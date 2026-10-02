@@ -1,0 +1,19 @@
+node_modules/
+dist/
+qa/
+coverage/
+.nyc_output/
+test-results/
+.study-director-test-artifacts/
+.cache/
+*.log
+.DS_Store
+
+# Local configuration, credentials and personal backup exports
+.env
+.env.*
+!.env.example
+.firebase/
+firebase-debug.log*
+*.sdbackup
+!tests/fixtures/**/*.sdbackup

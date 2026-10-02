@@ -1,0 +1,386 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import {webcrypto} from 'node:crypto';
+import {EXTERNAL_REPOSITORY_IDENTITIES} from '../../../contracts/canonical-identities.mjs';
+
+const driveSource=new URL('../../../source/external/drive.js',import.meta.url);
+const source=fs.readFileSync(driveSource,'utf8')
+  .replaceAll('@@SD_RELEASE@@','QA_FIXTURE').replaceAll('@@SD_RELEASE_ID@@','vb8')
+  .replaceAll('@@SD_GOOGLE_OAUTH_CLIENT_ID@@','306494096916-p48tjuv0ni01c11a0dp4ini9gp3dafdi.apps.googleusercontent.com')
+  .replaceAll('@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@',JSON.stringify(EXTERNAL_REPOSITORY_IDENTITIES));
+const digest=async blob=>Buffer.from(await webcrypto.subtle.digest('SHA-256',await blob.arrayBuffer())).toString('hex');
+let folderVerificationMeasurement=null;
+function json(payload,status=200,headers={}){return new Response(JSON.stringify(payload),{status,headers:{'Content-Type':'application/json',...headers}});}
+async function waitFor(predicate,message){
+  for(let attempt=0;attempt<100;attempt++){if(predicate())return;await new Promise(resolve=>setTimeout(resolve,0));}
+  assert.fail(message);
+}
+
+function createHarness({expiresIn=3600,clock=null}={}){
+  const state={rangeMode:'valid',expiresIn,folders:[],files:new Map(),uploads:new Map(),requests:[],deletions:[],trashedFolders:new Set(),nextId:1,nextFolderId:1,nextVersion:1,scope:'https://www.googleapis.com/auth/drive.file',force401Once:false,evilUploadLocation:false,networkFailPutOnce:false,networkFailCoordinationPostOnce:false,networkFailCoordinationDeleteOnce:false,folderShared:false,folderCreateDenied:false,folderListGate:null,folderListStarted:0,uploadPutGate:null,uploadPutStarted:0};
+  const folderMetadata=(id='folder-1')=>({id,name:EXTERNAL_REPOSITORY_IDENTITIES.driveFolder,mimeType:'application/vnd.google-apps.folder',ownedByMe:true,shared:!!state.folderShared,trashed:state.trashedFolders.has(id),appProperties:{studyDirectorFolder:'true'},capabilities:{canAddChildren:true}});
+  const fileMetadata=file=>({id:file.id,name:file.name,size:String(file.content.size),version:String(file.version||''),modifiedTime:file.modifiedTime,createdTime:file.createdTime,mimeType:file.mimeType,parents:[...file.parents],ownedByMe:file.ownedByMe,shared:file.shared,trashed:file.trashed,sha256Checksum:String(file.sha256Checksum||''),appProperties:{...file.appProperties},capabilities:{canDownload:file.canDownload}});
+  const findId=pathname=>decodeURIComponent(pathname.split('/').at(-1));
+  async function mockFetch(input,options={}){
+    const url=new URL(String(input)),method=String(options.method||'GET').toUpperCase(),headers=new Headers(options.headers||{});
+    state.requests.push({url:url.href,method,authorization:headers.get('Authorization')||''});
+    assert.equal(url.origin,'https://www.googleapis.com','token-bearing requests must remain on the exact Google API origin');
+    assert.match(headers.get('Authorization')||'',/^Bearer token-/u);
+    const fault=state.jsonFault;
+    if(fault&&url.pathname==='/drive/v3/files'&&method==='GET'&&!String(url.searchParams.get('q')||'').includes("mimeType='application/vnd.google-apps.folder'")&&(fault.remaining===undefined||fault.remaining>0)){
+      if(fault.remaining!==undefined)fault.remaining--;
+      state.bodyRequests=(state.bodyRequests||0)+1;
+      const status=fault.status||200;
+      if(fault.mode==='invalid')return new Response('{truncated',{status,headers:{'Content-Type':'application/json'}});
+      if(fault.mode==='shape')return json(fault.payload,status);
+      if(fault.mode==='complete')return json(fault.payload,status);
+      let closed=false,abort;const body={signal:options.signal,aborted:false,cancelled:false,finish:null};(state.bodies??=[]).push(body);
+      const stream=new ReadableStream({
+        start(controller){
+          const close=()=>{if(closed)return;closed=true;options.signal?.removeEventListener('abort',abort);controller.enqueue(new TextEncoder().encode('{"files":[]}'));controller.close();};body.finish=close;
+          abort=()=>{body.aborted=true;if(closed)return;closed=true;options.signal?.removeEventListener('abort',abort);controller.error(Object.assign(new Error('QA_FIXTURE body aborted'),{name:'AbortError'}));};
+          options.signal?.addEventListener('abort',abort,{once:true});
+          if(fault.mode==='interrupted'){closed=true;options.signal?.removeEventListener('abort',abort);controller.error(new TypeError('QA_FIXTURE network body read interrupted'));}
+          else if(options.signal?.aborted)abort();
+        },
+        cancel(){body.cancelled=true;closed=true;options.signal?.removeEventListener('abort',abort);}
+      });
+      return new Response(stream,{status,headers:{'Content-Type':'application/json'}});
+    }
+    if(state.force401Once){state.force401Once=false;return json({error:{message:'expired token'}},401);}
+    if(url.pathname==='/drive/v3/files'&&method==='GET'){
+      const q=url.searchParams.get('q')||'';
+      if(q.includes("mimeType='application/vnd.google-apps.folder'")){state.folderListStarted+=1;if(state.folderListGate)await state.folderListGate;return json({files:state.folders.filter(id=>!state.trashedFolders.has(id)).map(folderMetadata)});}
+      let rows=[...state.files.values()].filter(file=>!file.trashed);
+      const kindMatch=q.match(/key='studyDirectorRepositoryKind' and value='([^']+)'/u),idMatch=q.match(/key='studyDirectorRepositoryId' and value='([^']+)'/u);
+      if(kindMatch)rows=rows.filter(file=>String(file.appProperties?.studyDirectorRepositoryKind||'')===kindMatch[1]);
+      if(idMatch)rows=rows.filter(file=>String(file.appProperties?.studyDirectorRepositoryId||'')===idMatch[1]);
+      const files=rows.map(fileMetadata).sort((a,b)=>String(b.createdTime).localeCompare(String(a.createdTime)));
+      return json({files:files.slice(0,Number(url.searchParams.get('pageSize'))||1000)});
+    }
+    if(url.pathname==='/drive/v3/files'&&method==='POST'){
+      if(state.folderCreateDenied)return json({error:{message:'folder creation denied'}},403);
+      const metadata=JSON.parse(String(options.body||'{}'));
+      if(metadata.mimeType==='application/vnd.google-apps.folder'){
+        const id=`folder-${state.nextFolderId++}`;state.folders.push(id);return json(folderMetadata(id));
+      }
+      const id=`repo-${state.nextId++}`,stamp=new Date().toISOString(),file={id,name:metadata.name,mimeType:metadata.mimeType||'application/octet-stream',parents:[...(metadata.parents||[])],appProperties:{...(metadata.appProperties||{})},content:new Blob([]),ownedByMe:true,shared:false,trashed:false,canDownload:true,version:state.nextVersion++,createdTime:stamp,modifiedTime:stamp};state.files.set(id,file);
+      if(state.networkFailCoordinationPostOnce&&['publication','maintenance'].includes(String(metadata.appProperties?.studyDirectorRepositoryKind||''))){state.networkFailCoordinationPostOnce=false;throw new TypeError('simulated ambiguous coordination create');}
+      return json(fileMetadata(file));
+    }
+    if(url.pathname==='/upload/drive/v3/files'&&method==='POST'){
+      const uploadType=String(url.searchParams.get('uploadType')||'');
+      if(uploadType==='multipart'){
+        if(state.networkFailPutOnce){state.networkFailPutOnce=false;throw new TypeError('simulated transient upload network loss');}
+        state.uploadPutStarted+=1;if(state.uploadPutGate)await state.uploadPutGate;
+        assert.ok(options.body instanceof Blob,'multipart upload body must be a Blob');
+        const contentType=String(headers.get('Content-Type')||''),boundary=contentType.match(/boundary=([^;]+)/u)?.[1];assert.ok(boundary,'multipart upload must declare a boundary');
+        const bodyText=await options.body.text(),parts=bodyText.split(`--${boundary}`);assert.ok(parts.length>=4,'multipart upload must contain metadata and binary parts');
+        const metadataPart=parts[1],binaryPart=parts[2],metadata=JSON.parse(metadataPart.slice(metadataPart.indexOf('\r\n\r\n')+4).trim());
+        const binaryStart=binaryPart.indexOf('\r\n\r\n')+4,binaryText=binaryPart.slice(binaryStart).replace(/\r\n$/u,''),content=new Blob([binaryText]),id=`repo-${state.nextId++}`,stamp=new Date(Date.UTC(2026,0,1,0,0,state.files.size)).toISOString();
+        const file={id,name:metadata.name,mimeType:metadata.mimeType||'application/octet-stream',parents:[...(metadata.parents||[])],appProperties:{...(metadata.appProperties||{})},content,sha256Checksum:await digest(content),ownedByMe:true,shared:false,trashed:false,canDownload:true,version:state.nextVersion++,createdTime:stamp,modifiedTime:stamp};state.files.set(id,file);return json(fileMetadata(file));
+      }
+      const metadata=JSON.parse(String(options.body||'{}')),uploadId=`upload-${state.nextId++}`,id=`repo-${state.nextId++}`;
+      state.uploads.set(uploadId,{id,metadata});
+      const location=state.evilUploadLocation?'https://attacker.example/upload?upload_id=stolen':`https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=${uploadId}`;
+      state.evilUploadLocation=false;return json({},200,{Location:location});
+    }
+    if(url.pathname==='/upload/drive/v3/files'&&method==='PUT'){
+      const uploadId=url.searchParams.get('upload_id'),pending=state.uploads.get(uploadId);assert.ok(pending,'upload session must exist');
+      const range=String(headers.get('Content-Range')||'');
+      if(range.startsWith('bytes */')){
+        const complete=state.files.get(pending.id);if(complete)return json(fileMetadata(complete),200);
+        const received=Math.max(0,Number(pending.received)||0);return new Response(null,{status:308,headers:received?{'Range':`bytes=0-${received-1}`}:{}});
+      }
+      if(state.networkFailPutOnce){state.networkFailPutOnce=false;throw new TypeError('simulated transient upload network loss');}
+      state.uploadPutStarted+=1;if(state.uploadPutGate)await state.uploadPutGate;
+      const match=range.match(/^bytes (\d+)-(\d+)\/(\d+)$/u);assert.ok(match,'resumable PUT must declare a valid byte range');const start=Number(match[1]),end=Number(match[2]),total=Number(match[3]);assert.equal(start,Math.max(0,Number(pending.received)||0),'resumable chunks must continue from the confirmed server offset');
+      const chunk=options.body instanceof Blob?options.body:new Blob([options.body||'']);assert.equal(chunk.size,end-start+1);pending.parts=pending.parts||[];pending.parts.push(chunk);pending.received=end+1;
+      if(pending.received<total)return new Response(null,{status:308,headers:{'Range':`bytes=0-${end}`}});
+      const content=new Blob(pending.parts),stamp=new Date(Date.UTC(2026,0,1,0,0,state.files.size)).toISOString(),file={id:pending.id,name:pending.metadata.name,mimeType:pending.metadata.mimeType,parents:[...pending.metadata.parents],appProperties:{...pending.metadata.appProperties},content,sha256Checksum:await digest(content),ownedByMe:true,shared:false,trashed:false,canDownload:true,version:state.nextVersion++,createdTime:stamp,modifiedTime:stamp};state.files.set(pending.id,file);return json(fileMetadata(file),200);
+    }
+    if(url.pathname.startsWith('/drive/v3/files/')&&method==='GET'){
+      const id=findId(url.pathname);
+      if(state.folders.includes(id)&&url.searchParams.get('alt')!=='media')return json(folderMetadata(id));
+      const file=state.files.get(id);if(!file)return json({error:{message:'not found'}},404);
+      if(url.searchParams.get('alt')==='media'){
+        const range=headers.get('Range');if(range&&state.rangeMode!=='ignored'){
+          const match=/^bytes=(\d+)-(\d+)$/u.exec(range),start=Number(match[1]),end=Number(match[2]);let content=file.content.slice(start,end+1);if(state.rangeMode==='truncated')content=content.slice(0,-1);
+          return new Response(content,{status:206,headers:{'Content-Range':state.rangeMode==='wrong-range'?`bytes 1-2/${file.content.size}`:`bytes ${start}-${end}/${file.content.size}`}});
+        }
+        return new Response(file.content,{status:200,headers:{'Content-Length':String(file.content.size),'Content-Type':file.mimeType}});
+      }
+      return json(fileMetadata(file));
+    }
+    if(url.pathname.startsWith('/drive/v3/files/')&&method==='DELETE'){
+      const id=findId(url.pathname),file=state.files.get(id),kind=String(file?.appProperties?.studyDirectorRepositoryKind||'');
+      if(state.networkFailCoordinationDeleteOnce&&['publication','maintenance'].includes(kind)){state.networkFailCoordinationDeleteOnce=false;throw new TypeError('simulated ambiguous coordination delete');}
+      state.deletions.push(id);state.files.delete(id);return new Response(null,{status:204});
+    }
+    throw new Error(`unhandled Drive request ${method} ${url.href}`);
+  }
+  let provider=null;const scripts=[];
+  const document={scripts,head:{appendChild(node){scripts.push(node);queueMicrotask(()=>node.onload&&node.onload());return node;}},body:{appendChild(){return null;}},createElement(tag){return {tagName:String(tag).toUpperCase(),remove(){},setAttribute(){},appendChild(){},style:{},src:'',async:false,defer:false,onload:null,onerror:null};},getElementById(){return null;}};
+  const oauth={hasGrantedAllScopes(response,scope){return String(response.scope||'').split(/\s+/).includes(scope);},initTokenClient(config){return {requestAccessToken(){queueMicrotask(()=>config.callback({access_token:`token-${state.requests.length+1}`,expires_in:state.expiresIn,token_type:'Bearer',scope:state.scope}));}};},revoke(token,callback){queueMicrotask(()=>callback({successful:true}));}};
+  state.releasedDownloads=0;
+  const api={capabilities:{pluginApi:1,backupController:1,backupProviders:1},backup:{repositoryPolicy:Object.freeze({publicationMaxAgeMs:24*60*60*1000,publicationAssertionMarginMs:30*60*1000,maintenanceWorkBudgetMs:30*1000,maintenanceReleaseGraceMs:30*1000,maintenanceMaxAgeMs:60*1000,maintenanceAssertionMarginMs:30*1000,objectGcGraceMs:48*60*60*1000}),receiveStream:async(stream,size,options={})=>{if(options.signal?.aborted)throw new Error('cancelled');const blob=await new Response(stream).blob();assert.equal(blob.size,size);options.onProgress?.({phase:'downloading',loaded:blob.size,total:size});return blob;},releaseFile:async()=>{state.releasedDownloads+=1;},limits:{maxFileBytes:20*1024*1024},providers:{register(config){provider=config;return true;}}}};
+  const harnessSetTimeout=(fn,ms,...args)=>{if(clock)return clock.setTimeout(()=>fn(...args),ms);const timer=setTimeout(fn,ms,...args);if(Number(ms)>5000)timer.unref?.();return timer;};
+  const harnessClearTimeout=id=>clock?clock.clearTimeout(id):clearTimeout(id);
+  const context=vm.createContext({console,setTimeout:harnessSetTimeout,clearTimeout:harnessClearTimeout,queueMicrotask,Blob,Headers,Response,ReadableStream,TextEncoder,URL,URLSearchParams,Uint8Array,AbortController,crypto:webcrypto,fetch:mockFetch,document,Event:class Event{constructor(type){this.type=type;}},CustomEvent:class CustomEvent{},addEventListener(){},removeEventListener(){},dispatchEvent(){},google:{accounts:{oauth2:oauth}},StudyDirector:{registerPlugin(descriptor){return descriptor.setup(api);}}});
+  context.window=context;context.globalThis=context;vm.runInContext(source,context,{filename:'source/external/drive.js'});assert.ok(provider,'Drive provider must register');return {state,provider,context};
+}
+
+
+{
+  const {state,provider}=createHarness();await provider.prepare();let changes=0;provider.subscribeConnection(()=>{changes+=1;});
+  await provider.authorize();assert.equal(provider.connected(),true);assert.equal(changes,1,'Drive authorization must notify provider UI that the connection became valid');
+  state.force401Once=true;await assert.rejects(()=>provider.repository.list({kind:'object'}),/authorization expired/u);assert.equal(provider.connected(),false);assert.equal(changes,2,'a Drive 401 must invalidate authorization and notify provider UI immediately');
+  await provider.authorize();assert.equal(provider.connected(),true);assert.equal(changes,3,'reauthorization must notify provider UI that Drive is connected again');
+  await provider.disconnect();assert.equal(provider.connected(),false);assert.equal(changes,4,'explicit Drive disconnect must notify provider UI immediately');
+}
+
+{
+  const {state,provider}=createHarness();await provider.prepare();state.expiresIn=1;let changes=0;provider.subscribeConnection(()=>{changes+=1;});await provider.authorize();assert.equal(provider.connected(),true);assert.equal(changes,1);
+  await new Promise(resolve=>setTimeout(resolve,1100));assert.equal(provider.connected(),false,'Drive connected state must expire without requiring a user action');assert.equal(changes,2,'scheduled OAuth expiry must notify provider UI so stale Backup/Versions/Settings controls disappear');
+}
+
+const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSource=async()=>{})=>{const blob=new Blob([text],{type:'application/octet-stream'});return {kind,id,name:id+(kind==='object'?'.sdobject':kind==='commit'?'.sdcommit':'.sdcheckpoint'),blob,size:blob.size,digest:await digest(blob),exportedAt:'2026-09-19T00:00:00.000Z',appVersion:'QA_FIXTURE',checkProtection,checkSource};};
+
+{
+ const {state,provider}=createHarness();await provider.prepare();await provider.authorize();const original=await makeRepositoryFile('object','obj_'+'f'.repeat(32),'ranged repository bytes'),ref=await provider.repository.upload(original);
+ const range=await provider.repository.download(ref,{offset:7,length:5});assert.equal(await range.blob.text(),'repos');assert.equal(range.totalBytes,original.blob.size);assert.ok(range.version);
+ for(const mode of ['ignored','wrong-range','truncated']){state.rangeMode=mode;await assert.rejects(provider.repository.download(ref,{offset:7,length:5}),/requested backup range|incomplete backup range/u);}
+ state.rangeMode='valid';const abort=new AbortController();abort.abort(new Error('test cancellation'));await assert.rejects(provider.repository.download(ref,{offset:0,length:5,signal:abort.signal}));
+}
+
+{
+  const {state,provider}=createHarness();await provider.prepare();await provider.authorize();
+  const largeId='obj_'+'a'.repeat(32),largeFile=await makeRepositoryFile('object',largeId,'x'.repeat(5*1024*1024+1));
+  state.evilUploadLocation=true;await assert.rejects(()=>provider.repository.upload(largeFile),/unexpected Google Drive endpoint|invalid upload session/u);assert.equal(state.requests.some(request=>/attacker\.example/u.test(request.url)),false,'untrusted upload locations must never receive a request');
+  state.networkFailPutOnce=true;const uploadedLarge=await provider.repository.upload(largeFile);assert.equal(uploadedLarge.id,largeId);assert.equal(uploadedLarge.serverDigest,largeFile.digest);assert.ok(state.requests.some(request=>request.method==='PUT'&&request.url.includes('/upload/drive/v3/files')&&request.url.includes('upload_id=')),'genuinely large repository objects must retain resumable uploads');
+}
+
+{
+  const {state,provider}=createHarness();await provider.prepare();
+  assert.equal(typeof provider.backgroundAvailable,'function','Drive must expose a non-interactive background-availability probe');assert.equal(provider.backgroundAvailable(),false,'Drive background work must not run before an in-memory OAuth token exists');
+  assert.ok(provider.repository,'Drive must expose repository transport');
+  assert.equal(provider.save,undefined,'legacy monolithic Drive save path must be retired');
+  assert.equal(provider.load,undefined,'legacy monolithic Drive load path must be retired');
+  for(const key of ['list','upload','download','delete','beginPublication','listPublications','assertPublication','endPublication','beginMaintenance','listMaintenances','assertMaintenance','endMaintenance','beginOperation'])assert.equal(typeof provider.repository[key],'function');
+  assert.equal(provider.repository.historyReadConcurrency,8,'Drive immutable-history verification should use the shared eight-read concurrency ceiling');
+  state.scope='https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.metadata.readonly';await assert.rejects(()=>provider.authorize(),/permissions beyond/u);state.scope='https://www.googleapis.com/auth/drive.file';await provider.authorize();assert.equal(provider.backgroundAvailable(),true,'Drive background work may proceed while the existing OAuth token remains valid');
+  const objectId='obj_'+'1'.repeat(32),file=await makeRepositoryFile('object',objectId,'repository-object-proof');
+  const uploaded=await provider.repository.upload(file);assert.equal(uploaded.id,objectId);assert.equal(uploaded.digest,file.digest);assert.equal(uploaded.serverDigest,file.digest,'small repository uploads must be accepted from Drive server SHA-256 without a read-back download');assert.match(uploaded.remoteVersion,/^\d+$/u,'Drive repository descriptors must expose the fresh remote file version for verified-history reuse');assert.match(uploaded.verificationScope,/^drive-repository:1:1:folder-/u,'Drive repository descriptors must bind verified-history reuse to the stable revalidated repository folder rather than an operation epoch');
+  assert.ok(state.requests.some(request=>request.method==='POST'&&request.url.includes('/upload/drive/v3/files')&&request.url.includes('uploadType=multipart')),'tiny repository files must use one-request multipart upload');assert.equal(state.requests.some(request=>request.method==='PUT'&&request.url.includes('/upload/drive/v3/files')),false,'tiny repository files must not pay for a resumable PUT round trip');
+  const listed=await provider.repository.list({kind:'object'});assert.equal(listed.items.length,1);assert.equal(listed.items[0].id,objectId);const stableScope=listed.items[0].verificationScope;provider.release();await provider.authorize();const relistedAfterSession=await provider.repository.list({kind:'object'});assert.equal(relistedAfterSession.items[0].verificationScope,stableScope,'freshly revalidated access to the same Drive repository folder must preserve verified-history cache scope across provider sessions');
+  const downloaded=await provider.repository.download(uploaded);assert.equal(await downloaded.blob.text(),'repository-object-proof');await downloaded.release();assert.equal(state.releasedDownloads,1,'Drive repository downloads must release their temporary local file immediately after use');
+  const remote=[...state.files.values()].find(row=>row.appProperties.studyDirectorRepositoryId===objectId);assert.ok(remote);assert.equal(remote.appProperties.studyDirectorRepository,'true');assert.equal(remote.appProperties.studyDirectorRepositoryKind,'object');assert.equal(remote.appProperties.studyDirectorBackup,undefined,'repository objects must not carry retired whole-backup markers');
+  await assert.rejects(()=>provider.repository.delete({...uploaded,digest:'f'.repeat(64)}),/changed before deletion/u);assert.equal(state.deletions.length,0,'digest mismatch must fail closed before deletion');
+  remote.version=Number(uploaded.remoteVersion)+1;await assert.rejects(()=>provider.repository.delete(uploaded),/changed version before deletion/u);assert.equal(state.deletions.length,0,'remote-version mismatch must fail closed before deletion even when digest metadata is unchanged');remote.version=Number(uploaded.remoteVersion);
+  assert.equal(await provider.repository.delete(uploaded),true);assert.equal((await provider.repository.list({kind:'object'})).items.length,0);
+  const historyCheckpointId='cp_'+'b'.repeat(32),historyCheckpoint={...(await makeRepositoryFile('checkpoint',historyCheckpointId,'history-metadata-proof')),historySummary:{logicalFingerprint:'c'.repeat(64),counts:{dailyRecord:4,areaNote:3},encrypted:false,retention:{role:'normal',protectedUntil:'',calendar:{localDate:'2026-09-19',weekStart:'2026-09-14',month:'2026-09',utcOffsetMinutes:0}}}},uploadedHistoryCheckpoint=await provider.repository.upload(historyCheckpoint),listedHistoryCheckpoints=await provider.repository.list({kind:'checkpoint'});assert.equal(listedHistoryCheckpoints.items.length,1);assert.deepEqual(JSON.parse(JSON.stringify(listedHistoryCheckpoints.items[0].history.retention.calendar)),{localDate:'2026-09-19',weekStart:'2026-09-14',month:'2026-09',utcOffsetMinutes:0},'Drive checkpoint metadata must round-trip the retention calendar so history can be tiered without downloading manifests');assert.equal(await provider.repository.delete(uploadedHistoryCheckpoint),true);
+  const checkpointId='cp_'+'9'.repeat(32),commit=await makeRepositoryFile('commit',checkpointId,JSON.stringify({format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt:'2026-09-19T00:00:00.000Z',sourceRevision:'2026-09-19T00:00:00.000Z',manifestVersion:2})),uploadedCommit=await provider.repository.upload(commit);assert.equal(uploadedCommit.kind,'commit');assert.equal(uploadedCommit.name,checkpointId+'.sdcommit');const listedCommits=await provider.repository.list({kind:'commit'});assert.equal(listedCommits.items.length,1);assert.equal(listedCommits.items[0].id,checkpointId);const downloadedCommit=await provider.repository.download(uploadedCommit);assert.equal(JSON.parse(await downloadedCommit.blob.text()).checkpointId,checkpointId);await downloadedCommit.release();assert.equal(await provider.repository.delete(uploadedCommit),true);assert.equal((await provider.repository.list({kind:'commit'})).items.length,0,'Drive commit markers must use the same exact-identity transport lifecycle as manifests and objects');
+  assert.ok(state.requests.filter(request=>request.authorization).every(request=>request.authorization.startsWith('Bearer token-')));
+}
+
+{
+  const {state,provider}=createHarness();await provider.prepare();state.scope='https://www.googleapis.com/auth/drive.file';await provider.authorize();
+  const [checkpoints,commits,objects]=await Promise.all([provider.repository.list({kind:'checkpoint'}),provider.repository.list({kind:'commit'}),provider.repository.list({kind:'object'})]);
+  assert.equal(checkpoints.items.length,0);assert.equal(commits.items.length,0);assert.equal(objects.items.length,0);
+  const folderCreates=state.requests.filter(request=>request.method==='POST'&&new URL(request.url).pathname==='/drive/v3/files').length;
+  assert.equal(folderCreates,1,'concurrent cold repository listings must share one folder discovery/creation flight');
+  assert.equal(state.folders.length,1,'cold repository resolution must create exactly one marked folder');
+  const metadataBefore=state.requests.filter(request=>request.method==='GET'&&/\/drive\/v3\/files\/folder-1(?:\?|$)/u.test(new URL(request.url).pathname+new URL(request.url).search)).length;
+  await provider.repository.list({kind:'object'});
+  const metadataAfter=state.requests.filter(request=>request.method==='GET'&&new URL(request.url).pathname==='/drive/v3/files/folder-1').length;
+  assert.ok(metadataAfter>metadataBefore,'single-flight result must be released after settlement so later operations perform the existing fresh folder verification');
+}
+
+{
+  const {state,provider}=createHarness();await provider.prepare();state.scope='https://www.googleapis.com/auth/drive.file';await provider.authorize();
+  await provider.repository.list({kind:'object'});
+  const folderVerificationCount=()=>state.requests.filter(request=>{if(request.method!=='GET')return false;const url=new URL(request.url);return url.pathname==='/drive/v3/files/folder-1'||url.pathname==='/drive/v3/files'&&String(url.searchParams.get('q')||'').includes("mimeType='application/vnd.google-apps.folder'");}).length;
+  const directBefore=folderVerificationCount();
+  await provider.repository.list({kind:'checkpoint'});await provider.repository.list({kind:'commit'});await provider.repository.list({kind:'object'});
+  const directChecks=folderVerificationCount()-directBefore;assert.equal(directChecks,3,'independent Drive operations must retain fresh folder verification');
+  const operation=provider.repository.beginOperation();assert.equal(operation.historyReadConcurrency,8,'scoped Drive operations must retain the shared eight-read immutable-history ceiling');const scopedBefore=folderVerificationCount();
+  await operation.list({kind:'checkpoint'});await operation.list({kind:'commit'});await operation.list({kind:'object'});
+  const scopedChecks=folderVerificationCount()-scopedBefore;assert.equal(scopedChecks,1,'one Drive repository operation must reuse one verified folder receipt');
+
+  const invalidated=provider.repository.beginOperation();await invalidated.list({kind:'object'});const beforeContradiction=folderVerificationCount();
+  state.folderShared=true;await assert.rejects(()=>provider.repository.list({kind:'object'}),/no longer private and owned/u,'contradictory folder metadata must fail closed and invalidate prior receipts');
+  state.folderShared=false;const beforeRevalidation=folderVerificationCount();await invalidated.list({kind:'object'});
+  assert.equal(folderVerificationCount()-beforeRevalidation,1,'an operation receipt invalidated by contradictory metadata must reverify before reuse');
+  folderVerificationMeasurement={directChecks,scopedChecks,contradictionChecks:folderVerificationCount()-beforeContradiction};
+}
+
+{
+  const {state,provider}=createHarness();await provider.prepare();state.scope='https://www.googleapis.com/auth/drive.file';await provider.authorize();
+  await provider.repository.list({kind:'object'});assert.deepEqual(state.folders,['folder-1']);
+  const oldFolder=state.folders[0];state.folders=[];for(const [id,file] of [...state.files])if(file.parents.includes(oldFolder))state.files.delete(id);
+  const result=await provider.repository.list({kind:'checkpoint'});assert.equal(result.items.length,0,'the first operation after external Drive repository deletion must recover as a fresh empty repository');
+  assert.deepEqual(state.folders,['folder-2'],'a cached deleted Drive folder must be forgotten and replaced within the same operation');
+  assert.ok(state.requests.some(request=>request.method==='GET'&&new URL(request.url).pathname==='/drive/v3/files/folder-1'),'self-healing must verify the remembered repository identity before creating a replacement');
+}
+
+{
+  const {state,provider}=createHarness();await provider.prepare();state.scope='https://www.googleapis.com/auth/drive.file';await provider.authorize();
+  await provider.repository.list({kind:'object'});const oldFolder=state.folders[0];state.trashedFolders.add(oldFolder);
+  const result=await provider.repository.list({kind:'checkpoint'});assert.equal(result.items.length,0,'a Drive repository moved to Trash must be treated as externally deleted and replaced in the same operation');assert.deepEqual(state.folders.filter(id=>!state.trashedFolders.has(id)),['folder-2'],'the replacement repository must be the only active marked folder after the old folder is trashed');
+}
+
+{
+  const {state,provider}=createHarness();await provider.prepare();state.scope='https://www.googleapis.com/auth/drive.file';await provider.authorize();state.folderCreateDenied=true;
+  const failed=await Promise.allSettled([provider.repository.list({kind:'checkpoint'}),provider.repository.list({kind:'commit'})]);
+  assert.ok(failed.every(result=>result.status==='rejected'),'all callers sharing a failed cold-folder resolution must observe the same failure');
+  assert.equal(state.requests.filter(request=>request.method==='POST'&&new URL(request.url).pathname==='/drive/v3/files').length,1,'a failed concurrent cold-folder resolution must still issue only one create request');
+  state.folderCreateDenied=false;await provider.repository.list({kind:'object'});
+  assert.equal(state.requests.filter(request=>request.method==='POST'&&new URL(request.url).pathname==='/drive/v3/files').length,2,'a failed single-flight must clear so a later operation can retry folder creation');
+  assert.equal(state.folders.length,1,'retry after a failed single-flight must create one clean repository folder');
+}
+
+{
+  const {state,provider}=createHarness();await provider.prepare();state.scope='https://www.googleapis.com/auth/drive.file';await provider.authorize();state.folders.push('folder-1','folder-2');
+  await assert.rejects(()=>provider.repository.list({kind:'object'}),/More than one marked Study Director backup folder/u,'ambiguous app-owned folder identity must stop repository access');
+}
+
+{
+  const {state,provider}=createHarness();await provider.prepare();await provider.authorize();const objectId='obj_'+'2'.repeat(32),file=await makeRepositoryFile('object',objectId,'policy-boundary');let checks=0;
+  await assert.rejects(()=>provider.repository.upload({...file,checkProtection:async()=>{checks+=1;if(checks>=2)throw Object.assign(new Error('policy changed'),{name:'AbortError',code:'BACKUP_POLICY_CHANGED'});}}),/policy changed/u);
+  assert.equal(state.deletions.length,0,'policy changes must never trigger deletion/cleanup inside the transport');
+}
+
+
+{
+  const {state,provider}=createHarness();await provider.prepare();await provider.authorize();const checkpointId='cp_'+'4'.repeat(32);let sourceChecks=0;
+  const file=await makeRepositoryFile('checkpoint',checkpointId,'source-fence-checkpoint',async()=>{},async()=>{sourceChecks+=1;if(state.requests.some(request=>request.url.includes('/upload/drive/v3/files')&&['POST','PUT'].includes(request.method)))throw Object.assign(new Error('source changed during manifest publication'),{name:'AbortError',code:'BACKUP_SOURCE_CHANGED'});});
+  await assert.rejects(()=>provider.repository.upload(file),/source changed during manifest publication/u,'Drive transport must keep the source-revision fence active through resumable checkpoint publication');
+  assert.ok(sourceChecks>=2,'checkpoint publication must recheck source state more than once');
+}
+
+
+{
+  const {state,provider}=createHarness();await provider.prepare();await provider.authorize();
+  let releaseFolder;state.folderListGate=new Promise(resolve=>{releaseFolder=resolve;});
+  const firstController=new AbortController(),secondController=new AbortController();
+  const first=provider.repository.list({kind:'checkpoint',signal:firstController.signal});
+  const second=provider.repository.list({kind:'commit',signal:secondController.signal});
+  await waitFor(()=>state.folderListStarted===1,'parallel lists must share one in-flight folder lookup before cancellation');
+  firstController.abort(new Error('cancel first Drive context'));
+  await assert.rejects(first,/cancel first Drive context/u,'cancelling one repository context must reject only that caller');
+  releaseFolder();state.folderListGate=null;
+  const secondResult=await second;assert.equal(secondResult.items.length,0,'a sibling repository context must survive another caller cancellation');
+  assert.equal(state.requests.filter(request=>request.method==='POST'&&new URL(request.url).pathname==='/drive/v3/files').length,1,'surviving folder-resolution waiter must retain the single cold-folder creation');
+}
+
+{
+  const {state,provider}=createHarness();await provider.prepare();await provider.authorize();await provider.repository.list({kind:'object'});
+  let releaseUploads;state.uploadPutGate=new Promise(resolve=>{releaseUploads=resolve;});let failSourceA=false,sourceA=0,sourceB=0;
+  const fileA=await makeRepositoryFile('object','obj_'+'5'.repeat(32),'parallel-source-A',async()=>{},async()=>{sourceA+=1;if(failSourceA)throw Object.assign(new Error('source A changed'),{name:'AbortError',code:'BACKUP_SOURCE_CHANGED'});});
+  const fileB=await makeRepositoryFile('object','obj_'+'6'.repeat(32),'parallel-source-B',async()=>{},async()=>{sourceB+=1;});
+  const uploadA=provider.repository.upload(fileA),uploadB=provider.repository.upload(fileB);
+  await waitFor(()=>state.uploadPutStarted>=2,'parallel source-context uploads must both reach their independent PUT requests');failSourceA=true;releaseUploads();state.uploadPutGate=null;
+  const [resultA,resultB]=await Promise.allSettled([uploadA,uploadB]);
+  assert.equal(resultA.status,'rejected','source failure must stop its own upload context');assert.match(String(resultA.reason&&resultA.reason.message),/source A changed/u);
+  assert.equal(resultB.status,'fulfilled','source failure in one upload context must not poison a sibling upload');assert.ok(sourceA>=2&&sourceB>=2,'each upload must retain its own source fence callbacks throughout publication');
+}
+
+{
+  const {state,provider}=createHarness();await provider.prepare();await provider.authorize();await provider.repository.list({kind:'object'});
+  let releaseUploads;state.uploadPutGate=new Promise(resolve=>{releaseUploads=resolve;});let failProtectionA=false,protectionA=0,protectionB=0;
+  const fileA=await makeRepositoryFile('object','obj_'+'7'.repeat(32),'parallel-protection-A',async()=>{protectionA+=1;if(failProtectionA)throw Object.assign(new Error('protection A changed'),{name:'AbortError',code:'BACKUP_POLICY_CHANGED'});},async()=>{});
+  const fileB=await makeRepositoryFile('object','obj_'+'8'.repeat(32),'parallel-protection-B',async()=>{protectionB+=1;},async()=>{});
+  const uploadA=provider.repository.upload(fileA),uploadB=provider.repository.upload(fileB);
+  await waitFor(()=>state.uploadPutStarted>=2,'parallel protection-context uploads must both reach their independent PUT requests');failProtectionA=true;releaseUploads();state.uploadPutGate=null;
+  const [resultA,resultB]=await Promise.allSettled([uploadA,uploadB]);
+  assert.equal(resultA.status,'rejected','protection failure must stop its own upload context');assert.match(String(resultA.reason&&resultA.reason.message),/protection A changed/u);
+  assert.equal(resultB.status,'fulfilled','protection failure in one upload context must not poison a sibling upload');assert.ok(protectionA>=2&&protectionB>=2,'each upload must retain its own protection fence callbacks throughout publication');
+}
+
+{
+  const {state,provider}=createHarness();await provider.prepare();await provider.authorize();const objectId='obj_'+'3'.repeat(32),file=await makeRepositoryFile('object',objectId,'duplicate-proof');const uploaded=await provider.repository.upload(file);assert.equal(uploaded.serverDigest,file.digest,'Drive upload receipts must expose the output-only server SHA-256 for binary content');const original=[...state.files.values()].find(row=>row.appProperties.studyDirectorRepositoryId===objectId);const duplicate={...original,id:'repo-duplicate',content:original.content,appProperties:{...original.appProperties}};state.files.set(duplicate.id,duplicate);
+  await assert.rejects(()=>provider.repository.upload(file),/Duplicate Study Director backup files/u,'duplicate logical repository identities must fail closed');
+  assert.ok(state.files.has(uploaded.remoteId)&&state.files.has('repo-duplicate'),'duplicate detection must not mutate either remote object');
+}
+
+
+{
+  const {state,provider}=createHarness();await provider.prepare();await provider.authorize();
+  const operation=provider.repository.beginOperation();state.networkFailCoordinationPostOnce=true;const marker=await operation.beginPublication();assert.match(marker.id,/^pub_[a-f0-9]{32}$/u);assert.equal(marker.kind,'publication');assert.equal([...state.files.values()].filter(file=>file.appProperties.studyDirectorRepositoryKind==='publication').length,1,'ambiguous publication creation must recover the exact pre-generated marker instead of creating a duplicate');
+  let active=await operation.listPublications();assert.equal(active.items.length,1,'a live Drive publication marker must be visible to repository maintenance');assert.equal(active.ignored,0);
+  const verified=await operation.assertPublication(marker);assert.equal(verified.id,marker.id,'the writer must be able to reverify its publication protection before manifest/commit publication');
+  const publicationReleaseStart=state.requests.length;state.networkFailCoordinationDeleteOnce=true;assert.equal(await operation.endPublication(marker),true);const publicationReleaseRequests=state.requests.slice(publicationReleaseStart).map(request=>({method:request.method,url:new URL(request.url)}));assert.equal(publicationReleaseRequests.some(request=>request.method==='GET'&&request.url.pathname===`/drive/v3/files/${marker.remoteId}`),false,'known verified publication release must DELETE directly instead of paying for a redundant metadata GET');active=await operation.listPublications();assert.equal(active.items.length,0,'ambiguous publication deletion must recheck exact identity and retry until the marker is confirmed absent');
+  await assert.rejects(()=>operation.assertPublication(marker),/disappeared before commit/u,'a writer whose publication protection disappeared must fail before committing');
+  assert.equal([...state.files.values()].some(file=>file.appProperties.studyDirectorRepositoryKind==='publication'),false,'publication markers must not leak into repository history after release');
+}
+
+{
+  const {state,provider}=createHarness();await provider.prepare();await provider.authorize();
+  const operation=provider.repository.beginOperation();state.networkFailCoordinationPostOnce=true;const marker=await operation.beginMaintenance();assert.match(marker.id,/^mnt_[a-f0-9]{32}$/u);assert.equal(marker.kind,'maintenance');assert.equal([...state.files.values()].filter(file=>file.appProperties.studyDirectorRepositoryKind==='maintenance').length,1,'ambiguous maintenance creation must recover the exact pre-generated marker instead of creating a duplicate');
+  let active=await operation.listMaintenances();assert.equal(active.items.length,1,'a live Drive maintenance marker must be visible to publication coordination');assert.equal(active.ignored,0);
+  const verified=await operation.assertMaintenance(marker);assert.equal(verified.id,marker.id,'destructive maintenance must be able to reverify its provider-visible protection');
+  const markerFile=state.files.get(marker.remoteId);markerFile.createdTime=new Date(Date.now()-31*1000).toISOString();markerFile.modifiedTime=markerFile.createdTime;await assert.rejects(()=>operation.assertMaintenance(marker),/too old/u,'Drive maintenance protection must stop authorizing destructive work once the bounded 30-second maintenance budget has elapsed');markerFile.createdTime=marker.createdAt;markerFile.modifiedTime=marker.createdAt;
+  const maintenanceReleaseStart=state.requests.length;state.networkFailCoordinationDeleteOnce=true;assert.equal(await operation.endMaintenance(marker),true);const maintenanceReleaseRequests=state.requests.slice(maintenanceReleaseStart).map(request=>({method:request.method,url:new URL(request.url)}));assert.equal(maintenanceReleaseRequests.some(request=>request.method==='GET'&&request.url.pathname===`/drive/v3/files/${marker.remoteId}`),false,'known verified maintenance release must DELETE directly instead of paying for a redundant metadata GET');active=await operation.listMaintenances();assert.equal(active.items.length,0,'ambiguous maintenance deletion must recheck exact identity and retry until the marker is confirmed absent');
+  await assert.rejects(()=>operation.assertMaintenance(marker),/disappeared during cleanup/u,'maintenance whose provider-visible protection disappeared must fail closed before more deletion');
+  assert.equal([...state.files.values()].some(file=>file.appProperties.studyDirectorRepositoryKind==='maintenance'),false,'maintenance markers must not leak into repository history after release');
+}
+
+// Exercise actual response streams after headers, not only pending fetch calls.
+const bodyContractCases=[];
+const flushBodies=async()=>{for(let i=0;i<120;i++)await Promise.resolve();};
+function bodyClock(){
+ let now=0,next=0;const timers=new Map();
+ return {now:()=>now,setTimeout:(fn,ms)=>{const id=++next;timers.set(id,{fn,at:now+Number(ms)});return id;},clearTimeout:id=>timers.delete(id),
+  pending:()=>[...timers.values()].map(t=>t.at-now).sort((a,b)=>a-b),
+  advance:async ms=>{now+=ms;for(;;){const due=[...timers.entries()].filter(([,t])=>t.at<=now).sort((a,b)=>a[1].at-b[1].at)[0];if(!due)break;timers.delete(due[0]);due[1].fn();await flushBodies();}}
+ };
+}
+async function settleBody(task,clock){
+ let result;task.then(value=>{result={ok:true,value};},error=>{result={ok:false,error};});
+ for(let i=0;i<15;i++){await flushBodies();if(result)return result;const next=clock.pending()[0];assert.ok(Number.isFinite(next)&&next<=45000,'body work must retain a bounded deadline or retry');await clock.advance(next);}
+ assert.fail('body request did not settle within its bounded retry sequence');
+}
+async function bodyFixture(){const clock=bodyClock(),h=createHarness({clock});await h.provider.prepare();await h.provider.authorize();await h.provider.repository.list({kind:'object'});return {...h,clock};}
+function repositoryBackground(h){
+ for(const name of ['internal','operation-lifecycle','repository-background'])vm.runInContext(fs.readFileSync(`source/core/${name}.js`,'utf8'),h.context);
+ const registry=h.context[Symbol.for('studyDirector.internalModules.v1')],lifecycle=registry.require('operation-lifecycle',1),background=registry.require('repository-background',1,Object.freeze({lifecycle}));
+ return background.createCoordinator(Object.freeze({target:'google-drive',environment:Object.freeze({AbortController,now:h.clock.now,setTimeout:h.clock.setTimeout,clearTimeout:h.clock.clearTimeout})}));
+}
+for(const status of [200,403,503]){
+ const h=await bodyFixture(),bg=repositoryBackground(h),scope=await bg.beginBackground('integrity',{budgetMs:120000});h.state.jsonFault={mode:'stall',status};
+ const task=h.provider.repository.beginOperation({signal:scope.signal}).list({kind:'object'}).finally(()=>scope.release());const rejected=assert.rejects(task,{name:'AbortError'});
+ await flushBodies();assert.equal(h.state.bodies?.length,1);assert.ok(h.clock.pending().includes(45000),'request deadline must remain after headers');
+ const foreground=bg.beginForeground();let foregroundReady=false;const ready=foreground.settled.then(()=>{foregroundReady=true;});await flushBodies();assert.equal(foregroundReady,true,'body cancellation must release background work before the foreground deadline');await rejected;await ready;
+ assert.equal(h.state.bodies[0].signal.aborted,true);assert.equal(h.state.bodies[0].aborted,true);assert.deepEqual([...bg.status().active],[]);
+ assert.equal(h.state.bodyRequests,1,'cancelled success/error body must not enter transient retries');
+ foreground.release();assert.equal(h.clock.pending().filter(ms=>ms<=120000).length,0);await h.provider.disconnect();assert.deepEqual(h.clock.pending(),[]);
+ bodyContractCases.push('foreground cancels post-header body '+status);
+}
+{
+ const h=await bodyFixture();h.state.jsonFault={mode:'stall'};const started=h.clock.now();
+ const result=await settleBody(h.provider.repository.list({kind:'object'}),h.clock);
+ assert.equal(result.ok,false);assert.match(result.error.message,/timed out/u);assert.equal(h.state.bodyRequests,3);assert.equal(h.clock.now()-started,136200,'three original deadlines and bounded retry delays must cover complete bodies');
+ assert.ok(h.state.bodies.every(body=>body.aborted&&body.signal.aborted));
+ h.state.jsonFault=null;assert.equal((await h.provider.repository.list({kind:'object'})).items.length,0,'a genuine successful empty inventory remains usable after recovery');
+ await h.provider.disconnect();assert.deepEqual(h.clock.pending(),[]);bodyContractCases.push('post-header deadlines and subsequent recovery');
+}
+for(const fault of [{mode:'interrupted'},{mode:'invalid'},{mode:'shape',payload:null},{mode:'shape',payload:{files:null}},{mode:'interrupted',status:403}]){
+ const h=await bodyFixture();h.state.jsonFault=fault;
+ const result=await settleBody(h.provider.repository.list({kind:'object'}),h.clock);
+ assert.equal(result.ok,false,'unavailable/invalid JSON must not return a successful empty inventory');
+ if(fault.mode==='shape')assert.match(result.error.message,/could not confirm the backup information/u);
+ await h.provider.disconnect();assert.deepEqual(h.clock.pending(),[]);bodyContractCases.push('reject '+fault.mode+' body '+(fault.status||200));
+}
+{
+ const h=await bodyFixture();h.state.jsonFault={mode:'complete',status:403,remaining:1,payload:{error:{message:'temporarily rate limited',errors:[{reason:'rateLimitExceeded'}]}}};
+ const result=await settleBody(h.provider.repository.list({kind:'object'}),h.clock);assert.equal(result.ok,true);assert.equal(result.value.items.length,0);assert.equal(h.state.bodyRequests,1);
+ await h.provider.disconnect();assert.deepEqual(h.clock.pending(),[]);bodyContractCases.push('parsed error payload supports retry and error handling');
+}
+{
+ const h=await bodyFixture();h.state.jsonFault={mode:'stall',status:401};
+ await assert.rejects(h.provider.repository.list({kind:'object'}),/authorization expired/u);assert.equal(h.provider.connected(),false);assert.equal(h.state.bodies[0].cancelled,true);
+ await h.provider.release();assert.deepEqual(h.clock.pending(),[]);bodyContractCases.push('401 invalidates authorization without waiting for unused body');
+}
+
+console.log(JSON.stringify({status:'PASS',suite:'drive-repository-security',bodyContractCases,folderVerificationMeasurement,transportOnly:true,commitMarkerTransport:true,legacyWholeBlobRetired:true,driveFileScopeOnly:true,endpointConfined:true,tinyMultipartUpload:true,largeResumableUpload:true,opaqueMarkers:true,boundedStreamingDownload:true,coldFolderSingleFlight:true,coldFolderFailureRetry:true,folderAmbiguityRejected:true,policyBoundaryFailClosed:true,duplicateIdentityFailClosed:true,sourceFenceThroughUpload:true,parallelCancellationIsolated:true,parallelSourceFenceIsolated:true,parallelProtectionFenceIsolated:true,folderVerificationCoalesced:true,folderReceiptInvalidation:true,exactDeletion:true,temporaryDownloadRelease:true,publicationProtectionLifecycle:true,maintenanceProtectionLifecycle:true,externalRepositoryDeletionSelfHeals:true,trashedRepositorySelfHeals:true,boundedMaintenanceLease:true},null,2));

@@ -1,0 +1,155 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
+import {fileURLToPath} from 'node:url';
+
+const HERE=path.dirname(fileURLToPath(import.meta.url));
+const ROOT=path.resolve(HERE,'../../..');
+const read=relative=>fs.readFileSync(path.join(ROOT,relative),'utf8');
+for(const file of ['source/core/internal.js','source/core/startup.js'])vm.runInThisContext(read(file),{filename:file});
+const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
+const Startup=registry.require('startup-lifecycle',1);
+
+const docListeners=new Map(),winListeners=new Map();
+const document={
+  readyState:'complete',hidden:false,
+  addEventListener:(name,handler)=>docListeners.set(name,handler)
+};
+const window={addEventListener:(name,handler)=>winListeners.set(name,handler)};
+const sequence=[];
+const drain=async(turns=32)=>{for(let i=0;i<turns;i++)await Promise.resolve();};
+const guard=(scope,operation)=>{try{return operation();}catch(error){sequence.push(`guard:${scope}:${error.message}`);return false;}};
+const fn=name=>()=>{sequence.push(name);return true;};
+const asyncFn=name=>async()=>{sequence.push(`${name}:begin`);await Promise.resolve();sequence.push(`${name}:end`);return true;};
+let primary=true;
+const coordinator=Startup.createCoordinator(Object.freeze({
+  environment:Object.freeze({document,window}),
+  diagnostics:Object.freeze({guard}),
+  activation:Object.freeze({publish:(kind,source,options)=>{sequence.push(`activation:${kind}:${source}:${options?.destructive===true?'destructive':'non-destructive'}`);return true;}}),
+  ownership:Object.freeze({
+    install:fn('ownership-install'),evaluate:asyncFn('ownership-evaluate',2),
+    canMutate:()=>primary,hasControl:()=>primary,writeLease:fn('write-lease'),
+    flushAndRelease:asyncFn('flush-release'),transitionReleasing:fn('transition-releasing'),
+    release:fn('release'),setPrimary:value=>{primary=!!value;sequence.push(`set-primary:${primary}`);}
+  }),
+  timer:Object.freeze({stopPresentation:fn('timer-stop'),syncAfterWake:()=>{sequence.push('wake-reconcile');return false;}}),
+  flushers:Object.freeze({
+    planDraft:fn('flush-plan'),preferences:fn('flush-preferences'),activeSession:fn('flush-session'),
+    areaNotes:fn('flush-notes'),deletionRecovery:fn('flush-deletion-recovery')
+  }),
+  startup:Object.freeze({
+    migrateCompatibility:asyncFn('compatibility-migration',1),restoreAppearance:fn('appearance'),bindDom:fn('bind-dom'),
+    recoverInterruptedLibraryClear:asyncFn('library-clear-recovery',2),
+    recoverInterruptedRestore:asyncFn('restore-recovery',2),
+    loadNotes:asyncFn('notes-load',4),hydrateDrafts:fn('drafts'),previewPlan:fn('preview'),
+    startClock:fn('clock'),startHeaderClock:fn('header-clock'),refreshCoreUi:fn('core-ui'),
+    renderRecovery:fn('recovery'),checkBackup:fn('backup-check'),showEmptyIfNeeded:fn('empty'),
+    openInitialTab:fn('initial-tab'),restoreActiveSession:asyncFn('session-restore',2),
+    showNameSetup:fn('name'),inspectStorage:asyncFn('storage-inspect',1),
+    reconcileLifecycle:fn('lifecycle-reconcile'),applyLaunchRoute:fn('launch-route'),verifyReady:asyncFn('canonical-verification',1),markReady:fn('startup-ready'),
+    reportFailure:fn('startup-failure'),clearFailure:fn('startup-failure-clear')
+  })
+}));
+coordinator.start();
+await drain(96);
+const status=coordinator.status();
+assert.equal(status.fullyInitialized,true);
+assert.equal(status.initializing,false);
+assert.equal(status.state,'ready');
+assert.equal(status.failed,false);
+assert.equal(status.failedStage,'');
+assert.equal(status.lastFailure,null);
+const index=name=>sequence.indexOf(name);
+assert.ok(index('ownership-evaluate:end')<index('compatibility-migration:begin'));
+assert.ok(index('compatibility-migration:end')<index('library-clear-recovery:begin'));
+assert.ok(index('library-clear-recovery:end')<index('restore-recovery:begin'));
+assert.ok(index('restore-recovery:end')<index('notes-load:begin'));
+assert.ok(index('notes-load:end')<index('session-restore:begin'));
+assert.ok(index('session-restore:end')<index('lifecycle-reconcile'));
+assert.ok(index('lifecycle-reconcile')<index('launch-route'));
+assert.ok(index('launch-route')<index('name'));
+assert.deepEqual(status.completedStages.slice(-7),['active-session-restore','lifecycle-reconcile','launch-route','name-setup','storage-inspection','canonical-verification','startup-ready']);
+assert.ok(index('canonical-verification:end')<index('startup-ready'));
+
+coordinator.flush();
+assert.ok(index('flush-plan')<index('flush-preferences'));
+assert.ok(index('flush-preferences')<index('flush-session'));
+assert.ok(index('flush-session')<index('flush-deletion-recovery'));
+assert.equal(sequence.includes('capture-notes'),false);
+
+const focus=winListeners.get('focus');
+assert.equal(typeof focus,'function');
+focus();
+await drain();
+assert.ok(sequence.includes('wake-reconcile'));
+assert.ok(sequence.includes('activation:ordinary-focus:focus:non-destructive'));
+const visibility=docListeners.get('visibilitychange');
+document.hidden=true;visibility();
+assert.ok(sequence.includes('activation:background:visibilitychange:non-destructive'));
+document.hidden=false;visibility();
+await drain();
+assert.ok(sequence.includes('activation:visibility-return:visibilitychange:non-destructive'));
+const exit=winListeners.get('pagehide');assert.equal(typeof exit,'function');exit();
+assert.ok(sequence.includes('activation:exit:page-exit:destructive'));
+const lastEvaluateEnd=sequence.lastIndexOf('ownership-evaluate:end');
+assert.ok(lastEvaluateEnd<sequence.lastIndexOf('wake-reconcile'));
+
+
+// Fatal finalization failure is explicit, non-mutating, and retryable.
+const failureSequence=[],failureDocListeners=new Map(),failureWinListeners=new Map();
+let failVerification=true,primary2=true,failureEvaluations=0;
+const failureDocument={readyState:'complete',hidden:false,addEventListener:(name,handler)=>failureDocListeners.set(name,handler)};
+const failureWindow={addEventListener:(name,handler)=>failureWinListeners.set(name,handler)};
+const failureCoordinator=Startup.createCoordinator(Object.freeze({
+  environment:Object.freeze({document:failureDocument,window:failureWindow}),
+  diagnostics:Object.freeze({guard:(scope,operation)=>{try{return operation();}catch(error){failureSequence.push(`guard:${scope}:${error.message}`);return false;}}}),
+  activation:Object.freeze({publish:()=>true}),
+  ownership:Object.freeze({
+    install:()=>true,evaluate:async()=>{failureEvaluations++;primary2=true;return true;},canMutate:()=>primary2,hasControl:()=>primary2,writeLease:()=>true,
+    flushAndRelease:async()=>true,transitionReleasing:()=>true,release:()=>{failureSequence.push('release');primary2=false;return true;},
+    setPrimary:value=>{primary2=!!value;failureSequence.push(`primary:${primary2}`);return primary2;}
+  }),
+  timer:Object.freeze({stopPresentation:()=>true,syncAfterWake:()=>true}),
+  flushers:Object.freeze({planDraft:()=>true,preferences:()=>true,activeSession:()=>true,areaNotes:()=>true,deletionRecovery:()=>true}),
+  startup:Object.freeze({
+    migrateCompatibility:async()=>true,restoreAppearance:()=>true,bindDom:()=>true,recoverInterruptedLibraryClear:async()=>true,recoverInterruptedRestore:async()=>true,
+    loadNotes:async()=>true,hydrateDrafts:()=>true,previewPlan:()=>true,startClock:()=>true,startHeaderClock:()=>true,refreshCoreUi:()=>true,renderRecovery:()=>true,
+    checkBackup:()=>true,showEmptyIfNeeded:()=>true,openInitialTab:()=>true,restoreActiveSession:async()=>true,showNameSetup:()=>true,inspectStorage:async()=>true,
+    reconcileLifecycle:()=>true,applyLaunchRoute:()=>true,
+    verifyReady:async()=>{if(failVerification)throw new Error('canonical proof failed');return Object.freeze({canonical:true});},
+    markReady:()=>{failureSequence.push('ready');return true;},reportFailure:failure=>{failureSequence.push(`failure:${failure.stage}`);return true;},
+    clearFailure:()=>{failureSequence.push('clear');return true;}
+  })
+}));
+failureCoordinator.start();await drain(96);
+let failureStatus=failureCoordinator.status();
+assert.equal(failureStatus.fullyInitialized,false);
+assert.equal(failureStatus.state,'failed');
+assert.equal(failureStatus.failed,true);
+assert.equal(failureStatus.failedStage,'canonical-verification');
+assert.equal(failureStatus.lastFailure.code,'STARTUP_INITIALIZATION_FAILED');
+assert.equal(primary2,false,'fatal startup failure must relinquish mutation ownership');
+const evaluationsAtFailure=failureEvaluations;failureWinListeners.get('focus')?.();await drain();
+assert.equal(failureEvaluations,evaluationsAtFailure,'focus/visibility wake reconciliation must not reacquire ownership while startup is failed');
+assert.equal(primary2,false);
+assert.ok(failureSequence.includes('failure:canonical-verification'));
+assert.equal(failureSequence.includes('ready'),false);
+failVerification=false;
+failureCoordinator.start();await drain(96);
+failureStatus=failureCoordinator.status();
+assert.equal(failureStatus.state,'ready');
+assert.equal(failureStatus.fullyInitialized,true);
+assert.equal(failureStatus.failed,false);
+assert.equal(failureStatus.failedStage,'');
+assert.equal(failureStatus.lastFailure,null);
+assert.ok(failureSequence.includes('ready'),'a later start() must retry and publish readiness after the fault clears');
+
+console.log(JSON.stringify({
+  status:'PASS',
+  module:'source/core/startup.js',
+  completedStages:status.completedStages.length,
+  startupOrdering:true,
+  wakeOrdering:true,
+  activationContract:true
+},null,2));

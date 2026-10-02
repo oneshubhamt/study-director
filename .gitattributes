@@ -1,0 +1,5 @@
+# Keep deterministic source/build bytes consistent on every platform.
+* text=auto eol=lf
+*.png binary
+*.wav binary
+*.woff2 binary

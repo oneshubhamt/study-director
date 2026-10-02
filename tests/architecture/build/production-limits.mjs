@@ -1,0 +1,28 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {PRODUCTION_LIMITS,CAPACITY_PROFILES,assertProductionLimits} from '../../../contracts/production-limits.mjs';
+
+assert.equal(assertProductionLimits(),true);
+assert.equal(PRODUCTION_LIMITS.maxImportRecords,10000);
+assert.equal(PRODUCTION_LIMITS.maxImportAreaNotes,1000);
+assert.equal(Object.prototype.hasOwnProperty.call(PRODUCTION_LIMITS,'maxImportReflectionDrafts'),false,'Retired Reflection Draft capacity must not remain in current production limits.');
+assert.equal(PRODUCTION_LIMITS.maxNoteChars,70000);
+assert.equal(PRODUCTION_LIMITS.maxReflectionChars,70000);
+assert.equal(PRODUCTION_LIMITS.maxRichTextWords,10000);
+assert.equal(PRODUCTION_LIMITS.maxRichTextBytes,896*1024);
+assert.equal(PRODUCTION_LIMITS.backupMaxCompressedBytes,20*1024*1024);
+assert.equal(PRODUCTION_LIMITS.backupMaxUncompressedBytes,64*1024*1024);
+assert.equal(PRODUCTION_LIMITS.richAssetMaxBytes,12*1024*1024);
+assert.equal(PRODUCTION_LIMITS.attachmentPdfAudioMaxBytes,2*1024*1024*1024);
+assert.equal(PRODUCTION_LIMITS.richAssetMaxDimensionPx,4096);
+assert.equal(PRODUCTION_LIMITS.richAssetMaxPixels,12*1024*1024);
+assert.ok(CAPACITY_PROFILES.denseTextMetadata.dailyRecords<PRODUCTION_LIMITS.maxImportRecords);
+assert.equal(CAPACITY_PROFILES.denseTextMetadata.assetCount,0);
+assert.equal(Object.prototype.hasOwnProperty.call(CAPACITY_PROFILES.denseTextMetadata,'reflectionDrafts'),false);
+assert.equal(CAPACITY_PROFILES.countBoundaries.includes('reflectionDrafts'),false);
+const app=fs.readFileSync('source/app.html','utf8'),build=fs.readFileSync('build/build.mjs','utf8'),editor=fs.readFileSync('rich-text/editor.ts','utf8');
+assert.match(app,/Object\.freeze\(@@SD_PRODUCTION_LIMITS@@\)/);
+assert.match(build,/import \{PRODUCTION_LIMITS,assertProductionLimits\}/);
+assert.match(editor,/PRODUCTION_LIMITS\.richAssetMaxBytes/);
+assert.doesNotMatch(editor,/const MAX_IMAGE_BYTES=8\*1024\*1024/);
+console.log(JSON.stringify({status:'PASS',suite:'production-limits',limits:Object.keys(PRODUCTION_LIMITS).length,profiles:Object.keys(CAPACITY_PROFILES)},null,2));

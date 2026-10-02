@@ -1,0 +1,95 @@
+{
+  "id": "./",
+  "name": "Study Director",
+  "short_name": "Study Director",
+  "description": "A local-first planning, timing, review and study-insight workspace.",
+  "lang": "en",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "background_color": "#04050a",
+  "theme_color": "#04050a",
+  "categories": ["education", "productivity"],
+  "related_applications": [
+    {
+      "platform": "webapp",
+      "url": "./manifest.webmanifest",
+      "id": "./"
+    }
+  ],
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "assets/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "assets/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Plan",
+      "short_name": "Plan",
+      "description": "Open today’s study plan.",
+      "url": "./?tab=plan",
+      "icons": [{"src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png"}]
+    },
+    {
+      "name": "Execute",
+      "short_name": "Execute",
+      "description": "Open the active study execution workspace.",
+      "url": "./?tab=execute",
+      "icons": [{"src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png"}]
+    },
+    {
+      "name": "Review",
+      "short_name": "Review",
+      "description": "Open today’s study review.",
+      "url": "./?tab=review",
+      "icons": [{"src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png"}]
+    },
+    {
+      "name": "Library",
+      "short_name": "Library",
+      "description": "Open saved Study Days, reflections, notes, attachments and backups.",
+      "url": "./?tab=library",
+      "icons": [{"src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png"}]
+    },
+    {
+      "name": "Insights",
+      "short_name": "Insights",
+      "description": "Open study insights and analytics.",
+      "url": "./?tab=insights",
+      "icons": [{"src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png"}]
+    },
+    {
+      "name": "Guide",
+      "short_name": "Guide",
+      "description": "Open the Study Director guide.",
+      "url": "./?tab=guide",
+      "icons": [{"src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png"}]
+    }
+  ]
+}

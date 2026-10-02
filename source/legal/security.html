@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark light">
+<title>Security · Study Director</title>
+<link rel="stylesheet" href="legal.css">
+</head>
+<body>
+<main>
+<header>
+<div class="kicker">Study Director · Security</div>
+<h1>Security</h1>
+<div class="meta">Last updated 20 August 2026 · Copyright © 2026 Shubham Tiwari and Dr Satyam Kumar. All rights reserved.</div>
+<nav aria-label="Legal documents"><a href="./">Study Director</a><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a><a href="security.html" aria-current="page">Security</a><a href="license.html">License</a><a href="notices.html">Notices</a></nav>
+</header>
+
+<p>This statement describes Study Director's security model and responsible vulnerability-reporting process. It is intended to explain safeguards and reporting expectations; it is not a representation that any software or service can be completely free of defects or security risk.</p>
+
+<h2>1. Security model</h2>
+<ul>
+<li><strong>Local-first storage:</strong> core study records remain in browser/device storage by default instead of being copied to a Study Director application database.</li>
+<li><strong>Transport security:</strong> the public web application is served over HTTPS by Firebase Hosting.</li>
+<li><strong>Browser controls:</strong> the production Hosting configuration uses a restrictive Content Security Policy and additional response headers intended to reduce script-injection, framing and unnecessary browser-permission risks.</li>
+<li><strong>Google Drive least privilege:</strong> optional Drive access requests only the <code>drive.file</code> scope.</li>
+<li><strong>Short-lived authorization:</strong> the Study Director Drive provider keeps its OAuth access token in memory rather than intentionally persisting it to <code>localStorage</code> or <code>sessionStorage</code>.</li>
+<li><strong>Backup integrity:</strong> Study Director verifies supported backups, including per-image SHA-256 checks in binary-framed backup v10 and SHA-256 read-back checks for Drive operations. Integrity verification is not encryption. Optional encrypted backups use native AES-256-GCM with authenticated headers and PBKDF2-HMAC-SHA-256 (600,000 iterations). Encryption covers backup contents; it does not encrypt browser storage or internal recovery journals.</li>
+<li><strong>Defensive restore:</strong> backup imports are validated and previewed before destructive restore operations are committed.</li>
+</ul>
+
+<h2>2. User responsibilities</h2>
+<p>Protect your device account, browser profile, downloaded backup files and Google account. Use device encryption, current software and strong account authentication where available. Keep an independent backup of important study information and do not share OAuth tokens, passwords or private backup files with untrusted parties.</p>
+
+<h2>3. Reporting a vulnerability</h2>
+<p>Report suspected security vulnerabilities privately to <a href="mailto:shubhamtiwari1212@gmail.com">shubhamtiwari1212@gmail.com</a>. A useful report should include the affected Study Director version, browser/device context where relevant, reproducible steps, expected and observed behaviour, the likely security impact, and the minimum evidence necessary to demonstrate the issue. Please do not send passwords, OAuth tokens, another person's personal data, or unnecessary backup contents.</p>
+<p>We will make reasonable efforts to acknowledge and triage genuine security reports and to investigate material vulnerabilities. This statement does not create a bug-bounty programme or promise payment.</p>
+
+<h2>4. Responsible security testing</h2>
+<p>Good-faith testing must be confined to systems, accounts, devices and data that you own or are expressly authorised to test. Do not access another person's data, exfiltrate information, perform denial-of-service or destructive testing, use social engineering, circumvent account controls, or publicly disclose an unremediated vulnerability before a reasonable opportunity for investigation and remediation. This policy does not authorise conduct prohibited by law or by a third-party service's terms.</p>
+
+<h2>5. Security incidents</h2>
+<p>If we confirm a security incident within systems or data for which the Study Director operators are responsible, we will take reasonable steps appropriate to the circumstances to contain the incident, investigate its cause and scope, preserve relevant evidence, reduce ongoing risk, remediate the affected component, and prevent recurrence where practicable. We will notify affected users, Google, the Data Protection Board of India, CERT-In, or other competent authorities when and to the extent required by applicable law, binding service terms, or a valid legal obligation.</p>
+
+<h2>6. Supported release and updates</h2>
+<p>This statement applies to <strong>Study Director @@SD_RELEASE@@</strong>. Users should prefer the current production release because older cached, copied or independently hosted builds may not contain later security corrections. Security-relevant changes may require updates to the application's Content Security Policy, service-worker integrity manifest and other deployment controls.</p>
+
+<h2>7. Security contact</h2>
+<p><strong>Vulnerability and security reports:</strong> <a href="mailto:shubhamtiwari1212@gmail.com">shubhamtiwari1212@gmail.com</a>.</p>
+<p>For privacy or data-rights matters, use the same address and refer to the <a href="privacy.html">Privacy Policy</a>.</p>
+
+<div class="rights">Copyright © 2026 Shubham Tiwari and Dr Satyam Kumar. All rights reserved.</div>
+</main>
+</body>
+</html>

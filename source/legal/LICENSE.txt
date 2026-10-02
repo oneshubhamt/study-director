@@ -1,0 +1,26 @@
+STUDY DIRECTOR LICENSE
+
+Copyright © 2026 Shubham Tiwari and Dr Satyam Kumar. All rights reserved.
+
+Study Director is source-available software. It is not offered under an open-source license.
+
+1. Personal non-commercial use
+Permission is granted to an individual to access and use an authorised, unmodified copy of Study Director for personal and non-commercial purposes. Temporary technical copies automatically made by a browser, PWA installation, cache, or similar mechanism solely to enable such authorised use are permitted.
+
+2. No modification, reverse engineering or redistribution
+Except with prior written permission from the copyright holders, or to the extent applicable law grants a right that cannot lawfully be restricted, no permission is granted to modify, adapt, translate, reverse engineer, decompile, disassemble, create derivative works from, reproduce for distribution, publish, redistribute, sublicense, sell, rent, commercially exploit, or host Study Director or its first-party source code as a competing or derivative service.
+
+3. No removal of notices
+Copyright, licence, attribution, security, and third-party notices must not be removed from any copy that you are legally entitled to make.
+
+4. User content
+This licence does not claim ownership of notes, plans, reflections, schedules, or other content created by users. Users retain their rights in their own content.
+
+5. Third-party materials and services
+Third-party software, fonts, services, trademarks and other materials are governed by their respective terms and licences. See NOTICE.txt and assets/licenses/.
+
+6. No warranty
+To the maximum extent permitted by applicable law, the software is provided “as is” and “as available”, without warranties or guarantees beyond those that cannot legally be excluded.
+
+7. Reservation of rights
+All rights not expressly granted by this licence are reserved by Shubham Tiwari and Dr Satyam Kumar. No implied licence is granted merely because browser-delivered source code can be inspected, cached or technically copied during ordinary use.

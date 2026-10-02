@@ -1,0 +1,235 @@
+# Study Director — Current Architecture
+
+This document describes the current Study Director architecture. It intentionally records durable design and invariants rather than the history of individual implementation passes.
+
+## 1. Composition model
+
+Application subsystems are registered as private internal modules and composed by the host. Modules receive narrow frozen capability ports instead of resolving one another freely. The internal registry validates module identity and exported contract versions at the host boundary.
+
+Large feature areas remain separate when their failure models differ. In particular, Google Drive and Device Folder share repository semantics but retain provider-specific transport/permission behavior.
+
+## 2. Canonical local data
+
+Structured application state is stored in IndexedDB. Attachment bytes are stored in OPFS and published only after write/read-back integrity verification. Backup scratch files also live in OPFS under opaque operation-scoped names: workers reopen those names inside OPFS rather than receiving FileSystemHandle objects across postMessage boundaries. Scratch ownership uses browser Web Locks only for the active operation; abandoned scratch bytes are collectible later and never block a future backup or restore. Important writes use explicit transactions, revision/conflict checks or recovery journals as appropriate.
+
+Principal persisted domains include:
+
+- Saved Days / daily records;
+- Ongoing Notes;
+- Plans and preferences;
+- Active Session and timer recovery state;
+- attachment metadata and OPFS bytes;
+- repository/recovery metadata needed for safe backup and restore.
+
+Temporary UI projections are not authoritative. After protected operations, controls are re-derived from the current runtime/canonical state rather than restoring stale pre-operation DOM state.
+
+## 3. Active Session and timer
+
+The Active Session is portable across devices and backups. It carries the current session/schedule/review state required to resume work. A restored running or paused timer is rehydrated into the timer runtime and the Execute controls are then derived from that restored runtime.
+
+If a restored Plan working draft is semantically identical to the applied Active Session schedule, Plan remains in the applied/live state. A genuinely different restored working draft remains an editing draft.
+
+## 4. Rich text
+
+The rich-text runtime is generated from the authored `rich-text/` source and reviewed dependencies. Ongoing-Note reconciliation is format-aware and supports ancestor-aware merge behavior. Historical rich-text portability is handled through explicit codecs rather than by exposing internal editor state as the durable format.
+
+## 5. Managed backup repositories
+
+Google Drive and Device Folder use the same managed-repository model:
+
+- immutable logical objects;
+- immutable checkpoints/commits;
+- integrity verification before a checkpoint is accepted;
+- verified history;
+- retention and object garbage collection;
+- incremental logical-unit preparation;
+- bounded concurrent reads where appropriate;
+- cancellation and foreground/background coordination.
+
+The providers are intentionally not collapsed into one transport implementation because Drive authorization/remote consistency and File System Access permission/handle semantics differ materially.
+
+## 6. Restore and reconciliation
+
+Restore/Bring-in first verifies the selected checkpoint and reconstructs a verified portable snapshot. Destructive local replacement is protected by recovery journaling and a Before-restore checkpoint where required.
+
+Combine/reconciliation handles Saved Days, Ongoing Notes, Active Session and attachments through explicit domain rules. Reconciliation ancestry is incremental and provider history is scoped to the repository being inspected.
+
+## 7. Foreground publication and background maintenance
+
+Foreground backup/restore publication has priority over background repository maintenance.
+
+Maintenance is bounded by the shared repository work budget. Provider-visible maintenance markers behave as bounded leases: a marker remains authoritative only through the allowed work budget plus bounded release/network grace. An abandoned marker can therefore be reaped by a later foreground operation instead of blocking Backup/Restore for an extended period.
+
+Background maintenance intent is durable only when useful, and it is scoped to the repository generation that created it.
+
+Background admission rechecks the complete active set after awaiting a retiring executor. If another contender acquired during the wait, higher-priority work aborts that lower executor and declines admission until the existing retry path can observe its actual release. It never overlaps an executor whose settlement was not awaited.
+
+## 8. Repository identity and external deletion
+
+A Drive repository is identified by its actual Drive folder generation. If a cached folder has been deleted or moved to Trash, the Drive transport invalidates the stale identity, rediscovers or creates the repository, and continues the same foreground operation.
+
+When the repository generation changes, provider-session state tied to the previous repository is discarded, including cached/verified history, convergence retry state and stale maintenance intent. The same scoping also applies across application restarts through durable maintenance metadata.
+
+For Device Folder, deleting Study Director's repository subfolder is self-healing because required repository directories are recreated. Browser permission state is treated separately from folder identity: a temporary permission lapse keeps the configured directory handle and offers permission renewal on that same folder. Only a genuinely missing/unusable parent handle returns the app to folder selection.
+
+## 9. Google Drive authorization state
+
+The Data & Backup row distinguishes configuration/history from live authorization.
+
+- Never connected: offers Connect/Recover.
+- Live authorization: offers Back up now / Versions / Settings.
+- Expired or invalid authorization: shows Reconnect required.
+
+Known token expiry, a Drive `401`, explicit disconnect and visibility re-entry update the UI state. External revocation cannot be known without a Google request; the next Drive request detects it and immediately transitions the UI to reconnect-required state.
+
+Drive JSON metadata is consumed once inside the original request timeout and abort lifetime. Retry/error handlers and metadata callers share that parsed payload. Interrupted, malformed or invalid-shape responses fail; they are not empty inventory. Successful media responses retain the existing bounded streaming owner, while header-only 204/308/401 outcomes do not wait for unused bodies. Copied developer updater states preserve checking and downloading.
+
+## 10. Compatibility
+
+Compatibility is deliberately isolated. Current canonical repositories/codecs do not depend on historical representations for ordinary operation.
+
+The compatibility layer covers live-install migration and historical external formats where still required. Live-install migration must not be removed until the explicit retirement-readiness contract is satisfied. Historical backup readers can remain even after installation migrations are retired.
+
+## 11. UI and responsive architecture
+
+Glass + Dark is the default presentation for a new installation. Returning users restore their saved skin and theme through a synchronous first-paint mirror; canonical preferences repair that mirror after persistence hydration. Mobile layouts include safe-area support, dynamic viewport units, coarse-pointer target sizing and dedicated phone/tablet navigation behavior.
+
+## 12. Notification presentation
+
+`notice-coordinator` owns notification state, priority, deduplication, acknowledgement, recurrence and toast expiry. `interactions` renders coordinator-owned toasts and continues to own decision dialogs. Feature controllers retain execution, mutation authority and cancellation; dismissing a notification never cancels its operation.
+
+The shared immutable event contract carries `source`, `id`, `operationId`, `severity` (`info`, `success`, `warning`, `error`), `lifecycle` (`running`, `succeeded`, `failed`, `cancelled`, `resolved`), `foreground`, `title`, `message`, optional numeric `progress`, optional `action` (`label`, `run`), and `surface` (`toast`, `inline`, `quiet`). Background success/cancellation defaults to the quiet surface. Presentation actions run only on explicit activation. Progress carries a stage, completed/total item counts and completed/total byte counts.
+
+- `emit(event)` publishes a condition by source/id. Identical publications do not restart expiry or undo acknowledgement. `resolveEvent(source,id)` clears the condition and re-arms identical recurrence.
+- `notify(options)` adapts existing one-shot interaction messages. It deduplicates visible repetitions, while a later foreground result can appear again after the previous result expired or was dismissed. Unspecified severity is neutral; known failure callers explicitly report errors.
+- `begin(event)` establishes a new operation generation and returns a scoped `read()` / `update(patch)` / `resolve()` handle. A replaced generation cannot overwrite or clear the current one. Terminal outcomes reject later progress. Controllers must retain this handle in the operation closure rather than discover the current handle in a delayed callback.
+- Four toasts are visible at once, ordered by severity. Routine messages cannot displace unresolved errors. Routine queued messages and retired deduplication records are bounded; active operations and unresolved failures are retained until resolved or acknowledged. One coordinator deadline timer manages visible toast expiry and explicitly transient inline feedback (`retainInline:false`). Hover, keyboard focus and a hidden page pause the remaining duration; removal/preemption cleans stale pause reasons.
+- The existing top notice region retains local-save failure > safety > storage > update > installation ordering. Acknowledgement suppresses the current condition; resolving it clears that suppression and resets the live announcement.
+
+Device Folder, Drive and portable controllers publish directly through the shared backup presentation port. Recovery lends its event handle to nested work. The host renders coordinator-owned inline events beside the backup rows, preserving progress when an operation overlay closes. Existing Settings/Versions actions can reopen active operations. Device automatic backup retains its existing quiet inline presentation, with operation-specific busy labels. Recovery outcomes name local verification and provider-specific pending/verified backup state separately.
+
+Provider transport caches retain operational repository metadata. Review saves, clipboard export, Library exports/deletions and attachment operations use the coordinator’s scoped presentation port. Optional `surfaceId` identifies the existing inline status node; a single host subscriber projects its latest event. Local save failures have the highest-priority persistent banner with recovery guidance. A committed save followed by a refresh or cleanup error explicitly retains the local-save-completed outcome. Editor autosave indicators and decision dialogs remain feature-owned.
+
+Plan, saved-plan operations, generic Review/Library/recovery feedback, attachment access failures, backup encryption errors, clipboard diagnostics and Insights computation outcomes also use coordinator state. The host projects inline messages using a coordinator-issued surface revision: an operation keeps its initial surface precedence so late callbacks cannot overwrite a newer operation, while a new unscoped feedback occurrence can supersede older content. Expired transient feedback leaves the surface empty rather than resurrecting an older message. Scoped reads check generation even when a caller reuses an operation ID. Startup journal recovery is a background running/succeeded/failed operation, not an error-shaped progress message. See `NOTIFICATIONS.md` for the coverage inventory.
+
+Sound is an output of the notification coordinator, not a Pomodoro setting. `configureDelivery` installs the audio and OS transport ports and the current tab/visibility predicate. Semantic event occurrences (`cue`, `occurrence`, `operationId`, optionally `system`) retain feature provenance. Features never select assets or audio frequencies. Timer start/resume/pause, combined block advancement, study-day completion, Pomodoro and practice cues are scoped through the coordinator. The Pomodoro module owns rhythm and break eligibility only.
+
+The central cue policy defines Full / Minimal / Off. Full is the initial default; explicit changes persist as optional `soundMode` in typed PortablePreferences v2 within appMeta, including portable backup round trips. Existing records remain canonical without the optional field. An existing `nudge.sound:false` is read as Off only when the new field is absent; saving rhythm writes the current global sound mode and removes sound from new rhythm configuration. There is no migration framework or new store. Device permission and screen wake preferences remain device-local.
+
+Full adds short pause/resume/skip, near-target and explicit successful-operation cues. Minimal retains core study milestones, Pomodoro/break/overtime/target cues and actionable failures. Autosaves, normal automatic backup completion, cleanup, navigation and progress are silent. Failure conditions sound on first appearance, severity escalation, or recurrence after success/resolution; retries and reopening never replay them. Sound acceptance is separate from visual dismissal and operation cancellation.
+
+The coordinator fences delayed playback by operation generation, occurrence, lifecycle, semantic cue, visibility, ownership, sound mode and a 1.2-second loading deadline. It drops lower-priority cues during attention playback. Off and ownership/page lifecycle changes invalidate pending playback and fade current audio. Test sound is an explicit one-shot exception, without changing preferences or interrupting attention cues. No audio is queued for a future unlock.
+
+The private `audio-engine` loads and decodes a bounded catalogue, plays buffers with short fades, reports readiness, caches successful loads, retries failed loads on new events and releases source/gain nodes. Its AudioContext is closed on disposal. Original Quiet Wood assets are rendered offline by `build/compose-sounds.py`, with source/provenance and signal measurements in `source/assets/sounds/`. They are acoustic-style modal synthesis, not third-party recordings. All thirteen 22.05-kHz mono 16-bit PCM samples are precached with the release integrity manifest; the complete WAV family occupies 524,252 bytes. Musical phrases and delivery policy remain unchanged; listener audition is separate from format validation.
+
+For foreground study reminders, the coordinator chooses the custom cue; in the background it delegates to permitted OS delivery without deliberately playing an additional app sound. Off requests `silent` OS delivery. The browser adapter rechecks ownership, permission, enablement and occurrence validity after asynchronous service-worker lookup. Legacy OS-only reminders use `deliverSystem` with deduplication and a bounded delivery age. Only explicit settings actions request permission. Device-controlled sound, browser audio interaction requirements and lack of guaranteed closed-app alarms remain platform limits. Transient notification state is never backed up.
+
+Execute settings have two independent panels: compact Pomodoro rhythm with inline validated minutes (commit on blur/Enter), and Focus & Alerts with screen awake, app sounds and device notifications. Both are available without an active session and use shared Director/Glass tokens. Numeric values remain editable with rhythm disabled; native radios provide the mode selector's keyboard behavior. There is one Test sound action and one device-notification test, with no per-cue catalogue or volume slider.
+
+## 13. Core safety invariants
+
+The following invariants should be preserved by future changes:
+
+1. Local canonical data must never depend on the continued existence of a backup repository.
+2. A failed/incomplete restore must not leave a half-applied local dataset.
+3. A checkpoint is not trusted merely because an upload/write call returned successfully; integrity must be verified.
+4. Foreground Backup/Restore must not be permanently blocked by abandoned background-maintenance state.
+5. External deletion/recreation of a provider repository must not poison future provider state.
+6. Provider-specific failure models remain provider-specific below the shared repository semantics.
+7. Compatibility retirement and historical backup readability are separate decisions.
+8. Temporary UI locks must release into state derived from the current runtime, not a stale pre-operation DOM snapshot.
+9. Generated deployment output is derived from source and is never the canonical place to make changes.
+
+## Backup presentation ownership
+
+`backup-presentation` is a stateless adapter over `notice-coordinator`: Device Folder, Google Drive, portable files and managed recovery use the same scoped event handles. The coordinator retains messages, typed progress, severity, lifecycle, dismissal and delivery deadlines. Controllers retain execution leases, signals, repository state and verified checkpoint metadata. Existing dialogs, backup rows and toasts project coordinator state without separate message caches.
+
+Recovery lends its scoped handle to nested provider work; only the outer operation publishes the final result. Local recovery completion, pending external convergence and verified external backup are distinct outcomes. Background convergence uses a separate event identity so it cannot overwrite local recovery progress. Foreground completion has one expiring confirmation while its inline result remains available; automatic success only refreshes status. Permission and repeated-failure conditions have stable identities, contextual actions and explicit resolution. Normal maintenance deferral remains diagnostic.
+
+Device Folder and Drive rows use the same stateless location/result formatters. Resting state is `On · Last verified HH:mm` for today's verification (with a date for older verification); running state describes backup, restore, combine or history work. Typed progress appears in the existing inline operation summary. Successful summaries gain one visual tick without changing the underlying event or replaying delivery. A local recovery tick does not promote pending external backup to verified. Durable verification metadata remains intact; the redundant global freshness row and its save/drawer callbacks are removed.
+
+Execute's Ongoing Notes title and Area context share a typographic baseline in core CSS. Glass adjusts spacing only and inherits that alignment. Font sizes remain independent; no theme-specific centering or duplicate Execute alignment rules override the baseline.
+
+## PWA update safety
+
+`pwa-lifecycle` owns registration, candidate discovery, activation monitoring and reload. An attempt retains the exact worker object and its identified release. A message or activation acknowledgement is only a hint. Reload requires that exact worker to be the current controller in the `activated` state, with a matching identity and a valid application reservation. `registration.active` may already refer to an activating worker and does not authorize reload. First control acquisition is adopted without saving or reloading the interactive page.
+
+The host synchronously reserves the window before asynchronous preparation. A modal progress surface and capture listeners block new input/actions. The primary holds the existing cross-tab mutation lease and managed editor/session quiescence. A settled secondary window can prepare for an already activated controller without writing primary data; it still holds editor quiescence and validates its own ownership and work revision. Ownership projection restores controls from current runtime state after release.
+
+Preparation drains existing asset/data maintenance and attachment integrity, suspends Device Folder automatic work and provider background coordinators, then flushes Diary, Plan, reflection, live session, notes and deletion recovery. Deletion recovery must return confirmed success; a failed read, transaction or marker retirement postpones preparation while its recovery intent remains retained. Plan and active-session read-backs remain mandatory; the live session must be confirmed in canonical IndexedDB. The reservation is validated again immediately before reload and held until `pagehide`. Cancellation stops subsequent preparation steps; completed or in-flight storage operations retain their ordinary repository ordering.
+
+Preparation has a 20-second deadline, activation an 8-second deadline, and a requested navigation an 8-second watchdog. Postponement releases the reservation, mutation lease, quiescence and background suspensions, aborts identity channels, and clears activation timers. A late activation needs a fresh preparation. The structured session marker records the intended release, build and page asset identity and cannot suppress a later safe retry. After host startup, boot confirmation compares those identities with the actual controlling worker and loaded page before clearing the marker. A mismatch offers a prepared manual reload without an automatic loop. Unavailable worker identity leaves a visible pending confirmation and retains the marker. Identity requests coalesce, have a three-second deadline, and retry on focus, visibility return, page return and update checks. Successful proof clears obsolete boot failure presentation while preserving unrelated registration/check errors, newer waiting candidates and an active update reservation. Candidate replacement or redundancy invalidates the old attempt and updates discovery.
+
+Registration listeners are installed once; a failed registration can be retried. An `InvalidStateError` update invalidates a removed registration so the next check registers again. Checks coalesce and wait for an installing worker to succeed, fail or reach the 120-second download deadline. The primary scheduler retains the 24-hour success cooldown and bounded 5-minute to 1-hour failure backoff. Missing registration bypasses the old success cooldown, and the explicit retry action bypasses backoff. Unsupported windows do not schedule registration work.
+
+Cache identity includes the worker template and verified precache manifest; loaded page assets have a separate build-derived identity. Failed new installs remove only their new cache, while retries of an existing identity preserve verified entries. Activation claims clients independently of old-cache retirement. Ready clients acknowledge their loaded asset generation; unknown clients defer cleanup and older live generations remain pinned. Retained fingerprinted assets stay available offline, one previous unused generation is kept for history return (including legacy pages), and installing/waiting candidates are protected. A three-shell cap postpones installations rather than deleting pinned assets. Client reports, navigation, focus and future update checks provide retry opportunities for retirement. Checking/downloading/installation-failed and boot outcomes remain distinct. Silent registration and update checks each have a 120-second deadline. Real-browser activation, modal focus restoration and OS suspension behavior require the browser QA described in `VERIFICATION.md`.
+
+## Integrity state and verification
+
+Repository integrity metadata retains the device-local `RepositoryIntegrityScrub.v3` storage identity with a version-5 payload. Each target carries its repository identity, scan identity, verified cursor, completion/failure dates and quarantined object IDs. Drive uses the transport's repository verification scope. Device Folder stores the actual repository directory handle and compares it with `isSameEntry`, so cloned handles for the same directory retain progress while folder replacement or recreation starts a new cycle. Version-2, version-3 and version-4 records remain readable; unscoped version-2 completion/quarantine derivations are invalidated when a target is first bound to a proven repository identity.
+
+Target changes and progress updates use a strict appMeta readwrite transaction. Failed reads cannot become default state that overwrites another provider, and failed writes/commits reject the checkpoint. The write chain remains usable after rejection. Ownership and repository identity are checked before accepting results; a stale scan cannot populate the replacement repository's state. Quarantine consumers use the same identity-bound reads. Valid quarantine and exclusion IDs are deduplicated without truncation in host state, shared repository policy and provider adapters. History filtering, selected-version restore, repair publication and scrub traversal honor the entire set. Object/byte/segment pass limits still bound verification work; a failed metadata commit preserves the previous record rather than consuming progress.
+
+The managed repository scrub hashes the ordered object inventory into a scan identity. A cursor is resumable only against that identity; inventory changes restart the cycle so objects inserted before an old cursor cannot be silently skipped. After each complete object verification, an awaited progress callback commits its cursor before the executor yields. Errors and aborts carry the last verified progress. Object/byte batch limits remain bounded, with the first oversized object permitted. The shared integrity policy allows 120 seconds per opportunity, independently of shorter retention-maintenance budgets, and remains preemptible by foreground operations. The private integrity continuation capability persists one-MiB stored-byte hash/offset checkpoints after scratch writes flush, with at most 32 segments per opportunity. Device snapshots bind size/mtime; Drive validates exact bounded ranges and version before/after a read. Changed versions or missing staging reset only that object. Resumed plaintext passes revalidate the current source version, including after a long key lock. Authentication failure compares bounded source ranges with the failing staged frame so damaged local ciphertext can restart without declaring repository corruption or repeating an unbounded hash. Streaming encrypted objects resume plaintext hash and authenticated frames, including the terminal frame. Historical encrypted objects retain the existing bounded compatibility reader. Structured objects retain their semantic checks, with scratch verification separating local staging damage from repository corruption. Staging files use shared producer/read leases, strict metadata retention and scoped file-worker lifetime. Password/key material never enters metadata.
+
+Explicit stored/plaintext digest or size mismatches, verified JSON/identity/member failures, and authoritative missing-object results may quarantine an object and request the existing repair publication. Transport timeout, permission, key-lock, cancellation, unknown reader results and unreadable/incomplete history are unavailable or yielded outcomes. They do not manufacture corruption or trigger repair writes. A completed cycle that still contains quarantined objects retains its warning; partial progress preserves unresolved failure state. Explicit Device Folder and Drive rechecks include quarantined objects, removing each only after full successful verification. Recheck request identities reject results from older scans. Rechecks remain pending through unavailable or locked outcomes. A separate inventory-bound attempted cursor durably records each fully checked recheck failure; the verified cursor advances only for healthy objects. Still-corrupt quarantined objects consume batch budgets and remain quarantined while later candidates are verified. Earlier corruption does not discard a later object's segment checkpoint. A full recheck with remaining corruption ends the request with a failed outcome and warning, without repeatedly publishing repairs for already known failures. Newly discovered corruption retains the existing repair path; a new request or changed repository/inventory invalidates old attempt progress.
+
+Yielded work continues after two minutes; metadata failures retain a five-minute retry, unavailable verification uses ten minutes, and locked protection uses thirty minutes. Existing corruption retry and fourteen-day recurrence remain separate. A recent previous completion cannot suppress an unfinished cycle or failure. Startup metadata failures also retain retry opportunities. Device Folder permission restoration and write-control takeover provide a fresh scheduling opportunity without requesting permission; ordinary focus on a connected target leaves the existing cadence intact. State is published as healthy only after the relevant durable checkpoint succeeds.
+
+Local attachment integrity remains a presence/size/metadata audit, rather than a full periodic content hash. Its metadata reads and clean-result writes fail closed: storage unavailability preserves prior findings and schedules retry. Version-2 attachment audit state retains a metadata/reference inventory fingerprint and cursor across five-second, 128-record opportunities; version-1 records remain readable. Partial/deferred scans preserve previous findings until full completion commits. Changed inventories restart safely and foreground preemption retains completed units when write authority is still held. Normal GC, retention rules and canonical user data remain independently owned.
+
+
+## Background-operation reliability
+
+Attachment ingestion uses an owned worker with monotonic request IDs, a 120-second progress inactivity watchdog and a two-second cooperative cancel deadline. Cancellation wins over a late success. Timeout/error/messageerror retires the worker and settles its outstanding requests; callbacks captured from a retired worker cannot affect its replacement. Abandoned staging requests verified GC rather than unsafe immediate deletion. Quota estimation has a five-second read-only opportunity and signal cancellation. Search uses a fixed thirty-second build/query deadline followed by its existing content fallback, with the same worker/ID fences and timer cleanup. Export keeps its existing scoped processing/watchdogs and now fences retired callbacks. Existing image and Insights request-scoped lifetimes remain.
+
+Local GC keeps separate operational records: a v2 last-success day and a v1 durable pending intent. The earlier v1 scheduled-attempt day is classified legacy residue and cannot certify success. Pending survives failure, foreground deferral and reopen, even after another successful sweep that day. Actual completion persists the success day and clears pending; a failed marker write or a newer request retains retry. Ownership return and reader release provide opportunities; reader contention also has a fallback retry. Unsupported capabilities remain dormant.
+
+A local opportunity is cooperatively bounded to five seconds and 128 reference/removal/directory units per batch. The reference scan resumes only under the same canonical mutation epoch, reference revision, live values and key inventory; source change restarts proof. Notes/session/Saved Days reads must be trustworthy, and Saved Days GC uses the strict canonical reader rather than its interactive rescue fallback. No orphan metadata is removed before the reference proof finishes. Physical traversal releases locks between batches, resumes its iterator/candidate and reloads retained metadata on each opportunity. Existing reader/editor locks, pinned library items, journals, write tokens and source guards remain mandatory.
+
+Scratch token release unlocks promptly and requests coalesced collection instead of scanning the entire directory. Scratch GC serializes five-second/128-entry opportunities, resumes traversal, fails closed on unknown retained metadata and preserves producer/shared-reader/download/journal leases. Errors retry after thirty minutes; external reader contention retains a five-minute retry across batches. Foreground file scopes suspend collection and resume pending work after release. Synchronous native picker activation is preserved; scratch-dependent processing awaits collection separately.
+
+Repository foreground/suspension waiters, local attachment settlement and scratch processing settlement have ten-second deadlines. Timeout fails the waiting action while the actual executor/locks remain active until release. Higher-priority background work cannot overlap an unsettled job. Device preflight failure releases its foreground reservation, and a failed automatic suspension releases its token. Local reconciliation waits for real cleanup settlement. Canonical housekeeping checks foreground/ownership/budget boundaries between operations and writes completion only after a successful metadata read and completed phases.
+
+Work limits are cooperative at native-call/unit boundaries; full-list APIs still materialize their arrays and an individual native call cannot be forcibly cancelled. A permanently stuck browser call may require browser recovery. Local reference/traversal continuation is in memory and restarts after reopening; the pending record schedules re-proof. Scratch orphan discovery also runs at startup. Jobs remain page-owned and are not closed-app background-sync services. Search content fallback and very large individual records retain their existing main-thread cost.
+
+
+## Lifecycle contracts and diagnostics
+
+Device Folder foreground release restores eligible automatic work in one place. An interrupted normal, urgent or write-retry timer retains its original deadline and trigger; release does not consume another retry attempt. Ownership, suspension and pending-revision checks still govern admission. Publication retains its own success, locked-encryption and bounded write-failure retry policy. Viewing Versions does not restart deliberately exhausted retries.
+
+Managed provider pending-backup reads reject when metadata is unavailable. A successful empty read alone establishes that there is no pending request. Read/publication failures use the existing capped convergence backoff while authorized; failure handlers do not reread the failed marker. Registration, hook configuration, connection notifications and foreground release (including reconnect) supply one coalesced discovery opportunity for retained intent. Authorization loss leaves intent durable and stops polling. Foreground scopes and suspension retain the scheduled opportunity through the repository coordinator.
+
+The attachment reference coordinator requires strict Saved Days reads and rejects failed Active Session results, including rescue values accompanied by a canonical-read error. Integrity verification and reference removal therefore cannot mistake an incomplete inventory for absence. Interactive Saved Days rescue behaviour remains available through its ordinary reader. Source failure follows the existing unavailable audit path: earlier findings, completion date and cursor remain intact, developer status explains the wait, and a thirty-minute retry replaces daily-success scheduling.
+
+The host composes the private `operation-lifecycle` v1 capability into repository background scheduling, attachment maintenance, file processing and operation diagnostics. These modules do not resolve one another. It supplies the common settlement waiter, outcome interpretation and current-state snapshot; transport-specific worker/watchdog and PWA activation protocols keep their own lifetimes.
+
+Settlement has one cancellation/timeout cleanup contract. The default ten-second deadline bounds the caller's wait, never releases the executor, lock or reservation on its behalf. Waiting on an already-aborted signal fails even when there are no active jobs. Repository preemption deliberately ignores retired executor errors after actual settlement; file processing propagates collection failure. Native pickers still start synchronously through file scopes. A pre-cancelled background request cannot acquire a coordinator job.
+
+Job snapshots separate current state from the last attempt. `state` is `running`, `paused`, `scheduled`, `pending` or `idle`. `busy` means an actual operation remains active; `pending` means retained or queued work/opportunity, including a future recurrence; `scheduled` describes the queue even when a foreground owner has disarmed its timer. `nextEligibleAt` retains the real due time. `lastOutcome` is `completed`, `yielded`, `deferred`, `unavailable`, `failed` or `cancelled`; old/reloaded diagnostic records can also be `superseded` or `interrupted`. A completed partial integrity batch (`complete:false`) is `yielded`. The repository aggregate preserves its existing scheduled/active job arrays; individual job/scheduler snapshots use the common boolean fields.
+
+Device and Drive use one maintenance diagnostic projection and one integrity projection. Counts, uncertainty, retry eligibility and partial completion survive in the trace. Unavailable verification stays distinct from confirmed corruption, and copied integrity reasons use safe categories rather than raw transport messages. Storage health labels repository findings as Backup verification; attachment warnings describe verification needing attention without declaring corruption when data could not be read.
+
+The session diagnostic recorder holds at most twenty live traces plus the configured recent completed history (twenty in production). Starting unrelated work never closes a live trace. Closing moves a trace into completion order, so a long operation survives ordinary history pressure. Each trace retains its start and latest phases within a 512-phase bound, including its terminal phase. Details allow at most twenty-four typed fields: controlled categories, codes, phases, counts, booleans and normalized dates. Arbitrary text, provider scope IDs and object names are excluded before persistence and on legacy reload. Explicit IDs are authoritative; legacy implicit phases route only to a unique provider/target trace and do not guess when ambiguous. Same-clock reloads cannot reuse an existing trace ID. Session-storage failure leaves usable in-memory diagnostics and reports its availability; saturation declines only recording, never the actual work.
+
+Copied diagnostics include storage-health warnings and save observations, note-save failure, write ownership, foreground backup/export activity, connection and encryption state, Device dirty/retry status, canonical maintenance, attachment cleanup, scratch collection, attachment/file processors, Device/Drive work, updater phase and PWA cache outcome/reason. This projection excludes study content, payloads, folder names and arbitrary status/error messages. Copied verification status also includes identity-bound durable progress, last full scan, failure and attempt dates, coverage, and up to eight daily target summaries. The UI distinguishes incomplete, unavailable, awaiting connection, recheck requested and encryption/foreground blockers, and explicitly labels shallow attachment coverage and repository exclusions. Clipboard success/failure keeps the existing quiet presentation contract.
+
+Regression tooling names VM-loaded canonical modules for accurate coverage attribution. The baseline comparison, mutation harness, source/generated syntax checks and deployment contract share file-backed subprocess capture; launch errors, signals and output-limit failures are harness failures, not application/test results. This also supports environments that prohibit subprocess pipes. Coverage floors and critical-path requirements remain enforced.
+
+## Maintenance completion and request identity
+
+Repository maintenance retains the existing device-local `repositoryMaintenancePending.v2` metadata identity with a version-4 payload. Versions 1–3 remain readable. New requests receive a durable UUID, including requests made in the same clock tick with identical reasons. Conditional completion and retry writes compare the serviced identity, repository scope and eligibility fields inside one strict IndexedDB transaction. Another provider and a newer request remain untouched. External cleanup captures its serviced intent before work begins; an unfenced adopted result conservatively retains pending work. Requests arriving during execution or after a commit retain their deadline and follow-up timer. A local request generation supplements the durable comparison when scheduling results after awaited mutations.
+
+Canonical data maintenance uses a version-6 completion marker, accepting the prior version-5 record for migration while requiring a new successful strict pass. Note loading verifies canonical availability and flushes strictly without replacing dirty cached edits. Fallback migration, active-session read/reconciliation, recovery retirement and deletion recovery must each succeed before the daily completion commit. A strict pending marker is committed before phases start, retaining the prior completion date. A failed phase or interruption retains this durable intent and feature recovery; it cannot consume the daily gate, including after a recent successful pass or a restart. Interactive callers retain their existing fallback behavior. Foreground checks and ownership validation remain between phases.
+
+SDVB75F7 retains a failed initial repository-cleanup request in a single in-memory slot per scheduler. A five-minute retry re-reads metadata and uses an atomic expected-entry comparison with a fresh identity. Newer durable requests win; an unknown original baseline preserves an existing deadline and renews its identity. The slot is tied to the Device directory handle or known provider repository generation, discarded on a destination change, preserved across foreground suspension, and exposed as `intentPending`. A failure before any durable write cannot survive closing the app; subsequent repository observation re-discovers cleanup opportunity when the repository becomes available. Cleanup still uses fresh reachability and grace rules.
+
+On-demand diagnostics read six owner-managed metadata summaries in parallel with a three-second settlement deadline. They include pending canonical maintenance/deletions/local recovery, restore and Library-clear journal headers, durable cleanup intents and their eligibility, external publication intent and historical verified-copy records. They do not read journal payloads, run scans, authorize providers, hash data, open pickers, or mutate data. An individual read failure is unavailable; a hung read is unavailable with a diagnostic deadline. Late reads do not rewrite the copied report. Library clear and startup rollback have guarded traces: diagnostic failure never changes their outcome. Up to forty-eight live rows are copied, with any truncation count explicit. Observed save dates and historical verification are evidence of past events, not a current health certificate. Device retry exhaustion means unscheduled dirty work after its finite budget; Drive reports capped retry backoff and continues its bounded attempts.
+
+## Background data safety boundaries
+
+Interactive reads may offer rescue data when browser storage fails. Destructive cleanup, attachment reference surgery, Library safety capture and rollback verification explicitly request strict Saved-Day and Active-Session reads. Valid absence is different from an unavailable source; a mixed session result containing both rescue data and an error is not a complete reference inventory. Strict reads include the local recovery/deletion inputs as well as IndexedDB.
+
+Library clear captures the entire affected scope in a durable journal before changing it. Recovery uses that journal and verifies the restored canonical state before journal retirement. If verification cannot read the data, recovery remains pending rather than reporting success.
+
+Backup preparation accepts deletion reconciliation only when its boolean result is explicitly true. Both full and incremental preparation enforce that rule, including full captures whose other writers were already settled. Failed settlement can support a clearly labelled rescue export but cannot authorize a complete managed checkpoint or local restore preflight. A read-only export cannot settle deletions; it requires a canonical fast fence to claim complete state, otherwise deletion coverage remains uncertain.

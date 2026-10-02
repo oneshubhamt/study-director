@@ -1,0 +1,54 @@
+{
+  "name": "wordgard",
+  "version": "0.5.2",
+  "description": "Semantic rich text editor system",
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./doc": "./dist/doc.js",
+    "./types": "./dist/types.js",
+    "./schema": "./dist/schema.js",
+    "./table": "./dist/table.js",
+    "./state": "./dist/state.js",
+    "./editor": "./dist/editor.js",
+    "./command": "./dist/command.js",
+    "./history": "./dist/history.js",
+    "./collab": "./dist/collab.js",
+    "./phrases": "./dist/phrases.js"
+  },
+  "scripts": {
+    "test": "mocha test/test-*.ts",
+    "test-headless": "node bin/test-headless.ts",
+    "prepare": "node bin/build.ts",
+    "watch": "node bin/build.ts --watch",
+    "testserver": "node bin/run-testserver.ts",
+    "release": "node bin/release.ts"
+  },
+  "files": ["/dist"],
+  "author": "Marijn Haverbeke <marijn@haverbeke.berlin>",
+  "license": "MIT",
+  "dependencies": {
+    "@marijn/find-cluster-break": "^1.0.2",
+    "crelt": "^1.0.6",
+    "style-mod": "^4.1.3"
+  },
+  "devDependencies": {
+    "@swc/wasm-typescript": "^1.15.3",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.10.2",
+    "acorn": "^8.16.0",
+    "acorn-walk": "^8.3.5",
+    "esmoduleserve": "^0.3.1",
+    "ist": "^1.1.7",
+    "mocha": "^11.7.6",
+    "rollup": "^4.60.1",
+    "rollup-plugin-dts": "^6.4.1",
+    "send": "^1.2.1",
+    "serve-static": "^1.15.0",
+    "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

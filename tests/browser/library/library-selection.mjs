@@ -1,0 +1,123 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {launchChromium,CdpPage,waitFor} from '../../helpers/browser-harness.mjs';
+
+const internal=fs.readFileSync(new URL('../../../source/core/internal.js',import.meta.url),'utf8');
+const noticeSource=fs.readFileSync(new URL('../../../source/core/notice-coordinator.js',import.meta.url),'utf8');
+const librarySource=fs.readFileSync(new URL('../../../source/core/library.js',import.meta.url),'utf8');
+const coreCss=fs.readFileSync(new URL('../../../source/styles/core.css',import.meta.url),'utf8');
+const browser=await launchChromium({profilePrefix:'study-director-library-selection-'});
+let page=null;
+const result={status:'PASS',suite:'library-selection',checks:{}};
+try{
+  const targets=await (await fetch(`http://127.0.0.1:${browser.port}/json/list`)).json(),target=targets.find(item=>item.type==='page')||targets[0];
+  page=await CdpPage.connect(target.webSocketDebuggerUrl,target.id);await page.send('Runtime.enable');await page.send('Page.enable');
+  await page.evaluate(internal+'\n'+noticeSource+'\n'+librarySource,{returnByValue:false});
+  await page.evaluate(`(()=>{const style=document.createElement('style');style.textContent=${JSON.stringify(coreCss)};document.head.appendChild(style);})()`);
+  await page.evaluate(`(()=>{
+    document.body.innerHTML='<details class="library-notes-drawer" id="library-notes-drawer" open><summary>Notes <span id="library-notes-summary-count"></span></summary><input id="library-notes-search"><div class="library-notes-grid"><nav class="library-notes-nav" style="width:252px"><div class="library-notes-nav-head"><span class="library-notes-nav-title"><span class="ui-label">Areas</span><span class="library-note-selection-count" id="library-note-selection-count" hidden>0 selected</span></span><span class="library-notes-nav-tools"><button class="library-note-action ui-btn" id="library-note-select">Export</button><button class="library-note-action ui-btn" id="library-note-select-all" hidden>All</button><button class="library-note-action ui-btn" id="library-note-selection-clear" hidden>Clear</button><span class="library-note-selection-actions"><button class="library-note-action ui-btn" id="library-note-export" hidden disabled>Export</button><button class="library-note-action ui-btn library-note-selection-cancel" id="library-note-select-cancel" hidden>×</button></span><button class="library-note-tool ui-btn" id="library-note-add">+</button><button class="library-note-tool delete ui-btn" id="library-note-delete">−</button><span class="library-notes-nav-count" id="library-notes-nav-count"></span></span></div><div id="library-notes-list"></div></nav><section class="library-notes-editor" id="library-notes-editor"></section></div><div id="ongoing-notes-status"></div></details>';
+    const freeze=Object.freeze;
+    const entries=[
+      freeze({key:'geography',label:'Geography',text:'Geo note',hasNote:true,current:false,support:false,depth:0}),
+      freeze({key:'core-subject',label:'Core Subject',text:'',hasNote:false,current:false,support:false,depth:0}),
+      freeze({key:'polity',label:'Core Subject > Polity',text:'Polity note',hasNote:true,current:false,support:false,depth:1}),
+      freeze({key:'history',label:'Core Subject > History',text:'History note',hasNote:true,current:false,support:false,depth:1}),
+      freeze({key:'ethics',label:'Ethics',text:'Ethics note',hasNote:true,current:false,support:false,depth:0})
+    ];
+    window.__exports=[];window.__exportResult=null;
+    const textEl=(tag,className,text)=>{const el=document.createElement(tag);el.className=className||'';el.textContent=String(text||'');return el;};
+    const no=()=>{};
+    const coordinator=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('notice-coordinator',1).createCoordinator(freeze({}));
+    coordinator.subscribe(state=>{for(const event of state.events){const node=document.getElementById(event.surfaceId);if(node)node.textContent=event.message;}});
+    const ports=freeze({
+      notifications:coordinator.presentation('library'),
+      records:freeze({get:async()=>null,list:async()=>[],remove:async()=>true,sortedSummaries:async()=>[]}),
+      domain:freeze({countTaskOutcomes:()=>0,isTrackableBlock:()=>false,isValidIsoDate:()=>false,sanitizePracticeRuns:v=>v||[],sanitizeTaskOutcomeCounts:v=>v||{},taskOutcomeSummaryText:()=>''}),
+      presentation:freeze({createSavedDayTaskReviewCard:()=>document.createElement('div'),createPomodoroSummaryLine:()=>document.createElement('div'),emptyMsg:text=>textEl('div','',text),optionalDurationLabel:()=>'',optionalHoursLabel:()=>'',optionalPercentLabel:()=>'',plainTextContent:v=>String(v||''),populatePracticeRunTable:no,prettyDate:v=>String(v||''),renderRichTextContent:(target,value)=>{target.textContent='PREVIEW '+String(value||'');},textEl}),
+      view:freeze({document,goTab:no,setStatus:no,setTextSafe:(id,value)=>{const el=document.getElementById(id);if(el)el.textContent=String(value||'');},window}),
+      interactions:freeze({confirm:async()=>false,input:async()=>null}),
+      environment:freeze({cancelAnimationFrame:id=>cancelAnimationFrame(id),createOption:(text,value)=>{const option=document.createElement('option');option.text=text;option.value=value;return option;},createSearchWorker:()=>{const corpus=new Map();return {onmessage:null,onerror:null,postMessage(message){const m=message||{};if(m.type==='sync'){corpus.clear();for(const row of m.documents||[])corpus.set(String(row.key||''),String(row.plain??row.value??'').toLowerCase());return;}if(m.type==='batch'){for(const row of m.documents||[])corpus.set(String(row.key||''),String(row.plain??row.value??'').toLowerCase());return;}if(m.type==='upsert'){const row=m.document||{};corpus.set(String(row.key||''),String(row.plain??row.value??'').toLowerCase());return;}if(m.type==='delete'){corpus.delete(String(m.key||''));return;}if(m.type==='query'){const needle=String(m.query||'').toLowerCase(),keys=[...corpus].filter(([,text])=>text.includes(needle)).map(([key])=>key);queueMicrotask(()=>this.onmessage?.({data:{type:'result',id:m.id,keys}}));}},terminate(){corpus.clear();}};},requestAnimationFrame:cb=>requestAnimationFrame(cb)}),
+      exporter:freeze({cancel:()=>{},exportKeys:async keys=>{window.__exports.push([...keys]);return window.__exportResult||freeze({status:'downloaded',kind:keys.length===1?'markdown':'zip',notes:keys.length,assets:0,filename:keys.length===1?'One.md':'Study-Director-Notes.zip'});}}),
+      diary:freeze({bindEditor:no,captureEditor:v=>v,clearEditor:no,commitEditor:()=>true,settled:async()=>true}),
+      notes:freeze({bindEditor:no,canCreate:()=>true,catalogue:()=>entries,clearEditor:no,commitEditor:()=>true,failure:()=>null,get:(key,label)=>freeze({key,label,text:entries.find(x=>x.key===key)?.text||''}),normalizeArea:v=>String(v||''),orderEntries:v=>v,remove:async()=>true,renderInherited:no,searchDocuments:()=>entries.filter(x=>x.text).map(x=>freeze({key:x.key,revision:'r1',value:x.text})),size:()=>entries.length}),
+      attachments:freeze({batch:async fn=>fn(),count:async()=>0,invalidate:()=>{},reconcile:async()=>true}),
+      clearLibrary:freeze({preflight:async()=>freeze({status:'ready'}),execute:async()=>freeze({status:'cleared'})}),
+      ownership:freeze({canMutate:()=>true}),
+      session:freeze({hasActiveSession:()=>false})
+    });
+    const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],module=registry.require('library',1);window.__libraryView=module.createView(freeze({ports}));
+  })()`);
+  await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-notes-list .library-note-nav-item').length===5`),{label:'library note rows'});
+  assert.equal(await page.evaluate(`!!document.querySelector('#library-notes-editor textarea')`),true,'Normal Library mode must remain editable.');
+
+  await page.click('#library-note-select');
+  await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-notes-list .library-note-checkbox').length===5`),{label:'selection checkboxes'});
+  assert.equal(await page.evaluate(`document.getElementById('library-note-selection-count').textContent`),'1 selected','The open saved note should be preselected.');
+  assert.equal(await page.evaluate(`!!document.querySelector('#library-notes-editor textarea')`),false,'Selection mode must show a read-only preview rather than an editor.');
+  assert.equal(await page.evaluate(`document.querySelector('#library-notes-editor .library-ongoing-note-read')?.textContent.includes('Geo note')`),true);
+  const headerState=await page.evaluate(`(()=>{const nav=document.querySelector('.library-notes-nav'),head=document.querySelector('.library-notes-nav-head'),areas=document.querySelector('.library-notes-nav-title .ui-label'),count=document.getElementById('library-note-selection-count'),ids=['library-note-select-all','library-note-selection-clear','library-note-export','library-note-select-cancel'];return {add:getComputedStyle(document.getElementById('library-note-add')).display,remove:getComputedStyle(document.getElementById('library-note-delete')).display,navCount:getComputedStyle(document.getElementById('library-notes-nav-count')).display,countVisible:getComputedStyle(count).display,countAligned:Math.abs(areas.getBoundingClientRect().top-count.getBoundingClientRect().top)<8,actions:ids.map(id=>{const el=document.getElementById(id),r=el.getBoundingClientRect();return {id,display:getComputedStyle(el).display,left:r.left,right:r.right,width:r.width};}),nav:{left:nav.getBoundingClientRect().left,right:nav.getBoundingClientRect().right},headHeight:head.getBoundingClientRect().height,duplicateCounts:document.querySelectorAll('.library-note-selection-count').length};})()`);
+  assert.equal(headerState.add,'none','Create must be absent from rendered export mode.');
+  assert.equal(headerState.remove,'none','Delete must be absent from rendered export mode.');
+  assert.equal(headerState.navCount,'none','Normal note count must be absent from rendered export mode.');
+  assert.notEqual(headerState.countVisible,'none','Selection count must remain visible.');
+  assert.equal(headerState.countAligned,true,'Selection count must sit beside Areas, not consume action-row width.');
+  assert.equal(headerState.duplicateCounts,1,'Selection count must not be duplicated in the preview header.');
+  assert.ok(headerState.actions.every(action=>action.display!=='none'&&action.width>=24&&action.left>=headerState.nav.left&&action.right<=headerState.nav.right+1),'All/Clear/Export/× must be visible and usable within the narrow sidebar.');
+  result.checks.masterDetailPreservedReadOnly=true;result.checks.compactHeaderRenderedCorrectly=true;
+  await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:false});
+  const mobileActions=await page.evaluate(`(()=>{const bar=document.querySelector('.library-note-selection-actions'),count=document.getElementById('library-note-selection-count'),exportButton=document.getElementById('library-note-export'),cancel=document.getElementById('library-note-select-cancel'),er=exportButton.getBoundingClientRect(),cr=cancel.getBoundingClientRect();return {position:getComputedStyle(bar).position,countDisplay:getComputedStyle(count).display,exportDisplay:getComputedStyle(exportButton).display,cancelDisplay:getComputedStyle(cancel).display,inside:er.left>=0&&cr.right<=innerWidth+1&&er.width>=44&&cr.width>=44};})()`);
+  assert.equal(mobileActions.position,'fixed','Mobile export actions must remain a sticky bottom action bar.');
+  assert.notEqual(mobileActions.countDisplay,'none','Mobile selection count must remain visible beside Areas.');
+  assert.notEqual(mobileActions.exportDisplay,'none');assert.notEqual(mobileActions.cancelDisplay,'none');assert.equal(mobileActions.inside,true,'Mobile Export and cancel controls must remain touch-usable inside the viewport.');
+  result.checks.mobileActionBar=true;
+  await page.send('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:1,mobile:false});
+
+  await page.click('#library-note-selection-clear');
+  await waitFor(()=>page.evaluate(`document.getElementById('library-note-selection-count').textContent==='0 selected'`),{label:'selection clear'});
+  const parentSelector='[data-ongoing-note-key="core-subject"] .library-note-checkbox';
+  assert.equal(await page.evaluate(`!document.querySelector('${parentSelector}').disabled`),true,'A parent with exportable descendants must be selectable.');
+  await page.click(parentSelector);
+  await waitFor(()=>page.evaluate(`document.getElementById('library-note-selection-count').textContent==='2 selected'`),{label:'parent subtree selection'});
+  await page.click('[data-ongoing-note-key="polity"] .library-note-checkbox');
+  await waitFor(()=>page.evaluate(`document.getElementById('library-note-selection-count').textContent==='1 selected'`),{label:'child deselection'});
+  assert.equal(await page.evaluate(`document.querySelector('${parentSelector}').indeterminate`),true,'Parent checkbox must become indeterminate when only part of its subtree is selected.');
+  result.checks.triStateSubtreeSelection=true;
+
+  await page.evaluate(`(()=>{const input=document.getElementById('library-notes-search');input.value='Polity';input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+  await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-notes-list .library-note-checkbox').length===1`),{label:'filtered selection list'});
+  assert.equal(await page.evaluate(`document.getElementById('library-note-selection-count').textContent`),'1 selected','Search must not discard off-screen selections.');
+  await page.click('#library-note-select-all');
+  await waitFor(()=>page.evaluate(`document.getElementById('library-note-selection-count').textContent==='4 selected'`),{label:'all saved notes selection'});
+  assert.equal(await page.evaluate(`document.getElementById('library-note-select-all').disabled`),true);
+  result.checks.searchRetainsSelectionAndAllMeansAll=true;
+
+  await page.evaluate(`(()=>{const input=document.getElementById('library-notes-search');input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+  await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-notes-list .library-note-nav-item').length===5`),{label:'clear search'});
+  await page.click('[data-ongoing-note-key="ethics"] .library-note-select-copy');
+  await waitFor(()=>page.evaluate(`document.querySelector('#library-notes-editor .library-notes-editor-title')?.textContent==='Ethics'`),{label:'selection preview navigation'});
+  assert.equal(await page.evaluate(`document.getElementById('library-note-selection-count').textContent`),'4 selected');
+  result.checks.previewNavigationDoesNotChangeSelection=true;
+
+  await page.click('#library-note-export');
+  await waitFor(()=>page.evaluate(`window.__exports.length===1`),{label:'selection export'});
+  assert.deepEqual((await page.evaluate(`window.__exports[0].slice().sort()`)),['ethics','geography','history','polity']);
+  assert.equal(await page.evaluate(`document.getElementById('library-note-export').hidden`),true);
+  result.checks.selectionPassedToExistingExporter=true;
+
+  await page.click('#library-note-select');
+  await page.evaluate(`document.getElementById('library-notes-drawer').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
+  await waitFor(()=>page.evaluate(`document.getElementById('library-note-select').hidden===false`),{label:'escape exits selection'});
+  assert.equal(await page.evaluate(`!!document.querySelector('#library-notes-editor textarea')`),true);
+  assert.equal(await page.evaluate(`getComputedStyle(document.getElementById('library-note-add')).display!=='none'&&getComputedStyle(document.getElementById('library-note-delete')).display!=='none'`),true,'Normal create/delete controls must return after selection mode exits.');
+  result.checks.escapeRestoresNormalEditor=true;
+
+  await page.click('#library-note-select');
+  await page.evaluate(`window.__exportResult=Object.freeze({status:'too-large',notes:1,assets:0,maxBytes:128*1024*1024})`);
+  await page.click('#library-note-export');
+  await waitFor(()=>page.evaluate(`document.getElementById('ongoing-notes-status').textContent.includes('128 MiB safety limit')`),{label:'export resource safety message'});
+  assert.equal(await page.evaluate(`document.getElementById('library-note-export').hidden`),false,'Oversized export must leave selection mode available for narrowing.');
+  result.checks.exportResourceGateSurfaced=true;
+
+  const unexpected=page.events.filter(event=>!/favicon/i.test(event.text));assert.deepEqual(unexpected,[]);result.checks.noRuntimeErrors=true;
+}finally{if(page)page.close();await browser.close();}
+console.log(JSON.stringify(result,null,2));

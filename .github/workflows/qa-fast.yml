@@ -1,0 +1,42 @@
+name: Repository checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repository-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Bug regression policy
+        if: github.event_name == 'pull_request'
+        run: node tests/helpers/bug-regression-policy.mjs
+      - name: Targeted safety and repository contracts
+        run: >-
+          node tests/helpers/run-category.mjs targeted
+          tests/integration/storage/background-gc-reliability.mjs
+          tests/integration/library/library-clear.mjs
+          tests/integration/backup/capture-safety.mjs
+          tests/architecture/test-suite/suite-governance.mjs
+          tests/architecture/test-suite/suite-structure.mjs
+          tests/architecture/test-suite/suite-policy.mjs
+      - name: Source build
+        run: node build/build.mjs
+      - name: Verify generated build
+        run: node build/verify-build.mjs
+      - name: Verify generated syntax
+        run: node tests/architecture/build/generated-syntax-check.mjs

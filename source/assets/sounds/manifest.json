@@ -1,0 +1,86 @@
+{
+  "family": "Quiet Wood",
+  "sampleRate": 22050,
+  "channels": 1,
+  "bits": 16,
+  "cues": [
+    {
+      "cue": "begin",
+      "seconds": 1.13,
+      "peak": 0.2253,
+      "rms": 0.055
+    },
+    {
+      "cue": "pause",
+      "seconds": 0.63,
+      "peak": 0.2546,
+      "rms": 0.055
+    },
+    {
+      "cue": "resume",
+      "seconds": 0.72,
+      "peak": 0.2602,
+      "rms": 0.055
+    },
+    {
+      "cue": "skip",
+      "seconds": 0.57,
+      "peak": 0.2339,
+      "rms": 0.055
+    },
+    {
+      "cue": "complete",
+      "seconds": 1.17,
+      "peak": 0.2805,
+      "rms": 0.055
+    },
+    {
+      "cue": "day",
+      "seconds": 1.54,
+      "peak": 0.2465,
+      "rms": 0.055
+    },
+    {
+      "cue": "invitation",
+      "seconds": 1.11,
+      "peak": 0.2506,
+      "rms": 0.055
+    },
+    {
+      "cue": "return",
+      "seconds": 1.03,
+      "peak": 0.2817,
+      "rms": 0.055
+    },
+    {
+      "cue": "overtime",
+      "seconds": 0.98,
+      "peak": 0.2382,
+      "rms": 0.055
+    },
+    {
+      "cue": "target",
+      "seconds": 0.86,
+      "peak": 0.2619,
+      "rms": 0.055
+    },
+    {
+      "cue": "hint",
+      "seconds": 0.45,
+      "peak": 0.2617,
+      "rms": 0.055
+    },
+    {
+      "cue": "confirm",
+      "seconds": 0.565,
+      "peak": 0.2456,
+      "rms": 0.055
+    },
+    {
+      "cue": "attention",
+      "seconds": 1.12,
+      "peak": 0.2497,
+      "rms": 0.055
+    }
+  ]
+}

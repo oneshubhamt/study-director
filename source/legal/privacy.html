@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark light">
+<title>Privacy Policy · Study Director</title>
+<link rel="stylesheet" href="legal.css">
+</head>
+<body>
+<main>
+<header>
+<div class="kicker">Study Director · Privacy</div>
+<h1>Privacy Policy</h1>
+<div class="meta">Last updated 20 August 2026 · Copyright © 2026 Shubham Tiwari and Dr Satyam Kumar. All rights reserved.</div>
+<nav aria-label="Legal documents"><a href="./">Study Director</a><a href="privacy.html" aria-current="page">Privacy</a><a href="terms.html">Terms</a><a href="security.html">Security</a><a href="license.html">License</a><a href="notices.html">Notices</a></nav>
+</header>
+
+<p>Study Director is a local-first study planning, timing, review and insights application operated by <strong>Shubham Tiwari and Dr Satyam Kumar</strong>. This Privacy Policy explains what information Study Director handles, why it is handled, where it is stored, the choices available to you, and what happens if you use optional backup features.</p>
+
+<h2>1. Local-first study data</h2>
+<p>By default, Study Director keeps your study data on the device and browser in which you use the app. This can include plans and tasks, timer and session information, Areas, notes and reflections, optional rich-text formatting, saved-day history, preferences, installation state, and local backup/restore metadata. Study Director does not operate a central application database that receives these study records.</p>
+<p>You ordinarily control this local data directly through Study Director and your browser or device. Clearing Study Director site data, uninstalling the PWA with data removal, deleting records in the app, or restoring a backup can change or remove local information. The operators generally cannot recover study data that exists only on your device.</p>
+
+<h2>2. Manual file backups</h2>
+<p>If you export a backup file, Study Director writes the data supported by the current Study Director backup format to the location you choose on your device or file system. That copy remains under your control. Study Director imports a backup only when you deliberately select a supported Study Director backup for restore. In @@SD_RELEASE@@, rich-text state stored in Ongoing Notes and Daily Reflection remains inside those existing string fields. Images attached to rich notes or reflections are stored locally in the same Study Director browser database as raw binary Blobs addressed by generated asset identifiers; Study Director does not base64-encode, resize, compress, or upload those images as part of rich-text editing. In @@SD_RELEASE@@, the current Study Director backup format transports referenced image Blobs inside the same verified backup file as raw binary frames, with SHA-256 integrity descriptors; image bytes are not base64-encoded or embedded in JSON. The optional Device Folder and Google Drive features store the same logical checkpoint as an incremental backup repository: opaque verified objects plus checkpoint manifests. Unchanged attachment bytes can therefore be referenced by later checkpoints instead of being recopied into a new monolithic backup file; no separate image service is used. A pre-existing image reference whose local Blob is already unavailable is recorded explicitly as unavailable and remains unavailable after restore unless complete bytes are restored from another backup.</p>
+
+<h2>3. Optional Google Drive access</h2>
+<p>Google Drive integration is optional and is initiated by you. When authorization is required, Study Director requests only the <code>https://www.googleapis.com/auth/drive.file</code> permission. This permission is limited to files the app creates or files you deliberately make available to it; it does not provide general access to browse unrelated files throughout your Google Drive.</p>
+<p>For the Drive feature, Study Director may access or create: a Study Director backup folder; opaque repository objects and checkpoint manifests created by Study Director; and metadata necessary to identify, verify and manage those files, such as file identifiers, names, sizes, timestamps, parent-folder information, ownership/sharing state, and Study Director marker metadata. It uses this access only to upload changed repository objects, list and read eligible checkpoint files, restore a selected checkpoint, verify integrity, retain or delete older checkpoint manifests and unreferenced Study Director repository objects, use resumable upload transfers and recover an interrupted transfer while its upload session remains usable, and revoke authorization when you disconnect.</p>
+<p>The current implementation uses deterministic managed-backup retention in Google Drive: up to 15 normal verified recovery points across Latest, daily, weekly and monthly periods. The repository format can additionally hold one temporary protected Before-restore safety point for managed recovery operations. Checkpoints may share unchanged repository objects, and new R13 checkpoints become eligible as Latest only after a verified commit marker is written. Study Director does not use Drive access to read unrelated Drive content, build advertising profiles, sell data, assess creditworthiness, or train a general-purpose artificial-intelligence model.</p>
+<p>The Google OAuth access token is kept in application memory for the active authorization session and is not intentionally persisted by the Study Director Drive provider to <code>localStorage</code> or <code>sessionStorage</code>. Google independently processes account, authentication, hosting and Drive-service information under Google's own terms and privacy policies.</p>
+<p><strong>Google Limited Use:</strong> Study Director's use of information received from Google Workspace APIs adheres to the Google API Services User Data Policy, including the Limited Use requirements.</p>
+<div class="note warn"><strong>Backup security:</strong> Optional backup encryption encrypts local, folder and Google Drive backup contents with AES-256-GCM. It must be enabled in Library. Passwords and unlock keys are not stored; automatic encrypted backups pause after reopening until unlocked. Filenames, file sizes and Drive metadata remain visible. Notes exports, browser storage and internal recovery journals are not encrypted by this feature. SHA-256 and structural verification remain integrity controls. Protect your device, downloaded backups and Google account accordingly.</div>
+
+<h2>4. Hosting and technical information</h2>
+<p>The public web application is hosted using Google Firebase Hosting. Like other web-hosting infrastructure, Firebase necessarily processes technical information needed to deliver, secure and operate the hosted site, which can include IP addresses and request metadata, under Google's applicable terms and privacy practices. Study Director does not use this hosting information for behavioural advertising.</p>
+
+<h2>5. Analytics, advertising, sale and sharing</h2>
+<p>The @@SD_RELEASE@@ release does not include Study Director analytics, behavioural advertising, ad-tech tracking, or a mechanism for selling user study data. Study Director does not sell Google user data or disclose it to advertising platforms or data brokers. Data is shared with Google only to the extent necessary for hosting, authentication and the optional Google Drive functionality you request, or where disclosure is required by applicable law.</p>
+
+<h2>6. Purpose, choice and data minimisation</h2>
+<p>Study information is handled only to provide the functions you ask Study Director to perform: planning, timing, review, Library, insights, local backup/restore, and optional external backup/restore. Google Drive access is requested in context only when you choose a Drive action. Where consent is the applicable lawful basis, you may withhold or withdraw it without losing access to the app's ordinary local-first functions.</p>
+
+<h2>7. Retention and deletion</h2>
+<ul>
+<li><strong>Local study data:</strong> remains on your device until you delete it, clear the relevant browser/site data, or replace it through a restore operation.</li>
+<li><strong>Local rich-text formatting:</strong> remains in the existing note/reflection strings until edited, replaced, restored, or removed with the corresponding Study Director data.</li>
+<li><strong>Downloaded backups:</strong> remain wherever you save them until you delete them.</li>
+<li><strong>Google Drive backups:</strong> remain in your Google Drive until deleted by you or rotated/deleted by Study Director as part of the Drive feature.</li>
+<li><strong>Google authorization:</strong> can be disconnected through Study Director and can also be revoked through your Google Account controls.</li>
+<li><strong>Support or grievance correspondence:</strong> if you contact us by email, the correspondence may be retained for as long as reasonably necessary to respond, maintain an appropriate record, address security or legal issues, and comply with applicable law.</li>
+</ul>
+
+<h2>8. Your choices and data-protection rights</h2>
+<p>Because the principal study record is local, you can ordinarily inspect, correct, complete, update, export and delete it directly in Study Director. You can withdraw Google Drive authorization by using Study Director's disconnect control or your Google Account controls.</p>
+<p>Where India's Digital Personal Data Protection Act, 2023, the Digital Personal Data Protection Rules, 2025, or another applicable law gives you rights in relation to personal data processed by the operators, you may request information about such processing; correction, completion or updating; erasure where legally applicable; withdrawal of consent; grievance redressal; or exercise of a lawful nomination right. Send the request to <a href="mailto:shubhamtiwari1212@gmail.com">shubhamtiwari1212@gmail.com</a> and describe the right you wish to exercise and enough context for us to identify the relevant interaction. Do not send passwords, OAuth tokens or complete backup files unless specifically and securely requested.</p>
+<p>We may request only information reasonably necessary to verify the request, protect another person's rights, prevent fraud, or comply with law. Where a legal retention requirement applies, erasure may be limited to the extent required by that law.</p>
+
+<h2>9. Grievance redressal and contact</h2>
+<p><strong>Privacy, data-rights and grievance contact:</strong> <a href="mailto:shubhamtiwari1212@gmail.com">shubhamtiwari1212@gmail.com</a>.</p>
+<p>We aim to respond to privacy and data-protection grievances within <strong>30 days</strong> of receipt. If applicable law requires a shorter period, that shorter period will apply. Where the DPDP framework applies, you should ordinarily use this grievance mechanism before escalating a grievance to the Data Protection Board of India in accordance with applicable law.</p>
+
+<h2>10. Security and personal-data incidents</h2>
+<p>Study Director uses a local-first architecture and technical safeguards described in the <a href="security.html">Security statement</a>. If a confirmed personal-data breach falls within the operators' responsibilities, we will take reasonable steps to contain and investigate it, mitigate risk, preserve relevant evidence, and make notifications to affected persons, regulators, service providers or other parties when applicable law or binding service terms require them.</p>
+
+<h2>11. Age and children</h2>
+<p>Study Director's current public release is intended only for persons aged <strong>18 years or older</strong>. It is not designed to obtain verifiable parental consent for processing personal data of children. If you are under 18, do not use the current public release or authorize Google Drive access through it.</p>
+
+<h2>12. Third-party services</h2>
+<p>Firebase Hosting, Google Identity Services and Google Drive are Google services governed by Google's applicable terms and privacy policies. Study Director does not control Google's independent processing. Links to third-party services are provided for transparency and do not change the local-first treatment of Study Director's own study records.</p>
+
+<h2>13. Changes to this policy</h2>
+<p>If Study Director materially changes how it accesses, uses, stores, retains or shares personal data—especially Google user data—this policy and any required in-product disclosure will be updated before the changed practice is introduced where required. The “Last updated” date above identifies the current published version.</p>
+
+<div class="rights">Copyright © 2026 Shubham Tiwari and Dr Satyam Kumar. All rights reserved.</div>
+</main>
+</body>
+</html>
