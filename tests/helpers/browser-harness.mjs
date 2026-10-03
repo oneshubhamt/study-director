@@ -100,7 +100,7 @@ export async function startReleaseServer(){
 
 export class CdpPage{
   constructor(socket,targetId){
-    this.socket=socket;this.targetId=targetId;this.nextId=0;this.pending=new Map();this.events=[];this.coverageStarted=false;this.closed=false;
+    this.socket=socket;this.targetId=targetId;this.nextId=0;this.pending=new Map();this.events=[];this.loadCount=0;this.coverageStarted=false;this.closed=false;
     socket.onmessage=event=>{
       const message=JSON.parse(event.data);
       if(message.id){
@@ -108,6 +108,7 @@ export class CdpPage{
         this.pending.delete(message.id);
         message.error?pending.reject(new Error(JSON.stringify(message.error))):pending.resolve(message.result);return;
       }
+      if(message.method==='Page.loadEventFired')this.loadCount+=1;
       if(message.method==='Runtime.exceptionThrown')this.events.push({kind:'exception',text:message.params.exceptionDetails.exception?.description||message.params.exceptionDetails.text||'Runtime exception'});
       if(message.method==='Runtime.consoleAPICalled'&&message.params.type==='error')this.events.push({kind:'console-error',text:message.params.args.map(arg=>arg.value??arg.description??'').join(' ')});
       if(message.method==='Log.entryAdded'&&message.params.entry.level==='error')this.events.push({kind:'log-error',text:message.params.entry.text});

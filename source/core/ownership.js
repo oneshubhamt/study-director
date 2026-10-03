@@ -242,7 +242,7 @@ registry.define('ownership',1,()=>{
       if(!channel)return Promise.resolve(true);
       if(probePending)return probePending.promise;
       const yieldedControl=hasControl;
-      transition(OWNERSHIP_STATES.RESOLVING,'checking recorded owner');
+      if(yieldedControl||state!==OWNERSHIP_STATES.SECONDARY)transition(OWNERSHIP_STATES.RESOLVING,'checking recorded owner');
       if(yieldedControl)stopExecution();
       hooks.render();
       const probeId='probe_'+env.now().toString(36)+'_'+env.randomIdPart(6);
@@ -257,7 +257,9 @@ registry.define('ownership',1,()=>{
       if(!webLocks)return Promise.resolve(writeLease({force,hydrate}));
       if(webLockHeld)return Promise.resolve(writeLease({force:true,hydrate}));
       if(webLockAttempt)return webLockAttempt;
-      transition(OWNERSHIP_STATES.ACQUIRING,force?'explicit takeover':'web lock check');
+      // A routine availability check does not change a read-only tab's authority.
+      // If the lock is granted, writeLease performs the actual acquiring transition.
+      if(force||state!==OWNERSHIP_STATES.SECONDARY)transition(OWNERSHIP_STATES.ACQUIRING,force?'explicit takeover':'web lock check');
       hooks.render();
       let resolveAttempt;
       const attempt=new Promise(resolve=>{resolveAttempt=resolve;});

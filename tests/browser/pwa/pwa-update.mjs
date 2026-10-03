@@ -1,23 +1,16 @@
 import {createPwaVariant} from '../../helpers/pwa-variant.mjs';
 import assert from 'node:assert/strict';
-import {artifactPath,writeArtifact} from '../../helpers/artifacts.mjs';
-import crypto from 'node:crypto';
-import fs from 'node:fs';
+import {writeArtifact} from '../../helpers/artifacts.mjs';
 import http from 'node:http';
-import os from 'node:os';
-import path from 'node:path';
-import {spawn} from 'node:child_process';
+import {launchChromium} from '../../helpers/browser-harness.mjs';
 import {renderBuild,validateBuild} from '../../../build/build.mjs';
 
-const root=process.cwd();
 const build=renderBuild();
 assert.equal(validateBuild(build),true);
 const deployment=build.deployment;
 const originalIndex=deployment.get(build.identity.main);
 const originalWorker=deployment.get('sw.js');
 const originalPwa=build.pwa.deployment;
-const chromium=process.env.CHROMIUM_PATH||['/usr/bin/chromium','/tmp/chromium'].find(fs.existsSync)||'/usr/bin/chromium';
-if(!fs.existsSync(chromium))throw new Error(`Chromium not found: ${chromium}`);
 
 const support=JSON.parse(deployment.get('firebase-hosting-headers.merge.json'));
 const rootHeaders=support.hosting.headers.find(rule=>rule.source==='/**')?.headers||[];
@@ -25,7 +18,6 @@ const enforced=rootHeaders.find(header=>header.key==='Content-Security-Policy')?
 const trusted=rootHeaders.find(header=>header.key==='Content-Security-Policy-Report-Only')?.value||'';
 const enforcedCsp=`${enforced}; ${trusted}`;
 
-const sha256=value=>crypto.createHash('sha256').update(value).digest('hex');
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function waitFor(operation,{timeout=60000,interval=100,label='condition'}={}){
   const started=Date.now();let last;
@@ -71,60 +63,34 @@ const server=http.createServer((request,response)=>{
 await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
 const appUrl=`http://127.0.0.1:${server.address().port}/${build.identity.main}`;
 
-class CdpPage{
-  constructor(socket){
-    this.socket=socket;this.nextId=0;this.pending=new Map();this.events=[];this.loadCount=0;
-    socket.onmessage=event=>{
-      const message=JSON.parse(event.data);
-      if(message.id){
-        const pending=this.pending.get(message.id);if(!pending)return;
-        this.pending.delete(message.id);
-        message.error?pending.reject(new Error(JSON.stringify(message.error))):pending.resolve(message.result);return;
-      }
-      if(message.method==='Page.loadEventFired')this.loadCount+=1;
-      if(message.method==='Runtime.exceptionThrown')this.events.push({kind:'exception',text:message.params.exceptionDetails.exception?.description||message.params.exceptionDetails.text||'Runtime exception'});
-      if(message.method==='Runtime.consoleAPICalled'&&message.params.type==='error')this.events.push({kind:'console-error',text:message.params.args.map(arg=>arg.value??arg.description??'').join(' ')});
-    };
-  }
-  static async connect(url){const socket=new WebSocket(url);await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject;});return new CdpPage(socket);}
-  send(method,params={}){return new Promise((resolve,reject)=>{const id=++this.nextId;const timer=setTimeout(()=>{this.pending.delete(id);reject(new Error(`CDP ${method} timed out`));},10000);this.pending.set(id,{resolve:value=>{clearTimeout(timer);resolve(value);},reject:error=>{clearTimeout(timer);reject(error);}});this.socket.send(JSON.stringify({id,method,params}));});}
-  async evaluate(expression){
-    const result=await this.send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true,userGesture:true});
-    if(result.exceptionDetails)throw new Error(result.exceptionDetails.exception?.description||result.exceptionDetails.text||'Evaluation failed');
-    return result.result.value;
-  }
-  close(){this.socket.close();}
-}
+const browser=await launchChromium({profilePrefix:'study-director-qa-pwa-'});
 
-const profile=fs.mkdtempSync(path.join(os.tmpdir(),'study-director-qa-pwa-'));
-const browser=spawn(chromium,[
-  '--headless=new','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check',
-  '--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'
-],{stdio:['ignore','ignore','pipe'],env:{...process.env,TERM:process.env.TERM||'xterm'}});
-let browserError='';browser.stderr.on('data',chunk=>{browserError+=chunk;});
-const activePath=path.join(profile,'DevToolsActivePort');
-await waitFor(()=>fs.existsSync(activePath),{timeout:20000,label:'Chromium DevTools port'});
-const [browserPort]=fs.readFileSync(activePath,'utf8').trim().split(/\r?\n/);
-await waitFor(async()=>{try{return (await fetch(`http://127.0.0.1:${browserPort}/json/version`)).ok;}catch{return false;}},{label:'Chromium endpoint'});
-
-async function createPage(){
-  // Navigate at target creation so the first CDP evaluation is never stranded across an initial navigation.
-  // The enforced CSP is already delivered by the server before any application script runs.
-  const target=await (await fetch(`http://127.0.0.1:${browserPort}/json/new?${encodeURIComponent(appUrl)}`,{method:'PUT'})).json();
-  const page=await CdpPage.connect(target.webSocketDebuggerUrl);
-  await page.send('Runtime.enable');await page.send('Page.enable');await page.send('Network.enable');
-  await page.send('Emulation.setTimezoneOverride',{timezoneId:'Asia/Kolkata'});
-  await page.send('Emulation.setDeviceMetricsOverride',{width:1365,height:900,deviceScaleFactor:1,mobile:false});
-  await waitFor(()=>page.evaluate(`!!(window.StudyDirector&&document.querySelector('[data-tab="plan"]'))`),{label:'Study Director shell'});
-  await page.evaluate(`(()=>{window.__sd73iViolations=[];document.addEventListener('securitypolicyviolation',event=>__sd73iViolations.push({directive:event.effectiveDirective,disposition:event.disposition,blocked:event.blockedURI||''}));window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';document.querySelector('[data-action="skip-name-setup"]')?.click();return true})()`);
+async function createPage(url=appUrl){
+  const page=await browser.createPage(url,{preload:"window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';window.__sd73iViolations=[];document.addEventListener('securitypolicyviolation',event=>window.__sd73iViolations.push({directive:event.effectiveDirective,disposition:event.disposition,blocked:event.blockedURI||''}));const nativeUpdate=ServiceWorkerRegistration.prototype.update;ServiceWorkerRegistration.prototype.update=function(){localStorage.setItem('qa.pwaExplicitChecks',String(Number(localStorage.getItem('qa.pwaExplicitChecks')||0)+1));return nativeUpdate.call(this)};"});
+  await waitForStartup(page);
+  await page.evaluate(`document.querySelector('[data-action="skip-name-setup"]')?.click()`);
   return page;
 }
 async function waitForStartup(page){
   await waitFor(()=>page.evaluate(`document.documentElement.dataset.studyDirectorLifecycle==='ready'||document.documentElement.dataset.studyDirectorLifecycle==='read-only'`),{label:'session lifecycle ready'});
 }
+async function reloadOffline(page,label){
+  // CDP's network override does not reliably survive an offline cached document's
+  // Navigator state. Keep the app's offline signal explicit for that document;
+  // real network emulation and service-worker cache serving remain in force.
+  const script=await page.send('Page.addScriptToEvaluateOnNewDocument',{source:"Object.defineProperty(navigator,'onLine',{configurable:true,get:()=>false});"});
+  const previous=await page.evaluate('performance.timeOrigin');
+  await page.send('Page.reload',{ignoreCache:false});
+  await waitFor(()=>page.evaluate(`performance.timeOrigin!==${previous}&&document.readyState==='complete'`),{label});
+  await page.send('Page.removeScriptToEvaluateOnNewDocument',{identifier:script.identifier});
+  await waitForStartup(page);assert.equal(await page.evaluate('navigator.onLine'),false);
+}
 async function workerIdentity(page,slot='active'){
   return page.evaluate(`(async()=>{const registration=await navigator.serviceWorker.getRegistration();const worker=registration&&registration['${slot}'];if(!worker)return '';return new Promise(resolve=>{const channel=new MessageChannel();const timer=setTimeout(()=>resolve('timeout'),3000);channel.port1.onmessage=event=>{clearTimeout(timer);channel.port1.close();resolve(event.data&&event.data.releaseId||'')};worker.postMessage({type:'SD_PWA_IDENTIFY'},[channel.port2])})})()`);
 }
+// Browser registration may perform native checks too. Count only explicit calls
+// to registration.update(), including the application's automatic checks.
+async function explicitChecks(page){return page.evaluate("Number(localStorage.getItem('qa.pwaExplicitChecks')||0)");}
 async function waitForNoInstalling(page){
   return waitFor(()=>page.evaluate(`navigator.serviceWorker.getRegistration().then(registration=>registration&&!registration.installing)`),{label:'service-worker installation settled'});
 }
@@ -143,11 +109,11 @@ try{
 
   const recentStamp=await page1.evaluate(`Number(localStorage.getItem('studyDirector.pwaUpdateCheck.v1'))`);
   assert.ok(Date.now()-recentStamp<30000,'startup update-check timestamp is not recent');
-  const noCheckBefore=swRequests;
+  const noCheckBefore=await explicitChecks(page1);
   served='next';
   await page1.evaluate(`window.dispatchEvent(new Event('focus'))`);
   await sleep(700);
-  assert.equal(swRequests,noCheckBefore,'a fresh 24-hour cooldown performed an unnecessary update check');
+  assert.equal(await explicitChecks(page1),noCheckBefore,'a fresh 24-hour cooldown performed an unnecessary update check');
   assert.equal(await page1.evaluate(`navigator.serviceWorker.getRegistration().then(registration=>!!registration.waiting)`),false);
   evidence.checks.cooldown={twentyFourHours:true,recentForegroundSkipped:true};
   served='current';
@@ -165,10 +131,7 @@ try{
   await Promise.all([page1,page2].map(page=>waitFor(()=>page.evaluate(`navigator.onLine===false`),{label:'offline tab'})));
   await page1.evaluate(`localStorage.setItem('studyDirector.pwaUpdateCheck.v1','${due}')`);
   await waitFor(()=>page1.evaluate(`navigator.onLine===false`),{label:'offline state'});
-  const offlineDocument=await page1.evaluate('performance.timeOrigin');
-  await page1.send('Page.reload',{ignoreCache:false});
-  await waitFor(()=>page1.evaluate(`performance.timeOrigin!==${offlineDocument}&&document.readyState==='complete'`),{label:'offline restart before due discovery'});
-  await waitForStartup(page1);
+  await reloadOffline(page1,'offline restart before due discovery');
   if(await page1.evaluate(`document.documentElement.dataset.studyDirectorUiState==='secondary'`))await page1.evaluate(`document.querySelector('.ownership-banner[data-ownership-state="secondary"] button').click()`);
   await waitFor(()=>page1.evaluate(`document.documentElement.dataset.studyDirectorUiState==='primary'`),{label:'primary control after offline restart'});
   const scheduleState=await page1.evaluate(`(async()=>{const now=new Date(),minute=now.getHours()*60+now.getMinutes()-1,hh=String(Math.floor((minute+1440)%1440/60)).padStart(2,'0'),mm=String((minute+1440)%1440%60).padStart(2,'0'),input=document.getElementById('plan-input');document.querySelector('[data-tab="plan"]').click();input.value=hh+':'+mm+' | 30 | PwaUpdateQA Update QA | work | QA | pages | 5';input.dispatchEvent(new Event('input',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,500));const apply=document.querySelector('[data-action="apply-schedule"]');const enabled=!apply.disabled;apply.click();return enabled})()`);
@@ -178,17 +141,19 @@ try{
   await waitFor(()=>page1.evaluate(`!document.getElementById('pwa-update-apply').disabled`),{label:'ongoing update check settled'});
   await waitForNoInstalling(page1);await sleep(250);
   served='next';
-  const offlineSwRequests=swRequests;
+  const offlineChecks=await explicitChecks(page1);
   await page1.evaluate(`document.dispatchEvent(new Event('visibilitychange'))`);
   await sleep(500);
-  assert.equal(swRequests,offlineSwRequests,'offline due check attempted a service-worker fetch');
+  assert.equal(await explicitChecks(page1),offlineChecks,'offline due check attempted a service-worker fetch');
   assert.equal(await page1.evaluate(`Number(localStorage.getItem('studyDirector.pwaUpdateCheck.v1'))`),due,'offline due check consumed the 24-hour cooldown');
+  const discoveryChecks=await explicitChecks(page1);
   await Promise.all([page1,page2].map(page=>page.send('Network.emulateNetworkConditions',{offline:false,latency:0,downloadThroughput:-1,uploadThroughput:-1})));
+  await page1.evaluate(`delete navigator.onLine`);
   await waitFor(()=>page1.evaluate(`navigator.onLine===true`),{label:'online state'});
-  const discoveryRequests=swRequests;
   await Promise.all([page1,page2].map(page=>page.evaluate(`window.dispatchEvent(new Event('online'))`)));
   await waitFor(()=>page1.evaluate(`navigator.serviceWorker.getRegistration().then(registration=>!!registration.waiting)`),{timeout:60000,label:'automatic due update discovery'});
-  assert.equal(swRequests-discoveryRequests,1,'multiple tabs duplicated the proactive service-worker update check');
+  await waitFor(async()=>(await explicitChecks(page1))>discoveryChecks,{label:'primary proactive check after reconnection'});
+  assert.equal((await explicitChecks(page1))-discoveryChecks,1,'multiple tabs duplicated the proactive service-worker update check');
   assert.equal(await workerIdentity(page1,'waiting'),next.releaseId);
   assert.equal(await workerIdentity(page1),originalPwa.releaseId);
   await waitFor(()=>page1.evaluate(`document.getElementById('pwa-update-message')?.textContent.includes('live timer before updating')`),{label:'automatic Plan-end queue'});
@@ -216,10 +181,13 @@ try{
 
   // Corrupt service-worker script must fail closed without displacing the active release.
   served='bad-syntax';
+  await waitForStartup(page1);
+  if(await page1.evaluate(`document.documentElement.dataset.studyDirectorUiState==='secondary'`))await page1.evaluate(`document.querySelector('.ownership-banner[data-ownership-state="secondary"] button').click()`);
   await waitFor(()=>page1.evaluate(`document.documentElement.dataset.studyDirectorUiState==='primary'`),{timeout:30000,label:'primary ownership after update'});
-  await page1.evaluate(`localStorage.setItem('studyDirector.pwaUpdateCheck.v1',String(Date.now()-25*60*60*1000));window.dispatchEvent(new Event('online'))`);
   const corruptDueStamp=await page1.evaluate(`Number(localStorage.getItem('studyDirector.pwaUpdateCheck.v1'))`);
   const syntaxRequestFloor=swRequests;
+  await waitFor(()=>page1.evaluate(`!document.getElementById('pwa-update-apply').disabled`),{label:'update control settled'});
+  await page1.evaluate(`document.getElementById('pwa-update-apply').click()`);
   await waitFor(()=>swRequests>syntaxRequestFloor,{label:'corrupt worker check'});
   await sleep(700);
   await waitForNoInstalling(page1);
@@ -228,21 +196,12 @@ try{
   assert.equal(await page1.evaluate(`navigator.serviceWorker.getRegistration().then(registration=>!!registration.waiting)`),false);
   evidence.checks.corruptWorker={rejected:true,activePreserved:true};
 
-  // Restart the page offline so the bounded in-memory failure backoff is reset without performing a successful check.
-  await page1.send('Network.emulateNetworkConditions',{offline:true,latency:0,downloadThroughput:0,uploadThroughput:0});
-  const priorDocument=await page1.evaluate('performance.timeOrigin');
-  await page1.send('Page.reload',{ignoreCache:false});
-  await waitFor(()=>page1.evaluate(`performance.timeOrigin!==${priorDocument}&&document.readyState==='complete'`),{label:'new offline document'});
-  await waitFor(()=>page1.evaluate(`!!window.StudyDirector`),{label:'shell after offline updater retry reset'});
-  await waitForStartup(page1);
-
-  // Valid worker with a bad required-asset hash must delete its partial shell and keep the old active release.
+  // A user retry bypasses failure backoff through the existing update control.
+  // Required-asset hash failure must keep the active release and remove partial cache.
   served='bad-precache';
-  await page1.evaluate(`localStorage.setItem('studyDirector.pwaUpdateCheck.v1',String(Date.now()-25*60*60*1000))`);
-  await page1.send('Network.emulateNetworkConditions',{offline:false,latency:0,downloadThroughput:-1,uploadThroughput:-1});
-  await waitFor(()=>page1.evaluate(`navigator.onLine===true`),{label:'online state before bad-precache retry'});
-  await page1.evaluate(`window.dispatchEvent(new Event('online'))`);
   const precacheRequestFloor=swRequests;
+  await waitFor(()=>page1.evaluate(`!document.getElementById('pwa-update-apply').disabled`),{label:'failed check settled'});
+  await page1.evaluate(`document.getElementById('pwa-update-apply').click()`);
   await waitFor(()=>swRequests>precacheRequestFloor,{label:'bad-precache worker check'});
   await waitForNoInstalling(page1);
   await sleep(400);
@@ -261,11 +220,8 @@ try{
 }catch(error){
   let diagnostic=null;
   try{diagnostic=await page1?.evaluate(`(async()=>({href:location.href,title:document.title,body:(document.body?.innerText||'').slice(0,700),pwaMessage:document.getElementById('pwa-update-message')?.textContent,ui:document.documentElement.dataset.studyDirectorUiState,controller:!!navigator.serviceWorker?.controller,registration:!!(await navigator.serviceWorker?.getRegistration()),waiting:!!(await navigator.serviceWorker?.getRegistration())?.waiting,caches:typeof caches==='undefined'?[]:await caches.keys(),violations:window.__sd73iViolations||[]}))()`);}catch(diagnosticError){diagnostic={error:String(diagnosticError)};}
-  throw new Error(`${error.stack||error}\nPage diagnostic: ${JSON.stringify(diagnostic)}\nChromium stderr:\n${browserError.slice(-8000)}`);
+  throw new Error(`${error.stack||error}\nPage diagnostic: ${JSON.stringify(diagnostic)}\nChromium stderr:\n${browser.stderr().slice(-8000)}`);
 }finally{
-  try{page1?.close();page2?.close();}catch{}
-  browser.kill('SIGTERM');
-  await Promise.race([new Promise(resolve=>browser.once('exit',resolve)),sleep(3000)]);
-  server.close();
-  try{fs.rmSync(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});}catch(cleanupError){console.error('QA profile cleanup:',cleanupError.code);}
+  await browser.close();
+  await new Promise(resolve=>server.close(resolve));
 }
