@@ -16,9 +16,7 @@ const crossLayerContracts=new Map([
   ['exports/exports','Integration protects export processing/contracts; browser protects the complete user export workflow.'],
   ['ui/interactions','Integration protects interaction-controller behavior and prompt lifecycle ownership; browser protects real dialogs, guidance, and asynchronous History API traversal ordering.'],
 ]);
-const overlapExceptions=new Map([
-  [pairKey('tests/browser/pwa/pwa-offline.mjs','tests/browser/pwa/pwa-update.mjs'),'Both exercise the service-worker lifecycle, but offline resilience and update activation are intentionally independent browser journeys with different failure contracts.']
-]);
+const overlapExceptions=new Map();
 const semanticThreshold=0.55;
 const structuralContainmentThreshold=0.30;
 
