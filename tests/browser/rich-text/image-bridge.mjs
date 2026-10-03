@@ -17,7 +17,7 @@ try{
 
   await page.click('#picker + .sd-rte .sd-rte-editor p:nth-of-type(2)');await page.settle();
   await page.send('Page.setInterceptFileChooserDialog',{enabled:true});
-  await page.click('#picker + .sd-rte .sd-rte-toolbar button[aria-label="Insert image"]');
+  await page.click('#picker + .sd-rte .sd-rte-attachment-trigger');await page.click('#picker + .sd-rte button[aria-label="Insert image"]');
   // Reproduce the user's observed browser caret jump while the native chooser owns focus.
   await page.evaluate(`selectPara('picker',0,0)`);await page.settle();
   const doc=await page.send('DOM.getDocument',{depth:-1,pierce:true}),input=await page.send('DOM.querySelector',{nodeId:doc.root.nodeId,selector:'#picker + .sd-rte .sd-rte-asset-input'});

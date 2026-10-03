@@ -3472,7 +3472,7 @@ function applyRows(rows,options={}){
     if(opts.lifecycleManaged)return applyRows(rows,opts);
     const date=isValidIsoDate(opts.studyDate)?opts.studyDate:todayISO();
     return SessionLifecycle.runSync(opts.source||'schedule-apply',{
-      scheduleIdentity:true,date,autoDate:date===todayISO(),
+      scheduleIdentity:true,date,autoDate:date===todayISO(),snapshotReview:null,
     },()=>applyRows(rows,{...opts,lifecycleManaged:true}));
   }
   function reconcile(source='schedule-reapply'){
@@ -4483,6 +4483,7 @@ function resetRuntimeSessionState(options={}){
   resetBreakState(false);
   setTimerMode(TIMER_MODES.EMPTY,'session-reset');
   TimerState.clearSession();
+  hydrateReviewState({date:isValidIsoDate(opts.date)?opts.date:todayISO(),snapshotReview:null});
   
   invalidateScheduleDerived({identity:true,adjustments:true,render:true});
   PlanRuntime.resetSession();
@@ -5747,7 +5748,12 @@ const trustedAssetURL=(()=>{
 const FEATURE_SCROLL_OWNERS=new Set(['review','library','insights']);
 const shellTabScrollState=new Map();
 const navigationFocusState=new Map();
-const nextNavigationFrame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
+const nextNavigationFrame=()=>new Promise(resolve=>{
+  let frame=null,timer=null;
+  const finish=()=>{if(frame!==null)cancelAnimationFrame(frame);if(timer!==null)clearTimeout(timer);resolve();};
+  // Hidden windows may receive no animation frames; startup must still settle.
+  frame=requestAnimationFrame(finish);timer=setTimeout(finish,document.hidden?0:100);
+});
 function captureShellScroll(tab){
   if(FEATURE_SCROLL_OWNERS.has(tab))return;
   const root=document.scrollingElement||document.documentElement,main=document.querySelector('.main');
@@ -6842,7 +6848,7 @@ const RichTextRuntime=(()=>{
     if(!descriptor){syncField(field);return false;}
     if(field.dataset.richMountFailed===descriptor.documentId&&!options.retry)return false;clearMountError(field);
     if(closingAll)return false;
-    const existing=mounted.get(field);if(existing?.documentId===descriptor.documentId){lastActiveField=field;return true;}
+    const existing=mounted.get(field);if(existing?.documentId===descriptor.documentId){lastActiveField=field;if(options.focus===true)existing.mounted.focus();return true;}
     if(existing)await dispose(field,{resync:false});
     for(const [other,record] of mounted)if(other!==field&&record.documentId===descriptor.documentId)await dispose(other,{resync:true});
     const request=++sequence;pending.set(field,request);
@@ -7873,6 +7879,7 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
   }),
   notes:Object.freeze({
     bindEditor:bindAreaNoteEditor,
+    focusEditor:field=>{void RichTextRuntime.activate(field,{focus:true}).catch(error=>AppDiagnostics.capture('library.note-focus',error,'warn'));},
     canCreate:()=>AppData.notes.size()<APP_LIMITS.maxOngoingNotes,
     catalogue:ongoingAreaNoteCatalogue,
     clearEditor:clearTaskNoteEditorBinding,
@@ -8430,6 +8437,7 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
     clearTimeout:timer=>clearTimeout(timer),
     now:()=>Date.now(),
     setTimeout:(callback,delay)=>setTimeout(callback,delay),
+    yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'}),
     showDirectoryPicker:typeof window.showDirectoryPicker==='function'
       ? options=>window.showDirectoryPicker(options)
       : null
@@ -8775,7 +8783,8 @@ async function prepareApplicationUpdate(context={}){
 function schedulePwaUpdateEvaluation(delay=PWA_UPDATE_SAFETY_RETRY_MS){
   if(pwaUpdateRetryTimer!==null){clearTimeout(pwaUpdateRetryTimer);pwaUpdateRetryTimer=null;}
   if(!pwaLatestUpdateState||(!pwaLatestUpdateState.updateReady&&!pwaLatestUpdateState.applying))return false;
-  pwaUpdateRetryTimer=setTimeout(()=>{pwaUpdateRetryTimer=null;void evaluateAutomaticPwaUpdate();},Math.max(0,Number(delay)||0));
+  const editDelay=pwaLastEditableInputAt?Math.max(0,pwaLastEditableInputAt+PWA_EDIT_IDLE_MS+50-Date.now()):0;
+  pwaUpdateRetryTimer=setTimeout(()=>{pwaUpdateRetryTimer=null;void evaluateAutomaticPwaUpdate();},Math.max(0,Number(delay)||0,editDelay));
   return true;
 }
 async function evaluateAutomaticPwaUpdate(){
@@ -9508,7 +9517,7 @@ const NoteSyncPopover=(()=>{
       popover=document.createElement('div');popover.id='note-sync-popover';popover.className='note-sync-popover';popover.setAttribute('role','tooltip');
       controller=RichTextApi.createAnchoredPopover(popover,{align:'end',manual:true,onClose:clearTarget});
     }
-    if(target!==element){hide();const parent=element.closest('.sd-rte-focus-layer')||document.body;parent.append(popover);popover.inert=false;}
+    if(target!==element){hide();const parent=element.closest('.workspace-overlay-rich-text')||document.body;parent.append(popover);popover.inert=false;}
     target=element;popover.textContent=message;element.setAttribute('aria-describedby','note-sync-popover');controller.show(element);
   };
   const refresh=element=>{if(target===element)show(element);};

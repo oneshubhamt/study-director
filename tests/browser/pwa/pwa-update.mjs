@@ -150,6 +150,7 @@ try{
   assert.equal(swRequests,noCheckBefore,'a fresh 24-hour cooldown performed an unnecessary update check');
   assert.equal(await page1.evaluate(`navigator.serviceWorker.getRegistration().then(registration=>!!registration.waiting)`),false);
   evidence.checks.cooldown={twentyFourHours:true,recentForegroundSkipped:true};
+  served='current';
 
   page2=await createPage();
   await waitForStartup(page2);
@@ -158,20 +159,31 @@ try{
   await waitFor(()=>page2.evaluate(`document.documentElement.dataset.studyDirectorUiState==='secondary'`),{label:'secondary ownership'});
   await page2.evaluate(`(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'hidden'});return true})()`);
 
+
+  const due=Date.now()-25*60*60*1000;
+  await Promise.all([page1,page2].map(page=>page.send('Network.emulateNetworkConditions',{offline:true,latency:0,downloadThroughput:0,uploadThroughput:0})));
+  await Promise.all([page1,page2].map(page=>waitFor(()=>page.evaluate(`navigator.onLine===false`),{label:'offline tab'})));
+  await page1.evaluate(`localStorage.setItem('studyDirector.pwaUpdateCheck.v1','${due}')`);
+  await waitFor(()=>page1.evaluate(`navigator.onLine===false`),{label:'offline state'});
+  const offlineDocument=await page1.evaluate('performance.timeOrigin');
+  await page1.send('Page.reload',{ignoreCache:false});
+  await waitFor(()=>page1.evaluate(`performance.timeOrigin!==${offlineDocument}&&document.readyState==='complete'`),{label:'offline restart before due discovery'});
+  await waitForStartup(page1);
+  if(await page1.evaluate(`document.documentElement.dataset.studyDirectorUiState==='secondary'`))await page1.evaluate(`document.querySelector('.ownership-banner[data-ownership-state="secondary"] button').click()`);
+  await waitFor(()=>page1.evaluate(`document.documentElement.dataset.studyDirectorUiState==='primary'`),{label:'primary control after offline restart'});
   const scheduleState=await page1.evaluate(`(async()=>{const now=new Date(),minute=now.getHours()*60+now.getMinutes()-1,hh=String(Math.floor((minute+1440)%1440/60)).padStart(2,'0'),mm=String((minute+1440)%1440%60).padStart(2,'0'),input=document.getElementById('plan-input');document.querySelector('[data-tab="plan"]').click();input.value=hh+':'+mm+' | 30 | PwaUpdateQA Update QA | work | QA | pages | 5';input.dispatchEvent(new Event('input',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,500));const apply=document.querySelector('[data-action="apply-schedule"]');const enabled=!apply.disabled;apply.click();return enabled})()`);
   assert.equal(scheduleState,true,'QA Plan could not be applied');
   await waitFor(()=>page1.evaluate(`document.getElementById('cd-mode')?.textContent.includes('RUNNING')&&document.getElementById('execute-state-overlay')?.hidden`),{label:'running timer'});
 
-  const due=Date.now()-25*60*60*1000;
-  await page1.evaluate(`localStorage.setItem('studyDirector.pwaUpdateCheck.v1','${due}')`);
-  await page1.send('Network.emulateNetworkConditions',{offline:true,latency:0,downloadThroughput:0,uploadThroughput:0});
-  await waitFor(()=>page1.evaluate(`navigator.onLine===false`),{label:'offline state'});
+  await waitFor(()=>page1.evaluate(`!document.getElementById('pwa-update-apply').disabled`),{label:'ongoing update check settled'});
+  await waitForNoInstalling(page1);await sleep(250);
+  served='next';
   const offlineSwRequests=swRequests;
   await page1.evaluate(`document.dispatchEvent(new Event('visibilitychange'))`);
   await sleep(500);
   assert.equal(swRequests,offlineSwRequests,'offline due check attempted a service-worker fetch');
   assert.equal(await page1.evaluate(`Number(localStorage.getItem('studyDirector.pwaUpdateCheck.v1'))`),due,'offline due check consumed the 24-hour cooldown');
-  await page1.send('Network.emulateNetworkConditions',{offline:false,latency:0,downloadThroughput:-1,uploadThroughput:-1});
+  await Promise.all([page1,page2].map(page=>page.send('Network.emulateNetworkConditions',{offline:false,latency:0,downloadThroughput:-1,uploadThroughput:-1})));
   await waitFor(()=>page1.evaluate(`navigator.onLine===true`),{label:'online state'});
   const discoveryRequests=swRequests;
   await Promise.all([page1,page2].map(page=>page.evaluate(`window.dispatchEvent(new Event('online'))`)));
@@ -179,7 +191,7 @@ try{
   assert.equal(swRequests-discoveryRequests,1,'multiple tabs duplicated the proactive service-worker update check');
   assert.equal(await workerIdentity(page1,'waiting'),next.releaseId);
   assert.equal(await workerIdentity(page1),originalPwa.releaseId);
-  await waitFor(()=>page1.evaluate(`document.getElementById('pwa-update-message')?.textContent.includes('Update queued')`),{label:'automatic Plan-end queue'});
+  await waitFor(()=>page1.evaluate(`document.getElementById('pwa-update-message')?.textContent.includes('live timer before updating')`),{label:'automatic Plan-end queue'});
   assert.equal(await page1.evaluate(`document.getElementById('pwa-update-apply').textContent`),'Pause & Update');
   evidence.checks.discovery={offlineDeferred:true,onlineRetry:true,noTestSideRegistrationUpdate:true,onePrimaryCheckAcrossTabs:true,queuedAutomatically:true};
 
@@ -218,7 +230,9 @@ try{
 
   // Restart the page offline so the bounded in-memory failure backoff is reset without performing a successful check.
   await page1.send('Network.emulateNetworkConditions',{offline:true,latency:0,downloadThroughput:0,uploadThroughput:0});
-  await page1.send('Page.reload',{ignoreCache:true});
+  const priorDocument=await page1.evaluate('performance.timeOrigin');
+  await page1.send('Page.reload',{ignoreCache:false});
+  await waitFor(()=>page1.evaluate(`performance.timeOrigin!==${priorDocument}&&document.readyState==='complete'`),{label:'new offline document'});
   await waitFor(()=>page1.evaluate(`!!window.StudyDirector`),{label:'shell after offline updater retry reset'});
   await waitForStartup(page1);
 
@@ -246,12 +260,12 @@ try{
   console.log(JSON.stringify(evidence,null,2));
 }catch(error){
   let diagnostic=null;
-  try{diagnostic=await page1?.evaluate(`(async()=>({href:location.href,title:document.title,body:(document.body?.innerText||'').slice(0,700),ui:document.documentElement.dataset.studyDirectorUiState,controller:!!navigator.serviceWorker?.controller,registration:!!(await navigator.serviceWorker?.getRegistration()),waiting:!!(await navigator.serviceWorker?.getRegistration())?.waiting,caches:typeof caches==='undefined'?[]:await caches.keys(),violations:window.__sd73iViolations||[]}))()`);}catch(diagnosticError){diagnostic={error:String(diagnosticError)};}
+  try{diagnostic=await page1?.evaluate(`(async()=>({href:location.href,title:document.title,body:(document.body?.innerText||'').slice(0,700),pwaMessage:document.getElementById('pwa-update-message')?.textContent,ui:document.documentElement.dataset.studyDirectorUiState,controller:!!navigator.serviceWorker?.controller,registration:!!(await navigator.serviceWorker?.getRegistration()),waiting:!!(await navigator.serviceWorker?.getRegistration())?.waiting,caches:typeof caches==='undefined'?[]:await caches.keys(),violations:window.__sd73iViolations||[]}))()`);}catch(diagnosticError){diagnostic={error:String(diagnosticError)};}
   throw new Error(`${error.stack||error}\nPage diagnostic: ${JSON.stringify(diagnostic)}\nChromium stderr:\n${browserError.slice(-8000)}`);
 }finally{
   try{page1?.close();page2?.close();}catch{}
   browser.kill('SIGTERM');
   await Promise.race([new Promise(resolve=>browser.once('exit',resolve)),sleep(3000)]);
   server.close();
-  fs.rmSync(profile,{recursive:true,force:true});
+  try{fs.rmSync(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});}catch(cleanupError){console.error('QA profile cleanup:',cleanupError.code);}
 }

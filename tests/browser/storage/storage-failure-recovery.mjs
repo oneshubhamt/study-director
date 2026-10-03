@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
+import {CdpPage,withoutPwaChecks} from '../../helpers/browser-harness.mjs';
 
 const root=process.cwd();
 const chromium=process.env.CHROMIUM_PATH||['/usr/bin/chromium','/tmp/chromium'].find(fs.existsSync)||'/usr/bin/chromium';
@@ -16,7 +17,7 @@ const exposure=`window.__StorageDebug=Object.freeze({StorageHealthController,Ind
 let main=fs.readFileSync(path.join(deployment,manifest.main),'utf8');
 if(!main.includes(marker))throw new Error('Storage-health browser harness hook is unavailable.');
 main=main.replace(marker,exposure+marker);
-main=main.replace('void PwaLifecycle.install();','/* PWA lifecycle is covered by the dedicated sealed-origin gate. */');
+main=withoutPwaChecks(main);
 
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function waitFor(fn,{timeout=45000,interval=100,label='condition'}={}){
@@ -43,17 +44,6 @@ const server=http.createServer((req,res)=>{
 await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
 const appUrl=`http://127.0.0.1:${server.address().port}/${manifest.main}`;
 
-class CdpPage{
-  constructor(ws){this.ws=ws;this.nextId=0;this.pending=new Map();this.events=[];ws.onmessage=event=>{
-    const msg=JSON.parse(event.data);
-    if(msg.id){const pending=this.pending.get(msg.id);if(!pending)return;this.pending.delete(msg.id);msg.error?pending.reject(new Error(JSON.stringify(msg.error))):pending.resolve(msg.result);return;}
-    if(msg.method==='Runtime.exceptionThrown')this.events.push(msg.params.exceptionDetails.exception?.description||msg.params.exceptionDetails.text||'Runtime exception');
-  };}
-  static async connect(url){const ws=new WebSocket(url);await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject;});return new CdpPage(ws);}
-  send(method,params={}){return new Promise((resolve,reject)=>{const id=++this.nextId;this.pending.set(id,{resolve,reject});this.ws.send(JSON.stringify({id,method,params}));});}
-  async evaluate(expression){const result=await this.send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true,userGesture:true});if(result.exceptionDetails)throw new Error(result.exceptionDetails.exception?.description||result.exceptionDetails.text||'Evaluation failed');return result.result.value;}
-  close(){this.ws.close();}
-}
 
 const profile=fs.mkdtempSync(path.join(os.tmpdir(),'qa-storage-health-'));
 const browser=spawn(chromium,[
@@ -94,7 +84,7 @@ async function createPage({idbMode='normal',allLocalFailures=false,waitForStartu
   try{await waitFor(()=>page.evaluate(`!!window.__StorageDebug`),{timeout:10000,label:`${idbMode} debug exposure`});}
   catch(error){
     const diagnostic=await page.evaluate(`({href:location.href,title:document.title,ready:document.readyState,body:(document.body&&document.body.innerText||'').slice(0,500)})`).catch(()=>null);
-    throw new Error(`${error.message}; page=${JSON.stringify(diagnostic)}; exceptions=${page.events.join(' | ')}`);
+    throw new Error(`${error.message}; page=${JSON.stringify(diagnostic)}; exceptions=${page.events.map(event=>event.text).join(' | ')}`);
   }
   if(waitForStartup)await waitFor(()=>page.evaluate(`__StorageDebug.StartupLifecycle.status().fullyInitialized`),{timeout:60000,label:`${idbMode} startup`});
   await page.settle(3);
@@ -109,7 +99,9 @@ try{
     const d=__StorageDebug,wait=ms=>new Promise(r=>setTimeout(r,ms)),warningVisible=()=>!document.getElementById('notice-region').hidden&&!document.getElementById('storage-warning').hidden;
     const input=document.getElementById('plan-input');
     input.value='05:30 | 60 | Storage health probe | work | Reliability | block | 1';
-    __storageFaults.quota=true;
+    const originalPut=IDBObjectStore.prototype.put;__storageFaults.plan=true;
+    IDBObjectStore.prototype.put=function(value,...args){if(this.name==='appMeta'&&value?.key==='planDraft.v1'&&__storageFaults.plan)throw new DOMException('forced Plan metadata quota failure','QuotaExceededError');return originalPut.call(this,value,...args);};
+    __storageFaults.quota=true;d.AppData.local.setText('probe','quota');
     d.PlanDraftEditor.composerInput();await wait(420);
     const failed=d.readStorageHealth();
     const failedView={issues:failed.issues.map(row=>row.source),warning:warningVisible(),status:document.getElementById('plan-status').textContent,board:document.getElementById('plan-board-state').textContent};
@@ -118,19 +110,19 @@ try{
     await d.IndexedDb.open();
     const afterUnrelatedSuccess=d.readStorageHealth().issues.map(row=>row.source);
     d.dismissStorageWarning();const dismissed=warningVisible();
-    __storageFaults.quota=false;
-    const recovered=d.PlanDraftEditor.save();await wait(50);
+    __storageFaults.quota=false;__storageFaults.plan=false;d.AppData.local.setText('probe','recovered');
+    const recovered=await d.PlanDraftEditor.save();await wait(50);
     const recoveredView={issues:d.readStorageHealth().issues.map(row=>row.source),warning:warningVisible(),status:document.getElementById('plan-status').textContent};
-    __storageFaults.write=true;
-    d.PlanDraftEditor.composerInput();const flushed=d.PlanDraftEditor.flush();await wait(30);
+    __storageFaults.write=true;d.AppData.local.setText('probe','blocked');__storageFaults.plan=true;input.value+='\\n';
+    d.PlanDraftEditor.composerInput();const flushed=await d.PlanDraftEditor.flush();await wait(30);
     const explicitView={issues:d.readStorageHealth().issues.map(row=>row.source),warning:warningVisible(),status:document.getElementById('plan-status').textContent};
     __storageFaults.read=true;d.AppData.local.getText('probe','');
     const readFailed=d.readStorageHealth().issues.map(row=>row.source);
     __storageFaults.read=false;d.AppData.local.getText('probe','');
     const readRecovered=d.readStorageHealth().issues.map(row=>row.source);
-    __storageFaults.write=false;d.PlanDraftEditor.save();await wait(30);
-    __storageFaults.write=true;d.PlanDraftEditor.save();await wait(20);
-    const secondFailureVisible=warningVisible();
+    __storageFaults.write=false;__storageFaults.plan=false;await d.PlanDraftEditor.save();d.AppData.local.setText('probe','recovered');await wait(30);
+    __storageFaults.plan=true;input.value+='\\n';await d.PlanDraftEditor.save();await wait(20);
+    const secondFailureVisible=warningVisible();__storageFaults.plan=false;IDBObjectStore.prototype.put=originalPut;await d.PlanDraftEditor.save();if((await d.AppData.planData.read()).draft!==input.value)throw new Error('Plan recovery did not persist canonical metadata');
     return {failedView,afterCapabilityInspection,afterUnrelatedSuccess,dismissed,recovered,recoveredView,flushed,explicitView,readFailed,readRecovered,secondFailureVisible};
   })()`);
   assert.ok(planScenario.failedView.issues.includes('planDraft.write'),'debounced Plan failure was not source-owned');
@@ -155,7 +147,7 @@ try{
   const activeScenario=await page.evaluate(`(async()=>{
     const d=__StorageDebug,wait=ms=>new Promise(r=>setTimeout(r,ms));
     __storageFaults.write=false;__storageFaults.quota=false;
-    d.PlanDraftEditor.save();d.applySchedule({skipNotify:true});
+    await d.PlanDraftEditor.save();d.applySchedule({skipNotify:true});
     await d.writeLiveDraftNow({markChanged:false});await wait(50);
     const beforeHealth=d.readStorageHealth();
     const original=IDBDatabase.prototype.transaction;
@@ -242,7 +234,7 @@ try{
   assert.equal(reloadState.warning,true,'storage warning did not return after reload');
   results.recovery={bothSystemsUnavailable:true,inMemoryAuthority:true,reload:true};
 
-  const runtimeExceptions=pages.flatMap(current=>current.events);
+  const runtimeExceptions=pages.flatMap(current=>current.events.filter(event=>event.kind==='exception').map(event=>event.text));
   assert.deepEqual(runtimeExceptions,[],`Unexpected runtime exceptions: ${runtimeExceptions.join(' | ')}`);
   writeArtifact('storage-failure-recovery-results.json',JSON.stringify({status:'PASS',...results},null,2)+'\n');
   console.log(JSON.stringify({status:'PASS',...results},null,2));

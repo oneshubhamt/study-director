@@ -191,4 +191,22 @@ for(const phase of ['read','write']){
  available=true;bg.wake('ownership');assert.equal(clock.pending(),0);assert.equal(attempts,1);resolveNative();await job.settled();assert.equal(bg.status().active.length,0);assert.equal(job.status().pending,true);
  await clock.advance(1000);await clock.drainMicrotasks(80);assert.equal(attempts,2);assert.equal(job.status().pending,false);assert.equal(clock.pending(),0);
 }
+// Discovery is a state predicate: known idle jobs stay idle, while unknown
+// settings and dirty repositories are rediscovered after eligibility changes.
+for(const blocked of [false,true]){
+ const fake=createFakeClock(),bg=coordinator(fake);let dirty=false,available=blocked?'awaiting-control':true,attempts=0;
+ const job=bg.registerJob('automatic',{initialDelayMs:null,discover:()=>dirty,isAvailable:()=>available,capture:()=>{},retryMs:1000,execute:async()=>{attempts++;dirty=false;return {status:'completed'};}});
+ bg.wake('startup');assert.equal(job.status().pending,false);assert.equal(fake.pending(),0);
+ dirty=true;bg.wake('permission');assert.equal(job.status().pending,true);
+ if(blocked){assert.equal(fake.pending(),0);available=true;bg.wake('control');}
+ await fake.advance(1000);await fake.drainMicrotasks(80);assert.equal(attempts,1);assert.equal(job.status().pending,false);
+ bg.wake('unchanged');await fake.advance(1000);assert.equal(attempts,1);
+ // Explicit pending intent must wake even when discovery already reports clean.
+ job.schedule(1000,'retained');bg.wake('reconnect');await fake.advance(1000);await fake.drainMicrotasks(80);assert.equal(attempts,2);
+}
+{
+ const fake=createFakeClock(),bg=coordinator(fake);let errors=0,attempts=0;
+ bg.registerJob('automatic',{initialDelayMs:null,discover:()=>{throw new Error('state unavailable');},isAvailable:()=>true,capture:()=>{errors++;},execute:async()=>{attempts++;return {status:'completed'};}});
+ bg.wake('startup');await fake.advance(1000);await fake.drainMicrotasks(80);assert.equal(errors,1);assert.equal(attempts,1,'uncertain discovery retains an execution opportunity');
+}
 console.log(JSON.stringify({status:'PASS',suite:'repository-background',sharedPolicy:true,priority:true,foregroundPreemption:true,suspensionSettlement:true,durableIntent:true,maintenanceLifecycle:true,triggerAttribution:true,integrityRecurrence:true,integrityStateFailureRetry:true},null,2));

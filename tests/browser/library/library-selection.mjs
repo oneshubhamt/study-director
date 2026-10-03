@@ -28,18 +28,18 @@ try{
     const textEl=(tag,className,text)=>{const el=document.createElement(tag);el.className=className||'';el.textContent=String(text||'');return el;};
     const no=()=>{};
     const coordinator=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('notice-coordinator',1).createCoordinator(freeze({}));
-    coordinator.subscribe(state=>{for(const event of state.events){const node=document.getElementById(event.surfaceId);if(node)node.textContent=event.message;}});
+    coordinator.subscribe(state=>{for(const event of [...state.events].sort((a,b)=>a.surfaceRevision-b.surfaceRevision)){const node=document.getElementById(event.surfaceId);if(node)node.textContent=event.message;}});
     const ports=freeze({
       notifications:coordinator.presentation('library'),
       records:freeze({get:async()=>null,list:async()=>[],remove:async()=>true,sortedSummaries:async()=>[]}),
-      domain:freeze({countTaskOutcomes:()=>0,isTrackableBlock:()=>false,isValidIsoDate:()=>false,sanitizePracticeRuns:v=>v||[],sanitizeTaskOutcomeCounts:v=>v||{},taskOutcomeSummaryText:()=>''}),
+      domain:freeze({countTaskOutcomes:()=>0,earliestSupportedSavedDate:()=> '2025-01-01',isSupportedSavedDate:()=>false,todayISO:()=> '2026-10-03',isTrackableBlock:()=>false,isValidIsoDate:()=>false,sanitizePracticeRuns:v=>v||[],sanitizeTaskOutcomeCounts:v=>v||{},taskOutcomeSummaryText:()=>''}),
       presentation:freeze({createSavedDayTaskReviewCard:()=>document.createElement('div'),createPomodoroSummaryLine:()=>document.createElement('div'),emptyMsg:text=>textEl('div','',text),optionalDurationLabel:()=>'',optionalHoursLabel:()=>'',optionalPercentLabel:()=>'',plainTextContent:v=>String(v||''),populatePracticeRunTable:no,prettyDate:v=>String(v||''),renderRichTextContent:(target,value)=>{target.textContent='PREVIEW '+String(value||'');},textEl}),
       view:freeze({document,goTab:no,setStatus:no,setTextSafe:(id,value)=>{const el=document.getElementById(id);if(el)el.textContent=String(value||'');},window}),
       interactions:freeze({confirm:async()=>false,input:async()=>null}),
       environment:freeze({cancelAnimationFrame:id=>cancelAnimationFrame(id),createOption:(text,value)=>{const option=document.createElement('option');option.text=text;option.value=value;return option;},createSearchWorker:()=>{const corpus=new Map();return {onmessage:null,onerror:null,postMessage(message){const m=message||{};if(m.type==='sync'){corpus.clear();for(const row of m.documents||[])corpus.set(String(row.key||''),String(row.plain??row.value??'').toLowerCase());return;}if(m.type==='batch'){for(const row of m.documents||[])corpus.set(String(row.key||''),String(row.plain??row.value??'').toLowerCase());return;}if(m.type==='upsert'){const row=m.document||{};corpus.set(String(row.key||''),String(row.plain??row.value??'').toLowerCase());return;}if(m.type==='delete'){corpus.delete(String(m.key||''));return;}if(m.type==='query'){const needle=String(m.query||'').toLowerCase(),keys=[...corpus].filter(([,text])=>text.includes(needle)).map(([key])=>key);queueMicrotask(()=>this.onmessage?.({data:{type:'result',id:m.id,keys}}));}},terminate(){corpus.clear();}};},requestAnimationFrame:cb=>requestAnimationFrame(cb)}),
       exporter:freeze({cancel:()=>{},exportKeys:async keys=>{window.__exports.push([...keys]);return window.__exportResult||freeze({status:'downloaded',kind:keys.length===1?'markdown':'zip',notes:keys.length,assets:0,filename:keys.length===1?'One.md':'Study-Director-Notes.zip'});}}),
-      diary:freeze({bindEditor:no,captureEditor:v=>v,clearEditor:no,commitEditor:()=>true,settled:async()=>true}),
-      notes:freeze({bindEditor:no,canCreate:()=>true,catalogue:()=>entries,clearEditor:no,commitEditor:()=>true,failure:()=>null,get:(key,label)=>freeze({key,label,text:entries.find(x=>x.key===key)?.text||''}),normalizeArea:v=>String(v||''),orderEntries:v=>v,remove:async()=>true,renderInherited:no,searchDocuments:()=>entries.filter(x=>x.text).map(x=>freeze({key:x.key,revision:'r1',value:x.text})),size:()=>entries.length}),
+      diary:freeze({bindEditor:no,captureEditor:v=>v,clearEditor:no,commitEditor:()=>true,deleteEntry:async()=>false,draft:()=>null,settled:async()=>true}),
+      notes:freeze({bindEditor:no,canCreate:()=>true,catalogue:()=>entries,clearEditor:no,commitEditor:()=>true,failure:()=>null,focusEditor:field=>field.focus(),get:(key,label)=>freeze({key,label,text:entries.find(x=>x.key===key)?.text||''}),normalizeArea:v=>String(v||''),orderEntries:v=>v,remove:async()=>true,renderInherited:no,searchDocuments:()=>entries.filter(x=>x.text).map(x=>freeze({key:x.key,revision:'r1',value:x.text})),size:()=>entries.length}),
       attachments:freeze({batch:async fn=>fn(),count:async()=>0,invalidate:()=>{},reconcile:async()=>true}),
       clearLibrary:freeze({preflight:async()=>freeze({status:'ready'}),execute:async()=>freeze({status:'cleared'})}),
       ownership:freeze({canMutate:()=>true}),
@@ -112,6 +112,7 @@ try{
   result.checks.escapeRestoresNormalEditor=true;
 
   await page.click('#library-note-select');
+  await page.click('#library-note-select-all');
   await page.evaluate(`window.__exportResult=Object.freeze({status:'too-large',notes:1,assets:0,maxBytes:128*1024*1024})`);
   await page.click('#library-note-export');
   await waitFor(()=>page.evaluate(`document.getElementById('ongoing-notes-status').textContent.includes('128 MiB safety limit')`),{label:'export resource safety message'});

@@ -44,10 +44,13 @@ try{
   await page.settle();
 
   // Coarse-pointer/mobile contract: contextual image controls must remain visibly discoverable,
-  // not merely have an invisible 44px hit box.
+  // after selecting the image with a real touch, without relying on mouse hover.
   await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:700,deviceScaleFactor:3,mobile:true});
   await page.send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:1});
   await page.settle();
+  const touch=await page.evaluate(`(()=>{const img=document.querySelector('#alt + .sd-rte img');img.scrollIntoView({block:'center'});const r=img.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`);
+  await page.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[touch]});
+  await page.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await page.settle();
   const mobileControls=await page.evaluate(`(()=>{
     const root=document.querySelector('#alt + .sd-rte'),figure=root.querySelector('.sd-rte-image');
     const probe=selector=>{const el=figure.querySelector(selector),r=el.getBoundingClientRect(),style=getComputedStyle(el);return {w:r.width,h:r.height,opacity:Number(style.opacity||1),visibility:style.visibility,display:style.display,borderWidth:parseFloat(style.borderTopWidth)||0,borderColor:style.borderTopColor,background:style.backgroundColor}};

@@ -209,7 +209,7 @@ registry.define('review',1,()=>{
     }
     function hydrateReviewState(options={}){
       const target=reviewDate(options.date||getReviewDate());
-      const review=options.snapshotReview&&typeof options.snapshotReview==='object'?options.snapshotReview:{reflection:'',studyQuality:null};
+      const review=options.snapshotReview===undefined&&persistedReview.date===target?persistedReview:options.snapshotReview&&typeof options.snapshotReview==='object'?options.snapshotReview:{reflection:'',studyQuality:null};
       const dd=document.getElementById('day-date');if(dd&&dd.value!==target)dd.value=target;
       return applyReviewState(review,target);
     }

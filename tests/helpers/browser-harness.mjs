@@ -30,6 +30,11 @@ function contentType(name){
   return 'application/octet-stream';
 }
 
+export function withoutPwaChecks(html){
+  return html.replace(/void PwaLifecycle\.install\(\)(?:\.then\(\(\)=>schedulePwaUpdateCheck\(750\)\))?;/,'/* Dedicated PWA browser tests cover installation. */')
+    .replace(/async function checkPwaUpdateIfDue\([^\n]+\)\{/,'$& return false; /* Dedicated PWA browser tests cover update checks. */');
+}
+
 export function instrumentedHtml(kind='deployment',options={}){
   const manifest=readBuildManifest();
   let html=fs.readFileSync(path.join(root,'dist',kind,manifest.main),'utf8');
@@ -37,7 +42,7 @@ export function instrumentedHtml(kind='deployment',options={}){
   if(!html.includes(marker))throw new Error(`PWA6 instrumentation marker missing from ${kind}.`);
   const exposure=`window.__PWA6=Object.freeze({StartupLifecycle,SessionLifecycle,AppOwnership,TimerState,TimerEngine,PracticePacer,Interactions,SystemNotifications,Pomodoro,NoticeCoordinator,AppData,IndexedDb,BackupController,BackupProviderRuntime,DeviceBackup,NativeCapabilities,PwaLifecycle,SessionEvidenceGateway,ReviewModel,ReviewView,ReviewEditor,LibraryView,PlanDraftEditor,applySchedule,goTab,commitTaskNoteEditor,setStudyQuality,saveDayRecord,flushLiveDraft,todayISO,readStorageHealth,loadScheduleIntoDraft,resetTodaySession,markDone,togglePause,setCurrentTask,refreshPnote,RichTextRuntime,RichTextAssets,renderRichTextContent});\n`;
   html=html.replace(marker,exposure+marker);
-  if(options.disablePwa!==false)html=html.replace(/void PwaLifecycle\.install\(\)(?:\.then\(\(\)=>schedulePwaUpdateCheck\(750\)\))?;/,'/* PWA6 instrumented runtime: sealed PWA lifecycle tested separately. */');
+  if(options.disablePwa!==false)html=withoutPwaChecks(html);
   return html;
 }
 
@@ -59,14 +64,14 @@ export async function startReleaseServer(){
       response.writeHead(failure.status||503,{'content-type':'text/plain','cache-control':'no-store'});
       response.end(failure.body||'injected network failure');return;
     }
-    if(relative==='instrumented.html'){
-      response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});
-      response.end(instrumentedHtml(kind));return;
-    }
     const override=overrides.get(pathname);
     if(override!==undefined){
       response.writeHead(200,{'content-type':contentType(relative),'cache-control':'no-store','service-worker-allowed':`/${kind}/`});
       response.end(override);return;
+    }
+    if(relative==='instrumented.html'){
+      response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});
+      response.end(instrumentedHtml(kind));return;
     }
     const base=path.resolve(root,'dist',kind),file=path.resolve(base,relative||manifest.main);
     if(!file.startsWith(base+path.sep)||!fs.existsSync(file)||!fs.statSync(file).isFile()){
@@ -147,12 +152,13 @@ export class CdpPage{
     return state;
   }
   async navigate(url){
+    const previous=await this.evaluate('performance.timeOrigin');
     const result=await this.send('Page.navigate',{url});
     if(result?.errorText)throw new Error(`Chromium navigation failed for ${url}: ${result.errorText}`);
-    await waitFor(()=>this.evaluate(`document.readyState==='complete'`),{label:`navigation ${url}`});
+    await waitFor(()=>this.evaluate(`performance.timeOrigin!==${previous}&&document.readyState==='complete'`),{label:`navigation ${url}`});
     await this.assertHealthyNavigation(url);
   }
-  async reload(){await this.send('Page.reload',{ignoreCache:false});await waitFor(()=>this.evaluate(`document.readyState==='complete'`),{label:'reload'});await this.assertHealthyNavigation('reload');}
+  async reload(){const previous=await this.evaluate('performance.timeOrigin');await this.send('Page.reload',{ignoreCache:false});await waitFor(()=>this.evaluate(`performance.timeOrigin!==${previous}&&document.readyState==='complete'`),{label:'reload'});await this.assertHealthyNavigation('reload');}
   async settle(frames=2){
     const count=Math.max(1,Math.min(8,Number(frames)||2));
     await this.evaluate(`new Promise(resolve=>{let remaining=${count};const step=()=>{remaining-=1;if(remaining<=0)resolve(true);else requestAnimationFrame(step)};requestAnimationFrame(step)})`);
@@ -162,7 +168,13 @@ export class CdpPage{
     await this.send('Emulation.setTouchEmulationEnabled',mobile?{enabled:true,maxTouchPoints:5}:{enabled:false});
   }
   async elementPoint(selector){
+    await this.evaluate(`document.querySelector(${JSON.stringify(selector)})?.scrollIntoView({block:'center',inline:'nearest'})`);
+    await this.settle();
     const point=await this.evaluate(`(()=>{const element=document.querySelector(${JSON.stringify(selector)});if(!element)throw new Error('Missing input target: '+${JSON.stringify(selector)});element.scrollIntoView({block:'nearest',inline:'nearest'});const rect=element.getBoundingClientRect(),style=getComputedStyle(element);if(rect.width<=0||rect.height<=0||style.display==='none'||style.visibility==='hidden')throw new Error('Hidden input target: '+${JSON.stringify(selector)});return {x:rect.left+rect.width/2,y:rect.top+rect.height/2};})()`);
+    await this.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:point.x,y:point.y});
+    await this.settle();
+    const hit=await this.evaluate(`(()=>{const target=document.querySelector(${JSON.stringify(selector)}),hit=document.elementFromPoint(${point.x},${point.y});return {ok:!!hit&&(hit===target||target.contains(hit)),hit:hit?.outerHTML.slice(0,300)};})()`);
+    if(!hit.ok)throw new Error(`Covered input target: ${selector}; hit=${hit.hit}`);
     return point;
   }
   async click(selector){
@@ -252,5 +264,6 @@ export async function waitForStudyDirector(page,{instrumented=false,timeout=4500
   const expression=instrumented
     ? `!!(window.StudyDirector&&window.__PWA6&&__PWA6.StartupLifecycle.status().fullyInitialized)`
     : `!!(window.StudyDirector&&document.documentElement.dataset.studyDirectorReady==='true')`;
-  return waitFor(()=>page.evaluate(expression),{timeout,label:'Study Director startup'});
+  try{return await waitFor(()=>page.evaluate(expression),{timeout,label:'Study Director startup'});}
+  catch(error){const state=await page.evaluate(`({href:location.href,startup:window.__PWA6?.StartupLifecycle.status(),lifecycle:document.documentElement.dataset.studyDirectorLifecycle,body:document.body.innerText.slice(-1500)})`).catch(()=>null);throw new Error(`${error.message}; state=${JSON.stringify(state)}; errors=${JSON.stringify(page.events)}`,{cause:error});}
 }

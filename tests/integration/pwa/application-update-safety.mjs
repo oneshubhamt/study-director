@@ -7,6 +7,7 @@ import {createHarness as repositoryHarness} from '../../helpers/repository-harne
 // these fixtures expose save failures, lock lifetime, and background drain races.
 const source=fs.readFileSync('source/app.html','utf8');
 const preparation=source.slice(source.indexOf('function pwaRecoveryReadBackIssue('),source.indexOf('function schedulePwaUpdateEvaluation('));
+const updateScheduler=source.slice(source.indexOf('function schedulePwaUpdateEvaluation('),source.indexOf('async function evaluateAutomaticPwaUpdate('));
 const scheduler=source.slice(source.indexOf('function pwaLastUpdateCheckAt('),source.indexOf('const PwaLifecycle=PwaLifecycleModule'));
 const flush=async()=>{for(let i=0;i<40;i++)await Promise.resolve();};
 function deferred(){let resolve;const promise=new Promise(yes=>{resolve=yes;});return {promise,resolve};}
@@ -22,7 +23,7 @@ function fixture(){
   const window={addEventListener(type,fn){const set=listeners.get(type)||new Set();set.add(fn);listeners.set(type,set);},removeEventListener(type,fn){listeners.get(type)?.delete(fn);}};
   const record=async label=>{calls.push(label);};
   const sandbox={console,AbortController,Promise,Date:class extends Date{static now(){return state.now;}},Object,
-    pwaUpdateReservation:null,pwaWorkRevision:0,imagePreparationCount:0,attachmentIntegrityRunning:Promise.resolve(),
+    pwaUpdateReservation:null,pwaWorkRevision:0,pwaUpdateRetryTimer:null,pwaLatestUpdateState:{updateReady:true},pwaLastEditableInputAt:0,PWA_EDIT_IDLE_MS:1800,PWA_UPDATE_SAFETY_RETRY_MS:300000,evaluateAutomaticPwaUpdate:()=>calls.push('automatic-update'),imagePreparationCount:0,attachmentIntegrityRunning:Promise.resolve(),
     OWNERSHIP_STATES:{PRIMARY:'primary',SECONDARY:'secondary'},TIMER_MODES:{RUNNING:'running'},TimerState:{paused:false,mode:'running'},TASKS:[{}],
     document:{body:element('body'),createElement:element,querySelector:()=>state.dialog?{}:null,getElementById:()=>({value:state.draft})},window,
     StartupLifecycle:{status:()=>({fullyInitialized:state.startup})},AppOwnership:{status:()=>({...state.owner})},SessionLifecycle:{status:()=>({...state.lifecycle})},
@@ -33,7 +34,7 @@ function fixture(){
     ReviewSaveService:{status:()=>({})},AttachmentLibrary:{status:()=>({busy:state.attachment})},AttachmentIngest:{status:()=>({busy:false})},Exports:{status:()=>({busy:false})},BackupController:{status:()=>({busy:false})},
     BackupProviderRuntime:{status:()=>({busy:state.providerBusy}),suspendBackground:()=>{calls.push('provider-suspend');holds.add('provider');return {settled:Promise.resolve(),release:()=>{holds.delete('provider');calls.push('provider-resume');}};}},
     DeviceBackup:{status:()=>({busy:false}),suspendAutomatic:()=>{holds.add('device');return state.device;},resumeAutomatic:()=>{holds.delete('device');calls.push('device-resume');}},
-    RichTextAssetMaintenance:{settled:()=>state.maintenance},OwnershipUiProjection:{apply(){calls.push('project');}},
+    AttachmentIntegrityJob:{settled:()=>Promise.resolve()},RichTextAssetMaintenance:{settled:()=>state.maintenance},OwnershipUiProjection:{apply(){calls.push('project');}},
     RichTextRuntime:{quiesce:async run=>{state.quiesced++;try{return await run();}finally{state.quiesced--;}}},
     quiesceManagedRecoveryRuntime:async run=>{state.quiesced++;try{return await run();}finally{state.quiesced--;}},
     PracticePacer:{status:()=>({running:state.pacer})},isLiveTrackableTimer:()=>state.timer,appCanMutate:()=>state.owner.state==='primary',pwaRecentEditableInput:()=>false,
@@ -50,7 +51,7 @@ function fixture(){
     pwaLastSuccessfulUpdateCheckMemoryAt:0,pwaUpdateCheckFailureCount:0,pwaUpdateCheckRetryAt:0,pwaUpdateCheckTimer:null,pwaUpdateCheckRunning:false,
     setTimeout:(fn,delay)=>{const id=Symbol();state.timers.set(id,{fn,delay});return id;},clearTimeout:id=>state.timers.delete(id)
   };
-  vm.createContext(sandbox);vm.runInContext(preparation+'\n'+scheduler,sandbox);
+  vm.createContext(sandbox);vm.runInContext(preparation+'\n'+updateScheduler+'\n'+scheduler,sandbox);
   const context=(extra={})=>({requestId:'request',automatic:false,external:false,signal:new AbortController().signal,...extra});
   return {state,calls,holds,sandbox,elements,listeners,context,reserve:extra=>{const ctx=context(extra);return {ctx,guard:sandbox.reserveApplicationUpdate(ctx)};}};
 }
@@ -165,5 +166,17 @@ await test('pending boot confirmation has a visible retry action and clears only
  context.renderPwaUpdateStatus({...state,checking:true,phase:'checking'});assert.equal(elements.get('pwa-update-apply').disabled,true);
  context.renderPwaUpdateStatus({...state,bootState:'confirmed',phase:'idle',message:'This window’s version is confirmed.'});assert.equal(notices.at(-1).visible,false);
  context.renderPwaUpdateStatus({...state,bootState:'confirmed',phase:'installation-failed',checkError:'network unavailable',message:'The update check failed.'});assert.equal(notices.at(-1).visible,true);assert.equal(elements.get('pwa-update-apply').textContent,'Retry update check');assert.equal(elements.get('pwa-update-message').textContent,'The update check failed.');
+});
+await test('editing idle deadline survives focus, completion, and retry scheduling in every order',async()=>{
+  for(const elapsed of [0,200,1799,1851])for(const requested of [0,250,1800,5000,300000]){
+    const h=fixture(),started=h.state.now;h.sandbox.pwaLastEditableInputAt=started;h.state.now+=elapsed;
+    h.sandbox.schedulePwaUpdateEvaluation(1850);h.sandbox.schedulePwaUpdateEvaluation(requested);
+    assert.equal(h.state.timers.size,1,'Replacing a wake-up must leave exactly one timer.');
+    const timer=[...h.state.timers.values()][0];
+    assert.equal(timer.delay,Math.max(requested,1850-elapsed,0),'A wake-up cannot precede the editing idle deadline.');
+    assert.deepEqual(h.calls,[]);timer.fn();assert.deepEqual(h.calls,['automatic-update']);
+  }
+  const h=fixture();h.sandbox.schedulePwaUpdateEvaluation(250);h.sandbox.pwaLatestUpdateState={updateReady:false};
+  assert.equal(h.sandbox.schedulePwaUpdateEvaluation(0),false);assert.equal(h.state.timers.size,0);
 });
 console.log(JSON.stringify({status:'PASS',suite:'application-update-safety',cases},null,2));

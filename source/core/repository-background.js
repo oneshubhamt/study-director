@@ -80,7 +80,7 @@ registry.define('repository-background',1,input=>{
     const environment=exactObject(input.environment,['AbortController','clearTimeout','now','setTimeout'],'Repository-background environment');
     const TargetAbortController=environment.AbortController;
     if(typeof TargetAbortController!=='function'||typeof environment.clearTimeout!=='function'||typeof environment.now!=='function'||typeof environment.setTimeout!=='function')throw new TypeError('Repository-background environment is invalid.');
-    const target=String(input.target||'repository').slice(0,80),scheduled=new Map(),active=new Map(),suspensions=new Set(),jobs=new Map(),discoverable=new Set();let foreground=null,suspensionSequence=0;
+    const target=String(input.target||'repository').slice(0,80),scheduled=new Map(),active=new Map(),suspensions=new Set(),jobs=new Map(),discoverable=new Map();let foreground=null,suspensionSequence=0;
     const nowMs=()=>{const value=Number(environment.now());return Number.isFinite(value)?value:Date.now();};
     const waitForSettlement=(waiting,signal=null)=>Lifecycle.waitForSettlement(waiting,{signal,setTimeout:environment.setTimeout,clearTimeout:environment.clearTimeout,ignoreFailures:true,timeoutCode:'REPOSITORY_BACKGROUND_UNSETTLED',timeoutMessage:'Background file work has not stopped yet. Retry after it finishes.',cancelError:()=>backgroundAbort('REPOSITORY_FOREGROUND_CANCELLED','Backup operation was cancelled.')});
     function priority(job){return PRIORITY[String(job||'')]||0;}
@@ -104,10 +104,10 @@ registry.define('repository-background',1,input=>{
       if(!priority(name)||jobs.has(name))throw new TypeError('Repository background job is invalid or already registered.');
       const {initialDelayMs=1000,discover=true,...jobPorts}=ports;
       const owned=Lifecycle.createJob({...jobPorts,onBlocked:()=>{const row=active.get(name);if(row&&!row.controller.signal.aborted)row.controller.abort(backgroundAbort(row.preemptCode,row.preemptMessage));},minDelayMs:1000,environment:freeze({now:nowMs,setTimeout:(callback,delay)=>{schedule(name,delay,callback);return scheduled.get(name);},clearTimeout:entry=>{if(scheduled.get(name)===entry)clearTimer(name);}})});
-      jobs.set(name,owned);if(discover)discoverable.add(name);if(initialDelayMs!==null)owned.schedule(initialDelayMs,'registered');return owned;
+      jobs.set(name,owned);if(discover)discoverable.set(name,()=>{try{return typeof discover==='function'?discover()===true:true;}catch(error){try{ports.capture(error);}catch{}return true;}});if(initialDelayMs!==null)owned.schedule(initialDelayMs,'registered');return owned;
     }
     function unregisterJob(name){const owned=jobs.get(name);if(!owned)return false;owned.dispose();jobs.delete(name);discoverable.delete(name);const row=active.get(name);if(row&&!row.controller.signal.aborted)row.controller.abort(backgroundAbort(row.preemptCode,row.preemptMessage));return true;}
-    function wake(reason='eligibility',discover=true){if(foreground||suspensions.size)return false;for(const [name,owned] of jobs)owned.wake(reason,discover&&discoverable.has(name)&&!owned.status().busy);resumeTimers();return true;}
+    function wake(reason='eligibility',discover=true){if(foreground||suspensions.size)return false;for(const [name,owned] of jobs)owned.wake(reason,discover&&!owned.status().busy&&discoverable.get(name)?.()===true);resumeTimers();return true;}
     function suspendTimers(){for(const entry of scheduled.values())disarm(entry);}
     function resumeTimers(){if(foreground||suspensions.size)return false;for(const entry of scheduled.values())arm(entry);return true;}
     function suspend(reason='suspended'){

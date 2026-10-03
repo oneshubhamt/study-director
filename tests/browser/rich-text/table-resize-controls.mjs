@@ -18,7 +18,7 @@ try{
   page=await browser.createPage('about:blank',{viewport:{width:1120,height:900,mobile:false,scale:1}});
   await page.evaluate(bundle,{returnByValue:false});
   await page.evaluate(`(async()=>{
-    document.body.innerHTML='<main style="display:grid;gap:24px;width:680px;margin:20px"><textarea id="table" style="height:520px">Before table</textarea><textarea id="image" style="height:420px"></textarea></main>';
+    document.body.innerHTML='<main style="display:grid;gap:24px;width:520px;margin:20px"><textarea id="table" style="height:520px">Before table</textarea><textarea id="image" style="height:420px"></textarea></main>';
     image.value=${JSON.stringify(imageValue)};
     const c=document.createElement('canvas');c.width=1000;c.height=700;c.getContext('2d').fillRect(0,0,1000,700);const blob=await new Promise(r=>c.toBlob(r,'image/png'));
     window.assets={get:async id=>id===${JSON.stringify(imageId)}?blob:null,put:async()=>{},remove:async()=>{}};
@@ -60,78 +60,22 @@ try{
   await page.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:firstCellPoint.x,y:firstCellPoint.y,button:'left',buttons:0,clickCount:1});
   await waitFor(()=>page.evaluate(`document.querySelector('#table + .sd-rte .sd-rte-toolbar-rail').scrollLeft>0`),{label:'re-enter table reveal'});
 
-  // Table-width resize: sustained movement must be monotonic and preview state must clear after one final commit.
-  const startTable=await page.evaluate(`(()=>{const field=document.querySelector('#table'),cell=[...document.querySelectorAll('#table + .sd-rte tr:first-child td')].at(-1),table=cell.closest('table'),r=cell.getBoundingClientRect();window.__tableResizeInputs=0;field.addEventListener('input',()=>window.__tableResizeInputs++);window.__tableDrag={x:r.right-1,y:r.top+r.height/2};return {width:table.getBoundingClientRect().width,stored:JSON.parse(field.value.slice(4)).doc.content.find(n=>n.type==='Table').marks.SDTableWidth}})()`);
-  await page.evaluate(`(()=>{const cell=[...document.querySelectorAll('#table + .sd-rte tr:first-child td')].at(-1);cell.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,clientX:__tableDrag.x,clientY:__tableDrag.y,pointerId:73,pointerType:'mouse',buttons:1}))})()`);
-  const tableWidths=[],tableClobberWidths=[];
-  for(const dx of [-15,-25,-35,-45,-55,-65,-75,-85]){
-    await page.evaluate(`window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,cancelable:true,clientX:__tableDrag.x+${dx},clientY:__tableDrag.y,pointerId:73,pointerType:'mouse',buttons:1}))`);
-    await page.evaluate(`new Promise(r=>requestAnimationFrame(r))`);
-    tableWidths.push(await page.evaluate(`document.querySelector('#table + .sd-rte table').getBoundingClientRect().width`));
-    // Simulate Wordgard reconciliation restoring canonical inline geometry during an active drag.
-    // Wordgard-owned transient decorations must survive reconciliation and restore the preview by the next paint.
-    await page.evaluate(`(()=>{const table=document.querySelector('#table + .sd-rte table');table.style.width=${JSON.stringify(String(startTable.stored)+'%')}})()`);
-    await page.evaluate(`new Promise(r=>requestAnimationFrame(r))`);
-    tableClobberWidths.push(await page.evaluate(`document.querySelector('#table + .sd-rte table').getBoundingClientRect().width`));
-  }
-  for(let i=1;i<tableWidths.length;i++)assert.ok(tableWidths[i]<=tableWidths[i-1]+1,`Table width preview snapped during drag: ${tableWidths.join(', ')}`);
-  assert.ok(tableWidths.every(width=>Math.abs(width-startTable.width)>3),'Table resize preview must not transiently return to its starting geometry.');
-  tableClobberWidths.forEach((width,index)=>assert.ok(Math.abs(width-tableWidths[index])<=1.5,`Table preview was not repaired after canonical-style clobber: preview=${tableWidths[index]}, repaired=${width}`));
-  const duringTable=await page.evaluate(`(()=>{const root=document.querySelector('#table + .sd-rte'),stored=JSON.parse(document.querySelector('#table').value.slice(4)).doc.content.find(n=>n.type==='Table').marks.SDTableWidth;return {mode:root.querySelector('.sd-rte-wordgard').dataset.sdTableResizing,stored,inputs:window.__tableResizeInputs}})()`);
-  assert.equal(duringTable.mode,'table');
-  assert.equal(duringTable.stored,startTable.stored,'Table resize must remain non-persistent until pointer-up.');
-  assert.equal(duringTable.inputs,0,'Transient table-resize effects must not emit host input events before pointer-up.');
-  await page.evaluate(`window.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,cancelable:true,clientX:__tableDrag.x-85,clientY:__tableDrag.y,pointerId:73,pointerType:'mouse',buttons:0}))`);
-  await page.evaluate(`new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))`);
-  const committedTable=await page.evaluate(`(()=>{const root=document.querySelector('#table + .sd-rte'),node=JSON.parse(document.querySelector('#table').value.slice(4)).doc.content.find(n=>n.type==='Table');return {stored:node.marks.SDTableWidth,mode:root.querySelector('.sd-rte-wordgard').dataset.sdTableResizing||'',inputs:window.__tableResizeInputs}})()`);
-  assert.notEqual(committedTable.stored,startTable.stored);
-  assert.equal(committedTable.mode,'');
-  assert.equal(committedTable.inputs,1,'Table resize must emit exactly one host input event for the final document commit.');
-
-  // Column and row resizing use the same Wordgard transient-decoration path and remain monotonic.
-  const colStart=await page.evaluate(`(()=>{const cell=document.querySelector('#table + .sd-rte tr:first-child td:first-child'),r=cell.getBoundingClientRect();window.__colDrag={x:r.right-1,y:r.top+r.height/2};return [...document.querySelectorAll('#table + .sd-rte tr:first-child td')].map(c=>c.getBoundingClientRect().width)})()`);
-  await page.evaluate(`document.querySelector('#table + .sd-rte tr:first-child td:first-child').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,clientX:__colDrag.x,clientY:__colDrag.y,pointerId:74,pointerType:'mouse',buttons:1}))`);
-  const colWidths=[],colClobberWidths=[];
-  for(const dx of [18,32,46]){await page.evaluate(`window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,cancelable:true,clientX:__colDrag.x+${dx},clientY:__colDrag.y,pointerId:74,pointerType:'mouse',buttons:1}))`);await page.evaluate(`new Promise(r=>requestAnimationFrame(r))`);colWidths.push(await page.evaluate(`document.querySelector('#table + .sd-rte tr:first-child td:first-child').getBoundingClientRect().width`));await page.evaluate(`(()=>{const cells=[...document.querySelectorAll('#table + .sd-rte tr:first-child td')];cells[0].style.width='50%';cells[1].style.width='50%'})()`);await page.evaluate(`new Promise(r=>requestAnimationFrame(r))`);colClobberWidths.push(await page.evaluate(`document.querySelector('#table + .sd-rte tr:first-child td:first-child').getBoundingClientRect().width`));}
-  for(let i=1;i<colWidths.length;i++)assert.ok(colWidths[i]>=colWidths[i-1]-1,`Column preview snapped: ${colWidths.join(', ')}`);
-  colClobberWidths.forEach((width,index)=>assert.ok(Math.abs(width-colWidths[index])<=1.5,`Column preview was not repaired after style clobber: preview=${colWidths[index]}, repaired=${width}`));
-  assert.ok(colWidths.at(-1)>colStart[0]+3);
-  await page.evaluate(`window.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,cancelable:true,clientX:__colDrag.x+46,clientY:__colDrag.y,pointerId:74,pointerType:'mouse',buttons:0}))`);
-  await page.evaluate(`new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))`);
-
-  const rowStart=await page.evaluate(`(()=>{const cell=document.querySelector('#table + .sd-rte tr:first-child td:first-child'),r=cell.getBoundingClientRect();window.__rowDrag={x:r.left+r.width/2,y:r.bottom-1};return r.height})()`);
-  await page.evaluate(`document.querySelector('#table + .sd-rte tr:first-child td:first-child').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,clientX:__rowDrag.x,clientY:__rowDrag.y,pointerId:75,pointerType:'mouse',buttons:1}))`);
-  const rowHeights=[],rowClobberHeights=[];
-  for(const dy of [12,24,36]){await page.evaluate(`window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,cancelable:true,clientX:__rowDrag.x,clientY:__rowDrag.y+${dy},pointerId:75,pointerType:'mouse',buttons:1}))`);await page.evaluate(`new Promise(r=>requestAnimationFrame(r))`);rowHeights.push(await page.evaluate(`document.querySelector('#table + .sd-rte tr:first-child td:first-child').getBoundingClientRect().height`));await page.evaluate(`document.querySelectorAll('#table + .sd-rte tr:first-child td').forEach(cell=>cell.style.height=${JSON.stringify(String(rowStart)+'px')})`);await page.evaluate(`new Promise(r=>requestAnimationFrame(r))`);rowClobberHeights.push(await page.evaluate(`document.querySelector('#table + .sd-rte tr:first-child td:first-child').getBoundingClientRect().height`));}
-  for(let i=1;i<rowHeights.length;i++)assert.ok(rowHeights[i]>=rowHeights[i-1]-1,`Row preview snapped: ${rowHeights.join(', ')}`);
-  rowClobberHeights.forEach((height,index)=>assert.ok(Math.abs(height-rowHeights[index])<=1.5,`Row preview was not repaired after style clobber: preview=${rowHeights[index]}, repaired=${height}`));
-  assert.ok(rowHeights.at(-1)>rowStart+3);
-  await page.evaluate(`window.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,cancelable:true,clientX:__rowDrag.x,clientY:__rowDrag.y+36,pointerId:75,pointerType:'mouse',buttons:0}))`);
-  await page.evaluate(`new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))`);
-
-  // Repeated same-instance resize stress: alternate table width in both directions while deliberately
-  // restoring canonical geometry mid-drag. This catches intermittent reconciliation snap-back without
-  // conflating production behavior with repeated Chromium process startup.
+  // Only column proportions are resizable. Whole-table width and row height
+  // are responsive/content-driven, rather than retired fixed geometry marks.
   const stressCycles=[];
   for(let cycle=0;cycle<12;cycle++){
     const pointerId=100+cycle,dx=cycle%2===0?-24:24;
-    const start=await page.evaluate(`(()=>{const cell=[...document.querySelectorAll('#table + .sd-rte tr:first-child td')].at(-1),table=cell.closest('table'),r=cell.getBoundingClientRect(),stored=JSON.parse(document.querySelector('#table').value.slice(4)).doc.content.find(n=>n.type==='Table').marks.SDTableWidth;window.__stressDrag={x:r.right-1,y:r.top+r.height/2};return {width:table.getBoundingClientRect().width,stored}})()`);
-    await page.evaluate(`(()=>{const cell=[...document.querySelectorAll('#table + .sd-rte tr:first-child td')].at(-1);cell.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,clientX:__stressDrag.x,clientY:__stressDrag.y,pointerId:${pointerId},pointerType:'mouse',buttons:1}))})()`);
-    await page.evaluate(`window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,cancelable:true,clientX:__stressDrag.x+${dx},clientY:__stressDrag.y,pointerId:${pointerId},pointerType:'mouse',buttons:1}))`);
-    await page.evaluate(`new Promise(r=>requestAnimationFrame(r))`);
-    const preview=await page.evaluate(`document.querySelector('#table + .sd-rte table').getBoundingClientRect().width`);
-    assert.ok(Math.abs(preview-start.width)>2,`Stress cycle ${cycle+1} did not produce a visible table-width preview.`);
-    await page.evaluate(`document.querySelector('#table + .sd-rte table').style.width=${JSON.stringify(String(start.stored)+'%')}`);
-    await page.evaluate(`new Promise(r=>requestAnimationFrame(r))`);
-    const repaired=await page.evaluate(`document.querySelector('#table + .sd-rte table').getBoundingClientRect().width`);
-    assert.ok(Math.abs(repaired-preview)<=1.5,`Stress cycle ${cycle+1} snapped after canonical-style clobber: preview=${preview}, repaired=${repaired}`);
-    const storedDuring=await page.evaluate(`JSON.parse(document.querySelector('#table').value.slice(4)).doc.content.find(n=>n.type==='Table').marks.SDTableWidth`);
-    assert.equal(storedDuring,start.stored,`Stress cycle ${cycle+1} persisted before pointer-up.`);
-    await page.evaluate(`window.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,cancelable:true,clientX:__stressDrag.x+${dx},clientY:__stressDrag.y,pointerId:${pointerId},pointerType:'mouse',buttons:0}))`);
-    await page.evaluate(`new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))`);
-    const storedAfter=await page.evaluate(`JSON.parse(document.querySelector('#table').value.slice(4)).doc.content.find(n=>n.type==='Table').marks.SDTableWidth`);
-    assert.notEqual(storedAfter,start.stored,`Stress cycle ${cycle+1} did not commit on pointer-up.`);
-    stressCycles.push({cycle:cycle+1,preview,repaired});
+    const start=await page.evaluate(`(()=>{const cell=document.querySelector('#table + .sd-rte td'),r=cell.getBoundingClientRect(),widths=JSON.parse(table.value.slice(4)).doc.content.find(n=>n.type==='Table').content[0].content.map(c=>c.marks.SDCellWidth);window.__stressDrag={x:r.right-1,y:r.top+r.height/2};window.__resizeInputs=0;return {width: r.width,widths}})()`);
+    await page.evaluate(`document.querySelector('#table + .sd-rte td').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,clientX:__stressDrag.x,clientY:__stressDrag.y,pointerId:${pointerId},pointerType:'mouse',buttons:1}))`);
+    await page.evaluate(`window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,cancelable:true,clientX:__stressDrag.x+${dx},clientY:__stressDrag.y,pointerId:${pointerId},pointerType:'mouse',buttons:1}))`);await page.settle();
+    const preview=await page.evaluate(`document.querySelector('#table + .sd-rte td').getBoundingClientRect().width`);
+    assert.ok(Math.abs(preview-start.width)>2,'Column drag must produce a visible preview');
+    await page.evaluate(`document.querySelector('#table + .sd-rte td').style.width=${JSON.stringify(String(50)+'%')}`);await page.settle();
+    const repaired=await page.evaluate(`document.querySelector('#table + .sd-rte td').getBoundingClientRect().width`);
+    assert.ok(Math.abs(repaired-preview)<=1.5,'Transient column decorations must survive DOM reconciliation');
+    const during=await page.evaluate(`JSON.parse(table.value.slice(4)).doc.content.find(n=>n.type==='Table').content[0].content.map(c=>c.marks.SDCellWidth)`);assert.deepEqual(during,start.widths);
+    await page.evaluate(`window.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,cancelable:true,clientX:__stressDrag.x+${dx},clientY:__stressDrag.y,pointerId:${pointerId},pointerType:'mouse',buttons:0}))`);await page.settle();
+    const after=await page.evaluate(`JSON.parse(table.value.slice(4)).doc.content.find(n=>n.type==='Table').content[0].content.map(c=>c.marks.SDCellWidth)`);assert.notDeepEqual(after,start.widths);assert.ok(Math.abs(after.reduce((sum,n)=>sum+n,0)-100)<0.05);stressCycles.push({cycle,preview,repaired});
   }
 
   // Image-resize atomic interaction: even if the previous caret was in a bullet list, list controls must
@@ -149,8 +93,10 @@ try{
   // Mobile: contextual tools remain distinct, auto-reveal inside the toolbar, and retain 44px targets.
   await page.setViewport({width:390,height:844,mobile:true,scale:1});
   await page.evaluate(`document.querySelector('main').style.width='350px';const toolbar=document.querySelector('#table + .sd-rte .sd-rte-toolbar-rail');toolbar.scrollLeft=0`);
+  await page.evaluate(`document.querySelector('#table + .sd-rte .sd-rte-editor > p').scrollIntoView({block:'center'})`);await page.settle();
   const mobileParagraph=await page.evaluate(`(()=>{const r=document.querySelector('#table + .sd-rte .sd-rte-editor > p').getBoundingClientRect();return {x:r.left+8,y:r.top+r.height/2}})()`);
   await page.send('Input.dispatchMouseEvent',{type:'mousePressed',x:mobileParagraph.x,y:mobileParagraph.y,button:'left',buttons:1,clickCount:1});await page.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:mobileParagraph.x,y:mobileParagraph.y,button:'left',buttons:0,clickCount:1});
+  await waitFor(()=>page.evaluate(`document.querySelector('#table + .sd-rte .sd-rte-table-tools').hidden`));await page.evaluate(`document.querySelector('#table + .sd-rte td').scrollIntoView({block:'center'})`);await page.settle();
   const mobileCell=await page.evaluate(`(()=>{const r=document.querySelector('#table + .sd-rte td').getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`);
   await page.send('Input.dispatchMouseEvent',{type:'mousePressed',x:mobileCell.x,y:mobileCell.y,button:'left',buttons:1,clickCount:1});await page.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:mobileCell.x,y:mobileCell.y,button:'left',buttons:0,clickCount:1});
   await waitFor(()=>page.evaluate(`document.querySelector('#table + .sd-rte .sd-rte-toolbar-rail').scrollLeft>0`),{label:'mobile table tool reveal'});
@@ -175,5 +121,5 @@ try{
   assert.deepEqual(remountedWidths,touchCommitted,'Touch-resized column widths must survive serialization and editor remount.');
 
   assert.deepEqual(page.events,[],'QA_FIXTURE table-resize/control browser test produced runtime errors.');
-  console.log(JSON.stringify({status:'PASS',suite:'table-resize-controls',revealed,tableWidths,tableClobberWidths,colWidths,colClobberWidths,rowHeights,rowClobberHeights,stressCycles,listDuringImage,mobile},null,2));
+  console.log(JSON.stringify({status:'PASS',suite:'table-resize-controls',revealed,stressCycles,listDuringImage,mobile},null,2));
 }finally{if(page)await browser.closePage(page).catch(()=>{});await browser.close()}

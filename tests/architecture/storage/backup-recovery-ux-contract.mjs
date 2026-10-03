@@ -57,8 +57,8 @@ assert.match(app,/recoveryActive=state\.busy===true&&\['history','restore-versio
 assert.match(device,/async function refreshPermission\(\)[\s\S]*queryPermission\(directoryHandle\)[\s\S]*mode='permission'/u,'Device Folder must re-check persisted directory permission without prompting automatically.');
 assert.doesNotMatch(device,/if\(handle\)\{[\s\S]{0,300}storage\.remove\(config\.metadataKey\)/u,'temporary Device Folder permission loss must never discard the configured directory handle.');
 assert.match(app,/connect\.textContent=state\.mode==='permission'\?'Allow access':'Choose folder…'/u,'configured Device Folder permission renewal must be presented as Allow access rather than folder reselection.');
-assert.match(app,/AppActivation\.subscribe\(event=>\{void handleDeviceIntegrityActivation\(event\)/u,'foreground return must delegate to the permission and integrity opportunity handler.');
-const deviceActivation=app.slice(app.indexOf('async function handleDeviceIntegrityActivation('),app.indexOf('AppActivation.subscribe(event=>{void handleDeviceIntegrityActivation('));
+assert.match(app,/AppActivation\.subscribe\(event=>\{[^\n]*void refreshDeviceBackgroundPermission\(event\)/u,'foreground return must delegate to the permission and integrity opportunity handler.');
+const deviceActivation=app.slice(app.indexOf('async function refreshDeviceBackgroundPermission('),app.indexOf('AppActivation.subscribe(',app.indexOf('async function refreshDeviceBackgroundPermission(')));
 assert.match(deviceActivation,/DeviceBackup\.refreshPermission\(\)/u,'foreground return must refresh Device Folder permission state without opening a permission prompt.');
 assert.doesNotMatch(deviceActivation,/requestPermission|DeviceBackup\.connect\(/u,'activation opportunities must not prompt for folder access.');
 

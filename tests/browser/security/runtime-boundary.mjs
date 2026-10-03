@@ -13,7 +13,7 @@ if(process.env.SD_MINIFIED_TEST==='1'){
  const expose=html.match(/window\.__PWA6=Object\.freeze\(\{[^;]+;\n/)[0];
  html=fs.readFileSync(path.join(root,'index.html'),'utf8').replace('window.StudyDirector=StudyDirectorPublicAPI;',expose+'window.StudyDirector=StudyDirectorPublicAPI;').replace(/void PwaLifecycle\.install\(\)(?:\.then\(\(\)=>schedulePwaUpdateCheck\(750\)\))?;/,'');
 }
-server.setOverride('deployment','runtime-security.html',html.replace('<head>','<head><meta http-equiv="Content-Security-Policy" content="'+policy+'">').replace('Object.freeze({StartupLifecycle,','Object.freeze({mutateBackupProtection,readAppMetaValue,trustedAssetURL,trustedTypeViolations,StartupLifecycle,'));
+server.setOverride('deployment','runtime-security.html',html.replace('<head>','<head><meta http-equiv="Content-Security-Policy" content="'+policy+'">').replace('Object.freeze({StartupLifecycle,','Object.freeze({mutateBackupProtection,ExportsAppMeta,trustedAssetURL,trustedTypeViolations,StartupLifecycle,'));
 const preload=`(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'Security QA',updatedAt:d.toISOString()}));localStorage.setItem('studyDirector.nameSetupSkippedDate.v1',today);})();`;
 let page;
 try{
@@ -26,9 +26,9 @@ try{
  const policyWrites=await page.evaluate(`(async()=>{
    const mutate=__PWA6.mutateBackupProtection,record={version:1,id:'qa-policy',verifier:new Blob(['proof'])};
    const writes=await Promise.allSettled([mutate(record,{expectedId:'',check(){}}),mutate({...record,id:'stale-policy'},{expectedId:'',check(){}})]);
-   const current=await __PWA6.readAppMetaValue('backupProtection');
+   const current=await __PWA6.ExportsAppMeta.read('backupProtection');
    const refused=await mutate(null,{expectedId:current.id,check(){throw Error('ownership lost')}}).then(()=>false,()=>true);
-   const retained=(await __PWA6.readAppMetaValue('backupProtection')).id===current.id;
+   const retained=(await __PWA6.ExportsAppMeta.read('backupProtection')).id===current.id;
    await mutate(null,{expectedId:current.id,check(){}});
    return {commits:writes.filter(x=>x.status==='fulfilled').length,refused,retained};
  })()`);

@@ -1,3 +1,4 @@
+import {withoutPwaChecks} from '../../helpers/browser-harness.mjs';
 import assert from 'node:assert/strict';
 import {artifactPath,writeArtifact} from '../../helpers/artifacts.mjs';
 import fs from 'node:fs';
@@ -16,7 +17,7 @@ const exposure=`window.__DeviceBackupDebug=Object.freeze({DeviceBackup,BackupCon
 let main=fs.readFileSync(path.join(deployment,manifest.main),'utf8');
 if(!main.includes(marker))throw new Error('Device-backup browser harness hook is unavailable.');
 main=main.replace(marker,exposure+marker);
-main=main.replace('void PwaLifecycle.install();','/* Service-worker behavior is covered by the dedicated PWA browser gate. */');
+main=withoutPwaChecks(main);
 
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function waitFor(fn,{timeout=60000,interval=100,label='condition'}={}){
@@ -117,7 +118,7 @@ try{
   })()`);
   assert.equal(startup.supported,true);assert.equal(startup.mode,'off');assert.equal(startup.label,'Off');
   assert.deepEqual(startup.fileActions,['Export backup…','Import backup…']);
-  assert.equal(startup.recoverLabel,'Recover…');assert.equal(startup.recoverHidden,true,'Device recovery should appear only after a folder is connected');
+  assert.equal(startup.recoverLabel,'Versions');assert.equal(startup.recoverHidden,true,'Device recovery should appear only after a folder is connected');
   assert.equal(startup.advancedOpen,false);assert.deepEqual(startup.locationBadges,['Primary','Optional']);
   assert.equal(startup.pickerCalls,0,'startup invoked the folder picker');
   evidence.checks.startup={off:true,noPrompt:true,manualBackupPreserved:true};
@@ -133,7 +134,7 @@ try{
     return {checkpointNames,objectNames:objectNames.sort(),size:file.size,format:manifest.format,version:manifest.version,pickerCalls:__devicePickerCalls(),status:document.getElementById('device-backup-status').textContent.trim()};
   })()`);
   assert.equal(first.checkpointNames.length,1);assert.match(first.checkpointNames[0],/^cp_[a-f0-9]{32}\.sdcheckpoint$/u);
-  assert.ok(first.size>0);assert.equal(first.format,'study-director.backup-repository-checkpoint');assert.equal(first.version,4);assert.ok(first.objectNames.length>0);assert.equal(first.pickerCalls,1);assert.match(first.status,/^On(?:\s|$)/);
+  assert.ok(first.size>0);assert.equal(first.format,'study-director.backup-repository-checkpoint');assert.equal(first.version,5);assert.ok(first.objectNames.length>0);assert.equal(first.pickerCalls,1);assert.match(first.status,/^On(?:\s|$)/);
 
   await page.evaluate(`document.getElementById('device-backup-now').click()`);
   await waitFor(()=>page.evaluate(`(()=>{const state=__DeviceBackupDebug.DeviceBackup.status();return !state.busy&&state.checkpointCount===2&&/^cp_[a-f0-9]{32}\.sdcheckpoint$/.test(state.lastFilename||'');})()`),{timeout:90000,label:'second verified repository checkpoint'});
@@ -152,28 +153,32 @@ try{
   })()`);
   assert.equal(scheduleApplied,true);
   await waitFor(()=>page.evaluate(`__DeviceBackupDebug.TimerState.mode===__DeviceBackupDebug.TIMER_MODES.RUNNING`),{label:'running completion test timer'});
+  const beforeCompletion=await page.evaluate(`__DeviceBackupDebug.DeviceBackup.status().lastBackupAt`);
   await page.evaluate(`document.querySelector('[data-action="mark-done"]').click()`);
-  await waitFor(()=>page.evaluate(`(()=>{const state=__DeviceBackupDebug.DeviceBackup.status();return !state.busy&&state.checkpointCount>=3&&/^cp_[a-f0-9]{32}\.sdcheckpoint$/.test(state.lastFilename||'');})()`),{timeout:90000,label:'task-completion early repository backup'});
+  await waitFor(()=>page.evaluate(`(()=>{const state=__DeviceBackupDebug.DeviceBackup.status();return !state.busy&&state.checkpointCount>=1&&state.lastBackupAt>${JSON.stringify(beforeCompletion)}&&/^cp_[a-f0-9]{32}\.sdcheckpoint$/.test(state.lastFilename||'');})()`),{timeout:90000,label:'task-completion early repository backup'});
   evidence.checks.importantEvent={taskCompletionEarlyBackup:true};
 
+  const priorDocument=await page.evaluate('performance.timeOrigin');
   await page.send('Page.reload',{ignoreCache:true});
+  await waitFor(()=>page.evaluate(`performance.timeOrigin!==${priorDocument}&&document.readyState==='complete'`),{label:'new document after reload'});
   await waitFor(()=>page.evaluate(`!!window.__DeviceBackupDebug&&__DeviceBackupDebug.StartupLifecycle.status().fullyInitialized`),{label:'reload startup'});
-  await waitFor(()=>page.evaluate(`__DeviceBackupDebug.DeviceBackup.status().connected===true`),{label:'stored handle restoration'});
+  await waitFor(()=>page.evaluate(`__DeviceBackupDebug.DeviceBackup.status().connected===true&&/^On(?:\\s|$)/.test(document.getElementById('device-backup-status').textContent.trim())`),{label:'stored handle restoration'});
   const restored=await page.evaluate(`({pickerCalls:__devicePickerCalls(),state:__DeviceBackupDebug.DeviceBackup.status(),label:document.getElementById('device-backup-status').textContent.trim()})`);
   assert.equal(restored.pickerCalls,1,'reload prompted for a folder again');
   assert.equal(restored.state.permission,'granted');assert.match(restored.label,/^On(?:\s|$)/);
   evidence.checks.restart={handleRestored:true,noPrompt:true,lastBackupRetained:true};
 
+  await page.send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5});
   await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
   await sleep(250);
   const mobile=await page.evaluate(`(()=>{
     document.querySelector('[data-tab="library"]').click();document.querySelector('.library-data-drawer').open=true;
-    const row=document.getElementById('device-backup-status').closest('.backup-compact-row').getBoundingClientRect();
-    return {overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,row:{left:row.left,right:row.right,width:row.width},viewport:innerWidth,buttons:[...document.querySelectorAll('#device-backup-actions button:not([hidden])')].map(button=>({text:button.textContent.trim(),height:button.getBoundingClientRect().height}))};
+    const row=document.getElementById('device-backup-status').closest('.backup-location-row').getBoundingClientRect();
+    return {overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,row:{left:row.left,right:row.right,width:row.width},viewport:innerWidth,buttons:[...document.querySelectorAll('#device-backup-actions button:not([hidden])')].filter(button=>button.getClientRects().length>0).map(button=>({text:button.textContent.trim(),height:button.getBoundingClientRect().height}))};
   })()`);
   assert.ok(mobile.overflow<=1,`390px device-backup surface overflowed by ${mobile.overflow}px`);
   assert.ok(mobile.row.left>=-1&&mobile.row.right<=mobile.viewport+1,'device-backup row escaped the phone viewport');
-  assert.ok(mobile.buttons.every(button=>button.height>=44),'device-backup phone actions are below the touch target');
+  assert.ok(mobile.buttons.every(button=>button.height>=44),'device-backup phone actions are below the touch target: '+JSON.stringify(mobile.buttons));
   evidence.checks.mobile={contained:true,touchTargets:true};
 
   await page.evaluate(`document.getElementById('disconnect-device-backup').click()`);
@@ -192,5 +197,5 @@ try{
 }finally{
   try{page.close();}catch{}
   browser.kill('SIGTERM');await Promise.race([new Promise(resolve=>browser.once('exit',resolve)),sleep(3000)]);
-  server.close();fs.rmSync(profile,{recursive:true,force:true});
+  server.close();fs.rmSync(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});
 }

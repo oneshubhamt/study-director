@@ -60,7 +60,7 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
   const normalizeTs=(value,fallback='')=>{const parsed=Date.parse(String(value||''));return Number.isFinite(parsed)?new Date(parsed).toISOString():fallback};
   const installationIdentity=freeze({format:'study-director.installation-identity',contractVersion:3,getId:()=> 'inst_test'});
   const KeyedRecord=freeze({create:()=>Object.create(null),clone:value=>Object.assign(Object.create(null),structuredClone(value||{}))});
-  const dailyRecordCodec=freeze({
+  const dailyRecordCodec=controls.dailyRecordCodec||freeze({
     buildDailyRecordSummary:v=>v,
     sanitizeCurrentDailyRecord:v=>v&&typeof v==='object'&&Number(v.version)===1?v:null,
     sanitizeCurrentAreaNote:(source,key)=>source&&typeof source==='object'&&Number(source.version)===2?{version:2,key:String(source.key??key??''),label:String(source.label??source.key??key??''),text:String(source.text??''),updatedAt:String(source.updatedAt??'')}:null,
@@ -108,4 +108,3 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
   const app=module.createAppData(freeze({local,indexedDb,appMeta:repositoryMeta,compatibilityAppMeta:compatibilityMeta,installationIdentity,dailyRecordCodec,activeSessionCodec,compatibilityCodec,personalDataCodec,keyedRecord:KeyedRecord,journals,areaNotesRepositoryModule:areaNotesModule,clock:decisionClock,limits,dataContract,stores:freeze({dailyRecords:'daily',dailySummaries:'summary',areaNotes:'area',activeSessions:'session',appMeta:'meta'}),legacyStores:freeze({syncQueue:'sync',tombstones:'tombstones'}),keys:freeze({recovery:'recovery',fallbackDailyRecords:'fallback',areaNoteRescue:'areaNoteRescue',deletionRecovery:'deletionRecovery',legacySyncEmergency:'syncEmergency'}),legacyKeys:freeze({areaNotesPending:'pending'}),metaKeys,obsoleteMetaKeys,activeSessionId:'active',helpers,hooks}));
   return {app,appMetaGateway:gateway,repositoryMeta,compatibilityMeta,journalMeta,indexedDb,localWrites,idbWrites,idbReads,idbDurability,validationCalls,sharedLocal,stores};
 }
-

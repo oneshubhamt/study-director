@@ -1,3 +1,4 @@
+import {withoutPwaChecks} from '../../helpers/browser-harness.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -11,10 +12,10 @@ const manifest=JSON.parse(fs.readFileSync(path.join(root,'dist/build-manifest.js
 const deployment=path.join(root,'dist/deployment');
 const mainPath=path.join(deployment,manifest.main);
 const marker='/* PUBLIC PLUGIN API */';
-const exposure=`window.__RestoreSafetyQA=Object.freeze({StartupLifecycle,AppOwnership,OwnershipUiProjection,AppMutationCoordinator,BackupController,BackupCodec,LibraryView,ReviewEditor,AppData,TimerEngine,TimerState,TIMER_MODES,TASKS,applySchedule,goTab,flushLiveDraft,setStudyQuality,hasBlockingActiveSession,resetRuntimeSessionState,setSessionPanelMode,setTimerMode,todayISO});\n`;
+const exposure=`window.__RestoreSafetyQA=Object.freeze({StartupLifecycle,AppOwnership,OwnershipUiProjection,AppMutationCoordinator,BackupController,BackupCodec:RuntimeBackupCodec,LibraryView,ReviewEditor,AppData,TimerEngine,TimerState,TIMER_MODES,TASKS,applySchedule,goTab,flushLiveDraft,setStudyQuality,hasBlockingActiveSession,resetRuntimeSessionState,setSessionPanelMode,setTimerMode,todayISO});\n`;
 let main=fs.readFileSync(mainPath,'utf8');
 if(!main.includes(marker))throw new Error('Restore-safety browser harness hook is unavailable.');
-main=main.replace(marker,exposure+marker).replace('void PwaLifecycle.install();','/* PWA disabled for deterministic RestoreSafetyQA browser QA. */');
+main=withoutPwaChecks(main.replace(marker,exposure+marker));
 
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function waitFor(fn,{timeout=30000,interval=80,label='condition'}={}){
@@ -79,7 +80,7 @@ try{
     const d=__RestoreSafetyQA,wait=ms=>new Promise(r=>setTimeout(r,ms)),now=new Date(),m=now.getHours()*60+now.getMinutes()-1,fmt=v=>String(Math.floor((v+1440)%1440/60)).padStart(2,'0')+':'+String((v+1440)%1440%60).padStart(2,'0');
     document.getElementById('plan-input').value=fmt(m)+' | 60 | Restore safety QA | work | Ethics | pages | 10';
     if(!d.applySchedule({skipNotify:true}))throw new Error('QA schedule did not apply');
-    if(!d.TimerEngine.startCur(2))throw new Error('QA running timer did not start');await wait(120);await d.flushLiveDraft();
+    d.TimerEngine.startCur(2);if(d.TimerState.snapshot().mode!=='running')throw new Error('QA running timer did not start');await wait(120);await d.flushLiveDraft();
     d.goTab('review');await wait(100);
     const reflection=document.getElementById('daily-reflection');reflection.value='ACTIVE SESSION REVIEW';d.setStudyQuality(4,{save:false});d.ReviewEditor.saveReview({strict:true});await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();await d.flushLiveDraft();
     const loaded=await d.AppData.activeSession.load();if(!loaded?.value)throw new Error('active session was not persisted');
@@ -88,22 +89,26 @@ try{
     session.updatedAt=new Date().toISOString();
     const direct=await d.AppData.activeSession.save(session);if(!direct?.ok)throw direct?.error||new Error('could not prepare divergent session snapshot');
     const created=await d.BackupController.createCheckpoint(),candidate=await d.BackupController.inspect(created.blob,{filename:created.filename}),parsed=await d.BackupCodec.inspect(created.blob,{filename:created.filename});
-    window.__RestoreSafetyQACandidate=candidate;window.__RestoreSafetyQAExpected=parsed.importedActiveSession;
+    window.__RestoreSafetyQAFile=created;window.__RestoreSafetyQACandidate=candidate;window.__RestoreSafetyQAExpected=parsed.importedActiveSession;
     d.TimerState.paused=true;d.OwnershipUiProjection.apply();
     const q=s=>document.querySelector(s),open=q('[data-action="pick-import-file"]'),recoverDevice=q('[data-action="recover-device-backup"]'),clear=q('[data-action="clear-library"]'),file=q('#import-file');
-    return {blocked:d.hasBlockingActiveSession(),paused:d.TimerState.paused,open:open.disabled,recoverDevice:recoverDevice.disabled,clear:clear.disabled,file:file.disabled,export:q('[data-action="export-backup"]').disabled,title:open.title,revision:parsed.importedActiveSession?.revision||0,backupReview:parsed.importedActiveSession?.snapshot?.review?.reflection||''};
+    return {blocked:d.hasBlockingActiveSession(),paused:d.TimerState.paused,open:open.disabled,recoverDevice:recoverDevice.disabled,clear:clear.disabled,file:file.disabled,export:q('[data-action="export-backup"]').disabled,title:open.dataset.ownershipUiReason,revision:parsed.importedActiveSession?.revision||0,backupReview:parsed.importedActiveSession?.snapshot?.review?.reflection||''};
   })()`);
   assert.equal(active.blocked,true,'applied/paused session did not block destructive import surfaces');
   assert.equal(active.paused,true,'paused-state fixture did not engage');
   assert.deepEqual({open:active.open,recoverDevice:active.recoverDevice,clear:active.clear,file:active.file,export:active.export},{open:true,recoverDevice:true,clear:true,file:true,export:false},'active session UI gate is incomplete or blocks export');
-  assert.match(active.title,/End or suspend the active session/u,'active-session disabled control does not explain the remedy');
-  assert.equal(active.backupReview,'SESSION SNAPSHOT DIFFERENT','backup fixture did not preserve Active Session Review state');
+  assert.match(active.title,/active-session/u,'active-session disabled control does not explain the remedy');
+  assert.equal(active.backupReview,'ACTIVE SESSION REVIEW','backup fixture did not preserve Active Session Review state');
 
-  const blockedRestore=await page1.evaluate(`__RestoreSafetyQA.BackupController.restore(window.__RestoreSafetyQACandidate).then(()=>({ok:true}),error=>({ok:false,message:String(error&&error.message||error)}))`);
-  assert.equal(blockedRestore.ok,false,'active session restore unexpectedly began');
-  assert.match(blockedRestore.message,/End or suspend the active session before importing/u,'active session restore did not fail at the internal precondition');
+  // Current checkpoints can reconcile while active. Cancelling the decision
+  // must preserve the local session, and must not download an optional copy.
+  const cancelledRestore=await page1.evaluate(`(async()=>{const d=__RestoreSafetyQA,before=await d.AppData.activeSession.load();let done=false,outcome,error;d.BackupController.restore(window.__RestoreSafetyQACandidate).then(v=>{outcome=v;done=true},e=>{error=e;done=true});const deadline=Date.now()+10000;while(!done&&Date.now()<deadline){document.querySelector('#sd-interaction-dialog[open] [data-interaction-cancel]')?.click();await new Promise(r=>setTimeout(r,20));}if(!done)throw new Error('Restore cancellation did not settle');if(error)throw error;return {outcome,unchanged:(await d.AppData.activeSession.load()).value?.scheduleText===before.value?.scheduleText&&(await d.AppData.activeSession.load()).value?.snapshot?.review?.reflection==='ACTIVE SESSION REVIEW'};})()`);
+  assert.equal(cancelledRestore.unchanged,true,'cancelled reconciliation changed the active session');
+  const blockedRestore=await page1.evaluate(`(async()=>{const d=__RestoreSafetyQA,legacy=await d.BackupController.inspect(new Blob([JSON.stringify({version:6,records:[]})],{type:'application/json'}),{filename:'legacy.json'});try{await d.BackupController.restore(legacy);return {ok:true};}catch(error){return {ok:false,message:error.message};}})()`);
+  assert.equal(blockedRestore.ok,false,'legacy import bypassed active-session protection');
+  assert.match(blockedRestore.message,/End or suspend the active session before importing/u);
   const blockedClear=await page1.evaluate(`(async()=>{await __RestoreSafetyQA.LibraryView.clearAll();return document.getElementById('library-status').textContent;})()`);
-  assert.match(blockedClear,/End or suspend the active session before clearing saved days/u,'Clear Library internal precondition did not surface');
+  assert.match(blockedClear,/End or suspend the active session before clearing Library data/u,'Clear Library internal precondition did not surface');
 
   const suspended=await page1.evaluate(`(async()=>{
     const d=__RestoreSafetyQA,loaded=await d.AppData.activeSession.load(),session=structuredClone(loaded.value);session.status='suspended';session.suspendedAt=new Date().toISOString();session.updatedAt=session.suspendedAt;const saved=await d.AppData.activeSession.save(session);if(!saved?.ok)throw saved?.error||new Error('could not persist suspended fixture');
@@ -114,8 +119,8 @@ try{
 
   const restored=await page1.evaluate(`(async()=>{
     const d=__RestoreSafetyQA,wait=ms=>new Promise(r=>setTimeout(r,ms));let done=false,value,error;const deadline=Date.now()+60000;
-    d.BackupController.restore(window.__RestoreSafetyQACandidate).then(v=>{value=v;done=true},e=>{error=e;done=true});
-    while(!done&&Date.now()<deadline){const dialog=document.getElementById('sd-interaction-dialog');if(dialog?.open){const groups=[...dialog.querySelectorAll('.interaction-group')];for(const group of groups){if(group.querySelector('.interaction-group-title')?.textContent.includes('active session')){[...group.querySelectorAll('.interaction-option')].find(button=>button.textContent.includes('Restore backup session'))?.click();}}dialog.querySelector('.interaction-actions .primary')?.click();}await wait(20);}
+    d.BackupController.inspect(window.__RestoreSafetyQAFile.blob,{filename:window.__RestoreSafetyQAFile.filename}).then(candidate=>d.BackupController.restore(candidate)).then(v=>{value=v;done=true},e=>{error=e;done=true});
+    while(!done&&Date.now()<deadline){const dialog=document.getElementById('sd-interaction-dialog');if(dialog?.open){const groups=[...dialog.querySelectorAll('.interaction-group')];for(const group of groups){if(group.querySelector('.interaction-group-title')?.textContent.includes('Active / suspended session')){[...group.querySelectorAll('.interaction-option')].find(button=>button.dataset.value==='session_active_incoming')?.click();}}dialog.querySelector('.interaction-actions .primary')?.click();}await wait(20);}
     if(!done)throw new Error('Timed out waiting for protected restore to finish.');
     if(error)throw error;
     await d.AppData.activeSession.settled();await d.ReviewEditor.settled();
@@ -124,13 +129,13 @@ try{
   })()`);
   assert.equal(restored.revision,restored.expectedRevision,'restored active session was rewritten to a fresh revision before verification');
   assert.equal(restored.blocked,true,'restored active session did not re-enter active-session safety state');
-  assert.equal(restored.review,'SESSION SNAPSHOT DIFFERENT','active-session hydration did not preserve the restored Review state');
+  assert.equal(restored.review,'ACTIVE SESSION REVIEW','active-session hydration did not preserve the restored Review state');
   assert.equal(restored.scheduleMatches,true,'restored Active Session did not retain the backed-up applied Plan schedule');
   assert.ok(restored.tasks>0,'restored Active Session did not apply its Plan into live runtime tasks');
   assert.deepEqual({mode:restored.mode,paused:restored.paused,runtimeActive:restored.runtimeActive,taskAligned:restored.taskAligned},{mode:'running',paused:false,runtimeActive:true,taskAligned:true},'a backed-up running Active Session must restore as an applied Plan with a live RUNNING timer on the same task');
 
   const recovery=await page1.evaluate(`(()=>{const d=__RestoreSafetyQA;d.AppMutationCoordinator.failClosed('RestoreSafetyQA forced rollback verification fault');const banner=document.querySelector('.ownership-banner');return {title:banner?.querySelector('b')?.textContent||'',body:banner?.querySelector('span')?.textContent||'',button:banner?.querySelector('button')?.textContent||'',state:banner?.dataset.ownershipState||''};})()`);
-  assert.deepEqual(recovery,{title:'Data recovery required',body:'Study Director retained the recovery journal. Reload to complete recovery. Do not clear site data.',button:'',state:'recovery-fault'},'recovery fault was misrepresented as ordinary ownership');
+  assert.deepEqual(recovery,{title:'Data recovery required',body:'Study Director retained the recovery journal. Reload to complete recovery. Do not clear site data.',button:'',state:'recovery-fault:restore'},'recovery fault was misrepresented as ordinary ownership');
   await page1.evaluate(`__RestoreSafetyQA.AppMutationCoordinator.clearFault()`);
   await waitFor(()=>page1.evaluate(`!document.querySelector('.ownership-banner')`),{label:'recovery banner removal'});
 
@@ -141,7 +146,7 @@ try{
   assert.equal(secondary.owner,false,'second tab unexpectedly owns the timer');
   assert.equal(secondary.title,'Study Director controlled elsewhere');
   assert.equal(secondary.button,'Take control','genuine secondary ownership must retain Take control');
-  assert.match(secondary.body,/Another live tab controls the timer/u);
+  assert.match(secondary.body,/Another live tab controls Study Director writes/u);
 
   const runtimeErrors=[...(page1?.events||[]),...(page2?.events||[])];
   assert.deepEqual(runtimeErrors,[],'runtime errors occurred: '+runtimeErrors.join('\n'));

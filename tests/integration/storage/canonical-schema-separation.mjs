@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {createHarness} from '../../helpers/repository-harness.mjs';
 import {registry,Domain,RecordCodecs,CompatibilityCodecs,freeze,boundedNumber,boundedInt,clampText,optionalText,optionalBoundedNumber,normalizeTimestamp,sameDataValue,helpers,limits,dataContract,dailyRecordCodec} from '../../helpers/current-codec-fixture.mjs';
 const codec=dailyRecordCodec;
 const currentActiveSession=freeze({normalize:value=>value&&typeof value==='object'?freeze({...value,version:9}):null,sanitizeCurrent:value=>value&&Number(value.version)===9?freeze({...value}):null,sanitizeSessionSnapshot:value=>value||null});
@@ -44,6 +45,19 @@ assert.ok(diary,'diary-only record must validate');assert.equal(diary.recordKind
 assert.equal(codec.createDiaryRecord(date,'   ',{savedAt,updatedAt}),null,'empty diary-only records must not exist canonically');
 assert.equal(codec.createDiaryRecord('2026-09-18','future',{savedAt,updatedAt}),null,'future diary entries must be rejected');
 const diarySummary=codec.buildDailyRecordSummary(diary);assert.equal(diarySummary.recordKind,'diary');assert.equal(diarySummary.hasReflection,true);assert.equal(diarySummary.plannedMinutes,null);
+// Exercise the repository and the real strict codec together. Display-only
+// fields must survive sorted/window reads without being fed back to the writer.
+const earlier={...current,date:'2026-09-09',sourceRevision:8};
+const storedDiary={...diary,date:'2026-09-08'};
+const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map([[current.date,current],[earlier.date,earlier],[storedDiary.date,storedDiary]]),summary:new Map(),session:new Map(),meta:new Map()};
+const {app}=createHarness(new Map(),stores,{dailyRecordCodec:codec});
+assert.deepEqual(Array.from(await app.dailyRecords.sortedList(),row=>row.date),['2026-09-08','2026-09-09','2026-09-10']);
+for(const options of [{},{from:'2026-09-09',to:'2026-09-10'},{limit:1}]){
+  const rows=await app.dailyRecords.window(options);
+  assert.deepEqual(Array.from(rows,row=>row.date),options.limit?['2026-09-10']:['2026-09-09','2026-09-10']);
+  for(const row of rows){assert.equal(row.recordKind,'study');assert.ok(Array.isArray(row.tasks));assert.equal(codec.sanitizeCurrentDailyRecord(row),null,'read projections must not become canonical write input');}
+}
+assert.deepEqual(stores.daily.get(current.date),current,'reading Insights must leave canonical data untouched');
 assert.equal(codec.sanitizeDailyRecordSummary({...diarySummary,outcomeCounts:{...diarySummary.outcomeCounts,full:1}}),null,'diary summaries must reject study outcome counts');
 
 console.log(JSON.stringify({status:'PASS',suite:'canonical-schema-separation',dailyRecordVersion:16,areaNoteVersion:2,localRevisionsPreserved:true,distributedSyncFieldsRejected:true},null,2));

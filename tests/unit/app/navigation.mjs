@@ -400,4 +400,19 @@ for(const native of [false,true]){
   assert.equal(h.workspace.kind,'legal');assert.equal(h.workspace.key,'privacy');
 }
 
+// The host's presentation wait must settle even if a hidden tab receives no frames.
+{
+  const host=fs.readFileSync('source/app.html','utf8');
+  const start=host.indexOf('const nextNavigationFrame='),end=host.indexOf('\n});',start)+4;
+  for(const hidden of [false,true])for(const winner of ['frame','timer']){
+    let id=0,resolved=0;const frames=new Map(),timers=new Map();
+    const context=vm.createContext({Promise,document:{hidden},requestAnimationFrame:fn=>{const key=++id;frames.set(key,fn);return key;},cancelAnimationFrame:key=>frames.delete(key),setTimeout:(fn,delay)=>{const key=++id;timers.set(key,{fn,delay});return key;},clearTimeout:key=>timers.delete(key)});
+    vm.runInContext(host.slice(start,end)+'\nglobalThis.wait=nextNavigationFrame;',context);
+    const waiting=context.wait().then(()=>resolved++),timer=[...timers.values()][0];
+    assert.equal(timer.delay,hidden?0:100);assert.equal(resolved,0);
+    if(winner==='frame')[...frames.values()][0]();else timer.fn();
+    await waiting;assert.equal(resolved,1);assert.equal(frames.size,0);assert.equal(timers.size,0);
+  }
+}
+
 console.log(JSON.stringify({status:'PASS',contract:'navigation-workspace-history',drivers:['history','navigation'],tabs:6,failedTraversalReconciliation:['back','forward']},null,2));

@@ -1216,7 +1216,7 @@ async function getDailyRecordSummaries(){
   }
 }
 function sortDailySummariesAsc(summaries){return (summaries||[]).map(summary=>{const {dayOfWeek,dayName,...raw}=summary||{};return materializeDailyRecordSummary(raw);}).filter(Boolean).sort((a,b)=>a.date.localeCompare(b.date));}
-function sortDailyRecordsAsc(records){return (records||[]).map(materializeDailyRecordView).filter(r=>r&&isValidIsoDate(r.date)).sort((a,b)=>a.date.localeCompare(b.date));}
+function sortDailyRecordsAsc(records){return (records||[]).filter(r=>r&&isValidIsoDate(r.date)).sort((a,b)=>a.date.localeCompare(b.date));}
 async function getSortedDailyRecordSummaries(){return sortDailySummariesAsc(await getDailyRecordSummaries());}
 async function getSortedDailyRecords(){return sortDailyRecordsAsc(await getDailyRecords());}
 async function getDailyRecordsForWindow(options={}){
@@ -1228,7 +1228,7 @@ async function getDailyRecordsForWindow(options={}){
       const fallback=fallbackDailyRecordsGet();
       const idbRecords=await idbGetRecordsByDates(recordWindow.dates);
       const records=filterPendingDeletedEntities(mergeDailyRecordSets(idbRecords,fallback.filter(r=>recordWindow.dates.includes(r.date))),'dailyRecord','date');
-      return sortDailyRecordsAsc(records).filter(record=>record.recordKind==='study');
+      return sortDailyRecordsAsc(records.map(materializeDailyRecordView)).filter(record=>record.recordKind==='study');
     }catch(e){
       if(isCanonicalRuntimeError(e))throw e;
       const records=await Promise.all(recordWindow.dates.map(date=>getDailyRecord(date)));

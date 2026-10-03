@@ -36,7 +36,7 @@ try{
   })()`);
 
   const prepared=await page.evaluate(`(()=>{
-    const d=__PWA6,now=new Date(),base=now.getHours()*60+now.getMinutes()+2;
+    const d=__PWA6,now=new Date(),base=now.getHours()*60+now.getMinutes()-1;
     const fmt=value=>String(Math.floor((value+1440)%1440/60)).padStart(2,'0')+':'+String((value+1440)%1440%60).padStart(2,'0');
     const rows=[['Alpha Task','Alpha Empty'],['Zeta Task','Zeta Filled'],['Child Task','Parent > Child Empty']];
     document.getElementById('plan-input').value=rows.map((row,index)=>fmt(base+index*20)+' | 20 | '+row[0]+' | work | '+row[1]+' | pages | 10').join('\\n');
@@ -53,31 +53,32 @@ try{
     const field=document.querySelector('#library-notes-editor .library-notes-textarea');field.value='Durable Zeta note';field.dispatchEvent(new Event('input',{bubbles:true}));await d.AppData.notes.flush();
     const drawer=document.getElementById('library-notes-drawer');drawer.open=false;await wait(30);drawer.open=true;await wait(60);
     let rows=[...document.querySelectorAll('[data-ongoing-note-key]')];
-    const search=document.getElementById('library-notes-search');search.value='Durable Zeta note';search.dispatchEvent(new Event('input',{bubbles:true}));await nextRender();
+    const search=document.getElementById('library-notes-search');search.value='Durable Zeta note';search.dispatchEvent(new Event('input',{bubbles:true}));for(let i=0;i<100&&document.querySelectorAll('[data-ongoing-note-key]').length!==1;i++)await wait(20);
     const filtered=[...document.querySelectorAll('[data-ongoing-note-key]')].map(item=>item.dataset.ongoingNoteKey);
-    search.value='';search.dispatchEvent(new Event('input',{bubbles:true}));await nextRender();rows=[...document.querySelectorAll('[data-ongoing-note-key]')];
+    search.value='';search.dispatchEvent(new Event('input',{bubbles:true}));for(let i=0;i<100&&document.querySelectorAll('[data-ongoing-note-key]').length!==4;i++)await wait(20);rows=[...document.querySelectorAll('[data-ongoing-note-key]')];
     return {
       keys:rows.map(item=>item.dataset.ongoingNoteKey),
       filtered,
       classes:Object.fromEntries(rows.map(item=>[item.dataset.ongoingNoteKey,item.className])),
       colors:Object.fromEntries(rows.map(item=>[item.dataset.ongoingNoteKey,getComputedStyle(item).color])),
+      weights:Object.fromEntries(rows.map(item=>[item.dataset.ongoingNoteKey,Number(getComputedStyle(item.querySelector('.library-note-nav-name')).fontWeight)])),
       deleteDisabled:document.getElementById('library-note-delete').disabled
     };
   })()`);
   assert.equal(filled.keys[0],'zeta filled');
   assert.deepEqual(filled.filtered,['zeta filled']);
   assert.match(filled.classes['zeta filled'],/has-note/);assert.match(filled.classes['alpha empty'],/empty-note/);
-  assert.notEqual(filled.colors['zeta filled'],filled.colors['alpha empty']);
+  assert.ok(filled.weights['zeta filled']>filled.weights['alpha empty'],'saved and empty notes must remain visually distinct in every presentation');
   result.checks.filledFirstHierarchyAndMutedEmptyRows=true;
   console.error('[qa-notes] hierarchy and search passed');
 
   const temporary=await page.evaluate(`(async()=>{
     const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));await __interactionQA.create('Standalone Only','top');await wait(30);
-    const before={
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const before={
       selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||'',
       title:document.querySelector('.library-notes-editor-title')?.textContent||'',
       badge:document.querySelector('.library-notes-editor-badge')?.textContent||'',
-      focused:document.activeElement===document.querySelector('.library-notes-textarea')||document.activeElement===document.querySelector('.library-notes-editor .sd-rte-editor'),
+      focused:document.activeElement===document.querySelector('.library-notes-textarea')||!!document.activeElement.closest('.library-notes-editor .sd-rte-wordgard'),
       persisted:!!__PWA6.AppData.notes.exportPayload()['standalone only']
     };
     const drawer=document.getElementById('library-notes-drawer');drawer.open=false;await wait(30);drawer.open=true;await wait(60);
@@ -116,10 +117,10 @@ try{
   console.error('[qa-notes] standalone and nested creation passed');
 
   const linkedToPlan=await page.evaluate(`(async()=>{
-    const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),now=new Date(),minute=now.getHours()*60+now.getMinutes()+2;
+    const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),now=new Date(),minute=now.getHours()*60+now.getMinutes()-1;
     const start=String(Math.floor((minute+1440)%1440/60)).padStart(2,'0')+':'+String((minute+1440)%1440%60).padStart(2,'0');
     d.goTab('plan');document.getElementById('plan-input').value=start+' | 20 | Manual Area Task | work | Standalone Only | pages | 10';
-    const applying=d.applySchedule({skipNotify:true});await __interactionQA.accept();const applied=await applying;d.goTab('execute');d.refreshPnote({force:true});await wait(50);
+    const applying=d.applySchedule({skipNotify:true});if(applying&&typeof applying.then==='function')await __interactionQA.accept();const applied=await applying;d.goTab('execute');d.refreshPnote({force:true});await wait(50);
     const timer={value:document.getElementById('pn-extra').value,key:document.getElementById('pn-extra').dataset.areaKey};
     d.goTab('review');d.ReviewView.refresh({force:true});await wait(70);
     const reviewField=[...document.querySelectorAll('#review-list .task-note-field')].find(field=>field.dataset.areaKey==='standalone only');
@@ -146,7 +147,7 @@ try{
   const deletedParent=await page.evaluate(`(async()=>{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
     const parent=[...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='standalone only');parent.click();await wait(25);
-    const before={deleteDisabled:document.getElementById('library-note-delete').disabled,child:d.AppData.notes.exportPayload()['standalone only > nested topic']?.text||''};
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const before={deleteDisabled:document.getElementById('library-note-delete').disabled,child:d.AppData.notes.exportPayload()['standalone only > nested topic']?.text||''};
     document.getElementById('library-note-delete').click();const confirmation=await __interactionQA.accept();
     await new Promise((resolve,reject)=>{const started=Date.now(),poll=()=>{if(!d.AppData.notes.exportPayload()['standalone only'])resolve();else if(Date.now()-started>5000)reject(new Error('delete timeout'));else setTimeout(poll,40);};poll();});
     await wait(100);
@@ -180,9 +181,9 @@ try{
   result.checks.glassStickyControlsAndCompactBackupActions=true;
 
   // A long mobile note must scroll internally without trapping the surrounding Library page at its boundaries.
-  await page.evaluate(`(async()=>{const d=__PWA6,current=d.AppData.notes.get('zeta filled'),text=Array.from({length:140},(_,i)=>'Boundary paragraph '+(i+1)+' — durable library scrolling evidence.').join('\n\n');d.AppData.notes.update('zeta filled','Zeta Filled',text,current?.updatedAt||'');await d.AppData.notes.flush();d.LibraryView.refreshNotes();const row=[...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='zeta filled');row?.click();})()`);
+  await page.evaluate(`(async()=>{const d=__PWA6,current=d.AppData.notes.get('zeta filled'),text=Array.from({length:140},(_,i)=>'Boundary paragraph '+(i+1)+' — durable library scrolling evidence.').join('\\n\\n');d.AppData.notes.update('zeta filled','Zeta Filled',text,current?.updatedAt||'');await d.AppData.notes.flush();d.LibraryView.refreshNotes();const row=[...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='zeta filled');row?.click();})()`);
   await waitFor(()=>page.evaluate(`(()=>{const scroller=document.querySelector('#library-notes-editor wg-scroller');return !!scroller&&scroller.scrollHeight>scroller.clientHeight+20})()`),{label:'long-note internal scroll range'});
-  const scrollBoundary=await page.evaluate(`(()=>{const inner=document.querySelector('#library-notes-editor wg-scroller'),drawer=document.getElementById('library-notes-drawer'),tail=document.createElement('div');tail.dataset.qaScrollTail='true';tail.style.height='900px';drawer.after(tail);const outer=document.scrollingElement,innerMax=Math.max(0,inner.scrollHeight-inner.clientHeight);inner.scrollTop=0;const top=inner.scrollTop;inner.scrollTop=innerMax;const bottom=inner.scrollTop;const outerMax=Math.max(0,outer.scrollHeight-outer.clientHeight);outer.scrollTop=Math.min(outerMax,Math.max(0,drawer.offsetTop));const before=outer.scrollTop;outer.scrollTop=Math.min(outerMax,before+180);const after=outer.scrollTop;return {innerMax,top,bottom,overscroll:getComputedStyle(inner).overscrollBehaviorY,outerMax,before,after}})()`);
+  const scrollBoundary=await page.evaluate(`(()=>{const inner=document.querySelector('#library-notes-editor wg-scroller'),drawer=document.getElementById('library-notes-drawer'),tail=document.createElement('div');tail.dataset.qaScrollTail='true';tail.style.height='900px';drawer.after(tail);let outer=drawer.parentElement;while(outer&&!(outer.scrollHeight>outer.clientHeight+1&&/auto|scroll/.test(getComputedStyle(outer).overflowY)))outer=outer.parentElement;outer=outer||document.scrollingElement;const innerMax=Math.max(0,inner.scrollHeight-inner.clientHeight);inner.scrollTop=0;const top=inner.scrollTop;inner.scrollTop=innerMax;const bottom=inner.scrollTop;const outerMax=Math.max(0,outer.scrollHeight-outer.clientHeight);outer.scrollTop=Math.min(Math.max(0,outerMax-180),Math.max(0,drawer.offsetTop));const before=outer.scrollTop;outer.scrollTop=Math.min(outerMax,before+180);const after=outer.scrollTop;return {innerMax,top,bottom,overscroll:getComputedStyle(inner).overscrollBehaviorY,outerMax,before,after}})()`);
   assert.ok(scrollBoundary.innerMax>20,'Long ongoing note must provide a real internal scroll range.');assert.equal(scrollBoundary.top,0);assert.ok(Math.abs(scrollBoundary.bottom-scrollBoundary.innerMax)<=1,'Long ongoing note must reach its bottom boundary.');assert.notEqual(scrollBoundary.overscroll,'contain','Ongoing-note editor must not trap scroll chaining at its boundaries.');assert.ok(scrollBoundary.outerMax>scrollBoundary.before&&scrollBoundary.after>scrollBoundary.before,'Library page must remain independently scrollable around the long note.');
   result.checks.mobileLongNoteScrollBoundaryHandoff=true;
 

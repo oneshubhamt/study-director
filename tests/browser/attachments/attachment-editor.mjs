@@ -21,10 +21,10 @@ try{
   assert.equal(await page.evaluate(`StudyDirectorRichText.toPlainText(f.value).includes('Voice.wav')`),true);
   await waitFor(()=>page.evaluate(`document.querySelector('.sd-rte-audio-status')?.textContent==='Loading audio…'`),{label:'audio status while asset is genuinely pending'});
   await page.evaluate(`(()=>{Object.defineProperty(HTMLMediaElement.prototype,'readyState',{configurable:true,get(){return this.src?1:0}});window.__resolveAudioAsset(window.audioBlob)})()`);
-  await waitFor(()=>page.evaluate(`{const p=document.querySelector('.sd-rte-audio-player'),s=document.querySelector('.sd-rte-audio-status');return !!p?.src&&p.src.startsWith('blob:')&&s?.textContent==='';}`),{label:'already-ready audio clears loading status'});
+  await waitFor(()=>page.evaluate(`(()=>{const p=document.querySelector('.sd-rte-audio-player'),s=document.querySelector('.sd-rte-audio-status');return !!p?.src&&p.src.startsWith('blob:')&&s?.textContent==='';})()`),{label:'already-ready audio clears loading status'});
   await page.evaluate(`(()=>{const editor=document.querySelector('.sd-rte-editor'),text=[...editor.querySelectorAll('p')].at(-1)?.firstChild;if(!text)return;const range=document.createRange(),selection=getSelection();range.setStart(text,text.length);range.collapse(true);selection.removeAllRanges();selection.addRange(range);editor.focus()})()`);
   await page.send('Input.insertText',{text:' after audio'});
-  await waitFor(()=>page.evaluate(`f.value.includes('after audio')`),{label:'post-audio editor update'});
+  await waitFor(()=>page.evaluate(`f.value.includes('after audio')`),{label:'post-audio editor update'});await page.settle();
   assert.equal(await page.evaluate(`document.querySelector('.sd-rte-audio-status')?.textContent||''`),'','Cached ready audio must not regress to a stale Loading audio status after an editor redraw/update.');
   await page.setViewport({width:390,height:700,mobile:true,scale:3});await page.settle();await page.tap('.sd-rte-attachment-trigger');await page.settle();
   const mobile=await page.evaluate(`(()=>{const t=document.querySelector('.sd-rte-attachment-trigger').getBoundingClientRect(),m=document.getElementById(document.querySelector('.sd-rte-attachment-trigger').getAttribute('aria-controls')).getBoundingClientRect();return {trigger:{w:t.width,h:t.height},menu:{left:m.left,right:innerWidth-m.right,width:m.width},pageOverflow:document.documentElement.scrollWidth>innerWidth}})()`);

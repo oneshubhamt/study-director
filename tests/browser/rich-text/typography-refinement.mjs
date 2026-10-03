@@ -31,9 +31,9 @@ try{
 
   // Image mode: same Aa trigger, only L/C/R, no overflow, alignment persists/rendering changes.
   await page.click(`${root} .sd-rte-image`);await page.settle();
-  const trigger=await page.evaluate(`(()=>{const b=document.querySelector('${root} button[aria-label="Typography"]');return {disabled:b.disabled,expanded:b.getAttribute('aria-expanded')}})()`);
+  const trigger=await page.evaluate(`(()=>{const b=document.querySelector('${root} button[aria-label="Image position"]');return {disabled:b.disabled,expanded:b.getAttribute('aria-expanded')}})()`);
   assert.equal(trigger.disabled,false,'Aa must stay available for an image node selection.');
-  await page.click(`${root} button[aria-label="Typography"]`);await page.settle();
+  await page.click(`${root} button[aria-label="Image position"]`);await page.settle();
   const imageUI=await page.evaluate(`(()=>{const menu=document.querySelector('${root} .sd-rte-typography'),visible=[...menu.querySelectorAll('button')].filter(b=>!b.hidden&&b.getClientRects().length>0).map(b=>b.getAttribute('aria-label'));return {mode:menu.dataset.mode,visible,overflow:menu.scrollWidth>menu.clientWidth}})()`);
   assert.equal(imageUI.mode,'image');
   assert.deepEqual(imageUI.visible,['Align left','Align center','Align right']);

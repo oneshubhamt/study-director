@@ -178,7 +178,7 @@ try{
   served='next';
   await page1.send('Page.bringToFront');
   await forceUpdate(page1);
-  await waitFor(()=>page1.evaluate(`navigator.serviceWorker.getRegistration().then(r=>!!r.waiting)&&!document.getElementById('pwa-update-control').hidden`),{timeout:60000,label:'waiting update control'});
+  await waitFor(()=>page1.evaluate(`navigator.serviceWorker.getRegistration().then(r=>!!r.waiting&&!document.getElementById('pwa-update-control').hidden)`),{timeout:60000,label:'waiting update control'});
   assert.equal(await workerIdentity(page1,'waiting'),next.releaseId);
   assert.equal(await page1.evaluate(`document.getElementById('pwa-update-apply').textContent`),'Pause & Update');
   assert.equal(await workerIdentity(page1),originalPwa.releaseId);
@@ -202,7 +202,7 @@ try{
   writeArtifact('pwa-offline-results.json',JSON.stringify(evidence,null,2)+'\n');
   console.log(JSON.stringify(evidence,null,2));
 }catch(error){
-  let pageDiagnostic=null;
+  let pageDiagnostic=null;console.error('Reload counts',JSON.stringify({page1:page1?.loadCount,page2:page2?.loadCount}));console.error('Second tab',await page2?.evaluate(`({lifecycle:document.documentElement.dataset.studyDirectorLifecycle,ui:document.documentElement.dataset.studyDirectorUiState,update:document.getElementById('pwa-update-message')?.textContent,body:document.body?.innerText.slice(-1800)})`).catch(()=>null));
   try{pageDiagnostic=await page1?.evaluate(`(async()=>({href:location.href,title:document.title,body:(document.body?.innerText||'').slice(0,500),controller:!!navigator.serviceWorker?.controller,caches:typeof caches==='undefined'?[]:await caches.keys()}))()`);}catch(diagnosticError){pageDiagnostic={error:String(diagnosticError)};}
   throw new Error(`${error.stack||error}\nPage diagnostic: ${JSON.stringify(pageDiagnostic)}\nChromium stderr:\n${browserError.slice(-6000)}`);
 }finally{
@@ -210,5 +210,5 @@ try{
   browser.kill('SIGTERM');
   await Promise.race([new Promise(resolve=>browser.once('exit',resolve)),sleep(3000)]);
   server.close();
-  fs.rmSync(profile,{recursive:true,force:true});
+  try{fs.rmSync(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});}catch(cleanupError){console.error('QA profile cleanup:',cleanupError.code);}
 }
