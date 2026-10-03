@@ -1,70 +1,63 @@
-# Fresh background-services audit — 3 October 2026
+# Background services: corrective refactor and follow-up audit
 
-Baseline: branch `refactor/background-coordination`, commit `3d91713b98dfdb73d155717bcf595c4fa74b5ed1`. Source was reviewed before tests or previous audit conclusions. This is an audit, not a claim of certification.
+3 October 2026. Correction baseline: `739b3db18b7b147095747cc60c8972e1863f3e1d`, branch `refactor/background-coordination`. The latest audit reviewed the corrected source and assembled production paths. This report distinguishes verified corrections from remaining work; it is not a blanket certification.
 
-## Conclusion
+## Assessment
 
-Do not close the programme yet. Three source-level defects violate the requested safety/liveness rules. The common scheduling and priority mechanism is coherent; the remaining defects are incomplete executor proofs and discovery/progress contracts. Passing the existing tests does not invalidate the reproductions below.
+All three requested defects are corrected. The central job lifecycle and repository priority/settlement coordinator remain suitable foundations. The surrounding engineering was insufficiently consistent: adapters separately decided whether incomplete artifacts could be removed, total execution deadlines conflated read discovery with destructive work, and a forgiving UI read influenced durable backup discovery. A shared timer alone did not enforce the full system's safety and completion contracts.
 
-## Confirmed findings
+The correction therefore refactors the boundaries instead of adding three caller-specific retry exceptions. Shared cleanup now owns the safety decision and phase order for both providers. Provider-specific transports retain responsibility for permission, authorization, physical I/O and exclusion. No replacement scheduler or additional permanent job/timer layer was introduced.
 
-### High — unreadable repository metadata can authorize deletion of a real backup's counterpart
+**Do not close the programme yet.** The post-fix audit confirmed one further medium recovery limitation: a valid Drive backlog exceeding the 64-version history listing cutoff cannot automatically clean itself or publish another backup. The guard preserves data, but it does not provide eventual completion.
 
-`device-backup.js:426` and `backup-provider.js:407` omit metadata that could not be read before classifying manifest/commit pairs. A manifest with an unreadable commit is then classified as uncommitted; a commit with an unreadable manifest becomes orphaned. `device-backup.js:513` and `backup-provider.js:606` delete those apparent incomplete artifacts despite the unknown history. The common retention executor (`managed-repository.js:428`) blocks object GC on invalid checkpoint reads but still permits checkpoint pruning.
+## Corrected objectives and evidence
 
-Reproduced through both actual adapter runtimes with a temporary read exception, in both directions. All four cases deleted the readable counterpart of the unavailable file. The device tests use the existing adapter fixture's repository port; the provider probe also uses the production classifier/retention pipeline. A complete backup can disappear from usable history after one temporary read failure. Object GC initially stays blocked, but that does not undo the loss of the checkpoint pair.
+### 1. Uncertain history cannot authorize any repository-data deletion
 
-Correction objective: any incomplete/uncertain history must prohibit all destructive artifact and retention decisions. Put the invariant at the common cleanup boundary and apply it before the adapters' direct incomplete-artifact removals. Preserve intent and retry; after a complete inventory, genuinely abandoned artifacts and retention surplus should still be collected. Cover both directions, both adapters, read recovery, and reachability after recovery.
+`managed-repository.cleanupRepositoryRetention` checks unreadable, ignored and overflowed history before incomplete-artifact deletion, retention selection/deletion, object inventory or object GC. It returns retained history and an explicit pending/uncertain outcome. Device Folder and Drive now supply incomplete artifacts to this common executor; their separate deletion loops are removed.
 
-### Medium — healthy slow Drive inventory cannot finish within repeated housekeeping attempts
+The complete-history path remains useful: incomplete artifacts and surplus checkpoints share a bounded deletion allowance; partial passes preserve referenced objects and retry. Read-only object inventory precedes the destructive phase for background maintenance. Publication contention, deletion failure and uncertainty continue to produce governed pending outcomes.
 
-`backup-provider.js:991` gives the whole maintenance attempt a 30-second budget. `cleanupRepositoryProviderSafely` performs full history discovery and object discovery inside it. `drive.js:626` accumulates listing pages only within the current call. Cancellation loses pagination progress. Verified immutable body caching helps body reads but does not resume a listing.
+Verification covers all seven combinations of unreadable, ignored and overflowed history. Each produces zero data mutations and zero preparation calls. After recovery, the same physical dataset finishes within a bound derived from the two deletion allowances; every surviving checkpoint remains reachable after every partial pass. Actual adapter tests cover both failed metadata directions, retaining the valid counterpart and other repository files, followed by ordinary scheduled recovery and verified cleanup.
 
-A deterministic runtime probe supplies a finite four-page inventory with responsive 10-second pages and honours cancellation. Across nine attempts, pages continued responding, but no complete inventory was produced and no cleanup completed. Pending work and retries remain visible, so this is starvation rather than silent timer loss.
+### 2. Responsive Drive inventory can finish beyond the former total deadline
 
-Correction objective: read progress must survive the short destructive allowance, with foreground cancellation and scope/source revalidation. Do not simply remove the limit: Drive maintenance protection expires, and extending the scan requires a valid exclusion/renewal or a safely revalidated continuation protocol. Keep deletes bounded and fail closed if the inventory or protection is incomplete.
+The scheduler's existing execution scope owns a one-shot deletion budget that can start after discovery. Repeated phase notifications cannot extend it; released scopes cannot restart it; transfer jobs cannot acquire a housekeeping deadline.
 
-### Medium — unavailable local records can be treated as an empty recovery candidate and suppress automatic backup
+Drive operation contexts run the maintenance protection check between requests/pages. Renewal creates a new immutable marker, proves overlap with the existing unexpired marker, then releases the old one. Existing app versions understand both markers and the original expiry protocol. Missing, expired or foreign protection discards the attempt and requires fresh inventory. No PATCH access or extended expiry protocol was added.
 
-`app.html:8387` calls `dailyRecords.list()` and `activeSession.load()` without strict reads and does not inspect the session's `ok`/`error` result. The list's forgiving path can return an empty rescue list; session load can return `{ok:false,value:null,error}`. The helper then returns true for empty data.
+The background executor inventories history and objects under that protection, then starts its thirty-second destructive allowance. Network/body watchdogs, cancellation, foreground preemption, marker release and actual execution settlement remain active. Transports without renewable/scoped protection retain a bounded total opportunity.
 
-`device-backup.js:158` records the current observed source revision before using that answer to skip catch-up backup. A later ordinary wake checks for a source revision different from that observed revision, so the missed catch-up is not discovered again until another change or intervention.
+The assembled test uses the actual Drive plugin transport, provider runtime, classifier, retention executor and owned scheduler. Responsive ten-second pages require more than thirty seconds in total. Cleanup finishes, removes only genuinely unreferenced objects, retains the exact committed metadata pair, clears its pending intent and releases its marker. A separate case interrupts the actual page request with foreground history access: no backup data is deleted, the pending job resumes automatically, and verified completion follows. Marker tests also exercise ambiguous create/delete outcomes and missing, expired or foreign prior protection.
 
-The actual host helper returned true with unavailable Saved Days and Active Session data. A companion controller probe reproduced idle/no pending work and no automatic commit despite a newer current revision than the recorded backup revision.
+### 3. Unavailable local data cannot settle an empty recovery decision
 
-Correction objective: distinguish verified empty data from unavailable data; use strict canonical reads and inspect session results. Unknown state must retain a discovery/retry opportunity, not be remembered as a settled empty candidate. Preserve the intended recovery-first behaviour for genuinely empty local data with an existing external backup.
+The actual host helper strictly reads Saved Days and Active Session, checks the session outcome, and returns `null` for unavailable data. Verified empty and verified non-empty remain distinct boolean outcomes. The controller records the observed source revision only after a successful, stable decision with current permission/control. Unknown data preserves the owner's retry; it does not enqueue an empty backup that could obscure external recovery data.
 
-## Source coverage
+Tests execute the actual host function against canonical repository reads. Saved Days, Active Session, Ongoing Notes and metadata failures each return unknown. After ordinary retry, a recovered non-empty dataset publishes its catch-up backup; a proven empty dataset retains recovery-first behavior and does not publish an empty replacement. A failed session result is independently rejected as an emptiness proof. Tests cover both recovery outcomes for each failed canonical source.
 
-Reviewed the lifecycle owner and repository coordinator; host startup/control/focus/encryption/reconnection wiring; Device Folder publication, permission/source discovery, inventory/exclusion and cleanup; Drive scoped transport, response validation, pagination, chunk upload recovery, publication/maintenance exclusion and convergence; canonical maintenance and deletion reconciliation; attachment reference scans, logical deletion and physical sweep; attachment shallow verification; repository quarantine, resumable hashing and repository binding; OPFS scratch leases and durable retention; recovery preflight, safety checkpoints, journals and verified rollback; ingest/export/search/image/Insights worker ownership, cancellation and watchdog boundaries; developer diagnostic assembly.
+## Test consolidation and QA
 
-The source supports several useful safeguards: one owned opportunity per declared job; foreground reservation followed by actual settlement; preservation of future retry deadlines; progressing uploads without a 30-second total deadline; strict asset references; reader locks around physical storage; resumable attachment/scratch traversal and integrity hashing; provider-specific repository identities and request fences; transactional integrity metadata; verified recovery before journal cleanup. These are conditional guarantees while the app is running with available storage/control/authorization, not promises of execution after the browser closes.
+- Device Folder tests now execute the production classification, retention policy and cleanup engine; copied implementations were removed.
+- The shared Drive HTTP harness is reused by transport/security and assembled backup tests. Its multipart simulation now preserves binary bytes; the former text parser corrupted compressed data. Its error realm matches the application's shared window, so artificial VM boundaries do not replace cancellation reasons. It reads the production repository policy.
+- Existing domain suites were extended; no historical regression category or new standalone test suite was added. Fixtures retain their original safety assertions and timing budgets.
+- 27 targeted suites passed through the repository's guarded runner. The initial direct launch of the hermetic-policy self-check lacked its required guards; the normal runner verified child-process and worker-network restrictions successfully. It required no test relaxation.
+- Final source build, generated-build verification and generated syntax checks passed. Full promotion QA, browser smoke and native Google/device-permission acceptance were not rerun in this pass. The earlier Insights GitHub timing acceptance remains separate and open.
 
-No additional defect was confirmed in the reviewed attachment/quarantine/worker/journal paths during this audit. This does not prove they are bug-free. PWA update behaviour was excluded from this pass as requested. Native Google authorization and physical device permission behaviour were not acceptance-tested.
+## Follow-up finding: medium — valid Drive backlog cannot recover past 64 history entries
 
-## Verification and why the tests missed these cases
+`drive.repositoryList` limits each checkpoint/commit listing to 64 items. `repositoryProviderStateWork` carries overflow into cleanup; the common executor correctly refuses deletion from this incomplete inventory. Publication-base discovery also rejects that overflow. The result is safe preservation with no route back to a complete inventory.
 
-22 existing lifecycle, storage, backup, worker and diagnostic suites passed on this baseline; results are in `targeted-baseline.json`. The adversarial probes expose compositions absent from those suites: partial counterpart-read failure before cleanup, responsive paginated inventory longer than the total deadline, and failed forgiving reads before recovery-first dirty discovery. Some adapter fixtures duplicate classification/cleanup logic and can pass while omitting these unknown-state transitions. Architecture regex checks confirm wiring, not these behavioural invariants.
+An adversarial assembled probe created 65 valid committed versions while background work was blocked, then restored eligibility. All metadata and object reads were healthy. Repeated maintenance left all 65 manifests, 65 commits and 66 objects unchanged, with `blocked-uncertain` pending intent. The next legitimate backup rejected with “An unusual number of backup versions was found. Backup was stopped for review.” This is an intentional safety guard, but it fails the programme's automatic-recovery/eventual-completion objective for a finite valid backlog.
 
-The next correction pass should strengthen the existing domain suites around complete assembled outcomes, including both failed-read directions and eventual recovery. It should not create another historical test category, relax timeouts to force a pass, or treat a green suite as a substitute for source reasoning.
+Recommended next scope: refactor history discovery into bounded processing that can establish a complete inventory without retaining every full payload at once. Keep provider/repository identity, renewable exclusion, cancellation, verified manifest/commit pairing and the global unknown-history deletion prohibition. Advance through legitimate backlogs and retain governed progress; raising or removing the numeric cutoff alone is insufficient. The central scheduler can continue to own this job.
 
-## Evidence
+This remaining issue is reported, not implemented in the correction pass.
 
-- `device-uncertainty.mjs`: actual device controller, failing checkpoint/commit metadata reads, surviving file inventory.
-- `provider-uncertainty.mjs`: actual provider/classifier/retention runtime, failing checkpoint/commit downloads, deletion receipts.
-- `drive-progress.mjs`: owned maintenance job plus scoped, cancellable slow inventory; attempts/pages/completion/intent diagnostics.
-- `recovery-emptiness.mjs`: actual host helper with unavailable canonical sources.
-- `empty-discovery.mjs`: controller's source-discovery and wake behaviour after a false-empty answer.
-- `targeted-baseline.json`: existing tests and durations.
+## Audit coverage and limits
 
-The probes are retained outside the repository because this pass requests an audit before implementation. They are evidence, not replacements for durable regression cases in the domain suites.
+The follow-up reviewed job discovery, eligibility, deadlines, priority, preemption, request fencing and settlement; both repository adapters and publication/maintenance protocols; canonical maintenance/deletion reconciliation; attachment reachability, quarantine and GC; integrity recurrence, saved hashing progress and repository scope; temporary-file leases and recovery handoffs; journals and verified rollback; ingest/export/search/image/Insights worker cancellation and watchdogs; diagnostic projections. Particular adversarial attention went to unknown reads, admission/release races, interruption, finite work and capacity limits.
 
-## Insights timing investigation after the audit
+No additional data-deletion defect was confirmed in the reviewed attachment, quarantine, scratch, worker or recovery-journal paths. Execution remains conditional on an open app and available storage, control and authorization. There is no promise of maintenance after the browser closes. The capacity finding prevents unconditional closure of the background programme despite green targeted QA.
 
-The 590-day fixture remains representative: canonical records, worker rendering, worker-unavailable fallback, constructor-failure recovery, model parity and progressive DOM rendering. No budgets or assertions were weakened.
-
-Profiling identified repeated locale-formatter construction for calendar labels. The source now shares three formatters and formats calendar dates in UTC, preserving labels without shifting the date. The existing scaling suite checks parity with the previous labels across five time zones, every month, every weekday, year boundaries, leap days and daylight-saving transition dates. An isolated pre-change benchmark compared 7,500 labels: 71.0 ms before and 14.3 ms with shared formatters. This measures formatting, not total page responsiveness.
-
-The performance fixture now reports phase timings on failure and omits the large model signature from log output only; the actual signature equality assertion remains. Five targeted integration/architecture suites and three targeted browser cases passed. The browser cases ran with precise runtime coverage enabled. The local worker path completed in 871.4 ms against the unchanged 1,000 ms target, with a 65 ms maximum main-thread task and an 11.6 ms maximum DOM chunk. Build generation, build verification and generated syntax checks passed.
-
-The earlier GitHub run on the baseline completed in 1,559.2 ms and failed the 1,000 ms total deadline. The new revision has not yet passed that GitHub timing gate. Local total time did not improve beyond measurement variability; this small optimization does not establish that the remote failure is resolved. Keep the gate open until the new revision is measured there. No background production changes were made in this audit pass.
+Local evidence is retained in `/workspace/background-correction-evidence`: `targeted-governed.log`, build/verification/syntax logs, the extended domain-test logs, and `drive-backlog-audit.mjs` / `drive-backlog-audit.log`. The backlog probe is audit evidence outside the repository, not a passing substitute for the future production regression test.

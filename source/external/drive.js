@@ -623,6 +623,21 @@
     if(!metadata)metadata=await findRepositoryMaintenance(parent,id,context);if(!metadata)return false;
     return await deleteCoordinationMarker(metadata,{parent,id,findMarker:findRepositoryMaintenance,context,label:'Could not clear a completed Study Director repository-maintenance marker.'});
   }
+  async function renewRepositoryMaintenance(ref,baseContext=EMPTY_DRIVE_OPERATION){
+    const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id=String(ref&&ref.id||'');
+    if(!maintenanceIdValid(id))throw noRetry(new Error('Repository maintenance renewal has an invalid identity.'));
+    // Rotate immutable markers with overlap. Existing app versions understand
+    // both markers; no mutable timestamp or longer expiry protocol is required.
+    const next=await beginRepositoryMaintenance(context);
+    try{
+      const remoteId=trustedCoordinationRemoteId(ref,parent,MAINTENANCE_KIND,maintenanceIdValid);
+      const previous=remoteId?await getFileMetadata(remoteId,context).catch(error=>{if(Number(error&&error.driveStatus)===404)return null;throw error;}):await findRepositoryMaintenance(parent,id,context);
+      if(!previous||!validMaintenanceMetadata(previous,parent)||previous.appProperties[REPOSITORY_ID_MARKER]!==id||Date.now()-Date.parse(previous.createdTime)>=MAINTENANCE_MAX_AGE_MS)throw noRetry(new Error('Repository maintenance protection was interrupted. A fresh inventory is required.'));
+      await endRepositoryMaintenance(ref,context);return next;
+    }catch(error){
+      await endRepositoryMaintenance(next,EMPTY_DRIVE_OPERATION).catch(()=>{});throw error;
+    }
+  }
   async function listRepositoryFiles(kind,{limit=100000}={},context=EMPTY_DRIVE_OPERATION){
     if(!REPOSITORY_KINDS.has(kind))throw noRetry(new Error('Repository file kind is invalid.'));
     const parent=await ensureFolder(context),q=driveQuery([
@@ -756,7 +771,7 @@
     const kind=String(options&&options.kind||'');return await listRepositoryFiles(kind,{limit:['checkpoint','commit'].includes(kind)?64:100000},context);
   }
   function beginRepositoryOperation(options={}){
-    const base=driveOperationContext({signal:options&&options.signal});
+    const base=driveOperationContext({signal:options&&options.signal,checkProtection:options&&options.checkProtection});
     return Object.freeze({
       list:opts=>repositoryList(opts,base),
       upload:file=>repositoryUpload(file,base),
@@ -769,6 +784,7 @@
       beginMaintenance:()=>beginRepositoryMaintenance(base),
       listMaintenances:()=>listRepositoryMaintenances(base),
       assertMaintenance:ref=>assertRepositoryMaintenance(ref,base),
+      renewMaintenance:ref=>renewRepositoryMaintenance(ref,base),
       endMaintenance:ref=>endRepositoryMaintenance(ref,base),
       scope:()=>repositoryScope(base),
       choose:chooseRepositoryCheckpoint,
@@ -1025,7 +1041,7 @@
       disconnectLabel:'Disconnect Drive',
       disconnect,
       release,
-      repository:Object.freeze({list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:beginRepositoryPublication,listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,scope:()=>repositoryScope(),choose:chooseRepositoryCheckpoint,beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
+      repository:Object.freeze({list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:beginRepositoryPublication,listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,scope:()=>repositoryScope(),choose:chooseRepositoryCheckpoint,beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
     }));
   }
 

@@ -8387,11 +8387,12 @@ BackupProviderRuntime.configureRepositoryMaintenance(Object.freeze({read:reposit
 async function canonicalLocalRecoveryEmpty(){
   try{
     const [records,notePayload,active,plans,assets]=await Promise.all([
-      AppData.dailyRecords.list(),AppData.notes.readFreshPayload(),AppData.activeSession.load(),AppData.planData.read(),AttachmentStorage.list()
+      AppData.dailyRecords.list({strict:true}),AppData.notes.readFreshPayload(),AppData.activeSession.load(0,{strict:true}),AppData.planData.read(),AttachmentStorage.list()
     ]);
+    if(!active||active.ok!==true||active.error)throw active?.error||new Error('Active Session could not be read completely.');
     const hasPlan=!!(plans&&(String(plans.draft||'').trim()||(plans.savedPlans||[]).length));
     return !(records||[]).length&&!Object.keys(notePayload||{}).length&&!active?.value&&!hasPlan&&!(assets||[]).length;
-  }catch(error){AppDiagnostics.capture('backup.device-recovery-empty-check',error,'warn');return false;}
+  }catch(error){AppDiagnostics.capture('backup.device-recovery-empty-check',error,'warn');return null;}
 }
 let deviceRecoveryOfferRunning=false,deviceRecoveryOfferDismissed=false,deviceRecoveryHintNotified=false;
 async function offerDeviceRecoveryIfLocalEmpty(options={}){

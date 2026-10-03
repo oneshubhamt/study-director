@@ -131,10 +131,15 @@ registry.define('repository-background',1,input=>{
       }
       const controller=new TargetAbortController(),relay=()=>{if(!controller.signal.aborted)controller.abort(externalSignal?.reason instanceof Error?externalSignal.reason:backgroundAbort(preemptCode,preemptMessage));};
       if(externalSignal){if(externalSignal.aborted)relay();else externalSignal.addEventListener('abort',relay,{once:true});}
-      let resolveSettlement;const settlement=new Promise(resolve=>{resolveSettlement=resolve;});let budgetTimer=null;
-      if(Number(budgetMs)>0)budgetTimer=environment.setTimeout(()=>{if(!controller.signal.aborted)controller.abort(backgroundAbort(budgetCode,budgetMessage));},Math.max(1,Number(budgetMs)));
+      let resolveSettlement;const settlement=new Promise(resolve=>{resolveSettlement=resolve;});let budgetTimer=null,released=false;
+      const startBudget=milliseconds=>{
+        if(['automatic','convergence'].includes(name))throw new TypeError('Background transfers require progress watchdogs, not a total housekeeping deadline.');
+        if(released||controller.signal.aborted||budgetTimer!==null||!(Number(milliseconds)>0))return false;
+        budgetTimer=environment.setTimeout(()=>{if(!controller.signal.aborted)controller.abort(backgroundAbort(budgetCode,budgetMessage));},Math.max(1,Number(milliseconds)));return true;
+      };
+      if(Number(budgetMs)>0)startBudget(budgetMs);
       const row={controller,settlement,preemptCode:String(preemptCode),preemptMessage:String(preemptMessage)};active.set(name,row);
-      return freeze({job:name,signal:controller.signal,controller,settlement,release:()=>{if(externalSignal)externalSignal.removeEventListener('abort',relay);if(budgetTimer!==null){environment.clearTimeout(budgetTimer);budgetTimer=null;}if(active.get(name)===row)active.delete(name);resolveSettlement?.();resumeTimers();}});
+      return freeze({job:name,signal:controller.signal,controller,settlement,startBudget,release:()=>{if(released)return;released=true;if(externalSignal)externalSignal.removeEventListener('abort',relay);if(budgetTimer!==null){environment.clearTimeout(budgetTimer);budgetTimer=null;}if(active.get(name)===row)active.delete(name);resolveSettlement?.();resumeTimers();}});
     }
     function beginForeground({externalSignal=null,cancelCode='REPOSITORY_FOREGROUND_CANCELLED',cancelMessage='Repository foreground operation was cancelled.'}={}){
       if(foreground)return null;suspendTimers();
@@ -273,7 +278,7 @@ registry.define('repository-background',1,input=>{
         if(!scope){schedule(MAINTENANCE.busyMs,'background-busy','replace');emit('deferred',{reason:'background-busy',nextEligibleAt:new Date(nowMs()+MAINTENANCE.busyMs).toISOString(),actionable:false});return freeze({status:'deferred',reason:'background-busy'});}
         emit('running',{reason:String(pending.reason||trigger),requestedAt:String(pending.requestedAt||''),nextEligibleAt:String(pending.nextEligibleAt||''),actionable:true,transition:input.coordinator.transition('maintenance','scheduled','running',{reason:String(pending.reason||trigger),nextEligibleAt:String(pending.nextEligibleAt||''),actionable:true})});
         try{
-          emit('cleanup-start',{reason:String(pending.reason||trigger)});const cleanup=await input.execute(freeze({signal:scope.signal,pending,trigger:String(trigger||'scheduled')})),plan=input.intent.plan(cleanup);emit('cleanup-complete',{cleanup,plan});
+          emit('cleanup-start',{reason:String(pending.reason||trigger)});const cleanup=await input.execute(freeze({signal:scope.signal,startBudget:scope.startBudget,pending,trigger:String(trigger||'scheduled')})),plan=input.intent.plan(cleanup);emit('cleanup-complete',{cleanup,plan});
           if(cleanup&&cleanup.gcPending===true){
             const persisted=await persistPending(plan.reason,plan.retryMs,pending);if(persisted.superseded)return preserveNewerRequest();const reason=persisted.ok?plan.reason:'intent-write-failed',retryMs=persisted.ok?plan.retryMs:persisted.retryMs,state=persisted.ok?plan.state:'failed',actionable=persisted.ok?plan.actionable:false;
             const transition=input.coordinator.transition('maintenance','running',state,{reason,nextEligibleAt:persisted.nextEligibleAt,actionable});emit('pending',{reason,retryMs,nextEligibleAt:persisted.nextEligibleAt,actionable,cleanup,plan,transition});schedule(retryMs,reason,'replace');return freeze({status:'pending',reason,retryMs,nextEligibleAt:persisted.nextEligibleAt,...cleanup});

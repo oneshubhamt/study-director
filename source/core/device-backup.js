@@ -157,8 +157,11 @@ registry.define('device-backup',1,input=>{
     }
     async function reconcileSourceRevision(){
       if(!connected()||!ownership.canMutate()||pendingRevision>backedUpRevision||!hasNewerSourceRevision())return false;
-      const current=currentSourceRevision();observedSourceRevision=current;
-      if(checkpointCount>0&&await hooks.localRecoveryEmpty())return false;
+      const current=currentSourceRevision(),empty=checkpointCount>0?await hooks.localRecoveryEmpty():false;
+      if(!current||typeof empty!=='boolean'||current!==currentSourceRevision())throw Object.assign(new Error('Local recovery data could not be verified for automatic backup discovery.'),{code:'DEVICE_SOURCE_UNAVAILABLE'});
+      if(!connected()||!ownership.canMutate())return false;
+      observedSourceRevision=current;
+      if(empty)return false;
       pendingRevision+=1;if(!firstPendingAt)firstPendingAt=nowMs();schedule({urgent:true});publish();return true;
     }
     function canSchedulePendingBackup(){return connected()&&ownership.canMutate()&&!busy&&!foregroundController&&!automaticSuspensions.size&&pendingRevision>backedUpRevision;}
@@ -510,34 +513,30 @@ registry.define('device-backup',1,input=>{
       });
       return freeze({items:freeze(rows.filter(Boolean)),overflow:false,invalidCount});
     }
-    async function cleanupRepository(directories,state,{maintenanceLease,deadlineAt=0,signal=null,objectInventory=null}={}){
+    async function cleanupRepository(directories,state,{maintenanceLease,signal=null}={}){
       if(!maintenanceLease)throw new Error('Device Folder maintenance protection is required before repository cleanup.');
       await assertDeviceMaintenance(directories,maintenanceLease);
-      const objectGraceBefore=new Date(nowMs()-OBJECT_GC_GRACE_MS).toISOString(),assertLease=async()=>assertDeviceMaintenance(directories,maintenanceLease);let uncertain=state.unreadable.length,preRemoved=0;
-      for(const row of state.uncommitted||[]){
-        try{assertMaintenanceBudget(deadlineAt,signal);await assertLease();await directories.checkpoints.removeEntry(row.name);preRemoved+=1;}
-        catch(error){if(error&&(error.code==='DEVICE_MAINTENANCE_BUDGET'||error.name==='AbortError'))throw error;if(error&&error.name!=='NotFoundError'){uncertain+=1;capture('device-backup.repository-uncommitted-delete',error);}}
-      }
-      for(const name of state.orphanCommits||[]){
-        try{assertMaintenanceBudget(deadlineAt,signal);await assertLease();await directories.commits.removeEntry(name);}
-        catch(error){if(error&&(error.code==='DEVICE_MAINTENANCE_BUDGET'||error.name==='AbortError'))throw error;if(error&&error.name!=='NotFoundError'){uncertain+=1;capture('device-backup.repository-orphan-commit-delete',error);}}
-      }
+      const objectGraceBefore=new Date(nowMs()-OBJECT_GC_GRACE_MS).toISOString(),assertLease=async()=>assertDeviceMaintenance(directories,maintenanceLease);
+      let deadlineAt=0;
       const cleanupRows=freeze(state.valid.map(row=>freeze({id:row.id,ref:freeze({name:row.name,commitName:row.commitName}),manifest:row.manifest}))),retentionBacklog=repository.selectRetention(cleanupRows,{now:new Date(nowMs())}).remove.length,checkpointDeleteBudget=Math.min(256,Math.max(16,retentionBacklog));
       const result=await repository.cleanup(freeze({
         checkpoints:cleanupRows,
-        invalidCount:uncertain,ignoredCount:0,overflow:false,blockObjectGc:false,objectGraceBefore,maxCheckpointDeletes:checkpointDeleteBudget,maxObjectDeletes:64,
+        inventoryBeforeDelete:true,beginDeletion:async()=>{await maintenanceLease.keepAlive(true);operationMark('maintenance-inventory-complete',{total:state.valid.length},maintenanceTraceId);deadlineAt=nowMs()+MAINTENANCE_PASS_BUDGET_MS;},
+        invalidCount:state.unreadable.length,ignoredCount:0,overflow:false,blockObjectGc:false,objectGraceBefore,maxCheckpointDeletes:checkpointDeleteBudget,maxObjectDeletes:64,
+        incompleteArtifacts:freeze([...(state.uncommitted||[]).map(row=>freeze({kind:'checkpoint',ref:row.name})),...(state.orphanCommits||[]).map(name=>freeze({kind:'commit',ref:name}))]),
+        deleteIncompleteArtifact:async artifact=>{assertMaintenanceBudget(deadlineAt,signal);await assertLease();try{await directories[artifact.kind==='checkpoint'?'checkpoints':'commits'].removeEntry(artifact.ref);}catch(error){if(!error||error.name!=='NotFoundError')throw error;}return true;},
         deleteCheckpoint:async row=>{
           assertMaintenanceBudget(deadlineAt,signal);await assertLease();try{await directories.checkpoints.removeEntry(row.ref.name);}catch(error){if(!error||error.name!=='NotFoundError')throw error;}
           if(row.ref.commitName){assertMaintenanceBudget(deadlineAt,signal);await assertLease();try{await directories.commits.removeEntry(row.ref.commitName);}catch(error){if(!error||error.name!=='NotFoundError')throw error;}}
           return true;
         },
         listObjects:async()=>{
-          assertMaintenanceBudget(deadlineAt,signal);await assertLease();return objectInventory||readObjectInventory(directories,{deadlineAt,signal,check:maintenanceLease.keepAlive});
+          assertMaintenanceBudget(deadlineAt,signal);await assertLease();return readObjectInventory(directories,{deadlineAt,signal,check:maintenanceLease.keepAlive});
         },
         deleteObject:async item=>{assertMaintenanceBudget(deadlineAt,signal);await assertLease();try{await directories.objects.removeEntry(item.ref.name);return true;}catch(error){if(error&&error.name==='NotFoundError')return true;throw error;}},
         onError:(kind,error)=>capture('device-backup.repository-'+kind,error)
       }));
-      return freeze({...result,gcPending:result.gcPending===true,deferredIncomplete:0,removedUncommitted:preRemoved,warning:String(result.warning||'')});
+      return result;
     }
 
     async function cleanupDeviceRepositorySafely(directories,{signal=null}={}){
@@ -550,10 +549,8 @@ registry.define('device-backup',1,input=>{
         // exclusion alive so an incomplete scan is never reused after a writer.
         // Only the destructive phase spends the short housekeeping allowance.
         operationMark('maintenance-inventory-start',{},maintenanceTraceId);
-        const check=()=>maintenanceLease.keepAlive(),state=updateRecoveryState(await readCheckpointState(directories,{signal,check})),objectInventory=await readObjectInventory(directories,{signal,check});
-        operationMark('maintenance-inventory-complete',{total:state.valid.length+objectInventory.items.length},maintenanceTraceId);
-        await maintenanceLease.keepAlive(true);
-        const deadlineAt=nowMs()+MAINTENANCE_PASS_BUDGET_MS,cleanup=await cleanupRepository(directories,state,{maintenanceLease,deadlineAt,signal,objectInventory});
+        const check=()=>maintenanceLease.keepAlive(),state=updateRecoveryState(await readCheckpointState(directories,{signal,check}));
+        const cleanup=await cleanupRepository(directories,state,{maintenanceLease,signal});
         if(Array.isArray(cleanup.retained))updateRecoveryRows(cleanup.retained);return cleanup;
       }finally{await endDeviceMaintenance(directories,maintenanceLease);}
     }

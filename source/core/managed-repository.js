@@ -428,11 +428,23 @@ function rethrowCleanupControl(error){
 async function cleanupRepositoryRetention(input){
   const rows=Array.isArray(input&&input.checkpoints)?[...input.checkpoints]:[];
   rows.sort((a,b)=>Date.parse(a.manifest?.exportedAt||0)-Date.parse(b.manifest?.exportedAt||0)||String(a.id||'').localeCompare(String(b.id||'')));
-  if(input&&input.overflow===true)return freeze({warning:'Checkpoint saved and verified, but retention cleanup stopped because the repository listing overflowed its safety bound.',retained:freeze(rows),removedCheckpoints:0,checkpointDeferred:0,checkpointFailures:0,gcRemoved:0,gcDeferred:0,gcBudgetDeferred:0,gcFailures:0,gcSkipped:true,gcPending:true,uncertainCount:1,objectGcBlocked:false,overflow:true,selection:null});
+  const checkpointUncertain=Math.max(0,Number(input&&input.invalidCount)||0)+Math.max(0,Number(input&&input.ignoredCount)||0),overflow=input&&input.overflow===true;
+  // Missing and unreadable are different states. An incomplete inventory cannot
+  // prove that any manifest, commit or shared object is safe to remove.
+  if(overflow||checkpointUncertain)return freeze({warning:'Repository cleanup was deferred because backup history could not be read completely. No backup files were removed.',retained:freeze(rows),removedCheckpoints:0,removedUncommitted:0,removedOrphanCommits:0,deferredIncomplete:0,checkpointDeferred:0,checkpointFailures:0,gcRemoved:0,gcDeferred:0,gcBudgetDeferred:0,gcFailures:0,gcSkipped:true,gcPending:true,uncertainCount:checkpointUncertain+(overflow?1:0),objectGcBlocked:input&&input.blockObjectGc===true,overflow,selection:null});
+  const preparedObjects=input&&input.inventoryBeforeDelete===true?await input.listObjects():null;
+  await input.beginDeletion?.();
   const selection=selectRepositoryRetention(rows,{now:input&&input.now||new Date()}),keep=[...selection.retained],remove=[...selection.remove],retainedIds=new Set();for(const row of keep)for(const entry of row.manifest?.objects||[])retainedIds.add(entry.objectId);
   const checkpointDeleteLimit=Number.isSafeInteger(Number(input&&input.maxCheckpointDeletes))?Math.max(1,Number(input.maxCheckpointDeletes)):Number.POSITIVE_INFINITY;
   const objectDeleteLimit=Number.isSafeInteger(Number(input&&input.maxObjectDeletes))?Math.max(1,Number(input.maxObjectDeletes)):Number.POSITIVE_INFINITY;
-  let deletionFailures=0,removedCheckpoints=0,checkpointDeferred=0,checkpointDeleteAttempts=0;const failedRows=[],deferredRows=[];
+  let deletionFailures=0,removedCheckpoints=0,checkpointDeferred=0,checkpointDeleteAttempts=0,removedUncommitted=0,removedOrphanCommits=0;
+  const failedRows=[],deferredRows=[],incomplete=Array.isArray(input&&input.incompleteArtifacts)?input.incompleteArtifacts:[],deferredIncomplete=input&&input.blockObjectGc===true?incomplete.length:0;
+  if(!deferredIncomplete)for(const artifact of incomplete){
+    if(checkpointDeleteAttempts>=checkpointDeleteLimit){checkpointDeferred+=1;continue;}
+    checkpointDeleteAttempts+=1;
+    try{if(await input.deleteIncompleteArtifact(artifact)===false)throw new Error('Incomplete artifact deletion was not confirmed.');if(artifact.kind==='checkpoint')removedUncommitted+=1;else removedOrphanCommits+=1;}
+    catch(error){rethrowCleanupControl(error);deletionFailures+=1;try{input.onError?.('incomplete-delete',error,artifact);}catch(reportingError){}}
+  }
   for(const row of remove){
     if(checkpointDeleteAttempts>=checkpointDeleteLimit){checkpointDeferred+=1;deferredRows.push(row);for(const entry of row.manifest?.objects||[])retainedIds.add(entry.objectId);continue;}
     checkpointDeleteAttempts+=1;
@@ -443,7 +455,7 @@ async function cleanupRepositoryRetention(input){
   const graceBefore=Date.parse(String(input&&input.objectGraceBefore||''));
   if(!gcSkipped){
     try{
-      const listing=await input.listObjects(),objects=Array.isArray(listing)?listing:Array.isArray(listing&&listing.items)?listing.items:[];
+      const listing=preparedObjects||await input.listObjects(),objects=Array.isArray(listing)?listing:Array.isArray(listing&&listing.items)?listing.items:[];
       objectListingOverflow=listing&&listing.overflow===true;objectListingInvalid=Math.max(0,Number(listing&&listing.invalidCount)||0);
       if(objectListingOverflow||objectListingInvalid>0)gcSkipped=true;
       else for(const item of objects){
@@ -457,15 +469,16 @@ async function cleanupRepositoryRetention(input){
     }
   }
   const parts=[];
-  if(deletionFailures)parts.push(`${deletionFailures} old checkpoint${deletionFailures===1?' was':'s were'} retained because deletion could not be confirmed.`);
-  if(checkpointDeferred)parts.push(`${checkpointDeferred} old checkpoint${checkpointDeferred===1?' was':'s were'} deferred to keep this maintenance pass bounded.`);
+  if(deferredIncomplete)parts.push(`${deferredIncomplete} incomplete publication artifact${deferredIncomplete===1?' was':'s were'} retained because another repository publication may still be in progress.`);
+  if(deletionFailures)parts.push(`${deletionFailures} backup file${deletionFailures===1?' was':'s were'} retained because deletion could not be confirmed.`);
+  if(checkpointDeferred)parts.push(`${checkpointDeferred} backup file${checkpointDeferred===1?' was':'s were'} deferred to keep this maintenance pass bounded.`);
   if(gcSkipped)parts.push(input&&input.blockObjectGc===true?'Shared-object cleanup was deferred because another repository publication may still be in progress.':objectListingOverflow||objectListingInvalid||objectListingFailed?'Shared-object cleanup was deferred because the repository object listing could not be read or interpreted safely.':'Shared-object cleanup was deferred because checkpoint state still needs a later safe maintenance pass.');
   if(gcDeferred)parts.push(`${gcDeferred} recently created unreferenced object${gcDeferred===1?' was':'s were'} retained until a later maintenance pass.`);
   if(gcBudgetDeferred)parts.push(`${gcBudgetDeferred} unused object${gcBudgetDeferred===1?' was':'s were'} deferred to keep this maintenance pass bounded.`);
   if(gcFailures)parts.push(`${gcFailures} unused object${gcFailures===1?' could':'s could'} not be removed and will be retried later.`);
-  const checkpointUncertain=Math.max(0,Number(input&&input.invalidCount)||0)+Math.max(0,Number(input&&input.ignoredCount)||0),uncertain=checkpointUncertain+objectListingInvalid+(objectListingFailed?1:0);if(checkpointUncertain)parts.push(`${checkpointUncertain} unrecognised or unreadable checkpoint${checkpointUncertain===1?' was':'s were'} left untouched.`);if(objectListingInvalid)parts.push(`${objectListingInvalid} repository object entr${objectListingInvalid===1?'y was':'ies were'} unreadable and left untouched.`);if(objectListingFailed)parts.push('Repository object enumeration failed and was left untouched.');if(objectListingOverflow)parts.push('Repository object enumeration exceeded its safety bound and was left untouched.');
+  const uncertain=objectListingInvalid+(objectListingFailed?1:0);if(objectListingInvalid)parts.push(`${objectListingInvalid} repository object entr${objectListingInvalid===1?'y was':'ies were'} unreadable and left untouched.`);if(objectListingFailed)parts.push('Repository object enumeration failed and was left untouched.');if(objectListingOverflow)parts.push('Repository object enumeration exceeded its safety bound and was left untouched.');
   const actualRetained=[...keep,...failedRows,...deferredRows].sort((a,b)=>Date.parse(a.manifest?.exportedAt||0)-Date.parse(b.manifest?.exportedAt||0)||String(a.id||'').localeCompare(String(b.id||'')));
-  return freeze({warning:parts.join(' '),retained:freeze(actualRetained),removedCheckpoints,checkpointDeferred,checkpointFailures:deletionFailures,gcRemoved,gcDeferred,gcBudgetDeferred,gcFailures,gcSkipped,gcPending:gcSkipped||checkpointDeferred>0||gcDeferred>0||gcBudgetDeferred>0||gcFailures>0,uncertainCount:uncertain,objectGcBlocked:input&&input.blockObjectGc===true,objectListingFailed,overflow:objectListingOverflow,selection});
+  return freeze({warning:parts.join(' '),retained:freeze(actualRetained),removedCheckpoints,removedUncommitted,removedOrphanCommits,deferredIncomplete,checkpointDeferred,checkpointFailures:deletionFailures,gcRemoved,gcDeferred,gcBudgetDeferred,gcFailures,gcSkipped,gcPending:gcSkipped||deferredIncomplete>0||checkpointDeferred>0||gcDeferred>0||gcBudgetDeferred>0||gcFailures>0,uncertainCount:uncertain,objectGcBlocked:input&&input.blockObjectGc===true,objectListingFailed,overflow:objectListingOverflow,selection});
 }
 
 async function prepareRepositoryCheckpointWork(previousManifests=null,{interactive=false,availableObjectIds=null,excludedObjectIds=null,retention=null,signal=null}={}){
