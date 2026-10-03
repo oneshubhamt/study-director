@@ -41,17 +41,19 @@ async function render(page,{seedData=false}={}){
 function enforcePerformance(result,label,{strictMainThread=true}={}){
   assert.ok(result.shellVisibleMs<=PERFORMANCE_BUDGETS.insightsShellMs,`${label} visible shell took ${result.shellVisibleMs.toFixed(1)} ms.`);
   assert.ok(result.profile.shellMs<=PERFORMANCE_BUDGETS.insightsShellMs,`${label} shell profile exceeded budget.`);
-  assert.ok(result.profile.completeMs<=PERFORMANCE_BUDGETS.insightsCompleteMs,`${label} completed in ${result.profile.completeMs} ms.`);
+  const profile=result.profile;
+  assert.ok(profile.completeMs<=PERFORMANCE_BUDGETS.insightsCompleteMs,`${label} completed in ${profile.completeMs} ms (data ${profile.recordLoadMs}, model ${profile.modelComputeMs}, worker round trip ${profile.workerRoundTripMs}, DOM ${profile.domMs}, paint ${profile.layoutPaintMs}; maximum task ${profile.maxLongTaskMs}, DOM chunk ${profile.maxDomChunkMs}).`);
   if(strictMainThread)assert.ok(result.profile.maxLongTaskMs<=PERFORMANCE_BUDGETS.insightsMaxMainThreadTaskMs,`${label} long task was ${result.profile.maxLongTaskMs} ms.`);
   assert.ok(result.profile.maxDomChunkMs<=PERFORMANCE_BUDGETS.insightsMaxDomChunkMs,`${label} DOM chunk was ${result.profile.maxDomChunkMs} ms.`);
   assert.ok(result.profile.domChunks>=9,`${label} did not progressively render secondary sections.`);
   assert.match(result.text,/Insights/i);
 }
+function reportedProfile({modelSignature,...profile}){return profile;}
 
 try{
   const workerPage=await open();
   const workerResult=await render(workerPage,{seedData:true});
-  assert.equal(workerResult.profile.mode,'worker',JSON.stringify(workerResult));console.log('Worker render profile:',JSON.stringify(workerResult.profile));enforcePerformance(workerResult,'Worker path');
+  assert.equal(workerResult.profile.mode,'worker',JSON.stringify(reportedProfile(workerResult.profile)));console.log('Worker render profile:',JSON.stringify(reportedProfile(workerResult.profile)));enforcePerformance(workerResult,'Worker path');
 
   const fallbackPage=await open(`Object.defineProperty(window,'Worker',{configurable:true,writable:true,value:undefined});`);
   const fallbackResult=await render(fallbackPage);
@@ -69,7 +71,7 @@ try{
   assert.deepEqual(unexpected,[]);
   console.log(JSON.stringify({
     status:'PASS',suite:'insights-performance',fixtureDays:PERFORMANCE_BUDGETS.referenceInsightsDays,
-    worker:workerResult.profile,fallback:fallbackResult.profile,workerFailure:brokenResult.profile,
+    worker:reportedProfile(workerResult.profile),fallback:reportedProfile(fallbackResult.profile),workerFailure:brokenResult.profile,
     checks:{visibleShell:true,progressiveDom:true,workerFallbackParity:true,constructorFailureReported:true,workerPathWithinLongTaskBudget:true,fallbackDegradationReported:true}
   },null,2));
 }finally{

@@ -275,12 +275,17 @@
   }
   function dayName(iso){
     if(!isIsoDate(iso))return '';
-    return new Date(iso+'T00:00:00').toLocaleDateString('en-IN',{weekday:'short'});
+    return weekdayFormatter.format(new Date(iso+'T00:00:00Z'));
   }
+  // Calendar dates have no time zone. Reuse formatters rather than constructing
+  // locale machinery for every chart label, and keep the date stable across zones.
+  const weekdayFormatter=new Intl.DateTimeFormat('en-IN',{weekday:'short',timeZone:'UTC'});
+  const shortDateFormatter=new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',timeZone:'UTC'});
+  const shortDateYearFormatter=new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',year:'2-digit',timeZone:'UTC'});
   function shortDate(iso){
     if(!isIsoDate(iso))return 'No date';
     const includeYear=iso.slice(0,4)!==localIsoDate().slice(0,4);
-    return new Date(iso+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',...(includeYear?{year:'2-digit'}:{})});
+    return (includeYear?shortDateYearFormatter:shortDateFormatter).format(new Date(iso+'T00:00:00Z'));
   }
   function minutesLabel(minutes){
     const m=Math.round(Math.abs(num(minutes)));
