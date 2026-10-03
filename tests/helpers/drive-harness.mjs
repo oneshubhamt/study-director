@@ -18,6 +18,7 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
   const folderMetadata=(id='folder-1')=>({id,name:EXTERNAL_REPOSITORY_IDENTITIES.driveFolder,mimeType:'application/vnd.google-apps.folder',ownedByMe:true,shared:!!state.folderShared,trashed:state.trashedFolders.has(id),appProperties:{studyDirectorFolder:'true'},capabilities:{canAddChildren:true}});
   const fileMetadata=file=>({id:file.id,name:file.name,size:String(file.content.size),version:String(file.version||''),modifiedTime:file.modifiedTime,createdTime:file.createdTime,mimeType:file.mimeType,parents:[...file.parents],ownedByMe:file.ownedByMe,shared:file.shared,trashed:file.trashed,sha256Checksum:String(file.sha256Checksum||''),appProperties:{...file.appProperties},capabilities:{canDownload:file.canDownload}});
   const findId=pathname=>decodeURIComponent(pathname.split('/').at(-1));
+  const delay=(ms,signal)=>new Promise((resolve,reject)=>{let timer;const clear=()=>{harnessClearTimeout(timer);signal?.removeEventListener('abort',abort);},abort=()=>{clear();reject(signal.reason||Object.assign(new Error('QA_FIXTURE request cancelled'),{name:'AbortError'}));};timer=harnessSetTimeout(()=>{clear();resolve();},ms);if(signal?.aborted)abort();else signal?.addEventListener('abort',abort,{once:true});});
   async function mockFetch(input,options={}){
     const url=new URL(String(input)),method=String(options.method||'GET').toUpperCase(),headers=new Headers(options.headers||{});
     state.requests.push({url:url.href,method,authorization:headers.get('Authorization')||''});
@@ -53,13 +54,13 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
       if(kindMatch)rows=rows.filter(file=>String(file.appProperties?.studyDirectorRepositoryKind||'')===kindMatch[1]);
       if(idMatch)rows=rows.filter(file=>String(file.appProperties?.studyDirectorRepositoryId||'')===idMatch[1]);
       const files=rows.map(fileMetadata).sort((a,b)=>String(b.createdTime).localeCompare(String(a.createdTime)));
-      const offset=Number(url.searchParams.get('pageToken')||0),size=state.pageSize&&kindMatch?.[1]==='object'?state.pageSize:Number(url.searchParams.get('pageSize'))||1000;
+      const offset=Number(url.searchParams.get('pageToken')||0),size=state.pageSizes?.[kindMatch?.[1]]||(state.pageSize&&kindMatch?.[1]==='object'?state.pageSize:Number(url.searchParams.get('pageSize'))||1000);
       if(state.pageDelayMs&&kindMatch?.[1]==='object'){
         state.objectPageStarts=(state.objectPageStarts||0)+1;state.activeObjectPages=(state.activeObjectPages||0)+1;
-        try{await new Promise((resolve,reject)=>{let timer;const clear=()=>{harnessClearTimeout(timer);options.signal?.removeEventListener('abort',abort);},abort=()=>{clear();reject(options.signal.reason||Object.assign(new Error('QA_FIXTURE page cancelled'),{name:'AbortError'}));};timer=harnessSetTimeout(()=>{clear();resolve();},state.pageDelayMs);if(options.signal?.aborted)abort();else options.signal?.addEventListener('abort',abort,{once:true});});}
+        try{await delay(state.pageDelayMs,options.signal);}
         finally{state.activeObjectPages--;}
       }
-      return json({files:files.slice(offset,offset+size),...(offset+size<files.length?{nextPageToken:String(offset+size)}:{})});
+      return json({files:files.slice(offset,offset+size),...(offset+size<files.length?{nextPageToken:state.repeatPageKinds?.has(kindMatch?.[1])?'1':String(offset+size)}:{}),...(state.incompleteSearchKinds?.has(kindMatch?.[1])?{incompleteSearch:true}:{})});
     }
     if(url.pathname==='/drive/v3/files'&&method==='POST'){
       if(state.folderCreateDenied)return json({error:{message:'folder creation denied'}},403);
@@ -107,8 +108,13 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
       const id=findId(url.pathname);
       if(state.folders.includes(id)&&url.searchParams.get('alt')!=='media')return json(folderMetadata(id));
       const file=state.files.get(id);
-      if(file&&url.searchParams.get('alt')==='media'&&state.failMediaKinds?.has(file.appProperties?.studyDirectorRepositoryKind))return json({error:{message:'QA_FIXTURE temporarily unavailable backup metadata'}},404);if(!file)return json({error:{message:'not found'}},404);
+      if(file&&url.searchParams.get('alt')==='media'&&(state.failMediaKinds?.has(file.appProperties?.studyDirectorRepositoryKind)||state.failMediaIds?.has(id)))return json({error:{message:'QA_FIXTURE temporarily unavailable backup metadata'}},404);if(!file)return json({error:{message:'not found'}},404);
       if(url.searchParams.get('alt')==='media'){
+        if(state.historyReadDelayMs&&['checkpoint','commit'].includes(file.appProperties?.studyDirectorRepositoryKind)){
+          state.activeHistoryReads=(state.activeHistoryReads||0)+1;state.maxHistoryReads=Math.max(state.maxHistoryReads||0,state.activeHistoryReads);
+          try{await delay(state.historyReadDelayMs,options.signal);}finally{state.activeHistoryReads--;}
+        }
+        if(['checkpoint','commit'].includes(file.appProperties?.studyDirectorRepositoryKind))(state.historyReadCompletions??=[]).push(id);
         const range=headers.get('Range');if(range&&state.rangeMode!=='ignored'){
           const match=/^bytes=(\d+)-(\d+)$/u.exec(range),start=Number(match[1]),end=Number(match[2]);let content=file.content.slice(start,end+1);if(state.rangeMode==='truncated')content=content.slice(0,-1);
           return new Response(content,{status:206,headers:{'Content-Range':state.rangeMode==='wrong-range'?`bytes 1-2/${file.content.size}`:`bytes ${start}-${end}/${file.content.size}`}});

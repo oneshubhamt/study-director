@@ -42,7 +42,7 @@ const exportsPort=freeze({
   run:async(type,data,options)=>{if(type==='file.release')return true;if(type==='checksum'){checksumCounter+=1;if(data&&data.value===audioBlob)return AUDIO_HASH;}if(type==='encode.open')encodeOpenCounter+=1;return engine.run(type,data,options?.progress);},
   download:async()=>{},chooseSave:()=>{},save:async()=>({status:'saved'})
 });
-const noop=()=>{};
+const noop=()=>{},diagnosticFailures=[],operationEvents=[];
 async function baselineFingerprint(keys){return engine.run('checksum',{value:JSON.stringify([...keys].sort()),algorithm:'sha256'});}
 async function writeBaseline(checkpointId,spec){
   if(!spec||spec.format!=='study-director.reconciliation-base-update')throw new Error('Expected reconciliation baseline update.');
@@ -72,7 +72,7 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
   view:freeze({presentation:backupPresentation,document:documentStub,refreshPnote:noop,refreshReview:noop,renderSchedule:noop}),
   events:freeze({libraryChanged:noop,backupCompleted:noop,reconcileAreaNotes:async()=>true,restoreAreaNotesSnapshot:async()=>true,restoreSessionState:async()=>true,verifyActiveSessionRuntime:async()=>true,requestDeviceBackupConvergence:async()=>freeze({status:'skipped',reason:'not-connected'})}),
   operations:freeze({assertAuthority:()=>true,clearFault:noop,failClosed:message=>{throw new Error(message);},runExclusive:async(kind,operation)=>operation()}),interactions:freeze({choose:async()=>null,configure:async()=>null,notify:noop}),
-  environment:freeze({AbortController,clearTimeout:id=>(backgroundClock||globalThis).clearTimeout(id),yieldTask:async()=>{},requestAnimationFrame:callback=>(callback(),1),setTimeout:(callback,delay)=>(backgroundClock||globalThis).setTimeout(callback,delay)}),diagnostics:freeze({capture:noop,start:()=>'',mark:()=>false,finish:()=>false,fail:()=>false}),
+  environment:freeze({AbortController,clearTimeout:id=>(backgroundClock||globalThis).clearTimeout(id),yieldTask:async()=>{},requestAnimationFrame:callback=>(callback(),1),setTimeout:(callback,delay)=>(backgroundClock||globalThis).setTimeout(callback,delay)}),diagnostics:freeze({capture:(phase,error)=>{diagnosticFailures.push({phase,error:String(error?.stack||error)});if(diagnosticFailures.length>12)diagnosticFailures.shift();},start:()=>'',mark:(phase,details)=>{operationEvents.push({phase,...details});if(operationEvents.length>100)operationEvents.shift();return false;},finish:()=>false,fail:()=>false}),
   assets:freeze({get:async id=>{assetReads+=1;assert.equal(id,'asset-audio');return audioBlob;},put:async()=>true,keys:async()=>assetDescriptor?['asset-audio']:[],list:async()=>assetDescriptor?[assetDescriptor]:[],importAll:async()=>true,restoreAll:async()=>true,removeMany:async()=>true,removeMetadata:async()=>0,scheduleMaintenance:noop})
 })}));
 
@@ -265,6 +265,18 @@ for(const date of ['2026-05-12','2026-06-15','2026-07-16','2026-08-02','2026-08-
 const retentionNow=new Date(2026,8,20,12,0,0),tiered=runtime.repository.selectRetention(retentionHistory,{now:retentionNow}),tierValues=Object.values(tiered.tiers);
 assert.equal(tiered.normalRetained,15,'fully populated managed history must retain exactly 15 normal recovery points');assert.equal(tiered.retained.length,15);assert.equal(tierValues.filter(value=>value==='latest').length,1);assert.equal(tierValues.filter(value=>value==='daily').length,6);assert.equal(tierValues.filter(value=>value==='weekly').length,4);assert.equal(tierValues.filter(value=>value==='monthly').length,4);
 assert.deepEqual(tiered.retained.map(row=>row.id),runtime.repository.selectRetention(retentionHistory,{now:retentionNow}).retained.map(row=>row.id),'retention selection must be deterministic for identical history and local date');
+// The anchor may be any weekday, including leap-day and year/month boundaries.
+// Dense history fills each slot; order and evaluator date cannot change it.
+for(const anchor of ['2024-02-29','2026-12-31',...Array.from({length:7},(_,day)=>`2026-10-${String(day+1).padStart(2,'0')}`)]){
+ const anchorMs=Date.parse(anchor+'T12:00:00Z'),dense=[];
+ for(let day=219;day>=0;day--){const date=new Date(anchorMs-day*86400000).toISOString().slice(0,10);dense.push(retentionRow(20000+day*2,date,'08:00:00'),retentionRow(20001+day*2,date,'11:00:00'));}
+ const selection=runtime.repository.selectRetention(dense,{now:new Date(anchorMs)}),tiers=Object.values(selection.tiers);
+ assert.equal(selection.normalRetained,15);assert.equal(tiers.filter(tier=>tier==='latest').length,1);assert.equal(tiers.filter(tier=>tier==='daily').length,6);assert.equal(tiers.filter(tier=>tier==='weekly').length,4);assert.equal(tiers.filter(tier=>tier==='monthly').length,4);
+ assert.equal(new Set(selection.retained.map(row=>row.manifest.retention.calendar.localDate)).size,15,'tiers must not overlap or retain two ordinary snapshots for a day');
+ assert.ok(selection.retained.every(row=>row.manifest.exportedAt.includes('T11:00:00')),'each occupied period must use its newest available checkpoint');
+ assert.deepEqual(selection.retained.map(row=>row.id),runtime.repository.selectRetention([...dense].reverse(),{now:new Date(anchorMs+86400000*30)}).retained.map(row=>row.id));
+ assert.deepEqual(selection.retained.map(row=>row.id),runtime.repository.selectRetention(selection.retained,{now:new Date(anchorMs)}).retained.map(row=>row.id),'retention must be idempotent');
+}
 const timezoneShiftedEvaluation=runtime.repository.selectRetention(retentionHistory,{now:new Date('2026-09-21T02:00:00-11:00')});assert.deepEqual(timezoneShiftedEvaluation.retained.map(row=>row.id),tiered.retained.map(row=>row.id),'tier windows must stay anchored to the committed Latest checkpoint capture rather than the evaluator timezone');assert.deepEqual(timezoneShiftedEvaluation.tiers,tiered.tiers,'timezone changes must not reinterpret retained tier labels for the same committed history');
 const sep13=retentionHistory.find(row=>row.manifest.retention.calendar.localDate==='2026-09-13'),historyThroughSep14=retentionHistory.filter(row=>row.manifest.retention.calendar.localDate<='2026-09-14'),asDaily=runtime.repository.selectRetention(historyThroughSep14,{now:new Date(2026,8,14,12)}),asWeekly=runtime.repository.selectRetention(retentionHistory,{now:retentionNow});assert.equal(asDaily.tiers[sep13.id],'daily','a recent checkpoint must occupy the Daily tier while inside the six-day window');assert.equal(asWeekly.tiers[sep13.id],'weekly','the same immutable checkpoint must graduate into Weekly after newer committed history moves the retention window forward');
 const sep16=retentionHistory.find(row=>row.manifest.retention.calendar.localDate==='2026-09-16'),sep23=retentionRow(979,'2026-09-23'),midweek=runtime.repository.selectRetention([...retentionHistory,sep23],{now:new Date(2026,8,23,12)});assert.equal(midweek.tiers[sep16.id],'weekly','the calendar week immediately beyond a mid-week Daily boundary must remain eligible using only its older, non-overlapping portion');
@@ -647,7 +659,7 @@ const assembledDriveCases=[];
 for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inventory','foreground-preemption']){
  const realDate=globalThis.Date,clock=createFakeClock('2026-10-03T12:00:00.000Z');backgroundClock=clock;globalThis.Date=clock.Date;backgroundReady=true;dailyRecords=[];notes={};assetDescriptor=null;
  const maintenance=new Map(),id='drive-'+scenario,h=createDriveHarness({clock,registerProvider:config=>runtime.providers.register(freeze({...config,id,label:'Drive Background QA'}))});
- const settle=async(predicate,limitMs=180000)=>{for(let elapsed=0;elapsed<limitMs;elapsed+=1000){await clock.drainMicrotasks(160);await new Promise(resolve=>setImmediate(resolve));if(predicate())return;await clock.advance(1000);}assert.fail('assembled Drive execution did not settle: '+JSON.stringify({scenario,now:clock.now(),intent:maintenance.get(id+'-cold'),status:runtime.providers.backgroundStatus().filter(row=>String(row.job).startsWith(id)),pages:h.state.objectPageStarts,activePages:h.state.activeObjectPages,requests:h.state.requests.slice(-3).map(row=>({method:row.method,url:new URL(row.url).pathname})),deletions:h.state.deletions.slice(-3)}));};
+ const settle=async(predicate,limitMs=180000)=>{for(let elapsed=0;elapsed<limitMs;elapsed+=100){await clock.drainMicrotasks(220);await new Promise(resolve=>setImmediate(resolve));if(predicate())return;await clock.advance(100);}assert.fail('assembled Drive execution did not settle: '+JSON.stringify({scenario,now:clock.now(),intent:maintenance.get(id+'-cold'),status:runtime.providers.backgroundStatus().filter(row=>String(row.job).startsWith(id)),pages:h.state.objectPageStarts,activePages:h.state.activeObjectPages,requests:h.state.requests.slice(-3).map(row=>({method:row.method,url:new URL(row.url).pathname})),deletions:h.state.deletions.slice(-3)}));};
  try{
   await h.provider.prepare();await h.provider.authorize();snapshotRevision='drive-'+scenario;sourceRevision='2026-10-03T11:00:00.000Z';
   await runtime.providers.backupRepositoryProvider(id);
@@ -662,16 +674,16 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
   else{h.state.pageSize=1;h.state.pageDelayMs=10000;}
   await runtime.providers.history(coldId,{interactive:false});
   if(scenario.endsWith('unavailable')){
-   await settle(()=>maintenance.get(coldId)?.reason==='blocked-uncertain');
+   await settle(()=>maintenance.get(coldId)?.reason==='blocked-uncertain'&&!runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').busy);
    assert.deepEqual([...h.state.files.keys()].sort(),allFiles,'temporary history failure cannot authorize any backup deletion');
    assert.equal(runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').scheduled,true);
-   h.state.failMediaKinds.clear();await clock.advance(15*60*1000+1000);
+   h.state.failMediaKinds.clear();await clock.advance(Math.max(0,Date.parse(maintenance.get(coldId).nextEligibleAt)-clock.now()-100));
   }else if(scenario==='foreground-preemption'){
    await settle(()=>h.state.activeObjectPages>0);
    const deletions=h.state.deletions.length;await runtime.providers.history(coldId,{interactive:false});
    await settle(()=>h.state.activeObjectPages===0&&maintenance.get(coldId)?.reason==='preempted');
    assert.equal(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length,0,'foreground preemption precedes all destructive work');
-   assert.ok(h.state.deletions.length>=deletions);await clock.advance(15000);
+   assert.ok(h.state.deletions.length>=deletions);await clock.advance(Math.max(0,Date.parse(maintenance.get(coldId).nextEligibleAt)-clock.now()-100));
   }
   await settle(()=>!maintenance.has(coldId));
   assert.deepEqual([...h.state.files.values()].filter(file=>['checkpoint','commit'].includes(kind(file))).map(file=>file.id).sort(),originalPairs);
@@ -682,4 +694,68 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
   assembledDriveCases.push(scenario);
  }finally{runtime.providers.configureRepositoryMaintenance(null);await h.provider.disconnect();globalThis.Date=realDate;backgroundClock=null;}
 }
-console.log(JSON.stringify({status:'PASS',suite:'repository-checkpoint',assembledDriveCases,firstAttachmentReads:1,secondAttachmentReads:0,simulatedAttachmentBytes:AUDIO_BYTES,identicalCheckpointAllObjectsReused:true,unchangedStructuredObjectsRecompressed:false,oldSavedDayEditFreshObjects:fresh,ongoingNoteEditFreshObjects:noteFresh,attachmentMetadataZeroByteReads:true,savedDayDeletionNoResurrection:true,sealedCaptureSurvivesLaterMutation:true,providerTieredRetentionFoundation:true,providerCommitMarkerLatestAtomicity:true,retentionPolicy15Plus1:true,beforeRestorePublication:true,managedProviderProtectedPublication:true,orphanMaintenanceBackupRecovery:true,tierGraduation:true,sparseRetention:true,retentionDeletionFailureGcSafe:true,providerReconciliationConvergence:true,providerConvergenceFailureIsolated:true,providerSharedObjectGcSafe:true,publicationProtectedGcSafe:true,reclamationGraceSafe:true,providerLargeAttachmentUploadsBeforeSelfHeal:1,providerLaterAttachmentBytes:0,providerMissingObjectSelfHeal:true,providerOrphanGc:true,providerScrubSelfHeal:true,integrityScrubPriority:true,retainedAbaReuse:true,providerPostSealMutationAllowed:true,integrityScrubStableObjectsOnly:true,integrityScrubLeasesReleased:true,providerTemporaryDownloadsReleased:true,explicitProtectedRemoval:true,durableProviderRetry:true,metadataHistoryColdZeroDownloads:coldHistoryDownloads===0,metadataHistoryWarmZeroDownloads:warmHistoryAdditionalDownloads===0,metadataHistoryScopeIndependent:true,repositoryGenerationReset:true,metadataHistoryBodyVerificationDeferred:true,metadataHistoryUncertainZeroDownloads:uncertainColdDownloads===0,metadataHistoryListedRemoteFiles:coldHistoryRemoteFiles,postPublicationReceiptReuse:true,postPublicationReceiptPublications:2,postPublicationReceiptImmutableReadbacks:receiptDownloads.checkpoint.length+receiptDownloads.commit.length,postPublicationReceiptAdditionalHistoryDownloads:receiptDownloads.checkpoint.length+receiptDownloads.commit.length-4,stateDiscoveryObjectInventoryReuse:true,stateDiscoveryMatureObjectLists:objectListsDuringSecondReceipt,stateDiscoveryConservativeConcurrentObject:true,checksumOperations:checksumCounter},null,2));
+// Finite backlogs cross both former limits (64 versions / 100 pages), then
+// recover through the actual lifecycle, with exact retention and reachability.
+const driveBacklogCases=[];
+for(const {size,fault} of [{size:65,fault:''},{size:65,fault:'unavailable'},{size:300,fault:'preempted'}]){
+ const realDate=globalThis.Date,clock=createFakeClock('2026-10-03T12:00:00.000Z');backgroundClock=clock;globalThis.Date=clock.Date;backgroundReady=false;dailyRecords=[];assetDescriptor=null;
+ const id='drive-backlog-'+size+'-'+(fault||'healthy'),warmId=id+'-seed',maintenance=new Map(),h=createDriveHarness({clock,registerProvider:config=>runtime.providers.register(freeze({...config,id:warmId,label:'Drive Backlog Seed'}))});
+ const kind=file=>file.appProperties.studyDirectorRepositoryKind;
+ const settle=async predicate=>{for(let elapsed=0;elapsed<360000;elapsed+=100){await clock.drainMicrotasks(220);await new Promise(resolve=>setImmediate(resolve));if(predicate())return;await clock.advance(100);}assert.fail('Drive backlog did not settle: '+JSON.stringify({size,fault,intent:maintenance.get(id),active:h.state.activeHistoryReads,errors:diagnosticFailures.slice(-3),status:runtime.providers.backgroundStatus().filter(row=>row.job===id+' maintenance')}));};
+ try{
+  await h.provider.prepare();await h.provider.authorize();snapshotRevision=id;sourceRevision='2026-10-03T11:00:00.000Z';notes={Subject:freeze({version:2,key:'Subject',text:'backlog seed',updatedAt:sourceRevision})};
+  await runtime.providers.backupRepositoryProvider(warmId);
+  const seedFile=[...h.state.files.values()].find(file=>kind(file)==='checkpoint'),seed=JSON.parse(await seedFile.content.text());
+  for(let index=1;index<size;index++){
+   const checkpointId='cp_'+(50000+index).toString(16).padStart(32,'0'),date=new Date(clock.now()-Math.floor((size-index)/2)*86400000).toISOString().slice(0,10),exportedAt=date+`T${index%2?'10':'11'}:00:00.000Z`;
+   const manifest={...seed,checkpoint:{...seed.checkpoint,checkpointId,createdAt:exportedAt},exportedAt,sourceRevision:exportedAt,protectedCheckpointManifest:{...seed.protectedCheckpointManifest,checkpointId,sourceRevision:exportedAt},retention:{...seed.retention,calendar:{...retentionCalendar(date),utcOffsetMinutes:0}}};
+   const blob=new Blob([JSON.stringify(manifest)]);await h.provider.repository.upload({kind:'checkpoint',id:checkpointId,blob,digest:await engine.run('checksum',{value:blob}),exportedAt,historySummary:{logicalFingerprint:manifest.logicalFingerprint,counts:manifest.counts,retention:manifest.retention}});
+   const marker=await runtime.repository.inspectCommit(new Blob([JSON.stringify({format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt,sourceRevision:exportedAt,manifestVersion:manifest.version})]));
+   const commitBlob=new Blob([JSON.stringify(marker)]);await h.provider.repository.upload({kind:'commit',id:checkpointId,blob:commitBlob,digest:await engine.run('checksum',{value:commitBlob})});
+  }
+  runtime.providers.configureRepositoryMaintenance(freeze({read:async providerId=>maintenance.get(providerId)||null,mark:async(providerId,value)=>{maintenance.set(providerId,freeze({...maintenance.get(providerId),...value}));return true;},clear:async providerId=>{maintenance.delete(providerId);return true;}}));
+  // Publication must also work while a legitimate backlog still exists.
+  snapshotRevision=id+'-next';sourceRevision='2026-10-03T12:00:00.000Z';notes={Subject:freeze({version:2,key:'Subject',text:'new current state',updatedAt:sourceRevision})};
+  await runtime.providers.backupRepositoryProvider(warmId);
+  assert.equal([...h.state.files.values()].filter(file=>kind(file)==='checkpoint').length,size+1);
+  assert.ok(maintenance.has(warmId));
+  const abandoned=size>256?70:3;
+  for(let index=0;index<abandoned;index++){const blob=new Blob(['abandoned backlog object '+index]);await h.provider.repository.upload({kind:'object',id:'obj_'+(0xc00000+index).toString(16).padStart(32,'0'),blob,digest:await engine.run('checksum',{value:blob})});}
+  const rows=await Promise.all([...h.state.files.values()].filter(file=>kind(file)==='checkpoint').map(async file=>freeze({id:file.appProperties.studyDirectorRepositoryId,manifest:JSON.parse(await file.content.text()),remoteId:file.id})));
+  const expected=runtime.repository.selectRetention(rows,{now:new Date(clock.now())}).retained,kept=new Set(expected.map(row=>row.id)),initialFiles=new Set(h.state.files.keys()),readStart=h.state.historyReadCompletions?.length||0;
+  if(size>256)assert.equal(expected.length,15,'a fully populated backlog must settle to the ordinary 15 slots');
+  // A cold owner starts without body caches; version-bound compact proofs
+  // then own progress across uncertainty and foreground interruption.
+  maintenance.set(id,maintenance.get(warmId));maintenance.delete(warmId);
+  runtime.providers.register(freeze({...h.provider,id,label:'Drive Cold Backlog QA'}));h.state.pageSizes={checkpoint:1,commit:1};
+  if(fault==='unavailable'){const file=[...h.state.files.values()].find(file=>kind(file)==='commit'&&!kept.has(file.appProperties.studyDirectorRepositoryId));h.state.failMediaIds=new Set([file.id]);}
+  if(fault==='preempted')h.state.historyReadDelayMs=1000;
+  operationEvents.length=0;backgroundReady=true;runtime.providers.wakeBackground('backlog-access-restored');
+  let changedProofId='';
+  if(fault==='unavailable'){
+   await settle(()=>maintenance.get(id)?.reason==='blocked-uncertain'&&!runtime.providers.backgroundStatus().find(row=>row.job===id+' maintenance').busy);
+   assert.equal(h.state.deletions.filter(remoteId=>initialFiles.has(remoteId)).length,0,'one unavailable history body blocks all backup-data deletion');
+   h.state.failMediaIds.clear();await clock.advance(Math.max(0,Date.parse(maintenance.get(id).nextEligibleAt)-clock.now()-100));
+  }else if(fault==='preempted'){
+   await settle(()=>h.state.activeHistoryReads>0&&(h.state.historyReadCompletions||[]).slice(readStart).filter(remoteId=>kind(h.state.files.get(remoteId))==='checkpoint').length>=24);
+   assert.equal((await runtime.providers.history(id,{interactive:false})).available,true);
+   assert.equal(h.state.activeHistoryReads,0,'foreground history waits for actual reader settlement');
+   assert.ok(maintenance.has(id),'foreground history preserves the backlog request even when its observation renews the reason');
+   assert.ok(runtime.providers.backgroundStatus().find(row=>row.job===id+' maintenance').scheduled);
+   assert.ok(operationEvents.some(row=>row.phase==='background-transition'&&row.reason==='preempted'),'execution diagnostics must preserve the actual preemption reason');
+   assert.equal(h.state.deletions.filter(remoteId=>initialFiles.has(remoteId)).length,0,'foreground work settles the actual readers before deletion');
+   const changed=[...new Set(h.state.historyReadCompletions.slice(readStart))].map(remoteId=>h.state.files.get(remoteId)).find(file=>kind(file)==='checkpoint'&&!kept.has(file.appProperties.studyDirectorRepositoryId));
+   assert.ok(changed);changed.version++;changedProofId=changed.id;h.state.historyReadDelayMs=0;await clock.advance(Math.max(0,Date.parse(maintenance.get(id).nextEligibleAt)-clock.now()-100));
+  }
+  await settle(()=>!maintenance.has(id));
+  const physicalCheckpoints=[...h.state.files.values()].filter(file=>kind(file)==='checkpoint'),physicalCommits=[...h.state.files.values()].filter(file=>kind(file)==='commit'),physicalObjects=[...h.state.files.values()].filter(file=>kind(file)==='object');
+  assert.deepEqual(physicalCheckpoints.map(file=>file.appProperties.studyDirectorRepositoryId).sort(),[...kept].sort());assert.deepEqual(physicalCommits.map(file=>file.appProperties.studyDirectorRepositoryId).sort(),[...kept].sort());
+  assert.deepEqual(physicalObjects.map(file=>file.appProperties.studyDirectorRepositoryId).sort(),[...new Set(expected.flatMap(row=>row.manifest.objects.map(entry=>entry.objectId)))].sort(),'completion preserves exactly the retained versions\' reachable objects');
+  assert.equal([...h.state.files.values()].filter(file=>kind(file)==='maintenance').length,0);
+  const completions=h.state.historyReadCompletions.slice(readStart);
+  for(const row of rows.filter(row=>!kept.has(row.id))){const reads=completions.filter(remoteId=>remoteId===row.remoteId).length;assert.equal(reads,row.remoteId===changedProofId?2:1,'unchanged verified obsolete history resumes without redownloading; changed identity must reverify');}
+  if(fault==='preempted')assert.ok(h.state.maxHistoryReads<=8,'actual history requests respect the shared concurrency ceiling');
+  driveBacklogCases.push({size,fault,retained:kept.size,exactObjects:true,progressReused:true});
+ }finally{backgroundReady=false;runtime.providers.configureRepositoryMaintenance(null);await h.provider.disconnect();globalThis.Date=realDate;backgroundClock=null;}
+}
+console.log(JSON.stringify({status:'PASS',suite:'repository-checkpoint',assembledDriveCases,driveBacklogCases,firstAttachmentReads:1,secondAttachmentReads:0,simulatedAttachmentBytes:AUDIO_BYTES,identicalCheckpointAllObjectsReused:true,unchangedStructuredObjectsRecompressed:false,oldSavedDayEditFreshObjects:fresh,ongoingNoteEditFreshObjects:noteFresh,attachmentMetadataZeroByteReads:true,savedDayDeletionNoResurrection:true,sealedCaptureSurvivesLaterMutation:true,providerTieredRetentionFoundation:true,providerCommitMarkerLatestAtomicity:true,retentionPolicy15Plus1:true,beforeRestorePublication:true,managedProviderProtectedPublication:true,orphanMaintenanceBackupRecovery:true,tierGraduation:true,sparseRetention:true,retentionDeletionFailureGcSafe:true,providerReconciliationConvergence:true,providerConvergenceFailureIsolated:true,providerSharedObjectGcSafe:true,publicationProtectedGcSafe:true,reclamationGraceSafe:true,providerLargeAttachmentUploadsBeforeSelfHeal:1,providerLaterAttachmentBytes:0,providerMissingObjectSelfHeal:true,providerOrphanGc:true,providerScrubSelfHeal:true,integrityScrubPriority:true,retainedAbaReuse:true,providerPostSealMutationAllowed:true,integrityScrubStableObjectsOnly:true,integrityScrubLeasesReleased:true,providerTemporaryDownloadsReleased:true,explicitProtectedRemoval:true,durableProviderRetry:true,metadataHistoryColdZeroDownloads:coldHistoryDownloads===0,metadataHistoryWarmZeroDownloads:warmHistoryAdditionalDownloads===0,metadataHistoryScopeIndependent:true,repositoryGenerationReset:true,metadataHistoryBodyVerificationDeferred:true,metadataHistoryUncertainZeroDownloads:uncertainColdDownloads===0,metadataHistoryListedRemoteFiles:coldHistoryRemoteFiles,postPublicationReceiptReuse:true,postPublicationReceiptPublications:2,postPublicationReceiptImmutableReadbacks:receiptDownloads.checkpoint.length+receiptDownloads.commit.length,postPublicationReceiptAdditionalHistoryDownloads:receiptDownloads.checkpoint.length+receiptDownloads.commit.length-4,stateDiscoveryObjectInventoryReuse:true,stateDiscoveryMatureObjectLists:objectListsDuringSecondReceipt,stateDiscoveryConservativeConcurrentObject:true,checksumOperations:checksumCounter},null,2));

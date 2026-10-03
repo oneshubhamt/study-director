@@ -86,6 +86,24 @@ The PWA and Device Folder browser checks use the shared browser harness, includi
 
 Populated Insights reads no longer fetch the summary inventory twice or repeatedly create locale formatters for English weekday labels. The same saved records, derived results and progressive rendering remain in use. Its 590-day performance, worker/fallback parity and worker-failure retry checks retain their original limits. Browser attachment checks use a valid PCM WAV and actual media readiness; click automation preserves already-visible targets so it does not manufacture page scrolling.
 
-## Current audit limitation
+## Retention and backlog recovery
 
-The three findings from the 3 October baseline audit are corrected: uncertain history no longer authorizes counterpart deletion, slow responsive Drive inventory can complete under renewable protection, and unavailable local data retains Device Folder discovery. The follow-up audit confirmed a remaining capacity/recovery gap: Drive lists at most 64 checkpoint manifests or commits. A valid backlog of 65 versions causes overflow; cleanup repeatedly defers and a new backup stops for review. Data remains preserved, but automatic recovery does not finish. See [the current audit and evidence](BACKGROUND-AUDIT.md). The finite-work completion claim above is therefore not established for that backlog. Bounded history processing needs a further focused refactor before the programme can be closed.
+Device Folder and Drive share the same retention policy: 15 ordinary recovery points, plus at most one unexpired protected safety point. The protected point remains an extra temporary copy, as confirmed by the user; it does not displace an ordinary slot.
+
+| Tier | Slots | Selection |
+| --- | ---: | --- |
+| Latest | 1 | Newest ordinary committed checkpoint; its capture date anchors the windows |
+| Daily | 6 | Newest checkpoint on each of the six preceding dates |
+| Weekly | 4 | Newest eligible checkpoint in each of the four preceding Monday-based calendar weeks, excluding dates already covered by Daily |
+| Monthly | 4 | Newest eligible checkpoint in each of the four calendar-month buckets immediately before the weekly boundary, excluding the newer tiers |
+| Protected safety | 1 extra | Newest unexpired Before restore / combine / clear-library checkpoint |
+
+Missing periods leave empty slots. The latest day can be any weekday. Windows use the local calendar recorded at capture, so changing the evaluator's timezone does not reinterpret history. Calendar months and partial boundary periods mean the oldest available snapshot is not guaranteed to be an exact five months and one week old.
+
+Retention selects recovery points; it cannot enforce an instantaneous physical file limit. Publication first commits and verifies a new immutable version, then maintenance safely removes obsolete versions. A blocked, interrupted or failed cleanup can therefore leave more than 15 ordinary manifest/commit pairs temporarily. Each version has a manifest and a commit marker; shared objects are separate files and are not counted as versions. Version History projects retained points while physical cleanup catches up.
+
+Drive history inventory now reads all pages, independently of the retention slot count. Pages remain bounded to 1,000 descriptors and history verification to eight concurrent reads. Each verified obsolete manifest is reduced to a compact retention/provenance proof; full object references are loaded only for the selected points. The existing full-body cache remains limited to 64 entries. Compact proofs are scoped to the current repository and exact listed immutable file identity/version/digest. They are reused on ordinary retry, discarded on changed identity or repository, and pruned when physical history changes or cleanup completes. They are in-memory acceleration; durable pending intent still owns wake-up after reload.
+
+The same attempt validates every manifest/commit pair before authorizing deletion. Unknown history, an explicitly incomplete Drive search, repeated pagination tokens, or lost exclusion cannot produce a clean result or authorize reclamation. The verified retention evaluation time stays fixed through loading the selected manifests and deletion planning. Foreground preemption preserves its actual cancellation reason and waits for all active readers to settle; a later history observation may legitimately renew the pending request. Deletion still uses its existing short allowance and bounded entry count. Large finite backlogs and object GC continue through governed passes until verified completion.
+
+See [the current audit and evidence](BACKGROUND-AUDIT.md). The former 64-version recovery limitation is corrected; full browser/native acceptance and the separate remote Insights timing gate were not rerun in this correction.

@@ -361,7 +361,7 @@ registry.define('backup-provider',1,input=>{
   function verifiedHistoryCache(selected,item){
     const scope=String(item&&item.verificationScope||'');if(!scope)return null;
     let cache=verifiedHistoryByProvider.get(selected.id);
-    if(!cache||cache.scope!==scope){cache={scope,entries:new Map()};verifiedHistoryByProvider.set(selected.id,cache);}
+    if(!cache||cache.scope!==scope){cache={scope,entries:new Map(),proofs:new Map()};verifiedHistoryByProvider.set(selected.id,cache);}
     return cache;
   }
   function readVerifiedHistory(selected,item,expectedScope=null){
@@ -377,6 +377,16 @@ registry.define('backup-provider',1,input=>{
     while(cache.entries.size>VERIFIED_HISTORY_INDEX_LIMIT)cache.entries.delete(cache.entries.keys().next().value);
     return value;
   }
+  function repositoryRetentionManifest(manifest){
+    return freeze({version:manifest.version,checkpoint:manifest.checkpoint,exportedAt:manifest.exportedAt,sourceRevision:manifest.sourceRevision,retention:manifest.retention,objects:freeze([])});
+  }
+  function pruneRepositoryHistoryProofs(selected,items,expectedScope){
+    if(!expectedScope)return;
+    const cache=verifiedHistoryByProvider.get(selected.id);if(!cache||cache.scope!==expectedScope)return;
+    const current=new Set(items.map(verifiedHistoryIdentity).filter(Boolean));
+    for(const identity of cache.proofs.keys())if(!current.has(identity))cache.proofs.delete(identity);
+    for(const identity of cache.entries.keys())if(!current.has(identity))cache.entries.delete(identity);
+  }
   function repositoryDownloadLease(value){
     if(value instanceof Blob)return Object.freeze({blob:value,release:async()=>{}});
     if(!value||typeof value!=='object'||!(value.blob instanceof Blob))throw new Error('Backup repository transport returned an unreadable payload.');
@@ -384,37 +394,56 @@ registry.define('backup-provider',1,input=>{
   }
   function repositoryImportCancelled(){return Object.assign(new Error('Backup import was cancelled.'),{code:'STUDY_DIRECTOR_IMPORT_CANCELLED'});}
   async function mapRepositoryHistoryBounded(values,limit,worker,signal=null){
-    const rows=Array.isArray(values)?values:[],results=new Array(rows.length),concurrency=Math.max(1,Math.min(VERIFIED_HISTORY_READ_CONCURRENCY,Math.floor(Number(limit)||1)));let next=0;
-    const run=async()=>{while(true){if(signal?.aborted)throw repositoryImportCancelled();const index=next++;if(index>=rows.length)return;results[index]=await worker(rows[index],index);}};
-    await Promise.all(Array.from({length:Math.min(concurrency,rows.length)},run));return results;
+    const rows=Array.isArray(values)?values:[],results=new Array(rows.length),concurrency=Math.max(1,Math.min(VERIFIED_HISTORY_READ_CONCURRENCY,Math.floor(Number(limit)||1)));let next=0,failure=null;
+    const run=async()=>{try{while(!failure){if(signal?.aborted)throw signal.reason||repositoryImportCancelled();const index=next++;if(index>=rows.length)return;results[index]=await worker(rows[index],index);}}catch(error){if(!failure)failure=error;}};
+    await Promise.all(Array.from({length:Math.min(concurrency,rows.length)},run));if(failure)throw failure;return results;
   }
   function prepareRepositoryHistoryItems(values,kind){
     const seen=new Set(),items=[],invalid=[];
     for(const raw of Array.isArray(values)?values:[]){let item;try{item=repositoryProviderItem(raw,kind);if(seen.has(item.id))throw new Error(`Duplicate repository ${kind==='commit'?'commit':'checkpoint'} identity was returned by the backup provider.`);seen.add(item.id);items.push(item);}catch(error){if(/Duplicate repository (?:commit|checkpoint) identity/u.test(String(error&&error.message||'')))throw error;invalid.push(Object.freeze({item:item||null,error,kind}));}}
     return Object.freeze({items:Object.freeze(items),invalid:Object.freeze(invalid)});
   }
-  async function verifyRepositoryHistoryItem(selected,item,kind,verifiedScope,{interactive=true,signal=null}={}){
+  async function verifyRepositoryHistoryItem(selected,item,kind,verifiedScope,{interactive=true,signal=null,forCleanup=false}={}){
     let lease;
     try{
+      const identity=forCleanup&&item.verificationScope===verifiedScope?verifiedHistoryIdentity(item):'',proofCache=identity&&verifiedHistoryCache(selected,item),proof=proofCache&&proofCache.proofs.get(identity);
+      if(proof)return proof;
       const cached=readVerifiedHistory(selected,item,verifiedScope);
-      if(kind==='commit'){
-        let marker;if(cached&&cached.kind==='commit')marker=cached.value;else{lease=repositoryDownloadLease(await selected.repository.download(item,Object.freeze({signal})));if(item.size&&lease.blob.size!==item.size)throw new Error('Remote repository commit size changed before verification.');if(item.digest){const actualDigest=await Exports.run('checksum',{value:lease.blob});if(actualDigest!==item.digest)throw new Error('Remote repository commit failed content-integrity verification.');}marker=await RepositoryCheckpointPipeline.inspectCommit(lease.blob);rememberVerifiedHistory(selected,item,Object.freeze({kind:'commit',value:marker}),verifiedScope);}return Object.freeze({kind,row:Object.freeze({id:item.id,ref:item,marker})});
+      let value;
+      if(cached&&cached.kind===kind)value=cached.value;
+      else{
+        lease=repositoryDownloadLease(await selected.repository.download(item,Object.freeze({signal})));
+        if(item.size&&lease.blob.size!==item.size)throw new Error(`Remote repository ${kind} size changed before verification.`);
+        if(item.digest){const actualDigest=await Exports.run('checksum',{value:lease.blob},{signal});if(actualDigest!==item.digest)throw new Error(`Remote repository ${kind} failed content-integrity verification.`);}
+        value=kind==='commit'?await RepositoryCheckpointPipeline.inspectCommit(lease.blob):await RepositoryCheckpointPipeline.inspectManifest(lease.blob,{interactive});
+        if(kind==='checkpoint'&&value.checkpoint.checkpointId!==item.id)throw new Error('Remote repository checkpoint identity does not match its manifest.');
+        if(!forCleanup)rememberVerifiedHistory(selected,item,Object.freeze({kind,value}),verifiedScope);
       }
-      let manifest;if(cached&&cached.kind==='checkpoint')manifest=cached.value;else{lease=repositoryDownloadLease(await selected.repository.download(item,Object.freeze({signal})));if(item.size&&lease.blob.size!==item.size)throw new Error('Remote repository checkpoint size changed before verification.');if(item.digest){const actualDigest=await Exports.run('checksum',{value:lease.blob});if(actualDigest!==item.digest)throw new Error('Remote repository checkpoint failed content-integrity verification.');}manifest=await RepositoryCheckpointPipeline.inspectManifest(lease.blob,{interactive});if(manifest.checkpoint.checkpointId!==item.id)throw new Error('Remote repository checkpoint identity does not match its manifest.');rememberVerifiedHistory(selected,item,Object.freeze({kind:'checkpoint',value:manifest}),verifiedScope);}return Object.freeze({kind,row:Object.freeze({id:item.id,ref:item,manifest})});
-    }catch(error){if(signal?.aborted||error&&error.code==='STUDY_DIRECTOR_IMPORT_CANCELLED')throw error;return Object.freeze({kind,invalid:Object.freeze({item,error,kind})});}
+      const row=kind==='commit'?Object.freeze({id:item.id,ref:item,marker:value}):Object.freeze({id:item.id,ref:item,manifest:forCleanup?repositoryRetentionManifest(value):value});
+      const result=Object.freeze({kind,row});if(proofCache)proofCache.proofs.set(identity,result);return result;
+    }catch(error){if(signal?.aborted)throw signal.reason||error;if(error&&error.code==='STUDY_DIRECTOR_IMPORT_CANCELLED')throw error;return Object.freeze({kind,invalid:Object.freeze({item,error,kind})});}
     finally{await lease?.release?.().catch(()=>{});}
   }
-  async function repositoryProviderStateWork(selected,{interactive=true,signal=null}={}){
+  async function repositoryProviderStateWork(selected,{interactive=true,signal=null,forCleanup=false}={}){
     const [listed,listedCommits]=await Promise.all([selected.repository.list(Object.freeze({kind:'checkpoint',signal})),selected.repository.list(Object.freeze({kind:'commit',signal}))]);
     const items=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],commitItems=Array.isArray(listedCommits)?listedCommits:Array.isArray(listedCommits&&listedCommits.items)?listedCommits.items:[];
     const scopes=new Set([...items,...commitItems].map(raw=>String(raw&&raw.verificationScope||'')).filter(Boolean)),verifiedScope=scopes.size===1?[...scopes][0]:null;
     const preparedCommits=prepareRepositoryHistoryItems(commitItems,'commit'),preparedManifests=prepareRepositoryHistoryItems(items,'checkpoint'),invalid=[...preparedCommits.invalid,...preparedManifests.invalid],work=[...preparedCommits.items.map(item=>Object.freeze({kind:'commit',item})),...preparedManifests.items.map(item=>Object.freeze({kind:'checkpoint',item}))];
-    const verified=await mapRepositoryHistoryBounded(work,selected.repository.historyReadConcurrency,task=>verifyRepositoryHistoryItem(selected,task.item,task.kind,verifiedScope,{interactive,signal}),signal),manifests=[],commits=[];
+    if(forCleanup&&listed?.overflow!==true&&listedCommits?.overflow!==true)pruneRepositoryHistoryProofs(selected,[...preparedCommits.items,...preparedManifests.items],verifiedScope);
+    const verified=await mapRepositoryHistoryBounded(work,selected.repository.historyReadConcurrency,task=>verifyRepositoryHistoryItem(selected,task.item,task.kind,verifiedScope,{interactive,signal,forCleanup}),signal),manifests=[],commits=[];
     for(const result of verified){if(result.invalid){invalid.push(result.invalid);continue;}if(result.kind==='commit')commits.push(result.row);else manifests.push(result.row);}
     const classified=RepositoryCheckpointPipeline.classifyState(Object.freeze({manifests:Object.freeze(manifests),commits:Object.freeze(commits)}));
     for(const pair of classified.invalidPairs)invalid.push(Object.freeze({item:pair.manifest.ref||null,error:pair.error,kind:'checkpoint'}));
-    const rows=Object.freeze(classified.committed.map(row=>Object.freeze({item:row.ref,manifest:row.manifest,commitItem:row.commitRef||null}))),uncommitted=Object.freeze(classified.uncommitted.map(row=>Object.freeze({item:row.ref,manifest:row.manifest}))),orphanCommits=Object.freeze(classified.orphanCommits.map(row=>row.ref));
-    return Object.freeze({rows,uncommitted,orphanCommits,invalid:Object.freeze(invalid),ignored:Math.max(0,Number(listed&&listed.ignored)||0)+Math.max(0,Number(listedCommits&&listedCommits.ignored)||0),overflow:listed&&listed.overflow===true||listedCommits&&listedCommits.overflow===true,latest:rows.length?rows[rows.length-1]:null});
+    // Obsolete history keeps only verified retention/provenance proofs. Full
+    // object references are needed solely for the at-most-16 selected versions.
+    const fullById=new Map(),retentionAt=new Date().toISOString();
+    if(forCleanup&&!invalid.length&&!Number(listed?.ignored)&&!Number(listedCommits?.ignored)&&listed?.overflow!==true&&listedCommits?.overflow!==true){
+      const retained=RepositoryCheckpointPipeline.selectRetention(classified.committed,{now:new Date(retentionAt)}).retained;
+      const full=await mapRepositoryHistoryBounded(retained,selected.repository.historyReadConcurrency,row=>verifyRepositoryHistoryItem(selected,row.ref,'checkpoint',verifiedScope,{interactive,signal}),signal);
+      for(const result of full){if(result.invalid)invalid.push(result.invalid);else fullById.set(result.row.id,result.row.manifest);}
+    }
+    const rows=Object.freeze(classified.committed.map(row=>Object.freeze({item:row.ref,manifest:fullById.get(row.id)||row.manifest,commitItem:row.commitRef||null}))),uncommitted=Object.freeze(classified.uncommitted.map(row=>Object.freeze({item:row.ref,manifest:row.manifest}))),orphanCommits=Object.freeze(classified.orphanCommits.map(row=>row.ref));
+    return Object.freeze({rows,uncommitted,orphanCommits,invalid:Object.freeze(invalid),ignored:Math.max(0,Number(listed&&listed.ignored)||0)+Math.max(0,Number(listedCommits&&listedCommits.ignored)||0),overflow:listed&&listed.overflow===true||listedCommits&&listedCommits.overflow===true,retentionAt:forCleanup?retentionAt:null,latest:rows.length?rows[rows.length-1]:null});
   }
 
   async function repositoryProviderState(selected,options={}){
@@ -481,7 +510,7 @@ registry.define('backup-provider',1,input=>{
     return available;
   }
   async function repositoryProviderPublicationBase(selected,{signal=null}={}){
-    const inventory=await repositoryProviderInventory(selected,{signal});if(inventory.overflow)throw new Error('An unusual number of backup versions was found. Backup was stopped for review.');
+    const inventory=await repositoryProviderInventory(selected,{signal});if(inventory.overflow)throw new Error('Backup history could not be read completely. Backup was stopped safely.');
     const objectInventoryTask=inventory.pairs.length?repositoryObjectInventory(selected,{signal}):Promise.resolve(null);
     let latest=null,verificationFailures=0;
     for(const pair of [...inventory.pairs].reverse()){
@@ -607,7 +636,7 @@ registry.define('backup-provider',1,input=>{
     const publicationCapable=repositoryPublicationCapable(selected),publicationSafety=await repositoryPublicationSafety(selected),objectGraceBefore=publicationCapable?new Date(Date.now()-OBJECT_GC_GRACE_MS).toISOString():'',assertLease=checkMaintenance||(async()=>{if(maintenanceLease)await assertRepositoryMaintenance(selected,maintenanceLease);});
     const cleanupRows=Object.freeze(state.rows.map(row=>Object.freeze({id:row.item.id,ref:Object.freeze({checkpoint:row.item,commit:row.commitItem}),manifest:row.manifest}))),retentionBacklog=RepositoryCheckpointPipeline.selectRetention(cleanupRows,{now:new Date()}).remove.length,checkpointDeleteBudget=Math.min(MAINTENANCE_MAX_CHECKPOINT_DELETES,Math.max(MAINTENANCE_MIN_CHECKPOINT_DELETES,retentionBacklog));
     const cleaned=await RepositoryCheckpointPipeline.cleanup(Object.freeze({
-      checkpoints:cleanupRows,
+      checkpoints:cleanupRows,now:state.retentionAt?new Date(state.retentionAt):new Date(),
       inventoryBeforeDelete,beginDeletion,
       invalidCount:state.invalid.length,ignoredCount:state.ignored,overflow:state.overflow,blockObjectGc:publicationSafety.blocked,objectGraceBefore,maxCheckpointDeletes:checkpointDeleteBudget,maxObjectDeletes:MAINTENANCE_MAX_OBJECT_DELETES,
       incompleteArtifacts:freeze([...(state.uncommitted||[]).map(row=>freeze({kind:'checkpoint',ref:row.item})),...(state.orphanCommits||[]).map(item=>freeze({kind:'commit',ref:item}))]),
@@ -623,6 +652,7 @@ registry.define('backup-provider',1,input=>{
       deleteObject:async item=>{await assertLease();return selected.repository.delete(item.ref);},
       onError:(kind,error)=>AppDiagnostics.capture(kind==='checkpoint-delete'?'backup-provider.repository-checkpoint-delete':kind==='incomplete-delete'?'backup-provider.repository-incomplete-delete':'backup-provider.repository-object-gc',error,'warn')
     }));
+    if(!cleaned.gcPending){const cache=verifiedHistoryByProvider.get(selected.id);if(cache)pruneRepositoryHistoryProofs(selected,cleaned.retained.flatMap(row=>[row.ref.checkpoint,row.ref.commit].filter(Boolean)),cache.scope);}
     return cleaned;
   }
   async function cleanupRepositoryProvider(selected,state,newCheckpointId,options={}){
@@ -634,7 +664,7 @@ registry.define('backup-provider',1,input=>{
     await synchronizeRepositoryScope(scoped);
     if(!repositoryCoordinationCapable(scoped)){
       startBudget(PROVIDER_MAINTENANCE_BUDGET_MS);
-      const state=await repositoryProviderState(scoped,{interactive:false});
+      const state=await repositoryProviderState(scoped,{interactive:false,signal,forCleanup:true});
       return cleanupRepositoryProviderState(scoped,state);
     }
     let contentionRetryMs=0,maintenanceLease=await beginRepositoryMaintenance(scoped,{onBlocked:safety=>{const uncertain=Number(safety.publications&&safety.publications.invalid)||Number(safety.maintenances&&safety.maintenances.invalid)||0;if(uncertain)return;const deadlines=[safety.publications&&safety.publications.nextEligibleAt,safety.maintenances&&safety.maintenances.nextEligibleAt].map(value=>Date.parse(String(value||''))).filter(Number.isFinite);if(deadlines.length)contentionRetryMs=Math.max(1000,Math.min(...deadlines)-Date.now()+1000);}});
@@ -653,7 +683,7 @@ registry.define('backup-provider',1,input=>{
       const protectedSelection=renewable?repositoryOperationSelected(owner,{signal,checkProtection:keepAlive}):scoped;
       await keepAlive(true);
       OperationDiagnostics.mark('maintenance-inventory-start',{provider:selected.id},traceId);
-      const state=await repositoryProviderState(protectedSelection,{interactive:false});
+      const state=await repositoryProviderState(protectedSelection,{interactive:false,signal,forCleanup:true});
       return await cleanupRepositoryProviderState(protectedSelection,state,{checkMaintenance:()=>keepAlive(true),inventoryBeforeDelete:true,beginDeletion:async()=>{await keepAlive(true);OperationDiagnostics.mark('maintenance-inventory-complete',{provider:selected.id,total:state.rows.length},traceId);if(renewable)startBudget(PROVIDER_MAINTENANCE_BUDGET_MS);}});
     }finally{
       if(renewing)await renewing.catch(()=>{});
@@ -861,7 +891,7 @@ registry.define('backup-provider',1,input=>{
     else{inventory=await repositoryProviderInventory(selected,{signal:operation.signal});rememberRecentHistory(providerSelected,inventory);}
     await observeRepositoryMaintenance(providerSelected,repositoryInventoryObservation(inventory));
     OperationDiagnostics.mark('recovery-history-scan-complete',{provider:selected.id,versions:inventory.pairs.length,invalid:inventory.invalid.length+inventory.ignored+inventory.uncommitted.length+inventory.orphanCommits.length,reused:reusedHistory});
-    if(inventory.overflow)throw new Error('An unusual number of backup versions was found. Recovery was stopped for review.');
+    if(inventory.overflow)throw new Error('Backup history could not be read completely. Recovery was stopped safely.');
     const newest=[...inventory.pairs].reverse();if(!newest.length)throw new Error('No eligible Study Director backups were found.');
     const choices=freeze(newest.map(pair=>{const summary=pair.item.history;return freeze({id:pair.item.id,name:pair.item.name,exportedAt:summary?.exportedAt||repositoryMetadataTimestamp(pair.item),encrypted:summary?.encrypted===true,counts:summary?.counts||freeze({dailyRecord:0,areaNote:0}),size:pair.item.size,verification:summary?'on-restore':'legacy-on-restore'});}));
     let chosenId=String(checkpointId||'')||choices[0].id;
@@ -1088,7 +1118,7 @@ registry.define('backup-provider',1,input=>{
       OperationDiagnostics.mark('recovery-history-scan-start',{provider:selected.id},traceId);
       const scoped=repositoryOperationSelected(selected,{signal:foreground.signal}),inventory=await repositoryProviderInventory(scoped,{signal:foreground.signal});
       await observeRepositoryMaintenance(selected,repositoryInventoryObservation(inventory));
-      if(inventory.overflow)throw new Error('An unusual number of backup versions was found. Version History was stopped for review.');
+      if(inventory.overflow)throw new Error('Backup history could not be read completely. Version History was stopped safely.');
       const quarantinedObjectIds=integrityScrubHooks?await integrityScrubHooks.quarantine(selected.id):[],entries=repositoryInventoryHistoryEntries(scoped,inventory,{quarantinedObjectIds});
       rememberRecentHistory(selected,inventory);
       OperationDiagnostics.mark('recovery-history-scan-complete',{provider:selected.id,versions:entries.length},traceId);

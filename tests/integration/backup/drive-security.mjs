@@ -27,6 +27,20 @@ async function waitFor(predicate,message){
 
 const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSource=async()=>{})=>{const blob=new Blob([text],{type:'application/octet-stream'});return {kind,id,name:id+(kind==='object'?'.sdobject':kind==='commit'?'.sdcommit':'.sdcheckpoint'),blob,size:blob.size,digest:await digest(blob),exportedAt:'2026-09-19T00:00:00.000Z',appVersion:'QA_FIXTURE',checkProtection,checkSource};};
 
+// Complete history discovery is independent of retention capacity. Page work
+// stays bounded, while incomplete searches and repeated tokens cannot certify it.
+{
+ const {state,provider}=createHarness();await provider.prepare();await provider.authorize();state.pageSizes={checkpoint:1,commit:1};
+ for(const kind of ['checkpoint','commit']){
+  const seed=await provider.repository.upload(await makeRepositoryFile(kind,'cp_'+(9000).toString(16).padStart(32,'0'),'inventory transport proof')),template=state.files.get(seed.remoteId);
+  for(let index=1;index<110;index++){const id='cp_'+(9000+index).toString(16).padStart(32,'0'),remoteId=kind+'-page-'+index;state.files.set(remoteId,{...template,id:remoteId,name:id+(kind==='commit'?'.sdcommit':'.sdcheckpoint'),appProperties:{...template.appProperties,studyDirectorRepositoryId:id}});}
+  const inventory=await provider.repository.list({kind});assert.equal(inventory.items.length,110);assert.equal(inventory.overflow,false,'a healthy finite history must cross both former inventory bounds');
+ }
+ state.incompleteSearchKinds=new Set(['checkpoint']);const incomplete=await provider.repository.list({kind:'checkpoint'});assert.equal(incomplete.overflow,true);assert.equal(incomplete.items.length,0,'an explicitly incomplete Drive search cannot become a complete inventory');
+ state.incompleteSearchKinds.clear();state.repeatPageKinds=new Set(['checkpoint']);await assert.rejects(()=>provider.repository.list({kind:'checkpoint'}),/repeated a backup inventory page/u);
+ assert.equal(state.deletions.length,0);await provider.disconnect();
+}
+
 {
  const {state,provider}=createHarness();await provider.prepare();await provider.authorize();const original=await makeRepositoryFile('object','obj_'+'f'.repeat(32),'ranged repository bytes'),ref=await provider.repository.upload(original);
  const range=await provider.repository.download(ref,{offset:7,length:5});assert.equal(await range.blob.text(),'repos');assert.equal(range.totalBytes,original.blob.size);assert.ok(range.version);

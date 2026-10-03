@@ -646,13 +646,16 @@
       `appProperties has { key='${REPOSITORY_KIND_MARKER}' and value='${kind}' }`,
       'trashed=false'
     ]);
-    const items=[];let pageToken='',overflow=false,pages=0,ignored=0;
+    const items=[],pageTokens=new Set();let pageToken='',overflow=false,pages=0,ignored=0;
     do{
-      const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'1000',orderBy:'createdTime desc',fields:`nextPageToken,files(${REPOSITORY_FIELDS})`});if(pageToken)params.set('pageToken',pageToken);
+      const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'1000',orderBy:'createdTime desc',fields:`nextPageToken,incompleteSearch,files(${REPOSITORY_FIELDS})`});if(pageToken)params.set('pageToken',pageToken);
       const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);if(!response.ok)throw await apiError(response,'Could not read the Study Director backup history in Google Drive.');
       const payload=await jsonResponse(response),files=Array.isArray(payload&&payload.files)?payload.files:[];
+      if(payload&&payload.incompleteSearch===true){overflow=true;break;}
       for(const file of files){if(validRepositoryMetadata(file,parent,kind)){items.push(repositoryDescriptor(file,parent));if(items.length>=limit){overflow=!!payload?.nextPageToken||files.indexOf(file)<files.length-1;break;}}else ignored+=1;}
-      if(items.length>=limit)break;pageToken=String(payload&&payload.nextPageToken||'');pages+=1;if(pages>=100&&pageToken){overflow=true;break;}
+      if(items.length>=limit)break;pageToken=String(payload&&payload.nextPageToken||'');
+      if(pageToken){if(pageTokens.has(pageToken))throw noRetry(new Error('Google Drive repeated a backup inventory page. Nothing was changed.'));pageTokens.add(pageToken);}
+      pages+=1;if(Number.isFinite(limit)&&pages>=100&&pageToken){overflow=true;break;}
     }while(pageToken);
     return Object.freeze({items:Object.freeze(items),overflow,ignored});
   }
@@ -768,7 +771,9 @@
   }
   async function repositoryList(options={},baseContext=EMPTY_DRIVE_OPERATION){
     const context=childDriveOperationContext(baseContext,{signal:options&&options.signal});
-    const kind=String(options&&options.kind||'');return await listRepositoryFiles(kind,{limit:['checkpoint','commit'].includes(kind)?64:100000},context);
+    // Retention is a target, not an inventory limit: blocked cleanup can leave
+    // more physical versions. Read every history page before authorizing it.
+    const kind=String(options&&options.kind||'');return await listRepositoryFiles(kind,{limit:['checkpoint','commit'].includes(kind)?Number.POSITIVE_INFINITY:100000},context);
   }
   function beginRepositoryOperation(options={}){
     const base=driveOperationContext({signal:options&&options.signal,checkProtection:options&&options.checkProtection});
