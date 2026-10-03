@@ -68,7 +68,7 @@ Device Folder and Drive share the coordination contract, not transport assumptio
 
 Developer diagnostics belong to Library → Data & Backup → Copy diagnostics. Review → Copy report remains study-only. No background implementation details have been added to that user report.
 
-These tests establish the listed contracts under deterministic access, I/O, cancellation and failure schedules. They do not establish real-browser timing or behavior on a particular device. Browser acceptance and full regression are intentionally separate from this targeted coordination pass.
+These tests establish the listed contracts under deterministic access, I/O, cancellation and failure schedules. Full regression uses the GitHub Promotion QA workflow, including all browser journeys and built-runtime coverage. Native-device acceptance remains separate; the existing pull request links the current workflow result.
 
 ## Why the follow-up found defects
 
@@ -83,3 +83,5 @@ The same checks found a presentation wait that could block hidden-window startup
 Read-only ownership probes also used to change the authority revision even when no access changed. That could invalidate an update preparation between its checks. Failed availability probes now preserve the secondary state; actual acquisition, hydration and release still invalidate write tokens. Tests cover repeated unavailable Web Lock and BroadcastChannel probes followed by real takeover and release.
 
 The PWA browser checks use the shared browser harness, observe completed navigation and reinstall their security-policy listener before every document. Automatic update counts measure explicit registration update calls; browser-initiated registration checks are not mistaken for duplicate application work. Offline serving, damaged-worker rejection and required-asset verification still exercise real service workers and caches.
+
+Populated Insights reads no longer fetch the summary inventory twice or repeatedly create locale formatters for English weekday labels. The same saved records, derived results and progressive rendering remain in use. Its 590-day performance, worker/fallback parity and worker-failure retry checks retain their original limits. Browser attachment checks use a valid PCM WAV and actual media readiness; click automation preserves already-visible targets so it does not manufacture page scrolling.

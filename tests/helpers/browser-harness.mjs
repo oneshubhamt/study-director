@@ -169,7 +169,9 @@ export class CdpPage{
     await this.send('Emulation.setTouchEmulationEnabled',mobile?{enabled:true,maxTouchPoints:5}:{enabled:false});
   }
   async elementPoint(selector){
-    await this.evaluate(`document.querySelector(${JSON.stringify(selector)})?.scrollIntoView({block:'center',inline:'nearest'})`);
+    // Preserve the page's position when the target is already available to a
+    // user. Forced centering would contaminate scroll-stability assertions.
+    await this.evaluate(`(()=>{const element=document.querySelector(${JSON.stringify(selector)});if(!element)return;const r=element.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);if(!hit||!(hit===element||element.contains(hit)))element.scrollIntoView({block:'center',inline:'nearest'});})()`);
     await this.settle();
     const point=await this.evaluate(`(()=>{const element=document.querySelector(${JSON.stringify(selector)});if(!element)throw new Error('Missing input target: '+${JSON.stringify(selector)});element.scrollIntoView({block:'nearest',inline:'nearest'});const rect=element.getBoundingClientRect(),style=getComputedStyle(element);if(rect.width<=0||rect.height<=0||style.display==='none'||style.visibility==='hidden')throw new Error('Hidden input target: '+${JSON.stringify(selector)});return {x:rect.left+rect.width/2,y:rect.top+rect.height/2};})()`);
     await this.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:point.x,y:point.y});

@@ -3196,9 +3196,11 @@ function prettyDate(iso){
   const d=new Date(iso+'T00:00:00');
   return d.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
 }
+const FULL_WEEKDAY_NAMES=Object.freeze(['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']);
 function dateInsightsMeta(iso){
   const d=new Date(iso+'T00:00:00');
-  return {dayOfWeek:d.getDay(),dayName:d.toLocaleDateString('en-IN',{weekday:'long'})};
+  const dayOfWeek=d.getDay();
+  return {dayOfWeek,dayName:FULL_WEEKDAY_NAMES[dayOfWeek]||'Invalid Date'};
 }
 function hoursLabel(min){
   const n=Math.round((min||0)*10)/10;
@@ -3563,7 +3565,7 @@ function markDayContentSaved(date,revision){
 function reviewDateTitle(iso){
   const d=new Date(iso+'T00:00:00');
   if(Number.isNaN(d.getTime()))return '—';
-  const dowFull=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getDay()];
+  const dowFull=FULL_WEEKDAY_NAMES[d.getDay()];
   const monFull=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
   return `${dowFull} · ${monFull} ${d.getDate()}`;
 }
@@ -5394,7 +5396,7 @@ function tickClock(){
 function updateHeaderInfo(){
   const now=new Date();
   const dowShort=['SUN','MON','TUE','WED','THU','FRI','SAT'][now.getDay()];
-  const dowFull=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][now.getDay()];
+  const dowFull=FULL_WEEKDAY_NAMES[now.getDay()];
   const monShort=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][now.getMonth()];
   const monFull=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][now.getMonth()];
   const dd=now.getDate(),yyyy=now.getFullYear();

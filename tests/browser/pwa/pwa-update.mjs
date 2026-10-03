@@ -219,6 +219,8 @@ try{
   console.log(JSON.stringify(evidence,null,2));
 }catch(error){
   let diagnostic=null;
+  console.error('Tab reloads',JSON.stringify({page1:page1?.loadCount,page2:page2?.loadCount}));
+  console.error('Second tab state',await page2?.evaluate(`({origin:performance.timeOrigin,ui:document.documentElement.dataset.studyDirectorUiState,lifecycle:document.documentElement.dataset.studyDirectorLifecycle,pwaMessage:document.getElementById('pwa-update-message')?.textContent,update:document.getElementById('pwa-update-apply')?.textContent,reloadMarker:sessionStorage.getItem('studyDirector.pwaReload.v1')})`).catch(()=>null));
   try{diagnostic=await page1?.evaluate(`(async()=>({href:location.href,title:document.title,body:(document.body?.innerText||'').slice(0,700),pwaMessage:document.getElementById('pwa-update-message')?.textContent,ui:document.documentElement.dataset.studyDirectorUiState,controller:!!navigator.serviceWorker?.controller,registration:!!(await navigator.serviceWorker?.getRegistration()),waiting:!!(await navigator.serviceWorker?.getRegistration())?.waiting,caches:typeof caches==='undefined'?[]:await caches.keys(),violations:window.__sd73iViolations||[]}))()`);}catch(diagnosticError){diagnostic={error:String(diagnosticError)};}
   throw new Error(`${error.stack||error}\nPage diagnostic: ${JSON.stringify(diagnostic)}\nChromium stderr:\n${browser.stderr().slice(-8000)}`);
 }finally{

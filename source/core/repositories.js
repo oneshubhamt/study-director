@@ -1220,9 +1220,9 @@ function sortDailyRecordsAsc(records){return (records||[]).filter(r=>r&&isValidI
 async function getSortedDailyRecordSummaries(){return sortDailySummariesAsc(await getDailyRecordSummaries());}
 async function getSortedDailyRecords(){return sortDailyRecordsAsc(await getDailyRecords());}
 async function getDailyRecordsForWindow(options={}){
-  const summaries=(await getSortedDailyRecordSummaries()).filter(summary=>summary?.recordKind==='study');
   const opts=options&&typeof options==='object'?options:{};
   if(opts.windowDays||opts.from||opts.to||opts.limit){
+    const summaries=(await getSortedDailyRecordSummaries()).filter(summary=>summary?.recordKind==='study');
     const recordWindow=normalizeInsightsRecordWindowOptions(opts,summaries);
     try{
       const fallback=fallbackDailyRecordsGet();
