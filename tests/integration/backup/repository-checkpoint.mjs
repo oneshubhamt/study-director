@@ -4,12 +4,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createProcessingEngine} from '../../helpers/file-processing.mjs';
+import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
-for(const file of ['source/core/internal.js','source/core/operation-lifecycle.js','source/core/canonical.js','source/core/reconciliation.js','source/core/exports.js','source/core/managed-repository.js','source/core/repository-policy.js','source/core/repository-background.js','source/core/backup-provider.js','source/core/backup-capture.js','source/core/backup.js'])vm.runInThisContext(fs.readFileSync(file,'utf8'),{filename:file});
+for(const file of ['source/core/internal.js','source/core/operation-lifecycle.js','source/core/canonical.js','source/core/record-codecs.js','source/core/reconciliation.js','source/core/exports.js','source/core/managed-repository.js','source/core/repository-policy.js','source/core/repository-background.js','source/core/backup-provider.js','source/core/backup-capture.js','source/core/backup.js','source/core/backup-recovery-host.js'])vm.runInThisContext(fs.readFileSync(file,'utf8'),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const freeze=Object.freeze,CanonicalModule=registry.require('canonical',1),ManagedRepositoryModule=registry.require('managed-repository',1),RepositoryPolicyModule=registry.require('repository-policy',1),RepositoryBackgroundModule=registry.require('repository-background',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})),BackupProviderModule=registry.require('backup-provider',1,freeze({repositoryPolicy:RepositoryPolicyModule})),BackupCaptureModule=registry.require('backup-capture',1),BackupModule=registry.require('backup',1,freeze({backupCapture:BackupCaptureModule,backupProvider:BackupProviderModule,canonical:CanonicalModule,managedRepository:ManagedRepositoryModule,repositoryBackground:RepositoryBackgroundModule})),ReconciliationModule=registry.require('reconciliation',1,freeze({canonical:CanonicalModule})),ExportsModule=registry.require('exports',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)}));
 const exclusive=ExportsModule.createCoordinator({createWorker:()=>{throw new Error('The fixture uses direct processing.');},window:{},document:{}});
 const engine=createProcessingEngine();
+let backgroundClock=null,backgroundReady=true,primary=true;
 let checksumCounter=0,encodeOpenCounter=0,assetReads=0,snapshotRevision='rev-1',sourceRevision='2026-09-19T00:00:00.000Z',checkpointCounter=0,reconciliationBaseWrites=[],reconciliationBase=null,reconciliationBaseNotes=Object.create(null);
 const AUDIO_BYTES=300*1024*1024,AUDIO_HASH='a'.repeat(64);
 class VirtualLargeBlob extends Blob{get size(){return AUDIO_BYTES;}}
@@ -22,8 +24,10 @@ let assetDescriptor=freeze({id:'asset-audio',type:'audio/mpeg',size:AUDIO_BYTES,
 const backupPresentation=createBackupPresentation();
 const documentStub=freeze({getElementById:()=>null,addEventListener:()=>{},createElement:()=>({click(){},remove(){}}),createDocumentFragment:()=>({appendChild(){}}),body:freeze({appendChild(){}})});
 const countsShape=value=>freeze({dailyRecord:Number(value?.dailyRecord||0),areaNote:Number(value?.areaNote||0),activeSession:Number(value?.activeSession||0),personalData:Number(value?.personalData||0),checkpointManifest:Number(value?.checkpointManifest||0)});
+const personalCodec=registry.require('record-codecs',1).createPersonalDataCodec(freeze({}));
 const BackupCodec=freeze({
-  countShape:countsShape,assetIds:()=>freeze(['asset-audio']),
+  normalizePersonalData:personalCodec.normalize,countsEqual:(a,b)=>CanonicalModule.same(countsShape(a),countsShape(b)),normalizeAssetDescriptors:value=>{assert.equal(value.length,0,'this assembled verification fixture has no attachment descriptors');return freeze([]);},
+  countShape:countsShape,assetIds:()=>freeze(assetDescriptor?['asset-audio']:[]),
   createCheckpointMetadata:(installationId,createdAt)=>freeze({checkpointId:'cp_'+(++checkpointCounter).toString(16).padStart(32,'0'),createdAt,originInstallationId:installationId}),
   createProtectedManifest:(plan,checkpoint)=>freeze({format:'study-director.checkpoint-protected-manifest',version:2,checkpointId:checkpoint.checkpointId,sourceRevision:new Date(plan.sourceRevision).toISOString(),authority:freeze({savedDays:'pairwise-explicit-deletions',areaNotes:'pairwise-explicit-deletions',activeSession:'pairwise-singleton',plans:'pairwise-collection',personalSettings:'pairwise-singleton',attachments:'referenced-plus-library'}),savedDayDeletions:freeze([...(plan.savedDayDeletions||[])]),areaNoteDeletions:freeze([...(plan.areaNoteDeletions||[])]),attachmentDeletions:freeze([...(plan.attachmentDeletions||[])])}),
   utf8Bytes:value=>new TextEncoder().encode(String(value??'')),compressionSupported:()=>typeof CompressionStream==='function',
@@ -32,7 +36,7 @@ const BackupCodec=freeze({
 });
 const ActiveSessionCodec=freeze({sanitizeImportedActiveSession:value=>value});
 const exportsPort=freeze({
-  protect:async(file)=>freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),
+  backgroundAvailable:()=>backgroundReady?true:'locked',protect:async(file)=>freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),
   unprotect:async file=>freeze({blob:file,encrypted:false}),check:()=>{},scope:operation=>operation(),job:(operation,options)=>exclusive.job(operation,options),
   run:async(type,data,options)=>{if(type==='file.release')return true;if(type==='checksum'){checksumCounter+=1;if(data&&data.value===audioBlob)return AUDIO_HASH;}if(type==='encode.open')encodeOpenCounter+=1;return engine.run(type,data,options?.progress);},
   download:async()=>{},chooseSave:()=>{},save:async()=>({status:'saved'})
@@ -58,17 +62,17 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
     dailyRecordBackupDates:async()=>({dates:dailyRecords.map(item=>item.date),warning:dailyRecordCanonical?'':'Saved-day IndexedDB unavailable; this backup contains only emergency fallback records.',canonical:dailyRecordCanonical}),dailyRecordBackupMonth:async(month,options={})=>{if(!dailyRecordCanonical&&options.requireCanonical===true)throw Object.assign(new Error('Canonical Daily Records are unavailable.'),{code:'DAILY_RECORDS_CANONICAL_UNAVAILABLE'});return dailyRecords.filter(item=>String(item.date).startsWith(String(month)+'-'));},dailyRecordDocuments:async(dates,options={})=>{if(!dailyRecordCanonical&&options.requireCanonical===true)throw Object.assign(new Error('Canonical Daily Records are unavailable.'),{code:'DAILY_RECORDS_CANONICAL_UNAVAILABLE'});return dates.map(date=>dailyRecords.find(item=>item.date===date)).filter(Boolean);},dailyRecordImportBatches:async()=>({batches:0}),dailyRecordRemove:async()=>true,dailyRecordTimestamp:()=>'',
     notesExportPayload:()=>notes,notesReadFreshPayload:async()=>notes,notesReadFreshItems:async keys=>(keys||[]).map(key=>notes[key]||null),notesFlush:async()=>true,notesNormalizePayload:value=>value,notesFailure:()=>null,
     restoreJournalPrepare:async()=>true,restoreJournalRead:async()=>null,restoreJournalMark:async()=>true,restoreJournalClear:async()=>true,
-    scheduleRead:()=>'',personalSettle:async()=>true,personalExport:async()=>freeze({version:1,plans:freeze({draft:null,savedPlans:freeze([]),defaultId:null}),preferences:freeze({studentName:'Repo QA'})}),personalImport:async()=>true,personalVerify:async()=>true,
+    scheduleRead:()=>'',personalSettle:async()=>true,personalExport:async()=>freeze({version:2,plans:freeze({draft:null,savedPlans:freeze([]),defaultId:null}),preferences:freeze(personalCodec.preferences({studentName:'Repo QA'}))}),personalImport:async()=>true,personalVerify:async()=>true,
     sourceRevision:async()=>sourceRevision,snapshotRevision:async()=>snapshotRevision,canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],installationId:()=> 'inst_repository_qa',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryAreaNotes:async()=>[],deletionRecoveryReplaceAreaNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>reconciliationBase,reconciliationBaseReadNotes:async keys=>freeze(Object.fromEntries(keys.filter(key=>Object.prototype.hasOwnProperty.call(reconciliationBaseNotes,key)).map(key=>[key,reconciliationBaseNotes[key]]))),reconciliationBaseWrite:writeBaseline
   }),
   codecs:freeze({activeSession:ActiveSessionCodec,backup:BackupCodec}),reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({resolve:async({conflicts=[]})=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries(conflicts.map(item=>[item.key,freeze({text:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),exports:exportsPort,
-  session:freeze({canMutate:()=>true,cancelLiveDraftSave:noop,captureSnapshot:()=>null,hasActiveSession:()=>false,hasTasks:()=>false,toActiveSession:()=>null,withPersistenceSuppressed:operation=>operation()}),
+  session:freeze({canMutate:()=>primary,cancelLiveDraftSave:noop,captureSnapshot:()=>null,hasActiveSession:()=>false,hasTasks:()=>false,toActiveSession:()=>null,withPersistenceSuppressed:operation=>operation()}),
   domain:freeze({clampText:value=>String(value||''),filenameSafeStudentName:value=>String(value||'qa'),getStudentName:()=> 'Repo QA',materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:value=>value,todayISO:()=> '2026-09-19'}),
   view:freeze({presentation:backupPresentation,document:documentStub,refreshPnote:noop,refreshReview:noop,renderSchedule:noop}),
   events:freeze({libraryChanged:noop,backupCompleted:noop,reconcileAreaNotes:async()=>true,restoreAreaNotesSnapshot:async()=>true,restoreSessionState:async()=>true,verifyActiveSessionRuntime:async()=>true,requestDeviceBackupConvergence:async()=>freeze({status:'skipped',reason:'not-connected'})}),
   operations:freeze({assertAuthority:()=>true,clearFault:noop,failClosed:message=>{throw new Error(message);},runExclusive:async(kind,operation)=>operation()}),interactions:freeze({choose:async()=>null,configure:async()=>null,notify:noop}),
-  environment:freeze({AbortController,clearTimeout,yieldTask:async()=>{},requestAnimationFrame:callback=>(callback(),1),setTimeout}),diagnostics:freeze({capture:noop,start:()=>'',mark:()=>false,finish:()=>false,fail:()=>false}),
-  assets:freeze({get:async id=>{assetReads+=1;assert.equal(id,'asset-audio');return audioBlob;},put:async()=>true,keys:async()=>['asset-audio'],list:async()=>[assetDescriptor],importAll:async()=>true,restoreAll:async()=>true,removeMany:async()=>true,removeMetadata:async()=>0,scheduleMaintenance:noop})
+  environment:freeze({AbortController,clearTimeout:id=>(backgroundClock||globalThis).clearTimeout(id),yieldTask:async()=>{},requestAnimationFrame:callback=>(callback(),1),setTimeout:(callback,delay)=>(backgroundClock||globalThis).setTimeout(callback,delay)}),diagnostics:freeze({capture:noop,start:()=>'',mark:()=>false,finish:()=>false,fail:()=>false}),
+  assets:freeze({get:async id=>{assetReads+=1;assert.equal(id,'asset-audio');return audioBlob;},put:async()=>true,keys:async()=>assetDescriptor?['asset-audio']:[],list:async()=>assetDescriptor?[assetDescriptor]:[],importAll:async()=>true,restoreAll:async()=>true,removeMany:async()=>true,removeMetadata:async()=>0,scheduleMaintenance:noop})
 })}));
 
 const localRepositoryObjects=new Map();
@@ -553,5 +557,58 @@ assert.equal(await runtime.providers.backup('presentation-cancel'),false);assert
   const replacement=fresh.objects.find(entry=>entry.kind==='structuredPack'&&entry.members?.some(member=>member.kind==='areaNote'&&member.key==='Subject'));await runtime.repository.verifyObject(remoteFiles.get(remoteKey('object',replacement.objectId)).blob,replacement);
  }finally{runtime.providers.configureIntegrityScrub(null);}
  console.log(JSON.stringify({status:'PASS',suite:'provider-exclusion-capacity',restoreRejectsLastQuarantinedObject:true,persistedExclusionPublishesFreshVerifiedObject:true}));
+}
+// Assembled contract: the real BackupModule composes provider scheduling with
+// the real binary pipeline. Healthy transfers may exceed housekeeping budgets,
+// blocked cleanup wakes independently, and foreground history stays successful.
+{
+ const realDate=globalThis.Date,clock=createFakeClock('2026-09-19T12:00:00.000Z');backgroundClock=clock;globalThis.Date=clock.Date;
+ dailyRecords=[];notes={};assetDescriptor=null;snapshotRevision='background-composition';backgroundReady=false;
+ const rows=new Map(),attempts=[],aborts=[],completed=[];let connected=true,listener,pending=true,heldUpload=false,releaseUpload=null;
+ const key=row=>row.kind+'/'+row.id;
+ function transport(signal=null){return freeze({
+  scope:async()=>'coordination-scope',list:async({kind})=>({items:[...rows.values()].filter(row=>row.kind===kind),ignored:0,overflow:false}),
+  download:async item=>({blob:rows.get(key(item)).blob,release:async()=>{}}),delete:async item=>{rows.delete(key(item));return true;},
+  beginOperation:({signal})=>transport(signal),upload:async entry=>{
+   if(signal?.aborted)throw signal.reason;
+   if(entry.kind==='object'){
+    attempts.push({id:entry.id,startedAt:clock.now()});
+    await new Promise((resolve,reject)=>{
+     let timer;const clean=()=>{clock.clearTimeout(timer);signal?.removeEventListener('abort',abort);},abort=()=>{clean();aborts.push(signal.reason);reject(signal.reason);};
+     signal?.addEventListener('abort',abort,{once:true});
+     if(heldUpload)releaseUpload=()=>{clean();resolve();};else timer=clock.setTimeout(()=>{clean();resolve();},45000);
+    });
+   }
+   if(signal?.aborted)throw signal.reason;
+   const receipt=freeze({...entry,serverDigest:entry.digest,remoteVersion:'1',verificationScope:'coordination-scope',createdAt:new Date().toISOString(),modifiedAt:new Date().toISOString()});rows.set(key(entry),receipt);completed.push(entry.kind);return receipt;
+  }
+ });}
+ let cleanupIntent={repositoryScope:'coordination-scope',requestedAt:new Date().toISOString(),nextEligibleAt:new Date(clock.now()+1000).toISOString(),reason:'repository-state'},integrityTarget={completedAt:new Date().toISOString(),repositoryScope:'coordination-scope'},integrityWrites=0;
+ runtime.providers.configureRepositoryMaintenance(freeze({read:async id=>id==='google-drive'?cleanupIntent:null,mark:async(_id,value)=>{cleanupIntent={...cleanupIntent,...value};return true;},clear:async()=>{cleanupIntent=null;return true;}}));
+ runtime.providers.configureIntegrityScrub(freeze({readTarget:async()=>integrityTarget,writeResult:async(_id,result)=>{assert.equal(result.complete,true);integrityWrites++;integrityTarget={...integrityTarget,completedAt:new Date().toISOString()};},prepare:async()=>({maxObjects:4,maxBytes:1048576}),isAvailable:()=>true,isUnsafe:()=>false,yieldTask:async()=>{},quarantine:async()=>[]}));
+ runtime.providers.configurePendingBackupRetry(freeze({read:async id=>id==='google-drive'&&pending?{requestedAt:new Date().toISOString()}:null,mark:async()=>{pending=true;return true;},clear:async()=>{pending=false;return true;}}));
+ runtime.providers.register(freeze({id:'google-drive',label:'Google Drive',connected:()=>connected,backgroundAvailable:()=>connected,subscribeConnection:fn=>{listener=fn;},repository:transport()}));
+ async function until(predicate){for(let turn=0;turn<2000&&!predicate();turn++){await clock.drainMicrotasks(80);await new Promise(resolve=>setImmediate(resolve));}assert.ok(predicate(),'production I/O did not settle');}
+ const row=name=>runtime.providers.backgroundStatus().find(row=>row.job==='google-drive '+name);
+ try{
+  assert.equal((await runtime.providers.history('google-drive',{interactive:false})).available,true,'live integrity hooks cannot make history completion reject');
+  await clock.advance(3600000);assert.equal(attempts.length,0);assert.equal(row('convergence').state,'paused');assert.equal(clock.pending(),0,'locked/background jobs must not poll or prompt');
+  backgroundReady=true;connected=false;listener();await clock.advance(1000);assert.equal(attempts.length,0);
+  connected=true;listener();await clock.advance(1000);await until(()=>attempts.length>0);
+  await clock.advance(30000);await clock.drainMicrotasks(120);assert.equal(aborts.length,0);assert.equal(row('convergence').busy,true);assert.equal(pending,true);
+  await clock.advance(15000);await until(()=>!row('convergence').busy);assert.equal(pending,false);assert.equal(attempts.length,1,'a healthy finite upload must finish in its first attempt');assert.equal(completed.filter(kind=>kind==='commit').length,1);
+  const manifest=[...rows.values()].find(row=>row.kind==='checkpoint'),parsed=await runtime.repository.inspectManifest(manifest.blob,{interactive:false});
+  await runtime.repository.verifyCheckpoint(parsed,entry=>rows.get('object/'+entry.objectId).blob);
+  // Integrity must start from the same narrow runtime composition, then save
+  // its completed result; inspecting history must never be its wake-up owner.
+  integrityTarget={repositoryScope:'coordination-scope',completedAt:'',recheck:true};assert.equal(runtime.providers.requestIntegrity('google-drive'),true);await clock.advance(1000);await until(()=>integrityWrites===1);assert.equal(row('integrity').lastOutcome,'completed');
+  // Abort a later transfer through the actual foreground coordinator. Its
+  // publication cannot commit; durable work and a future retry survive.
+  snapshotRevision='background-preemption';notes={Subject:freeze({version:2,key:'Subject',text:'new background state',updatedAt:new Date().toISOString()})};pending=true;heldUpload=true;runtime.providers.wakeBackground('recovery');await clock.advance(1000);await until(()=>releaseUpload!==null);
+  const commits=completed.filter(kind=>kind==='commit').length,history=runtime.providers.history('google-drive',{interactive:false});await until(()=>aborts.length===1);assert.equal((await history).available,true);await until(()=>!row('convergence').busy);
+  assert.equal(completed.filter(kind=>kind==='commit').length,commits);assert.equal(pending,true);assert.equal(row('convergence').pending,true);assert.equal(row('convergence').scheduled,true);
+  heldUpload=false;await clock.advance(15000);await until(()=>attempts.length===3);await clock.advance(45000);await until(()=>!pending);assert.equal(completed.filter(kind=>kind==='commit').length,commits+1);
+  console.log(JSON.stringify({status:'PASS',suite:'assembled-provider-coordination',productionComposition:true,healthy45SecondUpload:true,liveIntegrityHooks:true,foregroundPreemption:true,verifiedCommit:true}));
+ }finally{runtime.providers.configurePendingBackupRetry(null);runtime.providers.configureRepositoryMaintenance(null);runtime.providers.configureIntegrityScrub(null);globalThis.Date=realDate;backgroundClock=null;}
 }
 console.log(JSON.stringify({status:'PASS',suite:'repository-checkpoint',firstAttachmentReads:1,secondAttachmentReads:0,simulatedAttachmentBytes:AUDIO_BYTES,identicalCheckpointAllObjectsReused:true,unchangedStructuredObjectsRecompressed:false,oldSavedDayEditFreshObjects:fresh,ongoingNoteEditFreshObjects:noteFresh,attachmentMetadataZeroByteReads:true,savedDayDeletionNoResurrection:true,sealedCaptureSurvivesLaterMutation:true,providerTieredRetentionFoundation:true,providerCommitMarkerLatestAtomicity:true,retentionPolicy15Plus1:true,beforeRestorePublication:true,managedProviderProtectedPublication:true,orphanMaintenanceBackupRecovery:true,tierGraduation:true,sparseRetention:true,retentionDeletionFailureGcSafe:true,providerReconciliationConvergence:true,providerConvergenceFailureIsolated:true,providerSharedObjectGcSafe:true,publicationProtectedGcSafe:true,reclamationGraceSafe:true,providerLargeAttachmentUploadsBeforeSelfHeal:1,providerLaterAttachmentBytes:0,providerMissingObjectSelfHeal:true,providerOrphanGc:true,providerScrubSelfHeal:true,integrityScrubPriority:true,retainedAbaReuse:true,providerPostSealMutationAllowed:true,integrityScrubStableObjectsOnly:true,integrityScrubLeasesReleased:true,providerTemporaryDownloadsReleased:true,explicitProtectedRemoval:true,durableProviderRetry:true,metadataHistoryColdZeroDownloads:coldHistoryDownloads===0,metadataHistoryWarmZeroDownloads:warmHistoryAdditionalDownloads===0,metadataHistoryScopeIndependent:true,repositoryGenerationReset:true,metadataHistoryBodyVerificationDeferred:true,metadataHistoryUncertainZeroDownloads:uncertainColdDownloads===0,metadataHistoryListedRemoteFiles:coldHistoryRemoteFiles,postPublicationReceiptReuse:true,postPublicationReceiptPublications:2,postPublicationReceiptImmutableReadbacks:receiptDownloads.checkpoint.length+receiptDownloads.commit.length,postPublicationReceiptAdditionalHistoryDownloads:receiptDownloads.checkpoint.length+receiptDownloads.commit.length-4,stateDiscoveryObjectInventoryReuse:true,stateDiscoveryMatureObjectLists:objectListsDuringSecondReceipt,stateDiscoveryConservativeConcurrentObject:true,checksumOperations:checksumCounter},null,2));

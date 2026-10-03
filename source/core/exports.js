@@ -31,7 +31,7 @@ registry.define('exports',1,input=>{
   function cancelled(){const error=new Error('File operation cancelled.');error.name='AbortError';error.code='STUDY_DIRECTOR_IMPORT_CANCELLED';return error;}
   // OPFS scratch/journal files have opaque names and shared reader leases.
   // Durable references are metadata records; orphan collection is lock guarded.
-  function createFileStore({storage,locks,retained=async()=>[],setTimeout:schedule=setTimeout,clearTimeout:clear=clearTimeout,now=Date.now,workMs=5000,maxEntries=128,onError=()=>{}}){
+  function createFileStore({storage,locks,retained=async()=>[],setTimeout:schedule=setTimeout,clearTimeout:clear=clearTimeout,now=Date.now,workMs=5000,maxEntries=128,isAvailable=()=>true,onError=()=>{}}){
     const ROOT='@@SD_BACKUP_FILES_OPFS_DIRECTORY@@',held=new Map(),objects=new WeakMap();
     const valid=name=>typeof name==='string'&&/^backup-[a-f0-9-]{36}$/.test(name);
     const directory=async()=>{if(!storage?.getDirectory||!locks?.request)throw new Error('Complete backups require browser file storage. Open the hosted app in a supported browser.');return (await storage.getDirectory()).getDirectoryHandle(ROOT,{create:true});};
@@ -40,22 +40,16 @@ registry.define('exports',1,input=>{
       const unlock=await new Promise((resolve,reject)=>{locks.request(ROOT+':'+name,{mode:'shared'},()=>new Promise(done=>resolve(done))).catch(reject);});
       const token={name,unlock,active:true,pinCount:0,releaseRequested:false};let tokens=held.get(name);if(!tokens)held.set(name,tokens=new Set());tokens.add(token);return token;
     }
-    let collection=null,collectionTimer=null,collectionDue=0,iterator=null,candidate=null,cycleBlocked=false,suspended=0,collectionPending=false,lastCollectionResult=null;
-    function scheduleCollection(delay=1000){
-      collectionPending=true;const due=Number(now())+delay;if(suspended)return;
-      if(collectionTimer!==null&&collectionDue<=due)return;if(collectionTimer!==null)clear(collectionTimer);collectionDue=due;
-      collectionTimer=schedule(()=>{collectionTimer=null;void collect().catch(onError);},delay);
-    }
-    function suspend(){suspended++;let released=false;return ()=>{if(released)return;released=true;suspended=Math.max(0,suspended-1);if(!suspended&&collectionPending)scheduleCollection();};}
-    async function collect({signal=null}={}){
-      if(collection)return collection;if(collectionTimer!==null){clear(collectionTimer);collectionTimer=null;}collectionPending=true;
-      if(suspended)return lastCollectionResult=Object.freeze({status:'yielded',reason:'foreground-busy',removed:0});
+    let iterator=null,candidate=null,cycleBlocked=false,suspended=0;
+    function scheduleCollection(delay=1000){return collectionJob.schedule(delay,'collection');}
+    function suspend(){suspended++;collectionJob.wake('foreground');let released=false;return ()=>{if(released)return;released=true;suspended=Math.max(0,suspended-1);if(!suspended)collectionJob.wake('resume');};}
+    async function collectAttempt({options:{signal=null}}){
       const started=Number(now());let removed=0,visited=0,blocked=false;
       const check=()=>{if(signal?.aborted||suspended||Number(now())-started>=workMs)throw Object.assign(new Error('Backup scratch collection yielded.'),{code:'BACKUP_GC_YIELDED'});};
-      collection=Promise.resolve().then(async()=>{
+      return Promise.resolve().then(async()=>{
         check();const dir=await directory();check();if(!iterator)iterator=dir.entries()[Symbol.asyncIterator]();
         while(visited<maxEntries){
-          check();if(!candidate)candidate=await iterator.next();check();if(candidate.done){iterator=null;candidate=null;blocked=cycleBlocked;cycleBlocked=false;collectionPending=blocked;return Object.freeze({status:blocked?'yielded':'completed',reason:blocked?'reader-locked':'',removed,visited});}
+          check();if(!candidate)candidate=await iterator.next();check();if(candidate.done){iterator=null;candidate=null;blocked=cycleBlocked;cycleBlocked=false;return Object.freeze({status:blocked?'yielded':'completed',reason:blocked?'reader-locked':'',removed,visited});}
           visited++;const [name,entry]=candidate.value;if(entry.kind!=='file'||!valid(name)||held.has(name)){candidate=null;continue;}
           await locks.request(ROOT+':'+name,{ifAvailable:true},async lock=>{
             check();if(!lock){cycleBlocked=true;return;}const keep=new Set(await retained());check();
@@ -65,9 +59,12 @@ registry.define('exports',1,input=>{
         }
         return Object.freeze({status:'yielded',reason:'budget',removed,visited});
       }).catch(error=>{if(error?.code==='BACKUP_GC_YIELDED')return Object.freeze({status:'yielded',reason:'preempted-or-budget',removed,visited});iterator=null;candidate=null;cycleBlocked=false;throw error;}).then(result=>{
-        lastCollectionResult=result;collection=null;if(result.status==='yielded')scheduleCollection(result.reason==='reader-locked'?5*60*1000:2000);return result;
-      },error=>{lastCollectionResult={status:'failed',reason:String(error?.code||error?.name||'Error')};collection=null;collectionPending=true;scheduleCollection(30*60*1000);throw error;});return collection;
+        if(result.status==='yielded')scheduleCollection(result.reason==='reader-locked'?5*60*1000:2000);return result;
+      },error=>{collectionJob.schedule(30*60*1000,'error','replace');throw error;});
     }
+    const collectionJob=Lifecycle.createJob({environment:{now,setTimeout:schedule,clearTimeout:clear},isAvailable:()=>suspended?'foreground-busy':isAvailable(),execute:collectAttempt,capture:onError,retryMs:30*60*1000});
+    collectionJob.schedule(1000,'startup');
+    const collect=(options={})=>collectionJob.run('collection',options);
     async function finishRelease(token){
       if(!token?.active)return;token.active=false;token.unlock();
       const tokens=held.get(token.name);tokens?.delete(token);if(!tokens?.size)held.delete(token.name);
@@ -92,7 +89,7 @@ registry.define('exports',1,input=>{
       const token=objects.get(blob);if(!token?.active)return ()=>{};token.pinCount+=1;let released=false;
       return ()=>{if(released)return;released=true;token.pinCount=Math.max(0,token.pinCount-1);if(token.pinCount===0&&token.releaseRequested)void finishRelease(token);};
     }
-    return Object.freeze({stage,resume,bind,read,release,nameOf,collect,pin,suspend,settled:()=>collection||Promise.resolve(),status:()=>Lifecycle.snapshot({busy:!!collection,pending:collectionPending,scheduled:collectionTimer!==null,suspended:suspended>0,reason:lastCollectionResult?.reason||'',nextEligibleAt:collectionTimer!==null?new Date(collectionDue).toISOString():'',lastResult:lastCollectionResult})});
+    return Object.freeze({stage,resume,bind,read,release,nameOf,collect,pin,suspend,wake:trigger=>collectionJob.wake(trigger),settled:collectionJob.settled,status:()=>{const state=collectionJob.status();return Object.freeze({...state,...Lifecycle.snapshot({busy:state.busy,pending:state.pending,scheduled:state.scheduled,suspended:suspended>0||state.suspended,reason:state.reason,nextEligibleAt:state.nextEligibleAt}),lastOutcome:state.lastOutcome});}});
   }
   function createCoordinator({createWorker,window,document,onState=()=>{},files=null}){
     let worker=null,leases=0,sequence=0,tail=Promise.resolve(),aborted=false,phase='',currentJob=null,fileJobActive=false,cancelEpoch=0;const pending=new Map(),fileProofs=new WeakMap(),streamAborts=new Set();

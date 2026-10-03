@@ -19,7 +19,7 @@ const BackupCodec=freeze({
 });
 const ActiveSessionCodec=freeze({sanitizeImportedActiveSession:value=>value,sanitizeCurrent:value=>value});
 const exportsPort=freeze({
-  protect:async(file)=>freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),unprotect:async file=>freeze({blob:file,encrypted:false}),check:()=>{},scope:operation=>operation(),job:operation=>operation(),
+  backgroundAvailable:()=>true,protect:async(file)=>freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),unprotect:async file=>freeze({blob:file,encrypted:false}),check:()=>{},scope:operation=>operation(),job:operation=>operation(),
   run:async(type,data,options)=>{if(type==='file.release')return true;return processing.run(type,data,options?.progress);},download:async()=>{},chooseSave:()=>{},save:async()=>({status:'saved'})
 });
 const token=value=>Number(value).toString(16).padStart(32,'0').slice(-32);

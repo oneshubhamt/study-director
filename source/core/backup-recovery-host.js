@@ -26,23 +26,10 @@ registry.define('backup-recovery-host',1,()=>{
     if(!raw)return fallback;
     return TECHNICAL_RECOVERY_TERMS.test(raw)?fallback:raw;
   }
-  function createHost(input){
-    exactObject(input,['cancellation','device','diagnostics','document','interactions','lifecycle','managedRecovery','mutation','presentation','providers','session','sourceRevision','storage','view'],'Backup recovery host input');
-    functions(input.cancellation,['cancelImport'],'Backup recovery host cancellation port');
-    functions(input.device,['backupNow','bringIn','cancelForeground','history','notifyChange','removeSafetyBackup','restoreVersion','resumeAutomatic','status','suspendAutomatic'],'Backup recovery host Device Folder port');
-    functions(input.diagnostics,['capture','mark'],'Backup recovery host diagnostics port');
-    if(!input.document||typeof input.document.getElementById!=='function'||typeof input.document.createElement!=='function')throw new TypeError('Backup recovery host document port is invalid.');
-    functions(input.interactions,['choose'],'Backup recovery host interactions port');
-    functions(input.lifecycle,['activeSessionIssue','activeSessionLoad','activeSessionSettled','attachmentBusy','canonicalPlanDraft','deletionRecoveryFlush','flushNotes','flushPlanDraft','hasTasks','noteFailure','planDraft','planInputValue','quiesce','savePlanDraft','settleAttachmentWriters','settlePlan','writeLiveDraft'],'Backup recovery host lifecycle port');
-    functions(input.managedRecovery,['createCoordinator'],'Backup recovery host managed-recovery port');
-    functions(input.mutation,['run'],'Backup recovery host mutation port');
-    functions(input.providers,['bringInRepositoryProvider','cancelForeground','configureConvergencePropagation','configureManagedRecovery','configurePendingBackupRetry','history','list','removeProtectedRepositoryProvider','restoreRepositoryProviderVersion'],'Backup recovery host provider port');
-    functions(input.session,['hasBlocking'],'Backup recovery host session port');
-    if(typeof input.sourceRevision!=='function')throw new TypeError('Backup recovery host sourceRevision port is invalid.');
-    functions(input.storage,['read','remove','write'],'Backup recovery host storage port');
-    functions(input.view,['invalidateAttachments','refreshCore','refreshNotes','refreshReview','renderLibrary','setStatus'],'Backup recovery host view port');
-
-    if(!Object.isFrozen(input.presentation)||['begin','read','feedback','condition','detail','outcome','resolve','reset','subscribe'].some(key=>typeof input.presentation[key]!=='function'))throw new TypeError('Backup presentation port is invalid.');
+  function createPendingStore(input){
+    exactObject(input,['storage','diagnostics','sourceRevision'],'Provider pending store input');
+    functions(input.storage,['read','remove','write'],'Provider pending storage');
+    if(typeof input.sourceRevision!=='function'||typeof input.diagnostics.capture!=='function')throw new TypeError('Provider pending store dependencies are invalid.');
     let pendingWriteChain=Promise.resolve();
     async function readPending(){
       try{return normalizePending(await input.storage.read());}
@@ -60,15 +47,35 @@ registry.define('backup-recovery-host',1,()=>{
     async function markPending(providerId){
       const id=String(providerId||'').trim().toLowerCase();if(!PROVIDER_ID.test(id))return false;
       const now=new Date().toISOString(),revision=String(input.sourceRevision()||''),sourceRevision=Number.isFinite(Date.parse(revision))?new Date(revision).toISOString():now;
-      await mutatePending(current=>({format:PENDING_FORMAT,version:1,entries:[...current.entries.filter(entry=>entry.providerId!==id),{providerId:id,requestedAt:now,sourceRevision}]}));return true;
+      await mutatePending(current=>{const prior=current.entries.find(entry=>entry.providerId===id),requestedAt=new Date(Math.max(Date.parse(now),Date.parse(prior?.requestedAt||'')+1||0)).toISOString();return {format:PENDING_FORMAT,version:1,entries:[...current.entries.filter(entry=>entry.providerId!==id),{providerId:id,requestedAt,sourceRevision}]};});return true;
     }
-    async function clearPending(providerId){
+    async function clearPending(providerId,expected=undefined){
       const id=String(providerId||'').trim().toLowerCase();if(!PROVIDER_ID.test(id))return false;
-      await mutatePending(current=>({format:PENDING_FORMAT,version:1,entries:current.entries.filter(entry=>entry.providerId!==id)}));return true;
+      let cleared=true;await mutatePending(current=>{const pending=current.entries.find(entry=>entry.providerId===id)||null;if(expected!==undefined&&JSON.stringify(pending)!==JSON.stringify(expected)){cleared=false;return current;}return {format:PENDING_FORMAT,version:1,entries:current.entries.filter(entry=>entry.providerId!==id)};});return cleared;
     }
     async function pending(providerId){
       const id=String(providerId||'').trim().toLowerCase();return (await readPending()).entries.find(entry=>entry.providerId===id)||null;
     }
+    return freeze({read:pending,mark:markPending,clear:clearPending});
+  }
+  function createHost(input){
+    exactObject(input,['cancellation','device','diagnostics','document','interactions','lifecycle','managedRecovery','mutation','presentation','providers','session','sourceRevision','storage','view'],'Backup recovery host input');
+    functions(input.cancellation,['cancelImport'],'Backup recovery host cancellation port');
+    functions(input.device,['backupNow','bringIn','cancelForeground','history','notifyChange','removeSafetyBackup','restoreVersion','resumeAutomatic','status','suspendAutomatic'],'Backup recovery host Device Folder port');
+    functions(input.diagnostics,['capture','mark'],'Backup recovery host diagnostics port');
+    if(!input.document||typeof input.document.getElementById!=='function'||typeof input.document.createElement!=='function')throw new TypeError('Backup recovery host document port is invalid.');
+    functions(input.interactions,['choose'],'Backup recovery host interactions port');
+    functions(input.lifecycle,['activeSessionIssue','activeSessionLoad','activeSessionSettled','attachmentBusy','canonicalPlanDraft','deletionRecoveryFlush','flushNotes','flushPlanDraft','hasTasks','noteFailure','planDraft','planInputValue','quiesce','savePlanDraft','settleAttachmentWriters','settlePlan','writeLiveDraft'],'Backup recovery host lifecycle port');
+    functions(input.managedRecovery,['createCoordinator'],'Backup recovery host managed-recovery port');
+    functions(input.mutation,['run'],'Backup recovery host mutation port');
+    functions(input.providers,['bringInRepositoryProvider','cancelForeground','configureConvergencePropagation','configureManagedRecovery','configurePendingBackupRetry','history','list','removeProtectedRepositoryProvider','restoreRepositoryProviderVersion'],'Backup recovery host provider port');
+    functions(input.session,['hasBlocking'],'Backup recovery host session port');
+    if(typeof input.sourceRevision!=='function')throw new TypeError('Backup recovery host sourceRevision port is invalid.');
+    functions(input.storage,['read','remove','write'],'Backup recovery host storage port');
+    functions(input.view,['invalidateAttachments','refreshCore','refreshNotes','refreshReview','renderLibrary','setStatus'],'Backup recovery host view port');
+
+    if(!Object.isFrozen(input.presentation)||['begin','read','feedback','condition','detail','outcome','resolve','reset','subscribe'].some(key=>typeof input.presentation[key]!=='function'))throw new TypeError('Backup presentation port is invalid.');
+    const {mark:markPending,clear:clearPending,read:pending}=createPendingStore(freeze({storage:input.storage,diagnostics:input.diagnostics,sourceRevision:input.sourceRevision}));
     async function requestDeviceConvergence(context={}){
       const state=input.device.status();
       if(!state.connected)return freeze({status:'skipped',reason:'not-connected'});
@@ -121,7 +128,7 @@ registry.define('backup-recovery-host',1,()=>{
 
     input.providers.configureConvergencePropagation(freeze({device:context=>requestDeviceConvergence(context)}));
     input.providers.configureManagedRecovery(freeze({run:spec=>coordinator.execute(spec)}));
-    input.providers.configurePendingBackupRetry(freeze({read:id=>pending(id),mark:id=>markPending(id),clear:id=>clearPending(id)}));
+    input.providers.configurePendingBackupRetry(freeze({read:id=>pending(id),mark:id=>markPending(id),clear:(id,expected)=>clearPending(id,expected)}));
 
     const presentation=input.presentation;
     let presentationScope=null,presentationLifecycle='succeeded';
@@ -284,6 +291,6 @@ registry.define('backup-recovery-host',1,()=>{
       status:()=>freeze({managedRecovery:coordinator.status(),history:freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})})
     });
   }
-  return freeze({format:'study-director.backup-recovery-host-module',contractVersion:1,createHost});
+  return freeze({format:'study-director.backup-recovery-host-module',contractVersion:1,createHost,createPendingStore});
 });
 })();

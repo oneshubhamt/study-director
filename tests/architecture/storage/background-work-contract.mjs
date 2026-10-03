@@ -30,9 +30,7 @@ assert.match(background,/const MAINTENANCE=freeze\(\{[\s\S]*continuationMs:5000[
 assert.match(background,/function maintenancePlan\(cleanup\)[\s\S]*bounded-continuation[\s\S]*contentionRetryMs[\s\S]*publication-contention[\s\S]*delete-failure[\s\S]*blocked-uncertain[\s\S]*gc-grace/u,'shared maintenance policy must distinguish actionable, expiry-aware contention, failures, uncertainty and grace-deferred work');
 assert.match(background,/maintenanceDefersAcrossObservation[\s\S]*preserveDeferred[\s\S]*maintenanceDelay\(pending/u,'repeated inspection must preserve blocked/error deadlines instead of pulling them into a hot loop');
 assert.match(background,/function createMaintenanceScheduler[\s\S]*state-read-failed[\s\S]*marker-clear-failed[\s\S]*intent-write-failed/u,'shared maintenance lifecycle must retain retry opportunities when durable marker operations fail');
-assert.match(background,/const availability=input\.isAvailable\(\)[\s\S]*availability!==true[\s\S]*return freeze\(\{status:'deferred'/u,'event-driven target unavailability must leave durable work pending without polling');
 assert.match(background,/function createIntegrityScheduler[\s\S]*integrityTargetDue[\s\S]*beginBackground\('integrity'[\s\S]*signal:scope\.signal[\s\S]*failureRetryMs/u,'repository integrity recurrence, ownership, cancellation and budget enforcement must be centralized in the shared background module');
-assert.match(background,/const availability=input\.isAvailable\(\);if\(availability!==true\)[\s\S]*if\(!availability\)schedule\(INTEGRITY\.unavailableRetryMs/u,'shared integrity scheduling must support event-driven availability without background polling');
 assert.match(app,/readRepositoryMaintenancePending\(\{throwOnError=false\}=[\s\S]*if\(throwOnError\)throw error/u,'durable maintenance state reads must be able to fail closed instead of silently becoming empty state');
 assert.match(app,/function mutateRepositoryMaintenancePending[\s\S]*BackupAppMeta\.transaction\('readwrite'[\s\S]*handle\.request\.onerror[\s\S]*outcome='superseded'[\s\S]*strict:true/u,'maintenance mutation must compare requests inside a strict transaction and fail closed on unavailable state');
 assert.doesNotMatch(device,/MAINTENANCE_(?:CATCHUP|GRACE|BLOCKED|ERROR|CONTENTION)_RETRY_MS/u,'Device must not retain a private maintenance cadence table');
@@ -53,7 +51,6 @@ assert.match(managedRepository,/objectListingFailed=true[\s\S]*uncertainCount:un
 assert.match(background,/const PRIORITY=freeze\(\{integrity:10,maintenance:20,automatic:30,convergence:40\}\)/u,'background priority must be explicit and shared');
 assert.match(background,/function beginForeground[\s\S]*suspendTimers\(\)[\s\S]*row\.controller\.abort/u,'foreground work must disarm scheduled work and abort active lower-priority jobs');
 assert.match(background,/function suspend\(reason='suspended'\)[\s\S]*waiting=\[\][\s\S]*row\.settlement[\s\S]*const settled=waitForSettlement\(waiting\)/u,'shared suspension must expose a settlement barrier rather than merely signal abort');
-assert.match(background,/function schedule\(delay,trigger='scheduled',mode='earliest'\)\{const scheduledTrigger=[\s\S]*=>run\(scheduledTrigger\)/u,'maintenance diagnostics must capture the trigger belonging to the retained timer rather than mutable later state');
 assert.match(device,/canSchedulePendingBackup\(\)[\s\S]*!foregroundController/u,'automatic Device backup scheduling must be excluded while a foreground operation owns the subsystem');
 assert.match(device,/beginAutomaticBackupController[\s\S]*background\.beginBackground\('automatic'/u,'automatic Device publication must use the shared background ownership gate');
 assert.match(device,/function beginForegroundController[\s\S]*background\.beginForeground/u,'Device explicit operations must reserve shared foreground ownership');
@@ -63,8 +60,7 @@ assert.match(provider,/function beginForeground\(selected[\s\S]*background\.begi
 assert.match(provider,/beginBackground\('convergence'/u,'deferred Drive convergence must use the shared priority gate');
 assert.match(provider,/background\.createIntegrityScheduler[\s\S]*budgetCode:'REPOSITORY_INTEGRITY_BUDGET'[\s\S]*execute:async\(\{target,trigger,nextEligibleAt,signal\}\)/u,'Drive integrity work must use the per-target shared recurrence and receive the shared cancellation signal');
 assert.match(app,/DeviceRepositoryBackground\.createIntegrityScheduler[\s\S]*budgetCode:'DEVICE_INTEGRITY_BUDGET'[\s\S]*backgroundOwned:true/u,'Device integrity work must use the per-target shared recurrence/ownership rather than nesting a second coordinator scope');
-assert.match(app,/isAvailable:\(\)=>DeviceBackup\.status\(\)\.connected\?true:'awaiting-connection'/u,'disconnected Device integrity must sleep until a connection opportunity instead of polling');
-assert.match(app,/connectDeviceBackupWithRecovery[\s\S]*DeviceRepositoryIntegrity\.schedule\(1500,'device-connected-opportunity'\)/u,'Device reconnect must explicitly revive due integrity work');
+assert.match(app,/isAvailable:\(\)=>DeviceBackup\.status\(\)\.connected\?backupBackgroundAvailability\(\):'awaiting-connection'/u,'disconnected Device integrity must sleep until a connection opportunity instead of polling');
 assert.match(app,/isAvailable:id=>id!=='google-drive'\?'unavailable':appCanMutate\(\)\?true:'awaiting-control'/u,'Drive integrity must become opportunity-driven while this tab lacks mutation control');
 assert.match(provider,/isAvailable:\(\)=>\{const local=integrityScrubHooks\.isAvailable\(id\);return local===true\?providerBackgroundAvailability\(selected\):String\(local\|\|'awaiting-control'\);\}/u,'provider integrity must preserve named event-driven unavailability instead of collapsing it to polling false');
 assert.doesNotMatch(app,/REPOSITORY_INTEGRITY_POLICY|repositoryIntegrityTargetDue|scheduleRepositoryIntegrityScrub|runDeviceRepositoryIntegrityScrub/u,'retired host integrity wrappers must be removed after coordinator consolidation');
@@ -98,9 +94,21 @@ assert.match(managedRepository,/health:manifest\.warning\?'degraded':'healthy'[\
 const pendingReader=host.slice(host.indexOf('async function readPending('),host.indexOf('function mutatePending('));
 assert.match(pendingReader,/throw error/u,'provider pending reads and mutations must propagate unavailable durable state');
 assert.doesNotMatch(pendingReader,/normalizePending\(null\)/u,'unavailable provider pending state must not be normalized into absence');
-assert.match(app,/attachmentIntegrityAwaitingControl=true;return Object\.freeze\(\{status:'skipped',reason:'not-primary'\}\)/u,'attachment integrity must become dormant while this tab lacks primary ownership');
-assert.match(app,/appCanMutate\(\)&&attachmentIntegrityAwaitingControl[\s\S]*scheduleAttachmentIntegrityAudit\(1500,'ownership-primary'\)/u,'primary ownership acquisition must explicitly revive deferred attachment integrity work');
 assert.doesNotMatch(app,/REPOSITORY_INTEGRITY_META_KEY|exactCanonicalKeys\(/u,'retired host declarations must not remain after ownership cleanup');
 assert.doesNotMatch(drive,/function readWithTimeout\b/u,'retired Drive timeout helper must be removed');
 
+// Coordination boundaries, rather than historical timer/flag spellings. The
+// unit and assembled integration suites establish the behavioral invariants.
+const lifecycle=fs.readFileSync('source/core/operation-lifecycle.js','utf8');
+assert.match(lifecycle,/function createJob[\s\S]*function reconcile[\s\S]*function wake[\s\S]*function complete/u);
+assert.match(background,/Lifecycle\.createJob/u);assert.match(background,/registerJob\('maintenance'/u);assert.match(background,/registerJob\('integrity'/u);
+assert.match(provider,/background\.registerJob\('convergence'/u);assert.match(device,/background\.registerJob\('automatic'/u);
+assert.match(assets,/Lifecycle\.createJob/u);assert.match(app,/const DataMaintenanceJob=OperationLifecycle\.createJob/u);assert.match(app,/const AttachmentIntegrityJob=OperationLifecycle\.createJob/u);
+assert.match(app,/OperationLifecycle\.createGroup/u);assert.match(app,/wakeBackgroundOperations\('ownership'\)/u);assert.match(app,/wakeBackgroundOperations\('encryption-unlocked'\)/u);
+assert.match(provider,/providerMaintenanceScheduler\(selected\);providerIntegrityScheduler\(selected\);providerConvergenceJob\(selected\)/u,'registration and reconnection must wake complete provider ownership');
+assert.match(provider,/budgetMs:background\.integrity\.workBudgetMs/u,'integrity policy must come from the bound coordinator');
+assert.doesNotMatch(provider,/Background\.integrity|PROVIDER_CONVERGENCE_BUDGET|backgroundAfter|convergenceAfter|resumePendingProviderBackup/u,'retired handoffs and transfer deadlines must be absent');
+assert.doesNotMatch(app,/dataMaintenanceTimer|attachmentIntegrityTimer|attachmentIntegrityRunning|attachmentIntegrityAwaitingControl|attachmentMaintenanceDailyTimer/u,'host timers must not duplicate lifecycle ownership');
+assert.doesNotMatch(device,/scheduledUrgent|scheduledRetry|automaticRetryPaused/u,'automatic deadlines and blockers belong to the shared lifecycle');
+assert.match(host,/JSON\.stringify\(pending\)!==JSON\.stringify\(expected\)/u,'publication completion must compare the serviced durable request');
 console.log(JSON.stringify({status:'PASS',suite:'background-work-contract',sharedStateMachine:true,maintenanceEligibility:true,maintenanceClassification:true,blockedBackoff:true,foregroundPreemption:true,suspensionSettlement:true,opportunityDrivenIntegrity:true,leanProviderPort:true,clearLibrarySafetyForeground:true,backgroundDiagnostics:true,authoritativeRebase:true,persistenceHardening:true,sharedRepositoryPolicy:true},null,2));

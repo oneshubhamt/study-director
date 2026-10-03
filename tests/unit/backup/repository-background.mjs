@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
 for(const file of ['source/core/internal.js','source/core/operation-lifecycle.js','source/core/repository-background.js'])vm.runInThisContext(fs.readFileSync(file,'utf8'),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
@@ -18,8 +19,8 @@ function coordinator(fake,target='device-folder'){
 {
   const fake=clock(),bg=coordinator(fake),cancelled=new AbortController();cancelled.abort();assert.equal(await bg.beginBackground('integrity',{externalSignal:cancelled.signal}),null);
   const foreground=bg.beginForeground({externalSignal:cancelled.signal});await assert.rejects(foreground.settled,{name:'AbortError'});foreground.release();assert.equal(fake.pending().length,0);
-  bg.schedule('maintenance',1000,()=>{});const state=bg.jobStatus('maintenance',false,{status:'pending',reason:'gc-grace'});assert.equal(state.state,'scheduled');assert.equal(state.lastOutcome,'deferred');assert.equal(Date.parse(state.nextEligibleAt),fake.now()+1000);
-  const hold=bg.suspend();assert.equal(bg.jobStatus('maintenance').state,'paused');assert.equal(bg.jobStatus('maintenance').scheduled,true);await hold.settled;bg.resume(hold);bg.clearAllScheduled();
+  bg.schedule('maintenance',1000,()=>{});const state=bg.jobStatus('maintenance',false,{status:'pending',reason:'gc-grace'});assert.equal(state.state,'scheduled');assert.equal(state.lastOutcome,'deferred');assert.equal(Date.parse(state.nextEligibleAt),fake.now()+1000);assert.equal(bg.status().nextEligibleAt,state.nextEligibleAt);
+  const hold=bg.suspend();assert.equal(bg.jobStatus('maintenance').state,'paused');assert.equal(bg.jobStatus('maintenance').scheduled,false);await hold.settled;bg.resume(hold);bg.clearAllScheduled();
   const pending=bg.maintenanceDetails({phase:'pending',reason:'delete-failure',cleanup:{gcPending:true,gcFailures:1}});assert.equal(bg.outcome(pending),'failed');assert.equal(pending.gcFailures,1);
   const integrity=bg.integrityDetails({status:'completed',complete:false,checked:2,total:4});assert.equal(bg.outcome(integrity),'yielded');assert.equal(integrity.checked,2);
   assert.equal(bg.integrityDetails({status:'unavailable',reason:'private transport path'}).reason,'repository-unavailable');
@@ -114,6 +115,7 @@ for(const pair of [['maintenance','automatic'],['maintenance','convergence'],['a
   const fake=clock(),bg=coordinator(fake);let stored=freeze({requestedAt:new Date(fake.now()).toISOString(),nextEligibleAt:new Date(fake.now()).toISOString(),reason:'repository-state'}),seenTrigger='';
   const intent=bg.maintenanceIntent(freeze({scope:()=>'actual-repository',capture:()=>{},read:async()=>stored,mark:async value=>{stored=freeze({requestedAt:stored.requestedAt,...value});return true;},clear:async()=>{stored=null;return true;},selectRetention:()=>freeze({remove:freeze([])})}));
   const scheduler=bg.createMaintenanceScheduler(freeze({intent,budgetMs:1000,budgetCode:'TEST_BUDGET',budgetMessage:'budget',preemptCode:'TEST_PREEMPT',preemptMessage:'preempt',capture:()=>{},isAvailable:()=>true,isBusy:()=>false,execute:async({trigger})=>{seenTrigger=trigger;return freeze({gcPending:false});},report:()=>{}}));
+  bg.clearScheduled('maintenance'); // Isolate explicit-request coalescing from initial durable discovery.
   scheduler.schedule(1000,'first-trigger','earliest');scheduler.schedule(5000,'later-trigger','earliest');await fake.advance(1000);while(scheduler.status().running)await Promise.resolve();assert.equal(seenTrigger,'first-trigger','an earlier retained maintenance timer must keep the trigger that actually scheduled it');
 }
 
@@ -176,5 +178,17 @@ for(const phase of ['read','write']){
   const fake=clock(),bg=coordinator(fake);let failing=true,executed=0;
   const scheduler=bg.createIntegrityScheduler(freeze({budgetMs:120000,budgetCode:'TEST_BUDGET',budgetMessage:'budget',preemptCode:'TEST_PREEMPT',preemptMessage:'preempted',capture:()=>{},execute:async()=>{executed++;return {status:'completed',complete:true};},isAvailable:()=>true,isUnsafe:()=>false,readTarget:async()=>{if(phase==='read'&&failing)throw new Error('read unavailable');return {};},writeResult:async()=>{if(phase==='write'&&failing)throw new Error('commit unavailable');},yieldTask:async()=>{}}));
   assert.equal((await scheduler.run()).status,'unavailable');assert.equal(fake.pending()[0],module.integrity.stateRetryMs,'failed state persistence must retain a short retry instead of a completion interval');failing=false;assert.equal((await scheduler.run()).status,'completed');assert.equal(fake.pending()[0],module.integrity.intervalMs);assert.ok(executed>0);
+}
+// Eligibility loss cancels active work without claiming its native operations
+// settled. Reconnection refreshes the same lifecycle, never a second executor.
+{
+ const clock=createFakeClock(),bg=coordinator(clock);let available=true,scope=null,resolveNative,attempts=0;
+ const native=new Promise(resolve=>{resolveNative=resolve;});
+ const job=bg.registerJob('maintenance',{isAvailable:()=>available,capture:()=>{},retryMs:1000,execute:async()=>{
+  attempts++;scope=await bg.beginBackground('maintenance');try{if(attempts===1)await native;return {status:scope.signal.aborted?'yielded':'completed'};}finally{scope.release();}
+ }});
+ await clock.advance(1000);await clock.drainMicrotasks(80);assert.equal(attempts,1);available='awaiting-control';bg.wake('ownership');assert.equal(scope.signal.aborted,true);assert.equal(job.status().busy,true);assert.equal(bg.status().active.length,1);
+ available=true;bg.wake('ownership');assert.equal(clock.pending(),0);assert.equal(attempts,1);resolveNative();await job.settled();assert.equal(bg.status().active.length,0);assert.equal(job.status().pending,true);
+ await clock.advance(1000);await clock.drainMicrotasks(80);assert.equal(attempts,2);assert.equal(job.status().pending,false);assert.equal(clock.pending(),0);
 }
 console.log(JSON.stringify({status:'PASS',suite:'repository-background',sharedPolicy:true,priority:true,foregroundPreemption:true,suspensionSettlement:true,durableIntent:true,maintenanceLifecycle:true,triggerAttribution:true,integrityRecurrence:true,integrityStateFailureRetry:true},null,2));

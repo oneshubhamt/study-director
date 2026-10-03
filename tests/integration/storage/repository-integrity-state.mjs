@@ -149,17 +149,12 @@ await test('recheck status distinguishes pending corruption, unavailability and 
  assert.match(h.context.integrityStatusText({recheck:false,lastOutcome:'failed',blockedReason:'corrupt',completedAt:stamp,quarantinedObjectIds:[objectId('c')]}),/^Objects need attention.*Last full scan/u);
  assert.match(h.context.integrityStatusText({recheck:true,blockedReason:'locked'}),/^Paused until backup encryption is unlocked/u);
 });
-await test('restored Device permission and write control wake a dormant integrity scan',async()=>{
-  const source=app.slice(app.indexOf('async function handleDeviceIntegrityActivation('),app.indexOf('AppActivation.subscribe(event=>{void handleDeviceIntegrityActivation('));
-  const state={connected:false,granted:true,owner:true,refreshes:0,schedules:[]},kinds={ORDINARY_FOCUS:'focus',VISIBILITY_RETURN:'visible',OWNERSHIP_TAKEOVER:'takeover'};
-  const context={APP_ACTIVATION_KINDS:kinds,appCanMutate:()=>state.owner,DeviceBackup:{status:()=>({connected:state.connected}),refreshPermission:async()=>{state.refreshes++;state.connected=state.granted;return {connected:state.connected};}},DeviceRepositoryIntegrity:{schedule:(delay,trigger)=>state.schedules.push({delay,trigger})}};
-  vm.createContext(context);vm.runInContext(source,context);
-  await context.handleDeviceIntegrityActivation({kind:'focus'});assert.deepEqual(state.schedules,[{delay:1500,trigger:'device-permission-opportunity'}]);
-  await context.handleDeviceIntegrityActivation({kind:'visible'});assert.equal(state.schedules.length,1,'ordinary focus must not reset an existing connected cadence');
-  await context.handleDeviceIntegrityActivation({kind:'takeover'});assert.equal(state.schedules.at(-1).trigger,'device-control-opportunity');
-  state.connected=false;state.owner=false;await context.handleDeviceIntegrityActivation({kind:'focus'});assert.equal(state.schedules.length,2,'read-only tab must not wake verification');
-  state.owner=true;state.granted=false;await context.handleDeviceIntegrityActivation({kind:'takeover'});assert.equal(state.schedules.length,2,'unavailable folder must remain dormant');
-  const refreshed=state.refreshes;await context.handleDeviceIntegrityActivation({kind:'background'});assert.equal(state.refreshes,refreshed);
+await test('activation refreshes Device permission without owning integrity scheduling',async()=>{
+ const start=app.indexOf('async function refreshDeviceBackgroundPermission('),source=app.slice(start,app.indexOf('AppActivation.subscribe(',start));
+ const kinds={ORDINARY_FOCUS:'focus',VISIBILITY_RETURN:'visible',OWNERSHIP_TAKEOVER:'takeover'};let refreshes=0;
+ const context={APP_ACTIVATION_KINDS:kinds,DeviceBackup:{refreshPermission:async()=>{refreshes++;}},DeviceRepositoryIntegrity:{schedule(){throw new Error('Activation must use the job owner');}}};vm.createContext(context);vm.runInContext(source,context);
+ for(const kind of ['focus','visible','takeover'])await context.refreshDeviceBackgroundPermission({kind});assert.equal(refreshes,3);
+ await context.refreshDeviceBackgroundPermission({kind:'background'});assert.equal(refreshes,3);
 });
 await test('large quarantine remains lossless across commits, restart, legacy payloads and repository replacement',async()=>{
  const h=fixture(),ids=Array.from({length:257},(_,i)=>'obj_'+(i+1).toString(16).padStart(32,'0'));

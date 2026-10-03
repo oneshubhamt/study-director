@@ -14,7 +14,7 @@ registry.define('asset-maintenance',1,input=>{
     const lease=options.lease;if(!lease||['protect','release','isProtected'].some(key=>typeof lease[key]!=='function'))throw new TypeError('Asset-maintenance storage lease is required.');
     const delayMs=Math.max(0,Number(options.delayMs??1800)||0),workMs=Math.max(1,Number(options.workMs)||5000),batchSize=Math.max(1,Number(options.batchSize)||128);
     const scheduleTimeout=ports.setTimeout||setTimeout,cancelTimeout=ports.clearTimeout||clearTimeout,now=ports.now||Date.now,diagnostics=ports.diagnostics;
-    let timer=null,running=null,rerunRequested=false,leaseRetryPending=false,pending=false,scheduledTrigger='requested',scheduledEligibleAt='',scanState=null,sweepPending=false,lastResult=null;
+    let rerunRequested=false,leaseRetryPending=false,scanState=null,sweepPending=false;
     const diagStart=details=>diagnostics?.start?.('asset-maintenance','Attachment storage',details)||'';
     const diagMark=(...args)=>diagnostics?.mark?.(...args),diagFinish=(...args)=>diagnostics?.finish?.(...args),diagFail=(...args)=>diagnostics?.fail?.(...args);
     const liveSnapshot=()=>ports.liveFields().map(field=>[field,String(field.value??'')]);
@@ -42,23 +42,16 @@ registry.define('asset-maintenance',1,input=>{
       return {references:state.references,trusted:true};
     }
     function schedule(delay=delayMs,trigger='requested'){
-      pending=true;if(running){rerunRequested=true;return true;}
-      const wait=Math.max(0,Number(delay)||0),due=Number(now())+wait;
-      // A later edit or lifecycle opportunity must not keep postponing a retry.
-      if(timer!==null&&Date.parse(scheduledEligibleAt)<=due)return true;
-      if(timer!==null)cancelTimeout(timer);scheduledTrigger=String(trigger||'requested');scheduledEligibleAt=new Date(due).toISOString();
-      timer=scheduleTimeout(()=>{timer=null;void run();},wait);return true;
+      if(job.status().busy)rerunRequested=true;
+      return job.schedule(Math.max(0,Number(delay)||0),trigger);
     }
-    async function run(){
-      if(running){rerunRequested=true;return running;}
-      if(timer!==null){cancelTimeout(timer);timer=null;}pending=true;
-      if(!ports.canMutate())return lastResult=freeze({status:'skipped',reason:'not-primary',removed:0});
-      if(ports.mutationActive()){schedule(15000,'foreground-busy');return lastResult=freeze({status:'skipped',reason:'mutation-active',removed:0});}
+    async function runAttempt({trigger:scheduledTrigger,nextEligibleAt:scheduledEligibleAt}){
+      if(ports.mutationActive()){job.schedule(15000,'foreground-busy');return freeze({status:'skipped',reason:'mutation-active',removed:0});}
       const started=Number(now()),traceId=diagStart({background:true,trigger:scheduledTrigger,nextEligibleAt:scheduledEligibleAt,actionable:true});
       const check=()=>{if(!ports.canMutate())throw interrupted('not-primary');if(ports.mutationActive())throw interrupted('foreground-busy');if(Number(now())-started>=workMs)throw interrupted('budget');};
       diagMark('asset-maintenance-eligibility',{trigger:scheduledTrigger,nextEligibleAt:scheduledEligibleAt,actionable:true},traceId);
       let removedSoFar=0;
-      running=Promise.resolve().then(()=>ports.collect(async store=>{
+      return Promise.resolve().then(()=>ports.collect(async store=>{
         check();const journal=await ports.readRestoreJournal();check();if(journal?.state)return freeze({status:'skipped',reason:'restore-journal',removed:0});
         const libraryJournal=await ports.readLibraryClearJournal();check();if(libraryJournal?.state)return freeze({status:'skipped',reason:'library-clear-journal',removed:0});
         const liveValues=liveSnapshot(),referenceRevision=ports.getReferenceRevision(),sourceRevision=await ports.getDatasetRevision();check();
@@ -76,7 +69,7 @@ registry.define('asset-maintenance',1,input=>{
         return freeze({status:more?'yielded':keys.length?'completed':'clean',reason:more?'continuation':'',assets:keys.length,references:scan.references.size,removed:removedSoFar,swept:Number(swept)||0});
       },{check,maxEntries:batchSize,yieldTask:()=>ports.yieldTask({priority:'background'})})).then(async result=>{
         if(Number(result?.removed)>0)ports.invalidate();
-        if(['completed','clean'].includes(result?.status)){if(rerunRequested)result=freeze({...result,status:'yielded',reason:'source-changed'});else{await ports.completed?.(result);pending=false;scanState=null;}}
+        if(['completed','clean'].includes(result?.status)){if(rerunRequested)result=freeze({...result,status:'yielded',reason:'source-changed'});else{await ports.completed?.(result);scanState=null;}}
         leaseRetryPending=result?.reason==='active-editor-or-file-operation';
         diagFinish({status:String(result?.status||'failed'),reason:String(result?.reason||''),removed:Number(result?.removed)||0},traceId);return result;
       }).catch(error=>{
@@ -84,18 +77,19 @@ registry.define('asset-maintenance',1,input=>{
         if(error?.code==='ASSET_MAINTENANCE_YIELDED'){const result=freeze({status:'yielded',reason:error.reason,removed:removedSoFar});diagFinish(result,traceId);return result;}
         scanState=null;ports.captureError(error);diagFail(error,{background:true},traceId);return freeze({status:'failed',removed:removedSoFar,reason:error?.message||String(error)});
       }).then(result=>{
-        lastResult=result;running=null;const rerun=rerunRequested;rerunRequested=false;
-        if(result.status==='failed')schedule(30*60*1000,'error');
+        const rerun=rerunRequested;rerunRequested=false;
+        if(result.status==='failed')job.schedule(30*60*1000,'error','replace');
         else if(result.reason==='not-primary'){/* Ownership return supplies the opportunity. */}
-        else if(result.status==='yielded')schedule(result.reason==='foreground-busy'?15000:2000,result.reason);
-        else if(result.status==='skipped'&&result.reason!=='storage-unavailable')schedule(60000,result.reason);
-        else if(rerun)schedule(delayMs,'rerun-requested');
+        else if(result.status==='yielded')job.schedule(result.reason==='foreground-busy'?15000:2000,result.reason);
+        else if(result.status==='skipped'&&result.reason!=='storage-unavailable')job.schedule(60000,result.reason);
+        else if(rerun)job.schedule(delayMs,'rerun-requested');
         return result;
-      });return running;
+      });
     }
-    const settled=()=>Lifecycle.waitForSettlement(running?[running]:[],{setTimeout:scheduleTimeout,clearTimeout:cancelTimeout,timeoutCode:'ASSET_MAINTENANCE_UNSETTLED',timeoutMessage:'Attachment cleanup has not stopped yet. Retry after it finishes.'});
-    function leaseReleased(){if(!leaseRetryPending)return false;leaseRetryPending=false;return schedule(0,'lease-released');}
-    return freeze({format:'study-director.asset-maintenance',contractVersion:1,lease,run,schedule,leaseReleased,settled,status:()=>freeze({...Lifecycle.snapshot({busy:!!running,pending,scheduled:timer!==null,reason:lastResult?.reason||scheduledTrigger,nextEligibleAt:timer!==null?scheduledEligibleAt:'',lastResult}),sweepPending})});
+    const job=Lifecycle.createJob({environment:{now,setTimeout:scheduleTimeout,clearTimeout:cancelTimeout},isAvailable:()=>!ports.canMutate()?'not-primary':ports.isAvailable?ports.isAvailable():true,execute:runAttempt,capture:ports.captureError,retryMs:30*60*1000});
+    const settled=()=>Lifecycle.waitForSettlement(job.status().busy?[job.settled()]:[],{setTimeout:scheduleTimeout,clearTimeout:cancelTimeout,timeoutCode:'ASSET_MAINTENANCE_UNSETTLED',timeoutMessage:'Attachment cleanup has not stopped yet. Retry after it finishes.'});
+    function leaseReleased(){if(!leaseRetryPending)return false;leaseRetryPending=false;return job.schedule(0,'lease-released','replace');}
+    return freeze({format:'study-director.asset-maintenance',contractVersion:1,lease,run:()=>job.run(),schedule,wake:trigger=>job.wake(trigger),leaseReleased,settled,status:()=>freeze({...job.status(),sweepPending})});
   }
   return freeze({format:'study-director.asset-maintenance-module',contractVersion:2,create});
 });

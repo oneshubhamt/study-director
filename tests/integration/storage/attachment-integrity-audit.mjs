@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
+import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
 const context={crypto:webcrypto,TextEncoder,Uint8Array,console,Blob,Object,Set,Map,Math,Number,String,Promise,Date,TypeError,Symbol};
 context.globalThis=context;vm.createContext(context);
@@ -69,8 +70,8 @@ await assert.rejects(store.shallowAudit(['asset-good']),{name:'NotAllowedError'}
 // metadata read failure and failure to durably save a newly clean scan.
 const app=fs.readFileSync('source/app.html','utf8'),begin=app.indexOf('let attachmentIntegrityView='),end=app.indexOf('const REPOSITORY_INTEGRITY_BATCH_BYTES=',begin);
 for(const failure of ['read','write']){
-  let cleared=0,writes=0;const retained=new Map([['asset-good',{kind:'size-mismatch'}]]),scheduled=[];
-  const context=vm.createContext({console,Object,Map,Date,Promise,APP_META_KEYS:{attachmentIntegrityAudit:'integrity'},AttachmentsModule:{validId:value=>/^asset-/.test(value)},attachmentIntegrityIssues:retained,
+  const clock=createFakeClock();let cleared=0,writes=0;const retained=new Map([['asset-good',{kind:'size-mismatch'}]]),scheduled=[];
+  const context=vm.createContext({console,Object,Map,Date:clock.Date,Promise,Symbol,TypeError,StartupLifecycle:{status:()=>({fullyInitialized:true})},APP_META_KEYS:{attachmentIntegrityAudit:'integrity'},AttachmentsModule:{validId:value=>/^asset-/.test(value)},attachmentIntegrityIssues:retained,
     readHostAppMetaValue:async()=>{if(failure==='read')throw new Error('read unavailable');return {version:1,checkedAt:'',issues:[{id:'asset-good',kind:'size-mismatch'}]};},
     writeHostAppMetaValue:async(_,__,options)=>{writes++;assert.equal(options.strict,true);throw new Error('write unavailable');},
     AttachmentStorage:{supported:()=>true,shallowAudit:async()=>({checked:1,issues:[]})},AttachmentReferences:{sources:async()=>[{ids:['asset-good']}]},
@@ -78,7 +79,7 @@ for(const failure of ['read','write']){
     BackgroundTasks:{yieldTask:async()=>{},budget:()=>()=>false},markStorageHealthError(){},markStorageHealthOk(){cleared++;},invalidateAttachmentLibrary(){},
     setTimeout:(_fn,ms)=>{scheduled.push(ms);return scheduled.length;},clearTimeout(){}
   });
-  context.document={getElementById:()=>null};context.richAssetReferenceRevision=0;context.AppData={dailyRecords:{datasetRevision:async()=>1}};vm.runInContext(app.slice(begin,end),context);const result=await context.runAttachmentIntegrityAudit();
+  for(const file of ['internal','operation-lifecycle'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),context);context.OperationLifecycle=context[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1);context.document={getElementById:()=>null};context.richAssetReferenceRevision=0;context.AppData={dailyRecords:{datasetRevision:async()=>1}};vm.runInContext(app.slice(begin,end),context);const result=await context.runAttachmentIntegrityAudit();
   assert.equal(result.status,'unavailable');assert.equal(context.attachmentIntegrityIssues,retained);assert.equal(cleared,0);assert.equal(writes,failure==='write'?1:0);assert.equal(scheduled.at(-1),30*60*1000);
 }
 

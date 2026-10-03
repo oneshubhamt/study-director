@@ -18,7 +18,7 @@ registry.define('device-backup',1,input=>{
     try{input.repository.validatePolicy(input.repository.retention);}catch{throw new TypeError('Device-backup repository port is invalid.');}
     functions(input.storage,['read','remove','write'],'Device-backup storage port');
     functions(input.ownership,['canMutate'],'Device-backup ownership port');
-    functions(input.hooks,['capture','chooseCheckpoint','excludedObjectIds','localRecoveryEmpty','managedRecovery','maintenanceRead','maintenanceMark','maintenanceClear','operationFail','operationFinish','operationMark','operationStart','render','sourceRevision'],'Device-backup hooks');
+    functions(input.hooks,['backgroundAvailable','capture','chooseCheckpoint','excludedObjectIds','localRecoveryEmpty','managedRecovery','maintenanceRead','maintenanceMark','maintenanceClear','operationFail','operationFinish','operationMark','operationStart','render','sourceRevision'],'Device-backup hooks');
     if(!input.background||input.background.format!=='study-director.repository-background-coordinator'||input.background.contractVersion!==1)throw new TypeError('Device-backup background coordinator is invalid.');
     if(!Object.isFrozen(input.presentation)||['begin','read','feedback','condition','detail','outcome','resolve','reset','subscribe'].some(key=>typeof input.presentation[key]!=='function'))throw new TypeError('Backup presentation port is invalid.');
     const config=input.configuration,environment=input.environment,repository=input.repository,background=input.background;
@@ -35,7 +35,7 @@ registry.define('device-backup',1,input=>{
     let presentationScope=null;
     const presentationState={get message(){return (presentationScope?.read()||presentation.read('device-folder','backup-status')||(presentation.read('device-folder')?.lifecycle==='failed'?presentation.read('device-folder'):null))?.message||'';},set message(value){if(presentationScope?.read()?.lifecycle==='running')presentationScope.update({message:String(value||'')});else presentation.feedback('device-folder',String(value||''));}};
     let directoryHandle=null,permission='unknown',lastBackupAt='',lastFilename='',savedSourceRevision='',recoveryAvailable=false,checkpointCount=0;
-    let timer=null,scrubRunning=null,foregroundController=null,foregroundKind='',scheduledUrgent=false,scheduledRetry=false,automaticRetryAttempt=0,pendingRevision=0,backedUpRevision=0,firstPendingAt=0,activeBackupRevision=0,postStartPendingAt=0,scheduledEligibleAt='',suspensionSequence=0,ownershipWasMutable=ownership.canMutate(),backupStage='',backupStageTimer=null,lastBackupProgressAt=0,stalled=false;
+    let scrubRunning=null,foregroundController=null,foregroundKind='',automaticRetryAttempt=0,pendingRevision=0,backedUpRevision=0,firstPendingAt=0,activeBackupRevision=0,postStartPendingAt=0,suspensionSequence=0,ownershipWasMutable=ownership.canMutate(),backupStage='',backupStageTimer=null,lastBackupProgressAt=0,stalled=false;
     const automaticSuspensions=new Set(),backgroundSuspensions=new Map();
     let ownershipSuspension=null;
 
@@ -87,12 +87,12 @@ registry.define('device-backup',1,input=>{
         format:'study-director.device-backup-status',contractVersion:1,
         installed,revision,supported,mode,busy,cancellable:!!foregroundController&&!foregroundController.signal.aborted,foregroundKind,maintenanceBusy:maintenanceScheduler.status().running||scrubRunning!==null,stalled,connected:connected(),permission,message:presentationState.message,hasOperationSummary:!!presentation.read('device-folder')&&!presentation.read('device-folder','backup-status'),
         lastBackupAt:lastBackupAt||null,lastFilename:lastFilename||null,folderName:directoryHandle&&typeof directoryHandle.name==='string'?directoryHandle.name:'',recoveryAvailable,checkpointCount,automaticSuspended:automaticSuspensions.size>0,
-        pending:pendingRevision>backedUpRevision,scheduled:timer!==null,nextEligibleAt:timer!==null?scheduledEligibleAt:'',retryAttempt:automaticRetryAttempt,retryExhausted:automaticRetryExhausted()&&timer===null&&!busy&&pendingRevision>backedUpRevision
+        pending:pendingRevision>backedUpRevision,scheduled:background.jobStatus('automatic').scheduled,nextEligibleAt:automaticJob.status().nextEligibleAt,backgroundState:background.jobStatus('automatic').state,blocker:automaticJob.status().blocker,retryAttempt:automaticRetryAttempt,retryBackoffCapped:automaticRetryBackoffCapped()&&pendingRevision>backedUpRevision
       });
     }
     function publish(){revision+=1;const state=snapshot();
       presentation.condition('device-folder','permission',directoryHandle&&mode==='permission'?'Device Folder permission is required. Reconnect the folder to resume external backups.':'');
-      presentation.condition('device-folder','retry-exhausted',mode==='error'&&automaticRetryExhausted()?'Automatic Device Folder backup retries are paused. Choose Back up now or reconnect the folder.':'');
+      presentation.condition('device-folder','retry-exhausted',mode==='error'&&automaticRetryBackoffCapped()?'Device Folder backup remains pending after repeated failures. Automatic retries continue less frequently. Choose Back up now or reconnect the folder to retry sooner.':'');
       hooks.render(state);return state;}
 
     function clearBackupStage(){if(backupStageTimer!==null){environment.clearTimeout(backupStageTimer);backupStageTimer=null;}if(presentationState.message===backupStage||presentationState.message.startsWith(backupStage+' ')||presentationState.message.startsWith('This step is taking longer than expected: '))presentationState.message='';backupStage='';lastBackupProgressAt=0;stalled=false;}
@@ -110,9 +110,8 @@ registry.define('device-backup',1,input=>{
       const now=nowMs();if(force||now-lastBackupProgressAt>=250){presentationScope?.update({message:stage,progress:{stage,...progress}});stalled=false;lastBackupProgressAt=now;publish();}
       armBackupStageTimer(stage);
     }
-    function clearSchedule(){if(timer!==null){environment.clearTimeout(timer);timer=null;}scheduledUrgent=false;scheduledRetry=false;scheduledEligibleAt='';return true;}
+    function clearSchedule(){return automaticJob.clear();}
     function clearMaintenanceSchedule(){return background.clearScheduled('maintenance');}
-    function scheduleRepositoryMaintenance(delay=1000,trigger='scheduled'){return maintenanceScheduler.schedule(delay,trigger,'earliest');}
     async function markMaintenance(reason,delay){
       if(String(reason||'')==='repository-state'){
         const pending=await maintenanceIntent.read();
@@ -155,37 +154,28 @@ registry.define('device-backup',1,input=>{
       return Number.isFinite(current)&&(!Number.isFinite(saved)||current>saved);
     }
     function canSchedulePendingBackup(){return connected()&&ownership.canMutate()&&!busy&&!foregroundController&&!automaticSuspensions.size&&pendingRevision>backedUpRevision;}
-    function automaticRetryExhausted(){return automaticRetryAttempt>=AUTOMATIC_RETRY_MULTIPLIERS.length;}
+    function automaticRetryBackoffCapped(){return automaticRetryAttempt>=AUTOMATIC_RETRY_MULTIPLIERS.length;}
     function resetAutomaticRetry(){automaticRetryAttempt=0;return true;}
     function scheduleRetry(){
       if(!canSchedulePendingBackup())return false;
       clearSchedule();
-      if(automaticRetryExhausted()){
-        mode='error';presentationState.message='Automatic device backup is still pending after repeated write failures. Automatic retries are paused to avoid repeated filesystem work. Choose Back up now, reconnect the folder, or make a new change to retry.';publish();return false;
-      }
-      const base=Math.max(1000,Number(config.quietDelayMs)||1000),multiplier=AUTOMATIC_RETRY_MULTIPLIERS[automaticRetryAttempt++]||1,delay=Math.min(AUTOMATIC_RETRY_MAX_DELAY_MS,base*multiplier);
+      const base=Math.max(1000,Number(config.quietDelayMs)||1000),multiplier=AUTOMATIC_RETRY_MULTIPLIERS[Math.min(automaticRetryAttempt++,AUTOMATIC_RETRY_MULTIPLIERS.length-1)],delay=Math.min(AUTOMATIC_RETRY_MAX_DELAY_MS,base*multiplier);
       return schedule({retry:true,eligibleAt:new Date(nowMs()+delay).toISOString()});
     }
     function schedule({urgent=false,retry=false,eligibleAt=''}={}){
-      if(!canSchedulePendingBackup())return false;
-      if(timer!==null){
-        // The first dirty change owns the normal ~30-minute deadline. Routine
-        // session checkpoints only keep the source dirty; they do not re-arm
-        // the same timer or repaint Device Backup state every minute.
-        if(scheduledUrgent||scheduledRetry||!urgent)return true;
-        clearSchedule();
-      }
-      const now=nowMs();
-      if(!firstPendingAt)firstPendingAt=now;
+      if(pendingRevision<=backedUpRevision)return false;
+      const state=automaticJob.status();
+      // The first dirty change owns the quiet deadline. Wake-ups preserve an
+      // urgent deadline or governed retry instead of restarting the countdown.
+      if(state.pending&&state.nextEligibleAt&&(['important-change','automatic-retry'].includes(state.reason)||!urgent)){automaticJob.wake('source');return true;}
+      const now=nowMs();if(!firstPendingAt)firstPendingAt=now;
       const resumedAt=Date.parse(eligibleAt),delay=Number.isFinite(resumedAt)?Math.max(0,resumedAt-now):urgent?Math.max(0,config.urgentDelayMs):Math.max(0,Math.min(config.quietDelayMs,firstPendingAt+config.maxDelayMs-now));
-      scheduledUrgent=urgent;scheduledRetry=retry;scheduledEligibleAt=new Date(now+delay).toISOString();
-      timer=environment.setTimeout(()=>{timer=null;scheduledUrgent=false;scheduledRetry=false;void backupNow(retry?'automatic-retry':urgent?'important-change':'scheduled');},delay);
-      publish();return true;
+      automaticJob.schedule(delay,retry?'automatic-retry':urgent?'important-change':'scheduled','replace');publish();return true;
     }
     function notifyChange(options={}){
       if(!connected()||!ownership.canMutate())return false;
       const changedAt=nowMs();
-      if(automaticRetryExhausted()){resetAutomaticRetry();firstPendingAt=changedAt;}
+      if(automaticRetryBackoffCapped()){clearSchedule();resetAutomaticRetry();firstPendingAt=changedAt;}
       pendingRevision+=1;
       if(activeBackupRevision>0&&pendingRevision>activeBackupRevision&&!postStartPendingAt)postStartPendingAt=changedAt;
       if(!firstPendingAt)firstPendingAt=changedAt;
@@ -194,13 +184,13 @@ registry.define('device-backup',1,input=>{
     }
     async function suspendAutomatic(reason='managed-recovery'){
       const token=`suspend_${(++suspensionSequence).toString(36)}_${nowMs().toString(36)}`,entry=freeze({token,reason:String(reason||'managed-recovery')});
-      automaticSuspensions.add(token);clearSchedule();const suspension=background.suspend(entry.reason);backgroundSuspensions.set(token,suspension);publish();try{await suspension.settled;return entry;}catch(error){automaticSuspensions.delete(token);backgroundSuspensions.delete(token);background.resume(suspension);publish();throw error;}
+      automaticSuspensions.add(token);const suspension=background.suspend(entry.reason);backgroundSuspensions.set(token,suspension);publish();try{await suspension.settled;return entry;}catch(error){automaticSuspensions.delete(token);backgroundSuspensions.delete(token);background.resume(suspension);publish();throw error;}
     }
     function resumeAutomatic(value){
       const token=String(value&&value.token||value||''),reason=String(value&&value.reason||'');if(!token||!automaticSuspensions.has(token))return false;
       automaticSuspensions.delete(token);const suspension=backgroundSuspensions.get(token);backgroundSuspensions.delete(token);if(suspension)background.resume(suspension);publish();
       if(!automaticSuspensions.size&&connected()&&ownership.canMutate()&&!busy&&pendingRevision>backedUpRevision){
-        if(automaticRetryExhausted())resetAutomaticRetry();schedule({urgent:!['bring-in','restore-version'].includes(reason)});
+        if(automaticRetryBackoffCapped())resetAutomaticRetry();schedule({urgent:!['bring-in','restore-version'].includes(reason)});
       }
       return true;
     }
@@ -208,16 +198,16 @@ registry.define('device-backup',1,input=>{
       const canMutate=ownership.canMutate();
       if(!canMutate){
         ownershipWasMutable=false;
-        const hadSchedule=timer!==null;clearSchedule();clearMaintenanceSchedule();if(!ownershipSuspension)ownershipSuspension=background.suspend('ownership-lost');
+        const hadSchedule=background.jobStatus('automatic').scheduled;if(!ownershipSuspension)ownershipSuspension=background.suspend('ownership-lost');
         if(hadSchedule)publish();
         return snapshot();
       }
       const regainedOwnership=!ownershipWasMutable;ownershipWasMutable=true;if(ownershipSuspension){background.resume(ownershipSuspension);ownershipSuspension=null;}
-      if(regainedOwnership&&automaticRetryExhausted())resetAutomaticRetry();
+      if(regainedOwnership&&automaticRetryBackoffCapped())resetAutomaticRetry();
       if(connected()&&hasNewerSourceRevision()&&pendingRevision<=backedUpRevision){
         pendingRevision+=1;if(!firstPendingAt)firstPendingAt=nowMs();
       }
-      if(regainedOwnership&&connected())scheduleRepositoryMaintenance(1000);
+      background.wake('ownership');
       if(connected()&&pendingRevision>backedUpRevision&&!busy&&!automaticSuspensions.size)schedule();
       return snapshot();
     }
@@ -260,9 +250,9 @@ registry.define('device-backup',1,input=>{
       const before=permission;permission=await queryPermission(directoryHandle);
       if(permission==='granted'){
         mode='connected';if(before!=='granted')presentationState.message='';
-        if(before!=='granted'){scheduleRepositoryMaintenance(1000,'permission-restored');if(canSchedulePendingBackup())schedule();}
+        if(before!=='granted'){background.wake('permission-restored');if(canSchedulePendingBackup())schedule();}
       }else{
-        clearSchedule();clearMaintenanceSchedule();mode='permission';
+        background.wake('permission-lost');mode='permission';
         presentationState.message=permission==='prompt'?'Folder permission needs to be renewed. Click Allow access.':'Folder access is blocked by the browser. Click Allow access or update this site’s folder permission.';
       }
       if(permission!==before)publish();
@@ -535,7 +525,7 @@ registry.define('device-backup',1,input=>{
     const maintenanceScheduler=background.createMaintenanceScheduler(freeze({
       intent:maintenanceIntent,budgetMs:MAINTENANCE_PASS_BUDGET_MS,budgetCode:'DEVICE_MAINTENANCE_BUDGET',budgetMessage:'Device Folder maintenance reached its work limit and will continue later.',preemptCode:'DEVICE_MAINTENANCE_PREEMPTED',preemptMessage:'Device Folder maintenance yielded to a higher-priority action.',
       capture:(phase,error)=>capture('device-backup.repository-maintenance-'+phase,error),
-      isAvailable:()=>connected()?ownership.canMutate()?true:'awaiting-control':'awaiting-connection',
+      isAvailable:()=>connected()?ownership.canMutate()?hooks.backgroundAvailable():'awaiting-control':'awaiting-connection',
       isBusy:()=>busy,
       execute:async({signal})=>{operationMark('maintenance-repository-open-start',{},maintenanceTraceId);const directories=await repositoryDirectories();operationMark('maintenance-repository-open-complete',{},maintenanceTraceId);return cleanupDeviceRepositorySafely(directories,{signal});},
       report:event=>{
@@ -557,21 +547,28 @@ registry.define('device-backup',1,input=>{
         if(phase==='settled'){publish();if(canSchedulePendingBackup())schedule();}
       }
     }));
+    const automaticJob=background.registerJob('automatic',{initialDelayMs:null,discover:false,
+      isAvailable:()=>!installed?'startup':!ownership.canMutate()?'awaiting-control':!connected()?'awaiting-connection':automaticSuspensions.size?'suspended':hooks.backgroundAvailable(),
+      capture:error=>capture('device-backup.automatic-lifecycle',error),retryMs:MAINTENANCE_POLICY.busyMs,
+      execute:async({trigger})=>{
+        if(pendingRevision<=backedUpRevision)return freeze({status:'idle',reason:'none'});
+        const result=await backupNow(automaticBackupReason(trigger)?trigger:'scheduled');
+        return freeze({...result,status:result.ok?'completed':result.cancelled?'interrupted':'deferred',pending:pendingRevision>backedUpRevision});
+      }
+    });
     function automaticBackupReason(reason){return ['scheduled','important-change','automatic-retry'].includes(String(reason||''));}
     async function beginAutomaticBackupController(externalSignal=null){
       return background.beginBackground('automatic',{externalSignal,preemptCode:'DEVICE_AUTOMATIC_PREEMPTED',preemptMessage:'Automatic Device Folder backup yielded to a higher-priority action.'});
     }
     function beginForegroundController(externalSignal=null,kind='operation'){
       if(foregroundController)return null;
-      const pendingSchedule=timer===null?null:freeze({urgent:scheduledUrgent,retry:scheduledRetry,eligibleAt:scheduledEligibleAt});
       const scope=background.beginForeground({externalSignal,cancelCode:'DEVICE_FOREGROUND_CANCELLED',cancelMessage:'Device Folder operation was cancelled.'});if(!scope)return null;
-      clearSchedule();
       foregroundController=scope.controller;foregroundKind=String(kind||'operation');publish();
       let released=false;
       const release=({resume=true}={})=>{
         if(released)return false;released=true;
         if(foregroundController===scope.controller){foregroundController=null;foregroundKind='';}scope.release();
-        if(resume&&(pendingSchedule||!automaticRetryExhausted())&&canSchedulePendingBackup())schedule(pendingSchedule||{});publish();return true;
+        if(resume&&canSchedulePendingBackup())schedule();publish();return true;
       };
       const settled=scope.settled.catch(error=>{release();presentationState.message=error.message;publish();throw error;});settled.catch(()=>{});
       return freeze({controller:scope.controller,signal:scope.signal,settled,release});
@@ -635,7 +632,7 @@ registry.define('device-backup',1,input=>{
               // that checkpoint instead of publishing an identical second copy.
               backedUpRevision=pendingRevision;firstPendingAt=0;postStartPendingAt=0;
               savedSourceRevision=currentSourceRevision();lastFilename=row.name;lastBackupAt=String(row.manifest.exportedAt||'');
-              await persistMetadata(metadataValue({sourceRevision:savedSourceRevision,lastFilename,lastBackupAt}));
+              await persistMetadata(metadataValue({sourceRevision:savedSourceRevision,lastFilename,lastBackupAt}));clearSchedule();
               return freeze({status:'completed',checkpointId:row.id,unchanged:true});
             }
             // Combine creates a genuinely new local state. Mark Device Backup dirty,
@@ -829,7 +826,7 @@ registry.define('device-backup',1,input=>{
               const completedAt=isoNow(),checkpointName=String(context.publication&&context.publication.name||''),committedSourceRevision=String(context.sourceRevision||currentSourceRevision());
               await persistMetadata(metadataValue({lastBackupAt:completedAt,lastFilename:checkpointName,sourceRevision:committedSourceRevision}));
               lastFilename=checkpointName;lastBackupAt=completedAt;savedSourceRevision=committedSourceRevision;checkpointCount=Math.max(1,state.valid.length+1);recoveryAvailable=true;
-              backedUpRevision=Math.max(backedUpRevision,startedRevision);if(pendingRevision<=backedUpRevision)firstPendingAt=0;else firstPendingAt=postStartPendingAt||nowMs();
+              backedUpRevision=Math.max(backedUpRevision,startedRevision);if(pendingRevision<=backedUpRevision){firstPendingAt=0;clearSchedule();}else firstPendingAt=postStartPendingAt||nowMs();
               resetAutomaticRetry();repository.markCompleted();mode='connected';presentationState.message='';mark('device-checkpoint-committed',{reason});return freeze({completedAt,checkpointName});
             },
             cleanup:async()=>{
@@ -863,7 +860,7 @@ registry.define('device-backup',1,input=>{
       if(foregroundOperation){foreground=beginForegroundController(options&&options.signal||null,manual?'backup':connectForeground?'connect':'operation');if(!foreground){if(traceId)operationFinish({ok:false,reason:'busy'},traceId);return freeze({ok:false,reason:'busy'});}if(manual)resetAutomaticRetry();operationMark('device-background-preemption-start',{},traceId);try{await foreground.settled;}catch(error){if(traceId)operationFail(error,{phase:'background-settlement'},traceId);return freeze({ok:false,reason:'background-unsettled',error});}operationMark('device-background-preemption-complete',{},traceId);}
       if(busy){foreground?.release();if(traceId)operationFinish({ok:false,reason:'busy'},traceId);return freeze({ok:false,reason:'busy'});}
       if(automatic){automaticScope=await beginAutomaticBackupController(options&&options.signal||null);if(!automaticScope){if(traceId)operationFinish({ok:false,reason:'background-busy'},traceId);return freeze({ok:false,reason:'background-busy'});}}
-      clearSchedule();presentationScope=presentation.begin('device-folder','backup',{label:'Device Folder',foreground:foregroundOperation,message:'Preparing backup…'});busy=true;mode=directoryHandle?'connected':'off';setBackupStage('Checking folder permission…');
+      presentationScope=presentation.begin('device-folder','backup',{label:'Device Folder',foreground:foregroundOperation,message:'Preparing backup…'});busy=true;mode=directoryHandle?'connected':'off';setBackupStage('Checking folder permission…');
       const signal=foreground?foreground.signal:automaticScope?automaticScope.signal:options&&options.signal||null;
       let result;
       try{
@@ -883,7 +880,7 @@ registry.define('device-backup',1,input=>{
         busy=false;publish();
         // Publication owns its success, locked and write-failure retry policy.
         if(automaticScope)automaticScope.release();if(foreground)foreground.release({resume:false});
-        if(result?.ok&&canSchedulePendingBackup())schedule();
+        if(result?.ok){clearSchedule();if(canSchedulePendingBackup())schedule();}
         else if(result?.reason==='write'&&result.error?.code!=='BACKUP_LOCKED'&&canSchedulePendingBackup())scheduleRetry();
       }
     }
@@ -924,7 +921,7 @@ registry.define('device-backup',1,input=>{
     }
     async function install(){
       if(installed)return snapshot();
-      installed=true;publish();return inspectStored();
+      installed=true;publish();const state=await inspectStored();background.wake('startup');return state;
     }
     return freeze({
       format:'study-director.device-backup',contractVersion:1,

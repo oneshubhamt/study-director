@@ -3,111 +3,77 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
-for(const file of ['source/core/internal.js','source/core/operation-lifecycle.js','source/core/repository-background.js'])vm.runInThisContext(fs.readFileSync(file,'utf8'),{filename:file});
-const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],freeze=Object.freeze;
-const Background=registry.require('repository-background',1,freeze({lifecycle:registry.require('operation-lifecycle',1)}));
-const host=fs.readFileSync('source/core/backup-recovery-host.js','utf8'),provider=fs.readFileSync('source/core/backup-provider.js','utf8');
+const freeze=Object.freeze,noop=()=>{};
 const marker=()=>({format:'study-director.managed-provider-backup-pending',version:1,entries:[{providerId:'google-drive',requestedAt:'2026-09-01T00:00:00.000Z',sourceRevision:'2026-09-01T00:00:00.000Z'}]});
-
-// Exercise canonical host reads, retry/connection/registration functions and the
-// real coordinator. Only provider I/O and presentation ports are stubbed here;
-// the existing repository suite checks actual publication and durable storage.
+// Load complete production modules. Publication is a verified executor port;
+// the repository-checkpoint suite separately exercises the real binary pipeline.
 function fixture({durable=marker(),authorized=true,failReads=[]}={}){
-  const clock=createFakeClock(),bg=Background.createCoordinator(freeze({target:'google-drive',environment:freeze({AbortController,now:clock.now,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout})}));
-  const captures=[],traces=[],readTimes=[];let reads=0,writes=0,clears=0,connectionListener=null,readUnavailable=false;
-  const hostContext={Object,String,Array,Number,Set,Date:clock.Date,Promise,freeze,PENDING_FORMAT:'study-director.managed-provider-backup-pending',PROVIDER_ID:/^[a-z][a-z0-9-]{0,40}$/u,
-    input:{storage:{read:async()=>{reads++;readTimes.push(clock.now());if(readUnavailable||failReads.includes(reads))throw new Error('Temporary metadata read failure');return durable;},write:async value=>{durable=value;},remove:async()=>{durable=null;}},diagnostics:{capture:(...args)=>captures.push(args)}},pendingWriteChain:Promise.resolve()};
-  vm.createContext(hostContext);
-  vm.runInContext(host.slice(host.indexOf('  function normalizePending('),host.indexOf('  function userMessage(')),hostContext);
-  vm.runInContext(host.slice(host.indexOf('    async function readPending('),host.indexOf('    async function requestDeviceConvergence(')),hostContext);
-  const pending=vm.runInContext('pending',hostContext);
-  const context={Object,String,Number,Date:clock.Date,Promise,freeze,safeId:value=>String(value||''),busy:false,preparing:false,foregroundController:null,providers:new Map(),
-    providerConvergenceRetryAttempts:new Map(),PROVIDER_CONVERGENCE_RETRY_DELAYS:[30000,120000,600000,1800000],PROVIDER_CONVERGENCE_BUSY_RETRY_MS:15000,PROVIDER_MAINTENANCE_BUDGET_MS:30000,
-    pendingRetryHooks:null,providerBackground:()=>bg,providerBackgroundAvailability:()=>authorized?true:'authorized-opportunity',
-    AppDiagnostics:{capture:(...args)=>captures.push(args)},OperationDiagnostics:{start:()=>{traces.push('start');return 'trace';},mark(){},finish:()=>traces.push('finish'),fail:()=>traces.push('fail')},
-    presentation:{condition(){},read:()=>null,resolve(){},begin:()=>({update(){},finish(){}})},renderButtons(){},saveRepositoryProvider:async()=>{writes++;return {checkpointId:'cp_fixture'};},scheduleProviderIntegrityScrub(){},
-    statusText(){},setBusy:value=>{context.busy=value;},release:async()=>{},elements:()=>({overlay:null}),close(){},presentProvider(){},userProviderMessage:error=>error.message,freezeProvider:value=>value};
-  vm.createContext(context);
-  for(const [begin,end] of [
-    ['  async function pendingRetryState(','  async function queueResolvedProviderState('],
-    ['  function beginForeground(selected,','  function cancelForeground('],
-    ['  async function authorize(','  function repositoryProviderItem('],
-    ['  async function connectCurrent(','  async function disconnectCurrent('],
-    ['  function configurePendingBackupRetry(','  function configureRepositoryMaintenance('],
-    ['  function register(config=','  function list()']
-  ])vm.runInContext(provider.slice(provider.indexOf(begin),provider.indexOf(end)),context);
-  const selected={id:'google-drive',label:'Google Drive',repository:{},authorize:async()=>{authorized=true;},subscribeConnection:callback=>{connectionListener=callback;}};
-  context.provider=()=>selected;
-  const hooks=freeze({read:pending,clear:async()=>{clears++;durable=null;return true;},mark:async()=>true});
-  return {clock,bg,context,selected,pending,hooks,captures,traces,readTimes,
-    register:()=>context.register(selected),configure:()=>context.configurePendingBackupRetry(hooks),connect:()=>context.connectCurrent(),
-    schedule:delay=>context.schedulePendingProviderBackup(selected,delay),
-    authorization:value=>{authorized=value;},notify:()=>connectionListener?.(),fail:value=>{readUnavailable=value;},
-    stats:()=>({reads,writes,clears,durable})};
+  const clock=createFakeClock(),captures=[],traces=[],readTimes=[];let reads=0,writes=0,clears=0,connectionListener=null,readUnavailable=false,control=true,locked=false,maintenance=null,cleanupPasses=0,publicationHook=noop;
+  const context={Object,Symbol,TypeError,Error,Date:clock.Date,AbortController,Blob,Promise,Map,Set,TextEncoder,Uint8Array,console,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout};context.globalThis=context;vm.createContext(context);
+  for(const name of ['internal','operation-lifecycle','repository-policy','repository-background','backup-provider','backup-recovery-host','notice-coordinator','backup-presentation'])vm.runInContext(fs.readFileSync(`source/core/${name}.js`,'utf8'),context,{filename:`source/core/${name}.js`});
+  const registry=context[Symbol.for('studyDirector.internalModules.v1')],lifecycle=registry.require('operation-lifecycle',1),background=registry.require('repository-background',1,freeze({lifecycle}));
+  const notifications=registry.require('notice-coordinator',1).createCoordinator(freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout})),presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications}));
+  const pending=registry.require('backup-recovery-host',1).createPendingStore(freeze({sourceRevision:()=>new clock.Date().toISOString(),diagnostics:freeze({capture:(...args)=>captures.push(args)}),storage:freeze({
+    read:async()=>{reads++;readTimes.push(clock.now());if(readUnavailable||failReads.includes(reads))throw new Error('Temporary metadata read failure');return durable;},
+    write:async value=>{durable=value;},remove:async()=>{clears++;durable=null;}
+  })}));
+  const unexpected=()=>{throw new Error('Unexpected executor in pending lifecycle test');};
+  const pipeline=freeze({publish:async(_history,options)=>{assert.equal(options.interactive,false,'automatic publication must never prompt for keys');writes++;await publicationHook(options);return {checkpointId:'cp_verified',publication:{name:'cp_verified'},manifest:{objects:[]}};},publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,verifyObject:unexpected,scrub:async()=>({status:'completed',complete:true}),cleanup:async()=>{cleanupPasses++;return {gcPending:false};},inspectCommit:unexpected,retention:freeze({}),validatePolicy:noop,classifyState:()=>({committed:[],uncommitted:[],orphanCommits:[],invalidPairs:[]}),activeProtected:()=>null,selectRetention:()=>({retained:[],remove:[]}),projectHistory:()=>[],markCompleted:noop});
+  const runtime=registry.require('backup-provider',1,freeze({repositoryPolicy:registry.require('repository-policy',1)})).createRuntime(freeze({background:freeze({format:background.format,contractVersion:1,createCoordinator:background.createCoordinator,maintenance:background.maintenance,maintenanceActionable:background.maintenanceActionable}),repository:pipeline,ports:freeze({
+    configuration:freeze({appVersion:'qa'}),controller:freeze({beginImport:noop,cancelImport:noop,finishImport:noop}),exports:freeze({run:unexpected}),domain:freeze({clampText:value=>String(value||'')}),view:freeze({presentation,document:{getElementById:()=>null,addEventListener:noop}}),ownership:freeze({canRunBackground:()=>!control?'awaiting-control':locked?'locked':true,requireMutationControl:noop}),environment:freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,requestAnimationFrame:fn=>(fn(),1)}),diagnostics:freeze({capture:(...args)=>captures.push(args),start:()=>{traces.push('start');return 'trace';},mark:noop,finish:()=>traces.push('finish'),fail:()=>traces.push('fail')})
+  })}));
+  const selected=freeze({id:'google-drive',label:'Google Drive',connected:()=>authorized,backgroundAvailable:()=>authorized,subscribeConnection:fn=>{connectionListener=fn;},repository:freeze({scope:async()=>'repo-scope',list:async()=>({items:[],overflow:false,ignored:0}),upload:unexpected,download:unexpected,delete:unexpected})});
+  return {clock,runtime,pending,captures,traces,readTimes,register:()=>runtime.register(selected),configure:()=>runtime.configurePendingBackupRetry(freeze(pending)),
+    authorization:value=>{authorized=value;},control:value=>{control=value;runtime.wakeBackground('ownership');},lock:value=>{locked=value;runtime.wakeBackground('encryption-unlocked');},notify:()=>connectionListener?.(),fail:value=>{readUnavailable=value;},onPublication:fn=>{publicationHook=fn;},
+    maintenance:()=>{maintenance={repositoryScope:'repo-scope',requestedAt:new clock.Date().toISOString(),nextEligibleAt:new clock.Date(clock.now()+1000).toISOString(),reason:'repository-state'};runtime.configureRepositoryMaintenance(freeze({read:async()=>maintenance,mark:async(_id,value)=>{maintenance={...maintenance,...value};return true;},clear:async()=>{maintenance=null;return true;}}));},
+    stats:()=>({reads,writes,clears,durable,maintenance,cleanupPasses}),status:()=>runtime.backgroundStatus().find(row=>row.job==='google-drive convergence')};
 }
-async function tick(t,ms){await t.clock.advance(ms);await t.clock.drainMicrotasks(160);}
+async function tick(t,ms){await t.clock.advance(ms);await t.clock.drainMicrotasks(240);}
 const cases=[];
 for(const failedRead of [1,2]){
-  const t=fixture({failReads:[failedRead]});t.register();t.configure();await tick(t,1000);
-  assert.equal(t.stats().writes,0);assert.equal(t.stats().clears,0);assert.equal(t.stats().durable.entries.length,1);
-  assert.deepEqual([...t.bg.status().scheduled],['convergence'],'unavailable pending state must retain a bounded retry');
-  assert.ok(t.traces.includes('fail'),'a pre-publication read failure must have a developer operation outcome');
-  await tick(t,30000);assert.equal(t.stats().writes,1);assert.equal(t.stats().clears,1);assert.equal(t.stats().durable,null);
-  await tick(t,3600000);assert.equal(t.stats().writes,1);assert.equal(t.clock.pending(),0);
-  cases.push('read failure '+failedRead+' resumes once');
+ const t=fixture({failReads:[failedRead]});t.register();t.configure();await tick(t,1000);
+ assert.equal(t.stats().writes,0);assert.equal(t.stats().clears,0);assert.ok(t.stats().durable);assert.equal(t.status().pending,true);assert.equal(t.status().scheduled,true);assert.ok(t.traces.includes('fail'));
+ await tick(t,30000);assert.equal(t.stats().writes,1);assert.equal(t.stats().clears,1);assert.equal(t.stats().durable,null);await tick(t,3600000);assert.equal(t.stats().writes,1);assert.equal(t.clock.pending(),0);
+ cases.push('strict read failure '+failedRead+' preserves intent and recovers once');
 }
 {
-  const t=fixture();t.fail(true);t.register();t.configure();
-  for(const delay of [1000,30000,120000,600000,1800000])await tick(t,delay);
-  assert.equal(t.stats().reads,5);assert.equal(t.stats().writes,0);assert.equal(t.stats().clears,0);
-  assert.deepEqual(t.readTimes.slice(1).map((time,i)=>time-t.readTimes[i]),[30000,120000,600000,1800000]);
-  assert.equal(t.clock.pending(),1,'repeated failure must keep one coalesced timer with capped backoff');
-  t.fail(false);await tick(t,1800000);assert.equal(t.stats().writes,1);assert.equal(t.stats().clears,1);assert.equal(t.clock.pending(),0);
-  cases.push('repeated read failure uses capped backoff');
+ const t=fixture();t.fail(true);t.register();t.configure();for(const delay of [1000,30000,120000,600000,1800000])await tick(t,delay);
+ assert.equal(t.stats().reads,5);assert.equal(t.stats().writes,0);assert.deepEqual(t.readTimes.slice(1).map((time,i)=>time-t.readTimes[i]),[30000,120000,600000,1800000]);assert.equal(t.clock.pending(),1);
+ t.fail(false);await tick(t,1800000);assert.equal(t.stats().writes,1);assert.equal(t.stats().durable,null);assert.equal(t.clock.pending(),0);cases.push('repeated failure has one capped-backoff opportunity');
 }
 {
-  const t=fixture({durable:null});t.register();t.configure();await tick(t,1000);await tick(t,3600000);
-  assert.equal(t.stats().reads,1);assert.equal(t.stats().writes,0);assert.equal(t.clock.pending(),0);assert.equal(t.traces.length,0);
-  cases.push('confirmed absence stops without publication');
+ const t=fixture({durable:null});t.register();t.configure();await tick(t,3600000);assert.equal(t.stats().reads,1);assert.equal(t.stats().writes,0);assert.equal(t.clock.pending(),0);assert.equal(t.traces.length,0);cases.push('confirmed absence retires without publication');
+}
+for(const order of ['before-hooks','after-hooks'])for(const blocker of ['authorization','control','lock']){
+ const t=fixture({authorized:blocker!=='authorization'});if(blocker==='control')t.control(false);if(blocker==='lock')t.lock(true);
+ if(order==='before-hooks'){t.register();t.configure();}else{t.configure();t.register();}
+ t.notify();await tick(t,3600000);assert.equal(t.stats().reads,0);assert.equal(t.clock.pending(),0);assert.equal(t.status().pending,true);assert.equal(t.status().state,'paused');
+ if(blocker==='authorization'){t.authorization(true);t.notify();t.notify();}else if(blocker==='control')t.control(true);else t.lock(false);
+ assert.equal(t.clock.pending(),1);await tick(t,1000);assert.equal(t.stats().writes,1);assert.equal(t.stats().clears,1);assert.equal(t.clock.pending(),0);cases.push(order+' restores '+blocker);
 }
 {
-  const t=fixture();t.register();t.configure();t.authorization(false);await tick(t,1000);await tick(t,3600000);
-  assert.equal(t.clock.pending(),0);assert.equal(t.stats().writes,0);assert.ok(t.stats().durable);
-  assert.equal(await t.connect(),true);await tick(t,1000);await tick(t,3600000);
-  assert.equal(t.stats().writes,1);assert.equal(t.stats().clears,1);assert.equal(t.clock.pending(),0);
-  cases.push('canonical reconnect wakes retained intent');
-}
-for(const registrationOrder of ['before-hooks','after-hooks']){
-  const t=fixture({authorized:false});
-  if(registrationOrder==='before-hooks'){t.register();t.configure();}else{t.configure();t.register();}
-  t.notify();await tick(t,3600000);assert.equal(t.stats().reads,0);assert.equal(t.clock.pending(),0,'unavailable authorization must not poll');
-  t.authorization(true);t.notify();t.notify();assert.equal(t.clock.pending(),1,'connection notifications must coalesce');
-  await tick(t,1000);assert.equal(t.stats().writes,1);assert.equal(t.stats().clears,1);assert.equal(t.clock.pending(),0);
-  cases.push('connection wake '+registrationOrder);
-}
-for(const registrationOrder of ['before-hooks','after-hooks']){
-  const t=fixture();if(registrationOrder==='before-hooks'){t.register();t.configure();}else{t.configure();t.register();}
-  await tick(t,1000);assert.equal(t.stats().writes,1);assert.equal(t.stats().durable,null);
-  cases.push('persisted intent discovered '+registrationOrder);
+ const t=fixture({durable:null});t.register();t.configure();t.maintenance();t.authorization(false);t.notify();await tick(t,3600000);
+ assert.equal(t.stats().cleanupPasses,0);assert.ok(t.stats().maintenance);assert.equal(t.clock.pending(),0);
+ t.authorization(true);t.notify();await tick(t,1000);assert.equal(t.stats().cleanupPasses,1);assert.equal(t.stats().maintenance,null);assert.equal(t.clock.pending(),0);cases.push('reconnection independently wakes cleanup with no backup intent or history action');
 }
 {
-  const t=fixture();t.register();t.configure();t.context.busy=true;await tick(t,1000);assert.equal(t.stats().writes,0);
-  t.context.busy=false;await tick(t,15000);assert.equal(t.stats().writes,1);assert.equal(t.stats().clears,1);
-  cases.push('foreground contention resumes');
+ const t=fixture();t.register();t.configure();const hold=t.runtime.suspendBackground('pwa-update');await hold.settled;await tick(t,3600000);assert.equal(t.stats().reads,0);t.notify();assert.equal(t.clock.pending(),0);assert.equal(hold.release(),true);assert.equal(hold.release(),false);await tick(t,1000);assert.equal(t.stats().writes,1);assert.equal(t.stats().durable,null);cases.push('suspension preserves and reconnects one opportunity');
 }
 {
-  const t=fixture();t.register();t.configure();const foreground=t.context.beginForeground(t.selected);await foreground.settled;
-  // Repository generation discovery can retire scheduled jobs during foreground
-  // work. Shared release must rediscover retained intent after that retirement.
-  t.bg.clearAllScheduled();assert.equal(foreground.release(),true);assert.equal(foreground.release(),false);
-  await tick(t,1000);assert.equal(t.stats().writes,1);assert.equal(t.stats().clears,1);assert.equal(t.clock.pending(),0);
-  cases.push('foreground release rediscovers intent after schedule retirement');
+ const t=fixture();t.register();t.configure();t.onPublication(async()=>{await t.pending.mark('google-drive');});await tick(t,1000);
+ assert.equal(t.stats().writes,1);assert.equal(t.stats().clears,0);assert.ok(t.stats().durable);assert.equal(t.status().pending,true,'older publication cannot clear a newer durable request');t.onPublication(noop);await tick(t,30000);assert.equal(t.stats().writes,2);assert.equal(t.stats().durable,null);cases.push('completion compares the serviced request before clearing durable intent');
 }
 {
-  const t=fixture();t.register();t.configure();const hold=t.bg.suspend('pwa-update');await hold.settled;
-  await tick(t,3600000);assert.equal(t.stats().reads,0);assert.equal(t.stats().writes,0);
-  t.notify();assert.equal(t.clock.pending(),0);t.bg.resume(hold);await tick(t,1000);
-  assert.equal(t.stats().writes,1);assert.equal(t.stats().clears,1);assert.equal(t.clock.pending(),0);
-  cases.push('suspension keeps one pending opportunity');
+ const t=fixture();t.register();t.configure();let release,started=false;t.onPublication(()=>{started=true;return new Promise(resolve=>{release=resolve;});});
+ await tick(t,1000);assert.equal(started,true);const history=t.runtime.history('google-drive',{interactive:false});await t.clock.drainMicrotasks(40);assert.equal(t.runtime.status().busy,true);release();assert.equal((await history).available,true);await t.clock.drainMicrotasks(120);assert.equal(t.runtime.status().busy,false);cases.push('foreground history waits for actual transfer release and remains successful');
 }
-console.log(JSON.stringify({status:'PASS',suite:'pending-provider-recovery',cases},null,2));
+for(const blocker of ['control','authorization','lock']){
+ const t=fixture();t.register();t.configure();let aborted=0;
+ t.onPublication(({signal})=>new Promise((_,reject)=>{signal.addEventListener('abort',()=>{aborted++;reject(signal.reason);},{once:true});}));
+ await tick(t,1000);assert.equal(t.status().busy,true);
+ if(blocker==='control')t.control(false);else if(blocker==='lock')t.lock(true);else{t.authorization(false);t.notify();}
+ await t.clock.drainMicrotasks(240);assert.equal(aborted,1);assert.equal(t.status().busy,false);assert.equal(t.status().pending,true);assert.equal(t.status().state,'paused');assert.equal(t.clock.pending(),0);assert.ok(t.stats().durable);
+ t.onPublication(noop);if(blocker==='control')t.control(true);else if(blocker==='lock')t.lock(false);else{t.authorization(true);t.notify();}
+ await tick(t,15000);assert.equal(t.stats().writes,2);assert.equal(t.stats().durable,null);assert.equal(t.clock.pending(),0);cases.push('active transfer safely reconnects after '+blocker+' loss');
+}
+console.log(JSON.stringify({status:'PASS',suite:'pending-provider-recovery',productionRuntime:true,cases},null,2));

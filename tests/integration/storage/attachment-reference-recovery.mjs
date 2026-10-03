@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
+import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
 const app=fs.readFileSync('source/app.html','utf8'),repositories=fs.readFileSync('source/core/repositories.js','utf8');
 const id='att-'+'a'.repeat(32),otherId='att-'+'c'.repeat(32);
 function fixture(){
-  const context={crypto:webcrypto,TextEncoder,Uint8Array,console,Blob,Object,Set,Map,Math,Number,String,Promise,Date,TypeError,Symbol,structuredClone};context.globalThis=context;vm.createContext(context);
-  for(const file of ['source/core/internal.js','source/core/asset-storage.js','source/core/attachments.js'])vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});
+  const clock=createFakeClock();
+  const context={crypto:webcrypto,TextEncoder,Uint8Array,console,Blob,Object,Set,Map,Math,Number,String,Promise,Date:clock.Date,TypeError,Symbol,structuredClone};context.globalThis=context;vm.createContext(context);
+  for(const file of ['source/core/internal.js','source/core/operation-lifecycle.js','source/core/asset-storage.js','source/core/attachments.js'])vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});
   const registry=context[Symbol.for('studyDirector.internalModules.v1')],Assets=registry.require('asset-storage',1),Attachments=registry.require('attachments',1);
   const metadata={version:2,storage:'opfs',file:'attblob-'+'b'.repeat(32),hash:'a'.repeat(64),size:10,type:'application/pdf',name:'fixture.pdf',library:false};
   const dir={getFileHandle:async()=>{throw Object.assign(new Error('missing'),{name:'NotFoundError'});}},storageRoot={getDirectoryHandle:async()=>dir};
@@ -27,7 +29,7 @@ function fixture(){
   const background={budget:()=>()=>false,yieldTask:async()=>{}};
   const references=Attachments.createReferenceCoordinator({data,scan:text=>({trusted:true,assetIds:text==='REFERENCE'?[id]:[],occurrences:[]}),rewriteReferences:async()=>{rewrites++;},withPersistenceSuppressed:work=>work(),review:{hydrate:async()=>{},invalidateBindings(){}},background,live:{fields:()=>[],reviewDate:()=>'',todayIso:()=>'',normalizeAreaName:value=>value}});
   let durable={version:2,checkedAt:'',attemptedAt:'',lastOutcome:'yielded',issues:[{id,kind:'missing-file'}],progress:null};const scheduled=[],warnings=[];
-  Object.assign(context,{APP_META_KEYS:{attachmentIntegrityAudit:'integrity'},AttachmentsModule:Attachments,AttachmentStorage:store,AttachmentReferences:references,attachmentIntegrityIssues:new Map([[id,{kind:'missing-file'}]]),AppData:data,richAssetReferenceRevision:0,
+  Object.assign(context,{OperationLifecycle:registry.require('operation-lifecycle',1),StartupLifecycle:{status:()=>({fullyInitialized:true})},APP_META_KEYS:{attachmentIntegrityAudit:'integrity'},AttachmentsModule:Attachments,AttachmentStorage:store,AttachmentReferences:references,attachmentIntegrityIssues:new Map([[id,{kind:'missing-file'}]]),AppData:data,richAssetReferenceRevision:0,
     readHostAppMetaValue:async()=>durable,writeHostAppMetaValue:async(_key,state,options)=>{assert.equal(options.strict,true);durable=state;writes++;},AppDiagnostics:{capture(){}},BackupOperationDiagnostics:{start:()=>'',mark(){},finish(){},fail(){}},appCanMutate:()=>true,backgroundMaintenanceForegroundBusy:()=>false,BackgroundTasks:background,
     markStorageHealthError:(_kind,message)=>warnings.push(message),markStorageHealthOk(){healthy++;},invalidateAttachmentLibrary(){},renderIntegrityStatuses(){},setTimeout:(_callback,ms)=>{scheduled.push(ms);return scheduled.length;},clearTimeout(){}});
   vm.runInContext(app.slice(app.indexOf('const ATTACHMENT_INTEGRITY_META_KEY='),app.indexOf('const REPOSITORY_INTEGRITY_BATCH_BYTES=')),context);

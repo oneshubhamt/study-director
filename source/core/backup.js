@@ -20,7 +20,7 @@ registry.define('backup',1,input=>{
     codecs:freeze(['activeSession','backup']),
     reconciliation:freeze(['createPlan','resolvePlan','summarizePlan']),
     noteReconciliation:freeze(['resolve']),
-    exports:freeze(['protect','unprotect','check','scope','job','run','download','chooseSave','save']),
+    exports:freeze(['backgroundAvailable','protect','unprotect','check','scope','job','run','download','chooseSave','save']),
     session:freeze(['canMutate','cancelLiveDraftSave','captureSnapshot','hasActiveSession','hasTasks','toActiveSession','withPersistenceSuppressed']),
     domain:freeze(['clampText','filenameSafeStudentName','getStudentName','materializeDailyRecordView','sanitizeCurrentDailyRecord','todayISO']),
     view:freeze(['presentation','document','refreshPnote','refreshReview','renderSchedule']),
@@ -1523,7 +1523,7 @@ const BackupProviderRuntime=BackupProviderModule.createRuntime(freeze({
     exports:freeze({run:Exports.run}),
     domain:freeze({clampText}),
     view:freeze({document,presentation:ports.view.presentation}),
-    ownership:freeze({requireMutationControl:requireBackupMutationControl}),
+    ownership:freeze({canRunBackground:()=>!appCanMutate()?'awaiting-control':Exports.backgroundAvailable(),requireMutationControl:requireBackupMutationControl}),
     environment:freeze({clearTimeout,requestAnimationFrame,setTimeout}),
     diagnostics:freeze({capture:AppDiagnostics.capture,start:OperationDiagnostics.start,mark:OperationDiagnostics.mark,finish:OperationDiagnostics.finish,fail:OperationDiagnostics.fail})
   })
