@@ -92,7 +92,7 @@ async function workerIdentity(page,slot='active'){
 // to registration.update(), including the application's automatic checks.
 async function explicitChecks(page){return page.evaluate("Number(localStorage.getItem('qa.pwaExplicitChecks')||0)");}
 async function waitForNoInstalling(page){
-  return waitFor(()=>page.evaluate(`navigator.serviceWorker.getRegistration().then(registration=>registration&&!registration.installing)`),{label:'service-worker installation settled'});
+  return waitFor(()=>page.evaluate(`navigator.serviceWorker.getRegistration().then(registration=>registration&&!registration.installing&&!document.getElementById('pwa-update-apply').disabled)`),{label:'service-worker check and installation settled'});
 }
 
 const evidence={status:'PASS',release:build.identity.release,checks:{}};
@@ -123,7 +123,12 @@ try{
   await waitFor(()=>page2.evaluate(`!!navigator.serviceWorker.controller`),{label:'secondary controlled tab'});
   await waitFor(()=>page1.evaluate(`document.documentElement.dataset.studyDirectorUiState==='primary'`),{label:'primary ownership'});
   await waitFor(()=>page2.evaluate(`document.documentElement.dataset.studyDirectorUiState==='secondary'`),{label:'secondary ownership'});
-  await page2.evaluate(`(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'hidden'});return true})()`);
+  // Use actual tab visibility: the edited primary is foreground, and the
+  // secondary is hidden. Changing a JS getter would leave Chrome throttling
+  // the primary while the fixture falsely called the foreground tab hidden.
+  await page1.send('Page.bringToFront');
+  await waitFor(()=>page1.evaluate(`!document.hidden`),{label:'foreground primary tab'});
+  await waitFor(()=>page2.evaluate(`document.hidden`),{label:'hidden secondary tab'});
 
 
   const due=Date.now()-25*60*60*1000;

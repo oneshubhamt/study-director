@@ -1,15 +1,11 @@
-import {withoutPwaChecks} from '../../helpers/browser-harness.mjs';
+import {withoutPwaChecks,launchChromium} from '../../helpers/browser-harness.mjs';
 import assert from 'node:assert/strict';
-import {artifactPath,writeArtifact} from '../../helpers/artifacts.mjs';
+import {writeArtifact} from '../../helpers/artifacts.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
-import os from 'node:os';
 import path from 'node:path';
-import {spawn} from 'node:child_process';
 
 const root=process.cwd();
-const chromium=process.env.CHROMIUM_PATH||['/usr/bin/chromium','/tmp/chromium'].find(fs.existsSync)||'/usr/bin/chromium';
-if(!fs.existsSync(chromium))throw new Error(`Chromium not found: ${chromium}`);
 const manifest=JSON.parse(fs.readFileSync(path.join(root,'dist/build-manifest.json'),'utf8'));
 const deployment=path.join(root,'dist/deployment');
 const marker='/* PUBLIC PLUGIN API */';
@@ -47,42 +43,8 @@ const server=http.createServer((req,res)=>{
 await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
 const appUrl=`http://127.0.0.1:${server.address().port}/${manifest.main}`;
 
-class CdpPage{
-  constructor(ws){
-    this.ws=ws;this.nextId=0;this.pending=new Map();this.events=[];
-    ws.onmessage=event=>{
-      const message=JSON.parse(event.data);
-      if(message.id){
-        const pending=this.pending.get(message.id);if(!pending)return;
-        this.pending.delete(message.id);
-        message.error?pending.reject(new Error(JSON.stringify(message.error))):pending.resolve(message.result);return;
-      }
-      if(message.method==='Runtime.exceptionThrown')this.events.push({kind:'exception',text:message.params.exceptionDetails.exception?.description||message.params.exceptionDetails.text||'Runtime exception'});
-      if(message.method==='Runtime.consoleAPICalled'&&message.params.type==='error')this.events.push({kind:'console-error',text:message.params.args.map(arg=>arg.value??arg.description??'').join(' ')});
-    };
-  }
-  static async connect(url){const ws=new WebSocket(url);await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject;});return new CdpPage(ws);}
-  send(method,params={}){return new Promise((resolve,reject)=>{const id=++this.nextId;this.pending.set(id,{resolve,reject});this.ws.send(JSON.stringify({id,method,params}));});}
-  async evaluate(expression){
-    const result=await this.send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true,userGesture:true});
-    if(result.exceptionDetails)throw new Error(result.exceptionDetails.exception?.description||result.exceptionDetails.text||'Evaluation failed');
-    return result.result.value;
-  }
-  close(){this.ws.close();}
-}
-
-const profile=fs.mkdtempSync(path.join(os.tmpdir(),'qa-device-browser-'));
-const browser=spawn(chromium,[
-  '--headless=new','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check',
-  '--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'
-],{stdio:['ignore','ignore','pipe']});
-let browserError='';browser.stderr.on('data',chunk=>{browserError+=chunk;});
-const activePortFile=path.join(profile,'DevToolsActivePort');
-await waitFor(()=>fs.existsSync(activePortFile),{timeout:20000,label:'Chromium DevTools port'});
-const [browserPort]=fs.readFileSync(activePortFile,'utf8').trim().split(/\r?\n/);
-await waitFor(async()=>{try{return (await fetch(`http://127.0.0.1:${browserPort}/json/version`)).ok;}catch{return false;}},{label:'Chromium CDP endpoint'});
-const target=await (await fetch(`http://127.0.0.1:${browserPort}/json/new?about:blank`,{method:'PUT'})).json();
-const page=await CdpPage.connect(target.webSocketDebuggerUrl);
+const browser=await launchChromium({profilePrefix:'qa-device-browser-'});
+let page=null;
 const prelude=`(()=>{
   window.__devicePickerCalls=()=>Number(sessionStorage.getItem('qa-picker-calls')||0);
   Object.defineProperty(window,'showDirectoryPicker',{configurable:true,value:async()=>{
@@ -94,11 +56,7 @@ const prelude=`(()=>{
 const evidence={status:'PASS',release:manifest.release,checks:{}};
 
 try{
-  await page.send('Runtime.enable');await page.send('Page.enable');await page.send('Log.enable');
-  await page.send('Emulation.setTimezoneOverride',{timezoneId:'Asia/Kolkata'});
-  await page.send('Emulation.setDeviceMetricsOverride',{width:1365,height:900,deviceScaleFactor:1,mobile:false});
-  await page.send('Page.addScriptToEvaluateOnNewDocument',{source:prelude});
-  await page.send('Page.navigate',{url:appUrl});
+  page=await browser.createPage(appUrl,{preload:prelude});
   await waitFor(()=>page.evaluate(`!!window.__DeviceBackupDebug&&__DeviceBackupDebug.StartupLifecycle.status().fullyInitialized`),{label:'Study Director startup'});
   await waitFor(()=>page.evaluate(`__DeviceBackupDebug.DeviceBackup.status().installed===true`),{label:'device-backup startup'});
 
@@ -192,10 +150,9 @@ try{
   console.log(JSON.stringify(evidence,null,2));
 }catch(error){
   let diagnostic=null;
-  try{diagnostic=await page.evaluate(`({href:location.href,title:document.title,body:(document.body?.innerText||'').slice(0,1000),device:window.__DeviceBackupDebug?.DeviceBackup.status()||null,pickerCalls:window.__devicePickerCalls?.()||null})`);}catch(diagnosticError){diagnostic={error:String(diagnosticError)};}
-  throw new Error(`${error.stack||error}\nPage diagnostic: ${JSON.stringify(diagnostic)}\nChromium stderr:\n${browserError.slice(-6000)}`);
+  try{diagnostic=await page?.evaluate(`({href:location.href,title:document.title,body:(document.body?.innerText||'').slice(0,1000),device:window.__DeviceBackupDebug?.DeviceBackup.status()||null,pickerCalls:window.__devicePickerCalls?.()||null})`);}catch(diagnosticError){diagnostic={error:String(diagnosticError)};}
+  throw new Error(`${error.stack||error}\nPage diagnostic: ${JSON.stringify(diagnostic)}\nChromium stderr:\n${browser.stderr().slice(-6000)}`);
 }finally{
-  try{page.close();}catch{}
-  browser.kill('SIGTERM');await Promise.race([new Promise(resolve=>browser.once('exit',resolve)),sleep(3000)]);
-  server.close();fs.rmSync(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});
+  await browser.close();
+  await new Promise(resolve=>server.close(resolve));
 }
