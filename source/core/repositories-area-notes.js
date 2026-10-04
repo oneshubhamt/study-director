@@ -35,9 +35,6 @@ const repository=(()=>{
   const notes=KeyedRecord.create();
   const dirtyKeys=new Set();
   const dirtyBaseRevisions=new Map();
-  // Last text both this tab and storage agreed on: the ancestor for a three-way
-  // merge if another writer changed the note meanwhile.
-  const dirtyBaseTexts=new Map();
   let storageLossSignalled=false,everLoaded=false;
   const SAVE_DEBOUNCE_MS=1000;
   const RECOVERY_WRITE_INTERVAL_MS=200;
@@ -345,14 +342,11 @@ const repository=(()=>{
     if(!LocalStorageContract.remove(LEGACY_STORAGE_KEYS.areaNotesPending))throw new Error('Legacy Ongoing Note recovery could not be retired after verified migration.');
     return Object.freeze({status:'migrated',records:keys.length});
   }
-  function markDirty(key,baseRevision,baseText=undefined){
+  function markDirty(key,baseRevision){
     const safeKey=normalizeAreaName(key);
     if(!safeKey)return;
     const wasDirty=dirtyKeys.has(safeKey);
-    if(!dirtyBaseRevisions.has(safeKey)){
-      dirtyBaseRevisions.set(safeKey,String(baseRevision===undefined?revision(notes[safeKey]):baseRevision||''));
-      dirtyBaseTexts.set(safeKey,baseText===undefined?String(notes[safeKey]?.text||''):String(baseText||''));
-    }
+    if(!dirtyBaseRevisions.has(safeKey))dirtyBaseRevisions.set(safeKey,String(baseRevision===undefined?revision(notes[safeKey]):baseRevision||''));
     dirtyKeys.add(safeKey);
     setNoteSyncStateForKey(safeKey,'saving');
     schedulePendingRecoveryWrite(safeKey,{immediate:!wasDirty});
@@ -399,15 +393,13 @@ const repository=(()=>{
           const persistedRaw=request.result||null,persistedRevision=normalizeTimestamp(persistedRaw&&persistedRaw.updatedAt,'')||'';
           const expected=expectedRevisions&&expectedRevisions.has(key)?String(expectedRevisions.get(key)||''):persistedRevision;
           if(persistedRevision!==expected){
-            const persisted=persistedRaw?normalizePayload({[key]:persistedRaw})[key]||null:null;
             // A row that vanished without a deletion record, after the browser
             // removed this site's data, is lost storage rather than a newer
             // decision made elsewhere. Rewrite it from this tab.
-            const vanished=!persistedRaw&&!!expected&&!deletion.value()&&(storageLost||!epoch.value());
-            // Identical content is not a competing edit.
-            const sameContent=!!persisted&&!!entry&&String(persisted.text||'')===String(entry.text||'')&&String(persisted.label||'')===String(entry.label||'');
-            if(!vanished&&!sameContent){conflicts.push({key,persisted});return;}
-            if(vanished)storageLossSignalled=true;
+            if(persistedRaw||!expected||deletion.value()||!(storageLost||!epoch.value())){
+              const persisted=persistedRaw?normalizePayload({[key]:persistedRaw})[key]||null:null;conflicts.push({key,persisted});return;
+            }
+            storageLossSignalled=true;
           }
           stageMutation();if(entry){store.put(entry);meta.remove('areaNoteDeletionPrefix',key);}else{store.delete(key);const deletion=areaNoteDeletionValue(key,deletedAt);meta.put('areaNoteDeletionPrefix',deletion,{suffix:key,updatedAt:deletion.deletedAt});}
         };
@@ -456,7 +448,6 @@ const repository=(()=>{
     if(saveTimer){clearTimeout(saveTimer);saveTimer=null;}
     dirtyKeys.clear();
     dirtyBaseRevisions.clear();
-    dirtyBaseTexts.clear();
     revisionTouchedAt.clear();
     recoveryWriteKeys.clear();
     if(recoveryWriteTimer){clearTimeout(recoveryWriteTimer);recoveryWriteTimer=null;}
@@ -468,7 +459,7 @@ const repository=(()=>{
     if(mergedJson!==loadedJson){
       new Set([...Object.keys(rescueBeforeRead),...Object.keys(pendingBeforeRead),...Object.keys(pendingAfterRead),...Object.keys(rescueAfterRead),...Object.keys(survivors)]).forEach(key=>{
         const safeKey=normalizeAreaName(key);
-        if(safeKey){dirtyKeys.add(safeKey);dirtyBaseRevisions.set(safeKey,revision(loaded[safeKey]));dirtyBaseTexts.set(safeKey,String(loaded[safeKey]?.text||''));}
+        if(safeKey){dirtyKeys.add(safeKey);dirtyBaseRevisions.set(safeKey,revision(loaded[safeKey]));}
       });
       scheduleSave();
     }
@@ -507,11 +498,9 @@ const repository=(()=>{
     const deltaKeys=[...new Set((keys||[]).map(normalizeAreaName).filter(Boolean))];
     if(!deltaKeys.length)return writeChain;
     const recoveryReady=flushPendingRecoveryWrites(deltaKeys);
-    let ancestors=new Map();
     writeChain=writeChain.catch(error=>{AppDiagnostics.capture('area-notes.previous-write',error,'error');}).then(async()=>{
       await recoveryReady;
       const expectedRevisions=new Map(deltaKeys.map(key=>[key,dirtyBaseRevisions.has(key)?String(dirtyBaseRevisions.get(key)||''):revision(notes[key])]));
-      ancestors=new Map(deltaKeys.map(key=>[key,dirtyBaseTexts.has(key)?dirtyBaseTexts.get(key):null]));
       return idbApplyDelta(deltaKeys,expectedRevisions);
     })
       .then(async result=>{
@@ -522,24 +511,17 @@ const repository=(()=>{
           const written=result.committed[key]||null,committedRevision=written?revision(written):'';
           if(dirtyKeys.has(key)||!sameEntry(notes[key],written)){
             dirtyBaseRevisions.set(key,committedRevision);
-            dirtyBaseTexts.set(key,String(written&&written.text||''));
             writePendingCacheForKeys([key]);
           }else{
             dirtyBaseRevisions.delete(key);
-            dirtyBaseTexts.delete(key);
             revisionTouchedAt.delete(key);
             clearPendingCacheKeys([key]);
             if(!committedRevision){delete notes[key];canonicalRefreshNeeded=true;}
             setNoteSyncStateForKey(key,'synced');
           }
         });
-        // Another writer changed the note. Storage keeps its version; the text
-        // this tab held is handed to the conflict review with its ancestor.
-        const reports=[];
         conflicts.forEach((persisted,key)=>{
-          const local=notes[key]||null;
-          reports.push(freeze({key,label:persisted&&persisted.label||local&&local.label||displayAreaName(key),storedText:String(persisted&&persisted.text||''),localText:String(local&&local.text||''),ancestor:ancestors.get(key)??null,storedDeleted:!persisted}));
-          dirtyKeys.delete(key);dirtyBaseRevisions.delete(key);dirtyBaseTexts.delete(key);revisionTouchedAt.delete(key);recoveryWriteKeys.delete(key);clearPendingCacheKeys([key]);
+          dirtyKeys.delete(key);dirtyBaseRevisions.delete(key);revisionTouchedAt.delete(key);clearPendingCacheKeys([key]);
           if(persisted)notes[key]=persisted;else delete notes[key];
         });
         if(!clearIndependentRescueKeys(deltaKeys))AppDiagnostics.capture('area-notes.rescue-clear',LocalStorageContract.lastError||new Error('Ongoing Note emergency rescue cleanup failed.'),'warn');
@@ -551,7 +533,7 @@ const repository=(()=>{
         if(canonicalRefreshNeeded)refreshAreaNoteConsumers();
         if(conflicts.size){
           refreshAreaNoteConsumers();
-          reports.forEach(report=>reportAreaNoteConflict(report));
+          conflicts.forEach((persisted,key)=>reportAreaNoteConflict(Object.freeze({key,label:persisted&&persisted.label||displayAreaName(key)})));
         }
       })
       .catch(e=>{
@@ -579,9 +561,7 @@ const repository=(()=>{
     const current=notes[safeKey]||null;
     const currentRevision=revision(current);
     if(String(expectedRevision||'')!==currentRevision){
-      // The editor was bound to an older revision. Storage keeps its note; the
-      // rejected text goes to the conflict review instead of vanishing.
-      reportAreaNoteConflict(Object.freeze({key:safeKey,label:current&&current.label||displayAreaName(label||safeKey),storedText:String(current&&current.text||''),localText:String(value||''),ancestor:null,storedDeleted:!current}));
+      reportAreaNoteConflict(Object.freeze({key:safeKey,label:current&&current.label||displayAreaName(label||safeKey)}));
       return {status:'conflict',revision:currentRevision};
     }
     const sourceText=String(value||''),nextLabel=clampText(displayAreaName(label||safeKey),APP_LIMITS.maxAreaNameChars);
@@ -597,12 +577,11 @@ const repository=(()=>{
     const entry=ensureEntry(safeKey,nextLabel);
     if(!entry)return {status:'rejected',revision:currentRevision};
     const nowMs=decisionNowMs(),lastTouch=revisionTouchedAt.get(safeKey)||0,touchRevision=!dirtyKeys.has(safeKey)||nowMs-lastTouch>=REVISION_TOUCH_INTERVAL_MS;
-    const previousText=current?String(current.text||''):'';
     entry.text=nextText;
     entry.label=nextLabel;
     if(touchRevision){entry.updatedAt=new Date(nowMs).toISOString();revisionTouchedAt.set(safeKey,nowMs);}
     touchSnapshot();
-    markDirty(entry.key,currentRevision,previousText);
+    markDirty(entry.key,currentRevision);
     scheduleSave();
     return {status:'changed',revision:revision(entry)};
   }
@@ -703,7 +682,7 @@ const repository=(()=>{
     const removed=[...new Set((keys||[]).map(normalizeAreaName).filter(Boolean))];
     if(!removed.length)return 0;
     let changed=false;
-    removed.forEach(key=>{if(Object.hasOwn(notes,key))changed=true;delete notes[key];dirtyKeys.delete(key);dirtyBaseRevisions.delete(key);dirtyBaseTexts.delete(key);revisionTouchedAt.delete(key);recoveryWriteKeys.delete(key);});
+    removed.forEach(key=>{if(Object.hasOwn(notes,key))changed=true;delete notes[key];dirtyKeys.delete(key);dirtyBaseRevisions.delete(key);revisionTouchedAt.delete(key);recoveryWriteKeys.delete(key);});
     if(changed)touchSnapshot();
     clearPendingCacheKeys(removed);
     refreshAreaNoteConsumers();
@@ -712,7 +691,7 @@ const repository=(()=>{
   function resetPendingAreaNoteWrites(){
     if(saveTimer){clearTimeout(saveTimer);saveTimer=null;}
     if(recoveryWriteTimer){clearTimeout(recoveryWriteTimer);recoveryWriteTimer=null;}
-    recoveryWriteKeys.clear();revisionTouchedAt.clear();dirtyKeys.clear();dirtyBaseRevisions.clear();dirtyBaseTexts.clear();
+    recoveryWriteKeys.clear();revisionTouchedAt.clear();dirtyKeys.clear();dirtyBaseRevisions.clear();
   }
   async function commitCollection(payload,{merge,deletions=[]}={}){
     await flush();
@@ -743,7 +722,7 @@ const repository=(()=>{
     if(!appCanMutate())return false;
     const safeKey=normalizeAreaName(key);if(!safeKey||!notes[safeKey])return false;
     await flush({strict:true});const current=notes[safeKey];if(!current)return false;
-    delete notes[safeKey];touchSnapshot();markDirty(safeKey,revision(current),String(current.text||''));
+    delete notes[safeKey];touchSnapshot();markDirty(safeKey,revision(current));
     await flush({strict:true});return !notes[safeKey];
   }
   async function clearAllAreaNotes(){

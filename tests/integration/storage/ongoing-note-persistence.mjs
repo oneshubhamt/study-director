@@ -3,10 +3,8 @@ import {createHarness} from '../../helpers/repository-harness.mjs';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
 // Ongoing Notes are first-class documents: an accepted edit is never replaced by
-// an older stored revision, storage that vanished underneath an open tab is
-// rewritten from memory, and when another writer genuinely changed a note the
-// text this tab held is handed to review with its ancestor instead of vanishing.
-// No extra persisted state is involved.
+// an older stored revision, and storage that vanished underneath an open tab is
+// rewritten from memory. No extra persisted state is involved.
 async function setup(){
   const clock=createFakeClock('2026-09-15T12:00:00.000Z'),reports=[],controls={clock,onNoteConflict:info=>reports.push(info)},h=createHarness(new Map(),null,controls);
   h.stores.meta.set('dailyRecordMigration',{key:'dailyRecordMigration',version:1,value:{recordVersion:1,summaryVersion:1,complete:true,recordCount:0},updatedAt:'2026-09-15T12:00:00.000Z'});
@@ -80,46 +78,23 @@ function clearSiteData(stores){for(const map of Object.values(stores))map.clear(
   assert.equal(stores.area.get('gamma')?.text,'edited while clearing','the strict flush rewrites the surviving note');
 }
 
-// 5. A genuine competing revision keeps the stored winner and hands the text
-// this tab held, with its ancestor, to review. Nothing extra is persisted.
+// 5. The storage-loss rule never overrides a row that exists or a recorded
+// deletion: those keep the original fail-safe (stored version wins).
 {
   const {app,stores,clock,reports}=await setup();
   app.notes.update('physics','Physics','shared start','');await app.notes.flush({strict:true});await clock.advance(2000);
-  app.notes.update('physics','Physics','shared start + local line',app.notes.get('physics').updatedAt);
-  stores.area.set('physics',{version:2,key:'physics',label:'Physics',text:'shared start + remote line',updatedAt:'2026-09-15T12:00:05.000Z'});
+  app.notes.update('physics','Physics','local line',app.notes.get('physics').updatedAt);
+  stores.area.set('physics',{version:2,key:'physics',label:'Physics',text:'stored line',updatedAt:'2026-09-15T12:00:05.000Z'});
   await app.notes.flush();await settle(clock);
-  assert.equal(stores.area.get('physics').text,'shared start + remote line','the stored winner is never overwritten');
-  assert.equal(app.notes.get('physics').text,'shared start + remote line');
+  assert.equal(stores.area.get('physics').text,'stored line','an existing stored row is never overwritten by a stale revision');
   assert.equal(reports.length,1);
-  assert.deepEqual({...reports[0]},{key:'physics',label:'Physics',storedText:'shared start + remote line',localText:'shared start + local line',ancestor:'shared start',storedDeleted:false});
-  assert.equal([...stores.meta.keys()].some(key=>!/^(?:canonicalMutationEpoch|backupPreparationUnit|dailyRecordMigration|areaNoteDeletion)/.test(key)),false,'no conflict state is persisted');
-  // Applying the reviewed text is an ordinary edit on top of the winner.
-  assert.equal(app.notes.update('physics','Physics','shared start + remote line + local line',app.notes.get('physics').updatedAt).status,'changed');
-  await app.notes.flush({strict:true});
-  assert.equal(stores.area.get('physics').text,'shared start + remote line + local line');
-}
-
-// 6. A note deleted elsewhere (deletion record present) is not resurrected; the
-// edit made here goes to review instead.
-{
-  const {app,stores,clock,reports}=await setup();
-  app.notes.update('chemistry','Chemistry','to be deleted elsewhere','');await app.notes.flush({strict:true});await clock.advance(2000);
+  app.notes.update('chemistry','Chemistry','to be deleted','');await app.notes.flush({strict:true});await clock.advance(2000);
   app.notes.update('chemistry','Chemistry','edited here',app.notes.get('chemistry').updatedAt);
   stores.area.delete('chemistry');
   stores.meta.set('areaNoteDeletion.v1:chemistry',{key:'areaNoteDeletion.v1:chemistry',version:1,value:{format:'study-director.area-note-deletion',version:1,key:'chemistry',deletedAt:'2026-09-15T12:00:03.000Z'},updatedAt:'2026-09-15T12:00:03.000Z'});
   await app.notes.flush();await settle(clock);
-  assert.equal(stores.area.has('chemistry'),false,'a recorded deletion wins over a stale edit');
-  assert.equal(app.notes.get('chemistry'),null);
-  assert.equal(reports[0].localText,'edited here');assert.equal(reports[0].storedDeleted,true);
-}
-
-// 7. A stale editor binding is rejected, and its text goes to review.
-{
-  const {app,clock,reports}=await setup();
-  app.notes.update('biology','Biology','current text','');await app.notes.flush({strict:true});await clock.advance(2000);
-  assert.equal(app.notes.update('biology','Biology','typed in a stale editor','2026-01-01T00:00:00.000Z').status,'conflict');
-  assert.equal(app.notes.get('biology').text,'current text','the stored note is unchanged');
-  assert.equal(reports.at(-1).localText,'typed in a stale editor');assert.equal(reports.at(-1).storedText,'current text');
+  assert.equal(stores.area.has('chemistry'),false,'a recorded deletion is not resurrected');
+  assert.equal(reports.length,2);
 }
 
 console.log(JSON.stringify({status:'PASS',suite:'ongoing-note-persistence',contracts:[
@@ -127,7 +102,5 @@ console.log(JSON.stringify({status:'PASS',suite:'ongoing-note-persistence',contr
   'rows lost to a browser data clear are rewritten from memory',
   'reloads keep in-memory survivors of a data clear',
   'strict flush self-heals after storage loss',
-  'genuine conflicts keep the stored winner and hand this tab\'s text and ancestor to review',
-  'recorded deletions are not resurrected',
-  'stale editor text goes to review'
+  'existing rows and recorded deletions keep the stored-version fail-safe'
 ]},null,2));

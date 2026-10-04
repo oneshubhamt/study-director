@@ -4760,14 +4760,8 @@ function refreshAreaNoteConsumers(){
 function reportAreaNoteConflict(info={}){
   const key=normalizeAreaName(info.key),label=displayAreaName(info.label||key||'this area');
   if(!key)return false;
-  setNoteSyncStateForKey(key,'conflict');
-  const localText=String(info.localText||''),storedText=String(info.storedText||'');
-  if(localText.trim()&&localText!==storedText){
-    pendingAreaNoteConflicts.set(key,Object.freeze({key,label,storedText,localText,ancestor:typeof info.ancestor==='string'?info.ancestor:null}));
-    settleAreaNoteConflicts();
-    return true;
-  }
   const message=`A newer ongoing note for ${label} was saved elsewhere. Study Director kept the newer note and rejected the outdated edit.`;
+  setNoteSyncStateForKey(key,'conflict');
   setPlanStatus(message,false);
   setStatus('save-status',message,false);
   setStatus('ongoing-notes-status',message,false);
@@ -8503,50 +8497,6 @@ async function reviewStorageReset(){
   // suspended first (it can be restored afterwards).
   if(hasBlockingActiveSession()){await suspendTodaySession();if(hasBlockingActiveSession())return false;}
   return showBackupPresentation('device-folder',DeviceBackup.status().connected?'history':'status');
-}
-/* ONGOING NOTE CONFLICTS · nothing is discarded when another writer changed a note */
-// Storage keeps the other writer's version. The text this tab held is merged
-// automatically when the shared three-way merge is safe; otherwise it waits for
-// review in the same comparison dialog used when combining backups.
-const pendingAreaNoteConflicts=new Map();
-let areaNoteConflictReviewRunning=false;
-function publishAreaNoteConflictNotice(){
-  const count=pendingAreaNoteConflicts.size;
-  if(!count){NoticeCoordinator.resolveEvent('area-notes','conflicts');return false;}
-  NoticeCoordinator.emit({source:'area-notes',id:'conflicts',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,cue:'none',
-    title:'Ongoing note needs review',
-    message:count===1?'This note was also changed elsewhere. Both versions are kept until you choose.':`${count} notes were also changed elsewhere. Both versions are kept until you choose.`,
-    action:{label:'Review',run:()=>void reviewAreaNoteConflicts()}});
-  return true;
-}
-function applyAreaNoteConflictText(conflict,text){
-  const current=AppData.notes.get(conflict.key),result=AppData.notes.update(conflict.key,current?.label||conflict.label,String(text??''),current?.updatedAt||'');
-  if(!['changed','unchanged'].includes(result.status))return false;
-  pendingAreaNoteConflicts.delete(conflict.key);refreshSubjectNoteFieldsForKey(conflict.key);return true;
-}
-function settleAreaNoteConflicts(){
-  for(const conflict of [...pendingAreaNoteConflicts.values()]){
-    if(conflict.ancestor===null)continue;
-    try{const merged=RichTextApi.mergeThreeWay(conflict.ancestor,conflict.storedText,conflict.localText);if(merged&&merged.safe&&applyAreaNoteConflictText(conflict,merged.value))setStatus('ongoing-notes-status',`Merged both versions of the ongoing note for ${conflict.label}.`,true);}
-    catch(error){AppDiagnostics.capture('area-notes.conflict-merge',error,'warn');}
-  }
-  return publishAreaNoteConflictNotice();
-}
-async function reviewAreaNoteConflicts(){
-  if(areaNoteConflictReviewRunning||!appCanMutate()||!pendingAreaNoteConflicts.size)return publishAreaNoteConflictNotice();
-  areaNoteConflictReviewRunning=true;
-  try{
-    const conflicts=[...pendingAreaNoteConflicts.values()];
-    const result=await withRichTextAssetMaintenancePaused(()=>NoteReconciliationUI.resolve({conflicts:conflicts.map(conflict=>({
-      key:conflict.key,label:conflict.label,localCandidateId:'stored',incomingCandidateId:'this-tab',
-      localValue:String(AppData.notes.get(conflict.key)?.text||''),incomingValue:conflict.localText,
-      ancestorAvailable:conflict.ancestor!==null,ancestorValue:String(conflict.ancestor||''),incomingLabel:'Your version'
-    }))}));
-    if(!result)return false;
-    for(const conflict of conflicts){const resolved=result.notes[conflict.key];if(resolved&&!applyAreaNoteConflictText(conflict,resolved.text))setStatus('ongoing-notes-status',`The reviewed note for ${conflict.label} could not be applied; both versions are still kept.`,false);}
-    refreshAreaNoteConsumers();
-    return true;
-  }finally{areaNoteConflictReviewRunning=false;publishAreaNoteConflictNotice();}
 }
 const DeviceRepositoryBackground=RepositoryBackgroundModule.createCoordinator(Object.freeze({target:'device-folder',environment:Object.freeze({AbortController:window.AbortController,clearTimeout:timer=>clearTimeout(timer),now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay)})}));
 DeviceBackup=DeviceBackupModule.createController(Object.freeze({
