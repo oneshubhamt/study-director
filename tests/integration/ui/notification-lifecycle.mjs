@@ -185,4 +185,16 @@ class Element {
   assert.match(presentation.summary(restored.read()),/^✓ Backup restored locally and verified\..*pending/,'success mark refers to completed local recovery, not pending external convergence');
   n.clear();
 }
-console.log(JSON.stringify({status:'PASS',suite:'notification-lifecycle',checks:['priority and persistent errors','deduplication','hover/focus/hidden expiry','dismissal versus cancellation','recurring notices','stale operation handles','terminal fencing','renderer severity','Device and Drive summaries']},null,2));
+// A condition that only a decision can clear stays on screen until it is resolved.
+{
+  const {notices:n,time}=coordinator();let reviewed=0;
+  n.emit({source:'storage-reset',id:'detected',severity:'warning',lifecycle:'succeeded',surface:'toast',persistent:true,dismissible:false,title:'Browser data was cleared',action:{label:'Review',run:()=>{reviewed++;}}});
+  const row=n.eventStatus().toasts[0];assert.equal(row.dismissible,false);
+  assert.equal(n.dismissEvent(row.key,row.deliveryId),false,'a decision notice ignores dismissal');time.tick(60000);
+  assert.deepEqual(n.eventStatus().toasts.map(item=>item.id),['detected'],'a decision notice never expires');
+  row.action.run();assert.equal(reviewed,1);
+  n.resolveEvent('storage-reset','detected');assert.equal(n.eventStatus().toasts.length,0,'only resolution clears it');
+  n.emit({source:'plain',id:'ordinary',severity:'warning',surface:'toast',persistent:true,dismissible:false,title:'No action'});
+  const plain=n.eventStatus().toasts[0];assert.equal(plain.dismissible,true,'without an action a notice stays dismissible');assert.equal(n.dismissEvent(plain.key,plain.deliveryId),true);
+}
+console.log(JSON.stringify({status:'PASS',suite:'notification-lifecycle',checks:['priority and persistent errors','decision notices persist until resolved','deduplication','hover/focus/hidden expiry','dismissal versus cancellation','recurring notices','stale operation handles','terminal fencing','renderer severity','Device and Drive summaries']},null,2));

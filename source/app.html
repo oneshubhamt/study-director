@@ -8468,7 +8468,7 @@ async function handleBrowserStorageReset(){
       ['preferences',()=>{protectedPreferencesDirty=true;return flushProtectedPreferences();}],
       ['session',()=>TASKS.length?writeLiveDraftNow({markChanged:false}):null]
     ]){try{await step();}catch(error){AppDiagnostics.capture(`storage-reset.${name}`,error,'error');}}
-    NoticeCoordinator.emit({source:'storage-reset',id:'detected',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,cue:'none',
+    NoticeCoordinator.emit({source:'storage-reset',id:'detected',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,dismissible:false,cue:'none',
       title:'Browser data was cleared',
       message:'Notes and plans still open here were saved again. Automatic backups are paused so an earlier backup stays easy to restore.',
       action:{label:'Review',run:()=>void reviewStorageReset()}});
@@ -8483,21 +8483,26 @@ function settleStorageReset(){
   NoticeCoordinator.resolveEvent('storage-reset','detected');
   return true;
 }
+// Two decisions lift the pause: keeping the current data, or a verified restore
+// or combine (see restoreJournalMark). Closing the dialog changes nothing and
+// the notice stays until one of them happens.
 async function reviewStorageReset(){
-  const connected=DeviceBackup.status().connected;
   const choice=await Interactions.choose({
     title:'Browser data was cleared',
-    message:'This browser lost its stored Study Director data. What this tab still had open was saved again.',
-    details:['Saved Days, attachments and anything not open here may only exist in a backup.','Automatic backups resume after a restore, or when you keep the current data.'],
-    cancelLabel:'Later',
+    message:'This browser lost its stored Study Director data. Notes, plans, settings and today’s session that were open here have been saved again.',
+    details:['Saved Days and attachments come back from a backup: Combine keeps what was saved again here.','Automatic backups stay paused until you choose.'],
+    cancelLabel:'Not now',
     choices:[
-      {value:'restore',label:'Restore a backup',kind:'primary',description:'Choose a verified earlier version. Combine keeps the notes from this tab.'},
-      {value:'keep',label:'Keep current data',description:'Resume automatic backups with what this browser holds now.'}
+      {value:'restore',label:'Restore a backup',kind:'primary',description:'Choose a verified Device Folder or Google Drive version.'},
+      {value:'keep',label:'Keep current data',description:'Resume automatic backups with what was saved again here.'}
     ]
   });
   if(choice==='keep')return settleStorageReset();
-  if(choice==='restore')return showBackupPresentation('device-folder',connected?'history':'status');
-  return false;
+  if(choice!=='restore')return false;
+  // Restore replaces or combines today's session, so a running session is
+  // suspended first (it can be restored afterwards).
+  if(hasBlockingActiveSession()){await suspendTodaySession();if(hasBlockingActiveSession())return false;}
+  return showBackupPresentation('device-folder',DeviceBackup.status().connected?'history':'status');
 }
 /* ONGOING NOTE CONFLICTS · nothing is discarded when another writer changed a note */
 // Storage keeps the other writer's version. The text this tab held is merged

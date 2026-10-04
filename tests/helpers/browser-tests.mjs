@@ -33,6 +33,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('workspace-overlay','tests/browser/rich-text/workspace-overlay.mjs',['rich-editor','focus-mode','overlay','pdf']),
     test('runtime-boundary','tests/browser/security/runtime-boundary.mjs',['security','trusted-types','paste','worker','execute','backup-protection','legal-center','export-worker']),
     test('storage-failures','tests/browser/storage/storage-failure-recovery.mjs',['storage','failure-injection','recovery']),
+    test('site-data-clear','tests/browser/storage/site-data-clear.mjs',['storage','site-data-clear','recovery','indexeddb','notifications','reload']),
     test('interactions','tests/browser/ui/interactions.mjs',['dialogs','history','navigation','keyboard','notifications'])
   ]),
   extended:Object.freeze([

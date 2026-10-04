@@ -356,7 +356,7 @@ registry.define('interactions',1,()=>{
           for(const [event,reason,paused] of [['mouseenter','hover',true],['mouseleave','hover',false],['focusin','focus',true],['focusout','focus',false]]){
             toast.addEventListener(event,eventValue=>{if(event==='focusout'&&toast.contains(eventValue.relatedTarget))return;notifications.pauseEvent(row.key,row.deliveryId,reason,paused);});
           }
-          copy.append(title,message);toast.append(copy,close);region.appendChild(toast);
+          copy.append(title,message);toast.append(copy);if(row.dismissible!==false)toast.append(close);region.appendChild(toast);
           entry={toast,copy,title,message,deliveryId:row.deliveryId,action:null,actionSpec:null};renderedToasts.set(row.key,entry);
           requestAnimationFrame(()=>toast.classList.remove('entering'));
         }
