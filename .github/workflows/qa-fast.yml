@@ -34,6 +34,7 @@ jobs:
           tests/unit/app/operation-lifecycle.mjs
           tests/unit/backup/repository-background.mjs
           tests/integration/storage/data-maintenance.mjs
+          tests/integration/storage/deletion-recovery.mjs
           tests/integration/backup/device-backup.mjs
           tests/integration/backup/repository-checkpoint.mjs
           tests/integration/backup/drive-security.mjs

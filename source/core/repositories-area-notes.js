@@ -436,7 +436,11 @@ const repository=(()=>{
     freshLoadPromise=(async()=>{
       await writeChain.catch(error=>{AppDiagnostics.capture('area-notes.pre-reload-write',error,'error');});
       if(saveTimer){clearTimeout(saveTimer);saveTimer=null;}
-      return performLoad({strict:true});
+      const loaded=await performLoad({strict:true});
+      // A successful recovery replaces the failed startup result. Otherwise
+      // every maintenance retry reloads notes and invalidates its own progress.
+      loadPromise=Promise.resolve(loaded);
+      return loaded;
     })().catch(error=>{
       AppDiagnostics.capture('area-notes.fresh-reload',error,'error');
       throw error;

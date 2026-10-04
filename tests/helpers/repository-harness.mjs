@@ -1,25 +1,24 @@
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {APP_META_RUNTIME_REGISTRY} from '../../contracts/data-architecture.mjs';
+import {PRODUCTION_LIMITS} from '../../contracts/production-limits.mjs';
 const freeze=Object.freeze;
 const appMetaSource=fs.readFileSync('source/core/app-meta.js','utf8');
 const repositoryJournals=fs.readFileSync('source/core/repository-journals.js','utf8');
 const areaNotesRepository=fs.readFileSync('source/core/repositories-area-notes.js','utf8');
 const repositories=fs.readFileSync('source/core/repositories.js','utf8');
+const persistence=fs.readFileSync('source/core/persistence.js','utf8');
 export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={}){
   const ClockDate=controls.clock?.Date||Date;
   const timerSet=controls.clock?.setTimeout||setTimeout;
   const timerClear=controls.clock?.clearTimeout||clearTimeout;
   const localWrites={pending:0,all:0,sessionBytes:0},idbWrites={recovery:0},idbReads={metaGetAll:0,boundedMetaGetAll:0,unboundedMetaGetAll:0},idbDurability={strict:0,normal:0,strictStores:[],normalStores:[]},validationCalls={within:0,clamp:0};
   const stores=sharedStores||{area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()};
-  let localReadError=null;
-  const local=freeze({
-    get lastError(){return localReadError;},
-    getJson:(key,fallback)=>{localReadError=null;if(controls.failLocalGetKeys?.has?.(key)){localReadError=new Error('QA_FIXTURE local recovery read failure');return fallback;}return sharedLocal.has(key)?structuredClone(sharedLocal.get(key)):fallback;},
-    getText:(key,fallback='')=>{localReadError=null;if(controls.failLocalGetKeys?.has?.(key)){localReadError=new Error('QA_FIXTURE local recovery read failure');return fallback;}return sharedLocal.has(key)?JSON.stringify(sharedLocal.get(key)):fallback;},
-    setJson:(key,value)=>{if(controls.failLocal||controls.failLocalSetKeys?.has?.(key))return false;if(key==='recovery')localWrites.sessionBytes+=Buffer.byteLength(JSON.stringify(value));localWrites.all++;if(key==='pending')localWrites.pending++;sharedLocal.set(key,structuredClone(value));return true;},
-    remove:key=>{if(controls.failLocalRemove||controls.failLocalRemoveKeys?.has?.(key))return false;sharedLocal.delete(key);return true;}
-  });
+  const localStorage={
+    getItem(key){if(controls.failLocalGetKeys?.has?.(key))throw new Error('QA_FIXTURE local recovery read failure');return sharedLocal.has(key)?JSON.stringify(sharedLocal.get(key)):null;},
+    setItem(key,text){if(controls.failLocal||controls.failLocalSetKeys?.has?.(key))throw new Error('QA_FIXTURE local recovery write failure');if(key==='recovery')localWrites.sessionBytes+=Buffer.byteLength(text);localWrites.all++;if(key==='pending')localWrites.pending++;sharedLocal.set(key,JSON.parse(text));},
+    removeItem(key){if(controls.failLocalRemove||controls.failLocalRemoveKeys?.has?.(key))throw new Error('QA_FIXTURE local recovery removal failure');sharedLocal.delete(key);}
+  };
   const storeMap=name=>name==='area'?stores.area:name==='sync'?stores.sync:name==='tombstones'?stores.tombstones:name==='reflection'?stores.reflection:name==='daily'?stores.daily:name==='summary'?stores.summary:name==='session'?stores.session:stores.meta;
   const runTransaction=(names,mode,operation,durability='normal')=>new Promise((resolve,reject)=>{
     idbDurability[durability]++;
@@ -89,13 +88,14 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
     wipeObject:o=>{for(const k of Object.keys(o))delete o[k];return o;},isValidIsoDate:v=>/^\d{4}-\d{2}-\d{2}$/.test(String(v)),isCanonicalScheduleText:()=>true,sameDataValue:(a,b)=>JSON.stringify(a)===JSON.stringify(b),
     activeSessionScheduleFingerprint:()=> 'fp',normalizeAreaName:v=>String(v??'').trim().toLowerCase(),displayAreaName:v=>String(v??'').trim(),isoDateDay:()=>0,normalizeTimestamp:normalizeTs,jsonByteLength:value=>Buffer.byteLength(typeof value==='string'?value:JSON.stringify(value))
   });
-  const hooks=freeze({canMutate:()=>controls.owned!==false,getOwnershipRevision:()=>Number(controls.ownershipRevision)||1,issueWriteToken:()=>{if(controls.owned===false)throw Object.assign(new Error('Ownership lost'),{code:'OWNERSHIP'});return freeze({revision:1});},assertWriteToken:()=>{if(controls.owned===false)throw Object.assign(new Error('Ownership lost'),{code:'OWNERSHIP'});return true;},isOwnershipLostError:e=>e.code==='OWNERSHIP',capture:()=>{},onStorageOk:()=>{},onStorageError:()=>{},onNotesChanged:()=>{},onNoteSyncState:()=>{},onNoteConflict:()=>{},onDailyRecordsChanged:()=>{},onDatasetRevisionChanged:()=>{},onCanonicalCommit:event=>controls.onCanonicalCommit?.(event)});
-  const limits=freeze({maxImportAreaNotes:1000,maxAreaNameChars:160,maxNoteChars:1000000,maxOngoingNotes:1000,fallbackDailyRecordsBytes:4*1024*1024,deletionRecoveryBytes:64*1024,maxImportRecords:1000,maxScheduleChars:2*1024*1024,backupMaxFileBytes:512*1024*1024,backupMaxCompressedBytes:512*1024*1024,maxBackupFilenameChars:240});
+  const hooks=freeze({canMutate:()=>controls.owned!==false,getOwnershipRevision:()=>Number(controls.ownershipRevision)||1,issueWriteToken:()=>{if(controls.owned===false)throw Object.assign(new Error('Ownership lost'),{code:'OWNERSHIP'});return freeze({revision:1});},assertWriteToken:()=>{if(controls.owned===false)throw Object.assign(new Error('Ownership lost'),{code:'OWNERSHIP'});return true;},isOwnershipLostError:e=>e.code==='OWNERSHIP',capture:(...args)=>controls.onDiagnostic?.(...args),onStorageOk:()=>{},onStorageError:(...args)=>controls.onStorageError?.(...args),onNotesChanged:()=>{},onNoteSyncState:()=>{},onNoteConflict:()=>{},onDailyRecordsChanged:()=>{},onDatasetRevisionChanged:()=>{},onCanonicalCommit:event=>controls.onCanonicalCommit?.(event)});
+  const limits=freeze({backupImportBatchSize:PRODUCTION_LIMITS.backupImportBatchSize,maxImportAreaNotes:1000,maxAreaNameChars:160,maxNoteChars:1000000,maxOngoingNotes:1000,fallbackDailyRecordsBytes:4*1024*1024,deletionRecoveryBytes:64*1024,maxImportRecords:1000,maxScheduleChars:2*1024*1024,backupMaxFileBytes:512*1024*1024,backupMaxCompressedBytes:512*1024*1024,maxBackupFilenameChars:240});
   const dataContract=freeze({schemas:freeze({LocalRecoveryEnvelope:freeze({version:1}),ActiveSession:freeze({version:1}),DailyRecord:freeze({version:1}),DailySummary:freeze({version:1}),AreaNote:freeze({version:2})})});
   const IDBKeyRange=freeze({bound:(lower,upper)=>freeze({lower:String(lower),upper:String(upper)})});
-  const context=vm.createContext({console,structuredClone,Buffer,setTimeout:timerSet,clearTimeout:timerClear,queueMicrotask,Date:ClockDate,Promise,Map,Set,Object,Array,String,Number,Math,JSON,RegExp,Error,RangeError,IDBKeyRange,TextEncoder,TextDecoder,Uint8Array,ArrayBuffer,Blob,crypto:globalThis.crypto,globalThis:null});context.globalThis=context;
-  vm.runInContext(fs.readFileSync('source/core/internal.js','utf8'),context,{filename:'internal.js'});vm.runInContext(appMetaSource,context,{filename:'app-meta.js'});vm.runInContext(repositoryJournals,context,{filename:'repository-journals.js'});vm.runInContext(areaNotesRepository,context,{filename:'repositories-area-notes.js'});vm.runInContext(repositories,context,{filename:'repositories.js'});
+  const context=vm.createContext({console,structuredClone,Buffer,setTimeout:timerSet,clearTimeout:timerClear,queueMicrotask,Date:ClockDate,Promise,Map,Set,Object,Array,String,Number,Math,JSON,RegExp,Error,RangeError,IDBKeyRange,TextEncoder,TextDecoder,Uint8Array,ArrayBuffer,Blob,localStorage,crypto:globalThis.crypto,globalThis:null});context.globalThis=context;
+  vm.runInContext(fs.readFileSync('source/core/internal.js','utf8'),context,{filename:'internal.js'});vm.runInContext(persistence,context,{filename:'persistence.js'});vm.runInContext(appMetaSource,context,{filename:'app-meta.js'});vm.runInContext(repositoryJournals,context,{filename:'repository-journals.js'});vm.runInContext(areaNotesRepository,context,{filename:'repositories-area-notes.js'});vm.runInContext(repositories,context,{filename:'repositories.js'});
   const registry=context[Symbol.for('studyDirector.internalModules.v1')];
+  const local=registry.require('persistence',1).createLocalStorage();
   const appMetaModule=registry.require('app-meta',1),journalModule=registry.require('repository-journals',1),areaNotesModule=registry.require('repositories-area-notes',1),module=registry.require('repositories',1);
   const decisionClock=freeze({nowMs:()=>new ClockDate().getTime()});
   const metaKeys=freeze({dailyRecordMigration:'dailyRecordMigration',planDraft:'planDraft.v1',planLibrary:'planLibrary.v1',personalPreferences:'personalPreferences.v1',canonicalMutationEpoch:'canonicalMutationEpoch.v1',backupPreparationUnitPrefix:'backupPreparationUnit.v1:',insightsDatasetRevision:'insightsDatasetRevision',dataMaintenance:'dataMaintenance',areaNoteRecoveryPrefix:'areaNoteRecovery.v1:',savedDayDeletionPrefix:'savedDayDeletion.v1:',areaNoteDeletionPrefix:'areaNoteDeletion.v1:',attachmentDeletionPrefix:'attachmentDeletion.v1:'});
