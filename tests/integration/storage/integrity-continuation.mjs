@@ -116,14 +116,17 @@ for(const corruptAt of [100,encrypted.size-1]){
  const h=harness(),ref=await drive.provider.repository.upload({kind:'object',id:objectId,name:objectId+'.sdobject',blob:source,size:source.size,digest:fingerprint,exportedAt:'2026-09-01T00:00:00.000Z',appVersion:'QA_FIXTURE'});
  for(const file of ['internal','operation-lifecycle','repository-background'])vm.runInContext(fs.readFileSync('source/core/'+file+'.js','utf8'),drive.context);
  const registry=drive.context[Symbol.for('studyDirector.internalModules.v1')],bg=registry.require('repository-background',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})).createCoordinator(Object.freeze({target:'google-drive',environment:Object.freeze({AbortController,now:clock.now,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout})}));
- drive.state.rangeChunkDelayMs=35000;const readOffsets=[];let completed=false,passes=0;
+ drive.state.rangeChunkDelayMs=35000;const readOffsets=[];let completed=false,passes=0,transferring=0;
  const scheduler=bg.createIntegrityScheduler(Object.freeze({budgetMs:120000,budgetCode:'TEST_BUDGET',budgetMessage:'budget',preemptCode:'TEST_PREEMPT',preemptMessage:'preempt',capture:error=>assert.fail(error),isAvailable:()=>true,isUnsafe:()=>false,readTarget:async()=>({scanId:'slow-proof',partial:structuredClone(h.durable)}),writeResult:async result=>{if(result.complete)completed=true;},yieldTask:async()=>{},execute:async({signal,checkpoint})=>{
-  try{const result=await h.pass({signal,readRange:async(_entry,range)=>{if(range.length>64)readOffsets.push(range.offset);return drive.provider.repository.download(ref,range);},onCheckpoint:async value=>{h.durable=structuredClone(value);checkpoint({scanId:'slow-proof',partial:value});}});return {...result,status:result.complete?'completed':'yielded'};}
+  try{const result=await h.pass({signal,readRange:async(_entry,range)=>{if(range.length>64)readOffsets.push(range.offset);transferring++;try{return await drive.provider.repository.download(ref,range);}finally{transferring--;}},onCheckpoint:async value=>{h.durable=structuredClone(value);checkpoint({scanId:'slow-proof',partial:value});}});return {...result,status:result.complete?'completed':'yielded'};}
   catch(error){if(error.code==='TEST_BUDGET')return {status:'yielded',reason:'budget',complete:false};throw error;}
  }}));
  for(;passes<8&&!completed;passes++){
   let outcome;const before=h.durable?.stored?.offset||0;scheduler.run().then(value=>{outcome=value;});
-  for(let elapsed=0;!outcome&&elapsed<500000;elapsed+=1000){await new Promise(resolve=>setImmediate(resolve));if(!outcome)await clock.advance(1000);}
+  // Fake time moves only while the simulated Drive download waits on it. Real
+  // hashing and scratch writes finish on their own schedule, so a loaded
+  // machine cannot let fake deadlines outrun them.
+  for(let elapsed=0,turns=0;!outcome&&elapsed<500000&&turns<1000000;turns++){await new Promise(resolve=>setImmediate(resolve));if(!outcome&&transferring){await clock.advance(1000);elapsed+=1000;}else await clock.advance(0);}
   assert.ok(outcome);assert.ok(completed||h.durable.stored.offset>before,'each healthy slow pass must persist a useful segment');assert.equal(h.held.size,0);
  }
  assert.equal(completed,true);assert.ok(passes>1);assert.deepEqual(readOffsets,[0,1048576,2097152]);assert.equal(h.durable.phase,'verified');assert.equal(bg.status().active.length,0);
