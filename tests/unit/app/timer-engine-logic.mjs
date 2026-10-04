@@ -98,6 +98,13 @@ timerState.mode='running';timerState.paused=false;timerState.inactiveGap=null;ti
 assert.equal(engine.absorbInactiveTimerGap('unit-wake'),40000);assert.equal(timerState.inactiveGap.gapMs,40000);
 engine.classifyInactiveGap('break');
 assert.equal(timerState.inactiveGap,null);assert.equal(timerState.runtime.totalPausedMs,40000);assert.equal(timerState.runtime.sleepPausedMs,40000);assert.equal(pauseRecords.at(-1).sec,40);assert.equal(pauseRecords.at(-1).meta.type,'inactive-gap');
+// A pending gap whose timer already stopped (for example at a fixed block) must
+// still close on any choice instead of leaving an unresponsive dialog.
+timerState.inactiveGap={id:'gap_stale',taskIdx:0,gapMs:90000,lastMs:clock.now()-90000,detectedAtMs:clock.now(),source:'sleep'};
+const savedRuntime=timerState.runtime;timerState.runtime=timerState.emptyRuntime();
+engine.classifyInactiveGap('focus');
+assert.equal(timerState.inactiveGap,null,'a gap without a live timer is released, not left pending');
+timerState.runtime=savedRuntime;
 assert.equal(practiceEvents.some(event=>event[0]==='gap-open'),true);assert.equal(practiceEvents.some(event=>event[0]==='gap-resolve'&&event[1]===0),true);
 
 // Wake after a backward wall-clock jump rebases every coupled timer timestamp by the same delta.
@@ -126,4 +133,4 @@ const restoredBreak={startedAtMs:pausedAt,now:clock.now(),overrunCapped:false,ac
 assert.equal(engine.resumeRestoredPaused(restoredBreak),true);
 assert.equal(timerState.mode,'paused');assert.equal(timerState.paused,true);assert.equal(timerState.currentIndex,0);assert.equal(timerState.runtime.taskIdx,0);assert.equal(timerState.activeBreak.type,'manual');
 
-console.log(JSON.stringify({status:'PASS',contract:'timer-engine-state-machine',restoreEvidence:true,pauseResume:true,inactiveGap:true,wakeRebase:true,crossDeviceRunningRestore:true,pausedRestore:true},null,2));
+console.log(JSON.stringify({status:'PASS',contract:'timer-engine-state-machine',restoreEvidence:true,pauseResume:true,inactiveGap:true,staleGapReleased:true,wakeRebase:true,crossDeviceRunningRestore:true,pausedRestore:true},null,2));

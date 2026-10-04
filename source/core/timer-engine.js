@@ -252,6 +252,13 @@ function closeInactiveGapPrompt(){
   const ov=document.getElementById('gap-overlay');
   if(ov)ov.classList.remove('on');
 }
+// A gap belongs to the running timer. When that timer stops for another reason
+// (a fixed block began, the day finished, the schedule was reset), its counted
+// focus was already saved and the gap has nothing left to classify.
+function discardInactiveGap(){
+  if(!TimerState.inactiveGap)return false;
+  TimerState.inactiveGap=null;closeInactiveGapPrompt();return true;
+}
 function showInactiveGapSplit(){
   const split=document.getElementById('gap-split');
   if(split)split.classList.add('on');
@@ -271,7 +278,12 @@ function handleInactiveGapSplitKey(e){
   }
 }
 function classifyInactiveGap(mode,focusMs=null){
-  if(!TimerState.inactiveGap||!TimerState.runtime||TimerState.runtime.startMs===null)return;
+  if(!TimerState.inactiveGap)return;
+  if(!TimerState.runtime||TimerState.runtime.startMs===null){
+    discardInactiveGap();saveLiveDraft();
+    try{recoverySetStatus('The timer had already stopped; the inactive gap was not added to any block.',true);}catch(e){}
+    return;
+  }
   const gap=TimerState.inactiveGap;
   const now=nowMs();
   const gapMs=Math.max(0,gap.gapMs||0);
@@ -365,6 +377,7 @@ function fixedBoundaryForRunningTimer(){
 }
 function stopTimerForFixedBoundary(boundary){
   clearSoundOperation();
+  discardInactiveGap();
   const activeIdx=TimerState.currentIndex;
   recordCurrentActiveToTask(activeIdx,'partial');
   saveNote();
@@ -757,7 +770,7 @@ const SessionEvidenceProjector=(()=>{
       return true;
     }
     function resetCountdownRuntime(){
-      stopExecution();
+      stopExecution();discardInactiveGap();
       TimerState.paused=false;remS=0;totS=0;overflowS=0;isOverflow=false;
       TimerState.runtime=TimerState.emptyRuntime();
       resetBreakState(false);
@@ -769,7 +782,7 @@ const SessionEvidenceProjector=(()=>{
       return status();
     }
     function resetToReady(reason='runtime-reset'){
-      stopExecution();
+      stopExecution();discardInactiveGap();
       TimerState.paused=false;remS=0;totS=0;overflowS=0;isOverflow=false;
       TimerState.runtime=TimerState.emptyRuntime();
       setTimerMode(TIMER_MODES.READY,reason);
