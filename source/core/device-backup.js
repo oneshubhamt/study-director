@@ -624,6 +624,9 @@ registry.define('device-backup',1,input=>{
       const recoveryPresentation=presentationScope;
       const reportRecovery=(stage,text,details={})=>{recoveryPresentation?.update({message:String(text||''),progress:{stage,...details}});if(typeof recoveryProgress==='function')try{recoveryProgress(freeze({stage,message:String(text||''),ok:true,...details}));}catch(error){capture('device-backup.recovery-progress',error);}};
       if(!exact&&modeName!=='bring-in')throw new TypeError('Unsupported Device Folder recovery mode.');
+      // Missing-only recovery (after browser data was cleared) uses the latest
+      // verified version, never prompts, and adds back only what is absent.
+      const missingOnly=!exact&&options?.missingOnly===true;
       if(!supported)return freeze({ok:false,reason:'unsupported'});
       const traceId=operationStart(exact?'device-restore':'device-combine','Device Folder');
       if(!ownership.canMutate()){presentationState.message=exact?'Take control in this tab before restoring a Device Folder version.':'Take control in this tab before combining from a Device Folder backup.';publish();operationFinish({status:'skipped',reason:'ownership'},traceId);return freeze({ok:false,reason:'ownership'});}
@@ -639,10 +642,11 @@ registry.define('device-backup',1,input=>{
         const projected=repository.projectHistory(freeze(state.valid.map(row=>freeze({id:row.id,manifest:row.manifest}))),freeze({id:'device-folder',label:'Device Folder'}),{quarantinedObjectIds}),healthyIds=new Set(projected.map(entry=>entry.location.checkpointId)),healthyRows=state.valid.filter(row=>healthyIds.has(row.id));
         if(!healthyRows.length)throw new Error('No verified Study Director backup was found in this folder.');
         const newest=freeze([...healthyRows].reverse().map(row=>freeze({id:row.id,exportedAt:row.manifest.exportedAt,encrypted:row.manifest.encrypted,counts:row.manifest.counts})));
-        const requestedId=String(options&&options.checkpointId||'');
-        let checkpointId=requestedId||newest[0].id;
+        const requestedId=String(options&&options.checkpointId||''),latestEntry=missingOnly?projected.find(entry=>entry.location.tier==='latest'):null;
+        if(missingOnly&&!latestEntry)throw new Error('No latest verified Device Folder backup is available.');
+        let checkpointId=requestedId||latestEntry?.location.checkpointId||newest[0].id;
         if(requestedId&&!/^cp_[a-f0-9]{32}$/u.test(requestedId))throw new Error('The requested Device Folder version identity is invalid.');
-        if(!requestedId&&newest.length>1){
+        if(!requestedId&&!missingOnly&&newest.length>1){
           operationMark('checkpoint-selection-start',{provider:'device-folder'},traceId);
           try{checkpointId=String(await hooks.chooseCheckpoint(newest,freeze({mode:modeName}))||'');}
           catch(error){operationMark('checkpoint-selection-failed',{provider:'device-folder',reason:String(error&&error.code||error&&error.name||'Error')},traceId);throw error;}
@@ -658,7 +662,7 @@ registry.define('device-backup',1,input=>{
           return file||null;
         };
         const managedRecovery=transaction=>hooks.managedRecovery(freeze({
-          kind:modeName,label:'Device Folder',apply:async()=>{reportRecovery('apply',exact?'Applying selected backup locally…':'Combining data locally…');const result=await transaction.apply();reportRecovery('verify-local','Verifying restored local data…');return result;},
+          kind:modeName,label:'Device Folder',keepsActiveSession:missingOnly,apply:async()=>{reportRecovery('apply',exact?'Applying selected backup locally…':'Combining data locally…');const result=await transaction.apply();reportRecovery('verify-local','Verifying restored local data…');return result;},
           createSafety:async()=>{
             operationMark('external-safety-publication-start',{provider:'device-folder'},traceId);presentationState.message='Creating and verifying Before restore safety backup…';publish();reportRecovery('safety','Creating protected safety backup in Device Folder…');
             const safetyPurpose=modeName==='bring-in'?'before-combine':'before-restore';
@@ -683,16 +687,16 @@ registry.define('device-backup',1,input=>{
             return freeze({status:'completed',queued:true,reason:'normal-device-backup'});
           }
         }));
-        operationMark('selected-checkpoint-inspection-start',{provider:'device-folder'},traceId);const candidate=await repository.inspect(row.manifest,readObject,{interactive:true,signal,committed:true,managedRecovery,managedProgress:recoveryProgress});operationMark('selected-checkpoint-inspection-complete',{provider:'device-folder'},traceId);
-        const result=exact?await repository.restoreVersion(candidate,{confirmed:options&&options.confirmed===true}):await repository.bringIn(candidate);
-        if(result&&result.cancelled){presentationState.message='';operationFinish({cancelled:true},traceId);return freeze({ok:false,reason:'cancelled',checkpointId:row.id,result});}
+        operationMark('selected-checkpoint-inspection-start',{provider:'device-folder'},traceId);const candidate=await repository.inspect(row.manifest,readObject,{interactive:!missingOnly,signal,committed:true,managedRecovery,managedProgress:recoveryProgress});operationMark('selected-checkpoint-inspection-complete',{provider:'device-folder'},traceId);
+        const result=exact?await repository.restoreVersion(candidate,{confirmed:options&&options.confirmed===true}):await repository.bringIn(candidate,{missingOnly});
+        if(result&&result.cancelled){presentationState.message='';operationFinish({cancelled:true},traceId);return freeze({ok:false,reason:result.reason==='needs-decision'?'needs-decision':'cancelled',checkpointId:row.id,result});}
         const convergence=result&&result.managedRecovery&&result.managedRecovery.present||freeze({status:'pending',reason:'post-operation backup status unavailable'});
         if(convergence.status!=='completed'){
           mode=connected()?'connected':(directoryHandle?'permission':'off');
           presentationState.message=connected()?(exact?'Version restore is complete. Device Folder status bookkeeping could not be refreshed; the selected checkpoint remains intact.':'Your data was combined locally. Device Folder convergence remains queued for the normal automatic backup cadence.'):(exact?'Version restore is complete. Reconnect Device Folder when convenient; the selected checkpoint remains intact.':'Your data was combined locally. Reconnect Device Folder so the normal automatic backup cadence can converge it.');
-          operationFinish({ok:true,convergence:convergence.status},traceId);return freeze({ok:true,checkpointId:row.id,result,convergence});
+          operationFinish({ok:true,convergence:convergence.status},traceId);return freeze({ok:true,checkpointId:row.id,exportedAt:String(row.manifest.exportedAt||''),result,convergence});
         }
-        presentationState.message='';operationFinish({ok:true,convergence:convergence.status},traceId);return freeze({ok:true,checkpointId:row.id,result,convergence});
+        presentationState.message='';operationFinish({ok:true,convergence:convergence.status},traceId);return freeze({ok:true,checkpointId:row.id,exportedAt:String(row.manifest.exportedAt||''),result,convergence});
       }catch(error){
         const cancelled=error?.name==='AbortError'||error?.code==='STUDY_DIRECTOR_IMPORT_CANCELLED'||error?.code==='DEVICE_FOREGROUND_CANCELLED';
         if(cancelled){mode='connected';presentationState.message='Recovery cancelled safely.';reportRecovery('cancelled','Recovery cancelled safely.');operationFinish({cancelled:true,reason:'cancelled'},traceId);return freeze({ok:false,reason:'cancelled',cancelled:true});}
@@ -703,10 +707,11 @@ registry.define('device-backup',1,input=>{
     }
     async function applyCheckpoint(modeName,options={}){
       if(busy||foregroundController)return freeze({ok:false,reason:'busy'});
-      const scope=options.presentation||presentation.begin('device-folder',modeName,{label:'Device Folder',message:'Preparing recovery…'});presentationScope=scope;
+      // The automatic missing-only recovery reports inline; the app shows its own notice.
+      const quiet=options.missingOnly===true,scope=options.presentation||presentation.begin('device-folder',modeName,{label:'Device Folder',message:'Preparing recovery…',...(quiet?{foreground:false}:{})});presentationScope=scope;
       let result;
       try{result=await applyCheckpointOperation(modeName,options);return result;}
-      finally{if(!options.presentation)scope.finish({lifecycle:result?.ok?'succeeded':result?.cancelled||result?.reason==='cancelled'?'cancelled':'failed',message:result?.ok?presentation.outcome(modeName,'Device Folder',result.convergence):result?.reason==='cancelled'?'Recovery cancelled safely.':presentationState.message||'Device Folder recovery could not be completed safely.'});if(presentationScope===scope)presentationScope=null;}
+      finally{if(!options.presentation)scope.finish({lifecycle:result?.ok?'succeeded':result?.cancelled||['cancelled','needs-decision'].includes(result?.reason)?'cancelled':'failed',message:result?.ok?presentation.outcome(modeName,'Device Folder',result.convergence):result?.reason==='cancelled'?'Recovery cancelled safely.':result?.reason==='needs-decision'?'Some differences need your choice. Nothing was changed.':presentationState.message||'Device Folder recovery could not be completed safely.'});if(presentationScope===scope)presentationScope=null;}
     }
     const restoreVersion=(options={})=>applyCheckpoint('restore-version',options);
     const bringIn=(options={})=>applyCheckpoint('bring-in',options);
@@ -962,13 +967,21 @@ registry.define('device-backup',1,input=>{
       }finally{busy=false;foreground.release();publish();}
       return snapshot();
     }
+    // Clearing browser data removes the stored folder settings while this page
+    // still holds the folder. They are written back once local data is whole
+    // again, so a later launch finds the same folder.
+    async function rememberAfterStorageReset(){
+      if(!supported||!directoryHandle||!ownership.canMutate())return false;
+      try{await persistMetadata(metadataValue());settingsUnverified=false;return true;}
+      catch(error){capture('device-backup.storage-reset-remember',error);return false;}
+    }
     async function install(){
       if(installed)return snapshot();
       installed=true;publish();const state=await inspectStored();background.wake('startup');return state;
     }
     return freeze({
       format:'study-director.device-backup',contractVersion:1,
-      install,status:snapshot,diagnosticMaintenance:()=>maintenanceScheduler.status(),connect,disconnect,backupNow,createProtectedSafety,cancelForeground,restoreVersion,bringIn,history,removeSafetyBackup,scrub,notifyChange,suspendAutomatic,resumeAutomatic,syncOwnership,refreshPermission,repositoryHandle:async()=>{if(!connected())throw new Error('Device Folder is unavailable.');return (await repositoryDirectories()).root;}
+      install,status:snapshot,diagnosticMaintenance:()=>maintenanceScheduler.status(),connect,disconnect,backupNow,createProtectedSafety,cancelForeground,restoreVersion,bringIn,history,removeSafetyBackup,scrub,notifyChange,suspendAutomatic,resumeAutomatic,syncOwnership,refreshPermission,rememberAfterStorageReset,repositoryHandle:async()=>{if(!connected())throw new Error('Device Folder is unavailable.');return (await repositoryDirectories()).root;}
     });
   }
   return freeze({format:'study-director.device-backup-module',contractVersion:1,createController});

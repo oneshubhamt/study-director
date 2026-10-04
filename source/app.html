@@ -8308,6 +8308,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     verifyActiveSessionRuntime:verifyRestoredSessionRuntime,
     requestDeviceBackupConvergence:context=>{if(!BackupRecoveryHost)throw new Error('Backup recovery host is not ready.');return BackupRecoveryHost.requestDeviceConvergence(context);},
     backupCompleted:context=>{
+      if(context?.userExport)settleStorageReset();
       markStorageHealthOk('backup','lastBackupAt');
       backupNudgeMessage='';
       backupNudgeCheckedAt=Date.now();
@@ -8441,17 +8442,25 @@ async function connectDeviceBackupWithRecovery(){
 }
 /* BROWSER DATA CLEARING · keep what an open tab still holds */
 // Clearing site data deletes IndexedDB, localStorage and OPFS even with persistent
-// storage granted. This tab still holds its notes, plan, preferences and session;
-// Saved Days and attachments may exist only in a backup. Until the user restores
-// or keeps the current state, automatic backups must not publish the reduced
-// dataset as their latest version. After a reload the folder is no longer
-// configured, so nothing needs to persist this pause.
-let storageResetHold=null,storageResetHandling=null;
+// storage granted. This tab still holds its notes, plan, preferences and session
+// and writes them back. Saved Days and attachments exist only in a backup: with a
+// connected Device Folder the latest version adds them back without touching the
+// rescued data; otherwise the user chooses. Until then automatic backups must not
+// publish the reduced dataset. The pause lives only in this tab: after a reload the
+// folder is remembered only if it was written back when the pause lifted.
+let storageResetHold=null,storageResetHandling=null,storageResetSince=0;
+function showStorageResetDecision(){
+  NoticeCoordinator.emit({source:'storage-reset',id:'detected',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,dismissible:false,cue:'none',
+    title:'Browser data was cleared',
+    message:'Your open notes, plans, settings and today’s session were kept. Past Saved Days and attachments need a restore from backup. Automatic backups are paused until you choose.',
+    action:{label:'Restore from backup',run:()=>void restoreAfterStorageReset()},
+    secondaryAction:{label:'Continue with current data',run:()=>settleStorageReset()}});
+}
 async function handleBrowserStorageReset(){
   if(storageResetHandling)return storageResetHandling;
   storageResetHandling=(async()=>{
     if(!storageResetHold){
-      const hold={provider:null,device:null};storageResetHold=hold;
+      const hold={provider:null,device:null};storageResetHold=hold;storageResetSince=Date.now();
       try{hold.provider=BackupProviderRuntime.suspendBackground('storage-reset');}catch(error){AppDiagnostics.capture('storage-reset.provider-suspend',error,'warn');}
       try{const token=await DeviceBackup.suspendAutomatic('storage-reset');if(storageResetHold===hold)hold.device=token;else DeviceBackup.resumeAutomatic(token);}
       catch(error){AppDiagnostics.capture('storage-reset.device-suspend',error,'warn');}
@@ -8462,39 +8471,42 @@ async function handleBrowserStorageReset(){
       ['preferences',()=>{protectedPreferencesDirty=true;return flushProtectedPreferences();}],
       ['session',()=>TASKS.length?writeLiveDraftNow({markChanged:false}):null]
     ]){try{await step();}catch(error){AppDiagnostics.capture(`storage-reset.${name}`,error,'error');}}
-    NoticeCoordinator.emit({source:'storage-reset',id:'detected',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,dismissible:false,cue:'none',
-      title:'Browser data was cleared',
-      message:'Notes and plans still open here were saved again. Automatic backups are paused so an earlier backup stays easy to restore.',
-      action:{label:'Review',run:()=>void reviewStorageReset()}});
     try{refreshAreaNoteConsumers();renderSched();}catch(error){AppDiagnostics.capture('storage-reset.render',error,'warn');}
+    // Add back only what this tab could not hold, from the latest verified
+    // Device Folder version. Anything needing a decision falls back to the notice.
+    let restored=null;
+    if(storageResetHold&&appCanMutate()&&DeviceBackup.status().connected){
+      try{restored=await DeviceBackup.bringIn({missingOnly:true});}
+      catch(error){AppDiagnostics.capture('storage-reset.missing-restore',error,'warn');}
+    }
+    if(restored&&restored.ok){
+      settleStorageReset();
+      const at=Date.parse(String(restored.exportedAt||''));
+      NoticeCoordinator.emit({source:'storage-reset',id:'restored',severity:'success',lifecycle:'succeeded',foreground:false,surface:'toast',duration:12000,cue:'none',
+        title:'Browser data was cleared',
+        message:`Your open work was kept, and past Saved Days and attachments were restored from your Device Folder backup${Number.isFinite(at)?` of ${new Date(at).toLocaleString()}`:''}.`});
+    }else if(storageResetHold)showStorageResetDecision();
   })().finally(()=>{storageResetHandling=null;});
   return storageResetHandling;
 }
+// Continuing, any verified restore or combine (restoreJournalMark), and any
+// backup the user makes to a file, the Device Folder or Drive lift the pause.
 function settleStorageReset(){
-  const hold=storageResetHold;storageResetHold=null;if(!hold)return false;
+  const hold=storageResetHold;storageResetHold=null;
+  NoticeCoordinator.resolveEvent('storage-reset','detected');
+  if(!hold)return false;
   try{hold.provider?.release();}catch(error){AppDiagnostics.capture('storage-reset.provider-resume',error,'warn');}
   if(hold.device)DeviceBackup.resumeAutomatic(hold.device);
-  NoticeCoordinator.resolveEvent('storage-reset','detected');
+  void Promise.resolve(AppMutationCoordinator.settled()).then(()=>DeviceBackup.rememberAfterStorageReset()).catch(error=>AppDiagnostics.capture('storage-reset.remember-folder',error,'warn'));
   return true;
 }
-// Two decisions lift the pause: keeping the current data, or a verified restore
-// or combine (see restoreJournalMark). Closing the dialog changes nothing and
-// the notice stays until one of them happens.
-async function reviewStorageReset(){
-  const choice=await Interactions.choose({
-    title:'Browser data was cleared',
-    message:'This browser lost its stored Study Director data. Notes, plans, settings and today’s session that were open here have been saved again.',
-    details:['Saved Days and attachments come back from a backup: Combine keeps what was saved again here.','Automatic backups stay paused until you choose.'],
-    cancelLabel:'Not now',
-    choices:[
-      {value:'restore',label:'Restore a backup',kind:'primary',description:'Choose a verified Device Folder or Google Drive version.'},
-      {value:'keep',label:'Keep current data',description:'Resume automatic backups with what was saved again here.'}
-    ]
-  });
-  if(choice==='keep')return settleStorageReset();
-  if(choice!=='restore')return false;
-  // Restore replaces or combines today's session, so a running session is
-  // suspended first (it can be restored afterwards).
+NoticeCoordinator.subscribe(state=>{
+  if(!storageResetHold)return;
+  if(state.events.some(event=>event.id==='backup-verified'&&event.lifecycle==='succeeded'&&Date.parse(String(event.completedAt||''))>=storageResetSince))settleStorageReset();
+});
+// The notice stays until the restore actually finishes. A restore replaces or
+// combines today's session, so a running session is suspended first.
+async function restoreAfterStorageReset(){
   if(hasBlockingActiveSession()){await suspendTodaySession();if(hasBlockingActiveSession())return false;}
   return showBackupPresentation('device-folder',DeviceBackup.status().connected?'history':'status');
 }

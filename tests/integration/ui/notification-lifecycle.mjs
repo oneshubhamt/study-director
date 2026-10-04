@@ -187,12 +187,15 @@ class Element {
 }
 // A condition that only a decision can clear stays on screen until it is resolved.
 {
-  const {notices:n,time}=coordinator();let reviewed=0;
-  n.emit({source:'storage-reset',id:'detected',severity:'warning',lifecycle:'succeeded',surface:'toast',persistent:true,dismissible:false,title:'Browser data was cleared',action:{label:'Review',run:()=>{reviewed++;}}});
+  const {notices:n,time}=coordinator();let restored=0,continued=0;
+  n.emit({source:'storage-reset',id:'detected',severity:'warning',lifecycle:'succeeded',surface:'toast',persistent:true,dismissible:false,title:'Browser data was cleared',action:{label:'Restore from backup',run:()=>{restored++;}},secondaryAction:{label:'Continue with current data',run:()=>{continued++;}}});
   const row=n.eventStatus().toasts[0];assert.equal(row.dismissible,false);
   assert.equal(n.dismissEvent(row.key,row.deliveryId),false,'a decision notice ignores dismissal');time.tick(60000);
   assert.deepEqual(n.eventStatus().toasts.map(item=>item.id),['detected'],'a decision notice never expires');
-  row.action.run();assert.equal(reviewed,1);
+  row.action.run();row.secondaryAction.run();assert.deepEqual([restored,continued],[1,1],'both choices stay available');
+  assert.throws(()=>n.emit({source:'storage-reset',id:'bad',surface:'toast',title:'x',action:{label:'Go',run:()=>{}},secondaryAction:{label:'',run:()=>{}}}),/secondary action is invalid/);
+  n.emit({source:'plain',id:'single',surface:'toast',title:'Only primary',secondaryAction:{label:'Ignored',run:()=>{}}});
+  assert.equal(n.eventStatus().toasts.find(item=>item.id==='single').secondaryAction,null,'a second choice needs a primary action');n.resolveEvent('plain','single');
   n.resolveEvent('storage-reset','detected');assert.equal(n.eventStatus().toasts.length,0,'only resolution clears it');
   n.emit({source:'plain',id:'ordinary',severity:'warning',surface:'toast',persistent:true,dismissible:false,title:'No action'});
   const plain=n.eventStatus().toasts[0];assert.equal(plain.dismissible,true,'without an action a notice stays dismissible');assert.equal(n.dismissEvent(plain.key,plain.deliveryId),true);

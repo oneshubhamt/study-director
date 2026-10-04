@@ -25,6 +25,8 @@ function node(){return {dataset:{},hidden:false,textContent:'',className:'',open
 const nodes=new Map([['managed-version-history',node()],['managed-version-history-kicker',node()],['managed-version-history-title',node()],['managed-version-history-copy',node()],['managed-version-history-progress',node()],['managed-version-history-progress-stage',node()],['managed-version-history-progress-detail',node()],['managed-version-history-list',node()],['managed-version-history-status',node()],['cancel-backup-import',node()]]);
 const document={getElementById:id=>nodes.get(id)||null,createElement:()=>node()};
 const plan={input:null,cached:'',persisted:'',stored:'',writable:true,saves:[]};
+// Today's session: every write commits a new revision and moves the source revision.
+const session={tasks:false,revision:0,writes:0,source:'2026-09-20T12:00:00.000Z'};
 const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresentation(),
   cancellation:freeze({cancelImport:()=>{cancelImportCalls+=1;return true;}}),
   device:freeze({
@@ -48,12 +50,12 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
     return null;
   }}),
   lifecycle:freeze({
-    activeSessionIssue:()=>'',activeSessionLoad:async()=>freeze({ok:true,value:null,error:null}),activeSessionSettled:async()=>{events.push('active-settled');return true;},
+    activeSessionIssue:()=>'',activeSessionLoad:async()=>freeze({ok:true,value:session.tasks?freeze({revision:session.revision}):null,error:null,storage:freeze({idb:true})}),activeSessionSettled:async()=>{events.push('active-settled');return true;},
     attachmentBusy:()=>false,canonicalPlanDraft:async()=>plan.stored,deletionRecoveryFlush:async()=>{events.push('deletion-flush');const value=deletionResults.length?deletionResults.shift():true;if(value instanceof Error)throw value;return value;},
-    flushNotes:async()=>{events.push('notes-flush');return true;},flushPlanDraft:async()=>{events.push('plan-flush');return true;},hasTasks:()=>false,noteFailure:()=>null,
+    flushNotes:async()=>{events.push('notes-flush');return true;},flushPlanDraft:async()=>{events.push('plan-flush');return true;},hasTasks:()=>session.tasks,noteFailure:()=>null,
     planDraft:()=>plan.cached,planInputValue:()=>plan.input,quiesce:async operation=>{events.push('quiesce-enter');try{return await operation();}finally{events.push('quiesce-exit');}},
     // Mirrors PlanData: the write is skipped when the page believes storage already holds it.
-    savePlanDraft:async(options={})=>{plan.saves.push(options.force===true);if(options.force===true||plan.persisted!==plan.input){if(plan.writable)plan.stored=plan.input;plan.persisted=plan.input;}plan.cached=plan.input;return true;},settleAttachmentWriters:async()=>{events.push('attachments-settle');return true;},settlePlan:async()=>{events.push('plan-settle');return true;},writeLiveDraft:async()=>null
+    savePlanDraft:async(options={})=>{plan.saves.push(options.force===true);if(options.force===true||plan.persisted!==plan.input){if(plan.writable)plan.stored=plan.input;plan.persisted=plan.input;}plan.cached=plan.input;return true;},settleAttachmentWriters:async()=>{events.push('attachments-settle');return true;},settlePlan:async()=>{events.push('plan-settle');return true;},writeLiveDraft:async()=>{session.writes+=1;session.revision+=1;session.source=new Date(Date.parse('2026-09-20T12:00:00.000Z')+session.revision*1000).toISOString();return freeze({ok:true,value:freeze({revision:session.revision}),storage:freeze({idb:true})});}
   }),
   managedRecovery:freeze({createCoordinator:input=>ManagedRecovery.createCoordinator(input)}),
   mutation:freeze({run:async(kind,operation)=>{events.push(`mutation:${kind}`);return operation();}}),
@@ -69,7 +71,7 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
     restoreRepositoryProviderVersion:async(id,options)=>providerRestoreImpl(id,options)
   }),
   session:freeze({hasBlocking:()=>false}),
-  sourceRevision:()=> '2026-09-20T12:00:00.000Z',
+  sourceRevision:()=>session.source,
   storage:freeze({read:async()=>{if(storageReadError)throw storageReadError;return storedPending;},remove:async()=>{storedPending=null;return true;},write:async value=>{storedPending=value;return true;}}),
   view:freeze({invalidateAttachments:()=>events.push('invalidate-attachments'),refreshCore:()=>events.push('refresh-core'),refreshNotes:()=>events.push('refresh-notes'),refreshReview:()=>events.push('refresh-review'),renderLibrary:()=>events.push('render-library'),setStatus:(id,message,ok=true)=>{statuses.push(freeze({id,message,ok}));return true;}})
 }));
@@ -153,5 +155,18 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   Object.assign(plan,{input:'09:00 Ethics 30',cached:'09:00 Ethics 30',persisted:'09:00 Ethics 30',stored:null,writable:false,saves:[]});
   await assert.rejects(()=>host.managedRecovery(spec),/pre-recovery read-back check/,'a draft that still cannot be read back stops recovery before local data changes');
   Object.assign(plan,{input:null,writable:true,saves:[]});
+}
+// A running session is written once before the safety backup. A recovery that
+// keeps today's session does not write it again, so the safety backup stays
+// current; any other recovery still treats that write as a change.
+{
+  const spec=keeps=>freeze({kind:'bring-in',label:'Device Folder',...(keeps?{keepsActiveSession:true}:{}),createSafety:async()=>freeze({verified:true,checkpointId:CHECKPOINT('c'),sourceRevision:session.source}),apply:async()=>freeze({ok:true}),publishPresent:async()=>freeze({status:'completed'})});
+  Object.assign(session,{tasks:true,writes:0});
+  assert.equal((await host.managedRecovery(spec(true))).ok,true,'a session-preserving recovery is not stopped by its own settlement');
+  assert.equal(session.writes,1,'the session is written once, before the safety backup');
+  session.writes=0;
+  await assert.rejects(()=>host.managedRecovery(spec(false)),/changed while the Before restore safety backup/,'a recovery that may replace the session keeps the stale-safety protection');
+  assert.equal(session.writes,2);assert.equal(suspended,0);
+  Object.assign(session,{tasks:false,writes:0});
 }
 console.log(JSON.stringify({status:'PASS',suite:'backup-recovery-host',providerScopedRecovery:true,noCrossProviderDiscovery:true,replaceAndCombine:true,durableProviderRetry:true,pendingMutationFailClosed:true,managedRecoveryLifecycle:true,closeDoesNotCancel:true,reopenReattaches:true,cancelSourceScoped:true},null,2));

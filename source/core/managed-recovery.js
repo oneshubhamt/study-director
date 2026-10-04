@@ -15,12 +15,12 @@ registry.define('managed-recovery',1,()=>{
     functions(input.diagnostics,['capture','mark'],'Managed recovery diagnostics port');
     let active=false;
     function normalizeSpec(spec){
-      exactObject(spec,['apply','createSafety','kind','label','publishPresent'],'Managed recovery operation');
+      exactObject(spec,Object.hasOwn(spec,'keepsActiveSession')?['apply','createSafety','keepsActiveSession','kind','label','publishPresent']:['apply','createSafety','kind','label','publishPresent'],'Managed recovery operation');
       if(typeof spec.apply!=='function'||typeof spec.createSafety!=='function'||typeof spec.publishPresent!=='function')throw new TypeError('Managed recovery callbacks are invalid.');
       const kind=String(spec.kind||'');
       if(!['bring-in','restore-version'].includes(kind))throw new TypeError('Managed recovery kind is invalid.');
       const label=String(spec.label||'').trim();if(!label)throw new TypeError('Managed recovery source label is required.');
-      return freeze({...spec,kind,label});
+      return freeze({...spec,kind,label,keepsActiveSession:spec.keepsActiveSession===true});
     }
     function verifiedSafety(value){
       return !!value&&typeof value==='object'&&value.verified===true&&/^cp_[a-f0-9]{32}$/u.test(String(value.checkpointId||''))&&Number.isFinite(Date.parse(String(value.sourceRevision||'')));
@@ -47,7 +47,7 @@ registry.define('managed-recovery',1,()=>{
           let result;
           input.diagnostics.mark('recovery-commit-quiesce-enter',{kind:spec.kind});
           await input.lifecycle.quiesce(async()=>{
-            input.diagnostics.mark('recovery-final-settle-start',{kind:spec.kind});await input.lifecycle.settle(spec.kind);input.diagnostics.mark('recovery-final-settle-complete',{kind:spec.kind});
+            input.diagnostics.mark('recovery-final-settle-start',{kind:spec.kind});await input.lifecycle.settle(spec.kind,freeze({phase:'final',keepsActiveSession:spec.keepsActiveSession}));input.diagnostics.mark('recovery-final-settle-complete',{kind:spec.kind});
             const currentRevision=String(input.lifecycle.revision()||'');
             if(settledRevision&&safety.sourceRevision&&currentRevision!==String(safety.sourceRevision)){
               const error=new Error('Local data changed while the Before restore safety backup was being created. Recovery stopped before changing current data; retry when ready.');error.code='STUDY_DIRECTOR_RECOVERY_STALE_SAFETY';throw error;

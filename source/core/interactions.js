@@ -357,7 +357,7 @@ registry.define('interactions',1,()=>{
             toast.addEventListener(event,eventValue=>{if(event==='focusout'&&toast.contains(eventValue.relatedTarget))return;notifications.pauseEvent(row.key,row.deliveryId,reason,paused);});
           }
           copy.append(title,message);toast.append(copy);if(row.dismissible!==false)toast.append(close);region.appendChild(toast);
-          entry={toast,copy,title,message,deliveryId:row.deliveryId,action:null,actionSpec:null};renderedToasts.set(row.key,entry);
+          entry={toast,copy,title,message,deliveryId:row.deliveryId,action:null,actionSpec:null,secondary:null,secondarySpec:null};renderedToasts.set(row.key,entry);
           requestAnimationFrame(()=>toast.classList.remove('entering'));
         }
         const {toast,title,message,copy}=entry;
@@ -366,12 +366,11 @@ registry.define('interactions',1,()=>{
         if(title.textContent!==row.title)title.textContent=row.title;
         if(message.textContent!==row.message)message.textContent=row.message;
         message.hidden=!row.message;
-        if(entry.actionSpec?.run!==row.action?.run||entry.actionSpec?.label!==row.action?.label){
-          entry.action?.remove();entry.action=null;entry.actionSpec=row.action;
-          if(row.action){
-            const action=button(row.action.label);action.addEventListener('click',()=>{try{Promise.resolve(row.action.run()).catch(error=>capture('notification.action',error));}catch(error){capture('notification.action',error);}});
-            copy.appendChild(action);entry.action=action;
-          }
+        const actionButton=spec=>{const control=button(spec.label);control.addEventListener('click',()=>{try{Promise.resolve(spec.run()).catch(error=>capture('notification.action',error));}catch(error){capture('notification.action',error);}});return control;};
+        if(entry.actionSpec?.run!==row.action?.run||entry.actionSpec?.label!==row.action?.label||entry.secondarySpec?.run!==row.secondaryAction?.run||entry.secondarySpec?.label!==row.secondaryAction?.label){
+          entry.action?.remove();entry.secondary?.remove();entry.action=entry.secondary=null;entry.actionSpec=row.action;entry.secondarySpec=row.secondaryAction||null;
+          if(row.action){entry.action=actionButton(row.action);copy.appendChild(entry.action);}
+          if(row.action&&row.secondaryAction){entry.secondary=actionButton(row.secondaryAction);copy.appendChild(entry.secondary);}
         }
       }
     }

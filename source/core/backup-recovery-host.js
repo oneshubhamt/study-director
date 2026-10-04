@@ -87,7 +87,7 @@ registry.define('backup-recovery-host',1,()=>{
         return freeze({status:'pending',reason:String(error&&error.message||error||'queue-failed'),queued:false});
       }
     }
-    async function settleRecoveryState(){
+    async function settleRecoveryState(options={}){
       if(input.lifecycle.attachmentBusy())throw new Error('An attachment is still being prepared or saved. Finish that operation before recovery.');
       await input.lifecycle.settleAttachmentWriters();
       if(await input.lifecycle.flushPlanDraft()===false)throw new Error('The current Plan draft could not be saved before recovery.');
@@ -102,7 +102,10 @@ registry.define('backup-recovery-host',1,()=>{
         await input.lifecycle.settlePlan();
         if((await input.lifecycle.canonicalPlanDraft())!==planInput)throw new Error('The Plan draft did not pass the pre-recovery read-back check.');
       }
-      const hasTasks=input.lifecycle.hasTasks();
+      // A recovery that never touches today's session keeps the copy confirmed
+      // before its safety backup; writing it again would only move the source
+      // revision past that backup.
+      const hasTasks=!(options.phase==='final'&&options.keepsActiveSession===true)&&input.lifecycle.hasTasks();
       let liveResult=null;if(hasTasks)liveResult=await input.lifecycle.writeLiveDraft();
       await input.lifecycle.flushNotes();
       const noteFailure=input.lifecycle.noteFailure();if(noteFailure&&noteFailure.failed)throw new Error(noteFailure.message||'Ongoing Notes are not safely stored yet.');
@@ -127,7 +130,7 @@ registry.define('backup-recovery-host',1,()=>{
 
     const coordinator=input.managedRecovery.createCoordinator(freeze({
       automaticBackup:freeze({suspend:reason=>input.device.suspendAutomatic(reason),resume:token=>input.device.resumeAutomatic(token)}),
-      lifecycle:freeze({settle:()=>settleRecoveryState(),quiesce:operation=>input.lifecycle.quiesce(operation),rebuild:()=>rebuildRecoveryState(),revision:()=>input.sourceRevision()}),
+      lifecycle:freeze({settle:(kind,options)=>settleRecoveryState(options),quiesce:operation=>input.lifecycle.quiesce(operation),rebuild:()=>rebuildRecoveryState(),revision:()=>input.sourceRevision()}),
       mutation:freeze({run:(kind,operation)=>input.mutation.run(kind,operation)}),
       diagnostics:freeze({capture:(scope,error,level)=>input.diagnostics.capture(scope,error,level),mark:(phase,details)=>input.diagnostics.mark(phase,details)})
     }));

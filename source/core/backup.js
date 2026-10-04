@@ -301,7 +301,7 @@ async function exportPortableBackup(){
       OperationDiagnostics.mark('standalone-capture-start',{},traceId);file=await createCheckpoint();OperationDiagnostics.mark('standalone-capture-complete',{bytes:Number(file&&file.blob&&file.blob.size)||0},traceId);
       if(!file.blob?.size)throw new Error('The prepared backup is empty. No file was saved.');
       OperationDiagnostics.mark('standalone-save-start',{},traceId);const result=await Exports.save(file);OperationDiagnostics.mark('standalone-save-complete',{},traceId);
-      markBackupCompleted();const message='Verified backup download started. Check that your browser saved it.';setLocalExportStatus(message+(file.warning?' '+file.warning:''));finishPortablePresentation({message:message+(file.warning?' '+file.warning:''),outcome:'download-started'});OperationDiagnostics.finish({bytes:Number(file.blob.size)||0},traceId);return result;
+      markBackupCompleted({userExport:true});const message='Verified backup download started. Check that your browser saved it.';setLocalExportStatus(message+(file.warning?' '+file.warning:''));finishPortablePresentation({message:message+(file.warning?' '+file.warning:''),outcome:'download-started'});OperationDiagnostics.finish({bytes:Number(file.blob.size)||0},traceId);return result;
     }catch(error){
       const cancelled=error.name==='AbortError'||error.code==='STUDY_DIRECTOR_IMPORT_CANCELLED',message=cancelled?'Backup export cancelled.':'Backup export failed: '+error.message;setLocalExportStatus(message,cancelled);
       finishPortablePresentation({message,lifecycle:cancelled?'cancelled':'failed'});
@@ -475,11 +475,13 @@ async function flushRestorePreflightState(signal){
   throwIfImportCancelled(signal);
   return true;
 }
-async function captureRestoreReconciliationRevision(relevantDates){
+// A missing-only restore cannot change today's session, so the running timer's
+// own saves are not a reason to rebuild its comparison.
+async function captureRestoreReconciliationRevision(relevantDates,{session:includeSession=true}={}){
   const [records,notesRaw,loadedSession,personalData]=await Promise.all([
     getDailyRecordDocumentsByDates(relevantDates||[]),
     AppData.notes.readFreshPayload(),
-    readCanonicalActiveSession(),
+    includeSession?readCanonicalActiveSession():null,
     personalExport({flush:false})
   ]);
   const notes=AppData.notes.normalizePayload(notesRaw),noteState=Object.keys(notes).sort().map(key=>{
@@ -489,25 +491,25 @@ async function captureRestoreReconciliationRevision(relevantDates){
   const session=loadedSession&&loadedSession.value?ActiveSessionCodec.sanitizeCurrent(loadedSession.value):null;
   return JSON.stringify([recordState,noteState,session,personalData||null]);
 }
-async function buildStableRestoreImpact(parsed,preview,signal){
+async function buildStableRestoreImpact(parsed,preview,signal,options={}){
   const relevantDates=restoreRelevantDates(parsed);
   for(let attempt=0;attempt<3;attempt+=1){
     throwIfImportAborted(signal);
-    const before=await captureRestoreReconciliationRevision(relevantDates);
+    const scope={session:options.missingOnly!==true},before=await captureRestoreReconciliationRevision(relevantDates,scope);
     const assetAssessment=await assessImportedAssets(parsed,signal);
-    const impact=await restoreImpactPreview(parsed,preview,assetAssessment);
-    const after=await captureRestoreReconciliationRevision(relevantDates);
-    if(before===after)return freeze({impact:freeze({...impact,assetAssessment}),revision:after,relevantDates});
+    const impact=await restoreImpactPreview(parsed,preview,assetAssessment,options);
+    const after=await captureRestoreReconciliationRevision(relevantDates,scope);
+    if(before===after)return freeze({impact:freeze({...impact,assetAssessment}),revision:after,relevantDates,scope});
     await yieldImport(signal);
   }
   throw staleReconciliationError();
 }
-async function assertRestoreReconciliationCurrent(expectedRevision,relevantDates){
-  if(expectedRevision!==await captureRestoreReconciliationRevision(relevantDates))throw staleReconciliationError();
+async function assertRestoreReconciliationCurrent(expectedRevision,relevantDates,scope){
+  if(expectedRevision!==await captureRestoreReconciliationRevision(relevantDates,scope))throw staleReconciliationError();
   return true;
 }
 
-async function buildRestoreReconciliationPlan(parsed,preview){
+async function buildRestoreReconciliationPlan(parsed,preview,{missingOnly=false}={}){
   const records=normalizeImportedDailyRecordSet(parsed&&parsed.records||[]).records;
   const checkpointDeletions=parsed&&parsed.protectedCheckpointManifest&&Array.isArray(parsed.protectedCheckpointManifest.savedDayDeletions)?parsed.protectedCheckpointManifest.savedDayDeletions:[];
   const checkpointNoteDeletions=parsed&&parsed.protectedCheckpointManifest&&Array.isArray(parsed.protectedCheckpointManifest.areaNoteDeletions)?parsed.protectedCheckpointManifest.areaNoteDeletions:[];
@@ -516,7 +518,9 @@ async function buildRestoreReconciliationPlan(parsed,preview){
   const allLocalDeletions=await AppData.deletionRecovery.savedDays(),relevantDateSet=new Set(relevantDates);
   const localDeletions=allLocalDeletions.filter(entry=>relevantDateSet.has(entry.date));
   const localNotes=AppData.notes.normalizePayload(await AppData.notes.readFreshPayload()),allLocalNoteDeletions=await AppData.deletionRecovery.areaNotes();
-  const incomingNotes=AppData.notes.normalizePayload(parsed&&parsed.data&&parsed.data.areaNotes||{});
+  // Missing-only recovery adds back what this device lacks (Saved Days,
+  // attachments) and never offers the backup's notes or session.
+  const incomingNotes=missingOnly?Object.create(null):AppData.notes.normalizePayload(parsed&&parsed.data&&parsed.data.areaNotes||{});
   const loadedSession=await readCanonicalActiveSession(),localSession=loadedSession&&loadedSession.value||null;
   const currentCheckpoint=Number(parsed&&parsed.formatVersion)>=15&&!!parsed.protectedCheckpointManifest;
   const rawIncomingSession=parsed&&parsed.importedActiveSession||null;
@@ -524,7 +528,7 @@ async function buildRestoreReconciliationPlan(parsed,preview){
   const checkpointId=String(parsed&&parsed.protectedCheckpointManifest&&parsed.protectedCheckpointManifest.checkpointId||preview&&preview.checkpoint&&preview.checkpoint.checkpointId||'incoming');
   return Reconciliation.createPlan({
     local:{id:'local',label:'This device',savedDays:localRecords,savedDayDeletions:localDeletions,notes:localNotes,noteDeletions:allLocalNoteDeletions,activeSession:localSession},
-    incoming:{id:checkpointId,label:currentCheckpoint?'Backup copy':(preview&&preview.filename||'Backup file'),savedDays:records,savedDayDeletions:checkpointDeletions,notes:incomingNotes,noteDeletions:checkpointNoteDeletions,activeSession:incomingSession}
+    incoming:{id:checkpointId,label:currentCheckpoint?'Backup copy':(preview&&preview.filename||'Backup file'),savedDays:records,savedDayDeletions:checkpointDeletions,notes:incomingNotes,noteDeletions:missingOnly?[]:checkpointNoteDeletions,activeSession:missingOnly?null:incomingSession}
   });
 }
 function savedDayChoiceLabel(candidate){
@@ -696,8 +700,8 @@ function backupCandidatePreview(parsed,file,metadata={}){
     size:Math.max(0,Number(metadata.size!==undefined?metadata.size:file&&file.size)||0)
   });
 }
-async function restoreImpactPreview(parsed,preview,assetAssessment=null){
-  const reconciliationPlan=await buildRestoreReconciliationPlan(parsed,preview);
+async function restoreImpactPreview(parsed,preview,assetAssessment=null,options={}){
+  const reconciliationPlan=await buildRestoreReconciliationPlan(parsed,preview,options);
   const summary=Reconciliation.summarizePlan(reconciliationPlan);
   const currentCheckpoint=Number(parsed&&parsed.formatVersion)>=15&&!!parsed.protectedCheckpointManifest;
   return freeze({
@@ -1110,7 +1114,8 @@ function restoreSurfaceStatus(stored,message,ok=true,stage='local',details={}){
   if(typeof report==='function'){try{report(freeze({stage:String(stage||'local'),message:String(message||''),ok:ok!==false,...details}));}catch(error){AppDiagnostics.capture('backup.managed-recovery-progress',error,'warn');}return true;}
   portablePresentation?.update({progress:{stage,...details}});setLocalExportStatus(message,ok);return false;
 }
-async function restoreBackupAttemptWithOperation(candidate,operation){
+async function restoreBackupAttemptWithOperation(candidate,operation,options={}){
+  const missingOnly=options&&options.missingOnly===true;
   const stored=candidate&&typeof candidate==='object'?inspectedBackups.get(candidate):null,snapshot=stored?candidateSnapshotState(stored):null;
   const parsed=snapshot&&snapshot.parsed||null,signal=operation&&operation.signal||stored&&stored.signal||null;
   if(!parsed)throw new Error('Backup candidate is not a current verified Study Director inspection.');
@@ -1119,7 +1124,11 @@ async function restoreBackupAttemptWithOperation(candidate,operation){
   OperationDiagnostics.mark('restore-preflight-start');
   await flushRestorePreflightState(signal);
   OperationDiagnostics.mark('restore-preflight-complete');
-  const stable=await buildStableRestoreImpact(parsed,preview,signal),impact=stable.impact;
+  const stable=await buildStableRestoreImpact(parsed,preview,signal,{missingOnly}),impact=stable.impact;
+  // Missing-only recovery runs without questions; anything that would need a
+  // decision is left for an explicit restore instead.
+  const needsDecision=()=>Object.freeze({cancelled:true,reason:'needs-decision',mode:'reconcile',added:0,replaced:0,kept:0,batches:0,assetsRestored:0,notesReconciled:false,activeSessionReconciled:false,savedDayDeletionsApplied:0});
+  if(missingOnly&&!impact.reconciliationCapable)return needsDecision();
   OperationDiagnostics.mark('reconciliation-impact-ready',{savedDayConflicts:Number(impact.savedDays&&impact.savedDays.conflicts)||0,activeSessionConflicts:Number(impact.activeSession&&impact.activeSession.conflicts)||0});
   const reconciliationRevision=stable.revision,relevantDates=stable.relevantDates;
   const mode=restoreModeForBackup(impact);
@@ -1129,7 +1138,8 @@ async function restoreBackupAttemptWithOperation(candidate,operation){
   const preliminaryNoteConflicts=noteReconciliationConflicts(impact.reconciliationPlan,null),noteAncestor=preliminaryNoteConflicts.length?await noteReconciliationAncestor(stored,preliminaryNoteConflicts.map(item=>item.key)):null;
   const noteConflicts=noteAncestor?noteReconciliationConflicts(impact.reconciliationPlan,noteAncestor):preliminaryNoteConflicts;
   let selectedDecisions=freeze({});
-  if(decisionSetup.groups.length){
+  if(missingOnly&&(decisionSetup.groups.some(group=>!['plans','personalSettings'].includes(group.id))||noteConflicts.length))return needsDecision();
+  if(decisionSetup.groups.length&&!missingOnly){
     selectedDecisions=await configure({
       title:'Different versions found',
       message:'Choose what to keep where this device and the backup differ. This device is selected by default; missing data is never treated as a deletion.',
@@ -1143,12 +1153,13 @@ async function restoreBackupAttemptWithOperation(candidate,operation){
   }
   const decisions=freeze({...decisionSetup.defaults,...selectedDecisions});
   if(decisions.safetyCopy===true){
-    await assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates);
+    await assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates,stable.scope);
     const extra=await downloadSafetyCopy({assumeFlushed:true});try{await Exports.run('file.release',{file:extra.blob});}catch(error){AppDiagnostics.capture('backup.optional-safety-copy-release',error,'warn');}
-    await assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates);
+    await assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates,stable.scope);
   }
   let reflectionDecisionMap=freeze({});
   const reflectionConflicts=savedDayReflectionConflicts(impact.reconciliationPlan);
+  if(missingOnly&&reflectionConflicts.length)return needsDecision();
   if(reflectionConflicts.length){
     const reflectionResult=await NoteReconciliation.resolve(freeze({conflicts:reflectionConflicts,incomingAssets:Array.isArray(parsed.importedAssets)?parsed.importedAssets:freeze([]),signal,manualOnly:true}));
     if(!reflectionResult)return Object.freeze({cancelled:true,mode,added:0,replaced:0,kept:0,batches:0,assetsRestored:0,notesReconciled:false,activeSessionReconciled:false,savedDayDeletionsApplied:0});
@@ -1162,6 +1173,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation){
   }
   const resolvedPlan=Reconciliation.resolvePlan(impact.reconciliationPlan,reconciliationSelections(impact.reconciliationPlan,decisions,noteDecisionMap,reflectionDecisionMap)),resolvedAssetReferences=await resolvedAssetReferenceIds(resolvedPlan,signal);
   let attachmentPlan=await buildAttachmentDeletionPlan(parsed,resolvedPlan,stable.impact.assetAssessment||null,freeze({}),signal,resolvedAssetReferences);
+  if(missingOnly&&attachmentPlan.conflicts.length)return needsDecision();
   if(attachmentPlan.conflicts.length){
     const groups=attachmentDeletionDecisionGroups(attachmentPlan),choice=await configure({title:'Review attachment differences',message:'Choose what to keep for standalone attachments that differ between this device and the backup. Attachments still referenced by your data are always kept.',groups,confirmLabel:'Apply choices',cancelLabel:'Cancel'});
     if(!choice)return Object.freeze({cancelled:true,mode,added:0,replaced:0,kept:0,batches:0,assetsRestored:0,notesReconciled:false,activeSessionReconciled:false,savedDayDeletionsApplied:0});
@@ -1169,16 +1181,16 @@ async function restoreBackupAttemptWithOperation(candidate,operation){
     attachmentPlan=await buildAttachmentDeletionPlan(parsed,resolvedPlan,stable.impact.assetAssessment||null,freeze(mapped),signal,resolvedAssetReferences);
   }
   throwIfImportAborted(signal);await yieldImport(signal);
-  await assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates);
+  await assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates,stable.scope);
   if(!impact.reconciliationCapable)requireNoActiveSession('using an older backup');
   return runRestoreMutation(stored,'restore-backup',async()=>{
   OperationDiagnostics.mark('local-restore-mutation-enter');
   if(!impact.reconciliationCapable)requireNoActiveSession('using an older backup');
-  await assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates);
+  await assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates,stable.scope);
   await ensureRestoreCapacity(parsed,preview);
   restoreSurfaceStatus(stored,'Creating and verifying a local rollback snapshot…',true,'local-safety');
   OperationDiagnostics.mark('local-safety-capture-start');
-  const {safetyFile,rollbackJournal}=await captureLocalSafetyCopy(stored,{afterCapture:()=>assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates)});
+  const {safetyFile,rollbackJournal}=await captureLocalSafetyCopy(stored,{afterCapture:()=>assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates,stable.scope)});
   OperationDiagnostics.mark('local-safety-capture-complete',{bytes:Number(safetyFile&&safetyFile.blob&&safetyFile.blob.size)||0});
   const rollbackScheduleText=scheduleRead();
   const rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),areaNotes:await AppData.deletionRecovery.areaNotes(),attachments:await AppData.deletionRecovery.attachments()});
@@ -1408,10 +1420,10 @@ async function recoverInterruptedRestore(){
     }finally{await Exports.run('file.release',{file:durable.payload.blob});}
   }));
 }
-async function restoreBackupWithOperation(candidate,operation){
+async function restoreBackupWithOperation(candidate,operation,options={}){
   const maxRebuilds=2,stored=candidate&&typeof candidate==='object'?inspectedBackups.get(candidate):null;
   for(let rebuild=0;;rebuild+=1){
-    try{return await restoreBackupAttemptWithOperation(candidate,operation);}
+    try{return await restoreBackupAttemptWithOperation(candidate,operation,options);}
     catch(error){
       if(error?.code!=='STUDY_DIRECTOR_RECONCILIATION_STALE'||rebuild>=maxRebuilds)throw error;
       throwIfImportAborted(operation&&operation.signal);
@@ -1420,9 +1432,9 @@ async function restoreBackupWithOperation(candidate,operation){
     }
   }
 }
-async function restoreBackup(candidate){
+async function restoreBackup(candidate,options={}){
   const owned=!activeImportOperation,operation=activeImportOperation||beginImport();
-  try{return await restoreBackupWithOperation(candidate,operation);}
+  try{return await restoreBackupWithOperation(candidate,operation,options);}
   finally{try{await candidate.release();}catch(error){AppDiagnostics.capture('backup.candidate-release',error,'warn');}if(owned)finishImport(operation);}
 }
 async function importPortableBackup(ev){

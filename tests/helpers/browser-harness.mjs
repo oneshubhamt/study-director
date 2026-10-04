@@ -236,7 +236,7 @@ export async function launchChromium(options={}){
     const target=await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`,{method:'PUT'})).json();
     const page=await CdpPage.connect(target.webSocketDebuggerUrl,target.id);
     pages.add(page);await page.send('Runtime.enable');await page.send('Page.enable');await page.send('Log.enable');await page.send('Network.enable');await page.send('Accessibility.enable');await page.startCoverage();
-    await page.send('Emulation.setTimezoneOverride',{timezoneId:'Asia/Kolkata'});
+    await page.send('Emulation.setTimezoneOverride',{timezoneId:settings.timezoneId||'Asia/Kolkata'});
     if(settings.userAgent)await page.send('Network.setUserAgentOverride',{userAgent:settings.userAgent,platform:settings.platform||''});
     await page.setViewport(settings.viewport||{width:1365,height:900,mobile:false,scale:1});
     if(settings.preload)await page.send('Page.addScriptToEvaluateOnNewDocument',{source:String(settings.preload)});

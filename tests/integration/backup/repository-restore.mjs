@@ -149,6 +149,27 @@ assert.equal(preparationRebaseCalls,1,'Successful managed Combine must atomicall
 assert.equal(result.mode,'reconcile');assert.equal(result.added,1);assert.equal(result.assetsRestored,1);assert.equal(result.notesReconciled,true);assert.equal(records[0].reflection,'repository reflection');assert.equal(notes.Ethics.text,'repository note');assert.equal(currentPersonal.preferences.studentName,'Repository Source');assert.equal(deletions[0].date,'2026-09-17');assert.equal(await codec.checksumBlob(assets.get(assetId)),imageHash);assert.equal(journal,null,'successful reconciliation must clear its rollback journal');
 for(const objectId of attachmentObjectIds)assert.equal(leaseReleaseCounts.get(objectId),1,'Managed candidate restore must release each retained repository attachment lease exactly once.');
 
+// After browser data is cleared, a missing-only Combine adds back Saved Days and
+// attachments without asking and leaves the rescued notes, plans and session alone.
+{
+  const saved={records,notes,assets:new Map(assets),currentPersonal,deletions,activeSession,scheduleText};
+  const rescuedSession=freeze({id:'current',type:'activeSession',version:9,revision:3,date:'2026-09-20',status:'active',scheduleText:'11:00 | 60 | Rescued | work | Ethics | block | 1',snapshot:freeze({label:'rescued'}),suspendedAt:null,updatedAt:'2026-09-20T05:00:00.000Z'});
+  const rescuedNotes={Ethics:normalizeArea({key:'Ethics',text:'written after clearing',updatedAt:'2026-09-20T05:00:00.000Z'},'Ethics')};
+  records=[];notes={...rescuedNotes};assets.clear();currentPersonal=localPersonal;deletions=[];activeSession=rescuedSession;scheduleText=rescuedSession.scheduleText;
+  const missing=await runtime.repository.bringIn(await runtime.repository.inspect(manifest,readObject,{interactive:false,committed:true}),{missingOnly:true});
+  assert.equal(missing.cancelled,false);assert.equal(missing.added,1);assert.equal(missing.assetsRestored,1);
+  assert.deepEqual(records.map(row=>[row.date,row.reflection]),[['2026-09-18','repository reflection']],'the missing Saved Day comes back');
+  assert.deepEqual(notes,rescuedNotes,'rescued notes are never replaced by the backup');
+  assert.equal(activeSession,rescuedSession,'today’s session is untouched');assert.equal(scheduleText,rescuedSession.scheduleText);
+  assert.deepEqual(currentPersonal,localPersonal,'rescued plans and settings stay as they are');
+  // A difference that needs a choice stops before anything changes.
+  records=[freeze({version:16,recordKind:'study',date:'2026-09-18',reflection:'local different day',savedAt:'2026-09-20T01:00:00.000Z',updatedAt:'2026-09-20T01:00:00.000Z'})];assets.clear();
+  const undecided=await runtime.repository.bringIn(await runtime.repository.inspect(manifest,readObject,{interactive:false,committed:true}),{missingOnly:true});
+  assert.equal(undecided.cancelled,true);assert.equal(undecided.reason,'needs-decision');
+  assert.equal(records[0].reflection,'local different day');assert.equal(assets.size,0,'nothing is added when a decision is needed');
+  ({records,notes,currentPersonal,deletions,activeSession,scheduleText}=saved);assets.clear();for(const [id,blob] of saved.assets)assets.set(id,blob);
+}
+
 // A lagging device may sit far behind the incoming checkpoint's direct parent. Three-way note reconciliation must use any reachable ancestry ID carried by the managed checkpoint, not a shallow retention-derived prefix.
 const deepAncestorCount=runtime.repository.retention.normalLimit+runtime.repository.retention.protectedLimit+4,deepAncestorIds=freeze(Array.from({length:deepAncestorCount},(_,index)=>'cp_'+String(1500+index).padStart(32,'0'))),directParentId=deepAncestorIds[0],laggedBaseId=deepAncestorIds.at(-1),laggedManifest=freeze({...manifest,reconciliationBaseId:directParentId,reconciliationAncestorIds:deepAncestorIds});
 reconciliationBaseNotes=Object.assign(Object.create(null),{Ethics:'common ancestor note'});reconciliationBase=freeze({format:'study-director.reconciliation-base',version:2,checkpointId:laggedBaseId,establishedAt:new Date().toISOString(),noteCount:1,noteKeyFingerprint:'0'.repeat(64)});notes={Ethics:normalizeArea({key:'Ethics',text:'local descendant note',updatedAt:'2026-09-19T00:01:00.000Z'},'Ethics')};lastNoteConflicts=[];
