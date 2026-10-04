@@ -78,7 +78,7 @@ assert.match(convergenceScheduler,/background\.registerJob\('convergence'[\s\S]*
 assert.match(convergenceScheduler,/status:'idle',reason:'none'/u,'confirmed absence alone retires pending work');
 assert.match(convergenceScheduler,/status:'deferred',reason:'busy'[\s\S]*status:'deferred',reason:'background-busy'/u,'temporary contention retains explicit pending outcomes');
 assert.match(convergenceScheduler,/scope\.signal\.aborted\?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay\(selected\)/u,'preemption and failures retain governed retries');
-assert.match(convergenceScheduler,/isAvailable:\(\)=>providerBackgroundAvailability\(selected\)/u,'the lifecycle owns authorization blockers and wake-ups');
+assert.match(convergenceScheduler,/isAvailable:\(\)=>\{const available=providerBackgroundAvailability\(selected\),saved=[^;]+;return available===true&&saved\?\.pending&&saved\.role==='before-restore'\?'awaiting-foreground':available;\}/u,'the lifecycle owns authorization blockers and wake-ups');
 const pendingRead=provider.slice(provider.indexOf('async function pendingRetryState('),provider.indexOf('function resetConvergenceRetry('));
 assert.match(pendingRead,/throw error/u,'unknown pending state must reach the bounded convergence recovery handler');
 assert.doesNotMatch(provider,/async function historyRepositoryProvider[\s\S]{0,1200}retryPendingProviderBackup\(selected\)/u,'opening Version History must remain metadata-only and must not unexpectedly publish pending user data');

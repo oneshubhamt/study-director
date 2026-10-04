@@ -21,7 +21,7 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
   const delay=(ms,signal)=>new Promise((resolve,reject)=>{let timer;const clear=()=>{harnessClearTimeout(timer);signal?.removeEventListener('abort',abort);},abort=()=>{clear();reject(signal.reason||Object.assign(new Error('QA_FIXTURE request cancelled'),{name:'AbortError'}));};timer=harnessSetTimeout(()=>{clear();resolve();},ms);if(signal?.aborted)abort();else signal?.addEventListener('abort',abort,{once:true});});
   async function mockFetch(input,options={}){
     const url=new URL(String(input)),method=String(options.method||'GET').toUpperCase(),headers=new Headers(options.headers||{});
-    state.requests.push({url:url.href,method,authorization:headers.get('Authorization')||''});
+    state.requests.push({url:url.href,method,authorization:headers.get('Authorization')||'',contentRange:headers.get('Content-Range')||''});
     assert.equal(url.origin,'https://www.googleapis.com','token-bearing requests must remain on the exact Google API origin');
     assert.match(headers.get('Authorization')||'',/^Bearer token-/u);
     const requestDelay=Number(state.requestDelayMs?.({url,method})||0);if(requestDelay>0)await delay(requestDelay,options.signal);
@@ -92,7 +92,7 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
       state.evilUploadLocation=false;return json({},200,{Location:location});
     }
     if(url.pathname==='/upload/drive/v3/files'&&method==='PUT'){
-      const uploadId=url.searchParams.get('upload_id'),pending=state.uploads.get(uploadId);assert.ok(pending,'upload session must exist');
+      const uploadId=url.searchParams.get('upload_id'),pending=state.uploads.get(uploadId);if(!pending)return json({error:{message:'Upload session expired.'}},404);
       const range=String(headers.get('Content-Range')||'');
       if(range.startsWith('bytes */')){
         const complete=state.files.get(pending.id);if(complete)return json(fileMetadata(complete),200);
@@ -152,7 +152,8 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
       try{
         state.uploadProgressStarted=(state.uploadProgressStarted||0)+1;
         const steps=state.uploadProgressSteps||1;
-        for(let step=1;step<=steps;step++){if(state.uploadProgressStepMs)await delay(state.uploadProgressStepMs,this.controller.signal);this.upload.onprogress?.({loaded:state.uploadRepeatProgress?1:Math.ceil(body.size*step/steps),total:body.size});}
+        const stepMs=typeof state.uploadProgressStepMs==='function'?Number(state.uploadProgressStepMs(body)):Number(state.uploadProgressStepMs)||0;
+        for(let step=1;step<=steps;step++){if(stepMs>0){state.awaitingUploadProgress=(state.awaitingUploadProgress||0)+1;try{await delay(stepMs,this.controller.signal);}finally{state.awaitingUploadProgress--;}}this.upload.onprogress?.({loaded:state.uploadRepeatProgress?1:Math.ceil(body.size*step/steps),total:body.size});}
         if(this.controller.signal.aborted)return;
         // Native Blob/crypto work implements the fake server's zero-delay
         // response. Do not let a virtual network clock outrun that real work.

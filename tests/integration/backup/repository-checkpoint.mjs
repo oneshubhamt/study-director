@@ -16,7 +16,8 @@ let backgroundClock=null,backgroundReady=true,primary=true;
 let checksumCounter=0,encodeOpenCounter=0,assetReads=0,snapshotRevision='rev-1',sourceRevision='2026-09-19T00:00:00.000Z',checkpointCounter=0,reconciliationBaseWrites=[],reconciliationBase=null,reconciliationBaseNotes=Object.create(null);
 const AUDIO_BYTES=300*1024*1024,AUDIO_HASH='a'.repeat(64);
 class VirtualLargeBlob extends Blob{get size(){return AUDIO_BYTES;}}
-const audioBlob=new VirtualLargeBlob(['x'],{type:'audio/mpeg'});
+let audioBlob=new VirtualLargeBlob(['x'],{type:'audio/mpeg'}),publicationProtection=null;
+const releasedFiles=[];
 let dailyRecordCanonical=true;
 let dailyRecords=[freeze({version:16,recordKind:'study',date:'2026-09-18',reflection:'one',savedAt:'2026-09-18T20:00:00.000Z',updatedAt:'2026-09-18T20:00:00.000Z'})];
 const stableSecondaryNote=freeze({version:2,key:'N2',text:'stable secondary note',updatedAt:'2026-09-18T20:00:00.000Z'});
@@ -37,9 +38,9 @@ const BackupCodec=freeze({
 });
 const ActiveSessionCodec=freeze({sanitizeImportedActiveSession:value=>value});
 const exportsPort=freeze({
-  backgroundAvailable:()=>backgroundReady?true:'locked',protect:async(file)=>freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),
-  unprotect:async file=>freeze({blob:file,encrypted:false}),check:()=>{},scope:operation=>operation(),job:(operation,options)=>exclusive.job(operation,options),
-  run:async(type,data,options)=>{if(type==='file.release')return true;if(type==='checksum'){checksumCounter+=1;if(data&&data.value===audioBlob)return AUDIO_HASH;}if(type==='encode.open')encodeOpenCounter+=1;return engine.run(type,data,options?.progress);},
+  backgroundAvailable:()=>backgroundReady?true:'locked',protect:async(file,options)=>publicationProtection?publicationProtection.protect(file,options):freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),
+  unprotect:async(file,options)=>publicationProtection?publicationProtection.unprotect(file,options):freeze({blob:file,encrypted:false}),check:()=>{},scope:operation=>operation(),job:(operation,options)=>exclusive.job(operation,options),
+  run:async(type,data,options)=>{if(type==='file.release'){releasedFiles.push(data.file);return true;}if(type==='checksum'){checksumCounter+=1;if(data&&data.value===audioBlob&&audioBlob.size===AUDIO_BYTES)return AUDIO_HASH;}if(type==='encode.open')encodeOpenCounter+=1;return engine.run(type,data,options?.progress);},
   download:async()=>{},chooseSave:()=>{},save:async()=>({status:'saved'})
 });
 const noop=()=>{},diagnosticFailures=[],operationEvents=[];
@@ -801,4 +802,129 @@ for(const {size,fault} of [{size:65,fault:''},{size:65,fault:'unavailable'},{siz
   driveBacklogCases.push({size,fault,retained:kept.size,exactObjects:true,progressReused:true});
  }finally{backgroundReady=false;runtime.providers.configureRepositoryMaintenance(null);await h.provider.disconnect();globalThis.Date=realDate;backgroundClock=null;}
 }
-console.log(JSON.stringify({status:'PASS',suite:'repository-checkpoint',assembledDriveCases,incompleteInventoryCases,driveBacklogCases,firstAttachmentReads:1,secondAttachmentReads:0,simulatedAttachmentBytes:AUDIO_BYTES,identicalCheckpointAllObjectsReused:true,unchangedStructuredObjectsRecompressed:false,oldSavedDayEditFreshObjects:fresh,ongoingNoteEditFreshObjects:noteFresh,attachmentMetadataZeroByteReads:true,savedDayDeletionNoResurrection:true,sealedCaptureSurvivesLaterMutation:true,providerTieredRetentionFoundation:true,providerCommitMarkerLatestAtomicity:true,retentionPolicy15Plus1:true,beforeRestorePublication:true,managedProviderProtectedPublication:true,orphanMaintenanceBackupRecovery:true,tierGraduation:true,sparseRetention:true,retentionDeletionFailureGcSafe:true,providerReconciliationConvergence:true,providerConvergenceFailureIsolated:true,providerSharedObjectGcSafe:true,publicationProtectedGcSafe:true,reclamationGraceSafe:true,providerLargeAttachmentUploadsBeforeSelfHeal:1,providerLaterAttachmentBytes:0,providerMissingObjectSelfHeal:true,providerOrphanGc:true,providerScrubSelfHeal:true,integrityScrubPriority:true,retainedAbaReuse:true,providerPostSealMutationAllowed:true,integrityScrubStableObjectsOnly:true,integrityScrubLeasesReleased:true,providerTemporaryDownloadsReleased:true,explicitProtectedRemoval:true,durableProviderRetry:true,metadataHistoryColdZeroDownloads:coldHistoryDownloads===0,metadataHistoryWarmZeroDownloads:warmHistoryAdditionalDownloads===0,metadataHistoryScopeIndependent:true,repositoryGenerationReset:true,metadataHistoryBodyVerificationDeferred:true,metadataHistoryUncertainZeroDownloads:uncertainColdDownloads===0,metadataHistoryListedRemoteFiles:coldHistoryRemoteFiles,postPublicationReceiptReuse:true,postPublicationReceiptPublications:2,postPublicationReceiptImmutableReadbacks:receiptDownloads.checkpoint.length+receiptDownloads.commit.length,postPublicationReceiptAdditionalHistoryDownloads:receiptDownloads.checkpoint.length+receiptDownloads.commit.length-4,stateDiscoveryObjectInventoryReuse:true,stateDiscoveryMatureObjectLists:objectListsDuringSecondReceipt,stateDiscoveryConservativeConcurrentObject:true,checksumOperations:checksumCounter},null,2));
+
+// A continuation owns one sealed capture. Attempt signals and worker lifetimes
+// can change, but payload identity, encrypted bytes and live file leases cannot.
+const publicationContinuationCases=[],assembledUploadContinuations=[];
+async function publicationProtectionFixture(encrypted){
+ let record=null;
+ const protection=ExportsModule.createProtection({processing:{run:(...args)=>engine.run(...args),job:operation=>operation(),check:noop},storage:{read:async()=>record,write:async(_key,value)=>{record=value;},remove:async()=>{record=null;}},interactions:{input:async()=>({value:'publication continuation password'}),choose:async()=> 'unlock',confirm:async()=>true},settingKey:'publication-protection'});
+ if(encrypted)await protection.manage();return {protection,changePolicy:()=>{record=null;}};
+}
+async function retainedPublicationFixture(phase,encrypted,{history=null,availableObjectIds=null,retain=true,retention=null}={}){
+ const setup=await publicationProtectionFixture(encrypted);publicationProtection=setup.protection;
+ runtime.controller.invalidateRepositoryPreparation();dailyRecords=[];notes={Subject:freeze({version:2,key:'Subject',text:'sealed note',updatedAt:'2026-10-04T00:00:00.000Z'})};assetDescriptor=null;snapshotRevision='continuation-'+phase+'-'+encrypted;sourceRevision='2026-10-04T00:00:00.000Z';
+ const continuation=runtime.repository.createPublication(),first=new AbortController(),stored=new Map(),manifests=[],markers=[];let failure=null,interrupted=false,activeSignal=first.signal;
+ const fail=step=>{if(step===phase&&!interrupted){interrupted=true;first.abort(Object.assign(new Error('authorization interrupted'),{name:'AbortError',code:'REPOSITORY_BACKGROUND_PREEMPTED'}));throw first.signal.reason;}};
+ const transport=freeze({
+  writeObject:async entry=>{await entry.checkProtection();if(stored.has(entry.objectId))assert.equal(entry.blob,stored.get(entry.objectId),'resumption preserves the exact stored/encrypted payload');else stored.set(entry.objectId,entry.blob);fail('object');return {id:entry.objectId};},
+  writeManifest:async file=>{await file.checkProtection();manifests.push(file.blob);fail('manifest');return {id:file.manifest.checkpoint.checkpointId};},
+  commit:async marker=>{await marker.checkProtection();markers.push(marker.blob);fail('commit');return {id:marker.checkpointId};},
+  retainOnFailure:()=>retain,onFailure:async(_error,context)=>{failure=context;}
+ });
+ const run=(extra={})=>runtime.repository.publish(history,{interactive:false,signal:activeSignal,continuation,availableObjectIds,retention,...extra},transport);
+ await assert.rejects(run(),{name:'AbortError'});assert.equal(failure.retained,retain);assert.equal(continuation.status().busy,false);assert.equal(continuation.status().pending,retain);
+ const payloads=failure.prepared.objects.filter(entry=>!entry.reused).map(entry=>entry.blob);if(manifests.length)payloads.push(manifests[0]);
+ if(encrypted)for(const blob of payloads)assert.equal(releasedFiles.includes(blob),!retain,'protected files live exactly as long as their retained publication');
+ return {continuation,stored,manifests,markers,payloads,prepared:failure.prepared,changePolicy:setup.changePolicy,run:(extra={})=>{activeSignal=new AbortController().signal;return run(extra);}};
+}
+const beforeContinuation={notes,dailyRecords,assetDescriptor,audioBlob,snapshotRevision,sourceRevision,backgroundReady};
+try{
+ for(const encrypted of [false,true])for(const phase of ['object','manifest','commit']){
+  const f=await retainedPublicationFixture(phase,encrypted),id=f.prepared.checkpoint.checkpointId;
+  notes={Subject:freeze({version:2,key:'Subject',text:'newer local edit',updatedAt:'2026-10-04T00:01:00.000Z'})};snapshotRevision+='-edited';sourceRevision='2026-10-04T00:01:00.000Z';
+  const result=await f.run();assert.equal(result.checkpointId,id);assert.equal(result.sourceRevision,'2026-10-04T00:00:00.000Z');assert.equal(notes.Subject.text,'newer local edit','continuing a sealed backup must not replace newer local data');
+  if(f.manifests.length>1)assert.equal(f.manifests[0],f.manifests[1],'an interrupted manifest is neither regenerated nor re-encrypted');
+  if(f.markers.length>1)assert.equal(f.markers[0],f.markers[1]);
+  assert.equal(f.continuation.status().pending,false);if(encrypted)for(const blob of f.payloads)assert.equal(releasedFiles.filter(value=>value===blob).length,1,'verified completion releases every retained file exactly once');
+  await f.continuation.release();publicationContinuationCases.push({encrypted,phase,sealedBytesPreserved:true,leasesReleased:true});
+ }
+ for(const boundary of ['policy-change','explicit-retirement','canonical-invalidation','declined-retention']){
+  const f=await retainedPublicationFixture('object',true,{retain:boundary!=='declined-retention'}),writes=f.stored.size;
+  if(boundary==='policy-change'){f.changePolicy();await assert.rejects(()=>f.run(),error=>error.code==='BACKUP_POLICY_CHANGED');}
+  else if(boundary==='declined-retention')assert.equal(f.continuation.status().pending,false);
+  else{if(boundary==='canonical-invalidation')runtime.controller.invalidateRepositoryPreparation();await f.continuation.release();await assert.rejects(()=>f.run(),/continuation is unavailable/u);}
+  assert.equal(f.stored.size,writes);await f.continuation.release();for(const blob of f.payloads)assert.equal(releasedFiles.filter(value=>value===blob).length,1);publicationContinuationCases.push(boundary);
+ }
+ const base=await retainedPublicationFixture('manifest',false),baseline=await base.run();await base.continuation.release();
+ const reused=await retainedPublicationFixture('manifest',false,{history:[baseline.manifest],availableObjectIds:new Set(baseline.manifest.objects.map(entry=>entry.objectId))});assert.ok(reused.prepared.objects.every(entry=>entry.reused));
+ await assert.rejects(()=>reused.run({availableObjectIds:new Set()}),error=>error.code==='BACKUP_REPOSITORY_BASE_CHANGED');assert.equal(reused.manifests.length,1,'a lost reuse dependency cannot authorize another manifest publication');assert.equal(reused.continuation.status().pending,false);await reused.continuation.release();publicationContinuationCases.push('missing-reused-object');
+ for(const changed of [false,true]){
+  const safety=await retainedPublicationFixture('object',true,{retention:{role:'before-restore'}});assert.equal(safety.continuation.status().role,'before-restore');
+  if(changed){snapshotRevision+='-changed';sourceRevision='2026-10-04T00:02:00.000Z';await assert.rejects(()=>safety.run(),error=>error.code==='BACKUP_SOURCE_FENCE_CHANGED');assert.equal(safety.continuation.status().pending,false);}
+  else{const result=await safety.run();assert.equal(result.checkpointId,safety.prepared.checkpoint.checkpointId);assert.equal(result.manifest.retention.role,'before-restore');}
+  await safety.continuation.release();publicationContinuationCases.push(changed?'safety-copy-current-source-fence':'unchanged-safety-copy-resumes');
+ }
+}finally{publicationProtection=null;notes=beforeContinuation.notes;dailyRecords=beforeContinuation.dailyRecords;assetDescriptor=beforeContinuation.assetDescriptor;audioBlob=beforeContinuation.audioBlob;snapshotRevision=beforeContinuation.snapshotRevision;sourceRevision=beforeContinuation.sourceRevision;backgroundReady=beforeContinuation.backgroundReady;}
+
+// Real canonical capture -> binary/encrypted checkpoint -> provider recovery
+// owner -> real Drive adapter. Only storage, HTTP and time are controlled.
+for(const encrypted of [false,true]){
+ const original={Date:globalThis.Date,notes,dailyRecords,assetDescriptor,audioBlob,snapshotRevision,sourceRevision,backgroundReady},clock=createFakeClock('2026-10-04T12:00:00.000Z');backgroundClock=clock;globalThis.Date=clock.Date;backgroundReady=true;
+ const id='drive-upload-'+(encrypted?'encrypted':'plain'),setup=await publicationProtectionFixture(encrypted);publicationProtection=setup.protection;
+ audioBlob=new Blob([new Uint8Array(6*1048576)],{type:'audio/mpeg'});dailyRecords=[];notes={Subject:freeze({version:2,key:'Subject',text:'before reconnect',updatedAt:new Date().toISOString()})};snapshotRevision=id;sourceRevision=new Date().toISOString();
+ assetDescriptor=freeze({id:'asset-audio',type:'audio/mpeg',size:audioBlob.size,hash:await engine.run('checksum',{value:audioBlob}),name:'slow-upload.mp3',library:true});
+ let durable=null;
+ const pendingStore=registry.require('backup-recovery-host',1).createPendingStore(freeze({sourceRevision:()=>sourceRevision,diagnostics:freeze({capture:noop}),storage:freeze({read:async()=>durable,write:async value=>{durable=value;},remove:async()=>{durable=null;}})}));
+ runtime.providers.configurePendingBackupRetry(freeze(pendingStore));await pendingStore.mark(id);
+ const h=createDriveHarness({clock,registerProvider:config=>runtime.providers.register(freeze({...config,id,label:'Google Drive'}))});await h.provider.prepare();
+ h.state.uploadProgressSteps=14;h.state.uploadProgressStepMs=body=>Math.max(1,Math.ceil(body.size/(2*1048576)*90000));
+ const row=()=>runtime.providers.backgroundStatus().find(value=>value.job===id+' convergence');
+ const pump=async(predicate)=>{let elapsed=0;for(const deadline=performance.now()+30000;!predicate()&&performance.now()<deadline;){
+  await new Promise(resolve=>setImmediate(resolve));
+  if(h.state.awaitingUploadProgress&&!h.state.nativeUploadReplies){await clock.advance(1000);elapsed+=1000;}
+  else if(!row().busy&&row().scheduled&&h.provider.connected()){const delay=Math.max(1,Date.parse(row().nextEligibleAt)-clock.now());await clock.advance(delay);elapsed+=delay;}
+  else await new Promise(resolve=>setTimeout(resolve,1));
+  assert.ok(elapsed<12*3600000,'finite unchanged payloads must converge across bounded authorization windows');
+ }assert.ok(predicate(),'assembled upload lifecycle must reach its expected state');};
+ try{
+  await h.provider.authorize();await pump(()=>row().busy&&[...h.state.uploads.values()].some(value=>value.received===2*1048576));
+  const aborts=h.state.uploadAborts||0;
+  if(!encrypted){
+   let history;const foreground=runtime.providers.history(id,{interactive:false}).then(value=>{history=value;});await pump(()=>!!history);await foreground;assert.equal(history.available,true);
+  }else{
+   publicationProtection.lock();backgroundReady=false;runtime.providers.wakeBackground('ownership');await pump(()=>!row().busy);assert.equal(row().blocker,'locked');assert.ok(await pendingStore.read(id));
+   await publicationProtection.manage();backgroundReady=true;runtime.providers.wakeBackground('encryption-unlocked');
+  }
+  assert.ok(h.state.uploadAborts>aborts,'foreground activity or loss of authority must stop the actual transfer');
+  await pump(()=>!h.provider.connected()&&!row().busy);
+  assert.equal(h.state.uploads.size,1);const session=[...h.state.uploads.values()][0],prefix=session.received;assert.equal(prefix,4*1048576);assert.ok(await pendingStore.read(id));assert.equal(exclusive.status().busy,false,'retained file leases must not keep the global file job busy');
+  const firstObjectId=session.metadata.appProperties.studyDirectorRepositoryId,firstRequests=h.state.requests.length;
+  // A newer recovery request must survive completion of the older sealed one.
+  notes={Subject:freeze({version:2,key:'Subject',text:'after reconnect',updatedAt:sourceRevision})};snapshotRevision+='-newer';await pendingStore.mark(id);
+  await h.provider.authorize();await pump(()=>!row().busy&&!durable);
+  const starts=h.state.requests.slice(firstRequests).filter(value=>/^bytes \d+-/u.test(value.contentRange));assert.ok(starts.length);assert.ok(starts.every(value=>Number(value.contentRange.match(/^bytes (\d+)-/u)[1])>=prefix),'the assembled owner must preserve the acknowledged prefix');
+  assert.equal(h.state.uploads.size,1,'the same prepared attachment identity must survive reauthorization and later local edits');assert.equal(session.received,[...h.state.files.values()].find(value=>value.appProperties.studyDirectorRepositoryId===firstObjectId).content.size);
+  assert.equal(exclusive.status().busy,false);assert.equal(notes.Subject.text,'after reconnect');
+  const commits=await h.provider.repository.list({kind:'commit'}),checkpoints=await h.provider.repository.list({kind:'checkpoint'});assert.equal(commits.items.length,1);assert.equal(checkpoints.items.length,1,'same-day follow-up remains subject to ordinary retention');
+  const opened=await h.provider.repository.download(checkpoints.items[0]);let manifest;try{manifest=await runtime.repository.inspectManifest(opened.blob,{interactive:false});}finally{await opened.release();}
+  assert.equal(manifest.sourceRevision,sourceRevision);assert.equal(manifest.encrypted,encrypted);assert.equal(manifest.objects.find(value=>value.kind==='attachment').objectId,firstObjectId);
+  const noteEntry=manifest.objects.find(value=>value.kind==='structuredPack'&&value.members.some(member=>member.kind==='areaNote'&&member.key==='Subject'));
+  const objectList=await h.provider.repository.list({kind:'object'}),storedNote=await h.provider.repository.download(objectList.items.find(value=>value.id===noteEntry.objectId));let decoded;
+  try{
+   await runtime.repository.verifyObject(storedNote.blob,noteEntry);decoded=await publicationProtection.unprotect(storedNote.blob,{interactive:false});
+   const stream=noteEntry.compression==='gzip'?decoded.blob.stream().pipeThrough(new DecompressionStream('gzip')):decoded.blob.stream(),body=JSON.parse(await new Response(stream).text());
+   assert.equal(body.members.find(value=>value.kind==='areaNote'&&value.key==='Subject').payload.text,'after reconnect','equal source timestamps cannot let an older publication settle a newer request');
+  }finally{if(decoded&&decoded.blob!==storedNote.blob)await exportsPort.run('file.release',{file:decoded.blob});await storedNote.release();}
+  assert.ok(operationEvents.some(value=>value.phase==='provider-publication-retained'&&value.provider===id));assert.ok(operationEvents.some(value=>value.phase==='provider-publication-resumed'&&value.provider===id));
+  assembledUploadContinuations.push({encrypted,authorizationWindows:2,serverPrefixRetained:true,sealedAttachmentIdentity:true,newerRequestCompleted:true,foregroundFileJobReleased:true});
+ }finally{runtime.providers.configurePendingBackupRetry(null);await h.provider.disconnect();publicationProtection=null;globalThis.Date=original.Date;backgroundClock=null;notes=original.notes;dailyRecords=original.dailyRecords;assetDescriptor=original.assetDescriptor;audioBlob=original.audioBlob;snapshotRevision=original.snapshotRevision;sourceRevision=original.sourceRevision;backgroundReady=original.backgroundReady;}
+}
+
+{
+ const original={Date:globalThis.Date,notes,dailyRecords,assetDescriptor,audioBlob,snapshotRevision,sourceRevision,backgroundReady},clock=createFakeClock('2026-10-04T12:00:00.000Z');backgroundClock=clock;globalThis.Date=clock.Date;backgroundReady=true;
+ const setup=await publicationProtectionFixture(true);publicationProtection=setup.protection;audioBlob=new Blob([new Uint8Array(6*1048576)],{type:'audio/mpeg'});dailyRecords=[];notes={};snapshotRevision='safety-upload';sourceRevision=new Date().toISOString();
+ assetDescriptor=freeze({id:'asset-audio',type:'audio/mpeg',size:audioBlob.size,hash:await engine.run('checksum',{value:audioBlob}),name:'safety.mp3',library:true});
+ let durable=null;const id='drive-safety-upload',pendingStore=registry.require('backup-recovery-host',1).createPendingStore(freeze({sourceRevision:()=>sourceRevision,diagnostics:freeze({capture:noop}),storage:freeze({read:async()=>durable,write:async value=>{durable=value;},remove:async()=>{durable=null;}})}));runtime.providers.configurePendingBackupRetry(freeze(pendingStore));
+ const h=createDriveHarness({clock,registerProvider:config=>runtime.providers.register(freeze({...config,id,label:'Google Drive'}))});await h.provider.prepare();h.state.uploadProgressSteps=14;h.state.uploadProgressStepMs=body=>Math.max(1,Math.ceil(body.size/(2*1048576)*90000));
+ const row=()=>runtime.providers.backgroundStatus().find(value=>value.job===id+' convergence');
+ const run=async()=>{const held=runtime.providers.suspendBackground('safety-copy');await held.settled;try{return await exclusive.job(()=>runtime.providers.backupRepositoryProvider(id,{interactive:false,signal:new AbortController().signal,retention:{role:'before-restore'}}),{wait:true});}finally{held.release();}};
+ const settle=async task=>{let result;task.then(value=>{result={value};},error=>{result={error};});for(const deadline=performance.now()+30000;!result&&performance.now()<deadline;){await new Promise(resolve=>setTimeout(resolve,1));if(h.state.awaitingUploadProgress&&!h.state.nativeUploadReplies)await clock.advance(1000);}assert.ok(result,JSON.stringify({clock:clock.now(),awaiting:h.state.awaitingUploadProgress,native:h.state.nativeUploadReplies,row:row(),files:exclusive.status(),active:runtime.providers.backgroundStatus().filter(value=>value.busy),phases:operationEvents.slice(-5)}));return result;};
+ try{
+  await h.provider.authorize();const first=await settle(run());assert.match(first.error?.message||'',/authorization/u);assert.equal(exclusive.status().busy,false);assert.equal(h.state.uploads.size,1);assert.equal(durable,null,'a foreground safety operation must not turn into an automatic ordinary backup');
+  await h.provider.authorize();assert.equal(row().blocker,'awaiting-foreground');const prefix=[...h.state.uploads.values()][0].received;assert.ok(prefix>=6*1048576);
+  const resumed=await settle(run());assert.ok(resumed.value,resumed.error?.stack);assert.equal(resumed.value.manifest.retention.role,'before-restore');assert.equal(h.state.uploads.size,1,'same-source safety retries retain the protected attachment and its identity');assert.equal(durable,null);assert.equal(exclusive.status().busy,false);
+  assembledUploadContinuations.push({encrypted:true,beforeRestore:true,authorizationWindows:2,foregroundOnly:true,sealedAttachmentIdentity:true});
+ }finally{runtime.providers.configurePendingBackupRetry(null);await h.provider.disconnect();publicationProtection=null;globalThis.Date=original.Date;backgroundClock=null;notes=original.notes;dailyRecords=original.dailyRecords;assetDescriptor=original.assetDescriptor;audioBlob=original.audioBlob;snapshotRevision=original.snapshotRevision;sourceRevision=original.sourceRevision;backgroundReady=original.backgroundReady;}
+}
+console.log(JSON.stringify({status:'PASS',suite:'repository-checkpoint',assembledUploadContinuations,publicationContinuationCases,assembledDriveCases,incompleteInventoryCases,driveBacklogCases,firstAttachmentReads:1,secondAttachmentReads:0,simulatedAttachmentBytes:AUDIO_BYTES,identicalCheckpointAllObjectsReused:true,unchangedStructuredObjectsRecompressed:false,oldSavedDayEditFreshObjects:fresh,ongoingNoteEditFreshObjects:noteFresh,attachmentMetadataZeroByteReads:true,savedDayDeletionNoResurrection:true,sealedCaptureSurvivesLaterMutation:true,providerTieredRetentionFoundation:true,providerCommitMarkerLatestAtomicity:true,retentionPolicy15Plus1:true,beforeRestorePublication:true,managedProviderProtectedPublication:true,orphanMaintenanceBackupRecovery:true,tierGraduation:true,sparseRetention:true,retentionDeletionFailureGcSafe:true,providerReconciliationConvergence:true,providerConvergenceFailureIsolated:true,providerSharedObjectGcSafe:true,publicationProtectedGcSafe:true,reclamationGraceSafe:true,providerLargeAttachmentUploadsBeforeSelfHeal:1,providerLaterAttachmentBytes:0,providerMissingObjectSelfHeal:true,providerOrphanGc:true,providerScrubSelfHeal:true,integrityScrubPriority:true,retainedAbaReuse:true,providerPostSealMutationAllowed:true,integrityScrubStableObjectsOnly:true,integrityScrubLeasesReleased:true,providerTemporaryDownloadsReleased:true,explicitProtectedRemoval:true,durableProviderRetry:true,metadataHistoryColdZeroDownloads:coldHistoryDownloads===0,metadataHistoryWarmZeroDownloads:warmHistoryAdditionalDownloads===0,metadataHistoryScopeIndependent:true,repositoryGenerationReset:true,metadataHistoryBodyVerificationDeferred:true,metadataHistoryUncertainZeroDownloads:uncertainColdDownloads===0,metadataHistoryListedRemoteFiles:coldHistoryRemoteFiles,postPublicationReceiptReuse:true,postPublicationReceiptPublications:2,postPublicationReceiptImmutableReadbacks:receiptDownloads.checkpoint.length+receiptDownloads.commit.length,postPublicationReceiptAdditionalHistoryDownloads:receiptDownloads.checkpoint.length+receiptDownloads.commit.length-4,stateDiscoveryObjectInventoryReuse:true,stateDiscoveryMatureObjectLists:objectListsDuringSecondReceipt,stateDiscoveryConservativeConcurrentObject:true,checksumOperations:checksumCounter},null,2));

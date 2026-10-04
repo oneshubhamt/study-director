@@ -372,4 +372,63 @@ for(const direction of ['upload','download']){
  const file=await makeRepositoryFile('object','obj_'+'b'.repeat(32),'fetch-only receipt proof');const uploaded=await h.provider.repository.upload(file);
  assert.equal(uploaded.serverDigest,file.digest);await h.provider.disconnect();productiveTransferCases.push('fetch-only capability fallback retains immutable server receipt validation');
 }
-console.log(JSON.stringify({status:'PASS',suite:'drive-repository-security',productiveTransferCases,bodyContractCases,folderVerificationMeasurement,transportOnly:true,commitMarkerTransport:true,legacyWholeBlobRetired:true,driveFileScopeOnly:true,endpointConfined:true,tinyMultipartUpload:true,largeResumableUpload:true,opaqueMarkers:true,boundedStreamingDownload:true,coldFolderSingleFlight:true,coldFolderFailureRetry:true,folderAmbiguityRejected:true,policyBoundaryFailClosed:true,duplicateIdentityFailClosed:true,sourceFenceThroughUpload:true,parallelCancellationIsolated:true,parallelSourceFenceIsolated:true,parallelProtectionFenceIsolated:true,folderVerificationCoalesced:true,folderReceiptInvalidation:true,exactDeletion:true,temporaryDownloadRelease:true,publicationProtectionLifecycle:true,maintenanceProtectionLifecycle:true,externalRepositoryDeletionSelfHeals:true,trashedRepositorySelfHeals:true,boundedMaintenanceLease:true},null,2));
+// Retained upload progress is a server-acknowledged prefix, never a guessed
+// client byte count. Exercise the production adapter and lifecycle together.
+const resumableUploadCases=[];
+async function settleUpload(task,h){
+ let result;task.then(value=>{result={ok:true,value};},error=>{result={ok:false,error};});
+ const started=h.clock.now();
+ while(!result&&h.clock.now()-started<4*3600000){await new Promise(resolve=>setImmediate(resolve));if(!result&&!h.state.nativeUploadReplies)await h.clock.advance(1000);}
+ assert.ok(result,'productive upload must settle within the simulated authorization windows');return result;
+}
+for(const bytes of [6*1048576,18*1048576]){
+ const clock=createFakeClock(),h=createHarness({clock});h.clock=clock;await h.provider.prepare();
+ const bg=repositoryBackground(h),file=await makeRepositoryFile('object','obj_'+'d'.repeat(32),new Blob([new Uint8Array(bytes)]));let outcome;
+ const job=bg.registerJob('convergence',{initialDelayMs:null,discover:false,isAvailable:()=>h.provider.backgroundAvailable()?true:'awaiting-connection',capture:error=>{throw error;},execute:async()=>{
+  const scope=await bg.beginBackground('convergence');assert.ok(scope);try{outcome=await settleUpload(h.provider.repository.upload(file,{signal:scope.signal}),h);return {status:outcome.ok?'completed':'interrupted',pending:!outcome.ok};}finally{scope.release();}
+ }});
+ const unsubscribe=h.provider.subscribeConnection(()=>bg.wake('connection'));h.state.uploadProgressSteps=14;h.state.uploadProgressStepMs=90000;
+ let previous=0,attempts=0;
+ for(;attempts<8;){await h.provider.authorize();attempts++;const start=h.state.requests.length;await job.run('reauthorized');
+  const session=[...h.state.uploads.values()][0];assert.ok(session);const acknowledged=session.received||0;assert.ok(acknowledged>previous,'every ordinary authorization window must advance a confirmed prefix');
+  for(const request of h.state.requests.slice(start)){const match=request.contentRange.match(/^bytes (\d+)-/u);if(match)assert.ok(Number(match[1])>=previous,'a confirmed prefix must never be retransmitted after reconnection');}
+  assert.equal(h.state.uploads.size,1,'reauthorization must retain one session for the same immutable payload');assert.equal(bg.status().active.length,0);
+  previous=acknowledged;if(outcome.ok)break;assert.equal(h.provider.connected(),false);assert.equal(h.state.files.size,0,'partial progress is not a completed repository object');
+ }
+ assert.equal(outcome.ok,true,outcome.error?.message);assert.equal(previous,bytes);assert.equal(outcome.value.serverDigest,file.digest);assert.equal(h.state.files.size,1);assert.ok(attempts>=2);
+ unsubscribe();bg.clearAllScheduled();await h.provider.disconnect();assert.equal(clock.pending(),0);resumableUploadCases.push({bytes,attempts,confirmedPrefixMonotone:true,oneSession:true});
+}
+for(const boundary of ['payload-change','repository-change','expired-session','regressed-offset','explicit-discard','foreground','partial-prefix','partial-regression']){
+ const clock=createFakeClock(),h=createHarness({clock});h.clock=clock;await h.provider.prepare();await h.provider.authorize();
+ const file=await makeRepositoryFile('object','obj_'+'e'.repeat(32),new Blob([new Uint8Array(6*1048576)])),controller=new AbortController();h.state.uploadProgressSteps=14;h.state.uploadProgressStepMs=90000;
+ const first=h.provider.repository.upload(file,{signal:controller.signal});let settled;first.then(value=>{settled={value};},error=>{settled={error};});
+ for(let steps=0;![...h.state.uploads.values()].some(row=>row.received===2*1048576)&&steps<1300;steps++){await new Promise(resolve=>setImmediate(resolve));if(!h.state.nativeUploadReplies)await clock.advance(1000);}
+ assert.equal([...h.state.uploads.values()][0]?.received,2*1048576);controller.abort(Object.assign(new Error('foreground preemption'),{name:'AbortError',code:'REPOSITORY_BACKGROUND_PREEMPTED'}));await assert.rejects(first,{name:'AbortError'});assert.ok(settled.error);
+ const before=h.state.requests.length,oldSession=[...h.state.uploads.keys()][0];h.state.uploadProgressSteps=1;h.state.uploadProgressStepMs=0;
+ if(boundary==='partial-prefix'||boundary==='partial-regression'){
+  const row=h.state.uploads.get(oldSession);row.parts.push(file.blob.slice(2*1048576,3*1048576));row.received=3*1048576;
+  if(boundary==='partial-regression'){
+   const second=new AbortController(),started=h.state.uploadProgressStarted;h.state.uploadProgressSteps=14;h.state.uploadProgressStepMs=90000;
+   const resumed=h.provider.repository.upload(file,{signal:second.signal}),rejected=assert.rejects(resumed,{name:'AbortError'});await waitFor(()=>h.state.uploadProgressStarted>started&&h.state.awaitingUploadProgress>0,'resume must poll the newer partial acknowledgement before sending');second.abort(Object.assign(new Error('preemption'),{name:'AbortError',code:'REPOSITORY_BACKGROUND_PREEMPTED'}));await rejected;
+   row.parts=row.parts.slice(0,1);row.received=2*1048576;await assert.rejects(()=>h.provider.repository.upload(file),/regressed upload position/u);assert.equal(h.state.files.size,0);
+  }else{
+   const result=await settleUpload(h.provider.repository.upload(file),h);assert.equal(result.ok,true,result.error?.message);assert.equal(result.value.serverDigest,file.digest);
+   assert.ok(h.state.requests.slice(before).some(value=>value.contentRange.startsWith('bytes '+3*1048576+'-')),'resume uses an extra server-confirmed partial chunk prefix');
+  }
+ }else if(boundary==='payload-change'){
+  const changed={...file,blob:new Blob(['different'.repeat(1048576)])};changed.digest=await digest(changed.blob);await assert.rejects(()=>h.provider.repository.upload(changed),/different content/u);
+  assert.equal(h.state.requests.slice(before).some(row=>row.method==='PUT'||row.method==='POST'),false);
+ }else if(boundary==='regressed-offset'){
+  const row=h.state.uploads.get(oldSession);row.received=0;row.parts=[];await assert.rejects(()=>h.provider.repository.upload(file),/regressed upload position/u);assert.equal(h.state.files.size,0);
+ }else{
+  if(boundary==='repository-change')h.state.trashedFolders.add('folder-1');
+  if(boundary==='expired-session')h.state.uploads.delete(oldSession);
+  if(boundary==='explicit-discard')h.provider.repository.discardUploads();
+  const result=await settleUpload(h.provider.repository.upload(file),h);assert.equal(result.ok,true,result.error?.message);assert.equal(result.value.serverDigest,file.digest);
+  const resumed=h.state.requests.slice(before).filter(row=>row.method==='PUT'&&/^bytes \d+-/u.test(row.contentRange));assert.ok(resumed.length);
+  assert.equal(Number(resumed[0].contentRange.match(/^bytes (\d+)-/u)[1]),boundary==='foreground'?2*1048576:0);
+  if(boundary==='repository-change')assert.notEqual(result.value.verificationScope,'drive-repository:1:1:folder-1');
+ }
+ await h.provider.disconnect();assert.equal(clock.pending(),0);resumableUploadCases.push(boundary);
+}
+console.log(JSON.stringify({status:'PASS',suite:'drive-repository-security',resumableUploadCases,productiveTransferCases,bodyContractCases,folderVerificationMeasurement,transportOnly:true,commitMarkerTransport:true,legacyWholeBlobRetired:true,driveFileScopeOnly:true,endpointConfined:true,tinyMultipartUpload:true,largeResumableUpload:true,opaqueMarkers:true,boundedStreamingDownload:true,coldFolderSingleFlight:true,coldFolderFailureRetry:true,folderAmbiguityRejected:true,policyBoundaryFailClosed:true,duplicateIdentityFailClosed:true,sourceFenceThroughUpload:true,parallelCancellationIsolated:true,parallelSourceFenceIsolated:true,parallelProtectionFenceIsolated:true,folderVerificationCoalesced:true,folderReceiptInvalidation:true,exactDeletion:true,temporaryDownloadRelease:true,publicationProtectionLifecycle:true,maintenanceProtectionLifecycle:true,externalRepositoryDeletionSelfHeals:true,trashedRepositorySelfHeals:true,boundedMaintenanceLease:true},null,2));

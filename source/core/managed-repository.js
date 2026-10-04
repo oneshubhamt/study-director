@@ -51,6 +51,7 @@ const REPOSITORY_OBJECT_FORMAT='study-director.backup-repository-object',REPOSIT
 const REPOSITORY_PACK_FORMAT='study-director.backup-repository-structured-pack',REPOSITORY_PACK_VERSION=1,REPOSITORY_PACK_SHARDS=4,REPOSITORY_PACK_MEMBER_MAX_BYTES=64*1024;
 const REPOSITORY_PACKABLE_KINDS=freeze(new Set(['areaNote','personalData']));
 const repositoryPreparedState=new WeakMap();
+const repositoryPublicationStates=new Map();
 const REPOSITORY_PREPARATION_INDEX_VERSION=2;
 const REPOSITORY_OBJECT_IO_CONCURRENCY=8;
 const REPOSITORY_LARGE_OBJECT_BYTES=8*1024*1024;
@@ -614,7 +615,7 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
     return prepared;
   }catch(error){for(const release of leases.splice(0))await release().catch(()=>{});throw error;}
 }
-function invalidateRepositoryPreparation(){repositoryPreparationIndex=null;return true;}
+function invalidateRepositoryPreparation(){repositoryPreparationIndex=null;for(const continuation of repositoryPublicationStates.keys())void continuation.release();return true;}
 function repositoryPreparationDiagnosticReason(error){
   const message=String(error&&error.message||'');
   if(message==='Incremental repository preparation index could not be rebuilt.')return 'incremental-index-rebuild';
@@ -921,17 +922,49 @@ async function releaseRepositoryCheckpoint(prepared){
   const state=repositoryPreparedState.get(prepared);if(!state||state.released)return false;state.released=true;repositoryPreparedState.delete(prepared);
   for(const release of state.leases.splice(0))await release().catch(()=>{});return true;
 }
+async function releaseRepositoryPublication(state){
+  const {prepared,manifestFile}=state;state.prepared=null;state.manifestFile=null;state.commitMarker=null;
+  await manifestFile?.release?.().catch(error=>AppDiagnostics.capture('repository.publication-release',error,'warn'));
+  if(prepared)await releaseRepositoryCheckpoint(prepared).catch(error=>AppDiagnostics.capture('repository.publication-release',error,'warn'));
+}
+function createRepositoryPublication(){
+  const state={prepared:null,manifestFile:null,commitMarker:null,busy:false,invalidated:false,settled:Promise.resolve(),releaseTask:null};
+  const continuation=freeze({
+    status:()=>freeze({pending:!!state.prepared,busy:state.busy,invalidated:state.invalidated,role:repositoryPreparedState.get(state.prepared)?.manifestBase.retention.role||'normal'}),
+    release:()=>{state.invalidated=true;return state.releaseTask||(state.releaseTask=state.settled.then(()=>releaseRepositoryPublication(state)).finally(()=>repositoryPublicationStates.delete(continuation)));}
+  });
+  repositoryPublicationStates.set(continuation,state);return continuation;
+}
+async function refreshRepositoryPublicationProtection(state,options){
+  const previous=repositoryPreparedState.get(state.prepared),context=await repositoryProtectionContext(options);
+  if(!previous||previous.released||context.protectionId!==previous.context.protectionId||context.encrypted!==previous.context.encrypted)throw Object.assign(new Error('Backup encryption changed. Retry the backup with the current settings.'),{name:'AbortError',code:'BACKUP_POLICY_CHANGED'});
+  if(previous.manifestBase.retention.role==='before-restore')await assertLogicalCheckpointCurrent(previous.capture);
+  if(state.prepared.objects.some(entry=>entry.reused&&(options.availableObjectIds instanceof Set&&!options.availableObjectIds.has(entry.objectId)||(options.excludedObjectIds||[]).includes(entry.objectId))))throw Object.assign(new Error('A reusable backup object is no longer available. Prepare a fresh checkpoint.'),{code:'BACKUP_REPOSITORY_BASE_CHANGED'});
+  // The immutable bytes outlive an attempt; its abort signal and file-worker
+  // generation do not. Rebind policy checks without re-encrypting the payload.
+  const prepared=freeze({...state.prepared,objects:freeze(state.prepared.objects.map(entry=>freeze({...entry,checkProtection:context.checkProtection})))});
+  repositoryPreparedState.delete(state.prepared);previous.context=context;repositoryPreparedState.set(prepared,previous);state.prepared=prepared;
+  if(state.manifestFile)state.manifestFile=freeze({...state.manifestFile,checkProtection:context.checkProtection});
+  if(state.commitMarker)state.commitMarker=freeze({...state.commitMarker,checkProtection:context.checkProtection});
+}
 async function publishRepositoryCheckpoint(history,options={},transport={}){
   if(!transport||typeof transport!=='object'||typeof transport.writeObject!=='function'||typeof transport.writeManifest!=='function'||typeof transport.commit!=='function')throw new TypeError('Repository publication transport is invalid.');
-  let prepared=null,manifestFile=null,publication=null,commitReceipt=null,committed=false;const written=[],warnings=[];
+  const continuation=options.continuation||null,state=continuation?repositoryPublicationStates.get(continuation):{prepared:null,manifestFile:null,commitMarker:null,busy:false,invalidated:false};
+  if(!state||state.invalidated||state.busy)throw new TypeError('Repository publication continuation is unavailable or already running.');
+  state.busy=true;let settle;state.settled=new Promise(resolve=>{settle=resolve;});
+  let prepared=state.prepared,manifestFile=state.manifestFile,publication=null,commitReceipt=null,committed=false,retained=false;const written=[],warnings=[];
+  const check=()=>{throwIfImportAborted(options.signal);if(state.invalidated)throw Object.assign(new Error('Repository publication was retired.'),{name:'AbortError',code:'BACKUP_SOURCE_FENCE_CHANGED'});};
   const postCommit=async(phase,message,work)=>{try{return await work();}catch(error){warnings.push(message);AppDiagnostics.capture(`repository.publication-${phase}`,error,'warn');return null;}};
   try{
-    prepared=await prepareRepositoryCheckpoint(history,options);
+    check();
+    if(prepared){await refreshRepositoryPublicationProtection(state,options);prepared=state.prepared;manifestFile=state.manifestFile;}
+    else{prepared=await prepareRepositoryCheckpoint(history,options);state.prepared=prepared;}
+    check();
     let objectsWritten=0,objectsReused=0,writtenBytes=0,attachmentBytesWritten=0;
     const freshObjects=[];
     for(const entry of prepared.objects){if(entry.reused)objectsReused+=1;else freshObjects.push(entry);}
     const receipts=await mapRepositoryBounded(freshObjects,async entry=>{
-      await entry.checkProtection?.();
+      check();await entry.checkProtection?.();check();
       const receipt=await transport.writeObject(entry,prepared),row=freeze({entry,receipt});
       written.push(row);
       return row;
@@ -939,11 +972,11 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
     for(const row of receipts){
       objectsWritten+=1;writtenBytes+=Number(row.entry.storedBytes)||0;if(row.entry.kind==='attachment')attachmentBytesWritten+=Number(row.entry.sourceBytes)||0;
     }
-    manifestFile=await finalizeRepositoryCheckpointManifest(prepared,options);
-    await manifestFile.checkProtection?.();await manifestFile.checkSource?.();
+    check();if(!manifestFile){manifestFile=await finalizeRepositoryCheckpointManifest(prepared,options);state.manifestFile=manifestFile;}
+    await manifestFile.checkProtection?.();await manifestFile.checkSource?.();check();
     publication=await transport.writeManifest(manifestFile,prepared);
     await manifestFile.checkSource?.();
-    const commitMarker=await createRepositoryCommitMarker(manifestFile.manifest,{checkProtection:manifestFile.checkProtection,checkSource:manifestFile.checkSource,signal:options.signal||null});
+    check();const commitMarker=state.commitMarker||(state.commitMarker=await createRepositoryCommitMarker(manifestFile.manifest,{checkProtection:manifestFile.checkProtection,checkSource:manifestFile.checkSource,signal:options.signal||null}));check();
     commitReceipt=await transport.commit(commitMarker,prepared,publication);
     committed=true;
     const baseEstablished=await postCommit('reconciliation-base','The checkpoint was saved and verified, but local reconciliation ancestry could not be updated. A later backup will retry completion bookkeeping.',async()=>{await establishRepositoryReconciliationBase(prepared);return true;});
@@ -952,17 +985,19 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
     const cleanupResult=typeof transport.cleanup==='function'?await postCommit('retention-cleanup','The checkpoint was saved and verified, but repository retention cleanup did not complete.',()=>transport.cleanup(freeze({...context,committedResult}))):null;
     return freeze({checkpointId:manifestFile.manifest.checkpoint.checkpointId,manifest:manifestFile.manifest,sourceRevision:manifestFile.sourceRevision,exportedAt:manifestFile.exportedAt,publication,commitReceipt,objectsWritten,objectsReused,writtenBytes,attachmentBytesWritten,committedResult,cleanupResult,warning:warnings.join(' ')});
   }catch(error){
-    if(typeof transport.onFailure==='function')try{await transport.onFailure(error,freeze({prepared,publication,commitReceipt,committed,written:freeze([...written])}));}catch(cleanupError){AppDiagnostics.capture('repository.publication-cleanup',cleanupError,'warn');}
+    if(['BACKUP_POLICY_CHANGED','BACKUP_SOURCE_FENCE_CHANGED','BACKUP_REPOSITORY_BASE_CHANGED'].includes(String(error?.code||'')))state.invalidated=true;
+    if(continuation&&state.prepared&&!state.invalidated&&!committed&&typeof transport.retainOnFailure==='function')try{retained=await transport.retainOnFailure(error)===true;}catch(retainError){AppDiagnostics.capture('repository.publication-retain',retainError,'warn');}
+    if(typeof transport.onFailure==='function')try{await transport.onFailure(error,freeze({prepared,publication,commitReceipt,committed,retained,written:freeze([...written])}));}catch(cleanupError){AppDiagnostics.capture('repository.publication-cleanup',cleanupError,'warn');}
     throw error;
   }finally{
-    await manifestFile?.release?.().catch(()=>{});
-    if(prepared)await releaseRepositoryCheckpoint(prepared).catch(error=>AppDiagnostics.capture('repository.publication-release',error,'warn'));
+    if(!retained||state.invalidated)await releaseRepositoryPublication(state);
+    state.busy=false;settle();
   }
 }
 
     return freeze({
       format:'study-director.managed-repository',contractVersion:1,
-      publish:publishRepositoryCheckpoint,inspectManifest:inspectRepositoryManifest,inspect:inspectRepositoryCheckpoint,verifyCheckpoint:verifyRepositoryCheckpoint,verifyObject:verifyRepositoryObject,scrub:scrubRepositoryIntegrity,cleanup:cleanupRepositoryRetention,inspectCommit:inspectRepositoryCommitMarker,
+      createPublication:createRepositoryPublication,publish:publishRepositoryCheckpoint,inspectManifest:inspectRepositoryManifest,inspect:inspectRepositoryCheckpoint,verifyCheckpoint:verifyRepositoryCheckpoint,verifyObject:verifyRepositoryObject,scrub:scrubRepositoryIntegrity,cleanup:cleanupRepositoryRetention,inspectCommit:inspectRepositoryCommitMarker,
       retention:REPOSITORY_RETENTION_POLICY,validatePolicy:validateRepositoryRetentionPolicy,classifyState:classifyRepositoryState,activeProtected:activeProtectedRepositoryRow,selectRetention:selectRepositoryRetention,projectHistory:projectManagedRepositoryHistory,invalidatePreparation:invalidateRepositoryPreparation
     });
   }

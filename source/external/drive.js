@@ -78,6 +78,7 @@
   let picker=null;
   let pendingAuthorization=null;
   let maxBackupBytes=DEFAULT_MAX_BACKUP_BYTES;
+  const repositoryUploads=new Map(),MAX_RETAINED_UPLOADS=16;
   let releaseFile=async()=>{},receiveBackupStream=null;
 
   const EMPTY_DRIVE_OPERATION=Object.freeze({signal:null,checkProtection:null,checkSource:null,folderState:null});
@@ -735,27 +736,46 @@
     if(!file||!REPOSITORY_KINDS.has(file.kind)||!repositoryIdValid(file.kind,file.id)||!(file.blob instanceof Blob)||file.blob.size<=0||file.blob.size>maxBackupBytes||!/^[a-f0-9]{64}$/u.test(String(file.digest||'')))throw new Error('No safe Study Director backup payload was supplied to Google Drive.');
     const context=childDriveOperationContext(baseContext,{checkProtection:file.checkProtection,checkSource:file.checkSource});
     await assertDriveOperationCurrent(context);
-    const parent=await ensureFolder(context),existing=file.knownAbsent===true?null:await findRepositoryFile(parent,file.kind,file.id,context);
+    const parent=await ensureFolder(context),uploadKey=parent+':'+file.kind+':'+file.id;
+    for(const [key,row] of repositoryUploads)if(row.parent!==parent&&!row.busy)repositoryUploads.delete(key);
+    const saved=repositoryUploads.get(uploadKey);
+    if(saved&&(saved.digest!==file.digest||saved.size!==file.blob.size))throw noRetry(new Error('An incomplete Study Director upload has different content for this identity.'));
+    if(saved?.busy)throw noRetry(new Error('This Study Director backup file is already uploading.'));
+    const existing=file.knownAbsent===true&&!saved?null:await findRepositoryFile(parent,file.kind,file.id,context);
     if(existing){
       const descriptor=repositoryDescriptor(existing,parent);if(descriptor.size!==file.blob.size||descriptor.digest!==file.digest)throw noRetry(new Error('A Study Director backup file with this identity already exists but has different content.'));
-      await assertDriveOperationCurrent(context);return descriptor;
+      await assertDriveOperationCurrent(context);repositoryUploads.delete(uploadKey);return descriptor;
     }
-    let payload;
+    let payload,session=saved||null;
     try{
       if(file.blob.size<=MULTIPART_UPLOAD_MAX_BYTES)payload=await uploadRepositoryMultipart(file,parent,context);
-      else{const uploadUrl=await beginRepositoryUpload(file,parent,context);payload=await uploadContent(uploadUrl,file.blob,'application/octet-stream',0,context);}
+      else{
+        let recovered=null;
+        if(session){
+          session.busy=true;
+          try{recovered=await recoverUploadPosition(session.url,file.blob.size,0,context);}
+          catch(error){if(error?.code!=='DRIVE_UPLOAD_SESSION_EXPIRED')throw error;repositoryUploads.delete(uploadKey);session=null;}
+          if(recovered&&recovered.offset<session.offset){repositoryUploads.delete(uploadKey);throw noRetry(new Error('Google Drive reported a regressed upload position. Retry the backup.'));}
+          if(recovered)session.offset=recovered.offset;
+        }
+        if(!session){
+          if(repositoryUploads.size>=MAX_RETAINED_UPLOADS){const old=[...repositoryUploads].find(([,row])=>!row.busy);if(!old)throw new Error('Google Drive upload continuation capacity is busy. Retry later.');repositoryUploads.delete(old[0]);}
+          session={parent,digest:file.digest,size:file.blob.size,url:await beginRepositoryUpload(file,parent,context),offset:0,busy:true};repositoryUploads.set(uploadKey,session);
+        }
+        payload=recovered?.complete?await jsonResponse(recovered.response):await uploadContent(session.url,file.blob,'application/octet-stream',recovered?.offset||0,context,offset=>{session.offset=offset;});
+      }
     }catch(error){
       if(operationStopped(error))throw error;
-      const recovered=await findRepositoryFile(parent,file.kind,file.id,context);if(recovered){const descriptor=repositoryDescriptor(recovered,parent);if(descriptor.size===file.blob.size&&descriptor.digest===file.digest&&(!descriptor.serverDigest||descriptor.serverDigest===file.digest)){await assertDriveOperationCurrent(context);return descriptor;}}
+      const recovered=await findRepositoryFile(parent,file.kind,file.id,context);if(recovered){const descriptor=repositoryDescriptor(recovered,parent);if(descriptor.size===file.blob.size&&descriptor.digest===file.digest&&(!descriptor.serverDigest||descriptor.serverDigest===file.digest)){await assertDriveOperationCurrent(context);repositoryUploads.delete(uploadKey);return descriptor;}}
       throw error;
-    }
+    }finally{if(session)session.busy=false;}
     await assertDriveOperationCurrent(context);
     const responseDigest=String(payload&&payload.sha256Checksum||'').toLowerCase();
     let metadata=payload&&validRepositoryMetadata(payload,parent,file.kind)&&/^[a-f0-9]{64}$/u.test(responseDigest)?payload:null;
     if(!metadata){const remoteId=String(payload&&payload.id||'');metadata=remoteId?await getFileMetadata(remoteId,context):await findRepositoryFile(parent,file.kind,file.id,context);}
     if(!metadata||!validRepositoryMetadata(metadata,parent,file.kind))throw new Error('Google Drive did not confirm the backup upload.');
     const descriptor=repositoryDescriptor(metadata,parent);if(descriptor.id!==file.id||descriptor.size!==file.blob.size||descriptor.digest!==file.digest||!descriptor.serverDigest||descriptor.serverDigest!==file.digest)throw noRetry(new Error('Google Drive server SHA-256 did not confirm the uploaded backup bytes.'));
-    await assertDriveOperationCurrent(context);return descriptor;
+    await assertDriveOperationCurrent(context);repositoryUploads.delete(uploadKey);return descriptor;
   }
   async function repositoryDownload(ref,options={},baseContext=EMPTY_DRIVE_OPERATION){
     if(!ref||!REPOSITORY_KINDS.has(ref.kind)||!repositoryIdValid(ref.kind,ref.id))throw new Error('A Study Director backup download has an invalid identity.');
@@ -810,6 +830,7 @@
       upload:file=>repositoryUpload(file,base),
       download:(ref,opts)=>repositoryDownload(ref,opts,base),
       delete:(ref,opts)=>repositoryDelete(ref,opts,base),
+      discardUploads:()=>repositoryUploads.clear(),
       beginPublication:()=>beginRepositoryPublication(base),
       listPublications:()=>listRepositoryPublications(base),
       assertPublication:ref=>assertRepositoryPublication(ref,base),
@@ -843,7 +864,7 @@
         const status=await queryUploadStatus(uploadUrl,totalBytes,context);
         if(status.status===200||status.status===201)return {complete:true,response:status,offset:totalBytes};
         if(status.status===308)return {complete:false,response:status,offset:receivedOffset(status,totalBytes)};
-        if(status.status===404)throw noRetry(new Error('The Google Drive upload session expired. Retry the backup.'));
+        if(status.status===404)throw noRetry(Object.assign(new Error('The Google Drive upload session expired. Retry the backup.'),{code:'DRIVE_UPLOAD_SESSION_EXPIRED'}));
         if(!await retryableResponse(status))throw noRetry(await apiError(status,'Could not recover the Google Drive upload.'));
         lastError=await apiError(status,'Google Drive is temporarily unavailable.');
         await delay(retryDelay(status,attempt+retry));
@@ -855,7 +876,7 @@
     }
     throw lastError||new Error('Could not recover the Google Drive upload.');
   }
-  async function uploadContent(uploadUrl,blob,mimeType,initialOffset=0,context=EMPTY_DRIVE_OPERATION){
+  async function uploadContent(uploadUrl,blob,mimeType,initialOffset=0,context=EMPTY_DRIVE_OPERATION,onOffset=null){
     const total=blob.size;
     if(!Number.isSafeInteger(total)||total<=0||total>maxBackupBytes)throw new Error('The prepared backup has an unsafe file size.');
     let offset=Math.max(0,Math.min(total,Number(initialOffset)||0)),transientAttempts=0,stalledRecoveries=0;
@@ -870,6 +891,7 @@
         transientAttempts=0;
       }
       offset=next;
+      onOffset?.(offset);
     };
     while(true){
       if(offset>=total)break;
@@ -1046,7 +1068,7 @@
           finish(reject,new Error(response&&response.error_description||response&&response.error||'Google did not confirm permission revocation.'));
         });
       });
-    }finally{clearSession();}
+    }finally{repositoryUploads.clear();clearSession();}
   }
   function setup(api){
     if(!supportsCapabilities(api,REQUIRED_CAPABILITIES)||!api.backup||!api.backup.providers||typeof api.backup.providers.register!=='function')return false;
@@ -1075,7 +1097,7 @@
       disconnectLabel:'Disconnect Drive',
       disconnect,
       release,
-      repository:Object.freeze({list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:beginRepositoryPublication,listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,scope:()=>repositoryScope(),choose:chooseRepositoryCheckpoint,beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
+      repository:Object.freeze({discardUploads:()=>repositoryUploads.clear(),list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:beginRepositoryPublication,listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,scope:()=>repositoryScope(),choose:chooseRepositoryCheckpoint,beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
     }));
   }
 
