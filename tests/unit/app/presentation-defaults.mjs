@@ -88,6 +88,17 @@ for(const [storedPresentation,storedTheme,expectedColor,expectedStatus] of [
   assert.equal(meta.statusBar.content,expectedStatus,'Standalone status-bar mode must match the restored saved theme.');
 }
 
+// Aurora preserves the pre-reimagining Glass as its own skin; a saved choice
+// must restore at first paint, before its pack script registers.
+for(const theme of ['dark','light']){
+  const {kernel,storage,root}=loadKernel({storedTheme:theme,storedPresentation:'aurora'});
+  assert.equal(kernel.activePresentationId(),'aurora','Saved Aurora must restore during pre-hydration.');
+  assert.deepEqual([root.dataset.typography,root.dataset.shape,root.dataset.material,root.dataset.depth],['aurora','aurora','aurora','aurora'],'Aurora owns its own presentation axes.');
+  assert.equal(kernel.registerPresentation(GLASS_PROFILE),true);
+  assert.equal(kernel.activePresentationId(),'aurora','Registering Glass must not override a saved Aurora choice.');
+  assert.equal(storage.get('studyDirector.presentation.v1'),'aurora');
+}
+
 // Releases before the dark/light rename stored Director-prefixed theme IDs.
 // They must keep restoring the same appearance without a migration write.
 for(const [legacy,expected,expectedColor] of [['director-dark','dark','#04050a'],['director-light','light','#f2f0ea']]){
@@ -105,4 +116,4 @@ assert.equal(loadKernel().kernel.normalizeThemeId('director-sepia'),'dark','Unkn
 
 assert.equal('motion' in loadKernel().kernel,false,'Presentation Kernel must not expose snapshot-transition machinery to plugins; appearance transitions are host-owned.');
 
-console.log(JSON.stringify({status:'PASS',contract:'presentation-defaults',paths:['implicit-glass-dark','saved-director-dark','saved-director-light','saved-glass-dark','saved-glass-light','legacy-director-theme-aliases','prepaint-browser-chrome','no-plugin-snapshot-api']},null,2));
+console.log(JSON.stringify({status:'PASS',contract:'presentation-defaults',paths:['implicit-glass-dark','saved-director-dark','saved-director-light','saved-glass-dark','saved-glass-light','legacy-director-theme-aliases','saved-aurora','prepaint-browser-chrome','no-plugin-snapshot-api']},null,2));

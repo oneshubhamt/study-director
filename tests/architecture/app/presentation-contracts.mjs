@@ -4,6 +4,7 @@ import fs from 'node:fs';
 const html=fs.readFileSync('source/app.html','utf8');
 const coreCss=fs.readFileSync('source/styles/core.css','utf8');
 const glassCss=fs.readFileSync('source/external/glass.js','utf8');
+const auroraCss=fs.readFileSync('source/external/aurora.js','utf8');
 const guideJs=fs.readFileSync('source/external/guide.js','utf8');
 
 assert.match(coreCss,/html\[data-theme="light"\]\{[\s\S]*?--sd-color-canvas:#f2f0ea;[\s\S]*?--sd-color-surface-1:#fcfbf8;/u,'Director Light must use the low-glare off-white foundation rather than a pure-white primary surface.');
@@ -60,4 +61,8 @@ assert.match(glassCss,/\[data-theme="dark"\]\[data-sd-area="execute"\]\{--sd-aur
 assert.match(html,/markPaneEntrance\(pane\);\n\s*document\.documentElement\.dataset\.sdArea=tabName;/u,'navigation publishes the active area for presentation atmospheres.');
 assert.doesNotMatch(coreCss,/--row-name-color:rgba\(/u,'plan row names must not be dimmed with alpha below readable contrast.');
 
-console.log(JSON.stringify({status:'PASS',contract:'presentation-source-contracts',paths:['prepaint-appearance','prepaint-browser-chrome','touch-minimums','execute-note-alignment','copy-report-centering','version-history-scroll','guide-touch','low-glare-light','tablet-plan-grid','compact-backup-layout','glass-legibility','glass-palettes','glass-aurora','pane-entrance','appearance-shift','appearance-reveal','typography-roles','hero-islands','area-atmosphere','readable-plan-rows','progress-field-border']},null,2));
+assert.match(auroraCss,/const PROFILE=Object\.freeze\(\{\s*contractVersion:2,\s*id:'aurora',\s*label:'Aurora',\s*typography:'aurora',\s*shape:'aurora',\s*material:'aurora',\s*depth:'aurora',/u,'Aurora is its own presentation profile.');
+assert.doesNotMatch(auroraCss,/data-(?:presentation|typography|shape|material|depth)="glass"|presentation==='glass'/u,'Aurora is an independent snapshot: no rule may depend on Glass, so reimagining Glass never changes it.');
+assert.match(html,/<script src="@@SD_EXTERNAL_GLASS_FILENAME@@"><\/script>\n<script src="@@SD_EXTERNAL_AURORA_FILENAME@@"><\/script>/u,'Aurora loads synchronously beside Glass so a saved Aurora choice paints without a flash.');
+
+console.log(JSON.stringify({status:'PASS',contract:'presentation-source-contracts',paths:['prepaint-appearance','prepaint-browser-chrome','touch-minimums','execute-note-alignment','copy-report-centering','version-history-scroll','guide-touch','low-glare-light','tablet-plan-grid','compact-backup-layout','glass-legibility','glass-palettes','glass-aurora','pane-entrance','appearance-shift','appearance-reveal','typography-roles','hero-islands','area-atmosphere','readable-plan-rows','aurora-snapshot','progress-field-border']},null,2));

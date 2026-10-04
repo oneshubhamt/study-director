@@ -19,7 +19,7 @@ const sw=read('source/platform/sw.js');
 assert.match(drive,/https:\/\/www\.googleapis\.com\/auth\/drive\.file/u,'Drive must request only the app-file OAuth scope.');
 assert.doesNotMatch(drive,/www\.googleapis\.com\/auth\/drive(?!\.file)|emptyTrash|\/permissions|permission-management/iu,'Broad Drive scope or permission-management capability is forbidden.');
 assert.equal((app.match(/import\s*\(/gu)||[]).length,0,'Runtime dynamic JavaScript imports are forbidden.');
-assert.deepEqual([...trustedExternalModuleIds],['glass','guide','insights','drive','rich-text','search-worker','image-worker','attachment-worker','export-worker']);
+assert.deepEqual([...trustedExternalModuleIds],['glass','aurora','guide','insights','drive','rich-text','search-worker','image-worker','attachment-worker','export-worker']);
 assert.deepEqual(externalModules.map(module=>module.id),[...trustedExternalModuleIds],'Only reviewed external runtime modules may be loadable.');
 assert.match(app,/script\.src=trustedAssetURL\(descriptor\.src\)/u,'On-demand scripts must cross the trusted-asset boundary.');
 
