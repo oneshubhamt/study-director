@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- Copyright © 2026 Shubham Tiwari and Dr Satyam Kumar. All rights reserved.
      Source-available for personal and noncommercial use only. See LICENSE.txt and NOTICE.txt. -->
-<html lang="en" data-theme="director-dark" data-presentation="glass" data-typography="glass" data-shape="glass" data-material="glass" data-depth="glass" data-density="standard" data-responsive="adaptive" data-motion="precise" data-charts="analytical">
+<html lang="en" data-theme="dark" data-presentation="glass" data-typography="glass" data-shape="glass" data-material="glass" data-depth="glass" data-density="standard" data-responsive="adaptive" data-motion="precise" data-charts="analytical">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -70,9 +70,13 @@
     })
   });
   const themes=freeze({
-    'director-dark':freeze({id:'director-dark',label:'Dark',presentationId:'director-current'}),
-    'director-light':freeze({id:'director-light',label:'Light',presentationId:'director-current'})
+    'dark':freeze({id:'dark',label:'Dark',presentationId:'director-current'}),
+    'light':freeze({id:'light',label:'Light',presentationId:'director-current'})
   });
+  // Earlier releases stored Director-prefixed theme IDs. Stored
+  // preferences, startup mirrors and backups keep them verbatim; every read
+  // resolves them here, and the next deliberate change writes the new ID.
+  const legacyThemes=freeze({'director-dark':'dark','director-light':'light'});
   const breakpoints=freeze({
     core:freeze({
       widePlan:1100,
@@ -345,8 +349,9 @@
   const manifest=freeze({
     format:'study-director.presentation-manifest',
     version:1,
-    defaults:freeze({theme:'director-dark',preferredPresentation:'glass',fallbackPresentation:'director-current'}),
+    defaults:freeze({theme:'dark',preferredPresentation:'glass',fallbackPresentation:'director-current'}),
     themes,
+    legacyThemes,
     presentations,
     breakpoints,
     tokens:freeze({
@@ -382,7 +387,8 @@
   const owns=(record,value)=>Object.prototype.hasOwnProperty.call(record,value);
   const safePresentationId=value=>String(value||'').trim().toLowerCase().match(presentationIdPattern)?.[0]||'';
   const normalizeThemeId=value=>{
-    const candidate=String(value||'').trim();
+    const raw=String(value||'').trim();
+    const candidate=owns(manifest.legacyThemes,raw)?manifest.legacyThemes[raw]:raw;
     return owns(manifest.themes,candidate)?candidate:manifest.defaults.theme;
   };
   const normalizePresentationId=value=>{
@@ -498,7 +504,7 @@
   restoreStoredPresentation();
 })();
 </script>
-<style data-sd-critical>html{--sd-meta-theme-color:#04050a;--sd-meta-apple-status-bar-style:black-translucent;background:#04050a;color:#f0f2ff}html[data-theme="director-light"]{--sd-meta-theme-color:#f2f0ea;--sd-meta-apple-status-bar-style:default;background:#f2f0ea;color:#0f1013}body{margin:0;min-height:100vh}</style>
+<style data-sd-critical>html{--sd-meta-theme-color:#04050a;--sd-meta-apple-status-bar-style:black-translucent;background:#04050a;color:#f0f2ff}html[data-theme="light"]{--sd-meta-theme-color:#f2f0ea;--sd-meta-apple-status-bar-style:default;background:#f2f0ea;color:#0f1013}body{margin:0;min-height:100vh}</style>
 <script>
 window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
 </script>
@@ -5797,6 +5803,7 @@ function commitTabView(context){
   document.querySelectorAll('.pane').forEach(p=>{p.classList.remove('on');p.style.display='none';p.hidden=true;});
   pane.classList.add('on');pane.style.display='block';pane.hidden=false;
   if(previousTab!==tabName)markPaneEntrance(pane);
+  document.documentElement.dataset.sdArea=tabName;
   if(tabName==='execute'){
     refreshPnote({force:true});
     updateCD();
@@ -5880,13 +5887,34 @@ function updateFullscreenButton(){
 }
 let appearanceShiftTimer=0;
 function beginAppearanceShift(){
-  // A deliberate theme/skin choice crossfades colour roles (see core.css
-  // APPEARANCE SHIFT). Reduced motion keeps the immediate switch.
-  if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  // Fallback for engines without View Transitions: crossfade colour roles
+  // (see core.css APPEARANCE SHIFT).
   const root=document.documentElement;
   root.setAttribute('data-sd-appearance-shift','');
   clearTimeout(appearanceShiftTimer);
   appearanceShiftTimer=setTimeout(()=>root.removeAttribute('data-sd-appearance-shift'),520);
+}
+function runAppearanceChange(origin,change){
+  // The one native View Transition boundary. Appearance changes are
+  // synchronous, so the snapshot never waits on storage, plugins or layout
+  // work; the new appearance is revealed from the control that chose it.
+  const reduce=!!(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  if(reduce||document.visibilityState!=='visible'){change();return;}
+  if(typeof document.startViewTransition!=='function'){beginAppearanceShift();change();return;}
+  const root=document.documentElement;
+  const rect=origin&&origin.getBoundingClientRect?origin.getBoundingClientRect():null;
+  const x=rect?rect.left+rect.width/2:window.innerWidth/2,y=rect?rect.top+rect.height/2:window.innerHeight/2;
+  const radius=Math.hypot(Math.max(x,window.innerWidth-x),Math.max(y,window.innerHeight-y));
+  root.style.setProperty('--sd-reveal-x',`${Math.round(x)}px`);
+  root.style.setProperty('--sd-reveal-y',`${Math.round(y)}px`);
+  root.style.setProperty('--sd-reveal-radius',`${Math.ceil(radius)}px`);
+  root.setAttribute('data-sd-appearance-reveal','');
+  let transition=null;
+  try{transition=document.startViewTransition(()=>{change();});}
+  catch(error){root.removeAttribute('data-sd-appearance-reveal');change();return;}
+  const settle=()=>{root.removeAttribute('data-sd-appearance-reveal');['--sd-reveal-x','--sd-reveal-y','--sd-reveal-radius'].forEach(name=>root.style.removeProperty(name));};
+  transition.finished.then(settle,settle);
+  transition.ready.catch(()=>{});
 }
 function renderThemeControls(){
   const controls=document.getElementById('theme-controls');
@@ -5921,14 +5949,16 @@ function applyTheme(themeId,{persist=false,restoreFocus=false}={}){
   }
   return clean;
 }
-function setTheme(themeId,{restoreFocus=false}={}){
+function setTheme(themeId,{restoreFocus=false,origin=null}={}){
   if(!requirePrimaryTab(null,'change appearance settings'))return PRESENTATION_KERNEL.activeThemeId();
-  beginAppearanceShift();
-  return applyTheme(themeId,{persist:true,restoreFocus});
+  const clean=PRESENTATION_KERNEL.normalizeThemeId(themeId);
+  if(clean===PRESENTATION_KERNEL.activeThemeId())return applyTheme(clean,{persist:true,restoreFocus});
+  runAppearanceChange(origin,()=>applyTheme(clean,{persist:true,restoreFocus}));
+  return clean;
 }
 function handleThemeSelection(ev){
   const control=ev.target.closest('[data-theme-id]');
-  if(control)setTheme(control.dataset.themeId,{restoreFocus:true});
+  if(control)setTheme(control.dataset.themeId,{restoreFocus:true,origin:control});
 }
 function renderPresentationControls(){
   const controls=document.getElementById('presentation-controls');
@@ -5963,10 +5993,12 @@ function applyPresentation(presentationId,{persist=false,restoreFocus=false}={})
   }
   return clean;
 }
-function setPresentation(presentationId,{restoreFocus=false}={}){
+function setPresentation(presentationId,{restoreFocus=false,origin=null}={}){
   if(!requirePrimaryTab(null,'change appearance settings'))return PRESENTATION_KERNEL.activePresentationId();
-  beginAppearanceShift();
-  return applyPresentation(presentationId,{persist:true,restoreFocus});
+  const clean=PRESENTATION_KERNEL.normalizePresentationId(presentationId);
+  if(clean===PRESENTATION_KERNEL.activePresentationId())return applyPresentation(clean,{persist:true,restoreFocus});
+  runAppearanceChange(origin,()=>applyPresentation(clean,{persist:true,restoreFocus}));
+  return clean;
 }
 function registerPresentationPack(definition){
   const accepted=PRESENTATION_KERNEL.registerPresentation(definition);
@@ -5975,7 +6007,7 @@ function registerPresentationPack(definition){
 }
 function handlePresentationSelection(ev){
   const control=ev.target.closest('[data-presentation-id]');
-  if(control)setPresentation(control.dataset.presentationId,{restoreFocus:true});
+  if(control)setPresentation(control.dataset.presentationId,{restoreFocus:true,origin:control});
 }
 const FONT_SCALE_STEPS=Object.freeze([0.95,1,1.08,1.16]);
 function normalizeFontScale(value){

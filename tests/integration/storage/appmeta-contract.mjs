@@ -130,7 +130,7 @@ assert.ok(harness.idbDurability.strict>0,'Portable Preferences publication must 
 const before=structuredClone(stores.meta.get('personalPreferences.v1'));
 controls.failNextMetaWrite=true;
 await assert.rejects(
-  ()=>preferences.write({...canonical,theme:'director-light'}),
+  ()=>preferences.write({...canonical,theme:'light'}),
   /injected appMeta write failure/i,
   'an IndexedDB failure must reject the canonical Preferences write'
 );
