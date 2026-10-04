@@ -47,7 +47,8 @@ await test('budget yield and restart preserve last verified cursor and scan iden
   const restarted=await h.context.readRepositoryIntegrityTarget('device');assert.equal(restarted.cursor,objectId('d'));assert.equal(restarted.scanId,scanId);assert.ok(restarted.cycleStartedAt);assert.equal(restarted.completedAt,stamp);
 });
 await test('unavailable reads retain quarantine and do not manufacture a corrupt object',async()=>{
-  const h=fixture();await h.context.updateRepositoryIntegrityTarget('drive',{repositoryScope:'drive-one',status:'unavailable',reason:'timeout'});
+  const h=fixture();for(const quarantined of [undefined,[],[objectId('c')]])await h.context.updateRepositoryIntegrityTarget('drive',{repositoryScope:'drive-one',status:'unavailable',reason:'timeout',complete:true,quarantined});
+  assert.equal(h.state.durable.drive.history.at(-1).complete,false,'unavailable cannot claim complete verification even with a stale progress flag');
   assert.deepEqual(Array.from(h.state.durable.drive.quarantinedObjectIds),[objectId('c')]);assert.equal(h.state.durable.drive.cursor,objectId('b'));assert.equal(h.state.durable.drive.scanId,scanId);assert.equal(h.state.durable.drive.completedAt,stamp);assert.ok(h.state.durable.drive.failedAt);
 });
 await test('partial progress cannot clear unresolved failure or quarantine health',async()=>{

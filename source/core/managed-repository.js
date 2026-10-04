@@ -441,14 +441,14 @@ async function cleanupRepositoryRetention(input){
   const failedRows=[],deferredRows=[],incomplete=Array.isArray(input&&input.incompleteArtifacts)?input.incompleteArtifacts:[],deferredIncomplete=input&&input.blockObjectGc===true?incomplete.length:0;
   if(!deferredIncomplete)for(const artifact of incomplete){
     if(checkpointDeleteAttempts>=checkpointDeleteLimit){checkpointDeferred+=1;continue;}
-    checkpointDeleteAttempts+=1;
-    try{if(await input.deleteIncompleteArtifact(artifact)===false)throw new Error('Incomplete artifact deletion was not confirmed.');if(artifact.kind==='checkpoint')removedUncommitted+=1;else removedOrphanCommits+=1;}
+    input.workBudget?.check();checkpointDeleteAttempts+=1;
+    try{if(await input.deleteIncompleteArtifact(artifact)===false)throw new Error('Incomplete artifact deletion was not confirmed.');if(artifact.kind==='checkpoint')removedUncommitted+=1;else removedOrphanCommits+=1;input.workBudget?.advance();}
     catch(error){rethrowCleanupControl(error);deletionFailures+=1;try{input.onError?.('incomplete-delete',error,artifact);}catch(reportingError){}}
   }
   for(const row of remove){
     if(checkpointDeleteAttempts>=checkpointDeleteLimit){checkpointDeferred+=1;deferredRows.push(row);for(const entry of row.manifest?.objects||[])retainedIds.add(entry.objectId);continue;}
-    checkpointDeleteAttempts+=1;
-    try{if(await input.deleteCheckpoint(row)!==false)removedCheckpoints+=1;else throw new Error('Checkpoint deletion was not confirmed.');}
+    input.workBudget?.check();checkpointDeleteAttempts+=1;
+    try{if(await input.deleteCheckpoint(row)!==false){removedCheckpoints+=1;input.workBudget?.advance();}else throw new Error('Checkpoint deletion was not confirmed.');}
     catch(error){rethrowCleanupControl(error);deletionFailures+=1;failedRows.push(row);for(const entry of row.manifest?.objects||[])retainedIds.add(entry.objectId);try{input.onError?.('checkpoint-delete',error,row);}catch(reportingError){}}
   }
   let gcRemoved=0,gcDeferred=0,gcBudgetDeferred=0,gcFailures=0,gcDeleteAttempts=0,objectListingInvalid=0,objectListingOverflow=false,objectListingFailed=false,gcSkipped=Math.max(0,Number(input&&input.invalidCount)||0)>0||Math.max(0,Number(input&&input.ignoredCount)||0)>0||deletionFailures>0||checkpointDeferred>0||input&&input.blockObjectGc===true;
@@ -462,8 +462,8 @@ async function cleanupRepositoryRetention(input){
         const id=String(item&&item.id||'');if(!id||retainedIds.has(id))continue;
         if(Number.isFinite(graceBefore)){const observed=Date.parse(String(item&&item.createdAt||item&&item.modifiedAt||''));if(!Number.isFinite(observed)||observed>graceBefore){gcDeferred+=1;continue;}}
         if(gcDeleteAttempts>=objectDeleteLimit){gcBudgetDeferred+=1;continue;}
-        gcDeleteAttempts+=1;
-        try{if(await input.deleteObject(item)!==false)gcRemoved+=1;else gcFailures+=1;}catch(error){rethrowCleanupControl(error);gcFailures+=1;try{input.onError?.('object-delete',error,item);}catch(reportingError){}}
+        input.workBudget?.check();gcDeleteAttempts+=1;
+        try{if(await input.deleteObject(item)!==false){gcRemoved+=1;input.workBudget?.advance();}else gcFailures+=1;}catch(error){rethrowCleanupControl(error);gcFailures+=1;try{input.onError?.('object-delete',error,item);}catch(reportingError){}}
       }
     }catch(error){rethrowCleanupControl(error);gcSkipped=true;objectListingFailed=true;try{input.onError?.('object-list',error,null);}catch(reportingError){}
     }

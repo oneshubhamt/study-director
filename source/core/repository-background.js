@@ -8,7 +8,7 @@ const {exactFrozenObject:exactObject}=registry.contracts;
 registry.define('repository-background',1,input=>{
   registry.contracts.exactFrozenObject(input,['lifecycle'],'repository-background module input');
   const Lifecycle=input.lifecycle;
-  if(!Object.isFrozen(Lifecycle)||Lifecycle.format!=='study-director.operation-lifecycle'||Lifecycle.contractVersion!==1||typeof Lifecycle.createJob!=='function')throw new TypeError('Operation lifecycle contract is unavailable or incompatible.');
+  if(!Object.isFrozen(Lifecycle)||Lifecycle.format!=='study-director.operation-lifecycle'||Lifecycle.contractVersion!==1||typeof Lifecycle.createJob!=='function'||typeof Lifecycle.createWorkBudget!=='function')throw new TypeError('Operation lifecycle contract is unavailable or incompatible.');
   const freeze=Object.freeze;
   const PRIORITY=freeze({integrity:10,maintenance:20,automatic:30,convergence:40});
   const MAINTENANCE=freeze({
@@ -55,14 +55,14 @@ registry.define('repository-background',1,input=>{
   }
   function maintenanceDetails(event){
     const cleanup=event.cleanup||{},plan=event.plan||{},reason=String(event.reason||plan.reason||'');
-    const details={status:event.phase==='completed'?'completed':event.phase==='yielded'?'yielded':event.phase==='cleanup-complete'?String(plan.state||'completed'):'pending',reason,actionable:event.actionable===true||plan.actionable===true,nextEligibleAt:String(event.nextEligibleAt||''),pending:cleanup.gcPending===true};
+    const details={status:event.phase==='completed'?'completed':event.phase==='yielded'?'yielded':event.phase==='cleanup-complete'?String(plan.state||'completed'):'pending',reason,actionable:event.actionable===true||plan.actionable===true,nextEligibleAt:String(event.nextEligibleAt||''),pending:cleanup.gcPending===true||['yielded','failed','pending','deferred','running','cleanup-start'].includes(event.phase)};
     for(const key of ['removedCheckpoints','checkpointDeferred','checkpointFailures','gcRemoved','gcDeferred','gcBudgetDeferred','gcFailures','uncertainCount'])details[key]=Math.max(0,Number(cleanup[key])||0);
     for(const key of ['gcSkipped','overflow','objectGcBlocked','maintenanceBlocked'])details[key]=cleanup[key]===true;
     return freeze(details);
   }
   function integrityDetails(result={}){
     const reason=String(result.reason||''),safeReason=['budget','preempted','locked','unavailable','not-due','busy','permission'].includes(reason)?reason:result.status==='unavailable'?'repository-unavailable':result.corruption===true?'integrity-corrupt':'';
-    return freeze({status:String(result.status||'unavailable'),complete:result.complete!==false,reason:safeReason,checked:Math.max(0,Number(result.checked)||0),attempted:Math.max(0,Number(result.attempted)||0),checkedBytes:Math.max(0,Number(result.checkedBytes)||0),total:Math.max(0,Number(result.total)||0),corruption:result.corruption===true,repaired:result.repaired===true});
+    return freeze({status:String(result.status||'unavailable'),complete:result.complete===true&&['completed','failed'].includes(result.status),reason:safeReason,checked:Math.max(0,Number(result.checked)||0),attempted:Math.max(0,Number(result.attempted)||0),checkedBytes:Math.max(0,Number(result.checkedBytes)||0),total:Math.max(0,Number(result.total)||0),corruption:result.corruption===true,repaired:result.repaired===true});
   }
   function repositoryObservationNeedsMaintenance(observation,selectRetention,now=Date.now()){
     if(!observation)return false;
@@ -131,15 +131,12 @@ registry.define('repository-background',1,input=>{
       }
       const controller=new TargetAbortController(),relay=()=>{if(!controller.signal.aborted)controller.abort(externalSignal?.reason instanceof Error?externalSignal.reason:backgroundAbort(preemptCode,preemptMessage));};
       if(externalSignal){if(externalSignal.aborted)relay();else externalSignal.addEventListener('abort',relay,{once:true});}
-      let resolveSettlement;const settlement=new Promise(resolve=>{resolveSettlement=resolve;});let budgetTimer=null,released=false;
-      const startBudget=milliseconds=>{
-        if(['automatic','convergence'].includes(name))throw new TypeError('Background transfers require progress watchdogs, not a total housekeeping deadline.');
-        if(released||controller.signal.aborted||budgetTimer!==null||!(Number(milliseconds)>0))return false;
-        budgetTimer=environment.setTimeout(()=>{if(!controller.signal.aborted)controller.abort(backgroundAbort(budgetCode,budgetMessage));},Math.max(1,Number(milliseconds)));return true;
-      };
-      if(Number(budgetMs)>0)startBudget(budgetMs);
+      let resolveSettlement;const settlement=new Promise(resolve=>{resolveSettlement=resolve;});let released=false;
+      const allowance=Lifecycle.createWorkBudget({now:environment.now,check:()=>{if(controller.signal.aborted)throw controller.signal.reason;},yieldError:()=>backgroundAbort(budgetCode,budgetMessage)});
+      const workBudget=freeze({...allowance,start:milliseconds=>{if(['automatic','convergence'].includes(name))throw new TypeError('Background transfers require progress watchdogs, not a total housekeeping deadline.');return !released&&!controller.signal.aborted&&allowance.start(milliseconds);}});
+      if(Number(budgetMs)>0)workBudget.start(budgetMs);
       const row={controller,settlement,preemptCode:String(preemptCode),preemptMessage:String(preemptMessage)};active.set(name,row);
-      return freeze({job:name,signal:controller.signal,controller,settlement,startBudget,release:()=>{if(released)return;released=true;if(externalSignal)externalSignal.removeEventListener('abort',relay);if(budgetTimer!==null){environment.clearTimeout(budgetTimer);budgetTimer=null;}if(active.get(name)===row)active.delete(name);resolveSettlement?.();resumeTimers();}});
+      return freeze({job:name,signal:controller.signal,controller,settlement,workBudget,release:()=>{if(released)return;released=true;if(externalSignal)externalSignal.removeEventListener('abort',relay);if(active.get(name)===row)active.delete(name);resolveSettlement?.();resumeTimers();}});
     }
     function beginForeground({externalSignal=null,cancelCode='REPOSITORY_FOREGROUND_CANCELLED',cancelMessage='Repository foreground operation was cancelled.'}={}){
       if(foreground)return null;suspendTimers();
@@ -147,7 +144,8 @@ registry.define('repository-background',1,input=>{
       if(externalSignal){if(externalSignal.aborted)relay();else externalSignal.addEventListener('abort',relay,{once:true});}
       const waiting=[];for(const row of active.values()){if(!row.controller.signal.aborted)row.controller.abort(backgroundAbort(row.preemptCode,row.preemptMessage));waiting.push(row.settlement);}
       const settled=waitForSettlement(waiting,controller.signal);const row={controller};foreground=row;
-      return freeze({signal:controller.signal,controller,settled,release:()=>{if(externalSignal)externalSignal.removeEventListener('abort',relay);if(foreground===row){foreground=null;resumeTimers();wake('foreground');}}});
+      const workBudget=Lifecycle.createWorkBudget({now:environment.now,check:()=>{if(controller.signal.aborted)throw controller.signal.reason;},yieldError:()=>backgroundAbort('REPOSITORY_MAINTENANCE_BUDGET','Repository cleanup will continue later.')});
+      return freeze({signal:controller.signal,controller,settled,workBudget,release:()=>{if(externalSignal)externalSignal.removeEventListener('abort',relay);if(foreground===row){foreground=null;resumeTimers();wake('foreground');}}});
     }
     function cancelForeground(error){if(!foreground||foreground.controller.signal.aborted)return false;foreground.controller.abort(error instanceof Error?error:backgroundAbort('REPOSITORY_FOREGROUND_CANCELLED',String(error||'Repository foreground operation was cancelled.')));return true;}
     async function preemptBackground(){const waiting=[];for(const row of active.values()){if(!row.controller.signal.aborted)row.controller.abort(backgroundAbort(row.preemptCode,row.preemptMessage));waiting.push(row.settlement);}if(waiting.length)await waitForSettlement(waiting);return waiting.length>0;}
@@ -158,7 +156,7 @@ registry.define('repository-background',1,input=>{
     }
     function status(){const owned=[...jobs.keys()].map(name=>jobStatus(name)),due=[...scheduled.values()].map(row=>row.dueAt).concat(owned.map(row=>Date.parse(row.nextEligibleAt))).filter(Number.isFinite);return freeze({...Lifecycle.snapshot({busy:!!foreground||active.size>0||owned.some(row=>row.busy),pending:scheduled.size>0||owned.some(row=>row.pending),scheduled:[...scheduled.values()].some(row=>row.timer!==null),suspended:suspensions.size>0||owned.some(row=>row.suspended),nextEligibleAt:due.length?new Date(Math.min(...due)).toISOString():''}),target,foreground:!!foreground,scheduled:freeze([...scheduled.keys()]),active:freeze([...active.keys()])});}
     let api=null;const maintenanceIntent=ports=>createMaintenanceIntent(freeze({...ports,coordinator:api})),createBoundMaintenanceScheduler=ports=>createMaintenanceScheduler(freeze({...ports,coordinator:api})),createBoundIntegrityScheduler=ports=>createIntegrityScheduler(freeze({...ports,coordinator:api}));
-    api=freeze({format:'study-director.repository-background-coordinator',contractVersion:1,now:nowMs,maintenance:MAINTENANCE,integrity:INTEGRITY,normalizeMaintenanceState,maintenanceDelay,maintenanceActionable,maintenanceDefersAcrossObservation,maintenanceDeadline,maintenancePlan,repositoryObservationNeedsMaintenance,maintenanceDetails,integrityDetails,outcome:Lifecycle.outcome,maintenanceIntent,createMaintenanceScheduler:createBoundMaintenanceScheduler,createIntegrityScheduler:createBoundIntegrityScheduler,registerJob,unregisterJob,wake,schedule,clearScheduled,clearAllScheduled,suspend,resume,beginBackground,beginForeground,cancelForeground,preemptBackground,status,jobStatus,transition,priority});return api;
+    api=freeze({format:'study-director.repository-background-coordinator',contractVersion:1,now:nowMs,maintenance:MAINTENANCE,integrity:INTEGRITY,normalizeMaintenanceState,maintenanceDelay,maintenanceActionable,maintenanceDefersAcrossObservation,maintenanceDeadline,maintenancePlan,repositoryObservationNeedsMaintenance,maintenanceDetails,integrityDetails,outcome:Lifecycle.outcome,maintenanceIntent,createMaintenanceScheduler:createBoundMaintenanceScheduler,createIntegrityScheduler:createBoundIntegrityScheduler,integrityCheckpoint,registerJob,unregisterJob,wake,schedule,clearScheduled,clearAllScheduled,suspend,resume,beginBackground,beginForeground,cancelForeground,preemptBackground,status,jobStatus,transition,priority});return api;
   }
   function createMaintenanceIntent(input){
     exactObject(input,['capture','clear','coordinator','mark','read','scope','selectRetention'],'Repository maintenance-intent input');
@@ -278,7 +276,7 @@ registry.define('repository-background',1,input=>{
         if(!scope){schedule(MAINTENANCE.busyMs,'background-busy','replace');emit('deferred',{reason:'background-busy',nextEligibleAt:new Date(nowMs()+MAINTENANCE.busyMs).toISOString(),actionable:false});return freeze({status:'deferred',reason:'background-busy'});}
         emit('running',{reason:String(pending.reason||trigger),requestedAt:String(pending.requestedAt||''),nextEligibleAt:String(pending.nextEligibleAt||''),actionable:true,transition:input.coordinator.transition('maintenance','scheduled','running',{reason:String(pending.reason||trigger),nextEligibleAt:String(pending.nextEligibleAt||''),actionable:true})});
         try{
-          emit('cleanup-start',{reason:String(pending.reason||trigger)});const cleanup=await input.execute(freeze({signal:scope.signal,startBudget:scope.startBudget,pending,trigger:String(trigger||'scheduled')})),plan=input.intent.plan(cleanup);emit('cleanup-complete',{cleanup,plan});
+          emit('cleanup-start',{reason:String(pending.reason||trigger)});const cleanup=await input.execute(freeze({signal:scope.signal,workBudget:scope.workBudget,pending,trigger:String(trigger||'scheduled')})),plan=input.intent.plan(cleanup);emit('cleanup-complete',{cleanup,plan});
           if(cleanup&&cleanup.gcPending===true){
             const persisted=await persistPending(plan.reason,plan.retryMs,pending);if(persisted.superseded)return preserveNewerRequest();const reason=persisted.ok?plan.reason:'intent-write-failed',retryMs=persisted.ok?plan.retryMs:persisted.retryMs,state=persisted.ok?plan.state:'failed',actionable=persisted.ok?plan.actionable:false;
             const transition=input.coordinator.transition('maintenance','running',state,{reason,nextEligibleAt:persisted.nextEligibleAt,actionable});emit('pending',{reason,retryMs,nextEligibleAt:persisted.nextEligibleAt,actionable,cleanup,plan,transition});schedule(retryMs,reason,'replace');return freeze({status:'pending',reason,retryMs,nextEligibleAt:persisted.nextEligibleAt,...cleanup});
@@ -298,6 +296,16 @@ registry.define('repository-background',1,input=>{
     return freeze({format:'study-director.repository-maintenance-scheduler',contractVersion:1,schedule,observe,request,adopt,run:trigger=>job.run(trigger),wake:trigger=>job.wake(trigger,true),status:()=>{const retained=retainedRequest(),state=input.coordinator.jobStatus('maintenance');return freeze({...state,...(retained?{pending:true,reason:'intent-write-failed',nextEligibleAt:new Date(retained.retryAt).toISOString(),state:state.state==='idle'?'pending':state.state}:{}),intentPending:!!retained,running:state.busy});}});
   }
 
+  function integrityCheckpoint(scope,target={}){
+    return progress=>{
+      if(scope.signal?.aborted)throw scope.signal.reason;
+      const partial=progress?.partial,prior=target?.partial,sameObject=partial?.objectId===prior?.objectId&&progress?.scanId===target?.scanId;
+      // Scratch initialisation is not verified progress. A completed segment or
+      // object is; all callers use the same boundary after durable state save.
+      const advanced=!progress||Number(progress.attempted)>0||progress.cursor&&progress.cursor!==target?.cursor||progress.recheckCursor&&progress.recheckCursor!==target?.recheckCursor||['stored','plain'].some(part=>Number(partial?.[part]?.offset)>Number(sameObject?prior?.[part]?.offset||0:0))||Number(partial?.plain?.frame)>Number(sameObject?prior?.plain?.frame||0:0);
+      if(advanced)scope.workBudget.advance();scope.workBudget.check();
+    };
+  }
   function integrityTargetDue(target,now=Date.now()){if(target?.cycleStartedAt||target?.cursor||target?.failedAt)return true;const completed=Date.parse(String(target&&target.completedAt||''));return !Number.isFinite(completed)||Number(now)-completed>=INTEGRITY.intervalMs;}
   function integrityResultDelay(result){if(result&&result.status==='completed')return result.complete?INTEGRITY.intervalMs:INTEGRITY.continueMs;if(result?.status==='yielded'||result?.reason==='budget'||String(result?.reason||'').endsWith('INTEGRITY_BUDGET'))return INTEGRITY.continueMs;if(result&&result.reason==='locked')return INTEGRITY.lockedRetryMs;if(result&&result.status==='unavailable')return INTEGRITY.retryMs;if(result&&result.status==='failed')return result.repaired?INTEGRITY.continueMs:INTEGRITY.failureRetryMs;return INTEGRITY.retryMs;}
   function createIntegrityScheduler(input){
@@ -315,19 +323,12 @@ registry.define('repository-background',1,input=>{
         // A total timer can repeatedly discard a healthy but slow segment.
         // Enforce the work allowance after durable progress; stall watchdogs
         // and the coordinator's foreground signal still interrupt active IO.
-        const scope=await input.coordinator.beginBackground('integrity',{budgetMs:0,preemptCode:String(input.preemptCode||'REPOSITORY_BACKGROUND_PREEMPTED'),preemptMessage:String(input.preemptMessage||'Repository integrity verification yielded to a higher-priority operation.')});
+        const scope=await input.coordinator.beginBackground('integrity',{budgetMs:0,budgetCode:String(input.budgetCode||'REPOSITORY_INTEGRITY_BUDGET'),budgetMessage:String(input.budgetMessage||'Repository integrity verification reached its work limit.'),preemptCode:String(input.preemptCode||'REPOSITORY_BACKGROUND_PREEMPTED'),preemptMessage:String(input.preemptMessage||'Repository integrity verification yielded to a higher-priority operation.')});
         if(!scope){schedule(INTEGRITY.retryMs,'background-busy');return freeze({status:'skipped',reason:'busy'});}
         try{
           const dueBase=Date.parse(String(target&&target.completedAt||target&&target.cycleStartedAt||'')),nextEligibleAt=Number.isFinite(dueBase)?new Date(dueBase+INTEGRITY.intervalMs).toISOString():new Date(now).toISOString();
-          const started=input.coordinator.now(),budgetMs=Math.max(0,Number(input.budgetMs)||0);
-          const checkpoint=progress=>{
-            if(scope.signal.aborted)throw scope.signal.reason;
-            const partial=progress?.partial,prior=target?.partial,sameObject=partial?.objectId===prior?.objectId&&progress?.scanId===target?.scanId;
-            // Initialising scratch state is not a verified segment. Even slow
-            // inventory/preparation must allow actual bytes or an object to advance.
-            const advanced=!progress||Number(progress.attempted)>0||progress.cursor&&progress.cursor!==target?.cursor||progress.recheckCursor&&progress.recheckCursor!==target?.recheckCursor||['stored','plain'].some(part=>Number(partial?.[part]?.offset)>Number(sameObject?prior?.[part]?.offset||0:0))||Number(partial?.plain?.frame)>Number(sameObject?prior?.plain?.frame||0:0);
-            if(advanced&&budgetMs&&input.coordinator.now()-started>=budgetMs){const error=Object.assign(new Error(String(input.budgetMessage||'Repository integrity verification reached its work limit.')),{name:'AbortError',code:String(input.budgetCode||'REPOSITORY_INTEGRITY_BUDGET')});scope.controller.abort(error);throw error;}
-          };
+          scope.workBudget.start(Math.max(0,Number(input.budgetMs)||0));
+          const checkpoint=integrityCheckpoint(scope,target);
           stage='execute';const result=await input.execute(freeze({target,trigger,nextEligibleAt,signal:scope.signal,checkpoint}));stage='state-write';await input.writeResult(result);schedule(integrityResultDelay(result),result&&result.reason||result&&result.status||'completed');return result;
         }finally{scope.release();}
       })().catch(error=>{const yielded=error?.name==='AbortError',budgeted=yielded&&String(error?.code||'')===String(input.budgetCode||''),preempted=yielded&&String(error?.code||'')===String(input.preemptCode||''),stateFailed=stage!=='execute'||error?.code==='REPOSITORY_INTEGRITY_STATE_UNAVAILABLE',changed=error?.code==='REPOSITORY_CHANGED';if(!yielded)input.capture(error);schedule(changed||budgeted?INTEGRITY.continueMs:stateFailed?INTEGRITY.stateRetryMs:preempted?INTEGRITY.retryMs:INTEGRITY.failureRetryMs,changed?'repository-changed':budgeted?'budget':preempted?'preempted':stateFailed?'state-unavailable':'error');return freeze({status:yielded?'skipped':stateFailed||changed?'unavailable':'failed',reason:budgeted?'budget':preempted?'preempted':String(error&&error.message||error)});});

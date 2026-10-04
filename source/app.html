@@ -4802,9 +4802,10 @@ const DataMaintenanceJob=OperationLifecycle.createJob({
   execute:async({trigger,nextEligibleAt})=>{
     if(backgroundMaintenanceForegroundBusy()){DataMaintenanceJob.schedule(15000,'foreground-busy');return Object.freeze({status:'skipped',reason:'foreground-busy'});}
     const traceId=BackupOperationDiagnostics.start('data-maintenance','Canonical storage',{background:true,trigger,nextEligibleAt,actionable:true});BackupOperationDiagnostics.mark('data-maintenance-eligibility',{trigger,nextEligibleAt,actionable:true},traceId);
-    const workStarted=Date.now();
+    const foregroundCheck=()=>{if(backgroundMaintenanceForegroundBusy())throw Object.assign(new Error('Data maintenance yielded.'),{code:'DATA_MAINTENANCE_YIELDED',reason:'foreground-busy'});};
+    const workBudget=OperationLifecycle.createWorkBudget({now:()=>Date.now(),milliseconds:20000,check:foregroundCheck,yieldError:()=>Object.assign(new Error('Data maintenance yielded.'),{code:'DATA_MAINTENANCE_YIELDED',reason:'budget'})});
     try{
-      const result=await AppData.maintenance.run({check:()=>{if(backgroundMaintenanceForegroundBusy()||Date.now()-workStarted>=20000)throw Object.assign(new Error('Data maintenance yielded.'),{code:'DATA_MAINTENANCE_YIELDED',reason:backgroundMaintenanceForegroundBusy()?'foreground-busy':'budget'});}});
+      const result=await AppData.maintenance.run({check:foregroundCheck,workBudget});
       const status=String(result&&result.status||'failed'),reason=String(result&&result.reason||'');
       BackupOperationDiagnostics.finish({status,result:status,reason},traceId);
       if(status==='yielded')scheduleDataMaintenance(15000,reason||'yielded');
@@ -8565,12 +8566,12 @@ async function updateRepositoryIntegrityTarget(target,result){
   if(bound.repositoryScope!==result.repositoryScope)throw repositoryIntegrityChanged();
   return mutateRepositoryIntegrityTarget(target,current=>{
     if(current.repositoryScope!==result.repositoryScope||current.requestId!==String(result.requestId||''))throw repositoryIntegrityChanged();
-    const now=new Date().toISOString(),quarantine=result.quarantined===undefined?current.quarantinedObjectIds:result.quarantined;
+    const now=new Date().toISOString(),quarantine=result.status==='unavailable'?[...new Set([...current.quarantinedObjectIds,...(result.quarantined||[])])]:result.quarantined===undefined?current.quarantinedObjectIds:result.quarantined;
     const hasProgress=Object.hasOwn(result,'cursor')&&Object.hasOwn(result,'scanId');
     const progress=hasProgress?{cursor:result.cursor,scanId:result.scanId,...(Object.hasOwn(result,'recheckCursor')?{recheckCursor:result.recheckCursor}:{}),...(Object.hasOwn(result,'partial')?{partial:result.partial}:{} )}:{};
     const dailyHistory=current.history.at(-1)?.at.slice(0,10)===now.slice(0,10)?current.history.slice(0,-1):current.history;
     const blockedReason=['locked','budget','preempted','permission'].includes(result.reason)?result.reason:result.status==='unavailable'?'unavailable':result.corruption?'corrupt':'';
-    const outcome={attemptedAt:now,lastOutcome:result.status,blockedReason,history:result.checkpointOnly?current.history:[...dailyHistory,{at:now,outcome:result.status,complete:result.complete===true}].slice(-8)};
+    const outcome={attemptedAt:now,lastOutcome:result.status,blockedReason,history:result.checkpointOnly?current.history:[...dailyHistory,{at:now,outcome:result.status,complete:result.complete===true&&['completed','failed'].includes(result.status)}].slice(-8)};
     const finishedRecheck=current.recheck&&result.recheckComplete===true&&result.status==='failed'&&result.corruption===true;
     if(result.complete===true&&(result.status==='completed'||finishedRecheck))return {...current,...outcome,completedAt:now,cycleStartedAt:'',cursor:'',recheckCursor:'',scanId:'',partial:null,recheck:false,failedAt:finishedRecheck?now:'',quarantinedObjectIds:quarantine};
     if(['completed','yielded','failed','unavailable','skipped'].includes(result.status))return {...current,...progress,...outcome,partial:progress.partial===undefined?result.corruption?null:current.partial:progress.partial,cycleStartedAt:hasProgress?current.cycleStartedAt||now:current.cycleStartedAt,failedAt:['failed','unavailable'].includes(result.status)?now:current.failedAt,quarantinedObjectIds:quarantine};

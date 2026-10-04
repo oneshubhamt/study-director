@@ -4,6 +4,17 @@ const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 if(!registry||registry.format!=='study-director.internal-module-registry'||registry.version!==1)throw new Error('Study Director internal module registry is unavailable or incompatible.');
 registry.define('operation-lifecycle',1,()=>{
   const freeze=Object.freeze;
+  // Housekeeping yields between productive units, never in the safety reads
+  // needed to finish its first unit. IO watchdogs and foreground checks remain
+  // independent. An allowance is fixed for the attempt, not renewed by work.
+  function createWorkBudget({now,milliseconds=0,check=()=>{},yieldError}={}){
+    if(typeof now!=='function'||typeof check!=='function'||typeof yieldError!=='function')throw new TypeError('Work allowance dependencies are incomplete.');
+    let started=null,limit=0,progressed=false;
+    const start=ms=>{if(started!==null||!(Number(ms)>0))return false;started=Number(now());limit=Number(ms);return true;};
+    const advance=()=>{check();progressed=true;};
+    const assert=()=>{check();if(progressed&&started!==null&&Number(now())-started>=limit)throw yieldError();};
+    start(milliseconds);return freeze({start,check:assert,advance});
+  }
   // An attempt may settle while durable work remains pending. Keep those facts separate.
   function outcome(details={}){
     const status=String(details.status||''),reason=String(details.reason||'');
@@ -93,6 +104,6 @@ registry.define('operation-lifecycle',1,()=>{
     function wake(trigger='eligibility'){for(const [id,owner] of owners)try{owner.wake(trigger);}catch(error){try{capture(id,error);}catch{}}}
     return freeze({register,wake});
   }
-  return freeze({format:'study-director.operation-lifecycle',contractVersion:1,outcome,snapshot,waitForSettlement,createJob,createGroup});
+  return freeze({format:'study-director.operation-lifecycle',contractVersion:1,outcome,snapshot,waitForSettlement,createWorkBudget,createJob,createGroup});
 });
 })();

@@ -19,9 +19,9 @@ function coordinator(fake,target='device-folder'){
 {
  const fake=clock(),bg=coordinator(fake),scope=await bg.beginBackground('maintenance',{budgetCode:'DELETION_BUDGET'});
  await fake.advance(45000);assert.equal(scope.signal.aborted,false,'responsive read-only discovery has no destructive deadline');
- assert.equal(scope.startBudget(1000),true);await fake.advance(600);assert.equal(scope.startBudget(1000),false,'a repeated phase notification cannot extend an allowance');
- await fake.advance(401);assert.equal(scope.signal.aborted,true);assert.equal(scope.signal.reason.code,'DELETION_BUDGET');scope.release();scope.release();assert.equal(fake.pending().length,0);assert.equal(scope.startBudget(1000),false);
- const transfer=await bg.beginBackground('automatic');assert.throws(()=>transfer.startBudget(1000),/progress watchdogs/u);transfer.release();
+ assert.equal(scope.workBudget.start(1000),true);await fake.advance(600);assert.equal(scope.workBudget.start(1000),false,'a repeated phase notification cannot extend an allowance');
+ await fake.advance(401);assert.equal(scope.signal.aborted,false,'elapsed preparation must not kill the first protected unit');scope.workBudget.check();scope.workBudget.advance();assert.throws(()=>scope.workBudget.check(),{code:'DELETION_BUDGET',name:'AbortError'});scope.release();scope.release();assert.equal(fake.pending().length,0);assert.equal(scope.workBudget.start(1000),false);
+ const transfer=await bg.beginBackground('automatic');assert.throws(()=>transfer.workBudget.start(1000),/progress watchdogs/u);transfer.release();
 }
 
 {
@@ -36,6 +36,7 @@ function coordinator(fake,target='device-folder'){
 }
 
 {
+  assert.equal(module.integrityDetails({status:'unavailable',complete:true}).complete,false,'unavailable verification cannot report completion');assert.equal(module.maintenanceDetails({phase:'yielded',reason:'bounded-continuation'}).pending,true,'a yielded attempt retains pending work');
   assert.equal(module.maintenancePlan(freeze({gcPending:true,checkpointDeferred:1})).reason,'bounded-continuation');
   const fallbackContention=module.maintenancePlan(freeze({gcPending:true,maintenanceBlocked:true}));assert.equal(fallbackContention.reason,'publication-contention');assert.equal(fallbackContention.retryMs,module.maintenance.contentionMs);const hintedContention=module.maintenancePlan(freeze({gcPending:true,maintenanceBlocked:true,contentionRetryMs:1234567}));assert.equal(hintedContention.retryMs,1234567,'coordination-aware maintenance must honor the actual marker-expiry retry hint');
   assert.equal(module.maintenancePlan(freeze({gcPending:true,gcFailures:1})).reason,'delete-failure');

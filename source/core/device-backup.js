@@ -70,12 +70,12 @@ registry.define('device-backup',1,input=>{
         Promise.resolve(operation).then(value=>finish(resolve,value),error=>finish(reject,error));
       });
     }
-    function assertMaintenanceBudget(deadlineAt,signal=null){if(signal?.aborted){const reason=signal.reason instanceof Error?signal.reason:new Error('Device Folder background work yielded.');if(!reason.name||reason.name==='Error')reason.name='AbortError';throw reason;}if(deadlineAt&&nowMs()>=deadlineAt){throw deviceBackgroundAbort('DEVICE_MAINTENANCE_BUDGET','Device Folder maintenance reached its work limit and will continue later.');}return true;}
-    async function readDirectoryEntries(directory,label,deadlineAt=0,signal=null,check=null){
+    function assertOperationCurrent(signal=null){if(signal?.aborted){const reason=signal.reason instanceof Error?signal.reason:new Error('Device Folder background work yielded.');if(!reason.name||reason.name==='Error')reason.name='AbortError';throw reason;}return true;}
+    async function readDirectoryEntries(directory,label,signal=null,check=null){
       if(!directory||typeof directory.entries!=='function')throw new Error(`${label} cannot be enumerated.`);
       const iterable=directory.entries(),iterator=iterable&&typeof iterable[Symbol.asyncIterator]==='function'?iterable[Symbol.asyncIterator]():iterable,out=[];
       if(!iterator||typeof iterator.next!=='function')throw new Error(`${label} cannot be enumerated.`);
-      try{for(;;){assertMaintenanceBudget(deadlineAt,signal);await check?.();const step=await readTimeout(iterator.next(),`${label} enumeration`,signal);assertMaintenanceBudget(deadlineAt,signal);await check?.();if(step.done)break;out.push(step.value);if(out.length%128===0)await environment.yieldTask();}}
+      try{for(;;){assertOperationCurrent(signal);await check?.();const step=await readTimeout(iterator.next(),`${label} enumeration`,signal);assertOperationCurrent(signal);await check?.();if(step.done)break;out.push(step.value);if(out.length%128===0)await environment.yieldTask();}}
       finally{if(typeof iterator.return==='function')Promise.resolve(iterator.return()).catch(error=>capture('device-backup.directory-release',error));}
       return out;
     }
@@ -225,14 +225,14 @@ registry.define('device-backup',1,input=>{
       const scope=await background.beginBackground('automatic');
       if(!scope){automaticJob.schedule(MAINTENANCE_POLICY.busyMs,'settings-busy');return snapshot();}
       try{
-        const stored=normalizeMetadata(await readTimeout(storage.read(config.metadataKey),'Device Folder settings',scope.signal));assertMaintenanceBudget(0,scope.signal);
+        const stored=normalizeMetadata(await readTimeout(storage.read(config.metadataKey),'Device Folder settings',scope.signal));assertOperationCurrent(scope.signal);
         settingsUnverified=false;
         if(!stored){mode='off';permission='unknown';presentationState.message='';return publish();}
         directoryHandle=stored.directoryHandle;lastBackupAt=stored.lastBackupAt;lastFilename=stored.lastFilename;savedSourceRevision=stored.sourceRevision;
-        permission=await queryPermission(directoryHandle);assertMaintenanceBudget(0,scope.signal);
+        permission=await queryPermission(directoryHandle);assertOperationCurrent(scope.signal);
         if(permission==='granted'){
           mode='connected';presentationState.message='';
-          const directories=await repositoryDirectories(),state=await readCheckpointState(directories,{signal:scope.signal});assertMaintenanceBudget(0,scope.signal);updateRecoveryState(state);await scheduleRepositoryMaintenanceForState(state,MAINTENANCE_POLICY.continuationMs);
+          const directories=await repositoryDirectories(),state=await readCheckpointState(directories,{signal:scope.signal});assertOperationCurrent(scope.signal);updateRecoveryState(state);await scheduleRepositoryMaintenanceForState(state,MAINTENANCE_POLICY.continuationMs);
           await reconcileSourceRevision();
         }else{
           mode='permission';
@@ -359,8 +359,8 @@ registry.define('device-backup',1,input=>{
     async function deviceCoordinationSafety(directories,{publications=false,maintenances=false,excludeMaintenanceId='',signal=null,check=null}={}){
       if(typeof directories.objects.entries!=='function')return freeze({publications:freeze({blocked:publications,active:0,invalid:publications?1:0}),maintenances:freeze({blocked:maintenances,active:0,invalid:maintenances?1:0})});
       let publicationActive=0,publicationInvalid=0,maintenanceActive=0,maintenanceInvalid=0,publicationNextEligibleAt=0,maintenanceNextEligibleAt=0;const now=nowMs(),excluded=String(excludeMaintenanceId||'');
-      for(const [name,handle] of await readDirectoryEntries(directories.objects,'Device Folder coordination directory',0,signal,check)){
-        await check?.();assertMaintenanceBudget(0,signal);
+      for(const [name,handle] of await readDirectoryEntries(directories.objects,'Device Folder coordination directory',signal,check)){
+        await check?.();assertOperationCurrent(signal);
         const text=String(name),publicationMatch=publications?/^(pub_[a-f0-9]{32})\.sdpublication$/u.exec(text):null,maintenanceMatch=maintenances?/^(mnt_[a-f0-9]{32})\.sdmaintenance$/u.exec(text):null;
         if(!publicationMatch&&!maintenanceMatch)continue;if(maintenanceMatch&&excluded&&maintenanceMatch[1]===excluded)continue;
         const kind=publicationMatch?'publication':'maintenance',maxAge=publicationMatch?PUBLICATION_MAX_AGE_MS:MAINTENANCE_MAX_AGE_MS;
@@ -393,9 +393,9 @@ registry.define('device-backup',1,input=>{
       const id='mnt_'+globalThis.crypto.randomUUID().replace(/-/gu,''),name=maintenanceName(id),lease=await writeCoordinationMarker(directories,{id,name,format:'study-director.repository-maintenance'});
       let renewedAt=nowMs(),renewing=null;
       const keepAlive=async(force=false)=>{
-        assertMaintenanceBudget(0,signal);
+        assertOperationCurrent(signal);
         if(!renewing&&(force||nowMs()-renewedAt>=FILESYSTEM_READ_TIMEOUT_MS))renewing=(async()=>{await assertDeviceMaintenance(directories,lease);await writeCoordinationMarker(directories,{id,name,format:'study-director.repository-maintenance'});renewedAt=nowMs();})().finally(()=>{renewing=null;});
-        if(renewing)await renewing;assertMaintenanceBudget(0,signal);
+        if(renewing)await renewing;assertOperationCurrent(signal);
       };
       const ownedLease=freeze({...lease,keepAlive,settled:()=>renewing?.catch(()=>{})});
       try{const safety=await deviceCoordinationSafety(directories,{publications:true,maintenances:true,excludeMaintenanceId:id,signal,check:keepAlive});if(!safety.publications.blocked&&!safety.maintenances.blocked)return ownedLease;if(typeof onBlocked==='function')onBlocked(safety);await endDeviceMaintenance(directories,ownedLease);return null;}
@@ -426,14 +426,14 @@ registry.define('device-backup',1,input=>{
       const rows=freeze(valid.map(row=>freeze({id:row.id,manifest:row.manifest}))),retainedIds=new Set(repository.selectRetention(rows,{now:new Date(nowMs())}).retained.map(row=>row.id));
       updateRecoveryRows(valid.filter(row=>retainedIds.has(row.id)));return state;
     }
-    async function readCheckpointStateWork(directories,{deadlineAt=0,signal=null,check=null}={}){
+    async function readCheckpointStateWork(directories,{signal=null,check=null}={}){
       const {checkpoints,commits}=directories,manifestEntries=[],commitEntries=[],unreadable=[];
       if(typeof checkpoints.entries!=='function'||typeof commits.entries!=='function')throw new Error('The selected folder cannot enumerate repository checkpoints.');
-      const collect=async(directory,kind,pattern)=>{const items=[];let ignored=0;for(const [name,handle] of await readDirectoryEntries(directory,`Device Folder ${kind} directory`,deadlineAt,signal,check)){assertMaintenanceBudget(deadlineAt,signal);const text=String(name);if(!handle||handle.kind!=='file'||!pattern.test(text)){const suspicious=(kind==='commit'?/^cp_.*\.sdcommit$/u:/^cp_.*\.sdcheckpoint$/u).test(text);if(suspicious)unreadable.push(text);else ignored+=1;continue;}items.push(freeze({kind,name:text,handle}));}return freeze({items:freeze(items),ignored});};
+      const collect=async(directory,kind,pattern)=>{const items=[];let ignored=0;for(const [name,handle] of await readDirectoryEntries(directory,`Device Folder ${kind} directory`,signal,check)){assertOperationCurrent(signal);const text=String(name);if(!handle||handle.kind!=='file'||!pattern.test(text)){const suspicious=(kind==='commit'?/^cp_.*\.sdcommit$/u:/^cp_.*\.sdcheckpoint$/u).test(text);if(suspicious)unreadable.push(text);else ignored+=1;continue;}items.push(freeze({kind,name:text,handle}));}return freeze({items:freeze(items),ignored});};
       const [commitScan,checkpointScan]=await Promise.all([collect(commits,'commit',/^cp_[a-f0-9]{32}\.sdcommit$/u),collect(checkpoints,'checkpoint',/^cp_[a-f0-9]{32}\.sdcheckpoint$/u)]),work=[...commitScan.items,...checkpointScan.items],ignored=commitScan.ignored+checkpointScan.ignored;
       const parsed=await mapBounded(work,async item=>{
         try{
-          assertMaintenanceBudget(deadlineAt,signal);await check?.();const file=await readTimeout(item.handle.getFile(),`Device Folder ${item.kind} ${item.name}`,signal);assertMaintenanceBudget(deadlineAt,signal);await check?.();
+          assertOperationCurrent(signal);await check?.();const file=await readTimeout(item.handle.getFile(),`Device Folder ${item.kind} ${item.name}`,signal);assertOperationCurrent(signal);await check?.();
           if(item.kind==='commit'){const marker=await repository.inspectCommit(file);return freeze({kind:'commit',row:freeze({id:item.name.slice(0,-'.sdcommit'.length),ref:item.name,marker})});}
           const manifest=await repository.inspectManifest(file,{interactive:false});if(checkpointFilename(manifest)!==item.name)throw new Error('Checkpoint filename and manifest identity do not match.');return freeze({kind:'checkpoint',row:freeze({id:manifest.checkpoint.checkpointId,ref:item.name,manifest})});
         }catch(error){if(error&&(error.code==='DEVICE_MAINTENANCE_BUDGET'||error.name==='AbortError'))throw error;if(item.kind==='checkpoint'&&error&&error.code==='BACKUP_LOCKED')throw error;unreadable.push(item.name);capture(item.kind==='commit'?'device-backup.repository-commit':'device-backup.repository-manifest',error);return null;}
@@ -477,7 +477,7 @@ registry.define('device-backup',1,input=>{
     async function repositoryAvailableObjectIds(objects,history,excludedObjectIds=null,signal=null){
       const excluded=new Set(Array.isArray(excludedObjectIds)?excludedObjectIds:[]),available=new Set(),candidates=[],seen=new Set();
       for(const manifest of history||[])for(const entry of manifest.objects||[]){if(excluded.has(entry.objectId)||seen.has(entry.objectId))continue;seen.add(entry.objectId);candidates.push(entry);}
-      const checked=await mapBounded(candidates,async entry=>{assertMaintenanceBudget(0,signal);const existing=await fileOrNull(objects,entry.objectId+'.sdobject');assertMaintenanceBudget(0,signal);return freeze({id:entry.objectId,ok:!!existing&&Number(existing.size)===Number(entry.storedBytes)});});
+      const checked=await mapBounded(candidates,async entry=>{assertOperationCurrent(signal);const existing=await fileOrNull(objects,entry.objectId+'.sdobject');assertOperationCurrent(signal);return freeze({id:entry.objectId,ok:!!existing&&Number(existing.size)===Number(entry.storedBytes)});});
       for(const row of checked)if(row.ok)available.add(row.id);return available;
     }
     async function writeRepositoryObject(objects,entry,onProgress=null){
@@ -500,57 +500,56 @@ registry.define('device-backup',1,input=>{
         if(!sameManifestIdentity(parsed,file.manifest))throw new Error('The reopened device checkpoint manifest failed provenance verification.');
       }});
     }
-    async function readObjectInventory(directories,{deadlineAt=0,signal=null,check=null}={}){
+    async function readObjectInventory(directories,{signal=null,check=null}={}){
       if(typeof directories.objects.entries!=='function')return freeze({items:freeze([]),overflow:false,invalidCount:1});
       const candidates=[];let invalidCount=0;
-      for(const [name,handle] of await readDirectoryEntries(directories.objects,'Device Folder object directory',deadlineAt,signal,check)){
+      for(const [name,handle] of await readDirectoryEntries(directories.objects,'Device Folder object directory',signal,check)){
         if(!/^obj_[a-f0-9]{32}\.sdobject$/u.test(String(name)))continue;
         if(!handle||handle.kind!=='file'){invalidCount+=1;continue;}candidates.push(freeze({name:String(name),handle}));
       }
       const rows=await mapBounded(candidates,async item=>{
-        try{assertMaintenanceBudget(deadlineAt,signal);await check?.();const file=await readTimeout(item.handle.getFile(),`Device Folder object ${item.name}`,signal);await check?.();const observed=new Date(Number(file.lastModified)||0).toISOString();return freeze({id:item.name.slice(0,-'.sdobject'.length),ref:freeze({name:item.name}),createdAt:observed,modifiedAt:observed});}
+        try{assertOperationCurrent(signal);await check?.();const file=await readTimeout(item.handle.getFile(),`Device Folder object ${item.name}`,signal);await check?.();const observed=new Date(Number(file.lastModified)||0).toISOString();return freeze({id:item.name.slice(0,-'.sdobject'.length),ref:freeze({name:item.name}),createdAt:observed,modifiedAt:observed});}
         catch(error){if(error&&(error.code==='DEVICE_MAINTENANCE_BUDGET'||error.name==='AbortError'))throw error;invalidCount+=1;capture('device-backup.repository-object-metadata',error);return null;}
       });
       return freeze({items:freeze(rows.filter(Boolean)),overflow:false,invalidCount});
     }
-    async function cleanupRepository(directories,state,{maintenanceLease,signal=null}={}){
+    async function cleanupRepository(directories,state,{maintenanceLease,signal=null,workBudget}={}){
       if(!maintenanceLease)throw new Error('Device Folder maintenance protection is required before repository cleanup.');
       await assertDeviceMaintenance(directories,maintenanceLease);
       const objectGraceBefore=new Date(nowMs()-OBJECT_GC_GRACE_MS).toISOString(),assertLease=async()=>assertDeviceMaintenance(directories,maintenanceLease);
-      let deadlineAt=0;
       const cleanupRows=freeze(state.valid.map(row=>freeze({id:row.id,ref:freeze({name:row.name,commitName:row.commitName}),manifest:row.manifest}))),retentionBacklog=repository.selectRetention(cleanupRows,{now:new Date(nowMs())}).remove.length,checkpointDeleteBudget=Math.min(256,Math.max(16,retentionBacklog));
       const result=await repository.cleanup(freeze({
         checkpoints:cleanupRows,
-        inventoryBeforeDelete:true,beginDeletion:async()=>{await maintenanceLease.keepAlive(true);operationMark('maintenance-inventory-complete',{total:state.valid.length},maintenanceTraceId);deadlineAt=nowMs()+MAINTENANCE_PASS_BUDGET_MS;},
+        workBudget,inventoryBeforeDelete:true,beginDeletion:async()=>{await maintenanceLease.keepAlive(true);operationMark('maintenance-inventory-complete',{total:state.valid.length},maintenanceTraceId);workBudget?.start(MAINTENANCE_PASS_BUDGET_MS);},
         invalidCount:state.unreadable.length,ignoredCount:0,overflow:false,blockObjectGc:false,objectGraceBefore,maxCheckpointDeletes:checkpointDeleteBudget,maxObjectDeletes:64,
         incompleteArtifacts:freeze([...(state.uncommitted||[]).map(row=>freeze({kind:'checkpoint',ref:row.name})),...(state.orphanCommits||[]).map(name=>freeze({kind:'commit',ref:name}))]),
-        deleteIncompleteArtifact:async artifact=>{assertMaintenanceBudget(deadlineAt,signal);await assertLease();try{await directories[artifact.kind==='checkpoint'?'checkpoints':'commits'].removeEntry(artifact.ref);}catch(error){if(!error||error.name!=='NotFoundError')throw error;}return true;},
+        deleteIncompleteArtifact:async artifact=>{assertOperationCurrent(signal);await assertLease();try{await directories[artifact.kind==='checkpoint'?'checkpoints':'commits'].removeEntry(artifact.ref);}catch(error){if(!error||error.name!=='NotFoundError')throw error;}return true;},
         deleteCheckpoint:async row=>{
-          assertMaintenanceBudget(deadlineAt,signal);await assertLease();try{await directories.checkpoints.removeEntry(row.ref.name);}catch(error){if(!error||error.name!=='NotFoundError')throw error;}
-          if(row.ref.commitName){assertMaintenanceBudget(deadlineAt,signal);await assertLease();try{await directories.commits.removeEntry(row.ref.commitName);}catch(error){if(!error||error.name!=='NotFoundError')throw error;}}
+          assertOperationCurrent(signal);await assertLease();try{await directories.checkpoints.removeEntry(row.ref.name);}catch(error){if(!error||error.name!=='NotFoundError')throw error;}
+          if(row.ref.commitName){assertOperationCurrent(signal);await assertLease();try{await directories.commits.removeEntry(row.ref.commitName);}catch(error){if(!error||error.name!=='NotFoundError')throw error;}}
           return true;
         },
         listObjects:async()=>{
-          assertMaintenanceBudget(deadlineAt,signal);await assertLease();return readObjectInventory(directories,{deadlineAt,signal,check:maintenanceLease.keepAlive});
+          assertOperationCurrent(signal);await assertLease();return readObjectInventory(directories,{signal,check:maintenanceLease.keepAlive});
         },
-        deleteObject:async item=>{assertMaintenanceBudget(deadlineAt,signal);await assertLease();try{await directories.objects.removeEntry(item.ref.name);return true;}catch(error){if(error&&error.name==='NotFoundError')return true;throw error;}},
+        deleteObject:async item=>{assertOperationCurrent(signal);await assertLease();try{await directories.objects.removeEntry(item.ref.name);return true;}catch(error){if(error&&error.name==='NotFoundError')return true;throw error;}},
         onError:(kind,error)=>capture('device-backup.repository-'+kind,error)
       }));
       return result;
     }
 
-    async function cleanupDeviceRepositorySafely(directories,{signal=null}={}){
-      assertMaintenanceBudget(0,signal);
+    async function cleanupDeviceRepositorySafely(directories,{signal=null,workBudget}={}){
+      assertOperationCurrent(signal);
       let contentionRetryMs=0;const maintenanceLease=await beginDeviceMaintenance(directories,{signal,onBlocked:safety=>{const uncertain=Number(safety.publications&&safety.publications.invalid)||Number(safety.maintenances&&safety.maintenances.invalid)||0;if(uncertain)return;const deadlines=[safety.publications&&safety.publications.nextEligibleAt,safety.maintenances&&safety.maintenances.nextEligibleAt].map(value=>Date.parse(String(value||''))).filter(Number.isFinite);if(deadlines.length)contentionRetryMs=Math.max(1000,Math.min(...deadlines)-nowMs()+1000);}});
       if(!maintenanceLease)return freeze({warning:'Device Folder maintenance was deferred because another backup or maintenance operation is active.',retained:null,removedCheckpoints:0,checkpointDeferred:0,checkpointFailures:0,gcRemoved:0,gcDeferred:0,gcBudgetDeferred:0,gcFailures:0,gcSkipped:true,gcPending:true,maintenanceBlocked:true,contentionRetryMs,uncertainCount:0,selection:null});
       try{
-        assertMaintenanceBudget(0,signal);
+        assertOperationCurrent(signal);
         // Inventory is read-only, progress-bounded and interruptible. Keep its
         // exclusion alive so an incomplete scan is never reused after a writer.
         // Only the destructive phase spends the short housekeeping allowance.
         operationMark('maintenance-inventory-start',{},maintenanceTraceId);
         const check=()=>maintenanceLease.keepAlive(),state=updateRecoveryState(await readCheckpointState(directories,{signal,check}));
-        const cleanup=await cleanupRepository(directories,state,{maintenanceLease,signal});
+        const cleanup=await cleanupRepository(directories,state,{maintenanceLease,signal,workBudget});
         if(Array.isArray(cleanup.retained))updateRecoveryRows(cleanup.retained);return cleanup;
       }finally{await endDeviceMaintenance(directories,maintenanceLease);}
     }
@@ -563,7 +562,7 @@ registry.define('device-backup',1,input=>{
       capture:(phase,error)=>capture('device-backup.repository-maintenance-'+phase,error),
       isAvailable:()=>connected()?ownership.canMutate()?hooks.backgroundAvailable():'awaiting-control':'awaiting-connection',
       isBusy:()=>busy,
-      execute:async({signal})=>{operationMark('maintenance-repository-open-start',{},maintenanceTraceId);const directories=await repositoryDirectories();operationMark('maintenance-repository-open-complete',{},maintenanceTraceId);return cleanupDeviceRepositorySafely(directories,{signal});},
+      execute:async({signal,workBudget})=>{operationMark('maintenance-repository-open-start',{},maintenanceTraceId);const directories=await repositoryDirectories();operationMark('maintenance-repository-open-complete',{},maintenanceTraceId);return cleanupDeviceRepositorySafely(directories,{signal,workBudget});},
       report:event=>{
         const phase=String(event&&event.phase||'');
         if(phase==='running'){
@@ -756,7 +755,7 @@ registry.define('device-backup',1,input=>{
         await assertDeviceMaintenance(directories,maintenanceLease);after=await readCheckpointState(directories,{signal:foreground.signal,check:maintenanceLease.keepAlive});updateRecoveryState(after);
         if(removedWasLast){const fallback=after.latest;lastFilename=fallback?.name||'';lastBackupAt=fallback?.manifest?.exportedAt||'';savedSourceRevision=fallback?.manifest?.sourceRevision||'';try{await persistMetadata(metadataValue());}catch(error){capture('device-backup.safety-backup-metadata',error);}}
         const servicedPending=await maintenanceIntent.read({throwOnError:true});let cleanup=null;
-        try{cleanup=await cleanupRepository(directories,after,{maintenanceLease,signal:foreground.signal});}catch(error){
+        try{cleanup=await cleanupRepository(directories,after,{maintenanceLease,signal:foreground.signal,workBudget:foreground.workBudget});}catch(error){
           capture('device-backup.safety-backup-cleanup',error);await maintenanceScheduler.request('error',MAINTENANCE_POLICY.errorMs,{mode:'replace'});presentationState.message='Safety backup removed. Unused backup storage will be cleaned up later.';
           const quarantinedObjectIds=await hooks.excludedObjectIds(),entries=repository.projectHistory(freeze(after.valid.map(row=>freeze({id:row.id,manifest:row.manifest}))),freeze({id:'device-folder',label:'Device Folder'}),{quarantinedObjectIds});
           return freeze({removed:true,checkpointId:requested,gcRemoved:0,checkpoints:after.valid.length,warning:String(error&&error.message||error),entries});
@@ -782,21 +781,22 @@ registry.define('device-backup',1,input=>{
         preemptCode:'DEVICE_INTEGRITY_PREEMPTED',preemptMessage:'Device Folder integrity verification yielded to a higher-priority action.'
       });
       if(!scope||!scope.signal)return freeze({status:'skipped',reason:'busy'});
+      const checkpoint=sharedOwned?null:background.integrityCheckpoint(scope,options),onProgress=async progress=>{await options.onProgress?.(progress);checkpoint?.(progress);};
       permission=await queryPermission(directoryHandle);
       if(!connected()){scope.release();return freeze({status:'skipped',reason:'permission'});}
       const traceId=operationStart('device-integrity','Device Folder',{background:true,trigger:String(options&&options.trigger||'scheduled'),nextEligibleAt:String(options&&options.nextEligibleAt||''),cursor:String(options&&options.cursor||''),actionable:true});
       let result=freeze({status:'skipped',reason:'unknown'});backgroundTransition('integrity','scheduled','running',{reason:String(options&&options.trigger||'scheduled'),nextEligibleAt:String(options&&options.nextEligibleAt||''),actionable:true},traceId);operationMark('integrity-eligibility',{trigger:String(options&&options.trigger||'scheduled'),nextEligibleAt:String(options&&options.nextEligibleAt||''),cursor:String(options&&options.cursor||''),actionable:true},traceId);mode='connected';publish();
       const task=(async()=>{
         try{
-          assertMaintenanceBudget(0,scope.signal);
-          operationMark('integrity-repository-open-start',{},traceId);const directories=await repositoryDirectories();operationMark('integrity-repository-open-complete',{},traceId);assertMaintenanceBudget(0,scope.signal);
+          assertOperationCurrent(scope.signal);
+          operationMark('integrity-repository-open-start',{},traceId);const directories=await repositoryDirectories();operationMark('integrity-repository-open-complete',{},traceId);assertOperationCurrent(scope.signal);
           operationMark('integrity-history-scan-start',{},traceId);const state=updateRecoveryState(await readCheckpointState(directories,{signal:scope.signal})),history=freeze(state.valid.map(row=>row.manifest));operationMark('integrity-history-scan-complete',{versions:history.length},traceId);
           if(state.unreadable?.length||state.invalidPairs?.length||state.uncommitted?.length||state.orphanCommits?.length)throw new Error('Device Folder history is incomplete or unreadable; integrity verification is unavailable.');
           if(!history.length)result=freeze({status:'completed',complete:true,cursor:'',checked:0,checkedBytes:0,total:0,quarantined:freeze([])});
           else{
-            const readObject=async entry=>{assertMaintenanceBudget(0,scope.signal);const file=await fileOrNull(directories.objects,entry.objectId+'.sdobject');assertMaintenanceBudget(0,scope.signal);return file||null;};
+            const readObject=async entry=>{assertOperationCurrent(scope.signal);const file=await fileOrNull(directories.objects,entry.objectId+'.sdobject');assertOperationCurrent(scope.signal);return file||null;};
             const readRange=async(entry,{offset,length})=>{const file=await readObject(entry);if(!file)throw Object.assign(new Error('Repository object is missing.'),{code:'REPOSITORY_OBJECT_MISSING'});if(file.size!==entry.storedBytes)throw Object.assign(new Error('Repository object size does not match its manifest.'),{code:'REPOSITORY_INTEGRITY_CORRUPT'});return {blob:file.slice(offset,offset+length),totalBytes:file.size,version:String(file.lastModified||0)+':'+file.size};};
-            result=freeze({status:'completed',...(await repository.scrub(history,readObject,{...options,readRange,signal:scope.signal}))});
+            result=freeze({status:'completed',...(await repository.scrub(history,readObject,{...options,readRange,signal:scope.signal,onProgress}))});
           }
         }catch(error){
           const yielded=error?.name==='AbortError',budgeted=error?.code==='DEVICE_INTEGRITY_BUDGET',locked=error?.code==='BACKUP_LOCKED';
@@ -824,7 +824,7 @@ registry.define('device-backup',1,input=>{
       if(!manifest){const state=updateRecoveryState(await readCheckpointState(directories,{signal})),row=state.valid.find(candidate=>candidate.id===checkpointId);manifest=row&&row.manifest||null;}
       const retention=manifest&&manifest.retention,protectedUntil=Date.parse(retention&&retention.protectedUntil||'');
       if(!manifest||manifest.checkpoint?.checkpointId!==checkpointId||retention?.role!=='before-restore'||!Number.isFinite(protectedUntil)||protectedUntil<=nowMs())throw new Error('The protected safety backup could not be verified.');
-      const readObject=async entry=>{assertMaintenanceBudget(0,signal);return await fileOrNull(directories.objects,entry.objectId+'.sdobject')||null;};
+      const readObject=async entry=>{assertOperationCurrent(signal);return await fileOrNull(directories.objects,entry.objectId+'.sdobject')||null;};
       await repository.verifyCheckpoint(manifest,readObject,{interactive:false,signal});
       return freeze({verified:true,checkpointId,protectedUntil:new Date(protectedUntil).toISOString(),sourceRevision:String(manifest.sourceRevision||''),source:'device-folder',purpose:String(retention&&retention.purpose||'before-restore')});
     }
@@ -836,7 +836,7 @@ registry.define('device-backup',1,input=>{
       const recoveryPresentation=presentationScope;
       const reportRecovery=(stage,text,details={})=>{if(recoveryProgress)recoveryPresentation?.update({message:String(text||''),progress:{stage,...details}});if(typeof recoveryProgress==='function')try{recoveryProgress(freeze({stage,message:String(text||''),ok:true,...details}));}catch(error){capture('device-backup.recovery-progress',error);}};
       try{
-        assertMaintenanceBudget(0,signal);mark('device-repository-open-start',{reason,reused:!!repositoryContext});setBackupStage('Opening the backup folder…');directories=repositoryContext&&repositoryContext.directories||await repositoryDirectories();mark('device-repository-open-complete',{reason,reused:!!repositoryContext});publicationLease=await beginDevicePublication(directories);mark('device-publication-lease-acquired',{reason});
+        assertOperationCurrent(signal);mark('device-repository-open-start',{reason,reused:!!repositoryContext});setBackupStage('Opening the backup folder…');directories=repositoryContext&&repositoryContext.directories||await repositoryDirectories();mark('device-repository-open-complete',{reason,reused:!!repositoryContext});publicationLease=await beginDevicePublication(directories);mark('device-publication-lease-acquired',{reason});
         let state=repositoryContext&&repositoryContext.state||null;
         if(state)mark('device-repository-scan-reused',{reason,versions:state.valid.length});
         else{mark('device-repository-scan-start',{reason});setBackupStage('Reading existing backup versions…');state=updateRecoveryState(await readCheckpointState(directories,{signal}));mark('device-repository-scan-complete',{reason,versions:state.valid.length,invalid:state.unreadable.length+state.uncommitted.length+state.orphanCommits.length});}

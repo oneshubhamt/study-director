@@ -23,7 +23,7 @@ assert.match(metadata,/version!==1&&version!==2&&version!==3&&version!==4/u,'leg
 assert.match(background,/input\.intent\.clear\(pending\)/u,'maintenance completion must carry its serviced request');
 assert.match(background,/generation!==requestGeneration/u,'requests arriving after a commit must retain their scheduling opportunity');
 assert.match(repositories,/AreaNotesRepository\.flush\(\{strict:true\}\)/u,'daily completion requires strict note durability');
-assert.match(repositories,/flushDeletionRecovery\(\)!==true/u,'daily completion must reject incomplete deletion recovery');
+assert.match(repositories,/flushDeletionRecovery\([^)]*\)!==true/u,'daily completion must reject incomplete deletion recovery');
 
 // Scheduling policy is shared rather than duplicated in Device and Drive, with suspension settlement and opportunity-driven availability.
 assert.match(background,/const MAINTENANCE=freeze\(\{[\s\S]*continuationMs:5000[\s\S]*contentionMs:15\*60\*1000[\s\S]*errorMs:5\*60\*1000[\s\S]*blockedMs:15\*60\*1000[\s\S]*graceMs:6\*60\*60\*1000/u,'maintenance cadence must be defined once in the repository-background policy');

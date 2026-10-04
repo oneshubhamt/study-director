@@ -136,3 +136,20 @@ assert.deepEqual(Array.from(legacyLedger,row=>String(row.date)),['2026-09-10','2
 assert.equal((await legacy.app.deletionRecovery.verify()).ok,true);
 
 console.log(JSON.stringify({status:'PASS',suite:'deletion-recovery',savedDayLedger:true,areaNoteDeletionLedger:true,reflectionDraftDomainRetired:true,attachmentDeletionLedger:true,failedDailyDeleteRecovery:true,failedActiveSessionDeleteRecovery:true,legacySyncStateMigrated:true,normalWritesUseNoSyncStores:true},null,2));
+
+// Servicing an older request cannot retire a newer request for the same entity.
+// The second async database read observes a foreground save followed by a
+// failed delete of the first entity, while the old recovery batch is in flight.
+{
+ const first='2026-09-01',second='2026-09-02',oldAt='2026-09-17T08:00:00.000Z',newAt='2026-09-17T10:00:00.000Z',local=new Map();let armed=false,changed=false;
+ const entry=(date,at)=>({key:'dailyRecord:'+date,kind:'dailyRecord',id:date,deletedAt:at});
+ class ConcurrentRecords extends Map{
+  get(key){if(armed&&!changed&&key===second){changed=true;this.set(first,day(first,'2026-09-17T09:00:00.000Z'));const pending=structuredClone(local.get('deletionRecovery'));pending.updatedAt=newAt;pending.entries[0]=entry(first,newAt);local.set('deletionRecovery',pending);}return super.get(key);}
+ }
+ const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new ConcurrentRecords([[first,day(first)],[second,day(second)]]),summary:new Map(),session:new Map(),meta:new Map()},current=createHarness(local,stores);
+ local.set('deletionRecovery',{format:'study-director.deletion-recovery',version:1,updatedAt:oldAt,entries:[entry(first,oldAt),entry(second,oldAt)]});armed=true;
+ assert.equal(await current.app.deletionRecovery.flush(),false,'newer outstanding work cannot report a complete flush');assert.equal(changed,true);
+ assert.deepEqual(local.get('deletionRecovery').entries,[entry(first,newAt)],'only the exact serviced requests may retire');assert.equal(stores.daily.has(first),true);assert.equal(await current.app.dailyRecords.get(first),null,'the outstanding newer deletion continues to shadow saved data');
+ assert.equal(await current.app.deletionRecovery.flush(),true);assert.equal(stores.daily.has(first),false);assert.equal(local.has('deletionRecovery'),false);
+ console.log(JSON.stringify({status:'PASS',suite:'deletion-recovery-request-fence',newerRequestPreserved:true,eventualCompletion:true}));
+}

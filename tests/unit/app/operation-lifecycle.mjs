@@ -76,4 +76,23 @@ cases.push('finite work completes across all blocker orders and repeated failure
   group.wake('connection');assert.equal(wakes,1);assert.equal(errors.length,2);assert.throws(()=>group.register('healthy',{wake(){}}),TypeError);
   cases.push('unknown availability and unverified completion retry; one owner failure cannot suppress another wake-up');
 }
+{
+ let casesChecked=0;
+ for(const size of [1,2,7,19])for(const preparationMs of [0,99,100,1000])for(const unitMs of [0,99,100,350]){
+  let now=0,remaining=size,attempts=0;
+  while(remaining){
+   const allowance=lifecycle.createWorkBudget({now:()=>now,milliseconds:100,yieldError:()=>Object.assign(new Error('yield'),{code:'WORK_BUDGET'})}),before=remaining;
+   now+=preparationMs;assert.equal(allowance.start(1000),false,'progress cannot renew or enlarge an attempt');
+   try{while(remaining){allowance.check();now+=unitMs;remaining--;allowance.advance();}}
+   catch(error){assert.equal(error.code,'WORK_BUDGET');}
+   assert.ok(remaining<before,'every healthy attempt must advance even after slow preparation');assert.ok(++attempts<=size,'a stable finite workload completes within its unit count');
+  }
+  casesChecked++;
+ }
+ for(const advanced of [false,true]){
+  let foreground=false;const stopped=Object.assign(new Error('foreground'),{code:'FOREGROUND'}),allowance=lifecycle.createWorkBudget({now:()=>0,milliseconds:100,check:()=>{if(foreground)throw stopped;},yieldError:()=>new Error('budget')});
+  if(advanced)allowance.advance();foreground=true;assert.throws(()=>allowance.check(),error=>error===stopped);assert.throws(()=>allowance.advance(),error=>error===stopped);
+ }
+ cases.push(`${casesChecked} work-allowance combinations conserve progress and complete; foreground protection applies before the first unit`);
+}
 console.log(JSON.stringify({status:'PASS',suite:'operation-lifecycle',cases},null,2));

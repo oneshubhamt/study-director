@@ -304,10 +304,11 @@ registry.define('repositories',1,()=>{
       const entries=currentDeletionRecoveryEntries(),next=sanitizeDeletionRecoveryEntries([...entries,{kind,id,deletedAt}]);
       return writeDeletionRecoveryEntries(next);
     }
-    function clearDeletionRecoveryKeys(keys){
+    function clearDeletionRecoveryKeys(keys,expected=null){
+      const serviced=expected&&new Map(expected.map(entry=>[entry.key,entry.deletedAt]));
       const remove=new Set((keys||[]).map(String));if(!remove.size)return true;
       const current=currentDeletionRecoveryEntries();if(LocalStorageContract.lastError)return false;
-      return writeDeletionRecoveryEntries(current.filter(entry=>!remove.has(entry.key)));
+      return writeDeletionRecoveryEntries(current.filter(entry=>!remove.has(entry.key)||serviced&&serviced.get(entry.key)!==entry.deletedAt));
     }
     function pendingDeletionShadowsEntity(kind,id,value,entryMap=null){
       const entry=(entryMap||pendingDeletionEntryMap()).get(deletionRecoveryKey(kind,id));
@@ -513,18 +514,32 @@ async function applyDeletionRecoveryEntry(entry){
   }
   return true;
 }
-async function flushDeletionRecovery(){
+async function flushDeletionRecovery(options={}){
   const entries=pendingDeletionEntries();
   if(LocalStorageContract.lastError){markStorageHealthError('deletionRecovery','Pending deletion recovery could not be read safely.');return false;}
   if(!entries.length){markStorageHealthOk('deletionRecovery');return true;}
-  const cleared=[];
+  const cleared=[],owner=getOwnershipRevision();
+  const retireServiced=()=>{
+    if(!cleared.length)return true;
+    if(!appCanMutate()||getOwnershipRevision()!==owner)return false;
+    if(!clearDeletionRecoveryKeys(cleared.map(entry=>entry.key),cleared))return false;
+    cleared.length=0;return true;
+  };
   try{
-    for(const entry of entries){await applyDeletionRecoveryEntry(entry);cleared.push(entry.key);}
-    if(!clearDeletionRecoveryKeys(cleared))throw LocalStorageContract.lastError||new Error('Pending deletion recovery markers could not be retired.');
-    markStorageHealthOk('deletionRecovery');
-    return true;
-  }catch(error){markStorageHealthError('deletionRecovery',`Pending deletion recovery could not be reconciled: ${error&&error.message||error}`);return false;}
+    for(const entry of entries){options.check?.();options.workBudget?.check();await applyDeletionRecoveryEntry(entry);cleared.push(entry);options.workBudget?.advance();}
+    options.check?.();
+    if(!retireServiced())throw LocalStorageContract.lastError||new Error('Pending deletion recovery markers could not be retired.');
+    if(pendingDeletionEntries().length||LocalStorageContract.lastError)throw LocalStorageContract.lastError||new Error('Newer pending deletions remain; recovery will continue.');
+    markStorageHealthOk('deletionRecovery');return true;
+  }catch(error){
+    // A yielded batch retains only its unfinished requests. Never consume a
+    // newer timestamp, or checkpoint after losing write ownership.
+    if(!retireServiced()){markStorageHealthError('deletionRecovery','Recovery progress could not be saved safely.');return false;}
+    if(error?.code==='DATA_MAINTENANCE_YIELDED')throw error;
+    markStorageHealthError('deletionRecovery',`Pending deletion recovery could not be reconciled: ${error&&error.message||error}`);return false;
+  }
 }
+
 function legacyDeleteTimestamp(entry){return normalizeTimestamp(entry&&entry.deletedAt||entry&&entry.updatedAt,null);}
 async function migrateLegacyDeletionState(){
   const token=compatibilityWriteToken('migrate legacy deletion state');
@@ -1367,7 +1382,7 @@ function normalizeInsightsRecordWindowOptions(options,summaries){
   return {dates};
 }
 const DATA_MAINTENANCE_INTERVAL_MS=24*60*60*1000;
-let dataMaintenancePromise=null;
+let dataMaintenancePromise=null,dataMaintenanceContinuation=null;
 async function runDataMaintenance(options={}){
   const force=!!(options&&options.force);
   if(!appCanMutate())return {status:'skipped',reason:'not-primary'};
@@ -1387,26 +1402,42 @@ async function runDataMaintenance(options={}){
     }
     requireSameOwner();
     await Meta.write('dataMaintenance',{version:DATA_MAINTENANCE_VERSION,status:'pending',completedAt:Number.isFinite(lastRun)?new Date(lastRun).toISOString():''},{strict:true,abortMessage:'data maintenance intent write aborted'});
-    requireSameOwner();
-    const fallback=fallbackDailyRecordsGet();
-    if(LocalStorageContract.lastError)throw LocalStorageContract.lastError;
-    if(fallback.length)await migrateFallbackDailyRecords(fallback,{strict:true});
-    requireSameOwner();
-    if(await AreaNotesRepository.load({strict:true})!==true)throw new Error('Ongoing Notes could not be loaded for maintenance.');
-    requireSameOwner();await AreaNotesRepository.flush({strict:true});
-    requireSameOwner();const rawRecovery=LocalStorageContract.getJson(STORAGE_KEYS.recovery,null);
-    if(LocalStorageContract.lastError)throw LocalStorageContract.lastError;
-    if(rawRecovery&&!sessionFromRecoveryEnvelope(rawRecovery)&&!LocalStorageContract.remove(STORAGE_KEYS.recovery))throw LocalStorageContract.lastError||new Error('Invalid session recovery could not be removed.');
-    requireSameOwner();const session=await loadActiveSessionRecord(0,{strict:true});
-    if(!session?.ok||session.error)throw session?.error||new Error('Active Session reconciliation is incomplete.');
-    requireSameOwner();
-    if(await flushDeletionRecovery()!==true)throw new Error('Pending deletion recovery is incomplete.');
+    // The durable marker retains intent across reload. This in-memory cursor
+    // retains completed phases only while their source and owner remain current;
+    // a reload safely revalidates all phases rather than trusting stale proof.
+    const readSource=async()=>{
+      const epoch=await Meta.read('canonicalMutationEpoch'),local=[];
+      for(const key of [STORAGE_KEYS.fallbackDailyRecords,STORAGE_KEYS.recovery,STORAGE_KEYS.deletionRecovery,STORAGE_KEYS.areaNoteRescue]){
+        local.push(LocalStorageContract.getText(key,null));if(LocalStorageContract.lastError)throw LocalStorageContract.lastError;
+      }
+      requireSameOwner();return [epoch?.token||'',AreaNotesRepository.metadataSnapshot().revision,activeSessionMutationEpoch,...local];
+    };
+    const sameSource=(a,b)=>!!b&&a.length===b.length&&a.every((value,index)=>value===b[index]);
+    const source=await readSource();
+    if(force||dataMaintenanceContinuation?.owner!==ownershipRevision||!sameSource(source,dataMaintenanceContinuation.source))dataMaintenanceContinuation={owner:ownershipRevision,source,phase:0};
+    const continuation=dataMaintenanceContinuation,phases=[
+      async()=>{const fallback=fallbackDailyRecordsGet();if(LocalStorageContract.lastError)throw LocalStorageContract.lastError;if(fallback.length)await migrateFallbackDailyRecords(fallback,{strict:true});},
+      async()=>{if(await AreaNotesRepository.load({strict:true})!==true)throw new Error('Ongoing Notes could not be loaded for maintenance.');},
+      async()=>{await AreaNotesRepository.flush({strict:true});},
+      async()=>{const rawRecovery=LocalStorageContract.getJson(STORAGE_KEYS.recovery,null);if(LocalStorageContract.lastError)throw LocalStorageContract.lastError;if(rawRecovery&&!sessionFromRecoveryEnvelope(rawRecovery)&&!LocalStorageContract.remove(STORAGE_KEYS.recovery))throw LocalStorageContract.lastError||new Error('Invalid session recovery could not be removed.');},
+      async()=>{const session=await loadActiveSessionRecord(0,{strict:true});if(!session?.ok||session.error)throw session?.error||new Error('Active Session reconciliation is incomplete.');},
+      async()=>{if(await flushDeletionRecovery({check:requireSameOwner,workBudget:options.workBudget})!==true)throw new Error('Pending deletion recovery is incomplete.');}
+    ];
+    while(continuation.phase<phases.length){
+      requireSameOwner();options.workBudget?.check();
+      await phases[continuation.phase]();requireSameOwner();
+      const nextSource=await readSource();
+      // Even a repair can change the source underlying earlier phase proof.
+      // Revalidate from the beginning once; idempotent repairs then converge.
+      continuation.phase=sameSource(nextSource,continuation.source)?continuation.phase+1:0;continuation.source=nextSource;options.workBudget?.advance();
+    }
     requireSameOwner();const report={version:DATA_MAINTENANCE_VERSION,status:'completed',completedAt:new Date().toISOString()};
     await Meta.write('dataMaintenance',report,{updatedAt:report.completedAt,strict:true,abortMessage:'data maintenance metadata write aborted'});
+    dataMaintenanceContinuation=null;
     markStorageHealthOk('maintenance');
     return report;
   })().catch(error=>{
-    if(error?.code==='DATA_MAINTENANCE_YIELDED')return {status:'yielded',reason:error.reason};
+    if(error?.code==='DATA_MAINTENANCE_YIELDED'){if(error.reason!=='budget')dataMaintenanceContinuation=null;return {status:'yielded',reason:error.reason,phase:dataMaintenanceContinuation?.phase||0};}
     if(error&&error.message==='Data maintenance stopped because app ownership changed')return {status:'skipped',reason:'ownership-changed'};
     AppDiagnostics.capture('maintenance.run',error,'error');
     markStorageHealthError('maintenance',`Data maintenance failed: ${error&&error.message||'data maintenance failed'}`);

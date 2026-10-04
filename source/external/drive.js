@@ -283,13 +283,12 @@
     const externalSignal=options&&options.signal||operation.signal;
     const abortFromExternal=()=>controller.abort();
     if(externalSignal){if(externalSignal.aborted)throw noRetry(driveAbortError(externalSignal));externalSignal.addEventListener('abort',abortFromExternal,{once:true});}
-    let timer;const renew=()=>{clearTimeout(timer);timer=setTimeout(()=>controller.abort(),Math.max(1000,Number(timeoutMs)||API_TIMEOUT_MS));};renew();
+    let timer=null;const disarm=()=>{if(timer!==null){clearTimeout(timer);timer=null;}},renew=()=>{disarm();timer=setTimeout(()=>{timer=null;controller.abort();},Math.max(1000,Number(timeoutMs)||API_TIMEOUT_MS));};
     let bodyAbort=null;
     try{
-      await assertDriveOperationCurrent(operation);
+      await assertDriveOperationCurrent(operation);renew();
       const progressUpload=Platform.XMLHttpRequest&&Platform.Response&&options.body instanceof Platform.Blob&&new Platform.URL(url).pathname==='/upload/drive/v3/files';
       const response=await (progressUpload?uploadWithProgress(url,options,controller.signal,renew):Platform.fetch(url,{...options,signal:controller.signal,credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer'}));
-      await assertDriveOperationCurrent(operation);
       const media=response.ok&&new Platform.URL(url).searchParams.get('alt')==='media';
       if(!media&&![204,308,401].includes(response.status)){
         const stopped=new Promise((_,reject)=>{
@@ -299,16 +298,17 @@
         });
         const payload=await Promise.race([response.json(),stopped]);
         if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.hasOwn(payload,'files')&&!Array.isArray(payload.files))throw noRetry(new Error('Google Drive could not confirm the backup information. Retry after the connection recovers.'));
-        await assertDriveOperationCurrent(operation);
         responsePayloads.set(response,payload);
       }else if(!media){void response.body?.cancel().catch(()=>{});}
+      if(controller.signal.aborted)throw controller.signal.reason;
+      disarm();await assertDriveOperationCurrent(operation);
       return response;
     }catch(error){
       if(externalSignal&&externalSignal.aborted)throw noRetry(driveAbortError(externalSignal));
       if(operationStopped(error)&&!controller.signal.aborted)throw noRetry(error);
       if(error&&error.name==='AbortError')throw timeoutError('Google Drive request');
       throw error;
-    }finally{clearTimeout(timer);if(bodyAbort)controller.signal.removeEventListener('abort',bodyAbort);if(externalSignal)externalSignal.removeEventListener('abort',abortFromExternal);}
+    }finally{disarm();if(bodyAbort)controller.signal.removeEventListener('abort',bodyAbort);if(externalSignal)externalSignal.removeEventListener('abort',abortFromExternal);}
   }
   async function authorizedFetch(url,options={},timeoutMs=API_TIMEOUT_MS,context=EMPTY_DRIVE_OPERATION){
     const method=String(options.method||'GET').toUpperCase();

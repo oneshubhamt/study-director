@@ -24,6 +24,7 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
     state.requests.push({url:url.href,method,authorization:headers.get('Authorization')||''});
     assert.equal(url.origin,'https://www.googleapis.com','token-bearing requests must remain on the exact Google API origin');
     assert.match(headers.get('Authorization')||'',/^Bearer token-/u);
+    const requestDelay=Number(state.requestDelayMs?.({url,method})||0);if(requestDelay>0)await delay(requestDelay,options.signal);
     const fault=state.jsonFault;
     if(fault&&url.pathname==='/drive/v3/files'&&method==='GET'&&!String(url.searchParams.get('q')||'').includes("mimeType='application/vnd.google-apps.folder'")&&(fault.remaining===undefined||fault.remaining>0)){
       if(fault.remaining!==undefined)fault.remaining--;

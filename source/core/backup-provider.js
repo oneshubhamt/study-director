@@ -632,12 +632,12 @@ registry.define('backup-provider',1,input=>{
   }
   async function assertRepositoryMaintenance(selected,lease){if(!lease)return true;const [,publications]=await Promise.all([selected.repository.assertMaintenance(lease),repositoryPublicationSafety(selected)]);if(publications.blocked){const error=new Error('Repository maintenance yielded to a higher-priority foreground publication.');error.name='AbortError';error.code='REPOSITORY_BACKGROUND_PREEMPTED';throw error;}return true;}
   async function endRepositoryMaintenance(selected,lease){if(!lease)return false;try{return await selected.repository.endMaintenance(lease);}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenance-release',error,'warn');return false;}}
-  async function cleanupRepositoryProviderState(selected,state,{reuseObjectInventory=false,maintenanceLease=null,checkMaintenance=null,inventoryBeforeDelete=false,beginDeletion=null}={}){
+  async function cleanupRepositoryProviderState(selected,state,{reuseObjectInventory=false,maintenanceLease=null,checkMaintenance=null,inventoryBeforeDelete=false,beginDeletion=null,workBudget=null}={}){
     const publicationCapable=repositoryPublicationCapable(selected),publicationSafety=await repositoryPublicationSafety(selected),objectGraceBefore=publicationCapable?new Date(Date.now()-OBJECT_GC_GRACE_MS).toISOString():'',assertLease=checkMaintenance||(async()=>{if(maintenanceLease)await assertRepositoryMaintenance(selected,maintenanceLease);});
     const cleanupRows=Object.freeze(state.rows.map(row=>Object.freeze({id:row.item.id,ref:Object.freeze({checkpoint:row.item,commit:row.commitItem}),manifest:row.manifest}))),retentionBacklog=RepositoryCheckpointPipeline.selectRetention(cleanupRows,{now:new Date()}).remove.length,checkpointDeleteBudget=Math.min(MAINTENANCE_MAX_CHECKPOINT_DELETES,Math.max(MAINTENANCE_MIN_CHECKPOINT_DELETES,retentionBacklog));
     const cleaned=await RepositoryCheckpointPipeline.cleanup(Object.freeze({
       checkpoints:cleanupRows,now:state.retentionAt?new Date(state.retentionAt):new Date(),
-      inventoryBeforeDelete,beginDeletion,
+      inventoryBeforeDelete,beginDeletion,workBudget,
       invalidCount:state.invalid.length,ignoredCount:state.ignored,overflow:state.overflow,blockObjectGc:publicationSafety.blocked,objectGraceBefore,maxCheckpointDeletes:checkpointDeleteBudget,maxObjectDeletes:MAINTENANCE_MAX_OBJECT_DELETES,
       incompleteArtifacts:freeze([...(state.uncommitted||[]).map(row=>freeze({kind:'checkpoint',ref:row.item})),...(state.orphanCommits||[]).map(item=>freeze({kind:'commit',ref:item}))]),
       deleteIncompleteArtifact:async artifact=>{await assertLease();await selected.repository.delete(artifact.ref);return true;},
@@ -659,32 +659,32 @@ registry.define('backup-provider',1,input=>{
     if(!state.rows.some(row=>row.item.id===newCheckpointId))throw new Error('The newly uploaded checkpoint did not become the committed Latest candidate before retention cleanup.');
     return String((await cleanupRepositoryProviderState(selected,state,options)).warning||'');
   }
-  async function cleanupRepositoryProviderSafely(selected,{signal=null,startBudget,traceId=''}={}){
+  async function cleanupRepositoryProviderSafely(selected,{signal=null,workBudget,traceId=''}={}){
     const owner=selected,scoped=repositoryOperationSelected(selected,{signal});
     await synchronizeRepositoryScope(scoped);
     if(!repositoryCoordinationCapable(scoped)){
-      startBudget(PROVIDER_MAINTENANCE_BUDGET_MS);
+      workBudget.start(PROVIDER_MAINTENANCE_BUDGET_MS);
       const state=await repositoryProviderState(scoped,{interactive:false,signal,forCleanup:true});
-      return cleanupRepositoryProviderState(scoped,state);
+      return cleanupRepositoryProviderState(scoped,state,{workBudget});
     }
     let contentionRetryMs=0,maintenanceLease=await beginRepositoryMaintenance(scoped,{onBlocked:safety=>{const uncertain=Number(safety.publications&&safety.publications.invalid)||Number(safety.maintenances&&safety.maintenances.invalid)||0;if(uncertain)return;const deadlines=[safety.publications&&safety.publications.nextEligibleAt,safety.maintenances&&safety.maintenances.nextEligibleAt].map(value=>Date.parse(String(value||''))).filter(Number.isFinite);if(deadlines.length)contentionRetryMs=Math.max(1000,Math.min(...deadlines)-Date.now()+1000);}});
     if(!maintenanceLease)return freeze({warning:'Repository maintenance was deferred because another backup or maintenance operation is active.',retained:null,removedCheckpoints:0,checkpointDeferred:0,checkpointFailures:0,gcRemoved:0,gcDeferred:0,gcBudgetDeferred:0,gcFailures:0,gcSkipped:true,gcPending:true,maintenanceBlocked:true,contentionRetryMs,uncertainCount:0,selection:null});
     const renewable=typeof scoped.repository.renewMaintenance==='function'&&typeof owner.repository.beginOperation==='function';let renewing=null;
     const keepAlive=async(force=false)=>{
       if(signal?.aborted)throw signal.reason;
-      if(renewing)await renewing;
+      if(renewing){await renewing;return;}
       if(renewable&&Date.now()-Date.parse(maintenanceLease.createdAt)>=PROVIDER_MAINTENANCE_BUDGET_MS/2){
-        renewing=(async()=>{maintenanceLease=await scoped.repository.renewMaintenance(maintenanceLease);await assertRepositoryMaintenance(scoped,maintenanceLease);})().finally(()=>{renewing=null;});await renewing;
+        renewing=(async()=>{maintenanceLease=await scoped.repository.renewMaintenance(maintenanceLease);await assertRepositoryMaintenance(scoped,maintenanceLease);})().finally(()=>{renewing=null;});await renewing;return;
       }
       if(force)await assertRepositoryMaintenance(scoped,maintenanceLease);
     };
     try{
-      if(!renewable)startBudget(PROVIDER_MAINTENANCE_BUDGET_MS);
+      if(!renewable)workBudget.start(PROVIDER_MAINTENANCE_BUDGET_MS);
       const protectedSelection=renewable?repositoryOperationSelected(owner,{signal,checkProtection:keepAlive}):scoped;
       await keepAlive(true);
       OperationDiagnostics.mark('maintenance-inventory-start',{provider:selected.id},traceId);
       const state=await repositoryProviderState(protectedSelection,{interactive:false,signal,forCleanup:true});
-      return await cleanupRepositoryProviderState(protectedSelection,state,{checkMaintenance:()=>keepAlive(true),inventoryBeforeDelete:true,beginDeletion:async()=>{await keepAlive(true);OperationDiagnostics.mark('maintenance-inventory-complete',{provider:selected.id,total:state.rows.length},traceId);if(renewable)startBudget(PROVIDER_MAINTENANCE_BUDGET_MS);}});
+      return await cleanupRepositoryProviderState(protectedSelection,state,{workBudget,checkMaintenance:()=>keepAlive(true),inventoryBeforeDelete:true,beginDeletion:async()=>{await keepAlive(true);OperationDiagnostics.mark('maintenance-inventory-complete',{provider:selected.id,total:state.rows.length},traceId);if(renewable)workBudget.start(PROVIDER_MAINTENANCE_BUDGET_MS);}});
     }finally{
       if(renewing)await renewing.catch(()=>{});
       await endRepositoryMaintenance(signal?.aborted?owner:scoped,maintenanceLease);
@@ -961,7 +961,7 @@ registry.define('backup-provider',1,input=>{
     const providerSelected=providers.get(safeId(id));if(!providerSelected||!providerSelected.repository)throw new Error('Repository backup provider is unavailable.');
     const selected=repositoryOperationSelected(providerSelected,{signal:options&&options.signal||null});
     const state=await repositoryProviderState(selected,{interactive:false,signal:options&&options.signal||null});
-    if(state.overflow||state.invalid?.length||state.uncommitted?.length||state.orphanCommits?.length)throw new Error('Repository history is incomplete or unreadable; integrity verification is unavailable.');
+    if(state.overflow||state.ignored||state.invalid?.length||state.uncommitted?.length||state.orphanCommits?.length)throw new Error('Repository history is incomplete or unreadable; integrity verification is unavailable.');
     const actualScope=typeof selected.repository.scope==='function'?String(await selected.repository.scope()||''):'';
     if(options.repositoryScope&&options.repositoryScope!==actualScope){const error=new Error('The backup repository changed.');error.code='REPOSITORY_CHANGED';throw error;}
     const history=Object.freeze(state.rows.map(row=>row.manifest));
@@ -1032,11 +1032,11 @@ registry.define('backup-provider',1,input=>{
     let scheduler=providerMaintenanceSchedulers.get(id);if(scheduler)return scheduler;
     const background=providerBackground(selected),intent=providerMaintenanceIntent(selected);let traceId='';
     scheduler=background.createMaintenanceScheduler(freeze({
-      intent,budgetMs:0,budgetCode:'REPOSITORY_MAINTENANCE_BUDGET',budgetMessage:'Repository cleanup reached its 30-second deletion allowance and will continue shortly.',preemptCode:'REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage:'Repository maintenance yielded to a higher-priority Drive operation.',
+      intent,budgetMs:0,budgetCode:'REPOSITORY_MAINTENANCE_BUDGET',budgetMessage:'Repository cleanup completed a protected work unit and will continue shortly.',preemptCode:'REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage:'Repository maintenance yielded to a higher-priority Drive operation.',
       capture:(phase,error)=>AppDiagnostics.capture('backup-provider.repository-maintenance-'+phase,error,'warn'),
       isAvailable:()=>providerBackgroundAvailability(selected),
       isBusy:()=>busy||preparing,
-      execute:({signal,startBudget})=>cleanupRepositoryProviderSafely(selected,{signal,startBudget,traceId}),
+      execute:({signal,workBudget})=>cleanupRepositoryProviderSafely(selected,{signal,workBudget,traceId}),
       report:event=>{
         const phase=String(event&&event.phase||'');
         if(phase==='running'){
