@@ -7756,7 +7756,6 @@ function scheduleAttachmentIntegrityAudit(delay=15000,trigger='scheduled'){
   return AttachmentIntegrityJob.schedule(delay,trigger,'replace');
 }
 function attachmentIntegrityDeferredError(message='Attachment integrity audit deferred.',code='ATTACHMENT_INTEGRITY_DEFERRED'){const error=new Error(message);error.code=code;return error;}
-function runAttachmentIntegrityAudit(){return AttachmentIntegrityJob.run();}
 async function runAttachmentIntegrityAttempt({trigger,nextEligibleAt}){
   let traceId='',priorState=null;return (async()=>{
     const prior=normalizeAttachmentIntegrityState(await readHostAppMetaValue(ATTACHMENT_INTEGRITY_META_KEY));priorState=prior;

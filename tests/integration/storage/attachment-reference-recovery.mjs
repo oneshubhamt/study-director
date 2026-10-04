@@ -40,7 +40,7 @@ for(const failure of ['active-session','session-rescue','saved-days'])for(const 
   const t=fixture();if(partial){const audit=await t.store.shallowAudit([id],{maxEntries:1});assert.equal(audit.complete,false);t.setProgress(audit.progress);}
   const before=JSON.stringify(t.stats().durable);t.setFailure(failure);
   if(failure==='saved-days')assert.equal((await t.data.dailyRecords.list()).length,0,'interactive Saved Days reading keeps its existing rescue fallback');
-  const result=await t.context.runAttachmentIntegrityAudit();assert.equal(result.status,'unavailable');
+  const result=await vm.runInContext('AttachmentIntegrityJob.run()',t.context);assert.equal(result.status,'unavailable');
   assert.equal(JSON.stringify(t.stats().durable),before,'source unavailability must preserve completion date, progress and earlier warnings');
   assert.equal(t.stats().writes,0);assert.equal(t.stats().healthy,0);assert.ok(t.context.attachmentIntegrityIssues.has(id));
   assert.equal(t.scheduled.at(-1),30*60*1000,'unavailable sources use recovery retry rather than daily completion');
@@ -48,7 +48,7 @@ for(const failure of ['active-session','session-rescue','saved-days'])for(const 
   assert.equal(vm.runInContext('attachmentIntegrityView.lastOutcome',t.context),'unavailable','developer verification status must explain the incomplete scan');
   await assert.rejects(()=>t.references.verifyAbsent(id));await assert.rejects(()=>t.references.removeEverywhere(id));assert.equal(t.stats().rewrites,0,'incomplete reference inventory cannot authorize reference surgery');
   t.setFailure(failure==='saved-days'?'saved-days-recovered':'');
-  const recovered=await t.context.runAttachmentIntegrityAudit();assert.equal(recovered.status,'completed','source recovery must resume without a false not-due gate');
+  const recovered=await vm.runInContext('AttachmentIntegrityJob.run()',t.context);assert.equal(recovered.status,'completed','source recovery must resume without a false not-due gate');
   assert.equal(t.stats().writes,1);assert.equal(t.stats().durable.issues[0]?.kind,'missing-file');assert.equal(t.stats().durable.progress,null);assert.ok(t.stats().durable.checkedAt);
   cases.push(failure+(partial?' retains partial cursor':' retains findings'));
 }
@@ -56,7 +56,7 @@ for(const failure of ['active-session','session-rescue','saved-days'])for(const 
   const t=fixture();t.setFailure('session-no-error');await assert.rejects(()=>t.references.sources(),/could not be read completely/);cases.push('failed session without error rejects');
 }
 {
-  const t=fixture();t.empty();const result=await t.context.runAttachmentIntegrityAudit();
+  const t=fixture();t.empty();const result=await vm.runInContext('AttachmentIntegrityJob.run()',t.context);
   assert.equal(result.status,'completed');assert.equal(result.checked,0);assert.equal(t.stats().durable.issues.length,0);assert.ok(t.stats().durable.checkedAt);assert.equal(t.stats().healthy,1);
   cases.push('valid empty reference sources can complete cleanly');
 }
