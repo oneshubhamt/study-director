@@ -35,7 +35,6 @@ registry.define('repositories',1,()=>{
         return areaNote(entry)&&normalizeAreaName(entry.key)===key;
       },
       savedDayDeletionPrefix:(value,context)=>!!(exactValue(value,['format','version','date','deletedAt'])&&value.format==='study-director.saved-day-deletion'&&Number(value.version)===1&&isValidIsoDate(String(value.date||''))&&String(value.date)===context.suffix&&!!normalizeTimestamp(value.deletedAt,null)),
-      areaNoteConflictPrefix:(value,context)=>!!(exactValue(value,['format','version','key','label','text','ancestor','storedRevision','createdAt'])&&value.format==='study-director.area-note-conflict'&&Number(value.version)===1&&!!context.suffix&&normalizeAreaName(value.key)===context.suffix&&typeof value.label==='string'&&value.label.length<=APP_LIMITS.maxAreaNameChars&&typeof value.text==='string'&&value.text.length<=APP_LIMITS.maxNoteChars&&(value.ancestor===null||typeof value.ancestor==='string'&&value.ancestor.length<=APP_LIMITS.maxNoteChars)&&(value.storedRevision===''||validIso(value.storedRevision))&&validIso(value.createdAt)),
       areaNoteDeletionPrefix:(value,context)=>!!(exactValue(value,['format','version','key','deletedAt'])&&value.format==='study-director.area-note-deletion'&&Number(value.version)===1&&normalizeAreaName(value.key)===context.suffix&&!!context.suffix&&!!normalizeTimestamp(value.deletedAt,null)),
       attachmentDeletionPrefix:(value,context)=>!!(exactValue(value,['format','version','assetId','deletedAt'])&&value.format==='study-director.attachment-deletion'&&Number(value.version)===1&&attachmentId(value.assetId)&&String(value.assetId)===context.suffix&&!!normalizeTimestamp(value.deletedAt,null))
     });
@@ -1616,9 +1615,6 @@ async function runDataMaintenance(options={}){
       applyDeletes:AreaNotesRepository.applyDeletes,
       size:AreaNotesRepository.size,
       flush:AreaNotesRepository.flush,
-      conflicts:AreaNotesRepository.conflicts,
-      resolveConflict:AreaNotesRepository.resolveConflict,
-      discardConflict:AreaNotesRepository.discardConflict,
       recoverAfterStorageLoss:AreaNotesRepository.recoverAfterStorageLoss
     });
     const activeSession=freeze({

@@ -92,7 +92,6 @@ export const APP_META_KEYS=freeze({
   areaNoteRecoveryPrefix:'areaNoteRecovery.v1:',
   savedDayDeletionPrefix:'savedDayDeletion.v1:',
   areaNoteDeletionPrefix:'areaNoteDeletion.v1:',
-  areaNoteConflictPrefix:'areaNoteConflict.v1:',
   attachmentDeletionPrefix:'attachmentDeletion.v1:',
   libraryClearJournalState:'libraryClearJournalState.v1',
   libraryClearJournalPayloadPrefix:'libraryClearJournalPayload.v1:',
@@ -121,7 +120,7 @@ export const OBSOLETE_APP_META_KEYS=freeze({
 });
 
 export const APP_META_VALIDATION_OWNERS=freeze({
-  repositories:freeze(['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','areaNoteRecoveryPrefix','savedDayDeletionPrefix','areaNoteDeletionPrefix','areaNoteConflictPrefix','attachmentDeletionPrefix']),
+  repositories:freeze(['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','areaNoteRecoveryPrefix','savedDayDeletionPrefix','areaNoteDeletionPrefix','attachmentDeletionPrefix']),
   journals:freeze(['libraryClearJournalState','libraryClearJournalPayloadPrefix','restoreJournalState','restoreJournalPayload','mutationLease']),
   host:freeze(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBaseLegacy','reconciliationBase','reconciliationBaseNotePrefix'])
 });
@@ -234,7 +233,6 @@ export const DATA_ARCHITECTURE=freeze({
       areaNoteRecoveryPrefix:surface('recovery-journal','repositories','protect','until canonical note commit settles','AreaNoteRecovery.v1',{protects:'indexedDb.areaNotes',created:'before/while an Ongoing Note canonical commit is pending',cleared:'after matching canonical AreaNote/deletion settles',supersededBy:'newer canonical AreaNote/deletion revision'}),
       savedDayDeletionPrefix:surface('canonical-deletion-history','repositories','protect','retain until the same Saved Day is recreated','SavedDayDeletion.v1'),
       areaNoteDeletionPrefix:surface('canonical-deletion-history','repositories','protect','retain until the same Ongoing Note is recreated','AreaNoteDeletion.v1'),
-      areaNoteConflictPrefix:surface('recovery','repositories','protect','until the user applies or discards the reviewed text','AreaNoteConflict.v1',{protects:'the losing side of an Ongoing Note save conflict',created:'when a save or stale editor loses to a different stored note revision',cleared:'after the reviewed text is applied to the stored note or explicitly discarded',supersededBy:'a newer conflict copy for the same note'}),
       attachmentDeletionPrefix:surface('canonical-deletion-history','repositories','protect-identifiers','retain until the same Attachment Library identity is explicitly restored/recreated','AttachmentDeletion.v1'),
       libraryClearJournalPayloadPrefix:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','LibraryClearJournalChunk.v1',{protects:'canonical Library rollback chunks',created:'before destructive Library clear commit',cleared:'after verified completion or rollback',supersededBy:'verified post-operation canonical state'}),
       reconciliationBaseNotePrefix:surface('reconciliation-base','host','protect','update/delete only changed Ongoing Note baselines; lazily read only for actual reconciliation conflicts','ReconciliationBaseNote.v1')
