@@ -132,6 +132,45 @@ console.log(JSON.stringify({status:'PASS',suite:'canonical-maintenance-progress'
  console.log(JSON.stringify({status:'PASS',suite:'canonical-maintenance-source-fence',latePhaseChangeRevalidated:true}));
 }
 
+// Recovery adoption is atomic with respect to accepted live mutations and
+// queued writes, not merely wall-clock timestamps. A superseded read preserves
+// the live model, autosave and durable intent, then converges on a stable retry.
+const noteRecoveryCases=[];
+for(const boundary of ['stable','canonical-read','final-result','autosave'])for(const change of boundary==='stable'?['none']:['edit','add','delete','queued-save']){
+ const clock=createFakeClock(),controls={clock},local=new Map();let armed=false,changed=false,mutation=Promise.resolve();
+ class ObservedMeta extends Map{entries(){const result=[...super.entries()];if(armed&&boundary!=='canonical-read'&&boundary!=='stable')queueMicrotask(applyChange);return result[Symbol.iterator]();}}
+ const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new ObservedMeta()},h=createHarness(local,stores,controls);
+ controls.onAreaRead=async()=>{throw new Error('startup notes unavailable');};await h.app.notes.load();controls.onAreaRead=null;
+ h.app.notes.update('first','First','earlier note','');await h.app.notes.flush({strict:true});await clock.advance(20);
+ if(change==='queued-save')h.app.notes.update('first','First','latest edit',h.app.notes.get('first').updatedAt);
+ const applyChange=()=>{
+  if(changed)return;changed=true;
+  if(change==='queued-save'){void clock.advance(1000);return;}
+  if(change==='delete')mutation=h.app.notes.remove('first');
+  else if(change==='add')h.app.notes.update('second','Second','new note','');
+  else{const current=h.app.notes.get('first');h.app.notes.update('first','First','intervening edit',current.updatedAt);const updated=h.app.notes.get('first');h.app.notes.update('first','First','latest edit',updated.updatedAt);assert.equal(h.app.notes.get('first').updatedAt,updated.updatedAt,'revision throttling cannot conceal a mutation');}
+  if(boundary==='autosave')void clock.advance(1000);
+ };
+ controls.onAreaRead=async()=>{armed=true;if(boundary==='canonical-read')applyChange();};
+ const job=automaticMaintenance(h,clock,controls),first=await job.run('recovery');armed=false;controls.onAreaRead=null;await mutation;
+ const expected=boundary==='stable'?{first:'earlier note'}:change==='delete'?{}:change==='add'?{first:'earlier note',second:'new note'}:{first:'latest edit'};
+ const texts=payload=>Object.fromEntries(Object.entries(payload).map(([key,value])=>[key,value.text]));
+ assert.deepEqual(texts(h.app.notes.exportPayload()),expected,`${boundary} ${change}: recovery cannot regress the live model`);
+ if(first.status==='completed')assert.deepEqual(texts(Object.fromEntries(stores.area)),expected,'completion acknowledges exactly the accepted work');
+ else{
+  assert.equal(first.status,'yielded',`${boundary} ${change}: a superseded snapshot cannot certify completion`);assert.equal(first.reason,'notes-changed');assert.equal(h.stores.meta.get('dataMaintenance').value.status,'pending');
+  await clock.advance(2000);assert.deepEqual(texts(Object.fromEntries(stores.area)),expected,'ordinary autosave remains armed after recovery defers');
+  assert.equal(job.status().scheduled,true);await clock.advance(13000);
+  for(let turn=0;turn<100&&job.status().busy;turn++)await clock.drainMicrotasks(50);
+  assert.equal(job.status().busy,false);assert.equal(h.stores.meta.get('dataMaintenance').value.status,'completed','the automatic wake-up reconciles stable recovery without manual repair');
+ }
+ await h.app.notes.flush({strict:true});assert.deepEqual(texts(Object.fromEntries(stores.area)),expected);
+ const restarted=createHarness(local,stores,{clock});await restarted.app.notes.load();assert.deepEqual(texts(restarted.app.notes.exportPayload()),expected,'restart sees the same acknowledged model');
+ if(change==='edit'&&changed){const current=h.app.notes.get('first');h.app.notes.update('first','First',current.text+' + subsequent edit',current.updatedAt);await h.app.notes.flush({strict:true});assert.equal(stores.area.get('first').text,'latest edit + subsequent edit');}
+ job.dispose();noteRecoveryCases.push({boundary,change});
+}
+console.log(JSON.stringify({status:'PASS',suite:'note-recovery-conservation',productionAppData:true,matrices:noteRecoveryCases},null,2));
+
 // The same host-owned allowance reaches individual recovery transactions;
 // checkpointed prefixes, rather than repeated batch preparation, conserve work.
 const recoveryProgressCases=[];

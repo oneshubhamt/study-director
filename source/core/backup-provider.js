@@ -575,7 +575,7 @@ registry.define('backup-provider',1,input=>{
     if(!repositoryMaintenanceCapable(selected))return freeze({blocked:false,reason:'maintenance-protection-unavailable',active:0,invalid:0});
     let listed;try{listed=await selected.repository.listMaintenances();}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenances',error,'warn');return freeze({blocked:true,reason:'maintenance-state-unavailable',active:0,invalid:1});}
     const rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],now=Date.now(),excluded=String(excludeId||'');let active=0,invalid=Math.max(0,Number(listed&&listed.ignored)||0)+(listed&&listed.overflow===true?1:0),nextEligibleAt=0;
-    for(const row of rows){if(excluded&&String(row&&row.id||'')===excluded)continue;const created=Date.parse(String(row&&row.createdAt||''));if(!Number.isFinite(created)){invalid+=1;continue;}if(now-created<MAINTENANCE_MAX_AGE_MS){active+=1;const expires=created+MAINTENANCE_MAX_AGE_MS;if(!nextEligibleAt||expires<nextEligibleAt)nextEligibleAt=expires;continue;}try{await selected.repository.endMaintenance(row);}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenance-expired-cleanup',error,'warn');}}
+    for(const row of rows){if(excluded&&String(row&&row.id||'')===excluded)continue;const created=Date.parse(String(row&&row.createdAt||'')),expires=row&&row.expiresAt?Date.parse(String(row.expiresAt)):created+MAINTENANCE_MAX_AGE_MS;if(!Number.isFinite(created)||!Number.isFinite(expires)||expires<=created){invalid+=1;continue;}if(now<expires){active+=1;if(!nextEligibleAt||expires<nextEligibleAt)nextEligibleAt=expires;continue;}try{await selected.repository.endMaintenance(row);}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenance-expired-cleanup',error,'warn');}}
     return freeze({blocked:active>0||invalid>0,reason:active>0?'active-maintenance':invalid>0?'uncertain-maintenance-state':'',active,invalid,nextEligibleAt:nextEligibleAt?new Date(nextEligibleAt).toISOString():''});
   }
   async function beginRepositoryPublication(selected){
@@ -673,7 +673,9 @@ registry.define('backup-provider',1,input=>{
     const keepAlive=async(force=false)=>{
       if(signal?.aborted)throw signal.reason;
       if(renewing){await renewing;return;}
-      if(renewable&&Date.now()-Date.parse(maintenanceLease.createdAt)>=PROVIDER_MAINTENANCE_BUDGET_MS/2){
+      const created=Date.parse(maintenanceLease.createdAt),duration=Date.parse(maintenanceLease.expiresAt)-created;
+      const renewAfter=Number.isFinite(duration)&&duration>0?duration/4:PROVIDER_MAINTENANCE_BUDGET_MS/2;
+      if(renewable&&Date.now()-created>=renewAfter){
         renewing=(async()=>{maintenanceLease=await scoped.repository.renewMaintenance(maintenanceLease);await assertRepositoryMaintenance(scoped,maintenanceLease);})().finally(()=>{renewing=null;});await renewing;return;
       }
       if(force)await assertRepositoryMaintenance(scoped,maintenanceLease);
@@ -687,7 +689,7 @@ registry.define('backup-provider',1,input=>{
       return await cleanupRepositoryProviderState(protectedSelection,state,{workBudget,checkMaintenance:()=>keepAlive(true),inventoryBeforeDelete:true,beginDeletion:async()=>{await keepAlive(true);OperationDiagnostics.mark('maintenance-inventory-complete',{provider:selected.id,total:state.rows.length},traceId);if(renewable)workBudget.start(PROVIDER_MAINTENANCE_BUDGET_MS);}});
     }finally{
       if(renewing)await renewing.catch(()=>{});
-      await endRepositoryMaintenance(signal?.aborted?owner:scoped,maintenanceLease);
+      await endRepositoryMaintenance(scoped,maintenanceLease);
     }
   }
 

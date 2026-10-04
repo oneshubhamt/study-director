@@ -1,45 +1,48 @@
-# Local recovery safety and background coordination
+# Background coordination: recovery and protected cleanup
 
-4 October 2026. Branch: `refactor/background-coordination`. This correction addresses the three confirmed local recovery findings: loss of a newer active-session rescue, loss of an unrelated saved day's rescue, and replacement of unread pending deletion intent.
+4 October 2026. Branch: `refactor/background-coordination`. The current correction addresses the two confirmed blockers from the fresh source audit: Notes recovery could replace an intervening edit, and Drive cleanup could retry indefinitely while its metadata requests succeeded.
 
-## Cause and correction
+## Recovery ownership
 
-The production LocalStorage adapter returns the supplied default after a failed read and exposes the failure through `lastError`. A successful later read or write clears that error. Checking it after filtering through another reader could therefore turn unavailable data into apparent absence. Some mutating callers did not check it at all.
+Recovery reads are asynchronous; a successful read is not proof that the live model remained unchanged. Notes now wait for the captured save chain and pending recovery writes, then fence adoption against both the live revision and any newly queued canonical save. The revision changes on every accepted mutation, independently of throttled note timestamps.
 
-Repository recovery now uses one immediate read barrier. The active-session deletion executor decodes the same successfully read envelope, removing its duplicate presence/read handoff. Saved-day and deletion-ledger readers reject unavailable contents before filtering, merging, retiring or replacing them. Session deletion staging reports failure before any destructive work when its shared ledger cannot be read.
+A superseded snapshot leaves the live model, dirty work, recovery copies and autosave timers intact. Canonical maintenance reports `yielded / notes-changed`, retains its durable pending intent and retries through its existing automatic wake-up. Timers are cleared only when a stable snapshot can actually be adopted. Maintenance cannot report completion until the accepted work is reconciled.
 
-Saved-day cleanup has one shared retirement operation for saves, batches, imports and reconciliation. It rereads the raw current rescue collection, retains unrelated and newer copies, and retires only values covered by the committed data. This preserves entries hidden by a pending deletion as well as saves arriving during awaited database work. Passive reconciliation compares the canonical record inside the same strict transaction and cannot overwrite a newer canonical value. Explicit save/import overwrite behavior remains available.
+Existing local data protections remain: immediate strict read barriers, fresh rescue retirement that preserves unrelated/newer copies, transaction-bound stale-replay checks, strict deletion reconciliation, attachment reference proofs, recovery journals and verified rollback. A committed save remains acknowledged if later housekeeping fails; developer diagnostics retain the pending cleanup. Review's Copy report remains study-only.
 
-A committed canonical save still acknowledges success and notifies backup when rescue cleanup is unavailable. Developer diagnostics retain the cleanup failure, and the rescue remains available to existing maintenance/recovery. Fire-and-forget reconciliation catches failures; strict maintenance propagates them and retains its pending marker.
+## Drive protection and progress
 
-Fault testing also exposed a failed Notes startup result that remained cached after successful strict recovery. Each subsequent maintenance phase reloaded Notes and invalidated its own source proof. Successful recovery now replaces that cached result, allowing stable finite work to converge.
+The old marker's useful assertion window was 30 seconds. Renewal and verification required sequential network reads, so two healthy 16-second requests could exhaust that window before useful cleanup. The deletion allowance did not describe the time needed to maintain network exclusion.
 
-## Rules verified
+The shared repository policy now distinguishes these limits:
 
-- An uncertain read cannot authorize deletion or erase an unseen rescue collection.
-- Operations on one entity conserve unrelated acknowledged data and pending deletion intent.
-- An older pending deletion cannot consume a newer acknowledged rescue.
-- Known committed data remains acknowledged when housekeeping fails; diagnostics distinguish the remaining work.
-- Rescue replay preserves newer canonical data, and cleanup preserves copies arriving during asynchronous reconciliation.
-- Finite failures followed by available storage permit recovery and maintenance to complete.
-- Existing ownership, strict durability, foreground priority, journal/rollback, capture completeness and retention boundaries remain enforced.
+| Boundary | Limit |
+| --- | --- |
+| Drive metadata request, including JSON body | 45 seconds |
+| Drive maintenance marker, version 2 | Five minutes |
+| Drive assertion margin | 75 seconds: one request plus release grace |
+| Drive renewal threshold | One quarter of the verified marker lifetime |
+| Drive destructive work | Cooperative 30 seconds, checked between productive protected units |
+| Device Folder marker / assertion margin | Existing 60 / 30 seconds |
+
+These timings preserve bounded stale protection without extending housekeeping execution budgets or introducing another scheduler. Immutable rotation verifies that the previous marker remains present, correctly scoped and unexpired. Unreadable expiry also invalidates protection. Lost protection requires fresh inventory before deletion can resume. Foreground cancellation still interrupts requests and waits for actual settlement; marker release reuses the verified operation scope instead of adding a redundant folder read. An identity change invalidates that scope.
+
+Version 1 Drive markers retain their original lifetime. Current coordination uses the adapter's verified expiry, rather than assuming every marker lasts 60 seconds. Version 2 markers are unrecognized by older clients' validators, causing their existing uncertainty handling to defer rather than expire active protection prematurely. An abandoned newer marker requires a current client to retire it after expiry.
 
 ## Verification
 
-Existing domain suites were strengthened; no test file or runtime dependency was added. The repository fixture now uses the actual production LocalStorage adapter, including successful-operation error reset, and the production import batch limit. Import tests require a real committed record.
+**26 targeted suites passed** through the guarded hermetic runner. They cover lifecycle and diagnostics, local recovery and strict durability, journals, capture, restore, Device Folder, Drive, cleanup, incremental preparation, Library clear, architecture boundaries and test governance. The three changed integration suites were revalidated after the final unreadable-expiry guard. Existing authoritative tests were strengthened; no test file, runtime module, dependency, persistent store or timer layer was added.
 
-The recovery suite injects one failure at every local read in each healthy operation trace: **112 cases across 12 operations**. It checks copy and intent conservation after the attempt and completion after a healthy retry. Seven further cases cover committed-save acknowledgement and diagnostics, stale replay, and unrelated/newer same-day arrivals during migration and deletion recovery.
+- Notes conservation is checked across 13 schedules: stable recovery and edits, additions, deletion or queued saves at canonical-read, final-result and autosave boundaries. Tests compare the exact live, canonical and restarted models, include equal timestamps, verify subsequent edits use the latest base, and exercise the production host's automatic wake-up.
+- The assembled Drive domain now includes 16 scenarios. Metadata latencies of 1, 3, 6, 11, 16, 31 and 44 seconds complete cleanup; the 44-second case also covers slow marker creation and deletion. Each bounded continuation retires new data, with at most four unfinished passes for four eligible objects. Completion preserves exactly the committed backup's referenced objects and immutable manifest/commit pair, retires orphan objects and clears pending intent and maintenance markers.
+- Foreground interruption, unavailable history and lost protection preserve pending work and data. A competing writer cannot expire an active version 2 marker at the old 60-second boundary. Direct transport tests cover legacy/future versions, missing/expired/unreadable/foreign protection, ambiguous creation/deletion, cancellation release and repository identity invalidation.
 
-Four deliberate mutations were rejected: ignoring the immediate read error, allowing stale rescue replay, retiring a cached rescue collection, and keeping the failed Notes result cached. The unmodified control passed; the cached-result mutation reproduced nontermination under a bounded external test timeout.
+Source build, exact generated inventory verification, source syntax and generated syntax passed in a disposable checkout: **111 development files, 112 deployment files, 130 generated JavaScript files and eight inline scripts**. QA evidence stays outside the source tree.
 
-**32 targeted suites passed locally** through the guarded hermetic runner: the repository-fixture consumers and affected capture, restore, library clear, attachment-reference, maintenance, durability, architecture and governance contracts; plus shared repository lifecycle, checkpoint cleanup and Drive transport tests. Several structural assertions in the existing architecture fixture were updated to the current availability guard, renewable lease port and shared deletion allowance. Behavioral safety tests passed independently of those assertion changes.
+## Assessment and limits
 
-Source build, exact generated inventory verification and generated syntax passed in a disposable checkout: **111 development files, 112 deployment files, 130 JavaScript files and eight inline scripts**. The existing GitHub Repository checks workflow now includes the strengthened deletion/recovery suite.
+Both confirmed blockers are addressed. The final review of their assembled paths found no additional material blocker requiring another coordination redesign. The consolidated lifecycle owner, provider-specific progress and strict storage proofs remain appropriate; these corrections repair their existing handoffs.
 
-## Design and limits
+Automatic completion requires a running page, eventual available access/control, stable source and verifiable protection. Unknown or expired protection cannot authorize deletion. Retention remains 15 ordinary recovery points plus one temporary protected safety snapshot.
 
-The job lifecycle owns scheduling, blockers and retry; the repository coordinator owns priority and actual settlement; storage executors own authoritative reads, data protection and resumable progress. This correction adds no scheduler, persistent store, timer layer or general state-machine framework. Successful slow work retains the shared productive-unit allowance; stalled requests and workers retain their separate watchdogs.
-
-Automatic completion requires a running page, eventual available storage/control and stable source. Unavailable or expired protection cannot authorize deletion. Retention remains 15 ordinary recovery points plus one temporary protected safety snapshot.
-
-The three confirmed recovery blockers are addressed by the verified correction. Full Promotion QA, browser smoke and physical Device Folder/live Drive acceptance were not rerun. Main remains unmerged; these results establish the exercised source contracts and failure schedules.
+Full Promotion QA, browser smoke, physical Device Folder and live Drive acceptance were outside this correction. These results establish the exercised source contracts and controlled failure schedules; they are not a claim that every browser or network condition has been certified. Main remains unmerged.

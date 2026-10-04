@@ -656,24 +656,34 @@ assert.equal(await runtime.providers.backup('presentation-cancel'),false);assert
 // Production Drive transport + production provider/classifier/retention +
 // owned scheduler. Only HTTP, storage and the clock are simulated.
 const assembledDriveCases=[];
-for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inventory','foreground-preemption','slow-deletion-1000','slow-deletion-3000','slow-deletion-6000','slow-deletion-11000','foreground-deletion']){
+for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inventory','foreground-preemption','slow-deletion-1000','slow-deletion-3000','slow-deletion-6000','slow-deletion-11000','slow-deletion-16000','slow-deletion-31000','slow-deletion-44000','slow-deletion-all-44000','foreground-deletion','foreground-deletion-44000','lost-protection','remote-lease']){
  const realDate=globalThis.Date,clock=createFakeClock('2026-10-03T12:00:00.000Z');backgroundClock=clock;globalThis.Date=clock.Date;backgroundReady=true;dailyRecords=[];notes={};assetDescriptor=null;
- const maintenance=new Map(),id='drive-'+scenario,h=createDriveHarness({clock,registerProvider:config=>runtime.providers.register(freeze({...config,id,label:'Drive Background QA'}))});
- const stepMs=scenario.includes('deletion')?1000:100,settle=async(predicate,limitMs=scenario.includes('deletion')?3600000:180000)=>{for(let elapsed=0;elapsed<limitMs;elapsed+=stepMs){await clock.drainMicrotasks(220);await new Promise(resolve=>setImmediate(resolve));if(predicate())return;await clock.advance(stepMs);}assert.fail('assembled Drive execution did not settle: '+JSON.stringify({scenario,now:clock.now(),intent:maintenance.get(id+'-cold'),status:runtime.providers.backgroundStatus().filter(row=>String(row.job).startsWith(id)),pages:h.state.objectPageStarts,activePages:h.state.activeObjectPages,requests:h.state.requests.slice(-3).map(row=>({method:row.method,url:new URL(row.url).pathname})),deletions:h.state.deletions.slice(-3)}));};
+ const maintenance=new Map(),progress=[],id='drive-'+scenario,h=createDriveHarness({clock,expiresIn:86400,registerProvider:config=>runtime.providers.register(freeze({...config,id,label:'Drive Background QA'}))});
+ // Four slow deletions may require four protected passes plus a final inventory.
+ // Bound simulated time by five passes of at most 120 request-sized intervals;
+ // wall-clock QA remains subject to the guarded runner's existing file timeout.
+ const stepMs=scenario.includes('deletion')?1000:100,settle=async(predicate,limitMs=scenario.endsWith('44000')?5*120*45000:scenario.includes('deletion')?3600000:180000)=>{for(let elapsed=0;elapsed<limitMs;elapsed+=stepMs){await clock.drainMicrotasks(220);await new Promise(resolve=>setImmediate(resolve));if(predicate())return;await clock.advance(stepMs);}assert.fail('assembled Drive execution did not settle: '+JSON.stringify({scenario,now:clock.now(),progress,intent:maintenance.get(id+'-cold'),status:runtime.providers.backgroundStatus().filter(row=>String(row.job).startsWith(id)),errors:diagnosticFailures.slice(-2),pages:h.state.objectPageStarts,activePages:h.state.activeObjectPages,requests:h.state.requests.slice(-3).map(row=>({method:row.method,url:new URL(row.url).pathname})),deletions:h.state.deletions.slice(-3)}));};
  try{
   await h.provider.prepare();await h.provider.authorize();snapshotRevision='drive-'+scenario;sourceRevision='2026-10-03T11:00:00.000Z';
   await runtime.providers.backupRepositoryProvider(id);
   const kind=file=>file.appProperties.studyDirectorRepositoryKind,committed=[...h.state.files.values()].filter(file=>['checkpoint','commit'].includes(kind(file))),originalPairs=committed.map(file=>file.id).sort();
   assert.equal(originalPairs.length,2);
+  if(scenario==='remote-lease'){
+   const operation=h.provider.repository.beginOperation(),marker=await operation.beginMaintenance();await clock.advance(61000);
+   await assert.rejects(runtime.providers.backupRepositoryProvider(id),error=>error.code==='STUDY_DIRECTOR_REPOSITORY_MAINTENANCE_BUSY','a live network lease still blocks a competing writer past the old 60-second expiry');
+   assert.ok(h.state.files.has(marker.remoteId),'a competing writer cannot retire the active lease using the legacy expiry');await operation.endMaintenance(marker);
+  }
   for(let index=0;index<4;index++){const blob=new Blob(['abandoned '+index]);await h.provider.repository.upload({kind:'object',id:'obj_'+(0xface00+index).toString(16).padStart(32,'0'),blob,digest:await engine.run('checksum',{value:blob,algorithm:'sha256'})});}
   const allFiles=[...h.state.files.keys()].sort(),scope=await h.provider.repository.scope();
   const coldId=id+'-cold';runtime.providers.register(freeze({...h.provider,id:coldId,label:'Drive Cold Background QA'}));
-  runtime.providers.configureRepositoryMaintenance(freeze({read:async providerId=>maintenance.get(providerId)||null,mark:async(providerId,value)=>{maintenance.set(providerId,freeze({...maintenance.get(providerId),...value}));return true;},clear:async providerId=>{maintenance.delete(providerId);return true;}}));
+  runtime.providers.configureRepositoryMaintenance(freeze({read:async providerId=>maintenance.get(providerId)||null,mark:async(providerId,value)=>{if(providerId===coldId&&value.reason==='bounded-continuation')progress.push(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length);maintenance.set(providerId,freeze({...maintenance.get(providerId),...value}));return true;},clear:async providerId=>{maintenance.delete(providerId);return true;}}));
   maintenance.set(coldId,freeze({repositoryScope:scope,requestedAt:new Date().toISOString(),nextEligibleAt:new Date(clock.now()+1000).toISOString(),reason:'repository-state'}));
   if(scenario.endsWith('unavailable'))h.state.failMediaKinds=new Set([scenario.startsWith('checkpoint')?'checkpoint':'commit']);
-  else if(!scenario.includes('deletion')){h.state.pageSize=1;h.state.pageDelayMs=10000;}
+  else if(!scenario.includes('deletion')&&scenario!=='lost-protection'){h.state.pageSize=1;h.state.pageDelayMs=10000;}
   await runtime.providers.history(coldId,{interactive:false});
-  if(scenario.includes('deletion')){const delayMs=Number(scenario.split('-').at(-1))||6000;h.state.requestDelayMs=({url,method})=>method==='GET'&&url.searchParams.get('alt')!=='media'&&!String(url.searchParams.get('q')||'').includes("mimeType='application/vnd.google-apps.folder'")?delayMs:0;}
+  if(scenario.includes('deletion')){const delayMs=Number(scenario.split('-').at(-1))||6000;h.state.requestDelayMs=({url,method})=>(method==='GET'||scenario.includes('-all-'))&&url.searchParams.get('alt')!=='media'&&!String(url.searchParams.get('q')||'').includes("mimeType='application/vnd.google-apps.folder'")?delayMs:0;}
+  let inventoryObserved=false,protectionLost=false;
+  if(scenario==='lost-protection')h.state.requestDelayMs=({url,method})=>{if(method==='GET'&&String(url.searchParams.get('q')||'').includes("value='object'"))inventoryObserved=true;const file=h.state.files.get(url.pathname.split('/').at(-1));if(inventoryObserved&&!protectionLost&&method==='GET'&&file&&kind(file)==='maintenance'){protectionLost=true;file.createdTime=new Date(clock.now()-300000).toISOString();}return 0;};
   if(scenario.endsWith('unavailable')){
    await settle(()=>maintenance.get(coldId)?.reason==='blocked-uncertain'&&!runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').busy);
    assert.deepEqual([...h.state.files.keys()].sort(),allFiles,'temporary history failure cannot authorize any backup deletion');
@@ -685,17 +695,22 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
    await settle(()=>h.state.activeObjectPages===0&&maintenance.get(coldId)?.reason==='preempted');
    assert.equal(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length,0,'foreground preemption precedes all destructive work');
    assert.ok(h.state.deletions.length>=deletions);await clock.advance(Math.max(0,Date.parse(maintenance.get(coldId).nextEligibleAt)-clock.now()-100));
-  }else if(scenario==='foreground-deletion'){
+  }else if(scenario.startsWith('foreground-deletion')){
    await settle(()=>h.state.deletions.some(remoteId=>allFiles.includes(remoteId)));
-   const removedBefore=h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length;let historySettled=false;const foreground=runtime.providers.history(coldId,{interactive:false}).finally(()=>{historySettled=true;});await settle(()=>historySettled);assert.equal((await foreground).available,true);
+   const removedBefore=h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length;let historySettled=false;const foreground=runtime.providers.history(coldId,{interactive:false}).finally(()=>{historySettled=true;});await settle(()=>historySettled);const outcome=await foreground;assert.equal(outcome.available,true,JSON.stringify({scenario,outcome,errors:diagnosticFailures.slice(-2)}));
    assert.equal(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length,removedBefore,'foreground prevents the next protected deletion');assert.ok(maintenance.has(coldId),'preemption retains intent');
+  }else if(scenario==='lost-protection'){
+   await settle(()=>protectionLost&&maintenance.get(coldId)?.reason==='error'&&!runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').busy);
+   assert.equal(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length,0,'lost protection invalidates inventory before any data deletion');assert.ok(runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').scheduled);
+   h.state.requestDelayMs=null;await clock.advance(Math.max(0,Date.parse(maintenance.get(coldId).nextEligibleAt)-clock.now()-100));
   }
   await settle(()=>!maintenance.has(coldId));
+  if(scenario.startsWith('slow-deletion')){assert.ok(progress.length<=4,'at most four unfinished passes for four eligible objects');progress.forEach((removed,index)=>assert.ok(removed>(index?progress[index-1]:0),'each short pass must retire new data, not merely retry its safety preparation'));}
   assert.deepEqual([...h.state.files.values()].filter(file=>['checkpoint','commit'].includes(kind(file))).map(file=>file.id).sort(),originalPairs);
   assert.equal([...h.state.files.values()].filter(file=>kind(file)==='maintenance').length,0);
   const retained=JSON.parse(await committed.find(file=>kind(file)==='checkpoint').content.text()),physicalObjects=new Set([...h.state.files.values()].filter(file=>kind(file)==='object').map(file=>file.appProperties.studyDirectorRepositoryId));
   assert.deepEqual([...physicalObjects].sort(),retained.objects.map(entry=>entry.objectId).sort(),'verified completion retains exactly the referenced objects');
-  if(!scenario.endsWith('unavailable')&&!scenario.includes('deletion'))assert.ok(h.state.objectPageStarts>=5,'real paginated discovery exceeds the former total deadline');
+  if(!scenario.endsWith('unavailable')&&!scenario.includes('deletion')&&scenario!=='lost-protection')assert.ok(h.state.objectPageStarts>=5,'real paginated discovery exceeds the former total deadline');
   assembledDriveCases.push(scenario);
  }finally{runtime.providers.configureRepositoryMaintenance(null);await h.provider.disconnect();globalThis.Date=realDate;backgroundClock=null;}
 }

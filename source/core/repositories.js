@@ -1462,7 +1462,7 @@ async function runDataMaintenance(options={}){
     markStorageHealthOk('maintenance');
     return report;
   })().catch(error=>{
-    if(error?.code==='DATA_MAINTENANCE_YIELDED'){if(error.reason!=='budget')dataMaintenanceContinuation=null;return {status:'yielded',reason:error.reason,phase:dataMaintenanceContinuation?.phase||0};}
+    if(error?.code==='DATA_MAINTENANCE_YIELDED'||error?.code==='AREA_NOTE_RECOVERY_SUPERSEDED'){const reason=error.code==='AREA_NOTE_RECOVERY_SUPERSEDED'?'notes-changed':error.reason;if(reason!=='budget')dataMaintenanceContinuation=null;return {status:'yielded',reason,phase:dataMaintenanceContinuation?.phase||0};}
     if(error&&error.message==='Data maintenance stopped because app ownership changed')return {status:'skipped',reason:'ownership-changed'};
     AppDiagnostics.capture('maintenance.run',error,'error');
     markStorageHealthError('maintenance',`Data maintenance failed: ${error&&error.message||'data maintenance failed'}`);

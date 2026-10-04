@@ -214,7 +214,14 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   const operation=provider.repository.beginOperation();state.networkFailCoordinationPostOnce=true;const marker=await operation.beginMaintenance();assert.match(marker.id,/^mnt_[a-f0-9]{32}$/u);assert.equal(marker.kind,'maintenance');assert.equal([...state.files.values()].filter(file=>file.appProperties.studyDirectorRepositoryKind==='maintenance').length,1,'ambiguous maintenance creation must recover the exact pre-generated marker instead of creating a duplicate');
   let active=await operation.listMaintenances();assert.equal(active.items.length,1,'a live Drive maintenance marker must be visible to publication coordination');assert.equal(active.ignored,0);
   const verified=await operation.assertMaintenance(marker);assert.equal(verified.id,marker.id,'destructive maintenance must be able to reverify its provider-visible protection');
-  const markerFile=state.files.get(marker.remoteId);markerFile.createdTime=new Date(Date.now()-31*1000).toISOString();markerFile.modifiedTime=markerFile.createdTime;await assert.rejects(()=>operation.assertMaintenance(marker),/too old/u,'Drive maintenance protection must stop authorizing destructive work once the bounded 30-second maintenance budget has elapsed');markerFile.createdTime=marker.createdAt;markerFile.modifiedTime=marker.createdAt;
+  const markerFile=state.files.get(marker.remoteId);assert.equal(markerFile.appProperties.studyDirectorRepositoryVersion,'2','the longer network lease must not be mistaken for the legacy 60-second marker');
+  const maxAge=Date.parse(marker.expiresAt)-Date.parse(marker.createdAt);assert.equal(maxAge,300000);
+  markerFile.createdTime=new Date(Date.now()-31*1000).toISOString();await operation.assertMaintenance(marker);
+  markerFile.createdTime=new Date(Date.now()-(maxAge-75000)).toISOString();await assert.rejects(()=>operation.assertMaintenance(marker),/too old/u,'network protection must retain room for a bounded request and release');
+  markerFile.appProperties.studyDirectorRepositoryVersion='1';markerFile.createdTime=new Date(Date.now()-31*1000).toISOString();await assert.rejects(()=>operation.assertMaintenance(marker),/too old/u,'legacy markers retain their original assertion and expiry semantics');
+  markerFile.createdTime=marker.createdAt;assert.equal(Date.parse((await operation.listMaintenances()).items[0].expiresAt)-Date.parse(marker.createdAt),60000);
+  markerFile.appProperties.studyDirectorRepositoryVersion='3';const unknown=await operation.listMaintenances();assert.equal(unknown.items.length,0);assert.equal(unknown.ignored,1,'unrecognized marker protocols remain uncertainty, which blocks coordinated writers and cleanup');
+  markerFile.appProperties.studyDirectorRepositoryVersion='2';markerFile.createdTime=marker.createdAt;markerFile.modifiedTime=marker.createdAt;
   const maintenanceReleaseStart=state.requests.length;state.networkFailCoordinationDeleteOnce=true;assert.equal(await operation.endMaintenance(marker),true);const maintenanceReleaseRequests=state.requests.slice(maintenanceReleaseStart).map(request=>({method:request.method,url:new URL(request.url)}));assert.equal(maintenanceReleaseRequests.some(request=>request.method==='GET'&&request.url.pathname===`/drive/v3/files/${marker.remoteId}`),false,'known verified maintenance release must DELETE directly instead of paying for a redundant metadata GET');active=await operation.listMaintenances();assert.equal(active.items.length,0,'ambiguous maintenance deletion must recheck exact identity and retry until the marker is confirmed absent');
   await assert.rejects(()=>operation.assertMaintenance(marker),/disappeared during cleanup/u,'maintenance whose provider-visible protection disappeared must fail closed before more deletion');
   assert.equal([...state.files.values()].some(file=>file.appProperties.studyDirectorRepositoryKind==='maintenance'),false,'maintenance markers must not leak into repository history after release');
@@ -222,22 +229,37 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
 
 // Renewal preserves exclusion across immutable-marker rotation, including
 // ambiguous transport outcomes, and rejects missing/expired/foreign protection.
-for(const failure of ['none','missing','expired','foreign']){
+for(const failure of ['none','legacy','missing','expired','unreadable-age','foreign']){
  const clock=createFakeClock('2026-10-03T12:00:00.000Z'),h=createHarness({clock});await h.provider.prepare();await h.provider.authorize();
  const operation=h.provider.repository.beginOperation(),marker=await operation.beginMaintenance();
  if(failure==='missing')h.state.files.delete(marker.remoteId);
- if(failure==='expired')await clock.advance(61000);
+ if(failure==='expired')await clock.advance(Date.parse(marker.expiresAt)-clock.now()+1000);
+ if(failure==='legacy')h.state.files.get(marker.remoteId).appProperties.studyDirectorRepositoryVersion='1';
+ if(failure==='unreadable-age')h.state.files.get(marker.remoteId).createdTime='unreadable';
  if(failure==='foreign')h.state.files.get(marker.remoteId).parents=['foreign-folder'];
- if(failure==='none'){
-  await clock.advance(40000);h.state.networkFailCoordinationPostOnce=true;h.state.networkFailCoordinationDeleteOnce=true;
+ if(failure==='none'||failure==='legacy'){
+  await clock.advance(failure==='legacy'?10000:40000);h.state.networkFailCoordinationPostOnce=true;h.state.networkFailCoordinationDeleteOnce=true;
   const next=await operation.renewMaintenance(marker);assert.notEqual(next.id,marker.id);assert.equal(h.state.files.has(marker.remoteId),false);
-  assert.equal((await operation.listMaintenances()).items.length,1);await operation.assertMaintenance(next);await operation.endMaintenance(next);
+  assert.equal((await operation.listMaintenances()).items.length,1);assert.equal(h.state.files.get(next.remoteId).appProperties.studyDirectorRepositoryVersion,'2');await operation.assertMaintenance(next);await operation.endMaintenance(next);
  }else{
   await assert.rejects(operation.renewMaintenance(marker),/interrupted|fresh inventory/u);
   assert.equal([...h.state.files.values()].filter(file=>file.appProperties.studyDirectorRepositoryKind==='maintenance').length,failure==='missing'?0:1,'failed renewal removes only its new candidate marker');
  }
  assert.equal(h.state.requests.some(request=>request.method==='PATCH'),false,'renewal retains immutable metadata and the existing endpoint policy');
  await h.provider.disconnect();assert.equal(clock.pending(),0);
+}
+
+// Cancellation releases only coordination artifacts, using the same verified
+// operation scope. Invalidating that scope still forces a fresh folder check.
+for(const invalidate of [false,true]){
+ const h=createHarness(),controller=new AbortController();await h.provider.prepare();await h.provider.authorize();
+ const operation=h.provider.repository.beginOperation({signal:controller.signal}),marker=await operation.beginMaintenance();
+ if(invalidate){h.state.trashedFolders.add('folder-1');await h.provider.repository.scope();}
+ const start=h.state.requests.length;controller.abort();await operation.endMaintenance(marker);
+ const metadataReads=h.state.requests.slice(start).filter(request=>request.method==='GET');
+ if(invalidate){assert.ok(metadataReads.length);assert.ok(h.state.files.has(marker.remoteId),'release cannot delete an old-folder marker after repository identity changes');}
+ else{assert.equal(metadataReads.length,0,'known marker release must not rediscover its already verified folder after cancellation');assert.equal(h.state.files.has(marker.remoteId),false);}
+ await h.provider.disconnect();
 }
 
 // Exercise actual response streams after headers, not only pending fetch calls.

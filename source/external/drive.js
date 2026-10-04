@@ -32,7 +32,9 @@
   const REPOSITORY_VERSION='1';
   const REPOSITORY_KINDS=Object.freeze(new Set(['object','checkpoint','commit']));
   const PUBLICATION_KIND='publication',MAINTENANCE_KIND='maintenance';
+  const MAINTENANCE_VERSION='2';
   let PUBLICATION_MAX_AGE_MS=0,PUBLICATION_ASSERTION_MARGIN_MS=0,MAINTENANCE_MAX_AGE_MS=0,MAINTENANCE_ASSERTION_MARGIN_MS=0;
+  let LEGACY_MAINTENANCE_MAX_AGE_MS=0,LEGACY_MAINTENANCE_ASSERTION_MARGIN_MS=0;
   const REQUIRED_CAPABILITIES=Object.freeze({pluginApi:1,backupController:1,backupProviders:1});
   const DEFAULT_MAX_BACKUP_BYTES=20*1024*1024;
   const UPLOAD_CHUNK_BYTES=2*1024*1024;
@@ -45,7 +47,7 @@
   const HISTORY_CALENDAR_MARKER='sdHistoryCalendar';
   const GIS_LOAD_TIMEOUT_MS=20000;
   const AUTH_TIMEOUT_MS=120000;
-  const API_TIMEOUT_MS=45000;
+  let API_TIMEOUT_MS=0;
   const TRANSFER_TIMEOUT_MS=120000;
   const REVOKE_TIMEOUT_MS=30000;
   const MAX_TRANSIENT_ATTEMPTS=3;
@@ -584,12 +586,12 @@
   function validMaintenanceMetadata(file,parent){
     const properties=file&&file.appProperties||{},id=String(properties[REPOSITORY_ID_MARKER]||'');
     return !!(file&&file.id&&maintenanceIdValid(id)&&file.name===maintenanceFilename(id)&&file.ownedByMe===true&&file.shared===false&&file.trashed===false&&exactParent(file,parent)&&
-      properties[REPOSITORY_MARKER.key]===REPOSITORY_MARKER.value&&properties[REPOSITORY_VERSION_MARKER]===REPOSITORY_VERSION&&properties[REPOSITORY_KIND_MARKER]===MAINTENANCE_KIND);
+      properties[REPOSITORY_MARKER.key]===REPOSITORY_MARKER.value&&[REPOSITORY_VERSION,MAINTENANCE_VERSION].includes(properties[REPOSITORY_VERSION_MARKER])&&properties[REPOSITORY_KIND_MARKER]===MAINTENANCE_KIND);
   }
   function maintenanceDescriptor(file,parent){
     if(!validMaintenanceMetadata(file,parent))throw noRetry(new Error('Google Drive returned unsafe Study Director maintenance metadata.'));
-    const id=String(file.appProperties[REPOSITORY_ID_MARKER]),createdAt=String(file.createdTime||'');
-    return Object.freeze({kind:MAINTENANCE_KIND,id,remoteId:String(file.id),verificationScope:coordinationVerificationScope(parent),name:String(file.name),createdAt,modifiedAt:String(file.modifiedTime||''),expiresAt:Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+MAINTENANCE_MAX_AGE_MS).toISOString():''});
+    const id=String(file.appProperties[REPOSITORY_ID_MARKER]),createdAt=String(file.createdTime||''),maxAge=file.appProperties[REPOSITORY_VERSION_MARKER]===MAINTENANCE_VERSION?MAINTENANCE_MAX_AGE_MS:LEGACY_MAINTENANCE_MAX_AGE_MS;
+    return Object.freeze({kind:MAINTENANCE_KIND,id,remoteId:String(file.id),verificationScope:coordinationVerificationScope(parent),name:String(file.name),createdAt,modifiedAt:String(file.modifiedTime||''),expiresAt:Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+maxAge).toISOString():''});
   }
   async function findRepositoryMaintenance(parent,id,context=EMPTY_DRIVE_OPERATION){
     if(!maintenanceIdValid(id))throw noRetry(new Error('A Study Director maintenance marker has an invalid identity.'));
@@ -609,7 +611,9 @@
   async function beginRepositoryMaintenance(baseContext=EMPTY_DRIVE_OPERATION){
     const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id='mnt_'+Platform.crypto.randomUUID().replace(/-/gu,''),now=new Date().toISOString();
     const metadata={name:maintenanceFilename(id),parents:[parent],mimeType:'application/octet-stream',appProperties:{
-      [REPOSITORY_MARKER.key]:REPOSITORY_MARKER.value,[REPOSITORY_VERSION_MARKER]:REPOSITORY_VERSION,[REPOSITORY_KIND_MARKER]:MAINTENANCE_KIND,[REPOSITORY_ID_MARKER]:id,
+      // Older clients classify this version as uncertain and defer. They must
+      // not expire a network lease using their former 60-second lifetime.
+      [REPOSITORY_MARKER.key]:REPOSITORY_MARKER.value,[REPOSITORY_VERSION_MARKER]:MAINTENANCE_VERSION,[REPOSITORY_KIND_MARKER]:MAINTENANCE_KIND,[REPOSITORY_ID_MARKER]:id,
       [FILE_SECURITY_MARKER]:FILE_SECURITY_VERSION,[REPOSITORY_IDENTITIES.driveAppVersionMarker]:PLUGIN_VERSION,[REPOSITORY_IDENTITIES.driveExportedAtMarker]:now
     }};
     let response=null,file=null;
@@ -635,7 +639,7 @@
     const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id=String(ref&&ref.id||'');let metadata=null;
     if(ref&&ref.remoteId){const candidate=await getFileMetadata(ref.remoteId,context).catch(error=>{if(Number(error&&error.driveStatus)===404)return null;throw error;});if(candidate&&validMaintenanceMetadata(candidate,parent)&&candidate.appProperties[REPOSITORY_ID_MARKER]===id)metadata=candidate;}
     if(!metadata)metadata=await findRepositoryMaintenance(parent,id,context);if(!metadata)throw noRetry(new Error('The Google Drive repository-maintenance marker disappeared during cleanup. Maintenance stopped safely.'));
-    const descriptor=maintenanceDescriptor(metadata,parent),created=Date.parse(descriptor.createdAt);if(!Number.isFinite(created)||Date.now()-created>=MAINTENANCE_MAX_AGE_MS-MAINTENANCE_ASSERTION_MARGIN_MS)throw noRetry(new Error('The Google Drive repository-maintenance marker is too old to continue destructive cleanup safely.'));
+    const descriptor=maintenanceDescriptor(metadata,parent),expires=Date.parse(descriptor.expiresAt),margin=metadata.appProperties[REPOSITORY_VERSION_MARKER]===MAINTENANCE_VERSION?MAINTENANCE_ASSERTION_MARGIN_MS:LEGACY_MAINTENANCE_ASSERTION_MARGIN_MS;if(!Number.isFinite(expires)||Date.now()>=expires-margin)throw noRetry(new Error('The Google Drive repository-maintenance marker is too old to continue destructive cleanup safely.'));
     return descriptor;
   }
   async function endRepositoryMaintenance(ref,baseContext=EMPTY_DRIVE_OPERATION){
@@ -648,16 +652,17 @@
   async function renewRepositoryMaintenance(ref,baseContext=EMPTY_DRIVE_OPERATION){
     const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id=String(ref&&ref.id||'');
     if(!maintenanceIdValid(id))throw noRetry(new Error('Repository maintenance renewal has an invalid identity.'));
-    // Rotate immutable markers with overlap. Existing app versions understand
-    // both markers; no mutable timestamp or longer expiry protocol is required.
+    // Rotate immutable markers with verified overlap. Missing or expired
+    // protection invalidates the inventory instead of resuming deletion.
     const next=await beginRepositoryMaintenance(context);
     try{
       const remoteId=trustedCoordinationRemoteId(ref,parent,MAINTENANCE_KIND,maintenanceIdValid);
       const previous=remoteId?await getFileMetadata(remoteId,context).catch(error=>{if(Number(error&&error.driveStatus)===404)return null;throw error;}):await findRepositoryMaintenance(parent,id,context);
-      if(!previous||!validMaintenanceMetadata(previous,parent)||previous.appProperties[REPOSITORY_ID_MARKER]!==id||Date.now()-Date.parse(previous.createdTime)>=MAINTENANCE_MAX_AGE_MS)throw noRetry(new Error('Repository maintenance protection was interrupted. A fresh inventory is required.'));
+      const expires=previous&&validMaintenanceMetadata(previous,parent)?Date.parse(maintenanceDescriptor(previous,parent).expiresAt):NaN;
+      if(!Number.isFinite(expires)||previous.appProperties[REPOSITORY_ID_MARKER]!==id||Date.now()>=expires)throw noRetry(new Error('Repository maintenance protection was interrupted. A fresh inventory is required.'));
       await endRepositoryMaintenance(ref,context);return next;
     }catch(error){
-      await endRepositoryMaintenance(next,EMPTY_DRIVE_OPERATION).catch(()=>{});throw error;
+      await endRepositoryMaintenance(next,driveOperationContext({folderState:context.folderState})).catch(()=>{});throw error;
     }
   }
   async function listRepositoryFiles(kind,{limit=100000}={},context=EMPTY_DRIVE_OPERATION){
@@ -813,7 +818,7 @@
       listMaintenances:()=>listRepositoryMaintenances(base),
       assertMaintenance:ref=>assertRepositoryMaintenance(ref,base),
       renewMaintenance:ref=>renewRepositoryMaintenance(ref,base),
-      endMaintenance:ref=>endRepositoryMaintenance(ref,base),
+      endMaintenance:ref=>endRepositoryMaintenance(ref,driveOperationContext({folderState:base.folderState})),
       scope:()=>repositoryScope(base),
       choose:chooseRepositoryCheckpoint,
       historyReadConcurrency:8
@@ -1048,8 +1053,9 @@
     const policy=api.backup.repositoryPolicy;
     if(!policy||typeof policy!=='object')return false;
     const publicationMaxAgeMs=Number(policy.publicationMaxAgeMs),publicationAssertionMarginMs=Number(policy.publicationAssertionMarginMs),maintenanceMaxAgeMs=Number(policy.maintenanceMaxAgeMs),maintenanceAssertionMarginMs=Number(policy.maintenanceAssertionMarginMs);
-    if(![publicationMaxAgeMs,publicationAssertionMarginMs,maintenanceMaxAgeMs,maintenanceAssertionMarginMs].every(value=>Number.isFinite(value)&&value>0)||publicationAssertionMarginMs>=publicationMaxAgeMs||maintenanceAssertionMarginMs>=maintenanceMaxAgeMs)return false;
-    PUBLICATION_MAX_AGE_MS=publicationMaxAgeMs;PUBLICATION_ASSERTION_MARGIN_MS=publicationAssertionMarginMs;MAINTENANCE_MAX_AGE_MS=maintenanceMaxAgeMs;MAINTENANCE_ASSERTION_MARGIN_MS=maintenanceAssertionMarginMs;
+    const metadataTimeoutMs=Number(policy.driveMetadataTimeoutMs),driveMaintenanceMaxAgeMs=Number(policy.driveMaintenanceMaxAgeMs),driveMaintenanceAssertionMarginMs=Number(policy.driveMaintenanceAssertionMarginMs);
+    if(![publicationMaxAgeMs,publicationAssertionMarginMs,maintenanceMaxAgeMs,maintenanceAssertionMarginMs,metadataTimeoutMs,driveMaintenanceMaxAgeMs,driveMaintenanceAssertionMarginMs].every(value=>Number.isFinite(value)&&value>0)||publicationAssertionMarginMs>=publicationMaxAgeMs||maintenanceAssertionMarginMs>=maintenanceMaxAgeMs||driveMaintenanceAssertionMarginMs>=driveMaintenanceMaxAgeMs)return false;
+    PUBLICATION_MAX_AGE_MS=publicationMaxAgeMs;PUBLICATION_ASSERTION_MARGIN_MS=publicationAssertionMarginMs;LEGACY_MAINTENANCE_MAX_AGE_MS=maintenanceMaxAgeMs;LEGACY_MAINTENANCE_ASSERTION_MARGIN_MS=maintenanceAssertionMarginMs;API_TIMEOUT_MS=metadataTimeoutMs;MAINTENANCE_MAX_AGE_MS=driveMaintenanceMaxAgeMs;MAINTENANCE_ASSERTION_MARGIN_MS=driveMaintenanceAssertionMarginMs;
     const publishedLimit=Number(api.backup.limits&&api.backup.limits.maxFileBytes);
     if(Number.isFinite(publishedLimit)&&publishedLimit>0)maxBackupBytes=publishedLimit;
     releaseFile=api.backup.releaseFile||releaseFile;
