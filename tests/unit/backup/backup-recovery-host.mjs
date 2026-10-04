@@ -24,6 +24,7 @@ const driveHistory=freeze({available:true,sourceId:'google-drive',sourceLabel:'G
 function node(){return {dataset:{},hidden:false,textContent:'',className:'',open:false,children:[],append(...items){this.children.push(...items);},appendChild(item){this.children.push(item);},replaceChildren(...items){this.children=[...items];},showModal(){this.open=true;},close(){this.open=false;}};}
 const nodes=new Map([['managed-version-history',node()],['managed-version-history-kicker',node()],['managed-version-history-title',node()],['managed-version-history-copy',node()],['managed-version-history-progress',node()],['managed-version-history-progress-stage',node()],['managed-version-history-progress-detail',node()],['managed-version-history-list',node()],['managed-version-history-status',node()],['cancel-backup-import',node()]]);
 const document={getElementById:id=>nodes.get(id)||null,createElement:()=>node()};
+const plan={input:null,cached:'',persisted:'',stored:'',writable:true,saves:[]};
 const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresentation(),
   cancellation:freeze({cancelImport:()=>{cancelImportCalls+=1;return true;}}),
   device:freeze({
@@ -48,10 +49,11 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
   }}),
   lifecycle:freeze({
     activeSessionIssue:()=>'',activeSessionLoad:async()=>freeze({ok:true,value:null,error:null}),activeSessionSettled:async()=>{events.push('active-settled');return true;},
-    attachmentBusy:()=>false,canonicalPlanDraft:async()=>'',deletionRecoveryFlush:async()=>{events.push('deletion-flush');const value=deletionResults.length?deletionResults.shift():true;if(value instanceof Error)throw value;return value;},
+    attachmentBusy:()=>false,canonicalPlanDraft:async()=>plan.stored,deletionRecoveryFlush:async()=>{events.push('deletion-flush');const value=deletionResults.length?deletionResults.shift():true;if(value instanceof Error)throw value;return value;},
     flushNotes:async()=>{events.push('notes-flush');return true;},flushPlanDraft:async()=>{events.push('plan-flush');return true;},hasTasks:()=>false,noteFailure:()=>null,
-    planDraft:()=>'',planInputValue:()=>null,quiesce:async operation=>{events.push('quiesce-enter');try{return await operation();}finally{events.push('quiesce-exit');}},
-    savePlanDraft:async()=>true,settleAttachmentWriters:async()=>{events.push('attachments-settle');return true;},settlePlan:async()=>{events.push('plan-settle');return true;},writeLiveDraft:async()=>null
+    planDraft:()=>plan.cached,planInputValue:()=>plan.input,quiesce:async operation=>{events.push('quiesce-enter');try{return await operation();}finally{events.push('quiesce-exit');}},
+    // Mirrors PlanData: the write is skipped when the page believes storage already holds it.
+    savePlanDraft:async(options={})=>{plan.saves.push(options.force===true);if(options.force===true||plan.persisted!==plan.input){if(plan.writable)plan.stored=plan.input;plan.persisted=plan.input;}plan.cached=plan.input;return true;},settleAttachmentWriters:async()=>{events.push('attachments-settle');return true;},settlePlan:async()=>{events.push('plan-settle');return true;},writeLiveDraft:async()=>null
   }),
   managedRecovery:freeze({createCoordinator:input=>ManagedRecovery.createCoordinator(input)}),
   mutation:freeze({run:async(kind,operation)=>{events.push(`mutation:${kind}`);return operation();}}),
@@ -137,5 +139,19 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   await assert.rejects(()=>host.managedRecovery(spec),/deletion/i);
   assert.equal(safeties,gate);assert.equal(applies,0);assert.equal(suspended,0);
   deletionResults=[];const retried=await host.managedRecovery(spec);assert.equal(retried.ok,true);assert.equal(applies,1);assert.equal(suspended,0);
+}
+// Browser data clearing removes the stored draft while the page still believes it
+// wrote that text. Recovery writes the visible draft again instead of failing.
+{
+  const spec=freeze({kind:'restore-version',label:'Device Folder',createSafety:async()=>freeze({verified:true,checkpointId:CHECKPOINT('c'),sourceRevision:'2026-09-20T12:00:00.000Z'}),apply:async()=>freeze({ok:true}),publishPresent:async()=>freeze({status:'completed'})});
+  Object.assign(plan,{input:'09:00 Economics 60',cached:'09:00 Economics 60',persisted:'09:00 Economics 60',stored:null,saves:[]});
+  assert.equal((await host.managedRecovery(spec)).ok,true,'a draft lost from storage is rewritten before recovery');
+  assert.equal(plan.stored,'09:00 Economics 60');assert.deepEqual(plan.saves,[true],'one forced write repairs the lost draft; the final settlement then reads it back');
+  Object.assign(plan,{input:'',cached:'',persisted:'',stored:null,saves:[]});
+  assert.equal((await host.managedRecovery(spec)).ok,true,'an empty visible draft is stored as empty rather than failing against an absent row');
+  assert.equal(plan.stored,'');
+  Object.assign(plan,{input:'09:00 Ethics 30',cached:'09:00 Ethics 30',persisted:'09:00 Ethics 30',stored:null,writable:false,saves:[]});
+  await assert.rejects(()=>host.managedRecovery(spec),/pre-recovery read-back check/,'a draft that still cannot be read back stops recovery before local data changes');
+  Object.assign(plan,{input:null,writable:true,saves:[]});
 }
 console.log(JSON.stringify({status:'PASS',suite:'backup-recovery-host',providerScopedRecovery:true,noCrossProviderDiscovery:true,replaceAndCombine:true,durableProviderRetry:true,pendingMutationFailClosed:true,managedRecoveryLifecycle:true,closeDoesNotCancel:true,reopenReattaches:true,cancelSourceScoped:true},null,2));

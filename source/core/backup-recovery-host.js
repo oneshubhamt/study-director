@@ -94,7 +94,14 @@ registry.define('backup-recovery-host',1,()=>{
       const planInput=input.lifecycle.planInputValue();
       if(planInput!==null&&(input.lifecycle.planDraft()??'')!==planInput&&await input.lifecycle.savePlanDraft()===false)throw new Error('The current Plan draft could not be saved before recovery.');
       await input.lifecycle.settlePlan();
-      if(planInput!==null&&(await input.lifecycle.canonicalPlanDraft())!==planInput)throw new Error('The Plan draft did not pass the pre-recovery read-back check.');
+      if(planInput!==null&&(await input.lifecycle.canonicalPlanDraft())!==planInput){
+        // Storage can lose a draft this page already wrote (for example when the
+        // browser's site data is cleared). Write the visible draft once more and
+        // require the read-back to match before replacing anything.
+        if(await input.lifecycle.savePlanDraft({force:true})===false)throw new Error('The current Plan draft could not be saved before recovery.');
+        await input.lifecycle.settlePlan();
+        if((await input.lifecycle.canonicalPlanDraft())!==planInput)throw new Error('The Plan draft did not pass the pre-recovery read-back check.');
+      }
       const hasTasks=input.lifecycle.hasTasks();
       let liveResult=null;if(hasTasks)liveResult=await input.lifecycle.writeLiveDraft();
       await input.lifecycle.flushNotes();

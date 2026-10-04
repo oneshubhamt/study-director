@@ -94,7 +94,7 @@ registry.define('persistence',1,()=>{
     exactObject(input.config,['dbName','dbVersion','legacyBaselineVersion','stores','legacyStores'],'IndexedDB config');
     exactObject(input.config.stores,['dailyRecords','dailySummaries','areaNotes','activeSessions','appMeta','assets'],'IndexedDB stores');
     exactObject(input.config.legacyStores,['syncQueue','tombstones','reflectionDrafts'],'IndexedDB legacy stores');
-    functions(input.hooks,['onError','onOk','capture'],'IndexedDB hooks');
+    functions(input.hooks,Object.hasOwn(input.hooks,'onReset')?['onError','onOk','capture','onReset']:['onError','onOk','capture'],'IndexedDB hooks');
     if(input.upgrade!==undefined)functions(input.upgrade,['apply'],'IndexedDB upgrade adapter');
     const applyUpgrade=input.upgrade?input.upgrade.apply:()=>false;
     const DB_NAME=input.config.dbName;
@@ -113,9 +113,21 @@ registry.define('persistence',1,()=>{
     const markStorageHealthError=input.hooks.onError;
     const markStorageHealthOk=input.hooks.onOk;
     const AppDiagnostics=freeze({capture:input.hooks.capture});
+    const onReset=typeof input.hooks.onReset==='function'?input.hooks.onReset:null;
     let appDbConnection=null;
     let appDbOpenPromise=null;
     const freshlyCreatedDatabases=new WeakSet();
+    // A database created after this page already held a connection was not
+    // opened for the first time: the browser deleted the site's data while the
+    // page stayed open (for example, Clear browsing data). Callers must not
+    // treat their in-memory "already saved" knowledge as durable after that.
+    let establishedConnection=false,startedFresh=false,resetCount=0,lastResetAt='';
+    function noteRecreatedDatabase(){
+      resetCount++;lastResetAt=new Date().toISOString();
+      const event=freeze({detectedAt:lastResetAt,count:resetCount});
+      AppDiagnostics.capture('storage.idb-recreated',new Error('The browser database was recreated while the app was open.'),'warn');
+      if(onReset)setTimeout(()=>{try{onReset(event);}catch(error){AppDiagnostics.capture('storage.idb-recreated-hook',error);}},0);
+    }
     function clearAppDBConnection(db=null){
       if(db&&appDbConnection!==db)return false;
       appDbConnection=null;
@@ -137,7 +149,7 @@ registry.define('persistence',1,()=>{
       for(const name of LEGACY_STORES)if(db.objectStoreNames.contains(name))db.deleteObjectStore(name);
     }
     function attachConnection(db){
-      appDbConnection=db;
+      appDbConnection=db;establishedConnection=true;
       db.onversionchange=()=>{
         if(appDbConnection===db)clearAppDBConnection(db);
         try{db.close();}catch(error){AppDiagnostics.capture('storage.db-versionchange-close',error);}
@@ -180,6 +192,7 @@ registry.define('persistence',1,()=>{
       if(Number(db.version)===1&&freshlyCreatedDatabases.has(db)){
         db.close();
         db=await openRequest(DB_VER,{retireLegacy:true,fresh:true});
+        if(establishedConnection)noteRecreatedDatabase();else startedFresh=true;
         return db;
       }
       if(Number(db.version)<LEGACY_BASELINE_VER){
@@ -282,7 +295,8 @@ registry.define('persistence',1,()=>{
       format:'study-director.indexeddb-primitives',contractVersion:2,
       isAvailable:()=>typeof globalThis.indexedDB?.open==='function',clearConnection:clearAppDBConnection,open:openAppDB,
       transaction:idbTransaction,strictTransaction:idbStrictTransaction,storeTransaction:idbStoreTransaction,strictStoreTransaction:idbStrictStoreTransaction,
-      get:idbGet,getAll:idbGetAll,getAllIfPresent,hasStore,topology,retireLegacyStores
+      get:idbGet,getAll:idbGetAll,getAllIfPresent,hasStore,topology,retireLegacyStores,
+      lifecycle:()=>freeze({startedFresh,resets:resetCount,lastResetAt})
     });
   }
 

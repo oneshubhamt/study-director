@@ -8,7 +8,7 @@ class StoreNames{
   [Symbol.iterator](){return [...this.set].sort()[Symbol.iterator]();}
 }
 function fakeIndexedDb(initial){
-  let state=initial?{version:Number(initial.version),stores:new Set(initial.stores)}:null;
+  let state=initial?{version:Number(initial.version),stores:new Set(initial.stores)}:null,lastDb=null;
   function dbView(){
     return {
       get version(){return state.version;},
@@ -31,7 +31,7 @@ function fakeIndexedDb(initial){
           const upgrading=nextVersion>oldVersion;
           state.version=nextVersion;
           const db=dbView();
-          req.result=db;
+          req.result=db;lastDb=db;
           if(upgrading){
             const transaction={aborted:false,abort(){this.aborted=true;}};
             req.onupgradeneeded?.({oldVersion,target:{result:db,transaction}});
@@ -42,7 +42,10 @@ function fakeIndexedDb(initial){
       });
       return req;
     },
-    snapshot(){return {version:state?.version??0,stores:[...(state?.stores||[])].sort()};}
+    snapshot(){return {version:state?.version??0,stores:[...(state?.stores||[])].sort()};},
+    // Browser "Clear browsing data": the database disappears and open connections close.
+    clearSiteData(){state=null;lastDb?.onclose?.();},
+    closeConnection(){lastDb?.onclose?.();}
   };
 }
 
@@ -62,11 +65,11 @@ const currentStores=Object.freeze({
 });
 const legacyStores=Object.freeze({syncQueue:'syncQueue',tombstones:'tombstones',reflectionDrafts:'reflectionDrafts'});
 const canonicalNames=Object.values(currentStores).sort();
-function makeDb(indexedDB){
+function makeDb(indexedDB,onReset=null){
   const persistence=loadPersistence(indexedDB);
   return persistence.createIndexedDb(Object.freeze({
     config:Object.freeze({dbName:'StudyDirectorDB',dbVersion:7,legacyBaselineVersion:5,stores:currentStores,legacyStores}),
-    hooks:Object.freeze({onError:()=>{},onOk:()=>{},capture:()=>{}}),
+    hooks:Object.freeze(onReset?{onError:()=>{},onOk:()=>{},capture:()=>{},onReset}:{onError:()=>{},onOk:()=>{},capture:()=>{}}),
     upgrade:Object.freeze({apply:()=>false})
   }));
 }
@@ -103,6 +106,23 @@ assert.equal(freshTopology.version,7);
 assert.deepEqual([...freshTopology.stores].sort(),canonicalNames);
 assert.deepEqual([...freshTopology.legacyStores],[]);
 assert.equal(freshTopology.current,true);
+assert.equal(freshDb.lifecycle().startedFresh,true,'a first-ever database is a fresh start, not a reset');
+assert.equal(freshDb.lifecycle().resets,0);
+
+// Clearing site data while the page stays open recreates the database on the
+// next open. That is reported once; an ordinary reconnection is not a reset.
+const resetEvents=[],resetBackend=fakeIndexedDb({version:7,stores:canonicalNames});
+const resetDb=makeDb(resetBackend,event=>resetEvents.push(event));
+await resetDb.open();
+assert.equal(resetDb.lifecycle().startedFresh,false,'an existing database is not a fresh start');
+resetBackend.closeConnection();await resetDb.open();await new Promise(resolve=>setTimeout(resolve,0));
+assert.deepEqual(resetEvents,[],'reopening an existing database after a closed connection is not a reset');
+resetBackend.clearSiteData();
+const recreated=await resetDb.open();await new Promise(resolve=>setTimeout(resolve,0));
+assert.equal(Number(recreated.version),7,'the recreated database receives the current topology');
+assert.equal(resetEvents.length,1,'the browser data clear is reported exactly once');
+assert.equal(resetEvents[0].count,1);assert.ok(Number.isFinite(Date.parse(resetEvents[0].detectedAt)));
+assert.equal(resetDb.lifecycle().resets,1);assert.equal(resetDb.lifecycle().startedFresh,false);
 
 
 // A genuinely historical pre-v3 database must not be mistaken for a fresh v1 database.
@@ -124,5 +144,5 @@ assert.deepEqual(historicalBackend.snapshot(),{version:7,stores:canonicalNames})
 
 console.log(JSON.stringify({
   status:'PASS',suite:'indexeddb-topology-retirement',
-  migrated:{from:5,to:7,removed:['syncQueue','tombstones','reflectionDrafts']},freshInstallLean:true,historicalV1Bridged:true
+  migrated:{from:5,to:7,removed:['syncQueue','tombstones','reflectionDrafts']},freshInstallLean:true,historicalV1Bridged:true,siteDataClearDetected:true
 },null,2));

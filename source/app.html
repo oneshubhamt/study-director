@@ -4048,7 +4048,8 @@ const IndexedDb=PersistenceModule.createIndexedDb(Object.freeze({
   hooks:Object.freeze({
     onError:message=>markStorageHealthError('indexedDB',`Browser database is unavailable: ${message}`),
     onOk:key=>markStorageHealthOk('indexedDB',key),
-    capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)
+    capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
+    onReset:()=>{void handleBrowserStorageReset().catch(error=>AppDiagnostics.capture('storage-reset.handle',error,'error'));}
   })
 }));
 const ReconciliationBaselineCodec=ReconciliationBaselineModule.createCodec(Object.freeze({limits:APP_LIMITS,normalizeAreaName}));
@@ -4759,8 +4760,15 @@ function refreshAreaNoteConsumers(){
 function reportAreaNoteConflict(info={}){
   const key=normalizeAreaName(info.key),label=displayAreaName(info.label||key||'this area');
   if(!key)return false;
-  const message=`A newer ongoing note for ${label} was saved elsewhere. Study Director kept the newer note and rejected the outdated edit.`;
   setNoteSyncStateForKey(key,'conflict');
+  if(info.preserved===true){
+    // The other version is stored durably; review happens on request, not in a blocking banner.
+    const message=`Two versions of the ongoing note for ${label} met. The stored note was kept and your other version is saved for review.`;
+    setStatus('save-status',message,false);setStatus('ongoing-notes-status',message,false);
+    void refreshAreaNoteConflictNotice();
+    return true;
+  }
+  const message=`A newer ongoing note for ${label} was saved elsewhere. Study Director kept the newer note and rejected the outdated edit.`;
   setPlanStatus(message,false);
   setStatus('save-status',message,false);
   setStatus('ongoing-notes-status',message,false);
@@ -6954,9 +6962,21 @@ const PlanData=(()=>{
     state={...state,draft:value};
     return enqueue(async token=>{
       if(libraryBytes+new TextEncoder().encode(JSON.stringify(value)).length+9>PersonalDataCodec.maxBytes)throw new RangeError('Plans and draft exceed the 1 MiB allowance.');
-      if(persistedDraft===value){failure=null;return true;}
+      // The cache only proves what this page wrote; a forced write (or a browser
+      // data clear, which resets the cache) must reach storage again.
+      if(persistedDraft===value&&options.force!==true){failure=null;return true;}
       await AppData.planData.writeDraft(value,{ownershipToken:token,allowHydrating:!!options.allowHydrating,backupCapture:options.backupCapture===true});persistedDraft=value;failure=null;return true;
     },options);
+  }
+  // Browser data was cleared while this page stayed open. Write back the draft
+  // and saved plans this page still holds instead of trusting the old cache.
+  async function rewriteAfterStorageReset(){
+    persistedDraft=undefined;
+    if(!ready)return false;
+    const library={savedPlans:state.savedPlans,defaultId:state.defaultId};
+    await enqueue(async token=>{await AppData.planData.writeLibrary(library,{ownershipToken:token,allowHydrating:false});failure=null;return true;});
+    if(state.draft!==null)await writeDraft(state.draft,{force:true});
+    return true;
   }
   async function writeLibrary(value,options={}){
     if(!ready)throw new Error('Plan storage is still loading.');
@@ -6991,7 +7011,7 @@ const PlanData=(()=>{
     await settled();const actual={version:2,plans:await AppData.planData.read(),preferences:await preferences()};
     if(JSON.stringify(PersonalDataCodec.normalize(actual))!==JSON.stringify(PersonalDataCodec.normalize(value)))throw new Error('Post-restore verification failed for plans or personal settings.');return true;
   }
-  return Object.freeze({hydrate,writeDraft,writeLibrary,settled,exportData,importData,verify,readDraft:()=>state.draft,library:()=>copy({savedPlans:state.savedPlans,defaultId:state.defaultId}),defaultSchedule:()=>state.savedPlans.find(p=>p.id===state.defaultId)?.scheduleText??null,ready:()=>ready});
+  return Object.freeze({hydrate,writeDraft,writeLibrary,rewriteAfterStorageReset,settled,exportData,importData,verify,readDraft:()=>state.draft,library:()=>copy({savedPlans:state.savedPlans,defaultId:state.defaultId}),defaultSchedule:()=>state.savedPlans.find(p=>p.id===state.defaultId)?.scheduleText??null,ready:()=>ready});
 })();
 
 /* PLAN MODULE COMPOSITION */
@@ -8219,7 +8239,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     notesFailure:()=>AppData.notes.failure(),
     restoreJournalPrepare:async value=>{const backupFile=await Exports.run('file.persist',{file:value.blob});const {blob,...metadata}=value;return AppData.restoreJournal.prepare({...metadata,backupFile});},
     restoreJournalRead:async()=>{const journal=await AppData.restoreJournal.read();if(!journal)return null;const ref=journal.payload.backupFile;return ref?{...journal,payload:{...journal.payload,blob:await Exports.run('file.read',{ref})}}:journal;},
-    restoreJournalMark:(id,phase)=>AppData.restoreJournal.mark(id,phase),
+    restoreJournalMark:async(id,phase)=>{const marked=await AppData.restoreJournal.mark(id,phase);if(phase==='verified')settleStorageReset();return marked;},
     restoreJournalClear:async id=>{const journal=await AppData.restoreJournal.read();await AppData.restoreJournal.clear(id);if(journal?.payload.backupFile)await BackupFiles.release(journal.payload.backupFile.name);},
     scheduleRead:()=>PlanData.readDraft()??'',
     personalSettle:async options=>{
@@ -8400,7 +8420,7 @@ async function offerDeviceRecoveryIfLocalEmpty(options={}){
   if(!await canonicalLocalRecoveryEmpty())return false;
   const state=DeviceBackup.status(),latestBefore=Number(options.latestBefore)||Number.POSITIVE_INFINITY;
   if(!state.connected){
-    if(options.reason==='startup'&&!deviceRecoveryHintNotified){deviceRecoveryHintNotified=true;Interactions.notify({key:'device-recovery-empty-local',title:'No local study data found',message:'If this is unexpected, choose your existing Device Folder in Library → Data & Backup to recover a verified backup.'});}
+    if(options.reason==='startup'&&!deviceRecoveryHintNotified){deviceRecoveryHintNotified=true;Interactions.notify({key:'device-recovery-empty-local',title:'No local study data found',message:'If browser data was cleared, reconnect your Device Folder or Google Drive to restore a verified backup.',action:{label:'Open Data & Backup',run:()=>void showBackupPresentation('device-folder','status')}});}
     return false;
   }
   deviceRecoveryOfferRunning=true;
@@ -8425,6 +8445,95 @@ async function connectDeviceBackupWithRecovery(){
   const startedAt=Date.now(),result=await DeviceBackup.connect();
   if(DeviceBackup.status().connected){await offerDeviceRecoveryIfLocalEmpty({reason:'connect',latestBefore:startedAt-1});}
   return result;
+}
+/* BROWSER DATA CLEARING · keep what an open tab still holds */
+// Clearing site data deletes IndexedDB, localStorage and OPFS even with persistent
+// storage granted. This tab still holds its notes, plan, preferences and session;
+// Saved Days and attachments may exist only in a backup. Until the user restores
+// or keeps the current state, automatic backups must not publish the reduced
+// dataset as their latest version. After a reload the folder is no longer
+// configured, so nothing needs to persist this pause.
+let storageResetHold=null,storageResetHandling=null;
+async function handleBrowserStorageReset(){
+  if(storageResetHandling)return storageResetHandling;
+  storageResetHandling=(async()=>{
+    if(!storageResetHold){
+      const hold={provider:null,device:null};storageResetHold=hold;
+      try{hold.provider=BackupProviderRuntime.suspendBackground('storage-reset');}catch(error){AppDiagnostics.capture('storage-reset.provider-suspend',error,'warn');}
+      try{const token=await DeviceBackup.suspendAutomatic('storage-reset');if(storageResetHold===hold)hold.device=token;else DeviceBackup.resumeAutomatic(token);}
+      catch(error){AppDiagnostics.capture('storage-reset.device-suspend',error,'warn');}
+    }
+    if(appCanMutate())for(const [name,step] of [
+      ['notes',()=>AppData.notes.recoverAfterStorageLoss()],
+      ['plan',()=>PlanData.rewriteAfterStorageReset()],
+      ['preferences',()=>{protectedPreferencesDirty=true;return flushProtectedPreferences();}],
+      ['session',()=>TASKS.length?writeLiveDraftNow({markChanged:false}):null]
+    ]){try{await step();}catch(error){AppDiagnostics.capture(`storage-reset.${name}`,error,'error');}}
+    NoticeCoordinator.emit({source:'storage-reset',id:'detected',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,cue:'none',
+      title:'Browser data was cleared',
+      message:'Notes and plans still open here were saved again. Automatic backups are paused so an earlier backup stays easy to restore.',
+      action:{label:'Review',run:()=>void reviewStorageReset()}});
+    try{refreshAreaNoteConsumers();renderSched();}catch(error){AppDiagnostics.capture('storage-reset.render',error,'warn');}
+  })().finally(()=>{storageResetHandling=null;});
+  return storageResetHandling;
+}
+function settleStorageReset(){
+  const hold=storageResetHold;storageResetHold=null;if(!hold)return false;
+  try{hold.provider?.release();}catch(error){AppDiagnostics.capture('storage-reset.provider-resume',error,'warn');}
+  if(hold.device)DeviceBackup.resumeAutomatic(hold.device);
+  NoticeCoordinator.resolveEvent('storage-reset','detected');
+  return true;
+}
+async function reviewStorageReset(){
+  const connected=DeviceBackup.status().connected;
+  const choice=await Interactions.choose({
+    title:'Browser data was cleared',
+    message:'This browser lost its stored Study Director data. What this tab still had open was saved again.',
+    details:['Saved Days, attachments and anything not open here may only exist in a backup.','Automatic backups resume after a restore, or when you keep the current data.'],
+    cancelLabel:'Later',
+    choices:[
+      {value:'restore',label:'Restore a backup',kind:'primary',description:'Choose a verified earlier version. Combine keeps the notes from this tab.'},
+      {value:'keep',label:'Keep current data',description:'Resume automatic backups with what this browser holds now.'}
+    ]
+  });
+  if(choice==='keep')return settleStorageReset();
+  if(choice==='restore')return showBackupPresentation('device-folder',connected?'history':'status');
+  return false;
+}
+/* ONGOING NOTE CONFLICT COPIES · review with the shared note reconciliation UI */
+let areaNoteConflictReviewRunning=false;
+function publishAreaNoteConflictNotice(count){
+  if(!count){NoticeCoordinator.resolveEvent('area-notes','conflict-copies');return false;}
+  NoticeCoordinator.emit({source:'area-notes',id:'conflict-copies',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,cue:'none',
+    title:'Ongoing note needs review',
+    message:count===1?'Two versions of an ongoing note met. The stored note was kept and your other version is saved for review.':`${count} ongoing notes have a second version saved for review.`,
+    action:{label:'Review',run:()=>void reviewAreaNoteConflicts()}});
+  return true;
+}
+async function refreshAreaNoteConflictNotice(){
+  try{const copies=await AppData.notes.conflicts();publishAreaNoteConflictNotice(copies.length);return copies.length;}
+  catch(error){AppDiagnostics.capture('area-notes.conflict-list',error,'warn');return 0;}
+}
+async function reviewAreaNoteConflicts(){
+  if(areaNoteConflictReviewRunning||!appCanMutate())return false;
+  areaNoteConflictReviewRunning=true;
+  try{
+    const copies=await AppData.notes.conflicts();
+    if(!copies.length){publishAreaNoteConflictNotice(0);return false;}
+    const conflicts=copies.map(copy=>{
+      const stored=AppData.notes.get(copy.key);
+      return {key:copy.key,label:stored?.label||copy.label,localCandidateId:'stored',incomingCandidateId:'conflict-copy',localValue:String(stored?.text||''),incomingValue:copy.text,ancestorAvailable:typeof copy.ancestor==='string',ancestorValue:String(copy.ancestor||''),incomingLabel:'Other version'};
+    });
+    const result=await withRichTextAssetMaintenancePaused(()=>NoteReconciliationUI.resolve({conflicts}));
+    if(!result)return false;
+    for(const copy of copies){
+      const resolved=result.notes[copy.key];if(!resolved)continue;
+      try{await AppData.notes.resolveConflict(copy.key,resolved.text,copy.createdAt);}
+      catch(error){AppDiagnostics.capture('area-notes.conflict-resolve',error,'error');setStatus('ongoing-notes-status',`The reviewed note could not be applied: ${error&&error.message||error}. Both versions are still kept.`,false);}
+    }
+    refreshAreaNoteConsumers();
+    return true;
+  }finally{areaNoteConflictReviewRunning=false;await refreshAreaNoteConflictNotice();}
 }
 const DeviceRepositoryBackground=RepositoryBackgroundModule.createCoordinator(Object.freeze({target:'device-folder',environment:Object.freeze({AbortController:window.AbortController,clearTimeout:timer=>clearTimeout(timer),now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay)})}));
 DeviceBackup=DeviceBackupModule.createController(Object.freeze({
@@ -8485,7 +8594,7 @@ BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze({
     attachmentBusy:()=>imagePreparationCount>0||AttachmentIngest.status().busy,canonicalPlanDraft:async()=>(await AppData.planData.read()).draft,deletionRecoveryFlush:()=>AppData.deletionRecovery.flush(),
     flushNotes:()=>AppData.notes.flush({strict:true}),flushPlanDraft:()=>PlanDraftEditor.flush(),hasTasks:()=>TASKS.length>0,noteFailure:()=>AppData.notes.failure(),
     planDraft:()=>PlanData.readDraft(),planInputValue:()=>document.getElementById('plan-input')?.value??null,quiesce:operation=>quiesceManagedRecoveryRuntime(operation),
-    savePlanDraft:()=>PlanDraftEditor.save(),settleAttachmentWriters:()=>settleAttachmentWriters(),settlePlan:()=>PlanData.settled(),writeLiveDraft:()=>writeLiveDraftNow({markChanged:false,allowDuringRecoveryQuiescence:true})
+    savePlanDraft:options=>PlanDraftEditor.save(options),settleAttachmentWriters:()=>settleAttachmentWriters(),settlePlan:()=>PlanData.settled(),writeLiveDraft:()=>writeLiveDraftNow({markChanged:false,allowDuringRecoveryQuiescence:true})
   }),
   managedRecovery:Object.freeze({createCoordinator:input=>ManagedRecoveryModule.createCoordinator(input)}),
   mutation:Object.freeze({run:(kind,operation)=>AppMutationCoordinator.runExclusive(kind,operation)}),
@@ -9688,6 +9797,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
       window.dispatchEvent(new CustomEvent('studydirector:startupready',{detail:Object.freeze({version:APP_VERSION,canonical:proof.canonical,retirementDataReady:proof.retirementDataReady})}));
       void PwaLifecycle.confirmBoot().catch(error=>AppDiagnostics.capture('pwa.boot-confirmation',error,'warn'));
       setTimeout(()=>{void offerDeviceRecoveryIfLocalEmpty({reason:'startup'}).catch(error=>AppDiagnostics.capture('backup.device-recovery-offer',error,'warn'));},0);
+      setTimeout(()=>{void refreshAreaNoteConflictNotice();},0);
       return proof;
     },
     reportFailure:failure=>{

@@ -33,6 +33,12 @@ If a restored Plan working draft is semantically identical to the applied Active
 
 The rich-text runtime is generated from the authored `rich-text/` source and reviewed dependencies. Ongoing-Note reconciliation is format-aware and supports ancestor-aware merge behavior. Historical rich-text portability is handled through explicit codecs rather than by exposing internal editor state as the durable format.
 
+### Ongoing Note save integrity and browser data clearing
+
+A note save batch reads its expected revision only when it runs, after earlier batches for the same note have committed, so a tab never mistakes its own commit for a competing edit. A genuine conflict keeps the stored note and writes the losing text, with its ancestor when known, to an `areaNoteConflict.v1:` copy before the recovery journal retires; the shared note reconciliation dialog reviews it, and applying or discarding retires the copy. A row that vanished without a deletion record, while the database was recreated, is lost storage rather than a newer decision: it is rewritten from memory, and a reload keeps notes that survive only in memory.
+
+Clearing site data deletes IndexedDB, localStorage and OPFS even with persistent storage granted. The IndexedDB owner reports a database recreated under an open page. The host then writes back the notes, plan, preferences and session the tab still holds, forces the Plan draft past its write cache, pauses automatic Device Folder and Drive publication, and shows a non-blocking notice. A verified restore/combine or an explicit "Keep current data" resumes publication. The pause is not persisted: after a reload the backup folder is no longer configured, and the empty-data startup hint points to Data & Backup. Only an external backup survives a deliberate clear.
+
 ## 5. Managed backup repositories
 
 Google Drive and Device Folder use the same managed-repository model:
