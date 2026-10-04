@@ -82,8 +82,9 @@
     })
   });
   const themes=freeze({
-    'dark':freeze({id:'dark',label:'Dark',presentationId:'director-current'}),
-    'light':freeze({id:'light',label:'Light',presentationId:'director-current'})
+    // Themes choose light or dark semantic roles only; skins are independent.
+    'dark':freeze({id:'dark',label:'Dark'}),
+    'light':freeze({id:'light',label:'Light'})
   });
   // Earlier releases stored Director-prefixed theme IDs. Stored
   // preferences, startup mirrors and backups keep them verbatim; every read

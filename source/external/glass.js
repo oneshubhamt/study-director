@@ -699,6 +699,13 @@ html[data-presentation="glass"]{
   --sd-motion-duration-fast:.17s;
   --sd-motion-duration-standard:.18s;
   --sd-motion-ease-standard:cubic-bezier(.2,.75,.25,1);
+  --sd-motion-surface-duration:.3s;
+  --sd-motion-surface-ease:cubic-bezier(.16,1,.3,1);
+  --sd-motion-surface-start:translate3d(0,10px,0) scale(.97);
+  --sd-motion-disclosure-duration:.34s;
+  --sd-motion-disclosure-ease:cubic-bezier(.16,1,.3,1);
+  --sd-motion-moment-duration:1.1s;
+  --sd-motion-press-transform:scale(.975);
   --sd-motion-pane-enter-name:sd-pane-enter-float;
   --sd-motion-pane-enter-duration:.46s;
   --sd-motion-pane-enter-ease:cubic-bezier(.16,1,.3,1);

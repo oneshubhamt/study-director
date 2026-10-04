@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const html=fs.readFileSync('source/app.html','utf8');
+const planJs=fs.readFileSync('source/core/plan.js','utf8');
 const coreCss=fs.readFileSync('source/styles/core.css','utf8');
 const glassCss=fs.readFileSync('source/external/glass.js','utf8');
 const auroraCss=fs.readFileSync('source/external/aurora.js','utf8');
@@ -65,4 +66,14 @@ assert.match(auroraCss,/const PROFILE=Object\.freeze\(\{\s*contractVersion:2,\s*
 assert.doesNotMatch(auroraCss,/data-(?:presentation|typography|shape|material|depth)="glass"|presentation==='glass'/u,'Aurora is an independent snapshot: no rule may depend on Glass, so reimagining Glass never changes it.');
 assert.match(html,/<script src="@@SD_EXTERNAL_GLASS_FILENAME@@"><\/script>\n<script src="@@SD_EXTERNAL_AURORA_FILENAME@@"><\/script>/u,'Aurora loads synchronously beside Glass so a saved Aurora choice paints without a flash.');
 
-console.log(JSON.stringify({status:'PASS',contract:'presentation-source-contracts',paths:['prepaint-appearance','prepaint-browser-chrome','touch-minimums','execute-note-alignment','copy-report-centering','version-history-scroll','guide-touch','low-glare-light','tablet-plan-grid','compact-backup-layout','glass-legibility','glass-palettes','glass-aurora','pane-entrance','appearance-shift','appearance-reveal','typography-roles','hero-islands','area-atmosphere','readable-plan-rows','aurora-snapshot','progress-field-border']},null,2));
+assert.doesNotMatch(html,/presentationId:'director-current'/u,'themes own light/dark roles only and must not name a skin.');
+assert.match(coreCss,/html\[data-theme="light"\]\[data-presentation="director-current"\] #cd\{/u,'Director-specific light styling is scoped to the Director skin, not to the theme.');
+for(const token of ['--sd-motion-surface-duration','--sd-motion-surface-ease','--sd-motion-surface-start','--sd-motion-disclosure-duration','--sd-motion-moment-duration']){
+  assert.ok(coreCss.includes(`${token}:`),`core motion profile defines ${token}`);
+  assert.ok(glassCss.includes(`${token}:`)&&auroraCss.includes(`${token}:`),`Glass and Aurora retune ${token}`);
+}
+assert.match(coreCss,/\.si\.sd-just-done \.si-card\{animation:sd-moment-settle var\(--sd-motion-moment-duration\) ease-out var\(--sd-moment-offset,0ms\) both\}/u,'the completion moment resumes through its offset when the board rebuilds.');
+assert.match(planJs,/completionMomentElapsed\(`\$\{i\}\|\$\{t\.name\}`,!!scheduleGateway\.row\(i\)\.done\)[\s\S]*?animationend[\s\S]*?classList\.remove\('sd-just-done'\)/u,'only a row seen incomplete then complete gets the moment, and it is cleared after playing so re-showing the pane cannot replay it.');
+assert.match(coreCss,/@media \(prefers-reduced-motion: reduce\)\{[\s\S]*?\.si\.sd-just-done \.si-card,\.si\.sd-just-done \.si-chk\{animation:none!important\}[\s\S]*?html\{--sd-motion-press-transform:none!important\}[\s\S]*?::details-content\{transition:none!important\}/u,'reduced motion removes the completion moment, press motion and disclosure unfolding.');
+
+console.log(JSON.stringify({status:'PASS',contract:'presentation-source-contracts',paths:['prepaint-appearance','prepaint-browser-chrome','touch-minimums','execute-note-alignment','copy-report-centering','version-history-scroll','guide-touch','low-glare-light','tablet-plan-grid','compact-backup-layout','glass-legibility','glass-palettes','glass-aurora','pane-entrance','appearance-shift','appearance-reveal','typography-roles','hero-islands','area-atmosphere','readable-plan-rows','aurora-snapshot','theme-skin-separation','motion-system','progress-field-border']},null,2));

@@ -197,10 +197,31 @@ function scheduleRowClass(row,rt){
   else if(scheduleGateway.row(i).skipped)cls+=' skipped';
   return cls;
 }
+// Presentation memory for the completion moment. Rows are rebuilt on every
+// render, so a CSS animation keyed only on .done would replay each refresh.
+// Only a row seen incomplete and then complete gets the moment; a rebuild
+// during it resumes through a negative delay instead of restarting.
+const COMPLETION_MOMENT_MS=900;
+const completionMoments=new Map();
+function completionMomentElapsed(key,done){
+  const now=Date.now(),prior=completionMoments.get(key);
+  if(completionMoments.size>400)completionMoments.clear();
+  if(!done){completionMoments.set(key,{done:false,at:0});return -1;}
+  if(prior&&prior.done===false){completionMoments.set(key,{done:true,at:now});return 0;}
+  if(prior&&prior.at&&now-prior.at<COMPLETION_MOMENT_MS)return now-prior.at;
+  completionMoments.set(key,{done:true,at:0});
+  return -1;
+}
 function createScheduleRow(row,rt){
   const t=row.t,i=row.idx;
   const wrap=document.createElement('div');
   wrap.className=scheduleRowClass(row,rt);
+  const momentElapsed=completionMomentElapsed(`${i}|${t.name}`,!!scheduleGateway.row(i).done);
+  if(momentElapsed>=0){
+    wrap.classList.add('sd-just-done');wrap.style.setProperty('--sd-moment-offset',`${-Math.round(momentElapsed)}ms`);
+    // Clear the marker once played so re-showing the pane cannot replay it.
+    on(wrap,'animationend',event=>{if(event.animationName==='sd-moment-settle')wrap.classList.remove('sd-just-done');});
+  }
   const tm=document.createElement('div');tm.className='si-time ui-mono';
   tm.append(document.createTextNode(studyMinuteToHHMM(row.startMin)),document.createElement('br'),document.createTextNode(studyMinuteToHHMM(row.endMin)));
   const trackable=isTrackableBlock(t);
