@@ -45,17 +45,17 @@ registry.define('exports',1,input=>{
     function suspend(){suspended++;collectionJob.wake('foreground');let released=false;return ()=>{if(released)return;released=true;suspended=Math.max(0,suspended-1);if(!suspended)collectionJob.wake('resume');};}
     async function collectAttempt({options:{signal=null}}){
       const started=Number(now());let removed=0,visited=0,blocked=false;
-      const check=()=>{if(signal?.aborted||suspended||Number(now())-started>=workMs)throw Object.assign(new Error('Backup scratch collection yielded.'),{code:'BACKUP_GC_YIELDED'});};
+      const check=()=>{if(signal?.aborted||suspended||visited>0&&Number(now())-started>=workMs)throw Object.assign(new Error('Backup scratch collection yielded.'),{code:'BACKUP_GC_YIELDED'});};
       return Promise.resolve().then(async()=>{
         check();const dir=await directory();check();if(!iterator)iterator=dir.entries()[Symbol.asyncIterator]();
         while(visited<maxEntries){
           check();if(!candidate)candidate=await iterator.next();check();if(candidate.done){iterator=null;candidate=null;blocked=cycleBlocked;cycleBlocked=false;return Object.freeze({status:blocked?'yielded':'completed',reason:blocked?'reader-locked':'',removed,visited});}
-          visited++;const [name,entry]=candidate.value;if(entry.kind!=='file'||!valid(name)||held.has(name)){candidate=null;continue;}
+          const [name,entry]=candidate.value;if(entry.kind!=='file'||!valid(name)||held.has(name)){candidate=null;visited++;continue;}
           await locks.request(ROOT+':'+name,{ifAvailable:true},async lock=>{
             check();if(!lock){cycleBlocked=true;return;}const keep=new Set(await retained());check();
             if(!keep.has(name)){await dir.removeEntry(name).catch(error=>{if(error.name!=='NotFoundError')throw error;});removed++;}
           });
-          candidate=null;if(visited%16===0)await new Promise(resolve=>schedule(resolve,0));
+          candidate=null;visited++;if(visited%16===0)await new Promise(resolve=>schedule(resolve,0));
         }
         return Object.freeze({status:'yielded',reason:'budget',removed,visited});
       }).catch(error=>{if(error?.code==='BACKUP_GC_YIELDED')return Object.freeze({status:'yielded',reason:'preempted-or-budget',removed,visited});iterator=null;candidate=null;cycleBlocked=false;throw error;}).then(result=>{

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createHash,webcrypto} from 'node:crypto';
+import {createDriveHarness} from '../../helpers/drive-harness.mjs';
+import {createFakeClock} from '../../helpers/fake-clock.mjs';
 import {outputHandle} from '../../helpers/file-processing.mjs';
 import {Sha256} from '../../../portable/sha256.js';
 import {hashSnapshot,restoreHash} from '../../../portable/integrity-hash.js';
@@ -105,5 +107,26 @@ for(const corruptAt of [100,encrypted.size-1]){
  const handle=await outputHandle(),messages=[],context=vm.createContext({Blob,TextEncoder,TextDecoder,Uint8Array,Uint32Array,DataView,WeakMap,Map,Set,crypto:webcrypto,performance,navigator:{storage:{getDirectory:async()=>({getDirectoryHandle:async()=>({getFileHandle:async()=>handle})})}},self:{postMessage:value=>messages.push(value)}});
  vm.runInContext(bundle,context,{filename:'source/external/export-worker.js'});await context.self.onmessage({data:{id:1,type:'integrity.append',data:{chunk:new Blob(['worker segment']),offset:0,hash:null,output:{kind:'opfs',name:'backup-00000000-0000-0000-0000-000000000001'}}}});assert.equal(messages.at(-1).value.offset,14);
  await context.self.onmessage({data:{id:2,type:'checksum',data:{value:'existing worker operation'}}});assert.equal(messages.at(-1).value,createHash('sha256').update('existing worker operation').digest('hex'));cases.push('checked-in worker dispatches the generated companion and retains existing operations');
+}
+// Compose the real Drive range transport, continuation/hash implementation and
+// shared scheduler. A slow segment exceeding the pass allowance must be saved
+// before yielding, then resumed without redownloading that completed segment.
+{
+ const clock=createFakeClock(),drive=createDriveHarness({clock});await drive.provider.prepare();await drive.provider.authorize();
+ const h=harness(),ref=await drive.provider.repository.upload({kind:'object',id:objectId,name:objectId+'.sdobject',blob:source,size:source.size,digest:fingerprint,exportedAt:'2026-09-01T00:00:00.000Z',appVersion:'QA_FIXTURE'});
+ for(const file of ['internal','operation-lifecycle','repository-background'])vm.runInContext(fs.readFileSync('source/core/'+file+'.js','utf8'),drive.context);
+ const registry=drive.context[Symbol.for('studyDirector.internalModules.v1')],bg=registry.require('repository-background',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})).createCoordinator(Object.freeze({target:'google-drive',environment:Object.freeze({AbortController,now:clock.now,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout})}));
+ drive.state.rangeChunkDelayMs=35000;const readOffsets=[];let completed=false,passes=0;
+ const scheduler=bg.createIntegrityScheduler(Object.freeze({budgetMs:120000,budgetCode:'TEST_BUDGET',budgetMessage:'budget',preemptCode:'TEST_PREEMPT',preemptMessage:'preempt',capture:error=>assert.fail(error),isAvailable:()=>true,isUnsafe:()=>false,readTarget:async()=>({scanId:'slow-proof',partial:structuredClone(h.durable)}),writeResult:async result=>{if(result.complete)completed=true;},yieldTask:async()=>{},execute:async({signal,checkpoint})=>{
+  try{const result=await h.pass({signal,readRange:async(_entry,range)=>{if(range.length>64)readOffsets.push(range.offset);return drive.provider.repository.download(ref,range);},onCheckpoint:async value=>{h.durable=structuredClone(value);checkpoint({scanId:'slow-proof',partial:value});}});return {...result,status:result.complete?'completed':'yielded'};}
+  catch(error){if(error.code==='TEST_BUDGET')return {status:'yielded',reason:'budget',complete:false};throw error;}
+ }}));
+ for(;passes<8&&!completed;passes++){
+  let outcome;const before=h.durable?.stored?.offset||0;scheduler.run().then(value=>{outcome=value;});
+  for(let elapsed=0;!outcome&&elapsed<500000;elapsed+=1000){await new Promise(resolve=>setImmediate(resolve));if(!outcome)await clock.advance(1000);}
+  assert.ok(outcome);assert.ok(completed||h.durable.stored.offset>before,'each healthy slow pass must persist a useful segment');assert.equal(h.held.size,0);
+ }
+ assert.equal(completed,true);assert.ok(passes>1);assert.deepEqual(readOffsets,[0,1048576,2097152]);assert.equal(h.durable.phase,'verified');assert.equal(bg.status().active.length,0);
+ await drive.provider.disconnect();cases.push('slow Drive transport persists each segment before cooperative yield and completes without repeated prefixes');
 }
 console.log(JSON.stringify({status:'PASS',suite:'integrity-continuation',cases},null,2));

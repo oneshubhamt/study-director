@@ -59,8 +59,19 @@ assert.equal(byId.has('asset-good'),false,'A healthy referenced file must not pr
 let auditProgress=null,passes=0,boundedResult;
 do{boundedResult=await store.shallowAudit(['asset-good','asset-size','asset-no-metadata'],{maxEntries:2,progress:auditProgress});auditProgress=boundedResult.progress;passes++;assert.ok(passes<10);}while(!boundedResult.complete);
 assert.ok(passes>1);assert.equal(boundedResult.checked,result.checked);assert.deepEqual(boundedResult.issues,result.issues,'resumed audit must retain all findings');
-let clock=0;const deadline=await store.shallowAudit(['asset-good'],{workMs:5,now:()=>++clock});assert.equal(deadline.status,'yielded');assert.ok(deadline.progress.cursor>0);
+let clock=0;const deadline=await store.shallowAudit(['asset-good'],{workMs:5,now:()=>clock,shouldYield:()=>true,yieldTask:async()=>{clock+=6;}});assert.equal(deadline.status,'yielded');assert.ok(deadline.progress.cursor>0);
 const changedInventory=await store.shallowAudit(['asset-good','asset-new-reference'],{maxEntries:1,progress:{...deadline.progress,cursor:4}});assert.equal(changedInventory.progress.cursor,1,'changed references must restart the inventory cursor');
+
+// Successful but slow inventory reads must preserve a monotonically advancing
+// cursor and exactly the same findings as the fast complete audit.
+for(const latency of [4999,5000,6000,20000]){
+ let stamp=0;
+ const slow=storageModule.create({name:'slow-audit',protocol:'https:',storage:{getDirectory:async()=>root},locks,
+  read:async key=>rows.get(key),keys:async()=>[...rows.keys()],entries:async()=>{stamp+=latency;return [...rows.entries()];},commit:async()=>assert.fail('read-only audit'),validId:value=>/^asset-[a-z-]+$/.test(value),validType:type=>type==='application/pdf',maxBytes:1024,issueToken:()=>1,assertToken(){},canMutate:()=>true,ingest:{ingest:async()=>assert.fail('unused')}});
+ let progress=null,previous=0,final;
+ for(let pass=0;pass<10;pass++){final=await slow.shallowAudit(['asset-good','asset-size','asset-no-metadata'],{now:()=>stamp,progress});progress=final.progress;if(final.complete)break;assert.ok(progress.cursor>previous);previous=progress.cursor;}
+ assert.equal(final.complete,true);assert.deepEqual(final.issues,result.issues);assert.equal(final.checked,result.checked);
+}
 
 const originalGet=dir.getFileHandle;
 dir.getFileHandle=async()=>{throw Object.assign(new Error('permission unavailable'),{name:'NotAllowedError'});};

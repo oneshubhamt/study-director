@@ -52,6 +52,8 @@
   const Platform=Object.freeze({
     fetch:globalThis.fetch&&globalThis.fetch.bind(globalThis),
     Headers:globalThis.Headers,
+    Response:globalThis.Response,
+    XMLHttpRequest:globalThis.XMLHttpRequest,
     AbortController:globalThis.AbortController,
     URL:globalThis.URL,
     URLSearchParams:globalThis.URLSearchParams,
@@ -256,17 +258,37 @@
     }
     return url.href;
   }
+  // Fetch exposes download streams but no upload byte progress. Use the
+  // browser's asynchronous upload transport only for validated binary uploads.
+  function uploadWithProgress(url,options,signal,progress){
+    return new Promise((resolve,reject)=>{
+      const xhr=new Platform.XMLHttpRequest();let settled=false,uploaded=0,downloaded=0;
+      const finish=(error,response)=>{if(settled)return;settled=true;signal.removeEventListener('abort',abort);xhr.onload=xhr.onerror=xhr.onabort=xhr.onprogress=null;xhr.upload.onprogress=null;error?reject(error):resolve(response);};
+      const abort=()=>{xhr.abort();finish(signal.reason||Object.assign(new Error('Google Drive upload was stopped.'),{name:'AbortError'}));};
+      try{
+        xhr.open(options.method,url,true);xhr.withCredentials=false;
+        for(const [key,value] of options.headers)xhr.setRequestHeader(key,value);
+        xhr.upload.onprogress=event=>{if(event.loaded>uploaded){uploaded=event.loaded;progress();}};
+        xhr.onprogress=event=>{if(event.loaded>downloaded){downloaded=event.loaded;progress();}};
+        xhr.onerror=()=>finish(new TypeError('Google Drive upload connection failed.'));
+        xhr.onabort=()=>finish(signal.reason||Object.assign(new Error('Google Drive upload was stopped.'),{name:'AbortError'}));
+        xhr.onload=()=>{try{const headers=new Platform.Headers();for(const line of xhr.getAllResponseHeaders().trim().split(/[\r\n]+/u)){const colon=line.indexOf(':');if(colon>0)headers.append(line.slice(0,colon),line.slice(colon+1).trim());}finish(null,new Platform.Response(xhr.responseText||null,{status:xhr.status,headers}));}catch(error){finish(error);}};
+        signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();else xhr.send(options.body);
+      }catch(error){finish(error);}
+    });
+  }
   async function fetchWithTimeout(url,options,timeoutMs,context=EMPTY_DRIVE_OPERATION){
     const controller=new Platform.AbortController();
     const operation=context||EMPTY_DRIVE_OPERATION;
     const externalSignal=options&&options.signal||operation.signal;
     const abortFromExternal=()=>controller.abort();
     if(externalSignal){if(externalSignal.aborted)throw noRetry(driveAbortError(externalSignal));externalSignal.addEventListener('abort',abortFromExternal,{once:true});}
-    const timer=setTimeout(()=>controller.abort(),Math.max(1000,Number(timeoutMs)||API_TIMEOUT_MS));
+    let timer;const renew=()=>{clearTimeout(timer);timer=setTimeout(()=>controller.abort(),Math.max(1000,Number(timeoutMs)||API_TIMEOUT_MS));};renew();
     let bodyAbort=null;
     try{
       await assertDriveOperationCurrent(operation);
-      const response=await Platform.fetch(url,{...options,signal:controller.signal,credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer'});
+      const progressUpload=Platform.XMLHttpRequest&&Platform.Response&&options.body instanceof Platform.Blob&&new Platform.URL(url).pathname==='/upload/drive/v3/files';
+      const response=await (progressUpload?uploadWithProgress(url,options,controller.signal,renew):Platform.fetch(url,{...options,signal:controller.signal,credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer'}));
       await assertDriveOperationCurrent(operation);
       const media=response.ok&&new Platform.URL(url).searchParams.get('alt')==='media';
       if(!media&&![204,308,401].includes(response.status)){
@@ -750,9 +772,10 @@
       const response=await authorizedFetch(`${DRIVE_API}/files/${encodeURIComponent(metadata.id)}?alt=media`,{headers:{Range:`bytes=${offset}-${offset+length-1}`}},TRANSFER_TIMEOUT_MS,context);
       if(response.status!==206||response.headers.get('Content-Range')!==`bytes ${offset}-${offset+length-1}/${total}`)throw new Error('Google Drive did not return the requested backup range.');
       const reader=response.body?.getReader();if(!reader)throw new Error('Google Drive range body is unavailable.');
-      let timer,abort,loaded=0;const parts=[];
-      const stopped=new Promise((_,reject)=>{abort=()=>{void reader.cancel().catch(()=>{});reject(context.signal?.reason instanceof Error?context.signal.reason:new Error('Repository range download was cancelled.'));};timer=setTimeout(abort,30000);context.signal?.addEventListener('abort',abort,{once:true});if(context.signal?.aborted)abort();});
-      try{for(let chunks=0;;chunks++){const part=await Promise.race([reader.read(),stopped]);if(part.done)break;loaded+=part.value.byteLength;if(loaded>length||chunks>4096)throw new Error('Google Drive range exceeded its verified size.');parts.push(part.value);}}
+      let timer,abort,stall,loaded=0;const parts=[];
+      const renew=()=>{clearTimeout(timer);timer=setTimeout(stall,TRANSFER_TIMEOUT_MS);};
+      const stopped=new Promise((_,reject)=>{const stop=error=>{void reader.cancel().catch(()=>{});reject(error);};abort=()=>stop(driveAbortError(context.signal));stall=()=>stop(timeoutError('Google Drive range download'));context.signal?.addEventListener('abort',abort,{once:true});renew();if(context.signal?.aborted)abort();});
+      try{for(let chunks=0;;chunks++){const part=await Promise.race([reader.read(),stopped]);if(part.done)break;loaded+=part.value.byteLength;if(loaded>length||chunks>4096)throw new Error('Google Drive range exceeded its verified size.');if(part.value.byteLength)renew();parts.push(part.value);}}
       finally{clearTimeout(timer);context.signal?.removeEventListener('abort',abort);void reader.cancel().catch(()=>{});}
       const blob=new Blob(parts);if(blob.size!==length)throw new Error('Google Drive returned an incomplete backup range.');
       const latest=repositoryDescriptor(await getFileMetadata(metadata.id,context),parent);if(latest.remoteVersion!==descriptor.remoteVersion)throw new Error('The repository object changed while reading a range.');

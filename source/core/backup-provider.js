@@ -1068,8 +1068,8 @@ registry.define('backup-provider',1,input=>{
       isAvailable:()=>{const local=integrityScrubHooks.isAvailable(id);return local===true?providerBackgroundAvailability(selected):String(local||'awaiting-control');},
       isUnsafe:()=>busy||preparing||integrityScrubHooks.isUnsafe(id)===true,
       yieldTask:()=>integrityScrubHooks.yieldTask(),
-      execute:async({target,trigger,nextEligibleAt,signal})=>{
-        const prepared=await integrityScrubHooks.prepare(id,target,freeze({trigger,nextEligibleAt}));if(!prepared)return freeze({status:'skipped',reason:'unavailable'});const options=freeze({...prepared,signal});
+      execute:async({target,trigger,nextEligibleAt,signal,checkpoint})=>{
+        const prepared=await integrityScrubHooks.prepare(id,target,freeze({trigger,nextEligibleAt}));if(!prepared)return freeze({status:'skipped',reason:'unavailable'});const options=freeze({...prepared,signal,onProgress:async progress=>{await prepared.onProgress?.(progress);checkpoint(progress);}});
         const traceId=OperationDiagnostics.start('provider-integrity',selected.label,{provider:id,background:true,trigger:String(trigger||'awaiting-connection'),nextEligibleAt:String(nextEligibleAt||''),cursor:String(options.cursor||''),actionable:true});
         OperationDiagnostics.mark('background-transition',background.transition('integrity','scheduled','running',{reason:String(trigger||'awaiting-connection'),nextEligibleAt:String(nextEligibleAt||''),actionable:true}),traceId);
         try{const result=await runConfiguredIntegrityScrub(selected,options),to=background.outcome(result);OperationDiagnostics.mark('background-transition',background.transition('integrity','running',to,{reason:background.integrityDetails(result).reason,actionable:false}),traceId);OperationDiagnostics.finish(background.integrityDetails(result),traceId);return result;}

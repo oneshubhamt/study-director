@@ -13,7 +13,7 @@ const repositoryPolicy=policyContext[Symbol.for('studyDirector.internalModules.v
 export const repositoryDigest=async blob=>Buffer.from(await webcrypto.subtle.digest('SHA-256',await blob.arrayBuffer())).toString('hex');
 const digest=repositoryDigest;
 function json(payload,status=200,headers={}){return new Response(JSON.stringify(payload),{status,headers:{'Content-Type':'application/json',...headers}});}
-export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=null}={}){
+export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=null,uploadProgressTransport=true}={}){
   const state={rangeMode:'valid',expiresIn,folders:[],files:new Map(),uploads:new Map(),requests:[],deletions:[],trashedFolders:new Set(),nextId:1,nextFolderId:1,nextVersion:1,scope:'https://www.googleapis.com/auth/drive.file',force401Once:false,evilUploadLocation:false,networkFailPutOnce:false,networkFailCoordinationPostOnce:false,networkFailCoordinationDeleteOnce:false,folderShared:false,folderCreateDenied:false,folderListGate:null,folderListStarted:0,uploadPutGate:null,uploadPutStarted:0};
   const folderMetadata=(id='folder-1')=>({id,name:EXTERNAL_REPOSITORY_IDENTITIES.driveFolder,mimeType:'application/vnd.google-apps.folder',ownedByMe:true,shared:!!state.folderShared,trashed:state.trashedFolders.has(id),appProperties:{studyDirectorFolder:'true'},capabilities:{canAddChildren:true}});
   const fileMetadata=file=>({id:file.id,name:file.name,size:String(file.content.size),version:String(file.version||''),modifiedTime:file.modifiedTime,createdTime:file.createdTime,mimeType:file.mimeType,parents:[...file.parents],ownedByMe:file.ownedByMe,shared:file.shared,trashed:file.trashed,sha256Checksum:String(file.sha256Checksum||''),appProperties:{...file.appProperties},capabilities:{canDownload:file.canDownload}});
@@ -117,6 +117,10 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
         if(['checkpoint','commit'].includes(file.appProperties?.studyDirectorRepositoryKind))(state.historyReadCompletions??=[]).push(id);
         const range=headers.get('Range');if(range&&state.rangeMode!=='ignored'){
           const match=/^bytes=(\d+)-(\d+)$/u.exec(range),start=Number(match[1]),end=Number(match[2]);let content=file.content.slice(start,end+1);if(state.rangeMode==='truncated')content=content.slice(0,-1);
+          if(state.rangeChunkDelayMs){
+            const bytes=new Uint8Array(await content.arrayBuffer());let offset=0,timer=null,pullDone=null;const transfer={loaded:0,cancelled:false};(state.rangeTransfers??=[]).push(transfer);
+            content=new ReadableStream({pull(controller){if(offset===bytes.length){controller.close();return;}return new Promise(resolve=>{pullDone=resolve;timer=harnessSetTimeout(()=>{timer=null;const chunk=state.rangeMode==='empty-progress'?new Uint8Array():bytes.slice(offset,offset+Math.max(1,state.rangeChunkBytes||262144));offset+=chunk.byteLength;transfer.loaded=offset;controller.enqueue(chunk);pullDone=null;resolve();},state.rangeChunkDelayMs);});},cancel(){transfer.cancelled=true;if(timer!==null)harnessClearTimeout(timer);pullDone?.();}});
+          }
           return new Response(content,{status:206,headers:{'Content-Range':state.rangeMode==='wrong-range'?`bytes 1-2/${file.content.size}`:`bytes ${start}-${end}/${file.content.size}`}});
         }
         return new Response(file.content,{status:200,headers:{'Content-Length':String(file.content.size),'Content-Type':file.mimeType}});
@@ -137,6 +141,28 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
   const api={capabilities:{pluginApi:1,backupController:1,backupProviders:1},backup:{repositoryPolicy,receiveStream:async(stream,size,options={})=>{if(options.signal?.aborted)throw new Error('cancelled');const blob=await new Response(stream).blob();assert.equal(blob.size,size);options.onProgress?.({phase:'downloading',loaded:blob.size,total:size});return blob;},releaseFile:async()=>{state.releasedDownloads+=1;},limits:{maxFileBytes:20*1024*1024},providers:{register(config){provider=config;return registerProvider?registerProvider(config):true;}}}};
   const harnessSetTimeout=(fn,ms,...args)=>{if(clock)return clock.setTimeout(()=>fn(...args),ms);const timer=setTimeout(fn,ms,...args);if(Number(ms)>5000)timer.unref?.();return timer;};
   const harnessClearTimeout=id=>clock?clock.clearTimeout(id):clearTimeout(id);
-  const context=vm.createContext({Error,TypeError,Date:clock?.Date||Date,console,setTimeout:harnessSetTimeout,clearTimeout:harnessClearTimeout,queueMicrotask,Blob,Headers,Response,ReadableStream,TextEncoder,URL,URLSearchParams,Uint8Array,AbortController,crypto:webcrypto,fetch:mockFetch,document,Event:class Event{constructor(type){this.type=type;}},CustomEvent:class CustomEvent{},addEventListener(){},removeEventListener(){},dispatchEvent(){},google:{accounts:{oauth2:oauth}},StudyDirector:{registerPlugin(descriptor){return descriptor.setup(api);}}});
+  class MockXMLHttpRequest{
+    constructor(){this.upload={};this.headers=new Headers();this.controller=new AbortController();}
+    open(method,url,async){assert.equal(async,true);this.method=method;this.url=url;}
+    setRequestHeader(key,value){this.headers.set(key,value);}
+    getAllResponseHeaders(){return [...this.response.headers].map(([key,value])=>key+': '+value).join('\r\n');}
+    abort(){this.controller.abort();state.uploadAborts=(state.uploadAborts||0)+1;this.onabort?.();}
+    send(body){void (async()=>{
+      try{
+        state.uploadProgressStarted=(state.uploadProgressStarted||0)+1;
+        const steps=state.uploadProgressSteps||1;
+        for(let step=1;step<=steps;step++){if(state.uploadProgressStepMs)await delay(state.uploadProgressStepMs,this.controller.signal);this.upload.onprogress?.({loaded:state.uploadRepeatProgress?1:Math.ceil(body.size*step/steps),total:body.size});}
+        if(this.controller.signal.aborted)return;
+        // Native Blob/crypto work implements the fake server's zero-delay
+        // response. Do not let a virtual network clock outrun that real work.
+        state.nativeUploadReplies=(state.nativeUploadReplies||0)+1;
+        try{this.response=await mockFetch(this.url,{method:this.method,headers:this.headers,body,signal:this.controller.signal});this.status=this.response.status;this.responseText=await this.response.text();}
+        finally{state.nativeUploadReplies--;}
+        if(this.controller.signal.aborted)return;
+        this.onprogress?.({loaded:this.responseText.length});this.onload?.();
+      }catch(error){if(!this.controller.signal.aborted)this.onerror?.(error);}
+    })();}
+  }
+  const context=vm.createContext({Error,TypeError,Date:clock?.Date||Date,console,setTimeout:harnessSetTimeout,clearTimeout:harnessClearTimeout,queueMicrotask,Blob,Headers,Response,XMLHttpRequest:uploadProgressTransport?MockXMLHttpRequest:undefined,ReadableStream,TextEncoder,URL,URLSearchParams,Uint8Array,AbortController,crypto:webcrypto,fetch:mockFetch,document,Event:class Event{constructor(type){this.type=type;}},CustomEvent:class CustomEvent{},addEventListener(){},removeEventListener(){},dispatchEvent(){},google:{accounts:{oauth2:oauth}},StudyDirector:{registerPlugin(descriptor){return descriptor.setup(api);}}});
   context.window=context;context.globalThis=context;vm.runInContext(source,context,{filename:'source/external/drive.js'});assert.ok(provider,'Drive provider must register');return {state,provider,context};
 }

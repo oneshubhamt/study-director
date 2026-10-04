@@ -130,4 +130,25 @@ cases.push('untrusted rich text, source changes and unavailable revisions forbid
     cases.push('canonical reachability: '+fault+' preserves all data and retries to exact cleanup');
   }
 }
+// Assemble the real storage executor and lifecycle. Preparation latency may
+// exceed the nominal pass allowance at every stage, but finite work must drain.
+for(const latency of [4999,5000,6000,20000]){
+ const timers=new Map();let stamp=0,sequence=0,completed=0,sourceRevision=1,busy=false,preempt=false;
+ const context=vm.createContext({Blob,TextEncoder,crypto:webcrypto,setTimeout:(fn,ms)=>{timers.set(++sequence,{fn,ms});return sequence;},clearTimeout:id=>timers.delete(id)});
+ for(const file of ['internal','operation-lifecycle','asset-storage','asset-maintenance'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),context);
+ const registry=context[Symbol.for('studyDirector.internalModules.v1')],Assets=registry.require('asset-storage',1),blob=new Blob(['orphan']);
+ const rows=new Map(Array.from({length:4},(_,i)=>['att-'+String(i+1).padStart(32,'0'),{version:2,storage:'opfs',file:'attblob-'+String(i+1).padStart(32,'0'),hash:'c'.repeat(64),size:blob.size,type:'application/pdf',name:'orphan.pdf',library:false}])),files=new Map([...rows.values()].map(row=>[row.file,blob]));
+ const slow=()=>{stamp+=latency;if(preempt)busy=true;};
+ const dir={async *entries(){for(const name of files.keys()){slow();yield [name,{kind:'file'}];}},removeEntry:async name=>files.delete(name)};
+ const storage=Assets.create({name:'slow-cleanup',protocol:'https:',storage:{getDirectory:async()=>({getDirectoryHandle:async()=>dir})},locks:{request:async(_name,options,work)=>(typeof options==='function'?options:work)({})},read:async key=>{slow();return rows.get(key);},keys:async()=>{slow();return [...rows.keys()];},entries:async()=>{slow();return [...rows];},commit:async(_upsert,remove,_token,guard)=>{assert.equal(guard(),true);for(const key of remove)rows.delete(key);sourceRevision++;},validId:value=>/^att-[a-f0-9]{32}$/.test(value),validType:type=>type==='application/pdf',maxBytes:1024,canMutate:()=>true,issueToken:()=>1,assertToken(){},ingest:{ingest:async()=>assert.fail('unused')}});
+ const maintenance=registry.require('asset-maintenance',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})).create({canMutate:()=>true,mutationActive:()=>busy,collect:storage.collect,readRestoreJournal:async()=>{slow();return null;},readLibraryClearJournal:async()=>{slow();return null;},liveFields:()=>[],getReferenceRevision:()=>1,getDatasetRevision:async()=>{slow();return sourceRevision;},scanReferences:()=>({trusted:true,assetIds:[]}),readNotes:async()=>{slow();return {};},loadActiveSession:async()=>{slow();return {ok:true,value:null};},listDailyRecords:async()=>{slow();return [];},budget:()=>()=>true,yieldTask:async()=>{},invalidate(){},captureError:error=>assert.fail(error),completed:()=>{completed++;},now:()=>stamp,setTimeout:context.setTimeout,clearTimeout:context.clearTimeout},{lease:Assets.createLease()});
+ preempt=true;assert.equal((await maintenance.run()).reason,'foreground-busy');assert.equal(rows.size,4);assert.equal(files.size,4);preempt=false;busy=false;
+ // Each source phase has a retained load and traversal boundary; the
+ // canonical mutation epoch changes after deletion, so each remaining
+ // orphan may require a new proof. Physical candidates advance once each.
+ const sourcePhases=3,maxAttempts=(2*sourcePhases+2)*rows.size+files.size+2;
+ let final;for(let pass=0;pass<maxAttempts;pass++){final=await maintenance.run();assert.ok(final.removed<=1,'slow deletion reads commit a single bounded candidate');if(['completed','clean'].includes(final.status))break;assert.equal(final.status,'yielded');assert.equal(final.reason,'budget');}
+ assert.ok(['completed','clean'].includes(final.status));assert.equal(rows.size,0);assert.equal(files.size,0);assert.equal(completed,1);assert.equal(maintenance.status().pending,false);assert.equal(timers.size,0);
+ cases.push('assembled attachment GC finishes with '+latency+'ms IO and preemption retains bytes');
+}
 console.log(JSON.stringify({status:'PASS',suite:'attachment-cleanup',cases},null,2));

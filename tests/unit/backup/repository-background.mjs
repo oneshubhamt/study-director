@@ -217,4 +217,22 @@ for(const blocked of [false,true]){
  bg.registerJob('automatic',{initialDelayMs:null,discover:()=>{throw new Error('state unavailable');},isAvailable:()=>true,capture:()=>{errors++;},execute:async()=>{attempts++;return {status:'completed'};}});
  bg.wake('startup');await fake.advance(1000);await fake.drainMicrotasks(80);assert.equal(errors,1);assert.equal(attempts,1,'uncertain discovery retains an execution opportunity');
 }
+// The elapsed allowance is enforced at an executor's durable checkpoint,
+// never halfway through useful slow IO. Foreground cancellation remains immediate.
+for(const elapsed of [19999,20000,20001,180000]){
+ const fake=clock(),bg=coordinator(fake);let persisted=0,observed=null;
+ const scheduler=bg.createIntegrityScheduler(freeze({budgetMs:20000,budgetCode:'TEST_BUDGET',budgetMessage:'budget',preemptCode:'TEST_PREEMPT',preemptMessage:'preempt',capture:()=>{},isAvailable:()=>true,isUnsafe:()=>false,readTarget:async()=>({}),writeResult:async()=>{},yieldTask:async()=>{},execute:async({signal,checkpoint})=>{
+  await fake.advance(elapsed);assert.equal(signal.aborted,false,'elapsed time alone cannot discard a productive segment');persisted=1;checkpoint();return {status:'completed',complete:true};
+ }}));
+ observed=await scheduler.run();assert.equal(persisted,1);assert.equal(observed.reason,elapsed>=20000?'budget':undefined);assert.equal(observed.status,elapsed>=20000?'skipped':'completed');assert.equal(bg.status().active.length,0);
+}
+{
+ const fake=clock(),bg=coordinator(fake);let savedOffset=0;
+ const prior={scanId:'same',partial:{objectId:'object',stored:{offset:1024},plain:{offset:0,frame:0}}};
+ const scheduler=bg.createIntegrityScheduler(freeze({budgetMs:20000,budgetCode:'TEST_BUDGET',budgetMessage:'budget',preemptCode:'TEST_PREEMPT',preemptMessage:'preempt',capture:()=>{},isAvailable:()=>true,isUnsafe:()=>false,readTarget:async()=>prior,writeResult:async()=>{},yieldTask:async()=>{},execute:async({checkpoint,signal})=>{
+  await fake.advance(180000);checkpoint({...prior,partial:{...prior.partial,plain:{name:'new-scratch',offset:0,frame:0}}});assert.equal(signal.aborted,false,'scratch initialization cannot starve productive work after slow preparation');
+  savedOffset=2048;checkpoint({...prior,partial:{...prior.partial,stored:{offset:savedOffset}}});assert.fail('a saved segment beyond the allowance must yield');
+ }}));
+ assert.equal((await scheduler.run()).reason,'budget');assert.equal(savedOffset,2048);
+}
 console.log(JSON.stringify({status:'PASS',suite:'repository-background',sharedPolicy:true,priority:true,foregroundPreemption:true,suspensionSettlement:true,durableIntent:true,maintenanceLifecycle:true,triggerAttribution:true,integrityRecurrence:true,integrityStateFailureRetry:true},null,2));

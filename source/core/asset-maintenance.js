@@ -20,7 +20,7 @@ registry.define('asset-maintenance',1,input=>{
     const liveSnapshot=()=>ports.liveFields().map(field=>[field,String(field.value??'')]);
     const liveChanged=values=>values.some(([field,value])=>!field?.isConnected||String(field.value??'')!==value);
     function collectInto(references,value){const scan=ports.scanReferences(String(value??''));for(const id of scan.assetIds||[])references.add(id);return scan.trusted===true;}
-    async function referencedAssetIds(keys,proof,liveValues,check){
+    async function referencedAssetIds(keys,proof,liveValues,check,progress){
       const signature=JSON.stringify([proof,keys,liveValues.map(([,value])=>value)]);
       if(!scanState||scanState.signature!==signature){scanState={signature,references:new Set(),phase:0,index:0,values:null};for(const [,value] of liveValues)if(!collectInto(scanState.references,value))return {references:scanState.references,trusted:false};}
       const state=scanState,complete=()=>keys.length>0&&keys.every(id=>state.references.has(id));let units=0;const shouldYield=ports.budget();
@@ -30,14 +30,14 @@ registry.define('asset-maintenance',1,input=>{
           if(state.phase===0)state.values=Object.values(await ports.readNotes()||{}).map(entry=>entry?.text);
           else if(state.phase===1){const loaded=await ports.loadActiveSession();if(loaded?.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session references could not be read completely.');state.values=[loaded?.value?.snapshot?.review?.reflection];}
           else state.values=(await ports.listDailyRecords()||[]).map(record=>record?.reflection);
-          check();
+          progress();check();
         }
         while(state.index<state.values.length){
           check();if(units>=batchSize)throw interrupted('budget');
           if(!collectInto(state.references,state.values[state.index])){scanState=null;return {references:state.references,trusted:false};}
-          state.index++;units++;if(complete())break;if(shouldYield())await ports.yieldTask({priority:'background'});
+          state.index++;units++;progress();if(complete())break;if(shouldYield())await ports.yieldTask({priority:'background'});
         }
-        if(complete())break;state.phase++;state.index=0;state.values=null;
+        if(complete())break;state.phase++;state.index=0;state.values=null;progress();
       }
       return {references:state.references,trusted:true};
     }
@@ -48,7 +48,10 @@ registry.define('asset-maintenance',1,input=>{
     async function runAttempt({trigger:scheduledTrigger,nextEligibleAt:scheduledEligibleAt}){
       if(ports.mutationActive()){job.schedule(15000,'foreground-busy');return freeze({status:'skipped',reason:'mutation-active',removed:0});}
       const started=Number(now()),traceId=diagStart({background:true,trigger:scheduledTrigger,nextEligibleAt:scheduledEligibleAt,actionable:true});
-      const check=()=>{if(!ports.canMutate())throw interrupted('not-primary');if(ports.mutationActive())throw interrupted('foreground-busy');if(Number(now())-started>=workMs)throw interrupted('budget');};
+      // Charge the allowance only at resumable boundaries. Slow preparation
+      // must permit one useful unit, while control checks always take priority.
+      let progressed=false;const progress=()=>{progressed=true;};
+      const check=()=>{if(!ports.canMutate())throw interrupted('not-primary');if(ports.mutationActive())throw interrupted('foreground-busy');if(progressed&&Number(now())-started>=workMs)throw interrupted('budget');};
       diagMark('asset-maintenance-eligibility',{trigger:scheduledTrigger,nextEligibleAt:scheduledEligibleAt,actionable:true},traceId);
       let removedSoFar=0;
       return Promise.resolve().then(()=>ports.collect(async store=>{
@@ -57,17 +60,17 @@ registry.define('asset-maintenance',1,input=>{
         const liveValues=liveSnapshot(),referenceRevision=ports.getReferenceRevision(),sourceRevision=await ports.getDatasetRevision();check();
         if(sourceRevision===null)return freeze({status:'skipped',reason:'unverified-record-source',removed:0});
         const keys=await store.keys();check();
-        const scan=keys.length?await referencedAssetIds(keys,[referenceRevision,sourceRevision],liveValues,check):{references:new Set(),trusted:true};
+        const scan=keys.length?await referencedAssetIds(keys,[referenceRevision,sourceRevision],liveValues,check,progress):{references:new Set(),trusted:true};
         if(!scan.trusted){scanState=null;return freeze({status:'skipped',reason:'uncertain-rich-text',assets:keys.length,references:scan.references.size,removed:0});}
         const latest=await ports.getDatasetRevision();check();
         if(referenceRevision!==ports.getReferenceRevision()||liveChanged(liveValues)||sourceRevision!==latest){scanState=null;throw interrupted('source-changed');}
         const safe=()=>{check();return referenceRevision===ports.getReferenceRevision()&&!liveChanged(liveValues);};
         const orphaned=keys.filter(id=>!scan.references.has(id)&&!lease.isProtected(id)),selected=orphaned.slice(0,batchSize);
-        removedSoFar=selected.length?await store.removeMany(selected,safe):0;check();
+        removedSoFar=selected.length?await store.removeMany(selected,safe):0;if(selected.length)progress();check();
         const swept=await store.sweep();check();sweepPending=store.status?.().sweepPending===true;
-        const more=orphaned.length>selected.length||sweepPending||keys.some(id=>!scan.references.has(id)&&lease.isProtected(id));
+        const more=orphaned.length>removedSoFar||sweepPending||keys.some(id=>!scan.references.has(id)&&lease.isProtected(id));
         return freeze({status:more?'yielded':keys.length?'completed':'clean',reason:more?'continuation':'',assets:keys.length,references:scan.references.size,removed:removedSoFar,swept:Number(swept)||0});
-      },{check,maxEntries:batchSize,yieldTask:()=>ports.yieldTask({priority:'background'})})).then(async result=>{
+      },{check,progress,shouldYield:()=>Number(now())-started>=workMs,maxEntries:batchSize,yieldTask:()=>ports.yieldTask({priority:'background'})})).then(async result=>{
         if(Number(result?.removed)>0)ports.invalidate();
         if(['completed','clean'].includes(result?.status)){if(rerunRequested)result=freeze({...result,status:'yielded',reason:'source-changed'});else{await ports.completed?.(result);scanState=null;}}
         leaseRetryPending=result?.reason==='active-editor-or-file-operation';

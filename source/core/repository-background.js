@@ -312,11 +312,23 @@ registry.define('repository-background',1,input=>{
         if(!integrityTargetDue(target,now)){schedule(Math.max(1000,INTEGRITY.intervalMs-(now-completed)+1000),'not-due');return freeze({status:'skipped',reason:'not-due'});}
         if(input.isUnsafe()){schedule(INTEGRITY.retryMs,'foreground-busy');return freeze({status:'skipped',reason:'busy'});}
         await input.yieldTask();if(input.isUnsafe()){schedule(INTEGRITY.retryMs,'foreground-busy');return freeze({status:'skipped',reason:'busy'});}
-        const scope=await input.coordinator.beginBackground('integrity',{budgetMs:Math.max(0,Number(input.budgetMs)||0),budgetCode:String(input.budgetCode||'REPOSITORY_INTEGRITY_BUDGET'),budgetMessage:String(input.budgetMessage||'Repository integrity verification reached its work limit.'),preemptCode:String(input.preemptCode||'REPOSITORY_BACKGROUND_PREEMPTED'),preemptMessage:String(input.preemptMessage||'Repository integrity verification yielded to a higher-priority operation.')});
+        // A total timer can repeatedly discard a healthy but slow segment.
+        // Enforce the work allowance after durable progress; stall watchdogs
+        // and the coordinator's foreground signal still interrupt active IO.
+        const scope=await input.coordinator.beginBackground('integrity',{budgetMs:0,preemptCode:String(input.preemptCode||'REPOSITORY_BACKGROUND_PREEMPTED'),preemptMessage:String(input.preemptMessage||'Repository integrity verification yielded to a higher-priority operation.')});
         if(!scope){schedule(INTEGRITY.retryMs,'background-busy');return freeze({status:'skipped',reason:'busy'});}
         try{
           const dueBase=Date.parse(String(target&&target.completedAt||target&&target.cycleStartedAt||'')),nextEligibleAt=Number.isFinite(dueBase)?new Date(dueBase+INTEGRITY.intervalMs).toISOString():new Date(now).toISOString();
-          stage='execute';const result=await input.execute(freeze({target,trigger,nextEligibleAt,signal:scope.signal}));stage='state-write';await input.writeResult(result);schedule(integrityResultDelay(result),result&&result.reason||result&&result.status||'completed');return result;
+          const started=input.coordinator.now(),budgetMs=Math.max(0,Number(input.budgetMs)||0);
+          const checkpoint=progress=>{
+            if(scope.signal.aborted)throw scope.signal.reason;
+            const partial=progress?.partial,prior=target?.partial,sameObject=partial?.objectId===prior?.objectId&&progress?.scanId===target?.scanId;
+            // Initialising scratch state is not a verified segment. Even slow
+            // inventory/preparation must allow actual bytes or an object to advance.
+            const advanced=!progress||Number(progress.attempted)>0||progress.cursor&&progress.cursor!==target?.cursor||progress.recheckCursor&&progress.recheckCursor!==target?.recheckCursor||['stored','plain'].some(part=>Number(partial?.[part]?.offset)>Number(sameObject?prior?.[part]?.offset||0:0))||Number(partial?.plain?.frame)>Number(sameObject?prior?.plain?.frame||0:0);
+            if(advanced&&budgetMs&&input.coordinator.now()-started>=budgetMs){const error=Object.assign(new Error(String(input.budgetMessage||'Repository integrity verification reached its work limit.')),{name:'AbortError',code:String(input.budgetCode||'REPOSITORY_INTEGRITY_BUDGET')});scope.controller.abort(error);throw error;}
+          };
+          stage='execute';const result=await input.execute(freeze({target,trigger,nextEligibleAt,signal:scope.signal,checkpoint}));stage='state-write';await input.writeResult(result);schedule(integrityResultDelay(result),result&&result.reason||result&&result.status||'completed');return result;
         }finally{scope.release();}
       })().catch(error=>{const yielded=error?.name==='AbortError',budgeted=yielded&&String(error?.code||'')===String(input.budgetCode||''),preempted=yielded&&String(error?.code||'')===String(input.preemptCode||''),stateFailed=stage!=='execute'||error?.code==='REPOSITORY_INTEGRITY_STATE_UNAVAILABLE',changed=error?.code==='REPOSITORY_CHANGED';if(!yielded)input.capture(error);schedule(changed||budgeted?INTEGRITY.continueMs:stateFailed?INTEGRITY.stateRetryMs:preempted?INTEGRITY.retryMs:INTEGRITY.failureRetryMs,changed?'repository-changed':budgeted?'budget':preempted?'preempted':stateFailed?'state-unavailable':'error');return freeze({status:yielded?'skipped':stateFailed||changed?'unavailable':'failed',reason:budgeted?'budget':preempted?'preempted':String(error&&error.message||error)});});
     }
