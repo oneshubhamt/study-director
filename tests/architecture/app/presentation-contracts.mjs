@@ -6,8 +6,8 @@ const coreCss=fs.readFileSync('source/styles/core.css','utf8');
 const glassCss=fs.readFileSync('source/external/glass.js','utf8');
 const guideJs=fs.readFileSync('source/external/guide.js','utf8');
 
-assert.match(coreCss,/html\[data-theme="director-light"\]\{[\s\S]*?--sd-color-canvas:#eef1ec;[\s\S]*?--sd-color-surface-1:#f8f9f5;/u,'Director Light must use the low-glare off-white foundation rather than a pure-white primary surface.');
-assert.match(html,/<style data-sd-critical>html\{[\s\S]*?--sd-meta-theme-color:#04050a;[\s\S]*?--sd-meta-apple-status-bar-style:black-translucent;[\s\S]*?background:#04050a;color:#f0f2ff\}html\[data-theme="director-light"\]\{[\s\S]*?--sd-meta-theme-color:#eef1ec;[\s\S]*?--sd-meta-apple-status-bar-style:default;[\s\S]*?background:#eef1ec;color:#161a26\}/u,'critical appearance bootstrap must expose matching browser-chrome metadata for Dark and Light before the full stylesheet loads.');
+assert.match(coreCss,/html\[data-theme="director-light"\]\{[\s\S]*?--sd-color-canvas:#f2f0ea;[\s\S]*?--sd-color-surface-1:#fcfbf8;/u,'Director Light must use the low-glare off-white foundation rather than a pure-white primary surface.');
+assert.match(html,/<style data-sd-critical>html\{[\s\S]*?--sd-meta-theme-color:#04050a;[\s\S]*?--sd-meta-apple-status-bar-style:black-translucent;[\s\S]*?background:#04050a;color:#f0f2ff\}html\[data-theme="director-light"\]\{[\s\S]*?--sd-meta-theme-color:#f2f0ea;[\s\S]*?--sd-meta-apple-status-bar-style:default;[\s\S]*?background:#f2f0ea;color:#0f1013\}/u,'critical appearance bootstrap must expose matching browser-chrome metadata for Dark and Light before the full stylesheet loads.');
 const criticalStyleIndex=html.indexOf('<style data-sd-critical>');
 const metadataSyncIndex=html.indexOf("window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();",criticalStyleIndex);
 const coreStyleIndex=html.indexOf('<link rel="stylesheet" href="@@SD_CORE_STYLE_FILENAME@@">');
@@ -37,4 +37,14 @@ assert.match(glassCss,/\.library-notes-nav-head\{[\s\S]*?--sd-glass-sticky-alpha
 assert.match(glassCss,/backup-location-row,\.backup-inline-settings,\.backup-compact-row,\.backup-security-group/u,'Data & Backup operational surfaces must consume the Glass material language without changing their semantic hierarchy.');
 assert.match(glassCss,/backup-model-disclosure,\.backup-advanced-disclosure/u,'The consolidated Backup model disclosure must use the same Glass disclosure material as Advanced.');
 
-console.log(JSON.stringify({status:'PASS',contract:'presentation-source-contracts',paths:['prepaint-appearance','prepaint-browser-chrome','touch-minimums','execute-note-alignment','copy-report-centering','version-history-scroll','guide-touch','low-glare-light','tablet-plan-grid','compact-backup-layout','glass-legibility']},null,2));
+assert.match(glassCss,/html\[data-presentation="glass"\]\[data-theme="director-dark"\]\{[\s\S]*?--sd-color-accent-primary:[\s\S]*?--sd-glass-aurora:/u,'Glass Dark must own its palette and aurora rather than reuse the Director palette.');
+assert.match(glassCss,/html\[data-presentation="glass"\]\[data-theme="director-light"\]\{[\s\S]*?--sd-color-accent-primary:[\s\S]*?--sd-glass-aurora:/u,'Glass Light must own its palette and aurora rather than reuse the Director palette.');
+assert.match(glassCss,/html\[data-material="glass"\] body::before\{[\s\S]*?position:fixed;[\s\S]*?pointer-events:none;[\s\S]*?var\(--sd-glass-aurora/u,'the Glass aurora must be one fixed, non-interactive layer that never scrolls or repaints with content.');
+assert.match(coreCss,/\.pane\.on\[data-sd-enter\]>\*\{animation:var\(--sd-motion-pane-enter-name\) var\(--sd-motion-pane-enter-duration\) var\(--sd-motion-pane-enter-ease\) backwards\}/u,'pane entrances must use backwards fill so no transform or opacity persists after the entrance.');
+assert.match(coreCss,/@media \(prefers-reduced-motion: reduce\)\{[\s\S]*?\.pane\.on\[data-sd-enter\]>\*\{animation:none!important\}/u,'reduced motion must remove pane entrances entirely, including staggered delays.');
+assert.match(glassCss,/--sd-motion-pane-enter-name:sd-pane-enter-float;/u,'Glass must present its own pane entrance.');
+assert.match(html,/pane\.classList\.add\('on'\);[^\n]*\n\s*if\(previousTab!==tabName\)markPaneEntrance\(pane\);/u,'only a real tab change may mark a pane entrance.');
+assert.match(html,/function beginAppearanceShift\(\)\{[\s\S]*?prefers-reduced-motion: reduce[\s\S]*?data-sd-appearance-shift/u,'appearance crossfades must respect reduced motion.');
+assert.match(coreCss,/\.pfield input\{\s*--field-local-border:var\(--sd-color-border-2\);\s*border:2px solid var\(--field-local-border\);/u,'progress fields must draw their local border colour instead of currentColor.');
+
+console.log(JSON.stringify({status:'PASS',contract:'presentation-source-contracts',paths:['prepaint-appearance','prepaint-browser-chrome','touch-minimums','execute-note-alignment','copy-report-centering','version-history-scroll','guide-touch','low-glare-light','tablet-plan-grid','compact-backup-layout','glass-legibility','glass-palettes','glass-aurora','pane-entrance','appearance-shift','progress-field-border']},null,2));

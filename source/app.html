@@ -498,7 +498,7 @@
   restoreStoredPresentation();
 })();
 </script>
-<style data-sd-critical>html{--sd-meta-theme-color:#04050a;--sd-meta-apple-status-bar-style:black-translucent;background:#04050a;color:#f0f2ff}html[data-theme="director-light"]{--sd-meta-theme-color:#eef1ec;--sd-meta-apple-status-bar-style:default;background:#eef1ec;color:#161a26}body{margin:0;min-height:100vh}</style>
+<style data-sd-critical>html{--sd-meta-theme-color:#04050a;--sd-meta-apple-status-bar-style:black-translucent;background:#04050a;color:#f0f2ff}html[data-theme="director-light"]{--sd-meta-theme-color:#f2f0ea;--sd-meta-apple-status-bar-style:default;background:#f2f0ea;color:#0f1013}body{margin:0;min-height:100vh}</style>
 <script>
 window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
 </script>
@@ -5750,6 +5750,14 @@ function captureNavigationState(context){
   const active=document.activeElement;
   navigationFocusState.set(context.generation,Object.freeze({departingHadFocus:!!(pane&&active&&pane.contains(active))}));
 }
+const paneEntranceTimers=new Map();
+function markPaneEntrance(pane){
+  // Presentation-owned entrance: CSS animates the arriving pane's sections for
+  // one beat. The marker is cleared afterwards so later re-renders stay still.
+  clearTimeout(paneEntranceTimers.get(pane.id));
+  pane.setAttribute('data-sd-enter','');
+  paneEntranceTimers.set(pane.id,setTimeout(()=>{pane.removeAttribute('data-sd-enter');paneEntranceTimers.delete(pane.id);},900));
+}
 async function presentTabCommit(context,update){
   // Primary tab changes are intentionally immediate. Navigation owns state,
   // history, focus, and readiness; visual snapshot transitions are not part of
@@ -5788,6 +5796,7 @@ function commitTabView(context){
   UiTabRegistry.sync(tabName);
   document.querySelectorAll('.pane').forEach(p=>{p.classList.remove('on');p.style.display='none';p.hidden=true;});
   pane.classList.add('on');pane.style.display='block';pane.hidden=false;
+  if(previousTab!==tabName)markPaneEntrance(pane);
   if(tabName==='execute'){
     refreshPnote({force:true});
     updateCD();
@@ -5869,6 +5878,16 @@ function updateFullscreenButton(){
     btn.title=active?'Exit fullscreen':'Enter fullscreen';
   }
 }
+let appearanceShiftTimer=0;
+function beginAppearanceShift(){
+  // A deliberate theme/skin choice crossfades colour roles (see core.css
+  // APPEARANCE SHIFT). Reduced motion keeps the immediate switch.
+  if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  const root=document.documentElement;
+  root.setAttribute('data-sd-appearance-shift','');
+  clearTimeout(appearanceShiftTimer);
+  appearanceShiftTimer=setTimeout(()=>root.removeAttribute('data-sd-appearance-shift'),520);
+}
 function renderThemeControls(){
   const controls=document.getElementById('theme-controls');
   if(!controls)return;
@@ -5904,6 +5923,7 @@ function applyTheme(themeId,{persist=false,restoreFocus=false}={}){
 }
 function setTheme(themeId,{restoreFocus=false}={}){
   if(!requirePrimaryTab(null,'change appearance settings'))return PRESENTATION_KERNEL.activeThemeId();
+  beginAppearanceShift();
   return applyTheme(themeId,{persist:true,restoreFocus});
 }
 function handleThemeSelection(ev){
@@ -5945,6 +5965,7 @@ function applyPresentation(presentationId,{persist=false,restoreFocus=false}={})
 }
 function setPresentation(presentationId,{restoreFocus=false}={}){
   if(!requirePrimaryTab(null,'change appearance settings'))return PRESENTATION_KERNEL.activePresentationId();
+  beginAppearanceShift();
   return applyPresentation(presentationId,{persist:true,restoreFocus});
 }
 function registerPresentationPack(definition){

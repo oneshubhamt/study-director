@@ -25,7 +25,7 @@ function loadKernel({storedTheme=null,storedPresentation=null}={}){
   const context=vm.createContext({
     console,Symbol,Object,Set,Map,Promise,TypeError,Error,window,document,localStorage,
     getComputedStyle:()=>({getPropertyValue:name=>{
-      if(name==='--sd-meta-theme-color')return root.dataset.theme==='director-light'?'#eef1ec':'#04050a';
+      if(name==='--sd-meta-theme-color')return root.dataset.theme==='director-light'?'#f2f0ea':'#04050a';
       if(name==='--sd-meta-apple-status-bar-style')return root.dataset.theme==='director-light'?'default':'black-translucent';
       return '';
     }})
@@ -71,9 +71,9 @@ const GLASS_PROFILE=Object.freeze({
 
 for(const [storedPresentation,storedTheme,expectedColor,expectedStatus] of [
   ['director-current','director-dark','#04050a','black-translucent'],
-  ['director-current','director-light','#eef1ec','default'],
+  ['director-current','director-light','#f2f0ea','default'],
   ['glass','director-dark','#04050a','black-translucent'],
-  ['glass','director-light','#eef1ec','default']
+  ['glass','director-light','#f2f0ea','default']
 ]){
   const {kernel,storage,root,meta}=loadKernel({storedTheme,storedPresentation});
   assert.equal(kernel.activeThemeId(),storedTheme,`Saved ${storedTheme} theme must be restored during pre-hydration.`);

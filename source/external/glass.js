@@ -239,19 +239,188 @@ html[data-material="glass"]{
   --sd-material-insights-window-control:rgba(var(--sd-rgb-surface-1),.28);
 }
 
+/* GLASS PALETTES ---------------------------------------------------------
+   Glass is a different room, not Director with rounded corners. It keeps the
+   host's semantic roles (accent, info, success, warning, danger, execute,
+   pacer) but gives them its own calm, luminous values, and puts a soft
+   aurora behind the frosted surfaces so the material has something to
+   refract. Director's palettes remain untouched. */
+html[data-presentation="glass"][data-theme="director-dark"]{
+  --sd-meta-theme-color:#080a14;
+  --sd-color-canvas:#080a14;
+  --sd-color-surface-1:#121422;
+  --sd-color-surface-2:#1a1d2e;
+  --sd-color-border-1:#1f2236;
+  --sd-color-border-2:#2a2e47;
+  --sd-color-border-3:#383d5a;
+  --sd-color-accent-primary:#a5b4fc;
+  --sd-color-accent-secondary:#ff9b7a;
+  --sd-color-info:#7dd3fc;
+  --sd-color-text-primary:#eef0fb;
+  --sd-color-text-secondary:#a3a8c3;
+  --sd-color-text-tertiary:#d9dcef;
+  --sd-color-text-muted:#5d6282;
+  --sd-color-text-secondary-strong:#bfc3da;
+  --sd-color-text-accessible-muted:#b6bbd3;
+  --sd-color-danger:#fb7185;
+  --sd-color-warning:#fbbf24;
+  --sd-color-success:#6ee7b7;
+  --sd-color-text-inverse:#0b0d1a;
+  --sd-rgb-canvas:8,10,20;
+  --sd-rgb-surface-1:18,20,34;
+  --sd-rgb-surface-2:26,29,46;
+  --sd-rgb-surface-deep:12,14,26;
+  --sd-rgb-shadow:2,3,12;
+  --sd-rgb-accent-primary:165,180,252;
+  --sd-rgb-accent-secondary:255,155,122;
+  --sd-rgb-info:125,211,252;
+  --sd-rgb-danger:251,113,133;
+  --sd-rgb-warning:251,191,36;
+  --sd-rgb-success:110,231,183;
+  --sd-rgb-shell-brand-deep:58,48,120;
+  --sd-rgb-shell-deep:12,14,28;
+  --sd-rgb-text-placeholder:120,126,160;
+  --sd-rgb-field-deep:10,12,24;
+  --sd-rgb-border-muted:52,57,88;
+  --sd-rgb-owner-deep:10,12,24;
+  --sd-color-shell-deep-1:#0c0e1a;
+  --sd-color-shell-deep-2:#0a0c16;
+  --sd-color-execute-lime:#c7d0ff;
+  --sd-color-execute-blue:#93c5fd;
+  --sd-color-execute-amber:#fcd34d;
+  --sd-color-execute-text-strong:#e3e6f6;
+  --sd-color-execute-text-soft:#9da3c0;
+  --sd-color-execute-danger-text:#fda4af;
+  --sd-color-execute-session-title:#ffb59c;
+  --sd-rgb-execute-lime:199,208,255;
+  --sd-rgb-execute-blue:147,197,253;
+  --sd-rgb-execute-amber:252,211,77;
+  --sd-rgb-execute-danger:251,113,133;
+  --sd-color-pacer-accent:#c4b5fd;
+  --sd-color-pacer-accent-strong:#d4c8ff;
+  --sd-color-pacer-accent-muted:#b3a5ef;
+  --sd-rgb-pacer-primary:167,139,250;
+  --sd-rgb-pacer-accent:196,181,253;
+  --sd-color-fitness:#6ee7b7;
+  --sd-color-brain:#7dd3fc;
+  --sd-rgb-fitness:110,231,183;
+  --sd-rgb-brain:125,211,252;
+  --sd-rgb-insights-nav-1:16,18,32;
+  --sd-rgb-insights-nav-2:20,22,38;
+  --sd-rgb-chart-divider:14,16,28;
+  --sd-chart-series-03:#ffb38a;
+  --sd-chart-series-04:#c4b5fd;
+  --sd-glass-aurora:
+    radial-gradient(62vmax 48vmax at 4% -8%,rgba(124,92,255,.30),transparent 62%),
+    radial-gradient(48vmax 42vmax at 102% 6%,rgba(56,189,248,.17),transparent 60%),
+    radial-gradient(56vmax 46vmax at 74% 108%,rgba(244,114,182,.13),transparent 62%),
+    radial-gradient(40vmax 36vmax at 16% 96%,rgba(45,212,191,.10),transparent 60%),
+    var(--sd-color-canvas);
+}
+
+html[data-presentation="glass"][data-theme="director-light"]{
+  --sd-meta-theme-color:#eceef6;
+  --sd-color-canvas:#eceef6;
+  --sd-color-surface-1:#ffffff;
+  --sd-color-surface-2:#f3f4fa;
+  --sd-color-border-1:#e0e3ee;
+  --sd-color-border-2:#cdd1e2;
+  --sd-color-border-3:#b4b9cf;
+  --sd-color-accent-primary:#4f46e5;
+  --sd-color-accent-secondary:#b23a0b;
+  --sd-color-info:#0369a1;
+  --sd-color-text-primary:#141629;
+  --sd-color-text-secondary:#555b78;
+  --sd-color-text-tertiary:#2d3150;
+  --sd-color-text-muted:#8f94ad;
+  --sd-color-text-secondary-strong:#3d4262;
+  --sd-color-text-accessible-muted:#3d4262;
+  --sd-color-danger:#c81e1e;
+  --sd-color-warning:#8f5600;
+  --sd-color-success:#12703a;
+  --sd-color-text-inverse:#ffffff;
+  --sd-rgb-canvas:236,238,246;
+  --sd-rgb-surface-1:255,255,255;
+  --sd-rgb-surface-2:243,244,250;
+  --sd-rgb-surface-deep:228,231,242;
+  --sd-rgb-neutral-overlay:20,22,48;
+  --sd-rgb-shadow:40,44,90;
+  --sd-rgb-accent-primary:79,70,229;
+  --sd-rgb-accent-secondary:178,58,11;
+  --sd-rgb-info:3,105,161;
+  --sd-rgb-danger:200,30,30;
+  --sd-rgb-warning:143,86,0;
+  --sd-rgb-success:18,112,58;
+  --sd-rgb-shell-brand-deep:79,70,229;
+  --sd-rgb-shell-deep:255,255,255;
+  --sd-rgb-text-placeholder:118,123,150;
+  --sd-rgb-field-deep:255,255,255;
+  --sd-rgb-border-muted:190,195,215;
+  --sd-color-shell-deep-1:#f6f7fc;
+  --sd-color-shell-deep-2:#eff1f8;
+  --sd-color-execute-lime:#4f46e5;
+  --sd-color-execute-blue:#2b5f9e;
+  --sd-color-execute-amber:#8f5600;
+  --sd-color-execute-text-strong:#1d2038;
+  --sd-color-execute-text-soft:#5a6080;
+  --sd-color-execute-danger-text:#b4232c;
+  --sd-color-execute-session-title:#a3340a;
+  --sd-rgb-execute-lime:79,70,229;
+  --sd-rgb-execute-blue:43,95,158;
+  --sd-rgb-execute-amber:143,86,0;
+  --sd-rgb-execute-danger:200,30,30;
+  --sd-color-pacer-accent:#6d28d9;
+  --sd-color-pacer-accent-strong:#5b21b6;
+  --sd-color-pacer-accent-muted:#6b4fb0;
+  --sd-rgb-pacer-primary:109,40,217;
+  --sd-rgb-pacer-accent:109,40,217;
+  --sd-color-fitness:#047857;
+  --sd-color-brain:#0369a1;
+  --sd-rgb-fitness:4,120,87;
+  --sd-rgb-brain:3,105,161;
+  --sd-rgb-insights-nav-1:255,255,255;
+  --sd-rgb-insights-nav-2:246,247,252;
+  --sd-rgb-chart-divider:216,220,234;
+  --sd-surface-accent-panel:rgba(var(--sd-rgb-accent-primary),.022);
+  --sd-state-accent-bg-soft:rgba(var(--sd-rgb-accent-primary),.018);
+  --sd-glass-aurora:
+    radial-gradient(60vmax 46vmax at 0% -6%,rgba(167,139,250,.34),transparent 62%),
+    radial-gradient(52vmax 44vmax at 104% 0%,rgba(255,183,150,.42),transparent 60%),
+    radial-gradient(56vmax 46vmax at 82% 108%,rgba(125,211,252,.36),transparent 62%),
+    radial-gradient(42vmax 36vmax at 10% 100%,rgba(134,239,172,.22),transparent 60%),
+    var(--sd-color-canvas);
+}
+
 html[data-theme="director-light"][data-material="glass"]{
-  --sd-glass-surface-alpha:.74;
-  --sd-glass-surface-soft-alpha:.56;
-  --sd-glass-panel-alpha:.68;
-  --sd-glass-field-alpha:.72;
-  --sd-glass-floating-alpha:.84;
-  --sd-glass-navigation-alpha:.78;
-  --sd-glass-readable-alpha:.88;
+  --sd-glass-surface-alpha:.62;
+  --sd-glass-surface-soft-alpha:.46;
+  --sd-glass-panel-alpha:.58;
+  --sd-glass-field-alpha:.78;
+  --sd-glass-floating-alpha:.82;
+  --sd-glass-navigation-alpha:.56;
+  --sd-glass-readable-alpha:.90;
   --sd-glass-sticky-alpha:.92;
-  --sd-glass-specular:rgba(var(--sd-rgb-on-strong),.22);
-  --sd-glass-specular-soft:rgba(var(--sd-rgb-on-strong),.12);
-  --sd-glass-edge:rgba(var(--sd-rgb-shadow),.30);
-  --sd-glass-control-edge:rgba(var(--sd-rgb-shadow),.46);
+  --sd-glass-specular:rgba(var(--sd-rgb-on-strong),.55);
+  --sd-glass-specular-soft:rgba(var(--sd-rgb-on-strong),.30);
+  --sd-glass-edge:rgba(var(--sd-rgb-shadow),.13);
+  --sd-glass-control-edge:rgba(var(--sd-rgb-shadow),.30);
+}
+
+/* The aurora sits on its own fixed layer so it never scrolls, repaints or
+   multiplies; every frosted surface samples the same light field. */
+html[data-material="glass"]{background:var(--sd-color-canvas)}
+html[data-material="glass"] body{background:transparent}
+html[data-material="glass"] body::before{
+  content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:var(--sd-glass-aurora,var(--sd-color-canvas));
+}
+html[data-material="glass"]{
+  --sd-material-document:transparent;
+  --sd-material-navigation:
+    linear-gradient(180deg,rgba(var(--sd-rgb-accent-primary),.08),transparent 220px),
+    linear-gradient(145deg,var(--sd-glass-specular-soft),transparent 46%),
+    rgba(var(--sd-rgb-surface-1),var(--sd-glass-navigation-alpha));
+  --sd-material-shell-header:transparent;
 }
 
 html[data-depth="glass"]{
@@ -328,12 +497,62 @@ html[data-presentation="glass"] .practice-variable-examples span{
   font-family:var(--sd-font-body);text-transform:none;letter-spacing:.01em;
 }
 
+/* GLASS VOICE ------------------------------------------------------------
+   Director speaks in condensed capitals and terminal mono. Glass speaks in
+   sentence case with proportional, tabular figures: the same information,
+   read as a calm document rather than a heads-up display. */
+html[data-typography="glass"]{
+  --sd-font-mono:"Barlow",sans-serif;
+  --sd-type-mono-tracking:.01em;
+  font-variant-numeric:tabular-nums;
+}
+html[data-presentation="glass"] :is(.np-name,.si-name,.review-date,.rcard-name,.library-title,.execute-overlay-title,.gap-title,.name-setup-title,.journal-date-wrap,.library-diary-month,.timer-focus-line,.managed-version-history-kicker){
+  text-transform:none;letter-spacing:-.012em;
+}
+html[data-presentation="glass"] :is(.np-name,.review-date,.library-title,.execute-overlay-title,.gap-title,.name-setup-title){
+  font-family:var(--sd-font-display);font-weight:var(--sd-font-weight-semibold);letter-spacing:-.022em;
+}
+html[data-presentation="glass"] .primary-controls .btn{letter-spacing:var(--sd-type-control-tracking)}
+html[data-presentation="glass"] .si-name{font-family:var(--sd-font-body);font-weight:var(--sd-font-weight-semibold)}
+html[data-presentation="glass"] :is(.ui-disclosure>summary,.plan-composer>summary){
+  text-transform:none;letter-spacing:.005em;font-family:var(--sd-font-body);font-weight:var(--sd-font-weight-semibold);
+}
+html[data-presentation="glass"] :is(.ui-disclosure,.plan-composer,.review-collapse,.backup-advanced-disclosure)>summary::after,
+html[data-presentation="glass"] .rt-actions-collapsed .rt-actions-summary::after{
+  content:"";width:8px;height:8px;padding:0;margin:0 6px 4px;border:0;
+  border-right:1.6px solid currentColor;border-bottom:1.6px solid currentColor;border-radius:1px;
+  color:var(--sd-color-text-secondary);transform:rotate(45deg);
+  transition:transform var(--sd-motion-duration-medium) var(--sd-motion-ease-standard);
+}
+html[data-presentation="glass"] :is(.ui-disclosure,.plan-composer,.review-collapse,.backup-advanced-disclosure)[open]>summary::after,
+html[data-presentation="glass"] .rt-actions-collapsed[open] .rt-actions-summary::after{transform:translateY(4px) rotate(-135deg)}
+html[data-presentation="glass"] .review-collapse:not([open])>summary::after{content:""}
+
+/* The clock and countdown lose their HUD glow and become quiet, luminous
+   numerals; state colour still arrives through the same classes. */
+html[data-presentation="glass"] #clock{
+  font-family:var(--sd-font-display);font-weight:var(--sd-font-weight-semibold);letter-spacing:.01em;
+  color:var(--sd-color-text-primary);
+}
+html[data-presentation="glass"] #cd{
+  font-family:var(--sd-font-display);font-weight:var(--sd-font-weight-semibold);letter-spacing:-.035em;
+  background:linear-gradient(180deg,var(--sd-color-text-primary) 18%,var(--sd-color-execute-lime) 100%);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;text-shadow:none;
+}
+html[data-presentation="glass"] #cd.warn{background-image:linear-gradient(180deg,var(--sd-color-text-primary) 10%,var(--sd-color-warning) 100%)}
+html[data-presentation="glass"] #cd.urg{background-image:linear-gradient(180deg,var(--sd-color-text-primary) 10%,var(--sd-color-danger) 100%)}
+
 /* Subtle Glass-specific rhythm and chart finish; no continuous animation. */
 html[data-presentation="glass"]{
   --sd-motion-duration-quick:.14s;
   --sd-motion-duration-fast:.17s;
   --sd-motion-duration-standard:.18s;
   --sd-motion-ease-standard:cubic-bezier(.2,.75,.25,1);
+  --sd-motion-pane-enter-name:sd-pane-enter-float;
+  --sd-motion-pane-enter-duration:.46s;
+  --sd-motion-pane-enter-ease:cubic-bezier(.16,1,.3,1);
+  --sd-motion-pane-enter-stagger:42ms;
+  --sd-motion-appearance-duration:.42s;
   --sd-chart-grid-color:rgba(var(--sd-rgb-neutral-overlay),.095);
   --sd-chart-line-width:1.5;
   --sd-chart-line-strong-width:2.7;

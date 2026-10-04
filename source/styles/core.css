@@ -136,120 +136,123 @@ html[data-theme="director-dark"]{
   --sd-chart-series-16:#f59e0b;
 }
 
-/* THEME: DIRECTOR LIGHT
-   A high-contrast light proof theme. It changes semantic visual roles only;
-   layout, typography, geometry, density, and behaviour remain independent. */
+/* THEME: DIRECTOR LIGHT · "Field Manual"
+   Warm paper, ink and a single signal orange. Director's lime cannot carry
+   text on a light ground, so the light theme moves the brand emphasis to the
+   orange half of the Director pair and keeps every text role at AA or better.
+   It changes semantic visual roles only; layout, typography, geometry,
+   density, and behaviour remain independent. */
 html[data-theme="director-light"]{
   color-scheme:light;
-  --sd-meta-theme-color:#eef1ec;
+  --sd-meta-theme-color:#f2f0ea;
   --sd-meta-apple-status-bar-style:default;
 
   /* Foundation colours and channels */
-  --sd-color-canvas:#eef1ec;
-  --sd-color-surface-1:#f8f9f5;
-  --sd-color-surface-2:#e5e9e4;
-  --sd-color-border-1:#d9ded8;
-  --sd-color-border-2:#c7cec6;
-  --sd-color-border-3:#b4beb4;
-  --sd-color-accent-primary:#5f6c00;
-  --sd-color-accent-secondary:#c43d00;
-  --sd-color-info:#006e91;
-  --sd-color-text-primary:#161a26;
-  --sd-color-text-secondary:#5d6679;
-  --sd-color-text-tertiary:#303747;
-  --sd-color-text-muted:#8b94a7;
-  --sd-color-text-secondary-strong:#465064;
-  --sd-color-text-accessible-muted:#465064;
-  --sd-color-danger:#bd242b;
-  --sd-color-warning:#925500;
-  --sd-color-success:#237b2d;
+  --sd-color-canvas:#f2f0ea;
+  --sd-color-surface-1:#fcfbf8;
+  --sd-color-surface-2:#ebe8e0;
+  --sd-color-border-1:#e2ded4;
+  --sd-color-border-2:#d0cabd;
+  --sd-color-border-3:#b7b0a1;
+  --sd-color-accent-primary:#b33a08;
+  --sd-color-accent-secondary:#b0305a;
+  --sd-color-info:#1d5bc8;
+  --sd-color-text-primary:#0f1013;
+  --sd-color-text-secondary:#545664;
+  --sd-color-text-tertiary:#2c2e37;
+  --sd-color-text-muted:#8c8b92;
+  --sd-color-text-secondary-strong:#3d3f4b;
+  --sd-color-text-accessible-muted:#3d3f4b;
+  --sd-color-danger:#bb2229;
+  --sd-color-warning:#8a5a00;
+  --sd-color-success:#1b7339;
   --sd-color-on-strong:#ffffff;
   --sd-color-text-inverse:#ffffff;
-  --sd-rgb-canvas:238,241,236;
-  --sd-rgb-surface-1:248,249,245;
-  --sd-rgb-surface-2:229,233,228;
-  --sd-rgb-surface-deep:218,224,217;
-  --sd-rgb-neutral-overlay:0,0,0;
+  --sd-rgb-canvas:242,240,234;
+  --sd-rgb-surface-1:252,251,248;
+  --sd-rgb-surface-2:235,232,224;
+  --sd-rgb-surface-deep:226,222,212;
+  --sd-rgb-neutral-overlay:20,18,12;
   --sd-rgb-on-strong:255,255,255;
-  --sd-rgb-shadow:38,46,66;
-  --sd-rgb-accent-primary:95,108,0;
-  --sd-rgb-info:0,110,145;
+  --sd-rgb-shadow:44,36,22;
+  --sd-rgb-accent-primary:179,58,8;
+  --sd-rgb-info:29,91,200;
 
   /* Semantic evidence and progress tones */
-  --sd-color-watch:#8e5e00;
+  --sd-color-watch:#8a5a00;
   --sd-color-low:#a72e50;
-  --sd-color-risk:#bd3156;
-  --sd-color-chart-coral:#ba4332;
-  --sd-color-review-mid:#887300;
-  --sd-color-review-high:#4c771b;
-  --sd-color-warning-bright:#a45e00;
-  --sd-color-data-fixed:#626d85;
-  --sd-rgb-watch:142,94,0;
+  --sd-color-risk:#bb2c52;
+  --sd-color-chart-coral:#b8402c;
+  --sd-color-review-mid:#7f6a00;
+  --sd-color-review-high:#3f7419;
+  --sd-color-warning-bright:#9c5600;
+  --sd-color-data-fixed:#5f6170;
+  --sd-rgb-watch:138,90,0;
   --sd-rgb-low:167,46,80;
-  --sd-rgb-risk:189,49,86;
-  --sd-rgb-chart-coral:186,67,50;
-  --sd-rgb-data-muted:94,103,126;
-  --sd-rgb-data-neutral:88,99,124;
-  --sd-rgb-violet:108,82,194;
+  --sd-rgb-risk:187,44,82;
+  --sd-rgb-chart-coral:184,64,44;
+  --sd-rgb-data-muted:96,97,110;
+  --sd-rgb-data-neutral:88,90,104;
+  --sd-rgb-violet:106,67,199;
 
   /* Core shell and domain channels */
-  --sd-rgb-accent-secondary:196,61,0;
-  --sd-rgb-danger:189,36,43;
-  --sd-rgb-warning:146,85,0;
-  --sd-rgb-success:35,123,45;
+  --sd-rgb-accent-secondary:176,48,90;
+  --sd-rgb-danger:187,34,41;
+  --sd-rgb-warning:138,90,0;
+  --sd-rgb-success:27,115,57;
   --sd-rgb-plan-danger:184,35,72;
   --sd-rgb-schedule-meal:82,87,183;
-  --sd-rgb-schedule-active:194,72,24;
+  --sd-rgb-schedule-active:179,58,8;
   --sd-rgb-danger-soft-text:153,30,45;
-  --sd-rgb-shell-brand-deep:103,31,26;
-  --sd-rgb-shell-deep:24,29,43;
-  --sd-rgb-text-placeholder:113,121,140;
-  --sd-rgb-field-deep:248,249,245;
-  --sd-rgb-border-muted:178,188,205;
+  --sd-rgb-shell-brand-deep:58,24,14;
+  --sd-rgb-shell-deep:17,17,21;
+  --sd-rgb-text-placeholder:118,117,126;
+  --sd-rgb-field-deep:252,251,248;
+  --sd-rgb-border-muted:190,183,170;
   --sd-rgb-owner-deep:255,255,255;
-  --sd-rgb-storage-ok:27,125,67;
-  --sd-color-shell-deep-1:#f3f5f0;
-  --sd-color-shell-deep-2:#e6eae5;
-  --sd-color-shell-header-eyebrow:rgba(var(--sd-rgb-on-strong),.89);
-  --sd-color-shell-header-date:rgba(var(--sd-rgb-on-strong),.89);
-  --sd-shell-header-overlay:linear-gradient(90deg,rgba(var(--sd-rgb-shell-deep),.35),rgba(var(--sd-rgb-shell-deep),.20) 82%,rgba(var(--sd-rgb-shell-deep),.10)),linear-gradient(180deg,rgba(var(--sd-rgb-on-strong),.04),transparent 40%);
+  --sd-rgb-storage-ok:27,115,57;
+  --sd-color-shell-deep-1:#f7f5f0;
+  --sd-color-shell-deep-2:#efece5;
+  --sd-color-shell-header-eyebrow:rgba(var(--sd-rgb-on-strong),.80);
+  --sd-color-shell-header-date:rgba(var(--sd-rgb-on-strong),.74);
+  --sd-shell-header-overlay:linear-gradient(180deg,rgba(var(--sd-rgb-on-strong),.05),transparent 40%);
 
   /* Execute and Practice Pacer feature palette */
-  --sd-color-execute-lime:#647100;
-  --sd-color-execute-blue:#426b80;
-  --sd-color-execute-amber:#955700;
-  --sd-color-execute-text-strong:#273342;
-  --sd-color-execute-text-soft:#667085;
-  --sd-color-execute-danger-text:#ad2d34;
-  --sd-color-execute-session-title:#ad401f;
-  --sd-rgb-execute-lime:100,113,0;
-  --sd-rgb-execute-blue:66,107,128;
-  --sd-rgb-execute-amber:149,87,0;
-  --sd-rgb-execute-danger:180,42,51;
-  --sd-color-pacer-accent:#6651bd;
-  --sd-color-pacer-accent-strong:#5944ad;
-  --sd-color-pacer-accent-muted:#7568aa;
-  --sd-rgb-pacer-primary:102,81,189;
-  --sd-rgb-pacer-accent:102,81,189;
+  --sd-color-execute-lime:#b33a08;
+  --sd-color-execute-blue:#2f5f8f;
+  --sd-color-execute-amber:#8a5a00;
+  --sd-color-execute-text-strong:#1d1f27;
+  --sd-color-execute-text-soft:#5a5c69;
+  --sd-color-execute-danger-text:#ad2228;
+  --sd-color-execute-session-title:#a3340a;
+  --sd-rgb-execute-lime:179,58,8;
+  --sd-rgb-execute-blue:47,95,143;
+  --sd-rgb-execute-amber:138,90,0;
+  --sd-rgb-execute-danger:180,34,41;
+  --sd-color-pacer-accent:#6a43c7;
+  --sd-color-pacer-accent-strong:#5a34b4;
+  --sd-color-pacer-accent-muted:#6e5aa8;
+  --sd-rgb-pacer-primary:106,67,199;
+  --sd-rgb-pacer-accent:106,67,199;
 
   /* Insights feature and chart channels */
-  --sd-color-fitness:#087c55;
-  --sd-color-brain:#087a98;
-  --sd-rgb-fitness:8,124,85;
-  --sd-rgb-brain:8,122,152;
-  --sd-rgb-insights-nav-1:250,251,253;
-  --sd-rgb-insights-nav-2:239,243,248;
-  --sd-rgb-chart-divider:211,217,228;
+  --sd-color-fitness:#07745a;
+  --sd-color-brain:#0b6f8b;
+  --sd-rgb-fitness:7,116,90;
+  --sd-rgb-brain:11,111,139;
+  --sd-rgb-insights-nav-1:252,251,248;
+  --sd-rgb-insights-nav-2:242,240,234;
+  --sd-rgb-chart-divider:220,215,204;
 
-  /* Ordered categorical-series palette, tuned for light surfaces */
+  /* Ordered categorical-series palette, tuned for paper surfaces */
   --sd-chart-series-01:var(--sd-color-info);
   --sd-chart-series-02:var(--sd-color-accent-primary);
-  --sd-chart-series-03:#b75413;
-  --sd-chart-series-04:#6c52c2;
-  --sd-chart-series-05:#087c55;
-  --sd-chart-series-06:#bd3156;
+  --sd-chart-series-03:#7a5a00;
+  --sd-chart-series-04:#6a43c7;
+  --sd-chart-series-05:#07745a;
+  --sd-chart-series-06:#bb2c52;
   --sd-chart-series-07:#2667b2;
-  --sd-chart-series-08:#967700;
+  --sd-chart-series-08:#8f6f00;
   --sd-chart-series-09:#087d75;
   --sd-chart-series-10:#854bb2;
   --sd-chart-series-11:#b43b5f;
@@ -638,6 +641,11 @@ html[data-motion="precise"]{
   --sd-motion-feedback-duration:var(--sd-motion-duration-fast);
   --sd-motion-feedback-ease:var(--sd-motion-ease-standard);
   --sd-motion-anchored-transition:none;
+  --sd-motion-pane-enter-name:sd-pane-enter-hud;
+  --sd-motion-pane-enter-duration:.26s;
+  --sd-motion-pane-enter-ease:linear;
+  --sd-motion-pane-enter-stagger:28ms;
+  --sd-motion-appearance-duration:.36s;
   --sd-motion-control-transition:border-color var(--sd-motion-duration-standard),background var(--sd-motion-duration-standard),color var(--sd-motion-duration-standard),box-shadow var(--sd-motion-duration-standard),opacity var(--sd-motion-duration-standard);
   --sd-motion-colors-fast-transition:border-color var(--sd-motion-duration-fast) var(--sd-motion-ease-standard),background var(--sd-motion-duration-fast) var(--sd-motion-ease-standard),color var(--sd-motion-duration-fast) var(--sd-motion-ease-standard);
   --sd-motion-field-transition:border-color var(--sd-motion-duration-fast),box-shadow var(--sd-motion-duration-fast);
@@ -738,15 +746,31 @@ html[data-charts="analytical"]{
   --sd-chart-fitness-hit-fill:rgba(var(--sd-rgb-accent-primary),.02);
 }
 
-/* LIGHT-THEME COMPOSITION · opaque footing and gentler neutral depth */
+/* LIGHT-THEME COMPOSITION · paper footing, ink shadows and one signal edge */
 html[data-theme="director-light"]{
-  --sd-surface-field:rgba(var(--sd-rgb-surface-1),.94);
-  --sd-shadow-card:0 1px 3px rgba(var(--sd-rgb-shadow),.08),0 10px 24px rgba(var(--sd-rgb-shadow),.04);
-  --sd-shadow-panel:0 10px 28px rgba(var(--sd-rgb-shadow),.10);
-  --sd-shadow-deep:0 20px 60px rgba(var(--sd-rgb-shadow),.22);
+  --sd-surface-field:rgba(var(--sd-rgb-surface-1),.96);
+  --sd-shadow-card:0 1px 0 rgba(var(--sd-rgb-shadow),.06),0 1px 3px rgba(var(--sd-rgb-shadow),.07);
+  --sd-shadow-panel:0 1px 0 rgba(var(--sd-rgb-shadow),.05),0 12px 28px -14px rgba(var(--sd-rgb-shadow),.22);
+  --sd-shadow-deep:0 24px 60px -18px rgba(var(--sd-rgb-shadow),.30);
+  --sd-color-shell-header-eyebrow:rgba(var(--sd-rgb-on-strong),.90);
+  /* Saturated ink reads far stronger on paper than lime does on black, so the
+     accent washes are thinner here to keep panels neutral and edges crisp. */
+  --sd-surface-accent-soft:rgba(var(--sd-rgb-accent-primary),.05);
+  --sd-surface-accent-panel:rgba(var(--sd-rgb-accent-primary),.014);
+  --sd-state-accent-bg:rgba(var(--sd-rgb-accent-primary),.022);
+  --sd-state-accent-bg-soft:rgba(var(--sd-rgb-accent-primary),.014);
+  --sd-state-accent-bg-faint:rgba(var(--sd-rgb-accent-primary),.009);
+  --sd-state-accent-glow:rgba(var(--sd-rgb-accent-primary),.03);
+  --sd-state-info-bg:rgba(var(--sd-rgb-info),.03);
+  --sd-state-info-bg-soft:rgba(var(--sd-rgb-info),.02);
+  --sd-state-info-bg-faint:rgba(var(--sd-rgb-info),.012);
+}
+html[data-theme="director-light"][data-material="solid"]{
+  --sd-material-shell-header:linear-gradient(150deg,rgba(var(--sd-rgb-accent-primary),.96) 0%,rgba(var(--sd-rgb-shell-brand-deep),.98) 52%,rgba(var(--sd-rgb-shell-deep),1) 100%);
+  --sd-material-navigation:linear-gradient(180deg,var(--sd-color-surface-1) 0%,var(--sd-color-shell-deep-1) 48%,var(--sd-color-shell-deep-2) 100%);
 }
 html[data-theme="director-light"] #cd{
-  background:linear-gradient(160deg,var(--sd-color-text-primary) 0%,var(--sd-color-accent-primary) 60%,rgba(var(--sd-rgb-accent-primary),.82) 100%);
+  background:linear-gradient(160deg,var(--sd-color-text-primary) 0%,var(--sd-color-text-primary) 46%,var(--sd-color-accent-primary) 100%);
   -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
 }
 html[data-theme="director-light"] #cd.warn{
@@ -758,7 +782,7 @@ html[data-theme="director-light"] #cd.urg{
   -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
 }
 html[data-theme="director-light"] .ownership-banner{background:linear-gradient(135deg,rgba(var(--sd-rgb-warning),.10),rgba(var(--sd-rgb-owner-deep),.98))}
-html[data-theme="director-light"] #install-notice-action{--btn-bg:var(--sd-color-surface-1);--btn-color:#3f4900;--btn-border:rgba(var(--sd-rgb-accent-primary),.42)}
+html[data-theme="director-light"] #install-notice-action{--btn-bg:var(--sd-color-accent-primary);--btn-color:var(--sd-color-text-inverse);--btn-border:var(--sd-color-accent-primary)}
 html[data-theme="director-light"] button[data-action="dismiss-install-notice"]{--btn-color:var(--sd-color-text-tertiary)}
 html[data-theme="director-light"] .display-tools-trigger{background:var(--sd-color-surface-1);color:var(--sd-color-text-tertiary)}
 html[data-theme="director-dark"] #install-notice-action{--btn-bg:var(--sd-color-accent-primary);--btn-color:var(--sd-color-canvas);--btn-border:var(--sd-color-accent-primary)}
@@ -880,6 +904,23 @@ input,textarea,select{border-radius:var(--sd-shape-field-radius)}
 .main{flex:1;min-width:0}
 .pane{display:none;padding:var(--sd-density-pane-padding-top) var(--sd-density-pane-padding-right) var(--sd-density-pane-padding-bottom) var(--sd-density-pane-padding-left)}
 .pane.on{display:block}
+/* PANE ENTRANCE · navigation marks the arriving pane with data-sd-enter for
+   one beat. Each presentation names its own keyframes; only opacity and a
+   short transform run, with backwards fill, so nothing persists after the
+   entrance and no fixed or filtered layer is left behind. */
+@keyframes sd-pane-enter-hud{0%{opacity:0;transform:translate3d(-6px,0,0)}34%{opacity:.92}48%{opacity:.5}66%{opacity:1}100%{opacity:1;transform:none}}
+@keyframes sd-pane-enter-float{0%{opacity:0;transform:translate3d(0,14px,0) scale(.994)}100%{opacity:1;transform:none}}
+.pane.on[data-sd-enter]>*{animation:var(--sd-motion-pane-enter-name) var(--sd-motion-pane-enter-duration) var(--sd-motion-pane-enter-ease) backwards}
+.pane.on[data-sd-enter]>:nth-child(2){animation-delay:var(--sd-motion-pane-enter-stagger)}
+.pane.on[data-sd-enter]>:nth-child(3){animation-delay:calc(var(--sd-motion-pane-enter-stagger)*2)}
+.pane.on[data-sd-enter]>:nth-child(4){animation-delay:calc(var(--sd-motion-pane-enter-stagger)*3)}
+.pane.on[data-sd-enter]>:nth-child(5){animation-delay:calc(var(--sd-motion-pane-enter-stagger)*4)}
+.pane.on[data-sd-enter]>:nth-child(n+6){animation-delay:calc(var(--sd-motion-pane-enter-stagger)*5)}
+/* APPEARANCE SHIFT · a user-chosen theme or skin change crossfades colour
+   roles instead of cutting; gradients and geometry settle with it. */
+html[data-sd-appearance-shift] *,html[data-sd-appearance-shift] *::before,html[data-sd-appearance-shift] *::after{
+  transition:background-color var(--sd-motion-appearance-duration) var(--sd-motion-ease-in-out),border-color var(--sd-motion-appearance-duration) var(--sd-motion-ease-in-out),color var(--sd-motion-appearance-duration) var(--sd-motion-ease-in-out),fill var(--sd-motion-appearance-duration) var(--sd-motion-ease-in-out),stroke var(--sd-motion-appearance-duration) var(--sd-motion-ease-in-out)!important;
+}
 /* CORE-06 · EXECUTE — PRIMARY SESSION SURFACE Owns countdown, progress, primary controls, subject notes, and schedule rows. */
 /* EXECUTE STATUS AND COUNTDOWN */
 .status-bar{
@@ -1019,7 +1060,7 @@ input,textarea,select{border-radius:var(--sd-shape-field-radius)}
 .pfield label{color:var(--sd-color-text-secondary)}
 .pfield input{
   --field-local-border:var(--sd-color-border-2);
-  border:2px solid;
+  border:2px solid var(--field-local-border);
   font-size:var(--sd-type-role-title-small-size);
   -moz-appearance:textfield;width:100%;
 }
@@ -2632,6 +2673,7 @@ html,body,.app{max-width:100%;overflow-x:hidden}
 @media (prefers-reduced-motion: reduce){
   :root{--sd-motion-hover-transform:var(--sd-value-none);--sd-motion-press-transform:var(--sd-value-none);--sd-motion-selected-transform:var(--sd-value-none);--sd-motion-overlay-transform:none}
   *,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;transition-delay:0ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important}
+  .pane.on[data-sd-enter]>*{animation:none!important}
   #clock,#cd,.execute-overlay-title,.pnote-title,.journal-title,.rstat .v,.hstat .v{filter:none!important}
   .sidebar,#nudge-overlay,#backup-provider-overlay,#gap-overlay,.ownership-banner,.execute-state-overlay{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
 }

@@ -94,6 +94,10 @@ The compatibility layer covers live-install migration and historical external fo
 
 Glass + Dark is the default presentation for a new installation. Returning users restore their saved skin and theme through a synchronous first-paint mirror; canonical preferences repair that mirror after persistence hydration. Mobile layouts include safe-area support, dynamic viewport units, coarse-pointer target sizing and dedicated phone/tablet navigation behavior.
 
+A theme (Dark / Light) chooses semantic colour roles; a skin (Director / Glass) chooses how those roles look. Director keeps the host palettes: neon lime on black for Dark, and paper, ink and signal orange for Light (lime cannot carry text on a light ground). Glass is a separate visual language. It sets its own values for the same semantic roles for each theme (an iris accent on a midnight canvas, and indigo on cool daylight). It adds a single fixed aurora layer behind its frosted surfaces and uses sentence-case Barlow with tabular figures instead of condensed capitals and terminal mono. Every text role stays at WCAG AA or better on its surfaces.
+
+Motion is presentation-owned and built only from CSS animations; the native View Transition snapshot API stays retired. A real tab change marks the arriving pane with `data-sd-enter` for one beat. Each skin names its own keyframes: Director plays a short HUD flicker and Glass a soft float. The keyframes use only opacity and transform, with backwards fill, so nothing persists afterwards. A theme or skin change the user makes briefly crossfades colour roles through `data-sd-appearance-shift`. Reduced motion removes both effects.
+
 ## 12. Notification presentation
 
 `notice-coordinator` owns notification state, priority, deduplication, acknowledgement, recurrence and toast expiry. `interactions` renders coordinator-owned toasts and continues to own decision dialogs. Feature controllers retain execution, mutation authority and cancellation; dismissing a notification never cancels its operation.
