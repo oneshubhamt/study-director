@@ -645,6 +645,8 @@ html[data-presentation="glass"] .library-note-nav-path,
 html[data-presentation="glass"] .library-notes-editor-empty,
 html[data-presentation="glass"] .library-ongoing-note-read.empty,
 html[data-presentation="glass"] .library-diary-read.empty{color:var(--sd-color-text-secondary)}
+html[data-presentation="glass"] .library-note-nav-item.has-note{color:var(--sd-color-text-primary)}
+html[data-presentation="glass"] .library-note-nav-item.empty-note{color:var(--sd-color-text-muted)}
 html[data-material="glass"] #pane-execute .nameplate{
   background:linear-gradient(145deg,var(--sd-glass-specular-soft),transparent 42%),linear-gradient(135deg,var(--sd-surface-neutral-wash),rgba(var(--sd-rgb-execute-lime),.018)),rgba(var(--sd-rgb-surface-1),.42);
   border-radius:var(--sd-shape-nameplate-radius);

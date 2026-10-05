@@ -28,8 +28,13 @@ try{
         dialog.querySelector('.interaction-actions .primary,.interaction-actions .danger').click();
         await waitFor(()=>!dialog.open);await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));return true;
       },
+      async noteAction(id){
+        const trigger=document.getElementById('library-note-actions');trigger.click();
+        const item=await waitFor(()=>{const button=document.getElementById(id);return button&&!button.closest('[role="menu"]').hidden&&!button.disabled?button:null;});
+        item.click();return true;
+      },
       async rename(value){
-        document.getElementById('library-note-rename').click();
+        await this.noteAction('library-note-rename');
         const dialog=await waitFor(()=>{const item=document.getElementById('sd-interaction-dialog');return item&&item.open?item:null;});
         const field=dialog.querySelector('.interaction-input'),before=field.value;field.value=value;field.dispatchEvent(new Event('input',{bubbles:true}));
         const text=dialog.textContent;dialog.querySelector('.interaction-actions .primary,.interaction-actions .danger').click();
@@ -70,7 +75,7 @@ try{
       classes:Object.fromEntries(rows.map(item=>[item.dataset.ongoingNoteKey,item.className])),
       colors:Object.fromEntries(rows.map(item=>[item.dataset.ongoingNoteKey,getComputedStyle(item).color])),
       weights:Object.fromEntries(rows.map(item=>[item.dataset.ongoingNoteKey,Number(getComputedStyle(item.querySelector('.library-note-nav-name')).fontWeight)])),
-      deleteDisabled:document.getElementById('library-note-delete').disabled
+      noteMenu:!!document.getElementById('library-note-actions')
     };
   })()`);
   assert.deepEqual(filled.keys,['alpha empty','parent','parent > child empty','zeta filled'],'notes are listed by name; a branch holding today’s Areas is open');
@@ -155,8 +160,8 @@ try{
   const deletedParent=await page.evaluate(`(async()=>{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
     const parent=[...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='standalone only');parent.click();await wait(25);
-    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const before={deleteDisabled:document.getElementById('library-note-delete').disabled,child:d.AppData.notes.exportPayload()['standalone only > nested topic']?.text||''};
-    document.getElementById('library-note-delete').click();const confirmation=document.getElementById('sd-interaction-dialog')?.open===true;
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const before={noteMenu:!!document.getElementById('library-note-actions'),child:d.AppData.notes.exportPayload()['standalone only > nested topic']?.text||''};
+    await __interactionQA.noteAction('library-note-delete');const confirmation=document.getElementById('sd-interaction-dialog')?.open===true;
     await new Promise((resolve,reject)=>{const started=Date.now(),poll=()=>{if(/Moved/.test(document.getElementById('ongoing-notes-status').textContent))resolve();else if(Date.now()-started>5000)reject(new Error('delete timeout'));else setTimeout(poll,40);};poll();});
     await wait(100);
     const rows=[...document.querySelectorAll('[data-ongoing-note-key]')],parentAfter=rows.find(item=>item.dataset.ongoingNoteKey==='standalone only');
@@ -167,7 +172,7 @@ try{
       zeta:d.AppData.notes.exportPayload()['zeta filled']?.text||''
     };
   })()`);
-  assert.equal(deletedParent.before.deleteDisabled,false);assert.equal(deletedParent.before.child,'Nested knowledge');
+  assert.equal(deletedParent.before.noteMenu,true);assert.equal(deletedParent.before.child,'Nested knowledge');
   assert.equal(deletedParent.confirmation,false,'deleting moves the note to Recently deleted without asking');
   assert.match(deletedParent.status,/Moved “Standalone Only” to Recently deleted/);assert.equal(deletedParent.parentPresent,true);assert.match(deletedParent.parentClass,/empty-note/);
   assert.equal(deletedParent.child,'Nested knowledge');assert.equal(deletedParent.zeta,'Durable Zeta note');
@@ -187,7 +192,7 @@ try{
     [...document.querySelectorAll('#library-notes-editor button')].find(button=>button.textContent==='Restore').click();
     await until(()=>/Restored/.test(document.getElementById('ongoing-notes-status').textContent));
     const restored={text:d.AppData.notes.exportPayload()['standalone only']?.text||'',status:document.getElementById('ongoing-notes-status').textContent,selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||'',sectionHidden:section.hidden};
-    document.getElementById('library-note-delete').click();await until(()=>/Moved/.test(document.getElementById('ongoing-notes-status').textContent));
+    await __interactionQA.noteAction('library-note-delete');await until(()=>/Moved/.test(document.getElementById('ongoing-notes-status').textContent));
     if(toggle.getAttribute('aria-expanded')!=='true')toggle.click();await until(()=>document.querySelector('[data-trash-key]'));
     document.querySelector('[data-trash-key]').click();await until(()=>[...document.querySelectorAll('#library-notes-editor button')].some(button=>button.textContent==='Delete forever'));
     [...document.querySelectorAll('#library-notes-editor button')].find(button=>button.textContent==='Delete forever').click();
@@ -227,7 +232,7 @@ try{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),until=async test=>{for(let i=0;i<150&&!test();i++)await wait(20);return test();};
     for(const close of document.querySelectorAll('.interaction-toast-close'))close.click();await until(()=>!document.querySelector('.interaction-toast'));
     [...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='zeta filled').click();await wait(30);
-    document.getElementById('library-note-delete').click();await until(()=>!d.AppData.notes.exportPayload()['zeta filled']);
+    await __interactionQA.noteAction('library-note-delete');await until(()=>!d.AppData.notes.exportPayload()['zeta filled']);
     const toast=await until(()=>[...document.querySelectorAll('.interaction-toast')].find(item=>item.textContent.includes('Moved “Zeta Filled” to Recently deleted')));
     const undo=[...toast.querySelectorAll('button')].find(button=>button.textContent==='Undo');
     undo.click();await until(()=>document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey==='zeta filled'&&/Restored/.test(document.getElementById('ongoing-notes-status').textContent));
@@ -238,12 +243,11 @@ try{
 
   await page.setViewport({width:390,height:844,mobile:true,scale:2});await page.settle(3);
   const mobile=await page.evaluate(`(()=>{
-    const add=document.getElementById('library-note-add'),remove=document.getElementById('library-note-delete'),root=document.documentElement;
+    const add=document.getElementById('library-note-add'),root=document.documentElement;
     const rect=element=>{const r=element.getBoundingClientRect();return {width:r.width,height:r.height}};
-    return {add:rect(add),remove:rect(remove),rename:rect(document.getElementById('library-note-rename')),addLabel:add.getAttribute('aria-label'),removeLabel:remove.getAttribute('aria-label'),overflow:root.scrollWidth-root.clientWidth};
+    return {add:rect(add),addLabel:add.getAttribute('aria-label'),addText:add.textContent,overflow:root.scrollWidth-root.clientWidth};
   })()`);
-  assert.ok(mobile.add.width>=44&&mobile.add.height>=44);assert.ok(mobile.remove.width>=44&&mobile.remove.height>=44);assert.ok(mobile.rename.width>=44&&mobile.rename.height>=44);
-  assert.equal(mobile.addLabel,'Create an Area note');assert.equal(mobile.removeLabel,'Delete the selected Area note');assert.ok(mobile.overflow<=1);
+  assert.ok(mobile.add.width>=44&&mobile.add.height>=44);assert.equal(mobile.addLabel,'Create a note');assert.equal(mobile.addText,'+ New');assert.ok(mobile.overflow<=1);
   result.checks.compactAccessibleTouchControlsAndNoHorizontalOverflow=true;
 
   // Phones show the list or one note: opening a note hides the list, and the
@@ -252,12 +256,12 @@ try{
     const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),shown=selector=>{const el=document.querySelector(selector);return !!el&&getComputedStyle(el).display!=='none'&&el.getBoundingClientRect().height>0;};
     const before={list:shown('.library-notes-nav'),note:shown('#library-notes-editor')};
     [...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='zeta filled').click();await wait(60);
-    const open={list:shown('.library-notes-nav'),note:shown('#library-notes-editor'),back:shown('#library-notes-editor .library-notes-back'),width:Math.round(document.getElementById('library-notes-editor').getBoundingClientRect().width),grid:Math.round(document.querySelector('.library-notes-grid').getBoundingClientRect().width)};
+    const open={list:shown('.library-notes-nav'),note:shown('#library-notes-editor'),back:shown('#library-notes-editor .library-notes-back'),menuTarget:(()=>{const r=document.getElementById('library-note-actions').getBoundingClientRect();return r.width>=44&&r.height>=44;})(),width:Math.round(document.getElementById('library-notes-editor').getBoundingClientRect().width),grid:Math.round(document.querySelector('.library-notes-grid').getBoundingClientRect().width)};
     document.querySelector('#library-notes-editor .library-notes-back').click();await wait(80);
     return {before,open,after:{list:shown('.library-notes-nav'),note:shown('#library-notes-editor'),focused:document.activeElement?.dataset?.ongoingNoteKey||''},overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth};
   })()`);
   assert.deepEqual(phone.before,{list:true,note:false});
-  assert.deepEqual({...phone.open,width:undefined,grid:undefined},{list:false,note:true,back:true,width:undefined,grid:undefined});assert.ok(Math.abs(phone.open.width-phone.open.grid)<=2,'the open note uses the full width');
+  assert.deepEqual({...phone.open,width:undefined,grid:undefined},{list:false,note:true,back:true,menuTarget:true,width:undefined,grid:undefined});assert.ok(Math.abs(phone.open.width-phone.open.grid)<=2,'the open note uses the full width');
   assert.deepEqual(phone.after,{list:true,note:false,focused:'zeta filled'});assert.ok(phone.overflow<=1);
   result.checks.phoneListAndNoteViews=true;
 

@@ -1604,6 +1604,14 @@ input,textarea,select{border-radius:var(--sd-shape-field-radius)}
 .library-notes-trash-toggle::before{content:"▸ ";display:inline-block;width:1.2em}.library-notes-trash-toggle[aria-expanded="true"]::before{content:"▾ "}
 .library-note-trash-item .library-note-nav-name{font-weight:650}
 .library-note-action.danger:hover:not(:disabled){border-color:var(--sd-color-danger);color:var(--sd-color-danger)}
+.library-note-nav-item.empty-note{color:var(--sd-color-text-muted)}
+.library-note-menu{display:grid;gap:3px;min-width:210px;padding:6px;border:1px solid var(--sd-color-border-2);border-radius:var(--sd-shape-floating-radius);background:rgb(var(--sd-rgb-surface-1));box-shadow:var(--sd-depth-floating)}
+.library-note-menu-item{display:flex;align-items:center;justify-content:space-between;gap:18px;width:100%;min-height:36px;margin:0;padding:7px 10px;border:0;border-radius:6px;background:transparent;color:var(--sd-color-text-primary);font:inherit;text-align:left;white-space:nowrap;cursor:pointer}
+.library-note-menu-item:hover:not(:disabled),.library-note-menu-item:focus-visible{background:rgba(var(--sd-rgb-neutral-overlay),.07);outline:none}
+.library-note-menu-item:disabled{color:var(--sd-color-text-muted);cursor:default}
+.library-note-menu-item.danger{color:var(--sd-color-danger)}
+.library-note-menu-hint{color:var(--sd-color-text-muted);font-size:var(--sd-type-role-label-size)}
+.library-note-menu-separator{height:1px;margin:6px 5px;background:var(--sd-color-border-1)}
 .library-notes-editor{min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;background:var(--sd-material-canvas)}
 .library-notes-back{display:none;flex:0 0 auto;align-items:center;min-height:44px;padding:4px 10px;border:1px solid var(--sd-color-border-1);font-family:var(--sd-font-mono);font-size:var(--sd-type-role-caption-size);white-space:nowrap}
 .library-notes-editor-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 12px 8px;min-width:0;flex:0 0 auto;border-bottom:1px solid var(--sd-color-border-1)}
@@ -1626,7 +1634,7 @@ input,textarea,select{border-radius:var(--sd-shape-field-radius)}
 .library-diary-item .library-note-nav-path{grid-column:1/-1}
 .library-diary-read{flex:1;min-height:0;overflow:auto;padding:14px 16px;scrollbar-gutter:stable;color:var(--sd-color-text-primary)}
 .library-diary-editor .library-notes-textarea{min-height:0}
-@media (pointer:coarse){.library-note-tool{width:44px;height:44px;min-width:44px}.library-note-action{min-height:44px}.library-note-nav-item{min-height:44px}.library-notes-trash-toggle,.library-notes-more{min-height:44px}}
+@media (pointer:coarse){.library-note-tool{width:44px;height:44px;min-width:44px}.library-note-action{min-height:44px}.library-note-nav-item{min-height:44px}.library-notes-trash-toggle,.library-notes-more,.library-note-menu-item{min-height:44px}.library-note-menu-hint{display:none}}
 /* CORE-12 · PLAN Owns plan composition, format guidance, session recovery, and draft board. */
 /* PLAN COMPOSER AND SESSION IMPORT */
 #pane-plan{

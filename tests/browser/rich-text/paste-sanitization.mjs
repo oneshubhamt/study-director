@@ -39,6 +39,12 @@ try{
   assert.deepEqual(clipboard.cut,{text:'Beta',prevented:true},'cut writes and removes the selection');
   assert.equal(clipboard.nativePrevented,true,'a native cut is applied as an editor transaction');
   assert.equal(clipboard.text,'Alpha Delta','cut and native cut both removed their selection');
+  // A real Ctrl+X, through the browser's own cut command, removes the selection.
+  const key=async(key,code,keyCode,modifiers,commands)=>{await page.send('Input.dispatchKeyEvent',{type:'rawKeyDown',key,code,windowsVirtualKeyCode:keyCode,modifiers,commands});await page.send('Input.dispatchKeyEvent',{type:'keyUp',key,code,windowsVirtualKeyCode:keyCode,modifiers});};
+  await page.evaluate(`document.querySelector('#clip + .sd-rte .sd-rte-editor').focus()`);
+  await key('a','KeyA',65,2,['selectAll']);await key('x','KeyX',88,2,['cut']);
+  await page.settle(3);
+  assert.equal(await page.evaluate(`StudyDirectorRichText.toPlainText(document.getElementById('clip').value).trim()`),'','a real cut empties the selection');
   assert.deepEqual(page.events,[],'QA_FIXTURE paste-sanitization browser test produced runtime errors.');
   console.log(JSON.stringify({status:'PASS',suite:'paste-sanitization',result,clipboard},null,2));
 }finally{if(page)await browser.closePage(page).catch(()=>{});await browser.close()}

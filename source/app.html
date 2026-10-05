@@ -1081,13 +1081,13 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
         </summary>
         <div class="library-notes-workspace">
           <div class="library-notes-intro">
-            <div class="library-notes-help ui-body">Persistent notes are shared by Area; parent notes are read-only context. Use + for a new standalone or nested Area, ✎ to rename or move a note, and − to move it to Recently deleted. Daily reflections stay under Saved Day Detail.</div>
+            <div class="library-notes-help ui-body">Persistent notes are shared by Area; parent notes are read-only context. Use New for a standalone or nested Area, and ⋯ on an open note to rename, move or delete it. Daily reflections stay under Saved Day Detail.</div>
             <input class="library-notes-search ui-field ui-mono" id="library-notes-search" type="search" placeholder="Search ongoing notes…" aria-label="Search ongoing notes">
           </div>
           <div class="library-notes-grid ui-canvas">
             <nav class="library-notes-nav" aria-label="Ongoing notes">
               <div class="library-notes-nav-head">
-                <span class="library-notes-nav-title"><span class="ui-label">Areas</span><span class="library-note-selection-count" id="library-note-selection-count" hidden>0 selected</span></span>
+                <span class="library-notes-nav-title"><span class="ui-label">Notes</span><span class="library-note-selection-count" id="library-note-selection-count" hidden>0 selected</span></span>
                 <span class="library-notes-nav-tools">
                   <button class="library-note-action ui-btn" id="library-note-select" type="button" aria-label="Choose ongoing notes to export">Export</button>
                   <button class="library-note-action ui-btn" id="library-note-select-all" type="button" hidden>All</button>
@@ -1096,9 +1096,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                     <button class="library-note-action ui-btn" id="library-note-export" type="button" hidden disabled>Export</button>
                     <button class="library-note-action ui-btn library-note-selection-cancel" id="library-note-select-cancel" type="button" hidden aria-label="Exit export selection" title="Exit export selection">×</button>
                   </span>
-                  <button class="library-note-tool ui-btn" id="library-note-add" type="button" data-owner-mutation="library-notes" aria-label="Create an Area note" title="Create an Area note">+</button>
-                  <button class="library-note-tool ui-btn" id="library-note-rename" type="button" data-owner-mutation="library-notes" aria-label="Rename or move the selected note" title="Select a saved note to rename or move it" disabled>✎</button>
-                  <button class="library-note-tool delete ui-btn" id="library-note-delete" type="button" data-owner-mutation="library-notes" aria-label="Delete the selected Area note" title="Select a saved note to delete it" disabled>−</button>
+                  <button class="library-note-action ui-btn" id="library-note-add" type="button" data-owner-mutation="library-notes" aria-label="Create a note" title="Create a note">+ New</button>
                   <span class="library-notes-nav-count" id="library-notes-nav-count">0</span>
                 </span>
               </div>
@@ -7961,6 +7959,7 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     execute:options=>RichTextRuntime.quiesce(()=>LibraryClearCoordinator.execute(options))
   }),
   ownership:Object.freeze({canMutate:()=>appCanMutate()}),
+  overlays:Object.freeze({createAnchoredPopover:(popup,options)=>RichTextApi.createAnchoredPopover(popup,options)}),
   session:Object.freeze({hasActiveSession:hasBlockingActiveSession})
 })}));
 if(!Object.isFrozen(LibraryView)||LibraryView.format!=='study-director.library-view'||LibraryView.contractVersion!==1){
