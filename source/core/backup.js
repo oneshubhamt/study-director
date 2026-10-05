@@ -376,6 +376,9 @@ async function applyResolvedSavedDays(resolvedPlan,operation,reportProgress=null
   const currentDeletions=await AppData.deletionRecovery.savedDays();
   const deletionLedgerChanged=!Canonical.same(currentDeletions,expectedDeletions);
   if(deletionLedgerChanged)await AppData.deletionRecovery.replaceSavedDays(expectedDeletions);
+  // A ledger keeps its newest records within its limit; what it stored is
+  // what the restore verifies.
+  const storedDeletions=deletionLedgerChanged?await AppData.deletionRecovery.savedDays():currentDeletions;
   const added=items.filter(item=>item.changed&&item.state==='record'&&!item.hadLocal).length;
   const replaced=items.filter(item=>item.changed&&item.state==='record'&&item.hadLocal).length;
   const kept=items.filter(item=>{const planItem=planItems.get(item.date);return !!(planItem&&planItem.conflict&&planItem.localCandidateId&&item.candidateId===planItem.localCandidateId);}).length;
@@ -384,7 +387,7 @@ async function applyResolvedSavedDays(resolvedPlan,operation,reportProgress=null
     changed:recordsToSave.length>0||deletionsToApply.length>0||deletionLedgerChanged,
     count:added,replaced,deleted,kept,identical,batches,
     appliedRecords:freeze(currentDailyRecords(recordsToSave,'Resolved Saved Days')),
-    expectedDeletions:freeze(expectedDeletions)
+    expectedDeletions:freeze([...storedDeletions])
   });
 }
 async function applyResolvedAreaNotes(resolvedPlan){
@@ -845,7 +848,8 @@ async function commitImportedAssets(selection,signal,attachmentPlan=null){
   if(deleteLocalIds.length){const result=await AssetData.removeMetadata(deleteLocalIds);deleted=Math.max(0,Number(result&&result.removed)||0);}
   const expectedDeletions=attachmentPlan&&attachmentPlan.expectedDeletions||freeze([]);
   await AppData.deletionRecovery.replaceAttachments(expectedDeletions);
-  return freeze({written:(selection.toWrite||[]).length,published,reused:Number(selection.reused)||0,deleted,changed:!!(published||deleted||attachmentPlan?.deletionLedgerChanged),expected:freeze([...selected]),expectedRemovedIds:freeze([...deleteLocalIds]),references:selection.references||freeze([]),expectedDeletions});
+  const storedDeletions=freeze([...(await AppData.deletionRecovery.attachments())]);
+  return freeze({written:(selection.toWrite||[]).length,published,reused:Number(selection.reused)||0,deleted,changed:!!(published||deleted||attachmentPlan?.deletionLedgerChanged),expected:freeze([...selected]),expectedRemovedIds:freeze([...deleteLocalIds]),references:selection.references||freeze([]),expectedDeletions:storedDeletions});
 }
 async function restoreSnapshotAssets(snapshot){
   if(!portableAssets||Number(snapshot&&snapshot.formatVersion)<10)return freeze({restored:false,removed:0,written:0});

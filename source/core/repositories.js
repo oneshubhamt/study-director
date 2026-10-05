@@ -590,6 +590,16 @@ async function migrateLegacyDeletionState(){
   await flushDeletionRecovery();
   return freeze({status:(queueRows.length||tombstoneRows.length||recovery.length)?'migrated':'not-needed',savedDayDeletions:dailyDeletes.size,recoveryEntries:nextRecovery.length});
 }
+// A deletion ledger keeps its newest records up to its limit, so it stays
+// bounded without dropping a recent deletion; only the oldest records go, and
+// only once the ledger is full. Listing applies the same rule, so maintenance
+// pruning storage never changes what a backup or restore reads.
+const ATTACHMENT_DELETION_LIMIT=50000;
+const newerDeletionFirst=idOf=>(a,b)=>b.deletedAt.localeCompare(a.deletedAt)||idOf(a).localeCompare(idOf(b));
+function newestDeletions(values,limit,idOf){
+  const kept=values.length>limit?[...values].sort(newerDeletionFirst(idOf)).slice(0,limit):[...values];
+  return kept.sort((a,b)=>idOf(a).localeCompare(idOf(b)));
+}
 function normalizeSavedDayDeletions(values){
   if(!Array.isArray(values))throw new TypeError('Saved-Day deletion ledger must be an array.');
   const byDate=new Map();
@@ -598,8 +608,7 @@ function normalizeSavedDayDeletions(values){
     if(!isValidIsoDate(date)||!deletedAt)throw new Error('Saved-Day deletion ledger contains an invalid entry.');
     const previous=byDate.get(date);if(!previous||Date.parse(deletedAt)>Date.parse(previous.deletedAt))byDate.set(date,{date,deletedAt});
   }
-  if(byDate.size>APP_LIMITS.maxImportRecords)throw new RangeError('Saved-Day deletion ledger exceeds the supported record limit.');
-  return [...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date));
+  return newestDeletions([...byDate.values()],APP_LIMITS.maxImportRecords,entry=>entry.date);
 }
 async function listSavedDayDeletions(){
   return normalizeSavedDayDeletions((await Meta.list('savedDayDeletionPrefix')).map(entry=>entry.value));
@@ -630,8 +639,7 @@ function normalizeAreaNoteDeletions(values){
     if(!key||!deletedAt)throw new Error('Ongoing Note deletion ledger contains an invalid entry.');
     const previous=byKey.get(key);if(!previous||Date.parse(deletedAt)>Date.parse(previous.deletedAt))byKey.set(key,{key,deletedAt});
   }
-  if(byKey.size>APP_LIMITS.maxOngoingNotes)throw new RangeError('Ongoing Note deletion ledger exceeds the supported note limit.');
-  return [...byKey.values()].sort((a,b)=>a.key.localeCompare(b.key));
+  return newestDeletions([...byKey.values()],APP_LIMITS.maxOngoingNotes,entry=>entry.key);
 }
 async function listAreaNoteDeletions(){
   return normalizeAreaNoteDeletions((await Meta.list('areaNoteDeletionPrefix')).map(entry=>entry.value));
@@ -645,8 +653,7 @@ function normalizeAttachmentDeletions(values){
   if(!Array.isArray(values))throw new TypeError('Attachment deletion ledger must be an array.');
   const byId=new Map();
   for(const value of values){const assetId=normalizeAttachmentDeletionId(value&&value.assetId),deletedAt=normalizeTimestamp(value&&value.deletedAt,'');if(!assetId||!deletedAt)throw new Error('Attachment deletion ledger contains an invalid entry.');const previous=byId.get(assetId);if(!previous||Date.parse(deletedAt)>Date.parse(previous.deletedAt))byId.set(assetId,{assetId,deletedAt});}
-  if(byId.size>50000)throw new RangeError('Attachment deletion ledger exceeds the supported attachment limit.');
-  return [...byId.values()].sort((a,b)=>a.assetId.localeCompare(b.assetId));
+  return newestDeletions([...byId.values()],ATTACHMENT_DELETION_LIMIT,entry=>entry.assetId);
 }
 async function listAttachmentDeletions(){
   return normalizeAttachmentDeletions((await Meta.list('attachmentDeletionPrefix')).map(entry=>entry.value));
@@ -654,6 +661,24 @@ async function listAttachmentDeletions(){
 async function replaceAttachmentDeletions(values){
   const clean=normalizeAttachmentDeletions(values);
   return replaceMetaPrefixFamily('attachmentDeletionPrefix',clean,{suffixOf:entry=>entry.assetId,valueOf:entry=>attachmentDeletionValue(entry.assetId,entry.deletedAt),abortMessage:'Attachment deletion ledger replacement aborted'});
+}
+// Removes the stored records each ledger's listing already leaves out.
+async function pruneDeletionLedgers(){
+  const ledgers=[['savedDayDeletionPrefix',APP_LIMITS.maxImportRecords,value=>value.date],['areaNoteDeletionPrefix',APP_LIMITS.maxOngoingNotes,value=>value.key],['attachmentDeletionPrefix',ATTACHMENT_DELETION_LIMIT,value=>value.assetId]];
+  let removed=0;
+  for(const [family,limit,idOf] of ledgers){
+    removed+=await Meta.transaction('readwrite',(meta,tx,finish)=>{
+      const existing=meta.getAll(family),request=existing.request;
+      request.onerror=()=>finish(false,request.error||new Error(`${family} pruning read failed`));
+      request.onsuccess=()=>{
+        let entries;try{entries=existing.entries();}catch(error){finish(false,error);return;}
+        const excess=entries.length-limit;
+        if(excess>0){stageCanonicalMutationEpoch(tx,[]);for(const entry of [...entries].sort((a,b)=>newerDeletionFirst(idOf)(a.value,b.value)).slice(limit))meta.remove(family,entry.suffix);}
+        tx.oncomplete=()=>finish(true,Math.max(0,excess));
+      };
+    },{strict:true,abortMessage:'Deletion ledger pruning aborted'});
+  }
+  return removed;
 }
 function stageAttachmentDeletionState(tx,state={}){
   if(!tx||typeof tx.objectStore!=='function')throw new TypeError('Attachment deletion state requires an IndexedDB transaction.');
@@ -1447,7 +1472,8 @@ async function runDataMaintenance(options={}){
       async()=>{await AreaNotesRepository.flush({strict:true});},
       async()=>{const rawRecovery=readLocalRecoveryJson(STORAGE_KEYS.recovery,null);if(rawRecovery&&!sessionFromRecoveryEnvelope(rawRecovery)&&!LocalStorageContract.remove(STORAGE_KEYS.recovery))throw LocalStorageContract.lastError||new Error('Invalid session recovery could not be removed.');},
       async()=>{const session=await loadActiveSessionRecord(0,{strict:true});if(!session?.ok||session.error)throw session?.error||new Error('Active Session reconciliation is incomplete.');},
-      async()=>{if(await flushDeletionRecovery({check:requireSameOwner,workBudget:options.workBudget})!==true)throw new Error('Pending deletion recovery is incomplete.');}
+      async()=>{if(await flushDeletionRecovery({check:requireSameOwner,workBudget:options.workBudget})!==true)throw new Error('Pending deletion recovery is incomplete.');},
+      async()=>{await pruneDeletionLedgers();}
     ];
     while(continuation.phase<phases.length){
       requireSameOwner();options.workBudget?.check();

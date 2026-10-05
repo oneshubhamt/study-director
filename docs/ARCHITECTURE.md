@@ -74,6 +74,8 @@ Restore/Bring-in first verifies the selected checkpoint and reconstructs a verif
 
 Combine/reconciliation handles Saved Days, Ongoing Notes, Active Session and attachments through explicit domain rules. Reconciliation ancestry is incremental and provider history is scoped to the repository being inspected.
 
+A deletion travels to other copies only as a deletion record (Saved Days, Ongoing Notes, attachments); absence never means deletion. Each ledger keeps its newest records within its limit (`maxImportRecords`, `maxOngoingNotes` and 50,000 respectively), so it stays bounded without ever dropping a recent deletion: only once a ledger is full do its oldest records go. Listing applies that rule, so a full ledger never stops a backup or an integrity check; data maintenance removes the same records from storage, so pruning never changes what a backup or restore reads; and a restore verifies the ledger it stored. Backup import and the restore journal still reject a ledger over its limit. A dropped record matters only when a backup older than that many later deletions is combined, which could bring the oldest deleted items back.
+
 ## 7. Foreground publication and background maintenance
 
 Foreground backup/restore publication has priority over background repository maintenance.
