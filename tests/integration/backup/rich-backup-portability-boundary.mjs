@@ -16,14 +16,14 @@ const Persistence=registry.require('persistence',1),freeze=Object.freeze,MiB=102
 const richSandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask};
 vm.createContext(richSandbox);vm.runInContext(read('source/external/rich-text.js'),richSandbox,{filename:'rich-text.js'});
 const rich=vm.runInContext('globalThis.StudyDirectorRichText',richSandbox);
-assert.equal(limits.backupMaxEntryBytes,2*MiB);
+assert.equal(limits.backupMaxEntryBytes,5*MiB);
 assert.equal(limits.backupMaxLineBytes,16*MiB);
-assert.equal(limits.backupMaxUncompressedBytes,64*MiB);
-assert.equal(limits.maxRichTextBytes,896*1024);
-assert.equal(limits.maxRichTextWords,10000);
+assert.equal(limits.backupMaxUncompressedBytes,512*MiB);
+assert.equal(limits.maxRichTextBytes,2*MiB);
+assert.equal(limits.maxRichTextWords,20000);
 const dataContract=RUNTIME_DATA_CONTRACT;
 const defs=freeze({
-  dailyRecord:freeze({idField:'date',backupLimit:limits.maxImportRecords}),areaNote:freeze({idField:'key',backupLimit:limits.maxImportAreaNotes}),
+  dailyRecord:freeze({idField:'date',backupLimit:limits.maxImportRecords}),areaNote:freeze({idField:'key',backupLimit:limits.maxOngoingNotes}),
   activeSession:freeze({idField:'id',backupLimit:1})
 });
 const entityDefinition=type=>defs[type]||null,entityIdentity=(type,item)=>String(item?.[defs[type]?.idField]||'');
@@ -41,27 +41,28 @@ const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,processing:
 }));
 
 const paragraph=param=>({type:'Paragraph',content:[{type:'Text',param}]});
-const content=Array.from({length:10000},(_,i)=>paragraph(`w${i}`));
+const content=Array.from({length:limits.maxRichTextWords},(_,i)=>paragraph(`w${i}`));
 const encode=()=>`WG1:${JSON.stringify({version:1,doc:{type:'Doc',content}})}`;
-// Valid whitespace in the first text node places the canonical Wordgard state just below the
-// shared byte ceiling without inflating its visible 10,000-word content.
+// Quote characters appended to the first word place the canonical Wordgard state just below the
+// byte ceiling. Each is stored as \" and escaped again inside a backup entry, the worst case for
+// how much a rich value grows there.
 const targetBytes=limits.maxRichTextBytes-256;
-content[0].content[0].param+=' '.repeat(Math.max(0,targetBytes-jsonByteLength(encode())));
+content[0].content[0].param+='"'.repeat(Math.max(0,Math.floor((targetBytes-jsonByteLength(encode()))/2)));
 const heavyState=encode();
-const canonicalBytes=rich.serializedBytes(heavyState);
+const {words,bytes:canonicalBytes}=rich.measure(heavyState);
 assert.equal(rich.isRichTextValue(heavyState),true,'Boundary state must remain valid Wordgard data.');
-assert.equal(rich.wordCount(heavyState),10000,'Adversarial state must exercise the full rich-word allowance.');
-assert.ok(canonicalBytes<=896*1024&&canonicalBytes>895*1024,'Fixture must sit immediately below the canonical rich-state ceiling.');
+assert.equal(words,limits.maxRichTextWords,'Adversarial state must exercise the full rich-word allowance.');
+assert.ok(canonicalBytes<=limits.maxRichTextBytes&&canonicalBytes>limits.maxRichTextBytes-1024,'Fixture must sit immediately below the canonical rich-state ceiling.');
 
 const updatedAt='2026-09-01T00:00:00.000Z';
 const ongoing=freeze({key:'Portability boundary',text:heavyState,updatedAt});
 const activeSession=freeze({version:9,id:'current',date:'2026-09-01',revision:1,updatedAt,snapshot:freeze({review:freeze({reflection:heavyState,studyQuality:5})})});
-const oldEntryLimit=1*MiB;
+const oldEntryLimit=2*MiB;
 const outcomes=[];
 for(const [entityType,item] of [['areaNote',ongoing],['activeSession',activeSession]]){
   const entryBytes=jsonByteLength(item);
-  assert.ok(entryBytes>oldEntryLimit,`${entityType} fixture must reproduce the old 1 MiB portability failure.`);
-  assert.ok(entryBytes<=limits.backupMaxEntryBytes,`${entityType} must fit the production 2 MiB entry boundary.`);
+  assert.ok(entryBytes>oldEntryLimit,`${entityType} fixture must exceed the previous 2 MiB entry limit.`);
+  assert.ok(entryBytes<=limits.backupMaxEntryBytes,`${entityType} must fit the production 5 MiB entry boundary.`);
   const groups=codec.splitItems([item]);
   assert.equal(groups.length,1);assert.equal(groups[0].length,1);assert.equal(groups[0][0],item);
   const chunk=await codec.encodeChunk(0,entityType,groups[0],codec.checksumAlgorithm());
@@ -70,6 +71,4 @@ for(const [entityType,item] of [['areaNote',ongoing],['activeSession',activeSess
   outcomes.push({entityType,canonicalBytes,entryBytes,lineBytes});
 }
 
-// The per-entry increase does not enlarge the complete expanded-backup resource ceiling.
-assert.equal(limits.backupMaxUncompressedBytes,64*MiB);
-console.log(JSON.stringify({status:'PASS',suite:'rich-backup-portability-boundary',engine:'wordgard',oldEntryLimitMiB:1,entryLimitMiB:2,lineLimitMiB:limits.backupMaxLineBytes/MiB,totalUncompressedLimitMiB:64,outcomes},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'rich-backup-portability-boundary',engine:'wordgard',oldEntryLimitMiB:2,entryLimitMiB:limits.backupMaxEntryBytes/MiB,lineLimitMiB:limits.backupMaxLineBytes/MiB,totalUncompressedLimitMiB:limits.backupMaxUncompressedBytes/MiB,outcomes},null,2));

@@ -355,7 +355,8 @@ registry.define('library',1,()=>{
       if(!entry)return `empty|${readOnly?'1':'0'}`;
       return [
         entry.key,entry.label,entry.support?'1':'0',entry.current?'1':'0',entry.ephemeral?'1':'0',entry.hasNote?'1':'0',
-        readOnly?'1':'0',writable?'1':'0',String(canonical?.updatedAt||''),String(canonical?.text||'')
+        // A note's revision changes with every change to its text.
+        readOnly?'1':'0',writable?'1':'0',String(canonical?.updatedAt||'')
       ].join('\u0000');
     }
     function renderOngoingNoteEditor(entry,readOnly=false){
@@ -402,8 +403,8 @@ registry.define('library',1,()=>{
       panel.replaceChildren(head,editorShell,inherited);
       setOngoingNotesStatus(writable?'':'Another tab has control. Browse freely, or take control before editing.',{readOnly:!writable});
       let rowHasNote=entry.hasNote;
-      editor.addEventListener('input',()=>{
-        const accepted=commitEditor(editor,editor.value);
+      editor.addEventListener('input',event=>{
+        const accepted=commitEditor(editor,editor.value,event);
         if(!accepted)return;
         const refreshed=getAreaNote(entry.key,entry.label);
         ongoingNoteEditorSignature=ongoingNoteEditorRenderSignature({...entry,hasNote:!!String(editor.value||'').trim()},refreshed,false,canMutate());

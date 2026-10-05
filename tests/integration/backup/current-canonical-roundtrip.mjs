@@ -8,7 +8,7 @@ const activeSessionCodec=RecordCodecs.createActiveSessionCodec(freeze({limits,da
   helpers:freeze({boundedInt,boundedNumber,clampText,clampEditorContent:clampText,editorContentWithinLimits:()=>true,cleanDayRevision:v=>Math.max(0,Math.round(Number(v)||0)),sameDataValue,activeSessionScheduleFingerprint:()=> 'fp',isCanonicalScheduleText:v=>!!v,isValidIsoDate:Domain.TimeModel.isValidIsoDate,normalizeStudyQuality:helpers.normalizeStudyQuality,parseProgressNumber:Domain.CompletionModel.parseProgressNumber,sanitizePracticeState:()=>({active:false,runs:[]})}),
   timestamps:freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp,normalizeImportedEpochMillis:(v,f=null)=>Number.isFinite(Number(v))?Number(v):f})}));
 const processing=freeze({...createProcessingEngine(),scope:fn=>fn()}),personalDataCodec=RecordCodecs.createPersonalDataCodec(limits),attachments=registry.require('attachments',1);
-const defs=freeze({dailyRecord:{idField:'date',backupLimit:limits.maxImportRecords},areaNote:{idField:'key',backupLimit:limits.maxImportAreaNotes},activeSession:{idField:'id',backupLimit:1}});
+const defs=freeze({dailyRecord:{idField:'date',backupLimit:limits.maxImportRecords},areaNote:{idField:'key',backupLimit:limits.maxOngoingNotes},activeSession:{idField:'id',backupLimit:1}});
 const richSandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask};vm.createContext(richSandbox);vm.runInContext(fs.readFileSync('source/external/rich-text.js','utf8'),richSandbox);
 const rich=richSandbox.StudyDirectorRichText;
 const codec=registry.require('backup-codec',1).createBackupCodec(freeze({limits,dataContract,processing,personalDataCodec,dailyRecordCodec,activeSessionCodec,

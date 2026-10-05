@@ -52,10 +52,14 @@ const repository=(()=>{
   let saveMessage='';
   let snapshotRevision=0,metadataSnapshotCache=null,searchSnapshotCache=null;
 
+  // A collection over the note limit is refused whole; cutting it would drop
+  // notes without a word.
+  function tooManyNotes(count){return Object.assign(new RangeError(`Ongoing Notes are limited to ${APP_LIMITS.maxOngoingNotes.toLocaleString()} notes; this would make ${count.toLocaleString()}. Nothing was changed.`),{code:'AREA_NOTE_LIMIT'});}
   function normalizePayload(payload,options={}){
     const strictRich=options&&options.strictRich===true;
     const out=KeyedRecord.create();
-    const entries=Object.entries((payload&&typeof payload==='object')?payload:{}).slice(0,APP_LIMITS.maxImportAreaNotes);
+    const entries=Object.entries((payload&&typeof payload==='object')?payload:{});
+    if(entries.length>APP_LIMITS.maxOngoingNotes)throw tooManyNotes(entries.length);
     entries.forEach(([rawKey,rawVal])=>{
       const source=(rawVal&&typeof rawVal==='object')?rawVal:{text:String(rawVal||'')};
       const key=normalizeAreaName(source.key||rawKey);if(!key)return;
@@ -69,7 +73,7 @@ const repository=(()=>{
   }
   function normalizeHistoricalPayloadForMigration(payload){
     const out=KeyedRecord.create();
-    const entries=Object.entries((payload&&typeof payload==='object')?payload:{}).slice(0,APP_LIMITS.maxImportAreaNotes);
+    const entries=Object.entries((payload&&typeof payload==='object')?payload:{}).slice(0,APP_LIMITS.maxOngoingNotes);
     entries.forEach(([rawKey,rawVal])=>{
       const source=(rawVal&&typeof rawVal==='object')?rawVal:{text:String(rawVal||'')};
       const key=normalizeAreaName(source.key||rawKey);if(!key)return;
@@ -153,7 +157,7 @@ const repository=(()=>{
   function normalizeRescueEntries(raw){
     const out=KeyedRecord.create();
     const source=raw&&raw.format===AREA_NOTE_RESCUE_FORMAT&&Number(raw.version)===1&&raw.entries&&typeof raw.entries==='object'&&!Array.isArray(raw.entries)?raw.entries:{};
-    Object.entries(source).slice(0,APP_LIMITS.maxImportAreaNotes).forEach(([rawKey,rawEntry])=>{
+    Object.entries(source).forEach(([rawKey,rawEntry])=>{
       const key=normalizeAreaName((rawEntry&&rawEntry.key)||rawKey);if(!key||!rawEntry)return;
       if(rawEntry.deleted){const updatedAt=normalizeTimestamp(rawEntry.updatedAt,null);if(updatedAt)out[key]={key,deleted:true,updatedAt};return;}
       const clean=sanitizeCurrentAreaNote(rawEntry,key);if(!clean)throw canonicalRuntimeError(`Ongoing Note rescue ${key} is not in the current canonical schema.`);out[key]=clean;
@@ -676,6 +680,7 @@ const repository=(()=>{
     const previous=normalizePayload(notes),imported=normalizePayload(payload,{strictRich:true}),deletedEntries=normalizeAreaNoteDeletions(deletions);
     const next=merge?Object.assign(previous,imported):imported;
     for(const entry of deletedEntries)delete next[entry.key];
+    if(Object.keys(next).length>APP_LIMITS.maxOngoingNotes)throw tooManyNotes(Object.keys(next).length);
     const previousKeys=new Set(Object.keys(previous)),nextKeys=new Set(Object.keys(next));
     const removedKeys=[...previousKeys].filter(key=>!nextKeys.has(key));
     resetPendingAreaNoteWrites();

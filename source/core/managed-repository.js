@@ -122,7 +122,7 @@ async function repositoryNoteSetIdentity(entries){
 }
 async function repositoryPreparationIndexCandidate(epochToken,stamps,entries){
   const rows=[...entries.values()].sort((a,b)=>a.unit.localeCompare(b.unit));
-  const maxUnits=Math.max(1024,Number(APP_LIMITS.maxImportRecords||10000)+Number(APP_LIMITS.maxImportAreaNotes||1000)+16);if(rows.length>maxUnits)return null;
+  const maxUnits=Math.max(1024,Number(APP_LIMITS.maxImportRecords||10000)+Number(APP_LIMITS.maxOngoingNotes||1000)+16);if(rows.length>maxUnits)return null;
   const noteSet=await repositoryNoteSetIdentity(entries);
   return freeze({version:REPOSITORY_PREPARATION_INDEX_VERSION,epochToken:String(epochToken||''),checkpointId:'',noteCount:noteSet.noteCount,noteKeyFingerprint:noteSet.noteKeyFingerprint,stamps:freeze([...(stamps||[])]),entries:freeze(rows)});
 }

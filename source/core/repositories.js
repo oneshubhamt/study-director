@@ -630,7 +630,7 @@ function normalizeAreaNoteDeletions(values){
     if(!key||!deletedAt)throw new Error('Ongoing Note deletion ledger contains an invalid entry.');
     const previous=byKey.get(key);if(!previous||Date.parse(deletedAt)>Date.parse(previous.deletedAt))byKey.set(key,{key,deletedAt});
   }
-  if(byKey.size>APP_LIMITS.maxImportAreaNotes)throw new RangeError('Ongoing Note deletion ledger exceeds the supported note limit.');
+  if(byKey.size>APP_LIMITS.maxOngoingNotes)throw new RangeError('Ongoing Note deletion ledger exceeds the supported note limit.');
   return [...byKey.values()].sort((a,b)=>a.key.localeCompare(b.key));
 }
 async function listAreaNoteDeletions(){

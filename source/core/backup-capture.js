@@ -250,7 +250,7 @@ async function assertLogicalCheckpointCurrent(capture){
 
 const MANAGED_PREPARATION_CAPTURE_FORMAT='study-director.managed-preparation-capture',MANAGED_PREPARATION_CAPTURE_VERSION=1;
 const managedPreparationGuards=new WeakMap();
-const MANAGED_PREPARATION_STAMP_LIMIT=Math.max(1024,Math.min(100000,Number(APP_LIMITS.backupMaxAssetDescriptors||50000)+Number(APP_LIMITS.maxImportRecords||10000)+Number(APP_LIMITS.maxImportAreaNotes||1000)+16));
+const MANAGED_PREPARATION_STAMP_LIMIT=Math.max(1024,Math.min(100000,Number(APP_LIMITS.backupMaxAssetDescriptors||50000)+Number(APP_LIMITS.maxImportRecords||10000)+Number(APP_LIMITS.maxOngoingNotes||1000)+16));
 function fastCaptureEpochToken(value){const text=String(value||''),prefix='study-director.fast-capture-fence.v1|';if(!text.startsWith(prefix))return '';const token=text.slice(prefix.length).split('|',1)[0];return /^[a-f0-9]{32}$/u.test(token)?token:'';}
 function requireManagedPreparationCapture(value){if(!value||!Object.isFrozen(value)||value.format!==MANAGED_PREPARATION_CAPTURE_FORMAT||Number(value.version)!==MANAGED_PREPARATION_CAPTURE_VERSION)throw new TypeError('Managed preparation capture is invalid.');return value;}
 function normalizedPreparationStamps(values){

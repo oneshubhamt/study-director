@@ -4,14 +4,17 @@ import {PRODUCTION_LIMITS,CAPACITY_PROFILES,assertProductionLimits} from '../../
 
 assert.equal(assertProductionLimits(),true);
 assert.equal(PRODUCTION_LIMITS.maxImportRecords,10000);
-assert.equal(PRODUCTION_LIMITS.maxImportAreaNotes,1000);
+assert.equal(PRODUCTION_LIMITS.maxOngoingNotes,10000);
+assert.equal(Object.prototype.hasOwnProperty.call(PRODUCTION_LIMITS,'maxImportAreaNotes'),false,'One note-count limit covers live, imported and backed-up notes.');
 assert.equal(Object.prototype.hasOwnProperty.call(PRODUCTION_LIMITS,'maxImportReflectionDrafts'),false,'Retired Reflection Draft capacity must not remain in current production limits.');
 assert.equal(PRODUCTION_LIMITS.maxNoteChars,70000);
 assert.equal(PRODUCTION_LIMITS.maxReflectionChars,70000);
-assert.equal(PRODUCTION_LIMITS.maxRichTextWords,10000);
-assert.equal(PRODUCTION_LIMITS.maxRichTextBytes,896*1024);
-assert.equal(PRODUCTION_LIMITS.backupMaxCompressedBytes,20*1024*1024);
-assert.equal(PRODUCTION_LIMITS.backupMaxUncompressedBytes,64*1024*1024);
+assert.equal(PRODUCTION_LIMITS.maxRichTextWords,20000);
+assert.equal(PRODUCTION_LIMITS.maxRichTextNodes,60000);
+assert.equal(PRODUCTION_LIMITS.maxRichTextBytes,2*1024*1024);
+assert.ok(PRODUCTION_LIMITS.backupMaxEntryBytes>2*PRODUCTION_LIMITS.maxRichTextBytes,'A maximum rich value fits one backup entry even when every character is escaped.');
+assert.equal(PRODUCTION_LIMITS.backupMaxCompressedBytes,128*1024*1024);
+assert.equal(PRODUCTION_LIMITS.backupMaxUncompressedBytes,512*1024*1024);
 assert.equal(PRODUCTION_LIMITS.richAssetMaxBytes,12*1024*1024);
 assert.equal(PRODUCTION_LIMITS.attachmentPdfAudioMaxBytes,2*1024*1024*1024);
 assert.equal(PRODUCTION_LIMITS.richAssetMaxDimensionPx,4096);

@@ -5,7 +5,7 @@ const KiB=1024;
 export const PRODUCTION_LIMITS=Object.freeze({
   minSupportedSavedDate:'2025-01-01',
   importBytes:20*MiB,
-  backupMaxCompressedBytes:20*MiB,
+  backupMaxCompressedBytes:128*MiB,
   backupMaxFileBytes:Number.MAX_SAFE_INTEGER,
   backupMaxAssetDescriptors:50000,
   richAssetMaxBytes:12*MiB,
@@ -15,8 +15,10 @@ export const PRODUCTION_LIMITS=Object.freeze({
   richAssetMaxAltChars:120,
   richAssetMaxDimensionPx:4096,
   richAssetMaxPixels:12*1024*1024,
-  backupMaxUncompressedBytes:64*MiB,
-  backupMaxEntryBytes:2*MiB,
+  backupMaxUncompressedBytes:512*MiB,
+  // One entry holds a whole note, Saved Day or session. JSON escaping at most
+  // doubles a rich value, so this stays above twice maxRichTextBytes.
+  backupMaxEntryBytes:5*MiB,
   backupMaxLineBytes:16*MiB,
   backupChunkTargetBytes:512*KiB,
   backupChunkItems:100,
@@ -24,7 +26,6 @@ export const PRODUCTION_LIMITS=Object.freeze({
   maxLegacyImportTombstones:30000,
   maxBackupChunks:25000,
   maxImportRecords:10000,
-  maxImportAreaNotes:1000,
   maxScheduleRows:160,
   maxTasksPerDay:160,
   maxScheduleChars:100000,
@@ -35,12 +36,16 @@ export const PRODUCTION_LIMITS=Object.freeze({
   maxQuoteChars:1000,
   maxNoteChars:70000,
   maxCarryForwardChars:10000,
-  maxRichTextWords:10000,
-  maxRichTextBytes:896*KiB,
+  maxRichTextWords:20000,
+  // Blocks and text runs in one rich document: three per word, as before.
+  maxRichTextNodes:60000,
+  // Room for maxRichTextWords of three-byte text (such as Hindi) plus formatting.
+  maxRichTextBytes:2*MiB,
   // Historical runtime size references; package sizes are informational from SDVB72B.
   richRuntimeMaxRawBytes:334*KiB,
   richRuntimeMaxGzipBytes:106*KiB,
-  maxOngoingNotes:1000,
+  // Live, imported and backed-up Ongoing Notes, and their deletion records.
+  maxOngoingNotes:10000,
   maxTaskNameChars:160,
   maxAreaNameChars:160,
   maxUnitChars:40,
@@ -83,6 +88,7 @@ export function assertProductionLimits(value=PRODUCTION_LIMITS){
   }
   if(value.backupMaxCompressedBytes>value.backupMaxUncompressedBytes)throw new RangeError('Compressed backup limit exceeds the uncompressed safety limit.');
   if(value.backupMaxEntryBytes>value.backupMaxLineBytes)throw new RangeError('Backup entry limit exceeds the line limit.');
+  if(value.backupMaxEntryBytes<=2*value.maxRichTextBytes)throw new RangeError('A maximum rich value could not fit one backup entry.');
   return true;
 }
 

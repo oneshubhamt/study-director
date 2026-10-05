@@ -13,7 +13,7 @@ const BackupCodecs=registry.require('backup-codec',1);
 const freeze=Object.freeze;
 const defs=freeze({
   dailyRecord:freeze({idField:'date',backupLimit:limits.maxImportRecords}),
-  areaNote:freeze({idField:'key',backupLimit:limits.maxImportAreaNotes}),
+  areaNote:freeze({idField:'key',backupLimit:limits.maxOngoingNotes}),
   activeSession:freeze({idField:'id',backupLimit:1}),
   
 });

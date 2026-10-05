@@ -177,7 +177,7 @@ function normalizeCheckpointAreaNoteDeletions(values){
     const clean=freeze({key,deletedAt:new Date(deletedAt).toISOString()}),previous=byKey.get(key);
     if(!previous||Date.parse(clean.deletedAt)>Date.parse(previous.deletedAt))byKey.set(key,clean);
   }
-  if(byKey.size>APP_LIMITS.maxImportAreaNotes)throw new Error('Checkpoint contains too many Ongoing Note deletion entries.');
+  if(byKey.size>APP_LIMITS.maxOngoingNotes)throw new Error('Checkpoint contains too many Ongoing Note deletion entries.');
   return freeze([...byKey.values()].sort((a,b)=>a.key.localeCompare(b.key)));
 }
 function normalizeCheckpointAttachmentDeletions(values){
@@ -237,7 +237,7 @@ function buildBackupManifest(plan,{compression='none',algorithm=backupChecksumAl
     createdBy:APP_CONFIG.attribution,exportedAt:plan.exportedAt,
     encoding:'ndjson',compression,checksumAlgorithm:algorithm,declaredCounts:plan.counts,
     ...(Number(version)>=10?{container:'binary-v1'}:{}),
-    limits:{maxEntryBytes:APP_LIMITS.backupMaxEntryBytes,maxRecords:APP_LIMITS.maxImportRecords,maxAreaNotes:APP_LIMITS.maxImportAreaNotes}
+    limits:{maxEntryBytes:APP_LIMITS.backupMaxEntryBytes,maxRecords:APP_LIMITS.maxImportRecords,maxAreaNotes:APP_LIMITS.maxOngoingNotes}
   };
 }
 async function backupChunkEnvelope(seq,entityType,items,algorithm){return Processing.run('chunk',{seq,entityType,items,algorithm,maxLineBytes:APP_LIMITS.backupMaxLineBytes});}
@@ -489,7 +489,7 @@ async function readLegacyBackupFile(file,options={}){
   const rawRecords=Array.isArray(data)?data:(Array.isArray(data.records)?data.records:[]);
   if(rawRecords.length>APP_LIMITS.maxImportRecords)throw new Error('Backup has too many daily records for safe import.');
   const hasAreaNotes=!!(data&&data.areaNotes&&typeof data.areaNotes==='object'&&!Array.isArray(data.areaNotes));
-  if(hasAreaNotes&&Object.keys(data.areaNotes).length>APP_LIMITS.maxImportAreaNotes)throw new Error('Backup has too many ongoing subject notes for safe import.');
+  if(hasAreaNotes&&Object.keys(data.areaNotes).length>APP_LIMITS.maxOngoingNotes)throw new Error('Backup has too many ongoing subject notes for safe import.');
   const importedActiveSession=CompatibilityCodec.activeSession(data.activeSession);
   const rawTombstoneCount=Array.isArray(data.tombstones)?data.tombstones.length:0;
   const report=backupImportReport({legacy:true,sourceVersion:sourceVersion||null,ignoredTombstones:Math.min(rawTombstoneCount,LEGACY_TOMBSTONE_LIMIT)});

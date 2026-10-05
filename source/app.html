@@ -1576,7 +1576,7 @@ const STUDY_DIRECTOR_CAPABILITIES=Object.freeze({
 });
 const ENTITY_DEFINITIONS=Object.freeze({
   dailyRecord:Object.freeze({schema:DATA_CONTRACT.schemas.DailyRecord.version,idField:'date',store:DB_DAILY_RECORD_STORE,backupLimit:APP_LIMITS.maxImportRecords}),
-  areaNote:Object.freeze({schema:DATA_CONTRACT.schemas.AreaNote.version,idField:'key',store:DB_AREA_NOTES_STORE,backupLimit:APP_LIMITS.maxImportAreaNotes}),
+  areaNote:Object.freeze({schema:DATA_CONTRACT.schemas.AreaNote.version,idField:'key',store:DB_AREA_NOTES_STORE,backupLimit:APP_LIMITS.maxOngoingNotes}),
   activeSession:Object.freeze({schema:DATA_CONTRACT.schemas.ActiveSession.version,idField:'id',fixedId:ACTIVE_SESSION_ID,store:DB_ACTIVE_SESSION_STORE,backupLimit:1}),
 });
 const BACKUP_ENTITY_TYPES=Object.freeze(Object.keys(ENTITY_DEFINITIONS));
@@ -2094,7 +2094,7 @@ function validatedRichInputMeta(event,field){
   if(!meta||meta.format!=='study-director.rich-validated-input'||meta.version!==1||typeof meta.canonical!=='string'||typeof meta.plain!=='string')return null;
   return field&&String(field.value||'')===meta.canonical?meta:null;
 }
-if(typeof RichTextApi.mountRichTextEditor!=='function'||typeof RichTextApi.renderRichText!=='function'||typeof RichTextApi.toPlainText!=='function'||typeof RichTextApi.toMarkdown!=='function'||typeof RichTextApi.classifySerializedValue!=='function'||typeof RichTextApi.isRichTextValue!=='function'||typeof RichTextApi.wordCount!=='function'||typeof RichTextApi.serializedBytes!=='function'||typeof RichTextApi.assetIds!=='function'||typeof RichTextApi.scanAssetReferences!=='function'||typeof RichTextApi.scanAttachmentReferences!=='function'||typeof RichTextApi.insertAttachmentReference!=='function'||typeof RichTextApi.removeAttachmentReferences!=='function'||typeof RichTextApi.exportDocument!=='function'||typeof RichTextApi.compareRichText!=='function'||typeof RichTextApi.mergeIncomingAdditions!=='function'||typeof RichTextApi.appendIncomingAdditions!=='function'||typeof RichTextApi.mergeThreeWay!=='function'){
+if(typeof RichTextApi.mountRichTextEditor!=='function'||typeof RichTextApi.renderRichText!=='function'||typeof RichTextApi.toPlainText!=='function'||typeof RichTextApi.toMarkdown!=='function'||typeof RichTextApi.classifySerializedValue!=='function'||typeof RichTextApi.isRichTextValue!=='function'||typeof RichTextApi.measure!=='function'||typeof RichTextApi.assetIds!=='function'||typeof RichTextApi.scanAssetReferences!=='function'||typeof RichTextApi.scanAttachmentReferences!=='function'||typeof RichTextApi.insertAttachmentReference!=='function'||typeof RichTextApi.removeAttachmentReferences!=='function'||typeof RichTextApi.exportDocument!=='function'||typeof RichTextApi.compareRichText!=='function'||typeof RichTextApi.mergeIncomingAdditions!=='function'||typeof RichTextApi.appendIncomingAdditions!=='function'||typeof RichTextApi.mergeThreeWay!=='function'){
   throw new Error('Study Director rich text runtime is unavailable or incompatible.');
 }
 function clampEditorContent(value,plainLimit){
@@ -2105,7 +2105,8 @@ function clampEditorContent(value,plainLimit){
 function editorContentWithinLimits(value){
   const text=String(value??''),kind=RichTextApi.classifySerializedValue(text);
   if(kind==='invalid-rich')return false;
-  return kind!=='rich'||(RichTextApi.wordCount(text)<=APP_LIMITS.maxRichTextWords&&RichTextApi.serializedBytes(text)<=APP_LIMITS.maxRichTextBytes);
+  if(kind!=='rich')return true;
+  const size=RichTextApi.measure(text);return size.words<=APP_LIMITS.maxRichTextWords&&size.bytes<=APP_LIMITS.maxRichTextBytes;
 }
 function plainTextContent(value){return RichTextApi.toPlainText(String(value??''));}
 function clampArray(arr,max){return Array.isArray(arr)?arr.slice(0,Math.max(0,Number(max)||0)):[];}
@@ -8233,7 +8234,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
       backupMaxFileBytes:APP_LIMITS.backupMaxFileBytes,
       backupMaxAssetDescriptors:APP_LIMITS.backupMaxAssetDescriptors,
       maxImportRecords:APP_LIMITS.maxImportRecords,
-      maxImportAreaNotes:APP_LIMITS.maxImportAreaNotes
+      maxOngoingNotes:APP_LIMITS.maxOngoingNotes
     })
   }),
   persistence:Object.freeze({

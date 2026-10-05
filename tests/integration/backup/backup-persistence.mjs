@@ -35,13 +35,13 @@ const limits=freeze({
   backupChunkItems:2,backupChunkTargetBytes:65536,backupMaxEntryBytes:65536,
   backupMaxLineBytes:262144,backupMaxCompressedBytes:4*1024*1024,backupMaxFileBytes:16*1024*1024,
   backupMaxUncompressedBytes:8*1024*1024,backupMaxAssetDescriptors:100,richAssetMaxBytes:8*1024*1024,maxBackupChunks:1000,
-  importBytes:4*1024*1024,maxImportRecords:100,maxImportAreaNotes:100,
+  importBytes:4*1024*1024,maxImportRecords:100,maxOngoingNotes:100,
   maxLegacyImportTombstones:100,maxReflectionChars:10000
 });
 const dataContract=RUNTIME_DATA_CONTRACT;
 const entityDefinitions=freeze({
   dailyRecord:freeze({idField:'date',backupLimit:limits.maxImportRecords}),
-  areaNote:freeze({idField:'key',backupLimit:limits.maxImportAreaNotes}),
+  areaNote:freeze({idField:'key',backupLimit:limits.maxOngoingNotes}),
   activeSession:freeze({idField:'id',backupLimit:1})
 });
 const clampText=(value,max=100000)=>String(value??'').slice(0,max);

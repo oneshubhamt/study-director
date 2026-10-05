@@ -15,7 +15,7 @@ const RecordCodecs=registry.require('record-codecs',1);
 const BackupCodecs=registry.require('backup-codec',1);
 const MiB=1024*1024;
 const dataContract=RUNTIME_DATA_CONTRACT;
-const defs=freeze({dailyRecord:freeze({idField:'date',backupLimit:limits.maxImportRecords}),areaNote:freeze({idField:'key',backupLimit:limits.maxImportAreaNotes}),activeSession:freeze({idField:'id',backupLimit:1})});
+const defs=freeze({dailyRecord:freeze({idField:'date',backupLimit:limits.maxImportRecords}),areaNote:freeze({idField:'key',backupLimit:limits.maxOngoingNotes}),activeSession:freeze({idField:'id',backupLimit:1})});
 const keyedRecord=freeze({create:()=>Object.create(null)}),entityDefinition=t=>defs[t]||null,entityIdentity=(t,x)=>String(x?.[defs[t]?.idField]||'');
 const boundedInt=(v,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{const n=Number(v);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
 const jsonByteLength=v=>new TextEncoder().encode(typeof v==='string'?v:JSON.stringify(v)).byteLength,isDate=v=>/^\d{4}-\d{2}-\d{2}$/.test(String(v||''));
