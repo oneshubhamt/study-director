@@ -1,4 +1,4 @@
-import {CdpPage as SharedCdpPage,withoutPwaChecks} from '../../helpers/browser-harness.mjs';
+import {CdpPage as SharedCdpPage,withoutPwaChecks,studyTimezone} from '../../helpers/browser-harness.mjs';
 import fs from 'node:fs';
 import {artifactPath,writeArtifact} from '../../helpers/artifacts.mjs';
 import path from 'node:path';
@@ -58,7 +58,7 @@ try{
   const target=await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(appUrl)}`,{method:'PUT'})).json();
   page=await CdpPage.connect(target.webSocketDebuggerUrl);
   await page.send('Runtime.enable');await page.send('Page.enable');await page.send('Log.enable');
-  await page.send('Emulation.setTimezoneOverride',{timezoneId:'Asia/Kolkata'});
+  await page.send('Emulation.setTimezoneOverride',{timezoneId:studyTimezone()});
   await page.send('Emulation.setDeviceMetricsOverride',{width:1365,height:900,deviceScaleFactor:1,mobile:false});
   await waitFor(()=>page.evaluate(`!!(window.__InsightsUiDebug&&__InsightsUiDebug.StartupLifecycle.status().fullyInitialized)`),{label:'Study Director startup'});
   const seeded=await page.evaluate(`(async()=>{

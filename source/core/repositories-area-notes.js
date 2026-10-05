@@ -14,8 +14,8 @@ registry.define('repositories-area-notes',1,()=>{
     const keys=exactObject(configuration.keys,['areaNoteRescue'],'Area Notes storage keys');
     const legacyKeys=exactObject(configuration.legacyKeys,['areaNotesPending'],'Area Notes legacy storage keys');
     const metaKeys=exactObject(configuration.metaKeys,['areaNoteRecoveryPrefix'],'Area Notes metadata keys');
-    const storage=exactObject(input.storage,['local','meta','idbGetAll','idbStoreTransaction','idbStrictTransaction'],'Area Notes storage port');
-    if(['idbGetAll','idbStoreTransaction','idbStrictTransaction'].some(key=>typeof storage[key]!=='function'))throw new TypeError('Area Notes storage functions are invalid.');
+    const storage=exactObject(input.storage,['local','meta','idbGetAll','idbStoreTransaction','idbStrictTransaction','storageResets'],'Area Notes storage port');
+    if(['idbGetAll','idbStoreTransaction','idbStrictTransaction','storageResets'].some(key=>typeof storage[key]!=='function'))throw new TypeError('Area Notes storage functions are invalid.');
     const codecs=exactObject(input.codecs,['compatibility','sanitizeCurrentAreaNote'],'Area Notes codec port');
     if(typeof codecs.sanitizeCurrentAreaNote!=='function'||!Object.isFrozen(codecs.compatibility))throw new TypeError('Area Notes codec port is invalid.');
     if(!Object.isFrozen(input.keyedRecord))throw new TypeError('Area Notes keyed-record capability must be frozen.');
@@ -25,7 +25,7 @@ registry.define('repositories-area-notes',1,()=>{
     const clock=functions(input.clock,['nowMs'],'Area Notes clock');
     const APP_LIMITS=configuration.limits,DATA_CONTRACT=configuration.dataContract,DB_AREA_NOTES_STORE=stores.areaNotes,DB_APP_META_STORE=stores.appMeta;
     const STORAGE_KEYS=freeze({areaNoteRescue:keys.areaNoteRescue}),LEGACY_STORAGE_KEYS=freeze({areaNotesPending:legacyKeys.areaNotesPending}),META_KEYS=freeze({areaNoteRecoveryPrefix:metaKeys.areaNoteRecoveryPrefix});
-    const LocalStorageContract=storage.local,Meta=storage.meta,idbGetAll=storage.idbGetAll,idbStoreTransaction=storage.idbStoreTransaction,idbStrictTransaction=storage.idbStrictTransaction;
+    const LocalStorageContract=storage.local,Meta=storage.meta,idbGetAll=storage.idbGetAll,idbStoreTransaction=storage.idbStoreTransaction,idbStrictTransaction=storage.idbStrictTransaction,storageResets=storage.storageResets;
     const CompatibilityCodec=codecs.compatibility,sanitizeCurrentAreaNote=codecs.sanitizeCurrentAreaNote,KeyedRecord=input.keyedRecord;
     const {clampText,clampEditorContent,editorContentWithinLimits,wipeObject,normalizeAreaName,displayAreaName,normalizeTimestamp,sameDataValue,jsonByteLength,canonicalRuntimeError,isCanonicalRuntimeError}=helpers;
     const appCanMutate=hooks.canMutate,assertWriteToken=hooks.assertWriteToken,compatibilityWriteToken=hooks.compatibilityWriteToken,markStorageHealthOk=hooks.storageOk,reportCanonicalCommit=hooks.reportCommit,refreshAreaNoteConsumers=hooks.onNotesChanged,setNoteSyncStateForKey=hooks.onNoteSyncState,reportAreaNoteConflict=hooks.onNoteConflict,showSubjectNoteSaveWarning=hooks.saveWarning,AppDiagnostics=freeze({capture:hooks.diagnosticsCapture});
@@ -35,7 +35,11 @@ const repository=(()=>{
   const notes=KeyedRecord.create();
   const dirtyKeys=new Set();
   const dirtyBaseRevisions=new Map();
-  let storageLossSignalled=false,everLoaded=false;
+  let storageLossSignalled=false,everLoaded=false,acknowledgedResets=0;
+  // The database layer counts a recreated database the moment it opens it,
+  // before any transaction on it runs. Storage counts as lost from then until
+  // every note this tab holds has been written back.
+  const storageLossKnown=()=>storageLossSignalled||(Number(storageResets())||0)>acknowledgedResets;
   const SAVE_DEBOUNCE_MS=1000;
   const RECOVERY_WRITE_INTERVAL_MS=200;
   const REVISION_TOUCH_INTERVAL_MS=500;
@@ -374,9 +378,8 @@ const repository=(()=>{
   async function idbApplyDelta(keys,expectedRevisions){
     const uniqueKeys=[...new Set((keys||[]).map(normalizeAreaName).filter(Boolean))];
     const canonical=new Map(uniqueKeys.map(key=>[key,canonicalEntrySnapshot(notes[key],key)]));
-    const storageLost=storageLossSignalled;
     return idbStrictTransaction([DB_AREA_NOTES_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
-      const store=tx.objectStore(DB_AREA_NOTES_STORE),meta=Meta.view(tx),conflicts=[],committed=KeyedRecord.create(),deletedAt=new Date().toISOString();let epochStaged=false;
+      const store=tx.objectStore(DB_AREA_NOTES_STORE),meta=Meta.view(tx),conflicts=[],committed=KeyedRecord.create(),deletedAt=new Date().toISOString(),storageLost=storageLossKnown();let epochStaged=false;
       const stageMutation=()=>{if(!epochStaged){stageCanonicalMutationEpoch(tx,uniqueKeys.map(areaNotePreparationUnit));epochStaged=true;}};
       // Requests complete in issue order, so these reads observe the state before
       // any write below. A database without any canonical mutation epoch was
@@ -427,12 +430,17 @@ const repository=(()=>{
     if(everLoaded&&!lastLoadReadFailed){
       const missing=Object.keys(notes).filter(key=>hasContent(notes[key])&&!loaded[key]&&![rescueBeforeRead,pendingBeforeRead,pendingAfterRead,rescueAfterRead].some(source=>source[key]));
       if(missing.length){
-        let deleted=new Set(),recreated=true;
+        // Without readable metadata a cleared database cannot be told apart from
+        // a deletion made in another tab. Leave memory as it is; the reload stays
+        // pending and is retried.
+        let deleted=null;
         try{
-          recreated=storageLossSignalled||!(await Meta.read('canonicalMutationEpoch'));
-          if(recreated)deleted=new Set((await Meta.list('areaNoteDeletionPrefix')).map(entry=>normalizeAreaName(entry.suffix)));
-        }catch(error){AppDiagnostics.capture('area-notes.storage-loss-check',error,'warn');}
-        if(recreated)for(const key of missing)if(!deleted.has(key))survivors[key]=canonicalEntrySnapshot(notes[key],key);
+          if(storageLossKnown()||!(await Meta.read('canonicalMutationEpoch')))deleted=new Set((await Meta.list('areaNoteDeletionPrefix')).map(entry=>normalizeAreaName(entry.suffix)));
+        }catch(error){
+          AppDiagnostics.capture('area-notes.storage-loss-check',error,'warn');lastLoadReadFailed=true;
+          throw Object.assign(new Error('Ongoing notes could not confirm what storage still holds. Recovery remains pending.'),{code:'AREA_NOTE_RECOVERY_UNRESOLVED'});
+        }
+        if(deleted)for(const key of missing)if(!deleted.has(key))survivors[key]=canonicalEntrySnapshot(notes[key],key);
       }
     }
     // Request results precede transaction completion. An edit or queued save
@@ -494,6 +502,18 @@ const repository=(()=>{
   // when it runs, after the previous batch committed, and a committed note stays
   // pending while this tab already holds something newer than what was written.
   const sameEntry=(entry,written)=>JSON.stringify(canonicalEntrySnapshot(entry,written&&written.key))===JSON.stringify(written||null);
+  function keepConflictCopy(local,key){
+    const base=`${clampText(displayAreaName(local.label||key),Math.max(1,APP_LIMITS.maxAreaNameChars-20))} (unsaved copy`;
+    for(let index=1;index<100;index+=1){
+      const label=`${base}${index>1?` ${index}`:''})`,copyKey=normalizeAreaName(label);
+      if(!copyKey||notes[copyKey])continue;
+      const result=updateInternal(copyKey,label,String(local.text||''),'',true);
+      if(result.status==='changed')return label;
+      AppDiagnostics.capture('area-notes.conflict-copy',new Error(`An unsaved copy of ${displayAreaName(key)} could not be kept (${result.status}).`),'error');
+      return '';
+    }
+    return '';
+  }
   function runSave(keys,options={}){
     const deltaKeys=[...new Set((keys||[]).map(normalizeAreaName).filter(Boolean))];
     if(!deltaKeys.length)return writeChain;
@@ -520,9 +540,14 @@ const repository=(()=>{
             setNoteSyncStateForKey(key,'synced');
           }
         });
+        const keptCopies=new Map();
         conflicts.forEach((persisted,key)=>{
+          const local=notes[key]||null;
           dirtyKeys.delete(key);dirtyBaseRevisions.delete(key);revisionTouchedAt.delete(key);clearPendingCacheKeys([key]);
           if(persisted)notes[key]=persisted;else delete notes[key];
+          // The stored version wins, but text this tab accepted is never thrown
+          // away: it is kept beside the stored note as an ordinary note.
+          if(local&&String(local.text||'').trim()&&String(local.text||'')!==String(persisted&&persisted.text||''))keptCopies.set(key,keepConflictCopy(local,key));
         });
         if(!clearIndependentRescueKeys(deltaKeys))AppDiagnostics.capture('area-notes.rescue-clear',LocalStorageContract.lastError||new Error('Ongoing Note emergency rescue cleanup failed.'),'warn');
         clearFailure();
@@ -533,7 +558,7 @@ const repository=(()=>{
         if(canonicalRefreshNeeded)refreshAreaNoteConsumers();
         if(conflicts.size){
           refreshAreaNoteConsumers();
-          conflicts.forEach((persisted,key)=>reportAreaNoteConflict(Object.freeze({key,label:persisted&&persisted.label||displayAreaName(key)})));
+          conflicts.forEach((persisted,key)=>reportAreaNoteConflict(Object.freeze({key,label:persisted&&persisted.label||displayAreaName(key),copyLabel:keptCopies.get(key)||''})));
         }
       })
       .catch(e=>{
@@ -618,7 +643,7 @@ const repository=(()=>{
     }
   }
   async function storageAppearsRecreated(){
-    if(storageLossSignalled)return true;
+    if(storageLossKnown())return true;
     try{return !(await Meta.read('canonicalMutationEpoch'));}
     catch(error){AppDiagnostics.capture('area-notes.storage-loss-probe',error,'warn');return false;}
   }
@@ -627,13 +652,16 @@ const repository=(()=>{
   // write every note back. Missing rows are accepted; present rows still
   // follow the ordinary revision check.
   async function recoverAfterStorageLoss(){
+    const resets=Number(storageResets())||0;
+    // Without write control this tab's notes are not the authoritative copy: the
+    // tab in control writes its notes back, so this one only acknowledges.
+    if(!appCanMutate()){acknowledgedResets=Math.max(acknowledgedResets,resets);return false;}
     storageLossSignalled=true;
-    if(!appCanMutate())return false;
     for(const key of Object.keys(notes))markDirty(key);
     await flush();
     await recoveryWriteChain.catch(()=>false);
     const recovered=!saveFailed&&!dirtyKeys.size;
-    if(recovered)storageLossSignalled=false;
+    if(recovered){storageLossSignalled=false;acknowledgedResets=Math.max(acknowledgedResets,resets);}
     return recovered;
   }
   function flush(options={}){
@@ -653,6 +681,12 @@ const repository=(()=>{
     }else pending=Promise.resolve(flushPendingRecoveryWrites()).then(()=>writeChain);
     if(!strict)return pending;
     return Promise.resolve(pending).then(async()=>{
+      // A clash during this flush keeps the rejected text as a new note; store
+      // that copy now so a strict flush never ends with it only in memory.
+      if(dirtyKeys.size&&!saveFailed){
+        if(saveTimer){clearTimeout(saveTimer);saveTimer=null;}
+        const keys=[...dirtyKeys];dirtyKeys.clear();await runSave(keys,{backupCapture});
+      }
       if(dirtyKeys.size)throw new Error(saveMessage||'current ongoing notes are not safely stored');
       if(saveFailed&&!(await repairStaleFailureIfCanonical())){
         if(!(await storageAppearsRecreated())||!(await recoverAfterStorageLoss()))throw new Error(saveMessage||'current ongoing notes are not safely stored');

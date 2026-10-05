@@ -63,7 +63,8 @@ registry.define('exports',1,input=>{
       },error=>{collectionJob.schedule(30*60*1000,'error','replace');throw error;});
     }
     const collectionJob=Lifecycle.createJob({environment:{now,setTimeout:schedule,clearTimeout:clear},isAvailable:()=>suspended?'foreground-busy':isAvailable(),execute:collectAttempt,capture:onError,retryMs:30*60*1000});
-    collectionJob.schedule(1000,'startup');
+    // The host runs the first collection once it has started. Scheduling here
+    // asked the host's availability check before the host had finished defining it.
     const collect=(options={})=>collectionJob.run('collection',options);
     async function finishRelease(token){
       if(!token?.active)return;token.active=false;token.unlock();

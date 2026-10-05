@@ -48,7 +48,7 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
   const storeTransaction=(name,mode,operation)=>transaction(name,mode,(tx,finish)=>operation(tx.objectStore(name),tx,finish));
   const strictStoreTransaction=(name,mode,operation)=>strictTransaction(name,mode,(tx,finish)=>operation(tx.objectStore(name),tx,finish));
   const indexedDb=freeze({
-    transaction,strictTransaction,storeTransaction,strictStoreTransaction,isAvailable:()=>true,
+    transaction,strictTransaction,storeTransaction,strictStoreTransaction,isAvailable:()=>true,lifecycle:()=>freeze({startedFresh:false,resets:Number(controls.storageResets)||0,lastResetAt:''}),
     get:async(name,key)=>{await controls.onStorageRead?.({store:name,kind:'get',key});const value=structuredClone(storeMap(name).get(key)||null);if(name==='session')await controls.onSessionRead?.();return value;},
     getAll:async name=>{await controls.onStorageRead?.({store:name,kind:'list'});if(name==='area')await controls.onAreaRead?.();return [...storeMap(name).values()].map(value=>structuredClone(value));},
     getAllIfPresent:async name=>controls.retiredLegacyStores&&['sync','tombstones','reflection'].includes(name)?[]:[...storeMap(name).values()].map(value=>structuredClone(value)),

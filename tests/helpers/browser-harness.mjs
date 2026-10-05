@@ -100,7 +100,7 @@ export async function startReleaseServer(){
 
 export class CdpPage{
   constructor(socket,targetId){
-    this.socket=socket;this.targetId=targetId;this.nextId=0;this.pending=new Map();this.events=[];this.loadCount=0;this.coverageStarted=false;this.closed=false;
+    this.socket=socket;this.targetId=targetId;this.nextId=0;this.pending=new Map();this.events=[];this.warnings=[];this.loadCount=0;this.coverageStarted=false;this.closed=false;
     socket.onmessage=event=>{
       const message=JSON.parse(event.data);
       if(message.id){
@@ -111,6 +111,7 @@ export class CdpPage{
       if(message.method==='Page.loadEventFired')this.loadCount+=1;
       if(message.method==='Runtime.exceptionThrown')this.events.push({kind:'exception',text:message.params.exceptionDetails.exception?.description||message.params.exceptionDetails.text||'Runtime exception'});
       if(message.method==='Runtime.consoleAPICalled'&&message.params.type==='error')this.events.push({kind:'console-error',text:message.params.args.map(arg=>arg.value??arg.description??'').join(' ')});
+      if(message.method==='Runtime.consoleAPICalled'&&message.params.type==='warning')this.warnings.push(message.params.args.map(arg=>arg.value??arg.description??'').join(' '));
       if(message.method==='Log.entryAdded'&&message.params.entry.level==='error')this.events.push({kind:'log-error',text:message.params.entry.text});
     };
   }
@@ -203,6 +204,14 @@ export class CdpPage{
   close(){this.closed=true;this.socket.close();}
 }
 
+// Browser tests build plans and Saved Days around the current time. A whole-hour
+// zone whose local time is about noon keeps them clear of the app's 04:00
+// study-day boundary and of midnight, whenever the suite runs, and keeps the
+// page's calendar date equal to the UTC date the test runner uses.
+export function studyTimezone(at=new Date()){
+  const offset=12-at.getUTCHours();
+  return offset===0?'Etc/UTC':`Etc/GMT${offset>0?'-':'+'}${Math.abs(offset)}`;
+}
 export function resolveChromiumExecutable(preferred=''){
   const candidates=[
     preferred,
@@ -236,7 +245,7 @@ export async function launchChromium(options={}){
     const target=await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`,{method:'PUT'})).json();
     const page=await CdpPage.connect(target.webSocketDebuggerUrl,target.id);
     pages.add(page);await page.send('Runtime.enable');await page.send('Page.enable');await page.send('Log.enable');await page.send('Network.enable');await page.send('Accessibility.enable');await page.startCoverage();
-    await page.send('Emulation.setTimezoneOverride',{timezoneId:settings.timezoneId||'Asia/Kolkata'});
+    await page.send('Emulation.setTimezoneOverride',{timezoneId:settings.timezoneId||studyTimezone()});
     if(settings.userAgent)await page.send('Network.setUserAgentOverride',{userAgent:settings.userAgent,platform:settings.platform||''});
     await page.setViewport(settings.viewport||{width:1365,height:900,mobile:false,scale:1});
     if(settings.preload)await page.send('Page.addScriptToEvaluateOnNewDocument',{source:String(settings.preload)});

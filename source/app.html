@@ -1600,6 +1600,7 @@ const KeyedRecord=Object.freeze({
 });
 // Data access is instantiated after the codecs through the private repository module.
 let StorageHealthController=null;
+let storageResetHold=null,storageResetHandling=null,storageResetSince=0,storageResetAcknowledged=0;
 let NativeCapabilities=null;
 let DeviceBackup=null,BackupRecoveryHost=null;
 const BackgroundTasks=NativeCapabilitiesModule.createTaskScheduler(window);
@@ -1655,9 +1656,14 @@ function createStorageHealthController(local){
     notify();
     return snapshot();
   }
+  // Each tab mirrors its own copy of this record. An unresolved browser-data
+  // clear is kept as stored unless this tab set or resolved it itself.
+  let clearMarkerOwned=false;
   function updateHistory(patch){
+    const marker=!!patch&&typeof patch==='object'&&Object.hasOwn(patch,'browserDataClearedAt');
     history=Object.assign({},history,patch&&typeof patch==='object'?patch:{},{version:2,updatedAt:new Date().toISOString()});
-    mirror();notify();return snapshot();
+    mirror({marker});if(marker)clearMarkerOwned=!!history.browserDataClearedAt;
+    notify();return snapshot();
   }
   function observeLocalStorage(operation,error){
     const kind=operation==='write'?'write':'read';
@@ -1667,10 +1673,13 @@ function createStorageHealthController(local){
       issue(source,`Browser storage could not be ${action}: ${error.message||error}. Changes may not survive a reload.`,{mirror:false});
     }else if(issueMap.has(source))recover(source,null,{mirror:false});
   }
-  function mirror(){
+  function mirror({marker=false}={}){
     if(mirroring)return false;
     mirroring=true;
-    try{return local.setJson(STORAGE_KEYS.storageHealth,history);}
+    try{
+      if(!clearMarkerOwned&&!marker){const stored=local.getJson(STORAGE_KEYS.storageHealth,null);history=Object.assign({},history,{browserDataClearedAt:stored&&stored.browserDataClearedAt||null});}
+      return local.setJson(STORAGE_KEYS.storageHealth,history);
+    }
     finally{mirroring=false;}
   }
   function snapshot(){
@@ -2435,6 +2444,7 @@ const AppOwnership=OwnershipModule.createOwnershipController(Object.freeze({
         sameTabReload:!!(options&&options.sameTabReload)||performance.getEntriesByType('navigation')[0]?.type==='reload'
       }));
       AppActivation.publish(APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER,'app-ownership',{destructive:true});
+      if(StartupLifecycle.status().fullyInitialized)resumeUnresolvedStorageReset();
       return result;
     },
     finalizeHydration:async()=>{
@@ -2446,6 +2456,7 @@ const AppOwnership=OwnershipModule.createOwnershipController(Object.freeze({
     scheduleMaintenance:()=>scheduleDataMaintenance(),
     practiceRender:()=>PracticePacer.render(),
     blocked:(status,reason)=>renderPrimaryTabBlock(status,reason),
+    peerStorageReset:detectedAt=>{void handleBrowserStorageReset({detectedAt,peer:true}).catch(error=>AppDiagnostics.capture('storage-reset.peer',error,'error'));},
     invalidate:context=>SessionLifecycle.invalidate('primary-tab-loss',{...context,reconcile:false}),
     flush:()=>StartupLifecycle.flush(),
     settled:async()=>{await PlanData.settled();return Promise.allSettled([
@@ -4049,7 +4060,7 @@ const IndexedDb=PersistenceModule.createIndexedDb(Object.freeze({
     onError:message=>markStorageHealthError('indexedDB',`Browser database is unavailable: ${message}`),
     onOk:key=>markStorageHealthOk('indexedDB',key),
     capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
-    onReset:()=>{void handleBrowserStorageReset().catch(error=>AppDiagnostics.capture('storage-reset.handle',error,'error'));}
+    onReset:event=>{void handleBrowserStorageReset(event).catch(error=>AppDiagnostics.capture('storage-reset.handle',error,'error'));}
   })
 }));
 const ReconciliationBaselineCodec=ReconciliationBaselineModule.createCodec(Object.freeze({limits:APP_LIMITS,normalizeAreaName}));
@@ -4760,7 +4771,10 @@ function refreshAreaNoteConsumers(){
 function reportAreaNoteConflict(info={}){
   const key=normalizeAreaName(info.key),label=displayAreaName(info.label||key||'this area');
   if(!key)return false;
-  const message=`A newer ongoing note for ${label} was saved elsewhere. Study Director kept the newer note and rejected the outdated edit.`;
+  const copyLabel=String(info.copyLabel||'').trim();
+  const message=copyLabel
+    ?`A different version of the ${label} note was already stored. Study Director kept that version and saved your edit as the note “${copyLabel}”.`
+    :`A newer ongoing note for ${label} was saved elsewhere. Study Director kept the newer note and rejected the outdated edit.`;
   setNoteSyncStateForKey(key,'conflict');
   setPlanStatus(message,false);
   setStatus('save-status',message,false);
@@ -7578,7 +7592,7 @@ const Exports=ExportsModule.createCoordinator({
   onState:state=>{const button=document.getElementById('cancel-standalone-import');if(button){if(state.fileBusy){button.hidden=false;button.textContent='Cancel';}else if(button.dataset.standaloneExportBusy!=='1')button.hidden=true;}if(state.fileBusy){if(!fileProcessingNotice)fileProcessingNotice=NoticeCoordinator.presentation('file-processing').begin({id:'worker',surfaceId:'file-processing-status',foreground:false,announce:false,title:'File processing'});fileProcessingNotice.update({message:state.phase,progress:{stage:state.phase}});}else{fileProcessingNotice?.resolve();fileProcessingNotice=null;const status=document.getElementById('file-processing-status');if(status)status.textContent='';}}
 });
 let backupProtectionReady=false;
-function backupBackgroundAvailability(){return !StartupLifecycle.status().fullyInitialized?'startup':!appCanMutate()?'awaiting-control':backupProtectionReady?true:'locked';}
+function backupBackgroundAvailability(){return !StartupLifecycle.status().fullyInitialized?'startup':!appCanMutate()?'awaiting-control':storageResetUnresolved()?'storage-reset':backupProtectionReady?true:'locked';}
 function setBackupProtectionSurfaceError(error){
   const hint=document.getElementById('backup-protection-hint');if(!hint)return;
   hint.hidden=false;NoticeCoordinator.emit({source:'backup-protection',id:'settings',surfaceId:'backup-protection-hint',surface:'inline',severity:'error',lifecycle:'failed',cue:'none',message:clampText(String(error&&error.message||error||'Backup encryption could not be updated.'),APP_LIMITS.maxStatusMessageChars)});
@@ -8246,6 +8260,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     personalVerify:value=>PlanData.verify(value),
     sourceRevision:()=>currentBackupSourceRevision(),
     snapshotRevision:options=>backupSnapshotRevision(options),
+    storageGeneration:()=>IndexedDb.lifecycle().resets,
     canonicalMutationEpochRead:()=>AppData.mutationEpoch.read(),
     canonicalPreparationRebase:()=>AppData.mutationEpoch.rebasePreparation(),
     preparationUnitStamps:()=>AppData.preparationUnits.list(),
@@ -8437,63 +8452,118 @@ async function offerDeviceRecoveryIfLocalEmpty(options={}){
 }
 async function connectDeviceBackupWithRecovery(){
   const startedAt=Date.now(),result=await DeviceBackup.connect();
-  if(DeviceBackup.status().connected){await offerDeviceRecoveryIfLocalEmpty({reason:'connect',latestBefore:startedAt-1});}
+  if(DeviceBackup.status().connected){
+    // Reconnecting after a browser data clear adds back what is missing, as the
+    // open tab would have done had the folder still been connected.
+    const hold=storageResetHold;
+    if(hold){if(!(await restoreMissingAfterStorageReset(hold))&&storageResetHold===hold)showStorageResetDecision();}
+    else await offerDeviceRecoveryIfLocalEmpty({reason:'connect',latestBefore:startedAt-1});
+  }
   return result;
 }
 /* BROWSER DATA CLEARING · keep what an open tab still holds */
 // Clearing site data deletes IndexedDB, localStorage and OPFS even with persistent
-// storage granted. This tab still holds its notes, plan, preferences and session
-// and writes them back. Saved Days and attachments exist only in a backup: with a
-// connected Device Folder the latest version adds them back without touching the
-// rescued data; otherwise the user chooses. Until then automatic backups must not
-// publish the reduced dataset. The pause lives only in this tab: after a reload the
-// folder is remembered only if it was written back when the pause lifted.
-let storageResetHold=null,storageResetHandling=null,storageResetSince=0;
-function showStorageResetDecision(){
+// storage granted. The database layer counts the clear the moment it reopens
+// storage, so notes and background backups treat storage as lost from then on.
+// This tab writes back what it still holds and checks each write. Saved Days and
+// attachments exist only in a backup: with a connected Device Folder, the newest
+// version saved before the clear adds them back without touching the rescued data;
+// otherwise the user chooses. Until then automatic backups stay paused so the
+// reduced data cannot become the newest backup. The unresolved clear is noted in
+// storage health, so a reload brings the notice and the pause back.
+const STORAGE_RESET_RETRY_MS=Object.freeze([3000,10000,30000]);
+const STORAGE_RESET_PARTS=Object.freeze({notes:'notes',plans:'plans',settings:'settings',session:'today’s session'});
+function storageResetUnresolved(){return !!storageResetHold||IndexedDb.lifecycle().resets>storageResetAcknowledged;}
+function storageResetList(names){const parts=names.map(name=>STORAGE_RESET_PARTS[name]||name);return parts.length<2?parts.join(''):`${parts.slice(0,-1).join(', ')} and ${parts.at(-1)}`;}
+function showStorageResetDecision({unsaved=[],retrying=false}={}){
+  const hold=storageResetHold,clearedAt=Date.parse(String(hold?.clearedAt||'')),parts=[];
+  if(hold?.reloaded)parts.push(`Browser data was cleared${Number.isFinite(clearedAt)?` on ${new Date(clearedAt).toLocaleString()}`:''}.`);
+  else if(unsaved.length)parts.push(`Not saved again${retrying?' yet':''}: ${storageResetList(unsaved)}. ${retrying?'Study Director is retrying. ':''}Until then that data exists only in this tab, so keep it open${retrying?'':' and export a backup file from Data & Backup'}.`);
+  else parts.push('Your open notes, plans, settings and today’s session were saved again.');
+  parts.push('Past Saved Days and attachments need a restore from backup.');
+  if(hold?.reloaded&&!DeviceBackup.status().connected)parts.push('Reconnect your Device Folder or sign in to Google Drive in Data & Backup.');
+  parts.push('Automatic backups are paused until you choose.');
   NoticeCoordinator.emit({source:'storage-reset',id:'detected',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,dismissible:false,cue:'none',
-    title:'Browser data was cleared',
-    message:'Your open notes, plans, settings and today’s session were kept. Past Saved Days and attachments need a restore from backup. Automatic backups are paused until you choose.',
+    title:'Browser data was cleared',message:parts.join(' '),
     action:{label:'Restore from backup',run:()=>void restoreAfterStorageReset()},
     secondaryAction:{label:'Continue with current data',run:()=>settleStorageReset()}});
 }
-async function handleBrowserStorageReset(){
+// Pausing is synchronous: scheduling stops at once, and waiting only lets a
+// running automatic backup wind down.
+function beginStorageResetHold(clearedAt){
+  if(storageResetHold)return storageResetHold;
+  const hold={provider:null,device:null,deviceReady:null,reloaded:false,clearedAt:String(clearedAt||new Date().toISOString())};storageResetHold=hold;storageResetSince=Date.now();
+  try{hold.provider=BackupProviderRuntime.suspendBackground('storage-reset');}catch(error){AppDiagnostics.capture('storage-reset.provider-suspend',error,'warn');}
+  hold.deviceReady=DeviceBackup.suspendAutomatic('storage-reset').then(token=>{if(storageResetHold===hold)hold.device=token;else DeviceBackup.resumeAutomatic(token);},error=>AppDiagnostics.capture('storage-reset.device-suspend',error,'warn'));
+  if(readStorageHealth().browserDataClearedAt!==hold.clearedAt)writeStorageHealth({browserDataClearedAt:hold.clearedAt});
+  return hold;
+}
+const storageResetSteps=Object.freeze({
+  notes:()=>AppData.notes.recoverAfterStorageLoss(),
+  plans:()=>PlanData.rewriteAfterStorageReset(),
+  settings:()=>{protectedPreferencesDirty=true;return flushProtectedPreferences();},
+  session:async()=>{if(!TASKS.length)return true;const result=await writeLiveDraftNow({markChanged:false});return !!(result&&result.ok&&result.storage?.idb===true);}
+});
+// Each write is checked. Failed parts are retried a few times; the notice says
+// what is still only in memory instead of claiming it was saved.
+async function writeBackAfterStorageReset(hold){
+  let pending=Object.keys(storageResetSteps);
+  for(let attempt=0;;attempt+=1){
+    const failed=[];
+    for(const name of pending){let saved=false;try{saved=await storageResetSteps[name]()===true;}catch(error){AppDiagnostics.capture(`storage-reset.${name}`,error,'error');}if(!saved)failed.push(name);}
+    if(!failed.length||attempt>=STORAGE_RESET_RETRY_MS.length||storageResetHold!==hold||!appCanMutate())return failed;
+    pending=failed;showStorageResetDecision({unsaved:failed,retrying:true});
+    await new Promise(resolve=>setTimeout(resolve,STORAGE_RESET_RETRY_MS[attempt]));
+  }
+}
+async function handleBrowserStorageReset(event={}){
   if(storageResetHandling)return storageResetHandling;
   storageResetHandling=(async()=>{
-    if(!storageResetHold){
-      const hold={provider:null,device:null};storageResetHold=hold;storageResetSince=Date.now();
-      try{hold.provider=BackupProviderRuntime.suspendBackground('storage-reset');}catch(error){AppDiagnostics.capture('storage-reset.provider-suspend',error,'warn');}
-      try{const token=await DeviceBackup.suspendAutomatic('storage-reset');if(storageResetHold===hold)hold.device=token;else DeviceBackup.resumeAutomatic(token);}
-      catch(error){AppDiagnostics.capture('storage-reset.device-suspend',error,'warn');}
+    // Another tab holds control and handles the clear; this one picks up an
+    // unresolved clear from storage health if it takes over.
+    if(!appCanMutate()){
+      storageResetAcknowledged=IndexedDb.lifecycle().resets;void AppData.notes.recoverAfterStorageLoss();
+      if(!event.peer)AppOwnership.announceStorageReset(event.detectedAt);
+      return;
     }
-    if(appCanMutate())for(const [name,step] of [
-      ['notes',()=>AppData.notes.recoverAfterStorageLoss()],
-      ['plan',()=>PlanData.rewriteAfterStorageReset()],
-      ['preferences',()=>{protectedPreferencesDirty=true;return flushProtectedPreferences();}],
-      ['session',()=>TASKS.length?writeLiveDraftNow({markChanged:false}):null]
-    ]){try{await step();}catch(error){AppDiagnostics.capture(`storage-reset.${name}`,error,'error');}}
+    const hold=beginStorageResetHold(event.detectedAt);
+    const unsaved=await writeBackAfterStorageReset(hold);
     try{refreshAreaNoteConsumers();renderSched();}catch(error){AppDiagnostics.capture('storage-reset.render',error,'warn');}
-    // Add back only what this tab could not hold, from the latest verified
-    // Device Folder version. Anything needing a decision falls back to the notice.
-    let restored=null;
-    if(storageResetHold&&appCanMutate()&&DeviceBackup.status().connected){
-      try{restored=await DeviceBackup.bringIn({missingOnly:true});}
-      catch(error){AppDiagnostics.capture('storage-reset.missing-restore',error,'warn');}
-    }
-    if(restored&&restored.ok){
-      settleStorageReset();
-      const at=Date.parse(String(restored.exportedAt||''));
-      NoticeCoordinator.emit({source:'storage-reset',id:'restored',severity:'success',lifecycle:'succeeded',foreground:false,surface:'toast',duration:12000,cue:'none',
-        title:'Browser data was cleared',
-        message:`Your open work was kept, and past Saved Days and attachments were restored from your Device Folder backup${Number.isFinite(at)?` of ${new Date(at).toLocaleString()}`:''}.`});
-    }else if(storageResetHold)showStorageResetDecision();
+    if(storageResetHold!==hold)return;
+    if(unsaved.length){showStorageResetDecision({unsaved});return;}
+    await hold.deviceReady;
+    if(storageResetHold===hold&&!(await restoreMissingAfterStorageReset(hold))&&storageResetHold===hold)showStorageResetDecision();
   })().finally(()=>{storageResetHandling=null;});
   return storageResetHandling;
+}
+// Add back only what this device lacks, from the newest Device Folder version
+// saved before the clear. Anything needing a decision falls back to the notice.
+async function restoreMissingAfterStorageReset(hold){
+  if(!appCanMutate()||!DeviceBackup.status().connected)return false;
+  let restored=null;
+  try{restored=await DeviceBackup.bringIn({missingOnly:true,before:hold.clearedAt});}
+  catch(error){AppDiagnostics.capture('storage-reset.missing-restore',error,'warn');}
+  if(!restored||!restored.ok)return false;
+  settleStorageReset();
+  const at=Date.parse(String(restored.exportedAt||'')),days=Math.max(0,Number(restored.result?.added)||0),files=Math.max(0,Number(restored.result?.assetsRestored)||0);
+  const source=`your Device Folder backup${Number.isFinite(at)?` of ${new Date(at).toLocaleString()}`:''}`,count=(value,word)=>`${value} ${word}${value===1?'':'s'}`;
+  NoticeCoordinator.emit({source:'storage-reset',id:'restored',severity:'success',lifecycle:'succeeded',foreground:false,surface:'toast',duration:12000,cue:'none',
+    title:'Browser data was cleared',
+    message:days||files?`Your open work was kept. Added ${count(days,'past Saved Day')} and ${count(files,'attachment')} from ${source}.`:`Your open work was kept. Nothing was missing compared with ${source}.`});
+  return true;
+}
+// A reload or a takeover in another tab brings back an unresolved clear.
+function resumeUnresolvedStorageReset(){
+  const stored=AppData.local.getJson(STORAGE_KEYS.storageHealth,null),clearedAt=String(stored&&stored.browserDataClearedAt||readStorageHealth().browserDataClearedAt||'');
+  if(!clearedAt||storageResetHold||!appCanMutate())return false;
+  beginStorageResetHold(clearedAt).reloaded=true;showStorageResetDecision();return true;
 }
 // Continuing, any verified restore or combine (restoreJournalMark), and any
 // backup the user makes to a file, the Device Folder or Drive lift the pause.
 function settleStorageReset(){
-  const hold=storageResetHold;storageResetHold=null;
+  const hold=storageResetHold;storageResetHold=null;storageResetAcknowledged=IndexedDb.lifecycle().resets;
   NoticeCoordinator.resolveEvent('storage-reset','detected');
+  if(readStorageHealth().browserDataClearedAt)writeStorageHealth({browserDataClearedAt:null});
   if(!hold)return false;
   try{hold.provider?.release();}catch(error){AppDiagnostics.capture('storage-reset.provider-resume',error,'warn');}
   if(hold.device)DeviceBackup.resumeAutomatic(hold.device);
@@ -9761,6 +9831,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
         try{await AppData.mutationEpoch.reseed();backupFastFenceReady=true;}
         catch(error){AppDiagnostics.capture('startup.canonical-mutation-epoch',error,'warn');}
       }
+      resumeUnresolvedStorageReset();
       installBackgroundOwners();scheduleDataMaintenance();BackgroundOperations.wake('startup');
       void BackupFiles.collect().catch(error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn'));
       document.documentElement.dataset.studyDirectorCanonicalBaseline=proof.canonical?'verified':'not-proven';

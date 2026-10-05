@@ -24,7 +24,7 @@ registry.define('backup-capture',1,()=>{
     const session=functions(input.session,['canMutate','cancelLiveDraftSave','captureSnapshot','hasTasks','toActiveSession'],'Backup capture session port');
     const personal=functions(input.personal,['settle','export'],'Backup capture personal-data port');
     const exports=functions(input.exports,['check','run'],'Backup capture export port');
-    const persistence=functions(input.persistence,['sourceRevision','snapshotRevision','dailyRecordDocuments'],'Backup capture persistence port');
+    const persistence=functions(input.persistence,['sourceRevision','snapshotRevision','dailyRecordDocuments','storageGeneration'],'Backup capture persistence port');
     const diagnostics=functions(input.diagnostics,['capture','mark'],'Backup capture diagnostics port');
     const domain=functions(input.domain,['getStudentName','currentDailyRecords'],'Backup capture domain port');
     const environment=functions(input.environment,['yieldTask'],'Backup capture environment port');
@@ -36,7 +36,7 @@ registry.define('backup-capture',1,()=>{
     const appCanMutate=session.canMutate,cancelLiveDraftSave=session.cancelLiveDraftSave,captureSessionSnapshot=session.captureSnapshot,activeSessionPayload=session.toActiveSession;
     const TASKS=freeze({get length(){return session.hasTasks()?1:0;}});
     const personalSettle=personal.settle,personalExport=personal.export,Exports=exports;
-    const ports=freeze({persistence:freeze({sourceRevision:persistence.sourceRevision,snapshotRevision:persistence.snapshotRevision})});
+    const ports=freeze({persistence:freeze({sourceRevision:persistence.sourceRevision,snapshotRevision:persistence.snapshotRevision,storageGeneration:persistence.storageGeneration})});
     const getDailyRecordDocumentsByDates=persistence.dailyRecordDocuments;
     const AppDiagnostics=freeze({capture:diagnostics.capture}),OperationDiagnostics=freeze({mark:diagnostics.mark});
     const getStudentNameFromDisplay=domain.getStudentName,currentDailyRecords=domain.currentDailyRecords,yieldTask=environment.yieldTask;
@@ -121,7 +121,16 @@ async function verifyAnomalousPhysicalAssetAliases(catalogue,assetIds,{checkpoin
   }
   return true;
 }
+// The browser can clear this site's storage under an open page. The database
+// layer counts each clear as it reopens storage; a capture that saw the count
+// change read a mix of old and emptied storage, so nothing from it is saved.
+function storageGeneration(){return Number(ports.persistence.storageGeneration())||0;}
+function assertStorageGeneration(expected){
+  if(storageGeneration()!==expected)throw backupPreparationError('BACKUP_STORAGE_CLEARED','checkpoint-source-fence','Browser data was cleared while this backup was being prepared. Nothing was saved.');
+  return true;
+}
 async function captureLogicalCheckpoint(exportedAt=new Date().toISOString(),options={}){
+  const generation=storageGeneration();
   const includeAssetBlobs=options&&options.includeAssetBlobs!==false;
   let yieldedAt=Date.now();
   async function checkpoint(){Exports.check();if(Date.now()-yieldedAt>=8){await yieldTask();yieldedAt=Date.now();Exports.check();}}
@@ -213,6 +222,7 @@ async function captureLogicalCheckpoint(exportedAt=new Date().toISOString(),opti
   if(snapshotRevision!==await ports.persistence.snapshotRevision(Object.freeze({legacy:forceLegacySnapshotFence})))throw new Error('Stored data changed while capturing the backup. Retry the backup.');
   const finalSourceRevision=String(await ports.persistence.sourceRevision()||sourceRevision);
   if(finalSourceRevision!==sourceRevision)throw new Error('Stored data changed while capturing the backup. Retry the backup.');
+  assertStorageGeneration(generation);
   const installationId=AppData.provenance.installationId();
   const checkpointMetadata=Number(backupVersion)>=14?BackupCodec.createCheckpointMetadata(installationId,exportedAt):null;
   const captureBase={
@@ -224,13 +234,14 @@ async function captureLogicalCheckpoint(exportedAt=new Date().toISOString(),opti
   };
   const protectedCheckpointManifest=Number(backupVersion)>=15?BackupCodec.createProtectedManifest(captureBase,checkpointMetadata):null;
   const capture=freeze({...captureBase,protectedCheckpointManifest});
-  logicalCheckpointGuards.set(capture,freeze({snapshotRevision,sourceRevision,forceLegacySnapshotFence}));
+  logicalCheckpointGuards.set(capture,freeze({snapshotRevision,sourceRevision,forceLegacySnapshotFence,generation}));
   return capture;
 }
 async function assertLogicalCheckpointCurrent(capture){
   requireLogicalCheckpointCapture(capture);
   const guard=logicalCheckpointGuards.get(capture);
   if(!guard)throw new Error('Logical checkpoint lifetime expired. Retry the backup.');
+  assertStorageGeneration(guard.generation);
   if(guard.snapshotRevision!==await ports.persistence.snapshotRevision(Object.freeze({legacy:guard.forceLegacySnapshotFence===true})))throw backupPreparationError('BACKUP_SOURCE_FENCE_CHANGED','checkpoint-source-fence','Stored data changed while the backup was being prepared. Retry the backup.');
   const currentSourceRevision=String(await ports.persistence.sourceRevision()||guard.sourceRevision);
   if(currentSourceRevision!==guard.sourceRevision)throw backupPreparationError('BACKUP_SOURCE_FENCE_CHANGED','checkpoint-source-fence','Stored data changed while the backup was being prepared. Retry the backup.');
@@ -248,7 +259,16 @@ function normalizedPreparationStamps(values){
   for(const raw of rows){const unit=String(raw&&raw.unit||''),token=String(raw&&raw.token||'');if(!unit||unit.length>512||!/^[a-f0-9]{32}$/u.test(token)||seen.has(unit))throw backupPreparationError('BACKUP_PREPARATION_INDEX_INVALID','checkpoint-preparation-index','Backup preparation metadata is invalid.');seen.add(unit);out.push(freeze({unit,token}));}
   out.sort((a,b)=>a.unit.localeCompare(b.unit));return freeze(out);
 }
+// Preparation is fenced from before its first storage access; a fallback full
+// capture fences itself the same way.
+const preparationGenerations=new WeakMap();
 async function beginManagedPreparationCapture(exportedAt=new Date().toISOString()){
+  const generation=storageGeneration(),capture=await beginManagedPreparationCaptureAt(exportedAt);
+  assertStorageGeneration(generation);
+  if(capture)preparationGenerations.set(capture,generation);
+  return capture;
+}
+async function beginManagedPreparationCaptureAt(exportedAt){
   if(!appCanMutate())return null;
   await backupPreparationStep('BACKUP_PLAN_SETTLE_FAILED','checkpoint-plan-settle',()=>personalSettle({backupCapture:true}));
   try{await backupPreparationStep('BACKUP_NOTES_SETTLE_FAILED','checkpoint-notes-settle',()=>AppData.notes.flush({strict:true,backupCapture:true}));}catch(error){AppDiagnostics.capture('backup.incremental-notes-flush',error,'warn');throw error;}
@@ -305,6 +325,7 @@ async function beginManagedPreparationCapture(exportedAt=new Date().toISOString(
 
 async function readManagedPreparationUnits(preparation,units){
   requireManagedPreparationCapture(preparation);const guard=managedPreparationGuards.get(preparation);if(!guard)throw new Error('Managed preparation capture lifetime expired. Retry the backup.');
+  assertStorageGeneration(preparationGenerations.get(preparation));
   const requested=[...new Set((units||[]).map(value=>String(value||'')).filter(Boolean))];if(requested.length>MANAGED_PREPARATION_STAMP_LIMIT)throw new Error('Too many changed backup preparation units.');
   const results=new Map(),noteUnits=[],noteKeys=[];
   for(const unit of requested){
@@ -339,7 +360,8 @@ async function finalizeManagedPreparationCapture(preparation,inventory){
     recordDates,areaNoteItems,activeSession:null,personalData:null,savedDayDeletions:preparation.savedDayDeletions,areaNoteDeletions:preparation.areaNoteDeletions,attachmentDeletions:preparation.attachmentDeletions,counts,assetItems,warning:preparation.warning,completeness:preparation.completeness
   });
   const protectedCheckpointManifest=Number(backupVersion)>=15?BackupCodec.createProtectedManifest(captureBase,preparation.checkpoint):null,capture=freeze({...captureBase,protectedCheckpointManifest});
-  logicalCheckpointGuards.set(capture,freeze({snapshotRevision:guard.snapshotRevision,sourceRevision:guard.sourceRevision,forceLegacySnapshotFence:false}));return capture;
+  const generation=preparationGenerations.get(preparation);assertStorageGeneration(generation);
+  logicalCheckpointGuards.set(capture,freeze({snapshotRevision:guard.snapshotRevision,sourceRevision:guard.sourceRevision,forceLegacySnapshotFence:false,generation}));return capture;
 }
 async function establishManagedPreparationBaseline(capture,units){
   requireLogicalCheckpointCapture(capture);const guard=logicalCheckpointGuards.get(capture);if(!guard||guard.forceLegacySnapshotFence===true||!fastCaptureEpochToken(guard.snapshotRevision))return null;

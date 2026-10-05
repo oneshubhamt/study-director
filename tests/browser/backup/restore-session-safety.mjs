@@ -1,4 +1,4 @@
-import {withoutPwaChecks} from '../../helpers/browser-harness.mjs';
+import {withoutPwaChecks,studyTimezone} from '../../helpers/browser-harness.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -59,7 +59,7 @@ await waitFor(async()=>{try{return (await fetch(`http://127.0.0.1:${browserPort}
 async function createPage(){
   const target=await (await fetch(`http://127.0.0.1:${browserPort}/json/new?about:blank`,{method:'PUT'})).json();
   const page=await CdpPage.connect(target.webSocketDebuggerUrl);
-  await page.send('Runtime.enable');await page.send('Page.enable');await page.send('Emulation.setTimezoneOverride',{timezoneId:'Asia/Kolkata'});
+  await page.send('Runtime.enable');await page.send('Page.enable');await page.send('Emulation.setTimezoneOverride',{timezoneId:studyTimezone()});
   await page.send('Page.navigate',{url:appUrl});
   await waitFor(()=>page.evaluate(`document.readyState==='complete'`),{label:'Study Director page load'});
   const loadedUrl=await page.evaluate(`location.href`);

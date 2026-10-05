@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {CdpPage,withoutPwaChecks} from '../../helpers/browser-harness.mjs';
+import {CdpPage,withoutPwaChecks,studyTimezone} from '../../helpers/browser-harness.mjs';
 
 const root=process.cwd();
 const chromium=process.env.CHROMIUM_PATH||['/usr/bin/chromium','/tmp/chromium'].find(fs.existsSync)||'/usr/bin/chromium';
@@ -77,7 +77,7 @@ async function createPage({idbMode='normal',allLocalFailures=false,waitForStartu
   const target=await (await fetch(`http://127.0.0.1:${browserPort}/json/new?about:blank`,{method:'PUT'})).json();
   const page=await CdpPage.connect(target.webSocketDebuggerUrl);
   await page.send('Runtime.enable');await page.send('Page.enable');await page.send('Log.enable');
-  await page.send('Emulation.setTimezoneOverride',{timezoneId:'Asia/Kolkata'});
+  await page.send('Emulation.setTimezoneOverride',{timezoneId:studyTimezone()});
   const faultSetup=allLocalFailures?`window.__storageFaults.read=true;window.__storageFaults.write=true;`:'';
   await page.send('Page.addScriptToEvaluateOnNewDocument',{source:`${controllableLocalStorage}${faultSetup}${indexedDbPrelude(idbMode)}window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';`});
   await page.send('Page.navigate',{url:appUrl});

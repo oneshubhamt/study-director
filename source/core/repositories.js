@@ -1378,7 +1378,7 @@ const AreaNotesRepository=AreaNotesRepositoryModule.create(freeze({
         keys:freeze({areaNoteRescue:STORAGE_KEYS.areaNoteRescue}),legacyKeys:freeze({areaNotesPending:LEGACY_STORAGE_KEYS.areaNotesPending}),
         metaKeys:freeze({areaNoteRecoveryPrefix:META_KEYS.areaNoteRecoveryPrefix})
       }),
-      storage:freeze({local:LocalStorageContract,meta:Meta,idbGetAll,idbStoreTransaction,idbStrictTransaction}),
+      storage:freeze({local:LocalStorageContract,meta:Meta,idbGetAll,idbStoreTransaction,idbStrictTransaction,storageResets:()=>IndexedDb.lifecycle().resets}),
       codecs:freeze({compatibility:CompatibilityCodec,sanitizeCurrentAreaNote}),keyedRecord:KeyedRecord,
       helpers:freeze({clampText,clampEditorContent,editorContentWithinLimits,wipeObject,normalizeAreaName,displayAreaName,normalizeTimestamp,sameDataValue,jsonByteLength,canonicalRuntimeError,isCanonicalRuntimeError}),
       hooks:freeze({

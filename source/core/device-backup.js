@@ -624,9 +624,11 @@ registry.define('device-backup',1,input=>{
       const recoveryPresentation=presentationScope;
       const reportRecovery=(stage,text,details={})=>{recoveryPresentation?.update({message:String(text||''),progress:{stage,...details}});if(typeof recoveryProgress==='function')try{recoveryProgress(freeze({stage,message:String(text||''),ok:true,...details}));}catch(error){capture('device-backup.recovery-progress',error);}};
       if(!exact&&modeName!=='bring-in')throw new TypeError('Unsupported Device Folder recovery mode.');
-      // Missing-only recovery (after browser data was cleared) uses the latest
-      // verified version, never prompts, and adds back only what is absent.
-      const missingOnly=!exact&&options?.missingOnly===true;
+      // Missing-only recovery (after browser data was cleared) uses the newest
+      // verified version saved before the clear, never prompts, and adds back
+      // only what is absent. A version saved after the clear may hold the
+      // reduced data, so it is never used.
+      const missingOnly=!exact&&options?.missingOnly===true,missingBefore=Date.parse(String(options?.before||''));
       if(!supported)return freeze({ok:false,reason:'unsupported'});
       const traceId=operationStart(exact?'device-restore':'device-combine','Device Folder');
       if(!ownership.canMutate()){presentationState.message=exact?'Take control in this tab before restoring a Device Folder version.':'Take control in this tab before combining from a Device Folder backup.';publish();operationFinish({status:'skipped',reason:'ownership'},traceId);return freeze({ok:false,reason:'ownership'});}
@@ -642,9 +644,10 @@ registry.define('device-backup',1,input=>{
         const projected=repository.projectHistory(freeze(state.valid.map(row=>freeze({id:row.id,manifest:row.manifest}))),freeze({id:'device-folder',label:'Device Folder'}),{quarantinedObjectIds}),healthyIds=new Set(projected.map(entry=>entry.location.checkpointId)),healthyRows=state.valid.filter(row=>healthyIds.has(row.id));
         if(!healthyRows.length)throw new Error('No verified Study Director backup was found in this folder.');
         const newest=freeze([...healthyRows].reverse().map(row=>freeze({id:row.id,exportedAt:row.manifest.exportedAt,encrypted:row.manifest.encrypted,counts:row.manifest.counts})));
-        const requestedId=String(options&&options.checkpointId||''),latestEntry=missingOnly?projected.find(entry=>entry.location.tier==='latest'):null;
-        if(missingOnly&&!latestEntry)throw new Error('No latest verified Device Folder backup is available.');
-        let checkpointId=requestedId||latestEntry?.location.checkpointId||newest[0].id;
+        const requestedId=String(options&&options.checkpointId||'');
+        const missingSource=missingOnly?newest.find(row=>projected.some(entry=>entry.location.checkpointId===row.id&&entry.location.tier!=='before-restore')&&(!Number.isFinite(missingBefore)||Date.parse(String(row.exportedAt||''))<missingBefore)):null;
+        if(missingOnly&&!missingSource){mode='connected';presentationState.message='No Device Folder version saved before browser data was cleared was found. Nothing was changed.';publish();operationFinish({cancelled:true,stage:'missing-only-source'},traceId);return freeze({ok:false,reason:'needs-decision'});}
+        let checkpointId=requestedId||missingSource?.id||newest[0].id;
         if(requestedId&&!/^cp_[a-f0-9]{32}$/u.test(requestedId))throw new Error('The requested Device Folder version identity is invalid.');
         if(!requestedId&&!missingOnly&&newest.length>1){
           operationMark('checkpoint-selection-start',{provider:'device-folder'},traceId);
@@ -711,7 +714,7 @@ registry.define('device-backup',1,input=>{
       const quiet=options.missingOnly===true,scope=options.presentation||presentation.begin('device-folder',modeName,{label:'Device Folder',message:'Preparing recovery…',...(quiet?{foreground:false}:{})});presentationScope=scope;
       let result;
       try{result=await applyCheckpointOperation(modeName,options);return result;}
-      finally{if(!options.presentation)scope.finish({lifecycle:result?.ok?'succeeded':result?.cancelled||['cancelled','needs-decision'].includes(result?.reason)?'cancelled':'failed',message:result?.ok?presentation.outcome(modeName,'Device Folder',result.convergence):result?.reason==='cancelled'?'Recovery cancelled safely.':result?.reason==='needs-decision'?'Some differences need your choice. Nothing was changed.':presentationState.message||'Device Folder recovery could not be completed safely.'});if(presentationScope===scope)presentationScope=null;}
+      finally{if(!options.presentation)scope.finish({lifecycle:result?.ok?'succeeded':result?.cancelled||['cancelled','needs-decision'].includes(result?.reason)?'cancelled':'failed',message:result?.ok?presentation.outcome(modeName,'Device Folder',result.convergence):result?.reason==='cancelled'?'Recovery cancelled safely.':result?.reason==='needs-decision'?presentationState.message||'Some differences need your choice. Nothing was changed.':presentationState.message||'Device Folder recovery could not be completed safely.'});if(presentationScope===scope)presentationScope=null;}
     }
     const restoreVersion=(options={})=>applyCheckpoint('restore-version',options);
     const bringIn=(options={})=>applyCheckpoint('bring-in',options);
