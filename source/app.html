@@ -1885,12 +1885,21 @@ async function showBackupPresentation(source,kind){
   if(['history','restore-version','bring-in','remove-safety'].includes(kind))return BackupRecoveryHost?.history.openSource(source);
   if(!await goTab('library',{source:'backup-notification'}))return false;
   const drawer=document.querySelector('.library-data-drawer');if(drawer)drawer.open=true;
-  if(source==='file'||source==='device-folder'){
-    const node=document.getElementById(source==='file'?'backup-file-status':'device-backup-status');
-    requestAnimationFrame(()=>node?.scrollIntoView({block:'center',behavior:preferredScrollBehavior()}));return true;
-  }
-  return BackupProviderRuntime.open(source);
+  // 'restore' shows every way back in: Device Folder where supported, Google
+  // Drive, and the backup file import under Advanced.
+  const target=document.getElementById({file:'backup-file-heading','device-folder':'device-backup-status',restore:'managed-backup-heading'}[source]||'');
+  if(!target)return BackupProviderRuntime.open(source);
+  if(source==='restore')document.querySelector('.backup-advanced-disclosure').open=true;
+  for(let node=target.parentElement;node;node=node.parentElement)if(node.tagName==='DETAILS')node.open=true;
+  requestAnimationFrame(()=>target.scrollIntoView({block:source==='restore'?'start':'center',behavior:preferredScrollBehavior()}));return true;
 }
+// A restore opens the versions of the backup location this tab is connected
+// to; otherwise Data & Backup with every way to restore.
+async function openBackupRestore(){
+  const source=DeviceBackup.status().connected?'device-folder':BackupProviderRuntime.connected('google-drive')?'google-drive':'';
+  return source?showBackupPresentation(source,'history'):showBackupPresentation('restore','status');
+}
+function backupRestoreChoices(){return DeviceBackup.status().supported?'your Device Folder, Google Drive or a backup file':'Google Drive or a backup file';}
 function renderNotificationSurfaces(state){
   const latest=new Map();
   for(const event of state.events)if(event.surfaceId&&(!latest.has(event.surfaceId)||event.surfaceRevision>latest.get(event.surfaceId).surfaceRevision))latest.set(event.surfaceId,event);
@@ -8429,7 +8438,7 @@ async function offerDeviceRecoveryIfLocalEmpty(options={}){
   if(!await canonicalLocalRecoveryEmpty())return false;
   const state=DeviceBackup.status(),latestBefore=Number(options.latestBefore)||Number.POSITIVE_INFINITY;
   if(!state.connected){
-    if(options.reason==='startup'&&!deviceRecoveryHintNotified){deviceRecoveryHintNotified=true;Interactions.notify({key:'device-recovery-empty-local',title:'No local study data found',message:'If browser data was cleared, reconnect your Device Folder or Google Drive to restore a verified backup.',action:{label:'Open Data & Backup',run:()=>void showBackupPresentation('device-folder','status')}});}
+    if(options.reason==='startup'&&!deviceRecoveryHintNotified){deviceRecoveryHintNotified=true;Interactions.notify({key:'device-recovery-empty-local',title:'No local study data found',message:`If browser data was cleared, restore from ${backupRestoreChoices()}.`,action:{label:'Restore from backup',run:()=>void openBackupRestore()}});}
     return false;
   }
   deviceRecoveryOfferRunning=true;
@@ -8480,9 +8489,9 @@ function showStorageResetDecision({unsaved=[],retrying=false}={}){
   if(hold?.reloaded)parts.push(`Browser data was cleared${Number.isFinite(clearedAt)?` on ${new Date(clearedAt).toLocaleString()}`:''}.`);
   else if(unsaved.length)parts.push(`Not saved again${retrying?' yet':''}: ${storageResetList(unsaved)}. ${retrying?'Study Director is retrying. ':''}Until then that data exists only in this tab, so keep it open${retrying?'':' and export a backup file from Data & Backup'}.`);
   else parts.push('Your open notes, plans, settings and today’s session were saved again.');
-  parts.push('Past Saved Days and attachments need a restore from backup.');
-  if(hold?.reloaded&&!DeviceBackup.status().connected)parts.push('Reconnect your Device Folder or sign in to Google Drive in Data & Backup.');
-  parts.push('Automatic backups are paused until you choose.');
+  const backingUp=DeviceBackup.status().connected||BackupProviderRuntime.connected('google-drive');
+  parts.push(backingUp?'Past Saved Days and attachments need a restore from backup.':`Past Saved Days and attachments can be restored from ${backupRestoreChoices()}.`);
+  if(backingUp)parts.push('Automatic backups are paused until you choose.');
   NoticeCoordinator.emit({source:'storage-reset',id:'detected',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,dismissible:false,cue:'none',
     title:'Browser data was cleared',message:parts.join(' '),
     action:{label:'Restore from backup',run:()=>void restoreAfterStorageReset()},
@@ -8578,7 +8587,7 @@ NoticeCoordinator.subscribe(state=>{
 // combines today's session, so a running session is suspended first.
 async function restoreAfterStorageReset(){
   if(hasBlockingActiveSession()){await suspendTodaySession();if(hasBlockingActiveSession())return false;}
-  return showBackupPresentation('device-folder',DeviceBackup.status().connected?'history':'status');
+  return openBackupRestore();
 }
 const DeviceRepositoryBackground=RepositoryBackgroundModule.createCoordinator(Object.freeze({target:'device-folder',environment:Object.freeze({AbortController:window.AbortController,clearTimeout:timer=>clearTimeout(timer),now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay)})}));
 DeviceBackup=DeviceBackupModule.createController(Object.freeze({

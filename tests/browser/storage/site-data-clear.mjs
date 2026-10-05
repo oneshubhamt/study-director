@@ -8,14 +8,22 @@ import {CURRENT_SCHEMA_VERSIONS} from '../../../contracts/canonical-identities.m
 // version saved before the clear adds back past Saved Days by itself; otherwise a
 // notice offers "Restore from backup" or "Continue with current data" and stays,
 // across reloads, until one is done. Reconnecting the folder after a reload adds
-// the missing Saved Days back the same way.
+// the missing Saved Days back the same way. Where folders are unsupported (iPad,
+// iPhone, Android, Safari, Firefox) the same choice leads to Google Drive and the
+// backup file import instead.
 const today=`const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');`;
 const preload=`(()=>{${today}localStorage.setItem('studyDirector.nameSetupSkippedDate.v1',today);})();`;
 // The stand-in Device Folder lives in OPFS; a real folder is outside browser storage.
 const folderPreload=`(()=>{${today}localStorage.setItem('studyDirector.nameSetupSkippedDate.v1',today);Object.defineProperty(window,'showDirectoryPicker',{configurable:true,value:async()=>navigator.storage.getDirectory()});})();`;
+// No Device Folder support, as on iPad and iPhone.
+const noFolderPreload=`(()=>{${today}localStorage.setItem('studyDirector.nameSetupSkippedDate.v1',today);Object.defineProperty(window,'showDirectoryPicker',{configurable:true,value:undefined});})();`;
 const toast=pattern=>`[...document.querySelectorAll('#sd-toast-region .interaction-toast')].find(toast=>${pattern}.test(toast.textContent))`;
+const decision=toast('/Continue with current data/');
+// What Data & Backup shows after "Restore from backup" with nothing connected.
+const restoreView=`(()=>{const shown=node=>!!node&&node.checkVisibility();return {tab:document.querySelector('.pane.on')?.id||'',drawer:document.querySelector('.library-data-drawer').open,
+  importButton:shown(document.querySelector('[data-action="pick-import-file"]')),driveRow:shown(document.getElementById('backup-provider-row-status-google-drive')),folderRow:document.getElementById('device-backup-status').textContent.trim()};})()`;
 const restoredToast=toast('/Added 1 past Saved Day and 0 attachments from your Device Folder backup/');
-const read=`(async()=>{const d=__PWA6,session=await d.AppData.activeSession.load(0,{strict:true}),plans=await d.AppData.planData.read(),notes=await d.AppData.notes.readFreshPayload(),notice=${toast('/Automatic backups are paused/')},yesterday=await d.AppData.dailyRecords.get(window.__qaYesterday||'');
+const read=`(async()=>{const d=__PWA6,session=await d.AppData.activeSession.load(0,{strict:true}),plans=await d.AppData.planData.read(),notes=await d.AppData.notes.readFreshPayload(),notice=${decision},yesterday=await d.AppData.dailyRecords.get(window.__qaYesterday||'');
   return {message:notice?notice.textContent:'',cleared:d.readStorageHealth().browserDataClearedAt||null,note:notes.medicine?.text||null,draft:String(plans.draft||''),savedPlans:plans.savedPlans.length,session:!!session.value,mode:d.TimerState.mode,name:(await d.AppData.personalPreferences.read())?.studentName||null,yesterday:yesterday?.reflection||null,
     notice:notice?{dismissible:!!notice.querySelector('.interaction-toast-close'),buttons:[...notice.querySelectorAll('button:not(.interaction-toast-close)')].map(button=>button.textContent.trim())}:null,paused:d.DeviceBackup.status().automaticSuspended,folder:d.DeviceBackup.status().connected};})()`;
 const startSession=(name)=>`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms)),now=new Date(),m=now.getHours()*60+now.getMinutes(),fmt=v=>String(Math.floor((v+1440)%1440/60)).padStart(2,'0')+':'+String((v+1440)%1440%60).padStart(2,'0');
@@ -28,7 +36,7 @@ const editNote=text=>`(async()=>{const d=__PWA6,current=d.AppData.notes.get('med
 const reload=async page=>{await page.reload();await waitForStudyDirector(page,{instrumented:true});await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'ownership after reload'});};
 const noRuntimeErrors=page=>assert.deepEqual(page.events.filter(event=>!/favicon|ResizeObserver loop/i.test(event.text||'')),[]);
 const appWarnings=page=>page.warnings.filter(text=>/\[Study Director\]/.test(text));
-const click=(page,label)=>page.evaluate(`[...${toast('/Automatic backups are paused/')}.querySelectorAll('button')].find(button=>button.textContent.trim()===${JSON.stringify(label)}).click()`);
+const click=(page,label)=>page.evaluate(`[...${decision}.querySelectorAll('button')].find(button=>button.textContent.trim()===${JSON.stringify(label)}).click()`);
 const server=await startReleaseServer();
 const result={status:'PASS',release:server.manifest.release,checks:{}};
 try{
@@ -53,6 +61,7 @@ try{
       assert.equal(cleared.session,true);assert.equal(cleared.mode,'running');assert.equal(cleared.name,'SiteDataQA');
       assert.deepEqual(cleared.notice,{dismissible:false,buttons:['Restore from backup','Continue with current data']},'only a choice can clear the notice');
       assert.match(cleared.message,/were saved again/,'the notice only claims what was verified');assert.ok(cleared.cleared,'the unresolved clear is noted for a reload');
+      assert.doesNotMatch(cleared.message,/Automatic backups/,'automatic backups are mentioned only when one is set up');
       assert.equal(cleared.paused,true,'automatic backup pauses so the reduced state cannot become the latest backup');
       result.checks.openTabStateWrittenBack=true;result.checks.automaticBackupPaused=true;
 
@@ -70,7 +79,7 @@ try{
       await reload(page);
       await waitFor(()=>page.evaluate(`${read}.then(state=>!!state.notice)`),{label:'notice after reload'});
       const reloadedBeforeChoice=await page.evaluate(read);
-      assert.match(reloadedBeforeChoice.message,/Browser data was cleared on .*Reconnect your Device Folder or sign in to Google Drive/);
+      assert.match(reloadedBeforeChoice.message,/Browser data was cleared on .*can be restored from your Device Folder, Google Drive or a backup file/);
       assert.equal(reloadedBeforeChoice.paused,true,'the pause comes back with the notice');
       assert.equal(reloadedBeforeChoice.note,'SiteDataQA note edited after clearing');assert.equal(reloadedBeforeChoice.session,true);assert.equal(reloadedBeforeChoice.savedPlans,1);
       result.checks.reloadKeepsDecision=true;
@@ -144,6 +153,42 @@ try{
     }finally{if(page)await browser.closePage(page).catch(()=>{});await browser.close();}
   }
 
+  // Without Device Folder support (iPad, iPhone): the startup hint and the clear
+  // notice offer Google Drive and a backup file, and "Restore from backup" opens
+  // Data & Backup with both in view.
+  {
+    const browser=await launchChromium({profilePrefix:'study-director-qa-site-data-clear-nofolder-'});let page=null;
+    try{
+      page=await browser.createPage(server.url('deployment','instrumented.html'),{preload:noFolderPreload,viewport:{width:390,height:844,mobile:true,scale:2}});
+      await waitForStudyDirector(page,{instrumented:true});
+      await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'primary ownership'});
+      assert.equal(await page.evaluate(`__PWA6.DeviceBackup.status().supported`),false);
+      const hint=toast('/No local study data found/');
+      await waitFor(()=>page.evaluate(`!!${hint}`),{label:'empty-data hint'});
+      const hintText=await page.evaluate(`${hint}.textContent`);
+      assert.match(hintText,/restore from Google Drive or a backup file/);assert.doesNotMatch(hintText,/Device Folder/,'no folder is offered where folders are unsupported');
+      await page.evaluate(`[...${hint}.querySelectorAll('button')].find(button=>button.textContent.trim()==='Restore from backup').click()`);
+      await waitFor(()=>page.evaluate(`${restoreView}.importButton`),{label:'restore choices in view'});
+      const fromHint=await page.evaluate(restoreView);
+      assert.deepEqual({...fromHint,folderRow:undefined},{tab:'pane-library',drawer:true,importButton:true,driveRow:true,folderRow:undefined},'Data & Backup opens with Google Drive and the backup file import in view');
+      result.checks.noFolderStartupHint=true;
+
+      await page.evaluate(`(async()=>{const d=__PWA6;d.goTab('plan');d.AppData.notes.update('medicine','Medicine','NoFolderQA note','');await d.AppData.notes.flush({strict:true});})()`);
+      await page.send('Storage.clearDataForOrigin',{origin:server.origin,storageTypes:'all'});
+      await page.evaluate(`__PWA6.AppData.notes.readFreshPayload()`);
+      await waitFor(()=>page.evaluate(`${read}.then(state=>!!state.notice)`),{label:'clear notice without folder support'});
+      const cleared=await page.evaluate(read);
+      assert.match(cleared.message,/can be restored from Google Drive or a backup file/);
+      assert.doesNotMatch(cleared.message,/Device Folder|Automatic backups/,'neither a folder nor automatic backups are mentioned');
+      assert.equal(cleared.note,'NoFolderQA note');
+      await click(page,'Restore from backup');
+      await waitFor(()=>page.evaluate(`${restoreView}.tab==='pane-library'&&${restoreView}.importButton`),{label:'restore choices after the clear'});
+      assert.ok((await page.evaluate(read)).notice,'the notice stays until a restore or a choice');
+      result.checks.noFolderRestoreChoices=true;
+      noRuntimeErrors(page);
+    }finally{if(page)await browser.closePage(page).catch(()=>{});await browser.close();}
+  }
+
   // Two tabs: the background tab is first to reopen storage after the clear. It
   // tells the tab in control, which writes its copy back and shows the decision.
   {
@@ -159,7 +204,7 @@ try{
       await waitFor(()=>other.evaluate(`__PWA6.IndexedDb.lifecycle().resets===1`),{label:'background tab counted the clear'});
       await waitFor(()=>owner.evaluate(`${read}.then(state=>!!state.notice&&state.note==='TabsQA note')`),{label:'owner handles the clear',timeout:30000});
       assert.equal(await owner.evaluate(`__PWA6.IndexedDb.lifecycle().resets`),0,'the tab in control learned of the clear from the other tab');
-      assert.equal(await other.evaluate(`!!${toast('/Automatic backups are paused/')}`),false,'only the tab in control asks for a decision');
+      assert.equal(await other.evaluate(`!!${decision}`),false,'only the tab in control asks for a decision');
       result.checks.backgroundTabHandsOverClear=true;
       for(const page of pages)noRuntimeErrors(page);
     }finally{for(const page of pages)await browser.closePage(page).catch(()=>{});await browser.close();}
