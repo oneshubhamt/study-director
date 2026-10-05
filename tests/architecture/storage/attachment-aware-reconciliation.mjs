@@ -17,7 +17,7 @@ assert.match(backup,/for\(const item of resolvedPlan&&resolvedPlan\.savedDays\|\
 assert.match(backup,/for\(const item of resolvedPlan&&resolvedPlan\.notes\|\|\[\]\)/,'Resolved Ongoing Notes must contribute attachment references.');
 assert.doesNotMatch(backup,/resolvedPlan&&resolvedPlan\.reflectionDrafts/,'Retired Reflection Drafts must not remain a reconciliation attachment-reference domain.');
 assert.match(backup,/resolvedPlan&&resolvedPlan\.activeSession&&resolvedPlan\.activeSession\.value/,'Resolved Active Session must contribute attachment references.');
-assert.match(backup,/referenceSet\.has\(item\.assetId\)\|\|\(item\.library===true&&states\[item\.assetId\]!==\'deleted\'\)/,'Only final references or non-deleted independently retained incoming assets may publish.');
+assert.match(backup,/referenceSet\.has\(item\.assetId\)\|\|\(item\.library===true&&states\[item\.assetId\]==='record'\)/,'Only final references or independently retained incoming assets the plan keeps may publish.');
 assert.match(backup,/Referenced attachments are never deleted by this choice/,'Attachment Library deletion choices must never override resolved rich-text references.');
 assert.doesNotMatch(backup,/importAll\(assessment\.available/,'Restore must not publish the complete incoming attachment set.');
 assert.match(backup,/verified checkpoint does not contain its bytes/,'A selected missing attachment must fail closed.');

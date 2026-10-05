@@ -495,10 +495,10 @@ async function captureRestoreReconciliationRevision(relevantDates,{session:inclu
   return JSON.stringify([recordState,noteState,session,personalData||null]);
 }
 async function buildStableRestoreImpact(parsed,preview,signal,options={}){
-  const relevantDates=restoreRelevantDates(parsed);
+  const relevantDates=options.note?freeze([]):restoreRelevantDates(parsed);
   for(let attempt=0;attempt<3;attempt+=1){
     throwIfImportAborted(signal);
-    const scope={session:options.missingOnly!==true},before=await captureRestoreReconciliationRevision(relevantDates,scope);
+    const scope={session:options.missingOnly!==true&&!options.note},before=await captureRestoreReconciliationRevision(relevantDates,scope);
     const assetAssessment=await assessImportedAssets(parsed,signal);
     const impact=await restoreImpactPreview(parsed,preview,assetAssessment,options);
     const after=await captureRestoreReconciliationRevision(relevantDates,scope);
@@ -512,10 +512,12 @@ async function assertRestoreReconciliationCurrent(expectedRevision,relevantDates
   return true;
 }
 
-async function buildRestoreReconciliationPlan(parsed,preview,{missingOnly=false}={}){
-  const records=normalizeImportedDailyRecordSet(parsed&&parsed.records||[]).records;
-  const checkpointDeletions=parsed&&parsed.protectedCheckpointManifest&&Array.isArray(parsed.protectedCheckpointManifest.savedDayDeletions)?parsed.protectedCheckpointManifest.savedDayDeletions:[];
-  const checkpointNoteDeletions=parsed&&parsed.protectedCheckpointManifest&&Array.isArray(parsed.protectedCheckpointManifest.areaNoteDeletions)?parsed.protectedCheckpointManifest.areaNoteDeletions:[];
+async function buildRestoreReconciliationPlan(parsed,preview,{missingOnly=false,note=''}={}){
+  // A one-note restore compares only that note: no Saved Days, deletions or
+  // session, and every other note stays exactly as it is on this device.
+  const records=note?[]:normalizeImportedDailyRecordSet(parsed&&parsed.records||[]).records;
+  const checkpointDeletions=!note&&parsed&&parsed.protectedCheckpointManifest&&Array.isArray(parsed.protectedCheckpointManifest.savedDayDeletions)?parsed.protectedCheckpointManifest.savedDayDeletions:[];
+  const checkpointNoteDeletions=!note&&parsed&&parsed.protectedCheckpointManifest&&Array.isArray(parsed.protectedCheckpointManifest.areaNoteDeletions)?parsed.protectedCheckpointManifest.areaNoteDeletions:[];
   const relevantDates=[...new Set([...records.map(record=>record.date),...checkpointDeletions.map(entry=>entry.date)])];
   const localRecords=currentDailyRecords(await getDailyRecordDocumentsByDates(relevantDates),'Local reconciliation Daily Records');
   const allLocalDeletions=await AppData.deletionRecovery.savedDays(),relevantDateSet=new Set(relevantDates);
@@ -523,15 +525,17 @@ async function buildRestoreReconciliationPlan(parsed,preview,{missingOnly=false}
   const localNotes=AppData.notes.normalizePayload(await AppData.notes.readFreshPayload()),allLocalNoteDeletions=await AppData.deletionRecovery.areaNotes();
   // Missing-only recovery adds back what this device lacks (Saved Days,
   // attachments) and never offers the backup's notes or session.
-  const incomingNotes=missingOnly?Object.create(null):AppData.notes.normalizePayload(parsed&&parsed.data&&parsed.data.areaNotes||{});
+  const backupNotes=missingOnly?Object.create(null):AppData.notes.normalizePayload(parsed&&parsed.data&&parsed.data.areaNotes||{}),incomingNotes=note?Object.create(null):backupNotes;
+  if(note&&Object.prototype.hasOwnProperty.call(backupNotes,note))incomingNotes[note]=backupNotes[note];
   const loadedSession=await readCanonicalActiveSession(),localSession=loadedSession&&loadedSession.value||null;
   const currentCheckpoint=Number(parsed&&parsed.formatVersion)>=15&&!!parsed.protectedCheckpointManifest;
   const rawIncomingSession=parsed&&parsed.importedActiveSession||null;
-  const incomingSession=currentCheckpoint?rawIncomingSession:(rawIncomingSession&&rawIncomingSession.date===todayISO()?rawIncomingSession:null);
+  const incomingSession=note?null:currentCheckpoint?rawIncomingSession:(rawIncomingSession&&rawIncomingSession.date===todayISO()?rawIncomingSession:null);
+  const backupAt=Date.parse(String(preview&&preview.exportedAt||'')),incomingLabel=note&&Number.isFinite(backupAt)?`Backup from ${new Date(backupAt).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}`:currentCheckpoint?'Backup copy':(preview&&preview.filename||'Backup file');
   const checkpointId=String(parsed&&parsed.protectedCheckpointManifest&&parsed.protectedCheckpointManifest.checkpointId||preview&&preview.checkpoint&&preview.checkpoint.checkpointId||'incoming');
   return Reconciliation.createPlan({
     local:{id:'local',label:'This device',savedDays:localRecords,savedDayDeletions:localDeletions,notes:localNotes,noteDeletions:allLocalNoteDeletions,activeSession:localSession},
-    incoming:{id:checkpointId,label:currentCheckpoint?'Backup copy':(preview&&preview.filename||'Backup file'),savedDays:records,savedDayDeletions:checkpointDeletions,notes:incomingNotes,noteDeletions:missingOnly?[]:checkpointNoteDeletions,activeSession:missingOnly?null:incomingSession}
+    incoming:{id:checkpointId,label:incomingLabel,savedDays:records,savedDayDeletions:checkpointDeletions,notes:incomingNotes,noteDeletions:missingOnly?[]:checkpointNoteDeletions,activeSession:missingOnly?null:incomingSession}
   });
 }
 function savedDayChoiceLabel(candidate){
@@ -817,6 +821,13 @@ async function buildAttachmentDeletionPlan(parsed,resolvedPlan,assessment,decisi
   const expectedDeletions=freeze([...deletionMap.values()].sort((a,b)=>a.assetId.localeCompare(b.assetId)));
   return freeze({conflicts:freeze(conflicts),states:freeze(states),expectedDeletions,deleteLocalIds:freeze(deleteLocalIds),references,deletionLedgerChanged:!Canonical.same(localDeletions,expectedDeletions)});
 }
+// A one-note restore adds back only the images its notes need. The Attachment
+// Library and its deletion records stay as they are, except that an image the
+// restored note uses again is no longer recorded as deleted.
+async function noteAttachmentPlan(references){
+  const referenceSet=new Set(references),localDeletions=await AppData.deletionRecovery.attachments(),expectedDeletions=freeze(localDeletions.filter(item=>!referenceSet.has(item.assetId)));
+  return freeze({conflicts:freeze([]),states:freeze(Object.fromEntries(references.map(id=>[id,'record']))),expectedDeletions,deleteLocalIds:freeze([]),references,deletionLedgerChanged:expectedDeletions.length!==localDeletions.length});
+}
 function attachmentDeletionDecisionGroups(plan){
   return freeze((plan&&plan.conflicts||[]).map(item=>freeze({id:`attachment__${item.assetId}`,label:`Attachment Library · ${item.label}`,defaultValue:item.defaultValue,description:'This standalone Attachment Library identity was explicitly deleted on one side. Referenced attachments are never deleted by this choice.',choices:freeze([
     freeze({value:'record',label:'Keep attachment',description:'Keep this independently retained Attachment Library item.'}),
@@ -834,7 +845,7 @@ async function selectResolvedImportedAssets(assessment,resolvedPlan,signal,attac
     if(!(local instanceof Blob))throw new Error(`Resolved data requires attachment ${id}, but the verified checkpoint does not contain its bytes.`);
   }
   const states=attachmentPlan&&attachmentPlan.states||{};
-  const selected=available.filter(item=>referenceSet.has(item.assetId)||(item.library===true&&states[item.assetId]!=='deleted'));
+  const selected=available.filter(item=>referenceSet.has(item.assetId)||(item.library===true&&states[item.assetId]==='record'));
   const toWriteIds=new Set((assessment.toWrite||[]).map(item=>item.assetId)),toWrite=selected.filter(item=>toWriteIds.has(item.assetId));
   return freeze({available:freeze(selected),toWrite:freeze(toWrite),reused:selected.length-toWrite.length,references});
 }
@@ -1119,7 +1130,7 @@ function restoreSurfaceStatus(stored,message,ok=true,stage='local',details={}){
   portablePresentation?.update({progress:{stage,...details}});setLocalExportStatus(message,ok);return false;
 }
 async function restoreBackupAttemptWithOperation(candidate,operation,options={}){
-  const missingOnly=options&&options.missingOnly===true;
+  const missingOnly=options&&options.missingOnly===true,note=!missingOnly&&typeof options?.note==='string'?options.note:'';
   const stored=candidate&&typeof candidate==='object'?inspectedBackups.get(candidate):null,snapshot=stored?candidateSnapshotState(stored):null;
   const parsed=snapshot&&snapshot.parsed||null,signal=operation&&operation.signal||stored&&stored.signal||null;
   if(!parsed)throw new Error('Backup candidate is not a current verified Study Director inspection.');
@@ -1128,22 +1139,33 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   OperationDiagnostics.mark('restore-preflight-start');
   await flushRestorePreflightState(signal);
   OperationDiagnostics.mark('restore-preflight-complete');
-  const stable=await buildStableRestoreImpact(parsed,preview,signal,{missingOnly}),impact=stable.impact;
+  const stable=await buildStableRestoreImpact(parsed,preview,signal,{missingOnly,note}),impact=stable.impact;
   // Missing-only recovery runs without questions; anything that would need a
   // decision is left for an explicit restore instead.
-  const needsDecision=()=>Object.freeze({cancelled:true,reason:'needs-decision',mode:'reconcile',added:0,replaced:0,kept:0,batches:0,assetsRestored:0,notesReconciled:false,activeSessionReconciled:false,savedDayDeletionsApplied:0});
-  if(missingOnly&&!impact.reconciliationCapable)return needsDecision();
+  const unchanged=reason=>Object.freeze({cancelled:true,reason,mode:'reconcile',added:0,replaced:0,kept:0,batches:0,assetsRestored:0,notesReconciled:false,activeSessionReconciled:false,savedDayDeletionsApplied:0}),needsDecision=()=>unchanged('needs-decision');
+  if((missingOnly||note)&&!impact.reconciliationCapable)return needsDecision();
+  // A one-note restore stops here when the backup has no copy of the note or
+  // the same text, so nothing is written and no safety backup is made.
+  const noteItem=note?impact.reconciliationPlan.notes.find(item=>item.key===note)||null:null,noteRecord=local=>noteItem?.candidates.find(candidate=>candidate.local===local&&candidate.kind==='record')||null;
+  if(note){
+    const localNote=noteRecord(true),backupNote=noteRecord(false);
+    if(!backupNote)return unchanged(noteItem?.identical?'note-unchanged':'note-missing');
+    if(localNote&&String(localNote.value?.text||'')===String(backupNote.value?.text||''))return unchanged('note-unchanged');
+  }
+  // The restored text is a new edit, so it carries a new revision.
+  const restoredNote=text=>{const base=noteRecord(true)||noteRecord(false),revision=Math.max(Date.now(),(Date.parse(String(noteRecord(true)?.value?.updatedAt||''))||0)+1);return freeze({[note]:freeze({value:freeze({...base.value,key:note,text,updatedAt:new Date(revision).toISOString()})})});};
   OperationDiagnostics.mark('reconciliation-impact-ready',{savedDayConflicts:Number(impact.savedDays&&impact.savedDays.conflicts)||0,activeSessionConflicts:Number(impact.activeSession&&impact.activeSession.conflicts)||0});
   const reconciliationRevision=stable.revision,relevantDates=stable.relevantDates;
   const mode=restoreModeForBackup(impact);
   if(!mode)return Object.freeze({cancelled:true,mode:null,added:0,replaced:0,kept:0,batches:0,assetsRestored:0,notesReconciled:false,activeSessionReconciled:false,savedDayDeletionsApplied:0});
   const currentCheckpoint=mode==='reconcile';
   const localPersonal=await personalExport({flush:false}),decisionSetup=restoreDecisionSetup(parsed,impact,mode,localPersonal);
-  const preliminaryNoteConflicts=noteReconciliationConflicts(impact.reconciliationPlan,null),noteAncestor=preliminaryNoteConflicts.length?await noteReconciliationAncestor(stored,preliminaryNoteConflicts.map(item=>item.key)):null;
+  // Restoring one note always shows the comparison, so it never merges itself.
+  const preliminaryNoteConflicts=noteReconciliationConflicts(impact.reconciliationPlan,null),noteAncestor=preliminaryNoteConflicts.length&&!note?await noteReconciliationAncestor(stored,preliminaryNoteConflicts.map(item=>item.key)):null;
   const noteConflicts=noteAncestor?noteReconciliationConflicts(impact.reconciliationPlan,noteAncestor):preliminaryNoteConflicts;
   let selectedDecisions=freeze({});
   if(missingOnly&&(decisionSetup.groups.some(group=>!['plans','personalSettings'].includes(group.id))||noteConflicts.length))return needsDecision();
-  if(decisionSetup.groups.length&&!missingOnly){
+  if(decisionSetup.groups.length&&!missingOnly&&!note){
     selectedDecisions=await configure({
       title:'Different versions found',
       message:'Choose what to keep where this device and the backup differ. This device is selected by default; missing data is never treated as a deletion.',
@@ -1173,10 +1195,15 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   if(noteConflicts.length){
     const noteResult=await NoteReconciliation.resolve(freeze({conflicts:noteConflicts,incomingAssets:Array.isArray(parsed.importedAssets)?parsed.importedAssets:freeze([]),signal}));
     if(!noteResult)return Object.freeze({cancelled:true,mode,added:0,replaced:0,kept:0,batches:0,assetsRestored:0,notesReconciled:false,activeSessionReconciled:false,savedDayDeletionsApplied:0});
-    noteDecisionMap=noteReconciliationSelections(impact.reconciliationPlan,noteResult);
+    if(note){const text=String(noteResult.notes?.[note]?.text??noteConflicts[0].localValue);if(text===noteConflicts[0].localValue)return unchanged('note-kept');noteDecisionMap=restoredNote(text);}
+    else noteDecisionMap=noteReconciliationSelections(impact.reconciliationPlan,noteResult);
+  }else if(note){
+    // Nothing on this device to compare with (the note is empty or was
+    // deleted here), so the backup's text comes back as it is.
+    noteDecisionMap=restoredNote(String(noteRecord(false).value?.text||''));
   }
   const resolvedPlan=Reconciliation.resolvePlan(impact.reconciliationPlan,reconciliationSelections(impact.reconciliationPlan,decisions,noteDecisionMap,reflectionDecisionMap)),resolvedAssetReferences=await resolvedAssetReferenceIds(resolvedPlan,signal);
-  let attachmentPlan=await buildAttachmentDeletionPlan(parsed,resolvedPlan,stable.impact.assetAssessment||null,freeze({}),signal,resolvedAssetReferences);
+  let attachmentPlan=note?await noteAttachmentPlan(resolvedAssetReferences):await buildAttachmentDeletionPlan(parsed,resolvedPlan,stable.impact.assetAssessment||null,freeze({}),signal,resolvedAssetReferences);
   if(missingOnly&&attachmentPlan.conflicts.length)return needsDecision();
   if(attachmentPlan.conflicts.length){
     const groups=attachmentDeletionDecisionGroups(attachmentPlan),choice=await configure({title:'Review attachment differences',message:'Choose what to keep for standalone attachments that differ between this device and the backup. Attachments still referenced by your data are always kept.',groups,confirmLabel:'Apply choices',cancelLabel:'Cancel'});
@@ -1254,7 +1281,8 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     const changed=!!(dailyResult.changed||assetResult.changed||noteResult.changed||sessionResult.changed||personalChanged);
     if(changed)await rebaseRepositoryPreparationAcceleration('combine');
     await AppData.restoreJournal.clear(restoreId);journalPrepared=false;clearFault();
-    if(currentCheckpoint){
+    // An older version restored for one note is not a shared base for later combines.
+    if(currentCheckpoint&&!note){
       const checkpointId=String(parsed&&parsed.protectedCheckpointManifest&&parsed.protectedCheckpointManifest.checkpointId||preview&&preview.checkpoint&&preview.checkpoint.checkpointId||'');
       if(checkpointId)try{await AppData.reconciliationBase.write(checkpointId,parsed&&parsed.data&&parsed.data.areaNotes||{});}catch(error){AppDiagnostics.capture('backup.reconciliation-base-write',error,'warn');}
     }

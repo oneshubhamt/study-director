@@ -1209,8 +1209,8 @@ registry.define('backup-provider',1,input=>{
       OperationDiagnostics.mark('provider-authorization-start',{provider:selected.id},traceId);await authorize(selected,'import');OperationDiagnostics.mark('provider-authorization-complete',{provider:selected.id},traceId);
       statusText(`Choose a backup from ${selected.label}…`);
       const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',onProgress:typeof options?.onProgress==='function'?options.onProgress:null});if(!candidate){statusText('Combine cancelled.');finishForegroundView(selected,{message:'Combine cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({cancelled:true});}
-      const result=await RepositoryCheckpointPipeline.bringIn(candidate);
-      if(result&&result.cancelled){statusText('Combine cancelled.');finishForegroundView(selected,{message:'Combine cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({...result,cancelled:true});}
+      const result=await RepositoryCheckpointPipeline.bringIn(candidate,{note:typeof options?.note==='string'?options.note:''});
+      if(result&&result.cancelled){const message=String(result.reason||'').startsWith('note-')?'No changes were made.':'Combine cancelled.';statusText(message);finishForegroundView(selected,{message,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({...result,cancelled:true});}
       const convergence=result&&result.managedRecovery&&result.managedRecovery.present||freeze({status:'pending',source:freeze({status:'failed',reason:'post-operation backup status unavailable'}),device:freeze({status:'skipped',reason:'unavailable'})});
       const sourceReady=convergence.source&&(convergence.source.status==='completed'||convergence.source.status==='pending'&&convergence.source.retryQueued===true),deviceReady=['completed','skipped'].includes(String(convergence.device&&convergence.device.status||''))||convergence.device&&convergence.device.status==='pending'&&convergence.device.queued===true;
       const finalMessage=presentation.outcome('bring-in',selected.label,convergence);statusText(finalMessage,sourceReady&&deviceReady);finishForegroundView(selected,{message:finalMessage,ok:true});
@@ -1315,7 +1315,7 @@ registry.define('backup-provider',1,input=>{
     renderButtons();
     return true;
   }
-  function list(){return Object.freeze([...providers.values()].map(item=>Object.freeze({id:item.id,label:item.label})));}
+  function list(){return Object.freeze([...providers.values()].map(item=>Object.freeze({id:item.id,label:item.label,connected:providerConnected(item)})));}
   function backgroundStatus(){return freeze([...providerBackgroundCoordinators.entries()].flatMap(([id,coordinator])=>[freeze({job:id+' maintenance',...(providerMaintenanceSchedulers.get(id)?.status()||coordinator.jobStatus('maintenance'))}),freeze({job:id+' integrity',...(providerIntegritySchedulers.get(id)?.status()||coordinator.jobStatus('integrity'))}),freeze({job:id+' convergence',...coordinator.jobStatus('convergence')})]));}
   function diagnosticConnections(){return freeze([...providers.values()].map(selected=>freeze({id:selected.id,connected:providerConnected(selected),scopeBound:repositoryScopeByProvider.has(selected.id),retryAttempt:providerConvergenceRetryAttempts.get(selected.id)||0,retryBackoffCapped:(providerConvergenceRetryAttempts.get(selected.id)||0)>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length})));}
   function status(){const overlay=elements().overlay;return Object.freeze({busy:busy||preparing,cancellable:!!foregroundController&&!foregroundController.signal.aborted,preparing,activeId,open:!!overlay?.classList.contains('on'),operation:foregroundView()?Object.freeze({...foregroundView()}):null});}

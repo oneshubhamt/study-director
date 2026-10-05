@@ -691,8 +691,8 @@ registry.define('device-backup',1,input=>{
           }
         }));
         operationMark('selected-checkpoint-inspection-start',{provider:'device-folder'},traceId);const candidate=await repository.inspect(row.manifest,readObject,{interactive:!missingOnly,signal,committed:true,managedRecovery,managedProgress:recoveryProgress});operationMark('selected-checkpoint-inspection-complete',{provider:'device-folder'},traceId);
-        const result=exact?await repository.restoreVersion(candidate,{confirmed:options&&options.confirmed===true}):await repository.bringIn(candidate,{missingOnly});
-        if(result&&result.cancelled){presentationState.message='';operationFinish({cancelled:true},traceId);return freeze({ok:false,reason:result.reason==='needs-decision'?'needs-decision':'cancelled',checkpointId:row.id,result});}
+        const result=exact?await repository.restoreVersion(candidate,{confirmed:options&&options.confirmed===true}):await repository.bringIn(candidate,{missingOnly,note:typeof options?.note==='string'?options.note:''});
+        if(result&&result.cancelled){presentationState.message='';operationFinish({cancelled:true},traceId);return freeze({ok:false,reason:['needs-decision','note-missing','note-unchanged','note-kept'].includes(result.reason)?result.reason:'cancelled',checkpointId:row.id,result});}
         const convergence=result&&result.managedRecovery&&result.managedRecovery.present||freeze({status:'pending',reason:'post-operation backup status unavailable'});
         if(convergence.status!=='completed'){
           mode=connected()?'connected':(directoryHandle?'permission':'off');

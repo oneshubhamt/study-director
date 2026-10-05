@@ -7957,7 +7957,8 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     searchDocuments:ongoingAreaNoteSearchDocuments,
     size:()=>AppData.notes.size(),
     trash:key=>AppData.notes.trash(key),
-    trashSnapshot:()=>AppData.notes.trashSnapshot()
+    trashSnapshot:()=>AppData.notes.trashSnapshot(),
+    versions:target=>BackupRecoveryHost.history.openNote(target)
   }),
   attachments:Object.freeze({
     batch:operation=>AttachmentLibrary.batch(operation),

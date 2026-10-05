@@ -17,7 +17,7 @@ registry.define('library',1,()=>{
     environment:freeze(['cancelAnimationFrame','createOption','createSearchWorker','requestAnimationFrame']),
     exporter:freeze(['exportKeys','cancel']),
     diary:freeze(['bindEditor','captureEditor','clearEditor','deleteEntry','draft','flushEditor','scheduleEditor','settled']),
-    notes:freeze(['bindEditor','canCreate','catalogue','clearEditor','commitEditor','failure','focusEditor','get','normalizeArea','orderEntries','purgeTrash','remove','rename','renderInherited','restore','searchDocuments','size','trash','trashSnapshot']),
+    notes:freeze(['bindEditor','canCreate','catalogue','clearEditor','commitEditor','failure','focusEditor','get','normalizeArea','orderEntries','purgeTrash','remove','rename','renderInherited','restore','searchDocuments','size','trash','trashSnapshot','versions']),
     attachments:freeze(['batch','count','invalidate','reconcile']),
     clearLibrary:freeze(['preflight','execute']),
     ownership:freeze(['canMutate']),
@@ -56,7 +56,7 @@ registry.define('library',1,()=>{
       bindEditor,canCreate:canCreateOngoingNote,catalogue:ongoingNoteCatalogue,clearEditor,commitEditor,failure:ongoingNoteFailure,focusEditor,
       get:getAreaNote,normalizeArea:normalizeOngoingNoteArea,orderEntries:orderOngoingNoteEntries,
       purgeTrash:purgeExpiredOngoingNotes,remove:removeOngoingNote,rename:renameNote,renderInherited,restore:restoreNote,searchDocuments:ongoingNoteSearchDocuments,size:ongoingNotesSize,
-      trash:trashNote,trashSnapshot:ongoingNoteTrash
+      trash:trashNote,trashSnapshot:ongoingNoteTrash,versions:openNoteVersions
     }=ports.notes;
     const {batch:batchAttachments,count:attachmentCount,invalidate:invalidateAttachments,reconcile:reconcileAttachments}=ports.attachments;
     const {preflight:preflightClearLibrary,execute:executeClearLibrary}=ports.clearLibrary;
@@ -364,8 +364,18 @@ registry.define('library',1,()=>{
       }catch(error){notice.finish('failed','The export did not complete: '+(error&&error.message||error));return false;}
       finally{ongoingNoteExportBusy=false;}
     }
-    // The open note's own actions: rename or move, and delete. Support
-    // Activities keeps its name and is never deleted, so it has none.
+    // Earlier versions come from the backups; restoring one shows the two
+    // texts side by side first, so it also works for a note emptied by mistake.
+    async function showNoteVersions(entry){
+      const restored=value=>{const at=new Date(value.exportedAt);setOngoingNotesStatus(`Restored “${entry.label}” from the backup of ${Number.isFinite(at.getTime())?at.toLocaleString():'an earlier date'}.`);};
+      const result=await openNoteVersions(freeze({key:entry.key,label:entry.label,onRestored:restored}));
+      if(result?.reason==='no-source')setOngoingNotesStatus('Earlier versions come from your backups. Connect a Device Folder or Google Drive in Data & Backup first.');
+      else if(result?.reason==='busy')setOngoingNotesStatus('Another backup task is running. Try again when it finishes.');
+      return result?.opened===true;
+    }
+    // The open note's own actions: rename or move, earlier versions, export
+    // and delete. Support Activities keeps its name and is never deleted, so
+    // it has none.
     function noteActionsMenu(entry){
       const trigger=textEl('button','library-note-tool ui-btn','⋯');trigger.type='button';trigger.id='library-note-actions';
       trigger.setAttribute('aria-label',`Actions for ${entry.label}`);trigger.setAttribute('aria-haspopup','menu');trigger.setAttribute('aria-expanded','false');trigger.title='Rename, move or delete this note';
@@ -377,13 +387,13 @@ registry.define('library',1,()=>{
         button.addEventListener('click',()=>{controller.hide();void run();});return button;
       };
       const separator=document.createElement('div');separator.className='library-note-menu-separator';separator.setAttribute('role','separator');
-      const rename=item('library-note-rename','Rename','F2',()=>renameNoteInPlace(entry)),move=item('library-note-move','Move…','',renameOngoingNote),exportNote=item('library-note-export-one','Export this note','',()=>exportOngoingNote(entry)),remove=item('library-note-delete','Delete','Del',deleteOngoingNote,true);
-      menu.append(rename,move,exportNote,separator,remove);
+      const rename=item('library-note-rename','Rename','F2',()=>renameNoteInPlace(entry)),move=item('library-note-move','Move…','',renameOngoingNote),exportNote=item('library-note-export-one','Export this note','',()=>exportOngoingNote(entry)),versions=item('library-note-versions','Earlier versions…','',()=>showNoteVersions(entry)),remove=item('library-note-delete','Delete','Del',deleteOngoingNote,true);
+      menu.append(rename,move,versions,exportNote,separator,remove);
       trigger.addEventListener('click',event=>{
         event.preventDefault();
         if(!menu.hidden){controller.hide();return;}
         // A note becomes renameable once something of it is saved.
-        const stored=!!getAreaNote(entry.key,entry.label);rename.disabled=move.disabled=exportNote.disabled=remove.disabled=!stored||!canMutate();
+        const stored=!!getAreaNote(entry.key,entry.label);rename.disabled=move.disabled=exportNote.disabled=remove.disabled=!stored||!canMutate();versions.disabled=!canMutate();
         for(const button of [rename,move,exportNote,remove])if(!stored)button.title='Write something in this note first';else button.removeAttribute('title');
         controller.show(trigger);trigger.setAttribute('aria-expanded','true');
         requestAnimationFrame(()=>{const first=menu.querySelector('[role="menuitem"]:not(:disabled)');if(first)first.focus();});
