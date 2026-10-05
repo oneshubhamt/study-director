@@ -19,7 +19,7 @@ assert.match(persistence,/strictTransaction:idbStrictTransaction[\s\S]*strictSto
 assert.match(persistence,/db\.transaction\(stores,mode,\{durability:'strict'\}\)/,'strict durability must use the native IndexedDB transaction option');
 assert.doesNotMatch(repositories,/idbPutReflectionDraft|DB_REFLECTION_DRAFT_STORE/u,'retired Reflection Draft persistence must not remain a current repository boundary');
 assert.match(repositories,/async function idbPutActiveSession[\s\S]*?return idbTransaction\(\[DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE\],'readwrite'/,'high-frequency active-session checkpoints must share their canonical mutation epoch in the same default-durability transaction');
-assert.match(areaNotes,/async function persistPendingEntries[\s\S]*?Meta\.transaction\('readwrite'/,'Ongoing Note recovery journaling must use the typed appMeta gateway');
+assert.doesNotMatch(areaNotes,/meta\.put\('areaNoteRecoveryPrefix'/u,'Ongoing Notes save straight to their canonical rows and never journal edits in appMeta');
 assert.match(areaNotes,/async function idbApplyDelta[\s\S]*?idbStrictTransaction\(\[DB_AREA_NOTES_STORE,DB_APP_META_STORE\],'readwrite'/,'canonical Ongoing Note commits and deletion markers must share one strict transaction');
 assert.match(repositories,/async function idbPutDailyRecordBatch[\s\S]*?idbStrictTransaction\(stores,'readwrite'/,'authoritative Daily Record commits must opt into strict durability');
 

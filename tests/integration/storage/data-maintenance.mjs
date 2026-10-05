@@ -135,11 +135,12 @@ console.log(JSON.stringify({status:'PASS',suite:'canonical-maintenance-progress'
 // Recovery adoption is atomic with respect to accepted live mutations and
 // queued writes, not merely wall-clock timestamps. A superseded read preserves
 // the live model, autosave and durable intent, then converges on a stable retry.
+// Adoption follows the canonical read with no further wait, so an edit, or an
+// edit whose autosave commits, can only land during that read.
 const noteRecoveryCases=[];
-for(const boundary of ['stable','canonical-read','final-result','autosave'])for(const change of boundary==='stable'?['none']:['edit','add','delete','queued-save']){
- const clock=createFakeClock(),controls={clock},local=new Map();let armed=false,changed=false,mutation=Promise.resolve();
- class ObservedMeta extends Map{entries(){const result=[...super.entries()];if(armed&&boundary!=='canonical-read'&&boundary!=='stable')queueMicrotask(applyChange);return result[Symbol.iterator]();}}
- const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new ObservedMeta()},h=createHarness(local,stores,controls);
+for(const boundary of ['stable','canonical-read','autosave'])for(const change of boundary==='stable'?['none']:['edit','add','delete','queued-save']){
+ const clock=createFakeClock(),controls={clock},local=new Map();let changed=false,mutation=Promise.resolve();
+ const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()},h=createHarness(local,stores,controls);
  controls.onAreaRead=async()=>{throw new Error('startup notes unavailable');};await h.app.notes.load();controls.onAreaRead=null;
  h.app.notes.update('first','First','earlier note','');await h.app.notes.flush({strict:true});await clock.advance(20);
  if(change==='queued-save')h.app.notes.update('first','First','latest edit',h.app.notes.get('first').updatedAt);
@@ -148,11 +149,11 @@ for(const boundary of ['stable','canonical-read','final-result','autosave'])for(
   if(change==='queued-save'){void clock.advance(1000);return;}
   if(change==='delete')mutation=h.app.notes.remove('first');
   else if(change==='add')h.app.notes.update('second','Second','new note','');
-  else{const current=h.app.notes.get('first');h.app.notes.update('first','First','intervening edit',current.updatedAt);const updated=h.app.notes.get('first');h.app.notes.update('first','First','latest edit',updated.updatedAt);assert.equal(h.app.notes.get('first').updatedAt,updated.updatedAt,'revision throttling cannot conceal a mutation');}
+  else{const current=h.app.notes.get('first');h.app.notes.update('first','First','intervening edit',current.updatedAt);const updated=h.app.notes.get('first');h.app.notes.update('first','First','latest edit',updated.updatedAt);assert.ok(h.app.notes.get('first').updatedAt>updated.updatedAt,'every accepted change moves the revision forward');}
   if(boundary==='autosave')void clock.advance(1000);
  };
- controls.onAreaRead=async()=>{armed=true;if(boundary==='canonical-read')applyChange();};
- const job=automaticMaintenance(h,clock,controls),first=await job.run('recovery');armed=false;controls.onAreaRead=null;await mutation;
+ controls.onAreaRead=async()=>{if(boundary!=='stable')applyChange();};
+ const job=automaticMaintenance(h,clock,controls),first=await job.run('recovery');controls.onAreaRead=null;await mutation;
  const expected=boundary==='stable'?{first:'earlier note'}:change==='delete'?{}:change==='add'?{first:'earlier note',second:'new note'}:{first:'latest edit'};
  const texts=payload=>Object.fromEntries(Object.entries(payload).map(([key,value])=>[key,value.text]));
  assert.deepEqual(texts(h.app.notes.exportPayload()),expected,`${boundary} ${change}: recovery cannot regress the live model`);

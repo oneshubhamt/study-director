@@ -25,107 +25,144 @@ const noOp=fast.app.notes.update('trusted','Trusted',canonical,trusted.revision)
 fast.validationCalls.within=0;fast.validationCalls.clamp=0;
 const defensive=fast.app.notes.update('plain','Plain','ordinary text','');assert.equal(defensive.status,'changed');assert.equal(fast.validationCalls.within,1,'ordinary repository update must retain validation');assert.equal(fast.validationCalls.clamp,1,'ordinary repository update must retain canonical clamping');
 
+const emptyStores=()=>({area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()});
 const cloneStores=(source,{copyArea=false}={})=>({
+  ...emptyStores(),
   area:copyArea?new Map([...source.area].map(([key,value])=>[key,structuredClone(value)])):new Map(),
-  sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),
   meta:new Map([...source.meta].map(([key,value])=>[key,structuredClone(value)]))
 });
-const recoveryEntries=stores=>[...stores.meta.values()].filter(row=>row?.value?.format==='study-director.area-note-recovery');
-const recoveryFor=(stores,key)=>recoveryEntries(stores).find(row=>row.value.key===key)?.value?.entry||null;
+const journalRows=stores=>[...stores.meta.values()].filter(row=>row?.value?.format==='study-director.area-note-recovery');
+const rescueFor=(local,key)=>local.get('areaNoteRescue')?.entries?.[key]||null;
 
-const sharedLocal=new Map(),sharedStores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()};
-const first=createHarness(sharedLocal,sharedStores);await first.app.notes.load();assert.ok(first.idbReads.boundedMetaGetAll>0,'recovery load must use a bounded appMeta key-range read');assert.equal(first.idbReads.unboundedMetaGetAll,0,'recovery load must not scan unrelated appMeta rows');
+// Typing saves straight to the database a moment after it pauses. Every change
+// moves the revision forward; nothing is journaled and the browser copy stays
+// untouched while saves succeed.
+const sharedLocal=new Map(),sharedStores=emptyStores();
+const first=createHarness(sharedLocal,sharedStores);await first.app.notes.load();
 let revision='';const revisions=[];
-{const result=first.app.notes.update('area','Area','rapid-0',revision);assert.equal(result.status,'changed');revision=result.revision;revisions.push(revision);}
-await settleRecovery();
-assert.equal(recoveryFor(sharedStores,'area').text,'rapid-0','first edit of a clean note must become crash-recoverable in IndexedDB immediately');
-assert.equal(sharedLocal.has('pending'),false,'current Area-note recovery must not require a redundant localStorage marker');
-for(let i=1;i<100;i++){
+for(let i=0;i<100;i++){
   const result=first.app.notes.update('area','Area',`rapid-${i}`,revision);assert.equal(result.status,'changed');revision=result.revision;revisions.push(revision);
 }
-assert.equal(new Set(revisions).size,1,'100 same-burst edits should reuse one revision timestamp');
-assert.equal(sharedStores.sync.size,0,'Area-note keystrokes must not write the retired sync queue');
-assert.equal(sharedStores.tombstones.size,0,'Area-note keystrokes must not write retired tombstones');
-assert.equal(first.localWrites.pending||0,0,'Area-note recovery must not write a redundant localStorage marker');
-await clock.advance(201);
-await settleRecovery();
-assert.ok(first.idbWrites.recovery<=2,`rapid burst should coalesce recovery writes, got ${first.idbWrites.recovery}`);
-assert.equal(recoveryFor(sharedStores,'area').text,'rapid-99','coalesced IndexedDB recovery snapshot must contain latest text');
+assert.equal(new Set(revisions).size,100,'every change gets its own revision, even within one millisecond');
+assert.ok(revisions.every((value,index)=>!index||value>revisions[index-1]),'revisions only move forward');
+assert.equal(sharedStores.area.has('area'),false,'nothing is written while typing continues');
+await clock.advance(251);await settleRecovery();
+assert.equal(sharedStores.area.get('area').text,'rapid-99','the pause after typing writes the latest text');
+assert.equal(journalRows(sharedStores).length,0,'no journal rows are written');
+assert.equal(first.localWrites.all,0,'successful saves never write the browser copy');
+assert.equal(sharedStores.sync.size+sharedStores.tombstones.size,0,'retired sync stores stay untouched');
 
-// Crash simulation: authoritative area-note IDB was not committed, but transient appMeta recovery survives.
-const crashStores=cloneStores(sharedStores);
+// A clock that goes back still moves the revision forward.
+const beforeSkew=first.app.notes.get('area').updatedAt;await clock.advance(-60000);
+const skewed=first.app.notes.update('area','Area','after clock skew',beforeSkew);assert.equal(skewed.status,'changed');assert.ok(skewed.revision>beforeSkew,'a clock moved back cannot reuse or lower a revision');
+await clock.advance(60000);await first.app.notes.flush({strict:true});
+
+// Hiding or closing the page with an unsaved edit keeps a browser copy; the
+// next start folds it back in and saves it.
+const hidden=first.app.notes.update('area','Area','typed just before closing',first.app.notes.get('area').updatedAt);assert.equal(hidden.status,'changed');
+assert.equal(first.app.notes.protectUnsaved(),true);assert.equal(rescueFor(sharedLocal,'area').text,'typed just before closing');
+const crashStores=cloneStores(sharedStores,{copyArea:true});
 const recovered=createHarness(sharedLocal,crashStores);await recovered.app.notes.load();
-assert.equal(recovered.app.notes.get('area').text,'rapid-99','fresh repository must recover latest coalesced text from appMeta after crash');
+assert.equal(recovered.app.notes.get('area').text,'typed just before closing','the browser copy restores the unsaved edit');
 await recovered.app.notes.flush({strict:true});
-assert.equal(crashStores.area.get('area').text,'rapid-99','recovered latest text must become authoritative after strict flush');
-assert.equal(recoveryEntries(crashStores).length,0,'recovery rows must clear after authoritative commit');
-assert.equal(sharedLocal.has('pending'),false,'Area-note recovery must remain IndexedDB-only after authoritative commit');
+assert.equal(crashStores.area.get('area').text,'typed just before closing','the recovered edit becomes the stored note');
+assert.equal(sharedLocal.has('areaNoteRescue'),false,'the browser copy is cleared once saved');
+assert.equal(recovered.app.notes.protectUnsaved(),true);assert.equal(sharedLocal.has('areaNoteRescue'),false,'hiding with nothing unsaved writes no copy');
 
-// After the coalescing window, a new edit may advance the revision again.
-await clock.advance(501);
-let recoveredRevision=recovered.app.notes.get('area').updatedAt;
-const later=recovered.app.notes.update('area','Area','after-window',recoveredRevision);assert.equal(later.status,'changed');assert.notEqual(later.revision,recoveredRevision,'revision should advance after the bounded coalescing interval');
-await recovered.app.notes.flush({strict:true});assert.equal(crashStores.area.get('area').text,'after-window');
+// A stale browser copy that storage already matches is dropped on load.
+sharedLocal.set('areaNoteRescue',{format:'study-director.area-note-rescue',version:1,updatedAt:new Date().toISOString(),entries:{area:structuredClone(crashStores.area.get('area'))}});
+const staleRescue=createHarness(sharedLocal,crashStores);await staleRescue.app.notes.load();
+assert.equal(sharedLocal.has('areaNoteRescue'),false,'a copy identical to storage is removed');
 
 // Clearing content is a durable empty note, not an implicit deletion.
 const emptyRevision=recovered.app.notes.get('area').updatedAt,emptied=recovered.app.notes.update('area','Area','',emptyRevision);assert.equal(emptied.status,'changed');
-await settleRecovery();
-assert.notEqual(recoveryFor(crashStores,'area').deleted,true,'blank edit must recover as an empty note, never as a deletion marker');
-assert.equal(recoveryFor(crashStores,'area').text,'');
+recovered.app.notes.protectUnsaved();
+assert.notEqual(rescueFor(sharedLocal,'area').deleted,true,'a blank edit is kept as an empty note, never as a deletion');
 const emptyLocal=new Map([...sharedLocal].map(([key,value])=>[key,structuredClone(value)]));
 const staleAuthoritative=cloneStores(crashStores,{copyArea:true});
-const emptyRecovered=createHarness(emptyLocal,staleAuthoritative);await emptyRecovered.app.notes.load();assert.equal(emptyRecovered.app.notes.get('area').text,'','pending empty note must shadow stale non-empty canonical content after crash');await emptyRecovered.app.notes.flush({strict:true});
-assert.equal(staleAuthoritative.area.get('area').text,'','recovered empty note must become authoritative');
-assert.equal(emptyRecovered.app.notes.exportPayload().area.text,'','backup payload must preserve intentional empty notes');
-assert.equal(emptyRecovered.app.notes.metadataSnapshot().records.find(record=>record.key==='area').hasNote,false,'empty note must remain catalogued but muted');
-assert.equal(emptyRecovered.app.notes.searchSnapshot().documents.some(record=>record.key==='area'),false,'empty notes must not inflate the content-search index');
-assert.equal(await emptyRecovered.app.notes.remove('area'),true,'explicit remove must remain the deletion path');
-assert.equal(staleAuthoritative.area.has('area'),false,'explicit remove must delete the canonical note');
+const emptyRecovered=createHarness(emptyLocal,staleAuthoritative);await emptyRecovered.app.notes.load();assert.equal(emptyRecovered.app.notes.get('area').text,'','the empty note shadows older stored text');await emptyRecovered.app.notes.flush({strict:true});
+assert.equal(staleAuthoritative.area.get('area').text,'','the recovered empty note is stored');
+assert.equal(emptyRecovered.app.notes.exportPayload().area.text,'','backups keep intentional empty notes');
+assert.equal(emptyRecovered.app.notes.metadataSnapshot().records.find(record=>record.key==='area').hasNote,false,'an empty note stays listed but muted');
+assert.equal(emptyRecovered.app.notes.searchSnapshot().documents.some(record=>record.key==='area'),false,'empty notes stay out of search');
+assert.equal(await emptyRecovered.app.notes.remove('area'),true,'explicit remove stays the deletion path');
+assert.equal(staleAuthoritative.area.has('area'),false,'explicit remove deletes the stored note');
+await recovered.app.notes.flush({strict:true});
 
-// Failed authoritative persistence retains the newest appMeta recovery until a later instance commits it.
-const failureLocal=new Map(),failureStores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()},failureControls={failNextAreaWrite:false};
+// A reload while an edit waits for its save keeps the edit.
+const reloadLocal=new Map(),reloadStores=emptyStores();
+const reloading=createHarness(reloadLocal,reloadStores);await reloading.app.notes.load();
+reloading.app.notes.update('reload','Reload','saved','');await reloading.app.notes.flush({strict:true});
+reloading.app.notes.update('reload','Reload','typed during reload',reloading.app.notes.get('reload').updatedAt);
+await reloading.app.notes.reloadFresh();
+assert.equal(reloading.app.notes.get('reload').text,'typed during reload','a reload never replaces an unsaved edit');
+await reloading.app.notes.flush({strict:true});assert.equal(reloadStores.area.get('reload').text,'typed during reload');
+
+// A failed save keeps the newest text in the browser copy until a later
+// instance stores it.
+const failureLocal=new Map(),failureStores=emptyStores(),failureControls={failNextAreaWrite:false};
 const failureBase={version:2,key:'failure',label:'Failure',text:'stable',updatedAt:'2026-09-04T04:00:00.000Z'};failureStores.area.set('failure',structuredClone(failureBase));
-const failing=createHarness(failureLocal,failureStores,failureControls);await failing.app.notes.load();failureControls.failNextAreaWrite=true;const failedEdit=failing.app.notes.update('failure','Failure','latest-before-failure',failureBase.updatedAt);assert.equal(failedEdit.status,'changed');await assert.rejects(()=>failing.app.notes.flush({strict:true}),/could not be saved|safely stored/,'strict durability flush must reject when authoritative write fails');assert.equal(failureStores.area.get('failure').text,'stable');assert.equal(recoveryFor(failureStores,'failure').text,'latest-before-failure','failed authoritative write must retain latest IndexedDB recovery');assert.equal(failing.app.notes.failure().failed,true);
-const failureRecovered=createHarness(failureLocal,failureStores);await failureRecovered.app.notes.load();assert.equal(failureRecovered.app.notes.get('failure').text,'latest-before-failure');await failureRecovered.app.notes.flush({strict:true});assert.equal(failureStores.area.get('failure').text,'latest-before-failure');assert.equal(recoveryEntries(failureStores).length,0);assert.equal(failureLocal.has('pending'),false);
+const failing=createHarness(failureLocal,failureStores,failureControls);await failing.app.notes.load();failureControls.failNextAreaWrite=true;
+const failedEdit=failing.app.notes.update('failure','Failure','latest-before-failure',failureBase.updatedAt);assert.equal(failedEdit.status,'changed');
+await assert.rejects(()=>failing.app.notes.flush({strict:true}),/could not be saved|safely stored/,'a strict flush rejects when the save fails');
+assert.equal(failureStores.area.get('failure').text,'stable');assert.equal(rescueFor(failureLocal,'failure').text,'latest-before-failure','a failed save keeps the newest text in the browser copy');assert.equal(failing.app.notes.failure().failed,true);
+const failureRecovered=createHarness(failureLocal,failureStores);await failureRecovered.app.notes.load();assert.equal(failureRecovered.app.notes.get('failure').text,'latest-before-failure');await failureRecovered.app.notes.flush({strict:true});
+assert.equal(failureStores.area.get('failure').text,'latest-before-failure');assert.equal(failureLocal.has('areaNoteRescue'),false);
+// The same tab recovers on its next successful save.
+failureControls.failNextAreaWrite=true;failing.app.notes.update('failure','Failure','second attempt',failing.app.notes.get('failure').updatedAt);
+await assert.rejects(()=>failing.app.notes.flush({strict:true}));
+await failing.app.notes.flush({strict:true}).catch(()=>{});
+assert.equal(failing.app.notes.failure().failed,false,'a later successful save clears the failure');assert.equal(failureLocal.has('areaNoteRescue'),false);
 
-// A failed recovery-row cleanup after a successful canonical write must not poison later strict preflight.
-const staleCleanupLocal=new Map(),staleCleanupStores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()},staleCleanupControls={failNextMetaOnlyWrite:false};
-const staleCleanup=createHarness(staleCleanupLocal,staleCleanupStores,staleCleanupControls);await staleCleanup.app.notes.load();
-const staleEdit=staleCleanup.app.notes.update('stale','Stale','canonically-saved','');assert.equal(staleEdit.status,'changed');await settleRecovery();
-staleCleanupControls.failNextMetaOnlyWrite=true;
-await staleCleanup.app.notes.flush({strict:true});
-await settleRecovery();
-assert.equal(staleCleanupStores.area.get('stale').text,'canonically-saved','canonical note write must succeed even when recovery cleanup fails transiently');
-await staleCleanup.app.notes.flush({strict:true});
-assert.equal(staleCleanup.app.notes.failure().failed,false,'strict flush must clear only a stale failure latch after canonical equality is independently verified');
-assert.equal(staleCleanupStores.area.get('stale').text,'canonically-saved');
+// A clash with a newer stored revision keeps the stored note and the local
+// text as its own note.
+const conflictLocal=new Map(),conflictStores=emptyStores();
+const conflictBase={version:2,key:'conflict',label:'Conflict',text:'base',updatedAt:'2026-09-04T04:10:00.000Z'};conflictStores.area.set('conflict',structuredClone(conflictBase));const conflicting=createHarness(conflictLocal,conflictStores);await conflicting.app.notes.load();const localConflictEdit=conflicting.app.notes.update('conflict','Conflict','local-dirty',conflictBase.updatedAt);assert.equal(localConflictEdit.status,'changed');conflictStores.area.set('conflict',{...structuredClone(conflictBase),text:'remote-newer',updatedAt:'2026-09-04T04:10:01.000Z'});await conflicting.app.notes.flush({strict:true});assert.equal(conflicting.app.notes.get('conflict').text,'remote-newer');assert.equal(conflictStores.area.get('conflict').text,'remote-newer');assert.equal(conflictStores.area.get('conflict (unsaved copy)')?.text,'local-dirty');assert.equal(conflictLocal.has('areaNoteRescue'),false);
 
-// Concurrent authoritative revision wins, stale transient recovery is removed,
-// and the rejected local edit is kept as its own note.
-const conflictLocal=new Map(),conflictStores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()};
-const conflictBase={version:2,key:'conflict',label:'Conflict',text:'base',updatedAt:'2026-09-04T04:10:00.000Z'};conflictStores.area.set('conflict',structuredClone(conflictBase));const conflicting=createHarness(conflictLocal,conflictStores);await conflicting.app.notes.load();const localConflictEdit=conflicting.app.notes.update('conflict','Conflict','local-dirty',conflictBase.updatedAt);assert.equal(localConflictEdit.status,'changed');conflictStores.area.set('conflict',{...structuredClone(conflictBase),text:'remote-newer',updatedAt:'2026-09-04T04:10:01.000Z'});await conflicting.app.notes.flush({strict:true});assert.equal(conflicting.app.notes.get('conflict').text,'remote-newer');assert.equal(conflictStores.area.get('conflict').text,'remote-newer');assert.equal(conflictStores.area.get('conflict (unsaved copy)')?.text,'local-dirty');assert.equal(recoveryEntries(conflictStores).length,0);assert.equal(conflictLocal.has('pending'),false);
+// The browser copy holds every unsaved note, the newest first while it fits.
+const scopedLocal=new Map([['areaNoteRescue',{format:'study-director.area-note-rescue',version:1,updatedAt:'2026-09-04T04:20:01.000Z',entries:{foreign:{version:2,key:'foreign',label:'Foreign',text:'from an earlier session',updatedAt:'2026-09-04T04:20:00.000Z'}}}]]),scopedStores=emptyStores(),scopedControls={failNextAreaWrite:true};
+const scoped=createHarness(scopedLocal,scopedStores,scopedControls);await scoped.app.notes.load();
+scoped.app.notes.update('local','Local','local-dirty','');await scoped.app.notes.flush().catch(()=>{});
+assert.deepEqual(Object.keys(scopedLocal.get('areaNoteRescue').entries).sort(),['foreign','local'],'a failed save keeps earlier unsaved notes in the copy');
+await scoped.app.notes.flush({strict:true});
+assert.equal(scopedStores.area.get('foreign').text,'from an earlier session');assert.equal(scopedStores.area.get('local').text,'local-dirty');assert.equal(scopedLocal.has('areaNoteRescue'),false);
 
-// Completing one note must not sweep another context's still-pending recovery row.
-const scopedLocal=new Map(),scopedStores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()};
-const scoped=createHarness(scopedLocal,scopedStores);await scoped.app.notes.load();
-const foreignEntry={version:2,key:'foreign',label:'Foreign',text:'other-context-pending',updatedAt:'2026-09-04T04:20:00.000Z'},foreignRowUpdatedAt='2026-09-04T04:20:01.000Z';
-scopedStores.meta.set('areaNoteRecovery.v1:foreign',{key:'areaNoteRecovery.v1:foreign',version:1,value:{format:'study-director.area-note-recovery',version:1,key:'foreign',entry:structuredClone(foreignEntry),updatedAt:foreignRowUpdatedAt},updatedAt:foreignRowUpdatedAt});
-const scopedEdit=scoped.app.notes.update('local','Local','local-dirty','');assert.equal(scopedEdit.status,'changed');await scoped.app.notes.flush({strict:true});
-assert.equal(scopedStores.area.get('local').text,'local-dirty');assert.equal(recoveryFor(scopedStores,'local'),null,'successful local save must clear only its own recovery row');assert.equal(recoveryFor(scopedStores,'foreign').text,'other-context-pending','successful local save must preserve unrelated pending recovery');assert.equal(scopedLocal.has('pending'),false,'unrelated recovery rows must remain discoverable from IndexedDB without a localStorage marker');
-const scopedRecovered=createHarness(scopedLocal,scopedStores);await scopedRecovered.app.notes.load();assert.equal(scopedRecovered.app.notes.get('foreign').text,'other-context-pending','preserved recovery row must remain recoverable by a fresh repository');await scopedRecovered.app.notes.flush({strict:true});assert.equal(scopedStores.area.get('foreign').text,'other-context-pending');assert.equal(recoveryEntries(scopedStores).length,0);assert.equal(scopedLocal.has('pending'),false);
-
-// A valid rich note above the old 512 KiB localStorage ceiling remains fully recoverable.
-const largeLocal=new Map(),largeStores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()};
+// A note larger than the browser copy still saves normally; hiding reports
+// that the copy cannot hold it.
+const largeLocal=new Map(),largeStores=emptyStores();
 const large=createHarness(largeLocal,largeStores);await large.app.notes.load();
-const largeText='WG1:'+JSON.stringify({version:1,doc:{type:'Doc',content:[{type:'Paragraph',content:[{type:'Text',param:'x'.repeat(600*1024)}]}]}});
-const largeEdit=large.app.notes.updateValidatedRich('large','Large',largeText,'');assert.equal(largeEdit.status,'changed');await settleRecovery();
-assert.ok(Buffer.byteLength(recoveryFor(largeStores,'large').text)>512*1024,'recovery row must preserve a valid rich note larger than the old localStorage ceiling');
-assert.equal(largeLocal.has('pending'),false,'large-note recovery must not use localStorage');
-await large.app.notes.flush({strict:true});assert.equal(recoveryEntries(largeStores).length,0);assert.equal(largeLocal.has('pending'),false);
+const largeText='WG1:'+JSON.stringify({version:1,doc:{type:'Doc',content:[{type:'Paragraph',content:[{type:'Text',param:'x'.repeat(1100*1024)}]}]}});
+assert.equal(large.app.notes.updateValidatedRich('large','Large',largeText,'').status,'changed');
+assert.equal(large.app.notes.protectUnsaved(),false,'a note over the copy limit is reported');
+await large.app.notes.flush({strict:true});assert.equal(largeStores.area.get('large').text,largeText,'the database stores it in full');
 
-// Existing v1 localStorage recovery is migrated to appMeta and the legacy source is retired.
+// Startup folds an earlier version's journal rows and v1 localStorage payload
+// into the stored notes once, the newer revision winning, and removes them.
 const legacyEntry={key:'legacy',label:'Legacy',text:'legacy-unsaved',updatedAt:'2026-09-04T05:00:00.000Z',entityType:'areaNote',entityId:'legacy',schemaVersion:1,deviceId:'dev_legacy',createdAt:'2026-09-04T05:00:00.000Z',deleted:false,syncStatus:'pending'};
-const legacyLocal=new Map([['pending',{version:1,updatedAt:'2026-09-04T05:00:01.000Z',pending:{legacy:structuredClone(legacyEntry)}}]]),legacyStores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()};
-const legacy=createHarness(legacyLocal,legacyStores);await legacy.app.compatibility.migrateAreaNoteRecovery();await legacy.app.notes.load();assert.equal(legacy.app.notes.get('legacy').text,'legacy-unsaved','legacy local recovery must restore only after the explicit compatibility adapter runs');assert.equal(recoveryFor(legacyStores,'legacy').text,'legacy-unsaved','legacy recovery must migrate to appMeta');assert.equal(legacyLocal.has('pending'),false,'verified migration must delete the legacy localStorage recovery source without replacing it with another marker');await legacy.app.notes.flush({strict:true});assert.equal(legacyStores.area.get('legacy').text,'legacy-unsaved');assert.equal(recoveryEntries(legacyStores).length,0);assert.equal(legacyLocal.has('pending'),false);
+const journalRow=(key,entry,updatedAt)=>[`areaNoteRecovery.v1:${key}`,{key:`areaNoteRecovery.v1:${key}`,version:1,value:{format:'study-director.area-note-recovery',version:1,key,entry,updatedAt},updatedAt}];
+const legacyLocal=new Map([['pending',{version:1,updatedAt:'2026-09-04T05:00:01.000Z',pending:{legacy:structuredClone(legacyEntry)}}]]),legacyStores=emptyStores();
+legacyStores.area.set('journaled',{version:2,key:'journaled',label:'Journaled',text:'stored',updatedAt:'2026-09-04T05:00:00.000Z'});
+legacyStores.area.set('outdated',{version:2,key:'outdated',label:'Outdated',text:'stored newer',updatedAt:'2026-09-04T05:10:00.000Z'});
+legacyStores.area.set('removed',{version:2,key:'removed',label:'Removed',text:'deleted in the journal',updatedAt:'2026-09-04T05:00:00.000Z'});
+for(const [key,value] of [
+  journalRow('journaled',{version:2,key:'journaled',label:'Journaled',text:'journaled newer',updatedAt:'2026-09-04T05:05:00.000Z'},'2026-09-04T05:05:00.000Z'),
+  journalRow('outdated',{version:2,key:'outdated',label:'Outdated',text:'journaled older',updatedAt:'2026-09-04T05:05:00.000Z'},'2026-09-04T05:05:00.000Z'),
+  journalRow('removed',{key:'removed',deleted:true,updatedAt:'2026-09-04T05:05:00.000Z'},'2026-09-04T05:05:00.000Z'),
+  journalRow('later-deleted',{version:2,key:'later-deleted',label:'Later deleted',text:'edit before deletion',updatedAt:'2026-09-04T05:00:00.000Z'},'2026-09-04T05:00:00.000Z'),
+  ['areaNoteDeletion.v1:later-deleted',{key:'areaNoteDeletion.v1:later-deleted',version:1,value:{format:'study-director.area-note-deletion',version:1,key:'later-deleted',deletedAt:'2026-09-04T05:01:00.000Z'},updatedAt:'2026-09-04T05:01:00.000Z'}]
+])legacyStores.meta.set(key,value);
+const legacy=createHarness(legacyLocal,legacyStores);
+const folded=await legacy.app.compatibility.migrateAreaNoteRecovery();assert.equal(folded.status,'migrated');
+assert.equal(legacyStores.area.get('legacy').text,'legacy-unsaved','the v1 localStorage payload is stored');
+assert.equal(legacyStores.area.get('journaled').text,'journaled newer','a newer journal entry is stored');
+assert.equal(legacyStores.area.get('outdated').text,'stored newer','a newer stored note is kept');
+assert.equal(legacyStores.area.has('removed'),false,'a newer journal deletion is applied');assert.ok(legacyStores.meta.has('areaNoteDeletion.v1:removed'),'the deletion is recorded');
+assert.equal(legacyStores.area.has('later-deleted'),false,'a note deleted after the journaled edit stays deleted');
+assert.equal(journalRows(legacyStores).length,0,'every journal row is removed');assert.equal(legacyLocal.has('pending'),false,'the v1 payload is removed');
+assert.equal((await legacy.app.compatibility.verifyAreaNoteRecovery()).ok,true);
+assert.equal((await legacy.app.compatibility.migrateAreaNoteRecovery()).status,'not-needed');
+await legacy.app.notes.load();assert.equal(legacy.app.notes.get('journaled').text,'journaled newer');
+legacyStores.meta.set(...journalRow('residue',{version:2,key:'residue',label:'Residue',text:'left behind',updatedAt:'2026-09-04T05:00:00.000Z'},'2026-09-04T05:00:00.000Z'));
+assert.deepEqual([...(await legacy.app.compatibility.verifyAreaNoteRecovery()).issues],['area-note-recovery-residue'],'verification reports journal rows that remain');
 
-console.log(JSON.stringify({status:'PASS',rapidEdits:100,recoveryWrites:first.idbWrites.recovery,localMarkerWrites:first.localWrites.pending,uniqueRapidRevisions:new Set(revisions).size,crashRecovered:true,crashEmptyRecovered:true,explicitDelete:true,failedWriteRecovered:true,staleCleanupRecovered:true,conflictRollback:true,largeRecoveryBytes:Buffer.byteLength(largeText),legacyMigrated:true,scopedRecoveryPreserved:true,boundedRecoveryReads:first.idbReads.boundedMetaGetAll,unboundedRecoveryReads:first.idbReads.unboundedMetaGetAll,validatedRichFastPath:true,canonicalNoOpFastPath:true},null,2));
+console.log(JSON.stringify({status:'PASS',rapidEdits:100,uniqueRapidRevisions:new Set(revisions).size,browserCopyWritesWhileSaving:first.localWrites.all,clockSkewSafe:true,closeRecovered:true,staleCopyDropped:true,emptyRecovered:true,explicitDelete:true,reloadKeepsEdit:true,failedWriteRecovered:true,conflictCopyKept:true,unsavedSetCopied:true,largeNoteSaved:Buffer.byteLength(largeText),legacyFolded:true,validatedRichFastPath:true,canonicalNoOpFastPath:true},null,2));

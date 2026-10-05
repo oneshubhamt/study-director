@@ -1612,9 +1612,9 @@ async function runDataMaintenance(options={}){
       replace:AreaNotesRepository.replace,
       merge:AreaNotesRepository.merge,
       reconcile:AreaNotesRepository.reconcile,
-      applyDeletes:AreaNotesRepository.applyDeletes,
       size:AreaNotesRepository.size,
       flush:AreaNotesRepository.flush,
+      protectUnsaved:AreaNotesRepository.protectUnsaved,
       recoverAfterStorageLoss:AreaNotesRepository.recoverAfterStorageLoss
     });
     const activeSession=freeze({

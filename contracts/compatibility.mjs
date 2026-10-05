@@ -114,9 +114,9 @@ export const COMPATIBILITY_REGISTRY=freeze({
     },
     {
       id:'area-note-recovery-v1',owner:'repositories-area-notes',kind:'live-migration',
-      source:'localStorage areaNotesPending.v1 payload with version 1 pending map',
-      target:'appMeta areaNoteRecovery.v1:* rows only',
-      proof:'pending entries are persisted to IndexedDB recovery rows before canonical note reconciliation',
+      source:'localStorage areaNotesPending.v1 payload with version 1 pending map and appMeta areaNoteRecovery.v1:* journal rows',
+      target:'canonical AreaNote rows and AreaNoteDeletion entries, newer revision winning; a later deletion stays',
+      proof:'both sources are folded and the journal rows removed in one transaction before notes load; no journal row or legacy payload remains',
       retirement:'baseline verified on all supported installations',
       sourceFiles:freeze(['source/core/repositories-area-notes.js','source/core/repositories.js'])
     },
@@ -274,7 +274,7 @@ export const PERMANENT_NON_MIGRATION=freeze({
   activeSessionRecovery:item({owner:'repositories',reason:'current crash recovery'}),
   dailyRecordFallback:item({owner:'repositories',reason:'current degraded-storage recovery; replay into IndexedDB is recovery, not legacy migration'}),
   scheduleProgressRemap:item({owner:'plan/session',reason:'current in-session progress remapping when a schedule changes; not historical storage compatibility'}),
-  areaNoteRecovery:item({owner:'repositories',reason:'current IndexedDB write-ahead recovery rows after the v1 localStorage bridge is retired'}),
+  areaNoteRecovery:item({owner:'repositories',reason:'current localStorage copy of unsaved Ongoing Notes when a save fails or the page closes mid-save'}),
   deletionRecovery:item({owner:'repositories',reason:'current failed-delete recovery for DailyRecord and ActiveSession; not a synchronization outbox'}),
   savedDayDeletionLedger:item({owner:'repositories',reason:'current domain deletion history needed for explicit Saved-Day checkpoint reconciliation; not distributed-sync state'}),
   restoreAndLibraryClearJournals:item({owner:'repository-journals',reason:'current destructive-operation rollback/recovery'}),

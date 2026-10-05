@@ -6781,7 +6781,7 @@ const RichTextRuntime=(()=>{
   }
   function handleActivation(event){
     if(!event||event.format!=='study-director.activation-event')return;
-    if(event.kind===APP_ACTIVATION_KINDS.BACKGROUND){scheduleBackgroundDisposal();return;}
+    if(event.kind===APP_ACTIVATION_KINDS.BACKGROUND){AppData.notes.protectUnsaved();void AppData.notes.flush();scheduleBackgroundDisposal();return;}
     if(event.kind===APP_ACTIVATION_KINDS.ORDINARY_FOCUS){cancelBackgroundDisposal();if(!document.hidden)syncAll(document);return;}
     if(event.kind===APP_ACTIVATION_KINDS.VISIBILITY_RETURN){cancelBackgroundDisposal();if(!document.hidden)syncAll(document);return;}
     if(event.kind===APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER||event.kind===APP_ACTIVATION_KINDS.DATE_ROLLOVER||event.kind===APP_ACTIVATION_KINDS.EXIT)cancelBackgroundDisposal();
@@ -6922,7 +6922,7 @@ const RichTextRuntime=(()=>{
     if(installed)return false;installed=true;
     document.addEventListener('focusin',onFocusIn,true);document.addEventListener('beforeinput',onBeforeInput,true);document.addEventListener('input',onInput,true);
     document.addEventListener('toggle',event=>{if(event.target instanceof HTMLDetailsElement)queueMicrotask(()=>syncAll(document));},true);
-    AppActivation.subscribe(handleActivation);window.addEventListener('pagehide',()=>{try{flushPendingReviewSave({strict:false});}catch{}void AppData.notes.flush();});
+    AppActivation.subscribe(handleActivation);window.addEventListener('pagehide',()=>{try{flushPendingReviewSave({strict:false});}catch{}AppData.notes.protectUnsaved();void AppData.notes.flush();});
     observer=new MutationObserver(records=>{
       const selector='textarea.task-note-field,textarea.library-diary-textarea,#daily-reflection';
       const addedEditor=records.some(record=>[...record.addedNodes].some(node=>

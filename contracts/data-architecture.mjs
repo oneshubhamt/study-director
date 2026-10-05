@@ -162,7 +162,7 @@ export const DATA_ARCHITECTURE=freeze({
     installationId:surface('coordination-identity','persistence','protect-identifiers','retained'),
     deletionRecovery:surface('recovery','repositories','protect-identifiers','until the failed DailyRecord/ActiveSession delete is reconciled','',{protects:'DailyRecord/ActiveSession deletion intent',created:'when authoritative deletion cannot complete atomically',cleared:'after canonical deletion state is verified',supersededBy:'verified canonical record/deletion state'}),
     fallbackDailyRecords:surface('recovery','repositories','protect','until migrated to IndexedDB','',{protects:'indexedDb.dailyRecords',created:'when a DailyRecord cannot be persisted to IndexedDB',cleared:'after replay and verification in canonical IndexedDB',supersededBy:'verified canonical DailyRecord'}),
-    areaNoteRescue:surface('recovery','repositories','protect','until Ongoing Note canonical/recovery persistence recovers','',{protects:'indexedDb.areaNotes/appMeta.areaNoteRecoveryPrefix',created:'when Ongoing Note persistence is degraded',cleared:'after canonical/recovery persistence verifies',supersededBy:'newer canonical AreaNote or deletion state'}),
+    areaNoteRescue:surface('recovery','repositories','protect','until the unsaved Ongoing Notes it holds are saved','',{protects:'indexedDb.areaNotes',created:'when an Ongoing Note save fails or the page is hidden or closed before a save finishes',cleared:'after the matching canonical AreaNote/deletion commits',supersededBy:'newer canonical AreaNote or deletion state'}),
     nameSetupSkipped:surface('preference','host','operational','short-lived'),
     fontScale:surface('startup-mirror','host','operational','disposable mirror of appMeta portable Preferences fontScale','',{mirrorOf:'appMeta.personalPreferences.fontScale'}),
     keepScreenAwake:surface('preference','native-capabilities','operational','retained'),
@@ -230,7 +230,7 @@ export const DATA_ARCHITECTURE=freeze({
     }),
     prefixes:freeze({
       backupPreparationUnitPrefix:surface('derived-performance','repositories','operational','disposable; rebuild from canonical data after loss, uncertainty or representation change','BackupPreparationUnit.v1',{rebuildFrom:'portable canonical IndexedDB state'}),
-      areaNoteRecoveryPrefix:surface('recovery-journal','repositories','protect','until canonical note commit settles','AreaNoteRecovery.v1',{protects:'indexedDb.areaNotes',created:'before/while an Ongoing Note canonical commit is pending',cleared:'after matching canonical AreaNote/deletion settles',supersededBy:'newer canonical AreaNote/deletion revision'}),
+      areaNoteRecoveryPrefix:surface('legacy-migration','repositories','protect','fold once into canonical AreaNote rows (newer revision wins), then remove in the same transaction','AreaNoteRecovery.v1'),
       savedDayDeletionPrefix:surface('canonical-deletion-history','repositories','protect','retain until the same Saved Day is recreated','SavedDayDeletion.v1'),
       areaNoteDeletionPrefix:surface('canonical-deletion-history','repositories','protect','retain until the same Ongoing Note is recreated','AreaNoteDeletion.v1'),
       attachmentDeletionPrefix:surface('canonical-deletion-history','repositories','protect-identifiers','retain until the same Attachment Library identity is explicitly restored/recreated','AttachmentDeletion.v1'),
