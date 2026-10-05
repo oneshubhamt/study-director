@@ -3,6 +3,7 @@
  * Study Director compatibility behavior is normalized by wordgard-patches.
  * Application/editor code should import Wordgard primitives only from here. */
 export {parseInertHTML} from './wordgard-patches/inert-html';
+export {cutHandling} from './wordgard-patches/cut';
 
 export {Wordgard,Decoration,PointSet,RangeSet,Widget,InputRule,KeyBinding,placeholder} from 'wordgard/editor';
 export {GardState,GardSelection,Transaction} from 'wordgard/state';

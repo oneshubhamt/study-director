@@ -1,6 +1,6 @@
 import {prepareImage} from './image-preparation';
 import {
-  parseInertHTML,Wordgard,Decoration,PointSet,RangeSet,Widget,InputRule,KeyBinding,placeholder,
+  parseInertHTML,cutHandling,Wordgard,Decoration,PointSet,RangeSet,Widget,InputRule,KeyBinding,placeholder,
   GardState,GardSelection,Transaction,Command,listIsActive,setTextblockType,toggleBlock,toggleList,toggleMark,
   canAddMarkInRange,history,redo,redoDepth,undo,undoDepth,CellSelection,tableCore,ChangeSet,Elt,Leaf,Node,Plot,Mark,serialize,
   BlockCell,BlockHeaderCell,Blockquote,BulletList,Doc,Heading,HorizontalRule,LineBreak,Link,ListItem,OrderedList,Paragraph,
@@ -145,7 +145,7 @@ function editorBehaviorExtensions(hooks:EditorInteractionHooks):GardState.Extens
   KeyBinding.of({key:'Mod-b',run:strongAction.run}),KeyBinding.of({key:'Mod-i',run:emphasisAction.run}),KeyBinding.of({key:'Mod-u',run:underlineAction.run}),KeyBinding.of({key:'Mod-.',run:superscriptAction.run}),KeyBinding.of({key:'Mod-,',run:subscriptAction.run}),
   InputRule.wrapping(/^ ?- $/,BulletList,true),InputRule.wrapping(/^ ?(\d+)\. $/,match=>OrderedList.of(+match[1]!.text),true),horizontalRuleInputRule,InputRule.wrapping(/^> $/,Blockquote,true),
   GardState.prec.highest(Wordgard.pasteHandler.of((wg,event)=>hooks.paste?.(event,wg)||false)),
-  tableCore,history(),autoLinkOnSpace.extension,
+  tableCore,history(),cutHandling,autoLinkOnSpace.extension,
   KeyBinding.of({key:'Enter',allowDefault:true,run:wg=>{autoLinkBeforeCursor(wg);return false}}),
   KeyBinding.of({key:'Tab',allowDefault:true,run:wg=>hooks.tab(wg,false),shift:wg=>hooks.tab(wg,true)}),
   KeyBinding.of({key:'Backspace',allowDefault:true,run:wg=>hooks.backspace(wg)}),
