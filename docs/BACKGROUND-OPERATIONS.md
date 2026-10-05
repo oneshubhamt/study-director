@@ -84,13 +84,14 @@ Device Folder and Drive share the same retention policy: 15 ordinary recovery po
 
 | Tier | Slots | Selection |
 | --- | ---: | --- |
-| Latest | 1 | Newest ordinary committed checkpoint; its capture date anchors the windows |
-| Daily | 6 | Newest checkpoint on each of the six preceding dates |
-| Weekly | 4 | Newest eligible checkpoint in each of the four preceding Monday-based calendar weeks, excluding dates already covered by Daily |
-| Monthly | 4 | Newest eligible checkpoint in each of the four calendar-month buckets immediately before the weekly boundary, excluding the newer tiers |
+| Latest | 1 | Newest ordinary committed checkpoint |
+| Daily | 6 | Newest checkpoint of each of the six most recent earlier days that have one |
+| Weekly | 4 | Newest checkpoint of each of the four most recent Monday-based weeks that have one, all older than the oldest Daily day |
+| Monthly | 4 | Newest checkpoint of each of the four most recent calendar months that have one, all older than the oldest Weekly week |
+| Saved | the rest | Slots the tiers cannot use go to the newest checkpoint of the remaining days, widest gap in time first, newer on a tie |
 | Protected safety | 1 extra | Newest unexpired Before restore / combine / clear-library checkpoint |
 
-Missing periods leave empty slots. The latest day can be any weekday. Windows use the local calendar recorded at capture, so changing the evaluator's timezone does not reinterpret history. Calendar months and partial boundary periods mean the oldest available snapshot is not guaranteed to be an exact five months and one week old.
+Periods without a checkpoint are skipped rather than counted, so gaps of any length (inside a week, between weeks or months, or a break of several months) never empty a tier: after a break the history from before it stays, and graduates from Daily to Weekly to Monthly as new checkpoints arrive. Retention keeps one checkpoint per day, the newest, and keeps every day it can up to 15, so a new checkpoint replaces at most one version and the history is never lost wholesale. The latest day can be any weekday. Periods use the local calendar recorded at capture, so changing the evaluator's timezone does not reinterpret history.
 
 Retention selects recovery points; it cannot enforce an instantaneous physical file limit. Publication first commits and verifies a new immutable version, then maintenance safely removes obsolete versions. A blocked, interrupted or failed cleanup can therefore leave more than 15 ordinary manifest/commit pairs temporarily. Each version has a manifest and a commit marker; shared objects are separate files and are not counted as versions. Version History projects retained points while physical cleanup catches up.
 

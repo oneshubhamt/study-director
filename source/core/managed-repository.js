@@ -228,7 +228,6 @@ function validateRepositoryRetention(value,exportedAt,{legacy=false}={}){
 }
 function repositoryDateKeyFromOrdinal(value){const date=new Date(Number(value)*86400000);return `${date.getUTCFullYear()}-${repositoryPad2(date.getUTCMonth()+1)}-${repositoryPad2(date.getUTCDate())}`;}
 function repositoryWeekStartOrdinal(value){const date=new Date(Number(value)*86400000),day=date.getUTCDay(),delta=(day-REPOSITORY_RETENTION_POLICY.weekStartsOn+7)%7;return Number(value)-delta;}
-function repositoryPreviousMonthKey(value,offset){const match=/^(\d{4})-(\d{2})$/u.exec(String(value||''));if(!match||!Number.isInteger(offset)||offset<0)throw new Error('Repository retention month is invalid.');const date=new Date(Date.UTC(Number(match[1]),Number(match[2])-1-offset,1));return `${date.getUTCFullYear()}-${repositoryPad2(date.getUTCMonth()+1)}`;}
 function newestRepositoryRow(rows){return rows.reduce((best,row)=>!best||Date.parse(row.manifest.exportedAt)>Date.parse(best.manifest.exportedAt)||Date.parse(row.manifest.exportedAt)===Date.parse(best.manifest.exportedAt)&&String(row.id).localeCompare(String(best.id))>0?row:best,null);}
 function activeProtectedRepositoryRow(rowsValue,now=Date.now()){
   const rows=Array.isArray(rowsValue)?rowsValue:[],nowMs=now instanceof Date?now.getTime():Number(now);
@@ -255,19 +254,30 @@ function selectRepositoryRetention(rowsValue,{now=new Date()}={}){
   const keep=(row,tier)=>{if(!row)return;selected.set(row.id,row);if(!tiers.has(row.id))tiers.set(row.id,tier);};
   const latest=newestRepositoryRow(normalRows);keep(latest,'latest');
   if(latest){
-    const anchorOrdinal=repositoryDateOrdinal(latest.manifest.retention.calendar.localDate);
-    if(!Number.isFinite(anchorOrdinal))throw new Error('Repository retention calendar anchor is invalid.');
-    const dailyStartOrdinal=anchorOrdinal-REPOSITORY_RETENTION_POLICY.dailyDays;
-    for(let offset=1;offset<=REPOSITORY_RETENTION_POLICY.dailyDays;offset++){
-      const key=repositoryDateKeyFromOrdinal(anchorOrdinal-offset),candidate=newestRepositoryRow(normalRows.filter(row=>row.manifest.retention.calendar.localDate===key));keep(candidate,'daily');
+    // Each tier keeps the newest checkpoint from its most recent periods that
+    // have one, all older than what the tier before it kept. Periods without a
+    // checkpoint are skipped, so a break of any length never empties a tier.
+    const calendar=row=>row.manifest.retention.calendar,policy=REPOSITORY_RETENTION_POLICY;
+    let older=normalRows.filter(row=>calendar(row).localDate<calendar(latest).localDate);
+    for(const [tier,count,period] of [['daily',policy.dailyDays,value=>value.localDate],['weekly',policy.weeklyPeriods,value=>value.weekStart],['monthly',policy.monthlyPeriods,value=>value.month]]){
+      const newest=new Map();
+      for(const row of older){const key=period(calendar(row)),best=newest.get(key);newest.set(key,best?newestRepositoryRow([best,row]):row);}
+      // Dates, weeks and months are zero-padded, so text order is time order.
+      const kept=[...newest.keys()].sort().reverse().slice(0,count);
+      for(const key of kept)keep(newest.get(key),tier);
+      const boundary=kept.at(-1);older=boundary===undefined?[]:older.filter(row=>period(calendar(row))<boundary);
     }
-    const firstWeeklyStart=repositoryWeekStartOrdinal(dailyStartOrdinal-1);
-    for(let offset=0;offset<REPOSITORY_RETENTION_POLICY.weeklyPeriods;offset++){
-      const weekStart=firstWeeklyStart-offset*7,key=repositoryDateKeyFromOrdinal(weekStart),candidate=newestRepositoryRow(normalRows.filter(row=>row.manifest.retention.calendar.weekStart===key&&repositoryDateOrdinal(row.manifest.retention.calendar.localDate)<dailyStartOrdinal));keep(candidate,'weekly');
-    }
-    const oldestWeeklyStart=firstWeeklyStart-(REPOSITORY_RETENTION_POLICY.weeklyPeriods-1)*7,monthlyBoundaryOrdinal=oldestWeeklyStart-1,boundaryMonth=repositoryDateKeyFromOrdinal(monthlyBoundaryOrdinal).slice(0,7);
-    for(let offset=0;offset<REPOSITORY_RETENTION_POLICY.monthlyPeriods;offset++){
-      const key=repositoryPreviousMonthKey(boundaryMonth,offset),candidate=newestRepositoryRow(normalRows.filter(row=>row.manifest.retention.calendar.month===key&&repositoryDateOrdinal(row.manifest.retention.calendar.localDate)<oldestWeeklyStart));keep(candidate,'monthly');
+    // Slots the tiers cannot use (a young history, a long break) go to the
+    // newest checkpoint of the remaining days, closing the widest gaps in time
+    // first and the newer on a tie. A day's older checkpoints still give way
+    // to its newest, but no day is dropped while a slot is free.
+    const time=row=>Date.parse(row.manifest.exportedAt),days=new Map(),covered=new Set([...selected.values()].map(row=>calendar(row).localDate));
+    for(const row of normalRows){const day=calendar(row).localDate;if(!covered.has(day))days.set(day,days.has(day)?newestRepositoryRow([days.get(day),row]):row);}
+    const spare=[...days.values()];
+    while(selected.size<policy.normalLimit&&spare.length){
+      let pick=0,widest=-1;
+      spare.forEach((row,index)=>{let gap=Infinity;for(const kept of selected.values())gap=Math.min(gap,Math.abs(time(row)-time(kept)));if(gap>widest||gap===widest&&newestRepositoryRow([spare[pick],row])===row){pick=index;widest=gap;}});
+      keep(spare.splice(pick,1)[0],'saved');
     }
   }
   if(activeProtected)keep(activeProtected,'before-restore');
