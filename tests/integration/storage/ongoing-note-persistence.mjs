@@ -210,6 +210,70 @@ for(const failEpochRead of [false,true]){
   assert.equal(stores.area.has('ias > polity'),false);assert.equal(stores.area.has('ias > polity > polity > y'),false);
 }
 
+// 11. A clash keeps this tab's version in the transaction that finds it: the
+// stored version replaces it only once the copy is stored. Copy names never run
+// out. At the note limit the oldest deleted note makes room; with none, nothing
+// is replaced, the failure says so, and deleting a note lets the copy in.
+{
+  const row=(key,text,updatedAt='2026-09-15T11:00:00.000Z',label=key)=>({version:2,key,label,text,updatedAt});
+  const clash=async(app,stores,clock,key,label,mine,theirs)=>{
+    app.notes.update(key,label,'shared',app.notes.get(key)?.updatedAt||'');await app.notes.flush({strict:true});await clock.advance(2000);
+    app.notes.update(key,label,mine,app.notes.get(key).updatedAt);
+    stores.area.set(key,row(key,theirs,'2026-09-15T13:00:00.000Z',label));
+  };
+  { // The write that finds the clash stores the copy; a crash right after loses nothing.
+    const {app,stores,clock,reports}=await setup();
+    await clash(app,stores,clock,'botany','Botany','mine','theirs');
+    assert.equal(await app.notes.flush(),true,'one write settles the clash');
+    assert.equal(stores.area.get('botany')?.text,'theirs');assert.equal(stores.area.get('botany (unsaved copy)')?.text,'mine','the copy is stored by the same transaction');
+    assert.equal(reports.at(-1).copyLabel,'Botany (unsaved copy)');
+    const reopened=createHarness(new Map(),stores,{clock});await reopened.app.notes.load();
+    assert.equal(reopened.app.notes.get('botany').text,'theirs');assert.equal(reopened.app.notes.get('botany (unsaved copy)').text,'mine','both versions survive a crash after the clash');
+  }
+  { // Edits made while the clash is settled join the copy.
+    const {app,stores,clock}=await setup();
+    await clash(app,stores,clock,'geology','Geology','mine','theirs');
+    const read=stores.area.get.bind(stores.area);let typed=false;
+    stores.area.get=key=>{if(key==='geology'&&!typed){typed=true;app.notes.update('geology','Geology','mine and more',app.notes.get('geology').updatedAt);}return read(key);};
+    await app.notes.flush({strict:true});stores.area.get=read;
+    assert.equal(typed,true);assert.equal(app.notes.get('geology').text,'theirs');
+    assert.equal(stores.area.get('geology (unsaved copy)')?.text,'mine and more','the latest local text is stored with the copy');
+  }
+  { // Names never run out: past 99 numbered copies the name is stamped.
+    const {app,stores,clock}=await setup();
+    for(let index=1;index<100;index+=1){const label=`Zoology (unsaved copy${index>1?` ${index}`:''})`;stores.area.set(label.toLowerCase(),row(label.toLowerCase(),`old copy ${index}`,undefined,label));}
+    await app.notes.reloadFresh();
+    await clash(app,stores,clock,'zoology','Zoology','mine','theirs');await app.notes.flush({strict:true});
+    const copies=[...stores.area.values()].filter(entry=>entry.key.startsWith('zoology (unsaved copy'));
+    assert.equal(copies.length,100);assert.equal(copies.filter(entry=>entry.text==='mine').length,1,'the copy got a stamped name');
+    assert.match(copies.find(entry=>entry.text==='mine').label,/^Zoology \(unsaved copy [0-9a-z]{16}\)$/u);
+    assert.equal(stores.area.get('zoology (unsaved copy 99)').text,'old copy 99','no stored note is replaced');
+  }
+  const fill=(stores,count,trash=[])=>{for(const [index,key] of trash.entries())stores.area.set(key,row(key,`deleted ${index}`,`2026-09-15T11:0${index}:00.000Z`,`Deleted ${index}`));for(let index=0;stores.area.size<count;index+=1)stores.area.set(`filler ${index}`,row(`filler ${index}`,'x'));};
+  { // At the limit the oldest deleted note makes room for the copy.
+    const {app,stores,clock}=await setup();
+    await clash(app,stores,clock,'ecology','Ecology','mine','theirs');fill(stores,1000,['~deleted 0001','~deleted 0002']);
+    assert.equal(await app.notes.flush(),true);
+    assert.equal(stores.area.size,1000,'the limit holds');assert.equal(stores.area.has('~deleted 0001'),false,'the oldest deleted note made room');assert.equal(stores.area.has('~deleted 0002'),true);
+    assert.equal(stores.area.get('ecology (unsaved copy)')?.text,'mine');
+  }
+  { // Without room nothing is replaced; deleting a note lets the copy in.
+    const {app,stores,clock,sharedLocal}=await setup();
+    await clash(app,stores,clock,'ethics','Ethics','mine','theirs');fill(stores,1000);
+    assert.equal(await app.notes.flush(),false,'the write reports failure');
+    assert.equal(stores.area.get('ethics').text,'theirs');assert.equal(app.notes.get('ethics').text,'mine','this tab keeps its version');
+    assert.equal(sharedLocal.get('areaNoteRescue')?.entries?.ethics?.text,'mine','and the browser copy holds it');
+    assert.match(app.notes.failure().message,/Ethics changed in another tab, and Ongoing Notes are at the 1,000-note limit.*Delete a note to make room/u);
+    await assert.rejects(app.notes.flush({strict:true}),/1,000-note limit/u,'a strict flush never reports it as saved');
+    await app.notes.reloadFresh();assert.equal(app.notes.get('ethics').text,'mine','a reload keeps the unsaved version');
+    const trashed=await app.notes.trash('filler 0');
+    assert.ok(trashed,'another note can still be deleted');
+    await app.notes.flush({strict:true});
+    assert.equal(stores.area.get('ethics').text,'theirs');assert.equal(stores.area.get('ethics (unsaved copy)')?.text,'mine','the copy is stored once there is room');
+    assert.equal(stores.area.size,1000);assert.equal(app.notes.failure().failed,false);assert.equal(sharedLocal.get('areaNoteRescue')?.entries?.ethics,undefined);
+  }
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'ongoing-note-persistence',contracts:[
   'queued batches use the revision committed by the earlier batch',
   'rows lost to a browser data clear are rewritten from memory',
@@ -220,5 +284,6 @@ console.log(JSON.stringify({status:'PASS',suite:'ongoing-note-persistence',contr
   'a clear counted by the database layer protects edits before the handler runs',
   'an unreadable takeover check keeps memory and deletion records',
   'deleted notes go to Recently deleted, restore beside a newer note, and expire after 30 days',
-  'rename moves a note with its children, merges a taken name only when asked'
+  'rename moves a note with its children, merges a taken name only when asked',
+  'a clash stores its copy in the transaction that finds it; names never run out; the limit never drops either version'
 ]},null,2));
