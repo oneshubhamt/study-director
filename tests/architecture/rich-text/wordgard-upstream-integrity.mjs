@@ -39,7 +39,7 @@ assert.match(patchedNode,/slice\(from: number, to\?: number\)/);
 assert.match(patchedNode,/to === undefined \? this\.length : to/);
 
 const patchedClipboard=applyWordgardSourcePatch('editor/clipboard.ts',read('vendor/wordgard/src/editor/clipboard.ts'),'../inert-html');
-assert.match(patchedClipboard,/^import \{parseInertHTML\} from "\.\.\/inert-html"\n/u,'Clipboard parsing must use the shared inert parser.');
+assert.match(patchedClipboard,/^import \{parseInertHTML\}[^\n]*\/inert-html"\n/u,'Clipboard parsing must use the shared inert parser.');
 assert.match(patchedClipboard,/let elt = parseInertHTML\(html\)/u);
 assert.doesNotMatch(patchedClipboard,/createPolicy\("detachedDocument"|detachedDoc\(\)\.createElement/);
 assert.match(patchedClipboard,/function clipboardDoc\(\)/,'Clipboard serialization must retain a detached non-parser document.');

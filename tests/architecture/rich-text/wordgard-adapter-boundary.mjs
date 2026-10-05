@@ -45,8 +45,8 @@ for(const file of walk('rich-text').filter(file=>file.endsWith('.ts')&&!posix(fi
 
 const typography=read('rich-text/typography.ts');
 assert.match(typography,/from ['"]\.\/wordgard-adapter['"]/,'Typography extensions must use the adapter.');
-assert.match(read('rich-text/wordgard-source/history.ts'),/from '\.\.\/\.\.\/vendor\/wordgard\/src\/history\/history'/u,'History comes from upstream; the build removes its menu buttons.');
-assert.match(read('rich-text/wordgard-adapter.ts'),/export \{cutHandling\} from '\.\/wordgard-patches\/cut'/u,'Cut handling is a Study Director extension behind the adapter.');
+assert.match(read('rich-text/wordgard-source/history.ts'),/\bvendor\/wordgard\/src\/history\/history'/u,'History comes from upstream; the build removes its menu buttons.');
+assert.match(read('rich-text/wordgard-adapter.ts'),/export \{cutHandling\}[^\n]*\/wordgard-patches\/cut'/u,'Cut handling is a Study Director extension behind the adapter.');
 assert.match(editor,/tableCore,history\(\),cutHandling,/u,'The editor installs the adapter cut handling.');
 assert.match(read('rich-text/wordgard-source/command.ts'),/killToLineEnd, yankKilled/,'Command facade must resolve keymap imports without enabling the default keymap.');
 

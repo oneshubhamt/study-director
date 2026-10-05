@@ -263,7 +263,8 @@ for(const failEpochRead of [false,true]){
     assert.equal(await app.notes.flush(),false,'the write reports failure');
     assert.equal(stores.area.get('ethics').text,'theirs');assert.equal(app.notes.get('ethics').text,'mine','this tab keeps its version');
     assert.equal(sharedLocal.get('areaNoteRescue')?.entries?.ethics?.text,'mine','and the browser copy holds it');
-    assert.match(app.notes.failure().message,/Ethics changed in another tab, and Ongoing Notes are at the 1,000-note limit.*Delete a note to make room/u);
+    const clashFailure=app.notes.failure().message;
+    assert.match(clashFailure,/Ethics changed in another tab, and Ongoing Notes are at the 1,000-note limit.*Delete a note to make room/u);
     await assert.rejects(app.notes.flush({strict:true}),/1,000-note limit/u,'a strict flush never reports it as saved');
     await app.notes.reloadFresh();assert.equal(app.notes.get('ethics').text,'mine','a reload keeps the unsaved version');
     const trashed=await app.notes.trash('filler 0');
@@ -297,7 +298,7 @@ for(const failEpochRead of [false,true]){
   // Rescue capacity: newest first, and the failure names what was left out.
   const big=char=>char.repeat(600*1024);
   controls.failNextAreaWrite=true;app.notes.update('filler 1','filler 1',big('a'),app.notes.get('filler 1').updatedAt);await clock.advance(5);
-  assert.equal(app.notes.failure().failed,true);assert.doesNotMatch(app.notes.failure().message,/emergency copy/u,'one note fits');
+  const oneFits=app.notes.failure();assert.equal(oneFits.failed,true);assert.doesNotMatch(oneFits.message,/emergency copy/u,'one note fits');
   app.notes.update('filler 2','filler 2',big('b'),app.notes.get('filler 2').updatedAt);
   controls.failNextAreaWrite=true;assert.equal(await app.notes.flush(),false);
   assert.equal(app.notes.protectUnsaved(),false,'the browser copy cannot hold both');
