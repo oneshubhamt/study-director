@@ -1617,6 +1617,7 @@ async function runDataMaintenance(options={}){
       protectUnsaved:AreaNotesRepository.protectUnsaved,
       trash:AreaNotesRepository.trash,
       restore:AreaNotesRepository.restore,
+      rename:AreaNotesRepository.rename,
       trashSnapshot:AreaNotesRepository.trashSnapshot,
       purgeExpiredTrash:AreaNotesRepository.purgeExpiredTrash,
       recoverAfterStorageLoss:AreaNotesRepository.recoverAfterStorageLoss

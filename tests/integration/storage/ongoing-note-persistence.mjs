@@ -179,6 +179,37 @@ for(const failEpochRead of [false,true]){
   assert.equal(stores.area.has(old),false,'expired trash is removed');assert.equal(stores.meta.has(`areaNoteDeletion.v1:${old}`),false);
 }
 
+// 10. Renaming moves a note with everything nested under it, in one transaction
+// that records the old names as deleted. A name that already holds text is
+// merged only when asked.
+{
+  const {app,stores}=await setup();
+  const write=async(key,label,text)=>{app.notes.update(key,label,text,app.notes.get(key)?.updatedAt||'');await app.notes.flush({strict:true});};
+  await write('gs2','GS2','paper');await write('gs2 > polity','GS2 > Polity','constitution');await write('gs2 > polity > rights','GS2 > Polity > Rights','articles');await write('history','History','ancient');
+  const moved=await app.notes.rename('gs2','Paper 2');
+  assert.equal(moved.status,'renamed');assert.deepEqual(moved.moved.map(item=>item.to).sort(),['paper 2','paper 2 > polity','paper 2 > polity > rights']);
+  assert.equal(stores.area.get('paper 2 > polity > rights').label,'Paper 2 > Polity > Rights','children keep their own names under the new parent');
+  assert.equal(stores.area.get('paper 2 > polity').text,'constitution');
+  for(const key of ['gs2','gs2 > polity','gs2 > polity > rights']){assert.equal(stores.area.has(key),false);assert.ok(stores.meta.has(`areaNoteDeletion.v1:${key}`),'old names are recorded as deleted');}
+  // A capitalisation change keeps the key and relabels the family.
+  assert.equal((await app.notes.rename('paper 2','PAPER 2')).status,'renamed');assert.equal(stores.area.get('paper 2 > polity').label,'PAPER 2 > Polity');
+  // Moving into itself is refused.
+  assert.equal((await app.notes.rename('paper 2','Paper 2 > Polity > Deeper')).status,'inside-itself');
+  // A taken name needs an explicit merge.
+  await write('modern','Modern','colonial');
+  const clash=await app.notes.rename('modern','History');
+  assert.equal(clash.status,'collision');assert.deepEqual([...clash.labels],['History']);assert.equal(stores.area.get('modern').text,'colonial','nothing changes without a merge');
+  const merged=await app.notes.rename('modern','History',{merge:(existing,moved)=>`${existing}\n${moved}`});
+  assert.equal(merged.status,'renamed');assert.equal(merged.merged,1);
+  assert.equal(stores.area.get('history').text,'ancient\ncolonial');assert.equal(stores.area.get('history').label,'History','the existing note keeps its name');assert.equal(stores.area.has('modern'),false);
+  // A deeper note may take a name another moved note leaves.
+  await write('ias > polity','IAS > Polity','A');await write('ias > polity > y','IAS > Polity > Y','B');await write('ias > polity > polity > y','IAS > Polity > Polity > Y','C');
+  const up=await app.notes.rename('ias > polity','IAS');
+  assert.equal(up.status,'renamed');
+  assert.deepEqual(['ias','ias > y','ias > polity > y'].map(key=>stores.area.get(key)?.text),['A','B','C']);
+  assert.equal(stores.area.has('ias > polity'),false);assert.equal(stores.area.has('ias > polity > polity > y'),false);
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'ongoing-note-persistence',contracts:[
   'queued batches use the revision committed by the earlier batch',
   'rows lost to a browser data clear are rewritten from memory',
@@ -188,5 +219,6 @@ console.log(JSON.stringify({status:'PASS',suite:'ongoing-note-persistence',contr
   'a clashing edit is kept as an unsaved-copy note',
   'a clear counted by the database layer protects edits before the handler runs',
   'an unreadable takeover check keeps memory and deletion records',
-  'deleted notes go to Recently deleted, restore beside a newer note, and expire after 30 days'
+  'deleted notes go to Recently deleted, restore beside a newer note, and expire after 30 days',
+  'rename moves a note with its children, merges a taken name only when asked'
 ]},null,2));

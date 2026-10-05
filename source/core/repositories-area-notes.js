@@ -755,6 +755,41 @@ const repository=(()=>{
     refreshAreaNoteConsumers();
     return key;
   }
+  // Renames or moves a note together with every note nested under it, in one
+  // transaction that records the old names as deleted. Today's plan is never
+  // touched: blocks still using an old name start a new note there. Where a
+  // new name already holds a note with text, the move happens only with
+  // options.merge(existingText,movedText), which returns the combined text.
+  async function rename(fromKey,toLabel,options={}){
+    if(!appCanMutate())return freeze({status:'rejected'});
+    const source=normalizeAreaName(fromKey),label=clampText(displayAreaName(toLabel),APP_LIMITS.maxAreaNameChars),target=normalizeAreaName(label);
+    if(!source||!target||isTrashKey(source)||isTrashKey(target)||!notes[source])return freeze({status:'rejected'});
+    if(target.startsWith(`${source} > `))return freeze({status:'inside-itself'});
+    await flush({strict:true});if(!notes[source])return freeze({status:'rejected'});
+    const depth=source.split(' > ').length,labelParts=label.split(' > ');
+    const moves=Object.keys(notes).filter(key=>!isTrashKey(key)&&(key===source||key.startsWith(`${source} > `))).map(key=>{
+      const parts=displayAreaName(notes[key].label||key).split(' > '),to=target+key.slice(source.length);
+      return {from:key,to,label:clampText(parts.length>=depth?[...labelParts,...parts.slice(depth)].join(' > '):displayAreaName(to),APP_LIMITS.maxAreaNameChars)};
+    });
+    const movedKeys=new Set(moves.map(move=>move.from)),clashes=moves.filter(move=>move.to!==move.from&&!movedKeys.has(move.to)&&hasContent(notes[move.to]));
+    if(clashes.length&&typeof options.merge!=='function')return freeze({status:'collision',labels:freeze(clashes.map(move=>String(notes[move.to].label||move.to)))});
+    const writes=[];
+    for(const move of moves){
+      const moved=notes[move.from],existing=move.to!==move.from&&!movedKeys.has(move.to)?notes[move.to]||null:null,merging=!!existing&&hasContent(existing);
+      const text=merging?String(options.merge(String(existing.text||''),String(moved.text||''))):String(moved.text||'');
+      if(!editorContentWithinLimits(text))return freeze({status:'content-limit',label:String(existing&&existing.label||move.label)});
+      const prior=[existing,moved].map(revision).filter(Boolean).sort().at(-1)||'';
+      writes.push({move,moved,existing,entry:{version:DATA_CONTRACT.schemas.AreaNote.version,key:move.to,label:merging?existing.label:move.label,text,updatedAt:nextRevision(prior)}});
+    }
+    // Every old name is freed before any new one is written, so a deeper note
+    // may take a name another moved note just left.
+    for(const {move,moved} of writes)if(move.to!==move.from){delete notes[move.from];markDirty(move.from,revision(moved));}
+    for(const {move,moved,existing,entry} of writes){notes[move.to]=entry;markDirty(move.to,move.to===move.from?revision(moved):revision(existing));}
+    touchSnapshot();
+    await flush({strict:true});
+    refreshAreaNoteConsumers();
+    return freeze({status:'renamed',key:target,moved:freeze(moves.map(move=>freeze({from:move.from,to:move.to}))),merged:clashes.length});
+  }
   function trashExpired(entry,now=decisionNowMs()){return timestamp(entry)<=now-TRASH_RETENTION_MS;}
   function trashSnapshot(){
     const now=decisionNowMs();
@@ -791,7 +826,7 @@ const repository=(()=>{
       throw e;
     }
   }
-  return Object.freeze({get,update,updateValidatedRich,remove,clearAll:clearAllAreaNotes,load,reloadFresh,readFreshPayload,readFreshItems,flush,protectUnsaved,trash,restore,trashSnapshot,purgeExpiredTrash,exportPayload,replace,merge,reconcile,normalizePayload,metadataSnapshot,searchSnapshot,size,failure,migrateLegacyRecovery,migrateHistoricalCanonicalRows,verifyCurrentRecovery,recoverAfterStorageLoss});
+  return Object.freeze({get,update,updateValidatedRich,remove,clearAll:clearAllAreaNotes,load,reloadFresh,readFreshPayload,readFreshItems,flush,protectUnsaved,trash,restore,rename,trashSnapshot,purgeExpiredTrash,exportPayload,replace,merge,reconcile,normalizePayload,metadataSnapshot,searchSnapshot,size,failure,migrateLegacyRecovery,migrateHistoricalCanonicalRows,verifyCurrentRecovery,recoverAfterStorageLoss});
 })();
 
     return repository;
