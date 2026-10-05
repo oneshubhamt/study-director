@@ -57,10 +57,15 @@ const repository=(()=>{
   let freshLoadPromise=null;
   let saveFailed=false;
   let saveMessage='';
+  // Unsaved notes the last browser copy could not hold.
+  let rescueShortfall=[];
   let snapshotRevision=0,metadataSnapshotCache=null,searchSnapshotCache=null;
 
   // A collection over the note limit is refused whole; cutting it would drop
   // notes without a word.
+  // Recently deleted shares the note limit but never blocks a note: at the
+  // limit the oldest deleted notes go first. Trash keys sort by deletion time.
+  function oldestTrashKeys(collection,count){return count>0?Object.keys(collection).filter(isTrashKey).sort().slice(0,count):[];}
   function tooManyNotes(count){return Object.assign(new RangeError(`Ongoing Notes are limited to ${APP_LIMITS.maxOngoingNotes.toLocaleString()} notes; this would make ${count.toLocaleString()}. Nothing was changed.`),{code:'AREA_NOTE_LIMIT'});}
   function normalizePayload(payload,options={}){
     const strictRich=options&&options.strictRich===true;
@@ -154,11 +159,13 @@ const repository=(()=>{
     const documents=Object.freeze(Object.values(notes).filter(entry=>hasContent(entry)&&!isTrashKey(entry.key)).map(entry=>Object.freeze({key:String(entry.key||''),revision:String(entry.updatedAt||''),value:String(entry.text||'')})));
     searchSnapshotCache=Object.freeze({revision:snapshotRevision,documents});return searchSnapshotCache;
   }
-  function clearFailure(){saveFailed=false;saveMessage='';}
+  function clearFailure(){saveFailed=false;saveMessage='';rescueShortfall=[];}
   function recordFailure(reason){
     saveFailed=true;
-    saveMessage=SaveLane.failureMessage('Ongoing Notes',reason||'the note database failed');
-    showSubjectNoteSaveWarning(reason);
+    const labels=rescueShortfall.map(key=>displayAreaName(notes[key]&&notes[key].label||key)),named=labels.length>3?`${labels.slice(0,3).join(', ')} and ${labels.length-3} more`:labels.join(', ');
+    const detail=String(reason||'the note database failed').replace(/[.\s]+$/u,'')+(labels.length?`. The browser's emergency copy holds ${Math.round(APP_LIMITS.areaNoteRescueBytes/104857.6)/10} MiB and could not keep ${named}, so closing this tab now would lose ${labels.length===1?'it':'them'}`:'');
+    saveMessage=SaveLane.failureMessage('Ongoing Notes',detail);
+    showSubjectNoteSaveWarning(detail);
   }
   const AREA_NOTE_RECOVERY_META_PREFIX=META_KEYS.areaNoteRecoveryPrefix;
   const AREA_NOTE_RECOVERY_FORMAT='study-director.area-note-recovery';
@@ -184,12 +191,13 @@ const repository=(()=>{
     return LocalStorageContract.setJson(STORAGE_KEYS.areaNoteRescue,envelope);
   }
   // The rescue is a snapshot of every note not yet confirmed in the database,
-  // newest first while it fits. Notes it held earlier are part of that set
-  // until saved, because loading marks them unsaved.
+  // newest first while it fits in areaNoteRescueBytes. Notes it held earlier
+  // are part of that set until saved, because loading marks them unsaved. Notes
+  // left out are named by the save failure.
   function protectUnsaved(){
     if(!everLoaded||!appCanMutate())return false;
     const keys=[...dirtyBaseRevisions.keys()];
-    if(!keys.length)return true;
+    if(!keys.length){rescueShortfall=[];return true;}
     const deletedAt=new Date().toISOString(),candidates=keys.map(key=>canonicalEntrySnapshot(notes[key],key)||{key,deleted:true,updatedAt:deletedAt}).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));
     const entries=KeyedRecord.create();let complete=true;
     for(const entry of candidates){
@@ -197,6 +205,7 @@ const repository=(()=>{
       if(jsonByteLength({format:AREA_NOTE_RESCUE_FORMAT,version:1,updatedAt:deletedAt,entries})>APP_LIMITS.areaNoteRescueBytes){delete entries[entry.key];complete=false;}
     }
     const written=Object.keys(entries).length?persistIndependentRescue(entries):true;
+    rescueShortfall=candidates.filter(entry=>!entry.deleted&&(!written||!entries[entry.key])).map(entry=>entry.key);
     if(!written||!complete)AppDiagnostics.capture('area-notes.rescue-write',LocalStorageContract.lastError||new Error(`Unsaved Ongoing Notes exceed the ${Math.round(APP_LIMITS.areaNoteRescueBytes/1024)} KB browser copy.`),'error');
     return written&&complete;
   }
@@ -610,8 +619,12 @@ const repository=(()=>{
       nextText=clampEditorContent(sourceText,APP_LIMITS.maxNoteChars);
     }
     if(!current&&isTrashKey(safeKey))return {status:'rejected',revision:''};
-    if(!current&&nextText.trim()&&size()>=APP_LIMITS.maxOngoingNotes)return {status:'limit',revision:currentRevision};
     if(!current&&!nextText.trim())return {status:'unchanged',revision:currentRevision};
+    if(!current){
+      const over=size()+1-APP_LIMITS.maxOngoingNotes,room=oldestTrashKeys(notes,over);
+      if(room.length<over)return {status:'limit',revision:currentRevision};
+      for(const key of room){const trashed=notes[key];delete notes[key];markDirty(key,revision(trashed));}
+    }
     const entry=ensureEntry(safeKey,nextLabel);
     if(!entry)return {status:'rejected',revision:currentRevision};
     entry.text=nextText;
@@ -718,7 +731,9 @@ const repository=(()=>{
     const previous=normalizePayload(notes),imported=normalizePayload(payload,{strictRich:true}),deletedEntries=normalizeAreaNoteDeletions(deletions);
     const next=merge?Object.assign(previous,imported):imported;
     for(const entry of deletedEntries)delete next[entry.key];
-    if(Object.keys(next).length>APP_LIMITS.maxOngoingNotes)throw tooManyNotes(Object.keys(next).length);
+    const over=Object.keys(next).length-APP_LIMITS.maxOngoingNotes,room=oldestTrashKeys(next,over);
+    if(room.length<over)throw tooManyNotes(Object.keys(next).length-room.length);
+    for(const key of room)delete next[key];
     const previousKeys=new Set(Object.keys(previous)),nextKeys=new Set(Object.keys(next));
     const removedKeys=[...previousKeys].filter(key=>!nextKeys.has(key));
     resetPendingAreaNoteWrites();

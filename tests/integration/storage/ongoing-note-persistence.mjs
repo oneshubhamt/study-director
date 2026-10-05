@@ -274,6 +274,38 @@ for(const failEpochRead of [false,true]){
   }
 }
 
+// 12. Recently deleted shares the note limit but never blocks a note: the oldest
+// deleted note gives way, in the same write. Live notes alone at the limit
+// refuse a new note, and an import over it is refused whole. A browser copy
+// too small for every unsaved note says which notes it could not keep.
+{
+  const row=(key,text,updatedAt='2026-09-15T11:00:00.000Z')=>({version:2,key,label:key,text,updatedAt});
+  const {app,stores,clock,controls}=await setup();
+  stores.area.set('~deleted 0001',row('~deleted 0001','old'));stores.area.set('~deleted 0002',row('~deleted 0002','newer'));
+  for(let index=0;stores.area.size<1000;index+=1)stores.area.set(`filler ${index}`,row(`filler ${index}`,'x'));
+  await app.notes.reloadFresh();
+  assert.equal(app.notes.update('new note','New note','text','').status,'changed','a full library with deleted notes still takes a new note');
+  await app.notes.flush({strict:true});
+  assert.equal(stores.area.size,1000);assert.equal(stores.area.has('~deleted 0001'),false,'the oldest deleted note gave way');assert.equal(stores.area.has('~deleted 0002'),true);
+  assert.deepEqual(app.notes.trashSnapshot().map(item=>item.key),['~deleted 0002']);
+  assert.equal((await app.notes.merge({'imported':row('imported','in')}))['~deleted 0002'],undefined,'an import at the limit drops the oldest deleted note');
+  assert.equal(stores.area.get('imported')?.text,'in');assert.equal(stores.area.size,1000);
+  assert.equal(app.notes.update('one too many','One too many','text','').status,'limit','live notes alone at the limit refuse a new note');
+  await assert.rejects(app.notes.merge({'another':row('another','in')}),error=>error.code==='AREA_NOTE_LIMIT','an import over the limit is refused whole');
+  assert.equal(stores.area.has('another'),false);
+
+  // Rescue capacity: newest first, and the failure names what was left out.
+  const big=char=>char.repeat(600*1024);
+  controls.failNextAreaWrite=true;app.notes.update('filler 1','filler 1',big('a'),app.notes.get('filler 1').updatedAt);await clock.advance(5);
+  assert.equal(app.notes.failure().failed,true);assert.doesNotMatch(app.notes.failure().message,/emergency copy/u,'one note fits');
+  app.notes.update('filler 2','filler 2',big('b'),app.notes.get('filler 2').updatedAt);
+  controls.failNextAreaWrite=true;assert.equal(await app.notes.flush(),false);
+  assert.equal(app.notes.protectUnsaved(),false,'the browser copy cannot hold both');
+  const failure=app.notes.failure().message;
+  assert.match(failure,/The browser's emergency copy holds 1 MiB and could not keep filler 1, so closing this tab now would lose it\./u,'the failure names the note left out');
+  await app.notes.flush({strict:true});assert.equal(app.notes.failure().failed,false,'a later save clears it');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'ongoing-note-persistence',contracts:[
   'queued batches use the revision committed by the earlier batch',
   'rows lost to a browser data clear are rewritten from memory',
@@ -285,5 +317,6 @@ console.log(JSON.stringify({status:'PASS',suite:'ongoing-note-persistence',contr
   'an unreadable takeover check keeps memory and deletion records',
   'deleted notes go to Recently deleted, restore beside a newer note, and expire after 30 days',
   'rename moves a note with its children, merges a taken name only when asked',
-  'a clash stores its copy in the transaction that finds it; names never run out; the limit never drops either version'
+  'a clash stores its copy in the transaction that finds it; names never run out; the limit never drops either version',
+  'Recently deleted gives way at the note limit; the rescue names notes it cannot hold'
 ]},null,2));
