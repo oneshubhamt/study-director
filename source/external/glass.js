@@ -570,6 +570,12 @@ html[data-material="glass"] .library-notes-nav-head{
   backdrop-filter:var(--sd-glass-filter-soft);
   -webkit-backdrop-filter:var(--sd-glass-filter-soft);
 }
+html[data-material="glass"] .library-notes-trash{
+  border-top-color:var(--sd-glass-edge);
+  background:linear-gradient(145deg,var(--sd-glass-specular-soft),transparent 46%),rgba(var(--sd-rgb-surface-1),var(--sd-glass-sticky-alpha));
+  backdrop-filter:var(--sd-glass-filter-soft);
+  -webkit-backdrop-filter:var(--sd-glass-filter-soft);
+}
 
 /* Data & Backup keeps Director's information hierarchy while adopting Glass
    materials instead of its legacy near-transparent local washes. */

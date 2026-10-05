@@ -118,6 +118,8 @@ The compatibility layer covers live-install migration and historical external fo
 
 Glass + Dark is the default presentation for a new installation. Returning users restore their saved skin and theme through a synchronous first-paint mirror; canonical preferences repair that mirror after persistence hydration. Mobile layouts include safe-area support, dynamic viewport units, coarse-pointer target sizing and dedicated phone/tablet navigation behavior.
 
+The Library's Ongoing Notes list is a tree in name order, Support Activities first. A branch opens on its twisty or the Right arrow key and starts open only while it holds today's Areas or the open note; what the person opens or closes is kept for the session. Rows show today's mark and when the note last changed; empty notes and plan placeholders are muted. The list shows 100 rows at a time and search lists matches with their paths. The toolbar creates (+), renames or moves (✎, F2) and deletes (−) the open note; Support Activities keeps its name and cannot be deleted. Deleting moves a note to Recently deleted, at the bottom of the list and opening upward, with Undo; a deleted note opens read-only with Restore and Delete forever. The editor pane is unchanged. On phones the list fills the panel and opening a note shows it full width with a back button.
+
 ## 12. Notification presentation
 
 `notice-coordinator` owns notification state, priority, deduplication, acknowledgement, recurrence and toast expiry. `interactions` renders coordinator-owned toasts and continues to own decision dialogs. Feature controllers retain execution, mutation authority and cancellation; dismissing a notification never cancels its operation.

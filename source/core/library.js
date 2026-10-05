@@ -17,7 +17,7 @@ registry.define('library',1,()=>{
     environment:freeze(['cancelAnimationFrame','createOption','createSearchWorker','requestAnimationFrame']),
     exporter:freeze(['exportKeys','cancel']),
     diary:freeze(['bindEditor','captureEditor','clearEditor','deleteEntry','draft','flushEditor','scheduleEditor','settled']),
-    notes:freeze(['bindEditor','canCreate','catalogue','clearEditor','commitEditor','failure','focusEditor','get','normalizeArea','orderEntries','remove','renderInherited','searchDocuments','size']),
+    notes:freeze(['bindEditor','canCreate','catalogue','clearEditor','commitEditor','failure','focusEditor','get','normalizeArea','orderEntries','purgeTrash','remove','rename','renderInherited','restore','searchDocuments','size','trash','trashSnapshot']),
     attachments:freeze(['batch','count','invalidate','reconcile']),
     clearLibrary:freeze(['preflight','execute']),
     ownership:freeze(['canMutate']),
@@ -53,7 +53,8 @@ registry.define('library',1,()=>{
     const {
       bindEditor,canCreate:canCreateOngoingNote,catalogue:ongoingNoteCatalogue,clearEditor,commitEditor,failure:ongoingNoteFailure,focusEditor,
       get:getAreaNote,normalizeArea:normalizeOngoingNoteArea,orderEntries:orderOngoingNoteEntries,
-      remove:removeOngoingNote,renderInherited,searchDocuments:ongoingNoteSearchDocuments,size:ongoingNotesSize
+      purgeTrash:purgeExpiredOngoingNotes,remove:removeOngoingNote,rename:renameNote,renderInherited,restore:restoreNote,searchDocuments:ongoingNoteSearchDocuments,size:ongoingNotesSize,
+      trash:trashNote,trashSnapshot:ongoingNoteTrash
     }=ports.notes;
     const {batch:batchAttachments,count:attachmentCount,invalidate:invalidateAttachments,reconcile:reconcileAttachments}=ports.attachments;
     const {preflight:preflightClearLibrary,execute:executeClearLibrary}=ports.clearLibrary;
@@ -87,6 +88,14 @@ registry.define('library',1,()=>{
     let ongoingNoteSelectionMode=false;
     let ongoingNoteSelection=new Set();
     let ongoingNoteExportBusy=false;
+    // The notes list is a tree in the catalogue's depth-first order. Branches the
+    // person opens or closes keep that state for this session; others open only
+    // while they hold today's Areas or the open note.
+    const ongoingNoteExpanded=new Map(),ONGOING_NOTE_PAGE_SIZE=100;
+    let ongoingNoteVisibleLimit=ONGOING_NOTE_PAGE_SIZE,ongoingNoteTreeNodes=new Map();
+    // Recently deleted: the open state of its list and the deleted note shown.
+    let ongoingNoteTrashOpen=false,selectedTrashKey='',ongoingNoteFocusKey='';
+    const LIBRARY_MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     let attachmentMutationHold=0,attachmentMutationNeedsNotes=false,attachmentMutationNeedsDiary=false,attachmentMutationNeedsLibrary=false,attachmentMutationRestoreViewport=false;
     const NOTE_SEARCH_IDLE_MS=120000,NOTE_SEARCH_RESPONSE_MS=30000,NOTE_SEARCH_BATCH_CHARS=2*1024*1024;
     let noteSearchDeadline=0,noteSearchWorker=null,noteSearchTimer=0,noteSearchBuildTimer=0,noteSearchBuildDocuments=null,noteSearchBuildIndex=0,noteSearchBuilding=false,noteSearchId=0,noteSearchQuery='',noteSearchReady=false,noteSearchMatches=new Set(),noteSearchFailed=false,noteSearchPendingUpdates=new Map(),noteSearchFallbackText=null;
@@ -191,7 +200,6 @@ registry.define('library',1,()=>{
       const parts=String(label||'').split('>').map(part=>part.trim()).filter(Boolean);
       return parts.length>1?parts.slice(0,-1).join(' > '):'';
     }
-    function reorderOngoingNoteRows(){const list=document.getElementById('library-notes-list');if(!list)return;const rows=new Map([...list.querySelectorAll('[data-ongoing-note-key]')].map(row=>[row.dataset.ongoingNoteKey,row]));ongoingNoteEntries().forEach(entry=>{const row=rows.get(entry.key);if(row)list.appendChild(row);});}
     function ongoingNoteSelectionIndex(entries){
       const rows=Array.isArray(entries)?entries:[],byLabel=new Map(rows.map(entry=>[String(entry.label||''),entry])),index=new Map(rows.map(entry=>[entry.key,[]]));
       for(const entry of rows){
@@ -216,7 +224,9 @@ registry.define('library',1,()=>{
       const add=document.getElementById('library-note-add'),remove=document.getElementById('library-note-delete'),drawer=ongoingNotesDrawer();
       if(drawer){drawer.classList.toggle('export-selecting',ongoingNoteSelectionMode);drawer.setAttribute('aria-busy',ongoingNoteExportBusy?'true':'false');}
       if(select)select.hidden=ongoingNoteSelectionMode;
+      const rename=document.getElementById('library-note-rename');
       if(add)add.hidden=ongoingNoteSelectionMode;
+      if(rename)rename.hidden=ongoingNoteSelectionMode;
       if(remove)remove.hidden=ongoingNoteSelectionMode;
       if(navCount)navCount.hidden=ongoingNoteSelectionMode;
       if(selectAll){selectAll.hidden=!ongoingNoteSelectionMode;selectAll.disabled=!exportable.length||allSelected||ongoingNoteExportBusy;selectAll.textContent='All';}
@@ -226,7 +236,7 @@ registry.define('library',1,()=>{
       if(count){count.hidden=!ongoingNoteSelectionMode;count.textContent=`${ongoingNoteSelection.size} selected`;}
     }
     function enterOngoingNoteSelection(){
-      ongoingNoteSelectionMode=true;ongoingNoteSelection.clear();
+      ongoingNoteSelectionMode=true;ongoingNoteSelection.clear();ongoingNotesDrawer()?.classList.remove('note-open');
       const current=ongoingNoteEntries().find(entry=>entry.key===selectedOngoingNoteKey);
       if(current?.hasNote)ongoingNoteSelection.add(current.key);
       clearOngoingNotesEditorBinding();renderOngoingNotes();return true;
@@ -281,19 +291,18 @@ registry.define('library',1,()=>{
       return true;
     }
     function updateOngoingNoteActions(entry){
-      const add=document.getElementById('library-note-add');
-      const remove=document.getElementById('library-note-delete');
+      const add=document.getElementById('library-note-add'),rename=document.getElementById('library-note-rename'),remove=document.getElementById('library-note-delete');
       const mutable=canMutate(),canAdd=mutable&&canCreateOngoingNote();
       if(add){
         add.disabled=!canAdd;
         add.setAttribute('aria-disabled',canAdd?'false':'true');
-        add.title=canAdd?'Create an ongoing note':'Ongoing Notes are limited to 1,000 saved notes';
+        add.title=canAdd?'Create an ongoing note':'Ongoing Notes are at their note limit';
       }
-      if(remove){
-        const stored=entry&&getAreaNote(entry.key,entry.label),removable=mutable&&!!stored;
-        remove.disabled=!removable;
-        remove.setAttribute('aria-disabled',removable?'false':'true');
-        remove.title=stored?`Delete the note for ${entry.label}`:'Select a saved note to delete it';
+      // Support Activities is shared by every support block: it keeps its name.
+      const stored=!!(entry&&getAreaNote(entry.key,entry.label)),editable=mutable&&stored&&!entry.support;
+      for(const [button,title] of [[rename,stored?entry.support?'Support Activities keeps its name':`Rename or move ${entry.label}`:'Select a saved note to rename or move it'],[remove,stored?entry.support?'Support Activities cannot be deleted':`Move ${entry.label} to Recently deleted`:'Select a saved note to delete it']]){
+        if(!button)continue;
+        button.disabled=!editable;button.setAttribute('aria-disabled',editable?'false':'true');button.title=title;
       }
     }
     function chooseOngoingNote(entries,filtered){
@@ -306,6 +315,126 @@ registry.define('library',1,()=>{
         ||null;
       selectedOngoingNoteKey=preferred?preferred.key:'';
       return preferred;
+    }
+    // Builds the tree from the catalogue's depth-first order: each note's parent
+    // is the nearest earlier note one level up.
+    function ongoingNoteTree(entries){
+      const nodes=entries.map(entry=>({entry,depth:Math.max(0,Number(entry.depth)||0),parent:null,children:0,holdsActive:false,expanded:false})),stack=[];
+      for(const node of nodes){
+        while(stack.length&&stack.at(-1).depth>=node.depth)stack.pop();
+        node.parent=stack.at(-1)||null;if(node.parent)node.parent.children+=1;
+        stack.push(node);
+      }
+      for(const node of nodes)if(node.entry.current||node.entry.key===selectedOngoingNoteKey)for(let up=node.parent;up&&!up.holdsActive;up=up.parent)up.holdsActive=true;
+      for(const node of nodes)node.expanded=node.children>0&&(ongoingNoteSelectionMode||(ongoingNoteExpanded.has(node.entry.key)?ongoingNoteExpanded.get(node.entry.key):node.holdsActive));
+      const visible=[];let closedAt=-1;
+      for(const node of nodes){
+        if(closedAt>=0&&node.depth>closedAt)continue;
+        closedAt=-1;visible.push(node);
+        if(node.children&&!node.expanded)closedAt=node.depth;
+      }
+      ongoingNoteTreeNodes=new Map(nodes.map(node=>[node.entry.key,node]));
+      return visible;
+    }
+    // Opens every branch above a note, so it is shown however the tree was left.
+    function expandOngoingNoteAncestors(key){
+      const node=ongoingNoteTreeNodes.get(key);
+      for(let up=node&&node.parent;up;up=up.parent)ongoingNoteExpanded.set(up.entry.key,true);
+    }
+    // Phones show the list or one note at a time: opening a note shows it full
+    // width, and its back button returns to the list.
+    function phoneLayout(){try{return !!window.matchMedia&&window.matchMedia('(max-width: 720px)').matches;}catch{return false;}}
+    function openNoteView(){const drawer=ongoingNotesDrawer();if(drawer&&phoneLayout()&&!ongoingNoteSelectionMode)drawer.classList.add('note-open');}
+    function closeNoteView(){
+      const drawer=ongoingNotesDrawer();if(!drawer||!drawer.classList.contains('note-open'))return false;
+      drawer.classList.remove('note-open');
+      requestAnimationFrame(()=>{const row=document.querySelector('#library-notes-list [role="treeitem"].active');if(row){row.tabIndex=0;row.focus({preventScroll:false});}});
+      return true;
+    }
+    function noteViewBackButton(){
+      const back=textEl('button','library-notes-back ui-btn','‹ Notes');back.type='button';back.setAttribute('aria-label','Back to the notes list');
+      back.addEventListener('click',closeNoteView);return back;
+    }
+    function toggleOngoingNoteBranch(key,expanded){ongoingNoteExpanded.set(key,!!expanded);ongoingNoteFocusKey=key;renderOngoingNotes();return true;}
+    function startOfLocalDay(time){const date=new Date(time);return new Date(date.getFullYear(),date.getMonth(),date.getDate()).getTime();}
+    function daysBefore(value){const time=Date.parse(String(value||''));return Number.isFinite(time)?Math.max(0,Math.round((startOfLocalDay(Date.now())-startOfLocalDay(time))/86400000)):-1;}
+    // When a note last changed: a time today, "Yesterday", then a date.
+    function editedLabel(value){
+      const days=daysBefore(value);if(days<0)return '';
+      const date=new Date(Date.parse(value));
+      if(days===0)return `${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
+      if(days===1)return 'Yesterday';
+      return `${date.getDate()} ${LIBRARY_MONTHS[date.getMonth()]}${date.getFullYear()!==new Date().getFullYear()?` ${date.getFullYear()}`:''}`;
+    }
+    function deletedLabel(value){const days=daysBefore(value);return days<=0?'Deleted today':days===1?'Deleted yesterday':`Deleted ${days} days ago`;}
+    function buildOngoingNoteTreeItem(node){
+      const {entry}=node,active=entry.key===selectedOngoingNoteKey&&!selectedTrashKey,leaf=ongoingNoteLeaf(entry.label),row=document.createElement('div');
+      row.className='library-note-nav-item library-note-tree-item '+(entry.hasNote?'has-note':'empty-note')+(entry.support?' support-note':'')+(active?' active':'');
+      row.style.setProperty('--note-indent',`${Math.min(6,node.depth)*15}px`);
+      row.dataset.ongoingNoteKey=entry.key;row.setAttribute('role','treeitem');row.setAttribute('aria-level',String(node.depth+1));row.setAttribute('aria-selected',active?'true':'false');
+      row.setAttribute('aria-label',`${leaf}${entry.hasNote?'':', empty'}${entry.current?', in today’s plan':''}`);
+      if(node.children)row.setAttribute('aria-expanded',node.expanded?'true':'false');
+      row.tabIndex=-1;
+      const twisty=textEl('span','library-note-twisty',node.children?(node.expanded?'▾':'▸'):'');twisty.setAttribute('aria-hidden','true');
+      if(node.children)twisty.addEventListener('click',event=>{event.stopPropagation();toggleOngoingNoteBranch(entry.key,!node.expanded);});
+      const meta=document.createElement('span');meta.className='library-note-nav-tags';
+      if(entry.current)meta.appendChild(textEl('span','library-note-tag current','TODAY'));
+      const edited=editedLabel(entry.updatedAt);if(edited)meta.appendChild(textEl('span','library-note-nav-edited',edited));
+      row.append(twisty,textEl('span','library-note-nav-name',leaf),meta);
+      row.addEventListener('click',()=>selectOngoingNote(entry.key));
+      return row;
+    }
+    // Arrow keys move through the tree, Right and Left open and close a branch,
+    // Enter opens a note and F2 renames it.
+    function handleOngoingNoteTreeKey(event){
+      const row=event.target&&event.target.closest?event.target.closest('[role="treeitem"]'):null;if(!row)return;
+      const rows=[...document.querySelectorAll('#library-notes-list [role="treeitem"]')],index=rows.indexOf(row),key=row.dataset.ongoingNoteKey,node=ongoingNoteTreeNodes.get(key);
+      const focusRow=target=>{if(!target)return;for(const item of rows)item.tabIndex=-1;target.tabIndex=0;target.focus();};
+      if(event.key==='ArrowDown')focusRow(rows[index+1]);
+      else if(event.key==='ArrowUp')focusRow(rows[index-1]);
+      else if(event.key==='Home')focusRow(rows[0]);
+      else if(event.key==='End')focusRow(rows.at(-1));
+      else if(event.key==='ArrowRight'){if(!node||!node.children)return;if(node.expanded)focusRow(rows[index+1]);else toggleOngoingNoteBranch(key,true);}
+      else if(event.key==='ArrowLeft'){if(node&&node.children&&node.expanded)toggleOngoingNoteBranch(key,false);else if(node&&node.parent)focusRow(rows.find(item=>item.dataset.ongoingNoteKey===node.parent.entry.key));else return;}
+      else if(event.key==='Enter'||event.key===' '){ongoingNoteFocusKey=key;selectOngoingNote(key);}
+      else if(event.key==='F2'){ongoingNoteFocusKey=key;selectOngoingNote(key);void renameOngoingNote();}
+      else return;
+      event.preventDefault();
+    }
+    function ongoingNoteTrashItems(){
+      return [...ongoingNoteTrash()].sort((a,b)=>String(a.label).localeCompare(String(b.label),undefined,{sensitivity:'base',numeric:true})||String(b.deletedAt).localeCompare(String(a.deletedAt)));
+    }
+    function buildTrashedNoteItem(item){
+      const button=document.createElement('button');button.type='button';
+      button.className='library-note-nav-item library-note-trash-item'+(item.hasNote?' has-note':' empty-note')+(item.key===selectedTrashKey?' active':'');
+      button.dataset.trashKey=item.key;button.setAttribute('aria-current',item.key===selectedTrashKey?'true':'false');
+      const parent=ongoingNoteParentPath(item.label);
+      button.append(textEl('span','library-note-nav-name',ongoingNoteLeaf(item.label)),textEl('span','library-note-nav-edited',deletedLabel(item.deletedAt)));
+      if(parent)button.append(textEl('span','library-note-nav-path',parent.replace(/\s*>\s*/g,' › ')));
+      button.addEventListener('click',()=>selectTrashedNote(item.key));
+      return button;
+    }
+    // Recently deleted sits at the bottom of the list and opens upward. It is
+    // hidden while empty and during export.
+    function renderOngoingNoteTrash(){
+      const section=document.getElementById('library-notes-trash'),list=document.getElementById('library-notes-trash-list'),toggle=document.getElementById('library-notes-trash-toggle'),count=document.getElementById('library-notes-trash-count');
+      if(!section||!list||!toggle)return;
+      const items=ongoingNoteSelectionMode?[]:ongoingNoteTrashItems();
+      section.hidden=!items.length;
+      if(!items.length){ongoingNoteTrashOpen=false;list.replaceChildren();return;}
+      if(count)count.textContent=`(${items.length})`;
+      toggle.setAttribute('aria-expanded',ongoingNoteTrashOpen?'true':'false');list.hidden=!ongoingNoteTrashOpen;
+      list.replaceChildren(...(ongoingNoteTrashOpen?items.map(buildTrashedNoteItem):[]));
+    }
+    function toggleOngoingNoteTrash(){
+      ongoingNoteTrashOpen=!ongoingNoteTrashOpen;
+      if(ongoingNoteTrashOpen&&canMutate())purgeExpiredOngoingNotes();
+      renderOngoingNotes();return true;
+    }
+    function selectTrashedNote(key){
+      if(!ongoingNoteTrashItems().some(item=>item.key===key))return false;
+      if(pendingOngoingNote){pendingOngoingNote=null;invalidateAttachments();}
+      selectedTrashKey=key;renderOngoingNotes();openNoteView();return true;
     }
     function buildOngoingNoteNavItem(entry,selectionIndex){
       if(ongoingNoteSelectionMode){
@@ -387,7 +516,7 @@ registry.define('library',1,()=>{
         const sync=textEl('div',`note-sync ui-label${writable?'':' idle'}`,writable?'✓':'—');
         sync.dataset.areaKey=entry.key;sync.setAttribute('role','status');sync.setAttribute('aria-atomic','true');sync.setAttribute('aria-label',syncMessage);sync.tabIndex=0;headTools.append(badge,sync);
       }
-      head.append(copy,headTools);
+      head.append(noteViewBackButton(),copy,headTools);
       const inherited=document.createElement('div');renderInherited(inherited,entry.key,false);
       if(readOnly){
         const preview=document.createElement('div');preview.className='library-ongoing-note-read';
@@ -402,7 +531,6 @@ registry.define('library',1,()=>{
       bindEditor(editor,entry.key,entry.label,'library');
       panel.replaceChildren(head,editorShell,inherited);
       setOngoingNotesStatus(writable?'':'Another tab has control. Browse freely, or take control before editing.',{readOnly:!writable});
-      let rowHasNote=entry.hasNote;
       editor.addEventListener('input',event=>{
         const accepted=commitEditor(editor,editor.value,event);
         if(!accepted)return;
@@ -415,9 +543,30 @@ registry.define('library',1,()=>{
           row.classList.toggle('empty-note',!hasNote);
           const tag=row.querySelector('.library-note-tag.note');if(tag)tag.hidden=!hasNote;
         }
-        if(hasNote!==rowHasNote){rowHasNote=hasNote;reorderOngoingNoteRows();}
         updateOngoingNoteActions({...entry,hasNote});
       });
+      return true;
+    }
+    // A deleted note opens read-only, with Restore and Delete forever.
+    function renderTrashedNote(item){
+      const panel=document.getElementById('library-notes-editor');if(!panel)return false;
+      const stored=getAreaNote(item.key,item.label),text=String(stored&&stored.text||''),signature=`trash\u0000${item.key}\u0000${String(stored&&stored.updatedAt||'')}\u0000${canMutate()?'1':'0'}`;
+      updateOngoingNoteActions(null);
+      if(signature===ongoingNoteEditorSignature&&panel.childElementCount)return true;
+      const previous=ongoingNotesEditorField();if(previous)clearEditor(previous);
+      ongoingNoteEditorSignature=signature;
+      const head=document.createElement('div');head.className='library-notes-editor-head';
+      const copy=document.createElement('div');copy.className='library-notes-editor-identity';
+      copy.append(textEl('div','library-notes-editor-title',ongoingNoteLeaf(item.label)),textEl('div','library-notes-editor-share ui-mono',`${deletedLabel(item.deletedAt)} · ${item.label}`));
+      const tools=document.createElement('div');tools.className='library-notes-editor-tools';
+      const restore=textEl('button','library-note-action ui-btn','Restore'),forget=textEl('button','library-note-action danger ui-btn','Delete forever');
+      restore.type='button';forget.type='button';restore.disabled=forget.disabled=!canMutate();
+      restore.addEventListener('click',()=>{void restoreTrashedNote(item.key);});forget.addEventListener('click',()=>{void deleteTrashedNoteForever(item.key);});
+      tools.append(restore,forget);head.append(noteViewBackButton(),copy,tools);
+      const preview=document.createElement('div');preview.className='library-ongoing-note-read';
+      if(!text.trim()){preview.classList.add('empty');preview.textContent='This note was empty.';}else renderRichTextContent(preview,text,'This note was empty.',`Deleted note ${item.label}`);
+      panel.replaceChildren(head,preview);
+      setOngoingNotesStatus(`Deleted notes are kept for 30 days.`);
       return true;
     }
     function renderOngoingNotes(){
@@ -428,14 +577,29 @@ registry.define('library',1,()=>{
       clearNoteSearchTimer();
       const query=ongoingNotesSearch(),searchState=filterOngoingNoteEntries(entries,query),filtered=searchState.entries;
       updateOngoingNoteSelectionControls(entries);
+      const trashed=selectedTrashKey&&!ongoingNoteSelectionMode?ongoingNoteTrashItems().find(item=>item.key===selectedTrashKey)||null:null;
+      if(!trashed)selectedTrashKey='';
       const selected=chooseOngoingNote(entries,filtered),selectionIndex=ongoingNoteSelectionMode?ongoingNoteSelectionIndex(entries):null;
       const list=document.getElementById('library-notes-list');
       if(list){
-        if(filtered.length)list.replaceChildren(...filtered.map(entry=>buildOngoingNoteNavItem(entry,selectionIndex)));
+        // Search shows matches with their paths; otherwise the tree.
+        const tree=!query,nodes=tree?ongoingNoteTree(entries):filtered.map(entry=>({entry})),activeIndex=nodes.findIndex(node=>node.entry.key===selectedOngoingNoteKey);
+        if(activeIndex>=ongoingNoteVisibleLimit)ongoingNoteVisibleLimit=Math.ceil((activeIndex+1)/ONGOING_NOTE_PAGE_SIZE)*ONGOING_NOTE_PAGE_SIZE;
+        const shown=nodes.slice(0,ongoingNoteVisibleLimit),rows=shown.map(node=>ongoingNoteSelectionMode||!tree?buildOngoingNoteNavItem(node.entry,selectionIndex):buildOngoingNoteTreeItem(node));
+        if(nodes.length>shown.length){
+          const more=textEl('button','library-notes-more ui-btn',`Show ${Math.min(nodes.length-shown.length,ONGOING_NOTE_PAGE_SIZE)} more`);more.type='button';
+          more.addEventListener('click',()=>{ongoingNoteVisibleLimit+=ONGOING_NOTE_PAGE_SIZE;renderOngoingNotes();});rows.push(more);
+        }
+        if(tree&&!ongoingNoteSelectionMode){list.setAttribute('role','tree');list.setAttribute('aria-label','Ongoing notes');}else{list.removeAttribute('role');list.removeAttribute('aria-label');}
+        if(filtered.length)list.replaceChildren(...rows);
         else list.replaceChildren(textEl('div','library-notes-zero ui-status','No ongoing notes match this search.'));
+        const focusable=list.querySelector('[role="treeitem"].active')||list.querySelector('[role="treeitem"]');if(focusable)focusable.tabIndex=0;
+        if(ongoingNoteFocusKey){const target=[...list.querySelectorAll('[role="treeitem"]')].find(row=>row.dataset.ongoingNoteKey===ongoingNoteFocusKey);ongoingNoteFocusKey='';if(target){for(const row of list.querySelectorAll('[role="treeitem"]'))row.tabIndex=-1;target.tabIndex=0;target.focus();}}
       }
       setTextSafe('library-notes-nav-count',query?(searchState.pending?`Searching… / ${entries.length}`:`${filtered.length} / ${entries.length}`):String(entries.length));
+      renderOngoingNoteTrash();
       if(ongoingNoteSelectionMode){renderOngoingNoteEditor(selected,true);setOngoingNotesStatus('Selection is temporary. Export does not change or sync your saved notes.');}
+      else if(trashed)renderTrashedNote(trashed);
       else renderOngoingNoteEditor(selected);
       requestSelectedOngoingNoteReveal();return true;
     }
@@ -448,8 +612,8 @@ registry.define('library',1,()=>{
       const match=ongoingNoteEntries().find(entry=>entry.key===String(key||''));
       if(!match)return false;
       if(pendingOngoingNote&&match.key!==pendingOngoingNote.key){pendingOngoingNote=null;invalidateAttachments();}
-      selectedOngoingNoteKey=match.key;
-      renderOngoingNotes();
+      selectedOngoingNoteKey=match.key;selectedTrashKey='';
+      renderOngoingNotes();openNoteView();
       return true;
     }
     function revealNoteReference(key){
@@ -460,8 +624,9 @@ registry.define('library',1,()=>{
       resetNoteSearch();
       if(ongoingNoteSelectionMode&&!ongoingNoteExportBusy){ongoingNoteSelectionMode=false;ongoingNoteSelection.clear();}
       const drawer=ongoingNotesDrawer();if(drawer)drawer.open=true;
-      selectedOngoingNoteKey=match.key;
-      renderOngoingNotes();
+      selectedOngoingNoteKey=match.key;selectedTrashKey='';
+      ongoingNoteTree(ongoingNoteEntries());expandOngoingNoteAncestors(match.key);
+      renderOngoingNotes();openNoteView();
       requestAnimationFrame(()=>requestAnimationFrame(()=>{
         const row=[...document.querySelectorAll('[data-ongoing-note-key]')].find(candidate=>candidate.dataset.ongoingNoteKey===match.key);
         if(row)row.scrollIntoView({block:'nearest'});
@@ -472,7 +637,7 @@ registry.define('library',1,()=>{
     async function createOngoingNote(){
       if(!canMutate())return false;
       if(!canCreateOngoingNote()){
-        setOngoingNotesStatus('Ongoing Notes are limited to 1,000 saved notes.',{error:true});
+        setOngoingNotesStatus('Ongoing Notes are at their note limit. Delete a note to make room.',{error:true});
         return false;
       }
       const selected=ongoingNoteEntries().find(entry=>entry.key===selectedOngoingNoteKey)||null;
@@ -509,47 +674,101 @@ registry.define('library',1,()=>{
       pendingOngoingNote=existing?null:Object.freeze({
         key:identity.key,label:identity.label,text:'',hasNote:false,current:false,updatedAt:'',ephemeral:true
       });
-      selectedOngoingNoteKey=identity.key;
+      selectedOngoingNoteKey=identity.key;selectedTrashKey='';
       invalidateAttachments();
       const search=document.getElementById('library-notes-search');
       if(search&&search.value)search.value='';
-      renderOngoingNotes();
+      ongoingNoteTree(ongoingNoteEntries());expandOngoingNoteAncestors(identity.key);
+      renderOngoingNotes();openNoteView();
       const editor=ongoingNotesEditorField();
       if(editor)requestAnimationFrame(()=>requestAnimationFrame(()=>{if(document.contains(editor))focusEditor(editor);}));
       const notice=notifications.begin({id:'ongoing-note-create',surfaceId:'ongoing-notes-status',title:existing?'Existing note opened':'New note ready',announce:false});
       notice.finish('succeeded',existing?`Opened the existing Area “${identity.label}”.`:`New Area “${identity.label}” is ready. It will be saved when you write a note.`);
       return true;
     }
+    function selectedStoredNote(){
+      const entry=ongoingNoteEntries().find(candidate=>candidate.key===selectedOngoingNoteKey)||null;
+      return entry&&!selectedTrashKey&&!entry.support&&getAreaNote(entry.key,entry.label)?entry:null;
+    }
+    // Deleting moves a note to Recently deleted at once; Undo puts it back.
     async function deleteOngoingNote(){
       if(!canMutate())return false;
-      const entry=ongoingNoteEntries().find(candidate=>candidate.key===selectedOngoingNoteKey)||null;
-      const editor=ongoingNotesEditorField();
-      if(!entry||!getAreaNote(entry.key,entry.label)||!editor){
-        setOngoingNotesStatus('Select a saved note before deleting it.');
-        return false;
-      }
-      const accepted=await confirm({
-        title:'Delete this ongoing note?',danger:true,
-        message:`This removes the current note text for “${entry.label}” from Study Director.`,
-        details:['Plan tasks and saved days are unchanged.','Parent Areas, child notes and existing backups are unchanged.'],
-        confirmLabel:'Delete note',cancelLabel:'Keep note'
-      });
-      if(!accepted)return false;
-      if(!canMutate())return false;
-      if(!getAreaNote(entry.key,entry.label)){renderOngoingNotes();return false;}
-      const notice=notifications.begin({id:'ongoing-note-delete',surfaceId:'ongoing-notes-status',title:'Delete note',message:'Deleting note…'});
-      try{if(!await removeOngoingNote(entry.key)){notice.finish('cancelled','No note was deleted.');return false;}}
-      catch(error){notice.finish('failed','The deletion is pending because browser storage could not be updated. Keep this tab open and retry after storage recovers.');return false;}
-      const noteFailure=ongoingNoteFailure();
-      if(noteFailure&&noteFailure.failed){
-        notice.finish('failed',noteFailure.message||'The note deletion is not safely stored yet.');
-        return false;
-      }
+      const entry=selectedStoredNote();
+      if(!entry){setOngoingNotesStatus('Select a saved note before deleting it.');return false;}
+      const notice=notifications.begin({id:'ongoing-note-delete',surfaceId:'ongoing-notes-status',title:'Delete note',message:'Moving the note to Recently deleted…'});
+      let trashKey;
+      try{trashKey=await trashNote(entry.key);}
+      catch(error){notice.finish('failed',error&&error.message||'The note could not be deleted because browser storage could not be updated. Keep this tab open and retry.');return false;}
+      if(trashKey===null){notice.finish('cancelled','No note was deleted.');return false;}
       if(pendingOngoingNote&&pendingOngoingNote.key===entry.key)pendingOngoingNote=null;
-      updateOngoingNoteSearchDocument({key:entry.key,deleted:true});
-      renderOngoingNotes();
-      notice.finish('succeeded',`Deleted the note for “${entry.label}”. Tasks, saved days, and child notes were not changed.`);
+      renderOngoingNotes();closeNoteView();
+      if(!trashKey){notice.finish('succeeded',`Removed the empty note “${entry.label}”.`);return true;}
+      notice.finish('succeeded',`Moved “${entry.label}” to Recently deleted.`,{action:{label:'Undo',run:()=>{void restoreTrashedNote(trashKey);}}});
       return true;
+    }
+    async function restoreTrashedNote(trashKey){
+      if(!canMutate())return false;
+      const item=ongoingNoteTrashItems().find(candidate=>candidate.key===trashKey);if(!item)return false;
+      const notice=notifications.begin({id:'ongoing-note-restore',surfaceId:'ongoing-notes-status',title:'Restore note',message:'Restoring the note…'});
+      let key;
+      try{key=await restoreNote(trashKey);}
+      catch(error){notice.finish('failed',error&&error.message||'The note could not be restored. Keep this tab open and retry.');return false;}
+      if(!key){notice.finish('failed',`“${item.label}” could not be restored: every “(restored)” name is taken.`);return false;}
+      selectedTrashKey='';selectedOngoingNoteKey=key;
+      ongoingNoteTree(ongoingNoteEntries());expandOngoingNoteAncestors(key);renderOngoingNotes();
+      const restored=ongoingNoteEntries().find(entry=>entry.key===key);
+      notice.finish('succeeded',restored&&restored.label!==item.label?`Restored “${item.label}” as “${restored.label}”, beside the note that now uses its name.`:`Restored “${item.label}”.`);
+      return true;
+    }
+    async function deleteTrashedNoteForever(trashKey){
+      if(!canMutate())return false;
+      const item=ongoingNoteTrashItems().find(candidate=>candidate.key===trashKey);if(!item)return false;
+      const accepted=await confirm({title:'Delete this note forever?',danger:true,message:`“${item.label}” will be removed for good. This cannot be undone.`,details:['Existing backups are unchanged.'],confirmLabel:'Delete forever',cancelLabel:'Keep it'});
+      if(!accepted||!canMutate())return false;
+      const notice=notifications.begin({id:'ongoing-note-forget',surfaceId:'ongoing-notes-status',title:'Delete forever',message:'Deleting the note…'});
+      try{if(!await removeOngoingNote(trashKey)){notice.finish('cancelled','No note was deleted.');return false;}}
+      catch(error){notice.finish('failed',error&&error.message||'The note could not be deleted. Keep this tab open and retry.');return false;}
+      selectedTrashKey='';renderOngoingNotes();closeNoteView();
+      notice.finish('succeeded',`Deleted “${item.label}” forever.`);
+      return true;
+    }
+    // Renames or moves a note with every note inside it. A name that already
+    // holds a note is merged only after the person agrees.
+    async function renameOngoingNote(){
+      if(!canMutate())return false;
+      const entry=selectedStoredNote();
+      if(!entry){setOngoingNotesStatus('Select a saved note to rename or move it.');return false;}
+      const nested=ongoingNoteEntries().some(candidate=>candidate.key.startsWith(`${entry.key} > `));
+      const result=await requestInput({
+        title:'Rename or move note',
+        message:'Type > to place it inside another Area, for example “GS2 > Polity”.',
+        inputLabel:'Name',defaultValue:entry.label,maxLength:160,required:true,requiredMessage:'Enter a name.',
+        hint:[nested?'Notes inside it move with it.':'',entry.current?`Today’s plan still uses “${entry.label.replace(/\s*>\s*/g,' › ')}”; its blocks will start a new note under that name.`:''].filter(Boolean).join(' ')||'Plan tasks and saved days are unchanged.',
+        preview:value=>String(value||'').trim().replace(/\s*>\s*/g,' › ')||'…',
+        validate:value=>normalizeOngoingNoteArea(value)?'':'Enter a valid name. Use > only to separate nested Areas.',
+        confirmLabel:'Rename',cancelLabel:'Cancel'
+      });
+      if(!result||!canMutate())return false;
+      const identity=normalizeOngoingNoteArea(result.value);
+      if(!identity||identity.label===entry.label)return false;
+      const notice=notifications.begin({id:'ongoing-note-rename',surfaceId:'ongoing-notes-status',title:'Rename note',message:'Renaming the note…'});
+      try{
+        let outcome=await renameNote(entry.key,identity.label,{merge:false});
+        if(outcome.status==='collision'){
+          const into=outcome.labels[0]||identity.label,others=outcome.labels.length-1;
+          const accepted=await confirm({title:'Merge notes?',message:`Merge “${entry.label}” into “${into}”? Its text is added to the end of “${into}”.`,details:others>0?[`${others} more note${others===1?'':'s'} inside it ${others===1?'is':'are'} merged the same way.`]:[],confirmLabel:'Merge',cancelLabel:'Cancel'});
+          if(!accepted||!canMutate()){notice.finish('cancelled','Nothing was renamed.');return false;}
+          outcome=await renameNote(entry.key,identity.label,{merge:true});
+        }
+        if(outcome.status!=='renamed'){
+          notice.finish('failed',outcome.status==='inside-itself'?'A note cannot move inside itself.':outcome.status==='content-limit'?`Merging would make “${outcome.label}” longer than one note can be. Nothing was changed.`:'The note could not be renamed. Nothing was changed.');
+          return false;
+        }
+        selectedOngoingNoteKey=outcome.key;ongoingNoteTree(ongoingNoteEntries());expandOngoingNoteAncestors(outcome.key);renderOngoingNotes();
+        const moved=outcome.moved.length-1;
+        notice.finish('succeeded',`${outcome.merged?'Merged into':'Renamed to'} “${identity.label}”${moved>0?`, with ${moved} note${moved===1?'':'s'} inside it`:''}.${entry.current?' Today’s plan still uses the old name.':''}`);
+        return true;
+      }catch(error){notice.finish('failed',error&&error.message||'The note could not be renamed. Keep this tab open and retry.');return false;}
     }
     function clearOngoingNotesEditorBinding(){
       ongoingNoteEditorSignature='';
@@ -572,7 +791,7 @@ registry.define('library',1,()=>{
       const drawer=ongoingNotesDrawer();
       const search=document.getElementById('library-notes-search');
       const add=document.getElementById('library-note-add');
-      const remove=document.getElementById('library-note-delete');
+      const remove=document.getElementById('library-note-delete'),rename=document.getElementById('library-note-rename'),list=document.getElementById('library-notes-list'),trashToggle=document.getElementById('library-notes-trash-toggle');
       const select=document.getElementById('library-note-select'),selectAll=document.getElementById('library-note-select-all'),clearSelection=document.getElementById('library-note-selection-clear'),exportButton=document.getElementById('library-note-export'),cancel=document.getElementById('library-note-select-cancel');
       if(drawer){
         drawer.addEventListener('toggle',()=>{
@@ -580,7 +799,7 @@ registry.define('library',1,()=>{
           else{
             if(ongoingNoteRevealFrame){cancelAnimationFrame(ongoingNoteRevealFrame);ongoingNoteRevealFrame=0;}
             ongoingNoteSelectionMode=false;ongoingNoteSelection.clear();ongoingNoteExportBusy=false;drawer.classList.remove('export-selecting');
-            pendingOngoingNote=null;
+            pendingOngoingNote=null;selectedTrashKey='';ongoingNoteTrashOpen=false;ongoingNoteVisibleLimit=ONGOING_NOTE_PAGE_SIZE;drawer.classList.remove('note-open');
             clearOngoingNotesEditorBinding();
             idleNoteSearch();
           }
@@ -590,6 +809,9 @@ registry.define('library',1,()=>{
       if(search)search.addEventListener('input',requestOngoingNotesRender);
       if(add)add.addEventListener('click',createOngoingNote);
       if(remove)remove.addEventListener('click',()=>{void deleteOngoingNote();});
+      if(rename)rename.addEventListener('click',()=>{void renameOngoingNote();});
+      if(list)list.addEventListener('keydown',handleOngoingNoteTreeKey);
+      if(trashToggle)trashToggle.addEventListener('click',toggleOngoingNoteTrash);
       if(select)select.addEventListener('click',enterOngoingNoteSelection);
       if(selectAll)selectAll.addEventListener('click',selectAllOngoingNotes);
       if(clearSelection)clearSelection.addEventListener('click',clearOngoingNoteSelection);
@@ -679,7 +901,6 @@ registry.define('library',1,()=>{
       }).catch(error=>{if(librarySummaryLoad===pending)librarySummaryLoad=null;throw error;});
       librarySummaryLoad=pending;return pending;
     }
-    const LIBRARY_MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     function diaryDrawer(){return document.getElementById('library-diary');}
     function diaryEditorField(){return document.querySelector('#library-diary-editor .library-diary-textarea');}
     function diaryDrawerOpen(){return !!diaryDrawer()?.open;}

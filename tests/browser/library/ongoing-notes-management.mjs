@@ -28,6 +28,14 @@ try{
         dialog.querySelector('.interaction-actions .primary,.interaction-actions .danger').click();
         await waitFor(()=>!dialog.open);await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));return true;
       },
+      async rename(value){
+        document.getElementById('library-note-rename').click();
+        const dialog=await waitFor(()=>{const item=document.getElementById('sd-interaction-dialog');return item&&item.open?item:null;});
+        const field=dialog.querySelector('.interaction-input'),before=field.value;field.value=value;field.dispatchEvent(new Event('input',{bubbles:true}));
+        const text=dialog.textContent;dialog.querySelector('.interaction-actions .primary,.interaction-actions .danger').click();
+        // A merge confirmation may reuse the dialog straight away.
+        await waitFor(()=>!dialog.open||!dialog.querySelector('.interaction-input'));return {before,text};
+      },
       async accept(){
         const dialog=await waitFor(()=>{const item=document.getElementById('sd-interaction-dialog');return item&&item.open?item:null;});
         const text=dialog.textContent;dialog.querySelector('.interaction-actions .primary,.interaction-actions .danger').click();await waitFor(()=>!dialog.open);return text;
@@ -65,11 +73,11 @@ try{
       deleteDisabled:document.getElementById('library-note-delete').disabled
     };
   })()`);
-  assert.equal(filled.keys[0],'zeta filled');
+  assert.deepEqual(filled.keys,['alpha empty','parent','parent > child empty','zeta filled'],'notes are listed by name; a branch holding today’s Areas is open');
   assert.deepEqual(filled.filtered,['zeta filled']);
   assert.match(filled.classes['zeta filled'],/has-note/);assert.match(filled.classes['alpha empty'],/empty-note/);
   assert.ok(filled.weights['zeta filled']>filled.weights['alpha empty'],'saved and empty notes must remain visually distinct in every presentation');
-  result.checks.filledFirstHierarchyAndMutedEmptyRows=true;
+  result.checks.alphabeticalTreeAndMutedEmptyRows=true;
   console.error('[qa-notes] hierarchy and search passed');
 
   const temporary=await page.evaluate(`(async()=>{
@@ -148,8 +156,8 @@ try{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
     const parent=[...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='standalone only');parent.click();await wait(25);
     await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const before={deleteDisabled:document.getElementById('library-note-delete').disabled,child:d.AppData.notes.exportPayload()['standalone only > nested topic']?.text||''};
-    document.getElementById('library-note-delete').click();const confirmation=await __interactionQA.accept();
-    await new Promise((resolve,reject)=>{const started=Date.now(),poll=()=>{if(!d.AppData.notes.exportPayload()['standalone only'])resolve();else if(Date.now()-started>5000)reject(new Error('delete timeout'));else setTimeout(poll,40);};poll();});
+    document.getElementById('library-note-delete').click();const confirmation=document.getElementById('sd-interaction-dialog')?.open===true;
+    await new Promise((resolve,reject)=>{const started=Date.now(),poll=()=>{if(/Moved/.test(document.getElementById('ongoing-notes-status').textContent))resolve();else if(Date.now()-started>5000)reject(new Error('delete timeout'));else setTimeout(poll,40);};poll();});
     await wait(100);
     const rows=[...document.querySelectorAll('[data-ongoing-note-key]')],parentAfter=rows.find(item=>item.dataset.ongoingNoteKey==='standalone only');
     return {
@@ -160,21 +168,98 @@ try{
     };
   })()`);
   assert.equal(deletedParent.before.deleteDisabled,false);assert.equal(deletedParent.before.child,'Nested knowledge');
-  assert.match(deletedParent.confirmation,/Plan tasks and saved days are unchanged/);assert.match(deletedParent.confirmation,/Parent Areas, child notes and existing backups are unchanged/);
-  assert.match(deletedParent.status,/Deleted the note/);assert.equal(deletedParent.parentPresent,true);assert.match(deletedParent.parentClass,/empty-note/);
+  assert.equal(deletedParent.confirmation,false,'deleting moves the note to Recently deleted without asking');
+  assert.match(deletedParent.status,/Moved “Standalone Only” to Recently deleted/);assert.equal(deletedParent.parentPresent,true);assert.match(deletedParent.parentClass,/empty-note/);
   assert.equal(deletedParent.child,'Nested knowledge');assert.equal(deletedParent.zeta,'Durable Zeta note');
   result.checks.revisionSafeDeletePreservesHierarchyTasksDaysChildrenAndBackupHistory=true;
-  console.error('[qa-notes] explicit deletion passed');
+  console.error('[qa-notes] deletion to Recently deleted passed');
+
+  // Recently deleted: listed at the bottom, opened read-only, restored, and
+  // deleted forever after confirmation.
+  const trash=await page.evaluate(`(async()=>{
+    const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),until=async test=>{for(let i=0;i<150&&!test();i++)await wait(20);return test();};
+    const section=document.getElementById('library-notes-trash'),toggle=document.getElementById('library-notes-trash-toggle');
+    const shown={hidden:section.hidden,label:toggle.textContent.replace(/\\s+/g,' ').trim()};
+    toggle.click();await until(()=>document.querySelector('[data-trash-key]'));
+    const row=document.querySelector('[data-trash-key]'),listed={name:row.querySelector('.library-note-nav-name').textContent,when:row.querySelector('.library-note-nav-edited').textContent,beforeList:section.firstElementChild.id};
+    row.click();await until(()=>[...document.querySelectorAll('#library-notes-editor button')].some(button=>button.textContent==='Restore'));
+    const preview={title:document.querySelector('.library-notes-editor-title').textContent,text:document.querySelector('#library-notes-editor .library-ongoing-note-read').textContent,editable:!!document.querySelector('#library-notes-editor textarea')};
+    [...document.querySelectorAll('#library-notes-editor button')].find(button=>button.textContent==='Restore').click();
+    await until(()=>/Restored/.test(document.getElementById('ongoing-notes-status').textContent));
+    const restored={text:d.AppData.notes.exportPayload()['standalone only']?.text||'',status:document.getElementById('ongoing-notes-status').textContent,selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||'',sectionHidden:section.hidden};
+    document.getElementById('library-note-delete').click();await until(()=>/Moved/.test(document.getElementById('ongoing-notes-status').textContent));
+    if(toggle.getAttribute('aria-expanded')!=='true')toggle.click();await until(()=>document.querySelector('[data-trash-key]'));
+    document.querySelector('[data-trash-key]').click();await until(()=>[...document.querySelectorAll('#library-notes-editor button')].some(button=>button.textContent==='Delete forever'));
+    [...document.querySelectorAll('#library-notes-editor button')].find(button=>button.textContent==='Delete forever').click();
+    const confirmation=await __interactionQA.accept();await until(()=>section.hidden);
+    return {shown,listed,preview,restored,confirmation,forever:{sectionHidden:section.hidden,trashLeft:d.AppData.notes.trashSnapshot().length,child:d.AppData.notes.exportPayload()['standalone only > nested topic']?.text||''}};
+  })()`);
+  assert.deepEqual(trash.shown,{hidden:false,label:'Recently deleted (1)'});
+  assert.deepEqual(trash.listed,{name:'Standalone Only',when:'Deleted today',beforeList:'library-notes-trash-list'},'deleted notes are listed above the toggle, opening upward');
+  assert.deepEqual(trash.preview,{title:'Standalone Only',text:trash.preview.text,editable:false});assert.match(trash.preview.text,/Standalone Area knowledge/);
+  assert.equal(trash.restored.text,'Standalone Area knowledge');assert.match(trash.restored.status,/Restored “Standalone Only”/);assert.equal(trash.restored.selected,'standalone only');assert.equal(trash.restored.sectionHidden,true);
+  assert.match(trash.confirmation,/will be removed for good/);assert.deepEqual(trash.forever,{sectionHidden:true,trashLeft:0,child:'Nested knowledge'});
+  result.checks.recentlyDeletedRestoreAndDeleteForever=true;
+  console.error('[qa-notes] Recently deleted passed');
+
+  // Rename moves a note; a name that already holds a note merges only after
+  // the person agrees.
+  const renamed=await page.evaluate(`(async()=>{
+    const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),until=async test=>{for(let i=0;i<150&&!test();i++)await wait(20);return test();};
+    await __interactionQA.create('Rename Me','top');await wait(25);
+    const field=document.querySelector('.library-notes-textarea');field.value='Moved knowledge';field.dispatchEvent(new Event('input',{bubbles:true}));await d.AppData.notes.flush();await wait(40);
+    const status=()=>document.getElementById('ongoing-notes-status').textContent;
+    const first=await __interactionQA.rename('Renamed Note');await until(()=>/Renamed to/.test(status()));
+    const afterRename={keys:Object.keys(d.AppData.notes.exportPayload()).filter(key=>/rename/.test(key)),selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||'',status:document.getElementById('ongoing-notes-status').textContent};
+    await __interactionQA.rename('Standalone Only > Nested Topic');const confirmation=await __interactionQA.accept();
+    await until(()=>/Merged into/.test(status()));
+    const merged=d.AppData.notes.exportPayload()['standalone only > nested topic']?.text||'';
+    return {before:first.before,afterRename,confirmation,merged:{plain:d.RichTextApi?d.RichTextApi.toPlainText(merged):merged,raw:merged},status:document.getElementById('ongoing-notes-status').textContent};
+  })()`);
+  assert.equal(renamed.before,'Rename Me','the dialog starts from the current name');
+  assert.deepEqual(renamed.afterRename.keys,['renamed note']);assert.equal(renamed.afterRename.selected,'renamed note');assert.match(renamed.afterRename.status,/Renamed to “Renamed Note”/);
+  assert.match(renamed.confirmation,/Merge “Renamed Note” into “Standalone Only > Nested Topic”\? Its text is added to the end/);
+  assert.match(renamed.merged.raw,/Nested knowledge/);assert.match(renamed.merged.raw,/Moved knowledge/);assert.match(renamed.status,/Merged into/);
+  result.checks.renameAndMergeOnlyWhenAsked=true;
+  console.error('[qa-notes] rename and merge passed');
+
+  const undone=await page.evaluate(`(async()=>{
+    const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),until=async test=>{for(let i=0;i<150&&!test();i++)await wait(20);return test();};
+    for(const close of document.querySelectorAll('.interaction-toast-close'))close.click();await until(()=>!document.querySelector('.interaction-toast'));
+    [...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='zeta filled').click();await wait(30);
+    document.getElementById('library-note-delete').click();await until(()=>!d.AppData.notes.exportPayload()['zeta filled']);
+    const toast=await until(()=>[...document.querySelectorAll('.interaction-toast')].find(item=>item.textContent.includes('Moved “Zeta Filled” to Recently deleted')));
+    const undo=[...toast.querySelectorAll('button')].find(button=>button.textContent==='Undo');
+    undo.click();await until(()=>document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey==='zeta filled'&&/Restored/.test(document.getElementById('ongoing-notes-status').textContent));
+    return {text:d.AppData.notes.exportPayload()['zeta filled']?.text||'',trash:d.AppData.notes.trashSnapshot().length,selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||''};
+  })()`);
+  assert.deepEqual(undone,{text:'Durable Zeta note',trash:0,selected:'zeta filled'},'Undo puts a deleted note back');
+  result.checks.deleteUndo=true;
 
   await page.setViewport({width:390,height:844,mobile:true,scale:2});await page.settle(3);
   const mobile=await page.evaluate(`(()=>{
     const add=document.getElementById('library-note-add'),remove=document.getElementById('library-note-delete'),root=document.documentElement;
     const rect=element=>{const r=element.getBoundingClientRect();return {width:r.width,height:r.height}};
-    return {add:rect(add),remove:rect(remove),addLabel:add.getAttribute('aria-label'),removeLabel:remove.getAttribute('aria-label'),overflow:root.scrollWidth-root.clientWidth};
+    return {add:rect(add),remove:rect(remove),rename:rect(document.getElementById('library-note-rename')),addLabel:add.getAttribute('aria-label'),removeLabel:remove.getAttribute('aria-label'),overflow:root.scrollWidth-root.clientWidth};
   })()`);
-  assert.ok(mobile.add.width>=44&&mobile.add.height>=44);assert.ok(mobile.remove.width>=44&&mobile.remove.height>=44);
+  assert.ok(mobile.add.width>=44&&mobile.add.height>=44);assert.ok(mobile.remove.width>=44&&mobile.remove.height>=44);assert.ok(mobile.rename.width>=44&&mobile.rename.height>=44);
   assert.equal(mobile.addLabel,'Create an Area note');assert.equal(mobile.removeLabel,'Delete the selected Area note');assert.ok(mobile.overflow<=1);
   result.checks.compactAccessibleTouchControlsAndNoHorizontalOverflow=true;
+
+  // Phones show the list or one note: opening a note hides the list, and the
+  // back button returns to it with the note's row focused.
+  const phone=await page.evaluate(`(async()=>{
+    const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),shown=selector=>{const el=document.querySelector(selector);return !!el&&getComputedStyle(el).display!=='none'&&el.getBoundingClientRect().height>0;};
+    const before={list:shown('.library-notes-nav'),note:shown('#library-notes-editor')};
+    [...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='zeta filled').click();await wait(60);
+    const open={list:shown('.library-notes-nav'),note:shown('#library-notes-editor'),back:shown('#library-notes-editor .library-notes-back'),width:Math.round(document.getElementById('library-notes-editor').getBoundingClientRect().width),grid:Math.round(document.querySelector('.library-notes-grid').getBoundingClientRect().width)};
+    document.querySelector('#library-notes-editor .library-notes-back').click();await wait(80);
+    return {before,open,after:{list:shown('.library-notes-nav'),note:shown('#library-notes-editor'),focused:document.activeElement?.dataset?.ongoingNoteKey||''},overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth};
+  })()`);
+  assert.deepEqual(phone.before,{list:true,note:false});
+  assert.deepEqual({...phone.open,width:undefined,grid:undefined},{list:false,note:true,back:true,width:undefined,grid:undefined});assert.ok(Math.abs(phone.open.width-phone.open.grid)<=2,'the open note uses the full width');
+  assert.deepEqual(phone.after,{list:true,note:false,focused:'zeta filled'});assert.ok(phone.overflow<=1);
+  result.checks.phoneListAndNoteViews=true;
 
   const mobileMaterials=await page.evaluate(`(()=>{const head=document.querySelector('.library-notes-nav-head'),drawer=document.querySelector('.library-data-drawer');drawer.open=true;const actions=[...document.querySelectorAll('.backup-file-actions>.mini-btn')].map(el=>el.getBoundingClientRect());const hs=getComputedStyle(head),root=document.documentElement;return {presentation:root.dataset.presentation,headBackground:hs.backgroundImage,headBackdrop:hs.backdropFilter||hs.webkitBackdropFilter||'none',actionWidths:actions.map(r=>Math.round(r.width)),overflow:root.scrollWidth-root.clientWidth}})()`);
   assert.equal(mobileMaterials.presentation,'glass');assert.match(mobileMaterials.headBackground,/gradient/i);assert.notEqual(mobileMaterials.headBackdrop,'none');assert.equal(mobileMaterials.actionWidths.length,2);assert.ok(Math.abs(mobileMaterials.actionWidths[0]-mobileMaterials.actionWidths[1])<=2);assert.ok(mobileMaterials.overflow<=1);

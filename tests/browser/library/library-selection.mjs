@@ -39,7 +39,7 @@ try{
       environment:freeze({cancelAnimationFrame:id=>cancelAnimationFrame(id),createOption:(text,value)=>{const option=document.createElement('option');option.text=text;option.value=value;return option;},createSearchWorker:()=>{const corpus=new Map();return {onmessage:null,onerror:null,postMessage(message){const m=message||{};if(m.type==='sync'){corpus.clear();for(const row of m.documents||[])corpus.set(String(row.key||''),String(row.plain??row.value??'').toLowerCase());return;}if(m.type==='batch'){for(const row of m.documents||[])corpus.set(String(row.key||''),String(row.plain??row.value??'').toLowerCase());return;}if(m.type==='upsert'){const row=m.document||{};corpus.set(String(row.key||''),String(row.plain??row.value??'').toLowerCase());return;}if(m.type==='delete'){corpus.delete(String(m.key||''));return;}if(m.type==='query'){const needle=String(m.query||'').toLowerCase(),keys=[...corpus].filter(([,text])=>text.includes(needle)).map(([key])=>key);queueMicrotask(()=>this.onmessage?.({data:{type:'result',id:m.id,keys}}));}},terminate(){corpus.clear();}};},requestAnimationFrame:cb=>requestAnimationFrame(cb)}),
       exporter:freeze({cancel:()=>{},exportKeys:async keys=>{window.__exports.push([...keys]);return window.__exportResult||freeze({status:'downloaded',kind:keys.length===1?'markdown':'zip',notes:keys.length,assets:0,filename:keys.length===1?'One.md':'Study-Director-Notes.zip'});}}),
       diary:freeze({bindEditor:no,captureEditor:v=>v,clearEditor:no,deleteEntry:async()=>false,draft:()=>null,flushEditor:async()=>null,scheduleEditor:()=>true,settled:async()=>true}),
-      notes:freeze({bindEditor:no,canCreate:()=>true,catalogue:()=>entries,clearEditor:no,commitEditor:()=>true,failure:()=>null,focusEditor:field=>field.focus(),get:(key,label)=>freeze({key,label,text:entries.find(x=>x.key===key)?.text||''}),normalizeArea:v=>String(v||''),orderEntries:v=>v,remove:async()=>true,renderInherited:no,searchDocuments:()=>entries.filter(x=>x.text).map(x=>freeze({key:x.key,revision:'r1',value:x.text})),size:()=>entries.length}),
+      notes:freeze({bindEditor:no,canCreate:()=>true,catalogue:()=>entries,clearEditor:no,commitEditor:()=>true,failure:()=>null,focusEditor:field=>field.focus(),get:(key,label)=>freeze({key,label,text:entries.find(x=>x.key===key)?.text||''}),normalizeArea:v=>String(v||''),orderEntries:v=>v,purgeTrash:()=>0,remove:async()=>true,rename:async()=>freeze({status:'rejected'}),renderInherited:no,restore:async()=>null,trash:async()=>null,trashSnapshot:()=>[],searchDocuments:()=>entries.filter(x=>x.text).map(x=>freeze({key:x.key,revision:'r1',value:x.text})),size:()=>entries.length}),
       attachments:freeze({batch:async fn=>fn(),count:async()=>0,invalidate:()=>{},reconcile:async()=>true}),
       clearLibrary:freeze({preflight:async()=>freeze({status:'ready'}),execute:async()=>freeze({status:'cleared'})}),
       ownership:freeze({canMutate:()=>true}),
@@ -47,8 +47,25 @@ try{
     });
     const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],module=registry.require('library',1);window.__libraryView=module.createView(freeze({ports}));
   })()`);
-  await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-notes-list .library-note-nav-item').length===5`),{label:'library note rows'});
+  // The list is a tree: a branch holding neither today's Areas nor the open
+  // note starts closed, and opens on its twisty or the Right arrow key.
+  await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-notes-list .library-note-nav-item').length===3`),{label:'library note rows'});
   assert.equal(await page.evaluate(`!!document.querySelector('#library-notes-editor textarea')`),true,'Normal Library mode must remain editable.');
+  const tree=await page.evaluate(`(()=>{const list=document.getElementById('library-notes-list'),rows=[...list.querySelectorAll('[role="treeitem"]')];return {role:list.getAttribute('role'),keys:rows.map(row=>row.dataset.ongoingNoteKey),branch:rows.find(row=>row.dataset.ongoingNoteKey==='core-subject').getAttribute('aria-expanded'),tabbable:rows.filter(row=>row.tabIndex===0).map(row=>row.dataset.ongoingNoteKey)};})()`);
+  assert.deepEqual(tree,{role:'tree',keys:['geography','core-subject','ethics'],branch:'false',tabbable:['geography']});
+  await page.evaluate(`document.querySelector('[data-ongoing-note-key="core-subject"] .library-note-twisty').click()`);
+  await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-notes-list [role="treeitem"]').length===5`),{label:'branch opens'});
+  await page.evaluate(`(()=>{const row=document.querySelector('[data-ongoing-note-key="core-subject"]');row.focus();row.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));})()`);
+  await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-notes-list [role="treeitem"]').length===3`),{label:'Left closes the branch'});
+  assert.equal(await page.evaluate(`document.activeElement?.dataset.ongoingNoteKey`),'core-subject','focus stays on the branch');
+  await page.evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}))`);
+  await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-notes-list [role="treeitem"]').length===5`),{label:'Right opens the branch'});
+  await page.evaluate(`(()=>{document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()`);
+  await waitFor(()=>page.evaluate(`document.querySelector('#library-notes-editor .library-notes-editor-title')?.textContent==='Polity'`),{label:'Enter opens a note'});
+  assert.equal(await page.evaluate(`document.activeElement?.dataset.ongoingNoteKey`),'polity','focus stays in the tree after opening');
+  await page.evaluate(`[...document.querySelectorAll('[data-ongoing-note-key]')].find(row=>row.dataset.ongoingNoteKey==='geography').click()`);
+  await waitFor(()=>page.evaluate(`document.querySelector('#library-notes-editor .library-notes-editor-title')?.textContent==='Geography'`),{label:'back to Geography'});
+  result.checks.collapsibleKeyboardTree=true;
 
   await page.click('#library-note-select');
   await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-notes-list .library-note-checkbox').length===5`),{label:'selection checkboxes'});

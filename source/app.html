@@ -1081,7 +1081,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
         </summary>
         <div class="library-notes-workspace">
           <div class="library-notes-intro">
-            <div class="library-notes-help ui-body">Persistent notes are shared by Area; parent notes are read-only context. Use + for another standalone or nested Area. Daily reflections stay under Saved Day Detail.</div>
+            <div class="library-notes-help ui-body">Persistent notes are shared by Area; parent notes are read-only context. Use + for a new standalone or nested Area, ✎ to rename or move a note, and − to move it to Recently deleted. Daily reflections stay under Saved Day Detail.</div>
             <input class="library-notes-search ui-field ui-mono" id="library-notes-search" type="search" placeholder="Search ongoing notes…" aria-label="Search ongoing notes">
           </div>
           <div class="library-notes-grid ui-canvas">
@@ -1097,11 +1097,16 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                     <button class="library-note-action ui-btn library-note-selection-cancel" id="library-note-select-cancel" type="button" hidden aria-label="Exit export selection" title="Exit export selection">×</button>
                   </span>
                   <button class="library-note-tool ui-btn" id="library-note-add" type="button" data-owner-mutation="library-notes" aria-label="Create an Area note" title="Create an Area note">+</button>
+                  <button class="library-note-tool ui-btn" id="library-note-rename" type="button" data-owner-mutation="library-notes" aria-label="Rename or move the selected note" title="Select a saved note to rename or move it" disabled>✎</button>
                   <button class="library-note-tool delete ui-btn" id="library-note-delete" type="button" data-owner-mutation="library-notes" aria-label="Delete the selected Area note" title="Select a saved note to delete it" disabled>−</button>
                   <span class="library-notes-nav-count" id="library-notes-nav-count">0</span>
                 </span>
               </div>
               <div class="library-notes-list" id="library-notes-list"></div>
+              <div class="library-notes-trash" id="library-notes-trash" hidden>
+                <div class="library-notes-trash-list" id="library-notes-trash-list" hidden></div>
+                <button class="library-notes-trash-toggle ui-btn" id="library-notes-trash-toggle" type="button" aria-expanded="false" aria-controls="library-notes-trash-list">Recently deleted <span id="library-notes-trash-count"></span></button>
+              </div>
             </nav>
             <section class="library-notes-editor" id="library-notes-editor">
               <div class="library-notes-editor-empty ui-status">Select an Area to view its ongoing note.</div>
@@ -4709,21 +4714,16 @@ function orderOngoingAreaEntries(source){
     const parts=String(key||'').split(' > ');
     return parts.length>1?parts.slice(0,-1).join(' > '):'';
   };
-  const values=[...entries.values()],branchHasNote=new Set();
-  values.filter(entry=>entry.hasNote).forEach(entry=>{
-    let key=entry.key;
-    while(key){branchHasNote.add(key);key=parentKey(key);}
-  });
+  const values=[...entries.values()];
   const children=new Map();
   values.forEach(entry=>{
     const parent=parentKey(entry.key);
     const group=children.get(parent)||[];
     group.push(entry);children.set(parent,group);
   });
+  // Support Activities first, then by name at every level.
   const compare=(a,b)=>(Number(b.support)-Number(a.support))
-    ||(Number(branchHasNote.has(b.key))-Number(branchHasNote.has(a.key)))
-    ||(Number(b.hasNote)-Number(a.hasNote))
-    ||a.label.localeCompare(b.label,undefined,{sensitivity:'base'});
+    ||a.label.localeCompare(b.label,undefined,{sensitivity:'base',numeric:true});
   children.forEach(group=>group.sort(compare));
   const ordered=[],seen=new Set();
   const visit=entry=>{
@@ -7930,7 +7930,8 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
   notes:Object.freeze({
     bindEditor:bindAreaNoteEditor,
     focusEditor:field=>{void RichTextRuntime.activate(field,{focus:true}).catch(error=>AppDiagnostics.capture('library.note-focus',error,'warn'));},
-    canCreate:()=>AppData.notes.size()<APP_LIMITS.maxOngoingNotes,
+    // Recently deleted gives way at the limit, so only live notes count here.
+    canCreate:()=>AppData.notes.metadataSnapshot().records.length<APP_LIMITS.maxOngoingNotes,
     catalogue:ongoingAreaNoteCatalogue,
     clearEditor:clearTaskNoteEditorBinding,
     commitEditor:commitTaskNoteEditor,
@@ -7938,10 +7939,16 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     get:(key,label)=>AppData.notes.get(key,label),
     normalizeArea:normalizeOngoingAreaInput,
     orderEntries:orderOngoingAreaEntries,
+    purgeTrash:()=>AppData.notes.purgeExpiredTrash(),
     remove:key=>AppData.notes.remove(key),
+    // A merge appends what the moved note adds, as Combine does.
+    rename:(key,label,options)=>AppData.notes.rename(key,label,options&&options.merge?{merge:(existing,moved)=>RichTextApi.appendIncomingAdditions(existing,moved).value}:{}),
     renderInherited:renderInheritedAreaNotes,
+    restore:key=>AppData.notes.restore(key),
     searchDocuments:ongoingAreaNoteSearchDocuments,
-    size:()=>AppData.notes.size()
+    size:()=>AppData.notes.size(),
+    trash:key=>AppData.notes.trash(key),
+    trashSnapshot:()=>AppData.notes.trashSnapshot()
   }),
   attachments:Object.freeze({
     batch:operation=>AttachmentLibrary.batch(operation),
