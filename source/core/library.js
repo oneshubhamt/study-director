@@ -83,7 +83,7 @@ registry.define('library',1,()=>{
     let libraryScrollState={documentTop:0,mainTop:0};
     let selectedDiaryDate='',diaryDraftRecord=null,diaryEditing=false,diaryEntryListed=false,diaryInstalled=false,diaryRenderFrame=0,diaryRenderToken=0,diarySummaryCountQueued=false,diarySummaryCountRevision=-1;
     let selectedOngoingNoteKey='';
-    let ongoingNoteEditorSignature='';
+    let ongoingNoteEditorSignature='',ongoingNoteParentSignature='';
     let ongoingNoteRenderFrame=0;
     let ongoingNoteRevealFrame=0;
     let ongoingNotesInstalled=false;
@@ -296,6 +296,74 @@ registry.define('library',1,()=>{
       add.disabled=!canAdd;add.setAttribute('aria-disabled',canAdd?'false':'true');
       add.title=canAdd?'Create a note':'Ongoing Notes are at their note limit';
     }
+    function parentNotesSignature(entry){
+      const byKey=new Map(ongoingNoteEntries().map(candidate=>[candidate.key,candidate])),parts=entry.key.split(' > '),out=[];
+      for(let index=1;index<parts.length;index++){const key=parts.slice(0,index).join(' > ');out.push(`${key}\u0000${byKey.get(key)?.updatedAt||''}`);}
+      return out.join('\u0001');
+    }
+    // Where the open note sits: each parent Area opens its own note.
+    function noteBreadcrumb(entry){
+      const crumbs=document.createElement('nav');crumbs.className='library-notes-crumbs';crumbs.setAttribute('aria-label','Location');
+      const parts=String(entry.label||'').split('>').map(part=>part.trim()).filter(Boolean).slice(0,-1),keys=entry.key.split(' > ');
+      parts.forEach((part,index)=>{
+        const crumb=textEl('button','library-notes-crumb',part);crumb.type='button';crumb.title=`Open ${parts.slice(0,index+1).join(' › ')}`;
+        crumb.addEventListener('click',()=>selectOngoingNote(keys.slice(0,index+1).join(' > ')));
+        crumbs.append(crumb,textEl('span','library-notes-crumb-separator','›'));
+      });
+      crumbs.hidden=!parts.length;return crumbs;
+    }
+    // When it last changed and whether today's plan uses it.
+    function noteMeta(entry,stored){
+      if(entry.support)return 'Shared by every support block';
+      if(entry.ephemeral)return 'New · saved when you write';
+      const edited=stored&&stored.updatedAt?editedLabel(stored.updatedAt):'',parts=[];
+      if(edited)parts.push(`Edited ${/^\d/u.test(edited)?edited:edited.toLowerCase()}`);
+      if(entry.current)parts.push('In today’s plan');
+      return parts.join(' · ')||'Nothing written yet';
+    }
+    // The title renames the note in place: Enter or leaving the field saves,
+    // Escape keeps the old name.
+    function noteTitle(entry,renameable){
+      const title=textEl(renameable?'button':'div','library-notes-editor-title',ongoingNoteLeaf(entry.label));
+      if(!renameable)return title;
+      title.type='button';title.title='Rename';title.setAttribute('aria-label',`Rename ${ongoingNoteLeaf(entry.label)}`);
+      title.addEventListener('click',()=>renameNoteInPlace(entry,title));
+      return title;
+    }
+    function renameNoteInPlace(entry,title=document.querySelector('#library-notes-editor button.library-notes-editor-title')){
+      if(!title||!title.isConnected||!canMutate())return false;
+      const leaf=ongoingNoteLeaf(entry.label),input=document.createElement('input');
+      input.type='text';input.className='library-notes-title-input ui-field';input.value=leaf;input.maxLength=160;input.setAttribute('aria-label','Note name');
+      title.replaceWith(input);input.focus();input.select();
+      let done=false;
+      const finish=save=>{
+        if(done)return;done=true;
+        const next=input.value.trim();if(input.isConnected)input.replaceWith(title);
+        if(!save||!next||next===leaf)return;
+        const parent=ongoingNoteParentPath(entry.label);void applyNoteRename(entry,parent?`${parent} > ${next}`:next);
+      };
+      input.addEventListener('keydown',event=>{
+        if(event.key==='Enter'){event.preventDefault();finish(true);}
+        else if(event.key==='Escape'){event.preventDefault();event.stopPropagation();finish(false);title.focus();}
+      });
+      input.addEventListener('blur',()=>finish(true));
+      return true;
+    }
+    async function exportOngoingNote(entry){
+      if(ongoingNoteExportBusy)return false;
+      if(!entry||!getAreaNote(entry.key,entry.label)){setOngoingNotesStatus('Write something in this note before exporting it.');return false;}
+      ongoingNoteExportBusy=true;
+      const notice=notifications.begin({id:'ongoing-note-export',surfaceId:'ongoing-notes-status',title:'Export note',message:'Preparing the Markdown export…'});
+      try{
+        const result=await exportKeys([entry.key]);
+        if(result&&(result.status==='downloaded'||result.status==='saved'))notice.finish('succeeded',`${result.status==='saved'?'Saved and verified':'Download started'}: “${entry.label}”${result.assets?` with ${result.assets} image${result.assets===1?'':'s'}`:''}.${result.missing?` ${result.missing} unavailable image(s) are marked in the note.`:''}`);
+        else if(result&&result.status==='cancelled')notice.finish('cancelled','Export cancelled.');
+        else if(result&&result.status==='too-large')notice.finish('failed',`This note is larger than the ${Math.round((Number(result.maxBytes)||0)/(1024*1024))} MiB export limit.`);
+        else notice.finish('failed','This note had nothing to export.');
+        return true;
+      }catch(error){notice.finish('failed','The export did not complete: '+(error&&error.message||error));return false;}
+      finally{ongoingNoteExportBusy=false;}
+    }
     // The open note's own actions: rename or move, and delete. Support
     // Activities keeps its name and is never deleted, so it has none.
     function noteActionsMenu(entry){
@@ -309,14 +377,14 @@ registry.define('library',1,()=>{
         button.addEventListener('click',()=>{controller.hide();void run();});return button;
       };
       const separator=document.createElement('div');separator.className='library-note-menu-separator';separator.setAttribute('role','separator');
-      const rename=item('library-note-rename','Rename or move…','F2',renameOngoingNote),remove=item('library-note-delete','Delete','Del',deleteOngoingNote,true);
-      menu.append(rename,separator,remove);
+      const rename=item('library-note-rename','Rename','F2',()=>renameNoteInPlace(entry)),move=item('library-note-move','Move…','',renameOngoingNote),exportNote=item('library-note-export-one','Export this note','',()=>exportOngoingNote(entry)),remove=item('library-note-delete','Delete','Del',deleteOngoingNote,true);
+      menu.append(rename,move,exportNote,separator,remove);
       trigger.addEventListener('click',event=>{
         event.preventDefault();
         if(!menu.hidden){controller.hide();return;}
         // A note becomes renameable once something of it is saved.
-        const stored=!!getAreaNote(entry.key,entry.label);rename.disabled=remove.disabled=!stored||!canMutate();
-        if(!stored)rename.title=remove.title='Write something in this note first';else{rename.removeAttribute('title');remove.removeAttribute('title');}
+        const stored=!!getAreaNote(entry.key,entry.label);rename.disabled=move.disabled=exportNote.disabled=remove.disabled=!stored||!canMutate();
+        for(const button of [rename,move,exportNote,remove])if(!stored)button.title='Write something in this note first';else button.removeAttribute('title');
         controller.show(trigger);trigger.setAttribute('aria-expanded','true');
         requestAnimationFrame(()=>{const first=menu.querySelector('[role="menuitem"]:not(:disabled)');if(first)first.focus();});
       });
@@ -414,7 +482,7 @@ registry.define('library',1,()=>{
       else if(event.key==='ArrowRight'){if(!node||!node.children)return;if(node.expanded)focusRow(rows[index+1]);else toggleOngoingNoteBranch(key,true);}
       else if(event.key==='ArrowLeft'){if(node&&node.children&&node.expanded)toggleOngoingNoteBranch(key,false);else if(node&&node.parent)focusRow(rows.find(item=>item.dataset.ongoingNoteKey===node.parent.entry.key));else return;}
       else if(event.key==='Enter'||event.key===' '){ongoingNoteFocusKey=key;selectOngoingNote(key);}
-      else if(event.key==='F2'){ongoingNoteFocusKey=key;selectOngoingNote(key);void renameOngoingNote();}
+      else if(event.key==='F2'){selectOngoingNote(key);const entry=selectedStoredNote();if(entry)renameNoteInPlace(entry);}
       else if(event.key==='Delete'){ongoingNoteFocusKey=key;selectOngoingNote(key);void deleteOngoingNote();}
       else return;
       event.preventDefault();
@@ -512,31 +580,33 @@ registry.define('library',1,()=>{
       const canonical=entry?getAreaNote(entry.key,entry.label):null,richValue=String(canonical?.text||''),value=richValue?plainTextContent(richValue):'';
       const writable=canMutate()&&!readOnly,signature=ongoingNoteEditorRenderSignature(entry,canonical,readOnly,writable);
       updateOngoingNoteActions();
-      if(signature===ongoingNoteEditorSignature&&panel.childElementCount)return !!entry;
+      // Parent notes can change while this one stays open: refresh only their
+      // sections, never the editor.
+      const parents=entry?parentNotesSignature(entry):'';
+      if(signature===ongoingNoteEditorSignature&&panel.childElementCount){
+        if(entry&&parents!==ongoingNoteParentSignature){ongoingNoteParentSignature=parents;const box=panel.querySelector('.subject-note-context');if(box)renderInherited(box,entry.key,false,{collapsible:true});}
+        return !!entry;
+      }
       const previous=ongoingNotesEditorField();
       if(previous)clearEditor(previous);
-      ongoingNoteEditorSignature=signature;
+      ongoingNoteEditorSignature=signature;ongoingNoteParentSignature=parents;
       if(!entry){
         panel.replaceChildren(textEl('div','library-notes-editor-empty ui-status','No ongoing notes match this search.'));
         return false;
       }
       const head=document.createElement('div');head.className='library-notes-editor-head';
+      const renameable=writable&&!entry.support&&!!canonical,meta=textEl('span','library-notes-editor-meta ui-mono',noteMeta(entry,canonical));
       const copy=document.createElement('div');copy.className='library-notes-editor-identity';
-      copy.append(
-        textEl('div','library-notes-editor-title',ongoingNoteLeaf(entry.label)),
-        textEl('div','library-notes-editor-share ui-mono',entry.support?'SUPPORT · SHARED':`AREA · ${entry.label}`)
-      );
+      copy.append(noteBreadcrumb(entry),noteTitle(entry,renameable),meta);
       const headTools=document.createElement('div');headTools.className='library-notes-editor-tools';
-      const badge=textEl('div','library-notes-editor-badge ui-chip ui-mono',entry.support?'Shared':entry.current?'In Today’s Plan':entry.ephemeral?'New Area':entry.hasNote?'Saved':'Area');
-      if(readOnly){headTools.append(badge);}
-      else{
+      if(!readOnly){
         const syncMessage=writable?'Synced':'Read-only in this tab';
         const sync=textEl('div',`note-sync ui-label${writable?'':' idle'}`,writable?'✓':'—');
-        sync.dataset.areaKey=entry.key;sync.setAttribute('role','status');sync.setAttribute('aria-atomic','true');sync.setAttribute('aria-label',syncMessage);sync.tabIndex=0;headTools.append(badge,sync);
+        sync.dataset.areaKey=entry.key;sync.setAttribute('role','status');sync.setAttribute('aria-atomic','true');sync.setAttribute('aria-label',syncMessage);sync.tabIndex=0;headTools.append(sync);
         if(writable&&!entry.support)headTools.append(...noteActionsMenu(entry));
       }
       head.append(noteViewBackButton(),copy,headTools);
-      const inherited=document.createElement('div');renderInherited(inherited,entry.key,false);
+      const inherited=document.createElement('div');renderInherited(inherited,entry.key,false,{collapsible:true});
       if(readOnly){
         const preview=document.createElement('div');preview.className='library-ongoing-note-read';
         if(!richValue.trim()){preview.classList.add('empty');preview.textContent='No content saved for this Area.';}else renderRichTextContent(preview,richValue,'No content saved for this Area.',`Ongoing note for ${entry.label}`);
@@ -555,6 +625,7 @@ registry.define('library',1,()=>{
         if(!accepted)return;
         const refreshed=getAreaNote(entry.key,entry.label);
         ongoingNoteEditorSignature=ongoingNoteEditorRenderSignature({...entry,hasNote:!!String(editor.value||'').trim()},refreshed,false,canMutate());
+        meta.textContent=noteMeta({...entry,ephemeral:false},refreshed);
         const hasNote=!!String(editor.value||'').trim();
         const row=[...document.querySelectorAll('[data-ongoing-note-key]')].find(candidate=>candidate.dataset.ongoingNoteKey===entry.key);
         if(row){
@@ -576,7 +647,7 @@ registry.define('library',1,()=>{
       ongoingNoteEditorSignature=signature;
       const head=document.createElement('div');head.className='library-notes-editor-head';
       const copy=document.createElement('div');copy.className='library-notes-editor-identity';
-      copy.append(textEl('div','library-notes-editor-title',ongoingNoteLeaf(item.label)),textEl('div','library-notes-editor-share ui-mono',`${deletedLabel(item.deletedAt)} · ${item.label}`));
+      copy.append(textEl('div','library-notes-editor-title',ongoingNoteLeaf(item.label)),textEl('span','library-notes-editor-meta ui-mono',`${deletedLabel(item.deletedAt)} · ${item.label.replace(/\s*>\s*/g,' › ')}`));
       const tools=document.createElement('div');tools.className='library-notes-editor-tools';
       const restore=textEl('button','library-note-action ui-btn','Restore'),forget=textEl('button','library-note-action danger ui-btn','Delete forever');
       restore.type='button';forget.type='button';restore.disabled=forget.disabled=!canMutate();
@@ -753,23 +824,29 @@ registry.define('library',1,()=>{
     }
     // Renames or moves a note with every note inside it. A name that already
     // holds a note is merged only after the person agrees.
+    // Move… asks for the full name: "GS2 > Polity" places the note under GS2.
     async function renameOngoingNote(){
       if(!canMutate())return false;
       const entry=selectedStoredNote();
-      if(!entry){setOngoingNotesStatus('Select a saved note to rename or move it.');return false;}
+      if(!entry){setOngoingNotesStatus('Select a saved note to move it.');return false;}
       const nested=ongoingNoteEntries().some(candidate=>candidate.key.startsWith(`${entry.key} > `));
       const result=await requestInput({
-        title:'Rename or move note',
-        message:'Type > to place it inside another Area, for example “GS2 > Polity”.',
-        inputLabel:'Name',defaultValue:entry.label,maxLength:160,required:true,requiredMessage:'Enter a name.',
+        title:'Move note',
+        message:'Type the full name, using > to place it inside another Area, for example “GS2 > Polity”.',
+        inputLabel:'Full name',defaultValue:entry.label,maxLength:160,required:true,requiredMessage:'Enter a name.',
         hint:[nested?'Notes inside it move with it.':'',entry.current?`Today’s plan still uses “${entry.label.replace(/\s*>\s*/g,' › ')}”; its blocks will start a new note under that name.`:''].filter(Boolean).join(' ')||'Plan tasks and saved days are unchanged.',
         preview:value=>String(value||'').trim().replace(/\s*>\s*/g,' › ')||'…',
         validate:value=>normalizeOngoingNoteArea(value)?'':'Enter a valid name. Use > only to separate nested Areas.',
-        confirmLabel:'Rename',cancelLabel:'Cancel'
+        confirmLabel:'Move',cancelLabel:'Cancel'
       });
       if(!result||!canMutate())return false;
-      const identity=normalizeOngoingNoteArea(result.value);
-      if(!identity||identity.label===entry.label)return false;
+      return applyNoteRename(entry,result.value);
+    }
+    // Renames or moves a note with every note inside it. A name that already
+    // holds a note is merged only after the person agrees.
+    async function applyNoteRename(entry,value){
+      const identity=normalizeOngoingNoteArea(value);
+      if(!identity||identity.label===entry.label||!canMutate())return false;
       const notice=notifications.begin({id:'ongoing-note-rename',surfaceId:'ongoing-notes-status',title:'Rename note',message:'Renaming the note…'});
       try{
         let outcome=await renameNote(entry.key,identity.label,{merge:false});
@@ -790,7 +867,7 @@ registry.define('library',1,()=>{
       }catch(error){notice.finish('failed',error&&error.message||'The note could not be renamed. Keep this tab open and retry.');return false;}
     }
     function clearOngoingNotesEditorBinding(){
-      ongoingNoteEditorSignature='';
+      ongoingNoteEditorSignature='';ongoingNoteParentSignature='';
       const field=ongoingNotesEditorField();
       if(field)clearEditor(field);
     }
@@ -810,7 +887,11 @@ registry.define('library',1,()=>{
       const drawer=ongoingNotesDrawer();
       const search=document.getElementById('library-notes-search');
       const add=document.getElementById('library-note-add');
-      const list=document.getElementById('library-notes-list'),trashToggle=document.getElementById('library-notes-trash-toggle');
+      const list=document.getElementById('library-notes-list'),trashToggle=document.getElementById('library-notes-trash-toggle'),info=document.getElementById('library-notes-info'),infoPopover=document.getElementById('library-notes-info-popover');
+      if(info&&infoPopover){
+        const about=createAnchoredPopover(infoPopover,{align:'start',onClose:()=>info.setAttribute('aria-expanded','false')});
+        info.addEventListener('click',event=>{event.preventDefault();if(infoPopover.hidden){about.show(info);info.setAttribute('aria-expanded','true');}else about.hide();});
+      }
       const select=document.getElementById('library-note-select'),selectAll=document.getElementById('library-note-select-all'),clearSelection=document.getElementById('library-note-selection-clear'),exportButton=document.getElementById('library-note-export'),cancel=document.getElementById('library-note-select-cancel');
       if(drawer){
         drawer.addEventListener('toggle',()=>{
@@ -939,7 +1020,7 @@ registry.define('library',1,()=>{
     }
     function diaryHeader(record,editing){
       const head=document.createElement('div');head.className='library-notes-editor-head';
-      const identity=document.createElement('div');identity.className='library-notes-editor-identity';identity.append(textEl('div','library-notes-editor-title',diaryDateLabel(record.date)),textEl('div','library-notes-editor-share ui-mono',`DIARY · ${record.dayName||''}`));
+      const identity=document.createElement('div');identity.className='library-notes-editor-identity';identity.append(textEl('div','library-notes-editor-title',diaryDateLabel(record.date)),textEl('span','library-notes-editor-meta ui-mono',record.dayName||''));
       const tools=document.createElement('div');tools.className='library-notes-editor-tools';
       const remove=document.createElement('button');remove.type='button';remove.className='library-note-action ui-btn';remove.textContent='Delete';remove.disabled=!canMutate();remove.setAttribute('aria-label','Delete this reflection');remove.addEventListener('click',()=>{void deleteDiaryEntry(record.date);});
       const action=document.createElement('button');action.type='button';action.className='library-note-action ui-btn';action.textContent=editing?'Done':'Edit';action.disabled=!editing&&!canMutate();action.setAttribute('aria-label',editing?'Finish editing reflection':'Edit reflection');

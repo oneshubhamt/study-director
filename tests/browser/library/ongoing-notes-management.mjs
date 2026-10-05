@@ -33,8 +33,8 @@ try{
         const item=await waitFor(()=>{const button=document.getElementById(id);return button&&!button.closest('[role="menu"]').hidden&&!button.disabled?button:null;});
         item.click();return true;
       },
-      async rename(value){
-        await this.noteAction('library-note-rename');
+      async move(value){
+        await this.noteAction('library-note-move');
         const dialog=await waitFor(()=>{const item=document.getElementById('sd-interaction-dialog');return item&&item.open?item:null;});
         const field=dialog.querySelector('.interaction-input'),before=field.value;field.value=value;field.dispatchEvent(new Event('input',{bubbles:true}));
         const text=dialog.textContent;dialog.querySelector('.interaction-actions .primary,.interaction-actions .danger').click();
@@ -90,14 +90,14 @@ try{
     await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const before={
       selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||'',
       title:document.querySelector('.library-notes-editor-title')?.textContent||'',
-      badge:document.querySelector('.library-notes-editor-badge')?.textContent||'',
+      meta:document.querySelector('.library-notes-editor-meta')?.textContent||'',
       focused:document.activeElement===document.querySelector('.library-notes-textarea')||!!document.activeElement.closest('.library-notes-editor .sd-rte-wordgard'),
       persisted:!!__PWA6.AppData.notes.exportPayload()['standalone only']
     };
     const drawer=document.getElementById('library-notes-drawer');drawer.open=false;await wait(30);drawer.open=true;await wait(60);
     return {...before,afterKeys:[...document.querySelectorAll('[data-ongoing-note-key]')].map(item=>item.dataset.ongoingNoteKey)};
   })()`);
-  assert.deepEqual({...temporary,afterKeys:undefined},{selected:'standalone only',title:'Standalone Only',badge:'New Area',focused:true,persisted:false,afterKeys:undefined});
+  assert.deepEqual({...temporary,afterKeys:undefined},{selected:'standalone only',title:'Standalone Only',meta:'New · saved when you write',focused:true,persisted:false,afterKeys:undefined});
   assert.equal(temporary.afterKeys.includes('standalone only'),false);
   result.checks.blankManualAreaIsTemporaryAndDiscarded=true;
   console.error('[qa-notes] temporary blank passed');
@@ -207,25 +207,51 @@ try{
   result.checks.recentlyDeletedRestoreAndDeleteForever=true;
   console.error('[qa-notes] Recently deleted passed');
 
-  // Rename moves a note; a name that already holds a note merges only after
-  // the person agrees.
+  // The title renames in place (Escape keeps the name); Move… takes a full
+  // name, and a name that already holds a note merges only after the person
+  // agrees. The breadcrumb opens the parent; parent notes start collapsed.
   const renamed=await page.evaluate(`(async()=>{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),until=async test=>{for(let i=0;i<150&&!test();i++)await wait(20);return test();};
     await __interactionQA.create('Rename Me','top');await wait(25);
     const field=document.querySelector('.library-notes-textarea');field.value='Moved knowledge';field.dispatchEvent(new Event('input',{bubbles:true}));await d.AppData.notes.flush();await wait(40);
-    const status=()=>document.getElementById('ongoing-notes-status').textContent;
-    const first=await __interactionQA.rename('Renamed Note');await until(()=>/Renamed to/.test(status()));
-    const afterRename={keys:Object.keys(d.AppData.notes.exportPayload()).filter(key=>/rename/.test(key)),selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||'',status:document.getElementById('ongoing-notes-status').textContent};
-    await __interactionQA.rename('Standalone Only > Nested Topic');const confirmation=await __interactionQA.accept();
+    d.LibraryView.refreshNotes();await wait(40);
+    const status=()=>document.getElementById('ongoing-notes-status').textContent,title=()=>document.querySelector('#library-notes-editor .library-notes-editor-title');
+    const key=(target,name)=>target.dispatchEvent(new KeyboardEvent('keydown',{key:name,bubbles:true,cancelable:true}));
+    title().click();let input=await until(()=>document.querySelector('.library-notes-title-input'));
+    const startValue=input.value;input.value='Discarded';key(input,'Escape');await wait(40);
+    const escaped={title:title()?.textContent||'',keys:Object.keys(d.AppData.notes.exportPayload()).filter(name=>/rename|discarded/.test(name))};
+    title().click();input=await until(()=>document.querySelector('.library-notes-title-input'));input.value='Renamed Note';key(input,'Enter');
+    await until(()=>/Renamed to/.test(status()));
+    const afterRename={keys:Object.keys(d.AppData.notes.exportPayload()).filter(name=>/rename/.test(name)),selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||'',title:title()?.textContent||'',status:status()};
+    const moved=await __interactionQA.move('Standalone Only > Nested Topic');const confirmation=await __interactionQA.accept();
     await until(()=>/Merged into/.test(status()));
     const merged=d.AppData.notes.exportPayload()['standalone only > nested topic']?.text||'';
-    return {before:first.before,afterRename,confirmation,merged:{plain:d.RichTextApi?d.RichTextApi.toPlainText(merged):merged,raw:merged},status:document.getElementById('ongoing-notes-status').textContent};
+    d.AppData.notes.update('standalone only','Standalone Only','Parent context',d.AppData.notes.get('standalone only')?.updatedAt||'');await d.AppData.notes.flush();
+    d.LibraryView.openNote('standalone only > nested topic');await wait(60);
+    const crumbs=[...document.querySelectorAll('#library-notes-editor .library-notes-crumb')].map(crumb=>crumb.textContent);
+    const parents=[...document.querySelectorAll('#library-notes-editor .subject-note-context-entry')];
+    const parent={label:parents[0]?.querySelector('summary')?.textContent||'',open:!!parents[0]?.open,drawn:!!parents[0]?.querySelector('.subject-note-context-entry-body')?.textContent};
+    parents[0].open=true;await until(()=>parents[0].querySelector('.subject-note-context-entry-body').textContent);
+    parent.openedText=parents[0].querySelector('.subject-note-context-entry-body').textContent;
+    document.querySelector('#library-notes-editor .library-notes-crumb').click();await wait(40);
+    const crumbOpened=document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||'';
+    document.getElementById('library-notes-info').click();await wait(40);
+    const info={shown:!document.getElementById('library-notes-info-popover').hidden,text:document.getElementById('library-notes-info-popover').textContent};
+    document.body.click();await wait(20);
+    return {startValue,escaped,afterRename,movedFrom:moved.before,confirmation,merged,crumbs,parent,crumbOpened,info,status:status()};
   })()`);
-  assert.equal(renamed.before,'Rename Me','the dialog starts from the current name');
-  assert.deepEqual(renamed.afterRename.keys,['renamed note']);assert.equal(renamed.afterRename.selected,'renamed note');assert.match(renamed.afterRename.status,/Renamed to “Renamed Note”/);
+  assert.equal(renamed.startValue,'Rename Me','the title field starts from the current name');
+  assert.deepEqual(renamed.escaped,{title:'Rename Me',keys:['rename me']},'Escape keeps the name');
+  assert.deepEqual(renamed.afterRename.keys,['renamed note']);assert.equal(renamed.afterRename.selected,'renamed note');assert.equal(renamed.afterRename.title,'Renamed Note');assert.match(renamed.afterRename.status,/Renamed to “Renamed Note”/);
+  assert.equal(renamed.movedFrom,'Renamed Note','Move… starts from the full name');
   assert.match(renamed.confirmation,/Merge “Renamed Note” into “Standalone Only > Nested Topic”\? Its text is added to the end/);
-  assert.match(renamed.merged.raw,/Nested knowledge/);assert.match(renamed.merged.raw,/Moved knowledge/);assert.match(renamed.status,/Merged into/);
-  result.checks.renameAndMergeOnlyWhenAsked=true;
+  assert.match(renamed.merged,/Nested knowledge/);assert.match(renamed.merged,/Moved knowledge/);assert.match(renamed.status,/Merged into|Restored/);
+  assert.deepEqual(renamed.crumbs,['Standalone Only']);
+  assert.deepEqual({...renamed.parent,openedText:undefined},{label:'From Standalone Only',open:false,drawn:false,openedText:undefined},'parent notes start collapsed and are drawn when opened');
+  assert.match(renamed.parent.openedText,/Parent context/);
+  assert.equal(renamed.crumbOpened,'standalone only','the breadcrumb opens the parent note');
+  assert.deepEqual(renamed.info,{shown:true,text:'A note is shared by every plan block in the same Area; support blocks share one note.'});
+  result.checks.renameInPlaceMoveMergeBreadcrumbAndParents=true;
   console.error('[qa-notes] rename and merge passed');
 
   const undone=await page.evaluate(`(async()=>{

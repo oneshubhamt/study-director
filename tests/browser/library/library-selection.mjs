@@ -137,6 +137,16 @@ try{
   assert.equal(await page.evaluate(`document.getElementById('library-note-export').hidden`),false,'Oversized export must leave selection mode available for narrowing.');
   result.checks.exportResourceGateSurfaced=true;
 
+  // The open note's ⋯ menu exports just that note through the same exporter.
+  await page.evaluate(`(()=>{window.__exportResult=null;document.getElementById('library-note-select-cancel').click();})()`);
+  await waitFor(()=>page.evaluate(`!!document.getElementById('library-note-actions')`),{label:'note menu after selection'});
+  const before=await page.evaluate(`window.__exports.length`);
+  await page.evaluate(`(()=>{document.getElementById('library-note-actions').click();document.getElementById('library-note-export-one').click();})()`);
+  await waitFor(()=>page.evaluate(`window.__exports.length===${before}+1`),{label:'single note export'});
+  assert.deepEqual(await page.evaluate(`window.__exports.at(-1)`),['ethics']);
+  await waitFor(()=>page.evaluate(`/Download started: “Ethics”/.test(document.getElementById('ongoing-notes-status').textContent)`),{label:'single export status'});
+  result.checks.exportThisNote=true;
+
   const unexpected=page.events.filter(event=>!/favicon/i.test(event.text));assert.deepEqual(unexpected,[]);result.checks.noRuntimeErrors=true;
 }finally{if(page)page.close();await browser.close();}
 console.log(JSON.stringify(result,null,2));

@@ -1081,13 +1081,12 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
         </summary>
         <div class="library-notes-workspace">
           <div class="library-notes-intro">
-            <div class="library-notes-help ui-body">Persistent notes are shared by Area; parent notes are read-only context. Use New for a standalone or nested Area, and ⋯ on an open note to rename, move or delete it. Daily reflections stay under Saved Day Detail.</div>
             <input class="library-notes-search ui-field ui-mono" id="library-notes-search" type="search" placeholder="Search ongoing notes…" aria-label="Search ongoing notes">
           </div>
           <div class="library-notes-grid ui-canvas">
             <nav class="library-notes-nav" aria-label="Ongoing notes">
               <div class="library-notes-nav-head">
-                <span class="library-notes-nav-title"><span class="ui-label">Notes</span><span class="library-note-selection-count" id="library-note-selection-count" hidden>0 selected</span></span>
+                <span class="library-notes-nav-title"><span class="ui-label">Notes</span><button class="library-notes-info" id="library-notes-info" type="button" aria-label="About notes" aria-haspopup="dialog" aria-expanded="false" aria-controls="library-notes-info-popover">i</button><span class="library-notes-info-popover" id="library-notes-info-popover" role="note" hidden>A note is shared by every plan block in the same Area; support blocks share one note.</span><span class="library-note-selection-count" id="library-note-selection-count" hidden>0 selected</span></span>
                 <span class="library-notes-nav-tools">
                   <button class="library-note-action ui-btn" id="library-note-select" type="button" aria-label="Choose ongoing notes to export">Export</button>
                   <button class="library-note-action ui-btn" id="library-note-select-all" type="button" hidden>All</button>
@@ -4854,12 +4853,24 @@ function inheritedSubjectNotesHtml(t){
   if(!inherited.length)return '';
   return inherited.map(entry=>`From ${entry.label}:\n${entry.text}`).join('\n\n');
 }
-function renderInheritedAreaNotes(container,areaKey,compact=false){
+// The Library shows each parent note as a closed "From GS2" section, drawn
+// when opened; other views show them all open.
+function renderInheritedAreaNotes(container,areaKey,compact=false,{collapsible=false}={}){
   if(!container)return;
   const inherited=inheritedAreaNoteEntries(areaKey);
-  container.className='subject-note-context'+(compact?' compact':'')+(inherited.length?' on':'');
+  container.className='subject-note-context'+(compact?' compact':'')+(collapsible?' collapsible':'')+(inherited.length?' on':'');
   container.replaceChildren();
   if(!inherited.length)return;
+  if(collapsible){
+    inherited.forEach(entry=>{
+      const section=document.createElement('details');section.className='subject-note-context-entry';
+      const label=document.createElement('summary');label.className='subject-note-context-entry-label ui-label';label.textContent=`From ${entry.label.replace(/\s*>\s*/g,' › ')}`;
+      const body=document.createElement('div');body.className='subject-note-context-entry-body';
+      section.append(label,body);container.appendChild(section);
+      section.addEventListener('toggle',()=>{if(section.open&&!body.dataset.rendered){body.dataset.rendered='1';renderRichTextContent(body,entry.value,'',`Parent note from ${entry.label}`);}});
+    });
+    return;
+  }
   const title=document.createElement('div');
   title.className='subject-note-context-title ui-label';
   title.textContent='Inherited Parent Notes · Read-only';
