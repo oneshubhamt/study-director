@@ -42,7 +42,7 @@ registry.define('repositories',1,()=>{
   function createAppData(input){
     exactObject(input,[
       'local','indexedDb','appMeta','compatibilityAppMeta','installationIdentity','dailyRecordCodec','activeSessionCodec','compatibilityCodec','personalDataCodec','keyedRecord','journals',
-      'limits','dataContract','stores','legacyStores','keys','legacyKeys','metaKeys','obsoleteMetaKeys','activeSessionId','helpers','hooks','clock','areaNotesRepositoryModule'
+      'limits','dataContract','stores','legacyStores','keys','legacyKeys','metaKeys','obsoleteMetaKeys','activeSessionId','helpers','hooks','clock','areaNotesRepositoryModule','saveLaneModule'
     ],'AppData input');
     if(!Object.isFrozen(input.local)||!Object.isFrozen(input.indexedDb)||!Object.isFrozen(input.appMeta)||!Object.isFrozen(input.compatibilityAppMeta)||!Object.isFrozen(input.installationIdentity)||
       !Object.isFrozen(input.dailyRecordCodec)||!Object.isFrozen(input.activeSessionCodec)||!Object.isFrozen(input.compatibilityCodec)||!Object.isFrozen(input.personalDataCodec)||
@@ -1387,7 +1387,8 @@ const AreaNotesRepository=AreaNotesRepositoryModule.create(freeze({
         diagnosticsCapture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)
       }),
       canonical:freeze({areaNoteDeletionValue,areaNotePreparationUnit,stageMutationEpoch:stageCanonicalMutationEpoch,normalizeAreaNoteDeletions}),
-      clock:freeze({nowMs:decisionNowMs})
+      clock:freeze({nowMs:decisionNowMs}),
+      saveLane:input.saveLaneModule
     }));
 function normalizeInsightsRecordWindowOptions(options,summaries){
   const opts=options&&typeof options==='object'?options:{};

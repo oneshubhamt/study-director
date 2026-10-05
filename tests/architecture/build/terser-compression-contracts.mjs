@@ -24,8 +24,10 @@ assert.doesNotMatch(buildSource,/\btoplevel\s*:\s*true\b/u,'Pass E must not intr
 
 // The reviewed graph remains bounded. CR3 intentionally loads the pure CR2 reconciliation engine
 // into the editor runtime for scratch-note comparison while Wordgard upstream remains unchanged.
-// Ancestor-aware three-way reconciliation and the read-only imported editor define the current graph. Keep a tight 108,000 B Brotli ceiling around the reviewed baseline so future growth requires explicit review.
-assert.ok(bundle.metrics.brotli<=108000,`Rich-text Brotli bundle exceeded the reviewed reconciliation ceiling: ${bundle.metrics.brotli} bytes.`);
+// Ancestor-aware three-way reconciliation and the read-only imported editor define the current graph;
+// grouped publishing for large documents added about 0.2 KB. Keep a tight 108,400 B Brotli ceiling
+// around the reviewed baseline so future growth requires explicit review.
+assert.ok(bundle.metrics.brotli<=108400,`Rich-text Brotli bundle exceeded the reviewed reconciliation ceiling: ${bundle.metrics.brotli} bytes.`);
 
 console.log(JSON.stringify({
   status:'PASS',

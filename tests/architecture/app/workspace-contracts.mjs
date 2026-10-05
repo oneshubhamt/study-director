@@ -69,7 +69,7 @@ assert.match(library,/const listed=!!String\(record\?\.reflection\|\|''\)\.trim\
 assert.doesNotMatch(library,/Empty reflections/u,'Empty reflection rows must not remain in Diary.');
 assert.match(app,/const DailyReflectionPersistence=[\s\S]*current\?\.recordKind==='study'[\s\S]*reflection:candidate/u,'Shared reflection persistence must update a Study Day reflection without replacing study data.');
 assert.match(app,/const DailyReflectionPersistence=[\s\S]*current\?\.recordKind==='diary'[\s\S]*dailyRecords\.remove\(date/u,'Shared reflection persistence must delete an empty diary-only record.');
-assert.match(library,/diaryPendingValue=null;[\s\S]*await diaryPendingSave\.catch\(\(\)=>\{\}\);[\s\S]*current=await getDailyRecord\(date\);[\s\S]*deleteDiaryEntryRecord\(date\)/u,'Diary deletion must wait for an already-started autosave, refresh the canonical record, then delete it.');
+assert.match(library,/const writing=settleDiaryEditor\(field\);clearDiaryEditor\(field\);await writing;[\s\S]*current=await getDailyRecord\(date\);[\s\S]*deleteDiaryEntryRecord\(date\)/u,'Diary deletion drops unsaved typing, waits for a write already under way, refreshes the canonical record, then deletes it.');
 assert.match(review,/existing\?\.recordKind==='diary'[\s\S]*doc=\{\.\.\.doc,reflection:existingReflection\}/u,'Diary-only dates must promote to Study Days without losing an existing reflection.');
 assert.match(repositories,/getDailyRecordsForWindow[\s\S]*recordKind==='study'/u,'Insights record windows must exclude diary-only records.');
 assert.match(app,/getDailySummaries\(\)[\s\S]*recordKind==='study'/u,'Insights summaries must exclude diary-only records.');
@@ -83,7 +83,7 @@ assert.match(app,/data-tab="library"[^>]*>[\s\S]*Library<\/button>/u,'Library mu
 assert.match(review,/function syncReviewSurfaceMode\(\)[\s\S]*review-stats[\s\S]*review-summary[\s\S]*practice-review[\s\S]*review-blocks-collapse[\s\S]*quality-wrap[\s\S]*copy-report-control/u,'Reflection-only Review must suppress study-only surfaces.');
 assert.match(review,/if\(!reviewHasStudyDay\(\)\)return queueReflectionOnlySave/u,'Reflection-only Review autosave must use canonical Daily Reflection persistence.');
 assert.match(review,/if\(!reviewHasStudyDay\(\)\)return saveReflectionOnlyRecord\(\)/u,'The Review save action must become reflection-only when no Study Day exists.');
-assert.match(review,/settled:\(\)=>Promise\.all\(\[AppData\.activeSession\.settled\(\),reflectionOnlyTail\]\)/u,'Reflection-only writes must participate in Review quiescence.');
+assert.match(review,/settled:\(\)=>Promise\.all\(\[AppData\.activeSession\.settled\(\),reflectionLane\.tail\(\)\]\)/u,'Reflection-only writes must participate in Review quiescence.');
 
 console.log(JSON.stringify({
   status:'PASS',suite:'diary-record-contract',checks:24,contentOnly:true,noNewStore:true,

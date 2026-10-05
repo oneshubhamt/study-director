@@ -22,7 +22,7 @@ export const FEATURE_CONTRACTS=Object.freeze([
   contract('attachments.deletion','tests/integration/attachments/attachment-deletion.mjs'),
   contract('attachments.shared-hash-safety','tests/integration/attachments/attachment-storage-dedup.mjs'),
   contract('backup.coherent-capture','tests/integration/backup/capture-safety.mjs'),
-  contract('library.diary-save-recovery','tests/integration/library/diary-save-recovery.mjs'),
+  contract('storage.save-lane','tests/integration/storage/save-lane.mjs'),
   contract('insights.render-lifecycle','tests/integration/insights/render-lifecycle.mjs'),
   contract('backup.create-inspect','tests/integration/backup/backup-persistence.mjs'),
   contract('backup.restore-session-safety','tests/browser/backup/restore-session-safety.mjs'),

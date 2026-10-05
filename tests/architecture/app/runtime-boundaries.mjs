@@ -333,8 +333,10 @@ assert.doesNotMatch(timer,/requestAnimationFrame\(step\)[\s\S]{0,240}requestAnim
 assert.match(timer,/The one-second timer tick already advances progress/u);
 assert.match(ownership,/if\(!\(renewing&&hasControl\)\)setPrimary/u,'Ownership heartbeat renewal must not replay primary UI hooks.');
 assert.match(app,/TIMER_SNAPSHOT_INTERVAL_MS=60\*1000/u,'Routine active-session crash checkpoints must use the agreed one-minute cadence.');
-assert.match(review,/const REVIEW_SAVE_DEBOUNCE_MS=450/u,'Review reflection and study-quality edits must retain the 450 ms priority persistence window.');
-assert.match(review,/function persistReviewBinding[\s\S]{0,520}saveLiveDraft\(\{markChanged:false,delayMs:REVIEW_SAVE_DEBOUNCE_MS/u,'Review autosave must use Active Session persistence rather than a separate Reflection Draft repository.');
+assert.match(review,/const reflectionLane=SaveLane\.createLane\(/u,'Review reflection and study-quality edits save through the shared save lane.');
+assert.doesNotMatch(review,/REVIEW_SAVE_DEBOUNCE_MS|reflectionOnlyTimer/u,'Review keeps no save timer of its own.');
+assert.match(review,/function persistReviewBinding[\s\S]{0,520}reflectionLane\.schedule\(freeze\(\{mode:'session'/u,'Review autosave on a study day goes through the save lane into the session.');
+assert.match(review,/async function writeReflection[\s\S]{0,200}mode==='session'[\s\S]{0,120}writeLiveDraftNow\(/u,'Review autosave must use Active Session persistence rather than a separate Reflection Draft repository.');
 assert.match(app,/review:currentReviewSnapshot\(\)/u,'Active Session snapshots must carry the current Review reflection and study quality.');
 assert.match(app,/function flushLiveDraft\(options=\{\}\)[\s\S]{0,520}writeLiveDraftNow\(\{\.\.\.pending,emergency:true\}\)/u,'Review/page-exit flushes must use the existing emergency Active Session recovery path.');
 assert.match(app,/window\.addEventListener\('pagehide',[\s\S]{0,180}flushPendingReviewSave\(\{strict:false\}\)/u,'Page hide must flush pending Review state before asynchronous work can be suspended.');

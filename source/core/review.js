@@ -53,7 +53,7 @@ registry.define('review',1,()=>{
       'limits','dataContract','completionSources','taskOutcomes','timerModes'
     ],'Review constants');
     exactObject(input.services,[
-      'appData','diagnostics','practicePacer','taskIdentity','taskSessionState','keyedRecord','evidenceGateway','dailyReflection'
+      'appData','diagnostics','practicePacer','taskIdentity','taskSessionState','keyedRecord','evidenceGateway','dailyReflection','saveLane'
     ],'Review services');
     exactObject(input.runtime,[
       'tasks','sessionState','scheduleDerivedState','currentIndex','timerMode','isPaused','pendingGap',
@@ -75,6 +75,8 @@ registry.define('review',1,()=>{
     const KeyedRecord=input.services.keyedRecord;
     const SessionEvidenceGateway=input.services.evidenceGateway;
     const DailyReflection=functions(input.services.dailyReflection,['commit','load'],'Review Daily Reflection service');
+    const SaveLane=input.services.saveLane;
+    if(!SaveLane||SaveLane.format!=='study-director.save-lane-module'||SaveLane.contractVersion!==1)throw new TypeError('Review save lane is unavailable or incompatible.');
     const Runtime=input.runtime;
     const TASKS=Runtime.tasks;
     const SessionState=Runtime.sessionState;
@@ -120,9 +122,8 @@ registry.define('review',1,()=>{
     let currentReview=freeze({date:'',reflection:'',studyQuality:null,unfinished:''});
     let persistedReview=freeze({date:'',reflection:'',studyQuality:null});
     let reflectionOnlyState=freeze({date:'',canonical:'',recordKind:null});
-    let reflectionOnlyTimer=0,reflectionOnlyPending=null,reflectionOnlyTail=Promise.resolve(),reflectionOnlyHydration=0,reflectionOnlyLoading=false;
+    let reflectionOnlyHydration=0,reflectionOnlyLoading=false;
     const REVIEW_EDITOR_BINDING_VERSION='review-v2';
-    const REVIEW_SAVE_DEBOUNCE_MS=450;
     const REVIEW_RICH_INPUT_META=Symbol.for('studyDirector.richValidatedInput.v1');
 
     function validReviewDate(value){
@@ -259,29 +260,39 @@ async function hydrateReflectionOnlyState(date=getReviewDate()){
     AppDiagnostics.capture('review.reflection-only-load',error,'warn');return false;
   }
 }
+// Today's reflection saves through the shared save lane: into its Saved Day
+// on a day without a study session, otherwise into the session. Each pending
+// value names its date and store, so a date change mid-save still writes the
+// right day.
+async function writeReflection(pending,options={}){
+  if(pending.mode==='session'){
+    const result=await writeLiveDraftNow({markChanged:false,backupCapture:pending.backupCapture||options.backupCapture===true});
+    if(!result||result.ok!==true)throw result&&result.error||new Error('the session could not be saved');
+    return result;
+  }
+  const expected=reflectionOnlyState.date===pending.date?reflectionOnlyState.canonical:'';
+  const saved=await DailyReflection.commit(pending.date,pending.reflection,{expectedCanonical:expected,backupCapture:pending.backupCapture||options.backupCapture===true});
+  reflectionOnlyState=freeze({date:pending.date,canonical:String(saved.canonical||''),recordKind:saved.recordKind||null});
+  if(reviewDate(getReviewDate())===pending.date){persistedReview=normalizeReviewState({reflection:reflectionOnlyState.canonical,studyQuality:null},pending.date,{validatedRich:true});syncReviewSurfaceMode();}
+  markStorageHealthTimestamp('lastDailyRecordSaveAt');await refreshLibraryAfterSave(pending.date);return saved;
+}
+function reflectionLaneState(state,error){
+  if(state==='saving')setReflectionRichSync('saving','Saving…');
+  else if(state==='saved')setReflectionRichSync('saved','Saved');
+  else{setReflectionRichSync('error',SaveLane.failureMessage('Reflection',error));AppDiagnostics.capture('review.reflection-save',error,'warn');}
+}
+const reflectionLane=SaveLane.createLane(freeze({label:'Reflection',write:writeReflection,onState:reflectionLaneState,environment:freeze({setTimeout,clearTimeout})}));
 function queueReflectionOnlySave(binding,options={}){
   if(!binding||!lifecycleCanWrite())return false;
   const clean=normalizeReviewState({reflection:binding.reflection,studyQuality:null},binding.date,{validatedRich:true});
-  persistedReview=clean;reflectionOnlyPending=freeze({date:clean.date,reflection:clean.reflection,backupCapture:options.backupCapture===true});
-  if(reflectionOnlyTimer)clearTimeout(reflectionOnlyTimer);
-  setReflectionRichSync('saving','Saving…');
-  reflectionOnlyTimer=setTimeout(()=>{reflectionOnlyTimer=0;void flushReflectionOnlySave().catch(()=>{});},REVIEW_SAVE_DEBOUNCE_MS);
+  persistedReview=clean;reflectionLane.schedule(freeze({mode:'saved-day',date:clean.date,reflection:clean.reflection,backupCapture:options.backupCapture===true}));
   if(document.getElementById('pane-review')?.classList.contains('on'))ReviewView.sync();
   return true;
 }
 function flushReflectionOnlySave(options={}){
-  if(reflectionOnlyTimer){clearTimeout(reflectionOnlyTimer);reflectionOnlyTimer=0;}
   const bound=resolveReviewEditorBinding(getReviewDate(),options.event||null);
-  if(bound)reflectionOnlyPending=freeze({date:bound.date,reflection:bound.reflection,backupCapture:options.backupCapture===true});
-  const pending=reflectionOnlyPending;if(!pending)return reflectionOnlyTail;reflectionOnlyPending=null;
-  reflectionOnlyTail=reflectionOnlyTail.catch(()=>{}).then(async()=>{
-    const expected=reflectionOnlyState.date===pending.date?reflectionOnlyState.canonical:'';
-    const saved=await DailyReflection.commit(pending.date,pending.reflection,{expectedCanonical:expected,backupCapture:pending.backupCapture||options.backupCapture===true});
-    reflectionOnlyState=freeze({date:pending.date,canonical:String(saved.canonical||''),recordKind:saved.recordKind||null});
-    if(reviewDate(getReviewDate())===pending.date){persistedReview=normalizeReviewState({reflection:reflectionOnlyState.canonical,studyQuality:null},pending.date,{validatedRich:true});setReflectionRichSync('saved','Saved');syncReviewSurfaceMode();}
-    markStorageHealthTimestamp('lastDailyRecordSaveAt');await refreshLibraryAfterSave(pending.date);return saved;
-  }).catch(error=>{if(reviewDate(getReviewDate())===pending.date)setReflectionRichSync('error','Save failed');AppDiagnostics.capture('review.reflection-only-save',error,'warn');throw error;});
-  return reflectionOnlyTail;
+  if(bound)reflectionLane.schedule(freeze({mode:'saved-day',date:bound.date,reflection:bound.reflection,backupCapture:options.backupCapture===true}));
+  return reflectionLane.flush(options);
 }
 function persistReviewBinding(binding,options={}){
   if(!binding||!lifecycleCanWrite())return false;
@@ -289,8 +300,7 @@ function persistReviewBinding(binding,options={}){
   persistedReview=normalizeReviewState(binding,binding.date,{validatedRich:true});
   if(options.markChanged!==false)markDayContentChanged();
   if(document.getElementById('pane-review')?.classList.contains('on'))ReviewView.sync();
-  setReflectionRichSync('saving','Saving…');
-  saveLiveDraft({markChanged:false,delayMs:REVIEW_SAVE_DEBOUNCE_MS,backupCapture:options.backupCapture===true});
+  reflectionLane.schedule(freeze({mode:'session',date:binding.date,backupCapture:options.backupCapture===true}));
   return true;
 }
 function saveReviewState(options={}){
@@ -305,9 +315,13 @@ function queueReviewSave(options={}){
   return persistReviewBinding(binding,options);
 }
 function flushPendingReviewSave(options={}){
+  SaveLane.prepareFlush();
   if(!reviewHasStudyDay())return flushReflectionOnlySave(options);
   const binding=resolveReviewEditorBinding(getReviewDate(),options.event||null);
   if(binding)persistedReview=normalizeReviewState(binding,binding.date,{validatedRich:true});
+  // The session is written at once, with its synchronous recovery copy; a
+  // queued session save would only repeat it.
+  if(reflectionLane.pending())reflectionLane.cancel();
   const result=flushLiveDraft({markChanged:false,backupCapture:options.backupCapture===true});
   return result===null?lifecycleCanWrite():true;
 }
@@ -450,7 +464,6 @@ async function saveReflectionOnlyRecord(){
   const notice=notifications.begin({id:'save-reflection',surfaceId:'save-status',title:'Save reflection',message:'Saving reflection…'});
   let committed=false;
   try{
-    reflectionOnlyPending=freeze({date:binding.date,reflection:binding.reflection,backupCapture:false});
     const saved=await flushReflectionOnlySave();
     const hasContent=!!String(saved?.canonical||'').trim();committed=true;
     ReviewView.sync();
@@ -1625,7 +1638,7 @@ function copyReview(){
       saveReview:saveReviewState,
       queueReview:queueReviewSave,
       flushPending:flushPendingReviewSave,
-      settled:()=>Promise.all([AppData.activeSession.settled(),reflectionOnlyTail]).then(()=>true),
+      settled:()=>Promise.all([AppData.activeSession.settled(),reflectionLane.tail()]).then(()=>true),
       hydrate:hydrateReviewState,
       selectDate:selectReviewDate,
       state:currentReviewState,

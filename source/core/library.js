@@ -16,7 +16,7 @@ registry.define('library',1,()=>{
     interactions:freeze(['confirm','input']),
     environment:freeze(['cancelAnimationFrame','createOption','createSearchWorker','requestAnimationFrame']),
     exporter:freeze(['exportKeys','cancel']),
-    diary:freeze(['bindEditor','captureEditor','clearEditor','commitEditor','deleteEntry','draft','settled']),
+    diary:freeze(['bindEditor','captureEditor','clearEditor','deleteEntry','draft','flushEditor','scheduleEditor','settled']),
     notes:freeze(['bindEditor','canCreate','catalogue','clearEditor','commitEditor','failure','focusEditor','get','normalizeArea','orderEntries','remove','renderInherited','searchDocuments','size']),
     attachments:freeze(['batch','count','invalidate','reconcile']),
     clearLibrary:freeze(['preflight','execute']),
@@ -49,7 +49,7 @@ registry.define('library',1,()=>{
     const {confirm,input:requestInput}=ports.interactions;
     const {cancelAnimationFrame,createOption,createSearchWorker,requestAnimationFrame}=ports.environment;
     const {exportKeys,cancel:cancelExport}=ports.exporter;
-    const {bindEditor:bindDiaryEditor,captureEditor:captureDiaryEditor,clearEditor:clearDiaryEditor,commitEditor:commitDiaryEditor,deleteEntry:deleteDiaryEntryRecord,draft:createDiaryDraft,settled:settleDiaryEditor}=ports.diary;
+    const {bindEditor:bindDiaryEditor,captureEditor:captureDiaryEditor,clearEditor:clearDiaryEditor,deleteEntry:deleteDiaryEntryRecord,flushEditor:flushDiaryEditor,scheduleEditor:scheduleDiaryEditor,draft:createDiaryDraft,settled:settleDiaryEditor}=ports.diary;
     const {
       bindEditor,canCreate:canCreateOngoingNote,catalogue:ongoingNoteCatalogue,clearEditor,commitEditor,failure:ongoingNoteFailure,focusEditor,
       get:getAreaNote,normalizeArea:normalizeOngoingNoteArea,orderEntries:orderOngoingNoteEntries,
@@ -77,7 +77,7 @@ registry.define('library',1,()=>{
     let libraryHasRendered=false;
     let libraryRestoreFrame=0;
     let libraryScrollState={documentTop:0,mainTop:0};
-    let selectedDiaryDate='',diaryDraftRecord=null,diaryEditing=false,diaryEntryListed=false,diaryInstalled=false,diaryRenderFrame=0,diaryRenderToken=0,diarySaveTimer=0,diaryPendingValue=null,diaryPendingSave=Promise.resolve(),diarySaveSequence=0,diarySummaryCountQueued=false,diarySummaryCountRevision=-1;
+    let selectedDiaryDate='',diaryDraftRecord=null,diaryEditing=false,diaryEntryListed=false,diaryInstalled=false,diaryRenderFrame=0,diaryRenderToken=0,diarySummaryCountQueued=false,diarySummaryCountRevision=-1;
     let selectedOngoingNoteKey='';
     let ongoingNoteEditorSignature='';
     let ongoingNoteRenderFrame=0;
@@ -717,7 +717,7 @@ registry.define('library',1,()=>{
       const panel=document.getElementById('library-diary-editor');if(!panel)return false;
       const shell=document.createElement('div');shell.className='library-notes-editor-shell';
       const field=document.createElement('textarea');field.className='library-notes-textarea library-diary-textarea ui-field';field.autocomplete='off';field.placeholder='Write this reflection…';shell.appendChild(field);panel.replaceChildren(diaryHeader(record,true),shell);
-      bindDiaryEditor(field,record.date,record);field.addEventListener('input',event=>scheduleDiarySave(captureDiaryEditor(field,event)));field.addEventListener('blur',()=>{void flushDiarySave().catch(()=>{});});field.focus();return true;
+      bindDiaryEditor(field,record.date,record,{onSaved:diarySaved,onState:(status,message)=>setDiaryStatus(status==='error'?message:'',status==='error')});field.addEventListener('input',event=>scheduleDiaryEditor(field,captureDiaryEditor(field,event)));field.addEventListener('blur',()=>{void flushDiarySave().catch(()=>{});});field.focus();return true;
     }
     async function renderDiary(){
       if(attachmentMutationHold){attachmentMutationNeedsDiary=true;return false;}
@@ -733,28 +733,17 @@ registry.define('library',1,()=>{
         return true;
       }catch(error){setDiaryStatus('Diary could not be loaded: '+(error&&error.message||error),true);return false;}
     }
-    function scheduleDiarySave(value){
-      diaryPendingValue=String(value??'');if(diarySaveTimer)window.clearTimeout(diarySaveTimer);
-      diarySaveTimer=window.setTimeout(()=>{diarySaveTimer=0;void flushDiarySave().catch(()=>{});},450);return true;
+    // The editor's save lane writes after typing pauses and retries a failed
+    // write; this keeps the list in step with what was saved.
+    function diarySaved(record){
+      const listed=!!String(record?.reflection||'').trim();
+      if(listed!==diaryEntryListed){diaryEntryListed=listed;invalidateLibrarySummaryCache();}
     }
-    function flushDiarySave(options={}){
-      if(diarySaveTimer){window.clearTimeout(diarySaveTimer);diarySaveTimer=0;}
-      const field=diaryEditorField();if(!field||diaryPendingValue===null)return diaryPendingSave;
-      const value=diaryPendingValue,sequence=++diarySaveSequence;diaryPendingValue=null;
-      diaryPendingSave=diaryPendingSave.catch(()=>{}).then(()=>commitDiaryEditor(field,value,options)).then(record=>{
-        const listed=!!String(record?.reflection||'').trim();
-        if(listed!==diaryEntryListed){diaryEntryListed=listed;invalidateLibrarySummaryCache();}
-        setDiaryStatus('');return record;
-      },error=>{
-        // Retry the latest failed draft without overwriting a newer queued edit.
-        if(sequence===diarySaveSequence&&diaryEditorField()===field&&diaryPendingValue===null)diaryPendingValue=value;
-        setDiaryStatus(error&&error.message||'Reflection was not saved.',true);throw error;
-      });return diaryPendingSave;
-    }
+    function flushDiarySave(options={}){const field=diaryEditorField();return field?flushDiaryEditor(field,options):Promise.resolve(null);}
     async function startDiaryEdit(date,recordOverride=null){
       if(!canMutate()){setDiaryStatus('Study control is in another tab. Take control here before editing Diary.',true);return false;}
       if(!isSupportedSavedDate(date))return false;
-      try{const record=recordOverride||await getDailyRecord(date);if(!record)return false;selectedDiaryDate=date;diaryDraftRecord=record.recordKind==='diary'&&!String(record.reflection||'').trim()?record:null;diaryEntryListed=!!String(record.reflection||'').trim();diaryEditing=true;diaryPendingValue=null;setDiaryStatus('');return renderDiaryEdit(record);}
+      try{const record=recordOverride||await getDailyRecord(date);if(!record)return false;selectedDiaryDate=date;diaryDraftRecord=record.recordKind==='diary'&&!String(record.reflection||'').trim()?record:null;diaryEntryListed=!!String(record.reflection||'').trim();diaryEditing=true;setDiaryStatus('');return renderDiaryEdit(record);}
       catch(error){setDiaryStatus('Diary editor could not open: '+(error&&error.message||error),true);return false;}
     }
     async function createDiaryEntry(){
@@ -774,12 +763,10 @@ registry.define('library',1,()=>{
       const confirmed=await confirm({title:'Delete reflection?',message:current?.recordKind==='study'?'The reflection will be removed. The saved Study Day will remain.':'This reflection will be deleted.',confirmLabel:'Delete',cancelLabel:'Cancel',danger:true});
       if(!confirmed||!canMutate())return false;
       if(diaryEditing&&selectedDiaryDate===date){
-        if(diarySaveTimer){window.clearTimeout(diarySaveTimer);diarySaveTimer=0;}
-        diaryPendingValue=null;
-        await diaryPendingSave.catch(()=>{});
-        diaryPendingSave=Promise.resolve();
-        current=await getDailyRecord(date);
-        const field=diaryEditorField();if(field)clearDiaryEditor(field);diaryEditing=false;
+        // Unsaved typing is dropped; a write already under way finishes first.
+        const field=diaryEditorField();
+        if(field){const writing=settleDiaryEditor(field);clearDiaryEditor(field);await writing;}
+        current=await getDailyRecord(date);diaryEditing=false;
       }
       if(current)await deleteDiaryEntryRecord(date);
       selectedDiaryDate='';diaryDraftRecord=null;diaryEntryListed=false;invalidateLibrarySummaryCache();setDiaryStatus('');await renderDiary();return true;
@@ -791,7 +778,7 @@ registry.define('library',1,()=>{
     }
     function finalizeDiaryEdit(){
       if(!diaryEditing)return true;const field=diaryEditorField();
-      if(field)clearDiaryEditor(field);diaryEditing=false;diaryEntryListed=false;diaryPendingValue=null;diaryDraftRecord=null;invalidateLibrarySummaryCache();return true;
+      if(field)clearDiaryEditor(field);diaryEditing=false;diaryEntryListed=false;diaryDraftRecord=null;invalidateLibrarySummaryCache();return true;
     }
     async function finishDiaryEdit(options={}){
       if(!await settleDiaryEdit())return false;

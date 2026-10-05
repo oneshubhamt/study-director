@@ -8,7 +8,9 @@ const {exactFrozenObject:exactObject,functionPort:functions}=registry.contracts;
 registry.define('repositories-area-notes',1,()=>{
   const freeze=Object.freeze;
   function create(input){
-    exactObject(input,['configuration','storage','codecs','keyedRecord','helpers','hooks','canonical','clock'],'Area Notes repository input');
+    exactObject(input,['configuration','storage','codecs','keyedRecord','helpers','hooks','canonical','clock','saveLane'],'Area Notes repository input');
+    const SaveLane=input.saveLane;
+    if(!SaveLane||SaveLane.format!=='study-director.save-lane-module'||SaveLane.contractVersion!==1||typeof SaveLane.createLane!=='function')throw new TypeError('Area Notes save lane is unavailable or incompatible.');
     const configuration=exactObject(input.configuration,['limits','dataContract','stores','keys','legacyKeys','metaKeys'],'Area Notes configuration');
     const stores=exactObject(configuration.stores,['areaNotes','appMeta'],'Area Notes stores');
     const keys=exactObject(configuration.keys,['areaNoteRescue'],'Area Notes storage keys');
@@ -40,10 +42,10 @@ const repository=(()=>{
   // before any transaction on it runs. Storage counts as lost from then until
   // every note this tab holds has been written back.
   const storageLossKnown=()=>storageLossSignalled||(Number(storageResets())||0)>acknowledgedResets;
-  // Each change is written straight to the database a moment after typing
-  // pauses. A browser copy (the rescue) holds unsaved notes only when that
-  // write fails or the page is hidden or closed before it finishes.
-  const SAVE_DEBOUNCE_MS=250;
+  // Each change is written straight to the database through the shared save
+  // lane, a moment after typing pauses. A browser copy (the rescue) holds
+  // unsaved notes only when that write fails or the page is hidden or closed
+  // before it finishes.
   // A deleted note stays an ordinary row under a reserved key ('~deleted <id>')
   // for areaNoteTrashDays. It keeps its label and text, and its revision is the
   // time it was deleted. Live notes never use the prefix, and trash rows leave
@@ -53,8 +55,6 @@ const repository=(()=>{
   const isTrashKey=key=>String(key||'').startsWith(TRASH_PREFIX);
   let loadPromise=null,lastLoadReadFailed=false;
   let freshLoadPromise=null;
-  let saveTimer=null;
-  let writeChain=Promise.resolve();
   let saveFailed=false;
   let saveMessage='';
   let snapshotRevision=0,metadataSnapshotCache=null,searchSnapshotCache=null;
@@ -155,7 +155,7 @@ const repository=(()=>{
   function clearFailure(){saveFailed=false;saveMessage='';}
   function recordFailure(reason){
     saveFailed=true;
-    saveMessage=`Ongoing subject notes could not be saved normally${reason?`: ${reason}`:''}. Use Export backup before closing this tab; Study Director will include recoverable in-memory notes if IndexedDB remains unavailable.`;
+    saveMessage=SaveLane.failureMessage('Ongoing Notes',reason||'the note database failed');
     showSubjectNoteSaveWarning(reason);
   }
   const AREA_NOTE_RECOVERY_META_PREFIX=META_KEYS.areaNoteRecoveryPrefix;
@@ -334,6 +334,7 @@ const repository=(()=>{
     if(!dirtyBaseRevisions.has(safeKey))dirtyBaseRevisions.set(safeKey,String(baseRevision===undefined?revision(notes[safeKey]):baseRevision||''));
     dirtyKeys.add(safeKey);
     setNoteSyncStateForKey(safeKey,'saving');
+    if(appCanMutate())lane.schedule();
   }
   async function idbRead(){
     const rows=await idbGetAll(DB_AREA_NOTES_STORE,'area note read aborted'),out=KeyedRecord.create();
@@ -391,9 +392,9 @@ const repository=(()=>{
     },'area note transaction aborted');
   }
   async function performLoad({strict=false}={}){
-    const revisionAtStart=snapshotRevision,writesAtStart=writeChain;
+    const revisionAtStart=snapshotRevision,writesAtStart=lane.tail();
     let loaded={};lastLoadReadFailed=false;
-    await writesAtStart;
+    await lane.settled();
     const rescueBeforeRead=readIndependentRescue();
     try{
       loaded=await idbRead();
@@ -425,7 +426,7 @@ const repository=(()=>{
     // Request results precede transaction completion. An edit or queued save
     // in that interval invalidates this snapshot, including equal timestamps.
     // Keep its dirty state and timers; a later stable recovery can adopt safely.
-    if(snapshotRevision!==revisionAtStart||writeChain!==writesAtStart){
+    if(snapshotRevision!==revisionAtStart||lane.tail()!==writesAtStart){
       lastLoadReadFailed=true;
       const error=new Error('Ongoing notes changed during recovery. Recovery remains pending.');
       error.code='AREA_NOTE_RECOVERY_SUPERSEDED';throw error;
@@ -436,7 +437,6 @@ const repository=(()=>{
     // revision they were made against; saving them settles any clash.
     const unsaved=new Map(dirtyBaseRevisions);
     for(const key of unsaved.keys()){const entry=canonicalEntrySnapshot(notes[key],key),clean=entry?normalizePayload({[key]:entry})[key]:null;if(clean)merged[key]=clean;else delete merged[key];}
-    if(saveTimer){clearTimeout(saveTimer);saveTimer=null;}
     dirtyKeys.clear();
     dirtyBaseRevisions.clear();
     wipeObject(notes);
@@ -453,7 +453,7 @@ const repository=(()=>{
     for(const [key,base] of unsaved){dirtyKeys.add(key);dirtyBaseRevisions.set(key,base);}
     everLoaded=true;
     purgeExpiredTrash();
-    if(dirtyKeys.size)scheduleSave();
+    if(dirtyKeys.size&&appCanMutate())lane.schedule();
     refreshAreaNoteConsumers();
     return true;
   }
@@ -468,7 +468,7 @@ const repository=(()=>{
   function reloadFresh(){
     if(freshLoadPromise)return freshLoadPromise;
     freshLoadPromise=(async()=>{
-      await writeChain.catch(error=>{AppDiagnostics.capture('area-notes.pre-reload-write',error,'error');});
+      await lane.settled();
       const loaded=await performLoad({strict:true});
       // A successful recovery replaces the failed startup result. Otherwise
       // every maintenance retry reloads notes and invalidates its own progress.
@@ -496,66 +496,56 @@ const repository=(()=>{
     }
     return '';
   }
-  function runSave(keys,options={}){
-    const deltaKeys=[...new Set((keys||[]).map(normalizeAreaName).filter(Boolean))];
-    if(!deltaKeys.length)return writeChain;
-    writeChain=writeChain.catch(error=>{AppDiagnostics.capture('area-notes.previous-write',error,'error');}).then(async()=>{
-      const expectedRevisions=new Map(deltaKeys.map(key=>[key,dirtyBaseRevisions.has(key)?String(dirtyBaseRevisions.get(key)||''):revision(notes[key])]));
-      return idbApplyDelta(deltaKeys,expectedRevisions);
-    })
-      .then(async result=>{
-        const conflicts=new Map((result&&result.conflicts||[]).map(item=>[item.key,item.persisted]));
-        const savedKeys=deltaKeys.filter(key=>!conflicts.has(key));
-        let canonicalRefreshNeeded=false;const settledKeys=[];
-        savedKeys.forEach(key=>{
-          const written=result.committed[key]||null,committedRevision=written?revision(written):'';
-          if(dirtyKeys.has(key)||!sameEntry(notes[key],written))dirtyBaseRevisions.set(key,committedRevision);
-          else{
-            dirtyBaseRevisions.delete(key);settledKeys.push(key);
-            if(!committedRevision){delete notes[key];canonicalRefreshNeeded=true;}
-            setNoteSyncStateForKey(key,'synced');
-          }
-        });
-        const keptCopies=new Map();
-        conflicts.forEach((persisted,key)=>{
-          const local=notes[key]||null;
-          dirtyKeys.delete(key);dirtyBaseRevisions.delete(key);settledKeys.push(key);
-          if(persisted)notes[key]=persisted;else delete notes[key];
-          // The stored version wins, but text this tab accepted is never thrown
-          // away: it is kept beside the stored note as an ordinary note.
-          if(local&&String(local.text||'').trim()&&String(local.text||'')!==String(persisted&&persisted.text||''))keptCopies.set(key,keepConflictCopy(local,key));
-        });
-        if(!clearIndependentRescueKeys(settledKeys))AppDiagnostics.capture('area-notes.rescue-clear',LocalStorageContract.lastError||new Error('Ongoing Note emergency rescue cleanup failed.'),'warn');
-        clearFailure();
-
-        markStorageHealthOk('areaNotes','lastNotesSaveAt');
-        if(savedKeys.length)reportCanonicalCommit('areaNote','upsert',null,{backupCapture:options.backupCapture===true});
-        if(canonicalRefreshNeeded||conflicts.size)touchSnapshot();
-        if(canonicalRefreshNeeded)refreshAreaNoteConsumers();
-        if(conflicts.size){
-          refreshAreaNoteConsumers();
-          conflicts.forEach((persisted,key)=>reportAreaNoteConflict(Object.freeze({key,label:persisted&&persisted.label||displayAreaName(key),copyLabel:keptCopies.get(key)||''})));
-        }
-      })
-      .catch(e=>{
-        deltaKeys.forEach(key=>dirtyKeys.add(key));
-        protectUnsaved();
-        recordFailure(e&&e.message?e.message:'area note database failed');
-      });
-    return writeChain;
+  // Writes one batch of notes in one transaction. A committed note stays
+  // pending while this tab already holds something newer than what was written.
+  async function commitNotes(deltaKeys,options={}){
+    const expectedRevisions=new Map(deltaKeys.map(key=>[key,dirtyBaseRevisions.has(key)?String(dirtyBaseRevisions.get(key)||''):revision(notes[key])]));
+    const result=await idbApplyDelta(deltaKeys,expectedRevisions);
+    const conflicts=new Map((result&&result.conflicts||[]).map(item=>[item.key,item.persisted]));
+    const savedKeys=deltaKeys.filter(key=>!conflicts.has(key));
+    let canonicalRefreshNeeded=false;const settledKeys=[];
+    savedKeys.forEach(key=>{
+      const written=result.committed[key]||null,committedRevision=written?revision(written):'';
+      if(dirtyKeys.has(key)||!sameEntry(notes[key],written))dirtyBaseRevisions.set(key,committedRevision);
+      else{
+        dirtyBaseRevisions.delete(key);settledKeys.push(key);
+        if(!committedRevision){delete notes[key];canonicalRefreshNeeded=true;}
+        setNoteSyncStateForKey(key,'synced');
+      }
+    });
+    const keptCopies=new Map();
+    conflicts.forEach((persisted,key)=>{
+      const local=notes[key]||null;
+      dirtyKeys.delete(key);dirtyBaseRevisions.delete(key);settledKeys.push(key);
+      if(persisted)notes[key]=persisted;else delete notes[key];
+      // The stored version wins, but text this tab accepted is never thrown
+      // away: it is kept beside the stored note as an ordinary note.
+      if(local&&String(local.text||'').trim()&&String(local.text||'')!==String(persisted&&persisted.text||''))keptCopies.set(key,keepConflictCopy(local,key));
+    });
+    if(!clearIndependentRescueKeys(settledKeys))AppDiagnostics.capture('area-notes.rescue-clear',LocalStorageContract.lastError||new Error('Ongoing Note emergency rescue cleanup failed.'),'warn');
+    clearFailure();
+    markStorageHealthOk('areaNotes','lastNotesSaveAt');
+    if(savedKeys.length)reportCanonicalCommit('areaNote','upsert',null,{backupCapture:options.backupCapture===true});
+    if(canonicalRefreshNeeded||conflicts.size)touchSnapshot();
+    if(canonicalRefreshNeeded)refreshAreaNoteConsumers();
+    if(conflicts.size){
+      refreshAreaNoteConsumers();
+      conflicts.forEach((persisted,key)=>reportAreaNoteConflict(Object.freeze({key,label:persisted&&persisted.label||displayAreaName(key),copyLabel:keptCopies.get(key)||''})));
+    }
   }
-  function scheduleSave(){
-    if(!appCanMutate())return writeChain;
-    if(!dirtyKeys.size)Object.keys(notes).forEach(key=>markDirty(key));
-    if(saveTimer)clearTimeout(saveTimer);
-    saveTimer=setTimeout(()=>{
-      saveTimer=null;
-      const keys=[...dirtyKeys];
-      dirtyKeys.clear();
-      void runSave(keys);
-    },SAVE_DEBOUNCE_MS);
-    return writeChain;
+  // The lane's write: every note changed since the last batch. A failed batch
+  // stays unsaved, goes to the browser copy, and the lane retries it.
+  async function saveDirtyNotes(_value,options={}){
+    if(!appCanMutate())return false;
+    const keys=[...new Set([...dirtyKeys].map(normalizeAreaName).filter(Boolean))];dirtyKeys.clear();
+    if(!keys.length)return true;
+    try{await commitNotes(keys,options);return true;}
+    catch(error){
+      keys.forEach(key=>dirtyKeys.add(key));protectUnsaved();
+      recordFailure(error&&error.message?error.message:'area note database failed');throw error;
+    }
   }
+  const lane=SaveLane.createLane(freeze({label:'Ongoing Notes',write:saveDirtyNotes,onState:()=>{},environment:freeze({setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer)})}));
   function updateInternal(key,label,value,expectedRevision='',validatedRich=false){
     if(!appCanMutate())return {status:'rejected',revision:''};
     const safeKey=normalizeAreaName(key);
@@ -584,7 +574,6 @@ const repository=(()=>{
     entry.updatedAt=nextRevision(currentRevision);
     touchSnapshot();
     markDirty(entry.key,currentRevision);
-    scheduleSave();
     return {status:'changed',revision:revision(entry)};
   }
   function update(key,label,value,expectedRevision=''){return updateInternal(key,label,value,expectedRevision,false);}
@@ -636,27 +625,14 @@ const repository=(()=>{
   }
   function flush(options={}){
     const strict=!!(options&&options.strict),backupCapture=options&&options.backupCapture===true;
-    if(!appCanMutate())return strict?Promise.reject(new Error('ongoing notes cannot flush without write ownership')):writeChain;
-    let pending;
-    if(saveTimer){
-      clearTimeout(saveTimer);
-      saveTimer=null;
-      const keys=[...dirtyKeys];
-      dirtyKeys.clear();
-      pending=runSave(keys,{backupCapture});
-    }else if(dirtyKeys.size){
-      const keys=[...dirtyKeys];
-      dirtyKeys.clear();
-      pending=runSave(keys,{backupCapture});
-    }else pending=writeChain;
+    if(!appCanMutate())return strict?Promise.reject(new Error('ongoing notes cannot flush without write ownership')):lane.settled();
+    const writeNow=()=>{if(dirtyKeys.size&&!lane.pending())lane.schedule();return lane.flush({backupCapture}).then(()=>true,()=>false);};
+    const pending=writeNow();
     if(!strict)return pending;
-    return Promise.resolve(pending).then(async()=>{
+    return pending.then(async()=>{
       // A clash during this flush keeps the rejected text as a new note; store
       // that copy now so a strict flush never ends with it only in memory.
-      if(dirtyKeys.size&&!saveFailed){
-        if(saveTimer){clearTimeout(saveTimer);saveTimer=null;}
-        const keys=[...dirtyKeys];dirtyKeys.clear();await runSave(keys,{backupCapture});
-      }
+      if(dirtyKeys.size&&!saveFailed)await writeNow();
       if(dirtyKeys.size)throw new Error(saveMessage||'current ongoing notes are not safely stored');
       if(saveFailed&&!(await repairStaleFailureIfCanonical())){
         if(!(await storageAppearsRecreated())||!(await recoverAfterStorageLoss()))throw new Error(saveMessage||'current ongoing notes are not safely stored');
@@ -680,8 +656,7 @@ const repository=(()=>{
     const byKey=new Map();for(const row of rows||[]){const clean=normalizePayload({[row&&row.key]:row})[normalizeAreaName(row&&row.key)];if(clean)byKey.set(clean.key,clean);}return freeze(requested.map(key=>byKey.get(key)||null));
   }
   function resetPendingAreaNoteWrites(){
-    if(saveTimer){clearTimeout(saveTimer);saveTimer=null;}
-    dirtyKeys.clear();dirtyBaseRevisions.clear();
+    lane.cancel();dirtyKeys.clear();dirtyBaseRevisions.clear();
   }
   async function commitCollection(payload,{merge,deletions=[]}={}){
     await flush();
@@ -801,7 +776,7 @@ const repository=(()=>{
     if(!everLoaded||!appCanMutate())return 0;
     const now=decisionNowMs(),expired=Object.keys(notes).filter(key=>isTrashKey(key)&&trashExpired(notes[key],now));
     for(const key of expired){const current=notes[key];delete notes[key];markDirty(key,revision(current));}
-    if(expired.length){touchSnapshot();scheduleSave();}
+    if(expired.length)touchSnapshot();
     return expired.length;
   }
   async function clearAllAreaNotes(){

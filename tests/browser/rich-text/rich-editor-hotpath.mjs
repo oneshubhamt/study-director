@@ -32,8 +32,8 @@ try{
   const tableMountMs=performance.now()-tableMountStart;
   const tableTyping=await typeBatch('#tableNote + .sd-rte tr:first-child td:first-child p',30);
   assert.ok(tableTyping.scrolls<=1,`Typing in one table cell must not repeatedly call scrollIntoView (got ${tableTyping.scrolls}).`);
-  const meta=await page.evaluate(`__lastMeta&&({format:__lastMeta.format,version:__lastMeta.version,words:__lastMeta.words,bytes:__lastMeta.bytes,plain:__lastMeta.plain,canonical:__lastMeta.canonical})`);
-  assert.equal(meta?.format,'study-director.rich-validated-input');assert.equal(meta?.version,1);assert.ok(Number.isInteger(meta?.words)&&meta.words>=0);assert.ok(Number.isInteger(meta?.bytes)&&meta.bytes>0);assert.equal(typeof meta?.plain,'string');assert.equal(typeof meta?.canonical,'string');
+  const meta=await page.evaluate(`__lastMeta&&({format:__lastMeta.format,version:__lastMeta.version,keys:Object.keys(__lastMeta).sort(),plain:__lastMeta.plain,canonical:__lastMeta.canonical})`);
+  assert.equal(meta?.format,'study-director.rich-validated-input');assert.equal(meta?.version,1);assert.deepEqual(meta?.keys,['canonical','format','plain','version'],'the validated input carries only what the app reads');assert.equal(typeof meta?.plain,'string');assert.equal(typeof meta?.canonical,'string');
 
   const switched=await typeBatch('#tableNote + .sd-rte tr:first-child td:nth-child(2) p',12);
   assert.ok(switched.scrolls<=1,'Typing after switching cells must require at most one reveal.');

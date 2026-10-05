@@ -1456,6 +1456,7 @@ const AudioEngineModule=INTERNAL_MODULES.load('audio-engine',1,'study-director.a
 const NoticeCoordinatorModule=INTERNAL_MODULES.load('notice-coordinator',1,'study-director.notice-coordinator-module',1);
 const NavigationModule=INTERNAL_MODULES.load('navigation',1,'study-director.navigation-module',1);
 const RepositoryJournalModule=INTERNAL_MODULES.load('repository-journals',1,'study-director.repository-journals',1);
+const SaveLaneModule=INTERNAL_MODULES.load('save-lane',1,'study-director.save-lane-module',1);
 const AreaNotesRepositoryModule=INTERNAL_MODULES.load('repositories-area-notes',1,'study-director.area-notes-repository-module',1);
 const RepositoryModule=INTERNAL_MODULES.load('repositories',1,'study-director.repositories',1);
 const ReviewModule=INTERNAL_MODULES.load('review',1,'study-director.review',1);
@@ -4412,6 +4413,7 @@ const AppData=RepositoryModule.createAppData(Object.freeze({
   keyedRecord:KeyedRecord,
   journals:RepositoryJournals,
   areaNotesRepositoryModule:AreaNotesRepositoryModule,
+  saveLaneModule:SaveLaneModule,
   limits:APP_LIMITS,
   dataContract:DATA_CONTRACT,
   stores:Object.freeze({
@@ -6570,6 +6572,7 @@ const LibraryDiaryEditor=(()=>{
   const bindings=new WeakMap();
   function clear(field){
     if(!(field instanceof HTMLTextAreaElement))return false;
+    bindings.get(field)?.lane.cancel();
     richTextCloseField(field);bindings.delete(field);
     ['diaryDate','diaryRevision','richSyncState','richSyncStatus','richExternalConflict'].forEach(key=>delete field.dataset[key]);
     return true;
@@ -6579,11 +6582,25 @@ const LibraryDiaryEditor=(()=>{
     const now=new Date().toISOString();
     return Object.freeze({version:DATA_CONTRACT.schemas.DailyRecord.version,recordKind:'diary',date:String(date),savedAt:now,updatedAt:now,sourceRevision:0,reflection:'',dayOfWeek:dateInsightsMeta(date).dayOfWeek,dayName:dateInsightsMeta(date).dayName});
   }
-  function bind(field,date,record){
+  // An open Diary editor saves through its own lane of the shared save engine.
+  async function write(field,state,value,options={}){
+    const candidate=clampEditorContent(value,APP_LIMITS.maxReflectionChars);
+    if(!editorContentWithinLimits(candidate))throw new Error('Diary reflection exceeds the rich-text limit.');
+    const saved=await DailyReflectionPersistence.commit(state.date,candidate,{expectedCanonical:state.canonical,backupCapture:options.backupCapture===true}),fresh=saved.record;
+    state.canonical=saved.canonical;state.revision=saved.revision;state.recordKind=saved.recordKind||'diary';
+    field.dataset.diaryRevision=String(state.revision);richTextSyncField(field);state.onSaved?.(fresh);return fresh;
+  }
+  function laneState(field,state,status,error){
+    const message=status==='error'?SaveLaneModule.failureMessage('Diary reflection',error):status==='saving'?'Saving…':'Saved';
+    field.dataset.richSyncState=status;field.dataset.richSyncStatus=message;state.onState?.(status,message);
+  }
+  function bind(field,date,record,{onSaved=null,onState=null}={}){
     if(!(field instanceof HTMLTextAreaElement)||!isSupportedSavedDate(date)||!record)return null;
     clear(field);
     const canonical=String(record.reflection||''),revision=AppData.dailyRecords.timestamp(record);
-    const state={date,canonical,revision,recordKind:record.recordKind==='diary'?'diary':'study',tail:Promise.resolve()};bindings.set(field,state);
+    const state={date,canonical,revision,recordKind:record.recordKind==='diary'?'diary':'study',onSaved,onState};
+    state.lane=SaveLaneModule.createLane(Object.freeze({label:'Diary reflection',write:(value,options)=>write(field,state,value,options),onState:(status,error)=>laneState(field,state,status,error),environment:Object.freeze({setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer)})}));
+    bindings.set(field,state);
     field.dataset.diaryDate=date;field.dataset.diaryRevision=String(revision);
     field.dataset.richSyncState=appCanMutate()?'saved':'read-only';field.dataset.richSyncStatus=appCanMutate()?'Saved':'Read-only';
     field.value=plainTextContent(canonical);field.maxLength=APP_LIMITS.maxReflectionChars;
@@ -6602,26 +6619,15 @@ const LibraryDiaryEditor=(()=>{
     if(trusted||RichTextApi.isRichTextValue(value))return value;
     return value===plainTextContent(state.canonical)?state.canonical:value;
   }
-  function commit(field,value,options={}){
-    const state=bindings.get(field);if(!state)return Promise.reject(new Error('Diary editor is no longer active.'));
-    const candidate=clampEditorContent(value,APP_LIMITS.maxReflectionChars);
-    if(!editorContentWithinLimits(candidate))return Promise.reject(new Error('Diary reflection exceeds the rich-text limit.'));
-    const run=state.tail.catch(()=>{}).then(async()=>{
-      field.dataset.richSyncState='saving';field.dataset.richSyncStatus='Saving…';
-      const saved=await DailyReflectionPersistence.commit(state.date,candidate,{expectedCanonical:state.canonical,backupCapture:options.backupCapture===true}),fresh=saved.record;
-      state.canonical=saved.canonical;state.revision=saved.revision;state.recordKind=saved.recordKind||'diary';
-      field.dataset.diaryRevision=String(state.revision);field.dataset.richSyncState='saved';field.dataset.richSyncStatus='Saved';
-      richTextSyncField(field);return fresh;
-    }).catch(error=>{field.dataset.richSyncState='error';field.dataset.richSyncStatus=error&&error.message||'Diary reflection was not saved.';throw error;});
-    state.tail=run.then(()=>true,()=>false);return run;
-  }
+  function schedule(field,value){const state=bindings.get(field);return state?state.lane.schedule(String(value??'')):false;}
+  function flush(field,options={}){const state=bindings.get(field);return state?state.lane.flush(options):Promise.reject(new Error('Diary editor is no longer active.'));}
   async function deleteEntry(date,options={}){
     const current=await AppData.dailyRecords.get(date);if(!current)return true;
     const result=await DailyReflectionPersistence.commit(date,'',{expectedCanonical:String(current.reflection||''),backupCapture:options.backupCapture===true});
     return current.recordKind==='study'?!!result.record&&result.record.recordKind==='study'&&!String(result.record.reflection||'').trim():!result.record;
   }
-  async function settled(field){const state=bindings.get(field);if(!state)return true;return await state.tail;}
-  return Object.freeze({bind,capture,clear,commit,deleteEntry,documentFor,draft,settled});
+  async function settled(field){const state=bindings.get(field);if(!state)return true;return await state.lane.settled();}
+  return Object.freeze({bind,capture,clear,deleteEntry,documentFor,draft,flush,schedule,settled});
 })();
 /* RICH TEXT */
 function richTextDocumentFor(field,options={}){
@@ -6782,7 +6788,7 @@ const RichTextRuntime=(()=>{
   }
   function handleActivation(event){
     if(!event||event.format!=='study-director.activation-event')return;
-    if(event.kind===APP_ACTIVATION_KINDS.BACKGROUND){AppData.notes.protectUnsaved();void AppData.notes.flush();scheduleBackgroundDisposal();return;}
+    if(event.kind===APP_ACTIVATION_KINDS.BACKGROUND){flushEditors();AppData.notes.protectUnsaved();void AppData.notes.flush();scheduleBackgroundDisposal();return;}
     if(event.kind===APP_ACTIVATION_KINDS.ORDINARY_FOCUS){cancelBackgroundDisposal();if(!document.hidden)syncAll(document);return;}
     if(event.kind===APP_ACTIVATION_KINDS.VISIBILITY_RETURN){cancelBackgroundDisposal();if(!document.hidden)syncAll(document);return;}
     if(event.kind===APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER||event.kind===APP_ACTIVATION_KINDS.DATE_ROLLOVER||event.kind===APP_ACTIVATION_KINDS.EXIT)cancelBackgroundDisposal();
@@ -6899,8 +6905,11 @@ const RichTextRuntime=(()=>{
       return true;
     }catch(error){releaseAssets?.();if(pending.get(field)===request)pending.delete(field);capture('rich-text.mount',error);showMountError(field,descriptor);return false;}
   }
+  // Editors that group keystrokes publish them now.
+  function flushEditors(){for(const record of mounted.values()){try{record.mounted.flush();}catch(error){capture('rich-text.flush',error);}}}
   async function quiesce(work){
     if(typeof work!=='function')throw new TypeError('Rich-text quiescence requires an operation.');
+    flushEditors();
     const outer=mutationHold===0;if(outer)mutationFocusState=captureMutationFocus();mutationHold++;
     if(outer){
       document.documentElement.dataset.richTextQuiesced='1';applyMutationFields(document);applyMutationSurfaces(document);
@@ -6923,7 +6932,7 @@ const RichTextRuntime=(()=>{
     if(installed)return false;installed=true;
     document.addEventListener('focusin',onFocusIn,true);document.addEventListener('beforeinput',onBeforeInput,true);document.addEventListener('input',onInput,true);
     document.addEventListener('toggle',event=>{if(event.target instanceof HTMLDetailsElement)queueMicrotask(()=>syncAll(document));},true);
-    AppActivation.subscribe(handleActivation);window.addEventListener('pagehide',()=>{try{flushPendingReviewSave({strict:false});}catch{}AppData.notes.protectUnsaved();void AppData.notes.flush();});
+    AppActivation.subscribe(handleActivation);window.addEventListener('pagehide',()=>{flushEditors();try{flushPendingReviewSave({strict:false});}catch{}AppData.notes.protectUnsaved();void AppData.notes.flush();});
     observer=new MutationObserver(records=>{
       const selector='textarea.task-note-field,textarea.library-diary-textarea,#daily-reflection';
       const addedEditor=records.some(record=>[...record.addedNodes].some(node=>
@@ -6936,8 +6945,9 @@ const RichTextRuntime=(()=>{
     queueMicrotask(()=>syncAll(document));return true;
   }
   function status(){return Object.freeze({installed,loaded:true,activeDocumentId:mounted.get(lastActiveField)?.documentId||'',activeDocumentIds:Object.freeze([...new Set([...mounted.values()].map(record=>record.documentId))]),mounted:mounted.size,pending:pending.size>0,quiesced:mutationActive(),backgroundDisposalPending:backgroundDisposeTimer!==null,backgroundIdleDisposeMs:BACKGROUND_IDLE_DISPOSE_MS,externalConflicts:[...mounted.values()].filter(record=>record.field.dataset.richExternalConflict==='1').length});}
-  return Object.freeze({install,activate,close,closeField,syncField,syncAll,reconcileExternal,quiesce,status});
+  return Object.freeze({install,activate,close,closeField,syncField,syncAll,reconcileExternal,quiesce,flushEditors,status});
 })();
+SaveLaneModule.onBeforeFlush(()=>RichTextRuntime.flushEditors());
 async function quiesceManagedRecoveryRuntime(operation){
   if(typeof operation!=='function')throw new TypeError('Managed recovery quiescence requires an operation.');
   const outer=managedRecoverySessionQuiescenceDepth===0;
@@ -7385,7 +7395,7 @@ const ReviewSubsystem=ReviewModule.createReviewSubsystem(Object.freeze({
   services:Object.freeze({
     appData:AppData,diagnostics:AppDiagnostics,practicePacer:PracticePacer,
     taskIdentity:TaskIdentity,taskSessionState:TaskSessionState,keyedRecord:KeyedRecord,
-    evidenceGateway:SessionEvidenceGateway,dailyReflection:DailyReflectionPersistence
+    evidenceGateway:SessionEvidenceGateway,dailyReflection:DailyReflectionPersistence,saveLane:SaveLaneModule
   }),
   runtime:Object.freeze({
     tasks:TASKS,sessionState:SessionState,scheduleDerivedState:ScheduleDerivedState,
@@ -7908,12 +7918,13 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
   }),
   exporter:Object.freeze({exportKeys:keys=>NoteExporter.exportKeys(keys),cancel:NoteExporter.cancel}),
   diary:Object.freeze({
-    bindEditor:(field,date,record)=>LibraryDiaryEditor.bind(field,date,record),
+    bindEditor:(field,date,record,options)=>LibraryDiaryEditor.bind(field,date,record,options),
     captureEditor:(field,event)=>LibraryDiaryEditor.capture(field,event),
     deleteEntry:(date,options)=>LibraryDiaryEditor.deleteEntry(date,options),
     draft:date=>LibraryDiaryEditor.draft(date),
     clearEditor:field=>LibraryDiaryEditor.clear(field),
-    commitEditor:(field,value,options)=>LibraryDiaryEditor.commit(field,value,options),
+    scheduleEditor:(field,value)=>LibraryDiaryEditor.schedule(field,value),
+    flushEditor:(field,options)=>LibraryDiaryEditor.flush(field,options),
     settled:field=>LibraryDiaryEditor.settled(field)
   }),
   notes:Object.freeze({
