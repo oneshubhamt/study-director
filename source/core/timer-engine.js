@@ -814,9 +814,14 @@ const SessionEvidenceProjector=(()=>{
       setTimerMode(TIMER_MODES.READY,reason);
       return true;
     }
-    function resumeAfterPrimaryRestore(){
+    function resumeAfterPrimaryRestore({frozenSinceMs=null}={}){
       if(!appCanMutate())return false;
       if(TimerState.runtime&&TimerState.runtime.startMs!==null&&TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex])&&[TIMER_MODES.RUNNING,TIMER_MODES.PAUSED].includes(TimerState.mode)){
+        // A restore that kept the session running paused only the display. If
+        // the timer was ticking when it froze, that time is study time, not an
+        // away gap; an older gap (the page was closed) is still asked about.
+        const lastTickMs=Number(TimerState.runtime.lastTickMs);
+        if(typeof frozenSinceMs==='number'&&Number.isFinite(frozenSinceMs)&&Number.isFinite(lastTickMs)&&lastTickMs>0&&frozenSinceMs-lastTickMs<=SLEEP_GAP_THRESHOLD_MS)TimerState.patchRuntime({lastTickMs:nowMs()});
         if(!tInt)tInt=setInterval(tick,1000);
         syncTimerAfterWake();
         if(TimerState.mode===TIMER_MODES.RUNNING&&!TimerState.paused)TimerPresentation.start();

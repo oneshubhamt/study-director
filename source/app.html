@@ -2355,7 +2355,7 @@ let backupNudgeCheckedAt=0;
 let backupNudgeNotifiedDate='';
 let saveReminderDate='';
 let restoreSessionPersistenceSuppressionDepth=0;
-let managedRecoverySessionQuiescenceDepth=0;
+let managedRecoverySessionQuiescenceDepth=0,managedRecoveryTimerFrozenSinceMs=null;
 let refreshSessionSafetyUi=()=>{};
 function restoreSessionPersistenceSuppressed(){return restoreSessionPersistenceSuppressionDepth>0;}
 function managedRecoverySessionQuiesced(){return managedRecoverySessionQuiescenceDepth>0;}
@@ -6961,13 +6961,14 @@ async function quiesceManagedRecoveryRuntime(operation){
   if(typeof operation!=='function')throw new TypeError('Managed recovery quiescence requires an operation.');
   const outer=managedRecoverySessionQuiescenceDepth===0;
   managedRecoverySessionQuiescenceDepth+=1;
-  if(outer){cancelPendingLiveDraftSave();TimerEngine.stopExecution();}
+  if(outer){cancelPendingLiveDraftSave();if(managedRecoveryTimerFrozenSinceMs===null)managedRecoveryTimerFrozenSinceMs=DecisionClock.nowMs();TimerEngine.stopExecution();}
   try{return await RichTextRuntime.quiesce(operation);}
   finally{
     managedRecoverySessionQuiescenceDepth=Math.max(0,managedRecoverySessionQuiescenceDepth-1);
     if(outer&&managedRecoverySessionQuiescenceDepth===0)void AppMutationCoordinator.settled().then(()=>{
       if(managedRecoverySessionQuiesced()||AppMutationCoordinator.status().active)return;
-      try{TimerEngine.resumeAfterPrimaryRestore();}catch(error){AppDiagnostics.capture('managed-recovery.resume-timer',error,'warn');}
+      const frozenSinceMs=managedRecoveryTimerFrozenSinceMs;managedRecoveryTimerFrozenSinceMs=null;
+      try{TimerEngine.resumeAfterPrimaryRestore({frozenSinceMs});}catch(error){AppDiagnostics.capture('managed-recovery.resume-timer',error,'warn');}
     });
   }
 }
@@ -9322,6 +9323,7 @@ const CLICK_ACTIONS=Object.freeze({
   'close-version-history': ()=>BackupRecoveryHost.history.close(),
   'cancel-version-history-operation': ()=>BackupRecoveryHost.history.cancel(),
   'recover-managed-version': ev=>BackupRecoveryHost.history.recover(ev),
+  'compare-managed-note': ev=>BackupRecoveryHost.history.recover(ev),
   'remove-managed-safety': ev=>BackupRecoveryHost.history.removeSafety(ev),
   'toggle-pause': togglePause,
   'practice-mode': ev=>PracticePacer.setSetupMode(ev.target.closest('[data-practice-mode]')?.dataset.practiceMode),
@@ -9434,7 +9436,7 @@ const OWNER_REQUIRED_CLICK_ACTIONS=new Set([
   'load-default','apply-schedule','clear-schedule-draft','take-pomodoro-break',
   'gap-focus','gap-break','gap-split','gap-ignore','gap-apply','save-name-setup','skip-name-setup',
   'font-smaller','font-reset','font-larger','set-theme','set-presentation',
-  'connect-device-backup','device-backup-now','disconnect-device-backup','recover-device-backup','recover-provider-backup','recover-managed-version'
+  'connect-device-backup','device-backup-now','disconnect-device-backup','recover-device-backup','recover-provider-backup','recover-managed-version','compare-managed-note'
 ]);
 const OWNER_REQUIRED_CHANGE_ACTIONS=new Set(['import-backup','change-reflection-date','keep-screen-awake','sound-mode']);
 const OWNER_REQUIRED_INPUT_ACTIONS=new Set(['student-name','pnote-progress','save-reflection','quote','schedule-draft','unfinished-note','practice-setup']);

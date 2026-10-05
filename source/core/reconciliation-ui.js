@@ -46,7 +46,8 @@ registry.define('reconciliation-ui',1,()=>{
     }
     async function resolve(options={}){
       if(active)throw new Error('Ongoing Note reconciliation is already open.');
-      const conflicts=normalizedConflicts(options.conflicts),manualOnly=options.manualOnly===true;
+      // purpose 'version' is one note compared with an earlier backup of it.
+      const conflicts=normalizedConflicts(options.conflicts),manualOnly=options.manualOnly===true,version=!manualOnly&&options.purpose==='version';
       if(!conflicts.length)return freeze({format:FORMAT,version:1,notes:freeze(Object.create(null))});
       const automaticNotes=Object.create(null),manual=[];
       for(const conflict of conflicts){
@@ -80,16 +81,16 @@ registry.define('reconciliation-ui',1,()=>{
       const dialog=document.createElement('dialog');dialog.className='sd-note-reconcile-dialog';dialog.setAttribute('aria-label',manualOnly?'Review Diary differences':'Review Ongoing Note differences');
       const shell=document.createElement('div');shell.className='sd-note-reconcile-shell';
       const header=document.createElement('header');header.className='sd-note-reconcile-header';
-      const headingWrap=document.createElement('div'),kicker=document.createElement('div'),title=document.createElement('h2'),progress=document.createElement('div');kicker.className='sd-note-reconcile-kicker';kicker.textContent=manualOnly?'DIARY DIFFERENCES':'ONGOING NOTE DIFFERENCES';title.className='sd-note-reconcile-title';progress.className='sd-note-reconcile-progress';headingWrap.append(kicker,title,progress);
+      const headingWrap=document.createElement('div'),kicker=document.createElement('div'),title=document.createElement('h2'),progress=document.createElement('div');kicker.className='sd-note-reconcile-kicker';kicker.textContent=manualOnly?'DIARY DIFFERENCES':version?'EARLIER VERSION':'ONGOING NOTE DIFFERENCES';title.className='sd-note-reconcile-title';progress.className='sd-note-reconcile-progress';headingWrap.append(kicker,title,progress);
       const cancel=document.createElement('button');cancel.type='button';cancel.className='sd-note-reconcile-close';cancel.textContent='Cancel';cancel.setAttribute('aria-label',manualOnly?'Cancel Diary review':'Cancel note review');header.append(headingWrap,cancel);
       const editors=document.createElement('div');editors.className='sd-note-reconcile-editors';
       const makePane=(side,label)=>{const pane=document.createElement('section'),head=document.createElement('div'),name=document.createElement('strong'),sub=document.createElement('span'),field=document.createElement('textarea');pane.className=`sd-note-reconcile-pane sd-note-reconcile-pane-${side}`;head.className='sd-note-reconcile-pane-head';name.textContent=label;sub.className='sd-note-reconcile-pane-sub';field.className='sd-note-reconcile-field';field.setAttribute('aria-label',label);field.spellcheck=true;head.append(name,sub);pane.append(head,field);return{pane,sub,field}};
-      const localPane=makePane('local',manualOnly?'Resolved reflection':'Resolved note'),incomingPane=makePane('incoming',manualOnly?'Imported reflection':'Imported note');editors.append(localPane.pane,incomingPane.pane);
+      const localPane=makePane('local',manualOnly?'Resolved reflection':version?'Current note':'Resolved note'),incomingPane=makePane('incoming',manualOnly?'Imported reflection':version?'Earlier version':'Imported note');editors.append(localPane.pane,incomingPane.pane);
       const diffStatus=document.createElement('div');diffStatus.className='sd-note-reconcile-diff-status';diffStatus.setAttribute('aria-live','polite');
       const actions=document.createElement('div');actions.className='sd-note-reconcile-actions';
       const strategy=document.createElement('div');strategy.className='sd-note-reconcile-strategies';strategy.setAttribute('role','group');strategy.setAttribute('aria-label','Difference review actions');
       const action=(label,kind)=>{const button=document.createElement('button');button.type='button';button.dataset.action=kind;button.textContent=label;strategy.append(button);return button};
-      const keepButton=action('Keep local','keep'),mergeButton=action('Smart merge','merge'),appendButton=action('Append additions','append'),importButton=action('Use imported','import'),customButton=action('Custom','custom');if(manualOnly){mergeButton.hidden=true;appendButton.hidden=true;}else customButton.hidden=true;
+      const keepButton=action(version?'Keep current':'Keep local','keep'),mergeButton=action('Smart merge','merge'),appendButton=action(version?'Add what’s missing':'Append additions','append'),importButton=action(version?'Use this version':'Use imported','import'),customButton=action('Custom','custom');if(manualOnly){mergeButton.hidden=true;appendButton.hidden=true;}else customButton.hidden=true;
       const navigation=document.createElement('div');navigation.className='sd-note-reconcile-navigation';
       const previous=document.createElement('button'),next=document.createElement('button');previous.type=next.type='button';previous.textContent='← Previous';next.textContent='Next →';const retry=document.createElement('button');retry.type='button';retry.textContent='Retry editors';retry.hidden=true;navigation.append(previous,next,retry);
       const apply=document.createElement('button');apply.type='button';apply.className='sd-note-reconcile-apply';apply.textContent='Apply resolved note';
@@ -127,8 +128,8 @@ registry.define('reconciliation-ui',1,()=>{
           await destroyHandles(previousHandles,'reconciliation-ui.transition-destroy');
           if(settled||token!==generation)return;
           index=Math.max(0,Math.min(states.length-1,nextIndex));const state=states[index],conflict=state.conflict;
-          title.textContent=conflict.label;progress.textContent=`Difference ${index+1} of ${states.length}`;localPane.sub.textContent='Editable working copy · this is what will be saved';incomingPane.sub.textContent=conflict.incomingLabel+' · read-only reference';
-          localPane.field.value=state.working;incomingPane.field.value=state.incoming;apply.textContent=manualOnly?(states.length===1?'Apply reflection':(state.applied?'Re-apply reflection':'Apply reflection')):(states.length===1?'Apply resolved note':(state.applied?'Re-apply resolved note':'Apply resolved note'));
+          title.textContent=conflict.label;progress.textContent=version?'':`Difference ${index+1} of ${states.length}`;localPane.sub.textContent='Editable working copy · this is what will be saved';incomingPane.sub.textContent=conflict.incomingLabel+' · read-only reference';
+          localPane.field.value=state.working;incomingPane.field.value=state.incoming;apply.textContent=version?'Save note':manualOnly?(states.length===1?'Apply reflection':(state.applied?'Re-apply reflection':'Apply reflection')):(states.length===1?'Apply resolved note':(state.applied?'Re-apply resolved note':'Apply resolved note'));
           const mountOptions=(field,label,value,assetStore,readOnly=false)=>freeze({field,label,initialValue:value,maxWords:configuration.maxWords,maxBytes:configuration.maxBytes,assets:assetStore,surface:'reconciliation',focusOnMount:false,allowAssetInsert:false,readOnly});
           // Keep ownership of a successful sibling even when its peer rejects.
           const mount=options=>Promise.resolve().then(()=>richText.mountRichTextEditor(options)).then(async handle=>{

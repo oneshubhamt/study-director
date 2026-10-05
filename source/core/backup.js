@@ -1193,7 +1193,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   }
   let noteDecisionMap=freeze({});
   if(noteConflicts.length){
-    const noteResult=await NoteReconciliation.resolve(freeze({conflicts:noteConflicts,incomingAssets:Array.isArray(parsed.importedAssets)?parsed.importedAssets:freeze([]),signal}));
+    const noteResult=await NoteReconciliation.resolve(freeze({conflicts:noteConflicts,incomingAssets:Array.isArray(parsed.importedAssets)?parsed.importedAssets:freeze([]),signal,...(note?{purpose:'version'}:{})}));
     if(!noteResult)return Object.freeze({cancelled:true,mode,added:0,replaced:0,kept:0,batches:0,assetsRestored:0,notesReconciled:false,activeSessionReconciled:false,savedDayDeletionsApplied:0});
     if(note){const text=String(noteResult.notes?.[note]?.text??noteConflicts[0].localValue);if(text===noteConflicts[0].localValue)return unchanged('note-kept');noteDecisionMap=restoredNote(text);}
     else noteDecisionMap=noteReconciliationSelections(impact.reconciliationPlan,noteResult);

@@ -223,7 +223,7 @@ registry.define('backup-recovery-host',1,()=>{
         const status=input.document.createElement('span');status.className='ui-helper';status.textContent=`${tierLabel(location.tier,location.safetyPurpose)}${location.encrypted?' · Encrypted':''}${location.health==='degraded'?' · Degraded capture':''}`;copy.appendChild(status);
         if(location.warning){const warning=input.document.createElement('span');warning.className='ui-status warn';warning.textContent=String(location.warning);copy.appendChild(warning);}
         const actions=input.document.createElement('div');actions.className='managed-version-location-actions';
-        const use=input.document.createElement('button');use.type='button';use.className='mini-btn ui-btn';use.dataset.action='recover-managed-version';use.dataset.versionHistorySource=location.sourceId;use.dataset.versionHistoryCheckpoint=location.checkpointId;use.textContent=noteTarget?'Compare…':'Restore / Combine…';actions.appendChild(use);
+        const use=input.document.createElement('button');use.type='button';use.className='mini-btn ui-btn';use.dataset.action=noteTarget?'compare-managed-note':'recover-managed-version';use.dataset.versionHistorySource=location.sourceId;use.dataset.versionHistoryCheckpoint=location.checkpointId;use.textContent=noteTarget?'Compare…':'Restore / Combine…';actions.appendChild(use);
         if(location.tier==='before-restore'&&!noteTarget){const remove=input.document.createElement('button');remove.type='button';remove.className='mini-btn ui-btn';remove.dataset.action='remove-managed-safety';remove.dataset.versionHistorySource=location.sourceId;remove.dataset.versionHistoryCheckpoint=location.safetyCheckpointId||location.checkpointId;remove.textContent='Remove safety backup';actions.appendChild(remove);}
         row.append(copy,actions);card.appendChild(row);list.appendChild(card);
       }
@@ -251,7 +251,9 @@ registry.define('backup-recovery-host',1,()=>{
       const {dialog}=elements();if(!dialog)return false;
       if(busy){if(activeSourceId!==source.id)return false;setDialogSource(source);renderOperationPresentation();if(!dialog.open)dialog.showModal();return true;}
       noteTarget=note;
-      if(input.session.hasBlocking()){activeSourceId=source.id;activeSourceLabel=source.label;setDialogSource(source);lastEntries=freeze([]);render();clearHistoryProgress();setHistoryStatus('Suspend or reset today’s active session before recovering a backup.',false);if(!dialog.open)dialog.showModal();return false;}
+      // Restoring one note leaves today's session as it is, so it stays
+      // available while a study session is active.
+      if(!noteTarget&&input.session.hasBlocking()){activeSourceId=source.id;activeSourceLabel=source.label;setDialogSource(source);lastEntries=freeze([]);render();clearHistoryProgress();setHistoryStatus('Suspend or reset today’s active session before recovering a backup.',false);if(!dialog.open)dialog.showModal();return false;}
       activeSourceId=source.id;activeSourceLabel=source.label;setDialogSource(source);lastEntries=freeze([]);render();clearHistoryProgress();setHistoryStatus('Loading backups…');if(!dialog.open)dialog.showModal();void collectSource(source.id,{interactive:true});return true;
     }
     // Earlier versions of one note come from the connected backup locations;
@@ -270,7 +272,7 @@ registry.define('backup-recovery-host',1,()=>{
     function eventButton(event,selector){const target=event&&event.target;return target&&typeof target.closest==='function'?target.closest(selector):null;}
     function selectedEntry(sourceId,checkpointId){return lastEntries.find(entry=>entry?.location?.sourceId===sourceId&&entry.location.checkpointId===checkpointId)||null;}
     async function recover(event){
-      if(busy)return false;const button=eventButton(event,'[data-action="recover-managed-version"][data-version-history-source][data-version-history-checkpoint]');if(!button)return false;
+      if(busy)return false;const button=eventButton(event,'[data-action="recover-managed-version"][data-version-history-source][data-version-history-checkpoint],[data-action="compare-managed-note"][data-version-history-source][data-version-history-checkpoint]');if(!button||(button.dataset.action==='compare-managed-note')!==!!noteTarget)return false;
       const sourceId=String(button.dataset.versionHistorySource||''),checkpointId=String(button.dataset.versionHistoryCheckpoint||''),entry=selectedEntry(sourceId,checkpointId),location=entry&&entry.location;if(!location)return false;
       const note=noteTarget;
       const choice=note?'combine':await input.interactions.choose({

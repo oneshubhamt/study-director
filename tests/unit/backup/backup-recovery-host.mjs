@@ -14,7 +14,7 @@ const events=[],statuses=[],diagnostics=[],notified=[];
 let storedPending=null,storageReadError=null,providerBringInResult=freeze({ok:true}),chooseMode='replace',restoredCheckpoint='',restoredConfirmed=false,suspended=0,cancelImportCalls=0,deviceCancelCalls=0,providerCancelCalls=0,lastProviderCancelId='';
 let deletionResults=[];
 let providerRestoreImpl=async()=>freeze({ok:true});
-let deviceHistoryReads=0,providerHistoryReads=0,providerBringInCheckpoint='',lastUseBackupOptions=null,deviceCombineResult=freeze({ok:true}),lastDeviceCombine=null,deviceConnected=true;
+let deviceHistoryReads=0,providerHistoryReads=0,providerBringInCheckpoint='',lastUseBackupOptions=null,deviceCombineResult=freeze({ok:true}),lastDeviceCombine=null,deviceConnected=true,sessionBlocking=false;
 const providerHooks={convergence:null,recovery:null,pending:null};
 const deviceEntry=freeze({logicalId:'state_'+'a'.repeat(64),logicalFingerprint:'a'.repeat(64),exportedAt:'2026-09-20T12:00:00.000Z',counts:freeze({dailyRecord:2,areaNote:1}),location:freeze({sourceId:'device-folder',sourceLabel:'Device Folder',checkpointId:CHECKPOINT('a'),exportedAt:'2026-09-20T12:00:00.000Z',tier:'latest',encrypted:false})});
 const driveEntry=freeze({logicalId:'state_'+'b'.repeat(64),logicalFingerprint:'b'.repeat(64),exportedAt:'2026-09-20T11:00:00.000Z',counts:freeze({dailyRecord:1,areaNote:1}),location:freeze({sourceId:'google-drive',sourceLabel:'Google Drive',checkpointId:CHECKPOINT('b'),exportedAt:'2026-09-20T11:00:00.000Z',tier:'latest',encrypted:false})});
@@ -70,7 +70,7 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
     removeProtectedRepositoryProvider:async()=>freeze({removed:true,entries:freeze([])}),
     restoreRepositoryProviderVersion:async(id,options)=>providerRestoreImpl(id,options)
   }),
-  session:freeze({hasBlocking:()=>false}),
+  session:freeze({hasBlocking:()=>sessionBlocking}),
   sourceRevision:()=>session.source,
   storage:freeze({read:async()=>{if(storageReadError)throw storageReadError;return storedPending;},remove:async()=>{storedPending=null;return true;},write:async value=>{storedPending=value;return true;}}),
   view:freeze({invalidateAttachments:()=>events.push('invalidate-attachments'),refreshCore:()=>events.push('refresh-core'),refreshNotes:()=>events.push('refresh-notes'),refreshReview:()=>events.push('refresh-review'),renderLibrary:()=>events.push('render-library'),setStatus:(id,message,ok=true)=>{statuses.push(freeze({id,message,ok}));return true;}})
@@ -173,18 +173,22 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
 // location in note mode. Comparing a version skips the Restore or Combine
 // choice, and an outcome that changes nothing keeps the list open.
 {
-  const restoredNotes=[],chooseCount=()=>events.filter(event=>event.startsWith('choose:')).length;
+  const restoredNotes=[],chooseCount=()=>events.filter(event=>event.startsWith('choose:')).length,noteButton={dataset:{action:'compare-managed-note',versionHistorySource:'device-folder',versionHistoryCheckpoint:CHECKPOINT('a')}};
+  // An active study session blocks whole-library recovery but not one note.
+  sessionBlocking=true;
+  assert.equal(await host.history.openSource('device-folder'),false,'whole-library recovery still waits for the session to be suspended');
   assert.deepEqual(await host.history.openNote({key:'Ethics',label:'GS2 > Ethics',onRestored:value=>restoredNotes.push(value)}),{opened:true},'with one connected location there is nothing to choose');
   await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(await host.history.recover({target:{closest:()=>deviceButton}}),false,'the whole-library button does nothing in note mode');
   assert.equal(nodes.get('managed-version-history-kicker').textContent,'Earlier versions');assert.equal(nodes.get('managed-version-history-title').textContent,'GS2 > Ethics');
   const choicesBefore=chooseCount();deviceCombineResult=freeze({ok:false,reason:'note-unchanged'});
-  assert.equal(await host.history.recover({target:{closest:()=>deviceButton}}),false);
+  assert.equal(await host.history.recover({target:{closest:()=>noteButton}}),false);
   assert.equal(lastDeviceCombine.note,'Ethics');assert.equal(lastDeviceCombine.confirmed,false);assert.match(host.history.status().status.message,/same text as this note/u);assert.equal(nodes.get('managed-version-history').open,true);
   deviceCombineResult=freeze({ok:true});
-  assert.equal(await host.history.recover({target:{closest:()=>deviceButton}}),true);
+  assert.equal(await host.history.recover({target:{closest:()=>noteButton}}),true);
   assert.equal(chooseCount(),choicesBefore,'a note comparison never asks Restore or Combine');assert.deepEqual(restoredNotes.map(value=>value.exportedAt),[deviceEntry.exportedAt]);
   // Opening Version History from Data & Backup leaves note mode.
-  await host.history.openSource('device-folder');await new Promise(resolve=>setImmediate(resolve));
+  sessionBlocking=false;await host.history.openSource('device-folder');await new Promise(resolve=>setImmediate(resolve));
   assert.equal(nodes.get('managed-version-history-title').textContent,'Device Folder backups');
   deviceConnected=false;assert.deepEqual(await host.history.openNote({key:'Ethics',label:'Ethics'}),{opened:false,reason:'no-source'},'without a connected backup nothing opens');deviceConnected=true;
   deviceCombineResult=freeze({ok:true});host.history.close();

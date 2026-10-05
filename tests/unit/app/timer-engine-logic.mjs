@@ -157,6 +157,19 @@ assert.equal(timerState.mode,'running');assert.equal(timerState.paused,false);as
 assert.ok(timerState.inactiveGap&&timerState.inactiveGap.gapMs>=180000,'A >2 minute cross-device interval must become a pending inactive gap.');
 assert.equal(timerState.runtime.recordedSec>=60,true,'Restoring a running timer must never regress saved focus evidence.');
 
+// A restore that kept the session running only froze the display. Time the
+// timer was frozen for is study time, not an away gap; a gap that began
+// before the freeze (the page was closed) is still asked about.
+for(const [label,lastTickAgoMs,frozenAgoMs,expectGap] of [['ticking when frozen',1000,200000,false],['already stale when frozen',400000,200000,true],['no freeze time given',1000,null,true]]){
+  const now=clock.now();
+  timerState.currentIndex=0;timerState.mode='running';timerState.paused=false;timerState.inactiveGap=null;timerState.activeBreak=null;timerState.breakStartMs=null;
+  timerState.runtime={...timerState.emptyRuntime(),taskIdx:0,startMs:now-600000,durationSec:3600,totalPausedMs:0,recordedSec:60,lastTickMs:now-frozenAgoMs-lastTickAgoMs};
+  if(frozenAgoMs===null)timerState.runtime.lastTickMs=now-200000;
+  assert.equal(engine.resumeAfterPrimaryRestore(frozenAgoMs===null?undefined:{frozenSinceMs:now-frozenAgoMs}),true,label);
+  assert.equal(!!timerState.inactiveGap,expectGap,label);
+  engine.stopExecution();timerState.inactiveGap=null;
+}
+
 // A paused timer remains PAUSED after restore and preserves its active break semantics.
 const pausedAt=clock.now()-45000;
 timerState.mode='ready';timerState.paused=false;timerState.inactiveGap=null;timerState.runtime={...timerState.emptyRuntime(),taskIdx:0,startMs:clock.now()-300000,durationSec:600,totalPausedMs:30000,recordedSec:90,lastTickMs:pausedAt,pausedStartedMs:pausedAt};
@@ -164,4 +177,4 @@ const restoredBreak={startedAtMs:pausedAt,now:clock.now(),overrunCapped:false,ac
 assert.equal(engine.resumeRestoredPaused(restoredBreak),true);
 assert.equal(timerState.mode,'paused');assert.equal(timerState.paused,true);assert.equal(timerState.currentIndex,0);assert.equal(timerState.runtime.taskIdx,0);assert.equal(timerState.activeBreak.type,'manual');
 
-console.log(JSON.stringify({status:'PASS',contract:'timer-engine-state-machine',restoreEvidence:true,pauseResume:true,inactiveGap:true,staleGapReleased:true,fixedAndSupportTimeExcluded:true,wakeRebase:true,crossDeviceRunningRestore:true,pausedRestore:true},null,2));
+console.log(JSON.stringify({status:'PASS',contract:'timer-engine-state-machine',restoreFreezeNotAwayGap:true,restoreEvidence:true,pauseResume:true,inactiveGap:true,staleGapReleased:true,fixedAndSupportTimeExcluded:true,wakeRebase:true,crossDeviceRunningRestore:true,pausedRestore:true},null,2));

@@ -665,7 +665,7 @@ registry.define('device-backup',1,input=>{
           return file||null;
         };
         const managedRecovery=transaction=>hooks.managedRecovery(freeze({
-          kind:modeName,label:'Device Folder',keepsActiveSession:missingOnly,apply:async()=>{reportRecovery('apply',exact?'Applying selected backup locally…':'Combining data locally…');const result=await transaction.apply();reportRecovery('verify-local','Verifying restored local data…');return result;},
+          kind:modeName,label:'Device Folder',keepsActiveSession:missingOnly||!!(typeof options?.note==='string'&&options.note),apply:async()=>{reportRecovery('apply',exact?'Applying selected backup locally…':'Combining data locally…');const result=await transaction.apply();reportRecovery('verify-local','Verifying restored local data…');return result;},
           createSafety:async()=>{
             operationMark('external-safety-publication-start',{provider:'device-folder'},traceId);presentationState.message='Creating and verifying Before restore safety backup…';publish();reportRecovery('safety','Creating protected safety backup in Device Folder…');
             const safetyPurpose=modeName==='bring-in'?'before-combine':'before-restore';

@@ -111,6 +111,43 @@ try{
   })()`);
   assert.equal(scheduleApplied,true);
   await waitFor(()=>page.evaluate(`__DeviceBackupDebug.TimerState.mode===__DeviceBackupDebug.TIMER_MODES.RUNNING`),{label:'running completion test timer'});
+  // A note can be restored from an earlier Device Folder version while the
+  // study timer runs: only that note changes, the timer keeps running and the
+  // restore is not mistaken for time away.
+  const noteKey=await page.evaluate(`(async()=>{
+    const notes=__DeviceBackupDebug.AppData.notes,result=notes.update('Reliability','Reliability','Version kept in the backup','');
+    await notes.flush({strict:true});return result.status==='changed'?notes.get('Reliability','Reliability').key:'';
+  })()`);
+  assert.ok(noteKey,'the note was saved before the backup');
+  const beforeNoteBackup=await page.evaluate(`__DeviceBackupDebug.DeviceBackup.status().lastBackupAt`);
+  await page.evaluate(`document.getElementById('device-backup-now').click()`);
+  await waitFor(()=>page.evaluate(`(()=>{const state=__DeviceBackupDebug.DeviceBackup.status();return !state.busy&&state.lastBackupAt>${JSON.stringify(beforeNoteBackup)};})()`),{timeout:90000,label:'backup holding the note'});
+  const noteCheckpoint=await page.evaluate(`(async()=>{
+    const debug=__DeviceBackupDebug,suspension=await debug.DeviceBackup.suspendAutomatic('qa-note-restore');window.__qaNoteSuspension=suspension;
+    const notes=debug.AppData.notes,current=notes.get(${JSON.stringify(noteKey)},'Reliability');notes.update(current.key,'Reliability','Text after an accident',current.updatedAt);await notes.flush({strict:true});
+    return debug.DeviceBackup.status().lastFilename.replace(/\.sdcheckpoint$/,'');
+  })()`);
+  await page.evaluate(`(()=>{document.querySelector('[data-tab="library"]').click();document.getElementById('library-notes-drawer').open=true;})()`);
+  await waitFor(()=>page.evaluate(`[...document.querySelectorAll('[data-ongoing-note-key]')].some(row=>row.dataset.ongoingNoteKey===${JSON.stringify(noteKey)})`),{label:'note listed in the Library'});
+  await page.evaluate(`[...document.querySelectorAll('[data-ongoing-note-key]')].find(row=>row.dataset.ongoingNoteKey===${JSON.stringify(noteKey)}).click()`);
+  await waitFor(()=>page.evaluate(`!!document.getElementById('library-note-actions')`),{label:'open note menu'});
+  await page.evaluate(`(()=>{document.getElementById('library-note-actions').click();document.getElementById('library-note-versions').click();})()`);
+  await waitFor(()=>page.evaluate(`!!document.querySelector('#managed-version-history [data-action="compare-managed-note"][data-version-history-checkpoint="${noteCheckpoint}"]')`),{timeout:60000,label:'note versions listed during the session'});
+  await page.evaluate(`document.querySelector('#managed-version-history [data-action="compare-managed-note"][data-version-history-checkpoint="${noteCheckpoint}"]').click()`);
+  await waitFor(()=>page.evaluate(`(()=>{const dialog=document.querySelector('dialog.sd-note-reconcile-dialog[open]');const take=dialog&&dialog.querySelector('[data-action="import"]');return !!take&&!take.disabled;})()`),{timeout:60000,label:'side-by-side note review'});
+  const reviewLabels=await page.evaluate(`[...document.querySelectorAll('dialog.sd-note-reconcile-dialog[open] .sd-note-reconcile-strategies button:not([hidden])')].map(button=>button.textContent.trim())`);
+  assert.deepEqual(reviewLabels,['Keep current','Smart merge','Add what’s missing','Use this version'],'the review speaks about versions of this note');
+  await page.evaluate(`(()=>{const dialog=document.querySelector('dialog.sd-note-reconcile-dialog[open]');dialog.querySelector('[data-action="import"]').click();})()`);
+  await sleep(300);
+  await page.evaluate(`document.querySelector('dialog.sd-note-reconcile-dialog[open] .sd-note-reconcile-apply').click()`);
+  await waitFor(()=>page.evaluate(`/Version kept in the backup/.test(__DeviceBackupDebug.AppData.notes.get(${JSON.stringify(noteKey)},'Reliability')?.text||'')`),{timeout:90000,label:'note restored from the earlier version'});
+  await sleep(1500);
+  const afterNoteRestore=await page.evaluate(`({mode:__DeviceBackupDebug.TimerState.mode,running:__DeviceBackupDebug.TIMER_MODES.RUNNING,gap:__DeviceBackupDebug.TimerState.inactiveGap,status:document.getElementById('ongoing-notes-status')?.textContent||''})`);
+  assert.equal(afterNoteRestore.mode,afterNoteRestore.running,'the study timer keeps running through a note restore');
+  assert.equal(afterNoteRestore.gap,null,'a note restore is not time away');
+  assert.match(afterNoteRestore.status,/Restored “Reliability” from the backup of/u);
+  await page.evaluate(`__DeviceBackupDebug.DeviceBackup.resumeAutomatic(window.__qaNoteSuspension)`);
+  evidence.checks.noteRestoreDuringSession={timerKeptRunning:true,noAwayGap:true};
   const beforeCompletion=await page.evaluate(`__DeviceBackupDebug.DeviceBackup.status().lastBackupAt`);
   await page.evaluate(`document.querySelector('[data-action="mark-done"]').click()`);
   await waitFor(()=>page.evaluate(`(()=>{const state=__DeviceBackupDebug.DeviceBackup.status();return !state.busy&&state.checkpointCount>=1&&state.lastBackupAt>${JSON.stringify(beforeCompletion)}&&/^cp_[a-f0-9]{32}\.sdcheckpoint$/.test(state.lastFilename||'');})()`),{timeout:90000,label:'task-completion early repository backup'});

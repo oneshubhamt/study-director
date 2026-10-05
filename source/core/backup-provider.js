@@ -914,7 +914,7 @@ registry.define('backup-provider',1,input=>{
     for(const entry of manifest.objects||[]){const item=byId.get(entry.objectId);if(!item||item.size&&item.size!==entry.storedBytes||item.digest&&item.digest!==entry.storedChecksum)throw new Error(`Repository object ${entry.objectId} is missing or its metadata no longer matches the selected version.`);}
     return freeze({byId,invalid:Math.max(0,Number(inventory.invalidCount)||0)});
   }
-  async function loadRepositoryProvider(selected,operation,{checkpointId='',mode='bring-in',onProgress=null}={}){
+  async function loadRepositoryProvider(selected,operation,{checkpointId='',mode='bring-in',onProgress=null,note=''}={}){
     if(!['bring-in','restore-version'].includes(mode))throw new TypeError('Unsupported managed repository recovery mode.');
     const presentationId=foregroundView()?.operationId||'';
     const progress=(stage,message,details={})=>{if(operation.signal?.aborted||(foregroundView()?.operationId||'')!==presentationId)return;recoveryStatus(message,true,onProgress,stage,details);};
@@ -964,7 +964,7 @@ registry.define('backup-provider',1,input=>{
     if(!managedRecoveryHooks)throw new Error('Managed recovery transaction coordination is unavailable.');
     const repositorySnapshot=freeze({history:freeze([row.manifest]),availableObjectIds:freeze([...objectInventory.byId.keys()]),inventory,invalidCount:inventory.invalid.length});
     const managedRecovery=transaction=>managedRecoveryHooks.run(freeze({
-      kind:mode,label:selected.label,apply:async()=>{progress('apply',mode==='bring-in'?'Combining data locally…':'Applying selected backup locally…');const result=await transaction.apply();progress('verify-local','Verifying restored local data…');return result;},
+      kind:mode,label:selected.label,keepsActiveSession:!!note,apply:async()=>{progress('apply',mode==='bring-in'?'Combining data locally…':'Applying selected backup locally…');const result=await transaction.apply();progress('verify-local','Verifying restored local data…');return result;},
       createSafety:async()=>{
         OperationDiagnostics.mark('external-safety-publication-start',{provider:selected.id});
         progress('safety',`Creating protected safety backup in ${selected.label}…`);
@@ -1208,8 +1208,8 @@ registry.define('backup-provider',1,input=>{
       if(selected.prepare){OperationDiagnostics.mark('provider-prepare-start',{provider:selected.id},traceId);await selected.prepare();OperationDiagnostics.mark('provider-prepare-complete',{provider:selected.id},traceId);}
       OperationDiagnostics.mark('provider-authorization-start',{provider:selected.id},traceId);await authorize(selected,'import');OperationDiagnostics.mark('provider-authorization-complete',{provider:selected.id},traceId);
       statusText(`Choose a backup from ${selected.label}…`);
-      const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',onProgress:typeof options?.onProgress==='function'?options.onProgress:null});if(!candidate){statusText('Combine cancelled.');finishForegroundView(selected,{message:'Combine cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({cancelled:true});}
-      const result=await RepositoryCheckpointPipeline.bringIn(candidate,{note:typeof options?.note==='string'?options.note:''});
+      const note=typeof options?.note==='string'?options.note:'',candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',note,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});if(!candidate){statusText('Combine cancelled.');finishForegroundView(selected,{message:'Combine cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({cancelled:true});}
+      const result=await RepositoryCheckpointPipeline.bringIn(candidate,{note});
       if(result&&result.cancelled){const message=String(result.reason||'').startsWith('note-')?'No changes were made.':'Combine cancelled.';statusText(message);finishForegroundView(selected,{message,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({...result,cancelled:true});}
       const convergence=result&&result.managedRecovery&&result.managedRecovery.present||freeze({status:'pending',source:freeze({status:'failed',reason:'post-operation backup status unavailable'}),device:freeze({status:'skipped',reason:'unavailable'})});
       const sourceReady=convergence.source&&(convergence.source.status==='completed'||convergence.source.status==='pending'&&convergence.source.retryQueued===true),deviceReady=['completed','skipped'].includes(String(convergence.device&&convergence.device.status||''))||convergence.device&&convergence.device.status==='pending'&&convergence.device.queued===true;
