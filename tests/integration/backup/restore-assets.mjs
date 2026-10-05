@@ -46,7 +46,7 @@ let importBlob=codec.createV10Container(new Blob([JSON.stringify(manifest)+'\n'+
 
 const originalDeletionLedger=freeze([freeze({date:'2026-08-30',deletedAt:'2026-08-31T00:30:00.000Z'})]);
 const originalAttachmentDeletionLedger=freeze([freeze({assetId:'img-deletedhistoryabcdefghijkl',deletedAt:'2026-08-31T00:45:00.000Z'})]);
-let notes={Local:freeze({key:'Local',text:'local before restore',updatedAt:'2026-08-31T01:00:00.000Z'})},assets=new Map(),assetMeta=new Map(),journal=null,failAtPhase='',deletionLedger=[...originalDeletionLedger],attachmentDeletionLedger=[...originalAttachmentDeletionLedger];
+let notes={Local:freeze({key:'Local',text:'local before restore',updatedAt:'2026-08-31T01:00:00.000Z'})},assets=new Map(),assetMeta=new Map(),journal=null,failAtPhase='',deletionLedger=[...originalDeletionLedger],attachmentDeletionLedger=[...originalAttachmentDeletionLedger],noteChoice=null;
 const events=[],statuses=[];let configureResult=freeze({});const fn=()=>false,clampText=(v,max=100000)=>String(v??'').slice(0,max);
 const documentStub=freeze({getElementById:()=>null,addEventListener:()=>false,createElement:()=>({click:()=>events.push('safety-download'),remove:()=>false}),createDocumentFragment:()=>({appendChild:()=>false}),body:freeze({appendChild:()=>false})});
 const runtime=BackupModule.createRuntime(freeze({ports:freeze({
@@ -59,7 +59,7 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
     restoreAll:async items=>{assets=new Map(items.map(item=>[item.assetId,item.blob]));assetMeta=new Map(items.map(item=>[item.assetId,{name:item.name,library:item.library}]));},
     get:async id=>assets.get(id)||null,put:async(id,blob)=>{events.push('asset-put');assets.set(id,blob);},keys:async()=>[...assets.keys()],removeMany:async ids=>{events.push('asset-remove');for(const id of ids)assets.delete(id);return ids.length;},removeMetadata:async ids=>{for(const id of ids){assets.delete(id);assetMeta.delete(id);}return freeze({status:'completed',removed:ids.length});},scheduleMaintenance:()=>{events.push('asset-maintenance');return true;}}),
   exports:freeze({...testProcessing,backgroundAvailable:()=>true,protect:async file=>(typeof file==='function'?await file():file),unprotect:async blob=>({blob,encrypted:false}),check:()=>{},job:fn=>fn(),download:()=>({status:'downloaded'}),chooseSave:async()=>null,save:async()=>({status:'downloaded'})}),
-    codecs:freeze({activeSession:activeSessionCodec,backup:freeze({...codec,inspect:codec.inspectCurrent})}),reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({resolve:async({conflicts=[]})=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries(conflicts.map(item=>[item.key,freeze({text:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),session:freeze({canMutate:()=>true,cancelLiveDraftSave:fn,captureSnapshot:()=>null,hasActiveSession:()=>false,hasTasks:()=>false,toActiveSession:()=>null,withPersistenceSuppressed:async operation=>operation()}),
+    codecs:freeze({activeSession:activeSessionCodec,backup:freeze({...codec,inspect:codec.inspectCurrent})}),reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({resolve:async({conflicts=[]})=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries(conflicts.map(item=>[item.key,freeze({text:noteChoice?noteChoice(item):item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),session:freeze({canMutate:()=>true,cancelLiveDraftSave:fn,captureSnapshot:()=>null,hasActiveSession:()=>false,hasTasks:()=>false,toActiveSession:()=>null,withPersistenceSuppressed:async operation=>operation()}),
   domain:freeze({clampText,filenameSafeStudentName:()=> 'student',getStudentName:()=> 'Student',materializeDailyRecordView:v=>v,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-08-31'}),
   view:freeze({presentation:createBackupPresentation(),document:documentStub,refreshPnote:fn,refreshReview:fn,renderSchedule:fn}),
   events:freeze({libraryChanged:fn,backupCompleted:fn,reconcileAreaNotes:async payload=>{events.push('reconcile-area-notes');notes={...notes,...payload};return notes;},restoreAreaNotesSnapshot:async payload=>{notes={...payload};return notes;},restoreSessionState:async()=>true,verifyActiveSessionRuntime:async()=>true,requestDeviceBackupConvergence:async()=>freeze({status:'skipped',reason:'not-connected'})}),
@@ -102,6 +102,20 @@ assert.ok(events.includes('asset-maintenance'),'post-commit maintenance must be 
   assert.equal(attachmentDeletionLedger.some(item=>item.assetId===assetId),false,'required attachment reference must clear conflicting standalone deletion intent.');
 }
 
+
+// Restoring one note brings back the image its restored text uses, whether
+// the image was cleaned up or recorded as deleted, and nothing else: a
+// library-only attachment stays away and unrelated deletion records stay.
+for(const recordedAsDeleted of [false,true]){
+  const unrelated={assetId:unusedAssetId,deletedAt:'2026-09-01T00:00:00.000Z'};
+  notes={Ethics:freeze({key:'Ethics',text:'text after an accident',updatedAt:'2026-09-03T01:00:00.000Z'}),Local:freeze({key:'Local',text:'local note',updatedAt:'2026-08-31T01:00:00.000Z'})};assets=new Map();assetMeta=new Map();deletionLedger=originalDeletionLedger.map(value=>({...value}));
+  attachmentDeletionLedger=[unrelated,...(recordedAsDeleted?[{assetId,deletedAt:'2026-09-02T00:00:00.000Z'}]:[])];events.length=0;journal=null;noteChoice=item=>item.incomingValue;
+  const noteResult=await runtime.controller.restore(await runtime.controller.inspect(importBlob,{filename:'note-version.sdbackup'}),{note:'Ethics'});noteChoice=null;
+  assert.equal(noteResult.cancelled,false);assert.equal(notes.Ethics.text,rich,'the earlier text comes back');assert.equal(notes.Local.text,'local note');
+  assert.equal(assets.has(assetId),true,`the image the restored text uses comes back${recordedAsDeleted?' even though it was recorded as deleted':''}`);
+  assert.equal(assets.has(libraryAssetId),false,'a library-only attachment is not part of a one-note restore');assert.equal(assets.has(unusedAssetId),false);
+  assert.deepEqual(attachmentDeletionLedger.map(item=>item.assetId),[unusedAssetId],'only the restored image leaves the deletion records');
+}
 
 // Incoming explicit deletion versus a local standalone library identity is a
 // real two-way choice: local is the default, but an explicit deletion choice

@@ -18,7 +18,7 @@ let deviceHistoryReads=0,providerHistoryReads=0,providerBringInCheckpoint='',las
 const providerHooks={convergence:null,recovery:null,pending:null};
 const deviceEntry=freeze({logicalId:'state_'+'a'.repeat(64),logicalFingerprint:'a'.repeat(64),exportedAt:'2026-09-20T12:00:00.000Z',counts:freeze({dailyRecord:2,areaNote:1}),location:freeze({sourceId:'device-folder',sourceLabel:'Device Folder',checkpointId:CHECKPOINT('a'),exportedAt:'2026-09-20T12:00:00.000Z',tier:'latest',encrypted:false})});
 const driveEntry=freeze({logicalId:'state_'+'b'.repeat(64),logicalFingerprint:'b'.repeat(64),exportedAt:'2026-09-20T11:00:00.000Z',counts:freeze({dailyRecord:1,areaNote:1}),location:freeze({sourceId:'google-drive',sourceLabel:'Google Drive',checkpointId:CHECKPOINT('b'),exportedAt:'2026-09-20T11:00:00.000Z',tier:'latest',encrypted:false})});
-const deviceHistory=freeze({available:true,sourceId:'device-folder',sourceLabel:'Device Folder',entries:freeze([deviceEntry])});
+let deviceHistory=freeze({available:true,sourceId:'device-folder',sourceLabel:'Device Folder',entries:freeze([deviceEntry])});
 const driveHistory=freeze({available:true,sourceId:'google-drive',sourceLabel:'Google Drive',entries:freeze([driveEntry])});
 
 function node(){return {dataset:{},hidden:false,textContent:'',className:'',open:false,children:[],append(...items){this.children.push(...items);},appendChild(item){this.children.push(item);},replaceChildren(...items){this.children=[...items];},showModal(){this.open=true;},close(){this.open=false;}};}
@@ -192,5 +192,16 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   assert.equal(nodes.get('managed-version-history-title').textContent,'Device Folder backups');
   deviceConnected=false;assert.deepEqual(await host.history.openNote({key:'Ethics',label:'Ethics'}),{opened:false,reason:'no-source'},'without a connected backup nothing opens');deviceConnected=true;
   deviceCombineResult=freeze({ok:true});host.history.close();
+}
+// Version History lists versions newest first by when they were saved,
+// whatever their tier and whatever order the location returned them in.
+{
+  const entry=(letter,exportedAt,tier)=>freeze({...deviceEntry,logicalId:'state_'+letter.repeat(64),exportedAt,location:freeze({...deviceEntry.location,checkpointId:CHECKPOINT(letter),exportedAt,tier})});
+  const scrambled=[entry('c','2026-06-01T08:00:00.000Z','monthly'),entry('d','2026-09-20T12:00:00.000Z','latest'),entry('e','2026-07-15T09:00:00.000Z','saved'),entry('f','2026-09-18T21:00:00.000Z','daily'),entry('a','2026-09-10T07:00:00.000Z','before-restore'),entry('b','2026-08-30T10:00:00.000Z','weekly')];
+  const previous=deviceHistory;deviceHistory=freeze({...previous,entries:freeze(scrambled)});
+  await host.history.openSource('device-folder');await new Promise(resolve=>setImmediate(resolve));
+  const listed=host.history.status().entries.map(item=>item.exportedAt),rendered=nodes.get('managed-version-history-list').children.map(card=>card.dataset.logicalVersion);
+  assert.deepEqual(listed,[...listed].sort().reverse(),'newest first');assert.deepEqual(rendered,host.history.status().entries.map(item=>item.logicalId),'the dialog shows them in that order');
+  deviceHistory=previous;host.history.close();
 }
 console.log(JSON.stringify({status:'PASS',suite:'backup-recovery-host',providerScopedRecovery:true,noCrossProviderDiscovery:true,replaceAndCombine:true,durableProviderRetry:true,pendingMutationFailClosed:true,managedRecoveryLifecycle:true,closeDoesNotCancel:true,reopenReattaches:true,cancelSourceScoped:true},null,2));
