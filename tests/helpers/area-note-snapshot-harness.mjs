@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import {RUNTIME_DATA_CONTRACT} from '../../contracts/canonical-identities.mjs';
 
 function functionSource(source,name){
   const marker=`function ${name}(`,start=source.indexOf(marker);
@@ -22,7 +23,8 @@ export function createAreaNoteSnapshotHarness(repositoriesSource,entries){
   const implementation=areaNoteSnapshotImplementation(repositoriesSource);
   const notes=Object.create(null);
   for(const entry of entries||[])notes[String(entry.key||'')]={...entry};
-  const sandbox={notes,Object,Number,String,hasContent:entry=>!!(entry&&String(entry.text||'').trim())};
+  const trashPrefix=RUNTIME_DATA_CONTRACT.schemas.AreaNote.trashKeyPrefix;
+  const sandbox={notes,Object,Number,String,hasContent:entry=>!!(entry&&String(entry.text||'').trim()),isTrashKey:key=>String(key||'').startsWith(trashPrefix)};
   vm.createContext(sandbox);
   vm.runInContext(`${implementation}\nglobalThis.__snapshotApi=Object.freeze({touchSnapshot,metadataSnapshot,searchSnapshot});`,sandbox,{filename:'area-note-snapshot-runtime.js'});
   return Object.freeze({api:sandbox.__snapshotApi,notes,implementation});

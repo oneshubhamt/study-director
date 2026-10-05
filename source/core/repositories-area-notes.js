@@ -44,6 +44,13 @@ const repository=(()=>{
   // pauses. A browser copy (the rescue) holds unsaved notes only when that
   // write fails or the page is hidden or closed before it finishes.
   const SAVE_DEBOUNCE_MS=250;
+  // A deleted note stays an ordinary row under a reserved key ('~deleted <id>')
+  // for areaNoteTrashDays. It keeps its label and text, and its revision is the
+  // time it was deleted. Live notes never use the prefix, and trash rows leave
+  // no deletion record when they go.
+  const TRASH_PREFIX=String(DATA_CONTRACT.schemas.AreaNote.trashKeyPrefix||''),TRASH_RETENTION_MS=Number(APP_LIMITS.areaNoteTrashDays)*86400000;
+  if(!TRASH_PREFIX||!(TRASH_RETENTION_MS>0))throw new TypeError('Area Notes trash contract is invalid.');
+  const isTrashKey=key=>String(key||'').startsWith(TRASH_PREFIX);
   let loadPromise=null,lastLoadReadFailed=false;
   let freshLoadPromise=null;
   let saveTimer=null;
@@ -137,12 +144,12 @@ const repository=(()=>{
   function touchSnapshot(){snapshotRevision=(snapshotRevision+1)%Number.MAX_SAFE_INTEGER;metadataSnapshotCache=null;searchSnapshotCache=null;}
   function metadataSnapshot(){
     if(metadataSnapshotCache&&metadataSnapshotCache.revision===snapshotRevision)return metadataSnapshotCache;
-    const records=Object.freeze(Object.values(notes).map(entry=>Object.freeze({key:String(entry.key||''),label:String(entry.label||entry.key||''),hasNote:hasContent(entry),updatedAt:String(entry.updatedAt||'')})));
+    const records=Object.freeze(Object.values(notes).filter(entry=>!isTrashKey(entry.key)).map(entry=>Object.freeze({key:String(entry.key||''),label:String(entry.label||entry.key||''),hasNote:hasContent(entry),updatedAt:String(entry.updatedAt||'')})));
     metadataSnapshotCache=Object.freeze({revision:snapshotRevision,records});return metadataSnapshotCache;
   }
   function searchSnapshot(){
     if(searchSnapshotCache&&searchSnapshotCache.revision===snapshotRevision)return searchSnapshotCache;
-    const documents=Object.freeze(Object.values(notes).filter(hasContent).map(entry=>Object.freeze({key:String(entry.key||''),revision:String(entry.updatedAt||''),value:String(entry.text||'')})));
+    const documents=Object.freeze(Object.values(notes).filter(entry=>hasContent(entry)&&!isTrashKey(entry.key)).map(entry=>Object.freeze({key:String(entry.key||''),revision:String(entry.updatedAt||''),value:String(entry.text||'')})));
     searchSnapshotCache=Object.freeze({revision:snapshotRevision,documents});return searchSnapshotCache;
   }
   function clearFailure(){saveFailed=false;saveMessage='';}
@@ -343,7 +350,7 @@ const repository=(()=>{
     return idbStrictTransaction([DB_AREA_NOTES_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
       const store=tx.objectStore(DB_AREA_NOTES_STORE),meta=Meta.view(tx);stageCanonicalMutationEpoch(tx,['*']);store.clear();
       Object.values(normalized).forEach(entry=>{store.put(entry);meta.remove('areaNoteDeletionPrefix',entry.key);});
-      if(recordDeletes){const now=new Date().toISOString();for(const rawKey of removedKeys){const key=normalizeAreaName(rawKey);if(key&&!normalized[key]){const deletion=areaNoteDeletionValue(key,deletedByKey.get(key)?.deletedAt||now);meta.put('areaNoteDeletionPrefix',deletion,{suffix:key,updatedAt:deletion.deletedAt});}}}
+      if(recordDeletes){const now=new Date().toISOString();for(const rawKey of removedKeys){const key=normalizeAreaName(rawKey);if(key&&!normalized[key]&&!isTrashKey(key)){const deletion=areaNoteDeletionValue(key,deletedByKey.get(key)?.deletedAt||now);meta.put('areaNoteDeletionPrefix',deletion,{suffix:key,updatedAt:deletion.deletedAt});}}}
       for(const entry of deletedEntries)if(!normalized[entry.key]){const deletion=areaNoteDeletionValue(entry.key,entry.deletedAt);meta.put('areaNoteDeletionPrefix',deletion,{suffix:entry.key,updatedAt:deletion.deletedAt});}
       tx.oncomplete=()=>finish(true);
     },'area note replacement aborted');
@@ -377,7 +384,7 @@ const repository=(()=>{
             }
             storageLossSignalled=true;
           }
-          stageMutation();if(entry){store.put(entry);meta.remove('areaNoteDeletionPrefix',key);}else{store.delete(key);const deletion=areaNoteDeletionValue(key,deletedAt);meta.put('areaNoteDeletionPrefix',deletion,{suffix:key,updatedAt:deletion.deletedAt});}
+          stageMutation();if(entry){store.put(entry);meta.remove('areaNoteDeletionPrefix',key);}else{store.delete(key);if(!isTrashKey(key)){const deletion=areaNoteDeletionValue(key,deletedAt);meta.put('areaNoteDeletionPrefix',deletion,{suffix:key,updatedAt:deletion.deletedAt});}}
         };
       });
       tx.oncomplete=()=>finish(true,{conflicts,committed});
@@ -444,8 +451,9 @@ const repository=(()=>{
     }
     if(stale.length&&!lastLoadReadFailed&&appCanMutate()&&!clearIndependentRescueKeys(stale))AppDiagnostics.capture('area-notes.rescue-clear',LocalStorageContract.lastError||new Error('Ongoing Note emergency rescue cleanup failed.'),'warn');
     for(const [key,base] of unsaved){dirtyKeys.add(key);dirtyBaseRevisions.set(key,base);}
-    if(dirtyKeys.size)scheduleSave();
     everLoaded=true;
+    purgeExpiredTrash();
+    if(dirtyKeys.size)scheduleSave();
     refreshAreaNoteConsumers();
     return true;
   }
@@ -566,6 +574,7 @@ const repository=(()=>{
       if(!editorContentWithinLimits(sourceText))return {status:'content-limit',revision:currentRevision};
       nextText=clampEditorContent(sourceText,APP_LIMITS.maxNoteChars);
     }
+    if(!current&&isTrashKey(safeKey))return {status:'rejected',revision:''};
     if(!current&&nextText.trim()&&size()>=APP_LIMITS.maxOngoingNotes)return {status:'limit',revision:currentRevision};
     if(!current&&!nextText.trim())return {status:'unchanged',revision:currentRevision};
     const entry=ensureEntry(safeKey,nextLabel);
@@ -699,12 +708,66 @@ const repository=(()=>{
   function replace(payload){return commitCollection(payload,{merge:false});}
   function merge(payload){return commitCollection(payload,{merge:true});}
   function reconcile(payload,deletions=[]){return commitCollection(payload,{merge:true,deletions});}
+  // Removes a note for good. A deletion record keeps a live note from coming
+  // back through Combine; a trash row needs none.
   async function remove(key){
     if(!appCanMutate())return false;
     const safeKey=normalizeAreaName(key);if(!safeKey||!notes[safeKey])return false;
     await flush({strict:true});const current=notes[safeKey];if(!current)return false;
     delete notes[safeKey];touchSnapshot();markDirty(safeKey,revision(current));
     await flush({strict:true});return !notes[safeKey];
+  }
+  function newTrashKey(){
+    for(;;){
+      const random=[...globalThis.crypto.getRandomValues(new Uint8Array(4))].map(value=>value.toString(16).padStart(2,'0')).join('');
+      const key=`${TRASH_PREFIX}${decisionNowMs().toString(36)}${random}`;if(!notes[key])return key;
+    }
+  }
+  // Moves a note to Recently deleted, in one transaction with its deletion
+  // record. An empty note is simply removed. Returns the trash key, '' for an
+  // empty note, or null when nothing changed.
+  async function trash(key){
+    if(!appCanMutate())return null;
+    const safeKey=normalizeAreaName(key);if(!safeKey||isTrashKey(safeKey)||!notes[safeKey])return null;
+    await flush({strict:true});const current=notes[safeKey];if(!current)return null;
+    if(!hasContent(current))return await remove(safeKey)?'':null;
+    const trashKey=newTrashKey();
+    notes[trashKey]={version:DATA_CONTRACT.schemas.AreaNote.version,key:trashKey,label:current.label,text:current.text,updatedAt:nextRevision(current.updatedAt)};
+    delete notes[safeKey];touchSnapshot();markDirty(safeKey,revision(current));markDirty(trashKey,'');
+    await flush({strict:true});
+    refreshAreaNoteConsumers();
+    return trashKey;
+  }
+  // Puts a deleted note back under its name, or "<Name> (restored)" when a
+  // note with text already uses that name. Returns the restored key or null.
+  async function restore(trashKey){
+    if(!appCanMutate())return null;
+    const safeKey=normalizeAreaName(trashKey);if(!isTrashKey(safeKey)||!notes[safeKey])return null;
+    await flush({strict:true});const item=notes[safeKey];if(!item)return null;
+    const base=displayAreaName(item.label||''),free=candidate=>{const key=normalizeAreaName(candidate);return key&&!isTrashKey(key)&&!hasContent(notes[key])?key:'';};
+    let label=clampText(base,APP_LIMITS.maxAreaNameChars),key=free(label);
+    for(let index=1;!key&&index<100;index+=1){label=`${clampText(base,Math.max(1,APP_LIMITS.maxAreaNameChars-20))} (restored${index>1?` ${index}`:''})`;key=free(label);}
+    if(!key)return null;
+    const existing=notes[key]||null;
+    notes[key]={version:DATA_CONTRACT.schemas.AreaNote.version,key,label,text:item.text,updatedAt:nextRevision(existing&&existing.updatedAt)};
+    delete notes[safeKey];touchSnapshot();markDirty(key,revision(existing));markDirty(safeKey,revision(item));
+    await flush({strict:true});
+    refreshAreaNoteConsumers();
+    return key;
+  }
+  function trashExpired(entry,now=decisionNowMs()){return timestamp(entry)<=now-TRASH_RETENTION_MS;}
+  function trashSnapshot(){
+    const now=decisionNowMs();
+    return freeze(Object.values(notes).filter(entry=>isTrashKey(entry.key)&&!trashExpired(entry,now)).map(entry=>freeze({key:entry.key,label:String(entry.label||''),deletedAt:String(entry.updatedAt||''),hasNote:hasContent(entry)})).sort((a,b)=>b.deletedAt.localeCompare(a.deletedAt)));
+  }
+  // Deleted notes past their retention are removed on load and when the trash
+  // is shown; saving follows the ordinary path.
+  function purgeExpiredTrash(){
+    if(!everLoaded||!appCanMutate())return 0;
+    const now=decisionNowMs(),expired=Object.keys(notes).filter(key=>isTrashKey(key)&&trashExpired(notes[key],now));
+    for(const key of expired){const current=notes[key];delete notes[key];markDirty(key,revision(current));}
+    if(expired.length){touchSnapshot();scheduleSave();}
+    return expired.length;
   }
   async function clearAllAreaNotes(){
     if(!appCanMutate())throw new Error('ongoing notes cannot be cleared without write ownership');
@@ -714,7 +777,7 @@ const repository=(()=>{
     if(!removedKeys.length)return Object.freeze({count:0});
     resetPendingAreaNoteWrites();
     try{
-      const deletedAt=new Date().toISOString(),deletions=removedKeys.map(key=>({key,deletedAt}));
+      const deletedAt=new Date().toISOString(),deletions=removedKeys.filter(key=>!isTrashKey(key)).map(key=>({key,deletedAt}));
       await idbReplace(KeyedRecord.create(),removedKeys,{deletedEntries:deletions,recordDeletes:true});
       if(!clearIndependentRescueKeys(removedKeys))AppDiagnostics.capture('area-notes.rescue-clear',LocalStorageContract.lastError||new Error('Ongoing Note emergency rescue cleanup failed.'),'warn');
       wipeObject(notes);touchSnapshot();clearFailure();
@@ -728,7 +791,7 @@ const repository=(()=>{
       throw e;
     }
   }
-  return Object.freeze({get,update,updateValidatedRich,remove,clearAll:clearAllAreaNotes,load,reloadFresh,readFreshPayload,readFreshItems,flush,protectUnsaved,exportPayload,replace,merge,reconcile,normalizePayload,metadataSnapshot,searchSnapshot,size,failure,migrateLegacyRecovery,migrateHistoricalCanonicalRows,verifyCurrentRecovery,recoverAfterStorageLoss});
+  return Object.freeze({get,update,updateValidatedRich,remove,clearAll:clearAllAreaNotes,load,reloadFresh,readFreshPayload,readFreshItems,flush,protectUnsaved,trash,restore,trashSnapshot,purgeExpiredTrash,exportPayload,replace,merge,reconcile,normalizePayload,metadataSnapshot,searchSnapshot,size,failure,migrateLegacyRecovery,migrateHistoricalCanonicalRows,verifyCurrentRecovery,recoverAfterStorageLoss});
 })();
 
     return repository;

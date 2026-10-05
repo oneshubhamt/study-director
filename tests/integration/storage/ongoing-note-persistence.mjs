@@ -139,6 +139,46 @@ for(const failEpochRead of [false,true]){
   else{assert.equal(app.notes.get('ethics')?.text,'deleted in another tab','memory is left as it was');assert.equal(await app.notes.reloadFresh(),true);assert.equal(app.notes.get('ethics'),null,'a later reload adopts the deletion');}
 }
 
+// 9. Deleting moves a note to Recently deleted: an ordinary row under a reserved
+// key, written in one transaction with the deletion record for its name. The
+// name is free at once; restore puts it back, or beside a newer note.
+{
+  const {app,stores,clock}=await setup();
+  app.notes.update('gs2 > polity','GS2 > Polity','fundamental rights','');await app.notes.flush({strict:true});
+  const trashKey=await app.notes.trash('gs2 > polity');
+  assert.match(trashKey,/^~deleted [0-9a-z]+$/u,'the trash key is reserved and never a real Area');
+  assert.equal(stores.area.has('gs2 > polity'),false,'the live row is gone');
+  assert.equal(stores.area.get(trashKey).text,'fundamental rights','the text is kept in the same store');
+  assert.equal(stores.area.get(trashKey).label,'GS2 > Polity','the original name is kept');
+  assert.ok(stores.meta.has('areaNoteDeletion.v1:gs2 > polity'),'the name is recorded as deleted for Combine');
+  assert.equal(stores.meta.has(`areaNoteDeletion.v1:${trashKey}`),false,'trash rows get no deletion record');
+  assert.equal(app.notes.metadataSnapshot().records.some(record=>record.key===trashKey),false,'trash is not listed with live notes');
+  assert.equal(app.notes.searchSnapshot().documents.some(record=>record.key===trashKey),false,'trash is not searched');
+  assert.deepEqual(app.notes.trashSnapshot().map(item=>item.label),['GS2 > Polity']);
+  assert.equal(app.notes.exportPayload()[trashKey].text,'fundamental rights','backups carry trash');
+  assert.equal(app.notes.update(`${trashKey}x`,'Fake','text','').status,'rejected','no live note can use the trash prefix');
+  // Today's plan still uses the name: its blocks start a new note.
+  assert.equal(app.notes.update('gs2 > polity','GS2 > Polity','new notes from today','').status,'changed');await app.notes.flush({strict:true});
+  const restoredKey=await app.notes.restore(trashKey);
+  assert.equal(restoredKey,'gs2 > polity (restored)','a name in use gets a "(restored)" note beside it');
+  assert.equal(stores.area.get('gs2 > polity').text,'new notes from today','the newer note is untouched');
+  assert.equal(stores.area.get(restoredKey).text,'fundamental rights');assert.equal(stores.area.has(trashKey),false);
+  assert.equal(app.notes.trashSnapshot().length,0);
+  // Restoring to a free name, and deleting forever.
+  const again=await app.notes.trash(restoredKey);assert.equal(await app.notes.restore(again),restoredKey,'a free name is reused');
+  const gone=await app.notes.trash(restoredKey);assert.equal(await app.notes.remove(gone),true);
+  assert.equal(stores.area.has(gone),false);assert.equal(stores.meta.has(`areaNoteDeletion.v1:${gone}`),false,'deleting forever leaves no record');
+  // An empty note is simply removed.
+  app.notes.update('blank','Blank','x','');await app.notes.flush({strict:true});app.notes.update('blank','Blank','',app.notes.get('blank').updatedAt);await app.notes.flush({strict:true});
+  assert.equal(await app.notes.trash('blank'),'','an empty note is removed without a trash entry');
+  // Retention: after 30 days the next load removes it.
+  const old=await app.notes.trash('gs2 > polity');assert.ok(old);
+  await clock.advance(29*86400000);assert.equal(app.notes.trashSnapshot().length,1);
+  await clock.advance(86400000+1000);assert.equal(app.notes.trashSnapshot().length,0,'expired trash is not shown');
+  assert.equal(app.notes.purgeExpiredTrash(),1);await app.notes.flush({strict:true});
+  assert.equal(stores.area.has(old),false,'expired trash is removed');assert.equal(stores.meta.has(`areaNoteDeletion.v1:${old}`),false);
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'ongoing-note-persistence',contracts:[
   'queued batches use the revision committed by the earlier batch',
   'rows lost to a browser data clear are rewritten from memory',
@@ -147,5 +187,6 @@ console.log(JSON.stringify({status:'PASS',suite:'ongoing-note-persistence',contr
   'existing rows and recorded deletions keep the stored-version fail-safe',
   'a clashing edit is kept as an unsaved-copy note',
   'a clear counted by the database layer protects edits before the handler runs',
-  'an unreadable takeover check keeps memory and deletion records'
+  'an unreadable takeover check keeps memory and deletion records',
+  'deleted notes go to Recently deleted, restore beside a newer note, and expire after 30 days'
 ]},null,2));

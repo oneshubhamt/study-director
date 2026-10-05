@@ -102,7 +102,9 @@ export const RUNTIME_DATA_CONTRACT=freeze({
     SessionSnapshot:freeze({version:CURRENT_SCHEMA_VERSIONS.SessionSnapshot}),
     LocalRecoveryEnvelope:freeze({version:CURRENT_SCHEMA_VERSIONS.LocalRecoveryEnvelope}),
     ActiveSession:freeze({version:CURRENT_SCHEMA_VERSIONS.ActiveSession,key:ACTIVE_SESSION_ID}),
-    AreaNote:freeze({version:CURRENT_SCHEMA_VERSIONS.AreaNote,key:'key'}),
+    // A deleted note stays an ordinary row under this reserved key until it is
+    // restored or its retention ends; live notes never use the prefix.
+    AreaNote:freeze({version:CURRENT_SCHEMA_VERSIONS.AreaNote,key:'key',trashKeyPrefix:'~deleted '}),
     AppMeta:freeze({version:CURRENT_SCHEMA_VERSIONS.AppMeta,key:'key'}),
     CheckpointMetadata:freeze({version:CURRENT_SCHEMA_VERSIONS.CheckpointMetadata,format:CHECKPOINT_METADATA.format}),
     CheckpointProtectedManifest:freeze({version:CURRENT_SCHEMA_VERSIONS.CheckpointProtectedManifest,format:CHECKPOINT_PROTECTED_MANIFEST.format}),
