@@ -6,10 +6,11 @@ import path from 'node:path';
 import vm from 'node:vm';
 import {fileURLToPath} from 'node:url';
 import {createProcessingEngine} from '../../helpers/file-processing.mjs';
+import {createMemoryDirectory} from '../../helpers/memory-directory.mjs';
 import {passwordKey,streamEncryptionInfo,transformEncrypted} from '../../../portable/stream-encryption.js';
 
 const HERE=path.dirname(fileURLToPath(import.meta.url)),ROOT=path.resolve(HERE,'../../..'),read=relative=>fs.readFileSync(path.join(ROOT,relative),'utf8');
-for(const file of ['source/core/internal.js','source/core/operation-lifecycle.js','source/core/record-codecs.js','source/core/backup-codec.js','source/core/canonical.js','source/core/reconciliation.js','source/core/managed-repository.js','source/core/repository-policy.js','source/core/repository-background.js','source/core/backup-provider.js','source/core/backup-capture.js','source/core/backup.js','source/core/managed-recovery.js'])vm.runInThisContext(read(file),{filename:file});
+for(const file of ['source/core/internal.js','source/core/device-folder-storage.js','source/core/operation-lifecycle.js','source/core/record-codecs.js','source/core/backup-codec.js','source/core/canonical.js','source/core/reconciliation.js','source/core/managed-repository.js','source/core/repository-policy.js','source/core/repository-background.js','source/core/backup-provider.js','source/core/backup-capture.js','source/core/backup.js','source/core/managed-recovery.js'])vm.runInThisContext(read(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],freeze=Object.freeze;
 const CanonicalModule=registry.require('canonical',1),RecordCodecs=registry.require('record-codecs',1),BackupCodecs=registry.require('backup-codec',1),ManagedRepositoryModule=registry.require('managed-repository',1),RepositoryPolicyModule=registry.require('repository-policy',1),BackupProviderModule=registry.require('backup-provider',1,freeze({repositoryPolicy:RepositoryPolicyModule})),BackupCaptureModule=registry.require('backup-capture',1),RepositoryBackgroundModule=registry.require('repository-background',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})),BackupModule=registry.require('backup',1,Object.freeze({backupCapture:BackupCaptureModule,backupProvider:BackupProviderModule,canonical:CanonicalModule,managedRepository:ManagedRepositoryModule,repositoryBackground:RepositoryBackgroundModule})),ReconciliationModule=registry.require('reconciliation',1,Object.freeze({canonical:CanonicalModule})),ManagedRecoveryModule=registry.require('managed-recovery',1);
 const processing=createProcessingEngine();
@@ -318,6 +319,31 @@ records.push(freeze({version:16,recordKind:'study',date:'2026-09-21',reflection:
   const none=await runtime.providers.bringInRepositoryProvider('repository-missing-qa',{missingOnly:true,quiet:true,before:'2000-01-01T00:00:00.000Z'});
   assert.equal(none.cancelled,true);assert.equal(none.reason,'needs-decision');assert.deepEqual(records,[],'nothing changes without a version from before the clear');
   ({notes}=saved);records=saved.records;deletions=saved.deletions;assets.clear();for(const [id,blob] of saved.assets)assets.set(id,blob);
+}
+
+// The Device Folder runs on the same engine as Google Drive through its
+// storage adapter: backup, Version History, a one-note restore and an exact
+// restore all work on a folder, reading and writing the existing layout.
+{
+  const saved={records:[...records],notes:{...notes},assets:new Map(assets),deletions:[...deletions],currentPersonal};
+  const folder=createMemoryDirectory(),deviceStorage=registry.require('device-folder-storage',1).createStorage(freeze({
+    folder:()=>folder,identities:freeze({root:'Study-Director-Automatic-Backup-Repository',objects:'objects',checkpoints:'checkpoints',commits:'commits'}),
+    checksum:async blob=>codec.checksumBlob(blob),inspectManifest:(file,options)=>runtime.repository.inspectManifest(file,options),
+    environment:freeze({canMutate:()=>true,now:()=>Date.now(),setTimeout,clearTimeout,yieldTask:async()=>{}}),
+    limits:freeze({publicationMaxAgeMs:24*3600000,publicationAssertionMarginMs:30*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,readTimeoutMs:10000})
+  }));
+  assert.equal(runtime.providers.register(freeze({id:'device-folder-engine',label:'Device Folder',connected:()=>true,repository:deviceStorage})),true);
+  notes={Ethics:normalizeArea({key:'Ethics',text:'folder version',updatedAt:'2026-09-21T01:00:00.000Z'},'Ethics')};
+  const published=await runtime.providers.backupRepositoryProvider('device-folder-engine',{interactive:false});
+  assert.match(published.checkpointId,/^cp_[a-f0-9]{32}$/u);
+  const repositoryRoot=await folder.getDirectoryHandle('Study-Director-Automatic-Backup-Repository');
+  assert.deepEqual((await repositoryRoot.getDirectoryHandle('checkpoints')).names(),[published.checkpointId+'.sdcheckpoint'],'the version lands in the existing folder layout');
+  const history=await runtime.providers.history('device-folder-engine',{interactive:false});
+  assert.equal(history.available,true);assert.deepEqual(history.entries.map(entry=>entry.location.checkpointId),[published.checkpointId]);assert.equal(history.entries[0].location.tier,'latest');
+  notes={...notes,Ethics:normalizeArea({key:'Ethics',text:'changed after the folder backup',updatedAt:'2099-01-04T00:00:00.000Z'},'Ethics')};noteChoice=conflict=>conflict.incomingValue;
+  const noteRestore=await runtime.providers.bringInRepositoryProvider('device-folder-engine',{checkpointId:published.checkpointId,note:'Ethics'});noteChoice=null;
+  assert.equal(noteRestore.cancelled,false);assert.equal(notes.Ethics.text,'folder version');
+  ({records,notes,deletions,currentPersonal}=saved);assets.clear();for(const [id,blob] of saved.assets)assets.set(id,blob);
 }
 
 // An integrity-valid but unpublished repository manifest is not eligible for historical restore.
