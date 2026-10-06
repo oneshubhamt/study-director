@@ -852,20 +852,24 @@ async function openRepositoryAttachment(manifest,entry,descriptor,readObject,opt
     return opened;
   }catch(error){await opened.release().catch(()=>{});throw error;}
 }
-async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectValue,{interactive=true,signal=null}={}){
-  const manifest=validateRepositoryManifest(manifestValue),readObject=repositoryReadPort(readObjectValue);
+// With note set, only the objects holding that note and the images its text
+// uses are read. Each is still verified against the verified manifest; the
+// whole-checkpoint cross-checks need every object and are left out.
+async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectValue,{interactive=true,signal=null,note=''}={}){
+  const manifest=validateRepositoryManifest(manifestValue),readObject=repositoryReadPort(readObjectValue),noteKey=String(note||'');
   throwIfImportAborted(signal);
   if(manifest.installationId&&manifest.installationId!==manifest.checkpoint.originInstallationId)throw new Error('Repository checkpoint installation provenance is inconsistent.');
   const objectById=new Map(manifest.objects.map(entry=>[entry.objectId,entry]));
   const allowedKinds=new Set(['dailyRecordPack','areaNote','activeSession','personalData','structuredPack','attachment']);if(manifest.version<=4)allowedKinds.add(LEGACY_REFLECTION_DRAFT_PACK_KIND);
   for(const entry of manifest.objects)if(!allowedKinds.has(entry.kind))throw new Error(`Repository object kind ${entry.kind} is unsupported.`);
   const dailyDocuments=[],areaNoteItems=[];let activeSession=null,personalData=null,legacyReflectionDraftCount=0;
-  const seenDates=new Set(),seenNoteKeys=new Set(),seenDraftDates=new Set(),structuredEntries=manifest.objects.filter(entry=>entry.kind!=='attachment');
+  const holdsNote=entry=>entry.kind==='areaNote'&&entry.key===noteKey||entry.kind==='structuredPack'&&repositoryPackManifestMembers(entry.members).some(member=>member.kind==='areaNote'&&member.key===noteKey);
+  const seenDates=new Set(),seenNoteKeys=new Set(),seenDraftDates=new Set(),structuredEntries=manifest.objects.filter(entry=>entry.kind!=='attachment'&&(!noteKey||holdsNote(entry)));
   const structuredPayloads=await mapRepositoryBounded(structuredEntries,async entry=>{
     throwIfImportAborted(signal);
     return readRepositoryStructuredObject(manifest,entry,readObject,{interactive,signal});
   });
-  const logicalRows=[];for(const rows of structuredPayloads)logicalRows.push(...rows);logicalRows.sort((a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key));
+  const logicalRows=[];for(const rows of structuredPayloads)logicalRows.push(...rows.filter(row=>!noteKey||row.kind==='areaNote'&&row.key===noteKey));logicalRows.sort((a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key));
   for(const logical of logicalRows){
     throwIfImportAborted(signal);const entry=logical,payload=logical.payload;
     if(entry.kind==='dailyRecordPack'){
@@ -885,10 +889,11 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
   }
   dailyDocuments.sort((a,b)=>String(a.date).localeCompare(String(b.date)));areaNoteItems.sort((a,b)=>String(a.key).localeCompare(String(b.key)));
   const counts=repositoryManifestCounts({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:dailyDocuments.length,areaNote:areaNoteItems.length,activeSession:activeSession?1:0,reflectionDraft:legacyReflectionDraftCount},manifest.version);
-  if(!repositoryCountsEqualForManifest(counts,manifest.counts,manifest.version))throw new Error('Repository checkpoint counts do not match its reconstructed contents.');
-  const referencedAttachmentIds=new Set(),attachmentLeases=new Map(),assetItems=[];
+  if(!noteKey&&!repositoryCountsEqualForManifest(counts,manifest.counts,manifest.version))throw new Error('Repository checkpoint counts do not match its reconstructed contents.');
+  const referencedAttachmentIds=new Set(),attachmentLeases=new Map(),assetItems=[],noteAssetIds=noteKey?new Set(areaNoteItems.flatMap(item=>[...BackupCodec.assetIds(item)])):null;
   try{
     for(const raw of manifest.assets){
+      if(noteAssetIds&&!noteAssetIds.has(raw.assetId))continue;
       throwIfImportAborted(signal);
       if(raw.missing===true){assetItems.push(freeze({descriptor:freeze({assetId:raw.assetId,missing:true}),blob:null}));continue;}
       const entry=objectById.get(raw.objectId);
@@ -900,7 +905,7 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
       const descriptor=freeze({assetId:raw.assetId,mimeType:raw.mimeType,size:raw.size,checksum:raw.checksum,name:raw.name,library:raw.library});
       assetItems.push(freeze({descriptor,blob:opened.blob}));
     }
-    for(const entry of manifest.objects)if(entry.kind==='attachment'&&!referencedAttachmentIds.has(entry.objectId))throw new Error('Repository checkpoint contains an unreferenced attachment object.');
+    if(!noteKey)for(const entry of manifest.objects)if(entry.kind==='attachment'&&!referencedAttachmentIds.has(entry.objectId))throw new Error('Repository checkpoint contains an unreferenced attachment object.');
     const installationId=manifest.installationId||manifest.checkpoint.originInstallationId;
     const capture=freeze({
       format:LOGICAL_CHECKPOINT_CAPTURE_FORMAT,version:LOGICAL_CHECKPOINT_CAPTURE_VERSION,
@@ -908,17 +913,17 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
       studentName:String(personalData&&personalData.preferences&&personalData.preferences.studentName||'Study Director'),installationId,checkpoint:manifest.checkpoint,
       recordDates:freeze(dailyDocuments.map(record=>String(record.date))),areaNoteItems:freeze(areaNoteItems),activeSession,personalData,
       savedDayDeletions:freeze([...(manifest.protectedCheckpointManifest.savedDayDeletions||[])]),areaNoteDeletions:freeze([...(manifest.protectedCheckpointManifest.areaNoteDeletions||[])]),attachmentDeletions:freeze([...(manifest.protectedCheckpointManifest.attachmentDeletions||[])]),counts,assetItems:freeze(assetItems),warning:manifest.warning,
-      protectedCheckpointManifest:manifest.protectedCheckpointManifest
+      protectedCheckpointManifest:manifest.protectedCheckpointManifest,noteScope:noteKey
     });
     let released=false;
     const release=async()=>{if(released)return false;released=true;for(const opened of attachmentLeases.values())await opened.release().catch(()=>{});attachmentLeases.clear();return true;};
-    return freeze({capture,release,repositoryCheckpoint:manifest.checkpoint,repositoryEncrypted:manifest.encrypted,verifiedSourceBytes:manifest.objects.reduce((total,entry)=>total+Math.max(0,Number(entry.sourceBytes)||0),0),storedBytes:manifest.objects.reduce((total,entry)=>total+Math.max(0,Number(entry.storedBytes)||0),0)});
+    return freeze({capture,release,repositoryCheckpoint:manifest.checkpoint,repositoryEncrypted:manifest.encrypted,verifiedSourceBytes:(noteKey?[...structuredEntries,...manifest.objects.filter(entry=>referencedAttachmentIds.has(entry.objectId))]:manifest.objects).reduce((total,entry)=>total+Math.max(0,Number(entry.sourceBytes)||0),0),storedBytes:manifest.objects.reduce((total,entry)=>total+Math.max(0,Number(entry.storedBytes)||0),0)});
   }catch(error){for(const opened of attachmentLeases.values())await opened.release().catch(()=>{});attachmentLeases.clear();throw error;}
 }
 async function inspectRepositoryCheckpoint(manifest,readObject,options={}){
   const signal=options.signal||currentImportSignal()||null,managedRecovery=options.managedRecovery;
   if(managedRecovery!==undefined&&managedRecovery!==null&&typeof managedRecovery!=='function')throw new TypeError('Managed repository recovery orchestration is invalid.');
-  const normalizedManifest=validateRepositoryManifest(manifest),reconstructed=await reconstructVerifiedRepositoryCheckpoint(normalizedManifest,readObject,{interactive:options.interactive!==false,signal});
+  const normalizedManifest=validateRepositoryManifest(manifest),reconstructed=await reconstructVerifiedRepositoryCheckpoint(normalizedManifest,readObject,{interactive:options.interactive!==false,signal,note:typeof options.note==='string'?options.note:''});
   try{
     return await inspectVerifiedCapture(reconstructed.capture,freeze({signal,release:reconstructed.release,sourceEncrypted:normalizedManifest.encrypted,repositoryManifest:normalizedManifest,repositoryCommitted:options.committed===true,managedRecovery:managedRecovery||null,managedProgress:typeof options.managedProgress==='function'?options.managedProgress:null,verifiedSourceBytes:reconstructed.verifiedSourceBytes,storedBytes:reconstructed.storedBytes}));
   }catch(error){await reconstructed.release().catch(()=>{});throw error;}

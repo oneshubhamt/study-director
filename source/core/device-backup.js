@@ -629,6 +629,8 @@ registry.define('device-backup',1,input=>{
       // only what is absent. A version saved after the clear may hold the
       // reduced data, so it is never used.
       const missingOnly=!exact&&options?.missingOnly===true,missingBefore=Date.parse(String(options?.before||''));
+      // Restoring one note reads only that note and its images from the version.
+      const note=!exact&&!missingOnly&&typeof options?.note==='string'?options.note:'';
       if(!supported)return freeze({ok:false,reason:'unsupported'});
       const traceId=operationStart(exact?'device-restore':'device-combine','Device Folder');
       if(!ownership.canMutate()){presentationState.message=exact?'Take control in this tab before restoring a Device Folder version.':'Take control in this tab before combining from a Device Folder backup.';publish();operationFinish({status:'skipped',reason:'ownership'},traceId);return freeze({ok:false,reason:'ownership'});}
@@ -665,7 +667,7 @@ registry.define('device-backup',1,input=>{
           return file||null;
         };
         const managedRecovery=transaction=>hooks.managedRecovery(freeze({
-          kind:modeName,label:'Device Folder',keepsActiveSession:missingOnly||!!(typeof options?.note==='string'&&options.note),apply:async()=>{reportRecovery('apply',exact?'Applying selected backup locally…':'Combining data locally…');const result=await transaction.apply();reportRecovery('verify-local','Verifying restored local data…');return result;},
+          kind:modeName,label:'Device Folder',keepsActiveSession:missingOnly||!!note,apply:async()=>{reportRecovery('apply',exact?'Applying selected backup locally…':'Combining data locally…');const result=await transaction.apply();reportRecovery('verify-local','Verifying restored local data…');return result;},
           createSafety:async()=>{
             operationMark('external-safety-publication-start',{provider:'device-folder'},traceId);presentationState.message='Creating and verifying Before restore safety backup…';publish();reportRecovery('safety','Creating protected safety backup in Device Folder…');
             const safetyPurpose=modeName==='bring-in'?'before-combine':'before-restore';
@@ -690,8 +692,8 @@ registry.define('device-backup',1,input=>{
             return freeze({status:'completed',queued:true,reason:'normal-device-backup'});
           }
         }));
-        operationMark('selected-checkpoint-inspection-start',{provider:'device-folder'},traceId);const candidate=await repository.inspect(row.manifest,readObject,{interactive:!missingOnly,signal,committed:true,managedRecovery,managedProgress:recoveryProgress});operationMark('selected-checkpoint-inspection-complete',{provider:'device-folder'},traceId);
-        const result=exact?await repository.restoreVersion(candidate,{confirmed:options&&options.confirmed===true}):await repository.bringIn(candidate,{missingOnly,note:typeof options?.note==='string'?options.note:''});
+        operationMark('selected-checkpoint-inspection-start',{provider:'device-folder'},traceId);const candidate=await repository.inspect(row.manifest,readObject,{interactive:!missingOnly,signal,committed:true,managedRecovery,managedProgress:recoveryProgress,...(note?{note}:{})});operationMark('selected-checkpoint-inspection-complete',{provider:'device-folder'},traceId);
+        const result=exact?await repository.restoreVersion(candidate,{confirmed:options&&options.confirmed===true}):await repository.bringIn(candidate,{missingOnly,note});
         if(result&&result.cancelled){presentationState.message='';operationFinish({cancelled:true},traceId);return freeze({ok:false,reason:['needs-decision','note-missing','note-unchanged','note-kept'].includes(result.reason)?result.reason:'cancelled',checkpointId:row.id,result});}
         const convergence=result&&result.managedRecovery&&result.managedRecovery.present||freeze({status:'pending',reason:'post-operation backup status unavailable'});
         if(convergence.status!=='completed'){

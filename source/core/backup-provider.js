@@ -953,13 +953,15 @@ registry.define('backup-provider',1,input=>{
     const objectInventory=repositoryObjectInventoryForManifest(listedObjects,row.manifest),needed=new Set((row.manifest.objects||[]).map(entry=>entry.objectId)),total=needed.size,totalDownloadBytes=(row.manifest.objects||[]).reduce((sum,entry)=>sum+Math.max(0,Number(entry&&entry.storedBytes)||0),0),downloadSlots=new Map(),downloadProgressBytes=new Map();let started=0,completed=0;
     if((row.manifest.objects||[]).some(entry=>quarantined.has(entry.objectId)))throw new Error('The selected backup version references an object that is quarantined after an integrity check. Choose another version or create a fresh backup.');
     progress('inventory',`Preparing selected backup data from ${selected.label}…`);
+    // A one-note read fetches a few of the version's objects, so whole-version totals would mislead.
+    const downloadProgress=details=>progress('download',note?`Reading this note from ${selected.label}…`:`Downloading backup data from ${selected.label}…`,note?{}:details);
     const readObject=async entry=>{
       const item=objectInventory.byId.get(entry.objectId);if(!item)throw new Error(`Repository object ${entry.objectId} is unavailable.`);
       let index=downloadSlots.get(entry.objectId);if(!index){index=++started;downloadSlots.set(entry.objectId,index);downloadProgressBytes.set(entry.objectId,0);OperationDiagnostics.mark('provider-object-download-start',{provider:selected.id,index,count:total,bytes:entry.storedBytes});}
       const aggregateBytes=()=>Math.min(totalDownloadBytes,[...downloadProgressBytes.values()].reduce((sum,value)=>sum+Math.max(0,Number(value)||0),0));
-      progress('download',`Downloading backup data from ${selected.label}…`,{current:completed,total,active:index,completedBytes:aggregateBytes(),totalBytes:totalDownloadBytes});
-      const result=await selected.repository.download(item,freeze({signal:operation.signal,onProgress:value=>{const loaded=Math.max(0,Number(value&&value.loaded)||0),bytes=Math.max(1,Number(value&&value.total)||Number(entry.storedBytes)||1);downloadProgressBytes.set(entry.objectId,Math.min(bytes,loaded));progress('download',`Downloading backup data from ${selected.label}…`,{current:completed,total,active:index,completedBytes:aggregateBytes(),totalBytes:totalDownloadBytes});}}));
-      downloadProgressBytes.set(entry.objectId,Math.max(0,Number(entry.storedBytes)||0));completed+=1;OperationDiagnostics.mark('provider-object-download-complete',{provider:selected.id,index,count:total,bytes:entry.storedBytes,completed});progress('download',`Downloading backup data from ${selected.label}…`,{current:completed,total,completedBytes:aggregateBytes(),totalBytes:totalDownloadBytes});return result;
+      downloadProgress({current:completed,total,active:index,completedBytes:aggregateBytes(),totalBytes:totalDownloadBytes});
+      const result=await selected.repository.download(item,freeze({signal:operation.signal,onProgress:value=>{const loaded=Math.max(0,Number(value&&value.loaded)||0),bytes=Math.max(1,Number(value&&value.total)||Number(entry.storedBytes)||1);downloadProgressBytes.set(entry.objectId,Math.min(bytes,loaded));downloadProgress({current:completed,total,active:index,completedBytes:aggregateBytes(),totalBytes:totalDownloadBytes});}}));
+      downloadProgressBytes.set(entry.objectId,Math.max(0,Number(entry.storedBytes)||0));completed+=1;OperationDiagnostics.mark('provider-object-download-complete',{provider:selected.id,index,count:total,bytes:entry.storedBytes,completed});downloadProgress({current:completed,total,completedBytes:aggregateBytes(),totalBytes:totalDownloadBytes});return result;
     };
     if(!managedRecoveryHooks)throw new Error('Managed recovery transaction coordination is unavailable.');
     const repositorySnapshot=freeze({history:freeze([row.manifest]),availableObjectIds:freeze([...objectInventory.byId.keys()]),inventory,invalidCount:inventory.invalid.length});
@@ -977,7 +979,7 @@ registry.define('backup-provider',1,input=>{
       },
       publishPresent:async result=>{progress('finalize','Finalizing recovery…');return managedProviderPresent(providerSelected,result,{sourceNeeded:mode==='bring-in',sourceCheckpoint:mode==='restore-version'?row.item.id:''});}
     }));
-    return RepositoryCheckpointPipeline.inspect(row.manifest,readObject,{interactive:true,signal:operation.signal,committed:true,managedRecovery,managedProgress:onProgress});
+    return RepositoryCheckpointPipeline.inspect(row.manifest,readObject,{interactive:true,signal:operation.signal,committed:true,managedRecovery,managedProgress:onProgress,...(note&&mode==='bring-in'?{note}:{})});
   }
   async function removeProtectedRepositoryProvider(id,checkpointId){
     if(busy)return freeze({removed:false,reason:'busy'});
