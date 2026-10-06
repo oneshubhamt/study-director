@@ -24,7 +24,7 @@ registry.define('backup-presentation',1,()=>{
   function outcome(kind,label,convergence){
     const message=kind==='restore-version'?'Backup restored locally and verified.':'Backup combined locally and verified.',external=convergence?.source||convergence,parts=[message];
     const append=(name,state)=>{if(state?.status==='pending')parts.push(`${name} backup update is pending.`);else if(state?.status==='completed')parts.push(`${name} backup state is verified.`);else if(state?.status==='failed')parts.push(`${name} backup status needs attention.`);};
-    append(label,external);if(convergence?.device)append('Device Folder',convergence.device);return parts.join(' ');
+    append(label,external);for(const other of convergence?.others||[])append(other.label,other);return parts.join(' ');
   }
   function createPresentation(input){
     if(!input||!Object.isFrozen(input)||!input.notifications||typeof input.notifications.readEvent!=='function')throw new TypeError('Backup presentation requires the notification coordinator.');
@@ -33,6 +33,7 @@ registry.define('backup-presentation',1,()=>{
     const read=(source,id='backup-operation')=>notifications.readEvent(source,id);
     function locationLabel(source,state={}){
       if(state.busy)return state.stalled?'Still working…':({history:'Reading backups…','restore-version':'Restoring…','bring-in':'Combining…','remove-safety':'Removing safety backup…'}[state.foregroundKind]||'Backing up…');
+      if(state.backingUp)return 'Backing up…';
       if(state.maintenanceBusy)return 'Maintaining backups…';
       if(state.mode==='unsupported')return 'Unavailable';
       if(state.mode==='permission')return 'Permission needed';

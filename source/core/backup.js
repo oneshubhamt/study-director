@@ -24,7 +24,7 @@ registry.define('backup',1,input=>{
     session:freeze(['canMutate','cancelLiveDraftSave','captureSnapshot','hasActiveSession','hasTasks','toActiveSession','withPersistenceSuppressed']),
     domain:freeze(['clampText','filenameSafeStudentName','getStudentName','materializeDailyRecordView','sanitizeCurrentDailyRecord','todayISO']),
     view:freeze(['presentation','document','refreshPnote','refreshReview','renderSchedule']),
-    events:freeze(['libraryChanged','backupCompleted','reconcileAreaNotes','restoreAreaNotesSnapshot','restoreSessionState','verifyActiveSessionRuntime','requestDeviceBackupConvergence']),
+    events:freeze(['libraryChanged','backupCompleted','reconcileAreaNotes','restoreAreaNotesSnapshot','restoreSessionState','verifyActiveSessionRuntime','restoredFromFile']),
     operations:freeze(['assertAuthority','clearFault','failClosed','runExclusive']),
     interactions:freeze(['choose','configure','notify']),
     environment:freeze(['AbortController','clearTimeout','requestAnimationFrame','setTimeout','yieldTask']),
@@ -78,7 +78,7 @@ registry.define('backup',1,input=>{
     const {canMutate:appCanMutate,cancelLiveDraftSave,captureSnapshot:captureSessionSnapshot,hasActiveSession,hasTasks,toActiveSession:activeSessionPayload,withPersistenceSuppressed}=ports.session;
     const {clampText,filenameSafeStudentName,getStudentName:getStudentNameFromDisplay,materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO}=ports.domain;
     const {document,refreshPnote,refreshReview,renderSchedule:renderSched}=ports.view;
-    const {libraryChanged,backupCompleted,reconcileAreaNotes,restoreAreaNotesSnapshot,restoreSessionState,verifyActiveSessionRuntime,requestDeviceBackupConvergence}=ports.events;
+    const {libraryChanged,backupCompleted,reconcileAreaNotes,restoreAreaNotesSnapshot,restoreSessionState,verifyActiveSessionRuntime,restoredFromFile}=ports.events;
     const {assertAuthority,clearFault,failClosed,runExclusive}=ports.operations;
     const {choose,configure,notify}=ports.interactions;
     const {AbortController,clearTimeout,requestAnimationFrame,setTimeout,yieldTask}=ports.environment;
@@ -1522,10 +1522,9 @@ async function importPortableBackup(ev){
     if(result&&result.cancelled){finishPortablePresentation({message:'Backup import cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,mode},traceId);return result;}
     if(result&&result.verified)setLocalExportStatus(result.changed?`✓ Backup ${mode==='replace'?'restored':mode==='missing'?'added what was missing':'combined'} locally and verified.`:'✓ Backup verified. Nothing was missing.');
     if(result&&result.verified&&!result.cancelled&&result.changed){
-      try{
-        const convergence=await requestDeviceBackupConvergence(freeze({source:'file',sourceLabel:'File backup'}));
-        if(convergence&&convergence.status==='pending')setLocalExportStatus(`✓ Backup ${mode==='replace'?'restored':'combined'} locally and verified. External Device Folder backup update is pending.`);
-      }catch(error){AppDiagnostics.capture('backup.file-reconciliation-convergence',error,'warn');}
+      // Locations that back up on their own pick up the restored data.
+      try{if(restoredFromFile()===true)setLocalExportStatus(`✓ Backup ${mode==='replace'?'restored':mode==='missing'?'added what was missing':'combined'} locally and verified. Automatic backups will include it shortly.`);}
+      catch(error){AppDiagnostics.capture('backup.file-reconciliation-convergence',error,'warn');}
     }
     finishPortablePresentation({outcome:'local-recovery-completed'});OperationDiagnostics.finish({cancelled:!!(result&&result.cancelled),mode,changed:!!(result&&result.changed)},traceId);return result;
   }catch(e){

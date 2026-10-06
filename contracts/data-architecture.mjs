@@ -222,7 +222,7 @@ export const DATA_ARCHITECTURE=freeze({
       backupProtection:surface('security-policy','exports','operational','while backup protection enabled','BackupProtection.v2'),
       attachmentIntegrityAudit:surface('derived-health','host','protect','replace on audit; opaque identity/error details only','AttachmentIntegrityAudit.v1',{rebuildFrom:'indexedDb.assets + opfs.attachments'}),
       automaticDeviceBackup:surface('backup-configuration','device-backup','operational','while connected','DeviceBackupSettings.v3'),
-      repositoryIntegrityScrub:surface('derived-health','backup','operational','transactional progress/completion bound to repository identity; opaque quarantined object ids only; device repository handle; no user-content details','RepositoryIntegrityScrub.v3',{rebuildFrom:'external backup repository manifests and objects'}),
+      repositoryIntegrityScrub:surface('derived-health','backup','operational','transactional progress/completion bound to repository identity; opaque quarantined object ids only; no user-content details','RepositoryIntegrityScrub.v3',{rebuildFrom:'external backup repository manifests and objects'}),
       managedProviderBackupPending:surface('operational','backup','operational','until the affected managed provider successfully publishes a later current backup or is explicitly disconnected','ManagedProviderBackupPending.v1'),
       repositoryMaintenancePending:surface('operational','backup','operational','until post-commit repository retention and safe orphan reclamation complete','RepositoryMaintenancePending.v2'),
       reconciliationBaseLegacy:surface('legacy-migration','host','protect','remove after verified ReconciliationBase.v2 migration','ReconciliationBase.v1'),

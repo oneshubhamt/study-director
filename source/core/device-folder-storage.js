@@ -173,7 +173,9 @@ registry.define('device-folder-storage',1,()=>{
     async function renewLock(kind,lease){
       await assertLock(kind,lease);const spec=LOCKS[kind],{objects}=await directories();
       await writeFile(objects,lease.name,new Blob([JSON.stringify({format:spec.format,version:1,id:lease.id,startedAt:iso(nowMs())})],{type:'application/json'}));
-      return lease;
+      // The renewed lease carries the new start, so the next renewal waits a full interval.
+      const written=await fileOrNull(objects,lease.name);if(!written)throw new Error('Device Folder lock disappeared. Retry the backup.');
+      return freeze({...lease,createdAt:iso(written.lastModified||nowMs())});
     }
     async function endLock(kind,lease){
       const spec=LOCKS[kind],name=String(lease&&lease.name||'');if(!spec.pattern.test(name))return false;

@@ -96,7 +96,7 @@ function createState({withActive=false}={}){
   };
 }
 
-function createHarness(state,{decisions={},noteResolver=null,deviceConvergence=null,hasLiveTasks=false,fileMode='combine',preflightFailure=''}={}){
+function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=null,hasLiveTasks=false,fileMode='combine',preflightFailure=''}={}){
   state.deletions??=[];state.noteDeletions??=[];state.attachmentDeletions??=[];
   let injectedFailure=String(preflightFailure||'');
   const prompts=[];const statuses=[];const events=[];const diagnosticMarks=[];const fn=()=>false;
@@ -129,7 +129,7 @@ function createHarness(state,{decisions={},noteResolver=null,deviceConvergence=n
       restoreAreaNotesSnapshot:async payload=>{state.notes=normalizeNotes(payload);events.push('notes-rollback');return state.notes;},
       restoreSessionState:async(value,scheduleText)=>(state.activeSession=value,state.schedule=String(scheduleText||''),events.push('session'),true),
       verifyActiveSessionRuntime:async expected=>(assert.deepEqual(state.activeSession,expected),true),
-      requestDeviceBackupConvergence:async context=>{events.push('device-convergence');return deviceConvergence?deviceConvergence(context,state):freeze({status:'skipped',reason:'not-connected'});}
+      restoredFromFile:()=>{events.push('restored-from-file');return restoredFromFile?restoredFromFile(state):false;}
     }),
     operations:freeze({assertAuthority:()=>{if(injectedFailure==='ownership')throw new Error('QA_FIXTURE ownership failure');return true;},clearFault:fn,failClosed:message=>{throw new Error(String(message));},runExclusive:async(kind,operation)=>operation()}),
     interactions:freeze({choose:async options=>options&&options.title==='Use this backup'?fileMode:null,configure:async config=>{prompts.push(config);const out={...decisions};for(const group of config.groups||[]){if(group.id.startsWith('savedDay__')){const remoteRecord=group.choices.find(choice=>String(choice.label||'').startsWith('Use '));const remoteDeletion=group.choices.find(choice=>String(choice.label||'').startsWith('Apply deletion'));if(decisions.dailyRecords==='replace'&&remoteRecord)out[group.id]=remoteRecord.value;else if(decisions.savedDayDeletions==='apply'&&remoteDeletion)out[group.id]=remoteDeletion.value;else out[group.id]=group.defaultValue;}else if(String(group.label||'').startsWith('Ongoing Note · ')){const remoteDeletion=group.choices.find(choice=>String(choice.label||'').startsWith('Apply deletion'));out[group.id]=(decisions.noteByKey?.[String(group.label).slice('Ongoing Note · '.length)]||decisions.noteDeletions)==='apply'&&remoteDeletion?remoteDeletion.value:group.defaultValue;}else if(group.id==='activeSession'){const incoming=group.choices.find(choice=>String(choice.label||'').startsWith('Use session'));out.activeSession=decisions.activeSession==='checkpoint'&&incoming?incoming.value:group.defaultValue;}}return freeze(out);},notify:fn}),
@@ -342,16 +342,16 @@ assert.equal(staleCalls,2,'A stale scratch decision must cause exactly one fresh
 assert.equal(staleState.notes.Shared.text,'External canonical edit while modal open.','The stale scratch result must never become canonical.');
 assert.ok(staleHarness.statuses.some(message=>/Rebuilding the comparison/u.test(message)),'The stale-plan retry should be visible on the standalone restore surface.');
 
-// Successful file-based reconciliation must explicitly converge connected Device Backup rather than waiting for the quiet schedule.
+// A file restore that changed data tells every automatic backup location at once.
 const fileState={records:new Map(),deletions:[],notes:{},activeSession:null,schedule:'',personal:personal('File Device'),journal:null};
 let fileConvergenceCalls=0;
-const fileHarness=createHarness(fileState,{deviceConvergence:async()=>{fileConvergenceCalls+=1;return freeze({status:'completed',checkpointId:'cp_file_converged'});}});
+const fileHarness=createHarness(fileState,{restoredFromFile:()=>{fileConvergenceCalls+=1;return true;}});
 const fileBlob=await makeCheckpoint({records:[record('2026-08-30','file reconciliation')],installationId:'inst_file_remote'});
 Object.defineProperty(fileBlob,'name',{value:'file-handoff.sdbackup',configurable:true});
 const fileInput={files:[fileBlob],value:'selected'};
 await fileHarness.runtime.controller.importLocal({target:fileInput});
 assert.equal(fileState.records.get('2026-08-30').reflection,'file reconciliation');
-assert.equal(fileConvergenceCalls,1,'Changed file reconciliation must request immediate connected Device Backup convergence exactly once.');
+assert.equal(fileConvergenceCalls,1,'A changed file restore must tell the automatic backup locations exactly once.');assert.ok(fileHarness.statuses.some(message=>/Automatic backups will include it shortly/u.test(message)));
 assert.equal(fileInput.value,'','File input should still be reset after convergence handling.');
 
 

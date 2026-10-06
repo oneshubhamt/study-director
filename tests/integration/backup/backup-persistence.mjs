@@ -211,7 +211,7 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
     },
     restoreAreaNotesSnapshot:async payload=>{events.push('rollback-area-notes');currentNotes=freeze(Object.fromEntries(Object.entries(payload||{}).map(([key,item])=>[key,normalizeAreaNote(item,key)]).filter(([,item])=>item)));return currentNotes;},
     restoreSessionState:async()=>{events.push('restore-session-state');return true;},
-    verifyActiveSessionRuntime:async()=>true,requestDeviceBackupConvergence:async()=>freeze({status:'skipped',reason:'not-connected'})
+    verifyActiveSessionRuntime:async()=>true,restoredFromFile:()=>false
   }),
   operations:freeze({assertAuthority:()=>true,clearFault:fn,failClosed:fn,runExclusive:async(kind,operation)=>operation()}),
   interactions:freeze({

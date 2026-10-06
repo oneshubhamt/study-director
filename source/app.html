@@ -1477,7 +1477,7 @@ const BackupCaptureModule=INTERNAL_MODULES.load('backup-capture',1,'study-direct
 const BackupModule=INTERNAL_MODULES.load('backup',1,'study-director.backup-module',1,Object.freeze({backupCapture:BackupCaptureModule,backupProvider:BackupProviderModule,canonical:CanonicalModule,managedRepository:ManagedRepositoryModule,repositoryBackground:RepositoryBackgroundModule}));
 const ManagedRecoveryModule=INTERNAL_MODULES.load('managed-recovery',1,'study-director.managed-recovery-module',1);
 const DeviceFolderStorageModule=INTERNAL_MODULES.load('device-folder-storage',1,'study-director.device-folder-storage-module',1);
-const DeviceBackupModule=INTERNAL_MODULES.load('device-backup',1,'study-director.device-backup-module',1,Object.freeze({repositoryPolicy:RepositoryPolicyModule}));
+const DeviceBackupModule=INTERNAL_MODULES.load('device-backup',1,'study-director.device-backup-module',1);
 const BackupRecoveryHostModule=INTERNAL_MODULES.load('backup-recovery-host',1,'study-director.backup-recovery-host-module',1);
 const PwaLifecycleModule=INTERNAL_MODULES.load('pwa-lifecycle',1,'study-director.pwa-lifecycle-module',1);
 const NativeCapabilitiesModule=INTERNAL_MODULES.load('native-capabilities',1,'study-director.native-capabilities-module',1);
@@ -1534,6 +1534,7 @@ const STORAGE_KEYS=Object.freeze(@@SD_LOCAL_STORAGE_KEYS@@);
 const SESSION_STORAGE_KEYS=Object.freeze(@@SD_SESSION_STORAGE_KEYS@@);
 const OBSOLETE_STORAGE_KEYS=Object.freeze(@@SD_OBSOLETE_LOCAL_STORAGE_KEYS@@);
 const APP_META_KEYS=Object.freeze(@@SD_APP_META_KEYS@@);
+const EXTERNAL_REPOSITORY_IDENTITIES=Object.freeze(@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@);
 const APP_META_REGISTRY=Object.freeze(Object.fromEntries(Object.entries(@@SD_APP_META_REGISTRY@@).map(([name,definition])=>[name,Object.freeze(definition)])));
 const OBSOLETE_APP_META_KEYS=Object.freeze(@@SD_OBSOLETE_APP_META_KEYS@@);
 const FACTORY_DEFAULTS = {
@@ -1924,7 +1925,7 @@ function renderNotificationSurfaces(state){
   }
 }
 NoticeCoordinator.subscribe(renderNotificationSurfaces);
-const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze({notifications:NoticeCoordinator,timeLabel:storageHealthTime,verified:source=>verifiedRecoveryState.providers[source]||null,action:(source,kind)=>Object.freeze({label:kind==='permission'?'Reconnect':'Show details',run:()=>showBackupPresentation(source,kind)})}));
+const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze({notifications:NoticeCoordinator,timeLabel:storageHealthTime,verified:source=>verifiedRecoveryState.providers[source]||null,action:(source,kind)=>Object.freeze({label:kind==='permission'?(source==='device-folder'?'Allow access':'Reconnect'):'Show details',run:()=>showBackupPresentation(source,kind)})}));
 const Interactions=InteractionsModule.createController(Object.freeze({ports:Object.freeze({
   environment:Object.freeze({
     clearTimeout:id=>clearTimeout(id),document,
@@ -2571,24 +2572,20 @@ const {
   updateBreakMeter, updateCD
 }=TimerEngine;
 function togglePause(){const result=togglePauseTimer();schedulePwaUpdateEvaluation(150);return result;}
-// Every automatic backup location hears about each change: the Device Folder
-// and any location this device already backs up to (Google Drive).
+// Every backup location that backs up on its own (the Device Folder, and
+// Google Drive once this device has backed up to it) hears about each change.
+// With no such location nothing happens.
 function notifyBackupChange(change){
-  const value=Object.freeze({urgent:change?.urgent===true,reason:String(change?.reason||'change')});
-  let noted=false;
-  try{noted=DeviceBackup?.notifyChange(value)===true;}catch(error){AppDiagnostics.capture('backup.change-device',error,'warn');}
-  try{BackupProviderRuntime?.noteChange(value);}catch(error){AppDiagnostics.capture('backup.change-provider',error,'warn');}
-  return noted;
+  try{BackupProviderRuntime?.noteChange(Object.freeze({urgent:change?.urgent===true,reason:String(change?.reason||'change')}));return true;}
+  catch(error){AppDiagnostics.capture('backup.change-provider',error,'warn');return false;}
 }
 // Changes still waiting for an automatic backup go out at once when the app
 // goes to the background (a phone may close it there) and before an update.
 function flushAutomaticBackups(reason){
-  const runs=[];
-  try{runs.push(DeviceBackup?.flushPending(reason));}catch(error){AppDiagnostics.capture('backup.flush-device',error,'warn');}
-  try{runs.push(BackupProviderRuntime.flushAutomatic(reason));}catch(error){AppDiagnostics.capture('backup.flush-provider',error,'warn');}
-  return Promise.allSettled(runs.filter(Boolean));
+  try{return Promise.allSettled([BackupProviderRuntime.flushAutomatic(reason)]);}
+  catch(error){AppDiagnostics.capture('backup.flush-provider',error,'warn');return Promise.resolve([]);}
 }
-function automaticBackupsWaiting(){const device=DeviceBackup?.status();return device?.connected===true&&device.pending===true||BackupProviderRuntime.automaticWaiting();}
+function automaticBackupsWaiting(){try{return BackupProviderRuntime.automaticWaiting();}catch{return false;}}
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&appCanMutate())void flushAutomaticBackups('app-hidden');});
 // An update waits up to a minute for waiting automatic backups to finish. A
 // backup that is still running after that keeps the update postponed until it
@@ -3687,7 +3684,7 @@ async function maybePromptBackupNudge(force=false){
   // old that backup is: automatic backups only run when something changed.
   const covered=Math.max(-Infinity,...verifiedRecoveryEntries().map(entry=>Date.parse(entry.sourceRevision)).filter(Number.isFinite));
   const changed=Date.parse(health.lastLocalSaveAt||''),unbacked=!Number.isFinite(covered)||!Number.isFinite(changed)||changed>covered;
-  const automatic=DeviceBackup?.status().connected===true||BackupProviderRuntime.automaticActive();
+  const automatic=BackupProviderRuntime.automaticActive();
   let due=!automatic&&unbacked&&Number.isFinite(last)&&(now-last>=BACKUP_NUDGE_MS);
   if(!Number.isFinite(last)&&!automatic){
     try{
@@ -4857,8 +4854,7 @@ function installBackgroundOwners(){
     ['attachments',Object.freeze({wake:trigger=>{scheduleDailyAttachmentMaintenance();RichTextAssetMaintenance.wake(trigger);}})],
     ['attachment-integrity',Object.freeze({wake:trigger=>AttachmentIntegrityJob.wake(trigger,true)})],
     ['temporary-files',BackupFiles],
-    ['device-folder',DeviceRepositoryBackground],
-    ['drive',Object.freeze({wake:BackupProviderRuntime.wakeBackground})]
+    ['backup-locations',Object.freeze({wake:BackupProviderRuntime.wakeBackground})]
   ])BackgroundOperations.register(id,owner);
   backgroundOwnersInstalled=true;
 }
@@ -4871,7 +4867,7 @@ function backgroundMaintenanceStatusBusy(owner,field='busy'){
   catch(error){try{AppDiagnostics.capture('maintenance.foreground-status',error);}catch{}return true;}
 }
 function backgroundMaintenanceForegroundBusy(){
-  return !!pwaUpdateReservation||backgroundMaintenanceStatusBusy(AppMutationCoordinator,'active')||backgroundMaintenanceStatusBusy(AttachmentIngest)||backgroundMaintenanceStatusBusy(Exports)||backgroundMaintenanceStatusBusy(BackupController)||backgroundMaintenanceStatusBusy(BackupProviderRuntime)||backgroundMaintenanceStatusBusy(DeviceBackup);
+  return !!pwaUpdateReservation||backgroundMaintenanceStatusBusy(AppMutationCoordinator,'active')||backgroundMaintenanceStatusBusy(AttachmentIngest)||backgroundMaintenanceStatusBusy(Exports)||backgroundMaintenanceStatusBusy(BackupController)||backgroundMaintenanceStatusBusy(BackupProviderRuntime);
 }
 const DataMaintenanceJob=OperationLifecycle.createJob({
   environment:{now:()=>Date.now(),setTimeout,clearTimeout},
@@ -7816,7 +7812,7 @@ async function requestRepositoryIntegrityRecheck(target){
     if(target==='device'&&!DeviceBackup.status().connected)throw new Error('Connect your Device Folder before requesting verification.');
     const bound=await readRepositoryIntegrityTarget(target);
     await mutateRepositoryIntegrityTarget(target,current=>{if(current.repositoryScope!==bound.repositoryScope)throw repositoryIntegrityChanged();return {...current,requestId:crypto.randomUUID(),recheck:true,recheckCursor:'',cursor:'',scanId:'',partial:null,cycleStartedAt:new Date().toISOString()};});
-    if(target==='device')DeviceRepositoryIntegrity.schedule(1000,'user-recheck');else BackupProviderRuntime.requestIntegrity('google-drive');
+    BackupProviderRuntime.requestIntegrity(target==='device'?'device-folder':'google-drive');
     setStatus('Backup recheck requested. Quarantined objects remain hidden until they pass full verification.');return true;
   }catch(error){setStatus(String(error?.message||error),false);AppDiagnostics.capture('backup.integrity-recheck',error,'warn');return false;}
 }
@@ -7914,16 +7910,15 @@ function normalizeRepositoryIntegrityTarget(value){
   const cursor=/^obj_[a-f0-9]{32}$/u.test(String(value?.cursor||''))?String(value.cursor):'';
   const seen=new Set(),quarantinedObjectIds=[];for(const raw of Array.isArray(value?.quarantinedObjectIds)?value.quarantinedObjectIds:[]){const id=String(raw||'');if(!/^obj_[a-f0-9]{32}$/u.test(id)||seen.has(id))continue;seen.add(id);quarantinedObjectIds.push(id);}
   const repositoryScope=typeof value?.repositoryScope==='string'&&value.repositoryScope.length<=320?value.repositoryScope:'';
-  const repositoryHandle=value?.repositoryHandle&&typeof value.repositoryHandle.getDirectoryHandle==='function'?value.repositoryHandle:null;
   const scanId=/^[a-f0-9]{64}$/u.test(String(value?.scanId||''))?String(value.scanId):'';
   const partial=IntegrityContinuationModule.normalize(value?.partial),recheck=value?.recheck===true,requestId=/^[a-f0-9-]{36}$/u.test(value?.requestId||'')?value.requestId:'';
   const recheckCursor=recheck&&/^obj_[a-f0-9]{32}$/u.test(String(value?.recheckCursor||''))?String(value.recheckCursor):'';
   const lastOutcome=['completed','yielded','failed','unavailable','skipped'].includes(value?.lastOutcome)?value.lastOutcome:'',blockedReason=['locked','budget','preempted','unavailable','permission','corrupt'].includes(value?.blockedReason)?value.blockedReason:'';
   const history=Object.freeze((Array.isArray(value?.history)?value.history:[]).slice(-8).filter(row=>row&&Number.isFinite(Date.parse(row.at))&&['completed','yielded','failed','unavailable','skipped'].includes(row.outcome)).map(row=>Object.freeze({at:new Date(row.at).toISOString(),outcome:row.outcome,complete:row.complete===true})));
-  return Object.freeze({repositoryScope,repositoryHandle,scanId,partial,recheck,recheckCursor,requestId,blockedReason,completedAt:iso('completedAt'),cycleStartedAt:iso('cycleStartedAt'),cursor,failedAt:iso('failedAt'),attemptedAt:iso('attemptedAt'),lastOutcome,history,quarantinedObjectIds:Object.freeze(quarantinedObjectIds)});
+  return Object.freeze({repositoryScope,scanId,partial,recheck,recheckCursor,requestId,blockedReason,completedAt:iso('completedAt'),cycleStartedAt:iso('cycleStartedAt'),cursor,failedAt:iso('failedAt'),attemptedAt:iso('attemptedAt'),lastOutcome,history,quarantinedObjectIds:Object.freeze(quarantinedObjectIds)});
 }
 function normalizeRepositoryIntegrityState(value){
-  return Object.freeze({version:5,device:normalizeRepositoryIntegrityTarget(value?.device),drive:normalizeRepositoryIntegrityTarget(value?.drive)});
+  return Object.freeze({version:6,device:normalizeRepositoryIntegrityTarget(value?.device),drive:normalizeRepositoryIntegrityTarget(value?.drive)});
 }
 
 async function libraryClearSnapshot(){
@@ -7941,11 +7936,14 @@ const LibraryClearCoordinator=LibraryClearModule.createCoordinator(Object.freeze
   diagnostics:Object.freeze({start:BackupOperationDiagnostics.start,mark:BackupOperationDiagnostics.mark,finish:BackupOperationDiagnostics.finish,fail:BackupOperationDiagnostics.fail}),
   runExclusive:(kind,operation)=>AppMutationCoordinator.runExclusive(kind,()=>withRestoreSessionPersistenceSuppressed(operation)),
   canMutate:()=>AppOwnership.canMutate(),assertAuthority:options=>AppMutationCoordinator.assertAuthority(options),assertEligible:assertLibraryClearEligible,settle:settleAttachmentWriters,snapshot:libraryClearSnapshot,
+  // The connected backup location keeps a protected copy first: the Device
+  // Folder, otherwise Google Drive while signed in. With neither, Clear
+  // Library relies on its own local safeguards.
   createProtectedSafety:async purpose=>{
-    const status=DeviceBackup.status();
-    if(!status.connected)return Object.freeze({verified:false,skipped:true,reason:'device-backup-not-connected'});
-    const safety=await DeviceBackup.createProtectedSafety(purpose);
-    if(!safety||safety.verified!==true)throw new Error('Clear Library stopped because the protected Device Folder safety backup could not be verified. Your Library data was not changed.');
+    const location=BackupProviderRuntime.list({hosted:true}).find(item=>item.id==='device-folder'&&item.connected)||BackupProviderRuntime.list({hosted:true}).find(item=>item.connected);
+    if(!location)return Object.freeze({verified:false,skipped:true,reason:'no-backup-location'});
+    const safety=await BackupProviderRuntime.createProtectedSafety(location.id,purpose);
+    if(!safety||safety.verified!==true)throw new Error(`Clear Library stopped because the protected ${location.label} safety backup could not be verified. Your Library data was not changed.`);
     return safety;
   },capture:LibraryClearState.capture,
   deleteOngoingNotes:()=>AppData.notes.clearAll(),deleteSavedDays:()=>AppData.dailyRecords.clearAll(),removeReferences:LibraryClearState.rewriteReferences,verifyLogical:LibraryClearState.verifyLogical,
@@ -8415,7 +8413,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     restoreAreaNotesSnapshot:restoreAreaNotesSnapshotThroughLifecycle,
     restoreSessionState:restoreSessionStateThroughLifecycle,
     verifyActiveSessionRuntime:verifyRestoredSessionRuntime,
-    requestDeviceBackupConvergence:context=>{if(!BackupRecoveryHost)throw new Error('Backup recovery host is not ready.');return BackupRecoveryHost.requestDeviceConvergence(context);},
+    restoredFromFile:()=>{notifyBackupChange({urgent:true,reason:'file-restore'});return BackupProviderRuntime.automaticActive();},
     backupCompleted:context=>{
       if(context?.userExport)settleStorageReset();
       markStorageHealthOk('backup','lastBackupAt');
@@ -8528,7 +8526,7 @@ async function offerDeviceRecoveryIfLocalEmpty(options={}){
   }
   deviceRecoveryOfferRunning=true;
   try{
-    const history=await DeviceBackup.history({interactive:false});
+    const history=await BackupProviderRuntime.history('device-folder',{interactive:false});
     const candidate=history.available?(history.entries||[]).find(entry=>entry?.location?.tier==='latest'&&Date.parse(String(entry.exportedAt||entry.location?.exportedAt||''))<=latestBefore):null;
     if(!candidate)return false;
     const accepted=await Interactions.confirm({
@@ -8539,9 +8537,8 @@ async function offerDeviceRecoveryIfLocalEmpty(options={}){
     });
     deviceRecoveryOfferDismissed=true;
     if(!accepted)return false;
-    const restored=await DeviceBackup.restoreVersion({checkpointId:candidate.location.checkpointId,confirmed:true});
-    if(restored?.ok===true)return true;
-    return false;
+    try{const restored=await BackupProviderRuntime.restoreRepositoryProviderVersion('device-folder',{checkpointId:candidate.location.checkpointId,confirmed:true});return !!restored&&restored.cancelled!==true;}
+    catch(error){AppDiagnostics.capture('backup.device-recovery-offer',error,'warn');return false;}
   }finally{deviceRecoveryOfferRunning=false;}
 }
 async function connectDeviceBackupWithRecovery(){
@@ -8586,9 +8583,8 @@ function showStorageResetDecision({unsaved=[],retrying=false}={}){
 // running automatic backup wind down.
 function beginStorageResetHold(clearedAt){
   if(storageResetHold)return storageResetHold;
-  const hold={provider:null,device:null,deviceReady:null,reloaded:false,clearedAt:String(clearedAt||new Date().toISOString())};storageResetHold=hold;storageResetSince=Date.now();
+  const hold={provider:null,reloaded:false,clearedAt:String(clearedAt||new Date().toISOString())};storageResetHold=hold;storageResetSince=Date.now();
   try{hold.provider=BackupProviderRuntime.suspendBackground('storage-reset');}catch(error){AppDiagnostics.capture('storage-reset.provider-suspend',error,'warn');}
-  hold.deviceReady=DeviceBackup.suspendAutomatic('storage-reset').then(token=>{if(storageResetHold===hold)hold.device=token;else DeviceBackup.resumeAutomatic(token);},error=>AppDiagnostics.capture('storage-reset.device-suspend',error,'warn'));
   if(readStorageHealth().browserDataClearedAt!==hold.clearedAt)writeStorageHealth({browserDataClearedAt:hold.clearedAt});
   return hold;
 }
@@ -8636,12 +8632,10 @@ async function handleBrowserStorageReset(event={}){
 // back to the notice.
 async function restoreMissingAfterStorageReset(hold){
   if(!appCanMutate())return false;
-  const device=DeviceBackup.status().connected,drive=!device&&BackupProviderRuntime.connected('google-drive');if(!device&&!drive)return false;
+  const locations=BackupProviderRuntime.list({hosted:true}),location=locations.find(item=>item.id==='device-folder'&&item.connected)||locations.find(item=>item.connected);if(!location)return false;
   const options={missingOnly:true,quiet:true,before:hold.clearedAt};let outcome=null;
-  try{
-    if(device){const restored=await DeviceBackup.bringIn(options);if(restored&&restored.ok)outcome={exportedAt:restored.exportedAt,result:restored.result,label:'Device Folder'};}
-    else{const restored=await BackupProviderRuntime.bringInRepositoryProvider('google-drive',options);if(restored&&restored.cancelled===false&&restored.verified)outcome={exportedAt:restored.exportedAt,result:restored,label:'Google Drive'};}
-  }catch(error){AppDiagnostics.capture('storage-reset.missing-restore',error,'warn');}
+  try{const restored=await BackupProviderRuntime.bringInRepositoryProvider(location.id,options);if(restored&&restored.cancelled===false&&restored.verified)outcome={exportedAt:restored.exportedAt,result:restored,label:location.label};}
+  catch(error){AppDiagnostics.capture('storage-reset.missing-restore',error,'warn');}
   if(!outcome)return false;
   settleStorageReset();
   const at=Date.parse(String(outcome.exportedAt||'')),days=Math.max(0,Number(outcome.result?.added)||0),files=Math.max(0,Number(outcome.result?.assetsRestored)||0);
@@ -8665,7 +8659,6 @@ function settleStorageReset(){
   if(readStorageHealth().browserDataClearedAt)writeStorageHealth({browserDataClearedAt:null});
   if(!hold)return false;
   try{hold.provider?.release();}catch(error){AppDiagnostics.capture('storage-reset.provider-resume',error,'warn');}
-  if(hold.device)DeviceBackup.resumeAutomatic(hold.device);
   void Promise.resolve(AppMutationCoordinator.settled()).then(()=>DeviceBackup.rememberAfterStorageReset()).catch(error=>AppDiagnostics.capture('storage-reset.remember-folder',error,'warn'));
   return true;
 }
@@ -8679,30 +8672,16 @@ async function restoreAfterStorageReset(){
   if(hasBlockingActiveSession()){await suspendTodaySession();if(hasBlockingActiveSession())return false;}
   return openBackupRestore();
 }
-const DeviceRepositoryBackground=RepositoryBackgroundModule.createCoordinator(Object.freeze({target:'device-folder',environment:Object.freeze({AbortController:window.AbortController,clearTimeout:timer=>clearTimeout(timer),now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay)})}));
+// The Device Folder is one backup location of the engine; this controller
+// keeps only the chosen folder, its permission and its status row.
 DeviceBackup=DeviceBackupModule.createController(Object.freeze({
-  presentation:BackupPresentation,
-  background:DeviceRepositoryBackground,
-  configuration:Object.freeze({
-    metadataKey:APP_META_KEYS.automaticDeviceBackup,
-    quietDelayMs:RepositoryPolicyModule.protocol.automaticQuietMs,
-    maxDelayMs:RepositoryPolicyModule.protocol.automaticQuietMs,
-    urgentDelayMs:RepositoryPolicyModule.protocol.automaticUrgentMs
-  }),
+  configuration:Object.freeze({metadataKey:APP_META_KEYS.automaticDeviceBackup,pickerId:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderPickerId,settingsTimeoutMs:10*1000}),
+  engine:Object.freeze({backup:id=>BackupProviderRuntime.backup(id),cancelForeground:(reason,id)=>BackupProviderRuntime.cancelForeground(reason,id),disconnect:id=>BackupProviderRuntime.disconnect(id),forget:id=>BackupProviderRuntime.forget(id),locationStatus:id=>BackupProviderRuntime.locationStatus(id),register:config=>BackupProviderRuntime.register(config),subscribeStatus:listener=>BackupProviderRuntime.subscribeStatus(listener)}),
   environment:Object.freeze({
-    clearTimeout:timer=>clearTimeout(timer),
-    now:()=>Date.now(),
-    setTimeout:(callback,delay)=>setTimeout(callback,delay),
-    yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'}),
-    showDirectoryPicker:typeof window.showDirectoryPicker==='function'
-      ? options=>window.showDirectoryPicker(options)
-      : null
+    canMutate:()=>appCanMutate(),clearTimeout:timer=>clearTimeout(timer),setTimeout:(callback,delay)=>setTimeout(callback,delay),
+    showDirectoryPicker:typeof window.showDirectoryPicker==='function'?options=>window.showDirectoryPicker(options):null
   }),
-  storage:exactAppMetaStorage(DeviceBackupAppMeta,'automaticDeviceBackup',APP_META_KEYS.automaticDeviceBackup,'Device Backup'),
-  repository:RepositoryCheckpointPipeline,
-  ownership:Object.freeze({canMutate:()=>appCanMutate()}),
   hooks:Object.freeze({
-    backgroundAvailable:backupBackgroundAvailability,
     capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
     chooseCheckpoint:async (rows,{mode='restore-version'}={})=>Interactions.choose({
       title:mode==='bring-in'?'Combine from Device Folder backup':'Restore Device Folder version',
@@ -8710,14 +8689,20 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
       cancelLabel:'Cancel',
       choices:rows.map((row,index)=>({value:row.id,label:`${index===0?'Latest · ':''}${new Date(row.exportedAt).toLocaleString()}`,description:`${Number(row.counts?.dailyRecord)||0} Saved Dates / Reflections · ${Number(row.counts?.areaNote)||0} Ongoing Notes${row.encrypted?' · Encrypted':''}`,kind:index===0?'primary':''}))
     }),
-    excludedObjectIds:async()=>((await readRepositoryIntegrityTarget('device')).quarantinedObjectIds),
-    localRecoveryEmpty:()=>canonicalLocalRecoveryEmpty(),
-    managedRecovery:spec=>{if(!BackupRecoveryHost)throw new Error('Managed recovery coordination is not ready.');return BackupRecoveryHost.managedRecovery(spec);},
-    maintenanceRead:()=>repositoryMaintenanceState('device-folder'),maintenanceMark:(state,expected)=>markRepositoryMaintenancePending('device-folder',state,expected),maintenanceClear:expected=>clearRepositoryMaintenancePending('device-folder',expected),
-    operationStart:(kind,source,details)=>BackupOperationDiagnostics.start(kind,source,details),operationMark:(phase,details,id)=>BackupOperationDiagnostics.mark(phase,details,id),operationFinish:(details,id)=>BackupOperationDiagnostics.finish(details,id),operationFail:(error,details,id)=>BackupOperationDiagnostics.fail(error,details,id),
     render:renderDeviceBackup,
-    sourceRevision:()=>currentBackupSourceRevision()
-  })
+    sourceRevision:()=>currentBackupSourceRevision(),
+    verifiedAt:()=>verifiedRecoveryState.providers['device-folder']?.verifiedAt||''
+  }),
+  presentation:BackupPresentation,
+  settings:exactAppMetaStorage(DeviceBackupAppMeta,'automaticDeviceBackup',APP_META_KEYS.automaticDeviceBackup,'Device Backup'),
+  transport:folder=>DeviceFolderStorageModule.createStorage(Object.freeze({
+    folder,
+    identities:Object.freeze({root:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderRoot,objects:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects,checkpoints:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints,commits:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits}),
+    checksum:(blob,{signal}={})=>Exports.run('checksum',{value:blob},{signal}),
+    inspectManifest:(file,options)=>RepositoryCheckpointPipeline.inspectManifest(file,options),
+    environment:Object.freeze({canMutate:()=>appCanMutate(),now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'})}),
+    limits:Object.freeze({publicationMaxAgeMs:RepositoryPolicyModule.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:RepositoryPolicyModule.protocol.publicationAssertionMarginMs,maintenanceMaxAgeMs:RepositoryPolicyModule.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:RepositoryPolicyModule.protocol.maintenanceAssertionMarginMs,readTimeoutMs:10*1000})
+  }))
 }));
 if(!Object.isFrozen(DeviceBackup)||DeviceBackup.format!=='study-director.device-backup'||DeviceBackup.contractVersion!==1){
   throw new Error('Study Director automatic device backup is unavailable or incompatible.');
@@ -8725,11 +8710,6 @@ if(!Object.isFrozen(DeviceBackup)||DeviceBackup.format!=='study-director.device-
 BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze({
   presentation:BackupPresentation,
   cancellation:Object.freeze({cancelImport:(reason,options)=>BackupController.cancelImport(reason,options)}),
-  device:Object.freeze({
-    backupNow:reason=>DeviceBackup.backupNow(reason),bringIn:options=>DeviceBackup.bringIn(options),cancelForeground:reason=>DeviceBackup.cancelForeground(reason),history:options=>DeviceBackup.history(options),notifyChange:change=>DeviceBackup.notifyChange(change),
-    removeSafetyBackup:options=>DeviceBackup.removeSafetyBackup(options),restoreVersion:options=>DeviceBackup.restoreVersion(options),resumeAutomatic:token=>DeviceBackup.resumeAutomatic(token),
-    status:()=>DeviceBackup.status(),suspendAutomatic:reason=>DeviceBackup.suspendAutomatic(reason)
-  }),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),mark:(phase,details)=>BackupOperationDiagnostics.mark(phase,details)}),
   document,
   interactions:Object.freeze({choose:options=>Interactions.choose(options)}),
@@ -8743,9 +8723,9 @@ BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze({
   managedRecovery:Object.freeze({createCoordinator:input=>ManagedRecoveryModule.createCoordinator(input)}),
   mutation:Object.freeze({run:(kind,operation)=>AppMutationCoordinator.runExclusive(kind,operation)}),
   providers:Object.freeze({
-    bringInRepositoryProvider:(id,options)=>BackupProviderRuntime.bringInRepositoryProvider(id,options),cancelForeground:(reason,id)=>BackupProviderRuntime.cancelForeground(reason,id),configureConvergencePropagation:config=>BackupProviderRuntime.configureConvergencePropagation(config),
+    bringInRepositoryProvider:(id,options)=>BackupProviderRuntime.bringInRepositoryProvider(id,options),cancelForeground:(reason,id)=>BackupProviderRuntime.cancelForeground(reason,id),
     configureManagedRecovery:config=>BackupProviderRuntime.configureManagedRecovery(config),configurePendingBackupRetry:config=>BackupProviderRuntime.configurePendingBackupRetry(config),
-    history:(id,options)=>BackupProviderRuntime.history(id,options),list:()=>BackupProviderRuntime.list(),removeProtectedRepositoryProvider:(id,checkpointId)=>BackupProviderRuntime.removeProtectedRepositoryProvider(id,checkpointId),
+    history:(id,options)=>BackupProviderRuntime.history(id,options),list:()=>BackupProviderRuntime.list({hosted:true}),removeProtectedRepositoryProvider:(id,checkpointId)=>BackupProviderRuntime.removeProtectedRepositoryProvider(id,checkpointId),
     restoreRepositoryProviderVersion:(id,options)=>BackupProviderRuntime.restoreRepositoryProviderVersion(id,options),suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason)
   }),
   session:Object.freeze({hasBlocking:()=>hasBlockingActiveSession()}),
@@ -8800,15 +8780,15 @@ function mutateRepositoryIntegrityTarget(target,change){
 }
 function repositoryIntegrityChanged(){const error=new Error('The backup repository changed during integrity verification.');error.code='REPOSITORY_CHANGED';return error;}
 async function readRepositoryIntegrityTarget(target){
-  const actual=target==='device'?await DeviceBackup.repositoryHandle():await BackupProviderRuntime.repositoryScope('google-drive');
+  const actual=await BackupProviderRuntime.repositoryScope(target==='device'?'device-folder':'google-drive');
   if(!actual)throw new Error('The backup repository identity is unavailable.');
   const prior=(await readRepositoryIntegrityState())[target];
-  const same=target==='device'?!!prior.repositoryHandle&&(typeof actual.isSameEntry==='function'?await actual.isSameEntry(prior.repositoryHandle):actual===prior.repositoryHandle):prior.repositoryScope===actual;
+  const same=prior.repositoryScope===actual;
   if(same&&prior.repositoryScope){repositoryIntegrityBoundScopes[target]=prior.repositoryScope;renderIntegrityStatuses();return prior;}
-  const repositoryScope=target==='device'?'device:'+crypto.randomUUID():String(actual);
+  const repositoryScope=String(actual);
   const bound=await mutateRepositoryIntegrityTarget(target,current=>{
     if(current.repositoryScope!==prior.repositoryScope)throw repositoryIntegrityChanged();
-    return {...normalizeRepositoryIntegrityTarget(null),repositoryScope,repositoryHandle:target==='device'?actual:null};
+    return {...normalizeRepositoryIntegrityTarget(null),repositoryScope};
   });
   repositoryIntegrityBoundScopes[target]=bound.repositoryScope;renderIntegrityStatuses();return bound;
 }
@@ -8830,21 +8810,7 @@ async function updateRepositoryIntegrityTarget(target,result){
     return current;
   });
 }
-function repositoryIntegrityUnsafe(){
-  return !appCanMutate()||!!AppMutationCoordinator?.status?.()?.active||!!AttachmentIngest?.status?.()?.busy||!!BackupController?.status?.()?.busy||!!BackupProviderRuntime?.status?.()?.busy||!!DeviceBackup?.status?.()?.busy||!!Exports?.status?.()?.busy;
-}
 const RepositoryIntegrityContinuation=IntegrityContinuationModule.create({files:BackupFiles,processing:Exports,protection:BackupProtection,yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'})});
-const DeviceRepositoryIntegrity=DeviceRepositoryBackground.createIntegrityScheduler(Object.freeze({
-  budgetMs:DeviceRepositoryBackground.integrity.workBudgetMs,budgetCode:'DEVICE_INTEGRITY_BUDGET',budgetMessage:'Device Folder integrity verification reached its work limit and will continue later.',
-  preemptCode:'DEVICE_INTEGRITY_PREEMPTED',preemptMessage:'Device Folder integrity verification yielded to a higher-priority action.',
-  capture:error=>AppDiagnostics.capture('backup.repository-integrity-device',error,'warn'),
-  execute:async({target,trigger,nextEligibleAt,signal,checkpoint})=>Object.freeze({repositoryScope:target.repositoryScope,requestId:target.requestId,...await DeviceBackup.scrub(Object.freeze({repositoryScope:target.repositoryScope,repositoryHandle:target.repositoryHandle,scanId:target.scanId,cursor:target.cursor,recheckCursor:target.recheckCursor,partial:target.partial,recheck:target.recheck,verifyIncremental:RepositoryIntegrityContinuation.verify,maxObjects:REPOSITORY_INTEGRITY_BATCH_OBJECTS,maxBytes:REPOSITORY_INTEGRITY_BATCH_BYTES,skipObjectIds:target.quarantinedObjectIds,trigger:String(trigger||'scheduled-integrity'),nextEligibleAt,signal,backgroundOwned:true,onProgress:async progress=>{await updateRepositoryIntegrityTarget('device',{...progress,status:'yielded',checkpointOnly:true,repositoryScope:target.repositoryScope,requestId:target.requestId});checkpoint(progress);}}))}),
-  isAvailable:()=>DeviceBackup.status().connected?backupBackgroundAvailability():'awaiting-connection',
-  isUnsafe:()=>repositoryIntegrityUnsafe(),
-  readTarget:async()=>DeviceBackup.status().connected?readRepositoryIntegrityTarget('device'):normalizeRepositoryIntegrityTarget(null),
-  writeResult:result=>updateRepositoryIntegrityTarget('device',result),
-  yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'})
-}));
 async function refreshDeviceBackgroundPermission(event){
   if(![APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER,APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTIVATION_KINDS.VISIBILITY_RETURN].includes(event?.kind))return;
   // The controller reconnects its whole job owner after permission changes.
@@ -8852,21 +8818,26 @@ async function refreshDeviceBackgroundPermission(event){
 }
 AppActivation.subscribe(event=>{if([APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTIVATION_KINDS.VISIBILITY_RETURN,APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER,APP_ACTIVATION_KINDS.DATE_ROLLOVER].includes(event.kind))wakeBackgroundOperations('activation');void refreshDeviceBackgroundPermission(event).catch(error=>AppDiagnostics.capture('device-backup.permission-refresh',error,'warn'));});
 // A location backs up on its own once this device has backed up to it.
-BackupProviderRuntime.configureAutomaticBackup(Object.freeze({covered:id=>verifiedRecoveryState.providers[id]?.sourceRevision||'',current:()=>currentBackupSourceRevision()}));
+// A location backs up on its own once this device has backed up to it (the
+// Device Folder from when it was chosen). A change found on start is backed up
+// only while local data is present.
+BackupProviderRuntime.configureAutomaticBackup(Object.freeze({covered:id=>verifiedRecoveryState.providers[id]?.sourceRevision||'',current:()=>currentBackupSourceRevision(),ready:async()=>await canonicalLocalRecoveryEmpty()===false}));
+// Each location's integrity state is kept under its own target.
+const INTEGRITY_TARGETS=Object.freeze({'device-folder':'device','google-drive':'drive'});
 BackupProviderRuntime.configureIntegrityScrub(Object.freeze({
-  readTarget:async id=>id==='google-drive'?await readRepositoryIntegrityTarget('drive'):normalizeRepositoryIntegrityTarget(null),
-  writeResult:async(id,result)=>{if(id==='google-drive')await updateRepositoryIntegrityTarget('drive',result);},
-  prepare:async(id,target,{trigger,nextEligibleAt})=>id==='google-drive'?Object.freeze({repositoryScope:target.repositoryScope,requestId:target.requestId,scanId:target.scanId,cursor:target.cursor,recheckCursor:target.recheckCursor,partial:target.partial,recheck:target.recheck,verifyIncremental:RepositoryIntegrityContinuation.verify,maxObjects:REPOSITORY_INTEGRITY_BATCH_OBJECTS,maxBytes:REPOSITORY_INTEGRITY_BATCH_BYTES,skipObjectIds:target.quarantinedObjectIds,trigger:String(trigger||'authorized-drive-opportunity'),nextEligibleAt:String(nextEligibleAt||''),onProgress:progress=>updateRepositoryIntegrityTarget('drive',{...progress,status:'yielded',checkpointOnly:true,repositoryScope:target.repositoryScope,requestId:target.requestId})}):null,
-  isAvailable:id=>id!=='google-drive'?'unavailable':appCanMutate()?true:'awaiting-control',
-  isUnsafe:id=>id!=='google-drive'||!!AppMutationCoordinator?.status?.()?.active||!!AttachmentIngest?.status?.()?.busy,
+  readTarget:async id=>INTEGRITY_TARGETS[id]?await readRepositoryIntegrityTarget(INTEGRITY_TARGETS[id]):normalizeRepositoryIntegrityTarget(null),
+  writeResult:async(id,result)=>{if(INTEGRITY_TARGETS[id])await updateRepositoryIntegrityTarget(INTEGRITY_TARGETS[id],result);},
+  prepare:async(id,target,{trigger,nextEligibleAt})=>INTEGRITY_TARGETS[id]?Object.freeze({repositoryScope:target.repositoryScope,requestId:target.requestId,scanId:target.scanId,cursor:target.cursor,recheckCursor:target.recheckCursor,partial:target.partial,recheck:target.recheck,verifyIncremental:RepositoryIntegrityContinuation.verify,maxObjects:REPOSITORY_INTEGRITY_BATCH_OBJECTS,maxBytes:REPOSITORY_INTEGRITY_BATCH_BYTES,skipObjectIds:target.quarantinedObjectIds,trigger:String(trigger||'scheduled-integrity'),nextEligibleAt:String(nextEligibleAt||''),onProgress:progress=>updateRepositoryIntegrityTarget(INTEGRITY_TARGETS[id],{...progress,status:'yielded',checkpointOnly:true,repositoryScope:target.repositoryScope,requestId:target.requestId})}):null,
+  isAvailable:id=>!INTEGRITY_TARGETS[id]?'unavailable':appCanMutate()?true:'awaiting-control',
+  isUnsafe:id=>!INTEGRITY_TARGETS[id]||!!AppMutationCoordinator?.status?.()?.active||!!AttachmentIngest?.status?.()?.busy,
   yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'}),
-  quarantine:async id=>id==='google-drive'?(await readRepositoryIntegrityTarget('drive')).quarantinedObjectIds:Object.freeze([])
+  quarantine:async id=>INTEGRITY_TARGETS[id]?(await readRepositoryIntegrityTarget(INTEGRITY_TARGETS[id])).quarantinedObjectIds:Object.freeze([])
 }));
 async function installRepositoryIntegrityScrub(){
   let state=null;
   try{state=applyRepositoryIntegrityHealth(await readRepositoryIntegrityState());}
   catch(error){AppDiagnostics.capture('backup.repository-integrity-state-read',error,'warn');markStorageHealthError('repositoryIntegrity','Backup verification state is unavailable. Study Director will retry.',{level:'warn'});}
-  await DeviceRepositoryIntegrity.install();return state;
+  return state;
 }
 /* PWA SHELL AND SAFE UPDATE COORDINATION */
 const PWA_UPDATE_READY_DELAY_MS=650;
@@ -8910,7 +8881,7 @@ function pwaUpdateBlockReason(options={}){
   const review=ReviewSaveService.status();
   if(review.rolloverSaveInProgress||review.saveDayInProgress||review.activeSessionPersistenceBlocked)return 'A Review save is still finishing. Wait for it to complete.';
   if(imagePreparationCount>0||AttachmentLibrary.status().busy||AttachmentIngest.status().busy)return 'An attachment is still being prepared or saved.';
-  if(Exports.status().busy||BackupController.status().busy||BackupProviderRuntime.status().busy||DeviceBackup.status().busy)return 'A backup, import, or storage-provider operation is still active.';
+  if(Exports.status().busy||BackupController.status().busy||BackupProviderRuntime.status().busy)return 'A backup, import, or storage-provider operation is still active.';
   if(!follower&&!ignoreActiveTimers&&isLiveTrackableTimer()&&!TimerState.paused&&TimerState.mode===TIMER_MODES.RUNNING)return 'Pause or finish the live timer before updating.';
   if(!follower&&!ignoreActiveTimers&&PracticePacer.status().running)return 'Pause or finish the Practice Pacer before updating.';
   if(!appCanMutate()&&!follower)return 'This window cannot safely write saved state yet. Wait for storage and ownership to settle.';
@@ -8922,7 +8893,7 @@ function reserveApplicationUpdate(context){
   const reason=pwaUpdateBlockReason(context);if(reason)throw new Error(reason);
   const owner=AppOwnership.status(),follower=context.external===true&&owner.state===OWNERSHIP_STATES.SECONDARY;
   const token={requestId:context.requestId,ownerRevision:owner.revision,ownerState:owner.state,workRevision:null,authority:null};
-  let released=false,resolveReady,rejectReady,unlock,deviceToken=null,providerHold=null;
+  let released=false,resolveReady,rejectReady,unlock,providerHold=null;
   const ready=new Promise((resolve,reject)=>{resolveReady=resolve;rejectReady=reject;}),held=new Promise(resolve=>{unlock=resolve;});
   // Observe early rejection even if releasing beats the caller's await.
   ready.catch(()=>{});
@@ -8951,8 +8922,7 @@ function reserveApplicationUpdate(context){
       const run=async authority=>{
         token.authority=authority;if(released||context.signal.aborted)return;
         providerHold=BackupProviderRuntime.suspendBackground('pwa-update');
-        const deviceReady=DeviceBackup.suspendAutomatic('pwa-update').then(value=>{if(released)DeviceBackup.resumeAutomatic(value);else deviceToken=value;});
-        const settled=Promise.all([providerHold.settled,deviceReady,RichTextAssetMaintenance.settled(),AppData.maintenance.settled(),AttachmentIntegrityJob.settled()]);
+        const settled=Promise.all([providerHold.settled,RichTextAssetMaintenance.settled(),AppData.maintenance.settled(),AttachmentIntegrityJob.settled()]);
         await Promise.race([settled,held]);
         if(released||context.signal.aborted)return;
         if(!validate())throw new Error('Study Director control changed while preparing the update.');
@@ -8962,7 +8932,7 @@ function reserveApplicationUpdate(context){
       else await AppMutationCoordinator.runExclusive('pwa-update',authority=>quiesceManagedRecoveryRuntime(()=>run(authority)));
     }catch(error){rejectReady(error);}
     finally{
-      providerHold?.release();if(deviceToken)DeviceBackup.resumeAutomatic(deviceToken);
+      providerHold?.release();
       context.signal.removeEventListener('abort',releaseSignal);
       for(const type of blockedEvents)window.removeEventListener(type,block,true);
       if(pwaUpdateReservation===token)pwaUpdateReservation=null;
@@ -9331,14 +9301,12 @@ function currentBackupDiagnosticStates(){
   sample('Ongoing note saving',()=>AppData.notes.failure(),value=>[{job:'Ongoing note saving',state:value.failed?'failed':'observed',failed:value.failed===true}]);
   sample('Write ownership',()=>({primary:appCanMutate(),...AppMutationCoordinator.status()}),value=>[{job:'Write ownership',state:value.active?'running':value.recoveryFault?'blocked':value.primary?'primary':'secondary',busy:!!value.active,pending:!!value.recoveryFault,foreign:value.foreign,authorityHealthy:value.authorityHealthy,authorityDurableProtected:value.authorityDurableProtected}]);
   sample('Backup controller',()=>BackupController.status(),value=>[{job:'Backup controller',...OperationLifecycle.snapshot(value),importActive:value.importActive,importCancelled:value.importCancelled,exportActive:value.standaloneExportActive}]);
-  sample('Device backup',()=>DeviceBackup.status(),value=>[{job:'Device backup',...OperationLifecycle.snapshot({busy:value.busy,pending:value.pending,scheduled:value.scheduled,suspended:value.automaticSuspended||value.backgroundState==='paused',reason:value.blocker,nextEligibleAt:value.nextEligibleAt}),connected:value.connected,permission:value.permission,stalled:value.stalled,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped,completedAt:value.lastBackupAt||'',checkpoints:value.checkpointCount}]);
-  sample('Device maintenance',()=>DeviceBackup.diagnosticMaintenance(),value=>[{job:'Device maintenance',...value}]);
+  sample('Device backup',()=>DeviceBackup.status(),value=>[{job:'Device backup',...OperationLifecycle.snapshot({busy:value.busy||value.backingUp,pending:value.pending,nextEligibleAt:value.nextEligibleAt}),connected:value.connected,permission:value.permission,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped,completedAt:value.lastBackupAt||''}]);
   sample('Provider operation',()=>BackupProviderRuntime.status(),value=>[{job:'Provider operation',...OperationLifecycle.snapshot(value),preparing:value.preparing}]);
   sample('Provider connection',()=>BackupProviderRuntime.diagnosticConnections(),values=>values.map(value=>({job:value.id==='google-drive'?'Google Drive connection':'External provider connection',state:value.connected?'connected':'disconnected',connected:value.connected,scopeBound:value.scopeBound,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped})));
   sample('Backup encryption',()=>BackupProtection.status(),value=>[{job:'Backup encryption',state:value.enabled?value.unlocked?'unlocked':'locked':'off',enabled:value.enabled,unlocked:value.unlocked}]);
   sample('Canonical maintenance',()=>({...DataMaintenanceJob.status(),busy:DataMaintenanceJob.status().busy||AppData.maintenance.status().busy}),value=>[{job:'Canonical maintenance',...value,...OperationLifecycle.snapshot(value),lastOutcome:value.lastOutcome}]);
-  for(const [job,owner] of [['Attachment cleanup',RichTextAssetMaintenance],['Backup scratch cleanup',BackupFiles],['Attachment processor',AttachmentIngest],['File processor',Exports],['Device integrity',DeviceRepositoryIntegrity]])sample(job,()=>owner.status(),value=>[{job,...(job.endsWith('processor')?OperationLifecycle.snapshot(value):value)}]);
-  sample('Device repository',()=>DeviceRepositoryBackground.status(),value=>[{job:'Device repository',...OperationLifecycle.snapshot({busy:value.foreground||value.active.length>0,pending:value.pending,scheduled:value.scheduled.length>0,suspended:value.suspended})}]);
+  for(const [job,owner] of [['Attachment cleanup',RichTextAssetMaintenance],['Backup scratch cleanup',BackupFiles],['Attachment processor',AttachmentIngest],['File processor',Exports]])sample(job,()=>owner.status(),value=>[{job,...(job.endsWith('processor')?OperationLifecycle.snapshot(value):value)}]);
   sample('App update',()=>PwaLifecycle.status(),pwa=>[{job:'App update',state:pwa.phase,busy:pwa.applying||pwa.reloading||pwa.checking,pending:pwa.updateReady,bootState:pwa.bootState,cacheState:pwa.cacheState||'',reason:pwa.cacheReason||''}]);
   sample('Attachment verification',()=>AttachmentIntegrityJob.status(),value=>[{job:'Attachment verification',...value,completedAt:attachmentIntegrityView?.checkedAt||'',attemptedAt:attachmentIntegrityView?.attemptedAt||'',cursor:attachmentIntegrityView?.progress?.cursor||0,total:attachmentIntegrityView?.progress?.total||0,coverage:'presence-and-size'}]);
   for(const target of ['device','drive']){const value=repositoryIntegrityView?.[target],bound=!!value?.repositoryScope&&repositoryIntegrityBoundScopes[target]===value.repositoryScope;states.push({job:target+' verification',reason:bound?value?.blockedReason||'':'awaiting-connection',state:!bound?'unbound':value?.recheck?'recheck-pending':value?.partial||value?.cursor?'partial':value?.lastOutcome||'never',completedAt:bound?value?.completedAt||'':'',attemptedAt:bound?value?.attemptedAt||'':'',failedAt:bound?value?.failedAt||'':'',progressBytes:bound?value?.partial?.stored?.offset||0:0,quarantined:bound?value?.quarantinedObjectIds?.length||0:0,history:bound?(value?.history||[]).map(row=>row.at+':'+row.outcome+(row.complete?':full':'')).join(' | '):''});}
@@ -9376,7 +9344,7 @@ const CLICK_ACTIONS=Object.freeze({
   'dismiss-install-notice': ()=>NativeCapabilities.dismissInstallNotice(),
   'toggle-system-alerts': ()=>SystemNotifications.toggle(),
   'connect-device-backup': ()=>connectDeviceBackupWithRecovery(),
-  'device-backup-now': ()=>DeviceBackup.backupNow('manual'),
+  'device-backup-now': ()=>DeviceBackup.backupNow(),
   'cancel-device-backup': ()=>DeviceBackup.cancelForeground(),
   'toggle-device-backup-settings': ()=>toggleDeviceBackupSettings(),
   'disconnect-device-backup': ()=>DeviceBackup.disconnect(),

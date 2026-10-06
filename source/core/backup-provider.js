@@ -64,7 +64,6 @@ registry.define('backup-provider',1,input=>{
   function subscribePresentation(listener){return presentation.subscribe(state=>{const event=state.events.find(row=>row.source===foregroundSource&&row.id==='backup-operation');if(event)listener(presentationView(event));});}
   let openRevision=0;
   let integrityScrubHooks=null;
-  let convergencePropagationHooks=null;
   let managedRecoveryHooks=null;
   let pendingRetryHooks=null;
   let maintenanceHooks=null;
@@ -164,6 +163,10 @@ registry.define('backup-provider',1,input=>{
     backgroundAvailable:typeof config.backgroundAvailable==='function'?config.backgroundAvailable:null,
     connected:typeof config.connected==='function'?config.connected:null,
     connectionExpiresAt:typeof config.connectionExpiresAt==='function'?config.connectionExpiresAt:null,
+    // automaticBaseline: the change time from which a location backs up on its
+    // own (the Device Folder: from when it was chosen). Without one, a location
+    // backs up on its own only after this device first backed up to it.
+    automaticBaseline:typeof config.automaticBaseline==='function'?config.automaticBaseline:null,
     subscribeConnection:typeof config.subscribeConnection==='function'?config.subscribeConnection:null,
     // hosted: the app renders this location's controls and connection notices.
     hosted:config.hosted===true,
@@ -857,9 +860,15 @@ registry.define('backup-provider',1,input=>{
     if(!state){state={covered:'',connected:false,noticeShown:false};automaticByProvider.set(id,state);}
     return state;
   }
+  // A change noted while the app runs is a real edit. Before the first one,
+  // a waiting change was found on start or reconnect, and is backed up only
+  // when local data is present: an emptied browser must not become a
+  // location's newest version.
+  let changeNoted=false;
   function automaticCovered(selected){
-    let recorded='';try{recorded=String(automaticHooks?.covered(selected.id)||'');}catch(error){AppDiagnostics.capture('backup-provider.automatic-covered',error,'warn');}
-    const times=[recorded,automaticState(selected).covered].map(value=>Date.parse(value)).filter(Number.isFinite);
+    let recorded='',baseline='';
+    try{recorded=String(automaticHooks?.covered(selected.id)||'');baseline=String(selected.automaticBaseline?.()||'');}catch(error){AppDiagnostics.capture('backup-provider.automatic-covered',error,'warn');}
+    const times=[recorded,baseline,automaticState(selected).covered].map(value=>Date.parse(value)).filter(Number.isFinite);
     return times.length?Math.max(...times):NaN;
   }
   function automaticEnabled(selected){return !!automaticHooks&&!!selected?.repository&&Number.isFinite(automaticCovered(selected));}
@@ -881,9 +890,9 @@ registry.define('backup-provider',1,input=>{
     return job.schedule(delay,urgent?'important-change':'automatic','earliest');
   }
   function noteChange(change={}){
-    const urgent=change&&change.urgent===true;
+    const urgent=change&&change.urgent===true;changeNoted=true;
     for(const selected of providers.values())scheduleAutomaticBackup(selected,{urgent});
-    return true;
+    notifyStatus();return true;
   }
   // Back up waiting changes now (the app going to the background, an update
   // about to apply) at every connected location that needs it.
@@ -900,7 +909,8 @@ registry.define('backup-provider',1,input=>{
     state.noticeShown=true;presentation.notice(selected.id,'permission',`${selected.label} sign-in expired.`);
   }
   async function retryPendingProviderBackup(selected,{signal=null}={}){
-    const pending=await pendingRetryState(selected);if(!pending&&!providerPublications.get(selected.id)?.continuation.status().pending&&!automaticNeeded(selected))return freeze({status:'idle',reason:'none',maintenancePending:false});
+    const pending=await pendingRetryState(selected),resuming=providerPublications.get(selected.id)?.continuation.status().pending===true;if(!pending&&!resuming&&!automaticNeeded(selected))return freeze({status:'idle',reason:'none',maintenancePending:false});
+    if(!pending&&!resuming&&!changeNoted&&automaticHooks?.ready&&await automaticHooks.ready()===false)return freeze({status:'idle',reason:'local-empty',maintenancePending:false});
     const summary=presentation.begin(selected.id,'backup',{id:'external-backup',label:selected.label,foreground:false,message:`Backing up to ${selected.label}…`});
     renderButtons();
     try{
@@ -917,14 +927,14 @@ registry.define('backup-provider',1,input=>{
       try{
         if(!await pendingRetryState(selected)&&!providerPublications.get(selected.id)?.continuation.status().pending&&!automaticNeeded(selected)){resetConvergenceRetry(selected);return freeze({status:'idle',reason:'none'});}
         if(busy||preparing){schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS);return freeze({status:'deferred',reason:'busy'});}
-        scope=await background.beginBackground('convergence',{budgetMs:0,preemptCode:'REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage:'Deferred Drive convergence yielded to a foreground operation.'});
+        scope=await background.beginBackground('convergence',{budgetMs:0,preemptCode:'REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage:'An automatic backup yielded to a foreground operation.'});
         if(!scope){schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS);return freeze({status:'deferred',reason:'background-busy'});}
         traceId=OperationDiagnostics.start('provider-convergence',selected.label,{provider:selected.id,background:true,trigger:'managed-recovery',nextEligibleAt:eligibleAt,actionable:true});
         OperationDiagnostics.mark('background-transition',background.transition('convergence','scheduled','running',{reason:'managed-recovery',nextEligibleAt:eligibleAt,actionable:true}),traceId);
         OperationDiagnostics.mark('convergence-eligibility',{provider:selected.id,nextEligibleAt:eligibleAt,actionable:true},traceId);
         OperationDiagnostics.mark('convergence-publication-start',{provider:selected.id},traceId);const result=await retryPendingProviderBackup(selected,{signal:scope.signal});OperationDiagnostics.mark('convergence-publication-complete',{provider:selected.id,status:String(result.status||''),maintenancePending:result.maintenancePending===true},traceId);OperationDiagnostics.mark('background-transition',background.transition('convergence','running',result.status==='completed'?'completed':'deferred',{reason:String(result.reason||''),actionable:false}),traceId);OperationDiagnostics.finish({status:String(result.status||'pending'),reason:String(result.reason||''),maintenancePending:result.maintenancePending===true},traceId);
         if(result.status==='completed'){resetConvergenceRetry(selected);background.wake('publication');scheduleAutomaticBackup(selected);}
-        else if(result.reason==='none')resetConvergenceRetry(selected);
+        else if(['none','local-empty'].includes(result.reason))resetConvergenceRetry(selected);
         else if(result.reason==='source'){resetConvergenceRetry(selected);if(!scheduleAutomaticBackup(selected))schedulePendingProviderBackup(selected,AUTOMATIC_QUIET_MS);}
         else schedulePendingProviderBackup(selected,scope.signal.aborted?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay(selected));
         return result;
@@ -950,9 +960,12 @@ registry.define('backup-provider',1,input=>{
       return providerBackground(selected).wake(trigger);
     }catch(error){AppDiagnostics.capture('backup-provider.background-configuration',error,'error');return false;}
   }
+  // After a restore, every other location that backs up on its own picks up
+  // the restored data once automatic backups resume.
+  function otherLocations(selected){return freeze([...providers.values()].filter(other=>other.id!==selected.id&&providerConnected(other)&&automaticEnabled(other)).map(other=>freeze({id:other.id,label:other.label,status:'pending',queued:true})));}
   async function queueResolvedProviderState(selected,result,{sourceNeeded=true,sourceCheckpoint=''}={}){
-    if(!result||result.cancelled)return freeze({source:freeze({status:'skipped',reason:'cancelled'}),device:freeze({status:'skipped',reason:'cancelled'})});
-    let source,device;
+    if(!result||result.cancelled)return freeze({source:freeze({status:'skipped',reason:'cancelled'}),others:freeze([])});
+    let source;
     if(sourceNeeded){
       const retryQueued=await markPendingRetry(selected);
       source=freeze({status:retryQueued?'pending':'failed',reason:retryQueued?'queued':'automatic retry could not be queued',retryQueued});
@@ -961,17 +974,12 @@ registry.define('backup-provider',1,input=>{
       await clearPendingRetry(selected);
       source=freeze({status:'completed',checkpoint:String(sourceCheckpoint||''),unchanged:true,retryQueued:false});
     }
-    if(convergencePropagationHooks){
-      try{const propagated=await convergencePropagationHooks.device(freeze({source:'provider',providerId:selected.id,providerLabel:selected.label,deferred:true}));device=freeze(propagated&&typeof propagated==='object'?{...propagated}:{status:'pending',reason:'queued',queued:true});}
-      catch(error){device=freeze({status:'pending',reason:String(error&&error.message||error),queued:false});AppDiagnostics.capture('backup-provider.managed-convergence-device',error,'warn');}
-    }else device=freeze({status:'skipped',reason:'not-configured'});
-    return freeze({source,device});
+    return freeze({source,others:otherLocations(selected)});
   }
   async function managedProviderPresent(selected,result,{sourceNeeded=true,sourceCheckpoint=''}={}){
-    const convergence=await queueResolvedProviderState(selected,result,{sourceNeeded,sourceCheckpoint}),sourceReady=convergence.source.status==='completed'||convergence.source.status==='pending'&&convergence.source.retryQueued===true,deviceReady=['completed','skipped'].includes(String(convergence.device.status||''))||convergence.device.status==='pending'&&convergence.device.queued===true;
-    const retryNote=!sourceReady&&convergence.source.retryQueued!==true?'automatic retry could not be queued':'';
-    const reason=[sourceReady?'':convergence.source.reason||`${selected.label} backup could not be queued`,retryNote,deviceReady?'':convergence.device.reason||'Device Backup refresh could not be queued'].filter(Boolean).join(' · ');
-    return freeze({status:sourceReady&&deviceReady?'completed':'pending',reason,checkpointId:String(convergence.source.checkpoint||''),source:convergence.source,device:convergence.device});
+    const convergence=await queueResolvedProviderState(selected,result,{sourceNeeded,sourceCheckpoint}),sourceReady=convergence.source.status==='completed'||convergence.source.status==='pending'&&convergence.source.retryQueued===true;
+    const reason=sourceReady?'':[convergence.source.reason||`${selected.label} backup could not be queued`,convergence.source.retryQueued!==true?'automatic retry could not be queued':''].filter(Boolean).join(' · ');
+    return freeze({status:sourceReady?'completed':'pending',reason,checkpointId:String(convergence.source.checkpoint||''),source:convergence.source,others:convergence.others});
   }
   function repositoryObjectInventoryForManifest(inventory,manifest){
     if(!inventory||inventory.overflow===true)throw new Error('An unusual number of backup objects was found. Recovery was stopped for review.');
@@ -1111,11 +1119,6 @@ registry.define('backup-provider',1,input=>{
     for(const key of ['readTarget','writeResult','prepare','isAvailable','isUnsafe','yieldTask','quarantine'])if(typeof config[key]!=='function')throw new TypeError('Repository integrity-scrub hooks are invalid.');
     integrityScrubHooks=Object.freeze({readTarget:config.readTarget,writeResult:config.writeResult,prepare:config.prepare,isAvailable:config.isAvailable,isUnsafe:config.isUnsafe,yieldTask:config.yieldTask,quarantine:config.quarantine});providerIntegritySchedulers.clear();for(const selected of providers.values())wakeProviderBackground(selected,'configured');return true;
   }
-  function configureConvergencePropagation(config=null){
-    if(config===null){convergencePropagationHooks=null;return true;}
-    if(!config||typeof config!=='object'||typeof config.device!=='function')throw new TypeError('Managed convergence hooks are invalid.');
-    convergencePropagationHooks=Object.freeze({device:config.device});return true;
-  }
   function configureManagedRecovery(config=null){
     if(config===null){managedRecoveryHooks=null;return true;}
     if(!config||typeof config!=='object'||typeof config.run!=='function')throw new TypeError('Managed recovery hooks are invalid.');
@@ -1135,10 +1138,11 @@ registry.define('backup-provider',1,input=>{
   }
   // covered(id): the change time the last backup from this device to that
   // location captured ('' when it never had one). current(): the newest change.
+  // ready(): optional; false while local data is empty (see changeNoted).
   function configureAutomaticBackup(config=null){
     if(config===null){automaticHooks=null;return true;}
-    if(!config||typeof config!=='object'||typeof config.covered!=='function'||typeof config.current!=='function')throw new TypeError('Automatic backup hooks are invalid.');
-    automaticHooks=freeze({covered:config.covered,current:config.current});for(const selected of providers.values())wakeProviderBackground(selected,'configured');return true;
+    if(!config||typeof config!=='object'||typeof config.covered!=='function'||typeof config.current!=='function'||config.ready!==undefined&&typeof config.ready!=='function')throw new TypeError('Automatic backup hooks are invalid.');
+    automaticHooks=freeze({covered:config.covered,current:config.current,ready:config.ready||null});for(const selected of providers.values())wakeProviderBackground(selected,'configured');return true;
   }
   async function maintenanceState(selected,{throwOnError=false}={}){const intent=providerMaintenanceIntent(selected);return intent?intent.read({throwOnError}):null;}
   const maintenanceActionable=(state,now=Date.now())=>Background.maintenanceActionable(state,now);
@@ -1167,7 +1171,7 @@ registry.define('backup-provider',1,input=>{
     let scheduler=providerMaintenanceSchedulers.get(id);if(scheduler)return scheduler;
     const background=providerBackground(selected),intent=providerMaintenanceIntent(selected);let traceId='';
     scheduler=background.createMaintenanceScheduler(freeze({
-      intent,budgetMs:0,budgetCode:'REPOSITORY_MAINTENANCE_BUDGET',budgetMessage:'Repository cleanup completed a protected work unit and will continue shortly.',preemptCode:'REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage:'Repository maintenance yielded to a higher-priority Drive operation.',
+      intent,budgetMs:0,budgetCode:'REPOSITORY_MAINTENANCE_BUDGET',budgetMessage:'Repository cleanup completed a protected work unit and will continue shortly.',preemptCode:'REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage:'Repository maintenance yielded to a higher-priority backup operation.',
       capture:(phase,error)=>AppDiagnostics.capture('backup-provider.repository-maintenance-'+phase,error,'warn'),
       isAvailable:()=>providerBackgroundAvailability(selected),
       isBusy:()=>busy||preparing,
@@ -1176,7 +1180,7 @@ registry.define('backup-provider',1,input=>{
         const phase=String(event&&event.phase||'');
         if(phase==='running'){
           traceId=OperationDiagnostics.start('provider-maintenance',selected.label,{provider:selected.id,background:true,trigger:String(event.reason||'scheduled'),requestedAt:String(event.requestedAt||''),nextEligibleAt:String(event.nextEligibleAt||''),actionable:true});
-          if(event.transition)OperationDiagnostics.mark('background-transition',event.transition,traceId);OperationDiagnostics.mark('maintenance-eligibility',{provider:selected.id,reason:String(event.reason||'scheduled'),requestedAt:String(event.requestedAt||''),nextEligibleAt:String(event.nextEligibleAt||''),actionable:true},traceId);return;
+          if(event.transition)OperationDiagnostics.mark('background-transition',event.transition,traceId);OperationDiagnostics.mark('maintenance-eligibility',{provider:selected.id,reason:String(event.reason||'scheduled'),requestedAt:String(event.requestedAt||''),nextEligibleAt:String(event.nextEligibleAt||''),actionable:true},traceId);notifyStatus();return;
         }
         if(phase==='cleanup-start'){OperationDiagnostics.mark('maintenance-cleanup-start',{provider:selected.id},traceId);return;}
         if(phase==='cleanup-complete'){
@@ -1186,7 +1190,7 @@ registry.define('backup-provider',1,input=>{
           if(event.transition)OperationDiagnostics.mark('background-transition',event.transition,traceId);
           if(phase==='failed'&&event.error)OperationDiagnostics.fail(event.error,{background:true,reason:String(event.reason||'error'),nextEligibleAt:String(event.nextEligibleAt||'')},traceId);
           else OperationDiagnostics.finish(background.maintenanceDetails(event),traceId);
-          traceId='';
+          traceId='';notifyStatus();
         }
       }
     }));providerMaintenanceSchedulers.set(id,scheduler);return scheduler;
@@ -1195,8 +1199,8 @@ registry.define('backup-provider',1,input=>{
     if(!selected||!selected.repository||!integrityScrubHooks)return null;const id=safeId(selected.id);if(!id)return null;selected=registeredProvider(selected);
     let scheduler=providerIntegritySchedulers.get(id);if(scheduler)return scheduler;const background=providerBackground(selected);
     scheduler=background.createIntegrityScheduler(freeze({
-      budgetMs:background.integrity.workBudgetMs,budgetCode:'REPOSITORY_INTEGRITY_BUDGET',budgetMessage:'Drive integrity verification reached its work limit and will continue on a later authorized operation.',
-      preemptCode:'REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage:'Drive integrity verification yielded to a higher-priority operation.',
+      budgetMs:background.integrity.workBudgetMs,budgetCode:'REPOSITORY_INTEGRITY_BUDGET',budgetMessage:'Backup integrity verification reached its work limit and will continue later.',
+      preemptCode:'REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage:'Backup integrity verification yielded to a higher-priority operation.',
       capture:error=>AppDiagnostics.capture('backup-provider.repository-integrity-background',error,'warn'),
       readTarget:()=>integrityScrubHooks.readTarget(id),
       writeResult:result=>integrityScrubHooks.writeResult(id,result),
@@ -1207,8 +1211,10 @@ registry.define('backup-provider',1,input=>{
         const prepared=await integrityScrubHooks.prepare(id,target,freeze({trigger,nextEligibleAt}));if(!prepared)return freeze({status:'skipped',reason:'unavailable'});const options=freeze({...prepared,signal,onProgress:async progress=>{await prepared.onProgress?.(progress);checkpoint(progress);}});
         const traceId=OperationDiagnostics.start('provider-integrity',selected.label,{provider:id,background:true,trigger:String(trigger||'awaiting-connection'),nextEligibleAt:String(nextEligibleAt||''),cursor:String(options.cursor||''),actionable:true});
         OperationDiagnostics.mark('background-transition',background.transition('integrity','scheduled','running',{reason:String(trigger||'awaiting-connection'),nextEligibleAt:String(nextEligibleAt||''),actionable:true}),traceId);
+        notifyStatus();
         try{const result=await runConfiguredIntegrityScrub(selected,options),to=background.outcome(result);OperationDiagnostics.mark('background-transition',background.transition('integrity','running',to,{reason:background.integrityDetails(result).reason,actionable:false}),traceId);OperationDiagnostics.finish(background.integrityDetails(result),traceId);return result;}
         catch(error){OperationDiagnostics.mark('background-transition',background.transition('integrity','running','failed',{reason:'error',actionable:false}),traceId);OperationDiagnostics.fail(error,{background:true},traceId);throw error;}
+        finally{notifyStatus();}
       }
     }));providerIntegritySchedulers.set(id,scheduler);return scheduler;
   }
@@ -1311,9 +1317,9 @@ registry.define('backup-provider',1,input=>{
       const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',note,missingOnly,before:String(options?.before||''),quiet,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});if(!candidate){const message=missingOnly?'No version saved before browser data was cleared was found. Nothing was changed.':'Combine cancelled.';statusText(message);finishForegroundView(selected,{message,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({cancelled:true,...(missingOnly?{reason:'needs-decision'}:{})});}
       const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{note,missingOnly});
       if(result&&result.cancelled){const message=String(result.reason||'').startsWith('note-')||result.reason==='needs-decision'?'No changes were made.':'Combine cancelled.';statusText(message);finishForegroundView(selected,{message,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({...result,cancelled:true});}
-      const convergence=result&&result.managedRecovery&&result.managedRecovery.present||freeze({status:'pending',source:freeze({status:'failed',reason:'post-operation backup status unavailable'}),device:freeze({status:'skipped',reason:'unavailable'})});
-      const sourceReady=convergence.source&&(convergence.source.status==='completed'||convergence.source.status==='pending'&&convergence.source.retryQueued===true),deviceReady=['completed','skipped'].includes(String(convergence.device&&convergence.device.status||''))||convergence.device&&convergence.device.status==='pending'&&convergence.device.queued===true;
-      const finalMessage=presentation.outcome('bring-in',selected.label,convergence);statusText(finalMessage,sourceReady&&deviceReady);finishForegroundView(selected,{message:finalMessage,ok:true});
+      const convergence=result&&result.managedRecovery&&result.managedRecovery.present||freeze({status:'pending',source:freeze({status:'failed',reason:'post-operation backup status unavailable'}),others:freeze([])});
+      const sourceReady=convergence.source&&(convergence.source.status==='completed'||convergence.source.status==='pending'&&convergence.source.retryQueued===true);
+      const finalMessage=presentation.outcome('bring-in',selected.label,convergence);statusText(finalMessage,sourceReady);finishForegroundView(selected,{message:finalMessage,ok:true});
 
       OperationDiagnostics.finish({cancelled:false},traceId);return freeze({...result,convergence,exportedAt});
     }catch(error){
@@ -1342,9 +1348,9 @@ registry.define('backup-provider',1,input=>{
       if(!candidate){statusText('Version restore cancelled.');finishForegroundView(selected,{message:'Version restore cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return Object.freeze({cancelled:true});}
       const result=await RepositoryCheckpointPipeline.restoreVersion(candidate,{confirmed:options&&options.confirmed===true});
       if(result&&result.cancelled){statusText('Version restore cancelled.');finishForegroundView(selected,{message:'Version restore cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return result;}
-      const convergence=result&&result.managedRecovery&&result.managedRecovery.present||freeze({status:'pending',source:freeze({status:'failed',reason:'post-operation backup status unavailable'}),device:freeze({status:'skipped',reason:'unavailable'})});
-      const sourceReady=convergence.source&&convergence.source.status==='completed',deviceReady=['completed','skipped'].includes(String(convergence.device&&convergence.device.status||''))||convergence.device&&convergence.device.status==='pending'&&convergence.device.queued===true;
-      const finalMessage=presentation.outcome('restore-version',selected.label,convergence);statusText(finalMessage,sourceReady&&deviceReady);finishForegroundView(selected,{message:finalMessage,ok:true});
+      const convergence=result&&result.managedRecovery&&result.managedRecovery.present||freeze({status:'pending',source:freeze({status:'failed',reason:'post-operation backup status unavailable'}),others:freeze([])});
+      const sourceReady=convergence.source&&convergence.source.status==='completed';
+      const finalMessage=presentation.outcome('restore-version',selected.label,convergence);statusText(finalMessage,sourceReady);finishForegroundView(selected,{message:finalMessage,ok:true});
 
       OperationDiagnostics.finish({cancelled:false},traceId);return Object.freeze({...result,convergence});
     }catch(error){
@@ -1375,22 +1381,35 @@ registry.define('backup-provider',1,input=>{
     }
   }
   function connectCurrent(){return connectProvider(provider());}
-  async function disconnectCurrent(){
-    if(busy)return;
-    const selected=provider();
-    if(!selected||!selected.disconnect)return;
-    const foreground=beginForeground(selected);if(!foreground)return;
+  // Forgetting a location drops everything this device holds about it; its
+  // backups stay where they are.
+  async function forgetProvider(selected){
+    automaticState(selected).noticeShown=true;automaticState(selected).covered='';await discardProviderPublication(selected);connectedOnceByProvider.delete(selected.id);clearRecentHistory(selected);verifiedHistoryByProvider.delete(selected.id);repositoryScopeByProvider.delete(selected.id);await clearPendingRetry(selected);providerBackground(selected).clearAllScheduled();presentation.reset(selected.id);
+  }
+  async function disconnectProvider(selected){
+    if(busy||!selected||!selected.disconnect)return false;
+    const foreground=beginForeground(selected);if(!foreground)return false;
     setBusy(true);statusText(`Disconnecting ${selected.label}…`);
     try{
       await foreground.settled;await authorize(selected,'disconnect');
-      automaticState(selected).noticeShown=true;await selected.disconnect();await discardProviderPublication(selected);connectedOnceByProvider.delete(selected.id);clearRecentHistory(selected);verifiedHistoryByProvider.delete(selected.id);repositoryScopeByProvider.delete(selected.id);await clearPendingRetry(selected);providerBackground(selected).clearAllScheduled();presentation.reset(selected.id);
-      statusText(`✓ ${selected.label} disconnected. Access permission was revoked.`);
+      await selected.disconnect();await forgetProvider(selected);
+      statusText(selected.hosted?'':`✓ ${selected.label} disconnected. Access permission was revoked.`);return true;
     }catch(error){
-      const message=error&&error.message?error.message:String(error);
-      statusText(`Disconnect failed: ${message}`,false);
+      statusText(`Disconnect failed: ${error&&error.message?error.message:String(error)}`,false);return false;
     }finally{await release(selected,'disconnect');setBusy(false);foreground.release();const {overlay}=elements();if(overlay?.classList.contains('on')&&activeId===selected.id)presentProvider(selected,activeTrigger);renderButtons();}
   }
+  function disconnectCurrent(){return disconnectProvider(provider());}
+  // Status for a location whose controls the app renders (the Device Folder).
+  const statusListeners=new Set();
+  function subscribeStatus(listener){if(typeof listener!=='function')throw new TypeError('Backup location status listener is invalid.');statusListeners.add(listener);return ()=>statusListeners.delete(listener);}
+  function notifyStatus(){for(const listener of statusListeners)try{listener();}catch(error){AppDiagnostics.capture('backup-provider.status-listener',error,'warn');}}
+  function locationStatus(id){
+    const selected=providers.get(safeId(id));if(!selected)return null;
+    const operation=foregroundView(),active=busy&&operation?.providerId===selected.id,coordinator=providerBackgroundCoordinators.get(selected.id),running=coordinator?coordinator.status().active:[],job=coordinator?coordinator.jobStatus('convergence'):null,attempts=providerConvergenceRetryAttempts.get(selected.id)||0;
+    return freeze({connected:providerConnected(selected),busy:active,foregroundKind:active?String(operation.kind||''):'',cancellable:active&&!!foregroundController&&!foregroundController.signal.aborted,backingUp:running.includes('convergence'),maintenanceBusy:running.includes('maintenance')||running.includes('integrity'),waiting:automaticWaiting(selected),nextEligibleAt:String(job?.nextEligibleAt||''),retryAttempt:attempts,retryBackoffCapped:attempts>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length});
+  }
   function renderButtons(){
+    notifyStatus();
     const {host}=elements();
     if(!host)return;
     const fragment=document.createDocumentFragment();
@@ -1416,7 +1435,7 @@ registry.define('backup-provider',1,input=>{
     renderButtons();
     return true;
   }
-  function list(){return Object.freeze([...providers.values()].filter(item=>!item.hosted).map(item=>Object.freeze({id:item.id,label:item.label,connected:providerConnected(item)})));}
+  function list({hosted=false}={}){return Object.freeze([...providers.values()].filter(item=>hosted||!item.hosted).map(item=>Object.freeze({id:item.id,label:item.label,connected:providerConnected(item)})));}
   function backgroundStatus(){return freeze([...providerBackgroundCoordinators.entries()].flatMap(([id,coordinator])=>[freeze({job:id+' maintenance',...(providerMaintenanceSchedulers.get(id)?.status()||coordinator.jobStatus('maintenance'))}),freeze({job:id+' integrity',...(providerIntegritySchedulers.get(id)?.status()||coordinator.jobStatus('integrity'))}),freeze({job:id+' convergence',...coordinator.jobStatus('convergence')})]));}
   function diagnosticConnections(){return freeze([...providers.values()].map(selected=>freeze({id:selected.id,connected:providerConnected(selected),scopeBound:repositoryScopeByProvider.has(selected.id),retryAttempt:providerConvergenceRetryAttempts.get(selected.id)||0,retryBackoffCapped:(providerConvergenceRetryAttempts.get(selected.id)||0)>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length})));}
   function status(){const overlay=elements().overlay;return Object.freeze({busy:busy||preparing,cancellable:!!foregroundController&&!foregroundController.signal.aborted,preparing,activeId,open:!!overlay?.classList.contains('on'),operation:foregroundView()?Object.freeze({...foregroundView()}):null});}
@@ -1436,7 +1455,7 @@ registry.define('backup-provider',1,input=>{
     });
   }
   install();
-  return Object.freeze({register,list,open,close,status,backgroundStatus,diagnosticConnections,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:renderButtons,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},subscribePresentation,cancelForeground,history:historyRepositoryProvider,backup:backupProvider,backupRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeProtectedRepositoryProvider,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureConvergencePropagation,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,suspendBackground,repositoryScope});
+  return Object.freeze({register,list,open,close,status,locationStatus,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:renderButtons,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},subscribePresentation,cancelForeground,history:historyRepositoryProvider,backup:backupProvider,backupRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeProtectedRepositoryProvider,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,suspendBackground,repositoryScope});
 
   }
   return freeze({format:'study-director.backup-provider-module',contractVersion:1,createRuntime});

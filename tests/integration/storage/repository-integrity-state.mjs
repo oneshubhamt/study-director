@@ -9,13 +9,12 @@ import {hashSnapshot} from '../../../portable/integrity-hash.js';
 // boundaries with injectable read/write/commit failures and real handle identity.
 const app=fs.readFileSync('source/app.html','utf8');
 const normalization=app.slice(app.indexOf('function normalizeRepositoryIntegrityTarget('),app.indexOf('async function libraryClearSnapshot('));
-const persistence=app.slice(app.indexOf('let repositoryIntegrityWriteChain='),app.indexOf('function repositoryIntegrityUnsafe('));
+const persistence=app.slice(app.indexOf('let repositoryIntegrityWriteChain='),app.indexOf('const RepositoryIntegrityContinuation='));
 const objectId=char=>'obj_'+char.repeat(32),scanId='a'.repeat(64),stamp='2026-09-01T00:00:00.000Z';
-function handle(identity){return {getDirectoryHandle(){},async isSameEntry(other){return other?.identity===identity;},identity};}
 function fixture(){
-  const state={readFailed:false,txReadFailed:false,writeFailed:false,commitFailed:false,owner:true,drive:'drive-one',device:handle('folder-one'),durable:null,writes:0,health:[],transactions:0};
+  const state={readFailed:false,txReadFailed:false,writeFailed:false,commitFailed:false,owner:true,drive:'drive-one',device:'device-one',durable:null,writes:0,health:[],transactions:0};
   const context={console,Object,Date,Promise,crypto:webcrypto,appCanMutate:()=>state.owner,
-    DeviceBackup:{repositoryHandle:async()=>state.device},BackupProviderRuntime:{repositoryScope:async()=>state.drive},AppDiagnostics:{capture(){}},
+    BackupProviderRuntime:{repositoryScope:async id=>id==='device-folder'?state.device:state.drive},AppDiagnostics:{capture(){}},
     repositoryIntegrityBoundScopes:{},renderIntegrityStatuses(){},markStorageHealthError:(key,message)=>state.health.push({kind:'warn',key,message}),markStorageHealthOk:key=>state.health.push({kind:'ok',key}),
     BackupAppMeta:{read:async()=>{if(state.readFailed)throw new Error('read unavailable');return state.durable;},transaction:(_mode,operation,options)=>{
       assert.equal(options.strict,true);state.transactions++;
@@ -29,7 +28,7 @@ function fixture(){
   };
   vm.createContext(context);for(const name of ['internal','integrity-continuation'])vm.runInContext(fs.readFileSync('source/core/'+name+'.js','utf8'),context);context.IntegrityContinuationModule=context[Symbol.for('studyDirector.internalModules.v1')].require('integrity-continuation',1);vm.runInContext(normalization+persistence,context);
   state.durable=context.normalizeRepositoryIntegrityState({version:3,
-    device:{repositoryScope:'device-one',repositoryHandle:handle('folder-one'),completedAt:stamp},
+    device:{repositoryScope:'device-one',completedAt:stamp},
     drive:{repositoryScope:'drive-one',completedAt:stamp,failedAt:stamp,cursor:objectId('b'),scanId,quarantinedObjectIds:[objectId('c')]}});
   return {state,context};
 }
@@ -55,9 +54,9 @@ await test('partial progress cannot clear unresolved failure or quarantine healt
   const h=fixture();await h.context.updateRepositoryIntegrityTarget('drive',{repositoryScope:'drive-one',status:'yielded',cursor:objectId('d'),scanId});assert.equal(h.state.durable.drive.failedAt,stamp);assert.equal(h.state.health.at(-1).kind,'warn');
   await h.context.updateRepositoryIntegrityTarget('drive',{repositoryScope:'drive-one',status:'completed',complete:true,quarantined:[objectId('c')]});assert.equal(h.state.durable.drive.failedAt,'');assert.equal(h.state.health.at(-1).kind,'warn','a cycle that skipped quarantine is not healthy');
 });
-await test('same physical folder keeps state across cloned handles; replacement invalidates it',async()=>{
-  const h=fixture();h.state.device=handle('folder-one');assert.equal((await h.context.readRepositoryIntegrityTarget('device')).repositoryScope,'device-one');assert.equal(h.state.writes,0);
-  h.state.device=handle('folder-two');const target=await h.context.readRepositoryIntegrityTarget('device');assert.notEqual(target.repositoryScope,'device-one');assert.equal(target.completedAt,'');assert.equal(target.cursor,'');assert.equal(target.repositoryHandle,h.state.device);
+await test('the same Device Folder repository keeps state; a replaced one starts over',async()=>{
+  const h=fixture();assert.equal((await h.context.readRepositoryIntegrityTarget('device')).repositoryScope,'device-one');assert.equal(h.state.writes,0);
+  h.state.device='device-two';const target=await h.context.readRepositoryIntegrityTarget('device');assert.equal(target.repositoryScope,'device-two');assert.equal(target.completedAt,'');assert.equal(target.cursor,'');
 });
 await test('Drive recreation and stale scan results cannot contaminate the new repository',async()=>{
   const h=fixture();h.state.drive='drive-two';await assert.rejects(h.context.updateRepositoryIntegrityTarget('drive',{repositoryScope:'drive-one',status:'failed',quarantined:[objectId('e')]}),{code:'REPOSITORY_CHANGED'});
@@ -97,18 +96,22 @@ await test('metadata gateway accepts canonical scoped state and readable legacy 
   assert.equal(validate(h.state.durable),true);const old=target=>({completedAt:target.completedAt,cycleStartedAt:target.cycleStartedAt,cursor:target.cursor,failedAt:target.failedAt,quarantinedObjectIds:target.quarantinedObjectIds});
   assert.equal(validate({version:2,device:old(h.state.durable.device),drive:old(h.state.durable.drive)}),true);
   const v4=target=>{const {recheckCursor,...prior}=target;return prior;};
-  assert.equal(h.state.durable.version,5);assert.equal(validate({version:4,device:v4(h.state.durable.device),drive:v4(h.state.durable.drive)}),true);
-  const v3=target=>({repositoryScope:target.repositoryScope,repositoryHandle:target.repositoryHandle,scanId:target.scanId,...old(target)});
+  assert.equal(h.state.durable.version,6);assert.equal(validate({version:4,device:v4(h.state.durable.device),drive:v4(h.state.durable.drive)}),true);
+  // Older records kept the Device Folder's directory handle; it is ignored now.
+  const folderHandle={getDirectoryHandle(){}};
+  assert.equal(validate({version:5,device:{...h.state.durable.device,repositoryHandle:folderHandle},drive:{...h.state.durable.drive,repositoryHandle:null}}),true);
+  assert.equal(validate({version:4,device:{...v4(h.state.durable.device),repositoryHandle:folderHandle},drive:{...v4(h.state.durable.drive),repositoryHandle:null}}),true);
+  const v3=target=>({repositoryScope:target.repositoryScope,repositoryHandle:null,scanId:target.scanId,...old(target)});
   assert.equal(validate({version:3,device:v3(h.state.durable.device),drive:v3(h.state.durable.drive)}),true);
   const large={...h.state.durable.drive,quarantinedObjectIds:Array.from({length:257},(_,i)=>'obj_'+(i+1).toString(16).padStart(32,'0'))};
-  for(const [version,project] of [[2,old],[3,v3],[4,v4],[5,value=>value]]){
+  for(const [version,project] of [[2,old],[3,v3],[4,v4],[5,value=>value],[6,value=>value]]){
     const record={version,device:project(h.state.durable.device),drive:project(large)};assert.equal(validate(record),true);assert.equal(context.normalizeRepositoryIntegrityState(record).drive.quarantinedObjectIds.length,257);
   }
   assert.equal(validate({...h.state.durable,drive:{...h.state.durable.drive,recheck:true,recheckCursor:'invalid'}}),false);
   assert.equal(validate({...h.state.durable,unknownField:true}),false);assert.equal(validate({...h.state.durable,version:99}),false);
 });
 await test('the recheck action is scoped, retains quarantine, and requires write control',async()=>{
- const h=fixture(),queued=[];h.context.DeviceBackup.status=()=>({connected:true});h.context.DeviceRepositoryIntegrity={schedule:(...args)=>queued.push(args)};h.context.BackupProviderRuntime.requestIntegrity=id=>queued.push(id);h.context.setStatus=()=>{};
+ const h=fixture(),queued=[];h.context.DeviceBackup={status:()=>({connected:true})};h.context.BackupProviderRuntime.requestIntegrity=id=>queued.push(id);h.context.setStatus=()=>{};
  const start=app.indexOf('async function requestRepositoryIntegrityRecheck('),end=app.indexOf('const ATTACHMENT_INTEGRITY_META_KEY=',start);vm.runInContext(app.slice(start,end),h.context);
  await h.context.mutateRepositoryIntegrityTarget('drive',current=>({...current,recheck:true,recheckCursor:objectId('c')}));
  assert.equal(await h.context.requestRepositoryIntegrityRecheck('drive'),true);assert.equal(h.state.durable.drive.recheckCursor,'');assert.equal(queued[0],'google-drive');assert.equal(h.state.durable.drive.recheck,true);assert.ok(h.state.durable.drive.requestId);assert.equal(h.state.durable.drive.quarantinedObjectIds.length,1);
@@ -153,7 +156,7 @@ await test('recheck status distinguishes pending corruption, unavailability and 
 await test('activation refreshes Device permission without owning integrity scheduling',async()=>{
  const start=app.indexOf('async function refreshDeviceBackgroundPermission('),source=app.slice(start,app.indexOf('AppActivation.subscribe(',start));
  const kinds={ORDINARY_FOCUS:'focus',VISIBILITY_RETURN:'visible',OWNERSHIP_TAKEOVER:'takeover'};let refreshes=0;
- const context={APP_ACTIVATION_KINDS:kinds,DeviceBackup:{refreshPermission:async()=>{refreshes++;}},DeviceRepositoryIntegrity:{schedule(){throw new Error('Activation must use the job owner');}}};vm.createContext(context);vm.runInContext(source,context);
+ const context={APP_ACTIVATION_KINDS:kinds,DeviceBackup:{refreshPermission:async()=>{refreshes++;}}};vm.createContext(context);vm.runInContext(source,context);
  for(const kind of ['focus','visible','takeover'])await context.refreshDeviceBackgroundPermission({kind});assert.equal(refreshes,3);
  await context.refreshDeviceBackgroundPermission({kind:'background'});assert.equal(refreshes,3);
 });

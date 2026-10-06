@@ -59,16 +59,15 @@ registry.define('backup-recovery-host',1,()=>{
     return freeze({read:pending,mark:markPending,clear:clearPending});
   }
   function createHost(input){
-    exactObject(input,['cancellation','device','diagnostics','document','interactions','lifecycle','managedRecovery','mutation','presentation','providers','session','sourceRevision','storage','view'],'Backup recovery host input');
+    exactObject(input,['cancellation','diagnostics','document','interactions','lifecycle','managedRecovery','mutation','presentation','providers','session','sourceRevision','storage','view'],'Backup recovery host input');
     functions(input.cancellation,['cancelImport'],'Backup recovery host cancellation port');
-    functions(input.device,['backupNow','bringIn','cancelForeground','history','notifyChange','removeSafetyBackup','restoreVersion','resumeAutomatic','status','suspendAutomatic'],'Backup recovery host Device Folder port');
     functions(input.diagnostics,['capture','mark'],'Backup recovery host diagnostics port');
     if(!input.document||typeof input.document.getElementById!=='function'||typeof input.document.createElement!=='function')throw new TypeError('Backup recovery host document port is invalid.');
     functions(input.interactions,['choose'],'Backup recovery host interactions port');
     functions(input.lifecycle,['activeSessionIssue','activeSessionLoad','activeSessionSettled','attachmentBusy','canonicalPlanDraft','deletionRecoveryFlush','flushNotes','flushPlanDraft','hasTasks','noteFailure','planDraft','planInputValue','quiesce','savePlanDraft','settleAttachmentWriters','settlePlan','writeLiveDraft'],'Backup recovery host lifecycle port');
     functions(input.managedRecovery,['createCoordinator'],'Backup recovery host managed-recovery port');
     functions(input.mutation,['run'],'Backup recovery host mutation port');
-    functions(input.providers,['bringInRepositoryProvider','cancelForeground','configureConvergencePropagation','configureManagedRecovery','configurePendingBackupRetry','history','list','removeProtectedRepositoryProvider','restoreRepositoryProviderVersion','suspendBackground'],'Backup recovery host provider port');
+    functions(input.providers,['bringInRepositoryProvider','cancelForeground','configureManagedRecovery','configurePendingBackupRetry','history','list','removeProtectedRepositoryProvider','restoreRepositoryProviderVersion','suspendBackground'],'Backup recovery host provider port');
     functions(input.session,['hasBlocking'],'Backup recovery host session port');
     if(typeof input.sourceRevision!=='function')throw new TypeError('Backup recovery host sourceRevision port is invalid.');
     functions(input.storage,['read','remove','write'],'Backup recovery host storage port');
@@ -76,17 +75,6 @@ registry.define('backup-recovery-host',1,()=>{
 
     if(!Object.isFrozen(input.presentation)||['begin','read','feedback','condition','detail','outcome','resolve','reset','subscribe'].some(key=>typeof input.presentation[key]!=='function'))throw new TypeError('Backup presentation port is invalid.');
     const {mark:markPending,clear:clearPending,read:pending}=createPendingStore(freeze({storage:input.storage,diagnostics:input.diagnostics,sourceRevision:input.sourceRevision}));
-    async function requestDeviceConvergence(context={}){
-      const state=input.device.status();
-      if(!state.connected)return freeze({status:'skipped',reason:'not-connected'});
-      try{
-        input.device.notifyChange(freeze({urgent:false,reason:'managed-convergence'}));
-        return freeze({status:'pending',reason:'queued',queued:true,source:String(context&&context.source||'')});
-      }catch(error){
-        input.diagnostics.capture('device-backup.managed-convergence',error,'warn');
-        return freeze({status:'pending',reason:String(error&&error.message||error||'queue-failed'),queued:false});
-      }
-    }
     async function settleRecoveryState(options={}){
       if(input.lifecycle.attachmentBusy())throw new Error('An attachment is still being prepared or saved. Finish that operation before recovery.');
       await input.lifecycle.settleAttachmentWriters();
@@ -129,15 +117,15 @@ registry.define('backup-recovery-host',1,()=>{
     }
 
     const coordinator=input.managedRecovery.createCoordinator(freeze({
-      // A restore pauses automatic backups at every location, not only the
-      // Device Folder, so none of them captures half-applied data.
+      // A restore pauses automatic backups at every location, so none of them
+      // captures half-applied data.
       automaticBackup:freeze({
         suspend:async reason=>{
-          const device=await input.device.suspendAutomatic(reason),providers=input.providers.suspendBackground(reason);
-          try{await providers.settled;}catch(error){providers.release();input.device.resumeAutomatic(device);throw error;}
-          return freeze({device,providers});
+          const held=input.providers.suspendBackground(reason);
+          try{await held.settled;}catch(error){held.release();throw error;}
+          return held;
         },
-        resume:held=>{held.providers.release();return input.device.resumeAutomatic(held.device);}
+        resume:held=>held.release()
       }),
       lifecycle:freeze({settle:(kind,options)=>settleRecoveryState(options),quiesce:operation=>input.lifecycle.quiesce(operation),rebuild:()=>rebuildRecoveryState(),revision:()=>input.sourceRevision()}),
       mutation:freeze({run:(kind,operation)=>input.mutation.run(kind,operation)}),
@@ -145,7 +133,6 @@ registry.define('backup-recovery-host',1,()=>{
     }));
     if(!Object.isFrozen(coordinator)||coordinator.format!=='study-director.managed-recovery-coordinator'||coordinator.contractVersion!==1)throw new Error('Study Director managed recovery coordination is unavailable or incompatible.');
 
-    input.providers.configureConvergencePropagation(freeze({device:context=>requestDeviceConvergence(context)}));
     input.providers.configureManagedRecovery(freeze({run:spec=>coordinator.execute(spec)}));
     input.providers.configurePendingBackupRetry(freeze({read:id=>pending(id),mark:id=>markPending(id),clear:(id,expected)=>clearPending(id,expected)}));
 
@@ -173,9 +160,7 @@ registry.define('backup-recovery-host',1,()=>{
     const tierLabel=(value,purpose='')=>value==='before-restore'?safetyLabel(purpose):value==='latest'?'Latest':value==='daily'?'Daily':value==='weekly'?'Weekly':value==='monthly'?'Monthly':'Saved';
     const dateLabel=value=>{const date=new Date(value);return Number.isFinite(date.getTime())?date.toLocaleString():String(value||'');};
     function sourceDescriptor(sourceId){
-      const id=String(sourceId||'').trim();
-      if(id==='device-folder')return freeze({id,label:'Device Folder',kind:'device'});
-      const provider=input.providers.list().find(item=>item.id===id);return provider?freeze({id:provider.id,label:provider.label,kind:'provider'}):null;
+      const id=String(sourceId||'').trim(),provider=input.providers.list().find(item=>item.id===id);return provider?freeze({id:provider.id,label:provider.label}):null;
     }
     function setHistoryStatus(message='',ok=true,lifecycle=''){
       presentationLifecycle=lifecycle||(ok?'succeeded':'failed');
@@ -207,8 +192,7 @@ registry.define('backup-recovery-host',1,()=>{
       const reason=new Error('Recovery operation was cancelled by the user.');reason.name='AbortError';reason.code='STUDY_DIRECTOR_IMPORT_CANCELLED';
       if(activeController&&!activeController.signal.aborted)activeController.abort(reason);
       try{input.cancellation.cancelImport('Recovery operation was cancelled by the user.',freeze({announce:false}));}catch{}
-      if(activeSourceId==='device-folder'){try{input.device.cancelForeground('Recovery operation was cancelled by the user.');}catch{}}
-      else if(activeSourceId){try{input.providers.cancelForeground('Recovery operation was cancelled by the user.',activeSourceId);}catch{}}
+      if(activeSourceId){try{input.providers.cancelForeground('Recovery operation was cancelled by the user.',activeSourceId);}catch{}}
       setHistoryStatus('');setHistoryProgress({stage:'cancelling',message:'Cancelling safely…'});return true;
     }
     function setDialogSource(source){
@@ -242,7 +226,7 @@ registry.define('backup-recovery-host',1,()=>{
       if(busy)return freeze({entries:lastEntries,source:freeze({sourceId:activeSourceId,sourceLabel:activeSourceLabel})});
       const controller=new AbortController();activeSourceId=source.id;activeSourceLabel=source.label;setOperationBusy(true,controller);setDialogSource(source);clearHistoryProgress();setHistoryStatus(`Reading ${source.label} backups…`);
       try{
-        const result=source.kind==='device'?await input.device.history(freeze({interactive,signal:controller.signal,presentation:presentationScope})):await input.providers.history(source.id,freeze({interactive,signal:controller.signal,presentation:presentationScope}));
+        const result=await input.providers.history(source.id,freeze({interactive,signal:controller.signal,presentation:presentationScope}));
         const entries=result&&result.available&&Array.isArray(result.entries)?[...result.entries]:[];
         entries.sort((a,b)=>Date.parse(b?.exportedAt||b?.location?.exportedAt||0)-Date.parse(a?.exportedAt||a?.location?.exportedAt||0)||String(b?.location?.checkpointId||'').localeCompare(String(a?.location?.checkpointId||'')));
         lastEntries=freeze(entries);render();
@@ -270,7 +254,7 @@ registry.define('backup-recovery-host',1,()=>{
     async function openNote(target={}){
       const key=String(target.key||''),label=String(target.label||key).slice(0,160);if(!key)return freeze({opened:false,reason:'invalid'});
       if(busy)return freeze({opened:false,reason:'busy'});
-      const sources=[...(input.device.status()?.connected===true?['device-folder']:[]),...input.providers.list().filter(item=>item.connected===true).map(item=>item.id)].map(sourceDescriptor).filter(Boolean);
+      const sources=input.providers.list().filter(item=>item.connected===true).map(item=>sourceDescriptor(item.id)).filter(Boolean);
       if(!sources.length)return freeze({opened:false,reason:'no-source'});
       const sourceId=sources.length===1?sources[0].id:await input.interactions.choose({title:'Earlier versions',message:`Where should Study Director look for earlier versions of ${label}?`,cancelLabel:'Cancel',choices:sources.map(source=>({value:source.id,label:source.label,description:`Backups saved to ${source.label}.`}))});
       if(!sourceId)return freeze({opened:false,reason:'cancelled'});
@@ -294,7 +278,7 @@ registry.define('backup-recovery-host',1,()=>{
       if(!choice)return false;const controller=new AbortController();setOperationBusy(true,controller,choice==='replace'?'restore-version':'bring-in');setHistoryStatus('');setHistoryProgress({message:choice==='replace'?'Preparing restore…':'Preparing comparison…'});
       try{
         const options=freeze({presentation:presentationScope,checkpointId,confirmed:choice==='replace',note:note?note.key:'',missingOnly:choice==='missing',signal:controller.signal,onProgress:value=>{if(activeController===controller&&!controller.signal.aborted)setHistoryProgress(value);}});
-        const result=choice==='replace'?(sourceId==='device-folder'?await input.device.restoreVersion(options):await input.providers.restoreRepositoryProviderVersion(sourceId,options)):(sourceId==='device-folder'?await input.device.bringIn(options):await input.providers.bringInRepositoryProvider(sourceId,options));
+        const result=choice==='replace'?await input.providers.restoreRepositoryProviderVersion(sourceId,options):await input.providers.bringInRepositoryProvider(sourceId,options);
         clearHistoryProgress();
         const saved=dateLabel(location.exportedAt),noteOutcome=note?{'note-missing':`This note isn’t in the backup from ${saved}.`,'note-unchanged':`The backup from ${saved} has the same text as this note.`,'note-kept':'No changes were made.'}[String(result?.reason||'')]:'';
         if(noteOutcome){setHistoryStatus(noteOutcome,true,'cancelled');return false;}
@@ -314,7 +298,7 @@ registry.define('backup-recovery-host',1,()=>{
       const choice=await input.interactions.choose({title:'Remove safety backup?',message:`Remove the temporary Before restore safety backup from ${location.sourceLabel}?`,details:['This does not change your current Study Director data.','After removal, this safety backup can no longer be used to undo that recovery.'],cancelLabel:'Keep safety backup',choices:[{value:'remove',label:'Remove safety backup',kind:'danger',description:'Delete this temporary safety backup from this backup location.'}]});
       if(choice!=='remove')return false;setOperationBusy(true,null,'remove-safety');setHistoryStatus(`Removing safety backup from ${location.sourceLabel}…`);
       try{
-        const result=sourceId==='device-folder'?await input.device.removeSafetyBackup(freeze({checkpointId})):await input.providers.removeProtectedRepositoryProvider(sourceId,checkpointId);
+        const result=await input.providers.removeProtectedRepositoryProvider(sourceId,checkpointId);
         if(!result||result.removed!==true){setHistoryStatus(userMessage(result&&result.error,'The safety backup could not be removed safely.'),false);return false;}
         if(Array.isArray(result.entries)){lastEntries=freeze([...result.entries].sort((a,b)=>Date.parse(b?.exportedAt||b?.location?.exportedAt||0)-Date.parse(a?.exportedAt||a?.location?.exportedAt||0)));render();}
         setHistoryStatus(result.warning?'Safety backup removed. Unused backup storage will be cleaned up later.':'Safety backup removed.');return true;
@@ -324,7 +308,6 @@ registry.define('backup-recovery-host',1,()=>{
     return freeze({
       format:'study-director.backup-recovery-host',contractVersion:1,
       managedRecovery:spec=>coordinator.execute(spec),
-      requestDeviceConvergence,
       history:freeze({subscribePresentation,openSource:sourceId=>openSource(sourceId),openNote,close,cancel:cancelActive,refresh:()=>activeSourceId?collectSource(activeSourceId,{interactive:true}):false,recover,removeSafety,status:()=>freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})}),
       status:()=>freeze({managedRecovery:coordinator.status(),history:freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})})
     });
