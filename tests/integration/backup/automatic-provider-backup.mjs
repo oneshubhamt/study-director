@@ -96,4 +96,12 @@ const cases=[];
   await tick(t,20*MINUTE);assert.equal(t.publishedAt.length,2);
   cases.push('changes during a backup wait for the next cadence');
 }
+{
+  const t=fixture({covered:'2026-10-06T08:00:00.000Z'});await tick(t,1000);t.change();await tick(t,MINUTE);
+  assert.equal(t.publishedAt.length,0);const flushed=t.runtime.flushAutomatic('app-hidden');await tick(t,5000);await flushed;
+  assert.equal(t.publishedAt.length,1,'going to the background backs up waiting changes at once');
+  await t.runtime.flushAutomatic('app-update');await tick(t,5000);assert.equal(t.publishedAt.length,1,'nothing waiting, nothing backed up');
+  assert.equal(t.runtime.automaticWaiting(),false);t.change();assert.equal(t.runtime.automaticWaiting(),true);
+  cases.push('backs up at once when the app goes to the background or updates');
+}
 console.log(JSON.stringify({status:'PASS',suite:'automatic-provider-backup',productionRuntime:true,cases},null,2));

@@ -193,6 +193,12 @@ registry.define('device-backup',1,input=>{
       if(automaticSuspensions.size){publish();return true;}
       return schedule({urgent:options&&options.urgent===true});
     }
+    // Back up waiting changes now: the app going to the background, an update
+    // about to apply. Resolves with the backup's outcome, or null when nothing waits.
+    function flushPending(reason='flush'){
+      if(!connected()||!ownership.canMutate()||automaticSuspensions.size||pendingRevision<=backedUpRevision)return Promise.resolve(null);
+      return automaticJob.run(String(reason||'flush'));
+    }
     async function suspendAutomatic(reason='managed-recovery'){
       const token=`suspend_${(++suspensionSequence).toString(36)}_${nowMs().toString(36)}`,entry=freeze({token,reason:String(reason||'managed-recovery')});
       automaticSuspensions.add(token);const suspension=background.suspend(entry.reason);backgroundSuspensions.set(token,suspension);publish();try{await suspension.settled;return entry;}catch(error){automaticSuspensions.delete(token);backgroundSuspensions.delete(token);background.resume(suspension);publish();throw error;}
@@ -987,7 +993,7 @@ registry.define('device-backup',1,input=>{
     }
     return freeze({
       format:'study-director.device-backup',contractVersion:1,
-      install,status:snapshot,diagnosticMaintenance:()=>maintenanceScheduler.status(),connect,disconnect,backupNow,createProtectedSafety,cancelForeground,restoreVersion,bringIn,history,removeSafetyBackup,scrub,notifyChange,suspendAutomatic,resumeAutomatic,syncOwnership,refreshPermission,rememberAfterStorageReset,repositoryHandle:async()=>{if(!connected())throw new Error('Device Folder is unavailable.');return (await repositoryDirectories()).root;}
+      install,status:snapshot,diagnosticMaintenance:()=>maintenanceScheduler.status(),connect,disconnect,backupNow,createProtectedSafety,cancelForeground,restoreVersion,bringIn,history,removeSafetyBackup,scrub,notifyChange,flushPending,suspendAutomatic,resumeAutomatic,syncOwnership,refreshPermission,rememberAfterStorageReset,repositoryHandle:async()=>{if(!connected())throw new Error('Device Folder is unavailable.');return (await repositoryDirectories()).root;}
     });
   }
   return freeze({format:'study-director.device-backup-module',contractVersion:1,createController});
