@@ -38,6 +38,14 @@ Device Folder (`device-backup.js`) and Drive (`backup-provider.js`) each carry t
 - **Retention.** 15 ordinary versions: Latest, six Daily, four Weekly and four Monthly, all chosen from periods that have a backup. Leftover slots go to the remaining days, widest time gap first. One protected safety version is kept on top of those.
 - **Safety.** Every restore makes a protected safety version first and rolls back locally if anything fails.
 
+## Standalone backup files
+
+A backup file stays one self-contained file covering everything, not a repository: gzip-compressed metadata followed by the attachments as they are (they are already compressed), optionally sealed in authenticated AES-GCM frames. It shares the capture, the codec and the file worker with the engine, and nothing else.
+
+- **Export.** The save dialog opens from the click itself, so the browser allows it and the status line answers at once. After a location is chosen the backup is captured, packaged into a private scratch file, verified by a full self-restore check, optionally encrypted, written to the chosen file and read back; the saved file must match byte for byte. Each step and its byte progress show as it happens. Browsers without a save dialog download the verified file instead. A file saved and read back counts for the backup reminder; a started download does not.
+- **File worker.** One SHA-256 for every file checksum in the app (files up to 32 MB use the browser's own; larger ones stream through a fast incremental one), byte comparison a word at a time, and AES-GCM with four 1 MB frames in flight. Reads stay bounded to one frame.
+- **Measured** on 200 MB of attachments: export 2.5 s (5.3 s encrypted), save and verify through the dialog 4.6 s, check before restore 1.1 s. Before this work: 10.2 s, 17.1 s and 4.9 s.
+
 ## Steps
 
 1. Device Folder storage adapter implementing the adapter interface, with its own tests.
