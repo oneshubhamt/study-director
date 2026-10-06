@@ -974,6 +974,18 @@ async function refreshRepositoryPublicationProtection(state,options){
   if(state.manifestFile)state.manifestFile=freeze({...state.manifestFile,checkProtection:context.checkProtection});
   if(state.commitMarker)state.commitMarker=freeze({...state.commitMarker,checkProtection:context.checkProtection});
 }
+// The newest ordinary version a prepared backup would duplicate, if any: the
+// same content (logical fingerprint) built from exactly the same stored
+// objects, none of them new. A repair that replaces a damaged object, and a
+// protected safety version, always get written.
+function repositoryUnchangedVersion(history,prepared){
+  const base=repositoryPreparedState.get(prepared)?.manifestBase;if(!base||base.retention?.role!=='normal'||prepared.objects.some(entry=>!entry.reused))return null;
+  let newest=null;
+  for(const manifest of Array.isArray(history)?history:[])if((manifest?.retention?.role||'normal')==='normal'&&(!newest||Date.parse(manifest.exportedAt)>Date.parse(newest.exportedAt)))newest=manifest;
+  if(!newest||!newest.logicalFingerprint||newest.logicalFingerprint!==base.logicalFingerprint)return null;
+  const ids=list=>(list||[]).map(entry=>String(entry.objectId)).sort().join('|');
+  return ids(newest.objects)===ids(base.objects)?newest:null;
+}
 async function publishRepositoryCheckpoint(history,options={},transport={}){
   if(!transport||typeof transport!=='object'||typeof transport.writeObject!=='function'||typeof transport.writeManifest!=='function'||typeof transport.commit!=='function')throw new TypeError('Repository publication transport is invalid.');
   const continuation=options.continuation||null,state=continuation?repositoryPublicationStates.get(continuation):{prepared:null,manifestFile:null,commitMarker:null,busy:false,invalidated:false};
@@ -987,6 +999,15 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
     if(prepared){await refreshRepositoryPublicationProtection(state,options);prepared=state.prepared;manifestFile=state.manifestFile;}
     else{prepared=await prepareRepositoryCheckpoint(history,options);state.prepared=prepared;}
     check();
+    // Nothing changed since the newest version: write nothing (no requests,
+    // no history slot), but record that the current changes are backed up.
+    const unchanged=repositoryUnchangedVersion(history,prepared);
+    if(unchanged){
+      const checkpointId=unchanged.checkpoint.checkpointId,publication=freeze({name:checkpointId+'.sdcheckpoint',unchanged:true}),objectsReused=prepared.objects.length;
+      const context=freeze({prepared,manifest:unchanged,sourceRevision:prepared.sourceRevision,exportedAt:unchanged.exportedAt,publication,commitReceipt:null,objectsWritten:0,objectsReused,writtenBytes:0,attachmentBytesWritten:0,unchanged:true});
+      const committedResult=typeof transport.onCommitted==='function'?await postCommit('bookkeeping','The backup was already up to date, but local backup status could not be updated.',()=>transport.onCommitted(context)):null;
+      return freeze({checkpointId,manifest:unchanged,sourceRevision:prepared.sourceRevision,exportedAt:unchanged.exportedAt,publication,commitReceipt:null,objectsWritten:0,objectsReused,writtenBytes:0,attachmentBytesWritten:0,committedResult,cleanupResult:null,unchanged:true,warning:warnings.join(' ')});
+    }
     let objectsWritten=0,objectsReused=0,writtenBytes=0,attachmentBytesWritten=0;
     const freshObjects=[];
     for(const entry of prepared.objects){if(entry.reused)objectsReused+=1;else freshObjects.push(entry);}

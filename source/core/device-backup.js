@@ -884,7 +884,7 @@ registry.define('device-backup',1,input=>{
               setBackupStage('Updating backup status…');reportRecovery('safety-complete','Protected safety backup verified in Device Folder.');
               const completedAt=isoNow(),checkpointName=String(context.publication&&context.publication.name||''),committedSourceRevision=String(context.sourceRevision||currentSourceRevision());
               await persistMetadata(metadataValue({lastBackupAt:completedAt,lastFilename:checkpointName,sourceRevision:committedSourceRevision}));
-              lastFilename=checkpointName;lastBackupAt=completedAt;savedSourceRevision=committedSourceRevision;checkpointCount=Math.max(1,state.valid.length+1);recoveryAvailable=true;
+              lastFilename=checkpointName;lastBackupAt=completedAt;savedSourceRevision=committedSourceRevision;checkpointCount=Math.max(1,state.valid.length+(context.unchanged?0:1));recoveryAvailable=true;
               backedUpRevision=Math.max(backedUpRevision,startedRevision);if(pendingRevision<=backedUpRevision){firstPendingAt=0;clearSchedule();}else firstPendingAt=postStartPendingAt||nowMs();
               resetAutomaticRetry();repository.markCompleted({recoveryCopy:{type:'provider',id:'device-folder',label:'Device Folder',sourceRevision:committedSourceRevision}});mode='connected';presentationState.message='';mark('device-checkpoint-committed',{reason});return freeze({completedAt,checkpointName});
             },
@@ -899,7 +899,7 @@ registry.define('device-backup',1,input=>{
         let fallbackCleanup=null;
         if(maintenanceNeeded&&!maintenanceQueued){setBackupStage('Finishing required backup maintenance…');try{const servicedPending=await maintenanceIntent.read({throwOnError:true});fallbackCleanup=await cleanupDeviceRepositorySafely(directories);const followUp=await maintenanceScheduler.adopt(fallbackCleanup,{trigger:'post-publication-fallback',pending:servicedPending});maintenanceQueued=followUp.pending===true;}catch(error){capture('device-backup.repository-maintenance-fallback',error);maintenanceQueued=await maintenanceScheduler.request('error',MAINTENANCE_POLICY.errorMs,{mode:'replace'})===true;}}
         const cleanup=published.cleanupResult||{},committed=published.committedResult||{},warning=[String(published.warning||''),String(cleanup.warning||''),String(fallbackCleanup&&fallbackCleanup.warning||'')].filter(Boolean).join(' ');
-        return freeze({ok:true,reason,checkpointId:published.checkpointId,manifest:published.manifest,sourceRevision:published.sourceRevision,lastBackupAt:String(committed.completedAt||lastBackupAt),objectsWritten:published.objectsWritten,objectsReused:published.objectsReused,writtenBytes:published.writtenBytes,attachmentBytesWritten:published.attachmentBytesWritten,gcRemoved:Number(fallbackCleanup&&fallbackCleanup.gcRemoved)||0,checkpoints:checkpointCount,maintenancePending:maintenanceQueued,warning});
+        return freeze({ok:true,reason,unchanged:published.unchanged===true,checkpointId:published.checkpointId,manifest:published.manifest,sourceRevision:published.sourceRevision,lastBackupAt:String(committed.completedAt||lastBackupAt),objectsWritten:published.objectsWritten,objectsReused:published.objectsReused,writtenBytes:published.writtenBytes,attachmentBytesWritten:published.attachmentBytesWritten,gcRemoved:Number(fallbackCleanup&&fallbackCleanup.gcRemoved)||0,checkpoints:checkpointCount,maintenancePending:maintenanceQueued,warning});
       }catch(error){
         if(directories&&publicationLease)await endDevicePublication(directories,publicationLease);
         const cancelled=error?.name==='AbortError'||error?.code==='DEVICE_FOREGROUND_CANCELLED'||error?.code==='STUDY_DIRECTOR_IMPORT_CANCELLED';
@@ -935,7 +935,7 @@ registry.define('device-backup',1,input=>{
         activeBackupRevision=0;postStartPendingAt=0;
         if(automatic&&result?.cancelled&&String(result.error?.code||signal?.reason?.code||'')==='DEVICE_AUTOMATIC_PREEMPTED'){mode=connected()?'connected':mode;presentationState.message='';}
         clearBackupStage();
-        presentationScope?.finish({lifecycle:result?.ok?'succeeded':result?.cancelled?'cancelled':'failed',message:result?.ok?'External backup verified in Device Folder.':result?.cancelled?'Backup cancelled safely.':presentationState.message||'Device Folder backup could not be completed. Retry or reconnect the folder.'});presentationScope=null;
+        presentationScope?.finish({lifecycle:result?.ok?'succeeded':result?.cancelled?'cancelled':'failed',message:result?.ok?(result.unchanged?'Device Folder already has your latest data.':'External backup verified in Device Folder.'):result?.cancelled?'Backup cancelled safely.':presentationState.message||'Device Folder backup could not be completed. Retry or reconnect the folder.'});presentationScope=null;
         busy=false;publish();
         // Publication owns its success, locked and write-failure retry policy.
         if(automaticScope)automaticScope.release();if(foreground)foreground.release({resume:false});

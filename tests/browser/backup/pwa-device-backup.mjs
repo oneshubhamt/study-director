@@ -94,6 +94,12 @@ try{
   assert.equal(first.checkpointNames.length,1);assert.match(first.checkpointNames[0],/^cp_[a-f0-9]{32}\.sdcheckpoint$/u);
   assert.ok(first.size>0);assert.equal(first.format,'study-director.backup-repository-checkpoint');assert.equal(first.version,5);assert.ok(first.objectNames.length>0);assert.equal(first.pickerCalls,1);assert.match(first.status,/^On(?:\s|$)/);
 
+  // Nothing changed: Back up now confirms the folder is current and adds no version.
+  await page.evaluate(`document.getElementById('device-backup-now').click()`);
+  await waitFor(()=>page.evaluate(`!__DeviceBackupDebug.DeviceBackup.status().busy&&/already has your latest data/.test(document.querySelector('.library-data-drawer')?.textContent||'')`),{timeout:90000,label:'unchanged backup confirmed'});
+  assert.equal(await page.evaluate('__DeviceBackupDebug.DeviceBackup.status().checkpointCount'),1,'an unchanged backup adds no version');
+  // A real change gets its own version.
+  await page.evaluate(`(async()=>{__DeviceBackupDebug.AppData.notes.update('Rotation','Rotation','A change worth a new version');await __DeviceBackupDebug.AppData.notes.flush();})()`);
   await page.evaluate(`document.getElementById('device-backup-now').click()`);
   await waitFor(()=>page.evaluate(`(()=>{const state=__DeviceBackupDebug.DeviceBackup.status();return !state.busy&&state.checkpointCount===2&&/^cp_[a-f0-9]{32}\.sdcheckpoint$/.test(state.lastFilename||'');})()`),{timeout:90000,label:'second verified repository checkpoint'});
   const rotation=await page.evaluate(`(async()=>{const root=await navigator.storage.getDirectory(),repo=await root.getDirectoryHandle('Study-Director-Automatic-Backup-Repository'),checkpoints=await repo.getDirectoryHandle('checkpoints'),out=[];for await(const [name,handle] of checkpoints.entries()){const file=await handle.getFile();out.push({name,size:file.size});}return out.sort((a,b)=>a.name.localeCompare(b.name));})()`);

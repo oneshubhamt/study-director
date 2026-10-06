@@ -890,7 +890,17 @@ try{
   assert.equal(f.stored.size,writes);await f.continuation.release();for(const blob of f.payloads)assert.equal(releasedFiles.filter(value=>value===blob).length,1);publicationContinuationCases.push(boundary);
  }
  const base=await retainedPublicationFixture('manifest',false),baseline=await base.run();await base.continuation.release();
- const reused=await retainedPublicationFixture('manifest',false,{history:[baseline.manifest],availableObjectIds:new Set(baseline.manifest.objects.map(entry=>entry.objectId))});assert.ok(reused.prepared.objects.every(entry=>entry.reused));
+ // The same content again as an ordinary version adds nothing: no transport
+ // write, the existing version reported as current, its change time covered.
+ {
+  const unexpectedWrite=()=>{throw new Error('an unchanged backup writes nothing');};let covered=null;
+  const duplicateResult=await runtime.repository.publish([baseline.manifest],{interactive:false,availableObjectIds:new Set(baseline.manifest.objects.map(entry=>entry.objectId))},freeze({writeObject:unexpectedWrite,writeManifest:unexpectedWrite,commit:unexpectedWrite,onCommitted:async context=>{covered=context;}}));
+  assert.equal(duplicateResult.unchanged,true);assert.equal(duplicateResult.checkpointId,baseline.checkpointId);assert.equal(duplicateResult.objectsWritten,0);
+  assert.equal(covered.unchanged,true);assert.equal(covered.sourceRevision,sourceRevision,'the current change time is recorded as backed up');publicationContinuationCases.push('unchanged-content-skipped');
+ }
+ // A protected safety version is always written, so resuming one whose reused
+ // object disappeared must still fail closed.
+ const reused=await retainedPublicationFixture('manifest',false,{history:[baseline.manifest],availableObjectIds:new Set(baseline.manifest.objects.map(entry=>entry.objectId)),retention:{role:'before-restore'}});assert.ok(reused.prepared.objects.every(entry=>entry.reused));
  await assert.rejects(()=>reused.run({availableObjectIds:new Set()}),error=>error.code==='BACKUP_REPOSITORY_BASE_CHANGED');assert.equal(reused.manifests.length,1,'a lost reuse dependency cannot authorize another manifest publication');assert.equal(reused.continuation.status().pending,false);await reused.continuation.release();publicationContinuationCases.push('missing-reused-object');
  for(const changed of [false,true]){
   const safety=await retainedPublicationFixture('object',true,{retention:{role:'before-restore'}});assert.equal(safety.continuation.status().role,'before-restore');
