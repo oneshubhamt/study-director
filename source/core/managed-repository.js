@@ -842,6 +842,15 @@ async function readRepositoryStructuredObject(manifest,entry,readObject,options=
     });
   }finally{await opened.release().catch(()=>{});}
 }
+// An attachment already on this device with the same size and checksum is
+// read from here instead of the backup location; its bytes are hashed and
+// must match the verified manifest, so nothing is trusted unchecked.
+async function localRepositoryAttachment(descriptor,{signal=null}={}){
+  let local=null;try{local=await AssetData.get(descriptor.assetId);}catch{return null;}
+  if(!(local instanceof Blob)||local.size!==Number(descriptor.size))return null;
+  throwIfImportAborted(signal);
+  return await Exports.run('checksum',{value:local},{signal})===descriptor.checksum?local:null;
+}
 async function openRepositoryAttachment(manifest,entry,descriptor,readObject,options={}){
   if(entry.kind!=='attachment'||entry.compression!=='none')throw new Error('Repository attachment object metadata is invalid.');
   const opened=await openRepositoryObject(manifest,entry,readObject,options);
@@ -855,7 +864,9 @@ async function openRepositoryAttachment(manifest,entry,descriptor,readObject,opt
 // With note set, only the objects holding that note and the images its text
 // uses are read. Each is still verified against the verified manifest; the
 // whole-checkpoint cross-checks need every object and are left out.
-async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectValue,{interactive=true,signal=null,note=''}={}){
+// localAttachments (restores only) lets attachments already on this device be
+// used instead of downloaded; verifying the backup copy itself never does.
+async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectValue,{interactive=true,signal=null,note='',localAttachments=false}={}){
   const manifest=validateRepositoryManifest(manifestValue),readObject=repositoryReadPort(readObjectValue),noteKey=String(note||'');
   throwIfImportAborted(signal);
   if(manifest.installationId&&manifest.installationId!==manifest.checkpoint.originInstallationId)throw new Error('Repository checkpoint installation provenance is inconsistent.');
@@ -899,10 +910,11 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
       const entry=objectById.get(raw.objectId);
       if(!entry||entry.kind!=='attachment')throw new Error(`Repository attachment ${raw.assetId} references an unavailable object.`);
       referencedAttachmentIds.add(entry.objectId);
+      const descriptor=freeze({assetId:raw.assetId,mimeType:raw.mimeType,size:raw.size,checksum:raw.checksum,name:raw.name,library:raw.library});
+      if(localAttachments&&entry.fingerprint===raw.checksum&&entry.sourceBytes===raw.size){const local=await localRepositoryAttachment(raw,{signal});if(local){assetItems.push(freeze({descriptor,blob:local}));continue;}}
       let opened=attachmentLeases.get(entry.objectId);
       if(!opened){opened=await openRepositoryAttachment(manifest,entry,raw,readObject,{interactive,signal});attachmentLeases.set(entry.objectId,opened);}
       else if(opened.blob.size!==raw.size||entry.fingerprint!==raw.checksum)throw new Error(`Repository attachment ${raw.assetId} shares an object with inconsistent metadata.`);
-      const descriptor=freeze({assetId:raw.assetId,mimeType:raw.mimeType,size:raw.size,checksum:raw.checksum,name:raw.name,library:raw.library});
       assetItems.push(freeze({descriptor,blob:opened.blob}));
     }
     if(!noteKey)for(const entry of manifest.objects)if(entry.kind==='attachment'&&!referencedAttachmentIds.has(entry.objectId))throw new Error('Repository checkpoint contains an unreferenced attachment object.');
@@ -923,7 +935,7 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
 async function inspectRepositoryCheckpoint(manifest,readObject,options={}){
   const signal=options.signal||currentImportSignal()||null,managedRecovery=options.managedRecovery;
   if(managedRecovery!==undefined&&managedRecovery!==null&&typeof managedRecovery!=='function')throw new TypeError('Managed repository recovery orchestration is invalid.');
-  const normalizedManifest=validateRepositoryManifest(manifest),reconstructed=await reconstructVerifiedRepositoryCheckpoint(normalizedManifest,readObject,{interactive:options.interactive!==false,signal,note:typeof options.note==='string'?options.note:''});
+  const normalizedManifest=validateRepositoryManifest(manifest),reconstructed=await reconstructVerifiedRepositoryCheckpoint(normalizedManifest,readObject,{interactive:options.interactive!==false,signal,note:typeof options.note==='string'?options.note:'',localAttachments:true});
   try{
     return await inspectVerifiedCapture(reconstructed.capture,freeze({signal,release:reconstructed.release,sourceEncrypted:normalizedManifest.encrypted,repositoryManifest:normalizedManifest,repositoryCommitted:options.committed===true,managedRecovery:managedRecovery||null,managedProgress:typeof options.managedProgress==='function'?options.managedProgress:null,verifiedSourceBytes:reconstructed.verifiedSourceBytes,storedBytes:reconstructed.storedBytes}));
   }catch(error){await reconstructed.release().catch(()=>{});throw error;}

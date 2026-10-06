@@ -128,6 +128,8 @@ assert.equal(manifest.protectedCheckpointManifest.version,2);assert.equal(manife
 reconciliationBase=null;reconciliationBaseNotes=Object.create(null);
 
 // Managed inspection must feed the private verified-snapshot path directly. It must not materialize or reopen a temporary portable container.
+// The attachment is absent locally here, so the candidate reads it from the repository under a lease.
+const localAssetsBeforeLeaseCheck=new Map(assets);assets.clear();
 const managedPortableBefore=freeze({...portablePathMetrics}),candidate=await runtime.repository.inspect(manifest,leasedReadObject,{interactive:false,committed:true});
 assert.equal(portablePathMetrics.containers,managedPortableBefore.containers,'Managed repository inspection must not encode a temporary .sdbackup container.');
 assert.equal(portablePathMetrics.inspections,managedPortableBefore.inspections,'Managed repository inspection must not reopen/decode a temporary .sdbackup container.');
@@ -142,6 +144,7 @@ assert.ok(standaloneContainers>managedPortableBefore.containers,'Standalone chec
 assert.ok(portablePathMetrics.inspections>standaloneInspections,'Standalone .sdbackup inspection must still use the portable decoder.');
 await standaloneCandidate.release();await standalone.release();
 
+for(const [id,blob] of localAssetsBeforeLeaseCheck)assets.set(id,blob);
 // Replace local state, then prove the unified reconciliation path restores from the repository candidate without a parallel conflict engine.
 records=[];notes={};assets.clear();currentPersonal=localPersonal;deletions=[];
 const result=await runtime.repository.bringIn(candidate);
@@ -168,6 +171,27 @@ for(const objectId of attachmentObjectIds)assert.equal(leaseReleaseCounts.get(ob
   assert.equal(undecided.cancelled,true);assert.equal(undecided.reason,'needs-decision');
   assert.equal(records[0].reflection,'local different day');assert.equal(assets.size,0,'nothing is added when a decision is needed');
   ({records,notes,currentPersonal,deletions,activeSession,scheduleText}=saved);assets.clear();for(const [id,blob] of saved.assets)assets.set(id,blob);
+}
+
+// A restore reads attachments already on this device (same size and checksum,
+// hashed again here) from local storage instead of the backup location;
+// verifying the backup copy itself still reads every attachment object.
+{
+  const attachmentEntries=manifest.objects.filter(entry=>entry.kind==='attachment'),readIds=new Set(),countingReader=async entry=>{readIds.add(entry.objectId);return readObject(entry);};
+  assert.ok(attachmentEntries.length>0);const savedAssets=new Map(assets);
+  assets.clear();assets.set(assetId,image);
+  const local=await runtime.repository.inspect(manifest,countingReader,{interactive:false,committed:true});
+  assert.ok(attachmentEntries.every(entry=>!readIds.has(entry.objectId)),'an attachment already here is not downloaded again');await local.release();
+  readIds.clear();assets.clear();
+  const remote=await runtime.repository.inspect(manifest,countingReader,{interactive:false,committed:true});
+  assert.ok(attachmentEntries.every(entry=>readIds.has(entry.objectId)),'a missing attachment is read from the backup');await remote.release();
+  readIds.clear();assets.set(assetId,new Blob([new Uint8Array([1,2,3])],{type:'image/png'}));
+  const different=await runtime.repository.inspect(manifest,countingReader,{interactive:false,committed:true});
+  assert.ok(attachmentEntries.every(entry=>readIds.has(entry.objectId)),'a local file with different bytes is never used');await different.release();
+  readIds.clear();assets.clear();assets.set(assetId,image);
+  await runtime.repository.verifyCheckpoint(manifest,countingReader,{interactive:false});
+  assert.ok(attachmentEntries.every(entry=>readIds.has(entry.objectId)),'verifying the backup copy reads its own attachment objects');
+  assets.clear();for(const [id,blob] of savedAssets)assets.set(id,blob);
 }
 
 // Restoring one note from a backup version reviews only that note, always side
