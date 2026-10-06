@@ -517,8 +517,11 @@ registry.define('backup-provider',1,input=>{
     return available;
   }
   async function repositoryProviderPublicationBase(selected,{signal=null}={}){
+    // The object listing does not depend on the version listing, so both
+    // requests go out together; an empty repository simply ignores it.
+    const objectListing=repositoryObjectInventory(selected,{signal});objectListing.catch(()=>{});
     const inventory=await repositoryProviderInventory(selected,{signal});if(inventory.overflow)throw new Error('Backup history could not be read completely. Backup was stopped safely.');
-    const objectInventoryTask=inventory.pairs.length?repositoryObjectInventory(selected,{signal}):Promise.resolve(null);
+    const objectInventoryTask=inventory.pairs.length?objectListing:objectListing.then(()=>null,()=>null);
     let latest=null,verificationFailures=0;
     for(const pair of [...inventory.pairs].reverse()){
       try{latest=await verifyRepositoryInventoryPair(selected,pair,{interactive:false,signal});break;}
@@ -746,7 +749,9 @@ registry.define('backup-provider',1,input=>{
           progress(retention?.role==='before-restore'?'safety-upload':'upload',retention?.role==='before-restore'?`Saving protected safety backup in ${selected.label}…`:`Uploading backup data to ${selected.label}…`,{current:objectCompleted,total:objectCount,completedBytes:uploadedBytes,totalBytes});return item;
         },
         writeManifest:async file=>{
-          requireBackupMutationControl('saving to '+selected.label);await file.checkProtection?.();await file.checkSource?.();if(publicationLease)await assertRepositoryPublication(selected,publicationLease);
+          // An uncommitted manifest is invisible to every reader, so the lease is
+          // asserted once, before the commit that makes the version real.
+          requireBackupMutationControl('saving to '+selected.label);await file.checkProtection?.();await file.checkSource?.();
           OperationDiagnostics.mark('provider-manifest-upload-start',{provider:selected.id});progress(retention?.role==='before-restore'?'safety-manifest':'manifest',retention?.role==='before-restore'?`Finalizing protected safety backup in ${selected.label}…`:`Uploading and verifying the backup version in ${selected.label}…`);
           const digest=await Exports.run('checksum',{value:file.blob},{signal}),checkpointId=file.manifest.checkpoint.checkpointId;let item=null;
           try{
