@@ -135,7 +135,8 @@ registry.define('device-folder-storage',1,()=>{
       if(!written||written.size!==file.blob.size){try{await directory.removeEntry(name);}catch{}throw new Error('The Device Folder did not keep the complete backup file.');}
       const expected=String(file.digest||''),actual=await input.checksum(written,{});
       if(expected&&actual!==expected){try{await directory.removeEntry(name);}catch{}throw new Error('A Device Folder backup file failed verification after it was written.');}
-      return describe(file.kind,file.id,name,written,await scope(),null);
+      // The read-back checksum is the folder's receipt, as Drive's server checksum is.
+      return freeze({...await describe(file.kind,file.id,name,written,await scope(),null),serverDigest:actual});
     }
     async function remove(item){
       const spec=KINDS[item&&item.kind];if(!spec||!spec.pattern.test(String(item.id||'')+spec.suffix))throw new Error('A Study Director backup deletion request has an invalid identity.');
@@ -178,8 +179,22 @@ registry.define('device-folder-storage',1,()=>{
       const spec=LOCKS[kind],name=String(lease&&lease.name||'');if(!spec.pattern.test(name))return false;
       const {objects}=await directories();try{await objects.removeEntry(name);return true;}catch(error){if(error&&error.name==='NotFoundError')return false;throw error;}
     }
+    // An operation view checks its signal and protection before every file
+    // call, so long cleanups can keep their lease renewed while listing.
+    function beginOperation({signal=null,checkProtection=null}={}){
+      const guard=async()=>{assertCurrent(signal);await checkProtection?.();assertCurrent(signal);};
+      return freeze({
+        list:async options=>{await guard();return list({...options,signal:options?.signal||signal});},
+        download:async(item,options={})=>{await guard();return download(item,{...options,signal:options.signal||signal});},
+        delete:async item=>{await guard();return remove(item);},
+        upload:async file=>{await guard();return upload(file);},
+        scope,historyReadConcurrency:8,
+        beginPublication:()=>beginLock('publication'),listPublications:()=>listLocks('publication'),assertPublication:lease=>assertLock('publication',lease),endPublication:lease=>endLock('publication',lease),
+        beginMaintenance:()=>beginLock('maintenance'),listMaintenances:()=>listLocks('maintenance'),assertMaintenance:lease=>assertLock('maintenance',lease),renewMaintenance:lease=>renewLock('maintenance',lease),endMaintenance:lease=>endLock('maintenance',lease)
+      });
+    }
     return freeze({
-      list,upload,download,delete:remove,scope,historyReadConcurrency:8,
+      list,upload,download,delete:remove,scope,beginOperation,historyReadConcurrency:8,
       beginPublication:()=>beginLock('publication'),listPublications:()=>listLocks('publication'),assertPublication:lease=>assertLock('publication',lease),endPublication:lease=>endLock('publication',lease),
       beginMaintenance:()=>beginLock('maintenance'),listMaintenances:()=>listLocks('maintenance'),assertMaintenance:lease=>assertLock('maintenance',lease),renewMaintenance:lease=>renewLock('maintenance',lease),endMaintenance:lease=>endLock('maintenance',lease)
     });

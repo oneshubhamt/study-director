@@ -81,7 +81,7 @@ registry.define('backup-provider',1,input=>{
     let intent=providerMaintenanceIntents.get(id);if(intent)return intent;const coordinator=providerBackground(selected);
     intent=coordinator.maintenanceIntent(freeze({capture:(phase,error)=>AppDiagnostics.capture('backup-provider.repository-maintenance-'+phase,error,'warn'),clear:expected=>maintenanceHooks.clear(id,expected),mark:(state,expected)=>maintenanceHooks.mark(id,freeze({...state,repositoryScope:repositoryScopeByProvider.get(id)||''}),expected),read:()=>maintenanceHooks.read(id),scope:()=>repositoryScopeByProvider.get(id)||null,selectRetention:RepositoryCheckpointPipeline.selectRetention}));providerMaintenanceIntents.set(id,intent);return intent;
   }
-  const userProviderMessage=(error,fallback)=>{const code=String(error&&error.code||'');if(code==='STUDY_DIRECTOR_REPOSITORY_MAINTENANCE_BUSY'||code==='STUDY_DIRECTOR_RECOVERY_MAINTENANCE_YIELD_TIMEOUT')return 'Another Study Director device is still finishing Google Drive backup maintenance. Wait a moment, then retry the restore.';if(code==='STUDY_DIRECTOR_REPOSITORY_MAINTENANCE_UNCERTAIN')return 'Google Drive backup maintenance state could not be verified safely. Retry after the other device has finished its backup work.';const raw=String(error&&error.message||error||'').trim();if(!raw)return fallback;return /\b(?:repository|checkpoint|manifest|commit marker|reconciliation)\b/iu.test(raw)?fallback:raw;};
+  const userProviderMessage=(error,fallback)=>{const code=String(error&&error.code||'');if(code==='STUDY_DIRECTOR_REPOSITORY_MAINTENANCE_BUSY'||code==='STUDY_DIRECTOR_RECOVERY_MAINTENANCE_YIELD_TIMEOUT')return 'Another Study Director device is still finishing backup maintenance. Wait a moment, then retry the restore.';if(code==='STUDY_DIRECTOR_REPOSITORY_MAINTENANCE_UNCERTAIN')return 'Backup maintenance state could not be verified safely. Retry after the other device has finished its backup work.';const raw=String(error&&error.message||error||'').trim();if(!raw)return fallback;return /\b(?:repository|checkpoint|manifest|commit marker|reconciliation)\b/iu.test(raw)?fallback:raw;};
   const providerBackgroundAvailability=selected=>{
     const local=ports.ownership.canRunBackground();if(local!==true)return String(local||'awaiting-control');
     if(!selected||typeof selected.backgroundAvailable!=='function')return 'awaiting-connection';
@@ -165,6 +165,8 @@ registry.define('backup-provider',1,input=>{
     connected:typeof config.connected==='function'?config.connected:null,
     connectionExpiresAt:typeof config.connectionExpiresAt==='function'?config.connectionExpiresAt:null,
     subscribeConnection:typeof config.subscribeConnection==='function'?config.subscribeConnection:null,
+    // hosted: the app renders this location's controls and connection notices.
+    hosted:config.hosted===true,
     disconnectLabel:clampText(config.disconnectLabel||'',60),
     disconnect:typeof config.disconnect==='function'?config.disconnect:null,
     release:typeof config.release==='function'?config.release:null,
@@ -537,7 +539,7 @@ registry.define('backup-provider',1,input=>{
     const expected=String(entry.storedChecksum||'').toLowerCase(),prefix=`Verifying object ${index} of ${count} in ${selected.label}`;
     const report=(stage,message,details={})=>{if(!signal?.aborted&&typeof onProgress==='function')onProgress(stage,message,details);};
     if(item.serverDigest){
-      if(item.serverDigest!==expected)throw new Error('Google Drive server SHA-256 did not match the uploaded repository object.');
+      if(item.serverDigest!==expected)throw new Error('The stored checksum did not match the uploaded repository object.');
       report('verify',`${prefix}… ✓`);return true;
     }
     const transferProgress=(stage,label)=>progress=>{const loadedBytes=Math.max(0,Number(progress?.loaded)||0),activeBytes=Math.max(1,Number(progress?.total)||Number(entry.storedBytes)||1);report(stage,`${prefix} · ${label}`,{loadedBytes,activeBytes});};
@@ -548,7 +550,7 @@ registry.define('backup-provider',1,input=>{
   async function verifyUploadedRepositoryManifest(selected,item,expected,expectedDigest='',signal=null){
     const localDigest=String(expectedDigest||item.digest||'').toLowerCase();
     if(item.serverDigest){
-      if(!localDigest||item.digest!==localDigest||item.serverDigest!==localDigest)throw new Error('Google Drive server SHA-256 did not match the uploaded backup version.');
+      if(!localDigest||item.digest!==localDigest||item.serverDigest!==localDigest)throw new Error('The stored checksum did not match the uploaded backup version.');
       return expected;
     }
     const lease=repositoryDownloadLease(await selected.repository.download(item,Object.freeze({signal})));
@@ -566,7 +568,7 @@ registry.define('backup-provider',1,input=>{
   async function verifyUploadedRepositoryCommit(selected,item,expected,signal=null){
     const localDigest=String(expected&&expected.digest||item.digest||'').toLowerCase();
     if(item.serverDigest){
-      if(!localDigest||item.digest!==localDigest||item.serverDigest!==localDigest)throw new Error('Google Drive server SHA-256 did not match the uploaded backup commit.');
+      if(!localDigest||item.digest!==localDigest||item.serverDigest!==localDigest)throw new Error('The stored checksum did not match the uploaded backup commit.');
       return Object.freeze({format:expected.format,version:expected.version,checkpointId:expected.checkpointId,exportedAt:expected.exportedAt,sourceRevision:expected.sourceRevision,manifestVersion:expected.manifestVersion});
     }
     const lease=repositoryDownloadLease(await selected.repository.download(item,Object.freeze({signal})));
@@ -596,7 +598,7 @@ registry.define('backup-provider',1,input=>{
   }
   function repositoryMaintenanceError(safety){
     const uncertain=Number(safety&&safety.invalid)||0;
-    const error=new Error(uncertain?'Google Drive repository maintenance state could not be verified safely. Retry after the other device finishes its backup work.':'Google Drive repository maintenance is still yielding to a foreground Study Director operation.');
+    const error=new Error(uncertain?'Backup maintenance state could not be verified safely. Retry after the other device finishes its backup work.':'Backup maintenance is still yielding to a foreground Study Director operation.');
     error.code=uncertain?'STUDY_DIRECTOR_REPOSITORY_MAINTENANCE_UNCERTAIN':'STUDY_DIRECTOR_REPOSITORY_MAINTENANCE_BUSY';
     error.repositoryMaintenance=freeze({reason:String(safety&&safety.reason||''),active:Math.max(0,Number(safety&&safety.active)||0),invalid:uncertain,nextEligibleAt:String(safety&&safety.nextEligibleAt||'')});
     return error;
@@ -892,6 +894,7 @@ registry.define('backup-provider',1,input=>{
   // again until they sign in and it ends again. Anyone else is never told.
   function connectionChanged(selected){
     const state=automaticState(selected),connected=providerConnected(selected),was=state.connected;state.connected=connected;
+    if(selected.hosted)return;
     if(connected){connectedOnceByProvider.add(selected.id);state.noticeShown=false;presentation.resolve(selected.id,'permission');return;}
     if(!was||state.noticeShown||!automaticEnabled(selected))return;
     state.noticeShown=true;presentation.notice(selected.id,'permission',`${selected.label} sign-in expired.`);
@@ -1048,6 +1051,22 @@ registry.define('backup-provider',1,input=>{
       publishPresent:async result=>{progress('finalize','Finalizing recovery…');return managedProviderPresent(providerSelected,result,{sourceNeeded:mode==='bring-in',sourceCheckpoint:mode==='restore-version'?row.item.id:''});}
     }));
     return RepositoryCheckpointPipeline.inspect(row.manifest,readObject,{interactive:!quiet,signal:operation.signal,committed:true,managedRecovery,managedProgress:onProgress,...(note&&mode==='bring-in'?{note}:{})});
+  }
+  // A protected safety version before a destructive action (Clear Library).
+  // It is written in the foreground, preempting background work.
+  async function createProtectedSafety(id,purpose='before-clear-library',options={}){
+    const selected=providers.get(safeId(id));if(!selected||!selected.repository)return freeze({verified:false,skipped:true,reason:'unavailable'});
+    if(!['before-restore','before-combine','before-clear-library'].includes(String(purpose)))throw new TypeError('Protected safety purpose is invalid.');
+    if(busy)return freeze({verified:false,skipped:true,reason:'busy'});
+    if(!providerConnected(selected))return freeze({verified:false,skipped:true,reason:'not-connected'});
+    const foreground=beginForeground(selected,options&&options.signal||null);if(!foreground)return freeze({verified:false,skipped:true,reason:'busy'});busy=true;
+    try{
+      await foreground.settled;
+      const saved=await saveRepositoryProvider(selected,{interactive:true,retention:{role:'before-restore',purpose},signal:foreground.signal,preemptBackground:false,foregroundPriority:true});
+      const retention=saved&&saved.manifest&&saved.manifest.retention,protectedUntil=Date.parse(retention&&retention.protectedUntil||'');
+      if(!saved?.checkpointId||retention?.role!=='before-restore'||!Number.isFinite(protectedUntil)||protectedUntil<=Date.now())throw new Error(`The protected safety backup in ${selected.label} could not be verified.`);
+      return freeze({verified:true,checkpointId:saved.checkpointId,protectedUntil:new Date(protectedUntil).toISOString(),sourceRevision:String(saved.sourceRevision||''),source:selected.id,purpose:String(purpose)});
+    }finally{busy=false;foreground.release();}
   }
   async function removeProtectedRepositoryProvider(id,checkpointId){
     if(busy)return freeze({removed:false,reason:'busy'});
@@ -1375,7 +1394,7 @@ registry.define('backup-provider',1,input=>{
     const {host}=elements();
     if(!host)return;
     const fragment=document.createDocumentFragment();
-    [...providers.values()].forEach(item=>{
+    [...providers.values()].filter(item=>!item.hosted).forEach(item=>{
       const external=presentation.read(item.id,'external-backup'),operation=foregroundView();
       const connected=providerConnected(item),wasConnected=connectedOnceByProvider.has(item.id),rowStatus=document.getElementById(`backup-provider-row-status-${item.id}`),active=busy&&operation?.providerId===item.id,working=active?operation:external?.lifecycle==='running'?external:null;if(connected)connectedOnceByProvider.add(item.id);
       if(rowStatus){rowStatus.textContent=presentation.locationLabel(item.id,{connected,wasConnected,busy:!!working,foregroundKind:working?.kind});rowStatus.classList.toggle('protected',connected&&!working);rowStatus.classList.toggle('standard',!connected||!!working);}
@@ -1397,7 +1416,7 @@ registry.define('backup-provider',1,input=>{
     renderButtons();
     return true;
   }
-  function list(){return Object.freeze([...providers.values()].map(item=>Object.freeze({id:item.id,label:item.label,connected:providerConnected(item)})));}
+  function list(){return Object.freeze([...providers.values()].filter(item=>!item.hosted).map(item=>Object.freeze({id:item.id,label:item.label,connected:providerConnected(item)})));}
   function backgroundStatus(){return freeze([...providerBackgroundCoordinators.entries()].flatMap(([id,coordinator])=>[freeze({job:id+' maintenance',...(providerMaintenanceSchedulers.get(id)?.status()||coordinator.jobStatus('maintenance'))}),freeze({job:id+' integrity',...(providerIntegritySchedulers.get(id)?.status()||coordinator.jobStatus('integrity'))}),freeze({job:id+' convergence',...coordinator.jobStatus('convergence')})]));}
   function diagnosticConnections(){return freeze([...providers.values()].map(selected=>freeze({id:selected.id,connected:providerConnected(selected),scopeBound:repositoryScopeByProvider.has(selected.id),retryAttempt:providerConvergenceRetryAttempts.get(selected.id)||0,retryBackoffCapped:(providerConvergenceRetryAttempts.get(selected.id)||0)>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length})));}
   function status(){const overlay=elements().overlay;return Object.freeze({busy:busy||preparing,cancellable:!!foregroundController&&!foregroundController.signal.aborted,preparing,activeId,open:!!overlay?.classList.contains('on'),operation:foregroundView()?Object.freeze({...foregroundView()}):null});}
@@ -1417,7 +1436,7 @@ registry.define('backup-provider',1,input=>{
     });
   }
   install();
-  return Object.freeze({register,list,open,close,status,backgroundStatus,diagnosticConnections,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:renderButtons,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},subscribePresentation,cancelForeground,history:historyRepositoryProvider,backup:backupProvider,backupRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeProtectedRepositoryProvider,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureConvergencePropagation,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,suspendBackground,repositoryScope});
+  return Object.freeze({register,list,open,close,status,backgroundStatus,diagnosticConnections,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:renderButtons,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},subscribePresentation,cancelForeground,history:historyRepositoryProvider,backup:backupProvider,backupRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeProtectedRepositoryProvider,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureConvergencePropagation,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,suspendBackground,repositoryScope});
 
   }
   return freeze({format:'study-director.backup-provider-module',contractVersion:1,createRuntime});
