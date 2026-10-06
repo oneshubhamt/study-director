@@ -162,12 +162,18 @@ registry.define('repositories',1,()=>{
     function markStorageHealthError(source,reason){onStorageError(source,reason);}
     function canonicalRuntimeError(message){const error=new Error(message);error.code='STUDY_DIRECTOR_NONCANONICAL_RUNTIME';return error;}
     function isCanonicalRuntimeError(error){return error&&error.code==='STUDY_DIRECTOR_NONCANONICAL_RUNTIME';}
+    // One change clock for every save: the mutation epoch written inside each
+    // transaction and the commit notice after it both take its next value, so
+    // a later change always has a later time, even if the system clock goes back.
+    let changeClockMs=0;
+    function nextChangeAt(){changeClockMs=Math.max(Date.now(),changeClockMs+1);return new Date(changeClockMs).toISOString();}
+    function seedChangeClock(value){const ms=Date.parse(String(value||''));if(Number.isFinite(ms))changeClockMs=Math.max(changeClockMs,ms);return changeClockMs?new Date(changeClockMs).toISOString():'';}
     function reportCanonicalCommit(entityType,operation='upsert',value=null,{backupCapture=false}={}){
       try{
         onCanonicalCommit(freeze({
           format:'study-director.canonical-commit',contractVersion:1,
           entityType:String(entityType||''),operation:operation==='delete'?'delete':'upsert',
-          committedAt:new Date().toISOString(),value,backupCapture:backupCapture===true
+          committedAt:nextChangeAt(),value,backupCapture:backupCapture===true
         }));
       }catch(error){capture('repository.canonical-commit-hook',error,'error');}
     }
@@ -175,7 +181,7 @@ registry.define('repositories',1,()=>{
       const bytes=new Uint8Array(16);globalThis.crypto.getRandomValues(bytes);return [...bytes].map(value=>value.toString(16).padStart(2,'0')).join('');
     }
     function newCanonicalMutationEpoch(){
-      return freeze({format:'study-director.canonical-mutation-epoch',version:1,token:randomCoordinationToken(),committedAt:new Date().toISOString()});
+      return freeze({format:'study-director.canonical-mutation-epoch',version:1,token:randomCoordinationToken(),committedAt:nextChangeAt()});
     }
     function canonicalPreparationUnit(value){
       const unit=String(value||'').trim();if(unit==='*'||unit==='personalData'||unit==='activeSession')return unit;if(/^dailyRecordPack:\d{4}-(?:0[1-9]|1[0-2])$/u.test(unit))return unit;if(unit.startsWith('areaNote:')){const key=unit.slice('areaNote:'.length);if(key&&normalizeAreaName(key)===key)return unit;}if(unit.startsWith('attachmentAsset:')&&/^(?:att|img)-[a-z0-9-]{20,80}$/u.test(unit.slice('attachmentAsset:'.length)))return unit;throw new TypeError('Backup preparation unit identity is invalid.');
@@ -193,12 +199,24 @@ registry.define('repositories',1,()=>{
       const units=preparationUnits===null?['*']:preparationUnits;stageBackupPreparationUnits(tx,units);
       return freeze({value,request});
     }
+    // A reseed invalidates capture fences without changing any data, so it
+    // keeps the change time of the last real save.
     async function reseedCanonicalMutationEpoch(){
-      const value=newCanonicalMutationEpoch();
+      const previous=await readCanonicalMutationEpoch().catch(()=>null),kept=Number.isFinite(Date.parse(String(previous&&previous.committedAt||'')))?previous.committedAt:'';
+      const value=kept?freeze({format:'study-director.canonical-mutation-epoch',version:1,token:randomCoordinationToken(),committedAt:kept}):newCanonicalMutationEpoch();
       await Meta.write('canonicalMutationEpoch',value,{updatedAt:value.committedAt,strict:true,abortMessage:'canonical mutation epoch reseed aborted'});
       return value;
     }
     async function readCanonicalMutationEpoch(){return Meta.read('canonicalMutationEpoch');}
+    // The last-save time kept in local storage is a fast copy of the change
+    // clock; the epoch written inside each save is the record. This returns the
+    // newer of the two and seeds the clock from both, so a copy that missed its
+    // last write (the tab closed in between) is repaired after a reload.
+    async function latestChangeAt(recorded=''){
+      const copy=String(recorded||'');seedChangeClock(copy);
+      const epoch=await readCanonicalMutationEpoch(),committedAt=String(epoch&&epoch.committedAt||'');seedChangeClock(committedAt);
+      return Date.parse(committedAt)>(Date.parse(copy)||0)?committedAt:copy;
+    }
     async function listBackupPreparationUnits(){return freeze((await Meta.list('backupPreparationUnitPrefix')).map(entry=>entry.value));}
     async function replaceBackupPreparationUnits(units){
       const targets=[...new Set((units||[]).map(canonicalPreparationUnit))];
@@ -435,13 +453,13 @@ function writePlanMeta(family,value,{strictDurability=false,ownershipToken=null,
   return Meta.transaction('readwrite',(meta,tx,finish)=>{
     assertWriteToken(token,'save plan documents');stageCanonicalMutationEpoch(tx,['personalData']);const request=meta.put(family,value);request.onerror=()=>finish(false,request.error||new Error('plan document write failed'));
     request.onsuccess=()=>{try{assertWriteToken(token,'save plan documents');}catch(error){try{tx.abort();}catch{}finish(false,error);}};
-    tx.oncomplete=()=>{onCanonicalCommit({entityType:'planData',operation:'upsert',backupCapture:backupCapture===true});finish(true);};
+    tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert',null,{backupCapture});finish(true);};
   },{strict:strictDurability,abortMessage:'plan document write aborted'});
 }
 const planData=freeze({
   replace:value=>{
     const token=issueWriteToken('restore Plan documents');if(new TextEncoder().encode(JSON.stringify(value)).length>1024*1024)throw new RangeError('Plan data exceeds its storage allowance.');
-    return Meta.transaction('readwrite',(meta,tx,finish)=>{assertWriteToken(token,'restore Plan documents');stageCanonicalMutationEpoch(tx,['personalData']);const updatedAt=new Date().toISOString();meta.put('planDraft',value.draft,{updatedAt});meta.put('planLibrary',{savedPlans:value.savedPlans,defaultId:value.defaultId},{updatedAt});tx.oncomplete=()=>{onCanonicalCommit({entityType:'planData',operation:'restore'});finish(true);};},{strict:true,abortMessage:'Plan document restore aborted'});
+    return Meta.transaction('readwrite',(meta,tx,finish)=>{assertWriteToken(token,'restore Plan documents');stageCanonicalMutationEpoch(tx,['personalData']);const updatedAt=new Date().toISOString();meta.put('planDraft',value.draft,{updatedAt});meta.put('planLibrary',{savedPlans:value.savedPlans,defaultId:value.defaultId},{updatedAt});tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert');finish(true);};},{strict:true,abortMessage:'Plan document restore aborted'});
   },
   read:async()=>{const [draft,library]=await Promise.all([Meta.read('planDraft'),Meta.read('planLibrary')]);return {draft:draft??null,savedPlans:library?.savedPlans||[],defaultId:library?.defaultId||null};},
   writeDraft:(value,options={})=>{if(value!==null&&(typeof value!=='string'||value.length>APP_LIMITS.maxScheduleChars))throw new RangeError('Plan draft exceeds its text limit.');return writePlanMeta('planDraft',value,options);},
@@ -1668,6 +1686,9 @@ async function runDataMaintenance(options={}){
     }
     const mutationEpoch=freeze({
       read:readCanonicalMutationEpoch,
+      nextChangeAt,
+      seedChangeClock,
+      latestChangeAt,
       reseed:reseedCanonicalMutationEpoch,
       rebasePreparation:rebaseBackupPreparationState,
       stage:stageCanonicalMutationEpoch,

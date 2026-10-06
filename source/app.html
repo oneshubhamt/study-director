@@ -4153,7 +4153,7 @@ const AttachmentStorage=AssetStorageModule.create({
     }
     if(deletionState)AppData.deletionRecovery.stageAttachments(tx,deletionState);
     for(const [id,row] of rows)store.put(row,id);for(const id of remove)store.delete(id);tx.oncomplete=()=>finish(true);
-  },'attachment metadata commit aborted').then(result=>{markStorageHealthTimestamp('lastLocalSaveAt');DeviceBackup?.notifyChange(Object.freeze({reason:'attachment-metadata'}));if(attachmentIntegrityIssues.size)scheduleAttachmentIntegrityAudit(5000);return result;})
+  },'attachment metadata commit aborted').then(result=>{writeStorageHealth({lastLocalSaveAt:AppData.mutationEpoch.nextChangeAt()});DeviceBackup?.notifyChange(Object.freeze({reason:'attachment-metadata'}));if(attachmentIntegrityIssues.size)scheduleAttachmentIntegrityAudit(5000);return result;})
 });
 const RichTextAssets=Object.freeze({
   retain:()=>AttachmentStorage.retain(),
@@ -4262,6 +4262,17 @@ function recordVerifiedRecoveryCopy(copy){
     return true;
   };
   const next=verifiedRecoveryWriteChain.catch(()=>{}).then(run);verifiedRecoveryWriteChain=next;return next;
+}
+// Every save writes the change clock inside its own transaction (the
+// mutation epoch); the last-save time in storage health is a fast copy for
+// backup decisions. If a save committed but the copy was not written (the tab
+// closed in between), the epoch repairs it here, so that change is still
+// backed up. Seeding the clock also keeps later saves later after a reload.
+async function reconcileChangeClock(){
+  const recorded=String(readStorageHealth().lastLocalSaveAt||'');let latest=recorded;
+  try{latest=await AppData.mutationEpoch.latestChangeAt(recorded);}catch(error){AppDiagnostics.capture('backup.change-clock-read',error,'warn');return false;}
+  if(latest===recorded)return false;
+  writeStorageHealth({lastLocalSaveAt:latest});return true;
 }
 async function installVerifiedRecoveryFreshness(){
   verifiedRecoveryState=normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY).catch(error=>{AppDiagnostics.capture('backup.freshness-read',error,'warn');return null;}));
@@ -4472,6 +4483,9 @@ const AppData=RepositoryModule.createAppData(Object.freeze({
     onCanonicalCommit:handleCanonicalCommit
   })
 }));
+// Saves made before the startup repair still continue the change clock from
+// the last recorded save, even if the system clock went back across a reload.
+try{AppData.mutationEpoch.seedChangeClock(readStorageHealth().lastLocalSaveAt);}catch(error){AppDiagnostics.capture('backup.change-clock-seed',error,'warn');}
 if(!Object.isFrozen(AppData)||AppData.format!=='study-director.app-data'||AppData.contractVersion!==1){
   throw new Error('Study Director AppData facade is unavailable or incompatible.');
 }
@@ -9769,7 +9783,7 @@ function installApplicationDomBindings(){
   SystemNotifications.install();AppAudio.install();renderSoundSettings();
   NativeCapabilities.install();
   void BackupProtection.refresh().catch(setBackupProtectionSurfaceError);
-  void DeviceBackup.install().then(()=>installRepositoryIntegrityScrub()).catch(error=>AppDiagnostics.capture('backup.repository-integrity-install',error,'warn'));
+  void reconcileChangeClock().catch(()=>false).then(()=>DeviceBackup.install()).then(()=>installRepositoryIntegrityScrub()).catch(error=>AppDiagnostics.capture('backup.repository-integrity-install',error,'warn'));
   updateFullscreenButton();
   PlanDraftEditor.install();
   UiTabRegistry.updateOrientation();
