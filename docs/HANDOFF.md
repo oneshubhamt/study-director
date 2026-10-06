@@ -165,7 +165,38 @@ Faster local loop: run each fast test in its own process, six at a time, and lis
 
 The aim is a machine that works every time: cohesive, bounded, lean and fast, with flexibility built in. There are three strands.
 
+### 3.0 How we proceed (agreed 2026-10-06)
+
+**Philosophy.** The app is clean, lean, efficient, elegant and reliable. No extravagant or unnecessary features. Everything works rock solid within the range it is meant for. Do the simple things very well; do not over-engineer.
+
+**Order, and when the session ends.**
+1. Finish refining the backup system to its best shape (section 1, then section 2).
+2. Audit it and report to the user what I think.
+3. Hold a brainstorming session with the user to understand how to improve notes. Discuss first; build only after agreement.
+4. Then the background services (3.3).
+5. The session concludes only once all three — backup, notes, background services — are as good as we can reasonably make them.
+
+**No upfront analysis.** Do not spend effort analysing or planning the notes and background-service phases until we reach them. The suggestions below are a starting list for those discussions, not a plan.
+
 ### 3.1 Notes as a first-class system
+
+**Decided: no separate local version history for notes.** Earlier versions of a note come from the backup versions in the Device Folder and Google Drive. Retention is Latest, six daily, four weekly and four monthly, so about four months of history. Together with undo and redo in the editor and Recently deleted (30 days), that is enough for realistic use.
+
+Accepted limits:
+- Earlier versions from the same day are not kept. The user considers this insignificant.
+- Someone who uses neither the Device Folder nor Drive has no earlier versions; that is their choice.
+- Standalone backup files are not a source of note versions.
+
+**No annotation features** (PDFs, audio, photos). Not needed.
+
+**What earlier versions should feel like** (refine the existing single-note restore; do not add a new system):
+- Opening a note's earlier versions shows simple, plain-time choices: "3 days ago", "2 weeks ago", "a month ago".
+- No backup machinery shows: no locations, checkpoints, tiers or other jargon. The person should not need to know how backups work, or even that versioning is happening.
+- Choosing a version opens the same note review used when a restore finds a note that differs. From there the person can keep parts of the newer note, merge, or replace, easily.
+- Things to settle in the notes brainstorm:
+  - list versions from both locations together, without duplicates;
+  - list only versions where the note actually differs;
+  - where the entry point sits on the open note.
 
 Done so far:
 - one save engine for notes, Diary and Review;
@@ -176,17 +207,18 @@ Done so far:
 - the tree UI, breadcrumb and editable title;
 - single-note restore from any backup version, including its images.
 
-Suggested next:
+Starting list for the notes brainstorm (to discuss, not a plan):
 - Performance at the limits:
   - a virtualised notes tree for 10,000 notes;
   - an incremental search index (update per save, not a rebuild);
   - measure open, save and search at 10,000 notes and 20,000 words.
-- A local per-note history: a few recent versions kept on the device, independent of backups, for quick "undo my last hour".
 - Link and reference integrity between notes and attachments; a repair pass inside existing maintenance.
 - Keep multi-tab behaviour simple: one writer, others read-only, as the ownership model already does. Verify note editing during a takeover.
 - Export and import of a single note or subtree (Markdown plus images).
 
 ### 3.2 Backup and restore at its best
+
+**Goal (user).** Very fast, performant and efficient, and extremely reliable. As far as we can manage, it must never fail the person, and it includes every needed safety feature.
 
 - Finish 1.3, then the audit (section 2).
 - One status model for all locations, rendered by the host; one notice policy (dismissible, opt-in only, never persistent).
@@ -200,6 +232,17 @@ Suggested next:
 - Consider a "backup health" summary in Data & Backup: last verified per location, waiting changes, next check.
 
 ### 3.3 Every background service, mapped and held to one standard
+
+**History, as the user describes it.** The background services began as a patchwork, built at different times. One broke another, and they did not give way to what the person asked for: clicking Back up first waited for maintenance to finish. Much has been fixed since — the services are now state machines with shared coordination — but the job is not finished.
+
+**Goal.**
+- Every background service gives way at once to anything the person explicitly does.
+- Every service runs smoothly, efficiently and in bounded time.
+- Together they cover everything this app needs, and nothing more.
+- When we get there, also decide:
+  - whether a service is missing;
+  - whether duplicate or similar services should be merged;
+  - what should be refined.
 
 Inventory to cover:
 - PWA update checks and the safe update apply;
