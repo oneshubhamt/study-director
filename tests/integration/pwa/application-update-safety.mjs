@@ -22,7 +22,7 @@ function fixture(){
   function element(tag){const node={tag,children:[],open:false,removed:false,setAttribute(){},addEventListener(type,fn){this[type]=fn;},append(...nodes){this.children.push(...nodes);},contains(target){return target===this||this.children.some(n=>n.contains(target));},showModal(){this.open=true;},close(){this.open=false;},remove(){this.removed=true;}};elements.push(node);return node;}
   const window={addEventListener(type,fn){const set=listeners.get(type)||new Set();set.add(fn);listeners.set(type,set);},removeEventListener(type,fn){listeners.get(type)?.delete(fn);}};
   const record=async label=>{calls.push(label);};
-  const sandbox={console,AbortController,Promise,Date:class extends Date{static now(){return state.now;}},Object,
+  const sandbox={console,AbortController,Promise,Date:class extends Date{static now(){return state.now;}},Object,backUpBeforeUpdate:async()=>{calls.push('backup');},
     pwaUpdateReservation:null,pwaWorkRevision:0,pwaUpdateRetryTimer:null,pwaLatestUpdateState:{updateReady:true},pwaLastEditableInputAt:0,PWA_EDIT_IDLE_MS:1800,PWA_UPDATE_SAFETY_RETRY_MS:300000,evaluateAutomaticPwaUpdate:()=>calls.push('automatic-update'),imagePreparationCount:0,attachmentIntegrityRunning:Promise.resolve(),
     OWNERSHIP_STATES:{PRIMARY:'primary',SECONDARY:'secondary'},TIMER_MODES:{RUNNING:'running'},TimerState:{paused:false,mode:'running'},TASKS:[{}],
     document:{body:element('body'),createElement:element,querySelector:()=>state.dialog?{}:null,getElementById:()=>({value:state.draft})},window,
@@ -142,7 +142,7 @@ await test('retry notice, progress state and Pause & Update use the correct acti
   assert.equal(await h.sandbox.applyPwaUpdateFromUi(),true);assert.equal(h.state.updates,1);
   h.state.status={supported:true,registered:true,updateReady:true};h.state.timer=true;h.state.attachment=true;
   assert.equal(await h.sandbox.applyPwaUpdateFromUi(),false);assert.ok(!h.calls.includes('pause'));
-  h.state.attachment=false;assert.equal(await h.sandbox.applyPwaUpdateFromUi(),true);assert.deepEqual(h.calls.filter(c=>['pause','apply'].includes(c)),['pause','apply']);
+  h.state.attachment=false;assert.equal(await h.sandbox.applyPwaUpdateFromUi(),true);assert.deepEqual(h.calls.filter(c=>['pause','backup','apply'].includes(c)),['pause','backup','apply'],'waiting automatic backups go out before the update applies');
   h.sandbox.renderPwaUpdateStatus({...h.state.status,applying:true,message:'Applying update…',phase:'activating'});
   assert.equal(nodes.get('pwa-update-apply').disabled,true);assert.equal(nodes.get('pwa-update-progress-message').textContent,'Applying update…');
 });
@@ -158,7 +158,7 @@ await test('secondary window retries an external activation after transient bloc
 await test('pending boot confirmation has a visible retry action and clears only after proof',async()=>{
  const elements=new Map(['pwa-update-control','pwa-update-apply','pwa-update-message','pwa-update-progress-message'].map(id=>[id,{}])),notices=[],checks=[],evaluations=[];
  const state={supported:true,registered:true,updateReady:false,applying:false,checking:false,bootState:'pending',phase:'boot-pending',message:'Update confirmation is pending.'};
- const context={Object,String,document:{getElementById:id=>elements.get(id)},pwaLatestUpdateState:null,pwaAutomaticBlockMessage:'old automatic block',pwaUpdateCheckRunning:false,pwaUpdateRetryTimer:null,PWA_UPDATE_READY_DELAY_MS:1500,PWA_UPDATE_SAFETY_RETRY_MS:1000,
+ const context={Object,String,backUpBeforeUpdate:async()=>{},document:{getElementById:id=>elements.get(id)},pwaLatestUpdateState:null,pwaAutomaticBlockMessage:'old automatic block',pwaUpdateCheckRunning:false,pwaUpdateRetryTimer:null,PWA_UPDATE_READY_DELAY_MS:1500,PWA_UPDATE_SAFETY_RETRY_MS:1000,
   NoticeCoordinator:{publish:(_,value)=>notices.push(value)},pwaUpdateActionLabel:()=> 'Update Now',clearTimeout(){},schedulePwaUpdateEvaluation:delay=>evaluations.push(delay),recordPwaUpdateCheckFailure(){},schedulePwaUpdateCheck(){},clearPwaUpdateCheckFailure(){},checkPwaUpdateIfDue:async options=>{checks.push(options);return true;},PwaLifecycle:{status:()=>state}};
  vm.createContext(context);vm.runInContext(source.slice(source.indexOf('async function applyPwaUpdateFromUi('),source.indexOf('function pwaLastUpdateCheckAt(')),context);
  context.renderPwaUpdateStatus(state);assert.equal(notices.at(-1).visible,true);assert.equal(notices.at(-1).title,'Update confirmation pending');assert.equal(elements.get('pwa-update-apply').textContent,'Retry confirmation');assert.equal(elements.get('pwa-update-message').textContent,state.message);assert.equal(evaluations.length,0);

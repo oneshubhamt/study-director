@@ -137,7 +137,7 @@ let cancelDuringBatchOnce=false;
 let restoreJournal=null;
 let activeSessionBlocking=false;
 let selectIncomingSavedDay=false;
-let exportSaveStatus='downloaded';
+let exportSaveStatus='downloaded',chooseSaveResult=()=>Promise.resolve(null);const chosenNames=[];
 let currentFileJob=null;
 function exclusiveFileJob(operation,{wait=false}={}){
   if(currentFileJob){
@@ -191,7 +191,7 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
     personalSettle:async()=>true,personalExport:async()=>personalDataFixture,personalImport:async()=>true,personalVerify:async()=>true,storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async options=>{snapshotFenceOptions.push(Object.freeze({...options}));return options?.legacy===true?'legacy-stable':'fast-stable';},canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],scheduleRead:()=> '08:00 | 60 | Existing | work | Ethics | block | 1',
     installationId:()=> 'inst_device_a',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryAreaNotes:async()=>[],deletionRecoveryReplaceAreaNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>null,reconciliationBaseReadNotes:async()=>freeze({}),reconciliationBaseWrite:async()=>true
   }),
-  exports:freeze({...testProcessing,backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():file,unprotect:async blob=>({blob,encrypted:false}),check:()=>{},job:exclusiveFileJob,download:()=>({status:'downloaded'}),chooseSave:async()=>{throw new Error('Standalone backup export must not open the native save picker.');},save:async(file,handle)=>{assert.ok(file.blob.size>0,'A backup download must never receive an empty file.');assert.equal(handle,undefined,'Standalone backup export must use the one-click browser download path.');return {status:exportSaveStatus};}}),
+  exports:freeze({...testProcessing,backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():file,unprotect:async blob=>({blob,encrypted:false}),check:()=>{},job:exclusiveFileJob,download:()=>({status:'downloaded'}),chooseSave:(filename,accept,options)=>{chosenNames.push(filename);assert.equal(options?.id,'study-director-backups');return chooseSaveResult();},save:async(file,handle,options)=>{assert.ok(file.blob.size>0,'A backup file must never receive an empty backup.');assert.equal(typeof options?.onProgress,'function');return handle?{status:'saved',filename:handle.name}:{status:exportSaveStatus};}}),
   assets:freeze({get:async id=>{assetGetCalls+=1;return assetRows.some(row=>row.id===id)?(assetBlobOverrides.get(id)||duplicateAssetBlob):null;},put:async()=>true,keys:async()=>assetRows.map(row=>row.id),list:async()=>assetRows,importAll:async()=>0,restoreAll:async()=>true,removeMany:async()=>0,removeMetadata:async()=>0,scheduleMaintenance:()=>true}),
     codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec}),
     reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({resolve:async({conflicts=[]})=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries(conflicts.map(item=>[item.key,freeze({text:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
@@ -288,6 +288,16 @@ assert.equal((await withoutFileJobDeadlock(()=>runtime.controller.exportLocal())
 assert.equal(currentFileJob,null,'standalone export must release its exclusive file job');
 assert.equal(backupCompletions.length,1);
 assert.equal(backupCompletions[0].recoveryCopy,undefined,'Browser download fallback is not a verified independent recovery copy.');
+// The save dialog opens from the click with the backup's file name; a file saved
+// there and read back is a verified copy of the data as of its capture.
+backupCompletions.length=0;chosenNames.length=0;chooseSaveResult=()=>Promise.resolve({name:'chosen.sdbackup'});
+const savedExport=await withoutFileJobDeadlock(()=>runtime.controller.exportLocal());
+assert.equal(savedExport.status,'saved');assert.match(chosenNames[0],/-study-director-backup-\d{4}-\d{2}-\d{2}\.sdbackup$/u);
+assert.equal(backupCompletions.length,1);assert.deepEqual({...backupCompletions[0].recoveryCopy},{type:'file',id:'file',label:'Portable backup',sourceRevision:'2026-09-15T12:00:00.000Z'});
+// Closing the dialog cancels quietly: nothing is prepared or recorded.
+backupCompletions.length=0;chooseSaveResult=()=>Promise.reject(Object.assign(new Error('cancelled'),{name:'AbortError'}));
+assert.equal((await withoutFileJobDeadlock(()=>runtime.controller.exportLocal())).status,'cancelled');assert.equal(backupCompletions.length,0);
+chooseSaveResult=()=>Promise.resolve(null);
 backupCompletions.length=0;
 exportSaveStatus='downloaded';
 changeSourceRevisionDuringExport=true;

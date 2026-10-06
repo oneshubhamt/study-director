@@ -93,7 +93,7 @@ registry.define('exports',1,input=>{
     return Object.freeze({stage,resume,bind,read,release,nameOf,collect,pin,suspend,wake:trigger=>collectionJob.wake(trigger),settled:collectionJob.settled,status:()=>{const state=collectionJob.status();return Object.freeze({...state,...Lifecycle.snapshot({busy:state.busy,pending:state.pending,scheduled:state.scheduled,suspended:suspended>0||state.suspended,reason:state.reason,nextEligibleAt:state.nextEligibleAt}),lastOutcome:state.lastOutcome});}});
   }
   function createCoordinator({createWorker,window,document,onState=()=>{},files=null}){
-    let worker=null,leases=0,sequence=0,tail=Promise.resolve(),aborted=false,phase='',currentJob=null,fileJobActive=false,cancelEpoch=0;const pending=new Map(),fileProofs=new WeakMap(),streamAborts=new Set();
+    let worker=null,leases=0,sequence=0,tail=Promise.resolve(),aborted=false,phase='',currentJob=null,fileJobActive=false,cancelEpoch=0;const pending=new Map(),persistedHashes=new WeakMap(),streamAborts=new Set();
     const status=()=>Object.freeze({busy:leases>0,jobBusy:currentJob!==null,fileBusy:fileJobActive&&leases>0,pending:pending.size,phase});
     const publish=()=>onState(status());
     function stop(error=null){
@@ -127,14 +127,14 @@ registry.define('exports',1,input=>{
       if(type==='file.persist')return scope(async()=>{
         let file=data.file,name=files.nameOf(file);
         if(!name){file=await run('file.copy',{file});name=files.nameOf(file);}
-        let hash=fileProofs.get(file);if(!hash){hash=await run('file.hash',{file});fileProofs.set(file,hash);}
+        let hash=persistedHashes.get(file);if(!hash){hash=await run('file.hash',{file});persistedHashes.set(file,hash);}
         return {name,size:file.size,hash};
       });
       return scope(async()=>{
         const task=async()=>{
           check();if(options.signal?.aborted)throw cancelled();await awaitCollection(options.signal);check();if(options.signal?.aborted)throw cancelled();
           const nextPhase=type==='crypto.verifier.create'?'Preparing protection…':type==='crypto.verifier.check'?'Unlocking backup…':type==='crypto.key'?'Preparing protection…':type==='decode.open'||type==='parseBlob'?'Reading backup…':type==='equalFiles'?'Verifying saved file…':type==='file.hash'?'Verifying backup file…':type==='file.copy'?'Preparing backup file…':type==='encode.open'?'Preparing backup…':type==='encode.write'?'Packaging backup data…':type==='encode.finish'?'Finishing backup file…':type==='zip'?'Packaging notes…':type==='markdown'?'Preparing notes…':phase;if(phase!==nextPhase){phase=nextPhase;publish();}
-          let staged=null;if(type==='file.copy'||type.startsWith('crypto.stream.')){staged=await files.stage();data={...data,output:Object.freeze({kind:'opfs',name:staged.name}),proof:type==='file.copy'||type==='crypto.stream.encrypt'};}
+          let staged=null;if(type==='file.copy'||type.startsWith('crypto.stream.')){staged=await files.stage();data={...data,output:Object.freeze({kind:'opfs',name:staged.name})};}
           const id=++sequence;
           const abort=()=>stop(cancelled());options.signal?.addEventListener('abort',abort,{once:true});
           try{check();if(options.signal?.aborted)throw cancelled();const value=await new Promise((resolve,reject)=>{
@@ -142,10 +142,7 @@ registry.define('exports',1,input=>{
             pending.set(id,{resolve,reject,timeout,type,stallTimeoutMs,onProgress:typeof options.onProgress==='function'?options.onProgress:null});
             try{ensure().postMessage({id,type,data});}catch(error){stop(error);}
           });
-            if(!staged)return value;
-            const proofed=value&&typeof value==='object'&&value.file instanceof Blob&&/^[a-f0-9]{64}$/u.test(String(value.hash||'')),file=proofed?value.file:value,bound=files.bind(file,staged.name);
-            if(proofed)fileProofs.set(bound,String(value.hash));
-            return bound;
+            return staged?files.bind(value,staged.name):value;
           }catch(error){if(staged)await files.release(staged.name).catch(()=>{});throw error;}finally{options.signal?.removeEventListener('abort',abort);}
         };
         const result=tail.then(task);tail=result.catch(()=>{});return result;
@@ -183,20 +180,24 @@ registry.define('exports',1,input=>{
       return Object.freeze({status:'downloaded',filename});
     }
     // Invoke synchronously from the click; await preparation only after this call.
-    function chooseSave(filename,accept){
+    // id lets the browser reopen the dialog in the folder last used for that kind of file.
+    function chooseSave(filename,accept,{id=''}={}){
       if(typeof window.showSaveFilePicker!=='function')return Promise.resolve(null);
-      try{return window.showSaveFilePicker({suggestedName:filename,types:[{description:'Study Director file',accept}]}).catch(error=>{if(error.name==='AbortError')throw cancelled();throw error;});}
+      try{return window.showSaveFilePicker({suggestedName:filename,types:[{description:'Study Director file',accept}],...(id?{id}:{})}).catch(error=>{if(error.name==='AbortError')throw cancelled();throw error;});}
       catch(error){return Promise.reject(error);}
     }
-    async function save(file,handle=null){return scope(async()=>{
+    // Writes go out in 8 MB pieces (few browser round trips, steady progress);
+    // the browser replaces the chosen file only when the write closes.
+    const SAVE_CHUNK_BYTES=8*1048576;
+    async function save(file,handle=null,{onProgress=null,onVerify=null}={}){return scope(async()=>{
       check();await file.checkProtection?.();
       if(!handle)return download(file.blob,file.filename);
-      let writable=null,closed=false;
+      let writable=null,closed=false;const total=file.blob.size,report=loaded=>{try{onProgress?.({loaded,total});}catch{}};
       try{
-        phase='Opening backup file…';publish();writable=await handle.createWritable({keepExistingData:false});check();for(let offset=0;offset<file.blob.size;offset+=1048576){check();await file.checkProtection?.();await writable.write(file.blob.slice(offset,offset+1048576));phase=`Writing backup file · ${Math.floor(Math.min(offset+1048576,file.blob.size)/Math.max(1,file.blob.size)*100)}%`;publish();}check();await file.checkProtection?.();phase='Finishing backup file…';publish();await writable.close();closed=true;
-        phase='Reopening and verifying saved file…';publish();
-        const reopened=await handle.getFile(),expectedHash=fileProofs.get(file.blob)||'';
-        const verified=expectedHash?reopened.size===file.blob.size&&await run('file.hash',{file:reopened})===expectedHash:await run('equalFiles',{left:file.blob,right:reopened});
+        phase='Opening backup file…';publish();writable=await handle.createWritable({keepExistingData:false});check();for(let offset=0;offset<total;offset+=SAVE_CHUNK_BYTES){check();await file.checkProtection?.();await writable.write(file.blob.slice(offset,offset+SAVE_CHUNK_BYTES));const written=Math.min(offset+SAVE_CHUNK_BYTES,total);phase=`Writing backup file · ${Math.floor(written/Math.max(1,total)*100)}%`;publish();report(written);}check();await file.checkProtection?.();phase='Finishing backup file…';publish();await writable.close();closed=true;
+        phase='Reopening and verifying saved file…';publish();try{onVerify?.();}catch{}
+        // The saved file must match the verified backup byte for byte.
+        const reopened=await handle.getFile(),verified=await run('equalFiles',{left:file.blob,right:reopened},{onProgress});
         if(!verified)throw new Error('The saved file did not match after reopening.');
         await file.checkProtection?.();return Object.freeze({status:'saved',filename:handle.name||file.filename});
       }catch(error){if(writable&&!closed)await writable.abort().catch(()=>{});if(closed)error.fileWritten=true;throw error;}
@@ -245,7 +246,7 @@ registry.define('exports',1,input=>{
         key=candidate;keyId=record.id;publish();return key;
       }catch(error){if(error.code!=='BACKUP_AUTH_FAILED')throw error;message=error.message;}}
     }
-    async function protect(file,{interactive=true,signal}={}){
+    async function protect(file,{interactive=true,signal,onProgress=null}={}){
       const epoch=keyEpoch,lifetime=generation.signal,checkOperation=processing.checkpoint?.()||processing.check;
       const record=await refresh();check(signal);
       const protectionId=record?.id||'';
@@ -266,7 +267,7 @@ registry.define('exports',1,input=>{
         await checkProtection();
         const controller=new AbortController(),signals=[lifetime,signal].filter(Boolean),abort=()=>controller.abort();
         for(const source of signals){source.addEventListener('abort',abort,{once:true});if(source.aborted)abort();}
-        try{blob=await processing.run('crypto.stream.encrypt',{file:blob,key:current},{signal:controller.signal});}
+        try{blob=await processing.run('crypto.stream.encrypt',{file:blob,key:current},{signal:controller.signal,onProgress});}
         finally{for(const source of signals)source.removeEventListener('abort',abort);}
       }
       try{await checkProtection();}catch(error){if(blob!==file.blob)await processing.run('file.release',{file:blob});throw error;}

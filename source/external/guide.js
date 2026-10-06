@@ -287,7 +287,7 @@
           ["Add only what’s missing","Brings back Saved Days and attachments this device doesn’t have and changes nothing you have now. If something differs and needs a choice, nothing is changed and Combine is the way to review it."],
           ["Replace current data","Makes the selected backup authoritative for portable Study Director data. Device-local settings stay on this device."],
           ["Combine with current data","Keeps current data and reviews genuine differences before applying them. An optional checkbox can also download an extra standalone safety copy; automatic rollback protection remains on."],
-          ["Export backup","Creates one complete standalone .sdbackup file for manual transfer or safekeeping. It is separate from Device Folder and Google Drive version history."],
+          ["Export backup","Creates one complete standalone .sdbackup file for manual transfer or safekeeping. You choose where it is saved; Study Director then reads the saved file back to verify it (browsers without a save dialog download it instead). It is separate from Device Folder and Google Drive version history."],
           ["Import backup","Verifies a standalone backup, then lets you Add only what’s missing, Combine with current data, or Replace current data."],
           ["Delete Day","Removes a saved day deliberately; back up first if the record may matter later."],
         ]},

@@ -198,7 +198,10 @@ async function portableBackupMetadataBlob(plan,compression){
   try{for await(const line of createPortableBackupLines(plan,{compression}))await Exports.run('encode.write',{id,line});return await Exports.run('encode.finish',{id});}
   catch(error){await Exports.run('encode.close',{id}).catch(()=>{});throw error;}
 }
-async function createPortableBackupBlob(plan,{preferCompression=true,verify=true,retainInspection=false}={}){
+// The name is known at the click, so the save dialog can open before the
+// backup is prepared.
+function portableBackupFilename(studentName,compression='gzip'){return filenameSafeStudentName(studentName)+'-study-director-backup-'+todayISO()+(portableAssets?'.sdbackup':(compression==='gzip'?'.sdbackup.gz':'.sdbackup'));}
+async function createPortableBackupBlob(plan,{preferCompression=true,verify=true,retainInspection=false,report=null}={}){
   let compression=preferCompression&&BackupCodec.compressionSupported()?'gzip':'none',blob=null,compressionFallback=false;
   if(portableAssets){
     const metadataBlob=await portableBackupMetadataBlob(plan,compression);
@@ -209,11 +212,11 @@ async function createPortableBackupBlob(plan,{preferCompression=true,verify=true
   }
   const maxFileBytes=portableAssets?APP_LIMITS.backupMaxFileBytes:APP_LIMITS.backupMaxCompressedBytes;
   if(blob.size>maxFileBytes)throw new Error(`Backup exceeds the ${Math.round(maxFileBytes/1048576)} MB safe file-size limit.`);
-  const filename=filenameSafeStudentName(plan.studentName)+'-study-director-backup-'+todayISO()+(portableAssets?'.sdbackup':(compression==='gzip'?'.sdbackup.gz':'.sdbackup'));
-  blob=await Exports.run('file.copy',{file:blob});
+  const filename=portableBackupFilename(plan.studentName,compression);
+  report?.stage('Packaging the backup…');blob=await Exports.run('file.copy',{file:blob},{onProgress:report?.progress});
   let inspection=null;
   try{if(verify){
-    inspection=await BackupCodec.inspect(blob,{filename,validateOnly:retainInspection!==true});
+    report?.stage('Verifying the backup…');inspection=await BackupCodec.inspect(blob,{filename,validateOnly:retainInspection!==true});
     if(!inspection||inspection.formatVersion!==DATA_CONTRACT.schemas.Backup.version||inspection.report.skipped)throw new Error('The generated backup did not pass its self-restore verification.');
     if(!BackupCodec.countsEqual(inspection.counts,plan.counts))throw new Error('The generated backup failed its count verification.');
     if(Number(backupVersion)>=18){const expectedCaptureAuthority=plan&&plan.completeness&&plan.completeness.complete===true?'canonical-complete':'rescue-partial';if(inspection.captureAuthority!==expectedCaptureAuthority)throw new Error('The generated backup failed its capture-authority verification.');}
@@ -222,9 +225,9 @@ async function createPortableBackupBlob(plan,{preferCompression=true,verify=true
   return retainInspection&&inspection?{blob,filename,compression,compressionFallback,inspection}:{blob,filename,compression,compressionFallback};
   }catch(error){await Exports.run('file.release',{file:blob});throw error;}
 }
-async function materializePortableCheckpoint(capture,{preferCompression=true,verify=true,retainInspection=false}={}){
+async function materializePortableCheckpoint(capture,{preferCompression=true,verify=true,retainInspection=false,report=null}={}){
   const plan=requireLogicalCheckpointCapture(capture);
-  const file=await createPortableBackupBlob(plan,{preferCompression,verify,retainInspection});
+  const file=await createPortableBackupBlob(plan,{preferCompression,verify,retainInspection,report});
   return freeze({...file,exportedAt:plan.exportedAt,sourceRevision:plan.sourceRevision,warning:plan.warning,counts:freeze({...plan.counts})});
 }
 const LogicalCheckpointCapture=freeze({capture:captureLogicalCheckpoint});
@@ -248,20 +251,23 @@ const ManagedRepository=ManagedRepositoryModule.createEngine(freeze({
   })
 }));
 if(!Object.isFrozen(ManagedRepository)||ManagedRepository.format!=='study-director.managed-repository'||ManagedRepository.contractVersion!==1)throw new Error('Managed repository engine is unavailable or incompatible.');
-async function createCanonicalCheckpoint(options={}){
+async function createCanonicalCheckpoint(options={},report=null){
+  report?.stage('Collecting your data…');
   const capture=await LogicalCheckpointCapture.capture(new Date().toISOString(),options);
-  return PortableCheckpointMaterializer.materialize(capture,{preferCompression:true,verify:true});
+  return PortableCheckpointMaterializer.materialize(capture,{preferCompression:true,verify:true,report});
 }
 async function createCanonicalCheckpointWithInspection(options={}){
   const capture=await LogicalCheckpointCapture.capture(new Date().toISOString(),options);
   return PortableCheckpointMaterializer.materialize(capture,{preferCompression:true,verify:true,retainInspection:true});
 }
 
-async function createCheckpoint(options={}){
+// report (optional): stage(message) and progress({loaded,total}) for a person
+// watching the export.
+async function createCheckpoint(options={},report=null){
   if(checkpointPromise)return checkpointPromise;
   checkpointPromise=(async()=>{
     let canonical,result;
-    try{result=await Exports.protect(async()=>{canonical=await createCanonicalCheckpoint();return canonical;},options);return Object.freeze({...result,release:()=>Exports.run('file.release',{file:result.blob})});}
+    try{result=await Exports.protect(async()=>{canonical=await createCanonicalCheckpoint({},report);report?.stage('Securing the backup…');return canonical;},{...options,onProgress:report?.progress});return Object.freeze({...result,release:()=>Exports.run('file.release',{file:result.blob})});}
     finally{if(canonical&&canonical.blob!==result?.blob)await Exports.run('file.release',{file:canonical.blob});}
   })();
   try{return await checkpointPromise;}finally{checkpointPromise=null;}
@@ -291,19 +297,41 @@ async function prepareSafetyCopy(options={}){
   }catch(error){if(canonical)await Exports.run('file.release',{file:canonical.blob});if(file?.blob!==canonical?.blob)await Exports.run('file.release',{file:file?.blob});throw error;}
 }
 async function downloadSafetyCopy(options={}){const {canonical,file}=await prepareSafetyCopy(options);if(canonical.blob!==file.blob)await Exports.run('file.release',{file:canonical.blob});return file;}
+// Progress for a person watching an export: each stage at once, and bytes as
+// the large steps (packaging, encrypting, saving, checking) move.
+function exportReporter(){
+  let last=0;
+  return freeze({
+    stage:message=>{portablePresentation?.update({message:String(message||''),progress:null});renderPortablePresentation();last=0;},
+    progress:value=>{const now=Date.now(),loaded=Math.max(0,Number(value&&value.loaded)||0),total=Math.max(0,Number(value&&value.total)||0);if(!total||now-last<150&&loaded<total)return;last=now;portablePresentation?.update({progress:{stage:'export',completedBytes:Math.min(loaded,total),totalBytes:total}});renderPortablePresentation();}
+  });
+}
+// A file saved through the save dialog and read back holds the data as of its
+// capture, so the backup reminder knows the latest changes are in a backup. A
+// download that has only started proves nothing yet.
+function fileRecoveryCopy(file){return freeze({type:'file',id:'file',label:'Portable backup',sourceRevision:String(file&&file.sourceRevision||'')});}
 async function exportPortableBackup(){
   if(localExportPromise)return localExportPromise;
+  // The save dialog opens straight from the click, before any waiting, so the
+  // browser allows it and the person gets an answer at once. The backup is
+  // prepared once a location is chosen. Browsers without a save dialog
+  // download the verified file instead.
+  const chosen=Exports.chooseSave(portableBackupFilename(getStudentNameFromDisplay()),{'application/octet-stream':[portableAssets?'.sdbackup':'.gz']},{id:'study-director-backups'});
   const traceId=OperationDiagnostics.start('standalone-export','Standalone backup');
-  portablePresentation=presentation.begin('file','export',{label:'File backup',message:'Preparing backup…'});setLocalExportBusy(true);renderPortablePresentation();
+  portablePresentation=presentation.begin('file','export',{label:'File backup',message:'Choose where to save the backup…'});setLocalExportBusy(true);renderPortablePresentation();
   localExportPromise=(async()=>{
     let file=null;
     try{
-      OperationDiagnostics.mark('standalone-capture-start',{},traceId);file=await createCheckpoint();OperationDiagnostics.mark('standalone-capture-complete',{bytes:Number(file&&file.blob&&file.blob.size)||0},traceId);
+      const handle=await chosen,report=exportReporter();
+      OperationDiagnostics.mark('standalone-capture-start',{chosen:!!handle},traceId);file=await createCheckpoint({},report);OperationDiagnostics.mark('standalone-capture-complete',{bytes:Number(file&&file.blob&&file.blob.size)||0},traceId);
       if(!file.blob?.size)throw new Error('The prepared backup is empty. No file was saved.');
-      OperationDiagnostics.mark('standalone-save-start',{},traceId);const result=await Exports.save(file);OperationDiagnostics.mark('standalone-save-complete',{},traceId);
-      markBackupCompleted({userExport:true});const message='Verified backup download started. Check that your browser saved it.';setLocalExportStatus(message+(file.warning?' '+file.warning:''));finishPortablePresentation({message:message+(file.warning?' '+file.warning:''),outcome:'download-started'});OperationDiagnostics.finish({bytes:Number(file.blob.size)||0},traceId);return result;
+      report.stage(handle?`Saving ${handle.name}…`:'Starting the download…');
+      OperationDiagnostics.mark('standalone-save-start',{},traceId);const result=await Exports.save(file,handle,{onProgress:report.progress,onVerify:()=>report.stage('Checking the saved file…')});OperationDiagnostics.mark('standalone-save-complete',{status:String(result&&result.status||'')},traceId);
+      const saved=result?.status==='saved';markBackupCompleted({userExport:true,...(saved?{recoveryCopy:fileRecoveryCopy(file)}:{})});
+      const message=(saved?`Backup saved and verified: ${result.filename}.`:'Verified backup download started. Check that your browser saved it.')+(file.warning?' '+file.warning:'');
+      setLocalExportStatus(message);finishPortablePresentation({message,outcome:saved?'saved':'download-started'});OperationDiagnostics.finish({bytes:Number(file.blob.size)||0,saved},traceId);return result;
     }catch(error){
-      const cancelled=error.name==='AbortError'||error.code==='STUDY_DIRECTOR_IMPORT_CANCELLED',message=cancelled?'Backup export cancelled.':'Backup export failed: '+error.message;setLocalExportStatus(message,cancelled);
+      const cancelled=error.name==='AbortError'||error.code==='STUDY_DIRECTOR_IMPORT_CANCELLED',message=cancelled?'Backup export cancelled.':'Backup export failed: '+error.message+(error.fileWritten?' The file at that location may be incomplete. Delete it and export again.':'');setLocalExportStatus(message,cancelled);
       finishPortablePresentation({message,lifecycle:cancelled?'cancelled':'failed'});
       if(cancelled)OperationDiagnostics.finish({cancelled:true},traceId);else OperationDiagnostics.fail(error,{},traceId);return {status:cancelled?'cancelled':'failed'};
     }finally{if(file)try{await file.release();}catch(error){AppDiagnostics.capture('backup.export-release',error,'warn');}}

@@ -24,11 +24,20 @@ try{
   try{await waitForStudyDirector(page,{instrumented:true,timeout:10000});}catch(error){console.log(JSON.stringify({events:page.events,body:await page.evaluate('document.body.innerText.slice(-1000)')}));throw error;}await waitFor(()=>page.evaluate('__PWA6.AppOwnership.status().hasControl'));
   assert.equal(await page.evaluate('workerCounts.started'),0,'export worker stays cold at startup');
   await page.evaluate(`__PWA6.goTab('library');document.querySelectorAll('details').forEach(el=>el.open=true);document.getElementById('download-backup').scrollIntoView()`);
+  // Export backup opens the save dialog straight from the click, writes the
+  // chosen file, reads it back and says so.
   await page.settle();await page.click('#download-backup');
+  await waitFor(()=>page.evaluate(`!!window.savedHandle&&!__PWA6.BackupController.status().standaloneExportActive`),{timeout:15000,label:'verified backup save'});
+  assert.equal(await page.evaluate('window.pickerCount||0'),1,'Export backup opens one save dialog');assert.equal(await page.evaluate('pickerActivation'),true,'the dialog opens from the click itself');
+  const chosen=await page.evaluate(`(async()=>{const file=await savedHandle.getFile(),candidate=await __PWA6.BackupController.inspect(file,{filename:file.name});return {name:file.name,size:file.size,preview:candidate.preview,workers:workerCounts,status:document.getElementById('backup-file-status').textContent}})()`);
+  assert.match(chosen.name,/^export-qa-study-director-backup-\d{4}-\d{2}-\d{2}\.sdbackup$/u);assert.equal(chosen.preview.formatVersion,DATA_CONTRACT.schemas.Backup.version);assert.ok(chosen.size>0);assert.equal(chosen.workers.live,0);
+  assert.match(chosen.status,/Backup saved and verified: export-qa-study-director-backup-/u);result.checks.saveDialogBackup=true;
+  // Browsers without a save dialog download the verified file instead.
+  await page.evaluate('window.nativePicker=window.showSaveFilePicker;window.showSaveFilePicker=undefined;window.latestDownload=null');await page.click('#download-backup');
   await waitFor(()=>page.evaluate(`!!window.latestDownload&&!__PWA6.BackupController.status().standaloneExportActive`),{timeout:15000,label:'verified backup download'});
-  assert.equal(await page.evaluate('window.pickerCount||0'),0,'one-click backup download must not open a save picker');
+  await page.evaluate('window.showSaveFilePicker=window.nativePicker');
   const downloaded=await page.evaluate(`(async()=>{const blob=await latestDownload.blob,candidate=await __PWA6.BackupController.inspect(blob,{filename:latestDownload.name});return {size:blob.size,preview:candidate.preview,workers:workerCounts}})()`);
-  assert.equal(downloaded.preview.formatVersion,DATA_CONTRACT.schemas.Backup.version);assert.ok(downloaded.size>0);assert.equal(downloaded.workers.live,0);result.checks.oneClickBackupDownload=true;
+  assert.equal(downloaded.preview.formatVersion,DATA_CONTRACT.schemas.Backup.version);assert.ok(downloaded.size>0);assert.equal(downloaded.workers.live,0);result.checks.downloadFallback=true;
   // Native file writes belong to the shared processor; keep their independent
   // user-activation and read-back verification checks alongside browser download.
   await page.evaluate(`(()=>{const button=document.createElement('button');button.id='native-save-probe';button.textContent='Native save QA';button.onclick=()=>{const handle=__PWA6.Exports.chooseSave('Native-QA.sdbackup',{'application/octet-stream':['.sdbackup']});window.nativeSave=handle.then(async target=>__PWA6.Exports.save(await __PWA6.BackupController.createCheckpoint(),target));};document.body.append(button);})()`);

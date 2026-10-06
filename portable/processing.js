@@ -1,8 +1,16 @@
 import {streamEncryptionInfo,transformEncrypted,passwordKey,createPasswordVerifier,verifyPasswordVerifier} from './stream-encryption.js';
 import {openOutput,copyFile} from './file-output.js';
-import {Sha256,hashBlob} from './sha256.js';
+import {hashBlob} from './sha256.js';
 import {createStoreZip} from './zip.js';
 
+const COMPARE_CHUNK_BYTES=1048576;
+function sameBytes(left,right){
+  if(left.byteLength!==right.byteLength)return false;
+  const words=left.byteLength>>>2,a=new Int32Array(left,0,words),b=new Int32Array(right,0,words);
+  for(let i=0;i<words;i++)if(a[i]!==b[i])return false;
+  const x=new Uint8Array(left),y=new Uint8Array(right);for(let i=words<<2;i<x.length;i++)if(x[i]!==y[i])return false;
+  return true;
+}
 // Pure processing only: no DOM, application storage, permissions or ownership.
 export function createProcessingEngine(renderMarkdown=()=>{throw new Error('Markdown renderer unavailable.');}){
   const sessions=new Map();let sequence=0;
@@ -25,14 +33,10 @@ export function createProcessingEngine(renderMarkdown=()=>{throw new Error('Mark
   async function run(type,data={},progress=()=>{}){
     if(typeof progress!=='function')progress=()=>{};
     if(type==='file.copy'||type==='crypto.stream.encrypt'||type==='crypto.stream.decrypt'){
-      const writer=await openOutput(data.output),proof=data.proof===true?new Sha256():null;
-      const output=proof?{
-        async write(bytes){proof.update(bytes);await writer.write(bytes);},
-        close:()=>writer.close(),abort:()=>writer.abort(),file:()=>writer.file(),get size(){return writer.size;}
-      }:writer;
+      const output=await openOutput(data.output);
       try{
         if(type==='file.copy')await copyFile(data.file,output,progress);else await transformEncrypted(data.file,data.key,output,{decrypt:type.endsWith('.decrypt'),progress});
-        await output.close();const file=await output.file();return proof?{file,hash:proof.hex()}:file;
+        await output.close();return await output.file();
       }catch(error){await output.abort().catch(()=>{});throw error;}
     }
     if(type==='crypto.info')return streamEncryptionInfo(data.file);
@@ -66,9 +70,11 @@ export function createProcessingEngine(renderMarkdown=()=>{throw new Error('Mark
     if(type==='encode.close'){const session=sessions.get(data.id);sessions.delete(data.id);await session?.writer.abort().catch(()=>{});return true;}
     if(type==='markdown')return renderMarkdown(data.doc,data.text,{assetPath:id=>data.paths[id]||''});
     if(type==='zip')return createStoreZip(data.files,{textEncoder:()=>new TextEncoder(),now:()=>new Date(data.date),makeBlob:(parts,type)=>new Blob(parts,{type})});
+    // Byte-for-byte comparison in 1 MB pieces (bounded memory), a word at a time: bound by
+    // reading speed rather than hashing.
     if(type==='equalFiles'){
-      if(data.left.size!==data.right.size)return false;
-      for(let offset=0;offset<data.left.size;offset+=1024*1024){const [left,right]=await Promise.all([data.left.slice(offset,offset+1024*1024).arrayBuffer(),data.right.slice(offset,offset+1024*1024).arrayBuffer()]);const a=new Uint8Array(left),b=new Uint8Array(right);if(a.length!==b.length||a.some((value,index)=>value!==b[index]))return false;progress({loaded:Math.min(offset+1048576,data.left.size),total:data.left.size,phase:'verifying'});}return true;
+      const size=data.left.size;if(size!==data.right.size)return false;
+      for(let offset=0;offset<size;offset+=COMPARE_CHUNK_BYTES){const [left,right]=await Promise.all([data.left.slice(offset,offset+COMPARE_CHUNK_BYTES).arrayBuffer(),data.right.slice(offset,offset+COMPARE_CHUNK_BYTES).arrayBuffer()]);if(!sameBytes(left,right))return false;progress({loaded:Math.min(offset+COMPARE_CHUNK_BYTES,size),total:size,phase:'verifying'});}return true;
     }
     throw new Error('Unknown portable processing operation.');
   }
