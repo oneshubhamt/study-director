@@ -3,7 +3,8 @@ import {openOutput,copyFile} from './file-output.js';
 import {hashBlob} from './sha256.js';
 import {createStoreZip} from './zip.js';
 
-const COMPARE_CHUNK_BYTES=1048576;
+const COMPARE_CHUNK_BYTES=1048576,RANGES_MAX_BYTES=16*1048576;
+const hexOf=buffer=>Array.from(new Uint8Array(buffer),v=>v.toString(16).padStart(2,'0')).join('');
 function sameBytes(left,right){
   if(left.byteLength!==right.byteLength)return false;
   const words=left.byteLength>>>2,a=new Int32Array(left,0,words),b=new Int32Array(right,0,words);
@@ -45,6 +46,14 @@ export function createProcessingEngine(renderMarkdown=()=>{throw new Error('Mark
     if(type==='crypto.verifier.check')return verifyPasswordVerifier(data.file,data.key);
     if(type==='file.hash')return hashBlob(data.file,progress);
     if(type==='checksum')return data.value instanceof Blob?hashBlob(data.value,progress):checksum(data.value,data.algorithm);
+    // Small parts stored back to back in one file: one read, then the
+    // browser's SHA-256 on each part. Returns one hex digest per range.
+    if(type==='checksum.ranges'){
+      const ranges=Array.isArray(data.ranges)?data.ranges:[],start=ranges[0]?.start,end=ranges.at(-1)?.end;
+      if(!(data.file instanceof Blob)||!ranges.length||!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||end>data.file.size||end-start>RANGES_MAX_BYTES||ranges.some((range,index)=>!(range.start>=start&&range.end>=range.start&&range.end<=end&&(!index||range.start>=ranges[index-1].end))))throw new Error('Checksum ranges are invalid.');
+      const bytes=await data.file.slice(start,end).arrayBuffer();progress({loaded:end-start,total:end-start,phase:'verifying'});
+      return Promise.all(ranges.map(async range=>hexOf(await crypto.subtle.digest('SHA-256',new Uint8Array(bytes,range.start-start,range.end-range.start)))));
+    }
     if(type==='stringify')return JSON.stringify(data.value);
     if(type==='chunk'){
       const body={seq:data.seq,entityType:data.entityType,items:data.items},hash=await checksum(body,data.algorithm);

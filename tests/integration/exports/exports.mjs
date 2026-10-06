@@ -128,4 +128,17 @@ for(const mode of ['success','write-failure','cancel-close']){
   assert.equal(releases,mode==='success'?0:1);assert.equal(writerAborts,mode==='write-failure'?1:0);
 }
 scenarios.push('failed stream-reader acquisition releases scratch; staging cancellation prevents worker dispatch');
+// Small parts stored back to back are checked with one read: each digest is
+// the standard SHA-256 of its part, and a changed byte shows in that part only.
+{
+  const parts=[new Uint8Array(1000).fill(1),new Uint8Array(0),new Uint8Array(70000).fill(7),new Uint8Array(5).fill(9)],file=new Blob(parts);let at=0;
+  const ranges=parts.map(part=>{const range={start:at,end:at+part.length};at+=part.length;return range;});
+  const digests=await engine.run('checksum.ranges',{file,ranges});
+  assert.deepEqual(digests,await Promise.all(parts.map(part=>engine.run('checksum',{value:new Blob([part])}))));
+  const changed=new Uint8Array(await file.arrayBuffer());changed[1500]^=1;const after=await engine.run('checksum.ranges',{file:new Blob([changed]),ranges});
+  assert.deepEqual(after.map((digest,index)=>digest===digests[index]),[true,true,false,true]);
+  for(const bad of [[],[{start:0,end:file.size+1}],[{start:10,end:5}],[{start:0,end:20},{start:10,end:30}]])await assert.rejects(engine.run('checksum.ranges',{file,ranges:bad}),/Checksum ranges are invalid/u);
+  await assert.rejects(engine.run('checksum.ranges',{file:new Blob([new Uint8Array(17*1048576)]),ranges:[{start:0,end:17*1048576}]}),/Checksum ranges are invalid/u,'one read stays bounded to 16 MB');
+  scenarios.push('back-to-back parts checked with one bounded read');
+}
 console.log(JSON.stringify({status:'PASS',scenarios,workersCreated:created,workersRemaining:alive},null,2));

@@ -444,6 +444,7 @@ function createV10Container(metadataBlob,{compression='none',assetBlobs=[]}={}){
   if(blob.size>BACKUP_MAX_FILE_BYTES)throw new Error(`Backup exceeds the ${Math.round(BACKUP_MAX_FILE_BYTES/1048576)} MB safe whole-file limit.`);
   return blob;
 }
+const BACKUP_CHECK_BATCH_BYTES=16*1048576;
 async function readV10BackupFile(file,options={}){
   backupThrowIfAborted(options.signal);
   if((file.size||0)>BACKUP_MAX_FILE_BYTES)throw new Error(`Backup file exceeds the ${Math.round(BACKUP_MAX_FILE_BYTES/1048576)} MB safe whole-file limit.`);
@@ -457,22 +458,28 @@ async function readV10BackupFile(file,options={}){
   if(metadataEnd>file.size)throw new Error('Backup v10 metadata is truncated.');
   const gzip=!!(flags&BACKUP_V10_FLAG_GZIP),metadataBlob=file.slice(metadataStart,metadataEnd);
   const parsed=await parseChunkedBackupMetadata(metadataBlob,{...options,filename:'backup-v10-metadata'}, {gzip,binaryV10:true});
-  let offset=metadataEnd,assetBytes=0;const importedAssets=[],contents=new Map();
+  // Each distinct attachment is stored once, back to back. Runs of small ones
+  // are checked with one read each (BACKUP_CHECK_BATCH_BYTES), larger ones on
+  // their own; any mismatch fails the whole file.
+  let offset=metadataEnd,assetBytes=0;const importedAssets=[],contents=new Map(),frames=[];
   for(const descriptor of parsed.assetDescriptors){
-    backupThrowIfAborted(options.signal);
     if(descriptor.missing===true)continue;
-    const group=descriptor.checksum+':'+descriptor.size;
-    let content=contents.get(group);
-    if(!content){
-      const end=offset+descriptor.size;if(!Number.isSafeInteger(end)||end>file.size)throw new Error(`Backup attachment ${descriptor.assetId} is truncated.`);
-      content=file.slice(offset,end);
-      if(await backupChecksumBlob(content,{signal:options.signal})!==descriptor.checksum)throw new Error(`Backup attachment ${descriptor.assetId} failed its integrity check.`);
-      contents.set(group,content);offset=end;assetBytes+=descriptor.size;
-    }
-    if(!options.validateOnly)importedAssets.push(freeze({...descriptor,blob:content.slice(0,content.size,descriptor.mimeType)}));
-    await backupImportYield(options);
+    const group=descriptor.checksum+':'+descriptor.size;if(contents.has(group))continue;
+    const end=offset+descriptor.size;if(!Number.isSafeInteger(end)||end>file.size)throw new Error(`Backup attachment ${descriptor.assetId} is truncated.`);
+    contents.set(group,file.slice(offset,end));frames.push({descriptor,start:offset,end});offset=end;assetBytes+=descriptor.size;
   }
   if(offset!==file.size)throw new Error('Backup contains unexpected trailing binary data.');
+  const mismatch=frame=>new Error(`Backup attachment ${frame.descriptor.assetId} failed its integrity check.`);
+  for(let index=0;index<frames.length;){
+    backupThrowIfAborted(options.signal);
+    const first=frames[index];
+    if(first.end-first.start>BACKUP_CHECK_BATCH_BYTES/2){if(await backupChecksumBlob(file.slice(first.start,first.end),{signal:options.signal})!==first.descriptor.checksum)throw mismatch(first);index+=1;await backupImportYield(options);continue;}
+    const batch=[];while(index<frames.length&&frames[index].end-frames[index].start<=BACKUP_CHECK_BATCH_BYTES/2&&frames[index].end-first.start<=BACKUP_CHECK_BATCH_BYTES)batch.push(frames[index++]);
+    const digests=await Processing.run('checksum.ranges',{file,ranges:batch.map(frame=>({start:frame.start,end:frame.end}))},{signal:options.signal});
+    batch.forEach((frame,position)=>{if(digests[position]!==frame.descriptor.checksum)throw mismatch(frame);});
+    await backupImportYield(options);
+  }
+  if(!options.validateOnly)for(const descriptor of parsed.assetDescriptors){if(descriptor.missing===true)continue;const content=contents.get(descriptor.checksum+':'+descriptor.size);importedAssets.push(freeze({...descriptor,blob:content.slice(0,content.size,descriptor.mimeType)}));}
   return {...parsed,importedAssets:freeze(importedAssets),assetBytes,uncompressedBytes:Number(parsed.uncompressedBytes||0)+assetBytes};
 }
 async function readLegacyBackupFile(file,options={}){
