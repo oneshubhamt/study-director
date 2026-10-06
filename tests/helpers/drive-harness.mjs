@@ -10,7 +10,11 @@ const source=fs.readFileSync(new URL('../../source/external/drive.js',import.met
 const policyContext=vm.createContext({});
 for(const file of ['internal','repository-policy'])vm.runInContext(fs.readFileSync(new URL(`../../source/core/${file}.js`,import.meta.url),'utf8'),policyContext);
 const repositoryPolicy=policyContext[Symbol.for('studyDirector.internalModules.v1')].require('repository-policy',1).protocol;
-export const repositoryDigest=async blob=>Buffer.from(await webcrypto.subtle.digest('SHA-256',await blob.arrayBuffer())).toString('hex');
+// Digests run on a background thread; tests on a fake clock wait for them
+// (pendingRepositoryDigests) before moving simulated time on.
+let digestsInFlight=0;
+export const pendingRepositoryDigests=()=>digestsInFlight;
+export const repositoryDigest=async blob=>{digestsInFlight+=1;try{return Buffer.from(await webcrypto.subtle.digest('SHA-256',await blob.arrayBuffer())).toString('hex');}finally{digestsInFlight-=1;}};
 const digest=repositoryDigest;
 function json(payload,status=200,headers={}){return new Response(JSON.stringify(payload),{status,headers:{'Content-Type':'application/json',...headers}});}
 export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=null,uploadProgressTransport=true}={}){

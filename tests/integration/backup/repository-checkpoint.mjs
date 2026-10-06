@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createProcessingEngine} from '../../helpers/file-processing.mjs';
-import {createDriveHarness} from '../../helpers/drive-harness.mjs';
+import {createDriveHarness,pendingRepositoryDigests} from '../../helpers/drive-harness.mjs';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
 for(const file of ['source/core/internal.js','source/core/operation-lifecycle.js','source/core/canonical.js','source/core/record-codecs.js','source/core/reconciliation.js','source/core/exports.js','source/core/managed-repository.js','source/core/repository-policy.js','source/core/repository-background.js','source/core/backup-provider.js','source/core/backup-capture.js','source/core/backup.js','source/core/backup-recovery-host.js'])vm.runInThisContext(fs.readFileSync(file,'utf8'),{filename:file});
@@ -12,6 +12,11 @@ const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const freeze=Object.freeze,CanonicalModule=registry.require('canonical',1),ManagedRepositoryModule=registry.require('managed-repository',1),RepositoryPolicyModule=registry.require('repository-policy',1),RepositoryBackgroundModule=registry.require('repository-background',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})),BackupProviderModule=registry.require('backup-provider',1,freeze({repositoryPolicy:RepositoryPolicyModule})),BackupCaptureModule=registry.require('backup-capture',1),BackupModule=registry.require('backup',1,freeze({backupCapture:BackupCaptureModule,backupProvider:BackupProviderModule,canonical:CanonicalModule,managedRepository:ManagedRepositoryModule,repositoryBackground:RepositoryBackgroundModule})),ReconciliationModule=registry.require('reconciliation',1,freeze({canonical:CanonicalModule})),ExportsModule=registry.require('exports',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)}));
 const exclusive=ExportsModule.createCoordinator({createWorker:()=>{throw new Error('The fixture uses direct processing.');},window:{},document:{}});
 const engine=createProcessingEngine();
+// File processing (hashing, compression) finishes on background threads, not
+// on the fake clock. Settling loops wait for it before moving simulated time,
+// so a loaded machine cannot let leases expire mid-step.
+let processingInFlight=0;
+async function realWorkSettled(){for(let turn=0;turn<20000&&(processingInFlight>0||pendingRepositoryDigests()>0);turn++)await new Promise(resolve=>setImmediate(resolve));}
 let backgroundClock=null,backgroundReady=true,primary=true;
 let checksumCounter=0,encodeOpenCounter=0,assetReads=0,snapshotRevision='rev-1',sourceRevision='2026-09-19T00:00:00.000Z',checkpointCounter=0,reconciliationBaseWrites=[],reconciliationBase=null,reconciliationBaseNotes=Object.create(null);
 const AUDIO_BYTES=300*1024*1024,AUDIO_HASH='a'.repeat(64);
@@ -40,7 +45,7 @@ const ActiveSessionCodec=freeze({sanitizeImportedActiveSession:value=>value});
 const exportsPort=freeze({
   backgroundAvailable:()=>backgroundReady?true:'locked',protect:async(file,options)=>publicationProtection?publicationProtection.protect(file,options):freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),
   unprotect:async(file,options)=>publicationProtection?publicationProtection.unprotect(file,options):freeze({blob:file,encrypted:false}),check:()=>{},scope:operation=>operation(),job:(operation,options)=>exclusive.job(operation,options),
-  run:async(type,data,options)=>{if(type==='file.release'){releasedFiles.push(data.file);return true;}if(type==='checksum'){checksumCounter+=1;if(data&&data.value===audioBlob&&audioBlob.size===AUDIO_BYTES)return AUDIO_HASH;}if(type==='encode.open')encodeOpenCounter+=1;return engine.run(type,data,options?.progress);},
+  run:async(type,data,options)=>{if(type==='file.release'){releasedFiles.push(data.file);return true;}if(type==='checksum'){checksumCounter+=1;if(data&&data.value===audioBlob&&audioBlob.size===AUDIO_BYTES)return AUDIO_HASH;}if(type==='encode.open')encodeOpenCounter+=1;processingInFlight+=1;try{return await engine.run(type,data,options?.progress);}finally{processingInFlight-=1;}},
   download:async()=>{},chooseSave:()=>{},save:async()=>({status:'saved'})
 });
 const noop=()=>{},diagnosticFailures=[],operationEvents=[];
@@ -669,7 +674,7 @@ assert.equal(await runtime.providers.backup('presentation-cancel'),false);assert
  runtime.providers.configureIntegrityScrub(freeze({readTarget:async()=>integrityTarget,writeResult:async(_id,result)=>{assert.equal(result.complete,true);integrityWrites++;integrityTarget={...integrityTarget,completedAt:new Date().toISOString()};},prepare:async()=>({maxObjects:4,maxBytes:1048576}),isAvailable:()=>true,isUnsafe:()=>false,yieldTask:async()=>{},quarantine:async()=>[]}));
  runtime.providers.configurePendingBackupRetry(freeze({read:async id=>id==='google-drive'&&pending?{requestedAt:new Date().toISOString()}:null,mark:async()=>{pending=true;return true;},clear:async()=>{pending=false;return true;}}));
  runtime.providers.register(freeze({id:'google-drive',label:'Google Drive',connected:()=>connected,backgroundAvailable:()=>connected,subscribeConnection:fn=>{listener=fn;},repository:transport()}));
- async function until(predicate){for(let turn=0;turn<2000&&!predicate();turn++){await clock.drainMicrotasks(80);await new Promise(resolve=>setImmediate(resolve));}assert.ok(predicate(),'production I/O did not settle');}
+ async function until(predicate){for(let turn=0;turn<2000&&!predicate();turn++){await clock.drainMicrotasks(80);await new Promise(resolve=>setImmediate(resolve));await realWorkSettled();}assert.ok(predicate(),'production I/O did not settle');}
  const row=name=>runtime.providers.backgroundStatus().find(row=>row.job==='google-drive '+name);
  try{
   assert.equal((await runtime.providers.history('google-drive',{interactive:false})).available,true,'live integrity hooks cannot make history completion reject');
@@ -701,7 +706,7 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
  // Four slow deletions may require four protected passes plus a final inventory.
  // Bound simulated time by five passes of at most 120 request-sized intervals;
  // wall-clock QA remains subject to the guarded runner's existing file timeout.
- const stepMs=scenario.includes('deletion')?1000:100,settle=async(predicate,limitMs=scenario.endsWith('44000')?5*120*45000:scenario.includes('deletion')?3600000:180000)=>{for(let elapsed=0;elapsed<limitMs;elapsed+=stepMs){await clock.drainMicrotasks(220);await new Promise(resolve=>setImmediate(resolve));if(predicate())return;await clock.advance(stepMs);}assert.fail('assembled Drive execution did not settle: '+JSON.stringify({scenario,now:clock.now(),progress,intent:maintenance.get(id+'-cold'),status:runtime.providers.backgroundStatus().filter(row=>String(row.job).startsWith(id)),errors:diagnosticFailures.slice(-2),pages:h.state.objectPageStarts,activePages:h.state.activeObjectPages,requests:h.state.requests.slice(-3).map(row=>({method:row.method,url:new URL(row.url).pathname})),deletions:h.state.deletions.slice(-3)}));};
+ const stepMs=scenario.includes('deletion')?1000:100,settle=async(predicate,limitMs=scenario.endsWith('44000')?5*120*45000:scenario.includes('deletion')?3600000:180000)=>{for(let elapsed=0;elapsed<limitMs;elapsed+=stepMs){await clock.drainMicrotasks(220);await new Promise(resolve=>setImmediate(resolve));await realWorkSettled();await clock.drainMicrotasks(220);if(predicate())return;await clock.advance(stepMs);}assert.fail('assembled Drive execution did not settle: '+JSON.stringify({scenario,now:clock.now(),progress,intent:maintenance.get(id+'-cold'),status:runtime.providers.backgroundStatus().filter(row=>String(row.job).startsWith(id)),errors:diagnosticFailures.slice(-2),pages:h.state.objectPageStarts,activePages:h.state.activeObjectPages,requests:h.state.requests.slice(-3).map(row=>({method:row.method,url:new URL(row.url).pathname})),deletions:h.state.deletions.slice(-3)}));};
  try{
   await h.provider.prepare();await h.provider.authorize();snapshotRevision='drive-'+scenario;sourceRevision='2026-10-03T11:00:00.000Z';
   await runtime.providers.backupRepositoryProvider(id);
