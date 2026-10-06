@@ -1085,7 +1085,7 @@
     [
       ['Save the day','Review → Save Today creates the Study Day record used by Library and Insights.'],
       ['Keep a backup','Library → Data & Backup explains managed checkpoints and multi-device handoff. For computer ↔ phone/tablet, back up to Google Drive on the device you are leaving, then open Versions on the other device and Combine or Replace. Advanced → Export backup… creates a separate standalone file.'],
-      ['Google Drive','Optional. Before Google authorization, Study Director explains that drive.file access is used only to create, list, read, verify, rotate or delete Study Director backup files and related metadata. Backups are integrity-checked; optional backup encryption can be enabled in Library.'],
+      ['Google Drive','Optional. Before Google authorization, Study Director explains that drive.file access is used only to create, list, read, verify, rotate or delete Study Director backup files and related metadata. Backups are integrity-checked; optional backup encryption can be enabled in Library. After your first Drive backup from a device, it also backs up automatically while you are signed in, on the same schedule as the Device Folder. Google ends the sign-in after about an hour; you get one notice you can dismiss, and changes made while signed out go up when you reconnect.'],
       ['Sample data',`The ${PREVIEW_SAMPLE_DAYS}-day preview is temporary, read-only and never included in exports.`]
     ].forEach(([title,copy])=>{
       const item=el('div','guide-data-item');

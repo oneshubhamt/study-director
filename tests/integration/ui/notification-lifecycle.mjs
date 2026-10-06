@@ -169,7 +169,7 @@ class Element {
   assert.equal(presentation.locationLabel('device-folder',{connected:true,lastBackupAt:verified.verifiedAt}),presentation.locationLabel('google-drive',{connected:true}));
   assert.equal(presentation.locationLabel('google-drive',{connected:true}),'On · Last verified 06:44','resting state uses the same compact timestamp and retained verification metadata');
   for(const source of ['device-folder','google-drive'])for(const [kind,label] of [['backup','Backing up…'],['history','Reading backups…'],['restore-version','Restoring…'],['bring-in','Combining…']])assert.equal(presentation.locationLabel(source,{connected:true,busy:true,foregroundKind:kind}),label);
-  assert.equal(presentation.locationLabel('google-drive',{wasConnected:true}),'Reconnect required');
+  assert.equal(presentation.locationLabel('google-drive',{wasConnected:true}),'Signed out');
   assert.equal(presentation.locationLabel('device-folder',{mode:'permission'}),'Permission needed');
   const providerSource=fs.readFileSync('source/core/backup-provider.js','utf8'),start=providerSource.indexOf('  function renderButtons(){'),end=providerSource.indexOf('  function register(',start);
   const row=new Element(),host={replaceChildren(){}},item={id:'google-drive',label:'Google Drive'};

@@ -1886,6 +1886,8 @@ if(!Object.isFrozen(NoticeCoordinator)||NoticeCoordinator.format!=='study-direct
 }
 async function showBackupPresentation(source,kind){
   if(source==='device-folder'&&kind==='permission')return DeviceBackup?.connect();
+  // Reconnecting straight from the toast keeps it to one click.
+  if(kind==='permission'&&source!=='file'&&await BackupProviderRuntime.connect(source))return true;
   if(['history','restore-version','bring-in','remove-safety'].includes(kind))return BackupRecoveryHost?.history.openSource(source);
   if(!await goTab('library',{source:'backup-notification'}))return false;
   const drawer=document.querySelector('.library-data-drawer');if(drawer)drawer.open=true;
@@ -2569,10 +2571,19 @@ const {
   updateBreakMeter, updateCD
 }=TimerEngine;
 function togglePause(){const result=togglePauseTimer();schedulePwaUpdateEvaluation(150);return result;}
+// Every automatic backup location hears about each change: the Device Folder
+// and any location this device already backs up to (Google Drive).
+function notifyBackupChange(change){
+  const value=Object.freeze({urgent:change?.urgent===true,reason:String(change?.reason||'change')});
+  let noted=false;
+  try{noted=DeviceBackup?.notifyChange(value)===true;}catch(error){AppDiagnostics.capture('backup.change-device',error,'warn');}
+  try{BackupProviderRuntime?.noteChange(value);}catch(error){AppDiagnostics.capture('backup.change-provider',error,'warn');}
+  return noted;
+}
 function notifyDeviceBackupIfStudyDayResolved(reason='study-day-completed'){
   const trackable=TASKS.map((task,index)=>({task,index})).filter(row=>isTrackableBlock(row.task));
   if(!trackable.length||!trackable.every(row=>isTaskResolved(row.index)))return false;
-  return DeviceBackup?.notifyChange(Object.freeze({urgent:true,reason}))||false;
+  return notifyBackupChange({urgent:true,reason});
 }
 function markDone(){
   const finishWasAvailable=isTrackableBlock(TASKS[TimerState.currentIndex]);
@@ -3649,8 +3660,15 @@ async function maybePromptBackupNudge(force=false){
   backupNudgeCheckedAt=now;
   const health=readStorageHealth();
   const last=Date.parse(health.lastBackupAt||'');
-  let due=Number.isFinite(last)&&(now-last>=BACKUP_NUDGE_MS);
-  if(!Number.isFinite(last)){
+  // One reminder for every kind of backup. It stays away while an automatic
+  // backup (Device Folder, or Drive while signed in) is able to run, and while
+  // a backup file, folder or Drive already holds the latest changes, however
+  // old that backup is: automatic backups only run when something changed.
+  const covered=Math.max(-Infinity,...verifiedRecoveryEntries().map(entry=>Date.parse(entry.sourceRevision)).filter(Number.isFinite));
+  const changed=Date.parse(health.lastLocalSaveAt||''),unbacked=!Number.isFinite(covered)||!Number.isFinite(changed)||changed>covered;
+  const automatic=DeviceBackup?.status().connected===true||BackupProviderRuntime.automaticActive();
+  let due=!automatic&&unbacked&&Number.isFinite(last)&&(now-last>=BACKUP_NUDGE_MS);
+  if(!Number.isFinite(last)&&!automatic){
     try{
       const summaries=await AppData.dailyRecords.summaries();
       due=Array.isArray(summaries)&&summaries.length>=7;
@@ -4154,7 +4172,7 @@ const AttachmentStorage=AssetStorageModule.create({
     }
     if(deletionState)AppData.deletionRecovery.stageAttachments(tx,deletionState);
     for(const [id,row] of rows)store.put(row,id);for(const id of remove)store.delete(id);tx.oncomplete=()=>finish(true);
-  },'attachment metadata commit aborted').then(result=>{writeStorageHealth({lastLocalSaveAt:AppData.mutationEpoch.nextChangeAt()});DeviceBackup?.notifyChange(Object.freeze({reason:'attachment-metadata'}));if(attachmentIntegrityIssues.size)scheduleAttachmentIntegrityAudit(5000);return result;})
+  },'attachment metadata commit aborted').then(result=>{writeStorageHealth({lastLocalSaveAt:AppData.mutationEpoch.nextChangeAt()});notifyBackupChange({reason:'attachment-metadata'});if(attachmentIntegrityIssues.size)scheduleAttachmentIntegrityAudit(5000);return result;})
 });
 const RichTextAssets=Object.freeze({
   retain:()=>AttachmentStorage.retain(),
@@ -4389,10 +4407,10 @@ function handleCanonicalCommit(event){
     const badgeActive=event.operation==='delete'?false:persistedActiveSessionUnfinished(event.value);
     if(NativeCapabilities.status().badgeActive!==badgeActive)void NativeCapabilities.updateBadge(badgeActive);
   }
-  if(event?.backupCapture!==true)DeviceBackup?.notifyChange(Object.freeze({
+  if(event?.backupCapture!==true)notifyBackupChange({
     urgent:event&&event.entityType==='dailyRecord',
     reason:String(event&&event.entityType||'canonical-commit')
-  }));
+  });
   if(referencesChanged&&event?.backupCapture!==true){
     scheduleRichTextAssetMaintenance();
     invalidateAttachmentLibrary();
@@ -4635,7 +4653,7 @@ async function finishTodaySession(){
     await goTab('review',{source:'finish-today'});
     ReviewView.refresh({force:true});
     completionNotice.update({lifecycle:'succeeded',cue:'day-complete',occurrence:completionNotice.operationId});
-    DeviceBackup?.notifyChange(Object.freeze({urgent:true,reason:'finish-today'}));
+    notifyBackupChange({urgent:true,reason:'finish-today'});
     return true;
   }catch(error){
     completionNotice?.update({lifecycle:'cancelled'});
@@ -8646,9 +8664,9 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
   background:DeviceRepositoryBackground,
   configuration:Object.freeze({
     metadataKey:APP_META_KEYS.automaticDeviceBackup,
-    quietDelayMs:30*60*1000,
-    maxDelayMs:30*60*1000,
-    urgentDelayMs:3000
+    quietDelayMs:RepositoryPolicyModule.protocol.automaticQuietMs,
+    maxDelayMs:RepositoryPolicyModule.protocol.automaticQuietMs,
+    urgentDelayMs:RepositoryPolicyModule.protocol.automaticUrgentMs
   }),
   environment:Object.freeze({
     clearTimeout:timer=>clearTimeout(timer),
@@ -8707,7 +8725,7 @@ BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze({
     bringInRepositoryProvider:(id,options)=>BackupProviderRuntime.bringInRepositoryProvider(id,options),cancelForeground:(reason,id)=>BackupProviderRuntime.cancelForeground(reason,id),configureConvergencePropagation:config=>BackupProviderRuntime.configureConvergencePropagation(config),
     configureManagedRecovery:config=>BackupProviderRuntime.configureManagedRecovery(config),configurePendingBackupRetry:config=>BackupProviderRuntime.configurePendingBackupRetry(config),
     history:(id,options)=>BackupProviderRuntime.history(id,options),list:()=>BackupProviderRuntime.list(),removeProtectedRepositoryProvider:(id,checkpointId)=>BackupProviderRuntime.removeProtectedRepositoryProvider(id,checkpointId),
-    restoreRepositoryProviderVersion:(id,options)=>BackupProviderRuntime.restoreRepositoryProviderVersion(id,options)
+    restoreRepositoryProviderVersion:(id,options)=>BackupProviderRuntime.restoreRepositoryProviderVersion(id,options),suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason)
   }),
   session:Object.freeze({hasBlocking:()=>hasBlockingActiveSession()}),
   sourceRevision:()=>currentBackupSourceRevision(),
@@ -8812,6 +8830,8 @@ async function refreshDeviceBackgroundPermission(event){
   await DeviceBackup.refreshPermission();
 }
 AppActivation.subscribe(event=>{if([APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTIVATION_KINDS.VISIBILITY_RETURN,APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER,APP_ACTIVATION_KINDS.DATE_ROLLOVER].includes(event.kind))wakeBackgroundOperations('activation');void refreshDeviceBackgroundPermission(event).catch(error=>AppDiagnostics.capture('device-backup.permission-refresh',error,'warn'));});
+// A location backs up on its own once this device has backed up to it.
+BackupProviderRuntime.configureAutomaticBackup(Object.freeze({covered:id=>verifiedRecoveryState.providers[id]?.sourceRevision||'',current:()=>currentBackupSourceRevision()}));
 BackupProviderRuntime.configureIntegrityScrub(Object.freeze({
   readTarget:async id=>id==='google-drive'?await readRepositoryIntegrityTarget('drive'):normalizeRepositoryIntegrityTarget(null),
   writeResult:async(id,result)=>{if(id==='google-drive')await updateRepositoryIntegrityTarget('drive',result);},

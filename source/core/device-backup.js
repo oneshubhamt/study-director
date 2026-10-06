@@ -880,7 +880,7 @@ registry.define('device-backup',1,input=>{
               await persistMetadata(metadataValue({lastBackupAt:completedAt,lastFilename:checkpointName,sourceRevision:committedSourceRevision}));
               lastFilename=checkpointName;lastBackupAt=completedAt;savedSourceRevision=committedSourceRevision;checkpointCount=Math.max(1,state.valid.length+1);recoveryAvailable=true;
               backedUpRevision=Math.max(backedUpRevision,startedRevision);if(pendingRevision<=backedUpRevision){firstPendingAt=0;clearSchedule();}else firstPendingAt=postStartPendingAt||nowMs();
-              resetAutomaticRetry();repository.markCompleted();mode='connected';presentationState.message='';mark('device-checkpoint-committed',{reason});return freeze({completedAt,checkpointName});
+              resetAutomaticRetry();repository.markCompleted({recoveryCopy:{type:'provider',id:'device-folder',label:'Device Folder',sourceRevision:committedSourceRevision}});mode='connected';presentationState.message='';mark('device-checkpoint-committed',{reason});return freeze({completedAt,checkpointName});
             },
             cleanup:async()=>{
               if(!maintenanceNeeded)return freeze({gcRemoved:0,checkpoints:checkpointCount,warning:''});

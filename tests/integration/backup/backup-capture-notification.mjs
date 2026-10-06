@@ -7,9 +7,9 @@ const end=html.indexOf('\nasync function refreshPersistedSessionBadge()',start);
 assert.ok(start>=0&&end>start,'The reference-aware canonical commit handler must be available.');
 const commits=[],notifications=[],maintenanceDelays=[];
 const RichTextApi={scanAttachmentReferences:value=>({trusted:true,assetIds:[...String(value||'').matchAll(/img-[a-z0-9-]{20,80}/g)].map(match=>match[0])})};
-const handler=new Function('writeStorageHealth','renderStorageHealth','document','NativeCapabilities','DeviceBackup','scheduleRichTextAssetMaintenance','invalidateAttachmentLibrary','RichTextApi','ACTIVE_SESSION_ID',
+const handler=new Function('writeStorageHealth','renderStorageHealth','document','NativeCapabilities','notifyBackupChange','scheduleRichTextAssetMaintenance','invalidateAttachmentLibrary','RichTextApi','ACTIVE_SESSION_ID',
   `let richAssetReferenceRevision=0;const canonicalAttachmentReferenceSignatures=new Map();${html.slice(start,end)};return {handleCanonicalCommit,getRevision:()=>richAssetReferenceRevision};`)(
-  state=>commits.push(state),()=>{}, {querySelector:()=>null},null,{notifyChange:change=>notifications.push(change)},delay=>maintenanceDelays.push(delay),()=>{},RichTextApi,'active-session'
+  state=>commits.push(state),()=>{}, {querySelector:()=>null},null,change=>notifications.push(change),delay=>maintenanceDelays.push(delay),()=>{},RichTextApi,'active-session'
 );
 handler.handleCanonicalCommit({entityType:'activeSession',operation:'upsert',value:{snapshot:{review:{reflection:'',studyQuality:null}}},committedAt:'2026-09-23T17:00:00.000Z',backupCapture:true});
 assert.equal(commits.length,1,'A backup session flush still updates local storage health.');

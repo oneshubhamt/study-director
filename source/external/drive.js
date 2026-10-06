@@ -69,7 +69,7 @@
   let gisPromise=null;
   let tokenClient=null;
   let accessToken='';
-  let tokenExpiresAt=0;
+  let tokenExpiresAt=0,signedInBefore=false;
   let connectionExpiryTimer=null;
   const connectionListeners=new Set();
   let folderId='';
@@ -193,7 +193,7 @@
     const safetyMs=Math.min(60000,Math.max(5000,Math.floor(lifetimeMs*0.1)));
     tokenExpiresAt=Date.now()+Math.max(1000,lifetimeMs-safetyMs);
     if(!accessToken){clearSession();pending.reject(new Error('Google did not return an access token.'));return;}
-    scheduleConnectionExpiry();notifyConnectionChange();pending.resolve(accessToken);
+    signedInBefore=true;scheduleConnectionExpiry();notifyConnectionChange();pending.resolve(accessToken);
   }
   async function prepare(){
     requirePlatform();
@@ -228,7 +228,7 @@
     const promise=new Promise((ok,fail)=>{resolve=ok;reject=fail;});
     const timer=setTimeout(()=>settleAuthorization(timeoutError('Google authorization')),AUTH_TIMEOUT_MS);
     pendingAuthorization={promise,resolve,reject,timer};
-    try{tokenClient.requestAccessToken({include_granted_scopes:false,prompt:'select_account'});}
+    try{tokenClient.requestAccessToken({include_granted_scopes:false,prompt:signedInBefore?'':'select_account'});}
     catch(error){settleAuthorization(error instanceof Error?error:new Error(String(error)));}
     return promise;
   }
@@ -1088,11 +1088,12 @@
       label:'Google Drive',
       exportLabel:'Back up',
       disclosureSummary:'ⓘ Drive access: Study Director backup files only · Details',
-      disclosure:'Google Drive is optional. If you choose Back up or Recover, Study Director will request drive.file access to create, list, read, verify, rotate or delete Study Director backup files and related metadata in your Drive. It does not use this permission to browse unrelated Drive files, sell data, or serve advertising. Optional backup encryption encrypts backup contents when enabled in Library. Continue only if you want to authorize this Drive action.',
+      disclosure:'Google Drive is optional. If you choose Back up or Recover, Study Director will request drive.file access to create, list, read, verify, rotate or delete Study Director backup files and related metadata in your Drive. It does not use this permission to browse unrelated Drive files, sell data, or serve advertising. Optional backup encryption encrypts backup contents when enabled in Library. After your first Drive backup from this device, Study Director also backs up to Drive automatically while you are signed in; Google ends the sign-in after about an hour. Continue only if you want to authorize this Drive action.',
       prepare,
       authorize,
       backgroundAvailable:()=>tokenValid(),
       connected:()=>tokenValid(),
+      connectionExpiresAt:()=>tokenValid()?tokenExpiresAt:0,
       subscribeConnection,
       disconnectLabel:'Disconnect Drive',
       disconnect,

@@ -68,7 +68,8 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
     history:async id=>{providerHistoryReads+=1;assert.equal(id,'google-drive');return driveHistory;},
     list:()=>freeze([freeze({id:'google-drive',label:'Google Drive'})]),
     removeProtectedRepositoryProvider:async()=>freeze({removed:true,entries:freeze([])}),
-    restoreRepositoryProviderVersion:async(id,options)=>providerRestoreImpl(id,options)
+    restoreRepositoryProviderVersion:async(id,options)=>providerRestoreImpl(id,options),
+    suspendBackground:()=>{events.push('suspend-providers');return freeze({settled:Promise.resolve(),release:()=>{events.push('resume-providers');return true;}});}
   }),
   session:freeze({hasBlocking:()=>sessionBlocking}),
   sourceRevision:()=>session.source,

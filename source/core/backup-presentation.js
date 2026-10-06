@@ -37,7 +37,7 @@ registry.define('backup-presentation',1,()=>{
       if(state.mode==='unsupported')return 'Unavailable';
       if(state.mode==='permission')return 'Permission needed';
       if(state.mode==='error')return 'Needs attention';
-      if(!state.connected)return state.wasConnected?'Reconnect required':'Off';
+      if(!state.connected)return state.wasConnected?'Signed out':'Off';
       const saved=typeof input.verified==='function'?input.verified(source):null;
       const at=state.lastBackupAt||read(source,'backup-verified')?.completedAt||saved?.verifiedAt;
       const when=at&&Number.isFinite(Date.parse(at))?(typeof input.timeLabel==='function'?input.timeLabel(at):new Date(at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',hour12:false})):'';
@@ -66,8 +66,12 @@ registry.define('backup-presentation',1,()=>{
     }
     function feedback(source,message,ok=true){if(!message)return notifications.resolveEvent(source,'backup-status');return notifications.emit({source,id:'backup-status',message,severity:ok?'info':'error',lifecycle:ok?'succeeded':'failed',surface:'inline',title:source,action:action(source,'status')});}
     function condition(source,id,message){if(!message)return notifications.resolveEvent(source,id);return notifications.emit({source,id,message,severity:'warning',lifecycle:'failed',foreground:false,title:source==='file'?'File backup':source==='device-folder'?'Device Folder backup':'Google Drive backup',action:action(source,id),surface:'toast',persistent:true});}
+    // A one-off heads-up (a sign-in that ended, repeated failures): a toast
+    // that closes on its own or when dismissed. Repeating the same notice
+    // does not show it again until it is resolved.
+    function notice(source,id,message){return notifications.emit({source,id,message,severity:'warning',lifecycle:'succeeded',foreground:false,title:source==='device-folder'?'Device Folder backup':'Google Drive backup',action:action(source,id),surface:'toast',duration:12000});}
     function reset(source){for(const event of notifications.eventStatus().events)if(event.source===source)notifications.resolveEvent(source,event.id);}
-    return freeze({begin,read,feedback,condition,bytes,detail,outcome,locationLabel,summary,restoreChoices:RESTORE_CHOICES,resolve:(source,id='backup-operation')=>notifications.resolveEvent(source,id),reset,subscribe:notifications.subscribe});
+    return freeze({begin,read,feedback,condition,notice,bytes,detail,outcome,locationLabel,summary,restoreChoices:RESTORE_CHOICES,resolve:(source,id='backup-operation')=>notifications.resolveEvent(source,id),reset,subscribe:notifications.subscribe});
   }
   return freeze({format:'study-director.backup-presentation-module',contractVersion:1,createPresentation});
 });

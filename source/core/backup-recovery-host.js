@@ -68,7 +68,7 @@ registry.define('backup-recovery-host',1,()=>{
     functions(input.lifecycle,['activeSessionIssue','activeSessionLoad','activeSessionSettled','attachmentBusy','canonicalPlanDraft','deletionRecoveryFlush','flushNotes','flushPlanDraft','hasTasks','noteFailure','planDraft','planInputValue','quiesce','savePlanDraft','settleAttachmentWriters','settlePlan','writeLiveDraft'],'Backup recovery host lifecycle port');
     functions(input.managedRecovery,['createCoordinator'],'Backup recovery host managed-recovery port');
     functions(input.mutation,['run'],'Backup recovery host mutation port');
-    functions(input.providers,['bringInRepositoryProvider','cancelForeground','configureConvergencePropagation','configureManagedRecovery','configurePendingBackupRetry','history','list','removeProtectedRepositoryProvider','restoreRepositoryProviderVersion'],'Backup recovery host provider port');
+    functions(input.providers,['bringInRepositoryProvider','cancelForeground','configureConvergencePropagation','configureManagedRecovery','configurePendingBackupRetry','history','list','removeProtectedRepositoryProvider','restoreRepositoryProviderVersion','suspendBackground'],'Backup recovery host provider port');
     functions(input.session,['hasBlocking'],'Backup recovery host session port');
     if(typeof input.sourceRevision!=='function')throw new TypeError('Backup recovery host sourceRevision port is invalid.');
     functions(input.storage,['read','remove','write'],'Backup recovery host storage port');
@@ -129,7 +129,16 @@ registry.define('backup-recovery-host',1,()=>{
     }
 
     const coordinator=input.managedRecovery.createCoordinator(freeze({
-      automaticBackup:freeze({suspend:reason=>input.device.suspendAutomatic(reason),resume:token=>input.device.resumeAutomatic(token)}),
+      // A restore pauses automatic backups at every location, not only the
+      // Device Folder, so none of them captures half-applied data.
+      automaticBackup:freeze({
+        suspend:async reason=>{
+          const device=await input.device.suspendAutomatic(reason),providers=input.providers.suspendBackground(reason);
+          try{await providers.settled;}catch(error){providers.release();input.device.resumeAutomatic(device);throw error;}
+          return freeze({device,providers});
+        },
+        resume:held=>{held.providers.release();return input.device.resumeAutomatic(held.device);}
+      }),
       lifecycle:freeze({settle:(kind,options)=>settleRecoveryState(options),quiesce:operation=>input.lifecycle.quiesce(operation),rebuild:()=>rebuildRecoveryState(),revision:()=>input.sourceRevision()}),
       mutation:freeze({run:(kind,operation)=>input.mutation.run(kind,operation)}),
       diagnostics:freeze({capture:(scope,error,level)=>input.diagnostics.capture(scope,error,level),mark:(phase,details)=>input.diagnostics.mark(phase,details)})
