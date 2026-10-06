@@ -280,18 +280,16 @@ registry.define('backup-recovery-host',1,()=>{
         message:`Verified backup checkpoint from ${location.sourceLabel}, saved ${dateLabel(location.exportedAt)}.`,
         details:['Device-local settings stay unchanged.','A verified safety backup protects the current state before recovery.'],
         cancelLabel:'Keep current',
-        choices:[
-          {value:'combine',label:'Combine with current data',description:'Keep current data and review genuine differences before applying them.'},
-          {value:'replace',label:'Replace current data',kind:'danger',description:'Make this backup authoritative. Current portable data not in this backup will be removed.'}
-        ]
+        choices:[presentation.restoreChoices.missing,presentation.restoreChoices.combine,presentation.restoreChoices.replace]
       });
       if(!choice)return false;const controller=new AbortController();setOperationBusy(true,controller,choice==='replace'?'restore-version':'bring-in');setHistoryStatus('');setHistoryProgress({message:choice==='replace'?'Preparing restore…':'Preparing comparison…'});
       try{
-        const options=freeze({presentation:presentationScope,checkpointId,confirmed:choice==='replace',note:note?note.key:'',signal:controller.signal,onProgress:value=>{if(activeController===controller&&!controller.signal.aborted)setHistoryProgress(value);}});
+        const options=freeze({presentation:presentationScope,checkpointId,confirmed:choice==='replace',note:note?note.key:'',missingOnly:choice==='missing',signal:controller.signal,onProgress:value=>{if(activeController===controller&&!controller.signal.aborted)setHistoryProgress(value);}});
         const result=choice==='replace'?(sourceId==='device-folder'?await input.device.restoreVersion(options):await input.providers.restoreRepositoryProviderVersion(sourceId,options)):(sourceId==='device-folder'?await input.device.bringIn(options):await input.providers.bringInRepositoryProvider(sourceId,options));
         clearHistoryProgress();
         const saved=dateLabel(location.exportedAt),noteOutcome=note?{'note-missing':`This note isn’t in the backup from ${saved}.`,'note-unchanged':`The backup from ${saved} has the same text as this note.`,'note-kept':'No changes were made.'}[String(result?.reason||'')]:'';
         if(noteOutcome){setHistoryStatus(noteOutcome,true,'cancelled');return false;}
+        if(choice==='missing'&&String(result?.reason||'')==='needs-decision'){setHistoryStatus(presentation.restoreChoices.needsDecision,true,'cancelled');return false;}
         if(result&&result.cancelled||result&&result.reason==='cancelled'){setHistoryStatus('Recovery cancelled safely.',true,'cancelled');return false;}
         if(result&&result.ok===false){const message=userMessage(result.error,'The selected backup could not be applied safely.');setHistoryStatus(message,false);return false;}
         setHistoryStatus(presentation.outcome(choice==='replace'?'restore-version':'bring-in',location.sourceLabel,result?.convergence));lastEntries=freeze([]);setOperationBusy(false);close();

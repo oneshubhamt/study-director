@@ -919,7 +919,7 @@ registry.define('backup-provider',1,input=>{
     for(const entry of manifest.objects||[]){const item=byId.get(entry.objectId);if(!item||item.size&&item.size!==entry.storedBytes||item.digest&&item.digest!==entry.storedChecksum)throw new Error(`Repository object ${entry.objectId} is missing or its metadata no longer matches the selected version.`);}
     return freeze({byId,invalid:Math.max(0,Number(inventory.invalidCount)||0)});
   }
-  async function loadRepositoryProvider(selected,operation,{checkpointId='',mode='bring-in',onProgress=null,note=''}={}){
+  async function loadRepositoryProvider(selected,operation,{checkpointId='',mode='bring-in',onProgress=null,note='',missingOnly=false,before='',quiet=false}={}){
     if(!['bring-in','restore-version'].includes(mode))throw new TypeError('Unsupported managed repository recovery mode.');
     const presentationId=foregroundView()?.operationId||'';
     const progress=(stage,message,details={})=>{if(operation.signal?.aborted||(foregroundView()?.operationId||'')!==presentationId)return;recoveryStatus(message,true,onProgress,stage,details);};
@@ -940,7 +940,13 @@ registry.define('backup-provider',1,input=>{
     const choices=freeze(newest.map(pair=>{const summary=pair.item.history;return freeze({id:pair.item.id,name:pair.item.name,exportedAt:summary?.exportedAt||repositoryMetadataTimestamp(pair.item),encrypted:summary?.encrypted===true,counts:summary?.counts||freeze({dailyRecord:0,areaNote:0}),size:pair.item.size,verification:summary?'on-restore':'legacy-on-restore'});}));
     let chosenId=String(checkpointId||'')||choices[0].id;
     if(checkpointId&&!choices.some(choice=>choice.id===chosenId))throw new Error('The selected backup version is no longer available.');
-    if(!checkpointId&&selected.repository.choose){
+    // Without a chosen version, adding what is missing uses the newest ordinary
+    // version saved before the given time (the browser-data clear).
+    if(!checkpointId&&missingOnly){
+      const beforeMs=Date.parse(before),source=newest.find(pair=>{const summary=pair.item.history;return summary&&summary.retention?.role!=='before-restore'&&(!Number.isFinite(beforeMs)||Date.parse(summary.exportedAt)<beforeMs);});
+      if(!source)return null;chosenId=source.item.id;
+    }
+    else if(!checkpointId&&selected.repository.choose){
       OperationDiagnostics.mark('checkpoint-selection-start',{provider:selected.id});
       let chosen;
       try{chosen=await selected.repository.choose(choices,freeze({ignored:inventory.invalid.length+inventory.ignored+inventory.uncommitted.length+inventory.orphanCommits.length,signal:operation.signal,mode}));}
@@ -951,7 +957,7 @@ registry.define('backup-provider',1,input=>{
     const pair=newest.find(candidate=>candidate.item.id===chosenId);if(!pair)throw new Error('The selected backup version is no longer available.');
     OperationDiagnostics.mark('checkpoint-selected',{provider:selected.id});
     progress('verify',`Verifying selected backup in ${selected.label}…`);
-    const verificationTask=(async()=>{OperationDiagnostics.mark('selected-checkpoint-verification-start',{provider:selected.id});const row=await verifyRepositoryInventoryPair(selected,pair,{interactive:true,signal:operation.signal});OperationDiagnostics.mark('selected-checkpoint-verification-complete',{provider:selected.id,objects:Number(row.manifest.objects&&row.manifest.objects.length)||0});return row;})();
+    const verificationTask=(async()=>{OperationDiagnostics.mark('selected-checkpoint-verification-start',{provider:selected.id});const row=await verifyRepositoryInventoryPair(selected,pair,{interactive:!quiet,signal:operation.signal});OperationDiagnostics.mark('selected-checkpoint-verification-complete',{provider:selected.id,objects:Number(row.manifest.objects&&row.manifest.objects.length)||0});return row;})();
     const inventoryTask=(async()=>{OperationDiagnostics.mark('recovery-object-inventory-start',{provider:selected.id});const value=await repositoryObjectInventory(selected,{signal:operation.signal});OperationDiagnostics.mark('recovery-object-inventory-complete',{provider:selected.id,objects:value.items.length,invalid:value.invalidCount,overflow:value.overflow===true});return value;})();
     const quarantineTask=integrityScrubHooks?integrityScrubHooks.quarantine(selected.id):Promise.resolve([]);
     const [row,listedObjects,quarantineRows]=await Promise.all([verificationTask,inventoryTask,quarantineTask]),quarantinedObjectIds=repositoryProviderObjectIds(quarantineRows),quarantined=new Set(quarantinedObjectIds);
@@ -971,7 +977,7 @@ registry.define('backup-provider',1,input=>{
     if(!managedRecoveryHooks)throw new Error('Managed recovery transaction coordination is unavailable.');
     const repositorySnapshot=freeze({history:freeze([row.manifest]),availableObjectIds:freeze([...objectInventory.byId.keys()]),inventory,invalidCount:inventory.invalid.length});
     const managedRecovery=transaction=>managedRecoveryHooks.run(freeze({
-      kind:mode,label:selected.label,keepsActiveSession:!!note,apply:async()=>{progress('apply',mode==='bring-in'?'Combining data locally…':'Applying selected backup locally…');const result=await transaction.apply();progress('verify-local','Verifying restored local data…');return result;},
+      kind:mode,label:selected.label,keepsActiveSession:!!note||missingOnly,apply:async()=>{progress('apply',mode==='bring-in'?'Combining data locally…':'Applying selected backup locally…');const result=await transaction.apply();progress('verify-local','Verifying restored local data…');return result;},
       createSafety:async()=>{
         OperationDiagnostics.mark('external-safety-publication-start',{provider:selected.id});
         progress('safety',`Creating protected safety backup in ${selected.label}…`);
@@ -984,7 +990,7 @@ registry.define('backup-provider',1,input=>{
       },
       publishPresent:async result=>{progress('finalize','Finalizing recovery…');return managedProviderPresent(providerSelected,result,{sourceNeeded:mode==='bring-in',sourceCheckpoint:mode==='restore-version'?row.item.id:''});}
     }));
-    return RepositoryCheckpointPipeline.inspect(row.manifest,readObject,{interactive:true,signal:operation.signal,committed:true,managedRecovery,managedProgress:onProgress,...(note&&mode==='bring-in'?{note}:{})});
+    return RepositoryCheckpointPipeline.inspect(row.manifest,readObject,{interactive:!quiet,signal:operation.signal,committed:true,managedRecovery,managedProgress:onProgress,...(note&&mode==='bring-in'?{note}:{})});
   }
   async function removeProtectedRepositoryProvider(id,checkpointId){
     if(busy)return freeze({removed:false,reason:'busy'});
@@ -1201,10 +1207,14 @@ registry.define('backup-provider',1,input=>{
       return false;
     }finally{if(foregroundView()&&foregroundView().providerId===selected.id)finishForegroundView(selected);await release(selected,'export');setBusy(false);foreground.release();detachFinishedSelection(selected);}
   }
+  // A quiet run (adding what is missing after browser data was cleared) never
+  // prompts: it runs only while already connected and never asks for sign-in.
   async function bringInRepositoryProvider(id,options={}){
     if(busy)return freeze({cancelled:true,reason:'busy'});
     const selected=providers.get(safeId(id));
     if(!selected||!selected.repository)throw new Error('Backup location is unavailable.');
+    const quiet=options?.quiet===true,missingOnly=options?.missingOnly===true,note=!missingOnly&&typeof options?.note==='string'?options.note:'';
+    if(quiet&&!providerConnected(selected))return freeze({cancelled:true,reason:'not-connected'});
     const traceId=OperationDiagnostics.start('provider-combine',selected.label,{provider:selected.id}),foreground=beginForeground(selected,options&&options.signal||null);
     if(!foreground){OperationDiagnostics.finish({status:'skipped',reason:'busy'},traceId);return freeze({cancelled:true,reason:'busy'});}
     const operation=BackupController.beginImport(),cancelImport=()=>operation.cancel?.('Backup recovery was cancelled by the user.');
@@ -1213,16 +1223,16 @@ registry.define('backup-provider',1,input=>{
     try{
       OperationDiagnostics.mark('provider-background-preemption-start',{provider:selected.id},traceId);await foreground.settled;OperationDiagnostics.mark('provider-background-preemption-complete',{provider:selected.id},traceId);
       if(selected.prepare){OperationDiagnostics.mark('provider-prepare-start',{provider:selected.id},traceId);await selected.prepare();OperationDiagnostics.mark('provider-prepare-complete',{provider:selected.id},traceId);}
-      OperationDiagnostics.mark('provider-authorization-start',{provider:selected.id},traceId);await authorize(selected,'import');OperationDiagnostics.mark('provider-authorization-complete',{provider:selected.id},traceId);
+      if(!quiet){OperationDiagnostics.mark('provider-authorization-start',{provider:selected.id},traceId);await authorize(selected,'import');OperationDiagnostics.mark('provider-authorization-complete',{provider:selected.id},traceId);}
       statusText(`Choose a backup from ${selected.label}…`);
-      const note=typeof options?.note==='string'?options.note:'',candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',note,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});if(!candidate){statusText('Combine cancelled.');finishForegroundView(selected,{message:'Combine cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({cancelled:true});}
-      const result=await RepositoryCheckpointPipeline.bringIn(candidate,{note});
-      if(result&&result.cancelled){const message=String(result.reason||'').startsWith('note-')?'No changes were made.':'Combine cancelled.';statusText(message);finishForegroundView(selected,{message,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({...result,cancelled:true});}
+      const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',note,missingOnly,before:String(options?.before||''),quiet,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});if(!candidate){const message=missingOnly?'No version saved before browser data was cleared was found. Nothing was changed.':'Combine cancelled.';statusText(message);finishForegroundView(selected,{message,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({cancelled:true,...(missingOnly?{reason:'needs-decision'}:{})});}
+      const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{note,missingOnly});
+      if(result&&result.cancelled){const message=String(result.reason||'').startsWith('note-')||result.reason==='needs-decision'?'No changes were made.':'Combine cancelled.';statusText(message);finishForegroundView(selected,{message,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({...result,cancelled:true});}
       const convergence=result&&result.managedRecovery&&result.managedRecovery.present||freeze({status:'pending',source:freeze({status:'failed',reason:'post-operation backup status unavailable'}),device:freeze({status:'skipped',reason:'unavailable'})});
       const sourceReady=convergence.source&&(convergence.source.status==='completed'||convergence.source.status==='pending'&&convergence.source.retryQueued===true),deviceReady=['completed','skipped'].includes(String(convergence.device&&convergence.device.status||''))||convergence.device&&convergence.device.status==='pending'&&convergence.device.queued===true;
       const finalMessage=presentation.outcome('bring-in',selected.label,convergence);statusText(finalMessage,sourceReady&&deviceReady);finishForegroundView(selected,{message:finalMessage,ok:true});
 
-      OperationDiagnostics.finish({cancelled:false},traceId);return freeze({...result,convergence});
+      OperationDiagnostics.finish({cancelled:false},traceId);return freeze({...result,convergence,exportedAt});
     }catch(error){
       const committed=error&&error.studyDirectorCommittedDescription?` ${error.studyDirectorCommittedDescription}; completed changes were not rolled back.`:'';
       const rolledBack=error&&error.studyDirectorRollbackDescription?` ${error.studyDirectorRollbackDescription}`:'';

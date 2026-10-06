@@ -40,7 +40,7 @@ assert.match(host,/source\.kind==='device'\?await input\.device\.history[\s\S]*i
 assert.doesNotMatch(host,/for\(const provider of input\.providers\.list\(\)\).*input\.providers\.history/u,'explicit recovery must never enumerate every provider');
 assert.doesNotMatch(host,/input\.repository\.mergeHistory/u,'provider-scoped recovery must not merge competing histories');
 assert.match(host,/backup checkpoint/u);assert.match(host,/Restore \/ Combine…/u);assert.match(host,/Before Clear Library/u,'protected bulk-delete safety checkpoints must be clearly labelled in history');
-assert.match(host,/cancelLabel:'Keep current'/u);assert.match(host,/label:'Replace current data'[\s\S]*Make this backup authoritative/u);assert.match(host,/label:'Combine with current data'[\s\S]*review genuine differences/u);
+assert.match(host,/cancelLabel:'Keep current'/u);assert.match(host,/choices:\[presentation\.restoreChoices\.missing,presentation\.restoreChoices\.combine,presentation\.restoreChoices\.replace\]/u);assert.match(presentation,/label:'Replace current data'[\s\S]*Make this backup authoritative/u);assert.match(presentation,/label:'Combine with current data'[\s\S]*review genuine differences/u);assert.match(presentation,/label:'Add only what’s missing'[\s\S]*Nothing you have now changes/u);
 assert.match(host,/sourceId==='device-folder'\?await input\.device\.restoreVersion\(options\):await input\.providers\.restoreRepositoryProviderVersion\(sourceId,options\)/u);
 assert.match(host,/sourceId==='device-folder'\?await input\.device\.bringIn\(options\):await input\.providers\.bringInRepositoryProvider\(sourceId,options\)/u);
 assert.match(app,/id="managed-version-history-progress"[\s\S]*id="managed-version-history-progress-stage"[\s\S]*id="managed-version-history-progress-detail"/u,'Version History must own its structured recovery progress surface.');
@@ -62,12 +62,12 @@ const deviceActivation=app.slice(app.indexOf('async function refreshDeviceBackgr
 assert.match(deviceActivation,/DeviceBackup\.refreshPermission\(\)/u,'foreground return must refresh Device Folder permission state without opening a permission prompt.');
 assert.doesNotMatch(deviceActivation,/requestPermission|DeviceBackup\.connect\(/u,'activation opportunities must not prompt for folder access.');
 
-assert.match(backup,/title:'Use this backup'/u);assert.match(backup,/cancelLabel:'Keep current'/u);assert.match(backup,/value:'replace',label:'Replace current data'/u);assert.match(backup,/value:'combine',label:'Combine with current data'/u);
+assert.match(backup,/title:'Use this backup'/u);assert.match(backup,/cancelLabel:'Keep current'/u);assert.match(backup,/choices=\[\.\.\.\(preview\.reconciliationCapable\?\[restoreChoices\.missing\]:\[\]\),restoreChoices\.combine,\.\.\.\(exactCapable\?\[restoreChoices\.replace\]:\[\]\)\]/u);
 assert.match(backup,/checkboxes:\[\{id:'safetyCopy',label:'Download an extra standalone safety copy before applying'/u,'optional file safety copy must be a compact checkbox on the existing reconciliation surface');
 assert.doesNotMatch(backup,/id:'safetyCopy',label:'Optional extra backup copy'[\s\S]*choices:/u,'optional file safety copy must not render as another radio-choice conflict row');
 assert.match(backup,/if\(decisions\.safetyCopy===true\)/u,'checkbox must only trigger the optional standalone download while automatic rollback remains independent');
 assert.match(backup,/restoreStandaloneVersion\(candidate,\{confirmed:true\}\)/u,'standalone Replace must use exact verified restore');
-assert.match(backup,/restoreBackup\(candidate\)/u,'standalone Combine must keep the reconciliation engine');
+assert.match(backup,/restoreBackup\(candidate,\{missingOnly:mode==='missing'\}\)/u,'standalone Combine must keep the reconciliation engine');
 assert.match(backup,/exactCapable=Number\(parsed&&parsed\.formatVersion\)>=18&&captureAuthority==='canonical-complete'&&!!parsed&&!!parsed\.protectedCheckpointManifest/u,'standalone Replace must require current complete-capture authority rather than merely a protected manifest');
 assert.match(backup,/rescuePartial=captureAuthority==='rescue-partial'/u,'verified rescue-partial standalone backups must remain recoverable without becoming exact-replacement authority');
 
@@ -81,7 +81,7 @@ assert.doesNotMatch(app,/'restore-latest-backup'|'open-version-history'|'bring-i
 assert.match(app,/ACTIVE_SESSION_BLOCKED_CLICK_ACTIONS=new Set\(\[[^\]]*'recover-device-backup'[^\]]*'recover-provider-backup'[^\]]*'recover-managed-version'/u);
 
 assert.match(device,/Existing Study Director backup checkpoints found\. Choose Versions to recover one, or Back up now to keep this device’s current data\./u);
-assert.match(guide,/Local-first, versioned handoff/u);assert.match(guide,/Google Drive is the intended computer ↔ phone\/tablet handoff path/u);assert.match(guide,/\["Recover"/u);assert.match(guide,/Keep current, Combine with current data, or Replace current data/u);assert.match(guide,/\["Replace current data"/u);assert.match(guide,/\["Combine with current data"/u);
+assert.match(guide,/Local-first, versioned handoff/u);assert.match(guide,/Google Drive is the intended computer ↔ phone\/tablet handoff path/u);assert.match(guide,/\["Recover"/u);assert.match(guide,/Keep current, Add only what’s missing, Combine with current data, or Replace current data/u);assert.match(guide,/\["Replace current data"/u);assert.match(guide,/\["Combine with current data"/u);
 assert.doesNotMatch(guide,/\["Restore latest"|\["Backup history"|\["Merge from backup"/u);
 assert.match(reconciliation,/label:'Backup copy'/u);assert.match(reconciliationUi,/incomingLabel:String\(item\.incomingLabel\|\|'Backup copy'\)/u);
 

@@ -1484,15 +1484,15 @@ async function importPortableBackup(ev){
     OperationDiagnostics.mark('standalone-inspection-start',{bytes:Number(f.size)||0},traceId);candidate=await inspectBackup(f,{filename:f.name||'',signal:operation.signal});OperationDiagnostics.mark('standalone-inspection-complete',{},traceId);
     const preview=candidate.preview||{},stored=inspectedBackups.get(candidate),snapshot=stored?candidateSnapshotState(stored):null,parsed=snapshot&&snapshot.parsed||null;
     const captureAuthority=String(parsed&&parsed.captureAuthority||'unknown'),exactCapable=Number(parsed&&parsed.formatVersion)>=18&&captureAuthority==='canonical-complete'&&!!parsed&&!!parsed.protectedCheckpointManifest,rescuePartial=captureAuthority==='rescue-partial';
-    const choices=[{value:'combine',label:'Combine with current data',description:'Keep current data and review genuine differences before applying them.'}];
-    if(exactCapable)choices.push({value:'replace',label:'Replace current data',kind:'danger',description:'Make this backup authoritative. Current portable data not in this backup will be removed.'});
+    const restoreChoices=presentation.restoreChoices,choices=[...(preview.reconciliationCapable?[restoreChoices.missing]:[]),restoreChoices.combine,...(exactCapable?[restoreChoices.replace]:[])];
     const decisionDetails=exactCapable?['Choose how this backup should be applied.']:rescuePartial?['This is a verified rescue backup from degraded storage. It can recover available data, but authoritative replacement is disabled.']:['This historical backup can be combined safely, but it does not carry current capture-authority proof for authoritative replacement.'];
     OperationDiagnostics.mark('standalone-decision-start',{},traceId);const mode=await choose({title:'Use this backup',message:`Verified backup${preview.exportedAt?` from ${new Date(preview.exportedAt).toLocaleString('en-IN')}`:''}.`,details:decisionDetails,cancelLabel:'Keep current',choices});
     OperationDiagnostics.mark('standalone-decision-complete',{mode:mode||'keep-current'},traceId);if(!mode){finishPortablePresentation({message:'Backup import cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,stage:'decision'},traceId);return freeze({cancelled:true});}
     consumed=true;OperationDiagnostics.mark('standalone-apply-start',{mode},traceId);
-    const result=mode==='replace'?await restoreStandaloneVersion(candidate,{confirmed:true}):await restoreBackup(candidate);OperationDiagnostics.mark('standalone-apply-complete',{mode,cancelled:result&&result.cancelled===true},traceId);
+    const result=mode==='replace'?await restoreStandaloneVersion(candidate,{confirmed:true}):await restoreBackup(candidate,{missingOnly:mode==='missing'});OperationDiagnostics.mark('standalone-apply-complete',{mode,cancelled:result&&result.cancelled===true},traceId);
+    if(result&&result.reason==='needs-decision'){finishPortablePresentation({message:presentation.restoreChoices.needsDecision,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,mode},traceId);return result;}
     if(result&&result.cancelled){finishPortablePresentation({message:'Backup import cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,mode},traceId);return result;}
-    if(result&&result.verified)setLocalExportStatus(result.changed?`✓ Backup ${mode==='replace'?'restored':'combined'} locally and verified.`:'✓ Backup verified. No changes were needed.');
+    if(result&&result.verified)setLocalExportStatus(result.changed?`✓ Backup ${mode==='replace'?'restored':mode==='missing'?'added what was missing':'combined'} locally and verified.`:'✓ Backup verified. Nothing was missing.');
     if(result&&result.verified&&!result.cancelled&&result.changed){
       try{
         const convergence=await requestDeviceBackupConvergence(freeze({source:'file',sourceLabel:'File backup'}));

@@ -12,6 +12,15 @@ registry.define('backup-presentation',1,()=>{
     else if(p.activeBytes>0)parts.push(`${bytes(p.loadedBytes)} of ${bytes(p.activeBytes)} in current item`);
     return parts.join(' · ');
   }
+  // The three ways a verified backup can be applied, worded once for every
+  // backup location. Adding only what is missing leaves everything current as
+  // it is and stops, unchanged, at anything that would need a choice.
+  const RESTORE_CHOICES=freeze({
+    missing:freeze({value:'missing',label:'Add only what’s missing',description:'Bring back Saved Days and attachments this device doesn’t have. Nothing you have now changes.'}),
+    combine:freeze({value:'combine',label:'Combine with current data',description:'Keep current data and review genuine differences before applying them.'}),
+    replace:freeze({value:'replace',label:'Replace current data',kind:'danger',description:'Make this backup authoritative. Current portable data not in this backup will be removed.'}),
+    needsDecision:'Some data differs from this backup and needs your choice, so nothing was changed. Use Combine to review the differences.'
+  });
   function outcome(kind,label,convergence){
     const message=kind==='restore-version'?'Backup restored locally and verified.':'Backup combined locally and verified.',external=convergence?.source||convergence,parts=[message];
     const append=(name,state)=>{if(state?.status==='pending')parts.push(`${name} backup update is pending.`);else if(state?.status==='completed')parts.push(`${name} backup state is verified.`);else if(state?.status==='failed')parts.push(`${name} backup status needs attention.`);};
@@ -58,7 +67,7 @@ registry.define('backup-presentation',1,()=>{
     function feedback(source,message,ok=true){if(!message)return notifications.resolveEvent(source,'backup-status');return notifications.emit({source,id:'backup-status',message,severity:ok?'info':'error',lifecycle:ok?'succeeded':'failed',surface:'inline',title:source,action:action(source,'status')});}
     function condition(source,id,message){if(!message)return notifications.resolveEvent(source,id);return notifications.emit({source,id,message,severity:'warning',lifecycle:'failed',foreground:false,title:source==='file'?'File backup':source==='device-folder'?'Device Folder backup':'Google Drive backup',action:action(source,id),surface:'toast',persistent:true});}
     function reset(source){for(const event of notifications.eventStatus().events)if(event.source===source)notifications.resolveEvent(source,event.id);}
-    return freeze({begin,read,feedback,condition,bytes,detail,outcome,locationLabel,summary,resolve:(source,id='backup-operation')=>notifications.resolveEvent(source,id),reset,subscribe:notifications.subscribe});
+    return freeze({begin,read,feedback,condition,bytes,detail,outcome,locationLabel,summary,restoreChoices:RESTORE_CHOICES,resolve:(source,id='backup-operation')=>notifications.resolveEvent(source,id),reset,subscribe:notifications.subscribe});
   }
   return freeze({format:'study-director.backup-presentation-module',contractVersion:1,createPresentation});
 });

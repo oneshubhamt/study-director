@@ -97,7 +97,7 @@ const presentation=[];host.history.subscribePresentation(value=>presentation.pus
 assert.equal(await host.history.recover({target:{closest:()=>deviceButton}}),true);
 assert.equal(presentation.at(-1).active,false);assert.equal(presentation.at(-1).lifecycle,'succeeded');assert.match(presentation.at(-1).message,/restored locally/);
 assert.equal(restoredCheckpoint,CHECKPOINT('a'));assert.equal(restoredConfirmed,true,'provider-owned Replace choice must be the only confirmation before exact restore');
-assert.equal(lastUseBackupOptions.cancelLabel,'Keep current');assert.deepEqual(lastUseBackupOptions.choices.map(choice=>choice.value),['combine','replace']);
+assert.equal(lastUseBackupOptions.cancelLabel,'Keep current');assert.deepEqual(lastUseBackupOptions.choices.map(choice=>choice.value),['missing','combine','replace']);
 
 chooseMode='combine';await host.history.openSource('google-drive');await new Promise(resolve=>setImmediate(resolve));
 assert.equal(deviceHistoryReads,1,'Google Drive recovery must not inspect Device Folder');assert.equal(providerHistoryReads,1);
@@ -192,6 +192,17 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   assert.equal(nodes.get('managed-version-history-title').textContent,'Device Folder backups');
   deviceConnected=false;assert.deepEqual(await host.history.openNote({key:'Ethics',label:'Ethics'}),{opened:false,reason:'no-source'},'without a connected backup nothing opens');deviceConnected=true;
   deviceCombineResult=freeze({ok:true});host.history.close();
+}
+// Every restore offers the same three choices; adding only what is missing
+// runs the missing-only Combine and explains when something needs a choice.
+{
+  chooseMode='missing';deviceCombineResult=freeze({ok:false,reason:'needs-decision'});
+  await host.history.openSource('device-folder');await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(await host.history.recover({target:{closest:()=>deviceButton}}),false);
+  assert.deepEqual(lastUseBackupOptions.choices.map(choice=>choice.value),['missing','combine','replace']);
+  assert.equal(lastDeviceCombine.missingOnly,true);assert.match(host.history.status().status.message,/needs your choice, so nothing was changed/u);
+  deviceCombineResult=freeze({ok:true});assert.equal(await host.history.recover({target:{closest:()=>deviceButton}}),true);
+  chooseMode='replace';host.history.close();
 }
 // Version History lists versions newest first by when they were saved,
 // whatever their tier and whatever order the location returned them in.

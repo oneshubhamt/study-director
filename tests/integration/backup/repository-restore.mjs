@@ -233,13 +233,13 @@ const historicalSession=freeze({id:'current',type:'activeSession',version:9,revi
 const remoteFiles=new Map(),readDownloads=[];let providerUploaded=false;
 const remoteKey=(kind,id)=>`${kind}:${id}`;
 for(const [objectId,blob] of objectFiles)remoteFiles.set(remoteKey('object',objectId),{kind:'object',id:objectId,name:objectId+'.sdobject',blob,createdAt:manifest.exportedAt});
-remoteFiles.set(remoteKey('checkpoint',checkpointId),{kind:'checkpoint',id:checkpointId,name:checkpointId+'.sdcheckpoint',blob:publishedManifestBlob,createdAt:manifest.exportedAt});
+remoteFiles.set(remoteKey('checkpoint',checkpointId),{kind:'checkpoint',id:checkpointId,name:checkpointId+'.sdcheckpoint',blob:publishedManifestBlob,createdAt:manifest.exportedAt,history:{logicalFingerprint:manifest.logicalFingerprint,exportedAt:manifest.exportedAt,counts:manifest.counts,encrypted:manifest.encrypted,retention:manifest.retention}});
 remoteFiles.set(remoteKey('commit',checkpointId),{kind:'commit',id:checkpointId,name:checkpointId+'.sdcommit',blob:publishedCommitBlob,createdAt:manifest.exportedAt});
 const originalHistoricalManifestBytes=new Uint8Array(await publishedManifestBlob.arrayBuffer());
 let safetyMaintenancePolls=0,publicationCounter=0,foregroundPublicationActive=false,orphanRestoreMaintenance=false,orphanRestoreReaps=0;const safetyCoordinationEvents=[];
 const providerTransport=freeze({
-  list:async({kind})=>freeze({items:freeze([...remoteFiles.values()].filter(file=>file.kind===kind).map(file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt}))),overflow:false}),
-  upload:async file=>{providerUploaded=true;const stored={kind:file.kind,id:file.id,name:file.name,blob:file.blob,createdAt:file.exportedAt||new Date().toISOString()};remoteFiles.set(remoteKey(file.kind,file.id),stored);return freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:stored.createdAt,modifiedAt:stored.createdAt});},
+  list:async({kind})=>freeze({items:freeze([...remoteFiles.values()].filter(file=>file.kind===kind).map(file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,...(file.history?{history:file.history}:{})}))),overflow:false}),
+  upload:async file=>{providerUploaded=true;const stored={kind:file.kind,id:file.id,name:file.name,blob:file.blob,createdAt:file.exportedAt||new Date().toISOString(),history:file.historySummary||null};remoteFiles.set(remoteKey(file.kind,file.id),stored);return freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:stored.createdAt,modifiedAt:stored.createdAt});},
   download:async item=>{if(item.kind==='object'&&!providerUploaded)readDownloads.push(item.id);const stored=remoteFiles.get(remoteKey(item.kind,item.id));if(!stored)throw new Error('missing provider fixture file');return stored.blob;},
   delete:async item=>remoteFiles.delete(remoteKey(item.kind,item.id)),
   beginPublication:async()=>{foregroundPublicationActive=true;safetyCoordinationEvents.push('publication-start');return freeze({id:`pub_${String(++publicationCounter).padStart(32,'0')}`,createdAt:new Date().toISOString()});},
@@ -277,6 +277,23 @@ records.push(freeze({version:16,recordKind:'study',date:'2026-09-21',reflection:
   assert.ok(readDownloads.length>=1&&readDownloads.length<new Set(manifest.objects.map(entry=>entry.objectId)).size,`the note read downloaded ${readDownloads.length} of ${manifest.objects.length} objects`);
   assert.ok(readDownloads.every(id=>!attachmentIds.has(id)),'no attachment the note does not use is downloaded');
   noteChoice=savedChoice;
+}
+
+// After browser data is cleared, adding what is missing from Drive runs
+// quietly only while Drive is connected (it never asks to sign in), uses the
+// newest version saved before the clear, and changes nothing when none exists.
+{
+  const saved={records:[...records],assets:new Map(assets),notes:{...notes},deletions:[...deletions]},beforeClear='2099-01-01T00:00:00.000Z';
+  assert.deepEqual({...await runtime.providers.bringInRepositoryProvider('repository-version-qa',{missingOnly:true,quiet:true,before:beforeClear})},{cancelled:true,reason:'not-connected'});
+  assert.equal(runtime.providers.register(freeze({id:'repository-missing-qa',label:'Repository Missing QA',connected:()=>true,repository:providerTransport})),true);
+  records=[];assets.clear();
+  const added=await runtime.providers.bringInRepositoryProvider('repository-missing-qa',{missingOnly:true,quiet:true,before:beforeClear});
+  assert.equal(added.cancelled,false);assert.equal(added.added,1);assert.deepEqual(records.map(row=>row.date),['2026-09-18'],'the missing Saved Day comes back');
+  assert.ok(Date.parse(added.exportedAt)<Date.parse(beforeClear),'the version used was saved before the clear');
+  records=[];
+  const none=await runtime.providers.bringInRepositoryProvider('repository-missing-qa',{missingOnly:true,quiet:true,before:'2000-01-01T00:00:00.000Z'});
+  assert.equal(none.cancelled,true);assert.equal(none.reason,'needs-decision');assert.deepEqual(records,[],'nothing changes without a version from before the clear');
+  ({notes}=saved);records=saved.records;deletions=saved.deletions;assets.clear();for(const [id,blob] of saved.assets)assets.set(id,blob);
 }
 
 // An integrity-valid but unpublished repository manifest is not eligible for historical restore.

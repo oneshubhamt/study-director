@@ -8590,17 +8590,22 @@ async function handleBrowserStorageReset(event={}){
   })().finally(()=>{storageResetHandling=null;});
   return storageResetHandling;
 }
-// Add back only what this device lacks, from the newest Device Folder version
-// saved before the clear. Anything needing a decision falls back to the notice.
+// Add back only what this device lacks, from the newest version saved before
+// the clear: the Device Folder first, otherwise Google Drive if it is already
+// connected (this never asks to sign in). Anything needing a decision falls
+// back to the notice.
 async function restoreMissingAfterStorageReset(hold){
-  if(!appCanMutate()||!DeviceBackup.status().connected)return false;
-  let restored=null;
-  try{restored=await DeviceBackup.bringIn({missingOnly:true,before:hold.clearedAt});}
-  catch(error){AppDiagnostics.capture('storage-reset.missing-restore',error,'warn');}
-  if(!restored||!restored.ok)return false;
+  if(!appCanMutate())return false;
+  const device=DeviceBackup.status().connected,drive=!device&&BackupProviderRuntime.connected('google-drive');if(!device&&!drive)return false;
+  const options={missingOnly:true,quiet:true,before:hold.clearedAt};let outcome=null;
+  try{
+    if(device){const restored=await DeviceBackup.bringIn(options);if(restored&&restored.ok)outcome={exportedAt:restored.exportedAt,result:restored.result,label:'Device Folder'};}
+    else{const restored=await BackupProviderRuntime.bringInRepositoryProvider('google-drive',options);if(restored&&restored.cancelled===false&&restored.verified)outcome={exportedAt:restored.exportedAt,result:restored,label:'Google Drive'};}
+  }catch(error){AppDiagnostics.capture('storage-reset.missing-restore',error,'warn');}
+  if(!outcome)return false;
   settleStorageReset();
-  const at=Date.parse(String(restored.exportedAt||'')),days=Math.max(0,Number(restored.result?.added)||0),files=Math.max(0,Number(restored.result?.assetsRestored)||0);
-  const source=`your Device Folder backup${Number.isFinite(at)?` of ${new Date(at).toLocaleString()}`:''}`,count=(value,word)=>`${value} ${word}${value===1?'':'s'}`;
+  const at=Date.parse(String(outcome.exportedAt||'')),days=Math.max(0,Number(outcome.result?.added)||0),files=Math.max(0,Number(outcome.result?.assetsRestored)||0);
+  const source=`your ${outcome.label} backup${Number.isFinite(at)?` of ${new Date(at).toLocaleString()}`:''}`,count=(value,word)=>`${value} ${word}${value===1?'':'s'}`;
   NoticeCoordinator.emit({source:'storage-reset',id:'restored',severity:'success',lifecycle:'succeeded',foreground:false,surface:'toast',duration:12000,cue:'none',
     title:'Browser data was cleared',
     message:days||files?`Your open work was kept. Added ${count(days,'past Saved Day')} and ${count(files,'attachment')} from ${source}.`:`Your open work was kept. Nothing was missing compared with ${source}.`});

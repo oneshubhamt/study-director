@@ -630,7 +630,8 @@ registry.define('device-backup',1,input=>{
       // reduced data, so it is never used.
       const missingOnly=!exact&&options?.missingOnly===true,missingBefore=Date.parse(String(options?.before||''));
       // Restoring one note reads only that note and its images from the version.
-      const note=!exact&&!missingOnly&&typeof options?.note==='string'?options.note:'';
+      // A quiet run (the automatic one after a clear) never prompts.
+      const note=!exact&&!missingOnly&&typeof options?.note==='string'?options.note:'',quiet=options?.quiet===true;
       if(!supported)return freeze({ok:false,reason:'unsupported'});
       const traceId=operationStart(exact?'device-restore':'device-combine','Device Folder');
       if(!ownership.canMutate()){presentationState.message=exact?'Take control in this tab before restoring a Device Folder version.':'Take control in this tab before combining from a Device Folder backup.';publish();operationFinish({status:'skipped',reason:'ownership'},traceId);return freeze({ok:false,reason:'ownership'});}
@@ -692,7 +693,7 @@ registry.define('device-backup',1,input=>{
             return freeze({status:'completed',queued:true,reason:'normal-device-backup'});
           }
         }));
-        operationMark('selected-checkpoint-inspection-start',{provider:'device-folder'},traceId);const candidate=await repository.inspect(row.manifest,readObject,{interactive:!missingOnly,signal,committed:true,managedRecovery,managedProgress:recoveryProgress,...(note?{note}:{})});operationMark('selected-checkpoint-inspection-complete',{provider:'device-folder'},traceId);
+        operationMark('selected-checkpoint-inspection-start',{provider:'device-folder'},traceId);const candidate=await repository.inspect(row.manifest,readObject,{interactive:!quiet,signal,committed:true,managedRecovery,managedProgress:recoveryProgress,...(note?{note}:{})});operationMark('selected-checkpoint-inspection-complete',{provider:'device-folder'},traceId);
         const result=exact?await repository.restoreVersion(candidate,{confirmed:options&&options.confirmed===true}):await repository.bringIn(candidate,{missingOnly,note});
         if(result&&result.cancelled){presentationState.message='';operationFinish({cancelled:true},traceId);return freeze({ok:false,reason:['needs-decision','note-missing','note-unchanged','note-kept'].includes(result.reason)?result.reason:'cancelled',checkpointId:row.id,result});}
         const convergence=result&&result.managedRecovery&&result.managedRecovery.present||freeze({status:'pending',reason:'post-operation backup status unavailable'});
@@ -713,7 +714,7 @@ registry.define('device-backup',1,input=>{
     async function applyCheckpoint(modeName,options={}){
       if(busy||foregroundController)return freeze({ok:false,reason:'busy'});
       // The automatic missing-only recovery reports inline; the app shows its own notice.
-      const quiet=options.missingOnly===true,scope=options.presentation||presentation.begin('device-folder',modeName,{label:'Device Folder',message:'Preparing recovery…',...(quiet?{foreground:false}:{})});presentationScope=scope;
+      const quiet=options.quiet===true,scope=options.presentation||presentation.begin('device-folder',modeName,{label:'Device Folder',message:'Preparing recovery…',...(quiet?{foreground:false}:{})});presentationScope=scope;
       let result;
       try{result=await applyCheckpointOperation(modeName,options);return result;}
       finally{if(!options.presentation)scope.finish({lifecycle:result?.ok?'succeeded':result?.cancelled||['cancelled','needs-decision'].includes(result?.reason)?'cancelled':'failed',message:result?.ok?presentation.outcome(modeName,'Device Folder',result.convergence):result?.reason==='cancelled'?'Recovery cancelled safely.':result?.reason==='needs-decision'?presentationState.message||'Some differences need your choice. Nothing was changed.':presentationState.message||'Device Folder recovery could not be completed safely.'});if(presentationScope===scope)presentationScope=null;}
