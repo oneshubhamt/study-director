@@ -2,6 +2,9 @@
   "name": "study-director-canonical-source",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "26.x"
+  },
   "scripts": {
     "build": "npm run build:richtext && node build/build.mjs",
     "build:richtext": "node build/wordgard-bundle.mjs --write",

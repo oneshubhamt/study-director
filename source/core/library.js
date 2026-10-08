@@ -17,7 +17,7 @@ registry.define('library',1,()=>{
     environment:freeze(['cancelAnimationFrame','createOption','createSearchWorker','requestAnimationFrame']),
     exporter:freeze(['exportKeys','cancel']),
     diary:freeze(['bindEditor','captureEditor','clearEditor','commitEditor','deleteEntry','draft','settled']),
-    notes:freeze(['bindEditor','canCreate','catalogue','clearEditor','commitEditor','failure','get','normalizeArea','orderEntries','remove','renderInherited','searchDocuments','size']),
+    notes:freeze(['bindEditor','canCreate','catalogue','clearEditor','commitEditor','failure','focusEditor','get','normalizeArea','orderEntries','remove','renderInherited','searchDocuments','size']),
     attachments:freeze(['batch','count','invalidate','reconcile']),
     clearLibrary:freeze(['preflight','execute']),
     ownership:freeze(['canMutate']),
@@ -51,7 +51,7 @@ registry.define('library',1,()=>{
     const {exportKeys,cancel:cancelExport}=ports.exporter;
     const {bindEditor:bindDiaryEditor,captureEditor:captureDiaryEditor,clearEditor:clearDiaryEditor,commitEditor:commitDiaryEditor,deleteEntry:deleteDiaryEntryRecord,draft:createDiaryDraft,settled:settleDiaryEditor}=ports.diary;
     const {
-      bindEditor,canCreate:canCreateOngoingNote,catalogue:ongoingNoteCatalogue,clearEditor,commitEditor,failure:ongoingNoteFailure,
+      bindEditor,canCreate:canCreateOngoingNote,catalogue:ongoingNoteCatalogue,clearEditor,commitEditor,failure:ongoingNoteFailure,focusEditor,
       get:getAreaNote,normalizeArea:normalizeOngoingNoteArea,orderEntries:orderOngoingNoteEntries,
       remove:removeOngoingNote,renderInherited,searchDocuments:ongoingNoteSearchDocuments,size:ongoingNotesSize
     }=ports.notes;
@@ -514,7 +514,7 @@ registry.define('library',1,()=>{
       if(search&&search.value)search.value='';
       renderOngoingNotes();
       const editor=ongoingNotesEditorField();
-      if(editor)requestAnimationFrame(()=>requestAnimationFrame(()=>{if(document.contains(editor))editor.focus({preventScroll:true});}));
+      if(editor)requestAnimationFrame(()=>requestAnimationFrame(()=>{if(document.contains(editor))void focusEditor(editor);}));
       const notice=notifications.begin({id:'ongoing-note-create',surfaceId:'ongoing-notes-status',title:existing?'Existing note opened':'New note ready',announce:false});
       notice.finish('succeeded',existing?`Opened the existing Area “${identity.label}”.`:`New Area “${identity.label}” is ready. It will be saved when you write a note.`);
       return true;

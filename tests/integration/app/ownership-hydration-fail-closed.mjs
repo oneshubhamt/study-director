@@ -21,6 +21,7 @@ const controller=Ownership.createOwnershipController(freeze({
   local:freeze({getJson:(key,fallback)=>ownerStore.has(key)?ownerStore.get(key):fallback,setJson:(key,value)=>{ownerStore.set(key,value);return true;},remove:key=>ownerStore.delete(key),lastError:()=>null}),
   diagnostics:freeze({capture:(scope,error)=>captured.push({scope,error:String(error?.message||error)}),guard:(_scope,fn)=>{try{return fn();}catch{return false;}}}),
   hooks:freeze({
+    canAcquire:()=>true,
     render:()=>{},refreshStorage:()=>{},stopExecution:()=>{},isInitialized:()=>true,
     hydrate:async()=>true,
     finalizeHydration:async()=>{throw new Error('Injected canonical Preferences hydration failure');},

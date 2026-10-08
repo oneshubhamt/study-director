@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor} from '../../helpers/browser-harness.mjs';
+import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor,instrumentedHtml} from '../../helpers/browser-harness.mjs';
 
-const preload=`(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'CoreFlowQA QA',updatedAt:new Date().toISOString()}));localStorage.setItem('studyDirector.nameSetupSkippedDate.v1',today);})();`;
+const preload=`(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');localStorage.setItem('studyDirector.nameSetupSkippedDate.v1',today);})();`;
 const server=await startReleaseServer(),browser=await launchChromium({profilePrefix:'study-director-qa-core-'});let page=null;
+server.setOverride('deployment',server.manifest.main,instrumentedHtml());
 const result={status:'PASS',release:server.manifest.release,checks:{}};
 try{
   page=await browser.createPage(server.url('deployment','instrumented.html'),{preload,viewport:{width:1280,height:860,mobile:false,scale:1}});

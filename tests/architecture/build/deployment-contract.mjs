@@ -60,7 +60,7 @@ try{
   assert.equal(defaultHeaders.has('Content-Security-Policy-Report-Only'),false);assert.match(defaultHeaders.get('Content-Security-Policy'),/require-trusted-types-for 'script'/,'default Firebase config must enforce Trusted Types');
   assert.equal(enforcementHeaders.has('Content-Security-Policy-Report-Only'),false,'enforcement candidate must remove the report-only Trusted Types header');
   assert.match(enforcementHeaders.get('Content-Security-Policy')||'',/require-trusted-types-for 'script'/);
-  assert.match(enforcementHeaders.get('Content-Security-Policy')||'',/trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-google-signin/);
+  assert.match(enforcementHeaders.get('Content-Security-Policy')||'',/trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-world-worker sd-google-signin/);
   assert.deepEqual(listFiles(publicDir).sort(),[...build.deployment.keys()].filter(name=>name!=='firebase-hosting-headers.merge.json').sort(),'the staged public directory must contain only the current release inventory');
 }finally{
   fs.rmSync(temp,{recursive:true,force:true});

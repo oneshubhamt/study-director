@@ -397,11 +397,24 @@ def minify_index(path: Path) -> None:
 
 def rename_hashed_js(public: Path) -> dict[str, str]:
     replacements: dict[str, str] = {}
-    for path in sorted(public.glob("sd.*.js")):
-        if path.name == "sw.js":
-            continue
-        original_name = path.name
-        minified = minify_js(path.read_text(encoding="utf-8"))
+    paths = {path.name: path for path in sorted(public.glob("sd.*.js"))}
+    visiting: set[str] = set()
+
+    def rename_asset(original_name: str) -> None:
+        if original_name in replacements:
+            return
+        if original_name in visiting:
+            raise RuntimeError(f"Circular JavaScript asset dependency: {original_name}")
+        visiting.add(original_name)
+        path = paths[original_name]
+        source = path.read_text(encoding="utf-8")
+        dependencies = [name for name in paths if name != original_name and name in source]
+        for dependency in dependencies:
+            rename_asset(dependency)
+            source = source.replace(dependency, replacements[dependency])
+        # Hash final runtime bytes after rewriting worker references. Host and
+        # service-worker manifests receive this same completed mapping afterward.
+        minified = minify_js(source)
         path.write_text(minified, encoding="utf-8", newline="\n")
         digest = sha256_file(path)
         parts = original_name.split(".")
@@ -409,6 +422,10 @@ def rename_hashed_js(public: Path) -> dict[str, str]:
         new_path = path.with_name(new_name)
         path.rename(new_path)
         replacements[original_name] = new_name
+        visiting.remove(original_name)
+
+    for name in paths:
+        rename_asset(name)
     return replacements
 
 

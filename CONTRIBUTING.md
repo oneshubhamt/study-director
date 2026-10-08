@@ -4,7 +4,7 @@ This is a private, source-available project. Contributions require the copyright
 
 ## Development
 
-Use Node.js 22 and Python 3. See the [README](README.md) for building and running the app. Source belongs at the repository root; generated `dist`, installed dependencies, personal backups and QA output do not belong in commits.
+Use Node.js 26 (see `.nvmrc`) and Python 3. See the [README](README.md) for building and running the app. Source belongs at the repository root; generated `dist`, installed dependencies, personal backups and QA output do not belong in commits.
 
 Create a branch for each coherent change and open a pull request to `main`. Describe the resulting behaviour and the checks actually run. Keep runtime changes separate from unrelated formatting or repository maintenance.
 

@@ -43,7 +43,7 @@ registry.define('ownership',1,()=>{
     functions(input.diagnostics,['capture','guard'],'App ownership diagnostics');
     functions(input.hooks,[
       'render','refreshStorage','stopExecution','isInitialized','hydrate','finalizeHydration','resume','refreshCore',
-      'scheduleMaintenance','practiceRender','blocked','invalidate','flush','settled'
+      'scheduleMaintenance','practiceRender','blocked','invalidate','flush','settled','canAcquire'
     ],'App ownership hooks');
     const config=input.config;
     const env=input.environment;
@@ -179,6 +179,7 @@ registry.define('ownership',1,()=>{
       return next;
     }
     function writeLease(options={}){
+      if(!hasControl&&!hooks.canAcquire())return false;
       const force=!!options.force;
       const hydrate=!!options.hydrate;
       const now=env.now();
@@ -272,6 +273,7 @@ registry.define('ownership',1,()=>{
       win.navigator.locks.request(config.webLockName,options,async lock=>{
         if(timeout)env.clearTimeout(timeout);
         if(!lock){resolveAttempt(false);return;}
+        if(!hooks.canAcquire()){resolveAttempt(false);return;}
         webLockHeld=true;
         let unlock;
         const hold=new Promise(done=>{unlock=done;});
@@ -293,6 +295,7 @@ registry.define('ownership',1,()=>{
       return attempt;
     }
     function evaluate(){
+      if(!hasControl&&!hooks.canAcquire())return Promise.resolve(false);
       if(takeoverPending)return Promise.resolve(false);
       if(evaluationPending)return evaluationPending;
       evaluationPending=(async()=>{
@@ -318,6 +321,7 @@ registry.define('ownership',1,()=>{
       },config.heartbeatMs);
     }
     async function takeOwnership(force=false){
+      if(!hasControl&&!hooks.canAcquire())return false;
       if(!force)return evaluate();
       const owner=readOwner();
       const requestId='takeover_'+env.now().toString(36)+'_'+env.randomIdPart(6);

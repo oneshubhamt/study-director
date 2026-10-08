@@ -1019,7 +1019,7 @@ html[data-material="aurora"] .practice-unit-row.head{background:var(--sd-materia
 
 html[data-material="aurora"] .sd-rte{background:var(--sd-material-canvas);border-color:var(--sd-glass-edge)}
 html[data-material="aurora"] .sd-rte-toolbar{background:var(--sd-material-inset);border-bottom-color:var(--sd-glass-edge)}
-html[data-presentation="aurora"] .library-note-nav-item,
+html[data-presentation="aurora"] .library-note-nav-item.empty-note:not(.active):not(:hover),
 html[data-presentation="aurora"] .library-note-nav-path,
 html[data-presentation="aurora"] .library-notes-editor-empty,
 html[data-presentation="aurora"] .library-ongoing-note-read.empty,

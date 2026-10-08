@@ -13,7 +13,7 @@ assert.equal(ownershipModule.isOwnershipLostError(lost),true);
 assert.equal(ownershipModule.isOwnershipLostError({code:'STUDY_DIRECTOR_OWNERSHIP_LOST'}),true);
 assert.equal(ownershipModule.isOwnershipLostError(new Error('other')),false);
 
-let ownershipNow=1000,lastError=null;
+let ownershipNow=1000,lastError=null,canAcquire=true;
 const ownerStore=new Map(),sessionStore=new Map(),ownershipHookCalls={render:0,refreshStorage:0,practiceRender:0};
 const ownership=ownershipModule.createOwnershipController(Object.freeze({
   config:Object.freeze({storageKey:'owner',sessionTabKey:'tab',channelName:'test',heartbeatMs:1000,staleMs:100,probeMs:25,webLockName:'test-lock'}),
@@ -29,6 +29,7 @@ const ownership=ownershipModule.createOwnershipController(Object.freeze({
   }),
   diagnostics:Object.freeze({capture:()=>{},guard:(_scope,fn)=>fn()}),
   hooks:Object.freeze({
+    canAcquire:()=>canAcquire,
     render:()=>{ownershipHookCalls.render+=1;},refreshStorage:()=>{ownershipHookCalls.refreshStorage+=1;},stopExecution:()=>{},isInitialized:()=>false,hydrate:async()=>{},finalizeHydration:async()=>{},resume:()=>{},refreshCore:()=>{},
     scheduleMaintenance:()=>{},practiceRender:()=>{ownershipHookCalls.practiceRender+=1;},blocked:()=>{},invalidate:()=>{},flush:async()=>{},settled:async()=>{}
   })
@@ -48,5 +49,14 @@ ownerStore.set('owner',{...ownerStore.get('owner'),claimId:'other-claim'});
 assert.throws(()=>ownership.assertWriteToken(writeToken,'tampered commit'),error=>ownershipModule.isOwnershipLostError(error));
 assert.equal(ownership.format,'study-director.app-ownership-controller');
 assert.equal(ownership.status().format,'study-director.app-ownership-status');
+
+ownership.setPrimary(false);
+ownerStore.clear();canAcquire=false;
+assert.equal(await ownership.evaluate(),false,'An update reservation must prevent automatic ownership takeover after the primary tab reloads.');
+assert.equal(ownership.writeLease({force:true}),false,'Direct acquisition must respect the same reservation.');
+assert.equal(await ownership.takeOwnership(true),false,'A reserved tab must not request a forced ownership transfer.');
+assert.equal(ownerStore.has('owner'),false,'A reserved secondary tab must leave the shared lease unclaimed.');
+canAcquire=true;
+assert.equal(await ownership.evaluate(),true,'Ownership acquisition must resume after the reservation is released.');
 
 console.log(JSON.stringify({status:'PASS',contract:'ownership',ownershipWriteFence:true,appScopedContract:true},null,2));

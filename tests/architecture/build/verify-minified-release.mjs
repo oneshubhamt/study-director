@@ -20,6 +20,16 @@ assert.ok(fs.existsSync(publicDir),'Run npm run stage:firebase:minified first.')
 
 const files=walk(publicDir),externalScripts=files.filter(name=>/^sd\.(?:glass|guide|insights|drive|richtext|note-search)\.[a-f0-9]{12}\.js$/.test(name));
 assert.equal(externalScripts.length,6,'Expected six content-addressed external scripts, including eager rich text and the lazy search worker.');
+const worldScripts=files.filter(name=>/^sd\.world(?:-planet-worker)?\.[a-f0-9]{12}\.js$/.test(name));
+assert.equal(worldScripts.length,2,'Living World must have its own pane and worker assets.');
+for(const name of worldScripts){
+  const source=read(publicDir,name).toString('utf8');
+  assert.equal(name.split('.').at(-2),sha(source).slice(0,12),name);
+  new vm.Script(source,{filename:name});
+}
+const worldRuntime=worldScripts.find(name=>name.startsWith('sd.world.'));
+const worldWorker=worldScripts.find(name=>name.startsWith('sd.world-planet-worker.'));
+assert.ok(read(publicDir,worldRuntime).toString('utf8').includes(worldWorker),'Minification must rewrite the isolated worker identity.');
 const privateScripts=privateModules.map(module=>files.find(name=>new RegExp(`^${module.stem.replaceAll('.','\\.')}\\.[a-f0-9]{12}\\.js$`).test(name)));
 assert.ok(privateScripts.every(Boolean),'Every private core module must be a content-addressed deployment script.');
 const styleFiles=styleModules.map(module=>files.find(name=>new RegExp(`^${module.stem.replaceAll('.','\\.')}\\.[a-f0-9]{12}\\.css$`).test(name)));
@@ -69,7 +79,7 @@ const enforcementCsp=enforcementRule.headers.find(header=>header.key==='Content-
 assert.equal(defaultReportOnly,'');assert.match(csp,/require-trusted-types-for 'script'/,'Default Firebase config must enforce Trusted Types.');
 assert.equal(enforcementRule.headers.some(header=>header.key==='Content-Security-Policy-Report-Only'),false,'Enforcement candidate must remove report-only Trusted Types.');
 assert.match(enforcementCsp,/require-trusted-types-for 'script'/);
-assert.match(enforcementCsp,/trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-google-signin/);
+assert.match(enforcementCsp,/trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-world-worker sd-google-signin/);
 for(const source of inline){const digest=crypto.createHash('sha256').update(source).digest('base64');assert.ok(csp.includes(`'sha256-${digest}'`),`CSP omitted inline hash ${digest}`);assert.ok(enforcementCsp.includes(`'sha256-${digest}'`),`Enforcement CSP omitted inline hash ${digest}`);}
 
 const sw=read(publicDir,'sw.js').toString('utf8');new vm.Script(sw,{filename:'sw.js'});

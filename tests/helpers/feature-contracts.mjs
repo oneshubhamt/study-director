@@ -1,6 +1,8 @@
 const contract=(id,owner)=>Object.freeze({id,owner});
 
 export const FEATURE_CONTRACTS=Object.freeze([
+  contract('world.standalone-pane','tests/browser/world/standalone-world.mjs'),
+  contract('world.neutral-planet-worker','tests/integration/world/isolated-planet-worker.mjs'),
   contract('plan.schedule-validation-ui','tests/browser/plans/saved-plans-ui.mjs'),
   contract('plan.completion-ui','tests/browser/plans/saved-plans-ui.mjs'),
   contract('plan.saved-plans','tests/browser/plans/saved-plans-ui.mjs'),
@@ -65,5 +67,5 @@ export const FEATURE_CONTRACTS=Object.freeze([
 ]);
 
 export const FEATURE_DOMAINS=Object.freeze([
-  'plan','execute','review','library','attachments','backup','exports','insights','pwa','rich-text','search','storage','security','ui'
+  'plan','execute','review','library','attachments','backup','exports','insights','world','pwa','rich-text','search','storage','security','ui'
 ]);

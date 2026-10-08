@@ -14,6 +14,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('multi-tab-handoff','tests/browser/storage/multi-tab.mjs',['multi-tab','ownership','indexeddb'])
   ]),
   feature:Object.freeze([
+    test('standalone-living-world','tests/browser/world/standalone-world.mjs',['world','webgpu','worker','isolation','navigation','trusted-types'],180000),
     test('library-selection','tests/browser/library/library-selection.mjs',['library','selection']),
     test('complete-encrypted-library','tests/browser/backup/complete-library.mjs',['encryption','attachments','opfs','recovery','trusted-types','pwa']),
     test('backup-encryption','tests/browser/backup/encryption.mjs',['encryption','password','files','cancellation','recovery','worker']),

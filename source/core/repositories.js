@@ -1406,6 +1406,7 @@ async function runDataMaintenance(options={}){
     markStorageHealthOk('maintenance');
     return report;
   })().catch(error=>{
+    if(error?.code==='AREA_NOTE_RECOVERY_SUPERSEDED')return {status:'yielded',reason:'notes-changed'};
     if(error?.code==='DATA_MAINTENANCE_YIELDED')return {status:'yielded',reason:error.reason};
     if(error&&error.message==='Data maintenance stopped because app ownership changed')return {status:'skipped',reason:'ownership-changed'};
     AppDiagnostics.capture('maintenance.run',error,'error');

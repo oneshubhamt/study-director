@@ -393,7 +393,10 @@ const repository=(()=>{
     },'area note transaction aborted');
   }
   async function performLoad({strict=false}={}){
+    const revisionAtStart=snapshotRevision,writesAtStart=writeChain;
     let loaded={};lastLoadReadFailed=false;
+    await writesAtStart;
+    await flushPendingRecoveryWrites([...dirtyKeys]);
     const rescueBeforeRead=readIndependentRescue(),pendingBeforeRead=await readPendingCache();
     try{
       loaded=await idbRead();
@@ -402,7 +405,16 @@ const repository=(()=>{
       if(strict||isCanonicalRuntimeError(e))throw e;
     }
     const pendingAfterRead=await readPendingCache(),rescueAfterRead=readIndependentRescue();
+    // Request results precede transaction completion. An edit or queued save
+    // in that interval invalidates this snapshot, including equal timestamps.
+    // Keep its dirty state and timers; a later stable recovery can adopt safely.
+    if(snapshotRevision!==revisionAtStart||writeChain!==writesAtStart){
+      lastLoadReadFailed=true;
+      const error=new Error('Ongoing notes changed during recovery. Recovery remains pending.');
+      error.code='AREA_NOTE_RECOVERY_SUPERSEDED';throw error;
+    }
     const merged=applyDeltas(applyDeltas(applyDeltas(applyDeltas(loaded,rescueBeforeRead),pendingBeforeRead),pendingAfterRead),rescueAfterRead);
+    if(saveTimer){clearTimeout(saveTimer);saveTimer=null;}
     dirtyKeys.clear();
     dirtyBaseRevisions.clear();
     revisionTouchedAt.clear();
@@ -435,8 +447,11 @@ const repository=(()=>{
     if(freshLoadPromise)return freshLoadPromise;
     freshLoadPromise=(async()=>{
       await writeChain.catch(error=>{AppDiagnostics.capture('area-notes.pre-reload-write',error,'error');});
-      if(saveTimer){clearTimeout(saveTimer);saveTimer=null;}
-      return performLoad({strict:true});
+      const loaded=await performLoad({strict:true});
+      // A successful recovery replaces the failed startup result. Otherwise
+      // every maintenance retry reloads notes and invalidates its own progress.
+      loadPromise=Promise.resolve(loaded);
+      return loaded;
     })().catch(error=>{
       AppDiagnostics.capture('area-notes.fresh-reload',error,'error');
       throw error;

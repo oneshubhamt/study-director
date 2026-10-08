@@ -400,4 +400,12 @@ for(const native of [false,true]){
   assert.equal(h.workspace.kind,'legal');assert.equal(h.workspace.key,'privacy');
 }
 
-console.log(JSON.stringify({status:'PASS',contract:'navigation-workspace-history',drivers:['history','navigation'],tabs:6,failedTraversalReconciliation:['back','forward']},null,2));
+for(const native of [false,true]){
+  const h=harness({url:'https://study-director.web.app/?tab=world',native});
+  await h.controller.install();await h.controller.hydrate();
+  assert.equal(h.active,'world');
+  await h.controller.request('plan',{source:'world-exit'});
+  h.win.history.back();await h.win._lastTraversal;
+  assert.equal(h.active,'world','Living World must participate in native and fallback History traversal');
+}
+console.log(JSON.stringify({status:'PASS',contract:'navigation-workspace-history',drivers:['history','navigation'],tabs:7,failedTraversalReconciliation:['back','forward']},null,2));

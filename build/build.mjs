@@ -24,8 +24,11 @@ function normalizePath(value){return value.split(path.sep).join('/');}
 function sourceFile(relative){return fs.readFileSync(path.join(SOURCE,relative),'utf8');}
 function sourceBytes(relative){return fs.readFileSync(path.join(SOURCE,relative));}
 function moduleSourceFiles(module){return Array.isArray(module.sources)?[...module.sources]:[module.source];}
-function moduleSource(module){return moduleSourceFiles(module).map(sourceFile).join('\n');}
-function externalSourceFiles(){return externalModules.flatMap(moduleSourceFiles);}
+function moduleSource(module){
+  const source=moduleSourceFiles(module).map(sourceFile).join('\n');
+  return module.isolated?`(() => {\n'use strict';\n${source}\n})();\n`:source;
+}
+function externalSourceFiles(){return [...new Set(externalModules.flatMap(moduleSourceFiles))];}
 function escapeRegExp(value){return String(value).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
 function escapeHtml(value){return String(value).replace(/[&<>]/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[character]));}
 
@@ -163,16 +166,20 @@ export function renderBuild(){
   invariant(/^\d+-[a-z0-9]+\.apps\.googleusercontent\.com$/u.test(productionClientId),'Production Google OAuth client ID is missing or malformed.');
   invariant(!developmentClientId||/^\d+-[a-z0-9]+\.apps\.googleusercontent\.com$/u.test(developmentClientId),'Development Google OAuth client ID is malformed.');
   invariant(!developmentClientId||developmentClientId!==productionClientId,'Development and production must not share a Google OAuth client.');
-  const externalSources=Object.freeze({
-    development:new Map(externalModules.map(module=>[
-      module.id,
-      renderPlatformTokens(moduleSource(module),identity,moduleSourceFiles(module).join('+'),{GOOGLE_OAUTH_CLIENT_ID:module.id==='drive'?developmentClientId:productionClientId})
-    ])),
-    deployment:new Map(externalModules.map(module=>[
-      module.id,
-      renderPlatformTokens(moduleSource(module),identity,moduleSourceFiles(module).join('+'),{GOOGLE_OAUTH_CLIENT_ID:productionClientId})
-    ]))
-  });
+  function externalSourcesFor(target){
+    const worker=externalModules.find(module=>module.id==='world-worker');
+    // Worker engines generate synchronously inside their own worker. A self token
+    // avoids a circular content hash; only the pane runtime launches this asset.
+    const workerSource=renderPlatformTokens(moduleSource(worker),identity,'world-worker',{WORLD_PLANET_WORKER_FILENAME:'self'});
+    const workerName=filename(worker,workerSource);
+    return new Map(externalModules.map(module=>[
+      module.id,module.id==='world-worker'?workerSource:renderPlatformTokens(moduleSource(module),identity,moduleSourceFiles(module).join('+'),{
+        GOOGLE_OAUTH_CLIENT_ID:target==='development'&&module.id==='drive'?developmentClientId:productionClientId,
+        WORLD_PLANET_WORKER_FILENAME:workerName
+      })
+    ]));
+  }
+  const externalSources=Object.freeze({development:externalSourcesFor('development'),deployment:externalSourcesFor('deployment')});
   const styleSources=new Map(styleModules.map(module=>[
     module.id,renderTokens(sourceFile(module.source),identity,module.source)
   ]));
@@ -188,6 +195,7 @@ export function renderBuild(){
     EXTERNAL_AURORA_FILENAME:externalNames[target].get('aurora'),
     EXTERNAL_GUIDE_FILENAME:externalNames[target].get('guide'),
     EXTERNAL_INSIGHTS_FILENAME:externalNames[target].get('insights'),
+    EXTERNAL_WORLD_FILENAME:externalNames[target].get('world'),
     EXTERNAL_DRIVE_FILENAME:externalNames[target].get('drive'),
     RICH_TEXT_FILENAME:externalNames[target].get('rich-text'),
     EXPORT_WORKER_FILENAME:externalNames[target].get('export-worker'),
@@ -239,7 +247,7 @@ export function renderBuild(){
         "frame-ancestors 'none'",
         "upgrade-insecure-requests",
         "require-trusted-types-for 'script'",
-        "trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-google-signin"
+        "trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-world-worker sd-google-signin"
       ].join('; ');
       const hostingHeadersSource=renderPlatformTokens(sourceFile(platformFiles.hostingHeaders.source),identity,platformFiles.hostingHeaders.source,{CONTENT_SECURITY_POLICY:contentSecurityPolicy});
       files.set(platformFiles.hostingHeaders.output,hostingHeadersSource);
@@ -368,7 +376,7 @@ export function validateBuild(build){
     .replace(privateModules.map(row=>`<script src="${privateNames.get(row.id)}"></script>`).join('\n'),privateModuleMarker);
   const normalizeHost=(value,target)=>{
     let normalized=normalizePrivateBlock(value).replaceAll(pwa[target].assetId,'__SD_PAGE_ASSET_ID__');
-    for(const id of ['glass','aurora','guide','insights','drive','rich-text'])normalized=normalized.replaceAll(externalNames[target].get(id),`@@SD_EXTERNAL_${id.toUpperCase()}_FILENAME@@`);
+    for(const id of ['glass','aurora','guide','insights','drive','rich-text','world'])normalized=normalized.replaceAll(externalNames[target].get(id),`@@SD_EXTERNAL_${id.toUpperCase()}_FILENAME@@`);
     for(const module of styleModules)normalized=normalized.replaceAll(styleNames.get(module.id),`@@SD_${module.id.toUpperCase()}_STYLE_FILENAME@@`);
     return normalized;
   };

@@ -97,7 +97,7 @@ const profile=fs.mkdtempSync(path.join(os.tmpdir(),'study-director-pwa-qa-'));
 const browser=spawn(chromium,[
   '--headless=new','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check',
   '--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'
-],{stdio:['ignore','ignore','pipe'],env:{...process.env,TERM:process.env.TERM||'xterm'}});
+],{detached:true,stdio:['ignore','ignore','pipe'],env:{...process.env,TERM:process.env.TERM||'xterm'}});
 let browserError='';browser.stderr.on('data',chunk=>{browserError+=chunk;});
 const activePath=path.join(profile,'DevToolsActivePort');
 await waitFor(()=>fs.existsSync(activePath),{timeout:20000,label:'Chromium DevTools port'});
@@ -149,6 +149,9 @@ try{
   await waitFor(()=>page1.evaluate(`StudyDirector.plugins.status().optionalFiles.find(row=>row.tabId==='insights')?.state==='registered'`),{label:'offline Insights module'});
   const offlinePlugins=await page1.evaluate(`({guide:StudyDirector.plugins.status().optionalFiles.find(row=>row.tabId==='guide')?.state==='registered',insights:StudyDirector.plugins.status().optionalFiles.find(row=>row.tabId==='insights')?.state==='registered'})`);
   assert.deepEqual(offlinePlugins,{guide:true,insights:true});
+  await page1.evaluate(`document.querySelector('[data-tab="world"]')?.click()`);
+  await waitFor(()=>page1.evaluate(`StudyDirector.plugins.status().optionalFiles.find(row=>row.tabId==='world')?.state==='registered'`),{label:'offline Living World module'});
+  await waitFor(()=>page1.evaluate(`['ready','unavailable'].includes(document.querySelector('#pane-world .world-pass8-stage')?.dataset.renderState)`),{label:'offline planet worker and WebGPU availability'});
   const beforeShortcut=page1.loadCount;
   await page1.send('Page.navigate',{url:`${appUrl}?tab=review`});
   await waitFor(()=>page1.loadCount>beforeShortcut,{label:'offline shortcut navigation event'});
@@ -178,7 +181,7 @@ try{
   served='next';
   await page1.send('Page.bringToFront');
   await forceUpdate(page1);
-  await waitFor(()=>page1.evaluate(`navigator.serviceWorker.getRegistration().then(r=>!!r.waiting)&&!document.getElementById('pwa-update-control').hidden`),{timeout:60000,label:'waiting update control'});
+  await waitFor(()=>page1.evaluate(`navigator.serviceWorker.getRegistration().then(r=>!!r.waiting&&!document.getElementById('pwa-update-control').hidden)`),{timeout:60000,label:'waiting update control'});
   assert.equal(await workerIdentity(page1,'waiting'),next.releaseId);
   assert.equal(await page1.evaluate(`document.getElementById('pwa-update-apply').textContent`),'Pause & Update');
   assert.equal(await workerIdentity(page1),originalPwa.releaseId);
@@ -203,12 +206,14 @@ try{
   console.log(JSON.stringify(evidence,null,2));
 }catch(error){
   let pageDiagnostic=null;
-  try{pageDiagnostic=await page1?.evaluate(`(async()=>({href:location.href,title:document.title,body:(document.body?.innerText||'').slice(0,500),controller:!!navigator.serviceWorker?.controller,caches:typeof caches==='undefined'?[]:await caches.keys()}))()`);}catch(diagnosticError){pageDiagnostic={error:String(diagnosticError)};}
+  try{pageDiagnostic=await Promise.all([page1,page2].filter(Boolean).map(page=>page.evaluate(`(async()=>({href:location.href,title:document.title,body:(document.body?.innerText||'').slice(-2000),dataset:{...document.documentElement.dataset},marker:sessionStorage.getItem('studyDirector.pwaReload.v1'),controller:!!navigator.serviceWorker?.controller,caches:typeof caches==='undefined'?[]:await caches.keys()}))()`)));}catch(diagnosticError){pageDiagnostic={error:String(diagnosticError)};}
   throw new Error(`${error.stack||error}\nPage diagnostic: ${JSON.stringify(pageDiagnostic)}\nChromium stderr:\n${browserError.slice(-6000)}`);
 }finally{
   try{page1?.close();page2?.close();}catch{}
-  browser.kill('SIGTERM');
-  await Promise.race([new Promise(resolve=>browser.once('exit',resolve)),sleep(3000)]);
+  const exited=browser.exitCode!==null||browser.signalCode!==null?Promise.resolve():new Promise(resolve=>browser.once('exit',resolve));
+  try{process.kill(-browser.pid,'SIGTERM');}catch{}
+  await Promise.race([exited,sleep(3000)]);
+  try{process.kill(-browser.pid,'SIGKILL');}catch{}
   server.close();
-  fs.rmSync(profile,{recursive:true,force:true});
+  fs.rmSync(profile,{recursive:true,force:true,maxRetries:8,retryDelay:100});
 }

@@ -35,7 +35,7 @@ See `docs/ARCHITECTURE.md` for the full current-state summary.
 
 ## Get started
 
-Prerequisites: Node.js 22 (the test runner supports 20+), npm for dependency rebuilding, and Python 3 for the local launcher.
+Prerequisites: Node.js 26 (the tested version is pinned in `.nvmrc`), npm for dependency rebuilding, and Python 3 for the local launcher. Both CI workflows use the same Node version pin; with nvm installed, run `nvm install` and `nvm use` in the repository.
 
 ```bash
 git clone https://github.com/oneshubhamt/study-director.git

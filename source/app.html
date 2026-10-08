@@ -2442,6 +2442,7 @@ const AppOwnership=OwnershipModule.createOwnershipController(Object.freeze({
     guard:(scope,operation)=>AppDiagnostics.guard(scope,operation)
   }),
   hooks:Object.freeze({
+    canAcquire:()=>!pwaUpdateReservation,
     render:()=>renderOwnershipUi(),
     refreshStorage:()=>refreshStorageFallbackWarning(),
     stopExecution:()=>{
@@ -2967,7 +2968,7 @@ function resumeTimerLoopAfterPrimaryRestore(){
   try{
     const resumed=TimerEngine.resumeAfterPrimaryRestore();
     if(StartupLifecycle.status().fullyInitialized)SessionLifecycle.reconcile('ownership-primary',{
-      date:getReviewDate(),
+      date:getReviewDate(),snapshotReview:ReviewEditor.activeSessionReview(),
     });
     return resumed;
   }catch(e){AppDiagnostics.capture('ownership.resume-timer',e,'error');return false;}
@@ -5421,7 +5422,7 @@ function preferredScrollBehavior(){
 const UiTabRegistry=(()=>{
   const renderHooks=new Map();
   const readyHooks=new Map();
-  const TAB_ORDER=Object.freeze(['plan','execute','review','library','insights','guide']);
+  const TAB_ORDER=Object.freeze(['plan','execute','review','library','insights','world','guide']);
   const safeId=id=>String(id||'').trim().toLowerCase().match(/^[a-z][a-z0-9-]{0,40}$/)?.[0]||'';
   const findNav=()=>document.querySelector('.sb-nav');
   const findMain=()=>document.querySelector('.main');
@@ -5432,7 +5433,7 @@ const UiTabRegistry=(()=>{
     items().sort((a,b)=>{
       const ai=TAB_ORDER.indexOf(a.dataset.tab),bi=TAB_ORDER.indexOf(b.dataset.tab);
       return (ai<0?999:ai)-(bi<0?999:bi);
-    }).forEach(item=>nav.appendChild(item));
+    }).forEach((item,index)=>{const current=nav.children[index];if(current!==item)nav.insertBefore(item,current||null);});
   }
   function sync(activeId){
     items().forEach(item=>{
@@ -5521,7 +5522,8 @@ const UiTabRegistry=(()=>{
 const STUDY_DIRECTOR_READY_EVENT='studydirector:ready';
 const OPTIONAL_PLUGIN_DESCRIPTORS=Object.freeze([
   Object.freeze({tabId:'guide',label:'Guide',icon:'?',src:'@@SD_EXTERNAL_GUIDE_FILENAME@@',pluginName:'SD-guide'}),
-  Object.freeze({tabId:'insights',label:'Insights',icon:'✦',src:'@@SD_EXTERNAL_INSIGHTS_FILENAME@@',pluginName:'SD-insights'})
+  Object.freeze({tabId:'insights',label:'Insights',icon:'✦',src:'@@SD_EXTERNAL_INSIGHTS_FILENAME@@',pluginName:'SD-insights'}),
+  Object.freeze({tabId:'world',label:'Living World',icon:'◌',src:'@@SD_EXTERNAL_WORLD_FILENAME@@',pluginName:'SD-world'})
 ]);
 const PluginRuntime=(()=>{
   const descriptorsByTab=new Map(OPTIONAL_PLUGIN_DESCRIPTORS.map(descriptor=>[descriptor.tabId,descriptor]));
@@ -5741,7 +5743,7 @@ document.addEventListener('securitypolicyviolation',event=>{
   trustedTypeViolations.set(key,Math.min(1000,(trustedTypeViolations.get(key)||0)+1));
 });
 const trustedAssetURL=(()=>{
-  const allowed=new Set(['@@SD_EXTERNAL_GUIDE_FILENAME@@','@@SD_EXTERNAL_INSIGHTS_FILENAME@@','@@SD_EXPORT_WORKER_FILENAME@@','@@SD_SEARCH_WORKER_FILENAME@@','@@SD_IMAGE_WORKER_FILENAME@@','@@SD_ATTACHMENT_WORKER_FILENAME@@','./sw.js'].map(value=>new URL(value,location.href).href));
+  const allowed=new Set(['@@SD_EXTERNAL_GUIDE_FILENAME@@','@@SD_EXTERNAL_INSIGHTS_FILENAME@@','@@SD_EXTERNAL_WORLD_FILENAME@@','@@SD_EXPORT_WORKER_FILENAME@@','@@SD_SEARCH_WORKER_FILENAME@@','@@SD_IMAGE_WORKER_FILENAME@@','@@SD_ATTACHMENT_WORKER_FILENAME@@','./sw.js'].map(value=>new URL(value,location.href).href));
   const validate=value=>{const url=new URL(value,location.href).href;if(!allowed.has(url))throw new TypeError('Unapproved application script.');return url;};
   const policy=globalThis.trustedTypes?.createPolicy('sd-assets',{createScriptURL:validate});
   return value=>policy?policy.createScriptURL(value):validate(value);
@@ -5749,7 +5751,13 @@ const trustedAssetURL=(()=>{
 const FEATURE_SCROLL_OWNERS=new Set(['review','library','insights']);
 const shellTabScrollState=new Map();
 const navigationFocusState=new Map();
-const nextNavigationFrame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
+const nextNavigationFrame=()=>new Promise(resolve=>{
+  if(document.hidden){resolve();return;}
+  // Background tabs may stop producing frames before navigation readiness settles.
+  let frame=null;
+  const deadline=setTimeout(()=>{if(frame!==null)cancelAnimationFrame(frame);resolve();},100);
+  frame=requestAnimationFrame(()=>{clearTimeout(deadline);resolve();});
+});
 function captureShellScroll(tab){
   if(FEATURE_SCROLL_OWNERS.has(tab))return;
   const root=document.scrollingElement||document.documentElement,main=document.querySelector('.main');
@@ -6891,7 +6899,7 @@ const RichTextRuntime=(()=>{
     if(!descriptor){syncField(field);return false;}
     if(field.dataset.richMountFailed===descriptor.documentId&&!options.retry)return false;clearMountError(field);
     if(closingAll)return false;
-    const existing=mounted.get(field);if(existing?.documentId===descriptor.documentId){lastActiveField=field;return true;}
+    const existing=mounted.get(field);if(existing?.documentId===descriptor.documentId){lastActiveField=field;if(options.focus===true)existing.mounted.focus();return true;}
     if(existing)await dispose(field,{resync:false});
     for(const [other,record] of mounted)if(other!==field&&record.documentId===descriptor.documentId)await dispose(other,{resync:true});
     const request=++sequence;pending.set(field,request);
@@ -7925,6 +7933,7 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     clearEditor:clearTaskNoteEditorBinding,
     commitEditor:commitTaskNoteEditor,
     failure:()=>AppData.notes.failure(),
+    focusEditor:async field=>{if(!await RichTextRuntime.activate(field,{focus:true})&&field.isConnected)field.focus({preventScroll:true});},
     get:(key,label)=>AppData.notes.get(key,label),
     normalizeArea:normalizeOngoingAreaInput,
     orderEntries:orderOngoingAreaEntries,
@@ -9750,7 +9759,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
     },
     reconcileLifecycle:()=>SessionLifecycle.reconcile('app-restart-ready',{
       date:getReviewDate(),autoDate:document.getElementById('day-date')?.dataset.autoDate==='1',
-      
+      snapshotReview:ReviewEditor.activeSessionReview()
     })
   })
 }));

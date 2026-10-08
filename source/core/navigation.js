@@ -6,7 +6,7 @@ if(!registry||registry.format!=='study-director.internal-module-registry'||regis
 }
 registry.define('navigation',1,()=>{
   const freeze=Object.freeze;
-  const TABS=freeze(['plan','execute','review','library','insights','guide']);
+  const TABS=freeze(['plan','execute','review','library','insights','world','guide']);
   const TAB_SET=new Set(TABS);
   const WORKSPACE_KINDS=new Set(['legal','focus','pdf','audio','prompt']);
   const ROUTE_STATE_KEY='studyDirectorRoute';

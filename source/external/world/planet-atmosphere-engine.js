@@ -1,0 +1,95 @@
+const SDWorldPlanetAtmosphereEngine = (() => {
+    'use strict';
+    const FORMAT = 'study-director.world.planetary-atmosphere-state';
+    const VERSION = 1;
+    const ENGINE_VERSION = 1;
+    const SHELL_FORMAT = 'study-director.world.planetary-atmosphere-shells';
+    const FIELD_FORMAT = 'study-director.world.planetary-weather-fields';
+    const SHELL_LEVEL = 2;
+    const ATMOSPHERE_HEIGHT_METERS = 3600;
+    const CLOUD_MIN_METERS = 620;
+    const CLOUD_MAX_METERS = 2350;
+    const WEATHER_BUCKET_MINUTES = 20;
+    const MAX_PRECIPITATION_COLUMNS = 96;
+    const Math3 = SDWorldSphericalMathEngine;
+    const Icosphere = SDWorldIcosphereEngine;
+    const Generator = SDWorldPlanetGeneratorEngine;
+    const Vector = Math3.vector;
+
+    const clamp = (value, minimum = 0, maximum = 1) => Math.min(maximum, Math.max(minimum, Number(value) || 0));
+    const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+    const round = (value, digits = 6) => Number(finite(value).toFixed(digits));
+    function deepFreeze(value) { if (!value || typeof value !== 'object' || Object.isFrozen(value) || ArrayBuffer.isView(value)) return value; Object.freeze(value); for (const child of Object.values(value)) deepFreeze(child); return value; }
+    function mix32(value) { let x = value >>> 0; x ^= x >>> 16; x = Math.imul(x, 0x7feb352d); x ^= x >>> 15; x = Math.imul(x, 0x846ca68b); x ^= x >>> 16; return x >>> 0; }
+    function hash32(...tokens) { let hash = 0x811c9dc5; for (const token of tokens) for (const char of String(token)) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 0x01000193); hash = mix32(hash); } return hash >>> 0; }
+    const hash01 = (...tokens) => hash32(...tokens) / 4294967296;
+    function validate(planet, ecology) {
+        if (!planet || planet.format !== Generator.format || planet.audit?.fingerprintMatches !== true) throw new TypeError('Planetary atmosphere requires a certified spherical planet.');
+        if (!ecology || ecology.format !== 'study-director.world.planetary-ecology-state' || ecology.audit?.fingerprintMatches !== true || ecology.source?.planetFingerprint !== planet.fingerprint) throw new TypeError('Planetary atmosphere requires matching certified planetary ecology.');
+        return { planet, ecology };
+    }
+    function parseWhen(options = {}) {
+        const text = String(options.localDateTime || options.dateTime || '2026-03-20T12:00:00'), match = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?)?/.exec(text);
+        if (!match) throw new TypeError('Planetary atmosphere requires an ISO local date/time.');
+        const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]), hour = Number(match[4] || 12), minute = Number(match[5] || 0), second = Number(match[6] || 0), timezoneOffsetMinutes = clamp(finite(options.timezoneOffsetMinutes, 0), -840, 840), localUtc = Date.UTC(year, month - 1, day, hour, minute, second), utcMilliseconds = localUtc - timezoneOffsetMinutes * 60000;
+        if (!Number.isFinite(utcMilliseconds) || new Date(localUtc).getUTCFullYear() !== year || new Date(localUtc).getUTCMonth() !== month - 1 || new Date(localUtc).getUTCDate() !== day) throw new RangeError('Planetary atmosphere date/time is invalid.');
+        const start = Date.UTC(year, 0, 1), next = Date.UTC(year + 1, 0, 1), dayOfYear = Math.floor((Date.UTC(year, month - 1, day) - start) / 86400000) + 1, daysInYear = Math.round((next - start) / 86400000), utc = new Date(utcMilliseconds), utcDayFraction = (utc.getUTCHours() * 3600 + utc.getUTCMinutes() * 60 + utc.getUTCSeconds()) / 86400, bucket = Math.floor(utcMilliseconds / (WEATHER_BUCKET_MINUTES * 60000));
+        const seasonPhase = ((dayOfYear - 80) / daysInYear % 1 + 1) % 1;
+        return Object.freeze({ text: `${match[1]}-${match[2]}-${match[3]}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}`, year, month, day, hour, minute, second, timezoneOffsetMinutes, utcMilliseconds, utcIso: utc.toISOString(), utcDayFraction, dayOfYear, daysInYear, seasonPhase, weatherBucket: bucket });
+    }
+    function solarState(planet, time) {
+        const axialTiltRadians = Math3.radians(planet.planet.axialTiltDegrees), orbitalAngle = Math.PI * 2 * (time.dayOfYear - 80) / time.daysInYear, declinationRadians = Math.asin(Math.sin(axialTiltRadians) * Math.sin(orbitalAngle)), subsolarHourAngle = Math.PI - Math.PI * 2 * time.utcDayFraction, equatorial = Vector.add(Vector.scale(planet.planet.primeMeridian, Math.cos(subsolarHourAngle)), Vector.scale(planet.planet.equatorialEast, Math.sin(subsolarHourAngle))), sunDirection = Vector.normalize(Vector.add(Vector.scale(equatorial, Math.cos(declinationRadians)), Vector.scale(planet.planet.axis, Math.sin(declinationRadians))), 'planetary sun direction'), subsolar = Math3.toLatLon(sunDirection, planet.planet);
+        return Object.freeze({ direction: sunDirection, declinationRadians: round(declinationRadians, 10), declinationDegrees: round(Math3.degrees(declinationRadians), 7), subsolarLatitudeDegrees: round(subsolar.latitudeDegrees, 7), subsolarLongitudeDegrees: round(subsolar.longitudeDegrees, 7), orbitalAngleRadians: round(orbitalAngle, 10) });
+    }
+    function directionNoise(seed, direction, bucket, salt = 0) {
+        const phases = [hash01(seed, salt, 0) * Math.PI * 2, hash01(seed, salt, 1) * Math.PI * 2, hash01(seed, salt, 2) * Math.PI * 2], drift = (bucket % 100000) * .0143;
+        return (Math.sin(Vector.dot(direction, { x: .731, y: -.312, z: .607 }) * 11.7 + phases[0] + drift) + Math.sin(Vector.dot(direction, { x: -.269, y: .883, z: .386 }) * 23.9 + phases[1] - drift * .63) * .55 + Math.sin(Vector.dot(direction, { x: .514, y: .687, z: -.513 }) * 47.3 + phases[2] + drift * .31) * .28) / 1.83;
+    }
+    function directionAt(planet, index) { const offset = index * 3; return { x: planet.topology.directions[offset], y: planet.topology.directions[offset + 1], z: planet.topology.directions[offset + 2] }; }
+    function weatherForCell(planet, ecology, solar, time, index) {
+        const direction = directionAt(planet, index), lat = Math.asin(clamp(Vector.dot(direction, planet.planet.axis), -1, 1)), solarCosine = clamp(Vector.dot(direction, solar.direction), -1, 1), daylight = clamp((solarCosine + .08) / .24), twilight = clamp(1 - Math.abs(solarCosine + .035) / .09), annualTemperature = finite(planet.climate.meanTemperatureC[index]), precipitationMm = Math.max(0, finite(planet.climate.annualPrecipitationMm[index])), snow = clamp(planet.climate.snowFraction[index]), elevation = finite(planet.geology.elevationMeters?.[index], 0), oceanicity = clamp(planet.climate.oceanicity?.[index], planet.ocean.isOcean[index] ? 1 : 0), moisture = clamp(ecology.fields.availableMoisture?.[index], precipitationMm / (precipitationMm + 650)), vegetation = clamp(ecology.fields.biomass?.[index]), seasonalAmplitude = (1 - oceanicity * .72) * (4 + 17 * Math.abs(Math.sin(lat))), seasonalPhase = Math.cos(Math.PI * 2 * (time.dayOfYear - 172) / time.daysInYear) * (lat >= 0 ? 1 : -1), temperatureC = annualTemperature + seasonalAmplitude * seasonalPhase + (solarCosine - .18) * 2.4, humidityBase = clamp(.14 + precipitationMm / (precipitationMm + 720) * .54 + moisture * .24 + oceanicity * .16 - Math.max(0, temperatureC - 31) * .008), noise = directionNoise(planet.seed, direction, time.weatherBucket, 1), convection = clamp((temperatureC - 18) / 20) * clamp(humidityBase * 1.2), cloudCoverage = clamp(.08 + humidityBase * .67 + convection * .16 + noise * .19 + snow * .08), storm = clamp((cloudCoverage - .58) * 1.62 + Math.max(0, noise) * .24 + convection * .22), precipitation = clamp((cloudCoverage - .42) * 1.22 * humidityBase + storm * .24), fog = clamp(humidityBase * cloudCoverage * (.22 + oceanicity * .28 + (temperatureC < 10 ? .22 : 0)) + (planet.ocean.isCoast[index] ? .13 : 0)), zonal = (Math.abs(lat) < Math.PI / 6 ? -.65 : Math.abs(lat) < Math.PI / 3 ? .72 : -.34) * (6 + 14 * Math.abs(Math.sin(lat))), meridional = noise * 5.5 + directionNoise(planet.seed, direction, time.weatherBucket, 2) * 2.2, windSpeed = Math.hypot(zonal, meridional), cloudBaseMeters = clamp(CLOUD_MIN_METERS + (1 - humidityBase) * 1050 + Math.max(0, temperatureC - 20) * 14, CLOUD_MIN_METERS, CLOUD_MAX_METERS), cloudThicknessMeters = 170 + cloudCoverage * 510 + storm * 380;
+        return { direction, solarCosine, daylight, twilight, temperatureC, humidity: humidityBase, cloudCoverage, precipitation, storm, fog, windEastMps: zonal, windNorthMps: meridional, windSpeedMps: windSpeed, cloudBaseMeters, cloudThicknessMeters, elevation, snow, vegetation };
+    }
+    function fields(planet, ecology, solar, time) {
+        const count = planet.cellCount, names = ['solarCosine','daylight','twilight','temperatureC','humidity','cloudCoverage','precipitation','storm','fog','windEastMps','windNorthMps','windSpeedMps','cloudBaseMeters','cloudThicknessMeters'], output = Object.fromEntries(names.map(name => [name, new Float32Array(count)]));
+        let daylightArea = 0, nightArea = 0, cloudArea = 0, precipitationArea = 0, totalArea = 0, minimumTemperatureC = Infinity, maximumTemperatureC = -Infinity, maximumWindMps = 0;
+        for (let index = 0; index < count; index += 1) { const row = weatherForCell(planet, ecology, solar, time, index), area = finite(planet.topology.areas[index], 0); for (const name of names) output[name][index] = row[name]; totalArea += area; daylightArea += area * row.daylight; nightArea += area * (1 - row.daylight); cloudArea += area * row.cloudCoverage; precipitationArea += area * row.precipitation; minimumTemperatureC = Math.min(minimumTemperatureC, row.temperatureC); maximumTemperatureC = Math.max(maximumTemperatureC, row.temperatureC); maximumWindMps = Math.max(maximumWindMps, row.windSpeedMps); }
+        return { format: FIELD_FORMAT, version: 1, ...output, summary: Object.freeze({ daylightAreaFraction: daylightArea / totalArea, nightAreaFraction: nightArea / totalArea, meanCloudCoverage: cloudArea / totalArea, meanPrecipitation: precipitationArea / totalArea, minimumTemperatureC, maximumTemperatureC, maximumWindMps }) };
+    }
+    function locate(planet, directionValue) {
+        const direction = Vector.normalize(directionValue, 'atmosphere sample direction'); let id = Icosphere.rootIds[0], best = -Infinity;
+        for (const root of Icosphere.rootIds) { const score = Vector.dot(direction, Icosphere.cell(root).centre); if (score > best) { best = score; id = root; } }
+        for (let level = 0; level < planet.level; level += 1) { let childBest = Icosphere.childIds(id)[0], scoreBest = -Infinity; for (const child of Icosphere.childIds(id)) { const score = Vector.dot(direction, Icosphere.cell(child).centre); if (score > scoreBest) { scoreBest = score; childBest = child; } } id = childBest; }
+        const parsed = Icosphere.parseId(id); let localIndex = 0; for (const digit of parsed.path) localIndex = localIndex * 4 + Number(digit);
+        return Object.freeze({ index: parsed.root * (4 ** planet.level) + localIndex, cellId: id });
+    }
+    function sample(state, directionValue, altitudeMeters = 0) {
+        if (!state || state.format !== FORMAT || state.version !== VERSION) throw new TypeError('Expected PlanetaryAtmosphereState.v1.');
+        const direction = Vector.normalize(directionValue, 'atmosphere sample direction'), location = locate(state.planet, direction), index = location.index, altitude = Math.max(-1000, finite(altitudeMeters)), pressure = Math.exp(-Math.max(0, altitude) / 7200), density = Math.exp(-Math.max(0, altitude) / 8500), lapse = Math.max(0, altitude) * .0065, solarCosine = Vector.dot(direction, state.sun.direction), phase = solarCosine > .08 ? 'day' : solarCosine > -.10 ? 'twilight' : 'night', frame = Math3.localFrame(direction, state.planet.planet), wind = Vector.add(Vector.scale(frame.east, state.fields.windEastMps[index]), Vector.scale(frame.north, state.fields.windNorthMps[index]));
+        return deepFreeze({ direction, index, cellId: location.cellId, altitudeMeters: altitude, phase, solarCosine: round(solarCosine), daylight: clamp((solarCosine + .08) / .24), pressureRatio: round(pressure), densityRatio: round(density), opticalDepth: round(density * (1.08 + state.fields.humidity[index] * .42)), temperatureC: round(state.fields.temperatureC[index] - lapse, 3), humidity: round(state.fields.humidity[index]), cloudCoverage: round(state.fields.cloudCoverage[index]), precipitation: round(state.fields.precipitation[index]), storm: round(state.fields.storm[index]), fog: round(state.fields.fog[index] * density), cloudBaseMeters: round(state.fields.cloudBaseMeters[index]), cloudTopMeters: round(state.fields.cloudBaseMeters[index] + state.fields.cloudThicknessMeters[index]), windMps: deepFreeze(wind), windSpeedMps: round(state.fields.windSpeedMps[index]) });
+    }
+    function shellMesh(planet, fieldState, kind) {
+        const mesh = Icosphere.buildStitchedMesh([...Icosphere.idsAtLevel(SHELL_LEVEL)]), rows = mesh.vertices.map(direction => { const index = locate(planet, direction).index, cloud = fieldState.cloudCoverage[index], altitudeMeters = kind === 'atmosphere' ? ATMOSPHERE_HEIGHT_METERS : fieldState.cloudBaseMeters[index] + fieldState.cloudThicknessMeters[index] * .5, opacity = kind === 'atmosphere' ? .22 : clamp((cloud - .18) * .78, 0, .58), colour = kind === 'atmosphere' ? [0.17, .46, .71] : [0.84, .88, .89]; return deepFreeze({ direction, altitudeMeters: round(altitudeMeters, 3), opacity: round(opacity), coverage: round(cloud), colour: Object.freeze(colour) }); }), flat = mesh.triangles.flat(), IndexArray = rows.length > 65535 ? Uint32Array : Uint16Array;
+        return deepFreeze({ kind, vertices: Object.freeze(rows), indices: new IndexArray(flat), vertexCount: rows.length, triangleCount: flat.length / 3 });
+    }
+    function precipitationColumns(planet, fieldState) {
+        const ranked = Array.from({ length: planet.cellCount }, (_, index) => index).filter(index => fieldState.precipitation[index] > .18 && !planet.ocean.isOcean[index]).sort((a, b) => fieldState.precipitation[b] - fieldState.precipitation[a] || String(planet.topology.ids[a]).localeCompare(String(planet.topology.ids[b]))).slice(0, MAX_PRECIPITATION_COLUMNS);
+        return Object.freeze(ranked.map(index => { const direction = directionAt(planet, index), frame = Math3.localFrame(direction, planet.planet), base = Math.max(0, finite(planet.geology.elevationMeters?.[index], 0)), intensity = fieldState.precipitation[index], height = 90 + intensity * 220; return deepFreeze({ id: `weather:${planet.topology.ids[index]}`, cellId: planet.topology.ids[index], direction, east: frame.east, north: frame.north, up: frame.up, baseAltitudeMeters: round(base + 12, 3), topAltitudeMeters: round(base + height, 3), intensity: round(intensity), snow: fieldState.temperatureC[index] < 1 }); }));
+    }
+    function shellAudit(shell) {
+        const edges = new Map(); for (let index = 0; index < shell.indices.length; index += 3) for (const [a, b] of [[shell.indices[index],shell.indices[index+1]],[shell.indices[index+1],shell.indices[index+2]],[shell.indices[index+2],shell.indices[index]]]) { const key = a < b ? `${a}:${b}` : `${b}:${a}`; edges.set(key, (edges.get(key) || 0) + 1); }
+        const counts = [...edges.values()]; return Object.freeze({ closed: counts.every(count => count === 2), crackEdges: counts.filter(count => count === 1).length, nonManifoldEdges: counts.filter(count => count > 2).length });
+    }
+    function fingerprint(state) {
+        let a = 0x811c9dc5, b = 0x9e3779b9; const add = value => { const text = String(value); for (let index = 0; index < text.length; index += 1) { a = Math.imul(a ^ text.charCodeAt(index), 0x01000193); b = mix32(b ^ a ^ text.charCodeAt(index)); } };
+        add(state.source.planetFingerprint); add(state.source.ecologyFingerprint); add(state.time.weatherBucket); for (const axis of ['x','y','z']) add(round(state.sun.direction[axis], 9)); for (const name of ['temperatureC','humidity','cloudCoverage','precipitation','storm','fog','windEastMps','windNorthMps']) { const values = state.fields[name]; for (let index = 0; index < values.length; index += Math.max(1, Math.floor(values.length / 640))) add(round(values[index], 5)); } return `pa1-${(a>>>0).toString(16).padStart(8,'0')}${(b>>>0).toString(16).padStart(8,'0')}`;
+    }
+    function build(planetValue, ecologyValue, options = {}) {
+        const { planet, ecology } = validate(planetValue, ecologyValue), engineVersion = Number(options.engineVersion ?? ENGINE_VERSION); if (engineVersion !== ENGINE_VERSION) throw new RangeError(`Unsupported planetary atmosphere engine version: ${engineVersion}.`);
+        const time = parseWhen(options), sun = solarState(planet, time), fieldState = fields(planet, ecology, sun, time), shells = deepFreeze({ format: SHELL_FORMAT, version: 1, atmosphere: shellMesh(planet, fieldState, 'atmosphere'), clouds: shellMesh(planet, fieldState, 'cloud'), precipitation: precipitationColumns(planet, fieldState) }), atmosphereAudit = shellAudit(shells.atmosphere), cloudAudit = shellAudit(shells.clouds), boundedNames = new Set(['humidity','cloudCoverage','precipitation','storm','fog','daylight','twilight']); let bounded = true; for (const [name, values] of Object.entries(fieldState)) { if (!ArrayBuffer.isView(values)) continue; for (let index = 0; index < values.length; index += 1) { const value = values[index]; if (!Number.isFinite(value) || (boundedNames.has(name) && (value < 0 || value > 1))) { bounded = false; break; } } if (!bounded) break; }
+        const samplingPlanet = Object.freeze({ fingerprint: planet.fingerprint, level: planet.level, cellCount: planet.cellCount, planet: planet.planet });
+        const state = { format: FORMAT, version: VERSION, engineVersion: ENGINE_VERSION, source: Object.freeze({ planetFingerprint: planet.fingerprint, ecologyFingerprint: ecology.fingerprint, seed: planet.seed }), planet: samplingPlanet, time, sun, fields: fieldState, shells, audit: null, fingerprint: null };
+        state.fingerprint = fingerprint(state); state.audit = Object.freeze({ atmosphereClosed: atmosphereAudit.closed, atmosphereCrackEdges: atmosphereAudit.crackEdges, cloudClosed: cloudAudit.closed, cloudCrackEdges: cloudAudit.crackEdges, boundedFields: bounded, sunUnitError: Math.abs(Vector.length(sun.direction) - 1), dayNightAreaError: Math.abs(fieldState.summary.daylightAreaFraction + fieldState.summary.nightAreaFraction - 1), fingerprintMatches: true }); return deepFreeze(state);
+    }
+    return Object.freeze({ format: FORMAT, version: VERSION, engineVersion: ENGINE_VERSION, shellFormat: SHELL_FORMAT, fieldFormat: FIELD_FORMAT, limits: Object.freeze({ shellLevel: SHELL_LEVEL, atmosphereHeightMeters: ATMOSPHERE_HEIGHT_METERS, cloudMinimumMeters: CLOUD_MIN_METERS, cloudMaximumMeters: CLOUD_MAX_METERS, weatherBucketMinutes: WEATHER_BUCKET_MINUTES, maximumPrecipitationColumns: MAX_PRECIPITATION_COLUMNS }), parseWhen, solarState, sample, build });
+})();

@@ -1014,7 +1014,7 @@ html[data-material="glass"] .practice-unit-row.head{background:var(--sd-material
 
 html[data-material="glass"] .sd-rte{background:var(--sd-material-canvas);border-color:var(--sd-glass-edge)}
 html[data-material="glass"] .sd-rte-toolbar{background:var(--sd-material-inset);border-bottom-color:var(--sd-glass-edge)}
-html[data-presentation="glass"] .library-note-nav-item,
+html[data-presentation="glass"] .library-note-nav-item.empty-note:not(.active):not(:hover),
 html[data-presentation="glass"] .library-note-nav-path,
 html[data-presentation="glass"] .library-notes-editor-empty,
 html[data-presentation="glass"] .library-ongoing-note-read.empty,

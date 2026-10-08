@@ -13,13 +13,15 @@ const timer=read('source/core/timer-engine.js');
 const insightsModel=read('source/external/insights-model.js');
 const insightsView=read('source/external/insights.js');
 const insights=insightsModel+'\n'+insightsView;
+const world=read('source/external/world.js');
+assert.doesNotMatch(world,/readOnly|API\.(?:plan|data|insights|preview|backup|logic)|indexedDB|sessionStorage|goTab|TimerState/,'Living World must have no canonical application bridge.');
 const sw=read('source/platform/sw.js');
 
 // Static security policy: forbidden capabilities and trust boundaries only.
 assert.match(drive,/https:\/\/www\.googleapis\.com\/auth\/drive\.file/u,'Drive must request only the app-file OAuth scope.');
 assert.doesNotMatch(drive,/www\.googleapis\.com\/auth\/drive(?!\.file)|emptyTrash|\/permissions|permission-management/iu,'Broad Drive scope or permission-management capability is forbidden.');
 assert.equal((app.match(/import\s*\(/gu)||[]).length,0,'Runtime dynamic JavaScript imports are forbidden.');
-assert.deepEqual([...trustedExternalModuleIds],['glass','aurora','guide','insights','drive','rich-text','search-worker','image-worker','attachment-worker','export-worker']);
+assert.deepEqual([...trustedExternalModuleIds],['glass','aurora','guide','insights','drive','rich-text','search-worker','image-worker','attachment-worker','export-worker','world-worker','world']);
 assert.deepEqual(externalModules.map(module=>module.id),[...trustedExternalModuleIds],'Only reviewed external runtime modules may be loadable.');
 assert.match(app,/script\.src=trustedAssetURL\(descriptor\.src\)/u,'On-demand scripts must cross the trusted-asset boundary.');
 

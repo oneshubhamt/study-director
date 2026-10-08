@@ -11,7 +11,7 @@ const layers=['unit','integration','browser','architecture'];
 const supportRoots=['fixtures','helpers'];
 const allowedDomains=new Set([
   'app','library','attachments','backup','build','exports','insights','plans','pwa','review',
-  'rich-text','search','security','storage','test-suite','ui'
+  'rich-text','search','security','storage','test-suite','ui','world'
 ]);
 
 function executableFiles(directory){

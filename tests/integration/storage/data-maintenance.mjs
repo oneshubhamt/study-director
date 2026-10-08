@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {createHarness} from '../../helpers/repository-harness.mjs';
+import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
 const obsoleteKey='reflectionDraftMigration.v1';
 const retainedKey='planDraft.v1';
@@ -81,3 +82,58 @@ await maintenanceFailure('completion metadata commit failure',async(_h,c)=>{c.fa
  const restarted=createHarness(h.sharedLocal,h.stores,{});assert.equal((await restarted.app.maintenance.run()).status,'completed','durable pending work bypasses a recent prior success after restart');assert.equal(h.stores.area.get('restart-pending').text,'retained after failed forced pass');failureCases.push('failure after recent success remains pending across restart');
 }
 console.log(JSON.stringify({status:'PASS',suite:'data-maintenance-phase-outcomes',cases:failureCases.length,failureCases,immediateRetry:true,recoveryPreserved:true},null,2));
+
+// Exercise the existing application scheduler with real AppData. Recovery must
+// preserve edits and autosave even when timestamps repeat or a save is queued.
+const appSource=fs.readFileSync('source/app.html','utf8');
+function maintenanceHost(h,clock){
+ const attempts=[];
+ const host=vm.createContext({
+  Date:clock.Date,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,
+  dataMaintenanceTimer:null,DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS:86400000,DATA_MAINTENANCE_FAILURE_RETRY_MS:60000,
+  StartupLifecycle:{status:()=>({fullyInitialized:true})},scheduleDailyAttachmentMaintenance(){},
+  backgroundMaintenanceForegroundBusy:()=>false,AppData:h.app,AppDiagnostics:{capture(){}},
+  BackupOperationDiagnostics:{start:()=>1,mark(){},finish:result=>attempts.push(result),fail(){}}
+ });
+ vm.runInContext(appSource.slice(appSource.indexOf('function scheduleDataMaintenance('),appSource.indexOf('/* ONGOING SUBJECT NOTES */')),host);
+ return {host,attempts};
+}
+const noteRecoveryCases=[];
+for(const boundary of ['stable','canonical-read','final-result','autosave'])for(const change of boundary==='stable'?['none']:['edit','add','delete','queued-save']){
+ const clock=createFakeClock(),controls={clock},local=new Map();let armed=false,changed=false,mutation=Promise.resolve();
+ class ObservedMeta extends Map{entries(){const result=[...super.entries()];if(armed&&boundary!=='canonical-read'&&boundary!=='stable')queueMicrotask(applyChange);return result[Symbol.iterator]();}}
+ const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new ObservedMeta()},h=createHarness(local,stores,controls);
+ await h.app.compatibility.migrateDailyRecords();
+ controls.onAreaRead=async()=>{throw new Error('startup notes unavailable');};await h.app.notes.load();controls.onAreaRead=null;
+ h.app.notes.update('first','First','earlier note','');await h.app.notes.flush({strict:true});await clock.advance(20);
+ if(change==='queued-save')h.app.notes.update('first','First','latest edit',h.app.notes.get('first').updatedAt);
+ const applyChange=()=>{
+  if(changed)return;changed=true;
+  if(change==='queued-save'){void clock.advance(1000);return;}
+  if(change==='delete')mutation=h.app.notes.remove('first');
+  else if(change==='add')h.app.notes.update('second','Second','new note','');
+  else{const current=h.app.notes.get('first');h.app.notes.update('first','First','intervening edit',current.updatedAt);const updated=h.app.notes.get('first');h.app.notes.update('first','First','latest edit',updated.updatedAt);assert.equal(h.app.notes.get('first').updatedAt,updated.updatedAt,'equal timestamps must not conceal a mutation');}
+  if(boundary==='autosave')void clock.advance(1000);
+ };
+ controls.onAreaRead=async()=>{armed=true;if(boundary==='canonical-read')applyChange();};
+ const {host,attempts}=maintenanceHost(h,clock);host.scheduleDataMaintenance(0,'recovery');
+ await clock.advance(0);await clock.drainMicrotasks(256);
+ armed=false;controls.onAreaRead=null;await mutation;
+ const first=attempts[0];assert.ok(first,'the host records the recovery attempt');
+ const expected=boundary==='stable'?{first:'earlier note'}:change==='delete'?{}:change==='add'?{first:'earlier note',second:'new note'}:{first:'latest edit'};
+ const texts=payload=>Object.fromEntries(Object.entries(payload).map(([key,value])=>[key,value.text]));
+ assert.deepEqual(texts(h.app.notes.exportPayload()),expected,`${boundary} ${change}: recovery preserves the live model`);
+ if(first.status==='completed')assert.deepEqual(texts(Object.fromEntries(stores.area)),expected,'completion acknowledges exactly the accepted work');
+ else{
+  assert.equal(first.status,'yielded');assert.equal(first.reason,'notes-changed');assert.equal(stores.meta.get('dataMaintenance').value.status,'pending');
+  await clock.advance(2000);assert.deepEqual(texts(Object.fromEntries(stores.area)),expected,'ordinary autosave remains armed');
+  await clock.advance(13000);await clock.drainMicrotasks(256);
+  assert.equal(attempts.at(-1).status,'completed','the existing host automatically retries stable recovery');
+  assert.equal(stores.meta.get('dataMaintenance').value.status,'completed');
+ }
+ await h.app.notes.flush({strict:true});assert.deepEqual(texts(Object.fromEntries(stores.area)),expected);
+ const restarted=createHarness(local,stores,{clock});await restarted.app.notes.load();assert.deepEqual(texts(restarted.app.notes.exportPayload()),expected,'restart preserves the acknowledged model');
+ if(change==='edit'&&changed){const current=h.app.notes.get('first');h.app.notes.update('first','First',current.text+' + subsequent edit',current.updatedAt);await h.app.notes.flush({strict:true});assert.equal(stores.area.get('first').text,'latest edit + subsequent edit');}
+ clock.clearTimeout(host.dataMaintenanceTimer);noteRecoveryCases.push({boundary,change});
+}
+console.log(JSON.stringify({status:'PASS',suite:'note-recovery-conservation',productionHost:true,productionAppData:true,matrices:noteRecoveryCases},null,2));

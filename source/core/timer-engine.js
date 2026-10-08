@@ -221,21 +221,43 @@ function handleOverlayFocusTrap(ev){
     first.focus();
   }
 }
+// Away time can only count toward the running block while that block's study
+// time lasted. A fixed block (or, for a work block, a support block) that began
+// during the away time ends the countable part; time from there on is never
+// added to the running block. The fixed block also stops the timer, as it would
+// have with the app open.
+function inactiveGapWindow(gap,now=nowMs()){
+  const gapMs=Math.max(0,Number(gap&&gap.gapMs)||0),last=Number(gap&&gap.lastMs);
+  const whole=Object.freeze({gapMs,countableMs:gapMs,limit:null,fixed:null});
+  if(!Number.isFinite(last)||last<=0||last>now||!TimerState.runtime)return whole;
+  const runningIdx=TimerState.runtime.taskIdx,running=TASKS[runningIdx],from=effectiveNowMin(new Date(last)),to=effectiveNowMin(new Date(now));
+  if(to<from)return whole;
+  const ends=row=>row.idx!==runningIdx&&(isFixedBlock(row.t)||isWorkBlock(running)&&isTrackableBlock(row.t)&&!isWorkBlock(row.t));
+  const rows=plannedRows().filter(row=>ends(row)&&row.start<=to&&row.end>from).sort((a,b)=>a.start-b.start);
+  if(!rows.length)return whole;
+  const limit=rows[0],lastDate=new Date(last),intoMinute=lastDate.getSeconds()*1000+lastDate.getMilliseconds();
+  const countableMs=Math.max(0,Math.min(gapMs,(limit.start-from)*60000-intoMinute));
+  const fixed=rows.find(row=>isFixedBlock(row.t))||null;
+  return Object.freeze({gapMs,countableMs,limit:{idx:limit.idx,task:limit.t,start:limit.start,end:limit.end},fixed:fixed?{idx:fixed.idx,task:fixed.t,start:fixed.start,end:fixed.end}:null});
+}
 function renderInactiveGapPrompt(){
   if(!TimerState.inactiveGap)return;
   clearSoundOperation();
   try{Pomodoro.stop({dismiss:true});}catch(e){}
   const task=TASKS[TimerState.inactiveGap.taskIdx]||{};
-  const gapMs=Math.max(0,Number(TimerState.inactiveGap.gapMs)||0);
+  const span=inactiveGapWindow(TimerState.inactiveGap),gapMs=span.gapMs;
   const ov=document.getElementById('gap-overlay');
   const msg=document.getElementById('gap-msg');
   const meta=document.getElementById('gap-meta');
   const split=document.getElementById('gap-split');
   const focusInput=document.getElementById('gap-focus-min');
-  if(msg)msg.textContent='The timer was inactive. How should this gap be counted?';
-  if(meta)meta.textContent=`Gap: ${fmtS(Math.round(gapMs/1000))}${task.name?' · '+task.name:''}`;
+  const limited=span.limit&&span.countableMs<gapMs,limitLabel=limited?shortTaskLabel(span.limit.task):'';
+  if(msg)msg.textContent=limited
+    ?`The timer was inactive. ${limitLabel} began while you were away, so only the ${fmtS(Math.round(span.countableMs/1000))} before it can count. How should that time be counted?`
+    :'The timer was inactive. How should this gap be counted?';
+  if(meta)meta.textContent=`Gap: ${fmtS(Math.round(gapMs/1000))}${task.name?' · '+task.name:''}${limited?` · countable: ${fmtS(Math.round(span.countableMs/1000))}`:''}`;
   if(split)split.classList.remove('on');
-  if(focusInput)focusInput.value=Math.max(0,Math.round(gapMs/60000));
+  if(focusInput){const countableMin=Math.max(0,Math.round(span.countableMs/60000));focusInput.value=countableMin;focusInput.max=String(countableMin);}
   if(ov){
     ov.classList.add('on');
     setTimeout(()=>focusFirstInOverlay(ov),0);
@@ -251,6 +273,13 @@ function openInactiveGapPrompt(taskIdx,gapMs,lastMs,detectedAtMs,source){
 function closeInactiveGapPrompt(){
   const ov=document.getElementById('gap-overlay');
   if(ov)ov.classList.remove('on');
+}
+// A gap belongs to the running timer. When that timer stops for another reason
+// (the day finished, the schedule was reset), its counted focus was already
+// saved and the gap has nothing left to classify.
+function discardInactiveGap(){
+  if(!TimerState.inactiveGap)return false;
+  TimerState.inactiveGap=null;closeInactiveGapPrompt();return true;
 }
 function showInactiveGapSplit(){
   const split=document.getElementById('gap-split');
@@ -271,48 +300,54 @@ function handleInactiveGapSplitKey(e){
   }
 }
 function classifyInactiveGap(mode,focusMs=null){
-  if(!TimerState.inactiveGap||!TimerState.runtime||TimerState.runtime.startMs===null)return;
   const gap=TimerState.inactiveGap;
-  const now=nowMs();
-  const gapMs=Math.max(0,gap.gapMs||0);
+  if(!gap)return;
+  // Every choice closes the dialog first, so an accounting problem can never
+  // leave the app behind an unresponsive modal.
+  discardInactiveGap();
+  if(!TimerState.runtime||TimerState.runtime.startMs===null){
+    saveLiveDraft();
+    try{recoverySetStatus('The timer had already stopped; the inactive gap was not added to any block.',true);}catch(e){}
+    return;
+  }
+  const now=nowMs(),span=inactiveGapWindow(gap,now);
+  const countable=span.countableMs,excluded=Math.max(0,span.gapMs-countable);
   const promptMs=Math.max(0,gap.promptMs||0)+Math.max(0,now-(gap.detectedAtMs||now));
   let focusPart=0,breakPart=0,ignoredPart=0,label='Ignored';
   if(mode==='focus'){
-    focusPart=gapMs; label='Focus';
+    focusPart=countable; label='Focus';
   }else if(mode==='break'){
-    breakPart=gapMs; label='Break';
+    breakPart=countable; label='Break';
   }else if(mode==='split'){
-    focusPart=Math.min(gapMs,Math.max(0,Math.round(focusMs||0)));
-    breakPart=Math.max(0,gapMs-focusPart);
+    focusPart=Math.min(countable,Math.max(0,Math.round(focusMs||0)));
+    breakPart=Math.max(0,countable-focusPart);
     label=`Split: ${fmtS(Math.round(focusPart/1000))} focus, ${fmtS(Math.round(breakPart/1000))} break`;
   }else{
-    ignoredPart=gapMs; label='Ignored';
+    ignoredPart=countable; label='Ignored';
   }
   TimerState.patchRuntime({
-    totalPausedMs:(TimerState.runtime.totalPausedMs||0)+breakPart+ignoredPart+promptMs,
-    sleepPausedMs:(TimerState.runtime.sleepPausedMs||0)+breakPart+ignoredPart,
+    totalPausedMs:(TimerState.runtime.totalPausedMs||0)+breakPart+ignoredPart+excluded+promptMs,
+    sleepPausedMs:(TimerState.runtime.sleepPausedMs||0)+breakPart+ignoredPart+excluded,
     lastTickMs:now
   });
   if(breakPart>0){
-    const gapEndMs=gap.detectedAtMs||now;
+    const countableEndMs=Number(gap.lastMs)>0?Number(gap.lastMs)+countable:(gap.detectedAtMs||now);
     addPauseToActual(gap.taskIdx,Math.round(breakPart/1000),{
-      startedAt:new Date(Math.max(0,gapEndMs-breakPart)).toISOString(),
-      endedAt:new Date(gapEndMs).toISOString(),
+      startedAt:new Date(Math.max(0,countableEndMs-breakPart)).toISOString(),
+      endedAt:new Date(countableEndMs).toISOString(),
       type:'inactive-gap'
     });
   }
   const shouldResetNudgeCycle=mode==='break'||mode==='ignore'||breakPart>0;
-  TimerState.inactiveGap=null;
-  closeInactiveGapPrompt();
   syncTimerFromClock();
   if(shouldResetNudgeCycle)Pomodoro.timerEvent('reset-cycle',{activeSec:currentTimerActiveSeconds()});
-  const boundary=fixedBoundaryForRunningTimer();
+  const boundary=span.fixed||fixedBoundaryForRunningTimer();
   PracticePacer.resolveInactiveGap(focusPart,{resume:!boundary,now});
-  if(boundary){stopTimerForFixedBoundary(boundary);return;}
+  if(boundary){stopTimerForFixedBoundary(boundary,{away:excluded>0});return;}
   updateCD();
   requestRender('schedule','realtime');
   saveLiveDraft();
-  try{recoverySetStatus(`Classified inactive gap as ${label.toLowerCase()}.`,true);}catch(e){}
+  try{recoverySetStatus(`Classified inactive gap as ${label.toLowerCase()}${excluded>0?`; ${fmtS(Math.round(excluded/1000))} after ${shortTaskLabel(span.limit.task)} began was not counted`:''}.`,true);}catch(e){}
 }
 function currentTimerActiveSeconds(){
   return currentTimerActiveSecondsAt((TimerState.paused&&TimerState.runtime&&TimerState.runtime.pausedStartedMs)?TimerState.runtime.pausedStartedMs:nowMs());
@@ -363,8 +398,9 @@ function fixedBoundaryForRunningTimer(){
   const row=plannedRows().find(r=>isFixedBlock(r.t)&&nowEff>=r.start&&nowEff<r.end);
   return row?{idx:row.idx,task:row.t,start:row.start,end:row.end}:null;
 }
-function stopTimerForFixedBoundary(boundary){
+function stopTimerForFixedBoundary(boundary,options={}){
   clearSoundOperation();
+  discardInactiveGap();
   const activeIdx=TimerState.currentIndex;
   recordCurrentActiveToTask(activeIdx,'partial');
   saveNote();
@@ -373,9 +409,12 @@ function stopTimerForFixedBoundary(boundary){
   tInt=null;TimerState.paused=false;resetBreakState();Pomodoro.timerEvent('reset-cycle',{anchorSec:0,activeSec:0});TimerState.runtime=TimerState.emptyRuntime();
   setTimerMode(TIMER_MODES.READY,'fixed-boundary');
   const label=boundary&&boundary.task?shortTaskLabel(boundary.task):'fixed block';
-  showEmpty(`Fixed block started: ${label}. Counted focus was saved; resume or shift the remaining study blocks when ready.`);
+  const away=options&&options.away===true;
+  showEmpty(away
+    ?`Fixed block started while you were away: ${label}. Your choice was applied to the study time before it; time from the fixed block on was not counted.`
+    :`Fixed block started: ${label}. Counted focus was saved; resume or shift the remaining study blocks when ready.`);
   refreshPnote({force:true});
-  try{recoverySetStatus(`Timer paused because fixed block started: ${label}. Counted focus was saved.`,true);}catch(e){}
+  try{recoverySetStatus(away?`Timer stopped at fixed block ${label}, which began while you were away. Time from the fixed block on was not counted.`:`Timer paused because fixed block started: ${label}. Counted focus was saved.`,true);}catch(e){}
   flushLiveDraft();
 }
 
@@ -456,7 +495,7 @@ function tick(){
     return;
   }
   absorbInactiveTimerGap('tick');
-  if(TimerState.inactiveGap)return;
+  if(TimerState.inactiveGap||!TimerState.runtime||TimerState.runtime.startMs===null)return;
   const boundary=fixedBoundaryForRunningTimer();
   if(boundary){stopTimerForFixedBoundary(boundary);return;}
   const wasOverflow=isOverflow;
@@ -757,7 +796,7 @@ const SessionEvidenceProjector=(()=>{
       return true;
     }
     function resetCountdownRuntime(){
-      stopExecution();
+      stopExecution();discardInactiveGap();
       TimerState.paused=false;remS=0;totS=0;overflowS=0;isOverflow=false;
       TimerState.runtime=TimerState.emptyRuntime();
       resetBreakState(false);
@@ -769,7 +808,7 @@ const SessionEvidenceProjector=(()=>{
       return status();
     }
     function resetToReady(reason='runtime-reset'){
-      stopExecution();
+      stopExecution();discardInactiveGap();
       TimerState.paused=false;remS=0;totS=0;overflowS=0;isOverflow=false;
       TimerState.runtime=TimerState.emptyRuntime();
       setTimerMode(TIMER_MODES.READY,reason);

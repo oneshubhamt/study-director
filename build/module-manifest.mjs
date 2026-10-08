@@ -116,7 +116,13 @@ export const runtimeDependencies=Object.freeze({
   startup:Object.freeze(['library','backup','pomodoro','plan','repositories','review','session-lifecycle','timer-engine','timer-state'])
 });
 
-export const trustedExternalModuleIds=Object.freeze(['glass','aurora','guide','insights','drive','rich-text','search-worker','image-worker','attachment-worker','export-worker']);
+// The planetary engines belong exclusively to the optional Living World runtime.
+const worldEngines=Object.freeze([
+  'spherical-math-engine','icosphere-engine','planet-generator-engine','behaviour-engine',
+  'planetary-ecology-engine','planet-natural-world-engine','planet-atmosphere-engine',
+  'planet-wildlife-engine','planet-camera-engine','planet-terrain-renderer-engine'
+].map(name=>`external/world/${name}.js`));
+export const trustedExternalModuleIds=Object.freeze(['glass','aurora','guide','insights','drive','rich-text','search-worker','image-worker','attachment-worker','export-worker','world-worker','world']);
 export const externalModules=Object.freeze([
   Object.freeze({id:'glass',source:'external/glass.js',stem:'sd.glass',execution:'startup'}),
   Object.freeze({id:'aurora',source:'external/aurora.js',stem:'sd.aurora',execution:'startup'}),
@@ -127,7 +133,13 @@ export const externalModules=Object.freeze([
   Object.freeze({id:'search-worker',source:'external/search-worker.js',stem:'sd.note-search',execution:'worker'}),
   Object.freeze({id:'image-worker',source:'external/image-worker.js',stem:'sd.image-worker',execution:'worker'}),
   Object.freeze({id:'attachment-worker',source:'external/attachment-worker.js',stem:'sd.attachment-worker',execution:'worker'}),
-  Object.freeze({id:'export-worker',source:'external/export-worker.js',stem:'sd.export-worker',execution:'worker'})
+  Object.freeze({id:'export-worker',source:'external/export-worker.js',stem:'sd.export-worker',execution:'worker'}),
+  Object.freeze({id:'world-worker',sources:Object.freeze([...worldEngines,'external/world/planet-worker.js']),stem:'sd.world-planet-worker',execution:'worker',isolated:true}),
+  Object.freeze({id:'world',sources:Object.freeze([
+    'external/world/worker-runtime.js',...worldEngines,
+    'external/world/chronology-engine.js','external/world/planet-history-engine.js',
+    'external/world.js'
+  ]),stem:'sd.world',execution:'on-demand',isolated:true})
 ]);
 
 export const styleModules=Object.freeze([
