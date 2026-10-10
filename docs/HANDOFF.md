@@ -30,6 +30,9 @@ There is nothing to re-read here; the designs live in `docs/BACKUP-ENGINE.md`, `
   - The compatibility layer is isolated, so it can be deleted in one step later (`tests/architecture/storage/compatibility-isolation.mjs`).
 - **Every audit finding is closed** (status table in the audit), along with #45 and #46.
 - **Retention:** 15 versions per location (latest, 6 daily, 4 weekly, 4 monthly). No tier shares a week or a month with the one before it, so the history reaches four to five months back.
+- **Dropped from the backup wish list:**
+  - a "backup health" summary, because each location's row already shows its last backup and any problem;
+  - streaming verification during restore, because every downloaded piece is already checked against the version's manifest before anything is written.
 - **Left for later on purpose:**
   - encryption, to come as end-to-end encryption with a sign-in-first experience;
   - measuring restore of a very large library;

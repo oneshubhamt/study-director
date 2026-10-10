@@ -4,12 +4,21 @@ The plan for making notes a first-class part of Study Director. **Status: decide
 
 ## Aim
 
-Notes are as important as time tracking. They should feel simple, smooth and beautiful, never lose anything, and cover what students and professionals use notes for most of the time. They are not meant to become Notion or Evernote.
+Study Director is a first-class notes app as well as a time tracker, and its notes are treated that way in durability, reliability and features. They should just work: simple, smooth, intuitive and beautiful, in keeping with the rest of the app. They should cover what students and professionals use notes for about 90% of the time, without becoming a full-featured app like Notion or Evernote.
 
 What already works well:
 - **Writing:** headings, bold, italic, underline and highlight; lists, checklists, quotes, tables and web links; images, PDFs and audio inside notes; focus mode.
 - **Organising:** nested notes, full-text search that updates on each save, and rename, move and merge.
 - **Safety:** one save engine with a safety copy; when two saves clash, the losing text is always kept; 30-day Recently deleted; earlier versions from backups; offline use.
+
+## Settled before this plan
+
+- **No separate version history for notes.** Earlier versions come from the backup versions in the Device Folder and Google Drive (four to five months back). Together with undo and redo in the editor and Recently deleted (30 days), that is enough.
+- **Accepted limits:**
+  - each location keeps one version per day, so changes within a day are not kept separately;
+  - someone who uses neither the Device Folder nor Drive has no earlier versions;
+  - portable backup files are not a source of note versions.
+- **No annotation features** for PDFs, audio or photos.
 
 ## Decided
 
@@ -19,8 +28,11 @@ What already works well:
    - The note's current text is never listed.
    - There is no per-day cap; at most 30 entries, and usually far fewer.
    - Labels use plain time, such as "Yesterday" or "3 days ago". When two entries share a date, the time is added.
-   - "Earlier versions…" stays in the open note's ⋯ menu.
-2. **Limit:** 2,000 notes (down from 10,000), 20,000 words each. Anyone already above 2,000 keeps every note but cannot add more until below the limit. Measure opening, saving and searching at that size, and build a faster tree only if it is slow.
+   - **No backup machinery shows:** no locations, checkpoints or tiers. Nobody needs to know how backups work to use earlier versions.
+   - **Choosing an entry** opens the existing side-by-side note review, which already handles keeping, combining or replacing the text.
+   - **On Drive,** opening the list reads each version's small index file (up to 15, read together), so it takes a second or two.
+   - **Where:** "Earlier versions…" stays in the open note's ⋯ menu, with Rename, Move, Export and Delete. The menu stays on the open note rather than moving to the list.
+2. **Limit:** 2,000 notes (down from 10,000), 20,000 words each. Anyone already above 2,000 keeps every note but cannot add more until below the limit. Measure opening, saving and searching at that size, and build a faster tree only if it is slow. Search already updates on each save rather than rebuilding, so it only needs timing.
 3. **Strikethrough:** in the "More text formatting" menu, next to superscript and subscript. The editor already supports it, so it only needs switching on.
 4. **Search lands on the match.** Opening a note from a search highlights every match and scrolls to the first. Arrow buttons or Enter step through the matches, and Esc or typing clears the highlights. The editor has highlighting built in, so this is a small addition, not a new system.
 5. **Sorting:** a sort button with two choices. "Name" shows the tree. "Recently edited" shows a flat list, newest first, with each note's path in small text. It uses the edit time already stored. Other orders were left out: created date would need a new stored field, and size is rarely useful. Today's notes already carry a TODAY mark.
@@ -30,8 +42,12 @@ What already works well:
    - **Markdown:** converted to HTML, then passed through the existing paste cleaner that already turns pasted web pages into note format.
    - **Images inside Markdown files:** not in the first version.
 8. **Already covered:** keeping images and PDFs inside notes in sync with their note is part of attachment upkeep, checked in the background-services pass. Editing while another tab takes over writing is already safe; add one test only if none covers it.
-9. **Later:** math equations.
-10. **Not doing:** templates, sharing, and drag-and-drop in the tree (Move covers it).
+9. **Later:** math equations. Code formatting is also supported by the editor and can be switched on if it is ever wanted.
+10. **Not doing:**
+    - templates;
+    - sharing;
+    - drag-and-drop in the tree (Move covers it);
+    - a separate Notes tab in the main navigation, because notes belong in the Library, which is the app's storage.
 11. **Every note gets a permanent identity** (confirmed 2026-10-10).
    **Today:** a note is identified by its name ("Cardiology › Heart failure"). Renaming or moving a note gives it a new identity, so:
    - its earlier versions disappear (older backups hold it under the old name);
@@ -87,6 +103,7 @@ What already works well:
      - storage use.
 
      Each note and diary entry still shows its own images inline.
+   - **Proper weight for every section.** Notes in particular must not look like a minor panel. Each section gets the space and proportion its importance deserves.
    - **Keep what works.** The redesign rearranges and resizes the existing parts rather than rebuilding them, and is shown as screenshots for approval before it is finalised.
 
 ## Order of work
@@ -108,4 +125,4 @@ What already works well:
 4. **Tags (14)** and **import (7).**
 5. **Measure at 2,000 notes,** then fix only what is slow.
 
-Each step follows the testing rhythm: make all of the step's changes, build once, run the suites once, fix what fails, and rerun only the failing tests.
+Each step starts on the user's go-ahead and ends with a commit, so it can be reviewed before the next. Each step follows the testing rhythm: make all of the step's changes, build once, run the suites once, fix what fails, and rerun only the failing tests.
