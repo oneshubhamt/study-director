@@ -184,7 +184,7 @@ The aim is a machine that works every time: cohesive, bounded, lean and fast, wi
 
 ### 3.1 Notes as a first-class system
 
-**Decided: no separate local version history for notes.** Earlier versions of a note come from the backup versions in the Device Folder and Google Drive. Retention is Latest, six daily, four weekly and four monthly, so about four months of history. Together with undo and redo in the editor and Recently deleted (30 days), that is enough for realistic use.
+**Decided: no separate local version history for notes.** Earlier versions of a note come from the backup versions in the Device Folder and Google Drive. Retention is Latest, six daily, four weekly and four monthly, so about four to five months of history. Together with undo and redo in the editor and Recently deleted (30 days), that is enough for realistic use.
 
 Accepted limits:
 - Earlier versions from the same day are not kept. The user considers this insignificant.

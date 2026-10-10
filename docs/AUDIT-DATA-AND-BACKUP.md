@@ -20,7 +20,7 @@ Every finding is closed. Details are in `HANDOFF.md` 1.5 to 1.8.
 | B6 code size | Reduced where it was duplication (the Drive dialog, coverage copies, the file row's two owners); the rest is safety work. |
 | T5 dead folder-settings fields | Removed (settings v4). |
 | T6 migration marker | Lives in the compatibility block; ordinary code never reads it. |
-| B7 retention | Stated once in Data & Backup and tested against the policy. |
+| B7 retention | Stated once in Data & Backup and tested against the policy. Tiers no longer share a week or a month, so the reach is four to five months. |
 | B8 restore modes | One verb family: Versions, Restore…, Restore note…, Restore from file…. |
 | B9 old-format test helper | Publishes version-5 manifests. |
 | B10 #45 / #46 | #45 done (bounded writes, measured at 1,000 versions); #46 closed with reasoning. |

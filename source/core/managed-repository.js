@@ -255,17 +255,20 @@ function selectRepositoryRetention(rowsValue,{now=new Date()}={}){
   const latest=newestRepositoryRow(normalRows);keep(latest,'latest');
   if(latest){
     // Each tier keeps the newest checkpoint from its most recent periods that
-    // have one, all older than what the tier before it kept. Periods without a
-    // checkpoint are skipped, so a break of any length never empties a tier.
+    // have one, counting only periods wholly older than the one holding the
+    // oldest checkpoint kept so far: no Weekly shares a week with a Daily and
+    // no Monthly a month with a Weekly. Periods without a checkpoint are
+    // skipped, so a break of any length never empties a tier.
     const calendar=row=>row.manifest.retention.calendar,policy=REPOSITORY_RETENTION_POLICY;
-    let older=normalRows.filter(row=>calendar(row).localDate<calendar(latest).localDate);
+    let oldest=latest;
     for(const [tier,count,period] of [['daily',policy.dailyDays,value=>value.localDate],['weekly',policy.weeklyPeriods,value=>value.weekStart],['monthly',policy.monthlyPeriods,value=>value.month]]){
-      const newest=new Map();
-      for(const row of older){const key=period(calendar(row)),best=newest.get(key);newest.set(key,best?newestRepositoryRow([best,row]):row);}
+      const limit=period(calendar(oldest)),newest=new Map();
       // Dates, weeks and months are zero-padded, so text order is time order.
+      for(const row of normalRows){const key=period(calendar(row));if(key<limit)newest.set(key,newest.has(key)?newestRepositoryRow([newest.get(key),row]):row);}
       const kept=[...newest.keys()].sort().reverse().slice(0,count);
+      if(!kept.length)break;
       for(const key of kept)keep(newest.get(key),tier);
-      const boundary=kept.at(-1);older=boundary===undefined?[]:older.filter(row=>period(calendar(row))<boundary);
+      oldest=newest.get(kept.at(-1));
     }
     // Slots the tiers cannot use (a young history, a long break) go to the
     // newest checkpoint of the remaining days, closing the widest gaps in time
