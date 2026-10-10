@@ -2,7 +2,28 @@
 
 Read-only audit of how Study Director stores data and how it backs it up and restores it. Notes and background services are out of scope (to be audited later).
 
-**Follow-up (same day):** decisions and the schema step that acted on T1–T6, B4 and B9 are recorded in `HANDOFF.md` 1.5.
+## Status (2026-10-10, after implementation)
+
+Every finding is closed. Details are in `HANDOFF.md` 1.5 to 1.8.
+
+| Finding | Outcome |
+|---|---|
+| B1 automatic backup on phones and Drive | Accepted limit (your decision). The 7-day reminder shows at every launch once nothing has covered the changes for a week, and now counts Drive, Device Folder and downloaded backups. |
+| T7 compatibility layer | Kept (your decision), consolidated and pinned to a fixed set of entry points by a guard test; ARCHITECTURE §10 lists what retiring it deletes. |
+| T1 record names | appMeta names carry no version; old names are moved once. |
+| T2 last backup stored four ways | One record (`verifiedRecoveryBackups` v3). Storage health's copy, the folder settings' fields and the engine's own copy are gone. |
+| T3 record built around two locations | Keyed by location id (v7). |
+| T4 emergency copies | One shared budget in priority order; reads and clears keep each copy's ceiling. |
+| B3 encryption pause | Rows read "Paused until unlocked". The encryption system itself waits for the end-to-end design (your decision). |
+| B4 Drive scrub downloads everything | Compares Google's stored checksum; nothing is downloaded. |
+| B5 engine draws UI | The engine and the backup runtime draw nothing; the app draws all three rows (Device Folder, Drive, file). |
+| B6 code size | Reduced where it was duplication (the Drive dialog, coverage copies, the file row's two owners); the rest is safety work. |
+| T5 dead folder-settings fields | Removed (settings v4). |
+| T6 migration marker | Lives in the compatibility block; ordinary code never reads it. |
+| B7 retention | Stated once in Data & Backup and tested against the policy. |
+| B8 restore modes | One verb family: Versions, Restore…, Restore note…, Restore from file…. |
+| B9 old-format test helper | Publishes version-5 manifests. |
+| B10 #45 / #46 | #45 done (bounded writes, measured at 1,000 versions); #46 closed with reasoning. |
 
 ## Verdict
 

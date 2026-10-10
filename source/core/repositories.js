@@ -427,14 +427,6 @@ const idbGet=IndexedDb.get;
 const idbGetAll=IndexedDb.getAll;
 const idbGetAllIfPresent=IndexedDb.getAllIfPresent;
 const idbHasStore=IndexedDb.hasStore;
-function storageMigrationMetaValue(complete=false,count=0){
-  return {
-    recordVersion:DATA_CONTRACT.schemas.DailyRecord.version,
-    summaryVersion:DATA_CONTRACT.schemas.DailySummary.version,
-    complete:!!complete,
-    recordCount:boundedInt(count,{min:0,max:APP_LIMITS.maxImportRecords*10,fallback:0})
-  };
-}
 // Historical appMeta residue is intentionally raw only inside this compatibility cleanup path.
 function rawLegacyMetaGet(key){return idbGet(DB_APP_META_STORE,String(key),'legacy metadata read aborted');}
 function rawLegacyMetaList(){return idbGetAll(DB_APP_META_STORE,'legacy metadata list aborted');}
@@ -445,17 +437,6 @@ function rawLegacyMetaDelete(key,{ownershipToken=null,reason='legacy metadata de
     req.onsuccess=()=>{if(!ownershipToken)return;try{assertWriteToken(ownershipToken,reason);}catch(error){try{tx.abort();}catch{}finish(false,error);}};
     tx.oncomplete=()=>finish(true,true);
   },'legacy metadata delete aborted');
-}
-async function removeObsoleteMetadata(){
-  const token=compatibilityWriteToken('clean obsolete metadata');
-  if(!token)return Object.freeze({status:'skipped',reason:'not-primary',removed:0});
-  let removed=0;
-  const rows=await rawLegacyMetaList();
-  for(const identity of OBSOLETE_META_KEYS){
-    const keys=String(identity).endsWith(':')?(rows||[]).map(row=>String(row&&row.key||'')).filter(key=>key.startsWith(identity)):[String(identity)];
-    for(const key of keys){assertWriteToken(token,'clean obsolete metadata');const row=await rawLegacyMetaGet(key);if(!row)continue;assertWriteToken(token,'clean obsolete metadata');await rawLegacyMetaDelete(key,{ownershipToken:token,reason:'clean obsolete metadata'});removed++;}
-  }
-  return removed;
 }
 function writePlanMeta(family,value,{strictDurability=false,ownershipToken=null,allowHydrating=false,backupCapture=false}={}){
   const token=ownershipToken||issueWriteToken('save plan documents',{allowHydrating});
@@ -578,46 +559,6 @@ async function flushDeletionRecovery(options={}){
   }
 }
 
-function legacyDeleteTimestamp(entry){return normalizeTimestamp(entry&&entry.deletedAt||entry&&entry.updatedAt,null);}
-async function migrateLegacyDeletionState(){
-  const token=compatibilityWriteToken('migrate legacy deletion state');
-  if(!token)return freeze({status:'skipped',reason:'not-primary',savedDayDeletions:0,recoveryEntries:0});
-  const [queueRows,tombstoneRows,records,active]=await Promise.all([
-    idbGetAllIfPresent(DB_LEGACY_SYNC_QUEUE_STORE,'legacy sync queue read aborted'),idbGetAllIfPresent(DB_LEGACY_TOMBSTONE_STORE,'legacy tombstone read aborted'),idbAllRecords(),idbGetActiveSession()
-  ]);
-  const recordMap=new Map((records||[]).map(record=>[String(record&&record.date||''),record]));
-  const dailyDeletes=new Map(),recovery=[];
-  const consider=(type,id,deletedAt)=>{
-    const when=normalizeTimestamp(deletedAt,null);if(!when)return;
-    if(type==='dailyRecord'&&isValidIsoDate(id)){
-      const current=recordMap.get(id);if(current&&entityTimestamp(current,'dailyRecord')>Date.parse(when))return;
-      const previous=dailyDeletes.get(id);if(!previous||Date.parse(when)>Date.parse(previous))dailyDeletes.set(id,when);
-      recovery.push({kind:'dailyRecord',id,deletedAt:when});
-    }else if(type==='activeSession'&&String(id)===ACTIVE_SESSION_ID){
-      if(active&&entityTimestamp(active,'activeSession')>Date.parse(when))return;
-      recovery.push({kind:'activeSession',id:ACTIVE_SESSION_ID,deletedAt:when});
-    }
-  };
-  for(const row of tombstoneRows||[])consider(String(row&&row.entityType||''),String(row&&row.entityId||''),legacyDeleteTimestamp(row));
-  for(const row of queueRows||[])if(row&&row.op==='delete')consider(String(row.entityType||''),String(row.entityId||''),legacyDeleteTimestamp(row));
-  for(const entry of legacySyncDeleteEntries())consider(entry.kind,entry.id,entry.deletedAt);
-  const currentRecovery=currentDeletionRecoveryEntries(),nextRecovery=sanitizeDeletionRecoveryEntries([...currentRecovery,...recovery]);
-  if(!writeDeletionRecoveryEntries(nextRecovery))throw new Error('Legacy deletion recovery could not be persisted safely.');
-  assertWriteToken(token,'migrate legacy deletion state');
-  const legacyStores=[];
-  if(await idbHasStore(DB_LEGACY_SYNC_QUEUE_STORE))legacyStores.push(DB_LEGACY_SYNC_QUEUE_STORE);
-  if(await idbHasStore(DB_LEGACY_TOMBSTONE_STORE))legacyStores.push(DB_LEGACY_TOMBSTONE_STORE);
-  await idbStrictTransaction([DB_APP_META_STORE,...legacyStores],'readwrite',(tx,finish)=>{
-    assertWriteToken(token,'migrate legacy deletion state');
-    const meta=Meta.view(tx);
-    for(const [date,deletedAt] of dailyDeletes){const deletion=savedDayDeletionValue(date,deletedAt);meta.put('savedDayDeletionPrefix',deletion,{suffix:date,updatedAt:deletion.deletedAt});}
-    for(const storeName of legacyStores)tx.objectStore(storeName).clear();
-    tx.oncomplete=()=>finish(true,true);
-  },'legacy deletion-state migration aborted');
-  if(!LocalStorageContract.remove(STORAGE_KEYS.legacySyncEmergency))throw new Error('Legacy sync emergency state could not be retired after verified conversion.');
-  await flushDeletionRecovery();
-  return freeze({status:(queueRows.length||tombstoneRows.length||recovery.length)?'migrated':'not-needed',savedDayDeletions:dailyDeletes.size,recoveryEntries:nextRecovery.length});
-}
 // A deletion ledger keeps its newest records up to its limit, so it stays
 // bounded without dropping a recent deletion; only the oldest records go, and
 // only once the ledger is full. Listing applies the same rule, so maintenance
@@ -732,105 +673,6 @@ async function verifyDeletionState(){
   if(legacyQueue.length)issues.push('legacy-sync-queue-not-empty');if(legacyTombstones.length)issues.push('legacy-tombstones-not-empty');
   if(LocalStorageContract.getText(STORAGE_KEYS.legacySyncEmergency,null)!==null)issues.push('legacy-sync-emergency-present');
   return freeze({ok:issues.length===0,issues:freeze(issues),pendingRecovery:pendingDeletionEntries().length,savedDayDeletions:savedDay.length,areaNoteDeletions:areaNote.length,attachmentDeletions:attachment.length});
-}
-function dailyRecordMigrationMarkerIsCurrent(row){
-  const value=row&&row.value||{};
-  return value.complete===true&&
-    Number(value.recordVersion)===DATA_CONTRACT.schemas.DailyRecord.version&&
-    Number(value.summaryVersion)===DATA_CONTRACT.schemas.DailySummary.version;
-}
-function canonicalizeFallbackDailyRecords(raw){
-  if(!Array.isArray(raw))throw new Error('Fallback Daily Records are not in a recognized array format. The source was preserved unchanged.');
-  const source=raw;
-  const records=[];let changed=false;
-  for(const record of source){
-    const current=sanitizeCurrentDailyRecord(record);
-    if(current&&sameDataValue(record,current)){records.push(current);continue;}
-    const canonical=CompatibilityCodec.dailyRecord(record);
-    if(!canonical)throw new Error('A fallback Daily Record could not be converted to the current canonical schema. The source was preserved unchanged.');
-    records.push(canonical);changed=true;
-  }
-  return Object.freeze({records:Object.freeze(records),changed});
-}
-async function migrateHistoricalDailyRecords(){
-  const rawFallback=readLocalRecoveryJson(STORAGE_KEYS.fallbackDailyRecords,[]);
-  const fallback=canonicalizeFallbackDailyRecords(rawFallback);
-  const marker=await rawLegacyMetaGet(META_KEYS.dailyRecordMigration);
-  if(dailyRecordMigrationMarkerIsCurrent(marker)&&!fallback.changed){
-    return Object.freeze({status:'current',records:Number(marker.value.recordCount)||0,rewritten:0,fallbackRecords:fallback.records.length});
-  }
-  const token=compatibilityWriteToken('migrate Daily Records');
-  if(!token)return Object.freeze({status:'skipped',reason:'not-primary',records:Number(marker?.value?.recordCount)||0,rewritten:0,fallbackRecords:fallback.records.length});
-  if(dailyRecordMigrationMarkerIsCurrent(marker)){
-    assertWriteToken(token,'migrate fallback Daily Records');
-    if(!LocalStorageContract.setJson(STORAGE_KEYS.fallbackDailyRecords,capFallbackDailyRecords(fallback.records))){
-      throw LocalStorageContract.lastError||new Error('Fallback Daily Records could not be rewritten to the current schema.');
-    }
-    return Object.freeze({status:'fallback-migrated',records:Number(marker.value.recordCount)||0,rewritten:0,fallbackRecords:fallback.records.length});
-  }
-  const result=await idbStrictTransaction([DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
-    const records=tx.objectStore(DB_DAILY_RECORD_STORE),summaries=tx.objectStore(DB_DAILY_SUMMARY_STORE),meta=CompatibilityMeta.view(tx);
-    const fail=error=>{try{tx.abort();}catch{}finish(false,error);};
-    const guard=()=>{try{assertWriteToken(token,'migrate Daily Records');return true;}catch(error){fail(error);return false;}};
-    if(!guard())return;
-    const clear=summaries.clear();
-    clear.onerror=()=>fail(clear.error||new Error('daily summary migration clear failed'));
-    let count=0,changed=0;
-    const req=records.openCursor();
-    req.onerror=()=>fail(req.error||new Error('daily record migration read failed'));
-    req.onsuccess=event=>{
-      if(!guard())return;
-      const cursor=event.target.result;
-      if(!cursor){
-        const markerValue=storageMigrationMetaValue(true,count),markerUpdatedAt=new Date().toISOString();
-        const markerRequest=meta.put('dailyRecordMigration',markerValue,{updatedAt:markerUpdatedAt});
-        markerRequest.onerror=()=>fail(markerRequest.error||new Error('daily record migration marker write failed'));
-        markerRequest.onsuccess=()=>{guard();};
-        return;
-      }
-      const current=sanitizeCurrentDailyRecord(cursor.value);
-      const canonical=current&&sameDataValue(cursor.value,current)?current:CompatibilityCodec.dailyRecord(cursor.value);
-      if(!canonical){fail(new Error(`Daily Record ${String(cursor.key||'')} could not be converted to the current canonical schema. The migration transaction was rolled back.`));return;}
-      if(!current||!sameDataValue(cursor.value,current)){const update=cursor.update(canonical);update.onerror=()=>fail(update.error||new Error('daily record migration write failed'));changed++;}
-      const summaryWrite=summaries.put(buildDailyRecordSummary(canonical));summaryWrite.onerror=()=>fail(summaryWrite.error||new Error('daily summary migration write failed'));
-      count++;cursor.continue();
-    };
-    tx.oncomplete=()=>finish(true,{records:count,rewritten:changed});
-  },'daily record canonical migration aborted');
-  assertWriteToken(token,'migrate fallback Daily Records');
-  if(fallback.changed&&!LocalStorageContract.setJson(STORAGE_KEYS.fallbackDailyRecords,capFallbackDailyRecords(fallback.records))){
-    throw LocalStorageContract.lastError||new Error('Fallback Daily Records could not be rewritten to the current schema.');
-  }
-  return Object.freeze({status:'migrated',...result,fallbackRecords:fallback.records.length});
-}
-async function verifyDailyRecordCanonicalBaseline(){
-  const issues=[];
-  let meta=null;
-  try{meta=await rawLegacyMetaGet(META_KEYS.dailyRecordMigration);}catch(error){issues.push('migration-marker-unreadable');}
-  const marker=meta&&meta.value||{};
-  if(!(marker.complete&&Number(marker.recordVersion)===DATA_CONTRACT.schemas.DailyRecord.version&&Number(marker.summaryVersion)===DATA_CONTRACT.schemas.DailySummary.version))issues.push('migration-marker-incomplete');
-  const [records,summaries]=await Promise.all([idbAllRecords(),idbAllSummaries()]);
-  const byDate=new Map();
-  for(const raw of records){
-    const clean=sanitizeCurrentDailyRecord(raw);
-    if(!clean||!sameDataValue(raw,clean)){issues.push(`daily-record:${String(raw&&raw.date||'?')}`);continue;}
-    byDate.set(clean.date,clean);
-  }
-  const summaryByDate=new Map();
-  for(const raw of summaries){
-    const clean=sanitizeDailyRecordSummary(raw);
-    if(!clean||!sameDataValue(raw,clean)){issues.push(`daily-summary:${String(raw&&raw.date||'?')}`);continue;}
-    summaryByDate.set(clean.date,clean);
-  }
-  if(summaryByDate.size!==byDate.size)issues.push('daily-summary-count-mismatch');
-  for(const [date,record] of byDate){
-    const summary=summaryByDate.get(date),expected=buildDailyRecordSummary(record);
-    if(!summary||!sameDataValue(summary,expected))issues.push(`daily-summary-mismatch:${date}`);
-  }
-  const rawFallback=readLocalRecoveryJson(STORAGE_KEYS.fallbackDailyRecords,[]),fallback=Array.isArray(rawFallback)?rawFallback:[];
-  if(!Array.isArray(rawFallback))issues.push('fallback-daily-records-invalid');
-  for(const raw of fallback){const clean=sanitizeCurrentDailyRecord(raw);if(!clean||!sameDataValue(raw,clean))issues.push(`fallback-daily-record:${String(raw&&raw.date||'?')}`);}
-  return freeze({ok:issues.length===0,records:records.length,summaries:summaries.length,fallbackRecords:fallback.length,issues:freeze(issues)});
 }
 async function idbGetRecordsByDates(dates){
   const unique=[...new Set((dates||[]).filter(isValidIsoDate))].slice(0,APP_LIMITS.maxImportRecords);
@@ -1042,59 +884,6 @@ async function loadActiveSessionRecord(retry=0,options={}){
     AppDiagnostics.capture('active-session.load-idb',e,'error');
     return {ok:!!localSession,value:localSession,error:e,storage:{local:!!localSession,idb:false}};
   }
-}
-async function migrateHistoricalActiveSession(){
-  const token=compatibilityWriteToken('canonicalize Active Session');
-  if(!token)return freeze({status:'skipped',reason:'not-primary',rewritten:0,recoveryRewritten:0});
-  let rewritten=0,recoveryRewritten=0;
-  const rawRecoveryText=LocalStorageContract.getText(STORAGE_KEYS.recovery,null);
-  if(LocalStorageContract.lastError)throw new Error('The Active Session recovery envelope could not be read safely. Migration was not attempted.');
-  if(rawRecoveryText!==null){
-    let rawRecovery;
-    try{rawRecovery=JSON.parse(rawRecoveryText);}catch(error){throw new Error('The stored Active Session recovery envelope is malformed. It was preserved unchanged.');}
-    const canonicalRecovery=CompatibilityCodec.localRecoveryEnvelope(rawRecovery);
-    if(!canonicalRecovery)throw new Error('The stored Active Session recovery envelope could not be converted to the current canonical schema. It was preserved unchanged.');
-    if(!sameDataValue(rawRecovery,canonicalRecovery)){
-      assertWriteToken(token,'canonicalize Active Session recovery');
-      if(!LocalStorageContract.setJson(STORAGE_KEYS.recovery,canonicalRecovery))throw LocalStorageContract.lastError||new Error('Active Session recovery canonicalization could not be persisted.');
-      const verified=readLocalRecoveryJson(STORAGE_KEYS.recovery,null);
-      if(!verified||!sameDataValue(sanitizeCurrentLocalRecoveryEnvelope(verified),canonicalRecovery))throw new Error('Active Session recovery canonicalization could not be verified.');
-      recoveryRewritten=1;
-    }
-  }
-  const raw=await idbGetActiveSession();
-  if(raw){
-    const current=ActiveSessionCodec.canonicalize(raw);
-    if(!(current&&sameDataValue(raw,current))){
-      const canonical=CompatibilityCodec.activeSession(raw);
-      if(!canonical)throw new Error('The stored Active Session could not be converted to the current canonical schema. The source was preserved unchanged.');
-      assertWriteToken(token,'canonicalize Active Session');
-      await idbStrictStoreTransaction(DB_ACTIVE_SESSION_STORE,'readwrite',(store,tx,finish)=>{
-        try{assertWriteToken(token,'canonicalize Active Session');}catch(error){finish(false,error);return;}
-        const request=store.put(canonical);
-        request.onerror=()=>finish(false,request.error||new Error('Active Session canonicalization write failed.'));
-        tx.oncomplete=()=>finish(true,true);
-      },'Active Session canonicalization aborted');
-      rewritten=1;
-    }
-  }
-  return freeze({status:(rewritten||recoveryRewritten)?'migrated':'current',rewritten,recoveryRewritten});
-}
-async function verifyHistoricalActiveSession(){
-  const issues=[];
-  const rawRecoveryText=LocalStorageContract.getText(STORAGE_KEYS.recovery,null);
-  if(LocalStorageContract.lastError)issues.push('active-session-recovery-unreadable');
-  else if(rawRecoveryText!==null){
-    try{
-      const rawRecovery=JSON.parse(rawRecoveryText),canonicalRecovery=sanitizeCurrentLocalRecoveryEnvelope(rawRecovery);
-      if(!canonicalRecovery||!sameDataValue(rawRecovery,canonicalRecovery))issues.push('active-session-recovery-noncanonical');
-    }catch(error){issues.push('active-session-recovery-invalid');}
-  }
-  try{
-    const raw=await idbGetActiveSession();
-    if(raw){const current=ActiveSessionCodec.sanitizeCurrent(raw);if(!current)issues.push('active-session-record-noncanonical');}
-  }catch(error){issues.push('active-session-record-unreadable');}
-  return freeze({ok:issues.length===0,issues:freeze(issues)});
 }
 
 async function clearActiveSessionRecord(){
@@ -1727,9 +1516,9 @@ async function runDataMaintenance(options={}){
 
     async function verifyCurrentRepositoryMetadata(){
       const issues=[],families=['planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance'];let rows=0;
-      const results=await Promise.allSettled([CompatibilityMeta.readEntry('dailyRecordMigration'),...families.map(name=>Meta.readEntry(name)),Meta.list('backupPreparationUnitPrefix')]);
+      const results=await Promise.allSettled([...families.map(name=>Meta.readEntry(name)),Meta.list('backupPreparationUnitPrefix')]);
       results.forEach((result,index)=>{
-        const family=index===0?'dailyRecordMigration':index===results.length-1?'backupPreparationUnitPrefix':families[index-1];
+        const family=index===results.length-1?'backupPreparationUnitPrefix':families[index];
         if(result.status==='rejected')issues.push(`${family}:${String(result.reason&&result.reason.message||result.reason)}`);
         else if(index===results.length-1)rows+=Array.isArray(result.value)?result.value.length:0;
         else if(result.value)rows++;
@@ -1743,6 +1532,223 @@ async function runDataMaintenance(options={}){
       const localRecovery=LocalStorageContract.getText(STORAGE_KEYS.recovery,null)!==null;if(LocalStorageContract.lastError)throw LocalStorageContract.lastError;
       return freeze({maintenanceStatus:maintenance?.status||'never',completedAt:maintenance?.completedAt||'',deletions:deletions.length,localRecovery});
     }});
+/* COMPATIBILITY ---------------------------------------------------------
+   Read-once conversions of older stored forms. They are reached only through
+   the compatibility namespace just below (AppData.compatibility), which only
+   the compatibility host calls at start-up. Retiring the compatibility layer
+   deletes this block and its wiring; nothing else depends on it.
+   ---------------------------------------------------------------------- */
+function storageMigrationMetaValue(complete=false,count=0){
+  return {
+    recordVersion:DATA_CONTRACT.schemas.DailyRecord.version,
+    summaryVersion:DATA_CONTRACT.schemas.DailySummary.version,
+    complete:!!complete,
+    recordCount:boundedInt(count,{min:0,max:APP_LIMITS.maxImportRecords*10,fallback:0})
+  };
+}
+async function removeObsoleteMetadata(){
+  const token=compatibilityWriteToken('clean obsolete metadata');
+  if(!token)return Object.freeze({status:'skipped',reason:'not-primary',removed:0});
+  let removed=0;
+  const rows=await rawLegacyMetaList();
+  for(const identity of OBSOLETE_META_KEYS){
+    const keys=String(identity).endsWith(':')?(rows||[]).map(row=>String(row&&row.key||'')).filter(key=>key.startsWith(identity)):[String(identity)];
+    for(const key of keys){assertWriteToken(token,'clean obsolete metadata');const row=await rawLegacyMetaGet(key);if(!row)continue;assertWriteToken(token,'clean obsolete metadata');await rawLegacyMetaDelete(key,{ownershipToken:token,reason:'clean obsolete metadata'});removed++;}
+  }
+  return removed;
+}
+function legacyDeleteTimestamp(entry){return normalizeTimestamp(entry&&entry.deletedAt||entry&&entry.updatedAt,null);}
+async function migrateLegacyDeletionState(){
+  const token=compatibilityWriteToken('migrate legacy deletion state');
+  if(!token)return freeze({status:'skipped',reason:'not-primary',savedDayDeletions:0,recoveryEntries:0});
+  const [queueRows,tombstoneRows,records,active]=await Promise.all([
+    idbGetAllIfPresent(DB_LEGACY_SYNC_QUEUE_STORE,'legacy sync queue read aborted'),idbGetAllIfPresent(DB_LEGACY_TOMBSTONE_STORE,'legacy tombstone read aborted'),idbAllRecords(),idbGetActiveSession()
+  ]);
+  const recordMap=new Map((records||[]).map(record=>[String(record&&record.date||''),record]));
+  const dailyDeletes=new Map(),recovery=[];
+  const consider=(type,id,deletedAt)=>{
+    const when=normalizeTimestamp(deletedAt,null);if(!when)return;
+    if(type==='dailyRecord'&&isValidIsoDate(id)){
+      const current=recordMap.get(id);if(current&&entityTimestamp(current,'dailyRecord')>Date.parse(when))return;
+      const previous=dailyDeletes.get(id);if(!previous||Date.parse(when)>Date.parse(previous))dailyDeletes.set(id,when);
+      recovery.push({kind:'dailyRecord',id,deletedAt:when});
+    }else if(type==='activeSession'&&String(id)===ACTIVE_SESSION_ID){
+      if(active&&entityTimestamp(active,'activeSession')>Date.parse(when))return;
+      recovery.push({kind:'activeSession',id:ACTIVE_SESSION_ID,deletedAt:when});
+    }
+  };
+  for(const row of tombstoneRows||[])consider(String(row&&row.entityType||''),String(row&&row.entityId||''),legacyDeleteTimestamp(row));
+  for(const row of queueRows||[])if(row&&row.op==='delete')consider(String(row.entityType||''),String(row.entityId||''),legacyDeleteTimestamp(row));
+  for(const entry of legacySyncDeleteEntries())consider(entry.kind,entry.id,entry.deletedAt);
+  const currentRecovery=currentDeletionRecoveryEntries(),nextRecovery=sanitizeDeletionRecoveryEntries([...currentRecovery,...recovery]);
+  if(!writeDeletionRecoveryEntries(nextRecovery))throw new Error('Legacy deletion recovery could not be persisted safely.');
+  assertWriteToken(token,'migrate legacy deletion state');
+  const legacyStores=[];
+  if(await idbHasStore(DB_LEGACY_SYNC_QUEUE_STORE))legacyStores.push(DB_LEGACY_SYNC_QUEUE_STORE);
+  if(await idbHasStore(DB_LEGACY_TOMBSTONE_STORE))legacyStores.push(DB_LEGACY_TOMBSTONE_STORE);
+  await idbStrictTransaction([DB_APP_META_STORE,...legacyStores],'readwrite',(tx,finish)=>{
+    assertWriteToken(token,'migrate legacy deletion state');
+    const meta=Meta.view(tx);
+    for(const [date,deletedAt] of dailyDeletes){const deletion=savedDayDeletionValue(date,deletedAt);meta.put('savedDayDeletionPrefix',deletion,{suffix:date,updatedAt:deletion.deletedAt});}
+    for(const storeName of legacyStores)tx.objectStore(storeName).clear();
+    tx.oncomplete=()=>finish(true,true);
+  },'legacy deletion-state migration aborted');
+  if(!LocalStorageContract.remove(STORAGE_KEYS.legacySyncEmergency))throw new Error('Legacy sync emergency state could not be retired after verified conversion.');
+  await flushDeletionRecovery();
+  return freeze({status:(queueRows.length||tombstoneRows.length||recovery.length)?'migrated':'not-needed',savedDayDeletions:dailyDeletes.size,recoveryEntries:nextRecovery.length});
+}
+function dailyRecordMigrationMarkerIsCurrent(row){
+  const value=row&&row.value||{};
+  return value.complete===true&&
+    Number(value.recordVersion)===DATA_CONTRACT.schemas.DailyRecord.version&&
+    Number(value.summaryVersion)===DATA_CONTRACT.schemas.DailySummary.version;
+}
+function canonicalizeFallbackDailyRecords(raw){
+  if(!Array.isArray(raw))throw new Error('Fallback Daily Records are not in a recognized array format. The source was preserved unchanged.');
+  const source=raw;
+  const records=[];let changed=false;
+  for(const record of source){
+    const current=sanitizeCurrentDailyRecord(record);
+    if(current&&sameDataValue(record,current)){records.push(current);continue;}
+    const canonical=CompatibilityCodec.dailyRecord(record);
+    if(!canonical)throw new Error('A fallback Daily Record could not be converted to the current canonical schema. The source was preserved unchanged.');
+    records.push(canonical);changed=true;
+  }
+  return Object.freeze({records:Object.freeze(records),changed});
+}
+async function migrateHistoricalDailyRecords(){
+  const rawFallback=readLocalRecoveryJson(STORAGE_KEYS.fallbackDailyRecords,[]);
+  const fallback=canonicalizeFallbackDailyRecords(rawFallback);
+  const marker=await rawLegacyMetaGet(META_KEYS.dailyRecordMigration);
+  if(dailyRecordMigrationMarkerIsCurrent(marker)&&!fallback.changed){
+    return Object.freeze({status:'current',records:Number(marker.value.recordCount)||0,rewritten:0,fallbackRecords:fallback.records.length});
+  }
+  const token=compatibilityWriteToken('migrate Daily Records');
+  if(!token)return Object.freeze({status:'skipped',reason:'not-primary',records:Number(marker?.value?.recordCount)||0,rewritten:0,fallbackRecords:fallback.records.length});
+  if(dailyRecordMigrationMarkerIsCurrent(marker)){
+    assertWriteToken(token,'migrate fallback Daily Records');
+    if(!LocalStorageContract.setJson(STORAGE_KEYS.fallbackDailyRecords,capFallbackDailyRecords(fallback.records))){
+      throw LocalStorageContract.lastError||new Error('Fallback Daily Records could not be rewritten to the current schema.');
+    }
+    return Object.freeze({status:'fallback-migrated',records:Number(marker.value.recordCount)||0,rewritten:0,fallbackRecords:fallback.records.length});
+  }
+  const result=await idbStrictTransaction([DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
+    const records=tx.objectStore(DB_DAILY_RECORD_STORE),summaries=tx.objectStore(DB_DAILY_SUMMARY_STORE),meta=CompatibilityMeta.view(tx);
+    const fail=error=>{try{tx.abort();}catch{}finish(false,error);};
+    const guard=()=>{try{assertWriteToken(token,'migrate Daily Records');return true;}catch(error){fail(error);return false;}};
+    if(!guard())return;
+    const clear=summaries.clear();
+    clear.onerror=()=>fail(clear.error||new Error('daily summary migration clear failed'));
+    let count=0,changed=0;
+    const req=records.openCursor();
+    req.onerror=()=>fail(req.error||new Error('daily record migration read failed'));
+    req.onsuccess=event=>{
+      if(!guard())return;
+      const cursor=event.target.result;
+      if(!cursor){
+        const markerValue=storageMigrationMetaValue(true,count),markerUpdatedAt=new Date().toISOString();
+        const markerRequest=meta.put('dailyRecordMigration',markerValue,{updatedAt:markerUpdatedAt});
+        markerRequest.onerror=()=>fail(markerRequest.error||new Error('daily record migration marker write failed'));
+        markerRequest.onsuccess=()=>{guard();};
+        return;
+      }
+      const current=sanitizeCurrentDailyRecord(cursor.value);
+      const canonical=current&&sameDataValue(cursor.value,current)?current:CompatibilityCodec.dailyRecord(cursor.value);
+      if(!canonical){fail(new Error(`Daily Record ${String(cursor.key||'')} could not be converted to the current canonical schema. The migration transaction was rolled back.`));return;}
+      if(!current||!sameDataValue(cursor.value,current)){const update=cursor.update(canonical);update.onerror=()=>fail(update.error||new Error('daily record migration write failed'));changed++;}
+      const summaryWrite=summaries.put(buildDailyRecordSummary(canonical));summaryWrite.onerror=()=>fail(summaryWrite.error||new Error('daily summary migration write failed'));
+      count++;cursor.continue();
+    };
+    tx.oncomplete=()=>finish(true,{records:count,rewritten:changed});
+  },'daily record canonical migration aborted');
+  assertWriteToken(token,'migrate fallback Daily Records');
+  if(fallback.changed&&!LocalStorageContract.setJson(STORAGE_KEYS.fallbackDailyRecords,capFallbackDailyRecords(fallback.records))){
+    throw LocalStorageContract.lastError||new Error('Fallback Daily Records could not be rewritten to the current schema.');
+  }
+  return Object.freeze({status:'migrated',...result,fallbackRecords:fallback.records.length});
+}
+async function verifyDailyRecordCanonicalBaseline(){
+  const issues=[];
+  let meta=null;
+  try{meta=await rawLegacyMetaGet(META_KEYS.dailyRecordMigration);}catch(error){issues.push('migration-marker-unreadable');}
+  const marker=meta&&meta.value||{};
+  if(!(marker.complete&&Number(marker.recordVersion)===DATA_CONTRACT.schemas.DailyRecord.version&&Number(marker.summaryVersion)===DATA_CONTRACT.schemas.DailySummary.version))issues.push('migration-marker-incomplete');
+  const [records,summaries]=await Promise.all([idbAllRecords(),idbAllSummaries()]);
+  const byDate=new Map();
+  for(const raw of records){
+    const clean=sanitizeCurrentDailyRecord(raw);
+    if(!clean||!sameDataValue(raw,clean)){issues.push(`daily-record:${String(raw&&raw.date||'?')}`);continue;}
+    byDate.set(clean.date,clean);
+  }
+  const summaryByDate=new Map();
+  for(const raw of summaries){
+    const clean=sanitizeDailyRecordSummary(raw);
+    if(!clean||!sameDataValue(raw,clean)){issues.push(`daily-summary:${String(raw&&raw.date||'?')}`);continue;}
+    summaryByDate.set(clean.date,clean);
+  }
+  if(summaryByDate.size!==byDate.size)issues.push('daily-summary-count-mismatch');
+  for(const [date,record] of byDate){
+    const summary=summaryByDate.get(date),expected=buildDailyRecordSummary(record);
+    if(!summary||!sameDataValue(summary,expected))issues.push(`daily-summary-mismatch:${date}`);
+  }
+  const rawFallback=readLocalRecoveryJson(STORAGE_KEYS.fallbackDailyRecords,[]),fallback=Array.isArray(rawFallback)?rawFallback:[];
+  if(!Array.isArray(rawFallback))issues.push('fallback-daily-records-invalid');
+  for(const raw of fallback){const clean=sanitizeCurrentDailyRecord(raw);if(!clean||!sameDataValue(raw,clean))issues.push(`fallback-daily-record:${String(raw&&raw.date||'?')}`);}
+  return freeze({ok:issues.length===0,records:records.length,summaries:summaries.length,fallbackRecords:fallback.length,issues:freeze(issues)});
+}
+async function migrateHistoricalActiveSession(){
+  const token=compatibilityWriteToken('canonicalize Active Session');
+  if(!token)return freeze({status:'skipped',reason:'not-primary',rewritten:0,recoveryRewritten:0});
+  let rewritten=0,recoveryRewritten=0;
+  const rawRecoveryText=LocalStorageContract.getText(STORAGE_KEYS.recovery,null);
+  if(LocalStorageContract.lastError)throw new Error('The Active Session recovery envelope could not be read safely. Migration was not attempted.');
+  if(rawRecoveryText!==null){
+    let rawRecovery;
+    try{rawRecovery=JSON.parse(rawRecoveryText);}catch(error){throw new Error('The stored Active Session recovery envelope is malformed. It was preserved unchanged.');}
+    const canonicalRecovery=CompatibilityCodec.localRecoveryEnvelope(rawRecovery);
+    if(!canonicalRecovery)throw new Error('The stored Active Session recovery envelope could not be converted to the current canonical schema. It was preserved unchanged.');
+    if(!sameDataValue(rawRecovery,canonicalRecovery)){
+      assertWriteToken(token,'canonicalize Active Session recovery');
+      if(!LocalStorageContract.setJson(STORAGE_KEYS.recovery,canonicalRecovery))throw LocalStorageContract.lastError||new Error('Active Session recovery canonicalization could not be persisted.');
+      const verified=readLocalRecoveryJson(STORAGE_KEYS.recovery,null);
+      if(!verified||!sameDataValue(sanitizeCurrentLocalRecoveryEnvelope(verified),canonicalRecovery))throw new Error('Active Session recovery canonicalization could not be verified.');
+      recoveryRewritten=1;
+    }
+  }
+  const raw=await idbGetActiveSession();
+  if(raw){
+    const current=ActiveSessionCodec.canonicalize(raw);
+    if(!(current&&sameDataValue(raw,current))){
+      const canonical=CompatibilityCodec.activeSession(raw);
+      if(!canonical)throw new Error('The stored Active Session could not be converted to the current canonical schema. The source was preserved unchanged.');
+      assertWriteToken(token,'canonicalize Active Session');
+      await idbStrictStoreTransaction(DB_ACTIVE_SESSION_STORE,'readwrite',(store,tx,finish)=>{
+        try{assertWriteToken(token,'canonicalize Active Session');}catch(error){finish(false,error);return;}
+        const request=store.put(canonical);
+        request.onerror=()=>finish(false,request.error||new Error('Active Session canonicalization write failed.'));
+        tx.oncomplete=()=>finish(true,true);
+      },'Active Session canonicalization aborted');
+      rewritten=1;
+    }
+  }
+  return freeze({status:(rewritten||recoveryRewritten)?'migrated':'current',rewritten,recoveryRewritten});
+}
+async function verifyHistoricalActiveSession(){
+  const issues=[];
+  const rawRecoveryText=LocalStorageContract.getText(STORAGE_KEYS.recovery,null);
+  if(LocalStorageContract.lastError)issues.push('active-session-recovery-unreadable');
+  else if(rawRecoveryText!==null){
+    try{
+      const rawRecovery=JSON.parse(rawRecoveryText),canonicalRecovery=sanitizeCurrentLocalRecoveryEnvelope(rawRecovery);
+      if(!canonicalRecovery||!sameDataValue(rawRecovery,canonicalRecovery))issues.push('active-session-recovery-noncanonical');
+    }catch(error){issues.push('active-session-recovery-invalid');}
+  }
+  try{
+    const raw=await idbGetActiveSession();
+    if(raw){const current=ActiveSessionCodec.sanitizeCurrent(raw);if(!current)issues.push('active-session-record-noncanonical');}
+  }catch(error){issues.push('active-session-record-unreadable');}
+  return freeze({ok:issues.length===0,issues:freeze(issues)});
+}
     const compatibility=freeze({
       migrateDailyRecords:migrateHistoricalDailyRecords,
       migrateActiveSession:migrateHistoricalActiveSession,
@@ -1776,6 +1782,7 @@ async function runDataMaintenance(options={}){
         return freeze({ok:present.length===0,present:freeze(present)});
       }
     });
+/* END COMPATIBILITY */
     const restoreJournal=RepositoryJournals.restoreJournal;
     const libraryClearJournal=RepositoryJournals.libraryClearJournal;
     const mutationLease=RepositoryJournals.mutationLease;

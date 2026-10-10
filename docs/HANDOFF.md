@@ -143,17 +143,23 @@ Your decisions on the audit (`docs/AUDIT-DATA-AND-BACKUP.md`) and what was done:
 - **B7.** Data & Backup states how far back versions go; a test keeps the sentence in step with the retention policy.
 - **B8.** Versions → Restore… / Restore note… / Restore from file….
 
+### 1.8 Compatibility isolation, #45 and #46, the file row (2026-10-10)
+
+- **T7 / T6.** The compatibility layer stays (your decision) and is now provably shallow: the repository migrations sit in one marked block, ordinary code never reads the `dailyRecordMigration` marker, and `compatibility-isolation` pins every entry point. ARCHITECTURE §10 lists exactly what retiring it deletes.
+- **#45, done.**
+  - Device Folder writes are bounded like reads: every write, close and removal times out instead of hanging (test: a stalled write fails with `DEVICE_FILESYSTEM_TIMEOUT`).
+  - Measured with 1,000 versions and 50,000 objects (`drive-repository-scale`): Version History takes 4 Drive requests in all and downloads nothing; listing 50,000 objects takes 51 requests; choosing what to keep from 1,000 versions takes about 5 ms. No change needed to Drive's metadata calls.
+  - History sidecars: not needed. Device Folder summaries come from each manifest; only an encrypted, locked manifest hides them, and encryption is deferred until the end-to-end design.
+- **#46, closed.** Incremental restore would save little: text data is small, attachments already present locally are reused, and a single note restore already downloads only what that note needs.
+- **File row.** `backup.js` no longer touches the page; the app draws Export, Cancel and the note from one renderer, replacing two places that shared the Cancel button.
+- **Dead code.** The engine's `subscribePresentation` (a third copy of the presentation subscription) is removed. A scan found no other unreferenced functions in the persistence and backup modules; four engine members are used only by tests, as entry points for testing the engine directly.
+
 ---
 
 ## 2. Remaining from the rest of this work
 
 - **Audit done (2026-10-10):** `docs/AUDIT-DATA-AND-BACKUP.md` covers the data topology and the whole backup system, with findings ranked and a suggested order. Your decisions and the schema step are in 1.5. B5 is done (1.6). Still open: B7 retention and B8 restore names (to propose), #45/#46 and the compatibility-layer isolation check (#64).
-- **#45 Drive/Device performance and reliability review** (open). Candidates:
-  - bounded writes in `device-folder-storage`;
-  - plain-text history sidecars so Device Folder history shows summaries while encryption is locked;
-  - fewer Drive metadata round trips on history;
-  - measure a 1,000-version, 50,000-object repository (list, history, cleanup).
-- **#46 incremental structured restore** (pending). Judged low value because text data is small; attachments are already reused locally. Close with that reasoning unless measurements say otherwise.
+- **#45 and #46:** done and closed (1.8).
 
 ---
 

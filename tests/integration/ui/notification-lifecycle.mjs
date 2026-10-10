@@ -83,7 +83,7 @@ class Element {
   const {notices:n}=coordinator(),nodes=new Map(['device-folder','google-drive'].map(source=>[`backup-operation-note-${source}`,new Element()]));
   const presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications:n}));
   const html=fs.readFileSync('source/app.html','utf8'),a=html.indexOf('BackupPresentation.subscribe(()=>{'),b=html.indexOf('const REPOSITORY_MAINTENANCE_FORMAT',a);
-  new Function('BackupPresentation','document',html.slice(a,b))(presentation,{getElementById:id=>nodes.get(id)||null});
+  new Function('BackupPresentation','document','renderFileBackup',html.slice(a,b))(presentation,{getElementById:id=>nodes.get(id)||null},()=>{});
   for(const sourceId of ['device-folder','google-drive']){
     const handle=presentation.begin(sourceId,'restore-version',{label:sourceId,message:'Verifying safety copy'});
     handle.update({progress:{current:1,total:2}});const node=nodes.get(`backup-operation-note-${sourceId}`);assert.equal(node.hidden,false);assert.match(node.textContent,/Verifying safety copy · 1 of 2 complete/);
@@ -103,7 +103,7 @@ class Element {
   const {notices:n}=coordinator(),presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications:n}));
   const source=fs.readFileSync('source/core/backup.js','utf8'),a=source.indexOf('async function exportPortableBackup(){'),b=source.indexOf('function exportLocalBackup(){',a);
   let error=new Error('Disk full');
-  const run=new Function('OperationDiagnostics','setLocalExportBusy','createCheckpoint','presentation','Exports','portableBackupFilename','getStudentNameFromDisplay','exportReporter','portableCopy','markBackupCompleted',`const portableAssets=true;let localExportPromise=null,portablePresentation=null;const renderPortablePresentation=()=>{},setLocalExportStatus=(message,ok)=>portablePresentation.update({message,severity:ok?'info':'error'}),finishPortablePresentation=patch=>portablePresentation.finish(patch);${source.slice(a,b)};return exportPortableBackup;`)({start:()=>'',mark:()=>{},finish:()=>{},fail:()=>{}},()=>{},async()=>{throw error;},presentation,{chooseSave:()=>Promise.resolve(null)},()=>'student-study-director-backup.sdbackup',()=>'Student',()=>({stage(){},progress(){}}),()=>({}),()=>{});
+  const run=new Function('OperationDiagnostics','notifyStatus','createCheckpoint','presentation','Exports','portableBackupFilename','getStudentNameFromDisplay','exportReporter','portableCopy','markBackupCompleted',`const portableAssets=true;let localExportPromise=null,portablePresentation=null;const setLocalExportStatus=(message,ok)=>portablePresentation.update({message,severity:ok?'info':'error'}),finishPortablePresentation=patch=>portablePresentation.finish(patch);${source.slice(a,b)};return exportPortableBackup;`)({start:()=>'',mark:()=>{},finish:()=>{},fail:()=>{}},()=>{},async()=>{throw error;},presentation,{chooseSave:()=>Promise.resolve(null)},()=>'student-study-director-backup.sdbackup',()=>'Student',()=>({stage(){},progress(){}}),()=>({}),()=>{});
   assert.equal((await run()).status,'failed');assert.equal(n.eventStatus().toasts.at(-1).severity,'error');assert.equal(presentation.read('file').lifecycle,'failed');
   error=Object.assign(new Error('Cancelled'),{name:'AbortError'});assert.equal((await run()).status,'cancelled');assert.equal(n.eventStatus().toasts.length,0);assert.equal(presentation.read('file').lifecycle,'cancelled','user cancellation is neutral feedback');n.clear();
 
@@ -114,6 +114,23 @@ class Element {
   const html=fs.readFileSync('source/app.html','utf8'),start=html.indexOf('function renderDeviceBackup(state){'),end=html.indexOf('\nfunction markStorageHealthOk',start),status=new Element(),note=new Element(),recover=new Element(),cleared=[];
   new Function('document','storageHealthTime','schedulePwaUpdateEvaluation','NoticeCoordinator','BackupPresentation',html.slice(start,end)+`;renderDeviceBackup({busy:true,foregroundKind:'restore-version',cancellable:false,connected:true,hasNote:true});`)({getElementById:id=>({'device-backup-status':status,'device-backup-note':note,'recover-device-backup':recover}[id]||null)},()=>'',()=>{}, {resolveEvent:(...args)=>cleared.push(args)},registry.require('backup-presentation',1).createPresentation(freeze({notifications:n})));
   assert.equal(status.textContent,'Restoring…');assert.equal(recover.disabled,false,'a cancelling recovery remains reopenable');assert.equal(note.hidden,true);assert.equal(cleared.length,0,'Device state cannot erase the coordinator summary during cancellation');
+}
+{
+  // The portable-file row is drawn by the app too: Export and Cancel follow the
+  // backup controller and the file processor; Version History's Cancel follows an import.
+  const html=fs.readFileSync('source/app.html','utf8'),start=html.indexOf('let fileBackupRowReady=false;'),end=html.indexOf("// Each location row opens its settings in place",start);
+  const ids=['download-backup','cancel-standalone-import','cancel-backup-import','backup-file-status'];
+  const draw=({exporting=false,fileBusy=false,importing=false,event=null}={})=>{
+    const nodes=new Map(ids.map(id=>[id,new Element()]));
+    new Function('document','BackupController','Exports','BackupPresentation',html.slice(start,end)+';fileBackupRowReady=true;renderFileBackup();')(
+      {getElementById:id=>nodes.get(id)||null},{status:()=>({standaloneExportActive:exporting,importActive:importing})},{status:()=>({fileBusy})},
+      {current:()=>event,summary:value=>value?.message||''});
+    return id=>nodes.get(id);
+  };
+  let row=draw();assert.equal(row('download-backup').textContent,'Export backup…');assert.equal(row('download-backup').disabled,false);assert.equal(row('cancel-standalone-import').hidden,true);assert.equal(row('backup-file-status').hidden,true);
+  row=draw({exporting:true,event:{message:'Saving backup…'}});assert.equal(row('download-backup').textContent,'Preparing backup…');assert.equal(row('download-backup').disabled,true);assert.equal(row('cancel-standalone-import').hidden,false);assert.equal(row('backup-file-status').textContent,'Saving backup…');
+  row=draw({fileBusy:true});assert.equal(row('cancel-standalone-import').hidden,false,'a running file job can be cancelled');
+  row=draw({importing:true});assert.equal(row('cancel-backup-import').hidden,false,'an import can be cancelled from Version History');
 }
 {
   // Google Drive's row is drawn by the app from engine status, with the same

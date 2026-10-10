@@ -75,7 +75,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   const storageFor=folderPort=>registry.require('device-folder-storage',1).createStorage(freeze({
     folder:folderPort,identities:IDENTITIES,checksum:(blob)=>sha256(blob),inspectManifest,
     environment:freeze({canMutate:()=>canMutate,now:()=>clock.now(),setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,yieldTask:async()=>{}}),
-    limits:freeze({publicationMaxAgeMs:policy.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:policy.protocol.publicationAssertionMarginMs,maintenanceMaxAgeMs:policy.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:policy.protocol.maintenanceAssertionMarginMs,readTimeoutMs:10*1000})
+    limits:freeze({publicationMaxAgeMs:policy.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:policy.protocol.publicationAssertionMarginMs,maintenanceMaxAgeMs:policy.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:policy.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
   }));
   const identity=value=>value,metaKeys=freeze(Object.fromEntries(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix'].map(name=>[name,name])));
   const settingsValid=registry.require('host-metadata',1).createAppMetaValidators(freeze({keys:metaKeys,same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),normalizers:freeze({verifiedRecovery:identity,attachmentIntegrity:identity,repositoryIntegrity:identity,reconciliationBase:identity,reconciliationBaseNote:identity})})).automaticDeviceBackup;

@@ -1,3 +1,4 @@
+import {performance} from 'node:perf_hooks';
 import {createBackupPresentation} from '../../helpers/backup-presentation.mjs';
 import {RUNTIME_DATA_CONTRACT} from '../../../contracts/canonical-identities.mjs';
 import assert from 'node:assert/strict';
@@ -75,7 +76,7 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
   codecs:freeze({activeSession:ActiveSessionCodec,backup:BackupCodec}),reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({resolve:async({conflicts=[]})=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries(conflicts.map(item=>[item.key,freeze({text:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),exports:exportsPort,
   session:freeze({canMutate:()=>primary,cancelLiveDraftSave:noop,captureSnapshot:()=>null,hasActiveSession:()=>false,hasTasks:()=>false,toActiveSession:()=>null,withPersistenceSuppressed:operation=>operation()}),
   domain:freeze({clampText:value=>String(value||''),filenameSafeStudentName:value=>String(value||'qa'),getStudentName:()=> 'Repo QA',materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:value=>value,todayISO:()=> '2026-09-19'}),
-  view:freeze({presentation:backupPresentation,document:documentStub,refreshPnote:noop,refreshReview:noop,renderSchedule:noop}),
+  view:freeze({presentation:backupPresentation,refreshPnote:noop,refreshReview:noop,renderSchedule:noop}),
   events:freeze({libraryChanged:noop,backupCompleted:noop,reconcileAreaNotes:async()=>true,restoreAreaNotesSnapshot:async()=>true,restoreSessionState:async()=>true,verifyActiveSessionRuntime:async()=>true,restoredFromFile:()=>false}),
   operations:freeze({assertAuthority:()=>true,clearFault:noop,failClosed:message=>{throw new Error(message);},runExclusive:async(kind,operation)=>operation()}),interactions:freeze({choose:async()=>null,configure:async()=>null,notify:noop}),
   environment:freeze({AbortController,clearTimeout:id=>(backgroundClock||globalThis).clearTimeout(id),yieldTask:async()=>{},setTimeout:(callback,delay)=>(backgroundClock||globalThis).setTimeout(callback,delay)}),diagnostics:freeze({capture:(phase,error)=>{diagnosticFailures.push({phase,error:String(error?.stack||error)});if(diagnosticFailures.length>12)diagnosticFailures.shift();},start:()=>'',mark:(phase,details)=>{operationEvents.push({phase,...details});if(operationEvents.length>100)operationEvents.shift();return false;},finish:()=>false,fail:()=>false}),
@@ -295,6 +296,14 @@ for(const anchor of ['2024-02-29','2026-12-31',...Array.from({length:7},(_,day)=
  assert.ok(selection.retained.every(row=>row.manifest.exportedAt.includes('T11:00:00')),'each occupied period must use its newest available checkpoint');
  assert.deepEqual(selection.retained.map(row=>row.id),runtime.repository.selectRetention([...dense].reverse(),{now:new Date(anchorMs+86400000*30)}).retained.map(row=>row.id));
  assert.deepEqual(selection.retained.map(row=>row.id),runtime.repository.selectRetention(selection.retained,{now:new Date(anchorMs)}).retained.map(row=>row.id),'retention must be idempotent');
+}
+// Scale: choosing what to keep from 1,000 versions stays well under a second.
+{
+ const many=[],anchorMs=Date.parse('2026-10-06T12:00:00Z');
+ for(let n=0;n<1000;n++){const date=new Date(anchorMs-Math.floor(n/3)*86400000).toISOString().slice(0,10);many.push(retentionRow(60000+n,date,`${String(8+n%3).padStart(2,'0')}:00:00`));}
+ const started=performance.now(),selection=runtime.repository.selectRetention(many,{now:new Date(anchorMs)}),elapsed=performance.now()-started;
+ assert.equal(selection.normalRetained,15);assert.ok(elapsed<1000,`retention over 1,000 versions took ${Math.round(elapsed)} ms`);
+ console.log(JSON.stringify({retentionOver1000VersionsMs:Math.round(elapsed)}));
 }
 const timezoneShiftedEvaluation=runtime.repository.selectRetention(retentionHistory,{now:new Date('2026-09-21T02:00:00-11:00')});assert.deepEqual(timezoneShiftedEvaluation.retained.map(row=>row.id),tiered.retained.map(row=>row.id),'tier windows must stay anchored to the committed Latest checkpoint capture rather than the evaluator timezone');assert.deepEqual(timezoneShiftedEvaluation.tiers,tiered.tiers,'timezone changes must not reinterpret retained tier labels for the same committed history');
 const sep13=retentionHistory.find(row=>row.manifest.retention.calendar.localDate==='2026-09-13'),historyThroughSep14=retentionHistory.filter(row=>row.manifest.retention.calendar.localDate<='2026-09-14'),asDaily=runtime.repository.selectRetention(historyThroughSep14,{now:new Date(2026,8,14,12)}),asWeekly=runtime.repository.selectRetention(retentionHistory,{now:retentionNow});assert.equal(asDaily.tiers[sep13.id],'daily','a recent checkpoint must occupy the Daily tier while inside the six-day window');assert.equal(asWeekly.tiers[sep13.id],'weekly','the same immutable checkpoint must graduate into Weekly after newer committed history moves the retention window forward');
@@ -609,17 +618,17 @@ assert.equal(borrowedHistory.available,true);assert.equal(parentPresentation.rea
 assert.equal(backupPresentation.read('repository-qa').operationId,parentPresentation.operationId,'nested history must use the parent event');
 parentPresentation.finish({message:'Backups loaded.'});assert.equal(parentPresentation.read().lifecycle,'succeeded');
 
-// The foreground adapter must publish a terminal result even with no settings overlay mounted.
-const presentations=[];const stopPresentations=runtime.providers.subscribePresentation(value=>presentations.push(value));
+// The foreground operation publishes its progress and a terminal result to the presentation the app draws from.
+const presentations=[],earlier=backupPresentation.read('repository-qa')?.operationId;let watched='repository-qa';const stopPresentations=backupPresentation.subscribe(()=>{const event=backupPresentation.read(watched);if(event&&event.operationId!==earlier)presentations.push({...event,active:event.lifecycle==='running'});});
 assert.equal(await runtime.providers.backup('repository-qa'),true);
 assert.ok(presentations.some(value=>value.active&&value.kind==='backup'));
 assert.equal(presentations.at(-1).active,false);assert.equal(presentations.at(-1).lifecycle,'succeeded');assert.match(presentations.at(-1).message,/External backup verified/);
 assert.ok(presentations.every(value=>value.operationId===presentations[0].operationId),'one foreground run keeps one presentation identity');
 const finishedOperation=presentations[0].operationId;
 assert.equal(runtime.providers.register(freeze({id:'presentation-error',label:'Presentation Error',repository:repositoryTransport,authorize:async()=>{throw new Error('Authorization unavailable');}})),true);
-assert.equal(await runtime.providers.backup('presentation-error'),false);assert.equal(presentations.at(-1).lifecycle,'failed');assert.match(presentations.at(-1).message,/Authorization unavailable/);assert.notEqual(presentations.at(-1).operationId,finishedOperation);
+watched='presentation-error';assert.equal(await runtime.providers.backup('presentation-error'),false);assert.equal(presentations.at(-1).lifecycle,'failed');assert.match(presentations.at(-1).message,/Authorization unavailable/);assert.notEqual(presentations.at(-1).operationId,finishedOperation);
 assert.equal(runtime.providers.register(freeze({id:'presentation-cancel',label:'Presentation Cancel',repository:repositoryTransport,authorize:async()=>{throw Object.assign(new Error('Cancelled'),{name:'AbortError'});}})),true);
-assert.equal(await runtime.providers.backup('presentation-cancel'),false);assert.equal(presentations.at(-1).lifecycle,'cancelled');stopPresentations();
+watched='presentation-cancel';assert.equal(await runtime.providers.backup('presentation-cancel'),false);assert.equal(presentations.at(-1).lifecycle,'cancelled');stopPresentations();
 
 {
  const history=[],bad=[];

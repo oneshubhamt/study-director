@@ -200,7 +200,7 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
     clampText,filenameSafeStudentName:()=> 'student',getStudentName:()=> 'Student',
     materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-08-05'
   }),
-  view:freeze({presentation:backupPresentation,document:documentStub,refreshPnote:fn,refreshReview:fn,renderSchedule:fn}),
+  view:freeze({presentation:backupPresentation,refreshPnote:fn,refreshReview:fn,renderSchedule:fn}),
   events:freeze({
     libraryChanged:()=>events.push('library-changed'),backupCompleted:context=>backupCompletions.push(context||{}),
     reconcileAreaNotes:async payload=>{

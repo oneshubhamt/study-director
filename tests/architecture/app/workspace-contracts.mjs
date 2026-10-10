@@ -32,7 +32,8 @@ assert.match(exportFn,/setLocalExportStatus\(message/u,'successful standalone do
 assert.match(exportFn,/message=cancelled\?'Backup export cancelled\.'[\s\S]*setLocalExportStatus\(message,cancelled\)/u,'standalone export cancellation and failures must stay on the standalone backup surface');
 assert.doesNotMatch(exportFn,/setStatus\('library-status'/u,'standalone export must not leak its routine status to the bottom-of-Library global status surface');
 assert.doesNotMatch(backup,/Exports\.status\(\)/u,'Backup runtime must not depend on the restricted Exports port exposing internal coordinator status');
-assert.match(backup,/else if\(!activeImportOperation\)cancel\.hidden=true/u,'standalone export cleanup must use Backup-owned operation state when restoring Cancel visibility');
+assert.doesNotMatch(backup,/document\.|getElementById/u,'the backup runtime draws nothing: the app draws the file row from its status');
+assert.match(app,/if\(cancel\)cancel\.hidden=!\(exporting\|\|Exports\.status\(\)\.fileBusy\);/u,'one renderer decides the file row Cancel from export and file-processor state');
 
 
 

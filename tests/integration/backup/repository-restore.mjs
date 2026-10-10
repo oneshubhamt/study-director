@@ -86,7 +86,7 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
   codecs:freeze({activeSession:activeSessionCodec,backup:runtimeBackupCodec}),reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({resolve:async({conflicts=[]})=>{noteReconciliationCalls+=1;lastNoteConflicts=[...conflicts];return freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries(conflicts.map(item=>[item.key,freeze({text:noteChoice?noteChoice(item):item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}}),exports:exportsPort,
   session:freeze({canMutate:()=>true,cancelLiveDraftSave:noop,captureSnapshot:()=>null,hasActiveSession:()=>false,hasTasks:()=>false,toActiveSession:()=>null,withPersistenceSuppressed:operation=>operation()}),
   domain:freeze({clampText:(value,max=100000)=>String(value??'').slice(0,max),filenameSafeStudentName:()=> 'repository-source',getStudentName:()=>currentPersonal.preferences.studentName,materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-09-19'}),
-  view:freeze({presentation:createBackupPresentation(),document:documentStub,refreshPnote:noop,refreshReview:noop,renderSchedule:noop}),
+  view:freeze({presentation:createBackupPresentation(),refreshPnote:noop,refreshReview:noop,renderSchedule:noop}),
   events:freeze({
     libraryChanged:noop,backupCompleted:noop,
     reconcileAreaNotes:async payload=>{notes={...notes,...payload};return notes;},
@@ -356,7 +356,7 @@ records.push(freeze({version:16,recordKind:'study',date:'2026-09-21',reflection:
     folder:()=>folder,identities:freeze({root:'Study-Director-Automatic-Backup-Repository',objects:'objects',checkpoints:'checkpoints',commits:'commits'}),
     checksum:async blob=>codec.checksumBlob(blob),inspectManifest:(file,options)=>runtime.repository.inspectManifest(file,options),
     environment:freeze({canMutate:()=>true,now:()=>Date.now(),setTimeout,clearTimeout,yieldTask:async()=>{}}),
-    limits:freeze({publicationMaxAgeMs:24*3600000,publicationAssertionMarginMs:30*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,readTimeoutMs:10000})
+    limits:freeze({publicationMaxAgeMs:24*3600000,publicationAssertionMarginMs:30*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,responseTimeoutMs:10000})
   }));
   assert.equal(runtime.providers.register(freeze({id:'device-folder-engine',label:'Device Folder',connected:()=>true,repository:deviceStorage})),true);
   notes={Ethics:normalizeArea({key:'Ethics',text:'folder version',updatedAt:'2026-09-21T01:00:00.000Z'},'Ethics')};

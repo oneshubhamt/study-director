@@ -26,7 +26,7 @@ registry.define('device-folder-storage',1,()=>{
     exactObject(input,['checksum','environment','folder','identities','inspectManifest','limits'],'Device Folder storage input');
     functions(input.environment,['canMutate','clearTimeout','now','setTimeout','yieldTask'],'Device Folder storage environment');
     exactObject(input.identities,['checkpoints','commits','objects','root'],'Device Folder storage identities');
-    exactObject(input.limits,['maintenanceAssertionMarginMs','maintenanceMaxAgeMs','publicationAssertionMarginMs','publicationMaxAgeMs','readTimeoutMs'],'Device Folder storage limits');
+    exactObject(input.limits,['maintenanceAssertionMarginMs','maintenanceMaxAgeMs','publicationAssertionMarginMs','publicationMaxAgeMs','responseTimeoutMs'],'Device Folder storage limits');
     if(typeof input.folder!=='function'||typeof input.checksum!=='function'||typeof input.inspectManifest!=='function')throw new TypeError('Device Folder storage ports are invalid.');
     const environment=input.environment,identities=input.identities,limits=input.limits;
     const summaryCache=new Map(),digestCache=new Map();
@@ -34,14 +34,15 @@ registry.define('device-folder-storage',1,()=>{
     const iso=ms=>new Date(Number(ms)||0).toISOString();
     function abortReason(signal){const reason=signal?.reason instanceof Error?signal.reason:new Error('Device Folder operation was cancelled.');if(!reason.name||reason.name==='Error')reason.name='AbortError';return reason;}
     function assertCurrent(signal){if(signal?.aborted)throw abortReason(signal);}
-    // Every file-system call is bounded, so a stalled folder (a disconnected
-    // drive, a cloud sync client) surfaces as an error instead of a hang.
-    function bounded(operation,label,signal=null){
+    // Every file-system call, read or write, is bounded, so a stalled folder
+    // (a disconnected drive, a cloud sync client) surfaces as an error instead
+    // of a hang. Closing a written file commits it, so it gets a longer allowance.
+    function bounded(operation,label,signal=null,timeoutMs=limits.responseTimeoutMs){
       return new Promise((resolve,reject)=>{
         let settled=false;
         const finish=(callback,value)=>{if(settled)return;settled=true;environment.clearTimeout(timer);signal?.removeEventListener('abort',onAbort);callback(value);};
         const onAbort=()=>finish(reject,abortReason(signal));
-        const timer=environment.setTimeout(()=>{const error=new Error(`${label} did not respond within ${Math.round(limits.readTimeoutMs/1000)} seconds.`);error.code='DEVICE_FILESYSTEM_READ_TIMEOUT';finish(reject,error);},limits.readTimeoutMs);
+        const timer=environment.setTimeout(()=>{const error=new Error(`${label} did not respond within ${Math.round(timeoutMs/1000)} seconds.`);error.code='DEVICE_FILESYSTEM_TIMEOUT';finish(reject,error);},timeoutMs);
         if(signal){if(signal.aborted){onAbort();return;}signal.addEventListener('abort',onAbort,{once:true});}
         Promise.resolve(operation).then(value=>finish(resolve,value),error=>finish(reject,error));
       });
@@ -105,7 +106,7 @@ registry.define('device-folder-storage',1,()=>{
         const match=spec.pattern.exec(String(name));if(!match)continue;
         if(!handle||handle.kind!=='file'){ignored+=1;continue;}
         try{const file=await bounded(handle.getFile(),`Device Folder ${kind} ${name}`,signal);if(!(Number(file.size)>0)){ignored+=1;continue;}items.push(await describe(kind,match[1],String(name),file,repositoryScope,signal));}
-        catch(error){if(error&&(error.name==='AbortError'||error.code==='DEVICE_FILESYSTEM_READ_TIMEOUT'))throw error;ignored+=1;}
+        catch(error){if(error&&(error.name==='AbortError'||error.code==='DEVICE_FILESYSTEM_TIMEOUT'))throw error;ignored+=1;}
       }
       return freeze({items:freeze(items),overflow:false,ignored});
     }
@@ -117,11 +118,12 @@ registry.define('device-folder-storage',1,()=>{
       return file;
     }
     async function writeFile(directory,name,blob,{checks=null,onProgress=null}={}){
-      const handle=await directory.getFileHandle(name,{create:true}),writable=await handle.createWritable({keepExistingData:false});let closed=false;
+      const label=`Device Folder write ${name}`;
+      const handle=await bounded(directory.getFileHandle(name,{create:true}),label),writable=await bounded(handle.createWritable({keepExistingData:false}),label);let closed=false;
       try{
-        for(let offset=0;offset<blob.size;offset+=WRITE_CHUNK_BYTES){await checks?.();await writable.write(blob.slice(offset,offset+WRITE_CHUNK_BYTES));onProgress?.(Math.min(offset+WRITE_CHUNK_BYTES,blob.size),blob.size);}
+        for(let offset=0;offset<blob.size;offset+=WRITE_CHUNK_BYTES){await checks?.();await bounded(writable.write(blob.slice(offset,offset+WRITE_CHUNK_BYTES)),label);onProgress?.(Math.min(offset+WRITE_CHUNK_BYTES,blob.size),blob.size);}
         await checks?.();if(!environment.canMutate())throw new Error('Control changed before the backup was committed.');
-        await writable.close();closed=true;
+        await bounded(writable.close(),label,null,limits.responseTimeoutMs*6);closed=true;
       }catch(error){if(!closed)try{await writable.abort?.();}catch{}throw error;}
       return handle;
     }
@@ -132,9 +134,9 @@ registry.define('device-folder-storage',1,()=>{
       const dirs=await directories(),name=file.id+spec.suffix,directory=dirs[spec.directory],checks=async()=>{await file.checkProtection?.();await file.checkSource?.();};
       await writeFile(directory,name,file.blob,{checks,onProgress:file.onProgress});
       const written=await fileOrNull(directory,name);
-      if(!written||written.size!==file.blob.size){try{await directory.removeEntry(name);}catch{}throw new Error('The Device Folder did not keep the complete backup file.');}
+      if(!written||written.size!==file.blob.size){try{await bounded(directory.removeEntry(name),`Device Folder remove ${name}`);}catch{}throw new Error('The Device Folder did not keep the complete backup file.');}
       const expected=String(file.digest||''),actual=await input.checksum(written,{});
-      if(expected&&actual!==expected){try{await directory.removeEntry(name);}catch{}throw new Error('A Device Folder backup file failed verification after it was written.');}
+      if(expected&&actual!==expected){try{await bounded(directory.removeEntry(name),`Device Folder remove ${name}`);}catch{}throw new Error('A Device Folder backup file failed verification after it was written.');}
       // The read-back checksum is the folder's receipt, as Drive's server checksum is.
       return freeze({...await describe(file.kind,file.id,name,written,await scope(),null),serverDigest:actual});
     }
@@ -142,7 +144,7 @@ registry.define('device-folder-storage',1,()=>{
       const spec=KINDS[item&&item.kind];if(!spec||!spec.pattern.test(String(item.id||'')+spec.suffix))throw new Error('A Study Director backup deletion request has an invalid identity.');
       const dirs=await directories(),name=item.id+spec.suffix,directory=dirs[spec.directory];
       if(item.remoteVersion){const current=await fileOrNull(directory,name);if(!current)return false;if(String(Math.max(1,Math.floor(Number(current.lastModified)||1)))!==String(item.remoteVersion))throw new Error('A Study Director backup file changed before deletion. Nothing was removed.');}
-      try{await directory.removeEntry(name);return true;}catch(error){if(error&&error.name==='NotFoundError')return false;throw error;}
+      try{await bounded(directory.removeEntry(name),`Device Folder remove ${name}`);return true;}catch(error){if(error&&error.name==='NotFoundError')return false;throw error;}
     }
     // Locks are marker files; their age comes from the file's modified time.
     async function beginLock(kind){
@@ -179,7 +181,7 @@ registry.define('device-folder-storage',1,()=>{
     }
     async function endLock(kind,lease){
       const spec=LOCKS[kind],name=String(lease&&lease.name||'');if(!spec.pattern.test(name))return false;
-      const {objects}=await directories();try{await objects.removeEntry(name);return true;}catch(error){if(error&&error.name==='NotFoundError')return false;throw error;}
+      const {objects}=await directories();try{await bounded(objects.removeEntry(name),`Device Folder lock ${name}`);return true;}catch(error){if(error&&error.name==='NotFoundError')return false;throw error;}
     }
     // An operation view checks its signal and protection before every file
     // call, so long cleanups can keep their lease renewed while listing.

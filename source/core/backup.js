@@ -23,7 +23,7 @@ registry.define('backup',1,input=>{
     exports:freeze(['backgroundAvailable','protect','unprotect','check','scope','job','run','download','chooseSave','save']),
     session:freeze(['canMutate','cancelLiveDraftSave','captureSnapshot','hasActiveSession','hasTasks','toActiveSession','withPersistenceSuppressed']),
     domain:freeze(['clampText','filenameSafeStudentName','getStudentName','materializeDailyRecordView','sanitizeCurrentDailyRecord','todayISO']),
-    view:freeze(['presentation','document','refreshPnote','refreshReview','renderSchedule']),
+    view:freeze(['presentation','refreshPnote','refreshReview','renderSchedule']),
     events:freeze(['libraryChanged','backupCompleted','reconcileAreaNotes','restoreAreaNotesSnapshot','restoreSessionState','verifyActiveSessionRuntime','restoredFromFile']),
     operations:freeze(['assertAuthority','clearFault','failClosed','runExclusive']),
     interactions:freeze(['choose','configure','notify']),
@@ -77,7 +77,7 @@ registry.define('backup',1,input=>{
     const Exports=ports.exports;
     const {canMutate:appCanMutate,cancelLiveDraftSave,captureSnapshot:captureSessionSnapshot,hasActiveSession,hasTasks,toActiveSession:activeSessionPayload,withPersistenceSuppressed}=ports.session;
     const {clampText,filenameSafeStudentName,getStudentName:getStudentNameFromDisplay,materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO}=ports.domain;
-    const {document,refreshPnote,refreshReview,renderSchedule:renderSched}=ports.view;
+    const {refreshPnote,refreshReview,renderSchedule:renderSched}=ports.view;
     const {libraryChanged,backupCompleted,reconcileAreaNotes,restoreAreaNotesSnapshot,restoreSessionState,verifyActiveSessionRuntime,restoredFromFile}=ports.events;
     const {assertAuthority,clearFault,failClosed,runExclusive}=ports.operations;
     const {choose,configure,notify}=ports.interactions;
@@ -125,14 +125,16 @@ function importAbortError(reason='Backup import was cancelled.'){
 function throwIfImportCancelled(signal){if(signal&&signal.aborted)throw importAbortError(String(signal.reason&&signal.reason.message||signal.reason||'Backup import was cancelled.'));}
 function throwIfImportAborted(signal,authorityOptions=null){assertAuthority(authorityOptions||undefined);throwIfImportCancelled(signal);}
 
-function setImportCancelVisibility(visible){
-  const button=document.getElementById('cancel-backup-import');if(button)button.hidden=!visible;
-}
+// The app draws the file backup row and the import Cancel from status() and
+// the 'file' presentation; listeners hear when an export or import starts or ends.
+const statusListeners=new Set();
+function subscribeStatus(listener){if(typeof listener!=='function')throw new TypeError('Backup status listener is invalid.');statusListeners.add(listener);return ()=>statusListeners.delete(listener);}
+function notifyStatus(){for(const listener of statusListeners)try{listener();}catch(error){AppDiagnostics.capture('backup.status-listener',error,'warn');}}
 function beginImport(){
   if(activeImportOperation)return activeImportOperation;
   const controller=new AbortController(),id=++importSequence;
   activeImportOperation=freeze({id,signal:controller.signal,cancel:reason=>{if(!controller.signal.aborted)controller.abort(importAbortError(reason));}});
-  setImportCancelVisibility(true);return activeImportOperation;
+  notifyStatus();return activeImportOperation;
 }
 function cancelImport(reason='Backup import was cancelled by the user.',options={}){
   if(!activeImportOperation)return false;
@@ -140,7 +142,7 @@ function cancelImport(reason='Backup import was cancelled by the user.',options=
 }
 function finishImport(operation=activeImportOperation){
   if(!operation||!activeImportOperation||operation.id!==activeImportOperation.id)return false;
-  activeImportOperation=null;presentation.condition('file','export-busy','');setImportCancelVisibility(false);return true;
+  activeImportOperation=null;presentation.condition('file','export-busy','');notifyStatus();return true;
 }
 async function yieldImport(signal,authorityOptions=null){
   throwIfImportAborted(signal,authorityOptions);
@@ -272,23 +274,13 @@ async function createCheckpoint(options={},report=null){
   })();
   try{return await checkpointPromise;}finally{checkpointPromise=null;}
 }
-function setLocalExportBusy(busy){
-  const button=document.getElementById('download-backup'),cancel=document.getElementById('cancel-standalone-import');
-  if(button){button.disabled=!!busy;button.setAttribute('aria-busy',busy?'true':'false');button.textContent=busy?'Preparing backup…':'Export backup…';}
-  if(cancel){cancel.dataset.standaloneExportBusy=busy?'1':'0';if(busy){cancel.hidden=false;cancel.textContent='Cancel';}else if(!activeImportOperation)cancel.hidden=true;}
-}
 const presentation=ports.view.presentation;
 let portablePresentation=null;
-function renderPortablePresentation(){
-  const event=presentation.read('file'),feedback=presentation.read('file','backup-status'),value=event?.lifecycle==='running'?event:feedback||event,status=document.getElementById('backup-file-status');
-  if(status){status.hidden=!value?.message;status.textContent=[value?.message,presentation.detail(value)].filter(Boolean).join(' · ');status.dataset.state=value?.severity==='error'?'error':'ok';}
-}
 function setLocalExportStatus(message='',ok=true){
   if(portablePresentation?.read()?.lifecycle==='running')portablePresentation.update({message:String(message||''),severity:ok?'info':'error'});
   else presentation.feedback('file',message,ok);
-  renderPortablePresentation();
 }
-function finishPortablePresentation(patch={}){portablePresentation?.finish(patch);portablePresentation=null;renderPortablePresentation();}
+function finishPortablePresentation(patch={}){portablePresentation?.finish(patch);portablePresentation=null;}
 function markBackupCompleted(context={}){if(appCanMutate())backupCompleted(context&&typeof context==='object'?context:{});}
 async function prepareSafetyCopy(options={}){
   let canonical,file;try{file=await Exports.protect(async()=>{canonical=await createCanonicalCheckpoint(options);return canonical;});
@@ -302,7 +294,7 @@ async function downloadSafetyCopy(options={}){const {canonical,file}=await prepa
 function exportReporter(){
   let last=0;
   return freeze({
-    stage:message=>{portablePresentation?.update({message:String(message||''),progress:null});renderPortablePresentation();last=0;},
+    stage:message=>{portablePresentation?.update({message:String(message||''),progress:null});last=0;},
     progress:value=>{const now=Date.now(),loaded=Math.max(0,Number(value&&value.loaded)||0),total=Math.max(0,Number(value&&value.total)||0);if(!total||now-last<150&&loaded<total)return;last=now;portablePresentation?.update({progress:{stage:'export',completedBytes:Math.min(loaded,total),totalBytes:total}});renderPortablePresentation();}
   });
 }
@@ -318,7 +310,7 @@ async function exportPortableBackup(){
   // download the verified file instead.
   const chosen=Exports.chooseSave(portableBackupFilename(getStudentNameFromDisplay()),{'application/octet-stream':[portableAssets?'.sdbackup':'.gz']},{id:'study-director-backups'});
   const traceId=OperationDiagnostics.start('standalone-export','Standalone backup');
-  portablePresentation=presentation.begin('file','export',{label:'File backup',message:'Choose where to save the backup…'});setLocalExportBusy(true);renderPortablePresentation();
+  portablePresentation=presentation.begin('file','export',{label:'File backup',message:'Choose where to save the backup…'});
   localExportPromise=(async()=>{
     let file=null;
     try{
@@ -336,7 +328,8 @@ async function exportPortableBackup(){
       if(cancelled)OperationDiagnostics.finish({cancelled:true},traceId);else OperationDiagnostics.fail(error,{},traceId);return {status:cancelled?'cancelled':'failed'};
     }finally{if(file)try{await file.release();}catch(error){AppDiagnostics.capture('backup.export-release',error,'warn');}}
   })();
-  try{return await localExportPromise;}finally{localExportPromise=null;setLocalExportBusy(false);}
+  notifyStatus();
+  try{return await localExportPromise;}finally{localExportPromise=null;notifyStatus();}
 }
 function exportLocalBackup(){
   if(localExportRequest)return localExportRequest;
@@ -357,7 +350,8 @@ function exportLocalBackup(){
       finishPortablePresentation({message,lifecycle:cancelled?'cancelled':'failed'});
       return Object.freeze({status:cancelled?'cancelled':'failed'});
     })
-    .finally(()=>{localExportRequest=null;if(!localExportPromise)setLocalExportBusy(false);});
+    .finally(()=>{localExportRequest=null;notifyStatus();});
+  notifyStatus();
   return localExportRequest;
 }
 
@@ -1507,7 +1501,7 @@ async function importPortableBackup(ev){
   if(!appCanMutate()){setLocalExportStatus('Study control is in another tab. Take control here before importing.',false);return;}
   const f=ev.target.files&&ev.target.files[0];if(!f)return;
   const traceId=OperationDiagnostics.start('standalone-import','Standalone backup'),operation=beginImport();let candidate=null,consumed=false;
-  portablePresentation=presentation.begin('file','import',{label:'File backup',message:'Reading and verifying backup…'});renderPortablePresentation();
+  portablePresentation=presentation.begin('file','import',{label:'File backup',message:'Reading and verifying backup…'});
   try{
     OperationDiagnostics.mark('standalone-inspection-start',{bytes:Number(f.size)||0},traceId);candidate=await inspectBackup(f,{filename:f.name||'',signal:operation.signal});OperationDiagnostics.mark('standalone-inspection-complete',{},traceId);
     const preview=candidate.preview||{},stored=inspectedBackups.get(candidate),snapshot=stored?candidateSnapshotState(stored):null,parsed=snapshot&&snapshot.parsed||null;
@@ -1554,6 +1548,7 @@ const controller=freeze({
   cancelImport,
   cancelStandalone,
   finishImport,
+  subscribeStatus,
   recoverInterruptedRestore:(...args)=>track(()=>recoverInterruptedRestore(...args),true),
   status
 });

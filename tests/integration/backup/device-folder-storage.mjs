@@ -15,7 +15,7 @@ const storage=registry.require('device-folder-storage',1).createStorage(freeze({
   checksum:async blob=>sha256(blob),
   inspectManifest:async file=>{const value=JSON.parse(await file.text());if(value.locked)throw Object.assign(new Error('locked'),{code:'BACKUP_LOCKED'});return manifestFor(value.id);},
   environment:freeze({canMutate:()=>canMutate,now:()=>now,setTimeout,clearTimeout,yieldTask:async()=>{}}),
-  limits:freeze({publicationMaxAgeMs:24*3600000,publicationAssertionMarginMs:30*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,readTimeoutMs:10000})
+  limits:freeze({publicationMaxAgeMs:24*3600000,publicationAssertionMarginMs:30*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,responseTimeoutMs:10000})
 }));
 folder=createMemoryDirectory({now:()=>now,faults});
 const id=n=>'cp_'+String(n).padStart(32,'0'),objectId=n=>'obj_'+String(n).padStart(32,'0');
@@ -34,6 +34,23 @@ const listed=(await storage.list({kind:'checkpoint'})).items;
 assert.equal(listed.length,1);assert.equal(listed[0].history.counts.dailyRecord,3);assert.equal(listed[0].history.retention.calendar.month,'2026-10');
 assert.match(listed[0].verificationScope,/^device-folder:1:[a-f0-9]{32}$/u);assert.equal((await storage.list({kind:'commit'})).items[0].verificationScope,listed[0].verificationScope,'one stable identity per folder');
 assert.equal(await storage.scope(),listed[0].verificationScope);
+
+// A write that stalls (a disconnected drive, a stuck sync client) fails within
+// the timeout instead of hanging the backup.
+{
+  const stalled=createMemoryDirectory({now:()=>now,faults});
+  const stallWrites=directory=>new Proxy(directory,{get:(target,key)=>key==='getFileHandle'?async(name,options)=>{const handle=await target.getFileHandle(name,options);return new Proxy(handle,{get:(file,prop)=>prop==='createWritable'?async()=>({write:()=>new Promise(()=>{}),close:async()=>{},abort:async()=>{}}):typeof file[prop]==='function'?file[prop].bind(file):file[prop]});}:key==='getDirectoryHandle'?async(name,options)=>stallWrites(await target.getDirectoryHandle(name,options)):typeof target[key]==='function'?target[key].bind(target):target[key]});
+  const timers=[];const stalledStorage=registry.require('device-folder-storage',1).createStorage(freeze({
+    folder:()=>stallWrites(stalled),identities,checksum:async blob=>sha256(blob),inspectManifest:async()=>manifestFor(id(9)),
+    environment:freeze({canMutate:()=>true,now:()=>now,setTimeout:(callback,ms)=>{timers.push(callback);return timers.length;},clearTimeout:()=>{},yieldTask:async()=>{}}),
+    limits:freeze({publicationMaxAgeMs:24*3600000,publicationAssertionMarginMs:30*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,responseTimeoutMs:10000})
+  }));
+  const blob=new Blob(['never lands']),pending=stalledStorage.upload(freeze({kind:'object',id:objectId(9),name:'',blob,size:blob.size,digest:await sha256(blob)}));
+  for(let i=0;i<20&&!timers.length;i++)await new Promise(resolve=>setImmediate(resolve));
+  // Fire every pending timeout: only the stalled chunk write is still waiting.
+  while(timers.length)timers.shift()();
+  await assert.rejects(pending,error=>error.code==='DEVICE_FILESYSTEM_TIMEOUT'&&/did not respond within 10 seconds/u.test(error.message));
+}
 
 // A write that reads back wrong is removed and fails.
 faults.corruptReadOf.add(objectId(2)+'.sdobject');

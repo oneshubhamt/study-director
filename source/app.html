@@ -2859,6 +2859,19 @@ function renderNativeCapabilities(state){
   }
   renderInstallationProjection(state);
 }
+// The portable-file row, drawn like the location rows: Export and Cancel from
+// the backup controller and file processor, the note from the 'file'
+// presentation. It draws once both exist; their status changes redraw it.
+let fileBackupRowReady=false;
+function renderFileBackup(){
+  if(!fileBackupRowReady)return;
+  const state=BackupController.status(),exporting=state.standaloneExportActive,node=id=>document.getElementById(id);
+  const button=node('download-backup'),cancel=node('cancel-standalone-import'),importCancel=node('cancel-backup-import'),note=node('backup-file-status');
+  if(button){button.disabled=exporting;button.setAttribute('aria-busy',exporting?'true':'false');button.textContent=exporting?'Preparing backup…':'Export backup…';}
+  if(cancel)cancel.hidden=!(exporting||Exports.status().fileBusy);
+  if(importCancel)importCancel.hidden=!state.importActive;
+  if(note){const event=BackupPresentation.current('file'),message=BackupPresentation.summary(event);note.hidden=!message;if(note.textContent!==message)note.textContent=message;note.dataset.state=event?.severity==='error'?'error':'ok';}
+}
 // Each location row opens its settings in place: 'device' or 'drive'.
 function toggleBackupSettings(kind){
   const panel=document.getElementById(`${kind}-backup-settings-panel`),button=document.getElementById(`${kind}-backup-settings`);
@@ -7695,7 +7708,7 @@ const BackupFiles=ExportsModule.createFileStore({storage:navigator.storage,locks
 let fileProcessingNotice=null;
 const Exports=ExportsModule.createCoordinator({
   createWorker:()=>new Worker(trustedAssetURL('@@SD_EXPORT_WORKER_FILENAME@@'),{name:'study-director-exports'}),window,document,files:BackupFiles,
-  onState:state=>{const button=document.getElementById('cancel-standalone-import');if(button){if(state.fileBusy){button.hidden=false;button.textContent='Cancel';}else if(button.dataset.standaloneExportBusy!=='1')button.hidden=true;}if(state.fileBusy){if(!fileProcessingNotice)fileProcessingNotice=NoticeCoordinator.presentation('file-processing').begin({id:'worker',surfaceId:'file-processing-status',foreground:false,announce:false,title:'File processing'});fileProcessingNotice.update({message:state.phase,progress:{stage:state.phase}});}else{fileProcessingNotice?.resolve();fileProcessingNotice=null;const status=document.getElementById('file-processing-status');if(status)status.textContent='';}}
+  onState:state=>{renderFileBackup();if(state.fileBusy){if(!fileProcessingNotice)fileProcessingNotice=NoticeCoordinator.presentation('file-processing').begin({id:'worker',surfaceId:'file-processing-status',foreground:false,announce:false,title:'File processing'});fileProcessingNotice.update({message:state.phase,progress:{stage:state.phase}});}else{fileProcessingNotice?.resolve();fileProcessingNotice=null;const status=document.getElementById('file-processing-status');if(status)status.textContent='';}}
 });
 let backupProtectionReady=false;
 function backupBackgroundAvailability(){return !StartupLifecycle.status().fullyInitialized?'startup':!appCanMutate()?'awaiting-control':storageResetUnresolved()?'storage-reset':backupProtectionReady?true:'locked';}
@@ -8455,7 +8468,6 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO
   }),
   view:Object.freeze({presentation:BackupPresentation,
-    document,
     refreshPnote,
     refreshReview:()=>ReviewView.refresh(),
     renderSchedule:renderSched
@@ -8505,7 +8517,9 @@ const {
 }=BackupRuntime;
 // Each location row has one inline note, drawn from the presentation's current event.
 // The controller owns execution; the coordinator owns the immutable presentation event.
+fileBackupRowReady=true;BackupController.subscribeStatus(renderFileBackup);renderFileBackup();
 BackupPresentation.subscribe(()=>{
+  renderFileBackup();
   for(const source of ['device-folder','google-drive']){
     const node=document.getElementById(`backup-operation-note-${source}`);if(!node)continue;
     const event=BackupPresentation.current(source);
@@ -8761,7 +8775,7 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
     checksum:(blob,{signal}={})=>Exports.run('checksum',{value:blob},{signal}),
     inspectManifest:(file,options)=>RepositoryCheckpointPipeline.inspectManifest(file,options),
     environment:Object.freeze({canMutate:()=>appCanMutate(),now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'})}),
-    limits:Object.freeze({publicationMaxAgeMs:RepositoryPolicyModule.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:RepositoryPolicyModule.protocol.publicationAssertionMarginMs,maintenanceMaxAgeMs:RepositoryPolicyModule.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:RepositoryPolicyModule.protocol.maintenanceAssertionMarginMs,readTimeoutMs:10*1000})
+    limits:Object.freeze({publicationMaxAgeMs:RepositoryPolicyModule.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:RepositoryPolicyModule.protocol.publicationAssertionMarginMs,maintenanceMaxAgeMs:RepositoryPolicyModule.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:RepositoryPolicyModule.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
   }))
 }));
 if(!Object.isFrozen(DeviceBackup)||DeviceBackup.format!=='study-director.device-backup'||DeviceBackup.contractVersion!==1){
