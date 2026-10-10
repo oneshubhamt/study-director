@@ -857,7 +857,7 @@ registry.define('backup-provider',1,input=>{
   const automaticByProvider=new Map();
   function automaticState(selected){
     const id=safeId(selected&&selected.id);let state=automaticByProvider.get(id);
-    if(!state){state={covered:'',connected:false,noticeShown:false};automaticByProvider.set(id,state);}
+    if(!state){state={covered:'',connected:false,noticeShown:false,waitingSince:NaN,urgentSince:NaN};automaticByProvider.set(id,state);}
     return state;
   }
   // A change noted while the app runs is a real edit. Before the first one,
@@ -877,17 +877,33 @@ registry.define('backup-provider',1,input=>{
     let current=NaN;try{current=Date.parse(String(automaticHooks.current()||''));}catch(error){AppDiagnostics.capture('backup-provider.automatic-current',error,'warn');}
     return Number.isFinite(current)&&current>automaticCovered(selected);
   }
+  // A backup restarts the countdown: changes made while it ran wait a full
+  // cadence from its end, except a key moment made after the capture.
   function rememberAutomaticCoverage(selected,sourceRevision){
     const at=Date.parse(String(sourceRevision||'')),state=automaticState(selected),prior=Date.parse(state.covered);
     if(Number.isFinite(at)&&(!Number.isFinite(prior)||at>prior))state.covered=new Date(at).toISOString();
+    const waiting=automaticNeeded(selected);state.waitingSince=waiting?Date.now():NaN;
+    if(!waiting||!(state.urgentSince>at))state.urgentSince=NaN;
+  }
+  // When a location's waiting changes are due: AUTOMATIC_QUIET_MS after the
+  // first one, sooner after a key moment or before a sign-in runs out. NaN
+  // when the waiting changes were found rather than seen (on start or on
+  // reconnect): those go at once.
+  function automaticDueAt(selected){
+    const state=automaticState(selected);if(!Number.isFinite(state.waitingSince))return NaN;
+    let due=state.waitingSince+AUTOMATIC_QUIET_MS,expiresAt=NaN;
+    if(Number.isFinite(state.urgentSince))due=Math.min(due,state.urgentSince+AUTOMATIC_URGENT_MS);
+    try{expiresAt=Number(selected.connectionExpiresAt?.());}catch(error){AppDiagnostics.capture('backup-provider.connection-expiry',error,'warn');}
+    if(Number.isFinite(expiresAt)&&expiresAt>0)due=Math.min(due,expiresAt-AUTOMATIC_EXPIRY_LEAD_MS);
+    return due;
   }
   function scheduleAutomaticBackup(selected,{urgent=false}={}){
     if(!automaticNeeded(selected)||!providerConnected(selected))return false;
     const job=providerConvergenceJob(selected);if(!job)return false;
-    let delay=urgent?AUTOMATIC_URGENT_MS:AUTOMATIC_QUIET_MS,expiresAt=NaN;
-    try{expiresAt=Number(selected.connectionExpiresAt?.());}catch(error){AppDiagnostics.capture('backup-provider.connection-expiry',error,'warn');}
-    if(Number.isFinite(expiresAt)&&expiresAt>0)delay=Math.min(delay,Math.max(0,expiresAt-AUTOMATIC_EXPIRY_LEAD_MS-Date.now()));
-    return job.schedule(delay,urgent?'important-change':'automatic','earliest');
+    const state=automaticState(selected),now=Date.now();
+    if(!Number.isFinite(state.waitingSince))state.waitingSince=now;
+    if(urgent&&!Number.isFinite(state.urgentSince))state.urgentSince=now;
+    return job.schedule(Math.max(0,automaticDueAt(selected)-now),urgent?'important-change':'automatic','earliest');
   }
   function noteChange(change={}){
     const urgent=change&&change.urgent===true;changeNoted=true;
@@ -897,7 +913,7 @@ registry.define('backup-provider',1,input=>{
   // Back up waiting changes now (the app going to the background, an update
   // about to apply) at every connected location that needs it.
   function automaticWaiting(selected){return providerConnected(selected)&&automaticNeeded(selected);}
-  function flushAutomatic(reason='flush'){return Promise.all([...providers.values()].filter(automaticWaiting).map(selected=>providerConvergenceJob(selected)?.run(String(reason||'flush'))||null));}
+  function flushAutomatic(reason='flush'){return Promise.all([...providers.values()].filter(automaticWaiting).map(selected=>providerConvergenceJob(selected)?.run('flush:'+String(reason||'flush'))||null));}
   // A sign-in ends on its own (Drive's lasts about an hour). Someone who backs
   // up to this location is told once, in a toast they can dismiss, and not
   // again until they sign in and it ends again. Anyone else is never told.
@@ -922,10 +938,14 @@ registry.define('backup-provider',1,input=>{
   function providerConvergenceJob(selected){
     if(!selected?.repository||!pendingRetryHooks)return null;const id=safeId(selected.id);
     let job=providerConvergenceJobs.get(id);if(job)return job;const background=providerBackground(selected);
-    job=background.registerJob('convergence',{isAvailable:()=>{const available=providerBackgroundAvailability(selected),saved=providerPublications.get(id)?.continuation.status();return available===true&&saved?.pending&&saved.role==='before-restore'?'awaiting-foreground':available;},retryMs:PROVIDER_CONVERGENCE_RETRY_DELAYS[0],capture:error=>AppDiagnostics.capture('backup-provider.convergence-lifecycle',error,'warn'),execute:async({nextEligibleAt:eligibleAt})=>{
+    job=background.registerJob('convergence',{isAvailable:()=>{const available=providerBackgroundAvailability(selected),saved=providerPublications.get(id)?.continuation.status();return available===true&&saved?.pending&&saved.role==='before-restore'?'awaiting-foreground':available;},retryMs:PROVIDER_CONVERGENCE_RETRY_DELAYS[0],capture:error=>AppDiagnostics.capture('backup-provider.convergence-lifecycle',error,'warn'),execute:async({trigger,nextEligibleAt:eligibleAt})=>{
       let scope=null,traceId='';
       try{
-        if(!await pendingRetryState(selected)&&!providerPublications.get(selected.id)?.continuation.status().pending&&!automaticNeeded(selected)){resetConvergenceRetry(selected);return freeze({status:'idle',reason:'none'});}
+        const owed=!!await pendingRetryState(selected)||providerPublications.get(selected.id)?.continuation.status().pending===true;
+        if(!owed&&!automaticNeeded(selected)){resetConvergenceRetry(selected);return freeze({status:'idle',reason:'none'});}
+        // Any other wake-up before the waiting changes are due keeps their deadline.
+        const due=automaticDueAt(selected);
+        if(!owed&&!String(trigger||'').startsWith('flush:')&&due>Date.now()+50){job.schedule(due-Date.now(),'automatic','earliest');return freeze({status:'idle',reason:'not-due'});}
         if(busy||preparing){schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS);return freeze({status:'deferred',reason:'busy'});}
         scope=await background.beginBackground('convergence',{budgetMs:0,preemptCode:'REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage:'An automatic backup yielded to a foreground operation.'});
         if(!scope){schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS);return freeze({status:'deferred',reason:'background-busy'});}
@@ -1384,7 +1404,7 @@ registry.define('backup-provider',1,input=>{
   // Forgetting a location drops everything this device holds about it; its
   // backups stay where they are.
   async function forgetProvider(selected){
-    automaticState(selected).noticeShown=true;automaticState(selected).covered='';await discardProviderPublication(selected);connectedOnceByProvider.delete(selected.id);clearRecentHistory(selected);verifiedHistoryByProvider.delete(selected.id);repositoryScopeByProvider.delete(selected.id);await clearPendingRetry(selected);providerBackground(selected).clearAllScheduled();presentation.reset(selected.id);
+    Object.assign(automaticState(selected),{noticeShown:true,covered:'',waitingSince:NaN,urgentSince:NaN});await discardProviderPublication(selected);connectedOnceByProvider.delete(selected.id);clearRecentHistory(selected);verifiedHistoryByProvider.delete(selected.id);repositoryScopeByProvider.delete(selected.id);await clearPendingRetry(selected);providerBackground(selected).clearAllScheduled();presentation.reset(selected.id);
   }
   async function disconnectProvider(selected){
     if(busy||!selected||!selected.disconnect)return false;
@@ -1405,8 +1425,8 @@ registry.define('backup-provider',1,input=>{
   function notifyStatus(){for(const listener of statusListeners)try{listener();}catch(error){AppDiagnostics.capture('backup-provider.status-listener',error,'warn');}}
   function locationStatus(id){
     const selected=providers.get(safeId(id));if(!selected)return null;
-    const operation=foregroundView(),active=busy&&operation?.providerId===selected.id,coordinator=providerBackgroundCoordinators.get(selected.id),running=coordinator?coordinator.status().active:[],job=coordinator?coordinator.jobStatus('convergence'):null,attempts=providerConvergenceRetryAttempts.get(selected.id)||0;
-    return freeze({connected:providerConnected(selected),busy:active,foregroundKind:active?String(operation.kind||''):'',cancellable:active&&!!foregroundController&&!foregroundController.signal.aborted,backingUp:running.includes('convergence'),maintenanceBusy:running.includes('maintenance')||running.includes('integrity'),waiting:automaticWaiting(selected),nextEligibleAt:String(job?.nextEligibleAt||''),retryAttempt:attempts,retryBackoffCapped:attempts>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length});
+    const operation=foregroundView(),active=busy&&operation?.providerId===selected.id,coordinator=providerBackgroundCoordinators.get(selected.id),background=coordinator?coordinator.status():null,running=background?background.active:[],job=coordinator?coordinator.jobStatus('convergence'):null,attempts=providerConvergenceRetryAttempts.get(selected.id)||0;
+    return freeze({connected:providerConnected(selected),busy:active,foregroundKind:active?String(operation.kind||''):'',cancellable:active&&!!foregroundController&&!foregroundController.signal.aborted,backingUp:running.includes('convergence'),maintenanceBusy:running.includes('maintenance')||running.includes('integrity'),paused:background?.held===true,waiting:automaticWaiting(selected),nextEligibleAt:String(job?.nextEligibleAt||''),retryAttempt:attempts,retryBackoffCapped:attempts>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length});
   }
   function renderButtons(){
     notifyStatus();

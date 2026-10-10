@@ -31,6 +31,7 @@ export const FEATURE_CONTRACTS=Object.freeze([
   contract('backup.encryption','tests/integration/backup/encryption.mjs'),
   contract('backup.folder-encryption','tests/integration/backup/folder-encryption.mjs'),
   contract('backup.device-repository','tests/integration/backup/device-backup.mjs'),
+  contract('backup.no-location','tests/integration/backup/no-backup-location.mjs'),
   contract('backup.repository-checkpoint','tests/integration/backup/repository-checkpoint.mjs'),
   contract('backup.repository-restore','tests/integration/backup/repository-restore.mjs'),
   contract('backup.drive-security','tests/integration/backup/drive-security.mjs'),

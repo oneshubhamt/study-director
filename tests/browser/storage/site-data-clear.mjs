@@ -25,7 +25,7 @@ const restoreView=`(()=>{const shown=node=>!!node&&node.checkVisibility();return
 const restoredToast=toast('/Added 1 past Saved Day and 0 attachments from your Device Folder backup/');
 const read=`(async()=>{const d=__PWA6,session=await d.AppData.activeSession.load(0,{strict:true}),plans=await d.AppData.planData.read(),notes=await d.AppData.notes.readFreshPayload(),notice=${decision},yesterday=await d.AppData.dailyRecords.get(window.__qaYesterday||'');
   return {message:notice?notice.textContent:'',cleared:d.readStorageHealth().browserDataClearedAt||null,note:notes.medicine?.text||null,draft:String(plans.draft||''),savedPlans:plans.savedPlans.length,session:!!session.value,mode:d.TimerState.mode,name:(await d.AppData.personalPreferences.read())?.studentName||null,yesterday:yesterday?.reflection||null,
-    notice:notice?{dismissible:!!notice.querySelector('.interaction-toast-close'),buttons:[...notice.querySelectorAll('button:not(.interaction-toast-close)')].map(button=>button.textContent.trim())}:null,paused:d.DeviceBackup.status().automaticSuspended,folder:d.DeviceBackup.status().connected};})()`;
+    notice:notice?{dismissible:!!notice.querySelector('.interaction-toast-close'),buttons:[...notice.querySelectorAll('button:not(.interaction-toast-close)')].map(button=>button.textContent.trim())}:null,paused:d.DeviceBackup.status().paused,folder:d.DeviceBackup.status().connected};})()`;
 const startSession=(name)=>`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms)),now=new Date(),m=now.getHours()*60+now.getMinutes(),fmt=v=>String(Math.floor((v+1440)%1440/60)).padStart(2,'0')+':'+String((v+1440)%1440%60).padStart(2,'0');
   const input=document.getElementById('student-display');input.value='${name}';input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('blur',{bubbles:true}));
   document.getElementById('plan-input').value=[fmt(m-5)+' | 60 | ${name} Block | work | Medicine | pages | 12',fmt(m+55)+' | 30 | Lunch | fixed | Meal | |'].join('\\n');await d.PlanDraftEditor.save();
@@ -110,7 +110,7 @@ try{
       const remember=`window.__qaYesterday=${JSON.stringify(yesterday)}`;
       await page.evaluate(remember);
       await page.evaluate(startSession('FolderQA'));
-      const backup=await page.evaluate(`(async()=>{const d=__PWA6;await d.DeviceBackup.connect();const result=await d.DeviceBackup.backupNow('manual');return !!(result&&result.ok);})()`);
+      const backup=await page.evaluate(`(async()=>{const d=__PWA6;await d.DeviceBackup.connect();return await d.DeviceBackup.backupNow()===true;})()`);
       assert.equal(backup,true);
       const before=await page.evaluate(read);
       assert.equal(before.yesterday,'FolderQA yesterday');assert.equal(before.folder,true);assert.equal(before.mode,'running');
@@ -124,7 +124,7 @@ try{
       assert.equal(restored.session,true);assert.equal(restored.mode,'running','the running session is untouched');
       assert.equal(restored.notice,null,'no decision is needed');assert.equal(restored.paused,false,'automatic backups resume');
       result.checks.automaticMissingOnlyRestore=true;
-      assert.equal(await page.evaluate(`__PWA6.DeviceBackup.backupNow('manual').then(result=>!!(result&&result.ok))`),true,'the combined state backs up completely');
+      assert.equal(await page.evaluate(`__PWA6.DeviceBackup.backupNow().then(result=>result===true)`),true,'the combined state backs up completely');
       result.checks.restoredStateBacksUp=true;
 
       await reload(page);await page.evaluate(remember);
@@ -175,7 +175,8 @@ try{
 
       await page.evaluate(`(async()=>{const d=__PWA6;d.goTab('plan');d.AppData.notes.update('medicine','Medicine','NoFolderQA note','');await d.AppData.notes.flush({strict:true});})()`);
       await page.send('Storage.clearDataForOrigin',{origin:server.origin,storageTypes:'all'});
-      await page.evaluate(`__PWA6.AppData.notes.readFreshPayload()`);
+      // The read only makes the app notice the clear; the clear itself may abort it.
+      await page.evaluate(`__PWA6.AppData.notes.readFreshPayload().catch(()=>null)`);
       await waitFor(()=>page.evaluate(`${read}.then(state=>!!state.notice)`),{label:'clear notice without folder support'});
       const cleared=await page.evaluate(read);
       assert.match(cleared.message,/can be restored from Google Drive or a backup file/);
@@ -200,7 +201,7 @@ try{
       const other=await browser.createPage(server.url('deployment','instrumented.html'),{preload,viewport:{width:1280,height:860,mobile:false,scale:1}});pages.push(other);
       await waitForStudyDirector(other,{instrumented:true});await waitFor(()=>other.evaluate(`!__PWA6.AppOwnership.status().hasControl`),{label:'background tab'});
       await owner.send('Storage.clearDataForOrigin',{origin:server.origin,storageTypes:'all'});
-      await other.evaluate(`__PWA6.AppData.notes.readFreshPayload()`);
+      await other.evaluate(`__PWA6.AppData.notes.readFreshPayload().catch(()=>null)`);
       await waitFor(()=>other.evaluate(`__PWA6.IndexedDb.lifecycle().resets===1`),{label:'background tab counted the clear'});
       await waitFor(()=>owner.evaluate(`${read}.then(state=>!!state.notice&&state.note==='TabsQA note')`),{label:'owner handles the clear',timeout:30000});
       assert.equal(await owner.evaluate(`__PWA6.IndexedDb.lifecycle().resets`),0,'the tab in control learned of the clear from the other tab');

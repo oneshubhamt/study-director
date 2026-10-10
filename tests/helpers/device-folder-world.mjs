@@ -1,0 +1,123 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import {webcrypto} from 'node:crypto';
+import {createFakeClock} from './fake-clock.mjs';
+import {createMemoryDirectory} from './memory-directory.mjs';
+
+// A Device Folder test world: the production controller, backup engine,
+// folder storage, retention and cleanup on an in-memory folder and a fake
+// clock. Only checkpoint preparation is a stand-in: each backup writes one
+// small object, a JSON manifest and the real commit marker through the
+// engine's own executor. `protection` (optional) seals the object and the
+// manifest the way backup encryption does.
+const freeze=Object.freeze;
+export const MINUTE=60*1000,DAY=24*60*MINUTE;
+const sha256=async blob=>Buffer.from(await webcrypto.subtle.digest('SHA-256',await blob.arrayBuffer())).toString('hex');
+export const IDENTITIES=freeze({root:'Study-Director-Automatic-Backup-Repository',objects:'objects',checkpoints:'checkpoints',commits:'commits'});
+
+export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',supported=true,protection=null}={}){
+  const clock=createFakeClock(start),notices=[],published=[],verified=new Map(),settingsStore=new Map(),rendered=[],captures=[];
+  let current=new clock.Date(clock.now()-MINUTE).toISOString(),localEmpty=false,canMutate=true,pickerResult=null,pickerCalls=0,sequence=0,durablePending=null;
+  const context={Object,Symbol,TypeError,Error,Date:clock.Date,AbortController,Blob,File,Promise,Map,Set,WeakMap,TextEncoder,Uint8Array,JSON,Math,Number,String,Array,console,crypto:webcrypto,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,DOMException};
+  context.globalThis=context;vm.createContext(context);
+  for(const name of ['internal','operation-lifecycle','repository-policy','repository-background','managed-repository','backup-provider','backup-recovery-host','notice-coordinator','backup-presentation','device-folder-storage','device-backup','host-metadata'])vm.runInContext(fs.readFileSync(`source/core/${name}.js`,'utf8'),context,{filename:`source/core/${name}.js`});
+  const registry=context[Symbol.for('studyDirector.internalModules.v1')],lifecycle=registry.require('operation-lifecycle',1),background=registry.require('repository-background',1,freeze({lifecycle})),policy=registry.require('repository-policy',1);
+  // Retention, classification and cleanup are the production repository rules.
+  const unused=()=>{throw new Error('Unexpected repository I/O in the Device Folder test.');};
+  const rules=registry.require('managed-repository',1).createEngine(freeze({
+    codec:freeze({countShape:value=>value,utf8Bytes:value=>new TextEncoder().encode(String(value)),compressionSupported:()=>false,assetIds:()=>[]}),
+    ports:freeze({
+      configuration:freeze({backupVersion:1,limits:freeze({}),logicalCaptureFormat:'qa.capture',logicalCaptureVersion:1}),
+      persistence:freeze({reconciliationBaseRead:unused,reconciliationBaseWrite:unused}),assets:freeze({get:unused,verifyAliases:unused}),
+      files:freeze({protect:unused,unprotect:unused,run:unused,scope:unused}),
+      checkpoint:freeze({capture:unused,beginPreparation:unused,readPreparationUnits:unused,finalizePreparation:unused,establishPreparationBaseline:unused,assertCurrent:unused,inspectVerifiedCapture:unused,verifyVerifiedCapture:unused,currentImportSignal:unused}),
+      domain:freeze({clampText:value=>String(value)}),environment:freeze({throwIfAborted:unused,yieldTask:async()=>{}}),diagnostics:freeze({capture:()=>{}})
+    })
+  }));
+  const calendar=at=>{const date=new Date(at),day=(date.getUTCDay()+6)%7,monday=new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),date.getUTCDate()-day));return freeze({localDate:at.slice(0,10),weekStart:monday.toISOString().slice(0,10),month:at.slice(0,7),utcOffsetMinutes:0});};
+  async function publish(_history,options,executor){
+    const exportedAt=new clock.Date(clock.now()).toISOString(),sourceRevision=current,checkpointId='cp_'+(++sequence).toString(16).padStart(32,'0'),role=options.retention?.role==='before-restore'?'before-restore':'normal';
+    const seal=async raw=>protection?(await protection.protect({blob:raw,filename:'backup'},{interactive:options.interactive!==false,signal:options.signal})).blob:raw;
+    const blob=await seal(new Blob([`library at ${sourceRevision}`])),objectId='obj_'+(await sha256(new Blob([sourceRevision]))).slice(0,32),storedChecksum=await sha256(blob),reused=options.availableObjectIds instanceof Set&&options.availableObjectIds.has(objectId);
+    const entry=freeze({objectId,blob,storedBytes:blob.size,storedChecksum,reused,checkProtection:async()=>{}}),prepared=freeze({exportedAt,objects:freeze([entry])});
+    if(!reused)await executor.writeObject(entry,prepared);
+    const manifest=freeze({format:'study-director.backup-repository-checkpoint',version:2,checkpoint:freeze({checkpointId,createdAt:exportedAt,originInstallationId:'qa'}),exportedAt,sourceRevision,logicalFingerprint:storedChecksum,counts:freeze({dailyRecord:1,areaNote:1}),encrypted:!!protection,
+      retention:freeze({role,purpose:role==='before-restore'?options.retention.purpose:'',protectedUntil:role==='before-restore'?new Date(clock.now()+7*DAY).toISOString():'',calendar:calendar(exportedAt)}),objects:freeze([freeze({objectId,storedBytes:blob.size,storedChecksum})])});
+    await executor.writeManifest(freeze({blob:await seal(new Blob([JSON.stringify(manifest)])),manifest,exportedAt,checkSource:async()=>{},checkProtection:async()=>{}}));
+    const marker={format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt,sourceRevision,manifestVersion:2},markerBlob=new Blob([JSON.stringify(marker)]);
+    await executor.commit(freeze({...marker,blob:markerBlob,size:markerBlob.size,digest:await sha256(markerBlob),checkSource:async()=>{},checkProtection:async()=>{}}));
+    published.push(freeze({checkpointId,sourceRevision,role,at:clock.now()}));
+    const committedResult=await executor.onCommitted(freeze({sourceRevision,exportedAt,publication:freeze({name:checkpointId+'.sdcheckpoint'}),manifest}));
+    const cleanupResult=executor.cleanup?await executor.cleanup(freeze({manifest})):null;
+    return freeze({checkpointId,manifest,sourceRevision,exportedAt,publication:freeze({name:checkpointId+'.sdcheckpoint'}),objectsWritten:reused?0:1,objectsReused:reused?1:0,writtenBytes:blob.size,attachmentBytesWritten:0,committedResult,cleanupResult,warning:''});
+  }
+  const inspectManifest=async(file,options={})=>{const opened=protection?(await protection.unprotect(file,{interactive:options.interactive!==false})).blob:file,value=JSON.parse(await opened.text());if(value.format!=='study-director.backup-repository-checkpoint')throw new Error('not a manifest');return value;};
+  const notSupported=()=>{throw new Error('Restore is covered by the browser and repository-restore suites.');};
+  const pipeline=freeze({createPublication:notSupported,publish,publishInline:publish,inspectManifest,inspect:notSupported,bringIn:notSupported,restoreVersion:notSupported,verifyCheckpoint:notSupported,verifyObject:notSupported,scrub:notSupported,cleanup:rules.cleanup,inspectCommit:rules.inspectCommit,
+    retention:rules.retention,validatePolicy:rules.validatePolicy,classifyState:rules.classifyState,activeProtected:rules.activeProtected,selectRetention:rules.selectRetention,projectHistory:rules.projectHistory,
+    markCompleted:({recoveryCopy})=>{if(recoveryCopy)verified.set(recoveryCopy.id,freeze({verifiedAt:new clock.Date(clock.now()).toISOString(),sourceRevision:recoveryCopy.sourceRevision}));}});
+  const coordinator=registry.require('notice-coordinator',1).createCoordinator(freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}));
+  const notifications=freeze({...coordinator,emit:raw=>{notices.push(raw);return coordinator.emit(raw);}});
+  const presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications}));
+  const noop=()=>{},documentStub=freeze({getElementById:()=>null,addEventListener:noop,createDocumentFragment:()=>({}),createElement:()=>({})});
+  const runtime=registry.require('backup-provider',1,freeze({repositoryPolicy:policy})).createRuntime(freeze({background:freeze({format:background.format,contractVersion:1,createCoordinator:background.createCoordinator,maintenance:background.maintenance,maintenanceActionable:background.maintenanceActionable}),repository:pipeline,ports:freeze({
+    configuration:freeze({appVersion:'qa'}),controller:freeze({beginImport:noop,cancelImport:noop,finishImport:noop}),exports:freeze({run:async(type,data)=>{assert.equal(type,'checksum');return sha256(data.value);}}),domain:freeze({clampText:value=>String(value||'')}),view:freeze({presentation,document:documentStub}),
+    ownership:freeze({canRunBackground:()=>!canMutate?'awaiting-control':protection&&protection.status().enabled&&!protection.status().unlocked?'locked':true,requireMutationControl:()=>{if(!canMutate)throw new Error('Take control first.');}}),environment:freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,requestAnimationFrame:fn=>(fn(),1)}),
+    diagnostics:freeze({capture:(scope,error)=>captures.push(freeze({scope,message:String(error?.message||error)})),start:()=>'trace',mark:noop,finish:noop,fail:noop})
+  })}));
+  const pending=registry.require('backup-recovery-host',1).createPendingStore(freeze({sourceRevision:()=>current,diagnostics:freeze({capture:noop}),storage:freeze({read:async()=>durablePending,write:async value=>{durablePending=value;},remove:async()=>{durablePending=null;}})}));
+  runtime.configurePendingBackupRetry(pending);
+  const maintenance=new Map();
+  runtime.configureRepositoryMaintenance(freeze({read:async id=>maintenance.get(id)||null,mark:async(id,state)=>{maintenance.set(id,freeze({...state,providerId:id}));return true;},clear:async id=>{maintenance.delete(id);return true;}}));
+  runtime.configureAutomaticBackup(freeze({covered:id=>verified.get(id)?.sourceRevision||'',current:()=>current,ready:async()=>!localEmpty}));
+  let folder=null;
+  const storageFor=folderPort=>registry.require('device-folder-storage',1).createStorage(freeze({
+    folder:folderPort,identities:IDENTITIES,checksum:(blob)=>sha256(blob),inspectManifest,
+    environment:freeze({canMutate:()=>canMutate,now:()=>clock.now(),setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,yieldTask:async()=>{}}),
+    limits:freeze({publicationMaxAgeMs:policy.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:policy.protocol.publicationAssertionMarginMs,maintenanceMaxAgeMs:policy.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:policy.protocol.maintenanceAssertionMarginMs,readTimeoutMs:10*1000})
+  }));
+  const identity=value=>value,metaKeys=freeze(Object.fromEntries(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBaseLegacy','reconciliationBase','reconciliationBaseNotePrefix'].map(name=>[name,name])));
+  const settingsValid=registry.require('host-metadata',1).createAppMetaValidators(freeze({keys:metaKeys,same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),normalizers:freeze({verifiedRecovery:identity,attachmentIntegrity:identity,repositoryIntegrity:identity,reconciliationBaseLegacy:identity,reconciliationBase:identity,reconciliationBaseNote:identity})})).automaticDeviceBackup;
+  const showDirectoryPicker=supported?()=>{pickerCalls+=1;if(pickerResult instanceof Error)return Promise.reject(pickerResult);return Promise.resolve(pickerResult);}:null;
+  const controller=registry.require('device-backup',1).createController(freeze({
+    configuration:freeze({metadataKey:'automaticDeviceBackup',pickerId:'study-director-device-backup',settingsTimeoutMs:10*1000}),
+    engine:freeze({backup:id=>runtime.backup(id),cancelForeground:(reason,id)=>runtime.cancelForeground(reason,id),disconnect:id=>runtime.disconnect(id),forget:id=>runtime.forget(id),locationStatus:id=>runtime.locationStatus(id),register:config=>runtime.register(config),subscribeStatus:listener=>runtime.subscribeStatus(listener)}),
+    environment:freeze({canMutate:()=>canMutate,clearTimeout:clock.clearTimeout,setTimeout:clock.setTimeout,showDirectoryPicker}),
+    hooks:freeze({capture:(scope,error)=>captures.push(freeze({scope,message:String(error?.message||error)})),chooseCheckpoint:async rows=>rows[0].id,render:state=>rendered.push(state),sourceRevision:()=>current,verifiedAt:()=>verified.get('device-folder')?.verifiedAt||''}),
+    presentation,
+    // Writes pass the app's own stored-record validator, as the real store does.
+    settings:freeze({read:async key=>settingsStore.get(key)||null,write:async(key,value)=>{if(!settingsValid(value,{key}))throw new Error(`appMeta ${key} value is not canonical.`);settingsStore.set(key,value);return true;},remove:async key=>{settingsStore.delete(key);return true;}}),
+    transport:folderPort=>storageFor(folderPort)
+  }));
+  // A browser directory handle with readwrite permission state.
+  function directory({permission='granted',grant='granted'}={}){
+    const faults={corruptReadOf:new Set()},handle=createMemoryDirectory({now:()=>clock.now(),faults});
+    Object.assign(handle,{faults,permission,requests:0,queryPermission:async()=>handle.permission,requestPermission:async()=>{handle.requests+=1;handle.permission=grant;return grant;}});
+    return handle;
+  }
+  // Real work (hashing, file reads) finishes between timers, so simulated time
+  // moves from one due timer to the next only once the work started by the
+  // previous one has settled.
+  const idle=()=>!runtime.status().busy&&runtime.backgroundStatus().every(row=>!row.busy&&!row.running);
+  // Waits for real work (up to 20 s of wall time), never for simulated time.
+  async function settle(){const until=Date.now()+20000;let quiet=0;for(let turn=0;quiet<3&&Date.now()<until;turn++){await new Promise(resolve=>setImmediate(resolve));if(turn%25===24)quiet=idle()?quiet+1:0;}}
+  async function tick(ms){
+    const target=clock.now()+ms;
+    for(;;){await settle();const next=clock.nextAt();if(next===null||next>target)break;await clock.advance(Math.max(0,next-clock.now()));}
+    await clock.advance(Math.max(0,target-clock.now()));await settle();
+  }
+  async function commits(handle){try{const root=await handle.getDirectoryHandle(IDENTITIES.root);return (await root.getDirectoryHandle(IDENTITIES.commits)).names();}catch{return [];}}
+  async function locks(handle){const root=await handle.getDirectoryHandle(IDENTITIES.root);return (await root.getDirectoryHandle(IDENTITIES.objects)).names().filter(name=>/\.sd(?:publication|maintenance)$/u.test(name));}
+  return {
+    clock,runtime,controller,published,verified,settingsStore,notices,rendered,captures,directory,tick,settle,commits,locks,storageFor,
+    get pickerCalls(){return pickerCalls;},
+    // The file name the next backup's object will have.
+    nextObjectName:async()=>'obj_'+(await sha256(new Blob([current]))).slice(0,32)+'.sdobject',
+    choose:value=>{pickerResult=value;},
+    change:(urgent=false)=>{current=new clock.Date(clock.now()).toISOString();runtime.noteChange({urgent});},
+    setLocalEmpty:value=>{localEmpty=value;},setCanMutate:value=>{canMutate=value;},
+    store:(handle,baseline='')=>settingsStore.set('automaticDeviceBackup',{format:'study-director.device-backup-settings',version:3,enabled:true,directoryHandle:handle,lastBackupAt:'',lastFilename:'',sourceRevision:baseline}),
+    permissionNotices:()=>notices.filter(raw=>raw.source==='device-folder'&&raw.id==='permission')
+  };
+}

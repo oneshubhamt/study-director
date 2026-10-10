@@ -16,7 +16,7 @@ function fixture(){
   const state={owner:{state:'primary',revision:1},mutation:{active:'',foreign:false},lifecycle:{ready:true,revision:1},
     startup:true,timer:false,pacer:false,attachment:false,providerBusy:false,dialog:false,diary:true,planFlush:true,reflection:true,
     deletionFlush:true,draft:'edited plan',storedDraft:'edited plan',noteFailure:null,loaded:{value:{revision:7},storage:{idb:true}},
-    live:{ok:true,value:{revision:7},storage:{idb:true}},maintenance:Promise.resolve(),device:Promise.resolve({token:'device'}),
+    live:{ok:true,value:{revision:7},storage:{idb:true}},maintenance:Promise.resolve(),backups:Promise.resolve(),
     diaryWait:Promise.resolve(),lockCount:0,quiesced:0,updates:0,checkSuccess:true,online:true,now:1000000,
     status:{supported:true,registered:true,updateReady:false},lastCheck:0,timers:new Map()};
   function element(tag){const node={tag,children:[],open:false,removed:false,setAttribute(){},addEventListener(type,fn){this[type]=fn;},append(...nodes){this.children.push(...nodes);},contains(target){return target===this||this.children.some(n=>n.contains(target));},showModal(){this.open=true;},close(){this.open=false;},remove(){this.removed=true;}};elements.push(node);return node;}
@@ -32,8 +32,8 @@ function fixture(){
       try{return await run({assert(){assert.equal(state.owner.state,'primary');}});}finally{state.mutation.active='';state.lockCount--;calls.push('unlock');}
     }},
     ReviewSaveService:{status:()=>({})},AttachmentLibrary:{status:()=>({busy:state.attachment})},AttachmentIngest:{status:()=>({busy:false})},Exports:{status:()=>({busy:false})},BackupController:{status:()=>({busy:false})},
-    BackupProviderRuntime:{status:()=>({busy:state.providerBusy}),suspendBackground:()=>{calls.push('provider-suspend');holds.add('provider');return {settled:Promise.resolve(),release:()=>{holds.delete('provider');calls.push('provider-resume');}};}},
-    DeviceBackup:{status:()=>({busy:false}),suspendAutomatic:()=>{holds.add('device');return state.device;},resumeAutomatic:()=>{holds.delete('device');calls.push('device-resume');}},
+    BackupProviderRuntime:{status:()=>({busy:state.providerBusy}),suspendBackground:()=>{calls.push('provider-suspend');holds.add('provider');return {settled:state.backups,release:()=>{holds.delete('provider');calls.push('provider-resume');}};}},
+    DeviceBackup:{status:()=>({busy:false})},
     AttachmentIntegrityJob:{settled:()=>Promise.resolve()},RichTextAssetMaintenance:{settled:()=>state.maintenance},OwnershipUiProjection:{apply(){calls.push('project');}},
     RichTextRuntime:{quiesce:async run=>{state.quiesced++;try{return await run();}finally{state.quiesced--;}}},
     quiesceManagedRecoveryRuntime:async run=>{state.quiesced++;try{return await run();}finally{state.quiesced--;}},
@@ -64,16 +64,16 @@ await test('primary saves every surface and holds mutation and editor locks unti
   for(const save of ['diary','plan-flush','reflection','live','notes','deletions','session-settled'])assert.ok(h.calls.includes(save),save);
   let prevented=false,stopped=false;for(const block of h.listeners.get('beforeinput'))block({target:{},preventDefault(){prevented=true;},stopImmediatePropagation(){stopped=true;}});
   assert.equal(prevented,true);assert.equal(stopped,true);assert.ok(h.elements.some(e=>e.tag==='dialog'&&e.open));
-  assert.equal(h.state.lockCount,1);assert.equal(h.holds.size,2);await guard.release();await guard.release();
+  assert.equal(h.state.lockCount,1);assert.equal(h.holds.size,1,'one hold pauses every backup location');await guard.release();await guard.release();
   assert.equal(h.state.lockCount,0);assert.equal(h.state.quiesced,0);assert.equal(h.holds.size,0);assert.equal(h.sandbox.pwaUpdateReservation,null);
   assert.ok([...h.listeners.values()].every(set=>set.size===0));assert.ok(h.elements.filter(e=>e.tag==='dialog').every(e=>!e.open&&e.removed));
-  assert.equal(h.calls.filter(c=>c==='device-resume').length,1);
+  assert.equal(h.calls.filter(c=>c==='provider-resume').length,1);
 });
-await test('background drain delays readiness and cancellation releases a late device suspension',async()=>{
-  const h=fixture(),maintenance=deferred(),device=deferred(),abort=new AbortController();h.state.maintenance=maintenance.promise;h.state.device=device.promise;
+await test('background drain delays readiness and cancellation releases the backup hold',async()=>{
+  const h=fixture(),maintenance=deferred(),device=deferred(),abort=new AbortController();h.state.maintenance=maintenance.promise;h.state.backups=device.promise;
   const {guard}=h.reserve({signal:abort.signal});let ready=false;guard.ready.then(()=>{ready=true;},()=>{});await flush();assert.equal(ready,false);
   abort.abort();await guard.release();assert.equal(h.state.lockCount,0);assert.equal(h.sandbox.pwaUpdateReservation,null);assert.equal(guard.validate(),false);
-  device.resolve({token:'late'});maintenance.resolve();await flush();assert.equal(h.holds.size,0);assert.equal(ready,false);assert.equal(h.calls.filter(c=>c==='device-resume').length,1);
+  device.resolve();maintenance.resolve();await flush();assert.equal(h.holds.size,0);assert.equal(ready,false);assert.equal(h.calls.filter(c=>c==='provider-resume').length,1);
 });
 await test('successful drain is required before save preparation',async()=>{
   const h=fixture(),gate=deferred();h.state.maintenance=gate.promise;const {guard}=h.reserve();let ready=false;guard.ready.then(()=>{ready=true;});await flush();assert.equal(ready,false);gate.resolve();await guard.ready;assert.equal(ready,true);await guard.release();

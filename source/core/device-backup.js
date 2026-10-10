@@ -9,7 +9,7 @@ const {exactFrozenObject:exactObject,functionPort:functions}=registry.contracts;
 // owns only what is particular to it: the chosen folder, its permission,
 // remembering it across launches, and the status row the app renders. Backing
 // up, Version History, restore, cleanup, integrity checks and automatic
-// timing all run through the engine, the same way as for Google Drive.
+// timing all run through the engine, the same way as for every location.
 registry.define('device-backup',1,()=>{
   const freeze=Object.freeze;
   const ID='device-folder',LABEL='Device Folder',FORMAT='study-director.device-backup-settings',VERSION=3;
@@ -41,7 +41,7 @@ registry.define('device-backup',1,()=>{
         format:'study-director.device-backup-status',contractVersion:1,
         installed,supported,mode,connected:connected(),permission,folderName:handle&&typeof handle.name==='string'?handle.name:'',message:message(),
         busy:engineState?.busy===true||connecting,cancellable:engineState?.cancellable===true,foregroundKind:connecting?'connect':String(engineState?.foregroundKind||''),
-        backingUp:engineState?.backingUp===true,maintenanceBusy:engineState?.maintenanceBusy===true,pending:engineState?.waiting===true,nextEligibleAt:String(engineState?.nextEligibleAt||''),
+        backingUp:engineState?.backingUp===true,maintenanceBusy:engineState?.maintenanceBusy===true,paused:engineState?.paused===true,pending:engineState?.waiting===true,nextEligibleAt:String(engineState?.nextEligibleAt||''),
         retryAttempt:Number(engineState?.retryAttempt)||0,retryBackoffCapped:engineState?.retryBackoffCapped===true,
         lastBackupAt:String(hooks.verifiedAt()||'')||null,hasOperationSummary:!!presentation.read(ID)&&!presentation.read(ID,'backup-status')
       });
@@ -72,7 +72,9 @@ registry.define('device-backup',1,()=>{
       if(!stored||typeof stored.getDirectoryHandle!=='function'||typeof stored.queryPermission!=='function')return null;
       return freeze({directoryHandle:stored,baseline:Number.isFinite(Date.parse(value.sourceRevision||''))?String(value.sourceRevision):''});
     }
-    const settingsValue=()=>({format:FORMAT,version:VERSION,enabled:true,directoryHandle:handle,sourceRevision:baseline});
+    // The stored record keeps its v3 shape; lastBackupAt and lastFilename are
+    // no longer used (Version History and the verified-copy record hold them).
+    const settingsValue=()=>({format:FORMAT,version:VERSION,enabled:true,directoryHandle:handle,lastBackupAt:'',lastFilename:'',sourceRevision:baseline});
     async function query(target=handle){
       if(!target||typeof target.queryPermission!=='function')return 'denied';
       try{const result=await target.queryPermission({mode:'readwrite'});return ['granted','prompt','denied'].includes(result)?result:'denied';}

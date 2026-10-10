@@ -14,17 +14,16 @@ for(const excluded of ['checkpointId','installationId','sourceRevision','reconci
 assert.match(repository,/if\(manifest\.logicalFingerprint&&manifest\.logicalFingerprint!==logicalFingerprint\)throw new Error\('Repository checkpoint logical-state fingerprint failed verification\.'/u);
 
 assert.match(provider,/async function historyRepositoryProvider\(id,options=\{\}\)[\s\S]*repositoryProviderInventory\(scoped,[\s\S]*repositoryInventoryHistoryEntries/u,'provider history must remain independently readable');
-assert.match(device,/async function history\(options=\{\}\)[\s\S]*interactive\?beginForegroundController[\s\S]*readCheckpointState\(directories,\{signal\}\)[\s\S]*repository\.projectHistory/u,'Device Folder must expose independent committed history and interactive history must remain cancellable/foreground-safe.');
+assert.match(provider,/async function historyRepositoryProvider\(id,options=\{\}\)[\s\S]*beginForeground\(selected,options&&options\.signal\|\|null\)[\s\S]*repositoryInventoryHistoryEntries/u,'every location, the Device Folder included, exposes independent committed history; interactive history stays cancellable and foreground-safe.');
 assert.match(app,/id="managed-version-history"[\s\S]*id="managed-version-history-title">Backup checkpoints/u,'one reusable recovery dialog may render the selected provider history');
-assert.match(host,/function sourceDescriptor\(sourceId\)[\s\S]*id==='device-folder'[\s\S]*input\.providers\.list\(\)\.find/u);
-assert.match(host,/async function collectSource\(sourceId[\s\S]*source\.kind==='device'\?await input\.device\.history[\s\S]*await input\.providers\.history\(source\.id/u);
+assert.match(host,/function sourceDescriptor\(sourceId\)[\s\S]*input\.providers\.list\(\)\.find/u);assert.doesNotMatch(host,/input\.device\b/u,'the recovery host has no Device-only path');
+assert.match(host,/async function collectSource\(sourceId[\s\S]*await input\.providers\.history\(source\.id/u);
 assert.doesNotMatch(host,/mergeHistory|sources\.push|for\(const provider of input\.providers\.list/u,'recovery history must stay provider-scoped instead of constructing a global timeline');
-assert.match(host,/sourceId==='device-folder'\?await input\.device\.restoreVersion\(options\):await input\.providers\.restoreRepositoryProviderVersion\(sourceId,options\)/u,'Replace must route only through the owning source');
-assert.match(host,/sourceId==='device-folder'\?await input\.device\.bringIn\(options\):await input\.providers\.bringInRepositoryProvider\(sourceId,options\)/u,'Combine must route only through the owning source');
-assert.match(host,/remove\.dataset\.action='remove-managed-safety'/u);assert.match(host,/sourceId==='device-folder'\?await input\.device\.removeSafetyBackup/u);
-assert.match(provider,/async function removeProtectedRepositoryProvider/u);assert.match(device,/async function removeSafetyBackup/u);
+assert.match(host,/choice==='replace'\?await input\.providers\.restoreRepositoryProviderVersion\(sourceId,options\):await input\.providers\.bringInRepositoryProvider\(sourceId,options\)/u,'Replace and Combine must route only through the owning location');
+assert.match(host,/remove\.dataset\.action='remove-managed-safety'/u);assert.match(host,/await input\.providers\.removeProtectedRepositoryProvider\(sourceId,checkpointId\)/u);
+assert.match(provider,/async function removeProtectedRepositoryProvider/u);
 for(const forbidden of ['import-file','importLocal','.sdbackup','import-archive'])assert.equal(host.includes(forbidden),false,`standalone file backup/import must stay outside managed provider history: ${forbidden}`);
 assert.doesNotMatch(drive,/DeviceBackup|device-backup|projectManagedRepositoryHistory|mergeManagedRepositoryHistory/u,'Google Drive transport must not know about Device Folder');
-assert.doesNotMatch(device,/google-drive|Google Drive|BackupProviderRuntime/u,'Device Folder must not know about Drive/provider recovery');
+assert.doesNotMatch(device,/google-drive|Google Drive|BackupProviderRuntime/u,'the Device Folder controller must not know about Drive; it reaches the engine only through its injected port');
 
 console.log(JSON.stringify({status:'PASS',suite:'managed-version-history-contract',providerScopedHistory:true,independentHistories:true,noCrossProviderDiscovery:true,manualFileExcluded:true,explicitSafetyRemoval:true},null,2));

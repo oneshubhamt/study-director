@@ -1,16 +1,16 @@
-# Handoff — paused 2026-10-06
+# Handoff
 
-Work stopped part-way through moving the Device Folder onto the shared backup engine. This note says exactly where things stand, what is left, what the wider programme is, and what has been done so far on this branch (`refactor/background-coordination`, draft PR #1).
+Status of the work on this branch (`refactor/background-coordination`, draft PR #1): what is done, what is left, the wider programme and the agreed direction, and a record of the work so far.
 
-**The latest commit is a work-in-progress save.** The build passes and most suites pass, but 17 fast tests still fail because they assert the old Device Folder design or need rewriting (listed in 1.3). CI on the PR will be red until 1.3 is finished.
+**Current state (2026-10-10):** the Device Folder now runs on the shared backup engine. All 138 fast tests pass, and the backup browser tests pass (Device Folder, restore safety, browser-data clear, encryption, exports). Next: the backup audit (section 2), then the notes brainstorm (3.0).
 
 ---
 
-## 1. In progress: the Device Folder becomes one location of the backup engine
+## 1. Done: the Device Folder is one location of the backup engine
 
 Goal (task #39, `docs/BACKUP-ENGINE.md`): one engine (`source/core/backup-provider.js`) does every backup operation for every location; each location only supplies storage access. Drive already worked this way. The Device Folder had its own ~1,000-line copy of the same machinery (`device-backup.js`, 113 KB), with its own scheduler, locks, publication, cleanup, integrity, history and restore.
 
-### 1.1 Done in the WIP commit
+### 1.1 What changed
 
 **Engine (`source/core/backup-provider.js`)**
 - `automaticBaseline` on a location: the change time from which it backs up on its own. The Device Folder uses it (from when it was chosen); Drive does not (it starts after this device first backs up to it).
@@ -69,81 +69,27 @@ Goal (task #39, `docs/BACKUP-ENGINE.md`): one engine (`source/core/backup-provid
 | Concurrent foreground operations | Device and Drive were independent. | The engine's foreground lock is shared: one at a time across locations; the second returns "busy". |
 | Start-up discovery | — | The guard reads local data once per start-up catch-up (records, notes, session, plans, attachments list). |
 
-### 1.3 Remaining to finish the move (in order)
+### 1.3 Finishing the move (2026-10-09/10)
 
-1. **Rewrite `tests/integration/backup/device-backup.mjs`** (96 KB, tests the deleted controller). Build it on:
-   - the new controller and the real engine;
-   - `device-folder-storage` over `tests/helpers/memory-directory.mjs`;
-   - the fake clock, following `automatic-provider-backup.mjs`.
+- **Tests rewritten for the new design.**
+  - `device-backup.mjs` and `folder-encryption.mjs` now run the production controller, engine, folder storage, retention and cleanup on an in-memory folder and a fake clock (`tests/helpers/device-folder-world.mjs`). Only checkpoint preparation is a stand-in.
+  - Settings writes go through the app's own stored-record validator.
+  - The fake clock steps from timer to timer and waits for real work in between.
+- **New test** `no-backup-location.mjs` (task #53): with no location registered, change notices, flush on hide, the update wait, the browser-data-clear fallback, restore entry, Clear Library, Version History and diagnostics all work, and nothing is shown.
+- **Contracts and other tests** updated to assert the new shape: a thin controller, a hosted engine location, no Device scheduler, no host device port.
+- **Bugs found and fixed on the way.**
+  - **Early automatic backup.** A check that was deferred while a foreground backup was busy fired 15 s later and backed up fresh changes, skipping the 20-minute quiet window. Each location now keeps its due time; any earlier wake-up re-arms it.
+  - **Lease renewal.** Device Folder maintenance leases renewed on every file call after the first interval; they now renew once per interval.
+  - **Stale app calls.** The app still called removed controller methods (`syncOwnership`). This broke start-up in the browser; the calls are removed.
+  - **Settings record shape.** The settings record lost two fields the stored-record validator requires. The v3 shape is kept, with `lastBackupAt` and `lastFilename` written empty.
+  - **Aborted maintenance.** A browser "clear site data" during canonical data maintenance was reported as an error. One aborted run in a row is now retried quietly; a second is reported. This was the intermittent `site-data-clear` flake.
+- **Paused state.** The Device Folder status shows `paused` while restores, updates or a browser-data clear hold backups.
+- **Docs** brought up to date:
+  - `BACKUP-ENGINE.md`: steps 1–4, 6 and 7 done; step 5 open for Drive's buttons.
+  - `BACKGROUND-OPERATIONS.md`, `ARCHITECTURE.md`, `NOTIFICATIONS.md`.
+  - The in-app guide has a Device Folder entry.
 
-   Carry over the behaviours from the old file's sections:
-   - picker cancel is neutral;
-   - permission request failures are contained;
-   - a stored folder at start-up is non-interactive;
-   - reconnect renews permission;
-   - an empty folder makes a first backup at once;
-   - a folder with backups is not published to on choose;
-   - start-up notices data newer than the last backup without waiting for an edit;
-   - deleting only the repository subfolder self-heals in the same backup;
-   - deleting the chosen folder forgets it and returns to a clean "Choose folder";
-   - legacy and unknown files are ignored;
-   - Clear Library safety preempts an automatic backup and publishes exactly one protected version;
-   - a managed-recovery suspend waits for an in-flight automatic backup to unwind;
-   - source changes before or after manifest verification leave no new committed version;
-   - a failed commit marker keeps Latest;
-   - Versions does not lose the automatic deadline;
-   - missing-only restore after a clear uses only a version saved before the clear and never prompts;
-   - flush on hide and before an update;
-   - the 20-minute cadence, and seconds after key moments;
-   - the permission toast appears once per launch and is dismissible.
-2. **`folder-encryption.mjs`**: rewrite for the engine. With encryption locked, automatic backups wait (availability `locked`) and a foreground backup fails with a clear message. Unlocking resumes.
-3. **`tests/unit/backup/backup-recovery-host.mjs`**:
-   - drop the `device` port and `configureConvergencePropagation`;
-   - `providers.list` includes `device-folder`;
-   - convergence is now `{source, others}`.
-4. **`backup-reminder.mjs`**: the reminder uses only `BackupProviderRuntime.automaticActive()`. The test should drive that, not `DeviceBackup.status().connected`.
-5. **`application-update-safety.mjs`**: the update hold no longer suspends the Device Folder separately.
-6. **`background-diagnostics.mjs`**: expects the old 'Device repository' rows. Point it at the engine's per-location rows.
-7. **`notification-lifecycle.mjs`**: its code slice now needs `notifyStatus` (ReferenceError).
-8. **Architecture contracts that assert the old design** — update each to assert the new shape:
-   - `runtime-boundaries`;
-   - `cleer-integration` (also lines 129–137 about device convergence and the file-restore port);
-   - `backup-recovery-ux-contract`;
-   - `background-work-contract`;
-   - `managed-version-history-contract`;
-   - `data-architecture` (settings capability);
-   - `managed-recovery-contract`;
-   - possibly `internal-module-boundary` (`device-backup` no longer takes `repositoryPolicy`).
-
-   The new shape to assert: a thin controller, a hosted engine location, no Device scheduler, no host device port.
-9. `suite-policy.mjs` failed when run directly with `node`. Check it under `npm test`; it is probably runner-only.
-10. **Browser tests** (`CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome`):
-    - `tests/browser/backup/pwa-device-backup.mjs`;
-    - `restore-session-safety`;
-    - `tests/browser/storage/site-data-clear.mjs`;
-    - `tests/browser/backup/encryption.mjs`;
-    - `tests/browser/exports/exports.mjs`.
-
-    Also run the smoke suite (`npm run test:browser`).
-11. **Task #53 — nothing breaks for someone who uses neither the Device Folder nor Drive** (user requirement). Add an integration test with no locations (and one with `showDirectoryPicker` unsupported, so the Device Folder is never registered). It should cover:
-    - change notices;
-    - flush on hide;
-    - `backUpBeforeUpdate` returns at once;
-    - the 7-day reminder works;
-    - the browser-data-clear hold, and the missing restore returning false so the decision notice shows;
-    - `openBackupRestore` opening Data & Backup;
-    - Clear Library safety skipped;
-    - Version History "no source";
-    - diagnostics;
-    - no toasts at any point.
-12. **Docs**:
-    - `BACKUP-ENGINE.md`: steps 2, 3, 4 and 6 are done; step 5 remains (the engine still renders Drive's buttons; move rendering to the host from `locationStatus`).
-    - `BACKGROUND-OPERATIONS.md`: the Device rows are now engine jobs.
-    - `ARCHITECTURE.md`: the Device Folder sections.
-    - `guide.js`: check the help text.
-13. Run everything: unit, integration, architecture and browser tests. Then commit, push, and close #39.
-
-Faster local loop: run each fast test in its own process, six at a time, and list failures. `npm test` stops at the first failure. A throwaway runner script was used in the session scratchpad; recreate it from this description.
+Faster local loop: run each fast test in its own process with the hermetic flags `npm test` uses (`--experimental-loader ./tests/helpers/hermetic-loader.mjs --import ./tests/helpers/hermetic-runtime.mjs`), six at a time, and list failures. `npm test` stops at the first failure.
 
 ---
 
@@ -156,8 +102,8 @@ Faster local loop: run each fast test in its own process, six at a time, and lis
   - fewer Drive metadata round trips on history;
   - measure a 1,000-version, 50,000-object repository (list, history, cleanup).
 - **#46 incremental structured restore** (pending). Judged low value because text data is small; attachments are already reused locally. Close with that reasoning unless measurements say otherwise.
-- **Intermittent flake** in `tests/browser/storage/site-data-clear.mjs`: "AbortError: The transaction was aborted", seen once. Not investigated.
-- **Engine step 5:** the host renders every location's controls from `locationStatus`; the engine stops touching DOM buttons.
+- **Engine step 5:** the host renders Drive's controls from `locationStatus` as it already does for the Device Folder; the engine stops touching DOM buttons.
+- **Start-up hint for empty local data.** On every launch with no local data and no connected folder, a hint says "No local study data found…" with Restore from backup. A brand-new install sees it too. Decide whether it should only appear when there is evidence of earlier use.
 
 ---
 
@@ -279,7 +225,7 @@ Suggestions:
 Commits since `main` (newest first), grouped:
 
 ### Backups (this and recent sessions)
-- (this commit) **WIP:** Device Folder moved onto the shared backup engine.
+- `d8000e4` and the commit after `9afe06d`: the Device Folder runs through the shared backup engine. It was saved mid-move, then finished, with the due-time, lease-renewal and aborted-maintenance fixes.
 - `d27570f` Prepare the backup engine to host the Device Folder (hosted locations, server-digest receipts, operation views, protected safety API).
 - `f71a941` Check runs of small attachments with one read (`checksum.ranges`).
 - `9696df4` Skip backups that would duplicate the newest version.

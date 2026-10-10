@@ -31,18 +31,19 @@ assert.match(app,/id="backup-provider-recover"[^>]*data-action="recover-provider
 assert.match(provider,/recoverButton\.dataset\.providerId=selected\.id/u,'Drive recovery must stay scoped to the provider opened in Settings');
 assert.doesNotMatch(provider,/backup-provider-import|importLabel/u,'provider overlay must reuse the shared provider-scoped recovery host rather than a second import implementation');
 assert.match(provider,/async function bringInRepositoryProvider\(id,options=\{\}\)[\s\S]*checkpointId:String\(options&&options\.checkpointId\|\|''\)/u,'provider Combine must accept an explicitly selected provider checkpoint');
-assert.match(device,/const bringIn=\(options=\{\}\)=>applyCheckpoint\('bring-in',options\)/u);
-assert.match(device,/checkpoint-selection-start/u);assert.match(device,/checkpoint-selection-cancelled/u);assert.match(device,/checkpoint-selection-failed/u);
+// The Device Folder restores, combines and lists versions through the engine like every location.
+const engine=fs.readFileSync('source/core/backup-provider.js','utf8');
+assert.match(engine,/checkpoint-selection-start/u);assert.match(engine,/checkpoint-selection-cancelled/u);assert.match(engine,/checkpoint-selection-failed/u);
+assert.match(device,/choose:\(choices,\{mode:kind='restore-version'\}=\{\}\)=>choices\.length<2\?choices\[0\]\?\.id\|\|null:hooks\.chooseCheckpoint/u,'the Device Folder supplies only its version chooser to the shared restore path');
 assert.match(provider,/checkpoint-selection-start/u);assert.match(provider,/checkpoint-selection-cancelled/u);assert.match(provider,/checkpoint-selection-failed/u);
 
 assert.match(host,/async function collectSource\(sourceId/u);
-assert.match(host,/source\.kind==='device'\?await input\.device\.history[\s\S]*input\.providers\.history\(source\.id/u,'history must query exactly the chosen source');
+assert.match(host,/const result=await input\.providers\.history\(source\.id,/u,'history must query exactly the chosen source');
 assert.doesNotMatch(host,/for\(const provider of input\.providers\.list\(\)\).*input\.providers\.history/u,'explicit recovery must never enumerate every provider');
 assert.doesNotMatch(host,/input\.repository\.mergeHistory/u,'provider-scoped recovery must not merge competing histories');
 assert.match(host,/backup checkpoint/u);assert.match(host,/Restore \/ Combine…/u);assert.match(host,/Before Clear Library/u,'protected bulk-delete safety checkpoints must be clearly labelled in history');
 assert.match(host,/cancelLabel:'Keep current'/u);assert.match(host,/choices:\[presentation\.restoreChoices\.missing,presentation\.restoreChoices\.combine,presentation\.restoreChoices\.replace\]/u);assert.match(presentation,/label:'Replace current data'[\s\S]*Make this backup authoritative/u);assert.match(presentation,/label:'Combine with current data'[\s\S]*review genuine differences/u);assert.match(presentation,/label:'Add only what’s missing'[\s\S]*Nothing you have now changes/u);
-assert.match(host,/sourceId==='device-folder'\?await input\.device\.restoreVersion\(options\):await input\.providers\.restoreRepositoryProviderVersion\(sourceId,options\)/u);
-assert.match(host,/sourceId==='device-folder'\?await input\.device\.bringIn\(options\):await input\.providers\.bringInRepositoryProvider\(sourceId,options\)/u);
+assert.match(host,/choice==='replace'\?await input\.providers\.restoreRepositoryProviderVersion\(sourceId,options\):await input\.providers\.bringInRepositoryProvider\(sourceId,options\)/u);
 assert.match(app,/id="managed-version-history-progress"[\s\S]*id="managed-version-history-progress-stage"[\s\S]*id="managed-version-history-progress-detail"/u,'Version History must own its structured recovery progress surface.');
 assert.match(host,/function setHistoryProgress[\s\S]*progressStage[\s\S]*progressDetail/u,'managed recovery progress must be rendered inside Version History rather than a generic page footer.');
 assert.match(styles,/\.managed-version-history\{position:fixed;inset:0;[\s\S]*margin:auto/u,'Version History must be explicitly centered as an application modal.');
@@ -54,7 +55,7 @@ assert.doesNotMatch(provider,/function close\(\{restoreFocus=true\}=\{\}\)[\s\S]
 assert.match(provider,/async function open\(id,trigger=null\)[\s\S]*if\(busy\)[\s\S]*renderForegroundView\(selected\)[\s\S]*setBusy\(true\)/u,'reopening Drive management must reattach to the live operation snapshot.');
 assert.match(provider,/async function connectProvider\(selected\)[\s\S]*connectedNow=true[\s\S]*if\(connectedNow\)\{[^\n]*if\(overlay\?\.classList\.contains\('on'\)&&activeId===selected\.id\)close\(\{restoreFocus:false\}\);\}[\s\S]*else if\(overlay\?\.classList\.contains\('on'\)&&activeId===selected\.id\)presentProvider/u,'a successful one-purpose provider Connect sheet dismisses itself while a failed connection remains visible for diagnosis.');
 assert.match(app,/recoveryActive=state\.busy===true&&\['history','restore-version','bring-in'\]\.includes[\s\S]*recover\.disabled=state\.busy===true&&!recoveryActive/u,'Device Versions must remain available to reattach to an active recovery operation.');
-assert.match(device,/async function refreshPermission\(\)[\s\S]*queryPermission\(directoryHandle\)[\s\S]*mode='permission'/u,'Device Folder must re-check persisted directory permission without prompting automatically.');
+assert.match(device,/async function refreshPermission\(\)[\s\S]*permission=await query\(\)[\s\S]*permissionNeeded\(\)/u,'Device Folder must re-check persisted directory permission without prompting automatically.');
 assert.doesNotMatch(device,/if\(handle\)\{[\s\S]{0,300}storage\.remove\(config\.metadataKey\)/u,'temporary Device Folder permission loss must never discard the configured directory handle.');
 assert.match(app,/connect\.textContent=state\.mode==='permission'\?'Allow access':'Choose folder…'/u,'configured Device Folder permission renewal must be presented as Allow access rather than folder reselection.');
 assert.match(app,/AppActivation\.subscribe\(event=>\{[^\n]*void refreshDeviceBackgroundPermission\(event\)/u,'foreground return must delegate to the permission and integrity opportunity handler.');
@@ -72,15 +73,15 @@ assert.match(backup,/exactCapable=Number\(parsed&&parsed\.formatVersion\)>=18&&c
 assert.match(backup,/rescuePartial=captureAuthority==='rescue-partial'/u,'verified rescue-partial standalone backups must remain recoverable without becoming exact-replacement authority');
 
 
-assert.match(app,/DeviceBackup\.createProtectedSafety\(purpose\)/u,'Clear Library must require a verified protected Device Folder safety checkpoint when managed Device backup is connected');
-assert.match(app,/Clear Library stopped because the protected Device Folder safety backup could not be verified/u);
+assert.match(app,/BackupProviderRuntime\.createProtectedSafety\(location\.id,purpose\)/u,'Clear Library must require a verified protected safety version at the connected backup location');
+assert.match(app,/Clear Library stopped because the protected \$\{location\.label\} safety backup could not be verified/u);
 assert.match(app,/'recover-device-backup': \(\)=>BackupRecoveryHost\.history\.openSource\('device-folder'\)/u);
 assert.match(app,/'recover-provider-backup': ev=>BackupRecoveryHost\.history\.openSource/u);
 assert.match(app,/'recover-managed-version': ev=>BackupRecoveryHost\.history\.recover\(ev\)/u);
 assert.doesNotMatch(app,/'restore-latest-backup'|'open-version-history'|'bring-in-managed-backup'|'restore-managed-version'/u);
 assert.match(app,/ACTIVE_SESSION_BLOCKED_CLICK_ACTIONS=new Set\(\[[^\]]*'recover-device-backup'[^\]]*'recover-provider-backup'[^\]]*'recover-managed-version'/u);
 
-assert.match(device,/Existing Study Director backup checkpoints found\. Choose Versions to recover one, or Back up now to keep this device’s current data\./u);
+assert.match(device,/Existing Study Director backups found\. Choose Versions to recover one, or Back up now to keep this device’s current data\./u);
 assert.match(guide,/Local-first, versioned handoff/u);assert.match(guide,/Google Drive is the intended computer ↔ phone\/tablet handoff path/u);assert.match(guide,/\["Recover"/u);assert.match(guide,/Keep current, Add only what’s missing, Combine with current data, or Replace current data/u);assert.match(guide,/\["Replace current data"/u);assert.match(guide,/\["Combine with current data"/u);
 assert.doesNotMatch(guide,/\["Restore latest"|\["Backup history"|\["Merge from backup"/u);
 assert.match(reconciliation,/label:'Backup copy'/u);assert.match(reconciliationUi,/incomingLabel:String\(item\.incomingLabel\|\|'Backup copy'\)/u);

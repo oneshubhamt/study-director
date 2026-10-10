@@ -35,11 +35,10 @@ assert.match(app,/readRepositoryMaintenancePending\(\{throwOnError=false\}=[\s\S
 assert.match(app,/function mutateRepositoryMaintenancePending[\s\S]*BackupAppMeta\.transaction\('readwrite'[\s\S]*handle\.request\.onerror[\s\S]*outcome='superseded'[\s\S]*strict:true/u,'maintenance mutation must compare requests inside a strict transaction and fail closed on unavailable state');
 assert.doesNotMatch(device,/MAINTENANCE_(?:CATCHUP|GRACE|BLOCKED|ERROR|CONTENTION)_RETRY_MS/u,'Device must not retain a private maintenance cadence table');
 assert.doesNotMatch(provider,/PROVIDER_MAINTENANCE_(?:CATCHUP|GRACE|BLOCKED|ERROR|CONTENTION)_RETRY_MS/u,'Drive must not retain a private maintenance cadence table');
-assert.match(device,/background\.createMaintenanceScheduler/u,'Device maintenance must use the shared lifecycle scheduler');
+assert.doesNotMatch(device,/createMaintenanceScheduler|createIntegrityScheduler|registerJob|beginBackground|beginForeground|setTimeout\(\(\)=>[^,]*schedule/u,'the Device Folder runs no jobs of its own: maintenance, integrity and automatic backups are the engine\'s per-location jobs');
 assert.match(provider,/background\.createMaintenanceScheduler/u,'Drive maintenance must use the per-target shared lifecycle scheduler');
 assert.match(provider,/scheduler\.observe\(observation/u,'Drive inspection must feed repository observations into durable maintenance intent');
-assert.match(device,/async function history[\s\S]*scheduleRepositoryMaintenanceForState\(state/u,'Device history inspection must create durable maintenance intent when repository debris is observed');
-assert.match(device,/maintenanceScheduler\.adopt\(cleanup,\{trigger:'safety-removal',pending:servicedPending\}/u,'Device cleanup performed outside the scheduler must return through the shared maintenance state machine');
+assert.match(provider,/async function historyRepositoryProvider[\s\S]*observeRepositoryMaintenance\(selected,repositoryInventoryObservation\(inventory\)\)/u,'history inspection must create durable maintenance intent when repository debris is observed, for every location');
 assert.match(provider,/providerMaintenanceScheduler\(selected\)\?\.adopt\(cleanup,\{trigger:'safety-removal',pending:servicedPending\}/u,'Drive cleanup performed outside the scheduler must return through the shared maintenance state machine');
 assert.match(provider,/backgroundAvailable:typeof config\.backgroundAvailable==='function'[\s\S]*providerBackgroundAvailability/u,'provider background scheduling must preserve a non-interactive availability contract');
 assert.match(provider,/isAvailable:\(\)=>providerBackgroundAvailability\(selected\)/u,'Drive maintenance must become opportunity-driven when provider authorization is unavailable');
@@ -51,29 +50,25 @@ assert.match(managedRepository,/objectListingFailed=true[\s\S]*uncertainCount:un
 assert.match(background,/const PRIORITY=freeze\(\{integrity:10,maintenance:20,automatic:30,convergence:40\}\)/u,'background priority must be explicit and shared');
 assert.match(background,/function beginForeground[\s\S]*suspendTimers\(\)[\s\S]*row\.controller\.abort/u,'foreground work must disarm scheduled work and abort active lower-priority jobs');
 assert.match(background,/function suspend\(reason='suspended'\)[\s\S]*waiting=\[\][\s\S]*row\.settlement[\s\S]*const settled=waitForSettlement\(waiting\)/u,'shared suspension must expose a settlement barrier rather than merely signal abort');
-assert.match(device,/canSchedulePendingBackup\(\)[\s\S]*!foregroundController/u,'automatic Device backup scheduling must be excluded while a foreground operation owns the subsystem');
-assert.match(device,/beginAutomaticBackupController[\s\S]*background\.beginBackground\('automatic'/u,'automatic Device publication must use the shared background ownership gate');
-assert.match(device,/function beginForegroundController[\s\S]*background\.beginForeground/u,'Device explicit operations must reserve shared foreground ownership');
-assert.match(device,/\(automatic\|\|integrityRepair\)&&foregroundController/u,'automatic and integrity-repair Device publications must not begin under foreground ownership');
-assert.match(device,/async function createProtectedSafety[\s\S]*beginForegroundController[\s\S]*await foreground\.settled[\s\S]*queryPermission/u,'Before Clear Library safety must reserve foreground ownership and settle background work before permission/repository work');
+assert.match(provider,/if\(busy\|\|preparing\)\{schedulePendingProviderBackup\(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS\)/u,'automatic backups never start while a foreground operation owns the engine');
+assert.match(provider,/scope=await background\.beginBackground\('convergence'/u,'automatic publication must use the shared background ownership gate');
+assert.match(provider,/async function createProtectedSafety\(id,purpose='before-clear-library',options=\{\}\)[\s\S]*beginForeground\(selected[\s\S]*await foreground\.settled[\s\S]*saveRepositoryProvider/u,'Before Clear Library safety must reserve foreground ownership and settle background work before repository work');
 assert.match(provider,/function beginForeground\(selected[\s\S]*background\.beginForeground/u,'Drive explicit operations must reserve shared foreground ownership');
 assert.match(provider,/beginBackground\('convergence'/u,'deferred Drive convergence must use the shared priority gate');
 assert.match(provider,/background\.createIntegrityScheduler[\s\S]*budgetCode:'REPOSITORY_INTEGRITY_BUDGET'[\s\S]*execute:async\(\{target,trigger,nextEligibleAt,signal,checkpoint\}\)/u,'Drive integrity work must use the per-target shared recurrence and receive the shared cancellation signal');
-assert.match(app,/DeviceRepositoryBackground\.createIntegrityScheduler[\s\S]*budgetCode:'DEVICE_INTEGRITY_BUDGET'[\s\S]*backgroundOwned:true/u,'Device integrity work must use the per-target shared recurrence/ownership rather than nesting a second coordinator scope');
-assert.match(app,/isAvailable:\(\)=>DeviceBackup\.status\(\)\.connected\?backupBackgroundAvailability\(\):'awaiting-connection'/u,'disconnected Device integrity must sleep until a connection opportunity instead of polling');
-assert.match(app,/isAvailable:id=>id!=='google-drive'\?'unavailable':appCanMutate\(\)\?true:'awaiting-control'/u,'Drive integrity must become opportunity-driven while this tab lacks mutation control');
+assert.match(app,/const INTEGRITY_TARGETS=Object\.freeze\(\{'device-folder':'device','google-drive':'drive'\}\)/u,'Device Folder and Drive integrity both run on the engine\'s per-location integrity scheduler');
+assert.match(app,/isAvailable:id=>!INTEGRITY_TARGETS\[id\]\?'unavailable':appCanMutate\(\)\?true:'awaiting-control'/u,'integrity must become opportunity-driven while this tab lacks mutation control');
 assert.match(provider,/isAvailable:\(\)=>\{const local=integrityScrubHooks\.isAvailable\(id\);return local===true\?providerBackgroundAvailability\(selected\):String\(local\|\|'awaiting-control'\);\}/u,'provider integrity must preserve named event-driven unavailability instead of collapsing it to polling false');
 assert.doesNotMatch(app,/REPOSITORY_INTEGRITY_POLICY|repositoryIntegrityTargetDue|scheduleRepositoryIntegrityScrub|runDeviceRepositoryIntegrityScrub/u,'retired host integrity wrappers must be removed after coordinator consolidation');
 assert.match(backup,/const RepositoryBackgroundProviderPort=freeze\(\{[\s\S]*format:RepositoryBackgroundModule\.format[\s\S]*createCoordinator:RepositoryBackgroundModule\.createCoordinator[\s\S]*maintenanceActionable:RepositoryBackgroundModule\.maintenanceActionable[\s\S]*background:RepositoryBackgroundProviderPort/u,'Backup Provider must receive a narrow repository-background port instead of the whole internal module surface');
 
 assert.match(app,/backgroundMaintenanceStatusBusy\(owner,field='busy'\)[\s\S]*catch\(error\)[\s\S]*return true/u,'foreground-status probe failures must conservatively block unrelated local background maintenance');
-assert.match(app,/backgroundMaintenanceForegroundBusy\(\)[\s\S]*AppMutationCoordinator,'active'[\s\S]*BackupController[\s\S]*BackupProviderRuntime[\s\S]*DeviceBackup/u,'local background work must yield to foreground backup/recovery');
+assert.match(app,/backgroundMaintenanceForegroundBusy\(\)[\s\S]*AppMutationCoordinator,'active'[\s\S]*BackupController[\s\S]*BackupProviderRuntime/u,'local background work must yield to foreground backup/recovery');
 assert.match(app,/BackupOperationDiagnostics\.start\('data-maintenance'/u);
 assert.match(app,/DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS=24\*60\*60\*1000[\s\S]*DATA_MAINTENANCE_FAILURE_RETRY_MS=30\*60\*1000/u,'canonical data maintenance must have an explicit recurring interval and bounded failure retry');
 assert.match(app,/status==='completed'[\s\S]*scheduleDataMaintenance\(DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS,'interval'\)[\s\S]*reason==='recent'[\s\S]*lastRun\+DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS[\s\S]*status==='failed'\|\|reason==='indexeddb-unavailable'[\s\S]*DATA_MAINTENANCE_FAILURE_RETRY_MS/u,'canonical data maintenance must remain live across long-running sessions and transient failures');
 assert.match(assets,/diagnostics\?\.start\?\.\('asset-maintenance'/u);
 assert.match(app,/BackupOperationDiagnostics\.start\('attachment-integrity'/u);
-assert.match(device,/operationStart\('device-integrity'[\s\S]*nextEligibleAt/u);
 assert.match(provider,/OperationDiagnostics\.start\('provider-integrity'[\s\S]*nextEligibleAt/u);
 assert.match(provider,/OperationDiagnostics\.start\('provider-convergence'/u);
 assert.match(app,/configuration:Object\.freeze\(\{release:APP_VERSION,limit:20\}\)/u,'diagnostic history must be large enough to inspect a background/foreground cycle');
@@ -84,7 +79,7 @@ assert.match(backup,/await rebaseRepositoryPreparationAcceleration\('replace'\)/
 // Persistence hardening and shared repository protocol policy.
 assert.match(policy,/const maintenanceWorkBudgetMs=30\*1000,maintenanceReleaseGraceMs=maintenanceWorkBudgetMs/u,'repository maintenance liveness must derive its bounded release grace from the existing 30-second work budget');
 assert.match(policy,/publicationMaxAgeMs:24\*60\*60\*1000[\s\S]*publicationAssertionMarginMs:30\*60\*1000[\s\S]*maintenanceWorkBudgetMs,[\s\S]*maintenanceReleaseGraceMs,[\s\S]*maintenanceMaxAgeMs:maintenanceWorkBudgetMs\+maintenanceReleaseGraceMs[\s\S]*maintenanceAssertionMarginMs:maintenanceReleaseGraceMs[\s\S]*objectGcGraceMs:48\*60\*60\*1000/u,'shared repository protocol must bound maintenance leases by work budget plus release grace rather than a long-lived lock');
-assert.match(device,/RepositoryPolicy=input\.repositoryPolicy[\s\S]*RepositoryPolicy\.protocol/u,'Device repository transport must consume shared repository protocol policy');
+assert.match(app,/limits:Object\.freeze\(\{publicationMaxAgeMs:RepositoryPolicyModule\.protocol\.publicationMaxAgeMs[\s\S]*maintenanceMaxAgeMs:RepositoryPolicyModule\.protocol\.maintenanceMaxAgeMs/u,'Device Folder storage must use the shared repository protocol policy for its locks');
 assert.match(provider,/RepositoryPolicy=input\.repositoryPolicy[\s\S]*RepositoryPolicy\.protocol/u,'Drive repository transport must consume shared repository protocol policy');
 assert.match(mutation,/async function refreshAuthority[\s\S]*durableAcquire[\s\S]*writeLease\(kind,id\)[\s\S]*loseAuthority\(error,\{durableProtected:true\}\)/u,'local mirror renewal failure must retain the stronger durable lease while failing forward mutation closed');
 assert.match(mutation,/function assertAuthority\(options=\{\}\)[\s\S]*allowDurableProtected[\s\S]*throw active\.authorityError/u,'destructive callers must have an explicit authority assertion with rollback-only durable protection');
@@ -102,7 +97,7 @@ assert.doesNotMatch(drive,/function readWithTimeout\b/u,'retired Drive timeout h
 const lifecycle=fs.readFileSync('source/core/operation-lifecycle.js','utf8');
 assert.match(lifecycle,/function createJob[\s\S]*function reconcile[\s\S]*function wake[\s\S]*function complete/u);
 assert.match(background,/Lifecycle\.createJob/u);assert.match(background,/registerJob\('maintenance'/u);assert.match(background,/registerJob\('integrity'/u);
-assert.match(provider,/background\.registerJob\('convergence'/u);assert.match(device,/background\.registerJob\('automatic'/u);
+assert.match(provider,/background\.registerJob\('convergence'/u);
 assert.match(assets,/Lifecycle\.createJob/u);assert.match(app,/const DataMaintenanceJob=OperationLifecycle\.createJob/u);assert.match(app,/const AttachmentIntegrityJob=OperationLifecycle\.createJob/u);
 assert.match(app,/OperationLifecycle\.createGroup/u);assert.match(app,/wakeBackgroundOperations\('ownership'\)/u);assert.match(app,/wakeBackgroundOperations\('encryption-unlocked'\)/u);
 assert.match(provider,/providerMaintenanceScheduler\(selected\);providerIntegrityScheduler\(selected\);providerConvergenceJob\(selected\)/u,'registration and reconnection must wake complete provider ownership');

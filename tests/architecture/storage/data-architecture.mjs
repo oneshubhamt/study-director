@@ -155,7 +155,7 @@ assert.match(appMeta,/function canonicalEnvelope\(row,key\)/u,'appMeta gateway m
 assert.match(appMeta,/validateValue\(definition,row\.value,key,suffix\)/u,'appMeta gateway must centrally apply family value validation');
 assert.match(app,/compatibilityAppMeta:CompatibilityAppMeta/u,'AppData migration paths must receive the compatibility-owned metadata capability explicitly');
 assert.match(app,/return ExportsAppMeta\.transaction\('readwrite'/u,'backup-protection policy mutation must use the exports-owned metadata capability');
-assert.match(app,/storage:exactAppMetaStorage\(DeviceBackupAppMeta,'automaticDeviceBackup'/u,'Device Backup settings must use the device-backup-owned metadata capability');
+assert.match(app,/settings:exactAppMetaStorage\(DeviceBackupAppMeta,'automaticDeviceBackup'/u,'Device Backup settings must use the device-backup-owned metadata capability');
 assert.match(app,/BackupAppMeta\.read\('repositoryIntegrityScrub'\)/u,'repository scrub state must use the backup-owned metadata capability');
 
 for(const pattern of [
@@ -207,14 +207,14 @@ assert.equal(OPFS_IDENTITIES.attachments,'study-director-assets-v2');
 for(const boundary of ['completeBackup','deviceBackup','driveBackup','attachmentArchive','markdownExport','zipExport'])assert.ok(DATA_ARCHITECTURE.external[boundary],`external boundary ${boundary} must be classified`);
 
 
-const sw=read('source/platform/sw.js'),deviceBackupSource=read('source/core/device-backup.js'),driveSource=read('source/external/drive.js');
+const sw=read('source/platform/sw.js'),deviceBackupSource=read('source/core/device-backup.js')+read('source/core/device-folder-storage.js'),driveSource=read('source/external/drive.js');
 assert.match(sw,/@@SD_CACHE_STORAGE_IDENTITIES@@/u,'service worker cache identities must come from the canonical contract');
 assert.doesNotMatch(sw,/const CACHE_PREFIX=['"]study-director-shell-/u,'service worker must not mint the shell cache prefix');
 assert.doesNotMatch(sw,/const bridgeCache=['"]study-director-update-bridge-v2/u,'service worker must not mint the update bridge cache');
-assert.match(deviceBackupSource,/@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@/u,'Device Backup repository directories must come from the canonical contract');
+assert.match(app,/const EXTERNAL_REPOSITORY_IDENTITIES=Object\.freeze\(@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@\)/u,'Device Backup repository directories must come from the canonical contract');assert.match(app,/identities:Object\.freeze\(\{root:EXTERNAL_REPOSITORY_IDENTITIES\.deviceFolderRoot/u,'Device Folder storage receives its directory names from the canonical contract');
 assert.doesNotMatch(deviceBackupSource,/Study-Director-Automatic-Backup-Repository/u,'Device Backup must not mint its repository root');
 assert.doesNotMatch(deviceBackupSource,/id:['"]study-director-device-backup/u,'Device Backup must not mint its persistent picker identity');
-assert.match(deviceBackupSource,/REPOSITORY_IDENTITIES\.deviceFolderPickerId/u,'Device Backup picker identity must come from the canonical contract');
+assert.match(app,/pickerId:EXTERNAL_REPOSITORY_IDENTITIES\.deviceFolderPickerId/u,'Device Backup picker identity must come from the canonical contract');
 assert.match(driveSource,/@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@/u,'Drive repository folder identity must come from the canonical contract');
 assert.doesNotMatch(driveSource,/const FOLDER_NAME=['"]Study Director Backups/u,'Drive must not mint its repository folder');
 for(const identity of ['studyDirectorFolder','studyDirectorSecurity','studyDirectorSha256','studyDirectorRepository','studyDirectorRepositoryVersion','studyDirectorRepositoryKind','studyDirectorRepositoryId'])assert.ok(!driveSource.includes(`'${identity}'`),`Drive must not mint durable appProperties identity ${identity}`);

@@ -10,12 +10,12 @@ const BackupRecoveryHost=registry.require('backup-recovery-host',1);
 const freeze=Object.freeze;
 const CHECKPOINT=value=>'cp_'+value.repeat(32);
 
-const events=[],statuses=[],diagnostics=[],notified=[];
+const events=[],statuses=[],diagnostics=[];
 let storedPending=null,storageReadError=null,providerBringInResult=freeze({ok:true}),chooseMode='replace',restoredCheckpoint='',restoredConfirmed=false,suspended=0,cancelImportCalls=0,deviceCancelCalls=0,providerCancelCalls=0,lastProviderCancelId='';
 let deletionResults=[];
 let providerRestoreImpl=async()=>freeze({ok:true});
 let deviceHistoryReads=0,providerHistoryReads=0,providerBringInCheckpoint='',lastUseBackupOptions=null,deviceCombineResult=freeze({ok:true}),lastDeviceCombine=null,deviceConnected=true,sessionBlocking=false;
-const providerHooks={convergence:null,recovery:null,pending:null};
+const providerHooks={recovery:null,pending:null};
 const deviceEntry=freeze({logicalId:'state_'+'a'.repeat(64),logicalFingerprint:'a'.repeat(64),exportedAt:'2026-09-20T12:00:00.000Z',counts:freeze({dailyRecord:2,areaNote:1}),location:freeze({sourceId:'device-folder',sourceLabel:'Device Folder',checkpointId:CHECKPOINT('a'),exportedAt:'2026-09-20T12:00:00.000Z',tier:'latest',encrypted:false})});
 const driveEntry=freeze({logicalId:'state_'+'b'.repeat(64),logicalFingerprint:'b'.repeat(64),exportedAt:'2026-09-20T11:00:00.000Z',counts:freeze({dailyRecord:1,areaNote:1}),location:freeze({sourceId:'google-drive',sourceLabel:'Google Drive',checkpointId:CHECKPOINT('b'),exportedAt:'2026-09-20T11:00:00.000Z',tier:'latest',encrypted:false})});
 let deviceHistory=freeze({available:true,sourceId:'device-folder',sourceLabel:'Device Folder',entries:freeze([deviceEntry])});
@@ -29,18 +29,6 @@ const plan={input:null,cached:'',persisted:'',stored:'',writable:true,saves:[]};
 const session={tasks:false,revision:0,writes:0,source:'2026-09-20T12:00:00.000Z'};
 const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresentation(),
   cancellation:freeze({cancelImport:()=>{cancelImportCalls+=1;return true;}}),
-  device:freeze({
-    backupNow:async reason=>{events.push(`backup:${reason}`);return freeze({ok:true,checkpointId:CHECKPOINT('d')});},
-    bringIn:async options=>{events.push(`device-combine:${options.checkpointId}`);lastDeviceCombine=options;return deviceCombineResult;},
-    cancelForeground:()=>{deviceCancelCalls+=1;return true;},
-    history:async()=>{deviceHistoryReads+=1;return deviceHistory;},
-    notifyChange:change=>{notified.push(change);return true;},
-    removeSafetyBackup:async()=>freeze({removed:true,entries:freeze([])}),
-    restoreVersion:async options=>{restoredCheckpoint=options.checkpointId;restoredConfirmed=options.confirmed===true;events.push(`restore:${restoredCheckpoint}`);return freeze({ok:true});},
-    resumeAutomatic:async()=>{suspended-=1;events.push('resume');return true;},
-    status:()=>freeze({connected:deviceConnected}),
-    suspendAutomatic:async()=>{suspended+=1;events.push('suspend');return freeze({token:'s1'});}
-  }),
   diagnostics:freeze({capture:(scope,error,level)=>diagnostics.push(freeze({scope,message:String(error?.message||error),level})),mark:()=>false}),
   document,
   interactions:freeze({choose:async options=>{
@@ -59,17 +47,23 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
   }),
   managedRecovery:freeze({createCoordinator:input=>ManagedRecovery.createCoordinator(input)}),
   mutation:freeze({run:async(kind,operation)=>{events.push(`mutation:${kind}`);return operation();}}),
+  // Every location, the Device Folder included, is reached through the engine.
   providers:freeze({
-    bringInRepositoryProvider:async(id,options)=>{providerBringInCheckpoint=options.checkpointId;events.push(`bring-in:${id}`);return providerBringInResult;},
-    cancelForeground:(_reason,id)=>{providerCancelCalls+=1;lastProviderCancelId=String(id||'');return true;},
-    configureConvergencePropagation:config=>{providerHooks.convergence=config;return true;},
+    bringInRepositoryProvider:async(id,options)=>{
+      if(id==='device-folder'){events.push(`device-combine:${options.checkpointId}`);lastDeviceCombine=options;return deviceCombineResult;}
+      providerBringInCheckpoint=options.checkpointId;events.push(`bring-in:${id}`);return providerBringInResult;
+    },
+    cancelForeground:(_reason,id)=>{if(id==='device-folder')deviceCancelCalls+=1;else providerCancelCalls+=1;lastProviderCancelId=String(id||'');return true;},
     configureManagedRecovery:config=>{providerHooks.recovery=config;return true;},
     configurePendingBackupRetry:config=>{providerHooks.pending=config;return true;},
-    history:async id=>{providerHistoryReads+=1;assert.equal(id,'google-drive');return driveHistory;},
-    list:()=>freeze([freeze({id:'google-drive',label:'Google Drive'})]),
+    history:async id=>{if(id==='device-folder'){deviceHistoryReads+=1;return deviceHistory;}providerHistoryReads+=1;assert.equal(id,'google-drive');return driveHistory;},
+    list:()=>freeze([freeze({id:'device-folder',label:'Device Folder',connected:deviceConnected}),freeze({id:'google-drive',label:'Google Drive',connected:false})]),
     removeProtectedRepositoryProvider:async()=>freeze({removed:true,entries:freeze([])}),
-    restoreRepositoryProviderVersion:async(id,options)=>providerRestoreImpl(id,options),
-    suspendBackground:()=>{events.push('suspend-providers');return freeze({settled:Promise.resolve(),release:()=>{events.push('resume-providers');return true;}});}
+    restoreRepositoryProviderVersion:async(id,options)=>{
+      if(id==='device-folder'){restoredCheckpoint=options.checkpointId;restoredConfirmed=options.confirmed===true;events.push(`restore:${restoredCheckpoint}`);return freeze({ok:true});}
+      return providerRestoreImpl(id,options);
+    },
+    suspendBackground:()=>{suspended+=1;events.push('suspend');let released=false;return freeze({settled:Promise.resolve(),release:()=>{if(released)return false;released=true;suspended-=1;events.push('resume');return true;}});}
   }),
   session:freeze({hasBlocking:()=>sessionBlocking}),
   sourceRevision:()=>session.source,
@@ -78,7 +72,7 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
 }));
 
 assert.equal(host.format,'study-director.backup-recovery-host');
-assert.ok(providerHooks.convergence&&providerHooks.recovery&&providerHooks.pending,'provider hooks must be configured once through the extracted host');
+assert.ok(providerHooks.recovery&&providerHooks.pending,'provider hooks must be configured once through the extracted host');
 await providerHooks.pending.mark('google-drive');assert.equal(storedPending.entries[0].providerId,'google-drive');await providerHooks.pending.clear('google-drive');assert.equal(storedPending,null);
 const preservedPending=freeze({format:'study-director.managed-provider-backup-pending',version:1,entries:freeze([freeze({providerId:'other-provider',requestedAt:'2026-09-20T12:00:00.000Z',sourceRevision:'2026-09-20T11:59:59.000Z'})])});
 storedPending=preservedPending;storageReadError=new Error('temporary appMeta read failure');
@@ -86,7 +80,6 @@ await assert.rejects(()=>providerHooks.pending.read('google-drive'),/temporary a
 await assert.rejects(()=>providerHooks.pending.mark('google-drive'),/temporary appMeta read failure/,'pending-marker mutation must fail closed when the durable state cannot be read');
 assert.equal(storedPending,preservedPending,'failed strict pending-marker mutation must not overwrite or remove unread durable state');
 storageReadError=null;assert.equal(await providerHooks.pending.read('google-drive'),null,'a successfully read marker without this provider is confirmed absence');storedPending=null;diagnostics.length=0;
-const convergence=await providerHooks.convergence.device(freeze({source:'google-drive'}));assert.equal(convergence.status,'pending');assert.equal(notified.at(-1).reason,'managed-convergence');
 
 const recovery=await host.managedRecovery(freeze({kind:'restore-version',label:'Device Folder',createSafety:async()=>freeze({verified:true,checkpointId:CHECKPOINT('c'),sourceRevision:'2026-09-20T12:00:00.000Z'}),apply:async()=>{events.push('apply');return freeze({ok:true});},publishPresent:async()=>freeze({status:'completed',checkpointId:CHECKPOINT('e')})}));
 assert.equal(recovery.managedRecovery.present.status,'completed');assert.equal(suspended,0);
@@ -116,7 +109,7 @@ const restorePresentationId=presentation.at(-1).operationId;assert.match(present
 host.history.close();assert.equal(nodes.get('managed-version-history').open,false,'Close must dismiss the modal while recovery continues.');assert.equal(cancelImportCalls,0);assert.equal(deviceCancelCalls,0);assert.equal(providerCancelCalls,0,'Close must not cancel provider recovery.');
 await host.history.openSource('google-drive');assert.equal(nodes.get('managed-version-history').open,true,'Reopening Version History must reattach to the live recovery.');assert.equal(nodes.get('managed-version-history-progress-stage').textContent,'Downloading backup data…');assert.match(nodes.get('managed-version-history-progress-detail').textContent,/2 of 8 complete/);
 assert.equal(presentation.at(-1).operationId,restorePresentationId,'reopening retains the operation identity');
-releaseCloseRestore(freeze({ok:true,convergence:{source:{status:'completed'},device:{status:'pending'}}}));assert.equal(await closeRestore,true);assert.match(presentation.at(-1).message,/Google Drive backup state is verified/);assert.match(presentation.at(-1).message,/Device Folder backup update is pending/);
+releaseCloseRestore(freeze({ok:true,convergence:{source:{status:'completed'},others:[{label:'Device Folder',status:'pending'}]}}));assert.equal(await closeRestore,true);assert.match(presentation.at(-1).message,/Google Drive backup state is verified/);assert.match(presentation.at(-1).message,/Device Folder backup update is pending/);
 
 const finalMessage=presentation.at(-1).message;lateProgress({message:'Late stale download'});assert.equal(presentation.at(-1).message,finalMessage,'completed restore callbacks cannot revive progress');
 

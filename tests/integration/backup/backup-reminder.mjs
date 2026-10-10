@@ -14,7 +14,9 @@ function reminder({lastBackupAt=null,lastLocalSaveAt=null,covered=[],device=fals
   const run=new Function('appCanMutate','readStorageHealth','verifiedRecoveryEntries','DeviceBackup','BackupProviderRuntime','AppData','refreshStorageFallbackWarning','todayISO','notifyUser','Date',
     `let backupNudgeCheckedAt=0,backupNudgeMessage='',backupNudgeNotifiedDate='';const BACKUP_NUDGE_CHECK_MS=3600000,BACKUP_NUDGE_MS=7*24*60*60*1000;${html.slice(start,end)};return maybePromptBackupNudge(true).then(()=>backupNudgeMessage);`);
   const FixedDate=class extends Date{static now(){return now;}};
-  return run(()=>true,()=>({lastBackupAt,lastLocalSaveAt}),()=>covered.map(at=>({sourceRevision:at})),{status:()=>({connected:device})},{automaticActive:()=>drive},
+  // Device Folder and Drive are both engine locations: either one able to back
+  // up on its own makes automaticActive() true.
+  return run(()=>true,()=>({lastBackupAt,lastLocalSaveAt}),()=>covered.map(at=>({sourceRevision:at})),null,{automaticActive:()=>device||drive},
     {dailyRecords:{summaries:async()=>Array.from({length:savedDays},(_,i)=>({date:i}))}},()=>{},()=>'2026-10-06',(...args)=>notified.push(args),FixedDate).then(message=>({message,notified}));
 }
 const cases=[];

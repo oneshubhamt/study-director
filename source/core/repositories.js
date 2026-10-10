@@ -1451,7 +1451,7 @@ function normalizeInsightsRecordWindowOptions(options,summaries){
   return {dates};
 }
 const DATA_MAINTENANCE_INTERVAL_MS=24*60*60*1000;
-let dataMaintenancePromise=null,dataMaintenanceContinuation=null;
+let dataMaintenancePromise=null,dataMaintenanceContinuation=null,dataMaintenanceAborted=false;
 async function runDataMaintenance(options={}){
   const force=!!(options&&options.force);
   if(!appCanMutate())return {status:'skipped',reason:'not-primary'};
@@ -1503,12 +1503,17 @@ async function runDataMaintenance(options={}){
     }
     requireSameOwner();const report={version:DATA_MAINTENANCE_VERSION,status:'completed',completedAt:new Date().toISOString()};
     await Meta.write('dataMaintenance',report,{updatedAt:report.completedAt,strict:true,abortMessage:'data maintenance metadata write aborted'});
-    dataMaintenanceContinuation=null;
+    dataMaintenanceContinuation=null;dataMaintenanceAborted=false;
     markStorageHealthOk('maintenance');
     return report;
   })().catch(error=>{
     if(error?.code==='DATA_MAINTENANCE_YIELDED'||error?.code==='AREA_NOTE_RECOVERY_SUPERSEDED'){const reason=error.code==='AREA_NOTE_RECOVERY_SUPERSEDED'?'notes-changed':error.reason;if(reason!=='budget')dataMaintenanceContinuation=null;return {status:'yielded',reason,phase:dataMaintenanceContinuation?.phase||0};}
     if(error&&error.message==='Data maintenance stopped because app ownership changed')return {status:'skipped',reason:'ownership-changed'};
+    // A transaction aborted from outside (the browser clearing site data
+    // mid-run) is retried once without an error; a second abort in a row is
+    // a real failure and is reported.
+    if(error?.name==='AbortError'&&!dataMaintenanceAborted){dataMaintenanceAborted=true;dataMaintenanceContinuation=null;return {status:'yielded',reason:'interrupted',phase:0};}
+    dataMaintenanceAborted=false;
     AppDiagnostics.capture('maintenance.run',error,'error');
     markStorageHealthError('maintenance',`Data maintenance failed: ${error&&error.message||'data maintenance failed'}`);
     return {status:'failed',reason:error&&error.message||String(error)};

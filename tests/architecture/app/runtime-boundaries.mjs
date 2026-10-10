@@ -325,7 +325,7 @@ const app=fs.readFileSync('source/app.html','utf8');
 const review=fs.readFileSync('source/core/review.js','utf8');
 const provider=fs.readFileSync('source/core/backup-provider.js','utf8');
 const background=fs.readFileSync('source/core/repository-background.js','utf8');
-const device=fs.readFileSync('source/core/device-backup.js','utf8');
+const backupEngine=fs.readFileSync('source/core/backup-provider.js','utf8');
 const css=fs.readFileSync('source/styles/core.css','utf8');
 const architecture=fs.readFileSync('contracts/data-architecture.mjs','utf8');
 const drive=fs.readFileSync('source/external/drive.js','utf8');
@@ -377,7 +377,8 @@ assert.match(background,/function arm\(entry\)\{[\s\S]*if\(!entry\|\|foreground\
 assert.match(provider,/finally\{[\s\S]*await release\(selected,'export'\);setBusy\(false\);foreground\.release\(\);/u,'foreground completion releases its owner without a second scheduling handoff');
 assert.match(drive,/function release\(\)\{clearPickerMetadata\(\);if\(accessToken&&Date\.now\(\)>=tokenExpiresAt\)clearSession\(\);\}/u,'Drive operation release must retain an unexpired access token so bounded post-operation maintenance can use the existing authorization.');
 assert.doesNotMatch(provider,/PROVIDER_BUSY_RETRY_MS/u,'Retired timed provider busy polling must not remain after background work became opportunistic and foreground-pre-emptible.');
-assert.match(device,/state\.pending&&state\.nextEligibleAt[\s\S]*automaticJob\.wake\('source'\)/u,'routine commits must preserve the lifecycle deadline');
+assert.match(backupEngine,/job\.schedule\(Math\.max\(0,automaticDueAt\(selected\)-now\),urgent\?'important-change':'automatic','earliest'\)/u,'routine commits must preserve the earliest automatic-backup deadline');
+assert.match(backupEngine,/due>Date\.now\(\)\+50\)\{job\.schedule\(due-Date\.now\(\),'automatic','earliest'\);return freeze\(\{status:'idle',reason:'not-due'\}\)/u,'any earlier wake-up keeps the waiting changes\' deadline instead of backing them up early');
 assert.match(css,/--sd-motion-progress-transition:width var\(--sd-motion-duration-progress\) linear/u,'Timer progress must regain smooth CSS interpolation without a display-rate JavaScript loop.');
 console.log(JSON.stringify({status:'PASS',suite:'runtime-energy-boundary',silentHeartbeat:true,timerRafBounded:true,sessionCheckpoint60s:true,attachmentMaintenanceReferenceDriven:true,dailyAttachmentSweep:true,activeSessionAssetGcReferenceDriven:true,hiddenPaneTicksBounded:true,providerMaintenanceBounded:true,providerMaintenancePreemptible:true,driveAuthorizationRetained:true,deviceScheduleStable:true,smoothCssProgress:true}));
 }

@@ -173,7 +173,7 @@ class Element {
   assert.equal(presentation.locationLabel('device-folder',{mode:'permission'}),'Permission needed');
   const providerSource=fs.readFileSync('source/core/backup-provider.js','utf8'),start=providerSource.indexOf('  function renderButtons(){'),end=providerSource.indexOf('  function register(',start);
   const row=new Element(),host={replaceChildren(){}},item={id:'google-drive',label:'Google Drive'};
-  const render=new Function('elements','providers','presentation','providerConnected','connectedOnceByProvider','document','foregroundView','backupProvider','open',`let busy=false;${providerSource.slice(start,end)};return renderButtons;`)(()=>({host}),new Map([[item.id,item]]),presentation,()=>true,new Set(),{getElementById:()=>row,createDocumentFragment:()=>new Element(),createElement:()=>new Element()},()=>null,()=>{},()=>{});
+  const render=new Function('elements','providers','presentation','providerConnected','connectedOnceByProvider','document','foregroundView','backupProvider','open',`let busy=false;const notifyStatus=()=>{};${providerSource.slice(start,end)};return renderButtons;`)(()=>({host}),new Map([[item.id,item]]),presentation,()=>true,new Set(),{getElementById:()=>row,createDocumentFragment:()=>new Element(),createElement:()=>new Element()},()=>null,()=>{},()=>{});
   render();assert.equal(row.textContent,'On · Last verified 06:44');
   const external=presentation.begin('google-drive','backup',{id:'external-backup',foreground:false});render();assert.equal(row.textContent,'Backing up…');
   external.finish({message:'External backup verified in Google Drive.'});render();assert.equal(row.textContent,'On · Last verified 06:44');

@@ -3052,7 +3052,6 @@ function renderOwnershipUi(){
   if(StartupLifecycle.status().fullyInitialized)PlanRuntime.savedPlans.syncAccess();
   OwnershipUiProjection.apply();
   renderOwnershipBanner();
-  DeviceBackup?.syncOwnership();
   wakeBackgroundOperations('ownership');
   void NativeCapabilities?.syncWake();
 }
@@ -7680,7 +7679,7 @@ function setBackupProtectionSurfaceError(error){
 const BackupProtection=ExportsModule.createProtection({processing:Exports,storage:{read:key=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return ExportsAppMeta.read('backupProtection');},write:(key,value,options)=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return mutateBackupProtection(value,options);},remove:(key,options)=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return mutateBackupProtection(null,options);}},interactions:Interactions,settingKey:APP_META_KEYS.backupProtection,canMutate:()=>appCanMutate(),issueToken:()=>AppOwnership.issueWriteToken('change backup encryption'),assertToken:token=>AppOwnership.assertWriteToken(token,'change backup encryption'),onState:state=>{
   NoticeCoordinator.resolveEvent('backup-protection','settings');
   const ready=!state.enabled||state.unlocked,restored=ready&&!backupProtectionReady;backupProtectionReady=ready;
-  if(restored&&StartupLifecycle.status().fullyInitialized){DeviceBackup?.syncOwnership();wakeBackgroundOperations('encryption-unlocked');}
+  if(restored&&StartupLifecycle.status().fullyInitialized)wakeBackgroundOperations('encryption-unlocked');
   const label=document.getElementById('backup-protection-status');if(label)label.textContent=state.enabled?(state.unlocked?'Unlocked':'Locked'):'Off';
   const button=document.getElementById('manage-backup-protection');if(button)button.textContent=state.enabled?(state.unlocked?'Manage…':'Unlock…'):'Set password…';
   const hint=document.getElementById('backup-protection-hint');if(hint){hint.className='backup-inline-note ui-helper';hint.textContent='Automatic encrypted backups are paused until you unlock.';hint.hidden=!state.enabled||state.unlocked;}

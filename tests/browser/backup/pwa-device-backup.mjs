@@ -9,7 +9,7 @@ const root=process.cwd();
 const manifest=JSON.parse(fs.readFileSync(path.join(root,'dist/build-manifest.json'),'utf8'));
 const deployment=path.join(root,'dist/deployment');
 const marker='/* PUBLIC PLUGIN API */';
-const exposure=`window.__DeviceBackupDebug=Object.freeze({DeviceBackup,BackupController,RepositoryCheckpointPipeline,StartupLifecycle,TimerState,TIMER_MODES,AppData,pwaUpdateBlockReason});\n`;
+const exposure=`window.__DeviceBackupDebug=Object.freeze({DeviceBackup,BackupProviderRuntime,BackupController,RepositoryCheckpointPipeline,StartupLifecycle,TimerState,TIMER_MODES,AppData,pwaUpdateBlockReason});\n`;
 let main=fs.readFileSync(path.join(deployment,manifest.main),'utf8');
 if(!main.includes(marker))throw new Error('Device-backup browser harness hook is unavailable.');
 main=main.replace(marker,exposure+marker);
@@ -52,6 +52,8 @@ const prelude=`(()=>{
     return navigator.storage.getDirectory();
   }});
   window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';
+  // The versions in the folder, read from the folder itself.
+  window.__deviceVersions=async()=>{try{const root=await navigator.storage.getDirectory(),repo=await root.getDirectoryHandle('Study-Director-Automatic-Backup-Repository'),commits=await repo.getDirectoryHandle('commits'),out=[];for await(const [name] of commits.entries())if(/^cp_[a-f0-9]{32}\\.sdcommit$/.test(name))out.push(name.slice(0,-'.sdcommit'.length));return out.sort();}catch{return [];}};
 })();`;
 const evidence={status:'PASS',release:manifest.release,checks:{}};
 
@@ -82,7 +84,7 @@ try{
   evidence.checks.startup={off:true,noPrompt:true,manualBackupPreserved:true};
 
   await page.evaluate(`document.getElementById('connect-device-backup').click()`);
-  await waitFor(()=>page.evaluate(`(()=>{const state=__DeviceBackupDebug.DeviceBackup.status();return state.connected&&!state.busy&&/^cp_[a-f0-9]{32}\.sdcheckpoint$/.test(state.lastFilename||'');})()`),{timeout:90000,label:'initial verified repository checkpoint'});
+  await waitFor(()=>page.evaluate(`(async()=>{const state=__DeviceBackupDebug.DeviceBackup.status();return state.connected&&!state.busy&&(await __deviceVersions()).length===1;})()`),{timeout:90000,label:'initial verified repository checkpoint'});
   const first=await page.evaluate(`(async()=>{
     const root=await navigator.storage.getDirectory(),repo=await root.getDirectoryHandle('Study-Director-Automatic-Backup-Repository');
     const checkpoints=await repo.getDirectoryHandle('checkpoints'),objects=await repo.getDirectoryHandle('objects'),checkpointNames=[],objectNames=[];
@@ -97,11 +99,11 @@ try{
   // Nothing changed: Back up now confirms the folder is current and adds no version.
   await page.evaluate(`document.getElementById('device-backup-now').click()`);
   await waitFor(()=>page.evaluate(`!__DeviceBackupDebug.DeviceBackup.status().busy&&/already has your latest data/.test(document.querySelector('.library-data-drawer')?.textContent||'')`),{timeout:90000,label:'unchanged backup confirmed'});
-  assert.equal(await page.evaluate('__DeviceBackupDebug.DeviceBackup.status().checkpointCount'),1,'an unchanged backup adds no version');
+  assert.equal(await page.evaluate('__deviceVersions().then(rows=>rows.length)'),1,'an unchanged backup adds no version');
   // A real change gets its own version.
   await page.evaluate(`(async()=>{__DeviceBackupDebug.AppData.notes.update('Rotation','Rotation','A change worth a new version');await __DeviceBackupDebug.AppData.notes.flush();})()`);
   await page.evaluate(`document.getElementById('device-backup-now').click()`);
-  await waitFor(()=>page.evaluate(`(()=>{const state=__DeviceBackupDebug.DeviceBackup.status();return !state.busy&&state.checkpointCount===2&&/^cp_[a-f0-9]{32}\.sdcheckpoint$/.test(state.lastFilename||'');})()`),{timeout:90000,label:'second verified repository checkpoint'});
+  await waitFor(()=>page.evaluate(`(async()=>!__DeviceBackupDebug.DeviceBackup.status().busy&&(await __deviceVersions()).length===2)()`),{timeout:90000,label:'second verified repository checkpoint'});
   const rotation=await page.evaluate(`(async()=>{const root=await navigator.storage.getDirectory(),repo=await root.getDirectoryHandle('Study-Director-Automatic-Backup-Repository'),checkpoints=await repo.getDirectoryHandle('checkpoints'),out=[];for await(const [name,handle] of checkpoints.entries()){const file=await handle.getFile();out.push({name,size:file.size});}return out.sort((a,b)=>a.name.localeCompare(b.name));})()`);
   assert.equal(rotation.length,2);assert.ok(rotation.every(row=>/^cp_[a-f0-9]{32}\.sdcheckpoint$/u.test(row.name)&&row.size>0));
   evidence.checks.rotation={immutableCheckpointNames:true,repositoryManifestReadback:true,twoManifests:true,retentionTarget:15};
@@ -125,13 +127,12 @@ try{
     await notes.flush({strict:true});return result.status==='changed'?notes.get('Reliability','Reliability').key:'';
   })()`);
   assert.ok(noteKey,'the note was saved before the backup');
-  const beforeNoteBackup=await page.evaluate(`__DeviceBackupDebug.DeviceBackup.status().lastBackupAt`);
+  const versionsBeforeNote=await page.evaluate('__deviceVersions()');
   await page.evaluate(`document.getElementById('device-backup-now').click()`);
-  await waitFor(()=>page.evaluate(`(()=>{const state=__DeviceBackupDebug.DeviceBackup.status();return !state.busy&&state.lastBackupAt>${JSON.stringify(beforeNoteBackup)};})()`),{timeout:90000,label:'backup holding the note'});
-  const noteCheckpoint=await page.evaluate(`(async()=>{
-    const debug=__DeviceBackupDebug,suspension=await debug.DeviceBackup.suspendAutomatic('qa-note-restore');window.__qaNoteSuspension=suspension;
+  const noteCheckpoint=await waitFor(()=>page.evaluate(`(async()=>{if(__DeviceBackupDebug.DeviceBackup.status().busy)return '';const added=(await __deviceVersions()).filter(id=>!${JSON.stringify(versionsBeforeNote)}.includes(id));return added.length===1?added[0]:'';})()`),{timeout:90000,label:'backup holding the note'});
+  await page.evaluate(`(async()=>{
+    const debug=__DeviceBackupDebug,hold=debug.BackupProviderRuntime.suspendBackground('qa-note-restore');await hold.settled;window.__qaNoteSuspension=hold;
     const notes=debug.AppData.notes,current=notes.get(${JSON.stringify(noteKey)},'Reliability');notes.update(current.key,'Reliability','Text after an accident',current.updatedAt);await notes.flush({strict:true});
-    return debug.DeviceBackup.status().lastFilename.replace(/\.sdcheckpoint$/,'');
   })()`);
   await page.evaluate(`(()=>{document.querySelector('[data-tab="library"]').click();document.getElementById('library-notes-drawer').open=true;})()`);
   await waitFor(()=>page.evaluate(`[...document.querySelectorAll('[data-ongoing-note-key]')].some(row=>row.dataset.ongoingNoteKey===${JSON.stringify(noteKey)})`),{label:'note listed in the Library'});
@@ -152,11 +153,11 @@ try{
   assert.equal(afterNoteRestore.mode,afterNoteRestore.running,'the study timer keeps running through a note restore');
   assert.equal(afterNoteRestore.gap,null,'a note restore is not time away');
   assert.match(afterNoteRestore.status,/Restored “Reliability” from the backup of/u);
-  await page.evaluate(`__DeviceBackupDebug.DeviceBackup.resumeAutomatic(window.__qaNoteSuspension)`);
+  await page.evaluate(`window.__qaNoteSuspension.release()`);
   evidence.checks.noteRestoreDuringSession={timerKeptRunning:true,noAwayGap:true};
   const beforeCompletion=await page.evaluate(`__DeviceBackupDebug.DeviceBackup.status().lastBackupAt`);
   await page.evaluate(`document.querySelector('[data-action="mark-done"]').click()`);
-  await waitFor(()=>page.evaluate(`(()=>{const state=__DeviceBackupDebug.DeviceBackup.status();return !state.busy&&state.checkpointCount>=1&&state.lastBackupAt>${JSON.stringify(beforeCompletion)}&&/^cp_[a-f0-9]{32}\.sdcheckpoint$/.test(state.lastFilename||'');})()`),{timeout:90000,label:'task-completion early repository backup'});
+  await waitFor(()=>page.evaluate(`(()=>{const state=__DeviceBackupDebug.DeviceBackup.status();return !state.busy&&!state.backingUp&&state.lastBackupAt>${JSON.stringify(beforeCompletion)};})()`),{timeout:90000,label:'task-completion early repository backup'});
   evidence.checks.importantEvent={taskCompletionEarlyBackup:true};
 
   const priorDocument=await page.evaluate('performance.timeOrigin');
