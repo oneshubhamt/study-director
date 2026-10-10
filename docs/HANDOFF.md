@@ -2,7 +2,7 @@
 
 Status of the work on this branch (`refactor/background-coordination`, draft PR #1). Read sections 1 and 3 first; section 2 is a closed summary.
 
-**Current state (2026-10-10):** the backup and data work is finished. Now: the notes brainstorm, in `docs/NOTES.md`. Nothing is built until everything there is decided. After notes: the background services (section 4).
+**Current state (2026-10-10):** the backup and data work is finished. The notes plan in `docs/NOTES.md` is fully decided; building starts when the user says so, following its order of work. After notes: the background services (section 4).
 
 ---
 
@@ -37,7 +37,7 @@ There is nothing to re-read here; the designs live in `docs/BACKUP-ENGINE.md`, `
 
 ## 3. Now: notes
 
-The brainstorm, decisions and proposals are in `docs/NOTES.md`, with the order of work once everything is decided.
+Every decision is in `docs/NOTES.md` (items 1 to 15), with the order of work.
 
 ## 4. Next: every background service, mapped and held to one standard
 
