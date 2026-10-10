@@ -197,9 +197,9 @@ registry.define('backup-recovery-host',1,()=>{
     }
     function setDialogSource(source){
       const {kicker,title,copy}=elements();
-      if(kicker)kicker.textContent=noteTarget?'Earlier versions':'Recovery';
+      if(kicker)kicker.textContent=noteTarget?'Earlier versions':'Versions';
       if(title)title.textContent=noteTarget?noteTarget.label:`${source.label} backups`;
-      if(copy)copy.textContent=noteTarget?`Choose a ${source.label} backup to compare with this note. You review the differences before anything changes.`:`Choose a verified ${source.label} backup checkpoint.`;
+      if(copy)copy.textContent=noteTarget?`Choose a ${source.label} version of this note. You review the differences before anything changes.`:`Choose a verified ${source.label} version to restore.`;
     }
     function render(entries=lastEntries){
       const {list}=elements();if(!list)return;list.replaceChildren();
@@ -216,7 +216,7 @@ registry.define('backup-recovery-host',1,()=>{
         const status=input.document.createElement('span');status.className='ui-helper';status.textContent=`${tierLabel(location.tier,location.safetyPurpose)}${location.encrypted?' · Encrypted':''}${location.health==='degraded'?' · Degraded capture':''}`;copy.appendChild(status);
         if(location.warning){const warning=input.document.createElement('span');warning.className='ui-status warn';warning.textContent=String(location.warning);copy.appendChild(warning);}
         const actions=input.document.createElement('div');actions.className='managed-version-location-actions';
-        const use=input.document.createElement('button');use.type='button';use.className='mini-btn ui-btn';use.dataset.action=noteTarget?'compare-managed-note':'recover-managed-version';use.dataset.versionHistorySource=location.sourceId;use.dataset.versionHistoryCheckpoint=location.checkpointId;use.textContent=noteTarget?'Compare…':'Restore / Combine…';actions.appendChild(use);
+        const use=input.document.createElement('button');use.type='button';use.className='mini-btn ui-btn';use.dataset.action=noteTarget?'compare-managed-note':'recover-managed-version';use.dataset.versionHistorySource=location.sourceId;use.dataset.versionHistoryCheckpoint=location.checkpointId;use.textContent=noteTarget?'Restore note…':'Restore…';actions.appendChild(use);
         if(location.tier==='before-restore'&&!noteTarget){const remove=input.document.createElement('button');remove.type='button';remove.className='mini-btn ui-btn';remove.dataset.action='remove-managed-safety';remove.dataset.versionHistorySource=location.sourceId;remove.dataset.versionHistoryCheckpoint=location.safetyCheckpointId||location.checkpointId;remove.textContent='Remove safety backup';actions.appendChild(remove);}
         row.append(copy,actions);card.appendChild(row);list.appendChild(card);
       }

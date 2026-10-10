@@ -37,7 +37,7 @@ registry.define('device-backup',1,()=>{
         format:'study-director.device-backup-status',contractVersion:1,
         installed,supported,mode,connected:connected(),permission,folderName:handle&&typeof handle.name==='string'?handle.name:'',
         busy:engineState?.busy===true||connecting,cancellable:engineState?.cancellable===true,foregroundKind:connecting?'connect':String(engineState?.foregroundKind||''),
-        backingUp:engineState?.backingUp===true,maintenanceBusy:engineState?.maintenanceBusy===true,paused:engineState?.paused===true,pending:engineState?.waiting===true,nextEligibleAt:String(engineState?.nextEligibleAt||''),
+        backingUp:engineState?.backingUp===true,maintenanceBusy:engineState?.maintenanceBusy===true,paused:engineState?.paused===true,locked:engineState?.locked===true,pending:engineState?.waiting===true,nextEligibleAt:String(engineState?.nextEligibleAt||''),
         retryAttempt:Number(engineState?.retryAttempt)||0,retryBackoffCapped:engineState?.retryBackoffCapped===true,
         lastBackupAt:String(hooks.verifiedAt()||'')||null,
         // The row's inline note shows the location's messages; this says whether it has one.

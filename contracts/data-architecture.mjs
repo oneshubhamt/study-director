@@ -240,7 +240,7 @@ export const DATA_ARCHITECTURE=freeze({
       restoreJournalState:surface('recovery-journal','repository-journals','operational','until verified completion/rollback','RestoreJournalState.v1',{protects:'checkpoint restore mutation',created:'before destructive restore commit',cleared:'after verified completion or rollback',supersededBy:'verified post-restore canonical state'}),
       restoreJournalPayload:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','RestoreJournalPayload.v4',{protects:'canonical dataset rollback image',created:'before destructive restore commit',cleared:'after verified completion or rollback',supersededBy:'verified post-restore canonical state'}),
       mutationLease:surface('coordination','repository-journals','operational','lease lifetime','MutationLease.v1'),
-      verifiedRecoveryBackups:surface('operational','host','operational','replace on verified backup','VerifiedRecoveryBackups.v2'),
+      verifiedRecoveryBackups:surface('operational','host','operational','replace on every backup','VerifiedRecoveryBackups.v3'),
       backupProtection:surface('security-policy','exports','operational','while backup protection enabled','BackupProtection.v2'),
       attachmentIntegrityAudit:surface('derived-health','host','protect','replace on audit; opaque identity/error details only','AttachmentIntegrityAudit.v2',{rebuildFrom:'indexedDb.assets + opfs.attachments'}),
       automaticDeviceBackup:surface('backup-configuration','device-backup','operational','while connected','DeviceBackupSettings.v4'),

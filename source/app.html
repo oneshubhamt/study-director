@@ -973,6 +973,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
           </details>
           <section class="backup-section backup-locations-section" aria-labelledby="managed-backup-heading">
             <div class="backup-section-heading-row"><div class="backup-section-title ui-label" id="managed-backup-heading">Automatic backup</div></div>
+            <p class="ui-helper" id="backup-retention-note">Each location keeps 15 versions: the latest, 6 daily, 4 weekly and 4 monthly, so about four months back.</p>
             <div class="backup-location-stack" aria-label="Automatic backup locations">
               <div class="backup-location-row backup-device-row">
                 <div class="backup-row-copy">
@@ -1040,7 +1041,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                   <span class="backup-location-heading"><span class="ui-label" id="backup-file-heading">Portable backup</span><span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="standalone-backup-info" aria-label="About portable backups" aria-expanded="false" aria-controls="standalone-backup-info">i</button><span class="pnote-info-popover" id="standalone-backup-info" role="note" hidden>A complete standalone .sdbackup file for manual transfer or safekeeping. It can be imported on another Study Director device, but it does not participate in Device Folder or Google Drive version history. When importing, choose whether to Replace or Combine.</span></span></span>
                   <div class="backup-file-actions">
                     <button class="mini-btn ui-btn" id="download-backup" type="button" data-action="export-backup" aria-busy="false">Export backup…</button>
-                    <button class="mini-btn ui-btn" type="button" data-action="pick-import-file">Import backup…</button>
+                    <button class="mini-btn ui-btn" type="button" data-action="pick-import-file">Restore from file…</button>
                   </div>
                 </div>
                 <div class="backup-processing-row">
@@ -1344,12 +1345,12 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
 <dialog id="managed-version-history" class="managed-version-history" aria-labelledby="managed-version-history-title" aria-describedby="managed-version-history-copy">
   <div class="managed-version-history-head">
     <div>
-      <div class="managed-version-history-kicker ui-label" id="managed-version-history-kicker">Recovery</div>
+      <div class="managed-version-history-kicker ui-label" id="managed-version-history-kicker">Versions</div>
       <div class="managed-version-history-title" id="managed-version-history-title">Backup checkpoints</div>
     </div>
     <button class="managed-version-history-close ui-btn" type="button" data-action="close-version-history" aria-label="Close recovery">×</button>
   </div>
-  <div class="managed-version-history-copy ui-body" id="managed-version-history-copy">Choose a verified backup checkpoint.</div>
+  <div class="managed-version-history-copy ui-body" id="managed-version-history-copy">Choose a verified version to restore.</div>
   <div class="managed-version-history-progress" id="managed-version-history-progress" role="status" aria-live="polite" aria-atomic="true" hidden>
     <div class="managed-version-history-progress-stage" id="managed-version-history-progress-stage"></div>
     <div class="managed-version-history-progress-detail ui-helper" id="managed-version-history-progress-detail"></div>
@@ -1616,7 +1617,7 @@ function createStorageHealthController(local){
   const issueMap=new Map();
   let active=false,mirroring=false;
   const stored=local.getJson(STORAGE_KEYS.storageHealth,null);
-  let history=Object.assign(emptyStorageHealth(),stored&&typeof stored==='object'?stored:{},{version:2});
+  let history=Object.assign(emptyStorageHealth(),stored&&typeof stored==='object'?stored:{},{version:3});
   const initialReadError=local.lastError;
   if(initialReadError){
     issueMap.set('localStorage.read',Object.freeze({
@@ -1628,29 +1629,26 @@ function createStorageHealthController(local){
   function notify(){if(active)refreshStorageFallbackWarning();}
   function normalizeSource(value){return String(value||'storage').slice(0,80);}
   function normalizeMessage(value){return clampText(String(value||'Storage is unavailable.'),APP_LIMITS.maxStatusMessageChars);}
-  function persistentMessage(source,message){
-    if(source==='attachmentIntegrity')return 'Attachment verification needs attention. Open Library → Attachment Library for details.';
-    return normalizeMessage(message);
-  }
   function issue(source,message,options={}){
     const key=normalizeSource(source),at=new Date().toISOString();
     const entry=Object.freeze({
       source:key,label:sourceLabels[key]||'Storage',message:normalizeMessage(message),
       level:options&&options.level==='warn'?'warn':'error',at
     });
+    // Issues are shown live and never stored: they describe this session.
     issueMap.set(key,entry);
-    history=Object.assign({},history,{version:2,lastError:persistentMessage(key,entry.message),lastErrorAt:at,lastErrorSource:key,updatedAt:at});
-    if(!options||options.mirror!==false)mirror();
+    // When the database fails, browser storage is the safety net: rewriting
+    // this record shows at once whether it can still be written.
+    if(key==='indexedDB'&&(!options||options.mirror!==false))mirror();
     notify();
     return snapshot();
   }
   function recover(source,patch=null,options={}){
-    const key=normalizeSource(source),at=new Date().toISOString();
+    const key=normalizeSource(source);
     const recovered=issueMap.delete(key);
     const hasPatch=!!(patch&&typeof patch==='object'&&Object.keys(patch).length);
     if(!recovered&&!hasPatch)return snapshot();
-    history=Object.assign({},history,patch&&typeof patch==='object'?patch:{},{version:2,updatedAt:at});
-    if(!options||options.mirror!==false)mirror();
+    if(hasPatch){history=Object.assign({},history,patch,{version:3});if(!options||options.mirror!==false)mirror();}
     notify();
     return snapshot();
   }
@@ -1659,7 +1657,7 @@ function createStorageHealthController(local){
   let clearMarkerOwned=false;
   function updateHistory(patch){
     const marker=!!patch&&typeof patch==='object'&&Object.hasOwn(patch,'browserDataClearedAt');
-    history=Object.assign({},history,patch&&typeof patch==='object'?patch:{},{version:2,updatedAt:new Date().toISOString()});
+    history=Object.assign({},history,patch&&typeof patch==='object'?patch:{},{version:3});
     mirror({marker});if(marker)clearMarkerOwned=!!history.browserDataClearedAt;
     notify();return snapshot();
   }
@@ -2741,7 +2739,10 @@ function setTaskSkippedState(idx){
 /* STORAGE HEALTH AND SINGLE-TAB GUARD */
 
 function emptyStorageHealth(){
-  return {version:2,lastLocalSaveAt:null,lastLiveSaveAt:null,lastDailyRecordSaveAt:null,lastNotesSaveAt:null,browserDataClearedAt:null,lastIdbOkAt:null,lastError:'',storagePersisted:null,usageBytes:null,quotaBytes:null,usageRatio:null,lastEstimateAt:null,updatedAt:null};
+  // lastLocalSaveAt: the change clock's fast copy for backup decisions.
+  // lastStudyDataSaveAt: when Saved Days or notes were last saved in this browser.
+  // browserDataClearedAt: a browser-data clear still being resolved.
+  return {version:3,lastLocalSaveAt:null,lastStudyDataSaveAt:null,browserDataClearedAt:null};
 }
 function readStorageHealth(){
   return StorageHealthController.snapshot();
@@ -2874,10 +2875,10 @@ function renderDriveBackup(){
   if(connect){const label=state.wasConnected?'Reconnect':'Connect';connect.hidden=connected;connect.textContent=label;connect.disabled=state.engineBusy;connect.setAttribute('aria-label',`${label} Google Drive`);}
   if(backupNow){backupNow.hidden=!connected||state.cancellable;backupNow.disabled=state.engineBusy;}
   if(cancel){cancel.hidden=!state.cancellable;cancel.disabled=!state.cancellable;}
-  if(versions){versions.hidden=!connected&&state.wasConnected;versions.textContent=connected?'Versions':'Recover';versions.disabled=state.engineBusy&&!recoveryActive;versions.setAttribute('aria-label',connected?'View Google Drive backup versions':'Recover from Google Drive');}
+  if(versions){versions.hidden=!connected&&state.wasConnected;versions.textContent='Versions';versions.disabled=state.engineBusy&&!recoveryActive;versions.setAttribute('aria-label','Google Drive backup versions');}
   if(settings){settings.hidden=!connected;settings.disabled=state.engineBusy;settings.setAttribute('aria-expanded',panel&&!panel.hidden?'true':'false');}
   if(panel&&!connected)panel.hidden=true;
-  if(last){const at=verifiedRecoveryState.providers['google-drive']?.verifiedAt;last.textContent=at?`Last verified ${storageHealthTime(at)}`:'Not yet verified';}
+  if(last){const at=verifiedRecoveryState.providers['google-drive']?.at;last.textContent=at?`Last verified ${storageHealthTime(at)}`:'Not yet verified';}
   if(disconnect)disconnect.disabled=state.engineBusy;
 }
 function renderDeviceBackup(state){
@@ -2944,6 +2945,8 @@ function storageSizeLabel(bytes){
   if(value<1024*1024)return `${Math.round(value/1024)} KB`;
   return `${Math.round(value/(1024*1024)*10)/10} MB`;
 }
+// The browser's storage estimate is measured at each launch and kept in memory for diagnostics.
+let storageEstimate=Object.freeze({persisted:null,usageBytes:null,quotaBytes:null});
 async function inspectStorageCapability(){
   if(!navigator.storage)return null;
   let persisted=null,estimate=null;
@@ -2955,7 +2958,7 @@ async function inspectStorageCapability(){
   const usage=Number(estimate&&estimate.usage),quota=Number(estimate&&estimate.quota);
   const ratio=Number.isFinite(usage)&&Number.isFinite(quota)&&quota>0?usage/quota:null;
   const payload={version:1,persisted:persisted===true,usageBytes:Number.isFinite(usage)?usage:null,quotaBytes:Number.isFinite(quota)?quota:null,usageRatio:ratio,checkedAt:new Date().toISOString()};
-  writeStorageHealth({storagePersisted:persisted,usageBytes:payload.usageBytes,quotaBytes:payload.quotaBytes,usageRatio:ratio,lastEstimateAt:payload.checkedAt});
+  storageEstimate=Object.freeze({persisted,usageBytes:payload.usageBytes,quotaBytes:payload.quotaBytes});
   if(ratio!==null&&ratio>=APP_LIMITS.storageCriticalRatio){
     markStorageHealthError('capacity',`Storage is ${Math.round(ratio*100)}% full (${storageSizeLabel(usage)} of ${storageSizeLabel(quota)}). Export a backup and free browser storage before continuing.`);
   }else if(ratio!==null&&ratio>=APP_LIMITS.storageWarningRatio){
@@ -2966,7 +2969,7 @@ async function inspectStorageCapability(){
 async function protectLocalData(){
   const state=await NativeCapabilities.protectLocalData();
   const persisted=state.storageMode==='protected'?true:state.storageMode==='standard'?false:null;
-  writeStorageHealth({storagePersisted:persisted,lastEstimateAt:new Date().toISOString()});
+  storageEstimate=Object.freeze({...storageEstimate,persisted});
   renderStorageHealth();
   return persisted===true;
 }
@@ -3775,7 +3778,7 @@ function activeSessionPayload(snapshot=null,options={}){
 function readLocalRecoverySession(){return AppData.activeSession.readLocal();}
 function handleActiveSessionRepositoryResult(result,action='save'){
   if(result&&result.ok){
-    if(action==='save'&&result.storage&&result.storage.idb===true)markStorageHealthOk('activeSession','lastLiveSaveAt');
+    if(action==='save'&&result.storage&&result.storage.idb===true)markStorageHealthOk('activeSession');
     else if(action==='save')markStorageHealthOk('activeSession');
     else if(action==='clear')markStorageHealthOk('activeSession');
     if(action==='save')ReviewEditor?.persistenceCommitted?.();
@@ -4279,52 +4282,53 @@ async function writeReconciliationBase(checkpointId,payload){
   return ReconciliationBaselineStore.write(checkpointId,spec);
 }
 const VERIFIED_RECOVERY_META_KEY=APP_META_KEYS.verifiedRecoveryBackups;
-let verifiedRecoveryState=Object.freeze({version:2,file:null,download:null,providers:Object.freeze({})}),verifiedRecoveryWriteChain=Promise.resolve();
-function normalizeVerifiedRecoveryEntry(value,{type,id='',label=''}={}){
-  if(!value||typeof value!=='object')return null;
-  const verifiedAt=typeof value.verifiedAt==='string'&&Number.isFinite(Date.parse(value.verifiedAt))?new Date(value.verifiedAt).toISOString():'';
-  const sourceRevision=typeof value.sourceRevision==='string'&&Number.isFinite(Date.parse(value.sourceRevision))?new Date(value.sourceRevision).toISOString():'';
-  if(!verifiedAt||!sourceRevision)return null;
-  const baselineId=typeof value.baselineId==='string'?value.baselineId.slice(0,48):'';
-  const backupFormatVersion=Number.isSafeInteger(value.backupFormatVersion)?value.backupFormatVersion:null;
-  return Object.freeze({type,id:String(value.id||id||'').slice(0,48),label:clampText(String(value.label||label||(type==='file'?'Portable backup':'Backup')),60),verifiedAt,sourceRevision,baselineId,backupFormatVersion});
+// The one record of past backups (version 3). Each entry is a copy: when it was
+// made (at), the change it holds (sourceRevision) and its backup format. file is
+// the last portable backup: read back through the save dialog (verified) or a
+// download, which cannot be read back but is still a backup the person made.
+// providers holds each location's last verified copy.
+let verifiedRecoveryState=Object.freeze({version:3,file:null,providers:Object.freeze({})}),verifiedRecoveryWriteChain=Promise.resolve();
+function backupTime(value){return typeof value==='string'&&Number.isFinite(Date.parse(value))?new Date(value).toISOString():'';}
+function normalizeBackupCopy(value){
+  const at=backupTime(value?.at),sourceRevision=backupTime(value?.sourceRevision);if(!at||!sourceRevision)return null;
+  return Object.freeze({at,sourceRevision,format:Number.isSafeInteger(value.format)?value.format:null});
 }
 function normalizeVerifiedRecoveryState(value){
+  if(Number(value?.version)!==3)return Object.freeze({version:3,file:null,providers:Object.freeze({})});
   const providers={};
-  if(value?.providers&&typeof value.providers==='object')for(const [id,row] of Object.entries(value.providers)){
-    if(!/^[a-z][a-z0-9-]{0,40}$/.test(id))continue;
-    const entry=normalizeVerifiedRecoveryEntry(row,{type:'provider',id});if(entry)providers[id]=entry;
+  if(value.providers&&typeof value.providers==='object')for(const [id,row] of Object.entries(value.providers)){
+    const copy=/^[a-z][a-z0-9-]{0,40}$/u.test(id)?normalizeBackupCopy(row):null;if(copy)providers[id]=copy;
   }
-  const startedAt=typeof value?.download?.startedAt==='string'&&Number.isFinite(Date.parse(value.download.startedAt))?new Date(value.download.startedAt).toISOString():'';
-  return Object.freeze({version:2,file:normalizeVerifiedRecoveryEntry(value?.file,{type:'file',label:'Portable backup'}),download:startedAt?Object.freeze({startedAt}):null,providers:Object.freeze(providers)});
+  const file=normalizeBackupCopy(value.file);
+  return Object.freeze({version:3,file:file?Object.freeze({...file,verified:value.file.verified===true}):null,providers:Object.freeze(providers)});
 }
 function verifiedRecoveryEntries(state=verifiedRecoveryState){return [state.file,...Object.values(state.providers||{})].filter(Boolean);}
-// When data was last backed up anywhere: a verified file, Device Folder or Drive copy, or a started download.
-function lastBackupTime(state=verifiedRecoveryState){return Math.max(-Infinity,...[...verifiedRecoveryEntries(state).map(entry=>entry.verifiedAt),state.download?.startedAt].map(value=>Date.parse(value||'')).filter(Number.isFinite));}
+// When data was last backed up anywhere: a file, a download, the Device Folder or Drive.
+function lastBackupTime(state=verifiedRecoveryState){return Math.max(-Infinity,...verifiedRecoveryEntries(state).map(entry=>Date.parse(entry.at)).filter(Number.isFinite));}
 // Decisions read the record fresh; a failed read falls back to the copy in memory.
 async function readVerifiedRecoveryState(){
   return normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY).catch(error=>{AppDiagnostics.capture('backup.freshness-read',error,'warn');return verifiedRecoveryState;}));
 }
+// The copy in memory changes at once, so a decision made right after a backup
+// (whether a location still has changes waiting) already sees it; the durable
+// record follows.
 function updateVerifiedRecoveryState(change){
+  verifiedRecoveryState=normalizeVerifiedRecoveryState(change(verifiedRecoveryState));BackupProviderRuntime.refresh();
   const run=async()=>{
-    const next=change(await readVerifiedRecoveryState());if(!next)return false;
+    const next=normalizeVerifiedRecoveryState(change(await readVerifiedRecoveryState()));
     verifiedRecoveryState=next;BackupProviderRuntime.refresh();
     try{await writeHostAppMetaValue(VERIFIED_RECOVERY_META_KEY,next);}catch(error){AppDiagnostics.capture('backup.freshness-write',error,'warn');}
     return true;
   };
   const next=verifiedRecoveryWriteChain.catch(()=>{}).then(run);verifiedRecoveryWriteChain=next;return next;
 }
-function recordVerifiedRecoveryCopy(copy){
-  if(!copy||!['file','provider'].includes(copy.type))return Promise.resolve(false);
-  const sourceRevision=typeof copy.sourceRevision==='string'&&Number.isFinite(Date.parse(copy.sourceRevision))?new Date(copy.sourceRevision).toISOString():'';if(!sourceRevision)return Promise.resolve(false);
-  return updateVerifiedRecoveryState(prior=>{
-    const entry=normalizeVerifiedRecoveryEntry({type:copy.type,id:copy.id,label:copy.label,verifiedAt:new Date().toISOString(),sourceRevision,baselineId:APP_VERSION,backupFormatVersion:DATA_CONTRACT.schemas.Backup.version},{type:copy.type,id:copy.id,label:copy.label});if(!entry)return null;
-    return copy.type==='file'?Object.freeze({...prior,file:entry}):Object.freeze({...prior,providers:Object.freeze({...prior.providers,[entry.id]:entry})});
-  });
+// Every completed backup lands here. source is 'file' or a location id.
+function recordBackupCopy(copy){
+  const source=String(copy?.source||''),sourceRevision=backupTime(copy?.sourceRevision);
+  if(!sourceRevision||!/^[a-z][a-z0-9-]{0,40}$/u.test(source))return Promise.resolve(false);
+  const entry={at:new Date().toISOString(),sourceRevision,format:DATA_CONTRACT.schemas.Backup.version};
+  return updateVerifiedRecoveryState(prior=>source==='file'?{...prior,file:{...entry,verified:copy.verified===true}}:{...prior,providers:{...prior.providers,[source]:entry}});
 }
-// A download cannot be read back, so it is not a verified copy; it still
-// counts as the person backing up for the 7-day reminder.
-function recordBackupDownload(){return updateVerifiedRecoveryState(prior=>Object.freeze({...prior,download:Object.freeze({startedAt:new Date().toISOString()})}));}
 // Every save writes the change clock inside its own transaction (the
 // mutation epoch); the last-save time in storage health is a fast copy for
 // backup decisions. If a save committed but the copy was not written (the tab
@@ -4343,11 +4347,9 @@ async function installVerifiedRecoveryFreshness(){
 async function verifyFreshCurrentBackup(){
   const state=normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY).catch(()=>null));
   const currentSave=Date.parse(readStorageHealth().lastLocalSaveAt||'');
-  const candidates=verifiedRecoveryEntries(state).filter(entry=>
-    entry.baselineId===APP_VERSION&&Number(entry.backupFormatVersion)===DATA_CONTRACT.schemas.Backup.version&&
-    Number.isFinite(Date.parse(entry.sourceRevision||''))&&(!Number.isFinite(currentSave)||Date.parse(entry.sourceRevision)>=currentSave)
-  );
-  return Object.freeze({ok:candidates.length>0,verifiedCopies:candidates.length,latestVerifiedAt:candidates.sort((a,b)=>Date.parse(b.verifiedAt)-Date.parse(a.verifiedAt))[0]?.verifiedAt||''});
+  // Only a verified copy in the current backup format that holds the latest change counts.
+  const candidates=verifiedRecoveryEntries(state).filter(entry=>entry.verified!==false&&entry.format===DATA_CONTRACT.schemas.Backup.version&&(!Number.isFinite(currentSave)||Date.parse(entry.sourceRevision)>=currentSave));
+  return Object.freeze({ok:candidates.length>0,verifiedCopies:candidates.length,latestVerifiedAt:candidates.sort((a,b)=>Date.parse(b.at)-Date.parse(a.at))[0]?.at||''});
 }
 // Compare policy identity and ownership inside the same typed metadata transaction.
 function mutateBackupProtection(value,options){
@@ -7704,7 +7706,8 @@ function setBackupProtectionSurfaceError(error){
 const BackupProtection=ExportsModule.createProtection({processing:Exports,storage:{read:key=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return ExportsAppMeta.read('backupProtection');},write:(key,value,options)=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return mutateBackupProtection(value,options);},remove:(key,options)=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return mutateBackupProtection(null,options);}},interactions:Interactions,settingKey:APP_META_KEYS.backupProtection,canMutate:()=>appCanMutate(),issueToken:()=>AppOwnership.issueWriteToken('change backup encryption'),assertToken:token=>AppOwnership.assertWriteToken(token,'change backup encryption'),onState:state=>{
   NoticeCoordinator.resolveEvent('backup-protection','settings');
   const ready=!state.enabled||state.unlocked,restored=ready&&!backupProtectionReady;backupProtectionReady=ready;
-  if(restored&&StartupLifecycle.status().fullyInitialized)wakeBackgroundOperations('encryption-unlocked');
+  // Rows say when automatic backups wait for the password; redraw them on every change.
+  if(StartupLifecycle.status().fullyInitialized){if(restored)wakeBackgroundOperations('encryption-unlocked');BackupProviderRuntime.refresh();}
   const label=document.getElementById('backup-protection-status');if(label)label.textContent=state.enabled?(state.unlocked?'Unlocked':'Locked'):'Off';
   const button=document.getElementById('manage-backup-protection');if(button)button.textContent=state.enabled?(state.unlocked?'Manage…':'Unlock…'):'Set password…';
   const hint=document.getElementById('backup-protection-hint');if(hint){hint.className='backup-inline-note ui-helper';hint.textContent='Automatic encrypted backups are paused until you unlock.';hint.hidden=!state.enabled||state.unlocked;}
@@ -8183,7 +8186,7 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
     removeRow:key=>IndexedDb.strictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{const request=store.delete(String(key));request.onerror=()=>finish(false,request.error||new Error('historical host metadata removal failed'));tx.oncomplete=()=>finish(true,true);},'historical host metadata removal aborted'),
     releaseBackupFile:async _name=>BackupFiles.collect(),normalizeVerifiedRecovery:value=>normalizeVerifiedRecoveryState(value),normalizeAttachmentIntegrity:value=>normalizeAttachmentIntegrityState(value),
     normalizeRepositoryIntegrity:value=>normalizeRepositoryIntegrityState(value),normalizeRepositoryIntegrityTarget:value=>normalizeRepositoryIntegrityTarget(value),
-    retireStorageHealthField:name=>{writeStorageHealth({[name]:undefined});return true;},
+    updateStorageHealth:patch=>{writeStorageHealth(patch);return true;},
     // Moves every renamed record in one transaction; an old and a new copy that
     // disagree stop the move with nothing changed.
     renameRows:pairs=>IndexedDb.strictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{
@@ -8471,7 +8474,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
       backupNudgeCheckedAt=Date.now();
       backupNudgeNotifiedDate='';
       refreshStorageFallbackWarning();
-      if(context?.recoveryCopy)void recordVerifiedRecoveryCopy(context.recoveryCopy);else void recordBackupDownload();
+      if(context?.copy)void recordBackupCopy(context.copy);
       schedulePwaUpdateEvaluation(250);
     }
   }),
@@ -8568,7 +8571,7 @@ async function canonicalLocalRecoveryEmpty(){
 // install never sees it, and data the person deleted leaves deletion history
 // that explains the emptiness. An unresolved clear has its own notice.
 async function studyDataLostHere(){
-  const health=readStorageHealth();if(!health.lastDailyRecordSaveAt&&!health.lastNotesSaveAt||storageResetUnresolved())return false;
+  const health=readStorageHealth();if(!health.lastStudyDataSaveAt||storageResetUnresolved())return false;
   try{const deletions=await Promise.all([AppData.deletionRecovery.savedDays(),AppData.deletionRecovery.areaNotes()]);return deletions.every(list=>!(list||[]).length);}
   catch(error){AppDiagnostics.capture('backup.device-recovery-deletions',error,'warn');return false;}
 }
@@ -8748,7 +8751,7 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
     }),
     render:renderDeviceBackup,
     sourceRevision:()=>currentBackupSourceRevision(),
-    verifiedAt:()=>verifiedRecoveryState.providers['device-folder']?.verifiedAt||''
+    verifiedAt:()=>verifiedRecoveryState.providers['device-folder']?.at||''
   }),
   presentation:BackupPresentation,
   settings:exactAppMetaStorage(DeviceBackupAppMeta,'automaticDeviceBackup',APP_META_KEYS.automaticDeviceBackup,'Device Backup'),
@@ -9349,7 +9352,7 @@ const AppInsights = Object.freeze({
 function currentBackupDiagnosticStates(){
   const states=[],sample=(job,read,project)=>{try{states.push(...project(read()));}catch{states.push({job,state:'unavailable',reason:'state-unavailable'});}};
   sample('Local storage health',()=>StorageHealthController.snapshot(),health=>{
-    const rows=[{job:'Local storage health',state:health.hasIssues?'attention':'observed',issues:health.issues?.length||0,completedAt:health.lastLocalSaveAt||'',liveSavedAt:health.lastLiveSaveAt||'',notesSavedAt:health.lastNotesSaveAt||'',recordsSavedAt:health.lastDailyRecordSaveAt||'',databaseOkAt:health.lastIdbOkAt||'',failedAt:health.lastErrorAt||'',storagePersisted:health.storagePersisted,usageBytes:health.usageBytes,quotaBytes:health.quotaBytes}];
+    const rows=[{job:'Local storage health',state:health.hasIssues?'attention':'observed',issues:health.issues?.length||0,completedAt:health.lastLocalSaveAt||'',studyDataSavedAt:health.lastStudyDataSaveAt||'',storagePersisted:storageEstimate.persisted,usageBytes:storageEstimate.usageBytes,quotaBytes:storageEstimate.quotaBytes}];
     const sources=['indexedDB','localStorage.read','localStorage.write','planDraft.write','activeSession','areaNotes','dailyRecords','deletionRecovery','maintenance','capacity','backup','attachmentIntegrity','repositoryIntegrity'];
     for(const source of sources){const issue=health.issues?.find(row=>row.source===source);if(issue)rows.push({job:'Storage '+source,state:'attention',severity:issue.level,failedAt:issue.at});}return rows;
   });
@@ -9373,7 +9376,7 @@ async function readDataDiagnosticStates(){
     ...[['Restore journal',AppData.restoreJournal],['Library clear journal',AppData.libraryClearJournal]].map(([job,owner])=>({job,read:()=>owner.diagnostics(),project:value=>({job,state:value?'pending':'absent',pending:!!value,phase:value?.phase||'',updatedAt:value?.updatedAt||'',coverage:'journal-header'})})),
     {job:'Repository cleanup intent',read:()=>BackupAppMeta.read('repositoryMaintenancePending'),project:value=>[{job:'Repository cleanup intent',state:value?.entries?.length?'pending':'absent',pending:!!value?.entries?.length,count:value?.entries?.length||0},...(value?.entries||[]).filter(entry=>['device-folder','google-drive'].includes(entry.providerId)).map(entry=>({job:entry.providerId==='device-folder'?'Device cleanup intent':'Drive cleanup intent',state:'pending',pending:true,reason:entry.reason,nextEligibleAt:entry.nextEligibleAt,scopeBound:!!entry.repositoryScope}))]},
     {job:'External backup pending',read:()=>BackupAppMeta.read('managedProviderBackupPending'),project:value=>({job:'External backup pending',state:value?.entries?.length?'pending':'absent',pending:!!value?.entries?.length,count:value?.entries?.length||0})},
-    {job:'Verified external copies',read:()=>BackupAppMeta.read('verifiedRecoveryBackups'),project:value=>{const entries=[value?.file,...Object.values(value?.providers||{})].filter(Boolean);return {job:'Verified external copies',state:entries.length?'recorded':'never',count:entries.length,completedAt:entries.map(entry=>entry.verifiedAt||'').filter(value=>Number.isFinite(Date.parse(value))).sort().at(-1)||'',coverage:'recorded-verification'};}}
+    {job:'Verified external copies',read:()=>BackupAppMeta.read('verifiedRecoveryBackups'),project:value=>{const entries=[value?.file,...Object.values(value?.providers||{})].filter(Boolean);return {job:'Verified external copies',state:entries.length?'recorded':'never',count:entries.length,completedAt:entries.map(entry=>entry.at||'').filter(value=>Number.isFinite(Date.parse(value))).sort().at(-1)||'',coverage:'recorded-verification'};}}
   ],results=new Map();
   const reads=samples.map(sample=>Promise.resolve().then(sample.read).then(value=>results.set(sample.job,sample.project(value))).catch(()=>results.set(sample.job,{job:sample.job,state:'unavailable',reason:'state-unavailable'})));
   try{await OperationLifecycle.waitForSettlement(reads,{timeoutMs:3000,timeoutCode:'DIAGNOSTIC_SNAPSHOT_TIMEOUT',timeoutMessage:'Diagnostic snapshot could not finish.'});}catch{}

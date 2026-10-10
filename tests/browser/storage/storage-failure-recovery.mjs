@@ -162,28 +162,24 @@ try{
     const recovered=await d.writeLiveDraftNow({markChanged:false});await wait(40);
     const afterRecovery=d.readStorageHealth();
     return {
-      beforeLiveAt:beforeHealth.lastLiveSaveAt,beforeLocalAt:beforeHealth.lastLocalSaveAt,
+      beforeLocalAt:beforeHealth.lastLocalSaveAt,
       fallbackOk:!!(fallbackOnly&&fallbackOnly.ok),fallbackStorage:fallbackOnly&&fallbackOnly.storage,
-      afterFallbackLiveAt:afterFallbackOnly.lastLiveSaveAt,afterFallbackLocalAt:afterFallbackOnly.lastLocalSaveAt,
-      failedOk:!!(failed&&failed.ok),afterFailureLiveAt:afterFailure.lastLiveSaveAt,afterFailureLocalAt:afterFailure.lastLocalSaveAt,
+      afterFallbackLocalAt:afterFallbackOnly.lastLocalSaveAt,
+      failedOk:!!(failed&&failed.ok),afterFailureLocalAt:afterFailure.lastLocalSaveAt,
       failureIssues:afterFailure.issues.map(row=>row.source),recoveredOk:!!(recovered&&recovered.ok),
-      afterRecoveryLiveAt:afterRecovery.lastLiveSaveAt,afterRecoveryLocalAt:afterRecovery.lastLocalSaveAt,
+      afterRecoveryLocalAt:afterRecovery.lastLocalSaveAt,
       recoveryIssues:afterRecovery.issues.map(row=>row.source)
     };
   })()`);
-  assert.ok(activeScenario.beforeLiveAt,'healthy live-session save did not establish its compatibility timestamp');
   assert.ok(activeScenario.beforeLocalAt,'healthy IndexedDB commit did not establish the visible local-save timestamp');
   assert.equal(activeScenario.fallbackOk,true,'local recovery fallback was not reported as available');
   assert.deepEqual(activeScenario.fallbackStorage,{local:true,idb:false},'fallback-only save did not report its actual storage outcome');
-  assert.equal(activeScenario.afterFallbackLiveAt,activeScenario.beforeLiveAt,'fallback-only save advanced the live saved timestamp');
   assert.equal(activeScenario.afterFallbackLocalAt,activeScenario.beforeLocalAt,'fallback-only save advanced the confirmed local-save timestamp');
   assert.equal(activeScenario.failedOk,false,'forced live-session storage failure was reported as successful');
-  assert.equal(activeScenario.afterFailureLiveAt,activeScenario.beforeLiveAt,'failed live-session save advanced the live saved timestamp');
   assert.equal(activeScenario.afterFailureLocalAt,activeScenario.beforeLocalAt,'failed live-session save advanced the confirmed local-save timestamp');
   assert.ok(activeScenario.failureIssues.includes('activeSession'),'failed live-session save was not surfaced');
   assert.ok(activeScenario.failureIssues.includes('indexedDB'),'transaction failure was not surfaced by IndexedDB');
   assert.equal(activeScenario.recoveredOk,true,'live-session recovery save failed after storage restoration');
-  assert.ok(Date.parse(activeScenario.afterRecoveryLiveAt)>=Date.parse(activeScenario.beforeLiveAt),'successful recovery did not advance the live timestamp');
   assert.ok(Date.parse(activeScenario.afterRecoveryLocalAt)>=Date.parse(activeScenario.beforeLocalAt),'successful recovery did not advance the confirmed local-save timestamp');
   assert.ok(!activeScenario.recoveryIssues.includes('activeSession'),'active-session issue did not clear after repository-confirmed recovery');
   assert.ok(!activeScenario.recoveryIssues.includes('indexedDB'),'IndexedDB issue did not clear after a successful transaction');
@@ -199,7 +195,7 @@ try{
     IDBDatabase.prototype.transaction=original;d.IndexedDb.clearConnection();
     await d.AppData.dailyRecords.summaries();await wait(250);
     const recovered=d.readStorageHealth();
-    return {savedAt:degraded.lastDailyRecordSaveAt,degradedIssues:degraded.issues.map(row=>row.source),recoveredIssues:recovered.issues.map(row=>row.source)};
+    return {savedAt:degraded.lastStudyDataSaveAt,degradedIssues:degraded.issues.map(row=>row.source),recoveredIssues:recovered.issues.map(row=>row.source)};
   })()`);
   assert.ok(savedDayFallbackScenario.savedAt,'fallback Saved-Day save did not record its confirmed save time');
   assert.ok(savedDayFallbackScenario.degradedIssues.includes('dailyRecords'),'fallback Saved-Day success incorrectly cleared its degraded-storage issue');

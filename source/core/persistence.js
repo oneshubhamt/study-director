@@ -155,7 +155,7 @@ registry.define('persistence',1,()=>{
         try{db.close();}catch(error){AppDiagnostics.capture('storage.db-versionchange-close',error);}
       };
       if('onclose' in db)db.onclose=()=>clearAppDBConnection(db);
-      markStorageHealthOk('lastIdbOkAt');
+      markStorageHealthOk();
       return db;
     }
     function openRequest(version=null,{legacyBridge=false,retireLegacy=false,fresh=false}={}){

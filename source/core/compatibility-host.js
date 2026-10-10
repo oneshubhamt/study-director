@@ -23,7 +23,7 @@ registry.define('compatibility-host',1,()=>{
     for(const key of Object.keys(input.preferences))if(typeof input.preferences[key]!=='function')throw new TypeError(`Compatibility-host Preferences adapter ${key} must be a function.`);
     exactObject(input.identity,['getId','installationKey','legacyKey'],'Compatibility-host installation identity adapter');
     if(typeof input.identity.getId!=='function')throw new TypeError('Compatibility-host installation identity getId is required.');
-    functions(input.metadata,['readRow','listRows','isCurrentDataMaintenance','writeValue','removeRow','releaseBackupFile','normalizeVerifiedRecovery','normalizeAttachmentIntegrity','normalizeRepositoryIntegrity','normalizeRepositoryIntegrityTarget','normalizeReconciliationNotes','normalizeReconciliationHeader','reconciliationKeyFingerprint','renameRows','retireStorageHealthField'],'Compatibility-host metadata adapter');
+    functions(input.metadata,['readRow','listRows','isCurrentDataMaintenance','writeValue','removeRow','releaseBackupFile','normalizeVerifiedRecovery','normalizeAttachmentIntegrity','normalizeRepositoryIntegrity','normalizeRepositoryIntegrityTarget','normalizeReconciliationNotes','normalizeReconciliationHeader','reconciliationKeyFingerprint','renameRows','updateStorageHealth'],'Compatibility-host metadata adapter');
     functions(input.live,['migrateActiveSession','migrateAreaNotes','migrateAreaNoteRecovery','migrateDeletionState','migrateDailyRecords','migrateInsightsRevisionEnvelope','cleanupLegacyAttachments','cleanupObsoleteMetadata'],'Compatibility-host live adapters');
     functions(input.topology,['retire'],'Compatibility-host topology adapter');
     functions(input.verification,['activeSession','areaNotes','areaNoteRecovery','deletionState','dailyRecords','insightsRevisionEnvelope','canonicalStores','legacyAttachments','obsoleteMetadata','topology','freshBackup'],'Compatibility-host verification adapters');
@@ -37,6 +37,33 @@ registry.define('compatibility-host',1,()=>{
 
     function exactKeys(value,keys){return !!(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('|')===[...keys].sort().join('|'));}
     function validTimestamp(value){return typeof value==='string'&&Number.isFinite(Date.parse(value));}
+    const isoTime=value=>validTimestamp(value)?new Date(value).toISOString():'';
+    // The last-backup record, version 3, keeps one shape for every copy: when
+    // it was made, the change it holds and its backup format; the last portable
+    // file (downloads included) is file. Versions 1 and 2 kept a type, id, label
+    // and app version on every entry (derivable or unused) and called the time
+    // verifiedAt; version 2 kept the last download apart. Storage health once
+    // kept a last-backup time of any kind. A download or that time becomes an
+    // unverified file copy holding the changes made before it.
+    function legacyVerifiedRecovery(value,backupAt){
+      const version=value?Number(value.version):3;
+      let file=null,providers={};
+      if(version===3){const current=metadata.normalizeVerifiedRecovery(value);file=current.file;providers={...current.providers};}
+      else if(version===1||version===2){
+        const copy=row=>{const at=isoTime(row&&row.verifiedAt),sourceRevision=isoTime(row&&row.sourceRevision);return at&&sourceRevision?{at,sourceRevision,format:Number.isSafeInteger(row.backupFormatVersion)?row.backupFormatVersion:null}:null;};
+        for(const [id,row] of Object.entries(value.providers&&typeof value.providers==='object'?value.providers:{})){const entry=copy(row);if(entry)providers[id]=entry;}
+        const saved=copy(value.file);file=saved?{...saved,verified:true}:null;
+      }else return null;
+      for(const at of [version===2?isoTime(value.download&&value.download.startedAt):'',isoTime(backupAt)])if(at&&(!file||Date.parse(at)>Date.parse(file.at)))file={at,sourceRevision:at,format:null,verified:false};
+      return metadata.normalizeVerifiedRecovery({version:3,file,providers});
+    }
+    // Storage health keeps three facts: the change clock, when study data was
+    // last saved here and an unresolved browser-data clear. These fields are
+    // retired: a last-backup time (now in the backup record), save times per
+    // kind (one study-data time instead), the browser's storage estimate
+    // (measured at each launch) and the last error (shown live, never read back).
+    const RETIRED_STORAGE_HEALTH_FIELDS=freeze(['lastBackupAt','lastLiveSaveAt','lastDailyRecordSaveAt','lastNotesSaveAt','lastIdbOkAt','lastError','lastErrorAt','lastErrorSource','updatedAt','storagePersisted','usageBytes','quotaBytes','usageRatio','lastEstimateAt']);
+    const retiredHealthFields=health=>health&&typeof health==='object'?RETIRED_STORAGE_HEALTH_FIELDS.filter(field=>Object.hasOwn(health,field)):[];
     // Repository verification state versions 2 to 6 kept one slot per known
     // location; versions 3 to 5 also kept the Device Folder's directory handle,
     // which the repository scope replaces. The current record is keyed by
@@ -191,18 +218,15 @@ registry.define('compatibility-host',1,()=>{
       if(maintenance&&!metadata.isCurrentDataMaintenance(maintenance.value)){
         requireOwnership();await metadata.removeRow(appMeta.dataMaintenance);removed++;
       }
-      const recovery=await metadata.readRow(appMeta.verifiedRecoveryBackups);
-      if(recovery){const normalized=metadata.normalizeVerifiedRecovery(recovery.value);if(!helpers.same(recovery.value,normalized)){requireOwnership();await metadata.writeValue(appMeta.verifiedRecoveryBackups,normalized,recovery.updatedAt);migrated++;}}
-      // Storage health once kept the time of the last backup of any kind; the
-      // backup record now keeps it, as the last download the person started.
-      const health=local.getJson(storage.storageHealth,null);
-      if(health&&typeof health==='object'&&Object.hasOwn(health,'lastBackupAt')){
-        const backupAt=validTimestamp(health.lastBackupAt)?new Date(health.lastBackupAt).toISOString():'';
-        if(backupAt){
-          const row=await metadata.readRow(appMeta.verifiedRecoveryBackups),current=metadata.normalizeVerifiedRecovery(row?row.value:null);
-          if(!current.download||Date.parse(current.download.startedAt)<Date.parse(backupAt)){requireOwnership();await metadata.writeValue(appMeta.verifiedRecoveryBackups,freeze({...current,download:freeze({startedAt:backupAt})}),row?.updatedAt);migrated++;}
-        }
-        requireOwnership();metadata.retireStorageHealthField('lastBackupAt');removed++;
+      const recovery=await metadata.readRow(appMeta.verifiedRecoveryBackups),health=local.getJson(storage.storageHealth,null),retired=retiredHealthFields(health);
+      const backupAt=retired.includes('lastBackupAt')?health.lastBackupAt:'';
+      if(recovery&&Number(recovery.value&&recovery.value.version)!==3||isoTime(backupAt)){
+        const converted=legacyVerifiedRecovery(recovery?recovery.value:null,backupAt);if(!converted)throw new Error('The last-backup record has an unknown shape and was preserved without modification.');
+        if(!recovery||!helpers.same(recovery.value,converted)){requireOwnership();await metadata.writeValue(appMeta.verifiedRecoveryBackups,converted,recovery&&recovery.updatedAt);migrated++;}
+      }
+      if(retired.length){
+        const studied=[health.lastStudyDataSaveAt,health.lastDailyRecordSaveAt,health.lastNotesSaveAt].map(isoTime).filter(Boolean).sort().at(-1)||null;
+        requireOwnership();metadata.updateStorageHealth(freeze({...Object.fromEntries(retired.map(field=>[field,undefined])),lastStudyDataSaveAt:studied}));removed+=retired.length;
       }
       const integrity=await metadata.readRow(appMeta.attachmentIntegrityAudit);
       if(integrity){const normalized=metadata.normalizeAttachmentIntegrity(integrity.value);if(!helpers.same(integrity.value,normalized)){requireOwnership();await metadata.writeValue(appMeta.attachmentIntegrityAudit,normalized,integrity.updatedAt);migrated++;}}
@@ -252,7 +276,9 @@ registry.define('compatibility-host',1,()=>{
       const device=rows.find(row=>String(row&&row.key||'')===appMeta.automaticDeviceBackup);
       if(device&&Number(device.value?.version)!==4)present.push(`${appMeta.automaticDeviceBackup}:v${Number(device.value?.version)||'?'}`);
       for(const row of rows){const key=String(row&&row.key||'');if(renamedFrom(key))present.push(key);}
-      if(Object.hasOwn(local.getJson(storage.storageHealth,null)||{},'lastBackupAt'))present.push(`${storage.storageHealth}:lastBackupAt`);
+      for(const field of retiredHealthFields(local.getJson(storage.storageHealth,null)))present.push(`${storage.storageHealth}:${field}`);
+      const recovery=rows.find(row=>String(row&&row.key||'')===appMeta.verifiedRecoveryBackups);
+      if(recovery&&Number(recovery.value&&recovery.value.version)!==3)present.push(`${appMeta.verifiedRecoveryBackups}:v${Number(recovery.value&&recovery.value.version)||'?'}`);
       const audit=rows.find(row=>String(row&&row.key||'')===appMeta.attachmentIntegrityAudit);
       if(audit&&!helpers.same(audit.value,metadata.normalizeAttachmentIntegrity(audit.value)))present.push(`${appMeta.attachmentIntegrityAudit}:v${Number(audit.value?.version)||'?'}`);
       const journal=rows.find(row=>String(row&&row.key||'')===appMeta.restoreJournalPayload);

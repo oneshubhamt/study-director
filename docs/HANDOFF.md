@@ -135,6 +135,14 @@ Your decisions on the audit (`docs/AUDIT-DATA-AND-BACKUP.md`) and what was done:
 - **Privacy wording** moved from the plugin descriptor into the Drive row's info popover (before connecting) and the settings panel (access line and Privacy link).
 - **Still drawn outside the host:** the portable-file row (`backup.js`: Export button, Cancel and status line, three DOM touchpoints). Same treatment when convenient.
 
+### 1.7 Lean records and the rest of the audit (2026-10-10)
+
+- **Last-backup record v3.** One shape per copy: `at`, `sourceRevision`, `format`; the file entry adds `verified`. A download is the file entry with `verified:false` (it is not derivable, and on iPhone it is the only manual backup). Removed: the separate download field, and the per-entry type, id, label and app version. The engine's own copy of coverage is gone; the record changes in memory first.
+- **Storage health** keeps `lastLocalSaveAt`, `lastStudyDataSaveAt` and `browserDataClearedAt`. Retired once by the compatibility host: last-backup time, per-kind save times (folded into one), storage estimate (in memory now), last error, `updatedAt`, `lastIdbOkAt`.
+- **B3.** A locked row reads "Paused until unlocked".
+- **B7.** Data & Backup states how far back versions go; a test keeps the sentence in step with the retention policy.
+- **B8.** Versions → Restore… / Restore note… / Restore from file….
+
 ---
 
 ## 2. Remaining from the rest of this work

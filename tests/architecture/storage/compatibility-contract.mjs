@@ -106,9 +106,9 @@ assert.match(app,/migrateCompatibility:\(\)=>CompatibilityFacade\.migrateLive\(\
 assert.match(app,/verifyReady:\(\)=>CompatibilityFacade\.verifyCanonicalInstallation\(\)/u,'actual installations must run the canonical proof before publishing startup-ready');
 assert.match(app,/studyDirectorCanonicalBaseline=proof\.canonical\?'verified':'not-proven'/u);
 assert.match(app,/studydirector:canonicalstatus/u);
-assert.match(app,/baselineId:APP_VERSION,backupFormatVersion:DATA_CONTRACT\.schemas\.Backup\.version/u,'verified recovery metadata must identify the canonical baseline and backup format');
+assert.match(app,/const entry=\{at:new Date\(\)\.toISOString\(\),sourceRevision,format:DATA_CONTRACT\.schemas\.Backup\.version\}/u,'each recorded backup copy keeps only when it was made, the change it holds and its backup format');
 assert.match(app,/async function verifyFreshCurrentBackup\(\)/u);
-assert.match(app,/entry\.baselineId===APP_VERSION&&Number\(entry\.backupFormatVersion\)===DATA_CONTRACT\.schemas\.Backup\.version/u);
+assert.match(app,/entry\.verified!==false&&entry\.format===DATA_CONTRACT\.schemas\.Backup\.version/u,'only a verified copy in the current backup format proves a fresh backup');
 assert.match(startup,/await runStage\('compatibility-migration',startup\.migrateCompatibility\)/u);
 assert.doesNotMatch(startup,/cleanupLegacyStorage|cleanupLegacyAttachments/u,'startup must see one compatibility operation, not individual legacy branches');
 

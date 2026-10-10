@@ -77,7 +77,7 @@ try{
     };
   })()`);
   assert.equal(startup.supported,true);assert.equal(startup.mode,'off');assert.equal(startup.label,'Off');
-  assert.deepEqual(startup.fileActions,['Export backup…','Import backup…']);
+  assert.deepEqual(startup.fileActions,['Export backup…','Restore from file…']);
   assert.equal(startup.recoverLabel,'Versions');assert.equal(startup.recoverHidden,true,'Device recovery should appear only after a folder is connected');
   assert.equal(startup.advancedOpen,false);assert.deepEqual(startup.locationBadges,['Primary','Optional']);
   assert.equal(startup.pickerCalls,0,'startup invoked the folder picker');
@@ -94,7 +94,9 @@ try{
     return {checkpointNames,objectNames:objectNames.sort(),size:file.size,format:manifest.format,version:manifest.version,pickerCalls:__devicePickerCalls(),status:document.getElementById('device-backup-status').textContent.trim()};
   })()`);
   assert.equal(first.checkpointNames.length,1);assert.match(first.checkpointNames[0],/^cp_[a-f0-9]{32}\.sdcheckpoint$/u);
-  assert.ok(first.size>0);assert.equal(first.format,'study-director.backup-repository-checkpoint');assert.equal(first.version,5);assert.ok(first.objectNames.length>0);assert.equal(first.pickerCalls,1);assert.match(first.status,/^On(?:\s|$)/);
+  assert.ok(first.size>0);assert.equal(first.format,'study-director.backup-repository-checkpoint');assert.equal(first.version,5);assert.ok(first.objectNames.length>0);assert.equal(first.pickerCalls,1);
+  // Maintenance may run just after the first backup; the row then settles on On.
+  await waitFor(()=>page.evaluate(`/^On(?:\\s|$)/.test(document.getElementById('device-backup-status').textContent.trim())`),{timeout:60000,label:'Device Folder row at rest after the first backup'});
 
   // Nothing changed: Back up now confirms the folder is current and adds no version.
   await page.evaluate(`document.getElementById('device-backup-now').click()`);

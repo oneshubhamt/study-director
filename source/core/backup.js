@@ -292,7 +292,7 @@ function finishPortablePresentation(patch={}){portablePresentation?.finish(patch
 function markBackupCompleted(context={}){if(appCanMutate())backupCompleted(context&&typeof context==='object'?context:{});}
 async function prepareSafetyCopy(options={}){
   let canonical,file;try{file=await Exports.protect(async()=>{canonical=await createCanonicalCheckpoint(options);return canonical;});
-  await Exports.save(file);markBackupCompleted();
+  await Exports.save(file);markBackupCompleted({copy:portableCopy(file,false)});
   return {canonical,file:Object.freeze({...file,downloadStarted:true})};
   }catch(error){if(canonical)await Exports.run('file.release',{file:canonical.blob});if(file?.blob!==canonical?.blob)await Exports.run('file.release',{file:file?.blob});throw error;}
 }
@@ -306,10 +306,10 @@ function exportReporter(){
     progress:value=>{const now=Date.now(),loaded=Math.max(0,Number(value&&value.loaded)||0),total=Math.max(0,Number(value&&value.total)||0);if(!total||now-last<150&&loaded<total)return;last=now;portablePresentation?.update({progress:{stage:'export',completedBytes:Math.min(loaded,total),totalBytes:total}});renderPortablePresentation();}
   });
 }
-// A file saved through the save dialog and read back holds the data as of its
-// capture, so the backup reminder knows the latest changes are in a backup. A
-// download that has only started proves nothing yet.
-function fileRecoveryCopy(file){return freeze({type:'file',id:'file',label:'Portable backup',sourceRevision:String(file&&file.sourceRevision||'')});}
+// A portable backup holds the data as of its capture. A file saved through the
+// save dialog is read back (verified); a download cannot be, but the person
+// still made a backup, so the reminder counts both.
+function portableCopy(file,verified){return freeze({source:'file',sourceRevision:String(file&&file.sourceRevision||''),verified});}
 async function exportPortableBackup(){
   if(localExportPromise)return localExportPromise;
   // The save dialog opens straight from the click, before any waiting, so the
@@ -327,7 +327,7 @@ async function exportPortableBackup(){
       if(!file.blob?.size)throw new Error('The prepared backup is empty. No file was saved.');
       report.stage(handle?`Saving ${handle.name}…`:'Starting the download…');
       OperationDiagnostics.mark('standalone-save-start',{},traceId);const result=await Exports.save(file,handle,{onProgress:report.progress,onVerify:()=>report.stage('Checking the saved file…')});OperationDiagnostics.mark('standalone-save-complete',{status:String(result&&result.status||'')},traceId);
-      const saved=result?.status==='saved';markBackupCompleted({userExport:true,...(saved?{recoveryCopy:fileRecoveryCopy(file)}:{})});
+      const saved=result?.status==='saved';markBackupCompleted({userExport:true,copy:portableCopy(file,saved)});
       const message=(saved?`Backup saved and verified: ${result.filename}.`:'Verified backup download started. Check that your browser saved it.')+(file.warning?' '+file.warning:'');
       setLocalExportStatus(message);finishPortablePresentation({message,outcome:saved?'saved':'download-started'});OperationDiagnostics.finish({bytes:Number(file.blob.size)||0,saved},traceId);return result;
     }catch(error){

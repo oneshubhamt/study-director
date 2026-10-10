@@ -10,10 +10,10 @@ const start=html.indexOf('async function maybePromptBackupNudge(force=false){'),
 assert.ok(start>=0&&end>start,'The backup reminder must be available.');
 const helpers=['function verifiedRecoveryEntries(','function lastBackupTime('].map(head=>{const at=html.indexOf(head);assert.ok(at>=0,head);return html.slice(at,html.indexOf('\n',at));}).join('\n');
 const DAY=24*60*60*1000,now=Date.parse('2026-10-06T08:00:00.000Z'),iso=ms=>new Date(ms).toISOString();
-// backups is the one record of past backups (verifiedRecoveryBackups v2):
-// verified copies per file and location, and the last started download.
-function reminder({file=null,providers={},download=null,lastLocalSaveAt=null,device=false,drive=false,savedDays=0}){
-  const notified=[],backups=Object.freeze({version:2,file,download,providers});
+// backups is the one record of past backups (verifiedRecoveryBackups v3): the
+// last portable file (saved and read back, or downloaded) and each location's copy.
+function reminder({file=null,providers={},lastLocalSaveAt=null,device=false,drive=false,savedDays=0}){
+  const notified=[],backups=Object.freeze({version:3,file,providers});
   const run=new Function('appCanMutate','readStorageHealth','readVerifiedRecoveryState','BackupProviderRuntime','AppData','refreshStorageFallbackWarning','todayISO','notifyUser','Date',
     `let backupNudgeCheckedAt=0,backupNudgeMessage='',backupNudgeNotifiedDate='';const BACKUP_NUDGE_CHECK_MS=3600000,BACKUP_NUDGE_MS=7*24*60*60*1000;let verifiedRecoveryState=null;${helpers}\n${html.slice(start,end)};return maybePromptBackupNudge(true).then(()=>backupNudgeMessage);`);
   const FixedDate=class extends Date{static now(){return now;}};
@@ -22,7 +22,7 @@ function reminder({file=null,providers={},download=null,lastLocalSaveAt=null,dev
   return run(()=>true,()=>({lastLocalSaveAt}),async()=>backups,{automaticActive:()=>device||drive},
     {dailyRecords:{summaries:async()=>Array.from({length:savedDays},(_,i)=>({date:i}))}},()=>{},()=>'2026-10-06',(...args)=>notified.push(args),FixedDate).then(message=>({message,notified}));
 }
-const copy=(verifiedAt,sourceRevision=verifiedAt)=>Object.freeze({verifiedAt,sourceRevision});
+const copy=(at,sourceRevision=at)=>Object.freeze({at,sourceRevision,format:1});
 const cases=[];
 {
   const r=await reminder({file:copy(iso(now-10*DAY)),lastLocalSaveAt:iso(now-2*DAY)});
@@ -55,11 +55,15 @@ for(const [label,options] of [['Device Folder',{device:true}],['Drive while sign
   cases.push('a Drive or Device Folder backup counts: reminded only a week after it');
 }
 {
-  // A download is not a verified copy, but the person did back up.
-  const recent=await reminder({download:Object.freeze({startedAt:iso(now-2*DAY)}),lastLocalSaveAt:iso(now-1000),savedDays:9});
+  // A download cannot be read back, but the person did back up, and it holds
+  // the changes made before it.
+  const download=at=>Object.freeze({...copy(at),verified:false});
+  const recent=await reminder({file:download(iso(now-2*DAY)),lastLocalSaveAt:iso(now-1000),savedDays:9});
   assert.equal(recent.message,'');
-  const old=await reminder({download:Object.freeze({startedAt:iso(now-8*DAY)}),lastLocalSaveAt:iso(now-1000),savedDays:9});
+  const old=await reminder({file:download(iso(now-8*DAY)),lastLocalSaveAt:iso(now-1000),savedDays:9});
   assert.match(old.message,/over a week old/u);
+  const unchanged=await reminder({file:download(iso(now-8*DAY)),lastLocalSaveAt:iso(now-9*DAY),savedDays:9});
+  assert.equal(unchanged.message,'','a download that holds the latest changes needs no reminder');
   cases.push('a download counts: reminded only a week after it');
 }
 {

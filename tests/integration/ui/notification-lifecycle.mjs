@@ -103,7 +103,7 @@ class Element {
   const {notices:n}=coordinator(),presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications:n}));
   const source=fs.readFileSync('source/core/backup.js','utf8'),a=source.indexOf('async function exportPortableBackup(){'),b=source.indexOf('function exportLocalBackup(){',a);
   let error=new Error('Disk full');
-  const run=new Function('OperationDiagnostics','setLocalExportBusy','createCheckpoint','presentation','Exports','portableBackupFilename','getStudentNameFromDisplay','exportReporter','fileRecoveryCopy','markBackupCompleted',`const portableAssets=true;let localExportPromise=null,portablePresentation=null;const renderPortablePresentation=()=>{},setLocalExportStatus=(message,ok)=>portablePresentation.update({message,severity:ok?'info':'error'}),finishPortablePresentation=patch=>portablePresentation.finish(patch);${source.slice(a,b)};return exportPortableBackup;`)({start:()=>'',mark:()=>{},finish:()=>{},fail:()=>{}},()=>{},async()=>{throw error;},presentation,{chooseSave:()=>Promise.resolve(null)},()=>'student-study-director-backup.sdbackup',()=>'Student',()=>({stage(){},progress(){}}),()=>({}),()=>{});
+  const run=new Function('OperationDiagnostics','setLocalExportBusy','createCheckpoint','presentation','Exports','portableBackupFilename','getStudentNameFromDisplay','exportReporter','portableCopy','markBackupCompleted',`const portableAssets=true;let localExportPromise=null,portablePresentation=null;const renderPortablePresentation=()=>{},setLocalExportStatus=(message,ok)=>portablePresentation.update({message,severity:ok?'info':'error'}),finishPortablePresentation=patch=>portablePresentation.finish(patch);${source.slice(a,b)};return exportPortableBackup;`)({start:()=>'',mark:()=>{},finish:()=>{},fail:()=>{}},()=>{},async()=>{throw error;},presentation,{chooseSave:()=>Promise.resolve(null)},()=>'student-study-director-backup.sdbackup',()=>'Student',()=>({stage(){},progress(){}}),()=>({}),()=>{});
   assert.equal((await run()).status,'failed');assert.equal(n.eventStatus().toasts.at(-1).severity,'error');assert.equal(presentation.read('file').lifecycle,'failed');
   error=Object.assign(new Error('Cancelled'),{name:'AbortError'});assert.equal((await run()).status,'cancelled');assert.equal(n.eventStatus().toasts.length,0);assert.equal(presentation.read('file').lifecycle,'cancelled','user cancellation is neutral feedback');n.clear();
 
@@ -124,11 +124,11 @@ class Element {
     const nodes=new Map(ids.map(id=>[id,new Element()]));nodes.get('drive-backup-settings-panel').hidden=false;
     new Function('document','BackupProviderRuntime','BackupPresentation','verifiedRecoveryState','storageHealthTime',html.slice(start,end)+';renderDriveBackup();')(
       {getElementById:id=>nodes.get(id)||null},{locationStatus:()=>state},{locationLabel:(_id,value)=>value.connected?'On':value.wasConnected?'Signed out':'Off'},
-      {providers:verifiedAt?{'google-drive':{verifiedAt}}:{}},()=>'09:30');
+      {providers:verifiedAt?{'google-drive':{at:verifiedAt}}:{}},()=>'09:30');
     const view=id=>nodes.get(id);return {shown:ids.slice(1,6).filter(id=>!view(id).hidden),view};
   };
   const base={connected:false,wasConnected:false,engineBusy:false,busy:false,backingUp:false,cancellable:false,foregroundKind:''};
-  let row=draw(base);assert.deepEqual(row.shown,['connect-drive-backup','recover-drive-backup']);assert.equal(row.view('connect-drive-backup').textContent,'Connect');assert.equal(row.view('recover-drive-backup').textContent,'Recover');
+  let row=draw(base);assert.deepEqual(row.shown,['connect-drive-backup','recover-drive-backup']);assert.equal(row.view('connect-drive-backup').textContent,'Connect');assert.equal(row.view('recover-drive-backup').textContent,'Versions');
   row=draw({...base,wasConnected:true});assert.deepEqual(row.shown,['connect-drive-backup'],'a lapsed sign-in leaves one Reconnect button');assert.equal(row.view('connect-drive-backup').textContent,'Reconnect');assert.equal(row.view('drive-backup-settings-panel').hidden,true,'settings close when Drive is not connected');
   row=draw({...base,connected:true,wasConnected:true},'2026-10-10T09:30:00.000Z');assert.deepEqual(row.shown,['drive-backup-now','recover-drive-backup','drive-backup-settings']);assert.equal(row.view('recover-drive-backup').textContent,'Versions');assert.equal(row.view('drive-backup-settings-last').textContent,'Last verified 09:30');
   row=draw({...base,connected:true,wasConnected:true,engineBusy:true,busy:true,cancellable:true,foregroundKind:'backup'});assert.deepEqual(row.shown,['cancel-drive-backup','recover-drive-backup','drive-backup-settings'],'a running backup offers Cancel in place of Back up now');assert.equal(row.view('disconnect-drive-backup').disabled,true);
@@ -182,12 +182,13 @@ class Element {
   failure=null;await handler();assert.equal(imports,1);assert.equal(n.readEvent('file','file-open'),null);n.clear();
 }
 {
-  const {notices:n}=coordinator(),verified={verifiedAt:'2026-10-01T06:44:00.000Z'};
+  const {notices:n}=coordinator(),verified={at:'2026-10-01T06:44:00.000Z'};
   const presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications:n,timeLabel:()=> '06:44',verified:()=>verified}));
-  assert.equal(presentation.locationLabel('device-folder',{connected:true,lastBackupAt:verified.verifiedAt}),presentation.locationLabel('google-drive',{connected:true}));
+  assert.equal(presentation.locationLabel('device-folder',{connected:true,lastBackupAt:verified.at}),presentation.locationLabel('google-drive',{connected:true}));
   assert.equal(presentation.locationLabel('google-drive',{connected:true}),'On · Last verified 06:44','resting state uses the same compact timestamp and retained verification metadata');
   for(const source of ['device-folder','google-drive'])for(const [kind,label] of [['backup','Backing up…'],['history','Reading backups…'],['restore-version','Restoring…'],['bring-in','Combining…']])assert.equal(presentation.locationLabel(source,{connected:true,busy:true,foregroundKind:kind}),label);
   assert.equal(presentation.locationLabel('google-drive',{wasConnected:true}),'Signed out');
+  for(const source of ['device-folder','google-drive'])assert.equal(presentation.locationLabel(source,{connected:true,locked:true}),'Paused until unlocked','with encryption locked, a row never claims automatic backups are on');
   assert.equal(presentation.locationLabel('device-folder',{mode:'permission'}),'Permission needed');
   // A row reads "Backing up…" while an external backup runs (the engine reports
   // it as backingUp) and returns to its resting label when it finishes.

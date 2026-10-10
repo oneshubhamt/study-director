@@ -21,7 +21,15 @@ assert.match(dataSurface,/data-action="toggle-backup-info"/u,'backup explanation
 assert.doesNotMatch(dataSurface,/Recovery &amp; history|Restore latest…|View backup history…|Merge from backup…/u,'separate Recovery & History wall must be removed');
 
 assert.match(dataSurface,/class="backup-advanced-disclosure ui-disclosure"/u);assert.doesNotMatch(dataSurface,/class="backup-advanced-disclosure ui-disclosure"[^>]*\sopen(?:\s|>|=)/u,'Advanced must default closed');
-assert.match(dataSurface,/id="backup-file-heading">Portable backup</u);assert.match(dataSurface,/>Export backup…</u);assert.match(dataSurface,/>Import backup…</u);
+assert.match(dataSurface,/id="backup-file-heading">Portable backup</u);assert.match(dataSurface,/>Export backup…</u);assert.match(dataSurface,/>Restore from file…</u);
+{
+  // How far back versions go is stated once, and matches the retention policy.
+  const repository=fs.readFileSync('source/core/managed-repository.js','utf8'),policy=repository.match(/normalLimit:(\d+),dailyDays:(\d+),weeklyPeriods:(\d+),monthlyPeriods:(\d+)/u);
+  assert.ok(policy,'retention policy must be readable');const [,normal,daily,weekly,monthly]=policy;
+  assert.match(dataSurface,new RegExp(`id="backup-retention-note">Each location keeps ${normal} versions: the latest, ${daily} daily, ${weekly} weekly and ${monthly} monthly, so about ${['','one','two','three','four','five','six'][Number(monthly)]} months back\\.<`,'u'),'the retention note must match the retention policy');
+  // One verb family for getting data back: Versions, then Restore…, Restore note… or Restore from file….
+  assert.match(host,/use\.textContent=noteTarget\?'Restore note…':'Restore…'/u);assert.doesNotMatch(app+host,/Restore \/ Combine|Import backup…/u);
+}
 assert.match(dataSurface,/id="security-storage-heading">Security &amp; storage</u);assert.match(dataSurface,/>Backup encryption</u);assert.match(dataSurface,/>Local storage</u);
 assert.match(styles,/\.backup-advanced-disclosure>summary/u);assert.doesNotMatch(styles,/\.backup-recovery-/u,'obsolete Recovery & History styling must be removed');
 
@@ -31,7 +39,7 @@ assert.match(provider,/wasConnected:connectedOnceByProvider\.has\(selected\.id\)
 assert.match(app,/function renderDriveBackup\(\)\{[\s\S]*BackupProviderRuntime\.locationStatus\('google-drive'\)[\s\S]*BackupPresentation\.locationLabel\('google-drive',state\)/u,'Drive row must use the shared location presentation with connection history');
 assert.match(app,/BackupProviderRuntime\.subscribeStatus\(renderDriveBackup\)/u);
 assert.match(presentation,/if\(!state\.connected\)return state\.wasConnected\?'Signed out':'Off'/u,'shared row status must distinguish expired authorization from a never-connected provider');
-assert.match(app,/const label=state\.wasConnected\?'Reconnect':'Connect';connect\.hidden=connected[\s\S]*backupNow\.hidden=!connected[\s\S]*versions\.hidden=!connected&&state\.wasConnected[\s\S]*versions\.textContent=connected\?'Versions':'Recover'[\s\S]*settings\.hidden=!connected/u,'expired Drive authorization must collapse stale backup/history/settings actions to one Reconnect action while never-connected Drive still offers Connect or Recover');
+assert.match(app,/const label=state\.wasConnected\?'Reconnect':'Connect';connect\.hidden=connected[\s\S]*backupNow\.hidden=!connected[\s\S]*versions\.hidden=!connected&&state\.wasConnected[\s\S]*versions\.textContent='Versions'[\s\S]*settings\.hidden=!connected/u,'expired Drive authorization must collapse stale backup/history/settings actions to one Reconnect action while never-connected Drive still offers Connect and Versions');
 assert.match(provider,/subscribeConnection:typeof config\.subscribeConnection==='function'\?config\.subscribeConnection:null/u);assert.match(provider,/connectedOnceByProvider=new Set\(\)/u,'provider UI must remember an authorization that was live in this tab so expiry can become Reconnect rather than a misleading fresh Connect state');assert.match(provider,/normalized\.subscribeConnection\)normalized\.subscribeConnection\(\(\)=>\{[^\n]*notifyStatus\(\)/u,'provider UI must subscribe to live authorization changes instead of waiting for the next user action');assert.match(app,/document\.addEventListener\('visibilitychange',\(\)=>\{if\(document\.hidden\)\{[^\n]*\}else BackupProviderRuntime\.refresh\(\);\}\);/u,'returning from a suspended mobile tab must synchronously re-evaluate token validity even if background timers were throttled');
 assert.match(dataSurface,/id="connect-drive-backup"[\s\S]*id="drive-backup-now"[\s\S]*id="cancel-drive-backup"[\s\S]*id="recover-drive-backup"[^>]*data-action="recover-provider-backup"[\s\S]*id="drive-backup-settings"[^>]*data-action="toggle-backup-settings"/u,'the Drive row has the same parts as the Device Folder row: connect, back up, cancel, versions and settings');
 assert.match(dataSurface,/id="drive-backup-settings-panel"[\s\S]*id="disconnect-drive-backup"[^>]*data-action="disconnect-drive-backup"/u,'Drive settings open in place, as the Device Folder\'s do');
@@ -47,7 +55,7 @@ assert.match(host,/async function collectSource\(sourceId/u);
 assert.match(host,/const result=await input\.providers\.history\(source\.id,/u,'history must query exactly the chosen source');
 assert.doesNotMatch(host,/for\(const provider of input\.providers\.list\(\)\).*input\.providers\.history/u,'explicit recovery must never enumerate every provider');
 assert.doesNotMatch(host,/input\.repository\.mergeHistory/u,'provider-scoped recovery must not merge competing histories');
-assert.match(host,/backup checkpoint/u);assert.match(host,/Restore \/ Combine…/u);assert.match(host,/Before Clear Library/u,'protected bulk-delete safety checkpoints must be clearly labelled in history');
+assert.match(host,/version to restore/u);assert.match(host,/'Restore…'/u);assert.match(host,/Before Clear Library/u,'protected bulk-delete safety checkpoints must be clearly labelled in history');
 assert.match(host,/cancelLabel:'Keep current'/u);assert.match(host,/choices:\[presentation\.restoreChoices\.missing,presentation\.restoreChoices\.combine,presentation\.restoreChoices\.replace\]/u);assert.match(presentation,/label:'Replace current data'[\s\S]*Make this backup authoritative/u);assert.match(presentation,/label:'Combine with current data'[\s\S]*review genuine differences/u);assert.match(presentation,/label:'Add only what’s missing'[\s\S]*Nothing you have now changes/u);
 assert.match(host,/choice==='replace'\?await input\.providers\.restoreRepositoryProviderVersion\(sourceId,options\):await input\.providers\.bringInRepositoryProvider\(sourceId,options\)/u);
 assert.match(app,/id="managed-version-history-progress"[\s\S]*id="managed-version-history-progress-stage"[\s\S]*id="managed-version-history-progress-detail"/u,'Version History must own its structured recovery progress surface.');

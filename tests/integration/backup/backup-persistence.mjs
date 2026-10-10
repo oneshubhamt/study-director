@@ -287,13 +287,13 @@ exportSaveStatus='downloaded';
 assert.equal((await withoutFileJobDeadlock(()=>runtime.controller.exportLocal())).status,'downloaded');
 assert.equal(currentFileJob,null,'standalone export must release its exclusive file job');
 assert.equal(backupCompletions.length,1);
-assert.equal(backupCompletions[0].recoveryCopy,undefined,'Browser download fallback is not a verified independent recovery copy.');
+assert.deepEqual({...backupCompletions[0].copy},{source:'file',sourceRevision:'2026-09-15T12:00:00.000Z',verified:false},'a download is a backup the person made; it cannot be read back, so it is recorded unverified');
 // The save dialog opens from the click with the backup's file name; a file saved
 // there and read back is a verified copy of the data as of its capture.
 backupCompletions.length=0;chosenNames.length=0;chooseSaveResult=()=>Promise.resolve({name:'chosen.sdbackup'});
 const savedExport=await withoutFileJobDeadlock(()=>runtime.controller.exportLocal());
 assert.equal(savedExport.status,'saved');assert.match(chosenNames[0],/-study-director-backup-\d{4}-\d{2}-\d{2}\.sdbackup$/u);
-assert.equal(backupCompletions.length,1);assert.deepEqual({...backupCompletions[0].recoveryCopy},{type:'file',id:'file',label:'Portable backup',sourceRevision:'2026-09-15T12:00:00.000Z'});
+assert.equal(backupCompletions.length,1);assert.deepEqual({...backupCompletions[0].copy},{source:'file',sourceRevision:'2026-09-15T12:00:00.000Z',verified:true});
 // Closing the dialog cancels quietly: nothing is prepared or recorded.
 backupCompletions.length=0;chooseSaveResult=()=>Promise.reject(Object.assign(new Error('cancelled'),{name:'AbortError'}));
 assert.equal((await withoutFileJobDeadlock(()=>runtime.controller.exportLocal())).status,'cancelled');assert.equal(backupCompletions.length,0);

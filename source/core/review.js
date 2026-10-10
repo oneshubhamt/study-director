@@ -274,7 +274,7 @@ async function writeReflection(pending,options={}){
   const saved=await DailyReflection.commit(pending.date,pending.reflection,{expectedCanonical:expected,backupCapture:pending.backupCapture||options.backupCapture===true});
   reflectionOnlyState=freeze({date:pending.date,canonical:String(saved.canonical||''),recordKind:saved.recordKind||null});
   if(reviewDate(getReviewDate())===pending.date){persistedReview=normalizeReviewState({reflection:reflectionOnlyState.canonical,studyQuality:null},pending.date,{validatedRich:true});syncReviewSurfaceMode();}
-  markStorageHealthTimestamp('lastDailyRecordSaveAt');await refreshLibraryAfterSave(pending.date);return saved;
+  markStorageHealthTimestamp('lastStudyDataSaveAt');await refreshLibraryAfterSave(pending.date);return saved;
 }
 function reflectionLaneState(state,error){
   if(state==='saving')setReflectionRichSync('saving','Saving…');
@@ -496,7 +496,7 @@ async function saveDayRecord(){
     await flushLiveDraft();
     const metrics=ReviewView.refresh({includeRecords:true,force:true});
     const {doc,rec}=await commitDailyRecord(metrics.evidence,'canonical daily record');committed=rec;
-    markStorageHealthTimestamp('lastDailyRecordSaveAt');
+    markStorageHealthTimestamp('lastStudyDataSaveAt');
     clearSaveReminder(rec.date,doc.sourceRevision);
     await writeLiveDraftNow({markChanged:false});
     await refreshLibraryAfterSave(rec.date);
@@ -553,7 +553,7 @@ async function handleStudyDayRollover(){
       saveReviewState({markChanged:false,strict:true});
       await flushLiveDraft();
       const {doc,rec}=await commitDailyRecord(SessionEvidenceGateway.snapshot({includeRecords:true}),'canonical rollover record');
-        markStorageHealthTimestamp('lastDailyRecordSaveAt');
+        markStorageHealthTimestamp('lastStudyDataSaveAt');
       markDayContentSaved(rec.date,doc.sourceRevision);
       notifyUser('Study day auto-saved',`${prettyDate(endedDate)} was saved to Library. Apply today’s schedule when ready.`,`sdm-rollover-${endedDate}`);
       Runtime.setSafetyMessage(`New study day: ${prettyDate(endedDate)} was auto-saved to Library. Apply today’s schedule when ready.`);

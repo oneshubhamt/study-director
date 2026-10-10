@@ -56,7 +56,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   const notSupported=()=>{throw new Error('Restore is covered by the browser and repository-restore suites.');};
   const pipeline=freeze({createPublication:notSupported,publish,publishInline:publish,inspectManifest,inspect:notSupported,bringIn:notSupported,restoreVersion:notSupported,verifyCheckpoint:notSupported,verifyObject:notSupported,scrub:notSupported,cleanup:rules.cleanup,inspectCommit:rules.inspectCommit,
     retention:rules.retention,validatePolicy:rules.validatePolicy,classifyState:rules.classifyState,activeProtected:rules.activeProtected,selectRetention:rules.selectRetention,projectHistory:rules.projectHistory,
-    markCompleted:({recoveryCopy})=>{if(recoveryCopy)verified.set(recoveryCopy.id,freeze({verifiedAt:new clock.Date(clock.now()).toISOString(),sourceRevision:recoveryCopy.sourceRevision}));}});
+    markCompleted:({copy})=>{if(copy)verified.set(copy.source,freeze({at:new clock.Date(clock.now()).toISOString(),sourceRevision:copy.sourceRevision}));}});
   const coordinator=registry.require('notice-coordinator',1).createCoordinator(freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}));
   const notifications=freeze({...coordinator,emit:raw=>{notices.push(raw);return coordinator.emit(raw);}});
   const presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications}));
@@ -84,7 +84,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
     configuration:freeze({metadataKey:'automaticDeviceBackup',pickerId:'study-director-device-backup',settingsTimeoutMs:10*1000}),
     engine:freeze({backup:id=>runtime.backup(id),cancelForeground:(reason,id)=>runtime.cancelForeground(reason,id),disconnect:id=>runtime.disconnect(id),forget:id=>runtime.forget(id),locationStatus:id=>runtime.locationStatus(id),register:config=>runtime.register(config),subscribeStatus:listener=>runtime.subscribeStatus(listener)}),
     environment:freeze({canMutate:()=>canMutate,clearTimeout:clock.clearTimeout,setTimeout:clock.setTimeout,showDirectoryPicker}),
-    hooks:freeze({capture:(scope,error)=>captures.push(freeze({scope,message:String(error?.message||error)})),chooseCheckpoint:async rows=>rows[0].id,render:state=>rendered.push(state),sourceRevision:()=>current,verifiedAt:()=>verified.get('device-folder')?.verifiedAt||''}),
+    hooks:freeze({capture:(scope,error)=>captures.push(freeze({scope,message:String(error?.message||error)})),chooseCheckpoint:async rows=>rows[0].id,render:state=>rendered.push(state),sourceRevision:()=>current,verifiedAt:()=>verified.get('device-folder')?.at||''}),
     presentation,
     // Writes pass the app's own stored-record validator, as the real store does.
     settings:freeze({read:async key=>settingsStore.get(key)||null,write:async(key,value)=>{if(!settingsValid(value,{key}))throw new Error(`appMeta ${key} value is not canonical.`);settingsStore.set(key,value);return true;},remove:async key=>{settingsStore.delete(key);return true;}}),

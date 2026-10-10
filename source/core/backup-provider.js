@@ -667,7 +667,7 @@ registry.define('backup-provider',1,input=>{
           try{item=repositoryProviderItem(await selected.repository.upload(Object.freeze({kind:'commit',id:marker.checkpointId,name:marker.checkpointId+'.sdcommit',blob:marker.blob,size:marker.size,digest:marker.digest,exportedAt:marker.exportedAt,appVersion:APP_VERSION,checkProtection:marker.checkProtection,checkSource:marker.checkSource,knownAbsent:!resuming})),'commit');const verifiedCommit=await verifyUploadedRepositoryCommit(selected,item,marker,signal);await marker.checkSource?.();rememberVerifiedHistory(selected,item,Object.freeze({kind:'commit',value:verifiedCommit}),item.verificationScope||null);OperationDiagnostics.mark('provider-commit-complete',{provider:selected.id});return item;}
           catch(error){if(item)await selected.repository.delete(item).catch(()=>{});else await selected.repository.delete(Object.freeze({kind:'commit',id:marker.checkpointId,digest:marker.digest})).catch(()=>{});throw error;}
         },
-        onCommitted:async context=>{OperationDiagnostics.mark('provider-checkpoint-committed',{provider:selected.id});rememberAutomaticCoverage(publicationOwner,context.sourceRevision||context.exportedAt);progress(retention?.role==='before-restore'?'safety-complete':'complete',retention?.role==='before-restore'?`Protected safety backup verified in ${selected.label}.`:`Finishing ${selected.label} backup…`);RepositoryCheckpointPipeline.markCompleted({recoveryCopy:{type:'provider',id:selected.id,label:selected.label,sourceRevision:context.sourceRevision||context.exportedAt||''}});return null;},
+        onCommitted:async context=>{OperationDiagnostics.mark('provider-checkpoint-committed',{provider:selected.id});RepositoryCheckpointPipeline.markCompleted({copy:{source:selected.id,sourceRevision:context.sourceRevision||context.exportedAt||''}});restartAutomaticCountdown(publicationOwner,context.sourceRevision||context.exportedAt);progress(retention?.role==='before-restore'?'safety-complete':'complete',retention?.role==='before-restore'?`Protected safety backup verified in ${selected.label}.`:`Finishing ${selected.label} backup…`);return null;},
         cleanup:deferredMaintenance?async()=>{if(!maintenanceNeeded)return Object.freeze({warning:''});const scheduler=providerMaintenanceScheduler(selected);if(maintenanceDeferred&&maintenancePendingState&&scheduler){const due=Date.parse(String(maintenancePendingState.nextEligibleAt||'')),delay=Number.isFinite(due)?Math.max(1000,due-Date.now()):MAINTENANCE_POLICY.contentionMs;scheduler.schedule(delay,maintenanceReason||'repository-state','earliest');maintenanceQueued=true;}else maintenanceQueued=await scheduler?.request('repository-state',MAINTENANCE_POLICY.busyMs,{mode:'earliest'})===true;return Object.freeze({warning:maintenanceQueued?'':'Backup cleanup is still pending and will be retried on a later backup.'});}:async context=>{progress('finish',`Finishing ${selected.label} backup…`);const after=await repositoryProviderState(selected,{interactive:false}),warning=await cleanupRepositoryProvider(selected,after,context.manifest.checkpoint.checkpointId,{reuseObjectInventory:true});return Object.freeze({warning});},
         retainOnFailure:error=>{
           const code=String(error?.code||''),cancelCode=String(signal?.reason?.code||'');
@@ -748,7 +748,7 @@ registry.define('backup-provider',1,input=>{
   const automaticByProvider=new Map();
   function automaticState(selected){
     const id=safeId(selected&&selected.id);let state=automaticByProvider.get(id);
-    if(!state){state={covered:'',connected:false,noticeShown:false,waitingSince:NaN,urgentSince:NaN};automaticByProvider.set(id,state);}
+    if(!state){state={connected:false,noticeShown:false,waitingSince:NaN,urgentSince:NaN};automaticByProvider.set(id,state);}
     return state;
   }
   // A change noted while the app runs is a real edit. Before the first one,
@@ -759,7 +759,7 @@ registry.define('backup-provider',1,input=>{
   function automaticCovered(selected){
     let recorded='',baseline='';
     try{recorded=String(automaticHooks?.covered(selected.id)||'');baseline=String(selected.automaticBaseline?.()||'');}catch(error){AppDiagnostics.capture('backup-provider.automatic-covered',error,'warn');}
-    const times=[recorded,baseline,automaticState(selected).covered].map(value=>Date.parse(value)).filter(Number.isFinite);
+    const times=[recorded,baseline].map(value=>Date.parse(value)).filter(Number.isFinite);
     return times.length?Math.max(...times):NaN;
   }
   function automaticEnabled(selected){return !!automaticHooks&&!!selected?.repository&&Number.isFinite(automaticCovered(selected));}
@@ -770,9 +770,8 @@ registry.define('backup-provider',1,input=>{
   }
   // A backup restarts the countdown: changes made while it ran wait a full
   // cadence from its end, except a key moment made after the capture.
-  function rememberAutomaticCoverage(selected,sourceRevision){
-    const at=Date.parse(String(sourceRevision||'')),state=automaticState(selected),prior=Date.parse(state.covered);
-    if(Number.isFinite(at)&&(!Number.isFinite(prior)||at>prior))state.covered=new Date(at).toISOString();
+  function restartAutomaticCountdown(selected,sourceRevision){
+    const at=Date.parse(String(sourceRevision||'')),state=automaticState(selected);
     const waiting=automaticNeeded(selected);state.waitingSince=waiting?Date.now():NaN;
     if(!waiting||!(state.urgentSince>at))state.urgentSince=NaN;
   }
@@ -1295,7 +1294,7 @@ registry.define('backup-provider',1,input=>{
   // Forgetting a location drops everything this device holds about it; its
   // backups stay where they are.
   async function forgetProvider(selected){
-    Object.assign(automaticState(selected),{noticeShown:true,covered:'',waitingSince:NaN,urgentSince:NaN});await discardProviderPublication(selected);connectedOnceByProvider.delete(selected.id);clearRecentHistory(selected);verifiedHistoryByProvider.delete(selected.id);repositoryScopeByProvider.delete(selected.id);await clearPendingRetry(selected);providerBackground(selected).clearAllScheduled();presentation.reset(selected.id);
+    Object.assign(automaticState(selected),{noticeShown:true,waitingSince:NaN,urgentSince:NaN});await discardProviderPublication(selected);connectedOnceByProvider.delete(selected.id);clearRecentHistory(selected);verifiedHistoryByProvider.delete(selected.id);repositoryScopeByProvider.delete(selected.id);await clearPendingRetry(selected);providerBackground(selected).clearAllScheduled();presentation.reset(selected.id);
   }
   async function disconnectProvider(selected){
     if(busy||!selected||!selected.disconnect)return false;
@@ -1317,7 +1316,7 @@ registry.define('backup-provider',1,input=>{
     const selected=providers.get(safeId(id));if(!selected)return null;
     const operation=foregroundView(),active=busy&&operation?.providerId===selected.id,coordinator=providerBackgroundCoordinators.get(selected.id),background=coordinator?coordinator.status():null,running=background?background.active:[],job=coordinator?coordinator.jobStatus('convergence'):null,attempts=providerConvergenceRetryAttempts.get(selected.id)||0;
     const connected=providerConnected(selected);if(connected)connectedOnceByProvider.add(selected.id);
-    return freeze({connected,wasConnected:connectedOnceByProvider.has(selected.id),engineBusy:busy,busy:active,foregroundKind:active?String(operation.kind||''):'',cancellable:active&&!!foregroundController&&!foregroundController.signal.aborted,backingUp:running.includes('convergence')||presentation.read(selected.id,'external-backup')?.lifecycle==='running',maintenanceBusy:running.includes('maintenance')||running.includes('integrity'),paused:background?.held===true,waiting:automaticWaiting(selected),nextEligibleAt:String(job?.nextEligibleAt||''),retryAttempt:attempts,retryBackoffCapped:attempts>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length});
+    return freeze({connected,wasConnected:connectedOnceByProvider.has(selected.id),engineBusy:busy,busy:active,foregroundKind:active?String(operation.kind||''):'',cancellable:active&&!!foregroundController&&!foregroundController.signal.aborted,backingUp:running.includes('convergence')||presentation.read(selected.id,'external-backup')?.lifecycle==='running',maintenanceBusy:running.includes('maintenance')||running.includes('integrity'),paused:background?.held===true,locked:ports.ownership.canRunBackground()==='locked',waiting:automaticWaiting(selected),nextEligibleAt:String(job?.nextEligibleAt||''),retryAttempt:attempts,retryBackoffCapped:attempts>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length});
   }
   function register(config={}){
     const normalized=freezeProvider(config&&typeof config==='object'?config:{});

@@ -576,7 +576,7 @@ const repository=(()=>{
     if(!clearIndependentRescueKeys(settledKeys))AppDiagnostics.capture('area-notes.rescue-clear',LocalStorageContract.lastError||new Error('Ongoing Note emergency rescue cleanup failed.'),'warn');
     if(movedEdits)protectUnsaved();
     if(!unresolved.length)clearFailure();
-    markStorageHealthOk('areaNotes','lastNotesSaveAt');
+    markStorageHealthOk('areaNotes','lastStudyDataSaveAt');
     if(result.written)reportCanonicalCommit('areaNote','upsert',null,{backupCapture:options.backupCapture===true});
     if(canonicalRefreshNeeded||reported.length)touchSnapshot();
     if(canonicalRefreshNeeded||reported.length)refreshAreaNoteConsumers();
@@ -745,7 +745,7 @@ const repository=(()=>{
       await idbReplace(next,removedKeys,{deletedEntries});
       if(!clearIndependentRescueKeys([...previousKeys,...nextKeys]))AppDiagnostics.capture('area-notes.rescue-clear',LocalStorageContract.lastError||new Error('Ongoing Note emergency rescue cleanup failed.'),'warn');
       wipeObject(notes);Object.assign(notes,next);touchSnapshot();clearFailure();
-      markStorageHealthOk('areaNotes','lastNotesSaveAt');
+      markStorageHealthOk('areaNotes','lastStudyDataSaveAt');
       reportCanonicalCommit('areaNote','upsert');
       return prepareExportPayload(next);
     }catch(e){
@@ -860,7 +860,7 @@ const repository=(()=>{
       if(!clearIndependentRescueKeys(removedKeys))AppDiagnostics.capture('area-notes.rescue-clear',LocalStorageContract.lastError||new Error('Ongoing Note emergency rescue cleanup failed.'),'warn');
       wipeObject(notes);touchSnapshot();clearFailure();
 
-      markStorageHealthOk('areaNotes','lastNotesSaveAt');
+      markStorageHealthOk('areaNotes','lastStudyDataSaveAt');
       refreshAreaNoteConsumers();
       reportCanonicalCommit('areaNote','delete');
       return Object.freeze({count:removedKeys.length});
