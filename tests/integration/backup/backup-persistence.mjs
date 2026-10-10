@@ -232,7 +232,7 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
   }),
   environment:freeze({
     AbortController,clearTimeout,yieldTask:async()=>{},
-    requestAnimationFrame:callback=>{callback();return 1;},setTimeout:(callback,delay)=>delay>=300000?setTimeout(callback,delay):(callback(),1)
+    setTimeout:(callback,delay)=>delay>=300000?setTimeout(callback,delay):(callback(),1)
   }),
   diagnostics:freeze({capture:(scope,error,level)=>events.push(`diagnostic:${scope}:${level}:${error?.message||error}`),start:()=>'',mark:()=>false,finish:()=>false,fail:()=>false})
 })}));

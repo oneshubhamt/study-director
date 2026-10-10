@@ -487,7 +487,6 @@ html[data-presentation="glass"] .sb-stats{
   html[data-presentation="glass"] #pane-plan{padding-top:max(18px,var(--sd-density-pane-padding-top));padding-bottom:var(--sd-glass-mobile-content-clearance)}
   html[data-presentation="glass"] .display-tools,
   html[data-presentation="glass"] #nudge-overlay,
-  html[data-presentation="glass"] #backup-provider-overlay,
   html[data-presentation="glass"] .pwa-update-control,
   html[data-presentation="glass"] .ownership-banner{bottom:var(--sd-glass-mobile-content-clearance)}
   html[data-presentation="glass"] .status-bar{border-radius:20px;overflow-x:auto}
@@ -772,7 +771,6 @@ function installOverlayCoordinator(){
   const root=document.documentElement;
   if(!root||root.dataset.glassOverlayCoordinator==='installed')return;
   const surfaces=[
-    {id:'backup',element:document.getElementById('backup-provider-overlay'),visible:element=>element.classList.contains('on'),blocksTools:true},
     {id:'owner',element:document.querySelector('.ownership-banner'),visible:element=>element.classList.contains('on'),blocksTools:true},
     {id:'update',element:document.querySelector('.pwa-update-control'),visible:element=>!element.hidden,blocksTools:false},
     {id:'nudge',element:document.getElementById('nudge-overlay'),visible:element=>element.classList.contains('on'),blocksTools:true}

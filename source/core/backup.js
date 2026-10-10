@@ -27,7 +27,7 @@ registry.define('backup',1,input=>{
     events:freeze(['libraryChanged','backupCompleted','reconcileAreaNotes','restoreAreaNotesSnapshot','restoreSessionState','verifyActiveSessionRuntime','restoredFromFile']),
     operations:freeze(['assertAuthority','clearFault','failClosed','runExclusive']),
     interactions:freeze(['choose','configure','notify']),
-    environment:freeze(['AbortController','clearTimeout','requestAnimationFrame','setTimeout','yieldTask']),
+    environment:freeze(['AbortController','clearTimeout','setTimeout','yieldTask']),
     diagnostics:freeze(['capture','fail','finish','mark','start']),
     assets:freeze(['get','put','keys','list','importAll','restoreAll','removeMany','removeMetadata','scheduleMaintenance'])
   });
@@ -49,7 +49,7 @@ registry.define('backup',1,input=>{
     requireFunctions(ports.events,PORT_FIELDS.events,'Backup events port');
     requireFunctions(ports.operations,PORT_FIELDS.operations,'Backup operations port');
     requireFunctions(ports.interactions,PORT_FIELDS.interactions,'Backup interactions port');
-    requireFunctions(ports.environment,['AbortController','clearTimeout','requestAnimationFrame','setTimeout','yieldTask'],'Backup environment port');
+    requireFunctions(ports.environment,['AbortController','clearTimeout','setTimeout','yieldTask'],'Backup environment port');
     requireFunctions(ports.diagnostics,PORT_FIELDS.diagnostics,'Backup diagnostics port');
     if(portableAssets)requireFunctions(ports.assets,PORT_FIELDS.assets,'Backup assets port');
     if(!Object.isFrozen(ports.configuration.limits)){
@@ -81,7 +81,7 @@ registry.define('backup',1,input=>{
     const {libraryChanged,backupCompleted,reconcileAreaNotes,restoreAreaNotesSnapshot,restoreSessionState,verifyActiveSessionRuntime,restoredFromFile}=ports.events;
     const {assertAuthority,clearFault,failClosed,runExclusive}=ports.operations;
     const {choose,configure,notify}=ports.interactions;
-    const {AbortController,clearTimeout,requestAnimationFrame,setTimeout,yieldTask}=ports.environment;
+    const {AbortController,clearTimeout,setTimeout,yieldTask}=ports.environment;
     const AppDiagnostics=freeze({capture:ports.diagnostics.capture});
     const OperationDiagnostics=freeze({start:ports.diagnostics.start,mark:ports.diagnostics.mark,finish:ports.diagnostics.finish,fail:ports.diagnostics.fail});
     const DATA_CONTRACT=freeze({schemas:freeze({Backup:freeze({version:backupVersion})})});
@@ -1599,9 +1599,9 @@ const BackupProviderRuntime=BackupProviderModule.createRuntime(freeze({
     controller:freeze({beginImport:BackupController.beginImport,cancelImport:BackupController.cancelImport,finishImport:BackupController.finishImport}),
     exports:freeze({run:Exports.run}),
     domain:freeze({clampText}),
-    view:freeze({document,presentation:ports.view.presentation}),
+    view:freeze({presentation:ports.view.presentation}),
     ownership:freeze({canRunBackground:()=>!appCanMutate()?'awaiting-control':Exports.backgroundAvailable(),requireMutationControl:requireBackupMutationControl}),
-    environment:freeze({clearTimeout,requestAnimationFrame,setTimeout}),
+    environment:freeze({clearTimeout,setTimeout}),
     diagnostics:freeze({capture:AppDiagnostics.capture,start:OperationDiagnostics.start,mark:OperationDiagnostics.mark,finish:OperationDiagnostics.finish,fail:OperationDiagnostics.fail})
   })
 }));

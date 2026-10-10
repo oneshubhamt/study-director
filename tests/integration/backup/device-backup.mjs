@@ -41,7 +41,7 @@ await test('a folder that already holds backups is not published to on choose; t
   assert.equal((await shared.commits(folder)).length,1);
   const w=world({start:'2026-10-06T09:00:00.000Z'});await w.controller.install();w.choose(folder);await w.controller.connect();await w.settle();
   assert.equal(w.published.length,0,'choosing a folder with backups writes nothing');
-  assert.match(w.controller.status().message,/Existing Study Director backups found/u);assert.equal(w.runtime.automaticWaiting(),false);
+  assert.match(w.note(),/Existing Study Director backups found/u);assert.equal(w.runtime.automaticWaiting(),false);
   await w.tick(30*MINUTE);assert.equal(w.published.length,0,'no change, no backup');
   w.change();await w.tick(21*MINUTE);assert.equal(w.published.length,1,'this device backs up from its next change');assert.equal((await w.commits(folder)).length,2);
 });
@@ -67,9 +67,9 @@ await test('a folder that needs permission again asks once, never prompts on its
 await test('cancelling the picker or refusing permission leaves a clean, unconnected state',async()=>{
   const w=world();await w.controller.install();
   w.choose(Object.assign(new Error('The user aborted a request.'),{name:'AbortError'}));await w.controller.connect();
-  assert.equal(w.controller.status().mode,'off');assert.equal(w.controller.status().message,'Folder selection was cancelled.');assert.equal(w.settingsStore.size,0);
+  assert.equal(w.controller.status().mode,'off');assert.equal(w.note(),'Folder selection was cancelled.');assert.equal(w.settingsStore.size,0);
   w.choose(w.directory({permission:'prompt',grant:'denied'}));await w.controller.connect();
-  assert.equal(w.controller.status().connected,false);assert.match(w.controller.status().message,/Write permission was not granted/u);assert.equal(w.settingsStore.size,0);assert.equal(w.published.length,0);
+  assert.equal(w.controller.status().connected,false);assert.match(w.note(),/Write permission was not granted/u);assert.equal(w.settingsStore.size,0);assert.equal(w.published.length,0);
 });
 
 await test('a deleted repository folder heals in the next backup; a deleted chosen folder is forgotten cleanly',async()=>{
@@ -78,7 +78,7 @@ await test('a deleted repository folder heals in the next backup; a deleted chos
   assert.equal((await w.commits(folder)).length,1,'the repository is recreated in the same backup');
   folder.markRemoved();w.change(true);await w.tick(10*1000);
   assert.equal(w.controller.status().connected,false);assert.equal(w.controller.status().mode,'off');assert.equal(w.settingsStore.size,0,'the dead folder is forgotten');
-  assert.match(w.controller.status().message,/no longer available/u);
+  assert.match(w.note(),/no longer available/u);
   w.change();await w.tick(30*MINUTE);assert.equal(w.runtime.automaticActive(),false,'nothing keeps trying');
 });
 

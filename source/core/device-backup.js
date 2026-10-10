@@ -23,7 +23,7 @@ registry.define('device-backup',1,()=>{
     functions(input.settings,['read','remove','write'],'Device-backup settings port');
     functions(input.hooks,['capture','chooseCheckpoint','render','sourceRevision','verifiedAt'],'Device-backup hooks');
     if(typeof input.transport!=='function')throw new TypeError('Device-backup transport port is invalid.');
-    if(!Object.isFrozen(input.presentation)||['feedback','notice','read','resolve','reset'].some(key=>typeof input.presentation[key]!=='function'))throw new TypeError('Backup presentation port is invalid.');
+    if(!Object.isFrozen(input.presentation)||['current','feedback','notice','read','resolve','reset'].some(key=>typeof input.presentation[key]!=='function'))throw new TypeError('Backup presentation port is invalid.');
     const {configuration:config,engine,environment,settings,hooks,presentation}=input;
     const supported=typeof environment.showDirectoryPicker==='function';
     let installed=false,handle=null,permission='unknown',baseline='',mode=supported?'off':'unsupported',settingsUnverified=supported,connectionListener=null,connecting=false,permissionNoticeShown=false;
@@ -31,19 +31,17 @@ registry.define('device-backup',1,()=>{
     function capture(scope,error){try{hooks.capture(scope,error);}catch{}}
     const connected=()=>supported&&!!handle&&permission==='granted';
     const sourceRevision=()=>{try{const value=String(hooks.sourceRevision()||'');return Number.isFinite(Date.parse(value))?value:'';}catch{return '';}};
-    function message(){
-      const running=presentation.read(ID),feedback=presentation.read(ID,'backup-status');
-      return ((running?.lifecycle==='running'?running:null)||feedback||(running?.lifecycle==='failed'?running:null))?.message||'';
-    }
     function snapshot(){
       const engineState=supported?engine.locationStatus(ID):null;
       return freeze({
         format:'study-director.device-backup-status',contractVersion:1,
-        installed,supported,mode,connected:connected(),permission,folderName:handle&&typeof handle.name==='string'?handle.name:'',message:message(),
+        installed,supported,mode,connected:connected(),permission,folderName:handle&&typeof handle.name==='string'?handle.name:'',
         busy:engineState?.busy===true||connecting,cancellable:engineState?.cancellable===true,foregroundKind:connecting?'connect':String(engineState?.foregroundKind||''),
         backingUp:engineState?.backingUp===true,maintenanceBusy:engineState?.maintenanceBusy===true,paused:engineState?.paused===true,pending:engineState?.waiting===true,nextEligibleAt:String(engineState?.nextEligibleAt||''),
         retryAttempt:Number(engineState?.retryAttempt)||0,retryBackoffCapped:engineState?.retryBackoffCapped===true,
-        lastBackupAt:String(hooks.verifiedAt()||'')||null,hasOperationSummary:!!presentation.read(ID)&&!presentation.read(ID,'backup-status')
+        lastBackupAt:String(hooks.verifiedAt()||'')||null,
+        // The row's inline note shows the location's messages; this says whether it has one.
+        hasNote:!!presentation.current(ID)
       });
     }
     function publish(){const state=snapshot();try{hooks.render(state);}catch(error){capture('device-backup.render',error);}return state;}

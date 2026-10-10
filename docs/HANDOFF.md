@@ -2,7 +2,7 @@
 
 Status of the work on this branch (`refactor/background-coordination`, draft PR #1): what is done, what is left, the wider programme and the agreed direction, and a record of the work so far.
 
-**Current state (2026-10-10):** the backup engine design is complete: both locations run on the shared engine and the host draws both rows from engine status. Older stored data is read only by the compatibility host, once (1.4). The audit's schema step is done (1.5): stable record names, one last-backup record, a location-keyed verification record, Device Folder settings v4, one emergency-copy budget and a download-free Drive scrub. All 138 fast tests and the browser smoke suite pass. Next: the host draws Drive's settings dialog and progress overlay (#63), then #45/#46 and the compatibility-layer isolation check (#64).
+**Current state (2026-10-10):** the backup engine design is complete: both locations run on the shared engine and the host draws both rows from engine status. Older stored data is read only by the compatibility host, once (1.4). The audit's schema step is done (1.5): stable record names, one last-backup record, a location-keyed verification record, Device Folder settings v4, one emergency-copy budget and a download-free Drive scrub. All 138 fast tests and the browser smoke suite pass. The engine draws no UI any more; both locations are drawn by the host the same way (1.6). Next: #45/#46 and the compatibility-layer isolation check (#64).
 
 ---
 
@@ -126,11 +126,20 @@ Your decisions on the audit (`docs/AUDIT-DATA-AND-BACKUP.md`) and what was done:
 - **T6.** The `dailyRecordMigration` marker is named in the daily-record retirement entry.
 - **Encryption (B3).** Left as is. Direction for later: full end-to-end encryption at rest and in transit, with a sign-in first experience (unlock, then use the app normally).
 
+### 1.6 One way to draw every backup location (2026-10-10, task #63)
+
+- **The engine draws nothing.** The Drive settings dialog, its progress block, status line and Cancel button are gone from `backup-provider.js`, with their focus, Escape and outside-click handling. The engine no longer takes `document` or `requestAnimationFrame`. Net: 268 lines removed, 107 added.
+- **Drive's row has the Device Folder's parts:** Connect or Reconnect (one click, as the expired-sign-in toast already did), Back up now, Cancel, Versions, and Settings that open in place (state, access, last verified, Disconnect Drive).
+- **One inline note per location**, drawn from `BackupPresentation.current(source)`. The Device Folder's own note now only says how the folder is doing; messages and progress are in the shared note, so nothing shows twice.
+- **Sign-in:** Connect prepares Google sign-in while background work gives way, then opens it. A successful connect leaves no message (the row says On); a failure stays in the row's note.
+- **Privacy wording** moved from the plugin descriptor into the Drive row's info popover (before connecting) and the settings panel (access line and Privacy link).
+- **Still drawn outside the host:** the portable-file row (`backup.js`: Export button, Cancel and status line, three DOM touchpoints). Same treatment when convenient.
+
 ---
 
 ## 2. Remaining from the rest of this work
 
-- **Audit done (2026-10-10):** `docs/AUDIT-DATA-AND-BACKUP.md` covers the data topology and the whole backup system, with findings ranked and a suggested order. Your decisions and the schema step are in 1.5. Still open: B5 (#63), B7 retention and B8 restore names (to propose), #45/#46 and the compatibility-layer isolation check (#64).
+- **Audit done (2026-10-10):** `docs/AUDIT-DATA-AND-BACKUP.md` covers the data topology and the whole backup system, with findings ranked and a suggested order. Your decisions and the schema step are in 1.5. B5 is done (1.6). Still open: B7 retention and B8 restore names (to propose), #45/#46 and the compatibility-layer isolation check (#64).
 - **#45 Drive/Device performance and reliability review** (open). Candidates:
   - bounded writes in `device-folder-storage`;
   - plain-text history sidecars so Device Folder history shows summaries while encryption is locked;

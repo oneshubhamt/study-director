@@ -64,7 +64,7 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
   view:freeze({presentation:createBackupPresentation(),document:documentStub,refreshPnote:fn,refreshReview:fn,renderSchedule:fn}),
   events:freeze({libraryChanged:fn,backupCompleted:fn,reconcileAreaNotes:async payload=>{events.push('reconcile-area-notes');notes={...notes,...payload};return notes;},restoreAreaNotesSnapshot:async payload=>{notes={...payload};return notes;},restoreSessionState:async()=>true,verifyActiveSessionRuntime:async()=>true,restoredFromFile:()=>false}),
   operations:freeze({assertAuthority:()=>true,clearFault:fn,failClosed:fn,runExclusive:async(kind,op)=>op()}),interactions:freeze({choose:async()=>null,configure:async()=>configureResult,notify:fn}),
-  environment:freeze({AbortController,clearTimeout,yieldTask:async()=>{},requestAnimationFrame:cb=>{cb();return 1;},setTimeout:cb=>{cb();return 1;}}),diagnostics:freeze({capture:fn,start:()=>'',mark:()=>false,finish:()=>false,fail:()=>false})
+  environment:freeze({AbortController,clearTimeout,yieldTask:async()=>{},setTimeout:cb=>{cb();return 1;}}),diagnostics:freeze({capture:fn,start:()=>'',mark:()=>false,finish:()=>false,fail:()=>false})
 })}));
 
 if(encryptedMode){

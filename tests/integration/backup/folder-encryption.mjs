@@ -49,7 +49,7 @@ await w.controller.install();w.choose(folder);await w.controller.connect();await
 {
   await w.tick(1000);w.change();folder.faults.corruptReadOf.add(await w.nextObjectName());
   assert.equal(await w.controller.backupNow(),false);
-  assert.equal(await commits(),3,'a write that reads back wrong never becomes a version');assert.match(w.controller.status().message,/failed verification/u);
+  assert.equal(await commits(),3,'a write that reads back wrong never becomes a version');assert.match(w.note(),/failed verification/u);
   const root=await folder.getDirectoryHandle(IDENTITIES.root),objects=(await root.getDirectoryHandle(IDENTITIES.objects)).names();assert.ok(!objects.includes(await w.nextObjectName()),'the bad file is removed');
   assert.equal(await w.controller.backupNow(),true,'the next attempt succeeds');assert.equal(await commits(),4);
   cases.push('a corrupt read-back fails the backup and leaves nothing behind');

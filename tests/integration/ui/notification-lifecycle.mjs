@@ -82,7 +82,7 @@ class Element {
 {
   const {notices:n}=coordinator(),nodes=new Map(['device-folder','google-drive'].map(source=>[`backup-operation-note-${source}`,new Element()]));
   const presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications:n}));
-  const html=fs.readFileSync('source/app.html','utf8'),a=html.indexOf('BackupPresentation.subscribe(state=>{'),b=html.indexOf('const REPOSITORY_MAINTENANCE_FORMAT',a);
+  const html=fs.readFileSync('source/app.html','utf8'),a=html.indexOf('BackupPresentation.subscribe(()=>{'),b=html.indexOf('const REPOSITORY_MAINTENANCE_FORMAT',a);
   new Function('BackupPresentation','document',html.slice(a,b))(presentation,{getElementById:id=>nodes.get(id)||null});
   for(const sourceId of ['device-folder','google-drive']){
     const handle=presentation.begin(sourceId,'restore-version',{label:sourceId,message:'Verifying safety copy'});
@@ -112,8 +112,26 @@ class Element {
   const {notices:n}=coordinator();for(let i=0;i<200;i++)n.emit({source:'maintenance',id:`quiet-${i}`,foreground:false,lifecycle:'succeeded',message:'Done'});
   assert.ok(n.eventStatus().events.length<=64,'quiet background results also have bounded retention');n.clear();
   const html=fs.readFileSync('source/app.html','utf8'),start=html.indexOf('function renderDeviceBackup(state){'),end=html.indexOf('\nfunction markStorageHealthOk',start),status=new Element(),note=new Element(),recover=new Element(),cleared=[];
-  new Function('document','storageHealthTime','schedulePwaUpdateEvaluation','NoticeCoordinator','BackupPresentation',html.slice(start,end)+`;renderDeviceBackup({busy:true,foregroundKind:'restore-version',cancellable:false,connected:true,message:'Cancelling safely…'});`)({getElementById:id=>({'device-backup-status':status,'device-backup-note':note,'recover-device-backup':recover}[id]||null)},()=>'',()=>{}, {resolveEvent:(...args)=>cleared.push(args)},registry.require('backup-presentation',1).createPresentation(freeze({notifications:n})));
+  new Function('document','storageHealthTime','schedulePwaUpdateEvaluation','NoticeCoordinator','BackupPresentation',html.slice(start,end)+`;renderDeviceBackup({busy:true,foregroundKind:'restore-version',cancellable:false,connected:true,hasNote:true});`)({getElementById:id=>({'device-backup-status':status,'device-backup-note':note,'recover-device-backup':recover}[id]||null)},()=>'',()=>{}, {resolveEvent:(...args)=>cleared.push(args)},registry.require('backup-presentation',1).createPresentation(freeze({notifications:n})));
   assert.equal(status.textContent,'Restoring…');assert.equal(recover.disabled,false,'a cancelling recovery remains reopenable');assert.equal(note.hidden,true);assert.equal(cleared.length,0,'Device state cannot erase the coordinator summary during cancellation');
+}
+{
+  // Google Drive's row is drawn by the app from engine status, with the same
+  // parts as the Device Folder row.
+  const html=fs.readFileSync('source/app.html','utf8'),start=html.indexOf('function renderDriveBackup(){'),end=html.indexOf('\nfunction renderDeviceBackup(',start);
+  const ids=['backup-provider-row-status-google-drive','connect-drive-backup','drive-backup-now','cancel-drive-backup','recover-drive-backup','drive-backup-settings','drive-backup-settings-panel','drive-backup-settings-last','disconnect-drive-backup'];
+  const draw=(state,verifiedAt='')=>{
+    const nodes=new Map(ids.map(id=>[id,new Element()]));nodes.get('drive-backup-settings-panel').hidden=false;
+    new Function('document','BackupProviderRuntime','BackupPresentation','verifiedRecoveryState','storageHealthTime',html.slice(start,end)+';renderDriveBackup();')(
+      {getElementById:id=>nodes.get(id)||null},{locationStatus:()=>state},{locationLabel:(_id,value)=>value.connected?'On':value.wasConnected?'Signed out':'Off'},
+      {providers:verifiedAt?{'google-drive':{verifiedAt}}:{}},()=>'09:30');
+    const view=id=>nodes.get(id);return {shown:ids.slice(1,6).filter(id=>!view(id).hidden),view};
+  };
+  const base={connected:false,wasConnected:false,engineBusy:false,busy:false,backingUp:false,cancellable:false,foregroundKind:''};
+  let row=draw(base);assert.deepEqual(row.shown,['connect-drive-backup','recover-drive-backup']);assert.equal(row.view('connect-drive-backup').textContent,'Connect');assert.equal(row.view('recover-drive-backup').textContent,'Recover');
+  row=draw({...base,wasConnected:true});assert.deepEqual(row.shown,['connect-drive-backup'],'a lapsed sign-in leaves one Reconnect button');assert.equal(row.view('connect-drive-backup').textContent,'Reconnect');assert.equal(row.view('drive-backup-settings-panel').hidden,true,'settings close when Drive is not connected');
+  row=draw({...base,connected:true,wasConnected:true},'2026-10-10T09:30:00.000Z');assert.deepEqual(row.shown,['drive-backup-now','recover-drive-backup','drive-backup-settings']);assert.equal(row.view('recover-drive-backup').textContent,'Versions');assert.equal(row.view('drive-backup-settings-last').textContent,'Last verified 09:30');
+  row=draw({...base,connected:true,wasConnected:true,engineBusy:true,busy:true,cancellable:true,foregroundKind:'backup'});assert.deepEqual(row.shown,['cancel-drive-backup','recover-drive-backup','drive-backup-settings'],'a running backup offers Cancel in place of Back up now');assert.equal(row.view('disconnect-drive-backup').disabled,true);
 }
 {
   const {notices:n,time}=coordinator(),actions=[];

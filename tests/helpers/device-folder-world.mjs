@@ -60,10 +60,10 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   const coordinator=registry.require('notice-coordinator',1).createCoordinator(freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}));
   const notifications=freeze({...coordinator,emit:raw=>{notices.push(raw);return coordinator.emit(raw);}});
   const presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications}));
-  const noop=()=>{},documentStub=freeze({getElementById:()=>null,addEventListener:noop,createDocumentFragment:()=>({}),createElement:()=>({})});
+  const noop=()=>{};
   const runtime=registry.require('backup-provider',1,freeze({repositoryPolicy:policy})).createRuntime(freeze({background:freeze({format:background.format,contractVersion:1,createCoordinator:background.createCoordinator,maintenance:background.maintenance,maintenanceActionable:background.maintenanceActionable}),repository:pipeline,ports:freeze({
-    configuration:freeze({appVersion:'qa'}),controller:freeze({beginImport:noop,cancelImport:noop,finishImport:noop}),exports:freeze({run:async(type,data)=>{assert.equal(type,'checksum');return sha256(data.value);}}),domain:freeze({clampText:value=>String(value||'')}),view:freeze({presentation,document:documentStub}),
-    ownership:freeze({canRunBackground:()=>!canMutate?'awaiting-control':protection&&protection.status().enabled&&!protection.status().unlocked?'locked':true,requireMutationControl:()=>{if(!canMutate)throw new Error('Take control first.');}}),environment:freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,requestAnimationFrame:fn=>(fn(),1)}),
+    configuration:freeze({appVersion:'qa'}),controller:freeze({beginImport:noop,cancelImport:noop,finishImport:noop}),exports:freeze({run:async(type,data)=>{assert.equal(type,'checksum');return sha256(data.value);}}),domain:freeze({clampText:value=>String(value||'')}),view:freeze({presentation}),
+    ownership:freeze({canRunBackground:()=>!canMutate?'awaiting-control':protection&&protection.status().enabled&&!protection.status().unlocked?'locked':true,requireMutationControl:()=>{if(!canMutate)throw new Error('Take control first.');}}),environment:freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}),
     diagnostics:freeze({capture:(scope,error)=>captures.push(freeze({scope,message:String(error?.message||error)})),start:()=>'trace',mark:noop,finish:noop,fail:noop})
   })}));
   const pending=registry.require('backup-recovery-host',1).createPendingStore(freeze({sourceRevision:()=>current,diagnostics:freeze({capture:noop}),storage:freeze({read:async()=>durablePending,write:async value=>{durablePending=value;},remove:async()=>{durablePending=null;}})}));
@@ -118,6 +118,8 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
     change:(urgent=false)=>{current=new clock.Date(clock.now()).toISOString();runtime.noteChange({urgent});},
     setLocalEmpty:value=>{localEmpty=value;},setCanMutate:value=>{canMutate=value;},
     store:(handle,baseline='')=>settingsStore.set('automaticDeviceBackup',{format:'study-director.device-backup-settings',version:4,directoryHandle:handle,baseline}),
+    // The message the Device Folder row's inline note shows.
+    note:()=>presentation.current('device-folder')?.message||'',
     permissionNotices:()=>notices.filter(raw=>raw.source==='device-folder'&&raw.id==='permission')
   };
 }

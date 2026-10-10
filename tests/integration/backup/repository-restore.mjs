@@ -94,7 +94,7 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
     restoreSessionState:async(value,nextSchedule)=>(activeSession=value,scheduleText=String(nextSchedule||''),true),verifyActiveSessionRuntime:async(value,nextSchedule)=>{assert.deepEqual(activeSession,value);assert.equal(scheduleText,String(nextSchedule||''));return true;},restoredFromFile:()=>false
   }),
   operations:freeze({assertAuthority:()=>true,clearFault:noop,failClosed:message=>{throw new Error(message);},runExclusive:async(kind,operation)=>operation()}),interactions:freeze({choose:async()=>null,configure,notify:noop}),
-  environment:freeze({AbortController,clearTimeout,yieldTask:async()=>{},requestAnimationFrame:callback=>(callback(),1),setTimeout}),diagnostics:freeze({capture:noop,start:()=>'',mark:()=>false,finish:()=>false,fail:()=>false}),
+  environment:freeze({AbortController,clearTimeout,yieldTask:async()=>{},setTimeout}),diagnostics:freeze({capture:noop,start:()=>'',mark:()=>false,finish:()=>false,fail:()=>false}),
   assets:freeze({
     get:async id=>assets.get(id)||null,put:async(id,blob)=>{assets.set(id,blob);return true;},keys:async()=>[...assets.keys()],
     list:async()=>Promise.all([...assets].map(async([id,blob])=>freeze({id,type:blob.type,size:blob.size,hash:await codec.checksumBlob(blob),name:'proof.png',library:true}))),

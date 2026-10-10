@@ -987,7 +987,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                   <button class="mini-btn ui-btn" id="device-backup-now" type="button" data-action="device-backup-now" hidden>Back up now</button>
                   <button class="mini-btn ui-btn" id="cancel-device-backup" type="button" data-action="cancel-device-backup" hidden>Cancel</button>
                   <button class="mini-btn ui-btn" id="recover-device-backup" type="button" data-action="recover-device-backup" aria-haspopup="dialog" aria-controls="managed-version-history" hidden>Versions</button>
-                  <button class="mini-btn ui-btn" id="device-backup-settings" type="button" data-action="toggle-device-backup-settings" aria-expanded="false" aria-controls="device-backup-settings-panel" hidden>Settings</button>
+                  <button class="mini-btn ui-btn" id="device-backup-settings" type="button" data-action="toggle-backup-settings" data-backup-settings="device" aria-expanded="false" aria-controls="device-backup-settings-panel" hidden>Settings</button>
                 </div>
               </div>
               <div class="backup-inline-note ui-helper" id="device-backup-note" role="status" aria-live="polite" hidden></div>
@@ -1006,17 +1006,29 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                 <div class="backup-row-copy">
                   <div class="backup-location-heading">
                     <span class="ui-label">Google Drive</span><span class="backup-location-badge optional">Optional</span>
-                    <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="drive-backup-info" aria-label="About Google Drive backup" aria-expanded="false" aria-controls="drive-backup-info">i</button><span class="pnote-info-popover" id="drive-backup-info" role="note" hidden>Independent off-device checkpoint history and the intended multi-device handoff path. Back up the device you are leaving, then on the other device open Versions and Combine or Replace. This is explicit handoff, not live sync; Device Folder is never inspected.</span></span>
+                    <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="drive-backup-info" aria-label="About Google Drive backup" aria-expanded="false" aria-controls="drive-backup-info">i</button><span class="pnote-info-popover" id="drive-backup-info" role="note" hidden>Independent off-device checkpoint history and the intended multi-device handoff path. Back up the device you are leaving, then on the other device open Versions and Combine or Replace. This is explicit handoff, not live sync; Device Folder is never inspected. Connect asks Google for drive.file access: Study Director creates, reads, verifies and deletes only its own backup files, never your other Drive files. After the first backup from this device it backs up automatically while you are signed in; Google ends a sign-in after about an hour.</span></span>
                   </div>
                 </div>
                 <strong class="backup-status-value standard ui-mono" id="backup-provider-row-status-google-drive">Not connected</strong>
                 <div class="backup-provider-actions" id="backup-provider-actions" role="group" aria-label="Google Drive backup actions">
+                  <button class="mini-btn ui-btn" id="connect-drive-backup" type="button" data-action="connect-drive-backup" hidden>Connect</button>
                   <button class="mini-btn ui-btn" id="drive-backup-now" type="button" data-action="drive-backup-now" aria-label="Back up now to Google Drive" hidden>Back up now</button>
+                  <button class="mini-btn ui-btn" id="cancel-drive-backup" type="button" data-action="cancel-drive-backup" hidden>Cancel</button>
                   <button class="mini-btn ui-btn" id="recover-drive-backup" type="button" data-action="recover-provider-backup" data-provider-id="google-drive" aria-haspopup="dialog" aria-controls="managed-version-history" hidden>Versions</button>
-                  <button class="mini-btn ui-btn" id="drive-backup-settings" type="button" data-action="open-drive-backup" aria-haspopup="dialog" aria-controls="backup-provider-overlay" hidden>Connect</button>
+                  <button class="mini-btn ui-btn" id="drive-backup-settings" type="button" data-action="toggle-backup-settings" data-backup-settings="drive" aria-expanded="false" aria-controls="drive-backup-settings-panel" hidden>Settings</button>
                 </div>
               </div>
               <div class="backup-inline-note ui-helper" id="backup-operation-note-google-drive" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+              <div class="backup-inline-settings" id="drive-backup-settings-panel" hidden>
+                <div class="backup-settings-grid ui-helper">
+                  <span>Automatic backup</span><strong>While signed in</strong>
+                  <span>Access</span><strong>Study Director backup files only · <a href="privacy.html" target="_blank" rel="noopener noreferrer">Privacy</a></strong>
+                  <span>Backup status</span><strong id="drive-backup-settings-last">Not yet verified</strong>
+                </div>
+                <div class="backup-settings-actions">
+                  <button class="mini-btn ui-btn" id="disconnect-drive-backup" type="button" data-action="disconnect-drive-backup">Disconnect Drive</button>
+                </div>
+              </div>
             </div>
           </section>
 
@@ -1350,30 +1362,6 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
     <button class="mini-btn ui-btn" type="button" data-action="close-version-history">Close</button>
   </div>
 </dialog>
-<div id="backup-provider-overlay" role="dialog" aria-modal="false" aria-labelledby="backup-provider-title" aria-describedby="backup-provider-msg" aria-busy="false">
-  <div class="backup-provider-head">
-    <div class="backup-provider-tag ui-label" id="backup-provider-title">Backup</div>
-    <button class="backup-provider-close ui-btn" id="backup-provider-close" type="button" aria-label="Close backup options">×</button>
-  </div>
-  <div id="backup-provider-msg">Choose an action.</div>
-  <details class="backup-provider-disclosure" id="backup-provider-disclosure" hidden>
-    <summary id="backup-provider-disclosure-summary">ⓘ Drive access: Study Director backup files only · Details</summary>
-    <div class="backup-provider-disclosure-body"><span id="backup-provider-disclosure-body"></span> <a href="privacy.html" target="_blank" rel="noopener noreferrer">Privacy</a></div>
-  </details>
-  <div class="backup-provider-menu-actions">
-    <button class="ui-btn primary" id="backup-provider-export" type="button">Back up</button>
-    <button class="ui-btn" id="backup-provider-recover" type="button" data-action="recover-provider-backup" aria-haspopup="dialog" aria-controls="managed-version-history">Recover…</button>
-  </div>
-  <div class="backup-provider-progress" id="backup-provider-progress" role="status" aria-live="polite" aria-atomic="true" hidden>
-    <div class="backup-provider-progress-stage" id="backup-provider-progress-stage"></div>
-    <div class="backup-provider-progress-detail ui-helper" id="backup-provider-progress-detail"></div>
-  </div>
-  <div class="ui-status" id="backup-provider-status" role="status" aria-live="polite"></div>
-  <div class="backup-processing-row"><button class="mini-btn ui-btn danger" id="backup-provider-cancel" type="button" hidden>Cancel</button></div>
-  <div class="backup-provider-disconnect-row">
-    <button class="backup-provider-disconnect ui-btn" id="backup-provider-disconnect" type="button" hidden>Disconnect</button>
-  </div>
-</div>
 <div id="gap-overlay" role="dialog" aria-modal="true" aria-labelledby="gap-msg">
   <div class="gap-box ui-panel">
     <div class="gap-title ui-label">Timer Recovery</div>
@@ -1899,8 +1887,8 @@ async function showBackupPresentation(source,kind){
   const drawer=document.querySelector('.library-data-drawer');if(drawer)drawer.open=true;
   // 'restore' shows every way back in: Device Folder where supported, Google
   // Drive, and the backup file import under Advanced.
-  const target=document.getElementById({file:'backup-file-heading','device-folder':'device-backup-status',restore:'managed-backup-heading'}[source]||'');
-  if(!target)return BackupProviderRuntime.open(source);
+  const target=document.getElementById({file:'backup-file-heading','device-folder':'device-backup-status','google-drive':'backup-provider-row-status-google-drive',restore:'managed-backup-heading'}[source]||'');
+  if(!target)return false;
   if(source==='restore')document.querySelector('.backup-advanced-disclosure').open=true;
   for(let node=target.parentElement;node;node=node.parentElement)if(node.tagName==='DETAILS')node.open=true;
   requestAnimationFrame(()=>target.scrollIntoView({block:source==='restore'?'start':'center',behavior:preferredScrollBehavior()}));return true;
@@ -2591,7 +2579,9 @@ function flushAutomaticBackups(reason){
   catch(error){AppDiagnostics.capture('backup.flush-provider',error,'warn');return Promise.resolve([]);}
 }
 function automaticBackupsWaiting(){try{return BackupProviderRuntime.automaticWaiting();}catch{return false;}}
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&appCanMutate())void flushAutomaticBackups('app-hidden');});
+// Hidden: back up waiting changes. Visible again: redraw the locations, since a
+// sign-in may have ended while timers were throttled.
+document.addEventListener('visibilitychange',()=>{if(document.hidden){if(appCanMutate())void flushAutomaticBackups('app-hidden');}else BackupProviderRuntime.refresh();});
 // An update waits up to a minute for waiting automatic backups to finish. A
 // backup that is still running after that keeps the update postponed until it
 // is done; one that failed does not hold the update back.
@@ -2868,8 +2858,9 @@ function renderNativeCapabilities(state){
   }
   renderInstallationProjection(state);
 }
-function toggleDeviceBackupSettings(){
-  const panel=document.getElementById('device-backup-settings-panel'),button=document.getElementById('device-backup-settings');
+// Each location row opens its settings in place: 'device' or 'drive'.
+function toggleBackupSettings(kind){
+  const panel=document.getElementById(`${kind}-backup-settings-panel`),button=document.getElementById(`${kind}-backup-settings`);
   if(!panel||!button||button.hidden)return false;
   panel.hidden=!panel.hidden;button.setAttribute('aria-expanded',panel.hidden?'false':'true');return !panel.hidden;
 }
@@ -2877,12 +2868,17 @@ function toggleDeviceBackupSettings(){
 // Before the Drive integration registers, the row keeps its static "Not connected".
 function renderDriveBackup(){
   const state=BackupProviderRuntime.locationStatus('google-drive');if(!state)return;
-  const status=document.getElementById('backup-provider-row-status-google-drive'),backupNow=document.getElementById('drive-backup-now'),versions=document.getElementById('recover-drive-backup'),settings=document.getElementById('drive-backup-settings');
+  const node=id=>document.getElementById(id),status=node('backup-provider-row-status-google-drive'),connect=node('connect-drive-backup'),backupNow=node('drive-backup-now'),cancel=node('cancel-drive-backup'),versions=node('recover-drive-backup'),settings=node('drive-backup-settings'),panel=node('drive-backup-settings-panel'),last=node('drive-backup-settings-last'),disconnect=node('disconnect-drive-backup');
   const connected=state.connected,working=state.busy||state.backingUp,recoveryActive=state.busy&&['history','restore-version','bring-in'].includes(state.foregroundKind);
   if(status){status.textContent=BackupPresentation.locationLabel('google-drive',state);status.classList.toggle('protected',connected&&!working);status.classList.toggle('standard',!connected||working);}
-  if(backupNow){backupNow.hidden=!connected;backupNow.disabled=state.engineBusy;}
+  if(connect){const label=state.wasConnected?'Reconnect':'Connect';connect.hidden=connected;connect.textContent=label;connect.disabled=state.engineBusy;connect.setAttribute('aria-label',`${label} Google Drive`);}
+  if(backupNow){backupNow.hidden=!connected||state.cancellable;backupNow.disabled=state.engineBusy;}
+  if(cancel){cancel.hidden=!state.cancellable;cancel.disabled=!state.cancellable;}
   if(versions){versions.hidden=!connected&&state.wasConnected;versions.textContent=connected?'Versions':'Recover';versions.disabled=state.engineBusy&&!recoveryActive;versions.setAttribute('aria-label',connected?'View Google Drive backup versions':'Recover from Google Drive');}
-  if(settings){const label=connected?'Settings':state.wasConnected?'Reconnect':'Connect';settings.hidden=false;settings.style.order=connected?'':'-1';settings.textContent=label;settings.disabled=state.engineBusy&&!state.busy;settings.setAttribute('aria-label',connected?'Google Drive settings':`${label} Google Drive`);}
+  if(settings){settings.hidden=!connected;settings.disabled=state.engineBusy;settings.setAttribute('aria-expanded',panel&&!panel.hidden?'true':'false');}
+  if(panel&&!connected)panel.hidden=true;
+  if(last){const at=verifiedRecoveryState.providers['google-drive']?.verifiedAt;last.textContent=at?`Last verified ${storageHealthTime(at)}`:'Not yet verified';}
+  if(disconnect)disconnect.disabled=state.engineBusy;
 }
 function renderDeviceBackup(state){
   if(!state)return;
@@ -2925,8 +2921,9 @@ function renderDeviceBackup(state){
   if(note){
     const fallback=state.mode==='unsupported'?'Automatic folder backup is unavailable in this browser. Portable and Google Drive backups still work.':
       connected?(state.pending?'Changes are waiting for the next automatic backup checkpoint.':'Your automatic backup checkpoint is up to date.') : '';
-    const message=state.message||fallback;
-    note.hidden=!message||recoveryActive||state.hasOperationSummary===true;
+    // Messages and progress show in the row's inline note; this note only says how the folder is doing.
+    const message=state.hasNote?'':fallback;
+    note.hidden=!message||recoveryActive;
     if(note.textContent!==message)note.textContent=message;
   }
 
@@ -7972,7 +7969,7 @@ const LibraryClearCoordinator=LibraryClearModule.createCoordinator(Object.freeze
   // Folder, otherwise Google Drive while signed in. With neither, Clear
   // Library relies on its own local safeguards.
   createProtectedSafety:async purpose=>{
-    const location=BackupProviderRuntime.list({hosted:true}).find(item=>item.id==='device-folder'&&item.connected)||BackupProviderRuntime.list({hosted:true}).find(item=>item.connected);
+    const location=BackupProviderRuntime.list().find(item=>item.id==='device-folder'&&item.connected)||BackupProviderRuntime.list().find(item=>item.connected);
     if(!location)return Object.freeze({verified:false,skipped:true,reason:'no-backup-location'});
     const safety=await BackupProviderRuntime.createProtectedSafety(location.id,purpose);
     if(!safety||safety.verified!==true)throw new Error(`Clear Library stopped because the protected ${location.label} safety backup could not be verified. Your Library data was not changed.`);
@@ -8493,7 +8490,6 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     AbortController,
     yieldTask:BackgroundTasks.yieldTask,
     clearTimeout:timer=>clearTimeout(timer),
-    requestAnimationFrame:callback=>requestAnimationFrame(callback),
     setTimeout:(callback,delay)=>setTimeout(callback,delay)
   }),
   diagnostics:Object.freeze({capture:AppDiagnostics.capture,start:BackupOperationDiagnostics.start,mark:BackupOperationDiagnostics.mark,finish:BackupOperationDiagnostics.finish,fail:BackupOperationDiagnostics.fail})
@@ -8504,13 +8500,12 @@ if(!Object.isFrozen(BackupRuntime)||BackupRuntime.format!=='study-director.backu
 const {
   controller:BackupController, checkpoint:CheckpointPipeline, repository:RepositoryCheckpointPipeline, providers:BackupProviderRuntime
 }=BackupRuntime;
-// Operation summaries stay in the backup rows when an overlay is closed.
+// Each location row has one inline note, drawn from the presentation's current event.
 // The controller owns execution; the coordinator owns the immutable presentation event.
-BackupPresentation.subscribe(state=>{
+BackupPresentation.subscribe(()=>{
   for(const source of ['device-folder','google-drive']){
     const node=document.getElementById(`backup-operation-note-${source}`);if(!node)continue;
-    const operation=state.events.find(row=>row.source===source&&row.id==='backup-operation'),external=state.events.find(row=>row.source===source&&row.id==='external-backup');
-    const event=operation?.lifecycle==='running'?operation:external&&Number(external.deliveryId)>Number(operation?.deliveryId||0)?external:operation;
+    const event=BackupPresentation.current(source);
     const message=BackupPresentation.summary(event);node.hidden=!message;
     if(node.textContent!==message)node.textContent=message;
     node.dataset.state=event?.severity==='error'?'error':'ok';
@@ -8694,7 +8689,7 @@ async function handleBrowserStorageReset(event={}){
 // back to the notice.
 async function restoreMissingAfterStorageReset(hold){
   if(!appCanMutate())return false;
-  const locations=BackupProviderRuntime.list({hosted:true}),location=locations.find(item=>item.id==='device-folder'&&item.connected)||locations.find(item=>item.connected);if(!location)return false;
+  const locations=BackupProviderRuntime.list(),location=locations.find(item=>item.id==='device-folder'&&item.connected)||locations.find(item=>item.connected);if(!location)return false;
   const options={missingOnly:true,quiet:true,before:hold.clearedAt};let outcome=null;
   try{const restored=await BackupProviderRuntime.bringInRepositoryProvider(location.id,options);if(restored&&restored.cancelled===false&&restored.verified)outcome={exportedAt:restored.exportedAt,result:restored,label:location.label};}
   catch(error){AppDiagnostics.capture('storage-reset.missing-restore',error,'warn');}
@@ -8787,7 +8782,7 @@ BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze({
   providers:Object.freeze({
     bringInRepositoryProvider:(id,options)=>BackupProviderRuntime.bringInRepositoryProvider(id,options),cancelForeground:(reason,id)=>BackupProviderRuntime.cancelForeground(reason,id),
     configureManagedRecovery:config=>BackupProviderRuntime.configureManagedRecovery(config),configurePendingBackupRetry:config=>BackupProviderRuntime.configurePendingBackupRetry(config),
-    history:(id,options)=>BackupProviderRuntime.history(id,options),list:()=>BackupProviderRuntime.list({hosted:true}),removeProtectedRepositoryProvider:(id,checkpointId)=>BackupProviderRuntime.removeProtectedRepositoryProvider(id,checkpointId),
+    history:(id,options)=>BackupProviderRuntime.history(id,options),list:()=>BackupProviderRuntime.list(),removeProtectedRepositoryProvider:(id,checkpointId)=>BackupProviderRuntime.removeProtectedRepositoryProvider(id,checkpointId),
     restoreRepositoryProviderVersion:(id,options)=>BackupProviderRuntime.restoreRepositoryProviderVersion(id,options),suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason)
   }),
   session:Object.freeze({hasBlocking:()=>hasBlockingActiveSession()}),
@@ -9362,7 +9357,7 @@ function currentBackupDiagnosticStates(){
   sample('Write ownership',()=>({primary:appCanMutate(),...AppMutationCoordinator.status()}),value=>[{job:'Write ownership',state:value.active?'running':value.recoveryFault?'blocked':value.primary?'primary':'secondary',busy:!!value.active,pending:!!value.recoveryFault,foreign:value.foreign,authorityHealthy:value.authorityHealthy,authorityDurableProtected:value.authorityDurableProtected}]);
   sample('Backup controller',()=>BackupController.status(),value=>[{job:'Backup controller',...OperationLifecycle.snapshot(value),importActive:value.importActive,importCancelled:value.importCancelled,exportActive:value.standaloneExportActive}]);
   sample('Device backup',()=>DeviceBackup.status(),value=>[{job:'Device backup',...OperationLifecycle.snapshot({busy:value.busy||value.backingUp,pending:value.pending,nextEligibleAt:value.nextEligibleAt}),connected:value.connected,permission:value.permission,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped,completedAt:value.lastBackupAt||''}]);
-  sample('Provider operation',()=>BackupProviderRuntime.status(),value=>[{job:'Provider operation',...OperationLifecycle.snapshot(value),preparing:value.preparing}]);
+  sample('Provider operation',()=>BackupProviderRuntime.status(),value=>[{job:'Provider operation',...OperationLifecycle.snapshot(value)}]);
   sample('Provider connection',()=>BackupProviderRuntime.diagnosticConnections(),values=>values.map(value=>({job:value.id==='google-drive'?'Google Drive connection':'External provider connection',state:value.connected?'connected':'disconnected',connected:value.connected,scopeBound:value.scopeBound,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped})));
   sample('Backup encryption',()=>BackupProtection.status(),value=>[{job:'Backup encryption',state:value.enabled?value.unlocked?'unlocked':'locked':'off',enabled:value.enabled,unlocked:value.unlocked}]);
   sample('Canonical maintenance',()=>({...DataMaintenanceJob.status(),busy:DataMaintenanceJob.status().busy||AppData.maintenance.status().busy}),value=>[{job:'Canonical maintenance',...value,...OperationLifecycle.snapshot(value),lastOutcome:value.lastOutcome}]);
@@ -9406,12 +9401,14 @@ const CLICK_ACTIONS=Object.freeze({
   'connect-device-backup': ()=>connectDeviceBackupWithRecovery(),
   'device-backup-now': ()=>DeviceBackup.backupNow(),
   'cancel-device-backup': ()=>DeviceBackup.cancelForeground(),
-  'toggle-device-backup-settings': ()=>toggleDeviceBackupSettings(),
+  'toggle-backup-settings': ev=>toggleBackupSettings(ev.target.closest('[data-backup-settings]')?.dataset.backupSettings),
   'disconnect-device-backup': ()=>DeviceBackup.disconnect(),
   'recover-device-backup': ()=>BackupRecoveryHost.history.openSource('device-folder'),
   'recover-provider-backup': ev=>BackupRecoveryHost.history.openSource(ev.target.closest('[data-provider-id]')?.dataset.providerId),
+  'connect-drive-backup': ()=>BackupProviderRuntime.connect('google-drive'),
   'drive-backup-now': ()=>BackupProviderRuntime.backup('google-drive'),
-  'open-drive-backup': ev=>BackupProviderRuntime.open('google-drive',ev.target.closest('button')),
+  'cancel-drive-backup': ()=>BackupProviderRuntime.cancelForeground(undefined,'google-drive'),
+  'disconnect-drive-backup': ()=>BackupProviderRuntime.disconnect('google-drive'),
   'refresh-version-history': ()=>BackupRecoveryHost.history.refresh(),
   'close-version-history': ()=>BackupRecoveryHost.history.close(),
   'cancel-version-history-operation': ()=>BackupRecoveryHost.history.cancel(),
@@ -9529,7 +9526,7 @@ const OWNER_REQUIRED_CLICK_ACTIONS=new Set([
   'load-default','apply-schedule','clear-schedule-draft','take-pomodoro-break',
   'gap-focus','gap-break','gap-split','gap-ignore','gap-apply','save-name-setup','skip-name-setup',
   'font-smaller','font-reset','font-larger','set-theme','set-presentation',
-  'connect-device-backup','device-backup-now','disconnect-device-backup','recover-device-backup','recover-provider-backup','drive-backup-now','open-drive-backup','recover-managed-version','compare-managed-note'
+  'connect-device-backup','device-backup-now','disconnect-device-backup','recover-device-backup','recover-provider-backup','connect-drive-backup','drive-backup-now','disconnect-drive-backup','recover-managed-version','compare-managed-note'
 ]);
 const OWNER_REQUIRED_CHANGE_ACTIONS=new Set(['import-backup','change-reflection-date','keep-screen-awake','sound-mode']);
 const OWNER_REQUIRED_INPUT_ACTIONS=new Set(['student-name','pnote-progress','save-reflection','quote','schedule-draft','unfinished-note','practice-setup']);
@@ -9574,8 +9571,7 @@ const OwnershipUiProjection=(()=>{
   ]);
   const DIRECT_SELECTORS=Object.freeze([
     '.task-note-field','[data-quality]','[data-draft-field]','[data-draft-action]','[data-owner-mutation]',
-    '#review-list input','#review-list textarea','#ns-nudge-after','#ns-break',
-    '#backup-provider-disconnect'
+    '#review-list input','#review-list textarea','#ns-nudge-after','#ns-break'
   ]);
   const BLOCKED_EVENT_TYPES=Object.freeze(['beforeinput','input','change','paste','cut','drop','dragstart']);
   const baselines=new WeakMap();

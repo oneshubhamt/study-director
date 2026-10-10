@@ -28,8 +28,8 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE}={}){
     },
     scrub:async()=>({status:'completed',complete:true}),cleanup:async()=>({gcPending:false}),retention:freeze({}),validatePolicy:noop,classifyState:()=>({committed:[],uncommitted:[],orphanCommits:[],invalidPairs:[]}),activeProtected:()=>null,selectRetention:()=>({retained:[],remove:[]}),projectHistory:()=>[],markCompleted:noop});
   const runtime=registry.require('backup-provider',1,freeze({repositoryPolicy:policy})).createRuntime(freeze({background:freeze({format:background.format,contractVersion:1,createCoordinator:background.createCoordinator,maintenance:background.maintenance,maintenanceActionable:background.maintenanceActionable}),repository:pipeline,ports:freeze({
-    configuration:freeze({appVersion:'qa'}),controller:freeze({beginImport:noop,cancelImport:noop,finishImport:noop}),exports:freeze({run:unexpected}),domain:freeze({clampText:value=>String(value||'')}),view:freeze({presentation,document:{getElementById:()=>null,addEventListener:noop}}),
-    ownership:freeze({canRunBackground:()=>true,requireMutationControl:noop}),environment:freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,requestAnimationFrame:fn=>(fn(),1)}),diagnostics:freeze({capture:noop,start:()=>'trace',mark:noop,finish:noop,fail:noop})
+    configuration:freeze({appVersion:'qa'}),controller:freeze({beginImport:noop,cancelImport:noop,finishImport:noop}),exports:freeze({run:unexpected}),domain:freeze({clampText:value=>String(value||'')}),view:freeze({presentation}),
+    ownership:freeze({canRunBackground:()=>true,requireMutationControl:noop}),environment:freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}),diagnostics:freeze({capture:noop,start:()=>'trace',mark:noop,finish:noop,fail:noop})
   })}));
   const connected=()=>authorized&&clock.now()<expiresAt;
   runtime.register(freeze({id:'google-drive',label:'Google Drive',connected,backgroundAvailable:connected,connectionExpiresAt:()=>connected()?expiresAt:0,subscribeConnection:fn=>{listener=fn;},

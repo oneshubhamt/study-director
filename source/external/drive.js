@@ -222,7 +222,7 @@
   function subscribeConnection(listener){if(typeof listener!=='function')return ()=>{};connectionListeners.add(listener);return ()=>connectionListeners.delete(listener);}
   function authorize(){
     if(tokenValid())return Promise.resolve(accessToken);
-    if(!tokenClient)return Promise.reject(new Error('Google Drive is still preparing. Close Drive and open it again.'));
+    if(!tokenClient)return Promise.reject(new Error('Google Drive is still preparing. Try again in a moment.'));
     if(pendingAuthorization)return pendingAuthorization.promise;
     let resolve,reject;
     const promise=new Promise((ok,fail)=>{resolve=ok;reject=fail;});
@@ -1086,16 +1086,12 @@
     return api.backup.providers.register(Object.freeze({
       id:'google-drive',
       label:'Google Drive',
-      exportLabel:'Back up',
-      disclosureSummary:'ⓘ Drive access: Study Director backup files only · Details',
-      disclosure:'Google Drive is optional. If you choose Back up or Recover, Study Director will request drive.file access to create, list, read, verify, rotate or delete Study Director backup files and related metadata in your Drive. It does not use this permission to browse unrelated Drive files, sell data, or serve advertising. Optional backup encryption encrypts backup contents when enabled in Library. After your first Drive backup from this device, Study Director also backs up to Drive automatically while you are signed in; Google ends the sign-in after about an hour. Continue only if you want to authorize this Drive action.',
       prepare,
       authorize,
       backgroundAvailable:()=>tokenValid(),
       connected:()=>tokenValid(),
       connectionExpiresAt:()=>tokenValid()?tokenExpiresAt:0,
       subscribeConnection,
-      disconnectLabel:'Disconnect Drive',
       disconnect,
       release,
       repository:Object.freeze({discardUploads:()=>repositoryUploads.clear(),list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:beginRepositoryPublication,listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,scope:()=>repositoryScope(),choose:chooseRepositoryCheckpoint,beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
