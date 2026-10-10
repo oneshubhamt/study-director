@@ -40,7 +40,7 @@ Goal (task #39, `docs/BACKUP-ENGINE.md`): one engine (`source/core/backup-provid
 **App (`source/app.html`)**
 - Removed `DeviceRepositoryBackground` and `DeviceRepositoryIntegrity`.
 - Device Folder integrity runs on the engine's integrity scheduler (`INTEGRITY_TARGETS`: `device-folder`→`device`, `google-drive`→`drive`). Its identity is the repository scope (`device-folder:1:<id>` from the scope file), replacing the stored directory handle and `isSameEntry`.
-- Integrity record now version 6. Versions 3–5 still validate; the old handle field is ignored (`host-metadata.js`). Existing Device Folder scan progress restarts once because the identity changed.
+- Integrity record now version 6. Following the compatibility contract, the ordinary runtime reads only v6; versions 2–5 are converted once at start-up by `compatibility-host.js` (`migrateHostMetadata`, registry entry `l7-host-metadata-normalization`). The retired directory handle is dropped, scan progress and quarantine carry over, an unknown shape is kept untouched and fails closed, and `verifyRetiredHostCompatibility` reports any old version still present. Existing Device Folder scan progress restarts once because the identity changed.
 - Change notices, flush on background, waiting check, reminder, update hold and storage-reset hold all go through the engine only. They are no-ops with no locations.
 - Clear Library's protected safety copy now goes to the Device Folder, otherwise Google Drive while signed in, otherwise it is skipped as before.
 - The missing-data restore after a browser-data clear uses the Device Folder, otherwise any connected location.
@@ -56,7 +56,7 @@ Goal (task #39, `docs/BACKUP-ENGINE.md`): one engine (`source/core/backup-provid
   - outcome text lists `others`.
 - Tests updated and passing:
   - `repository-checkpoint`, `repository-restore`, `checkpoint-handoff`, `restore-assets`, `repository-incremental-preparation`, `backup-persistence`;
-  - `repository-integrity-state` (scope identity, v6, legacy handle tolerance).
+  - `repository-integrity-state` (scope identity, v6 only in the ordinary validator); `compatibility-host` (v5-with-handle and v2 conversion, unknown shape preserved).
 - Data contract and `ARCHITECTURE.md` text updated for the integrity record.
 
 ### 1.2 Behaviour changes to confirm

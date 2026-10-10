@@ -18,20 +18,7 @@ registry.define('host-metadata',1,()=>{
       if(key===keys.verifiedRecoveryBackups)return same(value,normalizers.verifiedRecovery(value));
       if(key===keys.backupProtection){const version=Number(value&&value.version);return !!(value&&exactKeys(value,['version','id','verifier'])&&(version===1||version===2)&&typeof value.id==='string'&&value.id.length>0&&value.id.length<=128&&value.verifier instanceof Blob&&value.verifier.size>0&&value.verifier.size<=1024*1024);}
       if(key===keys.attachmentIntegrityAudit){const normalized=normalizers.attachmentIntegrity(value);return Number(value?.version)===1?same(value,{version:1,checkedAt:normalized.checkedAt,issues:normalized.issues}):same(value,normalized);}
-      if(key===keys.repositoryIntegrityScrub){
-        const normalized=normalizers.repositoryIntegrity(value),version=Number(value?.version);
-        // Versions 3 to 5 also kept the Device Folder's directory handle; the
-        // folder is now identified by its repository scope instead.
-        const withoutHandle=target=>{if(!target||typeof target!=='object')return target;const {repositoryHandle,...rest}=target;return rest;};
-        const stored=version>=3&&version<=5&&value&&typeof value==='object'?{...value,device:withoutHandle(value.device),drive:withoutHandle(value.drive)}:value;
-        if(version===2){
-          const legacy=target=>({completedAt:target.completedAt,cycleStartedAt:target.cycleStartedAt,cursor:target.cursor,failedAt:target.failedAt,quarantinedObjectIds:target.quarantinedObjectIds});
-          return same(stored,{version:2,device:legacy(normalized.device),drive:legacy(normalized.drive)});
-        }
-        if(version===3){const legacy=target=>({repositoryScope:target.repositoryScope,scanId:target.scanId,completedAt:target.completedAt,cycleStartedAt:target.cycleStartedAt,cursor:target.cursor,failedAt:target.failedAt,quarantinedObjectIds:target.quarantinedObjectIds});return same(stored,{version:3,device:legacy(normalized.device),drive:legacy(normalized.drive)});}
-        if(version===4||version===5){const legacy=target=>{if(version===5)return target;const {recheckCursor,...prior}=target;return prior;};return same(stored,{version,device:legacy(normalized.device),drive:legacy(normalized.drive)});}
-        return same(stored,normalized);
-      }
+      if(key===keys.repositoryIntegrityScrub)return same(value,normalizers.repositoryIntegrity(value));
       if(key===keys.managedProviderBackupPending){
         if(!value||!exactKeys(value,['format','version','entries'])||value.format!=='study-director.managed-provider-backup-pending'||Number(value.version)!==1||!Array.isArray(value.entries)||value.entries.length>8)return false;
         const seen=new Set();

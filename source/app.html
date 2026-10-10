@@ -8113,7 +8113,7 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
     appMeta:Object.freeze({
       personalPreferences:APP_META_KEYS.personalPreferences,dataMaintenance:APP_META_KEYS.dataMaintenance,verifiedRecoveryBackups:APP_META_KEYS.verifiedRecoveryBackups,
       backupProtection:APP_META_KEYS.backupProtection,attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,automaticDeviceBackup:APP_META_KEYS.automaticDeviceBackup,
-      repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,repositoryMaintenancePendingLegacy:OBSOLETE_APP_META_KEYS.repositoryMaintenancePendingLegacy,
+      repositoryIntegrityScrub:APP_META_KEYS.repositoryIntegrityScrub,repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,repositoryMaintenancePendingLegacy:OBSOLETE_APP_META_KEYS.repositoryMaintenancePendingLegacy,
       libraryClearJournalState:APP_META_KEYS.libraryClearJournalState,libraryClearJournalPayloadPrefix:APP_META_KEYS.libraryClearJournalPayloadPrefix,
       archiveClearJournalStateLegacy:OBSOLETE_APP_META_KEYS.archiveClearJournalStateLegacy,archiveClearJournalPayloadPrefixLegacy:OBSOLETE_APP_META_KEYS.archiveClearJournalPayloadPrefixLegacy
     })
@@ -8149,7 +8149,8 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
     isCurrentDataMaintenance:value=>RepositoryAppMetaValidators.dataMaintenance(value)===true,
     writeValue:(key,value,updatedAt)=>IndexedDb.strictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{const timestamp=Number.isFinite(Date.parse(String(updatedAt||'')))?new Date(String(updatedAt)).toISOString():new Date().toISOString(),request=store.put({key:String(key),version:1,value,updatedAt:timestamp});request.onerror=()=>finish(false,request.error||new Error('historical host metadata write failed'));tx.oncomplete=()=>finish(true,true);},'historical host metadata write aborted'),
     removeRow:key=>IndexedDb.strictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{const request=store.delete(String(key));request.onerror=()=>finish(false,request.error||new Error('historical host metadata removal failed'));tx.oncomplete=()=>finish(true,true);},'historical host metadata removal aborted'),
-    releaseBackupFile:async _name=>BackupFiles.collect(),normalizeVerifiedRecovery:value=>normalizeVerifiedRecoveryState(value),normalizeAttachmentIntegrity:value=>normalizeAttachmentIntegrityState(value)
+    releaseBackupFile:async _name=>BackupFiles.collect(),normalizeVerifiedRecovery:value=>normalizeVerifiedRecoveryState(value),normalizeAttachmentIntegrity:value=>normalizeAttachmentIntegrityState(value),
+    normalizeRepositoryIntegrity:value=>normalizeRepositoryIntegrityState(value)
   }),
   live:Object.freeze({
     migrateActiveSession:()=>AppData.compatibility.migrateActiveSession(),migrateAreaNotes:()=>AppData.compatibility.migrateAreaNotes(),

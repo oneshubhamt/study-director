@@ -86,27 +86,19 @@ await test('Drive executor quarantines confirmed corruption while retaining avai
     assert.equal(result.status,status,code);assert.equal(result.repositoryScope,'drive-one');assert.equal(result.cursor,objectId('e'));assert.equal(result.scanId,scanId);assert.equal(result.quarantined.includes(objectId('d')),quarantine,code);assert.ok(result.quarantined.includes(objectId('c')));
   }
 });
-await test('metadata gateway accepts canonical scoped state and readable legacy state',async()=>{
+await test('the ordinary validator accepts only the current record; older versions belong to the compatibility host',async()=>{
   const h=fixture(),context=h.context;
   for(const file of ['source/core/host-metadata.js'])vm.runInContext(fs.readFileSync(file,'utf8'),context);
   vm.runInContext(app.slice(app.indexOf('function sameDataValue('),app.indexOf('function normalizeStudyQuality(')),context);
   const module=context[Symbol.for('studyDirector.internalModules.v1')].require('host-metadata',1),names=['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBaseLegacy','reconciliationBase','reconciliationBaseNotePrefix'];
   const validators=module.createAppMetaValidators(Object.freeze({keys:Object.freeze(Object.fromEntries(names.map(name=>[name,name]))),same:context.sameDataValue,normalizers:Object.freeze({verifiedRecovery:value=>value,attachmentIntegrity:value=>value,repositoryIntegrity:context.normalizeRepositoryIntegrityState,reconciliationBaseLegacy:value=>value,reconciliationBase:value=>value,reconciliationBaseNote:value=>value})}));
   const validate=value=>validators.repositoryIntegrityScrub(value,{key:'repositoryIntegrityScrub'});
-  assert.equal(validate(h.state.durable),true);const old=target=>({completedAt:target.completedAt,cycleStartedAt:target.cycleStartedAt,cursor:target.cursor,failedAt:target.failedAt,quarantinedObjectIds:target.quarantinedObjectIds});
-  assert.equal(validate({version:2,device:old(h.state.durable.device),drive:old(h.state.durable.drive)}),true);
+  assert.equal(h.state.durable.version,6);assert.equal(validate(h.state.durable),true);
+  const old=target=>({completedAt:target.completedAt,cycleStartedAt:target.cycleStartedAt,cursor:target.cursor,failedAt:target.failedAt,quarantinedObjectIds:target.quarantinedObjectIds});
   const v4=target=>{const {recheckCursor,...prior}=target;return prior;};
-  assert.equal(h.state.durable.version,6);assert.equal(validate({version:4,device:v4(h.state.durable.device),drive:v4(h.state.durable.drive)}),true);
-  // Older records kept the Device Folder's directory handle; it is ignored now.
-  const folderHandle={getDirectoryHandle(){}};
-  assert.equal(validate({version:5,device:{...h.state.durable.device,repositoryHandle:folderHandle},drive:{...h.state.durable.drive,repositoryHandle:null}}),true);
-  assert.equal(validate({version:4,device:{...v4(h.state.durable.device),repositoryHandle:folderHandle},drive:{...v4(h.state.durable.drive),repositoryHandle:null}}),true);
-  const v3=target=>({repositoryScope:target.repositoryScope,repositoryHandle:null,scanId:target.scanId,...old(target)});
-  assert.equal(validate({version:3,device:v3(h.state.durable.device),drive:v3(h.state.durable.drive)}),true);
+  for(const record of [{version:2,device:old(h.state.durable.device),drive:old(h.state.durable.drive)},{version:4,device:v4(h.state.durable.device),drive:v4(h.state.durable.drive)},{...h.state.durable,version:5},{...h.state.durable,device:{...h.state.durable.device,repositoryHandle:null}}])assert.equal(validate(record),false,`version ${record.version} is not read by the ordinary runtime`);
   const large={...h.state.durable.drive,quarantinedObjectIds:Array.from({length:257},(_,i)=>'obj_'+(i+1).toString(16).padStart(32,'0'))};
-  for(const [version,project] of [[2,old],[3,v3],[4,v4],[5,value=>value],[6,value=>value]]){
-    const record={version,device:project(h.state.durable.device),drive:project(large)};assert.equal(validate(record),true);assert.equal(context.normalizeRepositoryIntegrityState(record).drive.quarantinedObjectIds.length,257);
-  }
+  const record={version:6,device:h.state.durable.device,drive:large};assert.equal(validate(record),true);assert.equal(context.normalizeRepositoryIntegrityState(record).drive.quarantinedObjectIds.length,257);
   assert.equal(validate({...h.state.durable,drive:{...h.state.durable.drive,recheck:true,recheckCursor:'invalid'}}),false);
   assert.equal(validate({...h.state.durable,unknownField:true}),false);assert.equal(validate({...h.state.durable,version:99}),false);
 });

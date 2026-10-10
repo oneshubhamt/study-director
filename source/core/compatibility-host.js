@@ -14,7 +14,7 @@ registry.define('compatibility-host',1,()=>{
     exactObject(input,['baselineId','facadeFactory','keys','local','ownership','plan','preferences','identity','metadata','live','topology','verification','backups','helpers'],'Compatibility-host input');
     if(typeof input.baselineId!=='string'||!input.baselineId||typeof input.facadeFactory!=='function')throw new TypeError('Compatibility-host facade configuration is invalid.');
     exactObject(input.keys,['storage','obsolete','appMeta'],'Compatibility-host key contract');
-    exactObject(input.keys.appMeta,['personalPreferences','dataMaintenance','verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryMaintenancePending','repositoryMaintenancePendingLegacy','libraryClearJournalState','libraryClearJournalPayloadPrefix','archiveClearJournalStateLegacy','archiveClearJournalPayloadPrefixLegacy'],'Compatibility-host appMeta key contract');
+    exactObject(input.keys.appMeta,['personalPreferences','dataMaintenance','verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryIntegrityScrub','repositoryMaintenancePending','repositoryMaintenancePendingLegacy','libraryClearJournalState','libraryClearJournalPayloadPrefix','archiveClearJournalStateLegacy','archiveClearJournalPayloadPrefixLegacy'],'Compatibility-host appMeta key contract');
     functions(input.local,['getText','getJson','setText','remove','lastError'],'Compatibility-host local storage');
     functions(input.ownership,['issueWriteToken','assertWriteToken','isOwnershipLostError'],'Compatibility-host ownership');
     functions(input.plan,['hydrate','library','readDraft','writeDraft','writeLibrary','settled','readCanonical'],'Compatibility-host Plan adapter');
@@ -22,7 +22,7 @@ registry.define('compatibility-host',1,()=>{
     for(const key of Object.keys(input.preferences))if(typeof input.preferences[key]!=='function')throw new TypeError(`Compatibility-host Preferences adapter ${key} must be a function.`);
     exactObject(input.identity,['getId','installationKey','legacyKey'],'Compatibility-host installation identity adapter');
     if(typeof input.identity.getId!=='function')throw new TypeError('Compatibility-host installation identity getId is required.');
-    functions(input.metadata,['readRow','listRows','isCurrentDataMaintenance','writeValue','removeRow','releaseBackupFile','normalizeVerifiedRecovery','normalizeAttachmentIntegrity'],'Compatibility-host metadata adapter');
+    functions(input.metadata,['readRow','listRows','isCurrentDataMaintenance','writeValue','removeRow','releaseBackupFile','normalizeVerifiedRecovery','normalizeAttachmentIntegrity','normalizeRepositoryIntegrity'],'Compatibility-host metadata adapter');
     functions(input.live,['migrateActiveSession','migrateAreaNotes','migrateAreaNoteRecovery','migrateDeletionState','migrateDailyRecords','migrateInsightsRevisionEnvelope','cleanupLegacyAttachments','cleanupObsoleteMetadata'],'Compatibility-host live adapters');
     functions(input.topology,['retire'],'Compatibility-host topology adapter');
     functions(input.verification,['activeSession','areaNotes','areaNoteRecovery','deletionState','dailyRecords','insightsRevisionEnvelope','canonicalStores','legacyAttachments','obsoleteMetadata','topology','freshBackup'],'Compatibility-host verification adapters');
@@ -36,6 +36,21 @@ registry.define('compatibility-host',1,()=>{
 
     function exactKeys(value,keys){return !!(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('|')===[...keys].sort().join('|'));}
     function validTimestamp(value){return typeof value==='string'&&Number.isFinite(Date.parse(value));}
+    // Repository verification state versions 2 to 5 predate the current record;
+    // versions 3 to 5 also kept the Device Folder's directory handle, which the
+    // repository scope now replaces. Progress and quarantine carry over.
+    function legacyRepositoryIntegrity(value){
+      const version=Number(value?.version);
+      if(!value||typeof value!=='object'||Array.isArray(value)||!Number.isSafeInteger(version)||version<2||version>5)return null;
+      const current=metadata.normalizeRepositoryIntegrity(value);
+      const stored=target=>{if(version<3||!target||typeof target!=='object')return target;const {repositoryHandle,...rest}=target;return rest;};
+      const shape=target=>{
+        const scan={completedAt:target.completedAt,cycleStartedAt:target.cycleStartedAt,cursor:target.cursor,failedAt:target.failedAt,quarantinedObjectIds:target.quarantinedObjectIds};
+        if(version===2)return scan;if(version===3)return {repositoryScope:target.repositoryScope,scanId:target.scanId,...scan};
+        if(version===4){const {recheckCursor,...prior}=target;return prior;}return target;
+      };
+      return helpers.same({...value,device:stored(value.device),drive:stored(value.drive)},{version,device:shape(current.device),drive:shape(current.drive)})?current:null;
+    }
     function legacyDeviceSettings(value){
       if(!value||!exactKeys(value,['format','version','enabled','directoryHandle','lastSlot','lastBackupAt','lastFilename','sourceRevision'])||value.format!=='study-director.device-backup-settings'||Number(value.version)!==1||value.enabled!==true)return null;
       const handle=value.directoryHandle;if(!handle||typeof handle.getFileHandle!=='function'||typeof handle.getDirectoryHandle!=='function'||typeof handle.queryPermission!=='function')return null;
@@ -117,6 +132,14 @@ registry.define('compatibility-host',1,()=>{
       if(integrity){const normalized=metadata.normalizeAttachmentIntegrity(integrity.value);if(!helpers.same(integrity.value,normalized)){requireOwnership();await metadata.writeValue(appMeta.attachmentIntegrityAudit,normalized,integrity.updatedAt);migrated++;}}
       const device=await metadata.readRow(appMeta.automaticDeviceBackup);
       if(device&&Number(device.value?.version)===1){const normalized=legacyDeviceSettings(device.value);if(!normalized)throw new Error('Historical Device Backup settings have an unknown shape and were preserved without modification.');requireOwnership();await metadata.writeValue(appMeta.automaticDeviceBackup,normalized,device.updatedAt);migrated++;}
+      const scrub=await metadata.readRow(appMeta.repositoryIntegrityScrub);
+      if(scrub&&!helpers.same(scrub.value,metadata.normalizeRepositoryIntegrity(scrub.value))){
+        const normalized=legacyRepositoryIntegrity(scrub.value);if(!normalized)throw new Error('Historical backup verification state has an unknown shape and was preserved without modification.');
+        requireOwnership();await metadata.writeValue(appMeta.repositoryIntegrityScrub,normalized,scrub.updatedAt);
+        const verified=await metadata.readRow(appMeta.repositoryIntegrityScrub);
+        if(!verified||!helpers.same(verified.value,normalized))throw new Error('Historical backup verification state could not be verified after conversion.');
+        migrated++;
+      }
       const legacyMaintenance=await metadata.readRow(appMeta.repositoryMaintenancePendingLegacy);
       if(legacyMaintenance){
         const legacyValue=normalizeRepositoryMaintenance(legacyMaintenance.value);
@@ -146,6 +169,8 @@ registry.define('compatibility-host',1,()=>{
       if(Number(protection?.value?.version)===1)present.push(`${appMeta.backupProtection}:v1`);
       const device=rows.find(row=>String(row&&row.key||'')===appMeta.automaticDeviceBackup);
       if(Number(device?.value?.version)===1)present.push(`${appMeta.automaticDeviceBackup}:v1`);
+      const scrub=rows.find(row=>String(row&&row.key||'')===appMeta.repositoryIntegrityScrub);
+      if(scrub&&!helpers.same(scrub.value,metadata.normalizeRepositoryIntegrity(scrub.value)))present.push(`${appMeta.repositoryIntegrityScrub}:v${Number(scrub.value?.version)||'?'}`);
       const maintenance=rows.find(row=>String(row&&row.key||'')===appMeta.dataMaintenance);
       if(maintenance&&!metadata.isCurrentDataMaintenance(maintenance.value))present.push(`${appMeta.dataMaintenance}:noncanonical`);
       if(rows.some(row=>String(row&&row.key||'')===appMeta.repositoryMaintenancePendingLegacy))present.push(appMeta.repositoryMaintenancePendingLegacy);

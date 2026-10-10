@@ -154,9 +154,9 @@ export const COMPATIBILITY_REGISTRY=freeze({
     },
     {
       id:'l7-host-metadata-normalization',owner:'compatibility/host',kind:'live-migration',
-      source:'L7 appMeta dataMaintenance v1 plus rebuildable noncanonical maintenance rows from intermediate upgrades, verifiedRecoveryBackups entries without baseline fields, attachmentIntegrityAudit issues with name, DeviceBackupSettings.v1, and backupProviderOperation:* journals',
+      source:'L7 appMeta dataMaintenance v1 plus rebuildable noncanonical maintenance rows from intermediate upgrades, verifiedRecoveryBackups entries without baseline fields, attachmentIntegrityAudit issues with name, DeviceBackupSettings.v1, repositoryIntegrityScrub versions 2 to 5 (versions 3 to 5 carrying a Device Folder directory handle), and backupProviderOperation:* journals',
       target:'current host/repository metadata shapes or verified absence for obsolete operational rows',
-      proof:'strict current appMeta verification passes after normalization; Device Folder handle/timestamps are retained, obsolete provider-operation journals are removed, and unknown historical shapes fail closed',
+      proof:'strict current appMeta verification passes after normalization; Device Folder handle/timestamps are retained, backup verification progress and quarantine carry over with the repository scope as identity, obsolete provider-operation journals are removed, and unknown historical shapes fail closed',
       retirement:'after all supported installations have crossed the metadata normalization, report the canonical baseline, and no historical provider journal remains',
       sourceFiles:freeze(['source/core/compatibility-host.js','source/core/host-metadata.js','source/app.html'])
     },
