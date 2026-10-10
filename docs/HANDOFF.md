@@ -315,6 +315,7 @@ Measured on 200 MB of attachments:
 
 ## 5. Working notes
 
+- **Testing rhythm (user's rule, 2026-10-10).** Make all the app changes for a piece of work first, then build once and run the suites once. Fix what fails, then rerun only the failing tests. Do not rerun tests after each small edit.
 - **Chromium for browser tests:** `CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome`. On a fresh profile, preset `localStorage` user defaults so the name dialog does not block clicks.
 - **Rebuild the worker bundles** after changing `portable/`: `node build/wordgard-bundle.mjs --write`.
 - **Fake-clock tests** that hash or encrypt must wait for real background work (`realWorkSettled` in `repository-checkpoint.mjs`).
