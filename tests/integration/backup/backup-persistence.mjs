@@ -100,7 +100,7 @@ const compatibilityNoop=async()=>freeze({status:'not-needed'});
 const compatibilityFacade=CompatibilityModule.createFacade(freeze({
   baselineId:'QA_FIXTURE',
   live:freeze({
-    cleanupLegacyStorage:compatibilityNoop,migratePlan:compatibilityNoop,migrateReflections:compatibilityNoop,migrateHostMetadata:compatibilityNoop,migrateActiveSession:compatibilityNoop,migrateAreaNotes:compatibilityNoop,
+    renameIdentities:compatibilityNoop,cleanupLegacyStorage:compatibilityNoop,migratePlan:compatibilityNoop,migrateReflections:compatibilityNoop,migrateHostMetadata:compatibilityNoop,migrateActiveSession:compatibilityNoop,migrateAreaNotes:compatibilityNoop,
     migrateAreaNoteRecovery:compatibilityNoop,migrateDailyRecords:compatibilityNoop,migrateDeletionState:compatibilityNoop,migrateInsightsRevisionEnvelope:compatibilityNoop,cleanupLegacyAttachments:compatibilityNoop,cleanupObsoleteMetadata:compatibilityNoop,retireTopology:compatibilityNoop,retireLegacyIdentity:compatibilityNoop
   }),
   backups:freeze({inspectCurrent:codec.inspectCurrent,inspectLegacy:codec.inspectLegacy}),

@@ -94,7 +94,7 @@ console.log(JSON.stringify({status:'PASS',suite:'repository-journals',contracts:
 
 // Missing payloads do not make the header-only diagnostic call read or repair payloads.
 await app.restoreJournal.prepare(Object.freeze({id:'restore_qa-diagnostic-0001',blob:new Blob(['PRIVATE DATA']),filename:'private.sdbackup',scheduleText:''}));
-assert.ok(stores.meta.has('restoreJournalPayload.v1'));stores.meta.delete('restoreJournalPayload.v1');assert.equal((await app.restoreJournal.diagnostics()).phase,'prepared');assert.equal(stores.meta.has('restoreJournalPayload.v1'),false,'diagnostics must not repair or write a missing payload');
+assert.ok(stores.meta.has('restoreJournalPayload'));stores.meta.delete('restoreJournalPayload');assert.equal((await app.restoreJournal.diagnostics()).phase,'prepared');assert.equal(stores.meta.has('restoreJournalPayload'),false,'diagnostics must not repair or write a missing payload');
 assert.equal((await app.metadata.diagnostics()).maintenanceStatus,'never');assert.equal((await app.metadata.diagnostics()).deletions,0);assert.equal((await app.metadata.diagnostics()).localRecovery,false);
 await app.restoreJournal.clear();assert.equal(await app.restoreJournal.diagnostics(),null);assert.equal(await app.libraryClearJournal.diagnostics(),null);
 console.log(JSON.stringify({status:'PASS',suite:'read-only-data-diagnostics',headerOnly:true,noPayloadRepair:true,metadataSummary:true},null,2));

@@ -42,9 +42,9 @@ registry.define('host-metadata',1,()=>{
       }
       if(key===keys.reconciliationBase)return same(value,normalizers.reconciliationBase(value));
       if(key===keys.automaticDeviceBackup){
-        if(!value||!exactKeys(value,['format','version','enabled','directoryHandle','lastBackupAt','lastFilename','sourceRevision'])||value.format!=='study-director.device-backup-settings'||Number(value.version)!==3||value.enabled!==true)return false;
-        const handle=value.directoryHandle,filename=String(value.lastFilename||''),backupAt=String(value.lastBackupAt||''),source=String(value.sourceRevision||'');
-        return !!(handle&&typeof handle.getFileHandle==='function'&&typeof handle.getDirectoryHandle==='function'&&typeof handle.queryPermission==='function'&&(!filename||/^cp_[a-f0-9]{32}\.sdcheckpoint$/u.test(filename))&&(!backupAt||Number.isFinite(Date.parse(backupAt)))&&(!source||Number.isFinite(Date.parse(source))));
+        if(!value||!exactKeys(value,['format','version','directoryHandle','baseline'])||value.format!=='study-director.device-backup-settings'||Number(value.version)!==4)return false;
+        const handle=value.directoryHandle,baseline=String(value.baseline||'');
+        return !!(handle&&typeof handle.getFileHandle==='function'&&typeof handle.getDirectoryHandle==='function'&&typeof handle.queryPermission==='function'&&(!baseline||Number.isFinite(Date.parse(baseline))));
       }
       return false;
     }

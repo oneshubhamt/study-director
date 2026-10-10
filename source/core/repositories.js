@@ -312,11 +312,13 @@ registry.define('repositories',1,()=>{
     }
     function pendingDeletionEntries(){return sanitizeDeletionRecoveryEntries(currentDeletionRecoveryEntries());}
     function pendingDeletionEntryMap(){return new Map(pendingDeletionEntries().map(entry=>[entry.key,entry]));}
-    function writeDeletionRecoveryEntries(values){
+    // Clearing or rewriting what is stored keeps the record's own ceiling; only
+    // a new entry has to fit in the shared emergency budget.
+    function writeDeletionRecoveryEntries(values,room=APP_LIMITS.deletionRecoveryBytes){
       const ordered=sanitizeDeletionRecoveryEntries(values),kept=[];
       for(let i=ordered.length-1;i>=0;i--){
         const candidate=[ordered[i],...kept],payload={format:'study-director.deletion-recovery',version:1,updatedAt:new Date().toISOString(),entries:candidate};
-        if(jsonByteLength(payload)>APP_LIMITS.deletionRecoveryBytes)break;
+        if(jsonByteLength(payload)>room)break;
         kept.unshift(ordered[i]);
       }
       if(kept.length!==ordered.length)return false;
@@ -325,7 +327,7 @@ registry.define('repositories',1,()=>{
     }
     function stageDeletionRecovery(kind,id,deletedAt=new Date().toISOString()){
       const entries=currentDeletionRecoveryEntries(),next=sanitizeDeletionRecoveryEntries([...entries,{kind,id,deletedAt}]);
-      return writeDeletionRecoveryEntries(next);
+      return writeDeletionRecoveryEntries(next,rescueRoom(STORAGE_KEYS.deletionRecovery,APP_LIMITS.deletionRecoveryBytes));
     }
     function clearDeletionRecoveryKeys(keys,expected=null){
       const serviced=expected&&new Map(expected.map(entry=>[entry.key,entry.deletedAt]));
@@ -354,14 +356,29 @@ registry.define('repositories',1,()=>{
       const id=normalizeAttachmentDeletionId(assetId),when=normalizeTimestamp(deletedAt,new Date().toISOString());if(!id)throw new TypeError('Attachment deletion identity is invalid.');return {format:'study-director.attachment-deletion',version:1,assetId:id,deletedAt:when};
     }
 
-function capFallbackDailyRecords(records){
+// Emergency copies in browser storage share one budget, filled in priority
+// order: the live session, unsaved notes, failed deletes, fallback Saved Days.
+// Each copy gets what the higher-priority copies leave, up to its own ceiling.
+// The budget limits what a copy may add; reading, clearing or rewriting what
+// is already stored keeps the copy's own ceiling. An unreadable copy fails
+// closed rather than counting as empty.
+function rescueRoom(key,ceiling){
+  const order=[STORAGE_KEYS.recovery,STORAGE_KEYS.areaNoteRescue,STORAGE_KEYS.deletionRecovery,STORAGE_KEYS.fallbackDailyRecords],index=order.indexOf(key);
+  let used=0;
+  for(const other of order.slice(0,Math.max(0,index))){
+    const text=LocalStorageContract.getText(other,'');if(LocalStorageContract.lastError)throw LocalStorageContract.lastError;
+    used+=new TextEncoder().encode(text||'').byteLength;
+  }
+  return Math.max(0,Math.min(ceiling,APP_LIMITS.localRescueBytes-used));
+}
+function capFallbackDailyRecords(records,room=APP_LIMITS.fallbackDailyRecordsBytes){
   const byDate=new Map();
   (records||[]).forEach(record=>{
     const clean=sanitizeCurrentDailyRecord(record);
     if(clean)byDate.set(clean.date,clean);
   });
   const ordered=[...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date)).slice(-FALLBACK_DAILY_RECORD_LIMIT);
-  while(ordered.length&&jsonByteLength(ordered)>APP_LIMITS.fallbackDailyRecordsBytes)ordered.shift();
+  while(ordered.length&&jsonByteLength(ordered)>room)ordered.shift();
   return ordered;
 }
 function activeSessionRecoveryEnvelope(session){
@@ -1220,7 +1237,7 @@ async function storeDailyRecord(rec,options={}){
     if(isOwnershipLostError(e))throw e;
     assertWriteToken(ownershipToken,'the daily-record fallback write');
     const existing=fallbackDailyRecordsGet(),arr=existing.filter(r=>r.date!==clean.date);arr.push(clean);
-    const capped=capFallbackDailyRecords(arr),retainedDates=new Set(capped.map(record=>record.date));
+    const capped=capFallbackDailyRecords(arr,rescueRoom(STORAGE_KEYS.fallbackDailyRecords,APP_LIMITS.fallbackDailyRecordsBytes)),retainedDates=new Set(capped.map(record=>record.date));
     showStorageFallbackWarning(e&&e.message?e.message:'saved-date database failed');
     if(arr.some(record=>!retainedDates.has(record.date))){
       throw new Error(`IndexedDB is unavailable and the emergency fallback is full (${FALLBACK_DAILY_RECORD_LIMIT} records / ${Math.round(APP_LIMITS.fallbackDailyRecordsBytes/1048576)} MB). The existing fallback was preserved and this save was not acknowledged; export a backup and retry after storage recovers.`);
@@ -1250,7 +1267,7 @@ async function storeDailyRecordBatch(records){
     assertWriteToken(ownershipToken,'the daily-record batch fallback write');
     showStorageFallbackWarning(e&&e.message?e.message:'saved-date batch save failed');
     const existing=fallbackDailyRecordsGet(),merged=mergeDailyRecordSets(existing,docs);
-    const capped=capFallbackDailyRecords(merged),retainedDates=new Set(capped.map(record=>record.date));
+    const capped=capFallbackDailyRecords(merged,rescueRoom(STORAGE_KEYS.fallbackDailyRecords,APP_LIMITS.fallbackDailyRecordsBytes)),retainedDates=new Set(capped.map(record=>record.date));
     if(merged.some(record=>!retainedDates.has(record.date))){
       throw new Error(`IndexedDB is unavailable and this batch exceeds the emergency fallback capacity (${FALLBACK_DAILY_RECORD_LIMIT} records / ${Math.round(APP_LIMITS.fallbackDailyRecordsBytes/1048576)} MB). Existing fallback records were preserved and nothing from this batch was written; keep the backup file and retry after storage recovers.`);
     }
@@ -1415,7 +1432,7 @@ const AreaNotesRepository=AreaNotesRepositoryModule.create(freeze({
       }),
       storage:freeze({local:LocalStorageContract,meta:Meta,idbGetAll,idbStoreTransaction,idbStrictTransaction,storageResets:()=>IndexedDb.lifecycle().resets}),
       codecs:freeze({compatibility:CompatibilityCodec,sanitizeCurrentAreaNote}),keyedRecord:KeyedRecord,
-      helpers:freeze({clampText,clampEditorContent,editorContentWithinLimits,wipeObject,normalizeAreaName,displayAreaName,normalizeTimestamp,sameDataValue,jsonByteLength,canonicalRuntimeError,isCanonicalRuntimeError}),
+      helpers:freeze({clampText,clampEditorContent,editorContentWithinLimits,wipeObject,normalizeAreaName,displayAreaName,normalizeTimestamp,sameDataValue,jsonByteLength,canonicalRuntimeError,isCanonicalRuntimeError,rescueRoom:()=>rescueRoom(STORAGE_KEYS.areaNoteRescue,APP_LIMITS.areaNoteRescueBytes)}),
       hooks:freeze({
         canMutate:appCanMutate,assertWriteToken,compatibilityWriteToken,storageOk:markStorageHealthOk,reportCommit:reportCanonicalCommit,
         onNotesChanged:refreshAreaNoteConsumers,onNoteSyncState:setNoteSyncStateForKey,onNoteConflict:reportAreaNoteConflict,saveWarning:showSubjectNoteSaveWarning,

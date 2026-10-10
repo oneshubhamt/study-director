@@ -123,8 +123,8 @@ export const COMPATIBILITY_REGISTRY=freeze({
       id:'daily-record-historical-shapes',owner:'record-codecs/repositories',kind:'live-canonicalization',
       source:'IndexedDB/imported DailyRecord versions <= 15 and non-current historical field shapes, including R10 embedded sync metadata',
       target:'current DailyRecord v16 (study or diary) with local updatedAt/sourceRevision plus rebuildable exact DailySummary v5',
-      proof:'every retained Daily Record is rewritten and strict-current validation succeeds; exact summaries rebuild from those records',
-      retirement:'after canonical rewrite is implemented and baseline verified on all supported installations',
+      proof:'every retained Daily Record is rewritten and strict-current validation succeeds; exact summaries rebuild from those records; the dailyRecordMigration marker records the finished rewrite and is deleted with this adapter',
+      retirement:'after canonical rewrite is implemented and baseline verified on all supported installations; the dailyRecordMigration appMeta record retires with it',
       sourceFiles:freeze(['source/core/compatibility-codecs.js','source/core/repositories.js'])
     },
     {
@@ -152,8 +152,16 @@ export const COMPATIBILITY_REGISTRY=freeze({
       sourceFiles:freeze(['contracts/data-architecture.mjs','source/core/compatibility-host.js'])
     },
     {
+      id:'appmeta-stable-names',owner:'compatibility/host',kind:'live-migration',
+      source:'appMeta records named with a version suffix (planDraft.v1, savedDayDeletion.v1:*, repositoryMaintenancePending.v2 and the others listed in RENAMED_APP_META_KEYS)',
+      target:'the same records under stable names; each record keeps its version inside its value',
+      proof:'every renamed record moves in one transaction before any other migration step reads it; an old and a new copy that differ stop the move with nothing changed; no old name remains',
+      retirement:'baseline verified on all supported installations',
+      sourceFiles:freeze(['source/core/compatibility-host.js','source/app.html','contracts/data-architecture.mjs'])
+    },
+    {
       id:'l7-host-metadata-normalization',owner:'compatibility/host',kind:'live-migration',
-      source:'L7 appMeta dataMaintenance v1 plus rebuildable noncanonical maintenance rows from intermediate upgrades, verifiedRecoveryBackups entries without baseline fields, attachmentIntegrityAudit issues with name, DeviceBackupSettings.v1, repositoryIntegrityScrub versions 2 to 5 (versions 3 to 5 carrying a Device Folder directory handle), single-row ReconciliationBase.v1 note merge bases, and backupProviderOperation:* journals',
+      source:'L7 appMeta dataMaintenance v1 plus rebuildable noncanonical maintenance rows from intermediate upgrades, verifiedRecoveryBackups entries without baseline fields, attachmentIntegrityAudit issues with name, DeviceBackupSettings.v1, repositoryIntegrityScrub versions 2 to 5 (versions 3 to 5 carrying a Device Folder directory handle), single-row ReconciliationBase.v1 note merge bases, and backupProviderOperation:* journals, Device Folder settings v3 (two unused fields; sourceRevision renamed baseline), repositoryIntegrityScrub v6 (fixed device/drive slots, now keyed by location id), verifiedRecoveryBackups v1 plus the storage-health lastBackupAt time (now the last started download in that record)',
       target:'current host/repository metadata shapes or verified absence for obsolete operational rows',
       proof:'strict current appMeta verification passes after normalization; Device Folder handle/timestamps are retained, backup verification progress and quarantine carry over with the repository scope as identity, note merge bases become a verified ReconciliationBase.v2 header plus per-note rows unless a newer current base exists, obsolete provider-operation journals are removed, and unknown historical shapes fail closed',
       retirement:'after all supported installations have crossed the metadata normalization, report the canonical baseline, and no historical provider journal remains',

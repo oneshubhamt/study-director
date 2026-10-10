@@ -79,16 +79,43 @@ export const OBSOLETE_LOCAL_STORAGE_KEYS=freeze({
   attachmentMaintenanceAttemptDay:'studyDirector.attachmentMaintenanceDay.v1'
 });
 
-// One authoritative identity map for the heterogeneous appMeta store.
+// One authoritative identity map for the heterogeneous appMeta store. Names are
+// stable; a record's version lives inside its value.
 export const APP_META_KEYS=freeze({
   dailyRecordMigration:'dailyRecordMigration',
+  planDraft:'planDraft',
+  planLibrary:'planLibrary',
+  personalPreferences:'personalPreferences',
+  canonicalMutationEpoch:'canonicalMutationEpoch',
+  backupPreparationUnitPrefix:'backupPreparationUnit:',
+  insightsDatasetRevision:'insightsDatasetRevision',
+  dataMaintenance:'dataMaintenance',
+  savedDayDeletionPrefix:'savedDayDeletion:',
+  areaNoteDeletionPrefix:'areaNoteDeletion:',
+  attachmentDeletionPrefix:'attachmentDeletion:',
+  libraryClearJournalState:'libraryClearJournalState',
+  libraryClearJournalPayloadPrefix:'libraryClearJournalPayload:',
+  restoreJournalState:'restoreJournalState',
+  restoreJournalPayload:'restoreJournalPayload',
+  mutationLease:'mutationLease',
+  verifiedRecoveryBackups:'verifiedRecoveryBackups',
+  backupProtection:'backupProtection',
+  attachmentIntegrityAudit:'attachmentIntegrityAudit',
+  automaticDeviceBackup:'automaticDeviceBackup',
+  repositoryIntegrityScrub:'repositoryIntegrityScrub',
+  managedProviderBackupPending:'managedProviderBackupPending',
+  repositoryMaintenancePending:'repositoryMaintenancePending',
+  reconciliationBase:'reconciliationBase',
+  reconciliationBaseNotePrefix:'reconciliationBaseNote:'
+});
+// Names these records had while names carried a version. The compatibility
+// host moves each record to its stable name once, before anything reads it.
+export const RENAMED_APP_META_KEYS=freeze({
   planDraft:'planDraft.v1',
   planLibrary:'planLibrary.v1',
   personalPreferences:'personalPreferences.v1',
   canonicalMutationEpoch:'canonicalMutationEpoch.v1',
   backupPreparationUnitPrefix:'backupPreparationUnit.v1:',
-  insightsDatasetRevision:'insightsDatasetRevision',
-  dataMaintenance:'dataMaintenance',
   savedDayDeletionPrefix:'savedDayDeletion.v1:',
   areaNoteDeletionPrefix:'areaNoteDeletion.v1:',
   attachmentDeletionPrefix:'attachmentDeletion.v1:',
@@ -97,11 +124,6 @@ export const APP_META_KEYS=freeze({
   restoreJournalState:'restoreJournalState.v1',
   restoreJournalPayload:'restoreJournalPayload.v1',
   mutationLease:'mutationLease.v1',
-  verifiedRecoveryBackups:'verifiedRecoveryBackups',
-  backupProtection:'backupProtection',
-  attachmentIntegrityAudit:'attachmentIntegrityAudit',
-  automaticDeviceBackup:'automaticDeviceBackup',
-  repositoryIntegrityScrub:'repositoryIntegrityScrub',
   managedProviderBackupPending:'managedProviderBackupPending.v1',
   repositoryMaintenancePending:'repositoryMaintenancePending.v2',
   reconciliationBase:'reconciliationBase.v2',
@@ -218,13 +240,13 @@ export const DATA_ARCHITECTURE=freeze({
       restoreJournalState:surface('recovery-journal','repository-journals','operational','until verified completion/rollback','RestoreJournalState.v1',{protects:'checkpoint restore mutation',created:'before destructive restore commit',cleared:'after verified completion or rollback',supersededBy:'verified post-restore canonical state'}),
       restoreJournalPayload:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','RestoreJournalPayload.v4',{protects:'canonical dataset rollback image',created:'before destructive restore commit',cleared:'after verified completion or rollback',supersededBy:'verified post-restore canonical state'}),
       mutationLease:surface('coordination','repository-journals','operational','lease lifetime','MutationLease.v1'),
-      verifiedRecoveryBackups:surface('operational','host','operational','replace on verified backup','VerifiedRecoveryBackups.v1'),
+      verifiedRecoveryBackups:surface('operational','host','operational','replace on verified backup','VerifiedRecoveryBackups.v2'),
       backupProtection:surface('security-policy','exports','operational','while backup protection enabled','BackupProtection.v2'),
       attachmentIntegrityAudit:surface('derived-health','host','protect','replace on audit; opaque identity/error details only','AttachmentIntegrityAudit.v2',{rebuildFrom:'indexedDb.assets + opfs.attachments'}),
-      automaticDeviceBackup:surface('backup-configuration','device-backup','operational','while connected','DeviceBackupSettings.v3'),
-      repositoryIntegrityScrub:surface('derived-health','backup','operational','transactional progress/completion bound to repository identity; opaque quarantined object ids only; no user-content details','RepositoryIntegrityScrub.v3',{rebuildFrom:'external backup repository manifests and objects'}),
+      automaticDeviceBackup:surface('backup-configuration','device-backup','operational','while connected','DeviceBackupSettings.v4'),
+      repositoryIntegrityScrub:surface('derived-health','backup','operational','transactional progress/completion bound to repository identity; opaque quarantined object ids only; no user-content details','RepositoryIntegrityScrub.v7',{rebuildFrom:'external backup repository manifests and objects'}),
       managedProviderBackupPending:surface('operational','backup','operational','until the affected managed provider successfully publishes a later current backup or is explicitly disconnected','ManagedProviderBackupPending.v1'),
-      repositoryMaintenancePending:surface('operational','backup','operational','until post-commit repository retention and safe orphan reclamation complete','RepositoryMaintenancePending.v2'),
+      repositoryMaintenancePending:surface('operational','backup','operational','until post-commit repository retention and safe orphan reclamation complete','RepositoryMaintenancePending.v4'),
       reconciliationBase:surface('reconciliation-base','host','protect','advance atomically after a verified current-checkpoint reconciliation','ReconciliationBase.v2')
     }),
     prefixes:freeze({
@@ -237,7 +259,7 @@ export const DATA_ARCHITECTURE=freeze({
     }),
     obsolete:freeze({
       reflectionDraftMigration:surface('legacy-residue','compatibility','operational','remove during compatibility migration','ReflectionDraftMigration.v1'),
-      repositoryMaintenancePendingLegacy:surface('legacy-migration','compatibility','operational','migrate provider maintenance intent to the current RepositoryMaintenancePending.v2 identity, then remove after verified replacement','RepositoryMaintenancePending.v1'),
+      repositoryMaintenancePendingLegacy:surface('legacy-migration','compatibility','operational','migrate provider maintenance intent to the current repositoryMaintenancePending record, then remove after verified replacement','RepositoryMaintenancePending.v1'),
       archiveClearJournalStateLegacy:surface('legacy-migration','compatibility','protect','migrate once to LibraryClearJournalState.v1, then remove after verified replacement','ArchiveClearJournalState.v1'),
       archiveClearJournalPayloadPrefixLegacy:surface('legacy-migration','compatibility','protect','migrate once to LibraryClearJournalChunk.v1, then remove after verified replacement','ArchiveClearJournalChunk.v1'),
       reconciliationBaseLegacy:surface('legacy-migration','compatibility','protect','migrate once to ReconciliationBase.v2 plus ReconciliationBaseNote.v1 rows, then remove after verified replacement','ReconciliationBase.v1'),

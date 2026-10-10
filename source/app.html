@@ -1541,6 +1541,7 @@ const APP_META_KEYS=Object.freeze(@@SD_APP_META_KEYS@@);
 const EXTERNAL_REPOSITORY_IDENTITIES=Object.freeze(@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@);
 const APP_META_REGISTRY=Object.freeze(Object.fromEntries(Object.entries(@@SD_APP_META_REGISTRY@@).map(([name,definition])=>[name,Object.freeze(definition)])));
 const OBSOLETE_APP_META_KEYS=Object.freeze(@@SD_OBSOLETE_APP_META_KEYS@@);
+const RENAMED_APP_META_KEYS=Object.freeze(@@SD_RENAMED_APP_META_KEYS@@);
 const FACTORY_DEFAULTS = {
   studentName: APP_CONFIG.defaultName,
   scheduleText: APP_CONFIG.factorySchedule
@@ -2750,7 +2751,7 @@ function setTaskSkippedState(idx){
 /* STORAGE HEALTH AND SINGLE-TAB GUARD */
 
 function emptyStorageHealth(){
-  return {version:2,lastLocalSaveAt:null,lastLiveSaveAt:null,lastDailyRecordSaveAt:null,lastBackupAt:null,lastNotesSaveAt:null,lastIdbOkAt:null,lastError:'',storagePersisted:null,usageBytes:null,quotaBytes:null,usageRatio:null,lastEstimateAt:null,updatedAt:null};
+  return {version:2,lastLocalSaveAt:null,lastLiveSaveAt:null,lastDailyRecordSaveAt:null,lastNotesSaveAt:null,browserDataClearedAt:null,lastIdbOkAt:null,lastError:'',storagePersisted:null,usageBytes:null,quotaBytes:null,usageRatio:null,lastEstimateAt:null,updatedAt:null};
 }
 function readStorageHealth(){
   return StorageHealthController.snapshot();
@@ -3690,13 +3691,13 @@ async function maybePromptBackupNudge(force=false){
   const now=Date.now();
   if(!force&&now-backupNudgeCheckedAt<BACKUP_NUDGE_CHECK_MS)return;
   backupNudgeCheckedAt=now;
-  const health=readStorageHealth();
-  const last=Date.parse(health.lastBackupAt||'');
-  // One reminder for every kind of backup. It stays away while an automatic
-  // backup (Device Folder, or Drive while signed in) is able to run, and while
-  // a backup file, folder or Drive already holds the latest changes, however
-  // old that backup is: automatic backups only run when something changed.
-  const covered=Math.max(-Infinity,...verifiedRecoveryEntries().map(entry=>Date.parse(entry.sourceRevision)).filter(Number.isFinite));
+  const health=readStorageHealth(),backups=await readVerifiedRecoveryState(),entries=verifiedRecoveryEntries(backups);
+  // One reminder for every kind of backup, counted from the latest backup
+  // anywhere: a verified file, a download, the Device Folder or Drive. It stays away while an
+  // automatic backup is able to run, and while a backup already holds the latest
+  // changes, however old: automatic backups only run when something changed.
+  const last=lastBackupTime(backups);
+  const covered=Math.max(-Infinity,...entries.map(entry=>Date.parse(entry.sourceRevision)).filter(Number.isFinite));
   const changed=Date.parse(health.lastLocalSaveAt||''),unbacked=!Number.isFinite(covered)||!Number.isFinite(changed)||changed>covered;
   const automatic=BackupProviderRuntime.automaticActive();
   let due=!automatic&&unbacked&&Number.isFinite(last)&&(now-last>=BACKUP_NUDGE_MS);
@@ -4281,7 +4282,7 @@ async function writeReconciliationBase(checkpointId,payload){
   return ReconciliationBaselineStore.write(checkpointId,spec);
 }
 const VERIFIED_RECOVERY_META_KEY=APP_META_KEYS.verifiedRecoveryBackups;
-let verifiedRecoveryState=Object.freeze({version:1,file:null,providers:Object.freeze({})}),verifiedRecoveryWriteChain=Promise.resolve();
+let verifiedRecoveryState=Object.freeze({version:2,file:null,download:null,providers:Object.freeze({})}),verifiedRecoveryWriteChain=Promise.resolve();
 function normalizeVerifiedRecoveryEntry(value,{type,id='',label=''}={}){
   if(!value||typeof value!=='object')return null;
   const verifiedAt=typeof value.verifiedAt==='string'&&Number.isFinite(Date.parse(value.verifiedAt))?new Date(value.verifiedAt).toISOString():'';
@@ -4297,22 +4298,36 @@ function normalizeVerifiedRecoveryState(value){
     if(!/^[a-z][a-z0-9-]{0,40}$/.test(id))continue;
     const entry=normalizeVerifiedRecoveryEntry(row,{type:'provider',id});if(entry)providers[id]=entry;
   }
-  return Object.freeze({version:1,file:normalizeVerifiedRecoveryEntry(value?.file,{type:'file',label:'Portable backup'}),providers:Object.freeze(providers)});
+  const startedAt=typeof value?.download?.startedAt==='string'&&Number.isFinite(Date.parse(value.download.startedAt))?new Date(value.download.startedAt).toISOString():'';
+  return Object.freeze({version:2,file:normalizeVerifiedRecoveryEntry(value?.file,{type:'file',label:'Portable backup'}),download:startedAt?Object.freeze({startedAt}):null,providers:Object.freeze(providers)});
 }
 function verifiedRecoveryEntries(state=verifiedRecoveryState){return [state.file,...Object.values(state.providers||{})].filter(Boolean);}
-function recordVerifiedRecoveryCopy(copy){
-  if(!copy||!['file','provider'].includes(copy.type))return Promise.resolve(false);
-  const sourceRevision=typeof copy.sourceRevision==='string'&&Number.isFinite(Date.parse(copy.sourceRevision))?new Date(copy.sourceRevision).toISOString():'';if(!sourceRevision)return Promise.resolve(false);
+// When data was last backed up anywhere: a verified file, Device Folder or Drive copy, or a started download.
+function lastBackupTime(state=verifiedRecoveryState){return Math.max(-Infinity,...[...verifiedRecoveryEntries(state).map(entry=>entry.verifiedAt),state.download?.startedAt].map(value=>Date.parse(value||'')).filter(Number.isFinite));}
+// Decisions read the record fresh; a failed read falls back to the copy in memory.
+async function readVerifiedRecoveryState(){
+  return normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY).catch(error=>{AppDiagnostics.capture('backup.freshness-read',error,'warn');return verifiedRecoveryState;}));
+}
+function updateVerifiedRecoveryState(change){
   const run=async()=>{
-    const prior=normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY).catch(error=>{AppDiagnostics.capture('backup.freshness-read',error,'warn');return verifiedRecoveryState;}));
-    const entry=normalizeVerifiedRecoveryEntry({type:copy.type,id:copy.id,label:copy.label,verifiedAt:new Date().toISOString(),sourceRevision,baselineId:APP_VERSION,backupFormatVersion:DATA_CONTRACT.schemas.Backup.version},{type:copy.type,id:copy.id,label:copy.label});if(!entry)return false;
-    const next=copy.type==='file'?Object.freeze({version:1,file:entry,providers:prior.providers}):Object.freeze({version:1,file:prior.file,providers:Object.freeze({...prior.providers,[entry.id]:entry})});
+    const next=change(await readVerifiedRecoveryState());if(!next)return false;
     verifiedRecoveryState=next;BackupProviderRuntime.refresh();
     try{await writeHostAppMetaValue(VERIFIED_RECOVERY_META_KEY,next);}catch(error){AppDiagnostics.capture('backup.freshness-write',error,'warn');}
     return true;
   };
   const next=verifiedRecoveryWriteChain.catch(()=>{}).then(run);verifiedRecoveryWriteChain=next;return next;
 }
+function recordVerifiedRecoveryCopy(copy){
+  if(!copy||!['file','provider'].includes(copy.type))return Promise.resolve(false);
+  const sourceRevision=typeof copy.sourceRevision==='string'&&Number.isFinite(Date.parse(copy.sourceRevision))?new Date(copy.sourceRevision).toISOString():'';if(!sourceRevision)return Promise.resolve(false);
+  return updateVerifiedRecoveryState(prior=>{
+    const entry=normalizeVerifiedRecoveryEntry({type:copy.type,id:copy.id,label:copy.label,verifiedAt:new Date().toISOString(),sourceRevision,baselineId:APP_VERSION,backupFormatVersion:DATA_CONTRACT.schemas.Backup.version},{type:copy.type,id:copy.id,label:copy.label});if(!entry)return null;
+    return copy.type==='file'?Object.freeze({...prior,file:entry}):Object.freeze({...prior,providers:Object.freeze({...prior.providers,[entry.id]:entry})});
+  });
+}
+// A download cannot be read back, so it is not a verified copy; it still
+// counts as the person backing up for the 7-day reminder.
+function recordBackupDownload(){return updateVerifiedRecoveryState(prior=>Object.freeze({...prior,download:Object.freeze({startedAt:new Date().toISOString()})}));}
 // Every save writes the change clock inside its own transaction (the
 // mutation epoch); the last-save time in storage health is a fast copy for
 // backup decisions. If a save committed but the copy was not written (the tab
@@ -4325,7 +4340,7 @@ async function reconcileChangeClock(){
   writeStorageHealth({lastLocalSaveAt:latest});return true;
 }
 async function installVerifiedRecoveryFreshness(){
-  verifiedRecoveryState=normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY).catch(error=>{AppDiagnostics.capture('backup.freshness-read',error,'warn');return null;}));
+  verifiedRecoveryState=await readVerifiedRecoveryState();
   BackupProviderRuntime.refresh();return verifiedRecoveryState;
 }
 async function verifyFreshCurrentBackup(){
@@ -7674,7 +7689,7 @@ function updateTimerFocusMetrics(metrics=null){
 async function retainedBackupFileNames(){
   const payload=await JournalAppMeta.read('restoreJournalPayload');
   const integrity=await BackupAppMeta.read('repositoryIntegrityScrub'),names=payload?.backupFile?.name?[payload.backupFile.name]:[];
-  for(const target of [integrity?.device,integrity?.drive])for(const part of [target?.partial?.stored,target?.partial?.plain])if(part?.name)names.push(part.name);
+  for(const target of Object.values(integrity?.locations||{}))for(const part of [target?.partial?.stored,target?.partial?.plain])if(part?.name)names.push(part.name);
   return names;
 }
 const BackupFiles=ExportsModule.createFileStore({storage:navigator.storage,locks:navigator.locks,retained:retainedBackupFileNames,isAvailable:()=>!StartupLifecycle.status().fullyInitialized?'startup':navigator.storage?.getDirectory&&navigator.locks?.request?true:'storage-unavailable',onError:error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn')});
@@ -7814,17 +7829,19 @@ function integrityStatusText(target,{shallow=false}={}){
   return state+progress+history+quarantine+(shallow?' · File contents are not checked.':' · Active sessions and historical reflection drafts are excluded.');
 }
 function renderIntegrityStatuses(){
-  for(const [id,label,value,shallow] of [['attachment-verification-status','Attachment presence and size',attachmentIntegrityView,true],['device-verification-status','Device Folder',repositoryIntegrityView?.device,false],['drive-verification-status','Google Drive',repositoryIntegrityView?.drive,false]]){
-    const element=document.getElementById(id);if(element){const target=id==='device-verification-status'?'device':'drive',bound=shallow||value?.repositoryScope&&repositoryIntegrityBoundScopes[target]===value.repositoryScope;element.textContent=label+': '+(bound?integrityStatusText(value,{shallow}):'Awaiting connection to the repository; no current scan confirmed.');}
+  for(const [id,label,location] of [['attachment-verification-status','Attachment presence and size',''],['device-verification-status','Device Folder','device-folder'],['drive-verification-status','Google Drive','google-drive']]){
+    const element=document.getElementById(id);if(!element)continue;
+    const value=location?repositoryIntegrityView?.locations?.[location]:attachmentIntegrityView,bound=!location||value?.repositoryScope&&repositoryIntegrityBoundScopes[location]===value.repositoryScope;
+    element.textContent=label+': '+(bound?integrityStatusText(value,{shallow:!location}):'Awaiting connection to the repository; no current scan confirmed.');
   }
 }
 async function requestRepositoryIntegrityRecheck(target){
   try{
     if(!appCanMutate())throw new Error('Use the primary tab to request backup verification.');
-    if(target==='device'&&!DeviceBackup.status().connected)throw new Error('Connect your Device Folder before requesting verification.');
+    if(!BackupProviderRuntime.locationStatus(target)?.connected)throw new Error('Connect this backup location before requesting verification.');
     const bound=await readRepositoryIntegrityTarget(target);
     await mutateRepositoryIntegrityTarget(target,current=>{if(current.repositoryScope!==bound.repositoryScope)throw repositoryIntegrityChanged();return {...current,requestId:crypto.randomUUID(),recheck:true,recheckCursor:'',cursor:'',scanId:'',partial:null,cycleStartedAt:new Date().toISOString()};});
-    BackupProviderRuntime.requestIntegrity(target==='device'?'device-folder':'google-drive');
+    BackupProviderRuntime.requestIntegrity(target);
     setStatus('Backup recheck requested. Quarantined objects remain hidden until they pass full verification.');return true;
   }catch(error){setStatus(String(error?.message||error),false);AppDiagnostics.capture('backup.integrity-recheck',error,'warn');return false;}
 }
@@ -7929,8 +7946,11 @@ function normalizeRepositoryIntegrityTarget(value){
   const history=Object.freeze((Array.isArray(value?.history)?value.history:[]).slice(-8).filter(row=>row&&Number.isFinite(Date.parse(row.at))&&['completed','yielded','failed','unavailable','skipped'].includes(row.outcome)).map(row=>Object.freeze({at:new Date(row.at).toISOString(),outcome:row.outcome,complete:row.complete===true})));
   return Object.freeze({repositoryScope,scanId,partial,recheck,recheckCursor,requestId,blockedReason,completedAt:iso('completedAt'),cycleStartedAt:iso('cycleStartedAt'),cursor,failedAt:iso('failedAt'),attemptedAt:iso('attemptedAt'),lastOutcome,history,quarantinedObjectIds:Object.freeze(quarantinedObjectIds)});
 }
+const INTEGRITY_LOCATION_ID=/^[a-z][a-z0-9-]{0,40}$/u;
 function normalizeRepositoryIntegrityState(value){
-  return Object.freeze({version:6,device:normalizeRepositoryIntegrityTarget(value?.device),drive:normalizeRepositoryIntegrityTarget(value?.drive)});
+  const locations={};
+  for(const [id,target] of Object.entries(value?.locations&&typeof value.locations==='object'?value.locations:{}).slice(0,8))if(INTEGRITY_LOCATION_ID.test(id))locations[id]=normalizeRepositoryIntegrityTarget(target);
+  return Object.freeze({version:7,locations:Object.freeze(locations)});
 }
 
 async function libraryClearSnapshot(){
@@ -8115,7 +8135,8 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
   baselineId:APP_VERSION,
   facadeFactory:CompatibilityModule.createFacade,
   keys:Object.freeze({
-    storage:Object.freeze({theme:STORAGE_KEYS.theme,presentation:STORAGE_KEYS.presentation,fontScale:STORAGE_KEYS.fontScale}),
+    storage:Object.freeze({theme:STORAGE_KEYS.theme,presentation:STORAGE_KEYS.presentation,fontScale:STORAGE_KEYS.fontScale,storageHealth:STORAGE_KEYS.storageHealth}),
+    renamedAppMeta:Object.freeze(Object.entries(RENAMED_APP_META_KEYS).map(([name,from])=>Object.freeze([from,APP_META_KEYS[name]]))),
     obsolete:Object.freeze({
       schedule:OBSOLETE_STORAGE_KEYS.schedule,defaults:OBSOLETE_STORAGE_KEYS.defaults,quote:OBSOLETE_STORAGE_KEYS.quote,nudge:OBSOLETE_STORAGE_KEYS.nudge,
       reflectionDrafts:OBSOLETE_STORAGE_KEYS.reflectionDrafts,reflectionLegacy:OBSOLETE_STORAGE_KEYS.reflectionLegacy,
@@ -8164,7 +8185,23 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
     writeValue:(key,value,updatedAt)=>IndexedDb.strictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{const timestamp=Number.isFinite(Date.parse(String(updatedAt||'')))?new Date(String(updatedAt)).toISOString():new Date().toISOString(),request=store.put({key:String(key),version:1,value,updatedAt:timestamp});request.onerror=()=>finish(false,request.error||new Error('historical host metadata write failed'));tx.oncomplete=()=>finish(true,true);},'historical host metadata write aborted'),
     removeRow:key=>IndexedDb.strictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{const request=store.delete(String(key));request.onerror=()=>finish(false,request.error||new Error('historical host metadata removal failed'));tx.oncomplete=()=>finish(true,true);},'historical host metadata removal aborted'),
     releaseBackupFile:async _name=>BackupFiles.collect(),normalizeVerifiedRecovery:value=>normalizeVerifiedRecoveryState(value),normalizeAttachmentIntegrity:value=>normalizeAttachmentIntegrityState(value),
-    normalizeRepositoryIntegrity:value=>normalizeRepositoryIntegrityState(value),
+    normalizeRepositoryIntegrity:value=>normalizeRepositoryIntegrityState(value),normalizeRepositoryIntegrityTarget:value=>normalizeRepositoryIntegrityTarget(value),
+    retireStorageHealthField:name=>{writeStorageHealth({[name]:undefined});return true;},
+    // Moves every renamed record in one transaction; an old and a new copy that
+    // disagree stop the move with nothing changed.
+    renameRows:pairs=>IndexedDb.strictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{
+      const request=store.getAll();request.onerror=()=>finish(false,request.error||new Error('renamed records could not be read'));
+      request.onsuccess=()=>{
+        const rows=request.result||[],byKey=new Map(rows.map(row=>[String(row&&row.key||''),row]));let count=0;
+        for(const row of rows){
+          const key=String(row&&row.key||''),pair=pairs.find(([from])=>from.endsWith(':')?key.startsWith(from):key===from);if(!pair)continue;
+          const target=pair[1]+key.slice(pair[0].length),existing=byKey.get(target);
+          if(existing&&!sameDataValue(existing.value,row.value)){try{tx.abort();}catch{}finish(false,new Error(`Record ${key} and its renamed copy ${target} differ. Nothing was renamed.`));return;}
+          if(!existing)store.put({...row,key:target});store.delete(key);count++;
+        }
+        tx.oncomplete=()=>finish(true,count);
+      };
+    },'renamed record transaction aborted'),
     normalizeReconciliationNotes:value=>ReconciliationBaselineCodec.normalizeUpdates(value),normalizeReconciliationHeader:value=>ReconciliationBaselineCodec.normalizeHeader(value),
     reconciliationKeyFingerprint:keys=>ReconciliationBaselineCodec.keyFingerprint(keys)
   }),
@@ -8432,12 +8469,12 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     restoredFromFile:()=>{notifyBackupChange({urgent:true,reason:'file-restore'});return BackupProviderRuntime.automaticActive();},
     backupCompleted:context=>{
       if(context?.userExport)settleStorageReset();
-      markStorageHealthOk('backup','lastBackupAt');
+      markStorageHealthOk('backup');
       backupNudgeMessage='';
       backupNudgeCheckedAt=Date.now();
       backupNudgeNotifiedDate='';
       refreshStorageFallbackWarning();
-      if(context?.recoveryCopy)void recordVerifiedRecoveryCopy(context.recoveryCopy);
+      if(context?.recoveryCopy)void recordVerifiedRecoveryCopy(context.recoveryCopy);else void recordBackupDownload();
       schedulePwaUpdateEvaluation(250);
     }
   }),
@@ -8776,27 +8813,27 @@ async function readRepositoryIntegrityState(){
 }
 function applyRepositoryIntegrityHealth(state){
   repositoryIntegrityView=state;renderIntegrityStatuses();
-  const targets=[state?.device,state?.drive],quarantined=targets.some(target=>target?.quarantinedObjectIds?.length),failed=targets.some(target=>target?.failedAt);
+  const targets=Object.values(state?.locations||{}),quarantined=targets.some(target=>target?.quarantinedObjectIds?.length),failed=targets.some(target=>target?.failedAt);
   if(quarantined)markStorageHealthError('repositoryIntegrity','Some backup objects failed integrity verification. Keep the local copy and use a healthy backup version.',{level:'warn'});
   else if(failed)markStorageHealthError('repositoryIntegrity','Backup verification is incomplete or unavailable. Study Director will retry; keep the local copy until verification succeeds.',{level:'warn'});
   else markStorageHealthOk('repositoryIntegrity');
   return state;
 }
 function mutateRepositoryIntegrityTarget(target,change){
-  if(!['device','drive'].includes(target))return Promise.reject(new Error('Unknown integrity target.'));
+  if(!INTEGRITY_LOCATION_ID.test(String(target||'')))return Promise.reject(new Error('Unknown backup location.'));
   const task=repositoryIntegrityWriteChain.catch(()=>{}).then(()=>BackupAppMeta.transaction('readwrite',(view,tx,finish)=>{
     const handle=view.get('repositoryIntegrityScrub');let updated;
     handle.request.onerror=()=>finish(false,handle.request.error||new Error('Integrity metadata could not be read.'));
     handle.request.onsuccess=()=>{
       try{
         if(!appCanMutate())throw new Error('Study control is required to save integrity state.');
-        const state=normalizeRepositoryIntegrityState(handle.value()),next=normalizeRepositoryIntegrityTarget(change(state[target]));
-        updated=Object.freeze({...state,[target]:next});
+        const state=normalizeRepositoryIntegrityState(handle.value()),next=normalizeRepositoryIntegrityTarget(change(state.locations[target]||normalizeRepositoryIntegrityTarget(null)));
+        updated=Object.freeze({...state,locations:Object.freeze({...state.locations,[target]:next})});
         const write=view.put('repositoryIntegrityScrub',updated);write.onerror=()=>finish(false,write.error||new Error('Integrity metadata could not be saved.'));
       }catch(error){finish(false,error);}
     };
     tx.oncomplete=()=>finish(true,updated);
-  },{strict:true,abortMessage:'Integrity metadata transaction aborted'})).then(updated=>{applyRepositoryIntegrityHealth(updated);return updated[target];}).catch(error=>{
+  },{strict:true,abortMessage:'Integrity metadata transaction aborted'})).then(updated=>{applyRepositoryIntegrityHealth(updated);return updated.locations[target];}).catch(error=>{
     if(!error.code)error.code='REPOSITORY_INTEGRITY_STATE_UNAVAILABLE';
     markStorageHealthError('repositoryIntegrity','Backup verification state could not be saved or read. The previous state is preserved; verification will retry.',{level:'warn'});
     AppDiagnostics.capture('backup.repository-integrity-state',error,'warn');throw error;
@@ -8805,9 +8842,9 @@ function mutateRepositoryIntegrityTarget(target,change){
 }
 function repositoryIntegrityChanged(){const error=new Error('The backup repository changed during integrity verification.');error.code='REPOSITORY_CHANGED';return error;}
 async function readRepositoryIntegrityTarget(target){
-  const actual=await BackupProviderRuntime.repositoryScope(target==='device'?'device-folder':'google-drive');
+  const actual=await BackupProviderRuntime.repositoryScope(target);
   if(!actual)throw new Error('The backup repository identity is unavailable.');
-  const prior=(await readRepositoryIntegrityState())[target];
+  const prior=(await readRepositoryIntegrityState()).locations[target]||normalizeRepositoryIntegrityTarget(null);
   const same=prior.repositoryScope===actual;
   if(same&&prior.repositoryScope){repositoryIntegrityBoundScopes[target]=prior.repositoryScope;renderIntegrityStatuses();return prior;}
   const repositoryScope=String(actual);
@@ -8842,21 +8879,19 @@ async function refreshDeviceBackgroundPermission(event){
   await DeviceBackup.refreshPermission();
 }
 AppActivation.subscribe(event=>{if([APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTIVATION_KINDS.VISIBILITY_RETURN,APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER,APP_ACTIVATION_KINDS.DATE_ROLLOVER].includes(event.kind))wakeBackgroundOperations('activation');void refreshDeviceBackgroundPermission(event).catch(error=>AppDiagnostics.capture('device-backup.permission-refresh',error,'warn'));});
-// A location backs up on its own once this device has backed up to it.
 // A location backs up on its own once this device has backed up to it (the
 // Device Folder from when it was chosen). A change found on start is backed up
 // only while local data is present.
 BackupProviderRuntime.configureAutomaticBackup(Object.freeze({covered:id=>verifiedRecoveryState.providers[id]?.sourceRevision||'',current:()=>currentBackupSourceRevision(),ready:async()=>await canonicalLocalRecoveryEmpty()===false}));
-// Each location's integrity state is kept under its own target.
-const INTEGRITY_TARGETS=Object.freeze({'device-folder':'device','google-drive':'drive'});
+// Each location's integrity state is kept under its location id.
 BackupProviderRuntime.configureIntegrityScrub(Object.freeze({
-  readTarget:async id=>INTEGRITY_TARGETS[id]?await readRepositoryIntegrityTarget(INTEGRITY_TARGETS[id]):normalizeRepositoryIntegrityTarget(null),
-  writeResult:async(id,result)=>{if(INTEGRITY_TARGETS[id])await updateRepositoryIntegrityTarget(INTEGRITY_TARGETS[id],result);},
-  prepare:async(id,target,{trigger,nextEligibleAt})=>INTEGRITY_TARGETS[id]?Object.freeze({repositoryScope:target.repositoryScope,requestId:target.requestId,scanId:target.scanId,cursor:target.cursor,recheckCursor:target.recheckCursor,partial:target.partial,recheck:target.recheck,verifyIncremental:RepositoryIntegrityContinuation.verify,maxObjects:REPOSITORY_INTEGRITY_BATCH_OBJECTS,maxBytes:REPOSITORY_INTEGRITY_BATCH_BYTES,skipObjectIds:target.quarantinedObjectIds,trigger:String(trigger||'scheduled-integrity'),nextEligibleAt:String(nextEligibleAt||''),onProgress:progress=>updateRepositoryIntegrityTarget(INTEGRITY_TARGETS[id],{...progress,status:'yielded',checkpointOnly:true,repositoryScope:target.repositoryScope,requestId:target.requestId})}):null,
-  isAvailable:id=>!INTEGRITY_TARGETS[id]?'unavailable':appCanMutate()?true:'awaiting-control',
-  isUnsafe:id=>!INTEGRITY_TARGETS[id]||!!AppMutationCoordinator?.status?.()?.active||!!AttachmentIngest?.status?.()?.busy,
+  readTarget:id=>readRepositoryIntegrityTarget(id),
+  writeResult:async(id,result)=>{await updateRepositoryIntegrityTarget(id,result);},
+  prepare:async(id,target,{trigger,nextEligibleAt})=>Object.freeze({repositoryScope:target.repositoryScope,requestId:target.requestId,scanId:target.scanId,cursor:target.cursor,recheckCursor:target.recheckCursor,partial:target.partial,recheck:target.recheck,verifyIncremental:RepositoryIntegrityContinuation.verify,maxObjects:REPOSITORY_INTEGRITY_BATCH_OBJECTS,maxBytes:REPOSITORY_INTEGRITY_BATCH_BYTES,skipObjectIds:target.quarantinedObjectIds,trigger:String(trigger||'scheduled-integrity'),nextEligibleAt:String(nextEligibleAt||''),onProgress:progress=>updateRepositoryIntegrityTarget(id,{...progress,status:'yielded',checkpointOnly:true,repositoryScope:target.repositoryScope,requestId:target.requestId})}),
+  isAvailable:()=>appCanMutate()?true:'awaiting-control',
+  isUnsafe:()=>!!AppMutationCoordinator?.status?.()?.active||!!AttachmentIngest?.status?.()?.busy,
   yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'}),
-  quarantine:async id=>INTEGRITY_TARGETS[id]?(await readRepositoryIntegrityTarget(INTEGRITY_TARGETS[id])).quarantinedObjectIds:Object.freeze([])
+  quarantine:async id=>(await readRepositoryIntegrityTarget(id)).quarantinedObjectIds
 }));
 async function installRepositoryIntegrityScrub(){
   let state=null;
@@ -9334,7 +9369,7 @@ function currentBackupDiagnosticStates(){
   for(const [job,owner] of [['Attachment cleanup',RichTextAssetMaintenance],['Backup scratch cleanup',BackupFiles],['Attachment processor',AttachmentIngest],['File processor',Exports]])sample(job,()=>owner.status(),value=>[{job,...(job.endsWith('processor')?OperationLifecycle.snapshot(value):value)}]);
   sample('App update',()=>PwaLifecycle.status(),pwa=>[{job:'App update',state:pwa.phase,busy:pwa.applying||pwa.reloading||pwa.checking,pending:pwa.updateReady,bootState:pwa.bootState,cacheState:pwa.cacheState||'',reason:pwa.cacheReason||''}]);
   sample('Attachment verification',()=>AttachmentIntegrityJob.status(),value=>[{job:'Attachment verification',...value,completedAt:attachmentIntegrityView?.checkedAt||'',attemptedAt:attachmentIntegrityView?.attemptedAt||'',cursor:attachmentIntegrityView?.progress?.cursor||0,total:attachmentIntegrityView?.progress?.total||0,coverage:'presence-and-size'}]);
-  for(const target of ['device','drive']){const value=repositoryIntegrityView?.[target],bound=!!value?.repositoryScope&&repositoryIntegrityBoundScopes[target]===value.repositoryScope;states.push({job:target+' verification',reason:bound?value?.blockedReason||'':'awaiting-connection',state:!bound?'unbound':value?.recheck?'recheck-pending':value?.partial||value?.cursor?'partial':value?.lastOutcome||'never',completedAt:bound?value?.completedAt||'':'',attemptedAt:bound?value?.attemptedAt||'':'',failedAt:bound?value?.failedAt||'':'',progressBytes:bound?value?.partial?.stored?.offset||0:0,quarantined:bound?value?.quarantinedObjectIds?.length||0:0,history:bound?(value?.history||[]).map(row=>row.at+':'+row.outcome+(row.complete?':full':'')).join(' | '):''});}
+  for(const [target,value] of Object.entries(repositoryIntegrityView?.locations||{})){const bound=!!value?.repositoryScope&&repositoryIntegrityBoundScopes[target]===value.repositoryScope;states.push({job:target+' verification',reason:bound?value?.blockedReason||'':'awaiting-connection',state:!bound?'unbound':value?.recheck?'recheck-pending':value?.partial||value?.cursor?'partial':value?.lastOutcome||'never',completedAt:bound?value?.completedAt||'':'',attemptedAt:bound?value?.attemptedAt||'':'',failedAt:bound?value?.failedAt||'':'',progressBytes:bound?value?.partial?.stored?.offset||0:0,quarantined:bound?value?.quarantinedObjectIds?.length||0:0,history:bound?(value?.history||[]).map(row=>row.at+':'+row.outcome+(row.complete?':full':'')).join(' | '):''});}
   sample('Provider background',()=>BackupProviderRuntime.backgroundStatus(),values=>values);return states;
 }
 async function readDataDiagnosticStates(){
@@ -9361,8 +9396,8 @@ async function copyBackupDiagnostics(){
 }
 // App-specific DOM handlers are installed only through the private startup/lifecycle coordinator.
 const CLICK_ACTIONS=Object.freeze({
-  'recheck-device-integrity':()=>requestRepositoryIntegrityRecheck('device'),
-  'recheck-drive-integrity':()=>requestRepositoryIntegrityRecheck('drive'),
+  'recheck-device-integrity':()=>requestRepositoryIntegrityRecheck('device-folder'),
+  'recheck-drive-integrity':()=>requestRepositoryIntegrityRecheck('google-drive'),
   'apply-pwa-update': applyPwaUpdateFromUi,
   'protect-local-data': protectLocalData,
   'install-notice-action': ()=>runInstallationAction({dismissNotice:true}),

@@ -143,14 +143,14 @@ assert.equal((await legacy.app.deletionRecovery.verify()).ok,true);
   const bounded=createHarness(new Map(),null,{});
   bounded.stores.meta.set('dailyRecordMigration',{key:'dailyRecordMigration',version:1,value:{recordVersion:1,summaryVersion:1,complete:true,recordCount:0},updatedAt:'2026-09-15T12:00:00.000Z'});
   const at=index=>new Date(Date.parse('2026-01-01T00:00:00.000Z')+index*60000).toISOString();
-  for(let index=0;index<1003;index+=1){const key=`note ${String(index).padStart(4,'0')}`;bounded.stores.meta.set(`areaNoteDeletion.v1:${key}`,{key:`areaNoteDeletion.v1:${key}`,version:1,value:{format:'study-director.area-note-deletion',version:1,key,deletedAt:at(index)},updatedAt:at(index)});}
+  for(let index=0;index<1003;index+=1){const key=`note ${String(index).padStart(4,'0')}`;bounded.stores.meta.set(`areaNoteDeletion:${key}`,{key:`areaNoteDeletion:${key}`,version:1,value:{format:'study-director.area-note-deletion',version:1,key,deletedAt:at(index)},updatedAt:at(index)});}
   const listed=await bounded.app.deletionRecovery.areaNotes();
   assert.equal(listed.length,1000,'a full ledger lists its newest records');
   assert.deepEqual(['note 0000','note 0001','note 0002'].map(key=>listed.some(entry=>entry.key===key)),[false,false,false],'the oldest records are the ones left out');
   assert.equal((await bounded.app.deletionRecovery.verify()).ok,true,'a full ledger is not an integrity failure');
   assert.equal((await bounded.app.maintenance.run({force:true})).status,'completed');
-  const stored=[...bounded.stores.meta.keys()].filter(key=>key.startsWith('areaNoteDeletion.v1:'));
-  assert.equal(stored.length,1000,'maintenance removes the records listing leaves out');assert.equal(bounded.stores.meta.has('areaNoteDeletion.v1:note 0002'),false);
+  const stored=[...bounded.stores.meta.keys()].filter(key=>key.startsWith('areaNoteDeletion:'));
+  assert.equal(stored.length,1000,'maintenance removes the records listing leaves out');assert.equal(bounded.stores.meta.has('areaNoteDeletion:note 0002'),false);
   assert.deepEqual(await bounded.app.deletionRecovery.areaNotes(),listed,'pruning changes nothing a backup reads');
   await bounded.app.deletionRecovery.replaceAreaNotes([...listed,{key:'newest',deletedAt:at(5000)}]);
   const replaced=await bounded.app.deletionRecovery.areaNotes();

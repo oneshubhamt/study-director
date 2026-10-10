@@ -25,7 +25,7 @@ registry.define('compatibility',1,()=>{
     exactObject(input,['baselineId','live','backups','verification'],'Compatibility facade input');
     if(typeof input.baselineId!=='string'||!input.baselineId)throw new TypeError('Compatibility baseline identity is required.');
     functions(input.live,[
-      'cleanupLegacyStorage','migratePlan','migrateReflections','migrateHostMetadata','migrateActiveSession','migrateAreaNotes','migrateAreaNoteRecovery','migrateDailyRecords','migrateDeletionState','migrateInsightsRevisionEnvelope','cleanupLegacyAttachments','cleanupObsoleteMetadata','retireTopology','retireLegacyIdentity'
+      'renameIdentities','cleanupLegacyStorage','migratePlan','migrateReflections','migrateHostMetadata','migrateActiveSession','migrateAreaNotes','migrateAreaNoteRecovery','migrateDailyRecords','migrateDeletionState','migrateInsightsRevisionEnvelope','cleanupLegacyAttachments','cleanupObsoleteMetadata','retireTopology','retireLegacyIdentity'
     ],'Compatibility live adapters');
     functions(input.backups,['inspectCurrent','inspectLegacy'],'Compatibility backup adapters');
     functions(input.verification,['planLegacy','reflectionLegacy','activeSession','areaNotes','areaNoteRecovery','dailyRecords','deletionState','insightsRevisionEnvelope','canonicalStores','legacyStorage','legacyAttachments','obsoleteMetadata','topology','retiredIdentity','retiredHostCompatibility','freshBackup'],'Compatibility verification adapters');
@@ -60,6 +60,8 @@ registry.define('compatibility',1,()=>{
         // Legacy localStorage may still contain the only copy of Plan/preferences,
         // Active Session recovery, or Area Note recovery data. Retired standalone
         // Reflection Draft keys are deliberately discarded by their compatibility step.
+        // Renamed records move first: every later step reads them by their new name.
+        results.identities=await input.live.renameIdentities();
         results.plan=await input.live.migratePlan();
         results.reflections=await input.live.migrateReflections();
         results.activeSession=await input.live.migrateActiveSession();

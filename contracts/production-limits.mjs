@@ -62,6 +62,10 @@ export const PRODUCTION_LIMITS=Object.freeze({
   maxPracticeMarksPerUnit:10000,
   minPracticeTargetMs:5000,
   maxPracticeTargetMs:24*60*60*1000,
+  // All emergency copies in browser storage share one budget (session first,
+  // then unsaved notes, failed deletes, fallback Saved Days); each also has its
+  // own ceiling below.
+  localRescueBytes:4*MiB,
   fallbackDailyRecordsBytes:3*MiB,
   areaNoteRescueBytes:1*MiB,
   deletionRecoveryBytes:64*KiB,

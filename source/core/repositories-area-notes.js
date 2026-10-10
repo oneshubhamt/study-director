@@ -20,7 +20,7 @@ registry.define('repositories-area-notes',1,()=>{
     const codecs=exactObject(input.codecs,['compatibility','sanitizeCurrentAreaNote'],'Area Notes codec port');
     if(typeof codecs.sanitizeCurrentAreaNote!=='function'||!Object.isFrozen(codecs.compatibility))throw new TypeError('Area Notes codec port is invalid.');
     if(!Object.isFrozen(input.keyedRecord))throw new TypeError('Area Notes keyed-record capability must be frozen.');
-    const helpers=functions(input.helpers,['clampText','clampEditorContent','editorContentWithinLimits','wipeObject','normalizeAreaName','displayAreaName','normalizeTimestamp','sameDataValue','jsonByteLength','canonicalRuntimeError','isCanonicalRuntimeError'],'Area Notes helper port');
+    const helpers=functions(input.helpers,['clampText','clampEditorContent','editorContentWithinLimits','wipeObject','normalizeAreaName','displayAreaName','normalizeTimestamp','sameDataValue','jsonByteLength','canonicalRuntimeError','isCanonicalRuntimeError','rescueRoom'],'Area Notes helper port');
     const hooks=functions(input.hooks,['canMutate','assertWriteToken','compatibilityWriteToken','storageOk','reportCommit','onNotesChanged','onNoteSyncState','onNoteConflict','saveWarning','diagnosticsCapture'],'Area Notes hook port');
     const canonical=functions(input.canonical,['areaNoteDeletionValue','areaNotePreparationUnit','stageMutationEpoch','normalizeAreaNoteDeletions'],'Area Notes canonical port');
     const clock=functions(input.clock,['nowMs'],'Area Notes clock');
@@ -28,7 +28,7 @@ registry.define('repositories-area-notes',1,()=>{
     const STORAGE_KEYS=freeze({areaNoteRescue:keys.areaNoteRescue}),LEGACY_STORAGE_KEYS=freeze({areaNotesPending:legacyKeys.areaNotesPending});
     const LocalStorageContract=storage.local,Meta=storage.meta,idbGetAll=storage.idbGetAll,idbStoreTransaction=storage.idbStoreTransaction,idbStrictTransaction=storage.idbStrictTransaction,storageResets=storage.storageResets;
     const CompatibilityCodec=codecs.compatibility,sanitizeCurrentAreaNote=codecs.sanitizeCurrentAreaNote,KeyedRecord=input.keyedRecord;
-    const {clampText,clampEditorContent,editorContentWithinLimits,wipeObject,normalizeAreaName,displayAreaName,normalizeTimestamp,sameDataValue,jsonByteLength,canonicalRuntimeError,isCanonicalRuntimeError}=helpers;
+    const {clampText,clampEditorContent,editorContentWithinLimits,wipeObject,normalizeAreaName,displayAreaName,normalizeTimestamp,sameDataValue,jsonByteLength,canonicalRuntimeError,isCanonicalRuntimeError,rescueRoom}=helpers;
     const appCanMutate=hooks.canMutate,assertWriteToken=hooks.assertWriteToken,compatibilityWriteToken=hooks.compatibilityWriteToken,markStorageHealthOk=hooks.storageOk,reportCanonicalCommit=hooks.reportCommit,refreshAreaNoteConsumers=hooks.onNotesChanged,setNoteSyncStateForKey=hooks.onNoteSyncState,reportAreaNoteConflict=hooks.onNoteConflict,showSubjectNoteSaveWarning=hooks.saveWarning,AppDiagnostics=freeze({capture:hooks.diagnosticsCapture});
     const {areaNoteDeletionValue,areaNotePreparationUnit,stageMutationEpoch:stageCanonicalMutationEpoch,normalizeAreaNoteDeletions}=canonical;
     const decisionNowMs=clock.nowMs;
@@ -185,13 +185,15 @@ const repository=(()=>{
     if(error)throw error;
     return normalizeRescueEntries(raw);
   }
-  function persistIndependentRescue(entries){
+  // Clearing keeps the copy's own ceiling; protecting new notes uses its share
+  // of the emergency budget.
+  function persistIndependentRescue(entries,room=APP_LIMITS.areaNoteRescueBytes){
     const updatedAt=new Date().toISOString(),envelope={format:AREA_NOTE_RESCUE_FORMAT,version:1,updatedAt,entries};
-    if(jsonByteLength(envelope)>APP_LIMITS.areaNoteRescueBytes)return false;
+    if(jsonByteLength(envelope)>room)return false;
     return LocalStorageContract.setJson(STORAGE_KEYS.areaNoteRescue,envelope);
   }
   // The rescue is a snapshot of every note not yet confirmed in the database,
-  // newest first while it fits in areaNoteRescueBytes. Notes it held earlier
+  // newest first while it fits in its share of the emergency-copy budget. Notes it held earlier
   // are part of that set until saved, because loading marks them unsaved. Notes
   // left out are named by the save failure.
   function protectUnsaved(){
@@ -199,12 +201,13 @@ const repository=(()=>{
     const keys=[...dirtyBaseRevisions.keys()];
     if(!keys.length){rescueShortfall=[];return true;}
     const deletedAt=new Date().toISOString(),candidates=keys.map(key=>canonicalEntrySnapshot(notes[key],key)||{key,deleted:true,updatedAt:deletedAt}).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));
-    const entries=KeyedRecord.create();let complete=true;
+    const entries=KeyedRecord.create();let complete=true,room=0;
+    try{room=rescueRoom();}catch(error){AppDiagnostics.capture('area-notes.rescue-room',error,'warn');}
     for(const entry of candidates){
       entries[entry.key]=entry;
-      if(jsonByteLength({format:AREA_NOTE_RESCUE_FORMAT,version:1,updatedAt:deletedAt,entries})>APP_LIMITS.areaNoteRescueBytes){delete entries[entry.key];complete=false;}
+      if(jsonByteLength({format:AREA_NOTE_RESCUE_FORMAT,version:1,updatedAt:deletedAt,entries})>room){delete entries[entry.key];complete=false;}
     }
-    const written=Object.keys(entries).length?persistIndependentRescue(entries):true;
+    const written=Object.keys(entries).length?persistIndependentRescue(entries,room):true;
     rescueShortfall=candidates.filter(entry=>!entry.deleted&&(!written||!entries[entry.key])).map(entry=>entry.key);
     if(!written||!complete)AppDiagnostics.capture('area-notes.rescue-write',LocalStorageContract.lastError||new Error(`Unsaved Ongoing Notes exceed the ${Math.round(APP_LIMITS.areaNoteRescueBytes/1024)} KB browser copy.`),'error');
     return written&&complete;

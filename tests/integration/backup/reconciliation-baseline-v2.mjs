@@ -23,25 +23,25 @@ const seed=freeze({format:'study-director.reconciliation-base-update',version:1,
 assert.equal(await store.write(cp(1),seed),true);
 const first=await store.readHeader();
 assert.equal(first.version,2);assert.equal(first.checkpointId,cp(1));assert.equal(first.noteCount,2);assert.match(first.noteKeyFingerprint,/^[a-f0-9]{64}$/u);
-assert.equal(sharedStores.meta.get('reconciliationBaseNote.v1:Ethics').value.text,'ethics v1');
-assert.equal(sharedStores.meta.get('reconciliationBaseNote.v1:Polity').value.text,'polity v1');
+assert.equal(sharedStores.meta.get('reconciliationBaseNote:Ethics').value.text,'ethics v1');
+assert.equal(sharedStores.meta.get('reconciliationBaseNote:Polity').value.text,'polity v1');
 
-const polityEnvelopeBefore=structuredClone(sharedStores.meta.get('reconciliationBaseNote.v1:Polity')),ethicsEnvelopeBefore=structuredClone(sharedStores.meta.get('reconciliationBaseNote.v1:Ethics'));
+const polityEnvelopeBefore=structuredClone(sharedStores.meta.get('reconciliationBaseNote:Polity')),ethicsEnvelopeBefore=structuredClone(sharedStores.meta.get('reconciliationBaseNote:Ethics'));
 await new Promise(resolve=>setTimeout(resolve,2));
 const editIdentity=await identity(['Ethics','Polity']),edit=freeze({format:'study-director.reconciliation-base-update',version:1,full:false,baseCheckpointId:cp(1),...editIdentity,noteKeys:null,updates:freeze({Ethics:'ethics v2'}),deletes:freeze([])});
 assert.equal(await store.write(cp(2),edit),true);
 assert.equal((await store.readHeader()).checkpointId,cp(2));
-assert.equal(sharedStores.meta.get('reconciliationBaseNote.v1:Ethics').value.text,'ethics v2');
-assert.notEqual(sharedStores.meta.get('reconciliationBaseNote.v1:Ethics').updatedAt,ethicsEnvelopeBefore.updatedAt,'edited note baseline must receive a new envelope');
-assert.deepEqual(sharedStores.meta.get('reconciliationBaseNote.v1:Polity'),polityEnvelopeBefore,'unchanged note baseline must not be rewritten');
+assert.equal(sharedStores.meta.get('reconciliationBaseNote:Ethics').value.text,'ethics v2');
+assert.notEqual(sharedStores.meta.get('reconciliationBaseNote:Ethics').updatedAt,ethicsEnvelopeBefore.updatedAt,'edited note baseline must receive a new envelope');
+assert.deepEqual(sharedStores.meta.get('reconciliationBaseNote:Polity'),polityEnvelopeBefore,'unchanged note baseline must not be rewritten');
 
-const ethicsEnvelopeAfterEdit=structuredClone(sharedStores.meta.get('reconciliationBaseNote.v1:Ethics'));
+const ethicsEnvelopeAfterEdit=structuredClone(sharedStores.meta.get('reconciliationBaseNote:Ethics'));
 await new Promise(resolve=>setTimeout(resolve,2));
 const noopIdentity=await identity(['Ethics','Polity']),noop=freeze({format:'study-director.reconciliation-base-update',version:1,full:false,baseCheckpointId:cp(2),...noopIdentity,noteKeys:null,updates:freeze({}),deletes:freeze([])});
-assert.equal(await store.write(cp(3),noop),true);assert.deepEqual(sharedStores.meta.get('reconciliationBaseNote.v1:Ethics'),ethicsEnvelopeAfterEdit,'unchanged checkpoint must advance only the tiny header');assert.deepEqual(sharedStores.meta.get('reconciliationBaseNote.v1:Polity'),polityEnvelopeBefore);
+assert.equal(await store.write(cp(3),noop),true);assert.deepEqual(sharedStores.meta.get('reconciliationBaseNote:Ethics'),ethicsEnvelopeAfterEdit,'unchanged checkpoint must advance only the tiny header');assert.deepEqual(sharedStores.meta.get('reconciliationBaseNote:Polity'),polityEnvelopeBefore);
 
 const removeIdentity=await identity(['Ethics']),remove=freeze({format:'study-director.reconciliation-base-update',version:1,full:false,baseCheckpointId:cp(3),...removeIdentity,noteKeys:null,updates:freeze({}),deletes:freeze(['Polity'])});
-assert.equal(await store.write(cp(4),remove),true);assert.equal(sharedStores.meta.has('reconciliationBaseNote.v1:Polity'),false,'deleted note must remove only its reconciliation row');assert.equal((await store.readHeader()).noteCount,1);
+assert.equal(await store.write(cp(4),remove),true);assert.equal(sharedStores.meta.has('reconciliationBaseNote:Polity'),false,'deleted note must remove only its reconciliation row');assert.equal((await store.readHeader()).noteCount,1);
 
 const headerBeforeStale=await store.readHeader(),staleIdentity=await identity(['Ethics']),stale=freeze({format:'study-director.reconciliation-base-update',version:1,full:false,baseCheckpointId:cp(2),...staleIdentity,noteKeys:null,updates:freeze({Ethics:'must not commit'}),deletes:freeze([])});
 assert.equal(await store.write(cp(5),stale),false,'a stale checkpoint baseline must not overwrite newer reconciliation ancestry');assert.equal((await store.readHeader()).checkpointId,headerBeforeStale.checkpointId);assert.equal((await store.readNotes(['Ethics'])).Ethics,'ethics v2');

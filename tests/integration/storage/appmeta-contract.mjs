@@ -11,14 +11,14 @@ let proof=await app.metadata.verifyCurrent();
 assert.equal(proof.ok,true,'an empty optional appMeta surface must be canonical');
 
 const epoch={format:'study-director.canonical-mutation-epoch',version:1,token:'a'.repeat(32),committedAt:'2026-09-16T09:59:00.000Z'};
-stores.meta.set('canonicalMutationEpoch.v1',{key:'canonicalMutationEpoch.v1',version:1,value:epoch,updatedAt:epoch.committedAt});
+stores.meta.set('canonicalMutationEpoch',{key:'canonicalMutationEpoch',version:1,value:epoch,updatedAt:epoch.committedAt});
 proof=await app.metadata.verifyCurrent();
 assert.equal(proof.ok,true,'the canonical mutation epoch must be accepted as device-local coordination metadata');
-stores.meta.set('canonicalMutationEpoch.v1',{key:'canonicalMutationEpoch.v1',version:1,value:{...epoch,token:'too-short'},updatedAt:epoch.committedAt});
+stores.meta.set('canonicalMutationEpoch',{key:'canonicalMutationEpoch',version:1,value:{...epoch,token:'too-short'},updatedAt:epoch.committedAt});
 proof=await app.metadata.verifyCurrent();
 assert.equal(proof.ok,false,'a malformed canonical mutation epoch must fail closed');
 assert.ok(proof.issues.some(issue=>issue.startsWith('canonicalMutationEpoch:')&&issue.includes('value is not canonical')));
-stores.meta.delete('canonicalMutationEpoch.v1');
+stores.meta.delete('canonicalMutationEpoch');
 
 const maintenance={version:6,status:'completed',completedAt:'2026-09-16T10:00:00.000Z'};
 stores.meta.set('dataMaintenance',{key:'dataMaintenance',version:1,value:maintenance,updatedAt:maintenance.completedAt});
@@ -46,8 +46,8 @@ const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new 
 const {appMetaGateway:gateway,repositoryMeta,indexedDb,idbReads}=createHarness(new Map(),stores);
 
 assert.equal(gateway.resolve('dataMaintenance')?.family,'dataMaintenance');
-assert.equal(gateway.resolve('savedDayDeletion.v1:2026-09-19')?.family,'savedDayDeletionPrefix');
-assert.equal(gateway.resolve('savedDayDeletion.v1:') ,null,'empty prefix suffix must not resolve as a current identity');
+assert.equal(gateway.resolve('savedDayDeletion:2026-09-19')?.family,'savedDayDeletionPrefix');
+assert.equal(gateway.resolve('savedDayDeletion:') ,null,'empty prefix suffix must not resolve as a current identity');
 assert.equal(gateway.resolve('unknown.key'),null,'unknown appMeta identity must not resolve');
 await assert.rejects(repositoryMeta.read('restoreJournalPayload'),/owned by repository-journals/,'repository capability must not access journal families');
 
@@ -72,7 +72,7 @@ await indexedDb.strictTransaction(['daily','meta'],'readwrite',(tx,finish)=>{
   tx.oncomplete=()=>finish(true,true);
 },'cross-store appMeta transaction aborted');
 assert.ok(stores.daily.has('2026-09-20'));
-assert.ok(stores.meta.has('savedDayDeletion.v1:2026-09-20'),'transaction-scoped view must participate in an existing cross-store transaction');
+assert.ok(stores.meta.has('savedDayDeletion:2026-09-20'),'transaction-scoped view must participate in an existing cross-store transaction');
 
 stores.meta.set('dataMaintenance',{key:'dataMaintenance',version:1,value:maintenance,updatedAt:maintenance.completedAt,unexpected:true});
 await assert.rejects(repositoryMeta.read('dataMaintenance'),/envelope is not canonical/,'typed reads must fail closed on malformed envelopes');
@@ -130,14 +130,14 @@ await preferences.replace(canonical);
 assert.deepEqual(await preferences.read(),canonical,'current PortablePreferences.v2 must round-trip through typed appMeta');
 assert.ok(harness.idbDurability.strict>0,'Portable Preferences publication must use a strict IndexedDB transaction');
 
-const before=structuredClone(stores.meta.get('personalPreferences.v1'));
+const before=structuredClone(stores.meta.get('personalPreferences'));
 controls.failNextMetaWrite=true;
 await assert.rejects(
   ()=>preferences.write({...canonical,theme:'director-light'}),
   /injected appMeta write failure/i,
   'an IndexedDB failure must reject the canonical Preferences write'
 );
-assert.deepEqual(stores.meta.get('personalPreferences.v1'),before,'failed canonical Preferences publication must not replace the last durable row');
+assert.deepEqual(stores.meta.get('personalPreferences'),before,'failed canonical Preferences publication must not replace the last durable row');
 
 
 console.log(JSON.stringify({

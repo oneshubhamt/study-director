@@ -9,6 +9,7 @@ const freeze=Object.freeze;
 
 const order=[];
 const live=freeze({
+  renameIdentities:async()=>{order.push('identities');return freeze({status:'renamed'});},
   cleanupLegacyStorage:async()=>{order.push('legacyStorage');return freeze({status:'cleaned'});},
   migratePlan:async()=>{order.push('plan');return freeze({status:'migrated'});},
   migrateReflections:async()=>{order.push('reflections');return freeze({status:'migrated'});},
@@ -66,7 +67,7 @@ assert.equal(Compatibility.applyIndexedDbUpgrade({oldVersion:3,db:upgradeDb,tran
 
 const [first,second]=await Promise.all([facade.migrateLive(),facade.migrateLive()]);
 assert.equal(first,second,'concurrent migration callers must share one facade run');
-assert.deepEqual(order,['plan','reflections','activeSession','areaNotes','areaNoteRecovery','dailyRecords','deletionState','insightsRevisionEnvelope','hostMetadata','attachments','obsoleteMetadata','legacyStorage','topology','retiredIdentity'],'physical retirement must occur only after migratable sources are consumed and local canonical proofs pass');
+assert.deepEqual(order,['identities','plan','reflections','activeSession','areaNotes','areaNoteRecovery','dailyRecords','deletionState','insightsRevisionEnvelope','hostMetadata','attachments','obsoleteMetadata','legacyStorage','topology','retiredIdentity'],'physical retirement must occur only after migratable sources are consumed and local canonical proofs pass');
 assert.equal(facade.status().migrated,true);
 
 assert.equal((await facade.inspectBackup('current')).kind,'current');

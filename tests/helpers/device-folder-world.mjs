@@ -42,10 +42,10 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
     const blob=await seal(new Blob([`library at ${sourceRevision}`])),objectId='obj_'+(await sha256(new Blob([sourceRevision]))).slice(0,32),storedChecksum=await sha256(blob),reused=options.availableObjectIds instanceof Set&&options.availableObjectIds.has(objectId);
     const entry=freeze({objectId,blob,storedBytes:blob.size,storedChecksum,reused,checkProtection:async()=>{}}),prepared=freeze({exportedAt,objects:freeze([entry])});
     if(!reused)await executor.writeObject(entry,prepared);
-    const manifest=freeze({format:'study-director.backup-repository-checkpoint',version:2,checkpoint:freeze({checkpointId,createdAt:exportedAt,originInstallationId:'qa'}),exportedAt,sourceRevision,logicalFingerprint:storedChecksum,counts:freeze({dailyRecord:1,areaNote:1}),encrypted:!!protection,
+    const manifest=freeze({format:'study-director.backup-repository-checkpoint',version:5,checkpoint:freeze({checkpointId,createdAt:exportedAt,originInstallationId:'qa'}),exportedAt,sourceRevision,logicalFingerprint:storedChecksum,counts:freeze({dailyRecord:1,areaNote:1}),encrypted:!!protection,
       retention:freeze({role,purpose:role==='before-restore'?options.retention.purpose:'',protectedUntil:role==='before-restore'?new Date(clock.now()+7*DAY).toISOString():'',calendar:calendar(exportedAt)}),objects:freeze([freeze({objectId,storedBytes:blob.size,storedChecksum})])});
     await executor.writeManifest(freeze({blob:await seal(new Blob([JSON.stringify(manifest)])),manifest,exportedAt,checkSource:async()=>{},checkProtection:async()=>{}}));
-    const marker={format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt,sourceRevision,manifestVersion:2},markerBlob=new Blob([JSON.stringify(marker)]);
+    const marker={format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt,sourceRevision,manifestVersion:5},markerBlob=new Blob([JSON.stringify(marker)]);
     await executor.commit(freeze({...marker,blob:markerBlob,size:markerBlob.size,digest:await sha256(markerBlob),checkSource:async()=>{},checkProtection:async()=>{}}));
     published.push(freeze({checkpointId,sourceRevision,role,at:clock.now()}));
     const committedResult=await executor.onCommitted(freeze({sourceRevision,exportedAt,publication:freeze({name:checkpointId+'.sdcheckpoint'}),manifest}));
@@ -117,7 +117,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
     choose:value=>{pickerResult=value;},
     change:(urgent=false)=>{current=new clock.Date(clock.now()).toISOString();runtime.noteChange({urgent});},
     setLocalEmpty:value=>{localEmpty=value;},setCanMutate:value=>{canMutate=value;},
-    store:(handle,baseline='')=>settingsStore.set('automaticDeviceBackup',{format:'study-director.device-backup-settings',version:3,enabled:true,directoryHandle:handle,lastBackupAt:'',lastFilename:'',sourceRevision:baseline}),
+    store:(handle,baseline='')=>settingsStore.set('automaticDeviceBackup',{format:'study-director.device-backup-settings',version:4,directoryHandle:handle,baseline}),
     permissionNotices:()=>notices.filter(raw=>raw.source==='device-folder'&&raw.id==='permission')
   };
 }

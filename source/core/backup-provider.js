@@ -1123,7 +1123,11 @@ registry.define('backup-provider',1,input=>{
     if(!history.length)return Object.freeze({complete:true,cursor:'',checked:0,checkedBytes:0,total:0,quarantined:Object.freeze([])});
     const readObject=entry=>selected.repository.download(Object.freeze({kind:'object',id:entry.objectId,size:entry.storedBytes,digest:entry.storedChecksum}),Object.freeze({signal:options&&options.signal||null}));
     const readRange=async(entry,range)=>selected.repository.download(Object.freeze({kind:'object',id:entry.objectId,size:entry.storedBytes,digest:entry.storedChecksum}),Object.freeze({...range,signal:options&&options.signal||null}));
-    try{return await RepositoryCheckpointPipeline.scrub(history,readObject,{...options,readRange});}
+    // Where the location reports its own checksum for each stored object
+    // (Drive), verification compares it instead of downloading the object.
+    const listed=await selected.repository.list(Object.freeze({kind:'object',signal:options&&options.signal||null})),digests=new Map();
+    for(const raw of Array.isArray(listed)?listed:Array.isArray(listed?.items)?listed.items:[]){const item=repositoryProviderItem(raw,'object');if(item.serverDigest)digests.set(item.id,item.serverDigest);}
+    try{return await RepositoryCheckpointPipeline.scrub(history,readObject,{...options,readRange,storedDigest:entry=>digests.get(entry.objectId)||''});}
     catch(error){
       const objectId=/^obj_[a-f0-9]{32}$/u.test(String(error&&error.repositoryObjectId||''))?String(error.repositoryObjectId):'';
       if(objectId&&['REPOSITORY_INTEGRITY_CORRUPT','REPOSITORY_OBJECT_MISSING'].includes(error?.code)&&(!options.repositoryScope||options.repositoryScope===await repositoryScope(id))){try{const repair=await saveRepositoryProvider(providerSelected,{excludedObjectIds:[objectId],signal:options&&options.signal||null,preemptBackground:false});error.repositoryRepaired=true;error.repositoryRepairCheckpointId=String(repair&&repair.name||'');}catch(repairFailure){error.repositoryRepaired=false;error.repositoryRepairError=String(repairFailure&&repairFailure.message||repairFailure);AppDiagnostics.capture('backup-provider.repository-integrity-repair',repairFailure,'warn');}}

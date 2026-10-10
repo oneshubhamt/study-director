@@ -6,7 +6,7 @@ import {createFakeClock} from '../../helpers/fake-clock.mjs';
 // an older stored revision, and storage that vanished underneath an open tab is
 // rewritten from memory. No extra persisted state is involved.
 async function setup(){
-  const clock=createFakeClock('2026-09-15T12:00:00.000Z'),reports=[],controls={clock,onNoteConflict:info=>reports.push(info),onStorageRead:({store,key})=>{if(controls.failEpochRead&&store==='meta'&&key==='canonicalMutationEpoch.v1')throw new Error('QA_FIXTURE metadata read failure');}},h=createHarness(new Map(),null,controls);
+  const clock=createFakeClock('2026-09-15T12:00:00.000Z'),reports=[],controls={clock,onNoteConflict:info=>reports.push(info),onStorageRead:({store,key})=>{if(controls.failEpochRead&&store==='meta'&&key==='canonicalMutationEpoch')throw new Error('QA_FIXTURE metadata read failure');}},h=createHarness(new Map(),null,controls);
   h.stores.meta.set('dailyRecordMigration',{key:'dailyRecordMigration',version:1,value:{recordVersion:1,summaryVersion:1,complete:true,recordCount:0},updatedAt:'2026-09-15T12:00:00.000Z'});
   await h.app.notes.load();
   return {clock,controls,reports,...h};
@@ -15,8 +15,8 @@ const settle=async clock=>{await clock.runAll();await clock.drainMicrotasks(64);
 function clearSiteData(stores){for(const map of Object.values(stores))map.clear();}
 // Any other write after a clear (for example the running timer's session save)
 // stores a fresh canonical mutation epoch.
-const recreateEpoch=stores=>stores.meta.set('canonicalMutationEpoch.v1',{key:'canonicalMutationEpoch.v1',version:1,value:{format:'study-director.canonical-mutation-epoch',version:1,token:'a'.repeat(32),committedAt:'2026-09-15T12:00:02.000Z'},updatedAt:'2026-09-15T12:00:02.000Z'});
-const deletionRecord=key=>({key:`areaNoteDeletion.v1:${key}`,version:1,value:{format:'study-director.area-note-deletion',version:1,key,deletedAt:'2026-09-15T12:00:03.000Z'},updatedAt:'2026-09-15T12:00:03.000Z'});
+const recreateEpoch=stores=>stores.meta.set('canonicalMutationEpoch',{key:'canonicalMutationEpoch',version:1,value:{format:'study-director.canonical-mutation-epoch',version:1,token:'a'.repeat(32),committedAt:'2026-09-15T12:00:02.000Z'},updatedAt:'2026-09-15T12:00:02.000Z'});
+const deletionRecord=key=>({key:`areaNoteDeletion:${key}`,version:1,value:{format:'study-director.area-note-deletion',version:1,key,deletedAt:'2026-09-15T12:00:03.000Z'},updatedAt:'2026-09-15T12:00:03.000Z'});
 
 // 1. A save batch queued while an earlier batch for the same note is still
 // committing must not mistake that earlier commit for a competing edit.
@@ -94,7 +94,7 @@ const deletionRecord=key=>({key:`areaNoteDeletion.v1:${key}`,version:1,value:{fo
   app.notes.update('chemistry','Chemistry','to be deleted','');await app.notes.flush({strict:true});await clock.advance(2000);
   app.notes.update('chemistry','Chemistry','edited here',app.notes.get('chemistry').updatedAt);
   stores.area.delete('chemistry');
-  stores.meta.set('areaNoteDeletion.v1:chemistry',deletionRecord('chemistry'));
+  stores.meta.set('areaNoteDeletion:chemistry',deletionRecord('chemistry'));
   await app.notes.flush();await settle(clock);
   assert.equal(stores.area.has('chemistry'),false,'a recorded deletion is not resurrected');
   assert.equal(reports.length,2);
@@ -128,13 +128,13 @@ const deletionRecord=key=>({key:`areaNoteDeletion.v1:${key}`,version:1,value:{fo
 for(const failEpochRead of [false,true]){
   const {app,stores,clock,controls}=await setup();
   app.notes.update('ethics','Ethics','deleted in another tab','');await app.notes.flush({strict:true});await clock.advance(2000);
-  stores.area.delete('ethics');stores.meta.set('areaNoteDeletion.v1:ethics',deletionRecord('ethics'));
+  stores.area.delete('ethics');stores.meta.set('areaNoteDeletion:ethics',deletionRecord('ethics'));
   controls.failEpochRead=failEpochRead;
   if(failEpochRead)await assert.rejects(()=>app.notes.reloadFresh(),/could not confirm what storage still holds/);
   else assert.equal(await app.notes.reloadFresh(),true);
   controls.failEpochRead=false;await app.notes.flush();await settle(clock);
   assert.equal(stores.area.has('ethics'),false,'the deleted note is not written back');
-  assert.ok(stores.meta.has('areaNoteDeletion.v1:ethics'),'the deletion record survives');
+  assert.ok(stores.meta.has('areaNoteDeletion:ethics'),'the deletion record survives');
   if(!failEpochRead)assert.equal(app.notes.get('ethics'),null,'a healthy reload adopts the deletion');
   else{assert.equal(app.notes.get('ethics')?.text,'deleted in another tab','memory is left as it was');assert.equal(await app.notes.reloadFresh(),true);assert.equal(app.notes.get('ethics'),null,'a later reload adopts the deletion');}
 }
@@ -150,8 +150,8 @@ for(const failEpochRead of [false,true]){
   assert.equal(stores.area.has('gs2 > polity'),false,'the live row is gone');
   assert.equal(stores.area.get(trashKey).text,'fundamental rights','the text is kept in the same store');
   assert.equal(stores.area.get(trashKey).label,'GS2 > Polity','the original name is kept');
-  assert.ok(stores.meta.has('areaNoteDeletion.v1:gs2 > polity'),'the name is recorded as deleted for Combine');
-  assert.equal(stores.meta.has(`areaNoteDeletion.v1:${trashKey}`),false,'trash rows get no deletion record');
+  assert.ok(stores.meta.has('areaNoteDeletion:gs2 > polity'),'the name is recorded as deleted for Combine');
+  assert.equal(stores.meta.has(`areaNoteDeletion:${trashKey}`),false,'trash rows get no deletion record');
   assert.equal(app.notes.metadataSnapshot().records.some(record=>record.key===trashKey),false,'trash is not listed with live notes');
   assert.equal(app.notes.searchSnapshot().documents.some(record=>record.key===trashKey),false,'trash is not searched');
   assert.deepEqual(app.notes.trashSnapshot().map(item=>item.label),['GS2 > Polity']);
@@ -167,7 +167,7 @@ for(const failEpochRead of [false,true]){
   // Restoring to a free name, and deleting forever.
   const again=await app.notes.trash(restoredKey);assert.equal(await app.notes.restore(again),restoredKey,'a free name is reused');
   const gone=await app.notes.trash(restoredKey);assert.equal(await app.notes.remove(gone),true);
-  assert.equal(stores.area.has(gone),false);assert.equal(stores.meta.has(`areaNoteDeletion.v1:${gone}`),false,'deleting forever leaves no record');
+  assert.equal(stores.area.has(gone),false);assert.equal(stores.meta.has(`areaNoteDeletion:${gone}`),false,'deleting forever leaves no record');
   // An empty note is simply removed.
   app.notes.update('blank','Blank','x','');await app.notes.flush({strict:true});app.notes.update('blank','Blank','',app.notes.get('blank').updatedAt);await app.notes.flush({strict:true});
   assert.equal(await app.notes.trash('blank'),'','an empty note is removed without a trash entry');
@@ -176,7 +176,7 @@ for(const failEpochRead of [false,true]){
   await clock.advance(29*86400000);assert.equal(app.notes.trashSnapshot().length,1);
   await clock.advance(86400000+1000);assert.equal(app.notes.trashSnapshot().length,0,'expired trash is not shown');
   assert.equal(app.notes.purgeExpiredTrash(),1);await app.notes.flush({strict:true});
-  assert.equal(stores.area.has(old),false,'expired trash is removed');assert.equal(stores.meta.has(`areaNoteDeletion.v1:${old}`),false);
+  assert.equal(stores.area.has(old),false,'expired trash is removed');assert.equal(stores.meta.has(`areaNoteDeletion:${old}`),false);
 }
 
 // 10. Renaming moves a note with everything nested under it, in one transaction
@@ -190,7 +190,7 @@ for(const failEpochRead of [false,true]){
   assert.equal(moved.status,'renamed');assert.deepEqual(moved.moved.map(item=>item.to).sort(),['paper 2','paper 2 > polity','paper 2 > polity > rights']);
   assert.equal(stores.area.get('paper 2 > polity > rights').label,'Paper 2 > Polity > Rights','children keep their own names under the new parent');
   assert.equal(stores.area.get('paper 2 > polity').text,'constitution');
-  for(const key of ['gs2','gs2 > polity','gs2 > polity > rights']){assert.equal(stores.area.has(key),false);assert.ok(stores.meta.has(`areaNoteDeletion.v1:${key}`),'old names are recorded as deleted');}
+  for(const key of ['gs2','gs2 > polity','gs2 > polity > rights']){assert.equal(stores.area.has(key),false);assert.ok(stores.meta.has(`areaNoteDeletion:${key}`),'old names are recorded as deleted');}
   // A capitalisation change keeps the key and relabels the family.
   assert.equal((await app.notes.rename('paper 2','PAPER 2')).status,'renamed');assert.equal(stores.area.get('paper 2 > polity').label,'PAPER 2 > Polity');
   // Moving into itself is refused.

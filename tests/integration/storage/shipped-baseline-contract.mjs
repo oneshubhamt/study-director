@@ -4,7 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {SHIPPED_BASELINE_PERSISTENCE_CONTRACT as BASELINE} from '../../fixtures/shipped-baseline-persistence-contract.mjs';
 import {INDEXED_DB,OBSOLETE_INDEXED_DB} from '../../../contracts/canonical-identities.mjs';
-import {LOCAL_STORAGE_KEYS,OBSOLETE_LOCAL_STORAGE_KEYS,APP_META_KEYS,OBSOLETE_APP_META_KEYS} from '../../../contracts/data-architecture.mjs';
+import {LOCAL_STORAGE_KEYS,OBSOLETE_LOCAL_STORAGE_KEYS,APP_META_KEYS,OBSOLETE_APP_META_KEYS,RENAMED_APP_META_KEYS} from '../../../contracts/data-architecture.mjs';
 import {allCompatibilityEntries} from '../../../contracts/compatibility.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
@@ -32,7 +32,7 @@ assert.equal(BASELINE.localStorage.length,26,'Fixture must retain every shipped-
 for(const key of BASELINE.localStorage)assert.ok(durableKeys.has(key),`Shipped-baseline LocalStorage identity is unaccounted for: ${key}`);
 
 const currentMeta=new Set(Object.values(APP_META_KEYS));
-const obsoleteMeta=new Set(Object.values(OBSOLETE_APP_META_KEYS));
+const obsoleteMeta=new Set([...Object.values(OBSOLETE_APP_META_KEYS),...Object.values(RENAMED_APP_META_KEYS)]);
 for(const key of BASELINE.appMeta){
   if(key==='backupProviderOperation:'){
     assert.match(compatibilityHost,/LEGACY_BACKUP_PROVIDER_OPERATION_PREFIX='backupProviderOperation:'/u);

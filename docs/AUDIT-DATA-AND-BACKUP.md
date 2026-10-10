@@ -1,6 +1,8 @@
 # Audit: data topology and backup system (2026-10-10)
 
-Read-only audit of how Study Director stores data and how it backs it up and restores it. Nothing was changed. Notes and background services are out of scope (to be audited later).
+Read-only audit of how Study Director stores data and how it backs it up and restores it. Notes and background services are out of scope (to be audited later).
+
+**Follow-up (same day):** decisions and the schema step that acted on T1–T6, B4 and B9 are recorded in `HANDOFF.md` 1.5.
 
 ## Verdict
 

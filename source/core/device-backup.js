@@ -12,7 +12,7 @@ const {exactFrozenObject:exactObject,functionPort:functions}=registry.contracts;
 // timing all run through the engine, the same way as for every location.
 registry.define('device-backup',1,()=>{
   const freeze=Object.freeze;
-  const ID='device-folder',LABEL='Device Folder',FORMAT='study-director.device-backup-settings',VERSION=3;
+  const ID='device-folder',LABEL='Device Folder',FORMAT='study-director.device-backup-settings',VERSION=4;
   // A stored folder with no recorded baseline still backs up on its own.
   const EPOCH='1970-01-01T00:00:00.000Z';
   function createController(input){
@@ -67,14 +67,14 @@ registry.define('device-backup',1,()=>{
       });
     }
     function normalizeSettings(value){
-      if(!value||typeof value!=='object'||value.format!==FORMAT||Number(value.version)!==VERSION||value.enabled!==true)return null;
+      if(!value||typeof value!=='object'||value.format!==FORMAT||Number(value.version)!==VERSION)return null;
       const stored=value.directoryHandle;
       if(!stored||typeof stored.getDirectoryHandle!=='function'||typeof stored.queryPermission!=='function')return null;
-      return freeze({directoryHandle:stored,baseline:Number.isFinite(Date.parse(value.sourceRevision||''))?String(value.sourceRevision):''});
+      return freeze({directoryHandle:stored,baseline:Number.isFinite(Date.parse(value.baseline||''))?String(value.baseline):''});
     }
-    // The stored record keeps its v3 shape; lastBackupAt and lastFilename are
-    // no longer used (Version History and the verified-copy record hold them).
-    const settingsValue=()=>({format:FORMAT,version:VERSION,enabled:true,directoryHandle:handle,lastBackupAt:'',lastFilename:'',sourceRevision:baseline});
+    // The folder and the change from which it backs up on its own; when it last
+    // backed up lives in the verified-copy record.
+    const settingsValue=()=>({format:FORMAT,version:VERSION,directoryHandle:handle,baseline});
     async function query(target=handle){
       if(!target||typeof target.queryPermission!=='function')return 'denied';
       try{const result=await target.queryPermission({mode:'readwrite'});return ['granted','prompt','denied'].includes(result)?result:'denied';}

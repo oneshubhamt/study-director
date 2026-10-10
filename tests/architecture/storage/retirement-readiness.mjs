@@ -34,6 +34,7 @@ const migrationEvidence=Object.freeze({
   'legacy-json-backups':['tests/integration/backup/backup-persistence.mjs'],
   'complete-backup-v7-v19':['tests/integration/backup/backup-persistence.mjs','tests/integration/backup/checkpoint-handoff.mjs'],
   'l7-host-metadata-normalization':['tests/integration/storage/compatibility-host.mjs'],
+  'appmeta-stable-names':['tests/integration/storage/compatibility-host.mjs'],
   'l13e-repository-maintenance-v1':['tests/integration/storage/compatibility-host.mjs','tests/integration/backup/repository-incremental-preparation.mjs','tests/integration/backup/repository-restore.mjs'],
   'restore-journal-payload-v1-v3':['tests/integration/storage/repository-journals.mjs'],
   'backup-repository-v1-v4':['tests/integration/backup/repository-restore.mjs'],

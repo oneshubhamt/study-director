@@ -185,8 +185,8 @@ assert.match(drive,/REPOSITORY_MARKER=Object\.freeze\(\{key:REPOSITORY_IDENTITIE
 assert.doesNotMatch(drive,/studyDirectorBackup|studyDirectorOperation|\.sdbackup|async function (?:save|load)\(/u,'Drive must not retain the retired whole-Blob backup transport');
 assert.doesNotMatch(app,/backupOperationJournal|backupProviderOperation/u,'host must not expose dead monolithic-provider journal infrastructure');
 
-assert.match(hostMetadata,/value\.format!=='study-director\.device-backup-settings'\|\|Number\(value\.version\)!==3/u,'isolated host metadata boundary must validate DeviceBackupSettings.v3');
-assert.match(dataArchitecture,/automaticDeviceBackup:surface\('backup-configuration','device-backup','operational','while connected','DeviceBackupSettings\.v3'\)/u,'data-architecture contract must classify DeviceBackupSettings.v3');
+assert.match(hostMetadata,/value\.format!=='study-director\.device-backup-settings'\|\|Number\(value\.version\)!==4/u,'isolated host metadata boundary must validate DeviceBackupSettings.v4');
+assert.match(dataArchitecture,/automaticDeviceBackup:surface\('backup-configuration','device-backup','operational','while connected','DeviceBackupSettings\.v4'\)/u,'data-architecture contract must classify DeviceBackupSettings.v4');
 assert.match(dataArchitecture,/deviceBackup:surface\('external-backup',[\s\S]*Bring-in reconciliation and exact historical Version Restore/u,'Device Folder architecture must classify distinct managed Bring-in and Version Restore semantics');
 assert.match(dataArchitecture,/driveBackup:surface\('external-backup',[\s\S]*separate Bring-in and exact historical Version Restore orchestration/u,'Drive architecture must classify distinct managed Bring-in and Version Restore semantics');
 

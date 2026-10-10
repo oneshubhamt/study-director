@@ -136,6 +136,18 @@ assert.equal(large.app.notes.updateValidatedRich('large','Large',largeText,'').s
 assert.equal(large.app.notes.protectUnsaved(),false,'a note over the copy limit is reported');
 await large.app.notes.flush({strict:true});assert.equal(largeStores.area.get('large').text,largeText,'the database stores it in full');
 
+// The emergency copies share one browser-storage budget: a large session copy
+// leaves less room for unsaved notes, and an unreadable session copy leaves none.
+const budgetLocal=new Map(),budgetControls={},budget=createHarness(budgetLocal,emptyStores(),budgetControls);await budget.app.notes.load();
+const mediumText='WG1:'+JSON.stringify({version:1,doc:{type:'Doc',content:[{type:'Paragraph',content:[{type:'Text',param:'y'.repeat(600*1024)}]}]}});
+assert.equal(budget.app.notes.updateValidatedRich('medium','Medium',mediumText,'').status,'changed');
+assert.equal(budget.app.notes.protectUnsaved(),true,'a note within its share is kept');
+budgetLocal.set('recovery','s'.repeat(3.6*1024*1024));
+assert.equal(budget.app.notes.protectUnsaved(),false,'the session copy comes first');assert.equal(budgetLocal.get('areaNoteRescue').entries.medium.text,mediumText,'the earlier copy is never overwritten by a smaller one');
+budgetLocal.delete('recovery');budgetControls.failLocalGetKeys=new Set(['recovery']);
+assert.equal(budget.app.notes.protectUnsaved(),false,'an unreadable copy is not counted as empty');budgetControls.failLocalGetKeys=null;
+assert.equal(budget.app.notes.protectUnsaved(),true);
+
 // Startup folds an earlier version's journal rows and v1 localStorage payload
 // into the stored notes once, the newer revision winning, and removes them.
 const legacyEntry={key:'legacy',label:'Legacy',text:'legacy-unsaved',updatedAt:'2026-09-04T05:00:00.000Z',entityType:'areaNote',entityId:'legacy',schemaVersion:1,deviceId:'dev_legacy',createdAt:'2026-09-04T05:00:00.000Z',deleted:false,syncStatus:'pending'};
@@ -149,14 +161,14 @@ for(const [key,value] of [
   journalRow('outdated',{version:2,key:'outdated',label:'Outdated',text:'journaled older',updatedAt:'2026-09-04T05:05:00.000Z'},'2026-09-04T05:05:00.000Z'),
   journalRow('removed',{key:'removed',deleted:true,updatedAt:'2026-09-04T05:05:00.000Z'},'2026-09-04T05:05:00.000Z'),
   journalRow('later-deleted',{version:2,key:'later-deleted',label:'Later deleted',text:'edit before deletion',updatedAt:'2026-09-04T05:00:00.000Z'},'2026-09-04T05:00:00.000Z'),
-  ['areaNoteDeletion.v1:later-deleted',{key:'areaNoteDeletion.v1:later-deleted',version:1,value:{format:'study-director.area-note-deletion',version:1,key:'later-deleted',deletedAt:'2026-09-04T05:01:00.000Z'},updatedAt:'2026-09-04T05:01:00.000Z'}]
+  ['areaNoteDeletion:later-deleted',{key:'areaNoteDeletion:later-deleted',version:1,value:{format:'study-director.area-note-deletion',version:1,key:'later-deleted',deletedAt:'2026-09-04T05:01:00.000Z'},updatedAt:'2026-09-04T05:01:00.000Z'}]
 ])legacyStores.meta.set(key,value);
 const legacy=createHarness(legacyLocal,legacyStores);
 const folded=await legacy.app.compatibility.migrateAreaNoteRecovery();assert.equal(folded.status,'migrated');
 assert.equal(legacyStores.area.get('legacy').text,'legacy-unsaved','the v1 localStorage payload is stored');
 assert.equal(legacyStores.area.get('journaled').text,'journaled newer','a newer journal entry is stored');
 assert.equal(legacyStores.area.get('outdated').text,'stored newer','a newer stored note is kept');
-assert.equal(legacyStores.area.has('removed'),false,'a newer journal deletion is applied');assert.ok(legacyStores.meta.has('areaNoteDeletion.v1:removed'),'the deletion is recorded');
+assert.equal(legacyStores.area.has('removed'),false,'a newer journal deletion is applied');assert.ok(legacyStores.meta.has('areaNoteDeletion:removed'),'the deletion is recorded');
 assert.equal(legacyStores.area.has('later-deleted'),false,'a note deleted after the journaled edit stays deleted');
 assert.equal(journalRows(legacyStores).length,0,'every journal row is removed');assert.equal(legacyLocal.has('pending'),false,'the v1 payload is removed');
 assert.equal((await legacy.app.compatibility.verifyAreaNoteRecovery()).ok,true);

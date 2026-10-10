@@ -14,7 +14,7 @@ globalThis.IntegrityContinuationModule=registry.require('integrity-continuation'
 {const app=fs.readFileSync('source/app.html','utf8');vm.runInThisContext(app.slice(app.indexOf('function normalizeRepositoryIntegrityTarget('),app.indexOf('async function libraryClearSnapshot(')),{filename:'repository-integrity-normalizer'});}
 const freeze=Object.freeze;
 
-const current={theme:'theme',presentation:'presentation',fontScale:'fontScale'};
+const current={theme:'theme',presentation:'presentation',fontScale:'fontScale',storageHealth:'storageHealth'};
 const obsolete={
   schedule:'oldSchedule',defaults:'oldDefaults',quote:'oldQuote',nudge:'oldNudge',reflectionDrafts:'oldReflections',reflectionLegacy:'oldReflection',
   deviceId:'oldDevice',liveDraft:'oldLiveDraft',activeSession:'oldActiveSession',storageCapability:'oldStorageCapability',diagnostics:'oldDiagnostics',
@@ -22,16 +22,19 @@ const obsolete={
 };
 const appMeta={
   personalPreferences:'preferences',dataMaintenance:'dataMaintenance',verifiedRecoveryBackups:'verifiedRecoveryBackups',attachmentIntegrityAudit:'attachmentIntegrityAudit',automaticDeviceBackup:'automaticDeviceBackup',repositoryIntegrityScrub:'repositoryIntegrityScrub',
-  reconciliationBase:'reconciliationBase.v2',reconciliationBaseNotePrefix:'reconciliationBaseNote.v1:',reconciliationBaseLegacy:'reconciliationBase.v1',restoreJournalPayload:'restoreJournalPayload.v1',
-  repositoryMaintenancePending:'repositoryMaintenancePending.v2',repositoryMaintenancePendingLegacy:'repositoryMaintenancePending.v1',
-  libraryClearJournalState:'libraryClearJournalState.v1',libraryClearJournalPayloadPrefix:'libraryClearJournalPayload.v1:',
+  reconciliationBase:'reconciliationBase',reconciliationBaseNotePrefix:'reconciliationBaseNote:',reconciliationBaseLegacy:'reconciliationBase.v1',restoreJournalPayload:'restoreJournalPayload',
+  repositoryMaintenancePending:'repositoryMaintenancePending',repositoryMaintenancePendingLegacy:'repositoryMaintenancePending.v1',
+  libraryClearJournalState:'libraryClearJournalState',libraryClearJournalPayloadPrefix:'libraryClearJournalPayload:',
   archiveClearJournalStateLegacy:'archiveClearJournalState.v1',archiveClearJournalPayloadPrefixLegacy:'archiveClearJournalPayload.v1:'
 };
+// Record names once carried a version; the first compatibility step moves them.
+const renamedAppMeta=Object.freeze([['reconciliationBase.v2','reconciliationBase'],['reconciliationBaseNote.v1:','reconciliationBaseNote:'],['restoreJournalPayload.v1','restoreJournalPayload'],['repositoryMaintenancePending.v2','repositoryMaintenancePending'],['libraryClearJournalState.v1','libraryClearJournalState'],['libraryClearJournalPayload.v1:','libraryClearJournalPayload:']].map(pair=>Object.freeze(pair)));
 const localRows=new Map([
   [obsolete.schedule,'07:00 | 60 | Legacy Plan'],[obsolete.defaults,JSON.stringify({studentName:'Asha',scheduleText:'08:00 | 45 | Legacy Default',practiceCueMode:'audio'})],
   [obsolete.quote,'Keep going'],[obsolete.nudge,JSON.stringify({enabled:true})],[current.theme,'dark'],[current.presentation,'glass'],[current.fontScale,'1.1'],
   [obsolete.reflectionDrafts,JSON.stringify({version:1,drafts:{'2026-09-19':{reflection:'Legacy reflection',revision:2,updatedAt:'2026-09-19T10:00:00.000Z'}}})],
-  [obsolete.deviceId,'dev_abcdefgh'],[obsolete.attachmentMaintenanceAttemptDay,'2026-09-18']
+  [obsolete.deviceId,'dev_abcdefgh'],[obsolete.attachmentMaintenanceAttemptDay,'2026-09-18'],
+  [current.storageHealth,JSON.stringify({lastLocalSaveAt:'2026-09-19T09:00:00.000Z',lastBackupAt:'2026-09-19T09:30:00.000Z'})]
 ]);
 let lastError=null;
 const local=freeze({
@@ -77,14 +80,23 @@ const metadataRows=new Map([
   ['backupProviderOperation:google-drive',{key:'backupProviderOperation:google-drive',version:1,value:{kind:'upload',backupFile:{name:'backup-00000000-0000-4000-8000-000000000000',size:10,hash:'a'.repeat(64)}},updatedAt:'2026-09-19T08:00:00.000Z'}]
 ]);
 let legacyFileCollections=0;
-const normalizeVerifiedRecovery=value=>freeze({version:1,file:value?.file?freeze({...value.file,baselineId:String(value.file.baselineId||''),backupFormatVersion:Number.isSafeInteger(value.file.backupFormatVersion)?value.file.backupFormatVersion:null}):null,providers:freeze(Object.fromEntries(Object.entries(value?.providers||{}).map(([id,row])=>[id,freeze({...row,baselineId:String(row.baselineId||''),backupFormatVersion:Number.isSafeInteger(row.backupFormatVersion)?row.backupFormatVersion:null})])))});
+const normalizeVerifiedRecovery=value=>freeze({version:2,download:value?.download?.startedAt?freeze({startedAt:value.download.startedAt}):null,file:value?.file?freeze({...value.file,baselineId:String(value.file.baselineId||''),backupFormatVersion:Number.isSafeInteger(value.file.backupFormatVersion)?value.file.backupFormatVersion:null}):null,providers:freeze(Object.fromEntries(Object.entries(value?.providers||{}).map(([id,row])=>[id,freeze({...row,baselineId:String(row.baselineId||''),backupFormatVersion:Number.isSafeInteger(row.backupFormatVersion)?row.backupFormatVersion:null})])))});
 const normalizeAttachmentIntegrity=value=>freeze({version:1,checkedAt:String(value?.checkedAt||''),issues:freeze((value?.issues||[]).map(row=>freeze({id:String(row.id||''),kind:String(row.kind||''),expectedSize:Number.isSafeInteger(row.expectedSize)?row.expectedSize:null,actualSize:Number.isSafeInteger(row.actualSize)?row.actualSize:null})))});
 const currentMaintenance=value=>!!(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('|')==='completedAt|status|version'&&(value.version===6&&(value.status==='completed'&&Number.isFinite(Date.parse(String(value.completedAt||'')))||value.status==='pending'&&(value.completedAt===''||Number.isFinite(Date.parse(String(value.completedAt||'')))))));
 const metadata=freeze({
   readRow:async key=>metadataRows.get(String(key))||null,listRows:async()=>[...metadataRows.values()],isCurrentDataMaintenance:currentMaintenance,
   writeValue:async(key,value,updatedAt)=>{metadataRows.set(String(key),{key:String(key),version:1,value,updatedAt:String(updatedAt||'2026-09-20T00:00:00.000Z')});return true;},
   removeRow:async key=>{metadataRows.delete(String(key));return true;},releaseBackupFile:async()=>{legacyFileCollections++;return true;},normalizeVerifiedRecovery,normalizeAttachmentIntegrity,
-  normalizeRepositoryIntegrity:normalizeRepositoryIntegrityState,normalizeReconciliationNotes:ReconciliationCodec.normalizeUpdates,normalizeReconciliationHeader:ReconciliationCodec.normalizeHeader,reconciliationKeyFingerprint:ReconciliationCodec.keyFingerprint
+  normalizeRepositoryIntegrity:normalizeRepositoryIntegrityState,normalizeRepositoryIntegrityTarget,
+  // One transaction in the app: a differing copy under the new name stops the whole move.
+  renameRows:async pairs=>{
+    const moves=[];
+    for(const [key,row] of metadataRows){const pair=pairs.find(([from])=>from.endsWith(':')?key.startsWith(from):key===from);if(!pair)continue;const target=pair[1]+key.slice(pair[0].length),existing=metadataRows.get(target);if(existing&&JSON.stringify(existing.value)!==JSON.stringify(row.value))throw new Error(`Record ${key} and its renamed copy ${target} differ. Nothing was renamed.`);moves.push([key,target,row,existing]);}
+    for(const [key,target,row,existing] of moves){if(!existing)metadataRows.set(target,{...row,key:target});metadataRows.delete(key);}
+    return moves.length;
+  },
+  retireStorageHealthField:name=>{const health=JSON.parse(localRows.get(current.storageHealth)||'{}');delete health[name];localRows.set(current.storageHealth,JSON.stringify(health));return true;},
+  normalizeReconciliationNotes:ReconciliationCodec.normalizeUpdates,normalizeReconciliationHeader:ReconciliationCodec.normalizeHeader,reconciliationKeyFingerprint:ReconciliationCodec.keyFingerprint
 });
 let topologyRetired=false;
 const ok=async()=>freeze({ok:true});
@@ -93,12 +105,12 @@ const canonicalStoreProof=async()=>{
   const row=metadataRows.get(appMeta.repositoryMaintenancePending);
   const value=row?.value;
   const currentValid=!!(value&&value.format==='study-director.repository-maintenance-pending'&&value.version===4&&Array.isArray(value.entries));
-  const issues=freeze([...(legacyPresent?freeze(['unclassified:repositoryMaintenancePending.v1']):freeze([])),...(!currentValid?freeze(['invalid:repositoryMaintenancePending.v2']):freeze([]))]);
+  const issues=freeze([...(legacyPresent?freeze(['unclassified:repositoryMaintenancePending.v1']):freeze([])),...(!currentValid?freeze(['invalid:repositoryMaintenancePending']):freeze([]))]);
   return freeze({ok:issues.length===0,issues});
 };
 assert.equal((await canonicalStoreProof()).ok,false,'the historical maintenance fixture must reproduce the canonicalStores failure before compatibility migration');
 const facade=Host.createFacade(freeze({
-  baselineId:'R12_REFINEMENT',facadeFactory:Compatibility.createFacade,keys:freeze({storage:freeze(current),obsolete:freeze(obsolete),appMeta:freeze(appMeta)}),
+  baselineId:'R12_REFINEMENT',facadeFactory:Compatibility.createFacade,keys:freeze({storage:freeze(current),obsolete:freeze(obsolete),appMeta:freeze(appMeta),renamedAppMeta}),
   local,ownership,plan,preferences,identity:freeze({getId:()=>local.getText('installationId',''),installationKey:'installationId',legacyKey:obsolete.deviceId}),
   metadata,
   live:freeze({migrateActiveSession:async()=>freeze({status:'not-needed'}),migrateAreaNotes:async()=>freeze({status:'not-needed'}),migrateAreaNoteRecovery:async()=>freeze({status:'not-needed'}),migrateDeletionState:async()=>freeze({status:'not-needed'}),migrateDailyRecords:async()=>freeze({status:'not-needed'}),migrateInsightsRevisionEnvelope:async()=>freeze({status:'not-needed'}),cleanupLegacyAttachments:async()=>freeze({status:'not-needed'}),cleanupObsoleteMetadata:async()=>freeze({status:'not-needed'})}),
@@ -127,9 +139,14 @@ assert.equal(localRows.has(obsolete.deviceId),false);
 assert.equal(localRows.has(obsolete.attachmentMaintenanceAttemptDay),false,'every obsolete browser-storage key is retired');
 let installationProof=await facade.verifyCanonicalInstallation();assert.equal(installationProof.canonical,true);assert.equal(installationProof.compatibilityRetired,true,'after one migration no historical host metadata remains');
 assert.equal(metadataRows.has('dataMaintenance'),false);assert.equal(metadataRows.has('backupProviderOperation:google-drive'),false);assert.equal(legacyFileCollections,1);
-const scrub=metadataRows.get('repositoryIntegrityScrub').value;
-assert.equal(scrub.version,6,'historical backup verification state is converted to the current record');assert.equal(Object.hasOwn(scrub.device,'repositoryHandle'),false,'the retired directory handle is dropped');
-assert.equal(scrub.device.repositoryScope,'device-scope');assert.equal(scrub.device.cursor,'obj_'+'b'.repeat(32));assert.deepEqual([...scrub.device.quarantinedObjectIds],['obj_'+'c'.repeat(32)],'quarantine carries over');assert.equal(scrub.drive.repositoryScope,'drive-scope');
+const scrub=metadataRows.get('repositoryIntegrityScrub').value,scrubDevice=scrub.locations['device-folder'],scrubDrive=scrub.locations['google-drive'];
+assert.equal(scrub.version,7,'historical backup verification state is converted to the current record, keyed by location id');assert.deepEqual(Object.keys(scrub.locations).sort(),['device-folder','google-drive']);assert.equal(Object.hasOwn(scrubDevice,'repositoryHandle'),false,'the retired directory handle is dropped');
+assert.equal(scrubDevice.repositoryScope,'device-scope');assert.equal(scrubDevice.cursor,'obj_'+'b'.repeat(32));assert.deepEqual([...scrubDevice.quarantinedObjectIds],['obj_'+'c'.repeat(32)],'quarantine carries over');assert.equal(scrubDrive.repositoryScope,'drive-scope');
+assert.equal(report.results.identities.status,'migrated','old record names move first');
+assert.equal([...metadataRows.keys()].some(key=>/\.v2$|\.v1:/u.test(key)&&key!=='reconciliationBase.v1'),false,'no record keeps an old name');
+assert.equal(metadataRows.get('verifiedRecoveryBackups').value.download.startedAt,'2026-09-19T09:30:00.000Z','the last backup time from storage health carries over into the one backup record');
+assert.equal(Object.hasOwn(JSON.parse(localRows.get(current.storageHealth)),'lastBackupAt'),false,'storage health no longer keeps its own backup time');
+assert.equal(JSON.parse(localRows.get(current.storageHealth)).lastLocalSaveAt,'2026-09-19T09:00:00.000Z','the rest of storage health is untouched');
 assert.equal(metadataRows.has('repositoryMaintenancePending.v1'),false,'repository-maintenance v1 identity must retire only after verified current replacement');
 assert.equal(metadataRows.has(appMeta.archiveClearJournalStateLegacy),false,'legacy Archive-clear journal state must retire after verified Library-clear migration');
 assert.equal([...metadataRows.keys()].some(key=>String(key).startsWith(appMeta.archiveClearJournalPayloadPrefixLegacy)),false,'legacy Archive-clear journal chunks must retire after verified Library-clear migration');
@@ -139,21 +156,21 @@ assert.match(String(migratedLibraryClearState?.id||''),/^libraryclear_/u,'migrat
 const migratedLibraryChunk=[...metadataRows.entries()].find(([key])=>String(key).startsWith(appMeta.libraryClearJournalPayloadPrefix));
 assert.ok(migratedLibraryChunk,'Library-clear migration must create canonical payload chunks');
 assert.equal(JSON.parse(new TextDecoder().decode(migratedLibraryChunk[1].value.bytes)).format,'study-director.library-clear-rollback','migrated Library-clear payload must use the canonical rollback format');
-assert.deepEqual(metadataRows.get('repositoryMaintenancePending.v2').value,{
+assert.deepEqual(metadataRows.get('repositoryMaintenancePending').value,{
   format:'study-director.repository-maintenance-pending',version:4,entries:[
     {providerId:'device-folder',requestedAt:'2026-09-19T08:02:00.000Z',nextEligibleAt:'2026-09-19T08:02:00.000Z',reason:'legacy',repositoryScope:'',requestId:''},
     {providerId:'google-drive',requestedAt:'2026-09-19T09:00:00.000Z',nextEligibleAt:'2026-09-19T09:30:00.000Z',reason:'catch-up',repositoryScope:'drive-scope',requestId:''}
   ]
 },'historical maintenance intents in either identity convert to the current version; a current-identity entry wins for its provider');
 assert.equal(metadataRows.has('reconciliationBase.v1'),false,'the single-row note merge base retires after verified conversion');
-const convertedBase=metadataRows.get('reconciliationBase.v2').value;
+const convertedBase=metadataRows.get('reconciliationBase').value;
 assert.equal(convertedBase.version,2);assert.equal(convertedBase.checkpointId,'cp_'+'1'.repeat(32));assert.equal(convertedBase.noteCount,2);assert.equal(convertedBase.noteKeyFingerprint,await ReconciliationCodec.keyFingerprint(['Ethics','Polity']));
-assert.equal(metadataRows.get('reconciliationBaseNote.v1:Ethics').value.text,'ethics base');assert.equal(metadataRows.get('reconciliationBaseNote.v1:Polity').value.text,'polity base');
-assert.equal(metadataRows.has('reconciliationBaseNote.v1:Stale'),false,'note rows outside the converted base are removed');
+assert.equal(metadataRows.get('reconciliationBaseNote:Ethics').value.text,'ethics base');assert.equal(metadataRows.get('reconciliationBaseNote:Polity').value.text,'polity base');
+assert.equal(metadataRows.has('reconciliationBaseNote.v1:Stale')||metadataRows.has('reconciliationBaseNote:Stale'),false,'note rows outside the converted base are renamed, then removed');
 
 metadataRows.set('dataMaintenance',{key:'dataMaintenance',version:1,value:{version:5,status:'completed',completedAt:'2026-09-20T01:00:00.000Z',canonicalRecords:10},updatedAt:'2026-09-20T01:00:00.000Z'});
 const secondFacade=Host.createFacade(freeze({
-  baselineId:'R12_REFINEMENT',facadeFactory:Compatibility.createFacade,keys:freeze({storage:freeze(current),obsolete:freeze(obsolete),appMeta:freeze(appMeta)}),
+  baselineId:'R12_REFINEMENT',facadeFactory:Compatibility.createFacade,keys:freeze({storage:freeze(current),obsolete:freeze(obsolete),appMeta:freeze(appMeta),renamedAppMeta}),
   local,ownership,plan,preferences,identity:freeze({getId:()=>local.getText('installationId',''),installationKey:'installationId',legacyKey:obsolete.deviceId}),
   metadata,
   live:freeze({migrateActiveSession:async()=>freeze({status:'not-needed'}),migrateAreaNotes:async()=>freeze({status:'not-needed'}),migrateAreaNoteRecovery:async()=>freeze({status:'not-needed'}),migrateDeletionState:async()=>freeze({status:'not-needed'}),migrateDailyRecords:async()=>freeze({status:'not-needed'}),migrateInsightsRevisionEnvelope:async()=>freeze({status:'not-needed'}),cleanupLegacyAttachments:async()=>freeze({status:'not-needed'}),cleanupObsoleteMetadata:async()=>freeze({status:'not-needed'})}),
@@ -166,12 +183,12 @@ await secondFacade.migrateLive();
 assert.equal(metadataRows.has('dataMaintenance'),false,'stale same-version maintenance payloads are rebuildable and must not block startup');
 assert.equal(metadataRows.get('verifiedRecoveryBackups').value.file.baselineId,'');assert.equal(metadataRows.get('verifiedRecoveryBackups').value.file.backupFormatVersion,null);
 assert.equal(Object.hasOwn(metadataRows.get('attachmentIntegrityAudit').value.issues[0],'name'),false);
-assert.equal(metadataRows.get('automaticDeviceBackup').value.version,3);assert.equal(metadataRows.get('automaticDeviceBackup').value.directoryHandle,directoryHandle);assert.equal(metadataRows.get('automaticDeviceBackup').value.lastFilename,'');
+assert.deepEqual(Object.keys(metadataRows.get('automaticDeviceBackup').value).sort(),['baseline','directoryHandle','format','version'],'the two unused Device Folder fields are dropped');assert.equal(metadataRows.get('automaticDeviceBackup').value.version,4);assert.equal(metadataRows.get('automaticDeviceBackup').value.directoryHandle,directoryHandle);assert.equal(metadataRows.get('automaticDeviceBackup').value.baseline,'2026-09-19T07:59:00.000Z','sourceRevision is now named baseline');
 installationProof=await facade.verifyCanonicalInstallation();assert.equal(installationProof.compatibilityRetired,true);
 
 metadataRows.set(appMeta.repositoryMaintenancePendingLegacy,{key:appMeta.repositoryMaintenancePendingLegacy,version:1,value:{format:'study-director.repository-maintenance-pending',version:1,entries:[{providerId:'google-drive',requestedAt:'2026-09-20T03:00:00.000Z',unexpected:true}]},updatedAt:'2026-09-20T03:00:00.000Z'});
 const malformedInput=freeze({
-  baselineId:'R12_REFINEMENT',facadeFactory:Compatibility.createFacade,keys:freeze({storage:freeze(current),obsolete:freeze(obsolete),appMeta:freeze(appMeta)}),
+  baselineId:'R12_REFINEMENT',facadeFactory:Compatibility.createFacade,keys:freeze({storage:freeze(current),obsolete:freeze(obsolete),appMeta:freeze(appMeta),renamedAppMeta}),
   local,ownership,plan,preferences,identity:freeze({getId:()=>local.getText('installationId',''),installationKey:'installationId',legacyKey:obsolete.deviceId}),metadata,
   live:freeze({migrateActiveSession:async()=>freeze({status:'not-needed'}),migrateAreaNotes:async()=>freeze({status:'not-needed'}),migrateAreaNoteRecovery:async()=>freeze({status:'not-needed'}),migrateDeletionState:async()=>freeze({status:'not-needed'}),migrateDailyRecords:async()=>freeze({status:'not-needed'}),migrateInsightsRevisionEnvelope:async()=>freeze({status:'not-needed'}),cleanupLegacyAttachments:async()=>freeze({status:'not-needed'}),cleanupObsoleteMetadata:async()=>freeze({status:'not-needed'})}),
   topology:freeze({retire:async()=>freeze({status:'retired'})}),verification:freeze({activeSession:ok,areaNotes:ok,areaNoteRecovery:ok,deletionState:ok,dailyRecords:ok,insightsRevisionEnvelope:ok,canonicalStores:canonicalStoreProof,legacyAttachments:ok,obsoleteMetadata:ok,topology:ok,freshBackup:ok}),
@@ -183,13 +200,13 @@ await assert.rejects(()=>malformedFacade.migrateLive(),/unknown shape and was pr
 assert.equal(metadataRows.has(appMeta.repositoryMaintenancePendingLegacy),true,'failed compatibility conversion must preserve its historical source row');
 metadataRows.delete(appMeta.repositoryMaintenancePendingLegacy);
 const scanTarget=target=>({completedAt:target.completedAt,cycleStartedAt:target.cycleStartedAt,cursor:target.cursor,failedAt:target.failedAt,quarantinedObjectIds:target.quarantinedObjectIds});
-metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',version:1,value:{version:2,device:scanTarget(scrub.device),drive:scanTarget(scrub.drive)},updatedAt:'2026-09-20T03:00:00.000Z'});
+metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',version:1,value:{version:2,device:scanTarget(scrubDevice),drive:scanTarget(scrubDrive)},updatedAt:'2026-09-20T03:00:00.000Z'});
 const scrubFacade=Host.createFacade(malformedInput);
 assert.equal((await scrubFacade.verifyCanonicalInstallation()).compatibilityRetired,false,'historical verification state keeps the compatibility facade in place');
 await scrubFacade.migrateLive();
-assert.equal(metadataRows.get('repositoryIntegrityScrub').value.version,6);assert.equal(metadataRows.get('repositoryIntegrityScrub').value.device.cursor,'obj_'+'b'.repeat(32),'version 2 progress carries over');
+assert.equal(metadataRows.get('repositoryIntegrityScrub').value.version,7);assert.equal(metadataRows.get('repositoryIntegrityScrub').value.locations['device-folder'].cursor,'obj_'+'b'.repeat(32),'version 2 progress carries over');
 assert.equal((await scrubFacade.verifyCanonicalInstallation()).compatibilityRetired,true);
-const malformedScrub={version:4,device:{...scrub.device,unexpected:true},drive:scrub.drive};
+const malformedScrub={version:4,device:{...scrubDevice,unexpected:true},drive:scrubDrive};
 metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',version:1,value:malformedScrub,updatedAt:'2026-09-20T03:00:00.000Z'});
 await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/backup verification state has an unknown shape and was preserved without modification/u);
 assert.equal(metadataRows.get('repositoryIntegrityScrub').value,malformedScrub,'an unknown historical shape is preserved untouched');
@@ -197,7 +214,7 @@ metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',vers
 const olderBase={format:'study-director.reconciliation-base',version:1,checkpointId:'cp_'+'2'.repeat(32),establishedAt:'2026-09-18T00:00:00.000Z',notes:{Ethics:'older'}};
 metadataRows.set('reconciliationBase.v1',{key:'reconciliationBase.v1',version:1,value:olderBase,updatedAt:'2026-09-18T00:00:00.000Z'});
 await Host.createFacade(malformedInput).migrateLive();
-assert.equal(metadataRows.has('reconciliationBase.v1'),false);assert.equal(metadataRows.get('reconciliationBase.v2').value.checkpointId,'cp_'+'1'.repeat(32),'an older single-row base never replaces a newer current base');assert.equal(metadataRows.get('reconciliationBaseNote.v1:Ethics').value.text,'ethics base');
+assert.equal(metadataRows.has('reconciliationBase.v1'),false);assert.equal(metadataRows.get('reconciliationBase').value.checkpointId,'cp_'+'1'.repeat(32),'an older single-row base never replaces a newer current base');assert.equal(metadataRows.get('reconciliationBaseNote:Ethics').value.text,'ethics base');
 const malformedBase={...olderBase,establishedAt:'2026-09-21T00:00:00.000Z',notes:['not a map']};
 metadataRows.set('reconciliationBase.v1',{key:'reconciliationBase.v1',version:1,value:malformedBase,updatedAt:'2026-09-21T00:00:00.000Z'});
 await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/note reconciliation base has an unknown shape and was preserved without modification/u);
@@ -207,19 +224,35 @@ const journalBlob=new Blob(['safety copy']),oldJournal={format:'study-director.r
 metadataRows.set('restoreJournalPayload.v1',{key:'restoreJournalPayload.v1',version:1,value:oldJournal,updatedAt:'2026-09-12T00:00:00.000Z'});
 assert.equal((await Host.createFacade(malformedInput).verifyCanonicalInstallation()).compatibilityRetired,false);
 await Host.createFacade(malformedInput).migrateLive();
-const currentJournal=metadataRows.get('restoreJournalPayload.v1').value;
+assert.equal(metadataRows.has('restoreJournalPayload.v1'),false);const currentJournal=metadataRows.get('restoreJournalPayload').value;
 assert.equal(currentJournal.version,4);assert.equal(currentJournal.blob,journalBlob);assert.deepEqual(currentJournal.savedDayDeletions,oldJournal.savedDayDeletions);assert.deepEqual([...currentJournal.areaNoteDeletions],[]);assert.deepEqual([...currentJournal.attachmentDeletions],[]);
 const unknownJournal={...oldJournal,version:1,unexpected:true};
-metadataRows.set('restoreJournalPayload.v1',{key:'restoreJournalPayload.v1',version:1,value:unknownJournal,updatedAt:'2026-09-12T00:00:00.000Z'});
+metadataRows.set('restoreJournalPayload',{key:'restoreJournalPayload',version:1,value:unknownJournal,updatedAt:'2026-09-12T00:00:00.000Z'});
 await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/interrupted restore from an older version has an unknown shape/u);
-assert.equal(metadataRows.get('restoreJournalPayload.v1').value,unknownJournal);metadataRows.delete('restoreJournalPayload.v1');
+assert.equal(metadataRows.get('restoreJournalPayload').value,unknownJournal);metadataRows.delete('restoreJournalPayload');
+
+// Version 6 kept fixed device/drive slots; it converts to the location-keyed record.
+metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',version:1,value:{version:6,device:scrubDevice,drive:scrubDrive},updatedAt:'2026-09-20T03:00:00.000Z'});
+await Host.createFacade(malformedInput).migrateLive();
+assert.deepEqual(metadataRows.get('repositoryIntegrityScrub').value,scrub,'version 6 converts to the same location-keyed record');
+// A record under its old name moves once; a differing copy under the new name stops the move and keeps both.
+const pendingRow=metadataRows.get('repositoryMaintenancePending');
+metadataRows.set('repositoryMaintenancePending.v2',{...pendingRow,key:'repositoryMaintenancePending.v2'});
+await Host.createFacade(malformedInput).migrateLive();
+assert.equal(metadataRows.has('repositoryMaintenancePending.v2'),false,'an identical copy under the old name is removed');assert.deepEqual(metadataRows.get('repositoryMaintenancePending').value,pendingRow.value);
+const differing={...pendingRow,key:'repositoryMaintenancePending.v2',value:{...pendingRow.value,entries:[]}};
+metadataRows.set('repositoryMaintenancePending.v2',differing);
+assert.equal((await Host.createFacade(malformedInput).verifyCanonicalInstallation()).compatibilityRetired,false,'a record under an old name keeps the compatibility facade in place');
+await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/differ\. Nothing was renamed/u);
+assert.equal(metadataRows.get('repositoryMaintenancePending.v2'),differing);assert.deepEqual(metadataRows.get('repositoryMaintenancePending').value,pendingRow.value,'both copies are kept for the person to resolve');
+metadataRows.delete('repositoryMaintenancePending.v2');
 
 const validators=HostMetadata.createAppMetaValidators(freeze({
   keys:freeze({verifiedRecoveryBackups:'a',backupProtection:'b',attachmentIntegrityAudit:'c',automaticDeviceBackup:'d',repositoryIntegrityScrub:'e',managedProviderBackupPending:'f',repositoryMaintenancePending:'h',reconciliationBase:'g2',reconciliationBaseNotePrefix:'g3'}),
   same:(a,b)=>a===b,normalizers:freeze({verifiedRecovery:value=>value,attachmentIntegrity:value=>value,repositoryIntegrity:value=>value,reconciliationBase:value=>value,reconciliationBaseNote:value=>value})
 }));
 const migratedValidators=HostMetadata.createAppMetaValidators(freeze({
-  keys:freeze({verifiedRecoveryBackups:'verifiedRecoveryBackups',backupProtection:'backupProtection',attachmentIntegrityAudit:'attachmentIntegrityAudit',automaticDeviceBackup:'automaticDeviceBackup',repositoryIntegrityScrub:'repositoryIntegrityScrub',managedProviderBackupPending:'managedProviderBackupPending.v1',repositoryMaintenancePending:'repositoryMaintenancePending.v2',reconciliationBase:'reconciliationBase.v2',reconciliationBaseNotePrefix:'reconciliationBaseNote.v1:'}),
+  keys:freeze({verifiedRecoveryBackups:'verifiedRecoveryBackups',backupProtection:'backupProtection',attachmentIntegrityAudit:'attachmentIntegrityAudit',automaticDeviceBackup:'automaticDeviceBackup',repositoryIntegrityScrub:'repositoryIntegrityScrub',managedProviderBackupPending:'managedProviderBackupPending',repositoryMaintenancePending:'repositoryMaintenancePending',reconciliationBase:'reconciliationBase',reconciliationBaseNotePrefix:'reconciliationBaseNote:'}),
   same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),normalizers:freeze({verifiedRecovery:normalizeVerifiedRecovery,attachmentIntegrity:normalizeAttachmentIntegrity,repositoryIntegrity:normalizeRepositoryIntegrityState,reconciliationBase:value=>value,reconciliationBaseNote:value=>value})
 }));
 assert.equal(migratedValidators.verifiedRecoveryBackups(metadataRows.get('verifiedRecoveryBackups').value,freeze({key:'verifiedRecoveryBackups'})),true,'migrated L7 recovery metadata must pass the ordinary current validator without compatibility interpretation');

@@ -2,7 +2,7 @@
 
 Status of the work on this branch (`refactor/background-coordination`, draft PR #1): what is done, what is left, the wider programme and the agreed direction, and a record of the work so far.
 
-**Current state (2026-10-10):** the backup engine design is complete: both locations run on the shared engine and the host draws both rows from engine status. Older stored data is now read only by the compatibility host, once (1.4). All 138 fast tests pass, and the backup browser tests pass. Next: the backup audit (section 2), then the notes brainstorm (3.0).
+**Current state (2026-10-10):** the backup engine design is complete: both locations run on the shared engine and the host draws both rows from engine status. Older stored data is read only by the compatibility host, once (1.4). The audit's schema step is done (1.5): stable record names, one last-backup record, a location-keyed verification record, Device Folder settings v4, one emergency-copy budget and a download-free Drive scrub. All 138 fast tests and the browser smoke suite pass. Next: the host draws Drive's settings dialog and progress overlay (#63), then #45/#46 and the compatibility-layer isolation check (#64).
 
 ---
 
@@ -112,11 +112,25 @@ Faster local loop: run each fast test in its own process with the hermetic flags
 - **Confirmed clean:** Daily Records, summaries, Area Notes, Active Session, deletion history, preferences and plans, attachments (old metadata is rejected in ordinary reads and cleaned only by the compatibility path), browser-storage recovery copies, the IndexedDB schema bridges and the service-worker update bridge.
 - **Old backup-repository formats (your decision: keep for now).** Device Folder and Drive checkpoints written by builds before SDVB75F10 (repository manifest versions 1–4, history entries without summaries, older Drive maintenance markers) stay readable. They are now registered for retirement (`backup-repository-v1-v4`: retire once every repository holds only version-5 checkpoints) and tested: `repository-restore` unpacks a current checkpoint into the older one-object-per-record layout and restores it as versions 1–4.
 
+### 1.5 Schema step after the audit (2026-10-10)
+
+Your decisions on the audit (`docs/AUDIT-DATA-AND-BACKUP.md`) and what was done:
+- **B1, automatic backup on phones and Drive.** Accepted as a limit of a browser-only app. The 7-day reminder is the safety net: it shows at every launch when no backup of any kind (Device Folder, Drive or a downloaded file) has covered the changes for 7 days. Before this step a Drive backup did not count toward it; it does now (T2). No serverless way to renew Drive's one-hour sign-in exists: the browser-only Google sign-in has no refresh token.
+- **T7, compatibility layer.** Kept, consolidated and shallowly wired so it can be deleted in one step later (task #64).
+- **T1, record names.** appMeta names lost their version suffix; the version lives only in the value. `RENAMED_APP_META_KEYS` lists the old names, and the compatibility step moves them first, in one strict transaction (registry entry `appmeta-stable-names`). Browser-storage keys keep their names, because the theme, storage health and ownership leases are read before the compatibility step runs.
+- **T2, last backup.** One record, `verifiedRecoveryBackups` v2, with the last started download. `storageHealth.lastBackupAt` is carried over once and retired; the Device Folder settings record is v4 (`directoryHandle`, `baseline`) without the two dead fields (T5).
+- **T3, integrity record.** Version 7, keyed by location id. `INTEGRITY_TARGETS` is gone.
+- **T4, emergency copies.** One shared budget (`localRescueBytes`, 4 MiB): session copy, then unsaved notes, then delete recovery, then fallback Saved Days.
+- **B4, Drive scrub.** Trusts Google's stored SHA-256 from the listing; nothing is downloaded.
+- **B9.** The Device Folder test world publishes version-5 manifests.
+- **T6.** The `dailyRecordMigration` marker is named in the daily-record retirement entry.
+- **Encryption (B3).** Left as is. Direction for later: full end-to-end encryption at rest and in transit, with a sign-in first experience (unlock, then use the app normally).
+
 ---
 
 ## 2. Remaining from the rest of this work
 
-- **Audit done (2026-10-10):** `docs/AUDIT-DATA-AND-BACKUP.md` covers the data topology and the whole backup system, with findings ranked and a suggested order. Nothing was implemented; next is discussing it with the user.
+- **Audit done (2026-10-10):** `docs/AUDIT-DATA-AND-BACKUP.md` covers the data topology and the whole backup system, with findings ranked and a suggested order. Your decisions and the schema step are in 1.5. Still open: B5 (#63), B7 retention and B8 restore names (to propose), #45/#46 and the compatibility-layer isolation check (#64).
 - **#45 Drive/Device performance and reliability review** (open). Candidates:
   - bounded writes in `device-folder-storage`;
   - plain-text history sidecars so Device Folder history shows summaries while encryption is locked;

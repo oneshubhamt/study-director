@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {createHarness} from '../../helpers/repository-harness.mjs';
 
 const obsoleteKey='reflectionDraftMigration.v1';
-const retainedKey='planDraft.v1';
+const retainedKey='planDraft';
 const recentAt=new Date().toISOString(),oldAt=new Date(Date.now()-2*24*60*60*1000).toISOString();
 const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map([
   [obsoleteKey,{key:obsoleteKey,version:1,value:{complete:true},updatedAt:recentAt}],

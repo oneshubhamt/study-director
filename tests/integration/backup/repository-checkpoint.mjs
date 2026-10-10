@@ -144,6 +144,16 @@ while(!scrubComplete){
 const expectedScrubbed=firstManifest.objects.filter(entry=>entry.kind!=='activeSession');
 assert.equal(scrubChecked,expectedScrubbed.length,'integrity scrub must verify each stable repository object exactly once per cycle');
 assert.equal(scrubReleased.length,scrubReadKinds.length,'every repository object lease opened for integrity hashing must be released');
+// A location that reports each stored object's checksum (Drive's SHA-256) is
+// checked against it: nothing is downloaded, and a mismatch is corruption.
+const digestReads=[],digestRead=entry=>{digestReads.push(entry.objectId);return scrubObjectFiles.get(entry.objectId);};
+const digestCycle=await runtime.repository.scrub([firstManifest],digestRead,{maxObjects:1,maxBytes:1,storedDigest:entry=>entry.storedChecksum});
+assert.equal(digestReads.length,0,'reported checksums need no download');assert.equal(digestCycle.complete,true,'reported checksums cost no budget, so one pass covers the repository');assert.equal(digestCycle.checked,expectedScrubbed.length);
+const tamperedId=expectedScrubbed[0].objectId;let tampered=null;
+try{await runtime.repository.scrub([firstManifest],digestRead,{storedDigest:entry=>entry.objectId===tamperedId?'f'.repeat(64):entry.storedChecksum});}catch(error){tampered=error;}
+assert.equal(tampered?.code,'REPOSITORY_INTEGRITY_CORRUPT');assert.equal(tampered.repositoryObjectId,tamperedId);assert.equal(digestReads.length,0);
+const mixed=await runtime.repository.scrub([firstManifest],digestRead,{maxObjects:32,storedDigest:entry=>entry.objectId===tamperedId?'':entry.storedChecksum});
+assert.equal(mixed.complete,true);assert.deepEqual(digestReads,[tamperedId],'an object without a reported checksum is read and hashed');
 
 // Verified progress must survive a stop between objects, while a changed scan
 // inventory must not reuse a cursor that could skip newly inserted objects.

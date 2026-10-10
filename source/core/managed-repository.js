@@ -714,7 +714,7 @@ function repositoryScrubObjectIds(value){
   for(const raw of rows){const id=String(raw||'');if(!/^obj_[a-f0-9]{32}$/u.test(id)||seen.has(id))continue;seen.add(id);out.push(id);}
   return freeze(out);
 }
-async function scrubRepositoryIntegrity(manifests,readObjectValue,{cursor='',recheckCursor='',scanId='',partial=null,recheck=false,verifyIncremental=null,readRange=null,maxObjects=4,maxBytes=256*1024*1024,signal=null,skipObjectIds=null,onProgress=null}={}){
+async function scrubRepositoryIntegrity(manifests,readObjectValue,{cursor='',recheckCursor='',scanId='',partial=null,recheck=false,verifyIncremental=null,readRange=null,maxObjects=4,maxBytes=256*1024*1024,signal=null,skipObjectIds=null,onProgress=null,storedDigest=null}={}){
   const history=repositoryHistory(manifests),readObject=repositoryReadPort(readObjectValue),firstByObject=new Map(),skipped=new Set(repositoryScrubObjectIds(skipObjectIds)),quarantinedPresent=new Set();
   for(const manifest of history)for(const entry of manifest.objects||[]){
     if(REPOSITORY_SCRUB_SKIPPED_KINDS.has(entry.kind)||firstByObject.has(entry.objectId))continue;
@@ -739,11 +739,15 @@ async function scrubRepositoryIntegrity(manifests,readObjectValue,{cursor='',rec
   const progress=()=>freeze({complete:false,cursor:lastCursor,recheckCursor:lastRecheckCursor,scanId:currentScanId,partial:checkpoint,checked,checkedBytes,attempted,total:rows.length,quarantined:freeze([...quarantinedPresent]),...(recheck?{corruption}:{} )});
   try{for(;index<rows.length;index+=1){
     throwIfImportAborted(signal);
-    const {manifest,entry}=rows[index],projected=attemptedBytes+Number(entry.storedBytes||0);
-    if(attempted>0&&(attempted>=objectLimit||projected>byteLimit))break;
+    // A location that keeps its own checksum of each stored object (Drive)
+    // is checked against it without downloading; it costs no budget.
+    const {manifest,entry}=rows[index],reported=typeof storedDigest==='function'?String(storedDigest(entry)||'').toLowerCase():'',projected=attemptedBytes+(reported?0:Number(entry.storedBytes||0));
+    if(!reported&&attempted>0&&(attempted>=objectLimit||projected>byteLimit))break;
     let healthy=true;
     try{
-      if(typeof verifyIncremental==='function'&&typeof readRange==='function'){
+      if(reported){
+        if(reported!==String(entry.storedChecksum||'').toLowerCase())throw repositoryCorruption(`Repository object ${entry.objectId} no longer matches its stored checksum.`);
+      }else if(typeof verifyIncremental==='function'&&typeof readRange==='function'){
         const verified=await verifyIncremental({entry,manifest,readRange,checkpoint,signal,onCheckpoint:async value=>{checkpoint=value;if(typeof onProgress==='function')await onProgress(progress());}});
         if(!verified.complete)break;
         if(entry.kind!=='attachment')await readRepositoryStructuredObject(manifest,entry,readObject,{interactive:false,signal,opened:verified.opened});
@@ -767,10 +771,10 @@ async function scrubRepositoryIntegrity(manifests,readObjectValue,{cursor='',rec
         error.repositoryObjectId=entry.objectId;error.repositoryObjectKind=entry.kind;error.repositoryScrubCursor=lastCursor;error.repositoryQuarantined=freeze([...quarantinedPresent]);throw error;
       }
     }
-    checkpoint=null;attempted+=1;attemptedBytes+=Number(entry.storedBytes)||0;
+    checkpoint=null;attempted+=reported?0:1;attemptedBytes+=reported?0:Number(entry.storedBytes)||0;
     if(recheck)lastRecheckCursor=entry.objectId;
     if(healthy){quarantinedPresent.delete(entry.objectId);checked+=1;checkedBytes+=Number(entry.storedBytes)||0;lastCursor=entry.objectId;}
-    if(typeof onProgress==='function')await onProgress(progress());
+    if(!reported&&typeof onProgress==='function')await onProgress(progress());
     await yieldTask({priority:'background'});
   }}catch(error){error.repositoryScrubCursor=lastCursor;error.repositoryScrubProgress=progress();throw error;}
   const complete=index>=rows.length;

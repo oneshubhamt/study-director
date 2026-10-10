@@ -100,7 +100,7 @@ try{
     const input=document.getElementById('plan-input');
     input.value='05:30 | 60 | Storage health probe | work | Reliability | block | 1';
     const originalPut=IDBObjectStore.prototype.put;__storageFaults.plan=true;
-    IDBObjectStore.prototype.put=function(value,...args){if(this.name==='appMeta'&&value?.key==='planDraft.v1'&&__storageFaults.plan)throw new DOMException('forced Plan metadata quota failure','QuotaExceededError');return originalPut.call(this,value,...args);};
+    IDBObjectStore.prototype.put=function(value,...args){if(this.name==='appMeta'&&value?.key==='planDraft'&&__storageFaults.plan)throw new DOMException('forced Plan metadata quota failure','QuotaExceededError');return originalPut.call(this,value,...args);};
     __storageFaults.quota=true;d.AppData.local.setText('probe','quota');
     d.PlanDraftEditor.composerInput();await wait(420);
     const failed=d.readStorageHealth();
