@@ -202,6 +202,11 @@ Accepted limits:
   - list only versions where the note actually differs;
   - where the entry point sits on the open note.
 
+**Brainstorm (started 2026-10-10; nothing built until everything is decided).** The user's answers so far:
+- Earlier versions list both locations together, without duplicates, and only versions where the note differs. Proposed rule: one entry per distinct text (the backups already record each note's fingerprint), at most one per day, never the text the note has now, labelled in plain time.
+- Note limit drops from 10,000 to 2,000. Measure open, save and search there; virtualise the tree only if slow. Search already updates on each save.
+- Open, awaiting the user: where the ⋯ menu sits, keeping earlier versions across renames, a Notes tab, and which gaps to fill (recent notes, search jump, strikethrough/code, note links, Markdown import, print).
+
 Done so far:
 - one save engine for notes, Diary and Review;
 - Recently deleted for 30 days;
