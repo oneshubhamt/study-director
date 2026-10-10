@@ -11,19 +11,18 @@ const harness=createHarness(new Map(),sharedStores),gateway=harness.appMetaGatew
 const limits=freeze({maxAreaNameChars:160,maxRichTextBytes:2*1024*1024,maxOngoingNotes:1000}),normalizeAreaName=value=>String(value??'').trim();
 const codec=BaselineModule.createCodec(freeze({limits,normalizeAreaName}));
 const validators={};for(const name of APP_META_VALIDATION_OWNERS.host)validators[name]=()=>true;
-validators.reconciliationBaseLegacy=value=>codec.normalizeLegacy(value)!==null;
 validators.reconciliationBase=value=>codec.normalizeHeader(value)!==null;
 validators.reconciliationBaseNotePrefix=(value,context)=>codec.normalizeNote(value,context)!==null;
 gateway.registerValidators('host',freeze(validators));
-const host=gateway.bind('host'),store=BaselineModule.createStore(freeze({codec,meta:host,families:freeze({legacy:'reconciliationBaseLegacy',header:'reconciliationBase',notes:'reconciliationBaseNotePrefix'})}));
-const cp=n=>'cp_'+String(n).padStart(32,'0'),legacyAt='2026-09-22T10:00:00.000Z';
+const host=gateway.bind('host'),store=BaselineModule.createStore(freeze({codec,meta:host,families:freeze({header:'reconciliationBase',notes:'reconciliationBaseNotePrefix'})}));
+const cp=n=>'cp_'+String(n).padStart(32,'0');
 const identity=async keys=>({noteCount:keys.length,noteKeyFingerprint:await codec.keyFingerprint(keys)});
-const legacy=freeze({format:'study-director.reconciliation-base',version:1,checkpointId:cp(1),establishedAt:legacyAt,notes:freeze({Ethics:'ethics v1',Polity:'polity v1'})});
-sharedStores.meta.set('reconciliationBase.v1',{key:'reconciliationBase.v1',version:1,value:legacy,updatedAt:legacyAt});
-
-const migrated=await store.readHeader();
-assert.equal(migrated.version,2);assert.equal(migrated.checkpointId,cp(1));assert.equal(migrated.noteCount,2);assert.match(migrated.noteKeyFingerprint,/^[a-f0-9]{64}$/u);
-assert.equal(sharedStores.meta.has('reconciliationBase.v1'),false,'legacy monolithic row must be removed after verified migration');
+// The first baseline is a full write; older single-row baselines are converted
+// once by the compatibility host (tests/integration/storage/compatibility-host.mjs).
+const seed=freeze({format:'study-director.reconciliation-base-update',version:1,full:true,baseCheckpointId:'',noteCount:2,noteKeyFingerprint:'',noteKeys:freeze(['Ethics','Polity']),updates:freeze({Ethics:'ethics v1',Polity:'polity v1'}),deletes:freeze([])});
+assert.equal(await store.write(cp(1),seed),true);
+const first=await store.readHeader();
+assert.equal(first.version,2);assert.equal(first.checkpointId,cp(1));assert.equal(first.noteCount,2);assert.match(first.noteKeyFingerprint,/^[a-f0-9]{64}$/u);
 assert.equal(sharedStores.meta.get('reconciliationBaseNote.v1:Ethics').value.text,'ethics v1');
 assert.equal(sharedStores.meta.get('reconciliationBaseNote.v1:Polity').value.text,'polity v1');
 
@@ -53,4 +52,4 @@ assert.deepEqual(Object.fromEntries(Object.entries(selected)),{Ethics:'ethics v2
 const full=freeze({format:'study-director.reconciliation-base-update',version:1,full:true,baseCheckpointId:'',noteCount:1,noteKeyFingerprint:'',noteKeys:freeze(['Essay']),updates:freeze({Essay:'essay baseline'}),deletes:freeze([])});
 assert.equal(await store.write(cp(6),full),true);assert.deepEqual(Object.fromEntries(Object.entries(await store.readNotes(['Essay','Ethics']))),{Essay:'essay baseline'},'rare exact/full baseline replacement must remove obsolete per-note rows atomically');
 
-console.log(JSON.stringify({status:'PASS',suite:'reconciliation-baseline-v2',migration:'v1-to-v2',unchangedCheckpoint:'header-only',editedNote:'one-row',deletedNote:'one-row-delete',lazyReads:'keyed-only',staleBase:'fail-closed'},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'reconciliation-baseline-v2',unchangedCheckpoint:'header-only',editedNote:'one-row',deletedNote:'one-row-delete',lazyReads:'keyed-only',staleBase:'fail-closed'},null,2));

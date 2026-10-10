@@ -177,7 +177,6 @@ registry.define('backup-provider',1,input=>{
   });
   function elements(){
     return {
-      host:document.getElementById('backup-provider-actions'),
       overlay:document.getElementById('backup-provider-overlay'),
       title:document.getElementById('backup-provider-title'),
       message:document.getElementById('backup-provider-msg'),
@@ -249,7 +248,7 @@ registry.define('backup-provider',1,input=>{
     if(closeButton)closeButton.disabled=false;
     if(disconnectButton)disconnectButton.disabled=busy;
     if(cancelButton){const cancellable=busy&&!!foregroundController&&!foregroundController.signal.aborted;cancelButton.hidden=!cancellable;cancelButton.disabled=!cancellable;}
-    renderButtons();
+    notifyStatus();
   }
   function beginForeground(selected,externalSignal=null){
     if(foregroundController)return null;
@@ -347,7 +346,7 @@ registry.define('backup-provider',1,input=>{
   }
   async function authorize(selected,operation){
     if(selected.authorize)await selected.authorize(Object.freeze({operation}));
-    presentation.condition(selected.id,'permission','');if(presentation.read(selected.id)?.lifecycle==='failed')presentation.resolve(selected.id);renderButtons();
+    presentation.condition(selected.id,'permission','');if(presentation.read(selected.id)?.lifecycle==='failed')presentation.resolve(selected.id);notifyStatus();
   }
   function repositoryProviderItem(raw,kind){
     if(!raw||typeof raw!=='object')throw new Error('Backup repository transport returned invalid file metadata.');
@@ -928,12 +927,12 @@ registry.define('backup-provider',1,input=>{
     const pending=await pendingRetryState(selected),resuming=providerPublications.get(selected.id)?.continuation.status().pending===true;if(!pending&&!resuming&&!automaticNeeded(selected))return freeze({status:'idle',reason:'none',maintenancePending:false});
     if(!pending&&!resuming&&!changeNoted&&automaticHooks?.ready&&await automaticHooks.ready()===false)return freeze({status:'idle',reason:'local-empty',maintenancePending:false});
     const summary=presentation.begin(selected.id,'backup',{id:'external-backup',label:selected.label,foreground:false,message:`Backing up to ${selected.label}…`});
-    renderButtons();
+    notifyStatus();
     try{
       const saved=await saveRepositoryProvider(selected,{interactive:false,signal,preemptBackground:false,pendingIntent:pending,recoveryProgress:value=>summary.update({message:value.message,progress:value})}),covered=publicationCoversPending(saved,pending),cleared=covered&&(!pending||await clearPendingRetry(selected,pending));
       summary.finish({message:cleared?`External backup verified in ${selected.label}.`:covered?'External backup is verified; status bookkeeping is pending.':'External backup is verified; newer changes are queued.',outcome:cleared?'external-backup-verified':'external-backup-pending'});
       return freeze({status:cleared?'completed':'pending',checkpointId:String(saved&&saved.checkpointId||saved&&saved.name||''),reason:cleared?'':covered?'retry marker could not be cleared':'source',maintenancePending:saved&&saved.maintenancePending===true});
-    }catch(error){summary.finish({message:'External backup update is pending.',lifecycle:signal?.aborted?'cancelled':'failed',outcome:'external-backup-pending'});AppDiagnostics.capture('backup-provider.pending-retry',error,'warn');return freeze({status:'pending',reason:String(error&&error.message||error)});}finally{renderButtons();}
+    }catch(error){summary.finish({message:'External backup update is pending.',lifecycle:signal?.aborted?'cancelled':'failed',outcome:'external-backup-pending'});AppDiagnostics.capture('backup-provider.pending-retry',error,'warn');return freeze({status:'pending',reason:String(error&&error.message||error)});}finally{notifyStatus();}
   }
   function providerConvergenceJob(selected){
     if(!selected?.repository||!pendingRetryHooks)return null;const id=safeId(selected.id);
@@ -1394,7 +1393,7 @@ registry.define('backup-provider',1,input=>{
       connectedNow=true;statusText(`✓ ${selected.label} connected for this tab.`);return true;
     }catch(error){statusText(`Connection failed: ${userProviderMessage(error,`${selected.label} could not be connected.`)}`,false);return false;}
     finally{
-      await release(selected,'connect');setBusy(false);foreground.release();renderButtons();
+      await release(selected,'connect');setBusy(false);foreground.release();notifyStatus();
       const {overlay}=elements();
       if(connectedNow){if(overlay?.classList.contains('on')&&activeId===selected.id)close({restoreFocus:false});}
       else if(overlay?.classList.contains('on')&&activeId===selected.id)presentProvider(selected,activeTrigger);
@@ -1416,33 +1415,18 @@ registry.define('backup-provider',1,input=>{
       statusText(selected.hosted?'':`✓ ${selected.label} disconnected. Access permission was revoked.`);return true;
     }catch(error){
       statusText(`Disconnect failed: ${error&&error.message?error.message:String(error)}`,false);return false;
-    }finally{await release(selected,'disconnect');setBusy(false);foreground.release();const {overlay}=elements();if(overlay?.classList.contains('on')&&activeId===selected.id)presentProvider(selected,activeTrigger);renderButtons();}
+    }finally{await release(selected,'disconnect');setBusy(false);foreground.release();const {overlay}=elements();if(overlay?.classList.contains('on')&&activeId===selected.id)presentProvider(selected,activeTrigger);notifyStatus();}
   }
   function disconnectCurrent(){return disconnectProvider(provider());}
-  // Status for a location whose controls the app renders (the Device Folder).
+  // Status for each location; the app draws every location row from it.
   const statusListeners=new Set();
   function subscribeStatus(listener){if(typeof listener!=='function')throw new TypeError('Backup location status listener is invalid.');statusListeners.add(listener);return ()=>statusListeners.delete(listener);}
   function notifyStatus(){for(const listener of statusListeners)try{listener();}catch(error){AppDiagnostics.capture('backup-provider.status-listener',error,'warn');}}
   function locationStatus(id){
     const selected=providers.get(safeId(id));if(!selected)return null;
     const operation=foregroundView(),active=busy&&operation?.providerId===selected.id,coordinator=providerBackgroundCoordinators.get(selected.id),background=coordinator?coordinator.status():null,running=background?background.active:[],job=coordinator?coordinator.jobStatus('convergence'):null,attempts=providerConvergenceRetryAttempts.get(selected.id)||0;
-    return freeze({connected:providerConnected(selected),busy:active,foregroundKind:active?String(operation.kind||''):'',cancellable:active&&!!foregroundController&&!foregroundController.signal.aborted,backingUp:running.includes('convergence'),maintenanceBusy:running.includes('maintenance')||running.includes('integrity'),paused:background?.held===true,waiting:automaticWaiting(selected),nextEligibleAt:String(job?.nextEligibleAt||''),retryAttempt:attempts,retryBackoffCapped:attempts>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length});
-  }
-  function renderButtons(){
-    notifyStatus();
-    const {host}=elements();
-    if(!host)return;
-    const fragment=document.createDocumentFragment();
-    [...providers.values()].filter(item=>!item.hosted).forEach(item=>{
-      const external=presentation.read(item.id,'external-backup'),operation=foregroundView();
-      const connected=providerConnected(item),wasConnected=connectedOnceByProvider.has(item.id),rowStatus=document.getElementById(`backup-provider-row-status-${item.id}`),active=busy&&operation?.providerId===item.id,working=active?operation:external?.lifecycle==='running'?external:null;if(connected)connectedOnceByProvider.add(item.id);
-      if(rowStatus){rowStatus.textContent=presentation.locationLabel(item.id,{connected,wasConnected,busy:!!working,foregroundKind:working?.kind});rowStatus.classList.toggle('protected',connected&&!working);rowStatus.classList.toggle('standard',!connected||!!working);}
-      const backup=document.createElement('button');backup.className='mini-btn ui-btn';backup.type='button';backup.textContent='Back up now';backup.disabled=busy;backup.setAttribute('aria-label',`Back up now to ${item.label}`);backup.addEventListener('click',()=>void backupProvider(item.id));
-      const versions=document.createElement('button');versions.className='mini-btn ui-btn';versions.type='button';versions.textContent=connected?'Versions':'Recover';versions.disabled=busy&&!(active&&['history','bring-in','restore-version'].includes(foregroundView().kind));versions.dataset.action='recover-provider-backup';versions.dataset.providerId=item.id;versions.setAttribute('aria-label',connected?`View ${item.label} backup versions`:`Recover from ${item.label}`);versions.setAttribute('aria-haspopup','dialog');versions.setAttribute('aria-controls','managed-version-history');
-      const settings=document.createElement('button');settings.className='mini-btn ui-btn';settings.type='button';settings.textContent=connected?'Settings':wasConnected?'Reconnect':'Connect';settings.disabled=busy&&!active;settings.dataset.backupProvider=item.id;settings.setAttribute('aria-label',connected?`${item.label} settings`:`${wasConnected?'Reconnect':'Connect'} ${item.label}`);settings.setAttribute('aria-haspopup','dialog');settings.setAttribute('aria-controls','backup-provider-overlay');settings.addEventListener('click',()=>open(item.id,settings));
-      if(connected)fragment.append(backup,versions,settings);else if(wasConnected)fragment.append(settings);else fragment.append(settings,versions);
-    });
-    host.replaceChildren(fragment);
+    const connected=providerConnected(selected);if(connected)connectedOnceByProvider.add(selected.id);
+    return freeze({connected,wasConnected:connectedOnceByProvider.has(selected.id),engineBusy:busy||preparing,busy:active,foregroundKind:active?String(operation.kind||''):'',cancellable:active&&!!foregroundController&&!foregroundController.signal.aborted,backingUp:running.includes('convergence')||presentation.read(selected.id,'external-backup')?.lifecycle==='running',maintenanceBusy:running.includes('maintenance')||running.includes('integrity'),paused:background?.held===true,waiting:automaticWaiting(selected),nextEligibleAt:String(job?.nextEligibleAt||''),retryAttempt:attempts,retryBackoffCapped:attempts>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length});
   }
   function register(config={}){
     const normalized=freezeProvider(config&&typeof config==='object'?config:{});
@@ -1450,9 +1434,9 @@ registry.define('backup-provider',1,input=>{
     if(providers.has(normalized.id))return false;
     providers.set(normalized.id,normalized);
     automaticState(normalized).connected=providerConnected(normalized);
-    if(normalized.subscribeConnection)normalized.subscribeConnection(()=>{connectionChanged(normalized);wakeProviderBackground(normalized,'connection');renderButtons();const {overlay}=elements();if(!busy&&!preparing&&overlay?.classList.contains('on')&&activeId===normalized.id)presentProvider(normalized,activeTrigger);});
+    if(normalized.subscribeConnection)normalized.subscribeConnection(()=>{connectionChanged(normalized);wakeProviderBackground(normalized,'connection');notifyStatus();const {overlay}=elements();if(!busy&&!preparing&&overlay?.classList.contains('on')&&activeId===normalized.id)presentProvider(normalized,activeTrigger);});
     wakeProviderBackground(normalized,'registered');
-    renderButtons();
+    notifyStatus();
     return true;
   }
   function list({hosted=false}={}){return Object.freeze([...providers.values()].filter(item=>hosted||!item.hosted).map(item=>Object.freeze({id:item.id,label:item.label,connected:providerConnected(item)})));}
@@ -1468,14 +1452,14 @@ registry.define('backup-provider',1,input=>{
     cancelButton?.addEventListener('click',()=>cancelForeground());
     closeButton?.addEventListener('click',()=>close());
     document.addEventListener('keydown',event=>{if(event.key==='Escape'&&overlay.classList.contains('on')){event.preventDefault();close();}});
-    document.addEventListener('visibilitychange',()=>{if(!document.hidden)renderButtons();});
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden)notifyStatus();});
     document.addEventListener('pointerdown',event=>{
       if(!overlay.classList.contains('on')||overlay.contains(event.target)||event.target.closest?.('[data-backup-provider]'))return;
       close({restoreFocus:false});
     });
   }
   install();
-  return Object.freeze({register,list,open,close,status,locationStatus,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:renderButtons,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},subscribePresentation,cancelForeground,history:historyRepositoryProvider,backup:backupProvider,backupRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeProtectedRepositoryProvider,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,suspendBackground,repositoryScope});
+  return Object.freeze({register,list,open,close,status,locationStatus,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},subscribePresentation,cancelForeground,history:historyRepositoryProvider,backup:backupProvider,backupRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeProtectedRepositoryProvider,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,suspendBackground,repositoryScope});
 
   }
   return freeze({format:'study-director.backup-provider-module',contractVersion:1,createRuntime});

@@ -7,7 +7,7 @@ const recentAt=new Date().toISOString(),oldAt=new Date(Date.now()-2*24*60*60*100
 const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map([
   [obsoleteKey,{key:obsoleteKey,version:1,value:{complete:true},updatedAt:recentAt}],
   [retainedKey,{key:retainedKey,version:1,value:{scheduleText:'keep'},updatedAt:recentAt}],
-  ['dataMaintenance',{key:'dataMaintenance',version:1,value:{version:5,status:'completed',completedAt:oldAt},updatedAt:recentAt}]
+  ['dataMaintenance',{key:'dataMaintenance',version:1,value:{version:6,status:'completed',completedAt:oldAt},updatedAt:recentAt}]
 ])};
 const {app}=createHarness(new Map(),stores);
 
@@ -76,9 +76,6 @@ await maintenanceFailure('pending intent commit failure',async(_h,c)=>{c.failNex
 await maintenanceFailure('completion metadata commit failure',async(_h,c)=>{c.failNextMaintenanceCompletion=true;return async()=>{};},async h=>assert.equal(h.stores.meta.get('dataMaintenance').value.status,'pending'));
 {
  const c={},h=createHarness(new Map(),null,c);await h.app.compatibility.migrateDailyRecords();c.onAreaRead=async()=>{throw new Error('initial notes unavailable');};await h.app.notes.load();assert.equal((await h.app.maintenance.run()).status,'failed');c.onAreaRead=null;assert.equal((await h.app.maintenance.run()).status,'completed');failureCases.push('initial fallback note load recovers strictly');
-}
-{
- const h=createHarness();await h.app.compatibility.migrateDailyRecords();const at=new Date().toISOString();h.stores.meta.set('dataMaintenance',{key:'dataMaintenance',version:1,value:{version:5,status:'completed',completedAt:at},updatedAt:at});assert.equal((await h.app.maintenance.run()).status,'completed','older soft completion cannot suppress strict maintenance');failureCases.push('recent legacy completion revalidated');
 }
 {
  const c={},h=createHarness(new Map(),null,c);await h.app.compatibility.migrateDailyRecords();const completed=await h.app.maintenance.run();h.app.notes.update('restart-pending','Restart Pending','retained after failed forced pass','');c.failNextAreaWrite=true;assert.equal((await h.app.maintenance.run({force:true})).status,'failed');const pending=h.stores.meta.get('dataMaintenance').value;assert.equal(pending.status,'pending');assert.equal(pending.completedAt,completed.completedAt);

@@ -164,6 +164,17 @@ try{
       await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'primary ownership'});
       assert.equal(await page.evaluate(`__PWA6.DeviceBackup.status().supported`),false);
       const hint=toast('/No local study data found/');
+      // A brand-new install has never saved study data here, so it gets no hint.
+      await new Promise(resolve=>setTimeout(resolve,1500));
+      assert.equal(await page.evaluate(`!!${hint}`),false,'a brand-new install sees no empty-data hint');
+      // Study data saved here and then lost with the database while the app was closed.
+      await page.evaluate(`(async()=>{const d=__PWA6;d.AppData.notes.update('medicine','Medicine','NoFolderQA lost note','');await d.AppData.notes.flush({strict:true});})()`);
+      await page.navigate(server.url('deployment','license.html'));
+      await page.send('Storage.clearDataForOrigin',{origin:server.origin,storageTypes:'indexeddb,file_systems'});
+      page.events.splice(0);// what the stand-in page logged is not the app's
+      await page.navigate(server.url('deployment','instrumented.html'));
+      await waitForStudyDirector(page,{instrumented:true});
+      await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'primary ownership after the loss'});
       await waitFor(()=>page.evaluate(`!!${hint}`),{label:'empty-data hint'});
       const hintText=await page.evaluate(`${hint}.textContent`);
       assert.match(hintText,/restore from Google Drive or a backup file/);assert.doesNotMatch(hintText,/Device Folder/,'no folder is offered where folders are unsupported');
@@ -171,7 +182,7 @@ try{
       await waitFor(()=>page.evaluate(`${restoreView}.importButton`),{label:'restore choices in view'});
       const fromHint=await page.evaluate(restoreView);
       assert.deepEqual({...fromHint,folderRow:undefined},{tab:'pane-library',drawer:true,importButton:true,driveRow:true,folderRow:undefined},'Data & Backup opens with Google Drive and the backup file import in view');
-      result.checks.noFolderStartupHint=true;
+      result.checks.noFolderStartupHint=true;result.checks.freshInstallNoHint=true;
 
       await page.evaluate(`(async()=>{const d=__PWA6;d.goTab('plan');d.AppData.notes.update('medicine','Medicine','NoFolderQA note','');await d.AppData.notes.flush({strict:true});})()`);
       await page.send('Storage.clearDataForOrigin',{origin:server.origin,storageTypes:'all'});

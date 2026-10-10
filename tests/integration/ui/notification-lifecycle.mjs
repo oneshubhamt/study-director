@@ -171,12 +171,12 @@ class Element {
   for(const source of ['device-folder','google-drive'])for(const [kind,label] of [['backup','Backing up…'],['history','Reading backups…'],['restore-version','Restoring…'],['bring-in','Combining…']])assert.equal(presentation.locationLabel(source,{connected:true,busy:true,foregroundKind:kind}),label);
   assert.equal(presentation.locationLabel('google-drive',{wasConnected:true}),'Signed out');
   assert.equal(presentation.locationLabel('device-folder',{mode:'permission'}),'Permission needed');
-  const providerSource=fs.readFileSync('source/core/backup-provider.js','utf8'),start=providerSource.indexOf('  function renderButtons(){'),end=providerSource.indexOf('  function register(',start);
-  const row=new Element(),host={replaceChildren(){}},item={id:'google-drive',label:'Google Drive'};
-  const render=new Function('elements','providers','presentation','providerConnected','connectedOnceByProvider','document','foregroundView','backupProvider','open',`let busy=false;const notifyStatus=()=>{};${providerSource.slice(start,end)};return renderButtons;`)(()=>({host}),new Map([[item.id,item]]),presentation,()=>true,new Set(),{getElementById:()=>row,createDocumentFragment:()=>new Element(),createElement:()=>new Element()},()=>null,()=>{},()=>{});
-  render();assert.equal(row.textContent,'On · Last verified 06:44');
-  const external=presentation.begin('google-drive','backup',{id:'external-backup',foreground:false});render();assert.equal(row.textContent,'Backing up…');
-  external.finish({message:'External backup verified in Google Drive.'});render();assert.equal(row.textContent,'On · Last verified 06:44');
+  // A row reads "Backing up…" while an external backup runs (the engine reports
+  // it as backingUp) and returns to its resting label when it finishes.
+  const external=presentation.begin('google-drive','backup',{id:'external-backup',foreground:false});
+  assert.equal(presentation.locationLabel('google-drive',{connected:true,backingUp:external.read().lifecycle==='running'}),'Backing up…');
+  external.finish({message:'External backup verified in Google Drive.'});
+  assert.equal(presentation.locationLabel('google-drive',{connected:true,backingUp:external.read().lifecycle==='running'}),'On · Last verified 06:44');
   assert.equal(presentation.summary(external.read()),'✓ External backup verified in Google Drive.');
   assert.equal(presentation.summary({...external.read(),message:'✓ External backup verified in Google Drive.'}),'✓ External backup verified in Google Drive.','success marks cannot duplicate');
   assert.equal(presentation.summary({...external.read(),lifecycle:'cancelled',severity:'info',message:'Cancelled.'}),'Cancelled.');

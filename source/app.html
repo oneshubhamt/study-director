@@ -1010,7 +1010,11 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                   </div>
                 </div>
                 <strong class="backup-status-value standard ui-mono" id="backup-provider-row-status-google-drive">Not connected</strong>
-                <div class="backup-provider-actions" id="backup-provider-actions" role="group" aria-label="Google Drive backup actions"></div>
+                <div class="backup-provider-actions" id="backup-provider-actions" role="group" aria-label="Google Drive backup actions">
+                  <button class="mini-btn ui-btn" id="drive-backup-now" type="button" data-action="drive-backup-now" aria-label="Back up now to Google Drive" hidden>Back up now</button>
+                  <button class="mini-btn ui-btn" id="recover-drive-backup" type="button" data-action="recover-provider-backup" data-provider-id="google-drive" aria-haspopup="dialog" aria-controls="managed-version-history" hidden>Versions</button>
+                  <button class="mini-btn ui-btn" id="drive-backup-settings" type="button" data-action="open-drive-backup" aria-haspopup="dialog" aria-controls="backup-provider-overlay" hidden>Connect</button>
+                </div>
               </div>
               <div class="backup-inline-note ui-helper" id="backup-operation-note-google-drive" role="status" aria-live="polite" aria-atomic="true" hidden></div>
             </div>
@@ -2868,6 +2872,17 @@ function toggleDeviceBackupSettings(){
   if(!panel||!button||button.hidden)return false;
   panel.hidden=!panel.hidden;button.setAttribute('aria-expanded',panel.hidden?'false':'true');return !panel.hidden;
 }
+// Google Drive's row, drawn from the engine's status like the Device Folder row.
+// Before the Drive integration registers, the row keeps its static "Not connected".
+function renderDriveBackup(){
+  const state=BackupProviderRuntime.locationStatus('google-drive');if(!state)return;
+  const status=document.getElementById('backup-provider-row-status-google-drive'),backupNow=document.getElementById('drive-backup-now'),versions=document.getElementById('recover-drive-backup'),settings=document.getElementById('drive-backup-settings');
+  const connected=state.connected,working=state.busy||state.backingUp,recoveryActive=state.busy&&['history','restore-version','bring-in'].includes(state.foregroundKind);
+  if(status){status.textContent=BackupPresentation.locationLabel('google-drive',state);status.classList.toggle('protected',connected&&!working);status.classList.toggle('standard',!connected||working);}
+  if(backupNow){backupNow.hidden=!connected;backupNow.disabled=state.engineBusy;}
+  if(versions){versions.hidden=!connected&&state.wasConnected;versions.textContent=connected?'Versions':'Recover';versions.disabled=state.engineBusy&&!recoveryActive;versions.setAttribute('aria-label',connected?'View Google Drive backup versions':'Recover from Google Drive');}
+  if(settings){const label=connected?'Settings':state.wasConnected?'Reconnect':'Connect';settings.hidden=false;settings.style.order=connected?'':'-1';settings.textContent=label;settings.disabled=state.engineBusy&&!state.busy;settings.setAttribute('aria-label',connected?'Google Drive settings':`${label} Google Drive`);}
+}
 function renderDeviceBackup(state){
   if(!state)return;
   const status=document.getElementById('device-backup-status');
@@ -4132,12 +4147,12 @@ AppMetaGateway.registerValidators('host',HostMetadataModule.createAppMetaValidat
     verifiedRecoveryBackups:APP_META_KEYS.verifiedRecoveryBackups,backupProtection:APP_META_KEYS.backupProtection,
     attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,automaticDeviceBackup:APP_META_KEYS.automaticDeviceBackup,
     repositoryIntegrityScrub:APP_META_KEYS.repositoryIntegrityScrub,managedProviderBackupPending:APP_META_KEYS.managedProviderBackupPending,repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,
-    reconciliationBaseLegacy:APP_META_KEYS.reconciliationBaseLegacy,reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix
+    reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix
   }),
   same:sameDataValue,
   normalizers:Object.freeze({
     verifiedRecovery:normalizeVerifiedRecoveryState,attachmentIntegrity:normalizeAttachmentIntegrityState,
-    repositoryIntegrity:normalizeRepositoryIntegrityState,reconciliationBaseLegacy:ReconciliationBaselineCodec.normalizeLegacy,
+    repositoryIntegrity:normalizeRepositoryIntegrityState,
     reconciliationBase:ReconciliationBaselineCodec.normalizeHeader,reconciliationBaseNote:ReconciliationBaselineCodec.normalizeNote
   })
 })));
@@ -4150,7 +4165,7 @@ const DeviceBackupAppMeta=AppMetaGateway.bind('device-backup');
 const BackupAppMeta=AppMetaGateway.bind('backup');
 const ReconciliationBaselineStore=ReconciliationBaselineModule.createStore(Object.freeze({
   codec:ReconciliationBaselineCodec,meta:HostAppMeta,
-  families:Object.freeze({legacy:'reconciliationBaseLegacy',header:'reconciliationBase',notes:'reconciliationBaseNotePrefix'})
+  families:Object.freeze({header:'reconciliationBase',notes:'reconciliationBaseNotePrefix'})
 }));
 let richAssetReferenceRevision=0,captureMutationGeneration=0,backupFastFenceReady=false;
 let imagePreparationCount=0,pwaWorkRevision=0;
@@ -8113,7 +8128,8 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
     appMeta:Object.freeze({
       personalPreferences:APP_META_KEYS.personalPreferences,dataMaintenance:APP_META_KEYS.dataMaintenance,verifiedRecoveryBackups:APP_META_KEYS.verifiedRecoveryBackups,
       backupProtection:APP_META_KEYS.backupProtection,attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,automaticDeviceBackup:APP_META_KEYS.automaticDeviceBackup,
-      repositoryIntegrityScrub:APP_META_KEYS.repositoryIntegrityScrub,repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,repositoryMaintenancePendingLegacy:OBSOLETE_APP_META_KEYS.repositoryMaintenancePendingLegacy,
+      repositoryIntegrityScrub:APP_META_KEYS.repositoryIntegrityScrub,reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix,
+      reconciliationBaseLegacy:OBSOLETE_APP_META_KEYS.reconciliationBaseLegacy,repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,repositoryMaintenancePendingLegacy:OBSOLETE_APP_META_KEYS.repositoryMaintenancePendingLegacy,
       libraryClearJournalState:APP_META_KEYS.libraryClearJournalState,libraryClearJournalPayloadPrefix:APP_META_KEYS.libraryClearJournalPayloadPrefix,
       archiveClearJournalStateLegacy:OBSOLETE_APP_META_KEYS.archiveClearJournalStateLegacy,archiveClearJournalPayloadPrefixLegacy:OBSOLETE_APP_META_KEYS.archiveClearJournalPayloadPrefixLegacy
     })
@@ -8150,7 +8166,9 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
     writeValue:(key,value,updatedAt)=>IndexedDb.strictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{const timestamp=Number.isFinite(Date.parse(String(updatedAt||'')))?new Date(String(updatedAt)).toISOString():new Date().toISOString(),request=store.put({key:String(key),version:1,value,updatedAt:timestamp});request.onerror=()=>finish(false,request.error||new Error('historical host metadata write failed'));tx.oncomplete=()=>finish(true,true);},'historical host metadata write aborted'),
     removeRow:key=>IndexedDb.strictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{const request=store.delete(String(key));request.onerror=()=>finish(false,request.error||new Error('historical host metadata removal failed'));tx.oncomplete=()=>finish(true,true);},'historical host metadata removal aborted'),
     releaseBackupFile:async _name=>BackupFiles.collect(),normalizeVerifiedRecovery:value=>normalizeVerifiedRecoveryState(value),normalizeAttachmentIntegrity:value=>normalizeAttachmentIntegrityState(value),
-    normalizeRepositoryIntegrity:value=>normalizeRepositoryIntegrityState(value)
+    normalizeRepositoryIntegrity:value=>normalizeRepositoryIntegrityState(value),
+    normalizeReconciliationNotes:value=>ReconciliationBaselineCodec.normalizeUpdates(value),normalizeReconciliationHeader:value=>ReconciliationBaselineCodec.normalizeHeader(value),
+    reconciliationKeyFingerprint:keys=>ReconciliationBaselineCodec.keyFingerprint(keys)
   }),
   live:Object.freeze({
     migrateActiveSession:()=>AppData.compatibility.migrateActiveSession(),migrateAreaNotes:()=>AppData.compatibility.migrateAreaNotes(),
@@ -8470,9 +8488,9 @@ let repositoryMaintenanceWriteChain=Promise.resolve();
 function maintenanceReason(value){const reason=String(value||'legacy').trim().toLowerCase();return /^[a-z][a-z0-9-]{0,47}$/u.test(reason)?reason:'legacy';}
 function maintenanceIso(value,fallback=''){const text=String(value||'');return Number.isFinite(Date.parse(text))?text:fallback;}
 function normalizeRepositoryMaintenancePending(value){
-  const entries=[],seen=new Set(),version=Number(value&&value.version),rows=value&&value.format===REPOSITORY_MAINTENANCE_FORMAT&&(version===1||version===2||version===3||version===4)&&Array.isArray(value.entries)?value.entries:[];
+  const entries=[],seen=new Set(),rows=value&&value.format===REPOSITORY_MAINTENANCE_FORMAT&&Number(value.version)===REPOSITORY_MAINTENANCE_VERSION&&Array.isArray(value.entries)?value.entries:[];
   for(const raw of rows){
-    const providerId=String(raw&&raw.providerId||''),requestedAt=maintenanceIso(raw&&raw.requestedAt),legacy=version===1,nextEligibleAt=maintenanceIso(raw&&raw.nextEligibleAt,requestedAt),reason=legacy?'legacy':maintenanceReason(raw&&raw.reason),repositoryScope=version>=3?String(raw&&raw.repositoryScope||''):'',requestId=version===4?String(raw&&raw.requestId||''):'';
+    const providerId=String(raw&&raw.providerId||''),requestedAt=maintenanceIso(raw&&raw.requestedAt),nextEligibleAt=maintenanceIso(raw&&raw.nextEligibleAt,requestedAt),reason=maintenanceReason(raw&&raw.reason),repositoryScope=String(raw&&raw.repositoryScope||''),requestId=String(raw&&raw.requestId||'');
     if(!/^[a-z][a-z0-9-]{0,40}$/u.test(providerId)||seen.has(providerId)||!requestedAt||!nextEligibleAt)continue;
     if(repositoryScope.length>320||requestId&&!/^[a-f0-9-]{36}$/u.test(requestId))continue;seen.add(providerId);entries.push(Object.freeze({providerId,requestedAt,nextEligibleAt,reason,repositoryScope,requestId}));
   }
@@ -8515,13 +8533,22 @@ async function canonicalLocalRecoveryEmpty(){
     return !(records||[]).length&&!Object.keys(notePayload||{}).length&&!active?.value&&!hasPlan&&!(assets||[]).length;
   }catch(error){AppDiagnostics.capture('backup.device-recovery-empty-check',error,'warn');return null;}
 }
+// The empty-data hint is for a browser that lost study data. Storage health
+// remembers when Saved Days or notes were last saved here, so a brand-new
+// install never sees it, and data the person deleted leaves deletion history
+// that explains the emptiness. An unresolved clear has its own notice.
+async function studyDataLostHere(){
+  const health=readStorageHealth();if(!health.lastDailyRecordSaveAt&&!health.lastNotesSaveAt||storageResetUnresolved())return false;
+  try{const deletions=await Promise.all([AppData.deletionRecovery.savedDays(),AppData.deletionRecovery.areaNotes()]);return deletions.every(list=>!(list||[]).length);}
+  catch(error){AppDiagnostics.capture('backup.device-recovery-deletions',error,'warn');return false;}
+}
 let deviceRecoveryOfferRunning=false,deviceRecoveryOfferDismissed=false,deviceRecoveryHintNotified=false;
 async function offerDeviceRecoveryIfLocalEmpty(options={}){
   if(deviceRecoveryOfferRunning||deviceRecoveryOfferDismissed||!appCanMutate())return false;
   if(!await canonicalLocalRecoveryEmpty())return false;
   const state=DeviceBackup.status(),latestBefore=Number(options.latestBefore)||Number.POSITIVE_INFINITY;
   if(!state.connected){
-    if(options.reason==='startup'&&!deviceRecoveryHintNotified){deviceRecoveryHintNotified=true;Interactions.notify({key:'device-recovery-empty-local',title:'No local study data found',message:`If browser data was cleared, restore from ${backupRestoreChoices()}.`,action:{label:'Restore from backup',run:()=>void openBackupRestore()}});}
+    if(options.reason==='startup'&&!deviceRecoveryHintNotified&&await studyDataLostHere()){deviceRecoveryHintNotified=true;Interactions.notify({key:'device-recovery-empty-local',title:'No local study data found',message:`If browser data was cleared, restore from ${backupRestoreChoices()}.`,action:{label:'Restore from backup',run:()=>void openBackupRestore()}});}
     return false;
   }
   deviceRecoveryOfferRunning=true;
@@ -9350,6 +9377,8 @@ const CLICK_ACTIONS=Object.freeze({
   'disconnect-device-backup': ()=>DeviceBackup.disconnect(),
   'recover-device-backup': ()=>BackupRecoveryHost.history.openSource('device-folder'),
   'recover-provider-backup': ev=>BackupRecoveryHost.history.openSource(ev.target.closest('[data-provider-id]')?.dataset.providerId),
+  'drive-backup-now': ()=>BackupProviderRuntime.backup('google-drive'),
+  'open-drive-backup': ev=>BackupProviderRuntime.open('google-drive',ev.target.closest('button')),
   'refresh-version-history': ()=>BackupRecoveryHost.history.refresh(),
   'close-version-history': ()=>BackupRecoveryHost.history.close(),
   'cancel-version-history-operation': ()=>BackupRecoveryHost.history.cancel(),
@@ -9467,7 +9496,7 @@ const OWNER_REQUIRED_CLICK_ACTIONS=new Set([
   'load-default','apply-schedule','clear-schedule-draft','take-pomodoro-break',
   'gap-focus','gap-break','gap-split','gap-ignore','gap-apply','save-name-setup','skip-name-setup',
   'font-smaller','font-reset','font-larger','set-theme','set-presentation',
-  'connect-device-backup','device-backup-now','disconnect-device-backup','recover-device-backup','recover-provider-backup','recover-managed-version','compare-managed-note'
+  'connect-device-backup','device-backup-now','disconnect-device-backup','recover-device-backup','recover-provider-backup','drive-backup-now','open-drive-backup','recover-managed-version','compare-managed-note'
 ]);
 const OWNER_REQUIRED_CHANGE_ACTIONS=new Set(['import-backup','change-reflection-date','keep-screen-awake','sound-mode']);
 const OWNER_REQUIRED_INPUT_ACTIONS=new Set(['student-name','pnote-progress','save-reflection','quote','schedule-draft','unfinished-note','practice-setup']);
@@ -9800,6 +9829,7 @@ function installApplicationDomBindings(){
   SystemNotifications.install();AppAudio.install();renderSoundSettings();
   NativeCapabilities.install();
   void BackupProtection.refresh().catch(setBackupProtectionSurfaceError);
+  BackupProviderRuntime.subscribeStatus(renderDriveBackup);renderDriveBackup();
   void reconcileChangeClock().catch(()=>false).then(()=>DeviceBackup.install()).then(()=>installRepositoryIntegrityScrub()).catch(error=>AppDiagnostics.capture('backup.repository-integrity-install',error,'warn'));
   updateFullscreenButton();
   PlanDraftEditor.install();

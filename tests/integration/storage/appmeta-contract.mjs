@@ -20,10 +20,13 @@ assert.equal(proof.ok,false,'a malformed canonical mutation epoch must fail clos
 assert.ok(proof.issues.some(issue=>issue.startsWith('canonicalMutationEpoch:')&&issue.includes('value is not canonical')));
 stores.meta.delete('canonicalMutationEpoch.v1');
 
-const maintenance={version:5,status:'completed',completedAt:'2026-09-16T10:00:00.000Z'};
+const maintenance={version:6,status:'completed',completedAt:'2026-09-16T10:00:00.000Z'};
 stores.meta.set('dataMaintenance',{key:'dataMaintenance',version:1,value:maintenance,updatedAt:maintenance.completedAt});
 proof=await app.metadata.verifyCurrent();
 assert.equal(proof.ok,true,'current maintenance metadata must validate exactly');
+stores.meta.set('dataMaintenance',{key:'dataMaintenance',version:1,value:{...maintenance,version:5},updatedAt:maintenance.completedAt});
+proof=await app.metadata.verifyCurrent();
+assert.equal(proof.ok,false,'an older maintenance version is not current; the compatibility host retires it');
 
 stores.meta.set('dataMaintenance',{key:'dataMaintenance',version:1,value:{...maintenance,staleField:true},updatedAt:maintenance.completedAt});
 proof=await app.metadata.verifyCurrent();
@@ -48,7 +51,7 @@ assert.equal(gateway.resolve('savedDayDeletion.v1:') ,null,'empty prefix suffix 
 assert.equal(gateway.resolve('unknown.key'),null,'unknown appMeta identity must not resolve');
 await assert.rejects(repositoryMeta.read('restoreJournalPayload'),/owned by repository-journals/,'repository capability must not access journal families');
 
-const maintenance={version:5,status:'completed',completedAt:'2026-09-19T10:00:00.000Z'};
+const maintenance={version:6,status:'completed',completedAt:'2026-09-19T10:00:00.000Z'};
 await repositoryMeta.write('dataMaintenance',maintenance,{updatedAt:maintenance.completedAt,strict:true});
 assert.deepEqual(await repositoryMeta.read('dataMaintenance'),maintenance);
 await assert.rejects(repositoryMeta.write('dataMaintenance',{...maintenance,unexpected:true},{strict:true}),/not canonical/,'family-specific validator must reject noncanonical values before publication');

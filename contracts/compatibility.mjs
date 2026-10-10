@@ -154,19 +154,27 @@ export const COMPATIBILITY_REGISTRY=freeze({
     },
     {
       id:'l7-host-metadata-normalization',owner:'compatibility/host',kind:'live-migration',
-      source:'L7 appMeta dataMaintenance v1 plus rebuildable noncanonical maintenance rows from intermediate upgrades, verifiedRecoveryBackups entries without baseline fields, attachmentIntegrityAudit issues with name, DeviceBackupSettings.v1, repositoryIntegrityScrub versions 2 to 5 (versions 3 to 5 carrying a Device Folder directory handle), and backupProviderOperation:* journals',
+      source:'L7 appMeta dataMaintenance v1 plus rebuildable noncanonical maintenance rows from intermediate upgrades, verifiedRecoveryBackups entries without baseline fields, attachmentIntegrityAudit issues with name, DeviceBackupSettings.v1, repositoryIntegrityScrub versions 2 to 5 (versions 3 to 5 carrying a Device Folder directory handle), single-row ReconciliationBase.v1 note merge bases, and backupProviderOperation:* journals',
       target:'current host/repository metadata shapes or verified absence for obsolete operational rows',
-      proof:'strict current appMeta verification passes after normalization; Device Folder handle/timestamps are retained, backup verification progress and quarantine carry over with the repository scope as identity, obsolete provider-operation journals are removed, and unknown historical shapes fail closed',
+      proof:'strict current appMeta verification passes after normalization; Device Folder handle/timestamps are retained, backup verification progress and quarantine carry over with the repository scope as identity, note merge bases become a verified ReconciliationBase.v2 header plus per-note rows unless a newer current base exists, obsolete provider-operation journals are removed, and unknown historical shapes fail closed',
       retirement:'after all supported installations have crossed the metadata normalization, report the canonical baseline, and no historical provider journal remains',
       sourceFiles:freeze(['source/core/compatibility-host.js','source/core/host-metadata.js','source/app.html'])
     },
     {
       id:'l13e-repository-maintenance-v1',owner:'compatibility/host',kind:'live-migration',
-      source:'appMeta repositoryMaintenancePending.v1 provider maintenance intent produced by SDVB74L13E and earlier v1 writers',
-      target:'appMeta repositoryMaintenancePending.v2 with explicit nextEligibleAt/reason scheduling state',
-      proof:'every valid v1 provider intent is normalized to v2, the replacement is read back and verified, and only then is the v1 identity removed before canonical appMeta verification',
+      source:'appMeta repositoryMaintenancePending.v1 provider maintenance intent produced by SDVB74L13E and earlier v1 writers, plus payload versions 1 to 3 stored under the current repositoryMaintenancePending.v2 identity',
+      target:'appMeta repositoryMaintenancePending.v2 holding the current version-4 payload (nextEligibleAt, reason, repositoryScope and requestId)',
+      proof:'every valid historical provider intent is normalized to the current payload, merged with any current entry for the same provider, read back and verified, and only then is the v1 identity removed before canonical appMeta verification',
       retirement:'after every supported installed build has crossed the L13E-era v2 maintenance identity migration and the canonical baseline no longer requires this adapter',
       sourceFiles:freeze(['contracts/data-architecture.mjs','source/core/compatibility-host.js','source/core/host-metadata.js','source/app.html'])
+    },
+    {
+      id:'restore-journal-payload-v1-v3',owner:'repository-journals',kind:'live-canonicalization',
+      source:'appMeta restoreJournalPayload versions 1 to 3 left by a restore interrupted under an older build',
+      target:'consumed once by restore crash recovery (rollback or completion) and removed; every new journal is written as version 4',
+      proof:'an interrupted restore journal is resolved and removed at the next start; a missing deletion ledger in versions 1 to 3 leaves that ledger untouched during rollback',
+      retirement:'after every supported installed build writes version-4 restore journals and the canonical baseline is verified',
+      sourceFiles:freeze(['source/core/repository-journals.js'])
     },
     {
       id:'l7-backup-protection-policy-v1',owner:'compatibility/exports',kind:'live-migration',

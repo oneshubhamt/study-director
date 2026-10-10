@@ -2,7 +2,7 @@
 
 Status of the work on this branch (`refactor/background-coordination`, draft PR #1): what is done, what is left, the wider programme and the agreed direction, and a record of the work so far.
 
-**Current state (2026-10-10):** the Device Folder now runs on the shared backup engine. All 138 fast tests pass, and the backup browser tests pass (Device Folder, restore safety, browser-data clear, encryption, exports). Next: the backup audit (section 2), then the notes brainstorm (3.0).
+**Current state (2026-10-10):** the backup engine design is complete: both locations run on the shared engine and the host draws both rows from engine status. Older stored data is now read only by the compatibility host, once (1.4). All 138 fast tests pass, and the backup browser tests pass. Next: the backup audit (section 2), then the notes brainstorm (3.0).
 
 ---
 
@@ -85,11 +85,28 @@ Goal (task #39, `docs/BACKUP-ENGINE.md`): one engine (`source/core/backup-provid
   - **Aborted maintenance.** A browser "clear site data" during canonical data maintenance was reported as an error. One aborted run in a row is now retried quietly; a second is reported. This was the intermittent `site-data-clear` flake.
 - **Paused state.** The Device Folder status shows `paused` while restores, updates or a browser-data clear hold backups.
 - **Docs** brought up to date:
-  - `BACKUP-ENGINE.md`: steps 1–4, 6 and 7 done; step 5 open for Drive's buttons.
+  - `BACKUP-ENGINE.md`: all seven steps done (step 5 on 2026-10-10, see 1.4).
   - `BACKGROUND-OPERATIONS.md`, `ARCHITECTURE.md`, `NOTIFICATIONS.md`.
   - The in-app guide has a Device Folder entry.
 
 Faster local loop: run each fast test in its own process with the hermetic flags `npm test` uses (`--experimental-loader ./tests/helpers/hermetic-loader.mjs --import ./tests/helpers/hermetic-runtime.mjs`), six at a time, and list failures. `npm test` stops at the first failure.
+
+### 1.4 Last engine step, start-up hint and read-once migration (2026-10-10)
+
+- **Drive's row is drawn by the host.** The engine no longer creates buttons. `renderDriveBackup()` in `app.html` draws the Google Drive row from `locationStatus('google-drive')` on every `subscribeStatus` notice, as the Device Folder row does. `locationStatus` gained `wasConnected` (so a lapsed sign-in reads "Signed out" with one Reconnect button) and `engineBusy` (another location's foreground operation holds the engine). `backingUp` also covers a running external backup. Buttons and order are unchanged: Back up now, Versions, Settings when connected; Reconnect after a lapse; Connect, Recover before first use. The Drive buttons are owner-gated like the Device Folder's.
+- **Device Folder row on Turn off.** Forgetting the folder now redraws the row at once. Before, status said "off" while the row briefly still said "On" (an intermittent `pwa-device-backup` failure).
+- **Start-up hint only after real loss.** "No local study data found…" now appears only when storage health shows that Saved Days or notes were saved in this browser before, no deletion history explains the emptiness, and no browser-data-clear notice is already showing. A brand-new install never sees it (`site-data-clear` browser test covers both).
+- **Read-once migration everywhere it was missing** (user's rule, 3.0). Older stored forms are converted once at start-up by `compatibility-host.js`, verified, and the old form retired; the ordinary runtime reads only the current form:
+  - backup verification record v2–v5 → v6;
+  - pending repository maintenance v1–v3 (in either key) → v4;
+  - the single-row note merge base `reconciliationBase.v1` → header plus one row per note (the key is now obsolete, owned by the compatibility host);
+  - attachment check record v1 → v2 (already converted; the ordinary validator no longer reads v1);
+  - data maintenance v5 is retired (maintenance runs again once).
+  Each conversion fails closed on an unknown shape and keeps the source untouched, and `verifyRetiredHostCompatibility` reports anything old still present.
+- **Two documented exceptions, both listed in the retirement registry:**
+  - restore journals v1–v3 (`restore-journal-payload-v1-v3`): a restore interrupted under an older build is resolved once by crash recovery, which must read it as written (a missing deletion ledger means "leave that ledger alone");
+  - backup password record v1 (`l7-backup-protection-policy-v1`): it can only be converted when the person next enters the password.
+- **Not local data:** old formats inside backup repositories and backup files (Drive, Device Folder, `.sdbackup`) are import adapters in the registry. They retire when old backups age out or are replaced.
 
 ---
 
@@ -102,8 +119,6 @@ Faster local loop: run each fast test in its own process with the hermetic flags
   - fewer Drive metadata round trips on history;
   - measure a 1,000-version, 50,000-object repository (list, history, cleanup).
 - **#46 incremental structured restore** (pending). Judged low value because text data is small; attachments are already reused locally. Close with that reasoning unless measurements say otherwise.
-- **Engine step 5:** the host renders Drive's controls from `locationStatus` as it already does for the Device Folder; the engine stops touching DOM buttons.
-- **Start-up hint for empty local data.** On every launch with no local data and no connected folder, a hint says "No local study data found…" with Restore from backup. A brand-new install sees it too. Decide whether it should only appear when there is evidence of earlier use.
 
 ---
 
@@ -121,6 +136,8 @@ The aim is a machine that works every time: cohesive, bounded, lean and fast, wi
 3. Hold a brainstorming session with the user to understand how to improve notes. Discuss first; build only after agreement.
 4. Then the background services (3.3).
 5. The session concludes only once all three — backup, notes, background services — are as good as we can reasonably make them.
+
+**Migration (user's rule, 2026-10-10).** Older data is read once, converted into the current canonical form, verified and retired, never used again. Only the compatibility host (`compatibility-host.js`, plus repository adapters where a transaction requires it) reads old forms; the ordinary runtime reads only current forms. Every conversion is listed in `contracts/compatibility.mjs` with its retirement condition, so the whole migration machinery can be deleted later, leaving one clean canonical data structure.
 
 **No upfront analysis.** Do not spend effort analysing or planning the notes and background-service phases until we reach them. The suggestions below are a starting list for those discussions, not a plan.
 

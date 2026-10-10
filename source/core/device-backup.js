@@ -88,6 +88,7 @@ registry.define('device-backup',1,()=>{
     function forgetFolder(text=''){
       handle=null;permission='unknown';baseline='';mode=supported?'off':'unsupported';
       presentation.resolve(ID,'permission');if(text)presentation.feedback(ID,text,false);
+      publish();
     }
     // A folder deleted or moved outside the app is forgotten, so the row
     // offers to choose one again instead of failing every backup.

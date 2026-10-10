@@ -105,7 +105,6 @@ export const APP_META_KEYS=freeze({
   repositoryIntegrityScrub:'repositoryIntegrityScrub',
   managedProviderBackupPending:'managedProviderBackupPending.v1',
   repositoryMaintenancePending:'repositoryMaintenancePending.v2',
-  reconciliationBaseLegacy:'reconciliationBase.v1',
   reconciliationBase:'reconciliationBase.v2',
   reconciliationBaseNotePrefix:'reconciliationBaseNote.v1:'
 });
@@ -116,13 +115,14 @@ export const OBSOLETE_APP_META_KEYS=freeze({
   reflectionDraftMigration:'reflectionDraftMigration.v1',
   repositoryMaintenancePendingLegacy:'repositoryMaintenancePending.v1',
   archiveClearJournalStateLegacy:'archiveClearJournalState.v1',
-  archiveClearJournalPayloadPrefixLegacy:'archiveClearJournalPayload.v1:'
+  archiveClearJournalPayloadPrefixLegacy:'archiveClearJournalPayload.v1:',
+  reconciliationBaseLegacy:'reconciliationBase.v1'
 });
 
 export const APP_META_VALIDATION_OWNERS=freeze({
   repositories:freeze(['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','areaNoteRecoveryPrefix','savedDayDeletionPrefix','areaNoteDeletionPrefix','attachmentDeletionPrefix']),
   journals:freeze(['libraryClearJournalState','libraryClearJournalPayloadPrefix','restoreJournalState','restoreJournalPayload','mutationLease']),
-  host:freeze(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBaseLegacy','reconciliationBase','reconciliationBaseNotePrefix'])
+  host:freeze(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix'])
 });
 
 function appMetaValidationOwner(name){
@@ -213,19 +213,18 @@ export const DATA_ARCHITECTURE=freeze({
       personalPreferences:surface('canonical-preferences','repositories','protect','retained','PortablePreferences.v2'),
       canonicalMutationEpoch:surface('coordination','repositories','operational','replace atomically with portable canonical mutations; reseed after verified startup compatibility','CanonicalMutationEpoch.v1'),
       insightsDatasetRevision:surface('derived-revision','repositories','operational','rebuildable','InsightsDatasetRevision.v2',{rebuildFrom:'canonical IndexedDB data revisions'}),
-      dataMaintenance:surface('operational','repositories','operational','replace on maintenance','DataMaintenance.v5'),
+      dataMaintenance:surface('operational','repositories','operational','replace on maintenance','DataMaintenance.v6'),
       libraryClearJournalState:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','LibraryClearJournalState.v1',{protects:'Library clear mutation',created:'before destructive Library clear commit',cleared:'after verified completion or rollback',supersededBy:'verified post-operation canonical state'}),
       restoreJournalState:surface('recovery-journal','repository-journals','operational','until verified completion/rollback','RestoreJournalState.v1',{protects:'checkpoint restore mutation',created:'before destructive restore commit',cleared:'after verified completion or rollback',supersededBy:'verified post-restore canonical state'}),
       restoreJournalPayload:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','RestoreJournalPayload.v4 (reads v1-v3)',{protects:'canonical dataset rollback image',created:'before destructive restore commit',cleared:'after verified completion or rollback',supersededBy:'verified post-restore canonical state'}),
       mutationLease:surface('coordination','repository-journals','operational','lease lifetime','MutationLease.v1'),
       verifiedRecoveryBackups:surface('operational','host','operational','replace on verified backup','VerifiedRecoveryBackups.v1'),
       backupProtection:surface('security-policy','exports','operational','while backup protection enabled','BackupProtection.v2'),
-      attachmentIntegrityAudit:surface('derived-health','host','protect','replace on audit; opaque identity/error details only','AttachmentIntegrityAudit.v1',{rebuildFrom:'indexedDb.assets + opfs.attachments'}),
+      attachmentIntegrityAudit:surface('derived-health','host','protect','replace on audit; opaque identity/error details only','AttachmentIntegrityAudit.v2',{rebuildFrom:'indexedDb.assets + opfs.attachments'}),
       automaticDeviceBackup:surface('backup-configuration','device-backup','operational','while connected','DeviceBackupSettings.v3'),
       repositoryIntegrityScrub:surface('derived-health','backup','operational','transactional progress/completion bound to repository identity; opaque quarantined object ids only; no user-content details','RepositoryIntegrityScrub.v3',{rebuildFrom:'external backup repository manifests and objects'}),
       managedProviderBackupPending:surface('operational','backup','operational','until the affected managed provider successfully publishes a later current backup or is explicitly disconnected','ManagedProviderBackupPending.v1'),
       repositoryMaintenancePending:surface('operational','backup','operational','until post-commit repository retention and safe orphan reclamation complete','RepositoryMaintenancePending.v2'),
-      reconciliationBaseLegacy:surface('legacy-migration','host','protect','remove after verified ReconciliationBase.v2 migration','ReconciliationBase.v1'),
       reconciliationBase:surface('reconciliation-base','host','protect','advance atomically after a verified current-checkpoint reconciliation','ReconciliationBase.v2')
     }),
     prefixes:freeze({
@@ -239,9 +238,10 @@ export const DATA_ARCHITECTURE=freeze({
     }),
     obsolete:freeze({
       reflectionDraftMigration:surface('legacy-residue','compatibility','operational','remove during compatibility migration','ReflectionDraftMigration.v1'),
-      repositoryMaintenancePendingLegacy:surface('legacy-migration','compatibility','operational','migrate provider maintenance intent to RepositoryMaintenancePending.v2, then remove after verified replacement','RepositoryMaintenancePending.v1'),
+      repositoryMaintenancePendingLegacy:surface('legacy-migration','compatibility','operational','migrate provider maintenance intent to the current RepositoryMaintenancePending.v2 identity, then remove after verified replacement','RepositoryMaintenancePending.v1'),
       archiveClearJournalStateLegacy:surface('legacy-migration','compatibility','protect','migrate once to LibraryClearJournalState.v1, then remove after verified replacement','ArchiveClearJournalState.v1'),
-      archiveClearJournalPayloadPrefixLegacy:surface('legacy-migration','compatibility','protect','migrate once to LibraryClearJournalChunk.v1, then remove after verified replacement','ArchiveClearJournalChunk.v1')
+      archiveClearJournalPayloadPrefixLegacy:surface('legacy-migration','compatibility','protect','migrate once to LibraryClearJournalChunk.v1, then remove after verified replacement','ArchiveClearJournalChunk.v1'),
+      reconciliationBaseLegacy:surface('legacy-migration','compatibility','protect','migrate once to ReconciliationBase.v2 plus ReconciliationBaseNote.v1 rows, then remove after verified replacement','ReconciliationBase.v1')
     })
   }),
   external:freeze({

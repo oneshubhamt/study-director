@@ -53,6 +53,6 @@ A backup file stays one self-contained file covering everything, not a repositor
 2. Device Folder backups run through the engine; the Device Folder controller keeps only the folder connection, permission and its status row. **Done.**
 3. Device Folder history, restore, maintenance and scrub run through the engine; the duplicates are deleted. **Done.**
 4. One scheduler and the change-time rule for both locations. **Done.**
-5. The engine no longer renders location controls itself; the host renders them from engine status. *Open:* the Device Folder row already renders from `locationStatus`; Drive's buttons are still rendered by the engine.
+5. The engine no longer renders location controls itself; the host renders both rows from `locationStatus` (with `wasConnected` and `engineBusy`) and redraws on `subscribeStatus`. **Done.**
 6. Version History talks to the engine for every location, with no per-location branches. **Done.**
 7. Someone who uses neither location: every backup path in the app works and stays quiet (`tests/integration/backup/no-backup-location.mjs`). **Done.**

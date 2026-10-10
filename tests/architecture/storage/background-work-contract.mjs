@@ -18,7 +18,8 @@ const drive=fs.readFileSync('source/external/drive.js','utf8');
 
 assert.match(app,/REPOSITORY_MAINTENANCE_VERSION=4/u);
 assert.match(app,/nextEligibleAt[\s\S]*reason[\s\S]*repositoryScope[\s\S]*requestId/u,'durable maintenance intent must carry eligibility, reason and repository generation');
-assert.match(metadata,/version!==1&&version!==2&&version!==3&&version!==4/u,'legacy maintenance metadata must remain readable during migration');
+assert.match(metadata,/Number\(value\.version\)!==4/u,'the ordinary runtime reads only the current maintenance intent');
+assert.match(fs.readFileSync('source/core/compatibility-host.js','utf8'),/MAINTENANCE_VERSION=4/u,'older maintenance intents are converted once by the compatibility host');
 
 assert.match(background,/input\.intent\.clear\(pending\)/u,'maintenance completion must carry its serviced request');
 assert.match(background,/generation!==requestGeneration/u,'requests arriving after a commit must retain their scheduling opportunity');

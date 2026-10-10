@@ -14,7 +14,7 @@ registry.define('compatibility-host',1,()=>{
     exactObject(input,['baselineId','facadeFactory','keys','local','ownership','plan','preferences','identity','metadata','live','topology','verification','backups','helpers'],'Compatibility-host input');
     if(typeof input.baselineId!=='string'||!input.baselineId||typeof input.facadeFactory!=='function')throw new TypeError('Compatibility-host facade configuration is invalid.');
     exactObject(input.keys,['storage','obsolete','appMeta'],'Compatibility-host key contract');
-    exactObject(input.keys.appMeta,['personalPreferences','dataMaintenance','verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryIntegrityScrub','repositoryMaintenancePending','repositoryMaintenancePendingLegacy','libraryClearJournalState','libraryClearJournalPayloadPrefix','archiveClearJournalStateLegacy','archiveClearJournalPayloadPrefixLegacy'],'Compatibility-host appMeta key contract');
+    exactObject(input.keys.appMeta,['personalPreferences','dataMaintenance','verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryIntegrityScrub','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseLegacy','repositoryMaintenancePending','repositoryMaintenancePendingLegacy','libraryClearJournalState','libraryClearJournalPayloadPrefix','archiveClearJournalStateLegacy','archiveClearJournalPayloadPrefixLegacy'],'Compatibility-host appMeta key contract');
     functions(input.local,['getText','getJson','setText','remove','lastError'],'Compatibility-host local storage');
     functions(input.ownership,['issueWriteToken','assertWriteToken','isOwnershipLostError'],'Compatibility-host ownership');
     functions(input.plan,['hydrate','library','readDraft','writeDraft','writeLibrary','settled','readCanonical'],'Compatibility-host Plan adapter');
@@ -22,7 +22,7 @@ registry.define('compatibility-host',1,()=>{
     for(const key of Object.keys(input.preferences))if(typeof input.preferences[key]!=='function')throw new TypeError(`Compatibility-host Preferences adapter ${key} must be a function.`);
     exactObject(input.identity,['getId','installationKey','legacyKey'],'Compatibility-host installation identity adapter');
     if(typeof input.identity.getId!=='function')throw new TypeError('Compatibility-host installation identity getId is required.');
-    functions(input.metadata,['readRow','listRows','isCurrentDataMaintenance','writeValue','removeRow','releaseBackupFile','normalizeVerifiedRecovery','normalizeAttachmentIntegrity','normalizeRepositoryIntegrity'],'Compatibility-host metadata adapter');
+    functions(input.metadata,['readRow','listRows','isCurrentDataMaintenance','writeValue','removeRow','releaseBackupFile','normalizeVerifiedRecovery','normalizeAttachmentIntegrity','normalizeRepositoryIntegrity','normalizeReconciliationNotes','normalizeReconciliationHeader','reconciliationKeyFingerprint'],'Compatibility-host metadata adapter');
     functions(input.live,['migrateActiveSession','migrateAreaNotes','migrateAreaNoteRecovery','migrateDeletionState','migrateDailyRecords','migrateInsightsRevisionEnvelope','cleanupLegacyAttachments','cleanupObsoleteMetadata'],'Compatibility-host live adapters');
     functions(input.topology,['retire'],'Compatibility-host topology adapter');
     functions(input.verification,['activeSession','areaNotes','areaNoteRecovery','deletionState','dailyRecords','insightsRevisionEnvelope','canonicalStores','legacyAttachments','obsoleteMetadata','topology','freshBackup'],'Compatibility-host verification adapters');
@@ -58,17 +58,48 @@ registry.define('compatibility-host',1,()=>{
       const sourceRevision=validTimestamp(value.sourceRevision)?new Date(value.sourceRevision).toISOString():'';
       return freeze({format:'study-director.device-backup-settings',version:3,enabled:true,directoryHandle:handle,lastBackupAt,lastFilename:'',sourceRevision});
     }
+    // Provider maintenance intents: versions 1 to 3 lack later scheduling fields;
+    // every version converts to the current version 4.
+    const MAINTENANCE_FORMAT='study-director.repository-maintenance-pending',MAINTENANCE_VERSION=4;
     function normalizeRepositoryMaintenance(value){
-      const format='study-director.repository-maintenance-pending',version=Number(value&&value.version),entries=[],seen=new Set();
-      if(!value||!exactKeys(value,['format','version','entries'])||value.format!==format||(version!==1&&version!==2&&version!==3)||!Array.isArray(value.entries)||value.entries.length>8)return null;
+      const version=Number(value&&value.version),entries=[],seen=new Set();
+      if(!value||!exactKeys(value,['format','version','entries'])||value.format!==MAINTENANCE_FORMAT||!(version>=1&&version<=MAINTENANCE_VERSION)||!Array.isArray(value.entries)||value.entries.length>8)return null;
+      const entryKeys=[['providerId','requestedAt'],['providerId','requestedAt','nextEligibleAt','reason'],['providerId','requestedAt','nextEligibleAt','reason','repositoryScope'],['providerId','requestedAt','nextEligibleAt','reason','repositoryScope','requestId']][version-1];
       for(const raw of value.entries){
-        const legacy=version===1,entryKeys=legacy?['providerId','requestedAt']:version===2?['providerId','requestedAt','nextEligibleAt','reason']:['providerId','requestedAt','nextEligibleAt','reason','repositoryScope'];
         if(!raw||!exactKeys(raw,entryKeys))return null;
-        const providerId=String(raw.providerId||''),requestedAt=String(raw.requestedAt||''),nextEligibleAt=legacy?requestedAt:String(raw.nextEligibleAt||''),reason=legacy?'legacy':String(raw.reason||''),repositoryScope=version===3?String(raw.repositoryScope||''):'';
-        if(!/^[a-z][a-z0-9-]{0,40}$/u.test(providerId)||seen.has(providerId)||!validTimestamp(requestedAt)||!validTimestamp(nextEligibleAt)||!/^[a-z][a-z0-9-]{0,47}$/u.test(reason)||repositoryScope.length>320)return null;
-        seen.add(providerId);entries.push(freeze({providerId,requestedAt,nextEligibleAt,reason,repositoryScope}));
+        const providerId=String(raw.providerId||''),requestedAt=String(raw.requestedAt||''),nextEligibleAt=version===1?requestedAt:String(raw.nextEligibleAt||''),reason=version===1?'legacy':String(raw.reason||''),repositoryScope=version>=3?String(raw.repositoryScope||''):'',requestId=version===4?raw.requestId:'';
+        if(!/^[a-z][a-z0-9-]{0,40}$/u.test(providerId)||seen.has(providerId)||!validTimestamp(requestedAt)||!validTimestamp(nextEligibleAt)||!/^[a-z][a-z0-9-]{0,47}$/u.test(reason)||repositoryScope.length>320||typeof requestId!=='string'||requestId&&!/^[a-f0-9-]{36}$/u.test(requestId))return null;
+        seen.add(providerId);entries.push(freeze({providerId,requestedAt,nextEligibleAt,reason,repositoryScope,requestId}));
       }
-      return freeze({format,version:3,entries:freeze(entries.sort((a,b)=>a.providerId.localeCompare(b.providerId)))});
+      return freeze({format:MAINTENANCE_FORMAT,version:MAINTENANCE_VERSION,entries:freeze(entries.sort((a,b)=>a.providerId.localeCompare(b.providerId)))});
+    }
+    // Reconciliation base version 1 kept every Ongoing Note's merge base in one
+    // row; the current form is a header plus one row per note.
+    async function legacyReconciliationBase(value){
+      if(!value||!exactKeys(value,['format','version','checkpointId','establishedAt','notes'])||value.format!=='study-director.reconciliation-base'||Number(value.version)!==1||!/^cp_[a-f0-9]{32}$/u.test(String(value.checkpointId||''))||!validTimestamp(value.establishedAt)||!value.notes||typeof value.notes!=='object'||Array.isArray(value.notes))return null;
+      const notes=metadata.normalizeReconciliationNotes(value.notes);if(!notes)return null;
+      const keys=Object.keys(notes).sort(),establishedAt=new Date(value.establishedAt).toISOString();
+      let fingerprint;try{fingerprint=await metadata.reconciliationKeyFingerprint(keys);}catch{return null;}
+      const header=metadata.normalizeReconciliationHeader({format:'study-director.reconciliation-base',version:2,checkpointId:String(value.checkpointId),establishedAt,noteCount:keys.length,noteKeyFingerprint:fingerprint});
+      return header?freeze({header,notes:freeze(keys.map(key=>freeze({suffix:encodeURIComponent(key),value:freeze({format:'study-director.reconciliation-base-note',version:1,key,text:notes[key]})})))}):null;
+    }
+    async function migrateReconciliationBase(requireOwnership){
+      const legacy=await metadata.readRow(appMeta.reconciliationBaseLegacy);if(!legacy)return freeze({migrated:0,removed:0});
+      const converted=await legacyReconciliationBase(legacy.value);
+      if(!converted)throw new Error('Historical note reconciliation base has an unknown shape and was preserved without modification.');
+      const currentRow=await metadata.readRow(appMeta.reconciliationBase),current=currentRow?metadata.normalizeReconciliationHeader(currentRow.value):null;
+      let migrated=0,removed=0;
+      if(!current||Date.parse(current.establishedAt)<Date.parse(converted.header.establishedAt)){
+        const keep=new Set(converted.notes.map(note=>appMeta.reconciliationBaseNotePrefix+note.suffix));
+        for(const row of await metadata.listRows()){const key=String(row&&row.key||'');if(key.startsWith(appMeta.reconciliationBaseNotePrefix)&&!keep.has(key)){requireOwnership();await metadata.removeRow(key);removed++;}}
+        for(const note of converted.notes){requireOwnership();await metadata.writeValue(appMeta.reconciliationBaseNotePrefix+note.suffix,note.value,converted.header.establishedAt);}
+        requireOwnership();await metadata.writeValue(appMeta.reconciliationBase,converted.header,converted.header.establishedAt);
+        const rows=await metadata.listRows(),header=rows.find(row=>String(row&&row.key||'')===appMeta.reconciliationBase),noteRows=rows.filter(row=>String(row&&row.key||'').startsWith(appMeta.reconciliationBaseNotePrefix));
+        if(!header||!helpers.same(header.value,converted.header)||noteRows.length!==converted.notes.length||converted.notes.some(note=>!noteRows.some(row=>row.key===appMeta.reconciliationBaseNotePrefix+note.suffix&&helpers.same(row.value,note.value))))throw new Error('Historical note reconciliation base could not be verified after conversion. The legacy source was preserved.');
+        migrated=1;
+      }
+      requireOwnership();await metadata.removeRow(appMeta.reconciliationBaseLegacy);removed++;
+      return freeze({migrated,removed});
     }
     async function sha256Hex(bytes){
       if(!globalThis.crypto?.subtle)throw new Error('Historical Library-clear journal migration requires SHA-256 support.');
@@ -140,24 +171,24 @@ registry.define('compatibility-host',1,()=>{
         if(!verified||!helpers.same(verified.value,normalized))throw new Error('Historical backup verification state could not be verified after conversion.');
         migrated++;
       }
-      const legacyMaintenance=await metadata.readRow(appMeta.repositoryMaintenancePendingLegacy);
-      if(legacyMaintenance){
-        const legacyValue=normalizeRepositoryMaintenance(legacyMaintenance.value);
-        if(!legacyValue)throw new Error('Historical repository-maintenance metadata has an unknown shape and was preserved without modification.');
-        const currentMaintenance=await metadata.readRow(appMeta.repositoryMaintenancePending),currentValue=currentMaintenance?normalizeRepositoryMaintenance(currentMaintenance.value):null;
-        if(currentMaintenance&&!currentValue)throw new Error('Current repository-maintenance metadata has an unknown shape and was preserved without modification.');
-        const mergedByProvider=new Map((legacyValue.entries||[]).map(entry=>[entry.providerId,entry]));
-        for(const entry of currentValue?.entries||[])mergedByProvider.set(entry.providerId,entry);
-        const merged=freeze({format:'study-director.repository-maintenance-pending',version:3,entries:freeze([...mergedByProvider.values()].sort((a,b)=>a.providerId.localeCompare(b.providerId)))});
+      const legacyMaintenance=await metadata.readRow(appMeta.repositoryMaintenancePendingLegacy),currentMaintenance=await metadata.readRow(appMeta.repositoryMaintenancePending);
+      const legacyValue=legacyMaintenance?normalizeRepositoryMaintenance(legacyMaintenance.value):null,currentValue=currentMaintenance?normalizeRepositoryMaintenance(currentMaintenance.value):null;
+      if(legacyMaintenance&&!legacyValue)throw new Error('Historical repository-maintenance metadata has an unknown shape and was preserved without modification.');
+      if(currentMaintenance&&!currentValue)throw new Error('Current repository-maintenance metadata has an unknown shape and was preserved without modification.');
+      if(legacyMaintenance||currentMaintenance&&!helpers.same(currentMaintenance.value,currentValue)){
+        const byProvider=new Map((legacyValue?.entries||[]).map(entry=>[entry.providerId,entry]));
+        for(const entry of currentValue?.entries||[])byProvider.set(entry.providerId,entry);
+        const merged=freeze({format:MAINTENANCE_FORMAT,version:MAINTENANCE_VERSION,entries:freeze([...byProvider.values()].sort((a,b)=>a.providerId.localeCompare(b.providerId)))});
         requireOwnership();
         if(merged.entries.length){
           await metadata.writeValue(appMeta.repositoryMaintenancePending,merged,currentMaintenance?.updatedAt||legacyMaintenance.updatedAt);
           const verified=await metadata.readRow(appMeta.repositoryMaintenancePending);
-          if(!verified||!helpers.same(normalizeRepositoryMaintenance(verified.value),merged))throw new Error('Historical repository-maintenance metadata replacement could not be verified. The legacy source was preserved.');
+          if(!verified||!helpers.same(verified.value,merged))throw new Error('Historical repository-maintenance metadata replacement could not be verified. The legacy source was preserved.');
           migrated++;
-        }
-        requireOwnership();await metadata.removeRow(appMeta.repositoryMaintenancePendingLegacy);removed++;
+        }else if(currentMaintenance){await metadata.removeRow(appMeta.repositoryMaintenancePending);removed++;}
+        if(legacyMaintenance){requireOwnership();await metadata.removeRow(appMeta.repositoryMaintenancePendingLegacy);removed++;}
       }
+      const reconciliation=await migrateReconciliationBase(requireOwnership);migrated+=reconciliation.migrated;removed+=reconciliation.removed;
       const rows=await metadata.listRows();
       for(const row of rows){const key=String(row&&row.key||'');if(!key.startsWith(LEGACY_BACKUP_PROVIDER_OPERATION_PREFIX))continue;const fileName=String(row?.value?.backupFile?.name||'');requireOwnership();await metadata.removeRow(key);removed++;if(fileName){try{await metadata.releaseBackupFile(fileName);}catch{ /* stale compatibility scratch files are non-authoritative */ }}}
       return freeze({status:migrated||removed?'migrated':'not-needed',migrated,removed});
@@ -169,11 +200,16 @@ registry.define('compatibility-host',1,()=>{
       if(Number(protection?.value?.version)===1)present.push(`${appMeta.backupProtection}:v1`);
       const device=rows.find(row=>String(row&&row.key||'')===appMeta.automaticDeviceBackup);
       if(Number(device?.value?.version)===1)present.push(`${appMeta.automaticDeviceBackup}:v1`);
+      const audit=rows.find(row=>String(row&&row.key||'')===appMeta.attachmentIntegrityAudit);
+      if(audit&&!helpers.same(audit.value,metadata.normalizeAttachmentIntegrity(audit.value)))present.push(`${appMeta.attachmentIntegrityAudit}:v${Number(audit.value?.version)||'?'}`);
       const scrub=rows.find(row=>String(row&&row.key||'')===appMeta.repositoryIntegrityScrub);
       if(scrub&&!helpers.same(scrub.value,metadata.normalizeRepositoryIntegrity(scrub.value)))present.push(`${appMeta.repositoryIntegrityScrub}:v${Number(scrub.value?.version)||'?'}`);
       const maintenance=rows.find(row=>String(row&&row.key||'')===appMeta.dataMaintenance);
       if(maintenance&&!metadata.isCurrentDataMaintenance(maintenance.value))present.push(`${appMeta.dataMaintenance}:noncanonical`);
       if(rows.some(row=>String(row&&row.key||'')===appMeta.repositoryMaintenancePendingLegacy))present.push(appMeta.repositoryMaintenancePendingLegacy);
+      const pending=rows.find(row=>String(row&&row.key||'')===appMeta.repositoryMaintenancePending);
+      if(pending&&Number(pending.value?.version)!==MAINTENANCE_VERSION)present.push(`${appMeta.repositoryMaintenancePending}:v${Number(pending.value?.version)||'?'}`);
+      if(rows.some(row=>String(row&&row.key||'')===appMeta.reconciliationBaseLegacy))present.push(appMeta.reconciliationBaseLegacy);
       if(rows.some(row=>String(row&&row.key||'')===appMeta.archiveClearJournalStateLegacy))present.push(appMeta.archiveClearJournalStateLegacy);
       for(const row of rows)if(String(row&&row.key||'').startsWith(appMeta.archiveClearJournalPayloadPrefixLegacy))present.push(String(row.key));
       return freeze({ok:present.length===0,present:freeze(present)});
