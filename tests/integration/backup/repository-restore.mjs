@@ -125,6 +125,32 @@ assert.ok(maxStructuredReads>1,'Independent structured repository objects should
 const attachmentObjectIds=new Set(manifest.objects.filter(entry=>entry.kind==='attachment').map(entry=>entry.objectId)),leaseReleaseCounts=new Map();
 const leasedReadObject=async entry=>{const blob=objectFiles.get(entry.objectId)||null;if(!blob)return null;return freeze({blob,release:async()=>leaseReleaseCounts.set(entry.objectId,(leaseReleaseCounts.get(entry.objectId)||0)+1)});};
 assert.equal(manifest.protectedCheckpointManifest.version,2);assert.equal(manifest.checkpoint.checkpointId,checkpointId);assert.equal(manifest.encrypted,true,'repository publication must preserve the configured encrypted protection state');
+// Checkpoints in older repository formats stay restorable until they age out of
+// the repository (registry: backup-repository-v1-v4). Version 4 has today's
+// shape; versions 1 to 3 kept one object per record instead of packed shards,
+// so the fixture unpacks this checkpoint's shards into that older layout.
+{
+  const sha256=async text=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))].map(byte=>byte.toString(16).padStart(2,'0')).join('');
+  const plainText=async (blob,gzip)=>{let stream=(await decryptBlob(blob)).stream();if(gzip)stream=stream.pipeThrough(new DecompressionStream('gzip'));return new Response(stream).text();};
+  const unpacked=new Map(objectFiles),perRecord=[];let sequence=0;
+  for(const entry of manifest.objects.filter(item=>item.kind==='structuredPack')){
+    const pack=JSON.parse(await plainText(objectFiles.get(entry.objectId),entry.compression==='gzip'));
+    for(const member of pack.members){
+      const text=JSON.stringify({format:'study-director.backup-repository-object',version:1,kind:member.kind,key:member.key,payload:member.payload});
+      const expected=entry.members.find(row=>row.kind===member.kind&&row.key===member.key);assert.equal(await sha256(text),expected.fingerprint,'the unpacked object matches its packed fingerprint');
+      const stored=await encryptBlob(new Blob([text])),objectId='obj_'+String(++sequence).padStart(32,'0');unpacked.set(objectId,stored);
+      perRecord.push(freeze({objectId,kind:member.kind,key:member.key,fingerprint:expected.fingerprint,compression:'none',sourceBytes:expected.sourceBytes,storedBytes:stored.size,storedChecksum:await codec.checksumBlob(stored)}));
+    }
+  }
+  const layoutBefore4=freeze([...manifest.objects.filter(item=>item.kind!=='structuredPack'),...perRecord]),readUnpacked=async entry=>unpacked.get(entry.objectId)||null;
+  for(const version of [1,2,3,4]){
+    // Before version 5 the counts also named the checkpoint manifest and personal data.
+    const counts=freeze({...manifest.counts,checkpointManifest:1,personalData:perRecord.some(item=>item.kind==='personalData')?1:0});
+    const older=freeze({...manifest,version,counts,objects:version<4?layoutBefore4:manifest.objects});
+    const candidate=await runtime.repository.inspect(older,version<4?readUnpacked:readObject,{interactive:false,committed:true});
+    assert.ok(candidate,`a version ${version} checkpoint can still be inspected for restore`);await candidate.release?.();
+  }
+}
 // Simulate another installation receiving this checkpoint rather than the publishing installation's newly established local ancestry.
 reconciliationBase=null;reconciliationBaseNotes=Object.create(null);
 

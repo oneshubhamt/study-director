@@ -235,6 +235,14 @@ export const COMPATIBILITY_REGISTRY=freeze({
       retirement:'after all required historical backups are replaced by a fresh current-format verified backup',
       sourceFiles:freeze(['source/core/backup-codec.js','source/core/backup.js','source/core/compatibility-codecs.js','source/external/drive.js'])
     },
+    {
+      id:'backup-repository-v1-v4',owner:'managed-repository',kind:'import-adapter',
+      source:'Device Folder and Google Drive checkpoints written before SDVB75F10: repository manifest versions 1 to 4 (version 1 without retention or a commit marker; up to version 4 with Reflection Draft packs and older Active Session shapes), history entries without summaries, and older Drive maintenance markers',
+      target:'the current restore model; every new checkpoint is written as manifest version 5',
+      proof:'old checkpoints are only read, never rewritten; their contents pass through the compatibility codecs and current validation before restore',
+      retirement:'after every repository holds only version-5 checkpoints, older backup versions having aged out under the 15-point retention or been replaced',
+      sourceFiles:freeze(['source/core/managed-repository.js','source/core/backup.js','source/core/backup-provider.js','source/external/drive.js'])
+    },
   ]),
   protocolCompatibility:items([
     {
