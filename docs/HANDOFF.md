@@ -116,7 +116,7 @@ Faster local loop: run each fast test in its own process with the hermetic flags
 
 ## 2. Remaining from the rest of this work
 
-- **The user's audit request.** After the move, audit all three backup mechanisms again (file, Device Folder, Drive) and the shared machinery, optimise, and report.
+- **Audit done (2026-10-10):** `docs/AUDIT-DATA-AND-BACKUP.md` covers the data topology and the whole backup system, with findings ranked and a suggested order. Nothing was implemented; next is discussing it with the user.
 - **#45 Drive/Device performance and reliability review** (open). Candidates:
   - bounded writes in `device-folder-storage`;
   - plain-text history sidecars so Device Folder history shows summaries while encryption is locked;
