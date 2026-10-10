@@ -2,7 +2,7 @@
 
 Status of the work on this branch (`refactor/background-coordination`, draft PR #1): what is done, what is left, the wider programme and the agreed direction, and a record of the work so far.
 
-**Current state (2026-10-10):** the backup engine design is complete: both locations run on the shared engine and the host draws both rows from engine status. Older stored data is read only by the compatibility host, once (1.4). The audit's schema step is done (1.5): stable record names, one last-backup record, a location-keyed verification record, Device Folder settings v4, one emergency-copy budget and a download-free Drive scrub. All 138 fast tests and the browser smoke suite pass. The engine draws no UI any more; both locations are drawn by the host the same way (1.6). Next: #45/#46 and the compatibility-layer isolation check (#64).
+**Current state (2026-10-10):** the backup system is in its target shape. Both locations run on the shared engine, the host draws every row, older stored data is read once by the compatibility host, and every audit finding is closed (`docs/AUDIT-DATA-AND-BACKUP.md`). Retention tiers no longer share a week or a month, so history reaches four to five months back. All 140 fast tests and the browser smoke suite pass. Next: the notes brainstorm (3.0 step 3, 3.1).
 
 ---
 
@@ -158,8 +158,8 @@ Your decisions on the audit (`docs/AUDIT-DATA-AND-BACKUP.md`) and what was done:
 
 ## 2. Remaining from the rest of this work
 
-- **Audit done (2026-10-10):** `docs/AUDIT-DATA-AND-BACKUP.md` covers the data topology and the whole backup system, with findings ranked and a suggested order. Your decisions and the schema step are in 1.5. B5 is done (1.6). Still open: B7 retention and B8 restore names (to propose), #45/#46 and the compatibility-layer isolation check (#64).
-- **#45 and #46:** done and closed (1.8).
+- **Audit:** every finding is closed, including B7 retention and B8 restore names (1.7, 1.8). #45 and #46 are done (1.8).
+- **Left open on purpose:** encryption (later: end-to-end, login first), and measuring restore of a very large library.
 
 ---
 
