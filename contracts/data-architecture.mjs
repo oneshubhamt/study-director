@@ -89,7 +89,6 @@ export const APP_META_KEYS=freeze({
   backupPreparationUnitPrefix:'backupPreparationUnit.v1:',
   insightsDatasetRevision:'insightsDatasetRevision',
   dataMaintenance:'dataMaintenance',
-  areaNoteRecoveryPrefix:'areaNoteRecovery.v1:',
   savedDayDeletionPrefix:'savedDayDeletion.v1:',
   areaNoteDeletionPrefix:'areaNoteDeletion.v1:',
   attachmentDeletionPrefix:'attachmentDeletion.v1:',
@@ -116,11 +115,12 @@ export const OBSOLETE_APP_META_KEYS=freeze({
   repositoryMaintenancePendingLegacy:'repositoryMaintenancePending.v1',
   archiveClearJournalStateLegacy:'archiveClearJournalState.v1',
   archiveClearJournalPayloadPrefixLegacy:'archiveClearJournalPayload.v1:',
-  reconciliationBaseLegacy:'reconciliationBase.v1'
+  reconciliationBaseLegacy:'reconciliationBase.v1',
+  areaNoteRecoveryPrefix:'areaNoteRecovery.v1:'
 });
 
 export const APP_META_VALIDATION_OWNERS=freeze({
-  repositories:freeze(['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','areaNoteRecoveryPrefix','savedDayDeletionPrefix','areaNoteDeletionPrefix','attachmentDeletionPrefix']),
+  repositories:freeze(['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','savedDayDeletionPrefix','areaNoteDeletionPrefix','attachmentDeletionPrefix']),
   journals:freeze(['libraryClearJournalState','libraryClearJournalPayloadPrefix','restoreJournalState','restoreJournalPayload','mutationLease']),
   host:freeze(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix'])
 });
@@ -216,7 +216,7 @@ export const DATA_ARCHITECTURE=freeze({
       dataMaintenance:surface('operational','repositories','operational','replace on maintenance','DataMaintenance.v6'),
       libraryClearJournalState:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','LibraryClearJournalState.v1',{protects:'Library clear mutation',created:'before destructive Library clear commit',cleared:'after verified completion or rollback',supersededBy:'verified post-operation canonical state'}),
       restoreJournalState:surface('recovery-journal','repository-journals','operational','until verified completion/rollback','RestoreJournalState.v1',{protects:'checkpoint restore mutation',created:'before destructive restore commit',cleared:'after verified completion or rollback',supersededBy:'verified post-restore canonical state'}),
-      restoreJournalPayload:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','RestoreJournalPayload.v4 (reads v1-v3)',{protects:'canonical dataset rollback image',created:'before destructive restore commit',cleared:'after verified completion or rollback',supersededBy:'verified post-restore canonical state'}),
+      restoreJournalPayload:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','RestoreJournalPayload.v4',{protects:'canonical dataset rollback image',created:'before destructive restore commit',cleared:'after verified completion or rollback',supersededBy:'verified post-restore canonical state'}),
       mutationLease:surface('coordination','repository-journals','operational','lease lifetime','MutationLease.v1'),
       verifiedRecoveryBackups:surface('operational','host','operational','replace on verified backup','VerifiedRecoveryBackups.v1'),
       backupProtection:surface('security-policy','exports','operational','while backup protection enabled','BackupProtection.v2'),
@@ -229,7 +229,6 @@ export const DATA_ARCHITECTURE=freeze({
     }),
     prefixes:freeze({
       backupPreparationUnitPrefix:surface('derived-performance','repositories','operational','disposable; rebuild from canonical data after loss, uncertainty or representation change','BackupPreparationUnit.v1',{rebuildFrom:'portable canonical IndexedDB state'}),
-      areaNoteRecoveryPrefix:surface('legacy-migration','repositories','protect','fold once into canonical AreaNote rows (newer revision wins), then remove in the same transaction','AreaNoteRecovery.v1'),
       savedDayDeletionPrefix:surface('canonical-deletion-history','repositories','protect','retain until the same Saved Day is recreated','SavedDayDeletion.v1'),
       areaNoteDeletionPrefix:surface('canonical-deletion-history','repositories','protect','retain until the same Ongoing Note is recreated','AreaNoteDeletion.v1'),
       attachmentDeletionPrefix:surface('canonical-deletion-history','repositories','protect-identifiers','retain until the same Attachment Library identity is explicitly restored/recreated','AttachmentDeletion.v1'),
@@ -241,7 +240,8 @@ export const DATA_ARCHITECTURE=freeze({
       repositoryMaintenancePendingLegacy:surface('legacy-migration','compatibility','operational','migrate provider maintenance intent to the current RepositoryMaintenancePending.v2 identity, then remove after verified replacement','RepositoryMaintenancePending.v1'),
       archiveClearJournalStateLegacy:surface('legacy-migration','compatibility','protect','migrate once to LibraryClearJournalState.v1, then remove after verified replacement','ArchiveClearJournalState.v1'),
       archiveClearJournalPayloadPrefixLegacy:surface('legacy-migration','compatibility','protect','migrate once to LibraryClearJournalChunk.v1, then remove after verified replacement','ArchiveClearJournalChunk.v1'),
-      reconciliationBaseLegacy:surface('legacy-migration','compatibility','protect','migrate once to ReconciliationBase.v2 plus ReconciliationBaseNote.v1 rows, then remove after verified replacement','ReconciliationBase.v1')
+      reconciliationBaseLegacy:surface('legacy-migration','compatibility','protect','migrate once to ReconciliationBase.v2 plus ReconciliationBaseNote.v1 rows, then remove after verified replacement','ReconciliationBase.v1'),
+      areaNoteRecoveryPrefix:surface('legacy-migration','compatibility','protect','fold once into canonical AreaNote rows (newer revision wins), then remove in the same transaction','AreaNoteRecovery.v1')
     })
   }),
   external:freeze({

@@ -59,7 +59,8 @@ assert.equal(idbDurability.strict,libraryStrictBefore+1,'library-clear journal r
 assert.equal(idbDurability.normal,libraryNormalBefore,'library-clear journal retirement must not fall back to a normal durability transaction');
 assert.equal(await app.libraryClearJournal.read(),null,'library-clear journal should clear its state and chunk payload together');
 
-// Exercise backward-compatible restore-journal payload validation without making historical forms canonical.
+// Older restore-journal payloads are converted once by the compatibility host;
+// the ordinary journal store accepts only the current version.
 const legacyId='restore_qa-journal-legacy1',legacyTime='2026-09-13T05:00:00.000Z';
 const backupFile=Object.freeze({name:'backup-123e4567-e89b-12d3-a456-426614174000',size:64,hash:'a'.repeat(64)});
 for(const payload of [
@@ -67,8 +68,7 @@ for(const payload of [
   Object.freeze({format:'study-director.restore-journal',version:2,id:legacyId,blob:new Blob(['v2']),filename:'legacy-v2.sdbackup',scheduleText:'',savedDayDeletions:Object.freeze([{date:'2026-09-10',deletedAt:legacyTime}])}),
   Object.freeze({format:'study-director.restore-journal',version:3,id:legacyId,blob:new Blob(['v3']),filename:'legacy-v3.sdbackup',scheduleText:'',savedDayDeletions:Object.freeze([]),areaNoteDeletions:Object.freeze([{key:'GS2',deletedAt:legacyTime}])})
 ]){
-  await journalMeta.write('restoreJournalPayload',payload);
-  assert.equal((await journalMeta.read('restoreJournalPayload')).version,payload.version);
+  await assert.rejects(()=>journalMeta.write('restoreJournalPayload',payload),/not canonical/u,`version ${payload.version} is not read by the ordinary runtime`);
 }
 await assert.rejects(()=>journalMeta.write('restoreJournalPayload',Object.freeze({format:'study-director.restore-journal',version:5,id:legacyId,blob:new Blob(['v5']),filename:'bad.sdbackup',scheduleText:''})),/not canonical/u);
 await journalMeta.remove('restoreJournalPayload');

@@ -24,7 +24,7 @@ try{
  const searchWorkerName=html.match(/sd\.note-search\.[a-f0-9]+\.js/)[0];
  assert.deepEqual(await page.evaluate(`new Promise((resolve,reject)=>{const w=new Worker(__PWA6.trustedAssetURL(${JSON.stringify(searchWorkerName)}));w.onmessage=({data})=>{w.terminate();resolve(data.keys)};w.onerror=()=>{w.terminate();reject(Error('Search worker failed under Trusted Types'))};w.postMessage({type:'sync',documents:[{key:'qa',plain:'search boundary'}]});w.postMessage({type:'query',id:1,query:'boundary'})})`),['qa']);
  const policyWrites=await page.evaluate(`(async()=>{
-   const mutate=__PWA6.mutateBackupProtection,record={version:1,id:'qa-policy',verifier:new Blob(['proof'])};
+   const mutate=__PWA6.mutateBackupProtection,record={version:2,id:'qa-policy',verifier:new Blob(['proof'])};
    const writes=await Promise.allSettled([mutate(record,{expectedId:'',check(){}}),mutate({...record,id:'stale-policy'},{expectedId:'',check(){}})]);
    const current=await __PWA6.ExportsAppMeta.read('backupProtection');
    const refused=await mutate(null,{expectedId:current.id,check(){throw Error('ownership lost')}}).then(()=>false,()=>true);

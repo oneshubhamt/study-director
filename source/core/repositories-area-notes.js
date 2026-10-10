@@ -11,11 +11,10 @@ registry.define('repositories-area-notes',1,()=>{
     exactObject(input,['configuration','storage','codecs','keyedRecord','helpers','hooks','canonical','clock','saveLane'],'Area Notes repository input');
     const SaveLane=input.saveLane;
     if(!SaveLane||SaveLane.format!=='study-director.save-lane-module'||SaveLane.contractVersion!==1||typeof SaveLane.createLane!=='function')throw new TypeError('Area Notes save lane is unavailable or incompatible.');
-    const configuration=exactObject(input.configuration,['limits','dataContract','stores','keys','legacyKeys','metaKeys'],'Area Notes configuration');
+    const configuration=exactObject(input.configuration,['limits','dataContract','stores','keys','legacyKeys'],'Area Notes configuration');
     const stores=exactObject(configuration.stores,['areaNotes','appMeta'],'Area Notes stores');
     const keys=exactObject(configuration.keys,['areaNoteRescue'],'Area Notes storage keys');
-    const legacyKeys=exactObject(configuration.legacyKeys,['areaNotesPending'],'Area Notes legacy storage keys');
-    const metaKeys=exactObject(configuration.metaKeys,['areaNoteRecoveryPrefix'],'Area Notes metadata keys');
+    const legacyKeys=exactObject(configuration.legacyKeys,['areaNotesPending','areaNoteRecoveryPrefix'],'Area Notes legacy storage keys');
     const storage=exactObject(input.storage,['local','meta','idbGetAll','idbStoreTransaction','idbStrictTransaction','storageResets'],'Area Notes storage port');
     if(['idbGetAll','idbStoreTransaction','idbStrictTransaction','storageResets'].some(key=>typeof storage[key]!=='function'))throw new TypeError('Area Notes storage functions are invalid.');
     const codecs=exactObject(input.codecs,['compatibility','sanitizeCurrentAreaNote'],'Area Notes codec port');
@@ -26,7 +25,7 @@ registry.define('repositories-area-notes',1,()=>{
     const canonical=functions(input.canonical,['areaNoteDeletionValue','areaNotePreparationUnit','stageMutationEpoch','normalizeAreaNoteDeletions'],'Area Notes canonical port');
     const clock=functions(input.clock,['nowMs'],'Area Notes clock');
     const APP_LIMITS=configuration.limits,DATA_CONTRACT=configuration.dataContract,DB_AREA_NOTES_STORE=stores.areaNotes,DB_APP_META_STORE=stores.appMeta;
-    const STORAGE_KEYS=freeze({areaNoteRescue:keys.areaNoteRescue}),LEGACY_STORAGE_KEYS=freeze({areaNotesPending:legacyKeys.areaNotesPending}),META_KEYS=freeze({areaNoteRecoveryPrefix:metaKeys.areaNoteRecoveryPrefix});
+    const STORAGE_KEYS=freeze({areaNoteRescue:keys.areaNoteRescue}),LEGACY_STORAGE_KEYS=freeze({areaNotesPending:legacyKeys.areaNotesPending});
     const LocalStorageContract=storage.local,Meta=storage.meta,idbGetAll=storage.idbGetAll,idbStoreTransaction=storage.idbStoreTransaction,idbStrictTransaction=storage.idbStrictTransaction,storageResets=storage.storageResets;
     const CompatibilityCodec=codecs.compatibility,sanitizeCurrentAreaNote=codecs.sanitizeCurrentAreaNote,KeyedRecord=input.keyedRecord;
     const {clampText,clampEditorContent,editorContentWithinLimits,wipeObject,normalizeAreaName,displayAreaName,normalizeTimestamp,sameDataValue,jsonByteLength,canonicalRuntimeError,isCanonicalRuntimeError}=helpers;
@@ -167,7 +166,8 @@ const repository=(()=>{
     saveMessage=SaveLane.failureMessage('Ongoing Notes',detail);
     showSubjectNoteSaveWarning(detail);
   }
-  const AREA_NOTE_RECOVERY_META_PREFIX=META_KEYS.areaNoteRecoveryPrefix;
+  // Retired appMeta journal rows; only the one-time migration below reads them.
+  const AREA_NOTE_RECOVERY_META_PREFIX=legacyKeys.areaNoteRecoveryPrefix;
   const AREA_NOTE_RECOVERY_FORMAT='study-director.area-note-recovery';
   const AREA_NOTE_RESCUE_FORMAT='study-director.area-note-rescue';
   function normalizeRescueEntries(raw){
@@ -268,7 +268,8 @@ const repository=(()=>{
     }catch(e){AppDiagnostics.capture('area-notes.pending-legacy-read',e);return KeyedRecord.create();}
   }
   async function readRecoveryEntries(){
-    return Meta.list('areaNoteRecoveryPrefix');
+    const rows=await idbGetAll(DB_APP_META_STORE,'Ongoing Note recovery read aborted');
+    return (rows||[]).filter(row=>String(row&&row.key||'').startsWith(AREA_NOTE_RECOVERY_META_PREFIX)).map(row=>freeze({key:String(row.key),suffix:String(row.key).slice(AREA_NOTE_RECOVERY_META_PREFIX.length),value:row.value}));
   }
   function recoveryEntryFromValue(value,suffix=''){
     const key=normalizeAreaName(value&&value.key);
@@ -312,7 +313,7 @@ const repository=(()=>{
     assertWriteToken(token,'migrate Ongoing Note recovery');
     let records=0;
     await idbStrictTransaction([DB_AREA_NOTES_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
-      const store=tx.objectStore(DB_AREA_NOTES_STORE),meta=Meta.view(tx);let staged=false,failed=false;
+      const store=tx.objectStore(DB_AREA_NOTES_STORE),rawMeta=tx.objectStore(DB_APP_META_STORE),meta=Meta.view(tx);let staged=false,failed=false;
       const fail=error=>{if(failed)return;failed=true;try{tx.abort();}catch{}finish(false,error);};
       for(const key of keys){
         // Requests complete in issue order: the deletion record is read first.
@@ -323,7 +324,7 @@ const repository=(()=>{
           try{assertWriteToken(token,'migrate Ongoing Note recovery');}catch(error){fail(error);return;}
           const current=row.result?normalizePayload({[key]:row.result}):KeyedRecord.create(),deletedAt=Date.parse(String(deletion.value()?.deletedAt||''));
           const next=applyDeltas(applyDeltas(current,legacy[key]?{[key]:legacy[key]}:{}),journal[key]?{[key]:journal[key]}:{})[key]||null;
-          meta.remove('areaNoteRecoveryPrefix',key);
+          rawMeta.delete(AREA_NOTE_RECOVERY_META_PREFIX+key);
           // A note deleted after the unsaved edit stays deleted.
           if(sameDataValue(next,current[key]||null)||next&&Number.isFinite(deletedAt)&&deletedAt>=timestamp(next))return;
           if(!staged){stageCanonicalMutationEpoch(tx,keys.map(areaNotePreparationUnit));staged=true;}

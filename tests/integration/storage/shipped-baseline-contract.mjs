@@ -42,12 +42,12 @@ for(const key of BASELINE.appMeta){
 }
 
 const compatibilityIds=new Set(allCompatibilityEntries().map(entry=>entry.id));
-for(const id of ['daily-record-historical-shapes','active-session-v7-domain-separation','area-note-historical-rows','r10-indexeddb-topology-retirement','l7-host-metadata-normalization','l7-backup-protection-policy-v1','legacy-protected-backup-v1','complete-backup-v7-v19']){
+for(const id of ['daily-record-historical-shapes','active-session-v7-domain-separation','area-note-historical-rows','r10-indexeddb-topology-retirement','l7-host-metadata-normalization','complete-backup-v7-v19']){
   assert.ok(compatibilityIds.has(id),`Shipped-baseline compatibility path is not inventoried: ${id}`);
 }
 assert.ok(BASELINE.external.backupMetadataVersion>=7&&BASELINE.external.backupMetadataVersion<=16);
 assert.match(backupCodec,/!\[7,8,9,10,11,12,13,14,15,16,17,18,19,20\]\.includes\(version\)/u,'The shipped backup version must remain inside the isolated complete-backup compatibility range.');
-assert.match(exportsSource,/legacyDecryptBackup\(file,current\)/u,'The shipped protected-backup format must route through the historical reader.');
+assert.doesNotMatch(exportsSource,/SDENC01|legacyDecryptBackup/u,'No encrypted backups exist in the retired SDENC01 format, so the app has no reader for it.');
 
 console.log(JSON.stringify({
   status:'PASS',suite:'shipped-baseline-contract',release:BASELINE.release,

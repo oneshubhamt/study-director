@@ -14,7 +14,7 @@ registry.define('compatibility-host',1,()=>{
     exactObject(input,['baselineId','facadeFactory','keys','local','ownership','plan','preferences','identity','metadata','live','topology','verification','backups','helpers'],'Compatibility-host input');
     if(typeof input.baselineId!=='string'||!input.baselineId||typeof input.facadeFactory!=='function')throw new TypeError('Compatibility-host facade configuration is invalid.');
     exactObject(input.keys,['storage','obsolete','appMeta'],'Compatibility-host key contract');
-    exactObject(input.keys.appMeta,['personalPreferences','dataMaintenance','verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryIntegrityScrub','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseLegacy','repositoryMaintenancePending','repositoryMaintenancePendingLegacy','libraryClearJournalState','libraryClearJournalPayloadPrefix','archiveClearJournalStateLegacy','archiveClearJournalPayloadPrefixLegacy'],'Compatibility-host appMeta key contract');
+    exactObject(input.keys.appMeta,['personalPreferences','dataMaintenance','verifiedRecoveryBackups','attachmentIntegrityAudit','automaticDeviceBackup','restoreJournalPayload','repositoryIntegrityScrub','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseLegacy','repositoryMaintenancePending','repositoryMaintenancePendingLegacy','libraryClearJournalState','libraryClearJournalPayloadPrefix','archiveClearJournalStateLegacy','archiveClearJournalPayloadPrefixLegacy'],'Compatibility-host appMeta key contract');
     functions(input.local,['getText','getJson','setText','remove','lastError'],'Compatibility-host local storage');
     functions(input.ownership,['issueWriteToken','assertWriteToken','isOwnershipLostError'],'Compatibility-host ownership');
     functions(input.plan,['hydrate','library','readDraft','writeDraft','writeLibrary','settled','readCanonical'],'Compatibility-host Plan adapter');
@@ -50,6 +50,16 @@ registry.define('compatibility-host',1,()=>{
         if(version===4){const {recheckCursor,...prior}=target;return prior;}return target;
       };
       return helpers.same({...value,device:stored(value.device),drive:stored(value.drive)},{version,device:shape(current.device),drive:shape(current.drive)})?current:null;
+    }
+    // A restore journal written before version 4 lacks the later deletion lists.
+    // Each missing list becomes an empty one: rollback then restores no deletion
+    // history of that kind, as it did whenever the safety copy carried none.
+    function legacyRestoreJournalPayload(value){
+      const version=Number(value?.version);
+      if(!value||typeof value!=='object'||value.format!=='study-director.restore-journal'||!(version>=1&&version<=3))return null;
+      const lists=['savedDayDeletions','areaNoteDeletions'].slice(0,version-1);
+      if(!exactKeys(value,['format','version','id',value.backupFile?'backupFile':'blob','filename','scheduleText',...lists])||lists.some(key=>!Array.isArray(value[key])))return null;
+      return freeze({...value,version:4,savedDayDeletions:value.savedDayDeletions||[],areaNoteDeletions:value.areaNoteDeletions||[],attachmentDeletions:[]});
     }
     function legacyDeviceSettings(value){
       if(!value||!exactKeys(value,['format','version','enabled','directoryHandle','lastSlot','lastBackupAt','lastFilename','sourceRevision'])||value.format!=='study-director.device-backup-settings'||Number(value.version)!==1||value.enabled!==true)return null;
@@ -163,6 +173,14 @@ registry.define('compatibility-host',1,()=>{
       if(integrity){const normalized=metadata.normalizeAttachmentIntegrity(integrity.value);if(!helpers.same(integrity.value,normalized)){requireOwnership();await metadata.writeValue(appMeta.attachmentIntegrityAudit,normalized,integrity.updatedAt);migrated++;}}
       const device=await metadata.readRow(appMeta.automaticDeviceBackup);
       if(device&&Number(device.value?.version)===1){const normalized=legacyDeviceSettings(device.value);if(!normalized)throw new Error('Historical Device Backup settings have an unknown shape and were preserved without modification.');requireOwnership();await metadata.writeValue(appMeta.automaticDeviceBackup,normalized,device.updatedAt);migrated++;}
+      const journal=await metadata.readRow(appMeta.restoreJournalPayload);
+      if(journal&&Number(journal.value?.version)!==4){
+        const converted=legacyRestoreJournalPayload(journal.value);if(!converted)throw new Error('An interrupted restore from an older version has an unknown shape and was preserved without modification.');
+        requireOwnership();await metadata.writeValue(appMeta.restoreJournalPayload,converted,journal.updatedAt);
+        const verified=await metadata.readRow(appMeta.restoreJournalPayload);
+        if(!verified||!helpers.same(verified.value,converted))throw new Error('An interrupted restore from an older version could not be verified after conversion.');
+        migrated++;
+      }
       const scrub=await metadata.readRow(appMeta.repositoryIntegrityScrub);
       if(scrub&&!helpers.same(scrub.value,metadata.normalizeRepositoryIntegrity(scrub.value))){
         const normalized=legacyRepositoryIntegrity(scrub.value);if(!normalized)throw new Error('Historical backup verification state has an unknown shape and was preserved without modification.');
@@ -196,12 +214,12 @@ registry.define('compatibility-host',1,()=>{
     async function verifyRetiredHostCompatibility(){
       const rows=await metadata.listRows(),present=[];
       for(const row of rows){const key=String(row&&row.key||'');if(key.startsWith(LEGACY_BACKUP_PROVIDER_OPERATION_PREFIX))present.push(key);}
-      const protection=rows.find(row=>String(row&&row.key||'')===appMeta.backupProtection);
-      if(Number(protection?.value?.version)===1)present.push(`${appMeta.backupProtection}:v1`);
       const device=rows.find(row=>String(row&&row.key||'')===appMeta.automaticDeviceBackup);
       if(Number(device?.value?.version)===1)present.push(`${appMeta.automaticDeviceBackup}:v1`);
       const audit=rows.find(row=>String(row&&row.key||'')===appMeta.attachmentIntegrityAudit);
       if(audit&&!helpers.same(audit.value,metadata.normalizeAttachmentIntegrity(audit.value)))present.push(`${appMeta.attachmentIntegrityAudit}:v${Number(audit.value?.version)||'?'}`);
+      const journal=rows.find(row=>String(row&&row.key||'')===appMeta.restoreJournalPayload);
+      if(journal&&Number(journal.value?.version)!==4)present.push(`${appMeta.restoreJournalPayload}:v${Number(journal.value?.version)||'?'}`);
       const scrub=rows.find(row=>String(row&&row.key||'')===appMeta.repositoryIntegrityScrub);
       if(scrub&&!helpers.same(scrub.value,metadata.normalizeRepositoryIntegrity(scrub.value)))present.push(`${appMeta.repositoryIntegrityScrub}:v${Number(scrub.value?.version)||'?'}`);
       const maintenance=rows.find(row=>String(row&&row.key||'')===appMeta.dataMaintenance);
@@ -304,7 +322,7 @@ registry.define('compatibility-host',1,()=>{
     }
     function verifyIdentity(){const installationId=normalizeInstallationIdentity(local.getText(identity.installationKey,'')),legacy=local.getText(identity.legacyKey,null);return freeze({ok:!!installationId&&legacy===null,installationId,legacyPresent:legacy!==null});}
 
-    const residueKeys=freeze([obsolete.liveDraft,obsolete.activeSession,obsolete.storageCapability,obsolete.diagnostics,obsolete.legacyOwnershipLease]);
+    const residueKeys=freeze([obsolete.liveDraft,obsolete.activeSession,obsolete.storageCapability,obsolete.diagnostics,obsolete.legacyOwnershipLease,obsolete.attachmentMaintenanceAttemptDay]);
     async function retireTopology(){
       let token;try{token=ownership.issueWriteToken('retire legacy database topology',{allowHydrating:true});}catch(error){if(ownership.isOwnershipLostError(error))return freeze({status:'skipped',reason:'not-primary'});throw error;}
       ownership.assertWriteToken(token,'retire legacy database topology');const result=await input.topology.retire();ownership.assertWriteToken(token,'verify legacy database topology retirement');return result;

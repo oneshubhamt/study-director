@@ -10,15 +10,14 @@ registry.define('repositories',1,()=>{
   const DATA_MAINTENANCE_VERSION=6;
   function exactValue(value,keys){return !!(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('|')===[...keys].sort().join('|'));}
   function createAppMetaValidators(input){
-    exactObject(input,['limits','dataContract','dailyRecordCodec','personalDataCodec','helpers'],'Repository appMeta validators input');
-    if(!Object.isFrozen(input.limits)||!Object.isFrozen(input.dataContract)||!Object.isFrozen(input.dailyRecordCodec)||!Object.isFrozen(input.personalDataCodec)||!Object.isFrozen(input.helpers))throw new TypeError('Repository appMeta validator contracts must be frozen.');
+    exactObject(input,['limits','dataContract','personalDataCodec','helpers'],'Repository appMeta validators input');
+    if(!Object.isFrozen(input.limits)||!Object.isFrozen(input.dataContract)||!Object.isFrozen(input.personalDataCodec)||!Object.isFrozen(input.helpers))throw new TypeError('Repository appMeta validator contracts must be frozen.');
     functions(input.helpers,['isValidIsoDate','normalizeAreaName','normalizeTimestamp','sameDataValue'],'Repository appMeta validator helpers');
-    const APP_LIMITS=input.limits,DATA_CONTRACT=input.dataContract,DailyRecordCodec=input.dailyRecordCodec,PersonalDataCodec=input.personalDataCodec;
+    const APP_LIMITS=input.limits,DATA_CONTRACT=input.dataContract,PersonalDataCodec=input.personalDataCodec;
     const {isValidIsoDate,normalizeAreaName,normalizeTimestamp,sameDataValue}=input.helpers;
     const validIso=value=>Number.isFinite(Date.parse(String(value||'')));
     const attachmentId=value=>/^(?:att|img)-[a-z0-9-]{20,80}$/u.test(String(value||''));
     const backupPreparationUnit=value=>{const unit=String(value||'');if(unit==='*'||unit==='personalData'||unit==='activeSession')return true;if(/^dailyRecordPack:\d{4}-(?:0[1-9]|1[0-2])$/u.test(unit))return true;if(unit.startsWith('areaNote:')){const key=unit.slice('areaNote:'.length);return !!key&&normalizeAreaName(key)===key;}if(unit.startsWith('attachmentAsset:'))return attachmentId(unit.slice('attachmentAsset:'.length));return false;};
-    const areaNote=value=>{const clean=DailyRecordCodec.sanitizeCurrentAreaNote(value,value&&value.key);return !!(clean&&sameDataValue(value,clean));};
     return freeze({
       dailyRecordMigration:value=>!!(exactValue(value,['recordVersion','summaryVersion','complete','recordCount'])&&Number(value.recordVersion)===DATA_CONTRACT.schemas.DailyRecord.version&&Number(value.summaryVersion)===DATA_CONTRACT.schemas.DailySummary.version&&value.complete===true&&Number.isSafeInteger(Number(value.recordCount))&&Number(value.recordCount)>=0),
       planDraft:value=>value===null||(typeof value==='string'&&value.length<=APP_LIMITS.maxScheduleChars),
@@ -28,12 +27,6 @@ registry.define('repositories',1,()=>{
       backupPreparationUnitPrefix:(value,context)=>!!(exactValue(value,['format','version','unit','token','updatedAt'])&&value.format==='study-director.backup-preparation-unit'&&Number(value.version)===1&&backupPreparationUnit(value.unit)&&context.suffix===encodeURIComponent(value.unit)&&/^[a-f0-9]{32}$/u.test(String(value.token||''))&&validIso(value.updatedAt)),
       insightsDatasetRevision:value=>!!(exactValue(value,['format','version','counter','updatedAt'])&&value.format==='study-director.insights-dataset-revision'&&Number(value.version)===2&&Number.isSafeInteger(Number(value.counter))&&Number(value.counter)>=1&&validIso(value.updatedAt)),
       dataMaintenance:value=>!!(exactValue(value,['version','status','completedAt'])&&Number(value.version)===DATA_MAINTENANCE_VERSION&&(value.status==='completed'&&validIso(value.completedAt)||value.status==='pending'&&(value.completedAt===''||validIso(value.completedAt)))),
-      areaNoteRecoveryPrefix:(value,context)=>{
-        if(!exactValue(value,['format','version','key','entry','updatedAt'])||value.format!=='study-director.area-note-recovery'||Number(value.version)!==1||!validIso(value.updatedAt))return false;
-        const key=normalizeAreaName(value.key);if(!key||key!==context.suffix)return false;
-        const entry=value.entry;if(entry&&entry.deleted===true)return exactValue(entry,['key','deleted','updatedAt'])&&normalizeAreaName(entry.key)===key&&validIso(entry.updatedAt);
-        return areaNote(entry)&&normalizeAreaName(entry.key)===key;
-      },
       savedDayDeletionPrefix:(value,context)=>!!(exactValue(value,['format','version','date','deletedAt'])&&value.format==='study-director.saved-day-deletion'&&Number(value.version)===1&&isValidIsoDate(String(value.date||''))&&String(value.date)===context.suffix&&!!normalizeTimestamp(value.deletedAt,null)),
       areaNoteDeletionPrefix:(value,context)=>!!(exactValue(value,['format','version','key','deletedAt'])&&value.format==='study-director.area-note-deletion'&&Number(value.version)===1&&normalizeAreaName(value.key)===context.suffix&&!!context.suffix&&!!normalizeTimestamp(value.deletedAt,null)),
       attachmentDeletionPrefix:(value,context)=>!!(exactValue(value,['format','version','assetId','deletedAt'])&&value.format==='study-director.attachment-deletion'&&Number(value.version)===1&&attachmentId(value.assetId)&&String(value.assetId)===context.suffix&&!!normalizeTimestamp(value.deletedAt,null))
@@ -54,8 +47,8 @@ registry.define('repositories',1,()=>{
     ],'AppData stores');
     exactObject(input.legacyStores,['syncQueue','tombstones'],'AppData legacy stores');
     exactObject(input.keys,['recovery','fallbackDailyRecords','areaNoteRescue','deletionRecovery','legacySyncEmergency'],'AppData storage keys');
-    exactObject(input.legacyKeys,['areaNotesPending'],'AppData legacy storage keys');
-    exactObject(input.metaKeys,['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','areaNoteRecoveryPrefix','savedDayDeletionPrefix','areaNoteDeletionPrefix','attachmentDeletionPrefix'],'AppData metadata keys');
+    exactObject(input.legacyKeys,['areaNotesPending','areaNoteRecoveryPrefix'],'AppData legacy storage keys');
+    exactObject(input.metaKeys,['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','savedDayDeletionPrefix','areaNoteDeletionPrefix','attachmentDeletionPrefix'],'AppData metadata keys');
     if(!Array.isArray(input.obsoleteMetaKeys)||input.obsoleteMetaKeys.some(key=>typeof key!=='string'||!key)||new Set(input.obsoleteMetaKeys).size!==input.obsoleteMetaKeys.length)throw new TypeError('AppData obsolete metadata keys are invalid.');
     functions(input.helpers,[
       'boundedInt','boundedNumber','clampText','clampEditorContent','editorContentWithinLimits','wipeObject','isValidIsoDate','isCanonicalScheduleText','sameDataValue',
@@ -1418,8 +1411,7 @@ const AreaNotesRepository=AreaNotesRepositoryModule.create(freeze({
       configuration:freeze({
         limits:APP_LIMITS,dataContract:DATA_CONTRACT,
         stores:freeze({areaNotes:DB_AREA_NOTES_STORE,appMeta:DB_APP_META_STORE}),
-        keys:freeze({areaNoteRescue:STORAGE_KEYS.areaNoteRescue}),legacyKeys:freeze({areaNotesPending:LEGACY_STORAGE_KEYS.areaNotesPending}),
-        metaKeys:freeze({areaNoteRecoveryPrefix:META_KEYS.areaNoteRecoveryPrefix})
+        keys:freeze({areaNoteRescue:STORAGE_KEYS.areaNoteRescue}),legacyKeys:freeze({areaNotesPending:LEGACY_STORAGE_KEYS.areaNotesPending,areaNoteRecoveryPrefix:LEGACY_STORAGE_KEYS.areaNoteRecoveryPrefix})
       }),
       storage:freeze({local:LocalStorageContract,meta:Meta,idbGetAll,idbStoreTransaction,idbStrictTransaction,storageResets:()=>IndexedDb.lifecycle().resets}),
       codecs:freeze({compatibility:CompatibilityCodec,sanitizeCurrentAreaNote}),keyedRecord:KeyedRecord,

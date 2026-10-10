@@ -5,29 +5,6 @@ registry.define('exports',1,input=>{
   registry.contracts.exactFrozenObject(input,['lifecycle'],'exports module input');
   const Lifecycle=input.lifecycle;
   if(!Object.isFrozen(Lifecycle)||Lifecycle.format!=='study-director.operation-lifecycle'||Lifecycle.contractVersion!==1)throw new TypeError('Operation lifecycle contract is unavailable or incompatible.');
-  // Temporary L7 SDENC01 reader. Current writes remain SDENC02 in the portable worker.
-  const LEGACY_ENCRYPTION_MAGIC=new TextEncoder().encode('SDENC01\n'),LEGACY_ENCRYPTION_HEADER=48,LEGACY_ENCRYPTION_TAG=16,LEGACY_ENCRYPTION_ITERATIONS=600000,LEGACY_ENCRYPTION_MAX=32*1024*1024;
-  const legacyEncryptionError=(message,code='BACKUP_ENCRYPTION_INVALID')=>Object.assign(new Error(message),{code});
-  async function legacyEncryptionInfo(file){
-    if(!(file instanceof Blob))throw legacyEncryptionError('A backup file is required.');
-    const header=new Uint8Array(await file.slice(0,LEGACY_ENCRYPTION_HEADER).arrayBuffer());
-    if(!LEGACY_ENCRYPTION_MAGIC.every((byte,index)=>header[index]===byte))return null;
-    if(header.length!==LEGACY_ENCRYPTION_HEADER)throw legacyEncryptionError('Encrypted backup header is truncated.');
-    const view=new DataView(header.buffer),size=view.getUint32(44,false);
-    if(header[8]!==1||header[9]!==1||header[10]!==1||header[11]!==0||view.getUint32(12,false)!==LEGACY_ENCRYPTION_ITERATIONS)throw legacyEncryptionError('Encrypted backup version or cryptographic parameters are unsupported.');
-    if(size<1||size>LEGACY_ENCRYPTION_MAX)throw legacyEncryptionError('Encrypted backups are limited to 32 MiB before encryption.','BACKUP_ENCRYPTION_LIMIT');
-    if(file.size!==LEGACY_ENCRYPTION_HEADER+size+LEGACY_ENCRYPTION_TAG)throw legacyEncryptionError('Encrypted backup is truncated or has unexpected trailing data.');
-    return Object.freeze({version:1,header,size});
-  }
-  async function legacyDecryptBackup(file,key){
-    const info=await legacyEncryptionInfo(file);if(!info)throw legacyEncryptionError('This is not an encrypted Study Director backup.');
-    if(!key||key.type!=='secret'||key.algorithm?.name!=='PBKDF2'||key.extractable)throw legacyEncryptionError('Unlock backup protection first.','BACKUP_LOCKED');
-    const aes=await crypto.subtle.deriveKey({name:'PBKDF2',hash:'SHA-256',salt:info.header.slice(16,32),iterations:LEGACY_ENCRYPTION_ITERATIONS},key,{name:'AES-GCM',length:256},false,['decrypt']);
-    const bytes=await file.slice(LEGACY_ENCRYPTION_HEADER).arrayBuffer();let plain;
-    try{plain=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv:info.header.slice(32,44),additionalData:info.header,tagLength:128},aes,bytes));}
-    catch(error){if(error.name!=='OperationError')throw error;throw legacyEncryptionError('The password is incorrect or the encrypted backup is damaged.','BACKUP_AUTH_FAILED');}
-    try{return new Blob([plain],{type:'application/octet-stream'});}finally{plain.fill(0);}
-  }
   function cancelled(){const error=new Error('File operation cancelled.');error.name='AbortError';error.code='STUDY_DIRECTOR_IMPORT_CANCELLED';return error;}
   // OPFS scratch/journal files have opaque names and shared reader leases.
   // Durable references are metadata records; orphan collection is lock guarded.
@@ -211,7 +188,7 @@ registry.define('exports',1,input=>{
   }
   // Policy is durable; password material is a non-extractable, tab-memory key only.
   function createProtection({processing,storage,interactions,settingKey,onState=()=>{},canMutate=()=>true,issueToken=()=>null,assertToken=()=>{}}){
-    const SETTING=String(settingKey||'').trim(),LEGACY_PROOF='Study Director backup protection v1';
+    const SETTING=String(settingKey||'').trim();
     if(!SETTING)throw new TypeError('Backup protection metadata key is required.');
     let key=null,keyId='',policy=null,keyEpoch=0,generation=new AbortController();
     const cancelled=()=>Object.assign(new Error('Backup encryption cancelled.'),{name:'AbortError',code:'STUDY_DIRECTOR_IMPORT_CANCELLED'});
@@ -219,7 +196,7 @@ registry.define('exports',1,input=>{
     function lock(){keyEpoch++;generation.abort();generation=new AbortController();key=null;keyId='';publish();}
     async function refresh(){
       const value=await storage.read(SETTING),version=Number(value&&value.version);
-      if(value&&(typeof value.id!=='string'||!value.id||value.id.length>128||![1,2].includes(version)||!(value.verifier instanceof Blob)))throw new Error('Backup encryption settings are unreadable. Backups are paused.');
+      if(value&&(typeof value.id!=='string'||!value.id||value.id.length>128||version!==2||!(value.verifier instanceof Blob)))throw new Error('Backup encryption settings are unreadable. Backups are paused.');
       policy=value;if(!policy||keyId!==policy.id){key=null;keyId='';}publish();return policy;
     }
     function check(signal){processing.check();if(signal?.aborted)throw cancelled();}
@@ -233,16 +210,8 @@ registry.define('exports',1,input=>{
       const epoch=keyEpoch;
       let message='Unlock backup encryption for this tab. Encrypted folder and Drive backups can run until you lock or leave this tab.';
       for(;;){const candidate=await askKey({message,signal});try{
-        if(Number(record.version)===1){
-          check(signal);const proof=await legacyDecryptBackup(record.verifier,candidate);check(signal);
-          if(await proof.text()!==LEGACY_PROOF)throw new Error('Backup encryption settings are invalid.');
-        }else await processing.run('crypto.verifier.check',{file:record.verifier,key:candidate},{signal});
-        check(signal);if(epoch!==keyEpoch)throw cancelled();let latest=await refresh();if(latest?.id!==record.id)throw new Error('Backup encryption changed in another tab. Try again.');
-        if(Number(latest.version)===1){
-          const verifier=await processing.run('crypto.verifier.create',{key:candidate},{signal});
-          await storage.write(SETTING,{version:2,id:record.id,verifier},{expectedId:record.id,check:()=>{check(signal);if(epoch!==keyEpoch)throw cancelled();}});
-          latest=await refresh();if(latest?.id!==record.id||Number(latest.version)!==2)throw new Error('Backup encryption migration could not be verified.');
-        }
+        await processing.run('crypto.verifier.check',{file:record.verifier,key:candidate},{signal});
+        check(signal);if(epoch!==keyEpoch)throw cancelled();const latest=await refresh();if(latest?.id!==record.id)throw new Error('Backup encryption changed in another tab. Try again.');
         key=candidate;keyId=record.id;publish();return key;
       }catch(error){if(error.code!=='BACKUP_AUTH_FAILED')throw error;message=error.message;}}
     }
@@ -274,15 +243,15 @@ registry.define('exports',1,input=>{
       return Object.freeze({...file,blob,encrypted:!!record,protectionId,protectionSignal:lifetime,checkProtection});
     }
     async function unprotect(file,{interactive=true,signal}={}){
-      let info=await processing.run('crypto.info',{file},{signal});check(signal);if(!info)info=await legacyEncryptionInfo(file);check(signal);if(!info)return {blob:file,encrypted:false};
-      if(![1,2].includes(Number(info.version)))throw Object.assign(new Error('This encrypted backup format is unsupported.'),{code:'BACKUP_ENCRYPTION_UNSUPPORTED'});
+      const info=await processing.run('crypto.info',{file},{signal});check(signal);if(!info)return {blob:file,encrypted:false};
+      if(Number(info.version)!==2)throw Object.assign(new Error('This encrypted backup format is unsupported.'),{code:'BACKUP_ENCRYPTION_UNSUPPORTED'});
       await refresh();const epoch=keyEpoch,lifetime=generation.signal;let current=key,message='';
       for(;;){
         if(!current){if(!interactive)throw Object.assign(new Error('Unlock backup encryption before verifying this encrypted backup.'),{code:'BACKUP_LOCKED'});current=await askKey({message,signal});}
         const controller=new AbortController(),signals=[signal,lifetime].filter(Boolean),abort=()=>controller.abort();
         for(const source of signals){source.addEventListener('abort',abort,{once:true});if(source.aborted)abort();}
         let blob;
-        try{blob=Number(info.version)===2?await processing.run('crypto.stream.decrypt',{file,key:current},{signal:controller.signal}):await legacyDecryptBackup(file,current);check(signal);if(epoch!==keyEpoch||lifetime.aborted)throw cancelled();return {blob,encrypted:true};}
+        try{blob=await processing.run('crypto.stream.decrypt',{file,key:current},{signal:controller.signal});check(signal);if(epoch!==keyEpoch||lifetime.aborted)throw cancelled();return {blob,encrypted:true};}
         catch(error){if(blob)await processing.run('file.release',{file:blob});if(error.code!=='BACKUP_AUTH_FAILED'||!interactive)throw error;message=error.message;current=null;}
         finally{for(const source of signals)source.removeEventListener('abort',abort);}
       }

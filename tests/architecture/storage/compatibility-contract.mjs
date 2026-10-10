@@ -7,6 +7,7 @@ import {
   CURRENT_FORMATS_OUTSIDE_MIGRATION,allCompatibilityEntries,assertCompatibilityContract
 } from '../../../contracts/compatibility.mjs';
 import {CACHE_STORAGE_IDENTITIES} from '../../../contracts/canonical-identities.mjs';
+import {OBSOLETE_APP_META_KEYS,OBSOLETE_LOCAL_STORAGE_KEYS,APP_META_VALIDATION_OWNERS} from '../../../contracts/data-architecture.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 const read=relative=>fs.readFileSync(path.join(root,relative),'utf8');
@@ -40,7 +41,7 @@ assert.equal(MIGRATION_FACADE_CONTRACT.verification.backupCheck,'freshBackup');
 assert.equal(CANONICAL_BASELINE.policy.ordinaryRuntime,'current-canonical-only');
 
 const entries=allCompatibilityEntries();
-assert.equal(entries.length,22,'Every temporary compatibility path must remain explicitly inventoried until retirement.');
+assert.equal(entries.length,20,'Every temporary compatibility path must remain explicitly inventoried until retirement.');
 assert.equal(new Set(entries.map(entry=>entry.id)).size,entries.length);
 for(const entry of entries){
   for(const file of entry.sourceFiles)assert.ok(fs.existsSync(path.join(root,file)),`${entry.id} references missing source ${file}`);
@@ -67,12 +68,18 @@ const evidenceByCompatibilityId=Object.freeze({
   'l7-host-metadata-normalization':['tests/integration/storage/compatibility-host.mjs'],
   'l13e-repository-maintenance-v1':['tests/integration/storage/compatibility-host.mjs','tests/integration/backup/repository-incremental-preparation.mjs','tests/integration/backup/repository-restore.mjs'],
   'restore-journal-payload-v1-v3':['tests/integration/storage/repository-journals.mjs'],
-  'l7-backup-protection-policy-v1':['tests/integration/backup/encryption.mjs','tests/integration/storage/compatibility-host.mjs'],
-  'legacy-protected-backup-v1':['tests/integration/backup/encryption.mjs'],
   'legacy-service-worker-update-bridge':['tests/integration/pwa/service-worker-lifecycle.mjs']
 });
 assert.deepEqual(Object.keys(evidenceByCompatibilityId).sort(),entries.map(entry=>entry.id).sort(),'every disposable compatibility path must have explicit regression evidence');
 for(const files of Object.values(evidenceByCompatibilityId))for(const file of files)assert.ok(fs.existsSync(path.join(root,file)),`compatibility evidence test is missing: ${file}`);
+
+// Read once, convert, retire: every retired browser-storage key is handed to a
+// compatibility path, every retired appMeta identity is cleaned by it, and no
+// retired identity is still a current validated family.
+for(const name of Object.keys(OBSOLETE_LOCAL_STORAGE_KEYS))assert.match(app,new RegExp(`OBSOLETE_STORAGE_KEYS\\.${name}\\b`,'u'),`retired browser-storage key ${name} has no compatibility path`);
+assert.match(app,/obsoleteMetaKeys:Object\.freeze\(Object\.values\(OBSOLETE_APP_META_KEYS\)\)/u,'every retired appMeta identity is removed by the compatibility cleanup');
+for(const name of Object.keys(OBSOLETE_APP_META_KEYS))assert.ok(!Object.values(APP_META_VALIDATION_OWNERS).flat().includes(name),`retired appMeta identity ${name} must not be a current family`);
+assert.doesNotMatch(read('source/core/host-metadata.js'),/version===1\|\||\[1,2(,3)?(,4)?\]\.includes|version>=3&&version<=5/u,'ordinary host metadata validators read only current versions');
 
 // One runtime facade owns all live migration orchestration and legacy backup routing.
 assert.match(compatibility,/function createFacade\(input\)/u);
@@ -159,9 +166,9 @@ assert.match(backupCodec,/async function inspectLegacyBackup\(/u);
 assert.match(app,/const RuntimeBackupCodec=Object\.freeze\(Object\.fromEntries/u);
 assert.match(app,/!\['inspectCurrent','inspectLegacy'\]\.includes\(key\)/u,'legacy/current backup inspection entry points must not leak onto the ordinary runtime codec');
 assert.match(app,/\['inspect',\(file,options\)=>CompatibilityFacade\.inspectBackup\(file,options\)\]/u);
-assert.match(exportsSource,/Number\(info\.version\)===2\?await processing\.run\('crypto\.stream\.decrypt'[\s\S]{0,160}:await legacyDecryptBackup\(file,current\)/u,'temporary protection compatibility must route SDENC01 through the isolated legacy decryptor while SDENC02 stays current');
+assert.match(exportsSource,/if\(Number\(info\.version\)!==2\)throw/u,'only the current SDENC02 protected format is read');assert.doesNotMatch(exportsSource,/SDENC01|legacyDecryptBackup/u);
 assert.doesNotMatch(drive,/SDENC02|\.sdbackup/u,'Drive repository transport must remain opaque to portable/protected backup container formats');
-assert.match(allCompatibilityEntries().map(entry=>entry.id).join('|'),/legacy-protected-backup-v1/u,'L7 protected-backup compatibility must remain explicitly inventoried until retirement');
+assert.doesNotMatch(allCompatibilityEntries().map(entry=>entry.id).join('|'),/backup-protection-policy-v1|protected-backup-v1/u,'retired password and encrypted-format paths stay gone');
 
 // Service Worker runs in a separate realm but exposes one explicitly disposable companion facade.
 assert.match(sw,/const CompatibilityFacade=Object\.freeze/u);
@@ -177,7 +184,7 @@ assert.match(attachments,/m\.format!=='study-director\.attachments'\|\|m\.versio
 
 for(const id of [
   'plan-legacy-schedule','reflection-drafts-retirement','active-session-v7-domain-separation','area-note-historical-rows','area-note-recovery-v1','daily-record-historical-shapes','r10-sync-delete-state',
-  'legacy-device-identity','l7-host-metadata-normalization','l7-backup-protection-policy-v1','legacy-protected-backup-v1','r10-indexeddb-topology-retirement','indexeddb-pre-v3-migration-marker','legacy-localstorage-residue','legacy-attachment-storage',
+  'legacy-device-identity','l7-host-metadata-normalization','r10-indexeddb-topology-retirement','indexeddb-pre-v3-migration-marker','legacy-localstorage-residue','legacy-attachment-storage',
   'obsolete-reflection-migration-meta','legacy-json-backups','complete-backup-v7-v19','legacy-service-worker-update-bridge'
 ])assert.ok(entries.some(entry=>entry.id===id),`Missing compatibility inventory entry ${id}`);
 

@@ -53,18 +53,7 @@ registry.define('integrity-continuation',1,()=>{
         // it to the current source version before trusting cached ciphertext.
         await proveStaging(0,Math.min(64,entry.storedBytes));
         const info=await processing.run('crypto.info',{file:storedFile},{signal});
-        if(!manifest.encrypted&&(info||await storedFile.slice(0,8).text()==='SDENC01\n'))throw Object.assign(new Error('Repository object protection does not match its checkpoint.'),{code:'REPOSITORY_INTEGRITY_CORRUPT'});
-        if(manifest.encrypted&&!info){
-          // The historical authenticated format is limited to 32 MiB and uses
-          // the existing bounded compatibility reader.
-          const decoded=await protection.unprotect(storedFile,{interactive:false,signal});
-          if(!decoded.encrypted)throw Object.assign(new Error('Repository object protection does not match its checkpoint.'),{code:'REPOSITORY_INTEGRITY_CORRUPT'});
-          if(entry.kind==='attachment'){
-            try{if(decoded.blob.size!==entry.sourceBytes||await processing.run('checksum',{value:decoded.blob},{signal})!==entry.fingerprint)throw Object.assign(new Error('Repository attachment failed plaintext verification.'),{code:'REPOSITORY_INTEGRITY_CORRUPT'});return freeze({complete:true});}
-            finally{await processing.run('file.release',{file:decoded.blob});}
-          }
-          handedOff=true;return freeze({complete:true,opened:freeze({blob:decoded.blob,release:async()=>{await processing.run('file.release',{file:decoded.blob});await files.release(stored.name);}})});
-        }
+        if(!!manifest.encrypted!==!!info)throw Object.assign(new Error('Repository object protection does not match its checkpoint.'),{code:'REPOSITORY_INTEGRITY_CORRUPT'});
         if(state.phase==='plain'){
           if(entry.kind!=='attachment'&&!plain){plain=await files.stage();state={...state,plain:{...state.plain,name:plain.name}};await save();}
           while(state.phase==='plain'&&units++<maxSegments){

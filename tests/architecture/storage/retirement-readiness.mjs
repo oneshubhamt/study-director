@@ -36,8 +36,6 @@ const migrationEvidence=Object.freeze({
   'l7-host-metadata-normalization':['tests/integration/storage/compatibility-host.mjs'],
   'l13e-repository-maintenance-v1':['tests/integration/storage/compatibility-host.mjs','tests/integration/backup/repository-incremental-preparation.mjs','tests/integration/backup/repository-restore.mjs'],
   'restore-journal-payload-v1-v3':['tests/integration/storage/repository-journals.mjs'],
-  'l7-backup-protection-policy-v1':['tests/integration/backup/encryption.mjs','tests/integration/storage/compatibility-host.mjs'],
-  'legacy-protected-backup-v1':['tests/integration/backup/encryption.mjs'],
   'legacy-service-worker-update-bridge':['tests/integration/pwa/service-worker-lifecycle.mjs']
 });
 assertEvidence('migration',migrationEvidence,allCompatibilityEntries(COMPATIBILITY_REGISTRY).map(entry=>entry.id));

@@ -53,7 +53,7 @@ export const MIGRATION_FACADE_CONTRACT=freeze({
   status:'runtime-isolated-detachable-host',
   disposable:false,
   retirementMode:'isolate-adapters-then-delete-package',
-  accepts:freeze(['legacy-live-storage','legacy-local-record-shapes','legacy-host-metadata','legacy-backup-files','legacy-protected-backup-files','legacy-update-protocol']),
+  accepts:freeze(['legacy-live-storage','legacy-local-record-shapes','legacy-host-metadata','legacy-backup-files','legacy-update-protocol']),
   emits:'current-canonical-data-or-explicit-rejection',
   verification:freeze({
     proofFormat:'study-director.canonical-installation-proof',
@@ -71,8 +71,7 @@ export const MIGRATION_FACADE_CONTRACT=freeze({
     'no-obsolete-appmeta-residue-remains',
     'all-canonical-indexeddb-records-validate-at-current-schema',
     'fresh-current-format-backup-created-and-verified',
-    'runtime-canonical-installation-proof-passes',
-    'no-transitional-v1-backup-protection-policy-remains'
+    'runtime-canonical-installation-proof-passes'
   ])
 });
 
@@ -169,20 +168,12 @@ export const COMPATIBILITY_REGISTRY=freeze({
       sourceFiles:freeze(['contracts/data-architecture.mjs','source/core/compatibility-host.js','source/core/host-metadata.js','source/app.html'])
     },
     {
-      id:'restore-journal-payload-v1-v3',owner:'repository-journals',kind:'live-canonicalization',
+      id:'restore-journal-payload-v1-v3',owner:'compatibility/host',kind:'live-migration',
       source:'appMeta restoreJournalPayload versions 1 to 3 left by a restore interrupted under an older build',
-      target:'consumed once by restore crash recovery (rollback or completion) and removed; every new journal is written as version 4',
-      proof:'an interrupted restore journal is resolved and removed at the next start; a missing deletion ledger in versions 1 to 3 leaves that ledger untouched during rollback',
+      target:'restoreJournalPayload version 4 with explicit (empty) deletion lists, then resolved by restore crash recovery',
+      proof:'the converted payload is read back and verified before crash recovery runs; the ordinary journal reader accepts only version 4 and unknown shapes fail closed',
       retirement:'after every supported installed build writes version-4 restore journals and the canonical baseline is verified',
-      sourceFiles:freeze(['source/core/repository-journals.js'])
-    },
-    {
-      id:'l7-backup-protection-policy-v1',owner:'compatibility/exports',kind:'live-migration',
-      source:'appMeta backupProtection v1 verifier encrypted with SDENC01',
-      target:'backupProtection v2 password verifier with the same policy identity',
-      proof:'v1 remains locked/fail-closed until the existing password authenticates; successful unlock atomically writes v2 and retirement proof remains false while v1 exists',
-      retirement:'after no supported installation reports backupProtection v1',
-      sourceFiles:freeze(['source/core/compatibility-host.js','source/core/host-metadata.js','source/core/exports.js'])
+      sourceFiles:freeze(['source/core/compatibility-host.js'])
     },
     {
       id:'r10-indexeddb-topology-retirement',owner:'compatibility/persistence',kind:'schema-bridge',
@@ -204,9 +195,9 @@ export const COMPATIBILITY_REGISTRY=freeze({
   legacyCleanup:items([
     {
       id:'legacy-localstorage-residue',owner:'compatibility/host',kind:'cleanup',
-      source:'liveDraft, activeSession.v1, storageCapability.v1, diagnostics.v1',
+      source:'liveDraft, activeSession.v1, storageCapability.v1, diagnostics.v1, timerOwner.v1 and attachmentMaintenanceDay.v1',
       target:'absence',
-      proof:'all four legacy localStorage identities are absent',
+      proof:'all six legacy localStorage identities are absent',
       retirement:'baseline verified on all supported installations',
       sourceFiles:freeze(['source/core/compatibility-host.js','source/core/startup.js'])
     },
@@ -235,14 +226,6 @@ export const COMPATIBILITY_REGISTRY=freeze({
       proof:'legacy source is parsed under size limits, sanitized, and never written before restore validation/journaling',
       retirement:'after all required historical backups are replaced by a fresh current-format verified backup',
       sourceFiles:freeze(['source/core/backup-codec.js','source/core/backup.js','source/core/compatibility-codecs.js'])
-    },
-    {
-      id:'legacy-protected-backup-v1',owner:'exports/portable-processing',kind:'import-adapter',
-      source:'SDENC01 password-encrypted backup container produced by L7 and earlier supported builds',
-      target:'decrypted bytes routed into the ordinary backup compatibility inspector/restore model',
-      proof:'authenticated AES-256-GCM v1 envelope validates under its fixed parameters and wrong passwords/corruption fail closed before backup parsing',
-      retirement:'after every required historical encrypted backup has been replaced by a verified current SDENC02 backup',
-      sourceFiles:freeze(['source/core/exports.js'])
     },
     {
       id:'complete-backup-v7-v19',owner:'backup-codec',kind:'import-adapter',

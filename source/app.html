@@ -4136,7 +4136,6 @@ const AppMetaGateway=AppMetaModule.create(Object.freeze({
 const RepositoryAppMetaValidators=RepositoryModule.createAppMetaValidators(Object.freeze({
   limits:APP_LIMITS,
   dataContract:DATA_CONTRACT,
-  dailyRecordCodec:DailyRecordCodec,
   personalDataCodec:PersonalDataCodec,
   helpers:Object.freeze({isValidIsoDate,normalizeAreaName,normalizeTimestamp,sameDataValue})
 }));
@@ -4495,7 +4494,7 @@ const AppData=RepositoryModule.createAppData(Object.freeze({
     deletionRecovery:STORAGE_KEYS.deletionRecovery,
     legacySyncEmergency:OBSOLETE_STORAGE_KEYS.syncEmergency
   }),
-  legacyKeys:Object.freeze({areaNotesPending:OBSOLETE_STORAGE_KEYS.areaNotesPending}),
+  legacyKeys:Object.freeze({areaNotesPending:OBSOLETE_STORAGE_KEYS.areaNotesPending,areaNoteRecoveryPrefix:OBSOLETE_APP_META_KEYS.areaNoteRecoveryPrefix}),
   metaKeys:Object.freeze({
     dailyRecordMigration:APP_META_KEYS.dailyRecordMigration,
     planDraft:APP_META_KEYS.planDraft,
@@ -4505,7 +4504,6 @@ const AppData=RepositoryModule.createAppData(Object.freeze({
     backupPreparationUnitPrefix:APP_META_KEYS.backupPreparationUnitPrefix,
     insightsDatasetRevision:APP_META_KEYS.insightsDatasetRevision,
     dataMaintenance:APP_META_KEYS.dataMaintenance,
-    areaNoteRecoveryPrefix:APP_META_KEYS.areaNoteRecoveryPrefix,
     savedDayDeletionPrefix:APP_META_KEYS.savedDayDeletionPrefix,
     areaNoteDeletionPrefix:APP_META_KEYS.areaNoteDeletionPrefix,
     attachmentDeletionPrefix:APP_META_KEYS.attachmentDeletionPrefix,
@@ -8123,11 +8121,11 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
       reflectionDrafts:OBSOLETE_STORAGE_KEYS.reflectionDrafts,reflectionLegacy:OBSOLETE_STORAGE_KEYS.reflectionLegacy,
       deviceId:OBSOLETE_STORAGE_KEYS.deviceId,liveDraft:OBSOLETE_STORAGE_KEYS.liveDraft,activeSession:OBSOLETE_STORAGE_KEYS.activeSession,
       storageCapability:OBSOLETE_STORAGE_KEYS.storageCapability,diagnostics:OBSOLETE_STORAGE_KEYS.diagnostics,
-      legacyOwnershipLease:OBSOLETE_STORAGE_KEYS.legacyOwnershipLease
+      legacyOwnershipLease:OBSOLETE_STORAGE_KEYS.legacyOwnershipLease,attachmentMaintenanceAttemptDay:OBSOLETE_STORAGE_KEYS.attachmentMaintenanceAttemptDay
     }),
     appMeta:Object.freeze({
       personalPreferences:APP_META_KEYS.personalPreferences,dataMaintenance:APP_META_KEYS.dataMaintenance,verifiedRecoveryBackups:APP_META_KEYS.verifiedRecoveryBackups,
-      backupProtection:APP_META_KEYS.backupProtection,attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,automaticDeviceBackup:APP_META_KEYS.automaticDeviceBackup,
+      attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,automaticDeviceBackup:APP_META_KEYS.automaticDeviceBackup,restoreJournalPayload:APP_META_KEYS.restoreJournalPayload,
       repositoryIntegrityScrub:APP_META_KEYS.repositoryIntegrityScrub,reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix,
       reconciliationBaseLegacy:OBSOLETE_APP_META_KEYS.reconciliationBaseLegacy,repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,repositoryMaintenancePendingLegacy:OBSOLETE_APP_META_KEYS.repositoryMaintenancePendingLegacy,
       libraryClearJournalState:APP_META_KEYS.libraryClearJournalState,libraryClearJournalPayloadPrefix:APP_META_KEYS.libraryClearJournalPayloadPrefix,

@@ -103,10 +103,14 @@ Faster local loop: run each fast test in its own process with the hermetic flags
   - attachment check record v1 → v2 (already converted; the ordinary validator no longer reads v1);
   - data maintenance v5 is retired (maintenance runs again once).
   Each conversion fails closed on an unknown shape and keeps the source untouched, and `verifyRetiredHostCompatibility` reports anything old still present.
-- **Two documented exceptions, both listed in the retirement registry:**
-  - restore journals v1–v3 (`restore-journal-payload-v1-v3`): a restore interrupted under an older build is resolved once by crash recovery, which must read it as written (a missing deletion ledger means "leave that ledger alone");
-  - backup password record v1 (`l7-backup-protection-policy-v1`): it can only be converted when the person next enters the password.
-- **Not local data:** old formats inside backup repositories and backup files (Drive, Device Folder, `.sdbackup`) are import adapters in the registry. They retire when old backups age out or are replaced.
+- **Whole-topology sweep (second pass, same day).** Every stored surface in `contracts/data-architecture.mjs` was checked: IndexedDB stores, appMeta families, browser storage, OPFS, caches, journals and backup formats. The ordinary runtime now reads only current forms everywhere; older forms are read once by the compatibility path, converted, verified and retired. Strays found and fixed:
+  - **Old backup password record and old encrypted format.** No encrypted backups exist (your confirmation), so the password record v1, its unlock-time conversion and the SDENC01 reader are deleted outright; only SDENC02 and password record v2 remain.
+  - **Restore journals v1–v3.** Converted once to v4 by the compatibility host before interrupted-restore recovery runs (start-up runs the compatibility step first). Missing deletion lists become empty lists. The journal reader accepts only v4.
+  - **Old note-recovery journal rows (`areaNoteRecovery.v1:*`).** Already folded only by the one-time migration, but still declared a current, validated family. Now an obsolete identity: only the migration reads it (raw), and the obsolete-metadata cleanup removes any residue.
+  - **`attachmentMaintenanceDay.v1` in browser storage.** Declared obsolete, but nothing removed it. The compatibility host now retires it with the other leftover keys.
+  - A guard test (`compatibility-contract`) fails if a retired browser-storage key has no compatibility path, if a retired appMeta identity is still a current family, or if the host metadata validators read old versions again.
+- **Confirmed clean:** Daily Records, summaries, Area Notes, Active Session, deletion history, preferences and plans, attachments (old metadata is rejected in ordinary reads and cleaned only by the compatibility path), browser-storage recovery copies, the IndexedDB schema bridges and the service-worker update bridge.
+- **Open decision: old backup-repository formats.** Device Folder and Drive checkpoints written by builds before SDVB75F10 (repository manifest versions 1–4, history entries without summaries, Drive maintenance markers from older builds) are still readable in `managed-repository.js`, `backup.js`, `backup-provider.js` and `drive.js`. They are not in the retirement registry and have no dedicated test. Either delete them (old checkpoints in those locations become unrestorable; the 15-point retention replaces them as new backups are made) or keep them, register them and add a test. Old `.sdbackup` files (complete-backup v7–v19) are registered import adapters with tests.
 
 ---
 
