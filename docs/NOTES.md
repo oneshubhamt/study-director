@@ -32,25 +32,25 @@ What already works well:
 8. **Already covered:** keeping images and PDFs inside notes in sync with their note is part of attachment upkeep, checked in the background-services pass. Editing while another tab takes over writing is already safe; add one test only if none covers it.
 9. **Later:** math equations.
 10. **Not doing:** templates, sharing, and drag-and-drop in the tree (Move covers it).
+11. **Every note gets a permanent identity** (confirmed 2026-10-10).
+   **Today:** a note is identified by its name ("Cardiology › Heart failure"). Renaming or moving a note gives it a new identity, so:
+   - its earlier versions disappear (older backups hold it under the old name);
+   - anything pointing at it by name breaks.
 
-## Proposed, to confirm
+   **Decision:**
+   - **Permanent id.** Each note gets an id at creation that never changes. The title is just a property, so rename and move change only the title.
+   - **Everything points at the id:** versions, links between notes, trash, backups, search, export, and the "open the note this attachment belongs to" action.
+   - **Stored record:** `{id, title, text, updatedAt}`. It replaces `{key, label, text, updatedAt}`, so there is no extra field. Matching a block's Area to a note title uses a lookup built in memory; nothing extra is stored.
+   - **Existing notes** are converted once, following the migration rule. A converted note's id is derived from its current name. Older backups, which store notes by name, therefore map to the same note, and its history is kept.
+     - Exception: history from before a rename that happened before this change stays under the old name.
 
-### A. Every note gets a permanent identity
+   Text matching was considered as the identity and rejected. A note's text changes with every edit, so it cannot recognise the note over time. The permanent id is the note's lasting fingerprint; text fingerprints are used only to compare versions.
 
-**Today:** a note is identified by its name ("Cardiology › Heart failure"). Renaming or moving a note gives it a new identity, so:
-- its earlier versions disappear (older backups hold it under the old name);
-- anything pointing at it by name breaks.
+   This is the largest change, and everything else builds on it, so it comes first.
 
-**Proposal:**
-- **Permanent id.** Each note gets an id at creation that never changes. The title is just a property, so rename and move change only the title.
-- **Everything points at the id:** versions, links between notes, trash, backups, search, export, and the "open the note this attachment belongs to" action.
-- **Stored record:** `{id, title, text, updatedAt}`. It replaces `{key, label, text, updatedAt}`, so there is no extra field. Matching a block's Area to a note title uses a lookup built in memory; nothing extra is stored.
-- **Existing notes** are converted once, following the migration rule. A converted note's id is derived from its current name. Older backups, which store notes by name, therefore map to the same note, and its history is kept.
-  - Exception: history from before a rename that happened before this change stays under the old name.
+## Under discussion
 
-Text matching was considered as the identity and rejected. A note's text changes with every edit, so it cannot recognise the note over time. The permanent id is the note's lasting fingerprint; text fingerprints are used only to compare versions.
-
-This is the largest change, and everything else builds on it, so it comes first.
+B to E were refined on 2026-10-10: notes on blocks through a bar of linked notes, tags with suggestions and filtering, and a Library with three sections. They are written down here once agreed.
 
 ### B. Notes and plan blocks
 
@@ -107,7 +107,7 @@ An explicit tags field per note was considered and set aside: it needs more scre
 
 ## Order of work (once everything is decided)
 
-1. **Permanent note identity (A)** and **earlier versions (decision 1):**
+1. **Permanent note identity (decision 11)** and **earlier versions (decision 1):**
    - the record and a one-time conversion;
    - backups;
    - the combined versions list, which survives renames;
