@@ -71,7 +71,7 @@ const runtimeBackupCodec=freeze({...codec,
   inspect:async(...args)=>{portablePathMetrics.inspections+=1;return codec.inspectCurrent(...args);}
 });
 const runtime=BackupModule.createRuntime(freeze({ports:freeze({
-  configuration:freeze({activeSessionId:'current',appVersion:'repository-restore-test',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits}),
+  configuration:freeze({appVersion:'repository-restore-test',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits}),
   
   persistence:freeze({
     activeSessionLoad:async()=>({ok:true,value:activeSession,error:null,storage:{idb:true}}),activeSessionSave:async value=>(activeSession=value,{ok:true,value}),activeSessionClear:async()=>(activeSession=null,{ok:true}),activeSessionSettled:async()=>true,

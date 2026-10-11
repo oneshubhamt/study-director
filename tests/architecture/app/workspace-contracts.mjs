@@ -130,7 +130,8 @@ assert.ok(app.indexOf('id="library-attachments"')>app.indexOf('id="library-data"
 assert.match(app,/openLibrary:\(\)=>\{LibraryView\.showSection\('data'\);/u,'An attachment link opens Data → Files.');
 // Only the shown section renders, and the view is remembered.
 assert.match(library,/function notesShown\(\)\{return libraryActive&&librarySection==='notes';\}/u);
-assert.match(library,/ports\.preferences\.write\(\{section:librarySection,diary:!!diaryDrawer\(\)\?\.open,sort:noteSort\}\)/u);
+assert.match(library,/ports\.preferences\.write\(\{section:librarySection,diary:!!diaryDrawer\(\)\?\.open,sort:noteSort,\.\.\.\(noteListWidth\?\{listWidth:noteListWidth\}:\{\}\)\}\)/u);
+assert.match(app,/class="library-notes-resizer" id="library-notes-resizer" role="separator" aria-orientation="vertical"/u,'The notes list has a keyboard-reachable resize handle.');
 // Search lands on matches through Wordgard's own decoration API; strikethrough is Wordgard's mark.
 assert.match(editor,/const searchMatches=GardState\.Field\.define<SearchMatches\|null>/u);
 assert.match(editor,/moreMenu\.append\(underlineButton,strikethroughButton,subscriptButton,superscriptButton\)/u);

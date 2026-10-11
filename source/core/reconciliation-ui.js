@@ -53,11 +53,12 @@ registry.define('reconciliation-ui',1,()=>{
       for(const conflict of conflicts){
         if(manualOnly){manual.push({conflict,smartValue:null});continue;}
         if(!conflict.ancestorAvailable){manual.push({conflict,smartValue:null});continue;}
-        try{
-          const threeWay=richText.mergeThreeWay(conflict.ancestorValue,conflict.localValue,conflict.incomingValue);
-          if(threeWay.safe){automaticNotes[conflict.key]=freeze({text:threeWay.value,localCandidateId:conflict.localCandidateId,incomingCandidateId:conflict.incomingCandidateId});continue;}
-          manual.push({conflict,smartValue:threeWay.value});
-        }catch(error){diagnostics.capture('reconciliation-ui.three-way-preflight',error,'warn');manual.push({conflict,smartValue:null});}
+        // Only one side changed since the shared copy: there is nothing to choose.
+        // When both changed, the review always opens, with Smart merge ready.
+        const onlyIncoming=conflict.localValue===conflict.ancestorValue,onlyLocal=conflict.incomingValue===conflict.ancestorValue;
+        if(onlyIncoming||onlyLocal){automaticNotes[conflict.key]=freeze({text:onlyIncoming?conflict.incomingValue:conflict.localValue,localCandidateId:conflict.localCandidateId,incomingCandidateId:conflict.incomingCandidateId});continue;}
+        try{manual.push({conflict,smartValue:richText.mergeThreeWay(conflict.ancestorValue,conflict.localValue,conflict.incomingValue).value});}
+        catch(error){diagnostics.capture('reconciliation-ui.three-way-preflight',error,'warn');manual.push({conflict,smartValue:null});}
       }
       if(!manual.length)return freeze({format:FORMAT,version:1,notes:freeze(automaticNotes)});
       const checkpointAssets=new Map();

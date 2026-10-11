@@ -15,7 +15,7 @@ registry.define('backup',1,input=>{
   if(!input.backupCapture||input.backupCapture.format!=='study-director.backup-capture-module'||input.backupCapture.contractVersion!==1||typeof input.backupCapture.create!=='function')throw new TypeError('Backup capture dependency is invalid.');
   const Canonical=input.canonical,ManagedRepositoryModule=input.managedRepository,BackupProviderModule=input.backupProvider,RepositoryBackgroundModule=input.repositoryBackground,BackupCaptureModule=input.backupCapture;
   const PORT_FIELDS=freeze({
-    configuration:freeze(['activeSessionId','appVersion','backupVersion','limits']),
+    configuration:freeze(['appVersion','backupVersion','limits']),
     persistence:freeze(['activeSessionLoad','activeSessionSave','activeSessionClear','activeSessionSettled','dailyRecordBackupDates','dailyRecordBackupMonth','dailyRecordDocuments','dailyRecordImportBatches','dailyRecordRemove','dailyRecordTimestamp','notesExportPayload','notesReadFreshPayload','notesReadFreshItems','notesFlush','notesNormalizePayload','notesAlignByTitle','notesFailure','restoreJournalPrepare','restoreJournalRead','restoreJournalMark','restoreJournalClear','scheduleRead','personalSettle','personalExport','personalImport','personalVerify','sourceRevision','snapshotRevision','storageGeneration','canonicalMutationEpochRead','canonicalPreparationRebase','preparationUnitStamps','preparationUnitReplace','installationId','deletionRecoveryFlush','deletionRecoverySavedDays','deletionRecoveryReplaceSavedDays','deletionRecoveryAreaNotes','deletionRecoveryReplaceAreaNotes','deletionRecoveryAttachments','deletionRecoveryReplaceAttachments','deletionRecoveryClearAttachment','reconciliationBaseRead','reconciliationBaseReadNotes','reconciliationBaseWrite']),
     codecs:freeze(['activeSession','backup']),
     reconciliation:freeze(['createPlan','resolvePlan','summarizePlan']),
@@ -60,7 +60,6 @@ registry.define('backup',1,input=>{
     }
     if(!Object.isFrozen(ports.view.presentation)||['begin','read','feedback','condition','detail','outcome','resolve','reset','subscribe'].some(key=>typeof ports.view.presentation[key]!=='function'))throw new TypeError('Backup presentation port is invalid.');
     const {
-      activeSessionId:ACTIVE_SESSION_ID,
       appVersion:APP_VERSION,
       backupVersion,
       limits:APP_LIMITS

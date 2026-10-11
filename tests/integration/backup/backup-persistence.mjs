@@ -160,7 +160,7 @@ const fn=()=>false;
 const backupPresentation=createBackupPresentation();
 let runtime;
 runtime=BackupModule.createRuntime(freeze({ports:freeze({
-  configuration:freeze({activeSessionId:'current',appVersion:'QA_FIXTURE',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits}),
+  configuration:freeze({appVersion:'QA_FIXTURE',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits}),
   
   persistence:freeze({
     activeSessionLoad:async()=>({ok:true,value:null,error:null,storage:{local:false,idb:false}}),activeSessionSave:async value=>({ok:true,value}),activeSessionClear:async()=>true,activeSessionSettled:async()=>true,

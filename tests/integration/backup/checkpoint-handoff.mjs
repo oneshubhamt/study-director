@@ -105,7 +105,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
   const presentation=createBackupPresentation();
   presentation.subscribe(()=>{const message=presentation.current('file')?.message||'';if(message&&statuses.at(-1)!==message)statuses.push(message);});
   const runtime=BackupModule.createRuntime(freeze({ports:freeze({
-    configuration:freeze({activeSessionId:'current',appVersion:'QA_B3',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits}),
+    configuration:freeze({appVersion:'QA_B3',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits}),
     
     persistence:freeze({
       activeSessionLoad:async()=>{if(injectedFailure==='session-read')return {ok:false,value:null,error:new Error('QA_FIXTURE session read failure'),storage:{idb:true}};return {ok:true,value:state.activeSession,error:null,storage:{idb:true}};},activeSessionSave:async value=>{events.push('preflight-session-save');if(injectedFailure==='session-save')return {ok:false,value:null,error:new Error('QA_FIXTURE session save failure')};state.activeSession=value;return {ok:true,value};},activeSessionClear:async()=>(state.activeSession=null,{ok:true}),activeSessionSettled:async()=>{if(injectedFailure==='session-settle')throw new Error('QA_FIXTURE session settle failure');return true;},

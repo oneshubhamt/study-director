@@ -978,6 +978,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
               <button class="library-notes-trash-toggle ui-btn" id="library-notes-trash-toggle" type="button" aria-expanded="false" aria-controls="library-notes-trash-list">Recently deleted <span id="library-notes-trash-count"></span></button>
             </div>
           </nav>
+          <div class="library-notes-resizer" id="library-notes-resizer" role="separator" aria-orientation="vertical" aria-controls="library-notes-list" aria-label="Width of the notes list" aria-valuemin="0" aria-valuemax="100" aria-valuenow="33" tabindex="0" title="Drag to resize · double-click to reset"></div>
           <section class="library-notes-editor" id="library-notes-editor">
             <div class="library-notes-editor-empty ui-status">Select an Area to view its note.</div>
           </section>
@@ -4281,10 +4282,10 @@ function renderRichTextContent(container,value,emptyText='',label='Rich text'){
   catch(error){AppDiagnostics.capture('rich-text.display',error,'warn');container.textContent=plainTextContent(canonical).trim()||String(emptyText||'');return false;}
 }
 // Prints one note, its title and content with images, and nothing else on the page.
-async function printNote(label,value){
+async function printNote(heading,value){
   for(const old of document.querySelectorAll('.note-print'))old.remove();
   const sheet=document.createElement('article'),title=document.createElement('h1'),body=document.createElement('div');
-  sheet.className='note-print';title.textContent=String(label||'Note').split('>').map(part=>part.trim()).filter(Boolean).at(-1)||'Note';sheet.append(title,body);document.body.appendChild(sheet);
+  sheet.className='note-print';title.textContent=String(heading||'Note');sheet.append(title,body);document.body.appendChild(sheet);
   const text=String(value??'');
   try{if(text.trim())RichTextApi.renderRichText({container:body,value:text,label:title.textContent,assets:RichTextAssets,eager:true});}
   catch(error){AppDiagnostics.capture('rich-text.print',error,'warn');body.textContent=plainTextContent(text);}
@@ -8047,7 +8048,6 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
   notifications:NoticeCoordinator.presentation('library',Object.freeze({label:'Open Library',run:()=>goTab('library')})),
   records:Object.freeze({
     get:date=>AppData.dailyRecords.get(date),
-    list:()=>AppData.dailyRecords.list(),
     remove:date=>AppData.dailyRecords.remove(date),
     sortedSummaries:()=>AppData.dailyRecords.sortedSummaries()
   }),
@@ -8093,7 +8093,6 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     commitEditor:commitTaskNoteEditor,
     find:(field,query,onClear)=>RichTextRuntime.find(field,query,onClear),
     findStep:(field,direction)=>RichTextRuntime.findStep(field,direction),
-    failure:()=>AppData.notes.failure(),
     get:(key,label)=>AppData.notes.get(key,label),
     normalizeArea:normalizeOngoingAreaInput,
     orderEntries:orderOngoingAreaEntries,
@@ -8109,7 +8108,7 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     trash:key=>AppData.notes.trash(key),
     trashSnapshot:()=>AppData.notes.trashSnapshot(),
     versions:target=>BackupRecoveryHost.history.openNote(target),
-    print:key=>{RichTextRuntime.flushEditors();const note=AppData.notes.get(key);return note?printNote(note.label,note.text):false;}
+    print:(key,title)=>{RichTextRuntime.flushEditors();const note=AppData.notes.get(key);return note?printNote(title,note.text):false;}
   }),
   attachments:Object.freeze({
     batch:operation=>AttachmentLibrary.batch(operation),
@@ -8430,7 +8429,6 @@ const NoteReconciliationUI=ReconciliationUIModule.createController(Object.freeze
 })}));
 const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freeze({
   configuration:Object.freeze({
-    activeSessionId:ACTIVE_SESSION_ID,
     appVersion:APP_VERSION,
     backupVersion:DATA_CONTRACT.schemas.Backup.version,
     limits:Object.freeze({

@@ -137,7 +137,6 @@ interface EditorInteractionHooks{
 interface HeadlessAction{run:Command.Bound|Command;active?:(state:GardState)=>boolean;enabled?:(state:GardState)=>boolean}
 const editableAction=(run:Command.Bound|Command,active?:HeadlessAction['active']):HeadlessAction=>({run,active,enabled:state=>!state.readOnly});
 const markAction=(mark:Mark):HeadlessAction=>editableAction(Command.bind(toggleMark,mark),state=>state.selection.isCursor?!!mark.isInSet(state.sel.activeMarks):!state.selection.ranges.some(range=>canAddMarkInRange(state.doc,range.from,range.to,mark)));
-const selectionInType=(tag:Plot.Tag)=>(state:GardState)=>{const block=state.sel.head.textblockParent;return !!block&&block.start===state.sel.anchor.textblockParent?.start&&block.node.tag.eq(tag)};
 const paragraphAction=editableAction(Command.bind(setTypographyPreset,'N'),state=>typographyState(state).preset==='N');
 const h1Action=editableAction(Command.bind(setTypographyPreset,'H1'),state=>typographyState(state).preset==='H1');
 const h2Action=editableAction(Command.bind(setTypographyPreset,'H2'),state=>typographyState(state).preset==='H2');

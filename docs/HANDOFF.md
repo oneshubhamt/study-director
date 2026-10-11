@@ -2,7 +2,7 @@
 
 Status of the work on this branch (`refactor/background-coordination`, draft PR #1). Read sections 1 and 3 first; section 2 is a closed summary.
 
-**Current state (2026-10-11):** the backup and data work is finished. The notes plan in `docs/NOTES.md` is decided (items 1 to 16) and step 1 of its order of work, permanent note ids with the combined earlier-versions list, is built. After notes: the background services (section 4).
+**Current state (2026-10-11):** the backup and data work is finished. The notes plan in `docs/NOTES.md` is decided (items 1 to 16); steps 1 (permanent note ids, the combined earlier-versions list) and 2 (the Library in three sections, sorting, search landing, strikethrough, print) are built. After notes: the background services (section 4), and last of all Wordgard as its own module (section 5).
 
 ---
 
@@ -83,9 +83,24 @@ Suggestions:
 - **Service worker.** Keep the verified update flow. Add a cache size budget. Make sure an update never interrupts a restore or backup: the update already waits up to a minute for backups.
 - **Idle and visibility awareness.** Run heavy maintenance only when the page is visible and idle (`scheduler.postTask` or `requestIdleCallback` where available), and never on battery saver if that becomes detectable.
 
+## 5. Last of all: Wordgard as its own module (decided 2026-10-11)
+
+Do this at the very end, after the background services.
+
+**Already so.**
+- `vendor/wordgard` is the exact upstream source, checked against `build/wordgard-metadata.mjs`.
+- Study Director's few changes are trims applied only at build time (`build/wordgard-source-patches.mjs`) and runtime additions behind `rich-text/wordgard-adapter.ts`.
+- Features use Wordgard's own capabilities where they exist (its Strikethrough mark, its decoration API for search matches); a patch or workaround is the last resort.
+
+**To do.**
+- Ship Wordgard as its own replaceable module in `source/`, unminified and untouched, separate from Study Director's editor code (`source/external/rich-text.js` currently holds both, already minified).
+- Build the lean version only when the minified deployment is made: tree-shaken to what Study Director uses, with the build-time trims applied.
+- A newer Wordgard then drops in by replacing that one module; the build names any trim whose upstream text moved.
+- At the same time, check whether newer Wordgard versions make the two runtime workarounds (`inert-html.ts`, `cut.ts`) or the build-time trims unnecessary, and drop those that are.
+
 ---
 
-## 5. Record of work on this branch (reference only)
+## 6. Record of work on this branch (reference only)
 
 Commits since `main` (newest first), grouped:
 
@@ -124,6 +139,8 @@ Measured on 200 MB of attachments:
 | SHA-256 in the worker | about 38 MB/s | about 135 MB/s |
 
 ### Notes and Library
+- `b30da47`, `5034bdf`, `368d8b6` Notes step 1: permanent note ids, the combined earlier-versions list, the rename tick box; conversions only in the compatibility block.
+- `c08935f`, `b331580` Notes step 2: "Notes" everywhere, strikethrough, the Library in Notes · Days · Data, sorting, search landing on matches, Print….
 - `546fbf2`, `26f862b`, `db1824a` Notes tree, Recently deleted, note menu, breadcrumb, editable title.
 - `691a83d` One save engine for notes, Diary and Review reflections.
 - `ff69680` Rename or move with children; merge only when asked.
@@ -157,7 +174,7 @@ Measured on 200 MB of attachments:
 
 ---
 
-## 6. Working notes
+## 7. Working notes
 
 - **Testing rhythm (user's rule, 2026-10-10).** Make all the app changes for a piece of work first, then build once and run the suites once. Fix what fails, then rerun only the failing tests. Do not rerun tests after each small edit.
 - **Chromium for browser tests:** `CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome`. On a fresh profile, preset `localStorage` user defaults so the name dialog does not block clicks.

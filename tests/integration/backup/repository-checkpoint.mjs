@@ -63,7 +63,7 @@ async function forceBaseline(checkpointId,notePayload){
   reconciliationBaseNotes=Object.create(null);for(const [key,value] of Object.entries(notePayload||{}))reconciliationBaseNotes[key]=String(value&&value.text||'');const keys=Object.keys(reconciliationBaseNotes).sort();reconciliationBase=freeze({format:'study-director.reconciliation-base',version:2,checkpointId,establishedAt:new Date().toISOString(),noteCount:keys.length,noteKeyFingerprint:await baselineFingerprint(keys)});
 }
 const runtime=BackupModule.createRuntime(freeze({ports:freeze({
-  configuration:freeze({activeSessionId:'current',appVersion:'repository-checkpoint-test',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits:freeze({backupChunkItems:50,backupMaxCompressedBytes:64*1024*1024,backupMaxFileBytes:1024*1024*1024})}),
+  configuration:freeze({appVersion:'repository-checkpoint-test',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits:freeze({backupChunkItems:50,backupMaxCompressedBytes:64*1024*1024,backupMaxFileBytes:1024*1024*1024})}),
   
   persistence:freeze({
     activeSessionLoad:async()=>({ok:true,value:null,error:null,storage:{idb:true}}),activeSessionSave:async value=>({ok:true,value}),activeSessionClear:async()=>({ok:true}),activeSessionSettled:async()=>true,

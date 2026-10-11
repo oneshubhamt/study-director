@@ -138,14 +138,28 @@ const conflict=(key,localValue,incomingValue,{ancestorAvailable=false,ancestorVa
   assert.equal(result.notes['2026-09-21'].text,'LOCAL-D2');
 }
 
-// A proven ancestor that yields a safe three-way result resolves without opening
-// the large modal at all.
+// When only one side changed since the shared copy there is nothing to choose:
+// the changed side is taken without opening the modal.
 {
   const harness=createController();
-  const result=await harness.controller.resolve({conflicts:[conflict('Auto','LOCAL-AUTO','REMOTE-AUTO',{ancestorAvailable:true,ancestorValue:'SAFE-BASE'})],incomingAssets:[]});
-  assert.equal(result.notes.Auto.text,'LOCAL-AUTO|THREEWAY|REMOTE-AUTO');
-  assert.equal(harness.document.body.children.length,0,'safe three-way reconciliation must stay silent');
-  assert.equal(harness.mounts.length,0,'safe three-way reconciliation must not mount editors');
+  const result=await harness.controller.resolve({conflicts:[conflict('Forward','SAFE-BASE','REMOTE-NEW',{ancestorAvailable:true,ancestorValue:'SAFE-BASE'}),conflict('Kept','LOCAL-NEW','SAFE-BASE',{ancestorAvailable:true,ancestorValue:'SAFE-BASE'})],incomingAssets:[]});
+  assert.equal(result.notes.Forward.text,'REMOTE-NEW');assert.equal(result.notes.Kept.text,'LOCAL-NEW');
+  assert.equal(harness.document.body.children.length,0,'a one-sided change must stay silent');
+  assert.equal(harness.mounts.length,0,'a one-sided change must not mount editors');
+}
+
+// When both sides changed, the review always opens, even when the edits merge
+// cleanly; Smart merge offers that clean merge.
+{
+  const harness=createController();
+  const promise=harness.controller.resolve({conflicts:[conflict('Both','LOCAL-AUTO','REMOTE-AUTO',{ancestorAvailable:true,ancestorValue:'SAFE-BASE'})],incomingAssets:[]});
+  await tick();await tick();
+  const dialog=harness.document.body.children[0];
+  assert.ok(dialog,'both sides changed: the review must open');
+  byText(dialog,'Smart merge').dispatch('click');
+  assert.equal(harness.mounts[0].field.value,'LOCAL-AUTO|THREEWAY|REMOTE-AUTO');
+  byText(dialog,'Apply resolved note').dispatch('click');
+  assert.equal((await promise).notes.Both.text,'LOCAL-AUTO|THREEWAY|REMOTE-AUTO');
 }
 
 // An unsafe three-way proposal is shown in the left working copy only when the

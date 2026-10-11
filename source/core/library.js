@@ -9,7 +9,7 @@ registry.define('library',1,()=>{
   const freeze=Object.freeze;
   const PORT_FIELDS=freeze({
     notifications:freeze(['begin','feedback']),
-    records:freeze(['get','list','remove','sortedSummaries']),
+    records:freeze(['get','remove','sortedSummaries']),
     domain:freeze(['countTaskOutcomes','earliestSupportedSavedDate','isTrackableBlock','isValidIsoDate','isSupportedSavedDate','todayISO','sanitizePracticeRuns','sanitizeTaskOutcomeCounts','taskOutcomeSummaryText']),
     presentation:freeze(['createSavedDayTaskReviewCard','createPomodoroSummaryLine','emptyMsg','optionalDurationLabel','optionalHoursLabel','optionalPercentLabel','plainTextContent','populatePracticeRunTable','prettyDate','renderRichTextContent','textEl']),
     view:freeze(['document','goTab','setStatus','setTextSafe','window']),
@@ -17,7 +17,7 @@ registry.define('library',1,()=>{
     environment:freeze(['cancelAnimationFrame','createOption','createSearchWorker','requestAnimationFrame']),
     exporter:freeze(['exportKeys','cancel']),
     diary:freeze(['bindEditor','captureEditor','clearEditor','deleteEntry','draft','flushEditor','scheduleEditor','settled']),
-    notes:freeze(['areaUse','bindEditor','canCreate','catalogue','clearEditor','clearFind','commitEditor','failure','find','findStep','focusEditor','get','normalizeArea','orderEntries','print','purgeTrash','remove','rename','renameAreaInPlans','renderInherited','restore','searchDocuments','size','trash','trashSnapshot','versions']),
+    notes:freeze(['areaUse','bindEditor','canCreate','catalogue','clearEditor','clearFind','commitEditor','find','findStep','focusEditor','get','normalizeArea','orderEntries','print','purgeTrash','remove','rename','renameAreaInPlans','renderInherited','restore','searchDocuments','size','trash','trashSnapshot','versions']),
     attachments:freeze(['batch','close','count','invalidate','reconcile','refresh']),
     preferences:freeze(['read','write']),
     clearLibrary:freeze(['preflight','execute']),
@@ -46,7 +46,7 @@ registry.define('library',1,()=>{
     requireFunctions(ports.session,PORT_FIELDS.session,'Library session port');
     requireFunctions(ports.preferences,PORT_FIELDS.preferences,'Library preferences port');
     const notifications=ports.notifications;
-    const {get:getDailyRecord,list:listDailyRecords,remove:removeDailyRecord,sortedSummaries}=ports.records;
+    const {get:getDailyRecord,remove:removeDailyRecord,sortedSummaries}=ports.records;
     const {countTaskOutcomes,earliestSupportedSavedDate,isTrackableBlock,isValidIsoDate,isSupportedSavedDate,todayISO,sanitizePracticeRuns,sanitizeTaskOutcomeCounts,taskOutcomeSummaryText}=ports.domain;
     const {createSavedDayTaskReviewCard,createPomodoroSummaryLine,emptyMsg,optionalDurationLabel,optionalHoursLabel,optionalPercentLabel,plainTextContent,populatePracticeRunTable,prettyDate,renderRichTextContent,textEl}=ports.presentation;
     const {document,goTab,setStatus,setTextSafe,window}=ports.view;
@@ -55,7 +55,7 @@ registry.define('library',1,()=>{
     const {exportKeys,cancel:cancelExport}=ports.exporter;
     const {bindEditor:bindDiaryEditor,captureEditor:captureDiaryEditor,clearEditor:clearDiaryEditor,deleteEntry:deleteDiaryEntryRecord,flushEditor:flushDiaryEditor,scheduleEditor:scheduleDiaryEditor,draft:createDiaryDraft,settled:settleDiaryEditor}=ports.diary;
     const {
-      areaUse:planAreaUse,renameAreaInPlans,bindEditor,canCreate:canCreateOngoingNote,catalogue:ongoingNoteCatalogue,clearEditor,clearFind,commitEditor,failure:ongoingNoteFailure,find:findInEditor,findStep,focusEditor,
+      areaUse:planAreaUse,renameAreaInPlans,bindEditor,canCreate:canCreateOngoingNote,catalogue:ongoingNoteCatalogue,clearEditor,clearFind,commitEditor,find:findInEditor,findStep,focusEditor,
       get:getAreaNote,normalizeArea:normalizeOngoingNoteArea,orderEntries:orderOngoingNoteEntries,print:printNote,
       purgeTrash:purgeExpiredOngoingNotes,remove:removeOngoingNote,rename:renameNote,renderInherited,restore:restoreNote,searchDocuments:ongoingNoteSearchDocuments,size:ongoingNotesSize,
       trash:trashNote,trashSnapshot:ongoingNoteTrash,versions:openNoteVersions
@@ -74,6 +74,9 @@ registry.define('library',1,()=>{
     let librarySection=LIBRARY_SECTIONS.includes(savedView.section)?savedView.section:'notes',libraryActive=false;
     // Notes list order: 'name' is the tree, 'recent' a flat list, newest edit first.
     let noteSort=savedView.sort==='recent'?'recent':'name';
+    // The notes list width a person dragged to, in pixels; 0 keeps a third of the panel.
+    const NOTE_LIST_MIN=200,NOTE_LIST_MAX_SHARE=0.6;
+    let noteListWidth=Number.isFinite(savedView.listWidth)&&savedView.listWidth>0?savedView.listWidth:0;
     // The note and query whose matches were last marked in the open note.
     let noteSearchLanded='';
     let selectedLibraryDate=null;
@@ -114,7 +117,6 @@ registry.define('library',1,()=>{
     let attachmentMutationHold=0,attachmentMutationNeedsNotes=false,attachmentMutationNeedsDiary=false,attachmentMutationNeedsLibrary=false,attachmentMutationRestoreViewport=false;
     const NOTE_SEARCH_IDLE_MS=120000,NOTE_SEARCH_RESPONSE_MS=30000,NOTE_SEARCH_BATCH_CHARS=2*1024*1024;
     let noteSearchDeadline=0,noteSearchWorker=null,noteSearchTimer=0,noteSearchBuildTimer=0,noteSearchBuildDocuments=null,noteSearchBuildIndex=0,noteSearchBuilding=false,noteSearchId=0,noteSearchQuery='',noteSearchReady=false,noteSearchMatches=new Set(),noteSearchFailed=false,noteSearchPendingUpdates=new Map(),noteSearchFallbackText=null;
-    const noteSearchMetrics={workerStarts:0,coldBuilds:0,coldDocuments:0,queries:0,fallbackBuilds:0};
 
     function clearNoteSearchTimer(){if(noteSearchTimer){window.clearTimeout(noteSearchTimer);noteSearchTimer=0;}}
     function clearNoteSearchBuildTimer(){if(noteSearchBuildTimer){window.clearTimeout(noteSearchBuildTimer);noteSearchBuildTimer=0;}}
@@ -158,13 +160,12 @@ registry.define('library',1,()=>{
     }
     function startNoteSearchBuild(worker){
       noteSearchBuildDocuments=ongoingNoteSearchDocuments();noteSearchBuildIndex=0;noteSearchBuilding=true;noteSearchPendingUpdates.clear();
-      noteSearchMetrics.coldBuilds++;noteSearchMetrics.coldDocuments+=noteSearchBuildDocuments.length;
       watchNoteSearch();if(postSearch({type:'sync',documents:[]}))noteSearchBuildTimer=window.setTimeout(feedNoteSearchBuild,0);
     }
     function ensureNoteSearch(){
       clearNoteSearchTimer();if(noteSearchWorker)return true;if(noteSearchFailed)return false;
       try{
-        const worker=createSearchWorker();noteSearchMetrics.workerStarts++;
+        const worker=createSearchWorker();
         worker.onmessage=event=>{if(noteSearchWorker!==worker)return;const message=event?.data||{};if(message.type==='error'){failNoteSearch();return;}if(message.type!=='result'||Number(message.id)!==noteSearchId||!noteSearchQuery)return;clearNoteSearchDeadline();noteSearchReady=true;noteSearchMatches=new Set(Array.isArray(message.keys)?message.keys.map(String):[]);requestOngoingNotesRender();};
         worker.onerror=event=>{if(noteSearchWorker!==worker)return;event?.preventDefault?.();failNoteSearch();};worker.onmessageerror=()=>{if(noteSearchWorker===worker)failNoteSearch();};noteSearchWorker=worker;startNoteSearchBuild(worker);return noteSearchWorker===worker;
       }catch{stopNoteSearch(true);return false;}
@@ -173,7 +174,7 @@ registry.define('library',1,()=>{
       const clean=String(query||'').trim().toLowerCase();if(!clean){resetNoteSearch();return false;}
       if(!ensureNoteSearch())return false;if(!force&&noteSearchQuery===clean)return true;
       noteSearchQuery=clean;noteSearchReady=false;watchNoteSearch();if(noteSearchBuilding)return true;
-      const id=++noteSearchId;noteSearchMetrics.queries++;return postSearch({type:'query',id,query:clean});
+      const id=++noteSearchId;return postSearch({type:'query',id,query:clean});
     }
     function updateOngoingNoteSearchDocument(record){
       if(!record)return false;clearNoteSearchTimer();const key=String(record.key||'').trim();if(!key)return false;
@@ -183,7 +184,7 @@ registry.define('library',1,()=>{
       noteSearchQuery='';noteSearchReady=false;const query=ongoingNotesSearch();if(query)requestNoteSearch(query,true);return true;
     }
     function fallbackNoteSearch(entries,query){
-      if(!noteSearchFallbackText){noteSearchFallbackText=new Map();noteSearchMetrics.fallbackBuilds++;for(const record of ongoingNoteSearchDocuments())noteSearchFallbackText.set(String(record.key||''),plainTextContent(record.value||'').toLowerCase());}
+      if(!noteSearchFallbackText){noteSearchFallbackText=new Map();for(const record of ongoingNoteSearchDocuments())noteSearchFallbackText.set(String(record.key||''),plainTextContent(record.value||'').toLowerCase());}
       return entries.filter(entry=>String(entry.label||'').toLowerCase().includes(query)||String(noteSearchFallbackText.get(entry.key)||'').includes(query));
     }
     function filterOngoingNoteEntries(entries,query){
@@ -207,19 +208,15 @@ registry.define('library',1,()=>{
     function ongoingNoteDestinations(){
       return freeze(ongoingNoteEntries().map(entry=>freeze({key:entry.key,label:entry.label,hasNote:!!entry.hasNote,pending:!!entry.ephemeral})));
     }
-    function ongoingNoteLeaf(label){
-      const parts=String(label||'').split('>').map(part=>part.trim()).filter(Boolean);
-      return parts.at(-1)||String(label||'Area');
-    }
-    function ongoingNoteParentPath(label){
-      const parts=String(label||'').split('>').map(part=>part.trim()).filter(Boolean);
-      return parts.length>1?parts.slice(0,-1).join(' > '):'';
-    }
+    // A note's title is its path, such as "Medicine > Cardiology".
+    function labelParts(label){return String(label||'').split('>').map(part=>part.trim()).filter(Boolean);}
+    function ongoingNoteLeaf(label){return labelParts(label).at(-1)||String(label||'Area');}
+    function ongoingNoteParentPath(label){const parts=labelParts(label);return parts.length>1?parts.slice(0,-1).join(' > '):'';}
     function ongoingNoteSelectionIndex(entries){
       const rows=Array.isArray(entries)?entries:[],byLabel=new Map(rows.map(entry=>[String(entry.label||''),entry])),index=new Map(rows.map(entry=>[entry.key,[]]));
       for(const entry of rows){
         if(!entry.hasNote)continue;
-        const parts=String(entry.label||'').split('>').map(part=>part.trim()).filter(Boolean),seen=new Set();
+        const parts=labelParts(entry.label),seen=new Set();
         for(let depth=1;depth<=parts.length;depth++){
           const ancestor=byLabel.get(parts.slice(0,depth).join(' > '));
           if(ancestor&&!seen.has(ancestor.key)){index.get(ancestor.key)?.push(entry.key);seen.add(ancestor.key);}
@@ -312,7 +309,7 @@ registry.define('library',1,()=>{
     // Where the open note sits: each parent Area opens its own note.
     function noteBreadcrumb(entry){
       const crumbs=document.createElement('nav');crumbs.className='library-notes-crumbs';crumbs.setAttribute('aria-label','Location');
-      const parts=String(entry.label||'').split('>').map(part=>part.trim()).filter(Boolean).slice(0,-1),keys=entry.key.split(' > ');
+      const parts=labelParts(entry.label).slice(0,-1),keys=entry.key.split(' > ');
       parts.forEach((part,index)=>{
         const crumb=textEl('button','library-notes-crumb',part);crumb.type='button';crumb.title=`Open ${parts.slice(0,index+1).join(' › ')}`;
         crumb.addEventListener('click',()=>selectOngoingNote(keys.slice(0,index+1).join(' > ')));
@@ -358,7 +355,7 @@ registry.define('library',1,()=>{
       return true;
     }
     async function printOngoingNote(entry){
-      try{if(await printNote(entry.key))return true;setOngoingNotesStatus('Write something in this note before printing it.');return false;}
+      try{if(await printNote(entry.key,ongoingNoteLeaf(entry.label)))return true;setOngoingNotesStatus('Write something in this note before printing it.');return false;}
       catch(error){setOngoingNotesStatus('The note could not be printed: '+(error&&error.message||error),{error:true});return false;}
     }
     async function exportOngoingNote(entry){
@@ -1157,7 +1154,41 @@ registry.define('library',1,()=>{
       document.addEventListener('visibilitychange',()=>{if(document.hidden&&diaryEditing)void flushDiarySave().catch(()=>{});});window.addEventListener('pagehide',()=>{if(diaryEditing)void flushDiarySave().catch(()=>{});});
     }
     installDiaryWorkspace();
-    function rememberView(){try{ports.preferences.write({section:librarySection,diary:!!diaryDrawer()?.open,sort:noteSort});}catch{}}
+    function rememberView(){try{ports.preferences.write({section:librarySection,diary:!!diaryDrawer()?.open,sort:noteSort,...(noteListWidth?{listWidth:noteListWidth}:{})});}catch{}}
+    function noteListGrid(){return document.querySelector('#library-notes .library-notes-grid');}
+    function applyNoteListWidth(){
+      const grid=noteListGrid(),handle=document.getElementById('library-notes-resizer');if(!grid)return;
+      grid.classList.toggle('custom-width',noteListWidth>0);
+      if(noteListWidth>0)grid.style.setProperty('--library-notes-list-width',`${noteListWidth}px`);else grid.style.removeProperty('--library-notes-list-width');
+      const nav=grid.querySelector('.library-notes-nav'),total=grid.clientWidth;
+      if(handle&&nav&&total)handle.setAttribute('aria-valuenow',String(Math.round(nav.getBoundingClientRect().width/total*100)));
+    }
+    function setNoteListWidth(width,{remember=true}={}){
+      const max=Math.max(NOTE_LIST_MIN,(noteListGrid()?.clientWidth||0)*NOTE_LIST_MAX_SHARE);
+      noteListWidth=width>0?Math.round(Math.min(max,Math.max(NOTE_LIST_MIN,width))):0;
+      applyNoteListWidth();if(remember)rememberView();
+    }
+    // Drag the list's edge, or focus it and use the arrow keys (Shift for bigger
+    // steps); a double-click or Enter returns the list to a third of the width.
+    function installNoteListResizer(){
+      const handle=document.getElementById('library-notes-resizer');if(!handle)return;
+      const listWidth=()=>noteListGrid()?.querySelector('.library-notes-nav')?.getBoundingClientRect().width||0;
+      handle.addEventListener('pointerdown',event=>{
+        if(event.button!==0)return;event.preventDefault();
+        const start=event.clientX,width=listWidth();handle.setPointerCapture?.(event.pointerId);handle.classList.add('dragging');
+        const move=moved=>setNoteListWidth(width+moved.clientX-start,{remember:false});
+        const end=()=>{handle.classList.remove('dragging');handle.removeEventListener('pointermove',move);handle.removeEventListener('pointerup',end);handle.removeEventListener('pointercancel',end);rememberView();};
+        handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',end);handle.addEventListener('pointercancel',end);
+      });
+      handle.addEventListener('dblclick',()=>setNoteListWidth(0));
+      handle.addEventListener('focus',applyNoteListWidth);
+      handle.addEventListener('keydown',event=>{
+        const step=event.shiftKey?64:16,actions={ArrowLeft:()=>setNoteListWidth(listWidth()-step),ArrowRight:()=>setNoteListWidth(listWidth()+step),Home:()=>setNoteListWidth(NOTE_LIST_MIN),End:()=>setNoteListWidth(Infinity),Enter:()=>setNoteListWidth(0)};
+        if(!actions[event.key])return;event.preventDefault();actions[event.key]();
+      });
+      applyNoteListWidth();
+    }
+    installNoteListResizer();
     function enterSection(){
       if(!libraryActive)return;
       if(librarySection==='notes'){clearNoteSearchTimer();if(noteSearchFailed)resetNoteSearchFailure();renderOngoingNotes();}
@@ -1633,18 +1664,14 @@ registry.define('library',1,()=>{
       requestRender:requestLibraryRender,
       invalidate:invalidateLibrarySummaryCache,
       refreshNotes:refreshOngoingNotes,
-      reconcileNotes:renderOngoingNotes,
       updateSearchDocument:updateOngoingNoteSearchDocument,
-      searchMetrics:()=>freeze({...noteSearchMetrics,workerActive:!!noteSearchWorker,building:noteSearchBuilding,failed:noteSearchFailed}),
       openDay:date=>{showSection('days');return openLibraryDayDetail(date);},
       showSection,
-      section:()=>librarySection,
       openNote:selectOngoingNote,
       noteDestinations:ongoingNoteDestinations,
       revealNoteReference,
       batchAttachmentMutation,
       settleDiary:settleDiaryEdit,
-      closeDay:closeLibraryDayDetail,
       loadMore:loadMoreLibrary,
       clearAll:clearLibraryRecords
     });

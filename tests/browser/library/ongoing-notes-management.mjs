@@ -334,6 +334,18 @@ try{
   assert.deepEqual(sorted,{role:null,first:'alpha renamed',edited:true,saved:'recent',tree:'tree'});
   result.checks.notesSortRecentlyEdited=true;
 
+  // The list's edge resizes it (arrow keys here), the width is remembered, and Enter resets it.
+  const resized=await page.evaluate(`(async()=>{
+    const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),handle=document.getElementById('library-notes-resizer'),nav=document.querySelector('#library-notes .library-notes-nav'),width=()=>Math.round(nav.getBoundingClientRect().width),saved=()=>JSON.parse(localStorage.getItem('studyDirector.library.view.v1')).listWidth;
+    const before=width();handle.focus();handle.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',shiftKey:true,bubbles:true}));await wait(30);
+    const narrower=width(),remembered=saved();handle.dispatchEvent(new KeyboardEvent('keydown',{key:'Home',bubbles:true}));await wait(30);const minimum=width();
+    handle.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));await wait(30);
+    return {narrower:before-narrower,remembered:remembered===narrower,minimum,reset:Math.abs(width()-before)<=1,cleared:saved()===undefined};
+  })()`);
+  assert.deepEqual(resized,{narrower:64,remembered:true,minimum:200,reset:true,cleared:true});
+  await page.click('#library-notes-resizer');
+  result.checks.notesListResizable=true;
+
   // Search lands on the match: every match is marked, Enter steps, Escape and typing clear.
   await page.evaluate(`(async()=>{const d=__PWA6;d.AppData.notes.update('alpha renamed','Alpha renamed','Mitral valve. Then the mitral area. Mitral again.',d.AppData.notes.get('alpha renamed')?.updatedAt||'');await d.AppData.notes.flush();d.LibraryView.refreshNotes();
     const search=document.getElementById('library-notes-search');search.value='mitral';search.dispatchEvent(new Event('input',{bubbles:true}));})()`);
@@ -357,12 +369,12 @@ try{
     const button=[...shell.querySelectorAll('button')].find(item=>item.getAttribute('aria-label')==='Strikethrough');
     const editable=shell.querySelector('[contenteditable]');editable.focus();const range=document.createRange();range.selectNodeContents(editable.querySelector('p'));const selection=getSelection();selection.removeAllRanges();selection.addRange(range);document.dispatchEvent(new Event('selectionchange'));await wait(40);
     button.click();await wait(60);
-    let printed=null;const realPrint=window.print;window.print=()=>{const sheet=document.querySelector('.note-print');printed={title:sheet.querySelector('h1').textContent,text:sheet.innerText.includes('Mitral valve'),printing:document.documentElement.classList.contains('printing-note')};};
+    let printed=null;const realPrint=window.print;window.print=()=>{const sheet=document.querySelector('.note-print');printed={title:sheet.querySelector('h1').textContent===document.querySelector('#library-notes-editor .library-notes-editor-title').textContent.trim(),text:sheet.innerText.includes('Mitral valve'),printing:document.documentElement.classList.contains('printing-note')};};
     document.getElementById('library-note-actions').click();await wait(30);document.getElementById('library-note-print').click();await wait(400);
     window.dispatchEvent(new Event('afterprint'));window.print=realPrint;
     return {keys:button.getAttribute('aria-keyshortcuts'),struck:!!editable.querySelector('s'),printed,left:document.querySelectorAll('.note-print').length};
   })()`);
-  assert.deepEqual(formatted,{keys:'Control+Shift+x Meta+Shift+x',struck:true,printed:{title:'Alpha renamed',text:true,printing:true},left:0});
+  assert.deepEqual(formatted,{keys:'Control+Shift+x Meta+Shift+x',struck:true,printed:{title:true,text:true,printing:true},left:0});
   await page.evaluate(`(()=>{const search=document.getElementById('library-notes-search');search.value='';search.dispatchEvent(new Event('input',{bubbles:true}));})()`);
   result.checks.strikethroughAndPrint=true;
   console.error('[qa-notes] sections, sort, search, strikethrough and print passed');

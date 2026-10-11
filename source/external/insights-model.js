@@ -4090,8 +4090,7 @@
       buildPrepared,
       releaseTransient,
       getLabEvidence:(prepared,options)=>labEvidence(historyEntry(prepared,options)),
-      filterPreparedWindow:(prepared,key,currentStudyDate=null)=>filterCanonicalRecordsForInsightWindow(prepared.records,key,currentStudyDate),
-      filterWindow:(records,key,currentStudyDate=null)=>filterCanonicalRecordsForInsightWindow(prepare(records).records,key,currentStudyDate)
+      filterPreparedWindow:(prepared,key,currentStudyDate=null)=>filterCanonicalRecordsForInsightWindow(prepared.records,key,currentStudyDate)
     });
   }
     return Object.freeze({
