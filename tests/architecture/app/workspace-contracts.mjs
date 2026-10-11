@@ -113,3 +113,27 @@ assert.doesNotMatch(interactions,/history\.pushState|history\.replaceState|popst
 
 console.log(JSON.stringify({status:'PASS',suite:'workspace-history-ownership',owner:'source/core/navigation.js',consumers:['Legal Center','workspace overlay','interaction dialogs']},null,2));
 }
+
+{ // library-sections-contract
+const app=fs.readFileSync('source/app.html','utf8');
+const library=fs.readFileSync('source/core/library.js','utf8');
+const editor=fs.readFileSync('rich-text/editor.ts','utf8');
+// Notes · Days · Data: one switch, one panel each, Notes first.
+const tabs=[...app.matchAll(/role="tab" id="library-tab-(\w+)" data-library-section="\1" aria-controls="library-\1"/gu)].map(match=>match[1]);
+assert.deepEqual(tabs,['notes','days','data'],'The Library switch names its three sections in order.');
+for(const name of tabs)assert.match(app,new RegExp(`<section class="[^"]*" id="library-${name}" role="tabpanel" aria-labelledby="library-tab-${name}"`,'u'),`The ${name} section is a tab panel.`);
+assert.match(app,/Lasting notes for each subject and topic\. A note opens alongside any block whose Area has the same name\./u);
+assert.doesNotMatch(app,/library-data-drawer|id="library-notes-drawer"|Ongoing Notes/u,'The old Library drawers and the "Ongoing Notes" name are gone.');
+// The Diary and Files stay one-click panels inside Days and Data.
+assert.ok(app.indexOf('id="library-diary"')>app.indexOf('id="library-days"')&&app.indexOf('id="library-diary"')<app.indexOf('id="library-data"'),'The Diary sits in Days.');
+assert.ok(app.indexOf('id="library-attachments"')>app.indexOf('id="library-data"'),'Files sit in Data.');
+assert.match(app,/openLibrary:\(\)=>\{LibraryView\.showSection\('data'\);/u,'An attachment link opens Data → Files.');
+// Only the shown section renders, and the view is remembered.
+assert.match(library,/function notesShown\(\)\{return libraryActive&&librarySection==='notes';\}/u);
+assert.match(library,/ports\.preferences\.write\(\{section:librarySection,diary:!!diaryDrawer\(\)\?\.open,sort:noteSort\}\)/u);
+// Search lands on matches through Wordgard's own decoration API; strikethrough is Wordgard's mark.
+assert.match(editor,/const searchMatches=GardState\.Field\.define<SearchMatches\|null>/u);
+assert.match(editor,/moreMenu\.append\(underlineButton,strikethroughButton,subscriptButton,superscriptButton\)/u);
+assert.doesNotMatch(editor,/vendor\/wordgard/u,'The editor reaches Wordgard only through the adapter.');
+console.log(JSON.stringify({status:'PASS',suite:'library-sections',sections:tabs},null,2));
+}

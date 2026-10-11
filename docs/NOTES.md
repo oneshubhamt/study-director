@@ -134,7 +134,7 @@ What already works well:
    - backups;
    - the combined versions list, which survives renames;
    - the 2,000-note limit.
-2. **The Library in three sections (15)** and the notes surface:
+2. **The Library in three sections (15)** and the notes surface. Built (2026-10-11), with screenshots for approval:
    - the new layout and names;
    - sorting (5);
    - landing on search matches (4);

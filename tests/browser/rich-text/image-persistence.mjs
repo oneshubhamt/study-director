@@ -35,6 +35,13 @@ try{
   await page.reload();await waitForStudyDirector(page,{instrumented:true});await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'image reload ownership'});await page.evaluate(`__PWA6.goTab('execute')`);await waitFor(()=>page.evaluate(`document.querySelector('.sd-rte-image img')!==null`),{label:'ongoing image after reload'});await page.evaluate(`__PWA6.goTab('review')`);await waitFor(()=>page.evaluate(`document.querySelector('.sd-rte-image img')!==null`),{label:'reflection image after reload'});
   const reload=await page.evaluate(`(async()=>{const session=(await __PWA6.AppData.activeSession.load()).value,note=__PWA6.AppData.notes.get('radiology'),ids=[...new Set([...StudyDirectorRichText.assetIds(session?.snapshot?.review?.reflection||''),...StudyDirectorRichText.assetIds(note?.text||'')])];return {review:!!session?.snapshot?.review,note:!!note,ids,blobs:await Promise.all(ids.map(id=>__PWA6.RichTextAssets.get(id).then(blob=>blob?.size||0)))};})()`);
   assert.equal(reload.review,true);assert.equal(reload.note,true);assert.equal(reload.ids.length,2);assert.ok(reload.blobs.every(size=>size>0));result.checks.reloadUsesRealIndexedDbAssets=true;
+  // Print… prints the note with its images loaded, and nothing else on the page.
+  const printed=await page.evaluate(`(async()=>{const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));await d.goTab('library');d.LibraryView.showSection('notes');await wait(60);
+    const row=[...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='radiology');row.click();await wait(80);
+    let seen=null;const realPrint=window.print;window.print=()=>{const sheet=document.querySelector('.note-print'),image=sheet?.querySelector('img');seen={title:sheet?.querySelector('h1')?.textContent,image:!!image&&image.complete&&image.naturalWidth>0,hiddenApp:getComputedStyle(document.querySelector('.app')).display};};
+    document.getElementById('library-note-actions').click();await wait(30);document.getElementById('library-note-print').click();for(let i=0;i<100&&!seen;i++)await wait(50);
+    window.dispatchEvent(new Event('afterprint'));window.print=realPrint;return seen;})()`);
+  assert.deepEqual({...printed,hiddenApp:undefined},{title:'Radiology',image:true,hiddenApp:undefined},'Print… waits for the note’s images');result.checks.printIncludesImages=true;
   const unexpected=page.events.filter(event=>!/favicon|ResizeObserver loop/i.test(event.text||''));assert.deepEqual(unexpected,[]);result.checks.noRuntimeErrors=true;
 }finally{if(page)await browser.closePage(page).catch(()=>{});await browser.close();await server.close();fs.rmSync(fixtureDir,{recursive:true,force:true});}
 console.log(JSON.stringify(result,null,2));

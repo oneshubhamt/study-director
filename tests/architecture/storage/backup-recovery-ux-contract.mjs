@@ -30,7 +30,7 @@ assert.match(dataSurface,/id="backup-file-heading">Portable backup</u);assert.ma
   // One verb family for getting data back: Versions, then Restore…, Restore note… or Restore from file….
   assert.match(host,/use\.textContent=noteTarget\?'Restore note…':'Restore…'/u);assert.doesNotMatch(app+host,/Restore \/ Combine|Import backup…/u);
 }
-assert.match(dataSurface,/id="security-storage-heading">Security &amp; storage</u);assert.match(dataSurface,/>Backup encryption</u);assert.match(dataSurface,/>Local storage</u);
+assert.match(dataSurface,/id="security-storage-heading">Storage</u);assert.match(dataSurface,/>Backup encryption</u);assert.match(dataSurface,/>Local storage</u);
 assert.match(styles,/\.backup-advanced-disclosure>summary/u);assert.doesNotMatch(styles,/\.backup-recovery-/u,'obsolete Recovery & History styling must be removed');
 
 // The host draws Google Drive's row from the engine's status, like the Device Folder row.

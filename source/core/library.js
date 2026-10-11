@@ -17,8 +17,9 @@ registry.define('library',1,()=>{
     environment:freeze(['cancelAnimationFrame','createOption','createSearchWorker','requestAnimationFrame']),
     exporter:freeze(['exportKeys','cancel']),
     diary:freeze(['bindEditor','captureEditor','clearEditor','deleteEntry','draft','flushEditor','scheduleEditor','settled']),
-    notes:freeze(['areaUse','bindEditor','canCreate','catalogue','clearEditor','commitEditor','failure','focusEditor','get','normalizeArea','orderEntries','purgeTrash','remove','rename','renameAreaInPlans','renderInherited','restore','searchDocuments','size','trash','trashSnapshot','versions']),
-    attachments:freeze(['batch','count','invalidate','reconcile']),
+    notes:freeze(['areaUse','bindEditor','canCreate','catalogue','clearEditor','clearFind','commitEditor','failure','find','findStep','focusEditor','get','normalizeArea','orderEntries','print','purgeTrash','remove','rename','renameAreaInPlans','renderInherited','restore','searchDocuments','size','trash','trashSnapshot','versions']),
+    attachments:freeze(['batch','close','count','invalidate','reconcile','refresh']),
+    preferences:freeze(['read','write']),
     clearLibrary:freeze(['preflight','execute']),
     ownership:freeze(['canMutate']),
     overlays:freeze(['createAnchoredPopover']),
@@ -43,6 +44,7 @@ registry.define('library',1,()=>{
     requireFunctions(ports.ownership,PORT_FIELDS.ownership,'Library ownership port');
     requireFunctions(ports.overlays,PORT_FIELDS.overlays,'Library overlays port');
     requireFunctions(ports.session,PORT_FIELDS.session,'Library session port');
+    requireFunctions(ports.preferences,PORT_FIELDS.preferences,'Library preferences port');
     const notifications=ports.notifications;
     const {get:getDailyRecord,list:listDailyRecords,remove:removeDailyRecord,sortedSummaries}=ports.records;
     const {countTaskOutcomes,earliestSupportedSavedDate,isTrackableBlock,isValidIsoDate,isSupportedSavedDate,todayISO,sanitizePracticeRuns,sanitizeTaskOutcomeCounts,taskOutcomeSummaryText}=ports.domain;
@@ -53,17 +55,27 @@ registry.define('library',1,()=>{
     const {exportKeys,cancel:cancelExport}=ports.exporter;
     const {bindEditor:bindDiaryEditor,captureEditor:captureDiaryEditor,clearEditor:clearDiaryEditor,deleteEntry:deleteDiaryEntryRecord,flushEditor:flushDiaryEditor,scheduleEditor:scheduleDiaryEditor,draft:createDiaryDraft,settled:settleDiaryEditor}=ports.diary;
     const {
-      areaUse:planAreaUse,renameAreaInPlans,bindEditor,canCreate:canCreateOngoingNote,catalogue:ongoingNoteCatalogue,clearEditor,commitEditor,failure:ongoingNoteFailure,focusEditor,
-      get:getAreaNote,normalizeArea:normalizeOngoingNoteArea,orderEntries:orderOngoingNoteEntries,
+      areaUse:planAreaUse,renameAreaInPlans,bindEditor,canCreate:canCreateOngoingNote,catalogue:ongoingNoteCatalogue,clearEditor,clearFind,commitEditor,failure:ongoingNoteFailure,find:findInEditor,findStep,focusEditor,
+      get:getAreaNote,normalizeArea:normalizeOngoingNoteArea,orderEntries:orderOngoingNoteEntries,print:printNote,
       purgeTrash:purgeExpiredOngoingNotes,remove:removeOngoingNote,rename:renameNote,renderInherited,restore:restoreNote,searchDocuments:ongoingNoteSearchDocuments,size:ongoingNotesSize,
       trash:trashNote,trashSnapshot:ongoingNoteTrash,versions:openNoteVersions
     }=ports.notes;
-    const {batch:batchAttachments,count:attachmentCount,invalidate:invalidateAttachments,reconcile:reconcileAttachments}=ports.attachments;
+    const {batch:batchAttachments,close:closeAttachments,count:attachmentCount,invalidate:invalidateAttachments,reconcile:reconcileAttachments,refresh:refreshAttachments}=ports.attachments;
     const {preflight:preflightClearLibrary,execute:executeClearLibrary}=ports.clearLibrary;
     const {canMutate}=ports.ownership;
     const {createAnchoredPopover}=ports.overlays;
     const {hasActiveSession}=ports.session;
 
+    // The Library shows one section at a time and remembers it, with whether
+    // the Diary panel was open. Only the shown section renders, and only while
+    // the Library tab is active.
+    const LIBRARY_SECTIONS=freeze(['notes','days','data']);
+    const savedView=(()=>{try{const value=ports.preferences.read();return value&&typeof value==='object'?value:{};}catch{return {};}})();
+    let librarySection=LIBRARY_SECTIONS.includes(savedView.section)?savedView.section:'notes',libraryActive=false;
+    // Notes list order: 'name' is the tree, 'recent' a flat list, newest edit first.
+    let noteSort=savedView.sort==='recent'?'recent':'name';
+    // The note and query whose matches were last marked in the open note.
+    let noteSearchLanded='';
     let selectedLibraryDate=null;
     const LIBRARY_PAGE_SIZE=100;
     let libraryVisibleLimit=LIBRARY_PAGE_SIZE;
@@ -182,9 +194,9 @@ registry.define('library',1,()=>{
       return {entries:entries.filter(entry=>String(entry.label||'').toLowerCase().includes(query)||noteSearchMatches.has(entry.key)),pending:false};
     }
 
-    function ongoingNotesDrawer(){return document.getElementById('library-notes-drawer');}
+    function notesSection(){return document.getElementById('library-notes');}
     function ongoingNotesEditorField(){return document.querySelector('#library-notes-editor .library-notes-textarea');}
-    function ongoingNotesDrawerOpen(){return !!ongoingNotesDrawer()?.open;}
+    function notesShown(){return libraryActive&&librarySection==='notes';}
     function ongoingNotesSearch(){return String(document.getElementById('library-notes-search')?.value||'').trim().toLowerCase();}
     function ongoingNoteEntries(){
       const entries=ongoingNoteCatalogue();
@@ -224,7 +236,7 @@ registry.define('library',1,()=>{
       const select=document.getElementById('library-note-select'),selectAll=document.getElementById('library-note-select-all'),clear=document.getElementById('library-note-selection-clear'),exportButton=document.getElementById('library-note-export'),cancel=document.getElementById('library-note-select-cancel'),count=document.getElementById('library-note-selection-count'),navCount=document.getElementById('library-notes-nav-count');
       const exportable=(entries||[]).filter(entry=>entry.hasNote),valid=new Set(exportable.map(entry=>entry.key)),allSelected=!!exportable.length&&exportable.every(entry=>ongoingNoteSelection.has(entry.key));
       for(const key of [...ongoingNoteSelection])if(!valid.has(key))ongoingNoteSelection.delete(key);
-      const add=document.getElementById('library-note-add'),drawer=ongoingNotesDrawer();
+      const add=document.getElementById('library-note-add'),drawer=notesSection();
       if(drawer){drawer.classList.toggle('export-selecting',ongoingNoteSelectionMode);drawer.setAttribute('aria-busy',ongoingNoteExportBusy?'true':'false');}
       if(select)select.hidden=ongoingNoteSelectionMode;
       if(add)add.hidden=ongoingNoteSelectionMode;
@@ -236,7 +248,7 @@ registry.define('library',1,()=>{
       if(count){count.hidden=!ongoingNoteSelectionMode;count.textContent=`${ongoingNoteSelection.size} selected`;}
     }
     function enterOngoingNoteSelection(){
-      ongoingNoteSelectionMode=true;ongoingNoteSelection.clear();ongoingNotesDrawer()?.classList.remove('note-open');
+      ongoingNoteSelectionMode=true;ongoingNoteSelection.clear();notesSection()?.classList.remove('note-open');
       const current=ongoingNoteEntries().find(entry=>entry.key===selectedOngoingNoteKey);
       if(current?.hasNote)ongoingNoteSelection.add(current.key);
       clearOngoingNotesEditorBinding();renderOngoingNotes();return true;
@@ -278,10 +290,6 @@ registry.define('library',1,()=>{
       }catch(error){console.error('Note export failed:',error);status='Notes export did not complete: '+error.message;}
       finally{ongoingNoteExportBusy=false;if(ongoingNoteSelectionMode)updateOngoingNoteSelectionControls(ongoingNoteEntries());else renderOngoingNotes();notice.finish(success?'succeeded':statusError?'failed':'cancelled',status);}
       return success;
-    }
-    function updateOngoingNotesSummary(total){
-      const count=Math.max(0,Number(total)||0);
-      setTextSafe('library-notes-summary-count',`· ${count} Note${count===1?'':'s'}`);
     }
     function setOngoingNotesStatus(message,{error=false,readOnly=false}={}){
       const status=document.getElementById('ongoing-notes-status');
@@ -349,6 +357,10 @@ registry.define('library',1,()=>{
       input.addEventListener('blur',()=>finish(true));
       return true;
     }
+    async function printOngoingNote(entry){
+      try{if(await printNote(entry.key))return true;setOngoingNotesStatus('Write something in this note before printing it.');return false;}
+      catch(error){setOngoingNotesStatus('The note could not be printed: '+(error&&error.message||error),{error:true});return false;}
+    }
     async function exportOngoingNote(entry){
       if(ongoingNoteExportBusy)return false;
       if(!entry||!getAreaNote(entry.key,entry.label)){setOngoingNotesStatus('Write something in this note before exporting it.');return false;}
@@ -369,7 +381,7 @@ registry.define('library',1,()=>{
     async function showNoteVersions(entry){
       const restored=value=>{const at=new Date(value.exportedAt);setOngoingNotesStatus(`Restored “${entry.label}” from the backup of ${Number.isFinite(at.getTime())?at.toLocaleString():'an earlier date'}.`);};
       const result=await openNoteVersions(freeze({id:String(entry.id||''),label:entry.label,text:String(getAreaNote(entry.key)?.text||''),onRestored:restored}));
-      if(result?.reason==='no-source')setOngoingNotesStatus('Earlier versions come from your backups. Connect a Device Folder or Google Drive in Data & Backup first.');
+      if(result?.reason==='no-source')setOngoingNotesStatus('Earlier versions come from your backups. Connect a Device Folder or Google Drive in Library → Data first.');
       else if(result?.reason==='busy')setOngoingNotesStatus('Another backup task is running. Try again when it finishes.');
       return result?.opened===true;
     }
@@ -387,14 +399,14 @@ registry.define('library',1,()=>{
         button.addEventListener('click',()=>{controller.hide();void run();});return button;
       };
       const separator=document.createElement('div');separator.className='library-note-menu-separator';separator.setAttribute('role','separator');
-      const rename=item('library-note-rename','Rename','F2',()=>renameNoteInPlace(entry)),move=item('library-note-move','Move…','',renameOngoingNote),exportNote=item('library-note-export-one','Export this note','',()=>exportOngoingNote(entry)),versions=item('library-note-versions','Earlier versions…','',()=>showNoteVersions(entry)),remove=item('library-note-delete','Delete','Del',deleteOngoingNote,true);
-      menu.append(rename,move,versions,exportNote,separator,remove);
+      const rename=item('library-note-rename','Rename','F2',()=>renameNoteInPlace(entry)),move=item('library-note-move','Move…','',renameOngoingNote),exportNote=item('library-note-export-one','Export this note','',()=>exportOngoingNote(entry)),print=item('library-note-print','Print…','',()=>printOngoingNote(entry)),versions=item('library-note-versions','Earlier versions…','',()=>showNoteVersions(entry)),remove=item('library-note-delete','Delete','Del',deleteOngoingNote,true);
+      menu.append(rename,move,versions,exportNote,print,separator,remove);
       trigger.addEventListener('click',event=>{
         event.preventDefault();
         if(!menu.hidden){controller.hide();return;}
         // A note becomes renameable once something of it is saved.
-        const stored=!!getAreaNote(entry.key,entry.label);rename.disabled=move.disabled=exportNote.disabled=remove.disabled=versions.disabled=!stored||!canMutate();
-        for(const button of [rename,move,exportNote,remove])if(!stored)button.title='Write something in this note first';else button.removeAttribute('title');
+        const stored=!!getAreaNote(entry.key,entry.label);rename.disabled=move.disabled=exportNote.disabled=remove.disabled=versions.disabled=!stored||!canMutate();print.disabled=!stored;
+        for(const button of [rename,move,exportNote,print,remove])if(!stored)button.title='Write something in this note first';else button.removeAttribute('title');
         controller.show(trigger);trigger.setAttribute('aria-expanded','true');
         requestAnimationFrame(()=>{const first=menu.querySelector('[role="menuitem"]:not(:disabled)');if(first)first.focus();});
       });
@@ -439,9 +451,9 @@ registry.define('library',1,()=>{
     // Phones show the list or one note at a time: opening a note shows it full
     // width, and its back button returns to the list.
     function phoneLayout(){try{return !!window.matchMedia&&window.matchMedia('(max-width: 720px)').matches;}catch{return false;}}
-    function openNoteView(){const drawer=ongoingNotesDrawer();if(drawer&&phoneLayout()&&!ongoingNoteSelectionMode)drawer.classList.add('note-open');}
+    function openNoteView(){const drawer=notesSection();if(drawer&&phoneLayout()&&!ongoingNoteSelectionMode)drawer.classList.add('note-open');}
     function closeNoteView(){
-      const drawer=ongoingNotesDrawer();if(!drawer||!drawer.classList.contains('note-open'))return false;
+      const drawer=notesSection();if(!drawer||!drawer.classList.contains('note-open'))return false;
       drawer.classList.remove('note-open');
       requestAnimationFrame(()=>{const row=document.querySelector('#library-notes-list [role="treeitem"].active');if(row){row.tabIndex=0;row.focus({preventScroll:false});}});
       return true;
@@ -547,15 +559,13 @@ registry.define('library',1,()=>{
       const button=document.createElement('button');
       button.type='button';
       button.className='library-note-nav-item '+(entry.hasNote?'has-note':'empty-note')+(entry.support?' support-note':'')+(entry.key===selectedOngoingNoteKey?' active':'');
-      button.style.setProperty('--note-indent',`${Math.min(6,Math.max(0,Number(entry.depth)||0))*15}px`);
       button.dataset.ongoingNoteKey=entry.key;
       button.setAttribute('aria-label',`Open ${entry.hasNote?'saved':'empty'} note for ${entry.label}`);
       button.setAttribute('aria-current',entry.key===selectedOngoingNoteKey?'true':'false');
       const name=textEl('span','library-note-nav-name',ongoingNoteLeaf(entry.label));
       const tags=document.createElement('span');tags.className='library-note-nav-tags';
-      const noteTag=textEl('span','library-note-tag note','NOTE');noteTag.hidden=!entry.hasNote;
-      tags.appendChild(noteTag);
       if(entry.current)tags.appendChild(textEl('span','library-note-tag current','TODAY'));
+      const edited=editedLabel(entry.updatedAt);if(edited)tags.appendChild(textEl('span','library-note-nav-edited',edited));
       const pathLabel=entry.support?'Shared support note':ongoingNoteParentPath(entry.label);
       button.append(name,tags);if(pathLabel)button.append(textEl('span','library-note-nav-path',pathLabel));
       button.addEventListener('click',()=>selectOngoingNote(entry.key));
@@ -628,7 +638,10 @@ registry.define('library',1,()=>{
       editor.placeholder=entry.support?'Ongoing reminders, decisions, follow-ups, and routine notes shared across support activities…':'Ongoing reminders, doubts, mistakes, ideas, and points to revisit for this subject/Area…';
       editor.value=value;editorShell.appendChild(editor);
       bindEditor(editor,entry.key,entry.label,'library');
-      panel.replaceChildren(head,editorShell,inherited);
+      const matches=document.createElement('div');matches.className='library-note-matches';matches.id='library-note-matches';matches.hidden=true;matches.setAttribute('role','status');
+      const matchTool=(text,label,run)=>{const button=textEl('button','library-note-tool ui-btn',text);button.type='button';button.setAttribute('aria-label',label);button.title=label;button.addEventListener('click',run);return button;};
+      matches.append(textEl('span','library-note-matches-count ui-mono',''),matchTool('↑','Previous match',()=>stepNoteMatch(-1)),matchTool('↓','Next match',()=>stepNoteMatch(1)),matchTool('×','Clear highlights',clearNoteMatches));
+      panel.replaceChildren(head,matches,editorShell,inherited);noteSearchLanded='';
       setOngoingNotesStatus(writable?'':'Another tab has control. Browse freely, or take control before editing.',{readOnly:!writable});
       editor.addEventListener('input',event=>{
         const accepted=commitEditor(editor,editor.value,event);
@@ -671,9 +684,8 @@ registry.define('library',1,()=>{
     }
     function renderOngoingNotes(){
       if(attachmentMutationHold){attachmentMutationNeedsNotes=true;return false;}
+      if(!notesShown())return false;
       const entries=ongoingNoteEntries();
-      updateOngoingNotesSummary(entries.length);
-      if(!ongoingNotesDrawerOpen())return false;
       clearNoteSearchTimer();
       const query=ongoingNotesSearch(),searchState=filterOngoingNoteEntries(entries,query),filtered=searchState.entries;
       updateOngoingNoteSelectionControls(entries);
@@ -683,7 +695,8 @@ registry.define('library',1,()=>{
       const list=document.getElementById('library-notes-list');
       if(list){
         // Search shows matches with their paths; otherwise the tree.
-        const tree=!query,nodes=tree?ongoingNoteTree(entries):filtered.map(entry=>({entry})),activeIndex=nodes.findIndex(node=>node.entry.key===selectedOngoingNoteKey);
+        const tree=!query&&noteSort==='name',flat=noteSort==='recent'?[...filtered].sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))):filtered;
+        const nodes=tree?ongoingNoteTree(entries):flat.map(entry=>({entry})),activeIndex=nodes.findIndex(node=>node.entry.key===selectedOngoingNoteKey);
         if(activeIndex>=ongoingNoteVisibleLimit)ongoingNoteVisibleLimit=Math.ceil((activeIndex+1)/ONGOING_NOTE_PAGE_SIZE)*ONGOING_NOTE_PAGE_SIZE;
         const shown=nodes.slice(0,ongoingNoteVisibleLimit),rows=shown.map(node=>ongoingNoteSelectionMode||!tree?buildOngoingNoteNavItem(node.entry,selectionIndex):buildOngoingNoteTreeItem(node));
         if(nodes.length>shown.length){
@@ -701,8 +714,22 @@ registry.define('library',1,()=>{
       if(ongoingNoteSelectionMode){renderOngoingNoteEditor(selected,true);setOngoingNotesStatus('Selection is temporary. Export does not change or sync your saved notes.');}
       else if(trashed)renderTrashedNote(trashed);
       else renderOngoingNoteEditor(selected);
-      requestSelectedOngoingNoteReveal();return true;
+      requestSelectedOngoingNoteReveal();landOnNoteSearch();return true;
     }
+    // Opening a note while searching marks every match in it and scrolls to the
+    // first. Arrows or Enter step through them; an edit or Escape clears them.
+    function landOnNoteSearch(){
+      const query=ongoingNotesSearch(),field=ongoingNotesEditorField(),target=query&&field&&!selectedTrashKey?`${selectedOngoingNoteKey}\u0000${query}`:'';
+      if(target===noteSearchLanded)return;noteSearchLanded=target;
+      if(!target){if(field)clearFind(field);showNoteMatches(0);return;}
+      void findInEditor(field,query,()=>{if(noteSearchLanded===target)showNoteMatches(0);}).then(count=>{if(noteSearchLanded===target)showNoteMatches(count,0);}).catch(()=>{});
+    }
+    function showNoteMatches(count,index=0){
+      const bar=document.getElementById('library-note-matches');if(!bar)return;
+      bar.hidden=!count;if(count)bar.querySelector('.library-note-matches-count').textContent=`${index+1} of ${count}`;
+    }
+    function stepNoteMatch(direction){const field=ongoingNotesEditorField();if(!field)return false;const {index,count}=findStep(field,direction);showNoteMatches(count,index);return count>0;}
+    function clearNoteMatches(){const field=ongoingNotesEditorField();if(field)clearFind(field);showNoteMatches(0);}
     function requestOngoingNotesRender(){
       if(attachmentMutationHold){attachmentMutationNeedsNotes=true;return false;}
       if(ongoingNoteRenderFrame)return false;
@@ -724,7 +751,7 @@ registry.define('library',1,()=>{
       if(search&&search.value)search.value='';
       resetNoteSearch();
       if(ongoingNoteSelectionMode&&!ongoingNoteExportBusy){ongoingNoteSelectionMode=false;ongoingNoteSelection.clear();}
-      const drawer=ongoingNotesDrawer();if(drawer)drawer.open=true;
+      showSection('notes');
       selectedOngoingNoteKey=match.key;selectedTrashKey='';
       ongoingNoteTree(ongoingNoteEntries());expandOngoingNoteAncestors(match.key);
       renderOngoingNotes();openNoteView();
@@ -888,16 +915,14 @@ registry.define('library',1,()=>{
       }catch(error){notice.finish('failed',error&&error.message||'The note could not be renamed. Keep this tab open and retry.');return false;}
     }
     function clearOngoingNotesEditorBinding(){
-      ongoingNoteEditorSignature='';ongoingNoteParentSignature='';
+      ongoingNoteEditorSignature='';ongoingNoteParentSignature='';noteSearchLanded='';
       const field=ongoingNotesEditorField();
       if(field)clearEditor(field);
     }
     function refreshOngoingNotes(){
       if(attachmentMutationHold){attachmentMutationNeedsNotes=true;return false;}
       if(noteSearchWorker)stopNoteSearch();
-      if(ongoingNotesDrawerOpen())return renderOngoingNotes();
-      const entries=ongoingNoteCatalogue();
-      updateOngoingNotesSummary(entries.length);
+      if(notesShown())return renderOngoingNotes();
       clearOngoingNotesEditorBinding();
       idleNoteSearch();
       return false;
@@ -905,7 +930,7 @@ registry.define('library',1,()=>{
     function installOngoingNotesWorkspace(){
       if(ongoingNotesInstalled)return;
       ongoingNotesInstalled=true;
-      const drawer=ongoingNotesDrawer();
+      const drawer=notesSection();
       const search=document.getElementById('library-notes-search');
       const add=document.getElementById('library-note-add');
       const list=document.getElementById('library-notes-list'),trashToggle=document.getElementById('library-notes-trash-toggle'),info=document.getElementById('library-notes-info'),infoPopover=document.getElementById('library-notes-info-popover');
@@ -914,20 +939,16 @@ registry.define('library',1,()=>{
         info.addEventListener('click',event=>{event.preventDefault();if(infoPopover.hidden){about.show(info);info.setAttribute('aria-expanded','true');}else about.hide();});
       }
       const select=document.getElementById('library-note-select'),selectAll=document.getElementById('library-note-select-all'),clearSelection=document.getElementById('library-note-selection-clear'),exportButton=document.getElementById('library-note-export'),cancel=document.getElementById('library-note-select-cancel');
-      if(drawer){
-        drawer.addEventListener('toggle',()=>{
-          if(drawer.open){clearNoteSearchTimer();if(noteSearchFailed)resetNoteSearchFailure();renderOngoingNotes();}
-          else{
-            if(ongoingNoteRevealFrame){cancelAnimationFrame(ongoingNoteRevealFrame);ongoingNoteRevealFrame=0;}
-            ongoingNoteSelectionMode=false;ongoingNoteSelection.clear();ongoingNoteExportBusy=false;drawer.classList.remove('export-selecting');
-            pendingOngoingNote=null;selectedTrashKey='';ongoingNoteTrashOpen=false;ongoingNoteVisibleLimit=ONGOING_NOTE_PAGE_SIZE;drawer.classList.remove('note-open');
-            clearOngoingNotesEditorBinding();
-            idleNoteSearch();
-          }
+      if(drawer)drawer.addEventListener('keydown',event=>{if(event.key==='Escape'&&ongoingNoteSelectionMode){event.preventDefault();cancelOngoingNoteSelection();}});
+      if(search){
+        search.addEventListener('input',requestOngoingNotesRender);
+        search.addEventListener('keydown',event=>{
+          if(event.key==='Enter'){event.preventDefault();if(!stepNoteMatch(event.shiftKey?-1:1)){noteSearchLanded='';landOnNoteSearch();}}
+          else if(event.key==='Escape'&&!document.getElementById('library-note-matches')?.hidden){event.preventDefault();clearNoteMatches();}
         });
-        drawer.addEventListener('keydown',event=>{if(event.key==='Escape'&&ongoingNoteSelectionMode){event.preventDefault();cancelOngoingNoteSelection();}});
       }
-      if(search)search.addEventListener('input',requestOngoingNotesRender);
+      const sort=document.getElementById('library-notes-sort');
+      if(sort){sort.value=noteSort;sort.addEventListener('change',()=>{noteSort=sort.value==='recent'?'recent':'name';ongoingNoteVisibleLimit=ONGOING_NOTE_PAGE_SIZE;rememberView();renderOngoingNotes();});}
       if(add)add.addEventListener('click',createOngoingNote);
       if(list)list.addEventListener('keydown',handleOngoingNoteTreeKey);
       if(trashToggle)trashToggle.addEventListener('click',toggleOngoingNoteTrash);
@@ -995,7 +1016,7 @@ registry.define('library',1,()=>{
           attachmentMutationNeedsNotes=false;attachmentMutationNeedsDiary=false;attachmentMutationNeedsLibrary=false;attachmentMutationRestoreViewport=false;
           if(options.finalReconcile!==false){
             if(notes)refreshOngoingNotes();
-            if(diary){requestDiarySummaryCountRefresh();if(diaryDrawerOpen())await renderDiary();}
+            if(diary){requestDiarySummaryCountRefresh();if(diaryShown())await renderDiary();}
             if(library&&document.getElementById('pane-library')?.classList.contains('on'))await renderLibrary();
           }
           if(restore)restoreLibraryScroll();
@@ -1022,11 +1043,11 @@ registry.define('library',1,()=>{
     }
     function diaryDrawer(){return document.getElementById('library-diary');}
     function diaryEditorField(){return document.querySelector('#library-diary-editor .library-diary-textarea');}
-    function diaryDrawerOpen(){return !!diaryDrawer()?.open;}
+    function diaryShown(){return libraryActive&&librarySection==='days'&&!!diaryDrawer()?.open;}
     function diaryDateLabel(date){const [year,month,day]=String(date||'').split('-');return `${Number(day)||day} ${LIBRARY_MONTHS[(Number(month)||1)-1]||month} ${year}`;}
     function diaryMonthLabel(date){const [year,month]=String(date||'').split('-');return `${LIBRARY_MONTHS[(Number(month)||1)-1]||month} ${year}`;}
     function setDiaryStatus(message,error=false){const status=document.getElementById('library-diary-status');if(!status)return false;status.className='library-notes-status ui-status'+(error?' err':'');status.textContent=String(message||'');return true;}
-    function requestDiaryRender(){if(attachmentMutationHold){attachmentMutationNeedsDiary=true;return false;}if(!diaryDrawerOpen()||diaryRenderFrame)return false;diaryRenderFrame=requestAnimationFrame(()=>{diaryRenderFrame=0;void renderDiary();});return true;}
+    function requestDiaryRender(){if(attachmentMutationHold){attachmentMutationNeedsDiary=true;return false;}if(!diaryShown()||diaryRenderFrame)return false;diaryRenderFrame=requestAnimationFrame(()=>{diaryRenderFrame=0;void renderDiary();});return true;}
     function diaryNavItem(summary){
       const button=document.createElement('button');button.type='button';button.className='library-note-nav-item library-diary-item has-note'+(summary.date===selectedDiaryDate?' active':'');button.dataset.diaryDate=summary.date;button.setAttribute('aria-pressed',summary.date===selectedDiaryDate?'true':'false');
       button.append(textEl('span','library-note-nav-name',diaryDateLabel(summary.date)),textEl('span','library-note-nav-path',summary.dayName||''));
@@ -1061,14 +1082,14 @@ registry.define('library',1,()=>{
     }
     async function renderDiary(){
       if(attachmentMutationHold){attachmentMutationNeedsDiary=true;return false;}
-      if(!diaryDrawerOpen())return false;const token=++diaryRenderToken;
+      if(!diaryShown())return false;const token=++diaryRenderToken;
       try{
-        const entries=await loadLibrarySummaries();if(token!==diaryRenderToken||!diaryDrawerOpen())return false;
+        const entries=await loadLibrarySummaries();if(token!==diaryRenderToken||!diaryShown())return false;
         const filled=diaryEntries(entries),valid=new Set(filled.map(entry=>entry.date));if(!diaryEditing&&!valid.has(selectedDiaryDate))selectedDiaryDate=filled[0]?.date||'';
         renderDiaryList(entries);
         const panel=document.getElementById('library-diary-editor');if(!selectedDiaryDate){if(panel)panel.replaceChildren(textEl('div','library-notes-editor-empty ui-status','Create a reflection with + New Reflection.'));return true;}
         if(diaryEditing&&diaryEditorField()?.dataset.diaryDate===selectedDiaryDate)return true;
-        const record=await getDailyRecord(selectedDiaryDate)||((diaryDraftRecord&&diaryDraftRecord.date===selectedDiaryDate)?diaryDraftRecord:null);if(token!==diaryRenderToken||!diaryDrawerOpen())return false;
+        const record=await getDailyRecord(selectedDiaryDate)||((diaryDraftRecord&&diaryDraftRecord.date===selectedDiaryDate)?diaryDraftRecord:null);if(token!==diaryRenderToken||!diaryShown())return false;
         if(record&&String(record.reflection||'').trim())renderDiaryRead(record);else if(panel)panel.replaceChildren(textEl('div','library-notes-editor-empty ui-status','This reflection is no longer available.'));
         return true;
       }catch(error){setDiaryStatus('Diary could not be loaded: '+(error&&error.message||error),true);return false;}
@@ -1122,7 +1143,7 @@ registry.define('library',1,()=>{
     }
     async function finishDiaryEdit(options={}){
       if(!await settleDiaryEdit())return false;
-      finalizeDiaryEdit();if(options.render!==false&&diaryDrawerOpen())await renderDiary();return true;
+      finalizeDiaryEdit();if(options.render!==false&&diaryShown())await renderDiary();return true;
     }
     async function selectDiaryDate(date){
       if(!isValidIsoDate(date)||date===selectedDiaryDate&&!diaryEditing)return false;
@@ -1131,10 +1152,55 @@ registry.define('library',1,()=>{
     function installDiaryWorkspace(){
       if(diaryInstalled)return;diaryInstalled=true;const drawer=diaryDrawer();if(!drawer)return;
       const add=document.getElementById('library-diary-add');if(add)add.addEventListener('click',()=>{void createDiaryEntry();});
-      drawer.addEventListener('toggle',()=>{if(drawer.open)void renderDiary();else if(diaryEditing)void finishDiaryEdit({render:false});});
+      if(savedView.diary===true)drawer.open=true;
+      drawer.addEventListener('toggle',()=>{rememberView();if(drawer.open)void renderDiary();else if(diaryEditing)void finishDiaryEdit({render:false});});
       document.addEventListener('visibilitychange',()=>{if(document.hidden&&diaryEditing)void flushDiarySave().catch(()=>{});});window.addEventListener('pagehide',()=>{if(diaryEditing)void flushDiarySave().catch(()=>{});});
     }
     installDiaryWorkspace();
+    function rememberView(){try{ports.preferences.write({section:librarySection,diary:!!diaryDrawer()?.open,sort:noteSort});}catch{}}
+    function enterSection(){
+      if(!libraryActive)return;
+      if(librarySection==='notes'){clearNoteSearchTimer();if(noteSearchFailed)resetNoteSearchFailure();renderOngoingNotes();}
+      else if(librarySection==='days'){if(diaryShown())void renderDiary();}
+      else void refreshAttachments();
+    }
+    function leaveSection(){
+      if(librarySection==='notes'){
+        const section=notesSection();
+        if(ongoingNoteRevealFrame){cancelAnimationFrame(ongoingNoteRevealFrame);ongoingNoteRevealFrame=0;}
+        ongoingNoteSelectionMode=false;ongoingNoteSelection.clear();ongoingNoteExportBusy=false;
+        pendingOngoingNote=null;selectedTrashKey='';ongoingNoteTrashOpen=false;ongoingNoteVisibleLimit=ONGOING_NOTE_PAGE_SIZE;
+        if(section)section.classList.remove('export-selecting','note-open');
+        clearOngoingNotesEditorBinding();idleNoteSearch();
+      }else if(librarySection==='days'){if(diaryEditing)void finishDiaryEdit({render:false});}
+      else closeAttachments();
+    }
+    function drawSections(){
+      for(const name of LIBRARY_SECTIONS){
+        const panel=document.getElementById('library-'+name),tab=document.getElementById('library-tab-'+name),on=name===librarySection;
+        if(panel)panel.hidden=!on;
+        if(tab){tab.setAttribute('aria-selected',on?'true':'false');tab.tabIndex=on?0:-1;}
+      }
+      document.getElementById('pane-library')?.setAttribute('data-library-section',librarySection);
+    }
+    function showSection(name){
+      if(!LIBRARY_SECTIONS.includes(name))return false;
+      if(name===librarySection)return true;
+      if(libraryActive)leaveSection();
+      librarySection=name;drawSections();rememberView();enterSection();return true;
+    }
+    function installSectionSwitch(){
+      const tabs=LIBRARY_SECTIONS.map(name=>document.getElementById('library-tab-'+name)).filter(Boolean);
+      for(const tab of tabs){
+        tab.addEventListener('click',()=>showSection(tab.dataset.librarySection));
+        tab.addEventListener('keydown',event=>{
+          const index=tabs.indexOf(tab),next=event.key==='ArrowRight'?index+1:event.key==='ArrowLeft'?index-1:event.key==='Home'?0:event.key==='End'?tabs.length-1:null;
+          if(next===null)return;event.preventDefault();const target=tabs[(next+tabs.length)%tabs.length];showSection(target.dataset.librarySection);target.focus();
+        });
+      }
+      drawSections();
+    }
+    installSectionSwitch();
     function requestLibraryRender(){
       if(attachmentMutationHold){attachmentMutationNeedsLibrary=true;return false;}
       if(libraryRenderFrame)return false;
@@ -1278,8 +1344,8 @@ registry.define('library',1,()=>{
       return true;
     }
     async function activateLibrary(options={}){
-      clearNoteSearchTimer();if(noteSearchFailed)resetNoteSearchFailure();
-      refreshOngoingNotes();requestDiarySummaryCountRefresh();if(diaryDrawerOpen())void renderDiary();
+      libraryActive=true;clearNoteSearchTimer();if(noteSearchFailed)resetNoteSearchFailure();
+      refreshOngoingNotes();requestDiarySummaryCountRefresh();if(diaryShown())void renderDiary();
       if(options&&options.restoreScroll&&options.immediateScroll===true)restoreLibraryScroll({immediate:true});
       if(libraryViewIsCurrent()){
         if(options&&options.restoreScroll&&options.immediateScroll!==true)restoreLibraryScroll();
@@ -1288,7 +1354,7 @@ registry.define('library',1,()=>{
       await renderLibrary({restoreScroll:!!(options&&options.restoreScroll)});
       return false;
     }
-    function deactivateLibrary(options={}){captureLibraryScroll();pendingOngoingNote=null;clearOngoingNotesEditorBinding();idleNoteSearch();if(diaryEditing){if(options.diarySettled===true)finalizeDiaryEdit();else void finishDiaryEdit({render:false});}}
+    function deactivateLibrary(options={}){libraryActive=false;captureLibraryScroll();pendingOngoingNote=null;clearOngoingNotesEditorBinding();idleNoteSearch();if(diaryEditing){if(options.diarySettled===true)finalizeDiaryEdit();else void finishDiaryEdit({render:false});}}
     function loadMoreLibrary(){
       libraryVisibleLimit+=LIBRARY_PAGE_SIZE;
       libraryPreserveLimitOnce=true;
@@ -1570,7 +1636,9 @@ registry.define('library',1,()=>{
       reconcileNotes:renderOngoingNotes,
       updateSearchDocument:updateOngoingNoteSearchDocument,
       searchMetrics:()=>freeze({...noteSearchMetrics,workerActive:!!noteSearchWorker,building:noteSearchBuilding,failed:noteSearchFailed}),
-      openDay:openLibraryDayDetail,
+      openDay:date=>{showSection('days');return openLibraryDayDetail(date);},
+      showSection,
+      section:()=>librarySection,
       openNote:selectOngoingNote,
       noteDestinations:ongoingNoteDestinations,
       revealNoteReference,

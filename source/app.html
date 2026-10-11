@@ -939,11 +939,74 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
   <!-- LIBRARY SURFACE: saved-day browser, reflection/notes library, backup management -->
   <div class="pane" id="pane-library" role="tabpanel" aria-labelledby="tab-library">
     <div class="library-wrap">
-      <div class="library-hero ui-panel">
-        <div class="library-kicker ui-label">Study Library</div>
+      <div class="library-head">
         <div class="library-title">Library</div>
-        <div class="library-sub ui-body">Find saved Study Days and reflections, manage notes and attachments, and manage backups.</div>
-        <div class="library-controls">
+        <div class="library-switch" role="tablist" aria-label="Library sections">
+          <button class="library-switch-btn ui-btn" type="button" role="tab" id="library-tab-notes" data-library-section="notes" aria-controls="library-notes" aria-selected="true">Notes</button>
+          <button class="library-switch-btn ui-btn" type="button" role="tab" id="library-tab-days" data-library-section="days" aria-controls="library-days" aria-selected="false" tabindex="-1">Days</button>
+          <button class="library-switch-btn ui-btn" type="button" role="tab" id="library-tab-data" data-library-section="data" aria-controls="library-data" aria-selected="false" tabindex="-1">Data</button>
+        </div>
+      </div>
+      <section class="library-notes-section" id="library-notes" role="tabpanel" aria-labelledby="library-tab-notes">
+        <p class="library-explainer ui-body">Lasting notes for each subject and topic. A note opens alongside any block whose Area has the same name.</p>
+        <div class="library-notes-grid ui-canvas">
+          <nav class="library-notes-nav" aria-label="Notes">
+            <div class="library-notes-nav-head">
+              <span class="library-notes-nav-title"><span class="ui-label">Notes</span><button class="library-notes-info" id="library-notes-info" type="button" aria-label="About notes" aria-haspopup="dialog" aria-expanded="false" aria-controls="library-notes-info-popover">i</button><span class="library-notes-info-popover" id="library-notes-info-popover" role="note" hidden>A note is shared by every plan block in the same Area; support blocks share one note.</span><span class="library-note-selection-count" id="library-note-selection-count" hidden>0 selected</span></span>
+              <span class="library-notes-nav-tools">
+                <button class="library-note-action ui-btn" id="library-note-select" type="button" aria-label="Choose notes to export">Export</button>
+                <button class="library-note-action ui-btn" id="library-note-select-all" type="button" hidden>All</button>
+                <button class="library-note-action ui-btn" id="library-note-selection-clear" type="button" hidden>Clear</button>
+                <span class="library-note-selection-actions">
+                  <button class="library-note-action ui-btn" id="library-note-export" type="button" hidden disabled>Export</button>
+                  <button class="library-note-action ui-btn library-note-selection-cancel" id="library-note-select-cancel" type="button" hidden aria-label="Exit export selection" title="Exit export selection">×</button>
+                </span>
+                <button class="library-note-action ui-btn" id="library-note-add" type="button" data-owner-mutation="library-notes" aria-label="Create a note" title="Create a note">+ New</button>
+                <span class="library-notes-nav-count" id="library-notes-nav-count">0</span>
+              </span>
+              <div class="library-notes-find">
+                <input class="library-notes-search ui-field ui-mono" id="library-notes-search" type="search" placeholder="Search notes…" aria-label="Search notes">
+                <select class="library-notes-sort ui-field" id="library-notes-sort" aria-label="Sort notes">
+                  <option value="name">Name</option>
+                  <option value="recent">Recently edited</option>
+                </select>
+              </div>
+            </div>
+            <div class="library-notes-list" id="library-notes-list"></div>
+            <div class="library-notes-trash" id="library-notes-trash" hidden>
+              <div class="library-notes-trash-list" id="library-notes-trash-list" hidden></div>
+              <button class="library-notes-trash-toggle ui-btn" id="library-notes-trash-toggle" type="button" aria-expanded="false" aria-controls="library-notes-trash-list">Recently deleted <span id="library-notes-trash-count"></span></button>
+            </div>
+          </nav>
+          <section class="library-notes-editor" id="library-notes-editor">
+            <div class="library-notes-editor-empty ui-status">Select an Area to view its note.</div>
+          </section>
+        </div>
+        <div class="library-notes-status ui-status" id="ongoing-notes-status" role="status" aria-live="polite"></div>
+      </section>
+      <section class="library-days" id="library-days" role="tabpanel" aria-labelledby="library-tab-days" hidden>
+        <p class="library-explainer ui-body">Diary reflections, and the Study Days saved from Review.</p>
+        <details class="library-notes-drawer ui-disclosure" id="library-diary">
+          <summary>
+            <span class="library-notes-summary-copy">Diary <span class="library-notes-summary-count" id="library-diary-summary-count">· 0 Entries</span></span>
+          </summary>
+          <div class="library-notes-workspace">
+            <div class="library-notes-grid library-diary-grid ui-canvas">
+              <nav class="library-notes-nav library-diary-nav" aria-label="Diary dates">
+                <div class="library-notes-nav-head">
+                  <span class="ui-label">Dates</span>
+                  <div class="library-notes-nav-tools"><span class="library-notes-nav-count" id="library-diary-nav-count">0</span><button class="library-note-action ui-btn" id="library-diary-add" type="button" aria-label="New Reflection">+ New Reflection</button></div>
+                </div>
+                <div class="library-notes-list" id="library-diary-list"></div>
+              </nav>
+              <section class="library-notes-editor library-diary-editor" id="library-diary-editor">
+                <div class="library-notes-editor-empty ui-status">Select a reflection.</div>
+              </section>
+            </div>
+            <div class="library-notes-status ui-status" id="library-diary-status" role="status" aria-live="polite"></div>
+          </div>
+        </details>
+        <div class="library-controls ui-panel" role="group" aria-label="Find Saved Days">
           <input class="ui-field ui-mono" id="library-search" type="search" placeholder="Search date or day…" aria-label="Search Library by date or day" data-input="render-library">
           <select class="ui-field ui-mono" id="library-year" aria-label="Filter Library by year" data-change="render-library"></select>
           <select class="ui-field ui-mono" id="library-month" aria-label="Filter Library by month" data-change="render-library"></select>
@@ -953,10 +1016,27 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
           </select>
           <button class="mini-btn ui-btn" type="button" data-action="render-library">Refresh</button>
         </div>
-      </div>
-      <details class="library-data-drawer ui-disclosure">
-        <summary>Data &amp; Backup</summary>
-        <div class="library-data-actions">
+        <div class="library-stats">
+          <div class="hstat ui-card"><div class="v" id="h-days">0</div><div class="l ui-label">Saved Days</div></div>
+          <div class="hstat ui-card"><div class="v" id="h-showing">0</div><div class="l ui-label">Showing</div></div>
+          <div class="hstat ui-card"><div class="v" id="h-selected">—</div><div class="l ui-label">Selected Day</div></div>
+        </div>
+        <div class="library-section ui-label">Saved Day Detail</div>
+        <div class="library-detail ui-panel" id="library-detail">
+          <div class="library-empty ui-status">Select a saved day from the list.</div>
+        </div>
+        <div class="library-list-tools">
+          <div class="library-section ui-label">Saved Days</div>
+          <div class="library-count ui-mono" id="library-count">—</div>
+        </div>
+        <div class="library-list" id="library-list"></div>
+        <div class="library-more" id="library-more" hidden>
+          <button class="mini-btn ui-btn" type="button" data-action="load-more-library">Load More</button>
+        </div>
+      </section>
+      <section class="library-data" id="library-data" role="tabpanel" aria-labelledby="library-tab-data" hidden>
+        <p class="library-explainer ui-body">Backups, files and storage for this device.</p>
+        <div class="library-data-group ui-panel">
           <details class="backup-model-disclosure ui-disclosure">
             <summary><span class="backup-model-summary"><span class="backup-model-summary-title">Backup model</span><span class="backup-model-summary-copy">Local-first · versioned handoff</span></span></summary>
             <div class="backup-model-body ui-helper">
@@ -1032,7 +1112,6 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
               </div>
             </div>
           </section>
-
           <details class="backup-advanced-disclosure ui-disclosure">
             <summary>Advanced</summary>
             <div class="backup-advanced-body">
@@ -1051,10 +1130,8 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                 <div class="backup-inline-note ui-helper" id="backup-file-status" role="status" aria-live="polite" hidden></div>
                 <input aria-label="Import a Study Director backup file" class="file-input" type="file" id="import-file" accept=".sdbackup,.sdbackup.gz,.json,application/json,application/gzip" data-change="import-backup">
               </section>
-
-              <section class="backup-section backup-advanced-section" aria-labelledby="security-storage-heading">
-                <div class="backup-section-title ui-label" id="security-storage-heading">Security &amp; storage</div>
-                <div class="backup-security-group" aria-label="Backup encryption and local storage status">
+              <section class="backup-section backup-advanced-section" aria-label="Backup encryption">
+                <div class="backup-security-group">
                   <div class="backup-compact-row">
                     <span class="ui-label">Backup encryption</span>
                     <div class="backup-security-state">
@@ -1063,24 +1140,53 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                     </div>
                   </div>
                   <div class="backup-inline-note ui-helper" id="backup-protection-hint" hidden>Automatic encrypted backups are paused until you unlock.</div>
-                  <div class="backup-compact-row backup-local-storage-row">
-                    <span class="ui-label">Local storage</span>
-                    <div class="backup-storage-state ui-mono">
-                      <strong class="backup-status-value standard" id="local-data-status" role="status" aria-live="polite">Checking…</strong>
-                      <button class="backup-storage-action mini-btn ui-btn" id="protect-local-data" type="button" data-action="protect-local-data" hidden>Try protection</button>
-                      <span class="backup-status-meta">· Saved <span id="last-local-save">Never</span></span>
-                    </div>
-                  </div>
-                  <div class="backup-inline-note ui-helper"><strong>Verification</strong><p id="attachment-verification-status" role="status">Attachment presence and size: not yet checked. This check does not verify file contents.</p><p id="device-verification-status" role="status">Device Folder: not yet verified.</p><button class="mini-btn ui-btn" type="button" data-action="recheck-device-integrity">Recheck Device Folder</button><p id="drive-verification-status" role="status">Google Drive: not yet verified.</p><button class="mini-btn ui-btn" type="button" data-action="recheck-drive-integrity">Recheck Google Drive</button></div>
-                  <div class="backup-compact-row backup-diagnostics-row">
-                    <span class="backup-location-heading"><span class="ui-label">Data and backup diagnostics</span><span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="backup-diagnostics-info" aria-label="About data and backup diagnostics" aria-expanded="false" aria-controls="backup-diagnostics-info">i</button><span class="pnote-info-popover" id="backup-diagnostics-info" role="note" hidden>Copies storage-health observations, backup and recovery stages, verification progress and pending cleanup for troubleshooting. Study content, note text, attachment names and backup payloads are not included.</span></span></span>
-                    <div class="backup-security-state"><button class="mini-btn ui-btn" id="copy-backup-diagnostics" type="button" data-action="copy-backup-diagnostics">Copy diagnostics</button><span class="backup-status-meta" id="backup-diagnostics-status" role="status" aria-live="polite"></span></div>
-                  </div>
                 </div>
               </section>
             </div>
           </details>
-
+        </div>
+        <details class="library-notes-drawer ui-disclosure" id="library-attachments">
+          <summary>Files</summary>
+          <div class="attachment-workspace">
+            <div class="attachment-inner-head"><span class="ui-label">Library</span><span class="library-notes-summary-count" id="attachment-count">· 0</span></div>
+            <p class="ui-helper">All attachments appear here automatically, whether added here or inserted in a note. Images and audio can be inserted inline; PDFs are added as links.</p>
+            <div class="attachment-actions">
+              <button class="mini-btn ui-btn" id="attachment-add" type="button" data-owner-mutation="attachments">Add files</button>
+              <button class="mini-btn ui-btn" id="attachment-import" type="button" data-owner-mutation="attachments">Import library</button>
+              <button class="mini-btn ui-btn" id="attachment-export" type="button">Export library</button>
+              <button class="mini-btn ui-btn" id="attachment-cancel" type="button" hidden>Cancel</button>
+              <input class="ui-field" id="attachment-search" type="search" placeholder="Find an attachment…" aria-label="Find an attachment" maxlength="160">
+            </div>
+            <input id="attachment-files" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,image/avif,application/pdf,audio/*" hidden>
+            <input id="attachment-archive" type="file" accept=".sdattachments" hidden>
+            <p class="ui-helper">Export backup includes your study data and complete attachment library, with optional backup encryption. Export Library creates a separate unencrypted attachment archive.</p>
+            <div class="attachment-progress ui-inset" id="attachment-progress" role="status" aria-live="polite" hidden>
+              <div class="attachment-progress-copy"><span id="attachment-progress-label">Preparing attachment…</span><span id="attachment-progress-value"></span></div>
+              <progress id="attachment-progress-bar" max="1"></progress>
+            </div>
+            <div class="attachment-grid ui-canvas"><nav id="attachment-list" aria-label="Attachments"></nav><section id="attachment-detail" aria-label="Selected attachment"><p class="ui-status">Select an attachment.</p></section></div>
+            <div class="ui-status" id="attachment-status" role="status" aria-live="polite"></div>
+          </div>
+        </details>
+        <div class="library-data-group ui-panel">
+          <section class="backup-section" aria-labelledby="security-storage-heading">
+            <div class="backup-section-title ui-label" id="security-storage-heading">Storage</div>
+            <div class="backup-security-group" aria-label="Local storage status">
+              <div class="backup-compact-row backup-local-storage-row">
+                <span class="ui-label">Local storage</span>
+                <div class="backup-storage-state ui-mono">
+                  <strong class="backup-status-value standard" id="local-data-status" role="status" aria-live="polite">Checking…</strong>
+                  <button class="backup-storage-action mini-btn ui-btn" id="protect-local-data" type="button" data-action="protect-local-data" hidden>Try protection</button>
+                  <span class="backup-status-meta">· Saved <span id="last-local-save">Never</span></span><span class="backup-status-meta" id="local-storage-use"></span>
+                </div>
+              </div>
+              <div class="backup-inline-note ui-helper"><strong>Verification</strong><p id="attachment-verification-status" role="status">Attachment presence and size: not yet checked. This check does not verify file contents.</p><p id="device-verification-status" role="status">Device Folder: not yet verified.</p><button class="mini-btn ui-btn" type="button" data-action="recheck-device-integrity">Recheck Device Folder</button><p id="drive-verification-status" role="status">Google Drive: not yet verified.</p><button class="mini-btn ui-btn" type="button" data-action="recheck-drive-integrity">Recheck Google Drive</button></div>
+              <div class="backup-compact-row backup-diagnostics-row">
+                <span class="backup-location-heading"><span class="ui-label">Data and backup diagnostics</span><span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="backup-diagnostics-info" aria-label="About data and backup diagnostics" aria-expanded="false" aria-controls="backup-diagnostics-info">i</button><span class="pnote-info-popover" id="backup-diagnostics-info" role="note" hidden>Copies storage-health observations, backup and recovery stages, verification progress and pending cleanup for troubleshooting. Study content, note text, attachment names and backup payloads are not included.</span></span></span>
+                <div class="backup-security-state"><button class="mini-btn ui-btn" id="copy-backup-diagnostics" type="button" data-action="copy-backup-diagnostics">Copy diagnostics</button><span class="backup-status-meta" id="backup-diagnostics-status" role="status" aria-live="polite"></span></div>
+              </div>
+            </div>
+          </section>
           <div class="storage-health ui-surface ui-status" id="storage-health" role="status" aria-live="polite" hidden></div>
           <div class="library-danger">
             <div class="library-danger-copy">
@@ -1091,104 +1197,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
             <button class="mini-btn ui-btn danger" type="button" data-action="clear-library">Clear Library…</button>
           </div>
         </div>
-      </details>
-      <details class="library-notes-drawer ui-disclosure" id="library-notes-drawer">
-        <summary>
-          <span class="library-notes-summary-copy">Notes <span class="library-notes-summary-count" id="library-notes-summary-count">· 0 Areas</span></span>
-        </summary>
-        <div class="library-notes-workspace">
-          <div class="library-notes-intro">
-            <input class="library-notes-search ui-field ui-mono" id="library-notes-search" type="search" placeholder="Search notes…" aria-label="Search notes">
-          </div>
-          <div class="library-notes-grid ui-canvas">
-            <nav class="library-notes-nav" aria-label="Notes">
-              <div class="library-notes-nav-head">
-                <span class="library-notes-nav-title"><span class="ui-label">Notes</span><button class="library-notes-info" id="library-notes-info" type="button" aria-label="About notes" aria-haspopup="dialog" aria-expanded="false" aria-controls="library-notes-info-popover">i</button><span class="library-notes-info-popover" id="library-notes-info-popover" role="note" hidden>A note is shared by every plan block in the same Area; support blocks share one note.</span><span class="library-note-selection-count" id="library-note-selection-count" hidden>0 selected</span></span>
-                <span class="library-notes-nav-tools">
-                  <button class="library-note-action ui-btn" id="library-note-select" type="button" aria-label="Choose notes to export">Export</button>
-                  <button class="library-note-action ui-btn" id="library-note-select-all" type="button" hidden>All</button>
-                  <button class="library-note-action ui-btn" id="library-note-selection-clear" type="button" hidden>Clear</button>
-                  <span class="library-note-selection-actions">
-                    <button class="library-note-action ui-btn" id="library-note-export" type="button" hidden disabled>Export</button>
-                    <button class="library-note-action ui-btn library-note-selection-cancel" id="library-note-select-cancel" type="button" hidden aria-label="Exit export selection" title="Exit export selection">×</button>
-                  </span>
-                  <button class="library-note-action ui-btn" id="library-note-add" type="button" data-owner-mutation="library-notes" aria-label="Create a note" title="Create a note">+ New</button>
-                  <span class="library-notes-nav-count" id="library-notes-nav-count">0</span>
-                </span>
-              </div>
-              <div class="library-notes-list" id="library-notes-list"></div>
-              <div class="library-notes-trash" id="library-notes-trash" hidden>
-                <div class="library-notes-trash-list" id="library-notes-trash-list" hidden></div>
-                <button class="library-notes-trash-toggle ui-btn" id="library-notes-trash-toggle" type="button" aria-expanded="false" aria-controls="library-notes-trash-list">Recently deleted <span id="library-notes-trash-count"></span></button>
-              </div>
-            </nav>
-            <section class="library-notes-editor" id="library-notes-editor">
-              <div class="library-notes-editor-empty ui-status">Select an Area to view its note.</div>
-            </section>
-          </div>
-          <div class="library-notes-status ui-status" id="ongoing-notes-status" role="status" aria-live="polite"></div>
-        </div>
-      </details>
-      <details class="library-notes-drawer ui-disclosure" id="library-attachments">
-        <summary>Attachments</summary>
-        <div class="attachment-workspace">
-          <div class="attachment-inner-head"><span class="ui-label">Library</span><span class="library-notes-summary-count" id="attachment-count">· 0</span></div>
-          <p class="ui-helper">All attachments appear here automatically, whether added here or inserted in a note. Images and audio can be inserted inline; PDFs are added as links.</p>
-          <div class="attachment-actions">
-            <button class="mini-btn ui-btn" id="attachment-add" type="button" data-owner-mutation="attachments">Add files</button>
-            <button class="mini-btn ui-btn" id="attachment-import" type="button" data-owner-mutation="attachments">Import library</button>
-            <button class="mini-btn ui-btn" id="attachment-export" type="button">Export library</button>
-            <button class="mini-btn ui-btn" id="attachment-cancel" type="button" hidden>Cancel</button>
-            <input class="ui-field" id="attachment-search" type="search" placeholder="Find an attachment…" aria-label="Find an attachment" maxlength="160">
-          </div>
-          <input id="attachment-files" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,image/avif,application/pdf,audio/*" hidden>
-          <input id="attachment-archive" type="file" accept=".sdattachments" hidden>
-          <p class="ui-helper">Export backup includes your study data and complete attachment library, with optional backup encryption. Export Library creates a separate unencrypted attachment archive.</p>
-          <div class="attachment-progress ui-inset" id="attachment-progress" role="status" aria-live="polite" hidden>
-            <div class="attachment-progress-copy"><span id="attachment-progress-label">Preparing attachment…</span><span id="attachment-progress-value"></span></div>
-            <progress id="attachment-progress-bar" max="1"></progress>
-          </div>
-          <div class="attachment-grid ui-canvas"><nav id="attachment-list" aria-label="Attachments"></nav><section id="attachment-detail" aria-label="Selected attachment"><p class="ui-status">Select an attachment.</p></section></div>
-          <div class="ui-status" id="attachment-status" role="status" aria-live="polite"></div>
-        </div>
-      </details>
-      <details class="library-notes-drawer ui-disclosure" id="library-diary">
-        <summary>
-          <span class="library-notes-summary-copy">Diary <span class="library-notes-summary-count" id="library-diary-summary-count">· 0 Entries</span></span>
-        </summary>
-        <div class="library-notes-workspace">
-          <div class="library-notes-grid library-diary-grid ui-canvas">
-            <nav class="library-notes-nav library-diary-nav" aria-label="Diary dates">
-              <div class="library-notes-nav-head">
-                <span class="ui-label">Dates</span>
-                <div class="library-notes-nav-tools"><span class="library-notes-nav-count" id="library-diary-nav-count">0</span><button class="library-note-action ui-btn" id="library-diary-add" type="button" aria-label="New Reflection">+ New Reflection</button></div>
-              </div>
-              <div class="library-notes-list" id="library-diary-list"></div>
-            </nav>
-            <section class="library-notes-editor library-diary-editor" id="library-diary-editor">
-              <div class="library-notes-editor-empty ui-status">Select a reflection.</div>
-            </section>
-          </div>
-          <div class="library-notes-status ui-status" id="library-diary-status" role="status" aria-live="polite"></div>
-        </div>
-      </details>
-      <div class="library-stats">
-        <div class="hstat ui-card"><div class="v" id="h-days">0</div><div class="l ui-label">Saved Days</div></div>
-        <div class="hstat ui-card"><div class="v" id="h-showing">0</div><div class="l ui-label">Showing</div></div>
-        <div class="hstat ui-card"><div class="v" id="h-selected">—</div><div class="l ui-label">Selected Day</div></div>
-      </div>
-      <div class="library-section ui-label">Saved Day Detail</div>
-      <div class="library-detail ui-panel" id="library-detail">
-        <div class="library-empty ui-status">Select a saved day from the list.</div>
-      </div>
-      <div class="library-list-tools">
-        <div class="library-section ui-label">Saved Days</div>
-        <div class="library-count ui-mono" id="library-count">—</div>
-      </div>
-      <div class="library-list" id="library-list"></div>
-      <div class="library-more" id="library-more" hidden>
-        <button class="mini-btn ui-btn" type="button" data-action="load-more-library">Load More</button>
-      </div>
+      </section>
       <div class="save-status ui-status" id="library-status" role="status" aria-live="polite" aria-atomic="true"></div>
     </div>
   </div>
@@ -1882,7 +1891,7 @@ async function showBackupPresentation(source,kind){
   if(kind==='permission'&&source!=='file'&&await BackupProviderRuntime.connect(source))return true;
   if(['history','restore-version','bring-in','remove-safety'].includes(kind))return BackupRecoveryHost?.history.openSource(source);
   if(!await goTab('library',{source:'backup-notification'}))return false;
-  const drawer=document.querySelector('.library-data-drawer');if(drawer)drawer.open=true;
+  LibraryView.showSection('data');
   // 'restore' shows every way back in: Device Folder where supported, Google
   // Drive, and the backup file import under Advanced.
   const target=document.getElementById({file:'backup-file-heading','device-folder':'device-backup-status','google-drive':'backup-provider-row-status-google-drive',restore:'managed-backup-heading'}[source]||'');
@@ -1892,7 +1901,7 @@ async function showBackupPresentation(source,kind){
   requestAnimationFrame(()=>target.scrollIntoView({block:source==='restore'?'start':'center',behavior:preferredScrollBehavior()}));return true;
 }
 // A restore opens the versions of the backup location this tab is connected
-// to; otherwise Data & Backup with every way to restore.
+// to; otherwise Library → Data with every way to restore.
 async function openBackupRestore(){
   const source=DeviceBackup.status().connected?'device-folder':BackupProviderRuntime.connected('google-drive')?'google-drive':'';
   return source?showBackupPresentation(source,'history'):showBackupPresentation('restore','status');
@@ -2956,7 +2965,8 @@ function markStorageHealthError(source,reason,options={}){
 function storageSizeLabel(bytes){
   const value=Math.max(0,Number(bytes)||0);
   if(value<1024*1024)return `${Math.round(value/1024)} KB`;
-  return `${Math.round(value/(1024*1024)*10)/10} MB`;
+  if(value<1024**3)return `${Math.round(value/(1024*1024)*10)/10} MB`;
+  return `${Math.round(value/1024**3*10)/10} GB`;
 }
 // The browser's storage estimate is measured at each launch and kept in memory for diagnostics.
 let storageEstimate=Object.freeze({persisted:null,usageBytes:null,quotaBytes:null});
@@ -2970,6 +2980,8 @@ async function inspectStorageCapability(){
   try{if(typeof navigator.storage.estimate==='function')estimate=await navigator.storage.estimate();}catch(e){}
   const usage=Number(estimate&&estimate.usage),quota=Number(estimate&&estimate.quota);
   const ratio=Number.isFinite(usage)&&Number.isFinite(quota)&&quota>0?usage/quota:null;
+  const use=document.getElementById('local-storage-use');
+  if(use)use.textContent=Number.isFinite(usage)?` · Using ${storageSizeLabel(usage)}${ratio!==null?` of ${storageSizeLabel(quota)}`:''}`:'';
   const payload={version:1,persisted:persisted===true,usageBytes:Number.isFinite(usage)?usage:null,quotaBytes:Number.isFinite(quota)?quota:null,usageRatio:ratio,checkedAt:new Date().toISOString()};
   storageEstimate=Object.freeze({persisted,usageBytes:payload.usageBytes,quotaBytes:payload.quotaBytes});
   if(ratio!==null&&ratio>=APP_LIMITS.storageCriticalRatio){
@@ -3728,7 +3740,7 @@ async function maybePromptBackupNudge(force=false){
       due=Array.isArray(summaries)&&summaries.length>=7;
     }catch(e){}
   }
-  backupNudgeMessage=due?'Backup reminder: the last backup is over a week old. Open Library -> Data & Backup.':'';
+  backupNudgeMessage=due?'Backup reminder: the last backup is over a week old. Open Library -> Data.':'';
   refreshStorageFallbackWarning();
   const notifyDate=todayISO();
   if(due&&backupNudgeNotifiedDate!==notifyDate){
@@ -4267,6 +4279,23 @@ function renderRichTextContent(container,value,emptyText='',label='Rich text'){
   if(!canonical.trim()){container.textContent=String(emptyText||'');return false;}
   try{return RichTextApi.renderRichText({container,value:canonical,label:String(label||'Rich text'),assets:RichTextAssets,workspaceOverlay:RichTextWorkspaceOverlay});}
   catch(error){AppDiagnostics.capture('rich-text.display',error,'warn');container.textContent=plainTextContent(canonical).trim()||String(emptyText||'');return false;}
+}
+// Prints one note, its title and content with images, and nothing else on the page.
+async function printNote(label,value){
+  for(const old of document.querySelectorAll('.note-print'))old.remove();
+  const sheet=document.createElement('article'),title=document.createElement('h1'),body=document.createElement('div');
+  sheet.className='note-print';title.textContent=String(label||'Note').split('>').map(part=>part.trim()).filter(Boolean).at(-1)||'Note';sheet.append(title,body);document.body.appendChild(sheet);
+  const text=String(value??'');
+  try{if(text.trim())RichTextApi.renderRichText({container:body,value:text,label:title.textContent,assets:RichTextAssets,eager:true});}
+  catch(error){AppDiagnostics.capture('rich-text.print',error,'warn');body.textContent=plainTextContent(text);}
+  // Images load before the print dialog opens; one that cannot load prints as its placeholder.
+  const deadline=Date.now()+10000,pending=()=>[...body.querySelectorAll('.sd-rte-image[data-sd-asset-id]')].some(figure=>!['ready','missing'].includes(figure.dataset.sdAssetHydrated));
+  while(pending()&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,50));
+  await Promise.all([...body.querySelectorAll('img')].map(image=>typeof image.decode==='function'?image.decode().catch(()=>{}):null));
+  document.documentElement.classList.add('printing-note');
+  window.addEventListener('afterprint',()=>{document.documentElement.classList.remove('printing-note');sheet.remove();},{once:true});
+  window.print();
+  return true;
 }
 function exactAppMetaFamily(capability,key,label='app metadata'){
   const resolved=AppMetaGateway.resolve(String(key||''));
@@ -7014,6 +7043,11 @@ const RichTextRuntime=(()=>{
       return true;
     }catch(error){releaseAssets?.();if(pending.get(field)===request)pending.delete(field);capture('rich-text.mount',error);showMountError(field,descriptor);return false;}
   }
+  // Search matches inside one editor: mount it if needed, mark every match and
+  // scroll to the first; the editor clears them on any edit or Escape.
+  async function find(field,query,onClear){if(!await activate(field))return 0;const record=mounted.get(field);return record?record.mounted.search(query,onClear):0;}
+  function findStep(field,direction){const record=mounted.get(field);return record?record.mounted.stepSearch(direction):{index:-1,count:0};}
+  function clearFind(field){mounted.get(field)?.mounted.clearSearch();}
   // Editors that group keystrokes publish them now.
   function flushEditors(){for(const record of mounted.values()){try{record.mounted.flush();}catch(error){capture('rich-text.flush',error);}}}
   async function quiesce(work){
@@ -7054,7 +7088,7 @@ const RichTextRuntime=(()=>{
     queueMicrotask(()=>syncAll(document));return true;
   }
   function status(){return Object.freeze({installed,loaded:true,activeDocumentId:mounted.get(lastActiveField)?.documentId||'',activeDocumentIds:Object.freeze([...new Set([...mounted.values()].map(record=>record.documentId))]),mounted:mounted.size,pending:pending.size>0,quiesced:mutationActive(),backgroundDisposalPending:backgroundDisposeTimer!==null,backgroundIdleDisposeMs:BACKGROUND_IDLE_DISPOSE_MS,externalConflicts:[...mounted.values()].filter(record=>record.field.dataset.richExternalConflict==='1').length});}
-  return Object.freeze({install,activate,close,closeField,syncField,syncAll,reconcileExternal,quiesce,flushEditors,status});
+  return Object.freeze({install,activate,close,closeField,syncField,syncAll,reconcileExternal,quiesce,flushEditors,find,findStep,clearFind,status});
 })();
 SaveLaneModule.onBeforeFlush(()=>RichTextRuntime.flushEditors());
 async function quiesceManagedRecoveryRuntime(operation){
@@ -7283,8 +7317,9 @@ function refreshPnote(options={}){
 }
 async function openOngoingNotesLibrary(){
   if(!await goTab('library',{source:'ongoing-notes'}))return false;
-  const drawer=document.getElementById('library-notes-drawer');
-  if(drawer){drawer.open=true;refreshLibraryOngoingNotes();requestAnimationFrame(()=>drawer.scrollIntoView({block:'start',behavior:preferredScrollBehavior()}));}
+  LibraryView.showSection('notes');
+  const section=document.getElementById('library-notes');
+  if(section)requestAnimationFrame(()=>section.scrollIntoView({block:'start',behavior:preferredScrollBehavior()}));
   return true;
 }
 function onPnoteChange(){
@@ -7827,11 +7862,11 @@ async function quiesceAttachmentMutation(work,options={}){
   return RichTextRuntime.quiesce(()=>LibraryView.batchAttachmentMutation(work,options));
 }
 const AttachmentLibrary=AttachmentsModule.create({
-  notifications:NoticeCoordinator.presentation('attachments',Object.freeze({label:'Open attachments',run:async()=>{if(await goTab('library')){const panel=document.getElementById('library-attachments');panel.open=true;panel.scrollIntoView({block:'start'});}}})),
+  notifications:NoticeCoordinator.presentation('attachments',Object.freeze({label:'Open attachments',run:async()=>{if(await goTab('library')){LibraryView.showSection('data');const panel=document.getElementById('library-attachments');panel.open=true;panel.scrollIntoView({block:'start'});}}})),
   onWorkStart:()=>{pwaWorkRevision++;},
   store:AttachmentStorage,processing:Exports,document,interactions:Interactions,
   canMutate:()=>appCanMutate(),requireOwner:()=>{if(!appCanMutate())throw new Error('Use the primary tab to manage attachments.');},token:()=>AppOwnership.issueWriteToken('manage attachments'),
-  isActive:()=>document.getElementById('pane-library').classList.contains('on'),cleanup:()=>scheduleRichTextAssetMaintenance(),renderReference:(container,source)=>renderRichTextContent(container,source.value,'',source.label),sources:options=>AttachmentReferences.sources(options),integrityIssue:id=>attachmentIntegrityIssues.get(String(id||''))||null,destinations:()=>LibraryView.noteDestinations(),settle:settleAttachmentWriters,openLibrary:()=>goTab('library',{source:'attachment-library'}),
+  isActive:()=>document.getElementById('pane-library').classList.contains('on')&&!document.getElementById('library-data').hidden,cleanup:()=>scheduleRichTextAssetMaintenance(),renderReference:(container,source)=>renderRichTextContent(container,source.value,'',source.label),sources:options=>AttachmentReferences.sources(options),integrityIssue:id=>attachmentIntegrityIssues.get(String(id||''))||null,destinations:()=>LibraryView.noteDestinations(),settle:settleAttachmentWriters,openLibrary:()=>{LibraryView.showSection('data');return goTab('library',{source:'attachment-library'});},
   openSource:async source=>{if(!await goTab('library',{source:'attachment-reference'}))return false;if(source.kind==='note')return LibraryView.revealNoteReference(source.key);if(source.kind==='day')return LibraryView.openDay(source.key);return false;},
   preparePdfOpen:()=>prepareNativePdfWindow(),
   openPdf:(row,file,reservedWindow,releaseReader)=>openPdfWorkspace(row,file,reservedWindow,releaseReader),
@@ -7900,9 +7935,9 @@ function attachmentIntegrityWarning(state){
   const first=issues[0];
   if(issues.length===1){
     const subject=first.id?`attachment ${first.id.slice(0,18)}…`:'an attachment';
-    return `Attachment storage needs attention · ${subject}: ${attachmentIntegrityIssueLabel(first)}. Open Library → Attachment Library.`;
+    return `Attachment storage needs attention · ${subject}: ${attachmentIntegrityIssueLabel(first)}. Open Library → Data → Files.`;
   }
-  return `Attachment storage needs attention · ${issues.length} attachment issues detected. Open Library → Attachment Library.`;
+  return `Attachment storage needs attention · ${issues.length} attachment issues detected. Open Library → Data → Files.`;
 }
 function applyAttachmentIntegrityState(state){
   const normalized=normalizeAttachmentIntegrityState(state);
@@ -8054,7 +8089,10 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     canCreate:()=>AppData.notes.metadataSnapshot().records.length<APP_LIMITS.maxOngoingNotes,
     catalogue:ongoingAreaNoteCatalogue,
     clearEditor:clearTaskNoteEditorBinding,
+    clearFind:field=>RichTextRuntime.clearFind(field),
     commitEditor:commitTaskNoteEditor,
+    find:(field,query,onClear)=>RichTextRuntime.find(field,query,onClear),
+    findStep:(field,direction)=>RichTextRuntime.findStep(field,direction),
     failure:()=>AppData.notes.failure(),
     get:(key,label)=>AppData.notes.get(key,label),
     normalizeArea:normalizeOngoingAreaInput,
@@ -8070,13 +8108,20 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     size:()=>AppData.notes.size(),
     trash:key=>AppData.notes.trash(key),
     trashSnapshot:()=>AppData.notes.trashSnapshot(),
-    versions:target=>BackupRecoveryHost.history.openNote(target)
+    versions:target=>BackupRecoveryHost.history.openNote(target),
+    print:key=>{RichTextRuntime.flushEditors();const note=AppData.notes.get(key);return note?printNote(note.label,note.text):false;}
   }),
   attachments:Object.freeze({
     batch:operation=>AttachmentLibrary.batch(operation),
+    close:()=>AttachmentLibrary.close(),
     count:()=>AttachmentLibrary.count(),
     invalidate:()=>AttachmentLibrary.invalidate(),
-    reconcile:()=>AttachmentLibrary.reconcile()
+    reconcile:()=>AttachmentLibrary.reconcile(),
+    refresh:()=>AttachmentLibrary.refresh()
+  }),
+  preferences:Object.freeze({
+    read:()=>AppData.local.getJson(STORAGE_KEYS.libraryView,null),
+    write:value=>AppData.local.setJson(STORAGE_KEYS.libraryView,value)
   }),
   clearLibrary:Object.freeze({
     preflight:selection=>LibraryClearCoordinator.preflight(selection),

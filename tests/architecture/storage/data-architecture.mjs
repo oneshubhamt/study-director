@@ -33,7 +33,7 @@ assert.match(app,/const SESSION_STORAGE_KEYS=Object\.freeze\(@@SD_SESSION_STORAG
 assert.match(app,/const OBSOLETE_STORAGE_KEYS=Object\.freeze\(@@SD_OBSOLETE_LOCAL_STORAGE_KEYS@@\);/u);
 assert.match(app,/const APP_META_KEYS=Object\.freeze\(@@SD_APP_META_KEYS@@\);/u);
 assert.match(app,/const OBSOLETE_APP_META_KEYS=Object\.freeze\(@@SD_OBSOLETE_APP_META_KEYS@@\);/u);
-assert.equal(Object.keys(LOCAL_STORAGE_KEYS).length,19,'current localStorage inventory includes separate attachment cleanup success and pending identities');
+assert.equal(Object.keys(LOCAL_STORAGE_KEYS).length,20,'current localStorage inventory includes separate attachment cleanup success and pending identities, and the Library view');
 assert.equal(LOCAL_STORAGE_KEYS.attachmentMaintenancePending,'studyDirector.attachmentMaintenancePending.v1');
 assert.equal(LOCAL_STORAGE_KEYS.attachmentMaintenanceDay,'studyDirector.attachmentMaintenanceDay.v2');
 assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.attachmentMaintenanceAttemptDay,'studyDirector.attachmentMaintenanceDay.v1','old scheduling records cannot certify completion in F2');
@@ -171,6 +171,7 @@ assert.doesNotMatch(persistence,/key:'dailyRecordMigration'/u,'IndexedDB upgrade
 // Insights preference is part of the same authoritative localStorage identity map.
 
 assert.equal(LOCAL_STORAGE_KEYS.insightsWindow,'studyDirector.insights.window.v1');
+assert.equal(LOCAL_STORAGE_KEYS.libraryView,'studyDirector.library.view.v1');
 assert.doesNotMatch(insights,/['"]studyDirector\.insights\.window\.v1['"]/u);
 assert.doesNotMatch(insights,/StudyDirector\?\.data\?\.storageKeys/u,'Insights must not depend on a public raw storage-identity capability once the bounded device-state port exists');
 

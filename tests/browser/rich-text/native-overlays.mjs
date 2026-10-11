@@ -35,6 +35,7 @@ try{
     assert.equal(await page.evaluate(`document.querySelectorAll('.sd-rte-menu:not([hidden])').length`),0,`${mode}: outside dismissal`);
     await page.evaluate(`document.querySelector('button[aria-label="More text formatting"]').focus()`);await key(page,'ArrowDown');await page.settle();
     assert.equal(await page.evaluate(`document.activeElement.getAttribute('aria-label')`),'Underline');
+    await key(page,'ArrowDown');assert.equal(await page.evaluate(`document.activeElement.getAttribute('aria-label')`),'Strikethrough');
     await key(page,'ArrowDown');assert.equal(await page.evaluate(`document.activeElement.getAttribute('aria-label')`),'Subscript');
     await key(page,'Escape');assert.equal(await page.evaluate(`document.activeElement.getAttribute('aria-label')`),'More text formatting');
     assert.equal(await page.evaluate(`document.querySelector('button[aria-label="More text formatting"]').getAttribute('aria-expanded')`),'false');

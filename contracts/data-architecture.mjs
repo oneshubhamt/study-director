@@ -53,7 +53,8 @@ export const LOCAL_STORAGE_KEYS=freeze({
   pwaUpdateCheck:'studyDirector.pwaUpdateCheck.v1',
   attachmentMaintenanceDay:'studyDirector.attachmentMaintenanceDay.v2',
   attachmentMaintenancePending:'studyDirector.attachmentMaintenancePending.v1',
-  insightsWindow:'studyDirector.insights.window.v1'
+  insightsWindow:'studyDirector.insights.window.v1',
+  libraryView:'studyDirector.library.view.v1'
 });
 
 export const SESSION_STORAGE_KEYS=freeze({
@@ -195,7 +196,8 @@ export const DATA_ARCHITECTURE=freeze({
     pwaUpdateCheck:surface('operational','host','operational','retained'),
     attachmentMaintenancePending:surface('operational','asset-maintenance','operational','durable pending attachment cleanup intent; cleared only after completed work'),
     attachmentMaintenanceDay:surface('operational','asset-maintenance','operational','last local calendar day whose attachment cleanup completed'),
-    insightsWindow:surface('preference','insights','operational','retained')
+    insightsWindow:surface('preference','insights','operational','retained'),
+    libraryView:surface('preference','library','operational','retained')
   }),
   sessionStorage:freeze({
     appTab:surface('coordination-identity','ownership','operational','tab-session lifetime'),

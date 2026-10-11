@@ -23,7 +23,7 @@ try{
   page=await browser.createPage(server.url('deployment','exports-fixture.html'),{preload,viewport:{width:1200,height:850}});
   try{await waitForStudyDirector(page,{instrumented:true,timeout:10000});}catch(error){console.log(JSON.stringify({events:page.events,body:await page.evaluate('document.body.innerText.slice(-1000)')}));throw error;}await waitFor(()=>page.evaluate('__PWA6.AppOwnership.status().hasControl'));
   assert.equal(await page.evaluate('workerCounts.started'),0,'export worker stays cold at startup');
-  await page.evaluate(`__PWA6.goTab('library');document.querySelectorAll('details').forEach(el=>el.open=true);document.getElementById('download-backup').scrollIntoView()`);
+  await page.evaluate(`__PWA6.goTab('library');__PWA6.LibraryView.showSection('data');document.querySelectorAll('details').forEach(el=>el.open=true);document.getElementById('download-backup').scrollIntoView()`);
   // Export backup opens the save dialog straight from the click, writes the
   // chosen file, reads it back and says so.
   await page.settle();await page.click('#download-backup');

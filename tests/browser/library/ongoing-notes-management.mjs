@@ -56,7 +56,7 @@ try{
     const rows=[['Alpha Task','Alpha Empty'],['Zeta Task','Zeta Filled'],['Child Task','Parent > Child Empty']];
     document.getElementById('plan-input').value=rows.map((row,index)=>fmt(base+index*20)+' | 20 | '+row[0]+' | work | '+row[1]+' | pages | 10').join('\\n');
     const applied=d.applySchedule({skipNotify:true});d.goTab('library');
-    const drawer=document.getElementById('library-notes-drawer');drawer.open=true;
+    __PWA6.LibraryView.showSection('notes');
     return {applied};
   })()`);
   assert.equal(prepared.applied,true);
@@ -66,7 +66,7 @@ try{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),nextRender=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
     const row=[...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='zeta filled');row.click();await wait(30);
     const field=document.querySelector('#library-notes-editor .library-notes-textarea');field.value='Durable Zeta note';field.dispatchEvent(new Event('input',{bubbles:true}));await d.AppData.notes.flush();
-    const drawer=document.getElementById('library-notes-drawer');drawer.open=false;await wait(30);drawer.open=true;await wait(60);
+    __PWA6.LibraryView.showSection('days');await wait(30);__PWA6.LibraryView.showSection('notes');await wait(60);
     let rows=[...document.querySelectorAll('[data-ongoing-note-key]')];
     const search=document.getElementById('library-notes-search');search.value='Durable Zeta note';search.dispatchEvent(new Event('input',{bubbles:true}));for(let i=0;i<100&&document.querySelectorAll('[data-ongoing-note-key]').length!==1;i++)await wait(20);
     const filtered=[...document.querySelectorAll('[data-ongoing-note-key]')].map(item=>item.dataset.ongoingNoteKey);
@@ -96,7 +96,7 @@ try{
       focused:document.activeElement===document.querySelector('.library-notes-textarea')||!!document.activeElement.closest('.library-notes-editor .sd-rte-wordgard'),
       persisted:!!__PWA6.AppData.notes.get('standalone only')
     };
-    const drawer=document.getElementById('library-notes-drawer');drawer.open=false;await wait(30);drawer.open=true;await wait(60);
+    __PWA6.LibraryView.showSection('days');await wait(30);__PWA6.LibraryView.showSection('notes');await wait(60);
     return {...before,afterKeys:[...document.querySelectorAll('[data-ongoing-note-key]')].map(item=>item.dataset.ongoingNoteKey)};
   })()`);
   assert.deepEqual({...temporary,afterKeys:undefined},{selected:'standalone only',title:'Standalone Only',meta:'New · saved when you write',focused:true,persisted:false,afterKeys:undefined});
@@ -108,11 +108,11 @@ try{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
     await __interactionQA.create('Standalone Only','top');await wait(25);
     let field=document.querySelector('.library-notes-textarea');field.value='Standalone Area knowledge';field.dispatchEvent(new Event('input',{bubbles:true}));await d.AppData.notes.flush();
-    let drawer=document.getElementById('library-notes-drawer');drawer.open=false;await wait(25);drawer.open=true;await wait(50);
+    __PWA6.LibraryView.showSection('days');await wait(25);__PWA6.LibraryView.showSection('notes');await wait(50);
     [...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='standalone only').click();await wait(25);
     await __interactionQA.create('Nested Topic','nested');await wait(25);
     field=document.querySelector('.library-notes-textarea');field.value='Nested knowledge';field.dispatchEvent(new Event('input',{bubbles:true}));await d.AppData.notes.flush();
-    drawer.open=false;await wait(25);drawer.open=true;await wait(60);
+    __PWA6.LibraryView.showSection('days');await wait(25);__PWA6.LibraryView.showSection('notes');await wait(60);
     const rows=[...document.querySelectorAll('[data-ongoing-note-key]')],keys=rows.map(item=>item.dataset.ongoingNoteKey);
     const beforeCount=keys.filter(key=>key==='standalone only').length;
     [...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='standalone only').click();await wait(20);
@@ -140,7 +140,7 @@ try{
     d.goTab('review');d.ReviewView.refresh({force:true});await wait(70);
     const reviewField=[...document.querySelectorAll('#review-list .task-note-field')].find(field=>field.dataset.areaKey==='standalone only');
     const review={value:reviewField?.value||'',key:reviewField?.dataset.areaKey||''};
-    d.goTab('library');const drawer=document.getElementById('library-notes-drawer');drawer.open=true;await wait(60);
+    d.goTab('library');__PWA6.LibraryView.showSection('notes');await wait(60);
     return {applied,timer,review};
   })()`);
   assert.equal(linkedToPlan.applied,true);
@@ -283,7 +283,7 @@ try{
     const applying=d.applySchedule({skipNotify:true});if(applying&&typeof applying.then==='function')await __interactionQA.accept();await applying;
     document.getElementById('saved-plan-name').value='Alpha plan';document.querySelector('[data-saved-plan="save"]').click();
     await until(()=>document.querySelector('[data-saved-plan-id]'));
-    d.goTab('library');document.getElementById('library-notes-drawer').open=true;
+    d.goTab('library');__PWA6.LibraryView.showSection('notes');
     d.AppData.notes.update('alpha empty','Alpha Empty','Alpha knowledge','');await d.AppData.notes.flush();d.LibraryView.refreshNotes();await wait(40);
     [...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='alpha empty').click();await wait(30);
     const id=d.AppData.notes.get('alpha empty').id,index=d.TimerState.currentIndex,taskId=d.TimerState.currentTaskId;
@@ -309,6 +309,64 @@ try{
   result.checks.renameTakesAreaAlongOrLeavesIt=true;
   console.error('[qa-notes] rename with plans passed');
 
+  // The Library's three sections: one shows at a time and the choice, with the
+  // Diary panel and the notes order, is remembered.
+  const sections=await page.evaluate(`(async()=>{
+    const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),shown=()=>['notes','days','data'].filter(name=>!document.getElementById('library-'+name).hidden);
+    document.getElementById('library-tab-days').click();await wait(30);const days=shown();
+    const diary=document.getElementById('library-diary');diary.open=true;await wait(30);
+    document.getElementById('library-tab-data').click();await wait(30);const data=shown();
+    document.getElementById('library-tab-data').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));await wait(30);const wrapped=shown();
+    return {days,data,wrapped,selected:document.getElementById('library-tab-notes').getAttribute('aria-selected'),saved:JSON.parse(localStorage.getItem('studyDirector.library.view.v1'))};
+  })()`);
+  assert.deepEqual(sections,{days:['days'],data:['data'],wrapped:['notes'],selected:'true',saved:{section:'notes',diary:true,sort:'name'}});
+  result.checks.librarySectionsSwitchAndRemember=true;
+
+  // Recently edited lists notes flat, newest first, each with its path.
+  const sorted=await page.evaluate(`(async()=>{
+    const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),sort=document.getElementById('library-notes-sort');
+    d.AppData.notes.update('alpha renamed','Alpha renamed','Newest edit','');await d.AppData.notes.flush();d.LibraryView.refreshNotes();
+    sort.value='recent';sort.dispatchEvent(new Event('change'));await wait(40);
+    const list=document.getElementById('library-notes-list'),first=list.querySelector('.library-note-nav-item');
+    const out={role:list.getAttribute('role'),first:first?.dataset.ongoingNoteKey,edited:!!first?.querySelector('.library-note-nav-edited'),saved:JSON.parse(localStorage.getItem('studyDirector.library.view.v1')).sort};
+    sort.value='name';sort.dispatchEvent(new Event('change'));await wait(40);out.tree=list.getAttribute('role');return out;
+  })()`);
+  assert.deepEqual(sorted,{role:null,first:'alpha renamed',edited:true,saved:'recent',tree:'tree'});
+  result.checks.notesSortRecentlyEdited=true;
+
+  // Search lands on the match: every match is marked, Enter steps, Escape and typing clear.
+  await page.evaluate(`(async()=>{const d=__PWA6;d.AppData.notes.update('alpha renamed','Alpha renamed','Mitral valve. Then the mitral area. Mitral again.',d.AppData.notes.get('alpha renamed')?.updatedAt||'');await d.AppData.notes.flush();d.LibraryView.refreshNotes();
+    const search=document.getElementById('library-notes-search');search.value='mitral';search.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+  await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-notes-editor .sd-rte-search-match').length===3`),{label:'search matches marked'});
+  const landed=await page.evaluate(`(async()=>{
+    const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),search=document.getElementById('library-notes-search'),bar=()=>document.getElementById('library-note-matches'),count=()=>bar().hidden?'':bar().querySelector('.library-note-matches-count').textContent;
+    const first=count();search.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));await wait(30);const second=count();
+    search.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',shiftKey:true,bubbles:true}));search.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',shiftKey:true,bubbles:true}));await wait(30);const wrapped=count();
+    search.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await wait(30);const cleared={marks:document.querySelectorAll('#library-notes-editor .sd-rte-search-match').length,bar:bar().hidden};
+    search.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));await wait(60);
+    return {first,second,wrapped,cleared,again:document.querySelectorAll('#library-notes-editor .sd-rte-search-match').length,current:document.querySelectorAll('#library-notes-editor .sd-rte-search-match.current').length};
+  })()`);
+  assert.deepEqual(landed,{first:'1 of 3',second:'2 of 3',wrapped:'3 of 3',cleared:{marks:0,bar:true},again:3,current:1});
+  await page.click('#library-notes-editor .sd-rte-wordgard [contenteditable]');await page.send('Input.insertText',{text:'!'});
+  await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-notes-editor .sd-rte-search-match').length===0&&document.getElementById('library-note-matches').hidden`),{label:'typing clears matches'});
+  result.checks.searchLandsOnMatches=true;
+
+  // Strikethrough sits in More text formatting; Print… prints the title and text only.
+  const formatted=await page.evaluate(`(async()=>{
+    const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),shell=document.querySelector('#library-notes-editor .sd-rte');
+    const button=[...shell.querySelectorAll('button')].find(item=>item.getAttribute('aria-label')==='Strikethrough');
+    const editable=shell.querySelector('[contenteditable]');editable.focus();const range=document.createRange();range.selectNodeContents(editable.querySelector('p'));const selection=getSelection();selection.removeAllRanges();selection.addRange(range);document.dispatchEvent(new Event('selectionchange'));await wait(40);
+    button.click();await wait(60);
+    let printed=null;const realPrint=window.print;window.print=()=>{const sheet=document.querySelector('.note-print');printed={title:sheet.querySelector('h1').textContent,text:sheet.innerText.includes('Mitral valve'),printing:document.documentElement.classList.contains('printing-note')};};
+    document.getElementById('library-note-actions').click();await wait(30);document.getElementById('library-note-print').click();await wait(400);
+    window.dispatchEvent(new Event('afterprint'));window.print=realPrint;
+    return {keys:button.getAttribute('aria-keyshortcuts'),struck:!!editable.querySelector('s'),printed,left:document.querySelectorAll('.note-print').length};
+  })()`);
+  assert.deepEqual(formatted,{keys:'Control+Shift+x Meta+Shift+x',struck:true,printed:{title:'Alpha renamed',text:true,printing:true},left:0});
+  await page.evaluate(`(()=>{const search=document.getElementById('library-notes-search');search.value='';search.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+  result.checks.strikethroughAndPrint=true;
+  console.error('[qa-notes] sections, sort, search, strikethrough and print passed');
+
   await page.setViewport({width:390,height:844,mobile:true,scale:2});await page.settle(3);
   const mobile=await page.evaluate(`(()=>{
     const add=document.getElementById('library-note-add'),root=document.documentElement;
@@ -333,14 +391,14 @@ try{
   assert.deepEqual(phone.after,{list:true,note:false,focused:'zeta filled'});assert.ok(phone.overflow<=1);
   result.checks.phoneListAndNoteViews=true;
 
-  const mobileMaterials=await page.evaluate(`(()=>{const head=document.querySelector('.library-notes-nav-head'),drawer=document.querySelector('.library-data-drawer');drawer.open=true;const actions=[...document.querySelectorAll('.backup-file-actions>.mini-btn')].map(el=>el.getBoundingClientRect());const hs=getComputedStyle(head),root=document.documentElement;return {presentation:root.dataset.presentation,headBackground:hs.backgroundImage,headBackdrop:hs.backdropFilter||hs.webkitBackdropFilter||'none',actionWidths:actions.map(r=>Math.round(r.width)),overflow:root.scrollWidth-root.clientWidth}})()`);
+  const mobileMaterials=await page.evaluate(`(()=>{const head=document.querySelector('.library-notes-nav-head');__PWA6.LibraryView.showSection('data');document.querySelector('.backup-advanced-disclosure').open=true;const actions=[...document.querySelectorAll('.backup-file-actions>.mini-btn')].map(el=>el.getBoundingClientRect());__PWA6.LibraryView.showSection('notes');const hs=getComputedStyle(head),root=document.documentElement;return {presentation:root.dataset.presentation,headBackground:hs.backgroundImage,headBackdrop:hs.backdropFilter||hs.webkitBackdropFilter||'none',actionWidths:actions.map(r=>Math.round(r.width)),overflow:root.scrollWidth-root.clientWidth}})()`);
   assert.equal(mobileMaterials.presentation,'glass');assert.match(mobileMaterials.headBackground,/gradient/i);assert.notEqual(mobileMaterials.headBackdrop,'none');assert.equal(mobileMaterials.actionWidths.length,2);assert.ok(Math.abs(mobileMaterials.actionWidths[0]-mobileMaterials.actionWidths[1])<=2);assert.ok(mobileMaterials.overflow<=1);
   result.checks.glassStickyControlsAndCompactBackupActions=true;
 
   // A long mobile note must scroll internally without trapping the surrounding Library page at its boundaries.
   await page.evaluate(`(async()=>{const d=__PWA6,current=d.AppData.notes.get('zeta filled'),text=Array.from({length:140},(_,i)=>'Boundary paragraph '+(i+1)+' — durable library scrolling evidence.').join('\\n\\n');d.AppData.notes.update('zeta filled','Zeta Filled',text,current?.updatedAt||'');await d.AppData.notes.flush();d.LibraryView.refreshNotes();const row=[...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='zeta filled');row?.click();})()`);
   await waitFor(()=>page.evaluate(`(()=>{const scroller=document.querySelector('#library-notes-editor wg-scroller');return !!scroller&&scroller.scrollHeight>scroller.clientHeight+20})()`),{label:'long-note internal scroll range'});
-  const scrollBoundary=await page.evaluate(`(()=>{const inner=document.querySelector('#library-notes-editor wg-scroller'),drawer=document.getElementById('library-notes-drawer'),tail=document.createElement('div');tail.dataset.qaScrollTail='true';tail.style.height='900px';drawer.after(tail);let outer=drawer.parentElement;while(outer&&!(outer.scrollHeight>outer.clientHeight+1&&/auto|scroll/.test(getComputedStyle(outer).overflowY)))outer=outer.parentElement;outer=outer||document.scrollingElement;const innerMax=Math.max(0,inner.scrollHeight-inner.clientHeight);inner.scrollTop=0;const top=inner.scrollTop;inner.scrollTop=innerMax;const bottom=inner.scrollTop;const outerMax=Math.max(0,outer.scrollHeight-outer.clientHeight);outer.scrollTop=Math.min(Math.max(0,outerMax-180),Math.max(0,drawer.offsetTop));const before=outer.scrollTop;outer.scrollTop=Math.min(outerMax,before+180);const after=outer.scrollTop;return {innerMax,top,bottom,overscroll:getComputedStyle(inner).overscrollBehaviorY,outerMax,before,after}})()`);
+  const scrollBoundary=await page.evaluate(`(()=>{const inner=document.querySelector('#library-notes-editor wg-scroller'),drawer=document.getElementById('library-notes'),tail=document.createElement('div');tail.dataset.qaScrollTail='true';tail.style.height='900px';drawer.after(tail);let outer=drawer.parentElement;while(outer&&!(outer.scrollHeight>outer.clientHeight+1&&/auto|scroll/.test(getComputedStyle(outer).overflowY)))outer=outer.parentElement;outer=outer||document.scrollingElement;const innerMax=Math.max(0,inner.scrollHeight-inner.clientHeight);inner.scrollTop=0;const top=inner.scrollTop;inner.scrollTop=innerMax;const bottom=inner.scrollTop;const outerMax=Math.max(0,outer.scrollHeight-outer.clientHeight);outer.scrollTop=Math.min(Math.max(0,outerMax-180),Math.max(0,drawer.offsetTop));const before=outer.scrollTop;outer.scrollTop=Math.min(outerMax,before+180);const after=outer.scrollTop;return {innerMax,top,bottom,overscroll:getComputedStyle(inner).overscrollBehaviorY,outerMax,before,after}})()`);
   assert.ok(scrollBoundary.innerMax>20,'Long note must provide a real internal scroll range.');assert.equal(scrollBoundary.top,0);assert.ok(Math.abs(scrollBoundary.bottom-scrollBoundary.innerMax)<=1,'Long note must reach its bottom boundary.');assert.notEqual(scrollBoundary.overscroll,'contain','Note editor must not trap scroll chaining at its boundaries.');assert.ok(scrollBoundary.outerMax>scrollBoundary.before&&scrollBoundary.after>scrollBoundary.before,'Library page must remain independently scrollable around the long note.');
   result.checks.mobileLongNoteScrollBoundaryHandoff=true;
 

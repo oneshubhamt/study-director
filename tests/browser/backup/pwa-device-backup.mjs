@@ -63,7 +63,7 @@ try{
   await waitFor(()=>page.evaluate(`__DeviceBackupDebug.DeviceBackup.status().installed===true`),{label:'device-backup startup'});
 
   const startup=await page.evaluate(`(()=>{
-    document.querySelector('[data-tab="library"]').click();document.querySelector('.library-data-drawer').open=true;
+    document.querySelector('[data-tab="library"]').click();document.getElementById('library-tab-data').click();
     return {
       supported:__DeviceBackupDebug.DeviceBackup.status().supported,
       mode:__DeviceBackupDebug.DeviceBackup.status().mode,
@@ -100,7 +100,7 @@ try{
 
   // Nothing changed: Back up now confirms the folder is current and adds no version.
   await page.evaluate(`document.getElementById('device-backup-now').click()`);
-  await waitFor(()=>page.evaluate(`!__DeviceBackupDebug.DeviceBackup.status().busy&&/already has your latest data/.test(document.querySelector('.library-data-drawer')?.textContent||'')`),{timeout:90000,label:'unchanged backup confirmed'});
+  await waitFor(()=>page.evaluate(`!__DeviceBackupDebug.DeviceBackup.status().busy&&/already has your latest data/.test(document.getElementById('library-data')?.textContent||'')`),{timeout:90000,label:'unchanged backup confirmed'});
   assert.equal(await page.evaluate('__deviceVersions().then(rows=>rows.length)'),1,'an unchanged backup adds no version');
   // A real change gets its own version.
   await page.evaluate(`(async()=>{__DeviceBackupDebug.AppData.notes.update('Rotation','Rotation','A change worth a new version');await __DeviceBackupDebug.AppData.notes.flush();})()`);
@@ -136,7 +136,7 @@ try{
     const debug=__DeviceBackupDebug,hold=debug.BackupProviderRuntime.suspendBackground('qa-note-restore');await hold.settled;window.__qaNoteSuspension=hold;
     const notes=debug.AppData.notes,current=notes.get(${JSON.stringify(noteKey)},'Reliability');notes.update(current.key,'Reliability','Text after an accident',current.updatedAt);await notes.flush({strict:true});
   })()`);
-  await page.evaluate(`(()=>{document.querySelector('[data-tab="library"]').click();document.getElementById('library-notes-drawer').open=true;})()`);
+  await page.evaluate(`(()=>{document.querySelector('[data-tab="library"]').click();document.getElementById('library-tab-notes').click();})()`);
   await waitFor(()=>page.evaluate(`[...document.querySelectorAll('[data-ongoing-note-key]')].some(row=>row.dataset.ongoingNoteKey===${JSON.stringify(noteKey)})`),{label:'note listed in the Library'});
   await page.evaluate(`[...document.querySelectorAll('[data-ongoing-note-key]')].find(row=>row.dataset.ongoingNoteKey===${JSON.stringify(noteKey)}).click()`);
   await waitFor(()=>page.evaluate(`!!document.getElementById('library-note-actions')`),{label:'open note menu'});
@@ -176,7 +176,7 @@ try{
   await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
   await sleep(250);
   const mobile=await page.evaluate(`(()=>{
-    document.querySelector('[data-tab="library"]').click();document.querySelector('.library-data-drawer').open=true;
+    document.querySelector('[data-tab="library"]').click();document.getElementById('library-tab-data').click();
     const row=document.getElementById('device-backup-status').closest('.backup-location-row').getBoundingClientRect();
     return {overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,row:{left:row.left,right:row.right,width:row.width},viewport:innerWidth,buttons:[...document.querySelectorAll('#device-backup-actions button:not([hidden])')].filter(button=>button.getClientRects().length>0).map(button=>({text:button.textContent.trim(),height:button.getBoundingClientRect().height}))};
   })()`);

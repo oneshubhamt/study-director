@@ -58,7 +58,7 @@ const noop=()=>{};
   const source=fs.readFileSync('source/core/library.js','utf8'),{coordinator,port}=createNotifications('library');
   let result={status:'cancelled'},failure=null;
   const context={notifications:port,ongoingNoteExportBusy:false,ongoingNoteSelection:new Set(['one']),ongoingNoteSelectionMode:true,ongoingNoteEntries:()=>[],updateOngoingNoteSelectionControls:noop,renderOngoingNotes:noop,console:{error:noop},exportKeys:async()=>{if(failure)throw failure;return result;}};
-  vm.createContext(context);vm.runInContext(source.slice(source.indexOf('    async function exportSelectedOngoingNotes('),source.indexOf('    function updateOngoingNotesSummary(')),context);
+  vm.createContext(context);vm.runInContext(source.slice(source.indexOf('    async function exportSelectedOngoingNotes('),source.indexOf('    function setOngoingNotesStatus(')),context);
   assert.equal(await context.exportSelectedOngoingNotes(),false);assert.equal(context.ongoingNoteSelection.size,1);assert.equal(coordinator.readEvent('library','ongoing-note-export').lifecycle,'cancelled');assert.equal(coordinator.eventStatus().toasts.length,0);
   failure=new Error('file access denied');assert.equal(await context.exportSelectedOngoingNotes(),false);assert.equal(coordinator.readEvent('library','ongoing-note-export').lifecycle,'failed');assert.equal(context.ongoingNoteSelection.size,1);
   failure=null;result={status:'downloaded',kind:'markdown'};assert.equal(await context.exportSelectedOngoingNotes(),true);assert.equal(context.ongoingNoteSelection.size,0);assert.match(coordinator.readEvent('library','ongoing-note-export').message,/download started/);assert.equal(coordinator.eventStatus().toasts.length,1);
