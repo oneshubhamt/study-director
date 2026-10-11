@@ -106,6 +106,26 @@ What already works well:
    - **Proper weight for every section.** Notes in particular must not look like a minor panel. Each section gets the space and proportion its importance deserves.
    - **Keep what works.** The redesign rearranges and resizes the existing parts rather than rebuilding them, and is shown as screenshots for approval before it is finalised.
 
+16. **Renaming a note can take its Area along** (decided 2026-10-11).
+   - **The tick box.** The Move dialog shows "Also rename it in today's plan and saved plans", ticked by default, whenever either uses the note's Area. Renaming the title in place behaves as if it were ticked.
+   - **Ticked.** Blocks in today's plan change their Area in place, keeping their times, progress and the running timer. The draft and saved plans are rewritten too, so blocks keep opening the same note.
+   - **Unticked.** Blocks keep the old name. The moment the rename happens, a running block shows an empty note under its own name, which becomes a new note once written in. The renamed note stays separate.
+   - **Typing an old name by hand** into a later plan likewise starts a new note.
+   - **Finished days** keep the name they were recorded with.
+
+## How notes and Areas fit together
+
+- **Two things name a note:**
+  - its **permanent id**, given when it is created and never changed;
+  - its **title** (the label, such as "Cardiology › Heart failure").
+- **The title connects a note to the plan.** A block opens the note whose title matches its Area. That is the only place titles are used to find a note, and two notes never share a title.
+- **Everything else uses the id:**
+  - saving and clash handling, Recently deleted, and deletion records;
+  - backups, earlier versions and restoring a single note;
+  - the note an attachment sits in;
+  - the linked-notes bar and links inside the text, when they come.
+- **So a rename changes only the title.** History, links and attachments stay with the note, and the tick box above decides whether the plan follows.
+
 ## Order of work
 
 1. **Permanent note identity (11)** and **earlier versions (1):**

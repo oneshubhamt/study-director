@@ -19,7 +19,7 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE}={}){
   const presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications}));
   const pending=registry.require('backup-recovery-host',1).createPendingStore(freeze({sourceRevision:()=>current,diagnostics:freeze({capture:noop}),storage:freeze({read:async()=>durable,write:async value=>{durable=value;},remove:async()=>{durable=null;}})}));
   const unexpected=()=>{throw new Error('Unexpected executor in the automatic backup test');};
-  const pipeline=freeze({createPublication:unexpected,publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,verifyObject:unexpected,inspectCommit:unexpected,
+  const pipeline=freeze({noteObject:unexpected,readNote:unexpected,createPublication:unexpected,publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,verifyObject:unexpected,inspectCommit:unexpected,
     publish:async(_history,options,executor)=>{
       assert.equal(options.interactive,false,'automatic backups never prompt');
       const captured=current;publishedAt.push(clock.now());await publicationHook(options);

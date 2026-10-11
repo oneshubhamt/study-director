@@ -295,7 +295,7 @@ function validateBackupManifest(manifest,gzip,{binaryV10=false}={}){
   if(!manifest||manifest.type!=='manifest'||manifest.format!==DATA_CONTRACT.schemas.Backup.format)throw new Error('File is not a chunked Study Director backup.');
   const version=Number(manifest.version)||0;
   if(version>DATA_CONTRACT.schemas.Backup.version)throw new Error('This backup was created by a newer Study Director version. Update the app before importing it.');
-  if(![7,8,9,10,11,12,13,14,15,16,17,18,19,20].includes(version))throw new Error('This backup version is not supported by this build.');
+  if(![7,8,9,10,11,12,13,14,15,16,17,18,19,20,21].includes(version))throw new Error('This backup version is not supported by this build.');
   if(version>=10&&!binaryV10)throw new Error('Backup v10 must use the binary-framed Study Director backup format.');
   if(version<10&&binaryV10)throw new Error('Binary backup framing is only valid for Study Director backup v10.');
   if(version>=10&&manifest.container!=='binary-v1')throw new Error('Backup v10 container metadata is invalid.');

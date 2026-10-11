@@ -16,7 +16,7 @@ registry.define('backup',1,input=>{
   const Canonical=input.canonical,ManagedRepositoryModule=input.managedRepository,BackupProviderModule=input.backupProvider,RepositoryBackgroundModule=input.repositoryBackground,BackupCaptureModule=input.backupCapture;
   const PORT_FIELDS=freeze({
     configuration:freeze(['activeSessionId','appVersion','backupVersion','limits']),
-    persistence:freeze(['activeSessionLoad','activeSessionSave','activeSessionClear','activeSessionSettled','dailyRecordBackupDates','dailyRecordBackupMonth','dailyRecordDocuments','dailyRecordImportBatches','dailyRecordRemove','dailyRecordTimestamp','notesExportPayload','notesReadFreshPayload','notesReadFreshItems','notesFlush','notesNormalizePayload','notesFailure','restoreJournalPrepare','restoreJournalRead','restoreJournalMark','restoreJournalClear','scheduleRead','personalSettle','personalExport','personalImport','personalVerify','sourceRevision','snapshotRevision','storageGeneration','canonicalMutationEpochRead','canonicalPreparationRebase','preparationUnitStamps','preparationUnitReplace','installationId','deletionRecoveryFlush','deletionRecoverySavedDays','deletionRecoveryReplaceSavedDays','deletionRecoveryAreaNotes','deletionRecoveryReplaceAreaNotes','deletionRecoveryAttachments','deletionRecoveryReplaceAttachments','deletionRecoveryClearAttachment','reconciliationBaseRead','reconciliationBaseReadNotes','reconciliationBaseWrite']),
+    persistence:freeze(['activeSessionLoad','activeSessionSave','activeSessionClear','activeSessionSettled','dailyRecordBackupDates','dailyRecordBackupMonth','dailyRecordDocuments','dailyRecordImportBatches','dailyRecordRemove','dailyRecordTimestamp','notesExportPayload','notesReadFreshPayload','notesReadFreshItems','notesFlush','notesNormalizePayload','notesAlignByTitle','notesFailure','restoreJournalPrepare','restoreJournalRead','restoreJournalMark','restoreJournalClear','scheduleRead','personalSettle','personalExport','personalImport','personalVerify','sourceRevision','snapshotRevision','storageGeneration','canonicalMutationEpochRead','canonicalPreparationRebase','preparationUnitStamps','preparationUnitReplace','installationId','deletionRecoveryFlush','deletionRecoverySavedDays','deletionRecoveryReplaceSavedDays','deletionRecoveryAreaNotes','deletionRecoveryReplaceAreaNotes','deletionRecoveryAttachments','deletionRecoveryReplaceAttachments','deletionRecoveryClearAttachment','reconciliationBaseRead','reconciliationBaseReadNotes','reconciliationBaseWrite']),
     codecs:freeze(['activeSession','backup']),
     reconciliation:freeze(['createPlan','resolvePlan','summarizePlan']),
     noteReconciliation:freeze(['resolve']),
@@ -68,7 +68,7 @@ registry.define('backup',1,input=>{
     const {
       activeSessionLoad,activeSessionSave,activeSessionClear,activeSessionSettled,dailyRecordBackupDates,dailyRecordBackupMonth,dailyRecordDocuments,
       dailyRecordImportBatches,dailyRecordRemove,dailyRecordTimestamp,notesExportPayload,notesReadFreshPayload,notesReadFreshItems,notesFlush,
-      notesNormalizePayload,notesFailure,restoreJournalPrepare,restoreJournalRead,
+      notesNormalizePayload,notesAlignByTitle,notesFailure,restoreJournalPrepare,restoreJournalRead,
       restoreJournalMark,restoreJournalClear,scheduleRead,personalSettle,personalExport,personalImport,personalVerify,canonicalMutationEpochRead,canonicalPreparationRebase,preparationUnitStamps,preparationUnitReplace,installationId,deletionRecoveryFlush,deletionRecoverySavedDays,deletionRecoveryReplaceSavedDays,deletionRecoveryAreaNotes,deletionRecoveryReplaceAreaNotes,deletionRecoveryAttachments,deletionRecoveryReplaceAttachments,deletionRecoveryClearAttachment,reconciliationBaseRead,reconciliationBaseReadNotes,reconciliationBaseWrite
     }=ports.persistence;
     const {activeSession:ActiveSessionCodec,backup:BackupCodec}=ports.codecs;
@@ -88,7 +88,7 @@ registry.define('backup',1,input=>{
     const AppData=freeze({
       activeSession:freeze({load:activeSessionLoad,save:activeSessionSave,clear:activeSessionClear,settled:activeSessionSettled}),
       dailyRecords:freeze({backupDates:dailyRecordBackupDates,backupMonth:dailyRecordBackupMonth,documents:dailyRecordDocuments,importBatches:dailyRecordImportBatches,remove:dailyRecordRemove,timestamp:dailyRecordTimestamp}),
-      notes:freeze({exportPayload:notesExportPayload,readFreshPayload:notesReadFreshPayload,readFreshItems:notesReadFreshItems,flush:notesFlush,normalizePayload:notesNormalizePayload,failure:notesFailure}),
+      notes:freeze({exportPayload:notesExportPayload,readFreshPayload:notesReadFreshPayload,readFreshItems:notesReadFreshItems,flush:notesFlush,normalizePayload:notesNormalizePayload,alignByTitle:notesAlignByTitle,failure:notesFailure}),
       restoreJournal:freeze({prepare:restoreJournalPrepare,read:restoreJournalRead,mark:restoreJournalMark,clear:restoreJournalClear}),
       provenance:freeze({installationId}),mutationEpoch:freeze({read:canonicalMutationEpochRead,rebasePreparation:canonicalPreparationRebase}),preparationUnits:freeze({list:preparationUnitStamps,replace:preparationUnitReplace}),deletionRecovery:freeze({flush:deletionRecoveryFlush,savedDays:deletionRecoverySavedDays,replaceSavedDays:deletionRecoveryReplaceSavedDays,areaNotes:deletionRecoveryAreaNotes,replaceAreaNotes:deletionRecoveryReplaceAreaNotes,attachments:deletionRecoveryAttachments,replaceAttachments:deletionRecoveryReplaceAttachments,clearAttachment:deletionRecoveryClearAttachment}),reconciliationBase:freeze({read:reconciliationBaseRead,readNotes:reconciliationBaseReadNotes,write:reconciliationBaseWrite})
     });
@@ -547,7 +547,7 @@ async function buildRestoreReconciliationPlan(parsed,preview,{missingOnly=false,
   const localNotes=AppData.notes.normalizePayload(await AppData.notes.readFreshPayload()),allLocalNoteDeletions=await AppData.deletionRecovery.areaNotes();
   // Missing-only recovery adds back what this device lacks (Saved Days,
   // attachments) and never offers the backup's notes or session.
-  const backupNotes=missingOnly?Object.create(null):AppData.notes.normalizePayload(parsed&&parsed.data&&parsed.data.areaNotes||{}),incomingNotes=note?Object.create(null):backupNotes;
+  const backupNotes=missingOnly?Object.create(null):AppData.notes.alignByTitle(parsed&&parsed.data&&parsed.data.areaNotes||{},allLocalNoteDeletions.map(entry=>entry.key)),incomingNotes=note?Object.create(null):backupNotes;
   if(note&&Object.prototype.hasOwnProperty.call(backupNotes,note))incomingNotes[note]=backupNotes[note];
   const loadedSession=await readCanonicalActiveSession(),localSession=loadedSession&&loadedSession.value||null;
   const currentCheckpoint=Number(parsed&&parsed.formatVersion)>=15&&!!parsed.protectedCheckpointManifest;
@@ -1575,6 +1575,8 @@ const repository=freeze({
   activeProtected:ManagedRepository.activeProtected,
   selectRetention:ManagedRepository.selectRetention,
   projectHistory:ManagedRepository.projectHistory,
+  noteObject:ManagedRepository.noteObject,
+  readNote:ManagedRepository.readNote,
   markCompleted:controller.markCompleted
 });
 return freeze({controller,repository});

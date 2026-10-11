@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {createHarness} from '../../helpers/repository-harness.mjs';
+import {storedNote} from '../../helpers/note-ids.mjs';
 
 const obsoleteKey='reflectionDraftMigration.v1';
 const retainedKey='planDraft';
@@ -59,8 +60,8 @@ async function maintenanceFailure(name,prepare,verify){
  const failed=await h.app.maintenance.run({force:true});assert.equal(failed.status,'failed',name);const marker=h.stores.meta.get('dataMaintenance');assert.ok(marker===previous||marker?.value?.status==='pending',name+' must not commit completion');
  await verify(h);await recover();const retry=await h.app.maintenance.run();assert.equal(retry.status,'completed',name+' must remain eligible for immediate retry');assert.equal(retry.version,6);assert.equal((await h.app.maintenance.run()).reason,'recent');failureCases.push(name);
 }
-await maintenanceFailure('canonical note write failure',async(h,c)=>{h.app.notes.update('audit','Audit','pending note','');c.failNextAreaWrite=true;return async()=>{};},async h=>{assert.equal(h.app.notes.failure().failed,true);assert.equal(h.stores.area.has('audit'),false);assert.equal(h.app.notes.exportPayload().audit.text,'pending note');});
-await maintenanceFailure('canonical note read unavailable',async(h,c)=>{h.app.notes.update('read-pending','Read Pending','retained through read failure','');c.onAreaRead=async()=>{throw new Error('note read unavailable');};return async()=>{c.onAreaRead=null;};},async h=>assert.equal(h.app.notes.exportPayload()['read-pending'].text,'retained through read failure'));
+await maintenanceFailure('canonical note write failure',async(h,c)=>{h.app.notes.update('audit','Audit','pending note','');c.failNextAreaWrite=true;return async()=>{};},async h=>{assert.equal(h.app.notes.failure().failed,true);assert.equal(storedNote(h.stores.area,'audit'),undefined);assert.equal(h.app.notes.exportPayload()[h.app.notes.get('audit').id].text,'pending note');});
+await maintenanceFailure('canonical note read unavailable',async(h,c)=>{h.app.notes.update('read-pending','Read Pending','retained through read failure','');c.onAreaRead=async()=>{throw new Error('note read unavailable');};return async()=>{c.onAreaRead=null;};},async h=>assert.equal(h.app.notes.exportPayload()[h.app.notes.get('read-pending').id].text,'retained through read failure'));
 await maintenanceFailure('session read unavailable',async(h,c)=>{c.onSessionRead=async()=>{throw new Error('session read unavailable');};return async()=>{c.onSessionRead=null;};},async()=>{});
 const sessionFixture={id:'active',version:1,revision:1,date:'2026-09-17',status:'active',scheduleText:'08:00 30 Study',snapshot:{date:'2026-09-17'},updatedAt:'2026-09-17T11:00:00.000Z'};
 await maintenanceFailure('session reconciliation write failure',async(h,c)=>{c.failSessionWrite=true;assert.equal((await h.app.activeSession.save(sessionFixture)).ok,true);return async()=>{c.failSessionWrite=false;};},async h=>{assert.ok(h.sharedLocal.has('recovery'));assert.equal(h.stores.session.has('active'),false);});
@@ -79,7 +80,7 @@ await maintenanceFailure('completion metadata commit failure',async(_h,c)=>{c.fa
 }
 {
  const c={},h=createHarness(new Map(),null,c);await h.app.compatibility.migrateDailyRecords();const completed=await h.app.maintenance.run();h.app.notes.update('restart-pending','Restart Pending','retained after failed forced pass','');c.failNextAreaWrite=true;assert.equal((await h.app.maintenance.run({force:true})).status,'failed');const pending=h.stores.meta.get('dataMaintenance').value;assert.equal(pending.status,'pending');assert.equal(pending.completedAt,completed.completedAt);
- const restarted=createHarness(h.sharedLocal,h.stores,{});assert.equal((await restarted.app.maintenance.run()).status,'completed','durable pending work bypasses a recent prior success after restart');assert.equal(h.stores.area.get('restart-pending').text,'retained after failed forced pass');failureCases.push('failure after recent success remains pending across restart');
+ const restarted=createHarness(h.sharedLocal,h.stores,{});assert.equal((await restarted.app.maintenance.run()).status,'completed','durable pending work bypasses a recent prior success after restart');assert.equal(storedNote(h.stores.area,'restart-pending').text,'retained after failed forced pass');failureCases.push('failure after recent success remains pending across restart');
 }
 console.log(JSON.stringify({status:'PASS',suite:'data-maintenance-phase-outcomes',cases:failureCases.length,failureCases,immediateRetry:true,recoveryPreserved:true},null,2));
 
@@ -125,7 +126,7 @@ console.log(JSON.stringify({status:'PASS',suite:'canonical-maintenance-progress'
 {
  const controls={},h=createHarness(new Map(),null,controls);await h.app.compatibility.migrateDailyRecords();await h.app.notes.load();let changed=false;
  controls.onSessionRead=async()=>{if(!changed){changed=true;h.app.notes.update('during-session','During Session','must be flushed before maintenance completes','');}};
- assert.equal((await h.app.maintenance.run()).status,'completed');assert.equal(h.stores.area.get('during-session').text,'must be flushed before maintenance completes');assert.equal(h.app.notes.failure().failed,false);
+ assert.equal((await h.app.maintenance.run()).status,'completed');assert.equal(storedNote(h.stores.area,'during-session').text,'must be flushed before maintenance completes');assert.equal(h.app.notes.failure().failed,false);
  console.log(JSON.stringify({status:'PASS',suite:'canonical-maintenance-source-fence',latePhaseChangeRevalidated:true}));
 }
 
@@ -152,7 +153,7 @@ for(const boundary of ['stable','canonical-read','autosave'])for(const change of
  controls.onAreaRead=async()=>{if(boundary!=='stable')applyChange();};
  const job=automaticMaintenance(h,clock,controls),first=await job.run('recovery');controls.onAreaRead=null;await mutation;
  const expected=boundary==='stable'?{first:'earlier note'}:change==='delete'?{}:change==='add'?{first:'earlier note',second:'new note'}:{first:'latest edit'};
- const texts=payload=>Object.fromEntries(Object.entries(payload).map(([key,value])=>[key,value.text]));
+ const texts=payload=>Object.fromEntries(Object.values(payload).map(value=>[value.label.toLowerCase(),value.text]));
  assert.deepEqual(texts(h.app.notes.exportPayload()),expected,`${boundary} ${change}: recovery cannot regress the live model`);
  if(first.status==='completed')assert.deepEqual(texts(Object.fromEntries(stores.area)),expected,'completion acknowledges exactly the accepted work');
  else{
@@ -164,7 +165,7 @@ for(const boundary of ['stable','canonical-read','autosave'])for(const change of
  }
  await h.app.notes.flush({strict:true});assert.deepEqual(texts(Object.fromEntries(stores.area)),expected);
  const restarted=createHarness(local,stores,{clock});await restarted.app.notes.load();assert.deepEqual(texts(restarted.app.notes.exportPayload()),expected,'restart sees the same acknowledged model');
- if(change==='edit'&&changed){const current=h.app.notes.get('first');h.app.notes.update('first','First',current.text+' + subsequent edit',current.updatedAt);await h.app.notes.flush({strict:true});assert.equal(stores.area.get('first').text,'latest edit + subsequent edit');}
+ if(change==='edit'&&changed){const current=h.app.notes.get('first');h.app.notes.update('first','First',current.text+' + subsequent edit',current.updatedAt);await h.app.notes.flush({strict:true});assert.equal(storedNote(stores.area,'first').text,'latest edit + subsequent edit');}
  job.dispose();noteRecoveryCases.push({boundary,change});
 }
 console.log(JSON.stringify({status:'PASS',suite:'note-recovery-conservation',productionAppData:true,matrices:noteRecoveryCases},null,2));

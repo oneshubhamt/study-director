@@ -26,7 +26,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   // Retention, classification and cleanup are the production repository rules.
   const unused=()=>{throw new Error('Unexpected repository I/O in the Device Folder test.');};
   const rules=registry.require('managed-repository',1).createEngine(freeze({
-    codec:freeze({countShape:value=>value,utf8Bytes:value=>new TextEncoder().encode(String(value)),compressionSupported:()=>false,assetIds:()=>[]}),
+    codec:freeze({countShape:value=>value,utf8Bytes:value=>new TextEncoder().encode(String(value)),compressionSupported:()=>false,assetIds:()=>[],legacyAreaNoteKey:value=>String(value||'')}),
     ports:freeze({
       configuration:freeze({backupVersion:1,limits:freeze({}),logicalCaptureFormat:'qa.capture',logicalCaptureVersion:1}),
       persistence:freeze({reconciliationBaseRead:unused,reconciliationBaseWrite:unused}),assets:freeze({get:unused,verifyAliases:unused}),
@@ -42,10 +42,10 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
     const blob=await seal(new Blob([`library at ${sourceRevision}`])),objectId='obj_'+(await sha256(new Blob([sourceRevision]))).slice(0,32),storedChecksum=await sha256(blob),reused=options.availableObjectIds instanceof Set&&options.availableObjectIds.has(objectId);
     const entry=freeze({objectId,blob,storedBytes:blob.size,storedChecksum,reused,checkProtection:async()=>{}}),prepared=freeze({exportedAt,objects:freeze([entry])});
     if(!reused)await executor.writeObject(entry,prepared);
-    const manifest=freeze({format:'study-director.backup-repository-checkpoint',version:5,checkpoint:freeze({checkpointId,createdAt:exportedAt,originInstallationId:'qa'}),exportedAt,sourceRevision,logicalFingerprint:storedChecksum,counts:freeze({dailyRecord:1,areaNote:1}),encrypted:!!protection,
+    const manifest=freeze({format:'study-director.backup-repository-checkpoint',version:6,checkpoint:freeze({checkpointId,createdAt:exportedAt,originInstallationId:'qa'}),exportedAt,sourceRevision,logicalFingerprint:storedChecksum,counts:freeze({dailyRecord:1,areaNote:1}),encrypted:!!protection,
       retention:freeze({role,purpose:role==='before-restore'?options.retention.purpose:'',protectedUntil:role==='before-restore'?new Date(clock.now()+7*DAY).toISOString():'',calendar:calendar(exportedAt)}),objects:freeze([freeze({objectId,storedBytes:blob.size,storedChecksum})])});
     await executor.writeManifest(freeze({blob:await seal(new Blob([JSON.stringify(manifest)])),manifest,exportedAt,checkSource:async()=>{},checkProtection:async()=>{}}));
-    const marker={format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt,sourceRevision,manifestVersion:5},markerBlob=new Blob([JSON.stringify(marker)]);
+    const marker={format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt,sourceRevision,manifestVersion:6},markerBlob=new Blob([JSON.stringify(marker)]);
     await executor.commit(freeze({...marker,blob:markerBlob,size:markerBlob.size,digest:await sha256(markerBlob),checkSource:async()=>{},checkProtection:async()=>{}}));
     published.push(freeze({checkpointId,sourceRevision,role,at:clock.now()}));
     const committedResult=await executor.onCommitted(freeze({sourceRevision,exportedAt,publication:freeze({name:checkpointId+'.sdcheckpoint'}),manifest}));
@@ -54,7 +54,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   }
   const inspectManifest=async(file,options={})=>{const opened=protection?(await protection.unprotect(file,{interactive:options.interactive!==false})).blob:file,value=JSON.parse(await opened.text());if(value.format!=='study-director.backup-repository-checkpoint')throw new Error('not a manifest');return value;};
   const notSupported=()=>{throw new Error('Restore is covered by the browser and repository-restore suites.');};
-  const pipeline=freeze({createPublication:notSupported,publish,publishInline:publish,inspectManifest,inspect:notSupported,bringIn:notSupported,restoreVersion:notSupported,verifyCheckpoint:notSupported,verifyObject:notSupported,scrub:notSupported,cleanup:rules.cleanup,inspectCommit:rules.inspectCommit,
+  const pipeline=freeze({noteObject:notSupported,readNote:notSupported,createPublication:notSupported,publish,publishInline:publish,inspectManifest,inspect:notSupported,bringIn:notSupported,restoreVersion:notSupported,verifyCheckpoint:notSupported,verifyObject:notSupported,scrub:notSupported,cleanup:rules.cleanup,inspectCommit:rules.inspectCommit,
     retention:rules.retention,validatePolicy:rules.validatePolicy,classifyState:rules.classifyState,activeProtected:rules.activeProtected,selectRetention:rules.selectRetention,projectHistory:rules.projectHistory,
     markCompleted:({copy})=>{if(copy)verified.set(copy.source,freeze({at:new clock.Date(clock.now()).toISOString(),sourceRevision:copy.sourceRevision}));}});
   const coordinator=registry.require('notice-coordinator',1).createCoordinator(freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}));

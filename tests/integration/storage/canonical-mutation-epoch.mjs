@@ -61,7 +61,8 @@ await assertAdvances('Daily Record save',()=>app.dailyRecords.save({version:1,da
 await app.notes.load();
 const noteChange=app.notes.update('general','General','epoch note','');
 assert.equal(noteChange.status,'changed');
-await assertAdvances('Ongoing Note canonical flush',()=>app.notes.flush({strict:true}),'areaNote:general');
+const generalUnit=`areaNote:${app.notes.get('general').id}`;
+await assertAdvances('Ongoing Note canonical flush',()=>app.notes.flush({strict:true}),generalUnit);
 
 await assertAdvances('Review-state Active Session save',()=>app.activeSession.save({id:'active',revision:1,date:'2026-09-22',status:'active',scheduleText:'',snapshot:{elapsedMs:1,review:{reflection:'draft',studyQuality:null}},updatedAt:'2026-09-22T04:45:02.000Z'}),'activeSession');
 assert.equal(commits.at(-1).entityType,'activeSession','Review persistence must invalidate the Active Session backup unit, not a separate draft family.');
@@ -80,7 +81,7 @@ await assertAdvances('Portable preference save',()=>app.personalPreferences.writ
 await assertAdvances('Backup-capture Plan draft save',()=>app.planData.writeDraft('Plan epoch draft captured',{backupCapture:true}),'personalData');
 assert.equal(commits.at(-1).entityType,'planData');assert.equal(commits.at(-1).backupCapture,true);
 const backupNoteBase=app.notes.get('general');const backupNoteChange=app.notes.update('general','General','epoch note captured',backupNoteBase.updatedAt);assert.equal(backupNoteChange.status,'changed');
-await assertAdvances('Backup-capture Ongoing Note flush',()=>app.notes.flush({strict:true,backupCapture:true}),'areaNote:general');
+await assertAdvances('Backup-capture Ongoing Note flush',()=>app.notes.flush({strict:true,backupCapture:true}),generalUnit);
 assert.equal(commits.at(-1).entityType,'areaNote');assert.equal(commits.at(-1).backupCapture,true);
 await assertAdvances('Backup-capture Daily Record save',()=>app.dailyRecords.save({version:1,date:'2026-09-22',reflection:'captured diary',updatedAt:'2026-09-22T04:45:06.000Z',savedAt:'2026-09-22T04:45:01.000Z'},{backupCapture:true}),'dailyRecordPack:2026-09');
 assert.equal(commits.at(-1).entityType,'dailyRecord');assert.equal(commits.at(-1).backupCapture,true);

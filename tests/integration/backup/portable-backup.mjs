@@ -65,7 +65,7 @@ const descriptor=freeze({assetId,mimeType:'image/png',size:image.size,checksum:a
 const manifest=codec.createManifest(plan,{compression:'none',algorithm});
 assert.equal(manifest.checkpoint,checkpoint,'Portable materialisation must reuse the checkpoint identity captured before serialisation.');
 assert.equal('studentName' in manifest,false,'Current backup manifest must not duplicate protected studentName outside the canonical personal-data section.');
-assert.equal(Object.hasOwn(manifest,'schemaVersion'),false,'Current v20 checkpoint manifests must not write legacy sync schemaVersion baggage.');
+assert.equal(Object.hasOwn(manifest,'schemaVersion'),false,'Current checkpoint manifests must not write legacy sync schemaVersion baggage.');
 const checkpointChunk=await codec.encodeChunk(0,'checkpointManifest',[codec.createProtectedManifest(plan,manifest.checkpoint)],algorithm);
 const personalChunk=await codec.encodeChunk(1,'personalData',[personalData],algorithm);
 const chunk=await codec.encodeChunk(2,'areaNote',area,algorithm);
@@ -73,7 +73,7 @@ const complete=await codec.encodeCompletion(3,counts,[checkpointChunk.checksum,p
 const metadata=new Blob([JSON.stringify(manifest)+'\n'+checkpointChunk.line+'\n'+personalChunk.line+'\n'+chunk.line+'\n'+JSON.stringify(complete)+'\n']);
 const portable=codec.createV10Container(metadata,{compression:'none',assetBlobs:[image]});
 const parsed=await codec.inspectCurrent(portable,{filename:'portable.sdbackup'});
-assert.equal(parsed.formatVersion,20);
+assert.equal(parsed.formatVersion,21);
 assert.equal(parsed.captureAuthority,'canonical-complete','Current standalone backups must persist canonical-complete authority inside the protected completion proof.');
 assert.equal(parsed.protectedCheckpointManifest.checkpointId,parsed.manifest.checkpoint.checkpointId);
 assert.equal(parsed.manifest.deviceId,undefined);

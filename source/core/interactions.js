@@ -65,7 +65,8 @@ registry.define('interactions',1,()=>{
           const value=String(result);
           const error=typeof options.validate==='function'?cleanText(options.validate(value,String(options.defaultOption||'')),300):'';
           if(error){nativeConfirm(error);return Promise.resolve(null);}
-          return Promise.resolve(freeze({value,option:String(options.defaultOption||'')}));
+          const checkbox=options.checkbox&&options.checkbox.label?{checked:!!nativeConfirm([cleanText(options.checkbox.label,180),'OK = yes · Cancel = no'].join('\n'))}:{};
+          return Promise.resolve(freeze({value,option:String(options.defaultOption||''),...checkbox}));
         }
         if(type==='choose'){
           const choices=Array.isArray(options.choices)?options.choices:[];
@@ -156,7 +157,7 @@ registry.define('interactions',1,()=>{
       header.append(eyebrow,title);shell.appendChild(header);
       const body=document.createElement('div');body.className='interaction-body';appendCopy(body,options);shell.appendChild(body);
       const error=document.createElement('div');error.className='interaction-error ui-status';error.id='sd-interaction-error';error.setAttribute('role','alert');error.hidden=true;
-      let inputElement=null,confirmationElement=null,selectedOption=String(options.defaultOption||''),configuredValues=null;
+      let inputElement=null,inputCheckbox=null,confirmationElement=null,selectedOption=String(options.defaultOption||''),configuredValues=null;
       if(request.type==='input'){
         const optionRows=Array.isArray(options.options)?options.options.filter(option=>option&&option.value!==undefined&&option.label):[];
         if(optionRows.length){
@@ -186,6 +187,16 @@ registry.define('interactions',1,()=>{
         field.appendChild(inputElement);body.appendChild(field);
         if(options.inputType==='password'){inputElement.spellcheck=false;inputElement.autocomplete=options.confirmPassword?'new-password':'current-password';if(options.confirmPassword){const confirm=document.createElement('label');confirm.className='interaction-field ui-body';confirm.textContent='Confirm password';confirmationElement=inputElement.cloneNode();confirmationElement.value='';confirm.appendChild(confirmationElement);body.appendChild(confirm);}}
         if(options.hint){const hint=document.createElement('div');hint.className='interaction-hint ui-helper';hint.textContent=cleanText(options.hint,500);body.appendChild(hint);}
+        // One optional tick box; when shown, the result carries `checked`.
+        if(options.checkbox&&options.checkbox.label){
+          const checks=document.createElement('div');checks.className='interaction-checks';
+          const row=document.createElement('label');row.className='interaction-checkbox-row ui-body';
+          inputCheckbox=document.createElement('input');inputCheckbox.type='checkbox';inputCheckbox.className='interaction-checkbox';inputCheckbox.checked=options.checkbox.defaultChecked===true;
+          const copy=document.createElement('span');copy.className='interaction-checkbox-copy';
+          const title=document.createElement('strong');title.textContent=cleanText(options.checkbox.label,180);copy.appendChild(title);
+          if(options.checkbox.description){const description=document.createElement('span');description.textContent=cleanText(options.checkbox.description,300);copy.appendChild(description);}
+          row.append(inputCheckbox,copy);checks.appendChild(row);body.appendChild(checks);
+        }
         if(typeof options.preview==='function'){
           const preview=document.createElement('div');preview.className='interaction-preview ui-mono';preview.textContent=cleanText(options.preview(inputElement.value,selectedOption),300);body.appendChild(preview);
           inputElement.addEventListener('input',()=>{preview.textContent=cleanText(options.preview(inputElement.value,selectedOption),300);error.hidden=true;});
@@ -273,7 +284,7 @@ registry.define('interactions',1,()=>{
           if(confirmationElement&&confirmationElement.value!==value){error.textContent='Passwords do not match.';error.hidden=false;confirmationElement.focus();return;}
           const validation=typeof options.validate==='function'?cleanText(options.validate(value,selectedOption),300):(options.required&&!value?cleanText(options.requiredMessage||'Enter a value to continue.',300):'');
           if(validation){error.textContent=validation;error.hidden=false;inputElement?.focus();return;}
-          settle(freeze({value,option:selectedOption}));
+          settle(freeze({value,option:selectedOption,...(inputCheckbox?{checked:inputCheckbox.checked}:{})}));
         });
         actions.appendChild(primary);
       }

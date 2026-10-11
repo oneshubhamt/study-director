@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {createHarness} from '../../helpers/repository-harness.mjs';
+import {noteId,legacyNoteKey} from '../../helpers/note-ids.mjs';
 import {registry,Domain,RecordCodecs,CompatibilityCodecs,freeze,boundedNumber,boundedInt,clampText,optionalText,optionalBoundedNumber,normalizeTimestamp,sameDataValue,helpers,limits,dataContract,dailyRecordCodec} from '../../helpers/current-codec-fixture.mjs';
 const codec=dailyRecordCodec;
 const currentActiveSession=freeze({normalize:value=>value&&typeof value==='object'?freeze({...value,version:9}):null,sanitizeCurrent:value=>value&&Number(value.version)===9?freeze({...value}):null,sanitizeSessionSnapshot:value=>value||null});
@@ -32,9 +33,20 @@ for(const key of ['entityType','entityId','schemaVersion','deviceId','createdAt'
 const legacyArea={version:1,key:'Optional',label:'Optional',text:'note',updatedAt,entityType:'areaNote',entityId:'Optional',schemaVersion:1,deviceId:'dev_r10',createdAt:savedAt,deleted:false,syncStatus:'pending'};
 assert.equal(codec.sanitizeCurrentAreaNote(legacyArea,'Optional'),null,'ordinary AreaNote codec must reject the historical shape');
 const area=compatibility.areaNote(legacyArea,'Optional');
-assert.deepEqual(area,{version:2,key:'optional',label:'Optional',text:'note',updatedAt});
+assert.deepEqual(area,{version:3,key:noteId('optional'),label:'Optional',text:'note',updatedAt});
 assert.ok(codec.sanitizeCurrentAreaNote(area));
-assert.equal(codec.sanitizeCurrentAreaNote({...area,syncStatus:'pending'}),null,'AreaNote.v2 must reject replication fields');
+assert.equal(codec.sanitizeCurrentAreaNote({...area,syncStatus:'pending'}),null,'AreaNote.v3 must reject replication fields');
+// A name-keyed AreaNote.v2 row takes the id worked out from its name (FNV-1a,
+// 64 bits, over the UTF-8 name), so every device and every older backup
+// converts the same note to the same id. An id passes through unchanged.
+const named={version:2,key:'gs2 > polity',label:'GS2 > Polity',text:'note',updatedAt};
+assert.equal(codec.sanitizeCurrentAreaNote(named),null,'AreaNote.v2 is no longer current');
+assert.deepEqual(compatibility.areaNote(named),{version:3,key:noteId('gs2 > polity'),label:'GS2 > Polity',text:'note',updatedAt});
+assert.equal(compatibility.areaNoteKey('a'),'n_af63dc4c8601ec8c','the id is FNV-1a 64 over the UTF-8 name');
+assert.equal(compatibility.areaNoteKey('GS2  >  Polity'),noteId('gs2 > polity'),'differently written forms of one name give one id');
+assert.equal(compatibility.areaNoteKey('~deleted 0001'),legacyNoteKey('~deleted 0001'),'an old trash key keeps the trash prefix');
+assert.equal(compatibility.areaNoteKey(area.key),area.key,'an id is already current');
+assert.equal(codec.sanitizeCurrentAreaNote({...area,key:'optional'}),null,'a current note is keyed by id, never by name');
 
 const legacyV15={...current,version:15};delete legacyV15.recordKind;
 const migratedV15=compatibility.dailyRecord(legacyV15);
@@ -60,4 +72,4 @@ for(const options of [{},{from:'2026-09-09',to:'2026-09-10'},{limit:1}]){
 assert.deepEqual(stores.daily.get(current.date),current,'reading Insights must leave canonical data untouched');
 assert.equal(codec.sanitizeDailyRecordSummary({...diarySummary,outcomeCounts:{...diarySummary.outcomeCounts,full:1}}),null,'diary summaries must reject study outcome counts');
 
-console.log(JSON.stringify({status:'PASS',suite:'canonical-schema-separation',dailyRecordVersion:16,areaNoteVersion:2,localRevisionsPreserved:true,distributedSyncFieldsRejected:true},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'canonical-schema-separation',dailyRecordVersion:16,areaNoteVersion:3,localRevisionsPreserved:true,distributedSyncFieldsRejected:true},null,2));

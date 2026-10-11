@@ -3611,6 +3611,14 @@ function applyRows(rows,options={}){
     writeLiveDraftNow();
     return true;
   }
+  // A note renamed with its Area: today's blocks take the new Area in place,
+  // keeping their times, progress and the running timer.
+  function renameAreas(rename){
+    const changed=TimerState.renameTaskAreas(rename);
+    if(!changed)return 0;
+    advanceTaskNoteScheduleRevision();invalidateScheduleDerived({identity:true,render:true});markDayContentChanged();writeLiveDraftNow();
+    return changed;
+  }
   function markRender(state){
     if(state==='dirty'){invalidateScheduleDerived({render:true});return true;}
     if(state==='clean'){ScheduleDerivedState.renderDirty=false;return true;}
@@ -3619,7 +3627,7 @@ function applyRows(rows,options={}){
   return Object.freeze({
     read,setAnchor,timeline,row,act,hasLiveState,
     captureMigration:snapshotScheduleProgressForMigration,
-    breakState,apply,reconcile,
+    breakState,apply,reconcile,renameAreas,
     flush:flushLiveDraft,
     clearSafety:clearSessionSafetyMessage,
     markRender
@@ -8039,6 +8047,7 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     settled:field=>LibraryDiaryEditor.settled(field)
   }),
   notes:Object.freeze({
+    areaUse:title=>PlanRuntime.areaUse(title),
     bindEditor:bindAreaNoteEditor,
     focusEditor:field=>{void RichTextRuntime.activate(field,{focus:true}).catch(error=>AppDiagnostics.capture('library.note-focus',error,'warn'));},
     // Recently deleted gives way at the limit, so only live notes count here.
@@ -8052,6 +8061,7 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     orderEntries:orderOngoingAreaEntries,
     purgeTrash:()=>AppData.notes.purgeExpiredTrash(),
     remove:key=>AppData.notes.remove(key),
+    renameAreaInPlans:(title,label)=>PlanRuntime.renameArea(title,label),
     // A merge appends what the moved note adds, as Combine does.
     rename:(key,label,options)=>AppData.notes.rename(key,label,options&&options.merge?{merge:(existing,moved)=>RichTextApi.appendIncomingAdditions(existing,moved).value}:{}),
     renderInherited:renderInheritedAreaNotes,
@@ -8405,6 +8415,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     notesReadFreshItems:keys=>AppData.notes.readFreshItems(keys),
     notesFlush:options=>AppData.notes.flush(options),
     notesNormalizePayload:value=>AppData.notes.normalizePayload(value),
+    notesAlignByTitle:(value,deletedIds)=>AppData.notes.alignByTitle(value,deletedIds),
     notesFailure:()=>AppData.notes.failure(),
     restoreJournalPrepare:async value=>{const backupFile=await Exports.run('file.persist',{file:value.blob});const {blob,...metadata}=value;return AppData.restoreJournal.prepare({...metadata,backupFile});},
     restoreJournalRead:async()=>{const journal=await AppData.restoreJournal.read();if(!journal)return null;const ref=journal.payload.backupFile;return ref?{...journal,payload:{...journal.payload,blob:await Exports.run('file.read',{ref})}}:journal;},
@@ -8803,7 +8814,7 @@ BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze({
   providers:Object.freeze({
     bringInRepositoryProvider:(id,options)=>BackupProviderRuntime.bringInRepositoryProvider(id,options),cancelForeground:(reason,id)=>BackupProviderRuntime.cancelForeground(reason,id),
     configureManagedRecovery:config=>BackupProviderRuntime.configureManagedRecovery(config),configurePendingBackupRetry:config=>BackupProviderRuntime.configurePendingBackupRetry(config),
-    history:(id,options)=>BackupProviderRuntime.history(id,options),list:()=>BackupProviderRuntime.list(),removeProtectedRepositoryProvider:(id,checkpointId)=>BackupProviderRuntime.removeProtectedRepositoryProvider(id,checkpointId),
+    history:(id,options)=>BackupProviderRuntime.history(id,options),list:()=>BackupProviderRuntime.list(),noteVersions:(id,noteId,options)=>BackupProviderRuntime.noteVersions(id,noteId,options),removeProtectedRepositoryProvider:(id,checkpointId)=>BackupProviderRuntime.removeProtectedRepositoryProvider(id,checkpointId),
     restoreRepositoryProviderVersion:(id,options)=>BackupProviderRuntime.restoreRepositoryProviderVersion(id,options),suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason)
   }),
   session:Object.freeze({hasBlocking:()=>hasBlockingActiveSession()}),

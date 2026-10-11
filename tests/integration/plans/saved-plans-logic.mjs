@@ -68,7 +68,7 @@ const ports=freeze({
   parser:freeze({isCanonicalScheduleText:()=>true,parseScheduleDraftText:()=>({ok:true,rows:[],warnings:[]}),scheduleTextFromRows:()=>''}),
   clock:freeze(Object.fromEntries(['clockHM','clockMinuteToStudyMinute','getMinuteOfDay','isValidHHMM','normalizeHHMM','studyMinuteToHHMM','t2m','timeLabelFromIso'].map(key=>[key,fn]))),
   view:freeze({document,on:()=>{},textEl:()=>{},updateRealTimeAwareness:()=>{},window:{}}),
-  scheduleGateway:freeze({act:fn,apply:fn,breakState:fn,captureMigration:fn,clearSafety:fn,flush:fn,hasLiveState:fn,markRender:fn,read:()=>({tasks:[],currentIndex:0,renderDirty:false}),reconcile:fn,row:()=>({}),setAnchor:fn,timeline:()=>({realtime:{scheduledIdx:0,nowEff:0}})}),
+  scheduleGateway:freeze({act:fn,apply:fn,breakState:fn,captureMigration:fn,clearSafety:fn,flush:fn,hasLiveState:fn,markRender:fn,read:()=>({tasks:[],currentIndex:0,renderDirty:false}),reconcile:fn,renameAreas:fn,row:()=>({}),setAnchor:fn,timeline:()=>({realtime:{scheduledIdx:0,nowEff:0}})}),
   ownership:freeze({canMutate:()=>canMutate,requirePrimary:()=>canMutate}),
   interactions:freeze({confirm:async()=>true,input:async()=>renameAnswer}),
   overlays:freeze({createAnchoredPopover:popup=>{popup.hidden=true;let trigger=null;return {show:target=>{trigger=target;target.popoverTargetElement=popup;popup.hidden=false;},hide:()=>{popup.hidden=true;if(trigger)trigger.popoverTargetElement=null;trigger=null;},destroy:()=>{popup.hidden=true;if(trigger)trigger.popoverTargetElement=null;trigger=null;}};}}),

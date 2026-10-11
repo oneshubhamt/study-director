@@ -2,7 +2,7 @@
 
 Status of the work on this branch (`refactor/background-coordination`, draft PR #1). Read sections 1 and 3 first; section 2 is a closed summary.
 
-**Current state (2026-10-10):** the backup and data work is finished. The notes plan in `docs/NOTES.md` is fully decided; building starts when the user says so, following its order of work. After notes: the background services (section 4).
+**Current state (2026-10-11):** the backup and data work is finished. The notes plan in `docs/NOTES.md` is decided (items 1 to 16) and step 1 of its order of work, permanent note ids with the combined earlier-versions list, is built. After notes: the background services (section 4).
 
 ---
 

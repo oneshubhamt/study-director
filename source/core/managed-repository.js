@@ -874,6 +874,25 @@ async function openRepositoryAttachment(manifest,entry,descriptor,readObject,opt
 // whole-checkpoint cross-checks need every object and are left out.
 // localAttachments (restores only) lets attachments already on this device be
 // used instead of downloaded; verifying the backup copy itself never does.
+// Where one note sits in a version: its own object, or a pack listing it,
+// with the fingerprint of its stored record, so versions can be told apart
+// without reading them. Older manifests name notes by title.
+function repositoryNoteIdOf(manifest,key){return Number(manifest.version)>=REPOSITORY_NOTE_ID_MANIFEST_VERSION?key:BackupCodec.legacyAreaNoteKey(key);}
+function repositoryNoteObject(manifest,noteId){
+  const id=String(noteId||'');if(!id)return null;
+  for(const entry of manifest.objects||[]){
+    if(entry.kind==='areaNote'&&repositoryNoteIdOf(manifest,entry.key)===id)return freeze({entry,fingerprint:entry.fingerprint});
+    if(entry.kind==='structuredPack'){const member=repositoryPackManifestMembers(entry.members).find(item=>item.kind==='areaNote'&&repositoryNoteIdOf(manifest,item.key)===id);if(member)return freeze({entry,fingerprint:member.fingerprint});}
+  }
+  return null;
+}
+// Reads one note's stored record from a version, and nothing else.
+async function readRepositoryNote(manifest,readObject,noteId,options={}){
+  const found=repositoryNoteObject(manifest,noteId);if(!found)return null;
+  const rows=await readRepositoryStructuredObject(manifest,found.entry,repositoryReadPort(readObject),options);
+  const row=rows.find(item=>item.kind==='areaNote'&&repositoryNoteIdOf(manifest,item.key)===String(noteId));
+  return row?row.payload:null;
+}
 async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectValue,{interactive=true,signal=null,note='',localAttachments=false}={}){
   const manifest=validateRepositoryManifest(manifestValue),readObject=repositoryReadPort(readObjectValue),noteKey=String(note||'');
   throwIfImportAborted(signal);
@@ -1055,6 +1074,7 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
 
     return freeze({
       format:'study-director.managed-repository',contractVersion:1,noteIdManifestVersion:REPOSITORY_NOTE_ID_MANIFEST_VERSION,
+      noteObject:repositoryNoteObject,readNote:readRepositoryNote,
       createPublication:createRepositoryPublication,publish:publishRepositoryCheckpoint,inspectManifest:inspectRepositoryManifest,inspect:inspectRepositoryCheckpoint,verifyCheckpoint:verifyRepositoryCheckpoint,verifyObject:verifyRepositoryObject,scrub:scrubRepositoryIntegrity,cleanup:cleanupRepositoryRetention,inspectCommit:inspectRepositoryCommitMarker,
       retention:REPOSITORY_RETENTION_POLICY,validatePolicy:validateRepositoryRetentionPolicy,classifyState:classifyRepositoryState,activeProtected:activeProtectedRepositoryRow,selectRetention:selectRepositoryRetention,projectHistory:projectManagedRepositoryHistory,invalidatePreparation:invalidateRepositoryPreparation
     });

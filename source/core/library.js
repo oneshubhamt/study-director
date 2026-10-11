@@ -17,7 +17,7 @@ registry.define('library',1,()=>{
     environment:freeze(['cancelAnimationFrame','createOption','createSearchWorker','requestAnimationFrame']),
     exporter:freeze(['exportKeys','cancel']),
     diary:freeze(['bindEditor','captureEditor','clearEditor','deleteEntry','draft','flushEditor','scheduleEditor','settled']),
-    notes:freeze(['bindEditor','canCreate','catalogue','clearEditor','commitEditor','failure','focusEditor','get','normalizeArea','orderEntries','purgeTrash','remove','rename','renderInherited','restore','searchDocuments','size','trash','trashSnapshot','versions']),
+    notes:freeze(['areaUse','bindEditor','canCreate','catalogue','clearEditor','commitEditor','failure','focusEditor','get','normalizeArea','orderEntries','purgeTrash','remove','rename','renameAreaInPlans','renderInherited','restore','searchDocuments','size','trash','trashSnapshot','versions']),
     attachments:freeze(['batch','count','invalidate','reconcile']),
     clearLibrary:freeze(['preflight','execute']),
     ownership:freeze(['canMutate']),
@@ -53,7 +53,7 @@ registry.define('library',1,()=>{
     const {exportKeys,cancel:cancelExport}=ports.exporter;
     const {bindEditor:bindDiaryEditor,captureEditor:captureDiaryEditor,clearEditor:clearDiaryEditor,deleteEntry:deleteDiaryEntryRecord,flushEditor:flushDiaryEditor,scheduleEditor:scheduleDiaryEditor,draft:createDiaryDraft,settled:settleDiaryEditor}=ports.diary;
     const {
-      bindEditor,canCreate:canCreateOngoingNote,catalogue:ongoingNoteCatalogue,clearEditor,commitEditor,failure:ongoingNoteFailure,focusEditor,
+      areaUse:planAreaUse,renameAreaInPlans,bindEditor,canCreate:canCreateOngoingNote,catalogue:ongoingNoteCatalogue,clearEditor,commitEditor,failure:ongoingNoteFailure,focusEditor,
       get:getAreaNote,normalizeArea:normalizeOngoingNoteArea,orderEntries:orderOngoingNoteEntries,
       purgeTrash:purgeExpiredOngoingNotes,remove:removeOngoingNote,rename:renameNote,renderInherited,restore:restoreNote,searchDocuments:ongoingNoteSearchDocuments,size:ongoingNotesSize,
       trash:trashNote,trashSnapshot:ongoingNoteTrash,versions:openNoteVersions
@@ -368,7 +368,7 @@ registry.define('library',1,()=>{
     // texts side by side first, so it also works for a note emptied by mistake.
     async function showNoteVersions(entry){
       const restored=value=>{const at=new Date(value.exportedAt);setOngoingNotesStatus(`Restored “${entry.label}” from the backup of ${Number.isFinite(at.getTime())?at.toLocaleString():'an earlier date'}.`);};
-      const result=await openNoteVersions(freeze({id:String(entry.id||''),label:entry.label,onRestored:restored}));
+      const result=await openNoteVersions(freeze({id:String(entry.id||''),label:entry.label,text:String(getAreaNote(entry.key)?.text||''),onRestored:restored}));
       if(result?.reason==='no-source')setOngoingNotesStatus('Earlier versions come from your backups. Connect a Device Folder or Google Drive in Data & Backup first.');
       else if(result?.reason==='busy')setOngoingNotesStatus('Another backup task is running. Try again when it finishes.');
       return result?.opened===true;
@@ -840,24 +840,33 @@ registry.define('library',1,()=>{
       if(!canMutate())return false;
       const entry=selectedStoredNote();
       if(!entry){setOngoingNotesStatus('Select a saved note to move it.');return false;}
-      const nested=ongoingNoteEntries().some(candidate=>candidate.key.startsWith(`${entry.key} > `));
+      const nested=ongoingNoteEntries().some(candidate=>candidate.key.startsWith(`${entry.key} > `)),use=planAreaUse(entry.key),where=planAreaPlaces(use);
       const result=await requestInput({
         title:'Move note',
         message:'Type the full name, using > to place it inside another Area, for example “GS2 > Polity”.',
         inputLabel:'Full name',defaultValue:entry.label,maxLength:160,required:true,requiredMessage:'Enter a name.',
-        hint:[nested?'Notes inside it move with it.':'',entry.current?`Today’s plan still uses “${entry.label.replace(/\s*>\s*/g,' › ')}”; its blocks will start a new note under that name.`:''].filter(Boolean).join(' ')||'Plan tasks and saved days are unchanged.',
+        hint:[nested?'Notes inside it move with it.':'','Finished days keep the name they were recorded with.'].filter(Boolean).join(' '),
+        checkbox:where?{label:`Also rename it in ${where}`,description:'Unticked, those blocks keep the old name and start a new note under it.',defaultChecked:true}:null,
         preview:value=>String(value||'').trim().replace(/\s*>\s*/g,' › ')||'…',
         validate:value=>normalizeOngoingNoteArea(value)?'':'Enter a valid name. Use > only to separate nested Areas.',
         confirmLabel:'Move',cancelLabel:'Cancel'
       });
       if(!result||!canMutate())return false;
-      return applyNoteRename(entry,result.value);
+      return applyNoteRename(entry,result.value,{inPlans:!where||result.checked===true});
+    }
+    // Where a note's Area is used: "today’s plan", "2 saved plans", or both.
+    function planAreaPlaces(use){
+      const parts=[use&&use.today?'today’s plan':'',use&&use.savedPlans?`${use.savedPlans===1?'a saved plan':`${use.savedPlans} saved plans`}`:''].filter(Boolean);
+      return parts.join(' and ');
     }
     // Renames or moves a note with every note inside it. A name that already
     // holds a note is merged only after the person agrees.
-    async function applyNoteRename(entry,value){
+    // Renames or moves the note; with inPlans (the default, and the rename
+    // dialog's tick box) the Area in today's plan and saved plans follows it.
+    async function applyNoteRename(entry,value,{inPlans=true}={}){
       const identity=normalizeOngoingNoteArea(value);
       if(!identity||identity.label===entry.label||!canMutate())return false;
+      const where=planAreaPlaces(planAreaUse(entry.key));
       const notice=notifications.begin({id:'ongoing-note-rename',surfaceId:'ongoing-notes-status',title:'Rename note',message:'Renaming the note…'});
       try{
         let outcome=await renameNote(entry.key,identity.label,{merge:false});
@@ -871,9 +880,12 @@ registry.define('library',1,()=>{
           notice.finish('failed',outcome.status==='inside-itself'?'A note cannot move inside itself.':outcome.status==='content-limit'?`Merging would make “${outcome.label}” longer than one note can be. Nothing was changed.`:'The note could not be renamed. Nothing was changed.');
           return false;
         }
+        let plans='';
+        if(where&&inPlans){await renameAreaInPlans(entry.key,identity.label);plans=` ${where.charAt(0).toUpperCase()+where.slice(1)} now ${where.includes(' and ')||/^\d/.test(where)?'use':'uses'} the new name.`;}
+        else if(where)plans=` ${where.charAt(0).toUpperCase()+where.slice(1)} still ${where.includes(' and ')||/^\d/.test(where)?'use':'uses'} the old name.`;
         selectedOngoingNoteKey=outcome.key;ongoingNoteTree(ongoingNoteEntries());expandOngoingNoteAncestors(outcome.key);renderOngoingNotes();
         const moved=outcome.moved.length-1;
-        notice.finish('succeeded',`${outcome.merged?'Merged into':'Renamed to'} “${identity.label}”${moved>0?`, with ${moved} note${moved===1?'':'s'} inside it`:''}.${entry.current?' Today’s plan still uses the old name.':''}`);
+        notice.finish('succeeded',`${outcome.merged?'Merged into':'Renamed to'} “${identity.label}”${moved>0?`, with ${moved} note${moved===1?'':'s'} inside it`:''}.${plans}`);
         return true;
       }catch(error){notice.finish('failed',error&&error.message||'The note could not be renamed. Keep this tab open and retry.');return false;}
     }

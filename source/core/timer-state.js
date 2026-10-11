@@ -142,6 +142,16 @@ registry.define('timer-state',1,()=>{
       setCurrentIndex(0);
       return tasksView;
     }
+    // Changes only the Area of today's blocks, when a note is renamed together
+    // with its Area: ids, order, the current block and progress stay as they
+    // are. rename(row) returns the new Area, or undefined to leave the row.
+    function renameTaskAreas(rename){
+      const relabel=rows=>rows.map(row=>{const area=row&&typeof row==='object'?rename(row):undefined;return area===undefined?row:{...row,area:String(area)};});
+      const next=relabel(tasks),changed=next.filter((task,index)=>task!==tasks[index]).length;
+      if(!changed)return 0;
+      tasks=normalizeTasks(next);originalSchedule=cloneFrozen(relabel(originalSchedule));
+      return changed;
+    }
     function clearSession(){
       tasks=freeze([]);
       session=freeze({studyDate:null,currentTaskId:null,contentRevision:0,savedRevision:0});
@@ -278,6 +288,7 @@ registry.define('timer-state',1,()=>{
       savedRevision:{get:()=>session.savedRevision,set:value=>{replaceSession({savedRevision:Math.max(0,Math.round(Number(value)||0))});},enumerable:true},
       emptyRuntime:{value:emptyRuntime,enumerable:true},
       loadSchedule:{value:loadSchedule,enumerable:true},
+      renameTaskAreas:{value:renameTaskAreas,enumerable:true},
       clearSession:{value:clearSession,enumerable:true},
       ensureTaskIds:{value:()=>true,enumerable:true},
       setMode:{value:setMode,enumerable:true},

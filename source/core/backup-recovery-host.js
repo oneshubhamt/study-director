@@ -67,7 +67,7 @@ registry.define('backup-recovery-host',1,()=>{
     functions(input.lifecycle,['activeSessionIssue','activeSessionLoad','activeSessionSettled','attachmentBusy','canonicalPlanDraft','deletionRecoveryFlush','flushNotes','flushPlanDraft','hasTasks','noteFailure','planDraft','planInputValue','quiesce','savePlanDraft','settleAttachmentWriters','settlePlan','writeLiveDraft'],'Backup recovery host lifecycle port');
     functions(input.managedRecovery,['createCoordinator'],'Backup recovery host managed-recovery port');
     functions(input.mutation,['run'],'Backup recovery host mutation port');
-    functions(input.providers,['bringInRepositoryProvider','cancelForeground','configureManagedRecovery','configurePendingBackupRetry','history','list','removeProtectedRepositoryProvider','restoreRepositoryProviderVersion','suspendBackground'],'Backup recovery host provider port');
+    functions(input.providers,['bringInRepositoryProvider','cancelForeground','configureManagedRecovery','configurePendingBackupRetry','history','list','noteVersions','removeProtectedRepositoryProvider','restoreRepositoryProviderVersion','suspendBackground'],'Backup recovery host provider port');
     functions(input.session,['hasBlocking'],'Backup recovery host session port');
     if(typeof input.sourceRevision!=='function')throw new TypeError('Backup recovery host sourceRevision port is invalid.');
     functions(input.storage,['read','remove','write'],'Backup recovery host storage port');
@@ -199,10 +199,34 @@ registry.define('backup-recovery-host',1,()=>{
       const {kicker,title,copy}=elements();
       if(kicker)kicker.textContent=noteTarget?'Earlier versions':'Versions';
       if(title)title.textContent=noteTarget?noteTarget.label:`${source.label} backups`;
-      if(copy)copy.textContent=noteTarget?`Choose a ${source.label} version of this note. You review the differences before anything changes.`:`Choose a verified ${source.label} version to restore.`;
+      if(copy)copy.textContent=noteTarget?'Choose an earlier version of this note. You review the differences before anything changes.':`Choose a verified ${source.label} version to restore.`;
+    }
+    // A note's earlier versions read in plain time: "Today, 14:05",
+    // "Yesterday", "3 days ago", "2 weeks ago", "4 months ago". The time is
+    // added when two versions share a date.
+    const DAY_MS=86400000,dayKey=date=>`${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+    function plainTimeLabel(value,withTime){
+      const date=new Date(value),now=new Date();if(!Number.isFinite(date.getTime()))return '';
+      const time=date.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'}),startOf=d=>new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime(),days=Math.round((startOf(now)-startOf(date))/DAY_MS);
+      const label=days<=0?'Today':days===1?'Yesterday':days<7?`${days} days ago`:days<35?`${Math.round(days/7)} week${Math.round(days/7)===1?'':'s'} ago`:`${Math.max(1,Math.round(days/30))} month${Math.max(1,Math.round(days/30))===1?'':'s'} ago`;
+      return days<=0||withTime?`${label}, ${time}`:label;
+    }
+    function renderNoteVersions(entries){
+      const {list}=elements();
+      if(!entries.length){const empty=input.document.createElement('div');empty.className='managed-version-history-empty ui-helper';empty.textContent=busy?'':'No earlier versions of this note are in your backups yet.';list.appendChild(empty);return;}
+      const perDay=new Map();for(const entry of entries){const key=dayKey(new Date(entry.exportedAt));perDay.set(key,(perDay.get(key)||0)+1);}
+      for(const entry of entries){
+        const location=entry.location,card=input.document.createElement('section');card.className='managed-version-card';
+        const head=input.document.createElement('div');head.className='managed-version-card-head';
+        const when=input.document.createElement('strong');when.className='managed-version-date';when.textContent=plainTimeLabel(entry.exportedAt,perDay.get(dayKey(new Date(entry.exportedAt)))>1);
+        const exact=input.document.createElement('span');exact.className='managed-version-counts ui-helper';exact.textContent=dateLabel(entry.exportedAt);
+        const use=input.document.createElement('button');use.type='button';use.className='mini-btn ui-btn';use.dataset.action='compare-managed-note';use.dataset.versionHistorySource=location.sourceId;use.dataset.versionHistoryCheckpoint=location.checkpointId;use.textContent='Review';
+        head.append(when,exact,use);card.appendChild(head);list.appendChild(card);
+      }
     }
     function render(entries=lastEntries){
       const {list}=elements();if(!list)return;list.replaceChildren();
+      if(noteTarget){renderNoteVersions(entries);return;}
       if(!entries.length){const empty=input.document.createElement('div');empty.className='managed-version-history-empty ui-helper';empty.textContent=`No ${activeSourceLabel||'managed'} backup checkpoints are available yet.`;list.appendChild(empty);return;}
       for(const entry of entries){
         const location=entry&&entry.location;if(!location)continue;
@@ -249,17 +273,41 @@ registry.define('backup-recovery-host',1,()=>{
       if(!noteTarget&&input.session.hasBlocking()){activeSourceId=source.id;activeSourceLabel=source.label;setDialogSource(source);lastEntries=freeze([]);render();clearHistoryProgress();setHistoryStatus('Suspend or reset today’s active session before recovering a backup.',false);if(!dialog.open)dialog.showModal();return false;}
       activeSourceId=source.id;activeSourceLabel=source.label;setDialogSource(source);lastEntries=freeze([]);render();clearHistoryProgress();setHistoryStatus('Loading backups…');if(!dialog.open)dialog.showModal();void collectSource(source.id,{interactive:true});return true;
     }
-    // Earlier versions of one note come from the connected backup locations;
-    // with more than one, the person picks which to look in.
+    // Earlier versions of one note come from every connected backup location
+    // together: one entry per distinct text, newest first, never the text the
+    // note has now.
+    function connectedSources(){return input.providers.list().filter(item=>item.connected===true).map(item=>sourceDescriptor(item.id)).filter(Boolean);}
+    async function collectNoteVersions({interactive=true}={}){
+      const sources=connectedSources(),note=noteTarget;if(!note||!sources.length||busy)return freeze({entries:lastEntries});
+      const controller=new AbortController();activeSourceId=sources[0].id;activeSourceLabel=sources[0].label;setOperationBusy(true,controller);lastEntries=freeze([]);render();setHistoryStatus('Looking for earlier versions in your backups…');
+      try{
+        const found=[],failed=[];
+        for(const source of sources){
+          const result=await input.providers.noteVersions(source.id,note.id,freeze({interactive,signal:controller.signal,presentation:presentationScope}));
+          if(result&&result.cancelled){setHistoryStatus('Cancelled.',true,'cancelled');return freeze({entries:lastEntries});}
+          if(result&&result.available)found.push(...result.entries);else failed.push(source.label);
+        }
+        const seen=new Set([note.text]),entries=[];
+        for(const entry of found.sort((a,b)=>Date.parse(b.exportedAt)-Date.parse(a.exportedAt)||String(b.checkpointId).localeCompare(String(a.checkpointId)))){
+          if(seen.has(entry.text))continue;seen.add(entry.text);
+          entries.push(freeze({exportedAt:entry.exportedAt,location:freeze({sourceId:entry.sourceId,sourceLabel:entry.sourceLabel,checkpointId:entry.checkpointId,exportedAt:entry.exportedAt})}));
+        }
+        lastEntries=freeze(entries);render();
+        const missing=failed.length?` ${failed.join(' and ')} could not be read.`:'';
+        setHistoryStatus(entries.length?`${entries.length} earlier version${entries.length===1?'':'s'}.${missing}`:`No earlier versions of this note are in your backups yet.${missing}`,!failed.length);
+        return freeze({entries:lastEntries});
+      }catch(error){lastEntries=freeze([]);render();setHistoryStatus(userMessage(error,'Earlier versions could not be read safely.'),false);input.diagnostics.capture('backup.note-versions',error,'warn');return freeze({entries:lastEntries});}
+      finally{if(activeController===controller)setOperationBusy(false);render();}
+    }
     async function openNote(target={}){
-      const key=String(target.key||''),label=String(target.label||key).slice(0,160);if(!key)return freeze({opened:false,reason:'invalid'});
+      const id=String(target.id||''),label=String(target.label||'').slice(0,160);if(!id)return freeze({opened:false,reason:'invalid'});
       if(busy)return freeze({opened:false,reason:'busy'});
-      const sources=input.providers.list().filter(item=>item.connected===true).map(item=>sourceDescriptor(item.id)).filter(Boolean);
-      if(!sources.length)return freeze({opened:false,reason:'no-source'});
-      const sourceId=sources.length===1?sources[0].id:await input.interactions.choose({title:'Earlier versions',message:`Where should Study Director look for earlier versions of ${label}?`,cancelLabel:'Cancel',choices:sources.map(source=>({value:source.id,label:source.label,description:`Backups saved to ${source.label}.`}))});
-      if(!sourceId)return freeze({opened:false,reason:'cancelled'});
-      const onRestored=typeof target.onRestored==='function'?target.onRestored:()=>{};
-      return freeze({opened:await openSource(sourceId,freeze({key,label,onRestored}))});
+      const sources=connectedSources();if(!sources.length)return freeze({opened:false,reason:'no-source'});
+      const {dialog}=elements();if(!dialog)return freeze({opened:false,reason:'unavailable'});
+      noteTarget=freeze({id,label,text:String(target.text??''),onRestored:typeof target.onRestored==='function'?target.onRestored:()=>{}});
+      activeSourceId=sources[0].id;activeSourceLabel=sources[0].label;setDialogSource(sources[0]);lastEntries=freeze([]);render();clearHistoryProgress();
+      if(!dialog.open)dialog.showModal();void collectNoteVersions({interactive:true});
+      return freeze({opened:true});
     }
     function close(){const {dialog}=elements();if(dialog?.open)dialog.close();return true;}
     function eventButton(event,selector){const target=event&&event.target;return target&&typeof target.closest==='function'?target.closest(selector):null;}
@@ -277,7 +325,7 @@ registry.define('backup-recovery-host',1,()=>{
       });
       if(!choice)return false;const controller=new AbortController();setOperationBusy(true,controller,choice==='replace'?'restore-version':'bring-in');setHistoryStatus('');setHistoryProgress({message:choice==='replace'?'Preparing restore…':'Preparing comparison…'});
       try{
-        const options=freeze({presentation:presentationScope,checkpointId,confirmed:choice==='replace',note:note?note.key:'',missingOnly:choice==='missing',signal:controller.signal,onProgress:value=>{if(activeController===controller&&!controller.signal.aborted)setHistoryProgress(value);}});
+        const options=freeze({presentation:presentationScope,checkpointId,confirmed:choice==='replace',note:note?note.id:'',missingOnly:choice==='missing',signal:controller.signal,onProgress:value=>{if(activeController===controller&&!controller.signal.aborted)setHistoryProgress(value);}});
         const result=choice==='replace'?await input.providers.restoreRepositoryProviderVersion(sourceId,options):await input.providers.bringInRepositoryProvider(sourceId,options);
         clearHistoryProgress();
         const saved=dateLabel(location.exportedAt),noteOutcome=note?{'note-missing':`This note isn’t in the backup from ${saved}.`,'note-unchanged':`The backup from ${saved} has the same text as this note.`,'note-kept':'No changes were made.'}[String(result?.reason||'')]:'';
@@ -308,7 +356,7 @@ registry.define('backup-recovery-host',1,()=>{
     return freeze({
       format:'study-director.backup-recovery-host',contractVersion:1,
       managedRecovery:spec=>coordinator.execute(spec),
-      history:freeze({subscribePresentation,openSource:sourceId=>openSource(sourceId),openNote,close,cancel:cancelActive,refresh:()=>activeSourceId?collectSource(activeSourceId,{interactive:true}):false,recover,removeSafety,status:()=>freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})}),
+      history:freeze({subscribePresentation,openSource:sourceId=>openSource(sourceId),openNote,close,cancel:cancelActive,refresh:()=>noteTarget?collectNoteVersions({interactive:true}):activeSourceId?collectSource(activeSourceId,{interactive:true}):false,recover,removeSafety,status:()=>freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})}),
       status:()=>freeze({managedRecovery:coordinator.status(),history:freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})})
     });
   }

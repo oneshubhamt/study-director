@@ -105,11 +105,19 @@ export const COMPATIBILITY_REGISTRY=freeze({
     },
     {
       id:'area-note-historical-rows',owner:'record-codecs/repositories-area-notes',kind:'live-canonicalization',
-      source:'IndexedDB AreaNote.v1 rows/recovery entries carrying historical sync metadata or degraded historical shapes',
-      target:'strict current AreaNote.v2 domain rows containing only version, key, label, text and local updatedAt revision',
-      proof:'every retained Area Note and recovery entry is rewritten losslessly into the strict current shape before ordinary reads resume',
+      source:'IndexedDB AreaNote.v1/v2 rows keyed by note name, their name-keyed deletion records and browser emergency copy, and recovery entries carrying historical sync metadata or degraded historical shapes',
+      target:'strict current AreaNote.v3 rows keyed by a permanent id (worked out from the old name with FNV-1a 64, so older backups map to the same note) containing only version, key, label, text and local updatedAt revision; deletion records and the emergency copy keyed by the same id',
+      proof:'every retained Area Note, deletion record, emergency-copy entry and recovery entry is rewritten losslessly into the strict current shape in one transaction before ordinary reads resume; the next backup reads every note afresh',
       retirement:'baseline verified on all supported installations',
       sourceFiles:freeze(['source/core/compatibility-codecs.js','source/core/repositories-area-notes.js','source/core/repositories.js'])
+    },
+    {
+      id:'name-keyed-notes-in-backups',owner:'backup-codec/managed-repository',kind:'import-adapter',
+      source:'portable backups before v21 and backup-location manifests before version 6, which key Ongoing Notes and their deletion history by note name',
+      target:'notes and note deletion history keyed by the permanent id worked out from each name, the same id the live conversion gives that note',
+      proof:'a v20 file is read as current apart from its notes; older manifests convert notes when a version is read and match one note by id for earlier versions and one-note restores',
+      retirement:'no supported backup older than portable v21 or manifest 6 remains',
+      sourceFiles:freeze(['source/core/backup-codec.js','source/core/managed-repository.js','source/core/backup.js','source/core/compatibility-codecs.js'])
     },
     {
       id:'area-note-recovery-v1',owner:'repositories-area-notes',kind:'live-migration',
@@ -238,7 +246,7 @@ export const COMPATIBILITY_REGISTRY=freeze({
     {
       id:'complete-backup-v7-v19',owner:'backup-codec',kind:'import-adapter',
       source:'study-director-backup metadata versions 7 through 19, including pre-v10 framing/checksum/entity-set variants, the pre-L10 personal-data envelope, R10 records carrying embedded sync metadata, B1 v14 checkpoints without protected reconciliation metadata, v15 protected-manifest checkpoints before the current deletion-ledger evolution, v16 personal-data payloads that still transported device-local Wake Lock/System Alerts fields, v17 checkpoints that predate protected capture-authority proof, v18 checkpoints that still carried the retired ReflectionDraft domain, and v19 checkpoints that predate DailyRecord.v16 record kinds',
-      target:'current v20 checkpoint restore model with protected reconciliation manifest, portable Preferences only, lean canonical domain records, and protected canonical-complete/rescue-partial capture authority',
+      target:'current v21 checkpoint restore model (notes keyed by permanent id through name-keyed-notes-in-backups) with protected reconciliation manifest, portable Preferences only, lean canonical domain records, and protected canonical-complete/rescue-partial capture authority',
       proof:'manifest/chunks/completion proof validate and imported entities pass canonical sanitizers before restore',
       retirement:'after all required historical backups are replaced by a fresh current-format verified backup',
       sourceFiles:freeze(['source/core/backup-codec.js','source/core/backup.js','source/core/compatibility-codecs.js','source/external/drive.js'])

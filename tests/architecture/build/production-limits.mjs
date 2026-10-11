@@ -4,7 +4,7 @@ import {PRODUCTION_LIMITS,CAPACITY_PROFILES,assertProductionLimits} from '../../
 
 assert.equal(assertProductionLimits(),true);
 assert.equal(PRODUCTION_LIMITS.maxImportRecords,10000);
-assert.equal(PRODUCTION_LIMITS.maxOngoingNotes,10000);
+assert.equal(PRODUCTION_LIMITS.maxOngoingNotes,2000);
 assert.equal(Object.prototype.hasOwnProperty.call(PRODUCTION_LIMITS,'maxImportAreaNotes'),false,'One note-count limit covers live, imported and backed-up notes.');
 assert.equal(Object.prototype.hasOwnProperty.call(PRODUCTION_LIMITS,'maxImportReflectionDrafts'),false,'Retired Reflection Draft capacity must not remain in current production limits.');
 assert.equal(PRODUCTION_LIMITS.maxNoteChars,70000);

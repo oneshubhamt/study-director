@@ -144,7 +144,7 @@ const repository=(()=>{
   // The note a title names, started in memory for its first edit.
   function ensureEntry(title,label=''){
     const safeTitle=normalizeAreaName(title);
-    if(!safeTitle)return null;
+    if(!safeTitle||NoteKeys.isKey(safeTitle))return null;
     let id=idForTitle(safeTitle);
     if(!id){id=newNoteId();setNote(id,{version:DATA_CONTRACT.schemas.AreaNote.version,key:id,label:clampText(displayAreaName(label||safeTitle),APP_LIMITS.maxAreaNameChars),text:'',updatedAt:null});}
     return notes[id];
@@ -834,6 +834,20 @@ const repository=(()=>{
       throw e;
     }
   }
+  // A backup's notes are matched to this device's by id. A backup note whose
+  // id is unknown here but whose title names a note here is that same note,
+  // made separately (on another device, or before ids): it takes this
+  // device's id, so a combine compares the two instead of keeping both. A
+  // note this device deleted or holds in Recently deleted is known, so it
+  // keeps its id and its deletion still applies.
+  function alignByTitle(payload,deletedIds=[]){
+    const incoming=normalizePayload(payload),out=KeyedRecord.create(),claimed=new Set(Object.keys(incoming)),deleted=new Set(deletedIds);
+    for(const [key,entry] of Object.entries(incoming)){
+      const known=isTrashKey(key)||notes[key]||notes[NoteKeys.trash(key)]||deleted.has(key),local=known?'':idForTitle(titleOf(entry));
+      if(local&&!claimed.has(local)){claimed.add(local);out[local]={...entry,key:local};}else out[key]=entry;
+    }
+    return out;
+  }
   function replace(payload){return commitCollection(payload,{merge:false});}
   function merge(payload){return commitCollection(payload,{merge:true});}
   function reconcile(payload,deletions=[]){return commitCollection(payload,{merge:true,deletions});}
@@ -888,7 +902,7 @@ const repository=(()=>{
     if(!appCanMutate())return freeze({status:'rejected'});
     const fromKey=keyFor(from),fromTitle=fromKey?titleKeyFor(fromKey):'';
     const source=normalizeAreaName(fromTitle),label=clampText(displayAreaName(toLabel),APP_LIMITS.maxAreaNameChars),target=normalizeAreaName(label);
-    if(!source||!target||!idForTitle(source))return freeze({status:'rejected'});
+    if(!source||!target||NoteKeys.isKey(target)||!idForTitle(source))return freeze({status:'rejected'});
     if(target.startsWith(`${source} > `))return freeze({status:'inside-itself'});
     await settle([idForTitle(source),idForTitle(target)].filter(Boolean));if(!idForTitle(source))return freeze({status:'rejected'});
     const depth=source.split(' > ').length,labelParts=label.split(' > ');
@@ -955,7 +969,7 @@ const repository=(()=>{
       throw e;
     }
   }
-  return Object.freeze({get,update,updateValidatedRich,remove,clearAll:clearAllAreaNotes,load,reloadFresh,readFreshPayload,readFreshItems,flush,protectUnsaved,trash,restore,rename,trashSnapshot,purgeExpiredTrash,exportPayload,replace,merge,reconcile,normalizePayload,metadataSnapshot,searchSnapshot,size,failure,migrateLegacyRecovery,migrateHistoricalCanonicalRows,verifyCurrentRecovery,recoverAfterStorageLoss});
+  return Object.freeze({get,update,updateValidatedRich,remove,clearAll:clearAllAreaNotes,load,reloadFresh,readFreshPayload,readFreshItems,flush,protectUnsaved,trash,restore,rename,trashSnapshot,purgeExpiredTrash,exportPayload,replace,merge,reconcile,alignByTitle,normalizePayload,metadataSnapshot,searchSnapshot,size,failure,migrateLegacyRecovery,migrateHistoricalCanonicalRows,verifyCurrentRecovery,recoverAfterStorageLoss});
 })();
 
     return repository;

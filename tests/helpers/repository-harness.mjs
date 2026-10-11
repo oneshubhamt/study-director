@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {APP_META_RUNTIME_REGISTRY} from '../../contracts/data-architecture.mjs';
 import {PRODUCTION_LIMITS} from '../../contracts/production-limits.mjs';
+import {noteKeys,legacyNoteKey} from './note-ids.mjs';
 const freeze=Object.freeze;
 const appMetaSource=fs.readFileSync('source/core/app-meta.js','utf8');
 const repositoryJournals=fs.readFileSync('source/core/repository-journals.js','utf8');
@@ -44,7 +45,7 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
         put(value,key){if(name==='meta'&&value.key==='dataMaintenance'&&value.value?.status==='completed'&&controls.failNextMaintenanceCompletion){controls.failNextMaintenanceCompletion=false;const req={error:new Error('QA_FIXTURE maintenance completion write failure'),onerror:null};queueMicrotask(()=>req.onerror?.());return req;}const resolved=key===undefined?(name==='session'?value.id:(value.key??value.date??value.id)):key;if(name==='meta'&&value?.value?.format==='study-director.area-note-recovery')idbWrites.recovery++;map.set(resolved,structuredClone(value));return {};},
         getAll(range=null){if(name==='meta'){idbReads.metaGetAll++;range?idbReads.boundedMetaGetAll++:idbReads.unboundedMetaGetAll++;}return request(req=>{req.result=[...map.entries()].filter(([key])=>inRange(key,range)).map(([,value])=>structuredClone(value));req.onsuccess?.();});},
         getAllKeys:name==='daily'&&controls.dailyKeyEnumeration!==true?undefined:function(range=null,count=Infinity){return request(req=>{req.result=[...map.keys()].filter(key=>inRange(key,range)).sort().slice(0,count);req.onsuccess?.();});},
-        openCursor(){const entries=[...map.entries()];let index=0;const req={result:undefined,error:null,onsuccess:null,onerror:null};const pump=()=>{if(index>=entries.length){req.result=null;req.onsuccess?.({target:req});return;}const [key,value]=entries[index];req.result={key,value:structuredClone(value),update(next){map.set(key,structuredClone(next));return {};},continue(){index++;pump();}};req.onsuccess?.({target:req});};queueMicrotask(pump);return req;},
+        openCursor(){const entries=[...map.entries()];let index=0;const req={result:undefined,error:null,onsuccess:null,onerror:null};const pump=()=>{if(index>=entries.length){req.result=null;req.onsuccess?.({target:req});return;}const [key,value]=entries[index];req.result={key,value:structuredClone(value),update(next){map.set(key,structuredClone(next));return {};},delete(){map.delete(key);return {};},continue(){index++;pump();}};req.onsuccess?.({target:req});};queueMicrotask(pump);return req;},
         delete:key=>{if(key&&typeof key==='object'&&'lower' in key&&'upper' in key){for(const candidate of [...map.keys()])if(String(candidate)>=String(key.lower)&&String(candidate)<=String(key.upper))map.delete(candidate);}else map.delete(key);return request(req=>{req.onsuccess?.();});},clear:()=>{map.clear();return {};}
       };
     }};
@@ -69,7 +70,8 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
   const dailyRecordCodec=controls.dailyRecordCodec||freeze({
     buildDailyRecordSummary:v=>v,
     sanitizeCurrentDailyRecord:v=>v&&typeof v==='object'&&Number(v.version)===1?v:null,
-    sanitizeCurrentAreaNote:(source,key)=>source&&typeof source==='object'&&Number(source.version)===2?{version:2,key:String(source.key??key??''),label:String(source.label??source.key??key??''),text:String(source.text??''),updatedAt:String(source.updatedAt??'')}:null,
+    sanitizeCurrentAreaNote:(source,key)=>{if(!source||typeof source!=='object'||Number(source.version)!==3)return null;const clean={version:3,key:String(source.key||key||''),label:String(source.label??''),text:String(source.text??''),updatedAt:String(source.updatedAt??'')};return noteKeys.isKey(clean.key)&&clean.label.trim()&&Object.keys(source).length===5?clean:null;},
+    areaNoteKeys:noteKeys,
     materializeDailyRecordView:v=>v,
     sanitizeDailyRecordSummary:v=>v,
     materializeDailyRecordSummary:v=>v
@@ -83,7 +85,8 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
   const compatibilityCodec=freeze({
     format:'study-director.compatibility-codecs',contractVersion:1,
     dailyRecord:v=>v&&typeof v==='object'?{...structuredClone(v),version:1}:null,
-    areaNote:(source,key)=>source&&typeof source==='object'?{version:2,key:String(source.key??key??''),label:String(source.label??source.key??key??''),text:String(source.text??''),updatedAt:String(source.updatedAt??'')}:null,
+    areaNote:(source,key)=>{if(!source||typeof source!=='object'||source.deleted===true)return null;const oldKey=String(source.key||key||''),stored=legacyNoteKey(oldKey);if(!stored)return null;const label=String(source.label||(oldKey.startsWith('~deleted ')?'':oldKey)).trim();return label?{version:3,key:stored,label,text:String(source.text??''),updatedAt:String(source.updatedAt||'2026-09-01T00:00:00.000Z')}:null;},
+    areaNoteKey:legacyNoteKey,
     activeSession:v=>v?{id:'active',type:'activeSession',version:1,revision:Number(v.revision)||1,date:String(v.date||''),status:v.status==='suspended'?'suspended':'active',scheduleText:String(v.scheduleText||''),snapshot:structuredClone(v.snapshot),suspendedAt:v.suspendedAt??null,updatedAt:String(v.updatedAt||'2026-09-17T10:00:00.000Z')}:null,
     localRecoveryEnvelope:v=>v&&v.shell?{version:1,revision:Number(v.revision||v.shell.revision)||1,shell:{id:'active',type:'activeSession',version:1,revision:Number(v.revision||v.shell.revision)||1,date:String(v.shell.date||''),status:v.shell.status==='suspended'?'suspended':'active',scheduleText:String(v.shell.scheduleText||''),suspendedAt:v.shell.suspendedAt??null,updatedAt:String(v.updatedAt||v.shell.updatedAt||'2026-09-17T10:00:00.000Z')},snapshot:structuredClone(v.snapshot),updatedAt:String(v.updatedAt||v.shell.updatedAt||'2026-09-17T10:00:00.000Z')}:null,
     protectedPreferences:v=>v&&typeof v==='object'&&Number(v.version)===1?structuredClone(v):null,
@@ -97,7 +100,7 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
   });
   const hooks=freeze({canMutate:()=>controls.owned!==false,getOwnershipRevision:()=>Number(controls.ownershipRevision)||1,issueWriteToken:()=>{if(controls.owned===false)throw Object.assign(new Error('Ownership lost'),{code:'OWNERSHIP'});return freeze({revision:1});},assertWriteToken:()=>{if(controls.owned===false)throw Object.assign(new Error('Ownership lost'),{code:'OWNERSHIP'});return true;},isOwnershipLostError:e=>e.code==='OWNERSHIP',capture:(...args)=>controls.onDiagnostic?.(...args),onStorageOk:()=>{},onStorageError:(...args)=>controls.onStorageError?.(...args),onNotesChanged:()=>{},onNoteSyncState:()=>{},onNoteConflict:info=>controls.onNoteConflict?.(info),onDailyRecordsChanged:()=>{},onDatasetRevisionChanged:()=>{},onCanonicalCommit:event=>controls.onCanonicalCommit?.(event)});
   const limits=freeze({backupImportBatchSize:PRODUCTION_LIMITS.backupImportBatchSize,maxAreaNameChars:160,maxNoteChars:1000000,localRescueBytes:PRODUCTION_LIMITS.localRescueBytes,areaNoteRescueBytes:PRODUCTION_LIMITS.areaNoteRescueBytes,areaNoteTrashDays:PRODUCTION_LIMITS.areaNoteTrashDays,maxOngoingNotes:1000,fallbackDailyRecordsBytes:4*1024*1024,deletionRecoveryBytes:64*1024,maxImportRecords:1000,maxScheduleChars:2*1024*1024,backupMaxFileBytes:512*1024*1024,backupMaxCompressedBytes:512*1024*1024,maxBackupFilenameChars:240});
-  const dataContract=freeze({schemas:freeze({LocalRecoveryEnvelope:freeze({version:1}),ActiveSession:freeze({version:1}),DailyRecord:freeze({version:1}),DailySummary:freeze({version:1}),AreaNote:freeze({version:2,trashKeyPrefix:'~deleted '})})});
+  const dataContract=freeze({schemas:freeze({LocalRecoveryEnvelope:freeze({version:1}),ActiveSession:freeze({version:1}),DailyRecord:freeze({version:1}),DailySummary:freeze({version:1}),AreaNote:freeze({version:3,trashKeyPrefix:'~deleted '})})});
   const IDBKeyRange=freeze({bound:(lower,upper)=>freeze({lower:String(lower),upper:String(upper)})});
   const context=vm.createContext({console,structuredClone,Buffer,setTimeout:timerSet,clearTimeout:timerClear,queueMicrotask,Date:ClockDate,Promise,Map,Set,Object,Array,String,Number,Math,JSON,RegExp,Error,RangeError,IDBKeyRange,TextEncoder,TextDecoder,Uint8Array,ArrayBuffer,Blob,localStorage,crypto:globalThis.crypto,globalThis:null});context.globalThis=context;
   vm.runInContext(fs.readFileSync('source/core/internal.js','utf8'),context,{filename:'internal.js'});vm.runInContext(persistence,context,{filename:'persistence.js'});vm.runInContext(appMetaSource,context,{filename:'app-meta.js'});vm.runInContext(repositoryJournals,context,{filename:'repository-journals.js'});vm.runInContext(fs.readFileSync('source/core/save-lane.js','utf8'),context,{filename:'save-lane.js'});vm.runInContext(areaNotesRepository,context,{filename:'repositories-area-notes.js'});vm.runInContext(repositories,context,{filename:'repositories.js'});

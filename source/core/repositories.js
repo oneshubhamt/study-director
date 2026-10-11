@@ -1457,6 +1457,7 @@ async function runDataMaintenance(options={}){
       metadataSnapshot:AreaNotesRepository.metadataSnapshot,
       searchSnapshot:AreaNotesRepository.searchSnapshot,
       normalizePayload:AreaNotesRepository.normalizePayload,
+      alignByTitle:AreaNotesRepository.alignByTitle,
       replace:AreaNotesRepository.replace,
       merge:AreaNotesRepository.merge,
       reconcile:AreaNotesRepository.reconcile,

@@ -19,7 +19,7 @@ registry.define('backup-provider',1,input=>{
     environment:freeze(['clearTimeout','setTimeout']),
     diagnostics:freeze(['capture','fail','finish','mark','start'])
   });
-  const REPOSITORY_FIELDS=freeze(['createPublication','publish','publishInline','inspectManifest','inspect','bringIn','restoreVersion','verifyCheckpoint','verifyObject','scrub','cleanup','inspectCommit','retention','validatePolicy','classifyState','activeProtected','selectRetention','projectHistory','markCompleted']);
+  const REPOSITORY_FIELDS=freeze(['createPublication','publish','publishInline','inspectManifest','inspect','bringIn','restoreVersion','verifyCheckpoint','verifyObject','scrub','cleanup','inspectCommit','retention','validatePolicy','classifyState','activeProtected','selectRetention','projectHistory','noteObject','readNote','markCompleted']);
   function createRuntime(input){
     exactObject(input,['background','ports','repository'],'Backup provider input');
     const Background=exactObject(input.background,['contractVersion','createCoordinator','format','maintenance','maintenanceActionable'],'Backup provider repository-background dependency');
@@ -366,6 +366,47 @@ registry.define('backup-provider',1,input=>{
     const orphanCommits=preparedCommits.items.filter(item=>!manifestIds.has(item.id));
     pairs.sort((a,b)=>Date.parse(repositoryMetadataTimestamp(a.item)||0)-Date.parse(repositoryMetadataTimestamp(b.item)||0)||a.item.id.localeCompare(b.item.id));
     return freeze({pairs:freeze(pairs),uncommitted:freeze(uncommitted),orphanCommits:freeze(orphanCommits),invalid:freeze(invalid),ignored:Math.max(0,Number(listed&&listed.ignored)||0)+Math.max(0,Number(listedCommits&&listedCommits.ignored)||0),overflow:listed&&listed.overflow===true||listedCommits&&listedCommits.overflow===true});
+  }
+  // Earlier texts of one note in this location's kept versions, newest first.
+  // Each version's index says which stored record holds the note; a record
+  // seen in a newer version is not read again, and only the note's own object
+  // is read, never its images.
+  async function noteVersionsRepositoryProvider(id,noteId,options={}){
+    const selected=providers.get(safeId(id)),note=String(noteId||'');
+    if(!selected||!selected.repository||!note)return Object.freeze({sourceId:safeId(id),available:false,reason:'unavailable',entries:Object.freeze([])});
+    if(busy)return Object.freeze({sourceId:selected.id,available:false,reason:'busy',entries:Object.freeze([])});
+    const traceId=OperationDiagnostics.start('provider-note-versions',selected.label,{provider:selected.id}),foreground=beginForeground(selected,options&&options.signal||null);
+    if(!foreground){OperationDiagnostics.finish({status:'skipped',reason:'busy'},traceId);return Object.freeze({sourceId:selected.id,available:false,reason:'busy',entries:Object.freeze([])});}
+    beginForegroundView(selected,'history',`Reading earlier versions from ${selected.label}…`,options.presentation);busy=true;setBusy(true);
+    try{
+      await foreground.settled;
+      if(selected.prepare)await selected.prepare();
+      if(options&&options.interactive!==false)await authorize(selected,'history');
+      const scoped=repositoryOperationSelected(selected,{signal:foreground.signal}),inventory=await repositoryProviderInventory(scoped,{signal:foreground.signal});
+      if(inventory.overflow)throw new Error('Backup history could not be read completely. Earlier versions were stopped safely.');
+      const quarantinedObjectIds=integrityScrubHooks?await integrityScrubHooks.quarantine(selected.id):[],quarantined=new Set(repositoryProviderObjectIds(quarantinedObjectIds));
+      const kept=repositoryInventoryHistoryEntries(scoped,inventory,{quarantinedObjectIds}),pairs=new Map(inventory.pairs.map(pair=>[pair.item.id,pair]));
+      const objects=await repositoryObjectInventory(selected,{signal:foreground.signal}),byId=new Map(objects.items.map(item=>[item.id,item]));
+      const readObject=entry=>{const item=byId.get(entry.objectId);if(!item||quarantined.has(entry.objectId))throw new Error(`Repository object ${entry.objectId} is unavailable.`);return selected.repository.download(item,freeze({signal:foreground.signal}));};
+      const seen=new Set(),entries=[];
+      for(const version of kept){
+        const pair=pairs.get(version.location.checkpointId);if(!pair)continue;
+        let manifest;try{manifest=(await verifyRepositoryInventoryPair(selected,pair,{interactive:false,signal:foreground.signal})).manifest;}
+        catch(error){if(foreground.signal.aborted)throw error;AppDiagnostics.capture('backup-provider.note-version-verification',error,'warn');continue;}
+        const found=RepositoryCheckpointPipeline.noteObject(manifest,note);if(!found||seen.has(found.fingerprint))continue;seen.add(found.fingerprint);
+        const payload=await RepositoryCheckpointPipeline.readNote(manifest,readObject,note,{interactive:false,signal:foreground.signal});
+        if(payload&&typeof payload.text==='string')entries.push(freeze({sourceId:selected.id,sourceLabel:selected.label,checkpointId:version.location.checkpointId,exportedAt:version.exportedAt,text:payload.text}));
+      }
+      OperationDiagnostics.finish({versions:entries.length},traceId);finishForegroundView(selected,{message:'',ok:true});
+      return Object.freeze({sourceId:selected.id,available:true,reason:'',entries:freeze(entries)});
+    }catch(error){
+      const cancelled=error?.name==='AbortError'||['PROVIDER_FOREGROUND_CANCELLED','STUDY_DIRECTOR_IMPORT_CANCELLED'].includes(String(error?.code||''));
+      if(cancelled){OperationDiagnostics.finish({cancelled:true},traceId);finishForegroundView(selected,{message:'',ok:true,lifecycle:'cancelled'});return Object.freeze({sourceId:selected.id,available:false,reason:'cancelled',cancelled:true,entries:Object.freeze([])});}
+      OperationDiagnostics.fail(error,{},traceId);finishForegroundView(selected,{message:'Could not read earlier versions safely.',ok:false});AppDiagnostics.capture('backup-provider.note-versions',error,'warn');
+      return Object.freeze({sourceId:selected.id,available:false,reason:String(error&&error.message||error),entries:Object.freeze([])});
+    }finally{
+      if(foregroundView()&&foregroundView().providerId===selected.id)finishForegroundView(selected);await release(selected,'history');busy=false;setBusy(false);foreground.release();
+    }
   }
   function repositoryInventoryObservation(inventory,{verificationFailures=0}={}){
     const source=inventory&&typeof inventory==='object'?inventory:{};return freeze({invalid:source.invalid||freeze([]),uncommitted:source.uncommitted||freeze([]),orphanCommits:source.orphanCommits||freeze([]),ignored:Math.max(0,Number(source.ignored)||0)+Math.max(0,Number(verificationFailures)||0),overflow:source.overflow===true,rows:source.pairs||freeze([])});
@@ -1332,7 +1373,7 @@ registry.define('backup-provider',1,input=>{
   function backgroundStatus(){return freeze([...providerBackgroundCoordinators.entries()].flatMap(([id,coordinator])=>[freeze({job:id+' maintenance',...(providerMaintenanceSchedulers.get(id)?.status()||coordinator.jobStatus('maintenance'))}),freeze({job:id+' integrity',...(providerIntegritySchedulers.get(id)?.status()||coordinator.jobStatus('integrity'))}),freeze({job:id+' convergence',...coordinator.jobStatus('convergence')})]));}
   function diagnosticConnections(){return freeze([...providers.values()].map(selected=>freeze({id:selected.id,connected:providerConnected(selected),scopeBound:repositoryScopeByProvider.has(selected.id),retryAttempt:providerConvergenceRetryAttempts.get(selected.id)||0,retryBackoffCapped:(providerConvergenceRetryAttempts.get(selected.id)||0)>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length})));}
   function status(){return Object.freeze({busy,cancellable:!!foregroundController&&!foregroundController.signal.aborted,operation:foregroundView()?Object.freeze({...foregroundView()}):null});}
-  return Object.freeze({register,list,status,locationStatus,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},cancelForeground,history:historyRepositoryProvider,backup:backupProvider,backupRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeProtectedRepositoryProvider,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,suspendBackground,repositoryScope});
+  return Object.freeze({register,list,status,locationStatus,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},cancelForeground,history:historyRepositoryProvider,noteVersions:noteVersionsRepositoryProvider,backup:backupProvider,backupRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeProtectedRepositoryProvider,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,suspendBackground,repositoryScope});
 
   }
   return freeze({format:'study-director.backup-provider-module',contractVersion:1,createRuntime});

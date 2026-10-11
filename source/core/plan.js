@@ -15,7 +15,7 @@ registry.define('plan',1,()=>{
     parser:freeze(['isCanonicalScheduleText','parseScheduleDraftText','scheduleTextFromRows']),
     clock:freeze(['clockHM','clockMinuteToStudyMinute','getMinuteOfDay','isValidHHMM','normalizeHHMM','studyMinuteToHHMM','t2m','timeLabelFromIso']),
     view:freeze(['document','on','textEl','updateRealTimeAwareness','window']),
-    scheduleGateway:freeze(['act','apply','breakState','captureMigration','clearSafety','flush','hasLiveState','markRender','read','reconcile','row','setAnchor','timeline']),
+    scheduleGateway:freeze(['act','apply','breakState','captureMigration','clearSafety','flush','hasLiveState','markRender','read','reconcile','renameAreas','row','setAnchor','timeline']),
     ownership:freeze(['canMutate','requirePrimary']),
     interactions:freeze(['confirm','input']),
     notifications:freeze(['begin','feedback']),
@@ -998,6 +998,36 @@ const PlanDraftEditor=(()=>{
       return true;
     }
     function resetSession(){PlanDraftEditor.reset();lastAppliedScheduleText='';lastScheduleNowMinuteKey=null;return true;}
+    // A note renamed or moved with "Also rename it in today's plan and saved
+    // plans" takes its Area along. Blocks under that Area, or nested inside it,
+    // change their Area: today's plan in place (times, progress and the timer
+    // stay), and the draft and saved plans as text. Finished days keep theirs.
+    const areaMatches=(row,from)=>{const key=taskAreaKey(row);return key===from||key.startsWith(`${from} > `);};
+    function renamedArea(row,from,toLabel){
+      if(!areaMatches(row,from))return undefined;
+      const rest=String(taskAreaValue(row)||'').split('>').map(part=>part.trim()).filter(Boolean).slice(from.split(' > ').length);
+      return [toLabel,...rest].join(' > ');
+    }
+    function renameAreaInText(text,from,toLabel){
+      const parsed=parseScheduleDraftText(String(text||''));if(!parsed.ok||!parsed.parsed.some(row=>areaMatches(row,from)))return null;
+      return scheduleTextFromRows(parsed.parsed.map(row=>{const area=renamedArea(row,from,toLabel);return area===undefined?row:{...row,area};}));
+    }
+    function areaUse(fromTitle){
+      const from=taskAreaKey({area:fromTitle});
+      return freeze({today:scheduleGateway.read().tasks.some(task=>areaMatches(task,from)),savedPlans:persistence.readLibrary().savedPlans.filter(plan=>renameAreaInText(plan.scheduleText,from,'x')!==null).length});
+    }
+    async function renameArea(fromTitle,toLabel){
+      const from=taskAreaKey({area:fromTitle}),label=String(toLabel||'').trim();if(!from||!label)return freeze({blocks:0,savedPlans:0});
+      const blocks=scheduleGateway.renameAreas(row=>renamedArea(row,from,label));
+      if(lastParsed.some(row=>areaMatches(row,from))){lastParsed=lastParsed.map(row=>{const area=renamedArea(row,from,label);return area===undefined?row:{...row,area};});if(lastAppliedScheduleText)lastAppliedScheduleText=scheduleTextFromRows(lastParsed);}
+      const input=document.getElementById('plan-input'),draft=input?renameAreaInText(input.value,from,label):null;
+      if(draft!==null){input.value=draft;await persistence.writeDraft(draft);}
+      const library=persistence.readLibrary(),now=new Date().toISOString();let savedPlans=0;
+      library.savedPlans=library.savedPlans.map(plan=>{const text=renameAreaInText(plan.scheduleText,from,label);if(text===null)return plan;savedPlans++;return {...plan,scheduleText:text,updatedAt:now};});
+      if(savedPlans){await persistence.writeLibrary(library);SavedPlans.render();}
+      if(blocks)renderSched();
+      return freeze({blocks,savedPlans});
+    }
     function appliedScheduleText(){return String(lastAppliedScheduleText||scheduleTextFromRows(lastParsed.length?lastParsed:TASKS)||'');}
     const api=freeze({
       format:'study-director.plan-controller',contractVersion:1,
@@ -1014,7 +1044,9 @@ const PlanDraftEditor=(()=>{
       renderOnOpen:renderScheduleOnPlanOpen,
       needsRealtimeRefresh,
       resetSession,
-      appliedScheduleText
+      appliedScheduleText,
+      areaUse,
+      renameArea
     });
     return api;
   }

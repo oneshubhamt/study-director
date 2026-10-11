@@ -41,7 +41,7 @@ assert.equal(MIGRATION_FACADE_CONTRACT.verification.backupCheck,'freshBackup');
 assert.equal(CANONICAL_BASELINE.policy.ordinaryRuntime,'current-canonical-only');
 
 const entries=allCompatibilityEntries();
-assert.equal(entries.length,22,'Every temporary compatibility path must remain explicitly inventoried until retirement.');
+assert.equal(entries.length,23,'Every temporary compatibility path must remain explicitly inventoried until retirement.');
 assert.equal(new Set(entries.map(entry=>entry.id)).size,entries.length);
 for(const entry of entries){
   for(const file of entry.sourceFiles)assert.ok(fs.existsSync(path.join(root,file)),`${entry.id} references missing source ${file}`);
@@ -70,6 +70,7 @@ const evidenceByCompatibilityId=Object.freeze({
   'l13e-repository-maintenance-v1':['tests/integration/storage/compatibility-host.mjs','tests/integration/backup/repository-incremental-preparation.mjs','tests/integration/backup/repository-restore.mjs'],
   'restore-journal-payload-v1-v3':['tests/integration/storage/repository-journals.mjs'],
   'backup-repository-v1-v4':['tests/integration/backup/repository-restore.mjs'],
+  'name-keyed-notes-in-backups':['tests/integration/backup/current-canonical-roundtrip.mjs','tests/integration/backup/repository-restore.mjs','tests/integration/storage/canonical-schema-separation.mjs'],
   'legacy-service-worker-update-bridge':['tests/integration/pwa/service-worker-lifecycle.mjs']
 });
 assert.deepEqual(Object.keys(evidenceByCompatibilityId).sort(),entries.map(entry=>entry.id).sort(),'every disposable compatibility path must have explicit regression evidence');
@@ -179,7 +180,7 @@ assert.equal(CACHE_STORAGE_IDENTITIES.updateBridge,'study-director-update-bridge
 assert.match(sw,/CompatibilityFacade\.installBridgeRequired\(\)/u);
 assert.match(sw,/CompatibilityFacade\.recoveryHandoff\(\)/u);
 
-assert.equal(CURRENT_FORMATS_OUTSIDE_MIGRATION.completeBackup.version,20);
+assert.equal(CURRENT_FORMATS_OUTSIDE_MIGRATION.completeBackup.version,21);
 assert.equal(CURRENT_FORMATS_OUTSIDE_MIGRATION.protectedBackup.version,2);
 assert.match(attachments,/new TextEncoder\(\)\.encode\('SDAT01\\r\\n'\)/u);
 assert.match(attachments,/m\.format!=='study-director\.attachments'\|\|m\.version!==1/u);

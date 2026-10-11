@@ -7,6 +7,7 @@ import vm from 'node:vm';
 import {fileURLToPath} from 'node:url';
 import {createProcessingEngine} from '../../helpers/file-processing.mjs';
 import {createMemoryDirectory} from '../../helpers/memory-directory.mjs';
+import {legacyNoteKey} from '../../helpers/note-ids.mjs';
 import {passwordKey,streamEncryptionInfo,transformEncrypted} from '../../../portable/stream-encryption.js';
 
 const HERE=path.dirname(fileURLToPath(import.meta.url)),ROOT=path.resolve(HERE,'../../..'),read=relative=>fs.readFileSync(path.join(ROOT,relative),'utf8');
@@ -32,7 +33,7 @@ const dailyRecordCodec=freeze({
 });
 const activeSessionCodec=freeze({sanitizeCurrent:item=>item&&item.id==='current'?freeze({...item}):null});
 const reflectionDraftCodec=freeze({format:'study-director.reflection-draft-codec',contractVersion:1,sanitizeCurrent:item=>item&&isDate(item.date)?freeze({...item,reflection:String(item.reflection||'')}):null});
-const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:item=>dailyRecordCodec.sanitizeCurrentDailyRecord(item),areaNote:normalizeArea,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
+const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:item=>dailyRecordCodec.sanitizeCurrentDailyRecord(item),areaNote:normalizeArea,areaNoteKey:legacyNoteKey,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
 const keyedRecord=freeze({create:()=>Object.create(null)}),entityDefinition=type=>defs[type]||null,entityIdentity=(type,item)=>String(item?.[defs[type]?.idField]||'');
 const boundedInt=(value,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
 const jsonByteLength=value=>new TextEncoder().encode(typeof value==='string'?value:JSON.stringify(value)).byteLength;
@@ -77,7 +78,7 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
     dailyRecordBackupDates:async()=>({dates:records.map(record=>record.date).sort(),warning:''}),dailyRecordBackupMonth:async month=>records.filter(record=>String(record.date).startsWith(String(month)+'-')).sort((a,b)=>a.date.localeCompare(b.date)),dailyRecordDocuments:async dates=>dates.map(date=>records.find(record=>record.date===date)).filter(Boolean),
     dailyRecordImportBatches:async incoming=>{for(const record of incoming){const index=records.findIndex(row=>row.date===record.date);if(index>=0)records[index]=freeze({...record});else records.push(freeze({...record}));}records.sort((a,b)=>a.date.localeCompare(b.date));return {batches:incoming.length?1:0};},
     dailyRecordRemove:async date=>{records=records.filter(record=>record.date!==date);return true;},dailyRecordTimestamp:date=>records.find(record=>record.date===date)?.updatedAt||'',
-    notesExportPayload:()=>notes,notesReadFreshPayload:async()=>notes,notesReadFreshItems:async keys=>(keys||[]).map(key=>notes[key]||null),notesFlush:async()=>true,notesNormalizePayload:value=>Object.fromEntries(Object.entries(value||{}).map(([key,item])=>[key,normalizeArea(item,key)]).filter(([,item])=>!!item)),notesFailure:()=>null,
+    notesExportPayload:()=>notes,notesReadFreshPayload:async()=>notes,notesReadFreshItems:async keys=>(keys||[]).map(key=>notes[key]||null),notesFlush:async()=>true,notesNormalizePayload:value=>Object.fromEntries(Object.entries(value||{}).map(([key,item])=>[key,normalizeArea(item,key)]).filter(([,item])=>!!item)),notesAlignByTitle:value=>value,notesFailure:()=>null,
     restoreJournalPrepare:async value=>(journal={state:{id:value.id},payload:value},true),restoreJournalRead:async()=>journal,restoreJournalMark:async(id,phase)=>{if(journal)journal.state.phase=phase;return journal?.state||null;},restoreJournalClear:async()=>{journal=null;return true;},
     scheduleRead:()=>scheduleText,personalSettle:async()=>true,personalExport:async()=>currentPersonal,personalImport:async value=>{currentPersonal=freeze(value);return true;},personalVerify:async value=>assert.deepEqual(currentPersonal,value),
     storageGeneration:()=>0,sourceRevision:async()=> '2026-09-19T00:00:00.000Z',snapshotRevision:async()=> 'snapshot-stable',canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>{preparationRebaseCalls+=1;return Object.freeze({epoch:null,stamps:Object.freeze([{unit:'*'}])});},preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],installationId:()=> 'inst_repository_restore_qa',
@@ -129,6 +130,8 @@ assert.equal(manifest.protectedCheckpointManifest.version,2);assert.equal(manife
 // the repository (registry: backup-repository-v1-v4). Version 4 has today's
 // shape; versions 1 to 3 kept one object per record instead of packed shards,
 // so the fixture unpacks this checkpoint's shards into that older layout.
+// Before version 6 notes are keyed by name, and one note is found by the id
+// worked out from it (registry: name-keyed-notes-in-backups).
 {
   const sha256=async text=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))].map(byte=>byte.toString(16).padStart(2,'0')).join('');
   const plainText=async (blob,gzip)=>{let stream=(await decryptBlob(blob)).stream();if(gzip)stream=stream.pipeThrough(new DecompressionStream('gzip'));return new Response(stream).text();};
@@ -143,12 +146,15 @@ assert.equal(manifest.protectedCheckpointManifest.version,2);assert.equal(manife
     }
   }
   const layoutBefore4=freeze([...manifest.objects.filter(item=>item.kind!=='structuredPack'),...perRecord]),readUnpacked=async entry=>unpacked.get(entry.objectId)||null;
-  for(const version of [1,2,3,4]){
+  assert.equal(runtime.repository.noteObject(manifest,legacyNoteKey('Ethics')),null,'a current manifest keys notes by id, never by name');
+  for(const version of [1,2,3,4,5]){
     // Before version 5 the counts also named the checkpoint manifest and personal data.
-    const counts=freeze({...manifest.counts,checkpointManifest:1,personalData:perRecord.some(item=>item.kind==='personalData')?1:0});
-    const older=freeze({...manifest,version,counts,objects:version<4?layoutBefore4:manifest.objects});
-    const candidate=await runtime.repository.inspect(older,version<4?readUnpacked:readObject,{interactive:false,committed:true});
+    const counts=version<5?freeze({...manifest.counts,checkpointManifest:1,personalData:perRecord.some(item=>item.kind==='personalData')?1:0}):manifest.counts;
+    const older=freeze({...manifest,version,counts,objects:version<4?layoutBefore4:manifest.objects}),reader=version<4?readUnpacked:readObject;
+    const candidate=await runtime.repository.inspect(older,reader,{interactive:false,committed:true});
     assert.ok(candidate,`a version ${version} checkpoint can still be inspected for restore`);await candidate.release?.();
+    assert.ok(runtime.repository.noteObject(older,legacyNoteKey('Ethics')),`a version ${version} checkpoint finds a name-keyed note by its id`);
+    assert.equal((await runtime.repository.readNote(older,reader,legacyNoteKey('Ethics'),{interactive:false}))?.text,'repository note',`a version ${version} checkpoint reads only that note`);
   }
 }
 // Simulate another installation receiving this checkpoint rather than the publishing installation's newly established local ancestry.
@@ -160,7 +166,7 @@ const localAssetsBeforeLeaseCheck=new Map(assets);assets.clear();
 const managedPortableBefore=freeze({...portablePathMetrics}),candidate=await runtime.repository.inspect(manifest,leasedReadObject,{interactive:false,committed:true});
 assert.equal(portablePathMetrics.containers,managedPortableBefore.containers,'Managed repository inspection must not encode a temporary .sdbackup container.');
 assert.equal(portablePathMetrics.inspections,managedPortableBefore.inspections,'Managed repository inspection must not reopen/decode a temporary .sdbackup container.');
-assert.equal(candidate.kind,'study-director.backup-candidate');assert.equal(candidate.preview.formatVersion,20);assert.equal(candidate.preview.reconciliationCapable,true);assert.equal(candidate.preview.encrypted,true,'repository-source encryption state must survive the internal verified-snapshot boundary');assert.equal(candidate.preview.authenticated,true);assert.equal(candidate.preview.checkpoint.checkpointId,checkpointId);
+assert.equal(candidate.kind,'study-director.backup-candidate');assert.equal(candidate.preview.formatVersion,21);assert.equal(candidate.preview.reconciliationCapable,true);assert.equal(candidate.preview.encrypted,true,'repository-source encryption state must survive the internal verified-snapshot boundary');assert.equal(candidate.preview.authenticated,true);assert.equal(candidate.preview.checkpoint.checkpointId,checkpointId);
 for(const objectId of attachmentObjectIds)assert.equal(leaseReleaseCounts.get(objectId)||0,0,'Managed candidate inspection must retain verified attachment leases until candidate restore/release.');
 const forgedCandidate=freeze({kind:'study-director.backup-candidate',verified:true,preview:candidate.preview,release:async()=>{}});
 await assert.rejects(()=>runtime.repository.bringIn(forgedCandidate),/current verified Study Director inspection/i,'A look-alike candidate must not cross the private verified-snapshot seal.');
