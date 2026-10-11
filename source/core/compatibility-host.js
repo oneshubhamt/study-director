@@ -120,13 +120,14 @@ registry.define('compatibility-host',1,()=>{
       return freeze({format:MAINTENANCE_FORMAT,version:MAINTENANCE_VERSION,entries:freeze(entries.sort((a,b)=>a.providerId.localeCompare(b.providerId)))});
     }
     // A merge base from before permanent ids names notes by title (version 1
-    // kept them all in one row). It is dropped rather than converted: a base
-    // only lets Combine merge two edits without asking, and the next backup or
-    // restore records a fresh one.
+    // kept them all in one row), and one from before titles, plans and
+    // settings were kept holds only text. It is dropped rather than converted: a base only lets Combine
+    // settle a difference without asking, and the next backup or restore
+    // records a fresh one.
     function staleReconciliationRows(rows){
       const keyOf=row=>String(row&&row.key||''),noteRow=row=>keyOf(row).startsWith(appMeta.reconciliationBaseNotePrefix);
       const base=rows.filter(row=>keyOf(row)===appMeta.reconciliationBase||keyOf(row)===appMeta.reconciliationBaseLegacy||noteRow(row));
-      return base.some(row=>keyOf(row)===appMeta.reconciliationBaseLegacy||noteRow(row)&&!helpers.isNoteKey(row.value&&row.value.key))?base:[];
+      return base.some(row=>keyOf(row)===appMeta.reconciliationBaseLegacy||keyOf(row)===appMeta.reconciliationBase&&typeof row.value?.personalFingerprint!=='string'||noteRow(row)&&(!helpers.isNoteKey(row.value&&row.value.key)||typeof row.value.label!=='string'))?base:[];
     }
     async function migrateReconciliationBase(requireOwnership){
       let removed=0;

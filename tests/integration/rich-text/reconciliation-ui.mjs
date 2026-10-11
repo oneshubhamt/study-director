@@ -68,7 +68,7 @@ const conflict=(key,localValue,incomingValue,{ancestorAvailable=false,ancestorVa
   assert.equal(harness.mounts[0].readOnly,false,'resolved editor must be editable');
   assert.equal(harness.mounts[1].readOnly,true,'imported editor must be read-only');
   assert.equal(descendants(dialog,node=>node.tagName==='TEXTAREA').length,2,'two scratch surfaces are present');
-  byText(dialog,'Use imported').dispatch('click');
+  byText(dialog,'Use the backup’s').dispatch('click');
   byText(dialog,'Apply resolved note').dispatch('click');
   await tick();await tick();
   assert.equal(harness.mounts.length,4,'applying the first conflict mounts the next pair');
@@ -95,7 +95,7 @@ const conflict=(key,localValue,incomingValue,{ancestorAvailable=false,ancestorVa
   // Even if a harness mutates the underlying textarea directly, Use imported must
   // use the immutable imported state rather than treating the right pane as output.
   harness.mounts[1].field.value='TAMPERED-REFERENCE';
-  byText(dialog,'Use imported').dispatch('click');
+  byText(dialog,'Use the backup’s').dispatch('click');
   assert.equal(harness.mounts[0].field.value,'REMOTE-C','Use imported must load the immutable incoming value');
   harness.mounts[0].field.value='CUSTOM RESOLVED';
   harness.mounts[0].field.oninput?.();
@@ -132,7 +132,7 @@ const conflict=(key,localValue,incomingValue,{ancestorAvailable=false,ancestorVa
   harness.mounts[0].field.value='';harness.mounts[0].field.oninput?.();
   byText(dialog,'Apply reflection').dispatch('click');
   assert.ok(dialog.open,'empty custom Diary resolution must remain open');
-  byText(dialog,'Keep local').dispatch('click');
+  byText(dialog,'Keep this device’s').dispatch('click');
   byText(dialog,'Apply reflection').dispatch('click');
   const result=await promise;
   assert.equal(result.notes['2026-09-21'].text,'LOCAL-D2');
@@ -147,7 +147,7 @@ const conflict=(key,localValue,incomingValue,{ancestorAvailable=false,ancestorVa
   const dialog=harness.document.body.children[0];
   assert.ok(dialog,'a one-sided change must still open the review');
   assert.equal(harness.mounts[0].field.value,'SAFE-BASE','the working copy starts from this device');
-  byText(dialog,'Use imported').dispatch('click');byText(dialog,'Apply resolved note').dispatch('click');
+  byText(dialog,'Use the backup’s').dispatch('click');byText(dialog,'Apply resolved note').dispatch('click');
   assert.equal((await promise).notes.Forward.text,'REMOTE-NEW');
 }
 
@@ -158,8 +158,27 @@ const conflict=(key,localValue,incomingValue,{ancestorAvailable=false,ancestorVa
   await tick();await tick();
   const dialog=harness.document.body.children[0];
   assert.equal(harness.mounts[0].field.value,'BACKUP-R');
-  byText(dialog,'Keep local').dispatch('click');byText(dialog,'Apply resolved note').dispatch('click');
+  byText(dialog,'Keep this device’s').dispatch('click');byText(dialog,'Apply resolved note').dispatch('click');
   assert.equal((await promise).notes.Replaced.text,'LOCAL-R');
+}
+
+// One choice settles every note not yet applied; notes already applied keep what the person chose.
+{
+  const harness=createController();
+  const promise=harness.controller.resolve({conflicts:[conflict('First','L1','B1'),conflict('Second','L2','B2'),conflict('Third','L3','B3')],incomingAssets:[]});
+  await tick();await tick();
+  const dialog=harness.document.body.children[0];
+  byText(dialog,'Use the backup’s').dispatch('click');byText(dialog,'Apply resolved note').dispatch('click');await tick();await tick();
+  byText(dialog,'This device’s').dispatch('click');
+  const result=await promise;
+  assert.deepEqual([result.notes.First.text,result.notes.Second.text,result.notes.Third.text],['B1','L2','L3']);
+}
+{
+  const harness=createController();
+  const promise=harness.controller.resolve({conflicts:[conflict('First','L1','B1'),conflict('Second','L2','B2')],incomingAssets:[]});
+  await tick();await tick();
+  byText(harness.document.body.children[0],'The backup’s').dispatch('click');
+  const result=await promise;assert.deepEqual([result.notes.First.text,result.notes.Second.text],['B1','B2']);
 }
 
 // When both sides changed, Smart merge offers the clean three-way merge.
@@ -184,7 +203,7 @@ const conflict=(key,localValue,incomingValue,{ancestorAvailable=false,ancestorVa
   const dialog=harness.document.body.children[0];
   byText(dialog,'Smart merge').dispatch('click');
   assert.equal(harness.mounts[0].field.value,'LOCAL-U|THREEWAY|REMOTE-U','Smart merge must use the ancestor-aware proposal when available');
-  byText(dialog,'Keep local').dispatch('click');
+  byText(dialog,'Keep this device’s').dispatch('click');
   assert.equal(harness.mounts[0].field.value,'LOCAL-U','Keep local must always restore the original local copy');
   byText(dialog,'Apply resolved note').dispatch('click');
   const result=await promise;
@@ -283,4 +302,4 @@ for(const failureAt of [1,2,4]){
   pending[1]();await tick();assert.equal(destroyed.length,2,'late sibling is released once');
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'reconciliation-ui-runtime',checks:70,coverage:['editable resolved editor','read-only imported editor','Smart merge fallback','safe three-way silent resolution','unsafe three-way proposal','manual custom editing','Diary manual-only reconciliation','Keep local reset','Use imported','Apply navigation','transient ranges','checkpoint-backed read-only AssetStore','cancel cleanup','late-mount cancellation','zero persistence port']},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'reconciliation-ui-runtime',checks:70,coverage:['editable resolved editor','read-only imported editor','Smart merge fallback','safe three-way silent resolution','unsafe three-way proposal','manual custom editing','Diary manual-only reconciliation','Keep local reset','Use the backup’s','Apply navigation','transient ranges','checkpoint-backed read-only AssetStore','cancel cleanup','late-mount cancellation','zero persistence port']},null,2));

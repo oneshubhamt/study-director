@@ -183,7 +183,7 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
       return {batches:values.length?1:0};
     },dailyRecordRemove:async date=>{for(let index=importedDailyRecords.length-1;index>=0;index--)if(importedDailyRecords[index].date===date)importedDailyRecords.splice(index,1);return true;},dailyRecordTimestamp:value=>Date.parse(value?.savedAt||value?.updatedAt||'')||0,
     notesExportPayload:()=>currentNotes,notesReadFreshPayload:async()=>currentNotes,notesReadFreshItems:async keys=>(keys||[]).map(key=>currentNotes[key]||null),notesFlush:async()=>true,notesNormalizePayload:value=>Object.fromEntries(Object.entries(value||{}).map(([key,item])=>[key,normalizeAreaNote(item,key)]).filter(([,item])=>item)),
-    notesIsLiveKey:key=>!String(key).startsWith('~'),notesAlignByTitle:value=>value,notesFailure:()=>noteFailure,
+    notesTrashKey:key=>String(key).startsWith('~')?'':'~deleted '+key,notesAlignByTitle:value=>value,notesFailure:()=>noteFailure,
     restoreJournalPrepare:async value=>{restoreJournal={state:{id:value.id},payload:value};return restoreJournal;},
     restoreJournalRead:async()=>restoreJournal,
     restoreJournalMark:async(id,phase)=>{assert.equal(id,restoreJournal.state.id);restoreJournal.state.phase=phase;return restoreJournal.state;},

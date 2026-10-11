@@ -77,6 +77,11 @@ await h.app.notes.reconcile({[obsoleteId]:{version:3,key:obsoleteId,label:'obsol
 noteLedger=await h.app.deletionRecovery.areaNotes();
 assert.equal(noteLedger.some(row=>row.key===obsoleteId),false,'Bringing a note back must atomically retire its deletion marker.');
 assert.deepEqual(Object.values(h.app.notes.exportPayload()).map(entry=>entry.label).sort(),['obsolete-note','obsolete-note (2)'],'two notes never share a title');
+// A note deleted elsewhere (a combine applying a deletion) moves to Recently deleted here, as deleting it here would.
+await h.app.notes.reconcile({},[{key:obsoleteId,deletedAt:'2026-09-18T00:00:00.000Z'}]);
+const retired=h.app.notes.exportPayload()['~deleted '+obsoleteId];
+assert.equal(h.app.notes.exportPayload()[obsoleteId],undefined);assert.equal(retired&&retired.text,'restored text','the deleted note’s text stays in Recently deleted');
+assert.equal((await h.app.deletionRecovery.areaNotes()).some(row=>row.key===obsoleteId),true,'and its deletion is recorded');
 
 // Review working state now belongs to Active Session and historical reflection
 // belongs to the Daily Record. There is no separate Reflection Draft register or

@@ -210,11 +210,16 @@ await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/backup
 assert.equal(metadataRows.get('repositoryIntegrityScrub').value,malformedScrub,'an unknown historical shape is preserved untouched');
 metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',version:1,value:scrub,updatedAt:'2026-09-20T03:00:00.000Z'});
 // A current merge base, keyed by note id, stays; one from before ids goes whole.
-const baseId=noteId('Ethics'),currentBase={format:'study-director.reconciliation-base',version:2,checkpointId:'cp_'+'2'.repeat(32),establishedAt:'2026-09-20T00:00:00.000Z',noteCount:1,noteKeyFingerprint:await ReconciliationCodec.keyFingerprint([baseId])};
+const baseId=noteId('Ethics'),currentBase={format:'study-director.reconciliation-base',version:2,checkpointId:'cp_'+'2'.repeat(32),establishedAt:'2026-09-20T00:00:00.000Z',noteCount:1,noteKeyFingerprint:await ReconciliationCodec.keyFingerprint([baseId]),personalFingerprint:''};
 metadataRows.set('reconciliationBase',{key:'reconciliationBase',version:1,value:currentBase,updatedAt:'2026-09-20T00:00:00.000Z'});
-metadataRows.set('reconciliationBaseNote:'+baseId,{key:'reconciliationBaseNote:'+baseId,version:1,value:{format:'study-director.reconciliation-base-note',version:1,key:baseId,text:'ethics base'},updatedAt:'2026-09-20T00:00:00.000Z'});
+metadataRows.set('reconciliationBaseNote:'+baseId,{key:'reconciliationBaseNote:'+baseId,version:1,value:{format:'study-director.reconciliation-base-note',version:1,key:baseId,label:'Ethics',text:'ethics base'},updatedAt:'2026-09-20T00:00:00.000Z'});
 await Host.createFacade(malformedInput).migrateLive();
 assert.equal(metadataRows.get('reconciliationBase').value,currentBase,'a merge base keyed by note id is current');assert.equal(metadataRows.get('reconciliationBaseNote:'+baseId).value.text,'ethics base');
+// One from before titles were kept holds only text; it goes whole too.
+const untitledId=noteId('Polity');metadataRows.set('reconciliationBaseNote:'+untitledId,{key:'reconciliationBaseNote:'+untitledId,version:1,value:{format:'study-director.reconciliation-base-note',version:1,key:untitledId,text:'polity base'},updatedAt:'2026-09-20T00:00:00.000Z'});
+await Host.createFacade(malformedInput).migrateLive();
+assert.deepEqual([...metadataRows.keys()].filter(key=>key.startsWith('reconciliationBase')),[],'a base row without a title takes the whole base with it');
+metadataRows.set('reconciliationBase',{key:'reconciliationBase',version:1,value:currentBase,updatedAt:'2026-09-20T00:00:00.000Z'});
 metadataRows.set('reconciliationBase.v1',{key:'reconciliationBase.v1',version:1,value:{format:'study-director.reconciliation-base',version:1,notes:['not a map']},updatedAt:'2026-09-21T00:00:00.000Z'});
 await Host.createFacade(malformedInput).migrateLive();
 assert.deepEqual([...metadataRows.keys()].filter(key=>key.startsWith('reconciliationBase')),[],'any single-row base, whatever its shape, takes the whole base with it');

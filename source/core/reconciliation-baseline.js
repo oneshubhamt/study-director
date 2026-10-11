@@ -13,24 +13,29 @@ registry.define('reconciliation-baseline',1,()=>{
     exactObject(input,['limits','isNoteKey'],'Reconciliation baseline codec input');
     if(!Object.isFrozen(input.limits)||typeof input.isNoteKey!=='function')throw new TypeError('Reconciliation baseline codec dependencies are invalid.');
     const limits=input.limits,isNoteKey=input.isNoteKey,encoder=new TextEncoder();
-    // The base holds notes under their stored keys.
+    // The base holds each note's title and text under its stored key: what
+    // both sides last shared, so Combine can tell which side changed which.
     function cleanKey(raw){const key=String(raw||'');return isNoteKey(key)?key:'';}
     function textValue(raw){const text=String(raw??'');return encoder.encode(text).byteLength<=Number(limits.maxRichTextBytes||2097152)?text:null;}
+    function labelValue(raw){return typeof raw==='string'&&raw.length<=Number(limits.maxAreaNameChars||160)?raw:null;}
+    // Plans and settings are kept as one fingerprint ('' when unknown).
+    function personalFingerprint(raw){return typeof raw==='string'&&/^(?:[a-f0-9]{64})?$/u.test(raw);}
+    function noteState(raw){if(!exactKeys(raw,['label','text']))return null;const label=labelValue(raw.label),text=textValue(raw.text);return label===null||text===null?null:freeze({label,text});}
     function normalizeHeader(value){
-      if(!value||!exactKeys(value,['format','version','checkpointId','establishedAt','noteCount','noteKeyFingerprint'])||value.format!=='study-director.reconciliation-base'||Number(value.version)!==2||!/^cp_[a-f0-9]{32}$/u.test(String(value.checkpointId||''))||!Number.isFinite(Date.parse(String(value.establishedAt||''))))return null;
-      const noteCount=Number(value.noteCount);if(!Number.isInteger(noteCount)||noteCount<0||noteCount>Number(limits.maxOngoingNotes||1000)||!/^[a-f0-9]{64}$/u.test(String(value.noteKeyFingerprint||'')))return null;
-      return freeze({format:'study-director.reconciliation-base',version:2,checkpointId:String(value.checkpointId),establishedAt:new Date(String(value.establishedAt)).toISOString(),noteCount,noteKeyFingerprint:String(value.noteKeyFingerprint)});
+      if(!value||!exactKeys(value,['format','version','checkpointId','establishedAt','noteCount','noteKeyFingerprint','personalFingerprint'])||value.format!=='study-director.reconciliation-base'||Number(value.version)!==2||!/^cp_[a-f0-9]{32}$/u.test(String(value.checkpointId||''))||!Number.isFinite(Date.parse(String(value.establishedAt||''))))return null;
+      const noteCount=Number(value.noteCount);if(!Number.isInteger(noteCount)||noteCount<0||noteCount>Number(limits.maxOngoingNotes||1000)||!/^[a-f0-9]{64}$/u.test(String(value.noteKeyFingerprint||''))||!personalFingerprint(value.personalFingerprint))return null;
+      return freeze({format:'study-director.reconciliation-base',version:2,checkpointId:String(value.checkpointId),establishedAt:new Date(String(value.establishedAt)).toISOString(),noteCount,noteKeyFingerprint:String(value.noteKeyFingerprint),personalFingerprint:String(value.personalFingerprint)});
     }
     function normalizeNote(value,context={}){
-      if(!value||!exactKeys(value,['format','version','key','text'])||value.format!=='study-director.reconciliation-base-note'||Number(value.version)!==1)return null;
-      const key=cleanKey(value.key),text=textValue(value.text),suffix=String(context&&context.suffix||'');if(!key||text===null||suffix!==encodeURIComponent(key))return null;
-      return freeze({format:'study-director.reconciliation-base-note',version:1,key,text});
+      if(!value||!exactKeys(value,['format','version','key','label','text'])||value.format!=='study-director.reconciliation-base-note'||Number(value.version)!==1)return null;
+      const key=cleanKey(value.key),state=noteState({label:value.label,text:value.text}),suffix=String(context&&context.suffix||'');if(!key||!state||suffix!==encodeURIComponent(key))return null;
+      return freeze({format:'study-director.reconciliation-base-note',version:1,key,label:state.label,text:state.text});
     }
     function normalizeKeys(values){
       if(!Array.isArray(values))return null;const out=[],seen=new Set();for(const raw of values){const key=cleanKey(raw);if(!key||seen.has(key))return null;seen.add(key);out.push(key);}if(out.length>Number(limits.maxOngoingNotes||1000))return null;return freeze(out.sort());
     }
     function normalizeUpdates(value){
-      if(!value||typeof value!=='object'||Array.isArray(value))return null;const out=Object.create(null);for(const [rawKey,rawText] of Object.entries(value)){const key=cleanKey(rawKey),text=textValue(rawText);if(!key||text===null)return null;out[key]=text;}return freeze(out);
+      if(!value||typeof value!=='object'||Array.isArray(value))return null;const out=Object.create(null);for(const [rawKey,raw] of Object.entries(value)){const key=cleanKey(rawKey),state=noteState(raw);if(!key||!state)return null;out[key]=state;}return freeze(out);
     }
     async function keyFingerprint(keys){
       const normalized=normalizeKeys(keys);if(!normalized)throw new TypeError('Reconciliation baseline note keys are invalid.');
@@ -45,13 +50,13 @@ registry.define('reconciliation-baseline',1,()=>{
     if(!codec||codec.format!=='study-director.reconciliation-baseline-codec'||codec.contractVersion!==1)throw new TypeError('Reconciliation baseline codec is invalid.');
     if(!meta||meta.format!=='study-director.app-meta-owner'||meta.contractVersion!==1)throw new TypeError('Reconciliation baseline appMeta capability is invalid.');
     for(const name of ['read','readEntry','write','remove','list','transaction','view'])if(typeof meta[name]!=='function')throw new TypeError('Reconciliation baseline appMeta capability is missing '+name+'.');
-    const noteValue=(key,text)=>freeze({format:'study-director.reconciliation-base-note',version:1,key,text:String(text??'')});
+    const noteValue=(key,state)=>freeze({format:'study-director.reconciliation-base-note',version:1,key,label:state.label,text:state.text});
     async function readHeader(){return codec.normalizeHeader(await meta.read(families.header).catch(()=>null));}
     async function readNotes(keys){
-      const normalized=codec.normalizeKeys(keys);if(!normalized)return freeze({});const rows=await Promise.all(normalized.map(async key=>{const value=await meta.read(families.notes,encodeURIComponent(key)).catch(()=>null),note=codec.normalizeNote(value,{suffix:encodeURIComponent(key)});return note?freeze([key,note.text]):null;})),out=Object.create(null);for(const row of rows)if(row)out[row[0]]=row[1];return freeze(out);
+      const normalized=codec.normalizeKeys(keys);if(!normalized)return freeze({});const rows=await Promise.all(normalized.map(async key=>{const value=await meta.read(families.notes,encodeURIComponent(key)).catch(()=>null),note=codec.normalizeNote(value,{suffix:encodeURIComponent(key)});return note?freeze([key,freeze({label:note.label,text:note.text})]):null;})),out=Object.create(null);for(const row of rows)if(row)out[row[0]]=row[1];return freeze(out);
     }
     async function write(checkpointId,spec){
-      const id=String(checkpointId||'');if(!/^cp_[a-f0-9]{32}$/u.test(id)||!spec||!exactKeys(spec,['format','version','full','baseCheckpointId','noteCount','noteKeyFingerprint','noteKeys','updates','deletes'])||spec.format!=='study-director.reconciliation-base-update'||Number(spec.version)!==1)return false;
+      const id=String(checkpointId||'');if(!/^cp_[a-f0-9]{32}$/u.test(id)||!spec||!exactKeys(spec,['format','version','full','baseCheckpointId','noteCount','noteKeyFingerprint','personalFingerprint','noteKeys','updates','deletes'])||spec.format!=='study-director.reconciliation-base-update'||Number(spec.version)!==1)return false;
       const full=spec.full===true,updates=codec.normalizeUpdates(spec.updates),deletes=codec.normalizeKeys(spec.deletes||[]),baseCheckpointId=String(spec.baseCheckpointId||'');if(!updates||!deletes||(!full&&!/^cp_[a-f0-9]{32}$/u.test(baseCheckpointId)))return false;
       let noteKeys=null,noteCount=Number(spec.noteCount),fingerprint=String(spec.noteKeyFingerprint||'');
       if(full){
@@ -61,7 +66,9 @@ registry.define('reconciliation-baseline',1,()=>{
         if(spec.noteKeys!==null||!Number.isInteger(noteCount)||noteCount<0||!/^[a-f0-9]{64}$/u.test(fingerprint))return false;
         const deleteSet=new Set(deletes);for(const key of Object.keys(updates))if(deleteSet.has(key))return false;
       }
-      const establishedAt=new Date().toISOString(),header=codec.normalizeHeader({format:'study-director.reconciliation-base',version:2,checkpointId:id,establishedAt,noteCount,noteKeyFingerprint:fingerprint});if(!header)return false;
+      // An update that did not read plans and settings keeps the base's fingerprint (null).
+      const establishedAt=new Date().toISOString(),personal=spec.personalFingerprint,headerFor=current=>codec.normalizeHeader({format:'study-director.reconciliation-base',version:2,checkpointId:id,establishedAt,noteCount,noteKeyFingerprint:fingerprint,personalFingerprint:personal===null?String(current&&current.personalFingerprint||''):personal});
+      if((personal===null&&full)||!headerFor(null))return false;
       return meta.transaction('readwrite',(view,tx,finish)=>{
         const currentHandle=view.get(families.header),allHandle=full?view.getAll(families.notes):null;let currentReady=false,allReady=!allHandle;
         const fail=error=>{try{tx.abort();}catch{}finish(false,error);};
@@ -71,8 +78,8 @@ registry.define('reconciliation-baseline',1,()=>{
           if(!full&&(!current||current.checkpointId!==baseCheckpointId)){tx.oncomplete=()=>finish(true,false);return;}
           if(full){const suffixes=new Set(noteKeys.map(key=>encodeURIComponent(key)));for(const entry of existing)if(!suffixes.has(String(entry.suffix||'')))view.remove(families.notes,entry.suffix);}
           for(const key of deletes)view.remove(families.notes,encodeURIComponent(key));
-          for(const [key,text] of Object.entries(updates))view.put(families.notes,noteValue(key,text),{suffix:encodeURIComponent(key),updatedAt:establishedAt});
-          view.put(families.header,header,{updatedAt:establishedAt});tx.oncomplete=()=>finish(true,true);
+          for(const [key,state] of Object.entries(updates))view.put(families.notes,noteValue(key,state),{suffix:encodeURIComponent(key),updatedAt:establishedAt});
+          view.put(families.header,headerFor(current),{updatedAt:establishedAt});tx.oncomplete=()=>finish(true,true);
         };
         currentHandle.request.onerror=()=>fail(currentHandle.request.error||new Error('Reconciliation baseline header read failed.'));currentHandle.request.onsuccess=()=>{currentReady=true;apply();};
         if(allHandle){allHandle.request.onerror=()=>fail(allHandle.request.error||new Error('Reconciliation baseline note scan failed.'));allHandle.request.onsuccess=()=>{allReady=true;apply();};}

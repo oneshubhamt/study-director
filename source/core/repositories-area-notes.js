@@ -647,7 +647,12 @@ const repository=(()=>{
     if(saveFailed)throw new Error(saveMessage||'current notes are not safely stored');
     const previous=normalizePayload(notes),imported=normalizePayload(payload,{strictRich:true}),deletedEntries=normalizeAreaNoteDeletions(deletions);
     const next=merge?Object.assign(previous,imported):imported;
-    for(const entry of deletedEntries)delete next[entry.key];
+    // A note deleted elsewhere moves to Recently deleted here, as trash() does,
+    // unless the payload already brings its deleted copy.
+    for(const entry of deletedEntries){
+      const current=next[entry.key],trashKey=NoteKeys.trash(entry.key);delete next[entry.key];
+      if(hasContent(current)&&trashKey&&!next[trashKey])next[trashKey]={version:DATA_CONTRACT.schemas.AreaNote.version,key:trashKey,label:current.label,text:current.text,updatedAt:nextRevision(current.updatedAt)};
+    }
     const over=Object.keys(next).length-APP_LIMITS.maxOngoingNotes,room=oldestTrashKeys(next,over);
     if(room.length<over)throw tooManyNotes(Object.keys(next).length-room.length);
     for(const key of room)delete next[key];

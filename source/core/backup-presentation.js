@@ -17,12 +17,13 @@ registry.define('backup-presentation',1,()=>{
   // it is and stops, unchanged, at anything that would need a choice.
   const RESTORE_CHOICES=freeze({
     missing:freeze({value:'missing',label:'Add only what’s missing',description:'Bring back Saved Days and attachments this device doesn’t have. Nothing you have now changes.'}),
-    combine:freeze({value:'combine',label:'Combine with current data',description:'Keep current data and review genuine differences before applying them.'}),
-    replace:freeze({value:'replace',label:'Replace current data',kind:'danger',description:'Make this backup authoritative. Current portable data not in this backup will be removed.'}),
+    combine:freeze({value:'combine',label:'Combine with current data',description:'Add what’s new. Notes, plans and settings changed on one side only since your last handoff are taken for you; you choose the rest. Nothing is deleted unless it was deleted on purpose.'}),
+    replace:freeze({value:'replace',label:'Replace current data',kind:'danger',description:'Make this device match this backup. You choose whether to keep what isn’t in it; notes it deleted go to Recently deleted.'}),
     needsDecision:'Some data differs from this backup and needs your choice, so nothing was changed. Use Combine to review the differences.'
   });
-  function outcome(kind,label,convergence){
-    const message=kind==='restore-version'?'Backup restored locally and verified.':'Backup combined locally and verified.',external=convergence?.source||convergence,parts=[message];
+  // detail, when given, says what the restore or combine changed.
+  function outcome(kind,label,convergence,detail=''){
+    const message=String(detail||'')||(kind==='restore-version'?'Backup restored locally and verified.':'Backup combined locally and verified.'),external=convergence?.source||convergence,parts=[message];
     const append=(name,state)=>{if(state?.status==='pending')parts.push(`${name} backup update is pending.`);else if(state?.status==='completed')parts.push(`${name} backup state is verified.`);else if(state?.status==='failed')parts.push(`${name} backup status needs attention.`);};
     append(label,external);for(const other of convergence?.others||[])append(other.label,other);return parts.join(' ');
   }

@@ -22,16 +22,16 @@ const cp=n=>'cp_'+String(n).padStart(32,'0');
 const identity=async keys=>({noteCount:keys.length,noteKeyFingerprint:await codec.keyFingerprint(keys)});
 // The first baseline is a full write; older single-row baselines are converted
 // once by the compatibility host (tests/integration/storage/compatibility-host.mjs).
-const seed=freeze({format:'study-director.reconciliation-base-update',version:1,full:true,baseCheckpointId:'',noteCount:2,noteKeyFingerprint:'',noteKeys:freeze([E,P]),updates:freeze({[E]:'ethics v1',[P]:'polity v1'}),deletes:freeze([])});
+const seed=freeze({format:'study-director.reconciliation-base-update',version:1,full:true,baseCheckpointId:'',noteCount:2,noteKeyFingerprint:'',personalFingerprint:'',noteKeys:freeze([E,P]),updates:freeze({[E]:freeze({label:'Ethics',text:'ethics v1'}),[P]:freeze({label:'Polity',text:'polity v1'})}),deletes:freeze([])});
 assert.equal(await store.write(cp(1),seed),true);
 const first=await store.readHeader();
 assert.equal(first.version,2);assert.equal(first.checkpointId,cp(1));assert.equal(first.noteCount,2);assert.match(first.noteKeyFingerprint,/^[a-f0-9]{64}$/u);
-assert.equal(sharedStores.meta.get('reconciliationBaseNote:'+E).value.text,'ethics v1');
+assert.equal(sharedStores.meta.get('reconciliationBaseNote:'+E).value.text,'ethics v1');assert.equal(sharedStores.meta.get('reconciliationBaseNote:'+E).value.label,'Ethics','the base keeps each note’s title too');
 assert.equal(sharedStores.meta.get('reconciliationBaseNote:'+P).value.text,'polity v1');
 
 const polityEnvelopeBefore=structuredClone(sharedStores.meta.get('reconciliationBaseNote:'+P)),ethicsEnvelopeBefore=structuredClone(sharedStores.meta.get('reconciliationBaseNote:'+E));
 await new Promise(resolve=>setTimeout(resolve,2));
-const editIdentity=await identity([E,P]),edit=freeze({format:'study-director.reconciliation-base-update',version:1,full:false,baseCheckpointId:cp(1),...editIdentity,noteKeys:null,updates:freeze({[E]:'ethics v2'}),deletes:freeze([])});
+const editIdentity=await identity([E,P]),edit=freeze({format:'study-director.reconciliation-base-update',version:1,full:false,baseCheckpointId:cp(1),...editIdentity,personalFingerprint:null,noteKeys:null,updates:freeze({[E]:freeze({label:'Ethics',text:'ethics v2'})}),deletes:freeze([])});
 assert.equal(await store.write(cp(2),edit),true);
 assert.equal((await store.readHeader()).checkpointId,cp(2));
 assert.equal(sharedStores.meta.get('reconciliationBaseNote:'+E).value.text,'ethics v2');
@@ -40,19 +40,28 @@ assert.deepEqual(sharedStores.meta.get('reconciliationBaseNote:'+P),polityEnvelo
 
 const ethicsEnvelopeAfterEdit=structuredClone(sharedStores.meta.get('reconciliationBaseNote:'+E));
 await new Promise(resolve=>setTimeout(resolve,2));
-const noopIdentity=await identity([E,P]),noop=freeze({format:'study-director.reconciliation-base-update',version:1,full:false,baseCheckpointId:cp(2),...noopIdentity,noteKeys:null,updates:freeze({}),deletes:freeze([])});
+const noopIdentity=await identity([E,P]),noop=freeze({format:'study-director.reconciliation-base-update',version:1,full:false,baseCheckpointId:cp(2),...noopIdentity,personalFingerprint:null,noteKeys:null,updates:freeze({}),deletes:freeze([])});
 assert.equal(await store.write(cp(3),noop),true);assert.deepEqual(sharedStores.meta.get('reconciliationBaseNote:'+E),ethicsEnvelopeAfterEdit,'unchanged checkpoint must advance only the tiny header');assert.deepEqual(sharedStores.meta.get('reconciliationBaseNote:'+P),polityEnvelopeBefore);
 
-const removeIdentity=await identity([E]),remove=freeze({format:'study-director.reconciliation-base-update',version:1,full:false,baseCheckpointId:cp(3),...removeIdentity,noteKeys:null,updates:freeze({}),deletes:freeze([P])});
+const removeIdentity=await identity([E]),remove=freeze({format:'study-director.reconciliation-base-update',version:1,full:false,baseCheckpointId:cp(3),...removeIdentity,personalFingerprint:null,noteKeys:null,updates:freeze({}),deletes:freeze([P])});
 assert.equal(await store.write(cp(4),remove),true);assert.equal(sharedStores.meta.has('reconciliationBaseNote:'+P),false,'deleted note must remove only its reconciliation row');assert.equal((await store.readHeader()).noteCount,1);
 
-const headerBeforeStale=await store.readHeader(),staleIdentity=await identity([E]),stale=freeze({format:'study-director.reconciliation-base-update',version:1,full:false,baseCheckpointId:cp(2),...staleIdentity,noteKeys:null,updates:freeze({[E]:'must not commit'}),deletes:freeze([])});
-assert.equal(await store.write(cp(5),stale),false,'a stale checkpoint baseline must not overwrite newer reconciliation ancestry');assert.equal((await store.readHeader()).checkpointId,headerBeforeStale.checkpointId);assert.equal((await store.readNotes([E]))[E],'ethics v2');
+const headerBeforeStale=await store.readHeader(),staleIdentity=await identity([E]),stale=freeze({format:'study-director.reconciliation-base-update',version:1,full:false,baseCheckpointId:cp(2),...staleIdentity,personalFingerprint:null,noteKeys:null,updates:freeze({[E]:freeze({label:'Ethics',text:'must not commit'})}),deletes:freeze([])});
+assert.equal(await store.write(cp(5),stale),false,'a stale checkpoint baseline must not overwrite newer reconciliation ancestry');assert.equal((await store.readHeader()).checkpointId,headerBeforeStale.checkpointId);assert.equal((await store.readNotes([E]))[E].text,'ethics v2');
 
 const scansBefore=harness.idbReads.metaGetAll,selected=await store.readNotes([E,M]);
-assert.deepEqual(Object.fromEntries(Object.entries(selected)),{[E]:'ethics v2'});assert.equal(harness.idbReads.metaGetAll,scansBefore,'lazy reconciliation reads must use keyed rows, not a full appMeta scan');
+assert.deepEqual(Object.fromEntries(Object.entries(selected)),{[E]:{label:'Ethics',text:'ethics v2'}});assert.equal(harness.idbReads.metaGetAll,scansBefore,'lazy reconciliation reads must use keyed rows, not a full appMeta scan');
 
-const full=freeze({format:'study-director.reconciliation-base-update',version:1,full:true,baseCheckpointId:'',noteCount:1,noteKeyFingerprint:'',noteKeys:freeze([S]),updates:freeze({[S]:'essay baseline'}),deletes:freeze([])});
-assert.equal(await store.write(cp(6),full),true);assert.deepEqual(Object.fromEntries(Object.entries(await store.readNotes([S,E]))),{[S]:'essay baseline'},'rare exact/full baseline replacement must remove obsolete per-note rows atomically');
+const full=freeze({format:'study-director.reconciliation-base-update',version:1,full:true,baseCheckpointId:'',noteCount:1,noteKeyFingerprint:'',personalFingerprint:'',noteKeys:freeze([S]),updates:freeze({[S]:freeze({label:'Essay',text:'essay baseline'})}),deletes:freeze([])});
+assert.equal(await store.write(cp(6),full),true);assert.deepEqual(Object.fromEntries(Object.entries(await store.readNotes([S,E]))),{[S]:{label:'Essay',text:'essay baseline'}},'rare exact/full baseline replacement must remove obsolete per-note rows atomically');
+
+// Plans and settings are one fingerprint: an update that did not read them keeps the base's.
+const sIdentity=await identity([S]),personalA='a'.repeat(64),personalB='b'.repeat(64);
+assert.equal(await store.write(cp(7),freeze({...full,personalFingerprint:personalA})),true);assert.equal((await store.readHeader()).personalFingerprint,personalA);
+assert.equal(await store.write(cp(8),freeze({format:'study-director.reconciliation-base-update',version:1,full:false,baseCheckpointId:cp(7),...sIdentity,personalFingerprint:null,noteKeys:null,updates:freeze({}),deletes:freeze([])})),true);
+assert.equal((await store.readHeader()).personalFingerprint,personalA,'an update that did not read plans and settings keeps their fingerprint');
+assert.equal(await store.write(cp(9),freeze({format:'study-director.reconciliation-base-update',version:1,full:false,baseCheckpointId:cp(8),...sIdentity,personalFingerprint:personalB,noteKeys:null,updates:freeze({}),deletes:freeze([])})),true);
+assert.equal((await store.readHeader()).personalFingerprint,personalB);
+assert.equal(await store.write(cp(10),freeze({...full,personalFingerprint:null})),false,'a full base always states its plans-and-settings fingerprint');
 
 console.log(JSON.stringify({status:'PASS',suite:'reconciliation-baseline-v2',unchangedCheckpoint:'header-only',editedNote:'one-row',deletedNote:'one-row-delete',lazyReads:'keyed-only',staleBase:'fail-closed'},null,2));

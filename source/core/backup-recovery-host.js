@@ -333,7 +333,7 @@ registry.define('backup-recovery-host',1,()=>{
         if(choice==='missing'&&String(result?.reason||'')==='needs-decision'){setHistoryStatus(presentation.restoreChoices.needsDecision,true,'cancelled');return false;}
         if(result&&result.cancelled||result&&result.reason==='cancelled'){setHistoryStatus('Recovery cancelled safely.',true,'cancelled');return false;}
         if(result&&result.ok===false){const message=userMessage(result.error,'The selected backup could not be applied safely.');setHistoryStatus(message,false);return false;}
-        setHistoryStatus(presentation.outcome(choice==='replace'?'restore-version':'bring-in',location.sourceLabel,result?.convergence));lastEntries=freeze([]);setOperationBusy(false);close();
+        setHistoryStatus(presentation.outcome(choice==='replace'?'restore-version':'bring-in',location.sourceLabel,result?.convergence,result?.summary));lastEntries=freeze([]);setOperationBusy(false);close();
         if(note)try{note.onRestored(freeze({exportedAt:location.exportedAt,sourceLabel:location.sourceLabel}));}catch(error){input.diagnostics.capture('backup.note-restored',error,'warn');}
         return true;
       }catch(error){clearHistoryProgress();const cancelled=error?.name==='AbortError'||String(error?.code||'')==='STUDY_DIRECTOR_IMPORT_CANCELLED',message=cancelled?'Recovery cancelled safely.':userMessage(error,'The selected backup could not be applied safely.');setHistoryStatus(message,cancelled,cancelled?'cancelled':'failed');if(!cancelled)input.diagnostics.capture('backup.provider-scoped-recovery',error,'warn');return false;}

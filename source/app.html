@@ -4314,22 +4314,17 @@ function exactAppMetaStorage(capability,family,key,label){
 }
 async function readHostAppMetaValue(key){return HostAppMeta.read(exactAppMetaFamily(HostAppMeta,key,'host app metadata'));}
 function writeHostAppMetaValue(key,value,options={}){return HostAppMeta.write(exactAppMetaFamily(HostAppMeta,key,'host app metadata'),value,options);}
-function normalizeReconciliationFullPayload(notesPayload){
-  const source=notesPayload&&typeof notesPayload==='object'&&!Array.isArray(notesPayload)?notesPayload:{},notes=Object.create(null),structured=Object.create(null);
-  for(const [rawKey,rawValue] of Object.entries(source)){
-    const key=normalizeAreaName(rawKey);if(!key)continue;
-    if(typeof rawValue==='string')notes[key]=rawValue;
-    else if(rawValue&&typeof rawValue==='object'&&typeof rawValue.text==='string'&&Object.keys(rawValue).every(name=>name==='text'))notes[key]=rawValue.text;
-    else structured[key]=rawValue;
-  }
-  const normalized=AppData.notes.normalizePayload(structured);for(const key of Object.keys(normalized))notes[key]=String(normalized[key]?.text||'');
-  const noteKeys=Object.keys(notes).sort(),updates=Object.create(null);for(const key of noteKeys)updates[key]=String(notes[key]??'');
-  return Object.freeze({format:'study-director.reconciliation-base-update',version:1,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',noteKeys:Object.freeze(noteKeys),updates:Object.freeze(updates),deletes:Object.freeze([])});
+// A combine or restore records the backup's notes, and the fingerprint of its
+// plans and settings, as the new shared base.
+function reconciliationFullUpdate(notesPayload,personalFingerprint){
+  const notes=AppData.notes.normalizePayload(notesPayload||{}),noteKeys=Object.keys(notes).sort(),updates=Object.create(null);
+  for(const key of noteKeys)updates[key]=Object.freeze({label:String(notes[key].label||''),text:String(notes[key].text||'')});
+  return Object.freeze({format:'study-director.reconciliation-base-update',version:1,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:String(personalFingerprint||''),noteKeys:Object.freeze(noteKeys),updates:Object.freeze(updates),deletes:Object.freeze([])});
 }
 async function readReconciliationBase(){return ReconciliationBaselineStore.readHeader();}
 async function readReconciliationBaseNotes(keys){return ReconciliationBaselineStore.readNotes(keys);}
-async function writeReconciliationBase(checkpointId,payload){
-  const spec=payload&&payload.format==='study-director.reconciliation-base-update'&&Number(payload.version)===1?payload:normalizeReconciliationFullPayload(payload);
+async function writeReconciliationBase(checkpointId,payload,personalFingerprint=''){
+  const spec=payload&&payload.format==='study-director.reconciliation-base-update'&&Number(payload.version)===1?payload:reconciliationFullUpdate(payload,personalFingerprint);
   return ReconciliationBaselineStore.write(checkpointId,spec);
 }
 const VERIFIED_RECOVERY_META_KEY=APP_META_KEYS.verifiedRecoveryBackups;
@@ -8457,7 +8452,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     notesFlush:options=>AppData.notes.flush(options),
     notesNormalizePayload:value=>AppData.notes.normalizePayload(value),
     notesAlignByTitle:(value,deletedIds)=>AppData.notes.alignByTitle(value,deletedIds),
-    notesIsLiveKey:key=>DailyRecordCodec.areaNoteKeys.isId(key),
+    notesTrashKey:key=>DailyRecordCodec.areaNoteKeys.trash(key),
     notesFailure:()=>AppData.notes.failure(),
     restoreJournalPrepare:async value=>{const backupFile=await Exports.run('file.persist',{file:value.blob});const {blob,...metadata}=value;return AppData.restoreJournal.prepare({...metadata,backupFile});},
     restoreJournalRead:async()=>{const journal=await AppData.restoreJournal.read();if(!journal)return null;const ref=journal.payload.backupFile;return ref?{...journal,payload:{...journal.payload,blob:await Exports.run('file.read',{ref})}}:journal;},
@@ -8491,7 +8486,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     deletionRecoveryClearAttachment:assetId=>AppData.deletionRecovery.clearAttachment(assetId),
     reconciliationBaseRead:()=>readReconciliationBase(),
     reconciliationBaseReadNotes:keys=>readReconciliationBaseNotes(keys),
-    reconciliationBaseWrite:(checkpointId,notes)=>writeReconciliationBase(checkpointId,notes)
+    reconciliationBaseWrite:(checkpointId,notes,personalFingerprint)=>writeReconciliationBase(checkpointId,notes,personalFingerprint)
   }),
   assets:Object.freeze({
     get:assetId=>AttachmentStorage.get(assetId),

@@ -1274,7 +1274,7 @@ registry.define('backup-provider',1,input=>{
       if(result&&result.cancelled){const message=String(result.reason||'').startsWith('note-')||result.reason==='needs-decision'?'No changes were made.':'Combine cancelled.';statusText(message);finishForegroundView(selected,{message,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({...result,cancelled:true});}
       const convergence=result&&result.managedRecovery&&result.managedRecovery.present||freeze({status:'pending',source:freeze({status:'failed',reason:'post-operation backup status unavailable'}),others:freeze([])});
       const sourceReady=convergence.source&&(convergence.source.status==='completed'||convergence.source.status==='pending'&&convergence.source.retryQueued===true);
-      const finalMessage=presentation.outcome('bring-in',selected.label,convergence);statusText(finalMessage,sourceReady);finishForegroundView(selected,{message:finalMessage,ok:true});
+      const finalMessage=presentation.outcome('bring-in',selected.label,convergence,result&&result.summary);statusText(finalMessage,sourceReady);finishForegroundView(selected,{message:finalMessage,ok:true});
 
       OperationDiagnostics.finish({cancelled:false},traceId);return freeze({...result,convergence,exportedAt});
     }catch(error){
@@ -1305,7 +1305,7 @@ registry.define('backup-provider',1,input=>{
       if(result&&result.cancelled){statusText('Version restore cancelled.');finishForegroundView(selected,{message:'Version restore cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return result;}
       const convergence=result&&result.managedRecovery&&result.managedRecovery.present||freeze({status:'pending',source:freeze({status:'failed',reason:'post-operation backup status unavailable'}),others:freeze([])});
       const sourceReady=convergence.source&&convergence.source.status==='completed';
-      const finalMessage=presentation.outcome('restore-version',selected.label,convergence);statusText(finalMessage,sourceReady);finishForegroundView(selected,{message:finalMessage,ok:true});
+      const finalMessage=presentation.outcome('restore-version',selected.label,convergence,result&&result.summary);statusText(finalMessage,sourceReady);finishForegroundView(selected,{message:finalMessage,ok:true});
 
       OperationDiagnostics.finish({cancelled:false},traceId);return Object.freeze({...result,convergence});
     }catch(error){

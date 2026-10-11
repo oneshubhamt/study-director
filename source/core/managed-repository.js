@@ -9,7 +9,7 @@ registry.define('managed-repository',1,()=>{
   const freeze=Object.freeze;
   const PORT_FIELDS=freeze({
     configuration:freeze(['backupVersion','limits','logicalCaptureFormat','logicalCaptureVersion']),
-    persistence:freeze(['reconciliationBaseRead','reconciliationBaseWrite']),
+    persistence:freeze(['reconciliationBaseRead','reconciliationBaseWrite','personalFingerprint']),
     assets:freeze(['get','verifyAliases']),
     files:freeze(['protect','unprotect','run','scope']),
     checkpoint:freeze(['capture','beginPreparation','readPreparationUnits','finalizePreparation','establishPreparationBaseline','assertCurrent','inspectVerifiedCapture','verifyVerifiedCapture','currentImportSignal']),
@@ -28,7 +28,7 @@ registry.define('managed-repository',1,()=>{
     if(!Object.isFrozen(ports.configuration.limits))throw new TypeError('Managed repository limits must be frozen.');
     const APP_LIMITS=ports.configuration.limits,backupVersion=ports.configuration.backupVersion;
     const LOGICAL_CHECKPOINT_CAPTURE_FORMAT=ports.configuration.logicalCaptureFormat,LOGICAL_CHECKPOINT_CAPTURE_VERSION=ports.configuration.logicalCaptureVersion;
-    const AppData=freeze({reconciliationBase:freeze({read:ports.persistence.reconciliationBaseRead,write:ports.persistence.reconciliationBaseWrite})});
+    const AppData=freeze({reconciliationBase:freeze({read:ports.persistence.reconciliationBaseRead,write:ports.persistence.reconciliationBaseWrite,personalFingerprint:ports.persistence.personalFingerprint})});
     const AssetData=freeze({get:ports.assets.get,verifyAliases:ports.assets.verifyAliases});
     const Exports=ports.files;
     const captureLogicalCheckpoint=ports.checkpoint.capture,beginPreparationCapture=ports.checkpoint.beginPreparation,readPreparationUnits=ports.checkpoint.readPreparationUnits,finalizePreparationCapture=ports.checkpoint.finalizePreparation,establishPreparationBaseline=ports.checkpoint.establishPreparationBaseline,assertLogicalCheckpointCurrent=ports.checkpoint.assertCurrent,inspectVerifiedCapture=ports.checkpoint.inspectVerifiedCapture,verifyVerifiedCapture=ports.checkpoint.verifyVerifiedCapture,currentImportSignal=ports.checkpoint.currentImportSignal;
@@ -104,6 +104,8 @@ function repositoryPreparationEntry(kind,key,payload,fingerprint='',sourceBytes=
   return freeze({unit,kind,key:String(key),present:present===true,fingerprint:present?String(fingerprint||''):'',sourceBytes:present?Math.max(0,Number(sourceBytes)||0):0,members,assetIds});
 }
 function repositoryPreparationEntryMap(index){const map=new Map();for(const entry of index&&index.entries||[])map.set(String(entry.unit),entry);return map;}
+// What the reconciliation base keeps of a note: its title and text.
+function baseNoteState(note){return freeze({label:String(note&&note.label||''),text:String(note&&note.text||'')});}
 async function repositoryPreparationPlan(preparation,reconciliationBase){
   const index=repositoryPreparationIndex;if(!index||Number(index.version)!==REPOSITORY_PREPARATION_INDEX_VERSION)return null;
   if(String(index.checkpointId||'')!==String(reconciliationBase&&reconciliationBase.checkpointId||''))return null;
@@ -506,7 +508,7 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
   const plan=preparation?await repositoryPreparationPlan(preparation,reconciliationBase):null;
   if(!plan&&repositoryPreparationIndex)repositoryPreparationIndex=null;
   const excluded=new Set(repositoryScrubObjectIds(excludedObjectIds)),available=availableObjectIds instanceof Set?new Set([...availableObjectIds].filter(id=>!excluded.has(id))):availableObjectIds;
-  const reuseIndex=repositoryReuseIndex(history,context.protectionId,available),objects=[],leases=[],structuredObjects=new Map(),packedPayloads=new Map(),currentByUnit=new Map(),candidateEntries=plan?new Map(plan.entries):new Map(),readNoteText=new Map();
+  const reuseIndex=repositoryReuseIndex(history,context.protectionId,available),objects=[],leases=[],structuredObjects=new Map(),packedPayloads=new Map(),currentByUnit=new Map(),candidateEntries=plan?new Map(plan.entries):new Map(),readNoteStates=new Map();let readPersonal;
   let capture=null,assetItems=[],candidateIndex=null,reconciliationUpdate=null;
   const serializeStructured=async(kind,key,payload)=>{
     const body=freeze({format:REPOSITORY_OBJECT_FORMAT,version:REPOSITORY_OBJECT_VERSION,kind,key,payload}),serialized=await repositorySerializedJson(body,{signal}),fingerprint=await Exports.run('checksum',{value:serialized.text,algorithm:'sha256'},{signal});
@@ -526,7 +528,8 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       }
       structuredObjects.set(unit,object);packedPayloads.delete(unit);
     }
-    if(kind==='areaNote')readNoteText.set(String(key),String(payload&&payload.text||''));
+    if(kind==='areaNote')readNoteStates.set(String(key),baseNoteState(payload));
+    if(kind==='personalData')readPersonal=payload;
     return entry;
   };
   const packGroups=entries=>{const groups=new Map();for(const entry of entries.values())if(repositoryPackableEntry(entry)){const shard=repositoryPackShard(entry.kind,entry.key);if(!groups.has(shard))groups.set(shard,[]);groups.get(shard).push(entry);}for(const rows of groups.values())rows.sort((a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key));return groups;};
@@ -562,7 +565,7 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       const reads=readUnits.size?await readPreparationUnits(preparation,[...readUnits].sort()):freeze([]);
       for(const result of reads){
         const descriptor=repositoryPreparationDescriptor(result&&result.unit);if(!descriptor)throw new Error('Incremental repository preparation returned an unknown unit.');
-        if(!result.present){candidateEntries.set(descriptor.unit,repositoryPreparationEntry(descriptor.kind,descriptor.key,null,'',0,{present:false}));structuredObjects.delete(descriptor.unit);if(descriptor.kind==='areaNote')readNoteText.set(descriptor.key,null);continue;}
+        if(!result.present){candidateEntries.set(descriptor.unit,repositoryPreparationEntry(descriptor.kind,descriptor.key,null,'',0,{present:false}));structuredObjects.delete(descriptor.unit);if(descriptor.kind==='areaNote')readNoteStates.set(descriptor.key,null);if(descriptor.kind==='personalData')readPersonal=null;continue;}
         await materializeStructured(descriptor.kind,descriptor.key,result.payload);
       }
       const inventory=repositoryPreparationInventory(candidateEntries),catalogue=new Map((preparation.assetCatalogue||[]).map(row=>[String(row&&row.id||''),row])),ids=new Set((preparation.assetCatalogue||[]).filter(row=>row&&row.library===true).map(row=>String(row.id)));
@@ -570,9 +573,9 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       await AssetData.verifyAliases(preparation.assetCatalogue,[...ids]);
       assetItems=[...ids].filter(Boolean).sort().map(assetId=>{const row=catalogue.get(assetId);if(!row)return freeze({descriptor:freeze({assetId,missing:true}),blob:null});return freeze({descriptor:freeze({assetId,mimeType:row.type,size:row.size,checksum:row.hash,name:row.name,library:row.library===true}),blob:null});});
       capture=await finalizePreparationCapture(preparation,freeze({recordDates:inventory.recordDates,noteKeys:inventory.noteKeys,assetIds:assetItems.map(item=>item.descriptor.assetId),counts:inventory.counts}));
-      const updates=Object.create(null),deletes=[];for(const [key,text] of readNoteText){if(text===null)deletes.push(key);else updates[key]=text;}
+      const updates=Object.create(null),deletes=[];for(const [key,state] of readNoteStates){if(state===null)deletes.push(key);else updates[key]=state;}
       candidateIndex=await repositoryPreparationIndexCandidate(preparation.epochToken,preparation.stamps,candidateEntries);if(!candidateIndex)throw new Error('Incremental repository preparation index could not be rebuilt.');
-      reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:1,full:false,baseCheckpointId:reconciliationBaseId,noteCount:candidateIndex.noteCount,noteKeyFingerprint:candidateIndex.noteKeyFingerprint,noteKeys:null,updates:freeze(updates),deletes:freeze(deletes.sort())});
+      reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:1,full:false,baseCheckpointId:reconciliationBaseId,noteCount:candidateIndex.noteCount,noteKeyFingerprint:candidateIndex.noteKeyFingerprint,personalFingerprint:readPersonal===undefined?null:await AppData.reconciliationBase.personalFingerprint(readPersonal),noteKeys:null,updates:freeze(updates),deletes:freeze(deletes.sort())});
     }else{
       capture=await captureLogicalCheckpoint(exportedAt,preparation?{includeAssetBlobs:false,assumeFlushed:true,requireCanonicalComplete:true}:{includeAssetBlobs:false,requireCanonicalComplete:true});
       for(const [month,items] of grouped(capture.dailyDocuments,'date'))await materializeStructured('dailyRecordPack',month,freeze([...items]));
@@ -580,8 +583,8 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       if(capture.activeSession)await materializeStructured('activeSession','active',capture.activeSession);
       if(capture.personalData)await materializeStructured('personalData','personal',capture.personalData);
       assetItems=[...(capture.assetItems||[])];
-      const updates=Object.create(null),noteKeys=[];for(const note of capture.areaNoteItems||[]){const key=String(note&&note.key||'').trim();if(!key)continue;noteKeys.push(key);updates[key]=String(note&&note.text||'');}
-      noteKeys.sort();reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:1,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([])});
+      const updates=Object.create(null),noteKeys=[];for(const note of capture.areaNoteItems||[]){const key=String(note&&note.key||'').trim();if(!key)continue;noteKeys.push(key);updates[key]=baseNoteState(note);}
+      noteKeys.sort();reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:1,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await AppData.reconciliationBase.personalFingerprint(capture.personalData||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([])});
     }
     const structuredRank=freeze({dailyRecordPack:0,activeSession:1,personalData:2,areaNote:3});
     for(const entry of [...candidateEntries.values()].filter(entry=>entry.present&&!repositoryPackableEntry(entry)).sort((a,b)=>(structuredRank[a.kind]??9)-(structuredRank[b.kind]??9)||String(a.key).localeCompare(String(b.key)))){
