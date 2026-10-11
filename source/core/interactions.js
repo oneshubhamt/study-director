@@ -158,6 +158,16 @@ registry.define('interactions',1,()=>{
       const body=document.createElement('div');body.className='interaction-body';appendCopy(body,options);shell.appendChild(body);
       const error=document.createElement('div');error.className='interaction-error ui-status';error.id='sd-interaction-error';error.setAttribute('role','alert');error.hidden=true;
       let inputElement=null,inputCheckbox=null,confirmationElement=null,selectedOption=String(options.defaultOption||''),configuredValues=null;
+      // One tick-box row with its description, for input's tick box and configure's list.
+      const checkboxRow=(checkbox,label,onChange=null)=>{
+        const row=document.createElement('label');row.className='interaction-checkbox-row ui-body';
+        const box=document.createElement('input');box.type='checkbox';box.className='interaction-checkbox';box.checked=checkbox.defaultChecked===true;
+        const copy=document.createElement('span');copy.className='interaction-checkbox-copy';
+        const title=document.createElement('strong');title.textContent=label;copy.appendChild(title);
+        if(checkbox.description){const description=document.createElement('span');description.textContent=cleanText(checkbox.description,300);copy.appendChild(description);}
+        if(onChange)box.addEventListener('change',()=>onChange(box.checked));
+        row.append(box,copy);return Object.freeze({row,box});
+      };
       if(request.type==='input'){
         const optionRows=Array.isArray(options.options)?options.options.filter(option=>option&&option.value!==undefined&&option.label):[];
         if(optionRows.length){
@@ -189,13 +199,8 @@ registry.define('interactions',1,()=>{
         if(options.hint){const hint=document.createElement('div');hint.className='interaction-hint ui-helper';hint.textContent=cleanText(options.hint,500);body.appendChild(hint);}
         // One optional tick box; when shown, the result carries `checked`.
         if(options.checkbox&&options.checkbox.label){
-          const checks=document.createElement('div');checks.className='interaction-checks';
-          const row=document.createElement('label');row.className='interaction-checkbox-row ui-body';
-          inputCheckbox=document.createElement('input');inputCheckbox.type='checkbox';inputCheckbox.className='interaction-checkbox';inputCheckbox.checked=options.checkbox.defaultChecked===true;
-          const copy=document.createElement('span');copy.className='interaction-checkbox-copy';
-          const title=document.createElement('strong');title.textContent=cleanText(options.checkbox.label,180);copy.appendChild(title);
-          if(options.checkbox.description){const description=document.createElement('span');description.textContent=cleanText(options.checkbox.description,300);copy.appendChild(description);}
-          row.append(inputCheckbox,copy);checks.appendChild(row);body.appendChild(checks);
+          const checks=document.createElement('div'),made=checkboxRow(options.checkbox,cleanText(options.checkbox.label,180));checks.className='interaction-checks';
+          inputCheckbox=made.box;checks.appendChild(made.row);body.appendChild(checks);
         }
         if(typeof options.preview==='function'){
           const preview=document.createElement('div');preview.className='interaction-preview ui-mono';preview.textContent=cleanText(options.preview(inputElement.value,selectedOption),300);body.appendChild(preview);
@@ -258,13 +263,8 @@ registry.define('interactions',1,()=>{
         if(checkboxRows.length){
           const checks=document.createElement('div');checks.className='interaction-checks';
           for(const {checkbox,id,label} of checkboxRows){
-            const row=document.createElement('label');row.className='interaction-checkbox-row ui-body';
-            const input=document.createElement('input');input.type='checkbox';input.className='interaction-checkbox';input.checked=checkbox.defaultChecked===true;configuredValues[id]=input.checked;
-            const copy=document.createElement('span');copy.className='interaction-checkbox-copy';
-            const title=document.createElement('strong');title.textContent=label;copy.appendChild(title);
-            if(checkbox.description){const description=document.createElement('span');description.textContent=cleanText(checkbox.description,300);copy.appendChild(description);}
-            input.addEventListener('change',()=>{configuredValues[id]=input.checked;});
-            row.append(input,copy);checks.appendChild(row);
+            const made=checkboxRow(checkbox,label,checked=>{configuredValues[id]=checked;});
+            configuredValues[id]=made.box.checked;checks.appendChild(made.row);
           }
           form.appendChild(checks);
         }

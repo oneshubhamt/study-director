@@ -859,8 +859,6 @@ registry.define('library',1,()=>{
       const parts=[use&&use.today?'today’s plan':'',use&&use.savedPlans?`${use.savedPlans===1?'a saved plan':`${use.savedPlans} saved plans`}`:''].filter(Boolean);
       return parts.join(' and ');
     }
-    // Renames or moves a note with every note inside it. A name that already
-    // holds a note is merged only after the person agrees.
     // Renames or moves the note; with inPlans (the default, and the rename
     // dialog's tick box) the Area in today's plan and saved plans follows it.
     async function applyNoteRename(entry,value,{inPlans=true}={}){

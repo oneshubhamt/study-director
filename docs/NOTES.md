@@ -128,7 +128,7 @@ What already works well:
 
 ## Order of work
 
-1. **Permanent note identity (11)** and **earlier versions (1):**
+1. **Permanent note identity (11)** and **earlier versions (1).** Done (2026-10-11), with the tick box from 16:
    - the record and a one-time conversion;
    - backups;
    - the combined versions list, which survives renames;

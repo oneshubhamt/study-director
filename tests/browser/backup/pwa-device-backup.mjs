@@ -94,7 +94,7 @@ try{
     return {checkpointNames,objectNames:objectNames.sort(),size:file.size,format:manifest.format,version:manifest.version,pickerCalls:__devicePickerCalls(),status:document.getElementById('device-backup-status').textContent.trim()};
   })()`);
   assert.equal(first.checkpointNames.length,1);assert.match(first.checkpointNames[0],/^cp_[a-f0-9]{32}\.sdcheckpoint$/u);
-  assert.ok(first.size>0);assert.equal(first.format,'study-director.backup-repository-checkpoint');assert.equal(first.version,5);assert.ok(first.objectNames.length>0);assert.equal(first.pickerCalls,1);
+  assert.ok(first.size>0);assert.equal(first.format,'study-director.backup-repository-checkpoint');assert.equal(first.version,6);assert.ok(first.objectNames.length>0);assert.equal(first.pickerCalls,1);
   // Maintenance may run just after the first backup; the row then settles on On.
   await waitFor(()=>page.evaluate(`/^On(?:\\s|$)/.test(document.getElementById('device-backup-status').textContent.trim())`),{timeout:60000,label:'Device Folder row at rest after the first backup'});
 

@@ -33,13 +33,15 @@ try{
         const item=await waitFor(()=>{const button=document.getElementById(id);return button&&!button.closest('[role="menu"]').hidden&&!button.disabled?button:null;});
         item.click();return true;
       },
-      async move(value){
+      async move(value,{inPlans}={}){
         await this.noteAction('library-note-move');
         const dialog=await waitFor(()=>{const item=document.getElementById('sd-interaction-dialog');return item&&item.open?item:null;});
         const field=dialog.querySelector('.interaction-input'),before=field.value;field.value=value;field.dispatchEvent(new Event('input',{bubbles:true}));
+        // The tick box shows only when today's plan or a saved plan uses the Area.
+        const box=dialog.querySelector('.interaction-checkbox'),checkbox=box?{label:box.closest('label').querySelector('strong').textContent,defaultChecked:box.checked}:null;if(box&&inPlans!==undefined)box.checked=inPlans;
         const text=dialog.textContent;dialog.querySelector('.interaction-actions .primary,.interaction-actions .danger').click();
         // A merge confirmation may reuse the dialog straight away.
-        await waitFor(()=>!dialog.open||!dialog.querySelector('.interaction-input'));return {before,text};
+        await waitFor(()=>!dialog.open||!dialog.querySelector('.interaction-input'));return {before,text,checkbox};
       },
       async accept(){
         const dialog=await waitFor(()=>{const item=document.getElementById('sd-interaction-dialog');return item&&item.open?item:null;});
@@ -92,7 +94,7 @@ try{
       title:document.querySelector('.library-notes-editor-title')?.textContent||'',
       meta:document.querySelector('.library-notes-editor-meta')?.textContent||'',
       focused:document.activeElement===document.querySelector('.library-notes-textarea')||!!document.activeElement.closest('.library-notes-editor .sd-rte-wordgard'),
-      persisted:!!__PWA6.AppData.notes.exportPayload()['standalone only']
+      persisted:!!__PWA6.AppData.notes.get('standalone only')
     };
     const drawer=document.getElementById('library-notes-drawer');drawer.open=false;await wait(30);drawer.open=true;await wait(60);
     return {...before,afterKeys:[...document.querySelectorAll('[data-ongoing-note-key]')].map(item=>item.dataset.ongoingNoteKey)};
@@ -119,7 +121,7 @@ try{
       keys,adjacent:keys.indexOf('standalone only > nested topic')===keys.indexOf('standalone only')+1,
       beforeCount,afterCount:[...document.querySelectorAll('[data-ongoing-note-key="standalone only"]')].length,
       selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||'',
-      payload:d.AppData.notes.exportPayload()
+      payload:Object.fromEntries(Object.values(d.AppData.notes.exportPayload()).map(note=>[note.label.toLowerCase(),note]))
     };
   })()`);
   assert.equal(created.adjacent,true);
@@ -149,7 +151,7 @@ try{
 
   const backupBeforeDelete=await page.evaluate(`(async()=>{
     const d=__PWA6,file=await d.BackupController.createCheckpoint(),candidate=await d.BackupController.inspect(file.blob,{filename:file.filename});
-    return {counts:file.counts,inspectedCounts:candidate.preview.counts,keys:Object.keys(d.AppData.notes.exportPayload()).sort(),blobSize:file.blob.size};
+    return {counts:file.counts,inspectedCounts:candidate.preview.counts,keys:Object.values(d.AppData.notes.exportPayload()).map(note=>note.label.toLowerCase()).sort(),blobSize:file.blob.size};
   })()`);
   assert.equal(backupBeforeDelete.counts.dailyRecord,0);assert.equal(backupBeforeDelete.counts.areaNote,3);assert.ok(backupBeforeDelete.blobSize>0);
   assert.deepEqual(backupBeforeDelete.inspectedCounts,backupBeforeDelete.counts);
@@ -160,7 +162,7 @@ try{
   const deletedParent=await page.evaluate(`(async()=>{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
     const parent=[...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='standalone only');parent.click();await wait(25);
-    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const before={noteMenu:!!document.getElementById('library-note-actions'),child:d.AppData.notes.exportPayload()['standalone only > nested topic']?.text||''};
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const before={noteMenu:!!document.getElementById('library-note-actions'),child:d.AppData.notes.get('standalone only > nested topic')?.text||''};
     await __interactionQA.noteAction('library-note-delete');const confirmation=document.getElementById('sd-interaction-dialog')?.open===true;
     await new Promise((resolve,reject)=>{const started=Date.now(),poll=()=>{if(/Moved/.test(document.getElementById('ongoing-notes-status').textContent))resolve();else if(Date.now()-started>5000)reject(new Error('delete timeout'));else setTimeout(poll,40);};poll();});
     await wait(100);
@@ -168,8 +170,8 @@ try{
     return {
       before,confirmation,status:document.getElementById('ongoing-notes-status').textContent,
       parentPresent:!!parentAfter,parentClass:parentAfter?.className||'',
-      child:d.AppData.notes.exportPayload()['standalone only > nested topic']?.text||'',
-      zeta:d.AppData.notes.exportPayload()['zeta filled']?.text||''
+      child:d.AppData.notes.get('standalone only > nested topic')?.text||'',
+      zeta:d.AppData.notes.get('zeta filled')?.text||''
     };
   })()`);
   assert.equal(deletedParent.before.noteMenu,true);assert.equal(deletedParent.before.child,'Nested knowledge');
@@ -191,13 +193,13 @@ try{
     const preview={title:document.querySelector('.library-notes-editor-title').textContent,text:document.querySelector('#library-notes-editor .library-ongoing-note-read').textContent,editable:!!document.querySelector('#library-notes-editor textarea')};
     [...document.querySelectorAll('#library-notes-editor button')].find(button=>button.textContent==='Restore').click();
     await until(()=>/Restored/.test(document.getElementById('ongoing-notes-status').textContent));
-    const restored={text:d.AppData.notes.exportPayload()['standalone only']?.text||'',status:document.getElementById('ongoing-notes-status').textContent,selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||'',sectionHidden:section.hidden};
+    const restored={text:d.AppData.notes.get('standalone only')?.text||'',status:document.getElementById('ongoing-notes-status').textContent,selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||'',sectionHidden:section.hidden};
     await __interactionQA.noteAction('library-note-delete');await until(()=>/Moved/.test(document.getElementById('ongoing-notes-status').textContent));
     if(toggle.getAttribute('aria-expanded')!=='true')toggle.click();await until(()=>document.querySelector('[data-trash-key]'));
     document.querySelector('[data-trash-key]').click();await until(()=>[...document.querySelectorAll('#library-notes-editor button')].some(button=>button.textContent==='Delete forever'));
     [...document.querySelectorAll('#library-notes-editor button')].find(button=>button.textContent==='Delete forever').click();
     const confirmation=await __interactionQA.accept();await until(()=>section.hidden);
-    return {shown,listed,preview,restored,confirmation,forever:{sectionHidden:section.hidden,trashLeft:d.AppData.notes.trashSnapshot().length,child:d.AppData.notes.exportPayload()['standalone only > nested topic']?.text||''}};
+    return {shown,listed,preview,restored,confirmation,forever:{sectionHidden:section.hidden,trashLeft:d.AppData.notes.trashSnapshot().length,child:d.AppData.notes.get('standalone only > nested topic')?.text||''}};
   })()`);
   assert.deepEqual(trash.shown,{hidden:false,label:'Recently deleted (1)'});
   assert.deepEqual(trash.listed,{name:'Standalone Only',when:'Deleted today',beforeList:'library-notes-trash-list'},'deleted notes are listed above the toggle, opening upward');
@@ -219,13 +221,14 @@ try{
     const key=(target,name)=>target.dispatchEvent(new KeyboardEvent('keydown',{key:name,bubbles:true,cancelable:true}));
     title().click();let input=await until(()=>document.querySelector('.library-notes-title-input'));
     const startValue=input.value;input.value='Discarded';key(input,'Escape');await wait(40);
-    const escaped={title:title()?.textContent||'',keys:Object.keys(d.AppData.notes.exportPayload()).filter(name=>/rename|discarded/.test(name))};
+    const titles=()=>Object.values(d.AppData.notes.exportPayload()).map(note=>note.label.toLowerCase()),startId=d.AppData.notes.get('rename me')?.id||'';
+    const escaped={title:title()?.textContent||'',keys:titles().filter(name=>/rename|discarded/.test(name))};
     title().click();input=await until(()=>document.querySelector('.library-notes-title-input'));input.value='Renamed Note';key(input,'Enter');
     await until(()=>/Renamed to/.test(status()));
-    const afterRename={keys:Object.keys(d.AppData.notes.exportPayload()).filter(name=>/rename/.test(name)),selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||'',title:title()?.textContent||'',status:status()};
+    const afterRename={keptId:!!startId&&d.AppData.notes.get('renamed note')?.id===startId,keys:titles().filter(name=>/rename/.test(name)),selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||'',title:title()?.textContent||'',status:status()};
     const moved=await __interactionQA.move('Standalone Only > Nested Topic');const confirmation=await __interactionQA.accept();
     await until(()=>/Merged into/.test(status()));
-    const merged=d.AppData.notes.exportPayload()['standalone only > nested topic']?.text||'';
+    const merged=d.AppData.notes.get('standalone only > nested topic')?.text||'';
     d.AppData.notes.update('standalone only','Standalone Only','Parent context',d.AppData.notes.get('standalone only')?.updatedAt||'');await d.AppData.notes.flush();
     d.LibraryView.openNote('standalone only > nested topic');await wait(60);
     const crumbs=[...document.querySelectorAll('#library-notes-editor .library-notes-crumb')].map(crumb=>crumb.textContent);
@@ -242,7 +245,7 @@ try{
   })()`);
   assert.equal(renamed.startValue,'Rename Me','the title field starts from the current name');
   assert.deepEqual(renamed.escaped,{title:'Rename Me',keys:['rename me']},'Escape keeps the name');
-  assert.deepEqual(renamed.afterRename.keys,['renamed note']);assert.equal(renamed.afterRename.selected,'renamed note');assert.equal(renamed.afterRename.title,'Renamed Note');assert.match(renamed.afterRename.status,/Renamed to “Renamed Note”/);
+  assert.equal(renamed.afterRename.keptId,true,'a rename keeps the note’s id');assert.deepEqual(renamed.afterRename.keys,['renamed note']);assert.equal(renamed.afterRename.selected,'renamed note');assert.equal(renamed.afterRename.title,'Renamed Note');assert.match(renamed.afterRename.status,/Renamed to “Renamed Note”/);
   assert.equal(renamed.movedFrom,'Renamed Note','Move… starts from the full name');
   assert.match(renamed.confirmation,/Merge “Renamed Note” into “Standalone Only > Nested Topic”\? Its text is added to the end/);
   assert.match(renamed.merged,/Nested knowledge/);assert.match(renamed.merged,/Moved knowledge/);assert.match(renamed.status,/Merged into|Restored/);
@@ -258,14 +261,53 @@ try{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),until=async test=>{for(let i=0;i<150&&!test();i++)await wait(20);return test();};
     for(const close of document.querySelectorAll('.interaction-toast-close'))close.click();await until(()=>!document.querySelector('.interaction-toast'));
     [...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='zeta filled').click();await wait(30);
-    await __interactionQA.noteAction('library-note-delete');await until(()=>!d.AppData.notes.exportPayload()['zeta filled']);
+    await __interactionQA.noteAction('library-note-delete');await until(()=>!d.AppData.notes.get('zeta filled'));
     const toast=await until(()=>[...document.querySelectorAll('.interaction-toast')].find(item=>item.textContent.includes('Moved “Zeta Filled” to Recently deleted')));
     const undo=[...toast.querySelectorAll('button')].find(button=>button.textContent==='Undo');
     undo.click();await until(()=>document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey==='zeta filled'&&/Restored/.test(document.getElementById('ongoing-notes-status').textContent));
-    return {text:d.AppData.notes.exportPayload()['zeta filled']?.text||'',trash:d.AppData.notes.trashSnapshot().length,selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||''};
+    return {text:d.AppData.notes.get('zeta filled')?.text||'',trash:d.AppData.notes.trashSnapshot().length,selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||''};
   })()`);
   assert.deepEqual(undone,{text:'Durable Zeta note',trash:0,selected:'zeta filled'},'Undo puts a deleted note back');
   result.checks.deleteUndo=true;
+
+  // Renaming a note can take its Area along. Ticked (the default), today's
+  // running block, the draft and a saved plan follow it in place; unticked,
+  // they keep the old name and start a new note under it. Either way the
+  // note keeps its id.
+  const areaRename=await page.evaluate(`(async()=>{
+    const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),until=async test=>{for(let i=0;i<150&&!test();i++)await wait(20);return test();};
+    for(const close of document.querySelectorAll('.interaction-toast-close'))close.click();
+    const status=()=>document.getElementById('ongoing-notes-status').textContent,plans=async()=>{const value=await d.AppData.planData.read();return {draft:String(value.draft||''),saved:value.savedPlans.map(plan=>plan.scheduleText).join('\\n')};};
+    const now=new Date(),minute=now.getHours()*60+now.getMinutes()-1,start=String(Math.floor((minute+1440)%1440/60)).padStart(2,'0')+':'+String((minute+1440)%1440%60).padStart(2,'0');
+    d.goTab('plan');document.getElementById('plan-input').value=start+' | 20 | Alpha Task | work | Alpha Empty | pages | 10';
+    const applying=d.applySchedule({skipNotify:true});if(applying&&typeof applying.then==='function')await __interactionQA.accept();await applying;
+    document.getElementById('saved-plan-name').value='Alpha plan';document.querySelector('[data-saved-plan="save"]').click();
+    await until(()=>document.querySelector('[data-saved-plan-id]'));
+    d.goTab('library');document.getElementById('library-notes-drawer').open=true;
+    d.AppData.notes.update('alpha empty','Alpha Empty','Alpha knowledge','');await d.AppData.notes.flush();d.LibraryView.refreshNotes();await wait(40);
+    [...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='alpha empty').click();await wait(30);
+    const id=d.AppData.notes.get('alpha empty').id,index=d.TimerState.currentIndex,taskId=d.TimerState.currentTaskId;
+    const ticked=await __interactionQA.move('Alpha Renamed',{inPlans:true});await until(()=>/Renamed to “Alpha Renamed”/.test(status()));
+    const tickedPlans=await plans();
+    const afterTicked={checkbox:ticked.checkbox,sameId:d.AppData.notes.get('alpha renamed')?.id===id,block:d.TimerState.tasks[0]?.area,sameBlock:d.TimerState.currentIndex===index&&d.TimerState.currentTaskId===taskId,
+      draft:tickedPlans.draft.includes('Alpha Renamed')&&!tickedPlans.draft.includes('Alpha Empty'),saved:tickedPlans.saved.includes('Alpha Renamed')&&!tickedPlans.saved.includes('Alpha Empty'),status:status()};
+    const unticked=await __interactionQA.move('Alpha Solo',{inPlans:false});await until(()=>/Renamed to “Alpha Solo”/.test(status()));
+    const untickedPlans=await plans();
+    const afterUnticked={defaultChecked:unticked.checkbox?.defaultChecked,sameId:d.AppData.notes.get('alpha solo')?.id===id,block:d.TimerState.tasks[0]?.area,oldTitle:d.AppData.notes.get('alpha renamed'),
+      saved:untickedPlans.saved.includes('Alpha Renamed')&&!untickedPlans.saved.includes('Alpha Solo'),status:status()};
+    // The running block now shows an empty note under its own Area name.
+    d.goTab('execute');d.refreshPnote({force:true});await wait(50);
+    afterUnticked.execute={value:document.getElementById('pn-extra').value,key:document.getElementById('pn-extra').dataset.areaKey};d.goTab('library');
+    return {afterTicked,afterUnticked};
+  })()`);
+  assert.deepEqual(areaRename.afterTicked.checkbox,{label:'Also rename it in today’s plan and a saved plan',defaultChecked:true},'the tick box names where the Area is used and starts ticked');
+  assert.equal(areaRename.afterTicked.sameId,true,'the note keeps its id');assert.equal(areaRename.afterTicked.block,'Alpha Renamed','today’s block takes the new Area');
+  assert.equal(areaRename.afterTicked.sameBlock,true,'the running block stays the running block');assert.equal(areaRename.afterTicked.draft,true);assert.equal(areaRename.afterTicked.saved,true);
+  assert.match(areaRename.afterTicked.status,/Today’s plan and a saved plan now use the new name/);
+  assert.deepEqual({...areaRename.afterUnticked,status:undefined},{defaultChecked:true,sameId:true,block:'Alpha Renamed',oldTitle:null,saved:true,execute:{value:'',key:'alpha renamed'},status:undefined},'unticked, the plans keep the old name and its note starts empty');
+  assert.match(areaRename.afterUnticked.status,/still use the old name/);
+  result.checks.renameTakesAreaAlongOrLeavesIt=true;
+  console.error('[qa-notes] rename with plans passed');
 
   await page.setViewport({width:390,height:844,mobile:true,scale:2});await page.settle(3);
   const mobile=await page.evaluate(`(()=>{
