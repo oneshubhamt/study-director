@@ -65,18 +65,21 @@ What already works well:
 
    This is the largest change, and everything else builds on it, so it comes first.
 
-12. **Linked notes bar.** Every note can carry a short list of other notes.
-   - **In Execute,** while a block runs, a bar sits under the note: `[ Heart failure ]  Pharmacology ×   ECG basics ×   +`.
+12. **Linked notes bar.** Every note can carry a short list of other notes. *(Built in step 3.)*
+   - **Where:** at the bottom of the note, under the text, like sheet tabs in a spreadsheet. With no links it is one small "+ Link note", so it takes no room and asks for no attention until used.
+   - **In Execute,** while a block runs, the bar reads `[ Heart failure ]  Pharmacology ×   ECG basics ×   +`.
      - The first chip is the block's own note, matched by Area name as today.
-     - Tapping any chip switches the editor to that note.
+     - Tapping any chip switches the editor to that note, and the title line says "Linked · Pharmacology"; tapping the first chip, or the block ending, goes back.
      - `+` searches and adds any note, and `×` removes one.
-   - **In the Library,** the same bar sits under the note's title, so it can be managed there too.
+   - **In the Library,** the same bar sits under the note's text, so it can be managed there too.
+   - **Up to 50** notes on one bar.
+   - **Combine** keeps the notes either side linked; nothing is lost and nothing is asked.
    - **Remembered per subject, not per block.** The list is saved on the note, so every future block of that Area shows it.
    - **One-way.** Linking Pharmacology to Heart failure does not put Heart failure on Pharmacology's bar. Pharmacology shows "Linked from: Heart failure" in small text instead; that list is worked out, not stored.
    - **Stored:** one optional field on the note, the list of linked note ids. Ids never break on renames or moves.
    - **Deleted notes** drop out of every bar, and come back if restored from Recently deleted. Ids of notes deleted for good are removed the next time the note is saved.
    - **Earlier versions** restore the note's text only; its bar stays as it is.
-13. **Links inside the text.** The Link button gets a "Note" choice, and typing `[[` opens the same picker.
+13. **Links inside the text.** The Link button gets a "Note" choice, and typing `[[` opens the same picker. *(Built in step 3.)* Exports keep the linked word as plain text.
    - A linked word opens that note when clicked, just as a web link opens a page.
    - The link is stored by id inside the note's text, so nothing new is stored and renames never break it.
    - A link to a deleted note shows as unavailable, and works again if the note is restored.
@@ -142,7 +145,7 @@ What already works well:
    - print (6).
 
    Screenshots go to the user before this step is finalised.
-3. **Linked notes bar (12)** and **links inside the text (13),** with the shared picker.
+3. **Linked notes bar (12)** and **links inside the text (13),** with the shared picker. *(Built.)*
 4. **Tags (14)** and **import (7).**
 5. **Measure at 2,000 notes,** then fix only what is slow.
 

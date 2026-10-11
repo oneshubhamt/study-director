@@ -364,14 +364,23 @@ const areaNoteKeys=freeze({
   trash:id=>areaNoteKeys.isId(id)?NOTE_TRASH_PREFIX+id:'',
   id:key=>areaNoteKeys.isTrash(key)?String(key).slice(NOTE_TRASH_PREFIX.length):areaNoteKeys.isId(key)?String(key):''
 });
+// links, when present, lists the other notes on the note's bar by id: never
+// empty, never the note itself, no repeats.
+function noteLinks(value,key){
+  if(!Array.isArray(value)||!value.length||value.length>APP_LIMITS.maxNoteLinks)return null;
+  const self=areaNoteKeys.id(key),seen=new Set();
+  for(const id of value){if(!areaNoteKeys.isId(id)||id===self||seen.has(id))return null;seen.add(id);}
+  return [...value];
+}
 function sanitizeCurrentAreaNote(value,keyHint=''){
   const source=value&&typeof value==='object'&&!Array.isArray(value)?value:null;if(!source||Number(source.version)!==DATA_CONTRACT.schemas.AreaNote.version)return null;
-  const expected=['version','key','label','text','updatedAt'];
+  const expected=['version','key','label','text','updatedAt',...('links' in source?['links']:[])];
   if(Object.keys(source).sort().join('|')!==expected.sort().join('|'))return null;
   const key=String(source.key||keyHint||''),label=optionalText(source.label,APP_LIMITS.maxAreaNameChars),text=optionalEditorContent(source.text,APP_LIMITS.maxNoteChars);
   if(!areaNoteKeys.isKey(key)||label===null||!normalizeAreaName(label)||text===null)return null;
   const updatedAt=normalizeImportedTimestamp(source.updatedAt,null);if(!updatedAt)return null;
-  const clean={version:DATA_CONTRACT.schemas.AreaNote.version,key,label,text,updatedAt};
+  const links='links' in source?noteLinks(source.links,key):undefined;if(links===null)return null;
+  const clean={version:DATA_CONTRACT.schemas.AreaNote.version,key,label,text,updatedAt,...(links?{links}:{})};
   return sameDataValue(source,clean)?clean:null;
 }
 function dailyResultAdjustedEnd(entry,result){

@@ -37,7 +37,7 @@ const defs=freeze({
 });
 const isDate=value=>/^\d{4}-\d{2}-\d{2}$/.test(String(value||''));
 const normalizeTimestamp=value=>Number.isFinite(Date.parse(String(value||'')))?new Date(value).toISOString():null;
-const normalizeArea=(item,key)=>item&&String(key||item.key||'')?freeze({version:2,key:String(key||item.key),...(item.label?{label:String(item.label)}:{}),text:String(item.text||''),updatedAt:normalizeTimestamp(item.updatedAt)||'2026-08-01T00:00:00.000Z'}):null;
+const normalizeArea=(item,key)=>item&&String(key||item.key||'')?freeze({version:2,key:String(key||item.key),...(item.label?{label:String(item.label)}:{}),text:String(item.text||''),updatedAt:normalizeTimestamp(item.updatedAt)||'2026-08-01T00:00:00.000Z',...(item.links?{links:[...item.links]}:{})}):null;
 const normalizeDrafts=value=>(Array.isArray(value)?value:[]).filter(item=>item&&isDate(item.date)).map(item=>freeze({...item,version:1,date:String(item.date),reflection:String(item.reflection||''),revision:Number(item.revision)||0,sessionRevision:Number(item.sessionRevision)||0,updatedAt:normalizeTimestamp(item.updatedAt)||'2026-08-01T00:00:00.000Z'})).sort((a,b)=>a.date.localeCompare(b.date));
 const dailyRecordCodec=freeze({
   sanitizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item}):null,
@@ -253,7 +253,12 @@ assert.equal(noteGroups(trashCopyHarness).length,0,'Nothing is asked when nothin
 const titleState=createState();titleState.notes={Renamed:normalizeArea({key:'Renamed',label:'Old title',text:'same text',updatedAt:'2026-08-24T10:00:00.000Z'},'Renamed')};titleState.noteDeletions=[];
 const titleHarness=createHarness(titleState,{decisions:{noteTitles:'incoming'}});
 await titleHarness.runtime.controller.restore(await titleHarness.runtime.controller.inspect(await makeCheckpoint({areaNotes:{Renamed:normalizeArea({key:'Renamed',label:'New title',text:'same text',updatedAt:'2026-08-24T12:00:00.000Z'},'Renamed')},installationId:'inst_note_title_remote'}),{filename:'note-title.sdbackup'}));
-assert.deepEqual(noteGroups(titleHarness).map(group=>group.id),['noteTitles'],'Differing titles are one question.');assert.equal(titleState.notes.Renamed.label,'New title');assert.equal(titleState.notes.Renamed.text,'same text');
+assert.deepEqual(noteGroups(titleHarness).map(group=>group.id),['noteTitles'],'Differing titles are one question.');
+// Linked notes from both sides are kept: nothing is lost, nothing is asked.
+const linkA='n_'+'a'.repeat(16),linkB='n_'+'b'.repeat(16),linkState=createState();linkState.notes={Linked:normalizeArea({key:'Linked',text:'same text',links:[linkA],updatedAt:'2026-08-24T10:00:00.000Z'},'Linked')};linkState.noteDeletions=[];
+const linkHarness=createHarness(linkState);
+await linkHarness.runtime.controller.restore(await linkHarness.runtime.controller.inspect(await makeCheckpoint({areaNotes:{Linked:normalizeArea({key:'Linked',text:'same text',links:[linkB],updatedAt:'2026-08-24T12:00:00.000Z'},'Linked')},installationId:'inst_note_links_remote'}),{filename:'note-links.sdbackup'}));
+assert.deepEqual([...linkState.notes.Linked.links],[linkA,linkB]);assert.equal(noteGroups(linkHarness).length,0);assert.equal(titleState.notes.Renamed.label,'New title');assert.equal(titleState.notes.Renamed.text,'same text');
 
 // Distinct names that formerly sanitized to the same ID must retain independent choices through restore.
 const collisionState=createState();collisionState.notes=Object.fromEntries(['a b','a_b'].map(key=>[key,normalizeArea({key,text:'keep '+key,updatedAt:'2026-08-24T10:00:00.000Z'},key)]));

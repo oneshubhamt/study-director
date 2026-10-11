@@ -318,6 +318,42 @@ for(const failEpochRead of [false,true]){
   await app.notes.flush({strict:true});assert.equal(app.notes.failure().failed,false,'a later save clears it');
 }
 
+// 13. A note's bar links other notes by id. The notes linking to one are
+// worked out of bars and #note= links in text. Deleted notes drop out and come
+// back with a restore; notes gone for good are dropped when the bar next changes.
+{
+  const {app,stores}=await setup();
+  for(const [title,text] of [['heart','Heart failure'],['pharm','Pharmacology'],['ecg','ECG basics']])app.notes.update(title,title,text,'');
+  await app.notes.flush({strict:true});
+  const heart=app.notes.get('heart').id,pharm=app.notes.get('pharm').id,ecg=app.notes.get('ecg').id;
+  assert.equal(app.notes.link('heart',pharm).status,'changed');assert.equal(app.notes.link(heart,ecg).status,'changed');
+  assert.equal(app.notes.link('heart',pharm).status,'unchanged','a note is on a bar once');
+  assert.equal(app.notes.link('heart',heart).status,'rejected','a note never links to itself');
+  await app.notes.flush({strict:true});
+  assert.deepEqual([...storedNote(stores.area,'heart').links],[pharm,ecg],'the bar is stored on the note, by id');
+  assert.deepEqual(app.notes.linkedFrom('pharm').map(note=>note.label),['heart']);
+  app.notes.update('ecg','ecg',`See #note=${pharm}`,app.notes.get('ecg').updatedAt);
+  assert.deepEqual(app.notes.linkedFrom(pharm).map(note=>note.label),['ecg','heart'],'a link in the text counts too');
+  // A title with no note yet gets one when its bar is filled.
+  assert.equal(app.notes.link('fresh topic',pharm,{label:'Fresh topic'}).status,'changed');
+  assert.deepEqual([...app.notes.get('fresh topic').links],[pharm]);assert.equal(app.notes.get('fresh topic').text,'');
+  // Deleting keeps the bar in Recently deleted; restoring brings it back.
+  const trashed=await app.notes.trash('heart');
+  assert.deepEqual([...app.notes.exportPayload()[trashed].links],[pharm,ecg]);
+  assert.equal(await app.notes.restore(trashed),'heart');assert.deepEqual([...app.notes.get('heart').links],[pharm,ecg]);
+  // A linked note in Recently deleted stays on the bar, ready to come back; one deleted forever goes on the next change.
+  const ecgTrash=await app.notes.trash('ecg');
+  assert.deepEqual([...app.notes.get('heart').links],[pharm,ecg],'a deleted note keeps its place');
+  await app.notes.remove(ecgTrash);
+  assert.equal(app.notes.link('heart',pharm,{on:false}).status,'changed');
+  assert.equal(app.notes.get('heart').links.length,0,'ids of notes gone for good are dropped');
+  await app.notes.flush({strict:true});assert.equal('links' in storedNote(stores.area,'heart'),false,'an empty bar is not stored');
+  // The record keeps the rules: ids only, never itself, no repeats.
+  const record=app.notes.exportPayload()[pharm];
+  for(const links of [[pharm],[heart,heart],['heart'],[]])assert.throws(()=>app.notes.normalizePayload({[pharm]:{...record,links}}),/canonical schema/u);
+  assert.deepEqual([...app.notes.normalizePayload({[pharm]:{...record,links:[heart]}})[pharm].links],[heart]);
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'ongoing-note-persistence',contracts:[
   'queued batches use the revision committed by the earlier batch',
   'rows lost to a browser data clear are rewritten from memory',
@@ -330,5 +366,6 @@ console.log(JSON.stringify({status:'PASS',suite:'ongoing-note-persistence',contr
   'deleted notes go to Recently deleted, restore beside a newer note, and expire after 30 days',
   'rename changes only titles: a note and its children keep their ids; a taken title merges only when asked',
   'a clash stores its copy in the transaction that finds it; names never run out; the limit never drops either version',
-  'Recently deleted gives way at the note limit; the rescue names notes it cannot hold'
+  'Recently deleted gives way at the note limit; the rescue names notes it cannot hold',
+  'a bar links notes by id; Linked from comes from bars and text; deletion keeps the bar and restore brings it back'
 ]},null,2));

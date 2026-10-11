@@ -49,6 +49,8 @@ export const PRODUCTION_LIMITS=Object.freeze({
   maxOngoingNotes:2000,
   // Days a deleted Ongoing Note stays in Recently deleted.
   areaNoteTrashDays:30,
+  // Notes one note's linked-notes bar can hold.
+  maxNoteLinks:50,
   maxTaskNameChars:160,
   maxAreaNameChars:160,
   maxUnitChars:40,

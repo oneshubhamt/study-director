@@ -183,6 +183,7 @@
           ["Block Progress","Done/Total converts pages, questions, cases, or other units into a percentage for the block. Manual % can override; focus time is only the fallback when stronger progress evidence is missing."],
           ["Practice Pacer","Starts or resumes only during a running work block. Use Simple for one target or Paper Plan for fixed-time or marks-weighted groups. Live guidance is derived; completed unit times are saved."],
           ["Notes","Persistent notes for the current Work Area, useful for doubts, mistakes, reminders, and subject-level carry-over. With no Work Area selected, the editor clears and links to Library notes."],
+          ["Linked notes","Under the note, the block's own note comes first, then the notes it links to. Tap one to read or edit it here; tap the first to come back. + links another note, × removes one. In the text, Link → Note or typing [[ links a word to a note."],
           ["Alignment","Compares the wall-clock schedule with the timer block so you can see drift clearly."],
           ["Adjust Plan","Manual recovery tools: jump to now, start full block, use remaining time, push work that still fits before 04:00, or make an unfinished note. Overflow becomes unfinished work."],
           ["Pomodoro Rhythm","Work-only break cues. The cue does not pause focus; the accepted Pomodoro break is timed separately and saved as planned recovery."],

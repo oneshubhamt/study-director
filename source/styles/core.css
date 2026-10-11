@@ -1626,6 +1626,31 @@ button.library-notes-editor-title:hover,button.library-notes-editor-title:focus-
 .library-notes-editor-tools{display:flex;align-items:center;gap:7px;flex:0 0 auto}
 .library-notes-editor-shell{flex:1;min-height:0;overflow:hidden;--sd-depth-focus:none;--sd-shape-editor-radius:0px}
 .library-notes-editor-shell>.sd-rte{height:100%;min-height:0;border:0}
+/* Linked notes: small chips under a note's text, quiet until used. */
+.note-links{display:grid;gap:4px;padding:6px 10px 8px;font-size:12px;color:var(--sd-color-text-secondary)}
+.note-links[hidden]{display:none}
+.note-links-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.note-link-chip,.note-links-add{display:inline-flex;align-items:center;min-height:26px;max-width:min(240px,100%);border:1px solid var(--sd-color-border-2,#272c42);border-radius:999px;background:transparent;color:inherit;font:inherit}
+button.note-link-chip{padding:0 10px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.note-link-chip.current{border-color:color-mix(in srgb,var(--sd-color-accent-primary,#e8ff00) 60%,transparent);color:var(--sd-color-text-primary)}
+.note-link-open,.note-link-remove,.note-link-from{background:none;border:0;color:inherit;font:inherit;cursor:pointer}
+.note-link-open{min-width:0;padding:3px 2px 3px 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.note-link-remove{padding:3px 8px 3px 5px;opacity:.55}.note-link-remove:hover,.note-link-remove:focus-visible{opacity:1}
+.note-links-add{padding:0 10px;border-style:dashed;color:var(--sd-color-text-muted);cursor:pointer}.note-links-add:hover,.note-links-add:focus-visible{border-style:solid;color:var(--sd-color-text-primary)}
+.note-links-from{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;color:var(--sd-color-text-muted);font-size:11.5px}
+.note-link-from{padding:0;text-decoration:underline;text-decoration-color:color-mix(in srgb,currentColor 40%,transparent);text-underline-offset:2px}
+.pnote-links .note-links{padding:6px 0 2px}
+@media(pointer:coarse){.note-link-chip,.note-links-add{min-height:36px}.note-link-remove{padding-inline:10px}}
+/* The one note picker. */
+.note-picker{box-sizing:border-box;width:min(460px,calc(100vw - 24px));max-height:min(520px,calc(100dvh - 48px));margin:12vh auto auto;padding:8px;border:1px solid var(--sd-color-border-2,#272c42);border-radius:var(--sd-shape-modal-radius,12px);background:rgb(var(--sd-rgb-surface-1,11,13,22));color:var(--sd-color-text-primary);display:none;grid-template-rows:auto minmax(0,1fr) auto;gap:6px}
+.note-picker[open]{display:grid}.note-picker::backdrop{background:rgba(0,0,0,.45)}
+.note-picker-field{width:100%;box-sizing:border-box}
+.note-picker-list{overflow:auto;min-height:0}
+.note-picker-option{display:grid;gap:1px;padding:7px 10px;border-radius:7px;cursor:pointer}
+.note-picker-option.active,.note-picker-option:hover{background:var(--sd-state-accent-bg-soft,rgba(232,255,0,.08))}
+.note-picker-title{font-size:13.5px}.note-picker-path{font-size:11.5px;color:var(--sd-color-text-muted)}
+.note-picker-empty{padding:8px 10px}
+
 .library-notes-editor-shell>.sd-rte .sd-rte-editor-host{height:auto!important}
 .library-notes-textarea{display:block;box-sizing:border-box;flex:1 1 auto;width:100%;height:100%;min-height:260px;max-height:100%;resize:none;overflow:auto;padding:14px 16px;font-size:var(--sd-type-role-reading-size);line-height:1.65}
 .library-notes-editor .subject-note-context{flex:0 0 auto;margin-top:10px}

@@ -657,6 +657,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
             <button class="mini-btn ui-btn" type="button" data-action="open-ongoing-notes">Open notes in Library</button>
           </div>
         </div>
+        <div class="pnote-links" id="pn-links"></div>
         <div class="subject-note-context" id="pn-inherited"></div>
       </div>
       <section class="practice-pacer ui-panel" id="practice-pacer" aria-label="Practice pacer">
@@ -1469,6 +1470,7 @@ const ExportsModule=INTERNAL_MODULES.load('exports',1,'study-director.exports-mo
 const IntegrityContinuationModule=INTERNAL_MODULES.load('integrity-continuation',1,'study-director.integrity-continuation-module',1);
 const NoteExportModule=INTERNAL_MODULES.load('note-export',2,'study-director.note-export-module',2);
 const LibraryClearModule=INTERNAL_MODULES.load('library-clear',1,'study-director.library-clear-module',2);
+const NoteLinksModule=INTERNAL_MODULES.load('note-links',1,'study-director.note-links-module',1);
 const LibraryModule=INTERNAL_MODULES.load('library',1,'study-director.library-module',1);
 const ManagedRepositoryModule=INTERNAL_MODULES.load('managed-repository',1,'study-director.managed-repository-module',1);
 const RepositoryPolicyModule=INTERNAL_MODULES.load('repository-policy',1,'study-director.repository-policy-module',1);
@@ -4278,7 +4280,7 @@ function renderRichTextContent(container,value,emptyText='',label='Rich text'){
   if(!container)return false;
   const canonical=String(value??'');
   if(!canonical.trim()){container.textContent=String(emptyText||'');return false;}
-  try{return RichTextApi.renderRichText({container,value:canonical,label:String(label||'Rich text'),assets:RichTextAssets,workspaceOverlay:RichTextWorkspaceOverlay});}
+  try{return RichTextApi.renderRichText({container,value:canonical,label:String(label||'Rich text'),assets:RichTextAssets,workspaceOverlay:RichTextWorkspaceOverlay,notes:richTextNotes()});}
   catch(error){AppDiagnostics.capture('rich-text.display',error,'warn');container.textContent=plainTextContent(canonical).trim()||String(emptyText||'');return false;}
 }
 // Prints one note, its title and content with images, and nothing else on the page.
@@ -5170,7 +5172,8 @@ function setNoteSyncStateForKey(key,state){
     if(normalizeAreaName(element.dataset.areaKey)===safeKey)apply(element);
   });
   const pn=document.getElementById('pn-sync');
-  const curKey=(TASKS[TimerState.currentIndex]&&isTrackableBlock(TASKS[TimerState.currentIndex]))?ongoingNoteKeyForTask(TASKS[TimerState.currentIndex]):'';
+  // Execute's indicator follows the note its editor shows, which may be a linked note.
+  const curKey=(TASKS[TimerState.currentIndex]&&isTrackableBlock(TASKS[TimerState.currentIndex]))?(document.getElementById('pn-extra')?.dataset.areaKey||ongoingNoteKeyForTask(TASKS[TimerState.currentIndex])):'';
   if(pn&&normalizeAreaName(curKey)===safeKey)apply(pn);
   if(state==='synced')publishSafetyNotice('','Note saved','area-note-conflict');
 }
@@ -6781,6 +6784,21 @@ function richTextDocumentFor(field,options={}){
   }
   return null;
 }
+// Links between notes: the one note picker and the linked-notes bar.
+const NoteLinks=NoteLinksModule.createController(Object.freeze({ports:Object.freeze({
+  view:Object.freeze({document}),
+  notes:Object.freeze({get:ref=>AppData.notes.get(ref),link:(ref,id,options)=>AppData.notes.link(ref,id,options),linkedFrom:ref=>AppData.notes.linkedFrom(ref),list:()=>AppData.notes.metadataSnapshot().records}),
+  ownership:Object.freeze({canMutate:()=>appCanMutate()})
+})}));
+// A link to a note opens it in Execute's editor when clicked there, and in
+// the Library everywhere else.
+async function openLinkedNote(id,field=null){
+  if(!AppData.notes.get(id))return false;
+  if(field&&field.id==='pn-extra'&&isLiveTrackableTimer()){const task=TASKS[TimerState.currentIndex];return openExecuteNote(id,TaskIdentity.idAt(TimerState.currentIndex),hasOngoingTaskNotes(task)?AppData.notes.get(ongoingNoteKeyForTask(task)):null);}
+  if(!await goTab('library',{source:'note-link'}))return false;
+  return LibraryView.revealNoteReference(id);
+}
+function richTextNotes(field=null){return Object.freeze({pick:()=>NoteLinks.pick(),title:id=>AppData.notes.get(id)?.label??null,open:id=>void openLinkedNote(id,field)});}
 const RichTextRuntime=(()=>{
   const BACKGROUND_IDLE_DISPOSE_MS=90000;
   let installed=false,sequence=0,observer=null,closingAll=false,mutationHold=0,mutationFocusState=null,lastActiveField=null,backgroundDisposeTimer=null;
@@ -7028,7 +7046,7 @@ const RichTextRuntime=(()=>{
       releaseAssets=await AttachmentStorage.retain();
       if(pending.get(field)!==request||!field.isConnected){releaseAssets();return false;}
       const initialCanonical=canonicalFor(field,current),editorMount=await RichTextApi.mountRichTextEditor({
-        field,label:current.label,initialValue:initialCanonical,maxWords:current.maxWords,maxBytes:APP_LIMITS.maxRichTextBytes,assets:RichTextAssets,surface:current.surface,
+        field,label:current.label,initialValue:initialCanonical,maxWords:current.maxWords,maxBytes:APP_LIMITS.maxRichTextBytes,assets:RichTextAssets,surface:current.surface,notes:richTextNotes(field),
         onAssetBusy:busy=>{imagePreparationCount+=busy?1:-1;if(busy)pwaWorkRevision++;else schedulePwaUpdateEvaluation(250);},
         createImageWorker:()=>new Worker(trustedAssetURL('@@SD_IMAGE_WORKER_FILENAME@@'),{name:'study-director-image'}),workspaceOverlay:RichTextWorkspaceOverlay,attachments:RichTextAttachmentPort,
         focusOnMount:options.focus===true,onDerivedText:field.matches('.task-note-field')?(_canonical,plain)=>updateAreaNoteSearchText(normalizeAreaName(field.dataset.areaKey),plain):undefined
@@ -7251,6 +7269,7 @@ let pnoteInfoPopover=null;
 function togglePnoteInfo(){const button=document.getElementById('pn-info-btn'),popover=document.getElementById('pn-info-popover');if(!button||!popover)return false;pnoteInfoPopover??=RichTextApi.createAnchoredPopover(popover,{align:'end'});const opening=popover.hidden;if(opening)pnoteInfoPopover.show(button);else pnoteInfoPopover.hide();return opening;}
 const backupInfoPopovers=new Map();
 function toggleBackupInfo(event){const button=event?.target?.closest?.('[data-backup-info-target]'),id=String(button?.dataset?.backupInfoTarget||''),popover=id?document.getElementById(id):null;if(!button||!popover)return false;let controller=backupInfoPopovers.get(id);if(!controller){controller=RichTextApi.createAnchoredPopover(popover,{align:'end',onClose:()=>button.setAttribute('aria-expanded','false')});backupInfoPopovers.set(id,controller);}const opening=popover.hidden;if(opening){controller.show(button);button.setAttribute('aria-expanded','true');}else{controller.hide();button.setAttribute('aria-expanded','false');}return opening;}
+let executeNoteView=null;
 function refreshPnote(options={}){
   const t=TASKS[TimerState.currentIndex];
   if(!isLiveTrackableTimer()){
@@ -7268,6 +7287,7 @@ function refreshPnote(options={}){
     setTextSafe('pn-info-popover','Persistent notes stay with their shared Area or support context. Use the Daily Diary for observations specific to today.');
     const pn=document.getElementById('pn-extra');
     if(pn){const shell=pn.closest('.execute-note-editor-shell'),active=document.activeElement;if(shell&&active instanceof HTMLElement&&shell.contains(active))active.blur();clearTaskNoteEditorBinding(pn);setElementValue(pn,'');setElementDisabled(pn,true);pn.hidden=false;setElementAttribute(pn,'placeholder','');setElementAttribute(pn,'aria-label','Note unavailable: no work or support block is active');}
+    executeNoteView=null;document.getElementById('pn-links')?.replaceChildren();
     renderInheritedAreaNotes(document.getElementById('pn-inherited'),'');
     const ps=document.getElementById('pn-sync');if(ps){setElementText(ps,'—');ps.removeAttribute('title');ps.setAttribute('aria-label','No active Area note');ps.classList.add('idle');ps.classList.remove('saving','err');NoteSyncPopover.refresh(ps);}
     const empty=document.getElementById('pn-empty');if(empty)empty.hidden=false;
@@ -7277,9 +7297,12 @@ function refreshPnote(options={}){
   const n=TaskSessionState.getField(TimerState.currentIndex,'notes')||{};
   TaskSessionState.setField(TimerState.currentIndex,'notes',n);
   const done=n.done!==undefined?n.done:'',total=n.total!==undefined?n.total:(taskTargetValue(t)||'');
-  const noteText=hasNotes?areaNoteTextForKey(areaKey):'',inheritedText=inheritedSubjectNotesHtml(t);
-  const key=[taskNoteScheduleRevision,TaskIdentity.idAt(TimerState.currentIndex),TimerState.currentIndex,measure,done,total,areaKey,noteText,inheritedText].join('|');
-  if(!options.force&&key===executeProgressPanelRenderKey)return false;
+  // A linked note opened from the bar stays on screen until this block ends.
+  const taskId=TaskIdentity.idAt(TimerState.currentIndex),viewed=hasNotes&&executeNoteView&&executeNoteView.taskId===taskId?AppData.notes.get(executeNoteView.id):null;
+  if(!viewed)executeNoteView=null;
+  const noteKey=viewed?viewed.key:areaKey,noteText=hasNotes?areaNoteTextForKey(noteKey):'',inheritedText=inheritedSubjectNotesHtml(t);
+  const key=[taskNoteScheduleRevision,taskId,TimerState.currentIndex,measure,done,total,areaKey,noteKey,noteText,inheritedText].join('|');
+  if(!options.force&&key===executeProgressPanelRenderKey){document.querySelector('#pn-links .note-links')?.refresh?.();return false;}
   executeProgressPanelRenderKey=key;
   setTextSafe('pn-utag',measure||'—');
   const labels={pages:'Pages',min:'Minutes',Qs:'Questions',videos:'Videos',cards:'Cards',topics:'Topics',answers:'Answers',block:'Block',blocks:'Blocks'};
@@ -7291,7 +7314,7 @@ function refreshPnote(options={}){
   setTextSafe('pn-title',support?'Support notes':'Notes');
   if(areaShare){
     const fullShare=support?'Shared by all support activities':hasNotes?`Shared by Area: ${ongoingNoteLabelForTask(t)}`:'';
-    areaShare.textContent=support?'All support activities':hasNotes?`Area · ${ongoingNoteLabelForTask(t)}`:'';
+    areaShare.textContent=viewed?`Linked · ${viewed.label}`:support?'All support activities':hasNotes?`Area · ${ongoingNoteLabelForTask(t)}`:'';
     areaShare.title=fullShare;areaShare.setAttribute('aria-label',fullShare);
     areaShare.hidden=!hasNotes;
   }
@@ -7299,17 +7322,27 @@ function refreshPnote(options={}){
   const infoButton=document.getElementById('pn-info-btn');if(infoButton)infoButton.setAttribute('aria-label',support?'About support notes':'About notes');
   const pn=document.getElementById('pn-extra');
   if(pn){
-    if(hasNotes)bindTaskNoteEditor(pn,TimerState.currentIndex,'execute');
+    if(viewed)bindAreaNoteEditor(pn,viewed.key,viewed.label,'execute');
+    else if(hasNotes)bindTaskNoteEditor(pn,TimerState.currentIndex,'execute');
     else clearTaskNoteEditorBinding(pn);
     pn.hidden=!hasNotes;
     setElementDisabled(pn,!hasNotes);
     setElementAttribute(pn,'placeholder',support?'Ongoing reminders, decisions, follow-ups, and routine notes shared across support activities…':'Ongoing reminders, doubts, tasks, mistakes, and points to revisit for this subject/area…');
     setElementValue(pn,noteText);
   }
+  const links=document.getElementById('pn-links');
+  if(links){const own=AppData.notes.get(areaKey);links.replaceChildren(...(hasNotes?[NoteLinks.bar({ref:own?own.id:areaKey,label:ongoingNoteLabelForTask(t),own:true,current:viewed?viewed.id:'',onOpen:ref=>openExecuteNote(ref,taskId,own)})]:[]));}
   renderInheritedSubjectNotes(document.getElementById('pn-inherited'),t);
   const empty=document.getElementById('pn-empty');if(empty)empty.hidden=true;
-  if(hasNotes)updateNoteSyncIndicators(TimerState.currentIndex,areaKey);
+  if(hasNotes)updateNoteSyncIndicators(TimerState.currentIndex,noteKey);
   onPnoteChange();return true;
+}
+// Execute's editor shows a linked note in place of the block's own until the
+// own chip is tapped or the block changes.
+function openExecuteNote(ref,taskId,own){
+  const target=AppData.notes.get(ref);
+  executeNoteView=target&&(!own||target.id!==own.id)?Object.freeze({taskId,id:target.id}):null;
+  return refreshPnote({force:true});
 }
 async function openOngoingNotesLibrary(){
   if(!await goTab('library',{source:'ongoing-notes'}))return false;
@@ -8089,6 +8122,7 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     find:(field,query,onClear)=>RichTextRuntime.find(field,query,onClear),
     findStep:(field,direction)=>RichTextRuntime.findStep(field,direction),
     get:(key,label)=>AppData.notes.get(key,label),
+    linksBar:options=>NoteLinks.bar(options),
     normalizeArea:normalizeOngoingAreaInput,
     orderEntries:orderOngoingAreaEntries,
     purgeTrash:()=>AppData.notes.purgeExpiredTrash(),

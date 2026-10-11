@@ -138,7 +138,7 @@ const repository=(()=>{
   }
   // What callers see of a note: its permanent id, and as `key` its title key
   // (a deleted note's trash key).
-  function noteView(entry){return entry?Object.freeze({id:NoteKeys.id(entry.key),key:isTrashKey(entry.key)?String(entry.key):titleOf(entry),label:String(entry.label||''),text:String(entry.text||''),updatedAt:entry.updatedAt}):null;}
+  function noteView(entry){return entry?Object.freeze({id:NoteKeys.id(entry.key),key:isTrashKey(entry.key)?String(entry.key):titleOf(entry),label:String(entry.label||''),text:String(entry.text||''),links:Object.freeze([...(entry.links||[])]),updatedAt:entry.updatedAt}):null;}
   function get(ref){
     const key=keyFor(ref);
     return key?noteView(notes[key]):null;
@@ -153,7 +153,8 @@ const repository=(()=>{
       key:safeKey,
       label:clampText(displayAreaName(entry.label),APP_LIMITS.maxAreaNameChars),
       text:String(entry.text||''),
-      updatedAt:String(entry.updatedAt||'')
+      updatedAt:String(entry.updatedAt||''),
+      ...(entry.links?{links:[...entry.links]}:{})
     };
   }
   function touchSnapshot(){snapshotRevision=(snapshotRevision+1)%Number.MAX_SAFE_INTEGER;metadataSnapshotCache=null;searchSnapshotCache=null;}
@@ -651,7 +652,7 @@ const repository=(()=>{
     // unless the payload already brings its deleted copy.
     for(const entry of deletedEntries){
       const current=next[entry.key],trashKey=NoteKeys.trash(entry.key);delete next[entry.key];
-      if(hasContent(current)&&trashKey&&!next[trashKey])next[trashKey]={version:DATA_CONTRACT.schemas.AreaNote.version,key:trashKey,label:current.label,text:current.text,updatedAt:nextRevision(current.updatedAt)};
+      if((hasContent(current)||current&&current.links)&&trashKey&&!next[trashKey])next[trashKey]={...current,key:trashKey,updatedAt:nextRevision(current.updatedAt)};
     }
     const over=Object.keys(next).length-APP_LIMITS.maxOngoingNotes,room=oldestTrashKeys(next,over);
     if(room.length<over)throw tooManyNotes(Object.keys(next).length-room.length);
@@ -704,9 +705,9 @@ const repository=(()=>{
     if(!appCanMutate())return null;
     const id=keyFor(ref);if(!id||isTrashKey(id))return null;
     await settle([id]);const current=notes[id];if(!current)return null;
-    if(!hasContent(current))return await removeKey(id)?'':null;
+    if(!hasContent(current)&&!current.links)return await removeKey(id)?'':null;
     const trashKey=NoteKeys.trash(id);
-    setNote(trashKey,{version:DATA_CONTRACT.schemas.AreaNote.version,key:trashKey,label:current.label,text:current.text,updatedAt:nextRevision(current.updatedAt)});
+    setNote(trashKey,{...current,key:trashKey,updatedAt:nextRevision(current.updatedAt)});
     dropNote(id);touchSnapshot();markDirty(id,revision(current));markDirty(trashKey,'');
     await settle([id,trashKey]);
     refreshAreaNoteConsumers();
@@ -723,7 +724,7 @@ const repository=(()=>{
     let label=clampText(base,APP_LIMITS.maxAreaNameChars),title=free(label);
     for(let index=1;!title&&index<100;index+=1){label=`${clampText(base,Math.max(1,APP_LIMITS.maxAreaNameChars-20))} (restored${index>1?` ${index}`:''})`;title=free(label);}
     if(!title)return null;
-    setNote(id,{version:DATA_CONTRACT.schemas.AreaNote.version,key:id,label,text:item.text,updatedAt:nextRevision(item.updatedAt)});
+    setNote(id,{...item,key:id,label,updatedAt:nextRevision(item.updatedAt)});
     dropNote(key);touchSnapshot();markDirty(id,'');markDirty(key,revision(item));
     await settle([id,key]);
     refreshAreaNoteConsumers();
@@ -771,6 +772,36 @@ const repository=(()=>{
     refreshAreaNoteConsumers();
     return freeze({status:'renamed',key:target,moved:freeze(moves.map(move=>freeze({from:move.from,to:move.to}))),merged:clashes.length});
   }
+  // A note's bar lists other notes by id. Ids of notes gone for good (neither
+  // live nor in Recently deleted) are dropped whenever the bar changes.
+  function keptLinks(entry){const self=NoteKeys.id(entry.key);return (entry.links||[]).filter(id=>id!==self&&(notes[id]||notes[NoteKeys.trash(id)]));}
+  // Adds another note to a note's bar, or removes it (on:false). A title with
+  // no note yet gets one, so a block's bar can be filled before its note is
+  // written.
+  function link(ref,id,{on=true,label=''}={}){
+    if(!appCanMutate())return freeze({status:'rejected'});
+    const target=String(id||''),raw=String(ref||'');if(!NoteKeys.isId(target)||on&&!notes[target])return freeze({status:'rejected'});
+    let key=keyFor(raw);
+    if(!key&&on&&!NoteKeys.isKey(raw)){
+      const over=size()+1-APP_LIMITS.maxOngoingNotes,room=oldestTrashKeys(notes,over);
+      if(room.length<over)return freeze({status:'limit'});
+      for(const trashKey of room){const trashed=notes[trashKey];dropNote(trashKey);markDirty(trashKey,revision(trashed));}
+      key=ensureEntry(raw,label)?.key||'';
+    }
+    const current=key&&!isTrashKey(key)?notes[key]:null;if(!current||key===target)return freeze({status:'rejected'});
+    const kept=keptLinks(current),links=on?(kept.includes(target)?kept:[...kept,target]):kept.filter(other=>other!==target);
+    if(links.length>APP_LIMITS.maxNoteLinks)return freeze({status:'limit'});
+    if(links.join('|')===(current.links||[]).join('|'))return freeze({status:'unchanged'});
+    const next={...current,updatedAt:nextRevision(current.updatedAt)};delete next.links;if(links.length)next.links=links;
+    setNote(key,next);touchSnapshot();markDirty(key,revision(current));refreshAreaNoteConsumers();
+    return freeze({status:'changed',id:key});
+  }
+  // Notes whose bar or text links to this one. Worked out, never stored.
+  function linkedFrom(ref){
+    const key=keyFor(ref);if(!key||isTrashKey(key))return freeze([]);
+    const marker=`#note=${key}`;
+    return freeze(Object.values(notes).filter(entry=>!isTrashKey(entry.key)&&entry.key!==key&&((entry.links||[]).includes(key)||String(entry.text||'').includes(marker))).map(noteView).sort((a,b)=>a.label.localeCompare(b.label)));
+  }
   function trashExpired(entry,now=decisionNowMs()){return timestamp(entry)<=now-TRASH_RETENTION_MS;}
   function trashSnapshot(){
     const now=decisionNowMs();
@@ -806,7 +837,7 @@ const repository=(()=>{
       throw e;
     }
   }
-  return Object.freeze({get,update,updateValidatedRich,remove,clearAll:clearAllAreaNotes,load,reloadFresh,readFreshPayload,readFreshItems,flush,protectUnsaved,trash,restore,rename,trashSnapshot,purgeExpiredTrash,exportPayload,replace,reconcile,alignByTitle,normalizePayload,metadataSnapshot,searchSnapshot,size,failure,verifyRescue,recoverAfterStorageLoss});
+  return Object.freeze({get,update,updateValidatedRich,link,linkedFrom,remove,clearAll:clearAllAreaNotes,load,reloadFresh,readFreshPayload,readFreshItems,flush,protectUnsaved,trash,restore,rename,trashSnapshot,purgeExpiredTrash,exportPayload,replace,reconcile,alignByTitle,normalizePayload,metadataSnapshot,searchSnapshot,size,failure,verifyRescue,recoverAfterStorageLoss});
 })();
 
     return repository;

@@ -743,9 +743,11 @@ function noteSelections(plan,state,decisions,result){
     const mine=local.value,theirs=incoming.value,localText=String(mine.text||''),incomingText=String(theirs.text||'');
     const text=state.texts.has(item.key)?state.texts.get(item.key):Object.prototype.hasOwnProperty.call(reviewed,item.key)?String(reviewed[item.key].text??''):localText;
     const label=state.labels.has(item.key)?state.labels.get(item.key):backupTitles?String(theirs.label):String(mine.label);
-    if(text===localText&&label===String(mine.label))out[item.key]=local.id;
-    else if(text===incomingText&&label===String(theirs.label))out[item.key]=incoming.id;
-    else out[item.key]=freeze({value:freeze({...mine,label,text,updatedAt:nextNoteRevision(mine,theirs)})});
+    // A bar keeps the notes either side linked: nothing is lost.
+    const links=[...new Set([...(mine.links||[]),...(theirs.links||[])])].slice(0,APP_LIMITS.maxNoteLinks),sameLinks=value=>(value.links||[]).join('|')===links.join('|');
+    if(text===localText&&label===String(mine.label)&&sameLinks(mine))out[item.key]=local.id;
+    else if(text===incomingText&&label===String(theirs.label)&&sameLinks(theirs))out[item.key]=incoming.id;
+    else{const value={...mine,label,text,updatedAt:nextNoteRevision(mine,theirs)};delete value.links;if(links.length)value.links=links;out[item.key]=freeze({value:freeze(value)});}
   }
   return freeze(out);
 }

@@ -17,7 +17,7 @@ registry.define('library',1,()=>{
     environment:freeze(['cancelAnimationFrame','createOption','createSearchWorker','requestAnimationFrame']),
     exporter:freeze(['exportKeys','cancel']),
     diary:freeze(['bindEditor','captureEditor','clearEditor','deleteEntry','draft','flushEditor','scheduleEditor','settled']),
-    notes:freeze(['areaUse','bindEditor','canCreate','catalogue','clearEditor','clearFind','commitEditor','find','findStep','focusEditor','get','normalizeArea','orderEntries','print','purgeTrash','remove','rename','renameAreaInPlans','renderInherited','restore','searchDocuments','size','trash','trashSnapshot','versions']),
+    notes:freeze(['areaUse','bindEditor','canCreate','catalogue','clearEditor','clearFind','commitEditor','find','findStep','focusEditor','get','linksBar','normalizeArea','orderEntries','print','purgeTrash','remove','rename','renameAreaInPlans','renderInherited','restore','searchDocuments','size','trash','trashSnapshot','versions']),
     attachments:freeze(['batch','close','count','invalidate','reconcile','refresh']),
     preferences:freeze(['read','write']),
     clearLibrary:freeze(['preflight','execute']),
@@ -56,7 +56,7 @@ registry.define('library',1,()=>{
     const {bindEditor:bindDiaryEditor,captureEditor:captureDiaryEditor,clearEditor:clearDiaryEditor,deleteEntry:deleteDiaryEntryRecord,flushEditor:flushDiaryEditor,scheduleEditor:scheduleDiaryEditor,draft:createDiaryDraft,settled:settleDiaryEditor}=ports.diary;
     const {
       areaUse:planAreaUse,renameAreaInPlans,bindEditor,canCreate:canCreateOngoingNote,catalogue:ongoingNoteCatalogue,clearEditor,clearFind,commitEditor,find:findInEditor,findStep,focusEditor,
-      get:getAreaNote,normalizeArea:normalizeOngoingNoteArea,orderEntries:orderOngoingNoteEntries,print:printNote,
+      get:getAreaNote,linksBar,normalizeArea:normalizeOngoingNoteArea,orderEntries:orderOngoingNoteEntries,print:printNote,
       purgeTrash:purgeExpiredOngoingNotes,remove:removeOngoingNote,rename:renameNote,renderInherited,restore:restoreNote,searchDocuments:ongoingNoteSearchDocuments,size:ongoingNotesSize,
       trash:trashNote,trashSnapshot:ongoingNoteTrash,versions:openNoteVersions
     }=ports.notes;
@@ -587,8 +587,9 @@ registry.define('library',1,()=>{
       if(!entry)return `empty|${readOnly?'1':'0'}`;
       return [
         entry.key,entry.label,entry.support?'1':'0',entry.current?'1':'0',entry.ephemeral?'1':'0',entry.hasNote?'1':'0',
-        // A note's revision changes with every change to its text.
-        readOnly?'1':'0',writable?'1':'0',String(canonical?.updatedAt||'')
+        // A change to the text from elsewhere re-renders the note; a change to
+        // its linked notes refreshes only the bar.
+        readOnly?'1':'0',writable?'1':'0',String(canonical?.text||'')
       ].join('\u0000');
     }
     function renderOngoingNoteEditor(entry,readOnly=false){
@@ -602,6 +603,8 @@ registry.define('library',1,()=>{
       const parents=entry?parentNotesSignature(entry):'';
       if(signature===ongoingNoteEditorSignature&&panel.childElementCount){
         if(entry&&parents!==ongoingNoteParentSignature){ongoingNoteParentSignature=parents;const box=panel.querySelector('.subject-note-context');if(box)renderInherited(box,entry.key,false,{collapsible:true});}
+        panel.querySelector('.note-links')?.refresh?.();
+        const meta=panel.querySelector('.library-notes-editor-meta');if(entry&&meta)meta.textContent=noteMeta(entry,canonical);
         return !!entry;
       }
       const previous=ongoingNotesEditorField();
@@ -638,7 +641,9 @@ registry.define('library',1,()=>{
       const matches=document.createElement('div');matches.className='library-note-matches';matches.id='library-note-matches';matches.hidden=true;matches.setAttribute('role','status');
       const matchTool=(text,label,run)=>{const button=textEl('button','library-note-tool ui-btn',text);button.type='button';button.setAttribute('aria-label',label);button.title=label;button.addEventListener('click',run);return button;};
       matches.append(textEl('span','library-note-matches-count ui-mono',''),matchTool('↑','Previous match',()=>stepNoteMatch(-1)),matchTool('↓','Next match',()=>stepNoteMatch(1)),matchTool('×','Clear highlights',clearNoteMatches));
-      panel.replaceChildren(head,matches,editorShell,inherited);noteSearchLanded='';
+      // Linked notes sit under the text, out of the way until used.
+      const links=linksBar({ref:canonical?.id||entry.key,label:entry.label,onOpen:revealNoteReference});
+      panel.replaceChildren(head,matches,editorShell,links,inherited);noteSearchLanded='';
       setOngoingNotesStatus(writable?'':'Another tab has control. Browse freely, or take control before editing.',{readOnly:!writable});
       editor.addEventListener('input',event=>{
         const accepted=commitEditor(editor,editor.value,event);

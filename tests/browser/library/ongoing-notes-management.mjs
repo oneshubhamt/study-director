@@ -379,6 +379,42 @@ try{
   result.checks.strikethroughAndPrint=true;
   console.error('[qa-notes] sections, sort, search, strikethrough and print passed');
 
+  // Linked notes: a quiet bar under the text, the one picker, [[ in the text, Linked from, and Execute.
+  const linkIds=await page.evaluate(`(async()=>{const n=__PWA6.AppData.notes;for(const [t,x] of [['Links Heart','Heart failure basics.'],['Links Pharm','Receptor table.'],['Links ECG','Axis and rate.']]){n.update(t,t,x);await new Promise(r=>setTimeout(r,20));}await n.flush();
+    __PWA6.LibraryView.revealNoteReference(n.get('Links Heart').id);await new Promise(r=>setTimeout(r,300));return {heart:n.get('Links Heart').id,pharm:n.get('Links Pharm').id,ecg:n.get('Links ECG').id};})()`);
+  assert.equal(await page.evaluate(`(()=>{const bar=document.querySelector('#library-notes-editor .note-links'),editor=document.querySelector('#library-notes-editor .library-notes-editor-shell');return bar.innerText.trim()+'|'+!!(editor.compareDocumentPosition(bar)&Node.DOCUMENT_POSITION_FOLLOWING);})()`),'+ Link note|true','an empty bar is one quiet button, under the text');
+  const pickNote=async(open,query)=>{await page.evaluate(open);await waitFor(()=>page.evaluate(`!!document.querySelector('dialog.note-picker[open]')`),{label:'note picker'});
+    await page.evaluate(`(()=>{const f=document.querySelector('.note-picker-field');f.value=${JSON.stringify(query)};f.dispatchEvent(new Event('input',{bubbles:true}));f.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()`);await page.settle(4);};
+  await pickNote(`document.querySelector('#library-notes-editor .note-links-add').click()`,'links pharm');
+  await page.evaluate(`(()=>{const c=document.querySelector('#library-notes-editor [contenteditable="true"]');c.focus();const s=getSelection();s.selectAllChildren(c);s.collapseToEnd();})()`);
+  await page.send('Input.insertText',{text:' See '});await page.send('Input.insertText',{text:'['});await page.send('Input.insertText',{text:'['});
+  await waitFor(()=>page.evaluate(`!!document.querySelector('dialog.note-picker[open]')`),{label:'[[ picker'});
+  await page.evaluate(`(()=>{const f=document.querySelector('.note-picker-field');f.value='links ecg';f.dispatchEvent(new Event('input',{bubbles:true}));f.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()`);await page.settle(6);
+  const linked=await page.evaluate(`(async()=>{const n=__PWA6.AppData.notes;await n.flush();const heart=n.get('Links Heart'),anchor=document.querySelector('#library-notes-editor a.sd-note-link');
+    return {links:[...heart.links],bar:document.querySelector('#library-notes-editor .note-links-row').innerText.replace(/\\s+/g,' ').trim(),anchor:anchor&&{text:anchor.textContent,href:anchor.getAttribute('href')},stored:heart.text.includes('#note=${linkIds.ecg}')&&!heart.text.includes('[[')};})()`);
+  assert.deepEqual(linked,{links:[linkIds.pharm],bar:'Links Pharm × +',anchor:{text:'Links ECG',href:`#note=${linkIds.ecg}`},stored:true});
+  const linkedFrom=await page.evaluate(`(async()=>{__PWA6.LibraryView.revealNoteReference(${JSON.stringify(linkIds.ecg)});await new Promise(r=>setTimeout(r,300));return document.querySelector('#library-notes-editor .note-links-from')?.innerText.replace(/\\s+/g,' ').trim();})()`);
+  assert.equal(linkedFrom,'Linked from Links Heart','a link in the text shows on the linked note');
+  // A deleted note drops out of the bar and comes back when restored.
+  const dropped=await page.evaluate(`(async()=>{const n=__PWA6.AppData.notes,trash=await n.trash('Links Pharm');__PWA6.LibraryView.revealNoteReference(${JSON.stringify(linkIds.heart)});await new Promise(r=>setTimeout(r,300));
+    const hidden=document.querySelector('#library-notes-editor .note-links-row').innerText.replace(/\\s+/g,' ').trim();await n.restore(trash);__PWA6.LibraryView.revealNoteReference(${JSON.stringify(linkIds.heart)});await new Promise(r=>setTimeout(r,300));
+    return {hidden,back:document.querySelector('#library-notes-editor .note-links-row').innerText.replace(/\\s+/g,' ').trim()};})()`);
+  assert.deepEqual(dropped,{hidden:'+ Link note',back:'Links Pharm × +'});
+  // Execute shows the block's own note first; a chip shows that note in the editor until the own chip is tapped.
+  const executeLinks=await page.evaluate(`(async()=>{
+    const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),now=new Date(),minute=now.getHours()*60+now.getMinutes()-1;
+    const start=String(Math.floor((minute+1440)%1440/60)).padStart(2,'0')+':'+String((minute+1440)%1440%60).padStart(2,'0');
+    d.goTab('plan');document.getElementById('plan-input').value=start+' | 20 | Linked block | work | Links Heart | pages | 10';
+    const applying=d.applySchedule({skipNotify:true});if(applying&&typeof applying.then==='function')await __interactionQA.accept();await applying;d.goTab('execute');d.refreshPnote({force:true});await wait(100);
+    const bar=()=>document.querySelector('#pn-links .note-links'),field=document.getElementById('pn-extra');
+    const before=bar().querySelector('.note-links-row').innerText.replace(/\\s+/g,' ').trim();
+    bar().querySelector('.note-link-open').click();await wait(100);const switched=[field.dataset.areaKey,document.getElementById('pn-area-share').textContent];
+    bar().querySelector('.note-link-chip.own').click();await wait(100);
+    const back=field.dataset.areaKey;d.goTab('library');return {before,switched,back};})()`);
+  assert.deepEqual(executeLinks,{before:'Links Heart Links Pharm × +',switched:['links pharm','Linked · Links Pharm'],back:'links heart'});
+  result.checks.linkedNotesBarTextLinksAndExecute=true;
+  console.error('[qa-notes] linked notes bar, [[ links and Execute passed');
+
   await page.setViewport({width:390,height:844,mobile:true,scale:2});await page.settle(3);
   const mobile=await page.evaluate(`(()=>{
     const add=document.getElementById('library-note-add'),root=document.documentElement;

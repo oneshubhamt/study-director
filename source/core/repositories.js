@@ -1447,6 +1447,8 @@ async function runDataMaintenance(options={}){
       get:AreaNotesRepository.get,
       update:AreaNotesRepository.update,
       updateValidatedRich:AreaNotesRepository.updateValidatedRich,
+      link:AreaNotesRepository.link,
+      linkedFrom:AreaNotesRepository.linkedFrom,
       remove:AreaNotesRepository.remove,
       clearAll:AreaNotesRepository.clearAll,
       load:AreaNotesRepository.load,
