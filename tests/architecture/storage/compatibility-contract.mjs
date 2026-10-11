@@ -142,7 +142,7 @@ assert.match(repositories,/async function verifyDailyRecordCanonicalBaseline\(\)
 assert.doesNotMatch(repositories,/migrateReflectionDrafts|idbApplyReflectionDrafts|reflectionDrafts=freeze\(/u,'retired Reflection Draft persistence must not remain exposed by current repositories.');
 assert.doesNotMatch(repositories,/function requireDailyRecordCanonicalReady\(\)/u,'normal Daily Record paths must not depend on a disposable migration marker');
 assert.match(repositories,/function readableDailyRecord\(record\)[\s\S]{0,260}canonicalRuntimeError/u);
-assert.doesNotMatch(areaNotesRepository,/normalizePayload\(parsed\.pending,\{compatibility:true\}\)/u,'normal Ongoing Note normalization must not expose a historical-mode switch');
+assert.doesNotMatch(areaNotesRepository,/normalizePayload\(parsed\.pending,\{compatibility:true\}\)/u,'normal note normalization must not expose a historical-mode switch');
 assert.match(repositories,/function readLegacyPendingNotes\(\)/u,'the v1 pending cache is read only by the compatibility block');
 assert.match(compatibility,/Historical data must never leak into ordinary hydration as a fallback/u);
 assert.match(assets,/uses historical metadata and must be migrated before normal runtime access/u);

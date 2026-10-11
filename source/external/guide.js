@@ -137,7 +137,7 @@
           ["Mins","How long the block runs."],
           ["Task","The visible activity name."],
           ["Kind","Work covers study, writing and tests; Support covers exercise, admin and routines; Fixed covers meals, rest and sleep."],
-          ["Area","The subject or domain used for grouping. Tasks with the same exact Area share one ongoing note."],
+          ["Area","The subject or domain used for grouping. Tasks with the same exact Area share one note."],
           ["Measure","Optional unit: pages, questions, cases."],
           ["Target","Optional goal number for that unit."],
         ]},
@@ -175,18 +175,18 @@
       ],
       referenceTabs:[
         {id:"surfaces",label:"Surfaces",heading:"How to read this pane",kind:"pairs",items:[
-          ["Now Studying","Shows the current block and its Area. Work blocks use Area-specific ongoing notes; every support block uses the shared Support Activities note."],
+          ["Now Studying","Shows the current block and its Area. Work blocks use Area-specific notes; every support block uses the shared Support Activities note."],
           ["Session Status","Shows No Session, Plan Ready, Live Session, Session Paused, Suspended or Complete from the real Timer state."],
           ["Countdown","Shows remaining time for the running block. Extra Time appears after the planned duration is crossed."],
           ["Finish Block","Ends the current block, records focus evidence, and advances the schedule. If no explicit progress was entered, focus time becomes the editable fallback completion."],
           ["Skip Block","Leaves the block zero-complete, records the skip, and moves to the next block."],
           ["Block Progress","Done/Total converts pages, questions, cases, or other units into a percentage for the block. Manual % can override; focus time is only the fallback when stronger progress evidence is missing."],
           ["Practice Pacer","Starts or resumes only during a running work block. Use Simple for one target or Paper Plan for fixed-time or marks-weighted groups. Live guidance is derived; completed unit times are saved."],
-          ["Ongoing Notes","Persistent notes for the current Work Area, useful for doubts, mistakes, reminders, and subject-level carry-over. With no Work Area selected, the editor clears and links to Library notes."],
+          ["Notes","Persistent notes for the current Work Area, useful for doubts, mistakes, reminders, and subject-level carry-over. With no Work Area selected, the editor clears and links to Library notes."],
           ["Alignment","Compares the wall-clock schedule with the timer block so you can see drift clearly."],
           ["Adjust Plan","Manual recovery tools: jump to now, start full block, use remaining time, push work that still fits before 04:00, or make an unfinished note. Overflow becomes unfinished work."],
           ["Pomodoro Rhythm","Work-only break cues. The cue does not pause focus; the accepted Pomodoro break is timed separately and saved as planned recovery."],
-          ["Session Controls","Suspend keeps today recoverable. Reset clears today's live progress but keeps saved Library records and ongoing notes."],
+          ["Session Controls","Suspend keeps today recoverable. Reset clears today's live progress but keeps saved Library records and notes."],
         ]},
         {id:"actions",label:"Controls",heading:"What you can do",kind:"list",items:[
           "Tap the big timer to pause or resume",
@@ -203,11 +203,11 @@
           ["Work Completion","Explicit Done/Total or manual % counts first. If missing, actual focus can fill completion as a time-derived fallback. Skipped blocks stay 0%."],
           ["Schedule Drift","Original versus adjusted timing, shifted blocks, and recovery choices."],
           ["Session Shape","Starts, ends, overtime, sessions per block, and interruptions."],
-          ["Subject Evidence","Area-linked ongoing notes and progress by subject/workstream."],
+          ["Subject Evidence","Area-linked notes and progress by subject/workstream."],
           ["Practice Evidence","Completed pacer runs are shown in Review, Library, and the Practice Pacing view inside Execution. They do not change focus, work completion, Pomodoro, or any non-pacing metric."],
         ]},
       ],
-      saved:["Live timer state is saved for same-day recovery. If the browser is reopened after the study day changes, the previous unsaved session can be loaded into Review without restarting its timer.","Actual focus, pause time, work completion, skips, and adjustments are captured.","Practice Pacer stores only completed unit durations, the linked task, one governing target, optional compact plan groups, and compact segment boundaries/labels when used. Session totals, remaining pace and displayed statistics are derived.","Ongoing subject notes are saved by Area and reused across days.","Review uses Timer evidence to create the saved daily record that Library and Insights can read."],
+      saved:["Live timer state is saved for same-day recovery. If the browser is reopened after the study day changes, the previous unsaved session can be loaded into Review without restarting its timer.","Actual focus, pause time, work completion, skips, and adjustments are captured.","Practice Pacer stores only completed unit durations, the linked task, one governing target, optional compact plan groups, and compact segment boundaries/labels when used. Session totals, remaining pace and displayed statistics are derived.","Notes are saved by Area and reused across days.","Review uses Timer evidence to create the saved daily record that Library and Insights can read."],
       flow:["Applied Plan","Active Block","Pause / Focus / Overtime","Complete / Skip / Adjust","Review"],
       remember:"Execute is not only a clock. It supplies the evidence later used by Review, Library and Insights."
     }),
@@ -236,7 +236,7 @@
           ["Today's Blocks","Shows each applied plan block as review evidence: what was planned, what happened, and how complete it is."],
           ["Progress Fields","Done/Total and work completion can be corrected before saving. The app shows whether completion came from units, manual %, focus-time fallback, finished status, or skip."],
           ["Practice Pacer","Shows one compact row per completed run and an in-table total only when several runs exist. Open a run to inspect its units or delete that run from today’s review."],
-          ["Ongoing Notes","Work Areas keep reusable subject or workstream notes. All support activities share one Support Activities note. Review uses them as context, not as a forced diary."],
+          ["Notes","Work Areas keep reusable subject or workstream notes. All support activities share one Support Activities note. Review uses them as context, not as a forced diary."],
           ["Diary Reflection","Optional. Use it for causes, decisions, lessons, mood, or anything that explains the day."],
           ["Save Today","Stores one canonical Study Day for the date. Saving again replaces that same Study Day; it never creates a second copy."],
           ["Save Reflection","When no Study Day is active, stores a non-empty Daily Reflection in Diary for that date."],
@@ -257,7 +257,7 @@
       label:"Library",
       title:"Library keeps your saved records organized.",
       purpose:[
-        "Library holds saved Study Days plus the Diary collection of dated reflections. Filter or sort Study Days, open a date, or work directly with reflections and Ongoing Notes.",
+        "Library holds saved Study Days plus the Diary collection of dated reflections. Filter or sort Study Days, open a date, or work directly with reflections and notes.",
         "Library also holds backup and restore tools. Back up regularly if the records matter; restore only trusted Study Director backups. Deleting a saved date removes that record."
       ],
       actions:[
@@ -278,7 +278,7 @@
           ["Day Detail","Shows the saved record for one day: study/work metrics, Pomodoro recovery, Practice Pacer summary when present, quality, reflection, unfinished note, and block evidence."],
           ["Task Details","Lets you inspect each saved block: planned duration, actual focus, work completion, progress units, explicit skip or other outcome state, area, and saved pause evidence."],
           ["Reflection / Unfinished","Keeps the diary reflection and carry-forward note visible beside the measurable record."],
-          ["Record Retrieval","Library lets you inspect saved Study Days while Diary and Ongoing Notes remain editable in their own Library sections."],
+          ["Record Retrieval","Library lets you inspect saved Study Days while Diary and notes remain editable in their own Library sections."],
         ]},
         {id:"data-tools",label:"Data Tools",heading:"Backup and recovery",kind:"pairs",items:[
           ["Data model","Local-first, versioned handoff: your device stays authoritative until you explicitly back up or recover a checkpoint. Google Drive is the intended computer ↔ phone/tablet handoff path; it is not continuous sync."],

@@ -13,7 +13,7 @@ registry.define('backup-capture',1,()=>{
     const data=exactObject(input.data,['activeSession','dailyRecords','notes','deletionRecovery','mutationEpoch','preparationUnits','provenance'],'Backup capture data port');
     const activeSessionData=functions(data.activeSession,['save','settled','load'],'Backup capture active-session data port');
     const dailyRecordData=functions(data.dailyRecords,['backupDates','backupMonth'],'Backup capture Saved-Day data port');
-    const noteData=functions(data.notes,['flush','failure','readFreshPayload','exportPayload','readFreshItems'],'Backup capture Ongoing Note data port');
+    const noteData=functions(data.notes,['flush','failure','readFreshPayload','exportPayload','readFreshItems'],'Backup capture note data port');
     const deletionData=functions(data.deletionRecovery,['flush','savedDays','areaNotes','attachments'],'Backup capture deletion data port');
     const mutationEpochData=functions(data.mutationEpoch,['read'],'Backup capture mutation-epoch data port');
     const preparationData=functions(data.preparationUnits,['list','replace'],'Backup capture preparation-unit data port');
@@ -166,11 +166,11 @@ async function captureLogicalCheckpoint(exportedAt=new Date().toISOString(),opti
     if(noteFailure&&noteFailure.failed){
       try{
         areaNotePayload=await AppData.notes.readFreshPayload();
-        noteCoverage='recovered-complete';noteRecoveryWarning='Ongoing Notes were included from durable recovery state because their canonical save had not settled.';
+        noteCoverage='recovered-complete';noteRecoveryWarning='Notes were included from durable recovery state because their canonical save had not settled.';
       }catch(error){
         AppDiagnostics.capture('backup.notes-rescue',error,'warn');
         areaNotePayload=AppData.notes.exportPayload();
-        noteCoverage='rescue-partial';noteRecoveryWarning='Ongoing Notes were included from this primary tab’s in-memory rescue state because IndexedDB could not be read. Keep this backup until browser storage recovers.';
+        noteCoverage='rescue-partial';noteRecoveryWarning='Notes were included from this primary tab’s in-memory rescue state because IndexedDB could not be read. Keep this backup until browser storage recovers.';
       }
     }else areaNotePayload=AppData.notes.exportPayload();
   }else areaNotePayload=await AppData.notes.readFreshPayload();
@@ -272,7 +272,7 @@ async function beginManagedPreparationCaptureAt(exportedAt){
   if(!appCanMutate())return null;
   await backupPreparationStep('BACKUP_PLAN_SETTLE_FAILED','checkpoint-plan-settle',()=>personalSettle({backupCapture:true}));
   try{await backupPreparationStep('BACKUP_NOTES_SETTLE_FAILED','checkpoint-notes-settle',()=>AppData.notes.flush({strict:true,backupCapture:true}));}catch(error){AppDiagnostics.capture('backup.incremental-notes-flush',error,'warn');throw error;}
-  const noteFailure=AppData.notes.failure();if(noteFailure&&noteFailure.failed)throw backupPreparationError('BACKUP_NOTES_SETTLE_FAILED','checkpoint-notes-settle','Ongoing Notes are not safely settled for repository preparation.');
+  const noteFailure=AppData.notes.failure();if(noteFailure&&noteFailure.failed)throw backupPreparationError('BACKUP_NOTES_SETTLE_FAILED','checkpoint-notes-settle','Notes are not safely settled for repository preparation.');
   const sessionResult=await backupPreparationStep('BACKUP_SESSION_SETTLE_FAILED','checkpoint-session-settle',()=>flushCurrentSessionForBackup());if(sessionResult.canonical===false){OperationDiagnostics.mark('checkpoint-preparation-fallback',{reason:'session-not-canonical'});return null;}
   try{await backupPreparationStep('BACKUP_DELETION_SETTLE_FAILED','checkpoint-deletion-settle',()=>settleDeletionRecovery());}catch(error){AppDiagnostics.capture('backup.incremental-deletion-recovery',error,'warn');OperationDiagnostics.mark('checkpoint-preparation-fallback',{reason:'deletion-settle'});return null;}
   OperationDiagnostics.mark('checkpoint-fast-fence-start');
@@ -330,7 +330,7 @@ async function readManagedPreparationUnits(preparation,units){
   const results=new Map(),noteUnits=[],noteKeys=[];
   for(const unit of requested){
     if(/^dailyRecordPack:\d{4}-(?:0[1-9]|1[0-2])$/u.test(unit)){const month=unit.slice('dailyRecordPack:'.length);let rows;try{rows=await AppData.dailyRecords.backupMonth(month,{requireCanonical:true});}catch(error){throw backupPreparationError('BACKUP_CANONICAL_CAPTURE_INCOMPLETE','checkpoint-canonical-completeness','Managed backup publication stopped because Saved Days could not be read completely from canonical IndexedDB storage. No incomplete rescue checkpoint was published.',error);}const payload=freeze([...(rows||[])]);results.set(unit,freeze({unit,present:payload.length>0,payload}));continue;}
-    if(unit.startsWith('areaNote:')){const key=unit.slice('areaNote:'.length);if(!key)throw new Error('Ongoing Note preparation unit is invalid.');noteUnits.push(unit);noteKeys.push(key);continue;}
+    if(unit.startsWith('areaNote:')){const key=unit.slice('areaNote:'.length);if(!key)throw new Error('Note preparation unit is invalid.');noteUnits.push(unit);noteKeys.push(key);continue;}
     if(unit==='personalData'){const payload=await personalExport({flush:false});results.set(unit,freeze({unit,present:!!payload,payload:payload||null}));continue;}
     if(unit==='activeSession'){const payload=guard.session&&typeof guard.session==='object'?ActiveSessionCodec.sanitizeCurrent(guard.session):null;results.set(unit,freeze({unit,present:!!payload,payload:payload||null}));continue;}
     throw new Error('Unknown backup preparation unit.');

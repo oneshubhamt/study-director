@@ -169,15 +169,15 @@ function normalizeCheckpointSavedDayDeletions(values){
   return freeze([...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date)));
 }
 function normalizeCheckpointAreaNoteDeletions(values){
-  if(!Array.isArray(values))throw new Error('Checkpoint Ongoing Note deletion history is invalid.');
+  if(!Array.isArray(values))throw new Error('Checkpoint note deletion history is invalid.');
   const byKey=new Map();
   for(const raw of values){
     const key=String(raw&&raw.key||'').trim(),deletedAt=String(raw&&raw.deletedAt||'');
-    if(!key||key.length>Number(APP_LIMITS.maxAreaNameChars||240)||!Number.isFinite(Date.parse(deletedAt)))throw new Error('Checkpoint contains an invalid Ongoing Note deletion entry.');
+    if(!key||key.length>Number(APP_LIMITS.maxAreaNameChars||240)||!Number.isFinite(Date.parse(deletedAt)))throw new Error('Checkpoint contains an invalid note deletion entry.');
     const clean=freeze({key,deletedAt:new Date(deletedAt).toISOString()}),previous=byKey.get(key);
     if(!previous||Date.parse(clean.deletedAt)>Date.parse(previous.deletedAt))byKey.set(key,clean);
   }
-  if(byKey.size>APP_LIMITS.maxOngoingNotes)throw new Error('Checkpoint contains too many Ongoing Note deletion entries.');
+  if(byKey.size>APP_LIMITS.maxOngoingNotes)throw new Error('Checkpoint contains too many note deletion entries.');
   return freeze([...byKey.values()].sort((a,b)=>a.key.localeCompare(b.key)));
 }
 function normalizeCheckpointAttachmentDeletions(values){
@@ -208,7 +208,7 @@ function backupProtectedCheckpointManifest(plan,checkpoint){
   const savedDayDeletions=normalizeCheckpointSavedDayDeletions(plan&&plan.savedDayDeletions||[]),areaNoteDeletions=normalizeCheckpointAreaNoteDeletions(plan&&plan.areaNoteDeletions||[]),attachmentDeletions=normalizeCheckpointAttachmentDeletions(plan&&plan.attachmentDeletions||[]);
   const recordDates=new Set((plan&&plan.recordDates||[]).map(String)),noteKeys=new Set((plan&&plan.areaNoteItems||[]).map(item=>String(item&&item.key||''))),assetIds=new Set((plan&&plan.assetItems||[]).map(item=>String(item&&item.descriptor&&item.descriptor.assetId||'')));
   if(savedDayDeletions.some(entry=>recordDates.has(entry.date)))throw new Error('Checkpoint cannot contain both a Saved Day and its deletion marker.');
-  if(areaNoteDeletions.some(entry=>noteKeys.has(entry.key)))throw new Error('Checkpoint cannot contain both an Ongoing Note and its deletion marker.');
+  if(areaNoteDeletions.some(entry=>noteKeys.has(entry.key)))throw new Error('Checkpoint cannot contain both a note and its deletion marker.');
   if(attachmentDeletions.some(entry=>assetIds.has(entry.assetId)))throw new Error('Checkpoint cannot contain both an Attachment Library identity and its deletion marker.');
   return freeze({format:contract.format,version:contract.version,checkpointId:checkpoint.checkpointId,sourceRevision:new Date(sourceRevision).toISOString(),authority:CHECKPOINT_AUTHORITY,savedDayDeletions,areaNoteDeletions,attachmentDeletions});
 }
@@ -428,7 +428,7 @@ async function parseChunkedBackupMetadata(file,options={},context={}){
     protectedCheckpointManifest=withNoteIdDeletions(validateProtectedCheckpointManifest(protectedCheckpointManifest,manifest.checkpoint,{normalizedLegacy:true}),Number(manifest.version)<NOTE_ID_BACKUP_VERSION);
     const recordDates=identities.dailyRecord,noteKeys=identities.areaNote,assetIds=new Set(assetDescriptors.map(item=>item.assetId));
     if(protectedCheckpointManifest.savedDayDeletions.some(entry=>recordDates.has(entry.date)))throw new Error('Checkpoint contains contradictory Saved-Day record/deletion state.');
-    if(protectedCheckpointManifest.areaNoteDeletions.some(entry=>noteKeys.has(entry.key)))throw new Error('Checkpoint contains contradictory Ongoing Note record/deletion state.');
+    if(protectedCheckpointManifest.areaNoteDeletions.some(entry=>noteKeys.has(entry.key)))throw new Error('Checkpoint contains contradictory note record/deletion state.');
     if(protectedCheckpointManifest.attachmentDeletions.some(entry=>assetIds.has(entry.assetId)))throw new Error('Checkpoint contains contradictory Attachment Library record/deletion state.');
   }
   return {importedPersonalData:personalData,data:{areaNotes},records,hasAreaNotes:true,areaNotesComplete,importedActiveSession:activeSession,protectedCheckpointManifest,captureAuthority,formatVersion:manifest.version,counts:actual,manifest,report,uncompressedBytes:state.uncompressedBytes,assetDescriptors,referencedAssetIds:freeze([...referencedAssetIds].sort())};

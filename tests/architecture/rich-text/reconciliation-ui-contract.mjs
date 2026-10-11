@@ -20,7 +20,7 @@ assert.match(editor,/compareRichText,mergeIncomingAdditions,appendIncomingAdditi
 for(const label of ['Keep local','Smart merge','Append additions','Use imported','Apply resolved note'])assert.ok(ui.includes(label),`Missing reconciliation action: ${label}`);
 assert.match(ui,/Promise\.allSettled\(/,'Reconciliation must retain both editor mount outcomes for cleanup.');
 assert.match(ui,/focusOnMount:false,allowAssetInsert:false,readOnly/,'Scratch editors must neither autofocus nor add attachments and must support a read-only imported surface.');
-assert.match(ui,/mountOptions\(incomingPane\.field,manualOnly\?'Imported Diary Reflection':'Imported Ongoing Note',state\.incoming,incomingScratchAssets,true\)/,'Imported reconciliation editor must mount read-only for both Ongoing Notes and Diary conflicts.');
+assert.match(ui,/mountOptions\(incomingPane\.field,manualOnly\?'Imported Diary Reflection':'Imported note',state\.incoming,incomingScratchAssets,true\)/,'Imported reconciliation editor must mount read-only for both notes and Diary conflicts.');
 assert.match(ui,/manualOnly[\s\S]{0,180}mergeButton\.hidden=true;appendButton\.hidden=true/,'Diary conflict mode must disable automatic merge strategies.');
 assert.ok(ui.includes("action('Custom','custom')"),'Diary conflict mode must expose explicit custom editing.');
 assert.match(ui,/richText\.mergeThreeWay\(conflict\.ancestorValue,conflict\.localValue,conflict\.incomingValue\)/,'Reconciliation UI must use the hidden common ancestor when one is available.');

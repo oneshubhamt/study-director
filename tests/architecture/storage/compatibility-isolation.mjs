@@ -25,7 +25,7 @@ assert.equal(occurrences(outsideFacade,/AppData\.compatibility\b/gu),0,'only the
 assert.equal(occurrences(outsideFacade,/\.cleanupLegacy\(/gu),0,'only the compatibility facade removes legacy attachment rows');
 
 // In the repositories, compatibility code sits in one marked block. What it
-// defines is used only inside it, it holds every Ongoing Note conversion (the
+// defines is used only inside it, it holds every note conversion (the
 // notes repository has none), and the Insights revision's older-form
 // conversions are called only from it.
 const blockStart=repositories.indexOf('/* COMPATIBILITY ---'),blockEnd=repositories.indexOf('/* END COMPATIBILITY */');

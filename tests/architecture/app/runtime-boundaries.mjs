@@ -167,13 +167,13 @@ assert.match(glass,/html\[data-presentation="glass"\]\[data-shape="glass"\] \.pw
 assert.doesNotMatch(core,/\.execute-command-rail \.ctrl-block\{[^}]*border-radius|\.progress-rail\{[^}]*border-radius|\.ownership-banner\{[^}]*border-radius|\.pwa-update-control\{[^}]*border-radius/s,
   'Director/core geometry remains free of Glass-specific radius overrides');
 assert.match(glass,/html\[data-presentation="glass"\] #pane-execute \.execute-note-desk \.pnote-hdr\{[\s\S]*?grid-template-columns:minmax\(0,1fr\) 26px[\s\S]*?html\[data-presentation="glass"\] #pane-execute \.execute-note-desk \.pnote-title\{[\s\S]*?font-size:var\(--sd-type-role-section-size\)[\s\S]*?letter-spacing:\.01em/s,
-  'Glass Ongoing Notes header reserves the sync slot and restores Glass typography at every width');
+  'Glass notes header reserves the sync slot and restores Glass typography at every width');
 assert.match(glass,/@media\(max-width:560px\)\{[\s\S]*?#pane-execute \.execute-note-desk \.pnote-title\{font-size:clamp\(1rem,5vw,var\(--sd-type-role-metric-size\)\)\}/s,
-  'Glass narrows only the Ongoing Notes title size on small screens');
+  'Glass narrows only the notes title size on small screens');
 assert.match(glass,/html\[data-presentation="glass"\] \.focus-rhythm-title,[\s\S]*?\.backup-section-title,[\s\S]*?\.execute-overlay-kicker,[\s\S]*?\.interaction-eyebrow\{letter-spacing:var\(--sd-type-label-tracking\)\}/s,
   'Glass section and overlay labels consume the shared Glass tracking token');
 assert.doesNotMatch(core,/pnote-title[^}]*clamp\(1rem,5vw|execute-note-desk \.pnote-hdr[^}]*grid-template-columns:minmax\(0,1fr\) 26px/s,
-  'Director Ongoing Notes typography/layout is not changed by the Glass correction');
+  'Director notes typography/layout is not changed by the Glass correction');
 
 // Plan draft rows use one coherent control geometry rather than browser/intrinsic sizing.
 assert.match(core,/\.plan-draft-fields\{[^}]*--plan-draft-control-height:36px[^}]*grid-template-columns:minmax\(180px,2fr\) repeat\(6,minmax\(88px,1fr\)\)[^}]*align-items:stretch/s,

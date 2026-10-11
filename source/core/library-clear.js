@@ -57,16 +57,16 @@ registry.define('library-clear',1,()=>{
           const fresh=await data.notes.readFreshPayload()||{},expected=new Map();
           for(const target of noteTargets){
             const current=fresh[target.key];
-            if(!current)throw new Error('An Ongoing Note changed before attachment removal.');
-            const value=transformReference(current.text,target,'The Ongoing Note');
+            if(!current)throw new Error('A note changed before attachment removal.');
+            const value=transformReference(current.text,target,'The note');
             const result=data.notes.updateValidatedRich(target.key,current.label||target.label,value,current.updatedAt||'');
-            if(!['changed','unchanged'].includes(result.status))throw new Error('The Ongoing Note changed during attachment removal.');
+            if(!['changed','unchanged'].includes(result.status))throw new Error('The note changed during attachment removal.');
             expected.set(target.key,value);changed++;
           }
           await data.notes.flush({strict:true});
-          if(data.notes.failure().failed)throw new Error('Ongoing Note reference removal did not save safely.');
+          if(data.notes.failure().failed)throw new Error('Note reference removal did not save safely.');
           const verified=await data.notes.readFreshPayload()||{};
-          for(const [key,value] of expected)if(String(verified[key]?.text||'')!==value)throw new Error('Ongoing Note reference removal verification failed.');
+          for(const [key,value] of expected)if(String(verified[key]?.text||'')!==value)throw new Error('Note reference removal verification failed.');
         }
         const dayTargets=grouped.filter(target=>target.kind==='day');
         if(dayTargets.length){
@@ -104,7 +104,7 @@ registry.define('library-clear',1,()=>{
       if(scope.notes.mode==='all')noteSnapshot={mode:'all',entries:clone(notePayload||{})};
       else if(scope.notes.mode==='selected'){
         const entries={};
-        for(const key of scope.notes.keys){const note=notePayload?.[key];if(!note)throw new Error('An Ongoing Note changed before the Library safety journal could be prepared. No Library data was changed.');entries[key]=clone(note);}
+        for(const key of scope.notes.keys){const note=notePayload?.[key];if(!note)throw new Error('A note changed before the Library safety journal could be prepared. No Library data was changed.');entries[key]=clone(note);}
         noteSnapshot={mode:'selected',entries};
       }
       let daySnapshot=null;
@@ -128,7 +128,7 @@ registry.define('library-clear',1,()=>{
     }
 
     async function verifyLogical(plan,policy){
-      if(plan.selection.ongoingNotes&&Object.keys(await data.notes.readFreshPayload()||{}).length)throw new Error('Ongoing Notes deletion did not verify.');
+      if(plan.selection.ongoingNotes&&Object.keys(await data.notes.readFreshPayload()||{}).length)throw new Error('Notes deletion did not verify.');
       if(plan.selection.savedDays&&(await data.dailyRecords.list({strict:true})).length)throw new Error('Saved Days deletion did not verify.');
       const ids=new Set(policy.deleteIds||[]),sources=await references.listSources();
       for(const source of sources)for(const id of source.ids||[])if(ids.has(id))throw new Error('An attachment selected for deletion is still referenced by retained data.');
@@ -146,11 +146,11 @@ registry.define('library-clear',1,()=>{
     async function restoreNotes(snapshot){
       if(!snapshot)return;
       if(snapshot.mode==='all'){await data.notes.replace(clone(snapshot.entries||{}));await data.notes.flush({strict:true});return;}
-      if(snapshot.mode!=='selected')throw new Error('Ongoing Notes rollback scope is invalid.');
+      if(snapshot.mode!=='selected')throw new Error('Notes rollback scope is invalid.');
       const current=await data.notes.readFreshPayload()||{};
       for(const [key,original] of Object.entries(snapshot.entries||{})){
         const live=current[key]||null,result=data.notes.updateValidatedRich(key,original.label||key,original.text||'',live?.updatedAt||'');
-        if(!['changed','unchanged'].includes(result.status))throw new Error('Ongoing Note rollback could not restore a targeted record.');
+        if(!['changed','unchanged'].includes(result.status))throw new Error('Note rollback could not restore a targeted record.');
       }
       await data.notes.flush({strict:true});
     }
@@ -181,8 +181,8 @@ registry.define('library-clear',1,()=>{
     async function verifyRestore(payload){
       if(payload.notes){
         const notes=await data.notes.readFreshPayload()||{},expected=payload.notes.entries||{};
-        if(payload.notes.mode==='all'&&Object.keys(notes).length!==Object.keys(expected).length)throw new Error('Ongoing Notes rollback restored an unexpected record count.');
-        for(const [key,original] of Object.entries(expected)){const actual=notes[key];if(!actual||String(actual.label||'')!==String(original.label||'')||String(actual.text||'')!==String(original.text||''))throw new Error('Ongoing Notes rollback verification failed.');}
+        if(payload.notes.mode==='all'&&Object.keys(notes).length!==Object.keys(expected).length)throw new Error('Notes rollback restored an unexpected record count.');
+        for(const [key,original] of Object.entries(expected)){const actual=notes[key];if(!actual||String(actual.label||'')!==String(original.label||'')||String(actual.text||'')!==String(original.text||''))throw new Error('Notes rollback verification failed.');}
       }
       if(payload.dailyRecords){
         const current=await data.dailyRecords.list({strict:true}),map=new Map(current.map(row=>[row.date,row])),expected=payload.dailyRecords.entries||[];

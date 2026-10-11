@@ -96,7 +96,7 @@ registry.define('backup-recovery-host',1,()=>{
       const hasTasks=!(options.phase==='final'&&options.keepsActiveSession===true)&&input.lifecycle.hasTasks();
       let liveResult=null;if(hasTasks)liveResult=await input.lifecycle.writeLiveDraft();
       await input.lifecycle.flushNotes();
-      const noteFailure=input.lifecycle.noteFailure();if(noteFailure&&noteFailure.failed)throw new Error(noteFailure.message||'Ongoing Notes are not safely stored yet.');
+      const noteFailure=input.lifecycle.noteFailure();if(noteFailure&&noteFailure.failed)throw new Error(noteFailure.message||'Notes are not safely stored yet.');
       if(await input.lifecycle.deletionRecoveryFlush()!==true)throw new Error('Pending deletion recovery could not be settled before recovery.');
       await input.lifecycle.activeSessionSettled();
       const loaded=await input.lifecycle.activeSessionLoad();await input.lifecycle.activeSessionSettled();
@@ -233,7 +233,7 @@ registry.define('backup-recovery-host',1,()=>{
         const card=input.document.createElement('section');card.className='managed-version-card';card.dataset.logicalVersion=entry.logicalId;
         const head=input.document.createElement('div');head.className='managed-version-card-head';
         const when=input.document.createElement('strong');when.className='managed-version-date';when.textContent=dateLabel(entry.exportedAt||location.exportedAt);
-        const counts=input.document.createElement('span');counts.className='managed-version-counts ui-helper';counts.textContent=`${Number(entry.counts?.dailyRecord)||0} Saved Days · ${Number(entry.counts?.areaNote)||0} Ongoing Notes`;
+        const counts=input.document.createElement('span');counts.className='managed-version-counts ui-helper';counts.textContent=`${Number(entry.counts?.dailyRecord)||0} Saved Days · ${Number(entry.counts?.areaNote)||0} Notes`;
         head.append(when,counts);card.appendChild(head);
         const row=input.document.createElement('div');row.className='managed-version-location';
         const copy=input.document.createElement('div');copy.className='managed-version-location-copy';

@@ -3,7 +3,7 @@ import {createHarness} from '../../helpers/repository-harness.mjs';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
 import {noteKeys,noteId,noteRow,storedNote} from '../../helpers/note-ids.mjs';
 
-// Ongoing Notes are first-class documents: an accepted edit is never replaced by
+// Notes are first-class documents: an accepted edit is never replaced by
 // an older stored revision, and storage that vanished underneath an open tab is
 // rewritten from memory. No extra persisted state is involved.
 async function setup(){
@@ -274,7 +274,7 @@ for(const failEpochRead of [false,true]){
     assert.equal(storedNote(stores.area,'ethics').text,'theirs');assert.equal(app.notes.get('ethics').text,'mine','this tab keeps its version');
     assert.equal(sharedLocal.get('areaNoteRescue')?.entries?.[ethicsId]?.text,'mine','and the browser copy holds it');
     const clashFailure=app.notes.failure().message;
-    assert.match(clashFailure,/Ethics changed in another tab, and Ongoing Notes are at the 1,000-note limit.*Delete a note to make room/u);
+    assert.match(clashFailure,/Ethics changed in another tab, and notes are at the 1,000-note limit.*Delete a note to make room/u);
     await assert.rejects(app.notes.flush({strict:true}),/1,000-note limit/u,'a strict flush never reports it as saved');
     await app.notes.reloadFresh();assert.equal(app.notes.get('ethics').text,'mine','a reload keeps the unsaved version');
     const trashed=await app.notes.trash('filler 0');

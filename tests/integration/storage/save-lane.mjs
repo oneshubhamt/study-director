@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
-// The one save engine behind Ongoing Notes, Diary reflections and the Review
+// The one save engine behind notes, Diary reflections and the Review
 // reflection: the first edit is written at once, continued typing at most
 // DELAY_MS later, one write at a time, always with the latest value; a failure
 // keeps the value and retries on its own.

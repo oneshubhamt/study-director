@@ -25,7 +25,7 @@ registry.define('reconciliation-ui',1,()=>{
     if(!document||typeof document.createElement!=='function')throw new TypeError('Reconciliation UI document is unavailable.');
     let active=null;
     function normalizedConflicts(raw){
-      if(!Array.isArray(raw))throw new TypeError('Ongoing Note conflicts must be an array.');
+      if(!Array.isArray(raw))throw new TypeError('Note conflicts must be an array.');
       const seen=new Set(),out=[];
       for(const item of raw){
         const key=String(item&&item.key||'').trim(),localCandidateId=String(item&&item.localCandidateId||''),incomingCandidateId=String(item&&item.incomingCandidateId||'');
@@ -45,7 +45,7 @@ registry.define('reconciliation-ui',1,()=>{
       return freeze({format:FORMAT,version:1,notes:freeze(notes)});
     }
     async function resolve(options={}){
-      if(active)throw new Error('Ongoing Note reconciliation is already open.');
+      if(active)throw new Error('Note reconciliation is already open.');
       // purpose 'version' is one note compared with an earlier backup of it.
       const conflicts=normalizedConflicts(options.conflicts),manualOnly=options.manualOnly===true,version=!manualOnly&&options.purpose==='version';
       if(!conflicts.length)return freeze({format:FORMAT,version:1,notes:freeze(Object.create(null))});
@@ -78,7 +78,7 @@ registry.define('reconciliation-ui',1,()=>{
       const localScratchAssets=readonlyAssetStore(false),incomingScratchAssets=readonlyAssetStore(true);
       const states=manual.map(item=>({conflict:item.conflict,working:item.conflict.localValue,incoming:item.conflict.incomingValue,smartValue:item.smartValue,result:null,applied:false}));
       const restoreFocus=document.activeElement;
-      const dialog=document.createElement('dialog');dialog.className='sd-note-reconcile-dialog';dialog.setAttribute('aria-label',manualOnly?'Review Diary differences':'Review Ongoing Note differences');
+      const dialog=document.createElement('dialog');dialog.className='sd-note-reconcile-dialog';dialog.setAttribute('aria-label',manualOnly?'Review Diary differences':'Review note differences');
       const shell=document.createElement('div');shell.className='sd-note-reconcile-shell';
       const header=document.createElement('header');header.className='sd-note-reconcile-header';
       const headingWrap=document.createElement('div'),kicker=document.createElement('div'),title=document.createElement('h2'),progress=document.createElement('div');kicker.className='sd-note-reconcile-kicker';kicker.textContent=manualOnly?'DIARY DIFFERENCES':version?'EARLIER VERSION':'ONGOING NOTE DIFFERENCES';title.className='sd-note-reconcile-title';progress.className='sd-note-reconcile-progress';headingWrap.append(kicker,title,progress);
@@ -138,8 +138,8 @@ registry.define('reconciliation-ui',1,()=>{
             return handle;
           });
           const results=await Promise.allSettled([
-            mount(mountOptions(localPane.field,manualOnly?'Resolved Diary Reflection':'Resolved Ongoing Note',state.working,localScratchAssets,false)),
-            mount(mountOptions(incomingPane.field,manualOnly?'Imported Diary Reflection':'Imported Ongoing Note',state.incoming,incomingScratchAssets,true))
+            mount(mountOptions(localPane.field,manualOnly?'Resolved Diary Reflection':'Resolved note',state.working,localScratchAssets,false)),
+            mount(mountOptions(incomingPane.field,manualOnly?'Imported Diary Reflection':'Imported note',state.incoming,incomingScratchAssets,true))
           ]);
           mountedLeft=results[0].status==='fulfilled'?results[0].value:null;mountedRight=results[1].status==='fulfilled'?results[1].value:null;
           const failure=results.find(result=>result.status==='rejected');if(failure)throw failure.reason;

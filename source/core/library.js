@@ -275,7 +275,7 @@ registry.define('library',1,()=>{
           if(result.missing)status+=` ${result.missing} unavailable image(s) are marked in the exported notes.`;
           ongoingNoteSelectionMode=false;ongoingNoteSelection.clear();
         }else if(result&&result.status==='cancelled'){status='Notes export cancelled.';statusError=false;}else if(result&&result.status==='too-large')status=`This export is larger than the ${Math.round((Number(result.maxBytes)||0)/(1024*1024))} MiB safety limit. Select fewer notes and export again.`;
-      }catch(error){console.error('Ongoing note export failed:',error);status='Notes export did not complete: '+error.message;}
+      }catch(error){console.error('Note export failed:',error);status='Notes export did not complete: '+error.message;}
       finally{ongoingNoteExportBusy=false;if(ongoingNoteSelectionMode)updateOngoingNoteSelectionControls(ongoingNoteEntries());else renderOngoingNotes();notice.finish(success?'succeeded':statusError?'failed':'cancelled',status);}
       return success;
     }
@@ -294,7 +294,7 @@ registry.define('library',1,()=>{
       const add=document.getElementById('library-note-add'),canAdd=canMutate()&&canCreateOngoingNote();
       if(!add)return;
       add.disabled=!canAdd;add.setAttribute('aria-disabled',canAdd?'false':'true');
-      add.title=canAdd?'Create a note':'Ongoing Notes are at their note limit';
+      add.title=canAdd?'Create a note':'Notes are at their note limit';
     }
     function parentNotesSignature(entry){
       const byKey=new Map(ongoingNoteEntries().map(candidate=>[candidate.key,candidate])),parts=entry.key.split(' > '),out=[];
@@ -549,7 +549,7 @@ registry.define('library',1,()=>{
       button.className='library-note-nav-item '+(entry.hasNote?'has-note':'empty-note')+(entry.support?' support-note':'')+(entry.key===selectedOngoingNoteKey?' active':'');
       button.style.setProperty('--note-indent',`${Math.min(6,Math.max(0,Number(entry.depth)||0))*15}px`);
       button.dataset.ongoingNoteKey=entry.key;
-      button.setAttribute('aria-label',`Open ${entry.hasNote?'saved':'empty'} ongoing note for ${entry.label}`);
+      button.setAttribute('aria-label',`Open ${entry.hasNote?'saved':'empty'} note for ${entry.label}`);
       button.setAttribute('aria-current',entry.key===selectedOngoingNoteKey?'true':'false');
       const name=textEl('span','library-note-nav-name',ongoingNoteLeaf(entry.label));
       const tags=document.createElement('span');tags.className='library-note-nav-tags';
@@ -601,7 +601,7 @@ registry.define('library',1,()=>{
       if(previous)clearEditor(previous);
       ongoingNoteEditorSignature=signature;ongoingNoteParentSignature=parents;
       if(!entry){
-        panel.replaceChildren(textEl('div','library-notes-editor-empty ui-status','No ongoing notes match this search.'));
+        panel.replaceChildren(textEl('div','library-notes-editor-empty ui-status','No notes match this search.'));
         return false;
       }
       const head=document.createElement('div');head.className='library-notes-editor-head';
@@ -619,7 +619,7 @@ registry.define('library',1,()=>{
       const inherited=document.createElement('div');renderInherited(inherited,entry.key,false,{collapsible:true});
       if(readOnly){
         const preview=document.createElement('div');preview.className='library-ongoing-note-read';
-        if(!richValue.trim()){preview.classList.add('empty');preview.textContent='No content saved for this Area.';}else renderRichTextContent(preview,richValue,'No content saved for this Area.',`Ongoing note for ${entry.label}`);
+        if(!richValue.trim()){preview.classList.add('empty');preview.textContent='No content saved for this Area.';}else renderRichTextContent(preview,richValue,'No content saved for this Area.',`Note for ${entry.label}`);
         panel.replaceChildren(head,preview,inherited);return true;
       }
       const editorShell=document.createElement('div');editorShell.className='library-notes-editor-shell';
@@ -690,9 +690,9 @@ registry.define('library',1,()=>{
           const more=textEl('button','library-notes-more ui-btn',`Show ${Math.min(nodes.length-shown.length,ONGOING_NOTE_PAGE_SIZE)} more`);more.type='button';
           more.addEventListener('click',()=>{ongoingNoteVisibleLimit+=ONGOING_NOTE_PAGE_SIZE;renderOngoingNotes();});rows.push(more);
         }
-        if(tree&&!ongoingNoteSelectionMode){list.setAttribute('role','tree');list.setAttribute('aria-label','Ongoing notes');}else{list.removeAttribute('role');list.removeAttribute('aria-label');}
+        if(tree&&!ongoingNoteSelectionMode){list.setAttribute('role','tree');list.setAttribute('aria-label','Notes');}else{list.removeAttribute('role');list.removeAttribute('aria-label');}
         if(filtered.length)list.replaceChildren(...rows);
-        else list.replaceChildren(textEl('div','library-notes-zero ui-status','No ongoing notes match this search.'));
+        else list.replaceChildren(textEl('div','library-notes-zero ui-status','No notes match this search.'));
         const focusable=list.querySelector('[role="treeitem"].active')||list.querySelector('[role="treeitem"]');if(focusable)focusable.tabIndex=0;
         if(ongoingNoteFocusKey){const target=[...list.querySelectorAll('[role="treeitem"]')].find(row=>row.dataset.ongoingNoteKey===ongoingNoteFocusKey);ongoingNoteFocusKey='';if(target){for(const row of list.querySelectorAll('[role="treeitem"]'))row.tabIndex=-1;target.tabIndex=0;target.focus();}}
       }
@@ -738,7 +738,7 @@ registry.define('library',1,()=>{
     async function createOngoingNote(){
       if(!canMutate())return false;
       if(!canCreateOngoingNote()){
-        setOngoingNotesStatus('Ongoing Notes are at their note limit. Delete a note to make room.',{error:true});
+        setOngoingNotesStatus('Notes are at their note limit. Delete a note to make room.',{error:true});
         return false;
       }
       const selected=ongoingNoteEntries().find(entry=>entry.key===selectedOngoingNoteKey)||null;
@@ -747,7 +747,7 @@ registry.define('library',1,()=>{
         {value:'top',label:'At top level',description:'Creates an independent Area.'}
       ]:[];
       const result=await requestInput({
-        title:'New ongoing note',
+        title:'New note',
         message:selected?'Choose where the new note belongs, then give its Area or topic a clear name.':'Give the new Area or topic a clear name.',
         inputLabel:'Area or topic name',placeholder:'For example: Cardiology',maxLength:160,required:true,
         requiredMessage:'Enter an Area or topic name.',
@@ -1408,7 +1408,7 @@ registry.define('library',1,()=>{
       const accepted=await confirm({
         title:`Delete ${prettyDate(date)}?`,danger:true,
         message:'This removes only this saved day from the Library in this browser.',
-        details:['Ongoing notes and the active session are unchanged.','Existing backup files are unchanged.'],
+        details:['Notes and the active session are unchanged.','Existing backup files are unchanged.'],
         confirmLabel:'Delete saved day',cancelLabel:'Keep saved day'
       });
       if(!accepted||libraryMutationBlocked('deleting a saved day'))return;
@@ -1443,7 +1443,7 @@ registry.define('library',1,()=>{
       return `${safe} can be deleted · ${protectedCount} ${protectedCount===1?'is':'are'} still used and will be kept by default.`;
     }
     async function requestClearLibrarySelectionFallback(counts){
-      const available=[counts.savedDays?'S = Saved Dates / Reflections':'',counts.ongoingNotes?'N = Ongoing Notes':'',counts.attachments?'A = Attachments':''].filter(Boolean);
+      const available=[counts.savedDays?'S = Saved Dates / Reflections':'',counts.ongoingNotes?'N = Notes':'',counts.attachments?'A = Attachments':''].filter(Boolean);
       const result=await requestInput({
         title:'Clear Library',danger:true,
         message:'Choose what to delete. Enter one or more letters separated by nothing or spaces.',
@@ -1509,7 +1509,7 @@ registry.define('library',1,()=>{
       const selection=choice.selection,plan=choice.plan,forceReferenced=choice.forceReferenced===true&&!!plan?.attachments?.protectedIds?.length;
       const onlySavedDays=selection.savedDays&&!selection.ongoingNotes&&!selection.attachments,details=[];
       if(selection.savedDays)details.push(`${counts.savedDays} Saved Date / Reflection record${counts.savedDays===1?'':'s'}.`);
-      if(selection.ongoingNotes)details.push(`${counts.ongoingNotes} Ongoing Note${counts.ongoingNotes===1?'':'s'}.`);
+      if(selection.ongoingNotes)details.push(`${counts.ongoingNotes} Note${counts.ongoingNotes===1?'':'s'}.`);
       if(selection.attachments){const safe=plan?.attachments?.safeIds?.length||0,protectedCount=plan?.attachments?.protectedIds?.length||0;if(forceReferenced)details.push(`${safe+protectedCount} Attachment${safe+protectedCount===1?'':'s'} will be deleted. References to ${protectedCount} still-used attachment${protectedCount===1?'':'s'} will first be removed from retained content.`);else details.push(`${safe} Attachment${safe===1?'':'s'} can be deleted safely; ${protectedCount} still-used attachment${protectedCount===1?'':'s'} will be kept.`);}
       details.push('Existing backup files, plans, preferences, and active/suspended session state (including unsaved Review work) are otherwise preserved.');
       const phrase=forceReferenced?'DELETE ATTACHMENTS AND REFERENCES':'DELETE SELECTED DATA';
@@ -1525,7 +1525,7 @@ registry.define('library',1,()=>{
     function clearLibraryResultMessage(result){
       const parts=[];
       if(result.selection.savedDays)parts.push(`${result.savedDays} saved day${result.savedDays===1?'':'s'}`);
-      if(result.selection.ongoingNotes)parts.push(`${result.ongoingNotes} ongoing note${result.ongoingNotes===1?'':'s'}`);
+      if(result.selection.ongoingNotes)parts.push(`${result.ongoingNotes} note${result.ongoingNotes===1?'':'s'}`);
       if(result.selection.attachments)parts.push(`${result.attachmentsRemoved} attachment${result.attachmentsRemoved===1?'':'s'}`);
       let message=parts.length?'Deleted '+parts.join(' · ')+'.':'No selected data needed deletion.';
       if(result.selection.attachments&&result.attachmentsProtected)message+=` Kept ${result.attachmentsProtected} referenced attachment${result.attachmentsProtected===1?'':'s'} still used by retained content.`;

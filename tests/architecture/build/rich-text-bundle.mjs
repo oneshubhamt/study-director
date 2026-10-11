@@ -17,7 +17,7 @@ assert.ok(!generatedAttachmentWorker.inputs.some(name=>/vendor\/wordgard|node_mo
 const committedSearchWorker=fs.readFileSync(path.join(root,'source/external/search-worker.js'),'utf8');
 const generatedSearchWorker=await buildSearchWorkerBundle();
 assert.equal(generated.source,committed,'Committed Wordgard rich-text runtime is not reproducible from the declared build pipeline.');
-assert.equal(generatedSearchWorker.source,committedSearchWorker,'Committed Ongoing Notes search worker is not reproducible from the declared build pipeline.');
+assert.equal(generatedSearchWorker.source,committedSearchWorker,'Committed notes search worker is not reproducible from the declared build pipeline.');
 assert.ok(generated.inputs.some(name=>/vendor\/wordgard\/src\/editor\/editor\.ts$/.test(name)));
 for(const suffix of ['table/cellselection.ts','table/correct.ts','table/tablepaste.ts'])
   assert.ok(generated.inputs.some(name=>name.endsWith(`vendor/wordgard/src/${suffix}`)),`Canonical table support missing: ${suffix}`);

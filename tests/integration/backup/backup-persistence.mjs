@@ -338,7 +338,7 @@ assert.equal(events.filter(value=>value==='suppression:start').length,suppressio
 assert.ok(events.lastIndexOf('suppression:end')>=suppressionStartBeforeRestore,'suppression must remain active through restore commit and verification');
 assert.equal(restored.added+restored.replaced,0,'identical Saved Days must remain untouched rather than being rewritten');
 assert.equal(importedDailyRecords.length,0,'identical local Saved Days must not create an import write');
-assert.equal(restored.notesReconciled,false,'identical Ongoing Notes must not be rewritten');
+assert.equal(restored.notesReconciled,false,'identical notes must not be rewritten');
 assert.equal(events.includes('reconcile-area-notes'),false);
 assert.equal(events.includes('import-active-session'),false);
 assert.equal(currentNotes.Economics.version,2,'reconciled restore state must remain lean AreaNote.v2');

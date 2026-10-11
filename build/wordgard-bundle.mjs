@@ -25,7 +25,7 @@ const WORDGARD_SOURCE_ALIASES=Object.freeze({
   'wordgard/phrases':path.join(WORDGARD_FACADE,'phrases.ts')
 });
 const HEADER=`/* Study Director @@SD_RELEASE@@ rich text bundle. Wordgard ${WORDGARD_METADATA.version} · MIT. */\n`;
-const SEARCH_HEADER='/* Study Director @@SD_RELEASE@@ transient Ongoing Notes search worker. */\n';
+const SEARCH_HEADER='/* Study Director @@SD_RELEASE@@ transient notes search worker. */\n';
 
 function byteMetrics(source){
   const bytes=Buffer.from(source);

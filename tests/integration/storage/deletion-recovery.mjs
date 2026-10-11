@@ -54,7 +54,7 @@ assert.equal(h.sharedLocal.has('deletionRecovery'),false);
 assert.equal(await h.app.dailyRecords.get('2026-09-18'),null,'a stale fallback must not resurrect after the marker is retired');
 
 
-// Ongoing Note deletions are canonical sync state, not mere absence. Deleting a
+// Note deletions are canonical sync state, not mere absence. Deleting a
 // note creates a minimal tombstone under its id; a new note with the same
 // title is a different note, and bringing the same id back retires it.
 await h.app.notes.load();
@@ -64,7 +64,7 @@ await h.app.notes.flush({strict:true});
 const obsoleteId=h.app.notes.get('obsolete-note').id;
 assert.equal(await h.app.notes.remove('obsolete-note'),true);
 let noteLedger=await h.app.deletionRecovery.areaNotes();
-assert.equal(noteLedger.some(row=>row.key===obsoleteId),true,'Ongoing Note deletion must create durable canonical deletion history.');
+assert.equal(noteLedger.some(row=>row.key===obsoleteId),true,'Note deletion must create durable canonical deletion history.');
 noteWrite=h.app.notes.update('obsolete-note','Obsolete Note','recreated text','');
 assert.equal(noteWrite.status,'changed');
 await h.app.notes.flush({strict:true});
@@ -75,7 +75,7 @@ const aligned=h.app.notes.alignByTitle({[obsoleteId]:{version:3,key:obsoleteId,l
 assert.deepEqual(Object.keys(aligned),[obsoleteId],'a backup copy of a deleted note keeps its id, so its deletion still applies');
 await h.app.notes.reconcile({[obsoleteId]:{version:3,key:obsoleteId,label:'obsolete-note',text:'restored text',updatedAt:'2026-09-17T12:00:00.000Z'}});
 noteLedger=await h.app.deletionRecovery.areaNotes();
-assert.equal(noteLedger.some(row=>row.key===obsoleteId),false,'Bringing an Ongoing Note back must atomically retire its deletion marker.');
+assert.equal(noteLedger.some(row=>row.key===obsoleteId),false,'Bringing a note back must atomically retire its deletion marker.');
 assert.deepEqual(Object.values(h.app.notes.exportPayload()).map(entry=>entry.label).sort(),['obsolete-note','obsolete-note (2)'],'two notes never share a title');
 
 // Review working state now belongs to Active Session and historical reflection

@@ -415,10 +415,10 @@ async function applyResolvedSavedDays(resolvedPlan,operation,reportProgress=null
 async function applyResolvedAreaNotes(resolvedPlan){
   const changed=(resolvedPlan&&resolvedPlan.notes||[]).filter(item=>item.changed),writes=changed.filter(item=>item.state==='record'&&item.value&&typeof item.value==='object'),deletions=changed.filter(item=>item.state==='deleted'&&item.deletedAt).map(item=>freeze({key:item.key,deletedAt:item.deletedAt}));
   if(!writes.length&&!deletions.length)return {message:'',changed:false,expected:null,expectedDeletions:null,count:0,deleted:0};
-  requireBackupMutationControl('reconciling ongoing notes');
+  requireBackupMutationControl('reconciling notes');
   const payload=Object.create(null);for(const item of writes)payload[item.key]=item.value;
   const committed=await reconcileAreaNotes(AppData.notes.normalizePayload(payload),deletions);
-  if(!committed||typeof committed!=='object'||Array.isArray(committed))throw new Error('Ongoing-note reconciliation did not return a canonical committed payload.');
+  if(!committed||typeof committed!=='object'||Array.isArray(committed))throw new Error('Note reconciliation did not return a canonical committed payload.');
   const expected=AppData.notes.normalizePayload(committed),expectedDeletions=freeze([...(await AppData.deletionRecovery.areaNotes())]),count=writes.length,deleted=deletions.length;
   return {message:` and ${count+deleted} ongoing subject note change${count+deleted===1?'':'s'}`,changed:true,expected,expectedDeletions,count,deleted};
 }
@@ -475,10 +475,10 @@ async function flushRestorePreflightState(signal){
     requireBackupMutationControl('preparing restore reconciliation');
     return true;
   });
-  await runRestorePreflightStage('notes','RESTORE_PREFLIGHT_NOTES_FAILED','Ongoing Notes could not be safely saved before comparing backup differences.',async()=>{
+  await runRestorePreflightStage('notes','RESTORE_PREFLIGHT_NOTES_FAILED','Notes could not be safely saved before comparing backup differences.',async()=>{
     await AppData.notes.flush({strict:true});
     const noteFailure=AppData.notes.failure();
-    if(noteFailure&&noteFailure.failed)throw new Error(noteFailure.message||'Ongoing Notes are not safely stored yet.');
+    if(noteFailure&&noteFailure.failed)throw new Error(noteFailure.message||'Notes are not safely stored yet.');
     return true;
   });
   await runRestorePreflightStage('deletions','RESTORE_PREFLIGHT_DELETION_FAILED','Deletion recovery state could not be safely saved before comparing backup differences.',async()=>{if(await AppData.deletionRecovery.flush()!==true)throw new Error('Pending deletion recovery remains incomplete.');return true;});
@@ -689,7 +689,7 @@ function noteReconciliationSelections(plan,result){
     const text=String(resolved.text||''),matching=item.candidates.find(candidate=>String(candidate.value&&candidate.value.text||'')===text);
     if(matching){decisions[item.key]=matching.id;continue;}
     const local=item.candidates.find(candidate=>candidate.id===item.localCandidateId),fallback=local||item.candidates[0];
-    if(!fallback||!fallback.value||typeof fallback.value!=='object')throw new Error(`Ongoing Note ${item.key} has no valid reconciliation base.`);
+    if(!fallback||!fallback.value||typeof fallback.value!=='object')throw new Error(`Note ${item.key} has no valid reconciliation base.`);
     decisions[item.key]=freeze({value:freeze({...fallback.value,key:item.key,text,updatedAt:new Date().toISOString()})});
   }
   return freeze(decisions);
@@ -764,9 +764,9 @@ function restoreDecisionSetup(parsed,impact,mode='import',localPersonal=null){
   for(const item of plan.notes){
     if(!item.conflict||!item.candidates.some(candidate=>candidate.kind==='deleted'))continue;
     groups.push({
-      id:item.decisionKey,label:`Ongoing Note · ${item.key}`,defaultValue:item.defaultCandidateId,
+      id:item.decisionKey,label:`Note · ${item.key}`,defaultValue:item.defaultCandidateId,
       description:'This note was explicitly deleted on one side. Choose whether the canonical note should exist or remain deleted.',
-      choices:item.candidates.map(candidate=>({value:candidate.id,label:noteChoiceLabel(candidate),description:candidate.kind==='deleted'?'Keep this Ongoing Note deleted.':'Use this complete Ongoing Note.'}))
+      choices:item.candidates.map(candidate=>({value:candidate.id,label:noteChoiceLabel(candidate),description:candidate.kind==='deleted'?'Keep this note deleted.':'Use this complete note.'}))
     });
   }
   if(plan.activeSession.conflict){
@@ -925,7 +925,7 @@ async function verifyRestoreCommit(expected,signal,authorityOptions=null){
   if(Array.isArray(expected.removedAssetIds)&&expected.removedAssetIds.length){const catalogue=new Set((await AssetData.list()).map(row=>row.id));for(const id of expected.removedAssetIds)if(catalogue.has(id))throw new Error(`Post-restore verification failed to remove Attachment Library identity ${id}.`);}
   if(expected.personalData)await personalVerify(expected.personalData);
   if(Array.isArray(expected.savedDayDeletions)){const stored=await AppData.deletionRecovery.savedDays();if(!Canonical.same(stored,expected.savedDayDeletions))throw new Error('Post-restore verification failed for Saved-Day deletion history.');}
-  if(Array.isArray(expected.areaNoteDeletions)){const stored=await AppData.deletionRecovery.areaNotes();if(!Canonical.same(stored,expected.areaNoteDeletions))throw new Error('Post-restore verification failed for Ongoing Note deletion history.');}
+  if(Array.isArray(expected.areaNoteDeletions)){const stored=await AppData.deletionRecovery.areaNotes();if(!Canonical.same(stored,expected.areaNoteDeletions))throw new Error('Post-restore verification failed for note deletion history.');}
   if(Array.isArray(expected.attachmentDeletions)){const stored=await AppData.deletionRecovery.attachments();if(!Canonical.same(stored,expected.attachmentDeletions))throw new Error('Post-restore verification failed for Attachment deletion history.');}
   if(Object.prototype.hasOwnProperty.call(expected,'activeSession')){
     await AppData.activeSession.settled();
@@ -980,7 +980,7 @@ function managedParsedSnapshot(capture,metadata={}){
   // Versions saved before notes had permanent ids (manifest 5 and older) keep
   // notes, and their deletion history, under note names; both convert to ids.
   const nameKeyedNotes=Number(repositoryManifest.version)<ManagedRepository.noteIdManifestVersion;
-  const areaNotes=managedSnapshotStage('ongoing-notes','MANAGED_CHECKPOINT_ONGOING_NOTES_FAILED',()=>{const out=Object.create(null);for(const raw of plan.areaNoteItems||[]){const key=String(raw&&raw.key||''),clean=nameKeyedNotes?BackupCodec.legacyAreaNote(raw,key):BackupCodec.normalizeAreaNote(raw,key);if(!clean||!key||Object.prototype.hasOwnProperty.call(out,clean.key))throw new Error('Managed repository Ongoing Note failed current-schema verification.');out[clean.key]=clean;}return out;});
+  const areaNotes=managedSnapshotStage('ongoing-notes','MANAGED_CHECKPOINT_ONGOING_NOTES_FAILED',()=>{const out=Object.create(null);for(const raw of plan.areaNoteItems||[]){const key=String(raw&&raw.key||''),clean=nameKeyedNotes?BackupCodec.legacyAreaNote(raw,key):BackupCodec.normalizeAreaNote(raw,key);if(!clean||!key||Object.prototype.hasOwnProperty.call(out,clean.key))throw new Error('Managed repository note failed current-schema verification.');out[clean.key]=clean;}return out;});
   const activeSession=managedSnapshotStage('active-session','MANAGED_CHECKPOINT_ACTIVE_SESSION_FAILED',()=>{const clean=plan.activeSession?BackupCodec.normalizeImportedActiveSession(plan.activeSession,{legacy:Number(repositoryManifest.version)<=4}):null;if(plan.activeSession&&!clean)throw new Error('Managed repository Active Session failed schema verification.');return clean;});
   const personalData=managedSnapshotStage('personal-data','MANAGED_CHECKPOINT_PERSONAL_DATA_FAILED',()=>plan.personalData?BackupCodec.normalizePersonalData(plan.personalData):null);
   const counts=managedSnapshotStage('counts','MANAGED_CHECKPOINT_COUNTS_FAILED',()=>{const value=BackupCodec.countShape({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:records.length,areaNote:Object.keys(areaNotes).length,activeSession:activeSession?1:0});if(!noteScope&&Number(repositoryManifest.version)>=5&&(!BackupCodec.countsEqual(value,plan.counts)||!BackupCodec.countsEqual(value,repositoryManifest.counts)))throw new Error('Managed repository counts failed portable-snapshot verification.');return value;});
@@ -1056,7 +1056,7 @@ async function replacePortableCanonicalSnapshot(snapshot,{scheduleText='',deleti
   throwIfImportAborted(signal,authorityOptions);
   await mark('ongoing-notes');
   const restoredNotes=await restoreAreaNotesSnapshot(targetNotes);
-  if(!restoredNotes||typeof restoredNotes!=='object'||Array.isArray(restoredNotes))throw new Error('Ongoing-note Version Restore did not return a canonical committed payload.');
+  if(!restoredNotes||typeof restoredNotes!=='object'||Array.isArray(restoredNotes))throw new Error('Note version restore did not return a canonical committed payload.');
   throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);
   let restoredAssets=0;
   if(portableAssets&&Number(source.formatVersion)>=10){
@@ -1281,7 +1281,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     throwIfImportAborted(signal);await yieldImport(signal);
     await AppData.restoreJournal.mark(restoreId,'applying-area-notes');
     const noteResult=await applyResolvedAreaNotes(resolvedPlan);
-    if(noteResult.changed)committedDescription+=(committedDescription?' and ':'')+'Ongoing Notes were already saved';
+    if(noteResult.changed)committedDescription+=(committedDescription?' and ':'')+'Notes were already saved';
     await AppData.restoreJournal.mark(restoreId,'area-notes-committed');
     throwIfImportAborted(signal);await yieldImport(signal);
     await AppData.restoreJournal.mark(restoreId,'applying-active-session');
@@ -1385,7 +1385,7 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
       title:'Replace current data?',
       message:'Study Director will make the complete portable app state match this backup. Portable data that did not exist in this backup will be removed. Device-local settings and browser permissions stay on this device.',
       details:[
-        `${preview.exportedAt?new Date(preview.exportedAt).toLocaleString('en-IN'):'Date unavailable'} · ${Number(preview.counts&&preview.counts.dailyRecord)||0} Saved Days · ${Number(preview.counts&&preview.counts.areaNote)||0} Ongoing Notes`,
+        `${preview.exportedAt?new Date(preview.exportedAt).toLocaleString('en-IN'):'Date unavailable'} · ${Number(preview.counts&&preview.counts.dailyRecord)||0} Saved Days · ${Number(preview.counts&&preview.counts.areaNote)||0} Notes`,
         'A verified safety copy protects the current local state if this operation fails.'
       ],
       groups:freeze([]),confirmLabel:'Replace current data',cancelLabel:'Cancel',danger:true,signal
@@ -1417,7 +1417,7 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
       await rebaseRepositoryPreparationAcceleration('replace');
       await AppData.restoreJournal.clear(restoreId);journalPrepared=false;clearFault();
       try{await AppData.reconciliationBase.write(checkpointId,parsed&&parsed.data&&parsed.data.areaNotes||{});}catch(error){AppDiagnostics.capture('backup.version-restore-reconciliation-base',error,'warn');}
-      restoreSurfaceStatus(stored,`✓ Backup restored exactly · ${restored.records} Saved Day${restored.records===1?'':'s'} · ${restored.notes} Ongoing Note${restored.notes===1?'':'s'} · ${restored.assets} attachment${restored.assets===1?'':'s'}. Final verification passed.`,true,'local-complete');
+      restoreSurfaceStatus(stored,`✓ Backup restored exactly · ${restored.records} Saved Day${restored.records===1?'':'s'} · ${restored.notes} Note${restored.notes===1?'':'s'} · ${restored.assets} attachment${restored.assets===1?'':'s'}. Final verification passed.`,true,'local-complete');
       return freeze({cancelled:false,mode:'restore-version',verified:true,changed:true,checkpointId,restored});
     }catch(error){
       const failure=error instanceof Error?error:new Error(String(error));

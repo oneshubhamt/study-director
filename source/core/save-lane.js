@@ -5,7 +5,7 @@ if(!registry||registry.format!=='study-director.internal-module-registry'||regis
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
 }
 const {exactFrozenObject:exactObject}=registry.contracts;
-// The one save engine shared by Ongoing Notes, Diary reflections and the
+// The one save engine shared by notes, Diary reflections and the
 // Review reflection. Each stored target gets a lane: the first edit after a
 // quiet moment is written at once, and while typing continues the latest value
 // is written again every DELAY_MS, one write at a time. What a crash can lose

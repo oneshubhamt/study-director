@@ -953,7 +953,7 @@ function renderReviewCard(model){
   noteBox.dataset.areaKey=model.noteAreaKey;
   noteBox.dataset.noteSupport=model.task.kind==='support'?'true':'false';
   const emptyNoteText=model.task.kind==='support'?'No current shared support note.':'No current ongoing subject note for this area.';
-  renderRichTextContent(noteBox,areaNoteStoredValueForKey(model.noteAreaKey),emptyNoteText,`Ongoing note for ${model.noteAreaLabel}`);
+  renderRichTextContent(noteBox,areaNoteStoredValueForKey(model.noteAreaKey),emptyNoteText,`Note for ${model.noteAreaLabel}`);
   if(!model.noteText)noteBox.classList.add('review-block-empty');
   const noteShare=textEl('div','review-flow-note ui-helper',model.task.kind==='support'?'Shared by all support activities':`Shared by Area: ${model.noteAreaLabel}`);
   const actions=document.createElement('div');
@@ -985,7 +985,7 @@ function renderReviewCard(model){
   const noteEdit=document.createElement('textarea');
   noteEdit.className='review-edit-note ui-field task-note-field';
   bindTaskNoteEditor(noteEdit,model.idx,'review');
-  noteEdit.value=model.noteText;noteEdit.placeholder=model.task.kind==='support'?'Edit the shared support note...':'Edit current ongoing notes for this subject/area...';
+  noteEdit.value=model.noteText;noteEdit.placeholder=model.task.kind==='support'?'Edit the shared support note...':'Edit current notes for this subject/area...';
   editPanel.append(measureRow,pctField,summary,noteEdit);
   const inheritedNotes=document.createElement('div');
   renderInheritedAreaNotes(inheritedNotes,model.noteAreaKey,true);
@@ -1444,7 +1444,7 @@ const REVIEW_REPORT_CATALOG=freeze([
   freeze({id:'summary',label:'Summary / statistics',compose:composeReviewSummary}),
   freeze({id:'diary',label:'Diary reflection',compose:composeReviewDiary}),
   freeze({id:'subjects',label:'Subject details',children:reviewReportSubjectChildren,compose:composeReviewSubjects}),
-  freeze({id:'ongoing',label:'Ongoing notes',children:reviewReportOngoingChildren,compose:composeReviewOngoing}),
+  freeze({id:'ongoing',label:'Notes',children:reviewReportOngoingChildren,compose:composeReviewOngoing}),
   freeze({id:'other',label:'Other details',children:()=>[freeze({id:'other:unfinished',label:'Unfinished note'})],compose:composeReviewOther})
 ]);
 const copyReportExcluded=new Set(),copyReportExpanded=new Set();

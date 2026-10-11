@@ -22,7 +22,7 @@ const styles=fs.readFileSync('source/styles/core.css','utf8');
 
 const applicable=app.match(/function applicableAreaNotesForTask\(t\)\{[\s\S]*?\n\}/u)?.[0]||'';
 assert.ok(applicable,'applicableAreaNotesForTask must remain present');
-assert.match(applicable,/AppData\.notes\.get\(exactKey,exactLabel\)/u,'viewing an Ongoing Note may read the current note');
+assert.match(applicable,/AppData\.notes\.get\(exactKey,exactLabel\)/u,'viewing a note may read the current note');
 assert.doesNotMatch(applicable,/create\s*:\s*true/u,'read-only Ongoing-Note rendering must not create a noncanonical placeholder in the repository cache');
 
 assert.match(app,/id="backup-file-status"[^>]*role="status"/u,'standalone backup must have a status surface beside its own controls');

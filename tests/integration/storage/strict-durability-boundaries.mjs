@@ -28,7 +28,7 @@ assert.equal(strictCount()+normalCount(),beforeTypingStrict+beforeTypingNormal,'
 // Canonical user-data boundaries opt into strict durability.
 const beforeNoteFlush=strictCount();
 await app.notes.flush({strict:true});
-assert.ok(strictCount()>beforeNoteFlush,'canonical Ongoing Note commit must use strict IndexedDB durability');
+assert.ok(strictCount()>beforeNoteFlush,'canonical note commit must use strict IndexedDB durability');
 
 const beforeDaily=strictCount();
 await app.dailyRecords.save({version:1,date:'2026-09-15',updatedAt:'2026-09-15T12:01:00.000Z',savedAt:'2026-09-15T12:01:00.000Z'});

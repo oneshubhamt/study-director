@@ -52,7 +52,7 @@ assert.equal(plan.activeSession.conflict,true);assert.equal(plan.activeSession.d
 
 const summary=reconciliation.summarizePlan(plan);
 assert.deepEqual(summary.savedDays,{total:3,newItems:0,conflicts:2,recordConflicts:1,localDeletionConflicts:1,identical:1,deletions:1,deletionConflicts:0,deletionAlreadyAbsent:1},'Saved-Day conflict accounting must have one authoritative reconciliation summary.');
-assert.deepEqual(summary.notes,{total:3,localItems:2,newItems:1,conflicts:1,deletions:0},'Ongoing Note impact must come from the reconciliation domain summary.');
+assert.deepEqual(summary.notes,{total:3,localItems:2,newItems:1,conflicts:1,deletions:0},'Note impact must come from the reconciliation domain summary.');
 assert.deepEqual(summary.activeSession,{total:1,checkpointPresent:true,localPresent:true,identical:false,newItems:0,conflicts:1},'Active Session impact must come from the reconciliation domain summary.');
 
 const incomingA=d10.candidates.find(candidate=>!candidate.local);
@@ -81,7 +81,7 @@ assert.equal(resolvedLocalOnly.activeSession.changed,false,'Incoming absence mus
 const incomingOnlySession=reconciliation.createPlan({local:{id:'local3',label:'Local',activeSession:null},incoming:{id:'cp',label:'Checkpoint',activeSession:session('USE')}});
 assert.equal(reconciliation.resolvePlan(incomingOnlySession,{}).activeSession.value.scheduleText,'USE','Incoming-only Active Session must be selected automatically.');
 
-// Ongoing Note deletion is a first-class pairwise state. Local deletion is the
+// Note deletion is a first-class pairwise state. Local deletion is the
 // default against a stale incoming record; incoming deletion requires a choice
 // against a live local note.
 const noteDeletionPlan=reconciliation.createPlan({
@@ -89,11 +89,11 @@ const noteDeletionPlan=reconciliation.createPlan({
   incoming:{id:'remote-note-delete',label:'Remote',notes:{Gone:note('Gone','stale remote note')},noteDeletions:[{key:'Live',deletedAt:'2026-09-19T11:00:00.000Z'}]}
 });
 const goneNote=noteDeletionPlan.notes.find(item=>item.key==='Gone'),liveNote=noteDeletionPlan.notes.find(item=>item.key==='Live');
-assert.equal(goneNote.conflict,true);assert.equal(goneNote.candidates.find(candidate=>candidate.id===goneNote.defaultCandidateId).kind,'deleted','A local Ongoing Note deletion must default over a stale incoming record.');
+assert.equal(goneNote.conflict,true);assert.equal(goneNote.candidates.find(candidate=>candidate.id===goneNote.defaultCandidateId).kind,'deleted','A local note deletion must default over a stale incoming record.');
 assert.equal(reconciliation.resolvePlan(noteDeletionPlan,{}).notes.find(item=>item.key==='Gone').state,'deleted');
-assert.equal(liveNote.conflict,true);assert.equal(liveNote.candidates.find(candidate=>candidate.id===liveNote.defaultCandidateId).kind,'record','An incoming Ongoing Note deletion must not silently delete a live local note.');
+assert.equal(liveNote.conflict,true);assert.equal(liveNote.candidates.find(candidate=>candidate.id===liveNote.defaultCandidateId).kind,'record','An incoming note deletion must not silently delete a live local note.');
 const incomingNoteDeletion=liveNote.candidates.find(candidate=>candidate.kind==='deleted');
-assert.equal(reconciliation.resolvePlan(noteDeletionPlan,{notes:{Live:incomingNoteDeletion.id}}).notes.find(item=>item.key==='Live').state,'deleted','An explicit incoming Ongoing Note deletion choice must resolve to deleted state.');
+assert.equal(reconciliation.resolvePlan(noteDeletionPlan,{notes:{Live:incomingNoteDeletion.id}}).notes.find(item=>item.key==='Live').state,'deleted','An explicit incoming note deletion choice must resolve to deleted state.');
 
 assert.throws(()=>reconciliation.createPlan({sources:[{id:'a'},{id:'b'}]}),/requires exactly local and incoming/u,'The production reconciliation API must reject the retired N-way shape.');
 assert.throws(()=>reconciliation.createPlan({local:{id:'local'},incoming:{id:'incoming'},third:{id:'third'}}),/requires exactly local and incoming/u,'The pairwise reconciliation API must reject unexpected top-level participants or metadata.');
@@ -109,4 +109,4 @@ assert.ok(Object.keys(configured).every(id=>id.length<=80));
 const collisionResolved=reconciliation.resolvePlan(collisionPlan,{notes:Object.fromEntries(collisionPlan.notes.map(item=>[item.key,configured[item.decisionKey]]))});
 collisionResolved.notes.forEach((item,index)=>assert.equal(item.state,index%2?'deleted':'record',`independent decision for ${item.key}`));
 
-console.log(JSON.stringify({status:'PASS',suite:'reconciliation-domain',checks:38,coverage:['pairwise ReconciliationPlan','exact pairwise API guard','ResolvedPlan','Saved-Day deletion candidates','Ongoing Note deletion candidates','per-key notes','Active Session presence rules','authoritative conflict summary','lean public API','no Reflection Draft reconciliation domain']},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'reconciliation-domain',checks:38,coverage:['pairwise ReconciliationPlan','exact pairwise API guard','ResolvedPlan','Saved-Day deletion candidates','Note deletion candidates','per-key notes','Active Session presence rules','authoritative conflict summary','lean public API','no Reflection Draft reconciliation domain']},null,2));

@@ -83,12 +83,12 @@ for(const dayCount of [1,30,365]){
   assert.equal(warmDelta.documentReads,0,`${dayCount}-day warm no-op must not reread Saved-Day payloads`);
   assert.equal(warmDelta.dateScans,1,`${dayCount}-day warm no-op must perform exactly one lightweight canonical Saved-Day key probe`);
   assert.equal(warmDelta.monthReads,0,`${dayCount}-day warm no-op must not issue monthly Saved-Day reads`);
-  assert.equal(warmDelta.noteFullReads,0,`${dayCount}-day warm no-op must not reread all Ongoing Notes`);
-  assert.equal(warmDelta.noteTargetReads,0,`${dayCount}-day warm no-op must not reread unchanged Ongoing Notes`);
+  assert.equal(warmDelta.noteFullReads,0,`${dayCount}-day warm no-op must not reread all notes`);
+  assert.equal(warmDelta.noteTargetReads,0,`${dayCount}-day warm no-op must not reread unchanged notes`);
   assert.equal(warmDelta.personalReads,0,`${dayCount}-day warm no-op must not re-export unchanged personal data`);
   assert.equal(warmDelta.personalSettles,1,`${dayCount}-day warm no-op must settle pending Plan/preferences before establishing the capture fence`);
   assert.equal(warmDelta.personalBackupCaptureSettles,1,`${dayCount}-day managed settlement must tag Plan/preferences writes as backup capture`);
-  assert.equal(warmDelta.notesBackupCaptureSettles,1,`${dayCount}-day managed settlement must tag Ongoing Note writes as backup capture`);
+  assert.equal(warmDelta.notesBackupCaptureSettles,1,`${dayCount}-day managed settlement must tag note writes as backup capture`);
   assert.equal(warmDelta.structuredStringifies,0,`${dayCount}-day warm no-op must not serialize unchanged structured repository objects`);
   assert.equal(warmDelta.structuredHashes,0,`${dayCount}-day warm no-op must not hash unchanged structured repository objects`);
   assert.equal(second.objectsWritten,0,`${dayCount}-day warm no-op must write no payload objects`);
@@ -125,7 +125,7 @@ for(const dayCount of [1,30,365]){
   await assert.rejects(()=>scenario.publish(second.manifest),error=>error&&error.code==='BACKUP_PREPARATION_INDEX_INVALID','incremental managed publication must fail closed when its reusable Saved-Day inventory no longer matches canonical storage');
 }
 
-// Other structured-unit attribution stays selective: Ongoing Note and personal singleton.
+// Other structured-unit attribution stays selective: Note and personal singleton.
 {
   const scenario=createScenario(30),first=await scenario.publish(null),second=await scenario.publish(first.manifest);
   let before={...scenario.counters};scenario.mutateNote();let next=await scenario.publish(second.manifest);

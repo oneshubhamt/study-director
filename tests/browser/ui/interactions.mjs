@@ -73,7 +73,7 @@ try{
 
   await page.evaluate(`(()=>{
     window.__inputValue='pending';
-    __PWA6.Interactions.input({title:'New ongoing note',message:'Choose where it belongs, then name it.',inputLabel:'Area or topic name',required:true,requiredMessage:'Enter an Area or topic name.',defaultOption:'nested',options:[{value:'nested',label:'Inside Ethics'},{value:'top',label:'At top level'}],preview:(value,scope)=>scope==='nested'?'Ethics › '+(value||'…'):(value||'New top-level Area'),confirmLabel:'Create note'}).then(value=>{window.__inputValue=value;});
+    __PWA6.Interactions.input({title:'New note',message:'Choose where it belongs, then name it.',inputLabel:'Area or topic name',required:true,requiredMessage:'Enter an Area or topic name.',defaultOption:'nested',options:[{value:'nested',label:'Inside Ethics'},{value:'top',label:'At top level'}],preview:(value,scope)=>scope==='nested'?'Ethics › '+(value||'…'):(value||'New top-level Area'),confirmLabel:'Create note'}).then(value=>{window.__inputValue=value;});
   })()`);
   await waitFor(()=>page.evaluate(`document.getElementById('sd-interaction-dialog').open&&!!document.querySelector('.interaction-input')`),{label:'themed note input'});
   await page.evaluate(`document.querySelector('.interaction-actions .primary').click()`);

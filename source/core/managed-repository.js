@@ -915,7 +915,7 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
       if(!Array.isArray(payload))throw new Error('Repository Saved-Day pack is invalid.');
       for(const record of payload){const date=String(record&&record.date||'');if(repositoryMonth(date)!==entry.key||seenDates.has(date))throw new Error('Repository Saved-Day pack contains an invalid or duplicate date.');seenDates.add(date);dailyDocuments.push(record);}
     }else if(entry.kind==='areaNote'){
-      if(!payload||typeof payload!=='object'||Array.isArray(payload)||String(payload.key||'')!==entry.key||seenNoteKeys.has(entry.key))throw new Error('Repository Ongoing Note object is invalid.');
+      if(!payload||typeof payload!=='object'||Array.isArray(payload)||String(payload.key||'')!==entry.key||seenNoteKeys.has(entry.key))throw new Error('Repository note object is invalid.');
       seenNoteKeys.add(entry.key);areaNoteItems.push(payload);
     }else if(entry.kind===LEGACY_REFLECTION_DRAFT_PACK_KIND){
       if(manifest.version>4||!Array.isArray(payload))throw new Error('Legacy repository Reflection Draft pack is invalid.');

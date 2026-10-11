@@ -14,7 +14,7 @@ assert.match(ui,/Attachments cannot be removed from storage while reconciling no
 
 assert.match(backup,/async function resolvedAssetReferenceIds\(resolvedPlan,signal\)/,'Backup restore must calculate final attachment references from ResolvedPlan.');
 assert.match(backup,/for\(const item of resolvedPlan&&resolvedPlan\.savedDays\|\|\[\]\)/,'Saved-Day choices must contribute attachment references.');
-assert.match(backup,/for\(const item of resolvedPlan&&resolvedPlan\.notes\|\|\[\]\)/,'Resolved Ongoing Notes must contribute attachment references.');
+assert.match(backup,/for\(const item of resolvedPlan&&resolvedPlan\.notes\|\|\[\]\)/,'Resolved notes must contribute attachment references.');
 assert.doesNotMatch(backup,/resolvedPlan&&resolvedPlan\.reflectionDrafts/,'Retired Reflection Drafts must not remain a reconciliation attachment-reference domain.');
 assert.match(backup,/resolvedPlan&&resolvedPlan\.activeSession&&resolvedPlan\.activeSession\.value/,'Resolved Active Session must contribute attachment references.');
 assert.match(backup,/referenceSet\.has\(item\.assetId\)\|\|\(item\.library===true&&states\[item\.assetId\]==='record'\)/,'Only final references or independently retained incoming assets the plan keeps may publish.');

@@ -643,9 +643,9 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
         <div class="pnote-hdr">
           <div class="pnote-heading">
             <div class="pnote-title-row">
-              <div class="pnote-title ui-label" id="pn-title">Ongoing Notes</div>
+              <div class="pnote-title ui-label" id="pn-title">Notes</div>
               <span class="pnote-share-inline" id="pn-area-share" hidden></span>
-              <span class="pnote-info"><button class="pnote-info-btn" id="pn-info-btn" type="button" data-action="toggle-pnote-info" aria-label="About Ongoing Notes" aria-expanded="false" aria-controls="pn-info-popover">i</button><span class="pnote-info-popover" id="pn-info-popover" role="note" hidden>Persistent notes stay with their shared Area or support context. Use the Daily Diary for observations specific to today.</span></span>
+              <span class="pnote-info"><button class="pnote-info-btn" id="pn-info-btn" type="button" data-action="toggle-pnote-info" aria-label="About notes" aria-expanded="false" aria-controls="pn-info-popover">i</button><span class="pnote-info-popover" id="pn-info-popover" role="note" hidden>Persistent notes stay with their shared Area or support context. Use the Daily Diary for observations specific to today.</span></span>
             </div>
           </div>
           <div class="note-sync ui-label idle" id="pn-sync" role="status" aria-live="polite" aria-atomic="true" aria-label="No active Area note" tabindex="0">—</div>
@@ -654,7 +654,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
           <textarea class="pnote-extra ui-field task-note-field" id="pn-extra" data-note-source="execute" placeholder="No work Area is selected." disabled></textarea>
           <div class="execute-note-empty" id="pn-empty">
             <div class="execute-note-empty-copy ui-body">No work or support block is active. Open Library to review or edit persistent notes.</div>
-            <button class="mini-btn ui-btn" type="button" data-action="open-ongoing-notes">Open Ongoing Notes in Library</button>
+            <button class="mini-btn ui-btn" type="button" data-action="open-ongoing-notes">Open notes in Library</button>
           </div>
         </div>
         <div class="subject-note-context" id="pn-inherited"></div>
@@ -833,7 +833,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
       </div>
       <div class="session-panel ui-panel execute-session-panel" id="session-panel" hidden>
         <div class="session-panel-title ui-label" id="session-panel-title">Live Session Active</div>
-        <div class="session-panel-note ui-body" id="session-panel-note">Today’s live schedule is active. These controls affect only the live session; saved Library records and ongoing notes are kept.</div>
+        <div class="session-panel-note ui-body" id="session-panel-note">Today’s live schedule is active. These controls affect only the live session; saved Library records and notes are kept.</div>
         <div class="session-actions">
           <button class="plan-btn ui-btn primary" type="button" data-action="restore-session" hidden disabled>Restore Session</button>
           <button class="plan-btn ui-btn warn" type="button" data-action="suspend-session" disabled>Suspend Today</button>
@@ -889,7 +889,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
       <summary class="review-task-head">
         <span class="review-task-head-copy">
           <span class="review-section-title ui-label">Today’s Blocks</span>
-          <span class="review-task-sub ui-body">Read the day first. Use Edit only to repair progress or current ongoing notes after the fact.</span>
+          <span class="review-task-sub ui-body">Read the day first. Use Edit only to repair progress or current notes after the fact.</span>
         </span>
       </summary>
       <div class="review-grid review-grid-polished" id="review-list"></div>
@@ -942,7 +942,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
       <div class="library-hero ui-panel">
         <div class="library-kicker ui-label">Study Library</div>
         <div class="library-title">Library</div>
-        <div class="library-sub ui-body">Find saved Study Days and reflections, manage Ongoing Notes and attachments, and manage backups.</div>
+        <div class="library-sub ui-body">Find saved Study Days and reflections, manage notes and attachments, and manage backups.</div>
         <div class="library-controls">
           <input class="ui-field ui-mono" id="library-search" type="search" placeholder="Search date or day…" aria-label="Search Library by date or day" data-input="render-library">
           <select class="ui-field ui-mono" id="library-year" aria-label="Filter Library by year" data-change="render-library"></select>
@@ -967,7 +967,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
               </dl>
               <div class="backup-model-included-label ui-label">Included in a complete checkpoint</div>
               <div class="backup-model-included-grid" aria-label="Data included in each backup checkpoint">
-                <span>✓ Saved Days / Diary &amp; Reflections</span><span>✓ Ongoing Notes</span><span>✓ Active Session</span><span>✓ Settings / personal data</span><span>✓ Referenced attachments</span><span>✓ Independently retained attachments</span>
+                <span>✓ Saved Days / Diary &amp; Reflections</span><span>✓ Notes</span><span>✓ Active Session</span><span>✓ Settings / personal data</span><span>✓ Referenced attachments</span><span>✓ Independently retained attachments</span>
               </div>
             </div>
           </details>
@@ -1094,18 +1094,18 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
       </details>
       <details class="library-notes-drawer ui-disclosure" id="library-notes-drawer">
         <summary>
-          <span class="library-notes-summary-copy">Ongoing Notes <span class="library-notes-summary-count" id="library-notes-summary-count">· 0 Areas</span></span>
+          <span class="library-notes-summary-copy">Notes <span class="library-notes-summary-count" id="library-notes-summary-count">· 0 Areas</span></span>
         </summary>
         <div class="library-notes-workspace">
           <div class="library-notes-intro">
-            <input class="library-notes-search ui-field ui-mono" id="library-notes-search" type="search" placeholder="Search ongoing notes…" aria-label="Search ongoing notes">
+            <input class="library-notes-search ui-field ui-mono" id="library-notes-search" type="search" placeholder="Search notes…" aria-label="Search notes">
           </div>
           <div class="library-notes-grid ui-canvas">
-            <nav class="library-notes-nav" aria-label="Ongoing notes">
+            <nav class="library-notes-nav" aria-label="Notes">
               <div class="library-notes-nav-head">
                 <span class="library-notes-nav-title"><span class="ui-label">Notes</span><button class="library-notes-info" id="library-notes-info" type="button" aria-label="About notes" aria-haspopup="dialog" aria-expanded="false" aria-controls="library-notes-info-popover">i</button><span class="library-notes-info-popover" id="library-notes-info-popover" role="note" hidden>A note is shared by every plan block in the same Area; support blocks share one note.</span><span class="library-note-selection-count" id="library-note-selection-count" hidden>0 selected</span></span>
                 <span class="library-notes-nav-tools">
-                  <button class="library-note-action ui-btn" id="library-note-select" type="button" aria-label="Choose ongoing notes to export">Export</button>
+                  <button class="library-note-action ui-btn" id="library-note-select" type="button" aria-label="Choose notes to export">Export</button>
                   <button class="library-note-action ui-btn" id="library-note-select-all" type="button" hidden>All</button>
                   <button class="library-note-action ui-btn" id="library-note-selection-clear" type="button" hidden>Clear</button>
                   <span class="library-note-selection-actions">
@@ -1123,7 +1123,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
               </div>
             </nav>
             <section class="library-notes-editor" id="library-notes-editor">
-              <div class="library-notes-editor-empty ui-status">Select an Area to view its ongoing note.</div>
+              <div class="library-notes-editor-empty ui-status">Select an Area to view its note.</div>
             </section>
           </div>
           <div class="library-notes-status ui-status" id="ongoing-notes-status" role="status" aria-live="polite"></div>
@@ -1133,7 +1133,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
         <summary>Attachments</summary>
         <div class="attachment-workspace">
           <div class="attachment-inner-head"><span class="ui-label">Library</span><span class="library-notes-summary-count" id="attachment-count">· 0</span></div>
-          <p class="ui-helper">All attachments appear here automatically, whether added here or inserted in an Ongoing Note. Images and audio can be inserted inline; PDFs are added as links.</p>
+          <p class="ui-helper">All attachments appear here automatically, whether added here or inserted in a note. Images and audio can be inserted inline; PDFs are added as links.</p>
           <div class="attachment-actions">
             <button class="mini-btn ui-btn" id="attachment-add" type="button" data-owner-mutation="attachments">Add files</button>
             <button class="mini-btn ui-btn" id="attachment-import" type="button" data-owner-mutation="attachments">Import library</button>
@@ -1262,7 +1262,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                   <span class="plan-kind-line"><strong>Support:</strong> support, gym, exercise, hobby, socialisation, admin</span>
                   <span class="plan-kind-line"><strong>Fixed:</strong> fixed, meal, rest, sleep</span>
                 </dd>
-                <dt>Area</dt><dd>The subject or domain used for grouping. The same exact Area shares one ongoing note.</dd>
+                <dt>Area</dt><dd>The subject or domain used for grouping. The same exact Area shares one note.</dd>
                 <dt>Measure / Target</dt><dd>Optional output, such as pages · 20.</dd>
               </dl>
               <div class="plan-field-required"><strong>Required:</strong> START, MINS, TASK, KIND, AREA. <strong>Optional:</strong> MEASURE and TARGET may be empty; use — for an unknown target if preferred.</div>
@@ -1305,7 +1305,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
         </label>
         <label class="library-clear-option" id="library-clear-option-ongoing-notes">
           <input id="library-clear-ongoing-notes" type="checkbox">
-          <span><strong>Ongoing Notes</strong><small>Deletes the independent Ongoing Notes collection.</small></span>
+          <span><strong>Notes</strong><small>Deletes the independent notes collection.</small></span>
           <span class="library-clear-count ui-mono" id="library-clear-ongoing-notes-count">0</span>
         </label>
         <label class="library-clear-option" id="library-clear-option-attachments">
@@ -1610,7 +1610,7 @@ const LocalStorageContract=PersistenceModule.createLocalStorage(Object.freeze({
 function createStorageHealthController(local){
   const sourceLabels=Object.freeze({
     'indexedDB':'Browser database','localStorage.read':'Browser storage read','localStorage.write':'Browser storage write',
-    'planDraft.write':'Plan draft','activeSession':'Live-session recovery','areaNotes':'Ongoing notes',
+    'planDraft.write':'Plan draft','activeSession':'Live-session recovery','areaNotes':'Notes',
     'dailyRecords':'Library records','deletionRecovery':'Deletion recovery',
     'maintenance':'Data maintenance','capacity':'Storage capacity','backup':'Backup','attachmentIntegrity':'Attachment storage','repositoryIntegrity':'Backup verification'
   });
@@ -3125,7 +3125,7 @@ function applyStoredSessionSnapshot(session,snapshot,{source,reviewOnly=false,li
 async function hydratePrimaryStateFromStorage(options={}){
   const sameTabReload=!!options.sameTabReload||performance.getEntriesByType('navigation')[0]?.type==='reload'||performance.navigation?.type===1;
   const notesReloaded=await AppData.notes.reloadFresh();
-  if(!notesReloaded)throw new Error('The latest ongoing notes could not be reloaded before ownership transfer.');
+  if(!notesReloaded)throw new Error('The latest notes could not be reloaded before ownership transfer.');
   const session=await loadActiveSessionForRestore();
   if(isRestorableActiveSession(session)){
     const snapshot=activeSessionSnapshot(session);
@@ -4746,7 +4746,7 @@ async function resetTodaySession(){
       setSessionPanelMode('none');
       refreshPlanAfterSessionReset();
       setPlanStatus('Today’s active session was reset. Paste, edit, or apply a schedule when ready.');
-      Interactions.notify({source:'session',kind:'success',key:'session-reset',title:'Today reset',message:'The active session was cleared; saved days and ongoing notes were kept.'});
+      Interactions.notify({source:'session',kind:'success',key:'session-reset',title:'Today reset',message:'The active session was cleared; saved days and notes were kept.'});
       return true;
     });
   }catch(e){
@@ -4884,12 +4884,12 @@ function reportAreaNoteConflict(info={}){
   const copyLabel=String(info.copyLabel||'').trim();
   const message=copyLabel
     ?`A different version of the ${label} note was already stored. Study Director kept that version and saved your edit as the note “${copyLabel}”.`
-    :`A newer ongoing note for ${label} was saved elsewhere. Study Director kept the newer note and rejected the outdated edit.`;
+    :`A newer note for ${label} was saved elsewhere. Study Director kept the newer note and rejected the outdated edit.`;
   setNoteSyncStateForKey(key,'conflict');
   setPlanStatus(message,false);
   setStatus('save-status',message,false);
   setStatus('ongoing-notes-status',message,false);
-  publishSafetyNotice(message,'Ongoing note editing conflict','area-note-conflict');
+  publishSafetyNotice(message,'Note editing conflict','area-note-conflict');
   return true;
 }
 
@@ -4980,7 +4980,7 @@ function renderInheritedAreaNotes(container,areaKey,compact=false,{collapsible=f
     const label=document.createElement('div');label.className='subject-note-context-entry-label ui-label';label.textContent=`From ${entry.label}`;
     const body=document.createElement('div');body.className='subject-note-context-entry-body';
     section.append(label,body);container.appendChild(section);
-    renderRichTextContent(body,entry.value,'',`Inherited ongoing note from ${entry.label}`);
+    renderRichTextContent(body,entry.value,'',`Inherited note from ${entry.label}`);
   });
 }
 function renderInheritedSubjectNotes(container,t,compact=false){
@@ -5041,7 +5041,7 @@ function bindTaskNoteEditor(field,idx,source='field'){
   field.dataset.noteScope=NOTE_EDITOR_SCOPES.TASK;
   field.dataset.noteSource=String(source||'field');
   field.dataset.richSyncState=appCanMutate()?'saved':'read-only';field.dataset.richSyncStatus=appCanMutate()?'Saved':'Read-only';
-  field.setAttribute('aria-label',`Ongoing note for ${identity.areaLabel}`);
+  field.setAttribute('aria-label',`Note for ${identity.areaLabel}`);
   field.maxLength=APP_LIMITS.maxNoteChars;
   queueMicrotask(()=>richTextSyncField(field));
   return identity;
@@ -5062,7 +5062,7 @@ function bindAreaNoteEditor(field,areaKey,areaLabel,source='library'){
   field.dataset.noteScope=NOTE_EDITOR_SCOPES.AREA;
   field.dataset.noteSource=String(source||'library');
   field.dataset.richSyncState=appCanMutate()?'saved':'read-only';field.dataset.richSyncStatus=appCanMutate()?'Saved':'Read-only';
-  field.setAttribute('aria-label',`Ongoing note for ${label}`);
+  field.setAttribute('aria-label',`Note for ${label}`);
   field.maxLength=APP_LIMITS.maxNoteChars;
   queueMicrotask(()=>richTextSyncField(field));
   return Object.freeze({idx:null,areaKey:safeKey,areaLabel:label,taskId:'',scheduleRevision:null,noteRevision:String(entry&&entry.updatedAt||'')});
@@ -5120,7 +5120,7 @@ function refreshSubjectNoteFieldsForKey(key,originField=null,derived=null,option
   });
   document.querySelectorAll('.review-block-note[data-area-key]').forEach(box=>{
     if(normalizeAreaName(box.dataset.areaKey)!==safeKey)return;
-    if(!deferRichMirrors)renderRichTextContent(box,stored,box.dataset.noteSupport==='true'?'No current shared support note.':'No current ongoing subject note for this area.',`Ongoing note for ${entry?.label||displayAreaName(safeKey)}`);
+    if(!deferRichMirrors)renderRichTextContent(box,stored,box.dataset.noteSupport==='true'?'No current shared support note.':'No current ongoing subject note for this area.',`Note for ${entry?.label||displayAreaName(safeKey)}`);
     box.classList.toggle('review-block-empty',!plain().trim());
   });
 }
@@ -5137,7 +5137,7 @@ function refreshAllSubjectNoteFieldsFromRepository(){
 function setNoteSyncStateForKey(key,state){
   const safeKey=normalizeAreaName(key);
   if(!safeKey)return;
-  const message=state==='saving'?'Saving ongoing note…':state==='conflict'?'Newer saved note detected · this edit is not being saved. Reopen the note to load it.':'Synced';
+  const message=state==='saving'?'Saving note…':state==='conflict'?'Newer saved note detected · this edit is not being saved. Reopen the note to load it.':'Synced';
   const symbol=state==='saving'?'…':state==='conflict'?'!':'✓';
   const apply=el=>{el.textContent=symbol;el.removeAttribute('title');el.setAttribute('aria-label',message);el.classList.remove('idle');el.classList.toggle('saving',state==='saving');el.classList.toggle('err',state==='conflict');NoteSyncPopover.refresh(el);};
   document.querySelectorAll('textarea.task-note-field[data-area-key]').forEach(field=>{if(normalizeAreaName(field.dataset.areaKey)!==safeKey)return;field.dataset.richSyncState=state;field.dataset.richSyncStatus=message;});
@@ -5147,7 +5147,7 @@ function setNoteSyncStateForKey(key,state){
   const pn=document.getElementById('pn-sync');
   const curKey=(TASKS[TimerState.currentIndex]&&isTrackableBlock(TASKS[TimerState.currentIndex]))?ongoingNoteKeyForTask(TASKS[TimerState.currentIndex]):'';
   if(pn&&normalizeAreaName(curKey)===safeKey)apply(pn);
-  if(state==='synced')publishSafetyNotice('','Ongoing note saved','area-note-conflict');
+  if(state==='synced')publishSafetyNotice('','Note saved','area-note-conflict');
 }
 function updateNoteSyncIndicators(idx,key){
   const safeKey=key?normalizeAreaName(key):(TASKS[idx]?ongoingNoteKeyForTask(TASKS[idx]):'');
@@ -6638,8 +6638,8 @@ function commitTaskNoteEditor(field,value,event=null){
   refreshSubjectNoteFieldsForKey(binding.areaKey,field,derived,{deferRichMirrors:!!trusted});
   if(result.status==='limit'||result.status==='content-limit'){
     const message=result.status==='content-limit'
-      ?`Ongoing Notes are limited to ${APP_LIMITS.maxRichTextWords.toLocaleString()} rich-text words per note.`
-      :`Ongoing Notes are limited to ${APP_LIMITS.maxOngoingNotes.toLocaleString()} saved notes.`;
+      ?`Notes are limited to ${APP_LIMITS.maxRichTextWords.toLocaleString()} rich-text words per note.`
+      :`Notes are limited to ${APP_LIMITS.maxOngoingNotes.toLocaleString()} saved notes.`;
     setStatus('ongoing-notes-status',message,false);setStatus('save-status',message,false);setPlanStatus(message,false);return false;
   }
   if(result.status==='rejected')return false;
@@ -6752,7 +6752,7 @@ function richTextDocumentFor(field,options={}){
   if(field.matches('.task-note-field')){
     const binding=editable?resolveTaskNoteEditorBinding(field,{requireVisible}):(()=>{const areaKey=normalizeAreaName(field.dataset.areaKey);return areaKey?Object.freeze({areaKey,areaLabel:displayAreaName(field.dataset.areaLabel||areaKey)}):null;})();
     if(!binding)return null;
-    return Object.freeze({documentId:`area:${binding.areaKey}`,label:`Ongoing note for ${binding.areaLabel}`,initialValue:areaNoteStoredValueForKey(binding.areaKey),maxWords:APP_LIMITS.maxRichTextWords,surface:field.id==='pn-extra'?'execute-note':'ongoing-note'});
+    return Object.freeze({documentId:`area:${binding.areaKey}`,label:`Note for ${binding.areaLabel}`,initialValue:areaNoteStoredValueForKey(binding.areaKey),maxWords:APP_LIMITS.maxRichTextWords,surface:field.id==='pn-extra'?'execute-note':'ongoing-note'});
   }
   return null;
 }
@@ -7232,12 +7232,12 @@ function refreshPnote(options={}){
     setElementValue(doneEl,'');setElementValue(totalEl,'');setElementDisabled(doneEl,true);setElementDisabled(totalEl,true);
     const pbar=document.getElementById('pbar');if(pbar)pbar.style.width='0%';
     setTextSafe('pn-sum','No active trackable block');
-    setTextSafe('pn-title','Ongoing Notes');
+    setTextSafe('pn-title','Notes');
     const areaShare=document.getElementById('pn-area-share');
     if(areaShare){areaShare.textContent='';areaShare.hidden=true;}
     setTextSafe('pn-info-popover','Persistent notes stay with their shared Area or support context. Use the Daily Diary for observations specific to today.');
     const pn=document.getElementById('pn-extra');
-    if(pn){const shell=pn.closest('.execute-note-editor-shell'),active=document.activeElement;if(shell&&active instanceof HTMLElement&&shell.contains(active))active.blur();clearTaskNoteEditorBinding(pn);setElementValue(pn,'');setElementDisabled(pn,true);pn.hidden=false;setElementAttribute(pn,'placeholder','');setElementAttribute(pn,'aria-label','Ongoing note unavailable: no work or support block is active');}
+    if(pn){const shell=pn.closest('.execute-note-editor-shell'),active=document.activeElement;if(shell&&active instanceof HTMLElement&&shell.contains(active))active.blur();clearTaskNoteEditorBinding(pn);setElementValue(pn,'');setElementDisabled(pn,true);pn.hidden=false;setElementAttribute(pn,'placeholder','');setElementAttribute(pn,'aria-label','Note unavailable: no work or support block is active');}
     renderInheritedAreaNotes(document.getElementById('pn-inherited'),'');
     const ps=document.getElementById('pn-sync');if(ps){setElementText(ps,'—');ps.removeAttribute('title');ps.setAttribute('aria-label','No active Area note');ps.classList.add('idle');ps.classList.remove('saving','err');NoteSyncPopover.refresh(ps);}
     const empty=document.getElementById('pn-empty');if(empty)empty.hidden=false;
@@ -7258,7 +7258,7 @@ function refreshPnote(options={}){
   setElementValue(doneEl,done);setElementValue(totalEl,total);
   setElementDisabled(doneEl,false);setElementDisabled(totalEl,false);
   const areaShare=document.getElementById('pn-area-share');
-  setTextSafe('pn-title',support?'Ongoing Support Notes':'Ongoing Subject Notes');
+  setTextSafe('pn-title',support?'Support notes':'Notes');
   if(areaShare){
     const fullShare=support?'Shared by all support activities':hasNotes?`Shared by Area: ${ongoingNoteLabelForTask(t)}`:'';
     areaShare.textContent=support?'All support activities':hasNotes?`Area · ${ongoingNoteLabelForTask(t)}`:'';
@@ -7266,7 +7266,7 @@ function refreshPnote(options={}){
     areaShare.hidden=!hasNotes;
   }
   setTextSafe('pn-info-popover',support?'One shared persistent note for every support activity. Use the Daily Diary for observations specific to today.':'This note is shared by blocks with the exact same Area. Parent-Area notes may appear as read-only context. Use the Daily Diary for observations specific to today.');
-  const infoButton=document.getElementById('pn-info-btn');if(infoButton)infoButton.setAttribute('aria-label',support?'About Ongoing Support Notes':'About Ongoing Subject Notes');
+  const infoButton=document.getElementById('pn-info-btn');if(infoButton)infoButton.setAttribute('aria-label',support?'About support notes':'About notes');
   const pn=document.getElementById('pn-extra');
   if(pn){
     if(hasNotes)bindTaskNoteEditor(pn,TimerState.currentIndex,'execute');
@@ -7483,7 +7483,7 @@ function updateSessionControls(){
       ? 'Today is closed for this plan. Open Review and Save Today to Library when ready.'
       : running
       ? 'The timer is actively tracking a block. Suspend or reset only if you intentionally want to stop this live session.'
-      : 'A plan is loaded but no countdown is running. These controls affect today’s live session; saved Library records and ongoing notes are kept.';
+      : 'A plan is loaded but no countdown is running. These controls affect today’s live session; saved Library records and notes are kept.';
   }
   if(planControls)planControls.hidden=!visible;
   [panel,planControls].filter(Boolean).forEach(container=>container.querySelectorAll('button[data-action]').forEach(btn=>{
@@ -7800,7 +7800,7 @@ async function validateAttachmentInsertionValue(value,row){
   return true;
 }
 async function insertAttachmentIntoOngoingNote(key,row){
-  const destination=LibraryView.noteDestinations().find(item=>item.key===String(key||''));if(!destination)throw new Error('This Ongoing Note destination is no longer available.');
+  const destination=LibraryView.noteDestinations().find(item=>item.key===String(key||''));if(!destination)throw new Error('This note destination is no longer available.');
   const token=AppOwnership.issueWriteToken('insert attachment in note');await settleAttachmentWriters();
   // Stored notes are keyed by their id; the destination names the note by title.
   const fresh=await AppData.notes.readFreshPayload()||{},storedId=()=>AppData.notes.get(destination.key)?.id||'',id=storedId(),hadNote=!!id&&Object.hasOwn(fresh,id),note=hadNote?fresh[id]:{label:destination.label,text:'',updatedAt:''};
@@ -8774,7 +8774,7 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
       title:mode==='bring-in'?'Combine from Device Folder backup':'Restore Device Folder version',
       message:mode==='bring-in'?'Choose a retained verified backup. Differences with this device will be reviewed before data changes.':'Choose a retained verified version. The complete portable Study Director state will be restored to match it; device-local settings remain unchanged.',
       cancelLabel:'Cancel',
-      choices:rows.map((row,index)=>({value:row.id,label:`${index===0?'Latest · ':''}${new Date(row.exportedAt).toLocaleString()}`,description:`${Number(row.counts?.dailyRecord)||0} Saved Dates / Reflections · ${Number(row.counts?.areaNote)||0} Ongoing Notes${row.encrypted?' · Encrypted':''}`,kind:index===0?'primary':''}))
+      choices:rows.map((row,index)=>({value:row.id,label:`${index===0?'Latest · ':''}${new Date(row.exportedAt).toLocaleString()}`,description:`${Number(row.counts?.dailyRecord)||0} Saved Dates / Reflections · ${Number(row.counts?.areaNote)||0} Notes${row.encrypted?' · Encrypted':''}`,kind:index===0?'primary':''}))
     }),
     render:renderDeviceBackup,
     sourceRevision:()=>currentBackupSourceRevision(),
@@ -9063,7 +9063,7 @@ async function prepareApplicationUpdate(context={}){
     await AppData.notes.flush();
     check();
     const noteFailure=AppData.notes.failure();
-    if(noteFailure&&noteFailure.failed)return Object.freeze({ok:false,reason:noteFailure.message||'Ongoing notes are not safely stored yet.'});
+    if(noteFailure&&noteFailure.failed)return Object.freeze({ok:false,reason:noteFailure.message||'Notes are not safely stored yet.'});
     if(await AppData.deletionRecovery.flush()!==true)return Object.freeze({ok:false,reason:'Pending deletions could not be safely reconciled. Keep this tab open and retry after browser storage recovers.'});
     check();
     await AppData.activeSession.settled();
@@ -9383,7 +9383,7 @@ function currentBackupDiagnosticStates(){
     const sources=['indexedDB','localStorage.read','localStorage.write','planDraft.write','activeSession','areaNotes','dailyRecords','deletionRecovery','maintenance','capacity','backup','attachmentIntegrity','repositoryIntegrity'];
     for(const source of sources){const issue=health.issues?.find(row=>row.source===source);if(issue)rows.push({job:'Storage '+source,state:'attention',severity:issue.level,failedAt:issue.at});}return rows;
   });
-  sample('Ongoing note saving',()=>AppData.notes.failure(),value=>[{job:'Ongoing note saving',state:value.failed?'failed':'observed',failed:value.failed===true}]);
+  sample('Note saving',()=>AppData.notes.failure(),value=>[{job:'Note saving',state:value.failed?'failed':'observed',failed:value.failed===true}]);
   sample('Write ownership',()=>({primary:appCanMutate(),...AppMutationCoordinator.status()}),value=>[{job:'Write ownership',state:value.active?'running':value.recoveryFault?'blocked':value.primary?'primary':'secondary',busy:!!value.active,pending:!!value.recoveryFault,foreign:value.foreign,authorityHealthy:value.authorityHealthy,authorityDurableProtected:value.authorityDurableProtected}]);
   sample('Backup controller',()=>BackupController.status(),value=>[{job:'Backup controller',...OperationLifecycle.snapshot(value),importActive:value.importActive,importCancelled:value.importCancelled,exportActive:value.standaloneExportActive}]);
   sample('Device backup',()=>DeviceBackup.status(),value=>[{job:'Device backup',...OperationLifecycle.snapshot({busy:value.busy||value.backingUp,pending:value.pending,nextEligibleAt:value.nextEligibleAt}),connected:value.connected,permission:value.permission,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped,completedAt:value.lastBackupAt||''}]);

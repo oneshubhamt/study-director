@@ -38,7 +38,7 @@ assert.equal(await controller.confirm({title:'Delete saved day?',message:'This c
 assert.match(confirmMessages[0],/Delete saved day\?[\s\S]*This cannot be undone/);
 
 assert.deepEqual(await controller.input({
-  title:'New ongoing note',defaultOption:'top',defaultValue:'',
+  title:'New note',defaultOption:'top',defaultValue:'',
   validate:value=>value.trim()?'':'invalid value'
 }),{value:'Topic name',option:'top'});
 

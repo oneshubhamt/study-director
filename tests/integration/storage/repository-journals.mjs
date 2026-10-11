@@ -31,7 +31,7 @@ assert.equal(restore.state.phase,'prepared');
 assert.equal(await restore.payload.blob.text(),'safety-copy');
 assert.equal(restore.payload.version,4);
 assert.equal(JSON.stringify(restore.payload.savedDayDeletions),JSON.stringify(rollbackDeletions),'restore journal must persist the Saved-Day deletion ledger needed for exact rollback');
-assert.equal(JSON.stringify(restore.payload.areaNoteDeletions),JSON.stringify(rollbackNoteDeletions),'restore journal must persist Ongoing Note deletion history for exact rollback');
+assert.equal(JSON.stringify(restore.payload.areaNoteDeletions),JSON.stringify(rollbackNoteDeletions),'restore journal must persist note deletion history for exact rollback');
 assert.equal(JSON.stringify(restore.payload.attachmentDeletions),JSON.stringify(rollbackAttachmentDeletions),'restore journal must persist Attachment Library deletion history for exact rollback');
 await app.restoreJournal.mark(restoreId,'committing');
 restore=await app.restoreJournal.read();

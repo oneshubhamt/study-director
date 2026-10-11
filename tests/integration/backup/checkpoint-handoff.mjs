@@ -133,7 +133,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
       restoredFromFile:()=>{events.push('restored-from-file');return restoredFromFile?restoredFromFile(state):false;}
     }),
     operations:freeze({assertAuthority:()=>{if(injectedFailure==='ownership')throw new Error('QA_FIXTURE ownership failure');return true;},clearFault:fn,failClosed:message=>{throw new Error(String(message));},runExclusive:async(kind,operation)=>operation()}),
-    interactions:freeze({choose:async options=>options&&options.title==='Use this backup'?fileMode:null,configure:async config=>{prompts.push(config);const out={...decisions};for(const group of config.groups||[]){if(group.id.startsWith('savedDay__')){const remoteRecord=group.choices.find(choice=>String(choice.label||'').startsWith('Use '));const remoteDeletion=group.choices.find(choice=>String(choice.label||'').startsWith('Apply deletion'));if(decisions.dailyRecords==='replace'&&remoteRecord)out[group.id]=remoteRecord.value;else if(decisions.savedDayDeletions==='apply'&&remoteDeletion)out[group.id]=remoteDeletion.value;else out[group.id]=group.defaultValue;}else if(String(group.label||'').startsWith('Ongoing Note · ')){const remoteDeletion=group.choices.find(choice=>String(choice.label||'').startsWith('Apply deletion'));out[group.id]=(decisions.noteByKey?.[String(group.label).slice('Ongoing Note · '.length)]||decisions.noteDeletions)==='apply'&&remoteDeletion?remoteDeletion.value:group.defaultValue;}else if(group.id==='activeSession'){const incoming=group.choices.find(choice=>String(choice.label||'').startsWith('Use session'));out.activeSession=decisions.activeSession==='checkpoint'&&incoming?incoming.value:group.defaultValue;}}return freeze(out);},notify:fn}),
+    interactions:freeze({choose:async options=>options&&options.title==='Use this backup'?fileMode:null,configure:async config=>{prompts.push(config);const out={...decisions};for(const group of config.groups||[]){if(group.id.startsWith('savedDay__')){const remoteRecord=group.choices.find(choice=>String(choice.label||'').startsWith('Use '));const remoteDeletion=group.choices.find(choice=>String(choice.label||'').startsWith('Apply deletion'));if(decisions.dailyRecords==='replace'&&remoteRecord)out[group.id]=remoteRecord.value;else if(decisions.savedDayDeletions==='apply'&&remoteDeletion)out[group.id]=remoteDeletion.value;else out[group.id]=group.defaultValue;}else if(String(group.label||'').startsWith('Note · ')){const remoteDeletion=group.choices.find(choice=>String(choice.label||'').startsWith('Apply deletion'));out[group.id]=(decisions.noteByKey?.[String(group.label).slice('Note · '.length)]||decisions.noteDeletions)==='apply'&&remoteDeletion?remoteDeletion.value:group.defaultValue;}else if(group.id==='activeSession'){const incoming=group.choices.find(choice=>String(choice.label||'').startsWith('Use session'));out.activeSession=decisions.activeSession==='checkpoint'&&incoming?incoming.value:group.defaultValue;}}return freeze(out);},notify:fn}),
     environment:freeze({AbortController,clearTimeout,yieldTask:async()=>{},setTimeout:callback=>(callback(),1)}),diagnostics:freeze({capture:fn,start:()=>'',mark:(name,details={})=>(diagnosticMarks.push([String(name),details]),true),finish:()=>false,fail:()=>false})
   })}));
   return {runtime,prompts,statuses,events,diagnosticMarks,setPreflightFailure:value=>{injectedFailure=String(value||'');}};
@@ -208,7 +208,7 @@ assert.ok(Object.keys(bulkGroup.choices[1].applyValues).every(id=>id.startsWith(
 
 // P7: the bulk UX must remain bounded and atomic with many simultaneous Saved-Day conflicts.
 const manyDates=Array.from({length:28},(_,index)=>`2026-06-${String(index+1).padStart(2,'0')}`),manyState=createState();manyState.records=new Map(manyDates.map((date,index)=>[date,record(date,`local ${index+1}`,'2026-09-01T12:00:00.000Z')]));manyState.deletions=[];manyState.notes={};manyState.activeSession=null;manyState.schedule='';const manyIncoming=manyDates.map((date,index)=>record(date,`backup ${index+1}`,'2026-09-02T12:00:00.000Z')),manyBlob=await makeCheckpoint({records:manyIncoming,exportedAt:'2026-09-02T13:00:00.000Z'}),manyHarness=createHarness(manyState,{decisions:{dailyRecords:'replace',reflections:'incoming'}});await manyHarness.runtime.controller.restore(await manyHarness.runtime.controller.inspect(manyBlob,{filename:'many-saved-day-conflicts.sdbackup'}));const manyPrompt=manyHarness.prompts.find(prompt=>prompt.groups?.some(group=>group.id==='savedDaysBulk')),manyBulk=manyPrompt?.groups.find(group=>group.id==='savedDaysBulk'),manyGroups=manyPrompt?.groups.filter(group=>String(group.id||'').startsWith('savedDay__'))||[];assert.ok(manyPrompt,'Many Saved-Day conflicts must still use one consolidated conflict surface.');assert.equal(manyGroups.length,manyDates.length,'Every conflicting Saved Day must remain an individually overridable atomic decision.');assert.equal(Object.keys(manyBulk.choices[0].applyValues).length,manyDates.length);assert.equal(Object.keys(manyBulk.choices[1].applyValues).length,manyDates.length);assert.ok(Object.keys(manyBulk.choices[0].applyValues).every(id=>id.startsWith('savedDay__')));assert.deepEqual([...manyState.records.keys()].sort(),manyDates);for(const [index,date] of manyDates.entries())assert.equal(manyState.records.get(date).reflection,`backup ${index+1}`,'Bulk incoming choice must replace the complete Saved-Day record, not merge fields.');
-assert.ok(importHarness.events.includes('preflight-notes-flush')&&importHarness.events.includes('preflight-deletion-flush'),'Restore preflight must flush Ongoing Notes and deletion recovery before planning; Review state is carried by Active Session.');
+assert.ok(importHarness.events.includes('preflight-notes-flush')&&importHarness.events.includes('preflight-deletion-flush'),'Restore preflight must flush notes and deletion recovery before planning; Review state is carried by Active Session.');
 assert.equal(importState.records.get('2026-08-01').reflection,'local only');
 assert.equal(importState.records.get('2026-08-02').reflection,'local conflict newer','Reconciliation must keep a divergent local Saved Day by default.');
 assert.equal(importState.records.get('2026-08-03').reflection,'local should survive import','A conflicting checkpoint deletion must not override the local Saved Day by default.');
@@ -218,7 +218,7 @@ assert.deepEqual(importState.deletions.map(item=>item.date),['2026-08-04','2026-
 assert.deepEqual(Object.keys(importState.notes).sort(),['Checkpoint','Local'],'Reconciliation should add a missing incoming Area while preserving local-only Areas.');
 
 
-// Ongoing Note deletion remains explicit and human-directed.
+// Note deletion remains explicit and human-directed.
 const deletionState=createState();
 delete deletionState.notes.Local;
 delete deletionState.notes.Checkpoint;
@@ -232,15 +232,15 @@ const deletionBlob=await makeCheckpoint({
 });
 const deletionHarness=createHarness(deletionState);
 await deletionHarness.runtime.controller.restore(await deletionHarness.runtime.controller.inspect(deletionBlob,{filename:'deletion-semantics.sdbackup'}));
-assert.equal(Object.hasOwn(deletionState.notes,'Gone'),false,'A local Ongoing Note tombstone must prevent stale incoming note resurrection.');
+assert.equal(Object.hasOwn(deletionState.notes,'Gone'),false,'A local note tombstone must prevent stale incoming note resurrection.');
 assert.equal(deletionState.noteDeletions.some(item=>item.key==='Gone'),true);
-assert.equal(deletionState.notes.Keep.text,'live local note','Incoming Ongoing Note deletion must default to the live local note.');
+assert.equal(deletionState.notes.Keep.text,'live local note','Incoming note deletion must default to the live local note.');
 
 const explicitNoteDeleteState=createState();explicitNoteDeleteState.notes={Keep:normalizeArea({key:'Keep',text:'live local note',updatedAt:'2026-08-24T10:00:00.000Z'},'Keep')};explicitNoteDeleteState.noteDeletions=[];
 const explicitNoteDeleteHarness=createHarness(explicitNoteDeleteState,{decisions:{noteDeletions:'apply'}});
 await explicitNoteDeleteHarness.runtime.controller.restore(await explicitNoteDeleteHarness.runtime.controller.inspect(await makeCheckpoint({noteDeletions:[{key:'Keep',deletedAt:'2026-08-24T14:00:00.000Z'}],installationId:'inst_note_delete_remote'}),{filename:'note-delete-choice.sdbackup'}));
-assert.equal(Object.hasOwn(explicitNoteDeleteState.notes,'Keep'),false,'Explicit Ongoing Note deletion choice must remove the live local note.');
-assert.equal(explicitNoteDeleteState.noteDeletions.some(item=>item.key==='Keep'),true,'Explicit Ongoing Note deletion must become canonical tombstone state.');
+assert.equal(Object.hasOwn(explicitNoteDeleteState.notes,'Keep'),false,'Explicit note deletion choice must remove the live local note.');
+assert.equal(explicitNoteDeleteState.noteDeletions.some(item=>item.key==='Keep'),true,'Explicit note deletion must become canonical tombstone state.');
 
 // Distinct names that formerly sanitized to the same ID must retain independent choices through restore.
 const collisionState=createState();collisionState.notes=Object.fromEntries(['a b','a_b'].map(key=>[key,normalizeArea({key,text:'keep '+key,updatedAt:'2026-08-24T10:00:00.000Z'},key)]));
@@ -262,7 +262,7 @@ assert.equal(handoffState.records.has('2026-08-03'),false,'Explicit checkpoint d
 assert.equal(handoffState.records.get('2026-08-04').reflection,'checkpoint revives local deletion','Checkpoint record choice must be able to replace a local deletion.');
 assert.equal(handoffState.records.get('2026-08-05').reflection,'checkpoint new');
 assert.deepEqual(handoffState.deletions.map(item=>item.date),['2026-08-03','2026-08-06']);
-assert.deepEqual(Object.keys(handoffState.notes).sort(),['Checkpoint','Local'],'Reconciliation must add missing Areas without clearing local-only Ongoing Notes.');
+assert.deepEqual(Object.keys(handoffState.notes).sort(),['Checkpoint','Local'],'Reconciliation must add missing Areas without clearing local-only notes.');
 assert.equal(handoffState.activeSession.date,'2026-08-07','Handoff must restore a non-today interrupted session.');
 assert.match(handoffState.schedule,/CHECKPOINT/u);
 assert.equal(handoffState.personal.preferences.studentName,'Checkpoint User');
@@ -307,7 +307,7 @@ assert.equal(clearState.activeSession.date,'2026-08-10','Checkpoint absence must
 
 
 
-// CR3 Ongoing Note reconciliation remains scratch-only until the resolved note enters the journaled restore commit.
+// CR3 Note reconciliation remains scratch-only until the resolved note enters the journaled restore commit.
 const noteState=createState();
 noteState.notes.Shared=freeze({version:2,key:'Shared',text:'Local sentence. Local-only detail.',updatedAt:'2026-08-22T15:00:00.000Z'});
 const noteBlob=await makeCheckpoint({areaNotes:{Shared:freeze({version:2,key:'Shared',text:'Local sentence. Imported addition.',updatedAt:'2026-08-23T15:00:00.000Z'})},installationId:'inst_note_remote'});
@@ -399,4 +399,4 @@ assert.equal(aRoundTrip.records.get('2026-08-13').reflection,'A local-only after
 assert.equal(aRoundTrip.activeSession.date,'2026-08-12');
 assert.match(aRoundTrip.schedule,/DEVICE-B/u);
 
-console.log(JSON.stringify({status:'PASS',suite:'checkpoint-handoff',preflightVariants:preflightCases.length,coverage:['current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential handoff','scratch Ongoing Note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'checkpoint-handoff',preflightVariants:preflightCases.length,coverage:['current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential handoff','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));

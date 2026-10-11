@@ -445,7 +445,7 @@ function confirmScheduleChangeWillMigrateProgress(newRows){
   const practiceMatched=snapshot.preview?snapshot.preview.practiceMatched:0;
   const details=[`${matched}/${total} current progress entries match the revised Plan.`];
   if(practiceTotal)details.push(`${practiceMatched}/${practiceTotal} Practice Pacer links match.`);
-  details.push('Removed or renamed unmatched blocks will no longer appear in today’s Review.','Ongoing Area notes remain separate and are preserved.');
+  details.push('Removed or renamed unmatched blocks will no longer appear in today’s Review.','Notes for each Area remain separate and are preserved.');
   return confirm({
     title:'Replace today’s live Plan?',
     message:'Study Director will carry forward progress only where the block identity still matches.',

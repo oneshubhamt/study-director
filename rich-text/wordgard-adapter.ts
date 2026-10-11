@@ -16,6 +16,6 @@ export {CellSelection,tableCore} from './wordgard-source/table';
 export {ChangeSet,Elt,Leaf,Node,Plot,Mark,parse,serialize} from 'wordgard/doc';
 export {
   Alignment,BlockCell,BlockHeaderCell,Blockquote,BulletList,Doc,Heading,HorizontalRule,
-  LineBreak,Link,ListItem,OrderedList,Paragraph,Subscript,Strong,Superscript,
+  LineBreak,Link,ListItem,OrderedList,Paragraph,Strikethrough,Subscript,Strong,Superscript,
   Table,TableRow,Underline,Emphasis,
 } from 'wordgard/types';
