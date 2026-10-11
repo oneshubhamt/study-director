@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
 import {createHarness} from '../../helpers/repository-harness.mjs';
+import {noteRow} from '../../helpers/note-ids.mjs';
 const source=fs.readFileSync('source/app.html','utf8');
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 function fixture(){
@@ -105,7 +106,7 @@ cases.push('untrusted rich text, source changes and unavailable revisions forbid
       const saved=await h.app.activeSession.save({...session('older reflection'),revision:19,updatedAt:'2026-10-01T12:19:00.000Z'},{emergency:true});
       assert.equal(saved.storage.local,true);controls.failSessionWrite=false;
     }
-    h.stores.area.set('biology',{version:2,key:'biology',label:'Biology',text:reference(ids[0]),updatedAt:'2026-10-01T12:20:00.000Z'});
+    const biologyNote=noteRow('Biology',reference(ids[0]),'2026-10-01T12:20:00.000Z');h.stores.area.set(biologyNote.key,biologyNote);
     h.stores.session.set('active',session(reference(ids[1])));
     await h.app.dailyRecords.save({version:1,date:'2026-10-01',savedAt:'2026-10-01T12:20:00.000Z',updatedAt:'2026-10-01T12:20:00.000Z',reflection:reference(ids[2])});
     controls.onStorageRead=async({store})=>{if(failed&&((fault==='notes'&&store==='area')||(fault==='day'&&store==='daily')||(fault.startsWith('session')&&store==='session')))throw new Error('Temporary '+fault+' read failure');};

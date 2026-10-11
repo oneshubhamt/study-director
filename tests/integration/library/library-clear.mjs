@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
 import {createHarness} from '../../helpers/repository-harness.mjs';
+import {noteRow} from '../../helpers/note-ids.mjs';
 import assert from 'node:assert/strict';
 
 // Library clear is one transactional contract: planning, scaling, reference rewrites, rollback, and commit semantics.
@@ -379,7 +380,8 @@ console.log(JSON.stringify({status:'PASS',suite:'library-clear-transaction',faul
     const controls={dailyKeyEnumeration:true},h=createHarness(new Map(),null,controls);let phase='setup',armed=false,enableFault=true,deletes=0,faultClosed=0;
     const session={id:'active',type:'activeSession',version:1,date:'2026-10-01',status:'suspended',scheduleText:'',suspendedAt:'2026-10-01T12:00:00.000Z',revision:20,updatedAt:'2026-10-01T12:20:00.000Z',snapshot:{review:{reflection:reference}}};
     h.stores.session.set('active',session);
-    await h.app.notes.replace({biology:{version:2,key:'biology',label:'Biology',text:reference,updatedAt:'2026-10-01T12:20:00.000Z'},unrelated:{version:2,key:'unrelated',label:'Other note',text:'Preserve this note',updatedAt:'2026-10-01T12:20:00.000Z'}});
+    const biologyNote=noteRow('Biology',reference,'2026-10-01T12:20:00.000Z'),otherNote=noteRow('Other note','Preserve this note','2026-10-01T12:20:00.000Z');
+    await h.app.notes.replace({[biologyNote.key]:biologyNote,[otherNote.key]:otherNote});
     await h.app.dailyRecords.saveBatch(['2026-09-30','2026-10-01'].map((date,i)=>({version:1,date,savedAt:'2026-10-01T12:20:00.000Z',updatedAt:'2026-10-01T12:20:00.000Z',reflection:i?reference:'Preserve this day'})));
     const meta={id,name:'Diagram',library:false},metadata=new Map([[id,meta]]),phases=[];
     let state;const references=Attachments.createReferenceCoordinator({data:h.app,scan:rich.scanAttachmentReferences,rewriteReferences:targets=>state.rewriteReferences(targets),withPersistenceSuppressed:work=>work(),review:{hydrate(){},invalidateBindings(){}},background:{budget:()=>()=>false,yieldTask:async()=>{}},live:{fields:()=>[],reviewDate:()=>'',todayIso:()=> '2026-10-01',normalizeAreaName:value=>value}});
