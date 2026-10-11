@@ -16,7 +16,7 @@ registry.define('backup',1,input=>{
   const Canonical=input.canonical,ManagedRepositoryModule=input.managedRepository,BackupProviderModule=input.backupProvider,RepositoryBackgroundModule=input.repositoryBackground,BackupCaptureModule=input.backupCapture;
   const PORT_FIELDS=freeze({
     configuration:freeze(['appVersion','backupVersion','limits']),
-    persistence:freeze(['activeSessionLoad','activeSessionSave','activeSessionClear','activeSessionSettled','dailyRecordBackupDates','dailyRecordBackupMonth','dailyRecordDocuments','dailyRecordImportBatches','dailyRecordRemove','dailyRecordTimestamp','notesExportPayload','notesReadFreshPayload','notesReadFreshItems','notesFlush','notesNormalizePayload','notesAlignByTitle','notesFailure','restoreJournalPrepare','restoreJournalRead','restoreJournalMark','restoreJournalClear','scheduleRead','personalSettle','personalExport','personalImport','personalVerify','sourceRevision','snapshotRevision','storageGeneration','canonicalMutationEpochRead','canonicalPreparationRebase','preparationUnitStamps','preparationUnitReplace','installationId','deletionRecoveryFlush','deletionRecoverySavedDays','deletionRecoveryReplaceSavedDays','deletionRecoveryAreaNotes','deletionRecoveryReplaceAreaNotes','deletionRecoveryAttachments','deletionRecoveryReplaceAttachments','deletionRecoveryClearAttachment','reconciliationBaseRead','reconciliationBaseReadNotes','reconciliationBaseWrite']),
+    persistence:freeze(['activeSessionLoad','activeSessionSave','activeSessionClear','activeSessionSettled','dailyRecordBackupDates','dailyRecordBackupMonth','dailyRecordDocuments','dailyRecordImportBatches','dailyRecordRemove','dailyRecordTimestamp','notesExportPayload','notesReadFreshPayload','notesReadFreshItems','notesFlush','notesNormalizePayload','notesAlignByTitle','notesIsLiveKey','notesFailure','restoreJournalPrepare','restoreJournalRead','restoreJournalMark','restoreJournalClear','scheduleRead','personalSettle','personalExport','personalImport','personalVerify','sourceRevision','snapshotRevision','storageGeneration','canonicalMutationEpochRead','canonicalPreparationRebase','preparationUnitStamps','preparationUnitReplace','installationId','deletionRecoveryFlush','deletionRecoverySavedDays','deletionRecoveryReplaceSavedDays','deletionRecoveryAreaNotes','deletionRecoveryReplaceAreaNotes','deletionRecoveryAttachments','deletionRecoveryReplaceAttachments','deletionRecoveryClearAttachment','reconciliationBaseRead','reconciliationBaseReadNotes','reconciliationBaseWrite']),
     codecs:freeze(['activeSession','backup']),
     reconciliation:freeze(['createPlan','resolvePlan','summarizePlan']),
     noteReconciliation:freeze(['resolve']),
@@ -67,7 +67,7 @@ registry.define('backup',1,input=>{
     const {
       activeSessionLoad,activeSessionSave,activeSessionClear,activeSessionSettled,dailyRecordBackupDates,dailyRecordBackupMonth,dailyRecordDocuments,
       dailyRecordImportBatches,dailyRecordRemove,dailyRecordTimestamp,notesExportPayload,notesReadFreshPayload,notesReadFreshItems,notesFlush,
-      notesNormalizePayload,notesAlignByTitle,notesFailure,restoreJournalPrepare,restoreJournalRead,
+      notesNormalizePayload,notesAlignByTitle,notesIsLiveKey,notesFailure,restoreJournalPrepare,restoreJournalRead,
       restoreJournalMark,restoreJournalClear,scheduleRead,personalSettle,personalExport,personalImport,personalVerify,canonicalMutationEpochRead,canonicalPreparationRebase,preparationUnitStamps,preparationUnitReplace,installationId,deletionRecoveryFlush,deletionRecoverySavedDays,deletionRecoveryReplaceSavedDays,deletionRecoveryAreaNotes,deletionRecoveryReplaceAreaNotes,deletionRecoveryAttachments,deletionRecoveryReplaceAttachments,deletionRecoveryClearAttachment,reconciliationBaseRead,reconciliationBaseReadNotes,reconciliationBaseWrite
     }=ports.persistence;
     const {activeSession:ActiveSessionCodec,backup:BackupCodec}=ports.codecs;
@@ -671,13 +671,13 @@ async function noteReconciliationAncestor(stored,keys=[]){
 function noteReconciliationConflicts(plan,ancestor=null){
   const conflicts=[];
   for(const item of plan.notes){
-    if(!item.conflict||!item.localCandidateId)continue;
+    if(!item.conflict||!item.localCandidateId||!notesIsLiveKey(item.key))continue;
     const local=item.candidates.find(candidate=>candidate.id===item.localCandidateId),incoming=item.candidates.filter(candidate=>!candidate.local);
     if(!local||local.kind!=='record'||incoming.length!==1||incoming[0].kind!=='record')continue;
     const remote=incoming[0],localText=String(local.value&&local.value.text||''),incomingText=String(remote.value&&remote.value.text||'');
     if(localText===incomingText)continue;
     const ancestorAvailable=!!(ancestor&&ancestor.notes&&Object.prototype.hasOwnProperty.call(ancestor.notes,item.key));
-    conflicts.push(freeze({key:item.key,label:String(local.value&&local.value.key||remote.value&&remote.value.key||item.key),localCandidateId:local.id,incomingCandidateId:remote.id,localValue:localText,incomingValue:incomingText,incomingLabel:remote.sources[0]?.label||'Backup copy',ancestorAvailable,ancestorValue:ancestorAvailable?String(ancestor.notes[item.key]||''):''}));
+    conflicts.push(freeze({key:item.key,label:String(local.value&&local.value.label||remote.value&&remote.value.label||item.key),localCandidateId:local.id,incomingCandidateId:remote.id,localValue:localText,incomingValue:incomingText,incomingLabel:remote.sources[0]?.label||'Backup copy',ancestorAvailable,ancestorValue:ancestorAvailable?String(ancestor.notes[item.key]||''):''}));
   }
   return freeze(conflicts);
 }
@@ -1366,6 +1366,29 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   }finally{await Exports.run('file.release',{file:safetyFile.blob});}
   });
 }
+// Replace never changes or removes a note on this device without asking. Each
+// note whose text the backup would change, or that the backup does not have,
+// opens in the review starting from the backup's copy; the person keeps it,
+// keeps this device's, merges or edits. Notes the backup adds are added.
+async function reviewReplacedNotes(parsed,signal){
+  const local=AppData.notes.normalizePayload(await AppData.notes.readFreshPayload()),deletedIds=(await AppData.deletionRecovery.areaNotes()).map(entry=>entry.key);
+  const target=AppData.notes.alignByTitle(parsed&&parsed.data&&parsed.data.areaNotes||{},deletedIds),conflicts=[];
+  for(const [key,mine] of Object.entries(local)){
+    if(!notesIsLiveKey(key))continue;
+    const theirs=target[key],localValue=String(mine&&mine.text||''),incomingValue=String(theirs&&theirs.text||'');
+    if(localValue!==incomingValue)conflicts.push(freeze({key,label:String(mine.label||key),localCandidateId:'local',incomingCandidateId:'incoming',localValue,incomingValue,incomingLabel:theirs?'This backup':'Not in this backup'}));
+  }
+  if(!conflicts.length)return freeze({notes:target,backup:target,kept:freeze([])});
+  const result=await NoteReconciliation.resolve(freeze({conflicts,incomingAssets:Array.isArray(parsed.importedAssets)?parsed.importedAssets:freeze([]),signal,startWith:'incoming'}));
+  if(!result)return null;
+  const notes={...target},kept=[];
+  for(const conflict of conflicts){
+    const text=String(result.notes?.[conflict.key]?.text??conflict.incomingValue);if(text===conflict.incomingValue)continue;
+    const mine=local[conflict.key],theirs=target[conflict.key],revision=Math.max(Date.now(),...[mine,theirs].map(row=>(Date.parse(String(row&&row.updatedAt||''))||0)+1));
+    notes[conflict.key]=freeze(text===conflict.localValue?mine:{...(theirs||mine),text,updatedAt:new Date(revision).toISOString()});kept.push(conflict.key);
+  }
+  return freeze({notes:freeze(notes),backup:target,kept:freeze(kept)});
+}
 async function restoreExactVersionWithOperation(candidate,operation,{confirmed=false,requireManaged=false}={}){
   const stored=candidate&&typeof candidate==='object'?inspectedBackups.get(candidate):null,snapshot=stored?candidateSnapshotState(stored):null,parsed=snapshot&&snapshot.parsed||null,provenance=snapshot&&snapshot.provenance||null,repositoryManifest=provenance&&provenance.repositoryManifest||null;
   const signal=operation&&operation.signal||stored&&stored.signal||null;
@@ -1382,7 +1405,7 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
   if(!confirmed){
     const accepted=await configure({
       title:'Replace current data?',
-      message:'Study Director will make the complete portable app state match this backup. Portable data that did not exist in this backup will be removed. Device-local settings and browser permissions stay on this device.',
+      message:'Study Director will make the complete portable app state match this backup. Portable data that did not exist in this backup will be removed. Any note the backup would change or remove opens for review first, so you choose what each one keeps. Device-local settings and browser permissions stay on this device.',
       details:[
         `${preview.exportedAt?new Date(preview.exportedAt).toLocaleString('en-IN'):'Date unavailable'} · ${Number(preview.counts&&preview.counts.dailyRecord)||0} Saved Days · ${Number(preview.counts&&preview.counts.areaNote)||0} Notes`,
         'A verified safety copy protects the current local state if this operation fails.'
@@ -1391,6 +1414,8 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
     });
     if(!accepted)return freeze({cancelled:true,mode:'restore-version',verified:false,checkpointId});
   }
+  const reviewed=await reviewReplacedNotes(parsed,signal);
+  if(!reviewed)return freeze({cancelled:true,mode:'restore-version',verified:false,checkpointId});
   throwIfImportAborted(signal);
   return runRestoreMutation(stored,requireManaged?'restore-managed-version':'restore-file-version',async()=>{
     OperationDiagnostics.mark('local-restore-mutation-enter');
@@ -1406,16 +1431,17 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
       OperationDiagnostics.mark('restore-journal-prepare-start');
       await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,scheduleText:rollbackScheduleText,savedDayDeletions:rollbackDeletionState.savedDays,areaNoteDeletions:rollbackDeletionState.areaNotes,attachmentDeletions:rollbackDeletionState.attachments});
       journalPrepared=true;OperationDiagnostics.mark('restore-journal-prepare-complete');
-      const targetDeletionState=protectedCheckpointDeletionState(parsed),targetSchedule=String(parsed.importedPersonalData&&parsed.importedPersonalData.plans&&parsed.importedPersonalData.plans.draft||parsed.importedActiveSession&&parsed.importedActiveSession.scheduleText||'');
+      const checkpointDeletionState=protectedCheckpointDeletionState(parsed),kept=new Set(reviewed.kept);
+      const targetDeletionState=kept.size?freeze({...checkpointDeletionState,areaNotes:freeze(checkpointDeletionState.areaNotes.filter(entry=>!kept.has(String(entry&&entry.key||''))))}):checkpointDeletionState,targetSchedule=String(parsed.importedPersonalData&&parsed.importedPersonalData.plans&&parsed.importedPersonalData.plans.draft||parsed.importedActiveSession&&parsed.importedActiveSession.scheduleText||'');
       OperationDiagnostics.mark('canonical-replacement-start');
-      const restored=await replacePortableCanonicalSnapshot(parsed,{scheduleText:targetSchedule,deletionState:targetDeletionState,signal,restoreId,requirePersonal:true,phasePrefix:'version-restore'});
+      const restored=await replacePortableCanonicalSnapshot(freeze({...parsed,data:freeze({...parsed.data,areaNotes:reviewed.notes})}),{scheduleText:targetSchedule,deletionState:targetDeletionState,signal,restoreId,requirePersonal:true,phasePrefix:'version-restore'});
       OperationDiagnostics.mark('canonical-replacement-complete',{savedDays:Number(restored&&restored.records)||0,notes:Number(restored&&restored.notes)||0,assets:Number(restored&&restored.assets)||0});
       committedDescription='The selected portable version was written and verified';
       await AppData.restoreJournal.mark(restoreId,'verified');
       OperationDiagnostics.mark('canonical-verification-complete');
       await rebaseRepositoryPreparationAcceleration('replace');
       await AppData.restoreJournal.clear(restoreId);journalPrepared=false;clearFault();
-      try{await AppData.reconciliationBase.write(checkpointId,parsed&&parsed.data&&parsed.data.areaNotes||{});}catch(error){AppDiagnostics.capture('backup.version-restore-reconciliation-base',error,'warn');}
+      try{await AppData.reconciliationBase.write(checkpointId,reviewed.backup);}catch(error){AppDiagnostics.capture('backup.version-restore-reconciliation-base',error,'warn');}
       restoreSurfaceStatus(stored,`✓ Backup restored exactly · ${restored.records} Saved Day${restored.records===1?'':'s'} · ${restored.notes} Note${restored.notes===1?'':'s'} · ${restored.assets} attachment${restored.assets===1?'':'s'}. Final verification passed.`,true,'local-complete');
       return freeze({cancelled:false,mode:'restore-version',verified:true,changed:true,checkpointId,restored});
     }catch(error){

@@ -8457,6 +8457,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     notesFlush:options=>AppData.notes.flush(options),
     notesNormalizePayload:value=>AppData.notes.normalizePayload(value),
     notesAlignByTitle:(value,deletedIds)=>AppData.notes.alignByTitle(value,deletedIds),
+    notesIsLiveKey:key=>DailyRecordCodec.areaNoteKeys.isId(key),
     notesFailure:()=>AppData.notes.failure(),
     restoreJournalPrepare:async value=>{const backupFile=await Exports.run('file.persist',{file:value.blob});const {blob,...metadata}=value;return AppData.restoreJournal.prepare({...metadata,backupFile});},
     restoreJournalRead:async()=>{const journal=await AppData.restoreJournal.read();if(!journal)return null;const ref=journal.payload.backupFile;return ref?{...journal,payload:{...journal.payload,blob:await Exports.run('file.read',{ref})}}:journal;},

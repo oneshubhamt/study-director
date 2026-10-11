@@ -39,28 +39,24 @@ registry.define('reconciliation-ui',1,()=>{
       }
       return freeze(out);
     }
-    function resultFrom(states,automaticNotes=null){
-      const notes=Object.assign(Object.create(null),automaticNotes||{});
+    function resultFrom(states){
+      const notes=Object.create(null);
       for(const state of states)notes[state.conflict.key]=freeze({text:String(state.result??state.working),localCandidateId:state.conflict.localCandidateId,incomingCandidateId:state.conflict.incomingCandidateId});
       return freeze({format:FORMAT,version:1,notes:freeze(notes)});
     }
     async function resolve(options={}){
       if(active)throw new Error('Note reconciliation is already open.');
       // purpose 'version' is one note compared with an earlier backup of it.
+      // Every difference is reviewed; nothing is resolved without the person.
+      // A shared earlier copy only shapes what Smart merge proposes.
       const conflicts=normalizedConflicts(options.conflicts),manualOnly=options.manualOnly===true,version=!manualOnly&&options.purpose==='version';
       if(!conflicts.length)return freeze({format:FORMAT,version:1,notes:freeze(Object.create(null))});
-      const automaticNotes=Object.create(null),manual=[];
-      for(const conflict of conflicts){
-        if(manualOnly){manual.push({conflict,smartValue:null});continue;}
-        if(!conflict.ancestorAvailable){manual.push({conflict,smartValue:null});continue;}
-        // Only one side changed since the shared copy: there is nothing to choose.
-        // When both changed, the review always opens, with Smart merge ready.
-        const onlyIncoming=conflict.localValue===conflict.ancestorValue,onlyLocal=conflict.incomingValue===conflict.ancestorValue;
-        if(onlyIncoming||onlyLocal){automaticNotes[conflict.key]=freeze({text:onlyIncoming?conflict.incomingValue:conflict.localValue,localCandidateId:conflict.localCandidateId,incomingCandidateId:conflict.incomingCandidateId});continue;}
-        try{manual.push({conflict,smartValue:richText.mergeThreeWay(conflict.ancestorValue,conflict.localValue,conflict.incomingValue).value});}
-        catch(error){diagnostics.capture('reconciliation-ui.three-way-preflight',error,'warn');manual.push({conflict,smartValue:null});}
-      }
-      if(!manual.length)return freeze({format:FORMAT,version:1,notes:freeze(automaticNotes)});
+      const smartMerge=conflict=>{
+        if(manualOnly||!conflict.ancestorAvailable)return null;
+        try{return richText.mergeThreeWay(conflict.ancestorValue,conflict.localValue,conflict.incomingValue).value;}
+        catch(error){diagnostics.capture('reconciliation-ui.three-way-preflight',error,'warn');return null;}
+      };
+      const manual=conflicts.map(conflict=>({conflict,smartValue:smartMerge(conflict)}));
       const checkpointAssets=new Map();
       for(const item of Array.isArray(options.incomingAssets)?options.incomingAssets:[]){const id=String(item&&item.assetId||'');if(id&&item.blob instanceof Blob)checkpointAssets.set(id,item.blob);}
       const readonlyAssetStore=(preferCheckpoint=false)=>freeze({
@@ -77,7 +73,9 @@ registry.define('reconciliation-ui',1,()=>{
       // verified checkpoint bytes; the resolved/local editor prefers canonical bytes
       // and only falls back to checkpoint bytes for not-yet-published attachments.
       const localScratchAssets=readonlyAssetStore(false),incomingScratchAssets=readonlyAssetStore(true);
-      const states=manual.map(item=>({conflict:item.conflict,working:item.conflict.localValue,incoming:item.conflict.incomingValue,smartValue:item.smartValue,result:null,applied:false}));
+      // Replace starts each note from the backup's copy; everything else from this device's.
+      const startIncoming=options.startWith==='incoming';
+      const states=manual.map(item=>({conflict:item.conflict,working:startIncoming?item.conflict.incomingValue:item.conflict.localValue,incoming:item.conflict.incomingValue,smartValue:item.smartValue,result:null,applied:false}));
       const restoreFocus=document.activeElement;
       const dialog=document.createElement('dialog');dialog.className='sd-note-reconcile-dialog';dialog.setAttribute('aria-label',manualOnly?'Review Diary differences':'Review note differences');
       const shell=document.createElement('div');shell.className='sd-note-reconcile-shell';
@@ -164,7 +162,7 @@ registry.define('reconciliation-ui',1,()=>{
       customButton.addEventListener('click',()=>{if(leftHandle){leftHandle.focus?.();localPane.field.focus?.();}diffStatus.textContent='Edit the resolved reflection, then apply it.';});
       retry.addEventListener('click',()=>{void mountCurrent(index)});
       previous.addEventListener('click',()=>{void mountCurrent(index-1)});next.addEventListener('click',()=>{void mountCurrent(index+1)});
-      apply.addEventListener('click',()=>{const state=states[index];saveScratch();if(manualOnly&&state.conflict.requireContent&&!String(state.working||'').trim()){state.applied=false;if(frame)view.cancelAnimationFrame(frame);frame=0;diffStatus.textContent='A diary-only entry cannot be empty. Keep one copy or enter custom text.';return;}state.result=state.working;state.applied=true;const nextUnresolved=states.findIndex((item,position)=>position>index&&!item.applied);if(nextUnresolved>=0){void mountCurrent(nextUnresolved);return}const anyUnresolved=states.findIndex(item=>!item.applied);if(anyUnresolved>=0){void mountCurrent(anyUnresolved);return}void finish(resultFrom(states,automaticNotes));});
+      apply.addEventListener('click',()=>{const state=states[index];saveScratch();if(manualOnly&&state.conflict.requireContent&&!String(state.working||'').trim()){state.applied=false;if(frame)view.cancelAnimationFrame(frame);frame=0;diffStatus.textContent='A diary-only entry cannot be empty. Keep one copy or enter custom text.';return;}state.result=state.working;state.applied=true;const nextUnresolved=states.findIndex((item,position)=>position>index&&!item.applied);if(nextUnresolved>=0){void mountCurrent(nextUnresolved);return}const anyUnresolved=states.findIndex(item=>!item.applied);if(anyUnresolved>=0){void mountCurrent(anyUnresolved);return}void finish(resultFrom(states));});
       cancel.addEventListener('click',()=>void finish(null));
       dialog.addEventListener('cancel',event=>{event.preventDefault();void finish(null)});
       dialog.addEventListener('close',()=>{if(!settled)void finish(null)});

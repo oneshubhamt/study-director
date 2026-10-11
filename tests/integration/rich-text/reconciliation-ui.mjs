@@ -138,18 +138,31 @@ const conflict=(key,localValue,incomingValue,{ancestorAvailable=false,ancestorVa
   assert.equal(result.notes['2026-09-21'].text,'LOCAL-D2');
 }
 
-// When only one side changed since the shared copy there is nothing to choose:
-// the changed side is taken without opening the modal.
+// Every difference opens the review, even when only one side changed since the
+// shared copy; nothing is applied until the person applies it.
 {
   const harness=createController();
-  const result=await harness.controller.resolve({conflicts:[conflict('Forward','SAFE-BASE','REMOTE-NEW',{ancestorAvailable:true,ancestorValue:'SAFE-BASE'}),conflict('Kept','LOCAL-NEW','SAFE-BASE',{ancestorAvailable:true,ancestorValue:'SAFE-BASE'})],incomingAssets:[]});
-  assert.equal(result.notes.Forward.text,'REMOTE-NEW');assert.equal(result.notes.Kept.text,'LOCAL-NEW');
-  assert.equal(harness.document.body.children.length,0,'a one-sided change must stay silent');
-  assert.equal(harness.mounts.length,0,'a one-sided change must not mount editors');
+  const promise=harness.controller.resolve({conflicts:[conflict('Forward','SAFE-BASE','REMOTE-NEW',{ancestorAvailable:true,ancestorValue:'SAFE-BASE'})],incomingAssets:[]});
+  await tick();await tick();
+  const dialog=harness.document.body.children[0];
+  assert.ok(dialog,'a one-sided change must still open the review');
+  assert.equal(harness.mounts[0].field.value,'SAFE-BASE','the working copy starts from this device');
+  byText(dialog,'Use imported').dispatch('click');byText(dialog,'Apply resolved note').dispatch('click');
+  assert.equal((await promise).notes.Forward.text,'REMOTE-NEW');
 }
 
-// When both sides changed, the review always opens, even when the edits merge
-// cleanly; Smart merge offers that clean merge.
+// Replace starts the working copy from the backup's version.
+{
+  const harness=createController();
+  const promise=harness.controller.resolve({conflicts:[conflict('Replaced','LOCAL-R','BACKUP-R')],incomingAssets:[],startWith:'incoming'});
+  await tick();await tick();
+  const dialog=harness.document.body.children[0];
+  assert.equal(harness.mounts[0].field.value,'BACKUP-R');
+  byText(dialog,'Keep local').dispatch('click');byText(dialog,'Apply resolved note').dispatch('click');
+  assert.equal((await promise).notes.Replaced.text,'LOCAL-R');
+}
+
+// When both sides changed, Smart merge offers the clean three-way merge.
 {
   const harness=createController();
   const promise=harness.controller.resolve({conflicts:[conflict('Both','LOCAL-AUTO','REMOTE-AUTO',{ancestorAvailable:true,ancestorValue:'SAFE-BASE'})],incomingAssets:[]});
