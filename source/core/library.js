@@ -368,7 +368,7 @@ registry.define('library',1,()=>{
     // texts side by side first, so it also works for a note emptied by mistake.
     async function showNoteVersions(entry){
       const restored=value=>{const at=new Date(value.exportedAt);setOngoingNotesStatus(`Restored “${entry.label}” from the backup of ${Number.isFinite(at.getTime())?at.toLocaleString():'an earlier date'}.`);};
-      const result=await openNoteVersions(freeze({key:entry.key,label:entry.label,onRestored:restored}));
+      const result=await openNoteVersions(freeze({id:String(entry.id||''),label:entry.label,onRestored:restored}));
       if(result?.reason==='no-source')setOngoingNotesStatus('Earlier versions come from your backups. Connect a Device Folder or Google Drive in Data & Backup first.');
       else if(result?.reason==='busy')setOngoingNotesStatus('Another backup task is running. Try again when it finishes.');
       return result?.opened===true;
@@ -393,7 +393,7 @@ registry.define('library',1,()=>{
         event.preventDefault();
         if(!menu.hidden){controller.hide();return;}
         // A note becomes renameable once something of it is saved.
-        const stored=!!getAreaNote(entry.key,entry.label);rename.disabled=move.disabled=exportNote.disabled=remove.disabled=!stored||!canMutate();versions.disabled=!canMutate();
+        const stored=!!getAreaNote(entry.key,entry.label);rename.disabled=move.disabled=exportNote.disabled=remove.disabled=versions.disabled=!stored||!canMutate();
         for(const button of [rename,move,exportNote,remove])if(!stored)button.title='Write something in this note first';else button.removeAttribute('title');
         controller.show(trigger);trigger.setAttribute('aria-expanded','true');
         requestAnimationFrame(()=>{const first=menu.querySelector('[role="menuitem"]:not(:disabled)');if(first)first.focus();});
@@ -716,8 +716,9 @@ registry.define('library',1,()=>{
       renderOngoingNotes();openNoteView();
       return true;
     }
+    // Attachments name the note they sit in by its permanent id.
     function revealNoteReference(key){
-      const match=ongoingNoteEntries().find(entry=>entry.key===String(key||''));
+      const target=String(key||''),match=ongoingNoteEntries().find(entry=>entry.id===target||entry.key===target);
       if(!match)return false;
       const search=document.getElementById('library-notes-search');
       if(search&&search.value)search.value='';

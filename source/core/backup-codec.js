@@ -320,6 +320,16 @@ function validateBackupManifest(manifest,gzip,{binaryV10=false}={}){
   if(!backupCountsEqual(counts,manifest.declaredCounts||{},entityTypes))throw new Error('Backup manifest contains unsafe entity counts.');
   return {manifest,counts,entityTypes};
 }
+// Backup v21 gave notes permanent ids and changed nothing else: a v20 file
+// is current apart from its notes, whose name keys are converted, along with
+// the names in its note deletion history.
+const NOTE_ID_BACKUP_VERSION=21;
+function legacyBackupItem(version,entityType){return Number(version)<(entityType==='areaNote'?NOTE_ID_BACKUP_VERSION:NOTE_ID_BACKUP_VERSION-1);}
+function withNoteIdDeletions(manifest,nameKeyed){
+  if(!manifest||!nameKeyed||!manifest.areaNoteDeletions.length)return manifest;
+  const areaNoteDeletions=normalizeCheckpointAreaNoteDeletions(manifest.areaNoteDeletions.map(entry=>({key:CompatibilityCodec.areaNoteKey(entry.key),deletedAt:entry.deletedAt})));
+  return freeze({...manifest,areaNoteDeletions});
+}
 function sanitizeChunkedBackupItem(entityType,item,{legacy=false}={}){
   if(jsonByteLength(item)>APP_LIMITS.backupMaxEntryBytes)throw new Error(`A ${entityType} entry exceeds the safe size limit.`);
   if(entityType==='personalData')return legacy?CompatibilityCodec.personalData(item):PersonalDataCodec.normalize(item);
@@ -370,7 +380,7 @@ async function parseChunkedBackupMetadata(file,options={},context={}){
       if(itemIndex%50===0)await backupImportYield(options);
       actual[entityType]++;
       if(entityType==='tombstone'){report.ignoredTombstones++;continue;}
-      const legacyItem=Number(manifest.version)!==DATA_CONTRACT.schemas.Backup.version;
+      const legacyItem=legacyBackupItem(manifest.version,entityType);
       const clean=sanitizeChunkedBackupItem(entityType,item,{legacy:legacyItem});
       if(!clean){
         if(!legacyItem)throw new Error(`Current backup contains a noncanonical ${entityType} entry.`);
@@ -415,7 +425,7 @@ async function parseChunkedBackupMetadata(file,options={},context={}){
   const proofChecksum=await backupChecksumText(proofBody,manifest.checksumAlgorithm);
   if(proofChecksum!==complete.checksum)throw new Error('Backup completion proof failed its integrity check.');
   if(Number(manifest.version)>=15){
-    protectedCheckpointManifest=validateProtectedCheckpointManifest(protectedCheckpointManifest,manifest.checkpoint,{normalizedLegacy:true});
+    protectedCheckpointManifest=withNoteIdDeletions(validateProtectedCheckpointManifest(protectedCheckpointManifest,manifest.checkpoint,{normalizedLegacy:true}),Number(manifest.version)<NOTE_ID_BACKUP_VERSION);
     const recordDates=identities.dailyRecord,noteKeys=identities.areaNote,assetIds=new Set(assetDescriptors.map(item=>item.assetId));
     if(protectedCheckpointManifest.savedDayDeletions.some(entry=>recordDates.has(entry.date)))throw new Error('Checkpoint contains contradictory Saved-Day record/deletion state.');
     if(protectedCheckpointManifest.areaNoteDeletions.some(entry=>noteKeys.has(entry.key)))throw new Error('Checkpoint contains contradictory Ongoing Note record/deletion state.');
@@ -563,6 +573,10 @@ return Object.freeze({
     const version=Number(record&&record.version);return Number.isSafeInteger(version)&&version<DATA_CONTRACT.schemas.DailyRecord.version?CompatibilityCodec.dailyRecord(record):null;
   },
   normalizeAreaNote:sanitizeCurrentAreaNote,
+  // Backups made before notes had permanent ids keyed them by name.
+  legacyAreaNote:(value,key)=>CompatibilityCodec.areaNote(value,key),
+  legacyAreaNoteKey:key=>CompatibilityCodec.areaNoteKey(key),
+  withNoteIdDeletions,
   normalizeImportedActiveSession:(value,{legacy=false}={})=>legacy?CompatibilityCodec.activeSession(value):ActiveSessionCodec.sanitizeCurrent(value),
   normalizePersonalData:value=>PersonalDataCodec.normalize(value),
   normalizeAssetDescriptors:backupSanitizeAssetDescriptors

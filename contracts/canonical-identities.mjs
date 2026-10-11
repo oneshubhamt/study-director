@@ -7,7 +7,7 @@ export const INDEXED_DB=freeze({
   stores:freeze({
     dailyRecords:store('dailyRecords','date','DailyRecord.v16',16),
     dailySummaries:store('dailySummaries','date','DailySummary.v5',5),
-    areaNotes:store('areaNotes','key','AreaNote.v2',2),
+    areaNotes:store('areaNotes','key','AreaNote.v3',3),
     activeSessions:store('activeSessions','id','ActiveSession.v9',9),
     appMeta:store('appMeta','key','AppMeta.v1',1),
     assets:store('assets','assetId','Attachment.v2',2)
@@ -20,7 +20,7 @@ export const CURRENT_SCHEMA_VERSIONS=freeze({
   SessionSnapshot:6,
   LocalRecoveryEnvelope:1,
   ActiveSession:9,
-  AreaNote:2,
+  AreaNote:3,
   AppMeta:1,
   CheckpointMetadata:1,
   CheckpointProtectedManifest:2
@@ -81,7 +81,7 @@ export const EXTERNAL_REPOSITORY_IDENTITIES=freeze({
 });
 
 export const EXTERNAL_FORMATS=freeze({
-  completeBackup:freeze({format:'study-director-backup',metadataVersion:20,containerMagic:'SDBK10\r\n'}),
+  completeBackup:freeze({format:'study-director-backup',metadataVersion:21,containerMagic:'SDBK10\r\n'}),
   protectedBackup:freeze({magic:'SDENC02\n',version:2}),
   attachmentArchive:freeze({format:'study-director.attachments',magic:'SDAT01\r\n',version:1})
 });
@@ -102,8 +102,8 @@ export const RUNTIME_DATA_CONTRACT=freeze({
     SessionSnapshot:freeze({version:CURRENT_SCHEMA_VERSIONS.SessionSnapshot}),
     LocalRecoveryEnvelope:freeze({version:CURRENT_SCHEMA_VERSIONS.LocalRecoveryEnvelope}),
     ActiveSession:freeze({version:CURRENT_SCHEMA_VERSIONS.ActiveSession,key:ACTIVE_SESSION_ID}),
-    // A deleted note stays an ordinary row under this reserved key until it is
-    // restored or its retention ends; live notes never use the prefix.
+    // A note's key is its permanent id (n_ and 16 hex digits). A deleted note
+    // keeps it behind this prefix until it is restored or its retention ends.
     AreaNote:freeze({version:CURRENT_SCHEMA_VERSIONS.AreaNote,key:'key',trashKeyPrefix:'~deleted '}),
     AppMeta:freeze({version:CURRENT_SCHEMA_VERSIONS.AppMeta,key:'key'}),
     CheckpointMetadata:freeze({version:CURRENT_SCHEMA_VERSIONS.CheckpointMetadata,format:CHECKPOINT_METADATA.format}),

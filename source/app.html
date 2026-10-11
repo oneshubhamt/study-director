@@ -4786,8 +4786,9 @@ function orderOngoingAreaEntries(source){
     const key=normalizeAreaName(raw.key||raw.label);
     if(!key)return;
     const existing=entries.get(key)||{
-      key,label:displayAreaName(raw.label||key),text:'',hasNote:false,current:false,updatedAt:'',ephemeral:false,support:false
+      key,id:'',label:displayAreaName(raw.label||key),text:'',hasNote:false,current:false,updatedAt:'',ephemeral:false,support:false
     };
+    if(raw.id)existing.id=String(raw.id);
     if(raw.label)existing.label=displayAreaName(raw.label);
     if(raw.text!==undefined)existing.text=String(raw.text||'');
     existing.hasNote=existing.hasNote||!!raw.hasNote||!!existing.text.trim();
@@ -4831,18 +4832,20 @@ function ongoingAreaNoteCatalogue(){
   const snapshot=AppData.notes.metadataSnapshot(),hierarchy=ongoingAreaTaskHierarchySignature();
   if(ongoingAreaNoteCatalogueCache&&ongoingAreaNoteCatalogueCache.revision===snapshot.revision&&ongoingAreaNoteCatalogueCache.hierarchy===hierarchy)return ongoingAreaNoteCatalogueCache.entries;
   const entries=new Map();
-  const ensure=(key,label,{hasNote=false,current=false,updatedAt=''}={})=>{
+  // Notes are listed by title key; a stored note also carries its permanent id.
+  const ensure=(key,label,{hasNote=false,current=false,updatedAt='',id=''}={})=>{
     const safeKey=normalizeAreaName(key);
     if(!safeKey)return;
     const support=safeKey===SUPPORT_ONGOING_NOTE.key;
-    const existing=entries.get(safeKey)||{key:safeKey,label:support?SUPPORT_ONGOING_NOTE.label:displayAreaName(label||safeKey),hasNote:false,current:false,updatedAt:'',support};
+    const existing=entries.get(safeKey)||{key:safeKey,id:'',label:support?SUPPORT_ONGOING_NOTE.label:displayAreaName(label||safeKey),hasNote:false,current:false,updatedAt:'',support};
+    if(id)existing.id=String(id);
     if(label)existing.label=support?SUPPORT_ONGOING_NOTE.label:displayAreaName(label);
     existing.hasNote=existing.hasNote||!!hasNote;
     existing.current=existing.current||!!current;
     if(updatedAt)existing.updatedAt=String(updatedAt);
     entries.set(safeKey,existing);
   };
-  snapshot.records.forEach(entry=>ensure(entry.key,entry.label,{hasNote:entry.hasNote,updatedAt:entry.updatedAt}));
+  snapshot.records.forEach(entry=>ensure(entry.key,entry.label,{hasNote:entry.hasNote,updatedAt:entry.updatedAt,id:entry.id}));
   TASKS.filter(hasOngoingTaskNotes).forEach(task=>ensure(ongoingNoteKeyForTask(task),ongoingNoteLabelForTask(task),{current:true}));
   [...entries.values()].forEach(entry=>{
     const labelParts=displayAreaName(entry.label).split(' > ');
@@ -7791,21 +7794,22 @@ async function validateAttachmentInsertionValue(value,row){
 async function insertAttachmentIntoOngoingNote(key,row){
   const destination=LibraryView.noteDestinations().find(item=>item.key===String(key||''));if(!destination)throw new Error('This Ongoing Note destination is no longer available.');
   const token=AppOwnership.issueWriteToken('insert attachment in note');await settleAttachmentWriters();
-  const fresh=await AppData.notes.readFreshPayload()||{},hadNote=Object.hasOwn(fresh,destination.key),note=fresh[destination.key]||{key:destination.key,label:destination.label,text:'',updatedAt:''};
+  // Stored notes are keyed by their id; the destination names the note by title.
+  const fresh=await AppData.notes.readFreshPayload()||{},storedId=()=>AppData.notes.get(destination.key)?.id||'',id=storedId(),hadNote=!!id&&Object.hasOwn(fresh,id),note=hadNote?fresh[id]:{label:destination.label,text:'',updatedAt:''};
   const type=String(row.type||''),mode=type.startsWith('image/')?'inline-image':type.startsWith('audio/')?'inline-audio':'link',transformed=RichTextApi.insertAttachmentReference(note.text,{id:row.id,name:row.name||'Attachment',mode}),value=transformed.value;
   await validateAttachmentInsertionValue(value,row);
   AppOwnership.assertWriteToken(token,'insert attachment in note');
   const result=AppData.notes.updateValidatedRich(destination.key,note.label||destination.label,value,note.updatedAt||'');
   if(!['changed','unchanged'].includes(result.status))throw new Error('The note changed. Reopen it and try again.');
   try{
-    await AppData.notes.flush({strict:true});const verified=(await AppData.notes.readFreshPayload()||{})[destination.key];if(verified?.text!==value||AppData.notes.failure().failed)throw new Error('The attachment insertion could not be verified.');
+    await AppData.notes.flush({strict:true});const verified=(await AppData.notes.readFreshPayload()||{})[storedId()];if(verified?.text!==value||AppData.notes.failure().failed)throw new Error('The attachment insertion could not be verified.');
   }catch(error){
     try{
-      const current=AppData.notes.get(destination.key,destination.label),rollback=AppData.notes.updateValidatedRich(destination.key,note.label||destination.label,note.text||'',current?.updatedAt||result.revision||'');
+      const current=AppData.notes.get(destination.key),rollback=AppData.notes.updateValidatedRich(destination.key,note.label||destination.label,note.text||'',current?.updatedAt||result.revision||'');
       if(!['changed','unchanged'].includes(rollback.status))throw new Error('The note changed before rollback.');
       await AppData.notes.flush({strict:true});
-      if(!hadNote){if(AppData.notes.get(destination.key,destination.label)&&!await AppData.notes.remove(destination.key))throw new Error('The newly materialized note could not be removed.');}
-      else if((await AppData.notes.readFreshPayload())?.[destination.key]?.text!==String(note.text||''))throw new Error('The prior note state did not restore.');
+      if(!hadNote){if(AppData.notes.get(destination.key)&&!await AppData.notes.remove(destination.key))throw new Error('The newly materialized note could not be removed.');}
+      else if((await AppData.notes.readFreshPayload())?.[id]?.text!==String(note.text||''))throw new Error('The prior note state did not restore.');
     }catch(rollbackError){throw new Error((error?.message||error)+' Automatic note rollback also failed: '+(rollbackError?.message||rollbackError));}
     throw error;
   }

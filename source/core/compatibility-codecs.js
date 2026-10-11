@@ -114,11 +114,29 @@ registry.define('compatibility-codecs',1,()=>{
       const candidate={version:DATA_CONTRACT.schemas.DailyRecord.version,recordKind:'study',date:String(historical.date),savedAt:normalizeImportedTimestamp(historical.savedAt,updatedAt),updatedAt,sourceRevision:boundedInt(historical.sourceRevision,{min:0,max:Number.MAX_SAFE_INTEGER,fallback:0}),quote:String(historical.quote??''),reflection:String(historical.reflection??''),studyQuality:historical.studyQuality===null?null:boundedInt(historical.studyQuality,{min:1,max:5,fallback:null}),realTimeSnapshot:historical.realTimeSnapshot?DailyRecordCodec.compactRealTimeSnapshot(historical.realTimeSnapshot):null,schedule,results,practiceRuns:runs,carryForwardDraft:String(historical.carryForwardDraft??'')};
       return DailyRecordCodec.sanitizeCurrentDailyRecord(candidate);
     }
+    // Notes saved before permanent ids were keyed by their name. Each such key
+    // becomes an id worked out from the name (FNV-1a, 64 bits, over its UTF-8
+    // bytes), so every older copy of a note, on this device or in a backup,
+    // turns into the same id. A deleted note's old key gets the same treatment
+    // behind the trash prefix.
+    const NoteKeys=DailyRecordCodec.areaNoteKeys,TRASH_PREFIX=String(DATA_CONTRACT.schemas.AreaNote.trashKeyPrefix||''),utf8=new TextEncoder();
+    function derivedNoteId(name){
+      let hash=0xcbf29ce484222325n;
+      for(const byte of utf8.encode(name)){hash^=BigInt(byte);hash=(hash*0x100000001b3n)&0xffffffffffffffffn;}
+      return 'n_'+hash.toString(16).padStart(16,'0');
+    }
+    function areaNoteKey(value){
+      const raw=String(value||'');if(NoteKeys.isKey(raw))return raw;
+      if(raw.startsWith(TRASH_PREFIX)){const old=raw.slice(TRASH_PREFIX.length).trim();return old?TRASH_PREFIX+derivedNoteId(TRASH_PREFIX+old):'';}
+      const name=normalizeAreaName(raw);return name?derivedNoteId(name):'';
+    }
     function areaNote(value,keyHint=''){
       const source=value&&typeof value==='object'&&!Array.isArray(value)?value:null;if(!source||source.deleted===true)return null;
-      const key=normalizeAreaName(source.key||keyHint),text=optionalEditorContent(source.text,APP_LIMITS.maxNoteChars);if(!key||text===null)return null;
+      const current=DailyRecordCodec.sanitizeCurrentAreaNote(source,keyHint);if(current)return current;
+      const oldKey=String(source.key||keyHint||''),name=normalizeAreaName(oldKey.startsWith(TRASH_PREFIX)?'':oldKey),key=areaNoteKey(oldKey),text=optionalEditorContent(source.text,APP_LIMITS.maxNoteChars);if(!key||text===null)return null;
       const label=optionalText(source.label,APP_LIMITS.maxAreaNameChars),updatedAt=normalizeImportedTimestamp(source.updatedAt,new Date().toISOString());if(!updatedAt)return null;
-      const candidate={version:DATA_CONTRACT.schemas.AreaNote.version,key,label:label===null?clampText(displayAreaName(key),APP_LIMITS.maxAreaNameChars):label,text,updatedAt};
+      const title=label!==null&&normalizeAreaName(label)?label:name?clampText(displayAreaName(name),APP_LIMITS.maxAreaNameChars):null;if(!title)return null;
+      const candidate={version:DATA_CONTRACT.schemas.AreaNote.version,key,label:title,text,updatedAt};
       return DailyRecordCodec.sanitizeCurrentAreaNote(candidate,key);
     }
     function migrateSessionSnapshot(snapshot){
@@ -171,7 +189,7 @@ registry.define('compatibility-codecs',1,()=>{
       if(Number(value.version)!==1)throw new Error('Unsupported legacy personal-data version.');
       return {version:2,plans:PersonalDataCodec.plans(value.plans),preferences:PersonalDataCodec.preferences(value.preferences)};
     }
-    return freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord,areaNote,activeSession,localRecoveryEnvelope,protectedPreferences,personalData});
+    return freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord,areaNote,areaNoteKey,activeSession,localRecoveryEnvelope,protectedPreferences,personalData});
   }
   return freeze({format:'study-director.compatibility-codecs-module',contractVersion:1,create});
 });

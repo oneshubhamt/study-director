@@ -353,12 +353,23 @@ function createDiaryRecord(date,reflection,options={}){
   const candidate={version:DATA_CONTRACT.schemas.DailyRecord.version,recordKind:'diary',date:String(date),savedAt,updatedAt,sourceRevision:boundedInt(options.sourceRevision,{min:0,max:Number.MAX_SAFE_INTEGER,fallback:0}),reflection:text};
   return sanitizeCurrentDailyRecord(candidate);
 }
+// A note's key is its permanent id, given when it is created and never
+// changed by a rename or move; its title is the label. A deleted note keeps
+// its id behind the trash prefix until it is restored or its retention ends.
+const NOTE_ID_PATTERN=/^n_[0-9a-f]{16}$/u,NOTE_TRASH_PREFIX=String(DATA_CONTRACT.schemas.AreaNote.trashKeyPrefix||'');
+const areaNoteKeys=freeze({
+  isId:value=>NOTE_ID_PATTERN.test(String(value||'')),
+  isTrash:value=>String(value||'').startsWith(NOTE_TRASH_PREFIX)&&NOTE_ID_PATTERN.test(String(value).slice(NOTE_TRASH_PREFIX.length)),
+  isKey:value=>areaNoteKeys.isId(value)||areaNoteKeys.isTrash(value),
+  trash:id=>areaNoteKeys.isId(id)?NOTE_TRASH_PREFIX+id:'',
+  id:key=>areaNoteKeys.isTrash(key)?String(key).slice(NOTE_TRASH_PREFIX.length):areaNoteKeys.isId(key)?String(key):''
+});
 function sanitizeCurrentAreaNote(value,keyHint=''){
   const source=value&&typeof value==='object'&&!Array.isArray(value)?value:null;if(!source||Number(source.version)!==DATA_CONTRACT.schemas.AreaNote.version)return null;
   const expected=['version','key','label','text','updatedAt'];
   if(Object.keys(source).sort().join('|')!==expected.sort().join('|'))return null;
-  const key=normalizeAreaName(source.key||keyHint),label=optionalText(source.label,APP_LIMITS.maxAreaNameChars),text=optionalEditorContent(source.text,APP_LIMITS.maxNoteChars);
-  if(!key||label===null||text===null)return null;
+  const key=String(source.key||keyHint||''),label=optionalText(source.label,APP_LIMITS.maxAreaNameChars),text=optionalEditorContent(source.text,APP_LIMITS.maxNoteChars);
+  if(!areaNoteKeys.isKey(key)||label===null||!normalizeAreaName(label)||text===null)return null;
   const updatedAt=normalizeImportedTimestamp(source.updatedAt,null);if(!updatedAt)return null;
   const clean={version:DATA_CONTRACT.schemas.AreaNote.version,key,label,text,updatedAt};
   return sameDataValue(source,clean)?clean:null;
@@ -442,7 +453,7 @@ function materializeDailyRecordSummary(summary){
       buildDailyRecordSummary,compactPauseEvents,compactRealTimeSnapshot,
       sanitizeTimerRuntimePayload,compactAdjustedSchedule,normalizeDailyResultEntry,
       dailyRecordMetricsFromEvidence,sanitizeCurrentDailyRecord,createDiaryRecord,
-      sanitizeCurrentAreaNote,materializeDailyRecordView,sanitizeDailyRecordSummary,materializeDailyRecordSummary,isSupportedSavedDate
+      sanitizeCurrentAreaNote,areaNoteKeys,materializeDailyRecordView,sanitizeDailyRecordSummary,materializeDailyRecordSummary,isSupportedSavedDate
     });
   }
   function createActiveSessionCodec(input){

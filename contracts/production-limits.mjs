@@ -45,7 +45,8 @@ export const PRODUCTION_LIMITS=Object.freeze({
   richRuntimeMaxRawBytes:334*KiB,
   richRuntimeMaxGzipBytes:106*KiB,
   // Live, imported and backed-up Ongoing Notes, and their deletion records.
-  maxOngoingNotes:10000,
+  // Recently deleted counts towards it but gives way.
+  maxOngoingNotes:2000,
   // Days a deleted Ongoing Note stays in Recently deleted.
   areaNoteTrashDays:30,
   maxTaskNameChars:160,

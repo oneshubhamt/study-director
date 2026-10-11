@@ -24,7 +24,7 @@ registry.define('managed-repository',1,()=>{
     for(const name of ['persistence','assets','files','checkpoint','domain','environment','diagnostics'])requireFunctions(ports[name],PORT_FIELDS[name],'Managed repository '+name+' port');
     const BackupCodec=input.codec;
     if(!BackupCodec||!Object.isFrozen(BackupCodec))throw new TypeError('Managed repository backup codec is invalid.');
-    requireFunctions(BackupCodec,['countShape','utf8Bytes','compressionSupported','assetIds'],'Managed repository backup codec');
+    requireFunctions(BackupCodec,['countShape','utf8Bytes','compressionSupported','assetIds','legacyAreaNoteKey'],'Managed repository backup codec');
     if(!Object.isFrozen(ports.configuration.limits))throw new TypeError('Managed repository limits must be frozen.');
     const APP_LIMITS=ports.configuration.limits,backupVersion=ports.configuration.backupVersion;
     const LOGICAL_CHECKPOINT_CAPTURE_FORMAT=ports.configuration.logicalCaptureFormat,LOGICAL_CHECKPOINT_CAPTURE_VERSION=ports.configuration.logicalCaptureVersion;
@@ -44,7 +44,8 @@ registry.define('managed-repository',1,()=>{
       return value;
     }
     validateRepositoryRetentionPolicy(REPOSITORY_RETENTION_POLICY);
-const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=5,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5]));
+// Manifest 6 keys notes by permanent id; earlier manifests keyed them by name.
+const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=6,REPOSITORY_NOTE_ID_MANIFEST_VERSION=6,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,6]));
 const LEGACY_REFLECTION_DRAFT_PACK_KIND='reflectionDraftPack';
 const REPOSITORY_COMMIT_FORMAT='study-director.backup-repository-commit',REPOSITORY_COMMIT_VERSION=1,REPOSITORY_COMMIT_REQUIRED_MANIFEST_VERSION=2;
 const REPOSITORY_OBJECT_FORMAT='study-director.backup-repository-object',REPOSITORY_OBJECT_VERSION=1;
@@ -881,13 +882,15 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
   const allowedKinds=new Set(['dailyRecordPack','areaNote','activeSession','personalData','structuredPack','attachment']);if(manifest.version<=4)allowedKinds.add(LEGACY_REFLECTION_DRAFT_PACK_KIND);
   for(const entry of manifest.objects)if(!allowedKinds.has(entry.kind))throw new Error(`Repository object kind ${entry.kind} is unsupported.`);
   const dailyDocuments=[],areaNoteItems=[];let activeSession=null,personalData=null,legacyReflectionDraftCount=0;
-  const holdsNote=entry=>entry.kind==='areaNote'&&entry.key===noteKey||entry.kind==='structuredPack'&&repositoryPackManifestMembers(entry.members).some(member=>member.kind==='areaNote'&&member.key===noteKey);
+  // A one-note read names the note by id; older manifests hold it by name.
+  const noteIdOf=key=>manifest.version>=REPOSITORY_NOTE_ID_MANIFEST_VERSION?key:BackupCodec.legacyAreaNoteKey(key);
+  const holdsNote=entry=>entry.kind==='areaNote'&&noteIdOf(entry.key)===noteKey||entry.kind==='structuredPack'&&repositoryPackManifestMembers(entry.members).some(member=>member.kind==='areaNote'&&noteIdOf(member.key)===noteKey);
   const seenDates=new Set(),seenNoteKeys=new Set(),seenDraftDates=new Set(),structuredEntries=manifest.objects.filter(entry=>entry.kind!=='attachment'&&(!noteKey||holdsNote(entry)));
   const structuredPayloads=await mapRepositoryBounded(structuredEntries,async entry=>{
     throwIfImportAborted(signal);
     return readRepositoryStructuredObject(manifest,entry,readObject,{interactive,signal});
   });
-  const logicalRows=[];for(const rows of structuredPayloads)logicalRows.push(...rows.filter(row=>!noteKey||row.kind==='areaNote'&&row.key===noteKey));logicalRows.sort((a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key));
+  const logicalRows=[];for(const rows of structuredPayloads)logicalRows.push(...rows.filter(row=>!noteKey||row.kind==='areaNote'&&noteIdOf(row.key)===noteKey));logicalRows.sort((a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key));
   for(const logical of logicalRows){
     throwIfImportAborted(signal);const entry=logical,payload=logical.payload;
     if(entry.kind==='dailyRecordPack'){
@@ -1051,7 +1054,7 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
 }
 
     return freeze({
-      format:'study-director.managed-repository',contractVersion:1,
+      format:'study-director.managed-repository',contractVersion:1,noteIdManifestVersion:REPOSITORY_NOTE_ID_MANIFEST_VERSION,
       createPublication:createRepositoryPublication,publish:publishRepositoryCheckpoint,inspectManifest:inspectRepositoryManifest,inspect:inspectRepositoryCheckpoint,verifyCheckpoint:verifyRepositoryCheckpoint,verifyObject:verifyRepositoryObject,scrub:scrubRepositoryIntegrity,cleanup:cleanupRepositoryRetention,inspectCommit:inspectRepositoryCommitMarker,
       retention:REPOSITORY_RETENTION_POLICY,validatePolicy:validateRepositoryRetentionPolicy,classifyState:classifyRepositoryState,activeProtected:activeProtectedRepositoryRow,selectRetention:selectRepositoryRetention,projectHistory:projectManagedRepositoryHistory,invalidatePreparation:invalidateRepositoryPreparation
     });
