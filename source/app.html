@@ -4149,7 +4149,7 @@ const IndexedDb=PersistenceModule.createIndexedDb(Object.freeze({
     onReset:event=>{void handleBrowserStorageReset(event).catch(error=>AppDiagnostics.capture('storage-reset.handle',error,'error'));}
   })
 }));
-const ReconciliationBaselineCodec=ReconciliationBaselineModule.createCodec(Object.freeze({limits:APP_LIMITS,normalizeAreaName}));
+const ReconciliationBaselineCodec=ReconciliationBaselineModule.createCodec(Object.freeze({limits:APP_LIMITS,isNoteKey:DailyRecordCodec.areaNoteKeys.isKey}));
 const AppMetaGateway=AppMetaModule.create(Object.freeze({
   indexedDb:Object.freeze({transaction:IndexedDb.transaction,strictTransaction:IndexedDb.strictTransaction,get:IndexedDb.get,getAll:IndexedDb.getAll}),
   store:DB_APP_META_STORE,
@@ -4159,7 +4159,7 @@ const RepositoryAppMetaValidators=RepositoryModule.createAppMetaValidators(Objec
   limits:APP_LIMITS,
   dataContract:DATA_CONTRACT,
   personalDataCodec:PersonalDataCodec,
-  helpers:Object.freeze({isValidIsoDate,normalizeAreaName,normalizeTimestamp,sameDataValue})
+  helpers:Object.freeze({isValidIsoDate,isNoteId:DailyRecordCodec.areaNoteKeys.isId,isNoteKey:DailyRecordCodec.areaNoteKeys.isKey,normalizeTimestamp,sameDataValue})
 }));
 AppMetaGateway.registerValidators('repositories',RepositoryAppMetaValidators);
 AppMetaGateway.registerValidators('journals',RepositoryJournalModule.createAppMetaValidators(Object.freeze({limits:APP_LIMITS})));
@@ -7768,7 +7768,7 @@ const AttachmentReferences=AttachmentsModule.createReferenceCoordinator(Object.f
   background:Object.freeze({budget:()=>BackgroundTasks.budget(),yieldTask:options=>BackgroundTasks.yieldTask(options)}),
   live:Object.freeze({
     fields:()=>document.querySelectorAll('textarea.task-note-field,textarea.library-diary-textarea,#daily-reflection'),
-    reviewDate:()=>getReviewDate(),todayIso:()=>todayISO(),normalizeAreaName:value=>normalizeAreaName(value)
+    reviewDate:()=>getReviewDate(),todayIso:()=>todayISO(),noteKey:area=>{const title=normalizeAreaName(area);return title?AppData.notes.get(title)?.id||title:'';}
   })
 }));
 const LibraryClearState=LibraryClearModule.createState(Object.freeze({
@@ -8228,9 +8228,7 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
         }
         tx.oncomplete=()=>finish(true,count);
       };
-    },'renamed record transaction aborted'),
-    normalizeReconciliationNotes:value=>ReconciliationBaselineCodec.normalizeUpdates(value),normalizeReconciliationHeader:value=>ReconciliationBaselineCodec.normalizeHeader(value),
-    reconciliationKeyFingerprint:keys=>ReconciliationBaselineCodec.keyFingerprint(keys)
+    },'renamed record transaction aborted')
   }),
   live:Object.freeze({
     migrateActiveSession:()=>AppData.compatibility.migrateActiveSession(),migrateAreaNotes:()=>AppData.compatibility.migrateAreaNotes(),
@@ -8252,7 +8250,7 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
     freshBackup:verifyFreshCurrentBackup
   }),
   backups:Object.freeze({inspectCurrent:(file,options)=>BackupCodec.inspectCurrent(file,options),inspectLegacy:(file,options)=>BackupCodec.inspectLegacy(file,options)}),
-  helpers:Object.freeze({same:sameDataValue,randomUuid:()=>crypto.randomUUID(),nowIso:()=>new Date().toISOString()})
+  helpers:Object.freeze({same:sameDataValue,randomUuid:()=>crypto.randomUUID(),nowIso:()=>new Date().toISOString(),isNoteKey:DailyRecordCodec.areaNoteKeys.isKey})
 }));
 const RuntimeBackupCodec=Object.freeze(Object.fromEntries([
   ...Object.entries(BackupCodec).filter(([key])=>!['inspectCurrent','inspectLegacy'].includes(key)),

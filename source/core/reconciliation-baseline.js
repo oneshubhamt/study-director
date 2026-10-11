@@ -10,10 +10,11 @@ registry.define('reconciliation-baseline',1,()=>{
   function exactKeys(value,keys){return !!(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('|')===[...keys].sort().join('|'));}
   function hex(bytes){return [...new Uint8Array(bytes)].map(value=>value.toString(16).padStart(2,'0')).join('');}
   function createCodec(input){
-    exactObject(input,['limits','normalizeAreaName'],'Reconciliation baseline codec input');
-    if(!Object.isFrozen(input.limits)||typeof input.normalizeAreaName!=='function')throw new TypeError('Reconciliation baseline codec dependencies are invalid.');
-    const limits=input.limits,normalizeAreaName=input.normalizeAreaName,encoder=new TextEncoder(),MAX_BYTES=8*1024*1024;
-    function cleanKey(raw){const key=normalizeAreaName(String(raw||''));return key&&key.length<=Number(limits.maxAreaNameChars||120)?key:'';}
+    exactObject(input,['limits','isNoteKey'],'Reconciliation baseline codec input');
+    if(!Object.isFrozen(input.limits)||typeof input.isNoteKey!=='function')throw new TypeError('Reconciliation baseline codec dependencies are invalid.');
+    const limits=input.limits,isNoteKey=input.isNoteKey,encoder=new TextEncoder();
+    // The base holds notes under their stored keys.
+    function cleanKey(raw){const key=String(raw||'');return isNoteKey(key)?key:'';}
     function textValue(raw){const text=String(raw??'');return encoder.encode(text).byteLength<=Number(limits.maxRichTextBytes||2097152)?text:null;}
     function normalizeHeader(value){
       if(!value||!exactKeys(value,['format','version','checkpointId','establishedAt','noteCount','noteKeyFingerprint'])||value.format!=='study-director.reconciliation-base'||Number(value.version)!==2||!/^cp_[a-f0-9]{32}$/u.test(String(value.checkpointId||''))||!Number.isFinite(Date.parse(String(value.establishedAt||''))))return null;

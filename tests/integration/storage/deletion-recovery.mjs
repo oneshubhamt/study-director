@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {createHarness} from '../../helpers/repository-harness.mjs';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
+import {noteId} from '../../helpers/note-ids.mjs';
 
 const controls={};
 const h=createHarness(new Map(),null,controls);
@@ -72,7 +73,7 @@ noteLedger=await h.app.deletionRecovery.areaNotes();
 assert.equal(noteLedger.some(row=>row.key===obsoleteId),true,'a new note with the same title must not retire the deleted note’s marker');
 const aligned=h.app.notes.alignByTitle({[obsoleteId]:{version:3,key:obsoleteId,label:'Obsolete Note',text:'old text',updatedAt:'2026-09-17T12:00:00.000Z'}},[obsoleteId]);
 assert.deepEqual(Object.keys(aligned),[obsoleteId],'a backup copy of a deleted note keeps its id, so its deletion still applies');
-await h.app.notes.merge({[obsoleteId]:{version:3,key:obsoleteId,label:'obsolete-note',text:'restored text',updatedAt:'2026-09-17T12:00:00.000Z'}});
+await h.app.notes.reconcile({[obsoleteId]:{version:3,key:obsoleteId,label:'obsolete-note',text:'restored text',updatedAt:'2026-09-17T12:00:00.000Z'}});
 noteLedger=await h.app.deletionRecovery.areaNotes();
 assert.equal(noteLedger.some(row=>row.key===obsoleteId),false,'Bringing an Ongoing Note back must atomically retire its deletion marker.');
 assert.deepEqual(Object.values(h.app.notes.exportPayload()).map(entry=>entry.label).sort(),['obsolete-note','obsolete-note (2)'],'two notes never share a title');
@@ -152,18 +153,19 @@ assert.equal((await legacy.app.deletionRecovery.verify()).ok,true);
   const bounded=createHarness(new Map(),null,{});
   bounded.stores.meta.set('dailyRecordMigration',{key:'dailyRecordMigration',version:1,value:{recordVersion:1,summaryVersion:1,complete:true,recordCount:0},updatedAt:'2026-09-15T12:00:00.000Z'});
   const at=index=>new Date(Date.parse('2026-01-01T00:00:00.000Z')+index*60000).toISOString();
-  for(let index=0;index<1003;index+=1){const key=`note ${String(index).padStart(4,'0')}`;bounded.stores.meta.set(`areaNoteDeletion:${key}`,{key:`areaNoteDeletion:${key}`,version:1,value:{format:'study-director.area-note-deletion',version:1,key,deletedAt:at(index)},updatedAt:at(index)});}
+  const nth=index=>noteId(`note ${String(index).padStart(4,'0')}`);
+  for(let index=0;index<1003;index+=1){const key=nth(index);bounded.stores.meta.set(`areaNoteDeletion:${key}`,{key:`areaNoteDeletion:${key}`,version:1,value:{format:'study-director.area-note-deletion',version:1,key,deletedAt:at(index)},updatedAt:at(index)});}
   const listed=await bounded.app.deletionRecovery.areaNotes();
   assert.equal(listed.length,1000,'a full ledger lists its newest records');
-  assert.deepEqual(['note 0000','note 0001','note 0002'].map(key=>listed.some(entry=>entry.key===key)),[false,false,false],'the oldest records are the ones left out');
+  assert.deepEqual([0,1,2].map(index=>listed.some(entry=>entry.key===nth(index))),[false,false,false],'the oldest records are the ones left out');
   assert.equal((await bounded.app.deletionRecovery.verify()).ok,true,'a full ledger is not an integrity failure');
   assert.equal((await bounded.app.maintenance.run({force:true})).status,'completed');
   const stored=[...bounded.stores.meta.keys()].filter(key=>key.startsWith('areaNoteDeletion:'));
-  assert.equal(stored.length,1000,'maintenance removes the records listing leaves out');assert.equal(bounded.stores.meta.has('areaNoteDeletion:note 0002'),false);
+  assert.equal(stored.length,1000,'maintenance removes the records listing leaves out');assert.equal(bounded.stores.meta.has(`areaNoteDeletion:${nth(2)}`),false);
   assert.deepEqual(await bounded.app.deletionRecovery.areaNotes(),listed,'pruning changes nothing a backup reads');
-  await bounded.app.deletionRecovery.replaceAreaNotes([...listed,{key:'newest',deletedAt:at(5000)}]);
+  await bounded.app.deletionRecovery.replaceAreaNotes([...listed,{key:noteId('newest'),deletedAt:at(5000)}]);
   const replaced=await bounded.app.deletionRecovery.areaNotes();
-  assert.equal(replaced.length,1000);assert.ok(replaced.some(entry=>entry.key==='newest'),'a new deletion is always kept');assert.equal(replaced.some(entry=>entry.key==='note 0003'),false);
+  assert.equal(replaced.length,1000);assert.ok(replaced.some(entry=>entry.key===noteId('newest')),'a new deletion is always kept');assert.equal(replaced.some(entry=>entry.key===nth(3)),false);
 }
 
 console.log(JSON.stringify({status:'PASS',suite:'deletion-recovery',boundedDeletionLedgers:true,savedDayLedger:true,areaNoteDeletionLedger:true,reflectionDraftDomainRetired:true,attachmentDeletionLedger:true,failedDailyDeleteRecovery:true,failedActiveSessionDeleteRecovery:true,legacySyncStateMigrated:true,normalWritesUseNoSyncStores:true},null,2));

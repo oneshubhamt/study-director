@@ -24,7 +24,7 @@ registry.define('managed-repository',1,()=>{
     for(const name of ['persistence','assets','files','checkpoint','domain','environment','diagnostics'])requireFunctions(ports[name],PORT_FIELDS[name],'Managed repository '+name+' port');
     const BackupCodec=input.codec;
     if(!BackupCodec||!Object.isFrozen(BackupCodec))throw new TypeError('Managed repository backup codec is invalid.');
-    requireFunctions(BackupCodec,['countShape','utf8Bytes','compressionSupported','assetIds','legacyAreaNoteKey'],'Managed repository backup codec');
+    requireFunctions(BackupCodec,['countShape','utf8Bytes','compressionSupported','assetIds'],'Managed repository backup codec');
     if(!Object.isFrozen(ports.configuration.limits))throw new TypeError('Managed repository limits must be frozen.');
     const APP_LIMITS=ports.configuration.limits,backupVersion=ports.configuration.backupVersion;
     const LOGICAL_CHECKPOINT_CAPTURE_FORMAT=ports.configuration.logicalCaptureFormat,LOGICAL_CHECKPOINT_CAPTURE_VERSION=ports.configuration.logicalCaptureVersion;
@@ -876,13 +876,13 @@ async function openRepositoryAttachment(manifest,entry,descriptor,readObject,opt
 // used instead of downloaded; verifying the backup copy itself never does.
 // Where one note sits in a version: its own object, or a pack listing it,
 // with the fingerprint of its stored record, so versions can be told apart
-// without reading them. Older manifests name notes by title.
-function repositoryNoteIdOf(manifest,key){return Number(manifest.version)>=REPOSITORY_NOTE_ID_MANIFEST_VERSION?key:BackupCodec.legacyAreaNoteKey(key);}
+// without reading them. Versions from before note ids name notes by title,
+// so they hold no earlier version of a note.
 function repositoryNoteObject(manifest,noteId){
-  const id=String(noteId||'');if(!id)return null;
+  const id=String(noteId||'');if(!id||Number(manifest.version)<REPOSITORY_NOTE_ID_MANIFEST_VERSION)return null;
   for(const entry of manifest.objects||[]){
-    if(entry.kind==='areaNote'&&repositoryNoteIdOf(manifest,entry.key)===id)return freeze({entry,fingerprint:entry.fingerprint});
-    if(entry.kind==='structuredPack'){const member=repositoryPackManifestMembers(entry.members).find(item=>item.kind==='areaNote'&&repositoryNoteIdOf(manifest,item.key)===id);if(member)return freeze({entry,fingerprint:member.fingerprint});}
+    if(entry.kind==='areaNote'&&entry.key===id)return freeze({entry,fingerprint:entry.fingerprint});
+    if(entry.kind==='structuredPack'){const member=repositoryPackManifestMembers(entry.members).find(item=>item.kind==='areaNote'&&item.key===id);if(member)return freeze({entry,fingerprint:member.fingerprint});}
   }
   return null;
 }
@@ -890,7 +890,7 @@ function repositoryNoteObject(manifest,noteId){
 async function readRepositoryNote(manifest,readObject,noteId,options={}){
   const found=repositoryNoteObject(manifest,noteId);if(!found)return null;
   const rows=await readRepositoryStructuredObject(manifest,found.entry,repositoryReadPort(readObject),options);
-  const row=rows.find(item=>item.kind==='areaNote'&&repositoryNoteIdOf(manifest,item.key)===String(noteId));
+  const row=rows.find(item=>item.kind==='areaNote'&&item.key===String(noteId));
   return row?row.payload:null;
 }
 async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectValue,{interactive=true,signal=null,note='',localAttachments=false}={}){
@@ -901,15 +901,14 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
   const allowedKinds=new Set(['dailyRecordPack','areaNote','activeSession','personalData','structuredPack','attachment']);if(manifest.version<=4)allowedKinds.add(LEGACY_REFLECTION_DRAFT_PACK_KIND);
   for(const entry of manifest.objects)if(!allowedKinds.has(entry.kind))throw new Error(`Repository object kind ${entry.kind} is unsupported.`);
   const dailyDocuments=[],areaNoteItems=[];let activeSession=null,personalData=null,legacyReflectionDraftCount=0;
-  // A one-note read names the note by id; older manifests hold it by name.
-  const noteIdOf=key=>manifest.version>=REPOSITORY_NOTE_ID_MANIFEST_VERSION?key:BackupCodec.legacyAreaNoteKey(key);
-  const holdsNote=entry=>entry.kind==='areaNote'&&noteIdOf(entry.key)===noteKey||entry.kind==='structuredPack'&&repositoryPackManifestMembers(entry.members).some(member=>member.kind==='areaNote'&&noteIdOf(member.key)===noteKey);
+  // A one-note read names the note by id.
+  const holdsNote=entry=>entry.kind==='areaNote'&&entry.key===noteKey||entry.kind==='structuredPack'&&repositoryPackManifestMembers(entry.members).some(member=>member.kind==='areaNote'&&member.key===noteKey);
   const seenDates=new Set(),seenNoteKeys=new Set(),seenDraftDates=new Set(),structuredEntries=manifest.objects.filter(entry=>entry.kind!=='attachment'&&(!noteKey||holdsNote(entry)));
   const structuredPayloads=await mapRepositoryBounded(structuredEntries,async entry=>{
     throwIfImportAborted(signal);
     return readRepositoryStructuredObject(manifest,entry,readObject,{interactive,signal});
   });
-  const logicalRows=[];for(const rows of structuredPayloads)logicalRows.push(...rows.filter(row=>!noteKey||row.kind==='areaNote'&&noteIdOf(row.key)===noteKey));logicalRows.sort((a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key));
+  const logicalRows=[];for(const rows of structuredPayloads)logicalRows.push(...rows.filter(row=>!noteKey||row.kind==='areaNote'&&row.key===noteKey));logicalRows.sort((a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key));
   for(const logical of logicalRows){
     throwIfImportAborted(signal);const entry=logical,payload=logical.payload;
     if(entry.kind==='dailyRecordPack'){

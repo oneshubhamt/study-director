@@ -104,28 +104,28 @@ export const COMPATIBILITY_REGISTRY=freeze({
       sourceFiles:freeze(['source/core/compatibility-codecs.js','source/core/repositories.js'])
     },
     {
-      id:'area-note-historical-rows',owner:'record-codecs/repositories-area-notes',kind:'live-canonicalization',
+      id:'area-note-historical-rows',owner:'record-codecs/repositories',kind:'live-canonicalization',
       source:'IndexedDB AreaNote.v1/v2 rows keyed by note name, their name-keyed deletion records and browser emergency copy, and recovery entries carrying historical sync metadata or degraded historical shapes',
-      target:'strict current AreaNote.v3 rows keyed by a permanent id (worked out from the old name with FNV-1a 64, so older backups map to the same note) containing only version, key, label, text and local updatedAt revision; deletion records and the emergency copy keyed by the same id',
+      target:'strict current AreaNote.v3 rows keyed by a permanent id (worked out from the old name with FNV-1a 64, so older backups map to the same note) containing only version, key, label, text and local updatedAt revision; deletion records and the emergency copy keyed by the same id; a note merge base keyed by title is dropped (the next backup or restore records a new one)',
       proof:'every retained Area Note, deletion record, emergency-copy entry and recovery entry is rewritten losslessly into the strict current shape in one transaction before ordinary reads resume; the next backup reads every note afresh',
       retirement:'baseline verified on all supported installations',
-      sourceFiles:freeze(['source/core/compatibility-codecs.js','source/core/repositories-area-notes.js','source/core/repositories.js'])
+      sourceFiles:freeze(['source/core/compatibility-codecs.js','source/core/repositories.js','source/core/compatibility-host.js'])
     },
     {
       id:'name-keyed-notes-in-backups',owner:'backup-codec/managed-repository',kind:'import-adapter',
       source:'portable backups before v21 and backup-location manifests before version 6, which key Ongoing Notes and their deletion history by note name',
       target:'notes and note deletion history keyed by the permanent id worked out from each name, the same id the live conversion gives that note',
-      proof:'a v20 file is read as current apart from its notes; older manifests convert notes when a version is read and match one note by id for earlier versions and one-note restores',
+      proof:'a v20 file is read as current apart from its notes; an older manifest converts its notes when the version is restored or combined whole, and offers no earlier version of one note',
       retirement:'no supported backup older than portable v21 or manifest 6 remains',
-      sourceFiles:freeze(['source/core/backup-codec.js','source/core/managed-repository.js','source/core/backup.js','source/core/compatibility-codecs.js'])
+      sourceFiles:freeze(['source/core/backup-codec.js','source/core/backup.js','source/core/compatibility-codecs.js'])
     },
     {
-      id:'area-note-recovery-v1',owner:'repositories-area-notes',kind:'live-migration',
+      id:'area-note-recovery-v1',owner:'repositories',kind:'live-migration',
       source:'localStorage areaNotesPending.v1 payload with version 1 pending map and appMeta areaNoteRecovery.v1:* journal rows',
       target:'canonical AreaNote rows and AreaNoteDeletion entries, newer revision winning; a later deletion stays',
       proof:'both sources are folded and the journal rows removed in one transaction before notes load; no journal row or legacy payload remains',
       retirement:'baseline verified on all supported installations',
-      sourceFiles:freeze(['source/core/repositories-area-notes.js','source/core/repositories.js'])
+      sourceFiles:freeze(['source/core/repositories.js'])
     },
     {
       id:'daily-record-historical-shapes',owner:'record-codecs/repositories',kind:'live-canonicalization',

@@ -130,8 +130,9 @@ assert.equal(manifest.protectedCheckpointManifest.version,2);assert.equal(manife
 // the repository (registry: backup-repository-v1-v4). Version 4 has today's
 // shape; versions 1 to 3 kept one object per record instead of packed shards,
 // so the fixture unpacks this checkpoint's shards into that older layout.
-// Before version 6 notes are keyed by name, and one note is found by the id
-// worked out from it (registry: name-keyed-notes-in-backups).
+// Before version 6 notes are keyed by title: such a version restores whole,
+// its notes converted, but offers no earlier version of one note
+// (registry: name-keyed-notes-in-backups).
 {
   const sha256=async text=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))].map(byte=>byte.toString(16).padStart(2,'0')).join('');
   const plainText=async (blob,gzip)=>{let stream=(await decryptBlob(blob)).stream();if(gzip)stream=stream.pipeThrough(new DecompressionStream('gzip'));return new Response(stream).text();};
@@ -153,8 +154,7 @@ assert.equal(manifest.protectedCheckpointManifest.version,2);assert.equal(manife
     const older=freeze({...manifest,version,counts,objects:version<4?layoutBefore4:manifest.objects}),reader=version<4?readUnpacked:readObject;
     const candidate=await runtime.repository.inspect(older,reader,{interactive:false,committed:true});
     assert.ok(candidate,`a version ${version} checkpoint can still be inspected for restore`);await candidate.release?.();
-    assert.ok(runtime.repository.noteObject(older,legacyNoteKey('Ethics')),`a version ${version} checkpoint finds a name-keyed note by its id`);
-    assert.equal((await runtime.repository.readNote(older,reader,legacyNoteKey('Ethics'),{interactive:false}))?.text,'repository note',`a version ${version} checkpoint reads only that note`);
+    assert.equal(runtime.repository.noteObject(older,legacyNoteKey('Ethics')),null,`a version ${version} checkpoint names notes by title, so it offers no earlier version of a note`);
   }
 }
 // Simulate another installation receiving this checkpoint rather than the publishing installation's newly established local ancestry.

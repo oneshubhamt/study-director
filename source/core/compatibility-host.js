@@ -23,12 +23,12 @@ registry.define('compatibility-host',1,()=>{
     for(const key of Object.keys(input.preferences))if(typeof input.preferences[key]!=='function')throw new TypeError(`Compatibility-host Preferences adapter ${key} must be a function.`);
     exactObject(input.identity,['getId','installationKey','legacyKey'],'Compatibility-host installation identity adapter');
     if(typeof input.identity.getId!=='function')throw new TypeError('Compatibility-host installation identity getId is required.');
-    functions(input.metadata,['readRow','listRows','isCurrentDataMaintenance','writeValue','removeRow','releaseBackupFile','normalizeVerifiedRecovery','normalizeAttachmentIntegrity','normalizeRepositoryIntegrity','normalizeRepositoryIntegrityTarget','normalizeReconciliationNotes','normalizeReconciliationHeader','reconciliationKeyFingerprint','renameRows','updateStorageHealth'],'Compatibility-host metadata adapter');
+    functions(input.metadata,['readRow','listRows','isCurrentDataMaintenance','writeValue','removeRow','releaseBackupFile','normalizeVerifiedRecovery','normalizeAttachmentIntegrity','normalizeRepositoryIntegrity','normalizeRepositoryIntegrityTarget','renameRows','updateStorageHealth'],'Compatibility-host metadata adapter');
     functions(input.live,['migrateActiveSession','migrateAreaNotes','migrateAreaNoteRecovery','migrateDeletionState','migrateDailyRecords','migrateInsightsRevisionEnvelope','cleanupLegacyAttachments','cleanupObsoleteMetadata'],'Compatibility-host live adapters');
     functions(input.topology,['retire'],'Compatibility-host topology adapter');
     functions(input.verification,['activeSession','areaNotes','areaNoteRecovery','deletionState','dailyRecords','insightsRevisionEnvelope','canonicalStores','legacyAttachments','obsoleteMetadata','topology','freshBackup'],'Compatibility-host verification adapters');
     functions(input.backups,['inspectCurrent','inspectLegacy'],'Compatibility-host backup adapters');
-    exactObject(input.helpers,['same','randomUuid','nowIso'],'Compatibility-host helpers');
+    exactObject(input.helpers,['same','randomUuid','nowIso','isNoteKey'],'Compatibility-host helpers');
     for(const key of Object.keys(input.helpers))if(typeof input.helpers[key]!=='function')throw new TypeError(`Compatibility-host helper ${key} must be a function.`);
 
     const keys=input.keys,local=input.local,ownership=input.ownership,plan=input.plan,preferences=input.preferences,identity=input.identity,metadata=input.metadata,helpers=input.helpers;
@@ -119,33 +119,19 @@ registry.define('compatibility-host',1,()=>{
       }
       return freeze({format:MAINTENANCE_FORMAT,version:MAINTENANCE_VERSION,entries:freeze(entries.sort((a,b)=>a.providerId.localeCompare(b.providerId)))});
     }
-    // Reconciliation base version 1 kept every Ongoing Note's merge base in one
-    // row; the current form is a header plus one row per note.
-    async function legacyReconciliationBase(value){
-      if(!value||!exactKeys(value,['format','version','checkpointId','establishedAt','notes'])||value.format!=='study-director.reconciliation-base'||Number(value.version)!==1||!/^cp_[a-f0-9]{32}$/u.test(String(value.checkpointId||''))||!validTimestamp(value.establishedAt)||!value.notes||typeof value.notes!=='object'||Array.isArray(value.notes))return null;
-      const notes=metadata.normalizeReconciliationNotes(value.notes);if(!notes)return null;
-      const keys=Object.keys(notes).sort(),establishedAt=new Date(value.establishedAt).toISOString();
-      let fingerprint;try{fingerprint=await metadata.reconciliationKeyFingerprint(keys);}catch{return null;}
-      const header=metadata.normalizeReconciliationHeader({format:'study-director.reconciliation-base',version:2,checkpointId:String(value.checkpointId),establishedAt,noteCount:keys.length,noteKeyFingerprint:fingerprint});
-      return header?freeze({header,notes:freeze(keys.map(key=>freeze({suffix:encodeURIComponent(key),value:freeze({format:'study-director.reconciliation-base-note',version:1,key,text:notes[key]})})))}):null;
+    // A merge base from before permanent ids names notes by title (version 1
+    // kept them all in one row). It is dropped rather than converted: a base
+    // only lets Combine merge two edits without asking, and the next backup or
+    // restore records a fresh one.
+    function staleReconciliationRows(rows){
+      const keyOf=row=>String(row&&row.key||''),noteRow=row=>keyOf(row).startsWith(appMeta.reconciliationBaseNotePrefix);
+      const base=rows.filter(row=>keyOf(row)===appMeta.reconciliationBase||keyOf(row)===appMeta.reconciliationBaseLegacy||noteRow(row));
+      return base.some(row=>keyOf(row)===appMeta.reconciliationBaseLegacy||noteRow(row)&&!helpers.isNoteKey(row.value&&row.value.key))?base:[];
     }
     async function migrateReconciliationBase(requireOwnership){
-      const legacy=await metadata.readRow(appMeta.reconciliationBaseLegacy);if(!legacy)return freeze({migrated:0,removed:0});
-      const converted=await legacyReconciliationBase(legacy.value);
-      if(!converted)throw new Error('Historical note reconciliation base has an unknown shape and was preserved without modification.');
-      const currentRow=await metadata.readRow(appMeta.reconciliationBase),current=currentRow?metadata.normalizeReconciliationHeader(currentRow.value):null;
-      let migrated=0,removed=0;
-      if(!current||Date.parse(current.establishedAt)<Date.parse(converted.header.establishedAt)){
-        const keep=new Set(converted.notes.map(note=>appMeta.reconciliationBaseNotePrefix+note.suffix));
-        for(const row of await metadata.listRows()){const key=String(row&&row.key||'');if(key.startsWith(appMeta.reconciliationBaseNotePrefix)&&!keep.has(key)){requireOwnership();await metadata.removeRow(key);removed++;}}
-        for(const note of converted.notes){requireOwnership();await metadata.writeValue(appMeta.reconciliationBaseNotePrefix+note.suffix,note.value,converted.header.establishedAt);}
-        requireOwnership();await metadata.writeValue(appMeta.reconciliationBase,converted.header,converted.header.establishedAt);
-        const rows=await metadata.listRows(),header=rows.find(row=>String(row&&row.key||'')===appMeta.reconciliationBase),noteRows=rows.filter(row=>String(row&&row.key||'').startsWith(appMeta.reconciliationBaseNotePrefix));
-        if(!header||!helpers.same(header.value,converted.header)||noteRows.length!==converted.notes.length||converted.notes.some(note=>!noteRows.some(row=>row.key===appMeta.reconciliationBaseNotePrefix+note.suffix&&helpers.same(row.value,note.value))))throw new Error('Historical note reconciliation base could not be verified after conversion. The legacy source was preserved.');
-        migrated=1;
-      }
-      requireOwnership();await metadata.removeRow(appMeta.reconciliationBaseLegacy);removed++;
-      return freeze({migrated,removed});
+      let removed=0;
+      for(const row of staleReconciliationRows(await metadata.listRows())){requireOwnership();await metadata.removeRow(String(row.key));removed++;}
+      return freeze({migrated:0,removed});
     }
     async function sha256Hex(bytes){
       if(!globalThis.crypto?.subtle)throw new Error('Historical Library-clear journal migration requires SHA-256 support.');
@@ -276,6 +262,7 @@ registry.define('compatibility-host',1,()=>{
       const device=rows.find(row=>String(row&&row.key||'')===appMeta.automaticDeviceBackup);
       if(device&&Number(device.value?.version)!==4)present.push(`${appMeta.automaticDeviceBackup}:v${Number(device.value?.version)||'?'}`);
       for(const row of rows){const key=String(row&&row.key||'');if(renamedFrom(key))present.push(key);}
+      for(const row of staleReconciliationRows(rows))present.push(String(row.key));
       for(const field of retiredHealthFields(local.getJson(storage.storageHealth,null)))present.push(`${storage.storageHealth}:${field}`);
       const recovery=rows.find(row=>String(row&&row.key||'')===appMeta.verifiedRecoveryBackups);
       if(recovery&&Number(recovery.value&&recovery.value.version)!==3)present.push(`${appMeta.verifiedRecoveryBackups}:v${Number(recovery.value&&recovery.value.version)||'?'}`);

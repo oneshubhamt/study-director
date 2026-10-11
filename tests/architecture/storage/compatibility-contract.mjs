@@ -134,7 +134,7 @@ assert.match(reflectionMigration,/local\.remove\(obsolete\.reflectionLegacy\)/u,
 assert.doesNotMatch(reflectionMigration,/reflection\.migrate|verifiedRows|putReflection|migrateReflectionDrafts/u,'Reflection retirement must not recreate discarded drafts in current canonical storage.');
 assert.doesNotMatch(review,/legacyStorageKeys|LEGACY_STORAGE_KEYS|OBSOLETE_STORAGE_KEYS|migrateLegacy/u,'normal Review capability must contain no historical storage parser or migration entry point');
 assert.doesNotMatch(app,/event\.key===OBSOLETE_STORAGE_KEYS\.reflectionDrafts/u,'ordinary runtime must not observe retired Reflection LocalStorage as a live data surface');
-assert.match(areaNotesRepository,/async function migrateLegacyRecovery\(\)/u);
+assert.match(repositories,/async function migrateAreaNoteRecovery\(\)/u);assert.doesNotMatch(areaNotesRepository,/CompatibilityCodec|compatibilityWriteToken|legacyKeys|async function migrate/u,'the notes repository holds no compatibility code');
 assert.match(repositories,/async function migrateHistoricalActiveSession\(\)/u);
 assert.match(repositories,/migrateActiveSession:migrateHistoricalActiveSession/u);
 assert.match(repositories,/async function migrateHistoricalDailyRecords\(\)/u);
@@ -143,7 +143,7 @@ assert.doesNotMatch(repositories,/migrateReflectionDrafts|idbApplyReflectionDraf
 assert.doesNotMatch(repositories,/function requireDailyRecordCanonicalReady\(\)/u,'normal Daily Record paths must not depend on a disposable migration marker');
 assert.match(repositories,/function readableDailyRecord\(record\)[\s\S]{0,260}canonicalRuntimeError/u);
 assert.doesNotMatch(areaNotesRepository,/normalizePayload\(parsed\.pending,\{compatibility:true\}\)/u,'normal Ongoing Note normalization must not expose a historical-mode switch');
-assert.match(areaNotesRepository,/function normalizeHistoricalPayloadForMigration\(payload\)/u);
+assert.match(repositories,/function readLegacyPendingNotes\(\)/u,'the v1 pending cache is read only by the compatibility block');
 assert.match(compatibility,/Historical data must never leak into ordinary hydration as a fallback/u);
 assert.match(assets,/uses historical metadata and must be migrated before normal runtime access/u);
 assert.match(records,/function sanitizeCurrentDailyRecord\(record\)/u);

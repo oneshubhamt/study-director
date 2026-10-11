@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createHash} from 'node:crypto';
+import {noteKeys,noteId} from '../../helpers/note-ids.mjs';
 
 for(const file of ['source/core/internal.js','source/core/compatibility.js','source/core/compatibility-host.js','source/core/host-metadata.js','source/core/reconciliation-baseline.js'])vm.runInThisContext(fs.readFileSync(file,'utf8'),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const Compatibility=registry.require('compatibility',1);
 const Host=registry.require('compatibility-host',1);
 const HostMetadata=registry.require('host-metadata',1);
-const ReconciliationCodec=registry.require('reconciliation-baseline',1).createCodec(Object.freeze({limits:Object.freeze({maxAreaNameChars:160,maxRichTextBytes:2*1024*1024,maxOngoingNotes:1000}),normalizeAreaName:value=>String(value??'').trim()}));
+const ReconciliationCodec=registry.require('reconciliation-baseline',1).createCodec(Object.freeze({limits:Object.freeze({maxAreaNameChars:160,maxRichTextBytes:2*1024*1024,maxOngoingNotes:1000}),isNoteKey:noteKeys.isKey}));
 vm.runInThisContext(fs.readFileSync('source/core/integrity-continuation.js','utf8'),{filename:'integrity-continuation.js'});
 globalThis.IntegrityContinuationModule=registry.require('integrity-continuation',1);
 {const app=fs.readFileSync('source/app.html','utf8');vm.runInThisContext(app.slice(app.indexOf('function normalizeRepositoryIntegrityTarget('),app.indexOf('async function libraryClearSnapshot(')),{filename:'repository-integrity-normalizer'});}
@@ -96,8 +97,7 @@ const metadata=freeze({
     for(const [key,target,row,existing] of moves){if(!existing)metadataRows.set(target,{...row,key:target});metadataRows.delete(key);}
     return moves.length;
   },
-  updateStorageHealth:patch=>{localRows.set(current.storageHealth,JSON.stringify({...JSON.parse(localRows.get(current.storageHealth)||'{}'),...patch}));return true;},
-  normalizeReconciliationNotes:ReconciliationCodec.normalizeUpdates,normalizeReconciliationHeader:ReconciliationCodec.normalizeHeader,reconciliationKeyFingerprint:ReconciliationCodec.keyFingerprint
+  updateStorageHealth:patch=>{localRows.set(current.storageHealth,JSON.stringify({...JSON.parse(localRows.get(current.storageHealth)||'{}'),...patch}));return true;}
 });
 let topologyRetired=false;
 const ok=async()=>freeze({ok:true});
@@ -118,7 +118,7 @@ const facade=Host.createFacade(freeze({
   topology:freeze({retire:async()=>{topologyRetired=true;return freeze({status:'retired'});}}),
   verification:freeze({activeSession:ok,areaNotes:ok,areaNoteRecovery:ok,deletionState:ok,dailyRecords:ok,insightsRevisionEnvelope:ok,canonicalStores:canonicalStoreProof,legacyAttachments:ok,obsoleteMetadata:ok,topology:async()=>freeze({ok:topologyRetired}),freshBackup:ok}),
   backups:freeze({inspectCurrent:async()=>freeze({kind:'current'}),inspectLegacy:async()=>freeze({kind:'legacy'})}),
-  helpers:freeze({same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),randomUuid:()=> 'uuid',nowIso:()=> '2026-09-20T00:00:00.000Z'})
+  helpers:freeze({same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),randomUuid:()=> 'uuid',nowIso:()=> '2026-09-20T00:00:00.000Z',isNoteKey:noteKeys.isKey})
 }));
 
 const report=await facade.migrateLive();
@@ -164,11 +164,7 @@ assert.deepEqual(metadataRows.get('repositoryMaintenancePending').value,{
     {providerId:'google-drive',requestedAt:'2026-09-19T09:00:00.000Z',nextEligibleAt:'2026-09-19T09:30:00.000Z',reason:'catch-up',repositoryScope:'drive-scope',requestId:''}
   ]
 },'historical maintenance intents in either identity convert to the current version; a current-identity entry wins for its provider');
-assert.equal(metadataRows.has('reconciliationBase.v1'),false,'the single-row note merge base retires after verified conversion');
-const convertedBase=metadataRows.get('reconciliationBase').value;
-assert.equal(convertedBase.version,2);assert.equal(convertedBase.checkpointId,'cp_'+'1'.repeat(32));assert.equal(convertedBase.noteCount,2);assert.equal(convertedBase.noteKeyFingerprint,await ReconciliationCodec.keyFingerprint(['Ethics','Polity']));
-assert.equal(metadataRows.get('reconciliationBaseNote:Ethics').value.text,'ethics base');assert.equal(metadataRows.get('reconciliationBaseNote:Polity').value.text,'polity base');
-assert.equal(metadataRows.has('reconciliationBaseNote.v1:Stale')||metadataRows.has('reconciliationBaseNote:Stale'),false,'note rows outside the converted base are renamed, then removed');
+assert.deepEqual([...metadataRows.keys()].filter(key=>key.startsWith('reconciliationBase')),[],'a merge base from before permanent ids, keyed by note title, is dropped');
 
 metadataRows.set('dataMaintenance',{key:'dataMaintenance',version:1,value:{version:5,status:'completed',completedAt:'2026-09-20T01:00:00.000Z',canonicalRecords:10},updatedAt:'2026-09-20T01:00:00.000Z'});
 const secondFacade=Host.createFacade(freeze({
@@ -179,7 +175,7 @@ const secondFacade=Host.createFacade(freeze({
   topology:freeze({retire:async()=>freeze({status:'retired'})}),
   verification:freeze({activeSession:ok,areaNotes:ok,areaNoteRecovery:ok,deletionState:ok,dailyRecords:ok,insightsRevisionEnvelope:ok,canonicalStores:canonicalStoreProof,legacyAttachments:ok,obsoleteMetadata:ok,topology:ok,freshBackup:ok}),
   backups:freeze({inspectCurrent:async()=>freeze({kind:'current'}),inspectLegacy:async()=>freeze({kind:'legacy'})}),
-  helpers:freeze({same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),randomUuid:()=> 'uuid',nowIso:()=> '2026-09-20T02:00:00.000Z'})
+  helpers:freeze({same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),randomUuid:()=> 'uuid',nowIso:()=> '2026-09-20T02:00:00.000Z',isNoteKey:noteKeys.isKey})
 }));
 await secondFacade.migrateLive();
 assert.equal(metadataRows.has('dataMaintenance'),false,'stale same-version maintenance payloads are rebuildable and must not block startup');
@@ -194,7 +190,7 @@ const malformedInput=freeze({
   local,ownership,plan,preferences,identity:freeze({getId:()=>local.getText('installationId',''),installationKey:'installationId',legacyKey:obsolete.deviceId}),metadata,
   live:freeze({migrateActiveSession:async()=>freeze({status:'not-needed'}),migrateAreaNotes:async()=>freeze({status:'not-needed'}),migrateAreaNoteRecovery:async()=>freeze({status:'not-needed'}),migrateDeletionState:async()=>freeze({status:'not-needed'}),migrateDailyRecords:async()=>freeze({status:'not-needed'}),migrateInsightsRevisionEnvelope:async()=>freeze({status:'not-needed'}),cleanupLegacyAttachments:async()=>freeze({status:'not-needed'}),cleanupObsoleteMetadata:async()=>freeze({status:'not-needed'})}),
   topology:freeze({retire:async()=>freeze({status:'retired'})}),verification:freeze({activeSession:ok,areaNotes:ok,areaNoteRecovery:ok,deletionState:ok,dailyRecords:ok,insightsRevisionEnvelope:ok,canonicalStores:canonicalStoreProof,legacyAttachments:ok,obsoleteMetadata:ok,topology:ok,freshBackup:ok}),
-  backups:freeze({inspectCurrent:async()=>freeze({kind:'current'}),inspectLegacy:async()=>freeze({kind:'legacy'})}),helpers:freeze({same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),randomUuid:()=> 'uuid',nowIso:()=> '2026-09-20T03:00:00.000Z'})
+  backups:freeze({inspectCurrent:async()=>freeze({kind:'current'}),inspectLegacy:async()=>freeze({kind:'legacy'})}),helpers:freeze({same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),randomUuid:()=> 'uuid',nowIso:()=> '2026-09-20T03:00:00.000Z',isNoteKey:noteKeys.isKey})
 });
 const malformedFacade=Host.createFacade(malformedInput);
 
@@ -213,14 +209,15 @@ metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',vers
 await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/backup verification state has an unknown shape and was preserved without modification/u);
 assert.equal(metadataRows.get('repositoryIntegrityScrub').value,malformedScrub,'an unknown historical shape is preserved untouched');
 metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',version:1,value:scrub,updatedAt:'2026-09-20T03:00:00.000Z'});
-const olderBase={format:'study-director.reconciliation-base',version:1,checkpointId:'cp_'+'2'.repeat(32),establishedAt:'2026-09-18T00:00:00.000Z',notes:{Ethics:'older'}};
-metadataRows.set('reconciliationBase.v1',{key:'reconciliationBase.v1',version:1,value:olderBase,updatedAt:'2026-09-18T00:00:00.000Z'});
+// A current merge base, keyed by note id, stays; one from before ids goes whole.
+const baseId=noteId('Ethics'),currentBase={format:'study-director.reconciliation-base',version:2,checkpointId:'cp_'+'2'.repeat(32),establishedAt:'2026-09-20T00:00:00.000Z',noteCount:1,noteKeyFingerprint:await ReconciliationCodec.keyFingerprint([baseId])};
+metadataRows.set('reconciliationBase',{key:'reconciliationBase',version:1,value:currentBase,updatedAt:'2026-09-20T00:00:00.000Z'});
+metadataRows.set('reconciliationBaseNote:'+baseId,{key:'reconciliationBaseNote:'+baseId,version:1,value:{format:'study-director.reconciliation-base-note',version:1,key:baseId,text:'ethics base'},updatedAt:'2026-09-20T00:00:00.000Z'});
 await Host.createFacade(malformedInput).migrateLive();
-assert.equal(metadataRows.has('reconciliationBase.v1'),false);assert.equal(metadataRows.get('reconciliationBase').value.checkpointId,'cp_'+'1'.repeat(32),'an older single-row base never replaces a newer current base');assert.equal(metadataRows.get('reconciliationBaseNote:Ethics').value.text,'ethics base');
-const malformedBase={...olderBase,establishedAt:'2026-09-21T00:00:00.000Z',notes:['not a map']};
-metadataRows.set('reconciliationBase.v1',{key:'reconciliationBase.v1',version:1,value:malformedBase,updatedAt:'2026-09-21T00:00:00.000Z'});
-await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/note reconciliation base has an unknown shape and was preserved without modification/u);
-assert.equal(metadataRows.get('reconciliationBase.v1').value,malformedBase);metadataRows.delete('reconciliationBase.v1');
+assert.equal(metadataRows.get('reconciliationBase').value,currentBase,'a merge base keyed by note id is current');assert.equal(metadataRows.get('reconciliationBaseNote:'+baseId).value.text,'ethics base');
+metadataRows.set('reconciliationBase.v1',{key:'reconciliationBase.v1',version:1,value:{format:'study-director.reconciliation-base',version:1,notes:['not a map']},updatedAt:'2026-09-21T00:00:00.000Z'});
+await Host.createFacade(malformedInput).migrateLive();
+assert.deepEqual([...metadataRows.keys()].filter(key=>key.startsWith('reconciliationBase')),[],'any single-row base, whatever its shape, takes the whole base with it');
 // An interrupted restore from an older build converts to the current journal before crash recovery reads it.
 const journalBlob=new Blob(['safety copy']),oldJournal={format:'study-director.restore-journal',version:2,id:'restore_qa-old-journal',blob:journalBlob,filename:'safety.sdbackup',scheduleText:'',savedDayDeletions:[{date:'2026-09-10',deletedAt:'2026-09-12T00:00:00.000Z'}]};
 metadataRows.set('restoreJournalPayload.v1',{key:'restoreJournalPayload.v1',version:1,value:oldJournal,updatedAt:'2026-09-12T00:00:00.000Z'});

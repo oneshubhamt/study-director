@@ -56,7 +56,7 @@ registry.define('attachments',1,()=>{
     if(typeof p.scan!=='function'||typeof p.rewriteReferences!=='function'||typeof p.withPersistenceSuppressed!=='function')throw new TypeError('Attachment reference mutation ports are incomplete.');
     if(!review||typeof review.hydrate!=='function'||typeof review.invalidateBindings!=='function')throw new TypeError('Attachment reference review ports are incomplete.');
     if(!background||typeof background.budget!=='function'||typeof background.yieldTask!=='function')throw new TypeError('Attachment reference background ports are incomplete.');
-    if(!live||typeof live.fields!=='function'||typeof live.reviewDate!=='function'||typeof live.todayIso!=='function'||typeof live.normalizeAreaName!=='function')throw new TypeError('Attachment reference live-source ports are incomplete.');
+    if(!live||typeof live.fields!=='function'||typeof live.reviewDate!=='function'||typeof live.todayIso!=='function'||typeof live.noteKey!=='function')throw new TypeError('Attachment reference live-source ports are incomplete.');
     const clone=value=>value==null?value:structuredClone(value);
     const nowIso=()=>new Date().toISOString();
     function scan(value){
@@ -86,7 +86,9 @@ registry.define('attachments',1,()=>{
         for(const field of live.fields()){
           const diary=field.matches('.library-diary-textarea'),reflection=field.id==='daily-reflection';
           const reviewDate=field.dataset.reviewDate||live.reviewDate();
-          const key=diary?field.dataset.diaryDate:reflection?String(session?.id||'current'):live.normalizeAreaName(field.dataset.areaKey);
+          // An open note is named like a stored one: by its id, or by its
+          // Area while it has no stored note yet.
+          const key=diary?field.dataset.diaryDate:reflection?String(session?.id||'current'):live.noteKey(field.dataset.areaKey);
           if(!key)continue;
           const kind=diary?'day':reflection?'session':'note',label=diary?'Diary edit · '+key:reflection?'Reflection · '+reviewDate:key;
           const identity=kind+':'+key,current=descriptor(kind,key,label,field.value),prior=sources.get(identity);

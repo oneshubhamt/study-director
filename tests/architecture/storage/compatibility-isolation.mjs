@@ -25,8 +25,9 @@ assert.equal(occurrences(outsideFacade,/AppData\.compatibility\b/gu),0,'only the
 assert.equal(occurrences(outsideFacade,/\.cleanupLegacy\(/gu),0,'only the compatibility facade removes legacy attachment rows');
 
 // In the repositories, compatibility code sits in one marked block. What it
-// defines is used only inside it, and the older-form conversions owned by
-// Ongoing Notes and the Insights revision are called only from it.
+// defines is used only inside it, it holds every Ongoing Note conversion (the
+// notes repository has none), and the Insights revision's older-form
+// conversions are called only from it.
 const blockStart=repositories.indexOf('/* COMPATIBILITY ---'),blockEnd=repositories.indexOf('/* END COMPATIBILITY */');
 assert.ok(blockStart>0&&blockEnd>blockStart,'the repositories keep their compatibility code in one marked block');
 const block=repositories.slice(blockStart,blockEnd),rest=repositories.slice(0,blockStart)+repositories.slice(blockEnd);
@@ -34,10 +35,12 @@ const defined=[...block.matchAll(/^(?:async )?function (\w+)\(/gmu)].map(match=>
 assert.ok(defined.length>=10,'the block holds the repository migrations');
 for(const name of defined)assert.equal(new RegExp(`\\b${name}\\b`,'u').test(rest),false,`${name} is compatibility code: only its block may use it`);
 assert.match(block,/const compatibility=freeze\(\{/u,'the AppData.compatibility namespace closes the block');
-for(const call of ['AreaNotesRepository.migrateHistoricalCanonicalRows','AreaNotesRepository.migrateLegacyRecovery','InsightsDatasetRevision.migrateLegacyEnvelope','InsightsDatasetRevision.verifyCanonicalEnvelope']){
+for(const call of ['InsightsDatasetRevision.migrateLegacyEnvelope','InsightsDatasetRevision.verifyCanonicalEnvelope']){
   assert.equal(rest.includes(call),false,`${call} is called only from the compatibility block`);
   assert.equal(block.includes(call),true,`${call} is reached through the compatibility namespace`);
 }
+for(const name of ['migrateAreaNoteRows','migrateAreaNoteRecovery','verifyAreaNoteRecovery'])assert.ok(defined.includes(name),`${name} lives in the compatibility block`);
+assert.doesNotMatch(read('source/core/repositories-area-notes.js'),/CompatibilityCodec|compatibilityWriteToken|legacyKeys|areaNoteRecovery|async function migrate/u,'the notes repository holds no compatibility code');
 
 // The daily-record migration marker belongs to the compatibility layer: only its block reads it.
 assert.equal(/dailyRecordMigration/u.test(rest.replace(/^\s*dailyRecordMigration:value=>.*$/mu,'').replace(/exactObject\(input\.metaKeys,\[[^\]]*\]/u,'')),false,'ordinary repository code never reads the migration marker');

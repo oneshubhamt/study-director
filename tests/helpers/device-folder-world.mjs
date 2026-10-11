@@ -26,7 +26,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   // Retention, classification and cleanup are the production repository rules.
   const unused=()=>{throw new Error('Unexpected repository I/O in the Device Folder test.');};
   const rules=registry.require('managed-repository',1).createEngine(freeze({
-    codec:freeze({countShape:value=>value,utf8Bytes:value=>new TextEncoder().encode(String(value)),compressionSupported:()=>false,assetIds:()=>[],legacyAreaNoteKey:value=>String(value||'')}),
+    codec:freeze({countShape:value=>value,utf8Bytes:value=>new TextEncoder().encode(String(value)),compressionSupported:()=>false,assetIds:()=>[]}),
     ports:freeze({
       configuration:freeze({backupVersion:1,limits:freeze({}),logicalCaptureFormat:'qa.capture',logicalCaptureVersion:1}),
       persistence:freeze({reconciliationBaseRead:unused,reconciliationBaseWrite:unused}),assets:freeze({get:unused,verifyAliases:unused}),

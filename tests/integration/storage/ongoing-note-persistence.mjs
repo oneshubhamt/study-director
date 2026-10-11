@@ -300,10 +300,10 @@ for(const failEpochRead of [false,true]){
   await app.notes.flush({strict:true});
   assert.equal(stores.area.size,1000);assert.equal(stores.area.has(oldTrash),false,'the oldest deleted note gave way');assert.equal(stores.area.has(newerTrash),true);
   assert.deepEqual(app.notes.trashSnapshot().map(item=>item.key),[newerTrash]);
-  const imported=row('imported','in');assert.equal((await app.notes.merge({[imported.key]:imported}))[newerTrash],undefined,'an import at the limit drops the oldest deleted note');
+  const imported=row('imported','in');assert.equal((await app.notes.reconcile({[imported.key]:imported}))[newerTrash],undefined,'an import at the limit drops the oldest deleted note');
   assert.equal(storedNote(stores.area,'imported')?.text,'in');assert.equal(stores.area.size,1000);
   assert.equal(app.notes.update('one too many','One too many','text','').status,'limit','live notes alone at the limit refuse a new note');
-  const another=row('another','in');await assert.rejects(app.notes.merge({[another.key]:another}),error=>error.code==='AREA_NOTE_LIMIT','an import over the limit is refused whole');
+  const another=row('another','in');await assert.rejects(app.notes.reconcile({[another.key]:another}),error=>error.code==='AREA_NOTE_LIMIT','an import over the limit is refused whole');
   assert.equal(stores.area.has(another.key),false);
 
   // Rescue capacity: newest first, and the failure names what was left out.

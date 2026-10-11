@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {createHarness} from '../../helpers/repository-harness.mjs';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
+import {noteId} from '../../helpers/note-ids.mjs';
 
 const clock=createFakeClock('2026-09-22T04:45:00.000Z');
 const commits=[],controls={clock,onCanonicalCommit:event=>commits.push(event)};
@@ -89,7 +90,7 @@ await assertAdvances('Backup-capture Portable preference save',()=>app.personalP
 assert.equal(commits.at(-1).entityType,'planData');assert.equal(commits.at(-1).backupCapture,true);
 
 await assertAdvances('Saved-Day deletion ledger replacement',()=>app.deletionRecovery.replaceSavedDays([{date:'2026-09-21',deletedAt:'2026-09-22T04:45:04.000Z'}]));
-await assertAdvances('Ongoing Note deletion ledger replacement',()=>app.deletionRecovery.replaceAreaNotes([{key:'old-note',deletedAt:'2026-09-22T04:45:05.000Z'}]));
+await assertAdvances('Ongoing Note deletion ledger replacement',()=>app.deletionRecovery.replaceAreaNotes([{key:noteId('old-note'),deletedAt:'2026-09-22T04:45:05.000Z'}]));
 const assetId='att-aaaaaaaaaaaaaaaaaaaa';
 await assertAdvances('Attachment deletion ledger write',()=>app.deletionRecovery.recordAttachment(assetId,'2026-09-22T04:45:06.000Z'));
 await assertAdvances('Attachment deletion ledger clear',()=>app.deletionRecovery.clearAttachment(assetId));

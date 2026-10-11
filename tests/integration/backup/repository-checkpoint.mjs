@@ -5,7 +5,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createProcessingEngine} from '../../helpers/file-processing.mjs';
-import {legacyNoteKey} from '../../helpers/note-ids.mjs';
 import {createDriveHarness,pendingRepositoryDigests} from '../../helpers/drive-harness.mjs';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
@@ -36,7 +35,7 @@ const countsShape=value=>freeze({dailyRecord:Number(value?.dailyRecord||0),areaN
 const personalCodec=registry.require('record-codecs',1).createPersonalDataCodec(freeze({}));
 const BackupCodec=freeze({
   normalizePersonalData:personalCodec.normalize,countsEqual:(a,b)=>CanonicalModule.same(countsShape(a),countsShape(b)),normalizeAssetDescriptors:value=>{assert.equal(value.length,0,'this assembled verification fixture has no attachment descriptors');return freeze([]);},
-  countShape:countsShape,assetIds:()=>freeze(assetDescriptor?['asset-audio']:[]),legacyAreaNoteKey:legacyNoteKey,withNoteIdDeletions:(manifest,nameKeyed)=>{assert.equal(nameKeyed,false,'current manifests already key notes by id');return manifest;},
+  countShape:countsShape,assetIds:()=>freeze(assetDescriptor?['asset-audio']:[]),withNoteIdDeletions:(manifest,nameKeyed)=>{assert.equal(nameKeyed,false,'current manifests already key notes by id');return manifest;},
   createCheckpointMetadata:(installationId,createdAt)=>freeze({checkpointId:'cp_'+(++checkpointCounter).toString(16).padStart(32,'0'),createdAt,originInstallationId:installationId}),
   createProtectedManifest:(plan,checkpoint)=>freeze({format:'study-director.checkpoint-protected-manifest',version:2,checkpointId:checkpoint.checkpointId,sourceRevision:new Date(plan.sourceRevision).toISOString(),authority:freeze({savedDays:'pairwise-explicit-deletions',areaNotes:'pairwise-explicit-deletions',activeSession:'pairwise-singleton',plans:'pairwise-collection',personalSettings:'pairwise-singleton',attachments:'referenced-plus-library'}),savedDayDeletions:freeze([...(plan.savedDayDeletions||[])]),areaNoteDeletions:freeze([...(plan.areaNoteDeletions||[])]),attachmentDeletions:freeze([...(plan.attachmentDeletions||[])])}),
   utf8Bytes:value=>new TextEncoder().encode(String(value??'')),compressionSupported:()=>typeof CompressionStream==='function',

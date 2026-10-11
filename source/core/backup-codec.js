@@ -575,7 +575,6 @@ return Object.freeze({
   normalizeAreaNote:sanitizeCurrentAreaNote,
   // Backups made before notes had permanent ids keyed them by name.
   legacyAreaNote:(value,key)=>CompatibilityCodec.areaNote(value,key),
-  legacyAreaNoteKey:key=>CompatibilityCodec.areaNoteKey(key),
   withNoteIdDeletions,
   normalizeImportedActiveSession:(value,{legacy=false}={})=>legacy?CompatibilityCodec.activeSession(value):ActiveSessionCodec.sanitizeCurrent(value),
   normalizePersonalData:value=>PersonalDataCodec.normalize(value),

@@ -138,7 +138,7 @@ assert.match(app,/async function restoreAreaNotesSnapshotThroughLifecycle[\s\S]*
 assert.doesNotMatch(app,/reconcileReflectionDraftsThroughLifecycle|ReviewEditor\.mergeBackup/u,'host composition must not expose a retired Reflection Draft reconciliation path');
 assert.doesNotMatch(app,/restoreReflectionDraftSnapshotThroughLifecycle|ReviewEditor\.replaceBackup/u,'host composition must not expose a retired Reflection Draft snapshot replacement path');
 assert.doesNotMatch(app,/ReviewEditor\.importBackup/u,'generic draft import mode switching must remain retired');
-assert.match(areaNotes,/return Object\.freeze\(\{[^}]*replace,merge,/u,'Area Notes repository must expose explicit replace and merge operations');
+assert.match(areaNotes,/return Object\.freeze\(\{[^}]*replace,reconcile,/u,'Area Notes repository must expose explicit replace and reconcile operations');
 assert.match(repositories,/AreaNotesRepositoryModule\.create/u,'repositories façade must compose the extracted Area Notes domain through an explicit dependency');
 assert.match(backup,/const summary=Reconciliation\.summarizePlan\(reconciliationPlan\)/u,'restore impact/conflict counts must be owned by the reconciliation domain instead of duplicated in backup orchestration');
 assert.doesNotMatch(backupProvider,/selected\.(?:save|load)\b|confirmPendingReplacement/u,'retired portable-provider fallback must stay absent from core provider runtime');

@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createProcessingEngine} from '../../helpers/file-processing.mjs';
-import {legacyNoteKey} from '../../helpers/note-ids.mjs';
 
 for(const file of ['source/core/internal.js','source/core/operation-lifecycle.js','source/core/canonical.js','source/core/reconciliation.js','source/core/managed-repository.js','source/core/repository-policy.js','source/core/repository-background.js','source/core/backup-provider.js','source/core/backup-capture.js','source/core/backup.js'])vm.runInThisContext(fs.readFileSync(file,'utf8'),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
@@ -13,7 +12,7 @@ const processing=createProcessingEngine(),documentStub=freeze({getElementById:()
 const countsShape=value=>freeze({dailyRecord:Number(value?.dailyRecord||0),areaNote:Number(value?.areaNote||0),activeSession:Number(value?.activeSession||0),personalData:Number(value?.personalData||0),checkpointManifest:Number(value?.checkpointManifest||0)});
 let checkpointCounter=0;
 const BackupCodec=freeze({
-  countShape:countsShape,assetIds:()=>freeze([]),legacyAreaNoteKey:legacyNoteKey,
+  countShape:countsShape,assetIds:()=>freeze([]),
   createCheckpointMetadata:(installationId,createdAt)=>freeze({checkpointId:'cp_'+(++checkpointCounter).toString(16).padStart(32,'0'),createdAt,originInstallationId:installationId}),
   createProtectedManifest:(plan,checkpoint)=>freeze({format:'study-director.checkpoint-protected-manifest',version:2,checkpointId:checkpoint.checkpointId,sourceRevision:new Date(plan.sourceRevision).toISOString(),authority:freeze({savedDays:'pairwise-explicit-deletions',areaNotes:'pairwise-explicit-deletions',activeSession:'pairwise-singleton',plans:'pairwise-collection',personalSettings:'pairwise-singleton',attachments:'referenced-plus-library'}),savedDayDeletions:freeze([...(plan.savedDayDeletions||[])]),areaNoteDeletions:freeze([...(plan.areaNoteDeletions||[])]),attachmentDeletions:freeze([...(plan.attachmentDeletions||[])])}),
   utf8Bytes:value=>new TextEncoder().encode(String(value??'')),compressionSupported:()=>typeof CompressionStream==='function',checksumAlgorithm:()=> 'sha256',createManifest:()=>({}),encodeChunk:async()=>({line:'',checksum:''}),splitItems:items=>[items],encodeCompletion:async()=>({}),createV10Container:()=>new Blob(),inspect:async()=>({}),normalizeRecord:value=>value,normalizeAreaNote:value=>value

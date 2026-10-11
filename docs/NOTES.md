@@ -57,8 +57,9 @@ What already works well:
    - **Permanent id.** Each note gets an id at creation that never changes. The title is just a property, so rename and move change only the title.
    - **Everything points at the id:** versions, links between notes, trash, backups, search, export, and the "open the note this attachment belongs to" action.
    - **Stored record:** `{id, title, text, updatedAt}`, which replaces `{key, label, text, updatedAt}`, plus the optional list of linked notes (decision 12). Matching a block's Area to a note title uses a lookup built in memory; nothing extra is stored.
-   - **Existing notes** are converted once, following the migration rule. A converted note's id is derived from its current name. Older backups, which store notes by name, therefore map to the same note, and its history is kept.
-     - Exception: history from before a rename that happened before this change stays under the old name.
+   - **Existing notes** are converted once, following the migration rule. A converted note's id is derived from its current name, so restoring or combining an older backup, which stores notes by name, maps them to the same notes.
+     - Earlier versions (decision 1) come only from backup versions saved since ids (2026-10-11). Older versions still restore whole. The notes at the time were few, so this was kept simple (decided 2026-10-11).
+     - The conversion lives only in the compatibility layer; the notes code itself knows only ids.
 
    Text matching was considered as the identity and rejected. A note's text changes with every edit, so it cannot recognise the note over time. The permanent id is the note's lasting fingerprint; text fingerprints are used only to compare versions.
 
