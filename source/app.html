@@ -962,6 +962,8 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                   <button class="library-note-action ui-btn" id="library-note-export" type="button" hidden disabled>Export</button>
                   <button class="library-note-action ui-btn library-note-selection-cancel" id="library-note-select-cancel" type="button" hidden aria-label="Exit export selection" title="Exit export selection">×</button>
                 </span>
+                <button class="library-note-action ui-btn" id="library-note-import" type="button" data-owner-mutation="library-notes" aria-label="Import text or Markdown files as notes" title="Import .txt or .md files as notes">Import</button>
+                <input id="library-note-import-file" type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" multiple hidden>
                 <button class="library-note-action ui-btn" id="library-note-add" type="button" data-owner-mutation="library-notes" aria-label="Create a note" title="Create a note">+ New</button>
                 <span class="library-notes-nav-count" id="library-notes-nav-count">0</span>
               </span>
@@ -972,6 +974,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                   <option value="recent">Recently edited</option>
                 </select>
               </div>
+              <div class="library-notes-tags" id="library-notes-tags" role="group" aria-label="Tags" hidden></div>
             </div>
             <div class="library-notes-list" id="library-notes-list"></div>
             <div class="library-notes-trash" id="library-notes-trash" hidden>
@@ -6787,7 +6790,8 @@ function richTextDocumentFor(field,options={}){
 // Links between notes: the one note picker and the linked-notes bar.
 const NoteLinks=NoteLinksModule.createController(Object.freeze({ports:Object.freeze({
   view:Object.freeze({document}),
-  notes:Object.freeze({get:ref=>AppData.notes.get(ref),link:(ref,id,options)=>AppData.notes.link(ref,id,options),linkedFrom:ref=>AppData.notes.linkedFrom(ref),list:()=>AppData.notes.metadataSnapshot().records}),
+  notes:Object.freeze({documents:()=>AppData.notes.searchSnapshot(),get:ref=>AppData.notes.get(ref),link:(ref,id,options)=>AppData.notes.link(ref,id,options),linkedFrom:ref=>AppData.notes.linkedFrom(ref),list:()=>AppData.notes.metadataSnapshot().records}),
+  text:Object.freeze({tagsIn:value=>RichTextApi.tagsIn(value)}),
   ownership:Object.freeze({canMutate:()=>appCanMutate()})
 })}));
 // A link to a note opens it in Execute's editor when clicked there, and in
@@ -6798,7 +6802,62 @@ async function openLinkedNote(id,field=null){
   if(!await goTab('library',{source:'note-link'}))return false;
   return LibraryView.revealNoteReference(id);
 }
-function richTextNotes(field=null){return Object.freeze({pick:()=>NoteLinks.pick(),title:id=>AppData.notes.get(id)?.label??null,open:id=>void openLinkedNote(id,field)});}
+function richTextNotes(field=null){return Object.freeze({pick:()=>NoteLinks.pick(),title:id=>AppData.notes.get(id)?.label??null,open:id=>void openLinkedNote(id,field),tag:(name,passive)=>void showNotesTagged(name,passive,field),pickTag:options=>NoteLinks.pickTag(options)});}
+// A tag tapped in the Library's open note narrows the list beside it; a tag
+// tapped anywhere else, or with Ctrl or Cmd, opens the Library's notes with it.
+async function showNotesTagged(name,passive,field){
+  const inLibrary=!!field?.closest?.('#library-notes-editor');
+  if(passive){if(inLibrary)LibraryView.filterTag(name);return;}
+  if(!inLibrary&&!await goTab('library',{source:'note-tag'}))return;
+  LibraryView.filterTag(name,{show:!inLibrary});
+}
+// Renames a tag in every note that has it, then saves. A note that changed
+// meanwhile is left as it is and named in the result.
+async function renameNoteTag(from,to){
+  if(!appCanMutate())throw new Error('Use the primary tab to rename tags.');
+  const source=RichTextApi.normalizeTag(from),target=RichTextApi.normalizeTag(to);
+  if(!source||!target)throw new Error('A tag starts with a letter and uses letters, digits, - or _.');
+  return RichTextRuntime.quiesce(()=>AppMutationCoordinator.runExclusive('rename-tag',async()=>{
+    await AppData.notes.flush({strict:true});
+    let changed=0;const failed=[];
+    for(const key of NoteLinks.tagged([source])){
+      const note=AppData.notes.get(key);if(!note)continue;
+      const value=RichTextApi.renameTag(note.text,source,target);if(value===note.text)continue;
+      const result=AppData.notes.update(note.id,note.label,value,note.updatedAt);
+      if(result.status==='changed')changed++;else failed.push(note.label);
+    }
+    await AppData.notes.flush({strict:true});
+    if(AppData.notes.failure().failed)throw new Error('The renamed tags have not saved yet. They will be retried.');
+    return {changed,failed};
+  }));
+}
+// Each .txt or .md file becomes a new note named after it, at the top level or
+// inside the note named; a title already in use gets " (2)". Files that cannot
+// become a note are named in the result with the reason.
+async function importNoteFiles(files,parent=''){
+  if(!appCanMutate())throw new Error('Use the primary tab to import notes.');
+  const list=[...(files||[])],made=[],skipped=[];
+  const titleFor=name=>{const base=clampText(String(name||'').replace(/\.[^.]*$/,'').replace(/\s*>\s*/g,' - ').replace(/[\u0000-\u001f\u007f]/g,'').trim(),120)||'Imported note',full=parent?`${parent} > ${base}`:base;let title=full;for(let count=2;AppData.notes.get(title);count++)title=`${full} (${count})`;return title;};
+  return RichTextRuntime.quiesce(()=>AppMutationCoordinator.runExclusive('import-notes',async()=>{
+    let full=false;
+    for(const file of list){
+      const name=String(file?.name||'file'),kind=/\.(md|markdown|txt)$/i.exec(name)?.[1]?.toLowerCase();
+      if(full){skipped.push(`${name} (notes are at their limit)`);continue;}
+      if(!kind){skipped.push(`${name} (not a .txt or .md file)`);continue;}
+      if(file.size>APP_LIMITS.maxRichTextBytes){skipped.push(`${name} (too large for one note)`);continue;}
+      let value;
+      try{const text=await file.text();value=kind==='txt'?RichTextApi.fromText(text):RichTextApi.fromMarkdown(text);}
+      catch(error){skipped.push(`${name} (${String(error?.message||'could not be read').replace(/\.$/,'')})`);continue;}
+      if(!value){skipped.push(`${name} (empty)`);continue;}
+      const title=titleFor(name),result=AppData.notes.update(title,title,value,'');
+      if(result.status==='changed'){made.push(Object.freeze({id:AppData.notes.get(title)?.id||'',label:title}));continue;}
+      skipped.push(`${name} (${result.status==='limit'?'notes are at their limit':result.status==='content-limit'?'too large for one note':'could not be saved'})`);
+      full=result.status==='limit';
+    }
+    if(made.length){await AppData.notes.flush({strict:true});if(AppData.notes.failure().failed)throw new Error('The imported notes have not saved yet. They will be retried.');}
+    return {made,skipped};
+  }));
+}
 const RichTextRuntime=(()=>{
   const BACKGROUND_IDLE_DISPOSE_MS=90000;
   let installed=false,sequence=0,observer=null,closingAll=false,mutationHold=0,mutationFocusState=null,lastActiveField=null,backgroundDisposeTimer=null;
@@ -8089,6 +8148,7 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
   }),
   view:Object.freeze({document,goTab,setStatus,setTextSafe,window}),
   interactions:Object.freeze({
+    choose:options=>Interactions.choose(options),
     confirm:options=>Interactions.confirm(options),
     input:options=>Interactions.input(options)
   }),
@@ -8122,18 +8182,23 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     find:(field,query,onClear)=>RichTextRuntime.find(field,query,onClear),
     findStep:(field,direction)=>RichTextRuntime.findStep(field,direction),
     get:(key,label)=>AppData.notes.get(key,label),
+    importFiles:(files,parent)=>importNoteFiles(files,parent),
     linksBar:options=>NoteLinks.bar(options),
     normalizeArea:normalizeOngoingAreaInput,
+    normalizeTag:value=>RichTextApi.normalizeTag(value),
     orderEntries:orderOngoingAreaEntries,
     purgeTrash:()=>AppData.notes.purgeExpiredTrash(),
     remove:key=>AppData.notes.remove(key),
     renameAreaInPlans:(title,label)=>PlanRuntime.renameArea(title,label),
+    renameTag:(from,to)=>renameNoteTag(from,to),
     // A merge appends what the moved note adds, as Combine does.
     rename:(key,label,options)=>AppData.notes.rename(key,label,options&&options.merge?{merge:(existing,moved)=>RichTextApi.appendIncomingAdditions(existing,moved).value}:{}),
     renderInherited:renderInheritedAreaNotes,
     restore:key=>AppData.notes.restore(key),
     searchDocuments:ongoingAreaNoteSearchDocuments,
     size:()=>AppData.notes.size(),
+    tagged:names=>NoteLinks.tagged(names),
+    tags:()=>NoteLinks.tags(),
     trash:key=>AppData.notes.trash(key),
     trashSnapshot:()=>AppData.notes.trashSnapshot(),
     versions:target=>BackupRecoveryHost.history.openNote(target),

@@ -37,10 +37,12 @@ What already works well:
 4. **Search lands on the match.** Opening a note from a search highlights every match and scrolls to the first. Arrow buttons or Enter step through the matches, and Esc or typing clears the highlights. The editor has highlighting built in, so this is a small addition, not a new system.
 5. **Sorting:** a sort button with two choices. "Name" shows the tree. "Recently edited" shows a flat list, newest first, with each note's path in small text. It uses the edit time already stored. Other orders were left out: created date would need a new stored field, and size is rarely useful. Today's notes already carry a TODAY mark.
 6. **Print a note:** "Print…" in the ⋯ menu prints only the note's title and content, with its images. The browser's print dialog also offers Save as PDF.
-7. **Import text and Markdown files:** if it stays simple. Each file becomes a new note named after the file, at the top level or inside the selected note, within the limits.
-   - **Plain text:** easy.
-   - **Markdown:** converted to HTML, then passed through the existing paste cleaner that already turns pasted web pages into note format.
+7. **Import text and Markdown files:** if it stays simple. Each file becomes a new note named after the file, at the top level or inside the selected note, within the limits. *(Built in step 4: Import beside + New; with a note open it asks "Inside <note>" or "At the top level".)*
+   - **Plain text:** easy. Each line becomes a paragraph.
+   - **Markdown:** converted to HTML, then passed through the existing paste cleaner that already turns pasted web pages into note format. Headings, lists, quotes, rules, tables (up to 15 × 15) and bold, italic, strikethrough, highlight and web links come across; `###` and deeper headings become bold lines, as notes have two heading levels.
+   - **Kept as written:** images, links to other files, task-list boxes and anything else a note cannot hold stay as their Markdown text, so nothing is lost. Code keeps its lines and indentation as plain text.
    - **Images inside Markdown files:** not in the first version.
+   - A title already in use gets " (2)". Files that are not .txt or .md, too large, or past the note limit are named in the result with the reason.
 8. **Already covered:** keeping images and PDFs inside notes in sync with their note is part of attachment upkeep, checked in the background-services pass. Editing while another tab takes over writing is already safe; add one test only if none covers it.
 9. **Later:** math equations. Code formatting is also supported by the editor and can be switched on if it is ever wanted.
 10. **Not doing:**
@@ -84,13 +86,14 @@ What already works well:
    - The link is stored by id inside the note's text, so nothing new is stored and renames never break it.
    - A link to a deleted note shows as unavailable, and works again if the note is restored.
    - Notes that link to the open one, from either the text or the bar, appear in its "Linked from" line.
-14. **Tags,** written as `#tag` in the text, the way Apple Notes, Bear and Obsidian work.
+14. **Tags,** written as `#tag` in the text, the way Apple Notes, Bear and Obsidian work. *(Built in step 4.)*
    - **Suggestions:** typing `#` offers existing tags, so near-duplicates like `#revise` and `#revison` don't appear.
-   - **Look:** tags show as small chips in the text, and clicking one filters the notes list to that tag.
-   - **Tag list:** the notes panel lists tags with a count each. Picking one or more filters the list; more than one means "has all of them". One tap clears the filter.
-   - **Rename everywhere:** renaming a tag changes it in every note, which fixes typos or merges two tags.
+   - **Look:** tags show as small chips in the text, and clicking one filters the notes list to that tag. In the Library's open note a tap narrows the list beside it and still places the cursor; elsewhere a tap in read-only text, or Ctrl/Cmd-click while editing, opens the Library's notes with that tag.
+   - **Suggestions in use:** they open by the text at the first letter after `#`, only when another tag starts with it. Enter or Tab takes the highlighted tag; a space, a stop or Esc keeps what was typed.
+   - **Tag list:** the notes panel lists tags with a count each. Picking one or more filters the list; more than one means "has all of them". One tap clears the filter. Picked tags come first, then the twelve most used; "+N more" shows the rest.
+   - **Rename everywhere:** renaming a tag changes it in every note, which fixes typos or merges two tags. Rename shows when exactly one tag is picked. Only the text changes: links, attachments and formatting stay.
    - **Rules:** capital letters do not matter, and a tag starts with a letter after a space or at the start of a line. So `#1`, `C#` and a Markdown heading are not tags.
-   - **Storage:** none. Tags are read from the text by the search indexer, and exports keep them as plain `#tags`.
+   - **Storage:** none. Tags are read from the notes' text, each note read again only when it changes, and exports keep them as plain `#tags`. (Built on the main thread rather than in the search worker, because the list and the suggestions need them at once; measured in step 5.)
    - The `#` suggestions, the `[[` picker and the bar's `+` share one picker.
 15. **The Library has three sections: Notes · Days · Data.** A switch at the top chooses between them. Notes opens first, and the Library remembers the last section used.
    - **Notes:**
@@ -146,7 +149,7 @@ What already works well:
 
    Screenshots go to the user before this step is finalised.
 3. **Linked notes bar (12)** and **links inside the text (13),** with the shared picker. *(Built.)*
-4. **Tags (14)** and **import (7).**
+4. **Tags (14)** and **import (7).** *(Built.)*
 5. **Measure at 2,000 notes,** then fix only what is slow.
 
 Each step starts on the user's go-ahead and ends with a commit, so it can be reviewed before the next. Each step follows the testing rhythm: make all of the step's changes, build once, run the suites once, fix what fails, and rerun only the failing tests.

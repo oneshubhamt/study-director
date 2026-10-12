@@ -1542,6 +1542,14 @@ input,textarea,select{border-radius:var(--sd-shape-field-radius)}
 .library-notes-summary-count{color:var(--sd-color-text-secondary-strong);font-family:var(--sd-font-mono);font-size:var(--sd-type-role-label-size);letter-spacing:1px;white-space:nowrap}
 .library-notes-workspace{padding:0 12px 12px}
 .library-notes-find{display:flex;gap:6px;flex:1 0 100%;min-width:0}
+/* Tags in use under the search: picked first, then the most used. */
+.library-notes-tags{display:flex;flex-wrap:wrap;gap:5px;flex:1 0 100%;min-width:0}
+.library-notes-tags[hidden]{display:none}
+.library-tag-chip,.library-tag-tool{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;min-height:26px;padding:0 9px;border:1px solid var(--sd-color-border-2,#272c42);border-radius:999px;background:transparent;color:var(--sd-color-text-secondary);font:inherit;font-size:12.5px;white-space:nowrap;cursor:pointer}
+.library-tag-chip .library-tag-name{color:var(--sd-color-info,#00d4ff)}
+.library-tag-count{font-size:11px;color:var(--sd-color-text-muted)}
+.library-tag-chip.active{border-color:color-mix(in srgb,var(--sd-color-info,#00d4ff) 70%,transparent);background:color-mix(in srgb,var(--sd-color-info,#00d4ff) 13%,transparent);color:var(--sd-color-text-primary)}
+@media(pointer:coarse){.library-tag-chip,.library-tag-tool{min-height:34px}}
 .library-notes-search{flex:1 1 auto;min-width:0;width:100%}
 .library-notes-sort{flex:0 0 auto;width:auto;max-width:48%;padding-inline:8px;font-size:var(--sd-type-role-copy-compact-size)}
 .library-note-matches{display:flex;align-items:center;gap:4px;padding:4px 10px;border-bottom:1px solid var(--sd-color-border-1);background:var(--sd-material-inset)}
@@ -1650,6 +1658,9 @@ button.note-link-chip{padding:0 10px;cursor:pointer;white-space:nowrap;overflow:
 .note-picker-option.active,.note-picker-option:hover{background:var(--sd-state-accent-bg-soft,rgba(232,255,0,.08))}
 .note-picker-title{font-size:13.5px}.note-picker-path{font-size:11.5px;color:var(--sd-color-text-muted)}
 .note-picker-empty{padding:8px 10px}
+/* Tag suggestions open by the text being typed, without dimming the note. */
+.note-picker.note-picker-anchored{position:fixed;inset:auto;width:min(280px,calc(100vw - 16px));max-height:min(300px,45dvh);margin:0}
+.note-picker.note-picker-anchored::backdrop{background:transparent}
 
 .library-notes-editor-shell>.sd-rte .sd-rte-editor-host{height:auto!important}
 .library-notes-textarea{display:block;box-sizing:border-box;flex:1 1 auto;width:100%;height:100%;min-height:260px;max-height:100%;resize:none;overflow:auto;padding:14px 16px;font-size:var(--sd-type-role-reading-size);line-height:1.65}

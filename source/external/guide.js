@@ -280,6 +280,8 @@
           ["Task Details","Lets you inspect each saved block: planned duration, actual focus, work completion, progress units, explicit skip or other outcome state, area, and saved pause evidence."],
           ["Reflection / Unfinished","Keeps the diary reflection and carry-forward note visible beside the measurable record."],
           ["Record Retrieval","Library lets you inspect saved Study Days while Diary and notes remain editable in their own Library sections."],
+          ["Tags","Write #tag anywhere in a note. Under the notes search, tap tags to show only notes that have all of them; × Clear shows every note again. With one tag picked, Rename changes it in every note, and a name already in use merges the two. Typing # and a letter offers the tags in use."],
+          ["Import","Import, beside + New, turns .txt and .md files into new notes named after them, inside the open note or at the top level. Images and links to other files stay as their Markdown text."],
         ]},
         {id:"data-tools",label:"Data Tools",heading:"Backup and recovery",kind:"pairs",items:[
           ["Data model","Local-first, versioned handoff: your device stays authoritative until you explicitly back up or recover a checkpoint. Google Drive is the intended computer ↔ phone/tablet handoff path; it is not continuous sync."],

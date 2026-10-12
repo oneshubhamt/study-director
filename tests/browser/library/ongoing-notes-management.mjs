@@ -389,6 +389,7 @@ try{
   await page.evaluate(`(()=>{const c=document.querySelector('#library-notes-editor [contenteditable="true"]');c.focus();const s=getSelection();s.selectAllChildren(c);s.collapseToEnd();})()`);
   await page.send('Input.insertText',{text:' See '});await page.send('Input.insertText',{text:'['});await page.send('Input.insertText',{text:'['});
   await waitFor(()=>page.evaluate(`!!document.querySelector('dialog.note-picker[open]')`),{label:'[[ picker'});
+  assert.equal(await page.evaluate(`document.querySelector('.note-picker-field').value`),'','the keystroke that opens the picker stays out of its field');
   await page.evaluate(`(()=>{const f=document.querySelector('.note-picker-field');f.value='links ecg';f.dispatchEvent(new Event('input',{bubbles:true}));f.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()`);await page.settle(6);
   const linked=await page.evaluate(`(async()=>{const n=__PWA6.AppData.notes;await n.flush();const heart=n.get('Links Heart'),anchor=document.querySelector('#library-notes-editor a.sd-note-link');
     return {links:[...heart.links],bar:document.querySelector('#library-notes-editor .note-links-row').innerText.replace(/\\s+/g,' ').trim(),anchor:anchor&&{text:anchor.textContent,href:anchor.getAttribute('href')},stored:heart.text.includes('#note=${linkIds.ecg}')&&!heart.text.includes('[[')};})()`);
@@ -414,6 +415,56 @@ try{
   assert.deepEqual(executeLinks,{before:'Links Heart Links Pharm × +',switched:['links pharm','Linked · Links Pharm'],back:'links heart'});
   result.checks.linkedNotesBarTextLinksAndExecute=true;
   console.error('[qa-notes] linked notes bar, [[ links and Execute passed');
+
+  // Tags: chips in the text, the list with counts, picks that narrow the list
+  // (more than one means all of them), # suggestions, and rename everywhere.
+  const tagList=await page.evaluate(`(async()=>{const d=__PWA6,n=d.AppData.notes,wait=ms=>new Promise(r=>setTimeout(r,ms));
+    for(const [t,x] of [['Tags One','Renal #revise and #mcq.'],['Tags Two','Heart #Revise only.'],['Tags Three','C# and #1 are not tags. #mcq']]){n.update(t,t,x);await wait(20);}
+    await n.flush();d.LibraryView.revealNoteReference(n.get('Tags One').id);await wait(300);
+    const chips=()=>[...document.querySelectorAll('#library-notes-tags .library-tag-chip')],chip=name=>chips().find(c=>c.querySelector('.library-tag-name').textContent==='#'+name);
+    const listed=()=>[...document.querySelectorAll('#library-notes-list [data-ongoing-note-key]')].map(r=>r.dataset.ongoingNoteKey).filter(k=>k.startsWith('tags '));
+    const before=chips().map(c=>c.textContent);chip('revise').click();await wait(60);const revise=listed();chip('mcq').click();await wait(60);const both=listed();
+    document.querySelector('#library-notes-tags .library-tag-tool').click();await wait(60);
+    return {before,revise,both,cleared:!document.querySelector('#library-notes-tags .library-tag-chip.active'),inText:[...document.querySelectorAll('#library-notes-editor .sd-tag')].map(c=>c.dataset.sdTag)};})()`);
+  assert.deepEqual(tagList,{before:['#mcq2','#revise2'],revise:['tags one','tags two'],both:['tags one'],cleared:true,inText:['revise','mcq']});
+  await page.evaluate(`(()=>{const c=document.querySelector('#library-notes-editor [contenteditable="true"]');c.focus();const s=getSelection();s.selectAllChildren(c);s.collapseToEnd();})()`);
+  await page.send('Input.insertText',{text:' #'});await page.send('Input.insertText',{text:'r'});
+  await waitFor(()=>page.evaluate(`!!document.querySelector('dialog.note-picker[open]')`),{label:'tag suggestions'});
+  assert.deepEqual(await page.evaluate(`({field:document.querySelector('.note-picker-field').value,options:[...document.querySelectorAll('.note-picker-option .note-picker-title')].map(o=>o.textContent)})`),{field:'r',options:['#revise']});
+  await page.evaluate(`document.querySelector('.note-picker-field').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))`);await page.settle(4);
+  await page.send('Input.insertText',{text:'now'});await page.settle(4);
+  const retagged=await page.evaluate(`(async()=>{const d=__PWA6,n=d.AppData.notes,wait=ms=>new Promise(r=>setTimeout(r,ms));await n.flush();
+    const typed=document.querySelector('#library-notes-editor [contenteditable="true"]').innerText.trim();
+    [...document.querySelectorAll('#library-notes-tags .library-tag-chip')].find(c=>c.querySelector('.library-tag-name').textContent==='#revise').click();await wait(60);
+    [...document.querySelectorAll('#library-notes-tags .library-tag-tool')].find(b=>b.textContent==='Rename').click();
+    const dialog=await new Promise(resolve=>{const poll=()=>{const item=document.getElementById('sd-interaction-dialog');if(item&&item.open)resolve(item);else setTimeout(poll,16);};poll();});
+    const field=dialog.querySelector('.interaction-input');field.value='Review';field.dispatchEvent(new Event('input',{bubbles:true}));dialog.querySelector('.interaction-actions .primary').click();
+    for(let i=0;i<100&&!/Renamed #/.test(document.getElementById('ongoing-notes-status').textContent);i++)await wait(30);
+    return {typed,status:document.getElementById('ongoing-notes-status').textContent,texts:['Tags One','Tags Two','Tags Three'].map(t=>n.get(t).text),picked:[...document.querySelectorAll('#library-notes-tags .library-tag-chip.active')].map(c=>c.textContent)};})()`);
+  assert.equal(retagged.typed,'Renal #revise and #mcq. #revise now');
+  assert.equal(retagged.status,'Renamed #revise to #review in 2 notes.');
+  assert.match(retagged.texts[0],/Renal #review and #mcq\. #review now/);assert.match(retagged.texts[1],/Heart #review only\./);assert.equal(retagged.texts[2],'C# and #1 are not tags. #mcq');
+  assert.deepEqual(retagged.picked,['#review2']);
+  result.checks.tagsListFilterSuggestionsAndRename=true;
+
+  // Import: each .txt or .md file becomes a note named after it, inside the open note or at the top level.
+  const imported=await page.evaluate(`(async()=>{const d=__PWA6,n=d.AppData.notes,wait=ms=>new Promise(r=>setTimeout(r,ms));
+    document.querySelector('#library-notes-tags .library-tag-tool')?.click();d.LibraryView.revealNoteReference(n.get('Tags One').id);await wait(200);
+    const input=document.getElementById('library-note-import-file'),files=new DataTransfer();
+    files.items.add(new File(['# Valves\\n\\nMitral **stenosis**. #mcq\\n\\n- Murmur\\n- Snap\\n'],'Valves.md',{type:'text/markdown'}));
+    files.items.add(new File(['One line\\nTwo lines'],'Plain.txt',{type:'text/plain'}));
+    files.items.add(new File(['%PDF'],'Scan.pdf',{type:'application/pdf'}));
+    input.files=files.files;input.dispatchEvent(new Event('change'));
+    const dialog=await new Promise(resolve=>{const poll=()=>{const item=document.getElementById('sd-interaction-dialog');if(item&&item.open)resolve(item);else setTimeout(poll,16);};poll();});
+    const question=dialog.innerText.includes('Import 3 files');
+    [...dialog.querySelectorAll('button')].find(b=>b.textContent.trim().startsWith('Inside')).click();
+    for(let i=0;i<100&&!/Imported/.test(document.getElementById('ongoing-notes-status').textContent);i++)await wait(30);
+    const valves=n.get('Tags One > Valves'),plain=n.get('Tags One > Plain');
+    return {question,status:document.getElementById('ongoing-notes-status').textContent,open:document.querySelector('#library-notes-editor .library-notes-editor-title')?.textContent,
+      valves:!!valves&&valves.text.startsWith('WG1:')&&valves.text.includes('"Heading"')&&valves.text.includes('"BulletList"')&&valves.text.includes('"Strong"'),plain:!!plain&&plain.text.includes('Two lines')};})()`);
+  assert.deepEqual(imported,{question:true,status:'Imported 2 notes. Not imported: Scan.pdf (not a .txt or .md file).',open:'Valves',valves:true,plain:true});
+  result.checks.importTextAndMarkdownFiles=true;
+  console.error('[qa-notes] tags and import passed');
 
   await page.setViewport({width:390,height:844,mobile:true,scale:2});await page.settle(3);
   const mobile=await page.evaluate(`(()=>{

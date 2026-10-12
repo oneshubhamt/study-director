@@ -13,11 +13,11 @@ registry.define('library',1,()=>{
     domain:freeze(['countTaskOutcomes','earliestSupportedSavedDate','isTrackableBlock','isValidIsoDate','isSupportedSavedDate','todayISO','sanitizePracticeRuns','sanitizeTaskOutcomeCounts','taskOutcomeSummaryText']),
     presentation:freeze(['createSavedDayTaskReviewCard','createPomodoroSummaryLine','emptyMsg','optionalDurationLabel','optionalHoursLabel','optionalPercentLabel','plainTextContent','populatePracticeRunTable','prettyDate','renderRichTextContent','textEl']),
     view:freeze(['document','goTab','setStatus','setTextSafe','window']),
-    interactions:freeze(['confirm','input']),
+    interactions:freeze(['choose','confirm','input']),
     environment:freeze(['cancelAnimationFrame','createOption','createSearchWorker','requestAnimationFrame']),
     exporter:freeze(['exportKeys','cancel']),
     diary:freeze(['bindEditor','captureEditor','clearEditor','deleteEntry','draft','flushEditor','scheduleEditor','settled']),
-    notes:freeze(['areaUse','bindEditor','canCreate','catalogue','clearEditor','clearFind','commitEditor','find','findStep','focusEditor','get','linksBar','normalizeArea','orderEntries','print','purgeTrash','remove','rename','renameAreaInPlans','renderInherited','restore','searchDocuments','size','trash','trashSnapshot','versions']),
+    notes:freeze(['areaUse','bindEditor','canCreate','catalogue','clearEditor','clearFind','commitEditor','find','findStep','focusEditor','get','importFiles','linksBar','normalizeArea','normalizeTag','orderEntries','print','purgeTrash','remove','rename','renameAreaInPlans','renameTag','renderInherited','restore','searchDocuments','size','tagged','tags','trash','trashSnapshot','versions']),
     attachments:freeze(['batch','close','count','invalidate','reconcile','refresh']),
     preferences:freeze(['read','write']),
     clearLibrary:freeze(['preflight','execute']),
@@ -50,15 +50,15 @@ registry.define('library',1,()=>{
     const {countTaskOutcomes,earliestSupportedSavedDate,isTrackableBlock,isValidIsoDate,isSupportedSavedDate,todayISO,sanitizePracticeRuns,sanitizeTaskOutcomeCounts,taskOutcomeSummaryText}=ports.domain;
     const {createSavedDayTaskReviewCard,createPomodoroSummaryLine,emptyMsg,optionalDurationLabel,optionalHoursLabel,optionalPercentLabel,plainTextContent,populatePracticeRunTable,prettyDate,renderRichTextContent,textEl}=ports.presentation;
     const {document,goTab,setStatus,setTextSafe,window}=ports.view;
-    const {confirm,input:requestInput}=ports.interactions;
+    const {choose,confirm,input:requestInput}=ports.interactions;
     const {cancelAnimationFrame,createOption,createSearchWorker,requestAnimationFrame}=ports.environment;
     const {exportKeys,cancel:cancelExport}=ports.exporter;
     const {bindEditor:bindDiaryEditor,captureEditor:captureDiaryEditor,clearEditor:clearDiaryEditor,deleteEntry:deleteDiaryEntryRecord,flushEditor:flushDiaryEditor,scheduleEditor:scheduleDiaryEditor,draft:createDiaryDraft,settled:settleDiaryEditor}=ports.diary;
     const {
       areaUse:planAreaUse,renameAreaInPlans,bindEditor,canCreate:canCreateOngoingNote,catalogue:ongoingNoteCatalogue,clearEditor,clearFind,commitEditor,find:findInEditor,findStep,focusEditor,
-      get:getAreaNote,linksBar,normalizeArea:normalizeOngoingNoteArea,orderEntries:orderOngoingNoteEntries,print:printNote,
-      purgeTrash:purgeExpiredOngoingNotes,remove:removeOngoingNote,rename:renameNote,renderInherited,restore:restoreNote,searchDocuments:ongoingNoteSearchDocuments,size:ongoingNotesSize,
-      trash:trashNote,trashSnapshot:ongoingNoteTrash,versions:openNoteVersions
+      get:getAreaNote,importFiles:importNoteFiles,linksBar,normalizeArea:normalizeOngoingNoteArea,normalizeTag,orderEntries:orderOngoingNoteEntries,print:printNote,
+      purgeTrash:purgeExpiredOngoingNotes,remove:removeOngoingNote,rename:renameNote,renameTag:renameNoteTag,renderInherited,restore:restoreNote,searchDocuments:ongoingNoteSearchDocuments,size:ongoingNotesSize,
+      tagged:taggedNotes,tags:noteTags,trash:trashNote,trashSnapshot:ongoingNoteTrash,versions:openNoteVersions
     }=ports.notes;
     const {batch:batchAttachments,close:closeAttachments,count:attachmentCount,invalidate:invalidateAttachments,reconcile:reconcileAttachments,refresh:refreshAttachments}=ports.attachments;
     const {preflight:preflightClearLibrary,execute:executeClearLibrary}=ports.clearLibrary;
@@ -111,6 +111,9 @@ registry.define('library',1,()=>{
     // while they hold today's Areas or the open note.
     const ongoingNoteExpanded=new Map(),ONGOING_NOTE_PAGE_SIZE=100;
     let ongoingNoteVisibleLimit=ONGOING_NOTE_PAGE_SIZE,ongoingNoteTreeNodes=new Map();
+    // Tags picked in the tag list: the list shows notes that have all of them.
+    let noteTagFilter=[],noteTagsRendered=null,noteTagsSignature='',noteTagsExpanded=false;
+    const NOTE_TAGS_SHOWN=12;
     // Recently deleted: the open state of its list and the deleted note shown.
     let ongoingNoteTrashOpen=false,selectedTrashKey='',ongoingNoteFocusKey='';
     const LIBRARY_MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -237,6 +240,7 @@ registry.define('library',1,()=>{
       if(drawer){drawer.classList.toggle('export-selecting',ongoingNoteSelectionMode);drawer.setAttribute('aria-busy',ongoingNoteExportBusy?'true':'false');}
       if(select)select.hidden=ongoingNoteSelectionMode;
       if(add)add.hidden=ongoingNoteSelectionMode;
+      const importButton=document.getElementById('library-note-import');if(importButton)importButton.hidden=ongoingNoteSelectionMode;
       if(navCount)navCount.hidden=ongoingNoteSelectionMode;
       if(selectAll){selectAll.hidden=!ongoingNoteSelectionMode;selectAll.disabled=!exportable.length||allSelected||ongoingNoteExportBusy;selectAll.textContent='All';}
       if(clear){clear.hidden=!ongoingNoteSelectionMode;clear.disabled=!ongoingNoteSelection.size||ongoingNoteExportBusy;}
@@ -689,15 +693,16 @@ registry.define('library',1,()=>{
       if(!notesShown())return false;
       const entries=ongoingNoteEntries();
       clearNoteSearchTimer();
-      const query=ongoingNotesSearch(),searchState=filterOngoingNoteEntries(entries,query),filtered=searchState.entries;
-      updateOngoingNoteSelectionControls(entries);
+      const query=ongoingNotesSearch(),searchState=filterOngoingNoteEntries(entries,query),tagKeys=noteTagFilter.length?taggedNotes(noteTagFilter):null;
+      const filtered=tagKeys?searchState.entries.filter(entry=>tagKeys.has(entry.key)):searchState.entries,filtering=!!query||!!tagKeys;
+      updateOngoingNoteSelectionControls(entries);renderNoteTags();
       const trashed=selectedTrashKey&&!ongoingNoteSelectionMode?ongoingNoteTrashItems().find(item=>item.key===selectedTrashKey)||null:null;
       if(!trashed)selectedTrashKey='';
       const selected=chooseOngoingNote(entries,filtered),selectionIndex=ongoingNoteSelectionMode?ongoingNoteSelectionIndex(entries):null;
       const list=document.getElementById('library-notes-list');
       if(list){
         // Search shows matches with their paths; otherwise the tree.
-        const tree=!query&&noteSort==='name',flat=noteSort==='recent'?[...filtered].sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))):filtered;
+        const tree=!filtering&&noteSort==='name',flat=noteSort==='recent'?[...filtered].sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))):filtered;
         const nodes=tree?ongoingNoteTree(entries):flat.map(entry=>({entry})),activeIndex=nodes.findIndex(node=>node.entry.key===selectedOngoingNoteKey);
         if(activeIndex>=ongoingNoteVisibleLimit)ongoingNoteVisibleLimit=Math.ceil((activeIndex+1)/ONGOING_NOTE_PAGE_SIZE)*ONGOING_NOTE_PAGE_SIZE;
         const shown=nodes.slice(0,ongoingNoteVisibleLimit),rows=shown.map(node=>ongoingNoteSelectionMode||!tree?buildOngoingNoteNavItem(node.entry,selectionIndex):buildOngoingNoteTreeItem(node));
@@ -707,11 +712,11 @@ registry.define('library',1,()=>{
         }
         if(tree&&!ongoingNoteSelectionMode){list.setAttribute('role','tree');list.setAttribute('aria-label','Notes');}else{list.removeAttribute('role');list.removeAttribute('aria-label');}
         if(filtered.length)list.replaceChildren(...rows);
-        else list.replaceChildren(textEl('div','library-notes-zero ui-status','No notes match this search.'));
+        else list.replaceChildren(textEl('div','library-notes-zero ui-status',query?'No notes match this search.':'No notes have all of these tags.'));
         const focusable=list.querySelector('[role="treeitem"].active')||list.querySelector('[role="treeitem"]');if(focusable)focusable.tabIndex=0;
         if(ongoingNoteFocusKey){const target=[...list.querySelectorAll('[role="treeitem"]')].find(row=>row.dataset.ongoingNoteKey===ongoingNoteFocusKey);ongoingNoteFocusKey='';if(target){for(const row of list.querySelectorAll('[role="treeitem"]'))row.tabIndex=-1;target.tabIndex=0;target.focus();}}
       }
-      setTextSafe('library-notes-nav-count',query?(searchState.pending?`Searching… / ${entries.length}`:`${filtered.length} / ${entries.length}`):String(entries.length));
+      setTextSafe('library-notes-nav-count',filtering?(searchState.pending?`Searching… / ${entries.length}`:`${filtered.length} / ${entries.length}`):String(entries.length));
       renderOngoingNoteTrash();
       if(ongoingNoteSelectionMode){renderOngoingNoteEditor(selected,true);setOngoingNotesStatus('Selection is temporary. Export does not change or sync your saved notes.');}
       else if(trashed)renderTrashedNote(trashed);
@@ -752,6 +757,7 @@ registry.define('library',1,()=>{
       const search=document.getElementById('library-notes-search');
       if(search&&search.value)search.value='';
       resetNoteSearch();
+      if(noteTagFilter.length&&!taggedNotes(noteTagFilter).has(match.key))noteTagFilter=[];
       if(ongoingNoteSelectionMode&&!ongoingNoteExportBusy){ongoingNoteSelectionMode=false;ongoingNoteSelection.clear();}
       showSection('notes');
       selectedOngoingNoteKey=match.key;selectedTrashKey='';
@@ -763,6 +769,75 @@ registry.define('library',1,()=>{
         const editor=document.getElementById('library-notes-editor');if(editor)editor.scrollIntoView({block:'nearest'});
       }));
       return true;
+    }
+    // The tag list: picked tags first, then the most used, with a count each;
+    // More shows the rest. Picks narrow the list to notes with all of them;
+    // Clear shows every note again.
+    function renderNoteTags(){
+      const row=document.getElementById('library-notes-tags');if(!row)return;
+      const all=noteTags(),writable=canMutate(),signature=`${noteTagFilter.join('\u0000')}\u0001${writable?'1':'0'}\u0001${noteTagsExpanded?'1':'0'}`;
+      if(all===noteTagsRendered&&signature===noteTagsSignature)return;
+      noteTagsRendered=all;noteTagsSignature=signature;
+      const counts=new Map(all.map(item=>[item.tag,item.count])),picked=new Set(noteTagFilter),chips=[];
+      const tool=(text,label,run)=>{const button=textEl('button','library-tag-tool ui-btn',text);button.type='button';button.setAttribute('aria-label',label);button.title=label;button.addEventListener('click',run);return button;};
+      if(picked.size)chips.push(tool('× Clear','Show all notes',clearNoteTags));
+      if(picked.size===1&&writable)chips.push(tool('Rename',`Rename #${noteTagFilter[0]} in every note`,()=>{void renameSelectedTag();}));
+      const others=[...all].filter(item=>!picked.has(item.tag)).sort((a,b)=>b.count-a.count||a.tag.localeCompare(b.tag)).map(item=>item.tag);
+      const shown=noteTagsExpanded?others:others.slice(0,NOTE_TAGS_SHOWN),hidden=others.length-shown.length;
+      for(const tag of [...noteTagFilter,...shown]){
+        const on=picked.has(tag),chip=textEl('button',`library-tag-chip ui-btn${on?' active':''}`,'');chip.type='button';chip.setAttribute('aria-pressed',on?'true':'false');
+        chip.append(textEl('span','library-tag-name',`#${tag}`),textEl('span','library-tag-count ui-mono',String(counts.get(tag)||0)));
+        chip.addEventListener('click',()=>toggleNoteTag(tag));chips.push(chip);
+      }
+      if(hidden>0||noteTagsExpanded&&others.length>NOTE_TAGS_SHOWN)chips.push(tool(hidden>0?`+${hidden} more`:'Fewer',hidden>0?'Show every tag':'Show the most used tags',()=>{noteTagsExpanded=!noteTagsExpanded;renderNoteTags();}));
+      row.replaceChildren(...chips);row.hidden=!chips.length;
+    }
+    function setNoteTagFilter(tags){noteTagFilter=tags;ongoingNoteVisibleLimit=ONGOING_NOTE_PAGE_SIZE;renderOngoingNotes();}
+    function toggleNoteTag(tag){setNoteTagFilter(noteTagFilter.includes(tag)?noteTagFilter.filter(other=>other!==tag):[...noteTagFilter,tag]);}
+    function clearNoteTags(){setNoteTagFilter([]);}
+    // A tag tapped in a note's text shows the notes with it. From the open
+    // note the list changes behind it; from elsewhere the list is shown.
+    function filterTag(tag,{show=false}={}){
+      const name=normalizeTag(tag);if(!name)return false;
+      const search=document.getElementById('library-notes-search');if(search&&search.value){search.value='';resetNoteSearch();}
+      showSection('notes');setNoteTagFilter([name]);if(show)closeNoteView();return true;
+    }
+    async function renameSelectedTag(){
+      const from=noteTagFilter[0];if(noteTagFilter.length!==1||!canMutate())return false;
+      const result=await requestInput({
+        title:`Rename #${from}`,message:'Every note with this tag gets the new name. A name already in use merges the two tags.',
+        inputLabel:'New name',defaultValue:from,maxLength:80,required:true,requiredMessage:'Enter a tag name.',
+        validate:value=>normalizeTag(value)?'':'A tag starts with a letter and uses letters, digits, - or _.',
+        confirmLabel:'Rename',cancelLabel:'Cancel'
+      });
+      const to=result?normalizeTag(result.value):'';if(!to||to===from)return false;
+      const notice=notifications.begin({id:'note-tag-rename',surfaceId:'ongoing-notes-status',title:'Rename tag',message:`Renaming #${from}…`});
+      let outcome;try{outcome=await renameNoteTag(from,to);}catch(error){notice.finish('failed',error?.message||'The tag could not be renamed.');return false;}
+      setNoteTagFilter([to]);
+      const changed=`${outcome.changed} ${outcome.changed===1?'note':'notes'}`,failed=outcome.failed||[];
+      notice.finish(failed.length?'failed':'succeeded',failed.length?`Renamed #${from} to #${to} in ${changed}. Not changed, as they changed meanwhile: ${failed.join(', ')}.`:`Renamed #${from} to #${to} in ${changed}.`);
+      return true;
+    }
+    // Text and Markdown files become new notes named after them, at the top
+    // level or inside the open note.
+    async function importNotes(files){
+      const list=[...(files||[])];if(!list.length||!canMutate())return false;
+      const open=ongoingNoteEntries().find(entry=>entry.key===selectedOngoingNoteKey&&!entry.support&&!entry.ephemeral)||null;
+      let parent='';
+      if(open){
+        const where=await choose({title:list.length===1?'Import 1 file':`Import ${list.length} files`,message:'Each file becomes a new note named after it.',cancelLabel:'Cancel',choices:[
+          {value:'inside',label:`Inside ${ongoingNoteLeaf(open.label)}`,kind:'primary',description:`Under ${open.label.replace(/\s*>\s*/g,' › ')}.`},
+          {value:'top',label:'At the top level',description:'As notes of their own.'}
+        ]});
+        if(!where)return false;parent=where==='inside'?open.label:'';
+      }
+      const notice=notifications.begin({id:'note-import',surfaceId:'ongoing-notes-status',title:'Import notes',message:`Importing ${list.length===1?'1 file':`${list.length} files`}…`});
+      let result;try{result=await importNoteFiles(list,parent);}catch(error){notice.finish('failed',error?.message||'The files could not be imported.');return false;}
+      const made=result.made||[],skipped=result.skipped||[];
+      if(made.length)revealNoteReference(made[0].id);
+      const parts=[];if(made.length)parts.push(`Imported ${made.length} ${made.length===1?'note':'notes'}.`);if(skipped.length)parts.push(`Not imported: ${skipped.join('; ')}.`);
+      notice.finish(made.length&&!skipped.length?'succeeded':'failed',parts.join(' ')||'Nothing was imported.');
+      return made.length>0;
     }
     async function createOngoingNote(){
       if(!canMutate())return false;
@@ -952,6 +1027,8 @@ registry.define('library',1,()=>{
       const sort=document.getElementById('library-notes-sort');
       if(sort){sort.value=noteSort;sort.addEventListener('change',()=>{noteSort=sort.value==='recent'?'recent':'name';ongoingNoteVisibleLimit=ONGOING_NOTE_PAGE_SIZE;rememberView();renderOngoingNotes();});}
       if(add)add.addEventListener('click',createOngoingNote);
+      const importButton=document.getElementById('library-note-import'),importFile=document.getElementById('library-note-import-file');
+      if(importButton&&importFile){importButton.addEventListener('click',()=>{importFile.value='';importFile.click();});importFile.addEventListener('change',()=>{const files=[...(importFile.files||[])];importFile.value='';void importNotes(files);});}
       if(list)list.addEventListener('keydown',handleOngoingNoteTreeKey);
       if(trashToggle)trashToggle.addEventListener('click',toggleOngoingNoteTrash);
       if(select)select.addEventListener('click',enterOngoingNoteSelection);
@@ -1675,6 +1752,7 @@ registry.define('library',1,()=>{
       openNote:selectOngoingNote,
       noteDestinations:ongoingNoteDestinations,
       revealNoteReference,
+      filterTag,
       batchAttachmentMutation,
       settleDiary:settleDiaryEdit,
       loadMore:loadMoreLibrary,

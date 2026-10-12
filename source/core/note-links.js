@@ -5,22 +5,24 @@ if(!registry||registry.format!=='study-director.internal-module-registry'||regis
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
 }
 const {exactFrozenObject:exactObject,declaredFunctions:requireFunctions}=registry.contracts;
-// Links between notes: the one note picker (the bar's +, the Link menu's
-// Note and typing [[ all open it) and the linked-notes bar that sits under a
-// note's text. Notes are named by id; titles are only shown.
+// Links between notes and their tags: the one picker (the bar's +, the Link
+// menu's Note, typing [[ and the # suggestions all open it), the linked-notes
+// bar that sits under a note's text, and the tags read from the notes' text.
+// Notes are named by id; titles are only shown.
 registry.define('note-links',1,()=>{
   const freeze=Object.freeze;
   const PORT_FIELDS=freeze({
     view:freeze(['document']),
-    notes:freeze(['get','link','linkedFrom','list']),
+    notes:freeze(['documents','get','link','linkedFrom','list']),
+    text:freeze(['tagsIn']),
     ownership:freeze(['canMutate'])
   });
   const SHOWN=50;
   function createController(input){
     exactObject(input,['ports'],'Note links input');
     const ports=exactObject(input.ports,Object.keys(PORT_FIELDS),'Note links ports');
-    exactObject(ports.view,PORT_FIELDS.view,'Note links view port');requireFunctions(ports.notes,PORT_FIELDS.notes,'Note links notes port');requireFunctions(ports.ownership,PORT_FIELDS.ownership,'Note links ownership port');
-    const {document}=ports.view,notes=ports.notes,canMutate=ports.ownership.canMutate;
+    exactObject(ports.view,PORT_FIELDS.view,'Note links view port');requireFunctions(ports.notes,PORT_FIELDS.notes,'Note links notes port');requireFunctions(ports.ownership,PORT_FIELDS.ownership,'Note links ownership port');requireFunctions(ports.text,PORT_FIELDS.text,'Note links text port');
+    const {document}=ports.view,notes=ports.notes,text=ports.text,canMutate=ports.ownership.canMutate;
     if(!document||typeof document.createElement!=='function')throw new TypeError('Note links document is unavailable.');
     const leaf=label=>String(label||'').split(/\s*>\s*/).filter(Boolean).at(-1)||String(label||'');
     const path=label=>String(label||'').split(/\s*>\s*/).filter(Boolean).slice(0,-1).join(' › ');
@@ -37,47 +39,109 @@ registry.define('note-links',1,()=>{
       for(const row of rows){const label=String(row.label||'').toLowerCase();if(!words.every(word=>label.includes(word)))continue;scored.push([leaf(label).startsWith(words[0])?0:label.startsWith(words[0])?1:2,row]);}
       return scored.sort((a,b)=>a[0]-b[0]||String(a[1].label).localeCompare(String(b[1].label))).slice(0,SHOWN).map(([,row])=>row);
     }
+    // Tags are read from the notes' text and kept per note revision, so only
+    // edited notes are read again. Keys are the notes' title keys.
+    let tagCache=new Map(),tagIndex=null;
+    function tagState(){
+      const snapshot=notes.documents();if(tagIndex&&tagIndex.revision===snapshot.revision)return tagIndex;
+      const next=new Map(),byTag=new Map();
+      for(const record of snapshot.documents){
+        const key=String(record.key||''),revision=String(record.revision||'');let cached=tagCache.get(key);
+        if(!cached||cached.revision!==revision){const value=String(record.value||'');cached={revision,tags:value.includes('#')?text.tagsIn(value):[]};}
+        next.set(key,cached);for(const tag of cached.tags){let keys=byTag.get(tag);if(!keys)byTag.set(tag,keys=new Set());keys.add(key);}
+      }
+      tagCache=next;
+      tagIndex=freeze({revision:snapshot.revision,byTag,list:freeze([...byTag].map(([tag,keys])=>freeze({tag,count:keys.size})).sort((a,b)=>a.tag.localeCompare(b.tag)))});
+      return tagIndex;
+    }
+    // Every tag in use, with how many notes have it, A to Z.
+    function tags(){return tagState().list;}
+    // The keys of the notes that have every tag named.
+    function tagged(names){
+      const byTag=tagState().byTag;let keys=null;
+      for(const name of names){const having=byTag.get(name)||new Set();keys=keys?new Set([...keys].filter(key=>having.has(key))):new Set(having);}
+      return keys||new Set();
+    }
+    // Tags holding what was typed, those starting with it first. The text typed
+    // so far is left out: the note being written already counts it as a tag,
+    // and choosing it would change nothing.
+    const tagRows=query=>{
+      const typed=String(query||'').trim().toLowerCase().replace(/^#/,''),all=tags();
+      const rows=typed?all.filter(row=>row.tag!==typed&&row.tag.includes(typed)).sort((a,b)=>(b.tag.startsWith(typed)?1:0)-(a.tag.startsWith(typed)?1:0)):[...all];
+      return rows.slice(0,SHOWN).map(row=>({title:`#${row.tag}`,detail:`${row.count} ${row.count===1?'note':'notes'}`,value:{text:row.tag,end:' '}}));
+    };
+    const TAG_CHARACTER=/^[\p{L}\p{M}\p{N}_-]$/u;
+    // The picker's two uses. Notes resolve to the note chosen or null. Tags
+    // resolve to the name to write after the # and what follows it: a tag
+    // chosen, or what was typed when a space, a stop or Escape ends it.
+    const NOTE_MODE=freeze({label:'Choose a note',placeholder:'Search notes…',empty:'No notes match.',
+      rows:query=>matches(query,picker.exclude).map(row=>({title:leaf(row.label),detail:path(row.label),value:row})),typed:()=>null,dismiss:()=>null,key:()=>undefined});
+    const TAG_MODE=freeze({label:'Choose a tag',placeholder:'Tag',empty:'',rows:tagRows,
+      typed:value=>({text:value,end:' '}),dismiss:value=>({text:value,end:''}),
+      key:(event,value,active)=>{
+        if(event.key==='Tab'){return active?active.value:{text:value,end:' '};}
+        if(event.key===' ')return {text:value,end:' '};
+        if(event.key==='Backspace'&&!value)return {text:'',end:''};
+        if(event.key.length<=2&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!TAG_CHARACTER.test(event.key))return {text:value,end:event.key};
+        return undefined;
+      }});
     let picker=null;
     function pickerParts(){
       if(picker)return picker;
-      const dialog=element('dialog','note-picker'),field=element('input','note-picker-field ui-field'),list=element('div','note-picker-list'),empty=element('div','note-picker-empty ui-status','No notes match.');
-      dialog.setAttribute('aria-label','Choose a note');field.type='search';field.placeholder='Search notes…';field.autocomplete='off';field.setAttribute('aria-label','Search notes');
+      const dialog=element('dialog','note-picker'),field=element('input','note-picker-field ui-field'),list=element('div','note-picker-list'),empty=element('div','note-picker-empty ui-status');
+      field.type='search';field.autocomplete='off';
       list.setAttribute('role','listbox');list.id='note-picker-list';field.setAttribute('aria-controls',list.id);empty.hidden=true;
       dialog.append(field,list,empty);document.body.append(dialog);
-      picker={dialog,field,list,empty,settle:null,rows:[],active:0};
+      picker={dialog,field,list,empty,settle:null,rows:[],active:0,mode:NOTE_MODE,exclude:[]};
       const show=index=>{picker.active=Math.max(0,Math.min(picker.rows.length-1,index));[...list.children].forEach((option,position)=>{const on=position===picker.active;option.classList.toggle('active',on);option.setAttribute('aria-selected',on?'true':'false');if(on){option.scrollIntoView?.({block:'nearest'});field.setAttribute('aria-activedescendant',option.id);}});};
-      const choose=index=>{const row=picker.rows[index];if(row)close(row);};
-      const close=result=>{const settle=picker.settle;picker.settle=null;if(dialog.open)dialog.close();if(settle)settle(result||null);};
+      const close=result=>{const settle=picker.settle;picker.settle=null;if(dialog.open)dialog.close();if(settle)settle(result===undefined?null:result);};
+      const choose=index=>{const row=picker.rows[index];if(row)close(row.value);};
       picker.fill=()=>{
-        picker.rows=matches(field.value,picker.exclude);
+        picker.rows=picker.mode.rows(field.value);
         list.replaceChildren(...picker.rows.map((row,index)=>{
           const option=element('div','note-picker-option');option.id=`note-picker-option-${index}`;option.setAttribute('role','option');
-          option.append(element('span','note-picker-title',leaf(row.label)));const where=path(row.label);if(where)option.append(element('span','note-picker-path',where));
+          option.append(element('span','note-picker-title',row.title));if(row.detail)option.append(element('span','note-picker-path',row.detail));
           option.addEventListener('pointerdown',event=>event.preventDefault());option.addEventListener('click',()=>choose(index));
           return option;
         }));
-        empty.hidden=picker.rows.length>0;show(0);
+        list.hidden=!picker.rows.length;empty.textContent=picker.mode.empty;empty.hidden=picker.rows.length>0||!picker.mode.empty;show(0);
       };
       field.addEventListener('input',()=>picker.fill());
       field.addEventListener('keydown',event=>{
-        if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();show(picker.active+(event.key==='ArrowDown'?1:-1));}
-        else if(event.key==='Enter'){event.preventDefault();choose(picker.active);}
+        if(event.isComposing)return;
+        if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();show(picker.active+(event.key==='ArrowDown'?1:-1));return;}
+        if(event.key==='Enter'){event.preventDefault();const row=picker.rows[picker.active];close(row?row.value:picker.mode.typed(field.value));return;}
+        const result=picker.mode.key(event,field.value,picker.rows[picker.active]);
+        if(result!==undefined){event.preventDefault();close(result);}
       });
-      dialog.addEventListener('cancel',event=>{event.preventDefault();close(null);});
-      dialog.addEventListener('click',event=>{if(event.target===dialog)close(null);});
+      dialog.addEventListener('cancel',event=>{event.preventDefault();close(picker.mode.dismiss(field.value));});
+      dialog.addEventListener('click',event=>{if(event.target===dialog)close(picker.mode.dismiss(field.value));});
       picker.close=close;
       return picker;
     }
-    // Resolves to the chosen note ({id,key,label}) or null.
-    function pick({exclude=[],query=''}={}){
+    function open(mode,query,anchor){
       const parts=pickerParts();
       if(parts.settle)parts.close(null);
-      parts.exclude=[...exclude];parts.field.value=String(query||'');parts.fill();
+      parts.mode=mode;parts.dialog.setAttribute('aria-label',mode.label);parts.field.placeholder=mode.placeholder;parts.field.setAttribute('aria-label',mode.label);
+      parts.field.value=String(query||'');parts.fill();
+      // Tag suggestions sit by the text being typed; notes take the middle.
+      const style=parts.dialog.style;parts.dialog.classList.toggle('note-picker-anchored',!!anchor);
+      if(anchor){const view=document.defaultView,below=anchor.bottom<(view?.innerHeight||0)*0.6;style.left=`${Math.max(8,Math.min(anchor.left,(view?.innerWidth||0)-288))}px`;style.top=below?`${anchor.bottom+6}px`:'';style.bottom=below?'':`${(view?.innerHeight||0)-anchor.top+6}px`;}
+      else style.left=style.top=style.bottom='';
       const restore=document.activeElement;
       return new Promise(resolve=>{
         parts.settle=result=>{resolve(result);try{restore?.focus?.({preventScroll:true});}catch{}};
-        try{parts.dialog.showModal();parts.field.focus();}catch{parts.close(null);}
+        try{parts.dialog.showModal();const end=parts.field.value.length;parts.field.focus();parts.field.setSelectionRange?.(end,end);}catch{parts.close(null);}
       });
+    }
+    // Resolves to the chosen note ({id,key,label}) or null.
+    function pick({exclude=[],query=''}={}){const parts=pickerParts();parts.exclude=[...exclude];return open(NOTE_MODE,query);}
+    // Offers the tags in use that hold what was typed; when none does, nothing
+    // opens and the text stays as typed.
+    function pickTag({query='',anchor=null}={}){
+      const typed=String(query||'').toLowerCase();
+      if(!typed||!tags().some(row=>row.tag!==typed&&row.tag.startsWith(typed)))return Promise.resolve(null);
+      return open(TAG_MODE,query,anchor);
     }
 
     // The bar under a note: the notes it links to (tap to open, × to remove),
@@ -110,7 +174,7 @@ registry.define('note-links',1,()=>{
       render();root.refresh=render;
       return root;
     }
-    return freeze({pick,bar,cancel:()=>picker?.close?.(null)});
+    return freeze({pick,pickTag,tags,tagged,bar,cancel:()=>picker?.close?.(null)});
   }
   return freeze({format:'study-director.note-links-module',contractVersion:1,createController});
 });
