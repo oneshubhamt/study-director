@@ -116,10 +116,9 @@ try{
   report.totalWords=facts.words;report.textMiB=facts.mib;report.tagsInUse=facts.tags.length;
 
   // Opening the app, then what runs by itself once it is open.
-  await timed('startup',async()=>{await page.reload();await waitForStudyDirector(page,{instrumented:true,timeout:120000});await primary();await sleep(1500);},
+  await timed('startup',async()=>{await page.reload();await waitForStudyDirector(page,{instrumented:true,timeout:120000});await primary();await page.evaluate(fixture);await sleep(1500);},
     `({readyMs:Math.round(__readyAt),...__tasksSince(0,__readyAt+1500),notes:__PWA6.AppData.notes.size()})`);
   assert.equal(report.steps.startup.notes,NOTES);
-  await page.evaluate(fixture);
   await timed('idle',async()=>{await page.evaluate('window.__idleStart=performance.now()');await sleep(6000);},`__tasksSince(__idleStart)`);
 
   const rows=`document.querySelectorAll('#library-notes-list [data-ongoing-note-key]').length`,count=`(document.getElementById('library-notes-nav-count')?.textContent||'')`;
