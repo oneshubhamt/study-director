@@ -63,7 +63,18 @@ function normalizeCellWidth(value:unknown){const number=Number(value);return Num
 const NOTE_LINK_RE=/^#note=(n_[0-9a-f]{16})$/;
 function noteLinkId(value:unknown){const match=typeof value==='string'?NOTE_LINK_RE.exec(value):null;return match?match[1]!:''}
 function validSerializedLinkUrl(value:unknown){return typeof value==='string'&&(/^(?:https?:\/\/|mailto:|tel:)/i.test(value)||/^#attachment=(?:att|img)-[a-z0-9-]{20,80}$/.test(value)||NOTE_LINK_RE.test(value))}
-function utf8ByteLength(value:unknown){const text=String(value??'');try{return new TextEncoder().encode(text).byteLength}catch{return text.length*2}}
+// UTF-8 size counted without encoding a copy: a pair of surrogates is four
+// bytes, and an unpaired one is written as U+FFFD, three bytes.
+function utf8ByteLength(value:unknown){
+  const text=String(value??'');let bytes=0;
+  for(let index=0;index<text.length;index++){
+    const code=text.charCodeAt(index);
+    if(code<0x80)bytes+=1;else if(code<0x800)bytes+=2;
+    else if(code>=0xd800&&code<0xdc00&&(text.charCodeAt(index+1)&0xfc00)===0xdc00){bytes+=4;index++}
+    else bytes+=3;
+  }
+  return bytes;
+}
 // A word is a run of characters outside \s, as splitting on /\s+/u counts
 // them; counting runs avoids building an array on every keystroke.
 function isWhitespace(code:number){return code===32||(code>=9&&code<=13)||code===160||code===5760||(code>=8192&&code<=8202)||code===8232||code===8233||code===8239||code===8287||code===12288||code===65279}
@@ -230,11 +241,20 @@ function inspectDocument(doc:Plot.Doc):DocumentInspection{
 }
 function validateDocument(doc:Plot.Doc){return inspectDocument(doc).valid}
 type DecodedStoredValue={kind:'plain';text:string}|{kind:'invalid-rich';text:string}|{kind:'rich';text:string;doc:Plot.Doc};
-function decodeStoredValue(value:unknown):DecodedStoredValue{
+function decodeFresh(value:string):DecodedStoredValue{
   const decoded=decodeWG1Envelope(value,WG1_DEFAULT_MAX_DEPTH,WG1_DEFAULT_MAX_NODES);
   if(decoded.kind==='plain')return {kind:'plain',text:decoded.text};
   if(decoded.kind==='invalid-envelope')return {kind:'invalid-rich',text:decoded.text};
   try{const doc=DocumentSchema.docFromJSON(decoded.envelope.doc);return validateDocument(doc)?{kind:'rich',text:decoded.text,doc}:{kind:'invalid-rich',text:decoded.text}}catch{return {kind:'invalid-rich',text:decoded.text}}
+}
+// A text is often asked about several times in a row (its kind, then its
+// size), so the last one decoded is kept. Documents never change once made,
+// so it can be shared.
+let lastDecoded:{text:string;decoded:DecodedStoredValue}|null=null;
+function decodeStoredValue(value:unknown):DecodedStoredValue{
+  const text=String(value??'');if(lastDecoded&&lastDecoded.text===text)return lastDecoded.decoded;
+  const decoded=decodeFresh(text);if(decoded.kind!=='plain')lastDecoded={text,decoded};
+  return decoded;
 }
 function decodeDocument(value:unknown):Plot.Doc|null{const decoded=decodeStoredValue(value);return decoded.kind==='rich'?decoded.doc:null}
 function classifySerializedValue(value:unknown){const decoded=decodeStoredValue(value);return decoded.kind==='rich'?'rich':decoded.kind==='plain'?'plain':'invalid-rich'}

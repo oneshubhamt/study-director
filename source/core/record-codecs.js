@@ -372,11 +372,23 @@ function noteLinks(value,key){
   for(const id of value){if(!areaNoteKeys.isId(id)||id===self||seen.has(id))return null;seen.add(id);}
   return [...value];
 }
+// A note's text is checked once: the text last found sound for each note is
+// kept, so reading the same notes again (at start-up, for backups and upkeep)
+// compares rather than parses. Those copies are the ones handed on, so the
+// texts are held once.
+const soundNoteText=new Map();
+function noteText(key,value){
+  const known=soundNoteText.get(key);if(known!==undefined&&known===value){soundNoteText.delete(key);soundNoteText.set(key,known);return known;}
+  const text=optionalEditorContent(value,APP_LIMITS.maxNoteChars);if(text===null)return null;
+  soundNoteText.delete(key);soundNoteText.set(key,text);
+  if(soundNoteText.size>APP_LIMITS.maxOngoingNotes)soundNoteText.delete(soundNoteText.keys().next().value);
+  return text;
+}
 function sanitizeCurrentAreaNote(value,keyHint=''){
   const source=value&&typeof value==='object'&&!Array.isArray(value)?value:null;if(!source||Number(source.version)!==DATA_CONTRACT.schemas.AreaNote.version)return null;
   const expected=['version','key','label','text','updatedAt',...('links' in source?['links']:[])];
   if(Object.keys(source).sort().join('|')!==expected.sort().join('|'))return null;
-  const key=String(source.key||keyHint||''),label=optionalText(source.label,APP_LIMITS.maxAreaNameChars),text=optionalEditorContent(source.text,APP_LIMITS.maxNoteChars);
+  const key=String(source.key||keyHint||''),label=optionalText(source.label,APP_LIMITS.maxAreaNameChars),text=noteText(key,source.text);
   if(!areaNoteKeys.isKey(key)||label===null||!normalizeAreaName(label)||text===null)return null;
   const updatedAt=normalizeImportedTimestamp(source.updatedAt,null);if(!updatedAt)return null;
   const links='links' in source?noteLinks(source.links,key):undefined;if(links===null)return null;

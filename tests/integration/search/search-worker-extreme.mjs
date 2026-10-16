@@ -9,18 +9,20 @@ const read=file=>fs.readFileSync(new URL('../../../'+file,import.meta.url),'utf8
 const workerSource=read('source/external/search-worker.js');
 const areaNotesRepository=read('source/core/repositories-area-notes.js');
 
-const NOTES=1000,WORDS_PER_NOTE=10000,BATCH_CHARS=2*1024*1024;
+// The note limit, with ten million words between them.
+const NOTES=2000,WORDS_PER_NOTE=5000,BATCH_CHARS=2*1024*1024;
 
 const hundredWords=Array.from({length:100},()=>"word");
 function makeDocument(i){
-  const content=Array.from({length:100},(_,paragraph)=>{
+  const content=Array.from({length:WORDS_PER_NOTE/100},(_,paragraph)=>{
     const words=hundredWords.slice();
-    if(paragraph===99)words[99]=`x${String(i).padStart(3,'0')}`;
+    if(paragraph===WORDS_PER_NOTE/100-1)words[99]=`x${String(i).padStart(4,'0')}`;
     return {type:'Paragraph',content:[{type:'Text',param:words.join(' ')}]};
   });
   return {key:`k${i}`,revision:'r1',value:'WG1:'+JSON.stringify({version:1,doc:{type:'Doc',content}})};
 }
 
+// Search finds notes by their title key, the label normalised.
 const canonicalEntries=Array.from({length:NOTES},(_,i)=>{const row=makeDocument(i);return {key:row.key,label:`Area ${i}`,text:row.value,updatedAt:row.revision}});
 const hostHarness=createAreaNoteSnapshotHarness(areaNotesRepository,canonicalEntries);
 let hostStart=performance.now();const hostSnapshot=hostHarness.api.searchSnapshot();const hostColdSnapshotMs=performance.now()-hostStart;
@@ -70,17 +72,17 @@ while(cursor<documents.length){
   maxPostMs=Math.max(maxPostMs,performance.now()-postStart);
   await new Promise(resolve=>setImmediate(resolve));
 }
-const first=await query(1,'x999');
+const first=await query(1,'x1999');
 const coldIndexMs=performance.now()-coldStart;
 if(workerFailure)throw workerFailure;
-assert.deepEqual(first.keys,['k999']);
+assert.deepEqual(first.keys,['area 1999']);
 
 const hotSamples=[];
 for(let i=0;i<20;i++){
   const start=performance.now();
-  const result=await query(100+i,`x${String(999-i).padStart(3,'0')}`);
+  const result=await query(100+i,`x${String(NOTES-1-i).padStart(4,'0')}`);
   hotSamples.push(performance.now()-start);
-  assert.deepEqual(result.keys,[`k${999-i}`]);
+  assert.deepEqual(result.keys,[`area ${NOTES-1-i}`]);
 }
 hotSamples.sort((a,b)=>a-b);
 const hotP95=hotSamples[Math.floor(hotSamples.length*.95)];

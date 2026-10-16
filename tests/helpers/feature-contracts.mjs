@@ -15,6 +15,7 @@ export const FEATURE_CONTRACTS=Object.freeze([
   contract('library.selection','tests/browser/library/library-selection.mjs'),
   contract('library.ongoing-notes','tests/browser/library/ongoing-notes-management.mjs'),
   contract('library.scroll-boundary','tests/browser/library/ongoing-notes-management.mjs'),
+  contract('library.notes-at-limit','tests/browser/library/notes-at-limit.mjs'),
   contract('library.destructive-clear','tests/integration/library/library-clear.mjs'),
   contract('attachments.library','tests/browser/attachments/attachments.mjs'),
   contract('attachments.editor-busy-lifecycle','tests/integration/rich-text/attachment-busy-lifecycle.mjs'),

@@ -15,6 +15,13 @@ export const PERFORMANCE_BUDGETS=Object.freeze({
   ongoingNotesExtremeColdMs:5000,
   ongoingNotesExtremeHotP95Ms:100,
   ongoingNotesExtremePostMs:50,
+  // Notes at their limit (2,000 notes, 2.3 million words), also under browser
+  // coverage. Checking every note's text on each read once held the page for
+  // three seconds at start-up; it now stays near 100 ms.
+  notesAtLimitStartupMs:15000,
+  notesAtLimitMaxTaskMs:1000,
+  notesAtLimitKeystrokeMs:50,
+  notesAtLimitSearchMs:1000,
   // Historical transfer-size references. SDVB72B reports these measurements;
   // user-authorized features are not constrained by package byte ceilings.
   coldCriticalTransferBytes:500*KiB,

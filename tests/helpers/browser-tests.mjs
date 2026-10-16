@@ -40,6 +40,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('attachment-library','tests/browser/attachments/attachments.mjs',['attachments','pdf','audio','opfs','references','streaming','atomic-import','trusted-types'],180000),
     test('insights-performance','tests/browser/insights/insights-performance.mjs',['insights','performance','worker','progressive-rendering','fallback']),
     test('maximum-insights','tests/browser/insights/insights-maximum-import.mjs',['insights','maximum-import']),
+    test('notes-at-limit','tests/browser/library/notes-at-limit.mjs',['library','ongoing-notes','performance','capacity','search','tags','backup'],240000),
     test('production-capacity','tests/browser/storage/capacity.mjs',['capacity','restore','reload','re-export','rollback'],300000),
     test('rich-editor-hotpath','tests/browser/rich-text/rich-editor-hotpath.mjs',['rich-editor','performance','persistence']),
     test('lifecycle-concurrency-memory','tests/browser/rich-text/image-memory.mjs',['rich-editor','wordgard','memory','lifecycle','background','image','multi-editor']),

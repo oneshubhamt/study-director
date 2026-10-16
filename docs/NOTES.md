@@ -32,7 +32,7 @@ What already works well:
    - **Choosing an entry** opens the existing side-by-side note review, which already handles keeping, combining or replacing the text.
    - **On Drive,** opening the list reads each version's small index file (up to 15, read together), so it takes a second or two.
    - **Where:** "Earlier versions…" stays in the open note's ⋯ menu, with Rename, Move, Export and Delete. The menu stays on the open note rather than moving to the list.
-2. **Limit:** 2,000 notes (down from 10,000), 20,000 words each. No existing data or backup holds more, so the one limit applies everywhere. Measure opening, saving and searching at that size, and build a faster tree only if it is slow. Search already updates on each save rather than rebuilding, so it only needs timing.
+2. **Limit:** 2,000 notes (down from 10,000), 20,000 words each. No existing data or backup holds more, so the one limit applies everywhere. Measure opening, saving and searching at that size, and build a faster tree only if it is slow. Search already updates on each save rather than rebuilding, so it only needs timing. *(Measured in step 5: the tree and search were fast enough; start-up, background work and typing were not, and are fixed. Results are under the order of work.)*
 3. **Strikethrough:** in the "More text formatting" menu, next to superscript and subscript. The editor already supports it, so it only needs switching on.
 4. **Search lands on the match.** Opening a note from a search highlights every match and scrolls to the first. Arrow buttons or Enter step through the matches, and Esc or typing clears the highlights. The editor has highlighting built in, so this is a small addition, not a new system.
 5. **Sorting:** a sort button with two choices. "Name" shows the tree. "Recently edited" shows a flat list, newest first, with each note's path in small text. It uses the edit time already stored. Other orders were left out: created date would need a new stored field, and size is rarely useful. Today's notes already carry a TODAY mark.
@@ -93,7 +93,7 @@ What already works well:
    - **Tag list:** the notes panel lists tags with a count each. Picking one or more filters the list; more than one means "has all of them". One tap clears the filter. Picked tags come first, then the twelve most used; "+N more" shows the rest.
    - **Rename everywhere:** renaming a tag changes it in every note, which fixes typos or merges two tags. Rename shows when exactly one tag is picked. Only the text changes: links, attachments and formatting stay.
    - **Rules:** capital letters do not matter, and a tag starts with a letter after a space or at the start of a line. So `#1`, `C#` and a Markdown heading are not tags.
-   - **Storage:** none. Tags are read from the notes' text, each note read again only when it changes, and exports keep them as plain `#tags`. (Built on the main thread rather than in the search worker, because the list and the suggestions need them at once; measured in step 5.)
+   - **Storage:** none. Tags are read from the notes' text, each note read again only when it changes, and exports keep them as plain `#tags`. (Built on the main thread rather than in the search worker, because the list and the suggestions need them at once. Step 5 measured it at about 80 ms, once per session, for 2,000 notes, so it stays there.)
    - The `#` suggestions, the `[[` picker and the bar's `+` share one picker.
 15. **The Library has three sections: Notes · Days · Data.** A switch at the top chooses between them. Notes opens first, and the Library remembers the last section used.
    - **Notes:**
@@ -150,6 +150,28 @@ What already works well:
    Screenshots go to the user before this step is finalised.
 3. **Linked notes bar (12)** and **links inside the text (13),** with the shared picker. *(Built.)*
 4. **Tags (14)** and **import (7).** *(Built.)*
-5. **Measure at 2,000 notes,** then fix only what is slow.
+5. **Measure at 2,000 notes,** then fix only what is slow. *(Done, 2026-10-16.)*
+
+   **Measured** on 2,000 notes holding 2.3 million words (18 MB). The library has a nested tree, 78 tags, links between notes, and ten notes at the 20,000-word limit. `tests/browser/library/notes-at-limit.mjs` repeats it and fails if it slows again.
+
+   **What was slow:** every read of the notes checked each note's whole text against the editor's rules again. A note was read three times for one check, and its size was measured by copying it. The app reads all notes several times at start-up, and again for backups and attachment upkeep. So it froze for 2.9 seconds at start-up, and for about 2.5 seconds more a few seconds later. Typing also rebuilt the list of all 2,000 titles on every keystroke, and renaming a tag rebuilt it once per note.
+
+   **Fix:** a note's text is checked once. The same text for the same note is then compared, not parsed. The title list is rebuilt only when a title changes.
+
+   | At 2,000 notes | Before | After | With 20 notes |
+   |---|---|---|---|
+   | Opening the app | 8.0 s, frozen up to 2.9 s | 2.5 s, never frozen over 0.1 s | 0.5 s |
+   | Background work after opening | 2.5 s of freezes | none | none |
+   | Storing all notes (as a restore does) | 4.1 s | 1.1 s | 0.05 s |
+   | Opening Notes the first time | 0.2 s | 0.16 s | 0.05 s |
+   | Opening a note (typical / 20,000 words) | 0.1 s / 0.3 s | 0.07 s / 0.2 s | same |
+   | Each keystroke, the app's own work | about 7 ms | under 2 ms | — |
+   | Saving a note | under 0.06 s | under 0.06 s | same |
+   | Searching (first / then) | 0.3 s / 0.3 s | 0.25 s / 0.03 s | 0.09 s / 0.01 s |
+   | Tag filter, pickers | about 0.1 s | about 0.1 s | under 0.05 s |
+   | Renaming a tag in 161 notes | 1.0 s, frozen 0.7 s | 0.4 s, frozen 0.1 s | — |
+   | A full backup | 4.1 s, frozen 0.8 s | 3.0 s, frozen under 0.1 s | 0.1 s |
+
+   The "Before" search and note-opening times were taken with the profiler on, so they read somewhat high. Searching for a word that is in most notes highlights it throughout the open note; that took 0.13 s, and depends on the note's length, not on how many notes there are. A far larger library, with every one of the 2,000 notes at 5,000 words (10 million words, 79 MB), opens in about 10 s but never freezes for more than 0.2 s. No faster tree was needed: the list shows 100 rows at a time.
 
 Each step starts on the user's go-ahead and ends with a commit, so it can be reviewed before the next. Each step follows the testing rhythm: make all of the step's changes, build once, run the suites once, fix what fails, and rerun only the failing tests.

@@ -54,10 +54,18 @@ const repository=(()=>{
   const TRASH_PREFIX=String(DATA_CONTRACT.schemas.AreaNote.trashKeyPrefix||''),TRASH_RETENTION_MS=Number(APP_LIMITS.areaNoteTrashDays)*86400000;
   if(!TRASH_PREFIX||!(TRASH_RETENTION_MS>0))throw new TypeError('Area Notes trash contract is invalid.');
   const isTrashKey=key=>String(key||'').startsWith(TRASH_PREFIX);
-  const titleOf=entry=>normalizeAreaName(entry&&entry.label);
+  // A label is normalised into its title once.
+  const titleByLabel=new Map();
+  function titleOf(entry){
+    const label=String(entry&&entry.label||'');let title=titleByLabel.get(label);
+    if(title===undefined){if(titleByLabel.size>=2*APP_LIMITS.maxOngoingNotes)titleByLabel.clear();title=normalizeAreaName(label);titleByLabel.set(label,title);}
+    return title;
+  }
   function newNoteId(){for(;;){const id=`n_${[...globalThis.crypto.getRandomValues(new Uint8Array(8))].map(value=>value.toString(16).padStart(2,'0')).join('')}`;if(!notes[id]&&!notes[NoteKeys.trash(id)])return id;}}
+  // The title lookup is rebuilt only when a title may have changed: a note
+  // added, removed or relabelled. Editing text keeps it.
   let changes=0,titleCache=null,titleCacheAt=-1;
-  function setNote(key,entry){notes[key]=entry;changes++;}
+  function setNote(key,entry){const before=notes[key];notes[key]=entry;if(!before||before.label!==entry.label)changes++;}
   function dropNote(key){delete notes[key];changes++;}
   function replaceNotes(next){wipeObject(notes);Object.assign(notes,next);changes++;}
   function titles(){

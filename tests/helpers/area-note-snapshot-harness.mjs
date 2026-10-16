@@ -24,7 +24,7 @@ export function createAreaNoteSnapshotHarness(repositoriesSource,entries){
   const notes=Object.create(null);
   for(const entry of entries||[])notes[String(entry.key||'')]={...entry};
   const trashPrefix=RUNTIME_DATA_CONTRACT.schemas.AreaNote.trashKeyPrefix;
-  const sandbox={notes,Object,Number,String,hasContent:entry=>!!(entry&&String(entry.text||'').trim()),isTrashKey:key=>String(key||'').startsWith(trashPrefix)};
+  const sandbox={notes,Object,Number,String,hasContent:entry=>!!(entry&&String(entry.text||'').trim()),isTrashKey:key=>String(key||'').startsWith(trashPrefix),titleOf:entry=>String(entry&&entry.label||'').trim().toLowerCase()};
   vm.createContext(sandbox);
   vm.runInContext(`${implementation}\nglobalThis.__snapshotApi=Object.freeze({touchSnapshot,metadataSnapshot,searchSnapshot});`,sandbox,{filename:'area-note-snapshot-runtime.js'});
   return Object.freeze({api:sandbox.__snapshotApi,notes,implementation});
