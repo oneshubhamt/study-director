@@ -2,7 +2,7 @@
 
 Status of the work on this branch (`refactor/background-coordination`, draft PR #1). Read sections 1 and 3 first; section 2 is a closed summary.
 
-**Current state (2026-10-17):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). Last of all: Wordgard as its own module (section 5).
+**Current state (2026-10-17):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). Last of all: Wordgard as its own module, with two items to explore alongside it: notification sounds made in code, and the editor toolbar order (section 5).
 
 ---
 
@@ -93,6 +93,14 @@ Do this at the very end, after the background services.
 - Build the lean version only when the minified deployment is made: tree-shaken to what Study Director uses, with the build-time trims applied.
 - A newer Wordgard then drops in by replacing that one module; the build names any trim whose upstream text moved.
 - At the same time, check whether newer Wordgard versions make the two runtime workarounds (`inert-html.ts`, `cut.ts`) or the build-time trims unnecessary, and drop those that are.
+- Ship only what Study Director uses, so the payload stays as small as possible.
+
+**Also to explore with it (noted 2026-10-17; not yet audited or built).**
+
+| Item | What to explore |
+|---|---|
+| Sounds made in code | The 13 notification sounds ship as WAV files in `source/assets/sounds` (about 525 KB, each 1 to 3 seconds). Explore making them with the browser's Web Audio API instead, so the files no longer ship and the app stays lean. Keep the current sounds as the reference for how each should sound. |
+| Editor toolbar order | Now: undo/redo · text (Aa, B, I, HL, ⋮) · block quote, bullets, numbers, checklist · link, attachment · table, horizontal rule · focus. Wanted: undo/redo · text · bullets, numbers, checklist · block quote · link, table, horizontal rule · attachment · focus. (The editor has no code-block button; the button meant is block quote ❝.) |
 
 ---
 
