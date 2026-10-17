@@ -99,7 +99,7 @@ Do this at the very end, after the background services.
 
 | Item | What to explore |
 |---|---|
-| Sounds made in code | The 13 notification sounds ship as WAV files in `source/assets/sounds` (about 525 KB, each 1 to 3 seconds). Explore making them with the browser's Web Audio API instead, so the files no longer ship and the app stays lean. Keep the current sounds as the reference for how each should sound. |
+| Sounds made in code | The 13 notification sounds ship as WAV files in `source/assets/sounds` (about 525 KB, each 1 to 3 seconds). Explore making them with the browser's Web Audio API instead, so the files no longer ship and the app stays lean. Keep the current sounds as the reference for how each should sound. They are already synthesized from short note phrases by `build/compose-sounds.py`, so the recipe exists. |
 | Editor toolbar order | Now: undo/redo · text (Aa, B, I, HL, ⋮) · block quote, bullets, numbers, checklist · link, attachment · table, horizontal rule · focus. Wanted: undo/redo · text · bullets, numbers, checklist · block quote · link, table, horizontal rule · attachment · focus. (The editor has no code-block button; the button meant is block quote ❝.) |
 
 ---
