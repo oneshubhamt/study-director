@@ -1,8 +1,8 @@
 # Handoff
 
-Status of the work on this branch (`refactor/background-coordination`, draft PR #1). Read sections 1 and 3 first; section 2 is a closed summary.
+Status of the work on this branch (`refactor/background-coordination`, draft PR #1). Read sections 1 and 5 first; sections 2 to 4 are closed summaries.
 
-**Current state (2026-10-17):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). Last of all: Wordgard as its own module, with two items to explore alongside it: notification sounds made in code, and the editor toolbar order (section 5).
+**Current state (2026-10-17):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). **Next: Drive sync and profiles (section 5).** Last of all: Wordgard as its own module, with two items to explore alongside it: notification sounds made in code, and the editor toolbar order (section 6).
 
 ---
 
@@ -15,7 +15,8 @@ Status of the work on this branch (`refactor/background-coordination`, draft PR 
 2. Audit it and report to the user what I think. **Done.**
 3. Hold a brainstorming session with the user to understand how to improve notes. Discuss first; build only after agreement. **Done.**
 4. Then the background services (section 4). **Done.**
-5. The session concludes only once all three — backup, notes, background services — are as good as we can reasonably make them.
+5. Then Drive sync and profiles (section 5, decided 2026-10-17). **Next.**
+6. The session concludes only once all four — backup, notes, background services, sync — are as good as we can reasonably make them.
 
 **Migration (user's rule, 2026-10-10).** Older data is read once, converted into the current canonical form, verified and retired, never used again. Only the compatibility host (`compatibility-host.js`, plus repository adapters where a transaction requires it) reads old forms; the ordinary runtime reads only current forms. Every conversion is listed in `contracts/compatibility.mjs` with its retirement condition, so the whole migration machinery can be deleted later, leaving one clean canonical data structure.
 
@@ -33,7 +34,7 @@ There is nothing to re-read here; the designs live in `docs/BACKUP-ENGINE.md`, `
   - a "backup health" summary, because each location's row already shows its last backup and any problem;
   - streaming verification during restore, because every downloaded piece is already checked against the version's manifest before anything is written.
 - **Left for later on purpose:**
-  - encryption, to come as end-to-end encryption with a sign-in-first experience;
+  - encryption, to come as end-to-end encryption with a sign-in-first experience (data in the browser is not encrypted; see 5.8);
   - measuring restore of a very large library;
   - deleting the compatibility layer once no older data can remain.
 
@@ -80,9 +81,128 @@ Every decision is in `docs/NOTES.md` (items 1 to 15), with the order of work. Al
 - *One reservation for local upkeep and backups.* See "One way to wait": the backup busy signals cover automatic backups too.
 - *New or merged services.* None is missing, and none duplicates another: the Device Folder and Drive already share every job.
 
-## 5. Last of all: Wordgard as its own module (decided 2026-10-11)
+## 5. Next: Drive sync and profiles (decided 2026-10-17)
 
-Do this at the very end, after the background services.
+Build this next, before Wordgard (section 6). The decisions below are the user's, settled over several rounds; do not reopen them. Take it slowly and thoroughly: the user expects edge cases to be many, and robustness must not be traded for convenience.
+
+**Goal.** Every device stays fully local and works on its own, exactly as now. Whenever a Drive connection happens to be open, the device syncs: it brings in what other devices changed, merges it with its own changes, then uploads. Drive is where a person's devices meet and holds the shared library and the shared Version History. It never overwrites an edit a device has not yet synced. Apart from Drive backup and restore becoming sync, and profiles, the app behaves exactly as it does now. The app is meant mainly for one device; two or three devices per person is the most it must handle well.
+
+**Why.** Drive today is explicit handoff: back up the device you leave, then choose Combine or Replace on the other. If that step is skipped, the keep-15 rule (newest version per day, over all devices together) can drop one device's versions from Drive, so its edits then live only on that device (audit finding #1, 2026-10-17). Sync removes the manual step, and with it the risk.
+
+### 5.1 Sync
+
+| Part | Decision |
+|---|---|
+| When | Whenever a Drive sign-in is open. Google gives this app about an hour, renewed only by a tap; that is accepted, and sync simply happens during those windows. A sync runs on sign-in, on opening the app, on returning to it, every 20 minutes while it is open, and on going to the background |
+| Upload cadence | Changes upload 20 minutes after the first one, as now. The user chose not to shorten it |
+| Order | Catch up first, then upload. A device never uploads over a Drive version it has not merged |
+| Upstream conflicts | Uploads take turns through the existing publication lease. If Drive moved on after this device caught up (another device uploaded in between), the upload is refused, and the device catches up again and retries, without asking anything |
+| Common ancestor | Each device remembers the Drive version it last synced with (the existing reconciliation base). That is the ancestor for three-way merging, however long the device was offline |
+| Two devices open together | No device lock: a Web Lock only works inside one browser, and a lock on Drive would stop the other device. Catching up on return to the app shows the other device's edits before you type |
+| Three devices | Each device merges only with Drive, which already holds the others' changes, so a choice is always between two versions |
+| Running session | Restore is blocked while a session runs, because it replaces or combines today's session (`hasBlockingActiveSession` in `app.html`; the blocked actions are `ACTIVE_SESSION_BLOCKED_CLICK_ACTIONS`). Sync must not be blocked. While a session runs, everything else merges as usual. Incoming changes to the running session itself (the Active Session and today's plan) wait until it ends or is suspended, then merge by the same rules. Uploads carry on and include this device's session as it is |
+| Sign-in expiry | The existing dismissible "sign-in expired" toast stays exactly as it is. No other prompts to sign in |
+| Sign-in across reloads | Keep the Drive sign-in for the rest of its hour across reloads; phones often close and reopen the app. Today it lives only in memory (`drive.js`) |
+| Status | A small status by the name tag in the left sidebar and in the Drive row of Library → Data: "Synced 10:42", "Syncing…" or "Changes since 10:42" |
+| Combine and Replace | Leave everyday Drive use. They stay for backup files and Device Folder versions. Restoring a Drive version from Version History applies to all devices, with a safety version kept first |
+| Device Folder | Unchanged: a local safety copy of this device (of the active profile). After a sync it holds the shared library anyway. It is not a second sync channel; two masters would mean conflicts |
+| First sync with no shared history | For example two devices that backed up separately to the same Drive. Two-way merge: anything on one side only is added, anything different on both is kept for review |
+
+### 5.2 Merge rules
+
+The person's data is never lost. Merging is automatic wherever it is lossless; only genuine conflicts are shown, and never as a pop-up during study.
+
+| Case | Result | Asked? |
+|---|---|---|
+| Changed on one side only since the last sync | That change is taken | No |
+| Note changed on both, edits in different paragraphs | Smart merge, applied automatically. `mergeThreeWay` (`rich-text/reconciliation.ts`) already returns `safe: true` when no paragraph changed on both sides, and treats fuzzy matches as conflicts | No |
+| Note changed on both, in the same paragraph | The newer edit shows for now; the other version is kept with the note and marked "Needs review" | Once, whenever the person chooses |
+| Note title renamed on both | The newer title shows; the other is kept for review | Same |
+| Note edited on one device, deleted on the other | The note stays; the review offers to delete it | Same |
+| Saved Day, plans and settings, or the Active Session changed on both | The newer one shows; the other is kept; the review lets the person pick one | Same |
+| Attachments | Added on either side are kept (they are content-addressed); deletions follow the deletion records | No |
+
+- Timestamps never settle a genuine conflict. They only decide what shows until the person reviews it.
+- A kept version is synced data: it can be reviewed on any device, never expires, and goes only when resolved. This needs a new "pending review" record in the library and in backups.
+- The review uses the existing dialog (`reconciliation-ui.js`): Smart merge, Append additions, keep either side, or Custom. It opens from a quiet "Needs review" mark on the note and from a count in Library → Data.
+- Each kept version is also in Version History (hourly versions, 5.5).
+- This replaces the rule agreed earlier the same day ("the newer edit wins and the other text goes to Recently deleted").
+
+### 5.3 Profiles
+
+| Part | Decision |
+|---|---|
+| What a profile is | A name, an optional backup password and an optional Google account. The three belong together. Drive and the password can be added later, or changed, in Library → Data |
+| Several people on one device | Supported, though rare. Each profile has its own local data: database, browser settings, attachments and Device Folder |
+| Existing data | Becomes the first profile under its current storage names. Nothing moves, so there is no migration. New profiles get their own names, resolved from the identities already centralised in `contracts/` |
+| Device-wide | Only what belongs to the device: app updates, the service worker and the profile list itself. Decide key by key |
+| Switching | The name tag in the left sidebar (desktop; the same tag on mobile) opens the profile list and Add profile. One profile is active at a time; switching reloads every open tab into it |
+| Drive link | The Drive library records its profile's id. Connecting a Google account whose library belongs to another profile is refused, so two people's data can never mix. Changing the account uploads the whole library to the new account and leaves the old copy alone |
+| Password | With one profile on the device, its backup key is remembered on the device (a non-extractable key, never the password) and not asked again. With several, each person is asked for their own when switching in, which unlocks their sync; "Not now" keeps working locally with sync paused. It is not a privacy lock, because browser data is not encrypted (5.8) |
+| Removing a profile from a device | From Library → Data, only after confirming its data is synced, or with a clear warning |
+
+Design sync around profile ids from the start; build the per-profile storage after sync.
+
+### 5.4 First start
+
+One form, an upgrade of the name dialog:
+
+```
+Personalise Study Director
+Name             [ Your name           ]
+Backup password  [ Optional            ]   (a confirm box appears once you type)
+[ Connect Google Drive ]  Keeps your devices in sync. You can connect later.
+                                            [ Skip ]  [ Continue ]
+```
+
+- The password is set before the first upload, so no unencrypted copy reaches Drive. Minimum 12 characters, as now.
+- Connecting to an account that already has a library offers "Continue with your library (412 notes, synced yesterday)" and downloads it. The typed password unlocks it, or is asked for again.
+- The name comes from the library, not from Google (no extra Google request).
+- Existing users see no form; their data and name become the first profile.
+- Without Drive, Library → Data shows a quiet "Not synced · Connect Drive" line. No pop-ups.
+
+### 5.5 Small items (step 1)
+
+| Item | Decision |
+|---|---|
+| Hourly versions | Keep the newest version per hour for the last 24 hours, up to 15, on top of latest + 6 daily + 4 weekly + 4 monthly, at Drive and the Device Folder. Today only the newest version of the current day survives (`selectRepositoryRetention`), so a mistake at 3 pm leaves yesterday as the nearest way back |
+| Combine and Replace colours | Combine becomes the primary (accent) button, as the recommended choice. Replace becomes amber: it can be undone from the safety copy, and red stays for permanent deletion. Today Combine has no `kind` (gray) and Replace is `danger` (red) in `backup-presentation.js` |
+| Audit finding #3 | `contracts/data-architecture.mjs` labels the restore journal `RestoreJournalPayload.v4`; it is v5 |
+| Audit finding #4 | A note in the folder picker: use a folder only this device uses, not one synced by Dropbox, OneDrive or iCloud |
+
+### 5.6 Order of work
+
+1. The small items (5.5).
+2. The sync engine and merge rules (5.1, 5.2), with sync designed around profile ids.
+3. The first-start form (5.4).
+4. Profiles (5.3).
+
+For each: make all the changes, build, test with two simulated devices in a real browser, fix, document, commit.
+
+### 5.7 Edge cases to settle while building
+
+| Case | Direction |
+|---|---|
+| A device whose browser data was cleared | The existing guards hold: a device with an unresolved clear never uploads; it downloads again |
+| A device offline for months | Merges normally; deletions older than the kept deletion records may reappear |
+| Device clocks differ | Clocks only choose what shows before review; they never decide a conflict |
+| A note open in the editor when a change arrives | It updates in place if nothing was typed since the last save; otherwise it is a both-changed case |
+| Password added or changed on one device | Other devices ask for the new one at their next sync |
+| Wrong Google account, or the account changed | Refused, or a full upload, as in 5.3 |
+| Drive full or unreachable | Sync pauses, the app carries on locally, with the existing toasts |
+| Restoring a Drive version | Applies to all devices; pending reviews are kept |
+| Large attachments on mobile | Downloaded only when missing, as now |
+
+### 5.8 Later (noted, not planned)
+
+- **Encryption at rest.** Data stored in the browser (IndexedDB, browser storage, attachments) is not encrypted. Backups are, when a password is set: Device Folder, Drive and backup files, attachments included. Note exports are not. Profiles on one device are therefore separate, not private. Already on the list: end-to-end encryption with a sign-in-first experience (section 2).
+- **Fully silent background sync** would need a small server to hold Google refresh tokens. Not planned; sync during sign-in windows is the accepted design.
+
+---
+
+## 6. Last of all: Wordgard as its own module (decided 2026-10-11)
+
+Do this at the very end, after Drive sync and profiles.
 
 **Already so.**
 - `vendor/wordgard` is the exact upstream source, checked against `build/wordgard-metadata.mjs`.
@@ -105,7 +225,7 @@ Do this at the very end, after the background services.
 
 ---
 
-## 6. Record of work on this branch (reference only)
+## 7. Record of work on this branch (reference only)
 
 Commits since `main` (newest first), grouped:
 
@@ -183,7 +303,7 @@ Measured on 200 MB of attachments:
 
 ---
 
-## 7. Working notes
+## 8. Working notes
 
 - **Testing rhythm (user's rule, 2026-10-10).** Make all the app changes for a piece of work first, then build once and run the suites once. Fix what fails, then rerun only the failing tests. Do not rerun tests after each small edit.
 - **Chromium for browser tests:** `CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome`. On a fresh profile, preset `localStorage` user defaults so the name dialog does not block clicks.
