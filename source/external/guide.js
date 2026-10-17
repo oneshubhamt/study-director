@@ -284,12 +284,12 @@
           ["Import","Import, beside + New, turns .txt and .md files into new notes named after them, inside the open note or at the top level. Images and links to other files stay as their Markdown text."],
         ]},
         {id:"data-tools",label:"Data Tools",heading:"Backup and recovery",kind:"pairs",items:[
-          ["Data model","Local-first, versioned handoff: your device stays authoritative until you explicitly back up or recover a checkpoint. Google Drive is the intended computer ↔ phone/tablet handoff path; it is not continuous sync."],
-          ["Managed checkpoints","Device Folder keeps verified versions in a folder on this device. Google Drive keeps the same managed checkpoint model off-device and lets another Study Director device recover that history after authorization."],
+          ["Data model","Local-first: each device keeps all its data and works on its own. While a device is signed in to Google Drive, it syncs: it takes in what your other devices changed, then uploads its own changes. A difference made on both sides waits, marked Needs review, until you choose."],
+          ["Managed checkpoints","Device Folder keeps verified versions in a folder on this device. Google Drive keeps the same versions off-device, shared by your devices: a version made here goes to both locations under the same name."],
           ["Recover","Choose a verified backup from that location, then Keep current, Add only what’s missing, Combine with current data, or Replace current data."],
           ["Add only what’s missing","Brings back Saved Days and attachments this device doesn’t have and changes nothing you have now. If something differs and needs a choice, nothing is changed and Combine is the way to review it."],
           ["Replace current data","Makes this device match the selected backup. One question asks whether to keep what this device has that the backup neither has nor deleted (kept by default); notes the backup deleted go to Recently deleted. Device-local settings stay on this device."],
-          ["Combine with current data","Adds what’s new. Notes, plans and settings changed on only one side since your last Drive or Device Folder handoff are taken without asking; where both sides changed, or Saved Days differ, you choose: notes side by side (one click can settle all remaining), the rest in one dialog with this device preselected. Nothing is deleted unless it was deleted on purpose, and deleted notes go to Recently deleted. An optional checkbox can also download an extra standalone safety copy; automatic rollback protection remains on."],
+          ["Combine with current data","Adds what’s new. Notes, plans and settings changed on only one side since your last Drive sync are taken without asking; where both sides changed, or Saved Days differ, you choose: notes side by side (one click can settle all remaining), the rest in one dialog with this device preselected. Nothing is deleted unless it was deleted on purpose, and deleted notes go to Recently deleted. An optional checkbox can also download an extra standalone safety copy; automatic rollback protection remains on."],
           ["Export backup","Creates one complete standalone .sdbackup file for manual transfer or safekeeping. You choose where it is saved; Study Director then reads the saved file back to verify it (browsers without a save dialog download it instead). It is separate from Device Folder and Google Drive version history."],
           ["Import backup","Verifies a standalone backup, then lets you Add only what’s missing, Combine with current data, or Replace current data."],
           ["Delete Day","Removes a saved day deliberately; back up first if the record may matter later."],
@@ -1087,9 +1087,9 @@
     const dataGrid=el('div','guide-data-grid');
     [
       ['Save the day','Review → Save Today creates the Study Day record used by Library and Insights.'],
-      ['Keep a backup','Library → Data explains managed checkpoints and multi-device handoff. For computer ↔ phone/tablet, back up to Google Drive on the device you are leaving, then open Versions on the other device and Combine or Replace. Advanced → Export backup… creates a separate standalone file.'],
+      ['Keep a backup','Library → Data explains backups and sync. To use Study Director on a computer and a phone or tablet, connect Google Drive on each; while signed in, they sync on their own. Advanced → Export backup… creates a separate standalone file.'],
       ['Device Folder','Optional, where the browser supports it. Choose a folder once; Study Director then backs up to it on its own, within 20 minutes of a change and within seconds of finishing the day. If the browser asks for permission again, you get one notice with Allow access.'],
-      ['Google Drive','Optional. Before Google authorization, Study Director explains that drive.file access is used only to create, list, read, verify, rotate or delete Study Director backup files and related metadata. Backups are integrity-checked; optional backup encryption can be enabled in Library. After your first Drive backup from a device, it also backs up automatically while you are signed in, on the same schedule as the Device Folder. Google ends the sign-in after about an hour; you get one notice you can dismiss, and changes made while signed out go up when you reconnect.'],
+      ['Google Drive','Optional. Before Google authorization, Study Director explains that drive.file access is used only to create, list, read, verify, rotate or delete Study Director backup files and related metadata. Backups are integrity-checked; optional backup encryption can be enabled in Library. While you are signed in, the device syncs: on sign-in, on opening or returning to the app, every 20 minutes and on leaving it; its own changes go up on the same schedule as the Device Folder. The sidebar shows Synced, Changes since or Needs review. Google ends the sign-in after about an hour (it lasts across reloads until then); you get one notice you can dismiss, and changes made while signed out sync when you reconnect.'],
       ['Sample data',`The ${PREVIEW_SAMPLE_DAYS}-day preview is temporary, read-only and never included in exports.`]
     ].forEach(([title,copy])=>{
       const item=el('div','guide-data-item');
@@ -1100,7 +1100,7 @@
     wrap.appendChild(data);
     const legal=el('section','guide-section guide-legal ui-card');
     const legalCopy=el('div');
-    legalCopy.append(el('h2','guide-label ui-label','Privacy, Legal & Security'),el('div','ui-body','Study Director is local-first with checkpoint-based handoff. Review the policies for local storage, optional Google Drive backup, software use, third-party notices and responsible security reporting.'));
+    legalCopy.append(el('h2','guide-label ui-label','Privacy, Legal & Security'),el('div','ui-body','Study Director is local-first, with optional sync through Google Drive. Review the policies for local storage, optional Google Drive backup, software use, third-party notices and responsible security reporting.'));
     const legalLinks=el('nav','guide-legal-links');
     legalLinks.setAttribute('aria-label','Study Director legal documents');
     LegalCenter.documents.forEach(documentDefinition=>{

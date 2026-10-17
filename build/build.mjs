@@ -61,6 +61,7 @@ function renderTokens(value,identity,sourceName){
     .replaceAll('@@SD_LOCAL_STORAGE_KEYS@@',JSON.stringify(LOCAL_STORAGE_KEYS))
     .replaceAll('@@SD_THEME_STORAGE_KEY@@',LOCAL_STORAGE_KEYS.theme)
     .replaceAll('@@SD_PRESENTATION_STORAGE_KEY@@',LOCAL_STORAGE_KEYS.presentation)
+    .replaceAll('@@SD_DRIVE_SESSION_STORAGE_KEY@@',LOCAL_STORAGE_KEYS.driveSession)
     .replaceAll('@@SD_SESSION_STORAGE_KEYS@@',JSON.stringify(SESSION_STORAGE_KEYS))
     .replaceAll('@@SD_OBSOLETE_LOCAL_STORAGE_KEYS@@',JSON.stringify(OBSOLETE_LOCAL_STORAGE_KEYS))
     .replaceAll('@@SD_APP_META_KEYS@@',JSON.stringify(APP_META_KEYS))

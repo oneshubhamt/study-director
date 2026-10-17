@@ -52,7 +52,8 @@ export const LOCAL_STORAGE_KEYS=freeze({
   presentation:'studyDirector.presentation.v1',
   pwaUpdateCheck:'studyDirector.pwaUpdateCheck.v1',
   insightsWindow:'studyDirector.insights.window.v1',
-  libraryView:'studyDirector.library.view.v1'
+  libraryView:'studyDirector.library.view.v1',
+  driveSession:'studyDirector.driveSession.v1'
 });
 
 export const SESSION_STORAGE_KEYS=freeze({
@@ -110,7 +111,8 @@ export const APP_META_KEYS=freeze({
   managedProviderBackupPending:'managedProviderBackupPending',
   repositoryMaintenancePending:'repositoryMaintenancePending',
   reconciliationBase:'reconciliationBase',
-  reconciliationBaseNotePrefix:'reconciliationBaseNote:'
+  reconciliationBaseNotePrefix:'reconciliationBaseNote:',
+  reconciliationBaseDayPrefix:'reconciliationBaseDays:'
 });
 // Earlier names of these records: while names carried a version, and before
 // notes and the Device Folder had their current names. The compatibility host
@@ -156,7 +158,7 @@ export const OBSOLETE_APP_META_KEYS=freeze({
 export const APP_META_VALIDATION_OWNERS=freeze({
   repositories:freeze(['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','savedDayDeletionPrefix','noteDeletionPrefix','attachmentDeletionPrefix']),
   journals:freeze(['libraryClearJournalState','libraryClearJournalPayloadPrefix','restoreJournalState','restoreJournalPayload','mutationLease']),
-  host:freeze(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix'])
+  host:freeze(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseDayPrefix'])
 });
 
 function appMetaValidationOwner(name){
@@ -206,7 +208,8 @@ export const DATA_ARCHITECTURE=freeze({
     presentation:surface('startup-mirror','host','operational','disposable mirror of appMeta portable Preferences presentation','',{mirrorOf:'appMeta.personalPreferences.presentation'}),
     pwaUpdateCheck:surface('operational','host','operational','retained'),
     insightsWindow:surface('preference','insights','operational','retained'),
-    libraryView:surface('preference','library','operational','retained')
+    libraryView:surface('preference','library','operational','retained'),
+    driveSession:surface('operational','drive','operational','until the Drive sign-in expires (about an hour), is disconnected or is rejected; keeps the sign-in across reloads and reopening')
   }),
   sessionStorage:freeze({
     appTab:surface('coordination-identity','ownership','operational','tab-session lifetime'),
@@ -219,7 +222,7 @@ export const DATA_ARCHITECTURE=freeze({
   memory:freeze({
     insightsModels:surface('derived','insights','protect','ephemeral/rebuildable','',{rebuildFrom:'canonical study records'}),
     searchIndex:surface('derived','search','protect','ephemeral/rebuildable','',{rebuildFrom:'canonical searchable records'}),
-    driveAccessToken:surface('operational','drive','protect','authorization-session only; never intentionally persisted')
+    driveAccessToken:surface('operational','drive','protect','authorization-session only; kept across reloads only through localStorage.driveSession until it expires')
   }),
   obsoleteLocalStorage:freeze({
     schedule:surface('legacy-migration','compatibility','protect','remove after canonical Plan migration'),
@@ -261,7 +264,7 @@ export const DATA_ARCHITECTURE=freeze({
       repositoryIntegrityScrub:surface('derived-health','backup','operational','transactional progress/completion bound to repository identity; opaque quarantined object ids only; no user-content details','RepositoryIntegrityScrub.v7',{rebuildFrom:'external backup repository manifests and objects'}),
       managedProviderBackupPending:surface('operational','backup','operational','until the affected managed provider successfully publishes a later current backup or is explicitly disconnected','ManagedProviderBackupPending.v1'),
       repositoryMaintenancePending:surface('operational','backup','operational','until post-commit repository retention and safe orphan reclamation complete','RepositoryMaintenancePending.v4'),
-      reconciliationBase:surface('reconciliation-base','host','protect','advance atomically after a verified current-checkpoint reconciliation','ReconciliationBase.v2')
+      reconciliationBase:surface('reconciliation-base','host','protect','advance atomically when a version this device shares through Drive is placed there or caught up to','ReconciliationBase.v3')
     }),
     prefixes:freeze({
       backupPreparationUnitPrefix:surface('derived-performance','repositories','operational','disposable; rebuild from canonical data after loss, uncertainty or representation change','BackupPreparationUnit.v1',{rebuildFrom:'portable canonical IndexedDB state'}),
@@ -269,7 +272,8 @@ export const DATA_ARCHITECTURE=freeze({
       noteDeletionPrefix:surface('canonical-deletion-history','repositories','protect','retain until the same Note is recreated','NoteDeletion.v1'),
       attachmentDeletionPrefix:surface('canonical-deletion-history','repositories','protect-identifiers','retain until the same Attachment Library identity is explicitly restored/recreated','AttachmentDeletion.v1'),
       libraryClearJournalPayloadPrefix:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','LibraryClearJournalChunk.v1',{protects:'canonical Library rollback chunks',created:'before destructive Library clear commit',cleared:'after verified completion or rollback',supersededBy:'verified post-operation canonical state'}),
-      reconciliationBaseNotePrefix:surface('reconciliation-base','host','protect','update/delete only changed Note baselines; lazily read only for actual reconciliation conflicts','ReconciliationBaseNote.v1')
+      reconciliationBaseNotePrefix:surface('reconciliation-base','host','protect','update/delete only changed Note baselines; lazily read only for actual reconciliation conflicts','ReconciliationBaseNote.v1'),
+      reconciliationBaseDayPrefix:surface('reconciliation-base','host','protect','one row of Saved-Day fingerprints per month; update/delete only changed months; read only for differing Saved Days','ReconciliationBaseDays.v1')
     }),
     obsolete:freeze({
       reflectionDraftMigration:surface('legacy-residue','compatibility','operational','remove during compatibility migration','ReflectionDraftMigration.v1'),

@@ -24,7 +24,7 @@ const obsolete={
 };
 const appMeta={
   personalPreferences:'preferences',dataMaintenance:'dataMaintenance',verifiedRecoveryBackups:'verifiedRecoveryBackups',attachmentIntegrityAudit:'attachmentIntegrityAudit',deviceFolder:'deviceFolder',repositoryIntegrityScrub:'repositoryIntegrityScrub',
-  reconciliationBase:'reconciliationBase',reconciliationBaseNotePrefix:'reconciliationBaseNote:',reconciliationBaseLegacy:'reconciliationBase.v1',restoreJournalPayload:'restoreJournalPayload',
+  reconciliationBase:'reconciliationBase',reconciliationBaseNotePrefix:'reconciliationBaseNote:',reconciliationBaseDayPrefix:'reconciliationBaseDays:',reconciliationBaseLegacy:'reconciliationBase.v1',restoreJournalPayload:'restoreJournalPayload',
   repositoryMaintenancePending:'repositoryMaintenancePending',repositoryMaintenancePendingLegacy:'repositoryMaintenancePending.v1',
   libraryClearJournalState:'libraryClearJournalState',libraryClearJournalPayloadPrefix:'libraryClearJournalPayload:',
   archiveClearJournalStateLegacy:'archiveClearJournalState.v1',archiveClearJournalPayloadPrefixLegacy:'archiveClearJournalPayload.v1:',
@@ -228,12 +228,17 @@ metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',vers
 await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/backup verification state has an unknown shape and was preserved without modification/u);
 assert.equal(metadataRows.get('repositoryIntegrityScrub').value,malformedScrub,'an unknown historical shape is preserved untouched');
 metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',version:1,value:scrub,updatedAt:'2026-09-20T03:00:00.000Z'});
-// A current merge base, keyed by note id, stays; one from before ids goes whole.
-const baseId=noteId('Ethics'),currentBase={format:'study-director.reconciliation-base',version:2,checkpointId:'cp_'+'2'.repeat(32),establishedAt:'2026-09-20T00:00:00.000Z',noteCount:1,noteKeyFingerprint:await ReconciliationCodec.keyFingerprint([baseId]),personalFingerprint:''};
+// A current merge base (version 3, with Saved Day and session fingerprints) stays; an older one goes whole.
+const baseId=noteId('Ethics'),currentBase={format:'study-director.reconciliation-base',version:3,checkpointId:'cp_'+'2'.repeat(32),establishedAt:'2026-09-20T00:00:00.000Z',noteCount:1,noteKeyFingerprint:await ReconciliationCodec.keyFingerprint([baseId]),personalFingerprint:'',sessionFingerprint:''};
+const baseDays={key:'reconciliationBaseDays:2026-09',version:1,value:{format:'study-director.reconciliation-base-days',version:1,month:'2026-09',days:{'2026-09-20':'a'.repeat(64)}},updatedAt:'2026-09-20T00:00:00.000Z'};metadataRows.set(baseDays.key,baseDays);
 metadataRows.set('reconciliationBase',{key:'reconciliationBase',version:1,value:currentBase,updatedAt:'2026-09-20T00:00:00.000Z'});
 metadataRows.set('reconciliationBaseNote:'+baseId,{key:'reconciliationBaseNote:'+baseId,version:1,value:{format:'study-director.reconciliation-base-note',version:1,key:baseId,label:'Ethics',text:'ethics base'},updatedAt:'2026-09-20T00:00:00.000Z'});
 await Host.createFacade(malformedInput).migrateLive();
-assert.equal(metadataRows.get('reconciliationBase').value,currentBase,'a merge base keyed by note id is current');assert.equal(metadataRows.get('reconciliationBaseNote:'+baseId).value.text,'ethics base');
+assert.equal(metadataRows.get('reconciliationBase').value,currentBase,'a version 3 merge base is current');assert.equal(metadataRows.get(baseDays.key),baseDays,'its Saved Day rows stay with it');
+metadataRows.set('reconciliationBase',{key:'reconciliationBase',version:1,value:{...currentBase,version:2,sessionFingerprint:undefined},updatedAt:'2026-09-20T00:00:00.000Z'});metadataRows.set(baseDays.key,baseDays);
+await Host.createFacade(malformedInput).migrateLive();
+assert.deepEqual([...metadataRows.keys()].filter(key=>key.startsWith('reconciliationBase')),[],'a version 2 base cannot tell an unknown Saved Day from a missing one, so it goes whole, Saved Day rows included');
+metadataRows.set('reconciliationBase',{key:'reconciliationBase',version:1,value:currentBase,updatedAt:'2026-09-20T00:00:00.000Z'});metadataRows.set('reconciliationBaseNote:'+baseId,{key:'reconciliationBaseNote:'+baseId,version:1,value:{format:'study-director.reconciliation-base-note',version:1,key:baseId,label:'Ethics',text:'ethics base'},updatedAt:'2026-09-20T00:00:00.000Z'});assert.equal(metadataRows.get('reconciliationBaseNote:'+baseId).value.text,'ethics base');
 // One from before titles were kept holds only text; it goes whole too.
 const untitledId=noteId('Polity');metadataRows.set('reconciliationBaseNote:'+untitledId,{key:'reconciliationBaseNote:'+untitledId,version:1,value:{format:'study-director.reconciliation-base-note',version:1,key:untitledId,text:'polity base'},updatedAt:'2026-09-20T00:00:00.000Z'});
 await Host.createFacade(malformedInput).migrateLive();
@@ -286,12 +291,12 @@ await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/last-b
 assert.deepEqual(metadataRows.get('verifiedRecoveryBackups').value,{version:7},'an unknown shape is preserved untouched');metadataRows.set('verifiedRecoveryBackups',convertedRecord);
 
 const validators=HostMetadata.createAppMetaValidators(freeze({
-  keys:freeze({verifiedRecoveryBackups:'a',backupProtection:'b',attachmentIntegrityAudit:'c',deviceFolder:'d',repositoryIntegrityScrub:'e',managedProviderBackupPending:'f',repositoryMaintenancePending:'h',reconciliationBase:'g2',reconciliationBaseNotePrefix:'g3'}),
-  same:(a,b)=>a===b,normalizers:freeze({verifiedRecovery:value=>value,attachmentIntegrity:value=>value,repositoryIntegrity:value=>value,reconciliationBase:value=>value,reconciliationBaseNote:value=>value})
+  keys:freeze({verifiedRecoveryBackups:'a',backupProtection:'b',attachmentIntegrityAudit:'c',deviceFolder:'d',repositoryIntegrityScrub:'e',managedProviderBackupPending:'f',repositoryMaintenancePending:'h',reconciliationBase:'g2',reconciliationBaseNotePrefix:'g3',reconciliationBaseDayPrefix:'g4'}),
+  same:(a,b)=>a===b,normalizers:freeze({verifiedRecovery:value=>value,attachmentIntegrity:value=>value,repositoryIntegrity:value=>value,reconciliationBase:value=>value,reconciliationBaseNote:value=>value,reconciliationBaseDays:value=>value})
 }));
 const migratedValidators=HostMetadata.createAppMetaValidators(freeze({
-  keys:freeze({verifiedRecoveryBackups:'verifiedRecoveryBackups',backupProtection:'backupProtection',attachmentIntegrityAudit:'attachmentIntegrityAudit',deviceFolder:'deviceFolder',repositoryIntegrityScrub:'repositoryIntegrityScrub',managedProviderBackupPending:'managedProviderBackupPending',repositoryMaintenancePending:'repositoryMaintenancePending',reconciliationBase:'reconciliationBase',reconciliationBaseNotePrefix:'reconciliationBaseNote:'}),
-  same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),normalizers:freeze({verifiedRecovery:normalizeVerifiedRecovery,attachmentIntegrity:normalizeAttachmentIntegrity,repositoryIntegrity:normalizeRepositoryIntegrityState,reconciliationBase:value=>value,reconciliationBaseNote:value=>value})
+  keys:freeze({verifiedRecoveryBackups:'verifiedRecoveryBackups',backupProtection:'backupProtection',attachmentIntegrityAudit:'attachmentIntegrityAudit',deviceFolder:'deviceFolder',repositoryIntegrityScrub:'repositoryIntegrityScrub',managedProviderBackupPending:'managedProviderBackupPending',repositoryMaintenancePending:'repositoryMaintenancePending',reconciliationBase:'reconciliationBase',reconciliationBaseNotePrefix:'reconciliationBaseNote:',reconciliationBaseDayPrefix:'reconciliationBaseDays:'}),
+  same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),normalizers:freeze({verifiedRecovery:normalizeVerifiedRecovery,attachmentIntegrity:normalizeAttachmentIntegrity,repositoryIntegrity:normalizeRepositoryIntegrityState,reconciliationBase:value=>value,reconciliationBaseNote:value=>value,reconciliationBaseDays:value=>value})
 }));
 assert.equal(migratedValidators.verifiedRecoveryBackups(metadataRows.get('verifiedRecoveryBackups').value,freeze({key:'verifiedRecoveryBackups'})),true,'migrated L7 recovery metadata must pass the ordinary current validator without compatibility interpretation');
 assert.equal(migratedValidators.attachmentIntegrityAudit(metadataRows.get('attachmentIntegrityAudit').value,freeze({key:'attachmentIntegrityAudit'})),true,'migrated L7 attachment-audit metadata must pass the ordinary current validator');

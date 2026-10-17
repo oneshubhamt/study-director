@@ -10,8 +10,8 @@ registry.define('host-metadata',1,()=>{
   function exactKeys(value,keys){return !!(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('|')===[...keys].sort().join('|'));}
   function createAppMetaValidators(input){
     exactObject(input,['keys','same','normalizers'],'Host metadata validator input');
-    exactObject(input.keys,['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix'],'Host metadata keys');
-    functions(input.normalizers,['verifiedRecovery','attachmentIntegrity','repositoryIntegrity','reconciliationBase','reconciliationBaseNote'],'Host metadata normalizers');
+    exactObject(input.keys,['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseDayPrefix'],'Host metadata keys');
+    functions(input.normalizers,['verifiedRecovery','attachmentIntegrity','repositoryIntegrity','reconciliationBase','reconciliationBaseNote','reconciliationBaseDays'],'Host metadata normalizers');
     if(typeof input.same!=='function')throw new TypeError('Host metadata equality helper is required.');
     const keys=input.keys,normalizers=input.normalizers,same=input.same;
     function canonical(key,value){
@@ -50,10 +50,11 @@ registry.define('host-metadata',1,()=>{
     }
     const validator=(value,context)=>canonical(context.key,value)===true;
     const reconciliationNoteValidator=(value,context)=>same(value,normalizers.reconciliationBaseNote(value,context))===true;
+    const reconciliationDaysValidator=(value,context)=>same(value,normalizers.reconciliationBaseDays(value,context))===true;
     return freeze({
       verifiedRecoveryBackups:validator,backupProtection:validator,attachmentIntegrityAudit:validator,
       deviceFolder:validator,repositoryIntegrityScrub:validator,managedProviderBackupPending:validator,repositoryMaintenancePending:validator,
-      reconciliationBase:validator,reconciliationBaseNotePrefix:reconciliationNoteValidator
+      reconciliationBase:validator,reconciliationBaseNotePrefix:reconciliationNoteValidator,reconciliationBaseDayPrefix:reconciliationDaysValidator
     });
   }
   return freeze({format:'study-director.host-metadata-module',contractVersion:1,createAppMetaValidators});

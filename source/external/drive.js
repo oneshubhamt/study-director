@@ -13,6 +13,7 @@
 
   const PLUGIN_VERSION='@@SD_RELEASE@@';
   const GOOGLE_OAUTH_CLIENT_ID='@@SD_GOOGLE_OAUTH_CLIENT_ID@@';
+  const SESSION_KEY='@@SD_DRIVE_SESSION_STORAGE_KEY@@';
   const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.file';
   const DRIVE_API='https://www.googleapis.com/drive/v3';
   const DRIVE_UPLOAD_API='https://www.googleapis.com/upload/drive/v3';
@@ -167,7 +168,25 @@
   function notifyConnectionChange(){for(const listener of [...connectionListeners])try{listener();}catch{}}
   function clearConnectionExpiryTimer(){if(connectionExpiryTimer!==null){clearTimeout(connectionExpiryTimer);connectionExpiryTimer=null;}}
   function scheduleConnectionExpiry(){clearConnectionExpiryTimer();if(!accessToken||!tokenExpiresAt)return;const delay=Math.max(0,tokenExpiresAt-Date.now());connectionExpiryTimer=setTimeout(()=>{connectionExpiryTimer=null;if(!accessToken)return;if(Date.now()>=tokenExpiresAt)clearSession();else scheduleConnectionExpiry();},delay);}
-  function clearAccessToken(){const changed=!!accessToken||tokenExpiresAt!==0;clearConnectionExpiryTimer();accessToken='';tokenExpiresAt=0;if(changed)notifyConnectionChange();}
+  // The sign-in is kept in this browser until it expires (about an hour), so a
+  // reload or reopening the app does not ask again. Other tabs pick it up too.
+  function parseSession(raw){try{const value=JSON.parse(raw||'null');return value&&typeof value==='object'?value:null;}catch{return null;}}
+  function usableSession(value){const expiresAt=Number(value&&value.expiresAt);return !!value&&typeof value.token==='string'&&!!value.token&&expiresAt>Date.now()+5000&&expiresAt<=Date.now()+7200000;}
+  function storedSession(){try{return parseSession(window.localStorage.getItem(SESSION_KEY));}catch{return null;}}
+  function rememberSession(){try{window.localStorage.setItem(SESSION_KEY,JSON.stringify({token:accessToken,expiresAt:tokenExpiresAt}));}catch{}}
+  function forgetSession(token){if(token&&(storedSession()||{}).token===token)try{window.localStorage.removeItem(SESSION_KEY);}catch{}}
+  function adoptSession(value){accessToken=value.token;tokenExpiresAt=Number(value.expiresAt);signedInBefore=true;scheduleConnectionExpiry();notifyConnectionChange();}
+  function restoreSession(){
+    const value=storedSession();
+    if(usableSession(value))adoptSession(value);else try{window.localStorage.removeItem(SESSION_KEY);}catch{}
+    try{window.addEventListener('storage',event=>{
+      if(event.key!==SESSION_KEY)return;
+      const next=parseSession(event.newValue);
+      if(usableSession(next)){if(next.token!==accessToken)adoptSession(next);}
+      else if(accessToken&&(parseSession(event.oldValue)||{}).token===accessToken)clearSession();
+    });}catch{}
+  }
+  function clearAccessToken(){const changed=!!accessToken||tokenExpiresAt!==0;forgetSession(accessToken);clearConnectionExpiryTimer();accessToken='';tokenExpiresAt=0;if(changed)notifyConnectionChange();}
   function clearPickerMetadata(){if(picker&&picker.list)picker.list.replaceChildren();}
   function clearSession(){clearAccessToken();invalidateFolderIdentity();cancelFolderResolution();clearPickerMetadata();}
   function grantedScopeSet(response){return new Set(String(response&&response.scope||'').split(/\s+/).filter(Boolean));}
@@ -194,7 +213,7 @@
     const safetyMs=Math.min(60000,Math.max(5000,Math.floor(lifetimeMs*0.1)));
     tokenExpiresAt=Date.now()+Math.max(1000,lifetimeMs-safetyMs);
     if(!accessToken){clearSession();pending.reject(new Error('Google did not return an access token.'));return;}
-    signedInBefore=true;scheduleConnectionExpiry();notifyConnectionChange();pending.resolve(accessToken);
+    signedInBefore=true;rememberSession();scheduleConnectionExpiry();notifyConnectionChange();pending.resolve(accessToken);
   }
   async function prepare(){
     requirePlatform();
@@ -1085,9 +1104,11 @@
     releaseFile=api.backup.releaseFile||releaseFile;
     receiveBackupStream=typeof api.backup.receiveStream==='function'?api.backup.receiveStream:null;
     if(!receiveBackupStream)return false;
+    restoreSession();
     return api.backup.providers.register(Object.freeze({
       id:'google-drive',
       label:'Google Drive',
+      shared:true,
       prepare,
       authorize,
       backgroundAvailable:()=>tokenValid(),

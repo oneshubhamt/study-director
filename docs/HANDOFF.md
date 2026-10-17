@@ -2,7 +2,7 @@
 
 Status of the work on this branch (`refactor/background-coordination`, draft PR #1). Read sections 1 and 5 first; sections 2 to 4 are closed summaries.
 
-**Current state (2026-10-17):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). **Next: Drive sync and profiles (section 5).** Last of all: Wordgard as its own module, with two items to explore alongside it: notification sounds made in code, and the editor toolbar order (section 6).
+**Current state (2026-10-17):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). **In progress: Drive sync and profiles (section 5).** Done: the small items (5.5) and sync (5.1). Next: review marks that do not stop the sync (5.2), the first-start form (5.4), then profiles (5.3), then removing code section 5 made redundant. Last of all: Wordgard as its own module, with two items to explore alongside it: notification sounds made in code, and the editor toolbar order (section 6).
 
 ---
 
@@ -15,7 +15,7 @@ Status of the work on this branch (`refactor/background-coordination`, draft PR 
 2. Audit it and report to the user what I think. **Done.**
 3. Hold a brainstorming session with the user to understand how to improve notes. Discuss first; build only after agreement. **Done.**
 4. Then the background services (section 4). **Done.**
-5. Then Drive sync and profiles (section 5, decided 2026-10-17). **Next.**
+5. Then Drive sync and profiles (section 5, decided 2026-10-17). **In progress.**
 6. The session concludes only once all four — backup, notes, background services, sync — are as good as we can reasonably make them.
 
 **Migration (user's rule, 2026-10-10).** Older data is read once, converted into the current canonical form, verified and retired, never used again. Only the compatibility host (`compatibility-host.js`, plus repository adapters where a transaction requires it) reads old forms; the ordinary runtime reads only current forms. Every conversion is listed in `contracts/compatibility.mjs` with its retirement condition, so the whole migration machinery can be deleted later, leaving one clean canonical data structure.
@@ -90,6 +90,15 @@ Build this next, before Wordgard (section 6). The decisions below are the user's
 **Why.** Drive today is explicit handoff: back up the device you leave, then choose Combine or Replace on the other. If that step is skipped, the keep-15 rule (newest version per day, over all devices together) can drop one device's versions from Drive, so its edits then live only on that device (audit finding #1, 2026-10-17). Sync removes the manual step, and with it the risk.
 
 ### 5.1 Sync
+
+**Done** (2026-10-17). Design and rules: `docs/BACKUP-ENGINE.md`, "Sync through Drive" and "One history". What was built, against the table below:
+- Catch up first, then upload; an upload that finds Drive moved on stops and the device catches up; another device's recent publication marker makes it wait its turn.
+- The shared base (v3) also holds one fingerprint per Saved Day and one of the Active Session, so Saved Days and the session merge three-way. Only Drive moves it.
+- Sync never asks: anything that needs a choice leaves the data untouched and shows "Needs review" (sidebar and Drive row); Review opens Combine on Drive's version, after the study session if one runs. Making review marks that do not stop the rest of the sync is 5.2.
+- The running session waits ("hold") while everything else merges.
+- Sign-in kept across reloads for the rest of its hour.
+- **Changed from the table (user, 2026-10-17):** the Device Folder and Drive keep one history. A version is made once and copied to the other location under the same id, so both show the same versions. The Device Folder is still not a sync channel.
+- Known limits: a fresh device whose plans and settings differ from Drive's shows "Needs review" on its first sync (5.4 settles this); two devices running a session on the same day can still replace one another's session when one overtakes the other's revision.
 
 | Part | Decision |
 |---|---|
@@ -230,6 +239,8 @@ Do this at the very end, after Drive sync and profiles.
 Commits since `main` (newest first), grouped:
 
 ### Backups (this and recent sessions)
+- The commit after `ebb49fa`: sync through Drive (5.1) and one history for the Device Folder and Drive.
+- `ebb49fa` Hourly versions where notes changed; Combine blue, Replace amber; audit fixes (5.5).
 - `d8000e4` and the commit after `9afe06d`: the Device Folder runs through the shared backup engine. It was saved mid-move, then finished, with the due-time, lease-renewal and aborted-maintenance fixes.
 - `d27570f` Prepare the backup engine to host the Device Folder (hosted locations, server-digest receipts, operation views, protected safety API).
 - `f71a941` Check runs of small attachments with one read (`checksum.ranges`).

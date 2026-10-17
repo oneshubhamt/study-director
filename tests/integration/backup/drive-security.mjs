@@ -25,6 +25,27 @@ async function waitFor(predicate,message){
   await new Promise(resolve=>setTimeout(resolve,1100));assert.equal(provider.connected(),false,'Drive connected state must expire without requiring a user action');assert.equal(changes,2,'scheduled OAuth expiry must notify provider UI so stale Backup/Versions/Settings controls disappear');
 }
 
+// The sign-in lasts across a reload until it expires: it is kept in this
+// browser's storage, forgotten on expiry, rejection and disconnect, and
+// picked up by other tabs.
+{
+  const KEY='studyDirector.driveSession.v1',rows=new Map(),storage={getItem:key=>rows.has(key)?rows.get(key):null,setItem:(key,value)=>{rows.set(key,String(value));},removeItem:key=>{rows.delete(key);}};
+  const first=createHarness({localStorage:storage});await first.provider.prepare();await first.provider.authorize();
+  const saved=JSON.parse(rows.get(KEY));assert.match(saved.token,/^token-/u);assert.ok(saved.expiresAt>Date.now()&&saved.expiresAt<=Date.now()+3600000);assert.deepEqual(Object.keys(saved).sort(),['expiresAt','token'],'only the token and its expiry are kept');
+  const reloaded=createHarness({localStorage:storage});assert.equal(reloaded.provider.connected(),true,'a reload keeps the Drive sign-in for the rest of its hour');assert.equal(reloaded.provider.connectionExpiresAt(),saved.expiresAt);
+  await reloaded.provider.repository.list({kind:'object'});assert.equal(reloaded.state.requests.at(-1).authorization,'Bearer '+saved.token,'the kept sign-in is used without asking again');
+  reloaded.state.force401Once=true;await assert.rejects(()=>reloaded.provider.repository.list({kind:'object'}),/authorization expired/u);assert.equal(rows.has(KEY),false,'a sign-in Google rejects is forgotten');
+  rows.set(KEY,JSON.stringify({token:'token-old',expiresAt:Date.now()-1000}));assert.equal(createHarness({localStorage:storage}).provider.connected(),false);assert.equal(rows.has(KEY),false,'an expired sign-in is removed, not used');
+  rows.set(KEY,JSON.stringify({token:'token-far',expiresAt:Date.now()+86400000}));assert.equal(createHarness({localStorage:storage}).provider.connected(),false,'a sign-in claiming to last a day is not trusted');
+  rows.set(KEY,'{broken');assert.equal(createHarness({localStorage:storage}).provider.connected(),false);assert.equal(rows.has(KEY),false);
+  const listeners=[],tab=createHarness({localStorage:storage,addEventListener:(type,listener)=>{if(type==='storage')listeners.push(listener);}});assert.equal(tab.provider.connected(),false);
+  const signer=createHarness({localStorage:storage});await signer.provider.prepare();await signer.provider.authorize();const value=rows.get(KEY);
+  for(const listener of listeners)listener({key:KEY,newValue:value,oldValue:null});assert.equal(tab.provider.connected(),true,'another tab picks up a new sign-in');
+  await signer.provider.disconnect();assert.equal(rows.has(KEY),false,'disconnect forgets the sign-in');
+  for(const listener of listeners)listener({key:KEY,newValue:null,oldValue:value});assert.equal(tab.provider.connected(),false,'disconnecting in one tab signs out the others');
+  const plain=createHarness();await plain.provider.prepare();await plain.provider.authorize();assert.equal(plain.provider.connected(),true,'without browser storage Drive still signs in');
+}
+
 const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSource=async()=>{})=>{const blob=new Blob([text],{type:'application/octet-stream'});return {kind,id,name:id+(kind==='object'?'.sdobject':kind==='commit'?'.sdcommit':'.sdcheckpoint'),blob,size:blob.size,digest:await digest(blob),exportedAt:'2026-09-19T00:00:00.000Z',appVersion:'QA_FIXTURE',checkProtection,checkSource};};
 
 // Complete history discovery is independent of retention capacity. Page work

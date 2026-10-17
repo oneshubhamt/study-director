@@ -51,7 +51,7 @@ assert.match(managedRepository,/objectListingFailed=true[\s\S]*uncertainCount:un
 assert.match(background,/const PRIORITY=freeze\(\{integrity:10,maintenance:20,automatic:30,convergence:40\}\)/u,'background priority must be explicit and shared');
 assert.match(background,/function beginForeground[\s\S]*suspendTimers\(\)[\s\S]*row\.controller\.abort/u,'foreground work must disarm scheduled work and abort active lower-priority jobs');
 assert.match(background,/function suspend\(reason='suspended'\)[\s\S]*waiting=\[\][\s\S]*row\.settlement[\s\S]*const settled=waitForSettlement\(waiting\)/u,'shared suspension must expose a settlement barrier rather than merely signal abort');
-assert.match(provider,/if\(busy\)\{schedulePendingProviderBackup\(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS\)/u,'automatic backups never start while a foreground operation owns the engine');
+assert.match(provider,/if\(busy\|\|sync\?\.catching\)\{schedulePendingProviderBackup\(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS\)/u,'automatic backups never start while a foreground operation owns the engine');
 assert.match(provider,/scope=await background\.beginBackground\('convergence'/u,'automatic publication must use the shared background ownership gate');
 assert.match(provider,/async function createProtectedSafety\(id,purpose='before-clear-library',options=\{\}\)[\s\S]*beginForeground\(selected[\s\S]*await foreground\.settled[\s\S]*saveRepositoryProvider/u,'Before Clear Library safety must reserve foreground ownership and settle background work before repository work');
 assert.match(provider,/function beginForeground\(selected[\s\S]*background\.beginForeground/u,'Drive explicit operations must reserve shared foreground ownership');

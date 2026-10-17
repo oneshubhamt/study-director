@@ -33,7 +33,8 @@ assert.match(app,/const SESSION_STORAGE_KEYS=Object\.freeze\(@@SD_SESSION_STORAG
 assert.match(app,/const OBSOLETE_STORAGE_KEYS=Object\.freeze\(@@SD_OBSOLETE_LOCAL_STORAGE_KEYS@@\);/u);
 assert.match(app,/const APP_META_KEYS=Object\.freeze\(@@SD_APP_META_KEYS@@\);/u);
 assert.match(app,/const OBSOLETE_APP_META_KEYS=Object\.freeze\(@@SD_OBSOLETE_APP_META_KEYS@@\);/u);
-assert.equal(Object.keys(LOCAL_STORAGE_KEYS).length,18,'current localStorage inventory; attachment cleanup keeps no record of its own');
+assert.equal(Object.keys(LOCAL_STORAGE_KEYS).length,19,'current localStorage inventory; attachment cleanup keeps no record of its own');
+assert.equal(LOCAL_STORAGE_KEYS.driveSession,'studyDirector.driveSession.v1');
 for(const key of ['attachmentMaintenancePending','attachmentMaintenanceDay']){assert.equal(Object.hasOwn(LOCAL_STORAGE_KEYS,key),false,key+' is retired');assert.equal(Object.hasOwn(DATA_ARCHITECTURE.localStorage,key),false,key+' has no live surface');}
 assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.attachmentMaintenancePending,'studyDirector.attachmentMaintenancePending.v1');
 assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.attachmentMaintenanceDay,'studyDirector.attachmentMaintenanceDay.v2');
@@ -98,7 +99,7 @@ assert.equal(validationFamilies.length,new Set(validationFamilies).size,'each cu
 assert.deepEqual([...validationFamilies].sort(),currentAppMetaFamilies,'every current appMeta family must be assigned to a validator');
 assert.deepEqual(APP_META_VALIDATION_OWNERS.repositories,Object.freeze(['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','savedDayDeletionPrefix','noteDeletionPrefix','attachmentDeletionPrefix']));
 assert.deepEqual(APP_META_VALIDATION_OWNERS.journals,Object.freeze(['libraryClearJournalState','libraryClearJournalPayloadPrefix','restoreJournalState','restoreJournalPayload','mutationLease']));
-assert.deepEqual(APP_META_VALIDATION_OWNERS.host,Object.freeze(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix']));
+assert.deepEqual(APP_META_VALIDATION_OWNERS.host,Object.freeze(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseDayPrefix']));
 assert.equal(Object.hasOwn(APP_META_VALIDATION_OWNERS,'provider'),false,'retired monolithic provider-operation journal must not remain a validation family');
 assert.equal(APP_META_FAMILY_COUNT,Object.keys(APP_META_KEYS).length,'appMeta family count must be mechanically derived from the authoritative identity map');
 assert.equal(APP_META_FAMILY_LABEL,`${APP_META_FAMILY_COUNT} typed appMeta families`);

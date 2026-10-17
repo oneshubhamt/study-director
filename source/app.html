@@ -518,6 +518,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
     <div class="sb-eyebrow ui-label">Study Director</div>
     <label class="sb-name"><input class="sb-name-input" id="student-display" data-student-name type="text" value="Student" aria-label="Student name" spellcheck="false" autocomplete="name" data-input="student-name" data-blur="student-name" data-keydown="student-name" title="Edit name; saved locally on blur"></label>
     <div class="sb-race ui-mono" id="sb-date">—</div>
+    <button class="sb-sync ui-mono" id="sb-sync" type="button" data-action="show-drive-sync" aria-label="Google Drive sync status" hidden></button>
   </div>
   <div class="sb-clock">
     <div class="sb-clock-lbl ui-label">Local Time</div>
@@ -1043,11 +1044,11 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
         <p class="library-explainer ui-body">Backups, files and storage for this device.</p>
         <div class="library-data-group ui-panel">
           <details class="backup-model-disclosure ui-disclosure">
-            <summary><span class="backup-model-summary"><span class="backup-model-summary-title">Backup model</span><span class="backup-model-summary-copy">Local-first · versioned handoff</span></span></summary>
+            <summary><span class="backup-model-summary"><span class="backup-model-summary-title">Backup model</span><span class="backup-model-summary-copy">Local-first · syncs through Drive</span></span></summary>
             <div class="backup-model-body ui-helper">
               <dl class="backup-model-explainer">
                 <div><dt>Managed checkpoints</dt><dd>Device Folder keeps verified versions in a folder you choose on this device. Google Drive keeps the same managed checkpoint model off-device. Each version behaves as a complete recovery point even though unchanged data is reused internally.</dd></div>
-                <div><dt>Multi-device handoff</dt><dd>Back up the device you are leaving to Google Drive, then on the other device open Google Drive → Versions and choose Combine or Replace. Saved data and the Active Session travel with the checkpoint. This is explicit handoff, not continuous sync.</dd></div>
+                <div><dt>Several devices</dt><dd>While a device is signed in to Google Drive it syncs: it takes in what your other devices changed, then uploads its own changes. A change made on one side only is taken for you; a difference made on both sides waits, marked Needs review, until you choose. Saved data and the Active Session travel too; changes to a session running here wait until it ends. Without Drive, each device keeps working on its own.</dd></div>
                 <div><dt>Portable backup</dt><dd>Export backup creates one complete <span class="ui-mono">.sdbackup</span> file for manual transfer or safekeeping. Import it on any Study Director device when needed; it does not join Device Folder or Google Drive version history.</dd></div>
               </dl>
               <div class="backup-model-included-label ui-label">Included in a complete checkpoint</div>
@@ -1092,7 +1093,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                 <div class="backup-row-copy">
                   <div class="backup-location-heading">
                     <span class="ui-label">Google Drive</span><span class="backup-location-badge optional">Optional</span>
-                    <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="drive-backup-info" aria-label="About Google Drive backup" aria-expanded="false" aria-controls="drive-backup-info">i</button><span class="pnote-info-popover" id="drive-backup-info" role="note" hidden>Independent off-device checkpoint history and the intended multi-device handoff path. Back up the device you are leaving, then on the other device open Versions and Combine or Replace. This is explicit handoff, not live sync; Device Folder is never inspected. Connect asks Google for drive.file access: Study Director creates, reads, verifies and deletes only its own backup files, never your other Drive files. After the first backup from this device it backs up automatically while you are signed in; Google ends a sign-in after about an hour.</span></span>
+                    <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="drive-backup-info" aria-label="About Google Drive backup" aria-expanded="false" aria-controls="drive-backup-info">i</button><span class="pnote-info-popover" id="drive-backup-info" role="note" hidden>Off-device version history, and where your devices meet. While you are signed in, this device takes in what your other devices changed, then backs up its own changes; a difference made on both sides waits for your review. Connect asks Google for drive.file access: Study Director creates, reads, verifies and deletes only its own backup files, never your other Drive files. Google ends a sign-in after about an hour; until then it stays signed in across reloads.</span></span>
                   </div>
                 </div>
                 <strong class="backup-status-value standard ui-mono" id="backup-provider-row-status-google-drive">Not connected</strong>
@@ -1897,6 +1898,11 @@ async function showBackupPresentation(source,kind){
   // Reconnecting straight from the toast keeps it to one click.
   if(kind==='permission'&&source!=='file'&&await BackupProviderRuntime.connect(source))return true;
   if(['history','restore-version','bring-in','remove-safety'].includes(kind))return BackupRecoveryHost?.history.openSource(source);
+  // A review opens Combine, which waits while today's session runs.
+  if(kind==='sync-review'){
+    if(!hasBlockingActiveSession())return BackupProviderRuntime.reviewSync(source);
+    Interactions.notify({source:'backup',key:'sync-review-session',title:'Review after this session',message:'Suspend or end today’s session to review changes from another device.'});return false;
+  }
   if(!await goTab('library',{source:'backup-notification'}))return false;
   LibraryView.showSection('data');
   // 'restore' shows every way back in: Device Folder where supported, Google
@@ -1932,7 +1938,7 @@ function renderNotificationSurfaces(state){
   }
 }
 NoticeCoordinator.subscribe(renderNotificationSurfaces);
-const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze({notifications:NoticeCoordinator,timeLabel:storageHealthTime,verified:source=>verifiedRecoveryState.providers[source]||null,action:(source,kind)=>Object.freeze({label:kind==='permission'?(source==='device-folder'?'Allow access':'Reconnect'):'Show details',run:()=>showBackupPresentation(source,kind)})}));
+const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze({notifications:NoticeCoordinator,timeLabel:storageHealthTime,verified:source=>verifiedRecoveryState.providers[source]||null,action:(source,kind)=>Object.freeze({label:kind==='permission'?(source==='device-folder'?'Allow access':'Reconnect'):kind==='sync-review'?'Review':'Show details',run:()=>showBackupPresentation(source,kind)})}));
 const Interactions=InteractionsModule.createController(Object.freeze({ports:Object.freeze({
   environment:Object.freeze({
     clearTimeout:id=>clearTimeout(id),document,
@@ -2909,6 +2915,7 @@ function renderDriveBackup(){
   if(panel&&!connected)panel.hidden=true;
   if(last){const at=verifiedRecoveryState.providers['google-drive']?.at;last.textContent=at?`Last verified ${storageHealthTime(at)}`:'Not yet verified';}
   if(disconnect)disconnect.disabled=state.engineBusy;
+  const sync=node('sb-sync');if(sync){const label=BackupPresentation.syncLabel(state);sync.hidden=!label;if(sync.textContent!==label)sync.textContent=label;sync.dataset.state=state.sync?.review?'review':'';}
 }
 function renderDeviceBackup(state){
   if(!state)return;
@@ -4192,13 +4199,13 @@ AppMetaGateway.registerValidators('host',HostMetadataModule.createAppMetaValidat
     verifiedRecoveryBackups:APP_META_KEYS.verifiedRecoveryBackups,backupProtection:APP_META_KEYS.backupProtection,
     attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,deviceFolder:APP_META_KEYS.deviceFolder,
     repositoryIntegrityScrub:APP_META_KEYS.repositoryIntegrityScrub,managedProviderBackupPending:APP_META_KEYS.managedProviderBackupPending,repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,
-    reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix
+    reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix,reconciliationBaseDayPrefix:APP_META_KEYS.reconciliationBaseDayPrefix
   }),
   same:sameDataValue,
   normalizers:Object.freeze({
     verifiedRecovery:normalizeVerifiedRecoveryState,attachmentIntegrity:normalizeAttachmentIntegrityState,
     repositoryIntegrity:normalizeRepositoryIntegrityState,
-    reconciliationBase:ReconciliationBaselineCodec.normalizeHeader,reconciliationBaseNote:ReconciliationBaselineCodec.normalizeNote
+    reconciliationBase:ReconciliationBaselineCodec.normalizeHeader,reconciliationBaseNote:ReconciliationBaselineCodec.normalizeNote,reconciliationBaseDays:ReconciliationBaselineCodec.normalizeDays
   })
 })));
 const RepositoryAppMeta=AppMetaGateway.bind('repositories');
@@ -4210,7 +4217,7 @@ const DeviceFolderAppMeta=AppMetaGateway.bind('device-backup');
 const BackupAppMeta=AppMetaGateway.bind('backup');
 const ReconciliationBaselineStore=ReconciliationBaselineModule.createStore(Object.freeze({
   codec:ReconciliationBaselineCodec,meta:HostAppMeta,
-  families:Object.freeze({header:'reconciliationBase',notes:'reconciliationBaseNotePrefix'})
+  families:Object.freeze({header:'reconciliationBase',notes:'reconciliationBaseNotePrefix',days:'reconciliationBaseDayPrefix'})
 }));
 let richAssetReferenceRevision=0,captureMutationGeneration=0,backupFastFenceReady=false;
 let imagePreparationCount=0,pwaWorkRevision=0;
@@ -4323,19 +4330,10 @@ function exactAppMetaStorage(capability,family,key,label){
 }
 async function readHostAppMetaValue(key){return HostAppMeta.read(exactAppMetaFamily(HostAppMeta,key,'host app metadata'));}
 function writeHostAppMetaValue(key,value,options={}){return HostAppMeta.write(exactAppMetaFamily(HostAppMeta,key,'host app metadata'),value,options);}
-// A combine or restore records the backup's notes, and the fingerprint of its
-// plans and settings, as the new shared base.
-function reconciliationFullUpdate(notesPayload,personalFingerprint){
-  const notes=AppData.notes.normalizePayload(notesPayload||{}),noteKeys=Object.keys(notes).sort(),updates=Object.create(null);
-  for(const key of noteKeys)updates[key]=Object.freeze({label:String(notes[key].label||''),text:String(notes[key].text||'')});
-  return Object.freeze({format:'study-director.reconciliation-base-update',version:1,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:String(personalFingerprint||''),noteKeys:Object.freeze(noteKeys),updates:Object.freeze(updates),deletes:Object.freeze([])});
-}
 async function readReconciliationBase(){return ReconciliationBaselineStore.readHeader();}
 async function readReconciliationBaseNotes(keys){return ReconciliationBaselineStore.readNotes(keys);}
-async function writeReconciliationBase(checkpointId,payload,personalFingerprint=''){
-  const spec=payload&&payload.format==='study-director.reconciliation-base-update'&&Number(payload.version)===1?payload:reconciliationFullUpdate(payload,personalFingerprint);
-  return ReconciliationBaselineStore.write(checkpointId,spec);
-}
+async function readReconciliationBaseDays(dates){return ReconciliationBaselineStore.readDays(dates);}
+async function writeReconciliationBase(checkpointId,spec){return ReconciliationBaselineStore.write(checkpointId,spec);}
 const VERIFIED_RECOVERY_META_KEY=APP_META_KEYS.verifiedRecoveryBackups;
 // The one record of past backups (version 3). Each entry is a copy: when it was
 // made (at), the change it holds (sourceRevision) and its backup format. file is
@@ -8329,7 +8327,7 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
     appMeta:Object.freeze({
       personalPreferences:APP_META_KEYS.personalPreferences,dataMaintenance:APP_META_KEYS.dataMaintenance,verifiedRecoveryBackups:APP_META_KEYS.verifiedRecoveryBackups,
       attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,deviceFolder:APP_META_KEYS.deviceFolder,restoreJournalPayload:APP_META_KEYS.restoreJournalPayload,
-      repositoryIntegrityScrub:APP_META_KEYS.repositoryIntegrityScrub,reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix,
+      repositoryIntegrityScrub:APP_META_KEYS.repositoryIntegrityScrub,reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix,reconciliationBaseDayPrefix:APP_META_KEYS.reconciliationBaseDayPrefix,
       reconciliationBaseLegacy:OBSOLETE_APP_META_KEYS.reconciliationBaseLegacy,repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,repositoryMaintenancePendingLegacy:OBSOLETE_APP_META_KEYS.repositoryMaintenancePendingLegacy,
       libraryClearJournalState:APP_META_KEYS.libraryClearJournalState,libraryClearJournalPayloadPrefix:APP_META_KEYS.libraryClearJournalPayloadPrefix,
       archiveClearJournalStateLegacy:OBSOLETE_APP_META_KEYS.archiveClearJournalStateLegacy,archiveClearJournalPayloadPrefixLegacy:OBSOLETE_APP_META_KEYS.archiveClearJournalPayloadPrefixLegacy,
@@ -8630,7 +8628,8 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     deletionRecoveryClearAttachment:assetId=>AppData.deletionRecovery.clearAttachment(assetId),
     reconciliationBaseRead:()=>readReconciliationBase(),
     reconciliationBaseReadNotes:keys=>readReconciliationBaseNotes(keys),
-    reconciliationBaseWrite:(checkpointId,notes,personalFingerprint)=>writeReconciliationBase(checkpointId,notes,personalFingerprint)
+    reconciliationBaseReadDays:dates=>readReconciliationBaseDays(dates),
+    reconciliationBaseWrite:(checkpointId,spec)=>writeReconciliationBase(checkpointId,spec)
   }),
   assets:Object.freeze({
     get:assetId=>AttachmentStorage.get(assetId),
@@ -9707,6 +9706,7 @@ const CLICK_ACTIONS=Object.freeze({
   'gap-ignore': ()=>classifyInactiveGap('ignore'),
   'gap-apply': applyInactiveGapSplit,
   'dismiss-storage-warning': dismissStorageWarning,
+  'show-drive-sync': ()=>showBackupPresentation('google-drive',BackupProviderRuntime.locationStatus('google-drive')?.sync?.review?'sync-review':'status'),
   'save-name-setup': saveNameSetup,
   'skip-name-setup': skipNameSetup,
   'font-smaller': ()=>stepFontScale(-1),

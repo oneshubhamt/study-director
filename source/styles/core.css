@@ -854,6 +854,10 @@ input,textarea,select{border-radius:var(--sd-shape-field-radius)}
 .sb-eyebrow{color:var(--sd-color-shell-header-eyebrow);margin-bottom:6px;position:relative}
 .sb-name{display:block;font-family:var(--sd-font-condensed);font-size:var(--sd-type-role-title-compact-size);font-weight:var(--sd-font-weight-black);color:var(--sd-color-on-strong);letter-spacing:.7px;text-transform:uppercase;line-height:1.04;position:relative;text-shadow:0 0 18px var(--sd-line-neutral-strong)}
 .sb-race{color:var(--sd-color-shell-header-date);margin-top:10px;position:relative}
+.sb-sync{display:block;margin-top:4px;padding:0;border:0;background:none;color:var(--sd-color-shell-header-date);font-size:var(--sd-type-role-overline-size);text-align:left;cursor:pointer;position:relative;opacity:.85}
+.sb-sync:hover,.sb-sync:focus-visible{opacity:1;color:var(--sd-color-accent-primary)}
+.sb-sync[data-state="review"]{color:var(--sd-color-warning);opacity:1}
+.sb-sync[hidden]{display:none}
 .sb-clock{padding:var(--sd-space-16) var(--sd-space-20) var(--sd-space-17);border-bottom:1px solid rgba(var(--sd-rgb-neutral-overlay),.08)}
 .sb-clock-lbl{color:var(--sd-color-text-secondary);margin-bottom:4px}
 #clock{font-family:var(--sd-font-mono);font-size:var(--sd-type-role-title-size);color:var(--sd-color-accent-primary);filter:drop-shadow(0 0 10px rgba(var(--sd-rgb-accent-primary),.32));letter-spacing:2px}

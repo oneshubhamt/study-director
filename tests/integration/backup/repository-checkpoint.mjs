@@ -72,7 +72,7 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
     notesExportPayload:()=>notes,notesReadFreshPayload:async()=>notes,notesReadFreshItems:async keys=>(keys||[]).map(key=>notes[key]||null),notesFlush:async()=>true,notesNormalizePayload:value=>value,notesTrashKey:key=>String(key).startsWith('~')?'':'~deleted '+key,notesAlignByTitle:value=>value,notesFailure:()=>null,
     restoreJournalPrepare:async()=>true,restoreJournalRead:async()=>null,restoreJournalMark:async()=>true,restoreJournalClear:async()=>true,
     scheduleRead:()=>'',personalSettle:async()=>true,personalExport:async()=>freeze({version:2,plans:freeze({draft:null,savedPlans:freeze([]),defaultId:null}),preferences:freeze(personalCodec.preferences({studentName:'Repo QA'}))}),personalImport:async()=>true,personalVerify:async()=>true,
-    storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async()=>snapshotRevision,canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],installationId:()=> 'inst_repository_qa',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryNotes:async()=>[],deletionRecoveryReplaceNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>reconciliationBase,reconciliationBaseReadNotes:async keys=>freeze(Object.fromEntries(keys.filter(key=>Object.prototype.hasOwnProperty.call(reconciliationBaseNotes,key)).map(key=>[key,reconciliationBaseNotes[key]]))),reconciliationBaseWrite:writeBaseline
+    storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async()=>snapshotRevision,canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],installationId:()=> 'inst_repository_qa',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryNotes:async()=>[],deletionRecoveryReplaceNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>reconciliationBase,reconciliationBaseReadNotes:async keys=>freeze(Object.fromEntries(keys.filter(key=>Object.prototype.hasOwnProperty.call(reconciliationBaseNotes,key)).map(key=>[key,reconciliationBaseNotes[key]]))),reconciliationBaseReadDays:async()=>freeze({}),reconciliationBaseWrite:writeBaseline
   }),
   codecs:freeze({activeSession:ActiveSessionCodec,backup:BackupCodec}),reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({resolve:async({conflicts=[]})=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries(conflicts.map(item=>[item.key,freeze({text:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),exports:exportsPort,
   session:freeze({canMutate:()=>primary,cancelLiveDraftSave:noop,captureSnapshot:()=>null,hasActiveSession:()=>false,hasTasks:()=>false,toActiveSession:()=>null,withPersistenceSuppressed:operation=>operation()}),
@@ -502,7 +502,8 @@ const repositoryTransport=freeze({
   list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,
   beginOperation:()=>{remoteOperationBegins+=1;return freeze({list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete});}
 });
-assert.equal(runtime.providers.register(freeze({id:'repository-qa',label:'Repository QA',repository:repositoryTransport})),true);
+// This location stands in for Drive: only a shared location moves the base.
+assert.equal(runtime.providers.register(freeze({id:'repository-qa',label:'Repository QA',shared:true,repository:repositoryTransport})),true);
 snapshotRevision='provider-1';sourceRevision='2026-09-19T01:00:00.000Z';dailyRecords=[freeze({version:16,recordKind:'study',date:'2026-09-18',reflection:'provider record',savedAt:sourceRevision,updatedAt:sourceRevision})];
 notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'provider note 1',updatedAt:sourceRevision})};
 const providerAttachmentReadsBefore=assetReads;
@@ -544,6 +545,8 @@ assert.deepEqual(deepLineagePublication.manifest.reconciliationAncestorIds,expec
 
 // A failed provider final-commit write must not publish a new Latest or advance local reconciliation provenance.
 const providerLatestBeforeCommitFailure=retainedLineage.at(-1).checkpoint.checkpointId,providerCheckpointCountBeforeCommitFailure=[...remoteFiles.values()].filter(file=>file.kind==='checkpoint').length,providerCommitCountBeforeCommitFailure=[...remoteFiles.values()].filter(file=>file.kind==='commit').length,providerBaselineWritesBeforeCommitFailure=reconciliationBaseWrites.length;
+// The probe above moved the base elsewhere; this device is back in step with the provider's newest version.
+await forceBaseline(providerLatestBeforeCommitFailure,notes);
 sourceRevision='2026-09-19T01:05:15.000Z';snapshotRevision='provider-commit-failure';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'provider commit failure probe',updatedAt:sourceRevision})};failRemoteCommit=true;
 await assert.rejects(()=>runtime.providers.backupRepositoryProvider('repository-qa'),/commit-marker failure/i);
 assert.equal([...remoteFiles.values()].filter(file=>file.kind==='checkpoint').length,providerCheckpointCountBeforeCommitFailure,'failed provider final commit must remove its unpublished manifest');
@@ -553,6 +556,28 @@ const providerCommittedAfterFailure=[];for(const file of remoteFiles.values())if
 
 const pendingProviderBackups=new Map();
 runtime.providers.configurePendingBackupRetry(freeze({read:async id=>pendingProviderBackups.get(id)||null,mark:async id=>(pendingProviderBackups.set(id,freeze({providerId:id})),true),clear:async id=>(pendingProviderBackups.delete(id),true)}));
+// One history for every location: a version made in one location is copied
+// to the next under the same id, so the Device Folder and Drive hold the
+// same versions, whichever backs up first.
+{
+  const store=()=>{const files=new Map(),key=(kind,id)=>kind+':'+id,describe=file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,digest:file.digest,remoteId:'spine-'+key(file.kind,file.id)});
+    return freeze({files,transport:freeze({list:async({kind})=>freeze({items:freeze([...files.values()].filter(file=>file.kind===kind).map(describe)),overflow:false}),upload:async file=>{const stored=freeze({...file,createdAt:new Date().toISOString()});files.set(key(file.kind,file.id),stored);return describe(stored);},download:async ref=>{const stored=files.get(key(ref.kind,ref.id));if(!stored)throw new Error('missing spine file');return freeze({blob:stored.blob,release:async()=>{}});},delete:async ref=>files.delete(key(ref.kind,ref.id))})});};
+  let connected=true;const baseBefore=reconciliationBase,baseNotesBefore=reconciliationBaseNotes;
+  const device=store(),drive=store(),versions=location=>[...location.files.values()].filter(file=>file.kind==='checkpoint').map(file=>file.id).sort(),uploads=location=>[...location.files.values()].filter(file=>file.kind==='object').length;
+  assert.equal(runtime.providers.register(freeze({id:'spine-device',label:'Device Folder',connected:()=>connected,repository:device.transport})),true);
+  assert.equal(runtime.providers.register(freeze({id:'spine-drive',label:'Google Drive',shared:true,connected:()=>connected,repository:drive.transport})),true);
+  runtime.providers.configureAutomaticBackup(freeze({covered:()=>sourceRevision,current:()=>sourceRevision}));
+  try{
+    sourceRevision='2026-09-19T02:00:00.000Z';snapshotRevision='spine-1';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'spine one',updatedAt:sourceRevision})};
+    const made=await runtime.providers.backupRepositoryProvider('spine-device',{interactive:false}),copied=await runtime.providers.backupRepositoryProvider('spine-drive',{interactive:false});
+    assert.equal(copied.checkpointId,made.checkpointId,'Drive takes the Device Folder version under the same id');assert.deepEqual(versions(drive),versions(device));assert.equal(uploads(drive),uploads(device),'with every object it needs');
+    assert.equal(reconciliationBase.checkpointId,made.checkpointId,'the copied version is what this device shares with Drive');
+    sourceRevision='2026-09-19T02:10:00.000Z';snapshotRevision='spine-2';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'spine two',updatedAt:sourceRevision})};
+    const second=await runtime.providers.backupRepositoryProvider('spine-drive',{interactive:false}),back=await runtime.providers.backupRepositoryProvider('spine-device',{interactive:false});
+    assert.notEqual(second.checkpointId,made.checkpointId);assert.equal(back.checkpointId,second.checkpointId,'the Device Folder takes the Drive version under the same id');
+    assert.deepEqual(versions(drive),versions(device),'both locations hold the same versions');
+  }finally{runtime.providers.configureAutomaticBackup(null);connected=false;reconciliationBase=baseBefore;reconciliationBaseNotes=baseNotesBefore;}
+}
 const retainedManifests=[];
 for(const file of remoteFiles.values())if(file.kind==='checkpoint')retainedManifests.push(await runtime.repository.inspectManifest(file.blob,{interactive:false}));
 const retainedObjectIds=new Set(retainedManifests.flatMap(manifest=>manifest.objects.map(entry=>entry.objectId)));
@@ -981,7 +1006,7 @@ for(const encrypted of [false,true]){
  h.state.uploadProgressSteps=14;h.state.uploadProgressStepMs=body=>Math.max(1,Math.ceil(body.size/(2*1048576)*90000));
  const row=()=>runtime.providers.backgroundStatus().find(value=>value.job===id+' convergence');
  const pump=async(predicate)=>{let elapsed=0;for(const deadline=performance.now()+30000;!predicate()&&performance.now()<deadline;){
-  await new Promise(resolve=>setImmediate(resolve));
+  await new Promise(resolve=>setImmediate(resolve));if(predicate())break;
   if(h.state.awaitingUploadProgress&&!h.state.nativeUploadReplies){await clock.advance(1000);elapsed+=1000;}
   else if(!row().busy&&row().scheduled&&h.provider.connected()){const delay=Math.max(1,Date.parse(row().nextEligibleAt)-clock.now());await clock.advance(delay);elapsed+=delay;}
   else await new Promise(resolve=>setTimeout(resolve,1));

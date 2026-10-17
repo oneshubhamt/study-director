@@ -18,7 +18,7 @@ registry.define('compatibility-host',1,()=>{
     if(!validPairs(input.keys.renamedAppMeta))throw new TypeError('Compatibility-host renamed appMeta identities are invalid.');
     if(!validPairs(input.keys.renamedLocal)||input.keys.renamedLocal.some(([from])=>from.endsWith(':')))throw new TypeError('Compatibility-host renamed browser-storage keys are invalid.');
     if(!Object.isFrozen(input.keys.renamedFormats)||Object.entries(input.keys.renamedFormats).some(([from,to])=>!from||typeof to!=='string'||!to))throw new TypeError('Compatibility-host renamed value formats are invalid.');
-    exactObject(input.keys.appMeta,['personalPreferences','dataMaintenance','verifiedRecoveryBackups','attachmentIntegrityAudit','deviceFolder','restoreJournalPayload','repositoryIntegrityScrub','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseLegacy','repositoryMaintenancePending','repositoryMaintenancePendingLegacy','libraryClearJournalState','libraryClearJournalPayloadPrefix','archiveClearJournalStateLegacy','archiveClearJournalPayloadPrefixLegacy','backupPreparationUnitPrefix'],'Compatibility-host appMeta key contract');
+    exactObject(input.keys.appMeta,['personalPreferences','dataMaintenance','verifiedRecoveryBackups','attachmentIntegrityAudit','deviceFolder','restoreJournalPayload','repositoryIntegrityScrub','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseDayPrefix','reconciliationBaseLegacy','repositoryMaintenancePending','repositoryMaintenancePendingLegacy','libraryClearJournalState','libraryClearJournalPayloadPrefix','archiveClearJournalStateLegacy','archiveClearJournalPayloadPrefixLegacy','backupPreparationUnitPrefix'],'Compatibility-host appMeta key contract');
     functions(input.local,['getText','getJson','setText','remove','lastError'],'Compatibility-host local storage');
     functions(input.ownership,['issueWriteToken','assertWriteToken','isOwnershipLostError'],'Compatibility-host ownership');
     functions(input.plan,['hydrate','library','readDraft','writeDraft','writeLibrary','settled','readCanonical'],'Compatibility-host Plan adapter');
@@ -126,14 +126,15 @@ registry.define('compatibility-host',1,()=>{
       return freeze({format:MAINTENANCE_FORMAT,version:MAINTENANCE_VERSION,entries:freeze(entries.sort((a,b)=>a.providerId.localeCompare(b.providerId)))});
     }
     // A merge base from before permanent ids names notes by title (version 1
-    // kept them all in one row), and one from before titles, plans and
-    // settings were kept holds only text. It is dropped rather than converted: a base only lets Combine
-    // settle a difference without asking, and the next backup or restore
-    // records a fresh one.
+    // kept them all in one row), one from before titles, plans and settings
+    // were kept holds only text, and one from before Saved Days and the
+    // session were kept (version 2) cannot tell their changes apart. It is
+    // dropped rather than converted: a base only lets Combine settle a
+    // difference without asking, and the next Drive sync records a fresh one.
     function staleReconciliationRows(rows){
-      const keyOf=row=>String(row&&row.key||''),noteRow=row=>keyOf(row).startsWith(appMeta.reconciliationBaseNotePrefix);
-      const base=rows.filter(row=>keyOf(row)===appMeta.reconciliationBase||keyOf(row)===appMeta.reconciliationBaseLegacy||noteRow(row));
-      return base.some(row=>keyOf(row)===appMeta.reconciliationBaseLegacy||keyOf(row)===appMeta.reconciliationBase&&typeof row.value?.personalFingerprint!=='string'||noteRow(row)&&(!helpers.isNoteKey(row.value&&row.value.key)||typeof row.value.label!=='string'))?base:[];
+      const keyOf=row=>String(row&&row.key||''),noteRow=row=>keyOf(row).startsWith(appMeta.reconciliationBaseNotePrefix),dayRow=row=>keyOf(row).startsWith(appMeta.reconciliationBaseDayPrefix);
+      const base=rows.filter(row=>keyOf(row)===appMeta.reconciliationBase||keyOf(row)===appMeta.reconciliationBaseLegacy||noteRow(row)||dayRow(row));
+      return base.some(row=>keyOf(row)===appMeta.reconciliationBaseLegacy||keyOf(row)===appMeta.reconciliationBase&&Number(row.value?.version)!==3||noteRow(row)&&(!helpers.isNoteKey(row.value&&row.value.key)||typeof row.value.label!=='string'))?base:[];
     }
     async function migrateReconciliationBase(requireOwnership){
       let removed=0;

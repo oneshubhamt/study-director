@@ -10,7 +10,7 @@ import {fileURLToPath} from 'node:url';
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
 const read=relative=>fs.readFileSync(path.join(ROOT,relative),'utf8');
-for(const file of ['source/core/internal.js','source/core/operation-lifecycle.js','source/core/record-codecs.js','source/core/backup-codec.js','source/core/canonical.js','source/core/reconciliation.js','source/core/managed-repository.js','source/core/repository-policy.js','source/core/repository-background.js','source/core/backup-provider.js','source/core/backup-capture.js','source/core/backup.js'])vm.runInThisContext(read(file),{filename:file});
+for(const file of ['source/core/internal.js','source/core/operation-lifecycle.js','source/core/record-codecs.js','source/core/backup-codec.js','source/core/canonical.js','source/core/reconciliation.js','source/core/managed-repository.js','source/core/repository-policy.js','source/core/repository-background.js','source/core/backup-provider.js','source/core/backup-capture.js','source/core/backup.js','source/core/managed-recovery.js'])vm.runInThisContext(read(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const RecordCodecs=registry.require('record-codecs',1);
 const BackupCodecs=registry.require('backup-codec',1);
@@ -22,6 +22,7 @@ const BackupProviderModule=registry.require('backup-provider',1,Object.freeze({r
 const BackupCaptureModule=registry.require('backup-capture',1);
 const BackupModule=registry.require('backup',1,Object.freeze({backupCapture:BackupCaptureModule,backupProvider:BackupProviderModule,canonical:CanonicalModule,managedRepository:ManagedRepositoryModule,repositoryBackground:RepositoryBackgroundModule}));
 const ReconciliationModule=registry.require('reconciliation',1,Object.freeze({canonical:CanonicalModule}));
+const ManagedRecoveryModule=registry.require('managed-recovery',1);
 const freeze=Object.freeze;
 const processing=freeze({...createProcessingEngine(),scope:operation=>operation()});
 const limits=freeze({
@@ -96,6 +97,28 @@ function createState({withActive=false}={}){
   };
 }
 
+// This device's base (what it last shared through Drive), kept in memory the
+// way the host keeps it: notes, one fingerprint per Saved Day, and the plans
+// and session fingerprints.
+function baseStore(state){
+  const base=()=>state.reconciliationBase;
+  return {
+    reconciliationBaseRead:async()=>base()?freeze({format:'study-director.reconciliation-base',version:3,checkpointId:base().checkpointId,establishedAt:base().establishedAt||new Date().toISOString(),noteCount:Number(base().noteCount??Object.keys(base().notes||{}).length),noteKeyFingerprint:String(base().noteKeyFingerprint||'0'.repeat(64)),personalFingerprint:String(base().personalFingerprint||''),sessionFingerprint:String(base().sessionFingerprint||'')}):null,
+    reconciliationBaseReadNotes:async keys=>freeze(Object.fromEntries(keys.filter(key=>Object.prototype.hasOwnProperty.call(base()?.notes||{},key)).map(key=>[key,freeze({label:String(base().notes[key]?.label??''),text:String(base().notes[key]?.text??'')})]))),
+    reconciliationBaseReadDays:async dates=>freeze(Object.fromEntries((dates||[]).filter(date=>Object.prototype.hasOwnProperty.call(base()?.days||{},date)).map(date=>[date,base().days[date]]))),
+    reconciliationBaseWrite:async(checkpointId,spec)=>{
+      assert.equal(spec?.format,'study-director.reconciliation-base-update');assert.equal(spec.version,2);
+      const current=base();if(!spec.full&&current?.checkpointId!==spec.baseCheckpointId)return false;
+      const notes=Object.assign(Object.create(null),spec.full?{}:current?.notes||{}),days=Object.assign(Object.create(null),spec.full?{}:current?.days||{});
+      for(const key of spec.deletes||[])delete notes[key];for(const [key,value] of Object.entries(spec.updates||{}))notes[key]=freeze({label:String(value.label),text:String(value.text)});
+      for(const [month,value] of Object.entries(spec.days||{})){for(const date of Object.keys(days))if(date.startsWith(month+'-'))delete days[date];Object.assign(days,value||{});}
+      const keys=spec.full?[...spec.noteKeys].sort():null,kept=(value,old)=>value===null?String(old||''):String(value);
+      state.reconciliationBase=freeze({checkpointId,establishedAt:new Date().toISOString(),noteCount:keys?keys.length:Number(spec.noteCount),noteKeyFingerprint:keys?await processing.run('checksum',{value:JSON.stringify(keys),algorithm:'sha256'}):String(spec.noteKeyFingerprint),personalFingerprint:kept(spec.personalFingerprint,current?.personalFingerprint),sessionFingerprint:kept(spec.sessionFingerprint,current?.sessionFingerprint),notes:freeze(notes),days:freeze(days)});
+      return true;
+    }
+  };
+}
+
 function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=null,hasLiveTasks=false,fileMode='combine',extrasMode='keep',preflightFailure=''}={}){
   state.deletions??=[];state.noteDeletions??=[];state.attachmentDeletions??=[];
   let injectedFailure=String(preflightFailure||'');
@@ -116,13 +139,13 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
       restoreJournalPrepare:async value=>(state.journal={state:{id:value.id},payload:value}),restoreJournalRead:async()=>state.journal,restoreJournalMark:async(id,phase)=>(state.journal.state.phase=phase,state.journal.state),restoreJournalClear:async()=>(state.journal=null,true),
       scheduleRead:()=>state.schedule,personalSettle:async()=>{if(injectedFailure==='personal')throw new Error('QA_FIXTURE personal preflight failure');return true;},personalExport:async()=>state.personal,personalImport:async value=>(state.personal=value,true),personalVerify:async value=>assert.deepEqual(state.personal,value),
       storageGeneration:()=>0,sourceRevision:async()=>'2026-08-23T00:00:00.000Z',snapshotRevision:async()=>'stable-b3',canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],installationId:()=> 'inst_device_local',deletionRecoveryFlush:async()=>{events.push('preflight-deletion-flush');if(injectedFailure==='deletions')throw new Error('QA_FIXTURE deletion preflight failure');if(injectedFailure==='deletions-false')return false;if(injectedFailure==='deletions-unknown')return undefined;return true;},
-      deletionRecoverySavedDays:async()=>state.deletions.map(value=>({...value})),deletionRecoveryReplaceSavedDays:async values=>(state.deletions=(values||[]).map(value=>({...value})),true),deletionRecoveryNotes:async()=>state.noteDeletions.map(value=>({...value})),deletionRecoveryReplaceNotes:async values=>(state.noteDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryAttachments:async()=>state.attachmentDeletions.map(value=>({...value})),deletionRecoveryReplaceAttachments:async values=>(state.attachmentDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryClearAttachment:async assetId=>(state.attachmentDeletions=state.attachmentDeletions.filter(item=>item.assetId!==assetId),true),reconciliationBaseRead:async()=>state.reconciliationBase?freeze({format:'study-director.reconciliation-base',version:2,checkpointId:state.reconciliationBase.checkpointId,establishedAt:state.reconciliationBase.establishedAt||new Date().toISOString(),noteCount:Number(state.reconciliationBase.noteCount??Object.keys(state.reconciliationBase.notes||{}).length),noteKeyFingerprint:String(state.reconciliationBase.noteKeyFingerprint||'0'.repeat(64))}):null,reconciliationBaseReadNotes:async keys=>freeze(Object.fromEntries(keys.filter(key=>Object.prototype.hasOwnProperty.call(state.reconciliationBase?.notes||{},key)).map(key=>{const value=state.reconciliationBase.notes[key];return [key,freeze({label:String(value?.label??''),text:String(value?.text??'')})];}))),reconciliationBaseWrite:async(checkpointId,spec)=>{const current=Object.assign(Object.create(null),state.reconciliationBase?.notes||{});if(spec&&spec.format==='study-director.reconciliation-base-update'){if(!spec.full&&state.reconciliationBase&&state.reconciliationBase.checkpointId!==spec.baseCheckpointId)return false;if(spec.full){const keep=new Set(spec.noteKeys||[]);for(const key of Object.keys(current))if(!keep.has(key))delete current[key];}for(const key of spec.deletes||[])delete current[key];for(const [key,value] of Object.entries(spec.updates||{}))current[key]=freeze({label:String(value.label),text:String(value.text)});let noteCount=Number(spec.noteCount),noteKeyFingerprint=String(spec.noteKeyFingerprint||'');if(spec.full){const keys=[...(spec.noteKeys||[])].sort();noteCount=keys.length;noteKeyFingerprint=await processing.run('checksum',{value:JSON.stringify(keys),algorithm:'sha256'});}state.reconciliationBase=freeze({checkpointId,establishedAt:new Date().toISOString(),noteCount,noteKeyFingerprint,notes:freeze(current)});return true;}const notes=freeze({...spec}),keys=Object.keys(notes).sort();state.reconciliationBase=freeze({checkpointId,establishedAt:new Date().toISOString(),noteCount:keys.length,noteKeyFingerprint:await processing.run('checksum',{value:JSON.stringify(keys),algorithm:'sha256'}),notes});return true;}
+      deletionRecoverySavedDays:async()=>state.deletions.map(value=>({...value})),deletionRecoveryReplaceSavedDays:async values=>(state.deletions=(values||[]).map(value=>({...value})),true),deletionRecoveryNotes:async()=>state.noteDeletions.map(value=>({...value})),deletionRecoveryReplaceNotes:async values=>(state.noteDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryAttachments:async()=>state.attachmentDeletions.map(value=>({...value})),deletionRecoveryReplaceAttachments:async values=>(state.attachmentDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryClearAttachment:async assetId=>(state.attachmentDeletions=state.attachmentDeletions.filter(item=>item.assetId!==assetId),true),...baseStore(state)
     }),
     assets:freeze({get:async()=>null,put:async()=>true,keys:async()=>[],list:async()=>[],importAll:async()=>0,restoreAll:async()=>true,removeMany:async()=>0,removeMetadata:async()=>0,scheduleMaintenance:fn}),
-    exports:freeze({...processing,backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():file,unprotect:async blob=>({blob,encrypted:false}),check:fn,job:fn=>fn(),download:fn,chooseSave:async()=>null,save:async()=>({status:'downloaded'})}),
+    exports:freeze({...processing,backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),unprotect:async blob=>({blob,encrypted:false}),check:fn,job:fn=>fn(),download:fn,chooseSave:async()=>null,save:async()=>({status:'downloaded'})}),
     codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec}),
     reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({resolve:async options=>noteResolver?noteResolver(options,state):freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:options.manualOnly&&decisions.reflections==='incoming'?item.incomingValue:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
-    session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('preflight-session-cancel'),captureSnapshot:()=>hasLiveTasks&&state.activeSession?state.activeSession.snapshot:null,hasActiveSession:()=>!!state.activeSession,hasTasks:()=>hasLiveTasks,toActiveSession:()=>hasLiveTasks?state.activeSession:null,withPersistenceSuppressed:async operation=>operation()}),
+    session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('preflight-session-cancel'),captureSnapshot:()=>hasLiveTasks&&state.activeSession?state.activeSession.snapshot:null,hasActiveSession:()=>!!state.activeSession&&state.running!==false,hasTasks:()=>hasLiveTasks,toActiveSession:()=>hasLiveTasks?state.activeSession:null,withPersistenceSuppressed:async operation=>operation()}),
     domain:freeze({clampText:(value,max=100000)=>String(value??'').slice(0,max),filenameSafeStudentName:()=> 'student',getStudentName:()=>state.personal.preferences.studentName,materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-08-31'}),
     view:freeze({presentation,refreshPnote:fn,refreshReview:fn,renderSchedule:fn}),
     events:freeze({libraryChanged:fn,backupCompleted:fn,
@@ -427,4 +450,70 @@ assert.equal(aRoundTrip.records.get('2026-08-13').reflection,'A local-only after
 assert.equal(aRoundTrip.activeSession.date,'2026-08-12');
 assert.match(aRoundTrip.schedule,/DEVICE-B/u);
 
-console.log(JSON.stringify({status:'PASS',suite:'checkpoint-handoff',preflightVariants:preflightCases.length,coverage:['current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential handoff','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));
+// Drive sync between two devices. Each takes in what the other changed before
+// uploading its own: a change made on one side only needs no choice, a
+// difference made on both waits for the person, and a session running here
+// keeps its own state while everything else merges.
+{
+  const drive=new Map(),key=(kind,id)=>kind+':'+id;
+  const describe=file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,digest:file.digest,remoteId:'remote-'+key(file.kind,file.id)});
+  const transport=freeze({
+    list:async({kind})=>freeze({items:freeze([...drive.values()].filter(file=>file.kind===kind).map(describe)),overflow:false}),
+    upload:async file=>{const stored=freeze({...file,createdAt:new Date().toISOString()});drive.set(key(file.kind,file.id),stored);return describe(stored);},
+    download:async ref=>{const stored=drive.get(key(ref.kind,ref.id));if(!stored)throw new Error('QA_FIXTURE missing Drive file');return freeze({blob:stored.blob,release:async()=>{}});},
+    delete:async ref=>drive.delete(key(ref.kind,ref.id))
+  });
+  const head=()=>[...drive.values()].filter(file=>file.kind==='checkpoint').sort((a,b)=>Date.parse(b.exportedAt)-Date.parse(a.exportedAt))[0]?.id||'';
+  const device=state=>{
+    const providers=createHarness(state).runtime.providers,recovery=ManagedRecoveryModule.createCoordinator(freeze({
+      automaticBackup:freeze({suspend:async()=>freeze({}),resume:async()=>true}),diagnostics:freeze({capture:()=>{},mark:()=>false}),
+      lifecycle:freeze({settle:async()=>{},quiesce:async operation=>operation(),revision:()=>'qa-sync',rebuild:async()=>{}}),mutation:freeze({run:async(_kind,operation)=>operation()})
+    }));
+    providers.configureManagedRecovery(freeze({run:spec=>recovery.execute(spec)}));
+    assert.equal(providers.register(freeze({id:'drive',label:'Google Drive',shared:true,connected:()=>true,repository:transport})),true);
+    return freeze({
+      upload:async()=>{await new Promise(resolve=>setTimeout(resolve,3));return providers.backupRepositoryProvider('drive',{interactive:false});},
+      sync:()=>providers.bringInRepositoryProvider('drive',{quiet:true,sync:true,checkpointId:head()})
+    });
+  };
+  const note=text=>freeze({Shared:freeze({version:2,key:'Shared',text,updatedAt:new Date().toISOString()})});
+  const a={records:new Map([['2026-08-01',record('2026-08-01','day one')],['2026-08-02',record('2026-08-02','day two')]]),deletions:[],noteDeletions:[],notes:note('first'),activeSession:null,schedule:'',personal:personal('Sync User'),journal:null};
+  const b={records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Sync User'),journal:null};
+  const A=device(a),B=device(b);
+  // A new device takes in everything.
+  const v1=await A.upload();assert.equal(a.reconciliationBase.checkpointId,v1.checkpointId,'a Drive backup is what this device shares');
+  assert.equal((await B.sync()).cancelled,false);
+  assert.deepEqual([...b.records.keys()].sort(),['2026-08-01','2026-08-02']);assert.equal(b.notes.Shared.text,'first');assert.equal(b.reconciliationBase.checkpointId,v1.checkpointId,'what a device takes in from Drive is what it shares');
+  // Changes on one side only cross over both ways without a question.
+  a.notes=note('edited on A');const v2=await A.upload();
+  b.records.set('2026-08-02',record('2026-08-02','edited on B','2026-08-30T10:00:00.000Z'));
+  await assert.rejects(()=>B.upload(),error=>error?.code==='REPOSITORY_SYNC_BEHIND','a device never uploads over a version it has not taken in');
+  assert.equal(head(),v2.checkpointId);
+  assert.equal((await B.sync()).cancelled,false,'changes made on one side only need no choice');
+  assert.equal(b.notes.Shared.text,'edited on A');assert.equal(b.records.get('2026-08-02').reflection,'edited on B','this device keeps its own change');assert.equal(b.reconciliationBase.checkpointId,v2.checkpointId);
+  const v3=await B.upload();
+  assert.equal((await A.sync()).cancelled,false);assert.equal(a.records.get('2026-08-02').reflection,'edited on B');assert.equal(a.notes.Shared.text,'edited on A');assert.equal(a.reconciliationBase.checkpointId,v3.checkpointId);
+  // A session left on one device carries on on the other; saving that day there ends it here too.
+  a.activeSession=session('2026-08-29','MOVING');a.schedule=a.activeSession.scheduleText;a.running=false;await A.upload();
+  assert.equal((await B.sync()).cancelled,false);assert.equal(b.activeSession.snapshot.label,'MOVING','a session moves to a device that has none');
+  b.activeSession=null;b.schedule='';b.records.set('2026-08-29',record('2026-08-29','saved on B','2026-08-30T12:00:00.000Z'));const saved=await B.upload();
+  assert.equal((await A.sync()).cancelled,false);assert.equal(a.activeSession,null,'a session saved as a Saved Day on the other device ends here');assert.equal(a.records.get('2026-08-29').reflection,'saved on B');
+  // The same Saved Day changed on both: nothing changes until the person chooses; timestamps settle nothing.
+  a.records.set('2026-08-01',record('2026-08-01','day one by A','2026-08-31T09:00:00.000Z'));const v4=await A.upload();
+  b.records.set('2026-08-01',record('2026-08-01','day one by B','2026-08-31T10:00:00.000Z'));
+  const conflict=await B.sync();assert.equal(conflict.cancelled,true);assert.equal(conflict.reason,'needs-decision');
+  assert.equal(b.records.get('2026-08-01').reflection,'day one by B','a newer timestamp settles nothing');assert.equal(b.reconciliationBase.checkpointId,saved.checkpointId,'an unsettled difference leaves the shared base where it was');
+  b.records.set('2026-08-01',record('2026-08-01','day one'));
+  assert.equal((await B.sync()).cancelled,false);assert.equal(b.records.get('2026-08-01').reflection,'day one by A');assert.equal(b.reconciliationBase.checkpointId,v4.checkpointId);
+  // A session running here keeps its own state; everything else merges.
+  a.activeSession=session('2026-08-30','A-SESSION');a.schedule=a.activeSession.scheduleText;a.running=false;a.notes=note('edited on A again');await A.upload();
+  b.activeSession=session('2026-08-31','B-SESSION');b.schedule=b.activeSession.scheduleText;
+  assert.equal((await B.sync()).cancelled,false,'sync is never blocked by a running session');
+  assert.equal(b.activeSession.snapshot.label,'B-SESSION','the session running here stays as it is');assert.equal(b.notes.Shared.text,'edited on A again','everything else merges as usual');
+  // Another device's own session never silently replaces one left unsaved here.
+  await B.upload();
+  const sessionChoice=await A.sync();assert.equal(sessionChoice.cancelled,true);assert.equal(sessionChoice.reason,'needs-decision');
+  assert.equal(a.activeSession.snapshot.label,'A-SESSION','an unsaved earlier session is not replaced by a new one from another device');
+}
+
+console.log(JSON.stringify({status:'PASS',suite:'checkpoint-handoff',preflightVariants:preflightCases.length,coverage:['two-device Drive sync','current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential handoff','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));

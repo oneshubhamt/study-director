@@ -33,13 +33,13 @@ const hostKeys=freeze({
   attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,deviceFolder:APP_META_KEYS.deviceFolder,
   repositoryIntegrityScrub:APP_META_KEYS.repositoryIntegrityScrub,managedProviderBackupPending:APP_META_KEYS.managedProviderBackupPending,
   repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,
-  reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix
+  reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix,reconciliationBaseDayPrefix:APP_META_KEYS.reconciliationBaseDayPrefix
 });
 function gateway(){
   const value=AppMeta.create(freeze({indexedDb,store:'meta',registry:APP_META_RUNTIME_REGISTRY}));
   value.registerValidators('host',HostMetadata.createAppMetaValidators(freeze({
     keys:hostKeys,same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),
-    normalizers:freeze({verifiedRecovery:v=>v,attachmentIntegrity:v=>v,repositoryIntegrity:v=>v,reconciliationBase:v=>v,reconciliationBaseNote:v=>v})
+    normalizers:freeze({verifiedRecovery:v=>v,attachmentIntegrity:v=>v,repositoryIntegrity:v=>v,reconciliationBase:v=>v,reconciliationBaseNote:v=>v,reconciliationBaseDays:v=>v})
   })));
   return value;
 }

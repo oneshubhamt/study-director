@@ -9,7 +9,7 @@ registry.define('managed-repository',1,()=>{
   const freeze=Object.freeze;
   const PORT_FIELDS=freeze({
     configuration:freeze(['backupVersion','limits','logicalCaptureFormat','logicalCaptureVersion']),
-    persistence:freeze(['reconciliationBaseRead','reconciliationBaseWrite','personalFingerprint']),
+    persistence:freeze(['reconciliationBaseRead','reconciliationBaseWrite','personalFingerprint','dayFingerprints','sessionFingerprint']),
     assets:freeze(['get','verifyAliases']),
     files:freeze(['protect','unprotect','run','scope']),
     checkpoint:freeze(['capture','beginPreparation','readPreparationUnits','finalizePreparation','establishPreparationBaseline','assertCurrent','inspectVerifiedCapture','verifyVerifiedCapture','currentImportSignal']),
@@ -28,7 +28,7 @@ registry.define('managed-repository',1,()=>{
     if(!Object.isFrozen(ports.configuration.limits))throw new TypeError('Managed repository limits must be frozen.');
     const APP_LIMITS=ports.configuration.limits,backupVersion=ports.configuration.backupVersion;
     const LOGICAL_CHECKPOINT_CAPTURE_FORMAT=ports.configuration.logicalCaptureFormat,LOGICAL_CHECKPOINT_CAPTURE_VERSION=ports.configuration.logicalCaptureVersion;
-    const AppData=freeze({reconciliationBase:freeze({read:ports.persistence.reconciliationBaseRead,write:ports.persistence.reconciliationBaseWrite,personalFingerprint:ports.persistence.personalFingerprint})});
+    const AppData=freeze({reconciliationBase:freeze({read:ports.persistence.reconciliationBaseRead,write:ports.persistence.reconciliationBaseWrite,personalFingerprint:ports.persistence.personalFingerprint,dayFingerprints:ports.persistence.dayFingerprints,sessionFingerprint:ports.persistence.sessionFingerprint})});
     const AssetData=freeze({get:ports.assets.get,verifyAliases:ports.assets.verifyAliases});
     const Exports=ports.files;
     const captureLogicalCheckpoint=ports.checkpoint.capture,beginPreparationCapture=ports.checkpoint.beginPreparation,readPreparationUnits=ports.checkpoint.readPreparationUnits,finalizePreparationCapture=ports.checkpoint.finalizePreparation,establishPreparationBaseline=ports.checkpoint.establishPreparationBaseline,assertLogicalCheckpointCurrent=ports.checkpoint.assertCurrent,inspectVerifiedCapture=ports.checkpoint.inspectVerifiedCapture,verifyVerifiedCapture=ports.checkpoint.verifyVerifiedCapture,currentImportSignal=ports.checkpoint.currentImportSignal;
@@ -58,10 +58,14 @@ const REPOSITORY_PACK_FORMAT='study-director.backup-repository-structured-pack',
 const REPOSITORY_PACKABLE_KINDS=freeze(new Set(['note','personalData'])),WRITTEN_PACKABLE_KINDS=freeze(new Set([WRITTEN_NOTE_KIND,'personalData']));
 const repositoryPreparedState=new WeakMap();
 const repositoryPublicationStates=new Map();
-const REPOSITORY_PREPARATION_INDEX_VERSION=2;
+const REPOSITORY_PREPARATION_INDEX_VERSION=3;
 const REPOSITORY_OBJECT_IO_CONCURRENCY=8;
 const REPOSITORY_LARGE_OBJECT_BYTES=8*1024*1024;
-let repositoryPreparationIndex=null;
+// What the last prepared version held (its units and their fingerprints),
+// and what changed since the base. The newest prepared version also keeps
+// its base update, so placing that same version in Drive later makes it
+// the base.
+let repositoryPreparationIndex=null,repositorySpine=null;
 async function mapRepositoryBounded(values,worker,limit=REPOSITORY_OBJECT_IO_CONCURRENCY){
   const rows=Array.isArray(values)?values:[],results=new Array(rows.length),concurrency=Math.max(1,Math.min(REPOSITORY_OBJECT_IO_CONCURRENCY,Math.floor(Number(limit)||1)));let next=0,failure=null;
   async function run(){for(;;){if(failure)return;const index=next++;if(index>=rows.length)return;try{results[index]=await worker(rows[index],index);}catch(error){if(!failure)failure=error;}}}
@@ -111,9 +115,11 @@ function repositoryPreparationEntry(kind,key,payload,fingerprint='',sourceBytes=
 function repositoryPreparationEntryMap(index){const map=new Map();for(const entry of index&&index.entries||[])map.set(String(entry.unit),entry);return map;}
 // What the reconciliation base keeps of a note: its title and text.
 function baseNoteState(note){return freeze({label:String(note&&note.label||''),text:String(note&&note.text||'')});}
-async function repositoryPreparationPlan(preparation,reconciliationBase){
+async function repositoryPreparationPlan(preparation,reconciliationBase,{baseUpdate=false}={}){
   const index=repositoryPreparationIndex;if(!index||Number(index.version)!==REPOSITORY_PREPARATION_INDEX_VERSION)return null;
-  if(String(index.checkpointId||'')!==String(reconciliationBase&&reconciliationBase.checkpointId||''))return null;
+  // A version that may become what is shared through Drive must say what
+  // changed since the base; when that is unknown the whole state is read.
+  if(baseUpdate&&!(reconciliationBase&&Array.isArray(index.sinceBase)&&String(index.baseCheckpointId||'')===String(reconciliationBase.checkpointId||'')))return null;
   const current=repositoryPreparationStampMap(preparation&&preparation.stamps),previous=repositoryPreparationStampMap(index.stamps);if(!current||!previous||current.has('*'))return null;
   for(const unit of current.keys())if(!repositoryPreparationDescriptor(unit)&&!/^attachmentAsset:(?:att|img)-[a-z0-9-]{20,80}$/u.test(unit))return null;
   for(const unit of previous.keys())if(!current.has(unit))return null;
@@ -121,8 +127,7 @@ async function repositoryPreparationPlan(preparation,reconciliationBase){
   if(String(index.epochToken||'')===String(preparation&&preparation.epochToken||'')){if(changed.length||current.size!==previous.size)return null;}
   else if(!changed.length)return null;
   const entries=repositoryPreparationEntryMap(index),structuredChanged=changed.filter(unit=>!!repositoryPreparationDescriptor(unit));
-  if(!reconciliationBase||Number(reconciliationBase.noteCount)!==Number(index.noteCount)||String(reconciliationBase.noteKeyFingerprint||'')!==String(index.noteKeyFingerprint||''))return null;
-  return freeze({index,entries,currentStamps:current,changed:freeze(changed),structuredChanged:freeze(structuredChanged)});
+  return freeze({index,entries,currentStamps:current,changed:freeze(changed),structuredChanged:freeze(structuredChanged),baseUpdate});
 }
 async function repositoryNoteSetIdentity(entries){
   const noteKeys=[...entries.values()].filter(entry=>entry&&entry.present&&entry.kind==='note').map(entry=>String(entry.key)).sort(),noteKeyFingerprint=await Exports.run('checksum',{value:JSON.stringify(noteKeys),algorithm:'sha256'});
@@ -530,17 +535,17 @@ async function cleanupRepositoryRetention(input){
   return freeze({warning:parts.join(' '),retained:freeze(actualRetained),removedCheckpoints,removedUncommitted,removedOrphanCommits,deferredIncomplete,checkpointDeferred,checkpointFailures:deletionFailures,gcRemoved,gcDeferred,gcBudgetDeferred,gcFailures,gcSkipped,gcPending:gcSkipped||deferredIncomplete>0||checkpointDeferred>0||gcDeferred>0||gcBudgetDeferred>0||gcFailures>0,uncertainCount:uncertain,objectGcBlocked:input&&input.blockObjectGc===true,objectListingFailed,overflow:objectListingOverflow,selection});
 }
 
-async function prepareRepositoryCheckpointWork(previousManifests=null,{interactive=false,availableObjectIds=null,excludedObjectIds=null,retention=null,signal=null}={}){
+async function prepareRepositoryCheckpointWork(previousManifests=null,{interactive=false,availableObjectIds=null,excludedObjectIds=null,retention=null,signal=null,baseUpdate=false}={}){
   throwIfImportAborted(signal);
   const history=repositoryHistory(previousManifests);
   const context=await repositoryProtectionContext({interactive});
   const exportedAt=new Date().toISOString();
   const preparation=await beginPreparationCapture(exportedAt);throwIfImportAborted(signal);
   const reconciliationBase=await AppData.reconciliationBase.read().catch(()=>null),reconciliationBaseId=String(reconciliationBase&&reconciliationBase.checkpointId||''),reconciliationAncestorIds=repositoryReconciliationAncestors(history,reconciliationBaseId);
-  const plan=preparation?await repositoryPreparationPlan(preparation,reconciliationBase):null;
+  const plan=preparation?await repositoryPreparationPlan(preparation,reconciliationBase,{baseUpdate}):null;
   if(!plan&&repositoryPreparationIndex)repositoryPreparationIndex=null;
   const excluded=new Set(repositoryScrubObjectIds(excludedObjectIds)),available=availableObjectIds instanceof Set?new Set([...availableObjectIds].filter(id=>!excluded.has(id))):availableObjectIds;
-  const reuseIndex=repositoryReuseIndex(history,context.protectionId,available),objects=[],leases=[],structuredObjects=new Map(),packedPayloads=new Map(),currentByUnit=new Map(),candidateEntries=plan?new Map(plan.entries):new Map(),readNoteStates=new Map();let readPersonal;
+  const reuseIndex=repositoryReuseIndex(history,context.protectionId,available),objects=[],leases=[],structuredObjects=new Map(),packedPayloads=new Map(),currentByUnit=new Map(),candidateEntries=plan?new Map(plan.entries):new Map(),readNoteStates=new Map(),readMonths=new Map();let readPersonal,readSession;
   let capture=null,assetItems=[],candidateIndex=null,reconciliationUpdate=null;
   const serializeStructured=async(kind,key,payload)=>{
     const body=freeze({format:REPOSITORY_OBJECT_FORMAT,version:REPOSITORY_OBJECT_VERSION,kind,key,payload}),serialized=await repositorySerializedJson(body,{signal}),fingerprint=await Exports.run('checksum',{value:serialized.text,algorithm:'sha256'},{signal});
@@ -562,6 +567,8 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
     }
     if(kind==='note')readNoteStates.set(String(key),baseNoteState(payload));
     if(kind==='personalData')readPersonal=payload;
+    if(kind==='dailyRecordPack')readMonths.set(String(key),payload);
+    if(kind==='activeSession')readSession=payload;
     return entry;
   };
   const packGroups=entries=>{const groups=new Map();for(const entry of entries.values())if(repositoryPackableEntry(entry)){const shard=repositoryPackShard(entry.kind,entry.key);if(!groups.has(shard))groups.set(shard,[]);groups.get(shard).push(entry);}for(const rows of groups.values())rows.sort((a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key));return groups;};
@@ -585,9 +592,12 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
     leases.push(file.release);return freeze({objectId,kind:'structuredPack',key,fingerprint,compression:payloadFile.compression,sourceBytes:payloadFile.sourceBytes,storedBytes:file.blob.size,storedChecksum:file.storedChecksum,members:manifestMembers,reused:false,blob:file.blob,checkProtection:file.checkProtection});
   };
   const grouped=(items,dateKey)=>{const map=new Map();for(const item of items){const month=repositoryMonth(item&&item[dateKey]);if(!map.has(month))map.set(month,[]);map.get(month).push(item);}return [...map.entries()].sort((a,b)=>a[0].localeCompare(b[0]));};
+  // The Saved-Day fingerprints of the months read here (null: none left).
+  const daysUpdate=async full=>{const out=Object.create(null);for(const [month,records] of readMonths){if(records===null){if(!full)out[month]=null;continue;}const months=await AppData.reconciliationBase.dayFingerprints(records);if(months[month])out[month]=months[month];}return freeze(out);};
   try{
     if(plan){
       const readUnits=new Set(plan.structuredChanged);
+      if(plan.baseUpdate)for(const unit of plan.index.sinceBase)if(repositoryPreparationDescriptor(unit))readUnits.add(unit);
       for(const entry of candidateEntries.values()){
         if(!entry.present||repositoryPackableEntry(entry))continue;
         const old=reuseIndex.structured.get(repositoryUnitKey(entry.kind,entry.key)+'\u0000'+entry.fingerprint);
@@ -597,7 +607,7 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       const reads=readUnits.size?await readPreparationUnits(preparation,[...readUnits].sort()):freeze([]);
       for(const result of reads){
         const descriptor=repositoryPreparationDescriptor(result&&result.unit);if(!descriptor)throw new Error('Incremental repository preparation returned an unknown unit.');
-        if(!result.present){candidateEntries.set(descriptor.unit,repositoryPreparationEntry(descriptor.kind,descriptor.key,null,'',0,{present:false}));structuredObjects.delete(descriptor.unit);if(descriptor.kind==='note')readNoteStates.set(descriptor.key,null);if(descriptor.kind==='personalData')readPersonal=null;continue;}
+        if(!result.present){candidateEntries.set(descriptor.unit,repositoryPreparationEntry(descriptor.kind,descriptor.key,null,'',0,{present:false}));structuredObjects.delete(descriptor.unit);if(descriptor.kind==='note')readNoteStates.set(descriptor.key,null);if(descriptor.kind==='personalData')readPersonal=null;if(descriptor.kind==='dailyRecordPack')readMonths.set(descriptor.key,null);if(descriptor.kind==='activeSession')readSession=null;continue;}
         await materializeStructured(descriptor.kind,descriptor.key,result.payload);
       }
       const inventory=repositoryPreparationInventory(candidateEntries),catalogue=new Map((preparation.assetCatalogue||[]).map(row=>[String(row&&row.id||''),row])),ids=new Set((preparation.assetCatalogue||[]).filter(row=>row&&row.library===true).map(row=>String(row.id)));
@@ -607,7 +617,7 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       capture=await finalizePreparationCapture(preparation,freeze({recordDates:inventory.recordDates,noteKeys:inventory.noteKeys,assetIds:assetItems.map(item=>item.descriptor.assetId),counts:inventory.counts}));
       const updates=Object.create(null),deletes=[];for(const [key,state] of readNoteStates){if(state===null)deletes.push(key);else updates[key]=state;}
       candidateIndex=await repositoryPreparationIndexCandidate(preparation.epochToken,preparation.stamps,candidateEntries);if(!candidateIndex)throw new Error('Incremental repository preparation index could not be rebuilt.');
-      reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:1,full:false,baseCheckpointId:reconciliationBaseId,noteCount:candidateIndex.noteCount,noteKeyFingerprint:candidateIndex.noteKeyFingerprint,personalFingerprint:readPersonal===undefined?null:await AppData.reconciliationBase.personalFingerprint(readPersonal),noteKeys:null,updates:freeze(updates),deletes:freeze(deletes.sort())});
+      if(plan.baseUpdate)reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:2,full:false,baseCheckpointId:reconciliationBaseId,noteCount:candidateIndex.noteCount,noteKeyFingerprint:candidateIndex.noteKeyFingerprint,personalFingerprint:readPersonal===undefined?null:await AppData.reconciliationBase.personalFingerprint(readPersonal),sessionFingerprint:readSession===undefined?null:await AppData.reconciliationBase.sessionFingerprint(readSession),noteKeys:null,updates:freeze(updates),deletes:freeze(deletes.sort()),days:await daysUpdate(false)});
     }else{
       capture=await captureLogicalCheckpoint(exportedAt,preparation?{includeAssetBlobs:false,assumeFlushed:true,requireCanonicalComplete:true}:{includeAssetBlobs:false,requireCanonicalComplete:true});
       for(const [month,items] of grouped(capture.dailyDocuments,'date'))await materializeStructured('dailyRecordPack',month,freeze([...items]));
@@ -616,7 +626,7 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       if(capture.personalData)await materializeStructured('personalData','personal',capture.personalData);
       assetItems=[...(capture.assetItems||[])];
       const updates=Object.create(null),noteKeys=[];for(const note of capture.noteItems||[]){const key=String(note&&note.key||'').trim();if(!key)continue;noteKeys.push(key);updates[key]=baseNoteState(note);}
-      noteKeys.sort();reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:1,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await AppData.reconciliationBase.personalFingerprint(capture.personalData||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([])});
+      noteKeys.sort();if(baseUpdate)reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:2,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await AppData.reconciliationBase.personalFingerprint(capture.personalData||null),sessionFingerprint:await AppData.reconciliationBase.sessionFingerprint(capture.activeSession||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([]),days:await daysUpdate(true)});
     }
     const structuredRank=freeze({dailyRecordPack:0,activeSession:1,personalData:2,note:3});
     for(const entry of [...candidateEntries.values()].filter(entry=>entry.present&&!repositoryPackableEntry(entry)).sort((a,b)=>(structuredRank[a.kind]??9)-(structuredRank[b.kind]??9)||String(a.key).localeCompare(String(b.key)))){
@@ -660,11 +670,14 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       format:'study-director.prepared-repository-checkpoint',version:1,checkpoint:capture.checkpoint,exportedAt:capture.exportedAt,sourceRevision:capture.sourceRevision,
       protectionId:context.protectionId,encrypted:context.encrypted,counts:freeze({...capture.counts}),objects:freeze(objects),warning:capture.warning
     });
-    repositoryPreparedState.set(prepared,{capture,context,manifestBase,leases,released:false,manifestFinalized:false,reconciliationUpdate,preparationIndexCandidate:candidateIndex});
+    // What changed since the base carries forward until the base moves.
+    const sinceBase=plan&&Array.isArray(plan.index.sinceBase)?freeze([...new Set([...plan.index.sinceBase,...plan.structuredChanged])].sort()):null;
+    const indexCandidate=candidateIndex?freeze({...candidateIndex,baseCheckpointId:plan?String(plan.index.baseCheckpointId||''):reconciliationBaseId,sinceBase}):null;
+    repositoryPreparedState.set(prepared,{capture,context,manifestBase,leases,released:false,manifestFinalized:false,reconciliationUpdate,preparationIndexCandidate:indexCandidate});
     return prepared;
   }catch(error){for(const release of leases.splice(0))await release().catch(()=>{});throw error;}
 }
-function invalidateRepositoryPreparation(){repositoryPreparationIndex=null;for(const continuation of repositoryPublicationStates.keys())void continuation.release();return true;}
+function invalidateRepositoryPreparation(){repositoryPreparationIndex=null;repositorySpine=null;for(const continuation of repositoryPublicationStates.keys())void continuation.release();return true;}
 function repositoryPreparationDiagnosticReason(error){
   const message=String(error&&error.message||'');
   if(message==='Incremental repository preparation index could not be rebuilt.')return 'incremental-index-rebuild';
@@ -716,15 +729,20 @@ async function finalizeRepositoryCheckpointManifest(prepared,{interactive=false,
     checkSource:async()=>true,release:()=>protectedFile.blob!==source?Exports.run('file.release',{file:protectedFile.blob}):Promise.resolve()
   });
 }
-async function establishRepositoryReconciliationBase(prepared){
-  const state=repositoryPreparedState.get(prepared);
-  if(!state||state.released||!state.manifestFinalized)throw new Error('Finalized repository checkpoint manifest is unavailable for reconciliation ancestry.');
-  const checkpointId=String(state.capture&&state.capture.checkpoint&&state.capture.checkpoint.checkpointId||'');
-  if(!/^cp_[a-f0-9]{32}$/u.test(checkpointId))throw new Error('Committed repository checkpoint identity is invalid.');
-  const update=state.reconciliationUpdate;if(!update)throw new Error('Prepared repository checkpoint reconciliation update is unavailable.');
-  const written=await AppData.reconciliationBase.write(checkpointId,update);
-  if(written!==false&&state.preparationIndexCandidate)repositoryPreparationIndex=freeze({...state.preparationIndexCandidate,checkpointId});else if(written===false)repositoryPreparationIndex=null;
-  return checkpointId;
+// A placed version becomes what the next backup builds on. A normal version
+// is also remembered with its base update, for placing it in Drive.
+function adoptRepositoryPreparation(prepared,checkpointId){
+  const state=repositoryPreparedState.get(prepared);if(!state||state.released)return false;
+  if(state.preparationIndexCandidate)repositoryPreparationIndex=freeze({...state.preparationIndexCandidate,checkpointId});
+  if(state.manifestBase.retention.role==='normal')repositorySpine=freeze({checkpointId,sourceRevision:String(state.capture&&state.capture.sourceRevision||''),update:state.reconciliationUpdate||null});
+  return true;
+}
+// This version is now what this device and Drive share.
+async function establishRepositoryBase(checkpointId){
+  const id=String(checkpointId||''),spine=repositorySpine;if(!/^cp_[a-f0-9]{32}$/u.test(id)||!spine||spine.checkpointId!==id||!spine.update)return false;
+  const written=await AppData.reconciliationBase.write(id,spine.update)!==false,index=repositoryPreparationIndex;
+  if(index)repositoryPreparationIndex=freeze({...index,...(written&&index.checkpointId===id?{baseCheckpointId:id,sinceBase:freeze([])}:{sinceBase:null})});
+  return written;
 }
 async function inspectRepositoryManifest(file,{interactive=false}={}){
   if(!(file instanceof Blob))throw new TypeError('Repository checkpoint file is unreadable.');
@@ -1000,7 +1018,7 @@ async function inspectRepositoryCheckpoint(manifest,readObject,options={}){
   if(managedRecovery!==undefined&&managedRecovery!==null&&typeof managedRecovery!=='function')throw new TypeError('Managed repository recovery orchestration is invalid.');
   const normalizedManifest=validateRepositoryManifest(manifest),reconstructed=await reconstructVerifiedRepositoryCheckpoint(normalizedManifest,readObject,{interactive:options.interactive!==false,signal,note:typeof options.note==='string'?options.note:'',localAttachments:true});
   try{
-    return await inspectVerifiedCapture(reconstructed.capture,freeze({signal,release:reconstructed.release,sourceEncrypted:normalizedManifest.encrypted,repositoryManifest:normalizedManifest,repositoryCommitted:options.committed===true,managedRecovery:managedRecovery||null,managedProgress:typeof options.managedProgress==='function'?options.managedProgress:null,verifiedSourceBytes:reconstructed.verifiedSourceBytes,storedBytes:reconstructed.storedBytes}));
+    return await inspectVerifiedCapture(reconstructed.capture,freeze({signal,release:reconstructed.release,sourceEncrypted:normalizedManifest.encrypted,repositoryManifest:normalizedManifest,repositoryCommitted:options.committed===true,sharedHead:options.sharedHead===true,managedRecovery:managedRecovery||null,managedProgress:typeof options.managedProgress==='function'?options.managedProgress:null,verifiedSourceBytes:reconstructed.verifiedSourceBytes,storedBytes:reconstructed.storedBytes}));
   }catch(error){await reconstructed.release().catch(()=>{});throw error;}
 }
 async function verifyRepositoryCheckpoint(manifest,readObject,options={}){
@@ -1049,6 +1067,26 @@ function repositoryUnchangedVersion(history,prepared){
   const ids=list=>(list||[]).map(entry=>String(entry.objectId)).sort().join('|');
   return ids(newest.objects)===ids(base.objects)?newest:null;
 }
+// A version another location already holds, placed here as it is: the same
+// manifest file, and each object this location lacks read from there.
+async function prepareRepositoryCopy(copy,{availableObjectIds=null,interactive=false,signal=null}={}){
+  if(!copy||!(copy.manifestBlob instanceof Blob)||typeof copy.readObject!=='function')throw new TypeError('Repository version copy is invalid.');
+  const manifest=await inspectRepositoryManifest(copy.manifestBlob,{interactive}),noCheck=async()=>true,leases=[],objects=[];
+  if(manifest.checkpoint.checkpointId!==String(copy.checkpointId||''))throw new Error('The copied backup version does not match the version selected.');
+  try{
+    for(const entry of manifest.objects){
+      throwIfImportAborted(signal);
+      if(availableObjectIds instanceof Set&&availableObjectIds.has(entry.objectId)){objects.push(freeze({...entry,reused:true,blob:null,checkProtection:noCheck}));continue;}
+      const read=await copy.readObject(entry);leases.push(read.release);
+      if(!(read.blob instanceof Blob)||read.blob.size!==entry.storedBytes)throw new Error(`Backup object ${entry.objectId} could not be read for copying.`);
+      objects.push(freeze({...entry,reused:false,blob:read.blob,checkProtection:noCheck}));
+    }
+  }catch(error){for(const release of leases.splice(0))await release().catch(()=>{});throw error;}
+  const prepared=freeze({format:'study-director.prepared-repository-checkpoint',version:1,checkpoint:manifest.checkpoint,exportedAt:manifest.exportedAt,sourceRevision:manifest.sourceRevision,protectionId:manifest.protectionId,encrypted:manifest.encrypted,counts:manifest.counts,objects:freeze(objects),warning:manifest.warning});
+  repositoryPreparedState.set(prepared,{capture:null,context:freeze({checkProtection:noCheck}),manifestBase:manifest,leases,released:false,manifestFinalized:true,reconciliationUpdate:null,preparationIndexCandidate:null,copy:true});
+  const manifestFile=freeze({blob:copy.manifestBlob,manifest,exportedAt:manifest.exportedAt,sourceRevision:manifest.sourceRevision,counts:manifest.counts,protectionId:manifest.protectionId,encrypted:manifest.encrypted,checkProtection:noCheck,checkSource:noCheck,release:async()=>{}});
+  return freeze({prepared,manifestFile});
+}
 async function publishRepositoryCheckpoint(history,options={},transport={}){
   if(!transport||typeof transport!=='object'||typeof transport.writeObject!=='function'||typeof transport.writeManifest!=='function'||typeof transport.commit!=='function')throw new TypeError('Repository publication transport is invalid.');
   const continuation=options.continuation||null,state=continuation?repositoryPublicationStates.get(continuation):{prepared:null,manifestFile:null,commitMarker:null,busy:false,invalidated:false};
@@ -1059,7 +1097,9 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
   const postCommit=async(phase,message,work)=>{try{return await work();}catch(error){warnings.push(message);AppDiagnostics.capture(`repository.publication-${phase}`,error,'warn');return null;}};
   try{
     check();
+    const copy=options.copy||null,current=!copy||copy.current===true;
     if(prepared){await refreshRepositoryPublicationProtection(state,options);prepared=state.prepared;manifestFile=state.manifestFile;}
+    else if(copy){const copied=await prepareRepositoryCopy(copy,options);prepared=copied.prepared;manifestFile=copied.manifestFile;state.prepared=prepared;state.manifestFile=manifestFile;}
     else{prepared=await prepareRepositoryCheckpoint(history,options);state.prepared=prepared;}
     check();
     // Nothing changed since the newest version: write nothing (no requests,
@@ -1067,8 +1107,9 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
     const unchanged=repositoryUnchangedVersion(history,prepared);
     if(unchanged){
       const checkpointId=unchanged.checkpoint.checkpointId,publication=freeze({name:checkpointId+'.sdcheckpoint',unchanged:true}),objectsReused=prepared.objects.length;
+      if(!copy)adoptRepositoryPreparation(prepared,checkpointId);if(options.shared&&current)await postCommit('reconciliation-base','The backup was already up to date, but this device could not record it as shared.',()=>establishRepositoryBase(checkpointId));
       const context=freeze({prepared,manifest:unchanged,sourceRevision:prepared.sourceRevision,exportedAt:unchanged.exportedAt,publication,commitReceipt:null,objectsWritten:0,objectsReused,writtenBytes:0,attachmentBytesWritten:0,unchanged:true});
-      const committedResult=typeof transport.onCommitted==='function'?await postCommit('bookkeeping','The backup was already up to date, but local backup status could not be updated.',()=>transport.onCommitted(context)):null;
+      const committedResult=current&&typeof transport.onCommitted==='function'?await postCommit('bookkeeping','The backup was already up to date, but local backup status could not be updated.',()=>transport.onCommitted(context)):null;
       return freeze({checkpointId,manifest:unchanged,sourceRevision:prepared.sourceRevision,exportedAt:unchanged.exportedAt,publication,commitReceipt:null,objectsWritten:0,objectsReused,writtenBytes:0,attachmentBytesWritten:0,committedResult,cleanupResult:null,unchanged:true,warning:warnings.join(' ')});
     }
     let objectsWritten=0,objectsReused=0,writtenBytes=0,attachmentBytesWritten=0;
@@ -1090,7 +1131,9 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
     check();const commitMarker=state.commitMarker||(state.commitMarker=await createRepositoryCommitMarker(manifestFile.manifest,{checkProtection:manifestFile.checkProtection,checkSource:manifestFile.checkSource,signal:options.signal||null}));check();
     commitReceipt=await transport.commit(commitMarker,prepared,publication);
     committed=true;
-    const baseEstablished=await postCommit('reconciliation-base','The checkpoint was saved and verified, but local reconciliation ancestry could not be updated. A later backup will retry completion bookkeeping.',async()=>{await establishRepositoryReconciliationBase(prepared);return true;});
+    // A copied older version only fills in history: no bookkeeping, no base.
+    const checkpointId=manifestFile.manifest.checkpoint.checkpointId;if(!copy)adoptRepositoryPreparation(prepared,checkpointId);
+    const baseEstablished=!current?false:!options.shared||await postCommit('reconciliation-base','The checkpoint was saved and verified, but this device could not record it as shared. A later backup will retry completion bookkeeping.',async()=>{if(!await establishRepositoryBase(checkpointId))throw new Error('The shared base could not be recorded.');return true;});
     const context=freeze({prepared,manifest:manifestFile.manifest,sourceRevision:manifestFile.sourceRevision,exportedAt:manifestFile.exportedAt,publication,commitReceipt,objectsWritten,objectsReused,writtenBytes,attachmentBytesWritten});
     const committedResult=baseEstablished&&typeof transport.onCommitted==='function'?await postCommit('bookkeeping','The checkpoint was saved and verified, but local backup status could not be updated. A later backup will retry completion bookkeeping.',()=>transport.onCommitted(context)):null;
     const cleanupResult=typeof transport.cleanup==='function'?await postCommit('retention-cleanup','The checkpoint was saved and verified, but repository retention cleanup did not complete.',()=>transport.cleanup(freeze({...context,committedResult}))):null;
@@ -1110,7 +1153,10 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
       format:'study-director.managed-repository',contractVersion:1,noteIdManifestVersion:REPOSITORY_NOTE_ID_MANIFEST_VERSION,
       noteObject:repositoryNoteObject,readNote:readRepositoryNote,
       createPublication:createRepositoryPublication,publish:publishRepositoryCheckpoint,inspectManifest:inspectRepositoryManifest,inspect:inspectRepositoryCheckpoint,verifyCheckpoint:verifyRepositoryCheckpoint,verifyObject:verifyRepositoryObject,scrub:scrubRepositoryIntegrity,cleanup:cleanupRepositoryRetention,inspectCommit:inspectRepositoryCommitMarker,
-      retention:REPOSITORY_RETENTION_POLICY,validatePolicy:validateRepositoryRetentionPolicy,classifyState:classifyRepositoryState,activeProtected:activeProtectedRepositoryRow,selectRetention:selectRepositoryRetention,projectHistory:projectManagedRepositoryHistory,invalidatePreparation:invalidateRepositoryPreparation
+      retention:REPOSITORY_RETENTION_POLICY,validatePolicy:validateRepositoryRetentionPolicy,classifyState:classifyRepositoryState,activeProtected:activeProtectedRepositoryRow,selectRetention:selectRepositoryRetention,projectHistory:projectManagedRepositoryHistory,invalidatePreparation:invalidateRepositoryPreparation,establishBase:establishRepositoryBase,
+      // The newest version this device made (any location), and whether
+      // placing it in Drive can make it the shared base.
+      spine:()=>repositorySpine?freeze({checkpointId:repositorySpine.checkpointId,sourceRevision:repositorySpine.sourceRevision,shareable:!!repositorySpine.update}):null
     });
   }
   return freeze({format:'study-director.managed-repository-module',contractVersion:1,createEngine});

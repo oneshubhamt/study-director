@@ -17,7 +17,7 @@ registry.define('backup-presentation',1,()=>{
   // it is and stops, unchanged, at anything that would need a choice.
   const RESTORE_CHOICES=freeze({
     missing:freeze({value:'missing',label:'Add only what’s missing',description:'Bring back Saved Days and attachments this device doesn’t have. Nothing you have now changes.'}),
-    combine:freeze({value:'combine',label:'Combine with current data',kind:'primary',description:'Add what’s new. Notes, plans and settings changed on one side only since your last handoff are taken for you; you choose the rest. Nothing is deleted unless it was deleted on purpose.'}),
+    combine:freeze({value:'combine',label:'Combine with current data',kind:'primary',description:'Add what’s new. Notes, plans and settings changed on one side only since your last sync are taken for you; you choose the rest. Nothing is deleted unless it was deleted on purpose.'}),
     replace:freeze({value:'replace',label:'Replace current data',kind:'caution',description:'Make this device match this backup. You choose whether to keep what isn’t in it; notes it deleted go to Recently deleted.'}),
     needsDecision:'Some data differs from this backup and needs your choice, so nothing was changed. Use Combine to review the differences.'
   });
@@ -34,7 +34,7 @@ registry.define('backup-presentation',1,()=>{
     const read=(source,id='backup-operation')=>notifications.readEvent(source,id);
     function locationLabel(source,state={}){
       if(state.busy)return state.stalled?'Still working…':({history:'Reading backups…','restore-version':'Restoring…','bring-in':'Combining…','remove-safety':'Removing safety backup…'}[state.foregroundKind]||'Backing up…');
-      if(state.backingUp)return 'Backing up…';
+      if(state.backingUp)return state.sync?'Syncing…':'Backing up…';
       if(state.maintenanceBusy)return 'Maintaining backups…';
       if(state.mode==='unsupported')return 'Unavailable';
       if(state.mode==='permission')return 'Permission needed';
@@ -42,10 +42,20 @@ registry.define('backup-presentation',1,()=>{
       if(!state.connected)return state.wasConnected?'Signed out':'Off';
       // With backup encryption on, automatic backups wait for the password each launch.
       if(state.locked)return 'Paused until unlocked';
+      const synced=syncLabel(state);if(synced)return synced;
       const saved=typeof input.verified==='function'?input.verified(source):null;
-      const at=state.lastBackupAt||read(source,'backup-verified')?.completedAt||saved?.at;
-      const when=at&&Number.isFinite(Date.parse(at))?(typeof input.timeLabel==='function'?input.timeLabel(at):new Date(at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',hour12:false})):'';
+      const when=timeText(state.lastBackupAt||read(source,'backup-verified')?.completedAt||saved?.at);
       return `On${when?' · Last verified '+when:''}`;
+    }
+    function timeText(at){return at&&Number.isFinite(Date.parse(at))?(typeof input.timeLabel==='function'?input.timeLabel(at):new Date(at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',hour12:false})):'';}
+    // A shared location (Drive) says how this device stands with it: Syncing…,
+    // Needs review, Synced 10:42, or Changes since 10:42 while this device has
+    // changes it has not uploaded yet. '' before the first sync.
+    function syncLabel(state={}){
+      const sync=state.sync;if(!sync||!state.connected||state.locked)return '';
+      if(sync.syncing||state.backingUp)return 'Syncing…';
+      if(sync.review)return 'Needs review';
+      return sync.syncedAt?`${state.waiting?'Changes since':'Synced'} ${timeText(sync.syncedAt)}`:'';
     }
     // What a location's row shows: its running operation, otherwise the newest
     // of its last operation, automatic backup or status message.
@@ -81,7 +91,7 @@ registry.define('backup-presentation',1,()=>{
     // does not show it again until it is resolved.
     function notice(source,id,message){return notifications.emit({source,id,message,severity:'warning',lifecycle:'succeeded',foreground:false,title:source==='device-folder'?'Device Folder backup':'Google Drive backup',action:action(source,id),surface:'toast',duration:12000});}
     function reset(source){for(const event of notifications.eventStatus().events)if(event.source===source)notifications.resolveEvent(source,event.id);}
-    return freeze({begin,read,current,feedback,condition,notice,bytes,detail,outcome,locationLabel,summary,restoreChoices:RESTORE_CHOICES,resolve:(source,id='backup-operation')=>notifications.resolveEvent(source,id),reset,subscribe:notifications.subscribe});
+    return freeze({begin,read,current,feedback,condition,notice,bytes,detail,outcome,locationLabel,syncLabel,summary,restoreChoices:RESTORE_CHOICES,resolve:(source,id='backup-operation')=>notifications.resolveEvent(source,id),reset,subscribe:notifications.subscribe});
   }
   return freeze({format:'study-director.backup-presentation-module',contractVersion:1,createPresentation});
 });

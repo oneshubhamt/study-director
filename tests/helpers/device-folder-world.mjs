@@ -29,7 +29,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
     codec:freeze({countShape:value=>value,utf8Bytes:value=>new TextEncoder().encode(String(value)),compressionSupported:()=>false,assetIds:()=>[]}),
     ports:freeze({
       configuration:freeze({backupVersion:1,limits:freeze({}),logicalCaptureFormat:'qa.capture',logicalCaptureVersion:1}),
-      persistence:freeze({reconciliationBaseRead:unused,reconciliationBaseWrite:unused,personalFingerprint:unused}),assets:freeze({get:unused,verifyAliases:unused}),
+      persistence:freeze({reconciliationBaseRead:unused,reconciliationBaseWrite:unused,personalFingerprint:unused,dayFingerprints:unused,sessionFingerprint:unused}),assets:freeze({get:unused,verifyAliases:unused}),
       files:freeze({protect:unused,unprotect:unused,run:unused,scope:unused}),
       checkpoint:freeze({capture:unused,beginPreparation:unused,readPreparationUnits:unused,finalizePreparation:unused,establishPreparationBaseline:unused,assertCurrent:unused,inspectVerifiedCapture:unused,verifyVerifiedCapture:unused,currentImportSignal:unused}),
       domain:freeze({clampText:value=>String(value)}),environment:freeze({throwIfAborted:unused,yieldTask:async()=>{}}),diagnostics:freeze({capture:()=>{}})
@@ -54,7 +54,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   }
   const inspectManifest=async(file,options={})=>{const opened=protection?(await protection.unprotect(file,{interactive:options.interactive!==false})).blob:file,value=JSON.parse(await opened.text());if(value.format!=='study-director.backup-repository-checkpoint')throw new Error('not a manifest');return value;};
   const notSupported=()=>{throw new Error('Restore is covered by the browser and repository-restore suites.');};
-  const pipeline=freeze({noteObject:notSupported,readNote:notSupported,createPublication:notSupported,publish,publishInline:publish,inspectManifest,inspect:notSupported,bringIn:notSupported,restoreVersion:notSupported,verifyCheckpoint:notSupported,verifyObject:notSupported,scrub:notSupported,cleanup:rules.cleanup,inspectCommit:rules.inspectCommit,
+  const pipeline=freeze({noteObject:notSupported,readNote:notSupported,createPublication:notSupported,publish,publishInline:publish,inspectManifest,inspect:notSupported,bringIn:notSupported,restoreVersion:notSupported,verifyCheckpoint:notSupported,sharedBase:async()=>null,establishBase:notSupported,spine:()=>null,verifyObject:notSupported,scrub:notSupported,cleanup:rules.cleanup,inspectCommit:rules.inspectCommit,
     retention:rules.retention,validatePolicy:rules.validatePolicy,classifyState:rules.classifyState,activeProtected:rules.activeProtected,selectRetention:rules.selectRetention,projectHistory:rules.projectHistory,
     markCompleted:({copy})=>{if(copy)verified.set(copy.source,freeze({at:new clock.Date(clock.now()).toISOString(),sourceRevision:copy.sourceRevision}));}});
   const coordinator=registry.require('notice-coordinator',1).createCoordinator(freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}));
@@ -77,8 +77,8 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
     environment:freeze({canMutate:()=>canMutate,now:()=>clock.now(),setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,yieldTask:async()=>{}}),
     limits:freeze({publicationMaxAgeMs:policy.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:policy.protocol.publicationAssertionMarginMs,maintenanceMaxAgeMs:policy.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:policy.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
   }));
-  const identity=value=>value,metaKeys=freeze(Object.fromEntries(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix'].map(name=>[name,name])));
-  const settingsValid=registry.require('host-metadata',1).createAppMetaValidators(freeze({keys:metaKeys,same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),normalizers:freeze({verifiedRecovery:identity,attachmentIntegrity:identity,repositoryIntegrity:identity,reconciliationBase:identity,reconciliationBaseNote:identity})})).deviceFolder;
+  const identity=value=>value,metaKeys=freeze(Object.fromEntries(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseDayPrefix'].map(name=>[name,name])));
+  const settingsValid=registry.require('host-metadata',1).createAppMetaValidators(freeze({keys:metaKeys,same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),normalizers:freeze({verifiedRecovery:identity,attachmentIntegrity:identity,repositoryIntegrity:identity,reconciliationBase:identity,reconciliationBaseNote:identity,reconciliationBaseDays:identity})})).deviceFolder;
   const showDirectoryPicker=supported?()=>{pickerCalls+=1;if(pickerResult instanceof Error)return Promise.reject(pickerResult);return Promise.resolve(pickerResult);}:null;
   const controller=registry.require('device-backup',1).createController(freeze({
     configuration:freeze({metadataKey:'deviceFolder',pickerId:'study-director-device-backup',settingsTimeoutMs:10*1000}),
