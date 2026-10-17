@@ -2,7 +2,7 @@
 
 Status of the work on this branch (`refactor/background-coordination`, draft PR #1). Read sections 1 and 3 first; section 2 is a closed summary.
 
-**Current state (2026-10-11):** the backup and data work is finished. The notes plan in `docs/NOTES.md` is decided (items 1 to 16); steps 1 (permanent note ids, the combined earlier-versions list) and 2 (the Library in three sections, sorting, search landing, strikethrough, print) are built. After notes: the background services (section 4), and last of all Wordgard as its own module (section 5).
+**Current state (2026-10-17):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. Next: the background services (section 4), and last of all Wordgard as its own module (section 5).
 
 ---
 
