@@ -92,8 +92,8 @@ const lifecycleContext=vm.createContext({Symbol,Object,Error,TypeError,Date,Prom
 for(const file of ['internal','operation-lifecycle'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),lifecycleContext);
 const lifecycle=lifecycleContext[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1),hostSource=fs.readFileSync('source/app.html','utf8');
 function automaticMaintenance(h,clock,controls){
- const context={Object,Error,Date:clock.Date,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,OperationLifecycle:lifecycle,AppData:h.app,StartupLifecycle:{status:()=>({fullyInitialized:true})},appCanMutate:()=>controls.owned!==false,backgroundMaintenanceForegroundBusy:()=>!!controls.foreground,AppDiagnostics:{capture(){}},BackupOperationDiagnostics:{start:()=>'',mark(){},finish(){},fail(){}},DATA_MAINTENANCE_FAILURE_RETRY_MS:300000,DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS:86400000,scheduleDataMaintenance:(delay,reason)=>context.job.schedule(delay,reason)};
- vm.createContext(context);
+ const context={Object,Error,Date:clock.Date,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,OperationLifecycle:lifecycle,AppData:h.app,StartupLifecycle:{status:()=>({fullyInitialized:true})},appCanMutate:()=>controls.owned!==false,backgroundMaintenanceForegroundBusy:()=>!!controls.foreground,AppDiagnostics:{capture(){}},BackupOperationDiagnostics:{start:()=>'',mark(){},finish(){},fail(){}},DATA_MAINTENANCE_FAILURE_RETRY_MS:300000,DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS:86400000,ATTACHMENT_CLEANUP_AFTER_UPKEEP_MS:5000,scheduleDataMaintenance:(delay,reason)=>context.job.schedule(delay,reason),scheduleRichTextAssetMaintenance:delay=>{(controls.cleanups??=[]).push(delay);return true;},wakeBackgroundOperations:trigger=>{(controls.wakes??=[]).push(trigger);context.job.wake(trigger,true);return true;}};
+ vm.createContext(context);controls.host=context;
  // The shared background gate, as the app defines it; maintenance keeps running through a browser-data clear.
  context.storageResetUnresolved=()=>!!controls.storageReset;vm.runInContext(hostSource.slice(hostSource.indexOf('function backgroundBlocker('),hostSource.indexOf('const BackgroundOperations=')),context);
  vm.runInContext(hostSource.slice(hostSource.indexOf('const DataMaintenanceJob='),hostSource.indexOf('function scheduleDataMaintenance('))+'\nglobalThis.job=DataMaintenanceJob;',context);return context.job;
@@ -104,7 +104,7 @@ for(const slowStore of ['area','session','meta','all'])for(const delayMs of [0,1
  let reads=0;controls.onStorageRead=async({store})=>{if(store==='area')reads++;if(slowStore==='all'||store===slowStore)await clock.advance(delayMs);};
  const job=automaticMaintenance(h,clock,controls),phases=[];let result;
  for(let attempt=0;attempt<8;attempt++){result=await job.run('latency');if(result.status==='completed')break;assert.equal(result.status,'yielded',`${slowStore} ${delayMs}`);assert.equal(result.reason,'budget');assert.ok(result.phase>0&&result.phase<7);assert.ok(!phases.length||result.phase>phases.at(-1),'stable source must advance monotonically');phases.push(result.phase);assert.equal(h.stores.meta.get('dataMaintenance').value.status,'pending');}
- assert.equal(result.status,'completed',`${slowStore} ${delayMs} must finish within the finite phase count`);assert.equal(reads,1,'successful strict Notes preparation is not repeated');assert.ok(h.stores.meta.get('dataMaintenance').value.completedAt);job.dispose();progressCases.push({slowStore,delayMs,attempts:phases.length+1});
+ assert.equal(result.status,'completed',`${slowStore} ${delayMs} must finish within the finite phase count`);assert.deepEqual(controls.cleanups,[5000],'attachment cleanup follows each completed daily upkeep');assert.equal(reads,1,'successful strict Notes preparation is not repeated');assert.ok(h.stores.meta.get('dataMaintenance').value.completedAt);job.dispose();progressCases.push({slowStore,delayMs,attempts:phases.length+1});
 }
 for(const change of ['canonical','unsaved-note','rescue','ownership','reload','unavailable','local-unavailable']){
  const clock=createFakeClock(),controls={clock},h=createHarness(new Map(),null,controls);await h.app.compatibility.migrateDailyRecords();await h.app.notes.load();
@@ -191,3 +191,32 @@ for(const delayMs of [19999,20000,35000])for(const preempt of [false,true]){
  assert.equal(result.status,'completed');assert.equal(records.size,0);assert.equal(local.has('deletionRecovery'),false);assert.equal(reads,dates.length,'each recovery row is consumed once');assert.equal(preempted,preempt);job.dispose();recoveryProgressCases.push({delayMs,preempt,reads});
 }
 console.log(JSON.stringify({status:'PASS',suite:'canonical-recovery-progress',productionHost:true,conservedWork:true,matrices:recoveryProgressCases},null,2));
+
+// While the person is busy, upkeep waits under a named reason with no timer of
+// its own; one watcher checks back and wakes every job when the work ends.
+{
+ const clock=createFakeClock(),controls={clock},h=createHarness(new Map(),null,controls);await h.app.compatibility.migrateDailyRecords();await h.app.notes.load();
+ const job=automaticMaintenance(h,clock,controls),host=controls.host,watch=()=>vm.runInContext('foregroundWatch',host);controls.foreground=true;
+ const deferred=await job.run('interval');assert.equal(deferred.status,'deferred');assert.equal(deferred.reason,'foreground-busy');
+ assert.equal(job.status().blocker,'foreground-busy');assert.equal(job.status().scheduled,false,'no job timer while the person is busy');assert.notEqual(watch(),null,'the shared watcher is armed');
+ assert.equal(clock.pending(),1,'only the watcher waits');await clock.advance(15000);assert.equal(controls.wakes,undefined,'still busy: no wake');assert.equal(clock.pending(),1,'the watcher re-arms itself');
+ assert.equal(host.foregroundChanged(),false,'a change while still busy keeps waiting');controls.foreground=false;
+ assert.equal(host.foregroundChanged(),true);assert.deepEqual(controls.wakes,['foreground-released']);assert.equal(watch(),null);assert.equal(host.foregroundChanged(),false,'nothing to release twice');
+ await clock.advance(0);await job.settled();assert.ok(h.stores.meta.get('dataMaintenance')?.value?.completedAt,'the woken job runs at once');assert.deepEqual(controls.cleanups,[5000]);job.dispose();
+ console.log(JSON.stringify({status:'PASS',suite:'upkeep-foreground-watcher',namedWait:true,oneWatcher:true,wakeOnRelease:true}));
+}
+
+// A file backup or import the person starts holds background backup work in
+// every location until it ends; automatic backups never set those flags.
+{
+ const status={importActive:false,standaloneExportActive:false,busy:false},holds=[],listeners=[];let changes=0;
+ const context={BackupController:{status:()=>({...status}),subscribeStatus:fn=>listeners.push(fn)},BackupProviderRuntime:{suspendBackground:reason=>{const hold={reason,released:0,settled:Promise.resolve(),release(){hold.released++;}};holds.push(hold);return hold;}},AppDiagnostics:{capture:error=>assert.fail(error)},foregroundChanged:()=>{changes++;}};
+ vm.createContext(context);const start=hostSource.indexOf('let fileWorkHold=null;'),marker='BackupController.subscribeStatus(holdBackgroundForFileWork);';
+ vm.runInContext(hostSource.slice(start,hostSource.indexOf(marker,start)+marker.length),context);assert.equal(listeners.length,1);const notify=()=>listeners[0]();
+ status.busy=true;notify();assert.equal(holds.length,0,'an automatic backup does not hold itself');
+ status.standaloneExportActive=true;notify();notify();assert.equal(holds.length,1,'one hold while the file backup runs');assert.equal(holds[0].reason,'file-backup');
+ status.standaloneExportActive=false;status.importActive=true;notify();assert.equal(holds.length,1,'an import that follows keeps the same hold');assert.equal(holds[0].released,0);
+ status.importActive=false;status.busy=false;notify();assert.equal(holds[0].released,1,'released when the person-started work ends');notify();assert.equal(holds[0].released,1);
+ assert.equal(changes,6,'each status change lets the upkeep watcher check at once');
+ console.log(JSON.stringify({status:'PASS',suite:'file-work-hold',holdsOnlyPersonStartedWork:true,singleHold:true,releasesOnEnd:true}));
+}

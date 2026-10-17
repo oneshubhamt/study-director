@@ -51,8 +51,6 @@ export const LOCAL_STORAGE_KEYS=freeze({
   theme:'studyDirector.theme.v1',
   presentation:'studyDirector.presentation.v1',
   pwaUpdateCheck:'studyDirector.pwaUpdateCheck.v1',
-  attachmentMaintenanceDay:'studyDirector.attachmentMaintenanceDay.v2',
-  attachmentMaintenancePending:'studyDirector.attachmentMaintenancePending.v1',
   insightsWindow:'studyDirector.insights.window.v1',
   libraryView:'studyDirector.library.view.v1'
 });
@@ -77,7 +75,10 @@ export const OBSOLETE_LOCAL_STORAGE_KEYS=freeze({
   syncEmergency:'studyDirector.syncEmergency.v1',
   nudge:'studyDirector.nudgeConfig',
   legacyOwnershipLease:'studyDirector.timerOwner.v1',
-  attachmentMaintenanceAttemptDay:'studyDirector.attachmentMaintenanceDay.v1'
+  attachmentMaintenanceAttemptDay:'studyDirector.attachmentMaintenanceDay.v1',
+  // Attachment cleanup now follows the daily upkeep and keeps no record of its own.
+  attachmentMaintenanceDay:'studyDirector.attachmentMaintenanceDay.v2',
+  attachmentMaintenancePending:'studyDirector.attachmentMaintenancePending.v1'
 });
 
 // One authoritative identity map for the heterogeneous appMeta store. Names are
@@ -194,8 +195,6 @@ export const DATA_ARCHITECTURE=freeze({
     theme:surface('startup-mirror','host','operational','disposable mirror of appMeta portable Preferences theme','',{mirrorOf:'appMeta.personalPreferences.theme'}),
     presentation:surface('startup-mirror','host','operational','disposable mirror of appMeta portable Preferences presentation','',{mirrorOf:'appMeta.personalPreferences.presentation'}),
     pwaUpdateCheck:surface('operational','host','operational','retained'),
-    attachmentMaintenancePending:surface('operational','asset-maintenance','operational','durable pending attachment cleanup intent; cleared only after completed work'),
-    attachmentMaintenanceDay:surface('operational','asset-maintenance','operational','last local calendar day whose attachment cleanup completed'),
     insightsWindow:surface('preference','insights','operational','retained'),
     libraryView:surface('preference','library','operational','retained')
   }),
@@ -227,7 +226,9 @@ export const DATA_ARCHITECTURE=freeze({
     syncEmergency:surface('legacy-migration','compatibility','protect-identifiers','convert delete intents to deletionRecovery; discard obsolete upsert intents after verified conversion'),
     nudge:surface('legacy-migration','compatibility','operational','migrate once into PortablePreferences.v2 and retire as an authoritative LocalStorage key'),
     legacyOwnershipLease:surface('legacy-residue','compatibility','operational','remove after app-scoped ownership identity is active'),
-    attachmentMaintenanceAttemptDay:surface('legacy-residue','compatibility','operational','old scheduled-attempt day cannot certify completed attachment cleanup')
+    attachmentMaintenanceAttemptDay:surface('legacy-residue','compatibility','operational','old scheduled-attempt day cannot certify completed attachment cleanup'),
+    attachmentMaintenanceDay:surface('legacy-residue','compatibility','operational','remove; attachment cleanup now follows the daily upkeep'),
+    attachmentMaintenancePending:surface('legacy-residue','compatibility','operational','remove; a cleanup request lost to a reload is caught by the next daily sweep')
   }),
   appMeta:freeze({
     exact:freeze({

@@ -45,7 +45,7 @@ function fixture(){
     AppData:{maintenance:{settled:()=>Promise.resolve()},planData:{read:async()=>({draft:state.storedDraft})},
       notes:{flush:()=>record('notes'),failure:()=>state.noteFailure},deletionRecovery:{flush:async()=>{await record('deletions');return state.deletionFlush;}},
       activeSession:{settled:()=>record('session-settled'),load:async()=>state.loaded},local:{getText:()=>state.lastCheck,setText:(_,value)=>{state.lastCheck=Number(value);return true;}}},
-    AppDiagnostics:{capture(){}},PwaLifecycle:{status:()=>state.status,checkForUpdate:async()=>{state.updates++;if(state.checkSuccess)state.status.registered=true;return state.checkSuccess;}},
+    AppDiagnostics:{capture(){}},foregroundChanged:()=>{state.foregroundReleases=(state.foregroundReleases||0)+1;},PwaLifecycle:{status:()=>state.status,checkForUpdate:async()=>{state.updates++;if(state.checkSuccess)state.status.registered=true;return state.checkSuccess;}},
     navigator:{get onLine(){return state.online;},locks:{request:async(_,__,run)=>run()}},STORAGE_KEYS:{pwaUpdateCheck:'last'},PWA_UPDATE_CHECK_LOCK:'update',
     PWA_UPDATE_CHECK_INTERVAL_MS:86400000,PWA_UPDATE_CHECK_RETRY_BASE_MS:30000,PWA_UPDATE_CHECK_RETRY_MAX_MS:900000,
     pwaLastSuccessfulUpdateCheckMemoryAt:0,pwaUpdateCheckFailureCount:0,pwaUpdateCheckRetryAt:0,pwaUpdateCheckTimer:null,pwaUpdateCheckRunning:false,
@@ -72,7 +72,7 @@ await test('primary saves every surface and holds mutation and editor locks unti
 await test('background drain delays readiness and cancellation releases the backup hold',async()=>{
   const h=fixture(),maintenance=deferred(),device=deferred(),abort=new AbortController();h.state.maintenance=maintenance.promise;h.state.backups=device.promise;
   const {guard}=h.reserve({signal:abort.signal});let ready=false;guard.ready.then(()=>{ready=true;},()=>{});await flush();assert.equal(ready,false);
-  abort.abort();await guard.release();assert.equal(h.state.lockCount,0);assert.equal(h.sandbox.pwaUpdateReservation,null);assert.equal(guard.validate(),false);
+  abort.abort();await guard.release();assert.equal(h.state.lockCount,0);assert.equal(h.sandbox.pwaUpdateReservation,null);assert.equal(h.state.foregroundReleases,1,'the end of an update lets paused upkeep resume at once');assert.equal(guard.validate(),false);
   device.resolve();maintenance.resolve();await flush();assert.equal(h.holds.size,0);assert.equal(ready,false);assert.equal(h.calls.filter(c=>c==='provider-resume').length,1);
 });
 await test('successful drain is required before save preparation',async()=>{

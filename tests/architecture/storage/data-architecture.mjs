@@ -33,13 +33,12 @@ assert.match(app,/const SESSION_STORAGE_KEYS=Object\.freeze\(@@SD_SESSION_STORAG
 assert.match(app,/const OBSOLETE_STORAGE_KEYS=Object\.freeze\(@@SD_OBSOLETE_LOCAL_STORAGE_KEYS@@\);/u);
 assert.match(app,/const APP_META_KEYS=Object\.freeze\(@@SD_APP_META_KEYS@@\);/u);
 assert.match(app,/const OBSOLETE_APP_META_KEYS=Object\.freeze\(@@SD_OBSOLETE_APP_META_KEYS@@\);/u);
-assert.equal(Object.keys(LOCAL_STORAGE_KEYS).length,20,'current localStorage inventory includes separate attachment cleanup success and pending identities, and the Library view');
-assert.equal(LOCAL_STORAGE_KEYS.attachmentMaintenancePending,'studyDirector.attachmentMaintenancePending.v1');
-assert.equal(LOCAL_STORAGE_KEYS.attachmentMaintenanceDay,'studyDirector.attachmentMaintenanceDay.v2');
+assert.equal(Object.keys(LOCAL_STORAGE_KEYS).length,18,'current localStorage inventory; attachment cleanup keeps no record of its own');
+for(const key of ['attachmentMaintenancePending','attachmentMaintenanceDay']){assert.equal(Object.hasOwn(LOCAL_STORAGE_KEYS,key),false,key+' is retired');assert.equal(Object.hasOwn(DATA_ARCHITECTURE.localStorage,key),false,key+' has no live surface');}
+assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.attachmentMaintenancePending,'studyDirector.attachmentMaintenancePending.v1');
+assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.attachmentMaintenanceDay,'studyDirector.attachmentMaintenanceDay.v2');
 assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.attachmentMaintenanceAttemptDay,'studyDirector.attachmentMaintenanceDay.v1','old scheduling records cannot certify completion in F2');
-assert.equal(DATA_ARCHITECTURE.localStorage.attachmentMaintenancePending.owner,'asset-maintenance');
-assert.equal(DATA_ARCHITECTURE.localStorage.attachmentMaintenancePending.role,'operational');
-assert.equal(Object.keys(OBSOLETE_LOCAL_STORAGE_KEYS).length,15);
+assert.equal(Object.keys(OBSOLETE_LOCAL_STORAGE_KEYS).length,17);
 assert.equal(Object.hasOwn(LOCAL_STORAGE_KEYS,'nudge'),false,'nudge must not remain a current LocalStorage authority');
 assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.nudge,'studyDirector.nudgeConfig');
 assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.legacyOwnershipLease,'studyDirector.timerOwner.v1');

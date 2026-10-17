@@ -373,7 +373,7 @@ registry.define('compatibility-host',1,()=>{
     }
     function verifyIdentity(){const installationId=normalizeInstallationIdentity(local.getText(identity.installationKey,'')),legacy=local.getText(identity.legacyKey,null);return freeze({ok:!!installationId&&legacy===null,installationId,legacyPresent:legacy!==null});}
 
-    const residueKeys=freeze([obsolete.liveDraft,obsolete.activeSession,obsolete.storageCapability,obsolete.diagnostics,obsolete.legacyOwnershipLease,obsolete.attachmentMaintenanceAttemptDay]);
+    const residueKeys=freeze([obsolete.liveDraft,obsolete.activeSession,obsolete.storageCapability,obsolete.diagnostics,obsolete.legacyOwnershipLease,obsolete.attachmentMaintenanceAttemptDay,obsolete.attachmentMaintenanceDay,obsolete.attachmentMaintenancePending]);
     async function retireTopology(){
       let token;try{token=ownership.issueWriteToken('retire legacy database topology',{allowHydrating:true});}catch(error){if(ownership.isOwnershipLostError(error))return freeze({status:'skipped',reason:'not-primary'});throw error;}
       ownership.assertWriteToken(token,'retire legacy database topology');const result=await input.topology.retire();ownership.assertWriteToken(token,'verify legacy database topology retirement');return result;

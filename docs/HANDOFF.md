@@ -57,11 +57,11 @@ Every decision is in `docs/NOTES.md` (items 1 to 15), with the order of work. Al
 
 | Service | Meets the standard | Changed in this pass |
 |---|---|---|
-| Canonical data maintenance | Yes: 20 s budget, yields to foreground, durable pending record, 24 h cadence | Uses the shared gate. Keeps running through a browser-data clear, because it is the recovery path. |
-| Attachment cleanup | Yes: 5 s / 128 files a pass, strict reference proof | Shared gate. Waits while a clear is unresolved and stops at once when one is detected. Images in Recently deleted notes are kept (now tested). |
-| Attachment verification | Yes: 5 s / 128 files, saved progress, daily | Shared gate; waits during a clear. |
+| Canonical data maintenance | Yes: 20 s budget, yields to foreground, durable pending record, 24 h cadence (defined once, in the repository) | Uses the shared gate. Keeps running through a browser-data clear, because it is the recovery path. Each completed day also empties notes past 30 days in Recently deleted, then starts attachment cleanup. |
+| Attachment cleanup | Yes: 5 s / 128 files a pass, strict reference proof | Shared gate. Waits while a clear is unresolved and stops at once when one is detected. Images in Recently deleted notes are kept (now tested). Runs after each daily upkeep and soon after a file falls out of use; it no longer keeps its own browser-storage record (the two old keys are removed at start-up). |
+| Attachment verification | Yes: 5 s / 128 files, saved progress, daily | Shared gate; waits during a clear. After giving way to the person it resumes when they finish, not 10 minutes later. |
 | Backup scratch files | Yes: lock per file, pinned files kept | Shared gate: now the writing tab only, and waits during a clear. |
-| Automatic backups, retention cleanup, integrity (Device Folder and Drive) | Yes: one engine, shared priorities (integrity < maintenance < automatic < convergence < foreground), leases, journals | Shared gate (it already paused for clears). |
+| Automatic backups, retention cleanup, integrity (Device Folder and Drive) | Yes: one engine, shared priorities (integrity < maintenance < automatic < convergence < foreground), leases, journals | Shared gate (it already paused for clears). A file backup or import the person starts now holds this work, so it never waits behind an integrity hash in the shared file worker. |
 | App update checks and the safe update | Yes: own timer with capped backoff, writing tab only; an update waits for backups (up to a minute) and for the applied plan to end | Diagnostics now show the next check, the last check and failed attempts. |
 | Service worker caches | Yes: a fixed file list and at most 3 release caches, nothing cached at runtime | None; no size budget is needed. |
 | Workers | Search: let go after 2 quiet minutes. Export: stops after each job. Image and Insights: one per use. | Attachment worker: now let go after 2 quiet minutes, like search. |
@@ -71,9 +71,12 @@ Every decision is in `docs/NOTES.md` (items 1 to 15), with the order of work. Al
 
 **The one shared gate.** `backgroundBlocker()` in `app.html` answers "may background work start?" for every job: start-up has finished, this tab owns writes, and, for housekeeping, no browser-data clear is unresolved. Each job adds only its own condition (storage support, encryption unlocked). When a clear is settled, every job is woken. `tests/architecture/storage/background-work-contract.mjs` keeps it that way.
 
+**One way to wait.** Local upkeep (canonical maintenance, attachment cleanup and checks, scratch files) asks `upkeepBlocker()`: the shared gate, plus "is the person busy?". While they are, each job waits under the named reason `foreground-busy` with no timer of its own, the same way backup jobs wait under a held reservation. One watcher checks back every 15 seconds and wakes every job the moment the work ends; notices, backup status and the end of an app update check at once. Local upkeep keeps its own gate rather than joining the backup reservation, because the backup busy signals include automatic backups, which would then block themselves. Copy diagnostics names every waiting and waking reason.
+
 **Considered and left out.**
 - *Run upkeep only while the page is visible.* A desktop tab left in the background all day would never run it. Upkeep already runs at background priority (`scheduler.postTask`) and yields to anything the person does.
 - *Move the app-update timer under the shared job.* It already meets the standard; moving it would touch the update-safety flow for no visible gain.
+- *One reservation for local upkeep and backups.* See "One way to wait": the backup busy signals cover automatic backups too.
 - *New or merged services.* None is missing, and none duplicates another: the Device Folder and Drive already share every job.
 
 ## 5. Last of all: Wordgard as its own module (decided 2026-10-11)

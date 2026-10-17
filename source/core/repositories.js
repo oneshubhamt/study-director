@@ -1515,7 +1515,7 @@ async function runDataMaintenance(options={}){
       stageAttachments:stageAttachmentDeletionState,
       verify:verifyDeletionState
     });
-    const maintenanceApi=freeze({status:()=>freeze({busy:!!dataMaintenancePromise}),run:runDataMaintenance,repairSummaries:repairDailySummaries,settled:()=>dataMaintenancePromise||Promise.resolve()});
+    const maintenanceApi=freeze({intervalMs:DATA_MAINTENANCE_INTERVAL_MS,status:()=>freeze({busy:!!dataMaintenancePromise}),run:runDataMaintenance,repairSummaries:repairDailySummaries,settled:()=>dataMaintenancePromise||Promise.resolve()});
 
     async function verifyCurrentRepositoryMetadata(){
       const issues=[],families=['planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance'];let rows=0;

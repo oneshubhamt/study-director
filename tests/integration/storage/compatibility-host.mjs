@@ -19,7 +19,8 @@ const current={theme:'theme',presentation:'presentation',fontScale:'fontScale',s
 const obsolete={
   schedule:'oldSchedule',defaults:'oldDefaults',quote:'oldQuote',nudge:'oldNudge',reflectionDrafts:'oldReflections',reflectionLegacy:'oldReflection',
   deviceId:'oldDevice',liveDraft:'oldLiveDraft',activeSession:'oldActiveSession',storageCapability:'oldStorageCapability',diagnostics:'oldDiagnostics',
-  legacyOwnershipLease:'oldOwnerLease',attachmentMaintenanceAttemptDay:'oldAttachmentMaintenanceDay'
+  legacyOwnershipLease:'oldOwnerLease',attachmentMaintenanceAttemptDay:'oldAttachmentMaintenanceDay',
+  attachmentMaintenanceDay:'oldAttachmentCleanupDay',attachmentMaintenancePending:'oldAttachmentCleanupPending'
 };
 const appMeta={
   personalPreferences:'preferences',dataMaintenance:'dataMaintenance',verifiedRecoveryBackups:'verifiedRecoveryBackups',attachmentIntegrityAudit:'attachmentIntegrityAudit',automaticDeviceBackup:'automaticDeviceBackup',repositoryIntegrityScrub:'repositoryIntegrityScrub',
@@ -34,7 +35,7 @@ const localRows=new Map([
   [obsolete.schedule,'07:00 | 60 | Legacy Plan'],[obsolete.defaults,JSON.stringify({studentName:'Asha',scheduleText:'08:00 | 45 | Legacy Default',practiceCueMode:'audio'})],
   [obsolete.quote,'Keep going'],[obsolete.nudge,JSON.stringify({enabled:true})],[current.theme,'dark'],[current.presentation,'glass'],[current.fontScale,'1.1'],
   [obsolete.reflectionDrafts,JSON.stringify({version:1,drafts:{'2026-09-19':{reflection:'Legacy reflection',revision:2,updatedAt:'2026-09-19T10:00:00.000Z'}}})],
-  [obsolete.deviceId,'dev_abcdefgh'],[obsolete.attachmentMaintenanceAttemptDay,'2026-09-18'],
+  [obsolete.deviceId,'dev_abcdefgh'],[obsolete.attachmentMaintenanceAttemptDay,'2026-09-18'],[obsolete.attachmentMaintenanceDay,'2026-09-19'],[obsolete.attachmentMaintenancePending,'1'],
   [current.storageHealth,JSON.stringify({version:2,lastLocalSaveAt:'2026-09-19T09:00:00.000Z',lastBackupAt:'2026-09-19T09:30:00.000Z',lastNotesSaveAt:'2026-09-18T10:00:00.000Z',lastDailyRecordSaveAt:'2026-09-19T08:30:00.000Z',lastLiveSaveAt:'2026-09-19T08:59:00.000Z',lastIdbOkAt:'2026-09-19T08:00:00.000Z',lastError:'Browser database is unavailable',lastErrorAt:'2026-09-18T00:00:00.000Z',lastErrorSource:'indexedDB',updatedAt:'2026-09-19T09:00:00.000Z',storagePersisted:true,usageBytes:10,quotaBytes:100,usageRatio:0.1,lastEstimateAt:'2026-09-19T08:00:00.000Z',browserDataClearedAt:null})]
 ]);
 let lastError=null;
@@ -137,7 +138,7 @@ assert.equal(localRows.has(obsolete.reflectionDrafts),false);
 assert.equal(topologyRetired,true);
 assert.equal(localRows.get('installationId'),'inst_abcdefgh');
 assert.equal(localRows.has(obsolete.deviceId),false);
-assert.equal(localRows.has(obsolete.attachmentMaintenanceAttemptDay),false,'every obsolete browser-storage key is retired');
+for(const key of [obsolete.attachmentMaintenanceAttemptDay,obsolete.attachmentMaintenanceDay,obsolete.attachmentMaintenancePending])assert.equal(localRows.has(key),false,'every obsolete browser-storage key is retired');
 let installationProof=await facade.verifyCanonicalInstallation();assert.equal(installationProof.canonical,true);assert.equal(installationProof.compatibilityRetired,true,'after one migration no historical host metadata remains');
 assert.equal(metadataRows.has('dataMaintenance'),false);assert.equal(metadataRows.has('backupProviderOperation:google-drive'),false);assert.equal(legacyFileCollections,1);
 const scrub=metadataRows.get('repositoryIntegrityScrub').value,scrubDevice=scrub.locations['device-folder'],scrubDrive=scrub.locations['google-drive'];
