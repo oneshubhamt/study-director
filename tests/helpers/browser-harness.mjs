@@ -40,7 +40,7 @@ export function instrumentedHtml(kind='deployment',options={}){
   let html=fs.readFileSync(path.join(root,'dist',kind,manifest.main),'utf8');
   const marker='/* PUBLIC PLUGIN API */';
   if(!html.includes(marker))throw new Error(`PWA6 instrumentation marker missing from ${kind}.`);
-  const exposure=`window.__PWA6=Object.freeze({StartupLifecycle,SessionLifecycle,AppOwnership,TimerState,TimerEngine,PracticePacer,Interactions,SystemNotifications,Pomodoro,NoticeCoordinator,AppData,IndexedDb,BackupController,BackupProviderRuntime,DeviceBackup,NativeCapabilities,PwaLifecycle,SessionEvidenceGateway,ReviewModel,ReviewView,ReviewEditor,LibraryView,PlanDraftEditor,applySchedule,goTab,commitTaskNoteEditor,setStudyQuality,saveDayRecord,flushLiveDraft,todayISO,readStorageHealth,loadScheduleIntoDraft,resetTodaySession,markDone,togglePause,setCurrentTask,refreshPnote,RichTextRuntime,RichTextAssets,renderRichTextContent});\n`;
+  const exposure=`window.__PWA6=Object.freeze({StartupLifecycle,SessionLifecycle,AppOwnership,TimerState,TimerEngine,PracticePacer,Interactions,SystemNotifications,Pomodoro,NoticeCoordinator,AppData,IndexedDb,BackupController,BackupProviderRuntime,DeviceBackup,NativeCapabilities,PwaLifecycle,SessionEvidenceGateway,ReviewModel,ReviewView,ReviewEditor,LibraryView,PlanDraftEditor,applySchedule,goTab,commitTaskNoteEditor,setStudyQuality,saveDayRecord,flushLiveDraft,todayISO,readStorageHealth,loadScheduleIntoDraft,resetTodaySession,markDone,togglePause,setCurrentTask,refreshPnote,RichTextRuntime,RichTextAssets,withRichTextAssetMaintenancePaused,renderRichTextContent});\n`;
   html=html.replace(marker,exposure+marker);
   if(options.disablePwa!==false)html=withoutPwaChecks(html);
   return html;

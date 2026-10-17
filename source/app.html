@@ -8308,34 +8308,6 @@ const BackupCodec=BackupCodecModule.createBackupCodec(Object.freeze({
   personalDataCodec:PersonalDataCodec
 }));
 
-async function verifyCanonicalStoreShapes(){
-  const issues=[];
-  try{
-    const [noteRows,sessionRows,appMetaProof,repositoryMetadata,deletionState,libraryState,libraryChunks,restoreState,restorePayload]=await Promise.all([
-      IndexedDb.getAll(DB_AREA_NOTES_STORE,'canonical Area Note verification aborted'),
-      IndexedDb.getAll(DB_ACTIVE_SESSION_STORE,'canonical active-session verification aborted'),
-      AppMetaGateway.verifyAll(),
-      AppData.metadata.verifyCurrent(),
-      AppData.deletionRecovery.verify(),
-      JournalAppMeta.read('libraryClearJournalState'),
-      JournalAppMeta.list('libraryClearJournalPayloadPrefix'),
-      JournalAppMeta.read('restoreJournalState'),
-      JournalAppMeta.read('restoreJournalPayload')
-    ]);
-    if(!appMetaProof?.ok)for(const issue of appMetaProof?.issues||[])issues.push(`app-meta:${issue}`);
-    if(!repositoryMetadata?.ok)for(const issue of repositoryMetadata?.issues||[])issues.push(`app-meta:${issue}`);
-    for(const row of noteRows||[]){const clean=DailyRecordCodec.sanitizeCurrentAreaNote(row,row&&row.key);if(!clean||!sameDataValue(row,clean))issues.push(`area-note:${String(row&&row.key||'?')}`);}
-    for(const row of sessionRows||[]){const clean=ActiveSessionCodec.sanitizeCurrent(row);if(!clean||!sameDataValue(row,clean))issues.push(`active-session:${String(row&&row.id||'?')}`);}
-    if(!deletionState?.ok)for(const issue of deletionState?.issues||[])issues.push(`deletion-state:${issue}`);
-    if(libraryChunks.length&&!libraryState)issues.push('app-meta-library-orphan-chunks');
-    if(libraryState||libraryChunks.length){try{await AppData.libraryClearJournal.read();}catch(error){issues.push(`app-meta-library-integrity:${String(error&&error.message||error)}`);}}
-    if(!!restoreState!==!!restorePayload)issues.push('app-meta-restore-pair');
-    if(restoreState||restorePayload){try{await AppData.restoreJournal.read();}catch(error){issues.push(`app-meta-restore-integrity:${String(error&&error.message||error)}`);}}
-    const assetKeys=await AttachmentStorage.keys(),assetRows=await AttachmentStorage.list();if(assetKeys.length!==assetRows.length)issues.push('attachment-metadata-noncanonical');
-  }catch(error){issues.push(`verification-error:${String(error&&error.message||error||'unknown')}`);}
-  return Object.freeze({ok:issues.length===0,issues:Object.freeze(issues)});
-}
-
 const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
   baselineId:APP_VERSION,
   facadeFactory:CompatibilityModule.createFacade,
@@ -8420,7 +8392,32 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
     activeSession:()=>AppData.compatibility.verifyActiveSession(),areaNotes:()=>AppData.compatibility.verifyAreaNotes(),
     areaNoteRecovery:()=>AppData.compatibility.verifyAreaNoteRecovery(),deletionState:()=>AppData.compatibility.verifyDeletionState(),
     dailyRecords:()=>AppData.compatibility.verifyDailyRecords(),insightsRevisionEnvelope:()=>AppData.compatibility.verifyInsightsRevisionEnvelope(),
-    canonicalStores:verifyCanonicalStoreShapes,legacyAttachments:()=>AttachmentStorage.verifyLegacyClean(),
+    legacyAttachments:()=>AttachmentStorage.verifyLegacyClean(),
+    canonicalStores:async()=>{
+      const issues=[];
+      try{
+        const [noteRows,sessionRows,appMetaProof,repositoryMetadata,libraryState,libraryChunks,restoreState,restorePayload]=await Promise.all([
+          IndexedDb.getAll(DB_AREA_NOTES_STORE,'canonical Area Note verification aborted'),
+          IndexedDb.getAll(DB_ACTIVE_SESSION_STORE,'canonical active-session verification aborted'),
+          AppMetaGateway.verifyAll(),
+          AppData.metadata.verifyCurrent(),
+          JournalAppMeta.read('libraryClearJournalState'),
+          JournalAppMeta.list('libraryClearJournalPayloadPrefix'),
+          JournalAppMeta.read('restoreJournalState'),
+          JournalAppMeta.read('restoreJournalPayload')
+        ]);
+        if(!appMetaProof?.ok)for(const issue of appMetaProof?.issues||[])issues.push(`app-meta:${issue}`);
+        if(!repositoryMetadata?.ok)for(const issue of repositoryMetadata?.issues||[])issues.push(`app-meta:${issue}`);
+        for(const row of noteRows||[]){const clean=DailyRecordCodec.sanitizeCurrentAreaNote(row,row&&row.key);if(!clean||!sameDataValue(row,clean))issues.push(`area-note:${String(row&&row.key||'?')}`);}
+        for(const row of sessionRows||[]){const clean=ActiveSessionCodec.sanitizeCurrent(row);if(!clean||!sameDataValue(row,clean))issues.push(`active-session:${String(row&&row.id||'?')}`);}
+        if(libraryChunks.length&&!libraryState)issues.push('app-meta-library-orphan-chunks');
+        if(libraryState||libraryChunks.length){try{await AppData.libraryClearJournal.read();}catch(error){issues.push(`app-meta-library-integrity:${String(error&&error.message||error)}`);}}
+        if(!!restoreState!==!!restorePayload)issues.push('app-meta-restore-pair');
+        if(restoreState||restorePayload){try{await AppData.restoreJournal.read();}catch(error){issues.push(`app-meta-restore-integrity:${String(error&&error.message||error)}`);}}
+        const assetKeys=await AttachmentStorage.keys(),assetRows=await AttachmentStorage.list();if(assetKeys.length!==assetRows.length)issues.push('attachment-metadata-noncanonical');
+      }catch(error){issues.push(`verification-error:${String(error&&error.message||error||'unknown')}`);}
+      return Object.freeze({ok:issues.length===0,issues:Object.freeze(issues)});
+    },
     obsoleteMetadata:()=>AppData.compatibility.verifyObsoleteMetadata(),
     topology:async()=>{
       const state=await IndexedDb.topology(),expected=Object.values(DB_STORES).slice().sort(),actual=state.stores.slice().sort();

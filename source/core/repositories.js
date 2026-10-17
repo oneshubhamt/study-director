@@ -301,12 +301,6 @@ registry.define('repositories',1,()=>{
       }
       return [...byKey.values()].sort((a,b)=>a.deletedAt.localeCompare(b.deletedAt));
     }
-    function legacySyncDeleteEntries(){
-      const raw=readLocalRecoveryJson(STORAGE_KEYS.legacySyncEmergency,null),entries=Array.isArray(raw&&raw.entries)?raw.entries:[];
-      return sanitizeDeletionRecoveryEntries(entries.filter(entry=>entry&&entry.op==='delete').map(entry=>({
-        kind:entry.entityType,id:entry.entityId,deletedAt:entry.updatedAt||entry.deletedAt
-      })));
-    }
     function currentDeletionRecoveryEntries(){
       const raw=readLocalRecoveryJson(STORAGE_KEYS.deletionRecovery,null);
       return sanitizeDeletionRecoveryEntries(raw&&raw.entries);
@@ -428,17 +422,6 @@ const idbGet=IndexedDb.get;
 const idbGetAll=IndexedDb.getAll;
 const idbGetAllIfPresent=IndexedDb.getAllIfPresent;
 const idbHasStore=IndexedDb.hasStore;
-// Historical appMeta residue is intentionally raw only inside this compatibility cleanup path.
-function rawLegacyMetaGet(key){return idbGet(DB_APP_META_STORE,String(key),'legacy metadata read aborted');}
-function rawLegacyMetaList(){return idbGetAll(DB_APP_META_STORE,'legacy metadata list aborted');}
-function rawLegacyMetaDelete(key,{ownershipToken=null,reason='legacy metadata delete'}={}){
-  return idbStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{
-    if(ownershipToken)assertWriteToken(ownershipToken,reason);
-    const req=store.delete(String(key));req.onerror=()=>finish(false,req.error||new Error('legacy metadata delete failed'));
-    req.onsuccess=()=>{if(!ownershipToken)return;try{assertWriteToken(ownershipToken,reason);}catch(error){try{tx.abort();}catch{}finish(false,error);}};
-    tx.oncomplete=()=>finish(true,true);
-  },'legacy metadata delete aborted');
-}
 function writePlanMeta(family,value,{strictDurability=false,ownershipToken=null,allowHydrating=false,backupCapture=false}={}){
   const token=ownershipToken||issueWriteToken('save plan documents',{allowHydrating});
   if(new TextEncoder().encode(JSON.stringify(value)).length>1024*1024)throw new RangeError('Plan data exceeds its storage allowance.');
@@ -467,8 +450,6 @@ const InsightsDatasetRevision=(()=>{
   let current=null,readPromise=null,lastError='',lastReason='',volatileRevision=0,refreshQueued=false;
   function exactKeys(value,keys){return !!(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('|')===[...keys].sort().join('|'));}
   function normalize(value){if(!exactKeys(value,['format','version','counter','updatedAt'])||value.format!==FORMAT||Number(value.version)!==VALUE_VERSION)return null;const counter=Number(value.counter),updatedAt=String(value.updatedAt||'');if(!Number.isSafeInteger(counter)||counter<1||!Number.isFinite(Date.parse(updatedAt)))return null;return Object.freeze({format:FORMAT,version:VALUE_VERSION,counter,updatedAt});}
-  function normalizeLegacyRow(row){if(!exactKeys(row,['key','format','version','counter','updatedAt'])||row.key!==KEY||row.format!==FORMAT||Number(row.version)!==1)return null;const counter=Number(row.counter),updatedAt=String(row.updatedAt||'');if(!Number.isSafeInteger(counter)||counter<1||!Number.isFinite(Date.parse(updatedAt)))return null;return Object.freeze({format:FORMAT,version:VALUE_VERSION,counter,updatedAt});}
-  function currentFromRawRow(saved){if(!saved)return null;if(!exactKeys(saved,['key','version','value','updatedAt'])||saved.key!==KEY||Number(saved.version)!==1)return null;const clean=normalize(saved.value);return clean&&saved.updatedAt===clean.updatedAt?clean:null;}
   function record(counter,updatedAt=new Date().toISOString()){return {format:FORMAT,version:VALUE_VERSION,counter:Math.min(Number.MAX_SAFE_INTEGER,Math.max(1,Math.floor(Number(counter)||1))),updatedAt};}
   function revisionKey(value){return value?`${value.version}:${value.counter}:${value.updatedAt}:v${volatileRevision}`:null;}
   function refreshActive(){if(refreshQueued)return;refreshQueued=true;queueMicrotask(()=>{refreshQueued=false;onDatasetRevisionChanged(snapshot());});}
@@ -484,16 +465,8 @@ const InsightsDatasetRevision=(()=>{
   function committed(state){if(state&&state.value){accept(state.value,state.reason);refreshActive();}}
   function invalidateVolatile(reason='fallback-record-change'){volatileRevision+=1;lastReason=clampText(reason||'',80);refreshActive();return snapshot();}
   async function bump(reason='daily-record-change'){let state=null;try{await Meta.transaction('readwrite',(meta,tx,finish)=>{state=stage(tx,reason);tx.oncomplete=()=>finish(true);tx.onabort=()=>finish(false,tx.error||new Error('Insights dataset revision is not canonical. Compatibility migration must complete first.'));},{abortMessage:'insights revision update aborted'});committed(state);}catch(error){capture('insights.revision-bump',error);invalidateVolatile(reason);}return snapshot();}
-  async function migrateLegacyEnvelope(){
-    const token=compatibilityWriteToken('migrate Insights revision metadata');if(!token)return Object.freeze({status:'skipped',reason:'not-primary'});
-    return idbStrictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{
-      const guard=()=>{try{assertWriteToken(token,'migrate Insights revision metadata');return true;}catch(error){try{tx.abort();}catch{}finish(false,error);return false;}};if(!guard())return;
-      const req=store.get(KEY);req.onerror=()=>finish(false,req.error||new Error('insights revision migration read failed'));req.onsuccess=()=>{if(!guard())return;const saved=req.result;if(!saved){tx.oncomplete=()=>finish(true,Object.freeze({status:'not-needed'}));return;}if(currentFromRawRow(saved)){tx.oncomplete=()=>finish(true,Object.freeze({status:'current'}));return;}const migrated=normalizeLegacyRow(saved);if(!migrated){try{tx.abort();}catch{}finish(false,new Error('Legacy Insights dataset revision could not be converted safely.'));return;}const put=Meta.view(tx).put('insightsDatasetRevision',migrated,{updatedAt:migrated.updatedAt});put.onerror=()=>finish(false,put.error||new Error('insights revision migration write failed'));put.onsuccess=()=>{guard();};tx.oncomplete=()=>finish(true,Object.freeze({status:'migrated'}));};
-    },'insights revision migration aborted');
-  }
-  async function verifyCanonicalEnvelope(){const saved=await rawLegacyMetaGet(KEY);return Object.freeze({ok:!saved||!!currentFromRawRow(saved),present:!!saved,legacy:!!saved&&!currentFromRawRow(saved)&&!!normalizeLegacyRow(saved)});}
   function snapshot(){return Object.freeze({format:FORMAT,version:VALUE_VERSION,counter:current&&current.counter||null,updatedAt:current&&current.updatedAt||null,revision:revisionKey(current),volatileRevision,lastReason,lastError});}
-  return Object.freeze({get,bump,stage,committed,invalidateVolatile,snapshot,migrateLegacyEnvelope,verifyCanonicalEnvelope});
+  return Object.freeze({get,bump,stage,committed,invalidateVolatile,snapshot,normalize,key:KEY});
 })();
 async function applyDeletionRecoveryEntry(entry){
   if(!entry)return true;
@@ -666,14 +639,6 @@ async function recordAttachmentDeletion(assetId,deletedAt=new Date().toISOString
 async function clearAttachmentDeletion(assetId){
   const id=normalizeAttachmentDeletionId(assetId);if(!id)return false;
   await Meta.transaction('readwrite',(meta,tx,finish)=>{stageCanonicalMutationEpoch(tx,[]);const request=meta.remove('attachmentDeletionPrefix',id);request.onerror=()=>finish(false,request.error||new Error('Attachment deletion ledger clear failed'));tx.oncomplete=()=>finish(true);},{strict:true,abortMessage:'Attachment deletion ledger clear aborted'});return true;
-}
-async function verifyDeletionState(){
-  const issues=[];let savedDay=[],areaNote=[],attachment=[];
-  try{[savedDay,areaNote,attachment]=await Promise.all([listSavedDayDeletions(),listAreaNoteDeletions(),listAttachmentDeletions()]);}catch(error){issues.push(`canonical-deletion-ledger:${String(error&&error.message||error)}`);}
-  const legacyQueue=await idbGetAllIfPresent(DB_LEGACY_SYNC_QUEUE_STORE,'legacy sync queue verification aborted'),legacyTombstones=await idbGetAllIfPresent(DB_LEGACY_TOMBSTONE_STORE,'legacy tombstone verification aborted');
-  if(legacyQueue.length)issues.push('legacy-sync-queue-not-empty');if(legacyTombstones.length)issues.push('legacy-tombstones-not-empty');
-  if(LocalStorageContract.getText(STORAGE_KEYS.legacySyncEmergency,null)!==null)issues.push('legacy-sync-emergency-present');
-  return freeze({ok:issues.length===0,issues:freeze(issues),pendingRecovery:pendingDeletionEntries().length,savedDayDeletions:savedDay.length,areaNoteDeletions:areaNote.length,attachmentDeletions:attachment.length});
 }
 async function idbGetRecordsByDates(dates){
   const unique=[...new Set((dates||[]).filter(isValidIsoDate))].slice(0,APP_LIMITS.maxImportRecords);
@@ -1512,8 +1477,7 @@ async function runDataMaintenance(options={}){
       replaceAttachments:replaceAttachmentDeletions,
       recordAttachment:recordAttachmentDeletion,
       clearAttachment:clearAttachmentDeletion,
-      stageAttachments:stageAttachmentDeletionState,
-      verify:verifyDeletionState
+      stageAttachments:stageAttachmentDeletionState
     });
     const maintenanceApi=freeze({intervalMs:DATA_MAINTENANCE_INTERVAL_MS,status:()=>freeze({busy:!!dataMaintenancePromise}),run:runDataMaintenance,repairSummaries:repairDailySummaries,settled:()=>dataMaintenancePromise||Promise.resolve()});
 
@@ -1541,6 +1505,44 @@ async function runDataMaintenance(options={}){
    the compatibility host calls at start-up. Retiring the compatibility layer
    deletes this block and its wiring; nothing else depends on it.
    ---------------------------------------------------------------------- */
+// Historical appMeta residue is intentionally raw only inside this compatibility cleanup path.
+function rawLegacyMetaGet(key){return idbGet(DB_APP_META_STORE,String(key),'legacy metadata read aborted');}
+function rawLegacyMetaList(){return idbGetAll(DB_APP_META_STORE,'legacy metadata list aborted');}
+function rawLegacyMetaDelete(key,{ownershipToken=null,reason='legacy metadata delete'}={}){
+  return idbStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{
+    if(ownershipToken)assertWriteToken(ownershipToken,reason);
+    const req=store.delete(String(key));req.onerror=()=>finish(false,req.error||new Error('legacy metadata delete failed'));
+    req.onsuccess=()=>{if(!ownershipToken)return;try{assertWriteToken(ownershipToken,reason);}catch(error){try{tx.abort();}catch{}finish(false,error);}};
+    tx.oncomplete=()=>finish(true,true);
+  },'legacy metadata delete aborted');
+}
+function legacySyncDeleteEntries(){
+  const raw=readLocalRecoveryJson(STORAGE_KEYS.legacySyncEmergency,null),entries=Array.isArray(raw&&raw.entries)?raw.entries:[];
+  return sanitizeDeletionRecoveryEntries(entries.filter(entry=>entry&&entry.op==='delete').map(entry=>({
+    kind:entry.entityType,id:entry.entityId,deletedAt:entry.updatedAt||entry.deletedAt
+  })));
+}
+async function verifyDeletionState(){
+  const issues=[];let savedDay=[],areaNote=[],attachment=[];
+  try{[savedDay,areaNote,attachment]=await Promise.all([listSavedDayDeletions(),listAreaNoteDeletions(),listAttachmentDeletions()]);}catch(error){issues.push(`canonical-deletion-ledger:${String(error&&error.message||error)}`);}
+  const legacyQueue=await idbGetAllIfPresent(DB_LEGACY_SYNC_QUEUE_STORE,'legacy sync queue verification aborted'),legacyTombstones=await idbGetAllIfPresent(DB_LEGACY_TOMBSTONE_STORE,'legacy tombstone verification aborted');
+  if(legacyQueue.length)issues.push('legacy-sync-queue-not-empty');if(legacyTombstones.length)issues.push('legacy-tombstones-not-empty');
+  if(LocalStorageContract.getText(STORAGE_KEYS.legacySyncEmergency,null)!==null)issues.push('legacy-sync-emergency-present');
+  return freeze({ok:issues.length===0,issues:freeze(issues),pendingRecovery:pendingDeletionEntries().length,savedDayDeletions:savedDay.length,areaNoteDeletions:areaNote.length,attachmentDeletions:attachment.length});
+}
+// Insights revision rows from before the value envelope.
+const INSIGHTS_REVISION_FORMAT='study-director.insights-dataset-revision';
+function exactRowKeys(value,keys){return !!(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('|')===[...keys].sort().join('|'));}
+function insightsRevisionFromLegacyRow(row){if(!exactRowKeys(row,['key','format','version','counter','updatedAt'])||row.key!==InsightsDatasetRevision.key||row.format!==INSIGHTS_REVISION_FORMAT||Number(row.version)!==1)return null;const counter=Number(row.counter),updatedAt=String(row.updatedAt||'');if(!Number.isSafeInteger(counter)||counter<1||!Number.isFinite(Date.parse(updatedAt)))return null;return Object.freeze({format:INSIGHTS_REVISION_FORMAT,version:2,counter,updatedAt});}
+function insightsRevisionFromCurrentRow(saved){if(!saved)return null;if(!exactRowKeys(saved,['key','version','value','updatedAt'])||saved.key!==InsightsDatasetRevision.key||Number(saved.version)!==1)return null;const clean=InsightsDatasetRevision.normalize(saved.value);return clean&&saved.updatedAt===clean.updatedAt?clean:null;}
+async function migrateInsightsRevisionEnvelope(){
+  const token=compatibilityWriteToken('migrate Insights revision metadata');if(!token)return Object.freeze({status:'skipped',reason:'not-primary'});
+  return idbStrictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{
+    const guard=()=>{try{assertWriteToken(token,'migrate Insights revision metadata');return true;}catch(error){try{tx.abort();}catch{}finish(false,error);return false;}};if(!guard())return;
+    const req=store.get(InsightsDatasetRevision.key);req.onerror=()=>finish(false,req.error||new Error('insights revision migration read failed'));req.onsuccess=()=>{if(!guard())return;const saved=req.result;if(!saved){tx.oncomplete=()=>finish(true,Object.freeze({status:'not-needed'}));return;}if(insightsRevisionFromCurrentRow(saved)){tx.oncomplete=()=>finish(true,Object.freeze({status:'current'}));return;}const migrated=insightsRevisionFromLegacyRow(saved);if(!migrated){try{tx.abort();}catch{}finish(false,new Error('Legacy Insights dataset revision could not be converted safely.'));return;}const put=Meta.view(tx).put('insightsDatasetRevision',migrated,{updatedAt:migrated.updatedAt});put.onerror=()=>finish(false,put.error||new Error('insights revision migration write failed'));put.onsuccess=()=>{guard();};tx.oncomplete=()=>finish(true,Object.freeze({status:'migrated'}));};
+  },'insights revision migration aborted');
+}
+async function verifyInsightsRevisionEnvelope(){const saved=await rawLegacyMetaGet(InsightsDatasetRevision.key);return Object.freeze({ok:!saved||!!insightsRevisionFromCurrentRow(saved),present:!!saved,legacy:!!saved&&!insightsRevisionFromCurrentRow(saved)&&!!insightsRevisionFromLegacyRow(saved)});}
 function storageMigrationMetaValue(complete=false,count=0){
   return {
     recordVersion:DATA_CONTRACT.schemas.DailyRecord.version,
@@ -1939,8 +1941,8 @@ async function verifyAreaNoteRecovery(){
         }
         return freeze({ok:issues.length===0,issues:freeze(issues)});
       },
-      migrateInsightsRevisionEnvelope:()=>InsightsDatasetRevision.migrateLegacyEnvelope(),
-      verifyInsightsRevisionEnvelope:()=>InsightsDatasetRevision.verifyCanonicalEnvelope(),
+      migrateInsightsRevisionEnvelope,
+      verifyInsightsRevisionEnvelope,
       verifyDeletionState,
       verifyAreaNoteRecovery,
       verifyObsoleteMetadata:async()=>{

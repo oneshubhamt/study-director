@@ -12,7 +12,6 @@ import {openIntegrityOutput} from '../../../portable/integrity-output.js';
 import {passwordKey,transformEncrypted} from '../../../portable/stream-encryption.js';
 import {openOutput} from '../../../portable/file-output.js';
 import {createProcessingEngine} from '../../../portable/processing.js';
-import {integrityWorkerCompanion,companionMarker} from '../../../build/integrity-worker-companion.mjs';
 for(const file of ['internal','integrity-continuation'])vm.runInThisContext(fs.readFileSync('source/core/'+file+'.js','utf8'),{filename:'source/core/'+file+'.js'});
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('integrity-continuation',1),digest=blob=>blob.arrayBuffer().then(bytes=>createHash('sha256').update(new Uint8Array(bytes)).digest('hex'));
 const size=2*1048576+177,bytes=new Uint8Array(size);for(let i=0;i<size;i++)bytes[i]=i%251;
@@ -103,10 +102,10 @@ for(const corruptAt of [100,encrypted.size-1]){
  let failure;for(let i=0;i<5;i++){try{await h.pass();}catch(error){failure=error;break;}}assert.ok(failure&&!failure.code&&/staging is damaged/.test(failure.message));assert.equal(h.durable,null);let result;for(let i=0;i<8;i++){result=await h.pass();if(result.complete)break;}assert.equal(result.complete,true);cases.push('damaged cached '+(corruptAt===100?'ciphertext':'terminal tag')+' restarts with bounded range proofs');
 }
 {
- const bundle=fs.readFileSync('source/external/export-worker.js','utf8');assert.equal(bundle.slice(bundle.indexOf(companionMarker)),integrityWorkerCompanion());
+ const bundle=fs.readFileSync('source/external/export-worker.js','utf8');
  const handle=await outputHandle(),messages=[],context=vm.createContext({Blob,TextEncoder,TextDecoder,Uint8Array,Uint32Array,DataView,WeakMap,Map,Set,crypto:webcrypto,performance,navigator:{storage:{getDirectory:async()=>({getDirectoryHandle:async()=>({getFileHandle:async()=>handle})})}},self:{postMessage:value=>messages.push(value)}});
  vm.runInContext(bundle,context,{filename:'source/external/export-worker.js'});await context.self.onmessage({data:{id:1,type:'integrity.append',data:{chunk:new Blob(['worker segment']),offset:0,hash:null,output:{kind:'opfs',name:'backup-00000000-0000-0000-0000-000000000001'}}}});assert.equal(messages.at(-1).value.offset,14);
- await context.self.onmessage({data:{id:2,type:'checksum',data:{value:'existing worker operation'}}});assert.equal(messages.at(-1).value,createHash('sha256').update('existing worker operation').digest('hex'));cases.push('checked-in worker dispatches the generated companion and retains existing operations');
+ await context.self.onmessage({data:{id:2,type:'checksum',data:{value:'existing worker operation'}}});assert.equal(messages.at(-1).value,createHash('sha256').update('existing worker operation').digest('hex'));cases.push('the one worker build runs integrity segments and every other operation');
 }
 // Compose the real Drive range transport, continuation/hash implementation and
 // shared scheduler. A slow segment exceeding the pass allowance must be saved

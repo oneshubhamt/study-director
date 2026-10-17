@@ -815,8 +815,8 @@ const repository=(()=>{
     const now=decisionNowMs();
     return freeze(Object.values(notes).filter(entry=>isTrashKey(entry.key)&&!trashExpired(entry,now)).map(entry=>freeze({key:entry.key,id:NoteKeys.id(entry.key),label:String(entry.label||''),deletedAt:String(entry.updatedAt||''),hasNote:hasContent(entry)})).sort((a,b)=>b.deletedAt.localeCompare(a.deletedAt)));
   }
-  // Deleted notes past their retention are removed on load and when the trash
-  // is shown; saving follows the ordinary path.
+  // Deleted notes past their retention are removed on load, when the trash is
+  // shown and by the daily upkeep; saving follows the ordinary path.
   function purgeExpiredTrash(){
     if(!everLoaded||!appCanMutate())return 0;
     const now=decisionNowMs(),expired=Object.keys(notes).filter(key=>isTrashKey(key)&&trashExpired(notes[key],now));

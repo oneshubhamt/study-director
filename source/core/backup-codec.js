@@ -274,17 +274,6 @@ async function backupImportYield(options){
   backupThrowIfAborted(options&&options.signal);
 }
 function backupFilename(options,file){return String(options&&options.filename||file&&file.name||'').toLowerCase();}
-async function backupLooksChunked(file,options={}){
-  const name=backupFilename(options,file);
-  if(name.endsWith('.sdbackup')||name.endsWith('.sdbackup.gz')||await backupFileHasGzipMagic(file))return true;
-  try{
-    const prefix=await file.slice(0,Math.min(file.size||4096,4096)).text();
-    const line=prefix.split(/\r?\n/,1)[0].trim();
-    if(!line)return false;
-    const value=JSON.parse(line);
-    return !!(value&&value.type==='manifest'&&value.format===DATA_CONTRACT.schemas.Backup.format);
-  }catch(e){return false;}
-}
 async function* backupDecodedLines(file,{gzip=false,state={},signal=null}={}){
   if(file.size>APP_LIMITS.backupMaxCompressedBytes)throw new Error('Backup file exceeds the safe file-size limit.');
   const id=await Processing.run('decode.open',{file,gzip,maxBytes:APP_LIMITS.backupMaxUncompressedBytes,maxLineBytes:APP_LIMITS.backupMaxLineBytes},{signal});
@@ -434,9 +423,6 @@ async function parseChunkedBackupMetadata(file,options={},context={}){
   return {importedPersonalData:personalData,data:{areaNotes},records,hasAreaNotes:true,areaNotesComplete,importedActiveSession:activeSession,protectedCheckpointManifest,captureAuthority,formatVersion:manifest.version,counts:actual,manifest,report,uncompressedBytes:state.uncompressedBytes,assetDescriptors,referencedAssetIds:freeze([...referencedAssetIds].sort())};
   }finally{await iterator.return?.();}
 }
-async function readChunkedBackupFile(file,options={}){
-  return parseChunkedBackupMetadata(file,options,{binaryV10:false});
-}
 async function backupHasV10Magic(file){
   try{return new TextDecoder().decode(await file.slice(0,BACKUP_V10_MAGIC.length).arrayBuffer())===BACKUP_V10_MAGIC;}catch(error){return false;}
 }
@@ -492,6 +478,36 @@ async function readV10BackupFile(file,options={}){
   if(!options.validateOnly)for(const descriptor of parsed.assetDescriptors){if(descriptor.missing===true)continue;const content=contents.get(descriptor.checksum+':'+descriptor.size);importedAssets.push(freeze({...descriptor,blob:content.slice(0,content.size,descriptor.mimeType)}));}
   return {...parsed,importedAssets:freeze(importedAssets),assetBytes,uncompressedBytes:Number(parsed.uncompressedBytes||0)+assetBytes};
 }
+function legacyBackupError(message='Backup uses a retired Study Director format.'){
+  const error=new Error(message);error.code='STUDY_DIRECTOR_LEGACY_BACKUP';return error;
+}
+async function inspectCurrentBackup(file,options={}){
+  if(!file||typeof file.stream!=='function')throw new Error('No readable backup file was provided.');
+  if(!await backupHasV10Magic(file))throw legacyBackupError();
+  const parsed=await readV10BackupFile(file,{...options,currentOnly:true});
+  if(Number(parsed&&parsed.formatVersion)!==DATA_CONTRACT.schemas.Backup.version)throw legacyBackupError(`Backup v${Number(parsed&&parsed.formatVersion)||'?'} requires the temporary compatibility adapter.`);
+  return parsed;
+}
+/* COMPATIBILITY ---------------------------------------------------------
+   Readers for backup files older than the current version. They are reached
+   only through inspectLegacy, which only the compatibility layer calls.
+   Retiring it deletes this block and the older-version branches in the shared
+   reader above, each of which tests the backup's version.
+   ---------------------------------------------------------------------- */
+async function backupLooksChunked(file,options={}){
+  const name=backupFilename(options,file);
+  if(name.endsWith('.sdbackup')||name.endsWith('.sdbackup.gz')||await backupFileHasGzipMagic(file))return true;
+  try{
+    const prefix=await file.slice(0,Math.min(file.size||4096,4096)).text();
+    const line=prefix.split(/\r?\n/,1)[0].trim();
+    if(!line)return false;
+    const value=JSON.parse(line);
+    return !!(value&&value.type==='manifest'&&value.format===DATA_CONTRACT.schemas.Backup.format);
+  }catch(e){return false;}
+}
+async function readChunkedBackupFile(file,options={}){
+  return parseChunkedBackupMetadata(file,options,{binaryV10:false});
+}
 async function readLegacyBackupFile(file,options={}){
   backupThrowIfAborted(options.signal);await backupImportYield(options);
   const importMb=Math.round(APP_LIMITS.importBytes/1048576);
@@ -530,27 +546,18 @@ async function readLegacyBackupFile(file,options={}){
   if(!Array.isArray(data)&&!Array.isArray(data.records)&&!hasAreaNotes&&!importedActiveSession&&!rawTombstoneCount)throw new Error('File does not contain daily records, ongoing subject notes, an active session, or deletion metadata.');
   return {data:{...data,areaNotes},records,hasAreaNotes,areaNotesComplete,importedActiveSession,formatVersion:sourceVersion||0,counts:backupCountShape({dailyRecord:rawRecords.length,areaNote:hasAreaNotes?Object.keys(data.areaNotes).length:0,activeSession:data.activeSession?1:0,tombstone:rawTombstoneCount}),report};
 }
-function legacyBackupError(message='Backup uses a retired Study Director format.'){
-  const error=new Error(message);error.code='STUDY_DIRECTOR_LEGACY_BACKUP';return error;
-}
 async function readPortableBackupFile(file,options={}){
   if(!file||typeof file.stream!=='function')throw new Error('No readable backup file was provided.');
   backupThrowIfAborted(options.signal);
   if(await backupHasV10Magic(file))return readV10BackupFile(file,options);
   return await backupLooksChunked(file,options)?readChunkedBackupFile(file,options):readLegacyBackupFile(file,options);
 }
-async function inspectCurrentBackup(file,options={}){
-  if(!file||typeof file.stream!=='function')throw new Error('No readable backup file was provided.');
-  if(!await backupHasV10Magic(file))throw legacyBackupError();
-  const parsed=await readV10BackupFile(file,{...options,currentOnly:true});
-  if(Number(parsed&&parsed.formatVersion)!==DATA_CONTRACT.schemas.Backup.version)throw legacyBackupError(`Backup v${Number(parsed&&parsed.formatVersion)||'?'} requires the temporary compatibility adapter.`);
-  return parsed;
-}
 async function inspectLegacyBackup(file,options={}){
   const parsed=await readPortableBackupFile(file,options);
   if(Number(parsed&&parsed.formatVersion)===DATA_CONTRACT.schemas.Backup.version)throw new Error('Current-format backup was unexpectedly routed through the legacy adapter.');
   return parsed;
 }
+/* END COMPATIBILITY */
 return Object.freeze({
   utf8Bytes:backupUtf8Bytes,
   checksumAlgorithm:backupChecksumAlgorithm,

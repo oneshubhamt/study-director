@@ -149,7 +149,7 @@ assert.equal(legacyLocal.has('syncEmergency'),false,'legacy syncEmergency is ret
 for(const date of ['2026-09-10','2026-09-11','2026-09-12'])assert.equal(legacyStores.daily.has(date),false,`legacy pending delete must not resurrect ${date}`);
 const legacyLedger=await legacy.app.deletionRecovery.savedDays();
 assert.deepEqual(Array.from(legacyLedger,row=>String(row.date)),['2026-09-10','2026-09-11','2026-09-12']);
-assert.equal((await legacy.app.deletionRecovery.verify()).ok,true);
+assert.equal((await legacy.app.compatibility.verifyDeletionState()).ok,true);
 
 // Deletion ledgers stay bounded: past the limit only the oldest records go.
 // Listing applies the rule, so a full ledger never stops a backup, and data
@@ -163,7 +163,7 @@ assert.equal((await legacy.app.deletionRecovery.verify()).ok,true);
   const listed=await bounded.app.deletionRecovery.areaNotes();
   assert.equal(listed.length,1000,'a full ledger lists its newest records');
   assert.deepEqual([0,1,2].map(index=>listed.some(entry=>entry.key===nth(index))),[false,false,false],'the oldest records are the ones left out');
-  assert.equal((await bounded.app.deletionRecovery.verify()).ok,true,'a full ledger is not an integrity failure');
+  assert.equal((await bounded.app.compatibility.verifyDeletionState()).ok,true,'a full ledger is not an integrity failure');
   assert.equal((await bounded.app.maintenance.run({force:true})).status,'completed');
   const stored=[...bounded.stores.meta.keys()].filter(key=>key.startsWith('areaNoteDeletion:'));
   assert.equal(stored.length,1000,'maintenance removes the records listing leaves out');assert.equal(bounded.stores.meta.has(`areaNoteDeletion:${nth(2)}`),false);

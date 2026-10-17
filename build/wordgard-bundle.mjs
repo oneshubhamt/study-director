@@ -6,7 +6,6 @@ import * as esbuild from 'esbuild-wasm';
 import {minify} from 'terser';
 import {wordgardSourcePatchPlugin} from './wordgard-source-patches.mjs';
 import {WORDGARD_METADATA} from './wordgard-metadata.mjs';
-import {integrityWorkerCompanion} from './integrity-worker-companion.mjs';
 
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'..');
@@ -71,7 +70,7 @@ export async function buildSearchWorkerBundle(){
   return buildBrowserBundle(SEARCH_ENTRY,SEARCH_HEADER);
 }
 
-export async function buildExportWorkerBundle(){const bundle=await buildBrowserBundle(path.join(ROOT,'portable/worker.ts'),'/* Study Director @@SD_RELEASE@@ portable data worker. */\n');const source=bundle.source+integrityWorkerCompanion();return Object.freeze({...bundle,source,metrics:byteMetrics(source)});}
+export async function buildExportWorkerBundle(){return buildBrowserBundle(path.join(ROOT,'portable/worker.ts'),'/* Study Director @@SD_RELEASE@@ portable data worker. */\n');}
 export async function buildImageWorkerBundle(){return buildBrowserBundle(path.join(ROOT,'rich-text/image-worker.ts'),'/* Study Director @@SD_RELEASE@@ image preparation worker. */\n');}
 export async function buildAttachmentWorkerBundle(){return buildBrowserBundle(path.join(ROOT,'portable/attachment-worker.ts'),'/* Study Director @@SD_RELEASE@@ attachment ingest worker. */\n');}
 

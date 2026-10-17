@@ -27,7 +27,7 @@ assert.equal(occurrences(outsideFacade,/\.cleanupLegacy\(/gu),0,'only the compat
 // In the repositories, compatibility code sits in one marked block. What it
 // defines is used only inside it, it holds every note conversion (the
 // notes repository has none), and the Insights revision's older-form
-// conversions are called only from it.
+// conversions live in it.
 const blockStart=repositories.indexOf('/* COMPATIBILITY ---'),blockEnd=repositories.indexOf('/* END COMPATIBILITY */');
 assert.ok(blockStart>0&&blockEnd>blockStart,'the repositories keep their compatibility code in one marked block');
 const block=repositories.slice(blockStart,blockEnd),rest=repositories.slice(0,blockStart)+repositories.slice(blockEnd);
@@ -35,12 +35,23 @@ const defined=[...block.matchAll(/^(?:async )?function (\w+)\(/gmu)].map(match=>
 assert.ok(defined.length>=10,'the block holds the repository migrations');
 for(const name of defined)assert.equal(new RegExp(`\\b${name}\\b`,'u').test(rest),false,`${name} is compatibility code: only its block may use it`);
 assert.match(block,/const compatibility=freeze\(\{/u,'the AppData.compatibility namespace closes the block');
-for(const call of ['InsightsDatasetRevision.migrateLegacyEnvelope','InsightsDatasetRevision.verifyCanonicalEnvelope']){
-  assert.equal(rest.includes(call),false,`${call} is called only from the compatibility block`);
-  assert.equal(block.includes(call),true,`${call} is reached through the compatibility namespace`);
-}
+for(const name of ['migrateInsightsRevisionEnvelope','verifyInsightsRevisionEnvelope','verifyDeletionState','legacySyncDeleteEntries','rawLegacyMetaGet'])assert.ok(defined.includes(name),`${name} lives in the compatibility block`);
 for(const name of ['migrateAreaNoteRows','migrateAreaNoteRecovery','verifyAreaNoteRecovery'])assert.ok(defined.includes(name),`${name} lives in the compatibility block`);
 assert.doesNotMatch(read('source/core/repositories-area-notes.js'),/CompatibilityCodec|compatibilityWriteToken|legacyKeys|areaNoteRecovery|async function migrate/u,'the notes repository holds no compatibility code');
+
+// Nothing outside the block reads the retired stores, keys or raw metadata rows.
+assert.doesNotMatch(rest,/rawLegacyMeta|legacySyncDeleteEntries|idbGetAllIfPresent\(DB_LEGACY_|getText\(STORAGE_KEYS\.legacySyncEmergency/u,'retired stores and keys are read only in the compatibility block');
+assert.doesNotMatch(rest,/migrateLegacyEnvelope|verifyCanonicalEnvelope|normalizeLegacyRow/u,'the Insights revision keeps no older-form conversions of its own');
+
+// The backup format module keeps its readers for older backup files in one
+// marked block, reached only through inspectLegacy.
+const codec=read('source/core/backup-codec.js'),codecStart=codec.indexOf('/* COMPATIBILITY ---'),codecEnd=codec.indexOf('/* END COMPATIBILITY */');
+assert.ok(codecStart>0&&codecEnd>codecStart,'the backup format module keeps its older-file readers in one marked block');
+const codecBlock=codec.slice(codecStart,codecEnd),codecRest=codec.slice(0,codecStart)+codec.slice(codecEnd);
+const codecDefined=[...codecBlock.matchAll(/^(?:async )?function (\w+)\(/gmu)].map(match=>match[1]);
+for(const name of ['readLegacyBackupFile','readChunkedBackupFile','backupLooksChunked','readPortableBackupFile','inspectLegacyBackup'])assert.ok(codecDefined.includes(name),`${name} lives in the backup format module's compatibility block`);
+for(const name of codecDefined){const uses=codecRest.match(new RegExp(`\\b${name}\\b`,'gu'))||[];assert.equal(uses.length,name==='inspectLegacyBackup'?1:0,`${name} is reached only through inspectLegacy`);}
+assert.match(codecRest,/inspectLegacy:\(\.\.\.args\)=>Processing\.scope\(\(\)=>inspectLegacyBackup\(\.\.\.args\)\)/u,'inspectLegacy is the one way in');
 
 // The daily-record migration marker belongs to the compatibility layer: only its block reads it.
 assert.equal(/dailyRecordMigration/u.test(rest.replace(/^\s*dailyRecordMigration:value=>.*$/mu,'').replace(/exactObject\(input\.metaKeys,\[[^\]]*\]/u,'')),false,'ordinary repository code never reads the migration marker');
