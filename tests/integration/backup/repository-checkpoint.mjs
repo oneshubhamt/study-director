@@ -291,10 +291,10 @@ assert.deepEqual(tiered.retained.map(row=>row.id),runtime.repository.selectReten
 for(const anchor of ['2024-02-29','2026-12-31',...Array.from({length:7},(_,day)=>`2026-10-${String(day+1).padStart(2,'0')}`)]){
  const anchorMs=Date.parse(anchor+'T12:00:00Z'),dense=[];
  for(let day=219;day>=0;day--){const date=new Date(anchorMs-day*86400000).toISOString().slice(0,10);dense.push(retentionRow(20000+day*2,date,'08:00:00'),retentionRow(20001+day*2,date,'11:00:00'));}
- const selection=runtime.repository.selectRetention(dense,{now:new Date(anchorMs)}),tiers=Object.values(selection.tiers);
- assert.equal(selection.normalRetained,15);assert.equal(tiers.filter(tier=>tier==='latest').length,1);assert.equal(tiers.filter(tier=>tier==='daily').length,6);assert.equal(tiers.filter(tier=>tier==='weekly').length,4);assert.equal(tiers.filter(tier=>tier==='monthly').length,4);
- assert.equal(new Set(selection.retained.map(row=>row.manifest.retention.calendar.localDate)).size,15,'tiers must not overlap or retain two ordinary snapshots for a day');
- assert.ok(selection.retained.every(row=>row.manifest.exportedAt.includes('T11:00:00')),'each occupied period must use its newest available checkpoint');
+ const selection=runtime.repository.selectRetention(dense,{now:new Date(anchorMs)}),tiers=Object.values(selection.tiers),base=selection.retained.filter(row=>selection.tiers[row.id]!=='hourly');
+ assert.equal(selection.normalRetained,16);assert.equal(base.length,15);assert.deepEqual(selection.retained.filter(row=>selection.tiers[row.id]==='hourly').map(row=>row.manifest.exportedAt),[anchor+'T08:00:00.000Z'],'the latest day\'s earlier backup is kept as Hourly');assert.equal(tiers.filter(tier=>tier==='latest').length,1);assert.equal(tiers.filter(tier=>tier==='daily').length,6);assert.equal(tiers.filter(tier=>tier==='weekly').length,4);assert.equal(tiers.filter(tier=>tier==='monthly').length,4);
+ assert.equal(new Set(base.map(row=>row.manifest.retention.calendar.localDate)).size,15,'tiers must not overlap or retain two ordinary snapshots for a day');
+ assert.ok(base.every(row=>row.manifest.exportedAt.includes('T11:00:00')),'each occupied period must use its newest available checkpoint');
  const [daily,weekly,monthly]=['daily','weekly','monthly'].map(tier=>selection.retained.filter(row=>selection.tiers[row.id]===tier).map(row=>row.manifest.retention.calendar));
  assert.ok(weekly[weekly.length-1].weekStart<daily[0].weekStart&&monthly[monthly.length-1].month<weekly[0].month,'no Weekly shares a week with a Daily and no Monthly a month with a Weekly');
  assert.ok(weekly.every((value,index)=>!index||Date.parse(value.localDate)-Date.parse(weekly[index-1].localDate)===7*86400000),'Weeklies are a week apart');
@@ -306,7 +306,7 @@ for(const anchor of ['2024-02-29','2026-12-31',...Array.from({length:7},(_,day)=
  const many=[],anchorMs=Date.parse('2026-10-06T12:00:00Z');
  for(let n=0;n<1000;n++){const date=new Date(anchorMs-Math.floor(n/3)*86400000).toISOString().slice(0,10);many.push(retentionRow(60000+n,date,`${String(8+n%3).padStart(2,'0')}:00:00`));}
  const started=performance.now(),selection=runtime.repository.selectRetention(many,{now:new Date(anchorMs)}),elapsed=performance.now()-started;
- assert.equal(selection.normalRetained,15);assert.ok(elapsed<1000,`retention over 1,000 versions took ${Math.round(elapsed)} ms`);
+ assert.equal(selection.retained.filter(row=>selection.tiers[row.id]!=='hourly').length,15);assert.equal(selection.normalRetained,17,'the latest day\'s two earlier backups are Hourly');assert.ok(elapsed<1000,`retention over 1,000 versions took ${Math.round(elapsed)} ms`);
  console.log(JSON.stringify({retentionOver1000VersionsMs:Math.round(elapsed)}));
 }
 const timezoneShiftedEvaluation=runtime.repository.selectRetention(retentionHistory,{now:new Date('2026-09-21T02:00:00-11:00')});assert.deepEqual(timezoneShiftedEvaluation.retained.map(row=>row.id),tiered.retained.map(row=>row.id),'tier windows must stay anchored to the committed Latest checkpoint capture rather than the evaluator timezone');assert.deepEqual(timezoneShiftedEvaluation.tiers,tiered.tiers,'timezone changes must not reinterpret retained tier labels for the same committed history');
@@ -325,10 +325,12 @@ assert.equal(afterBreak.normalRetained,15,'no day is dropped while a slot is fre
 // Device Folder and Drive do. Whatever the gaps, every day with a backup is
 // kept up to 15, one backup never costs more than one version, and the
 // newest is always Latest.
-const retentionRun=(times,firstId,check=()=>{})=>{let kept=[];times.forEach((ms,index)=>{
+const retentionRun=(times,firstId,check=()=>{})=>{let kept=[],tiers={};times.forEach((ms,index)=>{
   const at=new Date(ms).toISOString(),candidates=[...kept,retentionRow(firstId+index,at.slice(0,10),at.slice(11,19))],selection=runtime.repository.selectRetention(candidates,{now:new Date(ms)});
-  assert.equal(selection.normalRetained,Math.min(15,new Set(candidates.map(row=>row.manifest.retention.calendar.localDate)).size));assert.ok(selection.remove.length<=1);assert.equal(selection.tiers[candidates.at(-1).id],'latest');
-  kept=[...selection.retained];check(kept,index);
+  const base=selection.retained.filter(row=>selection.tiers[row.id]!=='hourly'),hourly=selection.retained.filter(row=>selection.tiers[row.id]==='hourly');
+  assert.equal(base.length,Math.min(15,new Set(candidates.map(row=>row.manifest.retention.calendar.localDate)).size));assert.ok(selection.remove.filter(row=>tiers[row.id]!=='hourly').length<=1,'one backup costs at most one version outside Hourly');assert.equal(selection.tiers[candidates.at(-1).id],'latest');
+  assert.ok(hourly.length<=10&&hourly.every(row=>Date.parse(row.manifest.exportedAt)>ms-24*3600000),'Hourly keeps at most 10, all from the 24 hours before the latest');
+  kept=[...selection.retained];tiers=selection.tiers;check(kept,index);
 });return kept;};
 // Six months of backups twice a day, a three-month break, then four months
 // of daily backups: the break costs one version, and the older history then
@@ -349,7 +351,39 @@ for(let schedule=0;schedule<40;schedule++){
   for(let index=0;index<40+Math.floor(retentionRandom()*120);index++){let pick=retentionRandom()*total,span=0;while(pick>weights[span]){pick-=weights[span];span+=1;}at+=Math.max(60000,Math.round(spans[span]()));times.push(at);}
   retentionRun(times,50000+schedule*1000);
 }
-const sameDayUnderLimit=[retentionRow(920,'2026-09-20','09:00:00'),retentionRow(921,'2026-09-20','13:00:00'),retentionRow(922,'2026-09-20','18:00:00')],sameDaySelection=runtime.repository.selectRetention(sameDayUnderLimit,{now:retentionNow});assert.deepEqual(sameDaySelection.retained.map(row=>row.id),[sameDayUnderLimit.at(-1).id],'same-day retention must keep only the newest immutable checkpoint of a day even when the repository is far below the 15-point capacity');assert.equal(sameDaySelection.remove.length,2);
+const sameDayUnderLimit=[retentionRow(920,'2026-09-20','09:00:00'),retentionRow(921,'2026-09-20','13:00:00'),retentionRow(922,'2026-09-20','18:00:00')],sameDaySelection=runtime.repository.selectRetention(sameDayUnderLimit,{now:retentionNow});assert.deepEqual(sameDaySelection.retained.map(row=>sameDaySelection.tiers[row.id]),['hourly','hourly','latest'],'earlier backups of the latest day are kept as Hourly');assert.equal(sameDaySelection.remove.length,0);
+{
+  // Hourly: walking back from the latest over the 24 hours before it, the
+  // newest backup of each earlier local hour whose notes differ from the
+  // version kept after it, up to 10 more. Local hours follow the offset
+  // captured with each backup, and the window follows the latest backup, not
+  // the clock, so every device selects alike. Rows without a notes
+  // fingerprint (older versions) count as changed.
+  const localRow=(id,iso,offset=0,notes='')=>{const local=new Date(Date.parse(iso)+offset*60000).toISOString().slice(0,10);return freeze({id:`cp_${String(id).padStart(32,'0')}`,manifest:freeze({exportedAt:iso,retention:freeze({role:'normal',protectedUntil:'',purpose:'',calendar:freeze({...retentionCalendar(local),utcOffsetMinutes:offset}),notesFingerprint:notes})})});};
+  const hourlyOf=selection=>selection.retained.filter(row=>selection.tiers[row.id]==='hourly').map(row=>row.manifest.exportedAt);
+  // Every 20 minutes for ten hours: one per hour, the newest of each.
+  const working=Array.from({length:30},(_,index)=>localRow(70000+index,new Date(Date.UTC(2026,9,10,8,0)+index*20*60000).toISOString()));
+  const workday=runtime.repository.selectRetention(working,{now:new Date(Date.UTC(2026,9,10,18))});
+  assert.equal(workday.tiers[working.at(-1).id],'latest');assert.deepEqual(hourlyOf(workday),['08:40','09:40','10:40','11:40','12:40','13:40','14:40','15:40','16:40'].map(time=>`2026-10-10T${time}:00.000Z`),'each earlier hour keeps its newest backup');
+  assert.deepEqual(runtime.repository.selectRetention(working,{now:new Date(Date.UTC(2027,0,1))}).retained.map(row=>row.id),workday.retained.map(row=>row.id),'the clock does not move the window');
+  // A half-hour offset: 10:20 and 10:40 UTC are 15:50 and 16:10 in India, two local hours.
+  const india=[localRow(71000,'2026-10-10T10:20:00.000Z',330),localRow(71001,'2026-10-10T10:40:00.000Z',330),localRow(71002,'2026-10-10T12:00:00.000Z',330)];
+  assert.deepEqual(hourlyOf(runtime.repository.selectRetention(india,{now:new Date(Date.UTC(2026,9,10,13))})),['2026-10-10T10:20:00.000Z','2026-10-10T10:40:00.000Z']);
+  assert.deepEqual(hourlyOf(runtime.repository.selectRetention(india.map((row,index)=>localRow(71100+index,row.manifest.exportedAt)),{now:new Date(Date.UTC(2026,9,10,13))})),['2026-10-10T10:40:00.000Z'],'in UTC both fall in the same hour');
+  // The window: exactly 24 hours before the latest is outside, a minute later inside.
+  const edge=[localRow(72000,'2026-10-09T11:00:00.000Z'),localRow(72001,'2026-10-09T12:00:00.000Z'),localRow(72002,'2026-10-09T12:01:00.000Z'),localRow(72003,'2026-10-10T12:00:00.000Z')],edgeSelection=runtime.repository.selectRetention(edge,{now:new Date(Date.UTC(2026,9,10,12))});
+  assert.equal(edgeSelection.tiers[edge[2].id],'daily','the newest of the day before is Daily, not Hourly');assert.equal(edgeSelection.tiers[edge[1].id],undefined,'exactly 24 hours before the latest is outside the window');assert.equal(edgeSelection.tiers[edge[0].id],undefined);
+  // Twenty hours with a backup: the newest 10 hours are kept.
+  const busy=Array.from({length:21},(_,index)=>localRow(73000+index,new Date(Date.UTC(2026,9,10,2,30)+index*3600000).toISOString())),busySelection=runtime.repository.selectRetention(busy,{now:new Date(Date.UTC(2026,9,10,23))});
+  assert.deepEqual(hourlyOf(busySelection),busy.slice(10,20).map(row=>row.manifest.exportedAt),'up to 10 more, the newest hours first');
+  // Only versions whose notes changed: a, a, b, b, b, then the latest c keeps
+  // 12:00 (b) and 09:00 (a), the newest of each notes state.
+  const fingerprint=letter=>letter.repeat(64),changes=['a','a','b','b','b','c'].map((letter,index)=>localRow(74000+index,`2026-10-10T${String(8+index).padStart(2,'0')}:00:00.000Z`,0,fingerprint(letter)));
+  assert.deepEqual(hourlyOf(runtime.repository.selectRetention(changes,{now:new Date(Date.UTC(2026,9,10,14))})),['2026-10-10T09:00:00.000Z','2026-10-10T12:00:00.000Z'],'a version whose notes match the one kept after it is not kept');
+  // Notes that never change keep no Hourly version.
+  assert.deepEqual(hourlyOf(runtime.repository.selectRetention(changes.map((row,index)=>localRow(74100+index,row.manifest.exportedAt,0,fingerprint('d'))),{now:new Date(Date.UTC(2026,9,10,14))})),[]);
+  assert.deepEqual(runtime.repository.selectRetention(busySelection.retained,{now:new Date(Date.UTC(2026,9,10,23))}).retained.map(row=>row.id),busySelection.retained.map(row=>row.id),'Hourly is idempotent');
+}
 const protectedRow=retentionRow(950,'2026-09-20','13:00:00','before-restore','2026-09-27T13:00:00.000Z','before-clear-library'),withProtected=runtime.repository.selectRetention([...retentionHistory,protectedRow],{now:retentionNow});assert.equal(withProtected.normalRetained,15);assert.equal(withProtected.retained.length,16,'one active protected safety checkpoint must live outside the 15 normal slots');assert.equal(withProtected.activeProtected.id,protectedRow.id);assert.equal(withProtected.activeProtected.manifest.retention.purpose,'before-clear-library');assert.equal(withProtected.tiers[protectedRow.id],'before-restore');
 const newerProtected=retentionRow(951,'2026-09-20','14:00:00','before-restore','2026-09-27T14:00:00.000Z','before-combine'),twoProtected=runtime.repository.selectRetention([...retentionHistory,protectedRow,newerProtected],{now:retentionNow});assert.equal(twoProtected.activeProtected.id,newerProtected.id,'only the newest unexpired protected safety point may occupy the shared slot');assert.equal(twoProtected.retained.length,16,'managed repository must retain 15 normal + exactly one protected point when history is populated');assert.ok(twoProtected.remove.some(row=>row.id===protectedRow.id),'the superseded protected safety point must be removable rather than consuming a normal retention tier');
 const expiredProtected=runtime.repository.selectRetention([...retentionHistory,protectedRow],{now:new Date(2026,8,28,12)});assert.equal(expiredProtected.activeProtected,null,'expired safety protection must no longer occupy the protected slot');assert.ok(expiredProtected.remove.some(row=>row.id===protectedRow.id),'expired protected safety checkpoints must be removable, not silently reclassified as normal history');assert.ok(expiredProtected.retained.length<=15);
@@ -832,8 +866,8 @@ for(const {size,fault} of [{size:65,fault:''},{size:65,fault:'unavailable'},{siz
   const abandoned=size>256?70:3;
   for(let index=0;index<abandoned;index++){const blob=new Blob(['abandoned backlog object '+index]);await h.provider.repository.upload({kind:'object',id:'obj_'+(0xc00000+index).toString(16).padStart(32,'0'),blob,digest:await engine.run('checksum',{value:blob})});}
   const rows=await Promise.all([...h.state.files.values()].filter(file=>kind(file)==='checkpoint').map(async file=>freeze({id:file.appProperties.studyDirectorRepositoryId,manifest:JSON.parse(await file.content.text()),remoteId:file.id})));
-  const expected=runtime.repository.selectRetention(rows,{now:new Date(clock.now())}).retained,kept=new Set(expected.map(row=>row.id)),initialFiles=new Set(h.state.files.keys()),readStart=h.state.historyReadCompletions?.length||0;
-  if(size>256)assert.equal(expected.length,15,'a fully populated backlog must settle to the ordinary 15 slots');
+  const selection=runtime.repository.selectRetention(rows,{now:new Date(clock.now())}),expected=selection.retained,kept=new Set(expected.map(row=>row.id)),initialFiles=new Set(h.state.files.keys()),readStart=h.state.historyReadCompletions?.length||0;
+  if(size>256)assert.equal(expected.filter(row=>selection.tiers[row.id]!=='hourly').length,15,'a fully populated backlog must settle to the ordinary 15 slots');
   // A cold owner starts without body caches; version-bound compact proofs
   // then own progress across uncertainty and foreground interruption.
   maintenance.set(id,maintenance.get(warmId));maintenance.delete(warmId);
@@ -972,8 +1006,8 @@ for(const encrypted of [false,true]){
   const starts=h.state.requests.slice(firstRequests).filter(value=>/^bytes \d+-/u.test(value.contentRange));assert.ok(starts.length);assert.ok(starts.every(value=>Number(value.contentRange.match(/^bytes (\d+)-/u)[1])>=prefix),'the assembled owner must preserve the acknowledged prefix');
   assert.equal(h.state.uploads.size,1,'the same prepared attachment identity must survive reauthorization and later local edits');assert.equal(session.received,[...h.state.files.values()].find(value=>value.appProperties.studyDirectorRepositoryId===firstObjectId).content.size);
   assert.equal(exclusive.status().busy,false);assert.equal(notes.Subject.text,'after reconnect');
-  const commits=await h.provider.repository.list({kind:'commit'}),checkpoints=await h.provider.repository.list({kind:'checkpoint'});assert.equal(commits.items.length,1);assert.equal(checkpoints.items.length,1,'same-day follow-up remains subject to ordinary retention');
-  const opened=await h.provider.repository.download(checkpoints.items[0]);let manifest;try{manifest=await runtime.repository.inspectManifest(opened.blob,{interactive:false});}finally{await opened.release();}
+  const commits=await h.provider.repository.list({kind:'commit'}),checkpoints=await h.provider.repository.list({kind:'checkpoint'});assert.equal(commits.items.length,2);assert.equal(checkpoints.items.length,2,'the earlier version of the day changed notes in an earlier hour, so it stays as Hourly');
+  const newestItem=[...checkpoints.items].sort((a,b)=>Date.parse(b.history?.exportedAt||b.createdAt)-Date.parse(a.history?.exportedAt||a.createdAt))[0],opened=await h.provider.repository.download(newestItem);let manifest;try{manifest=await runtime.repository.inspectManifest(opened.blob,{interactive:false});}finally{await opened.release();}
   assert.equal(manifest.sourceRevision,sourceRevision);assert.equal(manifest.encrypted,encrypted);assert.equal(manifest.objects.find(value=>value.kind==='attachment').objectId,firstObjectId);
   const noteEntry=manifest.objects.find(value=>value.kind==='structuredPack'&&value.members.some(member=>member.kind==='note'&&member.key==='Subject'));
   const objectList=await h.provider.repository.list({kind:'object'}),storedNote=await h.provider.repository.download(objectList.items.find(value=>value.id===noteEntry.objectId));let decoded;

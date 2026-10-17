@@ -210,7 +210,7 @@ registry.define('interactions',1,()=>{
       if(request.type==='choose'){
         const choices=document.createElement('div');choices.className='interaction-choices';
         (Array.isArray(options.choices)?options.choices:[]).forEach(choice=>{
-          const action=button(choice.label,choice.kind==='danger'?'danger':choice.kind==='primary'?'primary':'');
+          const action=button(choice.label,['danger','caution','primary'].includes(choice.kind)?choice.kind:'');
           action.classList.add('interaction-choice');
           if(choice.description){const description=document.createElement('span');description.className='interaction-choice-description';description.textContent=cleanText(choice.description,300);action.appendChild(description);}
           action.addEventListener('click',()=>settle(String(choice.value)));
@@ -276,7 +276,7 @@ registry.define('interactions',1,()=>{
       actions.appendChild(cancel);
       let primary=null;
       if(request.type!=='choose'){
-        primary=button(options.confirmLabel||(request.type==='input'?'Continue':'Confirm'),options.danger?'danger':'primary');
+        primary=button(options.confirmLabel||(request.type==='input'?'Continue':'Confirm'),options.danger?'danger':options.caution?'caution':'primary');
         primary.addEventListener('click',()=>{
           if(request.type==='confirm'){settle(true);return;}
           if(request.type==='configure'){settle(freeze({...configuredValues}));return;}
@@ -289,7 +289,7 @@ registry.define('interactions',1,()=>{
         actions.appendChild(primary);
       }
       shell.appendChild(actions);dialog.appendChild(shell);
-      dialog.setAttribute('aria-labelledby','sd-interaction-title');dialog.className='interaction-dialog'+(options.danger?' danger':'');
+      dialog.setAttribute('aria-labelledby','sd-interaction-title');dialog.className='interaction-dialog'+(options.danger?' danger':options.caution?' caution':'');
       dialog.oncancel=event=>{event.preventDefault();settle(request.type==='confirm'?false:null);};
       const historyDescriptor=freeze({kind:'prompt',token:`prompt:${historyNonce}:${++historySequence}`});
       active={...request,dialog,historyDescriptor,restoreFocus:document.activeElement&&typeof document.activeElement.focus==='function'?document.activeElement:null};

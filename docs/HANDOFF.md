@@ -29,7 +29,7 @@ There is nothing to re-read here; the designs live in `docs/BACKUP-ENGINE.md`, `
   - Stored names are plain: notes are `notes` everywhere (store, records, backups) and the Device Folder settings are `deviceFolder`; the old "area note" and "automatic device backup" names are converted on first start (table in `docs/ARCHITECTURE.md` §2). Backup files are version 22 and checkpoints version 7; an older build refuses them until it updates.
   - The compatibility layer is isolated, so it can be deleted in one step later (`tests/architecture/storage/compatibility-isolation.mjs`).
 - **Every audit finding is closed** (status table in the audit), along with #45 and #46.
-- **Retention:** 15 versions per location (latest, 6 daily, 4 weekly, 4 monthly). No tier shares a week or a month with the one before it, so the history reaches four to five months back.
+- **Retention:** 15 versions per location (latest, 6 daily, 4 weekly, 4 monthly). No tier shares a week or a month with the one before it, so the history reaches four to five months back. On top of those, up to 10 Hourly versions from the last 24 hours, only where the notes changed (2026-10-17).
 - **Dropped from the backup wish list:**
   - a "backup health" summary, because each location's row already shows its last backup and any problem;
   - streaming verification during restore, because every downloaded piece is already checked against the version's manifest before anything is written.
@@ -165,10 +165,10 @@ Backup password  [ Optional            ]   (a confirm box appears once you type)
 
 | Item | Decision |
 |---|---|
-| Hourly versions | Keep the newest version per hour for the last 24 hours, up to 15, on top of latest + 6 daily + 4 weekly + 4 monthly, at Drive and the Device Folder. Today only the newest version of the current day survives (`selectRepositoryRetention`), so a mistake at 3 pm leaves yesterday as the nearest way back |
-| Combine and Replace colours | Combine becomes the primary (accent) button, as the recommended choice. Replace becomes amber: it can be undone from the safety copy, and red stays for permanent deletion. Today Combine has no `kind` (gray) and Replace is `danger` (red) in `backup-presentation.js` |
-| Audit finding #3 | `contracts/data-architecture.mjs` labels the restore journal `RestoreJournalPayload.v4`; it is v5 |
-| Audit finding #4 | A note in the folder picker: use a folder only this device uses, not one synced by Dropbox, OneDrive or iCloud |
+| Hourly versions | **Done.** Up to 10 more from the 24 hours before Latest, one per local hour, and only where the notes changed (the user's refinement: so Version History is not crowded). Same rules at Drive and the Device Folder (`selectRepositoryRetention`). Before this, only the newest version of the current day survived |
+| Combine and Replace colours | **Done.** Combine is the primary (accent) choice; Replace and its confirmation are amber (`caution`). Dialog buttons marked primary had no style at all, which is why Combine looked muted; `.interaction-action.primary` and `.caution` now exist |
+| Audit finding #3 | **Done.** The restore journal label is `RestoreJournalPayload.v5` |
+| Audit finding #4 | **Done.** The Device Folder info popover says to use a folder only this device uses, not one synced by Dropbox, OneDrive or iCloud |
 
 ### 5.6 Order of work
 

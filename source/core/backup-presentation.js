@@ -17,8 +17,8 @@ registry.define('backup-presentation',1,()=>{
   // it is and stops, unchanged, at anything that would need a choice.
   const RESTORE_CHOICES=freeze({
     missing:freeze({value:'missing',label:'Add only what’s missing',description:'Bring back Saved Days and attachments this device doesn’t have. Nothing you have now changes.'}),
-    combine:freeze({value:'combine',label:'Combine with current data',description:'Add what’s new. Notes, plans and settings changed on one side only since your last handoff are taken for you; you choose the rest. Nothing is deleted unless it was deleted on purpose.'}),
-    replace:freeze({value:'replace',label:'Replace current data',kind:'danger',description:'Make this device match this backup. You choose whether to keep what isn’t in it; notes it deleted go to Recently deleted.'}),
+    combine:freeze({value:'combine',label:'Combine with current data',kind:'primary',description:'Add what’s new. Notes, plans and settings changed on one side only since your last handoff are taken for you; you choose the rest. Nothing is deleted unless it was deleted on purpose.'}),
+    replace:freeze({value:'replace',label:'Replace current data',kind:'caution',description:'Make this device match this backup. You choose whether to keep what isn’t in it; notes it deleted go to Recently deleted.'}),
     needsDecision:'Some data differs from this backup and needs your choice, so nothing was changed. Use Combine to review the differences.'
   });
   // detail, when given, says what the restore or combine changed.

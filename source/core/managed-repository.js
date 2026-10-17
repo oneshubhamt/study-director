@@ -35,7 +35,7 @@ registry.define('managed-repository',1,()=>{
     const clampText=ports.domain.clampText,throwIfImportAborted=ports.environment.throwIfAborted,yieldTask=ports.environment.yieldTask;
     const AppDiagnostics=freeze({capture:ports.diagnostics.capture});
     const REPOSITORY_RETENTION_POLICY=freeze({
-      format:'study-director.repository-retention-policy',version:1,normalLimit:15,dailyDays:6,weeklyPeriods:4,monthlyPeriods:4,protectedLimit:1,beforeRestoreProtectionMs:7*24*60*60*1000,weekStartsOn:1,calendar:'local-at-capture'
+      format:'study-director.repository-retention-policy',version:2,normalLimit:15,dailyDays:6,weeklyPeriods:4,monthlyPeriods:4,hourlyLimit:10,hourlyWindowHours:24,protectedLimit:1,beforeRestoreProtectionMs:7*24*60*60*1000,weekStartsOn:1,calendar:'local-at-capture'
     });
     const REPOSITORY_RECONCILIATION_ANCESTRY_MAX_BYTES=Math.max(8192,Math.floor((Number(APP_LIMITS.backupMaxEntryBytes)||2097152)/8));
     function validateRepositoryRetentionPolicy(value){
@@ -134,6 +134,12 @@ async function repositoryPreparationIndexCandidate(epochToken,stamps,entries){
   const noteSet=await repositoryNoteSetIdentity(entries);
   return freeze({version:REPOSITORY_PREPARATION_INDEX_VERSION,epochToken:String(epochToken||''),checkpointId:'',noteCount:noteSet.noteCount,noteKeyFingerprint:noteSet.noteKeyFingerprint,stamps:freeze([...(stamps||[])]),entries:freeze(rows)});
 }
+// One fingerprint for every note in a checkpoint, so retention can tell
+// which versions changed notes.
+async function repositoryNotesFingerprint(entries){
+  const notes=[...entries.values()].filter(entry=>entry&&entry.present&&entry.kind==='note').map(entry=>[String(entry.key),String(entry.fingerprint)]).sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);
+  return String(await Exports.run('checksum',{value:JSON.stringify(notes),algorithm:'sha256'})||'').toLowerCase();
+}
 function repositoryPreparationCounts(entries){
   let dailyRecord=0,note=0,activeSession=0,personalData=0;
   for(const entry of entries.values())if(entry&&entry.present){if(entry.kind==='dailyRecordPack')dailyRecord+=entry.members.length;else if(entry.kind==='note')note+=1;else if(entry.kind==='activeSession')activeSession=1;else if(entry.kind==='personalData')personalData=1;}
@@ -204,13 +210,13 @@ function repositoryLocalWeekStartKey(value){const date=value instanceof Date?new
 function repositoryRetentionCalendar(value){const date=value instanceof Date?new Date(value.getTime()):new Date(value);if(!Number.isFinite(date.getTime()))throw new Error('Repository retention calendar date is invalid.');const localDate=repositoryLocalDateKey(date);return freeze({localDate,weekStart:repositoryLocalWeekStartKey(date),month:localDate.slice(0,7),utcOffsetMinutes:-date.getTimezoneOffset()});}
 function repositoryUtcDateKey(value){const date=value instanceof Date?new Date(value.getTime()):new Date(value);if(!Number.isFinite(date.getTime()))throw new Error('Repository retention calendar date is invalid.');return `${date.getUTCFullYear()}-${repositoryPad2(date.getUTCMonth()+1)}-${repositoryPad2(date.getUTCDate())}`;}
 function repositoryOffsetDateKey(value,offsetMinutes){const date=value instanceof Date?new Date(value.getTime()):new Date(value),offset=Number(offsetMinutes);if(!Number.isFinite(date.getTime())||!Number.isInteger(offset)||Math.abs(offset)>14*60)throw new Error('Repository retention calendar offset is invalid.');return repositoryUtcDateKey(new Date(date.getTime()+offset*60000));}
-function repositoryLegacyRetentionDescriptor(exportedAt){const date=new Date(exportedAt);if(!Number.isFinite(date.getTime()))throw new Error('Repository retention calendar date is invalid.');const localDate=repositoryUtcDateKey(date),localOrdinal=repositoryDateOrdinal(localDate),weekStart=repositoryDateKeyFromOrdinal(repositoryWeekStartOrdinal(localOrdinal));return freeze({format:'study-director.repository-retention',version:1,role:'normal',protectedUntil:'',calendar:freeze({localDate,weekStart,month:localDate.slice(0,7),utcOffsetMinutes:0})});}
+function repositoryLegacyRetentionDescriptor(exportedAt){const date=new Date(exportedAt);if(!Number.isFinite(date.getTime()))throw new Error('Repository retention calendar date is invalid.');const localDate=repositoryUtcDateKey(date),localOrdinal=repositoryDateOrdinal(localDate),weekStart=repositoryDateKeyFromOrdinal(repositoryWeekStartOrdinal(localOrdinal));return freeze({format:'study-director.repository-retention',version:1,role:'normal',protectedUntil:'',calendar:freeze({localDate,weekStart,month:localDate.slice(0,7),utcOffsetMinutes:0}),notesFingerprint:''});}
 function canonicalRepositorySafetyPurpose(value,{legacy=false}={}){
   const purpose=String(value||'before-restore');
   if(legacy&&purpose==='before-clear-archive')return 'before-clear-library';
   return ['before-restore','before-combine','before-clear-library'].includes(purpose)?purpose:'';
 }
-function repositoryRetentionDescriptor(exportedAt,input=null){
+function repositoryRetentionDescriptor(exportedAt,input=null,notesFingerprint=''){
   // `role` is a stable wire field; `purpose` identifies the current safety operation.
   const role=input&&input.role==='before-restore'?'before-restore':'normal',calendar=repositoryRetentionCalendar(exportedAt);let protectedUntil='',purpose='';
   if(role==='before-restore'){
@@ -218,7 +224,7 @@ function repositoryRetentionDescriptor(exportedAt,input=null){
     protectedUntil=Number.isFinite(parsed)&&parsed>minimum?new Date(parsed).toISOString():new Date(minimum+REPOSITORY_RETENTION_POLICY.beforeRestoreProtectionMs).toISOString();
     purpose=canonicalRepositorySafetyPurpose(input&&input.purpose)||'before-restore';
   }
-  return freeze({format:'study-director.repository-retention',version:1,role,protectedUntil,purpose,calendar});
+  return freeze({format:'study-director.repository-retention',version:1,role,protectedUntil,purpose,calendar,notesFingerprint:/^[a-f0-9]{64}$/u.test(String(notesFingerprint||''))?String(notesFingerprint):''});
 }
 function repositoryDateOrdinal(key){
   const match=/^(\d{4})-(\d{2})-(\d{2})$/u.exec(String(key||''));if(!match)return NaN;
@@ -237,7 +243,8 @@ function validateRepositoryRetention(value,exportedAt,{legacy=false}={}){
   if(role==='normal'&&(protectedUntil||rawPurpose))throw new Error('Normal repository checkpoints cannot carry safety metadata.');
   const calendar=value.calendar,localDate=String(calendar&&calendar.localDate||''),weekStart=String(calendar&&calendar.weekStart||''),month=String(calendar&&calendar.month||''),offset=Number(calendar&&calendar.utcOffsetMinutes),localOrdinal=repositoryDateOrdinal(localDate),weekOrdinal=repositoryDateOrdinal(weekStart);
   if(!calendar||typeof calendar!=='object'||Array.isArray(calendar)||!Number.isFinite(localOrdinal)||!Number.isFinite(weekOrdinal)||!/^(?:\d{4})-(?:0[1-9]|1[0-2])$/u.test(month)||month!==localDate.slice(0,7)||!Number.isInteger(offset)||Math.abs(offset)>14*60||repositoryOffsetDateKey(exportedAt,offset)!==localDate||weekOrdinal>localOrdinal||localOrdinal-weekOrdinal>6||new Date(weekOrdinal*86400000).getUTCDay()!==REPOSITORY_RETENTION_POLICY.weekStartsOn)throw new Error('Device repository retention calendar is invalid.');
-  return freeze({format:'study-director.repository-retention',version:1,role,protectedUntil:role==='before-restore'?new Date(protectedUntilMs).toISOString():'',purpose,calendar:freeze({localDate,weekStart,month,utcOffsetMinutes:offset})});
+  const notesFingerprint=String(value.notesFingerprint||'');if(notesFingerprint&&!/^[a-f0-9]{64}$/u.test(notesFingerprint))throw new Error('Device repository retention notes fingerprint is invalid.');
+  return freeze({format:'study-director.repository-retention',version:1,role,protectedUntil:role==='before-restore'?new Date(protectedUntilMs).toISOString():'',purpose,calendar:freeze({localDate,weekStart,month,utcOffsetMinutes:offset}),notesFingerprint});
 }
 function repositoryDateKeyFromOrdinal(value){const date=new Date(Number(value)*86400000);return `${date.getUTCFullYear()}-${repositoryPad2(date.getUTCMonth()+1)}-${repositoryPad2(date.getUTCDate())}`;}
 function repositoryWeekStartOrdinal(value){const date=new Date(Number(value)*86400000),day=date.getUTCDay(),delta=(day-REPOSITORY_RETENTION_POLICY.weekStartsOn+7)%7;return Number(value)-delta;}
@@ -294,6 +301,21 @@ function selectRepositoryRetention(rowsValue,{now=new Date()}={}){
       let pick=0,widest=-1;
       spare.forEach((row,index)=>{let gap=Infinity;for(const kept of selected.values())gap=Math.min(gap,Math.abs(time(row)-time(kept)));if(gap>widest||gap===widest&&newestRepositoryRow([spare[pick],row])===row){pick=index;widest=gap;}});
       keep(spare.splice(pick,1)[0],'saved');
+    }
+    // On top of these, the 24 hours before the latest checkpoint keep up to
+    // hourlyLimit more, for notes: walking back from the latest, the newest
+    // checkpoint of each earlier local hour whose notes differ from the
+    // version kept after it. Versions whose notes did not change would only
+    // crowd Version History. The window follows the latest checkpoint rather
+    // than the clock, so every device selects alike.
+    const windowStart=time(latest)-policy.hourlyWindowHours*3600000,hour=row=>Math.floor((time(row)+calendar(row).utcOffsetMinutes*60000)/3600000),notes=row=>String(row.manifest.retention.notesFingerprint||'');
+    let after=latest,hourly=0;
+    for(const row of [...normalRows].reverse()){
+      if(hourly>=policy.hourlyLimit||time(row)<=windowStart)break;
+      if(row===latest)continue;
+      if(selected.has(row.id)){after=row;continue;}
+      if(hour(row)===hour(after)||notes(row)&&notes(row)===notes(after))continue;
+      keep(row,'hourly');hourly+=1;after=row;
     }
   }
   if(activeProtected)keep(activeProtected,'before-restore');
@@ -631,7 +653,7 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
     const logicalFingerprint=await repositoryLogicalFingerprint(identitySource);
     const manifestBase=freeze({
       format:REPOSITORY_MANIFEST_FORMAT,version:REPOSITORY_MANIFEST_VERSION,checkpoint:capture.checkpoint,exportedAt:capture.exportedAt,sourceRevision:capture.sourceRevision,
-      installationId:capture.installationId,protectionId:context.protectionId,encrypted:context.encrypted,counts:freeze({...capture.counts}),protectedCheckpointManifest:capture.protectedCheckpointManifest,reconciliationBaseId,reconciliationAncestorIds,retention:repositoryRetentionDescriptor(capture.exportedAt,retention),logicalFingerprint,
+      installationId:capture.installationId,protectionId:context.protectionId,encrypted:context.encrypted,counts:freeze({...capture.counts}),protectedCheckpointManifest:capture.protectedCheckpointManifest,reconciliationBaseId,reconciliationAncestorIds,retention:repositoryRetentionDescriptor(capture.exportedAt,retention,await repositoryNotesFingerprint(candidateEntries)),logicalFingerprint,
       objects:manifestObjects,assets:manifestAssets,warning:capture.warning
     });
     const prepared=freeze({

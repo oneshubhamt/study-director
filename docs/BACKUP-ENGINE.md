@@ -36,7 +36,7 @@ The Device Folder and Drive used to carry their own copies of the same machinery
   - attachments with a matching checksum come from local storage;
   - a one-note restore reads only that note's objects;
   - every byte used is checked against the version's verified manifest.
-- **Retention.** 15 ordinary versions: Latest, six Daily, four Weekly and four Monthly, all chosen from periods that have a backup. Weeklies start below the oldest Daily's week and Monthlies below the oldest Weekly's month, so the history reaches about four to five months back. Leftover slots go to the remaining days, widest time gap first. One protected safety version is kept on top of those.
+- **Retention.** 15 ordinary versions: Latest, six Daily, four Weekly and four Monthly, all chosen from periods that have a backup. Weeklies start below the oldest Daily's week and Monthlies below the oldest Weekly's month, so the history reaches about four to five months back. Leftover slots go to the remaining days, widest time gap first. On top of those, up to 10 Hourly versions from the 24 hours before Latest: one per local hour, only where the notes changed (each version records a fingerprint of its notes, `retention.notesFingerprint`; on Drive it is also the `sdHistoryNotes` property). One protected safety version is kept on top of those. The Device Folder and Drive use the same rules.
 - **Safety.** Every restore makes a protected safety version first and rolls back locally if anything fails.
 
 ## Standalone backup files

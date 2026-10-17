@@ -1542,7 +1542,7 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
         `${preview.exportedAt?new Date(preview.exportedAt).toLocaleString('en-IN'):'Date unavailable'} · ${Number(preview.counts&&preview.counts.dailyRecord)||0} Saved Days · ${Number(preview.counts&&preview.counts.note)||0} Notes`,
         'A verified safety copy protects the current local state if this operation fails.'
       ],
-      groups:extras?freeze([freeze({id:'extras',label:`Not in this backup · ${extras}`,defaultValue:'keep',description:'On this device, but neither in this backup nor deleted by it.',choices:REPLACEMENT_EXTRA_CHOICES})]):freeze([]),confirmLabel:'Replace current data',cancelLabel:'Cancel',danger:true,signal
+      groups:extras?freeze([freeze({id:'extras',label:`Not in this backup · ${extras}`,defaultValue:'keep',description:'On this device, but neither in this backup nor deleted by it.',choices:REPLACEMENT_EXTRA_CHOICES})]):freeze([]),confirmLabel:'Replace current data',cancelLabel:'Cancel',caution:true,signal
     });
     if(!accepted)return cancelled;
     keepExtras=accepted.extras!=='remove';

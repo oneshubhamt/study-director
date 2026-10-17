@@ -30,7 +30,7 @@ What already works well:
    - Labels use plain time, such as "Yesterday" or "3 days ago". When two entries share a date, the time is added.
    - **No backup machinery shows:** no locations, checkpoints or tiers. Nobody needs to know how backups work to use earlier versions.
    - **Choosing an entry** opens the existing side-by-side note review, which already handles keeping, combining or replacing the text.
-   - **On Drive,** opening the list reads each version's small index file (up to 15, read together), so it takes a second or two.
+   - **On Drive,** opening the list reads each version's small index file (up to 25, read together), so it takes a second or two.
    - **Where:** "Earlier versions…" stays in the open note's ⋯ menu, with Rename, Move, Export and Delete. The menu stays on the open note rather than moving to the list.
 2. **Limit:** 2,000 notes (down from 10,000), 20,000 words each. No existing data or backup holds more, so the one limit applies everywhere. Measure opening, saving and searching at that size, and build a faster tree only if it is slow. Search already updates on each save rather than rebuilding, so it only needs timing. *(Measured in step 5: the tree and search were fast enough; start-up, background work and typing were not, and are fixed. Results are under the order of work.)*
 3. **Strikethrough:** in the "More text formatting" menu, next to superscript and subscript. The editor already supports it, so it only needs switching on.

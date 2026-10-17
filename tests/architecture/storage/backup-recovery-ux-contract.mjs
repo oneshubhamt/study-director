@@ -24,9 +24,9 @@ assert.match(dataSurface,/class="backup-advanced-disclosure ui-disclosure"/u);as
 assert.match(dataSurface,/id="backup-file-heading">Portable backup</u);assert.match(dataSurface,/>Export backup…</u);assert.match(dataSurface,/>Restore from file…</u);
 {
   // How far back versions go is stated once, and matches the retention policy.
-  const repository=fs.readFileSync('source/core/managed-repository.js','utf8'),policy=repository.match(/normalLimit:(\d+),dailyDays:(\d+),weeklyPeriods:(\d+),monthlyPeriods:(\d+)/u);
-  assert.ok(policy,'retention policy must be readable');const [,normal,daily,weekly,monthly]=policy;
-  assert.match(dataSurface,new RegExp(`id="backup-retention-note">Each location keeps ${normal} versions: the latest, ${daily} daily, ${weekly} weekly and ${monthly} monthly, so about ${['','one','two','three','four','five','six'][Number(monthly)]} to ${['','one','two','three','four','five','six'][Number(monthly)+1]} months back\\.<`,'u'),'the retention note must match the retention policy');
+  const repository=fs.readFileSync('source/core/managed-repository.js','utf8'),policy=repository.match(/normalLimit:(\d+),dailyDays:(\d+),weeklyPeriods:(\d+),monthlyPeriods:(\d+),hourlyLimit:(\d+),hourlyWindowHours:(\d+)/u);
+  assert.ok(policy,'retention policy must be readable');const [,normal,daily,weekly,monthly,hourly,hours]=policy;
+  assert.match(dataSurface,new RegExp(`id="backup-retention-note">Each location keeps ${normal} versions: the latest, ${daily} daily, ${weekly} weekly and ${monthly} monthly, so about ${['','one','two','three','four','five','six'][Number(monthly)]} to ${['','one','two','three','four','five','six'][Number(monthly)+1]} months back\\. It also keeps one version per hour from the last ${hours} hours when your notes changed, up to ${hourly} more\\.<`,'u'),'the retention note must match the retention policy');
   // One verb family for getting data back: Versions, then Restore…, Restore note… or Restore from file….
   assert.match(host,/use\.textContent=noteTarget\?'Restore note…':'Restore…'/u);assert.doesNotMatch(app+host,/Restore \/ Combine|Import backup…/u);
 }

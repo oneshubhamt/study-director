@@ -1058,13 +1058,13 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
           </details>
           <section class="backup-section backup-locations-section" aria-labelledby="managed-backup-heading">
             <div class="backup-section-heading-row"><div class="backup-section-title ui-label" id="managed-backup-heading">Automatic backup</div></div>
-            <p class="ui-helper" id="backup-retention-note">Each location keeps 15 versions: the latest, 6 daily, 4 weekly and 4 monthly, so about four to five months back.</p>
+            <p class="ui-helper" id="backup-retention-note">Each location keeps 15 versions: the latest, 6 daily, 4 weekly and 4 monthly, so about four to five months back. It also keeps one version per hour from the last 24 hours when your notes changed, up to 10 more.</p>
             <div class="backup-location-stack" aria-label="Automatic backup locations">
               <div class="backup-location-row backup-device-row">
                 <div class="backup-row-copy">
                   <div class="backup-location-heading">
                     <span class="ui-label">Device Folder</span><span class="backup-location-badge primary">Primary</span>
-                    <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="device-backup-info" aria-label="About Device Folder backup" aria-expanded="false" aria-controls="device-backup-info">i</button><span class="pnote-info-popover" id="device-backup-info" role="note" hidden>Automatic versioned backup in a folder you choose. Versions shows only Device Folder checkpoints and never opens Google Drive.</span></span>
+                    <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="device-backup-info" aria-label="About Device Folder backup" aria-expanded="false" aria-controls="device-backup-info">i</button><span class="pnote-info-popover" id="device-backup-info" role="note" hidden>Automatic versioned backup in a folder you choose. Versions shows only Device Folder checkpoints and never opens Google Drive. Use a folder only this device uses, not one that Dropbox, OneDrive or iCloud syncs between devices.</span></span>
                   </div>
                 </div>
                 <strong class="backup-status-value standard ui-mono" id="device-backup-status">Off</strong>

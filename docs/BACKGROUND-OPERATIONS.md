@@ -83,7 +83,7 @@ These tests establish the listed contracts under deterministic access, I/O, canc
 
 ## Retention and backlog recovery
 
-Device Folder and Drive share the same retention policy: 15 ordinary recovery points, plus at most one unexpired protected safety point. The protected point remains an extra temporary copy, as confirmed by the user; it does not displace an ordinary slot.
+Device Folder and Drive share the same retention policy (`selectRepositoryRetention`): 15 ordinary recovery points, up to 10 Hourly versions from the last 24 hours, plus at most one unexpired protected safety point. The protected point remains an extra temporary copy, as confirmed by the user; it does not displace an ordinary slot.
 
 | Tier | Slots | Selection |
 | --- | ---: | --- |
@@ -92,6 +92,7 @@ Device Folder and Drive share the same retention policy: 15 ordinary recovery po
 | Weekly | 4 | Newest checkpoint of each of the four most recent Monday-based weeks that have one, counting only weeks wholly older than the oldest Daily's week |
 | Monthly | 4 | Newest checkpoint of each of the four most recent calendar months that have one, counting only months wholly older than the oldest Weekly's month |
 | Saved | the rest | Slots the tiers cannot use go to the newest checkpoint of the remaining days, widest gap in time first, newer on a tie |
+| Hourly | up to 10 extra | Walking back over the 24 hours before Latest, the newest checkpoint of each earlier local hour (by the UTC offset captured with it) whose notes differ from the version kept after it. Versions that changed no note are not kept, so Version History is not crowded. Checkpoints without a notes fingerprint (written before it existed) count as changed |
 | Protected safety | 1 extra | Newest unexpired Before restore / combine / clear-library checkpoint |
 
 No Weekly shares a week with a Daily and no Monthly a month with a Weekly, so with a backup every day the Weeklies fall one to five weeks back, a week apart, and the Monthlies about a month apart beyond them, reaching four to five months back. Periods without a checkpoint are skipped rather than counted, so gaps of any length (inside a week, between weeks or months, or a break of several months) never empty a tier: after a break the history from before it stays, and graduates from Daily to Weekly to Monthly as new checkpoints arrive. Retention keeps one checkpoint per day, the newest, and keeps every day it can up to 15, so a new checkpoint replaces at most one version and the history is never lost wholesale. The latest day can be any weekday. Periods use the local calendar recorded at capture, so changing the evaluator's timezone does not reinterpret history.

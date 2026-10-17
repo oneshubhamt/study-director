@@ -157,7 +157,7 @@ registry.define('backup-recovery-host',1,()=>{
       cancel:input.document.getElementById('cancel-backup-import')
     });
     const safetyLabel=value=>(value==='before-clear-library'||value==='before-clear-archive')?'Before Clear Library':value==='before-combine'?'Before Combine':'Before Restore';
-    const tierLabel=(value,purpose='')=>value==='before-restore'?safetyLabel(purpose):value==='latest'?'Latest':value==='daily'?'Daily':value==='weekly'?'Weekly':value==='monthly'?'Monthly':'Saved';
+    const tierLabel=(value,purpose='')=>value==='before-restore'?safetyLabel(purpose):value==='latest'?'Latest':value==='hourly'?'Hourly':value==='daily'?'Daily':value==='weekly'?'Weekly':value==='monthly'?'Monthly':'Saved';
     const dateLabel=value=>{const date=new Date(value);return Number.isFinite(date.getTime())?date.toLocaleString():String(value||'');};
     function sourceDescriptor(sourceId){
       const id=String(sourceId||'').trim(),provider=input.providers.list().find(item=>item.id===id);return provider?freeze({id:provider.id,label:provider.label}):null;
