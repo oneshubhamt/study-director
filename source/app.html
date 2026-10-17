@@ -2974,10 +2974,14 @@ function storageSizeLabel(bytes){
   if(value<1024**3)return `${Math.round(value/(1024*1024)*10)/10} MB`;
   return `${Math.round(value/1024**3*10)/10} GB`;
 }
-// The browser's storage estimate is measured at each launch and kept in memory for diagnostics.
-let storageEstimate=Object.freeze({persisted:null,usageBytes:null,quotaBytes:null});
+// The browser's storage estimate is measured at launch, and again when the app
+// is returned to at most once an hour, so a tab left open for days still warns
+// before storage fills. It is kept in memory for diagnostics.
+const STORAGE_ESTIMATE_REFRESH_MS=60*60*1000;
+let storageEstimate=Object.freeze({persisted:null,usageBytes:null,quotaBytes:null}),storageEstimateAt=0;
 async function inspectStorageCapability(){
   if(!navigator.storage)return null;
+  storageEstimateAt=Date.now();
   let persisted=null,estimate=null;
   try{
     const nativeState=await NativeCapabilities.inspectStorage();
@@ -4255,9 +4259,9 @@ const RichTextAssets=Object.freeze({
   async removeMany(_assetIds){scheduleRichTextAssetMaintenance();return 0;}
 });
 const RichTextAssetMaintenance=AssetMaintenanceModule.create(Object.freeze({
-  isAvailable:()=>!StartupLifecycle.status().fullyInitialized?'startup':AttachmentStorage.supported()?true:'storage-unavailable',
+  isAvailable:()=>backgroundBlocker()||(AttachmentStorage.supported()?true:'storage-unavailable'),
   canMutate:()=>appCanMutate(),
-  mutationActive:()=>richTextAssetMaintenancePauseCount>0||backgroundMaintenanceForegroundBusy(),
+  mutationActive:()=>richTextAssetMaintenancePauseCount>0||backgroundMaintenanceForegroundBusy()||storageResetUnresolved(),
   collect:(operation,options)=>AttachmentStorage.collect(operation,options),
   readRestoreJournal:()=>AppData.restoreJournal.read(),
   readLibraryClearJournal:()=>AppData.libraryClearJournal.read(),
@@ -4925,6 +4929,16 @@ function reportAreaNoteConflict(info={}){
 
 /* BOUNDED DATA MAINTENANCE */
 const DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS=24*60*60*1000,DATA_MAINTENANCE_FAILURE_RETRY_MS=30*60*1000;
+// Every background job asks this one question before it starts: start-up has
+// finished and this tab owns writes. Housekeeping (attachment cleanup and
+// checks, scratch files, backups and their upkeep) also waits while a
+// browser-data clear is unresolved. Canonical maintenance is recovery, so it
+// keeps running through a clear.
+function backgroundBlocker({housekeeping=true}={}){
+  if(!StartupLifecycle.status().fullyInitialized)return 'startup';
+  if(!appCanMutate())return 'awaiting-control';
+  return housekeeping&&storageResetUnresolved()?'storage-reset':'';
+}
 const BackgroundOperations=OperationLifecycle.createGroup((id,error)=>AppDiagnostics.capture('background.owner.'+id,error,'warn'));
 let backgroundOwnersInstalled=false;
 function installBackgroundOwners(){
@@ -4951,7 +4965,7 @@ function backgroundMaintenanceForegroundBusy(){
 }
 const DataMaintenanceJob=OperationLifecycle.createJob({
   environment:{now:()=>Date.now(),setTimeout,clearTimeout},
-  isAvailable:()=>!StartupLifecycle.status().fullyInitialized?'startup':appCanMutate()?true:'awaiting-control',
+  isAvailable:()=>backgroundBlocker({housekeeping:false})||true,
   retryMs:DATA_MAINTENANCE_FAILURE_RETRY_MS,capture:error=>AppDiagnostics.capture('maintenance.schedule',error,'error'),
   execute:async({trigger,nextEligibleAt})=>{
     if(backgroundMaintenanceForegroundBusy()){DataMaintenanceJob.schedule(15000,'foreground-busy');return Object.freeze({status:'skipped',reason:'foreground-busy'});}
@@ -7838,14 +7852,14 @@ async function retainedBackupFileNames(){
   for(const target of Object.values(integrity?.locations||{}))for(const part of [target?.partial?.stored,target?.partial?.plain])if(part?.name)names.push(part.name);
   return names;
 }
-const BackupFiles=ExportsModule.createFileStore({storage:navigator.storage,locks:navigator.locks,retained:retainedBackupFileNames,isAvailable:()=>!StartupLifecycle.status().fullyInitialized?'startup':navigator.storage?.getDirectory&&navigator.locks?.request?true:'storage-unavailable',onError:error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn')});
+const BackupFiles=ExportsModule.createFileStore({storage:navigator.storage,locks:navigator.locks,retained:retainedBackupFileNames,isAvailable:()=>backgroundBlocker()||(navigator.storage?.getDirectory&&navigator.locks?.request?true:'storage-unavailable'),onError:error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn')});
 let fileProcessingNotice=null;
 const Exports=ExportsModule.createCoordinator({
   createWorker:()=>new Worker(trustedAssetURL('@@SD_EXPORT_WORKER_FILENAME@@'),{name:'study-director-exports'}),window,document,files:BackupFiles,
   onState:state=>{renderFileBackup();if(state.fileBusy){if(!fileProcessingNotice)fileProcessingNotice=NoticeCoordinator.presentation('file-processing').begin({id:'worker',surfaceId:'file-processing-status',foreground:false,announce:false,title:'File processing'});fileProcessingNotice.update({message:state.phase,progress:{stage:state.phase}});}else{fileProcessingNotice?.resolve();fileProcessingNotice=null;const status=document.getElementById('file-processing-status');if(status)status.textContent='';}}
 });
 let backupProtectionReady=false;
-function backupBackgroundAvailability(){return !StartupLifecycle.status().fullyInitialized?'startup':!appCanMutate()?'awaiting-control':storageResetUnresolved()?'storage-reset':backupProtectionReady?true:'locked';}
+function backupBackgroundAvailability(){return backgroundBlocker()||(backupProtectionReady?true:'locked');}
 function setBackupProtectionSurfaceError(error){
   const hint=document.getElementById('backup-protection-hint');if(!hint)return;
   hint.hidden=false;NoticeCoordinator.emit({source:'backup-protection',id:'settings',surfaceId:'backup-protection-hint',surface:'inline',severity:'error',lifecycle:'failed',cue:'none',message:clampText(String(error&&error.message||error||'Backup encryption could not be updated.'),APP_LIMITS.maxStatusMessageChars)});
@@ -7998,7 +8012,7 @@ const ATTACHMENT_INTEGRITY_INTERVAL_MS=24*60*60*1000;
 const ATTACHMENT_INTEGRITY_RETRY_MS=10*60*1000;
 const AttachmentIntegrityJob=OperationLifecycle.createJob({
   environment:{now:()=>Date.now(),setTimeout,clearTimeout},minDelayMs:1000,retryMs:30*60*1000,
-  isAvailable:()=>!StartupLifecycle.status().fullyInitialized?'startup':!AttachmentStorage.supported()?'storage-unavailable':appCanMutate()?true:'awaiting-control',
+  isAvailable:()=>backgroundBlocker()||(AttachmentStorage.supported()?true:'storage-unavailable'),
   capture:error=>AppDiagnostics.capture('attachments.integrity-lifecycle',error,'warn'),execute:runAttachmentIntegrityAttempt
 });
 function normalizeAttachmentIntegrityIssue(value){
@@ -8882,6 +8896,7 @@ function settleStorageReset(){
   const hold=storageResetHold;storageResetHold=null;storageResetAcknowledged=IndexedDb.lifecycle().resets;
   NoticeCoordinator.resolveEvent('storage-reset','detected');
   if(readStorageHealth().browserDataClearedAt)writeStorageHealth({browserDataClearedAt:null});
+  wakeBackgroundOperations('storage-reset-settled');
   if(!hold)return false;
   try{hold.provider?.release();}catch(error){AppDiagnostics.capture('storage-reset.provider-resume',error,'warn');}
   void Promise.resolve(AppMutationCoordinator.settled()).then(()=>DeviceBackup.rememberAfterStorageReset()).catch(error=>AppDiagnostics.capture('storage-reset.remember-folder',error,'warn'));
@@ -9041,7 +9056,7 @@ async function refreshDeviceBackgroundPermission(event){
   // The controller reconnects its whole job owner after permission changes.
   await DeviceBackup.refreshPermission();
 }
-AppActivation.subscribe(event=>{if([APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTIVATION_KINDS.VISIBILITY_RETURN,APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER,APP_ACTIVATION_KINDS.DATE_ROLLOVER].includes(event.kind))wakeBackgroundOperations('activation');void refreshDeviceBackgroundPermission(event).catch(error=>AppDiagnostics.capture('device-backup.permission-refresh',error,'warn'));});
+AppActivation.subscribe(event=>{if([APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTIVATION_KINDS.VISIBILITY_RETURN,APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER,APP_ACTIVATION_KINDS.DATE_ROLLOVER].includes(event.kind)&&wakeBackgroundOperations('activation')&&Date.now()-storageEstimateAt>=STORAGE_ESTIMATE_REFRESH_MS)void inspectStorageCapability().catch(error=>AppDiagnostics.capture('storage.estimate-refresh',error,'warn'));void refreshDeviceBackgroundPermission(event).catch(error=>AppDiagnostics.capture('device-backup.permission-refresh',error,'warn'));});
 // A location backs up on its own once this device has backed up to it (the
 // Device Folder from when it was chosen). A change found on start is backed up
 // only while local data is present.
@@ -9051,7 +9066,7 @@ BackupProviderRuntime.configureIntegrityScrub(Object.freeze({
   readTarget:id=>readRepositoryIntegrityTarget(id),
   writeResult:async(id,result)=>{await updateRepositoryIntegrityTarget(id,result);},
   prepare:async(id,target,{trigger,nextEligibleAt})=>Object.freeze({repositoryScope:target.repositoryScope,requestId:target.requestId,scanId:target.scanId,cursor:target.cursor,recheckCursor:target.recheckCursor,partial:target.partial,recheck:target.recheck,verifyIncremental:RepositoryIntegrityContinuation.verify,maxObjects:REPOSITORY_INTEGRITY_BATCH_OBJECTS,maxBytes:REPOSITORY_INTEGRITY_BATCH_BYTES,skipObjectIds:target.quarantinedObjectIds,trigger:String(trigger||'scheduled-integrity'),nextEligibleAt:String(nextEligibleAt||''),onProgress:progress=>updateRepositoryIntegrityTarget(id,{...progress,status:'yielded',checkpointOnly:true,repositoryScope:target.repositoryScope,requestId:target.requestId})}),
-  isAvailable:()=>appCanMutate()?true:'awaiting-control',
+  isAvailable:()=>backgroundBlocker()||true,
   isUnsafe:()=>!!AppMutationCoordinator?.status?.()?.active||!!AttachmentIngest?.status?.()?.busy,
   yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'}),
   quarantine:async id=>(await readRepositoryIntegrityTarget(id)).quarantinedObjectIds
@@ -9071,7 +9086,7 @@ const PWA_UPDATE_CHECK_RETRY_MAX_MS=60*60*1000;
 const PWA_UPDATE_CHECK_LOCK='study-director-pwa-update-check-v1';
 const PWA_EDIT_IDLE_MS=1800;
 let pwaLatestUpdateState=null,pwaUpdateRetryTimer=null,pwaUpdateEvaluationRunning=false,pwaAutomaticBlockMessage='';
-let pwaUpdateCheckTimer=null,pwaUpdateCheckRunning=false,pwaLastEditableInputAt=0,pwaLastSuccessfulUpdateCheckMemoryAt=0,pwaUpdateCheckFailureCount=0,pwaUpdateCheckRetryAt=0;
+let pwaUpdateCheckTimer=null,pwaUpdateCheckDueAt=0,pwaUpdateCheckRunning=false,pwaLastEditableInputAt=0,pwaLastSuccessfulUpdateCheckMemoryAt=0,pwaUpdateCheckFailureCount=0,pwaUpdateCheckRetryAt=0;
 function pwaRecentEditableInput(){return pwaLastEditableInputAt>0&&Date.now()-pwaLastEditableInputAt<PWA_EDIT_IDLE_MS;}
 function pwaAppliedPlanEnded(){
   if(!TASKS.length)return false;
@@ -9335,7 +9350,7 @@ function recordPwaUpdateCheckFailure(at=Date.now()){
   pwaUpdateCheckRetryAt=Math.max(1,Math.floor(Number(at)||Date.now()))+pwaUpdateCheckBackoffMs();
   return pwaUpdateCheckRetryAt;
 }
-function clearPwaUpdateCheckTimer(){if(pwaUpdateCheckTimer!==null){clearTimeout(pwaUpdateCheckTimer);pwaUpdateCheckTimer=null;}}
+function clearPwaUpdateCheckTimer(){pwaUpdateCheckDueAt=0;if(pwaUpdateCheckTimer!==null){clearTimeout(pwaUpdateCheckTimer);pwaUpdateCheckTimer=null;}}
 function schedulePwaUpdateCheck(minimumDelay=0){
   clearPwaUpdateCheckTimer();
   const lifecycle=PwaLifecycle.status();if(!lifecycle.supported)return false;
@@ -9343,7 +9358,7 @@ function schedulePwaUpdateCheck(minimumDelay=0){
   if(lifecycle.registrationError&&!pwaUpdateCheckRetryAt)recordPwaUpdateCheckFailure();
   const now=Date.now(),last=pwaLastUpdateCheckAt(),dueIn=lifecycle.registered&&!lifecycle.checkError&&last?Math.max(0,last+PWA_UPDATE_CHECK_INTERVAL_MS-now):0,retryIn=pwaUpdateCheckRetryAt?Math.max(0,pwaUpdateCheckRetryAt-now):0;
   const delay=Math.max(dueIn,retryIn,Math.max(0,Number(minimumDelay)||0));
-  pwaUpdateCheckTimer=setTimeout(()=>{pwaUpdateCheckTimer=null;void checkPwaUpdateIfDue();},delay);
+  pwaUpdateCheckDueAt=now+delay;pwaUpdateCheckTimer=setTimeout(()=>{pwaUpdateCheckTimer=null;pwaUpdateCheckDueAt=0;void checkPwaUpdateIfDue();},delay);
   return true;
 }
 async function checkPwaUpdateIfDue({force=false}={}){
@@ -9530,7 +9545,7 @@ function currentBackupDiagnosticStates(){
   sample('Backup encryption',()=>BackupProtection.status(),value=>[{job:'Backup encryption',state:value.enabled?value.unlocked?'unlocked':'locked':'off',enabled:value.enabled,unlocked:value.unlocked}]);
   sample('Canonical maintenance',()=>({...DataMaintenanceJob.status(),busy:DataMaintenanceJob.status().busy||AppData.maintenance.status().busy}),value=>[{job:'Canonical maintenance',...value,...OperationLifecycle.snapshot(value),lastOutcome:value.lastOutcome}]);
   for(const [job,owner] of [['Attachment cleanup',RichTextAssetMaintenance],['Backup scratch cleanup',BackupFiles],['Attachment processor',AttachmentIngest],['File processor',Exports]])sample(job,()=>owner.status(),value=>[{job,...(job.endsWith('processor')?OperationLifecycle.snapshot(value):value)}]);
-  sample('App update',()=>PwaLifecycle.status(),pwa=>[{job:'App update',state:pwa.phase,busy:pwa.applying||pwa.reloading||pwa.checking,pending:pwa.updateReady,bootState:pwa.bootState,cacheState:pwa.cacheState||'',reason:pwa.cacheReason||''}]);
+  sample('App update',()=>PwaLifecycle.status(),pwa=>[{job:'App update',state:pwa.phase,busy:pwa.applying||pwa.reloading||pwa.checking,pending:pwa.updateReady,scheduled:pwaUpdateCheckDueAt>0,nextEligibleAt:pwaUpdateCheckDueAt?new Date(pwaUpdateCheckDueAt).toISOString():'',completedAt:pwaLastUpdateCheckAt()?new Date(pwaLastUpdateCheckAt()).toISOString():'',retryAttempt:pwaUpdateCheckFailureCount,bootState:pwa.bootState,cacheState:pwa.cacheState||'',reason:pwa.cacheReason||''}]);
   sample('Attachment verification',()=>AttachmentIntegrityJob.status(),value=>[{job:'Attachment verification',...value,completedAt:attachmentIntegrityView?.checkedAt||'',attemptedAt:attachmentIntegrityView?.attemptedAt||'',cursor:attachmentIntegrityView?.progress?.cursor||0,total:attachmentIntegrityView?.progress?.total||0,coverage:'presence-and-size'}]);
   for(const [target,value] of Object.entries(repositoryIntegrityView?.locations||{})){const bound=!!value?.repositoryScope&&repositoryIntegrityBoundScopes[target]===value.repositoryScope;states.push({job:target+' verification',reason:bound?value?.blockedReason||'':'awaiting-connection',state:!bound?'unbound':value?.recheck?'recheck-pending':value?.partial||value?.cursor?'partial':value?.lastOutcome||'never',completedAt:bound?value?.completedAt||'':'',attemptedAt:bound?value?.attemptedAt||'':'',failedAt:bound?value?.failedAt||'':'',progressBytes:bound?value?.partial?.stored?.offset||0:0,quarantined:bound?value?.quarantinedObjectIds?.length||0:0,history:bound?(value?.history||[]).map(row=>row.at+':'+row.outcome+(row.complete?':full':'')).join(' | '):''});}
   sample('Provider background',()=>BackupProviderRuntime.backgroundStatus(),values=>values);return states;

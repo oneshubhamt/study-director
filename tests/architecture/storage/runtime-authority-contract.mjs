@@ -43,7 +43,8 @@ const maintenanceEnd=app.indexOf('/* ONGOING SUBJECT NOTES */',maintenanceStart)
 const maintenanceBlock=app.slice(maintenanceStart,maintenanceEnd);
 assert.match(maintenanceBlock,/if\(!StartupLifecycle\.status\(\)\.fullyInitialized\)return false;/u,'data maintenance must not start before compatibility migration and canonical startup verification complete');
 const maintenanceAdmission=app.slice(app.indexOf('const DataMaintenanceJob=OperationLifecycle.createJob('),maintenanceStart);
-assert.match(maintenanceAdmission,/isAvailable:\(\)=>!StartupLifecycle\.status\(\)\.fullyInitialized\?'startup'/u,'the owned maintenance job must recheck startup at execution admission');
+assert.match(maintenanceAdmission,/isAvailable:\(\)=>backgroundBlocker\(/u,'the owned maintenance job must recheck the shared gate at execution admission');
+assert.match(app,/function backgroundBlocker\([^)]*\)\{\s*if\(!StartupLifecycle\.status\(\)\.fullyInitialized\)return 'startup';/u,'the shared background gate rechecks startup first');
 assert.match(app,/markReady:async proof=>\{[\s\S]*proof&&proof\.canonical===true[\s\S]*AppData\.mutationEpoch\.reseed\(\)[\s\S]*scheduleDataMaintenance\(\);/u,'initial maintenance must remain inside the verified-ready boundary after canonical epoch reseeding');
 assert.match(app,/normalizePracticeTargetMs:value=>validPracticeMs\(value,\{min:APP_LIMITS\.minPracticeTargetMs\}\)\|\|null/u,'historical optional Practice targets must normalize absent/invalid values to null rather than zero');
 

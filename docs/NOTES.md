@@ -43,7 +43,7 @@ What already works well:
    - **Kept as written:** images, links to other files, task-list boxes and anything else a note cannot hold stay as their Markdown text, so nothing is lost. Code keeps its lines and indentation as plain text.
    - **Images inside Markdown files:** not in the first version.
    - A title already in use gets " (2)". Files that are not .txt or .md, too large, or past the note limit are named in the result with the reason.
-8. **Already covered:** keeping images and PDFs inside notes in sync with their note is part of attachment upkeep, checked in the background-services pass. Editing while another tab takes over writing is already safe; add one test only if none covers it.
+8. **Already covered:** keeping images and PDFs inside notes in sync with their note is part of attachment upkeep. *(Checked in the background-services pass: cleanup keeps every file a note refers to, including notes in Recently deleted, so restoring one brings its images back; `storage/background-gc-reliability` tests it.)* Editing while another tab takes over writing is already safe; add one test only if none covers it.
 9. **Later:** math equations. Code formatting is also supported by the editor and can be switched on if it is ever wanted.
 10. **Not doing:**
     - templates;

@@ -32,6 +32,8 @@ function fixture(){
   Object.assign(context,{OperationLifecycle:registry.require('operation-lifecycle',1),StartupLifecycle:{status:()=>({fullyInitialized:true})},APP_META_KEYS:{attachmentIntegrityAudit:'integrity'},AttachmentsModule:Attachments,AttachmentStorage:store,AttachmentReferences:references,attachmentIntegrityIssues:new Map([[id,{kind:'missing-file'}]]),AppData:data,richAssetReferenceRevision:0,
     readHostAppMetaValue:async()=>durable,writeHostAppMetaValue:async(_key,state,options)=>{assert.equal(options.strict,true);durable=state;writes++;},AppDiagnostics:{capture(){}},BackupOperationDiagnostics:{start:()=>'',mark(){},finish(){},fail(){}},appCanMutate:()=>true,backgroundMaintenanceForegroundBusy:()=>false,BackgroundTasks:background,
     markStorageHealthError:(_kind,message)=>warnings.push(message),markStorageHealthOk(){healthy++;},invalidateAttachmentLibrary(){},renderIntegrityStatuses(){},setTimeout:(_callback,ms)=>{scheduled.push(ms);return scheduled.length;},clearTimeout(){}});
+  // The shared background gate, as the app defines it.
+  context.storageResetUnresolved=()=>false;vm.runInContext(app.slice(app.indexOf('function backgroundBlocker('),app.indexOf('const BackgroundOperations=')),context);
   vm.runInContext(app.slice(app.indexOf('const ATTACHMENT_INTEGRITY_META_KEY='),app.indexOf('const REPOSITORY_INTEGRITY_BATCH_BYTES=')),context);
   return {context,data,references,store,scheduled,warnings,setFailure:value=>{failure=value;},empty:()=>{empty=true;},setProgress:value=>{durable={...durable,progress:value};},stats:()=>({durable,writes,healthy,rewrites})};
 }

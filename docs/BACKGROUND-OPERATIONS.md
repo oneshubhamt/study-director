@@ -38,6 +38,8 @@ A future recurrence counts as a pending opportunity. Current execution and the p
 
 ## Jobs and policies
 
+Every job first asks one shared gate, `backgroundBlocker()` in `app.html`: start-up has finished and this tab owns writes. Housekeeping (attachment cleanup and verification, scratch files, backups and their upkeep) also waits while a browser-data clear is unresolved, and every job is woken when the clear is settled. Canonical data maintenance is recovery, so it keeps running through a clear. Each job adds only its own condition, such as storage support or an unlocked encryption key.
+
 | Job / owner | Pending work and progress | Execution and recovery |
 | --- | --- | --- |
 | Canonical data maintenance / host | Strict pending/completion metadata; canonical notes, session, fallback and deletion recovery | Shared cooperative 20-second allowance; retained phase cursor fenced by strict canonical epoch, local rescue values, live Notes revision and ownership; safe revalidation after changes/reload; recovery retires only exact serviced requests and checkpoints prefixes between transactions; 24-hour successful cadence and governed retry |

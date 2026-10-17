@@ -2,7 +2,7 @@
 
 Status of the work on this branch (`refactor/background-coordination`, draft PR #1). Read sections 1 and 3 first; section 2 is a closed summary.
 
-**Current state (2026-10-17):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. Next: the background services (section 4), and last of all Wordgard as its own module (section 5).
+**Current state (2026-10-17):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). Last of all: Wordgard as its own module (section 5).
 
 ---
 
@@ -13,13 +13,11 @@ Status of the work on this branch (`refactor/background-coordination`, draft PR 
 **Order, and when the session ends.**
 1. Finish refining the backup system to its best shape. **Done.**
 2. Audit it and report to the user what I think. **Done.**
-3. Hold a brainstorming session with the user to understand how to improve notes. Discuss first; build only after agreement.
-4. Then the background services (section 4).
+3. Hold a brainstorming session with the user to understand how to improve notes. Discuss first; build only after agreement. **Done.**
+4. Then the background services (section 4). **Done.**
 5. The session concludes only once all three — backup, notes, background services — are as good as we can reasonably make them.
 
 **Migration (user's rule, 2026-10-10).** Older data is read once, converted into the current canonical form, verified and retired, never used again. Only the compatibility host (`compatibility-host.js`, plus repository adapters where a transaction requires it) reads old forms; the ordinary runtime reads only current forms. Every conversion is listed in `contracts/compatibility.mjs` with its retirement condition, so the whole migration machinery can be deleted later, leaving one clean canonical data structure.
-
-**No upfront analysis.** Do not spend effort analysing or planning the background-service phase until we reach it. The suggestions in section 4 are a starting list for that discussion, not a plan.
 
 ## 2. Done: backups and data (closed)
 
@@ -42,46 +40,41 @@ There is nothing to re-read here; the designs live in `docs/BACKUP-ENGINE.md`, `
 
 Every decision is in `docs/NOTES.md` (items 1 to 15), with the order of work. All five steps are built; step 5 measured the app at 2,000 notes and fixed what was slow (results in `docs/NOTES.md`).
 
-## 4. Next: every background service, mapped and held to one standard
+## 4. Done: every background service, mapped and held to one standard
 
-**History, as the user describes it.** The background services began as a patchwork, built at different times. One broke another, and they did not give way to what the person asked for: clicking Back up first waited for maintenance to finish. Much has been fixed since — the services are now state machines with shared coordination — but the job is not finished.
+**History.** The background services began as a patchwork: one broke another, and they did not give way to what the person asked for. Earlier sessions rebuilt them as state machines with one job model, shared priorities and preemption (section 6, "Background operations"). This pass (2026-10-17) mapped every service against the standard below. Most already met it; the gaps are closed.
 
-**Goal.**
-- Every background service gives way at once to anything the person explicitly does.
-- Every service runs smoothly, efficiently and in bounded time.
-- Together they cover everything this app needs, and nothing more.
-- When we get there, also decide:
-  - whether a service is missing;
-  - whether duplicate or similar services should be merged;
-  - what should be refined.
-
-Inventory to cover:
-- PWA update checks and the safe update apply;
-- the service worker and its caches;
-- web workers: export/file worker, attachment worker, search worker;
-- canonical data maintenance;
-- attachment maintenance, cleanup and integrity audit;
-- backup scratch-file (OPFS) cleanup;
-- backup locations: automatic backups, maintenance, integrity;
-- deletion-ledger trimming;
-- storage health and quota estimates;
-- notice timers.
-
-The standard for each job:
+**The standard for each job:**
 1. Bounded work per run, with a work budget or progress watchdog.
-2. Preemptible by foreground work, resuming from a durable checkpoint.
+2. Gives way at once to foreground work, resuming from a durable checkpoint.
 3. Intent persisted when it must survive a reload; idempotent when repeated.
 4. One retry policy: backoff with a cap, and a user notice only when a person can act.
 5. Runs only while this tab owns writes; pauses during restores, updates and browser-data clears.
-6. Visible in one diagnostics view with state, next run and last outcome.
-7. Tested on a fake clock, plus one browser test for the real lifecycle.
+6. Visible in one diagnostics view (Library → Data → Copy diagnostics) with state, next run and last outcome.
+7. Tested on a fake clock, plus a browser test for the real lifecycle.
 
-Suggestions:
-- **One scheduler.** `BackgroundOperations` and the repository-background coordinators already cover most jobs. Bring the remaining ad-hoc timers under them, with clear priorities (integrity < maintenance < automatic backup < convergence < foreground).
-- **Workers.** Terminate idle workers after a quiet period to return memory. Keep one queue per worker; it is already serialized. Reuse the faster SHA-256 everywhere (already shared).
-- **Storage.** Request persistent storage; watch quota; trim OPFS scratch after crashes (exists); consider IndexedDB compaction of deletion ledgers (bounded already).
-- **Service worker.** Keep the verified update flow. Add a cache size budget. Make sure an update never interrupts a restore or backup: the update already waits up to a minute for backups.
-- **Idle and visibility awareness.** Run heavy maintenance only when the page is visible and idle (`scheduler.postTask` or `requestIdleCallback` where available), and never on battery saver if that becomes detectable.
+**The map.**
+
+| Service | Meets the standard | Changed in this pass |
+|---|---|---|
+| Canonical data maintenance | Yes: 20 s budget, yields to foreground, durable pending record, 24 h cadence | Uses the shared gate. Keeps running through a browser-data clear, because it is the recovery path. |
+| Attachment cleanup | Yes: 5 s / 128 files a pass, strict reference proof | Shared gate. Waits while a clear is unresolved and stops at once when one is detected. Images in Recently deleted notes are kept (now tested). |
+| Attachment verification | Yes: 5 s / 128 files, saved progress, daily | Shared gate; waits during a clear. |
+| Backup scratch files | Yes: lock per file, pinned files kept | Shared gate: now the writing tab only, and waits during a clear. |
+| Automatic backups, retention cleanup, integrity (Device Folder and Drive) | Yes: one engine, shared priorities (integrity < maintenance < automatic < convergence < foreground), leases, journals | Shared gate (it already paused for clears). |
+| App update checks and the safe update | Yes: own timer with capped backoff, writing tab only; an update waits for backups (up to a minute) and for the applied plan to end | Diagnostics now show the next check, the last check and failed attempts. |
+| Service worker caches | Yes: a fixed file list and at most 3 release caches, nothing cached at runtime | None; no size budget is needed. |
+| Workers | Search: let go after 2 quiet minutes. Export: stops after each job. Image and Insights: one per use. | Attachment worker: now let go after 2 quiet minutes, like search. |
+| Deletion records | Yes: bounded, trimmed by canonical maintenance | None. |
+| Storage health and quota | Persistent storage requested at launch; warnings at 80% and 92% | The estimate was measured only at launch; it is now refreshed on returning to the app, at most hourly, so a tab left open for days still warns. |
+| Notices, editor clean-up, debounced saves | Foreground UI, not background work | None. |
+
+**The one shared gate.** `backgroundBlocker()` in `app.html` answers "may background work start?" for every job: start-up has finished, this tab owns writes, and, for housekeeping, no browser-data clear is unresolved. Each job adds only its own condition (storage support, encryption unlocked). When a clear is settled, every job is woken. `tests/architecture/storage/background-work-contract.mjs` keeps it that way.
+
+**Considered and left out.**
+- *Run upkeep only while the page is visible.* A desktop tab left in the background all day would never run it. Upkeep already runs at background priority (`scheduler.postTask`) and yields to anything the person does.
+- *Move the app-update timer under the shared job.* It already meets the standard; moving it would touch the update-safety flow for no visible gain.
+- *New or merged services.* None is missing, and none duplicates another: the Device Folder and Drive already share every job.
 
 ## 5. Last of all: Wordgard as its own module (decided 2026-10-11)
 

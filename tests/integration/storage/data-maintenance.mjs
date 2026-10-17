@@ -93,7 +93,10 @@ for(const file of ['internal','operation-lifecycle'])vm.runInContext(fs.readFile
 const lifecycle=lifecycleContext[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1),hostSource=fs.readFileSync('source/app.html','utf8');
 function automaticMaintenance(h,clock,controls){
  const context={Object,Error,Date:clock.Date,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,OperationLifecycle:lifecycle,AppData:h.app,StartupLifecycle:{status:()=>({fullyInitialized:true})},appCanMutate:()=>controls.owned!==false,backgroundMaintenanceForegroundBusy:()=>!!controls.foreground,AppDiagnostics:{capture(){}},BackupOperationDiagnostics:{start:()=>'',mark(){},finish(){},fail(){}},DATA_MAINTENANCE_FAILURE_RETRY_MS:300000,DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS:86400000,scheduleDataMaintenance:(delay,reason)=>context.job.schedule(delay,reason)};
- vm.createContext(context);vm.runInContext(hostSource.slice(hostSource.indexOf('const DataMaintenanceJob='),hostSource.indexOf('function scheduleDataMaintenance('))+'\nglobalThis.job=DataMaintenanceJob;',context);return context.job;
+ vm.createContext(context);
+ // The shared background gate, as the app defines it; maintenance keeps running through a browser-data clear.
+ context.storageResetUnresolved=()=>!!controls.storageReset;vm.runInContext(hostSource.slice(hostSource.indexOf('function backgroundBlocker('),hostSource.indexOf('const BackgroundOperations=')),context);
+ vm.runInContext(hostSource.slice(hostSource.indexOf('const DataMaintenanceJob='),hostSource.indexOf('function scheduleDataMaintenance('))+'\nglobalThis.job=DataMaintenanceJob;',context);return context.job;
 }
 const progressCases=[];
 for(const slowStore of ['area','session','meta','all'])for(const delayMs of [0,1000,19999,20000,35000]){

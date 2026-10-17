@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
 import {createHarness} from '../../helpers/repository-harness.mjs';
-import {noteRow} from '../../helpers/note-ids.mjs';
+import {noteRow,TRASH_PREFIX} from '../../helpers/note-ids.mjs';
 const source=fs.readFileSync('source/app.html','utf8');
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 function fixture(){
@@ -92,7 +92,7 @@ cases.push('untrusted rich text, source changes and unavailable revisions forbid
 // metadata nor bytes. Once reads recover, only the unreachable object may go.
 {
   const richContext={URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask,structuredClone};vm.createContext(richContext);vm.runInContext(fs.readFileSync('source/external/rich-text.js','utf8'),richContext);
-  const rich=richContext.StudyDirectorRichText,ids=['note','session','day','orphan'].map((_,i)=>'att-'+String(i+1).padStart(32,'0'));
+  const rich=richContext.StudyDirectorRichText,ids=['note','session','day','trash','orphan'].map((_,i)=>'att-'+String(i+1).padStart(32,'0'));
   const reference=id=>rich.insertAttachmentReference('',{id,name:'Diagram',mode:'inline-image'}).value;
   const session=reflection=>({id:'active',type:'activeSession',version:1,date:'2026-10-01',status:'suspended',scheduleText:'',suspendedAt:'2026-10-01T12:00:00.000Z',revision:20,updatedAt:'2026-10-01T12:20:00.000Z',snapshot:{review:{reflection}}});
   const blob=new Blob([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jTioAAAAASUVORK5CYII=','base64')],{type:'image/png'});
@@ -107,6 +107,8 @@ cases.push('untrusted rich text, source changes and unavailable revisions forbid
       assert.equal(saved.storage.local,true);controls.failSessionWrite=false;
     }
     const biologyNote=noteRow('Biology',reference(ids[0]),'2026-10-01T12:20:00.000Z');h.stores.area.set(biologyNote.key,biologyNote);
+    // A note in Recently deleted keeps its images: restoring it must bring them back.
+    const deletedNote=noteRow('Chemistry',reference(ids[3]),'2026-10-01T12:20:00.000Z');h.stores.area.set(TRASH_PREFIX+deletedNote.key,{...deletedNote,key:TRASH_PREFIX+deletedNote.key});
     h.stores.session.set('active',session(reference(ids[1])));
     await h.app.dailyRecords.save({version:1,date:'2026-10-01',savedAt:'2026-10-01T12:20:00.000Z',updatedAt:'2026-10-01T12:20:00.000Z',reflection:reference(ids[2])});
     controls.onStorageRead=async({store})=>{if(failed&&((fault==='notes'&&store==='area')||(fault==='day'&&store==='daily')||(fault.startsWith('session')&&store==='session')))throw new Error('Temporary '+fault+' read failure');};
@@ -127,7 +129,7 @@ cases.push('untrusted rich text, source changes and unavailable revisions forbid
     assert.equal(JSON.stringify([...metadata]),beforeMetadata,fault+' must preserve every metadata row');assert.deepEqual([...physical.keys()],beforeBytes,fault+' must preserve every file');assert.equal(completed,0);assert.equal(maintenance.status().pending,true);assert.equal([...timers.values()][0].ms,1800000);
     failed=false;controls.failLocalGetKeys=new Set();
     assert.equal((await maintenance.run()).status,'completed',fault+' must resume');
-    assert.deepEqual([...metadata.keys()],ids.slice(0,3));assert.equal(physical.size,3);assert.equal(completed,1);assert.equal(maintenance.status().pending,false);assert.equal(timers.size,0);
+    assert.deepEqual([...metadata.keys()],ids.slice(0,4));assert.equal(physical.size,4);assert.equal(completed,1);assert.equal(maintenance.status().pending,false);assert.equal(timers.size,0);
     cases.push('canonical reachability: '+fault+' preserves all data and retries to exact cleanup');
   }
 }
