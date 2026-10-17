@@ -4929,14 +4929,16 @@ function reportAreaNoteConflict(info={}){
 
 /* BOUNDED DATA MAINTENANCE */
 const DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS=24*60*60*1000,DATA_MAINTENANCE_FAILURE_RETRY_MS=30*60*1000;
-// Every background job asks this one question before it starts: start-up has
-// finished and this tab owns writes. Housekeeping (attachment cleanup and
+// Every background job asks this one question before it starts: this tab owns
+// writes and start-up has finished. Housekeeping (attachment cleanup and
 // checks, scratch files, backups and their upkeep) also waits while a
 // browser-data clear is unresolved. Canonical maintenance is recovery, so it
-// keeps running through a clear.
+// keeps running through a clear. Ownership is asked first: a job configured
+// while the page is still loading asks before start-up exists, and no tab owns
+// writes until start-up has begun.
 function backgroundBlocker({housekeeping=true}={}){
-  if(!StartupLifecycle.status().fullyInitialized)return 'startup';
   if(!appCanMutate())return 'awaiting-control';
+  if(!StartupLifecycle.status().fullyInitialized)return 'startup';
   return housekeeping&&storageResetUnresolved()?'storage-reset':'';
 }
 const BackgroundOperations=OperationLifecycle.createGroup((id,error)=>AppDiagnostics.capture('background.owner.'+id,error,'warn'));
