@@ -23,7 +23,7 @@ assert.equal(limits.maxRichTextBytes,2*MiB);
 assert.equal(limits.maxRichTextWords,20000);
 const dataContract=RUNTIME_DATA_CONTRACT;
 const defs=freeze({
-  dailyRecord:freeze({idField:'date',backupLimit:limits.maxImportRecords}),areaNote:freeze({idField:'key',backupLimit:limits.maxOngoingNotes}),
+  dailyRecord:freeze({idField:'date',backupLimit:limits.maxImportRecords}),note:freeze({idField:'key',backupLimit:limits.maxNotes}),
   activeSession:freeze({idField:'id',backupLimit:1})
 });
 const entityDefinition=type=>defs[type]||null,entityIdentity=(type,item)=>String(item?.[defs[type]?.idField]||'');
@@ -35,9 +35,9 @@ const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,processing:
   entityTypes:freeze(Object.keys(defs)),keyedRecord:freeze({create:()=>Object.create(null)}),entities:freeze({entityDefinition,entityIdentity}),
   helpers:freeze({boundedInt,jsonByteLength}),
   richText:freeze({assetIds:value=>rich.assetIds(value),assetIdValid:value=>rich.isAssetId(value),imageMimeTypeValid:value=>rich.isSupportedImageType(value)}),
-  dailyRecordCodec:freeze({sanitizeHistoricalDailyRecord:value=>value,canonicalizeHistoricalDailyRecord:value=>value,sanitizeCurrentDailyRecord:value=>value,sanitizeImportedAreaNote:value=>value,sanitizeCurrentAreaNote:value=>value,isSupportedSavedDate:()=>true}),
+  dailyRecordCodec:freeze({sanitizeHistoricalDailyRecord:value=>value,canonicalizeHistoricalDailyRecord:value=>value,sanitizeCurrentDailyRecord:value=>value,sanitizeImportedNote:value=>value,sanitizeCurrentNote:value=>value,isSupportedSavedDate:()=>true}),
   activeSessionCodec:freeze({sanitizeCurrent:value=>value}),
-  compatibilityCodec:freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:value=>value,areaNote:value=>value,activeSession:value=>value,reflectionDraft:value=>value})
+  compatibilityCodec:freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:value=>value,note:value=>value,activeSession:value=>value,reflectionDraft:value=>value})
 }));
 
 const paragraph=param=>({type:'Paragraph',content:[{type:'Text',param}]});
@@ -59,7 +59,7 @@ const ongoing=freeze({key:'Portability boundary',text:heavyState,updatedAt});
 const activeSession=freeze({version:9,id:'current',date:'2026-09-01',revision:1,updatedAt,snapshot:freeze({review:freeze({reflection:heavyState,studyQuality:5})})});
 const oldEntryLimit=2*MiB;
 const outcomes=[];
-for(const [entityType,item] of [['areaNote',ongoing],['activeSession',activeSession]]){
+for(const [entityType,item] of [['note',ongoing],['activeSession',activeSession]]){
   const entryBytes=jsonByteLength(item);
   assert.ok(entryBytes>oldEntryLimit,`${entityType} fixture must exceed the previous 2 MiB entry limit.`);
   assert.ok(entryBytes<=limits.backupMaxEntryBytes,`${entityType} must fit the production 5 MiB entry boundary.`);

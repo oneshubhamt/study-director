@@ -42,10 +42,10 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
     const blob=await seal(new Blob([`library at ${sourceRevision}`])),objectId='obj_'+(await sha256(new Blob([sourceRevision]))).slice(0,32),storedChecksum=await sha256(blob),reused=options.availableObjectIds instanceof Set&&options.availableObjectIds.has(objectId);
     const entry=freeze({objectId,blob,storedBytes:blob.size,storedChecksum,reused,checkProtection:async()=>{}}),prepared=freeze({exportedAt,objects:freeze([entry])});
     if(!reused)await executor.writeObject(entry,prepared);
-    const manifest=freeze({format:'study-director.backup-repository-checkpoint',version:6,checkpoint:freeze({checkpointId,createdAt:exportedAt,originInstallationId:'qa'}),exportedAt,sourceRevision,logicalFingerprint:storedChecksum,counts:freeze({dailyRecord:1,areaNote:1}),encrypted:!!protection,
+    const manifest=freeze({format:'study-director.backup-repository-checkpoint',version:7,checkpoint:freeze({checkpointId,createdAt:exportedAt,originInstallationId:'qa'}),exportedAt,sourceRevision,logicalFingerprint:storedChecksum,counts:freeze({dailyRecord:1,note:1}),encrypted:!!protection,
       retention:freeze({role,purpose:role==='before-restore'?options.retention.purpose:'',protectedUntil:role==='before-restore'?new Date(clock.now()+7*DAY).toISOString():'',calendar:calendar(exportedAt)}),objects:freeze([freeze({objectId,storedBytes:blob.size,storedChecksum})])});
     await executor.writeManifest(freeze({blob:await seal(new Blob([JSON.stringify(manifest)])),manifest,exportedAt,checkSource:async()=>{},checkProtection:async()=>{}}));
-    const marker={format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt,sourceRevision,manifestVersion:6},markerBlob=new Blob([JSON.stringify(marker)]);
+    const marker={format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt,sourceRevision,manifestVersion:7},markerBlob=new Blob([JSON.stringify(marker)]);
     await executor.commit(freeze({...marker,blob:markerBlob,size:markerBlob.size,digest:await sha256(markerBlob),checkSource:async()=>{},checkProtection:async()=>{}}));
     published.push(freeze({checkpointId,sourceRevision,role,at:clock.now()}));
     const committedResult=await executor.onCommitted(freeze({sourceRevision,exportedAt,publication:freeze({name:checkpointId+'.sdcheckpoint'}),manifest}));
@@ -77,11 +77,11 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
     environment:freeze({canMutate:()=>canMutate,now:()=>clock.now(),setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,yieldTask:async()=>{}}),
     limits:freeze({publicationMaxAgeMs:policy.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:policy.protocol.publicationAssertionMarginMs,maintenanceMaxAgeMs:policy.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:policy.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
   }));
-  const identity=value=>value,metaKeys=freeze(Object.fromEntries(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix'].map(name=>[name,name])));
-  const settingsValid=registry.require('host-metadata',1).createAppMetaValidators(freeze({keys:metaKeys,same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),normalizers:freeze({verifiedRecovery:identity,attachmentIntegrity:identity,repositoryIntegrity:identity,reconciliationBase:identity,reconciliationBaseNote:identity})})).automaticDeviceBackup;
+  const identity=value=>value,metaKeys=freeze(Object.fromEntries(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix'].map(name=>[name,name])));
+  const settingsValid=registry.require('host-metadata',1).createAppMetaValidators(freeze({keys:metaKeys,same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),normalizers:freeze({verifiedRecovery:identity,attachmentIntegrity:identity,repositoryIntegrity:identity,reconciliationBase:identity,reconciliationBaseNote:identity})})).deviceFolder;
   const showDirectoryPicker=supported?()=>{pickerCalls+=1;if(pickerResult instanceof Error)return Promise.reject(pickerResult);return Promise.resolve(pickerResult);}:null;
   const controller=registry.require('device-backup',1).createController(freeze({
-    configuration:freeze({metadataKey:'automaticDeviceBackup',pickerId:'study-director-device-backup',settingsTimeoutMs:10*1000}),
+    configuration:freeze({metadataKey:'deviceFolder',pickerId:'study-director-device-backup',settingsTimeoutMs:10*1000}),
     engine:freeze({backup:id=>runtime.backup(id),cancelForeground:(reason,id)=>runtime.cancelForeground(reason,id),disconnect:id=>runtime.disconnect(id),forget:id=>runtime.forget(id),locationStatus:id=>runtime.locationStatus(id),register:config=>runtime.register(config),subscribeStatus:listener=>runtime.subscribeStatus(listener)}),
     environment:freeze({canMutate:()=>canMutate,clearTimeout:clock.clearTimeout,setTimeout:clock.setTimeout,showDirectoryPicker}),
     hooks:freeze({capture:(scope,error)=>captures.push(freeze({scope,message:String(error?.message||error)})),chooseCheckpoint:async rows=>rows[0].id,render:state=>rendered.push(state),sourceRevision:()=>current,verifiedAt:()=>verified.get('device-folder')?.at||''}),
@@ -117,7 +117,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
     choose:value=>{pickerResult=value;},
     change:(urgent=false)=>{current=new clock.Date(clock.now()).toISOString();runtime.noteChange({urgent});},
     setLocalEmpty:value=>{localEmpty=value;},setCanMutate:value=>{canMutate=value;},
-    store:(handle,baseline='')=>settingsStore.set('automaticDeviceBackup',{format:'study-director.device-backup-settings',version:4,directoryHandle:handle,baseline}),
+    store:(handle,baseline='')=>settingsStore.set('deviceFolder',{format:'study-director.device-folder-settings',version:4,directoryHandle:handle,baseline}),
     // The message the Device Folder row's inline note shows.
     note:()=>presentation.current('device-folder')?.message||'',
     permissionNotices:()=>notices.filter(raw=>raw.source==='device-folder'&&raw.id==='permission')

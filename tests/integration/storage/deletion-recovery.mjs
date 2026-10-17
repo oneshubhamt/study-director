@@ -63,25 +63,25 @@ assert.equal(noteWrite.status,'changed');
 await h.app.notes.flush({strict:true});
 const obsoleteId=h.app.notes.get('obsolete-note').id;
 assert.equal(await h.app.notes.remove('obsolete-note'),true);
-let noteLedger=await h.app.deletionRecovery.areaNotes();
+let noteLedger=await h.app.deletionRecovery.notes();
 assert.equal(noteLedger.some(row=>row.key===obsoleteId),true,'Note deletion must create durable canonical deletion history.');
 noteWrite=h.app.notes.update('obsolete-note','Obsolete Note','recreated text','');
 assert.equal(noteWrite.status,'changed');
 await h.app.notes.flush({strict:true});
 assert.notEqual(h.app.notes.get('obsolete-note').id,obsoleteId,'a new note with a deleted note’s title gets its own id');
-noteLedger=await h.app.deletionRecovery.areaNotes();
+noteLedger=await h.app.deletionRecovery.notes();
 assert.equal(noteLedger.some(row=>row.key===obsoleteId),true,'a new note with the same title must not retire the deleted note’s marker');
 const aligned=h.app.notes.alignByTitle({[obsoleteId]:{version:3,key:obsoleteId,label:'Obsolete Note',text:'old text',updatedAt:'2026-09-17T12:00:00.000Z'}},[obsoleteId]);
 assert.deepEqual(Object.keys(aligned),[obsoleteId],'a backup copy of a deleted note keeps its id, so its deletion still applies');
 await h.app.notes.reconcile({[obsoleteId]:{version:3,key:obsoleteId,label:'obsolete-note',text:'restored text',updatedAt:'2026-09-17T12:00:00.000Z'}});
-noteLedger=await h.app.deletionRecovery.areaNotes();
+noteLedger=await h.app.deletionRecovery.notes();
 assert.equal(noteLedger.some(row=>row.key===obsoleteId),false,'Bringing a note back must atomically retire its deletion marker.');
 assert.deepEqual(Object.values(h.app.notes.exportPayload()).map(entry=>entry.label).sort(),['obsolete-note','obsolete-note (2)'],'two notes never share a title');
 // A note deleted elsewhere (a combine applying a deletion) moves to Recently deleted here, as deleting it here would.
 await h.app.notes.reconcile({},[{key:obsoleteId,deletedAt:'2026-09-18T00:00:00.000Z'}]);
 const retired=h.app.notes.exportPayload()['~deleted '+obsoleteId];
 assert.equal(h.app.notes.exportPayload()[obsoleteId],undefined);assert.equal(retired&&retired.text,'restored text','the deleted note’s text stays in Recently deleted');
-assert.equal((await h.app.deletionRecovery.areaNotes()).some(row=>row.key===obsoleteId),true,'and its deletion is recorded');
+assert.equal((await h.app.deletionRecovery.notes()).some(row=>row.key===obsoleteId),true,'and its deletion is recorded');
 
 // Review working state now belongs to Active Session and historical reflection
 // belongs to the Daily Record. There is no separate Reflection Draft register or
@@ -159,21 +159,21 @@ assert.equal((await legacy.app.compatibility.verifyDeletionState()).ok,true);
   bounded.stores.meta.set('dailyRecordMigration',{key:'dailyRecordMigration',version:1,value:{recordVersion:1,summaryVersion:1,complete:true,recordCount:0},updatedAt:'2026-09-15T12:00:00.000Z'});
   const at=index=>new Date(Date.parse('2026-01-01T00:00:00.000Z')+index*60000).toISOString();
   const nth=index=>noteId(`note ${String(index).padStart(4,'0')}`);
-  for(let index=0;index<1003;index+=1){const key=nth(index);bounded.stores.meta.set(`areaNoteDeletion:${key}`,{key:`areaNoteDeletion:${key}`,version:1,value:{format:'study-director.area-note-deletion',version:1,key,deletedAt:at(index)},updatedAt:at(index)});}
-  const listed=await bounded.app.deletionRecovery.areaNotes();
+  for(let index=0;index<1003;index+=1){const key=nth(index);bounded.stores.meta.set(`noteDeletion:${key}`,{key:`noteDeletion:${key}`,version:1,value:{format:'study-director.note-deletion',version:1,key,deletedAt:at(index)},updatedAt:at(index)});}
+  const listed=await bounded.app.deletionRecovery.notes();
   assert.equal(listed.length,1000,'a full ledger lists its newest records');
   assert.deepEqual([0,1,2].map(index=>listed.some(entry=>entry.key===nth(index))),[false,false,false],'the oldest records are the ones left out');
   assert.equal((await bounded.app.compatibility.verifyDeletionState()).ok,true,'a full ledger is not an integrity failure');
   assert.equal((await bounded.app.maintenance.run({force:true})).status,'completed');
-  const stored=[...bounded.stores.meta.keys()].filter(key=>key.startsWith('areaNoteDeletion:'));
-  assert.equal(stored.length,1000,'maintenance removes the records listing leaves out');assert.equal(bounded.stores.meta.has(`areaNoteDeletion:${nth(2)}`),false);
-  assert.deepEqual(await bounded.app.deletionRecovery.areaNotes(),listed,'pruning changes nothing a backup reads');
-  await bounded.app.deletionRecovery.replaceAreaNotes([...listed,{key:noteId('newest'),deletedAt:at(5000)}]);
-  const replaced=await bounded.app.deletionRecovery.areaNotes();
+  const stored=[...bounded.stores.meta.keys()].filter(key=>key.startsWith('noteDeletion:'));
+  assert.equal(stored.length,1000,'maintenance removes the records listing leaves out');assert.equal(bounded.stores.meta.has(`noteDeletion:${nth(2)}`),false);
+  assert.deepEqual(await bounded.app.deletionRecovery.notes(),listed,'pruning changes nothing a backup reads');
+  await bounded.app.deletionRecovery.replaceNotes([...listed,{key:noteId('newest'),deletedAt:at(5000)}]);
+  const replaced=await bounded.app.deletionRecovery.notes();
   assert.equal(replaced.length,1000);assert.ok(replaced.some(entry=>entry.key===noteId('newest')),'a new deletion is always kept');assert.equal(replaced.some(entry=>entry.key===nth(3)),false);
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'deletion-recovery',boundedDeletionLedgers:true,savedDayLedger:true,areaNoteDeletionLedger:true,reflectionDraftDomainRetired:true,attachmentDeletionLedger:true,failedDailyDeleteRecovery:true,failedActiveSessionDeleteRecovery:true,legacySyncStateMigrated:true,normalWritesUseNoSyncStores:true},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'deletion-recovery',boundedDeletionLedgers:true,savedDayLedger:true,noteDeletionLedger:true,reflectionDraftDomainRetired:true,attachmentDeletionLedger:true,failedDailyDeleteRecovery:true,failedActiveSessionDeleteRecovery:true,legacySyncStateMigrated:true,normalWritesUseNoSyncStores:true},null,2));
 
 // Servicing an older request cannot retire a newer request for the same entity.
 // The second async database read observes a foreground save followed by a

@@ -26,7 +26,7 @@ registry.define('review',1,()=>{
       'originalStartMin','scheduleFingerprint'
     ]),
     evidence:freeze([
-      'actualRecordsSnapshot','applicableAreaNotesForTask','clearManualCompletionOverride',
+      'actualRecordsSnapshot','applicableNotesForTask','clearManualCompletionOverride',
       'liveTaskOutcome','progressInputState','recordCurrentActiveToTask',
       'resolveTaskCompletion','storeResolvedCompletion','syncProgressInputsToState','updateTimerFocusMetrics'
     ]),
@@ -38,9 +38,9 @@ registry.define('review',1,()=>{
       'writeLiveDraftNow'
     ]),
     notesDefaults:freeze([
-      'areaNoteStoredValueForKey','bindTaskNoteEditor','closeRichTextField','commitTaskNoteEditor','currentOngoingNoteEntriesForWorkTasks',
+      'noteStoredValueForKey','bindTaskNoteEditor','closeRichTextField','commitTaskNoteEditor','currentNoteEntriesForWorkTasks',
       'refreshPlanAfterSessionReset',
-      'renderInheritedAreaNotes','setPlanStatus','syncUnfinishedNoteDraft','unfinishedNoteDraftText'
+      'renderInheritedNotes','setPlanStatus','syncUnfinishedNoteDraft','unfinishedNoteDraftText'
     ]),
     view:freeze(['markStorageHealthTimestamp','notifyUser','on','refreshLibraryAfterSave','refreshStorageFallbackWarning','setStatus','updateBadges']),
     interactions:freeze(['confirm','notify']),
@@ -98,7 +98,7 @@ registry.define('review',1,()=>{
       originalStartMin,scheduleFingerprint
     }=ports.schedule;
     const {
-      actualRecordsSnapshot,applicableAreaNotesForTask,clearManualCompletionOverride,
+      actualRecordsSnapshot,applicableNotesForTask,clearManualCompletionOverride,
       liveTaskOutcome,progressInputState,recordCurrentActiveToTask,
       resolveTaskCompletion,storeResolvedCompletion,syncProgressInputsToState,updateTimerFocusMetrics
     }=ports.evidence;
@@ -110,8 +110,8 @@ registry.define('review',1,()=>{
       writeLiveDraftNow
     }=ports.session;
     const {
-      areaNoteStoredValueForKey,bindTaskNoteEditor,closeRichTextField,commitTaskNoteEditor,currentOngoingNoteEntriesForWorkTasks,
-      refreshPlanAfterSessionReset,renderInheritedAreaNotes,setPlanStatus,syncUnfinishedNoteDraft,unfinishedNoteDraftText
+      noteStoredValueForKey,bindTaskNoteEditor,closeRichTextField,commitTaskNoteEditor,currentNoteEntriesForWorkTasks,
+      refreshPlanAfterSessionReset,renderInheritedNotes,setPlanStatus,syncUnfinishedNoteDraft,unfinishedNoteDraftText
     }=ports.notesDefaults;
     const {markStorageHealthTimestamp,notifyUser,on,refreshLibraryAfterSave,refreshStorageFallbackWarning,setStatus,updateBadges}=ports.view;
     const {confirm,notify}=ports.interactions;
@@ -920,7 +920,7 @@ function buildReviewCardModel(task,evidence=null){
   const actualSeconds=evidence?evidence.actualTime[idx]:TaskSessionState.getField(idx,'actualTime');
   const tracked=actualSeconds!==undefined;
   const clock=row?.clock||TaskSessionState.getField(idx,'actualClock')||{};
-  const noteInfo=applicableAreaNotesForTask(task);
+  const noteInfo=applicableNotesForTask(task);
   return {
     task,idx,resolved,pct,progress,measure,target,hasPct,shifted,tracked,actualSeconds,clock,
     statusInfo:taskOutcomeInfo(row?.outcome||liveTaskOutcome(idx,{actualSnapshot:evidence?.actualTime,resolved,exactPct:pct})),
@@ -952,8 +952,8 @@ function renderReviewCard(model){
   noteBox.className='review-block-note ui-body';
   noteBox.dataset.areaKey=model.noteAreaKey;
   noteBox.dataset.noteSupport=model.task.kind==='support'?'true':'false';
-  const emptyNoteText=model.task.kind==='support'?'No current shared support note.':'No current ongoing subject note for this area.';
-  renderRichTextContent(noteBox,areaNoteStoredValueForKey(model.noteAreaKey),emptyNoteText,`Note for ${model.noteAreaLabel}`);
+  const emptyNoteText=model.task.kind==='support'?'No current shared support note.':'No current note for this area.';
+  renderRichTextContent(noteBox,noteStoredValueForKey(model.noteAreaKey),emptyNoteText,`Note for ${model.noteAreaLabel}`);
   if(!model.noteText)noteBox.classList.add('review-block-empty');
   const noteShare=textEl('div','review-flow-note ui-helper',model.task.kind==='support'?'Shared by all support activities':`Shared by Area: ${model.noteAreaLabel}`);
   const actions=document.createElement('div');
@@ -988,7 +988,7 @@ function renderReviewCard(model){
   noteEdit.value=model.noteText;noteEdit.placeholder=model.task.kind==='support'?'Edit the shared support note...':'Edit current notes for this subject/area...';
   editPanel.append(measureRow,pctField,summary,noteEdit);
   const inheritedNotes=document.createElement('div');
-  renderInheritedAreaNotes(inheritedNotes,model.noteAreaKey,true);
+  renderInheritedNotes(inheritedNotes,model.noteAreaKey,true);
   card.append(
     createTaskReviewHeader({name:model.task.name,area:taskAreaValue(model.task),pct:model.hasPct?model.pct:0,statusInfo:model.statusInfo,shifted:model.shifted,tracked:model.tracked,pctId:`rpct-${model.idx}`,source:model.resolved.source}),
     createTaskTimingRow({
@@ -1223,7 +1223,7 @@ function reviewViewEvidenceKey(evidence){
     const progress=TaskSessionState.getField(idx,'notes')||{};
     const clock=row.clock||TaskSessionState.getField(idx,'actualClock')||{};
     const record=TaskSessionState.getField(idx,'actualRecords')||{};
-    const noteInfo=applicableAreaNotesForTask(task);
+    const noteInfo=applicableNotesForTask(task);
     const pauseEvents=Array.isArray(record.pauseEvents)?record.pauseEvents.map(event=>[
       String(event&&event.type||event&&event.reason||'').trim().toLowerCase(),
       Math.max(0,Math.round(Number(event&&event.seconds)||0)),
@@ -1465,7 +1465,7 @@ function reviewReportSections(context){
   return REVIEW_REPORT_CATALOG.map(section=>freeze({...section,children:typeof section.children==='function'?section.children(context):[]}));
 }
 function reviewReportSelectorContext(){
-  return freeze({reportTasks:TASKS.filter(isTrackableBlock),subjectEntries:currentOngoingNoteEntriesForWorkTasks(TASKS)});
+  return freeze({reportTasks:TASKS.filter(isTrackableBlock),subjectEntries:currentNoteEntriesForWorkTasks(TASKS)});
 }
 function copyReportSectionState(section){
   if(!section.children.length)return freeze({checked:!copyReportExcluded.has(section.id),indeterminate:false});
@@ -1612,7 +1612,7 @@ function copyReview(){
     m,rec,reviewDay,quality,refl:clipboardPlainText(currentReview.reflection,{rich:true}),
     dowFull:['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][reviewDay.getDay()],
     monFull:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][reviewDay.getMonth()],
-    reportTasks:rec.tasks,subjectEntries:currentOngoingNoteEntriesForWorkTasks(TASKS),unfinished:String(rec.carryForwardDraft||Runtime.carryForward()||'').trim()
+    reportTasks:rec.tasks,subjectEntries:currentNoteEntriesForWorkTasks(TASKS),unfinished:String(rec.carryForwardDraft||Runtime.carryForward()||'').trim()
   });
   const txt=composeReviewReport(context);
   const notice=notifications.begin({id:'copy-report',surfaceId:'save-status',title:'Copy report',message:'Copying report…'});

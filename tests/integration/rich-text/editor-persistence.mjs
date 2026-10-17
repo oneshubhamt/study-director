@@ -33,7 +33,7 @@ const cloneStores=(source,{copyArea=false}={})=>({
   meta:new Map([...source.meta].map(([key,value])=>[key,structuredClone(value)]))
 });
 const journalRows=stores=>[...stores.meta.values()].filter(row=>row?.value?.format==='study-director.area-note-recovery');
-const rescueFor=(local,key)=>local.get('areaNoteRescue')?.entries?.[key]||null;
+const rescueFor=(local,key)=>local.get('noteRescue')?.entries?.[key]||null;
 
 // Typing saves straight to the database a moment after it pauses. Every change
 // moves the revision forward; nothing is journaled and the browser copy stays
@@ -67,13 +67,13 @@ const recovered=createHarness(sharedLocal,crashStores);await recovered.app.notes
 assert.equal(recovered.app.notes.get('area').text,'typed just before closing','the browser copy restores the unsaved edit');
 await recovered.app.notes.flush({strict:true});
 assert.equal(crashStores.area.get(areaId).text,'typed just before closing','the recovered edit becomes the stored note');
-assert.equal(sharedLocal.has('areaNoteRescue'),false,'the browser copy is cleared once saved');
-assert.equal(recovered.app.notes.protectUnsaved(),true);assert.equal(sharedLocal.has('areaNoteRescue'),false,'hiding with nothing unsaved writes no copy');
+assert.equal(sharedLocal.has('noteRescue'),false,'the browser copy is cleared once saved');
+assert.equal(recovered.app.notes.protectUnsaved(),true);assert.equal(sharedLocal.has('noteRescue'),false,'hiding with nothing unsaved writes no copy');
 
 // A stale browser copy that storage already matches is dropped on load.
-sharedLocal.set('areaNoteRescue',{format:'study-director.area-note-rescue',version:1,updatedAt:new Date().toISOString(),entries:{[areaId]:structuredClone(crashStores.area.get(areaId))}});
+sharedLocal.set('noteRescue',{format:'study-director.note-rescue',version:1,updatedAt:new Date().toISOString(),entries:{[areaId]:structuredClone(crashStores.area.get(areaId))}});
 const staleRescue=createHarness(sharedLocal,crashStores);await staleRescue.app.notes.load();
-assert.equal(sharedLocal.has('areaNoteRescue'),false,'a copy identical to storage is removed');
+assert.equal(sharedLocal.has('noteRescue'),false,'a copy identical to storage is removed');
 
 // Clearing content is a durable empty note, not an implicit deletion.
 const emptyRevision=recovered.app.notes.get('area').updatedAt,emptied=recovered.app.notes.update('area','Area','',emptyRevision);assert.equal(emptied.status,'changed');
@@ -108,25 +108,25 @@ const failedEdit=failing.app.notes.update('failure','Failure','latest-before-fai
 await assert.rejects(()=>failing.app.notes.flush({strict:true}),/could not be saved|safely stored/,'a strict flush rejects when the save fails');
 assert.equal(failureStores.area.get(failureBase.key).text,'stable');assert.equal(rescueFor(failureLocal,failureBase.key).text,'latest-before-failure','a failed save keeps the newest text in the browser copy');assert.equal(failing.app.notes.failure().failed,true);
 const failureRecovered=createHarness(failureLocal,failureStores);await failureRecovered.app.notes.load();assert.equal(failureRecovered.app.notes.get('failure').text,'latest-before-failure');await failureRecovered.app.notes.flush({strict:true});
-assert.equal(failureStores.area.get(failureBase.key).text,'latest-before-failure');assert.equal(failureLocal.has('areaNoteRescue'),false);
+assert.equal(failureStores.area.get(failureBase.key).text,'latest-before-failure');assert.equal(failureLocal.has('noteRescue'),false);
 // The same tab recovers on its next successful save.
 failureControls.failNextAreaWrite=true;failing.app.notes.update('failure','Failure','second attempt',failing.app.notes.get('failure').updatedAt);
 await assert.rejects(()=>failing.app.notes.flush({strict:true}));
 await failing.app.notes.flush({strict:true}).catch(()=>{});
-assert.equal(failing.app.notes.failure().failed,false,'a later successful save clears the failure');assert.equal(failureLocal.has('areaNoteRescue'),false);
+assert.equal(failing.app.notes.failure().failed,false,'a later successful save clears the failure');assert.equal(failureLocal.has('noteRescue'),false);
 
 // A clash with a newer stored revision keeps the stored note and the local
 // text as its own note.
 const conflictLocal=new Map(),conflictStores=emptyStores();
-const conflictBase=noteRow('Conflict','base','2026-09-04T04:10:00.000Z');conflictStores.area.set(conflictBase.key,structuredClone(conflictBase));const conflicting=createHarness(conflictLocal,conflictStores);await conflicting.app.notes.load();const localConflictEdit=conflicting.app.notes.update('conflict','Conflict','local-dirty',conflictBase.updatedAt);assert.equal(localConflictEdit.status,'changed');conflictStores.area.set(conflictBase.key,{...structuredClone(conflictBase),text:'remote-newer',updatedAt:'2026-09-04T04:10:01.000Z'});await conflicting.app.notes.flush({strict:true});assert.equal(conflicting.app.notes.get('conflict').text,'remote-newer');assert.equal(conflictStores.area.get(conflictBase.key).text,'remote-newer');assert.equal(storedNote(conflictStores.area,'conflict (unsaved copy)')?.text,'local-dirty');assert.equal(conflictLocal.has('areaNoteRescue'),false);
+const conflictBase=noteRow('Conflict','base','2026-09-04T04:10:00.000Z');conflictStores.area.set(conflictBase.key,structuredClone(conflictBase));const conflicting=createHarness(conflictLocal,conflictStores);await conflicting.app.notes.load();const localConflictEdit=conflicting.app.notes.update('conflict','Conflict','local-dirty',conflictBase.updatedAt);assert.equal(localConflictEdit.status,'changed');conflictStores.area.set(conflictBase.key,{...structuredClone(conflictBase),text:'remote-newer',updatedAt:'2026-09-04T04:10:01.000Z'});await conflicting.app.notes.flush({strict:true});assert.equal(conflicting.app.notes.get('conflict').text,'remote-newer');assert.equal(conflictStores.area.get(conflictBase.key).text,'remote-newer');assert.equal(storedNote(conflictStores.area,'conflict (unsaved copy)')?.text,'local-dirty');assert.equal(conflictLocal.has('noteRescue'),false);
 
 // The browser copy holds every unsaved note, the newest first while it fits.
-const scopedLocal=new Map([['areaNoteRescue',{format:'study-director.area-note-rescue',version:1,updatedAt:'2026-09-04T04:20:01.000Z',entries:{[noteId('foreign')]:noteRow('Foreign','from an earlier session','2026-09-04T04:20:00.000Z')}}]]),scopedStores=emptyStores(),scopedControls={failNextAreaWrite:true};
+const scopedLocal=new Map([['noteRescue',{format:'study-director.note-rescue',version:1,updatedAt:'2026-09-04T04:20:01.000Z',entries:{[noteId('foreign')]:noteRow('Foreign','from an earlier session','2026-09-04T04:20:00.000Z')}}]]),scopedStores=emptyStores(),scopedControls={failNextAreaWrite:true};
 const scoped=createHarness(scopedLocal,scopedStores,scopedControls);await scoped.app.notes.load();
 scoped.app.notes.update('local','Local','local-dirty','');await scoped.app.notes.flush().catch(()=>{});
-assert.deepEqual(Object.keys(scopedLocal.get('areaNoteRescue').entries).sort(),[noteId('foreign'),scoped.app.notes.get('local').id].sort(),'a failed save keeps earlier unsaved notes in the copy');
+assert.deepEqual(Object.keys(scopedLocal.get('noteRescue').entries).sort(),[noteId('foreign'),scoped.app.notes.get('local').id].sort(),'a failed save keeps earlier unsaved notes in the copy');
 await scoped.app.notes.flush({strict:true});
-assert.equal(scopedStores.area.get(noteId('foreign')).text,'from an earlier session');assert.equal(storedNote(scopedStores.area,'local').text,'local-dirty');assert.equal(scopedLocal.has('areaNoteRescue'),false);
+assert.equal(scopedStores.area.get(noteId('foreign')).text,'from an earlier session');assert.equal(storedNote(scopedStores.area,'local').text,'local-dirty');assert.equal(scopedLocal.has('noteRescue'),false);
 
 // A note larger than the browser copy still saves normally; hiding reports
 // that the copy cannot hold it.
@@ -144,7 +144,7 @@ const mediumText='WG1:'+JSON.stringify({version:1,doc:{type:'Doc',content:[{type
 assert.equal(budget.app.notes.updateValidatedRich('medium','Medium',mediumText,'').status,'changed');
 assert.equal(budget.app.notes.protectUnsaved(),true,'a note within its share is kept');
 budgetLocal.set('recovery','s'.repeat(3.6*1024*1024));
-assert.equal(budget.app.notes.protectUnsaved(),false,'the session copy comes first');assert.equal(budgetLocal.get('areaNoteRescue').entries[budget.app.notes.get('medium').id].text,mediumText,'the earlier copy is never overwritten by a smaller one');
+assert.equal(budget.app.notes.protectUnsaved(),false,'the session copy comes first');assert.equal(budgetLocal.get('noteRescue').entries[budget.app.notes.get('medium').id].text,mediumText,'the earlier copy is never overwritten by a smaller one');
 budgetLocal.delete('recovery');budgetControls.failLocalGetKeys=new Set(['recovery']);
 assert.equal(budget.app.notes.protectUnsaved(),false,'an unreadable copy is not counted as empty');budgetControls.failLocalGetKeys=null;
 assert.equal(budget.app.notes.protectUnsaved(),true);
@@ -164,22 +164,22 @@ for(const [key,value] of [
   journalRow('outdated',{version:2,key:'outdated',label:'Outdated',text:'journaled older',updatedAt:'2026-09-04T05:05:00.000Z'},'2026-09-04T05:05:00.000Z'),
   journalRow('removed',{key:'removed',deleted:true,updatedAt:'2026-09-04T05:05:00.000Z'},'2026-09-04T05:05:00.000Z'),
   journalRow('later-deleted',{version:2,key:'later-deleted',label:'Later deleted',text:'edit before deletion',updatedAt:'2026-09-04T05:00:00.000Z'},'2026-09-04T05:00:00.000Z'),
-  ['areaNoteDeletion:later-deleted',{key:'areaNoteDeletion:later-deleted',version:1,value:{format:'study-director.area-note-deletion',version:1,key:'later-deleted',deletedAt:'2026-09-04T05:01:00.000Z'},updatedAt:'2026-09-04T05:01:00.000Z'}]
+  ['noteDeletion:later-deleted',{key:'noteDeletion:later-deleted',version:1,value:{format:'study-director.note-deletion',version:1,key:'later-deleted',deletedAt:'2026-09-04T05:01:00.000Z'},updatedAt:'2026-09-04T05:01:00.000Z'}]
 ])legacyStores.meta.set(key,value);
 const legacy=createHarness(legacyLocal,legacyStores);
-assert.equal((await legacy.app.compatibility.migrateAreaNotes()).status,'migrated','name-keyed notes take their ids first');
-const folded=await legacy.app.compatibility.migrateAreaNoteRecovery();assert.equal(folded.status,'migrated');
+assert.equal((await legacy.app.compatibility.migrateNotes()).status,'migrated','name-keyed notes take their ids first');
+const folded=await legacy.app.compatibility.migrateNoteRecovery();assert.equal(folded.status,'migrated');
 assert.equal(legacyStores.area.get(noteId('legacy')).text,'legacy-unsaved','the v1 localStorage payload is stored');
 assert.equal(legacyStores.area.get(noteId('journaled')).text,'journaled newer','a newer journal entry is stored');
 assert.equal(legacyStores.area.get(noteId('outdated')).text,'stored newer','a newer stored note is kept');
-assert.equal(legacyStores.area.has(noteId('removed')),false,'a newer journal deletion is applied');assert.ok(legacyStores.meta.has(`areaNoteDeletion:${noteId('removed')}`),'the deletion is recorded');
+assert.equal(legacyStores.area.has(noteId('removed')),false,'a newer journal deletion is applied');assert.ok(legacyStores.meta.has(`noteDeletion:${noteId('removed')}`),'the deletion is recorded');
 assert.equal(legacyStores.area.has(noteId('later-deleted')),false,'a note deleted after the journaled edit stays deleted');
 assert.equal([...legacyStores.area.keys()].every(key=>/^n_[0-9a-f]{16}$/u.test(key)),true,'no name-keyed row remains');
 assert.equal(journalRows(legacyStores).length,0,'every journal row is removed');assert.equal(legacyLocal.has('pending'),false,'the v1 payload is removed');
-assert.equal((await legacy.app.compatibility.verifyAreaNoteRecovery()).ok,true);
-assert.equal((await legacy.app.compatibility.migrateAreaNoteRecovery()).status,'not-needed');
+assert.equal((await legacy.app.compatibility.verifyNoteRecovery()).ok,true);
+assert.equal((await legacy.app.compatibility.migrateNoteRecovery()).status,'not-needed');
 await legacy.app.notes.load();assert.equal(legacy.app.notes.get('journaled').text,'journaled newer');
 legacyStores.meta.set(...journalRow('residue',{version:2,key:'residue',label:'Residue',text:'left behind',updatedAt:'2026-09-04T05:00:00.000Z'},'2026-09-04T05:00:00.000Z'));
-assert.deepEqual([...(await legacy.app.compatibility.verifyAreaNoteRecovery()).issues],['area-note-recovery-residue'],'verification reports journal rows that remain');
+assert.deepEqual([...(await legacy.app.compatibility.verifyNoteRecovery()).issues],['note-recovery-residue'],'verification reports journal rows that remain');
 
 console.log(JSON.stringify({status:'PASS',rapidEdits:100,uniqueRapidRevisions:new Set(revisions).size,browserCopyWritesWhileSaving:first.localWrites.all,clockSkewSafe:true,closeRecovered:true,staleCopyDropped:true,emptyRecovered:true,explicitDelete:true,reloadKeepsEdit:true,failedWriteRecovered:true,conflictCopyKept:true,unsavedSetCopied:true,largeNoteSaved:Buffer.byteLength(largeText),legacyFolded:true,validatedRichFastPath:true,canonicalNoOpFastPath:true},null,2));

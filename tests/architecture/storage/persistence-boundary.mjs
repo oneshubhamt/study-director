@@ -7,7 +7,7 @@ const codecs=read('source/core/record-codecs.js');
 const backup=read('source/core/backup-codec.js');
 const journals=read('source/core/repository-journals.js');
 const repositories=read('source/core/repositories.js');
-const areaNotes=read('source/core/repositories-area-notes.js');
+const notes=read('source/core/repositories-notes.js');
 const app=read('source/app.html');
 const appMeta=read('source/core/app-meta.js');
 
@@ -19,8 +19,8 @@ assert.match(persistence,/strictTransaction:idbStrictTransaction[\s\S]*strictSto
 assert.match(persistence,/db\.transaction\(stores,mode,\{durability:'strict'\}\)/,'strict durability must use the native IndexedDB transaction option');
 assert.doesNotMatch(repositories,/idbPutReflectionDraft|DB_REFLECTION_DRAFT_STORE/u,'retired Reflection Draft persistence must not remain a current repository boundary');
 assert.match(repositories,/async function idbPutActiveSession[\s\S]*?return idbTransaction\(\[DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE\],'readwrite'/,'high-frequency active-session checkpoints must share their canonical mutation epoch in the same default-durability transaction');
-assert.doesNotMatch(areaNotes,/meta\.put\('areaNoteRecoveryPrefix'/u,'Notes save straight to their canonical rows and never journal edits in appMeta');
-assert.match(areaNotes,/async function idbApplyDelta[\s\S]*?idbStrictTransaction\(\[DB_AREA_NOTES_STORE,DB_APP_META_STORE\],'readwrite'/,'canonical note commits and deletion markers must share one strict transaction');
+assert.doesNotMatch(notes,/meta\.put\('noteRecoveryPrefix'/u,'Notes save straight to their canonical rows and never journal edits in appMeta');
+assert.match(notes,/async function idbApplyDelta[\s\S]*?idbStrictTransaction\(\[DB_NOTES_STORE,DB_APP_META_STORE\],'readwrite'/,'canonical note commits and deletion markers must share one strict transaction');
 assert.match(repositories,/async function idbPutDailyRecordBatch[\s\S]*?idbStrictTransaction\(stores,'readwrite'/,'authoritative Daily Record commits must opt into strict durability');
 
 const functionSlice=(source,name,next)=>{const start=source.indexOf(name),end=next?source.indexOf(next,start+name.length):-1;assert.ok(start>=0,`${name} must exist`);return source.slice(start,end>start?end:source.length);};
@@ -28,7 +28,7 @@ for(const [label,slice] of [
   ['DailyRecord batch write',functionSlice(repositories,'async function idbPutDailyRecordBatch','async function idbGet')],
   ['DailyRecord delete',functionSlice(repositories,'async function idbDelete(','async function idbAll')],
   ['ActiveSession write',functionSlice(repositories,'async function idbPutActiveSession','async function idbGetActiveSession')],
-  ['AreaNote commit',functionSlice(areaNotes,'async function idbApplyDelta','async function idbReplace')]
+  ['Note commit',functionSlice(notes,'async function idbApplyDelta','async function idbReplace')]
 ]){
   assert.doesNotMatch(slice,/DB_SYNC_QUEUE_STORE|DB_TOMBSTONE_STORE/u,`${label} must not depend on legacy sync stores`);
 }
@@ -61,7 +61,7 @@ assert.match(appMeta,/function family\(name,owner\)/,'appMeta gateway must enfor
 assert.match(persistence,/n>Number\(nowMs\)\+10\*60\*1000/,'import timestamp acceptance must use an explicit caller-supplied decision time');
 assert.match(journals,/Number\(current\.expiresAt\)>decisionNowMs\(\)/,'durable mutation lease expiry must use the injected decision clock');
 assert.match(repositories,/decisionNowMs\(\)-lastRun<DATA_MAINTENANCE_INTERVAL_MS/,'repository maintenance recency must use the injected decision clock');
-assert.match(repositories,/AreaNotesRepositoryModule\.create/,'AppData facade must compose the extracted notes repository through an injected module contract');
+assert.match(repositories,/NotesRepositoryModule\.create/,'AppData facade must compose the extracted notes repository through an injected module contract');
 assert.match(repositories,/Math\.floor\(Number\(seed\)\|\|0\),lastSessionRevision,decisionNowMs\(\)/,'session revision ordering must use the injected decision clock');
 
 console.log(JSON.stringify({status:'PASS',boundary:'persistence-repositories',layers:['persistence primitives','record codecs','backup codec','repository journals','AppData facade']},null,2));

@@ -42,7 +42,7 @@ export const LOCAL_STORAGE_KEYS=freeze({
   installationId:'studyDirector.installationId.v1',
   deletionRecovery:'studyDirector.deletionRecovery.v1',
   fallbackDailyRecords:'studyDirector.dailyRecordsFallback.v1',
-  areaNoteRescue:'studyDirector.areaNoteRescue.v1',
+  noteRescue:'studyDirector.noteRescue.v1',
   nameSetupSkipped:'studyDirector.nameSetupSkippedDate.v1',
   fontScale:'studyDirector.fontScale.v1',
   keepScreenAwake:'studyDirector.keepScreenAwake.v1',
@@ -65,7 +65,7 @@ export const OBSOLETE_LOCAL_STORAGE_KEYS=freeze({
   quote:'studyDirector.quote',
   reflectionDrafts:'studyDirector.reflectionDrafts.v1',
   reflectionLegacy:'studyDirector.reflectionDraft',
-  areaNotesPending:'studyDirector.areaNotesPending.v1',
+  notesPending:'studyDirector.areaNotesPending.v1',
   defaults:'studyDirector.userDefaults.v1',
   liveDraft:'studyDirector.liveDraft',
   activeSession:'studyDirector.activeSession.v1',
@@ -78,7 +78,9 @@ export const OBSOLETE_LOCAL_STORAGE_KEYS=freeze({
   attachmentMaintenanceAttemptDay:'studyDirector.attachmentMaintenanceDay.v1',
   // Attachment cleanup now follows the daily upkeep and keeps no record of its own.
   attachmentMaintenanceDay:'studyDirector.attachmentMaintenanceDay.v2',
-  attachmentMaintenancePending:'studyDirector.attachmentMaintenancePending.v1'
+  attachmentMaintenancePending:'studyDirector.attachmentMaintenancePending.v1',
+  // Renamed: moved once to noteRescue before anything reads it.
+  noteRescueLegacy:'studyDirector.areaNoteRescue.v1'
 });
 
 // One authoritative identity map for the heterogeneous appMeta store. Names are
@@ -93,7 +95,7 @@ export const APP_META_KEYS=freeze({
   insightsDatasetRevision:'insightsDatasetRevision',
   dataMaintenance:'dataMaintenance',
   savedDayDeletionPrefix:'savedDayDeletion:',
-  areaNoteDeletionPrefix:'areaNoteDeletion:',
+  noteDeletionPrefix:'noteDeletion:',
   attachmentDeletionPrefix:'attachmentDeletion:',
   libraryClearJournalState:'libraryClearJournalState',
   libraryClearJournalPayloadPrefix:'libraryClearJournalPayload:',
@@ -103,15 +105,16 @@ export const APP_META_KEYS=freeze({
   verifiedRecoveryBackups:'verifiedRecoveryBackups',
   backupProtection:'backupProtection',
   attachmentIntegrityAudit:'attachmentIntegrityAudit',
-  automaticDeviceBackup:'automaticDeviceBackup',
+  deviceFolder:'deviceFolder',
   repositoryIntegrityScrub:'repositoryIntegrityScrub',
   managedProviderBackupPending:'managedProviderBackupPending',
   repositoryMaintenancePending:'repositoryMaintenancePending',
   reconciliationBase:'reconciliationBase',
   reconciliationBaseNotePrefix:'reconciliationBaseNote:'
 });
-// Names these records had while names carried a version. The compatibility
-// host moves each record to its stable name once, before anything reads it.
+// Earlier names of these records: while names carried a version, and before
+// notes and the Device Folder had their current names. The compatibility host
+// moves each record to its current name once, before anything reads it.
 export const RENAMED_APP_META_KEYS=freeze({
   planDraft:'planDraft.v1',
   planLibrary:'planLibrary.v1',
@@ -119,7 +122,7 @@ export const RENAMED_APP_META_KEYS=freeze({
   canonicalMutationEpoch:'canonicalMutationEpoch.v1',
   backupPreparationUnitPrefix:'backupPreparationUnit.v1:',
   savedDayDeletionPrefix:'savedDayDeletion.v1:',
-  areaNoteDeletionPrefix:'areaNoteDeletion.v1:',
+  noteDeletionPrefix:freeze(['areaNoteDeletion.v1:','areaNoteDeletion:']),
   attachmentDeletionPrefix:'attachmentDeletion.v1:',
   libraryClearJournalState:'libraryClearJournalState.v1',
   libraryClearJournalPayloadPrefix:'libraryClearJournalPayload.v1:',
@@ -129,7 +132,14 @@ export const RENAMED_APP_META_KEYS=freeze({
   managedProviderBackupPending:'managedProviderBackupPending.v1',
   repositoryMaintenancePending:'repositoryMaintenancePending.v2',
   reconciliationBase:'reconciliationBase.v2',
-  reconciliationBaseNotePrefix:'reconciliationBaseNote.v1:'
+  reconciliationBaseNotePrefix:'reconciliationBaseNote.v1:',
+  deviceFolder:'automaticDeviceBackup'
+});
+// Value formats renamed with their records; a moved value takes the new one.
+export const RENAMED_VALUE_FORMATS=freeze({
+  'study-director.area-note-deletion':'study-director.note-deletion',
+  'study-director.area-note-rescue':'study-director.note-rescue',
+  'study-director.device-backup-settings':'study-director.device-folder-settings'
 });
 export const APP_META_FAMILY_COUNT=Object.keys(APP_META_KEYS).length;
 export const APP_META_FAMILY_LABEL=`${APP_META_FAMILY_COUNT} typed appMeta families`;
@@ -140,13 +150,13 @@ export const OBSOLETE_APP_META_KEYS=freeze({
   archiveClearJournalStateLegacy:'archiveClearJournalState.v1',
   archiveClearJournalPayloadPrefixLegacy:'archiveClearJournalPayload.v1:',
   reconciliationBaseLegacy:'reconciliationBase.v1',
-  areaNoteRecoveryPrefix:'areaNoteRecovery.v1:'
+  noteRecoveryPrefix:'areaNoteRecovery.v1:'
 });
 
 export const APP_META_VALIDATION_OWNERS=freeze({
-  repositories:freeze(['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','savedDayDeletionPrefix','areaNoteDeletionPrefix','attachmentDeletionPrefix']),
+  repositories:freeze(['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','savedDayDeletionPrefix','noteDeletionPrefix','attachmentDeletionPrefix']),
   journals:freeze(['libraryClearJournalState','libraryClearJournalPayloadPrefix','restoreJournalState','restoreJournalPayload','mutationLease']),
-  host:freeze(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix'])
+  host:freeze(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix'])
 });
 
 function appMetaValidationOwner(name){
@@ -161,7 +171,7 @@ export const DATA_ARCHITECTURE=freeze({
   indexedDb:freeze({
     dailyRecords:surface('canonical','repositories','protect','retained',INDEXED_DB.stores.dailyRecords.schema),
     dailySummaries:surface('derived','repositories','protect','rebuildable-from-dailyRecords',INDEXED_DB.stores.dailySummaries.schema,{rebuildFrom:'indexedDb.dailyRecords'}),
-    areaNotes:surface('canonical','repositories','protect','retained',INDEXED_DB.stores.areaNotes.schema),
+    notes:surface('canonical','repositories','protect','retained',INDEXED_DB.stores.notes.schema),
     activeSessions:surface('canonical-live','repositories','protect','until-session-finalization',INDEXED_DB.stores.activeSessions.schema),
     appMeta:containerSurface('typed-container','app-meta-gateway','mixed','key-family-specific',INDEXED_DB.stores.appMeta.schema,APP_META_FAMILY_LABEL),
     assets:surface('canonical-metadata','attachment-storage','protect','while attachment is retained/referenced',INDEXED_DB.stores.assets.schema)
@@ -186,7 +196,7 @@ export const DATA_ARCHITECTURE=freeze({
     installationId:surface('coordination-identity','persistence','protect-identifiers','retained'),
     deletionRecovery:surface('recovery','repositories','protect-identifiers','until the failed DailyRecord/ActiveSession delete is reconciled','',{protects:'DailyRecord/ActiveSession deletion intent',created:'when authoritative deletion cannot complete atomically',cleared:'after canonical deletion state is verified',supersededBy:'verified canonical record/deletion state'}),
     fallbackDailyRecords:surface('recovery','repositories','protect','until migrated to IndexedDB','',{protects:'indexedDb.dailyRecords',created:'when a DailyRecord cannot be persisted to IndexedDB',cleared:'after replay and verification in canonical IndexedDB',supersededBy:'verified canonical DailyRecord'}),
-    areaNoteRescue:surface('recovery','repositories','protect','until the unsaved Ongoing Notes it holds are saved','',{protects:'indexedDb.areaNotes',created:'when an Ongoing Note save fails or the page is hidden or closed before a save finishes',cleared:'after the matching canonical AreaNote/deletion commits',supersededBy:'newer canonical AreaNote or deletion state',capacity:'areaNoteRescueBytes (1 MiB), newest notes first; the save failure names any unsaved note left out'}),
+    noteRescue:surface('recovery','repositories','protect','until the unsaved notes it holds are saved','',{protects:'indexedDb.notes',created:'when a note save fails or the page is hidden or closed before a save finishes',cleared:'after the matching canonical Note/deletion commits',supersededBy:'newer canonical Note or deletion state',capacity:'noteRescueBytes (1 MiB), newest notes first; the save failure names any unsaved note left out'}),
     nameSetupSkipped:surface('preference','host','operational','short-lived'),
     fontScale:surface('startup-mirror','host','operational','disposable mirror of appMeta portable Preferences fontScale','',{mirrorOf:'appMeta.personalPreferences.fontScale'}),
     keepScreenAwake:surface('preference','native-capabilities','operational','retained'),
@@ -216,7 +226,7 @@ export const DATA_ARCHITECTURE=freeze({
     quote:surface('legacy-migration','compatibility','protect','remove after protected-preference migration'),
     reflectionDrafts:surface('legacy-residue','compatibility','operational','remove during ReflectionDraft retirement'),
     reflectionLegacy:surface('legacy-residue','compatibility','operational','remove during ReflectionDraft retirement'),
-    areaNotesPending:surface('legacy-migration','compatibility','protect','remove after Area Note recovery migration'),
+    notesPending:surface('legacy-migration','compatibility','protect','remove after Note recovery migration'),
     defaults:surface('legacy-migration','compatibility','protect','remove after Plan/protected-preference migration'),
     liveDraft:surface('legacy-residue','compatibility','protect','remove after verified legacy cleanup'),
     activeSession:surface('legacy-residue','compatibility','protect','remove after verified legacy cleanup'),
@@ -228,7 +238,8 @@ export const DATA_ARCHITECTURE=freeze({
     legacyOwnershipLease:surface('legacy-residue','compatibility','operational','remove after app-scoped ownership identity is active'),
     attachmentMaintenanceAttemptDay:surface('legacy-residue','compatibility','operational','old scheduled-attempt day cannot certify completed attachment cleanup'),
     attachmentMaintenanceDay:surface('legacy-residue','compatibility','operational','remove; attachment cleanup now follows the daily upkeep'),
-    attachmentMaintenancePending:surface('legacy-residue','compatibility','operational','remove; a cleanup request lost to a reload is caught by the next daily sweep')
+    attachmentMaintenancePending:surface('legacy-residue','compatibility','operational','remove; a cleanup request lost to a reload is caught by the next daily sweep'),
+    noteRescueLegacy:surface('legacy-migration','compatibility','protect','moved once to noteRescue, its format renamed, before notes load')
   }),
   appMeta:freeze({
     exact:freeze({
@@ -246,7 +257,7 @@ export const DATA_ARCHITECTURE=freeze({
       verifiedRecoveryBackups:surface('operational','host','operational','replace on every backup','VerifiedRecoveryBackups.v3'),
       backupProtection:surface('security-policy','exports','operational','while backup protection enabled','BackupProtection.v2'),
       attachmentIntegrityAudit:surface('derived-health','host','protect','replace on audit; opaque identity/error details only','AttachmentIntegrityAudit.v2',{rebuildFrom:'indexedDb.assets + opfs.attachments'}),
-      automaticDeviceBackup:surface('backup-configuration','device-backup','operational','while connected','DeviceBackupSettings.v4'),
+      deviceFolder:surface('backup-configuration','device-backup','operational','while connected','DeviceFolderSettings.v4'),
       repositoryIntegrityScrub:surface('derived-health','backup','operational','transactional progress/completion bound to repository identity; opaque quarantined object ids only; no user-content details','RepositoryIntegrityScrub.v7',{rebuildFrom:'external backup repository manifests and objects'}),
       managedProviderBackupPending:surface('operational','backup','operational','until the affected managed provider successfully publishes a later current backup or is explicitly disconnected','ManagedProviderBackupPending.v1'),
       repositoryMaintenancePending:surface('operational','backup','operational','until post-commit repository retention and safe orphan reclamation complete','RepositoryMaintenancePending.v4'),
@@ -255,10 +266,10 @@ export const DATA_ARCHITECTURE=freeze({
     prefixes:freeze({
       backupPreparationUnitPrefix:surface('derived-performance','repositories','operational','disposable; rebuild from canonical data after loss, uncertainty or representation change','BackupPreparationUnit.v1',{rebuildFrom:'portable canonical IndexedDB state'}),
       savedDayDeletionPrefix:surface('canonical-deletion-history','repositories','protect','retain until the same Saved Day is recreated','SavedDayDeletion.v1'),
-      areaNoteDeletionPrefix:surface('canonical-deletion-history','repositories','protect','retain until the same Ongoing Note is recreated','AreaNoteDeletion.v1'),
+      noteDeletionPrefix:surface('canonical-deletion-history','repositories','protect','retain until the same Note is recreated','NoteDeletion.v1'),
       attachmentDeletionPrefix:surface('canonical-deletion-history','repositories','protect-identifiers','retain until the same Attachment Library identity is explicitly restored/recreated','AttachmentDeletion.v1'),
       libraryClearJournalPayloadPrefix:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','LibraryClearJournalChunk.v1',{protects:'canonical Library rollback chunks',created:'before destructive Library clear commit',cleared:'after verified completion or rollback',supersededBy:'verified post-operation canonical state'}),
-      reconciliationBaseNotePrefix:surface('reconciliation-base','host','protect','update/delete only changed Ongoing Note baselines; lazily read only for actual reconciliation conflicts','ReconciliationBaseNote.v1')
+      reconciliationBaseNotePrefix:surface('reconciliation-base','host','protect','update/delete only changed Note baselines; lazily read only for actual reconciliation conflicts','ReconciliationBaseNote.v1')
     }),
     obsolete:freeze({
       reflectionDraftMigration:surface('legacy-residue','compatibility','operational','remove during compatibility migration','ReflectionDraftMigration.v1'),
@@ -266,7 +277,7 @@ export const DATA_ARCHITECTURE=freeze({
       archiveClearJournalStateLegacy:surface('legacy-migration','compatibility','protect','migrate once to LibraryClearJournalState.v1, then remove after verified replacement','ArchiveClearJournalState.v1'),
       archiveClearJournalPayloadPrefixLegacy:surface('legacy-migration','compatibility','protect','migrate once to LibraryClearJournalChunk.v1, then remove after verified replacement','ArchiveClearJournalChunk.v1'),
       reconciliationBaseLegacy:surface('legacy-migration','compatibility','protect','migrate once to ReconciliationBase.v2 plus ReconciliationBaseNote.v1 rows, then remove after verified replacement','ReconciliationBase.v1'),
-      areaNoteRecoveryPrefix:surface('legacy-migration','compatibility','protect','fold once into canonical AreaNote rows (newer revision wins), then remove in the same transaction','AreaNoteRecovery.v1')
+      noteRecoveryPrefix:surface('legacy-migration','compatibility','protect','fold once into canonical Note rows (newer revision wins), then remove in the same transaction','AreaNoteRecovery.v1')
     })
   }),
   external:freeze({

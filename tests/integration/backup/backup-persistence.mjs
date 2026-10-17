@@ -35,19 +35,19 @@ const limits=freeze({
   backupChunkItems:2,backupChunkTargetBytes:65536,backupMaxEntryBytes:65536,
   backupMaxLineBytes:262144,backupMaxCompressedBytes:4*1024*1024,backupMaxFileBytes:16*1024*1024,
   backupMaxUncompressedBytes:8*1024*1024,backupMaxAssetDescriptors:100,richAssetMaxBytes:8*1024*1024,maxBackupChunks:1000,
-  importBytes:4*1024*1024,maxImportRecords:100,maxOngoingNotes:100,
+  importBytes:4*1024*1024,maxImportRecords:100,maxNotes:100,
   maxLegacyImportTombstones:100,maxReflectionChars:10000
 });
 const dataContract=RUNTIME_DATA_CONTRACT;
 const entityDefinitions=freeze({
   dailyRecord:freeze({idField:'date',backupLimit:limits.maxImportRecords}),
-  areaNote:freeze({idField:'key',backupLimit:limits.maxOngoingNotes}),
+  note:freeze({idField:'key',backupLimit:limits.maxNotes}),
   activeSession:freeze({idField:'id',backupLimit:1})
 });
 const clampText=(value,max=100000)=>String(value??'').slice(0,max);
 const isDate=value=>/^\d{4}-\d{2}-\d{2}$/.test(String(value||''));
 const normalizeTimestamp=value=>Number.isFinite(Date.parse(String(value||'')))?new Date(value).toISOString():null;
-const normalizeAreaNote=(item,key)=>{
+const normalizeNote=(item,key)=>{
   if(!item||typeof item!=='object')return null;
   const id=String(key||item.key||'').trim();
   if(!id)return null;
@@ -71,14 +71,14 @@ const normalizeDrafts=value=>{
 };
 const dailyRecordCodec=freeze({
   sanitizeCurrentDailyRecord:item=>item&&isDate(item.date)&&Number(item.version)===16?freeze({...item,date:item.date}):null,
-  sanitizeCurrentAreaNote:normalizeAreaNote,
+  sanitizeCurrentNote:normalizeNote,
   isSupportedSavedDate:isDate
 });
 const activeSessionCodec=freeze({sanitizeCurrent:item=>item&&item.id==='current'?freeze({...item}):null});
 const compatibilityCodec=freeze({
   format:'study-director.compatibility-codecs',contractVersion:1,
   dailyRecord:item=>item&&isDate(item.date)?freeze({...item,date:item.date,version:15}):null,
-  areaNote:normalizeAreaNote,activeSession:item=>item&&item.id==='current'?freeze({...item}):null,
+  note:normalizeNote,activeSession:item=>item&&item.id==='current'?freeze({...item}):null,
   localRecoveryEnvelope:()=>null,reflectionDraft:item=>normalizeDrafts([item])[0]||null,
   personalData:item=>personalDataCodec.normalize(item)
 });
@@ -100,12 +100,12 @@ const compatibilityNoop=async()=>freeze({status:'not-needed'});
 const compatibilityFacade=CompatibilityModule.createFacade(freeze({
   baselineId:'QA_FIXTURE',
   live:freeze({
-    renameIdentities:compatibilityNoop,cleanupLegacyStorage:compatibilityNoop,migratePlan:compatibilityNoop,migrateReflections:compatibilityNoop,migrateHostMetadata:compatibilityNoop,migrateActiveSession:compatibilityNoop,migrateAreaNotes:compatibilityNoop,
-    migrateAreaNoteRecovery:compatibilityNoop,migrateDailyRecords:compatibilityNoop,migrateDeletionState:compatibilityNoop,migrateInsightsRevisionEnvelope:compatibilityNoop,cleanupLegacyAttachments:compatibilityNoop,cleanupObsoleteMetadata:compatibilityNoop,retireTopology:compatibilityNoop,retireLegacyIdentity:compatibilityNoop
+    renameIdentities:compatibilityNoop,cleanupLegacyStorage:compatibilityNoop,migratePlan:compatibilityNoop,migrateReflections:compatibilityNoop,migrateHostMetadata:compatibilityNoop,migrateActiveSession:compatibilityNoop,migrateNotes:compatibilityNoop,
+    migrateNoteRecovery:compatibilityNoop,migrateDailyRecords:compatibilityNoop,migrateDeletionState:compatibilityNoop,migrateInsightsRevisionEnvelope:compatibilityNoop,cleanupLegacyAttachments:compatibilityNoop,cleanupObsoleteMetadata:compatibilityNoop,retireTopology:compatibilityNoop,retireLegacyIdentity:compatibilityNoop
   }),
   backups:freeze({inspectCurrent:codec.inspectCurrent,inspectLegacy:codec.inspectLegacy}),
   verification:freeze({
-    planLegacy:async()=>freeze({ok:true}),reflectionLegacy:async()=>freeze({ok:true}),activeSession:async()=>freeze({ok:true}),areaNotes:async()=>freeze({ok:true}),areaNoteRecovery:async()=>freeze({ok:true}),
+    planLegacy:async()=>freeze({ok:true}),reflectionLegacy:async()=>freeze({ok:true}),activeSession:async()=>freeze({ok:true}),notes:async()=>freeze({ok:true}),noteRecovery:async()=>freeze({ok:true}),
     dailyRecords:async()=>freeze({ok:true}),deletionState:async()=>freeze({ok:true}),insightsRevisionEnvelope:async()=>freeze({ok:true}),canonicalStores:async()=>freeze({ok:true}),legacyStorage:async()=>freeze({ok:true}),
     legacyAttachments:async()=>freeze({ok:true}),obsoleteMetadata:async()=>freeze({ok:true}),topology:async()=>freeze({ok:true}),retiredIdentity:async()=>freeze({ok:true}),retiredHostCompatibility:async()=>freeze({ok:true}),freshBackup:async()=>freeze({ok:true})
   })
@@ -182,14 +182,14 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
       if(corruptAfterImportOnce){corruptAfterImportOnce=false;corruptPostCommitReadOnce=true;}
       return {batches:values.length?1:0};
     },dailyRecordRemove:async date=>{for(let index=importedDailyRecords.length-1;index>=0;index--)if(importedDailyRecords[index].date===date)importedDailyRecords.splice(index,1);return true;},dailyRecordTimestamp:value=>Date.parse(value?.savedAt||value?.updatedAt||'')||0,
-    notesExportPayload:()=>currentNotes,notesReadFreshPayload:async()=>currentNotes,notesReadFreshItems:async keys=>(keys||[]).map(key=>currentNotes[key]||null),notesFlush:async()=>true,notesNormalizePayload:value=>Object.fromEntries(Object.entries(value||{}).map(([key,item])=>[key,normalizeAreaNote(item,key)]).filter(([,item])=>item)),
+    notesExportPayload:()=>currentNotes,notesReadFreshPayload:async()=>currentNotes,notesReadFreshItems:async keys=>(keys||[]).map(key=>currentNotes[key]||null),notesFlush:async()=>true,notesNormalizePayload:value=>Object.fromEntries(Object.entries(value||{}).map(([key,item])=>[key,normalizeNote(item,key)]).filter(([,item])=>item)),
     notesTrashKey:key=>String(key).startsWith('~')?'':'~deleted '+key,notesAlignByTitle:value=>value,notesFailure:()=>noteFailure,
     restoreJournalPrepare:async value=>{restoreJournal={state:{id:value.id},payload:value};return restoreJournal;},
     restoreJournalRead:async()=>restoreJournal,
     restoreJournalMark:async(id,phase)=>{assert.equal(id,restoreJournal.state.id);restoreJournal.state.phase=phase;return restoreJournal.state;},
     restoreJournalClear:async id=>{if(id)assert.equal(id,restoreJournal.state.id);restoreJournal=null;return true;},
     personalSettle:async()=>true,personalExport:async()=>personalDataFixture,personalImport:async()=>true,personalVerify:async()=>true,storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async options=>{snapshotFenceOptions.push(Object.freeze({...options}));return options?.legacy===true?'legacy-stable':'fast-stable';},canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],scheduleRead:()=> '08:00 | 60 | Existing | work | Ethics | block | 1',
-    installationId:()=> 'inst_device_a',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryAreaNotes:async()=>[],deletionRecoveryReplaceAreaNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>null,reconciliationBaseReadNotes:async()=>freeze({}),reconciliationBaseWrite:async()=>true
+    installationId:()=> 'inst_device_a',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryNotes:async()=>[],deletionRecoveryReplaceNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>null,reconciliationBaseReadNotes:async()=>freeze({}),reconciliationBaseWrite:async()=>true
   }),
   exports:freeze({...testProcessing,backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():file,unprotect:async blob=>({blob,encrypted:false}),check:()=>{},job:exclusiveFileJob,download:()=>({status:'downloaded'}),chooseSave:(filename,accept,options)=>{chosenNames.push(filename);assert.equal(options?.id,'study-director-backups');return chooseSaveResult();},save:async(file,handle,options)=>{assert.ok(file.blob.size>0,'A backup file must never receive an empty backup.');assert.equal(typeof options?.onProgress,'function');return handle?{status:'saved',filename:handle.name}:{status:exportSaveStatus};}}),
   assets:freeze({get:async id=>{assetGetCalls+=1;return assetRows.some(row=>row.id===id)?(assetBlobOverrides.get(id)||duplicateAssetBlob):null;},put:async()=>true,keys:async()=>assetRows.map(row=>row.id),list:async()=>assetRows,importAll:async()=>0,restoreAll:async()=>true,removeMany:async()=>0,removeMetadata:async()=>0,scheduleMaintenance:()=>true}),
@@ -203,13 +203,13 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
   view:freeze({presentation:backupPresentation,refreshPnote:fn,refreshReview:fn,renderSchedule:fn}),
   events:freeze({
     libraryChanged:()=>events.push('library-changed'),backupCompleted:context=>backupCompletions.push(context||{}),
-    reconcileAreaNotes:async payload=>{
-      events.push('reconcile-area-notes');
+    reconcileNotes:async payload=>{
+      events.push('reconcile-notes');
       if(areaImportFailureOnce){areaImportFailureOnce=false;throw new Error('simulated note import failure');}
-      const normalized=Object.fromEntries(Object.entries(payload||{}).map(([key,item])=>[key,normalizeAreaNote(item,key)]).filter(([,item])=>item));
+      const normalized=Object.fromEntries(Object.entries(payload||{}).map(([key,item])=>[key,normalizeNote(item,key)]).filter(([,item])=>item));
       currentNotes=freeze({...currentNotes,...normalized});return currentNotes;
     },
-    restoreAreaNotesSnapshot:async payload=>{events.push('rollback-area-notes');currentNotes=freeze(Object.fromEntries(Object.entries(payload||{}).map(([key,item])=>[key,normalizeAreaNote(item,key)]).filter(([,item])=>item)));return currentNotes;},
+    restoreNotesSnapshot:async payload=>{events.push('rollback-notes');currentNotes=freeze(Object.fromEntries(Object.entries(payload||{}).map(([key,item])=>[key,normalizeNote(item,key)]).filter(([,item])=>item)));return currentNotes;},
     restoreSessionState:async()=>{events.push('restore-session-state');return true;},
     verifyActiveSessionRuntime:async()=>true,restoredFromFile:()=>false
   }),
@@ -243,7 +243,7 @@ const created=await runtime.controller.createCheckpoint();
 assert.ok(snapshotFenceOptions.length>=2,'A checkpoint must fence both capture and prepared publication.');
 assert.ok(snapshotFenceOptions.every(options=>options.legacy!==true),'Healthy canonical capture must use the fast snapshot fence.');
 assert.equal(created.counts.dailyRecord,1);
-assert.equal(created.counts.areaNote,2);
+assert.equal(created.counts.note,2);
 const parsed=await codec.inspectCurrent(created.blob,{filename:created.filename});
 assert.equal(parsed.records[0].reflection,'saved historical reflection');
 assert.equal(parsed.records[0].studyQuality,5);
@@ -307,9 +307,9 @@ assert.equal((await withoutFileJobDeadlock(()=>runtime.controller.exportLocal())
 assert.equal(currentFileJob,null,'The one-click standalone export must release its exclusive file lock.');
 exportSaveStatus='downloaded';
 backupCompletions.length=0;
-assert.deepEqual(Object.keys(parsed.data.areaNotes).sort(),['Economics','Ethics']);
-assert.equal(parsed.data.areaNotes.Economics.text,'shared text');
-assert.equal(parsed.data.areaNotes.Ethics.text,'shared text','identical text across distinct keys must be preserved, not deduplicated');
+assert.deepEqual(Object.keys(parsed.data.notes).sort(),['Economics','Ethics']);
+assert.equal(parsed.data.notes.Economics.text,'shared text');
+assert.equal(parsed.data.notes.Ethics.text,'shared text','identical text across distinct keys must be preserved, not deduplicated');
 assert.equal(parsed.importedReflectionDrafts,undefined,'Current v20 backups must not expose the retired Reflection Draft domain.');
 
 // Verified round trip imports repositories before any session/UI restoration and keeps both note identities.
@@ -339,7 +339,7 @@ assert.ok(events.lastIndexOf('suppression:end')>=suppressionStartBeforeRestore,'
 assert.equal(restored.added+restored.replaced,0,'identical Saved Days must remain untouched rather than being rewritten');
 assert.equal(importedDailyRecords.length,0,'identical local Saved Days must not create an import write');
 assert.equal(restored.notesReconciled,false,'identical notes must not be rewritten');
-assert.equal(events.includes('reconcile-area-notes'),false);
+assert.equal(events.includes('reconcile-notes'),false);
 assert.equal(events.includes('import-active-session'),false);
 assert.equal(currentNotes.Economics.version,2,'reconciled restore state must remain lean AreaNote.v2');
 assert.equal(currentNotes.Ethics.version,2);
@@ -386,7 +386,7 @@ restoring=false;
 // A durable journal left by a terminated tab is automatically replayed on the next startup.
 importedDailyRecords.splice(0,importedDailyRecords.length,freeze({version:16,recordKind:'study',date:'2026-08-04',reflection:'interrupted imported state',savedAt:'2026-08-04T20:00:00.000Z'}));
 restoreJournal={
-  state:{id:'restore_crash_recovery_12345678',phase:'area-notes-committed'},
+  state:{id:'restore_crash_recovery_12345678',phase:'notes-committed'},
   payload:{id:'restore_crash_recovery_12345678',blob:created.blob,filename:created.filename,scheduleText:'08:00 | 60 | Existing | work | Ethics | block | 1'}
 };
 const crashRecovery=await runtime.controller.recoverInterruptedRestore();
@@ -400,7 +400,7 @@ assert.ok(events.includes('restore-session-state'));
 // A failed canonical note flush is recoverable when the durable note payload is still readable.
 // The checkpoint must include that durable state and surface the recovery warning rather than
 // rejecting a complete, verifiable backup merely because the preceding flush reported failure.
-noteFailure={failed:true,message:'IndexedDB area-note flush failed'};
+noteFailure={failed:true,message:'IndexedDB note flush failed'};
 snapshotFenceOptions.length=0;
 const rescuedCheckpoint=await runtime.controller.createCheckpoint();
 assert.ok(snapshotFenceOptions.length>=2,'Recovery capture must remain fenced through publication.');

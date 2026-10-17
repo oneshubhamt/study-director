@@ -27,7 +27,7 @@ assert.match(ui,/richText\.mergeThreeWay\(conflict\.ancestorValue,conflict\.loca
 assert.match(ui,/richText\.compareRichText\(leftHandle\.getValue\(\),rightHandle\.getValue\(\)\)/,'UI must continuously compare scratch copies.');
 assert.match(ui,/setTransientRanges\(comparison\.localRanges\)/,'Local temporary differences must be decorated.');
 assert.match(ui,/setTransientRanges\(comparison\.incomingRanges\)/,'Imported temporary differences must be decorated.');
-assert.doesNotMatch(ui,/\bAppData\b|IndexedDb|localStorage|importAreaNotes|notes\.replace|dailyRecords/i,'Reconciliation modal must not have a canonical persistence port.');
+assert.doesNotMatch(ui,/\bAppData\b|IndexedDb|localStorage|importNotes|notes\.replace|dailyRecords/i,'Reconciliation modal must not have a canonical persistence port.');
 assert.match(styles,/\.sd-note-reconcile-editors\{display:grid;grid-template-columns:minmax\(0,1fr\) minmax\(0,1fr\)/,'Desktop reconciliation must be side-by-side.');
 assert.match(styles,/@media\(max-width:800px\).*\.sd-note-reconcile-editors\{grid-template-columns:1fr/s,'Mobile reconciliation must stack the editors.');
 

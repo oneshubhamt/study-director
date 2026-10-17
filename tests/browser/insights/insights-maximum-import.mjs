@@ -38,7 +38,7 @@ try{
       }
       records.push(qa.CompatibilityCodecs.dailyRecord({version:13,date,dayName:'Study day',studyQuality:1+(dayIndex%5),schedule,results,practiceRuns:[]}));
     }
-    const codec=qa.BackupCodec,counts=codec.countShape({checkpointManifest:1,personalData:1,dailyRecord:records.length,areaNote:0,activeSession:0});
+    const codec=qa.BackupCodec,counts=codec.countShape({checkpointManifest:1,personalData:1,dailyRecord:records.length,note:0,activeSession:0});
     const manifest=codec.createManifest({studentName:'Maximum Import QA',installationId:'inst_maximum_import_browser',exportedAt:'2026-08-13T00:00:00.000Z',counts},{compression:'none',algorithm:'sha256'});
     const lines=[JSON.stringify(manifest)],hashes=[];let sequence=0,parserYields=0,commitYields=0;
     for(const [type,value] of [['checkpointManifest',codec.createProtectedManifest({sourceRevision:manifest.exportedAt,recordDates:records.map(row=>row.date)},manifest.checkpoint)],['personalData',await qa.PlanData.exportData({flush:false})]]){const encoded=await codec.encodeChunk(sequence++,type,[value],'sha256');lines.push(encoded.line);hashes.push(encoded.checksum);}

@@ -654,7 +654,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
           <textarea class="pnote-extra ui-field task-note-field" id="pn-extra" data-note-source="execute" placeholder="No work Area is selected." disabled></textarea>
           <div class="execute-note-empty" id="pn-empty">
             <div class="execute-note-empty-copy ui-body">No work or support block is active. Open Library to review or edit persistent notes.</div>
-            <button class="mini-btn ui-btn" type="button" data-action="open-ongoing-notes">Open notes in Library</button>
+            <button class="mini-btn ui-btn" type="button" data-action="open-notes">Open notes in Library</button>
           </div>
         </div>
         <div class="pnote-links" id="pn-links"></div>
@@ -987,7 +987,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
             <div class="library-notes-editor-empty ui-status">Select an Area to view its note.</div>
           </section>
         </div>
-        <div class="library-notes-status ui-status" id="ongoing-notes-status" role="status" aria-live="polite"></div>
+        <div class="library-notes-status ui-status" id="notes-status" role="status" aria-live="polite"></div>
       </section>
       <section class="library-days" id="library-days" role="tabpanel" aria-labelledby="library-tab-days" hidden>
         <p class="library-explainer ui-body">Diary reflections, and the Study Days saved from Review.</p>
@@ -1317,10 +1317,10 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
           <span><strong>Saved Dates / Reflections</strong><small>Deletes saved Study Days and diary-only reflections.</small></span>
           <span class="library-clear-count ui-mono" id="library-clear-saved-days-count">0</span>
         </label>
-        <label class="library-clear-option" id="library-clear-option-ongoing-notes">
-          <input id="library-clear-ongoing-notes" type="checkbox">
+        <label class="library-clear-option" id="library-clear-option-notes">
+          <input id="library-clear-notes" type="checkbox">
           <span><strong>Notes</strong><small>Deletes the independent notes collection.</small></span>
-          <span class="library-clear-count ui-mono" id="library-clear-ongoing-notes-count">0</span>
+          <span class="library-clear-count ui-mono" id="library-clear-notes-count">0</span>
         </label>
         <label class="library-clear-option" id="library-clear-option-attachments">
           <input id="library-clear-attachments" type="checkbox">
@@ -1466,7 +1466,7 @@ const NoticeCoordinatorModule=INTERNAL_MODULES.load('notice-coordinator',1,'stud
 const NavigationModule=INTERNAL_MODULES.load('navigation',1,'study-director.navigation-module',1);
 const RepositoryJournalModule=INTERNAL_MODULES.load('repository-journals',1,'study-director.repository-journals',1);
 const SaveLaneModule=INTERNAL_MODULES.load('save-lane',1,'study-director.save-lane-module',1);
-const AreaNotesRepositoryModule=INTERNAL_MODULES.load('repositories-area-notes',1,'study-director.area-notes-repository-module',1);
+const NotesRepositoryModule=INTERNAL_MODULES.load('repositories-notes',1,'study-director.notes-repository-module',1);
 const RepositoryModule=INTERNAL_MODULES.load('repositories',1,'study-director.repositories',1);
 const ReviewModule=INTERNAL_MODULES.load('review',1,'study-director.review',1);
 const ExportsModule=INTERNAL_MODULES.load('exports',1,'study-director.exports-module',1,Object.freeze({lifecycle:OperationLifecycle}));
@@ -1512,7 +1512,7 @@ const PUBLIC_THEME_METADATA=Object.freeze(THEME_IDS.map(id=>THEME_DEFINITIONS[id
 const {
   invariants:PRESENTATION_INVARIANTS, breakpoints:PRESENTATION_BREAKPOINTS, tokens:PRESENTATION_TOKEN_CONTRACT
 }=PRESENTATION_MANIFEST;
-const ONGOING_NOTES_SEARCH_WORKER_URL='@@SD_SEARCH_WORKER_FILENAME@@';
+const NOTES_SEARCH_WORKER_URL='@@SD_SEARCH_WORKER_FILENAME@@';
 const APP_CONFIG = {
   appName: 'Study Director',
   attribution: 'Shubham Tiwari with ChatGPT',
@@ -1546,6 +1546,7 @@ const EXTERNAL_REPOSITORY_IDENTITIES=Object.freeze(@@SD_EXTERNAL_REPOSITORY_IDEN
 const APP_META_REGISTRY=Object.freeze(Object.fromEntries(Object.entries(@@SD_APP_META_REGISTRY@@).map(([name,definition])=>[name,Object.freeze(definition)])));
 const OBSOLETE_APP_META_KEYS=Object.freeze(@@SD_OBSOLETE_APP_META_KEYS@@);
 const RENAMED_APP_META_KEYS=Object.freeze(@@SD_RENAMED_APP_META_KEYS@@);
+const RENAMED_VALUE_FORMATS=Object.freeze(@@SD_RENAMED_VALUE_FORMATS@@);
 const FACTORY_DEFAULTS = {
   studentName: APP_CONFIG.defaultName,
   scheduleText: APP_CONFIG.factorySchedule
@@ -1562,7 +1563,7 @@ const OBSOLETE_DB_STORES=OBSOLETE_DB.stores;
 const DB_NAME=DATA_CONTRACT.storage.dbName;
 const DB_DAILY_RECORD_STORE=DB_STORES.dailyRecords;
 const DB_DAILY_SUMMARY_STORE=DB_STORES.dailySummaries;
-const DB_AREA_NOTES_STORE=DB_STORES.areaNotes;
+const DB_NOTES_STORE=DB_STORES.notes;
 const DB_ACTIVE_SESSION_STORE=DB_STORES.activeSessions;
 const DB_APP_META_STORE=DB_STORES.appMeta;
 const DB_LEGACY_SYNC_QUEUE_STORE=OBSOLETE_DB_STORES.syncQueue;
@@ -1590,7 +1591,7 @@ const STUDY_DIRECTOR_CAPABILITIES=Object.freeze({
 });
 const ENTITY_DEFINITIONS=Object.freeze({
   dailyRecord:Object.freeze({schema:DATA_CONTRACT.schemas.DailyRecord.version,idField:'date',store:DB_DAILY_RECORD_STORE,backupLimit:APP_LIMITS.maxImportRecords}),
-  areaNote:Object.freeze({schema:DATA_CONTRACT.schemas.AreaNote.version,idField:'key',store:DB_AREA_NOTES_STORE,backupLimit:APP_LIMITS.maxOngoingNotes}),
+  note:Object.freeze({schema:DATA_CONTRACT.schemas.Note.version,idField:'key',store:DB_NOTES_STORE,backupLimit:APP_LIMITS.maxNotes}),
   activeSession:Object.freeze({schema:DATA_CONTRACT.schemas.ActiveSession.version,idField:'id',fixedId:ACTIVE_SESSION_ID,store:DB_ACTIVE_SESSION_STORE,backupLimit:1}),
 });
 const BACKUP_ENTITY_TYPES=Object.freeze(Object.keys(ENTITY_DEFINITIONS));
@@ -1625,7 +1626,7 @@ const LocalStorageContract=PersistenceModule.createLocalStorage(Object.freeze({
 function createStorageHealthController(local){
   const sourceLabels=Object.freeze({
     'indexedDB':'Browser database','localStorage.read':'Browser storage read','localStorage.write':'Browser storage write',
-    'planDraft.write':'Plan draft','activeSession':'Live-session recovery','areaNotes':'Notes',
+    'planDraft.write':'Plan draft','activeSession':'Live-session recovery','notes':'Notes',
     'dailyRecords':'Library records','deletionRecovery':'Deletion recovery',
     'maintenance':'Data maintenance','capacity':'Storage capacity','backup':'Backup','attachmentIntegrity':'Attachment storage','repositoryIntegrity':'Backup verification'
   });
@@ -2168,7 +2169,7 @@ function normalizeStudyQuality(value){
 const {
   token:scheduleToken, normalizeKind:normalizeScheduleKind, isWork:isWorkBlock, isSupport:isSupportBlock,
   isFixed:isFixedBlock, isTrackable:isTrackableBlock, isPomodoroEligible:isPomodoroEligibleBlock,
-  hasOngoingNotes:hasOngoingTaskNotes, normalizeTarget:normalizeScheduleTarget, makeRow:makeScheduleRow,
+  hasNotes:hasOngoingTaskNotes, normalizeTarget:normalizeScheduleTarget, makeRow:makeScheduleRow,
   isCanonicalText:isCanonicalScheduleText, warningsMessage:scheduleWarningsMessage,
   parseText:parseScheduleDraftText, buildTasks, textFromRows:scheduleTextFromRows,
   fingerprint:scheduleFingerprintForRows, chronologicalRows, startMinutes:scheduleStartMinutes,
@@ -2176,12 +2177,12 @@ const {
   measureValue:taskMeasureValue, targetValue:taskTargetValue, areaLabel:taskAreaLabel, areaKey:taskAreaKey,
   parentAreaKeys:areaParentKeys
 }=ScheduleModel;
-const SUPPORT_ONGOING_NOTE=Object.freeze({
+const SUPPORT_NOTE=Object.freeze({
   key:'__study_director_support_activities__',
   label:'Support Activities'
 });
-function ongoingNoteKeyForTask(task){return isSupportBlock(task)?SUPPORT_ONGOING_NOTE.key:taskAreaKey(task);}
-function ongoingNoteLabelForTask(task){return isSupportBlock(task)?SUPPORT_ONGOING_NOTE.label:taskAreaLabel(task);}
+function noteKeyForTask(task){return isSupportBlock(task)?SUPPORT_NOTE.key:taskAreaKey(task);}
+function noteLabelForTask(task){return isSupportBlock(task)?SUPPORT_NOTE.label:taskAreaLabel(task);}
 const {
   normalizeSource:normalizeCompletionSource, parseProgressNumber
 }=CompletionModel;
@@ -2557,7 +2558,7 @@ const TimerEngine=TimerEngineModule.createEngine(Object.freeze({ports:Object.fre
   persistence:Object.freeze({activePauseEventSnapshot,addPauseToActual,compactPauseEvents:(...args)=>compactPauseEvents(...args),compactRealTimeSnapshot:(...args)=>compactRealTimeSnapshot(...args),flushLiveDraft,maybeSnapshotRunningTimer,recoveryCaptureActiveBeforeSwitch,recoverySetStatus,reopenActualSessionForTimer,saveLiveDraft,saveNote,writeLiveDraftNow}),
   view:Object.freeze({cachedElements,clearExecuteStateOverlay,invalidateExecuteIdleDisplay:()=>{executeIdleDisplayKey='';},refreshPnote,refreshExecuteIdleDisplay,requestRender,setElementStyle,setElementText,setTextSafe,setExecuteControlsEnabled,setExecuteShellVisible,showDone,showEmpty,textEl,toggleDoneMarker}),
   clock:Object.freeze({nowMs:DecisionClock.nowMs}),
-  reviewEvidence:Object.freeze({applicableAreaNotesForTask,buildRealTimeSnapshot,exactTaskCompletionPercent,getReviewDate,liveTaskOutcome,recordCurrentActiveToTask,resolveTaskCompletion,setTaskDoneState,setTaskSkippedState,updateRealTimeAwareness,updateTimerFocusMetrics}),
+  reviewEvidence:Object.freeze({applicableNotesForTask,buildRealTimeSnapshot,exactTaskCompletionPercent,getReviewDate,liveTaskOutcome,recordCurrentActiveToTask,resolveTaskCompletion,setTaskDoneState,setTaskSkippedState,updateRealTimeAwareness,updateTimerFocusMetrics}),
   clockEnvironment:Object.freeze({cancelAnimationFrame:frame=>cancelAnimationFrame(frame),clearInterval:id=>clearInterval(id),document,getComputedStyle:element=>getComputedStyle(element),requestAnimationFrame:callback=>requestAnimationFrame(callback),setInterval:(callback,delay)=>setInterval(callback,delay),setTimeout:(callback,delay)=>setTimeout(callback,delay),window}),
   userPreferences:Object.freeze({Pomodoro,notifications:NoticeCoordinator}),
   ownership:Object.freeze({appCanMutate}),
@@ -3030,7 +3031,7 @@ function showLiveDraftSaveWarning(reason){
 }
 function refreshStorageFallbackWarning(){
   const safetyMessage=String(sessionSafetyMessage||'').trim();
-  const issues=StorageHealthController.snapshot().issues,localFailures=issues.filter(issue=>issue.level==='error'&&['indexedDB','localStorage.write','planDraft.write','activeSession','areaNotes','dailyRecords','deletionRecovery'].includes(issue.source));
+  const issues=StorageHealthController.snapshot().issues,localFailures=issues.filter(issue=>issue.level==='error'&&['indexedDB','localStorage.write','planDraft.write','activeSession','notes','dailyRecords','deletionRecovery'].includes(issue.source));
   const failedSources=new Set(localFailures.map(issue=>issue.source));
   for(const event of NoticeCoordinator.eventStatus().events)if(event.source==='local-saving'&&!failedSources.has(event.id))NoticeCoordinator.resolveEvent(event.source,event.id);
   for(const issue of localFailures)NoticeCoordinator.emit({source:'local-saving',id:issue.source,severity:'error',lifecycle:'failed',foreground:false,surface:'quiet',title:'Local saving failed',message:issue.message});
@@ -3686,7 +3687,7 @@ function setReviewDateTitle(iso){
   if(rptDate)rptDate.textContent=reviewDateTitle(iso);
 }
 function setStatus(id,msg,ok=true,lifecycle=''){
-  const source=id==='library-status'?'library':id==='ongoing-notes-status'?'notes':'review';
+  const source=id==='library-status'?'library':id==='notes-status'?'notes':'review';
   if(!msg)return NoticeCoordinator.resolveEvent(source,'status-'+id);
   return NoticeCoordinator.emit({source,id:'status-'+id,surfaceId:id,surface:'inline',foreground:false,cue:'none',severity:ok?'info':'error',lifecycle:lifecycle||(ok?'succeeded':'failed'),message:clampText(msg,APP_LIMITS.maxStatusMessageChars)});
 }
@@ -4153,15 +4154,16 @@ const IndexedDb=PersistenceModule.createIndexedDb(Object.freeze({
     stores:Object.freeze({
       dailyRecords:DB_DAILY_RECORD_STORE,
       dailySummaries:DB_DAILY_SUMMARY_STORE,
-      areaNotes:DB_AREA_NOTES_STORE,
+      notes:DB_NOTES_STORE,
       activeSessions:DB_ACTIVE_SESSION_STORE,
       appMeta:DB_APP_META_STORE,
       assets:DB_ASSET_STORE
     }),
-    legacyBaselineVersion:OBSOLETE_DB.baselineVersion,
+    bridgeVersion:OBSOLETE_DB.bridgeVersion,
     legacyStores:Object.freeze({syncQueue:DB_LEGACY_SYNC_QUEUE_STORE,tombstones:DB_LEGACY_TOMBSTONE_STORE,reflectionDrafts:DB_RETIRED_REFLECTION_DRAFT_STORE})
   }),
   upgrade:Object.freeze({
+    renameStores:context=>CompatibilityModule.renameIndexedDbStores(Object.freeze({...context,renamedStores:Object.freeze(Object.fromEntries(Object.entries(OBSOLETE_DB.renamedStores).map(([id,from])=>[DB_STORES[id],from])))})),
     apply:context=>CompatibilityModule.applyIndexedDbUpgrade(Object.freeze({...context,dailyRecordMigrationKey:APP_META_KEYS.dailyRecordMigration}))
   }),
   hooks:Object.freeze({
@@ -4171,7 +4173,7 @@ const IndexedDb=PersistenceModule.createIndexedDb(Object.freeze({
     onReset:event=>{void handleBrowserStorageReset(event).catch(error=>AppDiagnostics.capture('storage-reset.handle',error,'error'));}
   })
 }));
-const ReconciliationBaselineCodec=ReconciliationBaselineModule.createCodec(Object.freeze({limits:APP_LIMITS,isNoteKey:DailyRecordCodec.areaNoteKeys.isKey}));
+const ReconciliationBaselineCodec=ReconciliationBaselineModule.createCodec(Object.freeze({limits:APP_LIMITS,isNoteKey:DailyRecordCodec.noteKeys.isKey}));
 const AppMetaGateway=AppMetaModule.create(Object.freeze({
   indexedDb:Object.freeze({transaction:IndexedDb.transaction,strictTransaction:IndexedDb.strictTransaction,get:IndexedDb.get,getAll:IndexedDb.getAll}),
   store:DB_APP_META_STORE,
@@ -4181,14 +4183,14 @@ const RepositoryAppMetaValidators=RepositoryModule.createAppMetaValidators(Objec
   limits:APP_LIMITS,
   dataContract:DATA_CONTRACT,
   personalDataCodec:PersonalDataCodec,
-  helpers:Object.freeze({isValidIsoDate,isNoteId:DailyRecordCodec.areaNoteKeys.isId,isNoteKey:DailyRecordCodec.areaNoteKeys.isKey,normalizeTimestamp,sameDataValue})
+  helpers:Object.freeze({isValidIsoDate,isNoteId:DailyRecordCodec.noteKeys.isId,isNoteKey:DailyRecordCodec.noteKeys.isKey,normalizeTimestamp,sameDataValue})
 }));
 AppMetaGateway.registerValidators('repositories',RepositoryAppMetaValidators);
 AppMetaGateway.registerValidators('journals',RepositoryJournalModule.createAppMetaValidators(Object.freeze({limits:APP_LIMITS})));
 AppMetaGateway.registerValidators('host',HostMetadataModule.createAppMetaValidators(Object.freeze({
   keys:Object.freeze({
     verifiedRecoveryBackups:APP_META_KEYS.verifiedRecoveryBackups,backupProtection:APP_META_KEYS.backupProtection,
-    attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,automaticDeviceBackup:APP_META_KEYS.automaticDeviceBackup,
+    attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,deviceFolder:APP_META_KEYS.deviceFolder,
     repositoryIntegrityScrub:APP_META_KEYS.repositoryIntegrityScrub,managedProviderBackupPending:APP_META_KEYS.managedProviderBackupPending,repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,
     reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix
   }),
@@ -4204,7 +4206,7 @@ const CompatibilityAppMeta=AppMetaGateway.bind('compatibility');
 const JournalAppMeta=AppMetaGateway.bind('repository-journals');
 const HostAppMeta=AppMetaGateway.bind('host');
 const ExportsAppMeta=AppMetaGateway.bind('exports');
-const DeviceBackupAppMeta=AppMetaGateway.bind('device-backup');
+const DeviceFolderAppMeta=AppMetaGateway.bind('device-backup');
 const BackupAppMeta=AppMetaGateway.bind('backup');
 const ReconciliationBaselineStore=ReconciliationBaselineModule.createStore(Object.freeze({
   codec:ReconciliationBaselineCodec,meta:HostAppMeta,
@@ -4475,7 +4477,7 @@ function canonicalAttachmentReferenceDescriptor(event){
   const type=String(event&&event.entityType||''),operation=event&&event.operation==='delete'?'delete':'upsert',value=event&&event.value;
   if(type==='dataset')return Object.freeze({key:'dataset:*',force:true,deleted:operation==='delete',text:''});
   let identity='',text='';
-  if(type==='areaNote'){identity=String(value&&value.key||'');text=String(value&&value.text||'');}
+  if(type==='note'){identity=String(value&&value.key||'');text=String(value&&value.text||'');}
   else if(type==='dailyRecord'){identity=String(value&&value.date||'');text=String(value&&value.reflection||'');}
   else if(type==='activeSession'){identity=String(value&&value.id||ACTIVE_SESSION_ID);text=String(value&&value.snapshot&&value.snapshot.review&&value.snapshot.review.reflection||'');}
   else return null;
@@ -4542,14 +4544,14 @@ const AppData=RepositoryModule.createAppData(Object.freeze({
   personalDataCodec:PersonalDataCodec,
   keyedRecord:KeyedRecord,
   journals:RepositoryJournals,
-  areaNotesRepositoryModule:AreaNotesRepositoryModule,
+  notesRepositoryModule:NotesRepositoryModule,
   saveLaneModule:SaveLaneModule,
   limits:APP_LIMITS,
   dataContract:DATA_CONTRACT,
   stores:Object.freeze({
     dailyRecords:DB_DAILY_RECORD_STORE,
     dailySummaries:DB_DAILY_SUMMARY_STORE,
-    areaNotes:DB_AREA_NOTES_STORE,
+    notes:DB_NOTES_STORE,
     activeSessions:DB_ACTIVE_SESSION_STORE,
     appMeta:DB_APP_META_STORE
   }),
@@ -4557,11 +4559,11 @@ const AppData=RepositoryModule.createAppData(Object.freeze({
   keys:Object.freeze({
     recovery:STORAGE_KEYS.recovery,
     fallbackDailyRecords:STORAGE_KEYS.fallbackDailyRecords,
-    areaNoteRescue:STORAGE_KEYS.areaNoteRescue,
+    noteRescue:STORAGE_KEYS.noteRescue,
     deletionRecovery:STORAGE_KEYS.deletionRecovery,
     legacySyncEmergency:OBSOLETE_STORAGE_KEYS.syncEmergency
   }),
-  legacyKeys:Object.freeze({areaNotesPending:OBSOLETE_STORAGE_KEYS.areaNotesPending,areaNoteRecoveryPrefix:OBSOLETE_APP_META_KEYS.areaNoteRecoveryPrefix}),
+  legacyKeys:Object.freeze({notesPending:OBSOLETE_STORAGE_KEYS.notesPending,noteRecoveryPrefix:OBSOLETE_APP_META_KEYS.noteRecoveryPrefix}),
   metaKeys:Object.freeze({
     dailyRecordMigration:APP_META_KEYS.dailyRecordMigration,
     planDraft:APP_META_KEYS.planDraft,
@@ -4572,7 +4574,7 @@ const AppData=RepositoryModule.createAppData(Object.freeze({
     insightsDatasetRevision:APP_META_KEYS.insightsDatasetRevision,
     dataMaintenance:APP_META_KEYS.dataMaintenance,
     savedDayDeletionPrefix:APP_META_KEYS.savedDayDeletionPrefix,
-    areaNoteDeletionPrefix:APP_META_KEYS.areaNoteDeletionPrefix,
+    noteDeletionPrefix:APP_META_KEYS.noteDeletionPrefix,
     attachmentDeletionPrefix:APP_META_KEYS.attachmentDeletionPrefix,
   }),
   obsoleteMetaKeys:Object.freeze(Object.values(OBSOLETE_APP_META_KEYS)),
@@ -4591,9 +4593,9 @@ const AppData=RepositoryModule.createAppData(Object.freeze({
     capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
     onStorageOk:markStorageHealthOk,
     onStorageError:markStorageHealthError,
-    onNotesChanged:refreshAreaNoteConsumers,
+    onNotesChanged:refreshNoteConsumers,
     onNoteSyncState:setNoteSyncStateForKey,
-    onNoteConflict:reportAreaNoteConflict,
+    onNoteConflict:reportNoteConflict,
     onDailyRecordsChanged:handleRepositoryDailyRecordsChanged,
     onDatasetRevisionChanged:handleRepositoryDatasetRevisionChanged,
     onCanonicalCommit:handleCanonicalCommit
@@ -4663,7 +4665,7 @@ async function suspendTodaySession(){
   const ok=await Interactions.confirm({
     title:'Suspend today’s session?',
     message:'The live timer will stop and today’s session will no longer restore automatically.',
-    details:['The live draft is kept; Restore Session can continue it without re-applying the schedule.','You can also open Review and save the suspended progress to Library. Saved Library Study Days and ongoing Area notes are unchanged.'],
+    details:['The live draft is kept; Restore Session can continue it without re-applying the schedule.','You can also open Review and save the suspended progress to Library. Saved Library Study Days and notes are unchanged.'],
     confirmLabel:'Suspend session',cancelLabel:'Keep session active'
   });
   if(!ok)return;
@@ -4762,7 +4764,7 @@ async function resetTodaySession(){
   const ok=await Interactions.confirm({
     title:'Reset today’s active session?',danger:true,
     message:'This clears today’s loaded Plan progress and live recovery state.',
-    details:['Timer audit, skips, completion marks and the live draft will be removed.','Saved Library Study Days and ongoing Area notes are unchanged.'],
+    details:['Timer audit, skips, completion marks and the live draft will be removed.','Saved Library Study Days and notes are unchanged.'],
     confirmLabel:'Reset today',cancelLabel:'Keep current session'
   });
   if(!ok)return;
@@ -4788,25 +4790,25 @@ async function resetTodaySession(){
 let latestCarryForward='';
 /* AREA NOTES REPOSITORY */
 
-function areaNoteStoredValueForKey(key){
+function noteStoredValueForKey(key){
   const entry=AppData.notes.get(key);
   return entry&&entry.text?String(entry.text):'';
 }
-function areaNoteTextForKey(key){return plainTextContent(areaNoteStoredValueForKey(key));}
-function areaNoteEditorContent(binding,value){
+function noteTextForKey(key){return plainTextContent(noteStoredValueForKey(key));}
+function noteEditorContent(binding,value){
   const current=String(value??'');
   if(current.startsWith(RichTextApi.storagePrefix))return current;
-  const stored=areaNoteStoredValueForKey(binding&&binding.areaKey);
+  const stored=noteStoredValueForKey(binding&&binding.areaKey);
   return current===plainTextContent(stored)?stored:current;
 }
-function applicableAreaNotesForTask(t){
-  const exactKey=ongoingNoteKeyForTask(t),exactLabel=ongoingNoteLabelForTask(t);
+function applicableNotesForTask(t){
+  const exactKey=noteKeyForTask(t),exactLabel=noteLabelForTask(t);
   if(!hasOngoingTaskNotes(t))return {exactKey,exactLabel,exactText:'',inherited:[]};
   const exact=AppData.notes.get(exactKey,exactLabel);
-  const inherited=isSupportBlock(t)?[]:inheritedAreaNoteEntries(exactKey);
+  const inherited=isSupportBlock(t)?[]:inheritedNoteEntries(exactKey);
   return {exactKey,exactLabel:exact?exact.label:exactLabel,exactText:exact?plainTextContent(exact.text||''):'',inherited};
 }
-function inheritedAreaNoteEntries(areaKey){
+function inheritedNoteEntries(areaKey){
   return areaParentKeys(normalizeAreaName(areaKey))
     .map(key=>AppData.notes.get(key))
     .filter(entry=>entry&&String(entry.text||'').trim())
@@ -4834,7 +4836,7 @@ function orderOngoingAreaEntries(source){
     existing.hasNote=existing.hasNote||!!raw.hasNote||!!existing.text.trim();
     existing.current=existing.current||!!raw.current;
     existing.ephemeral=existing.ephemeral||!!raw.ephemeral;
-    existing.support=existing.support||!!raw.support||key===SUPPORT_ONGOING_NOTE.key;
+    existing.support=existing.support||!!raw.support||key===SUPPORT_NOTE.key;
     if(raw.updatedAt)existing.updatedAt=String(raw.updatedAt);
     entries.set(key,existing);
   });
@@ -4865,52 +4867,52 @@ function orderOngoingAreaEntries(source){
     ...entry,depth:Math.max(0,entry.key.split(' > ').length-1)
   }));
 }
-let ongoingAreaNoteCatalogueCache=null;
-function ongoingAreaTaskHierarchySignature(){return TASKS.filter(hasOngoingTaskNotes).map(task=>`${ongoingNoteKeyForTask(task)}\u0000${ongoingNoteLabelForTask(task)}`).join('\u0001');}
-function ongoingAreaNoteSearchDocuments(){return AppData.notes.searchSnapshot().documents;}
-function ongoingAreaNoteCatalogue(){
+let noteCatalogueCache=null;
+function ongoingAreaTaskHierarchySignature(){return TASKS.filter(hasOngoingTaskNotes).map(task=>`${noteKeyForTask(task)}\u0000${noteLabelForTask(task)}`).join('\u0001');}
+function noteSearchDocuments(){return AppData.notes.searchSnapshot().documents;}
+function noteCatalogue(){
   const snapshot=AppData.notes.metadataSnapshot(),hierarchy=ongoingAreaTaskHierarchySignature();
-  if(ongoingAreaNoteCatalogueCache&&ongoingAreaNoteCatalogueCache.revision===snapshot.revision&&ongoingAreaNoteCatalogueCache.hierarchy===hierarchy)return ongoingAreaNoteCatalogueCache.entries;
+  if(noteCatalogueCache&&noteCatalogueCache.revision===snapshot.revision&&noteCatalogueCache.hierarchy===hierarchy)return noteCatalogueCache.entries;
   const entries=new Map();
   // Notes are listed by title key; a stored note also carries its permanent id.
   const ensure=(key,label,{hasNote=false,current=false,updatedAt='',id=''}={})=>{
     const safeKey=normalizeAreaName(key);
     if(!safeKey)return;
-    const support=safeKey===SUPPORT_ONGOING_NOTE.key;
-    const existing=entries.get(safeKey)||{key:safeKey,id:'',label:support?SUPPORT_ONGOING_NOTE.label:displayAreaName(label||safeKey),hasNote:false,current:false,updatedAt:'',support};
+    const support=safeKey===SUPPORT_NOTE.key;
+    const existing=entries.get(safeKey)||{key:safeKey,id:'',label:support?SUPPORT_NOTE.label:displayAreaName(label||safeKey),hasNote:false,current:false,updatedAt:'',support};
     if(id)existing.id=String(id);
-    if(label)existing.label=support?SUPPORT_ONGOING_NOTE.label:displayAreaName(label);
+    if(label)existing.label=support?SUPPORT_NOTE.label:displayAreaName(label);
     existing.hasNote=existing.hasNote||!!hasNote;
     existing.current=existing.current||!!current;
     if(updatedAt)existing.updatedAt=String(updatedAt);
     entries.set(safeKey,existing);
   };
   snapshot.records.forEach(entry=>ensure(entry.key,entry.label,{hasNote:entry.hasNote,updatedAt:entry.updatedAt,id:entry.id}));
-  TASKS.filter(hasOngoingTaskNotes).forEach(task=>ensure(ongoingNoteKeyForTask(task),ongoingNoteLabelForTask(task),{current:true}));
+  TASKS.filter(hasOngoingTaskNotes).forEach(task=>ensure(noteKeyForTask(task),noteLabelForTask(task),{current:true}));
   [...entries.values()].forEach(entry=>{
     const labelParts=displayAreaName(entry.label).split(' > ');
     areaParentKeys(entry.key).forEach((key,index)=>ensure(key,labelParts.slice(0,index+1).join(' > ')));
   });
   const ordered=Object.freeze(orderOngoingAreaEntries([...entries.values()]));
-  ongoingAreaNoteCatalogueCache=Object.freeze({revision:snapshot.revision,hierarchy,entries:ordered});
+  noteCatalogueCache=Object.freeze({revision:snapshot.revision,hierarchy,entries:ordered});
   return ordered;
 }
-let refreshLibraryOngoingNotes=()=>false;
-let updateOngoingNoteSearchDocument=()=>false;
-function updateAreaNoteSearchText(key,plain){const entry=key?AppData.notes.get(key):null;if(entry)updateOngoingNoteSearchDocument({key,revision:entry.updatedAt||'',plain:String(plain||'')});}
-function refreshAreaNoteConsumers(){
+let refreshLibraryNotes=()=>false;
+let updateNoteSearchDocument=()=>false;
+function updateNoteSearchText(key,plain){const entry=key?AppData.notes.get(key):null;if(entry)updateNoteSearchDocument({key,revision:entry.updatedAt||'',plain:String(plain||'')});}
+function refreshNoteConsumers(){
   richAssetReferenceRevision++;
   if(!SessionLifecycle.canWrite())return false;
   try{
     refreshAllSubjectNoteFieldsFromRepository();
     refreshPnote();
-    refreshLibraryOngoingNotes();
+    refreshLibraryNotes();
     requestRender('schedule');
     if(document.getElementById('pane-review')?.classList.contains('on'))ReviewView.refresh();
     if(document.getElementById('recovery-carry-text'))renderRecoveryReview();
-  }catch(e){AppDiagnostics.capture('area-notes.consumer-render',e);}
+  }catch(e){AppDiagnostics.capture('notes.consumer-render',e);}
 }
-function reportAreaNoteConflict(info={}){
+function reportNoteConflict(info={}){
   const key=normalizeAreaName(info.key),label=displayAreaName(info.label||key||'this area');
   if(!key)return false;
   const copyLabel=String(info.copyLabel||'').trim();
@@ -4920,8 +4922,8 @@ function reportAreaNoteConflict(info={}){
   setNoteSyncStateForKey(key,'conflict');
   setPlanStatus(message,false);
   setStatus('save-status',message,false);
-  setStatus('ongoing-notes-status',message,false);
-  publishSafetyNotice(message,'Note editing conflict','area-note-conflict');
+  setStatus('notes-status',message,false);
+  publishSafetyNotice(message,'Note editing conflict','note-conflict');
   return true;
 }
 
@@ -5019,15 +5021,15 @@ function scheduleDataMaintenance(delay=1200,trigger='scheduled'){
 
 /* ONGOING SUBJECT NOTES */
 function inheritedSubjectNotesHtml(t){
-  const inherited=applicableAreaNotesForTask(t).inherited;
+  const inherited=applicableNotesForTask(t).inherited;
   if(!inherited.length)return '';
   return inherited.map(entry=>`From ${entry.label}:\n${entry.text}`).join('\n\n');
 }
 // The Library shows each parent note as a closed "From GS2" section, drawn
 // when opened; other views show them all open.
-function renderInheritedAreaNotes(container,areaKey,compact=false,{collapsible=false}={}){
+function renderInheritedNotes(container,areaKey,compact=false,{collapsible=false}={}){
   if(!container)return;
-  const inherited=inheritedAreaNoteEntries(areaKey);
+  const inherited=inheritedNoteEntries(areaKey);
   container.className='subject-note-context'+(compact?' compact':'')+(collapsible?' collapsible':'')+(inherited.length?' on':'');
   container.replaceChildren();
   if(!inherited.length)return;
@@ -5054,13 +5056,13 @@ function renderInheritedAreaNotes(container,areaKey,compact=false,{collapsible=f
   });
 }
 function renderInheritedSubjectNotes(container,t,compact=false){
-  renderInheritedAreaNotes(container,hasOngoingTaskNotes(t)&&!isSupportBlock(t)?ongoingNoteKeyForTask(t):'',compact);
+  renderInheritedNotes(container,hasOngoingTaskNotes(t)&&!isSupportBlock(t)?noteKeyForTask(t):'',compact);
 }
-function currentOngoingNoteEntriesForWorkTasks(tasks){
+function currentNoteEntriesForWorkTasks(tasks){
   const seen=new Set();
   const entries=[];
   (tasks||[]).filter(t=>hasOngoingTaskNotes(t)).forEach(t=>{
-    const key=ongoingNoteKeyForTask(t);
+    const key=noteKeyForTask(t);
     if(!key||seen.has(key))return;
     seen.add(key);
     const entry=AppData.notes.get(key);
@@ -5075,12 +5077,12 @@ function taskNoteEditorIdentity(idx){
   if(validIdx===null)return null;
   const task=TASKS[validIdx];
   if(!hasOngoingTaskNotes(task))return null;
-  const areaKey=ongoingNoteKeyForTask(task),taskId=TaskIdentity.idAt(validIdx),scheduleRevision=taskNoteScheduleRevision;
+  const areaKey=noteKeyForTask(task),taskId=TaskIdentity.idAt(validIdx),scheduleRevision=taskNoteScheduleRevision;
   if(!areaKey||!taskId||!Number.isInteger(scheduleRevision)||scheduleRevision<1)return null;
   return Object.freeze({
     idx:validIdx,
     areaKey,
-    areaLabel:ongoingNoteLabelForTask(task),
+    areaLabel:noteLabelForTask(task),
     taskId,
     scheduleRevision,
     noteRevision:String(AppData.notes.get(areaKey)?.updatedAt||'')
@@ -5116,7 +5118,7 @@ function bindTaskNoteEditor(field,idx,source='field'){
   queueMicrotask(()=>richTextSyncField(field));
   return identity;
 }
-function bindAreaNoteEditor(field,areaKey,areaLabel,source='library'){
+function bindNoteEditor(field,areaKey,areaLabel,source='library'){
   if(!field)return null;
   const safeKey=normalizeAreaName(areaKey);
   if(!safeKey){clearTaskNoteEditorBinding(field);return null;}
@@ -5167,10 +5169,10 @@ function resolveTaskNoteEditorBinding(field,{requireVisible=true}={}){
   const idx=TaskIdentity.indexForId(taskId);
   if(idx===null)return null;
   const task=TASKS[idx];
-  if(!hasOngoingTaskNotes(task)||ongoingNoteKeyForTask(task)!==areaKey)return null;
+  if(!hasOngoingTaskNotes(task)||noteKeyForTask(task)!==areaKey)return null;
   field.dataset.noteIdx=String(idx);
   field.dataset.noteBindingState='current';
-  return Object.freeze({idx,areaKey,areaLabel:ongoingNoteLabelForTask(task),taskId,scheduleRevision,lifecycleRevision,noteRevision:String(field.dataset.noteRevision||'')});
+  return Object.freeze({idx,areaKey,areaLabel:noteLabelForTask(task),taskId,scheduleRevision,lifecycleRevision,noteRevision:String(field.dataset.noteRevision||'')});
 }
 function refreshSubjectNoteFieldsForKey(key,originField=null,derived=null,options={}){
   const safeKey=normalizeAreaName(key);
@@ -5190,7 +5192,7 @@ function refreshSubjectNoteFieldsForKey(key,originField=null,derived=null,option
   });
   document.querySelectorAll('.review-block-note[data-area-key]').forEach(box=>{
     if(normalizeAreaName(box.dataset.areaKey)!==safeKey)return;
-    if(!deferRichMirrors)renderRichTextContent(box,stored,box.dataset.noteSupport==='true'?'No current shared support note.':'No current ongoing subject note for this area.',`Note for ${entry?.label||displayAreaName(safeKey)}`);
+    if(!deferRichMirrors)renderRichTextContent(box,stored,box.dataset.noteSupport==='true'?'No current shared support note.':'No current note for this area.',`Note for ${entry?.label||displayAreaName(safeKey)}`);
     box.classList.toggle('review-block-empty',!plain().trim());
   });
 }
@@ -5216,12 +5218,12 @@ function setNoteSyncStateForKey(key,state){
   });
   const pn=document.getElementById('pn-sync');
   // Execute's indicator follows the note its editor shows, which may be a linked note.
-  const curKey=(TASKS[TimerState.currentIndex]&&isTrackableBlock(TASKS[TimerState.currentIndex]))?(document.getElementById('pn-extra')?.dataset.areaKey||ongoingNoteKeyForTask(TASKS[TimerState.currentIndex])):'';
+  const curKey=(TASKS[TimerState.currentIndex]&&isTrackableBlock(TASKS[TimerState.currentIndex]))?(document.getElementById('pn-extra')?.dataset.areaKey||noteKeyForTask(TASKS[TimerState.currentIndex])):'';
   if(pn&&normalizeAreaName(curKey)===safeKey)apply(pn);
-  if(state==='synced')publishSafetyNotice('','Note saved','area-note-conflict');
+  if(state==='synced')publishSafetyNotice('','Note saved','note-conflict');
 }
 function updateNoteSyncIndicators(idx,key){
-  const safeKey=key?normalizeAreaName(key):(TASKS[idx]?ongoingNoteKeyForTask(TASKS[idx]):'');
+  const safeKey=key?normalizeAreaName(key):(TASKS[idx]?noteKeyForTask(TASKS[idx]):'');
   setNoteSyncStateForKey(safeKey,'synced');
 }
 /* PLAN DRAFTS, SAVED DEFAULTS, AND QUOTE DRAFT */
@@ -6614,7 +6616,7 @@ function recoveryCarryForwardItems(forcedIndexes=null){
     let remainingUnits='—';
     if(total&& !isNaN(done))remainingUnits=Math.max(0,total-done);
     else if(total)remainingUnits=total;
-    const subjectNotes=applicableAreaNotesForTask(t);
+    const subjectNotes=applicableNotesForTask(t);
     const note=[...subjectNotes.inherited.map(x=>x.text),subjectNotes.exactText].filter(Boolean).join('\n').trim();
     items.push({idx:i,t,pct,suggested,remainingUnits,note,reason:forced?'study-day boundary':skipped?'skipped':partial?'partial':'missed'});
   });
@@ -6694,7 +6696,7 @@ function commitTaskNoteEditor(field,value,event=null){
   if(!SessionLifecycle.canWrite())return false;
   const binding=resolveTaskNoteEditorBinding(field,{requireVisible:true});
   if(!binding){if(field&&field.dataset&&field.dataset.richExternalConflict!=='1')field.dataset.noteBindingState='stale';return false;}
-  const trusted=validatedRichInputMeta(event,field),candidate=trusted?trusted.canonical:areaNoteEditorContent(binding,value);
+  const trusted=validatedRichInputMeta(event,field),candidate=trusted?trusted.canonical:noteEditorContent(binding,value);
   const result=trusted
     ?AppData.notes.updateValidatedRich(binding.areaKey,binding.areaLabel,candidate,binding.noteRevision)
     :AppData.notes.update(binding.areaKey,binding.areaLabel,candidate,binding.noteRevision);
@@ -6703,15 +6705,15 @@ function commitTaskNoteEditor(field,value,event=null){
     if(field.dataset.richExternalConflict==='1'){field.dataset.noteBindingState='conflict';setNoteSyncStateForKey(binding.areaKey,'conflict');}
     return false;
   }
-  const canonical=areaNoteStoredValueForKey(binding.areaKey),derived=trusted&&trusted.canonical===canonical?trusted:null;
+  const canonical=noteStoredValueForKey(binding.areaKey),derived=trusted&&trusted.canonical===canonical?trusted:null;
   if(field.value!==canonical)field.value=canonical;
-  if(!String(canonical||'').startsWith(RichTextApi.storagePrefix))updateAreaNoteSearchText(binding.areaKey,canonical);
+  if(!String(canonical||'').startsWith(RichTextApi.storagePrefix))updateNoteSearchText(binding.areaKey,canonical);
   refreshSubjectNoteFieldsForKey(binding.areaKey,field,derived,{deferRichMirrors:!!trusted});
   if(result.status==='limit'||result.status==='content-limit'){
     const message=result.status==='content-limit'
       ?`Notes are limited to ${APP_LIMITS.maxRichTextWords.toLocaleString()} rich-text words per note.`
-      :`Notes are limited to ${APP_LIMITS.maxOngoingNotes.toLocaleString()} saved notes.`;
-    setStatus('ongoing-notes-status',message,false);setStatus('save-status',message,false);setPlanStatus(message,false);return false;
+      :`Notes are limited to ${APP_LIMITS.maxNotes.toLocaleString()} saved notes.`;
+    setStatus('notes-status',message,false);setStatus('save-status',message,false);setPlanStatus(message,false);return false;
   }
   if(result.status==='rejected')return false;
   if(result.status==='changed')saveLiveDraft();
@@ -6823,7 +6825,7 @@ function richTextDocumentFor(field,options={}){
   if(field.matches('.task-note-field')){
     const binding=editable?resolveTaskNoteEditorBinding(field,{requireVisible}):(()=>{const areaKey=normalizeAreaName(field.dataset.areaKey);return areaKey?Object.freeze({areaKey,areaLabel:displayAreaName(field.dataset.areaLabel||areaKey)}):null;})();
     if(!binding)return null;
-    return Object.freeze({documentId:`area:${binding.areaKey}`,label:`Note for ${binding.areaLabel}`,initialValue:areaNoteStoredValueForKey(binding.areaKey),maxWords:APP_LIMITS.maxRichTextWords,surface:field.id==='pn-extra'?'execute-note':'ongoing-note'});
+    return Object.freeze({documentId:`area:${binding.areaKey}`,label:`Note for ${binding.areaLabel}`,initialValue:noteStoredValueForKey(binding.areaKey),maxWords:APP_LIMITS.maxRichTextWords,surface:field.id==='pn-extra'?'execute-note':'note'});
   }
   return null;
 }
@@ -6838,7 +6840,7 @@ const NoteLinks=NoteLinksModule.createController(Object.freeze({ports:Object.fre
 // the Library everywhere else.
 async function openLinkedNote(id,field=null){
   if(!AppData.notes.get(id))return false;
-  if(field&&field.id==='pn-extra'&&isLiveTrackableTimer()){const task=TASKS[TimerState.currentIndex];return openExecuteNote(id,TaskIdentity.idAt(TimerState.currentIndex),hasOngoingTaskNotes(task)?AppData.notes.get(ongoingNoteKeyForTask(task)):null);}
+  if(field&&field.id==='pn-extra'&&isLiveTrackableTimer()){const task=TASKS[TimerState.currentIndex];return openExecuteNote(id,TaskIdentity.idAt(TimerState.currentIndex),hasOngoingTaskNotes(task)?AppData.notes.get(noteKeyForTask(task)):null);}
   if(!await goTab('library',{source:'note-link'}))return false;
   return LibraryView.revealNoteReference(id);
 }
@@ -7148,7 +7150,7 @@ const RichTextRuntime=(()=>{
         field,label:current.label,initialValue:initialCanonical,maxWords:current.maxWords,maxBytes:APP_LIMITS.maxRichTextBytes,assets:RichTextAssets,surface:current.surface,notes:richTextNotes(field),
         onAssetBusy:busy=>{imagePreparationCount+=busy?1:-1;if(busy)pwaWorkRevision++;else schedulePwaUpdateEvaluation(250);},
         createImageWorker:()=>new Worker(trustedAssetURL('@@SD_IMAGE_WORKER_FILENAME@@'),{name:'study-director-image'}),workspaceOverlay:RichTextWorkspaceOverlay,attachments:RichTextAttachmentPort,
-        focusOnMount:options.focus===true,onDerivedText:field.matches('.task-note-field')?(_canonical,plain)=>updateAreaNoteSearchText(normalizeAreaName(field.dataset.areaKey),plain):undefined
+        focusOnMount:options.focus===true,onDerivedText:field.matches('.task-note-field')?(_canonical,plain)=>updateNoteSearchText(normalizeAreaName(field.dataset.areaKey),plain):undefined
       });
       if(pending.get(field)!==request||!field.isConnected){await editorMount.destroy();releaseAssets();syncField(field);return false;}
       pending.delete(field);mounted.set(field,{field,documentId:current.documentId,mounted:editorMount,releaseAssets,revision:fieldRichRevision(field),baselineCanonical:initialCanonical,localCanonical:initialCanonical});lastActiveField=field;
@@ -7326,7 +7328,7 @@ const PlanRuntime=PlanModule.createController(Object.freeze({ports:Object.freeze
   domain:Object.freeze({
     clampText,fmtDur,fmtS,hasOngoingTaskNotes,isFixedBlock,isSupportBlock,isTrackableBlock,isWorkBlock,
     makeScheduleRow,normalizeScheduleKind,normalizeScheduleTarget,positiveMinutes,scheduleFingerprintForRows,
-    scheduleToken,scheduleWarningsMessage,taskAreaKey:ongoingNoteKeyForTask,taskAreaValue,taskMeasureValue,taskTargetValue,areaNoteTextForKey
+    scheduleToken,scheduleWarningsMessage,taskAreaKey:noteKeyForTask,taskAreaValue,taskMeasureValue,taskTargetValue,noteTextForKey
   }),
   parser:Object.freeze({isCanonicalScheduleText,parseScheduleDraftText,scheduleTextFromRows}),
   clock:Object.freeze({clockHM,clockMinuteToStudyMinute,getMinuteOfDay,isValidHHMM,normalizeHHMM,studyMinuteToHHMM,t2m,timeLabelFromIso}),
@@ -7387,19 +7389,19 @@ function refreshPnote(options={}){
     const pn=document.getElementById('pn-extra');
     if(pn){const shell=pn.closest('.execute-note-editor-shell'),active=document.activeElement;if(shell&&active instanceof HTMLElement&&shell.contains(active))active.blur();clearTaskNoteEditorBinding(pn);setElementValue(pn,'');setElementDisabled(pn,true);pn.hidden=false;setElementAttribute(pn,'placeholder','');setElementAttribute(pn,'aria-label','Note unavailable: no work or support block is active');}
     executeNoteView=null;document.getElementById('pn-links')?.replaceChildren();
-    renderInheritedAreaNotes(document.getElementById('pn-inherited'),'');
+    renderInheritedNotes(document.getElementById('pn-inherited'),'');
     const ps=document.getElementById('pn-sync');if(ps){setElementText(ps,'—');ps.removeAttribute('title');ps.setAttribute('aria-label','No active Area note');ps.classList.add('idle');ps.classList.remove('saving','err');NoteSyncPopover.refresh(ps);}
     const empty=document.getElementById('pn-empty');if(empty)empty.hidden=false;
     return false;
   }
-  const measure=taskMeasureValue(t,'units'),hasNotes=hasOngoingTaskNotes(t),support=isSupportBlock(t),areaKey=hasNotes?ongoingNoteKeyForTask(t):'';
+  const measure=taskMeasureValue(t,'units'),hasNotes=hasOngoingTaskNotes(t),support=isSupportBlock(t),areaKey=hasNotes?noteKeyForTask(t):'';
   const n=TaskSessionState.getField(TimerState.currentIndex,'notes')||{};
   TaskSessionState.setField(TimerState.currentIndex,'notes',n);
   const done=n.done!==undefined?n.done:'',total=n.total!==undefined?n.total:(taskTargetValue(t)||'');
   // A linked note opened from the bar stays on screen until this block ends.
   const taskId=TaskIdentity.idAt(TimerState.currentIndex),viewed=hasNotes&&executeNoteView&&executeNoteView.taskId===taskId?AppData.notes.get(executeNoteView.id):null;
   if(!viewed)executeNoteView=null;
-  const noteKey=viewed?viewed.key:areaKey,noteText=hasNotes?areaNoteTextForKey(noteKey):'',inheritedText=inheritedSubjectNotesHtml(t);
+  const noteKey=viewed?viewed.key:areaKey,noteText=hasNotes?noteTextForKey(noteKey):'',inheritedText=inheritedSubjectNotesHtml(t);
   const key=[taskNoteScheduleRevision,taskId,TimerState.currentIndex,measure,done,total,areaKey,noteKey,noteText,inheritedText].join('|');
   if(!options.force&&key===executeProgressPanelRenderKey){document.querySelector('#pn-links .note-links')?.refresh?.();return false;}
   executeProgressPanelRenderKey=key;
@@ -7412,8 +7414,8 @@ function refreshPnote(options={}){
   const areaShare=document.getElementById('pn-area-share');
   setTextSafe('pn-title',support?'Support notes':'Notes');
   if(areaShare){
-    const fullShare=support?'Shared by all support activities':hasNotes?`Shared by Area: ${ongoingNoteLabelForTask(t)}`:'';
-    areaShare.textContent=viewed?`Linked · ${viewed.label}`:support?'All support activities':hasNotes?`Area · ${ongoingNoteLabelForTask(t)}`:'';
+    const fullShare=support?'Shared by all support activities':hasNotes?`Shared by Area: ${noteLabelForTask(t)}`:'';
+    areaShare.textContent=viewed?`Linked · ${viewed.label}`:support?'All support activities':hasNotes?`Area · ${noteLabelForTask(t)}`:'';
     areaShare.title=fullShare;areaShare.setAttribute('aria-label',fullShare);
     areaShare.hidden=!hasNotes;
   }
@@ -7421,7 +7423,7 @@ function refreshPnote(options={}){
   const infoButton=document.getElementById('pn-info-btn');if(infoButton)infoButton.setAttribute('aria-label',support?'About support notes':'About notes');
   const pn=document.getElementById('pn-extra');
   if(pn){
-    if(viewed)bindAreaNoteEditor(pn,viewed.key,viewed.label,'execute');
+    if(viewed)bindNoteEditor(pn,viewed.key,viewed.label,'execute');
     else if(hasNotes)bindTaskNoteEditor(pn,TimerState.currentIndex,'execute');
     else clearTaskNoteEditorBinding(pn);
     pn.hidden=!hasNotes;
@@ -7430,7 +7432,7 @@ function refreshPnote(options={}){
     setElementValue(pn,noteText);
   }
   const links=document.getElementById('pn-links');
-  if(links){const own=AppData.notes.get(areaKey);links.replaceChildren(...(hasNotes?[NoteLinks.bar({ref:own?own.id:areaKey,label:ongoingNoteLabelForTask(t),own:true,current:viewed?viewed.id:'',onOpen:ref=>openExecuteNote(ref,taskId,own)})]:[]));}
+  if(links){const own=AppData.notes.get(areaKey);links.replaceChildren(...(hasNotes?[NoteLinks.bar({ref:own?own.id:areaKey,label:noteLabelForTask(t),own:true,current:viewed?viewed.id:'',onOpen:ref=>openExecuteNote(ref,taskId,own)})]:[]));}
   renderInheritedSubjectNotes(document.getElementById('pn-inherited'),t);
   const empty=document.getElementById('pn-empty');if(empty)empty.hidden=true;
   if(hasNotes)updateNoteSyncIndicators(TimerState.currentIndex,noteKey);
@@ -7443,8 +7445,8 @@ function openExecuteNote(ref,taskId,own){
   executeNoteView=target&&(!own||target.id!==own.id)?Object.freeze({taskId,id:target.id}):null;
   return refreshPnote({force:true});
 }
-async function openOngoingNotesLibrary(){
-  if(!await goTab('library',{source:'ongoing-notes'}))return false;
+async function openNotesLibrary(){
+  if(!await goTab('library',{source:'notes'}))return false;
   LibraryView.showSection('notes');
   const section=document.getElementById('library-notes');
   if(section)requestAnimationFrame(()=>section.scrollIntoView({block:'start',behavior:preferredScrollBehavior()}));
@@ -7694,7 +7696,7 @@ const ReviewSubsystem=ReviewModule.createReviewSubsystem(Object.freeze({
       originalStartMin,scheduleFingerprint
     }),
     evidence:Object.freeze({
-      actualRecordsSnapshot,applicableAreaNotesForTask,clearManualCompletionOverride,
+      actualRecordsSnapshot,applicableNotesForTask,clearManualCompletionOverride,
       liveTaskOutcome,progressInputState,recordCurrentActiveToTask,
       resolveTaskCompletion,storeResolvedCompletion,syncProgressInputsToState,updateTimerFocusMetrics
     }),
@@ -7709,8 +7711,8 @@ const ReviewSubsystem=ReviewModule.createReviewSubsystem(Object.freeze({
       appCanMutate,writeLiveDraftNow
     }),
     notesDefaults:Object.freeze({
-      areaNoteStoredValueForKey,bindTaskNoteEditor,closeRichTextField:field=>richTextCloseField(field),commitTaskNoteEditor,currentOngoingNoteEntriesForWorkTasks,
-      refreshPlanAfterSessionReset,renderInheritedAreaNotes,setPlanStatus,syncUnfinishedNoteDraft,unfinishedNoteDraftText
+      noteStoredValueForKey,bindTaskNoteEditor,closeRichTextField:field=>richTextCloseField(field),commitTaskNoteEditor,currentNoteEntriesForWorkTasks,
+      refreshPlanAfterSessionReset,renderInheritedNotes,setPlanStatus,syncUnfinishedNoteDraft,unfinishedNoteDraftText
     }),
     notifications:NoticeCoordinator.presentation('review',Object.freeze({label:'Open Review',run:()=>goTab('review')})),
     view:Object.freeze({markStorageHealthTimestamp,notifyUser,on,refreshLibraryAfterSave:async()=>{LibraryView.invalidate();return LibraryView.render();},refreshStorageFallbackWarning,setStatus,updateBadges}),
@@ -7835,7 +7837,7 @@ function reconcileLifecycleEditors(context){
   refreshAllSubjectNoteFieldsFromRepository();
   refreshPnote({force:true});
   hydrateReviewState({date:targetDate,snapshotReview:options.snapshotReview,source:context.kind});
-  refreshLibraryOngoingNotes();
+  refreshLibraryNotes();
   ReviewView.invalidate();
   if(document.getElementById('pane-review')?.classList.contains('on'))ReviewView.refresh({force:true});
   requestRender('schedule','badges','header','realtime','recovery');
@@ -7962,7 +7964,7 @@ async function validateAttachmentInsertionValue(value,row){
   }
   return true;
 }
-async function insertAttachmentIntoOngoingNote(key,row){
+async function insertAttachmentIntoNote(key,row){
   const destination=LibraryView.noteDestinations().find(item=>item.key===String(key||''));if(!destination)throw new Error('This note destination is no longer available.');
   const token=AppOwnership.issueWriteToken('insert attachment in note');await settleAttachmentWriters();
   // Stored notes are keyed by their id; the destination names the note by title.
@@ -8002,7 +8004,7 @@ const AttachmentLibrary=AttachmentsModule.create({
   runExclusive:(kind,operation)=>AppMutationCoordinator.runExclusive(kind,authority=>withRestoreSessionPersistenceSuppressed(()=>operation(authority))),
   quiesce:(operation,options)=>quiesceAttachmentMutation(operation,options),
   removeReferences:id=>AttachmentReferences.removeEverywhere(id),
-  insert:(key,row)=>insertAttachmentIntoOngoingNote(key,row)
+  insert:(key,row)=>insertAttachmentIntoNote(key,row)
  });
 const RichTextAttachmentPort=Object.freeze({upload:async(file,options={})=>{const row=await AttachmentLibrary.add(file,options);if(!row)throw new Error('Attachment upload did not complete.');return Object.freeze({id:row.id,name:row.name,type:row.type});}});
 invalidateAttachmentLibrary=()=>AttachmentLibrary.invalidate();
@@ -8166,7 +8168,7 @@ const LibraryClearCoordinator=LibraryClearModule.createCoordinator(Object.freeze
     if(!safety||safety.verified!==true)throw new Error(`Clear Library stopped because the protected ${location.label} safety backup could not be verified. Your Library data was not changed.`);
     return safety;
   },capture:LibraryClearState.capture,
-  deleteOngoingNotes:()=>AppData.notes.clearAll(),deleteSavedDays:()=>AppData.dailyRecords.clearAll(),removeReferences:LibraryClearState.rewriteReferences,verifyLogical:LibraryClearState.verifyLogical,
+  deleteNotes:()=>AppData.notes.clearAll(),deleteSavedDays:()=>AppData.dailyRecords.clearAll(),removeReferences:LibraryClearState.rewriteReferences,verifyLogical:LibraryClearState.verifyLogical,
   removeAttachmentMetadata:ids=>AttachmentLibrary.removeMetadata(ids),verifyFinal:LibraryClearState.verifyFinal,restore:LibraryClearState.restore,verifyRestore:LibraryClearState.verifyRestore,sweep:()=>AttachmentLibrary.sweepOrphans(),
   failClosed:message=>AppMutationCoordinator.failClosed(message,'library-clear'),clearFault:()=>AppMutationCoordinator.clearFault(),
   journal:Object.freeze({prepare:value=>AppData.libraryClearJournal.prepare(value),read:()=>AppData.libraryClearJournal.read(),mark:(id,phase)=>AppData.libraryClearJournal.mark(id,phase),clear:id=>AppData.libraryClearJournal.clear(id)})
@@ -8195,7 +8197,7 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
   environment:Object.freeze({
     cancelAnimationFrame:frame=>cancelAnimationFrame(frame),
     createOption:(text,value)=>new Option(text,value),
-    createSearchWorker:()=>new Worker(trustedAssetURL(ONGOING_NOTES_SEARCH_WORKER_URL),{name:'study-director-note-search'}),
+    createSearchWorker:()=>new Worker(trustedAssetURL(NOTES_SEARCH_WORKER_URL),{name:'study-director-note-search'}),
     requestAnimationFrame:callback=>requestAnimationFrame(callback)
   }),
   exporter:Object.freeze({exportKeys:keys=>NoteExporter.exportKeys(keys),cancel:NoteExporter.cancel}),
@@ -8211,11 +8213,11 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
   }),
   notes:Object.freeze({
     areaUse:title=>PlanRuntime.areaUse(title),
-    bindEditor:bindAreaNoteEditor,
+    bindEditor:bindNoteEditor,
     focusEditor:field=>{void RichTextRuntime.activate(field,{focus:true}).catch(error=>AppDiagnostics.capture('library.note-focus',error,'warn'));},
     // Recently deleted gives way at the limit, so only live notes count here.
-    canCreate:()=>AppData.notes.metadataSnapshot().records.length<APP_LIMITS.maxOngoingNotes,
-    catalogue:ongoingAreaNoteCatalogue,
+    canCreate:()=>AppData.notes.metadataSnapshot().records.length<APP_LIMITS.maxNotes,
+    catalogue:noteCatalogue,
     clearEditor:clearTaskNoteEditorBinding,
     clearFind:field=>RichTextRuntime.clearFind(field),
     commitEditor:commitTaskNoteEditor,
@@ -8233,9 +8235,9 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     renameTag:(from,to)=>renameNoteTag(from,to),
     // A merge appends what the moved note adds, as Combine does.
     rename:(key,label,options)=>AppData.notes.rename(key,label,options&&options.merge?{merge:(existing,moved)=>RichTextApi.appendIncomingAdditions(existing,moved).value}:{}),
-    renderInherited:renderInheritedAreaNotes,
+    renderInherited:renderInheritedNotes,
     restore:key=>AppData.notes.restore(key),
-    searchDocuments:ongoingAreaNoteSearchDocuments,
+    searchDocuments:noteSearchDocuments,
     size:()=>AppData.notes.size(),
     tagged:names=>NoteLinks.tagged(names),
     tags:()=>NoteLinks.tags(),
@@ -8285,8 +8287,8 @@ NavigationController=NavigationModule.createController(Object.freeze({
 if(!Object.isFrozen(NavigationController)||NavigationController.format!=='study-director.navigation-controller'||NavigationController.contractVersion!==1){
   throw new Error('Study Director navigation controller is unavailable or incompatible.');
 }
-refreshLibraryOngoingNotes=LibraryView.refreshNotes;
-updateOngoingNoteSearchDocument=LibraryView.updateSearchDocument;
+refreshLibraryNotes=LibraryView.refreshNotes;
+updateNoteSearchDocument=LibraryView.updateSearchDocument;
 /* BACKUP MODULE COMPOSITION */
 const BackupCodec=BackupCodecModule.createBackupCodec(Object.freeze({
   processing:Object.freeze({run:Exports.run,scope:Exports.scope}),
@@ -8313,7 +8315,9 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
   facadeFactory:CompatibilityModule.createFacade,
   keys:Object.freeze({
     storage:Object.freeze({theme:STORAGE_KEYS.theme,presentation:STORAGE_KEYS.presentation,fontScale:STORAGE_KEYS.fontScale,storageHealth:STORAGE_KEYS.storageHealth}),
-    renamedAppMeta:Object.freeze(Object.entries(RENAMED_APP_META_KEYS).map(([name,from])=>Object.freeze([from,APP_META_KEYS[name]]))),
+    renamedAppMeta:Object.freeze(Object.entries(RENAMED_APP_META_KEYS).flatMap(([name,from])=>[from].flat().map(old=>Object.freeze([old,APP_META_KEYS[name]])))),
+    renamedLocal:Object.freeze([Object.freeze([OBSOLETE_STORAGE_KEYS.noteRescueLegacy,STORAGE_KEYS.noteRescue])]),
+    renamedFormats:RENAMED_VALUE_FORMATS,
     obsolete:Object.freeze({
       schedule:OBSOLETE_STORAGE_KEYS.schedule,defaults:OBSOLETE_STORAGE_KEYS.defaults,quote:OBSOLETE_STORAGE_KEYS.quote,nudge:OBSOLETE_STORAGE_KEYS.nudge,
       reflectionDrafts:OBSOLETE_STORAGE_KEYS.reflectionDrafts,reflectionLegacy:OBSOLETE_STORAGE_KEYS.reflectionLegacy,
@@ -8324,11 +8328,12 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
     }),
     appMeta:Object.freeze({
       personalPreferences:APP_META_KEYS.personalPreferences,dataMaintenance:APP_META_KEYS.dataMaintenance,verifiedRecoveryBackups:APP_META_KEYS.verifiedRecoveryBackups,
-      attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,automaticDeviceBackup:APP_META_KEYS.automaticDeviceBackup,restoreJournalPayload:APP_META_KEYS.restoreJournalPayload,
+      attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,deviceFolder:APP_META_KEYS.deviceFolder,restoreJournalPayload:APP_META_KEYS.restoreJournalPayload,
       repositoryIntegrityScrub:APP_META_KEYS.repositoryIntegrityScrub,reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix,
       reconciliationBaseLegacy:OBSOLETE_APP_META_KEYS.reconciliationBaseLegacy,repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,repositoryMaintenancePendingLegacy:OBSOLETE_APP_META_KEYS.repositoryMaintenancePendingLegacy,
       libraryClearJournalState:APP_META_KEYS.libraryClearJournalState,libraryClearJournalPayloadPrefix:APP_META_KEYS.libraryClearJournalPayloadPrefix,
-      archiveClearJournalStateLegacy:OBSOLETE_APP_META_KEYS.archiveClearJournalStateLegacy,archiveClearJournalPayloadPrefixLegacy:OBSOLETE_APP_META_KEYS.archiveClearJournalPayloadPrefixLegacy
+      archiveClearJournalStateLegacy:OBSOLETE_APP_META_KEYS.archiveClearJournalStateLegacy,archiveClearJournalPayloadPrefixLegacy:OBSOLETE_APP_META_KEYS.archiveClearJournalPayloadPrefixLegacy,
+      backupPreparationUnitPrefix:APP_META_KEYS.backupPreparationUnitPrefix
     })
   }),
   local:Object.freeze({
@@ -8365,39 +8370,41 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
     releaseBackupFile:async _name=>BackupFiles.collect(),normalizeVerifiedRecovery:value=>normalizeVerifiedRecoveryState(value),normalizeAttachmentIntegrity:value=>normalizeAttachmentIntegrityState(value),
     normalizeRepositoryIntegrity:value=>normalizeRepositoryIntegrityState(value),normalizeRepositoryIntegrityTarget:value=>normalizeRepositoryIntegrityTarget(value),
     updateStorageHealth:patch=>{writeStorageHealth(patch);return true;},
-    // Moves every renamed record in one transaction; an old and a new copy that
-    // disagree stop the move with nothing changed.
-    renameRows:pairs=>IndexedDb.strictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{
+    // Moves every renamed record in one transaction, renaming its value format
+    // with it; an old and a new copy that disagree stop the move with nothing
+    // changed.
+    renameRows:(pairs,formats)=>IndexedDb.strictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{
       const request=store.getAll();request.onerror=()=>finish(false,request.error||new Error('renamed records could not be read'));
       request.onsuccess=()=>{
         const rows=request.result||[],byKey=new Map(rows.map(row=>[String(row&&row.key||''),row]));let count=0;
         for(const row of rows){
           const key=String(row&&row.key||''),pair=pairs.find(([from])=>from.endsWith(':')?key.startsWith(from):key===from);if(!pair)continue;
-          const target=pair[1]+key.slice(pair[0].length),existing=byKey.get(target);
-          if(existing&&!sameDataValue(existing.value,row.value)){try{tx.abort();}catch{}finish(false,new Error(`Record ${key} and its renamed copy ${target} differ. Nothing was renamed.`));return;}
-          if(!existing)store.put({...row,key:target});store.delete(key);count++;
+          const target=pair[1]+key.slice(pair[0].length),existing=byKey.get(target),format=row.value&&typeof row.value==='object'?String(row.value.format||''):'';
+          const value=Object.hasOwn(formats,format)?{...row.value,format:formats[format]}:row.value;
+          if(existing&&!sameDataValue(existing.value,value)){try{tx.abort();}catch{}finish(false,new Error(`Record ${key} and its renamed copy ${target} differ. Nothing was renamed.`));return;}
+          if(!existing){store.put({...row,key:target,value});byKey.set(target,{...row,key:target,value});}store.delete(key);count++;
         }
         tx.oncomplete=()=>finish(true,count);
       };
     },'renamed record transaction aborted')
   }),
   live:Object.freeze({
-    migrateActiveSession:()=>AppData.compatibility.migrateActiveSession(),migrateAreaNotes:()=>AppData.compatibility.migrateAreaNotes(),
-    migrateAreaNoteRecovery:()=>AppData.compatibility.migrateAreaNoteRecovery(),migrateDeletionState:()=>AppData.compatibility.migrateDeletionState(),
+    migrateActiveSession:()=>AppData.compatibility.migrateActiveSession(),migrateNotes:()=>AppData.compatibility.migrateNotes(),
+    migrateNoteRecovery:()=>AppData.compatibility.migrateNoteRecovery(),migrateDeletionState:()=>AppData.compatibility.migrateDeletionState(),
     migrateDailyRecords:()=>AppData.compatibility.migrateDailyRecords(),migrateInsightsRevisionEnvelope:()=>AppData.compatibility.migrateInsightsRevisionEnvelope(),
     cleanupLegacyAttachments:()=>AttachmentStorage.cleanupLegacy(),cleanupObsoleteMetadata:()=>AppData.compatibility.cleanupObsoleteMetadata()
   }),
   topology:Object.freeze({retire:()=>IndexedDb.retireLegacyStores()}),
   verification:Object.freeze({
-    activeSession:()=>AppData.compatibility.verifyActiveSession(),areaNotes:()=>AppData.compatibility.verifyAreaNotes(),
-    areaNoteRecovery:()=>AppData.compatibility.verifyAreaNoteRecovery(),deletionState:()=>AppData.compatibility.verifyDeletionState(),
+    activeSession:()=>AppData.compatibility.verifyActiveSession(),notes:()=>AppData.compatibility.verifyNotes(),
+    noteRecovery:()=>AppData.compatibility.verifyNoteRecovery(),deletionState:()=>AppData.compatibility.verifyDeletionState(),
     dailyRecords:()=>AppData.compatibility.verifyDailyRecords(),insightsRevisionEnvelope:()=>AppData.compatibility.verifyInsightsRevisionEnvelope(),
     legacyAttachments:()=>AttachmentStorage.verifyLegacyClean(),
     canonicalStores:async()=>{
       const issues=[];
       try{
         const [noteRows,sessionRows,appMetaProof,repositoryMetadata,libraryState,libraryChunks,restoreState,restorePayload]=await Promise.all([
-          IndexedDb.getAll(DB_AREA_NOTES_STORE,'canonical Area Note verification aborted'),
+          IndexedDb.getAll(DB_NOTES_STORE,'canonical Note verification aborted'),
           IndexedDb.getAll(DB_ACTIVE_SESSION_STORE,'canonical active-session verification aborted'),
           AppMetaGateway.verifyAll(),
           AppData.metadata.verifyCurrent(),
@@ -8408,7 +8415,7 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
         ]);
         if(!appMetaProof?.ok)for(const issue of appMetaProof?.issues||[])issues.push(`app-meta:${issue}`);
         if(!repositoryMetadata?.ok)for(const issue of repositoryMetadata?.issues||[])issues.push(`app-meta:${issue}`);
-        for(const row of noteRows||[]){const clean=DailyRecordCodec.sanitizeCurrentAreaNote(row,row&&row.key);if(!clean||!sameDataValue(row,clean))issues.push(`area-note:${String(row&&row.key||'?')}`);}
+        for(const row of noteRows||[]){const clean=DailyRecordCodec.sanitizeCurrentNote(row,row&&row.key);if(!clean||!sameDataValue(row,clean))issues.push(`note:${String(row&&row.key||'?')}`);}
         for(const row of sessionRows||[]){const clean=ActiveSessionCodec.sanitizeCurrent(row);if(!clean||!sameDataValue(row,clean))issues.push(`active-session:${String(row&&row.id||'?')}`);}
         if(libraryChunks.length&&!libraryState)issues.push('app-meta-library-orphan-chunks');
         if(libraryState||libraryChunks.length){try{await AppData.libraryClearJournal.read();}catch(error){issues.push(`app-meta-library-integrity:${String(error&&error.message||error)}`);}}
@@ -8426,20 +8433,20 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
     freshBackup:verifyFreshCurrentBackup
   }),
   backups:Object.freeze({inspectCurrent:(file,options)=>BackupCodec.inspectCurrent(file,options),inspectLegacy:(file,options)=>BackupCodec.inspectLegacy(file,options)}),
-  helpers:Object.freeze({same:sameDataValue,randomUuid:()=>crypto.randomUUID(),nowIso:()=>new Date().toISOString(),isNoteKey:DailyRecordCodec.areaNoteKeys.isKey})
+  helpers:Object.freeze({same:sameDataValue,randomUuid:()=>crypto.randomUUID(),nowIso:()=>new Date().toISOString(),isNoteKey:DailyRecordCodec.noteKeys.isKey})
 }));
 const RuntimeBackupCodec=Object.freeze(Object.fromEntries([
   ...Object.entries(BackupCodec).filter(([key])=>!['inspectCurrent','inspectLegacy'].includes(key)),
   ['inspect',(file,options)=>CompatibilityFacade.inspectBackup(file,options)]
 ]));
 
-async function reconcileAreaNotesThroughLifecycle(importedNotes,deletions=[]){
-  return SessionLifecycle.run('reconciled-area-notes',{
+async function reconcileNotesThroughLifecycle(importedNotes,deletions=[]){
+  return SessionLifecycle.run('reconciled-notes',{
     date:getReviewDate(),
   },()=>AppData.notes.reconcile(importedNotes,deletions));
 }
-async function restoreAreaNotesSnapshotThroughLifecycle(snapshotNotes){
-  return SessionLifecycle.run('restored-area-notes-snapshot',{
+async function restoreNotesSnapshotThroughLifecycle(snapshotNotes){
+  return SessionLifecycle.run('restored-notes-snapshot',{
     date:getReviewDate(),
   },()=>AppData.notes.replace(snapshotNotes));
 }
@@ -8542,7 +8549,7 @@ function currentBackupSourceRevision(){
   return stored&&stored.lastLocalSaveAt||readStorageHealth().lastLocalSaveAt||'';
 }
 async function legacyBackupSnapshotRevision(){
-  return JSON.stringify([await AppData.dailyRecords.datasetRevision(),await AppData.deletionRecovery.savedDays(),await AppData.deletionRecovery.areaNotes(),await AppData.deletionRecovery.attachments(),richAssetReferenceRevision,await PlanData.exportData({flush:false}),document.getElementById('plan-input')?.value,await AttachmentStorage.list()]);
+  return JSON.stringify([await AppData.dailyRecords.datasetRevision(),await AppData.deletionRecovery.savedDays(),await AppData.deletionRecovery.notes(),await AppData.deletionRecovery.attachments(),richAssetReferenceRevision,await PlanData.exportData({flush:false}),document.getElementById('plan-input')?.value,await AttachmentStorage.list()]);
 }
 async function backupSnapshotRevision(options={}){
   if(options&&options.legacy===true||!backupFastFenceReady||!AppData.mutationEpoch.eligible())return legacyBackupSnapshotRevision();
@@ -8569,7 +8576,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
       backupMaxFileBytes:APP_LIMITS.backupMaxFileBytes,
       backupMaxAssetDescriptors:APP_LIMITS.backupMaxAssetDescriptors,
       maxImportRecords:APP_LIMITS.maxImportRecords,
-      maxOngoingNotes:APP_LIMITS.maxOngoingNotes
+      maxNotes:APP_LIMITS.maxNotes
     })
   }),
   persistence:Object.freeze({
@@ -8589,7 +8596,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     notesFlush:options=>AppData.notes.flush(options),
     notesNormalizePayload:value=>AppData.notes.normalizePayload(value),
     notesAlignByTitle:(value,deletedIds)=>AppData.notes.alignByTitle(value,deletedIds),
-    notesTrashKey:key=>DailyRecordCodec.areaNoteKeys.trash(key),
+    notesTrashKey:key=>DailyRecordCodec.noteKeys.trash(key),
     notesFailure:()=>AppData.notes.failure(),
     restoreJournalPrepare:async value=>{const backupFile=await Exports.run('file.persist',{file:value.blob});const {blob,...metadata}=value;return AppData.restoreJournal.prepare({...metadata,backupFile});},
     restoreJournalRead:async()=>{const journal=await AppData.restoreJournal.read();if(!journal)return null;const ref=journal.payload.backupFile;return ref?{...journal,payload:{...journal.payload,blob:await Exports.run('file.read',{ref})}}:journal;},
@@ -8616,8 +8623,8 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     deletionRecoveryFlush:()=>AppData.deletionRecovery.flush(),
     deletionRecoverySavedDays:()=>AppData.deletionRecovery.savedDays(),
     deletionRecoveryReplaceSavedDays:values=>AppData.deletionRecovery.replaceSavedDays(values),
-    deletionRecoveryAreaNotes:()=>AppData.deletionRecovery.areaNotes(),
-    deletionRecoveryReplaceAreaNotes:values=>AppData.deletionRecovery.replaceAreaNotes(values),
+    deletionRecoveryNotes:()=>AppData.deletionRecovery.notes(),
+    deletionRecoveryReplaceNotes:values=>AppData.deletionRecovery.replaceNotes(values),
     deletionRecoveryAttachments:()=>AppData.deletionRecovery.attachments(),
     deletionRecoveryReplaceAttachments:values=>AppData.deletionRecovery.replaceAttachments(values),
     deletionRecoveryClearAttachment:assetId=>AppData.deletionRecovery.clearAttachment(assetId),
@@ -8663,8 +8670,8 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
   }),
   events:Object.freeze({
     libraryChanged:()=>LibraryView.render(),
-    reconcileAreaNotes:reconcileAreaNotesThroughLifecycle,
-    restoreAreaNotesSnapshot:restoreAreaNotesSnapshotThroughLifecycle,
+    reconcileNotes:reconcileNotesThroughLifecycle,
+    restoreNotesSnapshot:restoreNotesSnapshotThroughLifecycle,
     restoreSessionState:restoreSessionStateThroughLifecycle,
     verifyActiveSessionRuntime:verifyRestoredSessionRuntime,
     restoredFromFile:()=>{notifyBackupChange({urgent:true,reason:'file-restore'});return BackupProviderRuntime.automaticActive();},
@@ -8787,7 +8794,7 @@ async function canonicalLocalRecoveryEmpty(){
 // that explains the emptiness. An unresolved clear has its own notice.
 async function studyDataLostHere(){
   const health=readStorageHealth();if(!health.lastStudyDataSaveAt||storageResetUnresolved())return false;
-  try{const deletions=await Promise.all([AppData.deletionRecovery.savedDays(),AppData.deletionRecovery.areaNotes()]);return deletions.every(list=>!(list||[]).length);}
+  try{const deletions=await Promise.all([AppData.deletionRecovery.savedDays(),AppData.deletionRecovery.notes()]);return deletions.every(list=>!(list||[]).length);}
   catch(error){AppDiagnostics.capture('backup.device-recovery-deletions',error,'warn');return false;}
 }
 let deviceRecoveryOfferRunning=false,deviceRecoveryOfferDismissed=false,deviceRecoveryHintNotified=false;
@@ -8893,7 +8900,7 @@ async function handleBrowserStorageReset(event={}){
     }
     const hold=beginStorageResetHold(event.detectedAt);
     const unsaved=await writeBackAfterStorageReset(hold);
-    try{refreshAreaNoteConsumers();renderSched();}catch(error){AppDiagnostics.capture('storage-reset.render',error,'warn');}
+    try{refreshNoteConsumers();renderSched();}catch(error){AppDiagnostics.capture('storage-reset.render',error,'warn');}
     if(storageResetHold!==hold)return;
     if(unsaved.length){showStorageResetDecision({unsaved});return;}
     await hold.deviceReady;
@@ -8951,7 +8958,7 @@ async function restoreAfterStorageReset(){
 // The Device Folder is one backup location of the engine; this controller
 // keeps only the chosen folder, its permission and its status row.
 DeviceBackup=DeviceBackupModule.createController(Object.freeze({
-  configuration:Object.freeze({metadataKey:APP_META_KEYS.automaticDeviceBackup,pickerId:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderPickerId,settingsTimeoutMs:10*1000}),
+  configuration:Object.freeze({metadataKey:APP_META_KEYS.deviceFolder,pickerId:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderPickerId,settingsTimeoutMs:10*1000}),
   engine:Object.freeze({backup:id=>BackupProviderRuntime.backup(id),cancelForeground:(reason,id)=>BackupProviderRuntime.cancelForeground(reason,id),disconnect:id=>BackupProviderRuntime.disconnect(id),forget:id=>BackupProviderRuntime.forget(id),locationStatus:id=>BackupProviderRuntime.locationStatus(id),register:config=>BackupProviderRuntime.register(config),subscribeStatus:listener=>BackupProviderRuntime.subscribeStatus(listener)}),
   environment:Object.freeze({
     canMutate:()=>appCanMutate(),clearTimeout:timer=>clearTimeout(timer),setTimeout:(callback,delay)=>setTimeout(callback,delay),
@@ -8963,14 +8970,14 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
       title:mode==='bring-in'?'Combine from Device Folder backup':'Restore Device Folder version',
       message:mode==='bring-in'?'Choose a retained verified backup. Differences with this device will be reviewed before data changes.':'Choose a retained verified version. The complete portable Study Director state will be restored to match it; device-local settings remain unchanged.',
       cancelLabel:'Cancel',
-      choices:rows.map((row,index)=>({value:row.id,label:`${index===0?'Latest · ':''}${new Date(row.exportedAt).toLocaleString()}`,description:`${Number(row.counts?.dailyRecord)||0} Saved Dates / Reflections · ${Number(row.counts?.areaNote)||0} Notes${row.encrypted?' · Encrypted':''}`,kind:index===0?'primary':''}))
+      choices:rows.map((row,index)=>({value:row.id,label:`${index===0?'Latest · ':''}${new Date(row.exportedAt).toLocaleString()}`,description:`${Number(row.counts?.dailyRecord)||0} Saved Dates / Reflections · ${Number(row.counts?.note)||0} Notes${row.encrypted?' · Encrypted':''}`,kind:index===0?'primary':''}))
     }),
     render:renderDeviceBackup,
     sourceRevision:()=>currentBackupSourceRevision(),
     verifiedAt:()=>verifiedRecoveryState.providers['device-folder']?.at||''
   }),
   presentation:BackupPresentation,
-  settings:exactAppMetaStorage(DeviceBackupAppMeta,'automaticDeviceBackup',APP_META_KEYS.automaticDeviceBackup,'Device Backup'),
+  settings:exactAppMetaStorage(DeviceFolderAppMeta,'deviceFolder',APP_META_KEYS.deviceFolder,'Device Backup'),
   transport:folder=>DeviceFolderStorageModule.createStorage(Object.freeze({
     folder,
     identities:Object.freeze({root:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderRoot,objects:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects,checkpoints:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints,commits:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits}),
@@ -9569,7 +9576,7 @@ function currentBackupDiagnosticStates(){
   const states=[],sample=(job,read,project)=>{try{states.push(...project(read()));}catch{states.push({job,state:'unavailable',reason:'state-unavailable'});}};
   sample('Local storage health',()=>StorageHealthController.snapshot(),health=>{
     const rows=[{job:'Local storage health',state:health.hasIssues?'attention':'observed',issues:health.issues?.length||0,completedAt:health.lastLocalSaveAt||'',studyDataSavedAt:health.lastStudyDataSaveAt||'',storagePersisted:storageEstimate.persisted,usageBytes:storageEstimate.usageBytes,quotaBytes:storageEstimate.quotaBytes}];
-    const sources=['indexedDB','localStorage.read','localStorage.write','planDraft.write','activeSession','areaNotes','dailyRecords','deletionRecovery','maintenance','capacity','backup','attachmentIntegrity','repositoryIntegrity'];
+    const sources=['indexedDB','localStorage.read','localStorage.write','planDraft.write','activeSession','notes','dailyRecords','deletionRecovery','maintenance','capacity','backup','attachmentIntegrity','repositoryIntegrity'];
     for(const source of sources){const issue=health.issues?.find(row=>row.source===source);if(issue)rows.push({job:'Storage '+source,state:'attention',severity:issue.level,failedAt:issue.at});}return rows;
   });
   sample('Note saving',()=>AppData.notes.failure(),value=>[{job:'Note saving',state:value.failed?'failed':'observed',failed:value.failed===true}]);
@@ -9685,7 +9692,7 @@ const CLICK_ACTIONS=Object.freeze({
   'load-default': loadDefaultPlan,
   'apply-schedule': ()=>{const result=applySchedule();if(result&&typeof result.finally==='function')return result.finally(()=>schedulePwaUpdateEvaluation(250));schedulePwaUpdateEvaluation(250);return result;},
   'clear-schedule-draft': PlanDraftEditor.clear,
-  'open-ongoing-notes': openOngoingNotesLibrary,
+  'open-notes': openNotesLibrary,
   'toggle-pnote-info': togglePnoteInfo,
   'toggle-backup-info': ev=>toggleBackupInfo(ev),
   'load-more-library': LibraryView.loadMore,
@@ -10132,7 +10139,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
     planDraft:PlanDraftEditor.flush,
     preferences:()=>flushProtectedPreferences(),
     activeSession:flushLiveDraft,
-    areaNotes:()=>AppData.notes.flush(),
+    notes:()=>AppData.notes.flush(),
     deletionRecovery:AppData.deletionRecovery.flush
   }),
   startup:Object.freeze({

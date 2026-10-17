@@ -91,18 +91,18 @@ registry.define('persistence',1,()=>{
     if(!input||!Object.isFrozen(input))throw new TypeError('IndexedDB input must be frozen.');
     const inputKeys=Object.keys(input).sort(),allowedKeys=['config','hooks','upgrade'];
     if(inputKeys.some(key=>!allowedKeys.includes(key))||!inputKeys.includes('config')||!inputKeys.includes('hooks'))throw new TypeError('IndexedDB input is incomplete, mutable, or contains unexpected fields.');
-    exactObject(input.config,['dbName','dbVersion','legacyBaselineVersion','stores','legacyStores'],'IndexedDB config');
-    exactObject(input.config.stores,['dailyRecords','dailySummaries','areaNotes','activeSessions','appMeta','assets'],'IndexedDB stores');
+    exactObject(input.config,['dbName','dbVersion','bridgeVersion','stores','legacyStores'],'IndexedDB config');
+    exactObject(input.config.stores,['dailyRecords','dailySummaries','notes','activeSessions','appMeta','assets'],'IndexedDB stores');
     exactObject(input.config.legacyStores,['syncQueue','tombstones','reflectionDrafts'],'IndexedDB legacy stores');
     functions(input.hooks,Object.hasOwn(input.hooks,'onReset')?['onError','onOk','capture','onReset']:['onError','onOk','capture'],'IndexedDB hooks');
-    if(input.upgrade!==undefined)functions(input.upgrade,['apply'],'IndexedDB upgrade adapter');
-    const applyUpgrade=input.upgrade?input.upgrade.apply:()=>false;
+    if(input.upgrade!==undefined)functions(input.upgrade,['renameStores','apply'],'IndexedDB upgrade adapter');
+    const applyUpgrade=input.upgrade?input.upgrade.apply:()=>false,renameStores=input.upgrade?input.upgrade.renameStores:()=>0;
     const DB_NAME=input.config.dbName;
     const DB_VER=input.config.dbVersion;
-    const LEGACY_BASELINE_VER=input.config.legacyBaselineVersion;
+    const BRIDGE_VER=input.config.bridgeVersion;
     const DB_DAILY_RECORD_STORE=input.config.stores.dailyRecords;
     const DB_DAILY_SUMMARY_STORE=input.config.stores.dailySummaries;
-    const DB_AREA_NOTES_STORE=input.config.stores.areaNotes;
+    const DB_NOTES_STORE=input.config.stores.notes;
     const DB_ACTIVE_SESSION_STORE=input.config.stores.activeSessions;
     const DB_APP_META_STORE=input.config.stores.appMeta;
     const DB_ASSET_STORE=input.config.stores.assets;
@@ -136,7 +136,7 @@ registry.define('persistence',1,()=>{
     function ensureCurrentStores(db){
       if(!db.objectStoreNames.contains(DB_DAILY_RECORD_STORE))db.createObjectStore(DB_DAILY_RECORD_STORE,{keyPath:'date'});
       if(!db.objectStoreNames.contains(DB_DAILY_SUMMARY_STORE))db.createObjectStore(DB_DAILY_SUMMARY_STORE,{keyPath:'date'});
-      if(!db.objectStoreNames.contains(DB_AREA_NOTES_STORE))db.createObjectStore(DB_AREA_NOTES_STORE,{keyPath:'key'});
+      if(!db.objectStoreNames.contains(DB_NOTES_STORE))db.createObjectStore(DB_NOTES_STORE,{keyPath:'key'});
       if(!db.objectStoreNames.contains(DB_ACTIVE_SESSION_STORE))db.createObjectStore(DB_ACTIVE_SESSION_STORE,{keyPath:'id'});
       if(!db.objectStoreNames.contains(DB_APP_META_STORE))db.createObjectStore(DB_APP_META_STORE,{keyPath:'key'});
       if(!db.objectStoreNames.contains(DB_ASSET_STORE))db.createObjectStore(DB_ASSET_STORE);
@@ -161,15 +161,18 @@ registry.define('persistence',1,()=>{
     function openRequest(version=null,{legacyBridge=false,retireLegacy=false,fresh=false}={}){
       return new Promise((resolve,reject)=>{
         if(typeof globalThis.indexedDB?.open!=='function'){markStorageHealthError('IndexedDB unavailable');reject(new Error('IndexedDB unavailable'));return;}
-        let settled=false;
+        let settled=false,blocked=false;
         const finish=(fn,val)=>{if(settled)return;settled=true;clearTimeout(timer);fn(val);};
-        const timer=setTimeout(()=>{markStorageHealthError('IndexedDB open timed out');finish(reject,new Error('IndexedDB open timed out'));},2500);
+        const timer=setTimeout(()=>{const message=blocked?'IndexedDB open blocked':'IndexedDB open timed out';markStorageHealthError(message);finish(reject,new Error(message));},2500);
         let req;
         try{req=version===null?globalThis.indexedDB.open(DB_NAME):globalThis.indexedDB.open(DB_NAME,version);}catch(error){markStorageHealthError(error&&error.message?error.message:'IndexedDB open failed');finish(reject,error);return;}
         req.onupgradeneeded=e=>{
+          // An open that was given up on never upgrades in the background.
+          if(settled){try{e.target.transaction&&e.target.transaction.abort();}catch(abortError){}return;}
           try{
             const db=e.target.result,tx=e.target.transaction;
             if(version===null&&Number(e.oldVersion||0)===0)freshlyCreatedDatabases.add(db);
+            if(!fresh)renameStores(Object.freeze({db,transaction:tx}));
             ensureCurrentStores(db);
             if(legacyBridge)ensureLegacyStores(db);
             if(retireLegacy)removeLegacyStores(db);
@@ -180,9 +183,12 @@ registry.define('persistence',1,()=>{
             finish(reject,error||new Error('IndexedDB upgrade failed'));
           }
         };
-        req.onsuccess=()=>finish(resolve,req.result);
-        req.onerror=()=>{markStorageHealthError((req.error&&req.error.message)||'IndexedDB open failed');finish(reject,req.error||new Error('IndexedDB open failed'));};
-        req.onblocked=()=>{markStorageHealthError('IndexedDB open blocked');finish(reject,new Error('IndexedDB open blocked'));};
+        req.onsuccess=()=>{if(settled){try{req.result.close();}catch(closeError){}return;}finish(resolve,req.result);};
+        req.onerror=()=>{if(settled)return;markStorageHealthError((req.error&&req.error.message)||'IndexedDB open failed');finish(reject,req.error||new Error('IndexedDB open failed'));};
+        // Another tab still holds the database while it closes its connection
+        // (each tab closes on a version change); the open waits for it within
+        // the same time limit.
+        req.onblocked=()=>{blocked=true;};
       });
     }
     async function openBootstrapDatabase(){
@@ -195,9 +201,9 @@ registry.define('persistence',1,()=>{
         if(establishedConnection)noteRecreatedDatabase();else startedFresh=true;
         return db;
       }
-      if(Number(db.version)<LEGACY_BASELINE_VER){
+      if(Number(db.version)<BRIDGE_VER){
         db.close();
-        db=await openRequest(LEGACY_BASELINE_VER,{legacyBridge:true});
+        db=await openRequest(BRIDGE_VER,{legacyBridge:true});
       }
       if(Number(db.version)>DB_VER){
         const version=db.version;db.close();

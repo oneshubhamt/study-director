@@ -64,19 +64,19 @@ try{
 
   const filled=await page.evaluate(`(async()=>{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),nextRender=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-    const row=[...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='zeta filled');row.click();await wait(30);
+    const row=[...document.querySelectorAll('[data-note-key]')].find(item=>item.dataset.noteKey==='zeta filled');row.click();await wait(30);
     const field=document.querySelector('#library-notes-editor .library-notes-textarea');field.value='Durable Zeta note';field.dispatchEvent(new Event('input',{bubbles:true}));await d.AppData.notes.flush();
     __PWA6.LibraryView.showSection('days');await wait(30);__PWA6.LibraryView.showSection('notes');await wait(60);
-    let rows=[...document.querySelectorAll('[data-ongoing-note-key]')];
-    const search=document.getElementById('library-notes-search');search.value='Durable Zeta note';search.dispatchEvent(new Event('input',{bubbles:true}));for(let i=0;i<100&&document.querySelectorAll('[data-ongoing-note-key]').length!==1;i++)await wait(20);
-    const filtered=[...document.querySelectorAll('[data-ongoing-note-key]')].map(item=>item.dataset.ongoingNoteKey);
-    search.value='';search.dispatchEvent(new Event('input',{bubbles:true}));for(let i=0;i<100&&document.querySelectorAll('[data-ongoing-note-key]').length!==4;i++)await wait(20);rows=[...document.querySelectorAll('[data-ongoing-note-key]')];
+    let rows=[...document.querySelectorAll('[data-note-key]')];
+    const search=document.getElementById('library-notes-search');search.value='Durable Zeta note';search.dispatchEvent(new Event('input',{bubbles:true}));for(let i=0;i<100&&document.querySelectorAll('[data-note-key]').length!==1;i++)await wait(20);
+    const filtered=[...document.querySelectorAll('[data-note-key]')].map(item=>item.dataset.noteKey);
+    search.value='';search.dispatchEvent(new Event('input',{bubbles:true}));for(let i=0;i<100&&document.querySelectorAll('[data-note-key]').length!==4;i++)await wait(20);rows=[...document.querySelectorAll('[data-note-key]')];
     return {
-      keys:rows.map(item=>item.dataset.ongoingNoteKey),
+      keys:rows.map(item=>item.dataset.noteKey),
       filtered,
-      classes:Object.fromEntries(rows.map(item=>[item.dataset.ongoingNoteKey,item.className])),
-      colors:Object.fromEntries(rows.map(item=>[item.dataset.ongoingNoteKey,getComputedStyle(item).color])),
-      weights:Object.fromEntries(rows.map(item=>[item.dataset.ongoingNoteKey,Number(getComputedStyle(item.querySelector('.library-note-nav-name')).fontWeight)])),
+      classes:Object.fromEntries(rows.map(item=>[item.dataset.noteKey,item.className])),
+      colors:Object.fromEntries(rows.map(item=>[item.dataset.noteKey,getComputedStyle(item).color])),
+      weights:Object.fromEntries(rows.map(item=>[item.dataset.noteKey,Number(getComputedStyle(item.querySelector('.library-note-nav-name')).fontWeight)])),
       noteMenu:!!document.getElementById('library-note-actions')
     };
   })()`);
@@ -90,14 +90,14 @@ try{
   const temporary=await page.evaluate(`(async()=>{
     const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));await __interactionQA.create('Standalone Only','top');await wait(30);
     await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const before={
-      selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||'',
+      selected:document.querySelector('.library-note-nav-item.active')?.dataset.noteKey||'',
       title:document.querySelector('.library-notes-editor-title')?.textContent||'',
       meta:document.querySelector('.library-notes-editor-meta')?.textContent||'',
       focused:document.activeElement===document.querySelector('.library-notes-textarea')||!!document.activeElement.closest('.library-notes-editor .sd-rte-wordgard'),
       persisted:!!__PWA6.AppData.notes.get('standalone only')
     };
     __PWA6.LibraryView.showSection('days');await wait(30);__PWA6.LibraryView.showSection('notes');await wait(60);
-    return {...before,afterKeys:[...document.querySelectorAll('[data-ongoing-note-key]')].map(item=>item.dataset.ongoingNoteKey)};
+    return {...before,afterKeys:[...document.querySelectorAll('[data-note-key]')].map(item=>item.dataset.noteKey)};
   })()`);
   assert.deepEqual({...temporary,afterKeys:undefined},{selected:'standalone only',title:'Standalone Only',meta:'New · saved when you write',focused:true,persisted:false,afterKeys:undefined});
   assert.equal(temporary.afterKeys.includes('standalone only'),false);
@@ -109,18 +109,18 @@ try{
     await __interactionQA.create('Standalone Only','top');await wait(25);
     let field=document.querySelector('.library-notes-textarea');field.value='Standalone Area knowledge';field.dispatchEvent(new Event('input',{bubbles:true}));await d.AppData.notes.flush();
     __PWA6.LibraryView.showSection('days');await wait(25);__PWA6.LibraryView.showSection('notes');await wait(50);
-    [...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='standalone only').click();await wait(25);
+    [...document.querySelectorAll('[data-note-key]')].find(item=>item.dataset.noteKey==='standalone only').click();await wait(25);
     await __interactionQA.create('Nested Topic','nested');await wait(25);
     field=document.querySelector('.library-notes-textarea');field.value='Nested knowledge';field.dispatchEvent(new Event('input',{bubbles:true}));await d.AppData.notes.flush();
     __PWA6.LibraryView.showSection('days');await wait(25);__PWA6.LibraryView.showSection('notes');await wait(60);
-    const rows=[...document.querySelectorAll('[data-ongoing-note-key]')],keys=rows.map(item=>item.dataset.ongoingNoteKey);
+    const rows=[...document.querySelectorAll('[data-note-key]')],keys=rows.map(item=>item.dataset.noteKey);
     const beforeCount=keys.filter(key=>key==='standalone only').length;
-    [...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='standalone only').click();await wait(20);
+    [...document.querySelectorAll('[data-note-key]')].find(item=>item.dataset.noteKey==='standalone only').click();await wait(20);
     await __interactionQA.create('  standalone   only  ','top');await wait(30);
     return {
       keys,adjacent:keys.indexOf('standalone only > nested topic')===keys.indexOf('standalone only')+1,
-      beforeCount,afterCount:[...document.querySelectorAll('[data-ongoing-note-key="standalone only"]')].length,
-      selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||'',
+      beforeCount,afterCount:[...document.querySelectorAll('[data-note-key="standalone only"]')].length,
+      selected:document.querySelector('.library-note-nav-item.active')?.dataset.noteKey||'',
       payload:Object.fromEntries(Object.values(d.AppData.notes.exportPayload()).map(note=>[note.label.toLowerCase(),note]))
     };
   })()`);
@@ -153,7 +153,7 @@ try{
     const d=__PWA6,file=await d.BackupController.createCheckpoint(),candidate=await d.BackupController.inspect(file.blob,{filename:file.filename});
     return {counts:file.counts,inspectedCounts:candidate.preview.counts,keys:Object.values(d.AppData.notes.exportPayload()).map(note=>note.label.toLowerCase()).sort(),blobSize:file.blob.size};
   })()`);
-  assert.equal(backupBeforeDelete.counts.dailyRecord,0);assert.equal(backupBeforeDelete.counts.areaNote,3);assert.ok(backupBeforeDelete.blobSize>0);
+  assert.equal(backupBeforeDelete.counts.dailyRecord,0);assert.equal(backupBeforeDelete.counts.note,3);assert.ok(backupBeforeDelete.blobSize>0);
   assert.deepEqual(backupBeforeDelete.inspectedCounts,backupBeforeDelete.counts);
   assert.deepEqual(backupBeforeDelete.keys,['standalone only','standalone only > nested topic','zeta filled']);
   result.checks.areaOnlyNotesBackUpIndependentlyOfSavedDays=true;
@@ -161,14 +161,14 @@ try{
 
   const deletedParent=await page.evaluate(`(async()=>{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-    const parent=[...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='standalone only');parent.click();await wait(25);
+    const parent=[...document.querySelectorAll('[data-note-key]')].find(item=>item.dataset.noteKey==='standalone only');parent.click();await wait(25);
     await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const before={noteMenu:!!document.getElementById('library-note-actions'),child:d.AppData.notes.get('standalone only > nested topic')?.text||''};
     await __interactionQA.noteAction('library-note-delete');const confirmation=document.getElementById('sd-interaction-dialog')?.open===true;
-    await new Promise((resolve,reject)=>{const started=Date.now(),poll=()=>{if(/Moved/.test(document.getElementById('ongoing-notes-status').textContent))resolve();else if(Date.now()-started>5000)reject(new Error('delete timeout'));else setTimeout(poll,40);};poll();});
+    await new Promise((resolve,reject)=>{const started=Date.now(),poll=()=>{if(/Moved/.test(document.getElementById('notes-status').textContent))resolve();else if(Date.now()-started>5000)reject(new Error('delete timeout'));else setTimeout(poll,40);};poll();});
     await wait(100);
-    const rows=[...document.querySelectorAll('[data-ongoing-note-key]')],parentAfter=rows.find(item=>item.dataset.ongoingNoteKey==='standalone only');
+    const rows=[...document.querySelectorAll('[data-note-key]')],parentAfter=rows.find(item=>item.dataset.noteKey==='standalone only');
     return {
-      before,confirmation,status:document.getElementById('ongoing-notes-status').textContent,
+      before,confirmation,status:document.getElementById('notes-status').textContent,
       parentPresent:!!parentAfter,parentClass:parentAfter?.className||'',
       child:d.AppData.notes.get('standalone only > nested topic')?.text||'',
       zeta:d.AppData.notes.get('zeta filled')?.text||''
@@ -190,11 +190,11 @@ try{
     toggle.click();await until(()=>document.querySelector('[data-trash-key]'));
     const row=document.querySelector('[data-trash-key]'),listed={name:row.querySelector('.library-note-nav-name').textContent,when:row.querySelector('.library-note-nav-edited').textContent,beforeList:section.firstElementChild.id};
     row.click();await until(()=>[...document.querySelectorAll('#library-notes-editor button')].some(button=>button.textContent==='Restore'));
-    const preview={title:document.querySelector('.library-notes-editor-title').textContent,text:document.querySelector('#library-notes-editor .library-ongoing-note-read').textContent,editable:!!document.querySelector('#library-notes-editor textarea')};
+    const preview={title:document.querySelector('.library-notes-editor-title').textContent,text:document.querySelector('#library-notes-editor .library-note-read').textContent,editable:!!document.querySelector('#library-notes-editor textarea')};
     [...document.querySelectorAll('#library-notes-editor button')].find(button=>button.textContent==='Restore').click();
-    await until(()=>/Restored/.test(document.getElementById('ongoing-notes-status').textContent));
-    const restored={text:d.AppData.notes.get('standalone only')?.text||'',status:document.getElementById('ongoing-notes-status').textContent,selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||'',sectionHidden:section.hidden};
-    await __interactionQA.noteAction('library-note-delete');await until(()=>/Moved/.test(document.getElementById('ongoing-notes-status').textContent));
+    await until(()=>/Restored/.test(document.getElementById('notes-status').textContent));
+    const restored={text:d.AppData.notes.get('standalone only')?.text||'',status:document.getElementById('notes-status').textContent,selected:document.querySelector('.library-note-nav-item.active')?.dataset.noteKey||'',sectionHidden:section.hidden};
+    await __interactionQA.noteAction('library-note-delete');await until(()=>/Moved/.test(document.getElementById('notes-status').textContent));
     if(toggle.getAttribute('aria-expanded')!=='true')toggle.click();await until(()=>document.querySelector('[data-trash-key]'));
     document.querySelector('[data-trash-key]').click();await until(()=>[...document.querySelectorAll('#library-notes-editor button')].some(button=>button.textContent==='Delete forever'));
     [...document.querySelectorAll('#library-notes-editor button')].find(button=>button.textContent==='Delete forever').click();
@@ -217,7 +217,7 @@ try{
     await __interactionQA.create('Rename Me','top');await wait(25);
     const field=document.querySelector('.library-notes-textarea');field.value='Moved knowledge';field.dispatchEvent(new Event('input',{bubbles:true}));await d.AppData.notes.flush();await wait(40);
     d.LibraryView.refreshNotes();await wait(40);
-    const status=()=>document.getElementById('ongoing-notes-status').textContent,title=()=>document.querySelector('#library-notes-editor .library-notes-editor-title');
+    const status=()=>document.getElementById('notes-status').textContent,title=()=>document.querySelector('#library-notes-editor .library-notes-editor-title');
     const key=(target,name)=>target.dispatchEvent(new KeyboardEvent('keydown',{key:name,bubbles:true,cancelable:true}));
     title().click();let input=await until(()=>document.querySelector('.library-notes-title-input'));
     const startValue=input.value;input.value='Discarded';key(input,'Escape');await wait(40);
@@ -225,7 +225,7 @@ try{
     const escaped={title:title()?.textContent||'',keys:titles().filter(name=>/rename|discarded/.test(name))};
     title().click();input=await until(()=>document.querySelector('.library-notes-title-input'));input.value='Renamed Note';key(input,'Enter');
     await until(()=>/Renamed to/.test(status()));
-    const afterRename={keptId:!!startId&&d.AppData.notes.get('renamed note')?.id===startId,keys:titles().filter(name=>/rename/.test(name)),selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||'',title:title()?.textContent||'',status:status()};
+    const afterRename={keptId:!!startId&&d.AppData.notes.get('renamed note')?.id===startId,keys:titles().filter(name=>/rename/.test(name)),selected:document.querySelector('.library-note-nav-item.active')?.dataset.noteKey||'',title:title()?.textContent||'',status:status()};
     const moved=await __interactionQA.move('Standalone Only > Nested Topic');const confirmation=await __interactionQA.accept();
     await until(()=>/Merged into/.test(status()));
     const merged=d.AppData.notes.get('standalone only > nested topic')?.text||'';
@@ -237,7 +237,7 @@ try{
     parents[0].open=true;await until(()=>parents[0].querySelector('.subject-note-context-entry-body').textContent);
     parent.openedText=parents[0].querySelector('.subject-note-context-entry-body').textContent;
     document.querySelector('#library-notes-editor .library-notes-crumb').click();await wait(40);
-    const crumbOpened=document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||'';
+    const crumbOpened=document.querySelector('.library-note-nav-item.active')?.dataset.noteKey||'';
     document.getElementById('library-notes-info').click();await wait(40);
     const info={shown:!document.getElementById('library-notes-info-popover').hidden,text:document.getElementById('library-notes-info-popover').textContent};
     document.body.click();await wait(20);
@@ -260,12 +260,12 @@ try{
   const undone=await page.evaluate(`(async()=>{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),until=async test=>{for(let i=0;i<150&&!test();i++)await wait(20);return test();};
     for(const close of document.querySelectorAll('.interaction-toast-close'))close.click();await until(()=>!document.querySelector('.interaction-toast'));
-    [...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='zeta filled').click();await wait(30);
+    [...document.querySelectorAll('[data-note-key]')].find(item=>item.dataset.noteKey==='zeta filled').click();await wait(30);
     await __interactionQA.noteAction('library-note-delete');await until(()=>!d.AppData.notes.get('zeta filled'));
     const toast=await until(()=>[...document.querySelectorAll('.interaction-toast')].find(item=>item.textContent.includes('Moved “Zeta Filled” to Recently deleted')));
     const undo=[...toast.querySelectorAll('button')].find(button=>button.textContent==='Undo');
-    undo.click();await until(()=>document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey==='zeta filled'&&/Restored/.test(document.getElementById('ongoing-notes-status').textContent));
-    return {text:d.AppData.notes.get('zeta filled')?.text||'',trash:d.AppData.notes.trashSnapshot().length,selected:document.querySelector('.library-note-nav-item.active')?.dataset.ongoingNoteKey||''};
+    undo.click();await until(()=>document.querySelector('.library-note-nav-item.active')?.dataset.noteKey==='zeta filled'&&/Restored/.test(document.getElementById('notes-status').textContent));
+    return {text:d.AppData.notes.get('zeta filled')?.text||'',trash:d.AppData.notes.trashSnapshot().length,selected:document.querySelector('.library-note-nav-item.active')?.dataset.noteKey||''};
   })()`);
   assert.deepEqual(undone,{text:'Durable Zeta note',trash:0,selected:'zeta filled'},'Undo puts a deleted note back');
   result.checks.deleteUndo=true;
@@ -277,7 +277,7 @@ try{
   const areaRename=await page.evaluate(`(async()=>{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),until=async test=>{for(let i=0;i<150&&!test();i++)await wait(20);return test();};
     for(const close of document.querySelectorAll('.interaction-toast-close'))close.click();
-    const status=()=>document.getElementById('ongoing-notes-status').textContent,plans=async()=>{const value=await d.AppData.planData.read();return {draft:String(value.draft||''),saved:value.savedPlans.map(plan=>plan.scheduleText).join('\\n')};};
+    const status=()=>document.getElementById('notes-status').textContent,plans=async()=>{const value=await d.AppData.planData.read();return {draft:String(value.draft||''),saved:value.savedPlans.map(plan=>plan.scheduleText).join('\\n')};};
     const now=new Date(),minute=now.getHours()*60+now.getMinutes()-1,start=String(Math.floor((minute+1440)%1440/60)).padStart(2,'0')+':'+String((minute+1440)%1440%60).padStart(2,'0');
     d.goTab('plan');document.getElementById('plan-input').value=start+' | 20 | Alpha Task | work | Alpha Empty | pages | 10';
     const applying=d.applySchedule({skipNotify:true});if(applying&&typeof applying.then==='function')await __interactionQA.accept();await applying;
@@ -285,7 +285,7 @@ try{
     await until(()=>document.querySelector('[data-saved-plan-id]'));
     d.goTab('library');__PWA6.LibraryView.showSection('notes');
     d.AppData.notes.update('alpha empty','Alpha Empty','Alpha knowledge','');await d.AppData.notes.flush();d.LibraryView.refreshNotes();await wait(40);
-    [...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='alpha empty').click();await wait(30);
+    [...document.querySelectorAll('[data-note-key]')].find(item=>item.dataset.noteKey==='alpha empty').click();await wait(30);
     const id=d.AppData.notes.get('alpha empty').id,index=d.TimerState.currentIndex,taskId=d.TimerState.currentTaskId;
     const ticked=await __interactionQA.move('Alpha Renamed',{inPlans:true});await until(()=>/Renamed to “Alpha Renamed”/.test(status()));
     const tickedPlans=await plans();
@@ -328,7 +328,7 @@ try{
     d.AppData.notes.update('alpha renamed','Alpha renamed','Newest edit','');await d.AppData.notes.flush();d.LibraryView.refreshNotes();
     sort.value='recent';sort.dispatchEvent(new Event('change'));await wait(40);
     const list=document.getElementById('library-notes-list'),first=list.querySelector('.library-note-nav-item');
-    const out={role:list.getAttribute('role'),first:first?.dataset.ongoingNoteKey,edited:!!first?.querySelector('.library-note-nav-edited'),saved:JSON.parse(localStorage.getItem('studyDirector.library.view.v1')).sort};
+    const out={role:list.getAttribute('role'),first:first?.dataset.noteKey,edited:!!first?.querySelector('.library-note-nav-edited'),saved:JSON.parse(localStorage.getItem('studyDirector.library.view.v1')).sort};
     sort.value='name';sort.dispatchEvent(new Event('change'));await wait(40);out.tree=list.getAttribute('role');return out;
   })()`);
   assert.deepEqual(sorted,{role:null,first:'alpha renamed',edited:true,saved:'recent',tree:'tree'});
@@ -422,7 +422,7 @@ try{
     for(const [t,x] of [['Tags One','Renal #revise and #mcq.'],['Tags Two','Heart #Revise only.'],['Tags Three','C# and #1 are not tags. #mcq']]){n.update(t,t,x);await wait(20);}
     await n.flush();d.LibraryView.revealNoteReference(n.get('Tags One').id);await wait(300);
     const chips=()=>[...document.querySelectorAll('#library-notes-tags .library-tag-chip')],chip=name=>chips().find(c=>c.querySelector('.library-tag-name').textContent==='#'+name);
-    const listed=()=>[...document.querySelectorAll('#library-notes-list [data-ongoing-note-key]')].map(r=>r.dataset.ongoingNoteKey).filter(k=>k.startsWith('tags '));
+    const listed=()=>[...document.querySelectorAll('#library-notes-list [data-note-key]')].map(r=>r.dataset.noteKey).filter(k=>k.startsWith('tags '));
     const before=chips().map(c=>c.textContent);chip('revise').click();await wait(60);const revise=listed();chip('mcq').click();await wait(60);const both=listed();
     document.querySelector('#library-notes-tags .library-tag-tool').click();await wait(60);
     return {before,revise,both,cleared:!document.querySelector('#library-notes-tags .library-tag-chip.active'),inText:[...document.querySelectorAll('#library-notes-editor .sd-tag')].map(c=>c.dataset.sdTag)};})()`);
@@ -439,8 +439,8 @@ try{
     [...document.querySelectorAll('#library-notes-tags .library-tag-tool')].find(b=>b.textContent==='Rename').click();
     const dialog=await new Promise(resolve=>{const poll=()=>{const item=document.getElementById('sd-interaction-dialog');if(item&&item.open)resolve(item);else setTimeout(poll,16);};poll();});
     const field=dialog.querySelector('.interaction-input');field.value='Review';field.dispatchEvent(new Event('input',{bubbles:true}));dialog.querySelector('.interaction-actions .primary').click();
-    for(let i=0;i<100&&!/Renamed #/.test(document.getElementById('ongoing-notes-status').textContent);i++)await wait(30);
-    return {typed,status:document.getElementById('ongoing-notes-status').textContent,texts:['Tags One','Tags Two','Tags Three'].map(t=>n.get(t).text),picked:[...document.querySelectorAll('#library-notes-tags .library-tag-chip.active')].map(c=>c.textContent)};})()`);
+    for(let i=0;i<100&&!/Renamed #/.test(document.getElementById('notes-status').textContent);i++)await wait(30);
+    return {typed,status:document.getElementById('notes-status').textContent,texts:['Tags One','Tags Two','Tags Three'].map(t=>n.get(t).text),picked:[...document.querySelectorAll('#library-notes-tags .library-tag-chip.active')].map(c=>c.textContent)};})()`);
   assert.equal(retagged.typed,'Renal #revise and #mcq. #revise now');
   assert.equal(retagged.status,'Renamed #revise to #review in 2 notes.');
   assert.match(retagged.texts[0],/Renal #review and #mcq\. #review now/);assert.match(retagged.texts[1],/Heart #review only\./);assert.equal(retagged.texts[2],'C# and #1 are not tags. #mcq');
@@ -458,9 +458,9 @@ try{
     const dialog=await new Promise(resolve=>{const poll=()=>{const item=document.getElementById('sd-interaction-dialog');if(item&&item.open)resolve(item);else setTimeout(poll,16);};poll();});
     const question=dialog.innerText.includes('Import 3 files');
     [...dialog.querySelectorAll('button')].find(b=>b.textContent.trim().startsWith('Inside')).click();
-    for(let i=0;i<100&&!/Imported/.test(document.getElementById('ongoing-notes-status').textContent);i++)await wait(30);
+    for(let i=0;i<100&&!/Imported/.test(document.getElementById('notes-status').textContent);i++)await wait(30);
     const valves=n.get('Tags One > Valves'),plain=n.get('Tags One > Plain');
-    return {question,status:document.getElementById('ongoing-notes-status').textContent,open:document.querySelector('#library-notes-editor .library-notes-editor-title')?.textContent,
+    return {question,status:document.getElementById('notes-status').textContent,open:document.querySelector('#library-notes-editor .library-notes-editor-title')?.textContent,
       valves:!!valves&&valves.text.startsWith('WG1:')&&valves.text.includes('"Heading"')&&valves.text.includes('"BulletList"')&&valves.text.includes('"Strong"'),plain:!!plain&&plain.text.includes('Two lines')};})()`);
   assert.deepEqual(imported,{question:true,status:'Imported 2 notes. Not imported: Scan.pdf (not a .txt or .md file).',open:'Valves',valves:true,plain:true});
   result.checks.importTextAndMarkdownFiles=true;
@@ -480,10 +480,10 @@ try{
   const phone=await page.evaluate(`(async()=>{
     const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),shown=selector=>{const el=document.querySelector(selector);return !!el&&getComputedStyle(el).display!=='none'&&el.getBoundingClientRect().height>0;};
     const before={list:shown('.library-notes-nav'),note:shown('#library-notes-editor')};
-    [...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='zeta filled').click();await wait(60);
+    [...document.querySelectorAll('[data-note-key]')].find(item=>item.dataset.noteKey==='zeta filled').click();await wait(60);
     const open={list:shown('.library-notes-nav'),note:shown('#library-notes-editor'),back:shown('#library-notes-editor .library-notes-back'),menuTarget:(()=>{const r=document.getElementById('library-note-actions').getBoundingClientRect();return r.width>=44&&r.height>=44;})(),width:Math.round(document.getElementById('library-notes-editor').getBoundingClientRect().width),grid:Math.round(document.querySelector('.library-notes-grid').getBoundingClientRect().width)};
     document.querySelector('#library-notes-editor .library-notes-back').click();await wait(80);
-    return {before,open,after:{list:shown('.library-notes-nav'),note:shown('#library-notes-editor'),focused:document.activeElement?.dataset?.ongoingNoteKey||''},overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth};
+    return {before,open,after:{list:shown('.library-notes-nav'),note:shown('#library-notes-editor'),focused:document.activeElement?.dataset?.noteKey||''},overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth};
   })()`);
   assert.deepEqual(phone.before,{list:true,note:false});
   assert.deepEqual({...phone.open,width:undefined,grid:undefined},{list:false,note:true,back:true,menuTarget:true,width:undefined,grid:undefined});assert.ok(Math.abs(phone.open.width-phone.open.grid)<=2,'the open note uses the full width');
@@ -495,17 +495,17 @@ try{
   result.checks.glassStickyControlsAndCompactBackupActions=true;
 
   // A long mobile note must scroll internally without trapping the surrounding Library page at its boundaries.
-  await page.evaluate(`(async()=>{const d=__PWA6,current=d.AppData.notes.get('zeta filled'),text=Array.from({length:140},(_,i)=>'Boundary paragraph '+(i+1)+' — durable library scrolling evidence.').join('\\n\\n');d.AppData.notes.update('zeta filled','Zeta Filled',text,current?.updatedAt||'');await d.AppData.notes.flush();d.LibraryView.refreshNotes();const row=[...document.querySelectorAll('[data-ongoing-note-key]')].find(item=>item.dataset.ongoingNoteKey==='zeta filled');row?.click();})()`);
+  await page.evaluate(`(async()=>{const d=__PWA6,current=d.AppData.notes.get('zeta filled'),text=Array.from({length:140},(_,i)=>'Boundary paragraph '+(i+1)+' — durable library scrolling evidence.').join('\\n\\n');d.AppData.notes.update('zeta filled','Zeta Filled',text,current?.updatedAt||'');await d.AppData.notes.flush();d.LibraryView.refreshNotes();const row=[...document.querySelectorAll('[data-note-key]')].find(item=>item.dataset.noteKey==='zeta filled');row?.click();})()`);
   await waitFor(()=>page.evaluate(`(()=>{const scroller=document.querySelector('#library-notes-editor wg-scroller');return !!scroller&&scroller.scrollHeight>scroller.clientHeight+20})()`),{label:'long-note internal scroll range'});
   const scrollBoundary=await page.evaluate(`(()=>{const inner=document.querySelector('#library-notes-editor wg-scroller'),drawer=document.getElementById('library-notes'),tail=document.createElement('div');tail.dataset.qaScrollTail='true';tail.style.height='900px';drawer.after(tail);let outer=drawer.parentElement;while(outer&&!(outer.scrollHeight>outer.clientHeight+1&&/auto|scroll/.test(getComputedStyle(outer).overflowY)))outer=outer.parentElement;outer=outer||document.scrollingElement;const innerMax=Math.max(0,inner.scrollHeight-inner.clientHeight);inner.scrollTop=0;const top=inner.scrollTop;inner.scrollTop=innerMax;const bottom=inner.scrollTop;const outerMax=Math.max(0,outer.scrollHeight-outer.clientHeight);outer.scrollTop=Math.min(Math.max(0,outerMax-180),Math.max(0,drawer.offsetTop));const before=outer.scrollTop;outer.scrollTop=Math.min(outerMax,before+180);const after=outer.scrollTop;return {innerMax,top,bottom,overscroll:getComputedStyle(inner).overscrollBehaviorY,outerMax,before,after}})()`);
   assert.ok(scrollBoundary.innerMax>20,'Long note must provide a real internal scroll range.');assert.equal(scrollBoundary.top,0);assert.ok(Math.abs(scrollBoundary.bottom-scrollBoundary.innerMax)<=1,'Long note must reach its bottom boundary.');assert.notEqual(scrollBoundary.overscroll,'contain','Note editor must not trap scroll chaining at its boundaries.');assert.ok(scrollBoundary.outerMax>scrollBoundary.before&&scrollBoundary.after>scrollBoundary.before,'Library page must remain independently scrollable around the long note.');
   result.checks.mobileLongNoteScrollBoundaryHandoff=true;
 
-  result.metrics.finalAreaNotes=Object.keys(await page.evaluate(`__PWA6.AppData.notes.exportPayload()`)).length;
+  result.metrics.finalNotes=Object.keys(await page.evaluate(`__PWA6.AppData.notes.exportPayload()`)).length;
   const unexpected=(page.events||[]).filter(event=>!/ResizeObserver loop|favicon/i.test(event.text));assert.deepEqual(unexpected,[]);
 }finally{
   if(page)await browser.closePage(page);await browser.close();await server.close();
 }
 
-writeArtifact('ongoing-notes-management-results.json',JSON.stringify(result,null,2)+'\n');
+writeArtifact('notes-management-results.json',JSON.stringify(result,null,2)+'\n');
 console.log(JSON.stringify(result,null,2));

@@ -9,7 +9,7 @@ for(const file of ['source/core/internal.js','source/core/reconciliation-baselin
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],BaselineModule=registry.require('reconciliation-baseline',1),freeze=Object.freeze;
 const sharedStores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()};
 const harness=createHarness(new Map(),sharedStores),gateway=harness.appMetaGateway;
-const limits=freeze({maxAreaNameChars:160,maxRichTextBytes:2*1024*1024,maxOngoingNotes:1000});
+const limits=freeze({maxAreaNameChars:160,maxRichTextBytes:2*1024*1024,maxNotes:1000});
 const codec=BaselineModule.createCodec(freeze({limits,isNoteKey:noteKeys.isKey}));
 // The base holds notes under their stored keys (ids).
 const E=noteId('Ethics'),P=noteId('Polity'),S=noteId('Essay'),M=noteId('Missing');

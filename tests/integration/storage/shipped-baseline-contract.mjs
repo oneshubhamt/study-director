@@ -21,9 +21,11 @@ for(const [id,old] of Object.entries(BASELINE.indexedDb.stores)){
     assert.equal(OBSOLETE_INDEXED_DB.stores[id],old.name,`${id} must be explicitly retired`);
     continue;
   }
-  const current=INDEXED_DB.stores[id];
+  // A renamed store keeps its rows; the upgrade gives it its current name.
+  const renamedTo=Object.keys(OBSOLETE_INDEXED_DB.renamedStores).find(current=>OBSOLETE_INDEXED_DB.renamedStores[current]===old.name);
+  const current=INDEXED_DB.stores[renamedTo||id];
   assert.ok(current,`Shipped baseline store ${id} has no current home`);
-  assert.equal(current.name,old.name,`Shipped baseline store ${id} identity drifted`);
+  assert.equal(current.name,renamedTo?INDEXED_DB.stores[renamedTo].name:old.name,`Shipped baseline store ${id} identity drifted`);
   assert.ok(current.schemaVersion>=old.schemaVersion,`Shipped baseline store ${id} schema regressed`);
 }
 
@@ -32,7 +34,7 @@ assert.equal(BASELINE.localStorage.length,26,'Fixture must retain every shipped-
 for(const key of BASELINE.localStorage)assert.ok(durableKeys.has(key),`Shipped-baseline LocalStorage identity is unaccounted for: ${key}`);
 
 const currentMeta=new Set(Object.values(APP_META_KEYS));
-const obsoleteMeta=new Set([...Object.values(OBSOLETE_APP_META_KEYS),...Object.values(RENAMED_APP_META_KEYS)]);
+const obsoleteMeta=new Set([...Object.values(OBSOLETE_APP_META_KEYS),...Object.values(RENAMED_APP_META_KEYS).flat()]);
 for(const key of BASELINE.appMeta){
   if(key==='backupProviderOperation:'){
     assert.match(compatibilityHost,/LEGACY_BACKUP_PROVIDER_OPERATION_PREFIX='backupProviderOperation:'/u);
@@ -42,11 +44,11 @@ for(const key of BASELINE.appMeta){
 }
 
 const compatibilityIds=new Set(allCompatibilityEntries().map(entry=>entry.id));
-for(const id of ['daily-record-historical-shapes','active-session-v7-domain-separation','area-note-historical-rows','r10-indexeddb-topology-retirement','l7-host-metadata-normalization','complete-backup-v7-v19']){
+for(const id of ['daily-record-historical-shapes','active-session-v7-domain-separation','note-historical-rows','r10-indexeddb-topology-retirement','l7-host-metadata-normalization','complete-backup-v7-v19']){
   assert.ok(compatibilityIds.has(id),`Shipped-baseline compatibility path is not inventoried: ${id}`);
 }
 assert.ok(BASELINE.external.backupMetadataVersion>=7&&BASELINE.external.backupMetadataVersion<=16);
-assert.match(backupCodec,/!\[7,8,9,10,11,12,13,14,15,16,17,18,19,20,21\]\.includes\(version\)/u,'The shipped backup version must remain inside the isolated complete-backup compatibility range.');
+assert.match(backupCodec,/version>=7&&version<=DATA_CONTRACT\.schemas\.Backup\.version/u,'The shipped backup version must remain inside the isolated complete-backup compatibility range.');
 assert.doesNotMatch(exportsSource,/SDENC01|legacyDecryptBackup/u,'No encrypted backups exist in the retired SDENC01 format, so the app has no reader for it.');
 
 console.log(JSON.stringify({

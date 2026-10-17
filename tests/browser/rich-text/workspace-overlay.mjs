@@ -26,7 +26,7 @@ try{
   assert.ok(Math.abs(mobile.x)<=1&&Math.abs(mobile.y)<=1&&Math.abs(mobile.right)<=1&&Math.abs(mobile.bottom)<=1,JSON.stringify(mobile));assert.equal(Math.round(mobile.w),390,JSON.stringify(mobile));assert.equal(Math.round(mobile.h),700,JSON.stringify(mobile));assert.ok(mobile.close.w>=44&&mobile.close.h>=44,JSON.stringify(mobile));assert.ok(mobile.scrollWidth<=mobile.clientWidth+1,JSON.stringify(mobile));
   await page.tap('.workspace-overlay-close');await waitFor(()=>page.evaluate(`!document.querySelector('dialog.workspace-overlay')`),{label:'mobile workspace overlay close'});
 
-  const surfaces=['reflection','ongoing-note','execute-note'];
+  const surfaces=['reflection','note','execute-note'];
   const viewports=[
     {label:'laptop',width:1440,height:768,mobile:false,scale:1},
     {label:'tablet',width:1024,height:1366,mobile:true,scale:2},

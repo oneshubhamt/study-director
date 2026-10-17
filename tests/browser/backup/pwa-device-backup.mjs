@@ -137,8 +137,8 @@ try{
     const notes=debug.AppData.notes,current=notes.get(${JSON.stringify(noteKey)},'Reliability');notes.update(current.key,'Reliability','Text after an accident',current.updatedAt);await notes.flush({strict:true});
   })()`);
   await page.evaluate(`(()=>{document.querySelector('[data-tab="library"]').click();document.getElementById('library-tab-notes').click();})()`);
-  await waitFor(()=>page.evaluate(`[...document.querySelectorAll('[data-ongoing-note-key]')].some(row=>row.dataset.ongoingNoteKey===${JSON.stringify(noteKey)})`),{label:'note listed in the Library'});
-  await page.evaluate(`[...document.querySelectorAll('[data-ongoing-note-key]')].find(row=>row.dataset.ongoingNoteKey===${JSON.stringify(noteKey)}).click()`);
+  await waitFor(()=>page.evaluate(`[...document.querySelectorAll('[data-note-key]')].some(row=>row.dataset.noteKey===${JSON.stringify(noteKey)})`),{label:'note listed in the Library'});
+  await page.evaluate(`[...document.querySelectorAll('[data-note-key]')].find(row=>row.dataset.noteKey===${JSON.stringify(noteKey)}).click()`);
   await waitFor(()=>page.evaluate(`!!document.getElementById('library-note-actions')`),{label:'open note menu'});
   await page.evaluate(`(()=>{document.getElementById('library-note-actions').click();document.getElementById('library-note-versions').click();})()`);
   await waitFor(()=>page.evaluate(`!!document.querySelector('#managed-version-history [data-action="compare-managed-note"][data-version-history-checkpoint="${noteCheckpoint}"]')`),{timeout:60000,label:'note versions listed during the session'});
@@ -151,7 +151,7 @@ try{
   await page.evaluate(`document.querySelector('dialog.sd-note-reconcile-dialog[open] .sd-note-reconcile-apply').click()`);
   await waitFor(()=>page.evaluate(`/Version kept in the backup/.test(__DeviceBackupDebug.AppData.notes.get(${JSON.stringify(noteKey)},'Reliability')?.text||'')`),{timeout:90000,label:'note restored from the earlier version'});
   await sleep(1500);
-  const afterNoteRestore=await page.evaluate(`({mode:__DeviceBackupDebug.TimerState.mode,running:__DeviceBackupDebug.TIMER_MODES.RUNNING,gap:__DeviceBackupDebug.TimerState.inactiveGap,status:document.getElementById('ongoing-notes-status')?.textContent||''})`);
+  const afterNoteRestore=await page.evaluate(`({mode:__DeviceBackupDebug.TimerState.mode,running:__DeviceBackupDebug.TIMER_MODES.RUNNING,gap:__DeviceBackupDebug.TimerState.inactiveGap,status:document.getElementById('notes-status')?.textContent||''})`);
   assert.equal(afterNoteRestore.mode,afterNoteRestore.running,'the study timer keeps running through a note restore');
   assert.equal(afterNoteRestore.gap,null,'a note restore is not time away');
   assert.match(afterNoteRestore.status,/Restored “Reliability” from the backup of/u);

@@ -356,20 +356,20 @@ function createDiaryRecord(date,reflection,options={}){
 // A note's key is its permanent id, given when it is created and never
 // changed by a rename or move; its title is the label. A deleted note keeps
 // its id behind the trash prefix until it is restored or its retention ends.
-const NOTE_ID_PATTERN=/^n_[0-9a-f]{16}$/u,NOTE_TRASH_PREFIX=String(DATA_CONTRACT.schemas.AreaNote.trashKeyPrefix||'');
-const areaNoteKeys=freeze({
+const NOTE_ID_PATTERN=/^n_[0-9a-f]{16}$/u,NOTE_TRASH_PREFIX=String(DATA_CONTRACT.schemas.Note.trashKeyPrefix||'');
+const noteKeys=freeze({
   isId:value=>NOTE_ID_PATTERN.test(String(value||'')),
   isTrash:value=>String(value||'').startsWith(NOTE_TRASH_PREFIX)&&NOTE_ID_PATTERN.test(String(value).slice(NOTE_TRASH_PREFIX.length)),
-  isKey:value=>areaNoteKeys.isId(value)||areaNoteKeys.isTrash(value),
-  trash:id=>areaNoteKeys.isId(id)?NOTE_TRASH_PREFIX+id:'',
-  id:key=>areaNoteKeys.isTrash(key)?String(key).slice(NOTE_TRASH_PREFIX.length):areaNoteKeys.isId(key)?String(key):''
+  isKey:value=>noteKeys.isId(value)||noteKeys.isTrash(value),
+  trash:id=>noteKeys.isId(id)?NOTE_TRASH_PREFIX+id:'',
+  id:key=>noteKeys.isTrash(key)?String(key).slice(NOTE_TRASH_PREFIX.length):noteKeys.isId(key)?String(key):''
 });
 // links, when present, lists the other notes on the note's bar by id: never
 // empty, never the note itself, no repeats.
 function noteLinks(value,key){
   if(!Array.isArray(value)||!value.length||value.length>APP_LIMITS.maxNoteLinks)return null;
-  const self=areaNoteKeys.id(key),seen=new Set();
-  for(const id of value){if(!areaNoteKeys.isId(id)||id===self||seen.has(id))return null;seen.add(id);}
+  const self=noteKeys.id(key),seen=new Set();
+  for(const id of value){if(!noteKeys.isId(id)||id===self||seen.has(id))return null;seen.add(id);}
   return [...value];
 }
 // A note's text is checked once: the text last found sound for each note is
@@ -381,18 +381,18 @@ function noteText(key,value){
   const known=soundNoteText.get(key);if(known!==undefined&&known===value){soundNoteText.delete(key);soundNoteText.set(key,known);return known;}
   const text=optionalEditorContent(value,APP_LIMITS.maxNoteChars);if(text===null)return null;
   soundNoteText.delete(key);soundNoteText.set(key,text);
-  if(soundNoteText.size>APP_LIMITS.maxOngoingNotes)soundNoteText.delete(soundNoteText.keys().next().value);
+  if(soundNoteText.size>APP_LIMITS.maxNotes)soundNoteText.delete(soundNoteText.keys().next().value);
   return text;
 }
-function sanitizeCurrentAreaNote(value,keyHint=''){
-  const source=value&&typeof value==='object'&&!Array.isArray(value)?value:null;if(!source||Number(source.version)!==DATA_CONTRACT.schemas.AreaNote.version)return null;
+function sanitizeCurrentNote(value,keyHint=''){
+  const source=value&&typeof value==='object'&&!Array.isArray(value)?value:null;if(!source||Number(source.version)!==DATA_CONTRACT.schemas.Note.version)return null;
   const expected=['version','key','label','text','updatedAt',...('links' in source?['links']:[])];
   if(Object.keys(source).sort().join('|')!==expected.sort().join('|'))return null;
   const key=String(source.key||keyHint||''),label=optionalText(source.label,APP_LIMITS.maxAreaNameChars),text=noteText(key,source.text);
-  if(!areaNoteKeys.isKey(key)||label===null||!normalizeAreaName(label)||text===null)return null;
+  if(!noteKeys.isKey(key)||label===null||!normalizeAreaName(label)||text===null)return null;
   const updatedAt=normalizeImportedTimestamp(source.updatedAt,null);if(!updatedAt)return null;
   const links='links' in source?noteLinks(source.links,key):undefined;if(links===null)return null;
-  const clean={version:DATA_CONTRACT.schemas.AreaNote.version,key,label,text,updatedAt,...(links?{links}:{})};
+  const clean={version:DATA_CONTRACT.schemas.Note.version,key,label,text,updatedAt,...(links?{links}:{})};
   return sameDataValue(source,clean)?clean:null;
 }
 function dailyResultAdjustedEnd(entry,result){
@@ -474,7 +474,7 @@ function materializeDailyRecordSummary(summary){
       buildDailyRecordSummary,compactPauseEvents,compactRealTimeSnapshot,
       sanitizeTimerRuntimePayload,compactAdjustedSchedule,normalizeDailyResultEntry,
       dailyRecordMetricsFromEvidence,sanitizeCurrentDailyRecord,createDiaryRecord,
-      sanitizeCurrentAreaNote,areaNoteKeys,materializeDailyRecordView,sanitizeDailyRecordSummary,materializeDailyRecordSummary,isSupportedSavedDate
+      sanitizeCurrentNote,noteKeys,materializeDailyRecordView,sanitizeDailyRecordSummary,materializeDailyRecordSummary,isSupportedSavedDate
     });
   }
   function createActiveSessionCodec(input){

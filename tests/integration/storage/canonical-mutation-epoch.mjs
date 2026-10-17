@@ -62,7 +62,7 @@ await assertAdvances('Daily Record save',()=>app.dailyRecords.save({version:1,da
 await app.notes.load();
 const noteChange=app.notes.update('general','General','epoch note','');
 assert.equal(noteChange.status,'changed');
-const generalUnit=`areaNote:${app.notes.get('general').id}`;
+const generalUnit=`note:${app.notes.get('general').id}`;
 await assertAdvances('Note canonical flush',()=>app.notes.flush({strict:true}),generalUnit);
 
 await assertAdvances('Review-state Active Session save',()=>app.activeSession.save({id:'active',revision:1,date:'2026-09-22',status:'active',scheduleText:'',snapshot:{elapsedMs:1,review:{reflection:'draft',studyQuality:null}},updatedAt:'2026-09-22T04:45:02.000Z'}),'activeSession');
@@ -83,14 +83,14 @@ await assertAdvances('Backup-capture Plan draft save',()=>app.planData.writeDraf
 assert.equal(commits.at(-1).entityType,'planData');assert.equal(commits.at(-1).backupCapture,true);
 const backupNoteBase=app.notes.get('general');const backupNoteChange=app.notes.update('general','General','epoch note captured',backupNoteBase.updatedAt);assert.equal(backupNoteChange.status,'changed');
 await assertAdvances('Backup-capture note flush',()=>app.notes.flush({strict:true,backupCapture:true}),generalUnit);
-assert.equal(commits.at(-1).entityType,'areaNote');assert.equal(commits.at(-1).backupCapture,true);
+assert.equal(commits.at(-1).entityType,'note');assert.equal(commits.at(-1).backupCapture,true);
 await assertAdvances('Backup-capture Daily Record save',()=>app.dailyRecords.save({version:1,date:'2026-09-22',reflection:'captured diary',updatedAt:'2026-09-22T04:45:06.000Z',savedAt:'2026-09-22T04:45:01.000Z'},{backupCapture:true}),'dailyRecordPack:2026-09');
 assert.equal(commits.at(-1).entityType,'dailyRecord');assert.equal(commits.at(-1).backupCapture,true);
 await assertAdvances('Backup-capture Portable preference save',()=>app.personalPreferences.write({studentName:'Epoch Capture',theme:'glass',presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null},{backupCapture:true}),'personalData');
 assert.equal(commits.at(-1).entityType,'planData');assert.equal(commits.at(-1).backupCapture,true);
 
 await assertAdvances('Saved-Day deletion ledger replacement',()=>app.deletionRecovery.replaceSavedDays([{date:'2026-09-21',deletedAt:'2026-09-22T04:45:04.000Z'}]));
-await assertAdvances('Note deletion ledger replacement',()=>app.deletionRecovery.replaceAreaNotes([{key:noteId('old-note'),deletedAt:'2026-09-22T04:45:05.000Z'}]));
+await assertAdvances('Note deletion ledger replacement',()=>app.deletionRecovery.replaceNotes([{key:noteId('old-note'),deletedAt:'2026-09-22T04:45:05.000Z'}]));
 const assetId='att-aaaaaaaaaaaaaaaaaaaa';
 await assertAdvances('Attachment deletion ledger write',()=>app.deletionRecovery.recordAttachment(assetId,'2026-09-22T04:45:06.000Z'));
 await assertAdvances('Attachment deletion ledger clear',()=>app.deletionRecovery.clearAttachment(assetId));

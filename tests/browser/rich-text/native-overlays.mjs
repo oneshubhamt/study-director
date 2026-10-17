@@ -74,7 +74,7 @@ try{
   await waitForStudyDirector(page,{instrumented:true});
   await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`));
   await page.evaluate(`(()=>{const now=new Date(),time=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');document.getElementById('plan-input').value=time+' | 30 | Study | work | History | pages | 10';__PWA6.applySchedule({skipNotify:true});__PWA6.setCurrentTask(0,{force:true});__PWA6.goTab('execute');__PWA6.refreshPnote({force:true})})()`);
-  await waitFor(()=>page.evaluate(`document.querySelector('#pnote .sd-rte')!==null`),{label:'mounted ongoing-notes editor'});
+  await waitFor(()=>page.evaluate(`document.querySelector('#pnote .sd-rte')!==null`),{label:'mounted notes editor'});
   await page.click('#pn-info-btn');
   assert.equal(await page.evaluate(`document.getElementById('pn-info-popover').matches(':popover-open')`),true);
   await page.click('#display-tools-trigger');

@@ -3,11 +3,11 @@ import fs from 'node:fs';
 import {Worker} from 'node:worker_threads';
 import {performance} from 'node:perf_hooks';
 import {PERFORMANCE_BUDGETS} from '../../../contracts/performance-budgets.mjs';
-import {createAreaNoteSnapshotHarness} from '../../helpers/area-note-snapshot-harness.mjs';
+import {createNoteSnapshotHarness} from '../../helpers/note-snapshot-harness.mjs';
 
 const read=file=>fs.readFileSync(new URL('../../../'+file,import.meta.url),'utf8');
 const workerSource=read('source/external/search-worker.js');
-const areaNotesRepository=read('source/core/repositories-area-notes.js');
+const notesRepository=read('source/core/repositories-notes.js');
 
 // The note limit, with ten million words between them.
 const NOTES=2000,WORDS_PER_NOTE=5000,BATCH_CHARS=2*1024*1024;
@@ -24,12 +24,12 @@ function makeDocument(i){
 
 // Search finds notes by their title key, the label normalised.
 const canonicalEntries=Array.from({length:NOTES},(_,i)=>{const row=makeDocument(i);return {key:row.key,label:`Area ${i}`,text:row.value,updatedAt:row.revision}});
-const hostHarness=createAreaNoteSnapshotHarness(areaNotesRepository,canonicalEntries);
+const hostHarness=createNoteSnapshotHarness(notesRepository,canonicalEntries);
 let hostStart=performance.now();const hostSnapshot=hostHarness.api.searchSnapshot();const hostColdSnapshotMs=performance.now()-hostStart;
 const documents=hostSnapshot.documents;
 const hostHotSamples=[];for(let i=0;i<100;i++){hostStart=performance.now();assert.strictEqual(hostHarness.api.searchSnapshot(),hostSnapshot);hostHotSamples.push(performance.now()-hostStart)}
 hostHotSamples.sort((a,b)=>a-b);const hostHotSnapshotP95=hostHotSamples[Math.floor(hostHotSamples.length*.95)];
-assert.ok(hostHotSnapshotP95<PERFORMANCE_BUDGETS.ongoingNotesHostSnapshotHotP95Ms,`Extreme host snapshot p95 ${hostHotSnapshotP95.toFixed(3)} ms indicates cache loss.`);
+assert.ok(hostHotSnapshotP95<PERFORMANCE_BUDGETS.notesHostSnapshotHotP95Ms,`Extreme host snapshot p95 ${hostHotSnapshotP95.toFixed(3)} ms indicates cache loss.`);
 const serializedBytes=documents.reduce((sum,row)=>sum+Buffer.byteLength(row.value),0);
 assert.ok(documents.every(row=>row.value.length<70000),'Fixture must remain inside the production note character ceiling.');
 
@@ -88,9 +88,9 @@ hotSamples.sort((a,b)=>a-b);
 const hotP95=hotSamples[Math.floor(hotSamples.length*.95)];
 
 // These are catastrophic-regression guards, not optimisation targets. Normal results are far below them.
-assert.ok(coldIndexMs<PERFORMANCE_BUDGETS.ongoingNotesExtremeColdMs,`Extreme cold index ${coldIndexMs.toFixed(1)} ms indicates a scaling regression.`);
-assert.ok(hotP95<PERFORMANCE_BUDGETS.ongoingNotesExtremeHotP95Ms,`Extreme hot-query p95 ${hotP95.toFixed(1)} ms is no longer interactively responsive.`);
-assert.ok(maxPostMs<PERFORMANCE_BUDGETS.ongoingNotesExtremePostMs,`A bounded Worker post blocked for ${maxPostMs.toFixed(1)} ms.`);
+assert.ok(coldIndexMs<PERFORMANCE_BUDGETS.notesExtremeColdMs,`Extreme cold index ${coldIndexMs.toFixed(1)} ms indicates a scaling regression.`);
+assert.ok(hotP95<PERFORMANCE_BUDGETS.notesExtremeHotP95Ms,`Extreme hot-query p95 ${hotP95.toFixed(1)} ms is no longer interactively responsive.`);
+assert.ok(maxPostMs<PERFORMANCE_BUDGETS.notesExtremePostMs,`A bounded Worker post blocked for ${maxPostMs.toFixed(1)} ms.`);
 
 const report={
   status:'PASS',suite:'search-worker-extreme',notes:NOTES,wordsPerNote:WORDS_PER_NOTE,totalWords:NOTES*WORDS_PER_NOTE,

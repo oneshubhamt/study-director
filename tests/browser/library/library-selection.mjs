@@ -15,7 +15,7 @@ try{
   await page.evaluate(internal+'\n'+noticeSource+'\n'+librarySource,{returnByValue:false});
   await page.evaluate(`(()=>{const style=document.createElement('style');style.textContent=${JSON.stringify(coreCss)};document.head.appendChild(style);})()`);
   await page.evaluate(`(()=>{
-    document.body.innerHTML='<div class="pane on" id="pane-library"><section class="library-notes-section" id="library-notes"><span id="library-notes-summary-count"></span><input id="library-notes-search"><div class="library-notes-grid"><nav class="library-notes-nav" style="width:252px"><div class="library-notes-nav-head"><span class="library-notes-nav-title"><span class="ui-label">Areas</span><span class="library-note-selection-count" id="library-note-selection-count" hidden>0 selected</span></span><span class="library-notes-nav-tools"><button class="library-note-action ui-btn" id="library-note-select">Export</button><button class="library-note-action ui-btn" id="library-note-select-all" hidden>All</button><button class="library-note-action ui-btn" id="library-note-selection-clear" hidden>Clear</button><span class="library-note-selection-actions"><button class="library-note-action ui-btn" id="library-note-export" hidden disabled>Export</button><button class="library-note-action ui-btn library-note-selection-cancel" id="library-note-select-cancel" hidden>×</button></span><button class="library-note-tool ui-btn" id="library-note-add">+</button><span class="library-notes-nav-count" id="library-notes-nav-count"></span></span></div><div id="library-notes-list"></div></nav><section class="library-notes-editor" id="library-notes-editor"></section></div><div id="ongoing-notes-status"></div></section></div>';
+    document.body.innerHTML='<div class="pane on" id="pane-library"><section class="library-notes-section" id="library-notes"><span id="library-notes-summary-count"></span><input id="library-notes-search"><div class="library-notes-grid"><nav class="library-notes-nav" style="width:252px"><div class="library-notes-nav-head"><span class="library-notes-nav-title"><span class="ui-label">Areas</span><span class="library-note-selection-count" id="library-note-selection-count" hidden>0 selected</span></span><span class="library-notes-nav-tools"><button class="library-note-action ui-btn" id="library-note-select">Export</button><button class="library-note-action ui-btn" id="library-note-select-all" hidden>All</button><button class="library-note-action ui-btn" id="library-note-selection-clear" hidden>Clear</button><span class="library-note-selection-actions"><button class="library-note-action ui-btn" id="library-note-export" hidden disabled>Export</button><button class="library-note-action ui-btn library-note-selection-cancel" id="library-note-select-cancel" hidden>×</button></span><button class="library-note-tool ui-btn" id="library-note-add">+</button><span class="library-notes-nav-count" id="library-notes-nav-count"></span></span></div><div id="library-notes-list"></div></nav><section class="library-notes-editor" id="library-notes-editor"></section></div><div id="notes-status"></div></section></div>';
     const freeze=Object.freeze;
     const entries=[
       freeze({key:'geography',label:'Geography',text:'Geo note',hasNote:true,current:false,support:false,depth:0}),
@@ -53,19 +53,19 @@ try{
   // note starts closed, and opens on its twisty or the Right arrow key.
   await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-notes-list .library-note-nav-item').length===3`),{label:'library note rows'});
   assert.equal(await page.evaluate(`!!document.querySelector('#library-notes-editor textarea')`),true,'Normal Library mode must remain editable.');
-  const tree=await page.evaluate(`(()=>{const list=document.getElementById('library-notes-list'),rows=[...list.querySelectorAll('[role="treeitem"]')];return {role:list.getAttribute('role'),keys:rows.map(row=>row.dataset.ongoingNoteKey),branch:rows.find(row=>row.dataset.ongoingNoteKey==='core-subject').getAttribute('aria-expanded'),tabbable:rows.filter(row=>row.tabIndex===0).map(row=>row.dataset.ongoingNoteKey)};})()`);
+  const tree=await page.evaluate(`(()=>{const list=document.getElementById('library-notes-list'),rows=[...list.querySelectorAll('[role="treeitem"]')];return {role:list.getAttribute('role'),keys:rows.map(row=>row.dataset.noteKey),branch:rows.find(row=>row.dataset.noteKey==='core-subject').getAttribute('aria-expanded'),tabbable:rows.filter(row=>row.tabIndex===0).map(row=>row.dataset.noteKey)};})()`);
   assert.deepEqual(tree,{role:'tree',keys:['geography','core-subject','ethics'],branch:'false',tabbable:['geography']});
-  await page.evaluate(`document.querySelector('[data-ongoing-note-key="core-subject"] .library-note-twisty').click()`);
+  await page.evaluate(`document.querySelector('[data-note-key="core-subject"] .library-note-twisty').click()`);
   await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-notes-list [role="treeitem"]').length===5`),{label:'branch opens'});
-  await page.evaluate(`(()=>{const row=document.querySelector('[data-ongoing-note-key="core-subject"]');row.focus();row.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));})()`);
+  await page.evaluate(`(()=>{const row=document.querySelector('[data-note-key="core-subject"]');row.focus();row.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));})()`);
   await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-notes-list [role="treeitem"]').length===3`),{label:'Left closes the branch'});
-  assert.equal(await page.evaluate(`document.activeElement?.dataset.ongoingNoteKey`),'core-subject','focus stays on the branch');
+  assert.equal(await page.evaluate(`document.activeElement?.dataset.noteKey`),'core-subject','focus stays on the branch');
   await page.evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}))`);
   await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-notes-list [role="treeitem"]').length===5`),{label:'Right opens the branch'});
   await page.evaluate(`(()=>{document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()`);
   await waitFor(()=>page.evaluate(`document.querySelector('#library-notes-editor .library-notes-editor-title')?.textContent==='Polity'`),{label:'Enter opens a note'});
-  assert.equal(await page.evaluate(`document.activeElement?.dataset.ongoingNoteKey`),'polity','focus stays in the tree after opening');
-  await page.evaluate(`[...document.querySelectorAll('[data-ongoing-note-key]')].find(row=>row.dataset.ongoingNoteKey==='geography').click()`);
+  assert.equal(await page.evaluate(`document.activeElement?.dataset.noteKey`),'polity','focus stays in the tree after opening');
+  await page.evaluate(`[...document.querySelectorAll('[data-note-key]')].find(row=>row.dataset.noteKey==='geography').click()`);
   await waitFor(()=>page.evaluate(`document.querySelector('#library-notes-editor .library-notes-editor-title')?.textContent==='Geography'`),{label:'back to Geography'});
   result.checks.collapsibleKeyboardTree=true;
 
@@ -73,7 +73,7 @@ try{
   await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-notes-list .library-note-checkbox').length===5`),{label:'selection checkboxes'});
   assert.equal(await page.evaluate(`document.getElementById('library-note-selection-count').textContent`),'1 selected','The open saved note should be preselected.');
   assert.equal(await page.evaluate(`!!document.querySelector('#library-notes-editor textarea')`),false,'Selection mode must show a read-only preview rather than an editor.');
-  assert.equal(await page.evaluate(`document.querySelector('#library-notes-editor .library-ongoing-note-read')?.textContent.includes('Geo note')`),true);
+  assert.equal(await page.evaluate(`document.querySelector('#library-notes-editor .library-note-read')?.textContent.includes('Geo note')`),true);
   const headerState=await page.evaluate(`(()=>{const nav=document.querySelector('.library-notes-nav'),head=document.querySelector('.library-notes-nav-head'),areas=document.querySelector('.library-notes-nav-title .ui-label'),count=document.getElementById('library-note-selection-count'),ids=['library-note-select-all','library-note-selection-clear','library-note-export','library-note-select-cancel'];return {add:getComputedStyle(document.getElementById('library-note-add')).display,noteMenu:!!document.getElementById('library-note-actions'),navCount:getComputedStyle(document.getElementById('library-notes-nav-count')).display,countVisible:getComputedStyle(count).display,countAligned:Math.abs(areas.getBoundingClientRect().top-count.getBoundingClientRect().top)<8,actions:ids.map(id=>{const el=document.getElementById(id),r=el.getBoundingClientRect();return {id,display:getComputedStyle(el).display,left:r.left,right:r.right,width:r.width};}),nav:{left:nav.getBoundingClientRect().left,right:nav.getBoundingClientRect().right},headHeight:head.getBoundingClientRect().height,duplicateCounts:document.querySelectorAll('.library-note-selection-count').length};})()`);
   assert.equal(headerState.add,'none','Create must be absent from rendered export mode.');
   assert.equal(headerState.noteMenu,false,'Note actions are absent from the read-only export preview.');
@@ -93,11 +93,11 @@ try{
 
   await page.click('#library-note-selection-clear');
   await waitFor(()=>page.evaluate(`document.getElementById('library-note-selection-count').textContent==='0 selected'`),{label:'selection clear'});
-  const parentSelector='[data-ongoing-note-key="core-subject"] .library-note-checkbox';
+  const parentSelector='[data-note-key="core-subject"] .library-note-checkbox';
   assert.equal(await page.evaluate(`!document.querySelector('${parentSelector}').disabled`),true,'A parent with exportable descendants must be selectable.');
   await page.click(parentSelector);
   await waitFor(()=>page.evaluate(`document.getElementById('library-note-selection-count').textContent==='2 selected'`),{label:'parent subtree selection'});
-  await page.click('[data-ongoing-note-key="polity"] .library-note-checkbox');
+  await page.click('[data-note-key="polity"] .library-note-checkbox');
   await waitFor(()=>page.evaluate(`document.getElementById('library-note-selection-count').textContent==='1 selected'`),{label:'child deselection'});
   assert.equal(await page.evaluate(`document.querySelector('${parentSelector}').indeterminate`),true,'Parent checkbox must become indeterminate when only part of its subtree is selected.');
   result.checks.triStateSubtreeSelection=true;
@@ -112,7 +112,7 @@ try{
 
   await page.evaluate(`(()=>{const input=document.getElementById('library-notes-search');input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
   await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-notes-list .library-note-nav-item').length===5`),{label:'clear search'});
-  await page.click('[data-ongoing-note-key="ethics"] .library-note-select-copy');
+  await page.click('[data-note-key="ethics"] .library-note-select-copy');
   await waitFor(()=>page.evaluate(`document.querySelector('#library-notes-editor .library-notes-editor-title')?.textContent==='Ethics'`),{label:'selection preview navigation'});
   assert.equal(await page.evaluate(`document.getElementById('library-note-selection-count').textContent`),'4 selected');
   result.checks.previewNavigationDoesNotChangeSelection=true;
@@ -134,7 +134,7 @@ try{
   await page.click('#library-note-select-all');
   await page.evaluate(`window.__exportResult=Object.freeze({status:'too-large',notes:1,assets:0,maxBytes:128*1024*1024})`);
   await page.click('#library-note-export');
-  await waitFor(()=>page.evaluate(`document.getElementById('ongoing-notes-status').textContent.includes('128 MiB safety limit')`),{label:'export resource safety message'});
+  await waitFor(()=>page.evaluate(`document.getElementById('notes-status').textContent.includes('128 MiB safety limit')`),{label:'export resource safety message'});
   assert.equal(await page.evaluate(`document.getElementById('library-note-export').hidden`),false,'Oversized export must leave selection mode available for narrowing.');
   result.checks.exportResourceGateSurfaced=true;
 
@@ -145,11 +145,11 @@ try{
   await page.evaluate(`(()=>{document.getElementById('library-note-actions').click();document.getElementById('library-note-export-one').click();})()`);
   await waitFor(()=>page.evaluate(`window.__exports.length===${before}+1`),{label:'single note export'});
   assert.deepEqual(await page.evaluate(`window.__exports.at(-1)`),['ethics']);
-  await waitFor(()=>page.evaluate(`/Download started: “Ethics”/.test(document.getElementById('ongoing-notes-status').textContent)`),{label:'single export status'});
+  await waitFor(()=>page.evaluate(`/Download started: “Ethics”/.test(document.getElementById('notes-status').textContent)`),{label:'single export status'});
   result.checks.exportThisNote=true;
   // Earlier versions come from the backups; without one connected the note says so.
   await page.evaluate(`(()=>{document.getElementById('library-note-actions').click();document.getElementById('library-note-versions').click();})()`);
-  await waitFor(()=>page.evaluate(`/Earlier versions come from your backups/.test(document.getElementById('ongoing-notes-status').textContent)`),{label:'earlier versions without a backup'});
+  await waitFor(()=>page.evaluate(`/Earlier versions come from your backups/.test(document.getElementById('notes-status').textContent)`),{label:'earlier versions without a backup'});
   result.checks.earlierVersionsNeedBackup=true;
 
   const unexpected=page.events.filter(event=>!/favicon/i.test(event.text));assert.deepEqual(unexpected,[]);result.checks.noRuntimeErrors=true;

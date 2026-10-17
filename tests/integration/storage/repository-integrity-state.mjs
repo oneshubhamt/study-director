@@ -96,7 +96,7 @@ await test('the ordinary validator accepts only the current record; older versio
   const h=fixture(),context=h.context;
   for(const file of ['source/core/host-metadata.js'])vm.runInContext(fs.readFileSync(file,'utf8'),context);
   vm.runInContext(app.slice(app.indexOf('function sameDataValue('),app.indexOf('function normalizeStudyQuality(')),context);
-  const module=context[Symbol.for('studyDirector.internalModules.v1')].require('host-metadata',1),names=['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix'];
+  const module=context[Symbol.for('studyDirector.internalModules.v1')].require('host-metadata',1),names=['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix'];
   const validators=module.createAppMetaValidators(Object.freeze({keys:Object.freeze(Object.fromEntries(names.map(name=>[name,name]))),same:context.sameDataValue,normalizers:Object.freeze({verifiedRecovery:value=>value,attachmentIntegrity:value=>value,repositoryIntegrity:context.normalizeRepositoryIntegrityState,reconciliationBase:value=>value,reconciliationBaseNote:value=>value})}));
   const validate=value=>validators.repositoryIntegrityScrub(value,{key:'repositoryIntegrityScrub'});
   assert.equal(h.state.durable.version,7);assert.equal(validate(h.state.durable),true);

@@ -16,7 +16,7 @@ registry.define('backup',1,input=>{
   const Canonical=input.canonical,ManagedRepositoryModule=input.managedRepository,BackupProviderModule=input.backupProvider,RepositoryBackgroundModule=input.repositoryBackground,BackupCaptureModule=input.backupCapture;
   const PORT_FIELDS=freeze({
     configuration:freeze(['appVersion','backupVersion','limits']),
-    persistence:freeze(['activeSessionLoad','activeSessionSave','activeSessionClear','activeSessionSettled','dailyRecordBackupDates','dailyRecordBackupMonth','dailyRecordDocuments','dailyRecordImportBatches','dailyRecordRemove','dailyRecordTimestamp','notesExportPayload','notesReadFreshPayload','notesReadFreshItems','notesFlush','notesNormalizePayload','notesAlignByTitle','notesTrashKey','notesFailure','restoreJournalPrepare','restoreJournalRead','restoreJournalMark','restoreJournalClear','scheduleRead','personalSettle','personalExport','personalImport','personalVerify','sourceRevision','snapshotRevision','storageGeneration','canonicalMutationEpochRead','canonicalPreparationRebase','preparationUnitStamps','preparationUnitReplace','installationId','deletionRecoveryFlush','deletionRecoverySavedDays','deletionRecoveryReplaceSavedDays','deletionRecoveryAreaNotes','deletionRecoveryReplaceAreaNotes','deletionRecoveryAttachments','deletionRecoveryReplaceAttachments','deletionRecoveryClearAttachment','reconciliationBaseRead','reconciliationBaseReadNotes','reconciliationBaseWrite']),
+    persistence:freeze(['activeSessionLoad','activeSessionSave','activeSessionClear','activeSessionSettled','dailyRecordBackupDates','dailyRecordBackupMonth','dailyRecordDocuments','dailyRecordImportBatches','dailyRecordRemove','dailyRecordTimestamp','notesExportPayload','notesReadFreshPayload','notesReadFreshItems','notesFlush','notesNormalizePayload','notesAlignByTitle','notesTrashKey','notesFailure','restoreJournalPrepare','restoreJournalRead','restoreJournalMark','restoreJournalClear','scheduleRead','personalSettle','personalExport','personalImport','personalVerify','sourceRevision','snapshotRevision','storageGeneration','canonicalMutationEpochRead','canonicalPreparationRebase','preparationUnitStamps','preparationUnitReplace','installationId','deletionRecoveryFlush','deletionRecoverySavedDays','deletionRecoveryReplaceSavedDays','deletionRecoveryNotes','deletionRecoveryReplaceNotes','deletionRecoveryAttachments','deletionRecoveryReplaceAttachments','deletionRecoveryClearAttachment','reconciliationBaseRead','reconciliationBaseReadNotes','reconciliationBaseWrite']),
     codecs:freeze(['activeSession','backup']),
     reconciliation:freeze(['createPlan','resolvePlan','summarizePlan']),
     noteReconciliation:freeze(['resolve']),
@@ -24,7 +24,7 @@ registry.define('backup',1,input=>{
     session:freeze(['canMutate','cancelLiveDraftSave','captureSnapshot','hasActiveSession','hasTasks','toActiveSession','withPersistenceSuppressed']),
     domain:freeze(['clampText','filenameSafeStudentName','getStudentName','materializeDailyRecordView','sanitizeCurrentDailyRecord','todayISO']),
     view:freeze(['presentation','refreshPnote','refreshReview','renderSchedule']),
-    events:freeze(['libraryChanged','backupCompleted','reconcileAreaNotes','restoreAreaNotesSnapshot','restoreSessionState','verifyActiveSessionRuntime','restoredFromFile']),
+    events:freeze(['libraryChanged','backupCompleted','reconcileNotes','restoreNotesSnapshot','restoreSessionState','verifyActiveSessionRuntime','restoredFromFile']),
     operations:freeze(['assertAuthority','clearFault','failClosed','runExclusive']),
     interactions:freeze(['choose','configure','notify']),
     environment:freeze(['AbortController','clearTimeout','setTimeout','yieldTask']),
@@ -68,7 +68,7 @@ registry.define('backup',1,input=>{
       activeSessionLoad,activeSessionSave,activeSessionClear,activeSessionSettled,dailyRecordBackupDates,dailyRecordBackupMonth,dailyRecordDocuments,
       dailyRecordImportBatches,dailyRecordRemove,dailyRecordTimestamp,notesExportPayload,notesReadFreshPayload,notesReadFreshItems,notesFlush,
       notesNormalizePayload,notesAlignByTitle,notesTrashKey,notesFailure,restoreJournalPrepare,restoreJournalRead,
-      restoreJournalMark,restoreJournalClear,scheduleRead,personalSettle,personalExport,personalImport,personalVerify,canonicalMutationEpochRead,canonicalPreparationRebase,preparationUnitStamps,preparationUnitReplace,installationId,deletionRecoveryFlush,deletionRecoverySavedDays,deletionRecoveryReplaceSavedDays,deletionRecoveryAreaNotes,deletionRecoveryReplaceAreaNotes,deletionRecoveryAttachments,deletionRecoveryReplaceAttachments,deletionRecoveryClearAttachment,reconciliationBaseRead,reconciliationBaseReadNotes,reconciliationBaseWrite
+      restoreJournalMark,restoreJournalClear,scheduleRead,personalSettle,personalExport,personalImport,personalVerify,canonicalMutationEpochRead,canonicalPreparationRebase,preparationUnitStamps,preparationUnitReplace,installationId,deletionRecoveryFlush,deletionRecoverySavedDays,deletionRecoveryReplaceSavedDays,deletionRecoveryNotes,deletionRecoveryReplaceNotes,deletionRecoveryAttachments,deletionRecoveryReplaceAttachments,deletionRecoveryClearAttachment,reconciliationBaseRead,reconciliationBaseReadNotes,reconciliationBaseWrite
     }=ports.persistence;
     const {activeSession:ActiveSessionCodec,backup:BackupCodec}=ports.codecs;
     const Reconciliation=ports.reconciliation;
@@ -77,7 +77,7 @@ registry.define('backup',1,input=>{
     const {canMutate:appCanMutate,cancelLiveDraftSave,captureSnapshot:captureSessionSnapshot,hasActiveSession,hasTasks,toActiveSession:activeSessionPayload,withPersistenceSuppressed}=ports.session;
     const {clampText,filenameSafeStudentName,getStudentName:getStudentNameFromDisplay,materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO}=ports.domain;
     const {refreshPnote,refreshReview,renderSchedule:renderSched}=ports.view;
-    const {libraryChanged,backupCompleted,reconcileAreaNotes,restoreAreaNotesSnapshot,restoreSessionState,verifyActiveSessionRuntime,restoredFromFile}=ports.events;
+    const {libraryChanged,backupCompleted,reconcileNotes,restoreNotesSnapshot,restoreSessionState,verifyActiveSessionRuntime,restoredFromFile}=ports.events;
     const {assertAuthority,clearFault,failClosed,runExclusive}=ports.operations;
     const {choose,configure,notify}=ports.interactions;
     const {AbortController,clearTimeout,setTimeout,yieldTask}=ports.environment;
@@ -89,7 +89,7 @@ registry.define('backup',1,input=>{
       dailyRecords:freeze({backupDates:dailyRecordBackupDates,backupMonth:dailyRecordBackupMonth,documents:dailyRecordDocuments,importBatches:dailyRecordImportBatches,remove:dailyRecordRemove,timestamp:dailyRecordTimestamp}),
       notes:freeze({exportPayload:notesExportPayload,readFreshPayload:notesReadFreshPayload,readFreshItems:notesReadFreshItems,flush:notesFlush,normalizePayload:notesNormalizePayload,alignByTitle:notesAlignByTitle,failure:notesFailure}),
       restoreJournal:freeze({prepare:restoreJournalPrepare,read:restoreJournalRead,mark:restoreJournalMark,clear:restoreJournalClear}),
-      provenance:freeze({installationId}),mutationEpoch:freeze({read:canonicalMutationEpochRead,rebasePreparation:canonicalPreparationRebase}),preparationUnits:freeze({list:preparationUnitStamps,replace:preparationUnitReplace}),deletionRecovery:freeze({flush:deletionRecoveryFlush,savedDays:deletionRecoverySavedDays,replaceSavedDays:deletionRecoveryReplaceSavedDays,areaNotes:deletionRecoveryAreaNotes,replaceAreaNotes:deletionRecoveryReplaceAreaNotes,attachments:deletionRecoveryAttachments,replaceAttachments:deletionRecoveryReplaceAttachments,clearAttachment:deletionRecoveryClearAttachment}),reconciliationBase:freeze({read:reconciliationBaseRead,readNotes:reconciliationBaseReadNotes,write:reconciliationBaseWrite})
+      provenance:freeze({installationId}),mutationEpoch:freeze({read:canonicalMutationEpochRead,rebasePreparation:canonicalPreparationRebase}),preparationUnits:freeze({list:preparationUnitStamps,replace:preparationUnitReplace}),deletionRecovery:freeze({flush:deletionRecoveryFlush,savedDays:deletionRecoverySavedDays,replaceSavedDays:deletionRecoveryReplaceSavedDays,notes:deletionRecoveryNotes,replaceNotes:deletionRecoveryReplaceNotes,attachments:deletionRecoveryAttachments,replaceAttachments:deletionRecoveryReplaceAttachments,clearAttachment:deletionRecoveryClearAttachment}),reconciliationBase:freeze({read:reconciliationBaseRead,readNotes:reconciliationBaseReadNotes,write:reconciliationBaseWrite})
     });
     const AssetData=portableAssets?freeze({
       get:ports.assets.get,put:ports.assets.put,keys:ports.assets.keys,list:ports.assets.list,importAll:ports.assets.importAll,restoreAll:ports.assets.restoreAll,removeMany:ports.assets.removeMany,removeMetadata:ports.assets.removeMetadata,scheduleMaintenance:ports.assets.scheduleMaintenance
@@ -156,7 +156,7 @@ const BackupCapture=BackupCaptureModule.create(freeze({
     activeSession:freeze({save:AppData.activeSession.save,settled:AppData.activeSession.settled,load:AppData.activeSession.load}),
     dailyRecords:freeze({backupDates:AppData.dailyRecords.backupDates,backupMonth:AppData.dailyRecords.backupMonth}),
     notes:freeze({flush:AppData.notes.flush,failure:AppData.notes.failure,readFreshPayload:AppData.notes.readFreshPayload,exportPayload:AppData.notes.exportPayload,readFreshItems:AppData.notes.readFreshItems}),
-    deletionRecovery:freeze({flush:AppData.deletionRecovery.flush,savedDays:AppData.deletionRecovery.savedDays,areaNotes:AppData.deletionRecovery.areaNotes,attachments:AppData.deletionRecovery.attachments}),
+    deletionRecovery:freeze({flush:AppData.deletionRecovery.flush,savedDays:AppData.deletionRecovery.savedDays,notes:AppData.deletionRecovery.notes,attachments:AppData.deletionRecovery.attachments}),
     mutationEpoch:freeze({read:AppData.mutationEpoch.read}),preparationUnits:freeze({list:AppData.preparationUnits.list,replace:AppData.preparationUnits.replace}),provenance:freeze({installationId:AppData.provenance.installationId})
   }),
   codecs:freeze({activeSession:ActiveSessionCodec,backup:BackupCodec}),
@@ -187,7 +187,7 @@ async function* createPortableBackupLines(plan,{compression='none'}={}){
     const docs=portableAssets?plan.dailyDocuments.slice(offset,offset+APP_LIMITS.backupChunkItems):currentDailyRecords(await getDailyRecordDocumentsByDates(dates),'Backup Daily Records').sort((a,b)=>a.date.localeCompare(b.date));
     for(const group of BackupCodec.splitItems(docs))yield await emit('dailyRecord',group);
   }
-  for(const group of BackupCodec.splitItems(plan.areaNoteItems))yield await emit('areaNote',group);
+  for(const group of BackupCodec.splitItems(plan.noteItems))yield await emit('note',group);
   if(plan.activeSession)yield await emit('activeSession',[plan.activeSession]);
   if(plan.personalData)yield await emit('personalData',[plan.personalData]);
   if(!BackupCodec.countsEqual(actual,plan.counts))throw new Error('Backup counts changed during export. Please export again.');
@@ -411,14 +411,14 @@ async function applyResolvedSavedDays(resolvedPlan,operation,reportProgress=null
     expectedDeletions:freeze([...storedDeletions])
   });
 }
-async function applyResolvedAreaNotes(resolvedPlan){
+async function applyResolvedNotes(resolvedPlan){
   const changed=(resolvedPlan&&resolvedPlan.notes||[]).filter(item=>item.changed),writes=changed.filter(item=>item.state==='record'&&item.value&&typeof item.value==='object'),deletions=changed.filter(item=>item.state==='deleted'&&item.deletedAt).map(item=>freeze({key:item.key,deletedAt:item.deletedAt}));
   if(!writes.length&&!deletions.length)return {message:'',changed:false,expected:null,expectedDeletions:null,count:0,deleted:0};
   requireBackupMutationControl('reconciling notes');
   const payload=Object.create(null);for(const item of writes)payload[item.key]=item.value;
-  const committed=await reconcileAreaNotes(AppData.notes.normalizePayload(payload),deletions);
+  const committed=await reconcileNotes(AppData.notes.normalizePayload(payload),deletions);
   if(!committed||typeof committed!=='object'||Array.isArray(committed))throw new Error('Note reconciliation did not return a canonical committed payload.');
-  const expected=AppData.notes.normalizePayload(committed),expectedDeletions=freeze([...(await AppData.deletionRecovery.areaNotes())]),count=writes.filter(item=>notesTrashKey(item.key)).length,deleted=deletions.filter(item=>notesTrashKey(item.key)).length;
+  const expected=AppData.notes.normalizePayload(committed),expectedDeletions=freeze([...(await AppData.deletionRecovery.notes())]),count=writes.filter(item=>notesTrashKey(item.key)).length,deleted=deletions.filter(item=>notesTrashKey(item.key)).length;
   const parts=[count?`${count} note${count===1?'':'s'} updated`:'',deleted?`${deleted} note${deleted===1?'':'s'} moved to Recently deleted`:''].filter(Boolean);
   return {message:parts.length?` · ${parts.join(' · ')}`:'',changed:true,expected,expectedDeletions,count,deleted};
 }
@@ -539,15 +539,15 @@ async function buildRestoreReconciliationPlan(parsed,preview,{missingOnly=false,
   // session, and every other note stays exactly as it is on this device.
   const records=note?[]:normalizeImportedDailyRecordSet(parsed&&parsed.records||[]).records;
   const checkpointDeletions=!note&&parsed&&parsed.protectedCheckpointManifest&&Array.isArray(parsed.protectedCheckpointManifest.savedDayDeletions)?parsed.protectedCheckpointManifest.savedDayDeletions:[];
-  const checkpointNoteDeletions=!note&&parsed&&parsed.protectedCheckpointManifest&&Array.isArray(parsed.protectedCheckpointManifest.areaNoteDeletions)?parsed.protectedCheckpointManifest.areaNoteDeletions:[];
+  const checkpointNoteDeletions=!note&&parsed&&parsed.protectedCheckpointManifest&&Array.isArray(parsed.protectedCheckpointManifest.noteDeletions)?parsed.protectedCheckpointManifest.noteDeletions:[];
   const relevantDates=[...new Set([...records.map(record=>record.date),...checkpointDeletions.map(entry=>entry.date)])];
   const localRecords=currentDailyRecords(await getDailyRecordDocumentsByDates(relevantDates),'Local reconciliation Daily Records');
   const allLocalDeletions=await AppData.deletionRecovery.savedDays(),relevantDateSet=new Set(relevantDates);
   const localDeletions=allLocalDeletions.filter(entry=>relevantDateSet.has(entry.date));
-  const localNotes=AppData.notes.normalizePayload(await AppData.notes.readFreshPayload()),allLocalNoteDeletions=await AppData.deletionRecovery.areaNotes();
+  const localNotes=AppData.notes.normalizePayload(await AppData.notes.readFreshPayload()),allLocalNoteDeletions=await AppData.deletionRecovery.notes();
   // Missing-only recovery adds back what this device lacks (Saved Days,
   // attachments) and never offers the backup's notes or session.
-  const backupNotes=missingOnly?Object.create(null):AppData.notes.alignByTitle(parsed&&parsed.data&&parsed.data.areaNotes||{},allLocalNoteDeletions.map(entry=>entry.key)),incomingNotes=note?Object.create(null):backupNotes;
+  const backupNotes=missingOnly?Object.create(null):AppData.notes.alignByTitle(parsed&&parsed.data&&parsed.data.notes||{},allLocalNoteDeletions.map(entry=>entry.key)),incomingNotes=note?Object.create(null):backupNotes;
   if(note&&Object.prototype.hasOwnProperty.call(backupNotes,note))incomingNotes[note]=backupNotes[note];
   const loadedSession=await readCanonicalActiveSession(),localSession=loadedSession&&loadedSession.value||null;
   const currentCheckpoint=Number(parsed&&parsed.formatVersion)>=15&&!!parsed.protectedCheckpointManifest;
@@ -963,7 +963,7 @@ async function verifyRestoreCommit(expected,signal,authorityOptions=null){
   }
   if(expected.notes){
     const stored=AppData.notes.normalizePayload(await AppData.notes.readFreshPayload());
-    if(!Canonical.same(stored,expected.notes))throw new Error('Post-restore verification failed for ongoing Area notes.');
+    if(!Canonical.same(stored,expected.notes))throw new Error('Post-restore verification failed for notes.');
   }
   if(Array.isArray(expected.assets)){
     const rows=await AssetData.list(),catalogue=new Map(rows.map(row=>[row.id,row])),verifiedPhysical=new Set();
@@ -985,7 +985,7 @@ async function verifyRestoreCommit(expected,signal,authorityOptions=null){
   if(Array.isArray(expected.removedAssetIds)&&expected.removedAssetIds.length){const catalogue=new Set((await AssetData.list()).map(row=>row.id));for(const id of expected.removedAssetIds)if(catalogue.has(id))throw new Error(`Post-restore verification failed to remove Attachment Library identity ${id}.`);}
   if(expected.personalData)await personalVerify(expected.personalData);
   if(Array.isArray(expected.savedDayDeletions)){const stored=await AppData.deletionRecovery.savedDays();if(!Canonical.same(stored,expected.savedDayDeletions))throw new Error('Post-restore verification failed for Saved-Day deletion history.');}
-  if(Array.isArray(expected.areaNoteDeletions)){const stored=await AppData.deletionRecovery.areaNotes();if(!Canonical.same(stored,expected.areaNoteDeletions))throw new Error('Post-restore verification failed for note deletion history.');}
+  if(Array.isArray(expected.noteDeletions)){const stored=await AppData.deletionRecovery.notes();if(!Canonical.same(stored,expected.noteDeletions))throw new Error('Post-restore verification failed for note deletion history.');}
   if(Array.isArray(expected.attachmentDeletions)){const stored=await AppData.deletionRecovery.attachments();if(!Canonical.same(stored,expected.attachmentDeletions))throw new Error('Post-restore verification failed for Attachment deletion history.');}
   if(Object.prototype.hasOwnProperty.call(expected,'activeSession')){
     await AppData.activeSession.settled();
@@ -1040,23 +1040,23 @@ function managedParsedSnapshot(capture,metadata={}){
   // Versions saved before notes had permanent ids (manifest 5 and older) keep
   // notes, and their deletion history, under note names; both convert to ids.
   const nameKeyedNotes=Number(repositoryManifest.version)<ManagedRepository.noteIdManifestVersion;
-  const areaNotes=managedSnapshotStage('ongoing-notes','MANAGED_CHECKPOINT_ONGOING_NOTES_FAILED',()=>{const out=Object.create(null);for(const raw of plan.areaNoteItems||[]){const key=String(raw&&raw.key||''),clean=nameKeyedNotes?BackupCodec.legacyAreaNote(raw,key):BackupCodec.normalizeAreaNote(raw,key);if(!clean||!key||Object.prototype.hasOwnProperty.call(out,clean.key))throw new Error('Managed repository note failed current-schema verification.');out[clean.key]=clean;}return out;});
+  const notes=managedSnapshotStage('notes','MANAGED_CHECKPOINT_NOTES_FAILED',()=>{const out=Object.create(null);for(const raw of plan.noteItems||[]){const key=String(raw&&raw.key||''),clean=nameKeyedNotes?BackupCodec.legacyNote(raw,key):BackupCodec.normalizeNote(raw,key);if(!clean||!key||Object.prototype.hasOwnProperty.call(out,clean.key))throw new Error('Managed repository note failed current-schema verification.');out[clean.key]=clean;}return out;});
   const activeSession=managedSnapshotStage('active-session','MANAGED_CHECKPOINT_ACTIVE_SESSION_FAILED',()=>{const clean=plan.activeSession?BackupCodec.normalizeImportedActiveSession(plan.activeSession,{legacy:Number(repositoryManifest.version)<=4}):null;if(plan.activeSession&&!clean)throw new Error('Managed repository Active Session failed schema verification.');return clean;});
   const personalData=managedSnapshotStage('personal-data','MANAGED_CHECKPOINT_PERSONAL_DATA_FAILED',()=>plan.personalData?BackupCodec.normalizePersonalData(plan.personalData):null);
-  const counts=managedSnapshotStage('counts','MANAGED_CHECKPOINT_COUNTS_FAILED',()=>{const value=BackupCodec.countShape({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:records.length,areaNote:Object.keys(areaNotes).length,activeSession:activeSession?1:0});if(!noteScope&&Number(repositoryManifest.version)>=5&&(!BackupCodec.countsEqual(value,plan.counts)||!BackupCodec.countsEqual(value,repositoryManifest.counts)))throw new Error('Managed repository counts failed portable-snapshot verification.');return value;});
+  const counts=managedSnapshotStage('counts','MANAGED_CHECKPOINT_COUNTS_FAILED',()=>{const value=BackupCodec.countShape({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:records.length,note:Object.keys(notes).length,activeSession:activeSession?1:0});if(!noteScope&&Number(repositoryManifest.version)>=5&&(!BackupCodec.countsEqual(value,plan.counts)||!BackupCodec.countsEqual(value,repositoryManifest.counts)))throw new Error('Managed repository counts failed portable-snapshot verification.');return value;});
   const attachmentState=managedSnapshotStage('attachments','MANAGED_CHECKPOINT_ATTACHMENTS_FAILED',()=>{
     const rawAssetItems=Array.isArray(plan.assetItems)?plan.assetItems:[],assetDescriptors=BackupCodec.normalizeAssetDescriptors(rawAssetItems.map(item=>item&&item.descriptor)),assetById=new Map(rawAssetItems.map(item=>[String(item&&item.descriptor&&item.descriptor.assetId||''),item])),importedAssets=[];
     for(const descriptor of assetDescriptors){const item=assetById.get(descriptor.assetId);if(!item)throw new Error(`Managed repository attachment ${descriptor.assetId} is unavailable.`);if(descriptor.missing===true){if(item.blob!==null&&item.blob!==undefined)throw new Error(`Managed repository missing attachment ${descriptor.assetId} unexpectedly contains bytes.`);continue;}if(!(item.blob instanceof Blob)||item.blob.size!==descriptor.size)throw new Error(`Managed repository attachment ${descriptor.assetId} failed snapshot binding.`);importedAssets.push(freeze({...descriptor,blob:item.blob.slice(0,item.blob.size,descriptor.mimeType)}));}
-    const referencedAssetIds=new Set(),collect=value=>{for(const id of BackupCodec.assetIds(value))referencedAssetIds.add(id);};records.forEach(collect);Object.values(areaNotes).forEach(collect);if(activeSession)collect(activeSession);
+    const referencedAssetIds=new Set(),collect=value=>{for(const id of BackupCodec.assetIds(value))referencedAssetIds.add(id);};records.forEach(collect);Object.values(notes).forEach(collect);if(activeSession)collect(activeSession);
     const descriptorIds=new Set(assetDescriptors.map(item=>item.assetId));for(const id of referencedAssetIds)if(!descriptorIds.has(id))throw new Error(`Managed repository is missing attachment descriptor ${id}.`);
     return freeze({assetDescriptors,assetById,importedAssets,referencedAssetIds});
   });
   const {assetDescriptors,assetById,importedAssets,referencedAssetIds}=attachmentState;
-  const normalizedPlan=freeze({...plan,dailyDocuments:freeze(records),recordDates:freeze(recordDates),areaNoteItems:freeze(Object.values(areaNotes).sort((a,b)=>String(a.key).localeCompare(String(b.key)))),activeSession,personalData,counts:freeze({...counts}),assetItems:freeze(assetDescriptors.map(descriptor=>freeze({descriptor,blob:descriptor.missing===true?null:assetById.get(descriptor.assetId).blob})))});
+  const normalizedPlan=freeze({...plan,dailyDocuments:freeze(records),recordDates:freeze(recordDates),noteItems:freeze(Object.values(notes).sort((a,b)=>String(a.key).localeCompare(String(b.key)))),activeSession,personalData,counts:freeze({...counts}),assetItems:freeze(assetDescriptors.map(descriptor=>freeze({descriptor,blob:descriptor.missing===true?null:assetById.get(descriptor.assetId).blob})))});
   const protectedCheckpointManifest=managedSnapshotStage('protected-manifest','MANAGED_CHECKPOINT_PROTECTED_MANIFEST_FAILED',()=>{if(noteScope)return BackupCodec.withNoteIdDeletions(repositoryManifest.protectedCheckpointManifest,nameKeyedNotes);const value=BackupCodec.createProtectedManifest(normalizedPlan,plan.checkpoint);if(Number(repositoryManifest.version)>=5&&(!Canonical.same(value,plan.protectedCheckpointManifest)||!Canonical.same(value,repositoryManifest.protectedCheckpointManifest)))throw new Error('Managed repository protected checkpoint state failed portable-snapshot verification.');return BackupCodec.withNoteIdDeletions(value,nameKeyedNotes);});
   const manifest=freeze(BackupCodec.createManifest(normalizedPlan,{compression:'none',algorithm:BackupCodec.checksumAlgorithm()})),report=freeze({legacy:false,sourceVersion:null,degraded:0,skipped:0,duplicates:0,invalidActiveSession:0,ignoredTombstones:0,warnings:freeze([])});
-  const sourceBytes=Math.max(0,Number(metadata&&metadata.verifiedSourceBytes)||0),entityCount=records.length+Object.keys(areaNotes).length+(activeSession?1:0)+(personalData?1:0)+1,chunkOverhead=Math.ceil(entityCount/Math.max(1,Number(APP_LIMITS.backupChunkItems)||1))*512+8192;
-  return freeze({noteScope,importedPersonalData:personalData,data:freeze({areaNotes:freeze(areaNotes)}),records:freeze(records),hasAreaNotes:true,areaNotesComplete:true,importedActiveSession:activeSession,protectedCheckpointManifest,captureAuthority:'canonical-complete',formatVersion:Number(backupVersion),counts:freeze({...counts}),manifest,report,uncompressedBytes:sourceBytes+chunkOverhead,assetDescriptors,referencedAssetIds:freeze([...referencedAssetIds].sort()),importedAssets:freeze(importedAssets),assetBytes:importedAssets.reduce((total,item)=>total+item.size,0)});
+  const sourceBytes=Math.max(0,Number(metadata&&metadata.verifiedSourceBytes)||0),entityCount=records.length+Object.keys(notes).length+(activeSession?1:0)+(personalData?1:0)+1,chunkOverhead=Math.ceil(entityCount/Math.max(1,Number(APP_LIMITS.backupChunkItems)||1))*512+8192;
+  return freeze({noteScope,importedPersonalData:personalData,data:freeze({notes:freeze(notes)}),records:freeze(records),hasNotes:true,notesComplete:true,importedActiveSession:activeSession,protectedCheckpointManifest,captureAuthority:'canonical-complete',formatVersion:Number(backupVersion),counts:freeze({...counts}),manifest,report,uncompressedBytes:sourceBytes+chunkOverhead,assetDescriptors,referencedAssetIds:freeze([...referencedAssetIds].sort()),importedAssets:freeze(importedAssets),assetBytes:importedAssets.reduce((total,item)=>total+item.size,0)});
 }
 async function inspectVerifiedLogicalCapture(capture,metadata={}){
   const signal=metadata&&metadata.signal||activeImportOperation&&activeImportOperation.signal||null;throwIfImportAborted(signal);
@@ -1088,13 +1088,13 @@ async function replacePortableCanonicalSnapshot(snapshot,{scheduleText='',deleti
   requireBackupMutationControl('replacing the portable Study Director state');
   const mark=async phase=>{if(restoreId)await AppData.restoreJournal.mark(restoreId,`${phasePrefix}-${phase}`);};
   const records=normalizeImportedDailyRecordSet(source.records||[]).records,targetDates=freeze(records.map(record=>record.date)),targetDateSet=new Set(targetDates);
-  const targetNotes=AppData.notes.normalizePayload(source.data&&source.data.areaNotes||{});
+  const targetNotes=AppData.notes.normalizePayload(source.data&&source.data.notes||{});
   const targetSession=source.importedActiveSession?ActiveSessionCodec.sanitizeCurrent(source.importedActiveSession):null;
   if(source.importedActiveSession&&!targetSession)throw new Error('The selected version contains an invalid Active Session.');
   const targetPersonal=source.importedPersonalData||null;
   if(requirePersonal&&!targetPersonal)throw new Error('The selected managed version is missing portable Plans or Preferences.');
-  const deletions=deletionState||freeze({savedDays:freeze([]),areaNotes:freeze([]),attachments:freeze([])});
-  for(const key of ['savedDays','areaNotes','attachments'])if(!Array.isArray(deletions[key]))throw new Error('The selected version has invalid canonical deletion state.');
+  const deletions=deletionState||freeze({savedDays:freeze([]),notes:freeze([]),attachments:freeze([])});
+  for(const key of ['savedDays','notes','attachments'])if(!Array.isArray(deletions[key]))throw new Error('The selected version has invalid canonical deletion state.');
   throwIfImportAborted(signal,authorityOptions);
   await mark('saved-days');
   const currentSource=await AppData.dailyRecords.backupDates(),currentDates=Array.isArray(currentSource&&currentSource.dates)?currentSource.dates:[],removedDates=[];
@@ -1105,8 +1105,8 @@ async function replacePortableCanonicalSnapshot(snapshot,{scheduleText='',deleti
   let recordBatches=0;
   if(records.length){const stored=await AppData.dailyRecords.importBatches(records,{signal,yieldControl:()=>yieldImport(signal,authorityOptions)});recordBatches=Number(stored&&stored.batches)||0;}
   throwIfImportAborted(signal,authorityOptions);
-  await mark('ongoing-notes');
-  const restoredNotes=await restoreAreaNotesSnapshot(targetNotes);
+  await mark('notes');
+  const restoredNotes=await restoreNotesSnapshot(targetNotes);
   if(!restoredNotes||typeof restoredNotes!=='object'||Array.isArray(restoredNotes))throw new Error('Note version restore did not return a canonical committed payload.');
   throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);
   let restoredAssets=0;
@@ -1122,7 +1122,7 @@ async function replacePortableCanonicalSnapshot(snapshot,{scheduleText='',deleti
   if(targetPersonal){await mark('personal-data');await personalImport(targetPersonal);throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);}
   await mark('deletion-state');
   await AppData.deletionRecovery.replaceSavedDays(deletions.savedDays);
-  await AppData.deletionRecovery.replaceAreaNotes(deletions.areaNotes);
+  await AppData.deletionRecovery.replaceNotes(deletions.notes);
   await AppData.deletionRecovery.replaceAttachments(deletions.attachments);
   await AppData.activeSession.settled();
   await mark('verifying');
@@ -1130,7 +1130,7 @@ async function replacePortableCanonicalSnapshot(snapshot,{scheduleText='',deleti
   await verifyRestoreCommit({
     personalData:targetPersonal,records,recordDatesExact:targetDates,notes:AppData.notes.normalizePayload(restoredNotes),
     assets:expectedAssets,assetIdsExact:Array.isArray(expectedAssets)?expectedAssets.map(item=>item.assetId):undefined,
-    activeSession:targetSession,scheduleText:String(scheduleText||''),savedDayDeletions:deletions.savedDays,areaNoteDeletions:deletions.areaNotes,attachmentDeletions:deletions.attachments
+    activeSession:targetSession,scheduleText:String(scheduleText||''),savedDayDeletions:deletions.savedDays,noteDeletions:deletions.notes,attachmentDeletions:deletions.attachments
   },signal,authorityOptions);
   for(const [scope,operation] of [['library',libraryChanged],['notes',refreshPnote],['review',()=>ReviewView.refresh()],['schedule',renderSched]])try{operation();}catch(error){AppDiagnostics.capture(`backup.version-restore-${scope}`,error,'warn');}
   if(portableAssets)AssetData.scheduleMaintenance(0);
@@ -1155,7 +1155,7 @@ async function rebaseRepositoryPreparationAcceleration(reason='authoritative-rec
 function rollbackDeletionState(snapshot,override=null){
   const protectedManifest=snapshot&&snapshot.protectedCheckpointManifest||null,provided=override&&typeof override==='object'?override:{};
   const value=(key,manifestKey)=>Array.isArray(provided[key])?provided[key]:Array.isArray(protectedManifest&&protectedManifest[manifestKey])?protectedManifest[manifestKey]:freeze([]);
-  return freeze({savedDays:freeze([...value('savedDays','savedDayDeletions')]),areaNotes:freeze([...value('areaNotes','areaNoteDeletions')]),attachments:freeze([...value('attachments','attachmentDeletions')])});
+  return freeze({savedDays:freeze([...value('savedDays','savedDayDeletions')]),notes:freeze([...value('notes','noteDeletions')]),attachments:freeze([...value('attachments','attachmentDeletions')])});
 }
 async function rollbackImportedState(journal,scheduleText='',deletionState=null){
   const rollbackAuthority=freeze({allowDurableProtected:true});
@@ -1305,12 +1305,12 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   const {safetyFile,rollbackJournal}=await captureLocalSafetyCopy(stored,{afterCapture:()=>assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates,stable.scope)});
   OperationDiagnostics.mark('local-safety-capture-complete',{bytes:Number(safetyFile&&safetyFile.blob&&safetyFile.blob.size)||0});
   const rollbackScheduleText=scheduleRead();
-  const rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),areaNotes:await AppData.deletionRecovery.areaNotes(),attachments:await AppData.deletionRecovery.attachments()});
+  const rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),notes:await AppData.deletionRecovery.notes(),attachments:await AppData.deletionRecovery.attachments()});
   const restoreId=`restore_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,14)}`;
   let committedDescription='',journalPrepared=false;
   try{
     OperationDiagnostics.mark('restore-journal-prepare-start');
-    await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,scheduleText:rollbackScheduleText,savedDayDeletions:rollbackDeletionState.savedDays,areaNoteDeletions:rollbackDeletionState.areaNotes,attachmentDeletions:rollbackDeletionState.attachments});
+    await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,scheduleText:rollbackScheduleText,savedDayDeletions:rollbackDeletionState.savedDays,noteDeletions:rollbackDeletionState.notes,attachmentDeletions:rollbackDeletionState.attachments});
     journalPrepared=true;OperationDiagnostics.mark('restore-journal-prepare-complete');
     let assetResult=freeze({written:0,published:0,reused:0,deleted:0,changed:false,expected:freeze([]),expectedRemovedIds:freeze([]),references:freeze([]),expectedDeletions:freeze([])});
     if(portableAssets&&Number(parsed.formatVersion)>=10){
@@ -1331,10 +1331,10 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     if(dailyResult.changed&&expectedDeletions)committedDescription+=(committedDescription?' and ':'')+'Saved-Day choices were already saved';
     await AppData.restoreJournal.mark(restoreId,'saved-day-state-committed');
     throwIfImportAborted(signal);await yieldImport(signal);
-    await AppData.restoreJournal.mark(restoreId,'applying-area-notes');
-    const noteResult=await applyResolvedAreaNotes(resolvedPlan);
+    await AppData.restoreJournal.mark(restoreId,'applying-notes');
+    const noteResult=await applyResolvedNotes(resolvedPlan);
     if(noteResult.changed)committedDescription+=(committedDescription?' and ':'')+'Notes were already saved';
-    await AppData.restoreJournal.mark(restoreId,'area-notes-committed');
+    await AppData.restoreJournal.mark(restoreId,'notes-committed');
     throwIfImportAborted(signal);await yieldImport(signal);
     await AppData.restoreJournal.mark(restoreId,'applying-active-session');
     const sessionResult=await applyResolvedActiveSession(resolvedPlan);
@@ -1351,7 +1351,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       assets:portableAssets&&Number(parsed.formatVersion)>=10?assetResult.expected:undefined,
       removedAssetIds:portableAssets&&Number(parsed.formatVersion)>=10?assetResult.expectedRemovedIds:undefined,
       savedDayDeletions:expectedDeletions,
-      areaNoteDeletions:noteResult.expectedDeletions,
+      noteDeletions:noteResult.expectedDeletions,
       attachmentDeletions:assetResult.expectedDeletions
     };
     if(sessionResult.changed){expectedCommit.activeSession=sessionResult.expected;expectedCommit.scheduleText=sessionResult.scheduleText||'';}
@@ -1365,7 +1365,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     // An older version restored for one note is not a shared base for later combines.
     if(currentCheckpoint&&!note){
       const checkpointId=String(parsed&&parsed.protectedCheckpointManifest&&parsed.protectedCheckpointManifest.checkpointId||preview&&preview.checkpoint&&preview.checkpoint.checkpointId||'');
-      if(checkpointId)try{await AppData.reconciliationBase.write(checkpointId,parsed&&parsed.data&&parsed.data.areaNotes||{},await personalFingerprint(parsed.importedPersonalData));}catch(error){AppDiagnostics.capture('backup.reconciliation-base-write',error,'warn');}
+      if(checkpointId)try{await AppData.reconciliationBase.write(checkpointId,parsed&&parsed.data&&parsed.data.notes||{},await personalFingerprint(parsed.importedPersonalData));}catch(error){AppDiagnostics.capture('backup.reconciliation-base-write',error,'warn');}
     }
     if(portableAssets)AssetData.scheduleMaintenance(0);
     const compatibility=[];
@@ -1430,9 +1430,9 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
 // unless the person chooses to remove it. Recently deleted always stays.
 async function planReplacement(stored,parsed){
   const manifest=parsed.protectedCheckpointManifest,local=AppData.notes.normalizePayload(await AppData.notes.readFreshPayload());
-  const target=AppData.notes.alignByTitle(parsed.data&&parsed.data.areaNotes||{},(await AppData.deletionRecovery.areaNotes()).map(entry=>entry.key));
+  const target=AppData.notes.alignByTitle(parsed.data&&parsed.data.notes||{},(await AppData.deletionRecovery.notes()).map(entry=>entry.key));
   const ids=(list,field)=>new Set((list||[]).map(entry=>String(entry&&entry[field]||'')));
-  const backupNoteDeletions=ids(manifest.areaNoteDeletions,'key'),liveLocal=Object.keys(local).filter(key=>notesTrashKey(key));
+  const backupNoteDeletions=ids(manifest.noteDeletions,'key'),liveLocal=Object.keys(local).filter(key=>notesTrashKey(key));
   const changed=liveLocal.filter(key=>target[key]&&String(target[key].text||'')!==String(local[key].text||'')),gone=liveLocal.filter(key=>!target[key]);
   const deletedByBackup=gone.filter(key=>backupNoteDeletions.has(key)||!!target[notesTrashKey(key)]);
   const backupDates=ids(parsed.records,'date'),backupDayDeletions=ids(manifest.savedDayDeletions,'date');
@@ -1500,7 +1500,7 @@ function replacementSnapshot(parsed,journal,plan,notes,keepExtras){
     for(const value of [...Object.values(notes),...records,parsed.importedActiveSession])if(value)for(const id of BackupCodec.assetIds(value))wanted.add(id);
     assets=freeze([...(parsed.importedAssets||[]),...(journal.importedAssets||[]).filter(item=>wanted.has(item.assetId)&&!have.has(item.assetId))]);
   }
-  return freeze({...parsed,records,data:freeze({...parsed.data,areaNotes:notes}),importedAssets:assets,importedPersonalData:personal});
+  return freeze({...parsed,records,data:freeze({...parsed.data,notes:notes}),importedAssets:assets,importedPersonalData:personal});
 }
 // Deletion records after a replace: the backup's and this device's, for
 // whatever the result does not hold, plus what this replace removed.
@@ -1510,12 +1510,12 @@ function mergedDeletions(field,limit,lists,present){
   return freeze([...byKey.values()].sort((a,b)=>Date.parse(b.deletedAt)-Date.parse(a.deletedAt)||a[field].localeCompare(b[field])).slice(0,limit).sort((a,b)=>a[field].localeCompare(b[field])));
 }
 function replacementDeletions(parsed,localState,snapshot,removed){
-  const manifest=parsed.protectedCheckpointManifest,notes=snapshot.data.areaNotes,dates=new Set(snapshot.records.map(record=>record.date)),assets=new Set((snapshot.importedAssets||[]).map(item=>item.assetId));
+  const manifest=parsed.protectedCheckpointManifest,notes=snapshot.data.notes,dates=new Set(snapshot.records.map(record=>record.date)),assets=new Set((snapshot.importedAssets||[]).map(item=>item.assetId));
   const now=new Date().toISOString(),fresh=(field,keys,lists)=>{const known=new Set(lists.flatMap(list=>(list||[]).map(entry=>String(entry&&entry[field]||''))));return keys.filter(key=>!known.has(key)).map(key=>({[field]:key,deletedAt:now}));};
-  const dayLists=[manifest.savedDayDeletions,localState.savedDays],noteLists=[manifest.areaNoteDeletions,localState.areaNotes];
+  const dayLists=[manifest.savedDayDeletions,localState.savedDays],noteLists=[manifest.noteDeletions,localState.notes];
   return freeze({
     savedDays:mergedDeletions('date',APP_LIMITS.maxImportRecords,[...dayLists,fresh('date',removed.days,dayLists)],date=>dates.has(date)),
-    areaNotes:mergedDeletions('key',APP_LIMITS.maxOngoingNotes,[...noteLists,fresh('key',removed.notes,noteLists)],key=>!!notes[key]),
+    notes:mergedDeletions('key',APP_LIMITS.maxNotes,[...noteLists,fresh('key',removed.notes,noteLists)],key=>!!notes[key]),
     attachments:mergedDeletions('assetId',Infinity,[manifest.attachmentDeletions,localState.attachments],id=>assets.has(id))
   });
 }
@@ -1539,7 +1539,7 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
       title:'Replace current data?',
       message:'This device will match this backup. A note the backup changed takes the backup’s copy, or opens for review when this device changed it too. A note the backup deleted moves to Recently deleted. Device-local settings and browser permissions stay on this device.',
       details:[
-        `${preview.exportedAt?new Date(preview.exportedAt).toLocaleString('en-IN'):'Date unavailable'} · ${Number(preview.counts&&preview.counts.dailyRecord)||0} Saved Days · ${Number(preview.counts&&preview.counts.areaNote)||0} Notes`,
+        `${preview.exportedAt?new Date(preview.exportedAt).toLocaleString('en-IN'):'Date unavailable'} · ${Number(preview.counts&&preview.counts.dailyRecord)||0} Saved Days · ${Number(preview.counts&&preview.counts.note)||0} Notes`,
         'A verified safety copy protects the current local state if this operation fails.'
       ],
       groups:extras?freeze([freeze({id:'extras',label:`Not in this backup · ${extras}`,defaultValue:'keep',description:'On this device, but neither in this backup nor deleted by it.',choices:REPLACEMENT_EXTRA_CHOICES})]):freeze([]),confirmLabel:'Replace current data',cancelLabel:'Cancel',danger:true,signal
@@ -1564,11 +1564,11 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
     OperationDiagnostics.mark('local-safety-capture-start');
     const {safetyFile,rollbackJournal}=await captureLocalSafetyCopy(stored);
     OperationDiagnostics.mark('local-safety-capture-complete',{bytes:Number(safetyFile&&safetyFile.blob&&safetyFile.blob.size)||0});
-    const rollbackScheduleText=scheduleRead(),rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),areaNotes:await AppData.deletionRecovery.areaNotes(),attachments:await AppData.deletionRecovery.attachments()});
+    const rollbackScheduleText=scheduleRead(),rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),notes:await AppData.deletionRecovery.notes(),attachments:await AppData.deletionRecovery.attachments()});
     const restoreId=`restore_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,14)}`;let journalPrepared=false,committedDescription='';
     try{
       OperationDiagnostics.mark('restore-journal-prepare-start');
-      await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,scheduleText:rollbackScheduleText,savedDayDeletions:rollbackDeletionState.savedDays,areaNoteDeletions:rollbackDeletionState.areaNotes,attachmentDeletions:rollbackDeletionState.attachments});
+      await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,scheduleText:rollbackScheduleText,savedDayDeletions:rollbackDeletionState.savedDays,noteDeletions:rollbackDeletionState.notes,attachmentDeletions:rollbackDeletionState.attachments});
       journalPrepared=true;OperationDiagnostics.mark('restore-journal-prepare-complete');
       const target=replacementSnapshot(parsed,rollbackJournal,plan,notes,keepExtras),targetDeletionState=replacementDeletions(parsed,rollbackDeletionState,target,removed),targetSchedule=String(parsed.importedPersonalData&&parsed.importedPersonalData.plans&&parsed.importedPersonalData.plans.draft||parsed.importedActiveSession&&parsed.importedActiveSession.scheduleText||'');
       OperationDiagnostics.mark('canonical-replacement-start');
@@ -1635,7 +1635,7 @@ async function recoverInterruptedRestore(){
     try{
       const parsed=await BackupCodec.inspect(durable.payload.blob,{filename:durable.payload.filename});
       await AppData.restoreJournal.mark(durable.state.id,'startup-rolling-back');
-      await rollbackImportedState(parsed,durable.payload.scheduleText,{savedDays:durable.payload.savedDayDeletions,areaNotes:durable.payload.areaNoteDeletions,attachments:durable.payload.attachmentDeletions});
+      await rollbackImportedState(parsed,durable.payload.scheduleText,{savedDays:durable.payload.savedDayDeletions,notes:durable.payload.noteDeletions,attachments:durable.payload.attachmentDeletions});
       await AppData.restoreJournal.mark(durable.state.id,'startup-rolled-back');
       await AppData.restoreJournal.clear(durable.state.id);clearFault();
       recoveryNotice.finish({message:'Local recovery completed: the interrupted restore was rolled back and verified before Study Director became writable.',outcome:'local-recovery-completed'});

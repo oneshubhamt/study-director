@@ -9,7 +9,7 @@ import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor,sleep} fr
 // note, searching, tags and the picker, and what runs by itself meanwhile.
 // SD_NOTES_COUNT sets how many notes, SD_NOTES_FIXTURE=extreme gives every
 // note 5,000 words, and SD_NOTES_CPU=1 adds where the time goes in each step.
-const NOTES=Number(process.env.SD_NOTES_COUNT)||PRODUCTION_LIMITS.maxOngoingNotes,PROFILE=process.env.SD_NOTES_FIXTURE==='extreme'?'extreme':'heavy',CPU=process.env.SD_NOTES_CPU==='1';
+const NOTES=Number(process.env.SD_NOTES_COUNT)||PRODUCTION_LIMITS.maxNotes,PROFILE=process.env.SD_NOTES_FIXTURE==='extreme'?'extreme':'heavy',CPU=process.env.SD_NOTES_CPU==='1';
 
 const preload=`(()=>{
   const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
@@ -121,7 +121,7 @@ try{
   assert.equal(report.steps.startup.notes,NOTES);
   await timed('idle',async()=>{await page.evaluate('window.__idleStart=performance.now()');await sleep(6000);},`__tasksSince(__idleStart)`);
 
-  const rows=`document.querySelectorAll('#library-notes-list [data-ongoing-note-key]').length`,count=`(document.getElementById('library-notes-nav-count')?.textContent||'')`;
+  const rows=`document.querySelectorAll('#library-notes-list [data-note-key]').length`,count=`(document.getElementById('library-notes-nav-count')?.textContent||'')`;
   await step('openNotes',`__measure(()=>{__PWA6.goTab('library');__PWA6.LibraryView.showSection('notes');},()=>${rows}>0&&!!document.querySelector('#library-notes-editor [contenteditable=true]'))`);
   Object.assign(report.steps.openNotes,await page.evaluate(`({rows:${rows},tagChips:document.querySelectorAll('#library-notes-tags .library-tag-chip').length})`));
   for(const order of ['recent','name'])await step(`sort-${order}`,`__measure(()=>{const sort=document.getElementById('library-notes-sort');sort.value='${order}';sort.dispatchEvent(new Event('change'));})`);
@@ -164,13 +164,13 @@ try{
     let dialog;while(!(dialog=document.getElementById('sd-interaction-dialog'))?.open)await new Promise(resolve=>setTimeout(resolve,4));
     const field=dialog.querySelector('.interaction-input');field.value=${JSON.stringify(`${busyTag}x`)};field.dispatchEvent(new Event('input',{bubbles:true}));
     dialog.querySelector('.interaction-actions .primary').click();
-  },()=>/Renamed #/.test(document.getElementById('ongoing-notes-status')?.textContent||''))`);
-  assert.match(await page.evaluate(`document.getElementById('ongoing-notes-status').textContent`),new RegExp(`in ${busyCount} notes\\.$`));
+  },()=>/Renamed #/.test(document.getElementById('notes-status')?.textContent||''))`);
+  assert.match(await page.evaluate(`document.getElementById('notes-status').textContent`),new RegExp(`in ${busyCount} notes\\.$`));
   await step('backup',`__measure(async()=>(await __PWA6.BackupController.createCheckpoint()).blob.size)`);
 
   // Catastrophic-regression guards, kept for the full library: checking
   // every note's text on each read froze start-up for three seconds.
-  if(PROFILE==='heavy'&&NOTES===PRODUCTION_LIMITS.maxOngoingNotes){
+  if(PROFILE==='heavy'&&NOTES===PRODUCTION_LIMITS.maxNotes){
     assert.ok(report.steps.startup.readyMs<PERFORMANCE_BUDGETS.notesAtLimitStartupMs,`Opening the app with ${NOTES} notes took ${report.steps.startup.readyMs} ms.`);
     for(const [name,result] of Object.entries(report.steps))if(Number.isFinite(result.maxTaskMs))assert.ok(result.maxTaskMs<PERFORMANCE_BUDGETS.notesAtLimitMaxTaskMs,`${name} held the page for ${result.maxTaskMs} ms.`);
     for(const name of ['typeInLimitNote','typeInTypicalNote'])assert.ok(report.steps[name].msPerCharacter<PERFORMANCE_BUDGETS.notesAtLimitKeystrokeMs,`${name} took ${report.steps[name].msPerCharacter} ms a character.`);

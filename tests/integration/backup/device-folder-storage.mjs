@@ -9,7 +9,7 @@ const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],freeze
 const sha256=async blob=>Buffer.from(await webcrypto.subtle.digest('SHA-256',await blob.arrayBuffer())).toString('hex');
 let now=Date.parse('2026-10-06T08:00:00.000Z'),folder=null,canMutate=true;
 const faults={corruptReadOf:new Set()},identities=freeze({root:'Study-Director-Automatic-Backup-Repository',objects:'objects',checkpoints:'checkpoints',commits:'commits'});
-const manifestFor=id=>freeze({checkpoint:freeze({checkpointId:id}),logicalFingerprint:'a'.repeat(64),exportedAt:new Date(now).toISOString(),counts:freeze({dailyRecord:3,areaNote:2}),encrypted:false,retention:freeze({role:'normal',protectedUntil:'',purpose:'',calendar:freeze({localDate:'2026-10-06',weekStart:'2026-10-05',month:'2026-10',utcOffsetMinutes:0})})});
+const manifestFor=id=>freeze({checkpoint:freeze({checkpointId:id}),logicalFingerprint:'a'.repeat(64),exportedAt:new Date(now).toISOString(),counts:freeze({dailyRecord:3,note:2}),encrypted:false,retention:freeze({role:'normal',protectedUntil:'',purpose:'',calendar:freeze({localDate:'2026-10-06',weekStart:'2026-10-05',month:'2026-10',utcOffsetMinutes:0})})});
 const storage=registry.require('device-folder-storage',1).createStorage(freeze({
   folder:()=>folder,identities,
   checksum:async blob=>sha256(blob),

@@ -18,7 +18,7 @@ export const CANONICAL_BASELINE=freeze({
     schemas:freeze({
       dailyRecords:CURRENT_SCHEMA_VERSIONS.DailyRecord,
       dailySummaries:CURRENT_SCHEMA_VERSIONS.DailySummary,
-      areaNotes:CURRENT_SCHEMA_VERSIONS.AreaNote,
+      notes:CURRENT_SCHEMA_VERSIONS.Note,
       activeSessions:CURRENT_SCHEMA_VERSIONS.ActiveSession,
       sessionSnapshots:CURRENT_SCHEMA_VERSIONS.SessionSnapshot,
       appMeta:CURRENT_SCHEMA_VERSIONS.AppMeta
@@ -26,7 +26,7 @@ export const CANONICAL_BASELINE=freeze({
   }),
   richText:freeze({prefix:'WG1:',version:1}),
   attachments:freeze({metadataVersion:INDEXED_DB.stores.assets.schemaVersion,storage:'opfs',directory:OPFS_IDENTITIES.attachments}),
-  recovery:freeze({activeSessionEnvelopeVersion:1,areaNoteRowVersion:1}),
+  recovery:freeze({activeSessionEnvelopeVersion:1,noteRowVersion:1}),
   external:freeze({
     completeBackup:EXTERNAL_FORMATS.completeBackup,
     protectedBackup:EXTERNAL_FORMATS.protectedBackup,
@@ -57,7 +57,7 @@ export const MIGRATION_FACADE_CONTRACT=freeze({
   emits:'current-canonical-data-or-explicit-rejection',
   verification:freeze({
     proofFormat:'study-director.canonical-installation-proof',
-    localChecks:freeze(['planLegacy','reflectionLegacy','activeSession','areaNotes','areaNoteRecovery','dailyRecords','deletionState','insightsRevisionEnvelope','canonicalStores','legacyStorage','legacyAttachments','obsoleteMetadata','topology','retiredIdentity']),
+    localChecks:freeze(['planLegacy','reflectionLegacy','activeSession','notes','noteRecovery','dailyRecords','deletionState','insightsRevisionEnvelope','canonicalStores','legacyStorage','legacyAttachments','obsoleteMetadata','topology','retiredIdentity']),
     retirementCompatibilityCheck:'retiredHostCompatibility',
     backupCheck:'freshBackup',
     localResult:'canonical',
@@ -104,28 +104,44 @@ export const COMPATIBILITY_REGISTRY=freeze({
       sourceFiles:freeze(['source/core/compatibility-codecs.js','source/core/repositories.js'])
     },
     {
-      id:'area-note-historical-rows',owner:'record-codecs/repositories',kind:'live-canonicalization',
+      id:'note-historical-rows',owner:'record-codecs/repositories',kind:'live-canonicalization',
       source:'IndexedDB AreaNote.v1/v2 rows keyed by note name, their name-keyed deletion records and browser emergency copy, and recovery entries carrying historical sync metadata or degraded historical shapes',
-      target:'strict current AreaNote.v3 rows keyed by a permanent id (worked out from the old name with FNV-1a 64, so older backups map to the same note) containing only version, key, label, text and local updatedAt revision; deletion records and the emergency copy keyed by the same id; a note merge base keyed by title is dropped (the next backup or restore records a new one)',
-      proof:'every retained Area Note, deletion record, emergency-copy entry and recovery entry is rewritten losslessly into the strict current shape in one transaction before ordinary reads resume; the next backup reads every note afresh',
+      target:'strict current Note.v3 rows keyed by a permanent id (worked out from the old name with FNV-1a 64, so older backups map to the same note) containing only version, key, label, text and local updatedAt revision; deletion records and the emergency copy keyed by the same id; a note merge base keyed by title is dropped (the next backup or restore records a new one)',
+      proof:'every retained Note, deletion record, emergency-copy entry and recovery entry is rewritten losslessly into the strict current shape in one transaction before ordinary reads resume; the next backup reads every note afresh',
       retirement:'baseline verified on all supported installations',
       sourceFiles:freeze(['source/core/compatibility-codecs.js','source/core/repositories.js','source/core/compatibility-host.js'])
     },
     {
       id:'name-keyed-notes-in-backups',owner:'backup-codec/managed-repository',kind:'import-adapter',
-      source:'portable backups before v21 and backup-location manifests before version 6, which key Ongoing Notes and their deletion history by note name',
+      source:'portable backups before v21 and backup-location manifests before version 6, which key Notes and their deletion history by note name',
       target:'notes and note deletion history keyed by the permanent id worked out from each name, the same id the live conversion gives that note',
       proof:'a v20 file is read as current apart from its notes; an older manifest converts its notes when the version is restored or combined whole, and offers no earlier version of one note',
       retirement:'no supported backup older than portable v21 or manifest 6 remains',
       sourceFiles:freeze(['source/core/backup-codec.js','source/core/backup.js','source/core/compatibility-codecs.js'])
     },
     {
-      id:'area-note-recovery-v1',owner:'repositories',kind:'live-migration',
+      id:'note-recovery-v1',owner:'repositories',kind:'live-migration',
       source:'localStorage areaNotesPending.v1 payload with version 1 pending map and appMeta areaNoteRecovery.v1:* journal rows',
-      target:'canonical AreaNote rows and AreaNoteDeletion entries, newer revision winning; a later deletion stays',
+      target:'canonical Note rows and NoteDeletion entries, newer revision winning; a later deletion stays',
       proof:'both sources are folded and the journal rows removed in one transaction before notes load; no journal row or legacy payload remains',
       retirement:'baseline verified on all supported installations',
       sourceFiles:freeze(['source/core/repositories.js'])
+    },
+    {
+      id:'canonical-note-and-folder-names',owner:'compatibility/host',kind:'live-migration',
+      source:'IndexedDB store areaNotes; appMeta areaNoteDeletion:* rows (study-director.area-note-deletion) and automaticDeviceBackup (study-director.device-backup-settings); localStorage studyDirector.areaNoteRescue.v1 (study-director.area-note-rescue); backup preparation stamps for areaNote:* units',
+      target:'the same data under its current names: the notes store, noteDeletion:* rows, the deviceFolder record and studyDirector.noteRescue.v1, each value carrying its renamed format; preparation stamps for old units are dropped (the next backup reads every note afresh)',
+      proof:'the store is renamed inside the bridge upgrade (version 8), so no row is copied; every record and the rescue copy move with their formats before any other step reads them, and an old and a new copy that differ stop the move with nothing changed',
+      retirement:'baseline verified on all supported installations',
+      sourceFiles:freeze(['contracts/canonical-identities.mjs','contracts/data-architecture.mjs','source/core/compatibility.js','source/core/compatibility-host.js','source/core/persistence.js','source/app.html'])
+    },
+    {
+      id:'area-note-names-in-backups',owner:'backup-codec/managed-repository',kind:'import-adapter',
+      source:'portable backups v21 and older (entity areaNote, data.areaNotes, protected manifest version 2 with areaNoteDeletions) and backup-location manifests version 6 and older (kind areaNote, units areaNote:*, counts.areaNote)',
+      target:'the current note entity, kind and deletion list names; checksums and completion proofs are still checked against the names the file was written with',
+      proof:'a v21 file and a version-6 manifest read back as the same notes, deletions and counts as before the rename',
+      retirement:'no supported backup older than portable v22 or manifest 7 remains',
+      sourceFiles:freeze(['source/core/backup-codec.js','source/core/managed-repository.js','source/core/device-folder-storage.js'])
     },
     {
       id:'daily-record-historical-shapes',owner:'record-codecs/repositories',kind:'live-canonicalization',
@@ -169,7 +185,7 @@ export const COMPATIBILITY_REGISTRY=freeze({
     },
     {
       id:'l7-host-metadata-normalization',owner:'compatibility/host',kind:'live-migration',
-      source:'L7 appMeta dataMaintenance v1 plus rebuildable noncanonical maintenance rows from intermediate upgrades, verifiedRecoveryBackups entries without baseline fields, attachmentIntegrityAudit issues with name, DeviceBackupSettings.v1, repositoryIntegrityScrub versions 2 to 5 (versions 3 to 5 carrying a Device Folder directory handle), single-row ReconciliationBase.v1 note merge bases, and backupProviderOperation:* journals, Device Folder settings v3 (two unused fields; sourceRevision renamed baseline), repositoryIntegrityScrub v6 (fixed device/drive slots, now keyed by location id), verifiedRecoveryBackups v1 and v2 (per-entry type, id, label and app version; a separate download), and retired storage-health fields (a last-backup time, per-kind save times, the storage estimate and the last error)',
+      source:'L7 appMeta dataMaintenance v1 plus rebuildable noncanonical maintenance rows from intermediate upgrades, verifiedRecoveryBackups entries without baseline fields, attachmentIntegrityAudit issues with name, DeviceFolderSettings.v1, repositoryIntegrityScrub versions 2 to 5 (versions 3 to 5 carrying a Device Folder directory handle), single-row ReconciliationBase.v1 note merge bases, and backupProviderOperation:* journals, Device Folder settings v3 (two unused fields; sourceRevision renamed baseline), repositoryIntegrityScrub v6 (fixed device/drive slots, now keyed by location id), verifiedRecoveryBackups v1 and v2 (per-entry type, id, label and app version; a separate download), and retired storage-health fields (a last-backup time, per-kind save times, the storage estimate and the last error)',
       target:'current host/repository metadata shapes or verified absence for obsolete operational rows',
       proof:'strict current appMeta verification passes after normalization; Device Folder handle/timestamps are retained, backup verification progress and quarantine carry over with the repository scope as identity, note merge bases become a verified ReconciliationBase.v2 header plus per-note rows unless a newer current base exists, obsolete provider-operation journals are removed, and unknown historical shapes fail closed',
       retirement:'after all supported installations have crossed the metadata normalization, report the canonical baseline, and no historical provider journal remains',
@@ -184,11 +200,11 @@ export const COMPATIBILITY_REGISTRY=freeze({
       sourceFiles:freeze(['contracts/data-architecture.mjs','source/core/compatibility-host.js','source/core/host-metadata.js','source/app.html'])
     },
     {
-      id:'restore-journal-payload-v1-v3',owner:'compatibility/host',kind:'live-migration',
-      source:'appMeta restoreJournalPayload versions 1 to 3 left by a restore interrupted under an older build',
-      target:'restoreJournalPayload version 4 with explicit (empty) deletion lists, then resolved by restore crash recovery',
-      proof:'the converted payload is read back and verified before crash recovery runs; the ordinary journal reader accepts only version 4 and unknown shapes fail closed',
-      retirement:'after every supported installed build writes version-4 restore journals and the canonical baseline is verified',
+      id:'restore-journal-payload-v1-v4',owner:'compatibility/host',kind:'live-migration',
+      source:'appMeta restoreJournalPayload versions 1 to 4 left by a restore interrupted under an older build',
+      target:'restoreJournalPayload version 5 with explicit deletion lists (noteDeletions, formerly areaNoteDeletions), then resolved by restore crash recovery',
+      proof:'the converted payload is read back and verified before crash recovery runs; the ordinary journal reader accepts only version 5 and unknown shapes fail closed',
+      retirement:'after every supported installed build writes version-5 restore journals and the canonical baseline is verified',
       sourceFiles:freeze(['source/core/compatibility-host.js'])
     },
     {
@@ -196,14 +212,14 @@ export const COMPATIBILITY_REGISTRY=freeze({
       source:`historical IndexedDB topology containing retired ${OBSOLETE_INDEXED_DB.stores.syncQueue}/${OBSOLETE_INDEXED_DB.stores.tombstones}/${OBSOLETE_INDEXED_DB.stores.reflectionDrafts} stores`,
       target:`current IndexedDB v${INDEXED_DB.version} six-store topology`,
       proof:'all local canonical surfaces and deletion-state conversion pass before version upgrade; post-upgrade topology contains only canonical stores',
-      retirement:'after the canonical baseline is verified and all supported installations have crossed v7; generic IndexedDB upgrade support remains permanent',
+      retirement:`after the canonical baseline is verified and all supported installations have crossed v${INDEXED_DB.version}; generic IndexedDB upgrade support remains permanent`,
       sourceFiles:freeze(['contracts/canonical-identities.mjs','source/core/persistence.js','source/core/compatibility.js','source/app.html'])
     },
     {
       id:'indexeddb-pre-v3-migration-marker',owner:'compatibility/persistence',kind:'schema-bridge',
       source:'IndexedDB oldVersion < 3',
-      target:'R10 bridge topology long enough to migrate, followed by the current six-store IndexedDB v7 topology',
-      proof:'pre-v3 data receives the migration marker, canonical conversion verifies, then the database upgrades to v7 with all retired stores absent',
+      target:`R10 bridge topology long enough to migrate, followed by the current six-store IndexedDB v${INDEXED_DB.version} topology`,
+      proof:`pre-v3 data receives the migration marker, canonical conversion verifies, then the database upgrades to v${INDEXED_DB.version} with all retired stores absent`,
       retirement:'remove historical oldVersion branch after baseline verification; retain generic onupgradeneeded infrastructure',
       sourceFiles:freeze(['source/core/compatibility.js','source/core/persistence.js'])
     },
@@ -246,7 +262,7 @@ export const COMPATIBILITY_REGISTRY=freeze({
     {
       id:'complete-backup-v7-v19',owner:'backup-codec',kind:'import-adapter',
       source:'study-director-backup metadata versions 7 through 19, including pre-v10 framing/checksum/entity-set variants, the pre-L10 personal-data envelope, R10 records carrying embedded sync metadata, B1 v14 checkpoints without protected reconciliation metadata, v15 protected-manifest checkpoints before the current deletion-ledger evolution, v16 personal-data payloads that still transported device-local Wake Lock/System Alerts fields, v17 checkpoints that predate protected capture-authority proof, v18 checkpoints that still carried the retired ReflectionDraft domain, and v19 checkpoints that predate DailyRecord.v16 record kinds',
-      target:'current v21 checkpoint restore model (notes keyed by permanent id through name-keyed-notes-in-backups) with protected reconciliation manifest, portable Preferences only, lean canonical domain records, and protected canonical-complete/rescue-partial capture authority',
+      target:`current v${EXTERNAL_FORMATS.completeBackup.metadataVersion} checkpoint restore model (notes keyed by permanent id through name-keyed-notes-in-backups) with protected reconciliation manifest, portable Preferences only, lean canonical domain records, and protected canonical-complete/rescue-partial capture authority`,
       proof:'manifest/chunks/completion proof validate and imported entities pass canonical sanitizers before restore',
       retirement:'after all required historical backups are replaced by a fresh current-format verified backup',
       sourceFiles:freeze(['source/core/backup-codec.js','source/core/backup.js','source/core/compatibility-codecs.js','source/external/drive.js'])
@@ -289,11 +305,11 @@ export const PERMANENT_NON_MIGRATION=freeze({
   activeSessionRecovery:item({owner:'repositories',reason:'current crash recovery'}),
   dailyRecordFallback:item({owner:'repositories',reason:'current degraded-storage recovery; replay into IndexedDB is recovery, not legacy migration'}),
   scheduleProgressRemap:item({owner:'plan/session',reason:'current in-session progress remapping when a schedule changes; not historical storage compatibility'}),
-  areaNoteRecovery:item({owner:'repositories',reason:'current localStorage copy of unsaved Ongoing Notes when a save fails or the page closes mid-save'}),
+  noteRecovery:item({owner:'repositories',reason:'current localStorage copy of unsaved Notes when a save fails or the page closes mid-save'}),
   deletionRecovery:item({owner:'repositories',reason:'current failed-delete recovery for DailyRecord and ActiveSession; not a synchronization outbox'}),
   savedDayDeletionLedger:item({owner:'repositories',reason:'current domain deletion history needed for explicit Saved-Day checkpoint reconciliation; not distributed-sync state'}),
   restoreAndLibraryClearJournals:item({owner:'repository-journals',reason:'current destructive-operation rollback/recovery'}),
-  currentBackupValidation:item({owner:'backup-codec',reason:'current v20/SDBK10 integrity, protected checkpoint-manifest bounds and canonical validation'}),
+  currentBackupValidation:item({owner:'backup-codec',reason:'current SDBK10 integrity, protected checkpoint-manifest bounds and canonical validation'}),
   currentAttachmentArchiveValidation:item({owner:'attachments',reason:'current SDAT01 v1 import/export validation'})
 });
 

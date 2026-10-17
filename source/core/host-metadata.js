@@ -10,7 +10,7 @@ registry.define('host-metadata',1,()=>{
   function exactKeys(value,keys){return !!(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('|')===[...keys].sort().join('|'));}
   function createAppMetaValidators(input){
     exactObject(input,['keys','same','normalizers'],'Host metadata validator input');
-    exactObject(input.keys,['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix'],'Host metadata keys');
+    exactObject(input.keys,['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix'],'Host metadata keys');
     functions(input.normalizers,['verifiedRecovery','attachmentIntegrity','repositoryIntegrity','reconciliationBase','reconciliationBaseNote'],'Host metadata normalizers');
     if(typeof input.same!=='function')throw new TypeError('Host metadata equality helper is required.');
     const keys=input.keys,normalizers=input.normalizers,same=input.same;
@@ -41,8 +41,8 @@ registry.define('host-metadata',1,()=>{
         return true;
       }
       if(key===keys.reconciliationBase)return same(value,normalizers.reconciliationBase(value));
-      if(key===keys.automaticDeviceBackup){
-        if(!value||!exactKeys(value,['format','version','directoryHandle','baseline'])||value.format!=='study-director.device-backup-settings'||Number(value.version)!==4)return false;
+      if(key===keys.deviceFolder){
+        if(!value||!exactKeys(value,['format','version','directoryHandle','baseline'])||value.format!=='study-director.device-folder-settings'||Number(value.version)!==4)return false;
         const handle=value.directoryHandle,baseline=String(value.baseline||'');
         return !!(handle&&typeof handle.getFileHandle==='function'&&typeof handle.getDirectoryHandle==='function'&&typeof handle.queryPermission==='function'&&(!baseline||Number.isFinite(Date.parse(baseline))));
       }
@@ -52,7 +52,7 @@ registry.define('host-metadata',1,()=>{
     const reconciliationNoteValidator=(value,context)=>same(value,normalizers.reconciliationBaseNote(value,context))===true;
     return freeze({
       verifiedRecoveryBackups:validator,backupProtection:validator,attachmentIntegrityAudit:validator,
-      automaticDeviceBackup:validator,repositoryIntegrityScrub:validator,managedProviderBackupPending:validator,repositoryMaintenancePending:validator,
+      deviceFolder:validator,repositoryIntegrityScrub:validator,managedProviderBackupPending:validator,repositoryMaintenancePending:validator,
       reconciliationBase:validator,reconciliationBaseNotePrefix:reconciliationNoteValidator
     });
   }

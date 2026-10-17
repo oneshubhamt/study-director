@@ -9,7 +9,7 @@ const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const Compatibility=registry.require('compatibility',1);
 const Host=registry.require('compatibility-host',1);
 const HostMetadata=registry.require('host-metadata',1);
-const ReconciliationCodec=registry.require('reconciliation-baseline',1).createCodec(Object.freeze({limits:Object.freeze({maxAreaNameChars:160,maxRichTextBytes:2*1024*1024,maxOngoingNotes:1000}),isNoteKey:noteKeys.isKey}));
+const ReconciliationCodec=registry.require('reconciliation-baseline',1).createCodec(Object.freeze({limits:Object.freeze({maxAreaNameChars:160,maxRichTextBytes:2*1024*1024,maxNotes:1000}),isNoteKey:noteKeys.isKey}));
 vm.runInThisContext(fs.readFileSync('source/core/integrity-continuation.js','utf8'),{filename:'integrity-continuation.js'});
 globalThis.IntegrityContinuationModule=registry.require('integrity-continuation',1);
 {const app=fs.readFileSync('source/app.html','utf8');vm.runInThisContext(app.slice(app.indexOf('function normalizeRepositoryIntegrityTarget('),app.indexOf('async function libraryClearSnapshot(')),{filename:'repository-integrity-normalizer'});}
@@ -23,19 +23,23 @@ const obsolete={
   attachmentMaintenanceDay:'oldAttachmentCleanupDay',attachmentMaintenancePending:'oldAttachmentCleanupPending'
 };
 const appMeta={
-  personalPreferences:'preferences',dataMaintenance:'dataMaintenance',verifiedRecoveryBackups:'verifiedRecoveryBackups',attachmentIntegrityAudit:'attachmentIntegrityAudit',automaticDeviceBackup:'automaticDeviceBackup',repositoryIntegrityScrub:'repositoryIntegrityScrub',
+  personalPreferences:'preferences',dataMaintenance:'dataMaintenance',verifiedRecoveryBackups:'verifiedRecoveryBackups',attachmentIntegrityAudit:'attachmentIntegrityAudit',deviceFolder:'deviceFolder',repositoryIntegrityScrub:'repositoryIntegrityScrub',
   reconciliationBase:'reconciliationBase',reconciliationBaseNotePrefix:'reconciliationBaseNote:',reconciliationBaseLegacy:'reconciliationBase.v1',restoreJournalPayload:'restoreJournalPayload',
   repositoryMaintenancePending:'repositoryMaintenancePending',repositoryMaintenancePendingLegacy:'repositoryMaintenancePending.v1',
   libraryClearJournalState:'libraryClearJournalState',libraryClearJournalPayloadPrefix:'libraryClearJournalPayload:',
-  archiveClearJournalStateLegacy:'archiveClearJournalState.v1',archiveClearJournalPayloadPrefixLegacy:'archiveClearJournalPayload.v1:'
+  archiveClearJournalStateLegacy:'archiveClearJournalState.v1',archiveClearJournalPayloadPrefixLegacy:'archiveClearJournalPayload.v1:',
+  backupPreparationUnitPrefix:'backupPreparationUnit:'
 };
 // Record names once carried a version; the first compatibility step moves them.
-const renamedAppMeta=Object.freeze([['reconciliationBase.v2','reconciliationBase'],['reconciliationBaseNote.v1:','reconciliationBaseNote:'],['restoreJournalPayload.v1','restoreJournalPayload'],['repositoryMaintenancePending.v2','repositoryMaintenancePending'],['libraryClearJournalState.v1','libraryClearJournalState'],['libraryClearJournalPayload.v1:','libraryClearJournalPayload:']].map(pair=>Object.freeze(pair)));
+const renamedAppMeta=Object.freeze([['reconciliationBase.v2','reconciliationBase'],['reconciliationBaseNote.v1:','reconciliationBaseNote:'],['restoreJournalPayload.v1','restoreJournalPayload'],['repositoryMaintenancePending.v2','repositoryMaintenancePending'],['libraryClearJournalState.v1','libraryClearJournalState'],['libraryClearJournalPayload.v1:','libraryClearJournalPayload:'],['areaNoteDeletion.v1:','noteDeletion:'],['areaNoteDeletion:','noteDeletion:'],['automaticDeviceBackup','deviceFolder']].map(pair=>Object.freeze(pair)));
+// Notes and the Device Folder once had other names; their values carried the old format names too.
+const renamedLocal=Object.freeze([Object.freeze(['oldNoteRescue','noteRescue'])]);
+const renamedFormats=Object.freeze({'study-director.area-note-deletion':'study-director.note-deletion','study-director.area-note-rescue':'study-director.note-rescue','study-director.device-backup-settings':'study-director.device-folder-settings'});
 const localRows=new Map([
   [obsolete.schedule,'07:00 | 60 | Legacy Plan'],[obsolete.defaults,JSON.stringify({studentName:'Asha',scheduleText:'08:00 | 45 | Legacy Default',practiceCueMode:'audio'})],
   [obsolete.quote,'Keep going'],[obsolete.nudge,JSON.stringify({enabled:true})],[current.theme,'dark'],[current.presentation,'glass'],[current.fontScale,'1.1'],
   [obsolete.reflectionDrafts,JSON.stringify({version:1,drafts:{'2026-09-19':{reflection:'Legacy reflection',revision:2,updatedAt:'2026-09-19T10:00:00.000Z'}}})],
-  [obsolete.deviceId,'dev_abcdefgh'],[obsolete.attachmentMaintenanceAttemptDay,'2026-09-18'],[obsolete.attachmentMaintenanceDay,'2026-09-19'],[obsolete.attachmentMaintenancePending,'1'],
+  [obsolete.deviceId,'dev_abcdefgh'],['oldNoteRescue',JSON.stringify({format:'study-director.area-note-rescue',version:1,entries:[]})],[obsolete.attachmentMaintenanceAttemptDay,'2026-09-18'],[obsolete.attachmentMaintenanceDay,'2026-09-19'],[obsolete.attachmentMaintenancePending,'1'],
   [current.storageHealth,JSON.stringify({version:2,lastLocalSaveAt:'2026-09-19T09:00:00.000Z',lastBackupAt:'2026-09-19T09:30:00.000Z',lastNotesSaveAt:'2026-09-18T10:00:00.000Z',lastDailyRecordSaveAt:'2026-09-19T08:30:00.000Z',lastLiveSaveAt:'2026-09-19T08:59:00.000Z',lastIdbOkAt:'2026-09-19T08:00:00.000Z',lastError:'Browser database is unavailable',lastErrorAt:'2026-09-18T00:00:00.000Z',lastErrorSource:'indexedDB',updatedAt:'2026-09-19T09:00:00.000Z',storagePersisted:true,usageBytes:10,quotaBytes:100,usageRatio:0.1,lastEstimateAt:'2026-09-19T08:00:00.000Z',browserDataClearedAt:null})]
 ]);
 let lastError=null;
@@ -79,6 +83,10 @@ const metadataRows=new Map([
   ['reconciliationBaseNote.v1:Stale',{key:'reconciliationBaseNote.v1:Stale',version:1,value:{format:'study-director.reconciliation-base-note',version:1,key:'Stale',text:'old'},updatedAt:'2026-09-18T07:00:00.000Z'}],
   [appMeta.archiveClearJournalStateLegacy,{key:appMeta.archiveClearJournalStateLegacy,version:1,value:legacyClearState,updatedAt:'2026-09-19T08:04:00.000Z'}],
   [appMeta.archiveClearJournalPayloadPrefixLegacy+`${legacyClearId}:00000000`,{key:appMeta.archiveClearJournalPayloadPrefixLegacy+`${legacyClearId}:00000000`,version:1,value:freeze({format:'study-director.archive-clear-journal',version:1,id:legacyClearId,index:0,bytes:legacyClearBytes}),updatedAt:'2026-09-19T08:04:00.000Z'}],
+  ['areaNoteDeletion:note_oldname0000000001',{key:'areaNoteDeletion:note_oldname0000000001',version:1,value:{format:'study-director.area-note-deletion',version:2,key:'note_oldname0000000001',deletedAt:'2026-09-18T00:00:00.000Z'},updatedAt:'2026-09-18T00:00:00.000Z'}],
+  ['areaNoteDeletion.v1:note_oldname0000000002',{key:'areaNoteDeletion.v1:note_oldname0000000002',version:1,value:{format:'study-director.area-note-deletion',version:2,key:'note_oldname0000000002',deletedAt:'2026-09-17T00:00:00.000Z'},updatedAt:'2026-09-17T00:00:00.000Z'}],
+  ['backupPreparationUnit:areaNote:note_oldname0000000001',{key:'backupPreparationUnit:areaNote:note_oldname0000000001',version:1,value:{unit:'areaNote:note_oldname0000000001',fingerprint:'a'.repeat(64)},updatedAt:'2026-09-18T00:00:00.000Z'}],
+  ['backupPreparationUnit:note:note_newname0000000001',{key:'backupPreparationUnit:note:note_newname0000000001',version:1,value:{unit:'note:note_newname0000000001',fingerprint:'b'.repeat(64)},updatedAt:'2026-09-18T00:00:00.000Z'}],
   ['backupProviderOperation:google-drive',{key:'backupProviderOperation:google-drive',version:1,value:{kind:'upload',backupFile:{name:'backup-00000000-0000-4000-8000-000000000000',size:10,hash:'a'.repeat(64)}},updatedAt:'2026-09-19T08:00:00.000Z'}]
 ]);
 let legacyFileCollections=0;
@@ -92,10 +100,15 @@ const metadata=freeze({
   removeRow:async key=>{metadataRows.delete(String(key));return true;},releaseBackupFile:async()=>{legacyFileCollections++;return true;},normalizeVerifiedRecovery,normalizeAttachmentIntegrity,
   normalizeRepositoryIntegrity:normalizeRepositoryIntegrityState,normalizeRepositoryIntegrityTarget,
   // One transaction in the app: a differing copy under the new name stops the whole move.
-  renameRows:async pairs=>{
-    const moves=[];
-    for(const [key,row] of metadataRows){const pair=pairs.find(([from])=>from.endsWith(':')?key.startsWith(from):key===from);if(!pair)continue;const target=pair[1]+key.slice(pair[0].length),existing=metadataRows.get(target);if(existing&&JSON.stringify(existing.value)!==JSON.stringify(row.value))throw new Error(`Record ${key} and its renamed copy ${target} differ. Nothing was renamed.`);moves.push([key,target,row,existing]);}
-    for(const [key,target,row,existing] of moves){if(!existing)metadataRows.set(target,{...row,key:target});metadataRows.delete(key);}
+  renameRows:async(pairs,formats)=>{
+    const moves=[],planned=new Map();
+    for(const [key,row] of metadataRows){
+      const pair=pairs.find(([from])=>from.endsWith(':')?key.startsWith(from):key===from);if(!pair)continue;
+      const target=pair[1]+key.slice(pair[0].length),existing=planned.get(target)||metadataRows.get(target),value=Object.hasOwn(formats,String(row.value?.format))?{...row.value,format:formats[row.value.format]}:row.value;
+      if(existing&&JSON.stringify(existing.value)!==JSON.stringify(value))throw new Error(`Record ${key} and its renamed copy ${target} differ. Nothing was renamed.`);
+      if(!existing)planned.set(target,{...row,key:target,value});moves.push(key);
+    }
+    for(const [target,row] of planned)metadataRows.set(target,row);for(const key of moves)metadataRows.delete(key);
     return moves.length;
   },
   updateStorageHealth:patch=>{localRows.set(current.storageHealth,JSON.stringify({...JSON.parse(localRows.get(current.storageHealth)||'{}'),...patch}));return true;}
@@ -112,12 +125,12 @@ const canonicalStoreProof=async()=>{
 };
 assert.equal((await canonicalStoreProof()).ok,false,'the historical maintenance fixture must reproduce the canonicalStores failure before compatibility migration');
 const facade=Host.createFacade(freeze({
-  baselineId:'R12_REFINEMENT',facadeFactory:Compatibility.createFacade,keys:freeze({storage:freeze(current),obsolete:freeze(obsolete),appMeta:freeze(appMeta),renamedAppMeta}),
+  baselineId:'R12_REFINEMENT',facadeFactory:Compatibility.createFacade,keys:freeze({storage:freeze(current),obsolete:freeze(obsolete),appMeta:freeze(appMeta),renamedAppMeta,renamedLocal,renamedFormats}),
   local,ownership,plan,preferences,identity:freeze({getId:()=>local.getText('installationId',''),installationKey:'installationId',legacyKey:obsolete.deviceId}),
   metadata,
-  live:freeze({migrateActiveSession:async()=>freeze({status:'not-needed'}),migrateAreaNotes:async()=>freeze({status:'not-needed'}),migrateAreaNoteRecovery:async()=>freeze({status:'not-needed'}),migrateDeletionState:async()=>freeze({status:'not-needed'}),migrateDailyRecords:async()=>freeze({status:'not-needed'}),migrateInsightsRevisionEnvelope:async()=>freeze({status:'not-needed'}),cleanupLegacyAttachments:async()=>freeze({status:'not-needed'}),cleanupObsoleteMetadata:async()=>freeze({status:'not-needed'})}),
+  live:freeze({migrateActiveSession:async()=>freeze({status:'not-needed'}),migrateNotes:async()=>freeze({status:'not-needed'}),migrateNoteRecovery:async()=>freeze({status:'not-needed'}),migrateDeletionState:async()=>freeze({status:'not-needed'}),migrateDailyRecords:async()=>freeze({status:'not-needed'}),migrateInsightsRevisionEnvelope:async()=>freeze({status:'not-needed'}),cleanupLegacyAttachments:async()=>freeze({status:'not-needed'}),cleanupObsoleteMetadata:async()=>freeze({status:'not-needed'})}),
   topology:freeze({retire:async()=>{topologyRetired=true;return freeze({status:'retired'});}}),
-  verification:freeze({activeSession:ok,areaNotes:ok,areaNoteRecovery:ok,deletionState:ok,dailyRecords:ok,insightsRevisionEnvelope:ok,canonicalStores:canonicalStoreProof,legacyAttachments:ok,obsoleteMetadata:ok,topology:async()=>freeze({ok:topologyRetired}),freshBackup:ok}),
+  verification:freeze({activeSession:ok,notes:ok,noteRecovery:ok,deletionState:ok,dailyRecords:ok,insightsRevisionEnvelope:ok,canonicalStores:canonicalStoreProof,legacyAttachments:ok,obsoleteMetadata:ok,topology:async()=>freeze({ok:topologyRetired}),freshBackup:ok}),
   backups:freeze({inspectCurrent:async()=>freeze({kind:'current'}),inspectLegacy:async()=>freeze({kind:'legacy'})}),
   helpers:freeze({same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),randomUuid:()=> 'uuid',nowIso:()=> '2026-09-20T00:00:00.000Z',isNoteKey:noteKeys.isKey})
 }));
@@ -145,6 +158,11 @@ const scrub=metadataRows.get('repositoryIntegrityScrub').value,scrubDevice=scrub
 assert.equal(scrub.version,7,'historical backup verification state is converted to the current record, keyed by location id');assert.deepEqual(Object.keys(scrub.locations).sort(),['device-folder','google-drive']);assert.equal(Object.hasOwn(scrubDevice,'repositoryHandle'),false,'the retired directory handle is dropped');
 assert.equal(scrubDevice.repositoryScope,'device-scope');assert.equal(scrubDevice.cursor,'obj_'+'b'.repeat(32));assert.deepEqual([...scrubDevice.quarantinedObjectIds],['obj_'+'c'.repeat(32)],'quarantine carries over');assert.equal(scrubDrive.repositoryScope,'drive-scope');
 assert.equal(report.results.identities.status,'migrated','old record names move first');
+assert.equal(metadataRows.has('automaticDeviceBackup'),false,'the Device Folder record moves to its new name');assert.equal(metadataRows.get('deviceFolder').value.format,'study-director.device-folder-settings','its value format is renamed with it');
+for(const id of ['note_oldname0000000001','note_oldname0000000002']){const row=metadataRows.get('noteDeletion:'+id);assert.equal(row?.value.format,'study-director.note-deletion',`note deletion ${id} moves under its new name and format`);assert.equal(row.value.key,id);}
+assert.equal([...metadataRows.keys()].some(key=>key.startsWith('areaNoteDeletion')),false,'no note deletion keeps an old name');
+assert.equal(localRows.has('oldNoteRescue'),false);assert.deepEqual(JSON.parse(localRows.get('noteRescue')),{format:'study-director.note-rescue',version:1,entries:[]},'the rescue copy moves under its new key and format');
+assert.equal(metadataRows.has('backupPreparationUnit:areaNote:note_oldname0000000001'),false,'a preparation stamp for a unit under the old name is dropped');assert.equal(metadataRows.has('backupPreparationUnit:note:note_newname0000000001'),true,'a current preparation stamp stays');
 assert.equal([...metadataRows.keys()].some(key=>/\.v2$|\.v1:/u.test(key)&&key!=='reconciliationBase.v1'),false,'no record keeps an old name');
 assert.deepEqual(metadataRows.get('verifiedRecoveryBackups').value,{version:3,file:{at:'2026-09-19T09:30:00.000Z',sourceRevision:'2026-09-19T09:30:00.000Z',format:null,verified:false},providers:{}},'the last-backup record keeps one shape; the newer last-backup time from storage health becomes an unverified file copy');
 const slimHealth=JSON.parse(localRows.get(current.storageHealth));
@@ -169,12 +187,12 @@ assert.deepEqual([...metadataRows.keys()].filter(key=>key.startsWith('reconcilia
 
 metadataRows.set('dataMaintenance',{key:'dataMaintenance',version:1,value:{version:5,status:'completed',completedAt:'2026-09-20T01:00:00.000Z',canonicalRecords:10},updatedAt:'2026-09-20T01:00:00.000Z'});
 const secondFacade=Host.createFacade(freeze({
-  baselineId:'R12_REFINEMENT',facadeFactory:Compatibility.createFacade,keys:freeze({storage:freeze(current),obsolete:freeze(obsolete),appMeta:freeze(appMeta),renamedAppMeta}),
+  baselineId:'R12_REFINEMENT',facadeFactory:Compatibility.createFacade,keys:freeze({storage:freeze(current),obsolete:freeze(obsolete),appMeta:freeze(appMeta),renamedAppMeta,renamedLocal,renamedFormats}),
   local,ownership,plan,preferences,identity:freeze({getId:()=>local.getText('installationId',''),installationKey:'installationId',legacyKey:obsolete.deviceId}),
   metadata,
-  live:freeze({migrateActiveSession:async()=>freeze({status:'not-needed'}),migrateAreaNotes:async()=>freeze({status:'not-needed'}),migrateAreaNoteRecovery:async()=>freeze({status:'not-needed'}),migrateDeletionState:async()=>freeze({status:'not-needed'}),migrateDailyRecords:async()=>freeze({status:'not-needed'}),migrateInsightsRevisionEnvelope:async()=>freeze({status:'not-needed'}),cleanupLegacyAttachments:async()=>freeze({status:'not-needed'}),cleanupObsoleteMetadata:async()=>freeze({status:'not-needed'})}),
+  live:freeze({migrateActiveSession:async()=>freeze({status:'not-needed'}),migrateNotes:async()=>freeze({status:'not-needed'}),migrateNoteRecovery:async()=>freeze({status:'not-needed'}),migrateDeletionState:async()=>freeze({status:'not-needed'}),migrateDailyRecords:async()=>freeze({status:'not-needed'}),migrateInsightsRevisionEnvelope:async()=>freeze({status:'not-needed'}),cleanupLegacyAttachments:async()=>freeze({status:'not-needed'}),cleanupObsoleteMetadata:async()=>freeze({status:'not-needed'})}),
   topology:freeze({retire:async()=>freeze({status:'retired'})}),
-  verification:freeze({activeSession:ok,areaNotes:ok,areaNoteRecovery:ok,deletionState:ok,dailyRecords:ok,insightsRevisionEnvelope:ok,canonicalStores:canonicalStoreProof,legacyAttachments:ok,obsoleteMetadata:ok,topology:ok,freshBackup:ok}),
+  verification:freeze({activeSession:ok,notes:ok,noteRecovery:ok,deletionState:ok,dailyRecords:ok,insightsRevisionEnvelope:ok,canonicalStores:canonicalStoreProof,legacyAttachments:ok,obsoleteMetadata:ok,topology:ok,freshBackup:ok}),
   backups:freeze({inspectCurrent:async()=>freeze({kind:'current'}),inspectLegacy:async()=>freeze({kind:'legacy'})}),
   helpers:freeze({same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),randomUuid:()=> 'uuid',nowIso:()=> '2026-09-20T02:00:00.000Z',isNoteKey:noteKeys.isKey})
 }));
@@ -182,15 +200,15 @@ await secondFacade.migrateLive();
 assert.equal(metadataRows.has('dataMaintenance'),false,'stale same-version maintenance payloads are rebuildable and must not block startup');
 assert.equal(metadataRows.get('verifiedRecoveryBackups').value.version,3,'a converted record stays as it is on later runs');
 assert.equal(Object.hasOwn(metadataRows.get('attachmentIntegrityAudit').value.issues[0],'name'),false);
-assert.deepEqual(Object.keys(metadataRows.get('automaticDeviceBackup').value).sort(),['baseline','directoryHandle','format','version'],'the two unused Device Folder fields are dropped');assert.equal(metadataRows.get('automaticDeviceBackup').value.version,4);assert.equal(metadataRows.get('automaticDeviceBackup').value.directoryHandle,directoryHandle);assert.equal(metadataRows.get('automaticDeviceBackup').value.baseline,'2026-09-19T07:59:00.000Z','sourceRevision is now named baseline');
+assert.deepEqual(Object.keys(metadataRows.get('deviceFolder').value).sort(),['baseline','directoryHandle','format','version'],'the two unused Device Folder fields are dropped');assert.equal(metadataRows.get('deviceFolder').value.version,4);assert.equal(metadataRows.get('deviceFolder').value.directoryHandle,directoryHandle);assert.equal(metadataRows.get('deviceFolder').value.baseline,'2026-09-19T07:59:00.000Z','sourceRevision is now named baseline');
 installationProof=await facade.verifyCanonicalInstallation();assert.equal(installationProof.compatibilityRetired,true);
 
 metadataRows.set(appMeta.repositoryMaintenancePendingLegacy,{key:appMeta.repositoryMaintenancePendingLegacy,version:1,value:{format:'study-director.repository-maintenance-pending',version:1,entries:[{providerId:'google-drive',requestedAt:'2026-09-20T03:00:00.000Z',unexpected:true}]},updatedAt:'2026-09-20T03:00:00.000Z'});
 const malformedInput=freeze({
-  baselineId:'R12_REFINEMENT',facadeFactory:Compatibility.createFacade,keys:freeze({storage:freeze(current),obsolete:freeze(obsolete),appMeta:freeze(appMeta),renamedAppMeta}),
+  baselineId:'R12_REFINEMENT',facadeFactory:Compatibility.createFacade,keys:freeze({storage:freeze(current),obsolete:freeze(obsolete),appMeta:freeze(appMeta),renamedAppMeta,renamedLocal,renamedFormats}),
   local,ownership,plan,preferences,identity:freeze({getId:()=>local.getText('installationId',''),installationKey:'installationId',legacyKey:obsolete.deviceId}),metadata,
-  live:freeze({migrateActiveSession:async()=>freeze({status:'not-needed'}),migrateAreaNotes:async()=>freeze({status:'not-needed'}),migrateAreaNoteRecovery:async()=>freeze({status:'not-needed'}),migrateDeletionState:async()=>freeze({status:'not-needed'}),migrateDailyRecords:async()=>freeze({status:'not-needed'}),migrateInsightsRevisionEnvelope:async()=>freeze({status:'not-needed'}),cleanupLegacyAttachments:async()=>freeze({status:'not-needed'}),cleanupObsoleteMetadata:async()=>freeze({status:'not-needed'})}),
-  topology:freeze({retire:async()=>freeze({status:'retired'})}),verification:freeze({activeSession:ok,areaNotes:ok,areaNoteRecovery:ok,deletionState:ok,dailyRecords:ok,insightsRevisionEnvelope:ok,canonicalStores:canonicalStoreProof,legacyAttachments:ok,obsoleteMetadata:ok,topology:ok,freshBackup:ok}),
+  live:freeze({migrateActiveSession:async()=>freeze({status:'not-needed'}),migrateNotes:async()=>freeze({status:'not-needed'}),migrateNoteRecovery:async()=>freeze({status:'not-needed'}),migrateDeletionState:async()=>freeze({status:'not-needed'}),migrateDailyRecords:async()=>freeze({status:'not-needed'}),migrateInsightsRevisionEnvelope:async()=>freeze({status:'not-needed'}),cleanupLegacyAttachments:async()=>freeze({status:'not-needed'}),cleanupObsoleteMetadata:async()=>freeze({status:'not-needed'})}),
+  topology:freeze({retire:async()=>freeze({status:'retired'})}),verification:freeze({activeSession:ok,notes:ok,noteRecovery:ok,deletionState:ok,dailyRecords:ok,insightsRevisionEnvelope:ok,canonicalStores:canonicalStoreProof,legacyAttachments:ok,obsoleteMetadata:ok,topology:ok,freshBackup:ok}),
   backups:freeze({inspectCurrent:async()=>freeze({kind:'current'}),inspectLegacy:async()=>freeze({kind:'legacy'})}),helpers:freeze({same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),randomUuid:()=> 'uuid',nowIso:()=> '2026-09-20T03:00:00.000Z',isNoteKey:noteKeys.isKey})
 });
 const malformedFacade=Host.createFacade(malformedInput);
@@ -230,7 +248,12 @@ metadataRows.set('restoreJournalPayload.v1',{key:'restoreJournalPayload.v1',vers
 assert.equal((await Host.createFacade(malformedInput).verifyCanonicalInstallation()).compatibilityRetired,false);
 await Host.createFacade(malformedInput).migrateLive();
 assert.equal(metadataRows.has('restoreJournalPayload.v1'),false);const currentJournal=metadataRows.get('restoreJournalPayload').value;
-assert.equal(currentJournal.version,4);assert.equal(currentJournal.blob,journalBlob);assert.deepEqual(currentJournal.savedDayDeletions,oldJournal.savedDayDeletions);assert.deepEqual([...currentJournal.areaNoteDeletions],[]);assert.deepEqual([...currentJournal.attachmentDeletions],[]);
+assert.equal(currentJournal.version,5);assert.equal(currentJournal.blob,journalBlob);assert.deepEqual(currentJournal.savedDayDeletions,oldJournal.savedDayDeletions);assert.deepEqual([...currentJournal.noteDeletions],[]);assert.deepEqual([...currentJournal.attachmentDeletions],[]);
+// Version 4 named the note deletions areaNoteDeletions; version 5 calls them noteDeletions.
+const noteDeletion={key:'note_oldname0000000003',deletedAt:'2026-09-11T00:00:00.000Z'},v4Journal={...oldJournal,version:4,areaNoteDeletions:[noteDeletion],attachmentDeletions:[]};
+metadataRows.set('restoreJournalPayload',{key:'restoreJournalPayload',version:1,value:v4Journal,updatedAt:'2026-09-12T00:00:00.000Z'});
+await Host.createFacade(malformedInput).migrateLive();
+const v5Journal=metadataRows.get('restoreJournalPayload').value;assert.equal(v5Journal.version,5);assert.equal(Object.hasOwn(v5Journal,'areaNoteDeletions'),false);assert.deepEqual([...v5Journal.noteDeletions],[noteDeletion],'version 4 note deletions carry over under their new name');assert.equal(v5Journal.blob,journalBlob);
 const unknownJournal={...oldJournal,version:1,unexpected:true};
 metadataRows.set('restoreJournalPayload',{key:'restoreJournalPayload',version:1,value:unknownJournal,updatedAt:'2026-09-12T00:00:00.000Z'});
 await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/interrupted restore from an older version has an unknown shape/u);
@@ -263,17 +286,17 @@ await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/last-b
 assert.deepEqual(metadataRows.get('verifiedRecoveryBackups').value,{version:7},'an unknown shape is preserved untouched');metadataRows.set('verifiedRecoveryBackups',convertedRecord);
 
 const validators=HostMetadata.createAppMetaValidators(freeze({
-  keys:freeze({verifiedRecoveryBackups:'a',backupProtection:'b',attachmentIntegrityAudit:'c',automaticDeviceBackup:'d',repositoryIntegrityScrub:'e',managedProviderBackupPending:'f',repositoryMaintenancePending:'h',reconciliationBase:'g2',reconciliationBaseNotePrefix:'g3'}),
+  keys:freeze({verifiedRecoveryBackups:'a',backupProtection:'b',attachmentIntegrityAudit:'c',deviceFolder:'d',repositoryIntegrityScrub:'e',managedProviderBackupPending:'f',repositoryMaintenancePending:'h',reconciliationBase:'g2',reconciliationBaseNotePrefix:'g3'}),
   same:(a,b)=>a===b,normalizers:freeze({verifiedRecovery:value=>value,attachmentIntegrity:value=>value,repositoryIntegrity:value=>value,reconciliationBase:value=>value,reconciliationBaseNote:value=>value})
 }));
 const migratedValidators=HostMetadata.createAppMetaValidators(freeze({
-  keys:freeze({verifiedRecoveryBackups:'verifiedRecoveryBackups',backupProtection:'backupProtection',attachmentIntegrityAudit:'attachmentIntegrityAudit',automaticDeviceBackup:'automaticDeviceBackup',repositoryIntegrityScrub:'repositoryIntegrityScrub',managedProviderBackupPending:'managedProviderBackupPending',repositoryMaintenancePending:'repositoryMaintenancePending',reconciliationBase:'reconciliationBase',reconciliationBaseNotePrefix:'reconciliationBaseNote:'}),
+  keys:freeze({verifiedRecoveryBackups:'verifiedRecoveryBackups',backupProtection:'backupProtection',attachmentIntegrityAudit:'attachmentIntegrityAudit',deviceFolder:'deviceFolder',repositoryIntegrityScrub:'repositoryIntegrityScrub',managedProviderBackupPending:'managedProviderBackupPending',repositoryMaintenancePending:'repositoryMaintenancePending',reconciliationBase:'reconciliationBase',reconciliationBaseNotePrefix:'reconciliationBaseNote:'}),
   same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),normalizers:freeze({verifiedRecovery:normalizeVerifiedRecovery,attachmentIntegrity:normalizeAttachmentIntegrity,repositoryIntegrity:normalizeRepositoryIntegrityState,reconciliationBase:value=>value,reconciliationBaseNote:value=>value})
 }));
 assert.equal(migratedValidators.verifiedRecoveryBackups(metadataRows.get('verifiedRecoveryBackups').value,freeze({key:'verifiedRecoveryBackups'})),true,'migrated L7 recovery metadata must pass the ordinary current validator without compatibility interpretation');
 assert.equal(migratedValidators.attachmentIntegrityAudit(metadataRows.get('attachmentIntegrityAudit').value,freeze({key:'attachmentIntegrityAudit'})),true,'migrated L7 attachment-audit metadata must pass the ordinary current validator');
 assert.equal(migratedValidators.repositoryIntegrityScrub(metadataRows.get('repositoryIntegrityScrub').value,freeze({key:'repositoryIntegrityScrub'})),true,'migrated backup verification state must pass the ordinary current validator');
-assert.equal(migratedValidators.automaticDeviceBackup(metadataRows.get('automaticDeviceBackup').value,freeze({key:'automaticDeviceBackup'})),true,'migrated L7 Device Backup settings must pass the ordinary current validator');
+assert.equal(migratedValidators.deviceFolder(metadataRows.get('deviceFolder').value,freeze({key:'deviceFolder'})),true,'migrated L7 Device Backup settings must pass the ordinary current validator');
 assert.equal(validators.backupProtection(freeze({version:2,id:'key',verifier:new Blob(['ok'])}),freeze({key:'b'})),true);
 assert.equal(validators.backupProtection(freeze({version:1,id:'legacy-key',verifier:new Blob(['legacy'])}),freeze({key:'b'})),false,'only the current password record is read');
 assert.equal(validators.backupProtection(freeze({version:2,id:'',verifier:new Blob(['ok'])}),freeze({key:'b'})),false);

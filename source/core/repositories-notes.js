@@ -5,31 +5,31 @@ if(!registry||registry.format!=='study-director.internal-module-registry'||regis
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
 }
 const {exactFrozenObject:exactObject,functionPort:functions}=registry.contracts;
-registry.define('repositories-area-notes',1,()=>{
+registry.define('repositories-notes',1,()=>{
   const freeze=Object.freeze;
   function create(input){
-    exactObject(input,['configuration','storage','codecs','keyedRecord','helpers','hooks','canonical','clock','saveLane'],'Area Notes repository input');
+    exactObject(input,['configuration','storage','codecs','keyedRecord','helpers','hooks','canonical','clock','saveLane'],'Notes repository input');
     const SaveLane=input.saveLane;
-    if(!SaveLane||SaveLane.format!=='study-director.save-lane-module'||SaveLane.contractVersion!==1||typeof SaveLane.createLane!=='function')throw new TypeError('Area Notes save lane is unavailable or incompatible.');
-    const configuration=exactObject(input.configuration,['limits','dataContract','stores','keys'],'Area Notes configuration');
-    const stores=exactObject(configuration.stores,['areaNotes','appMeta'],'Area Notes stores');
-    const keys=exactObject(configuration.keys,['areaNoteRescue'],'Area Notes storage keys');
-    const storage=exactObject(input.storage,['local','meta','idbGetAll','idbStoreTransaction','idbStrictTransaction','storageResets'],'Area Notes storage port');
-    if(['idbGetAll','idbStoreTransaction','idbStrictTransaction','storageResets'].some(key=>typeof storage[key]!=='function'))throw new TypeError('Area Notes storage functions are invalid.');
-    const codecs=exactObject(input.codecs,['sanitizeCurrentAreaNote','areaNoteKeys'],'Area Notes codec port');
-    if(typeof codecs.sanitizeCurrentAreaNote!=='function'||!Object.isFrozen(codecs.areaNoteKeys))throw new TypeError('Area Notes codec port is invalid.');
-    if(!Object.isFrozen(input.keyedRecord))throw new TypeError('Area Notes keyed-record capability must be frozen.');
-    const helpers=functions(input.helpers,['clampText','clampEditorContent','editorContentWithinLimits','wipeObject','normalizeAreaName','displayAreaName','normalizeTimestamp','sameDataValue','jsonByteLength','canonicalRuntimeError','isCanonicalRuntimeError','rescueRoom'],'Area Notes helper port');
-    const hooks=functions(input.hooks,['canMutate','storageOk','reportCommit','onNotesChanged','onNoteSyncState','onNoteConflict','saveWarning','diagnosticsCapture'],'Area Notes hook port');
-    const canonical=functions(input.canonical,['areaNoteDeletionValue','areaNotePreparationUnit','stageMutationEpoch','normalizeAreaNoteDeletions'],'Area Notes canonical port');
-    const clock=functions(input.clock,['nowMs'],'Area Notes clock');
-    const APP_LIMITS=configuration.limits,DATA_CONTRACT=configuration.dataContract,DB_AREA_NOTES_STORE=stores.areaNotes,DB_APP_META_STORE=stores.appMeta;
-    const STORAGE_KEYS=freeze({areaNoteRescue:keys.areaNoteRescue});
+    if(!SaveLane||SaveLane.format!=='study-director.save-lane-module'||SaveLane.contractVersion!==1||typeof SaveLane.createLane!=='function')throw new TypeError('Notes save lane is unavailable or incompatible.');
+    const configuration=exactObject(input.configuration,['limits','dataContract','stores','keys'],'Notes configuration');
+    const stores=exactObject(configuration.stores,['notes','appMeta'],'Notes stores');
+    const keys=exactObject(configuration.keys,['noteRescue'],'Notes storage keys');
+    const storage=exactObject(input.storage,['local','meta','idbGetAll','idbStoreTransaction','idbStrictTransaction','storageResets'],'Notes storage port');
+    if(['idbGetAll','idbStoreTransaction','idbStrictTransaction','storageResets'].some(key=>typeof storage[key]!=='function'))throw new TypeError('Notes storage functions are invalid.');
+    const codecs=exactObject(input.codecs,['sanitizeCurrentNote','noteKeys'],'Notes codec port');
+    if(typeof codecs.sanitizeCurrentNote!=='function'||!Object.isFrozen(codecs.noteKeys))throw new TypeError('Notes codec port is invalid.');
+    if(!Object.isFrozen(input.keyedRecord))throw new TypeError('Notes keyed-record capability must be frozen.');
+    const helpers=functions(input.helpers,['clampText','clampEditorContent','editorContentWithinLimits','wipeObject','normalizeAreaName','displayAreaName','normalizeTimestamp','sameDataValue','jsonByteLength','canonicalRuntimeError','isCanonicalRuntimeError','rescueRoom'],'Notes helper port');
+    const hooks=functions(input.hooks,['canMutate','storageOk','reportCommit','onNotesChanged','onNoteSyncState','onNoteConflict','saveWarning','diagnosticsCapture'],'Notes hook port');
+    const canonical=functions(input.canonical,['noteDeletionValue','notePreparationUnit','stageMutationEpoch','normalizeNoteDeletions'],'Notes canonical port');
+    const clock=functions(input.clock,['nowMs'],'Notes clock');
+    const APP_LIMITS=configuration.limits,DATA_CONTRACT=configuration.dataContract,DB_NOTES_STORE=stores.notes,DB_APP_META_STORE=stores.appMeta;
+    const STORAGE_KEYS=freeze({noteRescue:keys.noteRescue});
     const LocalStorageContract=storage.local,Meta=storage.meta,idbGetAll=storage.idbGetAll,idbStoreTransaction=storage.idbStoreTransaction,idbStrictTransaction=storage.idbStrictTransaction,storageResets=storage.storageResets;
-    const sanitizeCurrentAreaNote=codecs.sanitizeCurrentAreaNote,NoteKeys=codecs.areaNoteKeys,KeyedRecord=input.keyedRecord;
+    const sanitizeCurrentNote=codecs.sanitizeCurrentNote,NoteKeys=codecs.noteKeys,KeyedRecord=input.keyedRecord;
     const {clampText,clampEditorContent,editorContentWithinLimits,wipeObject,normalizeAreaName,displayAreaName,normalizeTimestamp,sameDataValue,jsonByteLength,canonicalRuntimeError,isCanonicalRuntimeError,rescueRoom}=helpers;
-    const appCanMutate=hooks.canMutate,markStorageHealthOk=hooks.storageOk,reportCanonicalCommit=hooks.reportCommit,refreshAreaNoteConsumers=hooks.onNotesChanged,setNoteSyncStateForKey=hooks.onNoteSyncState,reportAreaNoteConflict=hooks.onNoteConflict,showSubjectNoteSaveWarning=hooks.saveWarning,AppDiagnostics=freeze({capture:hooks.diagnosticsCapture});
-    const {areaNoteDeletionValue,areaNotePreparationUnit,stageMutationEpoch:stageCanonicalMutationEpoch,normalizeAreaNoteDeletions}=canonical;
+    const appCanMutate=hooks.canMutate,markStorageHealthOk=hooks.storageOk,reportCanonicalCommit=hooks.reportCommit,refreshNoteConsumers=hooks.onNotesChanged,setNoteSyncStateForKey=hooks.onNoteSyncState,reportNoteConflict=hooks.onNoteConflict,showSubjectNoteSaveWarning=hooks.saveWarning,AppDiagnostics=freeze({capture:hooks.diagnosticsCapture});
+    const {noteDeletionValue,notePreparationUnit,stageMutationEpoch:stageCanonicalMutationEpoch,normalizeNoteDeletions}=canonical;
     const decisionNowMs=clock.nowMs;
 const repository=(()=>{
   const notes=KeyedRecord.create();
@@ -48,17 +48,17 @@ const repository=(()=>{
   // the title key (the label normalised) is how plan Areas find it, kept in a
   // lookup rebuilt after any change. Two live notes never share a title.
   // A deleted note stays an ordinary row under its id behind a reserved prefix
-  // ('~deleted <id>') for areaNoteTrashDays. It keeps its label and text, and
+  // ('~deleted <id>') for noteTrashDays. It keeps its label and text, and
   // its revision is the time it was deleted. Trash rows leave no deletion
   // record when they go.
-  const TRASH_PREFIX=String(DATA_CONTRACT.schemas.AreaNote.trashKeyPrefix||''),TRASH_RETENTION_MS=Number(APP_LIMITS.areaNoteTrashDays)*86400000;
-  if(!TRASH_PREFIX||!(TRASH_RETENTION_MS>0))throw new TypeError('Area Notes trash contract is invalid.');
+  const TRASH_PREFIX=String(DATA_CONTRACT.schemas.Note.trashKeyPrefix||''),TRASH_RETENTION_MS=Number(APP_LIMITS.noteTrashDays)*86400000;
+  if(!TRASH_PREFIX||!(TRASH_RETENTION_MS>0))throw new TypeError('Notes trash contract is invalid.');
   const isTrashKey=key=>String(key||'').startsWith(TRASH_PREFIX);
   // A label is normalised into its title once.
   const titleByLabel=new Map();
   function titleOf(entry){
     const label=String(entry&&entry.label||'');let title=titleByLabel.get(label);
-    if(title===undefined){if(titleByLabel.size>=2*APP_LIMITS.maxOngoingNotes)titleByLabel.clear();title=normalizeAreaName(label);titleByLabel.set(label,title);}
+    if(title===undefined){if(titleByLabel.size>=2*APP_LIMITS.maxNotes)titleByLabel.clear();title=normalizeAreaName(label);titleByLabel.set(label,title);}
     return title;
   }
   function newNoteId(){for(;;){const id=`n_${[...globalThis.crypto.getRandomValues(new Uint8Array(8))].map(value=>value.toString(16).padStart(2,'0')).join('')}`;if(!notes[id]&&!notes[NoteKeys.trash(id)])return id;}}
@@ -92,18 +92,18 @@ const repository=(()=>{
   // Recently deleted shares the note limit but never blocks a note: at the
   // limit the oldest deleted notes go first.
   function oldestTrashKeys(collection,count){return count>0?Object.keys(collection).filter(isTrashKey).sort((a,b)=>String(collection[a]&&collection[a].updatedAt||'').localeCompare(String(collection[b]&&collection[b].updatedAt||''))||a.localeCompare(b)).slice(0,count):[];}
-  function tooManyNotes(count){return Object.assign(new RangeError(`Notes are limited to ${APP_LIMITS.maxOngoingNotes.toLocaleString()} notes; this would make ${count.toLocaleString()}. Nothing was changed.`),{code:'AREA_NOTE_LIMIT'});}
+  function tooManyNotes(count){return Object.assign(new RangeError(`Notes are limited to ${APP_LIMITS.maxNotes.toLocaleString()} notes; this would make ${count.toLocaleString()}. Nothing was changed.`),{code:'NOTE_LIMIT'});}
   function normalizePayload(payload,options={}){
     const strictRich=options&&options.strictRich===true;
     const out=KeyedRecord.create();
     const entries=Object.entries((payload&&typeof payload==='object')?payload:{});
-    if(entries.length>APP_LIMITS.maxOngoingNotes)throw tooManyNotes(entries.length);
+    if(entries.length>APP_LIMITS.maxNotes)throw tooManyNotes(entries.length);
     entries.forEach(([rawKey,rawVal])=>{
       const source=(rawVal&&typeof rawVal==='object')?rawVal:{text:String(rawVal||'')};
       const key=String(source.key||rawKey||'');if(!key)return;
       const sourceText=String(source.text||'');
       if(strictRich&&!editorContentWithinLimits(sourceText))throw new RangeError(`Note ${key} exceeds the ${APP_LIMITS.maxRichTextWords.toLocaleString()}-word rich-text limit.`);
-      const current=sanitizeCurrentAreaNote(source,key);
+      const current=sanitizeCurrentNote(source,key);
       if(current){out[key]=current;return;}
       throw canonicalRuntimeError(`Note ${String(key||rawKey||'?')} is not in the current canonical schema.`);
     });
@@ -141,7 +141,7 @@ const repository=(()=>{
     const safeTitle=normalizeAreaName(title);
     if(!safeTitle||NoteKeys.isKey(safeTitle))return null;
     let id=idForTitle(safeTitle);
-    if(!id){id=newNoteId();setNote(id,{version:DATA_CONTRACT.schemas.AreaNote.version,key:id,label:clampText(displayAreaName(label||safeTitle),APP_LIMITS.maxAreaNameChars),text:'',updatedAt:null});}
+    if(!id){id=newNoteId();setNote(id,{version:DATA_CONTRACT.schemas.Note.version,key:id,label:clampText(displayAreaName(label||safeTitle),APP_LIMITS.maxAreaNameChars),text:'',updatedAt:null});}
     return notes[id];
   }
   // What callers see of a note: its permanent id, and as `key` its title key
@@ -157,7 +157,7 @@ const repository=(()=>{
     const safeKey=String((entry&&entry.key)||key||'');
     if(!safeKey||!entry)return null;
     return {
-      version:DATA_CONTRACT.schemas.AreaNote.version,
+      version:DATA_CONTRACT.schemas.Note.version,
       key:safeKey,
       label:clampText(displayAreaName(entry.label),APP_LIMITS.maxAreaNameChars),
       text:String(entry.text||''),
@@ -180,41 +180,41 @@ const repository=(()=>{
   function recordFailure(reason){
     saveFailed=true;
     const labels=rescueShortfall.map(key=>displayAreaName(notes[key]&&notes[key].label||key)),named=labels.length>3?`${labels.slice(0,3).join(', ')} and ${labels.length-3} more`:labels.join(', ');
-    const detail=String(reason||'the note database failed').replace(/[.\s]+$/u,'')+(labels.length?`. The browser's emergency copy holds ${Math.round(APP_LIMITS.areaNoteRescueBytes/104857.6)/10} MiB and could not keep ${named}, so closing this tab now would lose ${labels.length===1?'it':'them'}`:'');
+    const detail=String(reason||'the note database failed').replace(/[.\s]+$/u,'')+(labels.length?`. The browser's emergency copy holds ${Math.round(APP_LIMITS.noteRescueBytes/104857.6)/10} MiB and could not keep ${named}, so closing this tab now would lose ${labels.length===1?'it':'them'}`:'');
     saveMessage=SaveLane.failureMessage('Notes',detail);
     showSubjectNoteSaveWarning(detail);
   }
-  const AREA_NOTE_RESCUE_FORMAT='study-director.area-note-rescue';
+  const NOTE_RESCUE_FORMAT='study-director.note-rescue';
   function normalizeRescueEntries(raw){
     const out=KeyedRecord.create();
-    const source=raw&&raw.format===AREA_NOTE_RESCUE_FORMAT&&Number(raw.version)===1&&raw.entries&&typeof raw.entries==='object'&&!Array.isArray(raw.entries)?raw.entries:{};
+    const source=raw&&raw.format===NOTE_RESCUE_FORMAT&&Number(raw.version)===1&&raw.entries&&typeof raw.entries==='object'&&!Array.isArray(raw.entries)?raw.entries:{};
     Object.entries(source).forEach(([rawKey,rawEntry])=>{
       const key=String((rawEntry&&rawEntry.key)||rawKey||'');if(!key||!rawEntry)return;
       if(rawEntry.deleted){const updatedAt=normalizeTimestamp(rawEntry.updatedAt,null);if(!NoteKeys.isKey(key))throw canonicalRuntimeError(`Note rescue ${key} is not in the current canonical schema.`);if(updatedAt)out[key]={key,deleted:true,updatedAt};return;}
-      const clean=sanitizeCurrentAreaNote(rawEntry,key);if(!clean)throw canonicalRuntimeError(`Note rescue ${key} is not in the current canonical schema.`);out[key]=clean;
+      const clean=sanitizeCurrentNote(rawEntry,key);if(!clean)throw canonicalRuntimeError(`Note rescue ${key} is not in the current canonical schema.`);out[key]=clean;
     });
     return out;
   }
   // Proof that the browser's emergency copy holds only current notes.
   function verifyRescue(){
-    const raw=LocalStorageContract.getJson(STORAGE_KEYS.areaNoteRescue,null);
-    if(LocalStorageContract.lastError)return freeze({ok:false,rows:0,issues:freeze(['area-note-rescue-unreadable'])});
+    const raw=LocalStorageContract.getJson(STORAGE_KEYS.noteRescue,null);
+    if(LocalStorageContract.lastError)return freeze({ok:false,rows:0,issues:freeze(['note-rescue-unreadable'])});
     if(!raw)return freeze({ok:true,rows:0,issues:freeze([])});
     let valid=false;
-    try{valid=raw.format===AREA_NOTE_RESCUE_FORMAT&&Number(raw.version)===1&&Number.isFinite(Date.parse(String(raw.updatedAt||'')))&&!!raw.entries&&typeof raw.entries==='object'&&Object.keys(normalizeRescueEntries(raw)).length===Object.keys(raw.entries).length&&jsonByteLength(raw)<=APP_LIMITS.areaNoteRescueBytes;}catch{valid=false;}
-    return freeze({ok:valid,rows:1,issues:freeze(valid?[]:['area-note-rescue-invalid'])});
+    try{valid=raw.format===NOTE_RESCUE_FORMAT&&Number(raw.version)===1&&Number.isFinite(Date.parse(String(raw.updatedAt||'')))&&!!raw.entries&&typeof raw.entries==='object'&&Object.keys(normalizeRescueEntries(raw)).length===Object.keys(raw.entries).length&&jsonByteLength(raw)<=APP_LIMITS.noteRescueBytes;}catch{valid=false;}
+    return freeze({ok:valid,rows:1,issues:freeze(valid?[]:['note-rescue-invalid'])});
   }
   function readIndependentRescue(){
-    const raw=LocalStorageContract.getJson(STORAGE_KEYS.areaNoteRescue,null),error=LocalStorageContract.lastError;
+    const raw=LocalStorageContract.getJson(STORAGE_KEYS.noteRescue,null),error=LocalStorageContract.lastError;
     if(error)throw error;
     return normalizeRescueEntries(raw);
   }
   // Clearing keeps the copy's own ceiling; protecting new notes uses its share
   // of the emergency budget.
-  function persistIndependentRescue(entries,room=APP_LIMITS.areaNoteRescueBytes){
-    const updatedAt=new Date().toISOString(),envelope={format:AREA_NOTE_RESCUE_FORMAT,version:1,updatedAt,entries};
+  function persistIndependentRescue(entries,room=APP_LIMITS.noteRescueBytes){
+    const updatedAt=new Date().toISOString(),envelope={format:NOTE_RESCUE_FORMAT,version:1,updatedAt,entries};
     if(jsonByteLength(envelope)>room)return false;
-    return LocalStorageContract.setJson(STORAGE_KEYS.areaNoteRescue,envelope);
+    return LocalStorageContract.setJson(STORAGE_KEYS.noteRescue,envelope);
   }
   // The rescue is a snapshot of every note not yet confirmed in the database,
   // newest first while it fits in its share of the emergency-copy budget. Notes it held earlier
@@ -226,21 +226,21 @@ const repository=(()=>{
     if(!keys.length){rescueShortfall=[];return true;}
     const deletedAt=new Date().toISOString(),candidates=keys.map(key=>canonicalEntrySnapshot(notes[key],key)||{key,deleted:true,updatedAt:deletedAt}).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));
     const entries=KeyedRecord.create();let complete=true,room=0;
-    try{room=rescueRoom();}catch(error){AppDiagnostics.capture('area-notes.rescue-room',error,'warn');}
+    try{room=rescueRoom();}catch(error){AppDiagnostics.capture('notes.rescue-room',error,'warn');}
     for(const entry of candidates){
       entries[entry.key]=entry;
-      if(jsonByteLength({format:AREA_NOTE_RESCUE_FORMAT,version:1,updatedAt:deletedAt,entries})>room){delete entries[entry.key];complete=false;}
+      if(jsonByteLength({format:NOTE_RESCUE_FORMAT,version:1,updatedAt:deletedAt,entries})>room){delete entries[entry.key];complete=false;}
     }
     const written=Object.keys(entries).length?persistIndependentRescue(entries,room):true;
     rescueShortfall=candidates.filter(entry=>!entry.deleted&&(!written||!entries[entry.key])).map(entry=>entry.key);
-    if(!written||!complete)AppDiagnostics.capture('area-notes.rescue-write',LocalStorageContract.lastError||new Error(`Unsaved notes exceed the ${Math.round(APP_LIMITS.areaNoteRescueBytes/1024)} KB browser copy.`),'error');
+    if(!written||!complete)AppDiagnostics.capture('notes.rescue-write',LocalStorageContract.lastError||new Error(`Unsaved notes exceed the ${Math.round(APP_LIMITS.noteRescueBytes/1024)} KB browser copy.`),'error');
     return written&&complete;
   }
   function clearIndependentRescueKeys(keys){
     const current=readIndependentRescue();if(LocalStorageContract.lastError)return false;let changed=false;
     for(const rawKey of keys||[]){const key=String(rawKey||'');if(key&&Object.hasOwn(current,key)){delete current[key];changed=true;}}
     if(!changed)return true;
-    if(!Object.keys(current).length)return LocalStorageContract.remove(STORAGE_KEYS.areaNoteRescue);
+    if(!Object.keys(current).length)return LocalStorageContract.remove(STORAGE_KEYS.noteRescue);
     return persistIndependentRescue(current);
   }
   function markDirty(key,baseRevision){
@@ -270,24 +270,24 @@ const repository=(()=>{
     return moves;
   }
   async function idbRead(){
-    const rows=await idbGetAll(DB_AREA_NOTES_STORE,'area note read aborted'),out=KeyedRecord.create();
+    const rows=await idbGetAll(DB_NOTES_STORE,'note read aborted'),out=KeyedRecord.create();
     for(const row of rows){
-      const clean=sanitizeCurrentAreaNote(row,row&&row.key);
+      const clean=sanitizeCurrentNote(row,row&&row.key);
       if(!clean)throw canonicalRuntimeError(`Note ${String(row&&row.key||'?')} is not in the current canonical schema.`);
       out[clean.key]=clean;
     }
     return out;
   }
   async function idbReplace(payload,removedKeys=[],options={}){
-    const normalized=normalizePayload(payload),deletedEntries=normalizeAreaNoteDeletions(options.deletedEntries||[]),recordDeletes=options.recordDeletes===true;
+    const normalized=normalizePayload(payload),deletedEntries=normalizeNoteDeletions(options.deletedEntries||[]),recordDeletes=options.recordDeletes===true;
     const deletedByKey=new Map(deletedEntries.map(entry=>[entry.key,entry]));
-    return idbStrictTransaction([DB_AREA_NOTES_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
-      const store=tx.objectStore(DB_AREA_NOTES_STORE),meta=Meta.view(tx);stageCanonicalMutationEpoch(tx,['*']);store.clear();
-      Object.values(normalized).forEach(entry=>{store.put(entry);meta.remove('areaNoteDeletionPrefix',entry.key);});
-      if(recordDeletes){const now=new Date().toISOString();for(const rawKey of removedKeys){const key=String(rawKey||'');if(key&&!normalized[key]&&!isTrashKey(key)){const deletion=areaNoteDeletionValue(key,deletedByKey.get(key)?.deletedAt||now);meta.put('areaNoteDeletionPrefix',deletion,{suffix:key,updatedAt:deletion.deletedAt});}}}
-      for(const entry of deletedEntries)if(!normalized[entry.key]){const deletion=areaNoteDeletionValue(entry.key,entry.deletedAt);meta.put('areaNoteDeletionPrefix',deletion,{suffix:entry.key,updatedAt:deletion.deletedAt});}
+    return idbStrictTransaction([DB_NOTES_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
+      const store=tx.objectStore(DB_NOTES_STORE),meta=Meta.view(tx);stageCanonicalMutationEpoch(tx,['*']);store.clear();
+      Object.values(normalized).forEach(entry=>{store.put(entry);meta.remove('noteDeletionPrefix',entry.key);});
+      if(recordDeletes){const now=new Date().toISOString();for(const rawKey of removedKeys){const key=String(rawKey||'');if(key&&!normalized[key]&&!isTrashKey(key)){const deletion=noteDeletionValue(key,deletedByKey.get(key)?.deletedAt||now);meta.put('noteDeletionPrefix',deletion,{suffix:key,updatedAt:deletion.deletedAt});}}}
+      for(const entry of deletedEntries)if(!normalized[entry.key]){const deletion=noteDeletionValue(entry.key,entry.deletedAt);meta.put('noteDeletionPrefix',deletion,{suffix:entry.key,updatedAt:deletion.deletedAt});}
       tx.oncomplete=()=>finish(true);
-    },'area note replacement aborted');
+    },'note replacement aborted');
   }
   // A clash keeps this tab's version as a new note, "<Name> (unsaved copy)",
   // numbered when that is taken and stamped past 99, so a name is always found.
@@ -304,21 +304,21 @@ const repository=(()=>{
   async function idbApplyDelta(keys,expectedRevisions){
     const uniqueKeys=[...new Set((keys||[]).map(key=>String(key||'')).filter(Boolean))];
     const canonical=new Map(uniqueKeys.map(key=>[key,canonicalEntrySnapshot(notes[key],key)]));
-    return idbStrictTransaction([DB_AREA_NOTES_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
-      const store=tx.objectStore(DB_AREA_NOTES_STORE),meta=Meta.view(tx),conflicts=[],committed=KeyedRecord.create(),evicted=[],changed=new Set(),deletedAt=new Date().toISOString(),storageLost=storageLossKnown();
+    return idbStrictTransaction([DB_NOTES_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
+      const store=tx.objectStore(DB_NOTES_STORE),meta=Meta.view(tx),conflicts=[],committed=KeyedRecord.create(),evicted=[],changed=new Set(),deletedAt=new Date().toISOString(),storageLost=storageLossKnown();
       const failOn=(request,message)=>{request.onerror=()=>finish(false,request.error||new Error(message));};
       let remaining=uniqueKeys.length;
       // Requests complete in issue order, so these reads observe the state before
       // any write below. A database without any canonical mutation epoch was
       // recreated (browser data cleared) rather than edited elsewhere.
       const epoch=meta.get('canonicalMutationEpoch');
-      failOn(epoch.request,'area note epoch read failed');
+      failOn(epoch.request,'note epoch read failed');
       uniqueKeys.forEach(key=>{
         const entry=canonical.get(key);committed[key]=entry;
-        const deletion=meta.get('areaNoteDeletionPrefix',key);
-        failOn(deletion.request,'area note deletion read failed');
+        const deletion=meta.get('noteDeletionPrefix',key);
+        failOn(deletion.request,'note deletion read failed');
         const request=store.get(key);
-        failOn(request,'area note revision read failed');
+        failOn(request,'note revision read failed');
         request.onsuccess=()=>{
           const persistedRaw=request.result||null,persistedRevision=normalizeTimestamp(persistedRaw&&persistedRaw.updatedAt,'')||'';
           const expected=expectedRevisions&&expectedRevisions.has(key)?String(expectedRevisions.get(key)||''):persistedRevision;
@@ -333,7 +333,7 @@ const repository=(()=>{
               conflicts.push({key,persisted,local:differs?entry:null,copy:null,unresolved:false});clash=true;
             }else storageLossSignalled=true;
           }
-          if(!clash){changed.add(key);if(entry){store.put(entry);meta.remove('areaNoteDeletionPrefix',key);}else{store.delete(key);if(!isTrashKey(key)){const deletion=areaNoteDeletionValue(key,deletedAt);meta.put('areaNoteDeletionPrefix',deletion,{suffix:key,updatedAt:deletion.deletedAt});}}}
+          if(!clash){changed.add(key);if(entry){store.put(entry);meta.remove('noteDeletionPrefix',key);}else{store.delete(key);if(!isTrashKey(key)){const deletion=noteDeletionValue(key,deletedAt);meta.put('noteDeletionPrefix',deletion,{suffix:key,updatedAt:deletion.deletedAt});}}}
           if(--remaining===0)keepClashCopies();
         };
       });
@@ -342,27 +342,27 @@ const repository=(()=>{
         const pending=conflicts.filter(item=>item.local);
         if(!pending.length){stageWrites();return;}
         const stored=store.getAll();
-        failOn(stored,'area note read failed');
+        failOn(stored,'note read failed');
         stored.onsuccess=()=>{
           const rows=stored.result||[],trash=rows.filter(row=>isTrashKey(row&&row.key)).sort((a,b)=>String(a.updatedAt||'').localeCompare(String(b.updatedAt||''))).map(row=>String(row.key));
           const takenTitles=new Set([...rows.filter(row=>!isTrashKey(row&&row.key)).map(titleOf),...titles().keys()]),takenIds=new Set(rows.map(row=>String(row&&row.key||'')));
-          let room=APP_LIMITS.maxOngoingNotes-rows.length;
+          let room=APP_LIMITS.maxNotes-rows.length;
           pending.forEach(item=>{
             while(room<=0&&trash.length){const key=trash.shift();store.delete(key);evicted.push(key);changed.add(key);room++;}
             if(room<=0){item.unresolved=true;return;}
             const label=copyLabel(item.local,title=>!title||takenTitles.has(title));takenTitles.add(normalizeAreaName(label));
             let copyKey=newNoteId();while(takenIds.has(copyKey))copyKey=newNoteId();takenIds.add(copyKey);
-            item.copy={version:DATA_CONTRACT.schemas.AreaNote.version,key:copyKey,label,text:String(item.local.text||''),updatedAt:nextRevision('')};
+            item.copy={version:DATA_CONTRACT.schemas.Note.version,key:copyKey,label,text:String(item.local.text||''),updatedAt:nextRevision('')};
             // add, never put: an id taken after all fails the batch instead of
             // replacing a stored note.
-            failOn(store.add(item.copy),'area note copy write failed');meta.remove('areaNoteDeletionPrefix',copyKey);changed.add(copyKey);room--;
+            failOn(store.add(item.copy),'note copy write failed');meta.remove('noteDeletionPrefix',copyKey);changed.add(copyKey);room--;
           });
           stageWrites();
         };
       }
-      function stageWrites(){if(changed.size)stageCanonicalMutationEpoch(tx,[...changed].map(areaNotePreparationUnit));}
+      function stageWrites(){if(changed.size)stageCanonicalMutationEpoch(tx,[...changed].map(notePreparationUnit));}
       tx.oncomplete=()=>finish(true,{conflicts,committed,evicted,written:changed.size});
-    },'area note transaction aborted');
+    },'note transaction aborted');
   }
   async function performLoad({strict=false}={}){
     const revisionAtStart=snapshotRevision,writesAtStart=lane.tail();
@@ -372,7 +372,7 @@ const repository=(()=>{
     try{
       loaded=await idbRead();
     }catch(e){
-      lastLoadReadFailed=true;AppDiagnostics.capture('area-notes.load',e,'error');
+      lastLoadReadFailed=true;AppDiagnostics.capture('notes.load',e,'error');
       if(strict||isCanonicalRuntimeError(e))throw e;
     }
     const rescueAfterRead=readIndependentRescue();
@@ -388,10 +388,10 @@ const repository=(()=>{
         // pending and is retried.
         let deleted=null;
         try{
-          if(storageLossKnown()||!(await Meta.read('canonicalMutationEpoch')))deleted=new Set((await Meta.list('areaNoteDeletionPrefix')).map(entry=>String(entry.suffix||'')));
+          if(storageLossKnown()||!(await Meta.read('canonicalMutationEpoch')))deleted=new Set((await Meta.list('noteDeletionPrefix')).map(entry=>String(entry.suffix||'')));
         }catch(error){
-          AppDiagnostics.capture('area-notes.storage-loss-check',error,'warn');lastLoadReadFailed=true;
-          throw Object.assign(new Error('Notes could not confirm what storage still holds. Recovery remains pending.'),{code:'AREA_NOTE_RECOVERY_UNRESOLVED'});
+          AppDiagnostics.capture('notes.storage-loss-check',error,'warn');lastLoadReadFailed=true;
+          throw Object.assign(new Error('Notes could not confirm what storage still holds. Recovery remains pending.'),{code:'NOTE_RECOVERY_UNRESOLVED'});
         }
         if(deleted)for(const key of missing)if(!deleted.has(key))survivors[key]=canonicalEntrySnapshot(notes[key],key);
       }
@@ -402,7 +402,7 @@ const repository=(()=>{
     if(snapshotRevision!==revisionAtStart||lane.tail()!==writesAtStart){
       lastLoadReadFailed=true;
       const error=new Error('Notes changed during recovery. Recovery remains pending.');
-      error.code='AREA_NOTE_RECOVERY_SUPERSEDED';throw error;
+      error.code='NOTE_RECOVERY_SUPERSEDED';throw error;
     }
     const merged=applyDeltas(applyDeltas(loaded,rescueBeforeRead),rescueAfterRead);
     for(const [key,entry] of Object.entries(survivors)){const clean=normalizePayload({[key]:entry})[key];if(clean&&!merged[key])merged[key]=clean;}
@@ -421,17 +421,17 @@ const repository=(()=>{
       if(sameDataValue(merged[key]||null,loaded[key]||null))stale.push(key);
       else{dirtyKeys.add(key);dirtyBaseRevisions.set(key,revision(loaded[key]));}
     }
-    if(stale.length&&!lastLoadReadFailed&&appCanMutate()&&!clearIndependentRescueKeys(stale))AppDiagnostics.capture('area-notes.rescue-clear',LocalStorageContract.lastError||new Error('Note emergency rescue cleanup failed.'),'warn');
+    if(stale.length&&!lastLoadReadFailed&&appCanMutate()&&!clearIndependentRescueKeys(stale))AppDiagnostics.capture('notes.rescue-clear',LocalStorageContract.lastError||new Error('Note emergency rescue cleanup failed.'),'warn');
     for(const [key,base] of unsaved){dirtyKeys.add(key);dirtyBaseRevisions.set(key,base);}
     if(appCanMutate())for(const {key,label} of separateTitles(notes)){const entry=notes[key];setNote(key,{...entry,label,updatedAt:nextRevision(entry.updatedAt)});markDirty(key,revision(entry));touchSnapshot();}
     everLoaded=true;
     purgeExpiredTrash();
     if(dirtyKeys.size&&appCanMutate())lane.schedule();
-    refreshAreaNoteConsumers();
+    refreshNoteConsumers();
     return true;
   }
   function load(options={}){
-    if(!loadPromise)loadPromise=performLoad().catch(error=>{AppDiagnostics.capture('area-notes.startup-load',error,'error');if(isCanonicalRuntimeError(error))throw error;return false;});
+    if(!loadPromise)loadPromise=performLoad().catch(error=>{AppDiagnostics.capture('notes.startup-load',error,'error');if(isCanonicalRuntimeError(error))throw error;return false;});
     if(!options.strict)return loadPromise;
     return loadPromise.then(async loaded=>{
       if(loaded!==true||lastLoadReadFailed)return reloadFresh();
@@ -448,7 +448,7 @@ const repository=(()=>{
       loadPromise=Promise.resolve(loaded);
       return loaded;
     })().catch(error=>{
-      AppDiagnostics.capture('area-notes.fresh-reload',error,'error');
+      AppDiagnostics.capture('notes.fresh-reload',error,'error');
       throw error;
     }).finally(()=>{freshLoadPromise=null;});
     return freshLoadPromise;
@@ -490,20 +490,20 @@ const repository=(()=>{
       if(item.persisted)setNote(key,item.persisted);else dropNote(key);
       reported.push(Object.freeze({key:title,label:String(item.persisted&&item.persisted.label||local&&local.label||''),copyLabel:item.copy?item.copy.label:''}));
     });
-    if(!clearIndependentRescueKeys(settledKeys))AppDiagnostics.capture('area-notes.rescue-clear',LocalStorageContract.lastError||new Error('Note emergency rescue cleanup failed.'),'warn');
+    if(!clearIndependentRescueKeys(settledKeys))AppDiagnostics.capture('notes.rescue-clear',LocalStorageContract.lastError||new Error('Note emergency rescue cleanup failed.'),'warn');
     if(movedEdits)protectUnsaved();
     if(!unresolved.length)clearFailure();
-    markStorageHealthOk('areaNotes','lastStudyDataSaveAt');
-    if(result.written)reportCanonicalCommit('areaNote','upsert',null,{backupCapture:options.backupCapture===true});
+    markStorageHealthOk('notes','lastStudyDataSaveAt');
+    if(result.written)reportCanonicalCommit('note','upsert',null,{backupCapture:options.backupCapture===true});
     if(canonicalRefreshNeeded||reported.length)touchSnapshot();
-    if(canonicalRefreshNeeded||reported.length)refreshAreaNoteConsumers();
-    reported.forEach(info=>reportAreaNoteConflict(info));
+    if(canonicalRefreshNeeded||reported.length)refreshNoteConsumers();
+    reported.forEach(info=>reportNoteConflict(info));
     if(dirtyKeys.size&&!unresolved.length)lane.schedule();
     return unresolved;
   }
   function clashWithoutRoom(keys){
     const labels=keys.map(key=>displayAreaName(notes[key]&&notes[key].label)).join(', ');
-    return Object.assign(new Error(`${labels} changed in another tab, and notes are at the ${APP_LIMITS.maxOngoingNotes.toLocaleString()}-note limit, so this tab's version cannot be kept as a separate note. Delete a note to make room`),{code:'AREA_NOTE_CLASH_NO_ROOM'});
+    return Object.assign(new Error(`${labels} changed in another tab, and notes are at the ${APP_LIMITS.maxNotes.toLocaleString()}-note limit, so this tab's version cannot be kept as a separate note. Delete a note to make room`),{code:'NOTE_CLASH_NO_ROOM'});
   }
   // The lane's write: every note changed since the last batch. A failed batch
   // stays unsaved, goes to the browser copy, and the lane retries it.
@@ -515,7 +515,7 @@ const repository=(()=>{
     try{unresolved=await commitNotes(keys,options);}
     catch(error){
       keys.forEach(key=>dirtyKeys.add(key));protectUnsaved();
-      recordFailure(error&&error.message?error.message:'area note database failed');throw error;
+      recordFailure(error&&error.message?error.message:'note database failed');throw error;
     }
     if(!unresolved.length)return true;
     const error=clashWithoutRoom(unresolved);protectUnsaved();recordFailure(error.message);throw error;
@@ -532,7 +532,7 @@ const repository=(()=>{
     if(byKey&&!current)return {status:'rejected',revision:''};
     const currentRevision=revision(current);
     if(String(expectedRevision||'')!==currentRevision){
-      reportAreaNoteConflict(Object.freeze({key:titleKeyFor(key)||title,label:current&&current.label||displayAreaName(label||title)}));
+      reportNoteConflict(Object.freeze({key:titleKeyFor(key)||title,label:current&&current.label||displayAreaName(label||title)}));
       return {status:'conflict',revision:currentRevision};
     }
     const named=normalizeAreaName(current?current.label:title),given=clampText(displayAreaName(label||named),APP_LIMITS.maxAreaNameChars);
@@ -548,7 +548,7 @@ const repository=(()=>{
     if(!current&&!nextText.trim())return {status:'unchanged',revision:currentRevision};
     if(!current){
       // A new note counts against the limit; Recently deleted gives way.
-      const over=size()+1-APP_LIMITS.maxOngoingNotes,room=oldestTrashKeys(notes,over);
+      const over=size()+1-APP_LIMITS.maxNotes,room=oldestTrashKeys(notes,over);
       if(room.length<over)return {status:'limit',revision:currentRevision};
       for(const trashKey of room){const trashed=notes[trashKey];dropNote(trashKey);markDirty(trashKey,revision(trashed));}
     }
@@ -575,20 +575,20 @@ const repository=(()=>{
       }
       const recoveryKeys=Object.keys(rescue||{});
       if(recoveryKeys.length){
-        if(!clearIndependentRescueKeys(recoveryKeys))AppDiagnostics.capture('area-notes.rescue-clear-after-verified-canonical',LocalStorageContract.lastError||new Error('Note emergency rescue cleanup failed after canonical verification.'),'warn');
+        if(!clearIndependentRescueKeys(recoveryKeys))AppDiagnostics.capture('notes.rescue-clear-after-verified-canonical',LocalStorageContract.lastError||new Error('Note emergency rescue cleanup failed after canonical verification.'),'warn');
       }
       if(snapshotRevision!==revisionAtStart||dirtyKeys.size)return false;
       clearFailure();
       return true;
     }catch(error){
-      AppDiagnostics.capture('area-notes.strict-flush-reverify',error,'warn');
+      AppDiagnostics.capture('notes.strict-flush-reverify',error,'warn');
       return false;
     }
   }
   async function storageAppearsRecreated(){
     if(storageLossKnown())return true;
     try{return !(await Meta.read('canonicalMutationEpoch'));}
-    catch(error){AppDiagnostics.capture('area-notes.storage-loss-probe',error,'warn');return false;}
+    catch(error){AppDiagnostics.capture('notes.storage-loss-probe',error,'warn');return false;}
   }
   // The browser removed this site's stored data while the page stayed open.
   // Everything this tab still holds is now the best copy: write every note
@@ -641,20 +641,20 @@ const repository=(()=>{
   async function readFreshItems(keys){
     const requested=[...new Set((keys||[]).map(key=>String(key||'')).filter(Boolean))];if(!requested.length)return freeze([]);
     await flush({strict:true});if(saveFailed)throw new Error(saveMessage||'current notes are not safely stored');
-    const rows=await idbStoreTransaction(DB_AREA_NOTES_STORE,'readonly',(store,tx,finish)=>{
+    const rows=await idbStoreTransaction(DB_NOTES_STORE,'readonly',(store,tx,finish)=>{
       const out=[];let pending=requested.length,failed=false;
       requested.forEach(key=>{const request=store.get(key);request.onsuccess=()=>{if(request.result)out.push(request.result);if(--pending===0&&!failed)finish(true,out);};request.onerror=()=>{if(failed)return;failed=true;finish(false,request.error||new Error('Note targeted read failed'));};});
     },'Note targeted read aborted');
     const byKey=new Map();for(const row of rows||[]){const key=String(row&&row.key||''),clean=normalizePayload({[key]:row})[key];if(clean)byKey.set(clean.key,clean);}return freeze(requested.map(key=>byKey.get(key)||null));
   }
-  function resetPendingAreaNoteWrites(){
+  function resetPendingNoteWrites(){
     lane.cancel();dirtyKeys.clear();dirtyBaseRevisions.clear();
   }
   // Writes a whole collection, from a restore or a combine.
   async function commitCollection(payload,{merge,deletions=[]}={}){
     await flush();
     if(saveFailed)throw new Error(saveMessage||'current notes are not safely stored');
-    const previous=normalizePayload(notes),imported=normalizePayload(payload,{strictRich:true}),deletedEntries=normalizeAreaNoteDeletions(deletions);
+    const previous=normalizePayload(notes),imported=normalizePayload(payload,{strictRich:true}),deletedEntries=normalizeNoteDeletions(deletions);
     const next=merge?Object.assign(previous,imported):imported;
     // A note deleted elsewhere moves to Recently deleted here, as trash() does,
     // unless the payload already brings its deleted copy.
@@ -662,22 +662,22 @@ const repository=(()=>{
       const current=next[entry.key],trashKey=NoteKeys.trash(entry.key);delete next[entry.key];
       if((hasContent(current)||current&&current.links)&&trashKey&&!next[trashKey])next[trashKey]={...current,key:trashKey,updatedAt:nextRevision(current.updatedAt)};
     }
-    const over=Object.keys(next).length-APP_LIMITS.maxOngoingNotes,room=oldestTrashKeys(next,over);
+    const over=Object.keys(next).length-APP_LIMITS.maxNotes,room=oldestTrashKeys(next,over);
     if(room.length<over)throw tooManyNotes(Object.keys(next).length-room.length);
     for(const key of room)delete next[key];
     for(const {key,label} of separateTitles(next))next[key]={...next[key],label,updatedAt:nextRevision(next[key].updatedAt)};
     const previousKeys=new Set(Object.keys(previous)),nextKeys=new Set(Object.keys(next));
     const removedKeys=[...previousKeys].filter(key=>!nextKeys.has(key));
-    resetPendingAreaNoteWrites();
+    resetPendingNoteWrites();
     try{
       await idbReplace(next,removedKeys,{deletedEntries});
-      if(!clearIndependentRescueKeys([...previousKeys,...nextKeys]))AppDiagnostics.capture('area-notes.rescue-clear',LocalStorageContract.lastError||new Error('Note emergency rescue cleanup failed.'),'warn');
+      if(!clearIndependentRescueKeys([...previousKeys,...nextKeys]))AppDiagnostics.capture('notes.rescue-clear',LocalStorageContract.lastError||new Error('Note emergency rescue cleanup failed.'),'warn');
       replaceNotes(next);touchSnapshot();clearFailure();
-      markStorageHealthOk('areaNotes','lastStudyDataSaveAt');
-      reportCanonicalCommit('areaNote','upsert');
+      markStorageHealthOk('notes','lastStudyDataSaveAt');
+      reportCanonicalCommit('note','upsert');
       return prepareExportPayload(next);
     }catch(e){
-      recordFailure(e&&e.message?e.message:'area note database failed');
+      recordFailure(e&&e.message?e.message:'note database failed');
       throw e;
     }
   }
@@ -718,7 +718,7 @@ const repository=(()=>{
     setNote(trashKey,{...current,key:trashKey,updatedAt:nextRevision(current.updatedAt)});
     dropNote(id);touchSnapshot();markDirty(id,revision(current));markDirty(trashKey,'');
     await settle([id,trashKey]);
-    refreshAreaNoteConsumers();
+    refreshNoteConsumers();
     return trashKey;
   }
   // Puts a deleted note back, with its id, under its title, or
@@ -735,7 +735,7 @@ const repository=(()=>{
     setNote(id,{...item,key:id,label,updatedAt:nextRevision(item.updatedAt)});
     dropNote(key);touchSnapshot();markDirty(id,'');markDirty(key,revision(item));
     await settle([id,key]);
-    refreshAreaNoteConsumers();
+    refreshNoteConsumers();
     return title;
   }
   // Renames or moves a note together with every note nested under it: only
@@ -777,7 +777,7 @@ const repository=(()=>{
     for(const {id,base,entry} of writes){setNote(id,entry);markDirty(id,revision(base));}
     touchSnapshot();
     await settle([...removals,...writes].map(item=>item.id));
-    refreshAreaNoteConsumers();
+    refreshNoteConsumers();
     return freeze({status:'renamed',key:target,moved:freeze(moves.map(move=>freeze({from:move.from,to:move.to}))),merged:clashes.length});
   }
   // A note's bar lists other notes by id. Ids of notes gone for good (neither
@@ -791,7 +791,7 @@ const repository=(()=>{
     const target=String(id||''),raw=String(ref||'');if(!NoteKeys.isId(target)||on&&!notes[target])return freeze({status:'rejected'});
     let key=keyFor(raw);
     if(!key&&on&&!NoteKeys.isKey(raw)){
-      const over=size()+1-APP_LIMITS.maxOngoingNotes,room=oldestTrashKeys(notes,over);
+      const over=size()+1-APP_LIMITS.maxNotes,room=oldestTrashKeys(notes,over);
       if(room.length<over)return freeze({status:'limit'});
       for(const trashKey of room){const trashed=notes[trashKey];dropNote(trashKey);markDirty(trashKey,revision(trashed));}
       key=ensureEntry(raw,label)?.key||'';
@@ -801,7 +801,7 @@ const repository=(()=>{
     if(links.length>APP_LIMITS.maxNoteLinks)return freeze({status:'limit'});
     if(links.join('|')===(current.links||[]).join('|'))return freeze({status:'unchanged'});
     const next={...current,updatedAt:nextRevision(current.updatedAt)};delete next.links;if(links.length)next.links=links;
-    setNote(key,next);touchSnapshot();markDirty(key,revision(current));refreshAreaNoteConsumers();
+    setNote(key,next);touchSnapshot();markDirty(key,revision(current));refreshNoteConsumers();
     return freeze({status:'changed',id:key});
   }
   // Notes whose bar or text links to this one. Worked out, never stored.
@@ -824,32 +824,32 @@ const repository=(()=>{
     if(expired.length)touchSnapshot();
     return expired.length;
   }
-  async function clearAllAreaNotes(){
+  async function clearAllNotes(){
     if(!appCanMutate())throw new Error('notes cannot be cleared without write ownership');
     await flush({strict:true});
     if(saveFailed)throw new Error(saveMessage||'current notes are not safely stored');
     const removedKeys=Object.keys(normalizePayload(notes));
     if(!removedKeys.length)return Object.freeze({count:0});
-    resetPendingAreaNoteWrites();
+    resetPendingNoteWrites();
     try{
       const deletedAt=new Date().toISOString(),deletions=removedKeys.filter(key=>!isTrashKey(key)).map(key=>({key,deletedAt}));
       await idbReplace(KeyedRecord.create(),removedKeys,{deletedEntries:deletions,recordDeletes:true});
-      if(!clearIndependentRescueKeys(removedKeys))AppDiagnostics.capture('area-notes.rescue-clear',LocalStorageContract.lastError||new Error('Note emergency rescue cleanup failed.'),'warn');
+      if(!clearIndependentRescueKeys(removedKeys))AppDiagnostics.capture('notes.rescue-clear',LocalStorageContract.lastError||new Error('Note emergency rescue cleanup failed.'),'warn');
       replaceNotes(KeyedRecord.create());touchSnapshot();clearFailure();
-      markStorageHealthOk('areaNotes','lastStudyDataSaveAt');
-      refreshAreaNoteConsumers();
-      reportCanonicalCommit('areaNote','delete');
+      markStorageHealthOk('notes','lastStudyDataSaveAt');
+      refreshNoteConsumers();
+      reportCanonicalCommit('note','delete');
       return Object.freeze({count:removedKeys.length});
     }catch(e){
-      recordFailure(e&&e.message?e.message:'area note database failed');
+      recordFailure(e&&e.message?e.message:'note database failed');
       throw e;
     }
   }
-  return Object.freeze({get,update,updateValidatedRich,link,linkedFrom,remove,clearAll:clearAllAreaNotes,load,reloadFresh,readFreshPayload,readFreshItems,flush,protectUnsaved,trash,restore,rename,trashSnapshot,purgeExpiredTrash,exportPayload,replace,reconcile,alignByTitle,normalizePayload,metadataSnapshot,searchSnapshot,size,failure,verifyRescue,recoverAfterStorageLoss});
+  return Object.freeze({get,update,updateValidatedRich,link,linkedFrom,remove,clearAll:clearAllNotes,load,reloadFresh,readFreshPayload,readFreshItems,flush,protectUnsaved,trash,restore,rename,trashSnapshot,purgeExpiredTrash,exportPayload,replace,reconcile,alignByTitle,normalizePayload,metadataSnapshot,searchSnapshot,size,failure,verifyRescue,recoverAfterStorageLoss});
 })();
 
     return repository;
   }
-  return freeze({format:'study-director.area-notes-repository-module',contractVersion:1,create});
+  return freeze({format:'study-director.notes-repository-module',contractVersion:1,create});
 });
 })();

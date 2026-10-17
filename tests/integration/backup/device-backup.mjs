@@ -19,7 +19,7 @@ await test('choosing an empty folder opens the picker from the click and makes t
   const connecting=w.controller.connect();assert.equal(w.pickerCalls,1,'the picker opens before anything is awaited');
   await connecting;await w.settle();
   assert.equal(w.controller.status().connected,true);assert.equal(w.published.length,1,'the first backup is made at once');assert.equal((await w.commits(folder)).length,1);
-  assert.equal(w.settingsStore.get('automaticDeviceBackup').directoryHandle,folder,'the folder is remembered');
+  assert.equal(w.settingsStore.get('deviceFolder').directoryHandle,folder,'the folder is remembered');
   assert.ok(w.controller.status().lastBackupAt,'the row shows when it was last verified');assert.deepEqual(await w.locks(folder),[],'no lock files remain');
 });
 
@@ -61,7 +61,7 @@ await test('a folder that needs permission again asks once, never prompts on its
   await w.controller.refreshPermission();w.change();await w.tick(25*MINUTE);
   assert.equal(w.permissionNotices().length,1,'one notice per launch');assert.equal(w.published.length,0,'nothing is written without permission');
   const allowing=w.controller.connect();assert.equal(folder.requests,1,'the permission prompt opens from the click');await allowing;await w.tick(5000);
-  assert.equal(w.controller.status().connected,true);assert.equal(w.published.length,1,'changes made meanwhile are backed up');assert.equal(w.settingsStore.get('automaticDeviceBackup').directoryHandle,folder,'the same folder is kept');
+  assert.equal(w.controller.status().connected,true);assert.equal(w.published.length,1,'changes made meanwhile are backed up');assert.equal(w.settingsStore.get('deviceFolder').directoryHandle,folder,'the same folder is kept');
 });
 
 await test('cancelling the picker or refusing permission leaves a clean, unconnected state',async()=>{
@@ -91,7 +91,7 @@ await test('Turn off forgets the folder and stops automatic backups; the backups
 
 await test('after a browser data clear the open tab writes the folder back',async()=>{
   const w=world(),folder=w.directory();await w.controller.install();w.choose(folder);await w.controller.connect();await w.settle();
-  w.settingsStore.clear();assert.equal(await w.controller.rememberAfterStorageReset(),true);assert.equal(w.settingsStore.get('automaticDeviceBackup').directoryHandle,folder);
+  w.settingsStore.clear();assert.equal(await w.controller.rememberAfterStorageReset(),true);assert.equal(w.settingsStore.get('deviceFolder').directoryHandle,folder);
 });
 
 await test('a protected safety version is written in the foreground, listed, and removable; retention bounds the folder',async()=>{

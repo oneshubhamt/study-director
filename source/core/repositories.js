@@ -17,7 +17,7 @@ registry.define('repositories',1,()=>{
     const {isValidIsoDate,isNoteId,isNoteKey,normalizeTimestamp,sameDataValue}=input.helpers;
     const validIso=value=>Number.isFinite(Date.parse(String(value||'')));
     const attachmentId=value=>/^(?:att|img)-[a-z0-9-]{20,80}$/u.test(String(value||''));
-    const backupPreparationUnit=value=>{const unit=String(value||'');if(unit==='*'||unit==='personalData'||unit==='activeSession')return true;if(/^dailyRecordPack:\d{4}-(?:0[1-9]|1[0-2])$/u.test(unit))return true;if(unit.startsWith('areaNote:'))return isNoteKey(unit.slice('areaNote:'.length));if(unit.startsWith('attachmentAsset:'))return attachmentId(unit.slice('attachmentAsset:'.length));return false;};
+    const backupPreparationUnit=value=>{const unit=String(value||'');if(unit==='*'||unit==='personalData'||unit==='activeSession')return true;if(/^dailyRecordPack:\d{4}-(?:0[1-9]|1[0-2])$/u.test(unit))return true;if(unit.startsWith('note:'))return isNoteKey(unit.slice('note:'.length));if(unit.startsWith('attachmentAsset:'))return attachmentId(unit.slice('attachmentAsset:'.length));return false;};
     return freeze({
       dailyRecordMigration:value=>!!(exactValue(value,['recordVersion','summaryVersion','complete','recordCount'])&&Number(value.recordVersion)===DATA_CONTRACT.schemas.DailyRecord.version&&Number(value.summaryVersion)===DATA_CONTRACT.schemas.DailySummary.version&&value.complete===true&&Number.isSafeInteger(Number(value.recordCount))&&Number(value.recordCount)>=0),
       planDraft:value=>value===null||(typeof value==='string'&&value.length<=APP_LIMITS.maxScheduleChars),
@@ -28,14 +28,14 @@ registry.define('repositories',1,()=>{
       insightsDatasetRevision:value=>!!(exactValue(value,['format','version','counter','updatedAt'])&&value.format==='study-director.insights-dataset-revision'&&Number(value.version)===2&&Number.isSafeInteger(Number(value.counter))&&Number(value.counter)>=1&&validIso(value.updatedAt)),
       dataMaintenance:value=>!!(exactValue(value,['version','status','completedAt'])&&Number(value.version)===DATA_MAINTENANCE_VERSION&&(value.status==='completed'&&validIso(value.completedAt)||value.status==='pending'&&(value.completedAt===''||validIso(value.completedAt)))),
       savedDayDeletionPrefix:(value,context)=>!!(exactValue(value,['format','version','date','deletedAt'])&&value.format==='study-director.saved-day-deletion'&&Number(value.version)===1&&isValidIsoDate(String(value.date||''))&&String(value.date)===context.suffix&&!!normalizeTimestamp(value.deletedAt,null)),
-      areaNoteDeletionPrefix:(value,context)=>!!(exactValue(value,['format','version','key','deletedAt'])&&value.format==='study-director.area-note-deletion'&&Number(value.version)===1&&isNoteId(value.key)&&value.key===context.suffix&&!!normalizeTimestamp(value.deletedAt,null)),
+      noteDeletionPrefix:(value,context)=>!!(exactValue(value,['format','version','key','deletedAt'])&&value.format==='study-director.note-deletion'&&Number(value.version)===1&&isNoteId(value.key)&&value.key===context.suffix&&!!normalizeTimestamp(value.deletedAt,null)),
       attachmentDeletionPrefix:(value,context)=>!!(exactValue(value,['format','version','assetId','deletedAt'])&&value.format==='study-director.attachment-deletion'&&Number(value.version)===1&&attachmentId(value.assetId)&&String(value.assetId)===context.suffix&&!!normalizeTimestamp(value.deletedAt,null))
     });
   }
   function createAppData(input){
     exactObject(input,[
       'local','indexedDb','appMeta','compatibilityAppMeta','installationIdentity','dailyRecordCodec','activeSessionCodec','compatibilityCodec','personalDataCodec','keyedRecord','journals',
-      'limits','dataContract','stores','legacyStores','keys','legacyKeys','metaKeys','obsoleteMetaKeys','activeSessionId','helpers','hooks','clock','areaNotesRepositoryModule','saveLaneModule'
+      'limits','dataContract','stores','legacyStores','keys','legacyKeys','metaKeys','obsoleteMetaKeys','activeSessionId','helpers','hooks','clock','notesRepositoryModule','saveLaneModule'
     ],'AppData input');
     if(!Object.isFrozen(input.local)||!Object.isFrozen(input.indexedDb)||!Object.isFrozen(input.appMeta)||!Object.isFrozen(input.compatibilityAppMeta)||!Object.isFrozen(input.installationIdentity)||
       !Object.isFrozen(input.dailyRecordCodec)||!Object.isFrozen(input.activeSessionCodec)||!Object.isFrozen(input.compatibilityCodec)||!Object.isFrozen(input.personalDataCodec)||
@@ -43,12 +43,12 @@ registry.define('repositories',1,()=>{
       throw new TypeError('AppData contracts must be frozen.');
     }
     exactObject(input.stores,[
-      'dailyRecords','dailySummaries','areaNotes','activeSessions','appMeta'
+      'dailyRecords','dailySummaries','notes','activeSessions','appMeta'
     ],'AppData stores');
     exactObject(input.legacyStores,['syncQueue','tombstones'],'AppData legacy stores');
-    exactObject(input.keys,['recovery','fallbackDailyRecords','areaNoteRescue','deletionRecovery','legacySyncEmergency'],'AppData storage keys');
-    exactObject(input.legacyKeys,['areaNotesPending','areaNoteRecoveryPrefix'],'AppData legacy storage keys');
-    exactObject(input.metaKeys,['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','savedDayDeletionPrefix','areaNoteDeletionPrefix','attachmentDeletionPrefix'],'AppData metadata keys');
+    exactObject(input.keys,['recovery','fallbackDailyRecords','noteRescue','deletionRecovery','legacySyncEmergency'],'AppData storage keys');
+    exactObject(input.legacyKeys,['notesPending','noteRecoveryPrefix'],'AppData legacy storage keys');
+    exactObject(input.metaKeys,['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','savedDayDeletionPrefix','noteDeletionPrefix','attachmentDeletionPrefix'],'AppData metadata keys');
     if(!Array.isArray(input.obsoleteMetaKeys)||input.obsoleteMetaKeys.some(key=>typeof key!=='string'||!key)||new Set(input.obsoleteMetaKeys).size!==input.obsoleteMetaKeys.length)throw new TypeError('AppData obsolete metadata keys are invalid.');
     functions(input.helpers,[
       'boundedInt','boundedNumber','clampText','clampEditorContent','editorContentWithinLimits','wipeObject','isValidIsoDate','isCanonicalScheduleText','sameDataValue',
@@ -67,8 +67,8 @@ registry.define('repositories',1,()=>{
       throw new TypeError('AppData journal contracts are invalid.');
     }
 
-    const AreaNotesRepositoryModule=input.areaNotesRepositoryModule;
-    if(!AreaNotesRepositoryModule||AreaNotesRepositoryModule.format!=='study-director.area-notes-repository-module'||AreaNotesRepositoryModule.contractVersion!==1||typeof AreaNotesRepositoryModule.create!=='function')throw new TypeError('Area Notes repository module is invalid.');
+    const NotesRepositoryModule=input.notesRepositoryModule;
+    if(!NotesRepositoryModule||NotesRepositoryModule.format!=='study-director.notes-repository-module'||NotesRepositoryModule.contractVersion!==1||typeof NotesRepositoryModule.create!=='function')throw new TypeError('Notes repository module is invalid.');
     const APP_LIMITS=input.limits;
     const DATA_CONTRACT=input.dataContract;
     const STORAGE_KEYS=input.keys;
@@ -79,7 +79,7 @@ registry.define('repositories',1,()=>{
     const decisionNowMs=input.clock.nowMs;
     const DB_DAILY_RECORD_STORE=input.stores.dailyRecords;
     const DB_DAILY_SUMMARY_STORE=input.stores.dailySummaries;
-    const DB_AREA_NOTES_STORE=input.stores.areaNotes;
+    const DB_NOTES_STORE=input.stores.notes;
     const DB_ACTIVE_SESSION_STORE=input.stores.activeSessions;
     const DB_APP_META_STORE=input.stores.appMeta;
     const DB_LEGACY_SYNC_QUEUE_STORE=input.legacyStores.syncQueue;
@@ -92,7 +92,7 @@ registry.define('repositories',1,()=>{
     if(CompatibilityMeta.format!=='study-director.app-meta-owner'||CompatibilityMeta.contractVersion!==1||CompatibilityMeta.owner!=='compatibility')throw new TypeError('Compatibility appMeta capability is invalid.');
     const InstallationIdentity=input.installationIdentity;
     if(InstallationIdentity.format!=='study-director.installation-identity'||InstallationIdentity.contractVersion!==3||typeof InstallationIdentity.getId!=='function')throw new TypeError('Installation identity contract is invalid.');
-    const DailyRecordCodec=input.dailyRecordCodec,NoteKeys=DailyRecordCodec.areaNoteKeys;
+    const DailyRecordCodec=input.dailyRecordCodec,NoteKeys=DailyRecordCodec.noteKeys;
     if(!NoteKeys||!Object.isFrozen(NoteKeys)||typeof NoteKeys.isId!=='function'||typeof NoteKeys.isKey!=='function')throw new TypeError('Note key contract is invalid.');
     const ActiveSessionCodec=input.activeSessionCodec;
     const CompatibilityCodec=input.compatibilityCodec;
@@ -113,9 +113,9 @@ registry.define('repositories',1,()=>{
       capture,
       onStorageOk,
       onStorageError,
-      onNotesChanged:refreshAreaNoteConsumers,
+      onNotesChanged:refreshNoteConsumers,
       onNoteSyncState:setNoteSyncStateForKey,
-      onNoteConflict:reportAreaNoteConflict,
+      onNoteConflict:reportNoteConflict,
       onDailyRecordsChanged,
       onDatasetRevisionChanged,
       onCanonicalCommit
@@ -127,7 +127,7 @@ registry.define('repositories',1,()=>{
     }
     const getInstallationId=InstallationIdentity.getId;
     const {
-      buildDailyRecordSummary,sanitizeCurrentDailyRecord,sanitizeCurrentAreaNote,
+      buildDailyRecordSummary,sanitizeCurrentDailyRecord,sanitizeCurrentNote,
       materializeDailyRecordView,sanitizeDailyRecordSummary,materializeDailyRecordSummary
     }=DailyRecordCodec;
     const FALLBACK_DAILY_RECORD_LIMIT=14;
@@ -178,10 +178,10 @@ registry.define('repositories',1,()=>{
       return freeze({format:'study-director.canonical-mutation-epoch',version:1,token:randomCoordinationToken(),committedAt:nextChangeAt()});
     }
     function canonicalPreparationUnit(value){
-      const unit=String(value||'').trim();if(unit==='*'||unit==='personalData'||unit==='activeSession')return unit;if(/^dailyRecordPack:\d{4}-(?:0[1-9]|1[0-2])$/u.test(unit))return unit;if(unit.startsWith('areaNote:')&&NoteKeys.isKey(unit.slice('areaNote:'.length)))return unit;if(unit.startsWith('attachmentAsset:')&&/^(?:att|img)-[a-z0-9-]{20,80}$/u.test(unit.slice('attachmentAsset:'.length)))return unit;throw new TypeError('Backup preparation unit identity is invalid.');
+      const unit=String(value||'').trim();if(unit==='*'||unit==='personalData'||unit==='activeSession')return unit;if(/^dailyRecordPack:\d{4}-(?:0[1-9]|1[0-2])$/u.test(unit))return unit;if(unit.startsWith('note:')&&NoteKeys.isKey(unit.slice('note:'.length)))return unit;if(unit.startsWith('attachmentAsset:')&&/^(?:att|img)-[a-z0-9-]{20,80}$/u.test(unit.slice('attachmentAsset:'.length)))return unit;throw new TypeError('Backup preparation unit identity is invalid.');
     }
     function dailyPreparationUnit(date){const value=String(date||'');if(!isValidIsoDate(value))throw new TypeError('Backup preparation Saved-Day date is invalid.');return `dailyRecordPack:${value.slice(0,7)}`;}
-    function areaNotePreparationUnit(key){const value=String(key||'');if(!NoteKeys.isKey(value))throw new TypeError('Backup preparation note key is invalid.');return `areaNote:${value}`;}
+    function notePreparationUnit(key){const value=String(key||'');if(!NoteKeys.isKey(value))throw new TypeError('Backup preparation note key is invalid.');return `note:${value}`;}
     function stageBackupPreparationUnits(tx,units){
       if(!Array.isArray(units)||!units.length)return freeze([]);
       const meta=Meta.view(tx),updatedAt=new Date().toISOString(),seen=new Set(),out=[];
@@ -257,7 +257,7 @@ registry.define('repositories',1,()=>{
       AppDiagnostics.capture('daily-record.recovery-cleanup',error,'warn');return false;
     }
     function showSubjectNoteSaveWarning(reason){
-      markStorageHealthError('areaNotes',`Notes could not be saved in this browser session${reason?`: ${reason}`:''}. Export a backup before closing this tab.`);
+      markStorageHealthError('notes',`Notes could not be saved in this browser session${reason?`: ${reason}`:''}. Export a backup before closing this tab.`);
     }
     function notifyDailyRecordsChanged(date='',type='change'){
       onDailyRecordsChanged(freeze({date:isValidIsoDate(date)?date:'',type:String(type||'change')}));
@@ -343,8 +343,8 @@ registry.define('repositories',1,()=>{
     function savedDayDeletionValue(date,deletedAt=new Date().toISOString()){
       const when=normalizeTimestamp(deletedAt,new Date().toISOString());return {format:'study-director.saved-day-deletion',version:1,date:String(date||''),deletedAt:when};
     }
-    function areaNoteDeletionValue(key,deletedAt=new Date().toISOString()){
-      const id=String(key||''),when=normalizeTimestamp(deletedAt,new Date().toISOString());if(!NoteKeys.isId(id))return null;return {format:'study-director.area-note-deletion',version:1,key:id,deletedAt:when};
+    function noteDeletionValue(key,deletedAt=new Date().toISOString()){
+      const id=String(key||''),when=normalizeTimestamp(deletedAt,new Date().toISOString());if(!NoteKeys.isId(id))return null;return {format:'study-director.note-deletion',version:1,key:id,deletedAt:when};
     }
     function normalizeAttachmentDeletionId(value){const id=String(value||'');return /^(?:att|img)-[a-z0-9-]{20,80}$/u.test(id)?id:'';}
     function attachmentDeletionValue(assetId,deletedAt=new Date().toISOString()){
@@ -358,7 +358,7 @@ registry.define('repositories',1,()=>{
 // is already stored keeps the copy's own ceiling. An unreadable copy fails
 // closed rather than counting as empty.
 function rescueRoom(key,ceiling){
-  const order=[STORAGE_KEYS.recovery,STORAGE_KEYS.areaNoteRescue,STORAGE_KEYS.deletionRecovery,STORAGE_KEYS.fallbackDailyRecords],index=order.indexOf(key);
+  const order=[STORAGE_KEYS.recovery,STORAGE_KEYS.noteRescue,STORAGE_KEYS.deletionRecovery,STORAGE_KEYS.fallbackDailyRecords],index=order.indexOf(key);
   let used=0;
   for(const other of order.slice(0,Math.max(0,index))){
     const text=LocalStorageContract.getText(other,'');if(LocalStorageContract.lastError)throw LocalStorageContract.lastError;
@@ -574,7 +574,7 @@ async function replaceSavedDayDeletions(values){
   return replaceMetaPrefixFamily('savedDayDeletionPrefix',clean,{suffixOf:entry=>entry.date,valueOf:entry=>savedDayDeletionValue(entry.date,entry.deletedAt),abortMessage:'Saved-Day deletion ledger replacement aborted'});
 }
 
-function normalizeAreaNoteDeletions(values){
+function normalizeNoteDeletions(values){
   if(!Array.isArray(values))throw new TypeError('Note deletion ledger must be an array.');
   const byKey=new Map();
   for(const value of values){
@@ -582,14 +582,14 @@ function normalizeAreaNoteDeletions(values){
     if(!NoteKeys.isId(key)||!deletedAt)throw new Error('Note deletion ledger contains an invalid entry.');
     const previous=byKey.get(key);if(!previous||Date.parse(deletedAt)>Date.parse(previous.deletedAt))byKey.set(key,{key,deletedAt});
   }
-  return newestDeletions([...byKey.values()],APP_LIMITS.maxOngoingNotes,entry=>entry.key);
+  return newestDeletions([...byKey.values()],APP_LIMITS.maxNotes,entry=>entry.key);
 }
-async function listAreaNoteDeletions(){
-  return normalizeAreaNoteDeletions((await Meta.list('areaNoteDeletionPrefix')).map(entry=>entry.value));
+async function listNoteDeletions(){
+  return normalizeNoteDeletions((await Meta.list('noteDeletionPrefix')).map(entry=>entry.value));
 }
-async function replaceAreaNoteDeletions(values){
-  const clean=normalizeAreaNoteDeletions(values);
-  return replaceMetaPrefixFamily('areaNoteDeletionPrefix',clean,{suffixOf:entry=>entry.key,valueOf:entry=>areaNoteDeletionValue(entry.key,entry.deletedAt),abortMessage:'Note deletion ledger replacement aborted'});
+async function replaceNoteDeletions(values){
+  const clean=normalizeNoteDeletions(values);
+  return replaceMetaPrefixFamily('noteDeletionPrefix',clean,{suffixOf:entry=>entry.key,valueOf:entry=>noteDeletionValue(entry.key,entry.deletedAt),abortMessage:'Note deletion ledger replacement aborted'});
 }
 
 function normalizeAttachmentDeletions(values){
@@ -607,7 +607,7 @@ async function replaceAttachmentDeletions(values){
 }
 // Removes the stored records each ledger's listing already leaves out.
 async function pruneDeletionLedgers(){
-  const ledgers=[['savedDayDeletionPrefix',APP_LIMITS.maxImportRecords,value=>value.date],['areaNoteDeletionPrefix',APP_LIMITS.maxOngoingNotes,value=>value.key],['attachmentDeletionPrefix',ATTACHMENT_DELETION_LIMIT,value=>value.assetId]];
+  const ledgers=[['savedDayDeletionPrefix',APP_LIMITS.maxImportRecords,value=>value.date],['noteDeletionPrefix',APP_LIMITS.maxNotes,value=>value.key],['attachmentDeletionPrefix',ATTACHMENT_DELETION_LIMIT,value=>value.assetId]];
   let removed=0;
   for(const [family,limit,idOf] of ledgers){
     removed+=await Meta.transaction('readwrite',(meta,tx,finish)=>{
@@ -1179,21 +1179,21 @@ async function clearAllDailyRecords(){
   }finally{finishWrite();}
 }
 
-const AreaNotesRepository=AreaNotesRepositoryModule.create(freeze({
+const NotesRepository=NotesRepositoryModule.create(freeze({
       configuration:freeze({
         limits:APP_LIMITS,dataContract:DATA_CONTRACT,
-        stores:freeze({areaNotes:DB_AREA_NOTES_STORE,appMeta:DB_APP_META_STORE}),
-        keys:freeze({areaNoteRescue:STORAGE_KEYS.areaNoteRescue})
+        stores:freeze({notes:DB_NOTES_STORE,appMeta:DB_APP_META_STORE}),
+        keys:freeze({noteRescue:STORAGE_KEYS.noteRescue})
       }),
       storage:freeze({local:LocalStorageContract,meta:Meta,idbGetAll,idbStoreTransaction,idbStrictTransaction,storageResets:()=>IndexedDb.lifecycle().resets}),
-      codecs:freeze({sanitizeCurrentAreaNote,areaNoteKeys:DailyRecordCodec.areaNoteKeys}),keyedRecord:KeyedRecord,
-      helpers:freeze({clampText,clampEditorContent,editorContentWithinLimits,wipeObject,normalizeAreaName,displayAreaName,normalizeTimestamp,sameDataValue,jsonByteLength,canonicalRuntimeError,isCanonicalRuntimeError,rescueRoom:()=>rescueRoom(STORAGE_KEYS.areaNoteRescue,APP_LIMITS.areaNoteRescueBytes)}),
+      codecs:freeze({sanitizeCurrentNote,noteKeys:DailyRecordCodec.noteKeys}),keyedRecord:KeyedRecord,
+      helpers:freeze({clampText,clampEditorContent,editorContentWithinLimits,wipeObject,normalizeAreaName,displayAreaName,normalizeTimestamp,sameDataValue,jsonByteLength,canonicalRuntimeError,isCanonicalRuntimeError,rescueRoom:()=>rescueRoom(STORAGE_KEYS.noteRescue,APP_LIMITS.noteRescueBytes)}),
       hooks:freeze({
         canMutate:appCanMutate,storageOk:markStorageHealthOk,reportCommit:reportCanonicalCommit,
-        onNotesChanged:refreshAreaNoteConsumers,onNoteSyncState:setNoteSyncStateForKey,onNoteConflict:reportAreaNoteConflict,saveWarning:showSubjectNoteSaveWarning,
+        onNotesChanged:refreshNoteConsumers,onNoteSyncState:setNoteSyncStateForKey,onNoteConflict:reportNoteConflict,saveWarning:showSubjectNoteSaveWarning,
         diagnosticsCapture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)
       }),
-      canonical:freeze({areaNoteDeletionValue,areaNotePreparationUnit,stageMutationEpoch:stageCanonicalMutationEpoch,normalizeAreaNoteDeletions}),
+      canonical:freeze({noteDeletionValue,notePreparationUnit,stageMutationEpoch:stageCanonicalMutationEpoch,normalizeNoteDeletions}),
       clock:freeze({nowMs:decisionNowMs}),
       saveLane:input.saveLaneModule
     }));
@@ -1240,18 +1240,18 @@ async function runDataMaintenance(options={}){
     // a reload safely revalidates all phases rather than trusting stale proof.
     const readSource=async()=>{
       const epoch=await Meta.read('canonicalMutationEpoch'),local=[];
-      for(const key of [STORAGE_KEYS.fallbackDailyRecords,STORAGE_KEYS.recovery,STORAGE_KEYS.deletionRecovery,STORAGE_KEYS.areaNoteRescue]){
+      for(const key of [STORAGE_KEYS.fallbackDailyRecords,STORAGE_KEYS.recovery,STORAGE_KEYS.deletionRecovery,STORAGE_KEYS.noteRescue]){
         local.push(LocalStorageContract.getText(key,null));if(LocalStorageContract.lastError)throw LocalStorageContract.lastError;
       }
-      requireSameOwner();return [epoch?.token||'',AreaNotesRepository.metadataSnapshot().revision,activeSessionMutationEpoch,...local];
+      requireSameOwner();return [epoch?.token||'',NotesRepository.metadataSnapshot().revision,activeSessionMutationEpoch,...local];
     };
     const sameSource=(a,b)=>!!b&&a.length===b.length&&a.every((value,index)=>value===b[index]);
     const source=await readSource();
     if(force||dataMaintenanceContinuation?.owner!==ownershipRevision||!sameSource(source,dataMaintenanceContinuation.source))dataMaintenanceContinuation={owner:ownershipRevision,source,phase:0};
     const continuation=dataMaintenanceContinuation,phases=[
       async()=>{const fallback=fallbackDailyRecordsGet();if(fallback.length)await migrateFallbackDailyRecords(fallback,{strict:true});},
-      async()=>{if(await AreaNotesRepository.load({strict:true})!==true)throw new Error('Notes could not be loaded for maintenance.');},
-      async()=>{await AreaNotesRepository.flush({strict:true});},
+      async()=>{if(await NotesRepository.load({strict:true})!==true)throw new Error('Notes could not be loaded for maintenance.');},
+      async()=>{await NotesRepository.flush({strict:true});},
       async()=>{const rawRecovery=readLocalRecoveryJson(STORAGE_KEYS.recovery,null);if(rawRecovery&&!sessionFromRecoveryEnvelope(rawRecovery)&&!LocalStorageContract.remove(STORAGE_KEYS.recovery))throw LocalStorageContract.lastError||new Error('Invalid session recovery could not be removed.');},
       async()=>{const session=await loadActiveSessionRecord(0,{strict:true});if(!session?.ok||session.error)throw session?.error||new Error('Active Session reconciliation is incomplete.');},
       async()=>{if(await flushDeletionRecovery({check:requireSameOwner,workBudget:options.workBudget})!==true)throw new Error('Pending deletion recovery is incomplete.');},
@@ -1271,7 +1271,7 @@ async function runDataMaintenance(options={}){
     markStorageHealthOk('maintenance');
     return report;
   })().catch(error=>{
-    if(error?.code==='DATA_MAINTENANCE_YIELDED'||error?.code==='AREA_NOTE_RECOVERY_SUPERSEDED'){const reason=error.code==='AREA_NOTE_RECOVERY_SUPERSEDED'?'notes-changed':error.reason;if(reason!=='budget')dataMaintenanceContinuation=null;return {status:'yielded',reason,phase:dataMaintenanceContinuation?.phase||0};}
+    if(error?.code==='DATA_MAINTENANCE_YIELDED'||error?.code==='NOTE_RECOVERY_SUPERSEDED'){const reason=error.code==='NOTE_RECOVERY_SUPERSEDED'?'notes-changed':error.reason;if(reason!=='budget')dataMaintenanceContinuation=null;return {status:'yielded',reason,phase:dataMaintenanceContinuation?.phase||0};}
     if(error&&error.message==='Data maintenance stopped because app ownership changed')return {status:'skipped',reason:'ownership-changed'};
     // A transaction aborted from outside (the browser clearing site data
     // mid-run) is retried once without an error; a second abort in a row is
@@ -1409,34 +1409,34 @@ async function runDataMaintenance(options={}){
       datasetRevision
     });
     const notes=freeze({
-      get:AreaNotesRepository.get,
-      update:AreaNotesRepository.update,
-      updateValidatedRich:AreaNotesRepository.updateValidatedRich,
-      link:AreaNotesRepository.link,
-      linkedFrom:AreaNotesRepository.linkedFrom,
-      remove:AreaNotesRepository.remove,
-      clearAll:AreaNotesRepository.clearAll,
-      load:AreaNotesRepository.load,
-      reloadFresh:AreaNotesRepository.reloadFresh,
-      readFreshPayload:AreaNotesRepository.readFreshPayload,
-      readFreshItems:AreaNotesRepository.readFreshItems,
-      failure:AreaNotesRepository.failure,
-      exportPayload:AreaNotesRepository.exportPayload,
-      metadataSnapshot:AreaNotesRepository.metadataSnapshot,
-      searchSnapshot:AreaNotesRepository.searchSnapshot,
-      normalizePayload:AreaNotesRepository.normalizePayload,
-      alignByTitle:AreaNotesRepository.alignByTitle,
-      replace:AreaNotesRepository.replace,
-      reconcile:AreaNotesRepository.reconcile,
-      size:AreaNotesRepository.size,
-      flush:AreaNotesRepository.flush,
-      protectUnsaved:AreaNotesRepository.protectUnsaved,
-      trash:AreaNotesRepository.trash,
-      restore:AreaNotesRepository.restore,
-      rename:AreaNotesRepository.rename,
-      trashSnapshot:AreaNotesRepository.trashSnapshot,
-      purgeExpiredTrash:AreaNotesRepository.purgeExpiredTrash,
-      recoverAfterStorageLoss:AreaNotesRepository.recoverAfterStorageLoss
+      get:NotesRepository.get,
+      update:NotesRepository.update,
+      updateValidatedRich:NotesRepository.updateValidatedRich,
+      link:NotesRepository.link,
+      linkedFrom:NotesRepository.linkedFrom,
+      remove:NotesRepository.remove,
+      clearAll:NotesRepository.clearAll,
+      load:NotesRepository.load,
+      reloadFresh:NotesRepository.reloadFresh,
+      readFreshPayload:NotesRepository.readFreshPayload,
+      readFreshItems:NotesRepository.readFreshItems,
+      failure:NotesRepository.failure,
+      exportPayload:NotesRepository.exportPayload,
+      metadataSnapshot:NotesRepository.metadataSnapshot,
+      searchSnapshot:NotesRepository.searchSnapshot,
+      normalizePayload:NotesRepository.normalizePayload,
+      alignByTitle:NotesRepository.alignByTitle,
+      replace:NotesRepository.replace,
+      reconcile:NotesRepository.reconcile,
+      size:NotesRepository.size,
+      flush:NotesRepository.flush,
+      protectUnsaved:NotesRepository.protectUnsaved,
+      trash:NotesRepository.trash,
+      restore:NotesRepository.restore,
+      rename:NotesRepository.rename,
+      trashSnapshot:NotesRepository.trashSnapshot,
+      purgeExpiredTrash:NotesRepository.purgeExpiredTrash,
+      recoverAfterStorageLoss:NotesRepository.recoverAfterStorageLoss
     });
     const activeSession=freeze({
       save:saveActiveSessionRecord,
@@ -1451,7 +1451,7 @@ async function runDataMaintenance(options={}){
     function canonicalMutationEpochEligible(){
       try{
         if(fallbackDailyRecordsGet().length||pendingDeletionEntries().length)return false;
-        const noteFailure=AreaNotesRepository.failure();
+        const noteFailure=NotesRepository.failure();
         return !(noteFailure&&noteFailure.failed);
       }catch(error){capture('canonical-mutation-epoch.eligibility',error,'warn');return false;}
     }
@@ -1471,8 +1471,8 @@ async function runDataMaintenance(options={}){
       flush:flushDeletionRecovery,
       savedDays:listSavedDayDeletions,
       replaceSavedDays:replaceSavedDayDeletions,
-      areaNotes:listAreaNoteDeletions,
-      replaceAreaNotes:replaceAreaNoteDeletions,
+      notes:listNoteDeletions,
+      replaceNotes:replaceNoteDeletions,
       attachments:listAttachmentDeletions,
       replaceAttachments:replaceAttachmentDeletions,
       recordAttachment:recordAttachmentDeletion,
@@ -1490,7 +1490,7 @@ async function runDataMaintenance(options={}){
         else if(index===results.length-1)rows+=Array.isArray(result.value)?result.value.length:0;
         else if(result.value)rows++;
       });
-      const rescueProof=AreaNotesRepository.verifyRescue();
+      const rescueProof=NotesRepository.verifyRescue();
       issues.push(...rescueProof.issues);
       return freeze({ok:issues.length===0,issues:freeze(issues),rows:rows+rescueProof.rows});
     }
@@ -1523,12 +1523,12 @@ function legacySyncDeleteEntries(){
   })));
 }
 async function verifyDeletionState(){
-  const issues=[];let savedDay=[],areaNote=[],attachment=[];
-  try{[savedDay,areaNote,attachment]=await Promise.all([listSavedDayDeletions(),listAreaNoteDeletions(),listAttachmentDeletions()]);}catch(error){issues.push(`canonical-deletion-ledger:${String(error&&error.message||error)}`);}
+  const issues=[];let savedDay=[],note=[],attachment=[];
+  try{[savedDay,note,attachment]=await Promise.all([listSavedDayDeletions(),listNoteDeletions(),listAttachmentDeletions()]);}catch(error){issues.push(`canonical-deletion-ledger:${String(error&&error.message||error)}`);}
   const legacyQueue=await idbGetAllIfPresent(DB_LEGACY_SYNC_QUEUE_STORE,'legacy sync queue verification aborted'),legacyTombstones=await idbGetAllIfPresent(DB_LEGACY_TOMBSTONE_STORE,'legacy tombstone verification aborted');
   if(legacyQueue.length)issues.push('legacy-sync-queue-not-empty');if(legacyTombstones.length)issues.push('legacy-tombstones-not-empty');
   if(LocalStorageContract.getText(STORAGE_KEYS.legacySyncEmergency,null)!==null)issues.push('legacy-sync-emergency-present');
-  return freeze({ok:issues.length===0,issues:freeze(issues),pendingRecovery:pendingDeletionEntries().length,savedDayDeletions:savedDay.length,areaNoteDeletions:areaNote.length,attachmentDeletions:attachment.length});
+  return freeze({ok:issues.length===0,issues:freeze(issues),pendingRecovery:pendingDeletionEntries().length,savedDayDeletions:savedDay.length,noteDeletions:note.length,attachmentDeletions:attachment.length});
 }
 // Insights revision rows from before the value envelope.
 const INSIGHTS_REVISION_FORMAT='study-director.insights-dataset-revision';
@@ -1760,36 +1760,36 @@ async function verifyHistoricalActiveSession(){
 // notes repository only ever reads current notes. Earlier versions journaled
 // unsaved edits in appMeta, and before that in localStorage; both are folded
 // in once, the newer revision winning and a later deletion staying.
-const AREA_NOTE_RECOVERY_PREFIX=LEGACY_STORAGE_KEYS.areaNoteRecoveryPrefix,AREA_NOTE_RECOVERY_FORMAT='study-director.area-note-recovery';
-const AREA_NOTE_RESCUE_FORMAT='study-director.area-note-rescue',AREA_NOTE_DELETION_PREFIX=META_KEYS.areaNoteDeletionPrefix;
-function areaNoteRecoveryKey(name){const safe=normalizeAreaName(name);return safe?`${AREA_NOTE_RECOVERY_PREFIX}${safe}`:'';}
-function areaNoteTime(entry){const value=Date.parse(String(entry&&entry.updatedAt||''));return Number.isFinite(value)?value:0;}
-function convertAreaNoteRescue(){
-  const raw=LocalStorageContract.getJson(STORAGE_KEYS.areaNoteRescue,null);if(LocalStorageContract.lastError)throw LocalStorageContract.lastError;
-  if(!raw||raw.format!==AREA_NOTE_RESCUE_FORMAT||Number(raw.version)!==1||!raw.entries||typeof raw.entries!=='object'||Array.isArray(raw.entries))return 0;
+const NOTE_RECOVERY_PREFIX=LEGACY_STORAGE_KEYS.noteRecoveryPrefix,NOTE_RECOVERY_FORMAT='study-director.area-note-recovery';
+const NOTE_RESCUE_FORMAT='study-director.note-rescue',NOTE_DELETION_PREFIX=META_KEYS.noteDeletionPrefix;
+function noteRecoveryKey(name){const safe=normalizeAreaName(name);return safe?`${NOTE_RECOVERY_PREFIX}${safe}`:'';}
+function noteTime(entry){const value=Date.parse(String(entry&&entry.updatedAt||''));return Number.isFinite(value)?value:0;}
+function convertNoteRescue(){
+  const raw=LocalStorageContract.getJson(STORAGE_KEYS.noteRescue,null);if(LocalStorageContract.lastError)throw LocalStorageContract.lastError;
+  if(!raw||raw.format!==NOTE_RESCUE_FORMAT||Number(raw.version)!==1||!raw.entries||typeof raw.entries!=='object'||Array.isArray(raw.entries))return 0;
   const out=Object.create(null);let converted=0;
   for(const [rawKey,rawEntry] of Object.entries(raw.entries)){
     if(!rawEntry||typeof rawEntry!=='object')continue;
-    const oldKey=String(rawEntry.key||rawKey),key=CompatibilityCodec.areaNoteKey(oldKey);if(!key)throw new Error(`Note rescue ${oldKey||'?'} could not be converted safely. The browser copy was preserved.`);
+    const oldKey=String(rawEntry.key||rawKey),key=CompatibilityCodec.noteKey(oldKey);if(!key)throw new Error(`Note rescue ${oldKey||'?'} could not be converted safely. The browser copy was preserved.`);
     if(rawEntry.deleted){const updatedAt=normalizeTimestamp(rawEntry.updatedAt,null);if(updatedAt)out[key]={key,deleted:true,updatedAt};}
-    else{const clean=CompatibilityCodec.areaNote(rawEntry,oldKey);if(!clean)throw new Error(`Note rescue ${oldKey||'?'} could not be converted safely. The browser copy was preserved.`);out[clean.key]=clean;}
+    else{const clean=CompatibilityCodec.note(rawEntry,oldKey);if(!clean)throw new Error(`Note rescue ${oldKey||'?'} could not be converted safely. The browser copy was preserved.`);out[clean.key]=clean;}
     if(key!==oldKey)converted++;
   }
-  if(converted&&!LocalStorageContract.setJson(STORAGE_KEYS.areaNoteRescue,{...raw,entries:out}))throw LocalStorageContract.lastError||new Error('Note rescue could not be converted.');
+  if(converted&&!LocalStorageContract.setJson(STORAGE_KEYS.noteRescue,{...raw,entries:out}))throw LocalStorageContract.lastError||new Error('Note rescue could not be converted.');
   return converted;
 }
 // One transaction moves every name-keyed row, deletion record and journal
 // entry; the next backup reads every note afresh under its new key.
-async function migrateAreaNoteRows(){
+async function migrateNoteRows(){
   const token=compatibilityWriteToken('canonicalize notes');
   if(!token)return freeze({status:'skipped',reason:'not-primary',records:0,recoveryRows:0});
-  const rescue=convertAreaNoteRescue();
+  const rescue=convertNoteRescue();
   let records=0,recoveryRows=0,deletions=0,staged=false;
-  return idbStrictTransaction([DB_AREA_NOTES_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
+  return idbStrictTransaction([DB_NOTES_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
     const fail=error=>{try{tx.abort();}catch{}finish(false,error);};
     const guard=()=>{try{assertWriteToken(token,'canonicalize notes');return true;}catch(error){fail(error);return false;}};
     if(!guard())return;
-    const notesStore=tx.objectStore(DB_AREA_NOTES_STORE),metaStore=tx.objectStore(DB_APP_META_STORE),meta=Meta.view(tx);
+    const notesStore=tx.objectStore(DB_NOTES_STORE),metaStore=tx.objectStore(DB_APP_META_STORE),meta=Meta.view(tx);
     const stage=()=>{if(!staged){stageCanonicalMutationEpoch(tx,['*']);staged=true;}};
     const writeFailed=(request,message)=>{request.onerror=()=>fail(request.error||new Error(message));};
     const rows=notesStore.openCursor();
@@ -1798,8 +1798,8 @@ async function migrateAreaNoteRows(){
       if(!guard())return;
       const cursor=event.target.result;if(!cursor)return;
       const row=cursor.value;
-      if(sanitizeCurrentAreaNote(row,row&&row.key)){cursor.continue();return;}
-      const canonical=CompatibilityCodec.areaNote(row,row&&row.key);
+      if(sanitizeCurrentNote(row,row&&row.key)){cursor.continue();return;}
+      const canonical=CompatibilityCodec.note(row,row&&row.key);
       if(!canonical){fail(new Error(`Note ${String(row&&row.key||'?')} could not be converted safely. The historical row was preserved.`));return;}
       stage();
       if(canonical.key===String(row&&row.key))writeFailed(cursor.update(canonical),'Note canonicalization write failed.');
@@ -1808,77 +1808,77 @@ async function migrateAreaNoteRows(){
     };
     // Deletion records are read raw: a name-keyed one is not a current record.
     const Range=globalThis.IDBKeyRange,prefixRange=prefix=>Range&&typeof Range.bound==='function'?Range.bound(prefix,`${prefix}￿`):null;
-    const ledger=metaStore.openCursor(prefixRange(AREA_NOTE_DELETION_PREFIX));
+    const ledger=metaStore.openCursor(prefixRange(NOTE_DELETION_PREFIX));
     ledger.onerror=()=>fail(ledger.error||new Error('Note deletion canonicalization read failed.'));
     ledger.onsuccess=event=>{
       if(!guard())return;
       const cursor=event.target.result;if(!cursor)return;
-      const row=cursor.value,rowKey=String(row&&row.key||'');if(!rowKey.startsWith(AREA_NOTE_DELETION_PREFIX)){cursor.continue();return;}
-      const suffix=rowKey.slice(AREA_NOTE_DELETION_PREFIX.length),key=CompatibilityCodec.areaNoteKey(row&&row.value&&row.value.key);
+      const row=cursor.value,rowKey=String(row&&row.key||'');if(!rowKey.startsWith(NOTE_DELETION_PREFIX)){cursor.continue();return;}
+      const suffix=rowKey.slice(NOTE_DELETION_PREFIX.length),key=CompatibilityCodec.noteKey(row&&row.value&&row.value.key);
       if(!NoteKeys.isId(key)){fail(new Error(`Note deletion ${suffix||'?'} could not be converted safely.`));return;}
       if(key!==suffix){
         stage();cursor.delete();
-        const value=areaNoteDeletionValue(key,row.value.deletedAt);meta.put('areaNoteDeletionPrefix',value,{suffix:key,updatedAt:value.deletedAt});deletions++;
+        const value=noteDeletionValue(key,row.value.deletedAt);meta.put('noteDeletionPrefix',value,{suffix:key,updatedAt:value.deletedAt});deletions++;
       }
       cursor.continue();
     };
-    const journal=metaStore.openCursor(prefixRange(AREA_NOTE_RECOVERY_PREFIX));
+    const journal=metaStore.openCursor(prefixRange(NOTE_RECOVERY_PREFIX));
     journal.onerror=()=>fail(journal.error||new Error('Note recovery canonicalization read failed.'));
     journal.onsuccess=event=>{
       if(!guard())return;
       const cursor=event.target.result;if(!cursor)return;
-      const row=cursor.value;if(!String(row&&row.key||'').startsWith(AREA_NOTE_RECOVERY_PREFIX)){cursor.continue();return;}
+      const row=cursor.value;if(!String(row&&row.key||'').startsWith(NOTE_RECOVERY_PREFIX)){cursor.continue();return;}
       const value=row&&row.value,name=normalizeAreaName(value&&value.key);
-      if(!value||value.format!==AREA_NOTE_RECOVERY_FORMAT||Number(value.version)!==1||!name||String(row.key||'')!==areaNoteRecoveryKey(name)){
+      if(!value||value.format!==NOTE_RECOVERY_FORMAT||Number(value.version)!==1||!name||String(row.key||'')!==noteRecoveryKey(name)){
         fail(new Error(`Note recovery ${String(row&&row.key||'?')} could not be converted safely. The historical row was preserved.`));return;
       }
       const entry=value.entry&&value.entry.deleted
         ?{key:name,deleted:true,updatedAt:normalizeTimestamp(value.entry.updatedAt||value.updatedAt||row.updatedAt,new Date().toISOString())}
-        :CompatibilityCodec.areaNote(value.entry,name);
+        :CompatibilityCodec.note(value.entry,name);
       if(!entry){fail(new Error(`Note recovery ${name} could not be converted safely. The historical row was preserved.`));return;}
       const updatedAt=normalizeTimestamp(value.updatedAt||row.updatedAt,entry.updatedAt||new Date().toISOString());
-      const canonical={key:areaNoteRecoveryKey(name),version:1,value:{format:AREA_NOTE_RECOVERY_FORMAT,version:1,key:name,entry,updatedAt},updatedAt};
+      const canonical={key:noteRecoveryKey(name),version:1,value:{format:NOTE_RECOVERY_FORMAT,version:1,key:name,entry,updatedAt},updatedAt};
       if(!sameDataValue(row,canonical)){writeFailed(cursor.update(canonical),'Note recovery canonicalization write failed.');recoveryRows++;}
       cursor.continue();
     };
     tx.oncomplete=()=>finish(true,freeze({status:(records||recoveryRows||deletions||rescue)?'migrated':'not-needed',records,recoveryRows,deletions,rescue}));
   },'Note canonicalization aborted');
 }
-async function readAreaNoteRecoveryRows(){
+async function readNoteRecoveryRows(){
   const rows=await idbGetAll(DB_APP_META_STORE,'Note recovery read aborted');
-  return (rows||[]).filter(row=>String(row&&row.key||'').startsWith(AREA_NOTE_RECOVERY_PREFIX)).map(row=>freeze({key:String(row.key),suffix:String(row.key).slice(AREA_NOTE_RECOVERY_PREFIX.length),value:row.value}));
+  return (rows||[]).filter(row=>String(row&&row.key||'').startsWith(NOTE_RECOVERY_PREFIX)).map(row=>freeze({key:String(row.key),suffix:String(row.key).slice(NOTE_RECOVERY_PREFIX.length),value:row.value}));
 }
-// A journal entry, already given its id by migrateAreaNoteRows.
-function areaNoteRecoveryEntry(value,suffix){
+// A journal entry, already given its id by migrateNoteRows.
+function noteRecoveryEntry(value,suffix){
   const name=normalizeAreaName(value&&value.key);
-  if(!value||value.format!==AREA_NOTE_RECOVERY_FORMAT||Number(value.version)!==1||!name||name!==normalizeAreaName(suffix)||!Number.isFinite(Date.parse(String(value.updatedAt||''))))return null;
+  if(!value||value.format!==NOTE_RECOVERY_FORMAT||Number(value.version)!==1||!name||name!==normalizeAreaName(suffix)||!Number.isFinite(Date.parse(String(value.updatedAt||''))))return null;
   if(value.entry&&value.entry.deleted){
     const valid=Object.keys(value.entry).sort().join('|')==='deleted|key|updatedAt'&&value.entry.deleted===true&&normalizeAreaName(value.entry.key)===name&&Number.isFinite(Date.parse(String(value.entry.updatedAt||'')));
-    const id=CompatibilityCodec.areaNoteKey(name);return valid&&id?{key:id,deleted:true,updatedAt:String(value.entry.updatedAt)}:null;
+    const id=CompatibilityCodec.noteKey(name);return valid&&id?{key:id,deleted:true,updatedAt:String(value.entry.updatedAt)}:null;
   }
-  return sanitizeCurrentAreaNote(value.entry,'');
+  return sanitizeCurrentNote(value.entry,'');
 }
 function readLegacyPendingNotes(){
-  let parsed=null;try{parsed=LocalStorageContract.getJson(LEGACY_STORAGE_KEYS.areaNotesPending,null);}catch(error){AppDiagnostics.capture('area-notes.pending-legacy-read',error);return Object.create(null);}
+  let parsed=null;try{parsed=LocalStorageContract.getJson(LEGACY_STORAGE_KEYS.notesPending,null);}catch(error){AppDiagnostics.capture('notes.pending-legacy-read',error);return Object.create(null);}
   const out=Object.create(null);if(!parsed||Number(parsed.version)!==1||!parsed.pending||typeof parsed.pending!=='object')return out;
-  for(const [rawKey,rawVal] of Object.entries(parsed.pending).slice(0,APP_LIMITS.maxOngoingNotes)){
+  for(const [rawKey,rawVal] of Object.entries(parsed.pending).slice(0,APP_LIMITS.maxNotes)){
     const source=rawVal&&typeof rawVal==='object'?rawVal:{text:String(rawVal||'')},key=String(source.key||rawKey||'');if(!key)continue;
-    const clean=CompatibilityCodec.areaNote(source,key);if(!clean)throw new Error(`Historical note ${key} could not be converted safely.`);out[clean.key]=clean;
+    const clean=CompatibilityCodec.note(source,key);if(!clean)throw new Error(`Historical note ${key} could not be converted safely.`);out[clean.key]=clean;
   }
   return out;
 }
 // The newer of two versions of one note; a deletion at or after a version removes it.
-function newerAreaNote(current,incoming){
+function newerNote(current,incoming){
   if(!incoming)return current;
-  if(incoming.deleted)return current&&areaNoteTime(incoming)<areaNoteTime(current)?current:null;
-  return !current||areaNoteTime(incoming)>=areaNoteTime(current)?incoming:current;
+  if(incoming.deleted)return current&&noteTime(incoming)<noteTime(current)?current:null;
+  return !current||noteTime(incoming)>=noteTime(current)?incoming:current;
 }
-async function migrateAreaNoteRecovery(){
+async function migrateNoteRecovery(){
   const token=compatibilityWriteToken('migrate note recovery');
   if(!token)return freeze({status:'skipped',reason:'not-primary',records:0});
   const legacy=readLegacyPendingNotes(),journal=Object.create(null),journalRows=new Map();
-  for(const row of await readAreaNoteRecoveryRows()){
-    const entry=areaNoteRecoveryEntry(row.value,row.suffix);
+  for(const row of await readNoteRecoveryRows()){
+    const entry=noteRecoveryEntry(row.value,row.suffix);
     if(!entry)throw canonicalRuntimeError(`Note recovery ${String(row.key||'?')} is not in the current canonical schema.`);
     journal[entry.key]=entry;journalRows.set(entry.key,row.key);
   }
@@ -1886,65 +1886,65 @@ async function migrateAreaNoteRecovery(){
   if(!keys.length)return freeze({status:'not-needed',records:0});
   assertWriteToken(token,'migrate note recovery');
   let records=0;
-  await idbStrictTransaction([DB_AREA_NOTES_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
-    const store=tx.objectStore(DB_AREA_NOTES_STORE),rawMeta=tx.objectStore(DB_APP_META_STORE),meta=Meta.view(tx);let staged=false,failed=false;
+  await idbStrictTransaction([DB_NOTES_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
+    const store=tx.objectStore(DB_NOTES_STORE),rawMeta=tx.objectStore(DB_APP_META_STORE),meta=Meta.view(tx);let staged=false,failed=false;
     const fail=error=>{if(failed)return;failed=true;try{tx.abort();}catch{}finish(false,error);};
     for(const key of keys){
       // Requests complete in issue order: the deletion record is read first.
-      const deletion=meta.get('areaNoteDeletionPrefix',key),row=store.get(key);
+      const deletion=meta.get('noteDeletionPrefix',key),row=store.get(key);
       row.onerror=()=>fail(row.error||new Error('Note recovery read failed.'));
       deletion.request.onerror=()=>fail(deletion.request.error||new Error('Note deletion read failed.'));
       row.onsuccess=()=>{
         try{assertWriteToken(token,'migrate note recovery');}catch(error){fail(error);return;}
-        const current=row.result?sanitizeCurrentAreaNote(row.result,key):null,deletedAt=Date.parse(String(deletion.value()?.deletedAt||''));
+        const current=row.result?sanitizeCurrentNote(row.result,key):null,deletedAt=Date.parse(String(deletion.value()?.deletedAt||''));
         if(row.result&&!current){fail(canonicalRuntimeError(`Note ${key} is not in the current canonical schema.`));return;}
-        const next=newerAreaNote(newerAreaNote(current,legacy[key]||null),journal[key]||null);
+        const next=newerNote(newerNote(current,legacy[key]||null),journal[key]||null);
         if(journalRows.has(key))rawMeta.delete(journalRows.get(key));
         // A note deleted after the unsaved edit stays deleted.
-        if(sameDataValue(next,current)||next&&Number.isFinite(deletedAt)&&deletedAt>=areaNoteTime(next))return;
-        if(!staged){stageCanonicalMutationEpoch(tx,keys.map(areaNotePreparationUnit));staged=true;}
-        if(next){store.put(next);meta.remove('areaNoteDeletionPrefix',key);}
-        else{store.delete(key);const value=areaNoteDeletionValue(key,new Date().toISOString());meta.put('areaNoteDeletionPrefix',value,{suffix:key,updatedAt:value.deletedAt});}
+        if(sameDataValue(next,current)||next&&Number.isFinite(deletedAt)&&deletedAt>=noteTime(next))return;
+        if(!staged){stageCanonicalMutationEpoch(tx,keys.map(notePreparationUnit));staged=true;}
+        if(next){store.put(next);meta.remove('noteDeletionPrefix',key);}
+        else{store.delete(key);const value=noteDeletionValue(key,new Date().toISOString());meta.put('noteDeletionPrefix',value,{suffix:key,updatedAt:value.deletedAt});}
         records++;
       };
     }
     tx.oncomplete=()=>finish(true);
   },'Note recovery migration aborted');
   assertWriteToken(token,'migrate note recovery');
-  if((await readAreaNoteRecoveryRows()).length)throw new Error('Note recovery rows remain after migration.');
-  if(Object.keys(legacy).length&&!LocalStorageContract.remove(LEGACY_STORAGE_KEYS.areaNotesPending))throw new Error('Legacy note recovery could not be retired after verified migration.');
+  if((await readNoteRecoveryRows()).length)throw new Error('Note recovery rows remain after migration.');
+  if(Object.keys(legacy).length&&!LocalStorageContract.remove(LEGACY_STORAGE_KEYS.notesPending))throw new Error('Legacy note recovery could not be retired after verified migration.');
   return freeze({status:'migrated',records});
 }
 // Proof that no journal row or older browser copy is left, and that the
 // emergency copy holds only current notes.
-async function verifyAreaNoteRecovery(){
+async function verifyNoteRecovery(){
   const issues=[];let rows=0;
-  try{rows=(await readAreaNoteRecoveryRows()).length;if(rows)issues.push('area-note-recovery-residue');}
-  catch(error){issues.push(`area-note-recovery:${String(error&&error.message||error)}`);}
-  const rescue=AreaNotesRepository.verifyRescue();issues.push(...rescue.issues);
-  if(LocalStorageContract.getText(LEGACY_STORAGE_KEYS.areaNotesPending,null)!==null)issues.push('legacy-area-note-recovery-source');
+  try{rows=(await readNoteRecoveryRows()).length;if(rows)issues.push('note-recovery-residue');}
+  catch(error){issues.push(`note-recovery:${String(error&&error.message||error)}`);}
+  const rescue=NotesRepository.verifyRescue();issues.push(...rescue.issues);
+  if(LocalStorageContract.getText(LEGACY_STORAGE_KEYS.notesPending,null)!==null)issues.push('legacy-note-recovery-source');
   return freeze({ok:issues.length===0,rows:rows+rescue.rows,issues:freeze(issues)});
 }
     const compatibility=freeze({
       migrateDailyRecords:migrateHistoricalDailyRecords,
       migrateActiveSession:migrateHistoricalActiveSession,
-      migrateAreaNotes:migrateAreaNoteRows,
-      migrateAreaNoteRecovery,
+      migrateNotes:migrateNoteRows,
+      migrateNoteRecovery,
       migrateDeletionState:migrateLegacyDeletionState,
       cleanupObsoleteMetadata:removeObsoleteMetadata,
       verifyDailyRecords:verifyDailyRecordCanonicalBaseline,
       verifyActiveSession:verifyHistoricalActiveSession,
-      verifyAreaNotes:async()=>{
+      verifyNotes:async()=>{
         const issues=[];
-        for(const row of await idbGetAll(DB_AREA_NOTES_STORE,'Area Note canonical baseline verification aborted')){
-          const clean=sanitizeCurrentAreaNote(row,row&&row.key);if(!clean||!sameDataValue(row,clean))issues.push(`area-note:${String(row&&row.key||'?')}`);
+        for(const row of await idbGetAll(DB_NOTES_STORE,'Note canonical baseline verification aborted')){
+          const clean=sanitizeCurrentNote(row,row&&row.key);if(!clean||!sameDataValue(row,clean))issues.push(`note:${String(row&&row.key||'?')}`);
         }
         return freeze({ok:issues.length===0,issues:freeze(issues)});
       },
       migrateInsightsRevisionEnvelope,
       verifyInsightsRevisionEnvelope,
       verifyDeletionState,
-      verifyAreaNoteRecovery,
+      verifyNoteRecovery,
       verifyObsoleteMetadata:async()=>{
         const rows=await rawLegacyMetaList(),present=[];
         for(const identity of OBSOLETE_META_KEYS){

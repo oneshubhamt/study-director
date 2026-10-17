@@ -129,7 +129,7 @@ const ScheduleModel=(()=>{
   function isFixed(task){return (task&&task.kind)==='fixed';}
   function isTrackable(task){return isWork(task)||isSupport(task);}
   function isPomodoroEligible(task){return isWork(task);}
-  function hasOngoingNotes(task){return isTrackable(task);}
+  function hasNotes(task){return isTrackable(task);}
   function normalizeTarget(value){
     const raw=String(value??'').trim();
     if(raw===''||raw==='—'||raw==='-')return null;
@@ -296,7 +296,7 @@ const ScheduleModel=(()=>{
   }
   function startMinutes(rows){return (rows||[]).map(row=>clockMinuteToStudyMinute(t2m(row.start)));}
   return Object.freeze({
-    token,normalizeKind,isWork,isSupport,isFixed,isTrackable,isPomodoroEligible,hasOngoingNotes,
+    token,normalizeKind,isWork,isSupport,isFixed,isTrackable,isPomodoroEligible,hasNotes,
     normalizeTarget,makeRow,parseText,isCanonicalText:text=>parseText(text).ok,analyzeTimeline,warningsMessage,
     buildTasks,textFromRows,fingerprint,chronologicalRows,startMinutes,normalizeArea,displayArea,areaValue,
     measureValue,targetValue,areaLabel,areaKey,parentAreaKeys,cleanIdentifierText

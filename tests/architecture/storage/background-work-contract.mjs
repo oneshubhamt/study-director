@@ -23,7 +23,7 @@ assert.match(fs.readFileSync('source/core/compatibility-host.js','utf8'),/MAINTE
 
 assert.match(background,/input\.intent\.clear\(pending\)/u,'maintenance completion must carry its serviced request');
 assert.match(background,/generation!==requestGeneration/u,'requests arriving after a commit must retain their scheduling opportunity');
-assert.match(repositories,/AreaNotesRepository\.flush\(\{strict:true\}\)/u,'daily completion requires strict note durability');
+assert.match(repositories,/NotesRepository\.flush\(\{strict:true\}\)/u,'daily completion requires strict note durability');
 assert.match(repositories,/flushDeletionRecovery\([^)]*\)!==true/u,'daily completion must reject incomplete deletion recovery');
 
 // Scheduling policy is shared rather than duplicated in Device and Drive, with suspension settlement and opportunity-driven availability.

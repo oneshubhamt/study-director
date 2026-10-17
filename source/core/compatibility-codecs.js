@@ -119,25 +119,25 @@ registry.define('compatibility-codecs',1,()=>{
     // bytes), so every older copy of a note, on this device or in a backup,
     // turns into the same id. A deleted note's old key gets the same treatment
     // behind the trash prefix.
-    const NoteKeys=DailyRecordCodec.areaNoteKeys,TRASH_PREFIX=String(DATA_CONTRACT.schemas.AreaNote.trashKeyPrefix||''),utf8=new TextEncoder();
+    const NoteKeys=DailyRecordCodec.noteKeys,TRASH_PREFIX=String(DATA_CONTRACT.schemas.Note.trashKeyPrefix||''),utf8=new TextEncoder();
     function derivedNoteId(name){
       let hash=0xcbf29ce484222325n;
       for(const byte of utf8.encode(name)){hash^=BigInt(byte);hash=(hash*0x100000001b3n)&0xffffffffffffffffn;}
       return 'n_'+hash.toString(16).padStart(16,'0');
     }
-    function areaNoteKey(value){
+    function noteKey(value){
       const raw=String(value||'');if(NoteKeys.isKey(raw))return raw;
       if(raw.startsWith(TRASH_PREFIX)){const old=raw.slice(TRASH_PREFIX.length).trim();return old?TRASH_PREFIX+derivedNoteId(TRASH_PREFIX+old):'';}
       const name=normalizeAreaName(raw);return name?derivedNoteId(name):'';
     }
-    function areaNote(value,keyHint=''){
+    function note(value,keyHint=''){
       const source=value&&typeof value==='object'&&!Array.isArray(value)?value:null;if(!source||source.deleted===true)return null;
-      const current=DailyRecordCodec.sanitizeCurrentAreaNote(source,keyHint);if(current)return current;
-      const oldKey=String(source.key||keyHint||''),name=normalizeAreaName(oldKey.startsWith(TRASH_PREFIX)?'':oldKey),key=areaNoteKey(oldKey),text=optionalEditorContent(source.text,APP_LIMITS.maxNoteChars);if(!key||text===null)return null;
+      const current=DailyRecordCodec.sanitizeCurrentNote(source,keyHint);if(current)return current;
+      const oldKey=String(source.key||keyHint||''),name=normalizeAreaName(oldKey.startsWith(TRASH_PREFIX)?'':oldKey),key=noteKey(oldKey),text=optionalEditorContent(source.text,APP_LIMITS.maxNoteChars);if(!key||text===null)return null;
       const label=optionalText(source.label,APP_LIMITS.maxAreaNameChars),updatedAt=normalizeImportedTimestamp(source.updatedAt,new Date().toISOString());if(!updatedAt)return null;
       const title=label!==null&&normalizeAreaName(label)?label:name?clampText(displayAreaName(name),APP_LIMITS.maxAreaNameChars):null;if(!title)return null;
-      const candidate={version:DATA_CONTRACT.schemas.AreaNote.version,key,label:title,text,updatedAt};
-      return DailyRecordCodec.sanitizeCurrentAreaNote(candidate,key);
+      const candidate={version:DATA_CONTRACT.schemas.Note.version,key,label:title,text,updatedAt};
+      return DailyRecordCodec.sanitizeCurrentNote(candidate,key);
     }
     function migrateSessionSnapshot(snapshot){
       if(!snapshot||typeof snapshot!=='object'||Array.isArray(snapshot))return snapshot;
@@ -189,7 +189,7 @@ registry.define('compatibility-codecs',1,()=>{
       if(Number(value.version)!==1)throw new Error('Unsupported legacy personal-data version.');
       return {version:2,plans:PersonalDataCodec.plans(value.plans),preferences:PersonalDataCodec.preferences(value.preferences)};
     }
-    return freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord,areaNote,areaNoteKey,activeSession,localRecoveryEnvelope,protectedPreferences,personalData});
+    return freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord,note,noteKey,activeSession,localRecoveryEnvelope,protectedPreferences,personalData});
   }
   return freeze({format:'study-director.compatibility-codecs-module',contractVersion:1,create});
 });

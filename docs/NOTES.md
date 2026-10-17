@@ -97,7 +97,7 @@ What already works well:
    - The `#` suggestions, the `[[` picker and the bar's `+` share one picker.
 15. **The Library has three sections: Notes · Days · Data.** A switch at the top chooses between them. Notes opens first, and the Library remembers the last section used.
    - **Notes:**
-     - "Notes" replaces "Ongoing Notes" everywhere, including Execute.
+     - "Notes" replaces "Notes" everywhere, including Execute.
      - Under the heading, one line explains what they are: *Lasting notes for each subject and topic. A note opens alongside any block whose Area has the same name.*
      - The section holds the list (search, sort and tags) and the open note with its bar.
      - On a computer, the list takes about a third of the width and the note two thirds, at the full height of the window. Phones keep "list, then note".

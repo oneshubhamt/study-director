@@ -14,7 +14,7 @@ registry.define('timer-engine',2,()=>{
     schedule:freeze(['adjustedEndMin','adjustedStartMin','beginActualTask','effectiveNowMin','findNextIncompleteTrackableAfter','getLatestCarryForward','getScheduleDerivedState','handleStudyDayRollover','hasAdjustedTiming','isFixedBlock','isLiveTrackableTimer','isTaskResolved','isTrackableBlock','isWorkBlock','originalEndMin','originalStartMin','plannedRows','scheduleFingerprint','studyDayRolledOver']),
     persistence:freeze(['activePauseEventSnapshot','addPauseToActual','compactPauseEvents','compactRealTimeSnapshot','flushLiveDraft','maybeSnapshotRunningTimer','recoveryCaptureActiveBeforeSwitch','recoverySetStatus','reopenActualSessionForTimer','saveLiveDraft','saveNote','writeLiveDraftNow']),
     view:freeze(['cachedElements','clearExecuteStateOverlay','invalidateExecuteIdleDisplay','refreshPnote','refreshExecuteIdleDisplay','requestRender','setElementStyle','setElementText','setTextSafe','setExecuteControlsEnabled','setExecuteShellVisible','showDone','showEmpty','textEl','toggleDoneMarker']),
-    reviewEvidence:freeze(['applicableAreaNotesForTask','buildRealTimeSnapshot','exactTaskCompletionPercent','getReviewDate','liveTaskOutcome','recordCurrentActiveToTask','resolveTaskCompletion','setTaskDoneState','setTaskSkippedState','updateRealTimeAwareness','updateTimerFocusMetrics']),
+    reviewEvidence:freeze(['applicableNotesForTask','buildRealTimeSnapshot','exactTaskCompletionPercent','getReviewDate','liveTaskOutcome','recordCurrentActiveToTask','resolveTaskCompletion','setTaskDoneState','setTaskSkippedState','updateRealTimeAwareness','updateTimerFocusMetrics']),
     clock:freeze(['nowMs']),
     clockEnvironment:freeze(['cancelAnimationFrame','clearInterval','document','getComputedStyle','requestAnimationFrame','setInterval','setTimeout','window']),
     userPreferences:freeze(['Pomodoro','notifications']),
@@ -31,7 +31,7 @@ registry.define('timer-engine',2,()=>{
     const {adjustedEndMin,adjustedStartMin,beginActualTask,effectiveNowMin,findNextIncompleteTrackableAfter,getLatestCarryForward,getScheduleDerivedState,handleStudyDayRollover,hasAdjustedTiming,isFixedBlock,isLiveTrackableTimer,isTaskResolved,isTrackableBlock,isWorkBlock,originalEndMin,originalStartMin,plannedRows,scheduleFingerprint,studyDayRolledOver}=ports.schedule;
     const {activePauseEventSnapshot,addPauseToActual,compactPauseEvents,compactRealTimeSnapshot,flushLiveDraft,maybeSnapshotRunningTimer,recoveryCaptureActiveBeforeSwitch,recoverySetStatus,reopenActualSessionForTimer,saveLiveDraft,saveNote,writeLiveDraftNow}=ports.persistence;
     const {cachedElements,clearExecuteStateOverlay,invalidateExecuteIdleDisplay,refreshPnote,refreshExecuteIdleDisplay,requestRender,setElementStyle,setElementText,setTextSafe,setExecuteControlsEnabled,setExecuteShellVisible,showDone,showEmpty,textEl,toggleDoneMarker}=ports.view;
-    const {applicableAreaNotesForTask,buildRealTimeSnapshot,exactTaskCompletionPercent,getReviewDate,liveTaskOutcome,recordCurrentActiveToTask,resolveTaskCompletion,setTaskDoneState,setTaskSkippedState,updateRealTimeAwareness,updateTimerFocusMetrics}=ports.reviewEvidence;
+    const {applicableNotesForTask,buildRealTimeSnapshot,exactTaskCompletionPercent,getReviewDate,liveTaskOutcome,recordCurrentActiveToTask,resolveTaskCompletion,setTaskDoneState,setTaskSkippedState,updateRealTimeAwareness,updateTimerFocusMetrics}=ports.reviewEvidence;
     const {nowMs}=ports.clock;
     const {cancelAnimationFrame,clearInterval,document,getComputedStyle,requestAnimationFrame,setInterval,setTimeout,window}=ports.clockEnvironment;
     const {Pomodoro,notifications}=ports.userPreferences;
@@ -766,7 +766,7 @@ const SessionEvidenceProjector=(()=>{
         outcome:row.outcome||liveTaskOutcome(idx,{actualSnapshot:evidence.actualTime,resolved,exactPct:completion}),
         resolvedState:TaskSessionState.resolvedState(idx)||'',
         progress,actualSeconds:evidence.actualTime[idx]??null,clock,actualRecord,
-        note:applicableAreaNotesForTask(task)
+        note:applicableNotesForTask(task)
       });
     });
     const practice=PracticePacer.snapshot();

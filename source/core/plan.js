@@ -11,7 +11,7 @@ registry.define('plan',1,()=>{
     configuration:freeze(['limits']),
     persistence:freeze(['lastError','readDraft','readLibrary','writeLibrary','writeDraft','reportDraftResult']),
     defaults:freeze(['active','applyStudentName','factory']),
-    domain:freeze(['clampText','fmtDur','fmtS','hasOngoingTaskNotes','isFixedBlock','isSupportBlock','isTrackableBlock','isWorkBlock','makeScheduleRow','normalizeScheduleKind','normalizeScheduleTarget','positiveMinutes','scheduleFingerprintForRows','scheduleToken','scheduleWarningsMessage','taskAreaKey','taskAreaValue','taskMeasureValue','taskTargetValue','areaNoteTextForKey']),
+    domain:freeze(['clampText','fmtDur','fmtS','hasOngoingTaskNotes','isFixedBlock','isSupportBlock','isTrackableBlock','isWorkBlock','makeScheduleRow','normalizeScheduleKind','normalizeScheduleTarget','positiveMinutes','scheduleFingerprintForRows','scheduleToken','scheduleWarningsMessage','taskAreaKey','taskAreaValue','taskMeasureValue','taskTargetValue','noteTextForKey']),
     parser:freeze(['isCanonicalScheduleText','parseScheduleDraftText','scheduleTextFromRows']),
     clock:freeze(['clockHM','clockMinuteToStudyMinute','getMinuteOfDay','isValidHHMM','normalizeHHMM','studyMinuteToHHMM','t2m','timeLabelFromIso']),
     view:freeze(['document','on','textEl','updateRealTimeAwareness','window']),
@@ -42,7 +42,7 @@ registry.define('plan',1,()=>{
     const APP_LIMITS=ports.configuration.limits;
     const persistence=ports.persistence,notifications=ports.notifications;
     const DefaultStore=ports.defaults;
-    const {clampText,fmtDur,fmtS,hasOngoingTaskNotes,isFixedBlock,isSupportBlock,isTrackableBlock,isWorkBlock,makeScheduleRow,normalizeScheduleKind,normalizeScheduleTarget,positiveMinutes,scheduleFingerprintForRows,scheduleToken,scheduleWarningsMessage,taskAreaKey,taskAreaValue,taskMeasureValue,taskTargetValue,areaNoteTextForKey}=ports.domain;
+    const {clampText,fmtDur,fmtS,hasOngoingTaskNotes,isFixedBlock,isSupportBlock,isTrackableBlock,isWorkBlock,makeScheduleRow,normalizeScheduleKind,normalizeScheduleTarget,positiveMinutes,scheduleFingerprintForRows,scheduleToken,scheduleWarningsMessage,taskAreaKey,taskAreaValue,taskMeasureValue,taskTargetValue,noteTextForKey}=ports.domain;
     const {isCanonicalScheduleText,parseScheduleDraftText,scheduleTextFromRows}=ports.parser;
     const {clockHM,clockMinuteToStudyMinute,getMinuteOfDay,isValidHHMM,normalizeHHMM,studyMinuteToHHMM,t2m,timeLabelFromIso}=ports.clock;
     const {document,on,textEl,updateRealTimeAwareness,window}=ports.view;
@@ -238,7 +238,7 @@ function createScheduleRow(row,rt){
   }
   if(i===rt.scheduledIdx){const wn=document.createElement('div');wn.className='wall-row-note ui-label';wn.textContent='WALL-CLOCK POSITION NOW';info.appendChild(wn);}
   if(hasOngoingTaskNotes(t)){
-    const noteText=areaNoteTextForKey(taskAreaKey(t)).trim();
+    const noteText=noteTextForKey(taskAreaKey(t)).trim();
     if(noteText){
       const note=document.createElement('div');
       note.className='plan-note-snapshot ui-helper';

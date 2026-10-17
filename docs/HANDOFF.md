@@ -25,6 +25,7 @@ There is nothing to re-read here; the designs live in `docs/BACKUP-ENGINE.md`, `
 - **One backup engine** (`backup-provider.js`) runs every operation for the Device Folder and Google Drive. The app draws all three rows (Device Folder, Drive, portable file) the same way.
 - **Data is lean and canonical.**
   - Older stored data is read once by the compatibility host, converted and retired.
+  - Stored names are plain: notes are `notes` everywhere (store, records, backups) and the Device Folder settings are `deviceFolder`; the old "area note" and "automatic device backup" names are converted on first start (table in `docs/ARCHITECTURE.md` §2). Backup files are version 22 and checkpoints version 7; an older build refuses them until it updates.
   - The compatibility layer is isolated, so it can be deleted in one step later (`tests/architecture/storage/compatibility-isolation.mjs`).
 - **Every audit finding is closed** (status table in the audit), along with #45 and #46.
 - **Retention:** 15 versions per location (latest, 6 daily, 4 weekly, 4 monthly). No tier shares a week or a month with the one before it, so the history reaches four to five months back.

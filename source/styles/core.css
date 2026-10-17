@@ -1666,7 +1666,7 @@ button.note-link-chip{padding:0 10px;cursor:pointer;white-space:nowrap;overflow:
 .library-notes-textarea{display:block;box-sizing:border-box;flex:1 1 auto;width:100%;height:100%;min-height:260px;max-height:100%;resize:none;overflow:auto;padding:14px 16px;font-size:var(--sd-type-role-reading-size);line-height:1.65}
 .library-notes-editor .subject-note-context{flex:0 0 auto;margin-top:10px}
 .library-notes-editor .subject-note-context :is(pre,.subject-note-context-entry-body){max-height:clamp(140px,22dvh,240px);overflow:auto;scrollbar-gutter:stable}
-.library-notes-editor-empty{display:grid;place-items:center;min-height:360px;padding:28px;color:var(--sd-color-text-muted);text-align:center}.library-ongoing-note-read{flex:1;min-height:0;overflow:auto;padding:14px 16px;scrollbar-gutter:stable;color:var(--sd-color-text-primary)}.library-ongoing-note-read.empty{display:grid;place-items:center;color:var(--sd-color-text-muted);text-align:center}
+.library-notes-editor-empty{display:grid;place-items:center;min-height:360px;padding:28px;color:var(--sd-color-text-muted);text-align:center}.library-note-read{flex:1;min-height:0;overflow:auto;padding:14px 16px;scrollbar-gutter:stable;color:var(--sd-color-text-primary)}.library-note-read.empty{display:grid;place-items:center;color:var(--sd-color-text-muted);text-align:center}
 .library-notes-zero{padding:16px 10px;text-align:center;color:var(--sd-color-text-muted)}
 .library-notes-status:not(:empty){margin-top:7px}
 .library-notes-status.read-only{color:var(--sd-color-warning)}

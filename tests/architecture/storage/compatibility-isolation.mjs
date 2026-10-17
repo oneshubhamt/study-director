@@ -14,7 +14,8 @@ const occurrences=(text,pattern)=>[...text.matchAll(pattern)].length;
 const facadeCalls=[...app.matchAll(/CompatibilityFacade\.(\w+)/gu)].map(match=>match[1]).sort();
 assert.deepEqual(facadeCalls,['inspectBackup','migrateLive','migrateLive','verifyCanonicalInstallation'],'the compatibility facade has exactly four call sites');
 assert.equal(occurrences(app,/CompatibilityModule\.applyIndexedDbUpgrade\(/gu),1,'the IndexedDB upgrade bridge is wired once');
-assert.equal(occurrences(app,/CompatibilityModule\./gu),2,'the compatibility module is used only for the upgrade bridge and to build the facade');
+assert.equal(occurrences(app,/CompatibilityModule\.renameIndexedDbStores\(/gu),1,'the IndexedDB store rename is wired once');
+assert.equal(occurrences(app,/CompatibilityModule\./gu),3,'the compatibility module is used only for the upgrade bridge (store renames and conversions) and to build the facade');
 
 // AppData.compatibility and the legacy attachment cleanup are wired only into the facade.
 const facadeStart=app.indexOf('const CompatibilityFacade=CompatibilityHostModule.createFacade(');
@@ -36,8 +37,8 @@ assert.ok(defined.length>=10,'the block holds the repository migrations');
 for(const name of defined)assert.equal(new RegExp(`\\b${name}\\b`,'u').test(rest),false,`${name} is compatibility code: only its block may use it`);
 assert.match(block,/const compatibility=freeze\(\{/u,'the AppData.compatibility namespace closes the block');
 for(const name of ['migrateInsightsRevisionEnvelope','verifyInsightsRevisionEnvelope','verifyDeletionState','legacySyncDeleteEntries','rawLegacyMetaGet'])assert.ok(defined.includes(name),`${name} lives in the compatibility block`);
-for(const name of ['migrateAreaNoteRows','migrateAreaNoteRecovery','verifyAreaNoteRecovery'])assert.ok(defined.includes(name),`${name} lives in the compatibility block`);
-assert.doesNotMatch(read('source/core/repositories-area-notes.js'),/CompatibilityCodec|compatibilityWriteToken|legacyKeys|areaNoteRecovery|async function migrate/u,'the notes repository holds no compatibility code');
+for(const name of ['migrateNoteRows','migrateNoteRecovery','verifyNoteRecovery'])assert.ok(defined.includes(name),`${name} lives in the compatibility block`);
+assert.doesNotMatch(read('source/core/repositories-notes.js'),/CompatibilityCodec|compatibilityWriteToken|legacyKeys|noteRecovery|async function migrate/u,'the notes repository holds no compatibility code');
 
 // Nothing outside the block reads the retired stores, keys or raw metadata rows.
 assert.doesNotMatch(rest,/rawLegacyMeta|legacySyncDeleteEntries|idbGetAllIfPresent\(DB_LEGACY_|getText\(STORAGE_KEYS\.legacySyncEmergency/u,'retired stores and keys are read only in the compatibility block');

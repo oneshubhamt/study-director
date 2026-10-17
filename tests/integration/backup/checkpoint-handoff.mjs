@@ -28,11 +28,11 @@ const limits=freeze({
   backupChunkItems:10,backupChunkTargetBytes:65536,backupMaxEntryBytes:65536,backupMaxLineBytes:262144,
   backupMaxCompressedBytes:4*1024*1024,backupMaxFileBytes:16*1024*1024,backupMaxUncompressedBytes:8*1024*1024,
   backupMaxAssetDescriptors:100,richAssetMaxBytes:8*1024*1024,maxBackupChunks:1000,importBytes:4*1024*1024,
-  maxImportRecords:100,maxOngoingNotes:100,maxLegacyImportTombstones:100,maxImportReflectionDrafts:100,maxReflectionChars:10000
+  maxImportRecords:100,maxNotes:100,maxLegacyImportTombstones:100,maxImportReflectionDrafts:100,maxReflectionChars:10000
 });
 const dataContract=RUNTIME_DATA_CONTRACT;
 const defs=freeze({
-  dailyRecord:freeze({idField:'date',backupLimit:limits.maxImportRecords}),areaNote:freeze({idField:'key',backupLimit:limits.maxOngoingNotes}),
+  dailyRecord:freeze({idField:'date',backupLimit:limits.maxImportRecords}),note:freeze({idField:'key',backupLimit:limits.maxNotes}),
   activeSession:freeze({idField:'id',backupLimit:1})
 });
 const isDate=value=>/^\d{4}-\d{2}-\d{2}$/.test(String(value||''));
@@ -43,11 +43,11 @@ const dailyRecordCodec=freeze({
   sanitizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item}):null,
   canonicalizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:15}):null,
   sanitizeCurrentDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:16,recordKind:'study',date:String(item.date)}):null,
-  sanitizeImportedAreaNote:normalizeArea,sanitizeCurrentAreaNote:normalizeArea,isSupportedSavedDate:isDate
+  sanitizeImportedNote:normalizeArea,sanitizeCurrentNote:normalizeArea,isSupportedSavedDate:isDate
 });
 const activeSessionCodec=freeze({sanitizeCurrent:item=>item&&item.id==='current'?freeze({...item,version:9}):null});
 const reflectionDraftCodec=freeze({format:'study-director.reflection-draft-codec',contractVersion:1,sanitizeCurrent:item=>item&&isDate(item.date)?freeze({...item,version:1,date:String(item.date),reflection:String(item.reflection||''),revision:Number(item.revision)||0,sessionRevision:Number(item.sessionRevision)||0,updatedAt:normalizeTimestamp(item.updatedAt)||'2026-08-01T00:00:00.000Z'}):null});
-const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:item=>dailyRecordCodec.canonicalizeHistoricalDailyRecord(item),areaNote:normalizeArea,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
+const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:item=>dailyRecordCodec.canonicalizeHistoricalDailyRecord(item),note:normalizeArea,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
 const keyedRecord=freeze({create:()=>Object.create(null)});
 const entityDefinition=type=>defs[type]||null,entityIdentity=(type,item)=>String(item?.[defs[type]?.idField]||'');
 const boundedInt=(value,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
@@ -65,15 +65,15 @@ const record=(date,reflection,updatedAt='2026-08-20T12:00:00.000Z')=>freeze({ver
 const session=(date,label)=>freeze({id:'current',type:'activeSession',version:9,revision:2,date,status:'suspended',scheduleText:`08:00 | 60 | ${label} | work | Ethics | block | 1`,snapshot:freeze({label}),suspendedAt:'2026-08-20T13:00:00.000Z',updatedAt:'2026-08-20T13:00:00.000Z'});
 const draft=(date,text,revision=1,updatedAt='2026-08-20T12:00:00.000Z')=>freeze({version:1,date,reflection:text,studyQuality:3,revision,sessionRevision:0,updatedAt});
 
-async function makeCheckpoint({records=[],deletions=[],areaNotes={},noteDeletions=[],activeSession=null,personalData=personal(),installationId='inst_checkpoint_a',exportedAt='2026-08-20T14:00:00.000Z'}={}){
-  const counts=codec.countShape({checkpointManifest:1,personalData:1,dailyRecord:records.length,areaNote:Object.keys(areaNotes).length,activeSession:activeSession?1:0});
-  const plan=freeze({studentName:'Checkpoint User',installationId,exportedAt,sourceRevision:exportedAt,recordDates:freeze(records.map(item=>item.date).sort()),savedDayDeletions:freeze(deletions),areaNoteItems:freeze(Object.values(areaNotes)),areaNoteDeletions:freeze(noteDeletions),counts});
+async function makeCheckpoint({records=[],deletions=[],notes={},noteDeletions=[],activeSession=null,personalData=personal(),installationId='inst_checkpoint_a',exportedAt='2026-08-20T14:00:00.000Z'}={}){
+  const counts=codec.countShape({checkpointManifest:1,personalData:1,dailyRecord:records.length,note:Object.keys(notes).length,activeSession:activeSession?1:0});
+  const plan=freeze({studentName:'Checkpoint User',installationId,exportedAt,sourceRevision:exportedAt,recordDates:freeze(records.map(item=>item.date).sort()),savedDayDeletions:freeze(deletions),noteItems:freeze(Object.values(notes)),noteDeletions:freeze(noteDeletions),counts});
   const algorithm=codec.checksumAlgorithm(),manifest=codec.createManifest(plan,{compression:'none',algorithm});
   let seq=0;const hashes=[],lines=[JSON.stringify(manifest)];
   const add=async(type,items)=>{if(!items.length)return;const chunk=await codec.encodeChunk(seq++,type,items,algorithm);hashes.push(chunk.checksum);lines.push(chunk.line);};
   await add('checkpointManifest',[codec.createProtectedManifest(plan,manifest.checkpoint)]);
   await add('dailyRecord',records);
-  await add('areaNote',Object.values(areaNotes));
+  await add('note',Object.values(notes));
   if(activeSession)await add('activeSession',[activeSession]);
   await add('personalData',[personalData]);
   const complete=await codec.encodeCompletion(seq,counts,hashes,algorithm,[]);lines.push(JSON.stringify(complete));
@@ -116,7 +116,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
       restoreJournalPrepare:async value=>(state.journal={state:{id:value.id},payload:value}),restoreJournalRead:async()=>state.journal,restoreJournalMark:async(id,phase)=>(state.journal.state.phase=phase,state.journal.state),restoreJournalClear:async()=>(state.journal=null,true),
       scheduleRead:()=>state.schedule,personalSettle:async()=>{if(injectedFailure==='personal')throw new Error('QA_FIXTURE personal preflight failure');return true;},personalExport:async()=>state.personal,personalImport:async value=>(state.personal=value,true),personalVerify:async value=>assert.deepEqual(state.personal,value),
       storageGeneration:()=>0,sourceRevision:async()=>'2026-08-23T00:00:00.000Z',snapshotRevision:async()=>'stable-b3',canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],installationId:()=> 'inst_device_local',deletionRecoveryFlush:async()=>{events.push('preflight-deletion-flush');if(injectedFailure==='deletions')throw new Error('QA_FIXTURE deletion preflight failure');if(injectedFailure==='deletions-false')return false;if(injectedFailure==='deletions-unknown')return undefined;return true;},
-      deletionRecoverySavedDays:async()=>state.deletions.map(value=>({...value})),deletionRecoveryReplaceSavedDays:async values=>(state.deletions=(values||[]).map(value=>({...value})),true),deletionRecoveryAreaNotes:async()=>state.noteDeletions.map(value=>({...value})),deletionRecoveryReplaceAreaNotes:async values=>(state.noteDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryAttachments:async()=>state.attachmentDeletions.map(value=>({...value})),deletionRecoveryReplaceAttachments:async values=>(state.attachmentDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryClearAttachment:async assetId=>(state.attachmentDeletions=state.attachmentDeletions.filter(item=>item.assetId!==assetId),true),reconciliationBaseRead:async()=>state.reconciliationBase?freeze({format:'study-director.reconciliation-base',version:2,checkpointId:state.reconciliationBase.checkpointId,establishedAt:state.reconciliationBase.establishedAt||new Date().toISOString(),noteCount:Number(state.reconciliationBase.noteCount??Object.keys(state.reconciliationBase.notes||{}).length),noteKeyFingerprint:String(state.reconciliationBase.noteKeyFingerprint||'0'.repeat(64))}):null,reconciliationBaseReadNotes:async keys=>freeze(Object.fromEntries(keys.filter(key=>Object.prototype.hasOwnProperty.call(state.reconciliationBase?.notes||{},key)).map(key=>{const value=state.reconciliationBase.notes[key];return [key,freeze({label:String(value?.label??''),text:String(value?.text??'')})];}))),reconciliationBaseWrite:async(checkpointId,spec)=>{const current=Object.assign(Object.create(null),state.reconciliationBase?.notes||{});if(spec&&spec.format==='study-director.reconciliation-base-update'){if(!spec.full&&state.reconciliationBase&&state.reconciliationBase.checkpointId!==spec.baseCheckpointId)return false;if(spec.full){const keep=new Set(spec.noteKeys||[]);for(const key of Object.keys(current))if(!keep.has(key))delete current[key];}for(const key of spec.deletes||[])delete current[key];for(const [key,value] of Object.entries(spec.updates||{}))current[key]=freeze({label:String(value.label),text:String(value.text)});let noteCount=Number(spec.noteCount),noteKeyFingerprint=String(spec.noteKeyFingerprint||'');if(spec.full){const keys=[...(spec.noteKeys||[])].sort();noteCount=keys.length;noteKeyFingerprint=await processing.run('checksum',{value:JSON.stringify(keys),algorithm:'sha256'});}state.reconciliationBase=freeze({checkpointId,establishedAt:new Date().toISOString(),noteCount,noteKeyFingerprint,notes:freeze(current)});return true;}const notes=freeze({...spec}),keys=Object.keys(notes).sort();state.reconciliationBase=freeze({checkpointId,establishedAt:new Date().toISOString(),noteCount:keys.length,noteKeyFingerprint:await processing.run('checksum',{value:JSON.stringify(keys),algorithm:'sha256'}),notes});return true;}
+      deletionRecoverySavedDays:async()=>state.deletions.map(value=>({...value})),deletionRecoveryReplaceSavedDays:async values=>(state.deletions=(values||[]).map(value=>({...value})),true),deletionRecoveryNotes:async()=>state.noteDeletions.map(value=>({...value})),deletionRecoveryReplaceNotes:async values=>(state.noteDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryAttachments:async()=>state.attachmentDeletions.map(value=>({...value})),deletionRecoveryReplaceAttachments:async values=>(state.attachmentDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryClearAttachment:async assetId=>(state.attachmentDeletions=state.attachmentDeletions.filter(item=>item.assetId!==assetId),true),reconciliationBaseRead:async()=>state.reconciliationBase?freeze({format:'study-director.reconciliation-base',version:2,checkpointId:state.reconciliationBase.checkpointId,establishedAt:state.reconciliationBase.establishedAt||new Date().toISOString(),noteCount:Number(state.reconciliationBase.noteCount??Object.keys(state.reconciliationBase.notes||{}).length),noteKeyFingerprint:String(state.reconciliationBase.noteKeyFingerprint||'0'.repeat(64))}):null,reconciliationBaseReadNotes:async keys=>freeze(Object.fromEntries(keys.filter(key=>Object.prototype.hasOwnProperty.call(state.reconciliationBase?.notes||{},key)).map(key=>{const value=state.reconciliationBase.notes[key];return [key,freeze({label:String(value?.label??''),text:String(value?.text??'')})];}))),reconciliationBaseWrite:async(checkpointId,spec)=>{const current=Object.assign(Object.create(null),state.reconciliationBase?.notes||{});if(spec&&spec.format==='study-director.reconciliation-base-update'){if(!spec.full&&state.reconciliationBase&&state.reconciliationBase.checkpointId!==spec.baseCheckpointId)return false;if(spec.full){const keep=new Set(spec.noteKeys||[]);for(const key of Object.keys(current))if(!keep.has(key))delete current[key];}for(const key of spec.deletes||[])delete current[key];for(const [key,value] of Object.entries(spec.updates||{}))current[key]=freeze({label:String(value.label),text:String(value.text)});let noteCount=Number(spec.noteCount),noteKeyFingerprint=String(spec.noteKeyFingerprint||'');if(spec.full){const keys=[...(spec.noteKeys||[])].sort();noteCount=keys.length;noteKeyFingerprint=await processing.run('checksum',{value:JSON.stringify(keys),algorithm:'sha256'});}state.reconciliationBase=freeze({checkpointId,establishedAt:new Date().toISOString(),noteCount,noteKeyFingerprint,notes:freeze(current)});return true;}const notes=freeze({...spec}),keys=Object.keys(notes).sort();state.reconciliationBase=freeze({checkpointId,establishedAt:new Date().toISOString(),noteCount:keys.length,noteKeyFingerprint:await processing.run('checksum',{value:JSON.stringify(keys),algorithm:'sha256'}),notes});return true;}
     }),
     assets:freeze({get:async()=>null,put:async()=>true,keys:async()=>[],list:async()=>[],importAll:async()=>0,restoreAll:async()=>true,removeMany:async()=>0,removeMetadata:async()=>0,scheduleMaintenance:fn}),
     exports:freeze({...processing,backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():file,unprotect:async blob=>({blob,encrypted:false}),check:fn,job:fn=>fn(),download:fn,chooseSave:async()=>null,save:async()=>({status:'downloaded'})}),
@@ -126,8 +126,8 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
     domain:freeze({clampText:(value,max=100000)=>String(value??'').slice(0,max),filenameSafeStudentName:()=> 'student',getStudentName:()=>state.personal.preferences.studentName,materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-08-31'}),
     view:freeze({presentation,refreshPnote:fn,refreshReview:fn,renderSchedule:fn}),
     events:freeze({libraryChanged:fn,backupCompleted:fn,
-      reconcileAreaNotes:async(payload,deletions=[])=>{state.notes=normalizeNotes({...state.notes,...payload});const deletedKeys=new Set((deletions||[]).map(item=>String(item.key)));for(const key of deletedKeys)delete state.notes[key];state.noteDeletions=state.noteDeletions.filter(item=>!Object.hasOwn(state.notes,item.key)&&!Object.values(payload||{}).some(note=>note&&note.key===item.key));for(const item of deletions||[]){state.noteDeletions=state.noteDeletions.filter(existing=>existing.key!==item.key);state.noteDeletions.push({...item});}for(const note of Object.values(payload||{}))state.noteDeletions=state.noteDeletions.filter(item=>item.key!==note.key);events.push('notes');return state.notes;},
-      restoreAreaNotesSnapshot:async payload=>{state.notes=normalizeNotes(payload);events.push('notes-rollback');return state.notes;},
+      reconcileNotes:async(payload,deletions=[])=>{state.notes=normalizeNotes({...state.notes,...payload});const deletedKeys=new Set((deletions||[]).map(item=>String(item.key)));for(const key of deletedKeys)delete state.notes[key];state.noteDeletions=state.noteDeletions.filter(item=>!Object.hasOwn(state.notes,item.key)&&!Object.values(payload||{}).some(note=>note&&note.key===item.key));for(const item of deletions||[]){state.noteDeletions=state.noteDeletions.filter(existing=>existing.key!==item.key);state.noteDeletions.push({...item});}for(const note of Object.values(payload||{}))state.noteDeletions=state.noteDeletions.filter(item=>item.key!==note.key);events.push('notes');return state.notes;},
+      restoreNotesSnapshot:async payload=>{state.notes=normalizeNotes(payload);events.push('notes-rollback');return state.notes;},
       restoreSessionState:async(value,scheduleText)=>(state.activeSession=value,state.schedule=String(scheduleText||''),events.push('session'),true),
       verifyActiveSessionRuntime:async expected=>(assert.deepEqual(state.activeSession,expected),true),
       restoredFromFile:()=>{events.push('restored-from-file');return restoredFromFile?restoredFromFile(state):false;}
@@ -143,7 +143,7 @@ const checkpointRecords=[record('2026-08-02','checkpoint conflict older','2026-0
 const checkpointDeletions=freeze([{date:'2026-08-03',deletedAt:'2026-08-20T12:00:00.000Z'},{date:'2026-08-06',deletedAt:'2026-08-20T12:30:00.000Z'}]);
 const checkpointNotes=freeze({Checkpoint:freeze({version:2,key:'Checkpoint',text:'checkpoint note',updatedAt:'2026-08-20T12:00:00.000Z'})});
 const checkpointSession=session('2026-08-07','CHECKPOINT');
-const blob=await makeCheckpoint({records:checkpointRecords,deletions:checkpointDeletions,areaNotes:checkpointNotes,activeSession:checkpointSession});
+const blob=await makeCheckpoint({records:checkpointRecords,deletions:checkpointDeletions,notes:checkpointNotes,activeSession:checkpointSession});
 
 // Restore-preflight failures must identify the exact local safety stage without exposing study content.
 const preflightCases=[
@@ -173,7 +173,7 @@ for(const [stage,code,hasLiveTasks] of preflightCases){
 
 // Format/protection boundary: public provenance is separate from integrity-covered authority/deletion metadata.
 const parsed=await codec.inspectCurrent(blob,{filename:'checkpoint.sdbackup'});
-assert.equal(parsed.formatVersion,21);
+assert.equal(parsed.formatVersion,22);
 assert.equal(parsed.manifest.protectedManifest.entityType,'checkpointManifest');
 assert.equal(Object.hasOwn(parsed.manifest,'authority'),false,'Checkpoint authority must not leak into the public provenance manifest.');
 assert.equal(Object.hasOwn(parsed.manifest,'savedDayDeletions'),false,'Saved-Day deletion history must stay behind the protected-manifest boundary.');
@@ -204,7 +204,7 @@ for(const group of savedDayGroups){
   assert.equal(bulkGroup.choices[2].applyValues[group.id],group.defaultValue,'Review-individually must restore each day’s safe native default.');
   assert.ok(group.choices.every(choice=>/saved|deleted|planned block|reflection|quality/i.test(choice.description)),'Each conflicting Saved Day must expose concise version context.');
 }
-assert.ok(Object.keys(bulkGroup.choices[1].applyValues).every(id=>id.startsWith('savedDay__')),'Saved-Day bulk controls must never alter Ongoing-Note or Active-Session choices.');
+assert.ok(Object.keys(bulkGroup.choices[1].applyValues).every(id=>id.startsWith('savedDay__')),'Saved-Day bulk controls must never alter Note or Active-Session choices.');
 
 // P7: the bulk UX must remain bounded and atomic with many simultaneous Saved-Day conflicts.
 const manyDates=Array.from({length:28},(_,index)=>`2026-06-${String(index+1).padStart(2,'0')}`),manyState=createState();manyState.records=new Map(manyDates.map((date,index)=>[date,record(date,`local ${index+1}`,'2026-09-01T12:00:00.000Z')]));manyState.deletions=[];manyState.notes={};manyState.activeSession=null;manyState.schedule='';const manyIncoming=manyDates.map((date,index)=>record(date,`backup ${index+1}`,'2026-09-02T12:00:00.000Z')),manyBlob=await makeCheckpoint({records:manyIncoming,exportedAt:'2026-09-02T13:00:00.000Z'}),manyHarness=createHarness(manyState,{decisions:{dailyRecords:'replace',reflections:'incoming'}});await manyHarness.runtime.controller.restore(await manyHarness.runtime.controller.inspect(manyBlob,{filename:'many-saved-day-conflicts.sdbackup'}));const manyPrompt=manyHarness.prompts.find(prompt=>prompt.groups?.some(group=>group.id==='savedDaysBulk')),manyBulk=manyPrompt?.groups.find(group=>group.id==='savedDaysBulk'),manyGroups=manyPrompt?.groups.filter(group=>String(group.id||'').startsWith('savedDay__'))||[];assert.ok(manyPrompt,'Many Saved-Day conflicts must still use one consolidated conflict surface.');assert.equal(manyGroups.length,manyDates.length,'Every conflicting Saved Day must remain an individually overridable atomic decision.');assert.equal(Object.keys(manyBulk.choices[0].applyValues).length,manyDates.length);assert.equal(Object.keys(manyBulk.choices[1].applyValues).length,manyDates.length);assert.ok(Object.keys(manyBulk.choices[0].applyValues).every(id=>id.startsWith('savedDay__')));assert.deepEqual([...manyState.records.keys()].sort(),manyDates);for(const [index,date] of manyDates.entries())assert.equal(manyState.records.get(date).reflection,`backup ${index+1}`,'Bulk incoming choice must replace the complete Saved-Day record, not merge fields.');
@@ -226,7 +226,7 @@ delete deletionState.records;
 delete deletionState.deletions;
 Object.assign(deletionState,{records:new Map(),deletions:[],notes:{Keep:normalizeArea({key:'Keep',text:'live local note',updatedAt:'2026-08-24T10:00:00.000Z'},'Keep')},noteDeletions:[{key:'Gone',deletedAt:'2026-08-24T12:00:00.000Z'}],activeSession:null,schedule:'',personal:personal('Deletion Device'),journal:null});
 const deletionBlob=await makeCheckpoint({
-  areaNotes:{Gone:normalizeArea({key:'Gone',text:'stale remote note',updatedAt:'2026-08-24T11:00:00.000Z'},'Gone')},
+  notes:{Gone:normalizeArea({key:'Gone',text:'stale remote note',updatedAt:'2026-08-24T11:00:00.000Z'},'Gone')},
   noteDeletions:[{key:'Keep',deletedAt:'2026-08-24T14:00:00.000Z'}],
   installationId:'inst_delete_remote',exportedAt:'2026-08-24T15:00:00.000Z'
 });
@@ -246,18 +246,18 @@ assert.equal(noteGroups(explicitNoteDeleteHarness).length,1,'A deletion the back
 // The backup deleted the note and holds this device's very text in Recently deleted: the deletion applies without asking.
 const trashCopyState=createState();trashCopyState.notes={Keep:normalizeArea({key:'Keep',text:'live local note',updatedAt:'2026-08-24T10:00:00.000Z'},'Keep')};trashCopyState.noteDeletions=[];
 const trashCopyHarness=createHarness(trashCopyState);
-await trashCopyHarness.runtime.controller.restore(await trashCopyHarness.runtime.controller.inspect(await makeCheckpoint({areaNotes:{'~deleted Keep':normalizeArea({key:'~deleted Keep',text:'live local note',updatedAt:'2026-08-24T14:00:00.000Z'},'~deleted Keep')},noteDeletions:[{key:'Keep',deletedAt:'2026-08-24T14:00:00.000Z'}],installationId:'inst_note_trash_remote'}),{filename:'note-trash-copy.sdbackup'}));
+await trashCopyHarness.runtime.controller.restore(await trashCopyHarness.runtime.controller.inspect(await makeCheckpoint({notes:{'~deleted Keep':normalizeArea({key:'~deleted Keep',text:'live local note',updatedAt:'2026-08-24T14:00:00.000Z'},'~deleted Keep')},noteDeletions:[{key:'Keep',deletedAt:'2026-08-24T14:00:00.000Z'}],installationId:'inst_note_trash_remote'}),{filename:'note-trash-copy.sdbackup'}));
 assert.equal(Object.hasOwn(trashCopyState.notes,'Keep'),false,'A deletion whose deleted copy holds this device’s text applies by itself.');assert.equal(trashCopyState.notes['~deleted Keep'].text,'live local note','The text stays in Recently deleted.');
 assert.equal(noteGroups(trashCopyHarness).length,0,'Nothing is asked when nothing on this device can be lost.');
 // A note renamed with no shared history: one question for all titles; the backup's titles are used when chosen.
 const titleState=createState();titleState.notes={Renamed:normalizeArea({key:'Renamed',label:'Old title',text:'same text',updatedAt:'2026-08-24T10:00:00.000Z'},'Renamed')};titleState.noteDeletions=[];
 const titleHarness=createHarness(titleState,{decisions:{noteTitles:'incoming'}});
-await titleHarness.runtime.controller.restore(await titleHarness.runtime.controller.inspect(await makeCheckpoint({areaNotes:{Renamed:normalizeArea({key:'Renamed',label:'New title',text:'same text',updatedAt:'2026-08-24T12:00:00.000Z'},'Renamed')},installationId:'inst_note_title_remote'}),{filename:'note-title.sdbackup'}));
+await titleHarness.runtime.controller.restore(await titleHarness.runtime.controller.inspect(await makeCheckpoint({notes:{Renamed:normalizeArea({key:'Renamed',label:'New title',text:'same text',updatedAt:'2026-08-24T12:00:00.000Z'},'Renamed')},installationId:'inst_note_title_remote'}),{filename:'note-title.sdbackup'}));
 assert.deepEqual(noteGroups(titleHarness).map(group=>group.id),['noteTitles'],'Differing titles are one question.');
 // Linked notes from both sides are kept: nothing is lost, nothing is asked.
 const linkA='n_'+'a'.repeat(16),linkB='n_'+'b'.repeat(16),linkState=createState();linkState.notes={Linked:normalizeArea({key:'Linked',text:'same text',links:[linkA],updatedAt:'2026-08-24T10:00:00.000Z'},'Linked')};linkState.noteDeletions=[];
 const linkHarness=createHarness(linkState);
-await linkHarness.runtime.controller.restore(await linkHarness.runtime.controller.inspect(await makeCheckpoint({areaNotes:{Linked:normalizeArea({key:'Linked',text:'same text',links:[linkB],updatedAt:'2026-08-24T12:00:00.000Z'},'Linked')},installationId:'inst_note_links_remote'}),{filename:'note-links.sdbackup'}));
+await linkHarness.runtime.controller.restore(await linkHarness.runtime.controller.inspect(await makeCheckpoint({notes:{Linked:normalizeArea({key:'Linked',text:'same text',links:[linkB],updatedAt:'2026-08-24T12:00:00.000Z'},'Linked')},installationId:'inst_note_links_remote'}),{filename:'note-links.sdbackup'}));
 assert.deepEqual([...linkState.notes.Linked.links],[linkA,linkB]);assert.equal(noteGroups(linkHarness).length,0);assert.equal(titleState.notes.Renamed.label,'New title');assert.equal(titleState.notes.Renamed.text,'same text');
 
 // Distinct names that formerly sanitized to the same ID must retain independent choices through restore.
@@ -311,12 +311,12 @@ assert.match(incomingSessionState.schedule,/REMOTE-ONLY/u);
 // Restore preflight must flush in-memory Active Session state before it becomes a reconciliation candidate.
 const liveFlushState=createState({withActive:true});
 const liveFlushHarness=createHarness(liveFlushState,{hasLiveTasks:true});
-const liveFlushBlob=await makeCheckpoint({records:[],deletions:[],areaNotes:{},activeSession:null});
+const liveFlushBlob=await makeCheckpoint({records:[],deletions:[],notes:{},activeSession:null});
 await liveFlushHarness.runtime.controller.restore(await liveFlushHarness.runtime.controller.inspect(liveFlushBlob,{filename:'checkpoint-live-flush.sdbackup'}));
 assert.ok(liveFlushHarness.events.includes('preflight-session-cancel')&&liveFlushHarness.events.includes('preflight-session-save'),'Restore preflight must settle the live Active Session before reconciliation planning.');
 
 // Presence semantics: an explicit checkpoint with no Active Session cannot clear a local active/suspended session.
-const noSessionBlob=await makeCheckpoint({records:[],deletions:[],areaNotes:{},activeSession:null});
+const noSessionBlob=await makeCheckpoint({records:[],deletions:[],notes:{},activeSession:null});
 const clearState=createState({withActive:true});
 const clearHarness=createHarness(clearState,{decisions:{activeSession:'checkpoint',plans:'keep',personalSettings:'keep'}});
 const clearCandidate=await clearHarness.runtime.controller.inspect(noSessionBlob,{filename:'checkpoint-no-session.sdbackup'});
@@ -328,7 +328,7 @@ assert.equal(clearState.activeSession.date,'2026-08-10','Checkpoint absence must
 // CR3 Note reconciliation remains scratch-only until the resolved note enters the journaled restore commit.
 const noteState=createState();
 noteState.notes.Shared=freeze({version:2,key:'Shared',text:'Local sentence. Local-only detail.',updatedAt:'2026-08-22T15:00:00.000Z'});
-const noteBlob=await makeCheckpoint({areaNotes:{Shared:freeze({version:2,key:'Shared',text:'Local sentence. Imported addition.',updatedAt:'2026-08-23T15:00:00.000Z'})},installationId:'inst_note_remote'});
+const noteBlob=await makeCheckpoint({notes:{Shared:freeze({version:2,key:'Shared',text:'Local sentence. Imported addition.',updatedAt:'2026-08-23T15:00:00.000Z'})},installationId:'inst_note_remote'});
 let noteReconcileCalls=0;
 const noteHarness=createHarness(noteState,{noteResolver:async({conflicts})=>{
   noteReconcileCalls++;assert.equal(noteState.journal,null,'Scratch reconciliation must run before the restore journal/canonical mutation phase.');assert.equal(noteState.notes.Shared.text,'Local sentence. Local-only detail.','Canonical local note must remain untouched while scratch reconciliation is open.');
@@ -343,7 +343,7 @@ assert.equal(noteState.notes.Local.text,'local note','Unrelated local-only Area 
 // Canonical data changing while scratch reconciliation is open must invalidate the plan before any journal/write and rebuild from fresh state.
 const staleState=createState();
 staleState.notes.Shared=freeze({version:2,key:'Shared',text:'Local before external edit.',updatedAt:'2026-08-22T15:00:00.000Z'});
-const staleBlob=await makeCheckpoint({areaNotes:{Shared:freeze({version:2,key:'Shared',text:'Incoming alternative.',updatedAt:'2026-08-23T15:00:00.000Z'})},installationId:'inst_stale_remote'});
+const staleBlob=await makeCheckpoint({notes:{Shared:freeze({version:2,key:'Shared',text:'Incoming alternative.',updatedAt:'2026-08-23T15:00:00.000Z'})},installationId:'inst_stale_remote'});
 let staleCalls=0;
 const staleHarness=createHarness(staleState,{noteResolver:async({conflicts})=>{
   staleCalls+=1;assert.equal(staleState.journal,null,'A stale reconciliation must be rejected before the restore journal exists.');
@@ -398,7 +398,7 @@ assert.equal(replaceInput.value,'','standalone Replace should reset the file inp
 // A → B → A sequential handoff: later divergence, explicit deletion and interrupted-session state remain coherent.
 const aRoundTrip=createState({withActive:true});
 const aFirstBlob=await makeCheckpoint({
-  records:[...aRoundTrip.records.values()],deletions:aRoundTrip.deletions,areaNotes:aRoundTrip.notes,
+  records:[...aRoundTrip.records.values()],deletions:aRoundTrip.deletions,notes:aRoundTrip.notes,
   activeSession:aRoundTrip.activeSession,personalData:aRoundTrip.personal,installationId:'inst_device_a',exportedAt:'2026-08-24T08:00:00.000Z'
 });
 const bRoundTrip={records:new Map(),deletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Device B'),journal:null};
@@ -415,7 +415,7 @@ bRoundTrip.deletions=[...bRoundTrip.deletions.filter(item=>item.date!=='2026-08-
 bRoundTrip.records.set('2026-08-11',record('2026-08-11','B new day','2026-08-25T09:10:00.000Z'));
 bRoundTrip.activeSession=session('2026-08-12','DEVICE-B');bRoundTrip.schedule=bRoundTrip.activeSession.scheduleText;
 const bReturnBlob=await makeCheckpoint({
-  records:[...bRoundTrip.records.values()],deletions:bRoundTrip.deletions,areaNotes:bRoundTrip.notes,
+  records:[...bRoundTrip.records.values()],deletions:bRoundTrip.deletions,notes:bRoundTrip.notes,
   activeSession:bRoundTrip.activeSession,personalData:bRoundTrip.personal,installationId:'inst_device_b',exportedAt:'2026-08-25T10:00:00.000Z'
 });
 const aReturnHarness=createHarness(aRoundTrip,{decisions:{dailyRecords:'replace',reflections:'incoming',savedDayDeletions:'apply',activeSession:'checkpoint',plans:'replace',personalSettings:'replace'}});

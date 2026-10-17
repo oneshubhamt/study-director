@@ -17,7 +17,7 @@ function clearSiteData(stores){for(const map of Object.values(stores))map.clear(
 // Any other write after a clear (for example the running timer's session save)
 // stores a fresh canonical mutation epoch.
 const recreateEpoch=stores=>stores.meta.set('canonicalMutationEpoch',{key:'canonicalMutationEpoch',version:1,value:{format:'study-director.canonical-mutation-epoch',version:1,token:'a'.repeat(32),committedAt:'2026-09-15T12:00:02.000Z'},updatedAt:'2026-09-15T12:00:02.000Z'});
-const deletionRecord=key=>({key:`areaNoteDeletion:${key}`,version:1,value:{format:'study-director.area-note-deletion',version:1,key,deletedAt:'2026-09-15T12:00:03.000Z'},updatedAt:'2026-09-15T12:00:03.000Z'});
+const deletionRecord=key=>({key:`noteDeletion:${key}`,version:1,value:{format:'study-director.note-deletion',version:1,key,deletedAt:'2026-09-15T12:00:03.000Z'},updatedAt:'2026-09-15T12:00:03.000Z'});
 
 // 1. A save batch queued while an earlier batch for the same note is still
 // committing must not mistake that earlier commit for a competing edit.
@@ -96,7 +96,7 @@ const deletionRecord=key=>({key:`areaNoteDeletion:${key}`,version:1,value:{forma
   app.notes.update('chemistry','Chemistry','edited here',app.notes.get('chemistry').updatedAt);
   const chemistryId=app.notes.get('chemistry').id;
   stores.area.delete(chemistryId);
-  stores.meta.set(`areaNoteDeletion:${chemistryId}`,deletionRecord(chemistryId));
+  stores.meta.set(`noteDeletion:${chemistryId}`,deletionRecord(chemistryId));
   await app.notes.flush();await settle(clock);
   assert.equal(stores.area.has(chemistryId),false,'a recorded deletion is not resurrected');
   assert.equal(reports.length,2);
@@ -130,13 +130,13 @@ const deletionRecord=key=>({key:`areaNoteDeletion:${key}`,version:1,value:{forma
 for(const failEpochRead of [false,true]){
   const {app,stores,clock,controls}=await setup();
   app.notes.update('ethics','Ethics','deleted in another tab','');await app.notes.flush({strict:true});await clock.advance(2000);
-  const ethicsId=app.notes.get('ethics').id;stores.area.delete(ethicsId);stores.meta.set(`areaNoteDeletion:${ethicsId}`,deletionRecord(ethicsId));
+  const ethicsId=app.notes.get('ethics').id;stores.area.delete(ethicsId);stores.meta.set(`noteDeletion:${ethicsId}`,deletionRecord(ethicsId));
   controls.failEpochRead=failEpochRead;
   if(failEpochRead)await assert.rejects(()=>app.notes.reloadFresh(),/could not confirm what storage still holds/);
   else assert.equal(await app.notes.reloadFresh(),true);
   controls.failEpochRead=false;await app.notes.flush();await settle(clock);
   assert.equal(stores.area.has(ethicsId),false,'the deleted note is not written back');
-  assert.ok(stores.meta.has(`areaNoteDeletion:${ethicsId}`),'the deletion record survives');
+  assert.ok(stores.meta.has(`noteDeletion:${ethicsId}`),'the deletion record survives');
   if(!failEpochRead)assert.equal(app.notes.get('ethics'),null,'a healthy reload adopts the deletion');
   else{assert.equal(app.notes.get('ethics')?.text,'deleted in another tab','memory is left as it was');assert.equal(await app.notes.reloadFresh(),true);assert.equal(app.notes.get('ethics'),null,'a later reload adopts the deletion');}
 }
@@ -154,8 +154,8 @@ for(const failEpochRead of [false,true]){
   assert.equal(stores.area.has(polityId),false,'the live row is gone');
   assert.equal(stores.area.get(trashKey).text,'fundamental rights','the text is kept in the same store');
   assert.equal(stores.area.get(trashKey).label,'GS2 > Polity','the original name is kept');
-  assert.ok(stores.meta.has(`areaNoteDeletion:${polityId}`),'the note is recorded as deleted for Combine');
-  assert.equal(stores.meta.has(`areaNoteDeletion:${trashKey}`),false,'trash rows get no deletion record');
+  assert.ok(stores.meta.has(`noteDeletion:${polityId}`),'the note is recorded as deleted for Combine');
+  assert.equal(stores.meta.has(`noteDeletion:${trashKey}`),false,'trash rows get no deletion record');
   assert.equal(app.notes.metadataSnapshot().records.some(record=>record.key===trashKey),false,'trash is not listed with live notes');
   assert.equal(app.notes.searchSnapshot().documents.some(record=>record.key===trashKey),false,'trash is not searched');
   assert.deepEqual(app.notes.trashSnapshot().map(item=>item.label),['GS2 > Polity']);
@@ -171,7 +171,7 @@ for(const failEpochRead of [false,true]){
   // Restoring to a free name, and deleting forever.
   const again=await app.notes.trash(restoredKey);assert.equal(await app.notes.restore(again),restoredKey,'a free name is reused');
   const gone=await app.notes.trash(restoredKey);assert.equal(await app.notes.remove(gone),true);
-  assert.equal(stores.area.has(gone),false);assert.equal(stores.meta.has(`areaNoteDeletion:${gone}`),false,'deleting forever leaves no record');
+  assert.equal(stores.area.has(gone),false);assert.equal(stores.meta.has(`noteDeletion:${gone}`),false,'deleting forever leaves no record');
   // An empty note is simply removed.
   app.notes.update('blank','Blank','x','');await app.notes.flush({strict:true});app.notes.update('blank','Blank','',app.notes.get('blank').updatedAt);await app.notes.flush({strict:true});
   assert.equal(await app.notes.trash('blank'),'','an empty note is removed without a trash entry');
@@ -180,7 +180,7 @@ for(const failEpochRead of [false,true]){
   await clock.advance(29*86400000);assert.equal(app.notes.trashSnapshot().length,1);
   await clock.advance(86400000+1000);assert.equal(app.notes.trashSnapshot().length,0,'expired trash is not shown');
   assert.equal(app.notes.purgeExpiredTrash(),1);await app.notes.flush({strict:true});
-  assert.equal(stores.area.has(old),false,'expired trash is removed');assert.equal(stores.meta.has(`areaNoteDeletion:${old}`),false);
+  assert.equal(stores.area.has(old),false,'expired trash is removed');assert.equal(stores.meta.has(`noteDeletion:${old}`),false);
 }
 
 // 10. Renaming moves a note with everything nested under it, in one
@@ -197,7 +197,7 @@ for(const failEpochRead of [false,true]){
   assert.equal(storedNote(stores.area,'paper 2 > polity').text,'constitution');
   assert.deepEqual(['paper 2','paper 2 > polity','paper 2 > polity > rights'].map(title=>app.notes.get(title).id),familyIds,'every moved note keeps its id');
   for(const title of ['gs2','gs2 > polity','gs2 > polity > rights'])assert.equal(storedNote(stores.area,title),undefined);
-  assert.equal([...stores.meta.keys()].some(key=>key.startsWith('areaNoteDeletion:')),false,'a rename records nothing as deleted');
+  assert.equal([...stores.meta.keys()].some(key=>key.startsWith('noteDeletion:')),false,'a rename records nothing as deleted');
   // A capitalisation change keeps the key and relabels the family.
   assert.equal((await app.notes.rename('paper 2','PAPER 2')).status,'renamed');assert.equal(storedNote(stores.area,'paper 2 > polity').label,'PAPER 2 > Polity');
   // Moving into itself is refused.
@@ -209,7 +209,7 @@ for(const failEpochRead of [false,true]){
   const merged=await app.notes.rename('modern','History',{merge:(existing,moved)=>`${existing}\n${moved}`});
   assert.equal(merged.status,'renamed');assert.equal(merged.merged,1);
   assert.equal(stores.area.get(historyId).text,'ancient\ncolonial');assert.equal(stores.area.get(historyId).label,'History','the existing note keeps its name and id');
-  assert.equal(stores.area.has(modernId),false);assert.ok(stores.meta.has(`areaNoteDeletion:${modernId}`),'the note merged away is recorded as deleted');
+  assert.equal(stores.area.has(modernId),false);assert.ok(stores.meta.has(`noteDeletion:${modernId}`),'the note merged away is recorded as deleted');
   // A deeper note may take a name another moved note leaves.
   await write('ias > polity','IAS > Polity','A');await write('ias > polity > y','IAS > Polity > Y','B');await write('ias > polity > polity > y','IAS > Polity > Polity > Y','C');
   const up=await app.notes.rename('ias > polity','IAS');
@@ -272,7 +272,7 @@ for(const failEpochRead of [false,true]){
     assert.equal(await app.notes.flush(),false,'the write reports failure');
     const ethicsId=app.notes.get('ethics').id;
     assert.equal(storedNote(stores.area,'ethics').text,'theirs');assert.equal(app.notes.get('ethics').text,'mine','this tab keeps its version');
-    assert.equal(sharedLocal.get('areaNoteRescue')?.entries?.[ethicsId]?.text,'mine','and the browser copy holds it');
+    assert.equal(sharedLocal.get('noteRescue')?.entries?.[ethicsId]?.text,'mine','and the browser copy holds it');
     const clashFailure=app.notes.failure().message;
     assert.match(clashFailure,/Ethics changed in another tab, and notes are at the 1,000-note limit.*Delete a note to make room/u);
     await assert.rejects(app.notes.flush({strict:true}),/1,000-note limit/u,'a strict flush never reports it as saved');
@@ -281,7 +281,7 @@ for(const failEpochRead of [false,true]){
     assert.ok(trashed,'another note can still be deleted');
     await app.notes.flush({strict:true});
     assert.equal(storedNote(stores.area,'ethics').text,'theirs');assert.equal(storedNote(stores.area,'ethics (unsaved copy)')?.text,'mine','the copy is stored once there is room');
-    assert.equal(stores.area.size,1000);assert.equal(app.notes.failure().failed,false);assert.equal(sharedLocal.get('areaNoteRescue')?.entries?.[ethicsId],undefined);
+    assert.equal(stores.area.size,1000);assert.equal(app.notes.failure().failed,false);assert.equal(sharedLocal.get('noteRescue')?.entries?.[ethicsId],undefined);
   }
 }
 
@@ -303,7 +303,7 @@ for(const failEpochRead of [false,true]){
   const imported=row('imported','in');assert.equal((await app.notes.reconcile({[imported.key]:imported}))[newerTrash],undefined,'an import at the limit drops the oldest deleted note');
   assert.equal(storedNote(stores.area,'imported')?.text,'in');assert.equal(stores.area.size,1000);
   assert.equal(app.notes.update('one too many','One too many','text','').status,'limit','live notes alone at the limit refuse a new note');
-  const another=row('another','in');await assert.rejects(app.notes.reconcile({[another.key]:another}),error=>error.code==='AREA_NOTE_LIMIT','an import over the limit is refused whole');
+  const another=row('another','in');await assert.rejects(app.notes.reconcile({[another.key]:another}),error=>error.code==='NOTE_LIMIT','an import over the limit is refused whole');
   assert.equal(stores.area.has(another.key),false);
 
   // Rescue capacity: newest first, and the failure names what was left out.
@@ -354,7 +354,7 @@ for(const failEpochRead of [false,true]){
   assert.deepEqual([...app.notes.normalizePayload({[pharm]:{...record,links:[heart]}})[pharm].links],[heart]);
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'ongoing-note-persistence',contracts:[
+console.log(JSON.stringify({status:'PASS',suite:'note-persistence',contracts:[
   'queued batches use the revision committed by the earlier batch',
   'rows lost to a browser data clear are rewritten from memory',
   'reloads keep in-memory survivors of a data clear',

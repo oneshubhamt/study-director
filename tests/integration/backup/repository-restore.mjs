@@ -19,21 +19,21 @@ const limits=freeze({
   backupChunkItems:10,backupChunkTargetBytes:65536,backupMaxEntryBytes:65536,backupMaxLineBytes:262144,
   backupMaxCompressedBytes:4*1024*1024,backupMaxFileBytes:16*1024*1024,backupMaxUncompressedBytes:8*1024*1024,
   backupMaxAssetDescriptors:100,richAssetMaxBytes:8*1024*1024,maxBackupChunks:1000,importBytes:4*1024*1024,
-  maxImportRecords:100,maxOngoingNotes:100,maxLegacyImportTombstones:100,maxReflectionChars:10000,maxScheduleChars:10000
+  maxImportRecords:100,maxNotes:100,maxLegacyImportTombstones:100,maxReflectionChars:10000,maxScheduleChars:10000
 });
 const dataContract=RUNTIME_DATA_CONTRACT;
-const defs=freeze({dailyRecord:freeze({idField:'date',backupLimit:100}),areaNote:freeze({idField:'key',backupLimit:100}),activeSession:freeze({idField:'id',backupLimit:1})});
+const defs=freeze({dailyRecord:freeze({idField:'date',backupLimit:100}),note:freeze({idField:'key',backupLimit:100}),activeSession:freeze({idField:'id',backupLimit:1})});
 const isDate=value=>/^\d{4}-\d{2}-\d{2}$/.test(String(value||''));
 const normalizeArea=(item,key)=>item&&String(key||item.key||'')?freeze({version:2,key:String(key||item.key),text:String(item.text||''),updatedAt:String(item.updatedAt||'2026-09-19T00:00:00.000Z')}):null;
 const dailyRecordCodec=freeze({
   sanitizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item}):null,
   canonicalizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:15}):null,
   sanitizeCurrentDailyRecord:item=>item&&isDate(item.date)&&Number(item.version)===16?freeze({...item}):null,
-  sanitizeImportedAreaNote:normalizeArea,sanitizeCurrentAreaNote:normalizeArea,isSupportedSavedDate:isDate
+  sanitizeImportedNote:normalizeArea,sanitizeCurrentNote:normalizeArea,isSupportedSavedDate:isDate
 });
 const activeSessionCodec=freeze({sanitizeCurrent:item=>item&&item.id==='current'?freeze({...item}):null});
 const reflectionDraftCodec=freeze({format:'study-director.reflection-draft-codec',contractVersion:1,sanitizeCurrent:item=>item&&isDate(item.date)?freeze({...item,reflection:String(item.reflection||'')}):null});
-const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:item=>dailyRecordCodec.sanitizeCurrentDailyRecord(item),areaNote:normalizeArea,areaNoteKey:legacyNoteKey,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
+const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:item=>dailyRecordCodec.sanitizeCurrentDailyRecord(item),note:normalizeArea,noteKey:legacyNoteKey,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
 const keyedRecord=freeze({create:()=>Object.create(null)}),entityDefinition=type=>defs[type]||null,entityIdentity=(type,item)=>String(item?.[defs[type]?.idField]||'');
 const boundedInt=(value,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
 const jsonByteLength=value=>new TextEncoder().encode(typeof value==='string'?value:JSON.stringify(value)).byteLength;
@@ -83,7 +83,7 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
     restoreJournalPrepare:async value=>(journal={state:{id:value.id},payload:value},true),restoreJournalRead:async()=>journal,restoreJournalMark:async(id,phase)=>{if(journal)journal.state.phase=phase;return journal?.state||null;},restoreJournalClear:async()=>{journal=null;return true;},
     scheduleRead:()=>scheduleText,personalSettle:async()=>true,personalExport:async()=>currentPersonal,personalImport:async value=>{currentPersonal=freeze(value);return true;},personalVerify:async value=>assert.deepEqual(currentPersonal,value),
     storageGeneration:()=>0,sourceRevision:async()=> '2026-09-19T00:00:00.000Z',snapshotRevision:async()=> 'snapshot-stable',canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>{preparationRebaseCalls+=1;return Object.freeze({epoch:null,stamps:Object.freeze([{unit:'*'}])});},preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],installationId:()=> 'inst_repository_restore_qa',
-    deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>deletions.map(value=>freeze({...value})),deletionRecoveryReplaceSavedDays:async values=>{deletions=(values||[]).map(value=>freeze({...value}));return true;},deletionRecoveryAreaNotes:async()=>noteDeletions.map(value=>freeze({...value})),deletionRecoveryReplaceAreaNotes:async values=>(noteDeletions=(values||[]).map(value=>freeze({...value})),true),deletionRecoveryAttachments:async()=>attachmentDeletions.map(value=>freeze({...value})),deletionRecoveryReplaceAttachments:async values=>(attachmentDeletions=(values||[]).map(value=>freeze({...value})),true),deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>reconciliationBase,reconciliationBaseReadNotes:async keys=>(reconciliationBaseNoteReadKeys.push(freeze([...(keys||[])])),freeze(Object.fromEntries(keys.filter(key=>Object.prototype.hasOwnProperty.call(reconciliationBaseNotes,key)).map(key=>[key,reconciliationBaseNotes[key]])))),reconciliationBaseWrite:async(checkpointId,payload)=>{if(payload&&payload.format==='study-director.reconciliation-base-update'){if(!payload.full&&reconciliationBase&&reconciliationBase.checkpointId!==payload.baseCheckpointId)return false;if(payload.full){const keep=new Set(payload.noteKeys||[]);for(const key of Object.keys(reconciliationBaseNotes))if(!keep.has(key))delete reconciliationBaseNotes[key];}for(const key of payload.deletes||[])delete reconciliationBaseNotes[key];for(const [key,value] of Object.entries(payload.updates||{}))reconciliationBaseNotes[key]=freeze({label:String(value.label),text:String(value.text)});reconciliationBase=freeze({format:'study-director.reconciliation-base',version:2,checkpointId,establishedAt:new Date().toISOString(),noteCount:Number(payload.noteCount),noteKeyFingerprint:String(payload.noteKeyFingerprint||'0'.repeat(64))});return true;}reconciliationBaseNotes=Object.create(null);for(const [key,value] of Object.entries(payload||{}))reconciliationBaseNotes[key]=freeze({label:String(value&&value.label||''),text:String(value&&value.text||'')});reconciliationBase=freeze({format:'study-director.reconciliation-base',version:2,checkpointId,establishedAt:new Date().toISOString(),noteCount:Object.keys(reconciliationBaseNotes).length,noteKeyFingerprint:'0'.repeat(64)});return true;}
+    deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>deletions.map(value=>freeze({...value})),deletionRecoveryReplaceSavedDays:async values=>{deletions=(values||[]).map(value=>freeze({...value}));return true;},deletionRecoveryNotes:async()=>noteDeletions.map(value=>freeze({...value})),deletionRecoveryReplaceNotes:async values=>(noteDeletions=(values||[]).map(value=>freeze({...value})),true),deletionRecoveryAttachments:async()=>attachmentDeletions.map(value=>freeze({...value})),deletionRecoveryReplaceAttachments:async values=>(attachmentDeletions=(values||[]).map(value=>freeze({...value})),true),deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>reconciliationBase,reconciliationBaseReadNotes:async keys=>(reconciliationBaseNoteReadKeys.push(freeze([...(keys||[])])),freeze(Object.fromEntries(keys.filter(key=>Object.prototype.hasOwnProperty.call(reconciliationBaseNotes,key)).map(key=>[key,reconciliationBaseNotes[key]])))),reconciliationBaseWrite:async(checkpointId,payload)=>{if(payload&&payload.format==='study-director.reconciliation-base-update'){if(!payload.full&&reconciliationBase&&reconciliationBase.checkpointId!==payload.baseCheckpointId)return false;if(payload.full){const keep=new Set(payload.noteKeys||[]);for(const key of Object.keys(reconciliationBaseNotes))if(!keep.has(key))delete reconciliationBaseNotes[key];}for(const key of payload.deletes||[])delete reconciliationBaseNotes[key];for(const [key,value] of Object.entries(payload.updates||{}))reconciliationBaseNotes[key]=freeze({label:String(value.label),text:String(value.text)});reconciliationBase=freeze({format:'study-director.reconciliation-base',version:2,checkpointId,establishedAt:new Date().toISOString(),noteCount:Number(payload.noteCount),noteKeyFingerprint:String(payload.noteKeyFingerprint||'0'.repeat(64))});return true;}reconciliationBaseNotes=Object.create(null);for(const [key,value] of Object.entries(payload||{}))reconciliationBaseNotes[key]=freeze({label:String(value&&value.label||''),text:String(value&&value.text||'')});reconciliationBase=freeze({format:'study-director.reconciliation-base',version:2,checkpointId,establishedAt:new Date().toISOString(),noteCount:Object.keys(reconciliationBaseNotes).length,noteKeyFingerprint:'0'.repeat(64)});return true;}
   }),
   codecs:freeze({activeSession:activeSessionCodec,backup:runtimeBackupCodec}),reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({resolve:async({conflicts=[]})=>{noteReconciliationCalls+=1;lastNoteConflicts=[...conflicts];return freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries(conflicts.map(item=>[item.key,freeze({text:noteChoice?noteChoice(item):item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}}),exports:exportsPort,
   session:freeze({canMutate:()=>true,cancelLiveDraftSave:noop,captureSnapshot:()=>null,hasActiveSession:()=>false,hasTasks:()=>false,toActiveSession:()=>null,withPersistenceSuppressed:operation=>operation()}),
@@ -91,8 +91,8 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
   view:freeze({presentation:createBackupPresentation(),refreshPnote:noop,refreshReview:noop,renderSchedule:noop}),
   events:freeze({
     libraryChanged:noop,backupCompleted:noop,
-    reconcileAreaNotes:async payload=>{notes={...notes,...payload};return notes;},
-    restoreAreaNotesSnapshot:async payload=>{if(failExactNotes){failExactNotes=false;throw new Error('injected exact note replacement failure');}notes={...payload};return notes;},
+    reconcileNotes:async payload=>{notes={...notes,...payload};return notes;},
+    restoreNotesSnapshot:async payload=>{if(failExactNotes){failExactNotes=false;throw new Error('injected exact note replacement failure');}notes={...payload};return notes;},
     restoreSessionState:async(value,nextSchedule)=>(activeSession=value,scheduleText=String(nextSchedule||''),true),verifyActiveSessionRuntime:async(value,nextSchedule)=>{assert.deepEqual(activeSession,value);assert.equal(scheduleText,String(nextSchedule||''));return true;},restoredFromFile:()=>false
   }),
   operations:freeze({assertAuthority:()=>true,clearFault:noop,failClosed:message=>{throw new Error(message);},runExclusive:async(kind,operation)=>operation()}),interactions:freeze({choose:async()=>null,configure,notify:noop}),
@@ -126,37 +126,76 @@ await runtime.repository.verifyCheckpoint(manifest,concurrentProbeReader,{intera
 assert.ok(maxStructuredReads>1,'Independent structured repository objects should be read concurrently during checkpoint verification.');assert.ok(maxStructuredReads<=8,'Structured repository restore reads must stay within the shared bounded concurrency limit of eight.');
 const attachmentObjectIds=new Set(manifest.objects.filter(entry=>entry.kind==='attachment').map(entry=>entry.objectId)),leaseReleaseCounts=new Map();
 const leasedReadObject=async entry=>{const blob=objectFiles.get(entry.objectId)||null;if(!blob)return null;return freeze({blob,release:async()=>leaseReleaseCounts.set(entry.objectId,(leaseReleaseCounts.get(entry.objectId)||0)+1)});};
-assert.equal(manifest.protectedCheckpointManifest.version,2);assert.equal(manifest.checkpoint.checkpointId,checkpointId);assert.equal(manifest.encrypted,true,'repository publication must preserve the configured encrypted protection state');
+assert.equal(manifest.protectedCheckpointManifest.version,3);assert.equal(manifest.checkpoint.checkpointId,checkpointId);assert.equal(manifest.encrypted,true,'repository publication must preserve the configured encrypted protection state');
 // Checkpoints in older repository formats stay restorable until they age out of
-// the repository (registry: backup-repository-v1-v4). Version 4 has today's
-// shape; versions 1 to 3 kept one object per record instead of packed shards,
-// so the fixture unpacks this checkpoint's shards into that older layout.
+// the repository (registry: backup-repository-v1-v4). Versions 4 to 6 pack
+// small objects into shards; versions 1 to 3 kept one object per record, so
+// the fixture unpacks this checkpoint's shards into that older layout.
+// Before version 7 a note was written as areaNote: in the manifest's objects,
+// pack members and counts, inside each object, and in the shard it lands in;
+// its protected manifest (version 2) named the note deletions areaNoteDeletions
+// (registry: area-note-names-in-backups). The fixture writes them that way.
 // Before version 6 notes are keyed by title: such a version restores whole,
 // its notes converted, but offers no earlier version of one note
 // (registry: name-keyed-notes-in-backups).
 {
   const sha256=async text=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))].map(byte=>byte.toString(16).padStart(2,'0')).join('');
   const plainText=async (blob,gzip)=>{let stream=(await decryptBlob(blob)).stream();if(gzip)stream=stream.pipeThrough(new DecompressionStream('gzip'));return new Response(stream).text();};
-  const unpacked=new Map(objectFiles),perRecord=[];let sequence=0;
+  const written=kind=>kind==='note'?'areaNote':kind,byKindKey=(a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key);
+  const packShard=(kind,key)=>{let hash=2166136261;for(const byte of new TextEncoder().encode(kind+'\u0000'+key)){hash^=byte;hash=Math.imul(hash,16777619)>>>0;}return hash%4;};
+  const files=new Map(objectFiles);let sequence=0;
+  const store=async(row,text)=>{const stored=await encryptBlob(new Blob([text])),objectId='obj_'+String(++sequence).padStart(32,'0');files.set(objectId,stored);return freeze({objectId,...row,fingerprint:await sha256(text),compression:'none',sourceBytes:new TextEncoder().encode(text).byteLength,storedBytes:stored.size,storedChecksum:await codec.checksumBlob(stored)});};
+  const objectText=(kind,key,payload)=>JSON.stringify({format:'study-director.backup-repository-object',version:1,kind,key,payload});
+  const members=[];
   for(const entry of manifest.objects.filter(item=>item.kind==='structuredPack')){
     const pack=JSON.parse(await plainText(objectFiles.get(entry.objectId),entry.compression==='gzip'));
     for(const member of pack.members){
-      const text=JSON.stringify({format:'study-director.backup-repository-object',version:1,kind:member.kind,key:member.key,payload:member.payload});
-      const expected=entry.members.find(row=>row.kind===member.kind&&row.key===member.key);assert.equal(await sha256(text),expected.fingerprint,'the unpacked object matches its packed fingerprint');
-      const stored=await encryptBlob(new Blob([text])),objectId='obj_'+String(++sequence).padStart(32,'0');unpacked.set(objectId,stored);
-      perRecord.push(freeze({objectId,kind:member.kind,key:member.key,fingerprint:expected.fingerprint,compression:'none',sourceBytes:expected.sourceBytes,storedBytes:stored.size,storedChecksum:await codec.checksumBlob(stored)}));
+      const expected=entry.members.find(row=>row.kind===member.kind&&row.key===member.key);assert.equal(await sha256(objectText(member.kind,member.key,member.payload)),expected.fingerprint,'the unpacked object matches its packed fingerprint');
+      members.push(freeze({kind:written(member.kind),key:member.key,payload:member.payload}));
     }
   }
-  const layoutBefore4=freeze([...manifest.objects.filter(item=>item.kind!=='structuredPack'),...perRecord]),readUnpacked=async entry=>unpacked.get(entry.objectId)||null;
-  assert.equal(runtime.repository.noteObject(manifest,legacyNoteKey('Ethics')),null,'a current manifest keys notes by id, never by name');
-  for(const version of [1,2,3,4,5]){
-    // Before version 5 the counts also named the checkpoint manifest and personal data.
-    const counts=version<5?freeze({...manifest.counts,checkpointManifest:1,personalData:perRecord.some(item=>item.kind==='personalData')?1:0}):manifest.counts;
-    const older=freeze({...manifest,version,counts,objects:version<4?layoutBefore4:manifest.objects}),reader=version<4?readUnpacked:readObject;
-    const candidate=await runtime.repository.inspect(older,reader,{interactive:false,committed:true});
-    assert.ok(candidate,`a version ${version} checkpoint can still be inspected for restore`);await candidate.release?.();
-    assert.equal(runtime.repository.noteObject(older,legacyNoteKey('Ethics')),null,`a version ${version} checkpoint names notes by title, so it offers no earlier version of a note`);
+  assert.ok(members.some(member=>member.kind==='areaNote'),'the fixture has packed notes to write under the old name');
+  assert.equal(manifest.objects.some(item=>item.kind==='note'),false,'every note in this checkpoint is packed');
+  const plain=manifest.objects.filter(item=>item.kind!=='structuredPack');
+  const unpackedLayout=[...plain];for(const member of members)unpackedLayout.push(await store({kind:member.kind,key:member.key},objectText(member.kind,member.key,member.payload)));
+  const shards=new Map();for(const member of members){const shard=packShard(member.kind,member.key);if(!shards.has(shard))shards.set(shard,[]);shards.get(shard).push(member);}
+  const packedLayout=[...plain];
+  for(const [shard,rows] of [...shards].sort((a,b)=>a[0]-b[0])){
+    rows.sort(byKindKey);
+    const listed=await Promise.all(rows.map(async row=>{const text=objectText(row.kind,row.key,row.payload);return freeze({kind:row.kind,key:row.key,fingerprint:await sha256(text),sourceBytes:new TextEncoder().encode(text).byteLength});}));
+    packedLayout.push(freeze({...await store({kind:'structuredPack',key:`shard:${shard}`},JSON.stringify({format:'study-director.backup-repository-structured-pack',version:1,shard,members:rows})),members:freeze(listed)}));
   }
+  const counts=Object.fromEntries(Object.entries(manifest.counts).map(([type,count])=>[written(type),count]));
+  const current=manifest.protectedCheckpointManifest,protectedV2=freeze({format:current.format,version:2,checkpointId:current.checkpointId,sourceRevision:current.sourceRevision,
+    authority:freeze(Object.fromEntries(Object.entries(current.authority).map(([name,mode])=>[name==='notes'?'areaNotes':name,mode]))),savedDayDeletions:current.savedDayDeletions,areaNoteDeletions:current.noteDeletions,attachmentDeletions:current.attachmentDeletions});
+  const readOlder=async entry=>files.get(entry.objectId)||null,noteKey=members.find(member=>member.kind==='areaNote').key;
+  assert.equal(runtime.repository.noteObject(manifest,legacyNoteKey('Ethics')),null,'a current manifest keys notes by id, never by name');
+  assert.ok(runtime.repository.noteObject(manifest,noteKey),'a current manifest offers an earlier version of one note');
+  for(const version of [1,2,3,4,5,6]){
+    // Before version 5 the counts also named the checkpoint manifest and personal data.
+    const olderCounts=freeze(version<5?{...counts,checkpointManifest:1,personalData:members.some(item=>item.kind==='personalData')?1:0}:counts);
+    const older=freeze({...manifest,version,counts:olderCounts,protectedCheckpointManifest:protectedV2,objects:freeze(version<4?unpackedLayout:packedLayout)});
+    const candidate=await runtime.repository.inspect(older,readOlder,{interactive:false,committed:true});
+    assert.ok(candidate,`a version ${version} checkpoint can still be inspected for restore`);await candidate.release?.();
+    if(version===6)assert.ok(runtime.repository.noteObject(older,noteKey),'a version 6 checkpoint keys notes by id, so it offers an earlier version of one note');
+    else assert.equal(runtime.repository.noteObject(older,legacyNoteKey('Ethics')),null,`a version ${version} checkpoint names notes by title, so it offers no earlier version of a note`);
+  }
+  // A version 6 manifest file keeps the logical-state fingerprint it was
+  // written with: the same fields, in the same order, under the old names.
+  const v6Identity=value=>{
+    const rows=[];for(const entry of value.objects){if(entry.kind==='structuredPack')rows.push(...entry.members.map(({kind,key,fingerprint,sourceBytes})=>({kind,key,fingerprint,sourceBytes})));else rows.push({kind:entry.kind,key:entry.key,fingerprint:entry.fingerprint,sourceBytes:entry.sourceBytes});}
+    rows.sort((a,b)=>byKindKey(a,b)||a.fingerprint.localeCompare(b.fingerprint)||a.sourceBytes-b.sourceBytes);
+    const assets=value.assets.map(entry=>entry.missing===true?{assetId:entry.assetId,missing:true}:{assetId:entry.assetId,mimeType:entry.mimeType,size:entry.size,checksum:entry.checksum,name:entry.name,library:entry.library===true}).sort((a,b)=>a.assetId.localeCompare(b.assetId));
+    const p=value.protectedCheckpointManifest,deletions=(list,key)=>list.map(entry=>({[key]:entry[key],deletedAt:entry.deletedAt})).sort((a,b)=>a[key].localeCompare(b[key])||a.deletedAt.localeCompare(b.deletedAt));
+    return {format:'study-director.managed-backup-logical-state',version:1,counts:value.counts,objects:rows,assets,deletions:{savedDays:deletions(p.savedDayDeletions,'date'),areaNotes:deletions(p.areaNoteDeletions,'key'),attachments:deletions(p.attachmentDeletions,'assetId')}};
+  };
+  const publishedV7=JSON.parse(await plainText(publishedManifestBlob,false));assert.equal(publishedV7.version,7);
+  const v6Base={...publishedV7,version:6,counts,protectedCheckpointManifest:protectedV2,objects:packedLayout},v6Fingerprint=await sha256(JSON.stringify(v6Identity(v6Base)));
+  assert.notEqual(v6Fingerprint,publishedV7.logicalFingerprint,'the old names give a different fingerprint');
+  const v6Manifest=await runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...v6Base,logicalFingerprint:v6Fingerprint})])),{interactive:false});
+  assert.equal(v6Manifest.version,6);assert.equal(v6Manifest.logicalFingerprint,v6Fingerprint,'a version 6 manifest verifies against the fingerprint it was written with');
+  assert.equal(v6Manifest.counts.note,manifest.counts.note,'its note count reads under the current name');assert.deepEqual(v6Manifest.protectedCheckpointManifest.noteDeletions,current.noteDeletions);
+  await assert.rejects(runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...v6Base,logicalFingerprint:publishedV7.logicalFingerprint})])),{interactive:false}),/logical-state fingerprint failed verification/u,'a version 6 manifest is not checked under the new names');
 }
 // Simulate another installation receiving this checkpoint rather than the publishing installation's newly established local ancestry.
 reconciliationBase=null;reconciliationBaseNotes=Object.create(null);
@@ -167,7 +206,7 @@ const localAssetsBeforeLeaseCheck=new Map(assets);assets.clear();
 const managedPortableBefore=freeze({...portablePathMetrics}),candidate=await runtime.repository.inspect(manifest,leasedReadObject,{interactive:false,committed:true});
 assert.equal(portablePathMetrics.containers,managedPortableBefore.containers,'Managed repository inspection must not encode a temporary .sdbackup container.');
 assert.equal(portablePathMetrics.inspections,managedPortableBefore.inspections,'Managed repository inspection must not reopen/decode a temporary .sdbackup container.');
-assert.equal(candidate.kind,'study-director.backup-candidate');assert.equal(candidate.preview.formatVersion,21);assert.equal(candidate.preview.reconciliationCapable,true);assert.equal(candidate.preview.encrypted,true,'repository-source encryption state must survive the internal verified-snapshot boundary');assert.equal(candidate.preview.authenticated,true);assert.equal(candidate.preview.checkpoint.checkpointId,checkpointId);
+assert.equal(candidate.kind,'study-director.backup-candidate');assert.equal(candidate.preview.formatVersion,22);assert.equal(candidate.preview.reconciliationCapable,true);assert.equal(candidate.preview.encrypted,true,'repository-source encryption state must survive the internal verified-snapshot boundary');assert.equal(candidate.preview.authenticated,true);assert.equal(candidate.preview.checkpoint.checkpointId,checkpointId);
 for(const objectId of attachmentObjectIds)assert.equal(leaseReleaseCounts.get(objectId)||0,0,'Managed candidate inspection must retain verified attachment leases until candidate restore/release.');
 const forgedCandidate=freeze({kind:'study-director.backup-candidate',verified:true,preview:candidate.preview,release:async()=>{}});
 await assert.rejects(()=>runtime.repository.bringIn(forgedCandidate),/current verified Study Director inspection/i,'A look-alike candidate must not cross the private verified-snapshot seal.');

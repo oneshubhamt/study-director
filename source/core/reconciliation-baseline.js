@@ -23,7 +23,7 @@ registry.define('reconciliation-baseline',1,()=>{
     function noteState(raw){if(!exactKeys(raw,['label','text']))return null;const label=labelValue(raw.label),text=textValue(raw.text);return label===null||text===null?null:freeze({label,text});}
     function normalizeHeader(value){
       if(!value||!exactKeys(value,['format','version','checkpointId','establishedAt','noteCount','noteKeyFingerprint','personalFingerprint'])||value.format!=='study-director.reconciliation-base'||Number(value.version)!==2||!/^cp_[a-f0-9]{32}$/u.test(String(value.checkpointId||''))||!Number.isFinite(Date.parse(String(value.establishedAt||''))))return null;
-      const noteCount=Number(value.noteCount);if(!Number.isInteger(noteCount)||noteCount<0||noteCount>Number(limits.maxOngoingNotes||1000)||!/^[a-f0-9]{64}$/u.test(String(value.noteKeyFingerprint||''))||!personalFingerprint(value.personalFingerprint))return null;
+      const noteCount=Number(value.noteCount);if(!Number.isInteger(noteCount)||noteCount<0||noteCount>Number(limits.maxNotes||1000)||!/^[a-f0-9]{64}$/u.test(String(value.noteKeyFingerprint||''))||!personalFingerprint(value.personalFingerprint))return null;
       return freeze({format:'study-director.reconciliation-base',version:2,checkpointId:String(value.checkpointId),establishedAt:new Date(String(value.establishedAt)).toISOString(),noteCount,noteKeyFingerprint:String(value.noteKeyFingerprint),personalFingerprint:String(value.personalFingerprint)});
     }
     function normalizeNote(value,context={}){
@@ -32,7 +32,7 @@ registry.define('reconciliation-baseline',1,()=>{
       return freeze({format:'study-director.reconciliation-base-note',version:1,key,label:state.label,text:state.text});
     }
     function normalizeKeys(values){
-      if(!Array.isArray(values))return null;const out=[],seen=new Set();for(const raw of values){const key=cleanKey(raw);if(!key||seen.has(key))return null;seen.add(key);out.push(key);}if(out.length>Number(limits.maxOngoingNotes||1000))return null;return freeze(out.sort());
+      if(!Array.isArray(values))return null;const out=[],seen=new Set();for(const raw of values){const key=cleanKey(raw);if(!key||seen.has(key))return null;seen.add(key);out.push(key);}if(out.length>Number(limits.maxNotes||1000))return null;return freeze(out.sort());
     }
     function normalizeUpdates(value){
       if(!value||typeof value!=='object'||Array.isArray(value))return null;const out=Object.create(null);for(const [rawKey,raw] of Object.entries(value)){const key=cleanKey(rawKey),state=noteState(raw);if(!key||!state)return null;out[key]=state;}return freeze(out);

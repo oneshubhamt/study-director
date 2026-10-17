@@ -44,11 +44,11 @@ export const PRODUCTION_LIMITS=Object.freeze({
   // Historical runtime size references; package sizes are informational from SDVB72B.
   richRuntimeMaxRawBytes:334*KiB,
   richRuntimeMaxGzipBytes:106*KiB,
-  // Live, imported and backed-up Ongoing Notes, and their deletion records.
+  // Live, imported and backed-up notes, and their deletion records.
   // Recently deleted counts towards it but gives way.
-  maxOngoingNotes:2000,
-  // Days a deleted Ongoing Note stays in Recently deleted.
-  areaNoteTrashDays:30,
+  maxNotes:2000,
+  // Days a deleted note stays in Recently deleted.
+  noteTrashDays:30,
   // Notes one note's linked-notes bar can hold.
   maxNoteLinks:50,
   maxTaskNameChars:160,
@@ -70,20 +70,20 @@ export const PRODUCTION_LIMITS=Object.freeze({
   // own ceiling below.
   localRescueBytes:4*MiB,
   fallbackDailyRecordsBytes:3*MiB,
-  areaNoteRescueBytes:1*MiB,
+  noteRescueBytes:1*MiB,
   deletionRecoveryBytes:64*KiB,
   storageWarningRatio:0.80,
   storageCriticalRatio:0.92
 });
 
 export const CAPACITY_PROFILES=Object.freeze({
-  fieldBoundaries:Object.freeze(['schedule','reflection','ongoingNote','richText','asset','backupEntry','backupLine']),
-  countBoundaries:Object.freeze(['dailyRecords','ongoingNotes','savedDayDeletions','assets']),
+  fieldBoundaries:Object.freeze(['schedule','reflection','note','richText','asset','backupEntry','backupLine']),
+  countBoundaries:Object.freeze(['dailyRecords','notes','savedDayDeletions','assets']),
   byteBoundaries:Object.freeze(['legacyImport','compressedBackup','uncompressedBackup','portableBackup']),
   denseTextMetadata:Object.freeze({
     description:'Dense plain-text backup metadata without image assets or rich-document payloads.',
     dailyRecords:500,
-    ongoingNotes:250,
+    notes:250,
     assetCount:0,
     averageTextBytes:8*KiB
   })

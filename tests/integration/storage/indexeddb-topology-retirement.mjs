@@ -33,7 +33,8 @@ function fakeIndexedDb(initial){
           const db=dbView();
           req.result=db;lastDb=db;
           if(upgrading){
-            const transaction={aborted:false,abort(){this.aborted=true;}};
+            // Renaming a store in the upgrade transaction keeps its rows.
+            const transaction={aborted:false,abort(){this.aborted=true;},objectStore(from){return {set name(to){state.stores.delete(String(from));state.stores.add(String(to));}};}};
             req.onupgradeneeded?.({oldVersion,target:{result:db,transaction}});
             if(transaction.aborted)return;
           }
@@ -49,37 +50,42 @@ function fakeIndexedDb(initial){
   };
 }
 
-function loadPersistence(indexedDB){
+function loadModules(indexedDB){
   const context=vm.createContext({
     console,Date,Math,JSON,RegExp,Error,TypeError,Object,Array,String,Number,Map,Set,Promise,Uint8Array,TextEncoder,
     crypto:globalThis.crypto,indexedDB,setTimeout,clearTimeout,queueMicrotask,globalThis:null
   });
   context.globalThis=context;
-  for(const file of ['internal','persistence'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),context,{filename:`${file}.js`});
-  return context[Symbol.for('studyDirector.internalModules.v1')].require('persistence',1);
+  for(const file of ['internal','persistence','compatibility'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),context,{filename:`${file}.js`});
+  const registry=context[Symbol.for('studyDirector.internalModules.v1')];
+  return {persistence:registry.require('persistence',1),compatibility:registry.require('compatibility',1)};
 }
 
 const currentStores=Object.freeze({
-  dailyRecords:'dailyRecords',dailySummaries:'dailySummaries',areaNotes:'areaNotes',activeSessions:'activeSessions',
+  dailyRecords:'dailyRecords',dailySummaries:'dailySummaries',notes:'notes',activeSessions:'activeSessions',
   appMeta:'appMeta',assets:'assets'
 });
 const legacyStores=Object.freeze({syncQueue:'syncQueue',tombstones:'tombstones',reflectionDrafts:'reflectionDrafts'});
 const canonicalNames=Object.values(currentStores).sort();
-function makeDb(indexedDB,onReset=null){
-  const persistence=loadPersistence(indexedDB);
+// Notes were kept in a store called areaNotes until version 8 renamed it.
+const renamedStores=Object.freeze({notes:'areaNotes'}),shippedNames=canonicalNames.map(name=>name==='notes'?'areaNotes':name);
+const upgradeWith=(compatibility,apply)=>Object.freeze({renameStores:context=>compatibility.renameIndexedDbStores(Object.freeze({...context,renamedStores})),apply});
+function makeDb(indexedDB,onReset=null,apply=()=>false){
+  const {persistence,compatibility}=loadModules(indexedDB);
   return persistence.createIndexedDb(Object.freeze({
-    config:Object.freeze({dbName:'StudyDirectorDB',dbVersion:7,legacyBaselineVersion:5,stores:currentStores,legacyStores}),
+    config:Object.freeze({dbName:'StudyDirectorDB',dbVersion:9,bridgeVersion:8,stores:currentStores,legacyStores}),
     hooks:Object.freeze(onReset?{onError:()=>{},onOk:()=>{},capture:()=>{},onReset}:{onError:()=>{},onOk:()=>{},capture:()=>{}}),
-    upgrade:Object.freeze({apply:()=>false})
+    upgrade:upgradeWith(compatibility,apply)
   }));
 }
 
 // The retired sync-era topology remains readable until verified migration retires it.
-const legacyBackend=fakeIndexedDb({version:5,stores:[...canonicalNames,'syncQueue','tombstones','reflectionDrafts']});
+const legacyBackend=fakeIndexedDb({version:5,stores:[...shippedNames,'syncQueue','tombstones','reflectionDrafts']});
 const legacyDb=makeDb(legacyBackend);
 await legacyDb.open();
 let topology=await legacyDb.topology();
-assert.equal(topology.version,5);
+assert.equal(topology.version,8,'an older database opens at the bridge version');
+assert.equal(topology.stores.includes('notes'),true,'the bridge gives the notes store its current name');assert.equal(topology.stores.includes('areaNotes'),false);
 assert.deepEqual([...topology.legacyStores].sort(),['reflectionDrafts','syncQueue','tombstones']);
 assert.equal(topology.current,false);
 assert.equal(await legacyDb.hasStore('syncQueue'),true,'legacy migration source must still exist before retirement');
@@ -88,21 +94,29 @@ const retired=await legacyDb.retireLegacyStores();
 assert.equal(retired.status,'retired');
 assert.equal(retired.removed,3);
 topology=await legacyDb.topology();
-assert.equal(topology.version,7);
+assert.equal(topology.version,9);
 assert.deepEqual([...topology.stores].sort(),canonicalNames);
 assert.deepEqual([...topology.legacyStores],[]);
 assert.equal(topology.current,true);
 assert.equal(await legacyDb.hasStore('syncQueue'),false);
 assert.equal(await legacyDb.hasStore('tombstones'),false);
 assert.equal(await legacyDb.hasStore('reflectionDrafts'),false,'retired Reflection Draft object store must be physically deleted during topology retirement.');
-assert.deepEqual(legacyBackend.snapshot(),{version:7,stores:canonicalNames});
+assert.deepEqual(legacyBackend.snapshot(),{version:9,stores:canonicalNames});
+
+// The previous build's database (version 7, already lean) gets the renamed store at the bridge too.
+const previousBackend=fakeIndexedDb({version:7,stores:shippedNames});
+const previousDb=makeDb(previousBackend);
+await previousDb.open();
+assert.deepEqual(previousBackend.snapshot().stores,[...canonicalNames,'syncQueue','tombstones'].sort(),'the bridge renames the notes store and adds the empty stores compatibility reads');
+await previousDb.retireLegacyStores();
+assert.deepEqual(previousBackend.snapshot(),{version:9,stores:canonicalNames});
 
 // A fresh installation never creates the obsolete stores at all.
 const freshBackend=fakeIndexedDb(null);
 const freshDb=makeDb(freshBackend);
 await freshDb.open();
 const freshTopology=await freshDb.topology();
-assert.equal(freshTopology.version,7);
+assert.equal(freshTopology.version,9);
 assert.deepEqual([...freshTopology.stores].sort(),canonicalNames);
 assert.deepEqual([...freshTopology.legacyStores],[]);
 assert.equal(freshTopology.current,true);
@@ -111,7 +125,7 @@ assert.equal(freshDb.lifecycle().resets,0);
 
 // Clearing site data while the page stays open recreates the database on the
 // next open. That is reported once; an ordinary reconnection is not a reset.
-const resetEvents=[],resetBackend=fakeIndexedDb({version:7,stores:canonicalNames});
+const resetEvents=[],resetBackend=fakeIndexedDb({version:9,stores:canonicalNames});
 const resetDb=makeDb(resetBackend,event=>resetEvents.push(event));
 await resetDb.open();
 assert.equal(resetDb.lifecycle().startedFresh,false,'an existing database is not a fresh start');
@@ -119,7 +133,7 @@ resetBackend.closeConnection();await resetDb.open();await new Promise(resolve=>s
 assert.deepEqual(resetEvents,[],'reopening an existing database after a closed connection is not a reset');
 resetBackend.clearSiteData();
 const recreated=await resetDb.open();await new Promise(resolve=>setTimeout(resolve,0));
-assert.equal(Number(recreated.version),7,'the recreated database receives the current topology');
+assert.equal(Number(recreated.version),9,'the recreated database receives the current topology');
 assert.equal(resetEvents.length,1,'the browser data clear is reported exactly once');
 assert.equal(resetEvents[0].count,1);assert.ok(Number.isFinite(Date.parse(resetEvents[0].detectedAt)));
 assert.equal(resetDb.lifecycle().resets,1);assert.equal(resetDb.lifecycle().startedFresh,false);
@@ -128,21 +142,43 @@ assert.equal(resetDb.lifecycle().resets,1);assert.equal(resetDb.lifecycle().star
 // A genuinely historical pre-v3 database must not be mistaken for a fresh v1 database.
 let historicalUpgradeCalls=0;
 const historicalBackend=fakeIndexedDb({version:1,stores:['dailyRecords','appMeta']});
-const historicalPersistence=loadPersistence(historicalBackend);
-const historicalDb=historicalPersistence.createIndexedDb(Object.freeze({
-  config:Object.freeze({dbName:'StudyDirectorDB',dbVersion:7,legacyBaselineVersion:5,stores:currentStores,legacyStores}),
-  hooks:Object.freeze({onError:()=>{},onOk:()=>{},capture:()=>{}}),
-  upgrade:Object.freeze({apply:context=>{historicalUpgradeCalls++;return Number(context.oldVersion)<3;}})
-}));
+const historicalDb=makeDb(historicalBackend,null,context=>{historicalUpgradeCalls++;return Number(context.oldVersion)<3;});
 await historicalDb.open();
 const historicalTopology=await historicalDb.topology();
-assert.equal(historicalTopology.version,5,'historical DB must stop at the compatibility bridge before retirement');
+assert.equal(historicalTopology.version,8,'historical DB must stop at the compatibility bridge before retirement');
 assert.deepEqual([...historicalTopology.legacyStores].sort(),['syncQueue','tombstones']);
 assert.equal(historicalUpgradeCalls,1,'pre-v3 compatibility upgrade adapter must run for an existing historical v1 database');
 await historicalDb.retireLegacyStores();
-assert.deepEqual(historicalBackend.snapshot(),{version:7,stores:canonicalNames});
+assert.deepEqual(historicalBackend.snapshot(),{version:9,stores:canonicalNames});
+
+// Another tab holding the database blocks an upgrade until it closes its
+// connection. The open waits for that within its time limit; one that never
+// clears fails, and a late result after that is closed and never upgrades.
+function blockingIndexedDb({releaseAfter}){
+  const events={aborted:0,closed:0};
+  return {events,open(){
+    const req={result:null,error:null,onupgradeneeded:null,onsuccess:null,onerror:null,onblocked:null};
+    queueMicrotask(()=>req.onblocked?.());
+    if(releaseAfter!==null)setTimeout(()=>{
+      const db={version:9,objectStoreNames:new StoreNames(new Set(canonicalNames)),createObjectStore(){},deleteObjectStore(){},close(){events.closed++;},onversionchange:null,onclose:null};
+      req.result=db;req.onupgradeneeded?.({oldVersion:8,target:{result:db,transaction:{abort(){events.aborted++;},objectStore(){return {};}}}});req.onsuccess?.();
+    },releaseAfter);
+    return req;
+  }};
+}
+{
+  const released=blockingIndexedDb({releaseAfter:50});
+  assert.equal(Number((await makeDb(released).open()).version),9,'an open blocked for a moment by another tab succeeds once it closes');
+  assert.deepEqual(released.events,{aborted:0,closed:0});
+  const stuck=blockingIndexedDb({releaseAfter:null});
+  await assert.rejects(makeDb(stuck).open(),/IndexedDB open blocked/u,'a block that never clears fails within the time limit');
+  const late=blockingIndexedDb({releaseAfter:2700});
+  await assert.rejects(makeDb(late).open(),/IndexedDB open blocked/u);
+  await new Promise(resolve=>setTimeout(resolve,300));
+  assert.deepEqual(late.events,{aborted:1,closed:1},'a late result is not upgraded and its connection is closed');
+}
 
 console.log(JSON.stringify({
   status:'PASS',suite:'indexeddb-topology-retirement',
-  migrated:{from:5,to:7,removed:['syncQueue','tombstones','reflectionDrafts']},freshInstallLean:true,historicalV1Bridged:true,siteDataClearDetected:true
+  migrated:{from:5,to:9,removed:['syncQueue','tombstones','reflectionDrafts'],renamed:{areaNotes:'notes'}},previousBuildBridged:true,briefBlockWaited:true,freshInstallLean:true,historicalV1Bridged:true,siteDataClearDetected:true
 },null,2));

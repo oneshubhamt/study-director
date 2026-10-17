@@ -84,14 +84,14 @@ const key=await passwordKey('long passphrase for integrity QA'),writer=await ope
  const wrong=await passwordKey('wrong passphrase'),h=harness(encrypted,{encrypted:true,key:wrong,segments:8});await assert.rejects(h.pass(),{code:'BACKUP_AUTH_FAILED'});assert.equal(h.durable.phase,'plain');assert.equal(h.held.size,0);cases.push('a wrong password is unavailable verification, never confirmed corruption');
 }
 {
- const h=harness(source,{segments:8});h.entry.kind='areaNote';const result=await h.pass();assert.equal(result.complete,true);assert.equal(await digest(result.opened.blob),fingerprint);assert.equal(h.held.size,1);await result.opened.release();assert.equal(h.held.size,0);cases.push('structured verification receives a leased file for its original semantic checks');
+ const h=harness(source,{segments:8});h.entry.kind='note';const result=await h.pass();assert.equal(result.complete,true);assert.equal(await digest(result.opened.blob),fingerprint);assert.equal(h.held.size,1);await result.opened.release();assert.equal(h.held.size,0);cases.push('structured verification receives a leased file for its original semantic checks');
 }
 {
- const h=harness(encrypted,{encrypted:true,key,segments:2});h.entry.kind='areaNote';let result;for(let i=0;i<8;i++){result=await h.pass();if(result.complete)break;}
+ const h=harness(encrypted,{encrypted:true,key,segments:2});h.entry.kind='note';let result;for(let i=0;i<8;i++){result=await h.pass();if(result.complete)break;}
  assert.ok(result.opened);assert.equal(await digest(result.opened.blob),fingerprint);assert.equal(h.held.size,2);await result.opened.release();assert.equal(h.held.size,0);cases.push('encrypted structured staging resumes and retains both leases through semantic verification');
 }
 {
- const h=harness(source,{segments:8});h.entry.kind='areaNote';const verified=await h.pass();await verified.opened.release();const handle=h.handles.get(h.durable.stored.name),writer=await handle.createSyncAccessHandle();writer.write(new Uint8Array([255]),{at:0});writer.flush();writer.close();
+ const h=harness(source,{segments:8});h.entry.kind='note';const verified=await h.pass();await verified.opened.release();const handle=h.handles.get(h.durable.stored.name),writer=await handle.createSyncAccessHandle();writer.write(new Uint8Array([255]),{at:0});writer.flush();writer.close();
  await assert.rejects(h.pass(),error=>!error.code&&/scratch verification failed|staging is damaged/.test(error.message));assert.equal(h.durable,null);cases.push('staging corruption restarts the read instead of quarantining repository data');
 }
 {

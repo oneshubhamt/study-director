@@ -28,19 +28,27 @@ registry.define('backup-codec',1,()=>{
     const SOURCE_ENTITY_TYPES=freeze([...input.entityTypes].filter(type=>type!=='tombstone'));
     const LEGACY_TOMBSTONE_TYPE='tombstone',LEGACY_REFLECTION_DRAFT_TYPE='reflectionDraft',LEGACY_REFLECTION_DRAFT_LIMIT=Math.max(1,Number(APP_LIMITS.maxImportRecords)||10000);
     const BACKUP_ENTITY_TYPES=freeze([...SOURCE_ENTITY_TYPES,'personalData','checkpointManifest']);
+    // Backup v22 renamed the note entity (areaNote before). A file is checked
+    // under the names it was written with; what it holds reads under the
+    // current ones.
+    const NOTE_ENTITY_VERSION=22,WRITTEN_NOTE_ENTITY='areaNote';
+    const currentBackupEntity=type=>type===WRITTEN_NOTE_ENTITY?'note':type;
+    const writtenBackupEntities=types=>freeze(types.map(type=>type==='note'?WRITTEN_NOTE_ENTITY:type));
+    const currentBackupCounts=counts=>freeze(Object.fromEntries(Object.entries(counts||{}).map(([type,count])=>[currentBackupEntity(type),count])));
     const KeyedRecord=input.keyedRecord;
     const ActiveSessionCodec=input.activeSessionCodec;
     const CompatibilityCodec=input.compatibilityCodec;
     // Historical completion proofs depend on the original entity order.
-    const LEGACY_SOURCE_ENTITY_TYPES=freeze([...SOURCE_ENTITY_TYPES,LEGACY_REFLECTION_DRAFT_TYPE]);
+    const BACKUP_ENTITY_TYPES_V19_TO_V21=writtenBackupEntities(BACKUP_ENTITY_TYPES);
+    const LEGACY_SOURCE_ENTITY_TYPES=writtenBackupEntities([...SOURCE_ENTITY_TYPES,LEGACY_REFLECTION_DRAFT_TYPE]);
     const BACKUP_ENTITY_TYPES_V15_TO_V18=freeze([...LEGACY_SOURCE_ENTITY_TYPES,'personalData','checkpointManifest']);
-    const LEGACY_SYNC_ENTITY_TYPES=freeze([...SOURCE_ENTITY_TYPES,LEGACY_TOMBSTONE_TYPE,LEGACY_REFLECTION_DRAFT_TYPE]);
+    const LEGACY_SYNC_ENTITY_TYPES=writtenBackupEntities([...SOURCE_ENTITY_TYPES,LEGACY_TOMBSTONE_TYPE,LEGACY_REFLECTION_DRAFT_TYPE]);
     const BACKUP_ENTITY_TYPES_V11_TO_V14=freeze([...LEGACY_SYNC_ENTITY_TYPES,'personalData']);
     const BACKUP_ENTITY_TYPES_V9_TO_V10=LEGACY_SYNC_ENTITY_TYPES;
-    const LEGACY_BACKUP_ENTITY_TYPES=freeze([...SOURCE_ENTITY_TYPES,LEGACY_TOMBSTONE_TYPE]);
+    const LEGACY_BACKUP_ENTITY_TYPES=writtenBackupEntities([...SOURCE_ENTITY_TYPES,LEGACY_TOMBSTONE_TYPE]);
     function backupEntityTypesForVersion(version){
       const value=Number(version);
-      return value>=19?BACKUP_ENTITY_TYPES:value>=15?BACKUP_ENTITY_TYPES_V15_TO_V18:value>=11?BACKUP_ENTITY_TYPES_V11_TO_V14:value>=9?BACKUP_ENTITY_TYPES_V9_TO_V10:LEGACY_BACKUP_ENTITY_TYPES;
+      return value>=NOTE_ENTITY_VERSION?BACKUP_ENTITY_TYPES:value>=19?BACKUP_ENTITY_TYPES_V19_TO_V21:value>=15?BACKUP_ENTITY_TYPES_V15_TO_V18:value>=11?BACKUP_ENTITY_TYPES_V11_TO_V14:value>=9?BACKUP_ENTITY_TYPES_V9_TO_V10:LEGACY_BACKUP_ENTITY_TYPES;
     }
     const BACKUP_V10_MAGIC='SDBK10\r\n';
     const BACKUP_V10_HEADER_BYTES=13;
@@ -58,7 +66,7 @@ registry.define('backup-codec',1,()=>{
     const {boundedInt,jsonByteLength}=input.helpers;
     const {assetIds:richTextAssetIds,assetIdValid:richTextAssetIdValid,imageMimeTypeValid:richTextImageMimeTypeValid}=input.richText;
     const sanitizeCurrentDailyRecord=input.dailyRecordCodec.sanitizeCurrentDailyRecord;
-    const sanitizeCurrentAreaNote=input.dailyRecordCodec.sanitizeCurrentAreaNote;
+    const sanitizeCurrentNote=input.dailyRecordCodec.sanitizeCurrentNote;
     const isSupportedSavedDate=input.dailyRecordCodec.isSupportedSavedDate;
 function assertSupportedSavedDate(record){
   const date=record&&record.date;
@@ -103,7 +111,7 @@ function backupCountShape(value={},types=BACKUP_ENTITY_TYPES){
   return Object.fromEntries(types.map(type=>[type,boundedInt(value[type],{min:0,max:backupEntityLimit(type),fallback:0})]));
 }
 function backupCountsEqual(a,b,types=BACKUP_ENTITY_TYPES){return types.every(type=>Number(a&&a[type]||0)===Number(b&&b[type]||0));}
-function backupEntityLimit(entityType){return entityType===LEGACY_TOMBSTONE_TYPE?LEGACY_TOMBSTONE_LIMIT:entityType===LEGACY_REFLECTION_DRAFT_TYPE?LEGACY_REFLECTION_DRAFT_LIMIT:['personalData','checkpointManifest'].includes(entityType)?1:entityDefinition(entityType)?.backupLimit||0;}
+function backupEntityLimit(entityType){return entityType===LEGACY_TOMBSTONE_TYPE?LEGACY_TOMBSTONE_LIMIT:entityType===LEGACY_REFLECTION_DRAFT_TYPE?LEGACY_REFLECTION_DRAFT_LIMIT:['personalData','checkpointManifest'].includes(entityType)?1:entityDefinition(currentBackupEntity(entityType))?.backupLimit||0;}
 function splitBackupItems(items){
   const groups=[];let current=[],bytes=2;
   for(const item of items||[]){
@@ -140,7 +148,7 @@ function validateCheckpointMetadata(value){
 }
 const LEGACY_CHECKPOINT_AUTHORITY=freeze({
   savedDays:'overlay-explicit-deletions',
-  areaNotes:'complete-collection',
+  notes:'complete-collection',
   reflectionDrafts:'complete-collection',
   activeSession:'complete-singleton',
   plans:'complete-collection',
@@ -149,7 +157,7 @@ const LEGACY_CHECKPOINT_AUTHORITY=freeze({
 });
 const CHECKPOINT_AUTHORITY=freeze({
   savedDays:'pairwise-explicit-deletions',
-  areaNotes:'pairwise-explicit-deletions',
+  notes:'pairwise-explicit-deletions',
   activeSession:'pairwise-singleton',
   plans:'pairwise-collection',
   personalSettings:'pairwise-singleton',
@@ -168,7 +176,7 @@ function normalizeCheckpointSavedDayDeletions(values){
   if(byDate.size>APP_LIMITS.maxImportRecords)throw new Error('Checkpoint contains too many Saved-Day deletion entries.');
   return freeze([...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date)));
 }
-function normalizeCheckpointAreaNoteDeletions(values){
+function normalizeCheckpointNoteDeletions(values){
   if(!Array.isArray(values))throw new Error('Checkpoint note deletion history is invalid.');
   const byKey=new Map();
   for(const raw of values){
@@ -177,7 +185,7 @@ function normalizeCheckpointAreaNoteDeletions(values){
     const clean=freeze({key,deletedAt:new Date(deletedAt).toISOString()}),previous=byKey.get(key);
     if(!previous||Date.parse(clean.deletedAt)>Date.parse(previous.deletedAt))byKey.set(key,clean);
   }
-  if(byKey.size>APP_LIMITS.maxOngoingNotes)throw new Error('Checkpoint contains too many note deletion entries.');
+  if(byKey.size>APP_LIMITS.maxNotes)throw new Error('Checkpoint contains too many note deletion entries.');
   return freeze([...byKey.values()].sort((a,b)=>a.key.localeCompare(b.key)));
 }
 function normalizeCheckpointAttachmentDeletions(values){
@@ -201,30 +209,41 @@ function validateCheckpointAuthority(value,version){
 }
 function backupProtectedCheckpointManifest(plan,checkpoint){
   const contract=DATA_CONTRACT.schemas.CheckpointProtectedManifest;
-  if(!contract||contract.format!=='study-director.checkpoint-protected-manifest'||Number(contract.version)!==2)throw new Error('Checkpoint protected-manifest contract is unavailable.');
+  if(!contract||contract.format!=='study-director.checkpoint-protected-manifest'||Number(contract.version)!==PROTECTED_MANIFEST_NOTE_NAMES_VERSION)throw new Error('Checkpoint protected-manifest contract is unavailable.');
   validateCheckpointMetadata(checkpoint);
   const sourceRevision=String(plan&&plan.sourceRevision||'');
   if(!Number.isFinite(Date.parse(sourceRevision)))throw new Error('Checkpoint source revision is invalid.');
-  const savedDayDeletions=normalizeCheckpointSavedDayDeletions(plan&&plan.savedDayDeletions||[]),areaNoteDeletions=normalizeCheckpointAreaNoteDeletions(plan&&plan.areaNoteDeletions||[]),attachmentDeletions=normalizeCheckpointAttachmentDeletions(plan&&plan.attachmentDeletions||[]);
-  const recordDates=new Set((plan&&plan.recordDates||[]).map(String)),noteKeys=new Set((plan&&plan.areaNoteItems||[]).map(item=>String(item&&item.key||''))),assetIds=new Set((plan&&plan.assetItems||[]).map(item=>String(item&&item.descriptor&&item.descriptor.assetId||'')));
+  const savedDayDeletions=normalizeCheckpointSavedDayDeletions(plan&&plan.savedDayDeletions||[]),noteDeletions=normalizeCheckpointNoteDeletions(plan&&plan.noteDeletions||[]),attachmentDeletions=normalizeCheckpointAttachmentDeletions(plan&&plan.attachmentDeletions||[]);
+  const recordDates=new Set((plan&&plan.recordDates||[]).map(String)),noteKeys=new Set((plan&&plan.noteItems||[]).map(item=>String(item&&item.key||''))),assetIds=new Set((plan&&plan.assetItems||[]).map(item=>String(item&&item.descriptor&&item.descriptor.assetId||'')));
   if(savedDayDeletions.some(entry=>recordDates.has(entry.date)))throw new Error('Checkpoint cannot contain both a Saved Day and its deletion marker.');
-  if(areaNoteDeletions.some(entry=>noteKeys.has(entry.key)))throw new Error('Checkpoint cannot contain both a note and its deletion marker.');
+  if(noteDeletions.some(entry=>noteKeys.has(entry.key)))throw new Error('Checkpoint cannot contain both a note and its deletion marker.');
   if(attachmentDeletions.some(entry=>assetIds.has(entry.assetId)))throw new Error('Checkpoint cannot contain both an Attachment Library identity and its deletion marker.');
-  return freeze({format:contract.format,version:contract.version,checkpointId:checkpoint.checkpointId,sourceRevision:new Date(sourceRevision).toISOString(),authority:CHECKPOINT_AUTHORITY,savedDayDeletions,areaNoteDeletions,attachmentDeletions});
+  return freeze({format:contract.format,version:contract.version,checkpointId:checkpoint.checkpointId,sourceRevision:new Date(sourceRevision).toISOString(),authority:CHECKPOINT_AUTHORITY,savedDayDeletions,noteDeletions,attachmentDeletions});
 }
-function validateProtectedCheckpointManifest(value,checkpoint=null,{normalizedLegacy=false}={}){
-  const contract=DATA_CONTRACT.schemas.CheckpointProtectedManifest;
+// Protected manifests before version 3 call the notes authority and deletion
+// list areaNotes and areaNoteDeletions. Reading gives them the current names;
+// version 2 differs from version 3 in nothing else, so it reads as version 3.
+const PROTECTED_MANIFEST_NOTE_NAMES_VERSION=3;
+function currentProtectedManifestNames(value){
+  const version=Number(value?.version);
+  if(!value||typeof value!=='object'||Array.isArray(value)||!(version>=1&&version<PROTECTED_MANIFEST_NOTE_NAMES_VERSION)||Object.hasOwn(value,'noteDeletions'))return value;
+  const {areaNoteDeletions,authority,...rest}=value;
+  const named=authority&&typeof authority==='object'&&!Array.isArray(authority)&&!Object.hasOwn(authority,'notes')?Object.fromEntries(Object.entries(authority).map(([key,mode])=>[key==='areaNotes'?'notes':key,mode])):authority;
+  return {...rest,version:version===2?PROTECTED_MANIFEST_NOTE_NAMES_VERSION:version,authority:named,...(areaNoteDeletions===undefined?{}:{noteDeletions:areaNoteDeletions})};
+}
+function validateProtectedCheckpointManifest(written,checkpoint=null,{normalizedLegacy=false}={}){
+  const contract=DATA_CONTRACT.schemas.CheckpointProtectedManifest,value=currentProtectedManifestNames(written);
   if(!contract||!value||typeof value!=='object'||Array.isArray(value))throw new Error('Protected checkpoint manifest is missing.');
   const version=Number(value.version),legacy=version===1,current=version===Number(contract.version);
   if(!legacy&&!current)throw new Error('Protected checkpoint manifest version is unsupported.');
-  const legacyWireKeys=['authority','checkpointId','format','savedDayDeletions','sourceRevision','version'],currentKeys=['areaNoteDeletions','attachmentDeletions','authority','checkpointId','format','savedDayDeletions','sourceRevision','version'];
+  const legacyWireKeys=['authority','checkpointId','format','savedDayDeletions','sourceRevision','version'],currentKeys=['noteDeletions','attachmentDeletions','authority','checkpointId','format','savedDayDeletions','sourceRevision','version'];
   const expectedKeys=legacy&&normalizedLegacy?currentKeys:(legacy?legacyWireKeys:currentKeys);
   if(Object.keys(value).sort().join('|')!==expectedKeys.slice().sort().join('|'))throw new Error('Protected checkpoint manifest contains unexpected fields.');
-  if(legacy&&normalizedLegacy&&(value.areaNoteDeletions?.length||value.attachmentDeletions?.length))throw new Error('Normalized legacy checkpoint manifest cannot contain deletion history introduced by newer formats.');
+  if(legacy&&normalizedLegacy&&(value.noteDeletions?.length||value.attachmentDeletions?.length))throw new Error('Normalized legacy checkpoint manifest cannot contain deletion history introduced by newer formats.');
   if(value.format!==contract.format||!/^cp_[a-f0-9]{32}$/u.test(String(value.checkpointId||''))||!Number.isFinite(Date.parse(String(value.sourceRevision||''))))throw new Error('Protected checkpoint manifest is invalid.');
   if(checkpoint&&String(value.checkpointId)!==String(checkpoint.checkpointId))throw new Error('Protected checkpoint manifest does not match its public checkpoint provenance.');
-  const authority=validateCheckpointAuthority(value.authority,version),savedDayDeletions=normalizeCheckpointSavedDayDeletions(value.savedDayDeletions),areaNoteDeletions=legacy?freeze([]):normalizeCheckpointAreaNoteDeletions(value.areaNoteDeletions),attachmentDeletions=legacy?freeze([]):normalizeCheckpointAttachmentDeletions(value.attachmentDeletions);
-  return freeze({format:contract.format,version,checkpointId:String(value.checkpointId),sourceRevision:new Date(String(value.sourceRevision)).toISOString(),authority,savedDayDeletions,areaNoteDeletions,attachmentDeletions});
+  const authority=validateCheckpointAuthority(value.authority,version),savedDayDeletions=normalizeCheckpointSavedDayDeletions(value.savedDayDeletions),noteDeletions=legacy?freeze([]):normalizeCheckpointNoteDeletions(value.noteDeletions),attachmentDeletions=legacy?freeze([]):normalizeCheckpointAttachmentDeletions(value.attachmentDeletions);
+  return freeze({format:contract.format,version,checkpointId:String(value.checkpointId),sourceRevision:new Date(String(value.sourceRevision)).toISOString(),authority,savedDayDeletions,noteDeletions,attachmentDeletions});
 }
 function buildBackupManifest(plan,{compression='none',algorithm=backupChecksumAlgorithm()}={}){
   const version=DATA_CONTRACT.schemas.Backup.version,currentCheckpoint=Number(version)>=14?(plan&&plan.checkpoint?validateCheckpointMetadata(plan.checkpoint):backupCheckpointMetadata(plan.installationId,plan.exportedAt)):null;
@@ -237,7 +256,7 @@ function buildBackupManifest(plan,{compression='none',algorithm=backupChecksumAl
     createdBy:APP_CONFIG.attribution,exportedAt:plan.exportedAt,
     encoding:'ndjson',compression,checksumAlgorithm:algorithm,declaredCounts:plan.counts,
     ...(Number(version)>=10?{container:'binary-v1'}:{}),
-    limits:{maxEntryBytes:APP_LIMITS.backupMaxEntryBytes,maxRecords:APP_LIMITS.maxImportRecords,maxAreaNotes:APP_LIMITS.maxOngoingNotes}
+    limits:{maxEntryBytes:APP_LIMITS.backupMaxEntryBytes,maxRecords:APP_LIMITS.maxImportRecords,maxNotes:APP_LIMITS.maxNotes}
   };
 }
 async function backupChunkEnvelope(seq,entityType,items,algorithm){return Processing.run('chunk',{seq,entityType,items,algorithm,maxLineBytes:APP_LIMITS.backupMaxLineBytes});}
@@ -284,7 +303,7 @@ function validateBackupManifest(manifest,gzip,{binaryV10=false}={}){
   if(!manifest||manifest.type!=='manifest'||manifest.format!==DATA_CONTRACT.schemas.Backup.format)throw new Error('File is not a chunked Study Director backup.');
   const version=Number(manifest.version)||0;
   if(version>DATA_CONTRACT.schemas.Backup.version)throw new Error('This backup was created by a newer Study Director version. Update the app before importing it.');
-  if(![7,8,9,10,11,12,13,14,15,16,17,18,19,20,21].includes(version))throw new Error('This backup version is not supported by this build.');
+  if(!(Number.isInteger(version)&&version>=7&&version<=DATA_CONTRACT.schemas.Backup.version))throw new Error('This backup version is not supported by this build.');
   if(version>=10&&!binaryV10)throw new Error('Backup v10 must use the binary-framed Study Director backup format.');
   if(version<10&&binaryV10)throw new Error('Binary backup framing is only valid for Study Director backup v10.');
   if(version>=10&&manifest.container!=='binary-v1')throw new Error('Backup v10 container metadata is invalid.');
@@ -299,7 +318,7 @@ function validateBackupManifest(manifest,gzip,{binaryV10=false}={}){
     if(new Date(String(manifest.checkpoint.createdAt)).toISOString()!==new Date(String(manifest.exportedAt)).toISOString())throw new Error('Backup checkpoint timestamp does not match the backup timestamp.');
   }
   if(version>=15){
-    const protectedContract=DATA_CONTRACT.schemas.CheckpointProtectedManifest,descriptor=manifest.protectedManifest,expectedProtectedVersion=version===15?1:Number(protectedContract.version);
+    const protectedContract=DATA_CONTRACT.schemas.CheckpointProtectedManifest,descriptor=manifest.protectedManifest,expectedProtectedVersion=version===15?1:version<NOTE_ENTITY_VERSION?2:Number(protectedContract.version);
     if(!descriptor||typeof descriptor!=='object'||Array.isArray(descriptor)||Object.keys(descriptor).sort().join('|')!==['entityType','format','version'].sort().join('|')||descriptor.entityType!=='checkpointManifest'||descriptor.format!==protectedContract.format||Number(descriptor.version)!==expectedProtectedVersion)throw new Error('Backup protected-manifest descriptor is invalid.');
   }
   if(version>=11&&manifest.declaredCounts?.personalData!==1)throw new Error('Backup is missing its personal-data section.');
@@ -313,17 +332,17 @@ function validateBackupManifest(manifest,gzip,{binaryV10=false}={}){
 // is current apart from its notes, whose name keys are converted, along with
 // the names in its note deletion history.
 const NOTE_ID_BACKUP_VERSION=21;
-function legacyBackupItem(version,entityType){return Number(version)<(entityType==='areaNote'?NOTE_ID_BACKUP_VERSION:NOTE_ID_BACKUP_VERSION-1);}
+function legacyBackupItem(version,entityType){return Number(version)<(entityType==='note'?NOTE_ID_BACKUP_VERSION:NOTE_ID_BACKUP_VERSION-1);}
 function withNoteIdDeletions(manifest,nameKeyed){
-  if(!manifest||!nameKeyed||!manifest.areaNoteDeletions.length)return manifest;
-  const areaNoteDeletions=normalizeCheckpointAreaNoteDeletions(manifest.areaNoteDeletions.map(entry=>({key:CompatibilityCodec.areaNoteKey(entry.key),deletedAt:entry.deletedAt})));
-  return freeze({...manifest,areaNoteDeletions});
+  if(!manifest||!nameKeyed||!manifest.noteDeletions.length)return manifest;
+  const noteDeletions=normalizeCheckpointNoteDeletions(manifest.noteDeletions.map(entry=>({key:CompatibilityCodec.noteKey(entry.key),deletedAt:entry.deletedAt})));
+  return freeze({...manifest,noteDeletions});
 }
 function sanitizeChunkedBackupItem(entityType,item,{legacy=false}={}){
   if(jsonByteLength(item)>APP_LIMITS.backupMaxEntryBytes)throw new Error(`A ${entityType} entry exceeds the safe size limit.`);
   if(entityType==='personalData')return legacy?CompatibilityCodec.personalData(item):PersonalDataCodec.normalize(item);
   if(entityType==='dailyRecord'){assertSupportedSavedDate(item);return sanitizeImportedRecord(item,{legacy});}
-  if(entityType==='areaNote')return legacy?CompatibilityCodec.areaNote(item,item&&item.key):sanitizeCurrentAreaNote(item,item&&item.key);
+  if(entityType==='note')return legacy?CompatibilityCodec.note(item,item&&item.key):sanitizeCurrentNote(item,item&&item.key);
   if(entityType==='activeSession')return legacy?CompatibilityCodec.activeSession(item):ActiveSessionCodec.sanitizeCurrent(item);
   if(entityType===LEGACY_REFLECTION_DRAFT_TYPE){if(!legacy||!item||typeof item!=='object'||Array.isArray(item)||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(String(item.date||'')))return null;return freeze({date:String(item.date)});}
   if(entityType==='checkpointManifest')return validateProtectedCheckpointManifest(item);
@@ -339,9 +358,9 @@ async function parseChunkedBackupMetadata(file,options={},context={}){
   if(options.currentOnly===true&&Number(manifest&&manifest.version)!==DATA_CONTRACT.schemas.Backup.version)throw legacyBackupError(`Backup v${Number(manifest&&manifest.version)||'?'} requires the temporary compatibility adapter.`);
   const checked=validateBackupManifest(manifest,gzip,{binaryV10:!!context.binaryV10}),expected=checked.counts,sourceEntityTypes=checked.entityTypes,actual=backupCountShape({},sourceEntityTypes);
   const report=backupImportReport({legacy:Number(manifest.version)!==DATA_CONTRACT.schemas.Backup.version,sourceVersion:manifest.version});
-  const records=[],areaNotes=KeyedRecord.create();let personalData=null,activeSession=null,protectedCheckpointManifest=null,expectedSeq=0,complete=null;const chunkHashes=[];
-  const identities=Object.fromEntries(sourceEntityTypes.map(type=>[type,new Set()])),referencedAssetIds=new Set();
-  let areaNotesComplete=true;
+  const records=[],notes=KeyedRecord.create();let personalData=null,activeSession=null,protectedCheckpointManifest=null,expectedSeq=0,complete=null;const chunkHashes=[];
+  const identities=Object.fromEntries(sourceEntityTypes.map(type=>[currentBackupEntity(type),new Set()])),referencedAssetIds=new Set();
+  let notesComplete=true;
   while(true){
     backupThrowIfAborted(options.signal);
     const next=await iterator.next();if(next.done)break;
@@ -355,7 +374,7 @@ async function parseChunkedBackupMetadata(file,options={},context={}){
     if(!entry||entry.type!=='chunk')throw new Error('Backup contains an unknown line type.');
     if(expectedSeq>=APP_LIMITS.maxBackupChunks)throw new Error('Backup contains too many chunks.');
     if(entry.seq!==expectedSeq++)throw new Error('Backup chunks are missing or out of order.');
-    const entityType=String(entry.entityType||''),limit=sourceEntityTypes.includes(entityType)?backupEntityLimit(entityType):0;
+    const entityType=String(entry.entityType||''),kind=currentBackupEntity(entityType),limit=sourceEntityTypes.includes(entityType)?backupEntityLimit(entityType):0;
     if(!limit||!Array.isArray(entry.items)||entry.count!==entry.items.length)throw new Error('Backup chunk metadata is invalid.');
     if(actual[entityType]+entry.items.length>limit)throw new Error(`Backup contains too many ${entityType} entries.`);
     const canonical={seq:entry.seq,entityType,items:entry.items};
@@ -368,31 +387,31 @@ async function parseChunkedBackupMetadata(file,options={},context={}){
       itemIndex++;
       if(itemIndex%50===0)await backupImportYield(options);
       actual[entityType]++;
-      if(entityType==='tombstone'){report.ignoredTombstones++;continue;}
-      const legacyItem=legacyBackupItem(manifest.version,entityType);
-      const clean=sanitizeChunkedBackupItem(entityType,item,{legacy:legacyItem});
+      if(kind==='tombstone'){report.ignoredTombstones++;continue;}
+      const legacyItem=legacyBackupItem(manifest.version,kind);
+      const clean=sanitizeChunkedBackupItem(kind,item,{legacy:legacyItem});
       if(!clean){
-        if(!legacyItem)throw new Error(`Current backup contains a noncanonical ${entityType} entry.`);
+        if(!legacyItem)throw new Error(`Current backup contains a noncanonical ${kind} entry.`);
         report.skipped++;
-        if(entityType==='areaNote')areaNotesComplete=false;
-        if(entityType==='activeSession')report.invalidActiveSession++;
+        if(kind==='note')notesComplete=false;
+        if(kind==='activeSession')report.invalidActiveSession++;
         continue;
       }
-      if(!['personalData','checkpointManifest',LEGACY_REFLECTION_DRAFT_TYPE].includes(entityType))backupCollectRichAssetIds(clean,referencedAssetIds);
-      const identity=entityType==='personalData'?'personal':entityType==='checkpointManifest'?'protected-checkpoint':entityType===LEGACY_REFLECTION_DRAFT_TYPE?String(clean.date):entityIdentity(entityType,clean);
-      if(identities[entityType].has(identity)){
-        if(!legacyItem)throw new Error(`Current backup contains a duplicate ${entityType} identity.`);
+      if(!['personalData','checkpointManifest',LEGACY_REFLECTION_DRAFT_TYPE].includes(kind))backupCollectRichAssetIds(clean,referencedAssetIds);
+      const identity=kind==='personalData'?'personal':kind==='checkpointManifest'?'protected-checkpoint':kind===LEGACY_REFLECTION_DRAFT_TYPE?String(clean.date):entityIdentity(kind,clean);
+      if(identities[kind].has(identity)){
+        if(!legacyItem)throw new Error(`Current backup contains a duplicate ${kind} identity.`);
         report.duplicates++;report.skipped++;
-        if(entityType==='areaNote')areaNotesComplete=false;
+        if(kind==='note')notesComplete=false;
         continue;
       }
-      identities[entityType].add(identity);
-      if(entityType==='checkpointManifest')protectedCheckpointManifest=clean;
+      identities[kind].add(identity);
+      if(kind==='checkpointManifest')protectedCheckpointManifest=clean;
       if(!options.validateOnly){
-        if(entityType==='personalData')personalData=clean;
-        else if(entityType==='dailyRecord')records.push(clean);
-        else if(entityType==='areaNote')areaNotes[clean.key]=clean;
-        else if(entityType==='activeSession')activeSession=clean;
+        if(kind==='personalData')personalData=clean;
+        else if(kind==='dailyRecord')records.push(clean);
+        else if(kind==='note')notes[clean.key]=clean;
+        else if(kind==='activeSession')activeSession=clean;
       }
       if(clean.degraded===true)report.degraded++;
     }
@@ -415,12 +434,12 @@ async function parseChunkedBackupMetadata(file,options={},context={}){
   if(proofChecksum!==complete.checksum)throw new Error('Backup completion proof failed its integrity check.');
   if(Number(manifest.version)>=15){
     protectedCheckpointManifest=withNoteIdDeletions(validateProtectedCheckpointManifest(protectedCheckpointManifest,manifest.checkpoint,{normalizedLegacy:true}),Number(manifest.version)<NOTE_ID_BACKUP_VERSION);
-    const recordDates=identities.dailyRecord,noteKeys=identities.areaNote,assetIds=new Set(assetDescriptors.map(item=>item.assetId));
+    const recordDates=identities.dailyRecord,noteKeys=identities.note,assetIds=new Set(assetDescriptors.map(item=>item.assetId));
     if(protectedCheckpointManifest.savedDayDeletions.some(entry=>recordDates.has(entry.date)))throw new Error('Checkpoint contains contradictory Saved-Day record/deletion state.');
-    if(protectedCheckpointManifest.areaNoteDeletions.some(entry=>noteKeys.has(entry.key)))throw new Error('Checkpoint contains contradictory note record/deletion state.');
+    if(protectedCheckpointManifest.noteDeletions.some(entry=>noteKeys.has(entry.key)))throw new Error('Checkpoint contains contradictory note record/deletion state.');
     if(protectedCheckpointManifest.attachmentDeletions.some(entry=>assetIds.has(entry.assetId)))throw new Error('Checkpoint contains contradictory Attachment Library record/deletion state.');
   }
-  return {importedPersonalData:personalData,data:{areaNotes},records,hasAreaNotes:true,areaNotesComplete,importedActiveSession:activeSession,protectedCheckpointManifest,captureAuthority,formatVersion:manifest.version,counts:actual,manifest,report,uncompressedBytes:state.uncompressedBytes,assetDescriptors,referencedAssetIds:freeze([...referencedAssetIds].sort())};
+  return {importedPersonalData:personalData,data:{notes},records,hasNotes:true,notesComplete,importedActiveSession:activeSession,protectedCheckpointManifest,captureAuthority,formatVersion:manifest.version,counts:currentBackupCounts(actual),manifest,report,uncompressedBytes:state.uncompressedBytes,assetDescriptors,referencedAssetIds:freeze([...referencedAssetIds].sort())};
   }finally{await iterator.return?.();}
 }
 async function backupHasV10Magic(file){
@@ -521,8 +540,9 @@ async function readLegacyBackupFile(file,options={}){
   if([7,8,9,10,11,12,13].includes(sourceVersion))throw new Error(`Backup v${sourceVersion} must use the complete Study Director backup format.`);
   const rawRecords=Array.isArray(data)?data:(Array.isArray(data.records)?data.records:[]);
   if(rawRecords.length>APP_LIMITS.maxImportRecords)throw new Error('Backup has too many daily records for safe import.');
-  const hasAreaNotes=!!(data&&data.areaNotes&&typeof data.areaNotes==='object'&&!Array.isArray(data.areaNotes));
-  if(hasAreaNotes&&Object.keys(data.areaNotes).length>APP_LIMITS.maxOngoingNotes)throw new Error('Backup has too many ongoing subject notes for safe import.');
+  // These files kept their notes under areaNotes.
+  const written=Array.isArray(data)?null:data.areaNotes,hasNotes=!!(written&&typeof written==='object'&&!Array.isArray(written));
+  if(hasNotes&&Object.keys(written).length>APP_LIMITS.maxNotes)throw new Error('Backup has too many notes for safe import.');
   const importedActiveSession=CompatibilityCodec.activeSession(data.activeSession);
   const rawTombstoneCount=Array.isArray(data.tombstones)?data.tombstones.length:0;
   const report=backupImportReport({legacy:true,sourceVersion:sourceVersion||null,ignoredTombstones:Math.min(rawTombstoneCount,LEGACY_TOMBSTONE_LIMIT)});
@@ -534,17 +554,18 @@ async function readLegacyBackupFile(file,options={}){
     if(recordIds.has(clean.date)){report.duplicates++;report.skipped++;return;}
     recordIds.add(clean.date);records.push(clean);if(clean.degraded===true)report.degraded++;
   });
-  const areaNotes=KeyedRecord.create(),areaIds=new Set();let areaNotesComplete=true;
-  if(hasAreaNotes)Object.entries(data.areaNotes).forEach(([rawKey,value])=>{
-    const clean=CompatibilityCodec.areaNote(value,rawKey);
-    if(!clean){report.skipped++;areaNotesComplete=false;return;}
-    if(areaIds.has(clean.key)){report.duplicates++;report.skipped++;areaNotesComplete=false;return;}
-    areaIds.add(clean.key);areaNotes[clean.key]=clean;if(clean.degraded===true)report.degraded++;
+  const notes=KeyedRecord.create(),areaIds=new Set();let notesComplete=true;
+  if(hasNotes)Object.entries(written).forEach(([rawKey,value])=>{
+    const clean=CompatibilityCodec.note(value,rawKey);
+    if(!clean){report.skipped++;notesComplete=false;return;}
+    if(areaIds.has(clean.key)){report.duplicates++;report.skipped++;notesComplete=false;return;}
+    areaIds.add(clean.key);notes[clean.key]=clean;if(clean.degraded===true)report.degraded++;
   });
   if(!importedActiveSession&&data.activeSession){report.invalidActiveSession++;report.skipped++;}
   if(rawTombstoneCount>LEGACY_TOMBSTONE_LIMIT)report.skipped+=rawTombstoneCount-LEGACY_TOMBSTONE_LIMIT;
-  if(!Array.isArray(data)&&!Array.isArray(data.records)&&!hasAreaNotes&&!importedActiveSession&&!rawTombstoneCount)throw new Error('File does not contain daily records, ongoing subject notes, an active session, or deletion metadata.');
-  return {data:{...data,areaNotes},records,hasAreaNotes,areaNotesComplete,importedActiveSession,formatVersion:sourceVersion||0,counts:backupCountShape({dailyRecord:rawRecords.length,areaNote:hasAreaNotes?Object.keys(data.areaNotes).length:0,activeSession:data.activeSession?1:0,tombstone:rawTombstoneCount}),report};
+  if(!Array.isArray(data)&&!Array.isArray(data.records)&&!hasNotes&&!importedActiveSession&&!rawTombstoneCount)throw new Error('File does not contain daily records, notes, an active session, or deletion metadata.');
+  const fields={...data};delete fields.areaNotes;
+  return {data:{...fields,notes},records,hasNotes,notesComplete,importedActiveSession,formatVersion:sourceVersion||0,counts:backupCountShape({dailyRecord:rawRecords.length,note:hasNotes?Object.keys(written).length:0,activeSession:data.activeSession?1:0,tombstone:rawTombstoneCount}),report};
 }
 async function readPortableBackupFile(file,options={}){
   if(!file||typeof file.stream!=='function')throw new Error('No readable backup file was provided.');
@@ -579,10 +600,11 @@ return Object.freeze({
     const current=sanitizeImportedRecord(record,{legacy:false});if(current)return current;
     const version=Number(record&&record.version);return Number.isSafeInteger(version)&&version<DATA_CONTRACT.schemas.DailyRecord.version?CompatibilityCodec.dailyRecord(record):null;
   },
-  normalizeAreaNote:sanitizeCurrentAreaNote,
+  normalizeNote:sanitizeCurrentNote,
   // Backups made before notes had permanent ids keyed them by name.
-  legacyAreaNote:(value,key)=>CompatibilityCodec.areaNote(value,key),
+  legacyNote:(value,key)=>CompatibilityCodec.note(value,key),
   withNoteIdDeletions,
+  currentProtectedManifestNames,
   normalizeImportedActiveSession:(value,{legacy=false}={})=>legacy?CompatibilityCodec.activeSession(value):ActiveSessionCodec.sanitizeCurrent(value),
   normalizePersonalData:value=>PersonalDataCodec.normalize(value),
   normalizeAssetDescriptors:backupSanitizeAssetDescriptors

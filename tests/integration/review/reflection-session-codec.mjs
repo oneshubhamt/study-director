@@ -45,12 +45,12 @@ const limits=Object.freeze({
   maxTaskNameChars:300,maxAreaNameChars:200,maxUnitChars:80,maxPracticeRunsPerDay:100,maxPracticeUnitsPerDay:1000,maxPracticeUnitsPerRun:100,minPracticeTargetMs:1000,maxPracticeTargetMs:86400000,maxStudentNameChars:100,maxQuoteChars:1000
 });
 const dataContract=Object.freeze({schemas:Object.freeze({
-  SessionSnapshot:Object.freeze({version:6}),ActiveSession:Object.freeze({version:9,key:'current'}),DailyRecord:Object.freeze({version:15}),AreaNote:Object.freeze({version:2}),LocalRecoveryEnvelope:Object.freeze({version:1})
+  SessionSnapshot:Object.freeze({version:6}),ActiveSession:Object.freeze({version:9,key:'current'}),DailyRecord:Object.freeze({version:15}),Note:Object.freeze({version:2}),LocalRecoveryEnvelope:Object.freeze({version:1})
 })});
 const keyedRecord=Object.freeze({create:()=>Object.create(null)});
 const dailyRecordCodec=Object.freeze({
   compactPauseEvents:events=>Array.isArray(events)?events:[],sanitizeTimerRuntimePayload:value=>value&&typeof value==='object'?value:null,
-  isSupportedSavedDate:isValidIsoDate,normalizeDailyResultEntry:value=>value,compactRealTimeSnapshot:value=>value,sanitizeCurrentDailyRecord:value=>value,sanitizeCurrentAreaNote:value=>value
+  isSupportedSavedDate:isValidIsoDate,normalizeDailyResultEntry:value=>value,compactRealTimeSnapshot:value=>value,sanitizeCurrentDailyRecord:value=>value,sanitizeCurrentNote:value=>value
 });
 const codec=RecordCodecs.createActiveSessionCodec(Object.freeze({
   limits,dataContract,activeSessionId:'current',domain:Domain,keyedRecord,helpers,

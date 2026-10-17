@@ -44,8 +44,8 @@ assert.equal(resolvedDeletion13.changed,true,'A shared deletion candidate must u
 
 const noteA=plan.notes.find(item=>item.key==='A'),noteB=plan.notes.find(item=>item.key==='B'),noteSame=plan.notes.find(item=>item.key==='Same');
 assert.equal(noteA.conflict,true);assert.equal(noteA.defaultCandidateId,noteA.localCandidateId);
-assert.equal(noteB.incomingOnly,true,'Missing local Area Note must be an automatic incoming candidate.');
-assert.equal(noteSame.identical,true,'Identical Area Notes must not conflict.');
+assert.equal(noteB.incomingOnly,true,'Missing local Note must be an automatic incoming candidate.');
+assert.equal(noteSame.identical,true,'Identical Notes must not conflict.');
 
 assert.equal(plan.activeSession.candidates.length,2,'Active Session reconciliation must remain pairwise.');
 assert.equal(plan.activeSession.conflict,true);assert.equal(plan.activeSession.defaultCandidateId,plan.activeSession.localCandidateId);
@@ -66,8 +66,8 @@ const customDayValue=freeze({...day('2026-09-10','custom reflection'),version:16
 const customDayResolved=reconciliation.resolvePlan(plan,{savedDays:{'2026-09-10':freeze({value:customDayValue})}});
 assert.equal(customDayResolved.savedDays.find(item=>item.date==='2026-09-10').record.reflection,'custom reflection','Saved-Day reconciliation must accept an explicit manually resolved reflection value.');
 assert.equal(customDayResolved.savedDays.find(item=>item.date==='2026-09-10').changed,true,'Custom Saved-Day resolution must be marked changed from local.');
-assert.equal(resolved.notes.find(item=>item.key==='A').changed,false,'Divergent Area Note must default to local until rich-text reconciliation resolves it.');
-assert.equal(resolved.notes.find(item=>item.key==='B').changed,true,'Missing incoming Area Note must be selected automatically.');
+assert.equal(resolved.notes.find(item=>item.key==='A').changed,false,'Divergent Note must default to local until rich-text reconciliation resolves it.');
+assert.equal(resolved.notes.find(item=>item.key==='B').changed,true,'Missing incoming Note must be selected automatically.');
 const customNoteValue=note('A','manually reconciled A');
 const customResolved=reconciliation.resolvePlan(plan,{notes:{A:freeze({value:customNoteValue})}});
 assert.equal(customResolved.notes.find(item=>item.key==='A').value.text,'manually reconciled A','ResolvedPlan must accept an explicit scratch-editor reconciliation value.');

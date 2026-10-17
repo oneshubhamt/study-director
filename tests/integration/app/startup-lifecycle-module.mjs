@@ -36,7 +36,7 @@ const coordinator=Startup.createCoordinator(Object.freeze({
   timer:Object.freeze({stopPresentation:fn('timer-stop'),syncAfterWake:()=>{sequence.push('wake-reconcile');return false;}}),
   flushers:Object.freeze({
     planDraft:fn('flush-plan'),preferences:fn('flush-preferences'),activeSession:fn('flush-session'),
-    areaNotes:fn('flush-notes'),deletionRecovery:fn('flush-deletion-recovery')
+    notes:fn('flush-notes'),deletionRecovery:fn('flush-deletion-recovery')
   }),
   startup:Object.freeze({
     migrateCompatibility:asyncFn('compatibility-migration',1),restoreAppearance:fn('appearance'),bindDom:fn('bind-dom'),
@@ -111,7 +111,7 @@ const failureCoordinator=Startup.createCoordinator(Object.freeze({
     setPrimary:value=>{primary2=!!value;failureSequence.push(`primary:${primary2}`);return primary2;}
   }),
   timer:Object.freeze({stopPresentation:()=>true,syncAfterWake:()=>true}),
-  flushers:Object.freeze({planDraft:()=>true,preferences:()=>true,activeSession:()=>true,areaNotes:()=>true,deletionRecovery:()=>true}),
+  flushers:Object.freeze({planDraft:()=>true,preferences:()=>true,activeSession:()=>true,notes:()=>true,deletionRecovery:()=>true}),
   startup:Object.freeze({
     migrateCompatibility:async()=>true,restoreAppearance:()=>true,bindDom:()=>true,recoverInterruptedLibraryClear:async()=>true,recoverInterruptedRestore:async()=>true,
     loadNotes:async()=>true,hydrateDrafts:()=>true,previewPlan:()=>true,startClock:()=>true,startHeaderClock:()=>true,refreshCoreUi:()=>true,renderRecovery:()=>true,

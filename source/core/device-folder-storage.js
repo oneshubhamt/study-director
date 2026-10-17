@@ -89,7 +89,7 @@ registry.define('device-folder-storage',1,()=>{
     async function summaryOf(file,cacheKey){
       if(summaryCache.has(cacheKey))return summaryCache.get(cacheKey);
       let summary=null;
-      try{const manifest=await input.inspectManifest(file,{interactive:false});summary=freeze({logicalFingerprint:manifest.logicalFingerprint,exportedAt:manifest.exportedAt,counts:freeze({dailyRecord:Number(manifest.counts?.dailyRecord)||0,areaNote:Number(manifest.counts?.areaNote)||0}),encrypted:manifest.encrypted===true,retention:manifest.retention});}
+      try{const manifest=await input.inspectManifest(file,{interactive:false});summary=freeze({logicalFingerprint:manifest.logicalFingerprint,exportedAt:manifest.exportedAt,counts:freeze({dailyRecord:Number(manifest.counts?.dailyRecord)||0,note:Number(manifest.counts?.note)||0}),encrypted:manifest.encrypted===true,retention:manifest.retention});}
       catch(error){if(error&&error.code==='BACKUP_LOCKED')return null;summary=null;}
       summaryCache.set(cacheKey,summary);if(summaryCache.size>256)summaryCache.delete(summaryCache.keys().next().value);return summary;
     }

@@ -3,11 +3,11 @@ const store=(name,key,schema,schemaVersion)=>freeze({name,key,schema,schemaVersi
 
 export const INDEXED_DB=freeze({
   name:'sdmLocalAppDB.v1',
-  version:7,
+  version:9,
   stores:freeze({
     dailyRecords:store('dailyRecords','date','DailyRecord.v16',16),
     dailySummaries:store('dailySummaries','date','DailySummary.v5',5),
-    areaNotes:store('areaNotes','key','AreaNote.v3',3),
+    notes:store('notes','key','Note.v3',3),
     activeSessions:store('activeSessions','id','ActiveSession.v9',9),
     appMeta:store('appMeta','key','AppMeta.v1',1),
     assets:store('assets','assetId','Attachment.v2',2)
@@ -20,15 +20,20 @@ export const CURRENT_SCHEMA_VERSIONS=freeze({
   SessionSnapshot:6,
   LocalRecoveryEnvelope:1,
   ActiveSession:9,
-  AreaNote:3,
+  Note:3,
   AppMeta:1,
   CheckpointMetadata:1,
-  CheckpointProtectedManifest:2
+  CheckpointProtectedManifest:3
 });
 
+// A database below bridgeVersion opens there first: its stores take their
+// current names and the retired stores stay readable until the compatibility
+// steps finish, which then move it to the current version.
 export const OBSOLETE_INDEXED_DB=freeze({
   baselineVersion:5,
-  stores:freeze({syncQueue:'syncQueue',tombstones:'tombstones',reflectionDrafts:'reflectionDrafts'})
+  bridgeVersion:8,
+  stores:freeze({syncQueue:'syncQueue',tombstones:'tombstones',reflectionDrafts:'reflectionDrafts'}),
+  renamedStores:freeze({notes:'areaNotes'})
 });
 
 export const ACTIVE_SESSION_ID='current';
@@ -43,7 +48,7 @@ export const CHECKPOINT_METADATA=freeze({
 export const CHECKPOINT_PROTECTED_MANIFEST=freeze({
   format:'study-director.checkpoint-protected-manifest',
   version:CURRENT_SCHEMA_VERSIONS.CheckpointProtectedManifest,
-  fields:freeze(['format','version','checkpointId','sourceRevision','authority','savedDayDeletions','areaNoteDeletions','attachmentDeletions'])
+  fields:freeze(['format','version','checkpointId','sourceRevision','authority','savedDayDeletions','noteDeletions','attachmentDeletions'])
 });
 
 export const OPFS_IDENTITIES=freeze({
@@ -81,7 +86,7 @@ export const EXTERNAL_REPOSITORY_IDENTITIES=freeze({
 });
 
 export const EXTERNAL_FORMATS=freeze({
-  completeBackup:freeze({format:'study-director-backup',metadataVersion:21,containerMagic:'SDBK10\r\n'}),
+  completeBackup:freeze({format:'study-director-backup',metadataVersion:22,containerMagic:'SDBK10\r\n'}),
   protectedBackup:freeze({magic:'SDENC02\n',version:2}),
   attachmentArchive:freeze({format:'study-director.attachments',magic:'SDAT01\r\n',version:1})
 });
@@ -104,7 +109,7 @@ export const RUNTIME_DATA_CONTRACT=freeze({
     ActiveSession:freeze({version:CURRENT_SCHEMA_VERSIONS.ActiveSession,key:ACTIVE_SESSION_ID}),
     // A note's key is its permanent id (n_ and 16 hex digits). A deleted note
     // keeps it behind this prefix until it is restored or its retention ends.
-    AreaNote:freeze({version:CURRENT_SCHEMA_VERSIONS.AreaNote,key:'key',trashKeyPrefix:'~deleted '}),
+    Note:freeze({version:CURRENT_SCHEMA_VERSIONS.Note,key:'key',trashKeyPrefix:'~deleted '}),
     AppMeta:freeze({version:CURRENT_SCHEMA_VERSIONS.AppMeta,key:'key'}),
     CheckpointMetadata:freeze({version:CURRENT_SCHEMA_VERSIONS.CheckpointMetadata,format:CHECKPOINT_METADATA.format}),
     CheckpointProtectedManifest:freeze({version:CURRENT_SCHEMA_VERSIONS.CheckpointProtectedManifest,format:CHECKPOINT_PROTECTED_MANIFEST.format}),
@@ -115,7 +120,7 @@ export const RUNTIME_DATA_CONTRACT=freeze({
 export const INDEXED_DB_STORE_NAMES=freeze(Object.fromEntries(Object.entries(INDEXED_DB.stores).map(([id,value])=>[id,value.name])));
 
 export function assertCanonicalIdentities(){
-  if(!Object.isFrozen(INDEXED_DB)||!Object.isFrozen(INDEXED_DB.stores)||!Object.isFrozen(CURRENT_SCHEMA_VERSIONS)||!Object.isFrozen(OPFS_IDENTITIES)||!Object.isFrozen(OBSOLETE_OPFS_IDENTITIES)||!Object.isFrozen(CACHE_STORAGE_IDENTITIES)||!Object.isFrozen(EXTERNAL_REPOSITORY_IDENTITIES)||!Object.isFrozen(EXTERNAL_FORMATS)||!Object.isFrozen(CHECKPOINT_METADATA)||!Object.isFrozen(CHECKPOINT_METADATA.fields)||!Object.isFrozen(CHECKPOINT_PROTECTED_MANIFEST)||!Object.isFrozen(CHECKPOINT_PROTECTED_MANIFEST.fields)||!Object.isFrozen(OBSOLETE_INDEXED_DB)||!Object.isFrozen(OBSOLETE_INDEXED_DB.stores)||!Object.isFrozen(RUNTIME_DATA_CONTRACT))throw new TypeError('Canonical persistence identities must be frozen.');
+  if(!Object.isFrozen(INDEXED_DB)||!Object.isFrozen(INDEXED_DB.stores)||!Object.isFrozen(CURRENT_SCHEMA_VERSIONS)||!Object.isFrozen(OPFS_IDENTITIES)||!Object.isFrozen(OBSOLETE_OPFS_IDENTITIES)||!Object.isFrozen(CACHE_STORAGE_IDENTITIES)||!Object.isFrozen(EXTERNAL_REPOSITORY_IDENTITIES)||!Object.isFrozen(EXTERNAL_FORMATS)||!Object.isFrozen(CHECKPOINT_METADATA)||!Object.isFrozen(CHECKPOINT_METADATA.fields)||!Object.isFrozen(CHECKPOINT_PROTECTED_MANIFEST)||!Object.isFrozen(CHECKPOINT_PROTECTED_MANIFEST.fields)||!Object.isFrozen(OBSOLETE_INDEXED_DB)||!Object.isFrozen(OBSOLETE_INDEXED_DB.stores)||!Object.isFrozen(OBSOLETE_INDEXED_DB.renamedStores)||!Object.isFrozen(RUNTIME_DATA_CONTRACT))throw new TypeError('Canonical persistence identities must be frozen.');
   if(!INDEXED_DB.name||!Number.isSafeInteger(INDEXED_DB.version)||INDEXED_DB.version<1)throw new Error('IndexedDB identity is invalid.');
   const physicalNames=Object.values(INDEXED_DB_STORE_NAMES);
   if(physicalNames.length!==6||new Set(physicalNames).size!==physicalNames.length)throw new Error('IndexedDB store identities are incomplete or duplicated.');
@@ -125,6 +130,8 @@ export function assertCanonicalIdentities(){
   }
   if(OBSOLETE_INDEXED_DB.baselineVersion>=INDEXED_DB.version||new Set(Object.values(OBSOLETE_INDEXED_DB.stores)).size!==Object.values(OBSOLETE_INDEXED_DB.stores).length)throw new Error('Obsolete IndexedDB identities are invalid.');
   if(Object.values(OBSOLETE_INDEXED_DB.stores).some(name=>physicalNames.includes(name)))throw new Error('Obsolete IndexedDB stores must not remain canonical stores.');
+  if(!(OBSOLETE_INDEXED_DB.bridgeVersion>OBSOLETE_INDEXED_DB.baselineVersion&&OBSOLETE_INDEXED_DB.bridgeVersion<INDEXED_DB.version))throw new Error('IndexedDB bridge version must sit between the shipped baseline and the current version.');
+  for(const [id,name] of Object.entries(OBSOLETE_INDEXED_DB.renamedStores))if(!INDEXED_DB.stores[id]||physicalNames.includes(name)||Object.values(OBSOLETE_INDEXED_DB.stores).includes(name))throw new Error(`Renamed IndexedDB store ${id} is invalid.`);
   if(new Set(Object.values(OPFS_IDENTITIES)).size!==Object.values(OPFS_IDENTITIES).length)throw new Error('Current OPFS identities must be unique.');
   if(new Set(Object.values(OBSOLETE_OPFS_IDENTITIES)).size!==Object.values(OBSOLETE_OPFS_IDENTITIES).length||Object.values(OBSOLETE_OPFS_IDENTITIES).some(value=>Object.values(OPFS_IDENTITIES).includes(value)))throw new Error('Obsolete OPFS identities must be unique and outside the current identity set.');
   if(new Set(Object.values(CACHE_STORAGE_IDENTITIES)).size!==Object.values(CACHE_STORAGE_IDENTITIES).length)throw new Error('Cache Storage identities must be unique.');

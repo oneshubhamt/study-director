@@ -15,8 +15,8 @@ handler.handleCanonicalCommit({entityType:'activeSession',operation:'upsert',val
 assert.equal(commits.length,1,'A backup session flush still updates local storage health.');
 assert.equal(notifications.length,0,'A backup capture cannot schedule another automatic device backup.');
 assert.equal(maintenanceDelays.length,0,'The first routine active-session snapshot must not manufacture attachment GC work.');
-for(const entityType of ['planData','areaNote','dailyRecord']){
-  const before=notifications.length,value=entityType==='areaNote'?{key:'BackupCaptureQA',text:''}:entityType==='dailyRecord'?{date:'2026-09-22',reflection:''}:null;
+for(const entityType of ['planData','note','dailyRecord']){
+  const before=notifications.length,value=entityType==='note'?{key:'BackupCaptureQA',text:''}:entityType==='dailyRecord'?{date:'2026-09-22',reflection:''}:null;
   handler.handleCanonicalCommit({entityType,operation:'upsert',value,committedAt:'2026-09-23T17:00:30.000Z',backupCapture:true});
   assert.equal(notifications.length,before,`${entityType} flushed for backup capture must not recursively schedule another Device backup.`);
 }

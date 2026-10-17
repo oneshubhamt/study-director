@@ -12,7 +12,7 @@ const {exactFrozenObject:exactObject,functionPort:functions}=registry.contracts;
 // timing all run through the engine, the same way as for every location.
 registry.define('device-backup',1,()=>{
   const freeze=Object.freeze;
-  const ID='device-folder',LABEL='Device Folder',FORMAT='study-director.device-backup-settings',VERSION=4;
+  const ID='device-folder',LABEL='Device Folder',FORMAT='study-director.device-folder-settings',VERSION=4;
   // A stored folder with no recorded baseline still backs up on its own.
   const EPOCH='1970-01-01T00:00:00.000Z';
   function createController(input){

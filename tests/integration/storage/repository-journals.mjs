@@ -23,15 +23,15 @@ const blob=new Blob(['safety-copy']);
 const rollbackDeletions=Object.freeze([Object.freeze({date:'2026-09-12',deletedAt:'2026-09-13T05:30:00.000Z'})]);
 const rollbackNoteDeletions=Object.freeze([Object.freeze({key:'Ethics',deletedAt:'2026-09-13T05:31:00.000Z'})]);
 const rollbackAttachmentDeletions=Object.freeze([Object.freeze({assetId:'img-journalabcdefghijklmnop',deletedAt:'2026-09-13T05:32:00.000Z'})]);
-await app.restoreJournal.prepare(Object.freeze({id:restoreId,blob,filename:'qa.sdbackup',scheduleText:'07:00 | 60 | QA | Study | Area | pages | 10',savedDayDeletions:rollbackDeletions,areaNoteDeletions:rollbackNoteDeletions,attachmentDeletions:rollbackAttachmentDeletions}));
+await app.restoreJournal.prepare(Object.freeze({id:restoreId,blob,filename:'qa.sdbackup',scheduleText:'07:00 | 60 | QA | Study | Area | pages | 10',savedDayDeletions:rollbackDeletions,noteDeletions:rollbackNoteDeletions,attachmentDeletions:rollbackAttachmentDeletions}));
 const restoreHeader=await app.restoreJournal.diagnostics();assert.equal(restoreHeader.phase,'prepared');assert.equal(restoreHeader.blob,undefined);assert.equal(restoreHeader.scheduleText,undefined);
 let restore=await app.restoreJournal.read();
 assert.equal(restore.state.id,restoreId);
 assert.equal(restore.state.phase,'prepared');
 assert.equal(await restore.payload.blob.text(),'safety-copy');
-assert.equal(restore.payload.version,4);
+assert.equal(restore.payload.version,5);
 assert.equal(JSON.stringify(restore.payload.savedDayDeletions),JSON.stringify(rollbackDeletions),'restore journal must persist the Saved-Day deletion ledger needed for exact rollback');
-assert.equal(JSON.stringify(restore.payload.areaNoteDeletions),JSON.stringify(rollbackNoteDeletions),'restore journal must persist note deletion history for exact rollback');
+assert.equal(JSON.stringify(restore.payload.noteDeletions),JSON.stringify(rollbackNoteDeletions),'restore journal must persist note deletion history for exact rollback');
 assert.equal(JSON.stringify(restore.payload.attachmentDeletions),JSON.stringify(rollbackAttachmentDeletions),'restore journal must persist Attachment Library deletion history for exact rollback');
 await app.restoreJournal.mark(restoreId,'committing');
 restore=await app.restoreJournal.read();
@@ -66,7 +66,7 @@ const backupFile=Object.freeze({name:'backup-123e4567-e89b-12d3-a456-42661417400
 for(const payload of [
   Object.freeze({format:'study-director.restore-journal',version:1,id:legacyId,backupFile,filename:'legacy-v1.sdbackup',scheduleText:''}),
   Object.freeze({format:'study-director.restore-journal',version:2,id:legacyId,blob:new Blob(['v2']),filename:'legacy-v2.sdbackup',scheduleText:'',savedDayDeletions:Object.freeze([{date:'2026-09-10',deletedAt:legacyTime}])}),
-  Object.freeze({format:'study-director.restore-journal',version:3,id:legacyId,blob:new Blob(['v3']),filename:'legacy-v3.sdbackup',scheduleText:'',savedDayDeletions:Object.freeze([]),areaNoteDeletions:Object.freeze([{key:'GS2',deletedAt:legacyTime}])})
+  Object.freeze({format:'study-director.restore-journal',version:3,id:legacyId,blob:new Blob(['v3']),filename:'legacy-v3.sdbackup',scheduleText:'',savedDayDeletions:Object.freeze([]),noteDeletions:Object.freeze([{key:'GS2',deletedAt:legacyTime}])})
 ]){
   await assert.rejects(()=>journalMeta.write('restoreJournalPayload',payload),/not canonical/u,`version ${payload.version} is not read by the ordinary runtime`);
 }

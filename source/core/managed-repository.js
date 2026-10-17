@@ -45,12 +45,17 @@ registry.define('managed-repository',1,()=>{
     }
     validateRepositoryRetentionPolicy(REPOSITORY_RETENTION_POLICY);
 // Manifest 6 keys notes by permanent id; earlier manifests keyed them by name.
-const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=6,REPOSITORY_NOTE_ID_MANIFEST_VERSION=6,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,6]));
+const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=7,REPOSITORY_NOTE_ID_MANIFEST_VERSION=6,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,6,7]));
+// Manifests before version 7 call a note areaNote: in object kinds, pack
+// members, counts and the deletion list. A version is verified under the names
+// it was written with; its notes leave the reader under the current name.
+const REPOSITORY_NOTE_KIND_VERSION=7,WRITTEN_NOTE_KIND='areaNote';
+const repositoryNoteKind=manifestVersion=>Number(manifestVersion)<REPOSITORY_NOTE_KIND_VERSION?WRITTEN_NOTE_KIND:'note';
 const LEGACY_REFLECTION_DRAFT_PACK_KIND='reflectionDraftPack';
 const REPOSITORY_COMMIT_FORMAT='study-director.backup-repository-commit',REPOSITORY_COMMIT_VERSION=1,REPOSITORY_COMMIT_REQUIRED_MANIFEST_VERSION=2;
 const REPOSITORY_OBJECT_FORMAT='study-director.backup-repository-object',REPOSITORY_OBJECT_VERSION=1;
 const REPOSITORY_PACK_FORMAT='study-director.backup-repository-structured-pack',REPOSITORY_PACK_VERSION=1,REPOSITORY_PACK_SHARDS=4,REPOSITORY_PACK_MEMBER_MAX_BYTES=64*1024;
-const REPOSITORY_PACKABLE_KINDS=freeze(new Set(['areaNote','personalData']));
+const REPOSITORY_PACKABLE_KINDS=freeze(new Set(['note','personalData'])),WRITTEN_PACKABLE_KINDS=freeze(new Set([WRITTEN_NOTE_KIND,'personalData']));
 const repositoryPreparedState=new WeakMap();
 const repositoryPublicationStates=new Map();
 const REPOSITORY_PREPARATION_INDEX_VERSION=2;
@@ -73,19 +78,19 @@ function repositoryPackShard(kind,key){
 function repositoryPackKey(shard){const value=Number(shard);if(!Number.isInteger(value)||value<0||value>=REPOSITORY_PACK_SHARDS)throw new Error('Repository structured-pack shard is invalid.');return `shard:${value}`;}
 function repositoryPackableEntry(entry){return !!(entry&&entry.present&&REPOSITORY_PACKABLE_KINDS.has(String(entry.kind))&&Number(entry.sourceBytes)>0&&Number(entry.sourceBytes)<=REPOSITORY_PACK_MEMBER_MAX_BYTES);}
 function repositoryPackMembersKey(members){return (members||[]).map(member=>`${member.kind}\u0000${member.key}\u0000${member.fingerprint}\u0000${member.sourceBytes}`).join('\u0001');}
-function repositoryPackManifestMembers(value){
-  const rows=Array.isArray(value)?value:[],seen=new Set(),out=[];
+function repositoryPackManifestMembers(value,manifestVersion=REPOSITORY_MANIFEST_VERSION){
+  const rows=Array.isArray(value)?value:[],seen=new Set(),out=[],packable=repositoryNoteKind(manifestVersion)==='note'?REPOSITORY_PACKABLE_KINDS:WRITTEN_PACKABLE_KINDS;
   for(const raw of rows){
     if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new Error('Repository structured-pack member is invalid.');
     const kind=String(raw.kind||''),key=String(raw.key||''),fingerprint=String(raw.fingerprint||'').toLowerCase(),sourceBytes=Number(raw.sourceBytes),unit=repositoryUnitKey(kind,key);
-    if(!REPOSITORY_PACKABLE_KINDS.has(kind)||!key||!/^[a-f0-9]{64}$/u.test(fingerprint)||!Number.isSafeInteger(sourceBytes)||sourceBytes<=0||sourceBytes>REPOSITORY_PACK_MEMBER_MAX_BYTES||seen.has(unit))throw new Error('Repository structured-pack member is malformed.');
+    if(!packable.has(kind)||!key||!/^[a-f0-9]{64}$/u.test(fingerprint)||!Number.isSafeInteger(sourceBytes)||sourceBytes<=0||sourceBytes>REPOSITORY_PACK_MEMBER_MAX_BYTES||seen.has(unit))throw new Error('Repository structured-pack member is malformed.');
     seen.add(unit);out.push(freeze({kind,key,fingerprint,sourceBytes}));
   }
   out.sort((a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key));if(!out.length)throw new Error('Repository structured-pack contains no members.');return freeze(out);
 }
 function repositoryPreparationUnit(kind,key){
   if(kind==='dailyRecordPack')return `dailyRecordPack:${String(key)}`;
-  if(kind==='areaNote')return `areaNote:${String(key)}`;
+  if(kind==='note')return `note:${String(key)}`;
   if(kind==='personalData'&&String(key)==='personal')return 'personalData';
   if(kind==='activeSession'&&String(key)==='active')return 'activeSession';
   throw new Error('Repository structured preparation unit is invalid.');
@@ -93,7 +98,7 @@ function repositoryPreparationUnit(kind,key){
 function repositoryPreparationDescriptor(unit){
   const value=String(unit||'');
   if(/^dailyRecordPack:\d{4}-(?:0[1-9]|1[0-2])$/u.test(value))return freeze({unit:value,kind:'dailyRecordPack',key:value.slice('dailyRecordPack:'.length)});
-  if(value.startsWith('areaNote:')&&value.length>'areaNote:'.length)return freeze({unit:value,kind:'areaNote',key:value.slice('areaNote:'.length)});
+  if(value.startsWith('note:')&&value.length>'note:'.length)return freeze({unit:value,kind:'note',key:value.slice('note:'.length)});
   if(value==='personalData')return freeze({unit:value,kind:'personalData',key:'personal'});
   if(value==='activeSession')return freeze({unit:value,kind:'activeSession',key:'active'});
   return null;
@@ -120,31 +125,32 @@ async function repositoryPreparationPlan(preparation,reconciliationBase){
   return freeze({index,entries,currentStamps:current,changed:freeze(changed),structuredChanged:freeze(structuredChanged)});
 }
 async function repositoryNoteSetIdentity(entries){
-  const noteKeys=[...entries.values()].filter(entry=>entry&&entry.present&&entry.kind==='areaNote').map(entry=>String(entry.key)).sort(),noteKeyFingerprint=await Exports.run('checksum',{value:JSON.stringify(noteKeys),algorithm:'sha256'});
+  const noteKeys=[...entries.values()].filter(entry=>entry&&entry.present&&entry.kind==='note').map(entry=>String(entry.key)).sort(),noteKeyFingerprint=await Exports.run('checksum',{value:JSON.stringify(noteKeys),algorithm:'sha256'});
   return freeze({noteKeys:freeze(noteKeys),noteCount:noteKeys.length,noteKeyFingerprint:String(noteKeyFingerprint||'')});
 }
 async function repositoryPreparationIndexCandidate(epochToken,stamps,entries){
   const rows=[...entries.values()].sort((a,b)=>a.unit.localeCompare(b.unit));
-  const maxUnits=Math.max(1024,Number(APP_LIMITS.maxImportRecords||10000)+Number(APP_LIMITS.maxOngoingNotes||1000)+16);if(rows.length>maxUnits)return null;
+  const maxUnits=Math.max(1024,Number(APP_LIMITS.maxImportRecords||10000)+Number(APP_LIMITS.maxNotes||1000)+16);if(rows.length>maxUnits)return null;
   const noteSet=await repositoryNoteSetIdentity(entries);
   return freeze({version:REPOSITORY_PREPARATION_INDEX_VERSION,epochToken:String(epochToken||''),checkpointId:'',noteCount:noteSet.noteCount,noteKeyFingerprint:noteSet.noteKeyFingerprint,stamps:freeze([...(stamps||[])]),entries:freeze(rows)});
 }
 function repositoryPreparationCounts(entries){
-  let dailyRecord=0,areaNote=0,activeSession=0,personalData=0;
-  for(const entry of entries.values())if(entry&&entry.present){if(entry.kind==='dailyRecordPack')dailyRecord+=entry.members.length;else if(entry.kind==='areaNote')areaNote+=1;else if(entry.kind==='activeSession')activeSession=1;else if(entry.kind==='personalData')personalData=1;}
-  return BackupCodec.countShape({checkpointManifest:1,personalData,dailyRecord,areaNote,activeSession});
+  let dailyRecord=0,note=0,activeSession=0,personalData=0;
+  for(const entry of entries.values())if(entry&&entry.present){if(entry.kind==='dailyRecordPack')dailyRecord+=entry.members.length;else if(entry.kind==='note')note+=1;else if(entry.kind==='activeSession')activeSession=1;else if(entry.kind==='personalData')personalData=1;}
+  return BackupCodec.countShape({checkpointManifest:1,personalData,dailyRecord,note,activeSession});
 }
 function repositoryPreparationInventory(entries){
   const recordDates=[],noteKeys=[],assetIds=new Set();
-  for(const entry of entries.values())if(entry&&entry.present){if(entry.kind==='dailyRecordPack')recordDates.push(...entry.members);else if(entry.kind==='areaNote')noteKeys.push(entry.key);for(const id of entry.assetIds||[])assetIds.add(String(id));}
+  for(const entry of entries.values())if(entry&&entry.present){if(entry.kind==='dailyRecordPack')recordDates.push(...entry.members);else if(entry.kind==='note')noteKeys.push(entry.key);for(const id of entry.assetIds||[])assetIds.add(String(id));}
   recordDates.sort();noteKeys.sort();return freeze({recordDates:freeze(recordDates),noteKeys:freeze(noteKeys),assetIds:freeze([...assetIds].sort()),counts:repositoryPreparationCounts(entries)});
 }
 function repositoryMonth(value){const match=/^(\d{4}-\d{2})-\d{2}$/u.exec(String(value||''));if(!match)throw new Error('Repository record date is invalid.');return match[1];}
-function repositoryManifestCounts(value,manifestVersion){
+function repositoryManifestCounts(written,manifestVersion){
+  const value=repositoryNoteKind(manifestVersion)!=='note'&&written&&Object.hasOwn(written,WRITTEN_NOTE_KIND)?{...written,note:written[WRITTEN_NOTE_KIND]}:written;
   const current=BackupCodec.countShape(value||{});
   if(Number(manifestVersion)>=5)return freeze({...current});
   const raw=Number(value&&value.reflectionDraft||0),reflectionDraft=Number.isSafeInteger(raw)&&raw>=0&&raw<=Math.max(1,Number(APP_LIMITS.maxImportRecords)||10000)?raw:0;
-  return freeze({dailyRecord:Number(current.dailyRecord||0),areaNote:Number(current.areaNote||0),activeSession:Number(current.activeSession||0),reflectionDraft,personalData:Number(current.personalData||0),checkpointManifest:Number(current.checkpointManifest||0)});
+  return freeze({dailyRecord:Number(current.dailyRecord||0),note:Number(current.note||0),activeSession:Number(current.activeSession||0),reflectionDraft,personalData:Number(current.personalData||0),checkpointManifest:Number(current.checkpointManifest||0)});
 }
 function repositoryCountsEqualForManifest(actual,expected,manifestVersion){
   const a=repositoryManifestCounts(actual,manifestVersion),b=repositoryManifestCounts(expected,manifestVersion);
@@ -164,7 +170,7 @@ function repositoryLogicalObjectRows(manifest){
   for(const entry of Array.isArray(manifest&&manifest.objects)?manifest.objects:[]){
     const kind=String(entry&&entry.kind||'');
     if(kind==='reflectionDraftPack')continue; // Legacy-only data intentionally retired from the current canonical state.
-    if(kind==='structuredPack'){for(const member of repositoryPackManifestMembers(entry.members))out.push(freeze({...member}));}
+    if(kind==='structuredPack'){for(const member of repositoryPackManifestMembers(entry.members,manifest.version))out.push(freeze({...member}));}
     else out.push(freeze({kind,key:String(entry&&entry.key||''),fingerprint:String(entry&&entry.fingerprint||''),sourceBytes:Number(entry&&entry.sourceBytes)||0}));
   }
   return freeze(out.sort((a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key)||a.fingerprint.localeCompare(b.fingerprint)||a.sourceBytes-b.sourceBytes));
@@ -175,13 +181,17 @@ function repositoryLogicalIdentityPayload(value){
   const assets=(Array.isArray(manifest.assets)?manifest.assets:[]).map(entry=>entry&&entry.missing===true?freeze({assetId:String(entry.assetId||''),missing:true}):freeze({assetId:String(entry&&entry.assetId||''),mimeType:String(entry&&entry.mimeType||''),size:Number(entry&&entry.size)||0,checksum:String(entry&&entry.checksum||''),name:String(entry&&entry.name||''),library:entry&&entry.library===true})).sort((a,b)=>a.assetId.localeCompare(b.assetId));
   const protectedManifest=manifest.protectedCheckpointManifest&&typeof manifest.protectedCheckpointManifest==='object'?manifest.protectedCheckpointManifest:{};
   const savedDayDeletions=(Array.isArray(protectedManifest.savedDayDeletions)?protectedManifest.savedDayDeletions:[]).map(entry=>freeze({date:String(entry&&entry.date||''),deletedAt:String(entry&&entry.deletedAt||'')})).sort((a,b)=>a.date.localeCompare(b.date)||a.deletedAt.localeCompare(b.deletedAt));
-  const areaNoteDeletions=(Array.isArray(protectedManifest.areaNoteDeletions)?protectedManifest.areaNoteDeletions:[]).map(entry=>freeze({key:String(entry&&entry.key||''),deletedAt:String(entry&&entry.deletedAt||'')})).sort((a,b)=>a.key.localeCompare(b.key)||a.deletedAt.localeCompare(b.deletedAt));
+  const noteDeletions=(Array.isArray(protectedManifest.noteDeletions)?protectedManifest.noteDeletions:[]).map(entry=>freeze({key:String(entry&&entry.key||''),deletedAt:String(entry&&entry.deletedAt||'')})).sort((a,b)=>a.key.localeCompare(b.key)||a.deletedAt.localeCompare(b.deletedAt));
   const attachmentDeletions=(Array.isArray(protectedManifest.attachmentDeletions)?protectedManifest.attachmentDeletions:[]).map(entry=>freeze({assetId:String(entry&&entry.assetId||''),deletedAt:String(entry&&entry.deletedAt||'')})).sort((a,b)=>a.assetId.localeCompare(b.assetId)||a.deletedAt.localeCompare(b.deletedAt));
   // Logical identity is defined by the current portable canonical domains. Legacy-only
   // Reflection Draft counts are verified when reading old manifests but are deliberately
   // excluded here because L16F discards that retired domain during compatibility migration.
-  const counts=BackupCodec.countShape(manifest.counts||{});
-  return freeze({format:'study-director.managed-backup-logical-state',version:1,counts:freeze({...counts}),objects:freeze(objects),assets:freeze(assets),deletions:freeze({savedDays:freeze(savedDayDeletions),areaNotes:freeze(areaNoteDeletions),attachments:freeze(attachmentDeletions)})});
+  // A version written before the note rename keeps the identity it was
+  // written with: the same fields, in the same order, under the old names.
+  const counts=BackupCodec.countShape(manifest.counts||{}),written=repositoryNoteKind(manifest.version)!=='note';
+  const identityCounts=written?Object.fromEntries(Object.entries(counts).map(([type,count])=>[type==='note'?WRITTEN_NOTE_KIND:type,count])):{...counts};
+  const deletions=written?{savedDays:freeze(savedDayDeletions),areaNotes:freeze(noteDeletions),attachments:freeze(attachmentDeletions)}:{savedDays:freeze(savedDayDeletions),notes:freeze(noteDeletions),attachments:freeze(attachmentDeletions)};
+  return freeze({format:'study-director.managed-backup-logical-state',version:1,counts:freeze(identityCounts),objects:freeze(objects),assets:freeze(assets),deletions:freeze(deletions)});
 }
 async function repositoryLogicalFingerprint(value){
   const payload=repositoryLogicalIdentityPayload(value),serialized=await Exports.run('stringify',{value:payload});
@@ -337,7 +347,7 @@ function validateRepositoryManifest(value){
     let members;
     if(kind==='structuredPack'){
       if(manifestVersion<4||!/^shard:[0-3]$/u.test(key))throw new Error('Device repository structured-pack reference is invalid.');
-      members=repositoryPackManifestMembers(raw.members);const shard=Number(key.slice('shard:'.length));
+      members=repositoryPackManifestMembers(raw.members,manifestVersion);const shard=Number(key.slice('shard:'.length));
       for(const member of members){const logicalUnit=repositoryUnitKey(member.kind,member.key);if(repositoryPackShard(member.kind,member.key)!==shard||logicalUnitKeys.has(logicalUnit))throw new Error('Device repository structured-pack membership is invalid.');logicalUnitKeys.add(logicalUnit);}
     }else if(kind!=='attachment'){const logicalUnit=repositoryUnitKey(kind,key);if(logicalUnitKeys.has(logicalUnit))throw new Error('Device repository logical object index contains duplicates.');logicalUnitKeys.add(logicalUnit);}
     objectIds.add(objectId);unitKeys.add(unit);objects.push(freeze({objectId,kind,key,fingerprint,compression,sourceBytes,storedBytes,storedChecksum,...(members?{members}:{})}));
@@ -355,7 +365,7 @@ function validateRepositoryManifest(value){
   const rawAncestorIds=Array.isArray(value.reconciliationAncestorIds)?value.reconciliationAncestorIds:(reconciliationBaseId?[reconciliationBaseId]:[]),reconciliationAncestorIds=[],reconciliationAncestorSet=new Set();
   for(const rawId of rawAncestorIds){const id=String(rawId||'');if(!/^cp_[a-f0-9]{32}$/u.test(id)||id===String(checkpoint.checkpointId||'')||reconciliationAncestorSet.has(id))throw new Error('Device repository reconciliation ancestry is invalid.');reconciliationAncestorSet.add(id);reconciliationAncestorIds.push(id);}
   if((reconciliationBaseId&&reconciliationAncestorIds[0]!==reconciliationBaseId)||(!reconciliationBaseId&&reconciliationAncestorIds.length)||repositoryReconciliationAncestryBytes(reconciliationAncestorIds)>REPOSITORY_RECONCILIATION_ANCESTRY_MAX_BYTES)throw new Error('Device repository reconciliation ancestry is invalid.');
-  const protectedCheckpointManifest=value.protectedCheckpointManifest;
+  const protectedCheckpointManifest=repositoryNoteKind(manifestVersion)==='note'?value.protectedCheckpointManifest:BackupCodec.currentProtectedManifestNames(value.protectedCheckpointManifest);
   if(Number(backupVersion)>=15&&(!protectedCheckpointManifest||protectedCheckpointManifest.checkpointId!==checkpoint.checkpointId||protectedCheckpointManifest.sourceRevision!==new Date(sourceRevision).toISOString()))throw new Error('Device repository protected checkpoint manifest is invalid.');
   const logicalFingerprint=String(value.logicalFingerprint||'').toLowerCase();
   if(manifestVersion>=3&&!/^[a-f0-9]{64}$/u.test(logicalFingerprint))throw new Error('Device repository logical checkpoint fingerprint is invalid.');
@@ -528,7 +538,7 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       }
       structuredObjects.set(unit,object);packedPayloads.delete(unit);
     }
-    if(kind==='areaNote')readNoteStates.set(String(key),baseNoteState(payload));
+    if(kind==='note')readNoteStates.set(String(key),baseNoteState(payload));
     if(kind==='personalData')readPersonal=payload;
     return entry;
   };
@@ -565,7 +575,7 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       const reads=readUnits.size?await readPreparationUnits(preparation,[...readUnits].sort()):freeze([]);
       for(const result of reads){
         const descriptor=repositoryPreparationDescriptor(result&&result.unit);if(!descriptor)throw new Error('Incremental repository preparation returned an unknown unit.');
-        if(!result.present){candidateEntries.set(descriptor.unit,repositoryPreparationEntry(descriptor.kind,descriptor.key,null,'',0,{present:false}));structuredObjects.delete(descriptor.unit);if(descriptor.kind==='areaNote')readNoteStates.set(descriptor.key,null);if(descriptor.kind==='personalData')readPersonal=null;continue;}
+        if(!result.present){candidateEntries.set(descriptor.unit,repositoryPreparationEntry(descriptor.kind,descriptor.key,null,'',0,{present:false}));structuredObjects.delete(descriptor.unit);if(descriptor.kind==='note')readNoteStates.set(descriptor.key,null);if(descriptor.kind==='personalData')readPersonal=null;continue;}
         await materializeStructured(descriptor.kind,descriptor.key,result.payload);
       }
       const inventory=repositoryPreparationInventory(candidateEntries),catalogue=new Map((preparation.assetCatalogue||[]).map(row=>[String(row&&row.id||''),row])),ids=new Set((preparation.assetCatalogue||[]).filter(row=>row&&row.library===true).map(row=>String(row.id)));
@@ -579,14 +589,14 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
     }else{
       capture=await captureLogicalCheckpoint(exportedAt,preparation?{includeAssetBlobs:false,assumeFlushed:true,requireCanonicalComplete:true}:{includeAssetBlobs:false,requireCanonicalComplete:true});
       for(const [month,items] of grouped(capture.dailyDocuments,'date'))await materializeStructured('dailyRecordPack',month,freeze([...items]));
-      for(const note of capture.areaNoteItems)await materializeStructured('areaNote',String(note.key),note);
+      for(const note of capture.noteItems)await materializeStructured('note',String(note.key),note);
       if(capture.activeSession)await materializeStructured('activeSession','active',capture.activeSession);
       if(capture.personalData)await materializeStructured('personalData','personal',capture.personalData);
       assetItems=[...(capture.assetItems||[])];
-      const updates=Object.create(null),noteKeys=[];for(const note of capture.areaNoteItems||[]){const key=String(note&&note.key||'').trim();if(!key)continue;noteKeys.push(key);updates[key]=baseNoteState(note);}
+      const updates=Object.create(null),noteKeys=[];for(const note of capture.noteItems||[]){const key=String(note&&note.key||'').trim();if(!key)continue;noteKeys.push(key);updates[key]=baseNoteState(note);}
       noteKeys.sort();reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:1,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await AppData.reconciliationBase.personalFingerprint(capture.personalData||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([])});
     }
-    const structuredRank=freeze({dailyRecordPack:0,activeSession:1,personalData:2,areaNote:3});
+    const structuredRank=freeze({dailyRecordPack:0,activeSession:1,personalData:2,note:3});
     for(const entry of [...candidateEntries.values()].filter(entry=>entry.present&&!repositoryPackableEntry(entry)).sort((a,b)=>(structuredRank[a.kind]??9)-(structuredRank[b.kind]??9)||String(a.key).localeCompare(String(b.key)))){
       const object=structuredObjects.get(entry.unit);if(!object)throw new Error('A reusable structured repository object became unavailable during checkpoint preparation.');objects.push(object);currentByUnit.set(repositoryUnitKey(object.kind,object.key),object);
     }
@@ -708,14 +718,14 @@ async function inspectRepositoryManifest(file,{interactive=false}={}){
 }
 function repositoryCorruption(message){const error=new Error(message);error.code='REPOSITORY_INTEGRITY_CORRUPT';return error;}
 async function verifyRepositoryObject(file,entry,options={}){
-  const expected=repositoryManifestObject(entry);
+  const expected=freeze({storedBytes:Number(entry&&entry.storedBytes)||0,storedChecksum:String(entry&&entry.storedChecksum||'')});
   if(!(file instanceof Blob)||file.size!==expected.storedBytes)throw repositoryCorruption('Repository object size did not match after reopening.');
   const checksum=await Exports.run('checksum',{value:file},{signal:options.signal||null,onProgress:typeof options.onProgress==='function'?options.onProgress:null});
   if(checksum!==expected.storedChecksum)throw repositoryCorruption('Repository object failed read-back verification.');
   return true;
 }
 const REPOSITORY_SCRUB_SKIPPED_KINDS=freeze(new Set(['activeSession',LEGACY_REFLECTION_DRAFT_PACK_KIND]));
-const REPOSITORY_SCRUB_KIND_PRIORITY=freeze(new Map([['attachment',0],['structuredPack',1],['areaNote',2],['dailyRecordPack',3],['personalData',4]]));
+const REPOSITORY_SCRUB_KIND_PRIORITY=freeze(new Map([['attachment',0],['structuredPack',1],['note',2],['dailyRecordPack',3],['personalData',4]]));
 function repositoryScrubObjectIds(value){
   const rows=Array.isArray(value)?value:[],seen=new Set(),out=[];
   for(const raw of rows){const id=String(raw||'');if(!/^obj_[a-f0-9]{32}$/u.test(id)||seen.has(id))continue;seen.add(id);out.push(id);}
@@ -729,7 +739,7 @@ async function scrubRepositoryIntegrity(manifests,readObjectValue,{cursor='',rec
     firstByObject.set(entry.objectId,freeze({manifest,entry}));
   }
   const rows=[...firstByObject.values()].sort((a,b)=>{
-    const pa=REPOSITORY_SCRUB_KIND_PRIORITY.get(a.entry.kind)??99,pb=REPOSITORY_SCRUB_KIND_PRIORITY.get(b.entry.kind)??99;
+    const pa=REPOSITORY_SCRUB_KIND_PRIORITY.get(a.entry.kind===WRITTEN_NOTE_KIND?'note':a.entry.kind)??99,pb=REPOSITORY_SCRUB_KIND_PRIORITY.get(b.entry.kind===WRITTEN_NOTE_KIND?'note':b.entry.kind)??99;
     return pa-pb||Date.parse(a.manifest.exportedAt)-Date.parse(b.manifest.exportedAt)||a.entry.objectId.localeCompare(b.entry.objectId);
   });
   const currentScanId=await Exports.run('checksum',{value:JSON.stringify(rows.map(({entry})=>[entry.objectId,entry.storedChecksum,entry.fingerprint]))},{signal});
@@ -839,7 +849,7 @@ async function readRepositoryStructuredObject(manifest,entry,readObject,options=
         }
         const shard=Number(String(entry.key).slice('shard:'.length));
         if(!body||typeof body!=='object'||Array.isArray(body)||body.format!==REPOSITORY_PACK_FORMAT||Number(body.version)!==REPOSITORY_PACK_VERSION||Number(body.shard)!==shard||!Array.isArray(body.members))throw repositoryCorruption(`Repository structured pack ${entry.objectId} identity is invalid.`);
-        const expected=repositoryPackManifestMembers(entry.members),actual=[];
+        const expected=repositoryPackManifestMembers(entry.members,manifest.version),actual=[];
         for(const raw of body.members){
           if(!raw||typeof raw!=='object'||Array.isArray(raw))throw repositoryCorruption(`Repository structured pack ${entry.objectId} contains an invalid member.`);
           const kind=String(raw.kind||''),key=String(raw.key||''),encoded=await (async()=>{const logicalBody=freeze({format:REPOSITORY_OBJECT_FORMAT,version:REPOSITORY_OBJECT_VERSION,kind,key,payload:raw.payload}),text=await Exports.run('stringify',{value:logicalBody}),bytes=BackupCodec.utf8Bytes(text).byteLength,hash=await Exports.run('checksum',{value:text,algorithm:'sha256'},{signal:options.signal});return freeze({bytes,hash});})();
@@ -882,10 +892,10 @@ async function openRepositoryAttachment(manifest,entry,descriptor,readObject,opt
 // without reading them. Versions from before note ids name notes by title,
 // so they hold no earlier version of a note.
 function repositoryNoteObject(manifest,noteId){
-  const id=String(noteId||'');if(!id||Number(manifest.version)<REPOSITORY_NOTE_ID_MANIFEST_VERSION)return null;
+  const id=String(noteId||''),noteKind=repositoryNoteKind(manifest.version);if(!id||Number(manifest.version)<REPOSITORY_NOTE_ID_MANIFEST_VERSION)return null;
   for(const entry of manifest.objects||[]){
-    if(entry.kind==='areaNote'&&entry.key===id)return freeze({entry,fingerprint:entry.fingerprint});
-    if(entry.kind==='structuredPack'){const member=repositoryPackManifestMembers(entry.members).find(item=>item.kind==='areaNote'&&item.key===id);if(member)return freeze({entry,fingerprint:member.fingerprint});}
+    if(entry.kind===noteKind&&entry.key===id)return freeze({entry,fingerprint:entry.fingerprint});
+    if(entry.kind==='structuredPack'){const member=repositoryPackManifestMembers(entry.members,manifest.version).find(item=>item.kind===noteKind&&item.key===id);if(member)return freeze({entry,fingerprint:member.fingerprint});}
   }
   return null;
 }
@@ -893,7 +903,7 @@ function repositoryNoteObject(manifest,noteId){
 async function readRepositoryNote(manifest,readObject,noteId,options={}){
   const found=repositoryNoteObject(manifest,noteId);if(!found)return null;
   const rows=await readRepositoryStructuredObject(manifest,found.entry,repositoryReadPort(readObject),options);
-  const row=rows.find(item=>item.kind==='areaNote'&&item.key===String(noteId));
+  const row=rows.find(item=>item.kind===repositoryNoteKind(manifest.version)&&item.key===String(noteId));
   return row?row.payload:null;
 }
 async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectValue,{interactive=true,signal=null,note='',localAttachments=false}={}){
@@ -901,25 +911,25 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
   throwIfImportAborted(signal);
   if(manifest.installationId&&manifest.installationId!==manifest.checkpoint.originInstallationId)throw new Error('Repository checkpoint installation provenance is inconsistent.');
   const objectById=new Map(manifest.objects.map(entry=>[entry.objectId,entry]));
-  const allowedKinds=new Set(['dailyRecordPack','areaNote','activeSession','personalData','structuredPack','attachment']);if(manifest.version<=4)allowedKinds.add(LEGACY_REFLECTION_DRAFT_PACK_KIND);
+  const noteKind=repositoryNoteKind(manifest.version),allowedKinds=new Set(['dailyRecordPack',noteKind,'activeSession','personalData','structuredPack','attachment']);if(manifest.version<=4)allowedKinds.add(LEGACY_REFLECTION_DRAFT_PACK_KIND);
   for(const entry of manifest.objects)if(!allowedKinds.has(entry.kind))throw new Error(`Repository object kind ${entry.kind} is unsupported.`);
-  const dailyDocuments=[],areaNoteItems=[];let activeSession=null,personalData=null,legacyReflectionDraftCount=0;
+  const dailyDocuments=[],noteItems=[];let activeSession=null,personalData=null,legacyReflectionDraftCount=0;
   // A one-note read names the note by id.
-  const holdsNote=entry=>entry.kind==='areaNote'&&entry.key===noteKey||entry.kind==='structuredPack'&&repositoryPackManifestMembers(entry.members).some(member=>member.kind==='areaNote'&&member.key===noteKey);
+  const holdsNote=entry=>entry.kind===noteKind&&entry.key===noteKey||entry.kind==='structuredPack'&&repositoryPackManifestMembers(entry.members,manifest.version).some(member=>member.kind===noteKind&&member.key===noteKey);
   const seenDates=new Set(),seenNoteKeys=new Set(),seenDraftDates=new Set(),structuredEntries=manifest.objects.filter(entry=>entry.kind!=='attachment'&&(!noteKey||holdsNote(entry)));
   const structuredPayloads=await mapRepositoryBounded(structuredEntries,async entry=>{
     throwIfImportAborted(signal);
     return readRepositoryStructuredObject(manifest,entry,readObject,{interactive,signal});
   });
-  const logicalRows=[];for(const rows of structuredPayloads)logicalRows.push(...rows.filter(row=>!noteKey||row.kind==='areaNote'&&row.key===noteKey));logicalRows.sort((a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key));
+  const logicalRows=[];for(const rows of structuredPayloads)logicalRows.push(...rows.filter(row=>!noteKey||row.kind===noteKind&&row.key===noteKey));logicalRows.sort((a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key));
   for(const logical of logicalRows){
     throwIfImportAborted(signal);const entry=logical,payload=logical.payload;
     if(entry.kind==='dailyRecordPack'){
       if(!Array.isArray(payload))throw new Error('Repository Saved-Day pack is invalid.');
       for(const record of payload){const date=String(record&&record.date||'');if(repositoryMonth(date)!==entry.key||seenDates.has(date))throw new Error('Repository Saved-Day pack contains an invalid or duplicate date.');seenDates.add(date);dailyDocuments.push(record);}
-    }else if(entry.kind==='areaNote'){
+    }else if(entry.kind===noteKind){
       if(!payload||typeof payload!=='object'||Array.isArray(payload)||String(payload.key||'')!==entry.key||seenNoteKeys.has(entry.key))throw new Error('Repository note object is invalid.');
-      seenNoteKeys.add(entry.key);areaNoteItems.push(payload);
+      seenNoteKeys.add(entry.key);noteItems.push(payload);
     }else if(entry.kind===LEGACY_REFLECTION_DRAFT_PACK_KIND){
       if(manifest.version>4||!Array.isArray(payload))throw new Error('Legacy repository Reflection Draft pack is invalid.');
       for(const draft of payload){const date=String(draft&&draft.date||'');if(repositoryMonth(date)!==entry.key||seenDraftDates.has(date))throw new Error('Legacy repository Reflection Draft pack contains an invalid or duplicate date.');seenDraftDates.add(date);legacyReflectionDraftCount++;}
@@ -929,10 +939,10 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
       if(entry.key!=='personal'||personalData!==null)throw new Error('Repository personal-data object is invalid.');personalData=payload;
     }else throw new Error(`Repository logical object kind ${entry.kind} is unsupported.`);
   }
-  dailyDocuments.sort((a,b)=>String(a.date).localeCompare(String(b.date)));areaNoteItems.sort((a,b)=>String(a.key).localeCompare(String(b.key)));
-  const counts=repositoryManifestCounts({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:dailyDocuments.length,areaNote:areaNoteItems.length,activeSession:activeSession?1:0,reflectionDraft:legacyReflectionDraftCount},manifest.version);
+  dailyDocuments.sort((a,b)=>String(a.date).localeCompare(String(b.date)));noteItems.sort((a,b)=>String(a.key).localeCompare(String(b.key)));
+  const counts=repositoryManifestCounts({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:dailyDocuments.length,note:noteItems.length,activeSession:activeSession?1:0,reflectionDraft:legacyReflectionDraftCount},manifest.version);
   if(!noteKey&&!repositoryCountsEqualForManifest(counts,manifest.counts,manifest.version))throw new Error('Repository checkpoint counts do not match its reconstructed contents.');
-  const referencedAttachmentIds=new Set(),attachmentLeases=new Map(),assetItems=[],noteAssetIds=noteKey?new Set(areaNoteItems.flatMap(item=>[...BackupCodec.assetIds(item)])):null;
+  const referencedAttachmentIds=new Set(),attachmentLeases=new Map(),assetItems=[],noteAssetIds=noteKey?new Set(noteItems.flatMap(item=>[...BackupCodec.assetIds(item)])):null;
   try{
     for(const raw of manifest.assets){
       if(noteAssetIds&&!noteAssetIds.has(raw.assetId))continue;
@@ -954,8 +964,8 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
       format:LOGICAL_CHECKPOINT_CAPTURE_FORMAT,version:LOGICAL_CHECKPOINT_CAPTURE_VERSION,
       dailyDocuments:freeze(dailyDocuments),exportedAt:manifest.exportedAt,sourceRevision:manifest.sourceRevision,
       studentName:String(personalData&&personalData.preferences&&personalData.preferences.studentName||'Study Director'),installationId,checkpoint:manifest.checkpoint,
-      recordDates:freeze(dailyDocuments.map(record=>String(record.date))),areaNoteItems:freeze(areaNoteItems),activeSession,personalData,
-      savedDayDeletions:freeze([...(manifest.protectedCheckpointManifest.savedDayDeletions||[])]),areaNoteDeletions:freeze([...(manifest.protectedCheckpointManifest.areaNoteDeletions||[])]),attachmentDeletions:freeze([...(manifest.protectedCheckpointManifest.attachmentDeletions||[])]),counts,assetItems:freeze(assetItems),warning:manifest.warning,
+      recordDates:freeze(dailyDocuments.map(record=>String(record.date))),noteItems:freeze(noteItems),activeSession,personalData,
+      savedDayDeletions:freeze([...(manifest.protectedCheckpointManifest.savedDayDeletions||[])]),noteDeletions:freeze([...(manifest.protectedCheckpointManifest.noteDeletions||[])]),attachmentDeletions:freeze([...(manifest.protectedCheckpointManifest.attachmentDeletions||[])]),counts,assetItems:freeze(assetItems),warning:manifest.warning,
       protectedCheckpointManifest:manifest.protectedCheckpointManifest,noteScope:noteKey
     });
     let released=false;

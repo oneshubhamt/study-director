@@ -8,13 +8,13 @@ export const PERFORMANCE_BUDGETS=Object.freeze({
   insightsTargetMainThreadTaskMs:50,
   insightsMaxDomChunkMs:100,
   // Search gates are catastrophic-regression guards, not byte/latency targets.
-  ongoingNotesWorkerCold1000x100Ms:350,
-  ongoingNotesWorkerHotP95Ms:25,
-  ongoingNotesWorkerIncrementalMs:25,
-  ongoingNotesHostSnapshotHotP95Ms:5,
-  ongoingNotesExtremeColdMs:5000,
-  ongoingNotesExtremeHotP95Ms:100,
-  ongoingNotesExtremePostMs:50,
+  notesWorkerCold1000x100Ms:350,
+  notesWorkerHotP95Ms:25,
+  notesWorkerIncrementalMs:25,
+  notesHostSnapshotHotP95Ms:5,
+  notesExtremeColdMs:5000,
+  notesExtremeHotP95Ms:100,
+  notesExtremePostMs:50,
   // Notes at their limit (2,000 notes, 2.3 million words), also under browser
   // coverage. Checking every note's text on each read once held the page for
   // three seconds at start-up; it now stays near 100 ms.

@@ -20,10 +20,10 @@ const backup=fs.readFileSync('source/core/backup.js','utf8');
 const provider=fs.readFileSync('source/core/backup-provider.js','utf8');
 const styles=fs.readFileSync('source/styles/core.css','utf8');
 
-const applicable=app.match(/function applicableAreaNotesForTask\(t\)\{[\s\S]*?\n\}/u)?.[0]||'';
-assert.ok(applicable,'applicableAreaNotesForTask must remain present');
+const applicable=app.match(/function applicableNotesForTask\(t\)\{[\s\S]*?\n\}/u)?.[0]||'';
+assert.ok(applicable,'applicableNotesForTask must remain present');
 assert.match(applicable,/AppData\.notes\.get\(exactKey,exactLabel\)/u,'viewing a note may read the current note');
-assert.doesNotMatch(applicable,/create\s*:\s*true/u,'read-only Ongoing-Note rendering must not create a noncanonical placeholder in the repository cache');
+assert.doesNotMatch(applicable,/create\s*:\s*true/u,'read-only Note rendering must not create a noncanonical placeholder in the repository cache');
 
 assert.match(app,/id="backup-file-status"[^>]*role="status"/u,'standalone backup must have a status surface beside its own controls');
 const exportFn=backup.match(/async function exportPortableBackup\(\)\{[\s\S]*?\n\}/u)?.[0]||'';
@@ -49,7 +49,7 @@ assert.match(backup,/else setLocalExportStatus\(message\)/u,'standalone import b
 assert.match(backup,/setLocalExportStatus\(message,ok\);return false;/u,'standalone deep restore status must stay on standalone backup surface');
 assert.match(provider,/BackupController\.cancelImport\(reason,freeze\(\{announce:false\}\)\)/u,'managed-provider cancellation must not leak into standalone or global Library status');
 
-console.log(JSON.stringify({ongoingNoteReadOnly:true,standaloneStatusLocal:true,libraryFallbackRetained:true,backupProtectionStatusLocal:true,managedCancellationLocal:true},null,2));
+console.log(JSON.stringify({noteReadOnly:true,standaloneStatusLocal:true,libraryFallbackRetained:true,backupProtectionStatusLocal:true,managedCancellationLocal:true},null,2));
 }
 
 { // diary-record-contract
@@ -123,7 +123,7 @@ const tabs=[...app.matchAll(/role="tab" id="library-tab-(\w+)" data-library-sect
 assert.deepEqual(tabs,['notes','days','data'],'The Library switch names its three sections in order.');
 for(const name of tabs)assert.match(app,new RegExp(`<section class="[^"]*" id="library-${name}" role="tabpanel" aria-labelledby="library-tab-${name}"`,'u'),`The ${name} section is a tab panel.`);
 assert.match(app,/Lasting notes for each subject and topic\. A note opens alongside any block whose Area has the same name\./u);
-assert.doesNotMatch(app,/library-data-drawer|id="library-notes-drawer"|Ongoing Notes/u,'The old Library drawers and the "Ongoing Notes" name are gone.');
+assert.doesNotMatch(app,/library-data-drawer|id="library-notes-drawer"|Ongoing Notes|Area Notes/u,'The old Library drawers and the "Ongoing Notes" name are gone.');
 // The Diary and Files stay one-click panels inside Days and Data.
 assert.ok(app.indexOf('id="library-diary"')>app.indexOf('id="library-days"')&&app.indexOf('id="library-diary"')<app.indexOf('id="library-data"'),'The Diary sits in Days.');
 assert.ok(app.indexOf('id="library-attachments"')>app.indexOf('id="library-data"'),'Files sit in Data.');

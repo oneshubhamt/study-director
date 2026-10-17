@@ -18,7 +18,7 @@ const hostMetadata=read('source/core/host-metadata.js');
 const startup=read('source/core/startup.js');
 const persistence=read('source/core/persistence.js');
 const repositories=read('source/core/repositories.js');
-const areaNotesRepository=read('source/core/repositories-area-notes.js');
+const notesRepository=read('source/core/repositories-notes.js');
 const review=read('source/core/review.js');
 const assets=read('source/core/asset-storage.js');
 const backupCodec=read('source/core/backup-codec.js');
@@ -36,12 +36,12 @@ assert.equal(CANONICAL_BASELINE.status,'target-not-yet-proven');
 assert.equal(MIGRATION_FACADE_CONTRACT.disposable,false);
 assert.equal(MIGRATION_FACADE_CONTRACT.retirementMode,'isolate-adapters-then-delete-package');
 assert.equal(MIGRATION_FACADE_CONTRACT.status,'runtime-isolated-detachable-host');
-assert.deepEqual(MIGRATION_FACADE_CONTRACT.verification.localChecks,['planLegacy','reflectionLegacy','activeSession','areaNotes','areaNoteRecovery','dailyRecords','deletionState','insightsRevisionEnvelope','canonicalStores','legacyStorage','legacyAttachments','obsoleteMetadata','topology','retiredIdentity']);
+assert.deepEqual(MIGRATION_FACADE_CONTRACT.verification.localChecks,['planLegacy','reflectionLegacy','activeSession','notes','noteRecovery','dailyRecords','deletionState','insightsRevisionEnvelope','canonicalStores','legacyStorage','legacyAttachments','obsoleteMetadata','topology','retiredIdentity']);
 assert.equal(MIGRATION_FACADE_CONTRACT.verification.backupCheck,'freshBackup');
 assert.equal(CANONICAL_BASELINE.policy.ordinaryRuntime,'current-canonical-only');
 
 const entries=allCompatibilityEntries();
-assert.equal(entries.length,23,'Every temporary compatibility path must remain explicitly inventoried until retirement.');
+assert.equal(entries.length,25,'Every temporary compatibility path must remain explicitly inventoried until retirement.');
 assert.equal(new Set(entries.map(entry=>entry.id)).size,entries.length);
 for(const entry of entries){
   for(const file of entry.sourceFiles)assert.ok(fs.existsSync(path.join(root,file)),`${entry.id} references missing source ${file}`);
@@ -52,8 +52,8 @@ const evidenceByCompatibilityId=Object.freeze({
   'plan-legacy-schedule':['tests/integration/storage/compatibility-retirement.mjs','tests/integration/plans/saved-plans-logic.mjs'],
   'reflection-drafts-retirement':['tests/integration/storage/compatibility-retirement.mjs','tests/integration/review/reflection-session-codec.mjs'],
   'active-session-v7-domain-separation':['tests/integration/review/reflection-session-codec.mjs'],
-  'area-note-historical-rows':['tests/integration/rich-text/editor-persistence.mjs'],
-  'area-note-recovery-v1':['tests/integration/rich-text/editor-persistence.mjs'],
+  'note-historical-rows':['tests/integration/rich-text/editor-persistence.mjs'],
+  'note-recovery-v1':['tests/integration/rich-text/editor-persistence.mjs'],
   'daily-record-historical-shapes':['tests/integration/storage/canonical-baseline.mjs'],
   'r10-sync-delete-state':['tests/integration/storage/deletion-recovery.mjs'],
   'r10-indexeddb-topology-retirement':['tests/integration/storage/indexeddb-topology-retirement.mjs'],
@@ -68,7 +68,9 @@ const evidenceByCompatibilityId=Object.freeze({
   'l7-host-metadata-normalization':['tests/integration/storage/compatibility-host.mjs'],
   'appmeta-stable-names':['tests/integration/storage/compatibility-host.mjs'],
   'l13e-repository-maintenance-v1':['tests/integration/storage/compatibility-host.mjs','tests/integration/backup/repository-incremental-preparation.mjs','tests/integration/backup/repository-restore.mjs'],
-  'restore-journal-payload-v1-v3':['tests/integration/storage/repository-journals.mjs'],
+  'restore-journal-payload-v1-v4':['tests/integration/storage/compatibility-host.mjs','tests/integration/storage/repository-journals.mjs'],
+  'canonical-note-and-folder-names':['tests/integration/storage/compatibility-host.mjs','tests/integration/storage/indexeddb-topology-retirement.mjs'],
+  'area-note-names-in-backups':['tests/integration/backup/current-canonical-roundtrip.mjs','tests/integration/backup/repository-restore.mjs'],
   'backup-repository-v1-v4':['tests/integration/backup/repository-restore.mjs'],
   'name-keyed-notes-in-backups':['tests/integration/backup/current-canonical-roundtrip.mjs','tests/integration/backup/repository-restore.mjs','tests/integration/storage/canonical-schema-separation.mjs'],
   'legacy-service-worker-update-bridge':['tests/integration/pwa/service-worker-lifecycle.mjs']
@@ -90,7 +92,7 @@ assert.match(compatibility,/async function migrateLive\(\)/u);
 assert.match(compatibility,/input\.live\.migratePlan\(\)/u);
 assert.match(compatibility,/input\.live\.migrateReflections\(\)/u);
 assert.match(compatibility,/input\.live\.migrateActiveSession\(\)/u);
-assert.match(compatibility,/input\.live\.migrateAreaNoteRecovery\(\)/u);
+assert.match(compatibility,/input\.live\.migrateNoteRecovery\(\)/u);
 assert.match(compatibility,/input\.live\.migrateDailyRecords\(\)/u);
 assert.match(compatibility,/input\.live\.migrateDeletionState\(\)/u);
 assert.match(compatibility,/input\.live\.migrateInsightsRevisionEnvelope\(\)/u);
@@ -134,7 +136,7 @@ assert.match(reflectionMigration,/local\.remove\(obsolete\.reflectionLegacy\)/u,
 assert.doesNotMatch(reflectionMigration,/reflection\.migrate|verifiedRows|putReflection|migrateReflectionDrafts/u,'Reflection retirement must not recreate discarded drafts in current canonical storage.');
 assert.doesNotMatch(review,/legacyStorageKeys|LEGACY_STORAGE_KEYS|OBSOLETE_STORAGE_KEYS|migrateLegacy/u,'normal Review capability must contain no historical storage parser or migration entry point');
 assert.doesNotMatch(app,/event\.key===OBSOLETE_STORAGE_KEYS\.reflectionDrafts/u,'ordinary runtime must not observe retired Reflection LocalStorage as a live data surface');
-assert.match(repositories,/async function migrateAreaNoteRecovery\(\)/u);assert.doesNotMatch(areaNotesRepository,/CompatibilityCodec|compatibilityWriteToken|legacyKeys|async function migrate/u,'the notes repository holds no compatibility code');
+assert.match(repositories,/async function migrateNoteRecovery\(\)/u);assert.doesNotMatch(notesRepository,/CompatibilityCodec|compatibilityWriteToken|legacyKeys|async function migrate/u,'the notes repository holds no compatibility code');
 assert.match(repositories,/async function migrateHistoricalActiveSession\(\)/u);
 assert.match(repositories,/migrateActiveSession:migrateHistoricalActiveSession/u);
 assert.match(repositories,/async function migrateHistoricalDailyRecords\(\)/u);
@@ -142,15 +144,15 @@ assert.match(repositories,/async function verifyDailyRecordCanonicalBaseline\(\)
 assert.doesNotMatch(repositories,/migrateReflectionDrafts|idbApplyReflectionDrafts|reflectionDrafts=freeze\(/u,'retired Reflection Draft persistence must not remain exposed by current repositories.');
 assert.doesNotMatch(repositories,/function requireDailyRecordCanonicalReady\(\)/u,'normal Daily Record paths must not depend on a disposable migration marker');
 assert.match(repositories,/function readableDailyRecord\(record\)[\s\S]{0,260}canonicalRuntimeError/u);
-assert.doesNotMatch(areaNotesRepository,/normalizePayload\(parsed\.pending,\{compatibility:true\}\)/u,'normal note normalization must not expose a historical-mode switch');
+assert.doesNotMatch(notesRepository,/normalizePayload\(parsed\.pending,\{compatibility:true\}\)/u,'normal note normalization must not expose a historical-mode switch');
 assert.match(repositories,/function readLegacyPendingNotes\(\)/u,'the v1 pending cache is read only by the compatibility block');
 assert.match(compatibility,/Historical data must never leak into ordinary hydration as a fallback/u);
 assert.match(assets,/uses historical metadata and must be migrated before normal runtime access/u);
 assert.match(records,/function sanitizeCurrentDailyRecord\(record\)/u);
-assert.doesNotMatch(records,/canonicalizeHistoricalDailyRecord|sanitizeHistoricalDailyRecord|sanitizeImportedAreaNote|canonicalizeHistoricalAreaNote|sanitizeImportedActiveSession/u,'ordinary record codecs must be current-schema only');
+assert.doesNotMatch(records,/canonicalizeHistoricalDailyRecord|sanitizeHistoricalDailyRecord|sanitizeImportedNote|canonicalizeHistoricalNote|sanitizeImportedActiveSession/u,'ordinary record codecs must be current-schema only');
 assert.match(compatibilityCodecs,/function sanitizeHistoricalDailyRecord\(record\)/u);
 assert.match(compatibilityCodecs,/function dailyRecord\(record\)/u);
-assert.match(compatibilityCodecs,/function areaNote\(value,keyHint=''/u);
+assert.match(compatibilityCodecs,/function note\(value,keyHint=''/u);
 assert.match(compatibilityCodecs,/function activeSession\(session\)/u);
 assert.match(compatibilityCodecs,/function localRecoveryEnvelope\(raw\)/u);
 assert.match(compatibilityCodecs,/function migrateSessionSnapshot\(snapshot\)/u,'Historical Active Session compatibility must migrate embedded reflectionDraft state into snapshot.review.');
@@ -180,13 +182,13 @@ assert.equal(CACHE_STORAGE_IDENTITIES.updateBridge,'study-director-update-bridge
 assert.match(sw,/CompatibilityFacade\.installBridgeRequired\(\)/u);
 assert.match(sw,/CompatibilityFacade\.recoveryHandoff\(\)/u);
 
-assert.equal(CURRENT_FORMATS_OUTSIDE_MIGRATION.completeBackup.version,21);
+assert.equal(CURRENT_FORMATS_OUTSIDE_MIGRATION.completeBackup.version,22);
 assert.equal(CURRENT_FORMATS_OUTSIDE_MIGRATION.protectedBackup.version,2);
 assert.match(attachments,/new TextEncoder\(\)\.encode\('SDAT01\\r\\n'\)/u);
 assert.match(attachments,/m\.format!=='study-director\.attachments'\|\|m\.version!==1/u);
 
 for(const id of [
-  'plan-legacy-schedule','reflection-drafts-retirement','active-session-v7-domain-separation','area-note-historical-rows','area-note-recovery-v1','daily-record-historical-shapes','r10-sync-delete-state',
+  'plan-legacy-schedule','reflection-drafts-retirement','active-session-v7-domain-separation','note-historical-rows','note-recovery-v1','daily-record-historical-shapes','r10-sync-delete-state',
   'legacy-device-identity','l7-host-metadata-normalization','r10-indexeddb-topology-retirement','indexeddb-pre-v3-migration-marker','legacy-localstorage-residue','legacy-attachment-storage',
   'obsolete-reflection-migration-meta','legacy-json-backups','complete-backup-v7-v19','legacy-service-worker-update-bridge'
 ])assert.ok(entries.some(entry=>entry.id===id),`Missing compatibility inventory entry ${id}`);

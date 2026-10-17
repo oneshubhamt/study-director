@@ -30,7 +30,7 @@ const indexedDb=freeze({
 });
 const hostKeys=freeze({
   verifiedRecoveryBackups:APP_META_KEYS.verifiedRecoveryBackups,backupProtection:APP_META_KEYS.backupProtection,
-  attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,automaticDeviceBackup:APP_META_KEYS.automaticDeviceBackup,
+  attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,deviceFolder:APP_META_KEYS.deviceFolder,
   repositoryIntegrityScrub:APP_META_KEYS.repositoryIntegrityScrub,managedProviderBackupPending:APP_META_KEYS.managedProviderBackupPending,
   repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,
   reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix

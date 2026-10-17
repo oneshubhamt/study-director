@@ -38,7 +38,7 @@ for(const key of ['attachmentMaintenancePending','attachmentMaintenanceDay']){as
 assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.attachmentMaintenancePending,'studyDirector.attachmentMaintenancePending.v1');
 assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.attachmentMaintenanceDay,'studyDirector.attachmentMaintenanceDay.v2');
 assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.attachmentMaintenanceAttemptDay,'studyDirector.attachmentMaintenanceDay.v1','old scheduling records cannot certify completion in F2');
-assert.equal(Object.keys(OBSOLETE_LOCAL_STORAGE_KEYS).length,17);
+assert.equal(Object.keys(OBSOLETE_LOCAL_STORAGE_KEYS).length,18);
 assert.equal(Object.hasOwn(LOCAL_STORAGE_KEYS,'nudge'),false,'nudge must not remain a current LocalStorage authority');
 assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.nudge,'studyDirector.nudgeConfig');
 assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.legacyOwnershipLease,'studyDirector.timerOwner.v1');
@@ -96,9 +96,9 @@ const currentAppMetaFamilies=[...Object.keys(DATA_ARCHITECTURE.appMeta.exact),..
 const validationFamilies=Object.values(APP_META_VALIDATION_OWNERS).flat();
 assert.equal(validationFamilies.length,new Set(validationFamilies).size,'each current appMeta family must have exactly one validation owner');
 assert.deepEqual([...validationFamilies].sort(),currentAppMetaFamilies,'every current appMeta family must be assigned to a validator');
-assert.deepEqual(APP_META_VALIDATION_OWNERS.repositories,Object.freeze(['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','savedDayDeletionPrefix','areaNoteDeletionPrefix','attachmentDeletionPrefix']));
+assert.deepEqual(APP_META_VALIDATION_OWNERS.repositories,Object.freeze(['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','savedDayDeletionPrefix','noteDeletionPrefix','attachmentDeletionPrefix']));
 assert.deepEqual(APP_META_VALIDATION_OWNERS.journals,Object.freeze(['libraryClearJournalState','libraryClearJournalPayloadPrefix','restoreJournalState','restoreJournalPayload','mutationLease']));
-assert.deepEqual(APP_META_VALIDATION_OWNERS.host,Object.freeze(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix']));
+assert.deepEqual(APP_META_VALIDATION_OWNERS.host,Object.freeze(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix']));
 assert.equal(Object.hasOwn(APP_META_VALIDATION_OWNERS,'provider'),false,'retired monolithic provider-operation journal must not remain a validation family');
 assert.equal(APP_META_FAMILY_COUNT,Object.keys(APP_META_KEYS).length,'appMeta family count must be mechanically derived from the authoritative identity map');
 assert.equal(APP_META_FAMILY_LABEL,`${APP_META_FAMILY_COUNT} typed appMeta families`);
@@ -154,12 +154,12 @@ assert.match(appMeta,/function canonicalEnvelope\(row,key\)/u,'appMeta gateway m
 assert.match(appMeta,/validateValue\(definition,row\.value,key,suffix\)/u,'appMeta gateway must centrally apply family value validation');
 assert.match(app,/compatibilityAppMeta:CompatibilityAppMeta/u,'AppData migration paths must receive the compatibility-owned metadata capability explicitly');
 assert.match(app,/return ExportsAppMeta\.transaction\('readwrite'/u,'backup-protection policy mutation must use the exports-owned metadata capability');
-assert.match(app,/settings:exactAppMetaStorage\(DeviceBackupAppMeta,'automaticDeviceBackup'/u,'Device Backup settings must use the device-backup-owned metadata capability');
+assert.match(app,/settings:exactAppMetaStorage\(DeviceFolderAppMeta,'deviceFolder'/u,'Device Backup settings must use the device-backup-owned metadata capability');
 assert.match(app,/BackupAppMeta\.read\('repositoryIntegrityScrub'\)/u,'repository scrub state must use the backup-owned metadata capability');
 
 for(const pattern of [
   /reflectionDraftMigration\.v1/u,/const PLAN_DRAFT_KEY=['"]/u,/const KEY='insightsDatasetRevision'/u,
-  /const AREA_NOTE_RECOVERY_META_PREFIX=['"]/u,/idbGetMeta\('dailyRecordMigration'\)/u,/idbGetMeta\('dataMaintenance'\)/u,/idbPutMeta\('dataMaintenance'/u
+  /const NOTE_RECOVERY_META_PREFIX=['"]/u,/idbGetMeta\('dailyRecordMigration'\)/u,/idbGetMeta\('dataMaintenance'\)/u,/idbPutMeta\('dataMaintenance'/u
 ])assert.doesNotMatch(repositories,pattern,'repository appMeta identities must come from the central contract');
 for(const pattern of [
   /const LIBRARY_CLEAR_JOURNAL_STATE_KEY=['"]/u,/const LIBRARY_CLEAR_JOURNAL_CHUNK_PREFIX=['"]/u,
