@@ -152,14 +152,19 @@ The person's data is never lost. Merging is automatic wherever it is lossless; o
 
 | Part | Decision |
 |---|---|
-| What a profile is | A name, an optional backup password and an optional Google account. The three belong together. Drive and the password can be added later, or changed, in Library → Data |
+| What a profile is | A name, an optional backup password and an optional Google account. The three belong together. Drive and the password can be added later, or changed, in the Profile panel (primary) or in Library → Data |
+| Profile panel (user, 2026-10-18) | One panel is the primary home for who you are: name, backup password (set, change, remove), Google account (shown by its email; connect, change, disconnect), the profile list (switch, Add profile) and this device's name (read only). Opened from the name tag on desktop and from the letter circle on phones. In-place editing of the name tag goes away. Library → Data keeps the password and Drive controls too, as the same actions, because backups need them; the name is edited only in the panel |
+| Profile ID (user, 2026-10-18) | Like the device ID: made once from the name plus a unique part (for example `prof_<name>_<time>_<random>`) and never changed when the name changes. The display name is not unique and there are no usernames: two people with the same name on one device are separate profiles, told apart in the list by their Google account email when connected. Two or three people per device is the expectation, not a limit |
+| Name (user, 2026-10-18) | One name per profile, synced with the library: changing it on one device changes it everywhere |
 | Several people on one device | Supported, though rare. Each profile has its own local data: database, browser settings, attachments and Device Folder |
 | Existing data | Becomes the first profile under its current storage names. Nothing moves, so there is no migration. New profiles get their own names, resolved from the identities already centralised in `contracts/` |
 | Device-wide | Only what belongs to the device: app updates, the service worker and the profile list itself. Decide key by key |
-| Switching | The name tag in the left sidebar (desktop) opens the profile list and Add profile. One profile is active at a time; switching reloads every open tab into it |
-| Mobile (open; design before building) | On mobile the sidebar becomes a bottom bar with only the section buttons, and the name is not shown (`.sb-head` is hidden at 900px and below). Where the name and the profile switcher live on mobile still needs a UX design, agreed with the user before 5.3 is built (noted 2026-10-18) |
+| Switching | In the Profile panel. One profile is active at a time; switching reloads every open tab into it and asks for that profile's password (below) |
+| Phones (user, 2026-10-18) | On phones the sidebar becomes the section bar at the top, and the name and sync status are hidden (`.sb-head` at 900px and below), so phones show no sync status today. A small circle at the start of that bar shows the first letter of the name in the accent colour, with a small dot only for "Needs review" or a sync problem; tapping it opens the Profile panel |
+| Dialogs (user, 2026-10-18) | The Profile panel, the first-start form (5.4) and Add profile (which opens the same form) are one family: the same size, layout and style. Uniform, consistent, professional; nothing janky |
+| Google account (user, 2026-10-18) | Shown by its email, read with one small Drive request when connecting |
 | Drive link | The Drive library records its profile's id. Connecting a Google account whose library belongs to another profile is refused, so two people's data can never mix. Changing the account uploads the whole library to the new account and leaves the old copy alone |
-| Password | With one profile on the device, its backup key is remembered on the device (a non-extractable key, never the password) and not asked again. With several, each person is asked for their own when switching in, which unlocks their sync; "Not now" keeps working locally with sync paused. It is not a privacy lock, because browser data is not encrypted (5.8) |
+| Password | With one profile on the device, its backup key is remembered on the device (a non-extractable key, never the password) and not asked again. With several, each person is asked for their own when switching in, which unlocks their sync; "Not now" keeps working locally with sync paused. It is not a privacy lock, because browser data is not encrypted (5.8). No version or backup uses a password yet, so there is no old-password handling to build (user, 2026-10-18). Removing the password is allowed, with a warning that later versions upload unencrypted. A forgotten password cannot be recovered, by design; nothing more is built for that now (5.8) |
 | Removing a profile from a device | From Library → Data, only after confirming its data is synced, or with a clear warning |
 | Device names (user, 2026-10-18; build in the 5.4 + 5.3 pass) | Nobody types a device name. The device ID itself says what the device is: `inst_<type>_<browser>_<first-use time>_<random>`, e.g. `inst_iphone_safari_mgk3x9p2_a8f3k2q1`. Type and browser are read from the browser when the ID is made (with a touch-screen check, since some iPads report themselves as a Mac); the random part keeps two alike devices apart. The name is read from the ID alone, so any device can name any other: "iPhone · Safari", with "(since 12 Oct)" added only when two devices would otherwise look the same. No new fields or store: versions and the session already carry the ID. Shown in "Running on … (last update …)", the Continue here question and Version History rows ("from …" or "This device"). Browsers give no model names, so it is type and browser only; a cleared or different browser is a new device. No compatibility: IDs made earlier on this branch are simply replaced |
 
@@ -182,6 +187,7 @@ Backup password  [ Optional            ]   (a confirm box appears once you type)
 - The name comes from the library, not from Google (no extra Google request).
 - Existing users see no form; their data and name become the first profile.
 - Without Drive, Library → Data shows a quiet "Not synced · Connect Drive" line. No pop-ups.
+- Add profile opens this same form, in the same dialog family as the Profile panel (5.3).
 
 ### 5.5 Small items (step 1)
 
@@ -223,7 +229,7 @@ For each build step: make all the changes, build, test with two simulated device
 
 ### 5.8 Later (noted, not planned)
 
-- **Encryption at rest.** Data stored in the browser (IndexedDB, browser storage, attachments) is not encrypted. Backups are, when a password is set: Device Folder, Drive and backup files, attachments included. Note exports are not. Profiles on one device are therefore separate, not private. Already on the list: end-to-end encryption with a sign-in-first experience (section 2).
+- **Encryption at rest.** Data stored in the browser (IndexedDB, browser storage, attachments) is not encrypted. Backups are, when a password is set: Device Folder, Drive and backup files, attachments included. Note exports are not. Profiles on one device are therefore separate, not private. Already on the list: end-to-end encryption with a sign-in-first experience (section 2). That work, which extends encryption to the whole data topology, also decides how passwords are managed: recovery, changes and the rest (user, 2026-10-18).
 - **Fully silent background sync** would need a small server to hold Google refresh tokens. Not planned; sync during sign-in windows is the accepted design.
 - **Better Smart merge of notes** (`mergeThreeWay`). It works decently, with a lot of room to improve. The user will come back to it later; until then, do not audit it or suggest changes (noted 2026-10-18).
 
