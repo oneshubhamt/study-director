@@ -21,7 +21,7 @@ registry.define('backup',1,input=>{
     reconciliation:freeze(['createPlan','resolvePlan','summarizePlan']),
     noteReconciliation:freeze(['resolve']),
     exports:freeze(['backgroundAvailable','protect','unprotect','check','scope','job','run','download','chooseSave','save']),
-    session:freeze(['canMutate','cancelLiveDraftSave','captureSnapshot','hasActiveSession','hasTasks','toActiveSession','withPersistenceSuppressed']),
+    session:freeze(['canMutate','cancelLiveDraftSave','captureSnapshot','hasActiveSession','hasTasks','toActiveSession','withPersistenceSuppressed','yieldSession']),
     domain:freeze(['clampText','filenameSafeStudentName','getStudentName','materializeDailyRecordView','sanitizeCurrentDailyRecord','todayISO']),
     view:freeze(['presentation','refreshPnote','refreshReview','renderSchedule']),
     events:freeze(['libraryChanged','backupCompleted','reconcileNotes','restoreNotesSnapshot','restoreSessionState','verifyActiveSessionRuntime','restoredFromFile']),
@@ -74,7 +74,7 @@ registry.define('backup',1,input=>{
     const Reconciliation=ports.reconciliation;
     const NoteReconciliation=ports.noteReconciliation;
     const Exports=ports.exports;
-    const {canMutate:appCanMutate,cancelLiveDraftSave,captureSnapshot:captureSessionSnapshot,hasActiveSession,hasTasks,toActiveSession:activeSessionPayload,withPersistenceSuppressed}=ports.session;
+    const {canMutate:appCanMutate,cancelLiveDraftSave,captureSnapshot:captureSessionSnapshot,hasActiveSession,hasTasks,toActiveSession:activeSessionPayload,withPersistenceSuppressed,yieldSession}=ports.session;
     const {clampText,filenameSafeStudentName,getStudentName:getStudentNameFromDisplay,materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO}=ports.domain;
     const {refreshPnote,refreshReview,renderSchedule:renderSched}=ports.view;
     const {libraryChanged,backupCompleted,reconcileNotes,restoreNotesSnapshot,restoreSessionState,verifyActiveSessionRuntime,restoredFromFile}=ports.events;
@@ -725,14 +725,19 @@ async function savedDaySettlement(plan,base){
 }
 // The Active Session: 'same', 'incoming' or 'local' when one side has not
 // changed it since the handoff, 'conflict' when both have, '' without a
-// handoff, and 'hold' while a session runs here during a sync (this
-// device's stays and the other side's waits).
+// handoff, and, while it runs here during a sync or a review, 'hold' (this
+// device's stays and the other side's waits) or 'yield' when another device
+// took it over after this one changed it (this device stops and the person
+// reviews both). A copy of another device's session that this device has not
+// changed always follows the other side.
 async function sessionSettlement(base,parsed,{hold=false}={}){
   const loaded=await readCanonicalActiveSession(),local=loaded&&loaded.value||null,incoming=parsed&&parsed.importedActiveSession||null;
   if(!local&&!incoming||local&&incoming&&Canonical.same(local,incoming))return 'same';
-  if(hold)return 'hold';if(!base)return '';
+  const me=installationId(),takenOver=hold&&!!incoming&&incoming.status!=='suspended'&&incoming.runningOn!==me;
+  if(hold&&!takenOver)return 'hold';if(!base)return takenOver?'yield':'';
   const shared=String(base.sessionFingerprint||''),[mine,theirs]=await Promise.all([sessionFingerprint(local),sessionFingerprint(incoming)]);
-  return mine===shared?(sessionFollows(local,incoming,parsed)?'incoming':'conflict'):theirs===shared?'local':'conflict';
+  if(takenOver)return mine===shared?'incoming':theirs===shared?'local':'yield';
+  return mine===shared?(local&&local.runningOn!==me||sessionFollows(local,incoming,parsed)?'incoming':'conflict'):theirs===shared?'local':'conflict';
 }
 // The other side's session replaces this device's without asking only when
 // it carries this one on (the same day, not behind it), or ends one that was
@@ -1286,7 +1291,12 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   // What both sides last shared, and the session: while one runs here a
   // sync keeps it as it is; otherwise the side that did not change it since
   // takes the other's.
-  const base=note?null:await handoffBase(stored),session=note||missingOnly?'same':await sessionSettlement(base,parsed,{hold:sync&&hasActiveSession()});
+  // A review during a study session leaves the session as it is too.
+  const review=!quiet&&!note&&options?.review===true,base=note?null:await handoffBase(stored);
+  let session=note||missingOnly?'same':await sessionSettlement(base,parsed,{hold:(sync||review)&&hasActiveSession()});
+  // Another device took the session over: stop it here, keeping what this
+  // device recorded, and let the person choose between the two.
+  if(session==='yield'){await yieldSession(parsed.importedActiveSession);session=sync?'conflict':await sessionSettlement(base,parsed);}
   if(sync&&session==='conflict')return needsDecision();
   const holdSession=session==='hold'||session==='local',clearSession=session==='incoming'&&!(parsed&&parsed.importedActiveSession);
   const stable=await buildStableRestoreImpact(parsed,preview,signal,{missingOnly,note,holdSession}),impact=stable.impact;

@@ -45,7 +45,7 @@ const limits=Object.freeze({
   maxTaskNameChars:300,maxAreaNameChars:200,maxUnitChars:80,maxPracticeRunsPerDay:100,maxPracticeUnitsPerDay:1000,maxPracticeUnitsPerRun:100,minPracticeTargetMs:1000,maxPracticeTargetMs:86400000,maxStudentNameChars:100,maxQuoteChars:1000
 });
 const dataContract=Object.freeze({schemas:Object.freeze({
-  SessionSnapshot:Object.freeze({version:6}),ActiveSession:Object.freeze({version:9,key:'current'}),DailyRecord:Object.freeze({version:15}),Note:Object.freeze({version:2}),LocalRecoveryEnvelope:Object.freeze({version:1})
+  SessionSnapshot:Object.freeze({version:6}),ActiveSession:Object.freeze({version:10,key:'current'}),DailyRecord:Object.freeze({version:15}),Note:Object.freeze({version:2}),LocalRecoveryEnvelope:Object.freeze({version:1})
 })});
 const keyedRecord=Object.freeze({create:()=>Object.create(null)});
 const dailyRecordCodec=Object.freeze({
@@ -61,11 +61,11 @@ const optionalBoundedNumber=(value,options={})=>{const n=boundedNumber(value,{..
 const compatibility=CompatibilityCodecs.create(Object.freeze({
   limits,dataContract,keyedRecord,personalDataCodec:Object.freeze({normalize:value=>value}),dailyRecordCodec,activeSessionCodec:codec,
   helpers:Object.freeze({boundedInt,boundedNumber,optionalBoundedNumber,optionalText,clampText,clampEditorContent:clampText,editorContentWithinLimits:()=>true,sameDataValue:helpers.sameDataValue,sanitizePracticeRun:value=>value,activeSessionScheduleFingerprint:helpers.activeSessionScheduleFingerprint,isValidIsoDate,isCanonicalScheduleText:helpers.isCanonicalScheduleText}),
-  timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp}),domain:Domain
+  timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp}),domain:Domain,installationId:()=>'inst_review_device'
 }));
 
 const session={
-  id:'current',type:'activeSession',version:9,revision:12,date:'2026-08-05',status:'active',
+  id:'current',type:'activeSession',version:10,revision:12,date:'2026-08-05',status:'active',runningOn:'inst_review_other_device',
   scheduleText:'07:00 | 60 | A | Study | Area | pages | 10',snapshot,suspendedAt:null,updatedAt:'2026-08-05T08:01:00.000Z'
 };
 const canonical=codec.canonicalize(session);
@@ -73,11 +73,11 @@ assert.ok(canonical);assert.deepEqual(canonical.snapshot.review,{reflection:'Ato
 
 const legacySnapshot=structuredClone(snapshot);legacySnapshot.version=5;delete legacySnapshot.review;
 legacySnapshot.reflectionDraft={version:1,date:'2026-08-05',reflection:'Legacy diary',studyQuality:3,revision:6,sessionRevision:12,updatedAt:'2026-08-05T08:00:00.000Z'};
-const legacyV8={...structuredClone(session),version:8,snapshot:legacySnapshot,entityType:'activeSession',entityId:'current',schemaVersion:1,deviceId:'dev_r10',createdAt:'2026-08-05T07:00:00.000Z',deleted:false,syncStatus:'pending'};
+const {runningOn:_runner,...sessionWithoutRunner}=session,legacyV8={...structuredClone(sessionWithoutRunner),version:8,snapshot:legacySnapshot,entityType:'activeSession',entityId:'current',schemaVersion:1,deviceId:'dev_r10',createdAt:'2026-08-05T07:00:00.000Z',deleted:false,syncStatus:'pending'};
 assert.equal(codec.sanitizeCurrent(legacyV8),null,'ordinary codec must reject the retired ActiveSession schema');
 const migrated=compatibility.activeSession(legacyV8);
 assert.ok(migrated,'compatibility codec must migrate historical ActiveSession review state');
-assert.equal(migrated.version,9);assert.equal(migrated.snapshot.version,6);
+assert.equal(migrated.version,10);assert.equal(migrated.runningOn,'inst_review_device','an older session belongs to the device converting it');assert.equal(compatibility.activeSession(session).runningOn,'inst_review_other_device','a current session keeps the device running it');assert.equal(migrated.snapshot.version,6);
 assert.deepEqual(migrated.snapshot.review,{reflection:'Legacy diary',studyQuality:3});
 assert.equal(Object.hasOwn(migrated.snapshot,'reflectionDraft'),false);
 for(const key of ['entityType','entityId','schemaVersion','deviceId','createdAt','deleted','syncStatus'])assert.equal(Object.hasOwn(migrated,key),false,`retired sync field ${key} must not enter ActiveSession.v9`);

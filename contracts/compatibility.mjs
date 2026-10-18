@@ -97,8 +97,8 @@ export const COMPATIBILITY_REGISTRY=freeze({
     },
     {
       id:'active-session-v7-domain-separation',owner:'record-codecs/repositories',kind:'live-canonicalization',
-      source:'historical IndexedDB ActiveSession rows including v8 snapshots with reflectionDraft',
-      target:'strict current ActiveSession.v9 with snapshot.review {reflection, studyQuality} and revision/updatedAt retained as local recovery ordering only',
+      source:'historical IndexedDB ActiveSession rows including v8 snapshots with reflectionDraft, and v9 rows and backups without runningOn',
+      target:'strict current ActiveSession.v10 with snapshot.review {reflection, studyQuality}, runningOn (the installation running it; an older session belongs to this installation) and revision/updatedAt retained as local recovery ordering only',
       proof:'a retained interrupted session is converted and rewritten before canonical-store verification; malformed/newer sessions are rejected without mutating the source',
       retirement:'baseline verified on all supported installations',
       sourceFiles:freeze(['source/core/compatibility-codecs.js','source/core/repositories.js'])

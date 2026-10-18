@@ -8,7 +8,8 @@ const {exactFrozenObject:exactObject,functionPort:functions}=registry.contracts;
 registry.define('compatibility-codecs',1,()=>{
   const freeze=Object.freeze;
   function create(input){
-    exactObject(input,['limits','dataContract','keyedRecord','dailyRecordCodec','activeSessionCodec','personalDataCodec','helpers','timestamps','domain'],'Compatibility codec input');
+    exactObject(input,['limits','dataContract','keyedRecord','dailyRecordCodec','activeSessionCodec','personalDataCodec','helpers','timestamps','domain','installationId'],'Compatibility codec input');
+    if(typeof input.installationId!=='function')throw new TypeError('Compatibility codec installation identity is required.');
     if(!Object.isFrozen(input.limits)||!Object.isFrozen(input.dataContract)||!Object.isFrozen(input.keyedRecord)||!Object.isFrozen(input.dailyRecordCodec)||!Object.isFrozen(input.activeSessionCodec)||!Object.isFrozen(input.personalDataCodec)||!Object.isFrozen(input.domain))throw new TypeError('Compatibility codec contracts must be frozen.');
     functions(input.helpers,['boundedInt','boundedNumber','optionalBoundedNumber','optionalText','clampText','clampEditorContent','editorContentWithinLimits','sameDataValue','sanitizePracticeRun','activeSessionScheduleFingerprint','isValidIsoDate','isCanonicalScheduleText'],'Compatibility codec helpers');
     functions(input.timestamps,['normalizeTimestamp','normalizeImportedTimestamp'],'Compatibility timestamp contract');
@@ -154,7 +155,7 @@ registry.define('compatibility-codecs',1,()=>{
     function activeSession(session){
       if(!session||typeof session!=='object'||session.deleted===true)return null;
       const version=Number(session.version);if(!Number.isSafeInteger(version)||version<1||version>DATA_CONTRACT.schemas.ActiveSession.version)return null;
-      const candidate=ActiveSessionCodec.normalize({id:DATA_CONTRACT.schemas.ActiveSession.key,type:'activeSession',version:DATA_CONTRACT.schemas.ActiveSession.version,revision:session.revision,date:session.date,status:session.status,scheduleText:session.scheduleText,snapshot:migrateSessionSnapshot(session.snapshot),suspendedAt:session.suspendedAt??null,updatedAt:session.updatedAt});
+      const candidate=ActiveSessionCodec.normalize({id:DATA_CONTRACT.schemas.ActiveSession.key,type:'activeSession',version:DATA_CONTRACT.schemas.ActiveSession.version,revision:session.revision,date:session.date,status:session.status,runningOn:session.runningOn||input.installationId(),scheduleText:session.scheduleText,snapshot:migrateSessionSnapshot(session.snapshot),suspendedAt:session.suspendedAt??null,updatedAt:session.updatedAt});
       return candidate?ActiveSessionCodec.sanitizeCurrent(candidate):null;
     }
     function localRecoveryEnvelope(raw){
@@ -164,7 +165,7 @@ registry.define('compatibility-codecs',1,()=>{
       const revision=boundedNumber(raw.revision||shell.revision,{min:1,max:Number.MAX_SAFE_INTEGER,fallback:0});if(!revision)return null;
       const snapshot=ActiveSessionCodec.sanitizeSessionSnapshot(migrateSessionSnapshot(raw.snapshot),shell.date,activeSessionScheduleFingerprint(shell),revision);if(!snapshot)return null;
       const updatedAt=normalizeTimestamp(raw.updatedAt||shell.updatedAt,new Date().toISOString());
-      const cleanShell={id:DATA_CONTRACT.schemas.ActiveSession.key,type:'activeSession',version:DATA_CONTRACT.schemas.ActiveSession.version,revision,date:shell.date,status:shell.status==='suspended'?'suspended':'active',scheduleText:shell.scheduleText,suspendedAt:shell.suspendedAt||null,updatedAt};
+      const cleanShell={id:DATA_CONTRACT.schemas.ActiveSession.key,type:'activeSession',version:DATA_CONTRACT.schemas.ActiveSession.version,revision,date:shell.date,status:shell.status==='suspended'?'suspended':'active',runningOn:shell.runningOn||input.installationId(),scheduleText:shell.scheduleText,suspendedAt:shell.suspendedAt||null,updatedAt};
       return {version:DATA_CONTRACT.schemas.LocalRecoveryEnvelope.version,revision,shell:cleanShell,snapshot,updatedAt};
     }
     function protectedPreferences(value){

@@ -332,6 +332,8 @@ function validateBackupManifest(manifest,gzip,{binaryV10=false}={}){
 // is current apart from its notes, whose name keys are converted, along with
 // the names in its note deletion history.
 const NOTE_ID_BACKUP_VERSION=21;
+// A session saved before it named its device (v9) comes in as this device's.
+function olderActiveSession(value){return Number(value&&value.version)<DATA_CONTRACT.schemas.ActiveSession.version;}
 function legacyBackupItem(version,entityType){return Number(version)<(entityType==='note'?NOTE_ID_BACKUP_VERSION:NOTE_ID_BACKUP_VERSION-1);}
 function withNoteIdDeletions(manifest,nameKeyed){
   if(!manifest||!nameKeyed||!manifest.noteDeletions.length)return manifest;
@@ -343,7 +345,7 @@ function sanitizeChunkedBackupItem(entityType,item,{legacy=false}={}){
   if(entityType==='personalData')return legacy?CompatibilityCodec.personalData(item):PersonalDataCodec.normalize(item);
   if(entityType==='dailyRecord'){assertSupportedSavedDate(item);return sanitizeImportedRecord(item,{legacy});}
   if(entityType==='note')return legacy?CompatibilityCodec.note(item,item&&item.key):sanitizeCurrentNote(item,item&&item.key);
-  if(entityType==='activeSession')return legacy?CompatibilityCodec.activeSession(item):ActiveSessionCodec.sanitizeCurrent(item);
+  if(entityType==='activeSession')return legacy||olderActiveSession(item)?CompatibilityCodec.activeSession(item):ActiveSessionCodec.sanitizeCurrent(item);
   if(entityType===LEGACY_REFLECTION_DRAFT_TYPE){if(!legacy||!item||typeof item!=='object'||Array.isArray(item)||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(String(item.date||'')))return null;return freeze({date:String(item.date)});}
   if(entityType==='checkpointManifest')return validateProtectedCheckpointManifest(item);
   return null;
@@ -605,7 +607,7 @@ return Object.freeze({
   legacyNote:(value,key)=>CompatibilityCodec.note(value,key),
   withNoteIdDeletions,
   currentProtectedManifestNames,
-  normalizeImportedActiveSession:(value,{legacy=false}={})=>legacy?CompatibilityCodec.activeSession(value):ActiveSessionCodec.sanitizeCurrent(value),
+  normalizeImportedActiveSession:(value,{legacy=false}={})=>legacy||olderActiveSession(value)?CompatibilityCodec.activeSession(value):ActiveSessionCodec.sanitizeCurrent(value),
   normalizePersonalData:value=>PersonalDataCodec.normalize(value),
   normalizeAssetDescriptors:backupSanitizeAssetDescriptors
 });

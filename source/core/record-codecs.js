@@ -491,6 +491,8 @@ function materializeDailyRecordSummary(summary){
     const APP_LIMITS=input.limits;
     const DATA_CONTRACT=input.dataContract;
     const ACTIVE_SESSION_ID=input.activeSessionId;
+    // The installation running the session (persistence.js installation identity).
+    const INSTALLATION_ID=/^inst_[a-z0-9_]{8,128}$/iu;
     const KeyedRecord=input.keyedRecord;
     const CompletionModel=input.domain.CompletionModel;
     const COMPLETION_SOURCES=input.domain.COMPLETION_SOURCES;
@@ -656,19 +658,20 @@ function materializeDailyRecordSummary(summary){
       revision,
       date:String(session.date||''),
       status:session.status==='suspended'?'suspended':'active',
+      runningOn:String(session.runningOn||''),
       scheduleText,
       snapshot:null,
       suspendedAt:session.suspendedAt?normalizeImportedTimestamp(session.suspendedAt,null):null,
       updatedAt:normalizeImportedTimestamp(session.updatedAt,new Date().toISOString())
     };
-    if(!isValidIsoDate(clean.date)||!isCanonicalScheduleText(clean.scheduleText))return null;
+    if(!isValidIsoDate(clean.date)||!isCanonicalScheduleText(clean.scheduleText)||!INSTALLATION_ID.test(clean.runningOn))return null;
     clean.snapshot=normalizeCurrentSessionSnapshot(session.snapshot,clean.date,activeSessionScheduleFingerprint(clean),revision);
     if(!clean.snapshot)return null;
     return clean;
   }
   function sanitizeCurrentActiveSession(session){
     if(!session||typeof session!=='object'||Array.isArray(session))return null;
-    const expected=['id','type','version','revision','date','status','scheduleText','snapshot','suspendedAt','updatedAt'];
+    const expected=['id','type','version','revision','date','status','runningOn','scheduleText','snapshot','suspendedAt','updatedAt'];
     if(Object.keys(session).sort().join('|')!==expected.sort().join('|'))return null;
     const clean=normalizeCurrentActiveSession(session);
     return clean&&sameDataValue(session,clean)?clean:null;

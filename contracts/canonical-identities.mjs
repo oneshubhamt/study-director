@@ -8,7 +8,7 @@ export const INDEXED_DB=freeze({
     dailyRecords:store('dailyRecords','date','DailyRecord.v16',16),
     dailySummaries:store('dailySummaries','date','DailySummary.v5',5),
     notes:store('notes','key','Note.v3',3),
-    activeSessions:store('activeSessions','id','ActiveSession.v9',9),
+    activeSessions:store('activeSessions','id','ActiveSession.v10',10),
     appMeta:store('appMeta','key','AppMeta.v1',1),
     assets:store('assets','assetId','Attachment.v2',2)
   })
@@ -19,7 +19,7 @@ export const CURRENT_SCHEMA_VERSIONS=freeze({
   DailySummary:5,
   SessionSnapshot:6,
   LocalRecoveryEnvelope:1,
-  ActiveSession:9,
+  ActiveSession:10,
   Note:3,
   AppMeta:1,
   CheckpointMetadata:1,

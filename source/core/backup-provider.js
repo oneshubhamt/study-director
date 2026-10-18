@@ -928,7 +928,7 @@ registry.define('backup-provider',1,input=>{
   async function reviewSync(id){
     const selected=providers.get(safeId(id));if(!selected||!selected.shared)return freeze({cancelled:true,reason:'unavailable'});
     const head=syncState(selected).review;if(!head)return freeze({cancelled:true,reason:'none'});
-    const result=await bringInRepositoryProvider(selected.id,{checkpointId:head});
+    const result=await bringInRepositoryProvider(selected.id,{checkpointId:head,review:true});
     if(result&&!result.cancelled){syncState(selected).review='';presentation.resolve(selected.id,'sync-review');}
     return result;
   }
@@ -1098,7 +1098,7 @@ registry.define('backup-provider',1,input=>{
     for(const entry of manifest.objects||[]){const item=byId.get(entry.objectId);if(!item||item.size&&item.size!==entry.storedBytes||item.digest&&item.digest!==entry.storedChecksum)throw new Error(`Repository object ${entry.objectId} is missing or its metadata no longer matches the selected version.`);}
     return freeze({byId,invalid:Math.max(0,Number(inventory.invalidCount)||0)});
   }
-  async function loadRepositoryProvider(selected,operation,{checkpointId='',mode='bring-in',onProgress=null,note='',missingOnly=false,before='',quiet=false,sync=false}={}){
+  async function loadRepositoryProvider(selected,operation,{checkpointId='',mode='bring-in',onProgress=null,note='',missingOnly=false,before='',quiet=false,sync=false,review=false}={}){
     if(!['bring-in','restore-version'].includes(mode))throw new TypeError('Unsupported managed repository recovery mode.');
     const presentationId=foregroundView()?.operationId||'';
     const progress=(stage,message,details={})=>{if(operation.signal?.aborted||(foregroundView()?.operationId||'')!==presentationId)return;recoveryStatus(message,true,onProgress,stage,details);};
@@ -1159,7 +1159,7 @@ registry.define('backup-provider',1,input=>{
     if(!managedRecoveryHooks)throw new Error('Managed recovery transaction coordination is unavailable.');
     const repositorySnapshot=freeze({history:freeze([row.manifest]),availableObjectIds:freeze([...objectInventory.byId.keys()]),inventory,invalidCount:inventory.invalid.length});
     const managedRecovery=transaction=>managedRecoveryHooks.run(freeze({
-      kind:sync?'sync':mode,label:selected.label,keepsActiveSession:!!note||missingOnly||sync,apply:async()=>{progress('apply',sync?`Taking in changes from ${selected.label}…`:mode==='bring-in'?'Combining data locally…':'Applying selected backup locally…');const result=await transaction.apply();progress('verify-local','Verifying restored local data…');return result;},
+      kind:sync?'sync':mode,label:selected.label,keepsActiveSession:!!note||missingOnly||sync||review,apply:async()=>{progress('apply',sync?`Taking in changes from ${selected.label}…`:mode==='bring-in'?'Combining data locally…':'Applying selected backup locally…');const result=await transaction.apply();progress('verify-local','Verifying restored local data…');return result;},
       createSafety:sync?null:async()=>{
         OperationDiagnostics.mark('external-safety-publication-start',{provider:selected.id});
         progress('safety',`Creating protected safety backup in ${selected.label}…`);
@@ -1444,8 +1444,8 @@ registry.define('backup-provider',1,input=>{
       if(selected.prepare){OperationDiagnostics.mark('provider-prepare-start',{provider:selected.id},traceId);await selected.prepare();OperationDiagnostics.mark('provider-prepare-complete',{provider:selected.id},traceId);}
       if(!quiet){OperationDiagnostics.mark('provider-authorization-start',{provider:selected.id},traceId);await authorize(selected,'import');OperationDiagnostics.mark('provider-authorization-complete',{provider:selected.id},traceId);}
       statusText(`Choose a backup from ${selected.label}…`);
-      const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',note,missingOnly,before:String(options?.before||''),quiet,sync,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});if(!candidate){const message=missingOnly?'No version saved before browser data was cleared was found. Nothing was changed.':'Combine cancelled.';statusText(message);finishForegroundView(selected,{message,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({cancelled:true,...(missingOnly?{reason:'needs-decision'}:{})});}
-      const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{note,missingOnly,sync});
+      const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',note,missingOnly,before:String(options?.before||''),quiet,sync,review:!quiet&&!note&&options?.review===true,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});if(!candidate){const message=missingOnly?'No version saved before browser data was cleared was found. Nothing was changed.':'Combine cancelled.';statusText(message);finishForegroundView(selected,{message,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({cancelled:true,...(missingOnly?{reason:'needs-decision'}:{})});}
+      const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{note,missingOnly,sync,review:!quiet&&!note&&options?.review===true});
       if(result&&result.cancelled){const message=String(result.reason||'').startsWith('note-')||result.reason==='needs-decision'?'No changes were made.':'Combine cancelled.';statusText(message);finishForegroundView(selected,{message,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({...result,cancelled:true});}
       const convergence=result&&result.managedRecovery&&result.managedRecovery.present||freeze({status:'pending',source:freeze({status:'failed',reason:'post-operation backup status unavailable'}),others:freeze([])});
       const sourceReady=convergence.source&&(convergence.source.status==='completed'||convergence.source.status==='pending'&&convergence.source.retryQueued===true);

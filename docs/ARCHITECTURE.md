@@ -50,7 +50,7 @@ The store is renamed in place inside the upgrade (rows are never copied): an old
 
 ## 3. Active Session and timer
 
-The Active Session is portable across devices and backups. It carries the current session/schedule/review state required to resume work. A restored running or paused timer is rehydrated into the timer runtime and the Execute controls are then derived from that restored runtime.
+The Active Session is portable across devices and backups. It carries the current session/schedule/review state required to resume work, and the installation running it (`runningOn`, ActiveSession v10; an older session belongs to the installation that converts it). A restored running or paused timer is rehydrated into the timer runtime only on the installation it names, and the Execute controls are then derived from that restored runtime. Any other installation shows the session as running on another device and runs it only after Continue Here (`docs/BACKUP-ENGINE.md`, "Sync through Drive").
 
 If a restored Plan working draft is semantically identical to the applied Active Session schedule, Plan remains in the applied/live state. A genuinely different restored working draft remains an editing draft.
 

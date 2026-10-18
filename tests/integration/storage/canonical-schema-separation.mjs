@@ -3,12 +3,12 @@ import {createHarness} from '../../helpers/repository-harness.mjs';
 import {noteId,legacyNoteKey} from '../../helpers/note-ids.mjs';
 import {registry,Domain,RecordCodecs,CompatibilityCodecs,freeze,boundedNumber,boundedInt,clampText,optionalText,optionalBoundedNumber,normalizeTimestamp,sameDataValue,helpers,limits,dataContract,dailyRecordCodec} from '../../helpers/current-codec-fixture.mjs';
 const codec=dailyRecordCodec;
-const currentActiveSession=freeze({normalize:value=>value&&typeof value==='object'?freeze({...value,version:9}):null,sanitizeCurrent:value=>value&&Number(value.version)===9?freeze({...value}):null,sanitizeSessionSnapshot:value=>value||null});
+const currentActiveSession=freeze({normalize:value=>value&&typeof value==='object'?freeze({...value,version:10}):null,sanitizeCurrent:value=>value&&Number(value.version)===10?freeze({...value}):null,sanitizeSessionSnapshot:value=>value||null});
 const personalDataCodec=freeze({normalize:value=>value});
 const compatibility=CompatibilityCodecs.create(freeze({
   limits,dataContract,keyedRecord:freeze({create:()=>Object.create(null)}),dailyRecordCodec:codec,activeSessionCodec:currentActiveSession,personalDataCodec,
   helpers:freeze({boundedInt,boundedNumber,optionalBoundedNumber,optionalText,clampText,clampEditorContent:clampText,editorContentWithinLimits:()=>true,sameDataValue,sanitizePracticeRun:helpers.sanitizePracticeRun,activeSessionScheduleFingerprint:()=> 'fp',isValidIsoDate:value=>/^\d{4}-\d{2}-\d{2}$/.test(String(value)),isCanonicalScheduleText:()=>true}),
-  timestamps:freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp}),domain:Domain
+  timestamps:freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp}),domain:Domain,installationId:()=>'inst_schema_device'
 }));
 
 const date='2026-09-10',savedAt='2026-09-10T20:00:00.000Z',updatedAt='2026-09-10T20:01:00.000Z';

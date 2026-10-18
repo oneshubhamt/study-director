@@ -98,7 +98,8 @@ Build this next, before Wordgard (section 6). The decisions below are the user's
 - The running session waits ("hold") while everything else merges.
 - Sign-in kept across reloads for the rest of its hour.
 - **Changed from the table (user, 2026-10-17):** the Device Folder and Drive keep one history. A version is made once and copied to the other location under the same id, so both show the same versions. The Device Folder is still not a sync channel.
-- Known limits: a fresh device whose plans and settings differ from Drive's shows "Needs review" on its first sync (5.4 settles this); two devices running a session on the same day can still replace one another's session when one overtakes the other's revision.
+- **Study session across devices (user, 2026-10-18).** The session names the device running it (ActiveSession v10, `runningOn`); only that device runs the timer. Another device shows "Running on another device" and edits notes and everything else freely; notes from it reach the running device without stopping its session. Suspend hands the session over (uploads at once; the other device offers Continue here). Continue Here on a device whose copy still runs elsewhere asks first; the device taken over from stops at its next sync and keeps its unsynced progress for review. "Needs review" opens during a running session and leaves the session as it is.
+- Known limit: a fresh device whose plans and settings differ from Drive's shows "Needs review" on its first sync (5.4 settles this).
 
 | Part | Decision |
 |---|---|

@@ -46,7 +46,7 @@ const dailyRecordCodec=freeze({
   sanitizeCurrentDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:16,recordKind:'study',date:String(item.date)}):null,
   sanitizeImportedNote:normalizeArea,sanitizeCurrentNote:normalizeArea,isSupportedSavedDate:isDate
 });
-const activeSessionCodec=freeze({sanitizeCurrent:item=>item&&item.id==='current'?freeze({...item,version:9}):null});
+const activeSessionCodec=freeze({sanitizeCurrent:item=>item&&item.id==='current'?freeze({...item,version:RUNTIME_DATA_CONTRACT.schemas.ActiveSession.version,runningOn:item.runningOn||'inst_device_local'}):null});
 const reflectionDraftCodec=freeze({format:'study-director.reflection-draft-codec',contractVersion:1,sanitizeCurrent:item=>item&&isDate(item.date)?freeze({...item,version:1,date:String(item.date),reflection:String(item.reflection||''),revision:Number(item.revision)||0,sessionRevision:Number(item.sessionRevision)||0,updatedAt:normalizeTimestamp(item.updatedAt)||'2026-08-01T00:00:00.000Z'}):null});
 const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:item=>dailyRecordCodec.canonicalizeHistoricalDailyRecord(item),note:normalizeArea,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
 const keyedRecord=freeze({create:()=>Object.create(null)});
@@ -63,7 +63,7 @@ const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,processing,
 const runtimeCodec=freeze({...codec,inspect:codec.inspectCurrent});
 const personal=(name='Checkpoint User')=>freeze({version:2,plans:freeze({draft:null,savedPlans:freeze([]),defaultId:null}),preferences:freeze({studentName:name,theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null})});
 const record=(date,reflection,updatedAt='2026-08-20T12:00:00.000Z')=>freeze({version:16,recordKind:'study',date,reflection,studyQuality:4,savedAt:updatedAt,updatedAt});
-const session=(date,label)=>freeze({id:'current',type:'activeSession',version:9,revision:2,date,status:'suspended',scheduleText:`08:00 | 60 | ${label} | work | Ethics | block | 1`,snapshot:freeze({label}),suspendedAt:'2026-08-20T13:00:00.000Z',updatedAt:'2026-08-20T13:00:00.000Z'});
+const session=(date,label,{runningOn='inst_device_local',status='suspended',revision=2}={})=>freeze({id:'current',type:'activeSession',version:RUNTIME_DATA_CONTRACT.schemas.ActiveSession.version,revision,date,status,runningOn,scheduleText:`08:00 | 60 | ${label} | work | Ethics | block | 1`,snapshot:freeze({label}),suspendedAt:'2026-08-20T13:00:00.000Z',updatedAt:'2026-08-20T13:00:00.000Z'});
 const draft=(date,text,revision=1,updatedAt='2026-08-20T12:00:00.000Z')=>freeze({version:1,date,reflection:text,studyQuality:3,revision,sessionRevision:0,updatedAt});
 
 async function makeCheckpoint({records=[],deletions=[],notes={},noteDeletions=[],activeSession=null,personalData=personal(),installationId='inst_checkpoint_a',exportedAt='2026-08-20T14:00:00.000Z'}={}){
@@ -138,14 +138,14 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
       notesExportPayload:()=>state.notes,notesReadFreshPayload:async()=>state.notes,notesReadFreshItems:async keys=>(keys||[]).map(key=>state.notes[key]||null),notesFlush:async()=>{events.push('preflight-notes-flush');if(injectedFailure==='notes')throw new Error('QA_FIXTURE notes preflight failure');return true;},notesNormalizePayload:normalizeNotes,notesTrashKey:key=>String(key).startsWith('~')?'':'~deleted '+key,notesAlignByTitle:value=>value,notesFailure:()=>({failed:false}),
       restoreJournalPrepare:async value=>(state.journal={state:{id:value.id},payload:value}),restoreJournalRead:async()=>state.journal,restoreJournalMark:async(id,phase)=>(state.journal.state.phase=phase,state.journal.state),restoreJournalClear:async()=>(state.journal=null,true),
       scheduleRead:()=>state.schedule,personalSettle:async()=>{if(injectedFailure==='personal')throw new Error('QA_FIXTURE personal preflight failure');return true;},personalExport:async()=>state.personal,personalImport:async value=>(state.personal=value,true),personalVerify:async value=>assert.deepEqual(state.personal,value),
-      storageGeneration:()=>0,sourceRevision:async()=>'2026-08-23T00:00:00.000Z',snapshotRevision:async()=>'stable-b3',canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],installationId:()=> 'inst_device_local',deletionRecoveryFlush:async()=>{events.push('preflight-deletion-flush');if(injectedFailure==='deletions')throw new Error('QA_FIXTURE deletion preflight failure');if(injectedFailure==='deletions-false')return false;if(injectedFailure==='deletions-unknown')return undefined;return true;},
+      storageGeneration:()=>0,sourceRevision:async()=>'2026-08-23T00:00:00.000Z',snapshotRevision:async()=>'stable-b3',canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],installationId:()=>state.installationId||'inst_device_local',deletionRecoveryFlush:async()=>{events.push('preflight-deletion-flush');if(injectedFailure==='deletions')throw new Error('QA_FIXTURE deletion preflight failure');if(injectedFailure==='deletions-false')return false;if(injectedFailure==='deletions-unknown')return undefined;return true;},
       deletionRecoverySavedDays:async()=>state.deletions.map(value=>({...value})),deletionRecoveryReplaceSavedDays:async values=>(state.deletions=(values||[]).map(value=>({...value})),true),deletionRecoveryNotes:async()=>state.noteDeletions.map(value=>({...value})),deletionRecoveryReplaceNotes:async values=>(state.noteDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryAttachments:async()=>state.attachmentDeletions.map(value=>({...value})),deletionRecoveryReplaceAttachments:async values=>(state.attachmentDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryClearAttachment:async assetId=>(state.attachmentDeletions=state.attachmentDeletions.filter(item=>item.assetId!==assetId),true),...baseStore(state)
     }),
     assets:freeze({get:async()=>null,put:async()=>true,keys:async()=>[],list:async()=>[],importAll:async()=>0,restoreAll:async()=>true,removeMany:async()=>0,removeMetadata:async()=>0,scheduleMaintenance:fn}),
     exports:freeze({...processing,backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),unprotect:async blob=>({blob,encrypted:false}),check:fn,job:fn=>fn(),download:fn,chooseSave:async()=>null,save:async()=>({status:'downloaded'})}),
     codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec}),
     reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({resolve:async options=>noteResolver?noteResolver(options,state):freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:options.manualOnly&&decisions.reflections==='incoming'?item.incomingValue:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
-    session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('preflight-session-cancel'),captureSnapshot:()=>hasLiveTasks&&state.activeSession?state.activeSession.snapshot:null,hasActiveSession:()=>!!state.activeSession&&state.running!==false,hasTasks:()=>hasLiveTasks,toActiveSession:()=>hasLiveTasks?state.activeSession:null,withPersistenceSuppressed:async operation=>operation()}),
+    session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('preflight-session-cancel'),captureSnapshot:()=>hasLiveTasks&&state.activeSession?state.activeSession.snapshot:null,hasActiveSession:()=>!!state.activeSession&&state.running!==false&&state.activeSession.runningOn===(state.installationId||'inst_device_local'),hasTasks:()=>hasLiveTasks,toActiveSession:()=>hasLiveTasks?state.activeSession:null,withPersistenceSuppressed:async operation=>operation(),yieldSession:async()=>{events.push('session-yield');state.activeSession=freeze({...state.activeSession,status:'suspended'});state.running=false;return true;}}),
     domain:freeze({clampText:(value,max=100000)=>String(value??'').slice(0,max),filenameSafeStudentName:()=> 'student',getStudentName:()=>state.personal.preferences.studentName,materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-08-31'}),
     view:freeze({presentation,refreshPnote:fn,refreshReview:fn,renderSchedule:fn}),
     events:freeze({libraryChanged:fn,backupCompleted:fn,
@@ -450,38 +450,41 @@ assert.equal(aRoundTrip.records.get('2026-08-13').reflection,'A local-only after
 assert.equal(aRoundTrip.activeSession.date,'2026-08-12');
 assert.match(aRoundTrip.schedule,/DEVICE-B/u);
 
+let syncWorld=null;
 // Drive sync between two devices. Each takes in what the other changed before
 // uploading its own: a change made on one side only needs no choice, a
 // difference made on both waits for the person, and a session running here
 // keeps its own state while everything else merges.
 {
   const drive=new Map(),key=(kind,id)=>kind+':'+id;
-  const describe=file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,digest:file.digest,remoteId:'remote-'+key(file.kind,file.id)});
+  const describe=file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,digest:file.digest,remoteId:'remote-'+key(file.kind,file.id),...(file.historySummary?{history:freeze({...file.historySummary,exportedAt:file.exportedAt})}:{})});
   const transport=freeze({
     list:async({kind})=>freeze({items:freeze([...drive.values()].filter(file=>file.kind===kind).map(describe)),overflow:false}),
     upload:async file=>{const stored=freeze({...file,createdAt:new Date().toISOString()});drive.set(key(file.kind,file.id),stored);return describe(stored);},
     download:async ref=>{const stored=drive.get(key(ref.kind,ref.id));if(!stored)throw new Error('QA_FIXTURE missing Drive file');return freeze({blob:stored.blob,release:async()=>{}});},
     delete:async ref=>drive.delete(key(ref.kind,ref.id))
   });
-  const head=()=>[...drive.values()].filter(file=>file.kind==='checkpoint').sort((a,b)=>Date.parse(b.exportedAt)-Date.parse(a.exportedAt))[0]?.id||'';
+  const head=()=>[...drive.values()].filter(file=>file.kind==='checkpoint'&&file.historySummary?.retention?.role!=='before-restore').sort((a,b)=>Date.parse(b.exportedAt)-Date.parse(a.exportedAt))[0]?.id||'';
   const device=state=>{
     const providers=createHarness(state).runtime.providers,recovery=ManagedRecoveryModule.createCoordinator(freeze({
       automaticBackup:freeze({suspend:async()=>freeze({}),resume:async()=>true}),diagnostics:freeze({capture:()=>{},mark:()=>false}),
-      lifecycle:freeze({settle:async()=>{},quiesce:async operation=>operation(),revision:()=>'qa-sync',rebuild:async()=>{}}),mutation:freeze({run:async(_kind,operation)=>operation()})
+      lifecycle:freeze({settle:async()=>{},quiesce:async operation=>operation(),revision:()=>'2026-08-23T00:00:00.000Z',rebuild:async()=>{}}),mutation:freeze({run:async(_kind,operation)=>operation()})
     }));
     providers.configureManagedRecovery(freeze({run:spec=>recovery.execute(spec)}));
     assert.equal(providers.register(freeze({id:'drive',label:'Google Drive',shared:true,connected:()=>true,repository:transport})),true);
     return freeze({
       upload:async()=>{await new Promise(resolve=>setTimeout(resolve,3));return providers.backupRepositoryProvider('drive',{interactive:false});},
-      sync:()=>providers.bringInRepositoryProvider('drive',{quiet:true,sync:true,checkpointId:head()})
+      sync:()=>providers.bringInRepositoryProvider('drive',{quiet:true,sync:true,checkpointId:head()}),
+      review:()=>providers.bringInRepositoryProvider('drive',{checkpointId:head(),review:true})
     });
   };
   const note=text=>freeze({Shared:freeze({version:2,key:'Shared',text,updatedAt:new Date().toISOString()})});
-  const a={records:new Map([['2026-08-01',record('2026-08-01','day one')],['2026-08-02',record('2026-08-02','day two')]]),deletions:[],noteDeletions:[],notes:note('first'),activeSession:null,schedule:'',personal:personal('Sync User'),journal:null};
-  const b={records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Sync User'),journal:null};
+  const a={installationId:'inst_sync_device_a',records:new Map([['2026-08-01',record('2026-08-01','day one')],['2026-08-02',record('2026-08-02','day two')]]),deletions:[],noteDeletions:[],notes:note('first'),activeSession:null,schedule:'',personal:personal('Sync User'),journal:null};
+  const b={installationId:'inst_sync_device_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Sync User'),journal:null};
   const A=device(a),B=device(b);
   // A new device takes in everything.
   const v1=await A.upload();assert.equal(a.reconciliationBase.checkpointId,v1.checkpointId,'a Drive backup is what this device shares');
+  syncWorld=freeze({drive,head,device,note});
   assert.equal((await B.sync()).cancelled,false);
   assert.deepEqual([...b.records.keys()].sort(),['2026-08-01','2026-08-02']);assert.equal(b.notes.Shared.text,'first');assert.equal(b.reconciliationBase.checkpointId,v1.checkpointId,'what a device takes in from Drive is what it shares');
   // Changes on one side only cross over both ways without a question.
@@ -494,7 +497,7 @@ assert.match(aRoundTrip.schedule,/DEVICE-B/u);
   const v3=await B.upload();
   assert.equal((await A.sync()).cancelled,false);assert.equal(a.records.get('2026-08-02').reflection,'edited on B');assert.equal(a.notes.Shared.text,'edited on A');assert.equal(a.reconciliationBase.checkpointId,v3.checkpointId);
   // A session left on one device carries on on the other; saving that day there ends it here too.
-  a.activeSession=session('2026-08-29','MOVING');a.schedule=a.activeSession.scheduleText;a.running=false;await A.upload();
+  a.activeSession=session('2026-08-29','MOVING',{runningOn:a.installationId});a.schedule=a.activeSession.scheduleText;a.running=false;await A.upload();
   assert.equal((await B.sync()).cancelled,false);assert.equal(b.activeSession.snapshot.label,'MOVING','a session moves to a device that has none');
   b.activeSession=null;b.schedule='';b.records.set('2026-08-29',record('2026-08-29','saved on B','2026-08-30T12:00:00.000Z'));const saved=await B.upload();
   assert.equal((await A.sync()).cancelled,false);assert.equal(a.activeSession,null,'a session saved as a Saved Day on the other device ends here');assert.equal(a.records.get('2026-08-29').reflection,'saved on B');
@@ -506,8 +509,8 @@ assert.match(aRoundTrip.schedule,/DEVICE-B/u);
   b.records.set('2026-08-01',record('2026-08-01','day one'));
   assert.equal((await B.sync()).cancelled,false);assert.equal(b.records.get('2026-08-01').reflection,'day one by A');assert.equal(b.reconciliationBase.checkpointId,v4.checkpointId);
   // A session running here keeps its own state; everything else merges.
-  a.activeSession=session('2026-08-30','A-SESSION');a.schedule=a.activeSession.scheduleText;a.running=false;a.notes=note('edited on A again');await A.upload();
-  b.activeSession=session('2026-08-31','B-SESSION');b.schedule=b.activeSession.scheduleText;
+  a.activeSession=session('2026-08-30','A-SESSION',{runningOn:a.installationId});a.schedule=a.activeSession.scheduleText;a.running=false;a.notes=note('edited on A again');await A.upload();
+  b.activeSession=session('2026-08-31','B-SESSION',{runningOn:b.installationId});b.schedule=b.activeSession.scheduleText;
   assert.equal((await B.sync()).cancelled,false,'sync is never blocked by a running session');
   assert.equal(b.activeSession.snapshot.label,'B-SESSION','the session running here stays as it is');assert.equal(b.notes.Shared.text,'edited on A again','everything else merges as usual');
   // Another device's own session never silently replaces one left unsaved here.
@@ -516,4 +519,46 @@ assert.match(aRoundTrip.schedule,/DEVICE-B/u);
   assert.equal(a.activeSession.snapshot.label,'A-SESSION','an unsaved earlier session is not replaced by a new one from another device');
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'checkpoint-handoff',preflightVariants:preflightCases.length,coverage:['two-device Drive sync','current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential handoff','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));
+// A study session belongs to the device running it. Another device keeps a
+// copy it never runs, edits notes freely, and continues the session only when
+// it is handed over (Suspend) or taken over (Continue here); the device taken
+// over from stops, and keeps what it recorded for review.
+{
+  syncWorld.drive.clear();
+  const {head,device,note}=syncWorld,day='2026-08-31';
+  const a={installationId:'inst_session_device_a',records:new Map(),deletions:[],noteDeletions:[],notes:note('first'),activeSession:null,schedule:'',personal:personal('Sync User'),journal:null};
+  const b={installationId:'inst_session_device_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Sync User'),journal:null};
+  const A=device(a),B=device(b),running=(state,label,revision)=>{state.activeSession=session(day,label,{runningOn:state.installationId,status:'active',revision});state.schedule=state.activeSession.scheduleText;state.running=true;};
+  running(a,'A-1',10);await A.upload();
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.activeSession.snapshot.label,'A-1');assert.equal(b.activeSession.runningOn,a.installationId,'a session running on another device comes in as that device’s');
+  // Notes edited on the other device come in while the session runs, and the session carries on untouched.
+  b.notes=note('edited on B during A’s session');await B.upload();
+  running(a,'A-2',11);
+  assert.equal((await A.sync()).cancelled,false,'notes from another device never stop a running session');
+  assert.equal(a.notes.Shared.text,'edited on B during A’s session');assert.equal(a.activeSession.snapshot.label,'A-2','the running session stays as it is');assert.equal(a.running,true);
+  await A.upload();
+  assert.equal((await B.sync()).cancelled,false);assert.equal(b.activeSession.snapshot.label,'A-2','the copy on the other device follows the running one');
+  // A review opened during the session settles the rest and leaves the session as it is.
+  b.notes=note('second edit on B');await B.upload();running(a,'A-2b',11.5);
+  const reviewed=await A.review();assert.equal(reviewed.cancelled,false,'a review works during a running session');
+  assert.equal(a.notes.Shared.text,'second edit on B');assert.equal(a.activeSession.snapshot.label,'A-2b','the review leaves the running session as it is');assert.equal(a.running,true);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  // Suspend hands the session over; Continue here picks it up on the other device.
+  a.activeSession=session(day,'A-SUSPENDED',{runningOn:a.installationId,revision:12});a.running=false;await A.upload();
+  assert.equal((await B.sync()).cancelled,false);assert.equal(b.activeSession.snapshot.label,'A-SUSPENDED');assert.equal(b.activeSession.status,'suspended');
+  running(b,'B-CONTINUED',13);await B.upload();
+  assert.equal((await A.sync()).cancelled,false);assert.equal(a.activeSession.runningOn,b.installationId,'the device that handed the session over now shows it running elsewhere');assert.equal(a.activeSession.snapshot.label,'B-CONTINUED');
+  // Taken over while the other device has nothing unsynced: it follows quietly.
+  running(a,'A-TOOK-OVER',14);await A.upload();
+  assert.equal((await B.sync()).cancelled,false,'a device with nothing unsynced follows a takeover without a question');
+  assert.equal(b.activeSession.runningOn,a.installationId);assert.equal(b.activeSession.snapshot.label,'A-TOOK-OVER');
+  // Taken over after recording progress: that device stops and keeps its progress for review.
+  running(b,'B-TOOK-BACK',15);await B.upload();
+  running(a,'A-PROGRESS',16);
+  const yielded=await A.sync();
+  assert.equal(yielded.cancelled,true);assert.equal(yielded.reason,'needs-decision','both versions wait for the person');
+  assert.equal(a.running,false,'the device that was taken over stops its timer');assert.equal(a.activeSession.snapshot.label,'A-PROGRESS','its progress is kept');assert.equal(a.activeSession.status,'suspended');
+}
+
+console.log(JSON.stringify({status:'PASS',suite:'checkpoint-handoff',preflightVariants:preflightCases.length,coverage:['two-device Drive sync','study session hand-off and takeover','current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential handoff','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));
