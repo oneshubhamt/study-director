@@ -609,4 +609,37 @@ let syncWorld=null;
   const keptProgress=a.reviews.open().find(review=>review.subject==='session');assert.equal(keptProgress.kept.snapshot.label,'A-PROGRESS','its own progress is kept for review');assert.equal(keptProgress.kept.status,'suspended');
 }
 
+// Taken over and already saved as that day's Saved Day on the other device
+// before this one syncs: the session ends here too (it never comes back), and
+// what this device recorded since it last synced is kept for review.
+{
+  syncWorld.drive.clear();
+  const {device,note}=syncWorld;
+  const a={installationId:'inst_session_device_a',records:new Map(),deletions:[],noteDeletions:[],notes:note('first'),activeSession:null,schedule:'',personal:personal('Sync User'),journal:null};
+  const b={installationId:'inst_session_device_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Sync User'),journal:null};
+  const A=device(a),B=device(b),start=(state,day,label,revision,status='active')=>{state.activeSession=session(day,label,{runningOn:state.installationId,status,revision});state.schedule=state.activeSession.scheduleText;state.running=status==='active';};
+  const takenAndSaved=async day=>{assert.equal((await B.sync()).cancelled,false);start(b,day,`B-${day}`,50);await B.upload();b.activeSession=null;b.schedule='';b.running=false;b.records.set(day,record(day,`saved on B ${day}`,`${day}T18:00:00.000Z`));await B.upload();};
+  const keptSessions=()=>a.reviews.open().filter(review=>review.subject==='session');
+  // Running here with progress since the last sync: the timer stops and the progress is kept.
+  start(a,'2026-09-01','A-RUNNING',10);await A.upload();await takenAndSaved('2026-09-01');
+  start(a,'2026-09-01','A-RUNNING-PROGRESS',11);
+  assert.equal((await A.sync()).cancelled,false,'an ended session never stops the sync');
+  assert.equal(a.activeSession,null,'a session saved on the other device ends here too');assert.equal(a.running,false,'the timer here stops');assert.equal(a.records.get('2026-09-01').reflection,'saved on B 2026-09-01');
+  assert.equal(keptSessions().length,1);assert.equal(keptSessions()[0].kept.snapshot.label,'A-RUNNING-PROGRESS','what it recorded since is kept for review');assert.equal(keptSessions()[0].kept.status,'suspended');
+  await A.upload();assert.equal((await B.sync()).cancelled,false);assert.equal(b.activeSession,null,'the ended session does not come back on the other device');
+  // Suspended here with progress since the last sync: the same.
+  start(a,'2026-09-02','A-SUSPENDED',20,'suspended');await A.upload();await takenAndSaved('2026-09-02');
+  start(a,'2026-09-02','A-SUSPENDED-PROGRESS',21,'suspended');
+  assert.equal((await A.sync()).cancelled,false);assert.equal(a.activeSession,null);
+  assert.equal(keptSessions().length,2);assert.ok(keptSessions().some(review=>review.kept.snapshot.label==='A-SUSPENDED-PROGRESS'));
+  await A.upload();assert.equal((await B.sync()).cancelled,false);assert.equal(b.activeSession,null);
+  // Running here with nothing new since the last sync: it simply ends, with nothing to review.
+  start(a,'2026-09-03','A-IDLE',30);await A.upload();await takenAndSaved('2026-09-03');
+  assert.equal((await A.sync()).cancelled,false);assert.equal(a.activeSession,null);assert.equal(keptSessions().length,2,'nothing new here, nothing kept');
+  // A session of its own that the other side never saw stays, even when that side saved the same day.
+  a.activeSession=null;await A.upload();assert.equal((await B.sync()).cancelled,false);
+  start(a,'2026-09-04','A-UNSEEN',40);b.records.set('2026-09-04',record('2026-09-04','B’s own day','2026-09-04T18:00:00.000Z'));await B.upload();
+  assert.equal((await A.sync()).cancelled,false);assert.equal(a.activeSession.snapshot.label,'A-UNSEEN','a session the other side never had is not ended by it');assert.equal(a.running,true);
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'checkpoint-handoff',preflightVariants:preflightCases.length,coverage:['two-device Drive sync','versions kept for review travel and resolve everywhere','study session hand-off and takeover','current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential handoff','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));

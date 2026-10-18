@@ -747,15 +747,28 @@ function syncSavedDayReviews(plan,settled){
 // device's stays and the other side's waits) or 'yield' when another device
 // took it over after this one changed it (this device stops and the person
 // reviews both). A copy of another device's session that this device has not
-// changed always follows the other side.
-async function sessionSettlement(base,parsed,{hold=false}={}){
+// changed always follows the other side. In a sync, a session the other side
+// ended (it has none and saved the session's day since both last shared one)
+// counts as taken over too, or as 'ended' when it does not run here: the
+// other side's ending shows and this device's progress is kept for review.
+async function sessionSettlement(base,parsed,{hold=false,sync=false}={}){
   const loaded=await readCanonicalActiveSession(),local=loaded&&loaded.value||null,incoming=parsed&&parsed.importedActiveSession||null;
   if(!local&&!incoming||local&&incoming&&Canonical.same(local,incoming))return 'same';
-  const me=installationId(),takenOver=hold&&!!incoming&&incoming.status!=='suspended'&&incoming.runningOn!==me;
+  const me=installationId(),shared=String(base&&base.sessionFingerprint||'');
+  const ended=(hold||sync)&&!!local&&!incoming&&!!shared&&await daySavedSinceBase(parsed,local.date);
+  const takenOver=hold&&(!!incoming&&incoming.status!=='suspended'&&incoming.runningOn!==me||ended);
   if(hold&&!takenOver)return 'hold';if(!base)return takenOver?'yield':'';
-  const shared=String(base.sessionFingerprint||''),[mine,theirs]=await Promise.all([sessionFingerprint(local),sessionFingerprint(incoming)]);
+  const [mine,theirs]=await Promise.all([sessionFingerprint(local),sessionFingerprint(incoming)]);
   if(takenOver)return mine===shared?'incoming':theirs===shared?'local':'yield';
+  if(ended)return mine===shared?'incoming':'ended';
   return mine===shared?(local&&local.runningOn!==me||sessionFollows(local,incoming,parsed)?'incoming':'conflict'):theirs===shared?'local':'conflict';
+}
+// The other side saved this day since both last shared it. When the shared
+// state cannot be read, it did not (the session then stays, as before).
+async function daySavedSinceBase(parsed,date){
+  const record=(Array.isArray(parsed&&parsed.records)?parsed.records:[]).find(item=>item&&item.date===date);if(!record)return false;
+  let shared;try{shared=await AppData.reconciliationBase.readDays([date]);}catch(error){AppDiagnostics.capture('backup.session-ended-base',error,'warn');return false;}
+  return await dayFingerprint(record)!==String(shared&&shared[date]||'');
 }
 // The other side's session replaces this device's without asking only when
 // it carries this one on (the same day, not behind it), or ends one that was
@@ -1436,7 +1449,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   // takes the other's.
   // A review during a study session leaves the session as it is too.
   const review=!quiet&&!note&&options?.review===true,base=note?null:await handoffBase(stored);
-  let session=note||missingOnly?'same':await sessionSettlement(base,parsed,{hold:(sync||review)&&hasActiveSession()});
+  let session=note||missingOnly?'same':await sessionSettlement(base,parsed,{hold:(sync||review)&&hasActiveSession(),sync});
   // Another device took the session over: stop it here, keeping what this
   // device recorded, and let the person choose between the two (a sync shows
   // the other device's, which runs there, and keeps this one's for review).
@@ -1446,16 +1459,17 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   const keepSession=value=>{const kept=value&&ActiveSessionCodec.sanitizeCurrent(value);return !!kept&&keep(()=>PendingReviewCodec.create({subject:'session',ref:'session',kept}));};
   if(session==='yield'){
     await yieldSession(parsed.importedActiveSession);
-    if(sync){const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null;session='incoming';if(mine&&parsed.importedActiveSession&&!keepSession(mine))return needsDecision();}
+    if(sync){const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null;session='incoming';if(mine&&!keepSession(mine))return needsDecision();}
     else session=await sessionSettlement(base,parsed);
   }
   // Both sides changed the session since they last shared it (or never
-  // shared one): a sync shows the newer and keeps the other for review. A
-  // side without a session has nothing to keep.
-  if(sync&&(session==='conflict'||session==='')){
+  // shared one): a sync shows the newer and keeps the other for review; one
+  // the other side ended shows ended. A side without a session has nothing
+  // to keep.
+  if(sync&&(session==='conflict'||session===''||session==='ended')){
     const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null,theirs=parsed.importedActiveSession||null,time=value=>Number(value&&value.revision)||Date.parse(String(value&&value.updatedAt||''))||0;
-    const incomingShows=!mine||!!theirs&&time(theirs)>time(mine);session=incomingShows?'incoming':'local';
-    if(mine&&theirs&&!keepSession(incomingShows?mine:theirs))return needsDecision();
+    const incomingShows=session==='ended'||!mine||!!theirs&&time(theirs)>time(mine),hidden=incomingShows?mine:theirs;session=incomingShows?'incoming':'local';
+    if(hidden&&!keepSession(hidden))return needsDecision();
   }
   const holdSession=session==='hold'||session==='local',clearSession=session==='incoming'&&!(parsed&&parsed.importedActiveSession);
   const stable=await buildStableRestoreImpact(parsed,preview,signal,{missingOnly,note,holdSession}),impact=stable.impact;
