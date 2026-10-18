@@ -2,7 +2,7 @@
 
 Status of the work on this branch (`refactor/background-coordination`, draft PR #1). Read sections 1 and 5 first; sections 2 to 4 are closed summaries.
 
-**Current state (2026-10-17):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). **In progress: Drive sync and profiles (section 5).** Done: the small items (5.5) and sync (5.1). Next: review marks that do not stop the sync (5.2), the first-start form (5.4), then profiles (5.3), then removing code section 5 made redundant. Last of all: Wordgard as its own module, with two items to explore alongside it: notification sounds made in code, and the editor toolbar order (section 6).
+**Current state (2026-10-18):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). **In progress: Drive sync and profiles (section 5).** Done: the small items (5.5), sync (5.1) and merge rules (5.2). Next: the first-start form (5.4), then profiles (5.3), then removing code section 5 made redundant, then a fresh audit of the backup system and app behaviour (5.6). Last of all: Wordgard as its own module, with two items to explore alongside it: notification sounds made in code, and the editor toolbar order (section 6).
 
 ---
 
@@ -154,7 +154,8 @@ The person's data is never lost. Merging is automatic wherever it is lossless; o
 | Several people on one device | Supported, though rare. Each profile has its own local data: database, browser settings, attachments and Device Folder |
 | Existing data | Becomes the first profile under its current storage names. Nothing moves, so there is no migration. New profiles get their own names, resolved from the identities already centralised in `contracts/` |
 | Device-wide | Only what belongs to the device: app updates, the service worker and the profile list itself. Decide key by key |
-| Switching | The name tag in the left sidebar (desktop; the same tag on mobile) opens the profile list and Add profile. One profile is active at a time; switching reloads every open tab into it |
+| Switching | The name tag in the left sidebar (desktop) opens the profile list and Add profile. One profile is active at a time; switching reloads every open tab into it |
+| Mobile (open; design before building) | On mobile the sidebar becomes a bottom bar with only the section buttons, and the name is not shown (`.sb-head` is hidden at 900px and below). Where the name and the profile switcher live on mobile still needs a UX design, agreed with the user before 5.3 is built (noted 2026-10-18) |
 | Drive link | The Drive library records its profile's id. Connecting a Google account whose library belongs to another profile is refused, so two people's data can never mix. Changing the account uploads the whole library to the new account and leaves the old copy alone |
 | Password | With one profile on the device, its backup key is remembered on the device (a non-extractable key, never the password) and not asked again. With several, each person is asked for their own when switching in, which unlocks their sync; "Not now" keeps working locally with sync paused. It is not a privacy lock, because browser data is not encrypted (5.8) |
 | Removing a profile from a device | From Library → Data, only after confirming its data is synced, or with a clear warning |
@@ -190,12 +191,19 @@ Backup password  [ Optional            ]   (a confirm box appears once you type)
 
 ### 5.6 Order of work
 
-1. The small items (5.5).
-2. The sync engine and merge rules (5.1, 5.2), with sync designed around profile ids.
+1. The small items (5.5). **Done.**
+2. The sync engine and merge rules (5.1, 5.2), with sync designed around profile ids. **Done.**
 3. The first-start form (5.4).
 4. Profiles (5.3).
+5. Remove what section 5 made redundant, then a cleanup pass.
+6. Audit the backup system and app behaviour again (noted by the user, 2026-10-18). Drive went from a manual handoff (back up, then Combine or Replace on the other device) to automatic sync, so much has changed. Check whether everything is still in its best shape, and what can be improved, refined or corrected:
+   - Device Folder and Drive backups end to end, after sync and one history.
+   - Version History: one history now shared by both locations, with keep-15 plus up to 10 hourly versions. How each location keeps, copies and prunes them.
+   - A note's earlier-versions list gathers Drive and Device Folder versions separately; with one history this may now be redundant.
+   - Every app behaviour built for manual handoff: restore flows, Combine and Replace, wording, reminders, status and notices.
+   - Report findings to the user first, as with the earlier audits.
 
-For each: make all the changes, build, test with two simulated devices in a real browser, fix, document, commit.
+For each build step: make all the changes, build, test with two simulated devices in a real browser, fix, document, commit.
 
 ### 5.7 Edge cases to settle while building
 
@@ -215,6 +223,7 @@ For each: make all the changes, build, test with two simulated devices in a real
 
 - **Encryption at rest.** Data stored in the browser (IndexedDB, browser storage, attachments) is not encrypted. Backups are, when a password is set: Device Folder, Drive and backup files, attachments included. Note exports are not. Profiles on one device are therefore separate, not private. Already on the list: end-to-end encryption with a sign-in-first experience (section 2).
 - **Fully silent background sync** would need a small server to hold Google refresh tokens. Not planned; sync during sign-in windows is the accepted design.
+- **Better Smart merge of notes** (`mergeThreeWay`). It works decently, with a lot of room to improve. The user will come back to it later; until then, do not audit it or suggest changes (noted 2026-10-18).
 
 ---
 
