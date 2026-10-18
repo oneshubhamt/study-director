@@ -13,7 +13,8 @@ const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],engine
 let unlockPrompts=0;
 const processing={...engine,check:()=>{},job:fn=>fn()},storage={read:async key=>settings.get(key)||null,write:async(key,value)=>settings.set(key,value),remove:async key=>settings.delete(key)};
 const interactions={input:async()=>{unlockPrompts+=1;return {value:'folder encryption passphrase'};},choose:async()=>'unlock',confirm:async()=>true};
-const makeProtection=()=>registry.require('exports',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})).createProtection({processing,storage,interactions,settingKey:'backupProtection'});
+// remember: the device holds one profile, so its kept key opens it again.
+const makeProtection=(remember=()=>true)=>registry.require('exports',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})).createProtection({processing,storage,interactions,settingKey:'backupProtection',remember});
 let protection=makeProtection();await protection.manage();assert.equal(protection.status().unlocked,true);
 const sealed=Object.freeze({protect:(...args)=>protection.protect(...args),unprotect:(...args)=>protection.unprotect(...args),status:()=>protection.status()});
 const w=createDeviceFolderWorld({protection:sealed}),folder=w.directory();
@@ -32,8 +33,8 @@ await w.controller.install();w.choose(folder);await w.controller.connect();await
   cases.push('objects and versions are sealed; commit markers hold metadata only');
 }
 {
-  // Reopening the app locks encryption: nothing is written on its own.
-  protection=makeProtection();await protection.refresh();assert.equal(protection.status().unlocked,false);const promptsBefore=unlockPrompts;
+  // With several profiles on the device, reopening locks encryption: nothing is written on its own.
+  protection=makeProtection(()=>false);await protection.refresh();assert.equal(protection.status().unlocked,false);const promptsBefore=unlockPrompts;
   w.change();await w.tick(25*MINUTE);
   assert.equal(await commits(),1,'a locked app writes nothing automatically');assert.equal(w.controller.status().pending,true,'the row says changes are waiting');assert.equal(unlockPrompts,promptsBefore,'nothing prompts on its own');
   await protection.manage();assert.equal(protection.status().unlocked,true);w.runtime.wakeBackground('encryption-unlocked');await w.tick(5000);
@@ -41,7 +42,7 @@ await w.controller.install();w.choose(folder);await w.controller.connect();await
   cases.push('locked encryption pauses automatic backups until unlocked');
 }
 {
-  protection=makeProtection();await protection.refresh();const before=unlockPrompts;
+  protection=makeProtection(()=>false);await protection.refresh();const before=unlockPrompts;
   w.change();assert.equal(await w.controller.backupNow(),true);
   assert.equal(unlockPrompts,before+1,'Back up now asks to unlock');assert.equal(await commits(),3);
   cases.push('Back up now while locked asks to unlock, then backs up');
@@ -53,5 +54,12 @@ await w.controller.install();w.choose(folder);await w.controller.connect();await
   const root=await folder.getDirectoryHandle(IDENTITIES.root),objects=(await root.getDirectoryHandle(IDENTITIES.objects)).names();assert.ok(!objects.includes(await w.nextObjectName()),'the bad file is removed');
   assert.equal(await w.controller.backupNow(),true,'the next attempt succeeds');assert.equal(await commits(),4);
   cases.push('a corrupt read-back fails the backup and leaves nothing behind');
+}
+{
+  // One profile on the device: reopening keeps encryption open, so automatic backups go on without asking.
+  protection=makeProtection();await protection.refresh();assert.equal(protection.status().unlocked,true);const before=unlockPrompts,lastBefore=w.controller.status().lastBackupAt;
+  await w.tick(1000);w.change();await w.tick(25*MINUTE);
+  assert.ok(w.controller.status().lastBackupAt>lastBefore,'the automatic backup is written');assert.equal(w.controller.status().pending,false);assert.equal(unlockPrompts,before,'nothing asks for the password');
+  cases.push('one profile reopens with encryption open and keeps backing up');
 }
 console.log(JSON.stringify({status:'PASS',suite:'folder-encryption',productionEngine:true,cases},null,2));

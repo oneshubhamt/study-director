@@ -71,7 +71,7 @@ registry.define('backup-recovery-host',1,()=>{
     functions(input.session,['hasBlocking'],'Backup recovery host session port');
     if(typeof input.sourceRevision!=='function')throw new TypeError('Backup recovery host sourceRevision port is invalid.');
     functions(input.storage,['read','remove','write'],'Backup recovery host storage port');
-    functions(input.view,['invalidateAttachments','refreshCore','refreshNotes','refreshReview','renderLibrary','setStatus'],'Backup recovery host view port');
+    functions(input.view,['deviceName','invalidateAttachments','refreshCore','refreshNotes','refreshReview','renderLibrary','setStatus'],'Backup recovery host view port');
 
     if(!Object.isFrozen(input.presentation)||['begin','read','feedback','condition','detail','outcome','resolve','reset','subscribe'].some(key=>typeof input.presentation[key]!=='function'))throw new TypeError('Backup presentation port is invalid.');
     const {mark:markPending,clear:clearPending,read:pending}=createPendingStore(freeze({storage:input.storage,diagnostics:input.diagnostics,sourceRevision:input.sourceRevision}));
@@ -211,6 +211,8 @@ registry.define('backup-recovery-host',1,()=>{
       const label=days<=0?'Today':days===1?'Yesterday':days<7?`${days} days ago`:days<35?`${Math.round(days/7)} week${Math.round(days/7)===1?'':'s'} ago`:`${Math.max(1,Math.round(days/30))} month${Math.max(1,Math.round(days/30))===1?'':'s'} ago`;
       return days<=0||withTime?`${label}, ${time}`:label;
     }
+    // The device that made a version: "from iPad · Safari" or "from this device".
+    function fromDevice(entry,entries){const name=input.view.deviceName(entry&&entry.origin,entries.map(other=>other&&other.origin));return name==='This device'?'from this device':name?`from ${name}`:'';}
     function renderNoteVersions(entries){
       const {list}=elements();
       if(!entries.length){const empty=input.document.createElement('div');empty.className='managed-version-history-empty ui-helper';empty.textContent=busy?'':'No earlier versions of this note are in your backups yet.';list.appendChild(empty);return;}
@@ -219,7 +221,7 @@ registry.define('backup-recovery-host',1,()=>{
         const location=entry.location,card=input.document.createElement('section');card.className='managed-version-card';
         const head=input.document.createElement('div');head.className='managed-version-card-head';
         const when=input.document.createElement('strong');when.className='managed-version-date';when.textContent=plainTimeLabel(entry.exportedAt,perDay.get(dayKey(new Date(entry.exportedAt)))>1);
-        const exact=input.document.createElement('span');exact.className='managed-version-counts ui-helper';exact.textContent=dateLabel(entry.exportedAt);
+        const exact=input.document.createElement('span');exact.className='managed-version-counts ui-helper';exact.textContent=[dateLabel(entry.exportedAt),fromDevice(entry,entries)].filter(Boolean).join(' · ');
         const use=input.document.createElement('button');use.type='button';use.className='mini-btn ui-btn';use.dataset.action='compare-managed-note';use.dataset.versionHistorySource=location.sourceId;use.dataset.versionHistoryCheckpoint=location.checkpointId;use.textContent='Review';
         head.append(when,exact,use);card.appendChild(head);list.appendChild(card);
       }
@@ -233,7 +235,7 @@ registry.define('backup-recovery-host',1,()=>{
         const card=input.document.createElement('section');card.className='managed-version-card';card.dataset.logicalVersion=entry.logicalId;
         const head=input.document.createElement('div');head.className='managed-version-card-head';
         const when=input.document.createElement('strong');when.className='managed-version-date';when.textContent=dateLabel(entry.exportedAt||location.exportedAt);
-        const counts=input.document.createElement('span');counts.className='managed-version-counts ui-helper';counts.textContent=`${Number(entry.counts?.dailyRecord)||0} Saved Days · ${Number(entry.counts?.note)||0} Notes`;
+        const counts=input.document.createElement('span');counts.className='managed-version-counts ui-helper';counts.textContent=[`${Number(entry.counts?.dailyRecord)||0} Saved Days · ${Number(entry.counts?.note)||0} Notes`,fromDevice(entry,entries)].filter(Boolean).join(' · ');
         head.append(when,counts);card.appendChild(head);
         const row=input.document.createElement('div');row.className='managed-version-location';
         const copy=input.document.createElement('div');copy.className='managed-version-location-copy';
@@ -290,7 +292,7 @@ registry.define('backup-recovery-host',1,()=>{
         const seen=new Set([note.text]),entries=[];
         for(const entry of found.sort((a,b)=>Date.parse(b.exportedAt)-Date.parse(a.exportedAt)||String(b.checkpointId).localeCompare(String(a.checkpointId)))){
           if(seen.has(entry.text))continue;seen.add(entry.text);
-          entries.push(freeze({exportedAt:entry.exportedAt,location:freeze({sourceId:entry.sourceId,sourceLabel:entry.sourceLabel,checkpointId:entry.checkpointId,exportedAt:entry.exportedAt})}));
+          entries.push(freeze({exportedAt:entry.exportedAt,origin:String(entry.origin||''),location:freeze({sourceId:entry.sourceId,sourceLabel:entry.sourceLabel,checkpointId:entry.checkpointId,exportedAt:entry.exportedAt})}));
         }
         lastEntries=freeze(entries);render();
         const missing=failed.length?` ${failed.join(' and ')} could not be read.`:'';

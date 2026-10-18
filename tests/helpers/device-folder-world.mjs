@@ -62,7 +62,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   const presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications}));
   const noop=()=>{};
   const runtime=registry.require('backup-provider',1,freeze({repositoryPolicy:policy})).createRuntime(freeze({background:freeze({format:background.format,contractVersion:1,createCoordinator:background.createCoordinator,maintenance:background.maintenance,maintenanceActionable:background.maintenanceActionable}),repository:pipeline,ports:freeze({
-    configuration:freeze({appVersion:'qa'}),controller:freeze({beginImport:noop,cancelImport:noop,finishImport:noop}),exports:freeze({run:async(type,data)=>{assert.equal(type,'checksum');return sha256(data.value);}}),domain:freeze({clampText:value=>String(value||'')}),view:freeze({presentation}),
+    configuration:freeze({appVersion:'qa'}),controller:freeze({beginImport:noop,cancelImport:noop,finishImport:noop}),exports:freeze({followProtection:async()=>false,run:async(type,data)=>{assert.equal(type,'checksum');return sha256(data.value);}}),domain:freeze({clampText:value=>String(value||'')}),view:freeze({presentation}),
     ownership:freeze({canRunBackground:()=>!canMutate?'awaiting-control':protection&&protection.status().enabled&&!protection.status().unlocked?'locked':true,requireMutationControl:()=>{if(!canMutate)throw new Error('Take control first.');}}),environment:freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}),
     diagnostics:freeze({capture:(scope,error)=>captures.push(freeze({scope,message:String(error?.message||error)})),start:()=>'trace',mark:noop,finish:noop,fail:noop})
   })}));

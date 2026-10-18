@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor} from '../../helpers/browser-harness.mjs';
 
-const preload=`(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');if(!localStorage.getItem('qa.defaultsSeeded')){localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'Multi-tab QA',updatedAt:new Date().toISOString()}));localStorage.setItem('qa.defaultsSeeded','1')};localStorage.setItem('studyDirector.nameSetupSkippedDate.v1',today);})();`;
+const preload=`(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');if(!localStorage.getItem('qa.defaultsSeeded')){localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'Multi-tab QA',updatedAt:new Date().toISOString()}));localStorage.setItem('qa.defaultsSeeded','1')};(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));})();`;
 const server=await startReleaseServer(),browser=await launchChromium({profilePrefix:'study-director-qa-tabs-'}),pages=[];
 const result={status:'PASS',release:server.manifest.release,checks:{}};
 try{

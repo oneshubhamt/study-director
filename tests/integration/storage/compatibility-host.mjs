@@ -20,7 +20,7 @@ const obsolete={
   schedule:'oldSchedule',defaults:'oldDefaults',quote:'oldQuote',nudge:'oldNudge',reflectionDrafts:'oldReflections',reflectionLegacy:'oldReflection',
   deviceId:'oldDevice',liveDraft:'oldLiveDraft',activeSession:'oldActiveSession',storageCapability:'oldStorageCapability',diagnostics:'oldDiagnostics',
   legacyOwnershipLease:'oldOwnerLease',attachmentMaintenanceAttemptDay:'oldAttachmentMaintenanceDay',
-  attachmentMaintenanceDay:'oldAttachmentCleanupDay',attachmentMaintenancePending:'oldAttachmentCleanupPending'
+  attachmentMaintenanceDay:'oldAttachmentCleanupDay',attachmentMaintenancePending:'oldAttachmentCleanupPending',nameSetupSkipped:'oldNameSetupSkipped'
 };
 const appMeta={
   personalPreferences:'preferences',dataMaintenance:'dataMaintenance',verifiedRecoveryBackups:'verifiedRecoveryBackups',attachmentIntegrityAudit:'attachmentIntegrityAudit',deviceFolder:'deviceFolder',repositoryIntegrityScrub:'repositoryIntegrityScrub',
@@ -39,7 +39,7 @@ const localRows=new Map([
   [obsolete.schedule,'07:00 | 60 | Legacy Plan'],[obsolete.defaults,JSON.stringify({studentName:'Asha',scheduleText:'08:00 | 45 | Legacy Default',practiceCueMode:'audio'})],
   [obsolete.quote,'Keep going'],[obsolete.nudge,JSON.stringify({enabled:true})],[current.theme,'dark'],[current.presentation,'glass'],[current.fontScale,'1.1'],
   [obsolete.reflectionDrafts,JSON.stringify({version:1,drafts:{'2026-09-19':{reflection:'Legacy reflection',revision:2,updatedAt:'2026-09-19T10:00:00.000Z'}}})],
-  [obsolete.deviceId,'dev_abcdefgh'],['oldNoteRescue',JSON.stringify({format:'study-director.area-note-rescue',version:1,entries:[]})],[obsolete.attachmentMaintenanceAttemptDay,'2026-09-18'],[obsolete.attachmentMaintenanceDay,'2026-09-19'],[obsolete.attachmentMaintenancePending,'1'],
+  [obsolete.deviceId,'dev_abcdefgh'],['oldNoteRescue',JSON.stringify({format:'study-director.area-note-rescue',version:1,entries:[]})],[obsolete.attachmentMaintenanceAttemptDay,'2026-09-18'],[obsolete.attachmentMaintenanceDay,'2026-09-19'],[obsolete.attachmentMaintenancePending,'1'],[obsolete.nameSetupSkipped,'2026-09-19'],
   [current.storageHealth,JSON.stringify({version:2,lastLocalSaveAt:'2026-09-19T09:00:00.000Z',lastBackupAt:'2026-09-19T09:30:00.000Z',lastNotesSaveAt:'2026-09-18T10:00:00.000Z',lastDailyRecordSaveAt:'2026-09-19T08:30:00.000Z',lastLiveSaveAt:'2026-09-19T08:59:00.000Z',lastIdbOkAt:'2026-09-19T08:00:00.000Z',lastError:'Browser database is unavailable',lastErrorAt:'2026-09-18T00:00:00.000Z',lastErrorSource:'indexedDB',updatedAt:'2026-09-19T09:00:00.000Z',storagePersisted:true,usageBytes:10,quotaBytes:100,usageRatio:0.1,lastEstimateAt:'2026-09-19T08:00:00.000Z',browserDataClearedAt:null})]
 ]);
 let lastError=null;
@@ -151,7 +151,7 @@ assert.equal(localRows.has(obsolete.reflectionDrafts),false);
 assert.equal(topologyRetired,true);
 assert.equal(localRows.get('installationId'),'inst_abcdefgh');
 assert.equal(localRows.has(obsolete.deviceId),false);
-for(const key of [obsolete.attachmentMaintenanceAttemptDay,obsolete.attachmentMaintenanceDay,obsolete.attachmentMaintenancePending])assert.equal(localRows.has(key),false,'every obsolete browser-storage key is retired');
+for(const key of [obsolete.attachmentMaintenanceAttemptDay,obsolete.attachmentMaintenanceDay,obsolete.attachmentMaintenancePending,obsolete.nameSetupSkipped])assert.equal(localRows.has(key),false,'every obsolete browser-storage key is retired');
 let installationProof=await facade.verifyCanonicalInstallation();assert.equal(installationProof.canonical,true);assert.equal(installationProof.compatibilityRetired,true,'after one migration no historical host metadata remains');
 assert.equal(metadataRows.has('dataMaintenance'),false);assert.equal(metadataRows.has('backupProviderOperation:google-drive'),false);assert.equal(legacyFileCollections,1);
 const scrub=metadataRows.get('repositoryIntegrityScrub').value,scrubDevice=scrub.locations['device-folder'],scrubDrive=scrub.locations['google-drive'];
@@ -302,9 +302,11 @@ assert.equal(migratedValidators.verifiedRecoveryBackups(metadataRows.get('verifi
 assert.equal(migratedValidators.attachmentIntegrityAudit(metadataRows.get('attachmentIntegrityAudit').value,freeze({key:'attachmentIntegrityAudit'})),true,'migrated L7 attachment-audit metadata must pass the ordinary current validator');
 assert.equal(migratedValidators.repositoryIntegrityScrub(metadataRows.get('repositoryIntegrityScrub').value,freeze({key:'repositoryIntegrityScrub'})),true,'migrated backup verification state must pass the ordinary current validator');
 assert.equal(migratedValidators.deviceFolder(metadataRows.get('deviceFolder').value,freeze({key:'deviceFolder'})),true,'migrated L7 Device Backup settings must pass the ordinary current validator');
-assert.equal(validators.backupProtection(freeze({version:2,id:'key',verifier:new Blob(['ok'])}),freeze({key:'b'})),true);
-assert.equal(validators.backupProtection(freeze({version:1,id:'legacy-key',verifier:new Blob(['legacy'])}),freeze({key:'b'})),false,'only the current password record is read');
-assert.equal(validators.backupProtection(freeze({version:2,id:'',verifier:new Blob(['ok'])}),freeze({key:'b'})),false);
+const setAt='2026-10-01T10:00:00.000Z';
+assert.equal(validators.backupProtection(freeze({version:3,id:'key',verifier:new Blob(['ok']),key:null,setAt}),freeze({key:'b'})),true);
+assert.equal(validators.backupProtection(freeze({version:2,id:'old-key',verifier:new Blob(['old'])}),freeze({key:'b'})),false,'only the current password record is read');
+assert.equal(validators.backupProtection(freeze({version:3,id:'',verifier:new Blob(['ok']),key:null,setAt}),freeze({key:'b'})),false);
+assert.equal(validators.backupProtection(freeze({version:3,id:'key',verifier:new Blob(['ok']),key:'raw password',setAt}),freeze({key:'b'})),false,'a remembered key is only ever a non-extractable CryptoKey');
 const pendingProvider=freeze({format:'study-director.managed-provider-backup-pending',version:1,entries:freeze([freeze({providerId:'google-drive',requestedAt:'2026-09-20T10:00:00.000Z',sourceRevision:'2026-09-20T09:59:00.000Z'})])});
 assert.equal(validators.managedProviderBackupPending(pendingProvider,freeze({key:'f'})),true,'durable provider retry metadata must validate as a typed host-owned appMeta value');
 assert.equal(validators.managedProviderBackupPending(freeze({...pendingProvider,entries:freeze([freeze({...pendingProvider.entries[0],providerId:'Google Drive'})])}),freeze({key:'f'})),false,'pending provider identities must be canonical and fail closed');

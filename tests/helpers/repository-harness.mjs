@@ -68,7 +68,7 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
     retireLegacyStores:async()=>{controls.retiredLegacyStores=true;stores.sync.clear();stores.tombstones.clear();stores.reflection.clear();return freeze({status:'retired',version:7,removed:3});}
   });
   const normalizeTs=(value,fallback='')=>{const parsed=Date.parse(String(value||''));return Number.isFinite(parsed)?new Date(parsed).toISOString():fallback};
-  const installationIdentity=freeze({format:'study-director.installation-identity',contractVersion:3,getId:()=> 'inst_test'});
+  const installationIdentity=freeze({format:'study-director.installation-identity',contractVersion:4,getId:()=> 'inst_test'});
   const KeyedRecord=freeze({create:()=>Object.create(null),clone:value=>Object.assign(Object.create(null),structuredClone(value||{}))});
   const dailyRecordCodec=controls.dailyRecordCodec||freeze({
     buildDailyRecordSummary:v=>v,

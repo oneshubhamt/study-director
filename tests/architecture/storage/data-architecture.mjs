@@ -25,9 +25,9 @@ const sourceFiles=[];
 const walk=dir=>{for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const full=path.join(dir,entry.name);if(entry.isDirectory())walk(full);else if(/\.(?:js|html)$/u.test(entry.name))sourceFiles.push(full);}};
 walk(path.join(root,'source'));
 
-assert.match(app,/const STORAGE_KEYS=Object\.freeze\(@@SD_LOCAL_STORAGE_KEYS@@\);/u);
-assert.match(app,/const themeStorageKey='@@SD_THEME_STORAGE_KEY@@';/u);
-assert.match(app,/const presentationStorageKey='@@SD_PRESENTATION_STORAGE_KEY@@';/u);
+assert.match(app,/const STORAGE_KEYS=Object\.freeze\(Object\.fromEntries\(Object\.entries\(@@SD_LOCAL_STORAGE_KEYS@@\)\.map\(\(\[name,key\]\)=>\[name,DEVICE_WIDE_STORAGE_KEYS\.includes\(name\)\?key:ProfileScope\.scoped\(key\)\]\)\)\);/u,'every browser-storage key but the device-wide ones belongs to the open profile');
+assert.match(app,/const themeStorageKey=profileScope\.scoped\('@@SD_THEME_STORAGE_KEY@@'\);/u);
+assert.match(app,/const presentationStorageKey=profileScope\.scoped\('@@SD_PRESENTATION_STORAGE_KEY@@'\);/u);
 assert.doesNotMatch(app,/['"]studyDirector\.(?:theme|presentation)\.v1['"]/u,'pre-hydration presentation bootstrap must use build-injected storage identities');
 assert.match(app,/const SESSION_STORAGE_KEYS=Object\.freeze\(@@SD_SESSION_STORAGE_KEYS@@\);/u);
 assert.match(app,/const OBSOLETE_STORAGE_KEYS=Object\.freeze\(@@SD_OBSOLETE_LOCAL_STORAGE_KEYS@@\);/u);
@@ -39,7 +39,8 @@ for(const key of ['attachmentMaintenancePending','attachmentMaintenanceDay']){as
 assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.attachmentMaintenancePending,'studyDirector.attachmentMaintenancePending.v1');
 assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.attachmentMaintenanceDay,'studyDirector.attachmentMaintenanceDay.v2');
 assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.attachmentMaintenanceAttemptDay,'studyDirector.attachmentMaintenanceDay.v1','old scheduling records cannot certify completion in F2');
-assert.equal(Object.keys(OBSOLETE_LOCAL_STORAGE_KEYS).length,18);
+assert.equal(Object.keys(OBSOLETE_LOCAL_STORAGE_KEYS).length,19);
+assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.nameSetupSkipped,'studyDirector.nameSetupSkippedDate.v1','the first-start form replaced the name prompt');
 assert.equal(Object.hasOwn(LOCAL_STORAGE_KEYS,'nudge'),false,'nudge must not remain a current LocalStorage authority');
 assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.nudge,'studyDirector.nudgeConfig');
 assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.legacyOwnershipLease,'studyDirector.timerOwner.v1');
@@ -128,17 +129,20 @@ assert.deepEqual(CANONICAL_OPFS_IDENTITIES,OPFS_IDENTITIES);
 assert.equal(EXTERNAL_FORMATS.completeBackup.metadataVersion,RUNTIME_DATA_CONTRACT.schemas.Backup.version);
 const attachmentWorkerSource=read('portable/attachment-worker.ts');
 const streamEncryptionSource=read('portable/stream-encryption.js');
-assert.ok(attachmentWorkerSource.includes("const DIRECTORY='@@SD_ATTACHMENT_OPFS_DIRECTORY@@';"),'standalone attachment worker must consume the build-injected canonical OPFS identity');
+assert.ok(attachmentWorkerSource.includes("const DIRECTORY='@@SD_ATTACHMENT_OPFS_DIRECTORY@@',SEPARATOR='@@SD_PROFILE_SCOPE_SEPARATOR@@',"),'standalone attachment worker must consume the build-injected canonical OPFS identity');
+// The worker bundles are built before the release fills in folder names, so a
+// folder check that measured a name would keep the placeholder's length.
+for(const bundle of ['source/external/attachment-worker.js','source/external/export-worker.js']){const text=read(bundle);assert.ok(text.includes('split("@@SD_PROFILE_SCOPE_SEPARATOR@@")'),bundle+' checks a profile folder by splitting its name');assert.doesNotMatch(text,/startsWith\([^)]*\)&&[^;]{0,40}\.slice\(\d+\)/u,bundle+' never fixes a placeholder length');}
 assert.ok(read('source/external/attachment-worker.js').includes('@@SD_ATTACHMENT_OPFS_DIRECTORY@@'),'emitted attachment-worker source must retain the canonical OPFS token until the release build renders it');
 const protectedMagicLiteral=JSON.stringify(EXTERNAL_FORMATS.protectedBackup.magic).slice(1,-1);
 assert.ok(streamEncryptionSource.includes(`new TextEncoder().encode('${protectedMagicLiteral}')`),'standalone encryption worker magic must mechanically match the canonical manifest');
 assert.ok(streamEncryptionSource.includes(`header[8]!==${EXTERNAL_FORMATS.protectedBackup.version}`),'standalone encryption reader version must mechanically match the canonical manifest');
 const literal=value=>String(value).replaceAll('\\','\\\\').replaceAll('\r','\\r').replaceAll('\n','\\n').replaceAll("'","\\'");
-assert.ok(read('source/core/asset-storage.js').includes("DIRECTORY='@@SD_ATTACHMENT_OPFS_DIRECTORY@@'"),'attachment storage must consume the build-injected canonical OPFS identity');
-assert.ok(read('source/core/asset-storage.js').includes("LEGACY_DIRECTORY='@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@'"),'legacy attachment cleanup must consume the build-injected obsolete OPFS identity');
-assert.ok(read('source/core/exports.js').includes("ROOT='@@SD_BACKUP_FILES_OPFS_DIRECTORY@@'"),'backup temporary-file storage must consume the build-injected canonical OPFS identity');
+assert.ok(read('source/core/asset-storage.js').includes("DIRECTORY=String(ports.directory||'@@SD_ATTACHMENT_OPFS_DIRECTORY@@')"),'attachment storage must consume the build-injected canonical OPFS identity');
+assert.ok(read('source/core/asset-storage.js').includes("LEGACY_DIRECTORY=ports.directory?String(ports.legacyDirectory||''):'@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@'"),'legacy attachment cleanup must consume the build-injected obsolete OPFS identity');
+assert.ok(read('source/core/exports.js').includes("ROOT=String(root||'@@SD_BACKUP_FILES_OPFS_DIRECTORY@@')"),'backup temporary-file storage must consume the build-injected canonical OPFS identity');
 assert.ok(read('portable/file-output.js').includes("OPFS_DIRECTORY='@@SD_BACKUP_FILES_OPFS_DIRECTORY@@'"),'portable worker output must resolve the same canonical scratch directory itself');
-assert.match(read('source/core/exports.js'),/output:Object\.freeze\(\{kind:'opfs',name:staged\.name\}\)/u,'portable file work must send only an opaque scratch identity to the worker, never a FileSystemHandle');
+assert.match(read('source/core/exports.js'),/output:Object\.freeze\(\{kind:'opfs',name:staged\.name,directory:staged\.directory\}\)/u,'portable file work must send only an opaque scratch identity (name and profile folder) to the worker, never a FileSystemHandle');
 assert.doesNotMatch(read('source/core/exports.js'),/data=\{\.\.\.data,output:staged\.handle/u,'portable worker messages must not structured-clone an OPFS FileSystemHandle');
 assert.ok(read('source/core/backup-codec.js').includes(`BACKUP_V10_MAGIC='${literal(EXTERNAL_FORMATS.completeBackup.containerMagic)}'`),'backup container magic must mechanically match the canonical manifest');
 const attachmentsSource=read('source/core/attachments.js');
@@ -212,7 +216,7 @@ const sw=read('source/platform/sw.js'),deviceBackupSource=read('source/core/devi
 assert.match(sw,/@@SD_CACHE_STORAGE_IDENTITIES@@/u,'service worker cache identities must come from the canonical contract');
 assert.doesNotMatch(sw,/const CACHE_PREFIX=['"]study-director-shell-/u,'service worker must not mint the shell cache prefix');
 assert.doesNotMatch(sw,/const bridgeCache=['"]study-director-update-bridge-v2/u,'service worker must not mint the update bridge cache');
-assert.match(app,/const EXTERNAL_REPOSITORY_IDENTITIES=Object\.freeze\(@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@\)/u,'Device Backup repository directories must come from the canonical contract');assert.match(app,/identities:Object\.freeze\(\{root:EXTERNAL_REPOSITORY_IDENTITIES\.deviceFolderRoot/u,'Device Folder storage receives its directory names from the canonical contract');
+assert.match(app,/const EXTERNAL_REPOSITORY_IDENTITIES=Object\.freeze\(@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@\)/u,'Device Backup repository directories must come from the canonical contract');assert.match(app,/identities:Object\.freeze\(\{root:ProfileScope\.scoped\(EXTERNAL_REPOSITORY_IDENTITIES\.deviceFolderRoot\)/u,'Device Folder storage receives its directory names from the canonical contract');
 assert.doesNotMatch(deviceBackupSource,/Study-Director-Automatic-Backup-Repository/u,'Device Backup must not mint its repository root');
 assert.doesNotMatch(deviceBackupSource,/id:['"]study-director-device-backup/u,'Device Backup must not mint its persistent picker identity');
 assert.match(app,/pickerId:EXTERNAL_REPOSITORY_IDENTITIES\.deviceFolderPickerId/u,'Device Backup picker identity must come from the canonical contract');
@@ -226,7 +230,7 @@ assert.match(app,/deviceState:Object\.freeze\(\{[\s\S]{0,320}readInsightsWindow:
 assert.match(app,/function pwaLastUpdateCheckAt\(\)[\s\S]{0,260}AppData\.local\.getText\(STORAGE_KEYS\.pwaUpdateCheck/u,'PWA update bookkeeping must use the LocalStorage abstraction');
 assert.match(app,/function markPwaUpdateCheck[\s\S]{0,260}AppData\.local\.setText\(STORAGE_KEYS\.pwaUpdateCheck/u,'PWA update timestamp writes must use the LocalStorage abstraction');
 const appDirectLocal=[...app.matchAll(/\blocalStorage\.(?:getItem|setItem|removeItem)\(/gu)];
-assert.equal(appDirectLocal.length,2,'host direct localStorage access must be limited to the two pre-hydration appearance mirror helpers');
+assert.equal(appDirectLocal.length,3,'host direct localStorage access must be limited to the profile scope read and the two pre-hydration appearance mirror helpers');
 assert.ok(appDirectLocal.every(match=>match.index<app.indexOf('const LocalStorageContract=')),'direct host localStorage must occur only before the persistence abstraction is created');
 
 // Obsolete metadata cleanup belongs to the temporary compatibility port, not recurring maintenance.

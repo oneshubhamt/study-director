@@ -117,7 +117,10 @@ registry.define('reconciliation-baseline',1,()=>{
         for(const handle of handles){handle.request.onerror=()=>fail(handle.request.error||new Error('Reconciliation baseline read failed.'));handle.request.onsuccess=apply;}
       },{strict:true,abortMessage:'reconciliation baseline update aborted'});
     }
-    return freeze({format:'study-director.reconciliation-baseline-store',contractVersion:1,readHeader,readNotes,readDays,write});
+    // Forgets what was last shared (the Drive library changed): the next sync
+    // is a first sync, a two-way merge. The next full base rewrites the rows.
+    function clear(){return meta.remove(families.header,'',{strict:true});}
+    return freeze({format:'study-director.reconciliation-baseline-store',contractVersion:1,readHeader,readNotes,readDays,write,clear});
   }
   return freeze({format:'study-director.reconciliation-baseline-module',contractVersion:1,createCodec,createStore});
 });

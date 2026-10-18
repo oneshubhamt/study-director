@@ -21,7 +21,7 @@ const BackupCodec=freeze({
   utf8Bytes:value=>new TextEncoder().encode(String(value??'')),compressionSupported:()=>typeof CompressionStream==='function',checksumAlgorithm:()=> 'sha256',createManifest:()=>({}),encodeChunk:async()=>({line:'',checksum:''}),splitItems:items=>[items],encodeCompletion:async()=>({}),createV10Container:()=>new Blob(),inspect:async()=>({}),normalizeRecord:value=>value,normalizeNote:value=>value
 });
 const ActiveSessionCodec=freeze({sanitizeImportedActiveSession:value=>value,sanitizeCurrent:value=>value});
-const exportsPort=freeze({
+const exportsPort=freeze({followProtection:async()=>false,
   backgroundAvailable:()=>true,protect:async(file)=>freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),unprotect:async file=>freeze({blob:file,encrypted:false}),check:()=>{},scope:operation=>operation(),job:operation=>operation(),
   run:async(type,data,options)=>{if(type==='file.release')return true;return processing.run(type,data,options?.progress);},download:async()=>{},chooseSave:()=>{},save:async()=>({status:'saved'})
 });

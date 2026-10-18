@@ -61,7 +61,7 @@ const encryptionKey=await passwordKey('repository restore adapter qa passphrase'
 async function encryptBlob(file){const parts=[];await transformEncrypted(file,encryptionKey,{write:async bytes=>parts.push(new Uint8Array(bytes).slice())});return new Blob(parts,{type:'application/octet-stream'});}
 async function decryptBlob(file){const parts=[];await transformEncrypted(file,encryptionKey,{write:async bytes=>parts.push(new Uint8Array(bytes).slice())},{decrypt:true});return new Blob(parts,{type:'application/octet-stream'});}
 let fileJobActive=false,nestedFileJobReentries=0;
-const exportsPort=freeze({
+const exportsPort=freeze({followProtection:async()=>false,
   backgroundAvailable:()=>true,protect:async fileOrFactory=>{const file=typeof fileOrFactory==='function'?await fileOrFactory():fileOrFactory;return freeze({...file,blob:await encryptBlob(file.blob),encrypted:true,protectionId:'qa-protection',checkProtection:async()=>{}});},
   unprotect:async file=>freeze({blob:await streamEncryptionInfo(file)?await decryptBlob(file):file,encrypted:!!await streamEncryptionInfo(file)}),check:()=>{},scope:operation=>operation(),job:async operation=>{if(fileJobActive){nestedFileJobReentries+=1;throw new Error('nested file job re-entry');}fileJobActive=true;try{return await operation();}finally{fileJobActive=false;}},
   run:(type,data,options)=>processing.run(type,data,options?.progress),download:()=>freeze({status:'downloaded'}),chooseSave:async()=>null,save:async()=>freeze({status:'saved'})

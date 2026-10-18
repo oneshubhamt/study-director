@@ -70,7 +70,7 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
   session:freeze({hasBlocking:()=>sessionBlocking}),
   sourceRevision:()=>session.source,
   storage:freeze({read:async()=>{if(storageReadError)throw storageReadError;return storedPending;},remove:async()=>{storedPending=null;return true;},write:async value=>{storedPending=value;return true;}}),
-  view:freeze({invalidateAttachments:()=>events.push('invalidate-attachments'),refreshCore:()=>events.push('refresh-core'),refreshNotes:()=>events.push('refresh-notes'),refreshReview:()=>events.push('refresh-review'),renderLibrary:()=>events.push('render-library'),setStatus:(id,message,ok=true)=>{statuses.push(freeze({id,message,ok}));return true;}})
+  view:freeze({deviceName:id=>id==='inst_iphone_safari_mve00000_abcdef01'?'iPhone · Safari':'',invalidateAttachments:()=>events.push('invalidate-attachments'),refreshCore:()=>events.push('refresh-core'),refreshNotes:()=>events.push('refresh-notes'),refreshReview:()=>events.push('refresh-review'),renderLibrary:()=>events.push('render-library'),setStatus:(id,message,ok=true)=>{statuses.push(freeze({id,message,ok}));return true;}})
 }));
 
 assert.equal(host.format,'study-director.backup-recovery-host');

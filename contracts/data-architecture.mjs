@@ -43,7 +43,6 @@ export const LOCAL_STORAGE_KEYS=freeze({
   deletionRecovery:'studyDirector.deletionRecovery.v1',
   fallbackDailyRecords:'studyDirector.dailyRecordsFallback.v1',
   noteRescue:'studyDirector.noteRescue.v1',
-  nameSetupSkipped:'studyDirector.nameSetupSkippedDate.v1',
   fontScale:'studyDirector.fontScale.v1',
   keepScreenAwake:'studyDirector.keepScreenAwake.v1',
   installNoticeShown:'studyDirector.installNoticeShown.v1',
@@ -53,8 +52,16 @@ export const LOCAL_STORAGE_KEYS=freeze({
   pwaUpdateCheck:'studyDirector.pwaUpdateCheck.v1',
   insightsWindow:'studyDirector.insights.window.v1',
   libraryView:'studyDirector.library.view.v1',
-  driveSession:'studyDirector.driveSession.v1'
+  driveSession:'studyDirector.driveSession.v1',
+  profiles:'studyDirector.profiles.v1'
 });
+
+// Profiles (5.3): these belong to the device and are shared by every profile
+// on it. Every other durable name belongs to one profile: the first profile
+// keeps the plain names, a later one adds ~<its scope> (IndexedDB, browser
+// storage, attachment files, locks and the Device Folder repository).
+export const DEVICE_WIDE_LOCAL_STORAGE_KEYS=freeze(['installationId','installNoticeShown','pwaUpdateCheck','profiles']);
+export const PROFILE_SCOPE_SEPARATOR='~';
 
 export const SESSION_STORAGE_KEYS=freeze({
   appTab:'studyDirector.appTab.v1',
@@ -80,6 +87,8 @@ export const OBSOLETE_LOCAL_STORAGE_KEYS=freeze({
   // Attachment cleanup now follows the daily upkeep and keeps no record of its own.
   attachmentMaintenanceDay:'studyDirector.attachmentMaintenanceDay.v2',
   attachmentMaintenancePending:'studyDirector.attachmentMaintenancePending.v1',
+  // The first-start form (5.4) replaced the name prompt and its skip date.
+  nameSetupSkipped:'studyDirector.nameSetupSkippedDate.v1',
   // Renamed: moved once to noteRescue before anything reads it.
   noteRescueLegacy:'studyDirector.areaNoteRescue.v1'
 });
@@ -200,7 +209,6 @@ export const DATA_ARCHITECTURE=freeze({
     deletionRecovery:surface('recovery','repositories','protect-identifiers','until the failed DailyRecord/ActiveSession delete is reconciled','',{protects:'DailyRecord/ActiveSession deletion intent',created:'when authoritative deletion cannot complete atomically',cleared:'after canonical deletion state is verified',supersededBy:'verified canonical record/deletion state'}),
     fallbackDailyRecords:surface('recovery','repositories','protect','until migrated to IndexedDB','',{protects:'indexedDb.dailyRecords',created:'when a DailyRecord cannot be persisted to IndexedDB',cleared:'after replay and verification in canonical IndexedDB',supersededBy:'verified canonical DailyRecord'}),
     noteRescue:surface('recovery','repositories','protect','until the unsaved notes it holds are saved','',{protects:'indexedDb.notes',created:'when a note save fails or the page is hidden or closed before a save finishes',cleared:'after the matching canonical Note/deletion commits',supersededBy:'newer canonical Note or deletion state',capacity:'noteRescueBytes (1 MiB), newest notes first; the save failure names any unsaved note left out'}),
-    nameSetupSkipped:surface('preference','host','operational','short-lived'),
     fontScale:surface('startup-mirror','host','operational','disposable mirror of appMeta portable Preferences fontScale','',{mirrorOf:'appMeta.personalPreferences.fontScale'}),
     keepScreenAwake:surface('preference','native-capabilities','operational','retained'),
     installNoticeShown:surface('preference','native-capabilities','operational','retained'),
@@ -210,7 +218,8 @@ export const DATA_ARCHITECTURE=freeze({
     pwaUpdateCheck:surface('operational','host','operational','retained'),
     insightsWindow:surface('preference','insights','operational','retained'),
     libraryView:surface('preference','library','operational','retained'),
-    driveSession:surface('operational','drive','operational','until the Drive sign-in expires (about an hour), is disconnected or is rejected; keeps the sign-in across reloads and reopening')
+    driveSession:surface('operational','drive','operational','until the Drive sign-in expires (about an hour), is disconnected or is rejected; keeps the sign-in across reloads and reopening'),
+    profiles:surface('coordination-identity','profiles','protect-identifiers','retained; the device profile list: the active profile and each profile name, scope and Google account email')
   }),
   sessionStorage:freeze({
     appTab:surface('coordination-identity','ownership','operational','tab-session lifetime'),
@@ -243,6 +252,7 @@ export const DATA_ARCHITECTURE=freeze({
     attachmentMaintenanceAttemptDay:surface('legacy-residue','compatibility','operational','old scheduled-attempt day cannot certify completed attachment cleanup'),
     attachmentMaintenanceDay:surface('legacy-residue','compatibility','operational','remove; attachment cleanup now follows the daily upkeep'),
     attachmentMaintenancePending:surface('legacy-residue','compatibility','operational','remove; a cleanup request lost to a reload is caught by the next daily sweep'),
+    nameSetupSkipped:surface('legacy-residue','compatibility','operational','remove; the first-start form replaced the name prompt'),
     noteRescueLegacy:surface('legacy-migration','compatibility','protect','moved once to noteRescue, its format renamed, before notes load')
   }),
   appMeta:freeze({
@@ -259,7 +269,7 @@ export const DATA_ARCHITECTURE=freeze({
       restoreJournalPayload:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','RestoreJournalPayload.v5',{protects:'canonical dataset rollback image',created:'before destructive restore commit',cleared:'after verified completion or rollback',supersededBy:'verified post-restore canonical state'}),
       mutationLease:surface('coordination','repository-journals','operational','lease lifetime','MutationLease.v1'),
       verifiedRecoveryBackups:surface('operational','host','operational','replace on every backup','VerifiedRecoveryBackups.v3'),
-      backupProtection:surface('security-policy','exports','operational','while backup protection enabled','BackupProtection.v2'),
+      backupProtection:surface('security-policy','exports','operational','while a backup password is set; holds a check value and the non-extractable key made from the password, never the password','BackupProtection.v3'),
       attachmentIntegrityAudit:surface('derived-health','host','protect','replace on audit; opaque identity/error details only','AttachmentIntegrityAudit.v2',{rebuildFrom:'indexedDb.assets + opfs.attachments'}),
       deviceFolder:surface('backup-configuration','device-backup','operational','while connected','DeviceFolderSettings.v4'),
       repositoryIntegrityScrub:surface('derived-health','backup','operational','transactional progress/completion bound to repository identity; opaque quarantined object ids only; no user-content details','RepositoryIntegrityScrub.v7',{rebuildFrom:'external backup repository manifests and objects'}),
@@ -307,6 +317,7 @@ export function assertDataArchitecture(contract=DATA_ARCHITECTURE,keys=APP_META_
   if(Object.keys(contract.indexedDb).sort().join('|')!==storeNames.sort().join('|'))throw new Error('IndexedDB data architecture inventory is incomplete.');
   for(const [name,value] of Object.entries(contract.indexedDb))if(typeof value.schema!=='string'||!value.schema)throw new Error(`IndexedDB data surface ${name} is missing its canonical schema.`);
   if(Object.keys(contract.localStorage).sort().join('|')!==Object.keys(localKeys).sort().join('|'))throw new Error('Current localStorage inventory differs from the authoritative identities.');
+  if(!Object.isFrozen(DEVICE_WIDE_LOCAL_STORAGE_KEYS)||DEVICE_WIDE_LOCAL_STORAGE_KEYS.some(name=>!Object.hasOwn(localKeys,name)))throw new Error('Device-wide localStorage identities must be current identities.');
   if(Object.keys(contract.obsoleteLocalStorage).sort().join('|')!==Object.keys(obsoleteLocalKeys).sort().join('|'))throw new Error('Obsolete localStorage inventory differs from the authoritative identities.');
   const exactNames=Object.keys(contract.appMeta.exact),prefixNames=Object.keys(contract.appMeta.prefixes),obsoleteNames=Object.keys(contract.appMeta.obsolete);
   const currentAppMetaNames=[...exactNames,...prefixNames].sort();

@@ -41,7 +41,7 @@ registry.define('backup-presentation',1,()=>{
       if(state.mode==='error')return 'Needs attention';
       if(!state.connected)return state.wasConnected?'Signed out':'Off';
       // With backup encryption on, automatic backups wait for the password each launch.
-      if(state.locked)return 'Paused until unlocked';
+      if(state.locked)return 'Needs password';
       const synced=syncLabel(state);if(synced)return synced;
       const saved=typeof input.verified==='function'?input.verified(source):null;
       const when=timeText(state.lastBackupAt||read(source,'backup-verified')?.completedAt||saved?.at);
@@ -49,11 +49,13 @@ registry.define('backup-presentation',1,()=>{
     }
     function timeText(at){return at&&Number.isFinite(Date.parse(at))?(typeof input.timeLabel==='function'?input.timeLabel(at):new Date(at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',hour12:false})):'';}
     // A shared location (Drive) says how this device stands with it: Syncing…,
-    // Needs review, Synced 10:42, or Changes since 10:42 while this device has
-    // changes it has not uploaded yet. '' before the first sync.
+    // Needs password (set or changed on another device), Needs review,
+    // Synced 10:42, or Changes since 10:42 while this device has changes it
+    // has not uploaded yet. '' before the first sync.
     function syncLabel(state={}){
       const sync=state.sync;if(!sync||!state.connected||state.locked)return '';
       if(sync.syncing||state.backingUp)return 'Syncing…';
+      if(sync.password)return 'Needs password';
       if(sync.review)return 'Needs review';
       return sync.syncedAt?`${state.waiting?'Changes since':'Synced'} ${timeText(sync.syncedAt)}`:'';
     }

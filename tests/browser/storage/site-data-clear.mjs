@@ -12,11 +12,11 @@ import {CURRENT_SCHEMA_VERSIONS} from '../../../contracts/canonical-identities.m
 // iPhone, Android, Safari, Firefox) the same choice leads to Google Drive and the
 // backup file import instead.
 const today=`const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');`;
-const preload=`(()=>{${today}localStorage.setItem('studyDirector.nameSetupSkippedDate.v1',today);})();`;
+const preload=`(()=>{${today}(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));})();`;
 // The stand-in Device Folder lives in OPFS; a real folder is outside browser storage.
-const folderPreload=`(()=>{${today}localStorage.setItem('studyDirector.nameSetupSkippedDate.v1',today);Object.defineProperty(window,'showDirectoryPicker',{configurable:true,value:async()=>navigator.storage.getDirectory()});})();`;
+const folderPreload=`(()=>{${today}(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));Object.defineProperty(window,'showDirectoryPicker',{configurable:true,value:async()=>navigator.storage.getDirectory()});})();`;
 // No Device Folder support, as on iPad and iPhone.
-const noFolderPreload=`(()=>{${today}localStorage.setItem('studyDirector.nameSetupSkippedDate.v1',today);Object.defineProperty(window,'showDirectoryPicker',{configurable:true,value:undefined});})();`;
+const noFolderPreload=`(()=>{${today}(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));Object.defineProperty(window,'showDirectoryPicker',{configurable:true,value:undefined});})();`;
 const toast=pattern=>`[...document.querySelectorAll('#sd-toast-region .interaction-toast')].find(toast=>${pattern}.test(toast.textContent))`;
 const decision=toast('/Continue with current data/');
 // What Data & Backup shows after "Restore from backup" with nothing connected.

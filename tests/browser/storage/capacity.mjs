@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {PRODUCTION_LIMITS as limits,CAPACITY_PROFILES} from '../../../contracts/production-limits.mjs';
 import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor} from '../../helpers/browser-harness.mjs';
 
-const preload=`window.chooseIncomingBackup=${chooseIncomingBackup.toString()};(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'Capacity Browser QA',updatedAt:new Date().toISOString()}));localStorage.setItem('studyDirector.nameSetupSkippedDate.v1',today);})();`;
+const preload=`window.chooseIncomingBackup=${chooseIncomingBackup.toString()};(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'Capacity Browser QA',updatedAt:new Date().toISOString()}));(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));})();`;
 const server=await startReleaseServer(),browser=await launchChromium({profilePrefix:'study-director-qa-capacity-'});let page=null;
 const result={status:'PASS',release:server.manifest.release,checks:{},profile:{name:'maximum-count text-only restore',records:CAPACITY_PROFILES.denseTextMetadata.dailyRecords,notes:limits.maxNotes,assets:0}};
 try{

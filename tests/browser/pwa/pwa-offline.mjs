@@ -64,7 +64,7 @@ const browser=await launchChromium({profilePrefix:'study-director-pwa-qa-'});
 async function createPage(url=appUrl){
   const page=await browser.createPage(url,{preload:"window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';"});
   await waitForStartup(page);
-  await page.evaluate(`document.querySelector('[data-action="skip-name-setup"]')?.click()`);
+  await page.evaluate(`document.querySelector('[data-action="first-start-skip"]')?.click()`);
   return page;
 }
 async function waitForStartup(page){

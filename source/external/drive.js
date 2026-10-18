@@ -13,7 +13,8 @@
 
   const PLUGIN_VERSION='@@SD_RELEASE@@';
   const GOOGLE_OAUTH_CLIENT_ID='@@SD_GOOGLE_OAUTH_CLIENT_ID@@';
-  const SESSION_KEY='@@SD_DRIVE_SESSION_STORAGE_KEY@@';
+  // Each profile on the device keeps its own sign-in (see the profile scope in app.html).
+  const SESSION_KEY=window[Symbol.for('studyDirector.profileScope.v1')].scoped('@@SD_DRIVE_SESSION_STORAGE_KEY@@');
   const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.file';
   const DRIVE_API='https://www.googleapis.com/drive/v3';
   const DRIVE_UPLOAD_API='https://www.googleapis.com/upload/drive/v3';
@@ -23,6 +24,8 @@
   const FOLDER_NAME=REPOSITORY_IDENTITIES.driveFolder;
   const FOLDER_MIME='application/vnd.google-apps.folder';
   const FOLDER_MARKER=Object.freeze({key:REPOSITORY_IDENTITIES.driveFolderMarker,value:'true'});
+  // The profile whose library the folder holds. Two people's data never mix.
+  const PROFILE_MARKER=REPOSITORY_IDENTITIES.driveFolderProfileMarker,PROFILE_PATTERN=/^prof_[a-z0-9]{1,24}_[a-z0-9]{6,12}_[a-f0-9]{8}$/u;
   const FILE_SECURITY_VERSION='1';
   const FILE_SECURITY_MARKER=REPOSITORY_IDENTITIES.driveFileSecurityMarker;
   const FILE_DIGEST_MARKER=REPOSITORY_IDENTITIES.driveFileDigestMarker;
@@ -47,6 +50,8 @@
   const HISTORY_PROTECTED_UNTIL_MARKER='sdHistoryProtectedUntil';
   const HISTORY_CALENDAR_MARKER='sdHistoryCalendar';
   const HISTORY_NOTES_MARKER='sdHistoryNotes';
+  // The device that made the version (its ID says what it is).
+  const HISTORY_ORIGIN_MARKER='sdHistoryOrigin',ORIGIN_PATTERN=/^inst_[a-z0-9_]{8,96}$/u;
   const GIS_LOAD_TIMEOUT_MS=20000;
   const AUTH_TIMEOUT_MS=120000;
   let API_TIMEOUT_MS=0;
@@ -75,6 +80,7 @@
   let connectionExpiryTimer=null;
   const connectionListeners=new Set();
   let folderId='';
+  let profilePort=null,boundFolder='',seenFolder=null;
   let folderEpoch=0;
   let folderResolutionFlight=null;
   let picker=null;
@@ -101,7 +107,7 @@
       folderState:parent.folderState
     });
   }
-  function invalidateFolderIdentity(){folderId='';folderEpoch+=1;}
+  function invalidateFolderIdentity(){folderId='';boundFolder='';seenFolder=null;folderEpoch+=1;}
   function verifiedFolderReceipt(context=EMPTY_DRIVE_OPERATION){
     const state=context&&context.folderState,receipt=state&&state.receipt;
     if(!receipt)return '';
@@ -265,12 +271,12 @@
   }
   function validatedDriveRequest(value,method='GET'){
     const url=parseDriveUrl(value),verb=String(method||'GET').toUpperCase();
-    const collection=url.pathname==='/drive/v3/files';
+    const collection=url.pathname==='/drive/v3/files',about=url.pathname==='/drive/v3/about';
     const item=/^\/drive\/v3\/files\/[^/]+$/u.test(url.pathname);
     const uploadType=url.pathname==='/upload/drive/v3/files'?String(url.searchParams.get('uploadType')||''):'';
     const uploadCreate=uploadType==='resumable'||uploadType==='multipart';
     const uploadSession=uploadType==='resumable'&&!!url.searchParams.get('upload_id');
-    const allowed=(collection&&(verb==='GET'||verb==='POST'))||(item&&(verb==='GET'||verb==='DELETE'))||(uploadCreate&&verb==='POST')||(uploadSession&&verb==='PUT');
+    const allowed=(collection&&(verb==='GET'||verb==='POST'))||(about&&verb==='GET')||(item&&(verb==='GET'||verb==='DELETE'||verb==='PATCH'))||(uploadCreate&&verb==='POST')||(uploadSession&&verb==='PUT');
     if(!allowed)throw new Error('Blocked an unsupported Google Drive request.');
     return url.href;
   }
@@ -407,7 +413,7 @@
         if(cached.trashed===true)invalidateFolderIdentity();
         else{
           if(!validFolderMetadata(cached)){invalidateFolderIdentity();throw noRetry(new Error('The Study Director backup folder is no longer private and owned by this account. Drive backup was stopped.'));}
-          return folderId;
+          seenFolder=cached;return folderId;
         }
       }
     }
@@ -424,7 +430,7 @@
     const folders=Array.isArray(payload&&payload.files)?payload.files:[];
     if(folders.length>1){invalidateFolderIdentity();throw noRetry(new Error('More than one marked Study Director backup folder was found. Drive backup was stopped without choosing or deleting anything.'));}
     if(folders.length===1&&!validFolderMetadata(folders[0])){invalidateFolderIdentity();throw noRetry(new Error('The marked Study Director backup folder is shared, foreign-owned, trashed, or otherwise unsafe. Drive backup was stopped.'));}
-    folderId=String(folders[0]&&folders[0].id||'');
+    folderId=String(folders[0]&&folders[0].id||'');seenFolder=folders[0]||null;
     return folderId;
   }
   async function createFolder(context=EMPTY_DRIVE_OPERATION){
@@ -432,7 +438,7 @@
     const response=await authorizedFetch(`${DRIVE_API}/files?fields=${encodeURIComponent(fields)}`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({name:FOLDER_NAME,mimeType:FOLDER_MIME,appProperties:{[FOLDER_MARKER.key]:FOLDER_MARKER.value}})
+      body:JSON.stringify({name:FOLDER_NAME,mimeType:FOLDER_MIME,appProperties:{[FOLDER_MARKER.key]:FOLDER_MARKER.value,[PROFILE_MARKER]:expectedProfile()}})
     },API_TIMEOUT_MS,context);
     if(!response.ok)throw await apiError(response,'Could not create the Study Director backup folder.');
     const payload=await jsonResponse(response);
@@ -440,7 +446,65 @@
     folderId='';
     return await findFolder(context);
   }
-  async function resolveFolder(context=EMPTY_DRIVE_OPERATION){return await findFolder(context)||await createFolder(context);}
+  async function resolveFolder(context=EMPTY_DRIVE_OPERATION){
+    if(!expectedProfile())throw new Error('This profile is still starting. Try again in a moment.');
+    const found=await findFolder(context)||await createFolder(context);
+    await bindFolder(found,context);
+    return found;
+  }
+  // The folder must belong to the active profile. Once per sign-in the app is
+  // told the account and what the folder holds, and settles it: continue,
+  // claim an unmarked folder, take the folder's profile, or refuse. A folder
+  // marked by another profile on this device is always refused.
+  function expectedProfile(){try{const id=String(profilePort.id()||'');return PROFILE_PATTERN.test(id)?id:'';}catch{return '';}}
+  function folderProfile(folder){const id=String(folder&&folder.appProperties&&folder.appProperties[PROFILE_MARKER]||'');return PROFILE_PATTERN.test(id)?id:'';}
+  async function bindFolder(id,context=EMPTY_DRIVE_OPERATION){
+    const expected=expectedProfile();
+    if(boundFolder===`${id}\n${expected}`)return;
+    // The folder was just found or checked; its markers came with it.
+    const metadata=seenFolder&&seenFolder.id===id?seenFolder:await getFolderMetadata(id,context),found=folderProfile(metadata),mine=found===expected;
+    const [email,library]=await Promise.all([accountEmail(context),mine?null:latestLibrary(id,context)]);
+    const decision=await profilePort.bind(Object.freeze({email,folder:String(id),found,mine,library}));
+    if(mine&&decision==='continue'){}
+    else if(!found&&decision==='claim')await markFolder(id,expected,context);
+    else if(!(found&&decision==='adopt'&&expectedProfile()===found)){
+      // Forget this sign-in so Connect offers the choice of account again.
+      setTimeout(()=>{clearSession();signedInBefore=false;},0);
+      throw noRetry(Object.assign(new Error(found?'This Google account holds the library of another profile. Drive was not used.':'This Google account already holds a Study Director library. Drive was not used.'),{studyDirectorProfileRefused:true}));
+    }
+    boundFolder=`${id}\n${expectedProfile()}`;
+  }
+  async function markFolder(id,profile,context=EMPTY_DRIVE_OPERATION){
+    const fields='id,name,mimeType,ownedByMe,shared,trashed,appProperties,capabilities(canAddChildren)';
+    const response=await authorizedFetch(`${DRIVE_API}/files/${encodeURIComponent(id)}?fields=${encodeURIComponent(fields)}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({appProperties:{[PROFILE_MARKER]:profile}})},API_TIMEOUT_MS,context);
+    if(!response.ok)throw await apiError(response,'Could not mark the Study Director backup folder for this profile.');
+    const payload=await jsonResponse(response);
+    if(!validFolderMetadata(payload)||folderProfile(payload)!==profile)throw noRetry(new Error('Google Drive did not confirm the profile of the Study Director backup folder.'));
+  }
+  // The signed-in Google account, shown by its email (one small request).
+  async function accountEmail(context=EMPTY_DRIVE_OPERATION){
+    const response=await authorizedGet(`${DRIVE_API}/about?fields=${encodeURIComponent('user(emailAddress)')}`,{},context);
+    if(!response.ok)throw await apiError(response,'Could not read the Google account.');
+    const email=String(jsonResponse(response)?.user?.emailAddress||'').trim().toLowerCase();
+    return /^[^\s@]{1,128}@[^\s@]{1,190}$/u.test(email)?email:'';
+  }
+  // What the folder holds, for "Continue with your library": the newest
+  // version's counts and time, or null when it holds none.
+  async function latestLibrary(id,context=EMPTY_DRIVE_OPERATION){
+    const q=driveQuery([`'${String(id).replaceAll("'","\\'")}' in parents`,`appProperties has { key='${REPOSITORY_MARKER.key}' and value='${REPOSITORY_MARKER.value}' }`,`appProperties has { key='${REPOSITORY_KIND_MARKER}' and value='commit' }`,'trashed=false']);
+    const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'1',orderBy:'createdTime desc',fields:'files(id,createdTime,appProperties)'});
+    const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);
+    if(!response.ok)throw await apiError(response,'Could not read the Study Director library on Google Drive.');
+    const file=(jsonResponse(response).files||[])[0];if(!file)return null;
+    const checkpoint=await latestCheckpoint(id,context),counts=/^(\d+),(\d+)$/u.exec(String(checkpoint?.appProperties?.[HISTORY_COUNTS_MARKER]||''));
+    return Object.freeze({savedAt:String(file.createdTime||''),days:counts?Number(counts[1]):null,notes:counts?Number(counts[2]):null});
+  }
+  async function latestCheckpoint(id,context){
+    const q=driveQuery([`'${String(id).replaceAll("'","\\'")}' in parents`,`appProperties has { key='${REPOSITORY_KIND_MARKER}' and value='checkpoint' }`,`appProperties has { key='${HISTORY_ROLE_MARKER}' and value='normal' }`,'trashed=false']);
+    const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'1',orderBy:'createdTime desc',fields:'files(id,createdTime,appProperties)'});
+    const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);
+    return response.ok?(jsonResponse(response).files||[])[0]||null:null;
+  }
   function cancelFolderResolution(){
     const flight=folderResolutionFlight;
     if(!flight)return;
@@ -503,7 +567,7 @@
       const logicalFingerprint=String(properties[HISTORY_FINGERPRINT_MARKER]||'').toLowerCase(),countsMatch=/^(\d+),(\d+)$/u.exec(String(properties[HISTORY_COUNTS_MARKER]||'')),role=String(properties[HISTORY_ROLE_MARKER]||'normal'),protectedUntil=String(properties[HISTORY_PROTECTED_UNTIL_MARKER]||''),exportedAt=String(properties[REPOSITORY_IDENTITIES.driveExportedAtMarker]||file.createdTime||''),calendarMatch=/^(\d{4}-\d{2}-\d{2}),(\d{4}-\d{2}-\d{2}),(\d{4}-\d{2}),(-?\d{1,4})$/u.exec(String(properties[HISTORY_CALENDAR_MARKER]||''));
       let calendar=null;
       if(calendarMatch&&Number.isFinite(Date.parse(exportedAt))){const localDate=calendarMatch[1],weekStart=calendarMatch[2],month=calendarMatch[3],utcOffsetMinutes=Number(calendarMatch[4]),localOrdinal=Math.floor(Date.parse(`${localDate}T00:00:00.000Z`)/86400000),weekOrdinal=Math.floor(Date.parse(`${weekStart}T00:00:00.000Z`)/86400000),offsetDate=new Date(Date.parse(exportedAt)+utcOffsetMinutes*60000).toISOString().slice(0,10);if(Number.isInteger(utcOffsetMinutes)&&Math.abs(utcOffsetMinutes)<=14*60&&month===localDate.slice(0,7)&&offsetDate===localDate&&Number.isFinite(localOrdinal)&&Number.isFinite(weekOrdinal)&&weekOrdinal<=localOrdinal&&localOrdinal-weekOrdinal<=6&&new Date(weekOrdinal*86400000).getUTCDay()===1)calendar=Object.freeze({localDate,weekStart,month,utcOffsetMinutes});}
-      if(/^[a-f0-9]{64}$/u.test(logicalFingerprint)&&countsMatch&&['normal','before-restore'].includes(role)&&Number.isFinite(Date.parse(exportedAt))&&(!protectedUntil||Number.isFinite(Date.parse(protectedUntil))))history=Object.freeze({logicalFingerprint,exportedAt:new Date(exportedAt).toISOString(),counts:Object.freeze({dailyRecord:Number(countsMatch[1]),note:Number(countsMatch[2])}),encrypted:properties[HISTORY_ENCRYPTED_MARKER]==='1',retention:Object.freeze({role,protectedUntil:protectedUntil?new Date(protectedUntil).toISOString():'',calendar,notesFingerprint:/^[a-f0-9]{64}$/u.test(String(properties[HISTORY_NOTES_MARKER]||''))?String(properties[HISTORY_NOTES_MARKER]):''})});
+      if(/^[a-f0-9]{64}$/u.test(logicalFingerprint)&&countsMatch&&['normal','before-restore'].includes(role)&&Number.isFinite(Date.parse(exportedAt))&&(!protectedUntil||Number.isFinite(Date.parse(protectedUntil))))history=Object.freeze({logicalFingerprint,exportedAt:new Date(exportedAt).toISOString(),counts:Object.freeze({dailyRecord:Number(countsMatch[1]),note:Number(countsMatch[2])}),encrypted:properties[HISTORY_ENCRYPTED_MARKER]==='1',retention:Object.freeze({role,protectedUntil:protectedUntil?new Date(protectedUntil).toISOString():'',calendar,notesFingerprint:/^[a-f0-9]{64}$/u.test(String(properties[HISTORY_NOTES_MARKER]||''))?String(properties[HISTORY_NOTES_MARKER]):''}),origin:ORIGIN_PATTERN.test(String(properties[HISTORY_ORIGIN_MARKER]||''))?String(properties[HISTORY_ORIGIN_MARKER]):''});
     }
     return Object.freeze({kind,id,remoteId:String(file.id),remoteVersion:String(file.version||''),verificationScope:repositoryVerificationScope(parent),name:String(file.name),size:Number(file.size),createdAt:String(file.createdTime||''),modifiedAt:String(file.modifiedTime||''),digest:String(properties[FILE_DIGEST_MARKER]||''),serverDigest,history});
   }
@@ -734,6 +798,7 @@
         properties[HISTORY_FINGERPRINT_MARKER]=fingerprint;properties[HISTORY_COUNTS_MARKER]=`${daily},${notes}`;properties[HISTORY_ENCRYPTED_MARKER]=history.encrypted===true?'1':'0';properties[HISTORY_ROLE_MARKER]=role;if(protectedUntil&&Number.isFinite(Date.parse(protectedUntil)))properties[HISTORY_PROTECTED_UNTIL_MARKER]=new Date(protectedUntil).toISOString();
         if(calendar&&/^\d{4}-\d{2}-\d{2}$/u.test(String(calendar.localDate||''))&&/^\d{4}-\d{2}-\d{2}$/u.test(String(calendar.weekStart||''))&&/^\d{4}-\d{2}$/u.test(String(calendar.month||''))&&Number.isInteger(Number(calendar.utcOffsetMinutes)))properties[HISTORY_CALENDAR_MARKER]=`${calendar.localDate},${calendar.weekStart},${calendar.month},${Number(calendar.utcOffsetMinutes)}`;
         const notesFingerprint=String(history.retention&&history.retention.notesFingerprint||'').toLowerCase();if(/^[a-f0-9]{64}$/u.test(notesFingerprint))properties[HISTORY_NOTES_MARKER]=notesFingerprint;
+        if(ORIGIN_PATTERN.test(String(history.origin||'')))properties[HISTORY_ORIGIN_MARKER]=String(history.origin);
       }
     }
     return {name:repositoryFilename(file.kind,file.id),parents:[parent],mimeType:'application/octet-stream',appProperties:properties};
@@ -1089,7 +1154,7 @@
           finish(reject,new Error(response&&response.error_description||response&&response.error||'Google did not confirm permission revocation.'));
         });
       });
-    }finally{repositoryUploads.clear();clearSession();}
+    }finally{repositoryUploads.clear();clearSession();signedInBefore=false;}
   }
   function setup(api){
     if(!supportsCapabilities(api,REQUIRED_CAPABILITIES)||!api.backup||!api.backup.providers||typeof api.backup.providers.register!=='function')return false;
@@ -1104,6 +1169,8 @@
     releaseFile=api.backup.releaseFile||releaseFile;
     receiveBackupStream=typeof api.backup.receiveStream==='function'?api.backup.receiveStream:null;
     if(!receiveBackupStream)return false;
+    profilePort=api.backup.profile&&typeof api.backup.profile.id==='function'&&typeof api.backup.profile.bind==='function'?api.backup.profile:null;
+    if(!profilePort)return false;
     restoreSession();
     return api.backup.providers.register(Object.freeze({
       id:'google-drive',

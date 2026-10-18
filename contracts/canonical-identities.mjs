@@ -76,6 +76,7 @@ export const EXTERNAL_REPOSITORY_IDENTITIES=freeze({
   deviceFolderCommits:'commits',
   driveFolder:'Study Director Backups',
   driveFolderMarker:'studyDirectorFolder',
+  driveFolderProfileMarker:'studyDirectorProfile',
   driveFileSecurityMarker:'studyDirectorSecurity',
   driveFileDigestMarker:'studyDirectorSha256',
   driveRepositoryMarker:'studyDirectorRepository',

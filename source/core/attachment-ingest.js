@@ -4,8 +4,9 @@ const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 registry.define('attachment-ingest',1,()=>{
   const MiB=1048576,MIN_HEADROOM=32*MiB,MAX_HEADROOM=256*MiB;
   const cancelled=()=>Object.assign(new Error('Attachment operation cancelled.'),{name:'AbortError'});
-  function create({createWorker,storage,randomUUID=()=>crypto.randomUUID(),setTimeout:schedule=setTimeout,clearTimeout:clear=clearTimeout,stallTimeoutMs=120000,cancelTimeoutMs=2000,estimateTimeoutMs=5000,idleTimeoutMs=120000,onAbandoned=()=>{}}){
+  function create({createWorker,storage,directory,randomUUID=()=>crypto.randomUUID(),setTimeout:schedule=setTimeout,clearTimeout:clear=clearTimeout,stallTimeoutMs=120000,cancelTimeoutMs=2000,estimateTimeoutMs=5000,idleTimeoutMs=120000,onAbandoned=()=>{}}){
     if(typeof createWorker!=='function')throw new TypeError('Attachment worker factory is required.');
+    if(typeof directory!=='string'||!directory)throw new TypeError('Attachment folder is required.');
     // The worker is started on demand and let go after two quiet minutes, so an
     // occasional attachment does not hold its memory for the whole session.
     let worker=null,sequence=0,idleTimer=null;const pending=new Map();
@@ -58,7 +59,7 @@ registry.define('attachment-ingest',1,()=>{
           try{worker?.postMessage({type:'cancel',target:id});}catch{stop(cancelled());}
         };
         disarmIdle();pending.set(id,request);signal?.addEventListener('abort',abort,{once:true});request.watch();
-        try{ensure().postMessage({id,type,data});if(signal?.aborted)abort();}catch(error){stop(error);}
+        try{ensure().postMessage({id,type,data:{...data,directory}});if(signal?.aborted)abort();}catch(error){stop(error);}
       });
     }
     async function ingest(file,{signal,onProgress}={}){

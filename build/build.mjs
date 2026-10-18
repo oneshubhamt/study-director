@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import releaseConfig from '../release.config.mjs';
 import {PRODUCTION_LIMITS,assertProductionLimits} from '../contracts/production-limits.mjs';
-import {LOCAL_STORAGE_KEYS,SESSION_STORAGE_KEYS,OBSOLETE_LOCAL_STORAGE_KEYS,APP_META_KEYS,OBSOLETE_APP_META_KEYS,RENAMED_APP_META_KEYS,RENAMED_VALUE_FORMATS,APP_META_RUNTIME_REGISTRY,assertDataArchitecture} from '../contracts/data-architecture.mjs';
+import {LOCAL_STORAGE_KEYS,DEVICE_WIDE_LOCAL_STORAGE_KEYS,PROFILE_SCOPE_SEPARATOR,SESSION_STORAGE_KEYS,OBSOLETE_LOCAL_STORAGE_KEYS,APP_META_KEYS,OBSOLETE_APP_META_KEYS,RENAMED_APP_META_KEYS,RENAMED_VALUE_FORMATS,APP_META_RUNTIME_REGISTRY,assertDataArchitecture} from '../contracts/data-architecture.mjs';
 import {RUNTIME_DATA_CONTRACT,INDEXED_DB_STORE_NAMES,OBSOLETE_INDEXED_DB,OPFS_IDENTITIES,OBSOLETE_OPFS_IDENTITIES,CACHE_STORAGE_IDENTITIES,EXTERNAL_REPOSITORY_IDENTITIES,assertCanonicalIdentities} from '../contracts/canonical-identities.mjs';
 import {LEGACY_BACKUP_SCHEMA_VERSION,assertCompatibilityContract} from '../contracts/compatibility.mjs';
 import {
@@ -62,6 +62,9 @@ function renderTokens(value,identity,sourceName){
     .replaceAll('@@SD_THEME_STORAGE_KEY@@',LOCAL_STORAGE_KEYS.theme)
     .replaceAll('@@SD_PRESENTATION_STORAGE_KEY@@',LOCAL_STORAGE_KEYS.presentation)
     .replaceAll('@@SD_DRIVE_SESSION_STORAGE_KEY@@',LOCAL_STORAGE_KEYS.driveSession)
+    .replaceAll('@@SD_PROFILES_STORAGE_KEY@@',LOCAL_STORAGE_KEYS.profiles)
+    .replaceAll('@@SD_PROFILE_SCOPE_SEPARATOR@@',PROFILE_SCOPE_SEPARATOR)
+    .replaceAll('@@SD_DEVICE_WIDE_LOCAL_STORAGE_KEYS@@',JSON.stringify(DEVICE_WIDE_LOCAL_STORAGE_KEYS))
     .replaceAll('@@SD_SESSION_STORAGE_KEYS@@',JSON.stringify(SESSION_STORAGE_KEYS))
     .replaceAll('@@SD_OBSOLETE_LOCAL_STORAGE_KEYS@@',JSON.stringify(OBSOLETE_LOCAL_STORAGE_KEYS))
     .replaceAll('@@SD_APP_META_KEYS@@',JSON.stringify(APP_META_KEYS))

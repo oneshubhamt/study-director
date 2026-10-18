@@ -1363,16 +1363,52 @@ input,textarea,select{border-radius:var(--sd-shape-field-radius)}
 .theme-btn,.presentation-btn,.type-btn{width:36px;height:36px;background:var(--sd-color-surface-1);border:2px solid var(--sd-color-border-2);color:var(--sd-color-text-muted);font-family:var(--sd-font-condensed);font-size:var(--sd-type-role-body-size);font-weight:var(--sd-font-weight-extrabold);cursor:pointer;transition:var(--sd-motion-all-fast-transition)}
 .theme-btn,.presentation-btn{flex:1 1 64px;width:auto;min-width:0;padding:0 8px}
 .theme-btn[aria-pressed="true"],.presentation-btn[aria-pressed="true"]{color:var(--sd-color-accent-primary);border-color:rgba(var(--sd-rgb-accent-primary),.42);background:var(--sd-surface-accent-soft)}
-.name-setup-overlay{display:none;position:fixed;inset:0;width:100%;height:100dvh;z-index:403;align-items:center;justify-content:center;padding:max(24px,env(safe-area-inset-top,0px)) max(24px,env(safe-area-inset-right,0px)) max(24px,env(safe-area-inset-bottom,0px)) max(24px,env(safe-area-inset-left,0px));overflow-y:auto}
-.name-setup-overlay{background:var(--sd-material-setup-backdrop);backdrop-filter:var(--sd-material-setup-filter);-webkit-backdrop-filter:var(--sd-material-setup-filter)}
-.name-setup-box{transform:var(--sd-motion-overlay-transform)}
-.name-setup-overlay.on{display:flex}
-.name-setup-box{width:min(92vw,420px);--panel-line:rgba(var(--sd-rgb-accent-primary),.28);--panel-bg:linear-gradient(135deg,rgba(var(--sd-rgb-accent-primary),.05),rgba(var(--sd-rgb-info),.03)),var(--sd-color-surface-1);--panel-padding:24px 22px;--panel-cut-size:16px}
-.name-setup-title{font-family:var(--sd-font-condensed);font-size:var(--sd-type-role-metric-size);letter-spacing:1px;color:var(--sd-color-text-primary);text-transform:uppercase;margin-bottom:8px}
-.name-setup-note{color:var(--sd-color-text-secondary);line-height:1.45;margin-bottom:16px}
-.name-setup-field{width:100%;--field-local-border:var(--sd-color-border-1);--field-local-pad:12px 13px;border:2px solid;margin-bottom:12px}
-.name-setup-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap}
-.name-setup-status{min-height:18px;margin-top:10px}
+/* PROFILE: the sidebar name tag, the phone letter circle and the Profile dialog family
+   (the Profile panel, the first-start form and Add profile share size, layout and style). */
+.sb-name.profile-tag{display:flex;align-items:center;gap:9px;width:calc(100% + 16px);max-width:calc(100% + 16px);margin:-3px -8px -4px;padding:3px 8px 4px;border:1px solid transparent;border-radius:var(--sd-shape-control-radius);background:transparent;color:var(--sd-color-on-strong);text-align:left;cursor:pointer;transition:background-color .16s ease,border-color .16s ease,color .16s ease,transform .1s ease}
+.profile-tag-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.profile-tag-caret{flex:0 0 auto;width:7px;height:7px;margin:-3px 2px 0 auto;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);opacity:.5;transition:opacity .16s ease,transform .16s ease}
+.profile-tag:hover{background:rgba(var(--sd-rgb-accent-primary),.08);border-color:rgba(var(--sd-rgb-accent-primary),.24);color:var(--sd-color-accent-primary)}
+.profile-tag:hover .profile-tag-caret,.profile-tag:focus-visible .profile-tag-caret{opacity:1;transform:translateY(2px) rotate(45deg)}
+.profile-tag:focus-visible{outline:2px solid var(--sd-color-accent-primary);outline-offset:2px}
+.profile-tag:active{transform:translateY(1px)}
+.profile-badge{display:none}
+.profile-header{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:14px}
+.profile-avatar,.profile-item-avatar{display:grid;place-items:center;flex:0 0 auto;border-radius:50%;border:1px solid var(--sd-state-accent-line-strong);background:var(--sd-surface-accent-soft);color:var(--sd-color-accent-primary);font-family:var(--sd-font-condensed);font-weight:var(--sd-font-weight-black);line-height:1;text-transform:uppercase}
+.profile-avatar{width:52px;height:52px;font-size:1.45rem;box-shadow:0 0 0 4px rgba(var(--sd-rgb-accent-primary),.07)}
+.profile-heading{min-width:0}
+.profile-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.profile-subtitle{margin-top:5px;color:var(--sd-color-text-secondary);font:400 var(--sd-type-role-copy-compact-size)/1.35 var(--sd-font-body);overflow-wrap:anywhere}
+.profile-subtitle:empty{display:none}
+.profile-body{gap:16px}
+.profile-rows{display:grid;border:1px solid var(--sd-line-neutral-soft);border-radius:var(--sd-shape-control-radius);background:rgba(var(--sd-rgb-canvas),.18)}
+.profile-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:3px 12px;min-height:58px;padding:10px 12px;border-top:1px solid var(--sd-line-neutral-soft)}
+.profile-row:first-child{border-top:0}
+.profile-row-label{grid-column:1;color:var(--sd-color-text-secondary)}
+.profile-row-value{grid-column:1;min-width:0;color:var(--sd-color-text-primary);overflow-wrap:anywhere;line-height:1.35}
+.profile-row-actions{grid-column:2;grid-row:1/span 2;display:flex;gap:6px}
+.profile-row-actions .mini-btn{min-width:96px}
+.profile-name-row{grid-template-columns:minmax(0,1fr);gap:7px;cursor:text}
+.profile-name-input{min-height:42px}
+.profile-section{display:grid;gap:8px}
+.profile-section-title{margin:0;color:var(--sd-color-info);letter-spacing:1.4px}
+.profile-list{display:grid;gap:6px;margin:0;padding:0;list-style:none}
+.profile-item{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;min-height:52px;padding:8px 10px;border:1px solid var(--sd-line-neutral-soft);border-radius:var(--sd-shape-control-radius);background:rgba(var(--sd-rgb-canvas),.18)}
+.profile-item.current{border-color:var(--sd-state-accent-line);background:var(--sd-state-accent-bg-faint)}
+.profile-item-avatar{width:32px;height:32px;font-size:.95rem}
+.profile-item-text{display:grid;gap:2px;min-width:0}
+.profile-item-text strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.profile-item-text small{color:var(--sd-color-text-secondary);font:400 var(--sd-type-role-copy-compact-size)/1.3 var(--sd-font-body);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.profile-item-tag{color:var(--sd-color-accent-primary);white-space:nowrap}
+.profile-add{justify-self:start}
+.profile-actions{align-items:center;justify-content:space-between}
+.profile-device{min-width:0;color:var(--sd-color-text-secondary);font:400 var(--sd-type-role-copy-compact-size)/1.35 var(--sd-font-body)}
+.first-start-drive{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:10px 12px;padding:10px 12px;border:1px dashed var(--sd-line-neutral-soft);border-radius:var(--sd-shape-control-radius)}
+.first-start-drive-button{min-height:42px;padding:0 16px;white-space:nowrap}
+.first-start-drive-note{color:var(--sd-color-text-secondary);font:400 var(--sd-type-role-copy-compact-size)/1.4 var(--sd-font-body)}
+.interaction-field-optional{margin-left:4px;color:var(--sd-color-text-secondary);font-weight:400}
+.first-start-drive-button.connected{--btn-border:var(--sd-state-accent-line-strong);--btn-color:var(--sd-color-accent-primary);opacity:1}
+.first-start-dialog .interaction-field[hidden]{display:none}
 /* CORE-09 · EXECUTE — LIVE TIMING AND CORRECTIONS Owns real-time evidence, schedule corrections, carry-forward, and compact mode. */
 /* REALTIME AND CORRECTION PANELS */
 .rt-panel{
@@ -1786,25 +1822,6 @@ button.note-link-chip{padding:0 10px;cursor:pointer;white-space:nowrap;overflow:
 .quote-label{color:var(--sd-color-text-secondary);margin-bottom:7px}
 .quote-input{width:100%;--field-local-bg:rgba(var(--sd-rgb-field-deep),0.7);--field-local-border:rgba(var(--sd-rgb-accent-primary),0.16);--field-local-color:var(--sd-color-accent-primary);--field-local-focus:rgba(var(--sd-rgb-accent-primary),0.4);border:1px solid;font-family:var(--sd-font-condensed);font-size:var(--sd-type-role-reading-size);font-weight:var(--sd-font-weight-bold);font-style:italic;letter-spacing:.25px;padding:12px 16px;transition:var(--sd-motion-border-fast-transition);border-radius:var(--sd-shape-editor-radius)}
 .quote-input::placeholder{color:var(--sd-color-text-secondary);opacity:.68;font-style:italic}
-/* CORE-13 · APP SHELL — INLINE STUDENT IDENTITY Owns the editable student-name control; retained here to preserve cascade order. */
-.sb-name-input{
-  display:block;
-  width:100%;
-  min-width:72px;
-  max-width:100%;
-  margin:0;
-  padding:0 0 2px;
-  background:var(--sd-material-control);
-  border:0;
-  border-bottom:1px solid transparent;
-  outline:none;
-  font:inherit;
-  color:inherit;
-  letter-spacing:inherit;
-  text-transform:inherit;
-}
-.sb-name-input:focus{color:var(--sd-color-accent-primary);border-bottom-color:rgba(var(--sd-rgb-accent-primary),0.45)}
-.sb-name-input::placeholder{color:var(--sd-color-text-muted)}
 /* CORE-14 · REVIEW — STATE DETAIL AND POLISH Owns completion states, badges, timing chips, and Review action sizing. */
 /* REVIEW POLISH AND STATE DETAILS */
 #pane-execute .rt-actions-collapsed{margin:16px 0 14px}
@@ -2287,9 +2304,16 @@ html,body,.app{max-width:100%;overflow-x:hidden}
   .main{margin-left:0;overflow:visible}
   .sidebar::before,.sidebar::after{display:none}
   .sb-head,.sb-clock,.sb-stats{display:none}
+  /* The name tag becomes a letter circle at the start of the section bar; its dot says Needs review or a sync problem. */
+  .profile-badge{display:grid;place-items:center;position:relative;flex:0 0 auto;align-self:center;width:42px;height:42px;margin:0 4px 0 6px;padding:0;border:1px solid var(--sd-state-accent-line-strong);border-radius:50%;background:var(--sd-surface-accent-soft);color:var(--sd-color-accent-primary);font-family:var(--sd-font-condensed);font-size:1.12rem;font-weight:var(--sd-font-weight-black);line-height:1;text-transform:uppercase;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .1s ease,background-color .16s ease}
+  .profile-badge:hover{background:rgba(var(--sd-rgb-accent-primary),.18)}
+  .profile-badge:focus-visible{outline:2px solid var(--sd-color-accent-primary);outline-offset:2px}
+  .profile-badge:active{transform:scale(.93)}
+  .profile-badge-dot{position:absolute;top:0;right:0;width:11px;height:11px;border-radius:50%;background:var(--sd-color-warning);box-shadow:0 0 0 2px var(--sd-color-surface-1)}
+  .profile-badge-dot[hidden]{display:none}
 }
 @media (max-width: 900px),(hover:none) and (pointer:coarse){
-  input.ui-field,textarea.ui-field,select.ui-field,.plan-textarea,.plan-draft-field,.library-controls select,.library-controls input,.gap-split input,.name-setup-field{font-size:var(--sd-type-role-reading-size)}
+  input.ui-field,textarea.ui-field,select.ui-field,.plan-textarea,.plan-draft-field,.library-controls select,.library-controls input,.gap-split input,.profile-dialog input.ui-field{font-size:var(--sd-type-role-reading-size)}
   .library-notes-textarea{resize:none}
 }
 @media (max-width: 900px){
@@ -2333,7 +2357,7 @@ html,body,.app{max-width:100%;overflow-x:hidden}
   #pane-execute .status-bar{overflow-x:auto}
   .status-seg{white-space:nowrap}
   .rt-panel-compact{grid-template-columns:minmax(0,1fr)}
-  .gap-box,.name-setup-box{max-height:calc(100dvh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - 32px);overflow-y:auto}
+  .gap-box{max-height:calc(100dvh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - 32px);overflow-y:auto}
   .ownership-banner{left:max(14px,env(safe-area-inset-left,0px));right:max(14px,env(safe-area-inset-right,0px));bottom:max(14px,env(safe-area-inset-bottom,0px));max-width:none;flex-direction:column;align-items:stretch}
   .ownership-banner .mini-btn{width:100%}
   .practice-total-option .practice-pacer-field input{font-size:var(--sd-type-role-reading-size)}
@@ -2463,6 +2487,9 @@ html,body,.app{max-width:100%;overflow-x:hidden}
   .interaction-dialog{width:calc(100vw - 24px);max-height:calc(100dvh - 24px)}
   .interaction-header{padding:16px 15px 11px}.interaction-body{padding:14px 15px}.interaction-actions{padding:12px 15px 15px}
   .interaction-options{grid-template-columns:1fr}.interaction-actions{display:grid;grid-template-columns:1fr 1fr}.interaction-action{width:100%;min-width:0}
+  .profile-actions{grid-template-columns:minmax(0,1fr) auto}.profile-actions .interaction-action{width:auto;min-width:104px}
+  .first-start-drive{grid-template-columns:1fr}.first-start-drive-button{width:100%}
+  .profile-row-actions .mini-btn{min-width:84px}
   .sd-toast-region{top:max(76px,calc(env(safe-area-inset-top,0px) + 64px));left:max(12px,env(safe-area-inset-left,0px));right:max(12px,env(safe-area-inset-right,0px));width:auto}
   #nudge-overlay{left:max(12px,env(safe-area-inset-left,0px));right:max(12px,env(safe-area-inset-right,0px));bottom:max(12px,env(safe-area-inset-bottom,0px));width:auto;padding:14px 14px 13px}
   .nudge-actions{display:grid;grid-template-columns:1fr 1fr}
@@ -2587,7 +2614,6 @@ html,body,.app{max-width:100%;overflow-x:hidden}
   #pane-plan .plan-draft-fields{--plan-draft-control-height:max(var(--_sd-touch-min,44px),var(--sd-density-touch-target,0px))}
   .nav-item{min-height:max(var(--_sd-touch-min,44px),var(--sd-density-touch-target,0px))}
   .plan-kind-touch-target{position:relative;display:flex;align-items:stretch;min-width:0}
-  label.sb-name::after{content:"";position:absolute;inset:-8px 0;z-index:1}
   .plan-kind-touch-target>.plan-draft-field{width:100%}
   #pane-execute .primary-controls .btn{min-height:max(var(--_sd-touch-min,44px),var(--sd-density-touch-target,0px))}
   .library-controls select{min-height:max(var(--_sd-touch-min,44px),var(--sd-density-touch-target,0px))}
@@ -2685,7 +2711,6 @@ html,body,.app{max-width:100%;overflow-x:hidden}
      visible component remains deliberately smaller than 44px. Generated SVG
      charts use a full-surface nearest-point touch model; their internal data
      nodes remain discrete keyboard focus targets. */
-  label.sb-name::after{inset:-8px 0!important}
   .review-collapse>summary::before{inset:-11px 0!important}
   .insights-coach-open::after{inset:-8px -4px!important}
   .insights-execution-tab::after{inset:-2px 0!important}

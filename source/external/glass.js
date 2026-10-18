@@ -416,12 +416,10 @@ html[data-presentation="glass"] .sb-eyebrow{margin-bottom:5px;opacity:.72}
 html[data-presentation="glass"] .sb-name{
   font-family:var(--sd-font-body);font-weight:600;text-transform:none;letter-spacing:-.025em;line-height:1.08;text-shadow:none;
 }
-html[data-presentation="glass"] .sb-name-input{font-family:inherit;font-weight:inherit;text-transform:none;letter-spacing:inherit}
 html[data-presentation="glass"] .sb-race{margin-top:8px;opacity:.78}
 html[data-theme="director-light"][data-presentation="glass"] .sb-eyebrow,
 html[data-theme="director-light"][data-presentation="glass"] .sb-race{color:var(--sd-color-text-secondary-strong);opacity:1}
-html[data-theme="director-light"][data-presentation="glass"] .sb-name,
-html[data-theme="director-light"][data-presentation="glass"] .sb-name-input{color:var(--sd-color-text-primary)}
+html[data-theme="director-light"][data-presentation="glass"] .sb-name{color:var(--sd-color-text-primary)}
 html[data-presentation="glass"] .sb-clock{
   margin:0 12px;padding:10px 12px;border:1px solid var(--sd-glass-edge);border-radius:18px;
   background:rgba(var(--sd-rgb-surface-1),.22);box-shadow:inset 0 1px 0 rgba(var(--sd-rgb-on-strong),.055);
@@ -634,7 +632,6 @@ html[data-material="glass"] .theme-btn,
 html[data-material="glass"] .presentation-btn,
 html[data-material="glass"] .type-btn{background:var(--sd-material-control)}
 html[data-material="glass"] .gap-box,
-html[data-material="glass"] .name-setup-box{--panel-bg:var(--sd-material-floating)}
 html[data-material="glass"] .practice-unit-row.head{background:var(--sd-material-inset)}
 
 html[data-material="glass"] .sd-rte{background:var(--sd-material-canvas);border-color:var(--sd-glass-edge)}

@@ -2,7 +2,7 @@
 
 Status of the work on this branch (`refactor/background-coordination`, draft PR #1). Read sections 1 and 5 first; sections 2 to 4 are closed summaries.
 
-**Current state (2026-10-18):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). **In progress: Drive sync and profiles (section 5).** Done: the small items (5.5), sync (5.1) and merge rules (5.2). Next: the first-start form (5.4) and profiles (5.3) in one pass, with device names folded in, then removing code section 5 made redundant, then a fresh audit of the backup system and app behaviour (5.6). Last of all: Wordgard as its own module, with two items to explore alongside it: notification sounds made in code, and the editor toolbar order (section 6).
+**Current state (2026-10-18):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). **In progress: Drive sync and profiles (section 5).** Done: the small items (5.5), sync (5.1), merge rules (5.2), and the first-start form (5.4) with profiles and device names (5.3). Next: removing code section 5 made redundant, then a fresh audit of the backup system and app behaviour (5.6). Last of all: Wordgard as its own module, with two items to explore alongside it: notification sounds made in code, and the editor toolbar order (section 6).
 
 ---
 
@@ -150,6 +150,18 @@ The person's data is never lost. Merging is automatic wherever it is lossless; o
 
 ### 5.3 Profiles
 
+**Done** (2026-10-18), with device names. Design and rules: `docs/BACKUP-ENGINE.md`, "Profiles". What was built, against the table below:
+- **Profiles** (`core/profiles.js`). The device list is one browser-storage key (`studyDirector.profiles.v1`): the active profile and, for each, its id, name, Google email and Drive folder. A profile id is `prof_<name>_<time>_<random>`. It follows the name only until the first start is finished and no Drive library knows it; after that it never changes.
+- **Storage per profile.** The first profile keeps every current storage name, so nothing moved. A later one adds `~<scope>` to each name: database, browser-storage keys, attachment and scratch folders (the workers check the folder they are given), locks, channels, the Drive sign-in and the Device Folder repository. The scope is fixed when the profile is made. Device-wide: the device ID, the install notice, the update check and the profile list.
+- **Profile panel.** Name, Google Drive (email; connect, change, disconnect), backup password (set, change, remove), the profiles on this device (Switch, Add profile) and this device's name. Opened from the name tag in the sidebar (desktop) and from the letter circle on phones. Library → Data keeps the password and Drive controls, and has Remove this profile (shown with two or more).
+- **Switching** reloads every tab into the chosen profile. With two or more profiles, each start asks for that profile's password ("Not now" keeps sync and encrypted backups waiting). With one profile, the kept key opens it.
+- **Drive library tied to its profile.** The folder carries the profile id. Once per sign-in the app is told the account email and what the folder holds and settles it: its own folder continues; a folder from before profiles is claimed; a library from another device is offered as "Continue with your library?" (only within 5 minutes of tapping Connect) and its id taken over; a library or email of another profile on this device is refused without touching it, and the sign-in is forgotten so Connect offers the choice of account again. A new folder means a first, two-way sync.
+- **Password per profile** (record `BackupProtection.v3`): the key is kept as a non-extractable key with the record. A password set, changed or removed on another device: the next sync shows "Needs password" (sidebar and Drive row); entering it continues the sync and keeps that password here. A plain version built on an encrypted one removes it here.
+- **Removing a profile** asks first: when it is fully synced, it says Drive keeps everything; otherwise, that its data is deleted from this device for good. Its data is deleted once no tab holds it.
+- **Device names.** As in the table: `inst_<type>_<browser>_<time>_<random>`, named from the ID alone. Older IDs are replaced once.
+- **Correction:** on phones the section bar is a floating bar at the **bottom** (glass presentation; the Director presentation keeps a top bar). The letter circle sits at its start.
+- Known limits: Drive flows are tested against a simulated Drive (`tests/integration/backup/drive-profile-binding.mjs`), not real Google. Two people on one Google account are refused by design. A profile removed on one device stays on others.
+
 | Part | Decision |
 |---|---|
 | What a profile is | A name, an optional backup password and an optional Google account. The three belong together. Drive and the password can be added later, or changed, in the Profile panel (primary) or in Library → Data |
@@ -160,7 +172,7 @@ The person's data is never lost. Merging is automatic wherever it is lossless; o
 | Existing data | Becomes the first profile under its current storage names. Nothing moves, so there is no migration. New profiles get their own names, resolved from the identities already centralised in `contracts/` |
 | Device-wide | Only what belongs to the device: app updates, the service worker and the profile list itself. Decide key by key |
 | Switching | In the Profile panel. One profile is active at a time; switching reloads every open tab into it and asks for that profile's password (below) |
-| Phones (user, 2026-10-18) | On phones the sidebar becomes the section bar at the top, and the name and sync status are hidden (`.sb-head` at 900px and below), so phones show no sync status today. A small circle at the start of that bar shows the first letter of the name in the accent colour, with a small dot only for "Needs review" or a sync problem; tapping it opens the Profile panel |
+| Phones (user, 2026-10-18) | On phones the sidebar becomes the section bar (a floating bar at the bottom in the glass presentation), and the name and sync status are hidden (`.sb-head` at 900px and below), so phones show no sync status today. A small circle at the start of that bar shows the first letter of the name in the accent colour, with a small dot only for "Needs review" or a sync problem; tapping it opens the Profile panel |
 | Dialogs (user, 2026-10-18) | The Profile panel, the first-start form (5.4) and Add profile (which opens the same form) are one family: the same size, layout and style. Uniform, consistent, professional; nothing janky |
 | Design quality (user, 2026-10-18) | The name tag in the sidebar, the letter circle on phones and the Profile panel are designed with care on both desktop and phone: intuitive, plainly interactive (they look clickable, with clear hover, focus and pressed states), well proportioned and in the app's own design language. Checked with screenshots at desktop and phone widths before the pass is done |
 | Google account (user, 2026-10-18) | Shown by its email, read with one small Drive request when connecting |
@@ -172,6 +184,8 @@ The person's data is never lost. Merging is automatic wherever it is lossless; o
 Design sync around profile ids from the start; build the per-profile storage after sync.
 
 ### 5.4 First start
+
+**Done** (2026-10-18). Someone new (no data on this device) sees the form below; existing data becomes the first profile with no form. Skip leaves the name empty and keeps the profile. The typed password is set before Drive is used; connecting to a library from another device takes its name and settings. Add profile opens the same form, with Cancel going back to the profile it was added from. The old name prompt and its skip date are gone (`nameSetupSkippedDate` is cleaned up as an obsolete key).
 
 One form, an upgrade of the name dialog:
 
@@ -203,7 +217,7 @@ Backup password  [ Optional            ]   (a confirm box appears once you type)
 
 1. The small items (5.5). **Done.**
 2. The sync engine and merge rules (5.1, 5.2), with sync designed around profile ids. **Done.**
-3. The first-start form (5.4) and profiles (5.3), in one pass, with device names (5.3) folded in.
+3. The first-start form (5.4) and profiles (5.3), in one pass, with device names (5.3) folded in. **Done.**
 4. Remove what section 5 made redundant, then a cleanup pass.
 5. Audit the backup system and app behaviour again (noted by the user, 2026-10-18). Drive went from a manual handoff (back up, then Combine or Replace on the other device) to automatic sync, so much has changed. Check whether everything is still in its best shape, and what can be improved, refined or corrected:
    - Device Folder and Drive backups end to end, after sync and one history.

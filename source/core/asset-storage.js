@@ -14,7 +14,9 @@ registry.define('asset-storage',1,()=>{
   }
   function create(ports){
     const {read,keys,commit,validId,validType,maxBytes,storage,locks,issueToken,assertToken,canMutate,ingest}=ports;
-    const writeLock=ports.name+':attachment-metadata.v2',retainLock=ports.name+':attachment-retention.v2',DIRECTORY='@@SD_ATTACHMENT_OPFS_DIRECTORY@@',LEGACY_DIRECTORY='@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@';
+    const writeLock=ports.name+':attachment-metadata.v2',retainLock=ports.name+':attachment-retention.v2',DIRECTORY=String(ports.directory||'@@SD_ATTACHMENT_OPFS_DIRECTORY@@');
+    // Only the first profile can hold the attachment folder of earlier versions.
+    const LEGACY_DIRECTORY=ports.directory?String(ports.legacyDirectory||''):'@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@';
     const supported=()=>ports.protocol!=='file:'&&typeof storage?.getDirectory==='function'&&typeof locks?.request==='function'&&typeof ingest?.ingest==='function';
     function available(){if(!supported()){const error=new Error(ports.protocol==='file:'?'Attachments cannot be stored when index.html is opened directly. Close this copy and use Start-Study-Director from the deployment folder, or open the hosted app.':'Attachment storage is unavailable. Use a supported browser with site storage enabled.');error.name='NotSupportedError';throw error;}}
     const id=value=>{if(typeof value!=='string'||!validId(value))throw new TypeError('Invalid attachment identity.');return value;};
@@ -37,7 +39,7 @@ registry.define('asset-storage',1,()=>{
         let legacyMetadataCount=0;
         for(const [,row] of await allEntries())if(legacyMetadata(row))legacyMetadataCount++;
         let legacyDirectory=false;
-        try{await (await storage.getDirectory()).getDirectoryHandle(LEGACY_DIRECTORY);legacyDirectory=true;}
+        try{if(LEGACY_DIRECTORY){await (await storage.getDirectory()).getDirectoryHandle(LEGACY_DIRECTORY);legacyDirectory=true;}}
         catch(error){if(error?.name!=='NotFoundError')throw error;}
         return Object.freeze({ok:legacyMetadataCount===0&&!legacyDirectory,status:'verified',legacyMetadata:legacyMetadataCount,legacyDirectory});
       });
@@ -52,7 +54,7 @@ registry.define('asset-storage',1,()=>{
         assertToken(token);if(remove.length)await commit([],remove,token);
         assertToken(token);
         let directoryRemoved=false;
-        try{await (await storage.getDirectory()).removeEntry(LEGACY_DIRECTORY,{recursive:true});directoryRemoved=true;}catch(error){if(error?.name!=='NotFoundError')directoryRemoved=false;}
+        try{if(LEGACY_DIRECTORY){await (await storage.getDirectory()).removeEntry(LEGACY_DIRECTORY,{recursive:true});directoryRemoved=true;}}catch(error){if(error?.name!=='NotFoundError')directoryRemoved=false;}
         assertToken(token);
         legacyCleanupResult=Object.freeze({status:'completed',removed:remove.length,directoryRemoved});return legacyCleanupResult;
       });

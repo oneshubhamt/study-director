@@ -10,7 +10,7 @@ import {LOCAL_STORAGE_KEYS,OBSOLETE_LOCAL_STORAGE_KEYS,APP_META_KEYS,RENAMED_APP
 // opens the current build on it: every note, deletion and rescued edit must
 // come through under the current names, with nothing left under the old ones.
 const today=`const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');`;
-const preload=`(()=>{${today}localStorage.setItem('studyDirector.nameSetupSkippedDate.v1',today);})();`;
+const preload=`(()=>{${today}(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));})();`;
 const oldFormat=Object.fromEntries(Object.entries(RENAMED_VALUE_FORMATS).map(([from,to])=>[to,from]));
 const names=JSON.stringify({
   db:INDEXED_DB.name,version:INDEXED_DB.version,notes:INDEXED_DB.stores.notes.name,oldNotes:OBSOLETE_INDEXED_DB.renamedStores.notes,

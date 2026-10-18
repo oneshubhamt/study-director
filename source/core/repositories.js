@@ -92,7 +92,7 @@ registry.define('repositories',1,()=>{
     if(Meta.format!=='study-director.app-meta-owner'||Meta.contractVersion!==1||Meta.owner!=='repositories')throw new TypeError('Repository appMeta capability is invalid.');
     if(CompatibilityMeta.format!=='study-director.app-meta-owner'||CompatibilityMeta.contractVersion!==1||CompatibilityMeta.owner!=='compatibility')throw new TypeError('Compatibility appMeta capability is invalid.');
     const InstallationIdentity=input.installationIdentity;
-    if(InstallationIdentity.format!=='study-director.installation-identity'||InstallationIdentity.contractVersion!==3||typeof InstallationIdentity.getId!=='function')throw new TypeError('Installation identity contract is invalid.');
+    if(InstallationIdentity.format!=='study-director.installation-identity'||InstallationIdentity.contractVersion!==4||typeof InstallationIdentity.getId!=='function')throw new TypeError('Installation identity contract is invalid.');
     const DailyRecordCodec=input.dailyRecordCodec,NoteKeys=DailyRecordCodec.noteKeys;
     if(!NoteKeys||!Object.isFrozen(NoteKeys)||typeof NoteKeys.isId!=='function'||typeof NoteKeys.isKey!=='function')throw new TypeError('Note key contract is invalid.');
     const ActiveSessionCodec=input.activeSessionCodec;

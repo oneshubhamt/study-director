@@ -40,6 +40,23 @@
 </script>
 <script>
 (()=>{
+  // The active profile, read before anything opens storage. The profile list
+  // belongs to the device; every other durable name belongs to one profile.
+  // The first profile keeps the plain names, a later one adds ~<its scope>.
+  const key=Symbol.for('studyDirector.profileScope.v1');
+  if(window[key])return;
+  const registryKey='@@SD_PROFILES_STORAGE_KEY@@',separator='@@SD_PROFILE_SCOPE_SEPARATOR@@',pattern=/^prof_[a-z0-9]{1,24}_[a-z0-9]{6,12}_[a-f0-9]{8}$/;
+  let id='',scope='';
+  try{
+    const list=JSON.parse(localStorage.getItem(registryKey)||'null'),valid=entry=>!!entry&&pattern.test(entry.id)&&(entry.scope===''||pattern.test(entry.scope));
+    const profiles=list&&list.version===1&&Array.isArray(list.profiles)?list.profiles.filter(valid):[],active=profiles.find(entry=>entry.id===list.active)||profiles[0];
+    if(active){id=active.id;scope=active.scope;}
+  }catch{}
+  Object.defineProperty(window,key,{value:Object.freeze({registryKey,separator,pattern,id,scope,scoped:name=>scope?`${name}${separator}${scope}`:String(name)}),configurable:false,writable:false});
+})();
+</script>
+<script>
+(()=>{
   const key=Symbol.for('studyDirector.presentationKernel.v1');
   const freeze=Object.freeze;
   const list=(...values)=>freeze(values);
@@ -373,8 +390,9 @@
     })
   });
   const root=document.documentElement;
-  const themeStorageKey='@@SD_THEME_STORAGE_KEY@@';
-  const presentationStorageKey='@@SD_PRESENTATION_STORAGE_KEY@@';
+  const profileScope=window[Symbol.for('studyDirector.profileScope.v1')];
+  const themeStorageKey=profileScope.scoped('@@SD_THEME_STORAGE_KEY@@');
+  const presentationStorageKey=profileScope.scoped('@@SD_PRESENTATION_STORAGE_KEY@@');
   const presentationIdPattern=/^[a-z][a-z0-9-]{0,40}$/;
   const profileFields=freeze(['typography','shape','material','depth','density','responsive','motion','charts']);
   const registry=new Map(Object.entries(manifest.presentations));
@@ -516,7 +534,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
   <div class="mobile-brand ui-label">Study Director</div>
   <div class="sb-head">
     <div class="sb-eyebrow ui-label">Study Director</div>
-    <label class="sb-name"><input class="sb-name-input" id="student-display" data-student-name type="text" value="Student" aria-label="Student name" spellcheck="false" autocomplete="name" data-input="student-name" data-blur="student-name" data-keydown="student-name" title="Edit name; saved locally on blur"></label>
+    <button class="sb-name profile-tag" id="profile-tag" type="button" data-action="open-profile" aria-haspopup="dialog" aria-controls="profile-dialog" title="Profile, Google Drive and backup password"><span class="profile-tag-name" data-student-name>Student</span><span class="profile-tag-caret" aria-hidden="true"></span></button>
     <div class="sb-race ui-mono" id="sb-date">—</div>
     <button class="sb-sync ui-mono" id="sb-sync" type="button" data-action="show-drive-sync" aria-label="Google Drive sync status" hidden></button>
   </div>
@@ -524,6 +542,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
     <div class="sb-clock-lbl ui-label">Local Time</div>
     <div id="clock">00:00:00</div>
   </div>
+  <button class="profile-badge" id="profile-badge" type="button" data-action="open-profile" aria-haspopup="dialog" aria-controls="profile-dialog" aria-label="Profile: Student"><span class="profile-badge-letter" aria-hidden="true">S</span><span class="profile-badge-dot" id="profile-badge-dot" hidden></span></button>
   <div class="sb-nav" role="tablist" aria-label="Primary navigation">
     <button class="nav-item ui-label on" id="tab-plan" type="button" role="tab" data-tab="plan" aria-controls="pane-plan" aria-selected="true" tabindex="0"><span class="nav-icon" aria-hidden="true">▦</span>Plan</button>
     <button class="nav-item ui-label" id="tab-execute" type="button" role="tab" data-tab="execute" aria-controls="pane-execute" aria-selected="false" tabindex="-1"><span class="nav-icon" aria-hidden="true">⏱</span>Execute</button>
@@ -1149,8 +1168,15 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                       <button class="mini-btn ui-btn" id="manage-backup-protection" type="button" data-action="backup-protection">Set password…</button>
                     </div>
                   </div>
-                  <div class="backup-inline-note ui-helper" id="backup-protection-hint" hidden>Automatic encrypted backups are paused until you unlock.</div>
+                  <div class="backup-inline-note ui-helper" id="backup-protection-hint" hidden>Sync and encrypted backups wait until this profile’s backup password is entered.</div>
                 </div>
+              </section>
+              <section class="backup-section backup-advanced-section" id="profile-remove-section" aria-label="This profile" hidden>
+                <div class="backup-compact-row">
+                  <span class="ui-label">This profile</span>
+                  <button class="mini-btn ui-btn danger" id="profile-remove" type="button" data-action="remove-profile">Remove from this device…</button>
+                </div>
+                <div class="backup-inline-note ui-helper">Deletes this profile’s data from this device only. Other profiles are not changed.</div>
               </section>
             </div>
           </details>
@@ -1400,18 +1426,58 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
     </div>
   </div>
 </div>
-<div class="name-setup-overlay" id="name-setup-overlay" role="dialog" aria-modal="true" aria-labelledby="name-setup-title">
-  <div class="name-setup-box ui-panel">
-    <div class="name-setup-title" id="name-setup-title">Personalise Study Director</div>
-    <div class="name-setup-note ui-body">What should the app call you? This is saved only in this browser and can be changed later from the sidebar.</div>
-    <input class="name-setup-field ui-field" id="name-setup-input" type="text" autocomplete="name" spellcheck="false" placeholder="Your name" data-keydown="name-setup">
-    <div class="name-setup-actions">
-      <button class="mini-btn ui-btn ghost" type="button" data-action="skip-name-setup">Skip</button>
-      <button class="mini-btn ui-btn primary" type="button" data-action="save-name-setup">Save Name</button>
+<!-- PROFILE: the Profile panel and the first-start form (also Add profile) are one dialog family. -->
+<dialog class="interaction-dialog profile-dialog" id="profile-dialog" aria-labelledby="profile-dialog-title">
+  <div class="interaction-shell">
+    <div class="interaction-header profile-header">
+      <span class="profile-avatar" id="profile-avatar" aria-hidden="true">S</span>
+      <div class="profile-heading">
+        <div class="interaction-eyebrow ui-label">Profile</div>
+        <h2 class="interaction-title ui-title profile-title" id="profile-dialog-title" data-student-name>Student</h2>
+        <div class="profile-subtitle" id="profile-subtitle"></div>
+      </div>
     </div>
-    <div class="name-setup-status ui-status" id="name-setup-status"></div>
+    <div class="interaction-body profile-body">
+      <div class="profile-rows">
+        <label class="profile-row profile-name-row"><span class="profile-row-label ui-label">Name</span><input class="ui-field interaction-input profile-name-input" id="profile-name-input" type="text" autocomplete="name" spellcheck="false" data-keydown="profile-name" data-blur="profile-name"></label>
+        <div class="profile-row"><span class="profile-row-label ui-label">Google Drive</span><span class="profile-row-value" id="profile-drive-value">Not connected</span><span class="profile-row-actions"><button class="mini-btn ui-btn" id="profile-drive-action" type="button" data-action="profile-drive">Connect</button></span></div>
+        <div class="profile-row"><span class="profile-row-label ui-label">Backup password</span><span class="profile-row-value" id="profile-password-value">Off</span><span class="profile-row-actions"><button class="mini-btn ui-btn" id="profile-password-action" type="button" data-action="backup-protection">Set…</button></span></div>
+      </div>
+      <section class="profile-section" aria-labelledby="profile-list-title">
+        <h3 class="profile-section-title ui-label" id="profile-list-title">Profiles on this device</h3>
+        <ul class="profile-list" id="profile-list"></ul>
+        <button class="mini-btn ui-btn ghost profile-add" type="button" data-action="add-profile">+ Add profile</button>
+      </section>
+    </div>
+    <div class="interaction-actions profile-actions">
+      <span class="profile-device" id="profile-device"></span>
+      <button class="interaction-action ui-btn primary" type="button" data-action="close-profile" autofocus>Done</button>
+    </div>
   </div>
-</div>
+</dialog>
+<dialog class="interaction-dialog profile-dialog first-start-dialog" id="first-start-dialog" aria-labelledby="first-start-title" aria-describedby="first-start-note">
+  <form class="interaction-shell" id="first-start-form" method="dialog" novalidate>
+    <div class="interaction-header">
+      <div class="interaction-eyebrow ui-label" id="first-start-eyebrow">Welcome</div>
+      <h2 class="interaction-title ui-title" id="first-start-title">Personalise Study Director</h2>
+    </div>
+    <div class="interaction-body">
+      <p class="interaction-message ui-body" id="first-start-note">Everything stays on this device. Add a password to encrypt backups, and Google Drive to sync your devices.</p>
+      <label class="interaction-field">Name<input class="ui-field interaction-input" id="first-start-name" type="text" autocomplete="name" spellcheck="false" placeholder="Your name" data-keydown="first-start"></label>
+      <label class="interaction-field"><span>Backup password <span class="interaction-field-optional">optional</span></span><input class="ui-field interaction-input" id="first-start-password" type="password" autocomplete="new-password" placeholder="Optional" maxlength="1024" data-input="first-start-password" data-keydown="first-start"></label>
+      <label class="interaction-field" id="first-start-confirm-field" hidden>Confirm password<input class="ui-field interaction-input" id="first-start-confirm" type="password" autocomplete="new-password" maxlength="1024" data-keydown="first-start"></label>
+      <div class="first-start-drive">
+        <button class="ui-btn first-start-drive-button" id="first-start-drive" type="button" data-action="first-start-drive">Connect Google Drive</button>
+        <span class="first-start-drive-note" id="first-start-drive-note">Keeps your devices in sync. You can connect later.</span>
+      </div>
+      <div class="interaction-error ui-status" id="first-start-error" role="alert" hidden></div>
+    </div>
+    <div class="interaction-actions">
+      <button class="interaction-action ui-btn ghost" id="first-start-skip" type="button" data-action="first-start-skip">Skip</button>
+      <button class="interaction-action ui-btn primary" id="first-start-continue" type="button" data-action="first-start-continue">Continue</button>
+    </div>
+  </form>
+</dialog>
 <div class="display-tools" id="display-tools">
   <button class="display-tools-trigger" id="display-tools-trigger" type="button" data-action="toggle-display-tools" aria-expanded="false" aria-controls="display-tools-menu" title="Display controls">Aa</button>
   <div class="display-tools-menu" id="display-tools-menu" role="group" aria-label="Display controls" hidden>
@@ -1479,6 +1545,7 @@ const IntegrityContinuationModule=INTERNAL_MODULES.load('integrity-continuation'
 const NoteExportModule=INTERNAL_MODULES.load('note-export',2,'study-director.note-export-module',2);
 const LibraryClearModule=INTERNAL_MODULES.load('library-clear',1,'study-director.library-clear-module',2);
 const NoteLinksModule=INTERNAL_MODULES.load('note-links',1,'study-director.note-links-module',1);
+const ProfilesModule=INTERNAL_MODULES.load('profiles',1,'study-director.profiles-module',1);
 const LibraryModule=INTERNAL_MODULES.load('library',1,'study-director.library-module',1);
 const ManagedRepositoryModule=INTERNAL_MODULES.load('managed-repository',1,'study-director.managed-repository-module',1);
 const RepositoryPolicyModule=INTERNAL_MODULES.load('repository-policy',1,'study-director.repository-policy-module',1);
@@ -1543,7 +1610,10 @@ if(!RICH_TEXT_BOOT_API||!RICH_TEXT_BOOT_API.assetPolicy||typeof RICH_TEXT_BOOT_A
 const APP_LIMITS=Object.freeze(@@SD_PRODUCTION_LIMITS@@);
 if(APP_LIMITS.richAssetMaxBytes!==RICH_TEXT_BOOT_API.assetPolicy.maxBytes||APP_LIMITS.richAssetMaxPerDocument!==RICH_TEXT_BOOT_API.assetPolicy.maxPerDocument||APP_LIMITS.richAssetMaxBytesPerDocument!==RICH_TEXT_BOOT_API.assetPolicy.maxBytesPerDocument||APP_LIMITS.richAssetMaxDimensionPx!==RICH_TEXT_BOOT_API.assetPolicy.maxDimensionPx||APP_LIMITS.richAssetMaxPixels!==RICH_TEXT_BOOT_API.assetPolicy.maxPixels){throw new Error('Rich-text asset limits differ from the production-limit manifest.');}
 if(AttachmentsModule.limits?.maxImage!==APP_LIMITS.richAssetMaxBytes||AttachmentsModule.limits?.maxPdfAudio!==APP_LIMITS.attachmentPdfAudioMaxBytes){throw new Error('Attachment limits differ from the production-limit manifest.');}
-const STORAGE_KEYS=Object.freeze(@@SD_LOCAL_STORAGE_KEYS@@);
+// Durable names of the active profile (see the profile scope at the top).
+const ProfileScope=window[Symbol.for('studyDirector.profileScope.v1')];
+const DEVICE_WIDE_STORAGE_KEYS=Object.freeze(@@SD_DEVICE_WIDE_LOCAL_STORAGE_KEYS@@);
+const STORAGE_KEYS=Object.freeze(Object.fromEntries(Object.entries(@@SD_LOCAL_STORAGE_KEYS@@).map(([name,key])=>[name,DEVICE_WIDE_STORAGE_KEYS.includes(name)?key:ProfileScope.scoped(key)])));
 const SESSION_STORAGE_KEYS=Object.freeze(@@SD_SESSION_STORAGE_KEYS@@);
 const OBSOLETE_STORAGE_KEYS=Object.freeze(@@SD_OBSOLETE_LOCAL_STORAGE_KEYS@@);
 const APP_META_KEYS=Object.freeze(@@SD_APP_META_KEYS@@);
@@ -1565,7 +1635,7 @@ const DATA_CONTRACT=(()=>{
 const DB_STORES=Object.freeze(@@SD_INDEXED_DB_STORE_NAMES@@);
 const OBSOLETE_DB=Object.freeze(@@SD_OBSOLETE_INDEXED_DB@@);
 const OBSOLETE_DB_STORES=OBSOLETE_DB.stores;
-const DB_NAME=DATA_CONTRACT.storage.dbName;
+const DB_NAME=ProfileScope.scoped(DATA_CONTRACT.storage.dbName);
 const DB_DAILY_RECORD_STORE=DB_STORES.dailyRecords;
 const DB_DAILY_SUMMARY_STORE=DB_STORES.dailySummaries;
 const DB_NOTES_STORE=DB_STORES.notes;
@@ -1735,8 +1805,30 @@ const DecisionClock=Object.freeze({nowMs:()=>Date.now()});
 /* INSTALLATION IDENTITY + PERSISTENCE HELPERS · IMPORTED */
 const InstallationIdentity=PersistenceModule.createInstallationIdentity(Object.freeze({
   local:LocalStorageContract,
-  keys:Object.freeze({installationId:STORAGE_KEYS.installationId})
+  keys:Object.freeze({installationId:STORAGE_KEYS.installationId}),
+  describe:()=>PersistenceModule.describeDevice(navigator)
 }));
+// "iPhone · Safari", "This device", or '' when an ID does not say.
+const deviceName=(id,others=[])=>String(id||'')===InstallationIdentity.getId()?'This device':PersistenceModule.deviceName(id,[...others,InstallationIdentity.getId()]);
+// The people who use Study Director on this device (core/profiles.js).
+const Profiles=ProfilesModule.createController(Object.freeze({ports:Object.freeze({
+  scope:Object.freeze({pattern:ProfileScope.pattern,registryKey:ProfileScope.registryKey,scope:ProfileScope.scope,separator:ProfileScope.separator}),
+  storage:Object.freeze({
+    read:()=>LocalStorageContract.getText(ProfileScope.registryKey,null),
+    write:text=>LocalStorageContract.setText(ProfileScope.registryKey,text),
+    keys:()=>LocalStorageContract.keys(),
+    remove:key=>LocalStorageContract.remove(key)
+  }),
+  names:Object.freeze({database:DATA_CONTRACT.storage.dbName,directories:Object.freeze(['@@SD_ATTACHMENT_OPFS_DIRECTORY@@','@@SD_BACKUP_FILES_OPFS_DIRECTORY@@']),keys:Object.freeze(Object.entries(@@SD_LOCAL_STORAGE_KEYS@@).filter(([name])=>!DEVICE_WIDE_STORAGE_KEYS.includes(name)).map(([,key])=>key)),legacyDirectory:'@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@'}),
+  platform:Object.freeze({
+    deleteDatabase:name=>new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase(name);request.onsuccess=()=>resolve(true);request.onerror=()=>reject(request.error||new Error('A removed profile could not be deleted.'));}),
+    listen:handler=>{const listener=event=>{if(event.storageArea===localStorage)handler(event.key);};window.addEventListener('storage',listener);return ()=>window.removeEventListener('storage',listener);},
+    now:()=>Date.now(),random:bytes=>randomIdPart(bytes),reload:()=>location.reload(),
+    removeDirectory:async name=>{const root=await navigator.storage?.getDirectory?.();if(!root)return;await root.removeEntry(name,{recursive:true}).catch(error=>{if(error?.name!=='NotFoundError')throw error;});}
+  }),
+  limits:Object.freeze({maxName:APP_LIMITS.maxStudentNameChars})
+})}));
+Profiles.watch();
 const {
   randomIdPart,normalizeTimestamp,normalizeImportedTimestamp,normalizeImportedEpochMillis,jsonByteLength
 }=PersistenceModule;
@@ -1900,10 +1992,11 @@ if(!Object.isFrozen(NoticeCoordinator)||NoticeCoordinator.format!=='study-direct
 async function showBackupPresentation(source,kind){
   if(source==='device-folder'&&kind==='permission')return DeviceBackup?.connect();
   // Reconnecting straight from the toast keeps it to one click.
-  if(kind==='permission'&&source!=='file'&&await BackupProviderRuntime.connect(source))return true;
+  if(kind==='permission'&&source!=='file'&&await (source==='google-drive'?connectDriveForProfile():BackupProviderRuntime.connect(source)))return true;
   if(['history','restore-version','bring-in','remove-safety'].includes(kind))return BackupRecoveryHost?.history.openSource(source);
   // A review opens Combine, which waits while today's session runs.
   if(kind==='sync-review')return BackupProviderRuntime.reviewSync(source);
+  if(kind==='sync-password')return BackupProviderRuntime.unlockSync(source);
   if(!await goTab('library',{source:'backup-notification'}))return false;
   LibraryView.showSection('data');
   // 'restore' shows every way back in: Device Folder where supported, Google
@@ -1939,7 +2032,7 @@ function renderNotificationSurfaces(state){
   }
 }
 NoticeCoordinator.subscribe(renderNotificationSurfaces);
-const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze({notifications:NoticeCoordinator,timeLabel:storageHealthTime,verified:source=>verifiedRecoveryState.providers[source]||null,action:(source,kind)=>Object.freeze({label:kind==='permission'?(source==='device-folder'?'Allow access':'Reconnect'):kind==='sync-review'?'Review':'Show details',run:()=>showBackupPresentation(source,kind)})}));
+const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze({notifications:NoticeCoordinator,timeLabel:storageHealthTime,verified:source=>verifiedRecoveryState.providers[source]||null,action:(source,kind)=>Object.freeze({label:kind==='permission'?(source==='device-folder'?'Allow access':'Reconnect'):kind==='sync-review'?'Review':kind==='sync-password'?'Enter password':'Show details',run:()=>showBackupPresentation(source,kind)})}));
 const Interactions=InteractionsModule.createController(Object.freeze({ports:Object.freeze({
   environment:Object.freeze({
     clearTimeout:id=>clearTimeout(id),document,
@@ -2433,7 +2526,7 @@ const AppActivation=(()=>{
 const OWNERSHIP_HEARTBEAT_MS=4000;
 const OWNERSHIP_STALE_MS=15000;
 const OWNERSHIP_PROBE_MS=700;
-const OWNERSHIP_WEB_LOCK_NAME='study-director-app-owner-v1';
+const OWNERSHIP_WEB_LOCK_NAME=ProfileScope.scoped('study-director-app-owner-v1');
 const OWNERSHIP_STATES=OwnershipModule.OWNERSHIP_STATES;
 const SLEEP_GAP_THRESHOLD_MS=120000;
 let ownershipBanner=null;
@@ -2443,7 +2536,7 @@ let pwaUpdateReservation=null;
 const AppOwnership=OwnershipModule.createOwnershipController(Object.freeze({
   config:Object.freeze({
     storageKey:STORAGE_KEYS.appOwner,sessionTabKey:SESSION_STORAGE_KEYS.appTab,
-    channelName:'study-director-app-owner',heartbeatMs:OWNERSHIP_HEARTBEAT_MS,
+    channelName:ProfileScope.scoped('study-director-app-owner'),heartbeatMs:OWNERSHIP_HEARTBEAT_MS,
     staleMs:OWNERSHIP_STALE_MS,probeMs:OWNERSHIP_PROBE_MS,webLockName:OWNERSHIP_WEB_LOCK_NAME
   }),
   environment:Object.freeze({
@@ -2502,7 +2595,7 @@ const appCanMutate=()=>AppOwnership.canMutate()&&!(AppMutationCoordinator&&AppMu
 const transitionAppOwnership=next=>next===OWNERSHIP_STATES.RELEASING
   ?AppOwnership.transitionReleasing():AppOwnership.state;
 AppMutationCoordinator=MutationCoordinatorModule.createCoordinator(Object.freeze({
-  configuration:Object.freeze({lockName:'study-director-data-mutation-v1',storageKey:STORAGE_KEYS.mutationLock,leaseMs:20000,heartbeatMs:5000}),
+  configuration:Object.freeze({lockName:ProfileScope.scoped('study-director-data-mutation-v1'),storageKey:STORAGE_KEYS.mutationLock,leaseMs:20000,heartbeatMs:5000}),
   environment:Object.freeze({
     AbortController,locks:navigator.locks||null,now:DecisionClock.nowMs,randomIdPart,
     setInterval:(callback,delay)=>setInterval(callback,delay),clearInterval:id=>clearInterval(id),setTimeout:(callback,delay)=>setTimeout(callback,delay),
@@ -2917,7 +3010,8 @@ function renderDriveBackup(){
   if(last){const at=verifiedRecoveryState.providers['google-drive']?.at;last.textContent=at?`Last verified ${storageHealthTime(at)}`:'Not yet verified';}
   if(disconnect)disconnect.disabled=state.engineBusy;
   // Kept versions waiting for review show as Needs review too.
-  const sync=node('sb-sync');if(sync){const syncing=BackupPresentation.syncLabel(state),kept=KeptVersions.count()>0&&syncing!=='Syncing…',label=kept?'Needs review':syncing;sync.hidden=!label;if(sync.textContent!==label)sync.textContent=label;sync.dataset.state=state.sync?.review||kept?'review':'';}
+  const sync=node('sb-sync');if(sync){const syncing=BackupPresentation.syncLabel(state),kept=KeptVersions.count()>0&&syncing!=='Syncing…'&&syncing!=='Needs password',label=kept?'Needs review':syncing;sync.hidden=!label;if(sync.textContent!==label)sync.textContent=label;sync.dataset.state=state.sync?.review||state.sync?.password||kept?'review':'';}
+  renderProfile();if(FirstStart.isOpen())FirstStart.render();
 }
 function renderDeviceBackup(state){
   if(!state)return;
@@ -4267,11 +4361,11 @@ let attachmentIntegrityIssues=new Map();
 const RichTextAssetWriteLease=AssetStorageModule.createLease();
 function richAssetId(value){const id=String(value||'');if(!RichTextApi.isAssetId(id))throw new TypeError('Rich-text asset identity is invalid.');return id;}
 const AttachmentIngest=AttachmentIngestModule.create({
-  createWorker:()=>new Worker(trustedAssetURL('@@SD_ATTACHMENT_WORKER_FILENAME@@'),{name:'study-director-attachment-ingest'}),storage:navigator.storage,onAbandoned:()=>scheduleRichTextAssetMaintenance(5000)
+  createWorker:()=>new Worker(trustedAssetURL('@@SD_ATTACHMENT_WORKER_FILENAME@@'),{name:'study-director-attachment-ingest'}),storage:navigator.storage,directory:ProfileScope.scoped('@@SD_ATTACHMENT_OPFS_DIRECTORY@@'),onAbandoned:()=>scheduleRichTextAssetMaintenance(5000)
 });
 window.addEventListener('pagehide',()=>AttachmentIngest.destroy());
 const AttachmentStorage=AssetStorageModule.create({
-  name:DB_NAME,maxBytes:APP_LIMITS.richAssetMaxBytes,validId:AttachmentsModule.validId,validType:AttachmentsModule.validType,limitForType:AttachmentsModule.limitForType,
+  name:DB_NAME,directory:ProfileScope.scoped('@@SD_ATTACHMENT_OPFS_DIRECTORY@@'),legacyDirectory:ProfileScope.scope?'':'@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@',maxBytes:APP_LIMITS.richAssetMaxBytes,validId:AttachmentsModule.validId,validType:AttachmentsModule.validType,limitForType:AttachmentsModule.limitForType,
   storage:navigator.storage,locks:navigator.locks,protocol:location.protocol,ingest:AttachmentIngest,onReleased:()=>notifyRichTextAssetLeaseReleased(),
   canMutate:()=>appCanMutate(),issueToken:options=>AppOwnership.issueWriteToken('write attachment',options),assertToken:token=>AppOwnership.assertWriteToken(token,'write attachment'),
   read:id=>IndexedDb.get(DB_ASSET_STORE,id,'attachment metadata read aborted'),
@@ -4720,6 +4814,8 @@ async function suspendTodaySession(){
   }
 }
 function sessionUpdateTime(session){return storageHealthTime(String(session&&session.updatedAt||''));}
+// The device a session runs on, by name: "on iPhone · Safari", or "on another device".
+function sessionDevice(session){const name=deviceName(session&&session.runningOn);return name&&name!=='This device'?`on ${name}`:'on another device';}
 // Continue Here: this device runs the session from now on. A session still
 // running on another device moves only after a warning; that device stops its
 // timer at its next sync and offers what it recorded since for review.
@@ -4727,7 +4823,7 @@ async function confirmSessionTakeover(session,{replace=false}={}){
   const time=sessionUpdateTime(session);
   return Interactions.confirm({
     title:replace?'Start a new plan here?':'Continue here?',
-    message:`Today’s session is still running on another device (last update ${time}).`,
+    message:`Today’s session is still running ${sessionDevice(session)} (last update ${time}).`,
     details:[replace?'Applying this plan replaces that session on every device.':'The session moves to this device and its timer runs here.','The other device stops its timer at its next sync.',`Anything it recorded after ${time} is kept there for you to review.`],
     confirmLabel:replace?'Apply here':'Continue here',cancelLabel:'Not now'
   });
@@ -5577,73 +5673,234 @@ function applyStudentName(name){
   });
   const meta=document.querySelector('meta[name="apple-mobile-web-app-title"]');
   if(meta)meta.setAttribute('content',`${clean} Study Director`);
+  if(!isDefaultStudentName(clean))Profiles.rename(clean);
+  renderProfileBadge();
   return clean;
 }
 function getStudentNameFromDisplay(){
-  const el=document.getElementById('student-display');
-  return normalizeStudentName(el?('value' in el?el.value:el.textContent):'');
-}
-function onStudentNameEdit(){
-  const clean=getStudentNameFromDisplay();
-  const meta=document.querySelector('meta[name="apple-mobile-web-app-title"]');
-  if(meta)meta.setAttribute('content',`${clean} Study Director`);
-}
-function normalizeStudentNameDisplay(){
-  const clean=applyStudentName(getStudentNameFromDisplay());
-  persistUserDefaultName(clean);
-}
-function handleStudentNameKey(e){
-  if(e.key==='Enter'){
-    e.preventDefault();
-    normalizeStudentNameDisplay();
-    e.currentTarget.blur();
-    return false;
-  }
-  return true;
+  return normalizeStudentName(document.querySelector('.profile-tag-name')?.textContent||'');
 }
 function isDefaultStudentName(name){
   return normalizeStudentName(name)===FACTORY_DEFAULTS.studentName;
 }
-function closeNameSetup(){
-  const overlay=document.getElementById('name-setup-overlay');
-  if(overlay)overlay.classList.remove('on');
+/* PROFILE: the name tag, the phone letter circle, the Profile panel and the
+   first-start form (Add profile opens the same form). The name is the
+   library's own (personal preferences, synced); the device's profile list
+   mirrors it for the list and the circle. */
+function profileInitial(name){return (Array.from(String(name||'').trim())[0]||'?').toLocaleUpperCase();}
+function profileSince(row){const at=Date.parse(row?.createdAt||'');return Number.isFinite(at)?new Date(at).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'}):'';}
+// Two profiles with the same name are told apart by their Google account, or by when they were made.
+function profileLabel(row,rows=Profiles.list()){
+  const name=row?.name||'New profile',alike=rows.some(other=>other.scope!==row.scope&&(other.name||'New profile')===name);
+  return {name,meta:row?.email||(alike&&profileSince(row)?`since ${profileSince(row)}`:'')};
 }
-function showNameSetupIfNeeded(){
-  if(!appCanMutate()||!isDefaultStudentName(getStudentNameFromDisplay()))return;
-  if(AppData.local.getText(STORAGE_KEYS.nameSetupSkipped,'')===todayISO())return;
-  const overlay=document.getElementById('name-setup-overlay');
-  const input=document.getElementById('name-setup-input');
-  const status=document.getElementById('name-setup-status');
-  if(!overlay||!input)return;
-  if(status)status.textContent='';
-  input.value='';
-  overlay.classList.add('on');
-  setTimeout(()=>input.focus(),0);
+function driveSyncLabel(){
+  const status=BackupProviderRuntime.locationStatus('google-drive');if(!status?.connected)return '';
+  return KeptVersions.count()>0&&!status.sync?.syncing?'Needs review':BackupPresentation.syncLabel(status)||'Connected';
 }
-function saveNameSetup(){
-  const input=document.getElementById('name-setup-input');
-  const status=document.getElementById('name-setup-status');
-  const raw=String(input&&input.value||'').trim();
-  if(!raw){
-    if(status)status.textContent='Enter a name, or skip for today.';
-    return;
+function renderProfileBadge(){
+  let label='',locked=false;
+  try{label=driveSyncLabel();const protection=BackupProtection.status();locked=protection.enabled&&!protection.unlocked;}catch{/* Drawn again once backups are set up. */}
+  const name=getStudentNameFromDisplay(),letter=profileInitial(name),problem=['Needs review','Needs password','Needs attention'].includes(label)||locked;
+  const remove=document.getElementById('profile-remove-section');if(remove)remove.hidden=Profiles.list().length<2;
+  const badge=document.getElementById('profile-badge');
+  if(badge){const glyph=badge.querySelector('.profile-badge-letter');if(glyph&&glyph.textContent!==letter)glyph.textContent=letter;badge.setAttribute('aria-label',`Profile: ${name}${problem?` · ${label||'Needs password'}`:''}`);}
+  const dot=document.getElementById('profile-badge-dot');if(dot)dot.hidden=!problem;
+  const avatar=document.getElementById('profile-avatar');if(avatar&&avatar.textContent!==letter)avatar.textContent=letter;
+}
+function renderProfilePanel(){
+  const dialog=document.getElementById('profile-dialog');if(!dialog?.open)return;
+  const mine=Profiles.current(),rows=Profiles.list(),drive=BackupProviderRuntime.locationStatus('google-drive'),email=mine?.email||'',sync=driveSyncLabel(),protection=BackupProtection.status();
+  const subtitle=document.getElementById('profile-subtitle');if(subtitle)subtitle.textContent=drive?.connected?[email,sync].filter(Boolean).join(' · '):email?`${email} · Signed out`:'Only on this device';
+  const driveValue=document.getElementById('profile-drive-value'),driveAction=document.getElementById('profile-drive-action');
+  if(driveValue)driveValue.textContent=drive?.connected?(email||'Connected'):email?`${email} · Signed out`:'Not connected';
+  if(driveAction){driveAction.textContent=drive?.connected?'Disconnect':email?'Sign in':'Connect';driveAction.dataset.state=drive?.connected?'connected':'';driveAction.disabled=!!drive?.engineBusy;}
+  const passwordValue=document.getElementById('profile-password-value'),passwordAction=document.getElementById('profile-password-action');
+  if(passwordValue)passwordValue.textContent=protection.enabled?(protection.unlocked?'On':'On · Not entered on this device yet'):'Off';
+  if(passwordAction)passwordAction.textContent=protection.enabled?(protection.unlocked?'Change…':'Enter…'):'Set…';
+  const list=document.getElementById('profile-list');
+  if(list){
+    list.replaceChildren(...rows.map(row=>{
+      const item=document.createElement('li'),current=row.scope===mine?.scope,{name,meta}=profileLabel(row,rows);item.className='profile-item'+(current?' current':'');
+      const avatar=document.createElement('span');avatar.className='profile-item-avatar';avatar.setAttribute('aria-hidden','true');avatar.textContent=profileInitial(name);
+      const text=document.createElement('span');text.className='profile-item-text';const strong=document.createElement('strong');strong.textContent=name;text.append(strong);
+      if(meta){const small=document.createElement('small');small.textContent=meta;text.append(small);}
+      let end;
+      if(current){end=document.createElement('span');end.className='profile-item-tag ui-label';end.textContent='This profile';}
+      else{end=document.createElement('button');end.type='button';end.className='mini-btn ui-btn profile-switch';end.textContent='Switch';end.dataset.action='switch-profile';end.dataset.profile=row.id;end.setAttribute('aria-label',`Switch to ${name}`);}
+      item.append(avatar,text,end);return item;
+    }));
   }
-  const clean=applyStudentName(raw);
-  persistUserDefaultName(clean);
-  AppData.local.remove(STORAGE_KEYS.nameSetupSkipped);
-  closeNameSetup();
+  const device=document.getElementById('profile-device');if(device)device.textContent=`This device: ${PersistenceModule.deviceName(InstallationIdentity.getId())||'this browser'}`;
+  renderProfileBadge();
 }
-function skipNameSetup(){
-  AppData.local.setText(STORAGE_KEYS.nameSetupSkipped,todayISO());
-  closeNameSetup();
+function renderProfile(){renderProfileBadge();renderProfilePanel();}
+function openProfilePanel(){
+  const dialog=document.getElementById('profile-dialog');if(!dialog||dialog.open)return false;
+  const input=document.getElementById('profile-name-input');if(input)input.value=getStudentNameFromDisplay();
+  dialog.showModal();renderProfilePanel();return true;
 }
-function handleNameSetupKey(e){
-  if(e.key==='Enter'){
-    e.preventDefault();
-    saveNameSetup();
-    return false;
-  }
+function closeProfilePanel(){const dialog=document.getElementById('profile-dialog');if(dialog?.open)dialog.close();}
+function installProfileDialogs(){
+  const form=document.getElementById('first-start-form');form?.addEventListener('submit',event=>event.preventDefault());
+  // First start stays until Skip, Cancel or Continue; Escape does not drop it.
+  document.getElementById('first-start-dialog')?.addEventListener('cancel',event=>event.preventDefault());
+  document.getElementById('profile-dialog')?.addEventListener('close',()=>saveProfileName());
+}
+function saveProfileName(){
+  const input=document.getElementById('profile-name-input');if(!input)return;
+  const raw=String(input.value||'').trim();if(!raw){input.value=getStudentNameFromDisplay();return;}
+  if(normalizeStudentName(raw)===getStudentNameFromDisplay())return;
+  const clean=applyStudentName(raw);input.value=clean;persistUserDefaultName(clean);
+}
+function handleProfileNameKey(e){
+  if(e.key==='Enter'){e.preventDefault();saveProfileName();e.currentTarget.blur();return false;}
+  if(e.key==='Escape'){e.currentTarget.value=getStudentNameFromDisplay();}
   return true;
+}
+async function profileDriveAction(){
+  if(BackupProviderRuntime.locationStatus('google-drive')?.connected)return BackupProviderRuntime.disconnect('google-drive');
+  return connectDriveForProfile();
+}
+function switchProfile(ev){
+  const id=String(ev?.target?.closest?.('[data-profile]')?.dataset.profile||'');
+  if(!id)return false;
+  void flushProtectedPreferences().catch(()=>{});
+  return Profiles.switchTo(id);
+}
+function addProfile(){void flushProtectedPreferences().catch(()=>{});return Profiles.add();}
+// Removing this profile from the device, from Library → Data. Its data stays
+// wherever it was synced; on this device it is deleted.
+async function removeThisProfile(){
+  const mine=Profiles.current(),others=Profiles.list().filter(row=>row.scope!==mine?.scope);if(!mine||!others.length)return false;
+  const name=getStudentNameFromDisplay(),drive=BackupProviderRuntime.locationStatus('google-drive'),synced=!!(drive?.connected&&drive.sync?.syncedAt&&!drive.waiting&&!drive.sync.syncing);
+  const ok=await Interactions.confirm({
+    title:`Remove ${name} from this device?`,
+    message:synced?`Everything in this profile is synced to ${mine.email||'Google Drive'}. Connecting that account on any device brings it back.`:'This profile is not fully synced to Google Drive. Removing it deletes its notes, Saved Days, plans and attachments from this device for good.',
+    details:[`Other profiles on this device are not changed.`,synced?'Its Device Folder backups stay where they are.':'Its Device Folder backups and backup files, if any, stay where they are.'],
+    confirmLabel:'Remove from this device',danger:!synced,caution:synced
+  });
+  if(!ok)return false;
+  return Profiles.remove();
+}
+// The Drive connection a person asked for in the last few minutes may ask
+// them about the library it finds; one that just happens (a restored sign-in,
+// a background sync) never does.
+let driveConnectRequestedAt=0,driveLibraryQuestion=null;
+const DRIVE_CHOICE_WINDOW_MS=5*60*1000;
+function connectDriveForProfile(){driveConnectRequestedAt=Date.now();return BackupProviderRuntime.connect('google-drive');}
+async function recordDriveLibrary(email,folder){
+  const mine=Profiles.current();if(!mine)return;
+  // Another Drive library than the one last synced with: what was shared
+  // with the old one says nothing about the new one, so the next sync is a
+  // first sync (nothing is deleted on either side).
+  if(mine.folder!==folder)await ReconciliationBaselineStore.clear();
+  Profiles.setAccount({email,folder});renderProfile();
+}
+function askToJoinLibrary(email,library){
+  const notes=Number.isFinite(library?.notes)?`${library.notes} note${library.notes===1?'':'s'}`:'',when=library?.savedAt?storageHealthTime(library.savedAt):'';
+  const summary=[notes,when&&`synced ${when}`].filter(Boolean).join(', ');
+  return Interactions.confirm({
+    title:'Continue with your library?',
+    message:`${email||'This Google account'} already holds a Study Director library${summary?` (${summary})`:''}.`,
+    details:['It comes to this device and is combined with anything already here. Nothing is lost; where both differ, one is shown and the other kept for review.','Choose Not now if this library is not yours.'],
+    confirmLabel:'Continue with your library',cancelLabel:'Not now'
+  });
+}
+// Drive tells the app, once per sign-in, which account it reached and what
+// its library holds; the app settles whether this profile may use it.
+async function bindDriveLibrary(info){
+  const mine=Profiles.current();if(!mine)return 'refuse';
+  const email=String(info?.email||''),folder=String(info?.folder||''),found=String(info?.found||''),others=Profiles.list().filter(row=>row.scope!==mine.scope);
+  const refuse=message=>{Interactions.notify({key:'drive-profile-refused',title:'Google Drive was not used',message});renderProfile();return 'refuse';};
+  const owner=others.find(row=>email&&row.email===email||found&&row.id===found);
+  if(owner)return refuse(`This Google account holds ${owner.name||'another profile'}’s library on this device. Each profile syncs with its own Google account.`);
+  if(info?.mine){await recordDriveLibrary(email,folder);return 'continue';}
+  if(!found&&(!info?.library||!others.length)){await recordDriveLibrary(email,folder);return 'claim';}
+  if(Date.now()-driveConnectRequestedAt>DRIVE_CHOICE_WINDOW_MS)return refuse(`${email||'This Google account'} already holds a Study Director library. Connect Google Drive again to choose whether to continue with it.`);
+  driveLibraryQuestion??=askToJoinLibrary(email,info.library).finally(()=>{driveLibraryQuestion=null;});
+  if(!await driveLibraryQuestion){renderProfile();return 'refuse';}
+  if(found&&!Profiles.adopt(found))return refuse('That library belongs to another profile on this device.');
+  FirstStart.joined();
+  await recordDriveLibrary(email,folder);
+  return found?'adopt':'claim';
+}
+// First start (and Add profile): name, an optional password and Google
+// Drive. Someone joining their own Drive library takes its name and settings
+// from it, so nothing typed here competes with them.
+const FirstStart=(()=>{
+  let joined=false;
+  const node=id=>document.getElementById(id);
+  function error(message){const box=node('first-start-error');if(!box)return;box.textContent=message;box.hidden=!message;}
+  function password(){
+    const value=String(node('first-start-password')?.value||''),confirm=String(node('first-start-confirm')?.value||'');
+    if(!value)return {value:''};
+    if(value.length<12)return {error:'Use at least 12 characters for the backup password, or leave it empty.'};
+    if(value.length>1024)return {error:'Use at most 1024 characters for the backup password.'};
+    if(value!==confirm)return {error:'The two passwords do not match.'};
+    return {value};
+  }
+  // The password is set before anything is uploaded, so no unencrypted copy reaches Drive.
+  async function applyPassword(){
+    const chosen=password();if(chosen.error){error(chosen.error);node(chosen.error.includes('match')?'first-start-confirm':'first-start-password')?.focus();return false;}
+    if(chosen.value)await BackupProtection.enable(chosen.value);
+    return true;
+  }
+  function applyName(){
+    const raw=String(node('first-start-name')?.value||'').trim();if(!raw||joined)return;
+    const clean=applyStudentName(raw);persistUserDefaultName(clean);
+  }
+  function render(){
+    const mine=Profiles.current(),adding=!!(mine&&mine.from!==null);
+    node('first-start-eyebrow').textContent=adding?'New profile':'Welcome';
+    node('first-start-title').textContent=adding?'Add a profile':'Personalise Study Director';
+    node('first-start-note').textContent=adding?'A profile has its own notes, days, plans and backups on this device. Add a password to encrypt its backups, and Google Drive to sync it across devices.':'Everything stays on this device. Add a password to encrypt backups, and Google Drive to sync your devices.';
+    node('first-start-skip').textContent=adding?'Cancel':'Skip';
+    const drive=BackupProviderRuntime.locationStatus('google-drive'),button=node('first-start-drive'),note=node('first-start-drive-note');
+    if(button){button.textContent=drive?.connected?'Google Drive connected':'Connect Google Drive';button.disabled=!!drive?.connected||!!drive?.engineBusy;button.classList.toggle('connected',!!drive?.connected);}
+    if(note)note.textContent=drive?.connected?(joined?'Your library is coming to this device.':Profiles.current()?.email||'Synced through your Google account.'):'Keeps your devices in sync. You can connect later.';
+  }
+  function open(){
+    const dialog=node('first-start-dialog');if(!dialog||dialog.open)return false;
+    joined=false;error('');for(const id of ['first-start-password','first-start-confirm'])if(node(id))node(id).value='';
+    const name=getStudentNameFromDisplay();node('first-start-name').value=isDefaultStudentName(name)?'':name;node('first-start-confirm-field').hidden=true;
+    render();dialog.showModal();setTimeout(()=>node('first-start-name')?.focus(),0);return true;
+  }
+  function close(){const dialog=node('first-start-dialog');if(dialog?.open)dialog.close();}
+  async function connect(){
+    error('');if(!await applyPassword())return false;
+    // The id follows the name until a Drive library knows it.
+    const raw=String(node('first-start-name')?.value||'').trim();if(raw)Profiles.rename(raw);
+    const ok=await connectDriveForProfile();render();return ok;
+  }
+  async function finish(){
+    error('');if(!await applyPassword())return false;
+    applyName();Profiles.finishFirstStart();close();renderProfile();return true;
+  }
+  function skip(){
+    const mine=Profiles.current();
+    if(mine&&mine.from!==null)return Profiles.remove();
+    Profiles.finishFirstStart();close();renderProfile();return true;
+  }
+  function confirmField(){const field=node('first-start-confirm-field');if(field)field.hidden=!String(node('first-start-password')?.value||'');}
+  function key(e){if(e.key==='Enter'&&e.target?.tagName==='INPUT'){e.preventDefault();void finish();return false;}return true;}
+  return Object.freeze({open,close,render,connect,finish,skip,confirmField,key,joined:()=>{joined=true;render();},isOpen:()=>!!node('first-start-dialog')?.open});
+})();
+// Startup: make sure this page's profile is on the device's list, and offer
+// the first-start form to someone new.
+async function startProfile(){
+  const name=getStudentNameFromDisplay(),named=!isDefaultStudentName(name);
+  let mine=Profiles.current();
+  if(!mine)mine=Profiles.ensure(named?name:'',{fresh:!named&&await canonicalLocalRecoveryEmpty()===true});
+  else if(named)Profiles.rename(name);
+  renderProfile();
+  if(mine?.fresh&&appCanMutate())FirstStart.open();
+}
+// With several profiles on the device, each person enters their own backup
+// password when switching in; Not now keeps sync and encrypted backups paused.
+function askProfilePassword(){
+  if(Profiles.list().length<2||FirstStart.isOpen()||!appCanMutate())return;
+  void BackupProtection.ask().catch(setBackupProtectionSurfaceError);
 }
 function onQuoteChange(options={}){
   if(options.markChanged!==false)markDayContentChanged();
@@ -6310,7 +6567,7 @@ function toggleFS(){
 function shouldIgnoreFullscreenDblClick(target){
   if(!target||!target.closest||!target.closest('.app'))return true;
   if(target.closest('button,input,textarea,select,a,summary,label,[contenteditable="true"],[data-action],[data-tab]'))return true;
-  if(target.closest('.name-setup-overlay,#gap-overlay,#nudge-overlay,.execute-state-overlay,.nav-item,.plan-draft-row,.sched-row,.rcard,.library-day'))return true;
+  if(target.closest('dialog,#gap-overlay,#nudge-overlay,.execute-state-overlay,.nav-item,.plan-draft-row,.sched-row,.rcard,.library-day'))return true;
   if(target.closest('span,code,pre,.ui-label,.ui-body,.ui-mono,.plan-header,.library-title,.review-date,.rt-value'))return true;
   return false;
 }
@@ -7713,9 +7970,9 @@ function updateSessionControls(){
     const note=document.getElementById('session-panel-note');
     if(title)title.textContent=elsewhere?'Running on Another Device':suspended?'Today’s Session Suspended':finished?'Today Finished':running?'Live Timer Active':'Applied Plan Available';
     if(note)note.textContent=elsewhere
-      ? `Today’s session is running on another device (last update ${sessionUpdateTime(sessionPanelSession)}). Everything else works here as usual. Continue Here moves the session to this device.`
+      ? `Today’s session is running ${sessionDevice(sessionPanelSession)} (last update ${sessionUpdateTime(sessionPanelSession)}). Everything else works here as usual. Continue Here moves the session to this device.`
       : handedOff
-      ? 'Today’s session was suspended on another device. Continue Here picks it up on this device.'
+      ? `Today’s session was suspended ${sessionDevice(sessionPanelSession)}. Continue Here picks it up on this device.`
       : suspended
       ? 'Restore Session continues the parked session. Review → Save Today can save the suspended progress to Library without restarting its timer. Reset Today discards the parked session.'
       : finished
@@ -7954,7 +8211,7 @@ async function retainedBackupFileNames(){
   for(const target of Object.values(integrity?.locations||{}))for(const part of [target?.partial?.stored,target?.partial?.plain])if(part?.name)names.push(part.name);
   return names;
 }
-const BackupFiles=ExportsModule.createFileStore({storage:navigator.storage,locks:navigator.locks,retained:retainedBackupFileNames,isAvailable:()=>upkeepBlocker()||(navigator.storage?.getDirectory&&navigator.locks?.request?true:'storage-unavailable'),onError:error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn')});
+const BackupFiles=ExportsModule.createFileStore({storage:navigator.storage,locks:navigator.locks,root:ProfileScope.scoped('@@SD_BACKUP_FILES_OPFS_DIRECTORY@@'),retained:retainedBackupFileNames,isAvailable:()=>upkeepBlocker()||(navigator.storage?.getDirectory&&navigator.locks?.request?true:'storage-unavailable'),onError:error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn')});
 let fileProcessingNotice=null;
 const Exports=ExportsModule.createCoordinator({
   createWorker:()=>new Worker(trustedAssetURL('@@SD_EXPORT_WORKER_FILENAME@@'),{name:'study-director-exports'}),window,document,files:BackupFiles,
@@ -7966,14 +8223,15 @@ function setBackupProtectionSurfaceError(error){
   const hint=document.getElementById('backup-protection-hint');if(!hint)return;
   hint.hidden=false;NoticeCoordinator.emit({source:'backup-protection',id:'settings',surfaceId:'backup-protection-hint',surface:'inline',severity:'error',lifecycle:'failed',cue:'none',message:clampText(String(error&&error.message||error||'Backup encryption could not be updated.'),APP_LIMITS.maxStatusMessageChars)});
 }
-const BackupProtection=ExportsModule.createProtection({processing:Exports,storage:{read:key=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return ExportsAppMeta.read('backupProtection');},write:(key,value,options)=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return mutateBackupProtection(value,options);},remove:(key,options)=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return mutateBackupProtection(null,options);}},interactions:Interactions,settingKey:APP_META_KEYS.backupProtection,canMutate:()=>appCanMutate(),issueToken:()=>AppOwnership.issueWriteToken('change backup encryption'),assertToken:token=>AppOwnership.assertWriteToken(token,'change backup encryption'),onState:state=>{
+const BackupProtection=ExportsModule.createProtection({processing:Exports,storage:{read:key=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return ExportsAppMeta.read('backupProtection');},write:(key,value,options)=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return mutateBackupProtection(value,options);},remove:(key,options)=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return mutateBackupProtection(null,options);}},interactions:Interactions,settingKey:APP_META_KEYS.backupProtection,remember:()=>Profiles.list().length<2,canMutate:()=>appCanMutate(),issueToken:()=>AppOwnership.issueWriteToken('change backup encryption'),assertToken:token=>AppOwnership.assertWriteToken(token,'change backup encryption'),onState:state=>{
   NoticeCoordinator.resolveEvent('backup-protection','settings');
   const ready=!state.enabled||state.unlocked,restored=ready&&!backupProtectionReady;backupProtectionReady=ready;
   // Rows say when automatic backups wait for the password; redraw them on every change.
   if(StartupLifecycle.status().fullyInitialized){if(restored)wakeBackgroundOperations('encryption-unlocked');BackupProviderRuntime.refresh();}
-  const label=document.getElementById('backup-protection-status');if(label)label.textContent=state.enabled?(state.unlocked?'Unlocked':'Locked'):'Off';
-  const button=document.getElementById('manage-backup-protection');if(button)button.textContent=state.enabled?(state.unlocked?'Manage…':'Unlock…'):'Set password…';
-  const hint=document.getElementById('backup-protection-hint');if(hint){hint.className='backup-inline-note ui-helper';hint.textContent='Automatic encrypted backups are paused until you unlock.';hint.hidden=!state.enabled||state.unlocked;}
+  const label=document.getElementById('backup-protection-status');if(label)label.textContent=state.enabled?(state.unlocked?'On':'Not entered yet'):'Off';
+  const button=document.getElementById('manage-backup-protection');if(button)button.textContent=state.enabled?(state.unlocked?'Change or remove…':'Enter password…'):'Set password…';
+  const hint=document.getElementById('backup-protection-hint');if(hint){hint.className='backup-inline-note ui-helper';hint.textContent='Sync and encrypted backups wait until this profile’s backup password is entered.';hint.hidden=!state.enabled||state.unlocked;}
+  if(StartupLifecycle.status().fullyInitialized)renderProfile();
 }});
 window.addEventListener('pagehide',()=>BackupProtection.lock());
 window.addEventListener('pageshow',event=>{if(event.persisted)void BackupProtection.refresh().catch(setBackupProtectionSurfaceError);});
@@ -8435,7 +8693,7 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
       deviceId:OBSOLETE_STORAGE_KEYS.deviceId,liveDraft:OBSOLETE_STORAGE_KEYS.liveDraft,activeSession:OBSOLETE_STORAGE_KEYS.activeSession,
       storageCapability:OBSOLETE_STORAGE_KEYS.storageCapability,diagnostics:OBSOLETE_STORAGE_KEYS.diagnostics,
       legacyOwnershipLease:OBSOLETE_STORAGE_KEYS.legacyOwnershipLease,attachmentMaintenanceAttemptDay:OBSOLETE_STORAGE_KEYS.attachmentMaintenanceAttemptDay,
-      attachmentMaintenanceDay:OBSOLETE_STORAGE_KEYS.attachmentMaintenanceDay,attachmentMaintenancePending:OBSOLETE_STORAGE_KEYS.attachmentMaintenancePending
+      attachmentMaintenanceDay:OBSOLETE_STORAGE_KEYS.attachmentMaintenanceDay,attachmentMaintenancePending:OBSOLETE_STORAGE_KEYS.attachmentMaintenancePending,nameSetupSkipped:OBSOLETE_STORAGE_KEYS.nameSetupSkipped
     }),
     appMeta:Object.freeze({
       personalPreferences:APP_META_KEYS.personalPreferences,dataMaintenance:APP_META_KEYS.dataMaintenance,verifiedRecoveryBackups:APP_META_KEYS.verifiedRecoveryBackups,
@@ -8767,7 +9025,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
   codecs:Object.freeze({activeSession:ActiveSessionCodec,backup:RuntimeBackupCodec,pendingReview:PendingReviewCodec}),
   reconciliation:Object.freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),
   noteReconciliation:Object.freeze({resolve:options=>withRichTextAssetMaintenancePaused(()=>NoteReconciliationUI.resolve(options)),merge:(base,local,incoming)=>RichTextApi.mergeThreeWay(base,local,incoming)}),
-  exports:Object.freeze({backgroundAvailable:backupBackgroundAvailability,protect:BackupProtection.protect,unprotect:BackupProtection.unprotect,check:Exports.check,scope:operation=>AttachmentStorage.during(()=>Exports.scope(operation)),job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,download:Exports.download,chooseSave:Exports.chooseSave,save:Exports.save}),
+  exports:Object.freeze({backgroundAvailable:backupBackgroundAvailability,protect:BackupProtection.protect,unprotect:BackupProtection.unprotect,followProtection:BackupProtection.follow,check:Exports.check,scope:operation=>AttachmentStorage.during(()=>Exports.scope(operation)),job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,download:Exports.download,chooseSave:Exports.chooseSave,save:Exports.save}),
   session:Object.freeze({
     canMutate:()=>appCanMutate(),
     cancelLiveDraftSave:()=>{
@@ -9102,7 +9360,7 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
   settings:exactAppMetaStorage(DeviceFolderAppMeta,'deviceFolder',APP_META_KEYS.deviceFolder,'Device Backup'),
   transport:folder=>DeviceFolderStorageModule.createStorage(Object.freeze({
     folder,
-    identities:Object.freeze({root:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderRoot,objects:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects,checkpoints:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints,commits:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits}),
+    identities:Object.freeze({root:ProfileScope.scoped(EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderRoot),objects:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects,checkpoints:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints,commits:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits}),
     checksum:(blob,{signal}={})=>Exports.run('checksum',{value:blob},{signal}),
     inspectManifest:(file,options)=>RepositoryCheckpointPipeline.inspectManifest(file,options),
     environment:Object.freeze({canMutate:()=>appCanMutate(),now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'})}),
@@ -9141,7 +9399,7 @@ BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze({
     remove:()=>BackupAppMeta.remove('managedProviderBackupPending','',{strict:true})
   }),
   view:Object.freeze({
-    invalidateAttachments:()=>invalidateAttachmentLibrary(),refreshCore:()=>{renderSched();refreshCoreUi({header:true});},refreshNotes:()=>refreshPnote(),refreshReview:()=>ReviewView.refresh(),
+    deviceName:(id,others)=>deviceName(id,others),invalidateAttachments:()=>invalidateAttachmentLibrary(),refreshCore:()=>{renderSched();refreshCoreUi({header:true});},refreshNotes:()=>refreshPnote(),refreshReview:()=>ReviewView.refresh(),
     renderLibrary:()=>LibraryView.render(),setStatus
   })
 }));
@@ -9753,7 +10011,7 @@ const CLICK_ACTIONS=Object.freeze({
   'disconnect-device-backup': ()=>DeviceBackup.disconnect(),
   'recover-device-backup': ()=>BackupRecoveryHost.history.openSource('device-folder'),
   'recover-provider-backup': ev=>BackupRecoveryHost.history.openSource(ev.target.closest('[data-provider-id]')?.dataset.providerId),
-  'connect-drive-backup': ()=>BackupProviderRuntime.connect('google-drive'),
+  'connect-drive-backup': connectDriveForProfile,
   'drive-backup-now': ()=>BackupProviderRuntime.backup('google-drive'),
   'cancel-drive-backup': ()=>BackupProviderRuntime.cancelForeground(undefined,'google-drive'),
   'disconnect-drive-backup': ()=>BackupProviderRuntime.disconnect('google-drive'),
@@ -9829,10 +10087,17 @@ const CLICK_ACTIONS=Object.freeze({
   'gap-ignore': ()=>classifyInactiveGap('ignore'),
   'gap-apply': applyInactiveGapSplit,
   'dismiss-storage-warning': dismissStorageWarning,
-  'show-drive-sync': ()=>BackupProviderRuntime.locationStatus('google-drive')?.sync?.review?showBackupPresentation('google-drive','sync-review'):KeptVersions.count()?KeptVersions.review():showBackupPresentation('google-drive','status'),
+  'show-drive-sync': ()=>BackupProviderRuntime.locationStatus('google-drive')?.sync?.password?BackupProviderRuntime.unlockSync('google-drive'):BackupProviderRuntime.locationStatus('google-drive')?.sync?.review?showBackupPresentation('google-drive','sync-review'):KeptVersions.count()?KeptVersions.review():showBackupPresentation('google-drive','status'),
   'review-kept-versions': ()=>KeptVersions.review(),
-  'save-name-setup': saveNameSetup,
-  'skip-name-setup': skipNameSetup,
+  'open-profile': openProfilePanel,
+  'close-profile': closeProfilePanel,
+  'profile-drive': profileDriveAction,
+  'switch-profile': switchProfile,
+  'add-profile': addProfile,
+  'remove-profile': removeThisProfile,
+  'first-start-drive': ()=>FirstStart.connect(),
+  'first-start-continue': ()=>FirstStart.finish(),
+  'first-start-skip': ()=>FirstStart.skip(),
   'font-smaller': ()=>stepFontScale(-1),
   'font-reset': ()=>setFontScale(1),
   'font-larger': ()=>stepFontScale(1),
@@ -9849,7 +10114,7 @@ const CHANGE_ACTIONS=Object.freeze({
   'keep-screen-awake': ev=>NativeCapabilities.setKeepAwake(ev.target.checked)
 });
 const INPUT_ACTIONS=Object.freeze({
-  'student-name': onStudentNameEdit,
+  'first-start-password': ()=>FirstStart.confirmField(),
   'pnote-progress': onPnoteChange,
   'save-reflection': queueReviewSave,
   'quote': onQuoteChange,
@@ -9859,12 +10124,12 @@ const INPUT_ACTIONS=Object.freeze({
   'practice-setup': ()=>PracticePacer.previewSetup()
 });
 const BLUR_ACTIONS=Object.freeze({
-  'student-name': normalizeStudentNameDisplay,
+  'profile-name': saveProfileName,
   'save-reflection': ()=>flushPendingReviewSave()
 });
 const KEYDOWN_ACTIONS=Object.freeze({
-  'student-name': handleStudentNameKey,
-  'name-setup': handleNameSetupKey,
+  'profile-name': handleProfileNameKey,
+  'first-start': e=>FirstStart.key(e),
   'gap-split': handleInactiveGapSplitKey,
   'practice-start': handlePracticeStartKey
 });
@@ -9874,14 +10139,14 @@ const OWNER_REQUIRED_CLICK_ACTIONS=new Set([
   'generate-carry-forward','close-unfinished-note','save-day','clear-library','pick-import-file',
   'toggle-pomodoro','toggle-system-alerts','restore-session','suspend-session','finish-session','reset-session','edit-plan','confirm-plan-edit','cancel-plan-edit',
   'load-default','apply-schedule','clear-schedule-draft','take-pomodoro-break',
-  'gap-focus','gap-break','gap-split','gap-ignore','gap-apply','save-name-setup','skip-name-setup',
+  'gap-focus','gap-break','gap-split','gap-ignore','gap-apply','profile-drive','switch-profile','add-profile','remove-profile','first-start-drive','first-start-continue','first-start-skip',
   'font-smaller','font-reset','font-larger','set-theme','set-presentation',
   'connect-device-backup','device-backup-now','disconnect-device-backup','recover-device-backup','recover-provider-backup','connect-drive-backup','drive-backup-now','disconnect-drive-backup','recover-managed-version','compare-managed-note'
 ]);
 const OWNER_REQUIRED_CHANGE_ACTIONS=new Set(['import-backup','change-reflection-date','keep-screen-awake','sound-mode']);
-const OWNER_REQUIRED_INPUT_ACTIONS=new Set(['student-name','pnote-progress','save-reflection','quote','schedule-draft','unfinished-note','practice-setup']);
-const OWNER_REQUIRED_BLUR_ACTIONS=new Set(['student-name','save-reflection']);
-const OWNER_REQUIRED_KEYDOWN_ACTIONS=new Set(['student-name','name-setup','gap-split','practice-start']);
+const OWNER_REQUIRED_INPUT_ACTIONS=new Set(['pnote-progress','save-reflection','quote','schedule-draft','unfinished-note','practice-setup']);
+const OWNER_REQUIRED_BLUR_ACTIONS=new Set(['profile-name','save-reflection']);
+const OWNER_REQUIRED_KEYDOWN_ACTIONS=new Set(['profile-name','first-start','gap-split','practice-start']);
 const ACTIVE_SESSION_BLOCKED_CLICK_ACTIONS=new Set(['clear-library','pick-import-file','recover-device-backup','recover-provider-backup','recover-managed-version']);
 const ACTIVE_SESSION_BLOCKED_CHANGE_ACTIONS=new Set(['import-backup']);
 const ACTIVE_SESSION_BLOCKED_IDS=new Set([]);
@@ -10179,8 +10444,9 @@ function installDelegatedEventBindings(){
 }
 function installApplicationDomBindings(){
   document.documentElement.dataset.studyDirectorBound='1';
+  installProfileDialogs();
   const liveLimits={
-    'student-display':APP_LIMITS.maxStudentNameChars,'name-setup-input':APP_LIMITS.maxStudentNameChars,
+    'profile-name-input':APP_LIMITS.maxStudentNameChars,'first-start-name':APP_LIMITS.maxStudentNameChars,
     'quote-input':APP_LIMITS.maxQuoteChars,'plan-input':APP_LIMITS.maxScheduleChars,
     'daily-reflection':APP_LIMITS.maxReflectionChars,'recovery-carry':APP_LIMITS.maxCarryForwardChars,
     'library-search':APP_LIMITS.maxSearchChars,'library-notes-search':APP_LIMITS.maxSearchChars,
@@ -10293,7 +10559,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
       return restored;
     },
     applyLaunchRoute:applyPwaLaunchRoute,
-    showNameSetup:showNameSetupIfNeeded,
+    showNameSetup:startProfile,
     inspectStorage:async()=>{const state=await inspectStorageCapability();await NativeCapabilities.offerInstallNotice();return state;},
     verifyReady:()=>CompatibilityFacade.verifyCanonicalInstallation(),
     markReady:async proof=>{
@@ -10304,6 +10570,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
       }
       resumeUnresolvedStorageReset();
       installBackgroundOwners();scheduleDataMaintenance();BackgroundOperations.wake('startup');void KeptVersions.refresh();
+      void Profiles.collect().then(result=>{if(result.error)AppDiagnostics.capture('profiles.collect',result.error,'warn');});askProfilePassword();
       void BackupFiles.collect().catch(error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn'));
       document.documentElement.dataset.studyDirectorCanonicalBaseline=proof.canonical?'verified':'not-proven';
       document.documentElement.dataset.studyDirectorRetirementData=proof.retirementDataReady?'ready':proof.canonical?'backup-required':'not-ready';
@@ -10371,6 +10638,8 @@ const StudyDirectorPublicAPI=Object.freeze({
       maxFileBytes:APP_LIMITS.backupMaxFileBytes
     }),
     repositoryPolicy:RepositoryPolicyModule.protocol,
+    // The active profile, and who decides which Drive library it may use.
+    profile:Object.freeze({id:()=>Profiles.current()?.id||'',bind:info=>bindDriveLibrary(info)}),
     providers:Object.freeze({
       register:BackupProviderRuntime.register,
       list:BackupProviderRuntime.list

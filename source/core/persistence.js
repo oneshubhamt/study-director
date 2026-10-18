@@ -39,6 +39,10 @@ registry.define('persistence',1,()=>{
       remove(key){
         try{globalThis.localStorage.removeItem(key);lastError=null;onOk('write');return true;}
         catch(error){lastError=error;onError('write',error);return false;}
+      },
+      keys(){
+        try{const keys=Object.keys(globalThis.localStorage);lastError=null;onOk('read');return keys;}
+        catch(error){lastError=error;onError('read',error);return [];}
       }
     };
     return freeze(api);
@@ -52,24 +56,47 @@ registry.define('persistence',1,()=>{
       return Math.random().toString(36).slice(2,12)+Date.now().toString(36);
     }
   }
+  // A device ID says what the device is, so any device can name any other
+  // with nothing typed and nothing else stored:
+  // inst_<type>_<browser>_<first use, base 36>_<random>.
+  const DEVICE_TYPES=freeze({iphone:'iPhone',ipad:'iPad',android:'Android',windows:'Windows',mac:'Mac',chromeos:'ChromeOS',linux:'Linux',device:'Device'});
+  const BROWSERS=freeze({safari:'Safari',chrome:'Chrome',edge:'Edge',firefox:'Firefox',opera:'Opera',samsung:'Samsung Internet',browser:'Browser'});
+  const INSTALLATION_ID=/^inst_([a-z]+)_([a-z]+)_([a-z0-9]{6,12})_([a-f0-9]{8})$/u;
+  // Read once, when the ID is made. Some iPads report themselves as a Mac;
+  // a touch screen tells them apart.
+  function describeDevice(nav){
+    const ua=String(nav&&nav.userAgent||''),platform=String(nav&&(nav.userAgentData&&nav.userAgentData.platform||nav.platform)||''),touch=Number(nav&&nav.maxTouchPoints)||0;
+    const type=/iPhone|iPod/u.test(ua)?'iphone':/iPad/u.test(ua)||/Macintosh/u.test(ua)&&touch>1?'ipad':/Android/u.test(ua)?'android':/CrOS/u.test(ua)?'chromeos':/Windows/u.test(ua)||/^Win/u.test(platform)?'windows':/Macintosh|Mac OS X/u.test(ua)||/^Mac/u.test(platform)?'mac':/Linux/u.test(ua)||/Linux/u.test(platform)?'linux':'device';
+    const browser=/SamsungBrowser/u.test(ua)?'samsung':/Edg(?:e|A|iOS)?\//u.test(ua)?'edge':/OPR\/|Opera/u.test(ua)?'opera':/Firefox\/|FxiOS/u.test(ua)?'firefox':/Chrome\/|CriOS|Chromium/u.test(ua)?'chrome':/Safari\//u.test(ua)?'safari':'browser';
+    return freeze({type,browser});
+  }
+  // "iPhone · Safari", with the first-use date added only when another of
+  // the given devices would read the same. '' for an ID that does not say.
+  function deviceName(id,others=[]){
+    const parse=value=>{const match=INSTALLATION_ID.exec(String(value||''));return match&&DEVICE_TYPES[match[1]]&&BROWSERS[match[2]]?freeze({label:`${DEVICE_TYPES[match[1]]} · ${BROWSERS[match[2]]}`,since:parseInt(match[3],36)}):null;};
+    const own=parse(id);if(!own)return '';
+    const alike=[...others].some(other=>String(other||'')!==String(id)&&parse(other)?.label===own.label);
+    return alike?`${own.label} (since ${new Date(own.since).toLocaleDateString(undefined,{day:'numeric',month:'short'})})`:own.label;
+  }
   function createInstallationIdentity(input){
-    exactObject(input,['local','keys'],'Installation identity input');
+    exactObject(input,['local','keys','describe'],'Installation identity input');
     exactObject(input.keys,['installationId'],'Installation identity keys');
-    if(!Object.isFrozen(input.local))throw new TypeError('Installation identity storage must be frozen.');
+    if(!Object.isFrozen(input.local)||typeof input.describe!=='function')throw new TypeError('Installation identity storage must be frozen.');
     const LocalStorageContract=input.local,key=input.keys.installationId;
     let cached='';
-    function normalize(value){return /^inst_[a-z0-9_]{8,128}$/i.test(String(value||''))?String(value):'';}
+    function normalize(value){const match=INSTALLATION_ID.exec(String(value||''));return match&&DEVICE_TYPES[match[1]]&&BROWSERS[match[2]]?String(value):'';}
     function getId(){
       if(cached)return cached;
       const current=normalize(LocalStorageContract.getText(key,''));
       if(current){cached=current;return current;}
-      const id=`inst_${Date.now().toString(36)}_${randomIdPart(8)}`;
+      const kind=input.describe()||{},type=DEVICE_TYPES[kind.type]?kind.type:'device',browser=BROWSERS[kind.browser]?kind.browser:'browser';
+      const id=`inst_${type}_${browser}_${Date.now().toString(36)}_${randomIdPart(4)}`;
       if(!LocalStorageContract.setText(key,id))throw LocalStorageContract.lastError||new Error('Installation identity could not be persisted.');
       const verified=normalize(LocalStorageContract.getText(key,''));
       if(verified!==id)throw new Error('Installation identity write could not be verified.');
       cached=id;return id;
     }
-    return freeze({format:'study-director.installation-identity',contractVersion:3,getId});
+    return freeze({format:'study-director.installation-identity',contractVersion:4,getId});
   }
   function normalizeTimestamp(value,fallback=null){
     const n=Date.parse(value||'');
@@ -310,7 +337,7 @@ registry.define('persistence',1,()=>{
     format:'study-director.persistence-primitives',
     contractVersion:1,
     createLocalStorage,
-    createInstallationIdentity,
+    createInstallationIdentity,describeDevice,deviceName,
     randomIdPart,normalizeTimestamp,normalizeImportedTimestamp,normalizeImportedEpochMillis,jsonByteLength,
     createIndexedDb
   });

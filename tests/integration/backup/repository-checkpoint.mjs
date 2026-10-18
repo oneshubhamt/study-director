@@ -47,7 +47,7 @@ const BackupCodec=freeze({
   inspect:async()=>({}),normalizeRecord:value=>value,normalizeNote:value=>value
 });
 const ActiveSessionCodec=freeze({sanitizeImportedActiveSession:value=>value});
-const exportsPort=freeze({
+const exportsPort=freeze({followProtection:async()=>false,
   backgroundAvailable:()=>backgroundReady?true:'locked',protect:async(file,options)=>publicationProtection?publicationProtection.protect(file,options):freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),
   unprotect:async(file,options)=>publicationProtection?publicationProtection.unprotect(file,options):freeze({blob:file,encrypted:false}),check:()=>{},scope:operation=>operation(),job:(operation,options)=>exclusive.job(operation,options),
   run:async(type,data,options)=>{if(type==='file.release'){releasedFiles.push(data.file);return true;}if(type==='checksum'){checksumCounter+=1;if(data&&data.value===audioBlob&&audioBlob.size===AUDIO_BYTES)return AUDIO_HASH;}if(type==='encode.open')encodeOpenCounter+=1;processingInFlight+=1;try{return await engine.run(type,data,options?.progress);}finally{processingInFlight-=1;}},

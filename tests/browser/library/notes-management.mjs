@@ -6,7 +6,7 @@ import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor} from '..
 const preload=`(()=>{
   const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
   localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'Notes QA',updatedAt:new Date().toISOString()}));
-  localStorage.setItem('studyDirector.nameSetupSkippedDate.v1',today);
+  (localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));
 })()`;
 
 const server=await startReleaseServer();

@@ -18,9 +18,13 @@ export const pendingRepositoryDigests=()=>digestsInFlight;
 export const repositoryDigest=async blob=>{digestsInFlight+=1;try{return Buffer.from(await webcrypto.subtle.digest('SHA-256',await blob.arrayBuffer())).toString('hex');}finally{digestsInFlight-=1;}};
 const digest=repositoryDigest;
 function json(payload,status=200,headers={}){return new Response(JSON.stringify(payload),{status,headers:{'Content-Type':'application/json',...headers}});}
-export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=null,uploadProgressTransport=true,localStorage=undefined,addEventListener=()=>{}}={}){
-  const state={rangeMode:'valid',expiresIn,folders:[],files:new Map(),uploads:new Map(),requests:[],deletions:[],trashedFolders:new Set(),nextId:1,nextFolderId:1,nextVersion:1,scope:'https://www.googleapis.com/auth/drive.file',force401Once:false,evilUploadLocation:false,networkFailPutOnce:false,networkFailCoordinationPostOnce:false,networkFailCoordinationDeleteOnce:false,folderShared:false,folderCreateDenied:false,folderListGate:null,folderListStarted:0,uploadPutGate:null,uploadPutStarted:0};
-  const folderMetadata=(id='folder-1')=>({id,name:EXTERNAL_REPOSITORY_IDENTITIES.driveFolder,mimeType:'application/vnd.google-apps.folder',ownedByMe:true,shared:!!state.folderShared,trashed:state.trashedFolders.has(id),appProperties:{studyDirectorFolder:'true'},capabilities:{canAddChildren:true}});
+export const QA_PROFILE_ID='prof_qa_mve00000_abcdef01';
+// The profile this test's page belongs to and how it settles a Drive folder:
+// its own folder continues, an unmarked one is claimed.
+const defaultBind=async info=>info.mine?'continue':'claim';
+export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=null,uploadProgressTransport=true,localStorage=undefined,addEventListener=()=>{},profileId=()=>QA_PROFILE_ID,bind=defaultBind,email='qa@example.com'}={}){
+  const state={email,folderProperties:new Map(),binds:[],rangeMode:'valid',expiresIn,folders:[],files:new Map(),uploads:new Map(),requests:[],deletions:[],trashedFolders:new Set(),nextId:1,nextFolderId:1,nextVersion:1,scope:'https://www.googleapis.com/auth/drive.file',force401Once:false,evilUploadLocation:false,networkFailPutOnce:false,networkFailCoordinationPostOnce:false,networkFailCoordinationDeleteOnce:false,folderShared:false,folderCreateDenied:false,folderListGate:null,folderListStarted:0,uploadPutGate:null,uploadPutStarted:0};
+  const folderMetadata=(id='folder-1')=>({id,name:EXTERNAL_REPOSITORY_IDENTITIES.driveFolder,mimeType:'application/vnd.google-apps.folder',ownedByMe:true,shared:!!state.folderShared,trashed:state.trashedFolders.has(id),appProperties:{studyDirectorFolder:'true',...(state.folderProperties.get(id)||{})},capabilities:{canAddChildren:true}});
   const fileMetadata=file=>({id:file.id,name:file.name,size:String(file.content.size),version:String(file.version||''),modifiedTime:file.modifiedTime,createdTime:file.createdTime,mimeType:file.mimeType,parents:[...file.parents],ownedByMe:file.ownedByMe,shared:file.shared,trashed:file.trashed,sha256Checksum:String(file.sha256Checksum||''),appProperties:{...file.appProperties},capabilities:{canDownload:file.canDownload}});
   const findId=pathname=>decodeURIComponent(pathname.split('/').at(-1));
   const delay=(ms,signal)=>new Promise((resolve,reject)=>{let timer;const clear=()=>{harnessClearTimeout(timer);signal?.removeEventListener('abort',abort);},abort=()=>{clear();reject(signal.reason||Object.assign(new Error('QA_FIXTURE request cancelled'),{name:'AbortError'}));};timer=harnessSetTimeout(()=>{clear();resolve();},ms);if(signal?.aborted)abort();else signal?.addEventListener('abort',abort,{once:true});});
@@ -72,7 +76,7 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
       if(state.folderCreateDenied)return json({error:{message:'folder creation denied'}},403);
       const metadata=JSON.parse(String(options.body||'{}'));
       if(metadata.mimeType==='application/vnd.google-apps.folder'){
-        const id=`folder-${state.nextFolderId++}`;state.folders.push(id);return json(folderMetadata(id));
+        const id=`folder-${state.nextFolderId++}`;state.folders.push(id);const {studyDirectorFolder:_marker,...properties}=metadata.appProperties||{};state.folderProperties.set(id,properties);return json(folderMetadata(id));
       }
       const id=`repo-${state.nextId++}`,stamp=new (clock?.Date||Date)().toISOString(),file={id,name:metadata.name,mimeType:metadata.mimeType||'application/octet-stream',parents:[...(metadata.parents||[])],appProperties:{...(metadata.appProperties||{})},content:new Blob([]),ownedByMe:true,shared:false,trashed:false,canDownload:true,version:state.nextVersion++,createdTime:stamp,modifiedTime:stamp};state.files.set(id,file);
       if(state.networkFailCoordinationPostOnce&&['publication','maintenance'].includes(String(metadata.appProperties?.studyDirectorRepositoryKind||''))){state.networkFailCoordinationPostOnce=false;throw new TypeError('simulated ambiguous coordination create');}
@@ -133,6 +137,11 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
       }
       return json(fileMetadata(file));
     }
+    if(url.pathname==='/drive/v3/about'&&method==='GET')return json({user:{emailAddress:state.email}});
+    if(url.pathname.startsWith('/drive/v3/files/')&&method==='PATCH'){
+      const id=findId(url.pathname);if(!state.folders.includes(id))return json({error:{message:'not found'}},404);
+      const metadata=JSON.parse(String(options.body||'{}'));state.folderProperties.set(id,{...(state.folderProperties.get(id)||{}),...(metadata.appProperties||{})});return json(folderMetadata(id));
+    }
     if(url.pathname.startsWith('/drive/v3/files/')&&method==='DELETE'){
       const id=findId(url.pathname),file=state.files.get(id),kind=String(file?.appProperties?.studyDirectorRepositoryKind||'');
       if(state.networkFailCoordinationDeleteOnce&&['publication','maintenance'].includes(kind)){state.networkFailCoordinationDeleteOnce=false;throw new TypeError('simulated ambiguous coordination delete');}
@@ -144,7 +153,7 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
   const document={scripts,head:{appendChild(node){scripts.push(node);queueMicrotask(()=>node.onload&&node.onload());return node;}},body:{appendChild(){return null;}},createElement(tag){return {tagName:String(tag).toUpperCase(),remove(){},setAttribute(){},appendChild(){},style:{},src:'',async:false,defer:false,onload:null,onerror:null};},getElementById(){return null;}};
   const oauth={hasGrantedAllScopes(response,scope){return String(response.scope||'').split(/\s+/).includes(scope);},initTokenClient(config){return {requestAccessToken(){queueMicrotask(()=>config.callback({access_token:`token-${state.requests.length+1}`,expires_in:state.expiresIn,token_type:'Bearer',scope:state.scope}));}};},revoke(token,callback){queueMicrotask(()=>callback({successful:true}));}};
   state.releasedDownloads=0;
-  const api={capabilities:{pluginApi:1,backupController:1,backupProviders:1},backup:{repositoryPolicy,receiveStream:async(stream,size,options={})=>{if(options.signal?.aborted)throw new Error('cancelled');const blob=await new Response(stream).blob();assert.equal(blob.size,size);options.onProgress?.({phase:'downloading',loaded:blob.size,total:size});return blob;},releaseFile:async()=>{state.releasedDownloads+=1;},limits:{maxFileBytes:20*1024*1024},providers:{register(config){provider=config;return registerProvider?registerProvider(config):true;}}}};
+  const api={capabilities:{pluginApi:1,backupController:1,backupProviders:1},backup:{repositoryPolicy,receiveStream:async(stream,size,options={})=>{if(options.signal?.aborted)throw new Error('cancelled');const blob=await new Response(stream).blob();assert.equal(blob.size,size);options.onProgress?.({phase:'downloading',loaded:blob.size,total:size});return blob;},releaseFile:async()=>{state.releasedDownloads+=1;},limits:{maxFileBytes:20*1024*1024},profile:{id:()=>profileId(),bind:async info=>{state.binds.push(info);return bind(info);}},providers:{register(config){provider=config;return registerProvider?registerProvider(config):true;}}}};
   const harnessSetTimeout=(fn,ms,...args)=>{if(clock)return clock.setTimeout(()=>fn(...args),ms);const timer=setTimeout(fn,ms,...args);if(Number(ms)>5000)timer.unref?.();return timer;};
   const harnessClearTimeout=id=>clock?clock.clearTimeout(id):clearTimeout(id);
   class MockXMLHttpRequest{
@@ -171,5 +180,5 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
     })();}
   }
   const context=vm.createContext({Error,TypeError,Date:clock?.Date||Date,console,setTimeout:harnessSetTimeout,clearTimeout:harnessClearTimeout,queueMicrotask,Blob,Headers,Response,XMLHttpRequest:uploadProgressTransport?MockXMLHttpRequest:undefined,ReadableStream,TextEncoder,URL,URLSearchParams,Uint8Array,AbortController,crypto:webcrypto,fetch:mockFetch,document,Event:class Event{constructor(type){this.type=type;}},CustomEvent:class CustomEvent{},localStorage,addEventListener,removeEventListener(){},dispatchEvent(){},google:{accounts:{oauth2:oauth}},StudyDirector:{registerPlugin(descriptor){return descriptor.setup(api);}}});
-  context.window=context;context.globalThis=context;vm.runInContext(source,context,{filename:'source/external/drive.js'});assert.ok(provider,'Drive provider must register');return {state,provider,context};
+  context.window=context;context.globalThis=context;context[Symbol.for('studyDirector.profileScope.v1')]=Object.freeze({scoped:name=>String(name)});vm.runInContext(source,context,{filename:'source/external/drive.js'});assert.ok(provider,'Drive provider must register');return {state,provider,context};
 }

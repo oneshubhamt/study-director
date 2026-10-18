@@ -18,7 +18,7 @@ function loadModule(files,name){
   const {module}=loadModule(['source/core/internal.js','source/core/attachment-ingest.js'],'attachment-ingest');
   let estimateCalls=0;const posted=[];
   const worker={terminate(){},postMessage(message){posted.push(message);if(message.type==='ingest')queueMicrotask(()=>{this.onmessage?.({data:{id:message.id,progress:{phase:'copying',loaded:130*MiB,total:260*MiB,mode:'sync'}}});this.onmessage?.({data:{id:message.id,value:{storageName:message.data.storageName,hash:'a'.repeat(64),size:260*MiB,mode:'sync'}}});});}};
-  const coordinator=module.create({createWorker:()=>worker,storage:{estimate:async()=>{estimateCalls++;return {quota:1024*MiB,usage:100*MiB};}},randomUUID:()=> '12345678-1234-1234-1234-123456789012'});
+  const coordinator=module.create({createWorker:()=>worker,directory:'study-director-assets-v2',storage:{estimate:async()=>{estimateCalls++;return {quota:1024*MiB,usage:100*MiB};}},randomUUID:()=> '12345678-1234-1234-1234-123456789012'});
   const virtual=Object.create(Blob.prototype);Object.defineProperty(virtual,'size',{value:260*MiB});
   let progressCalls=0;
   const result=await coordinator.ingest(virtual,{onProgress:progress=>{progressCalls++;if(progress.phase==='copying')throw new Error('UI callback failure must be isolated');}});
@@ -32,7 +32,7 @@ function loadModule(files,name){
   let estimateCalls=0,workerPosts=0;
   const worker={terminate(){},postMessage(){workerPosts++;}};
   const virtual=Object.create(Blob.prototype);Object.defineProperty(virtual,'size',{value:260*MiB});
-  const low=module.create({createWorker:()=>worker,storage:{estimate:async()=>{estimateCalls++;return {quota:300*MiB,usage:40*MiB};}},randomUUID:()=> '12345678-1234-1234-1234-123456789012'});
+  const low=module.create({createWorker:()=>worker,directory:'study-director-assets-v2',storage:{estimate:async()=>{estimateCalls++;return {quota:300*MiB,usage:40*MiB};}},randomUUID:()=> '12345678-1234-1234-1234-123456789012'});
   await assert.rejects(()=>low.ingest(virtual),error=>error?.name==='QuotaExceededError');
   assert.equal(workerPosts,0,'quota rejection must happen before worker ingestion');
   const controller=new AbortController();controller.abort();estimateCalls=0;

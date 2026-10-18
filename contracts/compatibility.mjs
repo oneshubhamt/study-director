@@ -235,9 +235,9 @@ export const COMPATIBILITY_REGISTRY=freeze({
   legacyCleanup:items([
     {
       id:'legacy-localstorage-residue',owner:'compatibility/host',kind:'cleanup',
-      source:'liveDraft, activeSession.v1, storageCapability.v1, diagnostics.v1, timerOwner.v1, attachmentMaintenanceDay.v1, attachmentMaintenanceDay.v2 and attachmentMaintenancePending.v1',
+      source:'liveDraft, activeSession.v1, storageCapability.v1, diagnostics.v1, timerOwner.v1, attachmentMaintenanceDay.v1, attachmentMaintenanceDay.v2, attachmentMaintenancePending.v1 and nameSetupSkippedDate.v1',
       target:'absence',
-      proof:'all eight legacy localStorage identities are absent',
+      proof:'all nine legacy localStorage identities are absent',
       retirement:'baseline verified on all supported installations',
       sourceFiles:freeze(['source/core/compatibility-host.js','source/core/startup.js'])
     },

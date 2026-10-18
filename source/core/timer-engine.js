@@ -194,7 +194,7 @@ function focusableOverlayElements(root){
   });
 }
 function activeModalOverlay(){
-  return document.querySelector('#name-setup-overlay.on,#gap-overlay.on');
+  return document.querySelector('#gap-overlay.on');
 }
 function focusFirstInOverlay(overlay){
   const first=focusableOverlayElements(overlay)[0];

@@ -7,7 +7,7 @@ function fixture(kind='attachment-ingest'){
   const time=clock(),workers=[],context={console,Blob,TextEncoder,AbortController,DOMException,setTimeout:time.setTimeout,clearTimeout:time.clearTimeout};vm.createContext(context);
   for(const name of ['internal','operation-lifecycle',kind])vm.runInContext(fs.readFileSync(`source/core/${name}.js`,'utf8'),context,{filename:`source/core/${name}.js`});
   let failStart=false,abandoned=0;const createWorker=()=>{if(failStart)throw new Error('startup');const worker={messages:[],terminated:0,postMessage(value){this.messages.push(value);if(this.throwPost)throw new Error('clone');},terminate(){this.terminated++;if(this.throwTerminate)throw new Error('terminate');}};workers.push(worker);return worker;};
-  const mod=context[Symbol.for('studyDirector.internalModules.v1')].require(kind,1,Object.freeze({lifecycle:context[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1)})),api=kind==='attachment-ingest'?mod.create({createWorker,randomUUID:()=> 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',setTimeout:time.setTimeout,clearTimeout:time.clearTimeout,stallTimeoutMs:100,cancelTimeoutMs:10,onAbandoned:()=>abandoned++}):mod.createCoordinator({createWorker,window:{},document:{}});
+  const mod=context[Symbol.for('studyDirector.internalModules.v1')].require(kind,1,Object.freeze({lifecycle:context[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1)})),api=kind==='attachment-ingest'?mod.create({createWorker,directory:'study-director-assets-v2',randomUUID:()=> 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',setTimeout:time.setTimeout,clearTimeout:time.clearTimeout,stallTimeoutMs:100,cancelTimeoutMs:10,onAbandoned:()=>abandoned++}):mod.createCoordinator({createWorker,window:{},document:{}});
   return {api,time,workers,get abandoned(){return abandoned;},failStart:()=>{failStart=true;}};
 }
 const cases=[];
@@ -34,7 +34,7 @@ cases.push('error, unreadable response and throwing teardown still settle');
 }
 {
   const h=fixture(),context={console,Blob,setTimeout:h.time.setTimeout,clearTimeout:h.time.clearTimeout};vm.createContext(context);for(const file of ['internal','operation-lifecycle','attachment-ingest'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),context);
-  const api=context[Symbol.for('studyDirector.internalModules.v1')].require('attachment-ingest',1).create({createWorker:()=>{throw new Error('must not start');},storage:{estimate:()=>new Promise(()=>{})}});
+  const api=context[Symbol.for('studyDirector.internalModules.v1')].require('attachment-ingest',1).create({directory:'study-director-assets-v2',createWorker:()=>{throw new Error('must not start');},storage:{estimate:()=>new Promise(()=>{})}});
   const c=new AbortController(),result=api.ingest(new Blob(['x']),{signal:c.signal}),rejection=assert.rejects(result,{name:'AbortError'});c.abort();await rejection;assert.equal(h.time.timers.size,0);
   const preflight=api.preflight(1);h.time.tick(5000);assert.equal((await preflight).checked,false);assert.equal(h.time.timers.size,0);cases.push('quota preflight timeout and cancel settle before worker dispatch');
 }

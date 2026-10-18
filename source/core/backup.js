@@ -20,7 +20,7 @@ registry.define('backup',1,input=>{
     codecs:freeze(['activeSession','backup','pendingReview']),
     reconciliation:freeze(['createPlan','resolvePlan','summarizePlan']),
     noteReconciliation:freeze(['resolve','merge']),
-    exports:freeze(['backgroundAvailable','protect','unprotect','check','scope','job','run','download','chooseSave','save']),
+    exports:freeze(['backgroundAvailable','protect','unprotect','followProtection','check','scope','job','run','download','chooseSave','save']),
     session:freeze(['canMutate','cancelLiveDraftSave','captureSnapshot','hasActiveSession','hasTasks','toActiveSession','withPersistenceSuppressed','yieldSession']),
     domain:freeze(['clampText','filenameSafeStudentName','getStudentName','materializeDailyRecordView','sanitizeCurrentDailyRecord','todayISO']),
     view:freeze(['presentation','refreshPnote','refreshReview','renderSchedule']),
@@ -2056,7 +2056,7 @@ const BackupProviderRuntime=BackupProviderModule.createRuntime(freeze({
   ports:freeze({
     configuration:freeze({appVersion:APP_VERSION}),
     controller:freeze({beginImport:BackupController.beginImport,cancelImport:BackupController.cancelImport,finishImport:BackupController.finishImport}),
-    exports:freeze({run:Exports.run}),
+    exports:freeze({run:Exports.run,followProtection:Exports.followProtection}),
     domain:freeze({clampText}),
     view:freeze({presentation:ports.view.presentation}),
     ownership:freeze({canRunBackground:()=>!appCanMutate()?'awaiting-control':Exports.backgroundAvailable(),requireMutationControl:requireBackupMutationControl}),

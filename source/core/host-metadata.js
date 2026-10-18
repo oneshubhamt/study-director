@@ -16,7 +16,7 @@ registry.define('host-metadata',1,()=>{
     const keys=input.keys,normalizers=input.normalizers,same=input.same;
     function canonical(key,value){
       if(key===keys.verifiedRecoveryBackups)return same(value,normalizers.verifiedRecovery(value));
-      if(key===keys.backupProtection){const version=Number(value&&value.version);return !!(value&&exactKeys(value,['version','id','verifier'])&&version===2&&typeof value.id==='string'&&value.id.length>0&&value.id.length<=128&&value.verifier instanceof Blob&&value.verifier.size>0&&value.verifier.size<=1024*1024);}
+      if(key===keys.backupProtection){const version=Number(value&&value.version),stored=value&&value.key;return !!(value&&exactKeys(value,['version','id','verifier','key','setAt'])&&version===3&&typeof value.id==='string'&&value.id.length>0&&value.id.length<=128&&value.verifier instanceof Blob&&value.verifier.size>0&&value.verifier.size<=1024*1024&&(stored===null||typeof CryptoKey!=='undefined'&&stored instanceof CryptoKey&&stored.type==='secret'&&stored.algorithm?.name==='PBKDF2'&&stored.extractable===false)&&Number.isFinite(Date.parse(value.setAt)));}
       if(key===keys.attachmentIntegrityAudit)return same(value,normalizers.attachmentIntegrity(value));
       if(key===keys.repositoryIntegrityScrub)return same(value,normalizers.repositoryIntegrity(value));
       if(key===keys.managedProviderBackupPending){
