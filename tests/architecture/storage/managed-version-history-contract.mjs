@@ -7,7 +7,7 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..')
 const read=relative=>fs.readFileSync(path.join(root,relative),'utf8');
 const app=read('source/app.html'),repository=read('source/core/managed-repository.js'),provider=read('source/core/backup-provider.js'),device=read('source/core/device-backup.js'),host=read('source/core/backup-recovery-host.js'),drive=read('source/external/drive.js');
 
-assert.match(repository,/const REPOSITORY_MANIFEST_FORMAT='study-director\.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=7,/u);
+assert.match(repository,/const REPOSITORY_MANIFEST_FORMAT='study-director\.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=8,/u);
 assert.match(repository,/function repositoryLogicalIdentityPayload\(value\)[\s\S]*format:'study-director\.managed-backup-logical-state'[\s\S]*objects:freeze\(objects\),assets:freeze\(assets\),deletions:/u);
 const identityBody=repository.slice(repository.indexOf('function repositoryLogicalIdentityPayload'),repository.indexOf('async function repositoryLogicalFingerprint'));
 for(const excluded of ['checkpointId','installationId','sourceRevision','reconciliationBaseId','objectId','protectionId'])assert.equal(identityBody.includes(excluded),false,`provider/capture artifact must not enter logical-state identity: ${excluded}`);

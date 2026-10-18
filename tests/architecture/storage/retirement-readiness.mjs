@@ -37,6 +37,7 @@ const migrationEvidence=Object.freeze({
   'appmeta-stable-names':['tests/integration/storage/compatibility-host.mjs'],
   'l13e-repository-maintenance-v1':['tests/integration/storage/compatibility-host.mjs','tests/integration/backup/repository-incremental-preparation.mjs','tests/integration/backup/repository-restore.mjs'],
   'restore-journal-payload-v1-v4':['tests/integration/storage/compatibility-host.mjs','tests/integration/storage/repository-journals.mjs'],
+  'backups-before-pending-reviews':['tests/integration/backup/current-canonical-roundtrip.mjs','tests/integration/backup/repository-restore.mjs'],
   'canonical-note-and-folder-names':['tests/integration/storage/compatibility-host.mjs','tests/integration/storage/indexeddb-topology-retirement.mjs'],
   'area-note-names-in-backups':['tests/integration/backup/current-canonical-roundtrip.mjs','tests/integration/backup/repository-restore.mjs'],
   'backup-repository-v1-v4':['tests/integration/backup/repository-restore.mjs'],

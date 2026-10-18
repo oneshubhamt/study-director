@@ -8,6 +8,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
+import {testPendingReviewCodec} from '../../helpers/pending-review-codec.mjs';
 
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
@@ -40,7 +41,8 @@ const entityDefinition=type=>defs[type]||null,entityIdentity=(type,item)=>String
 const boundedInt=(value,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
 const jsonByteLength=value=>new TextEncoder().encode(typeof value==='string'?value:JSON.stringify(value)).byteLength;
 const personalDataCodec=RecordCodecs.createPersonalDataCodec(limits);
-const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,processing:testProcessing,
+const pendingReviewCodec=testPendingReviewCodec(RecordCodecs,{personalDataCodec});
+const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingReviewCodec,processing:testProcessing,
   appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),
   entityTypes:freeze(Object.keys(defs)),keyedRecord,entities:freeze({entityDefinition,entityIdentity}),
   helpers:freeze({boundedInt,jsonByteLength}),
@@ -73,7 +75,7 @@ const complete=await codec.encodeCompletion(3,counts,[checkpointChunk.checksum,p
 const metadata=new Blob([JSON.stringify(manifest)+'\n'+checkpointChunk.line+'\n'+personalChunk.line+'\n'+chunk.line+'\n'+JSON.stringify(complete)+'\n']);
 const portable=codec.createV10Container(metadata,{compression:'none',assetBlobs:[image]});
 const parsed=await codec.inspectCurrent(portable,{filename:'portable.sdbackup'});
-assert.equal(parsed.formatVersion,22);
+assert.equal(parsed.formatVersion,23);
 assert.equal(parsed.captureAuthority,'canonical-complete','Current standalone backups must persist canonical-complete authority inside the protected completion proof.');
 assert.equal(parsed.protectedCheckpointManifest.checkpointId,parsed.manifest.checkpoint.checkpointId);
 assert.equal(parsed.manifest.deviceId,undefined);

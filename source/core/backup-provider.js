@@ -887,9 +887,11 @@ registry.define('backup-provider',1,input=>{
   // shared. While signed in, this device first takes in what other devices
   // added there (catching up), then backs up. A backup that finds Drive moved
   // on meanwhile stops, and the next run catches up first; two devices
-  // backing up at once take turns. Sync never asks anything: a difference
-  // that needs the person's choice waits, marked Needs review, until they
-  // open it.
+  // backing up at once take turns. Sync never asks anything: where both
+  // sides changed something the newer shows and the other is kept for review
+  // (Library → Data). Only a version it cannot settle that way (an older
+  // format, or more kept versions than may wait) waits, marked Needs review,
+  // until the person opens it.
   const SYNC_RECHECK_MS=60*1000,SYNC_TURN_WINDOW_MS=15*60*1000,syncByProvider=new Map();
   function syncState(selected){const id=safeId(selected&&selected.id);let state=syncByProvider.get(id);if(!state){state={checkedAt:0,review:'',catching:false,behind:false,syncedAt:''};syncByProvider.set(id,state);}return state;}
   function syncView(selected){const state=syncState(selected);return freeze({syncedAt:state.syncedAt,review:!!state.review,syncing:state.catching});}

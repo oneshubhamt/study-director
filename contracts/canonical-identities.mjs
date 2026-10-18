@@ -21,6 +21,7 @@ export const CURRENT_SCHEMA_VERSIONS=freeze({
   LocalRecoveryEnvelope:1,
   ActiveSession:10,
   Note:3,
+  PendingReview:1,
   AppMeta:1,
   CheckpointMetadata:1,
   CheckpointProtectedManifest:3
@@ -86,7 +87,7 @@ export const EXTERNAL_REPOSITORY_IDENTITIES=freeze({
 });
 
 export const EXTERNAL_FORMATS=freeze({
-  completeBackup:freeze({format:'study-director-backup',metadataVersion:22,containerMagic:'SDBK10\r\n'}),
+  completeBackup:freeze({format:'study-director-backup',metadataVersion:23,containerMagic:'SDBK10\r\n'}),
   protectedBackup:freeze({magic:'SDENC02\n',version:2}),
   attachmentArchive:freeze({format:'study-director.attachments',magic:'SDAT01\r\n',version:1})
 });
@@ -110,6 +111,9 @@ export const RUNTIME_DATA_CONTRACT=freeze({
     // A note's key is its permanent id (n_ and 16 hex digits). A deleted note
     // keeps it behind this prefix until it is restored or its retention ends.
     Note:freeze({version:CURRENT_SCHEMA_VERSIONS.Note,key:'key',trashKeyPrefix:'~deleted '}),
+    // A version kept for review when both sides changed the same thing; it
+    // lives in appMeta (pendingReviewPrefix) under its id.
+    PendingReview:freeze({version:CURRENT_SCHEMA_VERSIONS.PendingReview,key:'id'}),
     AppMeta:freeze({version:CURRENT_SCHEMA_VERSIONS.AppMeta,key:'key'}),
     CheckpointMetadata:freeze({version:CURRENT_SCHEMA_VERSIONS.CheckpointMetadata,format:CHECKPOINT_METADATA.format}),
     CheckpointProtectedManifest:freeze({version:CURRENT_SCHEMA_VERSIONS.CheckpointProtectedManifest,format:CHECKPOINT_PROTECTED_MANIFEST.format}),

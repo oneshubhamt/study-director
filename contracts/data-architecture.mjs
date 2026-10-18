@@ -98,6 +98,7 @@ export const APP_META_KEYS=freeze({
   savedDayDeletionPrefix:'savedDayDeletion:',
   noteDeletionPrefix:'noteDeletion:',
   attachmentDeletionPrefix:'attachmentDeletion:',
+  pendingReviewPrefix:'pendingReview:',
   libraryClearJournalState:'libraryClearJournalState',
   libraryClearJournalPayloadPrefix:'libraryClearJournalPayload:',
   restoreJournalState:'restoreJournalState',
@@ -156,7 +157,7 @@ export const OBSOLETE_APP_META_KEYS=freeze({
 });
 
 export const APP_META_VALIDATION_OWNERS=freeze({
-  repositories:freeze(['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','savedDayDeletionPrefix','noteDeletionPrefix','attachmentDeletionPrefix']),
+  repositories:freeze(['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','savedDayDeletionPrefix','noteDeletionPrefix','attachmentDeletionPrefix','pendingReviewPrefix']),
   journals:freeze(['libraryClearJournalState','libraryClearJournalPayloadPrefix','restoreJournalState','restoreJournalPayload','mutationLease']),
   host:freeze(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseDayPrefix'])
 });
@@ -271,6 +272,7 @@ export const DATA_ARCHITECTURE=freeze({
       savedDayDeletionPrefix:surface('canonical-deletion-history','repositories','protect','retain until the same Saved Day is recreated','SavedDayDeletion.v1'),
       noteDeletionPrefix:surface('canonical-deletion-history','repositories','protect','retain until the same Note is recreated','NoteDeletion.v1'),
       attachmentDeletionPrefix:surface('canonical-deletion-history','repositories','protect-identifiers','retain until the same Attachment Library identity is explicitly restored/recreated','AttachmentDeletion.v1'),
+      pendingReviewPrefix:surface('canonical','repositories','protect','a kept version stays until the person resolves it; a resolved one keeps only its id, so other devices learn of it, and the newest of those are kept','PendingReview.v1'),
       libraryClearJournalPayloadPrefix:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','LibraryClearJournalChunk.v1',{protects:'canonical Library rollback chunks',created:'before destructive Library clear commit',cleared:'after verified completion or rollback',supersededBy:'verified post-operation canonical state'}),
       reconciliationBaseNotePrefix:surface('reconciliation-base','host','protect','update/delete only changed Note baselines; lazily read only for actual reconciliation conflicts','ReconciliationBaseNote.v1'),
       reconciliationBaseDayPrefix:surface('reconciliation-base','host','protect','one row of Saved-Day fingerprints per month; update/delete only changed months; read only for differing Saved Days','ReconciliationBaseDays.v1')

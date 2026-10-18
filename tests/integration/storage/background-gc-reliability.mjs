@@ -8,11 +8,18 @@ const source=fs.readFileSync('source/app.html','utf8');
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 function fixture(){
   const timers=new Map();let seq=0;const state={owner:true,busy:false,revision:'one',refs:0,failure:false,commitFailure:false,completed:0,scans:[],keys:['late'],removed:[],journal:null,removedPasses:[],invalidated:0,now:0};
-  const ports={canMutate:()=>state.owner,mutationActive:()=>state.busy,collect:async fn=>{if(state.failure)throw new Error('IO');return fn({keys:async()=>state.keys.slice(),removeMany:async ids=>{state.removed.push(...ids);state.removedPasses.push(ids.length);state.keys=state.keys.filter(key=>!ids.includes(key));return ids.length;},sweep:async()=>0});},readRestoreJournal:async()=>state.journal,readLibraryClearJournal:async()=>null,liveFields:()=>[],getReferenceRevision:()=>state.refs,getDatasetRevision:async()=>state.revision,scanReferences:value=>{state.scans.push(value);return {trusted:true,assetIds:value==='last'?['late']:[]};},readNotes:async()=>({}),loadActiveSession:async()=>({ok:true,value:null,error:null}),listDailyRecords:async()=>['a','b','c','d','last'].map(reflection=>({reflection})),budget:()=>()=>true,yieldTask:async()=>{},invalidate:()=>state.invalidated++,captureError:()=>{},completed:async()=>{if(state.commitFailure)throw new Error('completion write');state.completed++;},now:()=>state.now,setTimeout:(fn,ms)=>{timers.set(++seq,{fn,ms});return seq;},clearTimeout:id=>timers.delete(id)};
+  const ports={canMutate:()=>state.owner,mutationActive:()=>state.busy,collect:async fn=>{if(state.failure)throw new Error('IO');return fn({keys:async()=>state.keys.slice(),removeMany:async ids=>{state.removed.push(...ids);state.removedPasses.push(ids.length);state.keys=state.keys.filter(key=>!ids.includes(key));return ids.length;},sweep:async()=>0});},readRestoreJournal:async()=>state.journal,readLibraryClearJournal:async()=>null,liveFields:()=>[],getReferenceRevision:()=>state.refs,getDatasetRevision:async()=>state.revision,scanReferences:value=>{state.scans.push(value);return {trusted:true,assetIds:value==='last'?['late']:[]};},readNotes:async()=>({}),loadActiveSession:async()=>({ok:true,value:null,error:null}),readPendingReviewTexts:async()=>[],listDailyRecords:async()=>['a','b','c','d','last'].map(reflection=>({reflection})),budget:()=>()=>true,yieldTask:async()=>{},invalidate:()=>state.invalidated++,captureError:()=>{},completed:async()=>{if(state.commitFailure)throw new Error('completion write');state.completed++;},now:()=>state.now,setTimeout:(fn,ms)=>{timers.set(++seq,{fn,ms});return seq;},clearTimeout:id=>timers.delete(id)};
   const context={setTimeout:ports.setTimeout,clearTimeout:ports.clearTimeout};vm.createContext(context);for(const file of ['internal','operation-lifecycle','asset-maintenance'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),context,{filename:`source/core/${file}.js`});
   const mod=context[Symbol.for('studyDirector.internalModules.v1')].require('asset-maintenance',1,Object.freeze({lifecycle:context[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1)})),api=mod.create(ports,{lease:{protect(){},release(){},isProtected:()=>false},batchSize:2});return {state,ports,api,timers};
 }
 const cases=[];
+{
+  // An attachment used only by a version kept for review is never collected.
+  const h=fixture();h.state.keys=['kept-only','orphan'];h.ports.listDailyRecords=async()=>[];h.ports.readPendingReviewTexts=async()=>['kept text'];
+  const scan=h.ports.scanReferences;h.ports.scanReferences=value=>value==='kept text'?{trusted:true,assetIds:['kept-only']}:scan(value);
+  for(let pass=0;pass<12;pass++){const result=await h.api.run();if(['completed','clean'].includes(result.status))break;}
+  assert.deepEqual(h.state.removed,['orphan'],'only the unused attachment goes');cases.push('a kept version protects its attachments');
+}
 {
   const h=fixture();assert.equal((await h.api.run()).status,'yielded');assert.equal(h.state.removed.length,0);assert.equal((await h.api.run()).status,'yielded');assert.equal(h.state.removed.length,0);assert.equal((await h.api.run()).status,'completed');assert.equal(h.state.removed.length,0,'a late reference must prevent deletion');assert.equal(h.state.completed,1);assert.equal(h.state.scans.filter(x=>x==='a').length,1,'resume must not redo the prefix');assert.equal(h.timers.size,0);cases.push('bounded reference scan resumes without deleting a late reference');
 }
@@ -55,7 +62,7 @@ const store={keys:async()=>[assetId],removeMany:async ids=>{removeCalls++;return
 const maintenance=mod.create({
   canMutate:()=>true,mutationActive:()=>false,collect:async fn=>fn(store),readRestoreJournal:async()=>null,readLibraryClearJournal:async()=>null,
   liveFields:()=>[field],getReferenceRevision:()=>referenceRevision,getDatasetRevision:async()=>datasetRevision,
-  scanReferences:()=>uncertain?{trusted:false,assetIds:[]}:{trusted:true,assetIds:[]},readNotes:async()=>({}),loadActiveSession:async()=>({ok:true,value:null,error:null}),listDailyRecords:async()=>[],
+  scanReferences:()=>uncertain?{trusted:false,assetIds:[]}:{trusted:true,assetIds:[]},readNotes:async()=>({}),loadActiveSession:async()=>({ok:true,value:null,error:null}),readPendingReviewTexts:async()=>[],listDailyRecords:async()=>[],
   budget:()=>()=>false,yieldTask:async()=>{},invalidate:()=>{},captureError:()=>{}
 },{lease:lease()});
 const skipped=await maintenance.run();assert.equal(skipped.status,'skipped');assert.equal(skipped.reason,'uncertain-rich-text');assert.equal(skipped.removed,0);assert.equal(removeCalls,0);
@@ -65,7 +72,7 @@ datasetRevision='stable';let bumped=false;
 const changed=mod.create({
   canMutate:()=>true,mutationActive:()=>false,collect:async fn=>fn(store),readRestoreJournal:async()=>null,readLibraryClearJournal:async()=>null,
   liveFields:()=>[field],getReferenceRevision:()=>referenceRevision,getDatasetRevision:async()=>datasetRevision,
-  scanReferences:()=>({trusted:true,assetIds:[]}),readNotes:async()=>{if(!bumped){referenceRevision++;bumped=true;}return {};},loadActiveSession:async()=>({ok:true,value:null,error:null}),listDailyRecords:async()=>[],
+  scanReferences:()=>({trusted:true,assetIds:[]}),readNotes:async()=>{if(!bumped){referenceRevision++;bumped=true;}return {};},loadActiveSession:async()=>({ok:true,value:null,error:null}),readPendingReviewTexts:async()=>[],listDailyRecords:async()=>[],
   budget:()=>()=>false,yieldTask:async()=>{},invalidate:()=>{},captureError:()=>{}
 },{lease:lease()});
 assert.equal((await changed.run()).reason,'source-changed');assert.equal(removeCalls,1);
@@ -73,7 +80,7 @@ assert.equal((await changed.run()).reason,'source-changed');assert.equal(removeC
 let leaseRetrySchedules=0;
 const leaseBlocked=mod.create({
   canMutate:()=>true,mutationActive:()=>false,collect:async()=>({status:'skipped',reason:'active-editor-or-file-operation',removed:0}),readRestoreJournal:async()=>null,readLibraryClearJournal:async()=>null,
-  liveFields:()=>[],getReferenceRevision:()=>0,getDatasetRevision:async()=>'stable',scanReferences:()=>({trusted:true,assetIds:[]}),readNotes:async()=>({}),loadActiveSession:async()=>({ok:true,value:null,error:null}),listDailyRecords:async()=>[],
+  liveFields:()=>[],getReferenceRevision:()=>0,getDatasetRevision:async()=>'stable',scanReferences:()=>({trusted:true,assetIds:[]}),readNotes:async()=>({}),loadActiveSession:async()=>({ok:true,value:null,error:null}),readPendingReviewTexts:async()=>[],listDailyRecords:async()=>[],
   budget:()=>()=>false,yieldTask:async()=>{},invalidate:()=>{},captureError:()=>{},setTimeout:()=>{leaseRetrySchedules++;return 1;},clearTimeout:()=>{}
 },{lease:lease()});
 assert.equal((await leaseBlocked.run()).reason,'active-editor-or-file-operation');
@@ -119,7 +126,7 @@ cases.push('untrusted rich text, source changes and unavailable revisions forbid
     assert.equal((await storage.shallowAudit(ids)).issues.length,0);
     const maintenance=registry.require('asset-maintenance',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})).create({canMutate:()=>true,mutationActive:()=>false,collect:storage.collect,readRestoreJournal:h.app.restoreJournal.read,readLibraryClearJournal:h.app.libraryClearJournal.read,liveFields:()=>[],getReferenceRevision:()=>1,getDatasetRevision:async()=>'stable',scanReferences:rich.scanAttachmentReferences,readNotes:h.app.notes.readFreshPayload,
       // Check both strict production composition and a mixed-result port.
-      loadActiveSession:()=>h.app.activeSession.load(0,{strict:fault!=='session-partial-port'}),listDailyRecords:()=>h.app.dailyRecords.list({strict:true}),budget:()=>()=>false,yieldTask:async()=>{},invalidate(){},captureError(){},completed:()=>{completed++;},now:()=>0,setTimeout:context.setTimeout,clearTimeout:context.clearTimeout},{lease:Assets.createLease()});
+      loadActiveSession:()=>h.app.activeSession.load(0,{strict:fault!=='session-partial-port'}),readPendingReviewTexts:async()=>[],listDailyRecords:()=>h.app.dailyRecords.list({strict:true}),budget:()=>()=>false,yieldTask:async()=>{},invalidate(){},captureError(){},completed:()=>{completed++;},now:()=>0,setTimeout:context.setTimeout,clearTimeout:context.clearTimeout},{lease:Assets.createLease()});
     const beforeMetadata=JSON.stringify([...metadata]),beforeBytes=[...physical.keys()];
     assert.equal((await maintenance.run()).status,'failed',fault);
     assert.equal(JSON.stringify([...metadata]),beforeMetadata,fault+' must preserve every metadata row');assert.deepEqual([...physical.keys()],beforeBytes,fault+' must preserve every file');assert.equal(completed,0);assert.equal(maintenance.status().pending,true);assert.equal([...timers.values()][0].ms,1800000);
@@ -140,12 +147,12 @@ for(const latency of [4999,5000,6000,20000]){
  const slow=()=>{stamp+=latency;if(preempt)busy=true;};
  const dir={async *entries(){for(const name of files.keys()){slow();yield [name,{kind:'file'}];}},removeEntry:async name=>files.delete(name)};
  const storage=Assets.create({name:'slow-cleanup',protocol:'https:',storage:{getDirectory:async()=>({getDirectoryHandle:async()=>dir})},locks:{request:async(_name,options,work)=>(typeof options==='function'?options:work)({})},read:async key=>{slow();return rows.get(key);},keys:async()=>{slow();return [...rows.keys()];},entries:async()=>{slow();return [...rows];},commit:async(_upsert,remove,_token,guard)=>{assert.equal(guard(),true);for(const key of remove)rows.delete(key);sourceRevision++;},validId:value=>/^att-[a-f0-9]{32}$/.test(value),validType:type=>type==='application/pdf',maxBytes:1024,canMutate:()=>true,issueToken:()=>1,assertToken(){},ingest:{ingest:async()=>assert.fail('unused')}});
- const maintenance=registry.require('asset-maintenance',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})).create({canMutate:()=>true,mutationActive:()=>busy,collect:storage.collect,readRestoreJournal:async()=>{slow();return null;},readLibraryClearJournal:async()=>{slow();return null;},liveFields:()=>[],getReferenceRevision:()=>1,getDatasetRevision:async()=>{slow();return sourceRevision;},scanReferences:()=>({trusted:true,assetIds:[]}),readNotes:async()=>{slow();return {};},loadActiveSession:async()=>{slow();return {ok:true,value:null};},listDailyRecords:async()=>{slow();return [];},budget:()=>()=>true,yieldTask:async()=>{},invalidate(){},captureError:error=>assert.fail(error),completed:()=>{completed++;},now:()=>stamp,setTimeout:context.setTimeout,clearTimeout:context.clearTimeout},{lease:Assets.createLease()});
+ const maintenance=registry.require('asset-maintenance',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})).create({canMutate:()=>true,mutationActive:()=>busy,collect:storage.collect,readRestoreJournal:async()=>{slow();return null;},readLibraryClearJournal:async()=>{slow();return null;},liveFields:()=>[],getReferenceRevision:()=>1,getDatasetRevision:async()=>{slow();return sourceRevision;},scanReferences:()=>({trusted:true,assetIds:[]}),readNotes:async()=>{slow();return {};},loadActiveSession:async()=>{slow();return {ok:true,value:null};},readPendingReviewTexts:async()=>[],listDailyRecords:async()=>{slow();return [];},budget:()=>()=>true,yieldTask:async()=>{},invalidate(){},captureError:error=>assert.fail(error),completed:()=>{completed++;},now:()=>stamp,setTimeout:context.setTimeout,clearTimeout:context.clearTimeout},{lease:Assets.createLease()});
  preempt=true;assert.equal((await maintenance.run()).reason,'foreground-busy');assert.equal(rows.size,4);assert.equal(files.size,4);preempt=false;busy=false;
  // Each source phase has a retained load and traversal boundary; the
  // canonical mutation epoch changes after deletion, so each remaining
  // orphan may require a new proof. Physical candidates advance once each.
- const sourcePhases=3,maxAttempts=(2*sourcePhases+2)*rows.size+files.size+2;
+ const sourcePhases=4,maxAttempts=(2*sourcePhases+2)*rows.size+files.size+2;
  let final;for(let pass=0;pass<maxAttempts;pass++){final=await maintenance.run();assert.ok(final.removed<=1,'slow deletion reads commit a single bounded candidate');if(['completed','clean'].includes(final.status))break;assert.equal(final.status,'yielded');assert.equal(final.reason,'budget');}
  assert.ok(['completed','clean'].includes(final.status));assert.equal(rows.size,0);assert.equal(files.size,0);assert.equal(completed,1);assert.equal(maintenance.status().pending,false);assert.equal(timers.size,0);
  cases.push('assembled attachment GC finishes with '+latency+'ms IO and preemption retains bytes');

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {PRODUCTION_LIMITS as limits} from '../../../contracts/production-limits.mjs';
+import {testPendingReviewCodec} from '../../helpers/pending-review-codec.mjs';
 
 const read=file=>fs.readFileSync(new URL('../../../'+file,import.meta.url),'utf8');
 for(const file of ['source/core/internal.js','source/core/persistence.js','source/core/record-codecs.js','source/core/backup-codec.js'])vm.runInThisContext(read(file),{filename:file});
@@ -30,7 +31,8 @@ const entityDefinition=type=>defs[type]||null,entityIdentity=(type,item)=>String
 const boundedInt=(value,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
 const jsonByteLength=value=>new TextEncoder().encode(typeof value==='string'?value:JSON.stringify(value)).byteLength;
 const personalDataCodec=RecordCodecs.createPersonalDataCodec(limits);
-const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,processing:testProcessing,
+const pendingReviewCodec=testPendingReviewCodec(RecordCodecs,{personalDataCodec});
+const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingReviewCodec,processing:testProcessing,
   appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),
   entityTypes:freeze(Object.keys(defs)),keyedRecord:freeze({create:()=>Object.create(null)}),entities:freeze({entityDefinition,entityIdentity}),
   helpers:freeze({boundedInt,jsonByteLength}),

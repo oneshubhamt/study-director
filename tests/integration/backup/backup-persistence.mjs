@@ -9,6 +9,7 @@ import vm from 'node:vm';
 import {gzipSync} from 'node:zlib';
 import {fileURLToPath} from 'node:url';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
+import {testPendingReviewCodec,memoryPendingReviews,paragraphMerge} from '../../helpers/pending-review-codec.mjs';
 
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
@@ -90,7 +91,8 @@ const boundedInt=(value,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{
 };
 const jsonByteLength=value=>new TextEncoder().encode(typeof value==='string'?value:JSON.stringify(value)).byteLength;
 const personalDataCodec=RecordCodecs.createPersonalDataCodec(limits);
-const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,processing:testProcessing,
+const pendingReviewCodec=testPendingReviewCodec(RecordCodecs,{personalDataCodec}),keptReviews=memoryPendingReviews(pendingReviewCodec);
+const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingReviewCodec,processing:testProcessing,
   appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,
   legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),entityTypes:freeze(Object.keys(entityDefinitions)),keyedRecord,
   entities:freeze({entityDefinition,entityIdentity}),helpers:freeze({boundedInt,jsonByteLength}),
@@ -189,12 +191,12 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
     restoreJournalMark:async(id,phase)=>{assert.equal(id,restoreJournal.state.id);restoreJournal.state.phase=phase;return restoreJournal.state;},
     restoreJournalClear:async id=>{if(id)assert.equal(id,restoreJournal.state.id);restoreJournal=null;return true;},
     personalSettle:async()=>true,personalExport:async()=>personalDataFixture,personalImport:async()=>true,personalVerify:async()=>true,storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async options=>{snapshotFenceOptions.push(Object.freeze({...options}));return options?.legacy===true?'legacy-stable':'fast-stable';},canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],scheduleRead:()=> '08:00 | 60 | Existing | work | Ethics | block | 1',
-    installationId:()=> 'inst_device_a',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryNotes:async()=>[],deletionRecoveryReplaceNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>null,reconciliationBaseReadNotes:async()=>freeze({}),reconciliationBaseReadDays:async()=>freeze({}),reconciliationBaseWrite:async()=>true
+    installationId:()=> 'inst_device_a',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryNotes:async()=>[],deletionRecoveryReplaceNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>null,reconciliationBaseReadNotes:async()=>freeze({}),reconciliationBaseReadDays:async()=>freeze({}),...keptReviews.ports,reconciliationBaseWrite:async()=>true
   }),
   exports:freeze({...testProcessing,backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():file,unprotect:async blob=>({blob,encrypted:false}),check:()=>{},job:exclusiveFileJob,download:()=>({status:'downloaded'}),chooseSave:(filename,accept,options)=>{chosenNames.push(filename);assert.equal(options?.id,'study-director-backups');return chooseSaveResult();},save:async(file,handle,options)=>{assert.ok(file.blob.size>0,'A backup file must never receive an empty backup.');assert.equal(typeof options?.onProgress,'function');return handle?{status:'saved',filename:handle.name}:{status:exportSaveStatus};}}),
   assets:freeze({get:async id=>{assetGetCalls+=1;return assetRows.some(row=>row.id===id)?(assetBlobOverrides.get(id)||duplicateAssetBlob):null;},put:async()=>true,keys:async()=>assetRows.map(row=>row.id),list:async()=>assetRows,importAll:async()=>0,restoreAll:async()=>true,removeMany:async()=>0,removeMetadata:async()=>0,scheduleMaintenance:()=>true}),
-    codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec}),
-    reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({resolve:async({conflicts=[]})=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries(conflicts.map(item=>[item.key,freeze({text:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
+    codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec,pendingReview:pendingReviewCodec}),
+    reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async({conflicts=[]})=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries(conflicts.map(item=>[item.key,freeze({text:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
   session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('cancel-save'),captureSnapshot:()=>null,hasActiveSession:()=>activeSessionBlocking,hasTasks:()=>false,toActiveSession:()=>null,withPersistenceSuppressed:async operation=>{events.push('suppression:start');try{return await operation();}finally{events.push('suppression:end');}},yieldSession:async()=>false}),
   domain:freeze({
     clampText,filenameSafeStudentName:()=> 'student',getStudentName:()=> 'Student',

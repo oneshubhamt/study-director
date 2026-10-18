@@ -8,8 +8,8 @@ const {exactFrozenObject:exactObject,functionPort:functions}=registry.contracts;
 registry.define('backup-codec',1,()=>{
   const freeze=Object.freeze;
   function createBackupCodec(input){
-    exactObject(input,['appConfig','limits','dataContract','legacy','entityTypes','keyedRecord','entities','helpers','richText','dailyRecordCodec','activeSessionCodec','compatibilityCodec','personalDataCodec','processing'],'Backup codec input');
-    if(!Object.isFrozen(input.appConfig)||!Object.isFrozen(input.limits)||!Object.isFrozen(input.dataContract)||!Object.isFrozen(input.entityTypes)||!Object.isFrozen(input.keyedRecord)||!Object.isFrozen(input.richText)||!Object.isFrozen(input.dailyRecordCodec)||!Object.isFrozen(input.activeSessionCodec)||!Object.isFrozen(input.compatibilityCodec)||!Object.isFrozen(input.personalDataCodec)){
+    exactObject(input,['appConfig','limits','dataContract','legacy','entityTypes','keyedRecord','entities','helpers','richText','dailyRecordCodec','activeSessionCodec','compatibilityCodec','personalDataCodec','pendingReviewCodec','processing'],'Backup codec input');
+    if(!Object.isFrozen(input.appConfig)||!Object.isFrozen(input.limits)||!Object.isFrozen(input.dataContract)||!Object.isFrozen(input.entityTypes)||!Object.isFrozen(input.keyedRecord)||!Object.isFrozen(input.richText)||!Object.isFrozen(input.dailyRecordCodec)||!Object.isFrozen(input.activeSessionCodec)||!Object.isFrozen(input.compatibilityCodec)||!Object.isFrozen(input.personalDataCodec)||!Object.isFrozen(input.pendingReviewCodec)){
       throw new TypeError('Backup codec contracts must be frozen.');
     }
     if(input.compatibilityCodec.format!=='study-director.compatibility-codecs'||input.compatibilityCodec.contractVersion!==1)throw new TypeError('Backup compatibility codec contract is invalid.');
@@ -24,10 +24,14 @@ registry.define('backup-codec',1,()=>{
     const DATA_CONTRACT=input.dataContract;
     const LEGACY_BACKUP_SCHEMA_VERSION=Number(input.legacy.schemaVersion)||0;
     const LEGACY_TOMBSTONE_LIMIT=Math.max(0,Number(input.legacy.tombstoneLimit)||0);
-    const PersonalDataCodec=input.personalDataCodec;
+    const PersonalDataCodec=input.personalDataCodec,PendingReviewCodec=input.pendingReviewCodec;
     const SOURCE_ENTITY_TYPES=freeze([...input.entityTypes].filter(type=>type!=='tombstone'));
     const LEGACY_TOMBSTONE_TYPE='tombstone',LEGACY_REFLECTION_DRAFT_TYPE='reflectionDraft',LEGACY_REFLECTION_DRAFT_LIMIT=Math.max(1,Number(APP_LIMITS.maxImportRecords)||10000);
-    const BACKUP_ENTITY_TYPES=freeze([...SOURCE_ENTITY_TYPES,'personalData','checkpointManifest']);
+    // Backup v23 added the versions kept for review (pendingReview), waiting
+    // and resolved ones together.
+    const PENDING_REVIEW_VERSION=23,PENDING_REVIEW_TYPE='pendingReview',PENDING_REVIEW_LIMIT=2*Math.max(1,Number(APP_LIMITS.maxPendingReviews)||2000);
+    const BACKUP_ENTITY_TYPES_V22=freeze([...SOURCE_ENTITY_TYPES,'personalData','checkpointManifest']);
+    const BACKUP_ENTITY_TYPES=freeze([...BACKUP_ENTITY_TYPES_V22,PENDING_REVIEW_TYPE]);
     // Backup v22 renamed the note entity (areaNote before). A file is checked
     // under the names it was written with; what it holds reads under the
     // current ones.
@@ -39,7 +43,7 @@ registry.define('backup-codec',1,()=>{
     const ActiveSessionCodec=input.activeSessionCodec;
     const CompatibilityCodec=input.compatibilityCodec;
     // Historical completion proofs depend on the original entity order.
-    const BACKUP_ENTITY_TYPES_V19_TO_V21=writtenBackupEntities(BACKUP_ENTITY_TYPES);
+    const BACKUP_ENTITY_TYPES_V19_TO_V21=writtenBackupEntities(BACKUP_ENTITY_TYPES_V22);
     const LEGACY_SOURCE_ENTITY_TYPES=writtenBackupEntities([...SOURCE_ENTITY_TYPES,LEGACY_REFLECTION_DRAFT_TYPE]);
     const BACKUP_ENTITY_TYPES_V15_TO_V18=freeze([...LEGACY_SOURCE_ENTITY_TYPES,'personalData','checkpointManifest']);
     const LEGACY_SYNC_ENTITY_TYPES=writtenBackupEntities([...SOURCE_ENTITY_TYPES,LEGACY_TOMBSTONE_TYPE,LEGACY_REFLECTION_DRAFT_TYPE]);
@@ -48,7 +52,7 @@ registry.define('backup-codec',1,()=>{
     const LEGACY_BACKUP_ENTITY_TYPES=writtenBackupEntities([...SOURCE_ENTITY_TYPES,LEGACY_TOMBSTONE_TYPE]);
     function backupEntityTypesForVersion(version){
       const value=Number(version);
-      return value>=NOTE_ENTITY_VERSION?BACKUP_ENTITY_TYPES:value>=19?BACKUP_ENTITY_TYPES_V19_TO_V21:value>=15?BACKUP_ENTITY_TYPES_V15_TO_V18:value>=11?BACKUP_ENTITY_TYPES_V11_TO_V14:value>=9?BACKUP_ENTITY_TYPES_V9_TO_V10:LEGACY_BACKUP_ENTITY_TYPES;
+      return value>=PENDING_REVIEW_VERSION?BACKUP_ENTITY_TYPES:value>=NOTE_ENTITY_VERSION?BACKUP_ENTITY_TYPES_V22:value>=19?BACKUP_ENTITY_TYPES_V19_TO_V21:value>=15?BACKUP_ENTITY_TYPES_V15_TO_V18:value>=11?BACKUP_ENTITY_TYPES_V11_TO_V14:value>=9?BACKUP_ENTITY_TYPES_V9_TO_V10:LEGACY_BACKUP_ENTITY_TYPES;
     }
     const BACKUP_V10_MAGIC='SDBK10\r\n';
     const BACKUP_V10_HEADER_BYTES=13;
@@ -111,7 +115,7 @@ function backupCountShape(value={},types=BACKUP_ENTITY_TYPES){
   return Object.fromEntries(types.map(type=>[type,boundedInt(value[type],{min:0,max:backupEntityLimit(type),fallback:0})]));
 }
 function backupCountsEqual(a,b,types=BACKUP_ENTITY_TYPES){return types.every(type=>Number(a&&a[type]||0)===Number(b&&b[type]||0));}
-function backupEntityLimit(entityType){return entityType===LEGACY_TOMBSTONE_TYPE?LEGACY_TOMBSTONE_LIMIT:entityType===LEGACY_REFLECTION_DRAFT_TYPE?LEGACY_REFLECTION_DRAFT_LIMIT:['personalData','checkpointManifest'].includes(entityType)?1:entityDefinition(currentBackupEntity(entityType))?.backupLimit||0;}
+function backupEntityLimit(entityType){return entityType===LEGACY_TOMBSTONE_TYPE?LEGACY_TOMBSTONE_LIMIT:entityType===LEGACY_REFLECTION_DRAFT_TYPE?LEGACY_REFLECTION_DRAFT_LIMIT:entityType===PENDING_REVIEW_TYPE?PENDING_REVIEW_LIMIT:['personalData','checkpointManifest'].includes(entityType)?1:entityDefinition(currentBackupEntity(entityType))?.backupLimit||0;}
 function splitBackupItems(items){
   const groups=[];let current=[],bytes=2;
   for(const item of items||[]){
@@ -348,6 +352,7 @@ function sanitizeChunkedBackupItem(entityType,item,{legacy=false}={}){
   if(entityType==='activeSession')return legacy||olderActiveSession(item)?CompatibilityCodec.activeSession(item):ActiveSessionCodec.sanitizeCurrent(item);
   if(entityType===LEGACY_REFLECTION_DRAFT_TYPE){if(!legacy||!item||typeof item!=='object'||Array.isArray(item)||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(String(item.date||'')))return null;return freeze({date:String(item.date)});}
   if(entityType==='checkpointManifest')return validateProtectedCheckpointManifest(item);
+  if(entityType===PENDING_REVIEW_TYPE)return PendingReviewCodec.normalize(item);
   return null;
 }
 async function parseChunkedBackupMetadata(file,options={},context={}){
@@ -360,7 +365,7 @@ async function parseChunkedBackupMetadata(file,options={},context={}){
   if(options.currentOnly===true&&Number(manifest&&manifest.version)!==DATA_CONTRACT.schemas.Backup.version)throw legacyBackupError(`Backup v${Number(manifest&&manifest.version)||'?'} requires the temporary compatibility adapter.`);
   const checked=validateBackupManifest(manifest,gzip,{binaryV10:!!context.binaryV10}),expected=checked.counts,sourceEntityTypes=checked.entityTypes,actual=backupCountShape({},sourceEntityTypes);
   const report=backupImportReport({legacy:Number(manifest.version)!==DATA_CONTRACT.schemas.Backup.version,sourceVersion:manifest.version});
-  const records=[],notes=KeyedRecord.create();let personalData=null,activeSession=null,protectedCheckpointManifest=null,expectedSeq=0,complete=null;const chunkHashes=[];
+  const records=[],notes=KeyedRecord.create(),pendingReviews=[];let personalData=null,activeSession=null,protectedCheckpointManifest=null,expectedSeq=0,complete=null;const chunkHashes=[];
   const identities=Object.fromEntries(sourceEntityTypes.map(type=>[currentBackupEntity(type),new Set()])),referencedAssetIds=new Set();
   let notesComplete=true;
   while(true){
@@ -400,7 +405,7 @@ async function parseChunkedBackupMetadata(file,options={},context={}){
         continue;
       }
       if(!['personalData','checkpointManifest',LEGACY_REFLECTION_DRAFT_TYPE].includes(kind))backupCollectRichAssetIds(clean,referencedAssetIds);
-      const identity=kind==='personalData'?'personal':kind==='checkpointManifest'?'protected-checkpoint':kind===LEGACY_REFLECTION_DRAFT_TYPE?String(clean.date):entityIdentity(kind,clean);
+      const identity=kind==='personalData'?'personal':kind==='checkpointManifest'?'protected-checkpoint':kind===LEGACY_REFLECTION_DRAFT_TYPE?String(clean.date):kind===PENDING_REVIEW_TYPE?clean.id:entityIdentity(kind,clean);
       if(identities[kind].has(identity)){
         if(!legacyItem)throw new Error(`Current backup contains a duplicate ${kind} identity.`);
         report.duplicates++;report.skipped++;
@@ -414,6 +419,7 @@ async function parseChunkedBackupMetadata(file,options={},context={}){
         else if(kind==='dailyRecord')records.push(clean);
         else if(kind==='note')notes[clean.key]=clean;
         else if(kind==='activeSession')activeSession=clean;
+        else if(kind===PENDING_REVIEW_TYPE)pendingReviews.push(freeze(clean));
       }
       if(clean.degraded===true)report.degraded++;
     }
@@ -441,7 +447,8 @@ async function parseChunkedBackupMetadata(file,options={},context={}){
     if(protectedCheckpointManifest.noteDeletions.some(entry=>noteKeys.has(entry.key)))throw new Error('Checkpoint contains contradictory note record/deletion state.');
     if(protectedCheckpointManifest.attachmentDeletions.some(entry=>assetIds.has(entry.assetId)))throw new Error('Checkpoint contains contradictory Attachment Library record/deletion state.');
   }
-  return {importedPersonalData:personalData,data:{notes},records,hasNotes:true,notesComplete,importedActiveSession:activeSession,protectedCheckpointManifest,captureAuthority,formatVersion:manifest.version,counts:currentBackupCounts(actual),manifest,report,uncompressedBytes:state.uncompressedBytes,assetDescriptors,referencedAssetIds:freeze([...referencedAssetIds].sort())};
+  pendingReviews.sort((a,b)=>a.id.localeCompare(b.id));
+  return {importedPersonalData:personalData,data:{notes},records,pendingReviews:freeze(pendingReviews),hasNotes:true,notesComplete,importedActiveSession:activeSession,protectedCheckpointManifest,captureAuthority,formatVersion:manifest.version,counts:currentBackupCounts(actual),manifest,report,uncompressedBytes:state.uncompressedBytes,assetDescriptors,referencedAssetIds:freeze([...referencedAssetIds].sort())};
   }finally{await iterator.return?.();}
 }
 async function backupHasV10Magic(file){
@@ -609,6 +616,7 @@ return Object.freeze({
   currentProtectedManifestNames,
   normalizeImportedActiveSession:(value,{legacy=false}={})=>legacy||olderActiveSession(value)?CompatibilityCodec.activeSession(value):ActiveSessionCodec.sanitizeCurrent(value),
   normalizePersonalData:value=>PersonalDataCodec.normalize(value),
+  normalizePendingReview:value=>{const clean=PendingReviewCodec.normalize(value);return clean?freeze(clean):null;},
   normalizeAssetDescriptors:backupSanitizeAssetDescriptors
 });
   }

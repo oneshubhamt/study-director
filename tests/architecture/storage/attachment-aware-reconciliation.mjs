@@ -12,7 +12,7 @@ assert.match(ui,/if\(local instanceof Blob\)return local/,'Resolved/local editor
 assert.match(ui,/Attachments cannot be added while reconciling notes/,'Preview AssetStore must reject writes.');
 assert.match(ui,/Attachments cannot be removed from storage while reconciling notes/,'Preview AssetStore must reject deletion.');
 
-assert.match(backup,/async function resolvedAssetReferenceIds\(resolvedPlan,signal\)/,'Backup restore must calculate final attachment references from ResolvedPlan.');
+assert.match(backup,/async function resolvedAssetReferenceIds\(resolvedPlan,signal,reviews=freeze\(\[\]\)\)/,'Backup restore must calculate final attachment references from ResolvedPlan and the versions kept for review.');
 assert.match(backup,/for\(const item of resolvedPlan&&resolvedPlan\.savedDays\|\|\[\]\)/,'Saved-Day choices must contribute attachment references.');
 assert.match(backup,/for\(const item of resolvedPlan&&resolvedPlan\.notes\|\|\[\]\)/,'Resolved notes must contribute attachment references.');
 assert.doesNotMatch(backup,/resolvedPlan&&resolvedPlan\.reflectionDrafts/,'Retired Reflection Drafts must not remain a reconciliation attachment-reference domain.');

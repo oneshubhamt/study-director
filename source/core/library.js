@@ -17,7 +17,7 @@ registry.define('library',1,()=>{
     environment:freeze(['cancelAnimationFrame','createOption','createSearchWorker','requestAnimationFrame']),
     exporter:freeze(['exportKeys','cancel']),
     diary:freeze(['bindEditor','captureEditor','clearEditor','deleteEntry','draft','flushEditor','scheduleEditor','settled']),
-    notes:freeze(['areaUse','bindEditor','canCreate','catalogue','clearEditor','clearFind','commitEditor','find','findStep','focusEditor','get','importFiles','linksBar','normalizeArea','normalizeTag','orderEntries','print','purgeTrash','remove','rename','renameAreaInPlans','renameTag','renderInherited','restore','searchDocuments','size','tagged','tags','trash','trashSnapshot','versions']),
+    notes:freeze(['areaUse','bindEditor','canCreate','catalogue','clearEditor','clearFind','commitEditor','find','findStep','focusEditor','get','importFiles','linksBar','normalizeArea','normalizeTag','orderEntries','print','purgeTrash','remove','rename','renameAreaInPlans','renameTag','renderInherited','restore','reviewKept','keptVersion','searchDocuments','size','tagged','tags','trash','trashSnapshot','versions']),
     attachments:freeze(['batch','close','count','invalidate','reconcile','refresh']),
     preferences:freeze(['read','write']),
     clearLibrary:freeze(['preflight','execute']),
@@ -57,7 +57,7 @@ registry.define('library',1,()=>{
     const {
       areaUse:planAreaUse,renameAreaInPlans,bindEditor,canCreate:canCreateNote,catalogue:noteCatalogue,clearEditor,clearFind,commitEditor,find:findInEditor,findStep,focusEditor,
       get:getNote,importFiles:importNoteFiles,linksBar,normalizeArea:normalizeNoteArea,normalizeTag,orderEntries:orderNoteEntries,print:printNote,
-      purgeTrash:purgeExpiredNotes,remove:removeNote,rename:renameNote,renameTag:renameNoteTag,renderInherited,restore:restoreNote,searchDocuments:noteSearchDocuments,size:notesSize,
+      purgeTrash:purgeExpiredNotes,remove:removeNote,rename:renameNote,renameTag:renameNoteTag,renderInherited,restore:restoreNote,reviewKept,keptVersion,searchDocuments:noteSearchDocuments,size:notesSize,
       tagged:taggedNotes,tags:noteTags,trash:trashNote,trashSnapshot:noteTrash,versions:openNoteVersions
     }=ports.notes;
     const {batch:batchAttachments,close:closeAttachments,count:attachmentCount,invalidate:invalidateAttachments,reconcile:reconcileAttachments,refresh:refreshAttachments}=ports.attachments;
@@ -608,7 +608,7 @@ registry.define('library',1,()=>{
       if(signature===noteEditorSignature&&panel.childElementCount){
         if(entry&&parents!==noteParentSignature){noteParentSignature=parents;const box=panel.querySelector('.subject-note-context');if(box)renderInherited(box,entry.key,false,{collapsible:true});}
         panel.querySelector('.note-links')?.refresh?.();
-        const meta=panel.querySelector('.library-notes-editor-meta');if(entry&&meta)meta.textContent=noteMeta(entry,canonical);
+        const meta=panel.querySelector('.library-notes-editor-meta');if(entry&&meta){meta.textContent=noteMeta(entry,canonical);syncReviewMark(meta,writable?canonical:null);}
         return !!entry;
       }
       const previous=notesEditorField();
@@ -621,7 +621,7 @@ registry.define('library',1,()=>{
       const head=document.createElement('div');head.className='library-notes-editor-head';
       const renameable=writable&&!entry.support&&!!canonical,meta=textEl('span','library-notes-editor-meta ui-mono',noteMeta(entry,canonical));
       const copy=document.createElement('div');copy.className='library-notes-editor-identity';
-      copy.append(noteBreadcrumb(entry),noteTitle(entry,renameable),meta);
+      copy.append(noteBreadcrumb(entry),noteTitle(entry,renameable),meta);syncReviewMark(meta,writable?canonical:null);
       const headTools=document.createElement('div');headTools.className='library-notes-editor-tools';
       if(!readOnly){
         const syncMessage=writable?'Synced':'Read-only in this tab';
@@ -665,6 +665,15 @@ registry.define('library',1,()=>{
         updateNoteActions();
       });
       return true;
+    }
+    // 5.2: a quiet "Needs review" mark after the meta line while a sync has
+    // kept another version of this note; it opens that review.
+    function syncReviewMark(meta,canonical){
+      const id=String(canonical?.id||''),wanted=!!id&&keptVersion(id);let mark=meta.nextElementSibling?.classList.contains('library-note-review')?meta.nextElementSibling:null;
+      if(!wanted){mark?.remove();return;}
+      if(mark)return;
+      mark=textEl('button','library-note-tag library-note-review ui-btn','Needs review');mark.type='button';mark.title='Another device changed this note too. Review the kept version.';
+      mark.addEventListener('click',()=>reviewKept(id));meta.after(mark);
     }
     // A deleted note opens read-only, with Restore and Delete forever.
     function renderTrashedNote(item){

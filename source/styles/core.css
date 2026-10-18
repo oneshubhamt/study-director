@@ -1601,6 +1601,7 @@ input,textarea,select{border-radius:var(--sd-shape-field-radius)}
 .library-note-tag{padding:2px 5px;border:1px solid var(--sd-color-border-1);color:var(--sd-color-text-muted);font-family:var(--sd-font-mono);font-size:var(--sd-type-role-label-size);letter-spacing:.45px}
 .library-note-tag.current{border-color:rgba(var(--sd-rgb-info),.24);color:var(--sd-color-info)}
 .library-note-nav-item.has-note .library-note-tag.note{border-color:rgba(var(--sd-rgb-accent-secondary),.22);color:var(--sd-color-accent-secondary)}
+.library-note-review{align-self:center;justify-self:start;margin-top:4px;background:none;border-color:rgba(var(--sd-rgb-warning),.32);color:var(--sd-color-warning);cursor:pointer}.library-note-review:hover,.library-note-review:focus-visible{border-color:var(--sd-color-warning)}
 .library-note-tree-item{grid-template-columns:12px minmax(0,1fr) auto;align-items:center;column-gap:5px}
 .library-note-tree-item[aria-expanded]::before{display:none}
 .library-note-tree-item:focus-visible{outline:2px solid var(--sd-color-accent-primary);outline-offset:-2px}
@@ -1957,6 +1958,7 @@ html[data-study-director-ui-mutable="0"] [data-ownership-ui="drag"]{cursor:not-a
 .backup-file-actions{min-width:0}
 .backup-location-stack{display:grid;gap:6px;min-width:0}
 .backup-location-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:9px 12px;padding:10px;border:1px solid var(--sd-line-neutral-soft);background:rgba(var(--sd-rgb-neutral-overlay),.012);min-width:0}
+.kept-versions-row{border-color:rgba(var(--sd-rgb-warning),.32)}.kept-versions-row[hidden]{display:none!important}
 .backup-device-row,.backup-drive-row{grid-template-columns:minmax(0,1fr) auto auto}
 .backup-drive-row .backup-provider-actions{justify-content:flex-end}
 .backup-inline-settings{display:flex;align-items:flex-end;justify-content:space-between;gap:10px 16px;margin:-1px 0 1px;padding:9px 10px;border:1px solid var(--sd-line-neutral-soft);background:rgba(var(--sd-rgb-neutral-overlay),.008)}

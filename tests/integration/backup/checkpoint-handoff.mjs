@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import {fileURLToPath} from 'node:url';
+import {testPendingReviewCodec,memoryPendingReviews,paragraphMerge} from '../../helpers/pending-review-codec.mjs';
 
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
@@ -29,7 +30,7 @@ const limits=freeze({
   backupChunkItems:10,backupChunkTargetBytes:65536,backupMaxEntryBytes:65536,backupMaxLineBytes:262144,
   backupMaxCompressedBytes:4*1024*1024,backupMaxFileBytes:16*1024*1024,backupMaxUncompressedBytes:8*1024*1024,
   backupMaxAssetDescriptors:100,richAssetMaxBytes:8*1024*1024,maxBackupChunks:1000,importBytes:4*1024*1024,
-  maxImportRecords:100,maxNotes:100,maxLegacyImportTombstones:100,maxImportReflectionDrafts:100,maxReflectionChars:10000
+  maxImportRecords:100,maxNotes:100,maxLegacyImportTombstones:100,maxImportReflectionDrafts:100,maxReflectionChars:10000,maxPendingReviews:20
 });
 const dataContract=RUNTIME_DATA_CONTRACT;
 const defs=freeze({
@@ -54,7 +55,8 @@ const entityDefinition=type=>defs[type]||null,entityIdentity=(type,item)=>String
 const boundedInt=(value,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
 const jsonByteLength=value=>new TextEncoder().encode(typeof value==='string'?value:JSON.stringify(value)).byteLength;
 const personalDataCodec=RecordCodecs.createPersonalDataCodec(limits);
-const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,processing,
+const pendingReviewCodec=testPendingReviewCodec(RecordCodecs,{personalDataCodec});
+const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingReviewCodec,processing,
   appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),entityTypes:freeze(Object.keys(defs)),keyedRecord,
   entities:freeze({entityDefinition,entityIdentity}),helpers:freeze({boundedInt,jsonByteLength}),
   richText:freeze({assetIds:()=>freeze([]),assetIdValid:value=>/^img-[A-Za-z0-9_-]{16,128}$/.test(String(value||'')),imageMimeTypeValid:value=>['image/png','image/jpeg','image/webp','image/gif','image/avif'].includes(String(value||''))}),
@@ -120,7 +122,7 @@ function baseStore(state){
 }
 
 function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=null,hasLiveTasks=false,fileMode='combine',extrasMode='keep',preflightFailure=''}={}){
-  state.deletions??=[];state.noteDeletions??=[];state.attachmentDeletions??=[];
+  state.deletions??=[];state.noteDeletions??=[];state.attachmentDeletions??=[];state.reviews??=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
   let injectedFailure=String(preflightFailure||'');
   const prompts=[];const statuses=[];const events=[];const diagnosticMarks=[];const fn=()=>false;
   const normalizeNotes=value=>Object.fromEntries(Object.entries(value||{}).map(([key,item])=>[key,normalizeArea(item,key)]).filter(([,item])=>item));
@@ -139,12 +141,12 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
       restoreJournalPrepare:async value=>(state.journal={state:{id:value.id},payload:value}),restoreJournalRead:async()=>state.journal,restoreJournalMark:async(id,phase)=>(state.journal.state.phase=phase,state.journal.state),restoreJournalClear:async()=>(state.journal=null,true),
       scheduleRead:()=>state.schedule,personalSettle:async()=>{if(injectedFailure==='personal')throw new Error('QA_FIXTURE personal preflight failure');return true;},personalExport:async()=>state.personal,personalImport:async value=>(state.personal=value,true),personalVerify:async value=>assert.deepEqual(state.personal,value),
       storageGeneration:()=>0,sourceRevision:async()=>'2026-08-23T00:00:00.000Z',snapshotRevision:async()=>'stable-b3',canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],installationId:()=>state.installationId||'inst_device_local',deletionRecoveryFlush:async()=>{events.push('preflight-deletion-flush');if(injectedFailure==='deletions')throw new Error('QA_FIXTURE deletion preflight failure');if(injectedFailure==='deletions-false')return false;if(injectedFailure==='deletions-unknown')return undefined;return true;},
-      deletionRecoverySavedDays:async()=>state.deletions.map(value=>({...value})),deletionRecoveryReplaceSavedDays:async values=>(state.deletions=(values||[]).map(value=>({...value})),true),deletionRecoveryNotes:async()=>state.noteDeletions.map(value=>({...value})),deletionRecoveryReplaceNotes:async values=>(state.noteDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryAttachments:async()=>state.attachmentDeletions.map(value=>({...value})),deletionRecoveryReplaceAttachments:async values=>(state.attachmentDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryClearAttachment:async assetId=>(state.attachmentDeletions=state.attachmentDeletions.filter(item=>item.assetId!==assetId),true),...baseStore(state)
+      deletionRecoverySavedDays:async()=>state.deletions.map(value=>({...value})),deletionRecoveryReplaceSavedDays:async values=>(state.deletions=(values||[]).map(value=>({...value})),true),deletionRecoveryNotes:async()=>state.noteDeletions.map(value=>({...value})),deletionRecoveryReplaceNotes:async values=>(state.noteDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryAttachments:async()=>state.attachmentDeletions.map(value=>({...value})),deletionRecoveryReplaceAttachments:async values=>(state.attachmentDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryClearAttachment:async assetId=>(state.attachmentDeletions=state.attachmentDeletions.filter(item=>item.assetId!==assetId),true),...baseStore(state),...state.reviews.ports
     }),
     assets:freeze({get:async()=>null,put:async()=>true,keys:async()=>[],list:async()=>[],importAll:async()=>0,restoreAll:async()=>true,removeMany:async()=>0,removeMetadata:async()=>0,scheduleMaintenance:fn}),
     exports:freeze({...processing,backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),unprotect:async blob=>({blob,encrypted:false}),check:fn,job:fn=>fn(),download:fn,chooseSave:async()=>null,save:async()=>({status:'downloaded'})}),
-    codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec}),
-    reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({resolve:async options=>noteResolver?noteResolver(options,state):freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:options.manualOnly&&decisions.reflections==='incoming'?item.incomingValue:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
+    codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec,pendingReview:pendingReviewCodec}),
+    reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async options=>noteResolver?noteResolver(options,state):freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:options.manualOnly&&decisions.reflections==='incoming'?item.incomingValue:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
     session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('preflight-session-cancel'),captureSnapshot:()=>hasLiveTasks&&state.activeSession?state.activeSession.snapshot:null,hasActiveSession:()=>!!state.activeSession&&state.running!==false&&state.activeSession.runningOn===(state.installationId||'inst_device_local'),hasTasks:()=>hasLiveTasks,toActiveSession:()=>hasLiveTasks?state.activeSession:null,withPersistenceSuppressed:async operation=>operation(),yieldSession:async()=>{events.push('session-yield');state.activeSession=freeze({...state.activeSession,status:'suspended'});state.running=false;return true;}}),
     domain:freeze({clampText:(value,max=100000)=>String(value??'').slice(0,max),filenameSafeStudentName:()=> 'student',getStudentName:()=>state.personal.preferences.studentName,materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-08-31'}),
     view:freeze({presentation,refreshPnote:fn,refreshReview:fn,renderSchedule:fn}),
@@ -156,7 +158,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
       restoredFromFile:()=>{events.push('restored-from-file');return restoredFromFile?restoredFromFile(state):false;}
     }),
     operations:freeze({assertAuthority:()=>{if(injectedFailure==='ownership')throw new Error('QA_FIXTURE ownership failure');return true;},clearFault:fn,failClosed:message=>{throw new Error(String(message));},runExclusive:async(kind,operation)=>operation()}),
-    interactions:freeze({choose:async options=>{prompts.push(options);return options&&options.title==='Use this backup'?fileMode:options&&options.title==='Keep what isn’t in this backup?'?extrasMode:null;},configure:async config=>{prompts.push(config);const out={...decisions};for(const group of config.groups||[]){if(group.id.startsWith('savedDay__')){const remoteRecord=group.choices.find(choice=>String(choice.label||'').startsWith('Use '));const remoteDeletion=group.choices.find(choice=>String(choice.label||'').startsWith('Apply deletion'));if(decisions.dailyRecords==='replace'&&remoteRecord)out[group.id]=remoteRecord.value;else if(decisions.savedDayDeletions==='apply'&&remoteDeletion)out[group.id]=remoteDeletion.value;else out[group.id]=group.defaultValue;}else if(String(group.label||'').startsWith('Note · ')){const remoteDeletion=group.choices.find(choice=>choice.label==='Delete it');out[group.id]=(decisions.noteByKey?.[String(group.label).slice('Note · '.length)]||decisions.noteDeletions)==='apply'&&remoteDeletion?remoteDeletion.value:group.defaultValue;}else if(group.id==='activeSession'){const incoming=group.choices.find(choice=>String(choice.label||'').startsWith('Use session'));out.activeSession=decisions.activeSession==='checkpoint'&&incoming?incoming.value:group.defaultValue;}}return freeze(out);},notify:fn}),
+    interactions:freeze({choose:async options=>{prompts.push(options);return options&&options.title==='Use this backup'?fileMode:options&&options.title==='Keep what isn’t in this backup?'?extrasMode:null;},configure:async config=>{prompts.push(config);const out={...decisions};for(const group of config.groups||[]){if(group.id.startsWith('kept__')){out[group.id]=state.keptChoice||group.defaultValue;continue;}if(group.id.startsWith('savedDay__')){const remoteRecord=group.choices.find(choice=>String(choice.label||'').startsWith('Use '));const remoteDeletion=group.choices.find(choice=>String(choice.label||'').startsWith('Apply deletion'));if(decisions.dailyRecords==='replace'&&remoteRecord)out[group.id]=remoteRecord.value;else if(decisions.savedDayDeletions==='apply'&&remoteDeletion)out[group.id]=remoteDeletion.value;else out[group.id]=group.defaultValue;}else if(String(group.label||'').startsWith('Note · ')){const remoteDeletion=group.choices.find(choice=>choice.label==='Delete it');out[group.id]=(decisions.noteByKey?.[String(group.label).slice('Note · '.length)]||decisions.noteDeletions)==='apply'&&remoteDeletion?remoteDeletion.value:group.defaultValue;}else if(group.id==='activeSession'){const incoming=group.choices.find(choice=>String(choice.label||'').startsWith('Use session'));out.activeSession=decisions.activeSession==='checkpoint'&&incoming?incoming.value:group.defaultValue;}}return freeze(out);},notify:fn}),
     environment:freeze({AbortController,clearTimeout,yieldTask:async()=>{},setTimeout:callback=>(callback(),1)}),diagnostics:freeze({capture:fn,start:()=>'',mark:(name,details={})=>(diagnosticMarks.push([String(name),details]),true),finish:()=>false,fail:()=>false})
   })}));
   return {runtime,prompts,statuses,events,diagnosticMarks,setPreflightFailure:value=>{injectedFailure=String(value||'');}};
@@ -196,7 +198,7 @@ for(const [stage,code,hasLiveTasks] of preflightCases){
 
 // Format/protection boundary: public provenance is separate from integrity-covered authority/deletion metadata.
 const parsed=await codec.inspectCurrent(blob,{filename:'checkpoint.sdbackup'});
-assert.equal(parsed.formatVersion,22);
+assert.equal(parsed.formatVersion,23);
 assert.equal(parsed.manifest.protectedManifest.entityType,'checkpointManifest');
 assert.equal(Object.hasOwn(parsed.manifest,'authority'),false,'Checkpoint authority must not leak into the public provenance manifest.');
 assert.equal(Object.hasOwn(parsed.manifest,'savedDayDeletions'),false,'Saved-Day deletion history must stay behind the protected-manifest boundary.');
@@ -466,7 +468,10 @@ let syncWorld=null;
   });
   const head=()=>[...drive.values()].filter(file=>file.kind==='checkpoint'&&file.historySummary?.retention?.role!=='before-restore').sort((a,b)=>Date.parse(b.exportedAt)-Date.parse(a.exportedAt))[0]?.id||'';
   const device=state=>{
-    const providers=createHarness(state).runtime.providers,recovery=ManagedRecoveryModule.createCoordinator(freeze({
+    // A review of kept versions takes state.keptChoice ('use' or the default)
+    // and, for note texts, state.reviewText(conflict) or the current text.
+    const reviewTexts=(options,current)=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:typeof current.reviewText==='function'?current.reviewText(item,options):item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))});
+    const harness=createHarness(state,{noteResolver:reviewTexts}),providers=harness.runtime.providers,recovery=ManagedRecoveryModule.createCoordinator(freeze({
       automaticBackup:freeze({suspend:async()=>freeze({}),resume:async()=>true}),diagnostics:freeze({capture:()=>{},mark:()=>false}),
       lifecycle:freeze({settle:async()=>{},quiesce:async operation=>operation(),revision:()=>'2026-08-23T00:00:00.000Z',rebuild:async()=>{}}),mutation:freeze({run:async(_kind,operation)=>operation()})
     }));
@@ -475,7 +480,8 @@ let syncWorld=null;
     return freeze({
       upload:async()=>{await new Promise(resolve=>setTimeout(resolve,3));return providers.backupRepositoryProvider('drive',{interactive:false});},
       sync:()=>providers.bringInRepositoryProvider('drive',{quiet:true,sync:true,checkpointId:head()}),
-      review:()=>providers.bringInRepositoryProvider('drive',{checkpointId:head(),review:true})
+      review:()=>providers.bringInRepositoryProvider('drive',{checkpointId:head(),review:true}),
+      reviewKept:(options={})=>harness.runtime.controller.reviewKeptVersions(options)
     });
   };
   const note=text=>freeze({Shared:freeze({version:2,key:'Shared',text,updatedAt:new Date().toISOString()})});
@@ -501,22 +507,63 @@ let syncWorld=null;
   assert.equal((await B.sync()).cancelled,false);assert.equal(b.activeSession.snapshot.label,'MOVING','a session moves to a device that has none');
   b.activeSession=null;b.schedule='';b.records.set('2026-08-29',record('2026-08-29','saved on B','2026-08-30T12:00:00.000Z'));const saved=await B.upload();
   assert.equal((await A.sync()).cancelled,false);assert.equal(a.activeSession,null,'a session saved as a Saved Day on the other device ends here');assert.equal(a.records.get('2026-08-29').reflection,'saved on B');
-  // The same Saved Day changed on both: nothing changes until the person chooses; timestamps settle nothing.
+  // The same Saved Day changed on both: the sync never stops. The newer shows
+  // and the other is kept for review, on every device, until the person
+  // chooses; a time only chooses what shows meanwhile.
   a.records.set('2026-08-01',record('2026-08-01','day one by A','2026-08-31T09:00:00.000Z'));const v4=await A.upload();
   b.records.set('2026-08-01',record('2026-08-01','day one by B','2026-08-31T10:00:00.000Z'));
-  const conflict=await B.sync();assert.equal(conflict.cancelled,true);assert.equal(conflict.reason,'needs-decision');
-  assert.equal(b.records.get('2026-08-01').reflection,'day one by B','a newer timestamp settles nothing');assert.equal(b.reconciliationBase.checkpointId,saved.checkpointId,'an unsettled difference leaves the shared base where it was');
-  b.records.set('2026-08-01',record('2026-08-01','day one'));
-  assert.equal((await B.sync()).cancelled,false);assert.equal(b.records.get('2026-08-01').reflection,'day one by A');assert.equal(b.reconciliationBase.checkpointId,v4.checkpointId);
+  assert.equal((await B.sync()).cancelled,false,'a difference made on both sides never stops a sync');
+  assert.equal(b.records.get('2026-08-01').reflection,'day one by B','the newer one shows');assert.equal(b.reconciliationBase.checkpointId,v4.checkpointId,'the sync took in Drive’s version');
+  const keptDay=b.reviews.open().find(review=>review.subject==='savedDay');assert.equal(keptDay.ref,'2026-08-01');assert.equal(keptDay.kept.reflection,'day one by A','the other is kept for review');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.records.get('2026-08-01').reflection,'day one by B');assert.deepEqual(a.reviews.open().map(review=>review.id),[keptDay.id],'the kept version reaches the other device');
+  // Reviewed on either device: the choice is an ordinary edit, and the review ends everywhere.
+  a.keptChoice='use';const dayReview=await A.reviewKept();a.keptChoice='';
+  assert.equal(dayReview.reviewed,1);assert.equal(a.records.get('2026-08-01').reflection,'day one by A','the kept version is used');assert.deepEqual(a.reviews.open(),[]);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.records.get('2026-08-01').reflection,'day one by A');assert.deepEqual(b.reviews.open(),[],'a review resolved on one device ends on every device');
+  // Notes changed on both: different paragraphs merge by themselves (Smart
+  // merge); the same paragraph shows the newer edit and keeps the other with
+  // what both last shared, for the review's Smart merge.
+  b.notes=note('one\n\ntwo');await B.upload();assert.equal((await A.sync()).cancelled,false);
+  a.notes=note('one by A\n\ntwo');await A.upload();b.notes=note('one\n\ntwo by B');
+  assert.equal((await B.sync()).cancelled,false);assert.equal(b.notes.Shared.text,'one by A\n\ntwo by B','edits to different paragraphs are joined');assert.equal(b.reviews.open().length,0,'nothing is kept when nothing is lost');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);assert.equal(a.notes.Shared.text,'one by A\n\ntwo by B');
+  a.notes=note('one, A again\n\ntwo by B');await A.upload();await new Promise(resolve=>setTimeout(resolve,3));b.notes=note('one, B again\n\ntwo by B');
+  assert.equal((await B.sync()).cancelled,false);assert.equal(b.notes.Shared.text,'one, B again\n\ntwo by B','the newer edit shows');
+  const keptNote=b.reviews.open().find(review=>review.subject==='note');assert.equal(keptNote.kept.text,'one, A again\n\ntwo by B','the other edit is kept');assert.equal(keptNote.base.text,'one by A\n\ntwo by B','with what both last shared');
+  let offered=null;b.reviewText=(item,options)=>{offered={item,purpose:options.purpose};return 'one, A and B\n\ntwo by B';};
+  assert.equal((await B.reviewKept({ref:'Shared'})).reviewed,1);b.reviewText=null;
+  assert.equal(offered.purpose,'kept');assert.equal(offered.item.localValue,'one, B again\n\ntwo by B');assert.equal(offered.item.incomingValue,'one, A again\n\ntwo by B');assert.equal(offered.item.ancestorValue,'one by A\n\ntwo by B','the review offers Smart merge from what both last shared');
+  assert.equal(b.notes.Shared.text,'one, A and B\n\ntwo by B');assert.deepEqual(b.reviews.open(),[]);
+  await B.upload();assert.equal((await A.sync()).cancelled,false);assert.equal(a.notes.Shared.text,'one, A and B\n\ntwo by B');assert.deepEqual(a.reviews.open(),[]);
+  // A note edited on one device and deleted on the other stays; its review offers to delete it.
+  const draft=text=>freeze({version:2,key:'Draft',text,updatedAt:new Date().toISOString()});
+  b.notes={...b.notes,Draft:draft('a draft')};await B.upload();assert.equal((await A.sync()).cancelled,false);
+  a.notes={Shared:a.notes.Shared};a.noteDeletions=[{key:'Draft',deletedAt:new Date().toISOString()}];await A.upload();
+  b.notes={...b.notes,Draft:draft('kept writing on B')};
+  assert.equal((await B.sync()).cancelled,false);assert.equal(b.notes.Draft.text,'kept writing on B','an edited note is never deleted by a sync');
+  const keptDeletion=b.reviews.open().find(review=>review.subject==='note');assert.equal(keptDeletion.ref,'Draft');assert.equal(keptDeletion.kept,null,'the review offers the deletion');
+  b.keptChoice='use';assert.equal((await B.reviewKept()).reviewed,1);b.keptChoice='';
+  assert.equal(b.notes.Draft,undefined,'choosing it deletes the note');assert.ok(b.noteDeletions.some(item=>item.key==='Draft'));
+  await B.upload();assert.equal((await A.sync()).cancelled,false);assert.deepEqual(a.reviews.open(),[]);
+  // Plans and settings changed on both: this device's stay and the other's are kept.
+  a.personal=personal('Name on A');await A.upload();b.personal=personal('Name on B');
+  assert.equal((await B.sync()).cancelled,false);assert.equal(b.personal.preferences.studentName,'Name on B');
+  const keptPersonal=b.reviews.open().find(review=>review.subject==='personal');assert.equal(keptPersonal.kept.preferences.studentName,'Name on A');
+  b.keptChoice='use';await B.reviewKept();b.keptChoice='';assert.equal(b.personal.preferences.studentName,'Name on A','the review lets the person pick the kept settings');assert.deepEqual(b.reviews.open(),[]);
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
   // A session running here keeps its own state; everything else merges.
   a.activeSession=session('2026-08-30','A-SESSION',{runningOn:a.installationId});a.schedule=a.activeSession.scheduleText;a.running=false;a.notes=note('edited on A again');await A.upload();
   b.activeSession=session('2026-08-31','B-SESSION',{runningOn:b.installationId});b.schedule=b.activeSession.scheduleText;
   assert.equal((await B.sync()).cancelled,false,'sync is never blocked by a running session');
   assert.equal(b.activeSession.snapshot.label,'B-SESSION','the session running here stays as it is');assert.equal(b.notes.Shared.text,'edited on A again','everything else merges as usual');
-  // Another device's own session never silently replaces one left unsaved here.
+  // Another device's own session never silently replaces one left unsaved
+  // here: this one stays and the other is kept for review.
   await B.upload();
-  const sessionChoice=await A.sync();assert.equal(sessionChoice.cancelled,true);assert.equal(sessionChoice.reason,'needs-decision');
+  assert.equal((await A.sync()).cancelled,false);
   assert.equal(a.activeSession.snapshot.label,'A-SESSION','an unsaved earlier session is not replaced by a new one from another device');
+  assert.equal(a.reviews.open().find(review=>review.subject==='session').kept.snapshot.label,'B-SESSION','the other session is kept for review');
 }
 
 // A study session belongs to the device running it. Another device keeps a
@@ -557,8 +604,9 @@ let syncWorld=null;
   running(b,'B-TOOK-BACK',15);await B.upload();
   running(a,'A-PROGRESS',16);
   const yielded=await A.sync();
-  assert.equal(yielded.cancelled,true);assert.equal(yielded.reason,'needs-decision','both versions wait for the person');
-  assert.equal(a.running,false,'the device that was taken over stops its timer');assert.equal(a.activeSession.snapshot.label,'A-PROGRESS','its progress is kept');assert.equal(a.activeSession.status,'suspended');
+  assert.equal(yielded.cancelled,false,'a takeover never stops the sync');
+  assert.equal(a.running,false,'the device that was taken over stops its timer');assert.equal(a.activeSession.snapshot.label,'B-TOOK-BACK','it shows the session running on the other device');
+  const keptProgress=a.reviews.open().find(review=>review.subject==='session');assert.equal(keptProgress.kept.snapshot.label,'A-PROGRESS','its own progress is kept for review');assert.equal(keptProgress.kept.status,'suspended');
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'checkpoint-handoff',preflightVariants:preflightCases.length,coverage:['two-device Drive sync','study session hand-off and takeover','current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential handoff','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'checkpoint-handoff',preflightVariants:preflightCases.length,coverage:['two-device Drive sync','versions kept for review travel and resolve everywhere','study session hand-off and takeover','current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential handoff','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));

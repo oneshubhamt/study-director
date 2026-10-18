@@ -16,10 +16,10 @@ registry.define('backup',1,input=>{
   const Canonical=input.canonical,ManagedRepositoryModule=input.managedRepository,BackupProviderModule=input.backupProvider,RepositoryBackgroundModule=input.repositoryBackground,BackupCaptureModule=input.backupCapture;
   const PORT_FIELDS=freeze({
     configuration:freeze(['appVersion','backupVersion','limits']),
-    persistence:freeze(['activeSessionLoad','activeSessionSave','activeSessionClear','activeSessionSettled','dailyRecordBackupDates','dailyRecordBackupMonth','dailyRecordDocuments','dailyRecordImportBatches','dailyRecordRemove','dailyRecordTimestamp','notesExportPayload','notesReadFreshPayload','notesReadFreshItems','notesFlush','notesNormalizePayload','notesAlignByTitle','notesTrashKey','notesFailure','restoreJournalPrepare','restoreJournalRead','restoreJournalMark','restoreJournalClear','scheduleRead','personalSettle','personalExport','personalImport','personalVerify','sourceRevision','snapshotRevision','storageGeneration','canonicalMutationEpochRead','canonicalPreparationRebase','preparationUnitStamps','preparationUnitReplace','installationId','deletionRecoveryFlush','deletionRecoverySavedDays','deletionRecoveryReplaceSavedDays','deletionRecoveryNotes','deletionRecoveryReplaceNotes','deletionRecoveryAttachments','deletionRecoveryReplaceAttachments','deletionRecoveryClearAttachment','reconciliationBaseRead','reconciliationBaseReadNotes','reconciliationBaseReadDays','reconciliationBaseWrite']),
-    codecs:freeze(['activeSession','backup']),
+    persistence:freeze(['activeSessionLoad','activeSessionSave','activeSessionClear','activeSessionSettled','dailyRecordBackupDates','dailyRecordBackupMonth','dailyRecordDocuments','dailyRecordImportBatches','dailyRecordRemove','dailyRecordTimestamp','notesExportPayload','notesReadFreshPayload','notesReadFreshItems','notesFlush','notesNormalizePayload','notesAlignByTitle','notesTrashKey','notesFailure','restoreJournalPrepare','restoreJournalRead','restoreJournalMark','restoreJournalClear','scheduleRead','personalSettle','personalExport','personalImport','personalVerify','sourceRevision','snapshotRevision','storageGeneration','canonicalMutationEpochRead','canonicalPreparationRebase','preparationUnitStamps','preparationUnitReplace','installationId','deletionRecoveryFlush','deletionRecoverySavedDays','deletionRecoveryReplaceSavedDays','deletionRecoveryNotes','deletionRecoveryReplaceNotes','deletionRecoveryAttachments','deletionRecoveryReplaceAttachments','deletionRecoveryClearAttachment','reconciliationBaseRead','reconciliationBaseReadNotes','reconciliationBaseReadDays','reconciliationBaseWrite','pendingReviewsList','pendingReviewsReadItems','pendingReviewsMerge','pendingReviewsReplace','pendingReviewsResolve']),
+    codecs:freeze(['activeSession','backup','pendingReview']),
     reconciliation:freeze(['createPlan','resolvePlan','summarizePlan']),
-    noteReconciliation:freeze(['resolve']),
+    noteReconciliation:freeze(['resolve','merge']),
     exports:freeze(['backgroundAvailable','protect','unprotect','check','scope','job','run','download','chooseSave','save']),
     session:freeze(['canMutate','cancelLiveDraftSave','captureSnapshot','hasActiveSession','hasTasks','toActiveSession','withPersistenceSuppressed','yieldSession']),
     domain:freeze(['clampText','filenameSafeStudentName','getStudentName','materializeDailyRecordView','sanitizeCurrentDailyRecord','todayISO']),
@@ -55,7 +55,7 @@ registry.define('backup',1,input=>{
     if(!Object.isFrozen(ports.configuration.limits)){
       throw new TypeError('Backup configuration objects must be frozen.');
     }
-    if(!Object.isFrozen(ports.codecs.backup)||!Object.isFrozen(ports.codecs.activeSession)){
+    if(!Object.isFrozen(ports.codecs.backup)||!Object.isFrozen(ports.codecs.activeSession)||!Object.isFrozen(ports.codecs.pendingReview)){
       throw new TypeError('Backup codecs must be frozen.');
     }
     if(!Object.isFrozen(ports.view.presentation)||['begin','read','feedback','condition','detail','outcome','resolve','reset','subscribe'].some(key=>typeof ports.view.presentation[key]!=='function'))throw new TypeError('Backup presentation port is invalid.');
@@ -68,9 +68,9 @@ registry.define('backup',1,input=>{
       activeSessionLoad,activeSessionSave,activeSessionClear,activeSessionSettled,dailyRecordBackupDates,dailyRecordBackupMonth,dailyRecordDocuments,
       dailyRecordImportBatches,dailyRecordRemove,dailyRecordTimestamp,notesExportPayload,notesReadFreshPayload,notesReadFreshItems,notesFlush,
       notesNormalizePayload,notesAlignByTitle,notesTrashKey,notesFailure,restoreJournalPrepare,restoreJournalRead,
-      restoreJournalMark,restoreJournalClear,scheduleRead,personalSettle,personalExport,personalImport,personalVerify,canonicalMutationEpochRead,canonicalPreparationRebase,preparationUnitStamps,preparationUnitReplace,installationId,deletionRecoveryFlush,deletionRecoverySavedDays,deletionRecoveryReplaceSavedDays,deletionRecoveryNotes,deletionRecoveryReplaceNotes,deletionRecoveryAttachments,deletionRecoveryReplaceAttachments,deletionRecoveryClearAttachment,reconciliationBaseRead,reconciliationBaseReadNotes,reconciliationBaseReadDays,reconciliationBaseWrite
+      restoreJournalMark,restoreJournalClear,scheduleRead,personalSettle,personalExport,personalImport,personalVerify,canonicalMutationEpochRead,canonicalPreparationRebase,preparationUnitStamps,preparationUnitReplace,installationId,deletionRecoveryFlush,deletionRecoverySavedDays,deletionRecoveryReplaceSavedDays,deletionRecoveryNotes,deletionRecoveryReplaceNotes,deletionRecoveryAttachments,deletionRecoveryReplaceAttachments,deletionRecoveryClearAttachment,reconciliationBaseRead,reconciliationBaseReadNotes,reconciliationBaseReadDays,reconciliationBaseWrite,pendingReviewsList,pendingReviewsReadItems,pendingReviewsMerge,pendingReviewsReplace,pendingReviewsResolve
     }=ports.persistence;
-    const {activeSession:ActiveSessionCodec,backup:BackupCodec}=ports.codecs;
+    const {activeSession:ActiveSessionCodec,backup:BackupCodec,pendingReview:PendingReviewCodec}=ports.codecs;
     const Reconciliation=ports.reconciliation;
     const NoteReconciliation=ports.noteReconciliation;
     const Exports=ports.exports;
@@ -89,6 +89,7 @@ registry.define('backup',1,input=>{
       dailyRecords:freeze({backupDates:dailyRecordBackupDates,backupMonth:dailyRecordBackupMonth,documents:dailyRecordDocuments,importBatches:dailyRecordImportBatches,remove:dailyRecordRemove,timestamp:dailyRecordTimestamp}),
       notes:freeze({exportPayload:notesExportPayload,readFreshPayload:notesReadFreshPayload,readFreshItems:notesReadFreshItems,flush:notesFlush,normalizePayload:notesNormalizePayload,alignByTitle:notesAlignByTitle,failure:notesFailure}),
       restoreJournal:freeze({prepare:restoreJournalPrepare,read:restoreJournalRead,mark:restoreJournalMark,clear:restoreJournalClear}),
+      pendingReviews:freeze({list:pendingReviewsList,readItems:pendingReviewsReadItems,merge:pendingReviewsMerge,replace:pendingReviewsReplace,resolve:pendingReviewsResolve}),
       provenance:freeze({installationId}),mutationEpoch:freeze({read:canonicalMutationEpochRead,rebasePreparation:canonicalPreparationRebase}),preparationUnits:freeze({list:preparationUnitStamps,replace:preparationUnitReplace}),deletionRecovery:freeze({flush:deletionRecoveryFlush,savedDays:deletionRecoverySavedDays,replaceSavedDays:deletionRecoveryReplaceSavedDays,notes:deletionRecoveryNotes,replaceNotes:deletionRecoveryReplaceNotes,attachments:deletionRecoveryAttachments,replaceAttachments:deletionRecoveryReplaceAttachments,clearAttachment:deletionRecoveryClearAttachment}),reconciliationBase:freeze({read:reconciliationBaseRead,readNotes:reconciliationBaseReadNotes,readDays:reconciliationBaseReadDays,write:reconciliationBaseWrite})
     });
     const AssetData=portableAssets?freeze({
@@ -157,7 +158,8 @@ const BackupCapture=BackupCaptureModule.create(freeze({
     dailyRecords:freeze({backupDates:AppData.dailyRecords.backupDates,backupMonth:AppData.dailyRecords.backupMonth}),
     notes:freeze({flush:AppData.notes.flush,failure:AppData.notes.failure,readFreshPayload:AppData.notes.readFreshPayload,exportPayload:AppData.notes.exportPayload,readFreshItems:AppData.notes.readFreshItems}),
     deletionRecovery:freeze({flush:AppData.deletionRecovery.flush,savedDays:AppData.deletionRecovery.savedDays,notes:AppData.deletionRecovery.notes,attachments:AppData.deletionRecovery.attachments}),
-    mutationEpoch:freeze({read:AppData.mutationEpoch.read}),preparationUnits:freeze({list:AppData.preparationUnits.list,replace:AppData.preparationUnits.replace}),provenance:freeze({installationId:AppData.provenance.installationId})
+    mutationEpoch:freeze({read:AppData.mutationEpoch.read}),preparationUnits:freeze({list:AppData.preparationUnits.list,replace:AppData.preparationUnits.replace}),provenance:freeze({installationId:AppData.provenance.installationId}),
+    pendingReviews:freeze({list:AppData.pendingReviews.list,readItems:AppData.pendingReviews.readItems})
   }),
   codecs:freeze({activeSession:ActiveSessionCodec,backup:BackupCodec}),
   session:freeze({canMutate:appCanMutate,cancelLiveDraftSave,captureSnapshot:captureSessionSnapshot,hasTasks,toActiveSession:activeSessionPayload}),
@@ -190,6 +192,7 @@ async function* createPortableBackupLines(plan,{compression='none'}={}){
   for(const group of BackupCodec.splitItems(plan.noteItems))yield await emit('note',group);
   if(plan.activeSession)yield await emit('activeSession',[plan.activeSession]);
   if(plan.personalData)yield await emit('personalData',[plan.personalData]);
+  for(const group of BackupCodec.splitItems(plan.pendingReviewItems||[]))yield await emit('pendingReview',group);
   if(!BackupCodec.countsEqual(actual,plan.counts))throw new Error('Backup counts changed during export. Please export again.');
   const captureAuthority=plan&&plan.completeness&&plan.completeness.complete===true?'canonical-complete':'rescue-partial';
   yield (await Exports.run('stringify',{value:await BackupCodec.encodeCompletion(seq,actual,chunkHashes,algorithm,(plan.assetItems||[]).map(item=>item.descriptor),captureAuthority)}))+'\n';
@@ -723,6 +726,21 @@ async function savedDaySettlement(plan,base){
   }
   return settled;
 }
+// 5.2: a Saved Day both sides changed since they last shared it (or that
+// differs with no shared history) shows the newer side in a sync; the other
+// is kept for review (null where that side deleted the day).
+function syncSavedDayReviews(plan,settled){
+  if(!settled)return freeze([]);
+  const reviews=[],time=candidate=>Date.parse(String(candidate.kind==='deleted'?candidate.deletedAt:candidate.record&&(candidate.record.updatedAt||candidate.record.savedAt)||''))||0;
+  for(const item of plan.savedDays){
+    if(!item.conflict||settled.has(item.date))continue;
+    const local=item.candidates.find(candidate=>candidate.local),incoming=item.candidates.find(candidate=>!candidate.local);if(!local||!incoming)continue;
+    const shown=time(incoming)>time(local)?incoming:local,other=shown===local?incoming:local;
+    settled.set(item.date,shown.id);
+    reviews.push(PendingReviewCodec.create({subject:'savedDay',ref:item.date,kept:other.kind==='record'?sanitizeCurrentDailyRecord(other.record):null}));
+  }
+  return freeze(reviews);
+}
 // The Active Session: 'same', 'incoming' or 'local' when one side has not
 // changed it since the handoff, 'conflict' when both have, '' without a
 // handoff, and, while it runs here during a sync or a review, 'hold' (this
@@ -751,10 +769,13 @@ function sessionFollows(local,incoming,parsed){
 function nextNoteRevision(...values){return new Date(Math.max(Date.now(),...values.map(value=>(Date.parse(String(value&&value.updatedAt||''))||0)+1))).toISOString();}
 // Combine settles a note difference without asking only when nothing on this
 // device can be lost: a side still holds what both sides last shared (the
-// handoff ancestor), so only the other side changed it, or the side that
-// deleted a note holds the other side's copy in Recently deleted. Every other
-// difference is the person's: text in the review, deletions and titles in
-// "Different versions found".
+// handoff ancestor), so only the other side changed it; both changed the text
+// in different paragraphs, which Smart merge joins (mergeThreeWay, safe); the
+// note did not exist when both last shared, so the side deleting it has not
+// touched it since; or the side that deleted a note holds the other side's
+// copy in Recently deleted. Every other difference is the person's: text in
+// the review, deletions and titles in "Different versions found" (a sync
+// keeps it for review instead: syncNoteReviews).
 function noteReconciliationState(plan,ancestor=null){
   const items=new Map(plan.notes.map(item=>[item.key,item]));
   const shared=key=>ancestor&&ancestor.notes&&Object.prototype.hasOwnProperty.call(ancestor.notes,key)?ancestor.notes[key]:null;
@@ -770,7 +791,8 @@ function noteReconciliationState(plan,ancestor=null){
         const localValue=String(mine[field]??''),incomingValue=String(theirs[field]??'');if(localValue===incomingValue)continue;
         if(base&&localValue===base[field])decided.set(item.key,incomingValue);
         else if(base&&incomingValue===base[field])decided.set(item.key,localValue);
-        else if(field==='label')titles.push(freeze({key:item.key,local:localValue,incoming:incomingValue}));
+        else if(field==='text'&&base&&smartMerge(base.text,localValue,incomingValue)!==null)decided.set(item.key,smartMerge(base.text,localValue,incomingValue));
+        else if(field==='label')titles.push(freeze({key:item.key,local:localValue,incoming:incomingValue,base:base?String(base.label):null}));
         else conflicts.push(freeze({key:item.key,label:String(mine.label||theirs.label||item.key),localCandidateId:local.id,incomingCandidateId:incoming.id,localValue,incomingValue,incomingLabel:incoming.sources[0]?.label||'Backup copy',ancestorAvailable:!!base,ancestorValue:base?String(base.text):''}));
       }
       continue;
@@ -780,9 +802,121 @@ function noteReconciliationState(plan,ancestor=null){
     // deleting side holds that same copy in Recently deleted.
     const kept=local.kind==='record'?local:incoming,deleting=kept===local?incoming:local;
     if(same(kept.value,base)||same(kept.value,trashCopy(item.key,deleting.local)))settled.set(item.key,deleting.id);
+    else if(ancestor&&!base)settled.set(item.key,kept.id);
     else deletions.push(item);
   }
   return freeze({settled,texts,labels,conflicts:freeze(conflicts),deletions:freeze(deletions),titles:freeze(titles),items});
+}
+// Smart merge of two edits made since the shared text: the merged text when
+// no paragraph changed on both sides, else null.
+const smartMerges=new Map();
+function smartMerge(base,local,incoming){
+  const key=JSON.stringify([base,local,incoming]);if(smartMerges.has(key))return smartMerges.get(key);
+  let value=null;try{const result=NoteReconciliation.merge(base,local,incoming);value=result&&result.safe===true?String(result.value):null;}catch(error){AppDiagnostics.capture('backup.smart-merge',error,'warn');}
+  if(smartMerges.size>64)smartMerges.clear();smartMerges.set(key,value);return value;
+}
+// 5.2: a sync never asks. Where both sides changed a note's text or title
+// since they last shared it, the newer edit shows and the other is kept for
+// review with what both last shared (for Smart merge then); a note edited on
+// one side and deleted on the other stays, and its review offers to delete
+// it. Times only choose what shows until the person reviews it.
+function syncNoteReviews(plan,state){
+  const reviews=[],byKey=new Map(),time=value=>Date.parse(String(value&&value.updatedAt||''))||0;
+  const pair=key=>{const item=state.items.get(key),local=item&&item.candidates.find(candidate=>candidate.local),incoming=item&&item.candidates.find(candidate=>!candidate.local);return local&&incoming?{local,incoming,incomingNewer:time(incoming.value)>time(local.value)}:null;};
+  const entry=key=>{let value=byKey.get(key);if(!value){value={kept:{},base:{},hasBase:true};byKey.set(key,value);}return value;};
+  for(const conflict of state.conflicts){
+    const sides=pair(conflict.key);if(!sides)continue;
+    state.texts.set(conflict.key,sides.incomingNewer?conflict.incomingValue:conflict.localValue);
+    const held=entry(conflict.key);held.kept.text=sides.incomingNewer?conflict.localValue:conflict.incomingValue;if(conflict.ancestorAvailable)held.base.text=conflict.ancestorValue;else held.hasBase=false;
+  }
+  for(const title of state.titles){
+    const sides=pair(title.key);if(!sides)continue;
+    state.labels.set(title.key,sides.incomingNewer?title.incoming:title.local);
+    const held=entry(title.key);held.kept.label=sides.incomingNewer?title.local:title.incoming;if(title.base!==null)held.base.label=title.base;else held.hasBase=false;
+  }
+  for(const [key,held] of byKey)reviews.push(PendingReviewCodec.create({subject:'note',ref:key,kept:freeze(held.kept),base:held.hasBase&&Object.keys(held.base).length===Object.keys(held.kept).length?freeze(held.base):null}));
+  for(const item of state.deletions){
+    const record=item.candidates.find(candidate=>candidate.kind==='record');if(!record)continue;
+    state.settled.set(item.key,record.id);reviews.push(PendingReviewCodec.create({subject:'note',ref:item.key,kept:null}));
+  }
+  return freeze(reviews);
+}
+// 5.2: the person reviews what a sync kept, for one note or day (ref) or
+// all. Choices come first, then note texts in the comparison dialog, where
+// Smart merge starts from what both last shared. Nothing is written until
+// both are confirmed, and nothing that changed meanwhile is overwritten. Each
+// choice is then an edit like any other, so it syncs, and the review ends on
+// every device. A session kept for review waits while a session runs here.
+async function reviewKeptVersions({ref=''}={}){
+  requireBackupMutationControl('reviewing kept versions');
+  // One review per note or day at a time, the oldest first: a second kept
+  // version of the same note waits for the next look.
+  const target=String(ref||''),waiting=(await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt&&(!target||review.ref===target)),first=new Map();
+  for(const review of [...waiting].sort((a,b)=>a.keptAt.localeCompare(b.keptAt)||a.id.localeCompare(b.id)))if(!first.has(review.subject+':'+review.ref)&&(review.subject!=='session'||!hasActiveSession()))first.set(review.subject+':'+review.ref,review);
+  const reviews=[...first.values()],of=subject=>reviews.filter(review=>review.subject===subject);
+  if(!reviews.length)return freeze({reviewed:0,left:waiting.length,changed:0});
+  const noteIds=[...new Set(of('note').map(review=>review.ref))],noteRows=noteIds.length?await AppData.notes.readFreshItems(noteIds):[],notes=new Map(noteIds.map((id,index)=>[id,noteRows[index]||null]));
+  const days=new Map((of('savedDay').length?await getDailyRecordDocumentsByDates(of('savedDay').map(review=>review.ref)):[]).map(record=>[record.date,record]));
+  const personal=of('personal').length?await personalExport({flush:false}):null,session=of('session').length?(await readCanonicalActiveSession()).value||null:null;
+  // Each choice: 'keep' leaves this device's as it is (wait: the review stays
+  // open), 'use' takes the kept version.
+  const groups=[],steps=[],texts=[],choice=(review,part,label,description,keep,use,wait=false)=>{const id=`kept__${review.id}${part?`__${part}`:''}`;groups.push(freeze({id,label,defaultValue:'keep',description,choices:freeze([freeze({value:'keep',...keep}),freeze({value:'use',...use})])}));steps.push({id,review,part,wait});};
+  const when=review=>savedDayDecisionTimestamp(review.keptAt),day=(record,origin)=>record?savedDayChoiceDescription({kind:'record',record,local:origin==='here',sources:[{label:'Kept version',local:origin==='here'}]}):origin==='here'?'Not on this device.':'Deleted on the other device.';
+  for(const review of reviews){
+    const kept=review.kept;
+    if(review.subject==='note'){
+      const note=notes.get(review.ref);
+      if(!note)choice(review,'','Note · deleted here',`Another device changed this note after it was deleted here (kept ${when(review)}). Restore it from Recently deleted to compare.`,{label:'Keep for later',description:'The kept version waits.'},{label:'Discard the kept version',description:'Nothing changes here.'},true);
+      else if(!kept)choice(review,'',`Note · ${note.label}`,'Deleted on another device while it was edited here. It stays until you choose.',{label:'Keep the note',description:'It stays as it is.'},{label:'Delete it',description:'It moves to Recently deleted.'});
+      else{
+        if(typeof kept.label==='string'&&kept.label!==note.label)choice(review,'label',`Note title · ${note.label}`,`Renamed on both devices; “${kept.label}” was kept for review (${when(review)}).`,{label:`Keep “${note.label}”`,description:''},{label:`Use “${kept.label}”`,description:''});
+        if(typeof kept.text==='string'&&kept.text!==note.text)texts.push(freeze({key:review.ref,label:note.label,localCandidateId:'current',incomingCandidateId:review.id,localValue:note.text,incomingValue:kept.text,incomingLabel:`Kept ${when(review)}`,ancestorAvailable:typeof review.base?.text==='string',ancestorValue:String(review.base?.text||'')}));
+      }
+    }else if(review.subject==='savedDay'){
+      const record=days.get(review.ref)||null;
+      if(record||kept)choice(review,'',`Saved Day · ${review.ref}`,'Changed on both devices. The newer one shows; the other was kept for review.',{label:record?'Keep the current one':'Keep it deleted',description:day(record,'here')},{label:kept?'Use the kept version':'Delete it',description:day(kept,'kept')});
+    }else if(review.subject==='personal'){
+      if(!personal){steps.push({id:'',review,part:'',wait:true});continue;}
+      if(!Canonical.same(personal.plans,kept.plans))choice(review,'plans','Plan draft and saved plans','Changed on both devices; the other version was kept for review.',{label:'Keep current plans',description:''},{label:'Use kept plans',description:`The kept draft and saved plans (${kept.plans.savedPlans.length} saved plans).`});
+      if(!Canonical.same(personal.preferences,kept.preferences))choice(review,'settings','Personal and display settings','Changed on both devices; the other version was kept for review.',{label:'Keep current settings',description:''},{label:'Use kept settings',description:'The kept name, theme, text size and other preferences.'});
+    }else if(review.subject==='session'){
+      choice(review,'','Active / suspended session',`Both devices changed today’s session; the other was kept for review (${when(review)}).`,{label:session?'Keep the current session':'Keep no session',description:''},{label:'Use the kept session',description:'It is set aside here, ready to continue.'});
+    }
+  }
+  let picked=freeze({}),resolvedTexts=null;
+  if(groups.length){picked=await configure({title:'Kept versions',message:'A sync kept these versions where both devices changed the same thing. The current one stays selected; choose where the kept one should replace it.',groups,confirmLabel:'Apply choices',cancelLabel:'Later'});if(!picked)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});}
+  if(texts.length){resolvedTexts=await NoteReconciliation.resolve(freeze({conflicts:freeze(texts),incomingAssets:freeze([]),purpose:'kept'}));if(!resolvedTexts)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});}
+  const use=step=>picked[step.id]==='use',waits=new Set(steps.filter(step=>step.wait&&!use(step)).map(step=>step.review.id));
+  return runExclusive('review-kept-versions',()=>withPersistenceSuppressed(async()=>{
+    requireBackupMutationControl('reviewing kept versions');
+    // What another device or a sync changed while the person chose stays:
+    // those reviews wait for the next look.
+    const still=new Set((await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt).map(review=>review.id)),fresh=noteIds.length?await AppData.notes.readFreshItems(noteIds):[];
+    const changed=new Set(noteIds.filter((id,index)=>!Canonical.same(fresh[index]||null,notes.get(id))));
+    const freshDays=new Map((of('savedDay').length?await getDailyRecordDocumentsByDates(of('savedDay').map(review=>review.ref)):[]).map(record=>[record.date,record]));
+    for(const review of of('savedDay'))if(!Canonical.same(freshDays.get(review.ref)||null,days.get(review.ref)||null))changed.add(review.ref);
+    if(personal&&!Canonical.same(await personalExport({flush:false}),personal))changed.add('personal');
+    if(of('session').length&&(hasActiveSession()||!Canonical.same((await readCanonicalActiveSession()).value||null,session)))changed.add('session');
+    const done=reviews.filter(review=>still.has(review.id)&&!waits.has(review.id)&&!changed.has(review.ref)),doneIds=new Set(done.map(review=>review.id)),chosen=(review,part)=>steps.some(step=>step.review===review&&step.part===part&&use(step));
+    const noteItems=[],dayItems=[],now=new Date().toISOString();let plans=false,settings=false,keptSession=null;
+    for(const review of done){
+      if(review.subject==='note'){
+        const note=notes.get(review.ref);if(!note)continue;
+        if(!review.kept){if(chosen(review,''))noteItems.push(freeze({key:review.ref,changed:true,state:'deleted',deletedAt:now}));continue;}
+        const label=chosen(review,'label')?review.kept.label:note.label,text=resolvedTexts&&resolvedTexts.notes[review.ref]?String(resolvedTexts.notes[review.ref].text):note.text;
+        if(label!==note.label||text!==note.text)noteItems.push(freeze({key:review.ref,changed:true,state:'record',value:freeze({...note,label,text,updatedAt:nextNoteRevision(note)})}));
+      }else if(review.subject==='savedDay'&&chosen(review,''))dayItems.push(freeze(review.kept?{date:review.ref,changed:true,state:'record',record:freeze({...review.kept,updatedAt:now}),hadLocal:days.has(review.ref)}:{date:review.ref,changed:true,state:'deleted',deletedAt:now}));
+      else if(review.subject==='personal'){plans=plans||chosen(review,'plans')&&review.kept.plans;settings=settings||chosen(review,'settings')&&review.kept.preferences;}
+      else if(review.subject==='session'&&chosen(review,''))keptSession=review.kept;
+    }
+    if(noteItems.length)await applyResolvedNotes(freeze({notes:freeze(noteItems)}));
+    if(dayItems.length)await applyResolvedSavedDays(freeze({savedDays:freeze(dayItems),sourcePlan:freeze({savedDays:freeze([])})}),null,()=>{});
+    if(plans||settings)await personalImport({version:2,plans:plans||personal.plans,preferences:settings||personal.preferences});
+    if(keptSession)await applyResolvedActiveSession(freeze({activeSession:freeze({changed:true,value:freeze({...keptSession,status:'suspended',suspendedAt:keptSession.suspendedAt||now,revision:Math.max(Number(session&&session.revision)||0,Number(keptSession.revision)||0)+1,updatedAt:now})})}));
+    if(doneIds.size)await AppData.pendingReviews.resolve([...doneIds]);
+    try{libraryChanged();}catch(error){AppDiagnostics.capture('backup.kept-review-render',error,'warn');}
+    return freeze({reviewed:doneIds.size,left:waiting.length-doneIds.size,changed:reviews.filter(review=>still.has(review.id)&&!waits.has(review.id)&&changed.has(review.ref)).length});
+  }));
 }
 function noteTitleGroup(titles){
   const count=titles.length,examples=titles.slice(0,3).map(item=>`“${item.local}” here, “${item.incoming}” in the backup`).join(' · ')+(count>3?` · and ${count-3} more`:'');
@@ -921,7 +1055,7 @@ async function assessImportedAssets(parsed,signal){
   }
   return freeze({available:freeze([...available]),missing:freeze([...missing]),toWrite:freeze(toWrite),reused});
 }
-async function resolvedAssetReferenceIds(resolvedPlan,signal){
+async function resolvedAssetReferenceIds(resolvedPlan,signal,reviews=freeze([])){
   if(!portableAssets)return freeze([]);
   const references=new Set(),collect=value=>{for(const id of BackupCodec.assetIds(value))references.add(id);};
   const recordSource=await AppData.dailyRecords.backupDates(),recordDates=Array.isArray(recordSource&&recordSource.dates)?recordSource.dates:[];
@@ -933,6 +1067,7 @@ async function resolvedAssetReferenceIds(resolvedPlan,signal){
   for(const record of records.values()){throwIfImportAborted(signal);collect(record);}
   for(const item of resolvedPlan&&resolvedPlan.notes||[]){throwIfImportAborted(signal);if(item.value)collect(item.value);}
   if(resolvedPlan&&resolvedPlan.activeSession&&resolvedPlan.activeSession.value)collect(resolvedPlan.activeSession.value);
+  for(const review of reviews||[])if(!review.resolvedAt)collect(review);
   return freeze([...references].sort());
 }
 async function buildAttachmentDeletionPlan(parsed,resolvedPlan,assessment,decisions=freeze({}),signal=null,resolvedReferences=null){
@@ -1049,6 +1184,7 @@ async function verifyRestoreCommit(expected,signal,authorityOptions=null){
   }
   if(Array.isArray(expected.removedAssetIds)&&expected.removedAssetIds.length){const catalogue=new Set((await AssetData.list()).map(row=>row.id));for(const id of expected.removedAssetIds)if(catalogue.has(id))throw new Error(`Post-restore verification failed to remove Attachment Library identity ${id}.`);}
   if(expected.personalData)await personalVerify(expected.personalData);
+  if(Array.isArray(expected.pendingReviews)&&!Canonical.same(await AppData.pendingReviews.list(),expected.pendingReviews))throw new Error('Post-restore verification failed for versions kept for review.');
   if(Array.isArray(expected.savedDayDeletions)){const stored=await AppData.deletionRecovery.savedDays();if(!Canonical.same(stored,expected.savedDayDeletions))throw new Error('Post-restore verification failed for Saved-Day deletion history.');}
   if(Array.isArray(expected.noteDeletions)){const stored=await AppData.deletionRecovery.notes();if(!Canonical.same(stored,expected.noteDeletions))throw new Error('Post-restore verification failed for note deletion history.');}
   if(Array.isArray(expected.attachmentDeletions)){const stored=await AppData.deletionRecovery.attachments();if(!Canonical.same(stored,expected.attachmentDeletions))throw new Error('Post-restore verification failed for Attachment deletion history.');}
@@ -1108,20 +1244,22 @@ function managedParsedSnapshot(capture,metadata={}){
   const notes=managedSnapshotStage('notes','MANAGED_CHECKPOINT_NOTES_FAILED',()=>{const out=Object.create(null);for(const raw of plan.noteItems||[]){const key=String(raw&&raw.key||''),clean=nameKeyedNotes?BackupCodec.legacyNote(raw,key):BackupCodec.normalizeNote(raw,key);if(!clean||!key||Object.prototype.hasOwnProperty.call(out,clean.key))throw new Error('Managed repository note failed current-schema verification.');out[clean.key]=clean;}return out;});
   const activeSession=managedSnapshotStage('active-session','MANAGED_CHECKPOINT_ACTIVE_SESSION_FAILED',()=>{const clean=plan.activeSession?BackupCodec.normalizeImportedActiveSession(plan.activeSession,{legacy:Number(repositoryManifest.version)<=4}):null;if(plan.activeSession&&!clean)throw new Error('Managed repository Active Session failed schema verification.');return clean;});
   const personalData=managedSnapshotStage('personal-data','MANAGED_CHECKPOINT_PERSONAL_DATA_FAILED',()=>plan.personalData?BackupCodec.normalizePersonalData(plan.personalData):null);
-  const counts=managedSnapshotStage('counts','MANAGED_CHECKPOINT_COUNTS_FAILED',()=>{const value=BackupCodec.countShape({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:records.length,note:Object.keys(notes).length,activeSession:activeSession?1:0});if(!noteScope&&Number(repositoryManifest.version)>=5&&(!BackupCodec.countsEqual(value,plan.counts)||!BackupCodec.countsEqual(value,repositoryManifest.counts)))throw new Error('Managed repository counts failed portable-snapshot verification.');return value;});
+  // Versions kept for review (manifest 8 and later).
+  const pendingReviews=managedSnapshotStage('pending-reviews','MANAGED_CHECKPOINT_PENDING_REVIEWS_FAILED',()=>{const seen=new Set();return freeze((plan.pendingReviewItems||[]).map(raw=>{const clean=BackupCodec.normalizePendingReview(raw);if(!clean||seen.has(clean.id))throw new Error('Managed repository version kept for review failed current-schema verification.');seen.add(clean.id);return clean;}).sort((a,b)=>a.id.localeCompare(b.id)));});
+  const counts=managedSnapshotStage('counts','MANAGED_CHECKPOINT_COUNTS_FAILED',()=>{const value=BackupCodec.countShape({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:records.length,note:Object.keys(notes).length,activeSession:activeSession?1:0,pendingReview:pendingReviews.length});if(!noteScope&&Number(repositoryManifest.version)>=5&&(!BackupCodec.countsEqual(value,plan.counts)||!BackupCodec.countsEqual(value,repositoryManifest.counts)))throw new Error('Managed repository counts failed portable-snapshot verification.');return value;});
   const attachmentState=managedSnapshotStage('attachments','MANAGED_CHECKPOINT_ATTACHMENTS_FAILED',()=>{
     const rawAssetItems=Array.isArray(plan.assetItems)?plan.assetItems:[],assetDescriptors=BackupCodec.normalizeAssetDescriptors(rawAssetItems.map(item=>item&&item.descriptor)),assetById=new Map(rawAssetItems.map(item=>[String(item&&item.descriptor&&item.descriptor.assetId||''),item])),importedAssets=[];
     for(const descriptor of assetDescriptors){const item=assetById.get(descriptor.assetId);if(!item)throw new Error(`Managed repository attachment ${descriptor.assetId} is unavailable.`);if(descriptor.missing===true){if(item.blob!==null&&item.blob!==undefined)throw new Error(`Managed repository missing attachment ${descriptor.assetId} unexpectedly contains bytes.`);continue;}if(!(item.blob instanceof Blob)||item.blob.size!==descriptor.size)throw new Error(`Managed repository attachment ${descriptor.assetId} failed snapshot binding.`);importedAssets.push(freeze({...descriptor,blob:item.blob.slice(0,item.blob.size,descriptor.mimeType)}));}
-    const referencedAssetIds=new Set(),collect=value=>{for(const id of BackupCodec.assetIds(value))referencedAssetIds.add(id);};records.forEach(collect);Object.values(notes).forEach(collect);if(activeSession)collect(activeSession);
+    const referencedAssetIds=new Set(),collect=value=>{for(const id of BackupCodec.assetIds(value))referencedAssetIds.add(id);};records.forEach(collect);Object.values(notes).forEach(collect);if(activeSession)collect(activeSession);pendingReviews.forEach(collect);
     const descriptorIds=new Set(assetDescriptors.map(item=>item.assetId));for(const id of referencedAssetIds)if(!descriptorIds.has(id))throw new Error(`Managed repository is missing attachment descriptor ${id}.`);
     return freeze({assetDescriptors,assetById,importedAssets,referencedAssetIds});
   });
   const {assetDescriptors,assetById,importedAssets,referencedAssetIds}=attachmentState;
-  const normalizedPlan=freeze({...plan,dailyDocuments:freeze(records),recordDates:freeze(recordDates),noteItems:freeze(Object.values(notes).sort((a,b)=>String(a.key).localeCompare(String(b.key)))),activeSession,personalData,counts:freeze({...counts}),assetItems:freeze(assetDescriptors.map(descriptor=>freeze({descriptor,blob:descriptor.missing===true?null:assetById.get(descriptor.assetId).blob})))});
+  const normalizedPlan=freeze({...plan,dailyDocuments:freeze(records),recordDates:freeze(recordDates),noteItems:freeze(Object.values(notes).sort((a,b)=>String(a.key).localeCompare(String(b.key)))),activeSession,personalData,pendingReviewItems:pendingReviews,counts:freeze({...counts}),assetItems:freeze(assetDescriptors.map(descriptor=>freeze({descriptor,blob:descriptor.missing===true?null:assetById.get(descriptor.assetId).blob})))});
   const protectedCheckpointManifest=managedSnapshotStage('protected-manifest','MANAGED_CHECKPOINT_PROTECTED_MANIFEST_FAILED',()=>{if(noteScope)return BackupCodec.withNoteIdDeletions(repositoryManifest.protectedCheckpointManifest,nameKeyedNotes);const value=BackupCodec.createProtectedManifest(normalizedPlan,plan.checkpoint);if(Number(repositoryManifest.version)>=5&&(!Canonical.same(value,plan.protectedCheckpointManifest)||!Canonical.same(value,repositoryManifest.protectedCheckpointManifest)))throw new Error('Managed repository protected checkpoint state failed portable-snapshot verification.');return BackupCodec.withNoteIdDeletions(value,nameKeyedNotes);});
   const manifest=freeze(BackupCodec.createManifest(normalizedPlan,{compression:'none',algorithm:BackupCodec.checksumAlgorithm()})),report=freeze({legacy:false,sourceVersion:null,degraded:0,skipped:0,duplicates:0,invalidActiveSession:0,ignoredTombstones:0,warnings:freeze([])});
-  const sourceBytes=Math.max(0,Number(metadata&&metadata.verifiedSourceBytes)||0),entityCount=records.length+Object.keys(notes).length+(activeSession?1:0)+(personalData?1:0)+1,chunkOverhead=Math.ceil(entityCount/Math.max(1,Number(APP_LIMITS.backupChunkItems)||1))*512+8192;
-  return freeze({noteScope,importedPersonalData:personalData,data:freeze({notes:freeze(notes)}),records:freeze(records),hasNotes:true,notesComplete:true,importedActiveSession:activeSession,protectedCheckpointManifest,captureAuthority:'canonical-complete',formatVersion:Number(backupVersion),counts:freeze({...counts}),manifest,report,uncompressedBytes:sourceBytes+chunkOverhead,assetDescriptors,referencedAssetIds:freeze([...referencedAssetIds].sort()),importedAssets:freeze(importedAssets),assetBytes:importedAssets.reduce((total,item)=>total+item.size,0)});
+  const sourceBytes=Math.max(0,Number(metadata&&metadata.verifiedSourceBytes)||0),entityCount=records.length+Object.keys(notes).length+(activeSession?1:0)+(personalData?1:0)+pendingReviews.length+1,chunkOverhead=Math.ceil(entityCount/Math.max(1,Number(APP_LIMITS.backupChunkItems)||1))*512+8192;
+  return freeze({noteScope,importedPersonalData:personalData,data:freeze({notes:freeze(notes)}),records:freeze(records),pendingReviews,hasNotes:true,notesComplete:true,importedActiveSession:activeSession,protectedCheckpointManifest,captureAuthority:'canonical-complete',formatVersion:Number(backupVersion),counts:freeze({...counts}),manifest,report,uncompressedBytes:sourceBytes+chunkOverhead,assetDescriptors,referencedAssetIds:freeze([...referencedAssetIds].sort()),importedAssets:freeze(importedAssets),assetBytes:importedAssets.reduce((total,item)=>total+item.size,0)});
 }
 async function inspectVerifiedLogicalCapture(capture,metadata={}){
   const signal=metadata&&metadata.signal||activeImportOperation&&activeImportOperation.signal||null;throwIfImportAborted(signal);
@@ -1185,6 +1323,10 @@ async function replacePortableCanonicalSnapshot(snapshot,{scheduleText='',deleti
   await restoreSessionState(targetSession,String(scheduleText||''));
   throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);
   if(targetPersonal){await mark('personal-data');await personalImport(targetPersonal);throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);}
+  // The snapshot's versions kept for review, exactly (a version restore
+  // passes this device's and the version's together).
+  const targetReviews=Array.isArray(source.pendingReviews)?freeze(PendingReviewCodec.merge([source.pendingReviews],APP_LIMITS.maxPendingReviews)):null;
+  if(targetReviews){await mark('pending-reviews');await AppData.pendingReviews.replace(targetReviews);}
   await mark('deletion-state');
   await AppData.deletionRecovery.replaceSavedDays(deletions.savedDays);
   await AppData.deletionRecovery.replaceNotes(deletions.notes);
@@ -1195,7 +1337,8 @@ async function replacePortableCanonicalSnapshot(snapshot,{scheduleText='',deleti
   await verifyRestoreCommit({
     personalData:targetPersonal,records,recordDatesExact:targetDates,notes:AppData.notes.normalizePayload(restoredNotes),
     assets:expectedAssets,assetIdsExact:Array.isArray(expectedAssets)?expectedAssets.map(item=>item.assetId):undefined,
-    activeSession:targetSession,scheduleText:String(scheduleText||''),savedDayDeletions:deletions.savedDays,noteDeletions:deletions.notes,attachmentDeletions:deletions.attachments
+    activeSession:targetSession,scheduleText:String(scheduleText||''),savedDayDeletions:deletions.savedDays,noteDeletions:deletions.notes,attachmentDeletions:deletions.attachments,
+    ...(targetReviews?{pendingReviews:targetReviews}:{})
   },signal,authorityOptions);
   for(const [scope,operation] of [['library',libraryChanged],['notes',refreshPnote],['review',()=>ReviewView.refresh()],['schedule',renderSched]])try{operation();}catch(error){AppDiagnostics.capture(`backup.version-restore-${scope}`,error,'warn');}
   if(portableAssets)AssetData.scheduleMaintenance(0);
@@ -1295,9 +1438,25 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   const review=!quiet&&!note&&options?.review===true,base=note?null:await handoffBase(stored);
   let session=note||missingOnly?'same':await sessionSettlement(base,parsed,{hold:(sync||review)&&hasActiveSession()});
   // Another device took the session over: stop it here, keeping what this
-  // device recorded, and let the person choose between the two.
-  if(session==='yield'){await yieldSession(parsed.importedActiveSession);session=sync?'conflict':await sessionSettlement(base,parsed);}
-  if(sync&&session==='conflict')return needsDecision();
+  // device recorded, and let the person choose between the two (a sync shows
+  // the other device's, which runs there, and keeps this one's for review).
+  // Versions a sync keeps for review (5.2). One that cannot be kept leaves
+  // the difference for the person, so nothing is overwritten unkept.
+  const keptReviews=[],keep=build=>{try{keptReviews.push(...[].concat(build()));return true;}catch(error){AppDiagnostics.capture('backup.sync-keep-review',error,'warn');return false;}};
+  const keepSession=value=>{const kept=value&&ActiveSessionCodec.sanitizeCurrent(value);return !!kept&&keep(()=>PendingReviewCodec.create({subject:'session',ref:'session',kept}));};
+  if(session==='yield'){
+    await yieldSession(parsed.importedActiveSession);
+    if(sync){const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null;session='incoming';if(mine&&parsed.importedActiveSession&&!keepSession(mine))return needsDecision();}
+    else session=await sessionSettlement(base,parsed);
+  }
+  // Both sides changed the session since they last shared it (or never
+  // shared one): a sync shows the newer and keeps the other for review. A
+  // side without a session has nothing to keep.
+  if(sync&&(session==='conflict'||session==='')){
+    const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null,theirs=parsed.importedActiveSession||null,time=value=>Number(value&&value.revision)||Date.parse(String(value&&value.updatedAt||''))||0;
+    const incomingShows=!mine||!!theirs&&time(theirs)>time(mine);session=incomingShows?'incoming':'local';
+    if(mine&&theirs&&!keepSession(incomingShows?mine:theirs))return needsDecision();
+  }
   const holdSession=session==='hold'||session==='local',clearSession=session==='incoming'&&!(parsed&&parsed.importedActiveSession);
   const stable=await buildStableRestoreImpact(parsed,preview,signal,{missingOnly,note,holdSession}),impact=stable.impact;
   if((quiet||note)&&!impact.reconciliationCapable)return needsDecision();
@@ -1318,9 +1477,22 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   const currentCheckpoint=mode==='reconcile';
   // Restoring one note always shows the comparison, so it never settles itself.
   const differingNotes=note?[]:impact.reconciliationPlan.notes.filter(item=>item.conflict&&notesTrashKey(item.key)).map(item=>item.key);
-  const noteState=noteReconciliationState(impact.reconciliationPlan,differingNotes.length?await noteReconciliationAncestor(base,differingNotes):null),noteConflicts=noteState.conflicts;
+  const noteState=noteReconciliationState(impact.reconciliationPlan,differingNotes.length?await noteReconciliationAncestor(base,differingNotes):null);
   const settledDays=note?null:await savedDaySettlement(impact.reconciliationPlan,base);
-  const localPersonal=await personalExport({flush:false}),personal=missingOnly?null:await personalSettled(base,localPersonal,parsed.importedPersonalData),decisionSetup=restoreDecisionSetup(parsed,impact,mode,localPersonal,note?null:noteState,personal,settledDays,session);
+  const localPersonal=await personalExport({flush:false});let personal=missingOnly?null:await personalSettled(base,localPersonal,parsed.importedPersonalData);
+  // A sync settles every remaining difference itself: the newer version
+  // shows and the other is kept for review.
+  if(sync){
+    if(!keep(()=>[...syncNoteReviews(impact.reconciliationPlan,noteState),...syncSavedDayReviews(impact.reconciliationPlan,settledDays)]))return needsDecision();
+    const theirs=parsed.importedPersonalData||null;
+    if(!personal&&theirs&&!(localPersonal&&Canonical.same(localPersonal,theirs))){
+      const incomingTime=Date.parse(String(parsed.protectedCheckpointManifest&&parsed.protectedCheckpointManifest.sourceRevision||''))||0,localTime=Date.parse(String(await ports.persistence.sourceRevision()||''))||0;
+      personal=!localPersonal||incomingTime>localTime?'replace':'keep';
+      if(localPersonal&&!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(personal==='replace'?localPersonal:theirs)})))return needsDecision();
+    }
+  }
+  const noteConflicts=sync?freeze([]):noteState.conflicts,decisionNoteState=sync?freeze({...noteState,deletions:freeze([]),titles:freeze([])}):noteState;
+  const decisionSetup=restoreDecisionSetup(parsed,impact,mode,localPersonal,note?null:decisionNoteState,personal,settledDays,session);
   let selectedDecisions=freeze({});
   if(quiet&&(decisionSetup.groups.some(group=>sync||!['plans','personalSettings'].includes(group.id))||noteConflicts.length))return needsDecision();
   if(decisionSetup.groups.length&&!quiet&&!note){
@@ -1362,8 +1534,16 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     // deleted here), so the backup's text comes back as it is.
     noteDecisionMap=restoredNote(String(noteRecord(false).value?.text||''));
   }
-  const resolvedPlan=Reconciliation.resolvePlan(impact.reconciliationPlan,reconciliationSelections(impact.reconciliationPlan,decisions,noteDecisionMap,reflectionDecisionMap,settledDays)),resolvedAssetReferences=await resolvedAssetReferenceIds(resolvedPlan,signal);
+  // Versions kept for review join this device's: the other side's and those
+  // this merge keeps. None is ever dropped; more than may wait stops a sync.
+  const incomingReviews=note?freeze([]):freeze([...(parsed.pendingReviews||[]),...keptReviews]);
+  const reviewSet=incomingReviews.length?PendingReviewCodec.merge([await AppData.pendingReviews.list(),incomingReviews],APP_LIMITS.maxPendingReviews):freeze([]);
+  if(reviewSet.filter(item=>!item.resolvedAt).length>APP_LIMITS.maxPendingReviews){if(quiet)return needsDecision();throw new Error(`More than ${APP_LIMITS.maxPendingReviews} versions would wait for review. Review some under Library → Data first.`);}
+  const resolvedPlan=Reconciliation.resolvePlan(impact.reconciliationPlan,reconciliationSelections(impact.reconciliationPlan,decisions,noteDecisionMap,reflectionDecisionMap,settledDays)),resolvedAssetReferences=await resolvedAssetReferenceIds(resolvedPlan,signal,reviewSet);
   let attachmentPlan=note?await noteAttachmentPlan(resolvedAssetReferences):await buildAttachmentDeletionPlan(parsed,resolvedPlan,stable.impact.assetAssessment||null,freeze({}),signal,resolvedAssetReferences);
+  // A sync follows the deletion records: an attachment deleted on either side
+  // and used by nothing is deleted.
+  if(sync&&attachmentPlan.conflicts.length)attachmentPlan=await buildAttachmentDeletionPlan(parsed,resolvedPlan,stable.impact.assetAssessment||null,freeze(Object.fromEntries(attachmentPlan.conflicts.map(item=>[item.assetId,'deleted']))),signal,resolvedAssetReferences);
   if(quiet&&attachmentPlan.conflicts.length)return needsDecision();
   if(attachmentPlan.conflicts.length){
     const groups=attachmentDeletionDecisionGroups(attachmentPlan),choice=await configure({title:'Review attachment differences',message:'Choose what to keep for standalone attachments that differ between this device and the backup. Attachments still referenced by your data are always kept.',groups,confirmLabel:'Apply choices',cancelLabel:'Cancel'});
@@ -1417,6 +1597,14 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     if(noteResult.changed)committedDescription+=(committedDescription?' and ':'')+'Notes were already saved';
     await AppData.restoreJournal.mark(restoreId,'notes-committed');
     throwIfImportAborted(signal);await yieldImport(signal);
+    let reviewResult=freeze({changed:false,expected:null,kept:0});
+    if(incomingReviews.length){
+      await AppData.restoreJournal.mark(restoreId,'applying-pending-reviews');
+      const expected=freeze(PendingReviewCodec.merge([await AppData.pendingReviews.list(),incomingReviews],APP_LIMITS.maxPendingReviews));
+      const changedIds=await AppData.pendingReviews.merge(incomingReviews);
+      reviewResult=freeze({changed:changedIds.length>0,expected,kept:keptReviews.length});
+      if(reviewResult.changed)committedDescription+=(committedDescription?' and ':'')+'versions kept for review were already saved';
+    }
     await AppData.restoreJournal.mark(restoreId,'applying-active-session');
     const sessionResult=await applyResolvedActiveSession(resolvedPlan,{clear:clearSession});
     if(sessionResult.changed)committedDescription+=(committedDescription?' and ':'')+'the Active Session was already saved';
@@ -1433,14 +1621,15 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       removedAssetIds:portableAssets&&Number(parsed.formatVersion)>=10?assetResult.expectedRemovedIds:undefined,
       savedDayDeletions:expectedDeletions,
       noteDeletions:noteResult.expectedDeletions,
-      attachmentDeletions:assetResult.expectedDeletions
+      attachmentDeletions:assetResult.expectedDeletions,
+      ...(reviewResult.expected?{pendingReviews:reviewResult.expected}:{})
     };
     if(sessionResult.changed){expectedCommit.activeSession=sessionResult.expected;expectedCommit.scheduleText=sessionResult.scheduleText||'';}
     await verifyRestoreCommit(expectedCommit,signal);
     throwIfImportAborted(signal);
     await AppData.restoreJournal.mark(restoreId,'verified');
     OperationDiagnostics.mark('canonical-verification-complete');
-    const changed=!!(dailyResult.changed||assetResult.changed||noteResult.changed||sessionResult.changed||personalChanged);
+    const changed=!!(dailyResult.changed||assetResult.changed||noteResult.changed||sessionResult.changed||personalChanged||reviewResult.changed);
     if(changed)await rebaseRepositoryPreparationAcceleration('combine');
     await AppData.restoreJournal.clear(restoreId);journalPrepared=false;clearFault();
     if(sharedBase){
@@ -1468,6 +1657,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       if(assetResult.published)parts.push(assetResult.published+' attachment'+(assetResult.published===1?'':'s')+' updated');
       if(assetResult.deleted)parts.push(assetResult.deleted+' Attachment Library deletion'+(assetResult.deleted===1?'':'s')+' applied');
       if(batches>1)parts.push(batches+' committed record batches');
+      if(reviewResult.kept)parts.push(reviewResult.kept+' version'+(reviewResult.kept===1?'':'s')+' kept for review');
       summary=`✓ ${currentCheckpoint?'Merged':'Imported'} `+(parts.join(' · ')||'backup data')+noteResult.message+sessionResult.message+(kept?' · kept '+kept+' divergent local Saved Day'+(kept===1?'':'s'):'')+(identical?' · '+identical+' identical Saved Day'+(identical===1?'':'s')+' unchanged':'')+(compatibility.length?' · '+compatibility.join(' · '):'')+'. Final verification passed.';
       restoreSurfaceStatus(stored,summary,true,'local-complete');
     }
@@ -1477,7 +1667,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       added:count,replaced,kept,batches,
       savedDayDeletionsApplied:deleted,
       assetsRestored:assetResult.published,attachmentDeletionsApplied:assetResult.deleted,notesReconciled:noteResult.changed,
-      activeSessionReconciled:sessionResult.changed,personalDataRestored:personalChanged,changed,summary
+      activeSessionReconciled:sessionResult.changed,personalDataRestored:personalChanged,reviewsKept:reviewResult.kept,changed,summary
     });
   }catch(error){
     const failure=error instanceof Error?error:new Error(String(error));
@@ -1573,14 +1763,16 @@ function replacementNotes(plan,reviewed,keepExtras){
 function replacementSnapshot(parsed,journal,plan,notes,keepExtras){
   const days=new Set(keepExtras?plan.extras.days:[]),plans=new Set(keepExtras?plan.extras.plans:[]);
   const records=freeze([...(parsed.records||[]),...(journal.records||[]).filter(record=>days.has(String(record&&record.date||'')))]);
+  // Versions kept for review stay: the backup's and this device's together.
+  const pendingReviews=freeze(PendingReviewCodec.merge([journal.pendingReviews,parsed.pendingReviews],APP_LIMITS.maxPendingReviews).map(freeze));
   let personal=parsed.importedPersonalData||null,assets=parsed.importedAssets;
   if(personal&&plans.size){const kept=(journal.importedPersonalData?.plans?.savedPlans||[]).filter(item=>plans.has(String(item&&item.id||'')));personal=freeze({...personal,plans:freeze({...personal.plans,savedPlans:freeze([...personal.plans.savedPlans,...kept])})});}
   if(portableAssets&&Number(parsed.formatVersion)>=10){
     const have=new Set((parsed.importedAssets||[]).map(item=>item.assetId)),wanted=new Set(keepExtras?plan.extras.assets:[]);
-    for(const value of [...Object.values(notes),...records,parsed.importedActiveSession])if(value)for(const id of BackupCodec.assetIds(value))wanted.add(id);
+    for(const value of [...Object.values(notes),...records,parsed.importedActiveSession,...pendingReviews])if(value)for(const id of BackupCodec.assetIds(value))wanted.add(id);
     assets=freeze([...(parsed.importedAssets||[]),...(journal.importedAssets||[]).filter(item=>wanted.has(item.assetId)&&!have.has(item.assetId))]);
   }
-  return freeze({...parsed,records,data:freeze({...parsed.data,notes:notes}),importedAssets:assets,importedPersonalData:personal});
+  return freeze({...parsed,records,data:freeze({...parsed.data,notes:notes}),importedAssets:assets,importedPersonalData:personal,pendingReviews});
 }
 // Deletion records after a replace: the backup's and this device's, for
 // whatever the result does not hold, plus what this replace removed.
@@ -1800,6 +1992,7 @@ const controller=freeze({
   finishImport,
   subscribeStatus,
   recoverInterruptedRestore:(...args)=>track(()=>recoverInterruptedRestore(...args),true),
+  reviewKeptVersions:(...args)=>track(()=>reviewKeptVersions(...args),true),
   status
 });
 const repository=freeze({

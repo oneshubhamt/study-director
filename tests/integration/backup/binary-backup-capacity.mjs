@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {PRODUCTION_LIMITS as limits} from '../../../contracts/production-limits.mjs';
+import {testPendingReviewCodec} from '../../helpers/pending-review-codec.mjs';
 
 const read=file=>fs.readFileSync(new URL('../../../'+file,import.meta.url),'utf8');
 for(const file of ['source/core/internal.js','source/core/persistence.js','source/core/record-codecs.js','source/core/backup-codec.js'])vm.runInThisContext(read(file),{filename:file});
@@ -23,8 +24,9 @@ const dailyRecordCodec=freeze({sanitizeHistoricalDailyRecord:x=>x&&isDate(x.date
 const activeSessionCodec=freeze({sanitizeCurrent:()=>null});
 const reflectionDraftCodec=freeze({format:'study-director.reflection-draft-codec',contractVersion:1,sanitizeCurrent:()=>null});
 const personalDataCodec=RecordCodecs.createPersonalDataCodec(limits);
+const pendingReviewCodec=testPendingReviewCodec(RecordCodecs,{personalDataCodec});
 const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:x=>dailyRecordCodec.sanitizeCurrentDailyRecord(x),note:(x,k)=>dailyRecordCodec.sanitizeCurrentNote(x,k),activeSession:()=>null,localRecoveryEnvelope:()=>null,reflectionDraft:()=>null,personalData:x=>personalDataCodec.normalize(x)});
-const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,processing:testProcessing,appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),entityTypes:freeze(Object.keys(defs)),keyedRecord,entities:freeze({entityDefinition,entityIdentity}),helpers:freeze({boundedInt,jsonByteLength}),richText:freeze({assetIds:value=>richApi.assetIds(value),assetIdValid:value=>richApi.isAssetId(value),imageMimeTypeValid:value=>richApi.isSupportedImageType(value)}),dailyRecordCodec,activeSessionCodec,compatibilityCodec}));
+const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingReviewCodec,processing:testProcessing,appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),entityTypes:freeze(Object.keys(defs)),keyedRecord,entities:freeze({entityDefinition,entityIdentity}),helpers:freeze({boundedInt,jsonByteLength}),richText:freeze({assetIds:value=>richApi.assetIds(value),assetIdValid:value=>richApi.isAssetId(value),imageMimeTypeValid:value=>richApi.isSupportedImageType(value)}),dailyRecordCodec,activeSessionCodec,compatibilityCodec}));
 
 const uniqueAssetCount=8,logicalAssetCount=uniqueAssetCount+1;
 const assetIds=Array.from({length:logicalAssetCount},(_,i)=>`img-capacity-${String(i+1).padStart(20,'0')}`);

@@ -1042,13 +1042,17 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
       </section>
       <section class="library-data" id="library-data" role="tabpanel" aria-labelledby="library-tab-data" hidden>
         <p class="library-explainer ui-body">Backups, files and storage for this device.</p>
+        <div class="backup-location-row kept-versions-row" id="kept-versions" role="status" hidden>
+          <div class="backup-row-copy"><span class="ui-label">Needs review</span><span class="ui-helper" id="kept-versions-text"></span></div>
+          <button class="mini-btn ui-btn" id="review-kept-versions" type="button" data-action="review-kept-versions">Review</button>
+        </div>
         <div class="library-data-group ui-panel">
           <details class="backup-model-disclosure ui-disclosure">
             <summary><span class="backup-model-summary"><span class="backup-model-summary-title">Backup model</span><span class="backup-model-summary-copy">Local-first · syncs through Drive</span></span></summary>
             <div class="backup-model-body ui-helper">
               <dl class="backup-model-explainer">
                 <div><dt>Managed checkpoints</dt><dd>Device Folder keeps verified versions in a folder you choose on this device. Google Drive keeps the same managed checkpoint model off-device. Each version behaves as a complete recovery point even though unchanged data is reused internally.</dd></div>
-                <div><dt>Several devices</dt><dd>While a device is signed in to Google Drive it syncs: it takes in what your other devices changed, then uploads its own changes. A change made on one side only is taken for you; a difference made on both sides waits, marked Needs review, until you choose. Saved data and the Active Session travel too; changes to a session running here wait until it ends. Without Drive, each device keeps working on its own.</dd></div>
+                <div><dt>Several devices</dt><dd>While a device is signed in to Google Drive it syncs: it takes in what your other devices changed, then uploads its own changes. A change made on one side only is taken for you. Where both sides changed the same thing, the newer shows and the other is kept for you, marked Needs review; edits to different paragraphs of a note are joined for you. Saved data and the Active Session travel too; changes to a session running here wait until it ends. Without Drive, each device keeps working on its own.</dd></div>
                 <div><dt>Portable backup</dt><dd>Export backup creates one complete <span class="ui-mono">.sdbackup</span> file for manual transfer or safekeeping. Import it on any Study Director device when needed; it does not join Device Folder or Google Drive version history.</dd></div>
               </dl>
               <div class="backup-model-included-label ui-label">Included in a complete checkpoint</div>
@@ -1093,7 +1097,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                 <div class="backup-row-copy">
                   <div class="backup-location-heading">
                     <span class="ui-label">Google Drive</span><span class="backup-location-badge optional">Optional</span>
-                    <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="drive-backup-info" aria-label="About Google Drive backup" aria-expanded="false" aria-controls="drive-backup-info">i</button><span class="pnote-info-popover" id="drive-backup-info" role="note" hidden>Off-device version history, and where your devices meet. While you are signed in, this device takes in what your other devices changed, then backs up its own changes; a difference made on both sides waits for your review. Connect asks Google for drive.file access: Study Director creates, reads, verifies and deletes only its own backup files, never your other Drive files. Google ends a sign-in after about an hour; until then it stays signed in across reloads.</span></span>
+                    <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="drive-backup-info" aria-label="About Google Drive backup" aria-expanded="false" aria-controls="drive-backup-info">i</button><span class="pnote-info-popover" id="drive-backup-info" role="note" hidden>Off-device version history, and where your devices meet. While you are signed in, this device takes in what your other devices changed, then backs up its own changes; where both sides changed the same thing, the other version is kept for your review. Connect asks Google for drive.file access: Study Director creates, reads, verifies and deletes only its own backup files, never your other Drive files. Google ends a sign-in after about an hour; until then it stays signed in across reloads.</span></span>
                   </div>
                 </div>
                 <strong class="backup-status-value standard ui-mono" id="backup-provider-row-status-google-drive">Not connected</strong>
@@ -2912,7 +2916,8 @@ function renderDriveBackup(){
   if(panel&&!connected)panel.hidden=true;
   if(last){const at=verifiedRecoveryState.providers['google-drive']?.at;last.textContent=at?`Last verified ${storageHealthTime(at)}`:'Not yet verified';}
   if(disconnect)disconnect.disabled=state.engineBusy;
-  const sync=node('sb-sync');if(sync){const label=BackupPresentation.syncLabel(state);sync.hidden=!label;if(sync.textContent!==label)sync.textContent=label;sync.dataset.state=state.sync?.review?'review':'';}
+  // Kept versions waiting for review show as Needs review too.
+  const sync=node('sb-sync');if(sync){const syncing=BackupPresentation.syncLabel(state),kept=KeptVersions.count()>0&&syncing!=='Syncing…',label=kept?'Needs review':syncing;sync.hidden=!label;if(sync.textContent!==label)sync.textContent=label;sync.dataset.state=state.sync?.review||kept?'review':'';}
 }
 function renderDeviceBackup(state){
   if(!state)return;
@@ -3217,6 +3222,26 @@ const DailyRecordCodec=RecordCodecsModule.createDailyRecordCodec(Object.freeze({
   })
 }));
 const PersonalDataCodec=RecordCodecsModule.createPersonalDataCodec(APP_LIMITS);
+/* ACTIVE SESSION CODEC */
+/* ACTIVE SESSION CODEC · IMPORTED */
+const ActiveSessionCodec=RecordCodecsModule.createActiveSessionCodec(Object.freeze({
+  limits:APP_LIMITS,
+  dataContract:DATA_CONTRACT,
+  activeSessionId:ACTIVE_SESSION_ID,
+  domain:DomainModule,
+  keyedRecord:KeyedRecord,
+  helpers:Object.freeze({
+    boundedInt,boundedNumber,clampText,clampEditorContent,editorContentWithinLimits,cleanDayRevision,sameDataValue,
+    activeSessionScheduleFingerprint,isCanonicalScheduleText,isValidIsoDate,normalizeStudyQuality,
+    parseProgressNumber,sanitizePracticeState
+  }),
+  timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp,normalizeImportedEpochMillis}),
+  dailyRecordCodec:DailyRecordCodec
+}));
+const PendingReviewCodec=RecordCodecsModule.createPendingReviewCodec(Object.freeze({
+  dataContract:DATA_CONTRACT,dailyRecordCodec:DailyRecordCodec,activeSessionCodec:ActiveSessionCodec,personalDataCodec:PersonalDataCodec,
+  helpers:Object.freeze({sameDataValue,randomBytes:count=>crypto.getRandomValues(new Uint8Array(count))})
+}));
 const {
   buildDailyRecordSummary, compactPauseEvents, compactRealTimeSnapshot, compactAdjustedSchedule,
   normalizeDailyResultEntry, dailyRecordMetricsFromEvidence, sanitizeCurrentDailyRecord, createDiaryRecord, isSupportedSavedDate,
@@ -4193,6 +4218,7 @@ const RepositoryAppMetaValidators=RepositoryModule.createAppMetaValidators(Objec
   limits:APP_LIMITS,
   dataContract:DATA_CONTRACT,
   personalDataCodec:PersonalDataCodec,
+  pendingReviewCodec:PendingReviewCodec,
   helpers:Object.freeze({isValidIsoDate,isNoteId:DailyRecordCodec.noteKeys.isId,isNoteKey:DailyRecordCodec.noteKeys.isKey,normalizeTimestamp,sameDataValue})
 }));
 AppMetaGateway.registerValidators('repositories',RepositoryAppMetaValidators);
@@ -4284,6 +4310,7 @@ const RichTextAssetMaintenance=AssetMaintenanceModule.create(Object.freeze({
   readNotes:()=>AppData.notes.readFreshPayload(),
   loadActiveSession:()=>AppData.activeSession.load(0,{strict:true}),
   listDailyRecords:()=>AppData.dailyRecords.list({strict:true}),
+  readPendingReviewTexts:async()=>(await AppData.pendingReviews.list()).flatMap(review=>PendingReviewCodec.richTexts(review)),
   budget:()=>BackgroundTasks.budget(),yieldTask:options=>BackgroundTasks.yieldTask(options),
   invalidate:()=>invalidateAttachmentLibrary(),
   captureError:error=>AppDiagnostics.capture('rich-text.assets.maintenance',error,'warn'),
@@ -4422,22 +4449,6 @@ function mutateBackupProtection(value,options){
     tx.oncomplete=()=>finish(true,true);
   },{abortMessage:'backup encryption update aborted'});
 }
-/* ACTIVE SESSION CODEC */
-/* ACTIVE SESSION CODEC · IMPORTED */
-const ActiveSessionCodec=RecordCodecsModule.createActiveSessionCodec(Object.freeze({
-  limits:APP_LIMITS,
-  dataContract:DATA_CONTRACT,
-  activeSessionId:ACTIVE_SESSION_ID,
-  domain:DomainModule,
-  keyedRecord:KeyedRecord,
-  helpers:Object.freeze({
-    boundedInt,boundedNumber,clampText,clampEditorContent,editorContentWithinLimits,cleanDayRevision,sameDataValue,
-    activeSessionScheduleFingerprint,isCanonicalScheduleText,isValidIsoDate,normalizeStudyQuality,
-    parseProgressNumber,sanitizePracticeState
-  }),
-  timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp,normalizeImportedEpochMillis}),
-  dailyRecordCodec:DailyRecordCodec
-}));
 const CompatibilityCodecs=CompatibilityCodecsModule.create(Object.freeze({
   limits:APP_LIMITS,
   dataContract:DATA_CONTRACT,
@@ -4482,6 +4493,8 @@ function canonicalAttachmentReferenceDescriptor(event){
   if(type==='note'){identity=String(value&&value.key||'');text=String(value&&value.text||'');}
   else if(type==='dailyRecord'){identity=String(value&&value.date||'');text=String(value&&value.reflection||'');}
   else if(type==='activeSession'){identity=String(value&&value.id||ACTIVE_SESSION_ID);text=String(value&&value.snapshot&&value.snapshot.review&&value.snapshot.review.reflection||'');}
+  // A kept version may be the last to use an image: recheck them all.
+  else if(type==='pendingReview')return Object.freeze({key:'pendingReview:*',force:true,deleted:false,text:''});
   else return null;
   return Object.freeze({key:`${type}:${identity||'*'}`,force:false,deleted:operation==='delete',text});
 }
@@ -4517,6 +4530,7 @@ function handleCanonicalCommit(event){
     scheduleRichTextAssetMaintenance();
     invalidateAttachmentLibrary();
   }
+  if(event&&event.entityType==='pendingReview'&&StartupLifecycle.status().fullyInitialized)void KeptVersions.refresh();
 }
 
 async function refreshPersistedSessionBadge(){
@@ -4544,6 +4558,7 @@ const AppData=RepositoryModule.createAppData(Object.freeze({
   activeSessionCodec:ActiveSessionCodec,
   compatibilityCodec:CompatibilityCodecs,
   personalDataCodec:PersonalDataCodec,
+  pendingReviewCodec:PendingReviewCodec,
   keyedRecord:KeyedRecord,
   journals:RepositoryJournals,
   notesRepositoryModule:NotesRepositoryModule,
@@ -4578,6 +4593,7 @@ const AppData=RepositoryModule.createAppData(Object.freeze({
     savedDayDeletionPrefix:APP_META_KEYS.savedDayDeletionPrefix,
     noteDeletionPrefix:APP_META_KEYS.noteDeletionPrefix,
     attachmentDeletionPrefix:APP_META_KEYS.attachmentDeletionPrefix,
+    pendingReviewPrefix:APP_META_KEYS.pendingReviewPrefix,
   }),
   obsoleteMetaKeys:Object.freeze(Object.values(OBSOLETE_APP_META_KEYS)),
   activeSessionId:ACTIVE_SESSION_ID,
@@ -8231,6 +8247,40 @@ const LibraryClearCoordinator=LibraryClearModule.createCoordinator(Object.freeze
   failClosed:message=>AppMutationCoordinator.failClosed(message,'library-clear'),clearFault:()=>AppMutationCoordinator.clearFault(),
   journal:Object.freeze({prepare:value=>AppData.libraryClearJournal.prepare(value),read:()=>AppData.libraryClearJournal.read(),mark:(id,phase)=>AppData.libraryClearJournal.mark(id,phase),clear:id=>AppData.libraryClearJournal.clear(id)})
 }));
+// 5.2: versions a sync kept where two devices changed the same thing. Their
+// count shows in Library → Data and the sidebar; a note with one carries a
+// quiet "Needs review" mark. Reviewing never opens by itself.
+const KeptVersions=(()=>{
+  let count=0,notes=new Set(),generation=0;
+  async function refresh(){
+    const token=++generation;let open;
+    try{open=(await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt);}catch(error){AppDiagnostics.capture('kept-versions.refresh',error,'warn');return false;}
+    if(token!==generation)return false;
+    const next=new Set(open.filter(review=>review.subject==='note').map(review=>review.ref)),notesChanged=[...next].sort().join('|')!==[...notes].sort().join('|');
+    count=open.length;notes=next;renderKeptVersions();renderDriveBackup();
+    if(notesChanged)LibraryView.refreshNotes();
+    return true;
+  }
+  async function review(ref=''){
+    try{
+      const result=await BackupController.reviewKeptVersions({ref:String(ref||'')});
+      if(result.cancelled)return result;
+      const parts=[result.reviewed?`${result.reviewed} reviewed`:'',result.changed?`${result.changed} changed while you chose; review ${result.changed===1?'it':'them'} again`:'',result.left?`${result.left} still waiting${!result.reviewed&&!result.changed?' (a kept session waits until this session ends)':''}`:''].filter(Boolean);
+      Interactions.notify({source:'sync',key:'kept-review',title:'Kept versions',message:`${parts.join(' · ')||'Nothing to review'}.`});
+      return result;
+    }catch(error){
+      AppDiagnostics.capture('kept-versions.review',error,'warn');
+      Interactions.notify({source:'sync',key:'kept-review',kind:'error',title:'Review not saved',message:error&&error.message||'Nothing was changed. Try again.'});
+      return null;
+    }finally{void refresh();}
+  }
+  return Object.freeze({refresh,review,count:()=>count,note:id=>notes.has(String(id||''))});
+})();
+function renderKeptVersions(){
+  const row=document.getElementById('kept-versions'),text=document.getElementById('kept-versions-text'),count=KeptVersions.count();
+  if(row)row.hidden=!count;
+  if(text)text.textContent=`${count} version${count===1?' was':'s were'} kept where two devices changed the same thing. Nothing is lost; choose what to keep when you are ready.`;
+}
 const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
   notifications:NoticeCoordinator.presentation('library',Object.freeze({label:'Open Library',run:()=>goTab('library')})),
   records:Object.freeze({
@@ -8295,6 +8345,8 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     rename:(key,label,options)=>AppData.notes.rename(key,label,options&&options.merge?{merge:(existing,moved)=>RichTextApi.appendIncomingAdditions(existing,moved).value}:{}),
     renderInherited:renderInheritedNotes,
     restore:key=>AppData.notes.restore(key),
+    reviewKept:id=>void KeptVersions.review(id),
+    keptVersion:id=>KeptVersions.note(id),
     searchDocuments:noteSearchDocuments,
     size:()=>AppData.notes.size(),
     tagged:names=>NoteLinks.tagged(names),
@@ -8365,7 +8417,8 @@ const BackupCodec=BackupCodecModule.createBackupCodec(Object.freeze({
   dailyRecordCodec:DailyRecordCodec,
   activeSessionCodec:ActiveSessionCodec,
   compatibilityCodec:CompatibilityCodecs,
-  personalDataCodec:PersonalDataCodec
+  personalDataCodec:PersonalDataCodec,
+  pendingReviewCodec:PendingReviewCodec
 }));
 
 const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
@@ -8693,7 +8746,12 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     reconciliationBaseRead:()=>readReconciliationBase(),
     reconciliationBaseReadNotes:keys=>readReconciliationBaseNotes(keys),
     reconciliationBaseReadDays:dates=>readReconciliationBaseDays(dates),
-    reconciliationBaseWrite:(checkpointId,spec)=>writeReconciliationBase(checkpointId,spec)
+    reconciliationBaseWrite:(checkpointId,spec)=>writeReconciliationBase(checkpointId,spec),
+    pendingReviewsList:()=>AppData.pendingReviews.list(),
+    pendingReviewsReadItems:ids=>AppData.pendingReviews.readItems(ids),
+    pendingReviewsMerge:values=>AppData.pendingReviews.merge(values),
+    pendingReviewsReplace:values=>AppData.pendingReviews.replace(values),
+    pendingReviewsResolve:ids=>AppData.pendingReviews.resolve(ids)
   }),
   assets:Object.freeze({
     get:assetId=>AttachmentStorage.get(assetId),
@@ -8706,9 +8764,9 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     removeMetadata:assetIds=>AttachmentLibrary.removeMetadata(assetIds),
     scheduleMaintenance:delay=>scheduleRichTextAssetMaintenance(delay)
   }),
-  codecs:Object.freeze({activeSession:ActiveSessionCodec,backup:RuntimeBackupCodec}),
+  codecs:Object.freeze({activeSession:ActiveSessionCodec,backup:RuntimeBackupCodec,pendingReview:PendingReviewCodec}),
   reconciliation:Object.freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),
-  noteReconciliation:Object.freeze({resolve:options=>withRichTextAssetMaintenancePaused(()=>NoteReconciliationUI.resolve(options))}),
+  noteReconciliation:Object.freeze({resolve:options=>withRichTextAssetMaintenancePaused(()=>NoteReconciliationUI.resolve(options)),merge:(base,local,incoming)=>RichTextApi.mergeThreeWay(base,local,incoming)}),
   exports:Object.freeze({backgroundAvailable:backupBackgroundAvailability,protect:BackupProtection.protect,unprotect:BackupProtection.unprotect,check:Exports.check,scope:operation=>AttachmentStorage.during(()=>Exports.scope(operation)),job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,download:Exports.download,chooseSave:Exports.chooseSave,save:Exports.save}),
   session:Object.freeze({
     canMutate:()=>appCanMutate(),
@@ -9771,7 +9829,8 @@ const CLICK_ACTIONS=Object.freeze({
   'gap-ignore': ()=>classifyInactiveGap('ignore'),
   'gap-apply': applyInactiveGapSplit,
   'dismiss-storage-warning': dismissStorageWarning,
-  'show-drive-sync': ()=>showBackupPresentation('google-drive',BackupProviderRuntime.locationStatus('google-drive')?.sync?.review?'sync-review':'status'),
+  'show-drive-sync': ()=>BackupProviderRuntime.locationStatus('google-drive')?.sync?.review?showBackupPresentation('google-drive','sync-review'):KeptVersions.count()?KeptVersions.review():showBackupPresentation('google-drive','status'),
+  'review-kept-versions': ()=>KeptVersions.review(),
   'save-name-setup': saveNameSetup,
   'skip-name-setup': skipNameSetup,
   'font-smaller': ()=>stepFontScale(-1),
@@ -10244,7 +10303,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
         catch(error){AppDiagnostics.capture('startup.canonical-mutation-epoch',error,'warn');}
       }
       resumeUnresolvedStorageReset();
-      installBackgroundOwners();scheduleDataMaintenance();BackgroundOperations.wake('startup');
+      installBackgroundOwners();scheduleDataMaintenance();BackgroundOperations.wake('startup');void KeptVersions.refresh();
       void BackupFiles.collect().catch(error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn'));
       document.documentElement.dataset.studyDirectorCanonicalBaseline=proof.canonical?'verified':'not-proven';
       document.documentElement.dataset.studyDirectorRetirementData=proof.retirementDataReady?'ready':proof.canonical?'backup-required':'not-ready';

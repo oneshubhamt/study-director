@@ -99,7 +99,7 @@ Build this next, before Wordgard (section 6). The decisions below are the user's
 - Sign-in kept across reloads for the rest of its hour.
 - **Changed from the table (user, 2026-10-17):** the Device Folder and Drive keep one history. A version is made once and copied to the other location under the same id, so both show the same versions. The Device Folder is still not a sync channel.
 - **Study session across devices (user, 2026-10-18).** The session names the device running it (ActiveSession v10, `runningOn`); only that device runs the timer. Another device shows "Running on another device" and edits notes and everything else freely; notes from it reach the running device without stopping its session. Suspend hands the session over (uploads at once; the other device offers Continue here). Continue Here on a device whose copy still runs elsewhere asks first; the device taken over from stops at its next sync and keeps its unsynced progress for review. "Needs review" opens during a running session and leaves the session as it is.
-- Known limit: a fresh device whose plans and settings differ from Drive's shows "Needs review" on its first sync (5.4 settles this).
+- Known limit: a fresh device whose plans and settings differ from Drive's keeps Drive's for review on its first sync (5.4 settles this).
 
 | Part | Decision |
 |---|---|
@@ -119,6 +119,14 @@ Build this next, before Wordgard (section 6). The decisions below are the user's
 | First sync with no shared history | For example two devices that backed up separately to the same Drive. Two-way merge: anything on one side only is added, anything different on both is kept for review |
 
 ### 5.2 Merge rules
+
+**Done** (2026-10-18). Design and rules: `docs/BACKUP-ENGINE.md`, "Kept for review". What was built, against the table below:
+- A sync never stops for a choice. Smart merge joins notes changed in different paragraphs; everything else changed on both sides shows the newer and keeps the other as a `PendingReview` record (contract `PendingReview.v1`, appMeta `pendingReview:<id>`).
+- Kept versions are synced data: backup v23 and manifest v8 carry them (v22 files and v7 manifests read with none), every device gets them, a resolved one wins everywhere, and at most 2000 may wait (more stops the write; nothing is dropped). Their images are kept.
+- Review: a quiet "Needs review" mark on the note, a count in Library → Data, and "Needs review" in the sidebar. Choices first (titles, deletions, Saved Days, plans and settings, the session), then note texts in `reconciliation-ui.js` with Smart merge from what both last shared. Each choice is an ordinary edit that syncs; nothing that changed while the person chose is overwritten. A kept session waits while a session runs here and comes back suspended.
+- A takeover no longer stops the sync: the device taken over from shows the running session and keeps its own progress for review.
+- "Needs review" on Drive's version itself now appears only for what a sync cannot keep (an older backup format, or more than 2000 waiting).
+- Version History (5.5): each version made after a sync holds the kept versions, so they are in the history too.
 
 The person's data is never lost. Merging is automatic wherever it is lossless; only genuine conflicts are shown, and never as a pop-up during study.
 

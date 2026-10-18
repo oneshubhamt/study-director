@@ -104,6 +104,20 @@ const conflict=(key,localValue,incomingValue,{ancestorAvailable=false,ancestorVa
   assert.equal(result.notes.Custom.text,'CUSTOM RESOLVED','manual left editing is the custom reconciliation result');
 }
 
+// A version a sync kept for review: the current note against the kept one,
+// with Smart merge from what both last shared.
+{
+  const harness=createController();
+  const promise=harness.controller.resolve({conflicts:[conflict('Kept','LOCAL-K','KEPT-K',{ancestorAvailable:true,ancestorValue:'BASE-K'})],incomingAssets:[],purpose:'kept'});
+  await tick();await tick();
+  const dialog=harness.document.body.children[0];
+  for(const label of ['NEEDS REVIEW','Current note','Kept version','Keep current','Use kept version','Smart merge','Append additions'])assert.ok(byText(dialog,label),`the kept-version review shows “${label}”`);
+  byText(dialog,'Use kept version').dispatch('click');
+  assert.equal(harness.mounts[0].field.value,'KEPT-K');
+  byText(dialog,'Apply resolved note').dispatch('click');
+  assert.equal((await promise).notes.Kept.text,'KEPT-K');
+}
+
 // Diary/manual mode never runs automatic merge logic. It exposes only local/imported/custom
 // choices over the same editable-left/read-only-right surfaces.
 {

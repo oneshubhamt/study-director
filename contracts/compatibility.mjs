@@ -144,6 +144,14 @@ export const COMPATIBILITY_REGISTRY=freeze({
       sourceFiles:freeze(['source/core/backup-codec.js','source/core/managed-repository.js','source/core/device-folder-storage.js'])
     },
     {
+      id:'backups-before-pending-reviews',owner:'backup-codec/managed-repository',kind:'import-adapter',
+      source:'portable backups v22 and backup-location manifests version 7, written before versions kept for review existed',
+      target:'the current restore model with no version kept for review; checksums, counts and completion proofs are checked against the entity list and logical identity the file was written with',
+      proof:'a v22 file and a version-7 manifest read back as the same data and counts, with an empty list of versions kept for review',
+      retirement:'no supported backup older than portable v23 or manifest 8 remains',
+      sourceFiles:freeze(['source/core/backup-codec.js','source/core/managed-repository.js'])
+    },
+    {
       id:'daily-record-historical-shapes',owner:'record-codecs/repositories',kind:'live-canonicalization',
       source:'IndexedDB/imported DailyRecord versions <= 15 and non-current historical field shapes, including R10 embedded sync metadata',
       target:'current DailyRecord v16 (study or diary) with local updatedAt/sourceRevision plus rebuildable exact DailySummary v5',

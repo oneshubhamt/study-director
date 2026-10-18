@@ -9,10 +9,11 @@ const activeSessionCodec=RecordCodecs.createActiveSessionCodec(freeze({limits,da
   helpers:freeze({boundedInt,boundedNumber,clampText,clampEditorContent:clampText,editorContentWithinLimits:()=>true,cleanDayRevision:v=>Math.max(0,Math.round(Number(v)||0)),sameDataValue,activeSessionScheduleFingerprint:()=> 'fp',isCanonicalScheduleText:v=>!!v,isValidIsoDate:Domain.TimeModel.isValidIsoDate,normalizeStudyQuality:helpers.normalizeStudyQuality,parseProgressNumber:Domain.CompletionModel.parseProgressNumber,sanitizePracticeState:()=>({active:false,runs:[]})}),
   timestamps:freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp,normalizeImportedEpochMillis:(v,f=null)=>Number.isFinite(Number(v))?Number(v):f})}));
 const processing=freeze({...createProcessingEngine(),scope:fn=>fn()}),personalDataCodec=RecordCodecs.createPersonalDataCodec(limits),attachments=registry.require('attachments',1);
+const pendingReviewCodec=RecordCodecs.createPendingReviewCodec(freeze({dataContract,dailyRecordCodec,activeSessionCodec,personalDataCodec,helpers:freeze({sameDataValue,randomBytes:length=>crypto.getRandomValues(new Uint8Array(length))})}));
 const defs=freeze({dailyRecord:{idField:'date',backupLimit:limits.maxImportRecords},note:{idField:'key',backupLimit:limits.maxNotes},activeSession:{idField:'id',backupLimit:1}});
 const richSandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask};vm.createContext(richSandbox);vm.runInContext(fs.readFileSync('source/external/rich-text.js','utf8'),richSandbox);
 const rich=richSandbox.StudyDirectorRichText;
-const codecInput=freeze({limits,dataContract,processing,personalDataCodec,dailyRecordCodec,activeSessionCodec,
+const codecInput=freeze({limits,dataContract,processing,personalDataCodec,pendingReviewCodec,dailyRecordCodec,activeSessionCodec,
   appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),entityTypes:freeze(Object.keys(defs)),keyedRecord:freeze({create:()=>Object.create(null)}),entities:freeze({entityDefinition:t=>defs[t],entityIdentity:(t,v)=>v[defs[t].idField]}),helpers:freeze({boundedInt,jsonByteLength:v=>new TextEncoder().encode(typeof v==='string'?v:JSON.stringify(v)).length}),richText:freeze({assetIds:v=>rich.scanAttachmentReferences(v).assetIds,assetIdValid:attachments.validId,imageMimeTypeValid:attachments.validType}),compatibilityCodec:freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:()=>{throw Error('Unexpected migration')},note:()=>{throw Error('Unexpected migration')},activeSession:()=>{throw Error('Unexpected migration')},reflectionDraft:()=>{throw Error('Unexpected migration')}})}),codec=registry.require('backup-codec',1).createBackupCodec(codecInput);
 const stamp='2026-09-10T20:00:00.000Z',imageId='img-1234567890abcdefghijklmn';
 const text='WG1:'+JSON.stringify({version:1,doc:{type:'Doc',content:[{type:'Paragraph',content:[{type:'Text',param:'Current note'}]},{type:'SDImage',param:{assetId:imageId,alt:'retained image',widthPct:100}}]}});
@@ -32,7 +33,7 @@ const algorithm=codec.checksumAlgorithm(),manifest=codec.createManifest(plan,{co
 const groups=[['checkpointManifest',[codec.createProtectedManifest(plan,manifest.checkpoint)]],['personalData',[personal]],['dailyRecord',[study,diary]],['note',[note]],['activeSession',[active]]];
 async function assemble(values=groups,assets=descriptors){const chunks=[];for(let i=0;i<values.length;i++)chunks.push(await codec.encodeChunk(i,values[i][0],values[i][1],algorithm));const completion=await codec.encodeCompletion(chunks.length,counts,chunks.map(c=>c.checksum),algorithm,assets);return codec.createV10Container(new Blob([JSON.stringify(manifest)+'\n',...chunks.map(c=>c.line+'\n'),JSON.stringify(completion)+'\n']),{compression:'none',assetBlobs:blobs});}
 const file=await assemble(),parsed=await codec.inspectCurrent(file);
-assert.equal(parsed.formatVersion,22);assert.deepEqual(parsed.records,[dailyRecordCodec.sanitizeCurrentDailyRecord(study),diary]);assert.deepEqual(parsed.data.notes[note.key],note);assert.deepEqual(parsed.importedActiveSession,active);assert.deepEqual(parsed.importedPersonalData,personal);assert.deepEqual(parsed.assetDescriptors,descriptors);assert.equal(parsed.assetBytes,blobs.reduce((n,b)=>n+b.size,0));
+assert.equal(parsed.formatVersion,23);assert.deepEqual(parsed.records,[dailyRecordCodec.sanitizeCurrentDailyRecord(study),diary]);assert.deepEqual(parsed.data.notes[note.key],note);assert.deepEqual(parsed.importedActiveSession,active);assert.deepEqual(parsed.importedPersonalData,personal);assert.deepEqual(parsed.assetDescriptors,descriptors);assert.equal(parsed.assetBytes,blobs.reduce((n,b)=>n+b.size,0));
 for(let i=0;i<4;i++)assert.equal(await parsed.importedAssets[i].blob.text(),await blobs[i===3?1:i].text());
 for(const key of ['savedDayDeletions','noteDeletions','attachmentDeletions'])assert.deepEqual(parsed.protectedCheckpointManifest[key],plan[key]);
 const key=await passwordKey('Current format test passphrase'),sealed=[],opened=[];
@@ -55,14 +56,28 @@ const reader=registry.require('backup-codec',1).createBackupCodec(freeze({...cod
 const writtenType=type=>type==='note'?'areaNote':type,writtenCounts=value=>Object.fromEntries(Object.entries(value).map(([type,count])=>[writtenType(type),count]));
 async function writeOlder(version,olderPlan,noteItems){
   const writer=registry.require('backup-codec',1).createBackupCodec(freeze({...codecInput,dataContract:freeze({...dataContract,schemas:freeze({...dataContract.schemas,Backup:freeze({...dataContract.schemas.Backup,version})})})}));
-  const created=writer.createManifest(olderPlan,{compression:'none',algorithm}),olderManifest={...created,protectedManifest:{...created.protectedManifest,version:2},declaredCounts:writtenCounts(created.declaredCounts)};
+  const created=writer.createManifest(olderPlan,{compression:'none',algorithm}),olderManifest={...created,protectedManifest:{...created.protectedManifest,version:2},declaredCounts:writtenCounts(withoutReviews(created.declaredCounts))};
   const current=writer.createProtectedManifest(olderPlan,created.checkpoint),protectedV2={format:current.format,version:2,checkpointId:current.checkpointId,sourceRevision:current.sourceRevision,
     authority:Object.fromEntries(Object.entries(current.authority).map(([name,mode])=>[name==='notes'?'areaNotes':name,mode])),savedDayDeletions:current.savedDayDeletions,areaNoteDeletions:current.noteDeletions,attachmentDeletions:current.attachmentDeletions};
   const olderGroups=[['checkpointManifest',[protectedV2]],['personalData',[personal]],['dailyRecord',[study,diary]],['areaNote',noteItems],['activeSession',[active]]],chunks=[];
   for(let i=0;i<olderGroups.length;i++)chunks.push(await writer.encodeChunk(i,olderGroups[i][0],olderGroups[i][1],algorithm));
-  const completion=await writer.encodeCompletion(chunks.length,writtenCounts(counts),chunks.map(c=>c.checksum),algorithm,descriptors);
+  const completion=await writer.encodeCompletion(chunks.length,writtenCounts(withoutReviews(counts)),chunks.map(c=>c.checksum),algorithm,descriptors);
   return writer.createV10Container(new Blob([JSON.stringify(olderManifest)+'\n',...chunks.map(c=>c.line+'\n'),JSON.stringify(completion)+'\n']),{compression:'none',assetBlobs:blobs});
 }
+// A v22 file was written before versions kept for review existed: it reads
+// as the same data with none kept.
+const withoutReviews=value=>Object.fromEntries(Object.entries(value||{}).filter(([type])=>type!=='pendingReview'));
+const v22File=await (async()=>{
+  const writer=registry.require('backup-codec',1).createBackupCodec(freeze({...codecInput,dataContract:freeze({...dataContract,schemas:freeze({...dataContract.schemas,Backup:freeze({...dataContract.schemas.Backup,version:22})})})}));
+  const created=writer.createManifest(plan,{compression:'none',algorithm}),chunks=[],v22Groups=[['checkpointManifest',[writer.createProtectedManifest(plan,created.checkpoint)]],...groups.slice(1)];
+  for(let i=0;i<v22Groups.length;i++)chunks.push(await writer.encodeChunk(i,v22Groups[i][0],v22Groups[i][1],algorithm));
+  const completion=await writer.encodeCompletion(chunks.length,withoutReviews(counts),chunks.map(c=>c.checksum),algorithm,descriptors);
+  return writer.createV10Container(new Blob([JSON.stringify({...created,declaredCounts:withoutReviews(created.declaredCounts)})+'\n',...chunks.map(c=>c.line+'\n'),JSON.stringify(completion)+'\n']),{compression:'none',assetBlobs:blobs});
+})();
+await assert.rejects(reader.inspectCurrent(v22File),/compatibility adapter/u,'a v22 file is not current');
+const v22Parsed=await reader.inspectLegacy(v22File);
+assert.equal(v22Parsed.formatVersion,22);assert.deepEqual([...v22Parsed.pendingReviews],[],'a v22 file has no versions kept for review');
+assert.deepEqual(v22Parsed.records,parsed.records);assert.deepEqual({...v22Parsed.data.notes},{...parsed.data.notes});assert.deepEqual(v22Parsed.importedActiveSession,parsed.importedActiveSession);
 // A v21 file keys notes by id, as today; only the names differ.
 const v21File=await writeOlder(21,plan,[note]);
 await assert.rejects(reader.inspectCurrent(v21File),/compatibility adapter/u,'a v21 file is not current');
@@ -86,4 +101,4 @@ assert.deepEqual(v20Parsed.records,parsed.records,'everything else reads as curr
 const mixed=await (async()=>{const writer=registry.require('backup-codec',1).createBackupCodec(freeze({...codecInput,dataContract:freeze({...dataContract,schemas:freeze({...dataContract.schemas,Backup:freeze({...dataContract.schemas.Backup,version:21})})})}));const created=writer.createManifest(plan,{compression:'none',algorithm});const chunks=[];for(let i=0;i<groups.length;i++)chunks.push(await writer.encodeChunk(i,groups[i][0],groups[i][1],algorithm));const completion=await writer.encodeCompletion(chunks.length,counts,chunks.map(c=>c.checksum),algorithm,descriptors);return writer.createV10Container(new Blob([JSON.stringify(created)+'\n',...chunks.map(c=>c.line+'\n'),JSON.stringify(completion)+'\n']),{compression:'none',assetBlobs:blobs});})();
 await assert.rejects(reader.inspectLegacy(mixed),'a v21 file written with v22 names is rejected');
 
-console.log(JSON.stringify({status:'PASS',suite:'current-canonical-roundtrip',backupVersion:22,v21NamesRead:true,nameKeyedV20NotesConverted:true,dailyRecordVersion:16,activeSessionVersion:10,logicalAttachments:4,uniquePayloads:3,encryptedRoundtrip:true,strictCurrentCodecs:true}));
+console.log(JSON.stringify({status:'PASS',suite:'current-canonical-roundtrip',backupVersion:23,v22WithoutKeptVersions:true,v21NamesRead:true,nameKeyedV20NotesConverted:true,dailyRecordVersion:16,activeSessionVersion:10,logicalAttachments:4,uniquePayloads:3,encryptedRoundtrip:true,strictCurrentCodecs:true}));

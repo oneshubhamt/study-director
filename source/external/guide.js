@@ -284,7 +284,7 @@
           ["Import","Import, beside + New, turns .txt and .md files into new notes named after them, inside the open note or at the top level. Images and links to other files stay as their Markdown text."],
         ]},
         {id:"data-tools",label:"Data Tools",heading:"Backup and recovery",kind:"pairs",items:[
-          ["Data model","Local-first: each device keeps all its data and works on its own. While a device is signed in to Google Drive, it syncs: it takes in what your other devices changed, then uploads its own changes. A difference made on both sides waits, marked Needs review, until you choose."],
+          ["Data model","Local-first: each device keeps all its data and works on its own. While a device is signed in to Google Drive, it syncs: it takes in what your other devices changed, then uploads its own changes. Where both sides changed the same thing, the newer shows and the other is kept for you, marked Needs review; edits to different paragraphs of a note are joined for you."],
           ["Managed checkpoints","Device Folder keeps verified versions in a folder on this device. Google Drive keeps the same versions off-device, shared by your devices: a version made here goes to both locations under the same name."],
           ["Recover","Choose a verified backup from that location, then Keep current, Add only what’s missing, Combine with current data, or Replace current data."],
           ["Add only what’s missing","Brings back Saved Days and attachments this device doesn’t have and changes nothing you have now. If something differs and needs a choice, nothing is changed and Combine is the way to review it."],

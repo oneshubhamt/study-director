@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {PRODUCTION_LIMITS as limits,CAPACITY_PROFILES} from '../../../contracts/production-limits.mjs';
+import {testPendingReviewCodec} from '../../helpers/pending-review-codec.mjs';
 
 const read=file=>fs.readFileSync(file,'utf8');
 for(const file of ['source/core/internal.js','source/core/persistence.js','source/core/record-codecs.js','source/core/backup-codec.js'])vm.runInThisContext(read(file),{filename:file});
@@ -19,8 +20,9 @@ const defs=freeze({
 });
 const isDate=value=>/^\d{4}-\d{2}-\d{2}$/.test(String(value||''));
 const personalDataCodec=RecordCodecs.createPersonalDataCodec(limits);
-const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,processing:testProcessing,
-  appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract:freeze({app:'study-director.data-contract',schemas:freeze({CheckpointMetadata:freeze({format:'study-director.checkpoint-metadata',version:1}),CheckpointProtectedManifest:freeze({format:'study-director.checkpoint-protected-manifest',version:3}),Backup:freeze({format:'study-director.backup',version:22})})}),legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),
+const pendingReviewCodec=testPendingReviewCodec(RecordCodecs,{personalDataCodec});
+const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingReviewCodec,processing:testProcessing,
+  appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract:freeze({app:'study-director.data-contract',schemas:freeze({CheckpointMetadata:freeze({format:'study-director.checkpoint-metadata',version:1}),CheckpointProtectedManifest:freeze({format:'study-director.checkpoint-protected-manifest',version:3}),Backup:freeze({format:'study-director.backup',version:23})})}),legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),
   entityTypes:freeze(Object.keys(defs)),keyedRecord:freeze({create:()=>Object.create(null)}),entities:freeze({entityDefinition:type=>defs[type]||null,entityIdentity:(type,item)=>String(item?.[defs[type]?.idField]||'')}),
   helpers:freeze({boundedInt:(value,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;},jsonByteLength:value=>new TextEncoder().encode(typeof value==='string'?value:JSON.stringify(value)).byteLength}),
   richText:freeze({assetIds:()=>freeze([]),assetIdValid:()=>false,imageMimeTypeValid:()=>false}),

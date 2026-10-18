@@ -10,14 +10,14 @@ registry.define('repositories',1,()=>{
   const DATA_MAINTENANCE_VERSION=6;
   function exactValue(value,keys){return !!(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('|')===[...keys].sort().join('|'));}
   function createAppMetaValidators(input){
-    exactObject(input,['limits','dataContract','personalDataCodec','helpers'],'Repository appMeta validators input');
-    if(!Object.isFrozen(input.limits)||!Object.isFrozen(input.dataContract)||!Object.isFrozen(input.personalDataCodec)||!Object.isFrozen(input.helpers))throw new TypeError('Repository appMeta validator contracts must be frozen.');
+    exactObject(input,['limits','dataContract','personalDataCodec','pendingReviewCodec','helpers'],'Repository appMeta validators input');
+    if(!Object.isFrozen(input.limits)||!Object.isFrozen(input.dataContract)||!Object.isFrozen(input.personalDataCodec)||!Object.isFrozen(input.pendingReviewCodec)||!Object.isFrozen(input.helpers))throw new TypeError('Repository appMeta validator contracts must be frozen.');
     functions(input.helpers,['isValidIsoDate','isNoteId','isNoteKey','normalizeTimestamp','sameDataValue'],'Repository appMeta validator helpers');
-    const APP_LIMITS=input.limits,DATA_CONTRACT=input.dataContract,PersonalDataCodec=input.personalDataCodec;
+    const APP_LIMITS=input.limits,DATA_CONTRACT=input.dataContract,PersonalDataCodec=input.personalDataCodec,PendingReviewCodec=input.pendingReviewCodec;
     const {isValidIsoDate,isNoteId,isNoteKey,normalizeTimestamp,sameDataValue}=input.helpers;
     const validIso=value=>Number.isFinite(Date.parse(String(value||'')));
     const attachmentId=value=>/^(?:att|img)-[a-z0-9-]{20,80}$/u.test(String(value||''));
-    const backupPreparationUnit=value=>{const unit=String(value||'');if(unit==='*'||unit==='personalData'||unit==='activeSession')return true;if(/^dailyRecordPack:\d{4}-(?:0[1-9]|1[0-2])$/u.test(unit))return true;if(unit.startsWith('note:'))return isNoteKey(unit.slice('note:'.length));if(unit.startsWith('attachmentAsset:'))return attachmentId(unit.slice('attachmentAsset:'.length));return false;};
+    const backupPreparationUnit=value=>{const unit=String(value||'');if(unit==='*'||unit==='personalData'||unit==='activeSession')return true;if(/^dailyRecordPack:\d{4}-(?:0[1-9]|1[0-2])$/u.test(unit))return true;if(unit.startsWith('note:'))return isNoteKey(unit.slice('note:'.length));if(unit.startsWith('pendingReview:'))return /^pr_[a-f0-9]{32}$/u.test(unit.slice('pendingReview:'.length));if(unit.startsWith('attachmentAsset:'))return attachmentId(unit.slice('attachmentAsset:'.length));return false;};
     return freeze({
       dailyRecordMigration:value=>!!(exactValue(value,['recordVersion','summaryVersion','complete','recordCount'])&&Number(value.recordVersion)===DATA_CONTRACT.schemas.DailyRecord.version&&Number(value.summaryVersion)===DATA_CONTRACT.schemas.DailySummary.version&&value.complete===true&&Number.isSafeInteger(Number(value.recordCount))&&Number(value.recordCount)>=0),
       planDraft:value=>value===null||(typeof value==='string'&&value.length<=APP_LIMITS.maxScheduleChars),
@@ -29,16 +29,17 @@ registry.define('repositories',1,()=>{
       dataMaintenance:value=>!!(exactValue(value,['version','status','completedAt'])&&Number(value.version)===DATA_MAINTENANCE_VERSION&&(value.status==='completed'&&validIso(value.completedAt)||value.status==='pending'&&(value.completedAt===''||validIso(value.completedAt)))),
       savedDayDeletionPrefix:(value,context)=>!!(exactValue(value,['format','version','date','deletedAt'])&&value.format==='study-director.saved-day-deletion'&&Number(value.version)===1&&isValidIsoDate(String(value.date||''))&&String(value.date)===context.suffix&&!!normalizeTimestamp(value.deletedAt,null)),
       noteDeletionPrefix:(value,context)=>!!(exactValue(value,['format','version','key','deletedAt'])&&value.format==='study-director.note-deletion'&&Number(value.version)===1&&isNoteId(value.key)&&value.key===context.suffix&&!!normalizeTimestamp(value.deletedAt,null)),
-      attachmentDeletionPrefix:(value,context)=>!!(exactValue(value,['format','version','assetId','deletedAt'])&&value.format==='study-director.attachment-deletion'&&Number(value.version)===1&&attachmentId(value.assetId)&&String(value.assetId)===context.suffix&&!!normalizeTimestamp(value.deletedAt,null))
+      attachmentDeletionPrefix:(value,context)=>!!(exactValue(value,['format','version','assetId','deletedAt'])&&value.format==='study-director.attachment-deletion'&&Number(value.version)===1&&attachmentId(value.assetId)&&String(value.assetId)===context.suffix&&!!normalizeTimestamp(value.deletedAt,null)),
+      pendingReviewPrefix:(value,context)=>{const clean=PendingReviewCodec.normalize(value);return !!clean&&clean.id===context.suffix&&sameDataValue(clean,value);}
     });
   }
   function createAppData(input){
     exactObject(input,[
-      'local','indexedDb','appMeta','compatibilityAppMeta','installationIdentity','dailyRecordCodec','activeSessionCodec','compatibilityCodec','personalDataCodec','keyedRecord','journals',
+      'local','indexedDb','appMeta','compatibilityAppMeta','installationIdentity','dailyRecordCodec','activeSessionCodec','compatibilityCodec','personalDataCodec','pendingReviewCodec','keyedRecord','journals',
       'limits','dataContract','stores','legacyStores','keys','legacyKeys','metaKeys','obsoleteMetaKeys','activeSessionId','helpers','hooks','clock','notesRepositoryModule','saveLaneModule'
     ],'AppData input');
     if(!Object.isFrozen(input.local)||!Object.isFrozen(input.indexedDb)||!Object.isFrozen(input.appMeta)||!Object.isFrozen(input.compatibilityAppMeta)||!Object.isFrozen(input.installationIdentity)||
-      !Object.isFrozen(input.dailyRecordCodec)||!Object.isFrozen(input.activeSessionCodec)||!Object.isFrozen(input.compatibilityCodec)||!Object.isFrozen(input.personalDataCodec)||
+      !Object.isFrozen(input.dailyRecordCodec)||!Object.isFrozen(input.activeSessionCodec)||!Object.isFrozen(input.compatibilityCodec)||!Object.isFrozen(input.personalDataCodec)||!Object.isFrozen(input.pendingReviewCodec)||
       !Object.isFrozen(input.keyedRecord)||!Object.isFrozen(input.journals)||!Object.isFrozen(input.limits)||!Object.isFrozen(input.dataContract)||!Object.isFrozen(input.metaKeys)||!Object.isFrozen(input.obsoleteMetaKeys)||!Object.isFrozen(input.clock)){
       throw new TypeError('AppData contracts must be frozen.');
     }
@@ -48,7 +49,7 @@ registry.define('repositories',1,()=>{
     exactObject(input.legacyStores,['syncQueue','tombstones'],'AppData legacy stores');
     exactObject(input.keys,['recovery','fallbackDailyRecords','noteRescue','deletionRecovery','legacySyncEmergency'],'AppData storage keys');
     exactObject(input.legacyKeys,['notesPending','noteRecoveryPrefix'],'AppData legacy storage keys');
-    exactObject(input.metaKeys,['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','savedDayDeletionPrefix','noteDeletionPrefix','attachmentDeletionPrefix'],'AppData metadata keys');
+    exactObject(input.metaKeys,['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','savedDayDeletionPrefix','noteDeletionPrefix','attachmentDeletionPrefix','pendingReviewPrefix'],'AppData metadata keys');
     if(!Array.isArray(input.obsoleteMetaKeys)||input.obsoleteMetaKeys.some(key=>typeof key!=='string'||!key)||new Set(input.obsoleteMetaKeys).size!==input.obsoleteMetaKeys.length)throw new TypeError('AppData obsolete metadata keys are invalid.');
     functions(input.helpers,[
       'boundedInt','boundedNumber','clampText','clampEditorContent','editorContentWithinLimits','wipeObject','isValidIsoDate','isCanonicalScheduleText','sameDataValue',
@@ -98,6 +99,8 @@ registry.define('repositories',1,()=>{
     const CompatibilityCodec=input.compatibilityCodec;
     if(CompatibilityCodec.format!=='study-director.compatibility-codecs'||CompatibilityCodec.contractVersion!==1)throw new TypeError('Compatibility codec contract is invalid.');
     const PersonalDataCodec=input.personalDataCodec;
+    const PendingReviewCodec=input.pendingReviewCodec;
+    if(PendingReviewCodec.format!=='study-director.pending-review-codec'||PendingReviewCodec.contractVersion!==1)throw new TypeError('Pending-review codec contract is invalid.');
     const KeyedRecord=input.keyedRecord;
     const RepositoryJournals=input.journals;
     const {
@@ -178,7 +181,7 @@ registry.define('repositories',1,()=>{
       return freeze({format:'study-director.canonical-mutation-epoch',version:1,token:randomCoordinationToken(),committedAt:nextChangeAt()});
     }
     function canonicalPreparationUnit(value){
-      const unit=String(value||'').trim();if(unit==='*'||unit==='personalData'||unit==='activeSession')return unit;if(/^dailyRecordPack:\d{4}-(?:0[1-9]|1[0-2])$/u.test(unit))return unit;if(unit.startsWith('note:')&&NoteKeys.isKey(unit.slice('note:'.length)))return unit;if(unit.startsWith('attachmentAsset:')&&/^(?:att|img)-[a-z0-9-]{20,80}$/u.test(unit.slice('attachmentAsset:'.length)))return unit;throw new TypeError('Backup preparation unit identity is invalid.');
+      const unit=String(value||'').trim();if(unit==='*'||unit==='personalData'||unit==='activeSession')return unit;if(/^dailyRecordPack:\d{4}-(?:0[1-9]|1[0-2])$/u.test(unit))return unit;if(unit.startsWith('note:')&&NoteKeys.isKey(unit.slice('note:'.length)))return unit;if(/^pendingReview:pr_[a-f0-9]{32}$/u.test(unit))return unit;if(unit.startsWith('attachmentAsset:')&&/^(?:att|img)-[a-z0-9-]{20,80}$/u.test(unit.slice('attachmentAsset:'.length)))return unit;throw new TypeError('Backup preparation unit identity is invalid.');
     }
     function dailyPreparationUnit(date){const value=String(date||'');if(!isValidIsoDate(value))throw new TypeError('Backup preparation Saved-Day date is invalid.');return `dailyRecordPack:${value.slice(0,7)}`;}
     function notePreparationUnit(key){const value=String(key||'');if(!NoteKeys.isKey(value))throw new TypeError('Backup preparation note key is invalid.');return `note:${value}`;}
@@ -639,6 +642,41 @@ async function recordAttachmentDeletion(assetId,deletedAt=new Date().toISOString
 async function clearAttachmentDeletion(assetId){
   const id=normalizeAttachmentDeletionId(assetId);if(!id)return false;
   await Meta.transaction('readwrite',(meta,tx,finish)=>{stageCanonicalMutationEpoch(tx,[]);const request=meta.remove('attachmentDeletionPrefix',id);request.onerror=()=>finish(false,request.error||new Error('Attachment deletion ledger clear failed'));tx.oncomplete=()=>finish(true);},{strict:true,abortMessage:'Attachment deletion ledger clear aborted'});return true;
+}
+// Versions kept for review (PendingReview), one appMeta row each under its
+// id. A write merges by id, where a resolved review wins, and stamps each
+// changed review's backup unit, so versions carry it to other devices.
+async function listPendingReviews(){
+  return freeze((await Meta.list('pendingReviewPrefix')).map(entry=>freeze(entry.value)).sort((a,b)=>a.id.localeCompare(b.id)));
+}
+// Merges these into the stored reviews (replace: the stored set becomes
+// exactly these). Returns the ids whose rows changed. More reviews waiting
+// than the limit allows stops the write: none is ever dropped.
+async function writePendingReviews(values,{replace=false}={}){
+  const incoming=(Array.isArray(values)?values:[]).map(value=>{const clean=PendingReviewCodec.normalize(value);if(!clean)throw new TypeError('A version kept for review is invalid.');return clean;});
+  return Meta.transaction('readwrite',(meta,tx,finish)=>{
+    const existing=meta.getAll('pendingReviewPrefix'),request=existing.request;
+    request.onerror=()=>finish(false,request.error||new Error('Pending review read failed'));
+    request.onsuccess=()=>{
+      let next,stored;
+      try{stored=new Map(existing.entries().map(entry=>[entry.suffix,entry.value]));next=PendingReviewCodec.merge(replace?[incoming]:[[...stored.values()],incoming],APP_LIMITS.maxPendingReviews);}
+      catch(error){finish(false,error);return;}
+      if(next.filter(review=>!review.resolvedAt).length>APP_LIMITS.maxPendingReviews){finish(false,new RangeError(`More than ${APP_LIMITS.maxPendingReviews} versions would wait for review.`));return;}
+      const ids=new Set(next.map(review=>review.id)),changed=[];
+      for(const id of stored.keys())if(!ids.has(id)){meta.remove('pendingReviewPrefix',id);changed.push(id);}
+      for(const review of next){const held=stored.get(review.id);if(held&&sameDataValue(held,review))continue;meta.put('pendingReviewPrefix',review,{suffix:review.id,updatedAt:review.resolvedAt||review.keptAt});changed.push(review.id);}
+      if(changed.length)stageCanonicalMutationEpoch(tx,changed.map(id=>`pendingReview:${id}`));
+      tx.oncomplete=()=>{if(changed.length)reportCanonicalCommit('pendingReview','upsert');finish(true,freeze(changed.sort()));};
+    };
+  },{strict:true,abortMessage:'Pending review update aborted'});
+}
+async function resolvePendingReviews(ids,resolvedAt=new Date().toISOString()){
+  const wanted=new Set((ids||[]).map(String)),held=(await listPendingReviews()).filter(review=>wanted.has(review.id)&&!review.resolvedAt);
+  return held.length?writePendingReviews(held.map(review=>PendingReviewCodec.resolved(review,resolvedAt))):freeze([]);
+}
+async function readPendingReviewItems(ids){
+  const rows=await Promise.all((ids||[]).map(id=>Meta.read('pendingReviewPrefix',String(id))));
+  return freeze(rows.map(value=>value?freeze(value):null));
 }
 async function idbGetRecordsByDates(dates){
   const unique=[...new Set((dates||[]).filter(isValidIsoDate))].slice(0,APP_LIMITS.maxImportRecords);
@@ -1479,6 +1517,7 @@ async function runDataMaintenance(options={}){
       clearAttachment:clearAttachmentDeletion,
       stageAttachments:stageAttachmentDeletionState
     });
+    const pendingReviews=freeze({list:listPendingReviews,readItems:readPendingReviewItems,merge:values=>writePendingReviews(values),replace:values=>writePendingReviews(values,{replace:true}),resolve:resolvePendingReviews});
     const maintenanceApi=freeze({intervalMs:DATA_MAINTENANCE_INTERVAL_MS,status:()=>freeze({busy:!!dataMaintenancePromise}),run:runDataMaintenance,repairSummaries:repairDailySummaries,settled:()=>dataMaintenancePromise||Promise.resolve()});
 
     async function verifyCurrentRepositoryMetadata(){
@@ -1962,7 +2001,7 @@ async function verifyNoteRecovery(){
       format:'study-director.app-data',
       contractVersion:1,
       get lastStorageError(){return LocalStorageContract.lastError;},
-      local,planData,personalPreferences,dailyRecords,notes,activeSession,provenance,mutationEpoch,preparationUnits,deletionRecovery,restoreJournal,libraryClearJournal,mutationLease,maintenance:maintenanceApi,metadata,compatibility
+      local,planData,personalPreferences,dailyRecords,notes,activeSession,pendingReviews,provenance,mutationEpoch,preparationUnits,deletionRecovery,restoreJournal,libraryClearJournal,mutationLease,maintenance:maintenanceApi,metadata,compatibility
     });
   }
   return freeze({

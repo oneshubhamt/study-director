@@ -9,7 +9,7 @@ registry.define('asset-maintenance',1,input=>{
   const freeze=Object.freeze;
   const interrupted=reason=>Object.assign(new Error(`Attachment cleanup yielded: ${reason}`),{name:'AbortError',code:'ASSET_MAINTENANCE_YIELDED',reason});
   function create(ports,options={}){
-    const required=['canMutate','mutationActive','collect','readRestoreJournal','readLibraryClearJournal','liveFields','getReferenceRevision','getDatasetRevision','scanReferences','readNotes','loadActiveSession','listDailyRecords','budget','yieldTask','invalidate','captureError'];
+    const required=['canMutate','mutationActive','collect','readRestoreJournal','readLibraryClearJournal','liveFields','getReferenceRevision','getDatasetRevision','scanReferences','readNotes','loadActiveSession','listDailyRecords','readPendingReviewTexts','budget','yieldTask','invalidate','captureError'];
     if(!ports||required.some(key=>typeof ports[key]!=='function'))throw new TypeError('Asset-maintenance ports are incomplete.');
     const lease=options.lease;if(!lease||['protect','release','isProtected'].some(key=>typeof lease[key]!=='function'))throw new TypeError('Asset-maintenance storage lease is required.');
     const delayMs=Math.max(0,Number(options.delayMs??1800)||0),workMs=Math.max(1,Number(options.workMs)||5000),batchSize=Math.max(1,Number(options.batchSize)||128);
@@ -24,12 +24,14 @@ registry.define('asset-maintenance',1,input=>{
       const signature=JSON.stringify([proof,keys,liveValues.map(([,value])=>value)]);
       if(!scanState||scanState.signature!==signature){scanState={signature,references:new Set(),phase:0,index:0,values:null};for(const [,value] of liveValues)if(!collectInto(scanState.references,value))return {references:scanState.references,trusted:false};}
       const state=scanState,complete=()=>keys.length>0&&keys.every(id=>state.references.has(id));let units=0;const shouldYield=ports.budget();
-      while(state.phase<3&&!complete()){
+      // Notes, the session, Saved Days, then versions kept for review.
+      while(state.phase<4&&!complete()){
         check();
         if(!state.values){
           if(state.phase===0)state.values=Object.values(await ports.readNotes()||{}).map(entry=>entry?.text);
           else if(state.phase===1){const loaded=await ports.loadActiveSession();if(loaded?.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session references could not be read completely.');state.values=[loaded?.value?.snapshot?.review?.reflection];}
-          else state.values=(await ports.listDailyRecords()||[]).map(record=>record?.reflection);
+          else if(state.phase===2)state.values=(await ports.listDailyRecords()||[]).map(record=>record?.reflection);
+          else state.values=[...(await ports.readPendingReviewTexts()||[])];
           progress();check();
         }
         while(state.index<state.values.length){

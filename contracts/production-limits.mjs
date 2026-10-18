@@ -47,6 +47,8 @@ export const PRODUCTION_LIMITS=Object.freeze({
   // Live, imported and backed-up notes, and their deletion records.
   // Recently deleted counts towards it but gives way.
   maxNotes:2000,
+  // Versions kept for review waiting at once; as many resolved ones are kept.
+  maxPendingReviews:2000,
   // Days a deleted note stays in Recently deleted.
   noteTrashDays:30,
   // Notes one note's linked-notes bar can hold.

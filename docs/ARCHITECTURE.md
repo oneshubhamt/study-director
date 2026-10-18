@@ -19,6 +19,7 @@ Principal persisted domains include:
 - Plans and preferences;
 - Active Session and timer recovery state;
 - attachment metadata and OPFS bytes;
+- versions kept for review (`PendingReview`, appMeta `pendingReview:<id>`): what a sync did not show where both sides changed the same thing, synced and backed up like the rest until the person resolves it;
 - repository/recovery metadata needed for safe backup and restore.
 
 Temporary UI projections are not authoritative. After protected operations, controls are re-derived from the current runtime/canonical state rather than restoring stale pre-operation DOM state.
@@ -34,9 +35,9 @@ Temporary UI projections are not authoritative. After protected operations, cont
 | Device Folder settings | `deviceFolder`, format `study-director.device-folder-settings` | `automaticDeviceBackup`, format `study-director.device-backup-settings` |
 | Emergency copy of unsaved notes | `studyDirector.noteRescue.v1`, format `study-director.note-rescue` | `studyDirector.areaNoteRescue.v1`, format `study-director.area-note-rescue` |
 | Interrupted-restore journal | version 5, `noteDeletions` | version 4 and earlier, `areaNoteDeletions` |
-| Backup file | version 22, entity `note` | versions 21 and earlier, entity `areaNote` |
+| Backup file | version 22, entity `note` (version 23 adds `pendingReview`) | versions 21 and earlier, entity `areaNote` |
 | Protected checkpoint manifest | version 3, `noteDeletions`, authority `notes` | version 2, `areaNoteDeletions`, authority `areaNotes` |
-| Repository checkpoint | version 7, kind `note` | versions 6 and earlier, kind `areaNote` |
+| Repository checkpoint | version 7, kind `note` (version 8 adds `pendingReview`) | versions 6 and earlier, kind `areaNote` |
 
 The store is renamed in place inside the upgrade (rows are never copied): an older database opens at bridge version 8, which renames it, and the compatibility step then retires the bridge stores at version 9. The records and the emergency copy move in the first compatibility step, their value format renamed with them. Older backup files and checkpoints are read under the names they were written with: checksums, completion proofs, pack shards and the logical-state fingerprint are all checked against the written names, and what they hold is then read under the current ones. An older build refuses the version 9 database and the new backup versions until it is updated. Device Folder and Drive upload each note once more after the change, because the note objects are now written under the new kind.
 
@@ -106,6 +107,8 @@ The providers are intentionally not collapsed into one transport implementation 
 Restore/Bring-in first verifies the selected checkpoint and reconstructs a verified portable snapshot. Destructive local replacement is protected by recovery journaling and a Before-restore checkpoint where required.
 
 Combine/reconciliation handles Saved Days, Notes, Active Session and attachments through explicit domain rules. Reconciliation ancestry is incremental and provider history is scoped to the repository being inspected.
+
+A sync through Drive never asks. Where both sides changed the same thing it shows the newer and keeps the other as a `PendingReview` record (5.2; `docs/BACKUP-ENGINE.md`, "Kept for review"); a note changed in different paragraphs is joined by Smart merge. The records travel in every version and merge by id, a resolved one winning. `reviewKeptVersions` (backup runtime) is the review: choices, then note texts in `reconciliation-ui.js` (`purpose: 'kept'`), applied through the same write paths as Combine inside one exclusive operation, skipping anything that changed while the person chose. A Library clear leaves kept versions as they are; their review still works for notes that are gone ("Keep for later" or discard).
 
 A deletion travels to other copies only as a deletion record (Saved Days, Notes, attachments); absence never means deletion. Each ledger keeps its newest records within its limit (`maxImportRecords`, `maxNotes` and 50,000 respectively), so it stays bounded without ever dropping a recent deletion: only once a ledger is full do its oldest records go. Listing applies that rule, so a full ledger never stops a backup or an integrity check; data maintenance removes the same records from storage, so pruning never changes what a backup or restore reads; and a restore verifies the ledger it stored. Backup import and the restore journal still reject a ledger over its limit. A dropped record matters only when a backup older than that many later deletions is combined, which could bring the oldest deleted items back.
 

@@ -45,7 +45,9 @@ registry.define('managed-repository',1,()=>{
     }
     validateRepositoryRetentionPolicy(REPOSITORY_RETENTION_POLICY);
 // Manifest 6 keys notes by permanent id; earlier manifests keyed them by name.
-const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=7,REPOSITORY_NOTE_ID_MANIFEST_VERSION=6,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,6,7]));
+const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=8,REPOSITORY_NOTE_ID_MANIFEST_VERSION=6,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,6,7,8]));
+// Manifest 8 added the versions kept for review (pendingReview objects).
+const REPOSITORY_PENDING_REVIEW_VERSION=8,PENDING_REVIEW_KIND='pendingReview';
 // Manifests before version 7 call a note areaNote: in object kinds, pack
 // members, counts and the deletion list. A version is verified under the names
 // it was written with; its notes leave the reader under the current name.
@@ -55,7 +57,7 @@ const LEGACY_REFLECTION_DRAFT_PACK_KIND='reflectionDraftPack';
 const REPOSITORY_COMMIT_FORMAT='study-director.backup-repository-commit',REPOSITORY_COMMIT_VERSION=1,REPOSITORY_COMMIT_REQUIRED_MANIFEST_VERSION=2;
 const REPOSITORY_OBJECT_FORMAT='study-director.backup-repository-object',REPOSITORY_OBJECT_VERSION=1;
 const REPOSITORY_PACK_FORMAT='study-director.backup-repository-structured-pack',REPOSITORY_PACK_VERSION=1,REPOSITORY_PACK_SHARDS=4,REPOSITORY_PACK_MEMBER_MAX_BYTES=64*1024;
-const REPOSITORY_PACKABLE_KINDS=freeze(new Set(['note','personalData'])),WRITTEN_PACKABLE_KINDS=freeze(new Set([WRITTEN_NOTE_KIND,'personalData']));
+const REPOSITORY_PACKABLE_KINDS=freeze(new Set(['note','personalData',PENDING_REVIEW_KIND])),WRITTEN_PACKABLE_KINDS=freeze(new Set([WRITTEN_NOTE_KIND,'personalData']));
 const repositoryPreparedState=new WeakMap();
 const repositoryPublicationStates=new Map();
 const REPOSITORY_PREPARATION_INDEX_VERSION=3;
@@ -96,6 +98,7 @@ function repositoryPreparationUnit(kind,key){
   if(kind==='dailyRecordPack')return `dailyRecordPack:${String(key)}`;
   if(kind==='note')return `note:${String(key)}`;
   if(kind==='personalData'&&String(key)==='personal')return 'personalData';
+  if(kind===PENDING_REVIEW_KIND&&/^pr_[a-f0-9]{32}$/u.test(String(key)))return `pendingReview:${String(key)}`;
   if(kind==='activeSession'&&String(key)==='active')return 'activeSession';
   throw new Error('Repository structured preparation unit is invalid.');
 }
@@ -104,6 +107,7 @@ function repositoryPreparationDescriptor(unit){
   if(/^dailyRecordPack:\d{4}-(?:0[1-9]|1[0-2])$/u.test(value))return freeze({unit:value,kind:'dailyRecordPack',key:value.slice('dailyRecordPack:'.length)});
   if(value.startsWith('note:')&&value.length>'note:'.length)return freeze({unit:value,kind:'note',key:value.slice('note:'.length)});
   if(value==='personalData')return freeze({unit:value,kind:'personalData',key:'personal'});
+  if(/^pendingReview:pr_[a-f0-9]{32}$/u.test(value))return freeze({unit:value,kind:PENDING_REVIEW_KIND,key:value.slice('pendingReview:'.length)});
   if(value==='activeSession')return freeze({unit:value,kind:'activeSession',key:'active'});
   return null;
 }
@@ -135,7 +139,7 @@ async function repositoryNoteSetIdentity(entries){
 }
 async function repositoryPreparationIndexCandidate(epochToken,stamps,entries){
   const rows=[...entries.values()].sort((a,b)=>a.unit.localeCompare(b.unit));
-  const maxUnits=Math.max(1024,Number(APP_LIMITS.maxImportRecords||10000)+Number(APP_LIMITS.maxNotes||1000)+16);if(rows.length>maxUnits)return null;
+  const maxUnits=Math.max(1024,Number(APP_LIMITS.maxImportRecords||10000)+Number(APP_LIMITS.maxNotes||1000)+2*Number(APP_LIMITS.maxPendingReviews||2000)+16);if(rows.length>maxUnits)return null;
   const noteSet=await repositoryNoteSetIdentity(entries);
   return freeze({version:REPOSITORY_PREPARATION_INDEX_VERSION,epochToken:String(epochToken||''),checkpointId:'',noteCount:noteSet.noteCount,noteKeyFingerprint:noteSet.noteKeyFingerprint,stamps:freeze([...(stamps||[])]),entries:freeze(rows)});
 }
@@ -146,14 +150,14 @@ async function repositoryNotesFingerprint(entries){
   return String(await Exports.run('checksum',{value:JSON.stringify(notes),algorithm:'sha256'})||'').toLowerCase();
 }
 function repositoryPreparationCounts(entries){
-  let dailyRecord=0,note=0,activeSession=0,personalData=0;
-  for(const entry of entries.values())if(entry&&entry.present){if(entry.kind==='dailyRecordPack')dailyRecord+=entry.members.length;else if(entry.kind==='note')note+=1;else if(entry.kind==='activeSession')activeSession=1;else if(entry.kind==='personalData')personalData=1;}
-  return BackupCodec.countShape({checkpointManifest:1,personalData,dailyRecord,note,activeSession});
+  let dailyRecord=0,note=0,activeSession=0,personalData=0,pendingReview=0;
+  for(const entry of entries.values())if(entry&&entry.present){if(entry.kind==='dailyRecordPack')dailyRecord+=entry.members.length;else if(entry.kind==='note')note+=1;else if(entry.kind==='activeSession')activeSession=1;else if(entry.kind==='personalData')personalData=1;else if(entry.kind===PENDING_REVIEW_KIND)pendingReview+=1;}
+  return BackupCodec.countShape({checkpointManifest:1,personalData,dailyRecord,note,activeSession,pendingReview});
 }
 function repositoryPreparationInventory(entries){
-  const recordDates=[],noteKeys=[],assetIds=new Set();
-  for(const entry of entries.values())if(entry&&entry.present){if(entry.kind==='dailyRecordPack')recordDates.push(...entry.members);else if(entry.kind==='note')noteKeys.push(entry.key);for(const id of entry.assetIds||[])assetIds.add(String(id));}
-  recordDates.sort();noteKeys.sort();return freeze({recordDates:freeze(recordDates),noteKeys:freeze(noteKeys),assetIds:freeze([...assetIds].sort()),counts:repositoryPreparationCounts(entries)});
+  const recordDates=[],noteKeys=[],pendingReviewIds=[],assetIds=new Set();
+  for(const entry of entries.values())if(entry&&entry.present){if(entry.kind==='dailyRecordPack')recordDates.push(...entry.members);else if(entry.kind==='note')noteKeys.push(entry.key);else if(entry.kind===PENDING_REVIEW_KIND)pendingReviewIds.push(entry.key);for(const id of entry.assetIds||[])assetIds.add(String(id));}
+  recordDates.sort();noteKeys.sort();pendingReviewIds.sort();return freeze({recordDates:freeze(recordDates),noteKeys:freeze(noteKeys),pendingReviewIds:freeze(pendingReviewIds),assetIds:freeze([...assetIds].sort()),counts:repositoryPreparationCounts(entries)});
 }
 function repositoryMonth(value){const match=/^(\d{4}-\d{2})-\d{2}$/u.exec(String(value||''));if(!match)throw new Error('Repository record date is invalid.');return match[1];}
 function repositoryManifestCounts(written,manifestVersion){
@@ -199,7 +203,8 @@ function repositoryLogicalIdentityPayload(value){
   // excluded here because L16F discards that retired domain during compatibility migration.
   // A version written before the note rename keeps the identity it was
   // written with: the same fields, in the same order, under the old names.
-  const counts=BackupCodec.countShape(manifest.counts||{}),written=repositoryNoteKind(manifest.version)!=='note';
+  const shaped=BackupCodec.countShape(manifest.counts||{}),written=repositoryNoteKind(manifest.version)!=='note';
+  const counts=Number(manifest.version)<REPOSITORY_PENDING_REVIEW_VERSION?Object.fromEntries(Object.entries(shaped).filter(([type])=>type!==PENDING_REVIEW_KIND)):shaped;
   const identityCounts=written?Object.fromEntries(Object.entries(counts).map(([type,count])=>[type==='note'?WRITTEN_NOTE_KIND:type,count])):{...counts};
   const deletions=written?{savedDays:freeze(savedDayDeletions),areaNotes:freeze(noteDeletions),attachments:freeze(attachmentDeletions)}:{savedDays:freeze(savedDayDeletions),notes:freeze(noteDeletions),attachments:freeze(attachmentDeletions)};
   return freeze({format:'study-director.managed-backup-logical-state',version:1,counts:freeze(identityCounts),objects:freeze(objects),assets:freeze(assets),deletions:freeze(deletions)});
@@ -614,7 +619,7 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       for(const id of inventory.assetIds)ids.add(id);
       await AssetData.verifyAliases(preparation.assetCatalogue,[...ids]);
       assetItems=[...ids].filter(Boolean).sort().map(assetId=>{const row=catalogue.get(assetId);if(!row)return freeze({descriptor:freeze({assetId,missing:true}),blob:null});return freeze({descriptor:freeze({assetId,mimeType:row.type,size:row.size,checksum:row.hash,name:row.name,library:row.library===true}),blob:null});});
-      capture=await finalizePreparationCapture(preparation,freeze({recordDates:inventory.recordDates,noteKeys:inventory.noteKeys,assetIds:assetItems.map(item=>item.descriptor.assetId),counts:inventory.counts}));
+      capture=await finalizePreparationCapture(preparation,freeze({recordDates:inventory.recordDates,noteKeys:inventory.noteKeys,pendingReviewIds:inventory.pendingReviewIds,assetIds:assetItems.map(item=>item.descriptor.assetId),counts:inventory.counts}));
       const updates=Object.create(null),deletes=[];for(const [key,state] of readNoteStates){if(state===null)deletes.push(key);else updates[key]=state;}
       candidateIndex=await repositoryPreparationIndexCandidate(preparation.epochToken,preparation.stamps,candidateEntries);if(!candidateIndex)throw new Error('Incremental repository preparation index could not be rebuilt.');
       if(plan.baseUpdate)reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:2,full:false,baseCheckpointId:reconciliationBaseId,noteCount:candidateIndex.noteCount,noteKeyFingerprint:candidateIndex.noteKeyFingerprint,personalFingerprint:readPersonal===undefined?null:await AppData.reconciliationBase.personalFingerprint(readPersonal),sessionFingerprint:readSession===undefined?null:await AppData.reconciliationBase.sessionFingerprint(readSession),noteKeys:null,updates:freeze(updates),deletes:freeze(deletes.sort()),days:await daysUpdate(false)});
@@ -624,11 +629,12 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       for(const note of capture.noteItems)await materializeStructured('note',String(note.key),note);
       if(capture.activeSession)await materializeStructured('activeSession','active',capture.activeSession);
       if(capture.personalData)await materializeStructured('personalData','personal',capture.personalData);
+      for(const review of capture.pendingReviewItems||[])await materializeStructured(PENDING_REVIEW_KIND,review.id,review);
       assetItems=[...(capture.assetItems||[])];
       const updates=Object.create(null),noteKeys=[];for(const note of capture.noteItems||[]){const key=String(note&&note.key||'').trim();if(!key)continue;noteKeys.push(key);updates[key]=baseNoteState(note);}
       noteKeys.sort();if(baseUpdate)reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:2,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await AppData.reconciliationBase.personalFingerprint(capture.personalData||null),sessionFingerprint:await AppData.reconciliationBase.sessionFingerprint(capture.activeSession||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([]),days:await daysUpdate(true)});
     }
-    const structuredRank=freeze({dailyRecordPack:0,activeSession:1,personalData:2,note:3});
+    const structuredRank=freeze({dailyRecordPack:0,activeSession:1,personalData:2,note:3,[PENDING_REVIEW_KIND]:4});
     for(const entry of [...candidateEntries.values()].filter(entry=>entry.present&&!repositoryPackableEntry(entry)).sort((a,b)=>(structuredRank[a.kind]??9)-(structuredRank[b.kind]??9)||String(a.key).localeCompare(String(b.key)))){
       const object=structuredObjects.get(entry.unit);if(!object)throw new Error('A reusable structured repository object became unavailable during checkpoint preparation.');objects.push(object);currentByUnit.set(repositoryUnitKey(object.kind,object.key),object);
     }
@@ -951,12 +957,12 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
   throwIfImportAborted(signal);
   if(manifest.installationId&&manifest.installationId!==manifest.checkpoint.originInstallationId)throw new Error('Repository checkpoint installation provenance is inconsistent.');
   const objectById=new Map(manifest.objects.map(entry=>[entry.objectId,entry]));
-  const noteKind=repositoryNoteKind(manifest.version),allowedKinds=new Set(['dailyRecordPack',noteKind,'activeSession','personalData','structuredPack','attachment']);if(manifest.version<=4)allowedKinds.add(LEGACY_REFLECTION_DRAFT_PACK_KIND);
+  const noteKind=repositoryNoteKind(manifest.version),allowedKinds=new Set(['dailyRecordPack',noteKind,'activeSession','personalData','structuredPack','attachment']);if(manifest.version<=4)allowedKinds.add(LEGACY_REFLECTION_DRAFT_PACK_KIND);if(manifest.version>=REPOSITORY_PENDING_REVIEW_VERSION)allowedKinds.add(PENDING_REVIEW_KIND);
   for(const entry of manifest.objects)if(!allowedKinds.has(entry.kind))throw new Error(`Repository object kind ${entry.kind} is unsupported.`);
-  const dailyDocuments=[],noteItems=[];let activeSession=null,personalData=null,legacyReflectionDraftCount=0;
+  const dailyDocuments=[],noteItems=[],pendingReviewItems=[];let activeSession=null,personalData=null,legacyReflectionDraftCount=0;
   // A one-note read names the note by id.
   const holdsNote=entry=>entry.kind===noteKind&&entry.key===noteKey||entry.kind==='structuredPack'&&repositoryPackManifestMembers(entry.members,manifest.version).some(member=>member.kind===noteKind&&member.key===noteKey);
-  const seenDates=new Set(),seenNoteKeys=new Set(),seenDraftDates=new Set(),structuredEntries=manifest.objects.filter(entry=>entry.kind!=='attachment'&&(!noteKey||holdsNote(entry)));
+  const seenDates=new Set(),seenNoteKeys=new Set(),seenReviewIds=new Set(),seenDraftDates=new Set(),structuredEntries=manifest.objects.filter(entry=>entry.kind!=='attachment'&&(!noteKey||holdsNote(entry)));
   const structuredPayloads=await mapRepositoryBounded(structuredEntries,async entry=>{
     throwIfImportAborted(signal);
     return readRepositoryStructuredObject(manifest,entry,readObject,{interactive,signal});
@@ -977,10 +983,13 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
       if(entry.key!=='active'||activeSession!==null)throw new Error('Repository Active Session object is invalid.');activeSession=payload;
     }else if(entry.kind==='personalData'){
       if(entry.key!=='personal'||personalData!==null)throw new Error('Repository personal-data object is invalid.');personalData=payload;
+    }else if(entry.kind===PENDING_REVIEW_KIND&&manifest.version>=REPOSITORY_PENDING_REVIEW_VERSION){
+      if(!payload||typeof payload!=='object'||Array.isArray(payload)||String(payload.id||'')!==entry.key||seenReviewIds.has(entry.key))throw new Error('Repository object kept for review is invalid.');
+      seenReviewIds.add(entry.key);pendingReviewItems.push(payload);
     }else throw new Error(`Repository logical object kind ${entry.kind} is unsupported.`);
   }
-  dailyDocuments.sort((a,b)=>String(a.date).localeCompare(String(b.date)));noteItems.sort((a,b)=>String(a.key).localeCompare(String(b.key)));
-  const counts=repositoryManifestCounts({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:dailyDocuments.length,note:noteItems.length,activeSession:activeSession?1:0,reflectionDraft:legacyReflectionDraftCount},manifest.version);
+  dailyDocuments.sort((a,b)=>String(a.date).localeCompare(String(b.date)));noteItems.sort((a,b)=>String(a.key).localeCompare(String(b.key)));pendingReviewItems.sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+  const counts=repositoryManifestCounts({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:dailyDocuments.length,note:noteItems.length,activeSession:activeSession?1:0,pendingReview:pendingReviewItems.length,reflectionDraft:legacyReflectionDraftCount},manifest.version);
   if(!noteKey&&!repositoryCountsEqualForManifest(counts,manifest.counts,manifest.version))throw new Error('Repository checkpoint counts do not match its reconstructed contents.');
   const referencedAttachmentIds=new Set(),attachmentLeases=new Map(),assetItems=[],noteAssetIds=noteKey?new Set(noteItems.flatMap(item=>[...BackupCodec.assetIds(item)])):null;
   try{
@@ -1004,7 +1013,7 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
       format:LOGICAL_CHECKPOINT_CAPTURE_FORMAT,version:LOGICAL_CHECKPOINT_CAPTURE_VERSION,
       dailyDocuments:freeze(dailyDocuments),exportedAt:manifest.exportedAt,sourceRevision:manifest.sourceRevision,
       studentName:String(personalData&&personalData.preferences&&personalData.preferences.studentName||'Study Director'),installationId,checkpoint:manifest.checkpoint,
-      recordDates:freeze(dailyDocuments.map(record=>String(record.date))),noteItems:freeze(noteItems),activeSession,personalData,
+      recordDates:freeze(dailyDocuments.map(record=>String(record.date))),noteItems:freeze(noteItems),activeSession,personalData,pendingReviewItems:freeze(pendingReviewItems),
       savedDayDeletions:freeze([...(manifest.protectedCheckpointManifest.savedDayDeletions||[])]),noteDeletions:freeze([...(manifest.protectedCheckpointManifest.noteDeletions||[])]),attachmentDeletions:freeze([...(manifest.protectedCheckpointManifest.attachmentDeletions||[])]),counts,assetItems:freeze(assetItems),warning:manifest.warning,
       protectedCheckpointManifest:manifest.protectedCheckpointManifest,noteScope:noteKey
     });
