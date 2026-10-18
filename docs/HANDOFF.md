@@ -2,7 +2,7 @@
 
 Status of the work on this branch (`refactor/background-coordination`, draft PR #1). Read sections 1 and 5 first; sections 2 to 4 are closed summaries.
 
-**Current state (2026-10-18):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). **In progress: Drive sync and profiles (section 5).** Done: the small items (5.5), sync (5.1) and merge rules (5.2). Next: the first-start form (5.4), then profiles (5.3), then removing code section 5 made redundant, then a fresh audit of the backup system and app behaviour (5.6). Last of all: Wordgard as its own module, with two items to explore alongside it: notification sounds made in code, and the editor toolbar order (section 6).
+**Current state (2026-10-18):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). **In progress: Drive sync and profiles (section 5).** Done: the small items (5.5), sync (5.1) and merge rules (5.2). Next: the first-start form (5.4) and profiles (5.3) in one pass, with device names folded in, then removing code section 5 made redundant, then a fresh audit of the backup system and app behaviour (5.6). Last of all: Wordgard as its own module, with two items to explore alongside it: notification sounds made in code, and the editor toolbar order (section 6).
 
 ---
 
@@ -19,6 +19,8 @@ Status of the work on this branch (`refactor/background-coordination`, draft PR 
 6. The session concludes only once all four — backup, notes, background services, sync — are as good as we can reasonably make them.
 
 **Migration (user's rule, 2026-10-10).** Older data is read once, converted into the current canonical form, verified and retired, never used again. Only the compatibility host (`compatibility-host.js`, plus repository adapters where a transaction requires it) reads old forms; the ordinary runtime reads only current forms. Every conversion is listed in `contracts/compatibility.mjs` with its retirement condition, so the whole migration machinery can be deleted later, leaving one clean canonical data structure.
+
+**Not deployed (user, 2026-10-18).** This branch has never been released. Production still runs the old version from before this branch. Formats, identities and backups that existed only on this branch need no migration or compatibility; new changes simply replace them.
 
 ## 2. Done: backups and data (closed)
 
@@ -159,6 +161,7 @@ The person's data is never lost. Merging is automatic wherever it is lossless; o
 | Drive link | The Drive library records its profile's id. Connecting a Google account whose library belongs to another profile is refused, so two people's data can never mix. Changing the account uploads the whole library to the new account and leaves the old copy alone |
 | Password | With one profile on the device, its backup key is remembered on the device (a non-extractable key, never the password) and not asked again. With several, each person is asked for their own when switching in, which unlocks their sync; "Not now" keeps working locally with sync paused. It is not a privacy lock, because browser data is not encrypted (5.8) |
 | Removing a profile from a device | From Library → Data, only after confirming its data is synced, or with a clear warning |
+| Device names (user, 2026-10-18; build in the 5.4 + 5.3 pass) | Nobody types a device name. The device ID itself says what the device is: `inst_<type>_<browser>_<first-use time>_<random>`, e.g. `inst_iphone_safari_mgk3x9p2_a8f3k2q1`. Type and browser are read from the browser when the ID is made (with a touch-screen check, since some iPads report themselves as a Mac); the random part keeps two alike devices apart. The name is read from the ID alone, so any device can name any other: "iPhone · Safari", with "(since 12 Oct)" added only when two devices would otherwise look the same. No new fields or store: versions and the session already carry the ID. Shown in "Running on … (last update …)", the Continue here question and Version History rows ("from …" or "This device"). Browsers give no model names, so it is type and browser only; a cleared or different browser is a new device. No compatibility: IDs made earlier on this branch are simply replaced |
 
 Design sync around profile ids from the start; build the per-profile storage after sync.
 
@@ -193,10 +196,9 @@ Backup password  [ Optional            ]   (a confirm box appears once you type)
 
 1. The small items (5.5). **Done.**
 2. The sync engine and merge rules (5.1, 5.2), with sync designed around profile ids. **Done.**
-3. The first-start form (5.4).
-4. Profiles (5.3).
-5. Remove what section 5 made redundant, then a cleanup pass.
-6. Audit the backup system and app behaviour again (noted by the user, 2026-10-18). Drive went from a manual handoff (back up, then Combine or Replace on the other device) to automatic sync, so much has changed. Check whether everything is still in its best shape, and what can be improved, refined or corrected:
+3. The first-start form (5.4) and profiles (5.3), in one pass, with device names (5.3) folded in.
+4. Remove what section 5 made redundant, then a cleanup pass.
+5. Audit the backup system and app behaviour again (noted by the user, 2026-10-18). Drive went from a manual handoff (back up, then Combine or Replace on the other device) to automatic sync, so much has changed. Check whether everything is still in its best shape, and what can be improved, refined or corrected:
    - Device Folder and Drive backups end to end, after sync and one history.
    - Version History: one history now shared by both locations, with keep-15 plus up to 10 hourly versions. How each location keeps, copies and prunes them.
    - A note's earlier-versions list gathers Drive and Device Folder versions separately; with one history this may now be redundant.
