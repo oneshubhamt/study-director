@@ -73,17 +73,17 @@ try{
       mode:__DeviceBackupDebug.DeviceBackup.status().mode,
       label:document.getElementById('device-backup-status').textContent.trim(),
       fileActions:[...document.querySelectorAll('.backup-file-actions > button')].map(button=>button.textContent.trim()),
-      recoverLabel:document.getElementById('recover-device-backup')?.textContent.trim()||'',
-      recoverHidden:document.getElementById('recover-device-backup')?.hidden===true,
+      versionHistoryLabel:document.getElementById('open-version-history')?.textContent.trim()||'',
+      sharedActionsHidden:document.getElementById('backup-shared-actions')?.hidden===true,
       advancedOpen:document.querySelector('.backup-advanced-disclosure')?.open===true,
-      locationBadges:[...document.querySelectorAll('.backup-location-badge')].map(node=>node.textContent.trim()),
+      locationBadges:document.querySelectorAll('.backup-location-badge').length,
       pickerCalls:__devicePickerCalls()
     };
   })()`);
   assert.equal(startup.supported,true);assert.equal(startup.mode,'off');assert.equal(startup.label,'Off');
   assert.deepEqual(startup.fileActions,['Export backup…','Restore from file…']);
-  assert.equal(startup.recoverLabel,'Versions');assert.equal(startup.recoverHidden,true,'Device recovery should appear only after a folder is connected');
-  assert.equal(startup.advancedOpen,false);assert.deepEqual(startup.locationBadges,['Primary','Optional']);
+  assert.equal(startup.versionHistoryLabel,'Version History');assert.equal(startup.sharedActionsHidden,true,'Back up now and Version History appear once a location is connected');
+  assert.equal(startup.advancedOpen,false);assert.equal(startup.locationBadges,0,'neither location is ranked');
   assert.equal(startup.pickerCalls,0,'startup invoked the folder picker');
   evidence.checks.startup={off:true,noPrompt:true,manualBackupPreserved:true};
 
@@ -103,12 +103,12 @@ try{
   await waitFor(()=>page.evaluate(`/^On(?:\\s|$)/.test(document.getElementById('device-backup-status').textContent.trim())`),{timeout:60000,label:'Device Folder row at rest after the first backup'});
 
   // Nothing changed: Back up now confirms the folder is current and adds no version.
-  await page.evaluate(`document.getElementById('device-backup-now').click()`);
+  await page.evaluate(`document.getElementById('backup-now').click()`);
   await waitFor(()=>page.evaluate(`!__DeviceBackupDebug.DeviceBackup.status().busy&&/already has your latest data/.test(document.getElementById('library-data')?.textContent||'')`),{timeout:90000,label:'unchanged backup confirmed'});
   assert.equal(await page.evaluate('__deviceVersions().then(rows=>rows.length)'),1,'an unchanged backup adds no version');
   // A real change gets its own version.
   await page.evaluate(`(async()=>{__DeviceBackupDebug.AppData.notes.update('Rotation','Rotation','A change worth a new version');await __DeviceBackupDebug.AppData.notes.flush();})()`);
-  await page.evaluate(`document.getElementById('device-backup-now').click()`);
+  await page.evaluate(`document.getElementById('backup-now').click()`);
   await waitFor(()=>page.evaluate(`(async()=>!__DeviceBackupDebug.DeviceBackup.status().busy&&(await __deviceVersions()).length===2)()`),{timeout:90000,label:'second verified repository checkpoint'});
   const rotation=await page.evaluate(`(async()=>{const repo=await __deviceRepository(),checkpoints=await repo.getDirectoryHandle('checkpoints'),out=[];for await(const [name,handle] of checkpoints.entries()){const file=await handle.getFile();out.push({name,size:file.size});}return out.sort((a,b)=>a.name.localeCompare(b.name));})()`);
   assert.equal(rotation.length,2);assert.ok(rotation.every(row=>/^cp_[a-f0-9]{32}\.sdcheckpoint$/u.test(row.name)&&row.size>0));
@@ -134,7 +134,7 @@ try{
   })()`);
   assert.ok(noteKey,'the note was saved before the backup');
   const versionsBeforeNote=await page.evaluate('__deviceVersions()');
-  await page.evaluate(`document.getElementById('device-backup-now').click()`);
+  await page.evaluate(`document.getElementById('backup-now').click()`);
   const noteCheckpoint=await waitFor(()=>page.evaluate(`(async()=>{if(__DeviceBackupDebug.DeviceBackup.status().busy)return '';const added=(await __deviceVersions()).filter(id=>!${JSON.stringify(versionsBeforeNote)}.includes(id));return added.length===1?added[0]:'';})()`),{timeout:90000,label:'backup holding the note'});
   await page.evaluate(`(async()=>{
     const debug=__DeviceBackupDebug,hold=debug.BackupProviderRuntime.suspendBackground('qa-note-restore');await hold.settled;window.__qaNoteSuspension=hold;
@@ -191,7 +191,7 @@ try{
 
   await page.evaluate(`document.getElementById('disconnect-device-backup').click()`);
   await waitFor(()=>page.evaluate(`(()=>{const state=__DeviceBackupDebug.DeviceBackup.status();return !state.busy&&state.mode==='off'&&!state.connected;})()`),{label:'device backup turn off'});
-  const off=await page.evaluate(`({label:document.getElementById('device-backup-status').textContent.trim(),connect:!document.getElementById('connect-device-backup').hidden,backupNow:document.getElementById('device-backup-now').hidden})`);
+  const off=await page.evaluate(`({label:document.getElementById('device-backup-status').textContent.trim(),connect:!document.getElementById('connect-device-backup').hidden,backupNow:document.getElementById('backup-shared-actions').hidden})`);
   assert.deepEqual(off,{label:'Off',connect:true,backupNow:true});
   evidence.checks.turnOff={off:true,connectAvailable:true};
 

@@ -666,15 +666,15 @@ function activeSessionChoiceLabel(candidate){
   const source=candidate.sources.find(item=>item.local)||candidate.sources[0];
   return source?.local?'Keep this device’s session':`Use session from ${source?.label||'backup'}`;
 }
-// What both sides last shared (the handoff ancestor): this device's last
-// handoff, when the backup descends from it, else null.
-async function handoffBase(stored){
+// What both sides last shared: the shared base this device last synced, when
+// the backup descends from it, else null.
+async function lastSharedBase(stored){
   const snapshot=candidateSnapshotState(stored),manifest=snapshot&&snapshot.provenance&&snapshot.provenance.repositoryManifest,repositoryBaseId=String(manifest&&manifest.reconciliationBaseId||'');if(!repositoryBaseId)return null;
   const ancestorIds=Array.isArray(manifest.reconciliationAncestorIds)&&manifest.reconciliationAncestorIds.length?manifest.reconciliationAncestorIds:[repositoryBaseId];
   const localBase=await AppData.reconciliationBase.read().catch(()=>null);
   return localBase&&ancestorIds.includes(String(localBase.checkpointId||''))?localBase:null;
 }
-// Each note's title and text at the last handoff.
+// Each note's title and text in the shared base.
 async function noteReconciliationAncestor(base,keys=[]){
   if(!base)return null;
   const notes=keys.length?await AppData.reconciliationBase.readNotes(keys).catch(()=>freeze({})):freeze({});
@@ -683,7 +683,7 @@ async function noteReconciliationAncestor(base,keys=[]){
 // Plans and settings are compared as one unit by fingerprint.
 async function personalFingerprint(value){return value?String(await Exports.run('checksum',{value:Canonical.signature(value),algorithm:'sha256'})):'';}
 // 'replace' or 'keep' when only one side changed plans and settings since the
-// handoff; null when they match, both changed, or there is no shared history.
+// shared base; null when they match, both changed, or there is no shared history.
 async function personalSettled(base,local,incoming){
   const shared=String(base&&base.personalFingerprint||'');if(!shared||!local||!incoming)return null;
   const [mine,theirs]=await Promise.all([personalFingerprint(local),personalFingerprint(incoming)]);
@@ -714,8 +714,8 @@ async function sharedBaseUpdate(parsed){
   const records=normalizeImportedDailyRecordSet(parsed&&parsed.records||[]).records;
   return freeze({format:'study-director.reconciliation-base-update',version:2,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await personalFingerprint(parsed&&parsed.importedPersonalData),sessionFingerprint:await sessionFingerprint(parsed&&parsed.importedActiveSession||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([]),days:await dayFingerprintMonths(records)});
 }
-// Saved Days that differ and that one side has not changed since the
-// handoff: that side takes the other's (a record or a deletion).
+// Saved Days that differ and that one side has not changed since the shared
+// base: that side takes the other's (a record or a deletion).
 async function savedDaySettlement(plan,base){
   const settled=new Map(),items=base?plan.savedDays.filter(item=>item.conflict):[];if(!items.length)return settled;
   const shared=await AppData.reconciliationBase.readDays(items.map(item=>item.date)).catch(()=>freeze({}));
@@ -742,8 +742,8 @@ function syncSavedDayReviews(plan,settled){
   return freeze(reviews);
 }
 // The Active Session: 'same', 'incoming' or 'local' when one side has not
-// changed it since the handoff, 'conflict' when both have, '' without a
-// handoff, and, while it runs here during a sync or a review, 'hold' (this
+// changed it since the shared base, 'conflict' when both have, '' without a
+// shared base, and, while it runs here during a sync or a review, 'hold' (this
 // device's stays and the other side's waits) or 'yield' when another device
 // took it over after this one changed it (this device stops and the person
 // reviews both). A copy of another device's session that this device has not
@@ -782,7 +782,7 @@ function sessionFollows(local,incoming,parsed){
 function nextNoteRevision(...values){return new Date(Math.max(Date.now(),...values.map(value=>(Date.parse(String(value&&value.updatedAt||''))||0)+1))).toISOString();}
 // Combine settles a note difference without asking only when nothing on this
 // device can be lost: a side still holds what both sides last shared (the
-// handoff ancestor), so only the other side changed it; both changed the text
+// shared base), so only the other side changed it; both changed the text
 // in different paragraphs, which Smart merge joins (mergeThreeWay, safe); the
 // note did not exist when both last shared, so the side deleting it has not
 // touched it since; or the side that deleted a note holds the other side's
@@ -811,7 +811,7 @@ function noteReconciliationState(plan,ancestor=null){
       continue;
     }
     // One side deleted the note. The deletion stands, or the note stays, when
-    // the side that kept it has not changed it since the handoff or the
+    // the side that kept it has not changed it since the shared base or the
     // deleting side holds that same copy in Recently deleted.
     const kept=local.kind==='record'?local:incoming,deleting=kept===local?incoming:local;
     if(same(kept.value,base)||same(kept.value,trashCopy(item.key,deleting.local)))settled.set(item.key,deleting.id);
@@ -1016,7 +1016,7 @@ function restoreModeForBackup(impact){
   return 'reconcile';
 }
 function restoreDecisionSetup(parsed,impact,mode='import',localPersonal=null,noteState=null,personal=null,settledDays=null,session=''){
-  // Plans and settings changed on one side only since the handoff are settled
+  // Plans and settings changed on one side only since the shared base are settled
   // without asking ('replace' takes the backup's, 'keep' this device's).
   const plan=impact.reconciliationPlan,groups=[],defaults={plans:personal||'keep',personalSettings:personal||'keep',safetyCopy:false};
   if(parsed.importedPersonalData&&!personal){
@@ -1448,7 +1448,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   // sync keeps it as it is; otherwise the side that did not change it since
   // takes the other's.
   // A review during a study session leaves the session as it is too.
-  const review=!quiet&&!note&&options?.review===true,base=note?null:await handoffBase(stored);
+  const review=!quiet&&!note&&options?.review===true,base=note?null:await lastSharedBase(stored);
   let session=note||missingOnly?'same':await sessionSettlement(base,parsed,{hold:(sync||review)&&hasActiveSession(),sync});
   // Another device took the session over: stop it here, keeping what this
   // device recorded, and let the person choose between the two (a sync shows
@@ -1707,7 +1707,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
 }
 // Replace makes this device match the backup without losing anything here
 // unasked. A note whose text the backup changed takes the backup's copy when
-// this device has not changed it since the last handoff, and opens in the
+// this device has not changed it since the shared base, and opens in the
 // review otherwise, starting from the backup's copy. A note the backup
 // deleted moves to Recently deleted. What this device has that the backup
 // neither has nor deleted (notes, Saved Days, attachments, saved plans) stays
@@ -1725,7 +1725,7 @@ async function planReplacement(stored,parsed){
   if(portableAssets&&Number(parsed.formatVersion)>=10){const known=new Set([...ids(parsed.assetDescriptors,'assetId'),...ids(manifest.attachmentDeletions,'assetId')]);assets=(await AssetData.list()).map(row=>String(row&&row.id||'')).filter(id=>id&&!known.has(id));}
   const backupPlans=parsed.importedPersonalData?parsed.importedPersonalData.plans.savedPlans:null,localPlans=backupPlans?((await personalExport({flush:false}))?.plans?.savedPlans||[]):[],backupPlanIds=ids(backupPlans,'id');
   const plans=localPlans.map(plan=>String(plan&&plan.id||'')).filter(id=>id&&!backupPlanIds.has(id));
-  const reviewKeys=[...changed,...deletedByBackup],ancestor=reviewKeys.length?await noteReconciliationAncestor(await handoffBase(stored),reviewKeys):null;
+  const reviewKeys=[...changed,...deletedByBackup],ancestor=reviewKeys.length?await noteReconciliationAncestor(await lastSharedBase(stored),reviewKeys):null;
   return freeze({local,target,changed:freeze(changed),deletedByBackup:freeze(deletedByBackup),ancestor,plansOverLimit:!!backupPlans&&backupPlans.length+plans.length>100,extras:freeze({notes:freeze(gone.filter(key=>!deletedByBackup.includes(key))),days:freeze(days),assets:freeze(assets),plans:freeze(plans)})});
 }
 // "2 notes (“Geography”, “Essay”), 1 Saved Day (12 Oct)": counts, naming the first few.
@@ -1758,7 +1758,7 @@ async function reviewReplacedNotes(plan,parsed,signal){
 }
 // The notes after a replace. A retired note keeps this device's copy in
 // Recently deleted unless the backup's deleted copy already holds it, or this
-// device had not changed it since the last handoff.
+// device had not changed it since the shared base.
 function replacementNotes(plan,reviewed,keepExtras){
   const {local,target,ancestor}=plan,notes={...target,...reviewed},retired=[];
   const same=(a,b)=>!!a&&!!b&&String(a.text??'')===String(b.text??'')&&String(a.label??'')===String(b.label??'');
@@ -1823,10 +1823,11 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
   if(!confirmed){
     const accepted=await configure({
       title:'Replace current data?',
-      message:'This device will match this backup. A note the backup changed takes the backup’s copy, or opens for review when this device changed it too. A note the backup deleted moves to Recently deleted. Device-local settings and browser permissions stay on this device.',
+      message:'Your data will match this backup. A note the backup changed takes the backup’s copy, or opens for review when this device changed it too. A note the backup deleted moves to Recently deleted. Device-local settings and browser permissions stay on this device.',
       details:[
         `${preview.exportedAt?new Date(preview.exportedAt).toLocaleString('en-IN'):'Date unavailable'} · ${Number(preview.counts&&preview.counts.dailyRecord)||0} Saved Days · ${Number(preview.counts&&preview.counts.note)||0} Notes`,
-        'A verified safety copy protects the current local state if this operation fails.'
+        'A verified safety copy protects the current local state if this operation fails.',
+        ...[presentation.reach?.()||''].filter(Boolean)
       ],
       groups:extras?freeze([freeze({id:'extras',label:`Not in this backup · ${extras}`,defaultValue:'keep',description:'On this device, but neither in this backup nor deleted by it.',choices:REPLACEMENT_EXTRA_CHOICES})]):freeze([]),confirmLabel:'Replace current data',cancelLabel:'Cancel',caution:true,signal
     });
@@ -1962,7 +1963,7 @@ async function importPortableBackup(ev){
     const preview=candidate.preview||{},stored=inspectedBackups.get(candidate),snapshot=stored?candidateSnapshotState(stored):null,parsed=snapshot&&snapshot.parsed||null;
     const captureAuthority=String(parsed&&parsed.captureAuthority||'unknown'),exactCapable=Number(parsed&&parsed.formatVersion)>=18&&captureAuthority==='canonical-complete'&&!!parsed&&!!parsed.protectedCheckpointManifest,rescuePartial=captureAuthority==='rescue-partial';
     const restoreChoices=presentation.restoreChoices,choices=[...(preview.reconciliationCapable?[restoreChoices.missing]:[]),restoreChoices.combine,...(exactCapable?[restoreChoices.replace]:[])];
-    const decisionDetails=exactCapable?['Choose how this backup should be applied.']:rescuePartial?['This is a verified rescue backup from degraded storage. It can recover available data, but authoritative replacement is disabled.']:['This historical backup can be combined safely, but it does not carry current capture-authority proof for authoritative replacement.'];
+    const decisionDetails=[exactCapable?'Choose how this backup should be applied.':rescuePartial?'This backup was saved while browser storage was failing. It can bring back what it holds, but it cannot replace current data.':'This backup is from an older version of Study Director. It can be combined with current data, but it cannot replace it.',...[presentation.reach?.()||''].filter(Boolean)];
     OperationDiagnostics.mark('standalone-decision-start',{},traceId);const mode=await choose({title:'Use this backup',message:`Verified backup${preview.exportedAt?` from ${new Date(preview.exportedAt).toLocaleString('en-IN')}`:''}.`,details:decisionDetails,cancelLabel:'Keep current',choices});
     OperationDiagnostics.mark('standalone-decision-complete',{mode:mode||'keep-current'},traceId);if(!mode){finishPortablePresentation({message:'Backup import cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,stage:'decision'},traceId);return freeze({cancelled:true});}
     consumed=true;OperationDiagnostics.mark('standalone-apply-start',{mode},traceId);

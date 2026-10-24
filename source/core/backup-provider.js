@@ -97,7 +97,6 @@ registry.define('backup-provider',1,input=>{
       beginMaintenance:maintenanceCapable?value.beginMaintenance:null,listMaintenances:maintenanceCapable?value.listMaintenances:null,assertMaintenance:maintenanceCapable?value.assertMaintenance:null,renewMaintenance:maintenanceCapable&&typeof value.renewMaintenance==='function'?value.renewMaintenance:null,endMaintenance:maintenanceCapable?value.endMaintenance:null,
       scope:typeof value.scope==='function'?value.scope:null,
       discardUploads:typeof value.discardUploads==='function'?value.discardUploads:null,
-      choose:typeof value.choose==='function'?value.choose:null,
       beginOperation:typeof value.beginOperation==='function'?value.beginOperation:null,
       historyReadConcurrency:Math.max(1,Math.min(VERIFIED_HISTORY_READ_CONCURRENCY,Math.floor(Number(value.historyReadConcurrency)||1)))
     });
@@ -107,7 +106,7 @@ registry.define('backup-provider',1,input=>{
     const begin=selected&&selected.repository&&selected.repository.beginOperation;if(typeof begin!=='function')return selected;
     const scoped=freezeRepositoryTransport(begin(Object.freeze({signal:options&&options.signal||null,checkProtection:options&&options.checkProtection||null})));
     if(!scoped)throw new Error('Backup repository transport could not begin a verified operation.');
-    const repository=scoped.choose||!selected.repository.choose?scoped:Object.freeze({...scoped,choose:selected.repository.choose}),operationSelected=Object.freeze({...selected,repository});
+    const operationSelected=Object.freeze({...selected,repository:scoped});
     repositoryOperationStateBySelection.set(operationSelected,{objectInventory:null});
     return operationSelected;
   }
@@ -393,17 +392,22 @@ registry.define('backup-provider',1,input=>{
       const kept=repositoryInventoryHistoryEntries(scoped,inventory,{quarantinedObjectIds}),pairs=new Map(inventory.pairs.map(pair=>[pair.item.id,pair]));
       const objects=await repositoryObjectInventory(selected,{signal:foreground.signal}),byId=new Map(objects.items.map(item=>[item.id,item]));
       const readObject=entry=>{const item=byId.get(entry.objectId);if(!item||quarantined.has(entry.objectId))throw new Error(`Repository object ${entry.objectId} is unavailable.`);return selected.repository.download(item,freeze({signal:foreground.signal}));};
-      const seen=new Set(),entries=[];
+      // skip: versions already read at another location (by id or by the
+      // data they hold), so one history is read once. covered says which
+      // versions this location read.
+      const seen=new Set(),entries=[],skipIds=new Set(options?.skip?.checkpointIds||[]),skipData=new Set(options?.skip?.contents||[]),coveredIds=[],coveredData=[];
       for(const version of kept){
+        if(skipIds.has(version.location.checkpointId)||skipData.has(version.logicalFingerprint))continue;
         const pair=pairs.get(version.location.checkpointId);if(!pair)continue;
         let manifest;try{manifest=(await verifyRepositoryInventoryPair(selected,pair,{interactive:false,signal:foreground.signal})).manifest;}
         catch(error){if(foreground.signal.aborted)throw error;AppDiagnostics.capture('backup-provider.note-version-verification',error,'warn');continue;}
+        coveredIds.push(version.location.checkpointId);coveredData.push(version.logicalFingerprint);
         const found=RepositoryCheckpointPipeline.noteObject(manifest,note);if(!found||seen.has(found.fingerprint))continue;seen.add(found.fingerprint);
         const payload=await RepositoryCheckpointPipeline.readNote(manifest,readObject,note,{interactive:false,signal:foreground.signal});
         if(payload&&typeof payload.text==='string')entries.push(freeze({sourceId:selected.id,sourceLabel:selected.label,checkpointId:version.location.checkpointId,exportedAt:version.exportedAt,origin:String(manifest.installationId||version.origin||''),text:payload.text}));
       }
       OperationDiagnostics.finish({versions:entries.length},traceId);finishForegroundView(selected,{message:'',ok:true});
-      return Object.freeze({sourceId:selected.id,available:true,reason:'',entries:freeze(entries)});
+      return Object.freeze({sourceId:selected.id,available:true,reason:'',entries:freeze(entries),covered:freeze({checkpointIds:freeze(coveredIds),contents:freeze(coveredData)})});
     }catch(error){
       const cancelled=error?.name==='AbortError'||['PROVIDER_FOREGROUND_CANCELLED','STUDY_DIRECTOR_IMPORT_CANCELLED'].includes(String(error?.code||''));
       if(cancelled){OperationDiagnostics.finish({cancelled:true},traceId);finishForegroundView(selected,{message:'',ok:true,lifecycle:'cancelled'});return Object.freeze({sourceId:selected.id,available:false,reason:'cancelled',cancelled:true,entries:Object.freeze([])});}
@@ -431,7 +435,7 @@ registry.define('backup-provider',1,input=>{
   function repositoryInventoryHistoryEntries(selected,inventory,{quarantinedObjectIds=null}={}){
     const quarantined=repositoryProviderObjectIds(quarantinedObjectIds),source=freeze({id:selected.id,label:selected.label}),now=Date.now(),rows=[...inventory.pairs].reverse();
     const retentionRows=[];
-    for(const pair of rows){const summary=pair.item.history,calendar=summary?.retention?.calendar;if(!summary||!calendar)continue;retentionRows.push(freeze({id:pair.item.id,manifest:freeze({exportedAt:summary.exportedAt,retention:summary.retention})}));}
+    for(const pair of rows){const summary=pair.item.history,calendar=summary?.retention?.calendar;if(!summary||!calendar)continue;retentionRows.push(freeze({id:pair.item.id,manifest:freeze({exportedAt:summary.exportedAt,retention:summary.retention,installationId:String(summary.origin||'')})}));}
     let retainedIds=null,tiers={};
     if(retentionRows.length){const selection=RepositoryCheckpointPipeline.selectRetention(freeze(retentionRows),{now:new Date(now)});retainedIds=new Set(selection.retained.map(row=>row.id));tiers=selection.tiers;}
     const legacyLimit=Math.max(1,Number(RepositoryCheckpointPipeline.retention?.normalLimit)||15);let legacyKept=0;
@@ -763,8 +767,10 @@ registry.define('backup-provider',1,input=>{
     clearRecentHistory(selected);if(role==='normal'&&(!copy||copy.current)){placedSpine(published.checkpointId,publicationOwner);if(publicationOwner.shared)syncState(publicationOwner).syncedAt=new Date().toISOString();}
     return Object.freeze({name:item.name||published.checkpointId,unchanged:published.unchanged===true,checkpointId:published.checkpointId,manifest:published.manifest,warning,maintenancePending:deferredMaintenance&&maintenanceQueued,sourceRevision:published.sourceRevision,requestId:publication?.requestId||String(pendingIntent?.requestedAt||''),objectsWritten:published.objectsWritten,objectsReused:published.objectsReused,writtenBytes:published.writtenBytes,attachmentBytesWritten:published.attachmentBytesWritten});
   }
-  function activeProtectedProviderRow(state,now=Date.now()){
-    const rows=(state&&Array.isArray(state.rows)?state.rows:[]).map(row=>freeze({id:row.item.id,manifest:row.manifest,row})),active=RepositoryCheckpointPipeline.activeProtected(rows,now);
+  // The protected safety version of the device that made checkpointId.
+  function activeProtectedProviderRow(state,checkpointId,now=Date.now()){
+    const rows=(state&&Array.isArray(state.rows)?state.rows:[]).map(row=>freeze({id:row.item.id,manifest:row.manifest,row})),requested=rows.find(row=>row.id===checkpointId);if(!requested)return null;
+    const active=RepositoryCheckpointPipeline.activeProtected(rows,now,String(requested.manifest?.installationId||requested.manifest?.checkpoint?.originInstallationId||''));
     return active&&active.row||null;
   }
   async function removeProtectedProviderCheckpoint(selected,checkpointId,{signal=null}={}){
@@ -777,7 +783,7 @@ registry.define('backup-provider',1,input=>{
     }
     try{
       await assertRepositoryMaintenance(selected,maintenanceLease);
-      const state=await repositoryProviderState(selected,{interactive:false,signal}),active=activeProtectedProviderRow(state);
+      const state=await repositoryProviderState(selected,{interactive:false,signal}),active=activeProtectedProviderRow(state,requested);
       if(!active||active.item.id!==requested)throw new Error(`The selected Before restore safety backup in ${selected.label} is no longer protected.`);
       if(active.commitItem){await assertRepositoryMaintenance(selected,maintenanceLease);await selected.repository.delete(active.commitItem);}
       await assertRepositoryMaintenance(selected,maintenanceLease);await selected.repository.delete(active.item);
@@ -965,7 +971,9 @@ registry.define('backup-provider',1,input=>{
   function placedSpine(checkpointId,selected){
     const id=String(checkpointId||''),spine=RepositoryCheckpointPipeline.spine();if(!id||!spine||spine.checkpointId!==id)return;
     spinePlaced=freeze({checkpointId:id,at:freeze([...new Set([...(spinePlaced.checkpointId===id?spinePlaced.at:[]),safeId(selected.id)])])});
-    for(const other of providers.values())if(!spinePlaced.at.includes(other.id))scheduleAutomaticBackup(other);
+    // A location that waited for this version goes now; any other keeps its
+    // own deadline.
+    for(const other of providers.values())if(!spinePlaced.at.includes(other.id)){if(other.shared&&syncState(other).waitedAt)providerConvergenceJob(other)?.schedule(1000,'spine','earliest');else scheduleAutomaticBackup(other);}
   }
   function spineCopy(selected){
     const spine=RepositoryCheckpointPipeline.spine();if(!spine||spinePlaced.checkpointId!==spine.checkpointId||spinePlaced.at.includes(selected.id)||copyFailed.get(selected.id)===spine.checkpointId||selected.shared&&!spine.shareable)return null;
@@ -990,7 +998,7 @@ registry.define('backup-provider',1,input=>{
   async function backfillCandidate(selected,{signal=null}={}){
     fillState.set(selected.id,Date.now());
     const scoped=repositoryOperationSelected(selected,{signal}),mine=recentHistory(selected)||await repositoryProviderInventory(scoped,{signal}),have=new Set(mine.pairs.map(pair=>pair.item.id));rememberRecentHistory(selected,mine);
-    const normal=pair=>(pair.item.history?.retention?.role||'normal')==='normal',row=pair=>pair.item.history?.retention?.calendar?freeze({id:pair.item.id,manifest:freeze({exportedAt:pair.item.history.exportedAt,retention:pair.item.history.retention})}):null;
+    const normal=pair=>(pair.item.history?.retention?.role||'normal')==='normal',row=pair=>pair.item.history?.retention?.calendar?freeze({id:pair.item.id,manifest:freeze({exportedAt:pair.item.history.exportedAt,retention:pair.item.history.retention,installationId:String(pair.item.history.origin||'')})}):null;
     const newest=[...mine.pairs].reverse().find(normal),limit=selected.shared&&newest?Date.parse(repositoryMetadataTimestamp(newest.item)):Infinity;
     for(const source of providers.values()){
       if(source.id===selected.id||!source.repository||!providerConnected(source))continue;
@@ -1008,10 +1016,11 @@ registry.define('backup-provider',1,input=>{
     const summary=presentation.begin(selected.id,'backup',{id:'external-backup',label:selected.label,foreground:false,message:`Backing up to ${selected.label}…`});
     notifyStatus();
     try{
-      const copy=spineCopy(selected),leader=copy?null:spineLeader(selected);
-      if(leader){providerConvergenceJob(leader)?.schedule(1000,'spine','earliest');summary.finish({message:`Waiting for the Device Folder backup to copy it to ${selected.label}.`,lifecycle:'cancelled',outcome:'external-backup-pending'});return freeze({status:'pending',reason:'turn'});}
+      // Each round of changes waits afresh: the wait ends once Drive goes on.
+      const copy=spineCopy(selected),leader=copy?null:spineLeader(selected);if(!leader&&selected.shared)syncState(selected).waitedAt=0;
+      if(leader){providerConvergenceJob(leader)?.schedule(1000,'spine','earliest');summary.finish({message:`Backing up to the ${leader.label} first.`,lifecycle:'cancelled',outcome:'external-backup-pending'});return freeze({status:'pending',reason:'spine'});}
       const saved=await saveRepositoryProvider(selected,{interactive:false,signal,preemptBackground:false,pendingIntent:pending,copy,recoveryProgress:value=>summary.update({message:value.message,progress:value})}).catch(error=>{if(copy&&!['REPOSITORY_SYNC_TURN','REPOSITORY_SYNC_BEHIND'].includes(String(error?.code||''))&&!signal?.aborted)copyFailed.set(selected.id,copy.checkpointId);throw error;}),covered=publicationCoversPending(saved,pending),cleared=covered&&(!pending||await clearPendingRetry(selected,pending));
-      summary.finish({message:cleared?`External backup verified in ${selected.label}.`:covered?'External backup is verified; status bookkeeping is pending.':'External backup is verified; newer changes are queued.',outcome:cleared?'external-backup-verified':'external-backup-pending'});
+      summary.finish({message:cleared?`Backed up to ${selected.label}.`:covered?`Backed up to ${selected.label}; its status updates shortly.`:`Backed up to ${selected.label}; newer changes back up next.`,outcome:cleared?'external-backup-verified':'external-backup-pending'});
       return freeze({status:cleared?'completed':'pending',checkpointId:String(saved&&saved.checkpointId||saved&&saved.name||''),reason:cleared?'':covered?'retry marker could not be cleared':'source',maintenancePending:saved&&saved.maintenancePending===true});
     }catch(error){
       const code=String(error&&error.code||''),turn=code==='REPOSITORY_SYNC_TURN',behind=code==='REPOSITORY_SYNC_BEHIND';
@@ -1066,6 +1075,9 @@ registry.define('backup-provider',1,input=>{
         else if(['none','local-empty'].includes(result.reason))resetConvergenceRetry(selected);
         // Drive moved on, or another device is backing up there: catch up or take turns.
         else if(['behind','turn'].includes(result.reason)){if(sync&&result.reason==='behind')sync.behind=true;schedulePendingProviderBackup(selected,result.reason==='behind'?1000:PROVIDER_CONVERGENCE_BUSY_RETRY_MS);}
+        // Waiting for the Device Folder's version: it is due already, so the
+        // retry keeps that (going to the background stays "at once").
+        else if(result.reason==='spine')job.schedule(PROVIDER_CONVERGENCE_BUSY_RETRY_MS,'spine','replace');
         else if(result.reason==='source'){resetConvergenceRetry(selected);if(!scheduleAutomaticBackup(selected))schedulePendingProviderBackup(selected,AUTOMATIC_QUIET_MS);}
         else schedulePendingProviderBackup(selected,scope.signal.aborted?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay(selected));
         return result;
@@ -1093,17 +1105,17 @@ registry.define('backup-provider',1,input=>{
   }
   // After a restore, every other location that backs up on its own picks up
   // the restored data once automatic backups resume.
-  function otherLocations(selected){return freeze([...providers.values()].filter(other=>other.id!==selected.id&&providerConnected(other)&&automaticEnabled(other)).map(other=>freeze({id:other.id,label:other.label,status:'pending',queued:true})));}
+  function otherLocations(selected){return freeze([...providers.values()].filter(other=>other.id!==selected.id&&providerConnected(other)&&automaticEnabled(other)).map(other=>freeze({id:other.id,label:other.label,shared:other.shared===true,status:'pending',queued:true})));}
   async function queueResolvedProviderState(selected,result,{sourceNeeded=true,sourceCheckpoint=''}={}){
     if(!result||result.cancelled)return freeze({source:freeze({status:'skipped',reason:'cancelled'}),others:freeze([])});
     let source;
     if(sourceNeeded){
       const retryQueued=await markPendingRetry(selected);
-      source=freeze({status:retryQueued?'pending':'failed',reason:retryQueued?'queued':'automatic retry could not be queued',retryQueued});
+      source=freeze({status:retryQueued?'pending':'failed',reason:retryQueued?'queued':'automatic retry could not be queued',retryQueued,shared:selected.shared===true});
     }else{
       providerBackground(selected).clearScheduled('convergence');
       await clearPendingRetry(selected);
-      source=freeze({status:'completed',checkpoint:String(sourceCheckpoint||''),unchanged:true,retryQueued:false});
+      source=freeze({status:'completed',checkpoint:String(sourceCheckpoint||''),unchanged:true,retryQueued:false,shared:selected.shared===true});
     }
     return freeze({source,others:otherLocations(selected)});
   }
@@ -1120,6 +1132,9 @@ registry.define('backup-provider',1,input=>{
   }
   async function loadRepositoryProvider(selected,operation,{checkpointId='',mode='bring-in',onProgress=null,note='',missingOnly=false,before='',quiet=false,sync=false,review=false,password=false}={}){
     if(!['bring-in','restore-version'].includes(mode))throw new TypeError('Unsupported managed repository recovery mode.');
+    // Every restore names its version (Version History, sync, recovery at
+    // start); only adding what is missing finds its own.
+    if(!checkpointId&&!missingOnly)throw new Error('Choose a version to restore. Nothing was changed.');
     const presentationId=foregroundView()?.operationId||'';
     const progress=(stage,message,details={})=>{if(operation.signal?.aborted||(foregroundView()?.operationId||'')!==presentationId)return;recoveryStatus(message,true,onProgress,stage,details);};
     OperationDiagnostics.mark('provider-background-preemption-start',{provider:selected.id});
@@ -1137,21 +1152,13 @@ registry.define('backup-provider',1,input=>{
     if(inventory.overflow)throw new Error('Backup history could not be read completely. Recovery was stopped safely.');
     const newest=[...inventory.pairs].reverse();if(!newest.length)throw new Error('No eligible Study Director backups were found.');
     const choices=freeze(newest.map(pair=>{const summary=pair.item.history;return freeze({id:pair.item.id,name:pair.item.name,exportedAt:summary?.exportedAt||repositoryMetadataTimestamp(pair.item),encrypted:summary?.encrypted===true,counts:summary?.counts||freeze({dailyRecord:0,note:0}),size:pair.item.size,verification:summary?'on-restore':'legacy-on-restore'});}));
-    let chosenId=String(checkpointId||'')||choices[0].id;
+    let chosenId=String(checkpointId||'');
     if(checkpointId&&!choices.some(choice=>choice.id===chosenId))throw new Error('The selected backup version is no longer available.');
     // Without a chosen version, adding what is missing uses the newest ordinary
     // version saved before the given time (the browser-data clear).
     if(!checkpointId&&missingOnly){
       const beforeMs=Date.parse(before),source=newest.find(pair=>{const summary=pair.item.history;return summary&&summary.retention?.role!=='before-restore'&&(!Number.isFinite(beforeMs)||Date.parse(summary.exportedAt)<beforeMs);});
       if(!source)return null;chosenId=source.item.id;
-    }
-    else if(!checkpointId&&selected.repository.choose){
-      OperationDiagnostics.mark('checkpoint-selection-start',{provider:selected.id});
-      let chosen;
-      try{chosen=await selected.repository.choose(choices,freeze({ignored:inventory.invalid.length+inventory.ignored+inventory.uncommitted.length+inventory.orphanCommits.length,signal:operation.signal,mode}));}
-      catch(error){OperationDiagnostics.mark('checkpoint-selection-failed',{provider:selected.id,reason:String(error&&error.code||error&&error.name||'Error')});throw error;}
-      if(!chosen){OperationDiagnostics.mark('checkpoint-selection-cancelled',{provider:selected.id});return null;}
-      chosenId=String(chosen.id||chosen);OperationDiagnostics.mark('checkpoint-selection-complete',{provider:selected.id});
     }
     const pair=newest.find(candidate=>candidate.item.id===chosenId);if(!pair)throw new Error('The selected backup version is no longer available.');
     // Combining Drive's newest ordinary version as a whole makes it what this
@@ -1195,7 +1202,9 @@ registry.define('backup-provider',1,input=>{
         OperationDiagnostics.mark('external-safety-publication-complete',{provider:selected.id});
         return freeze({verified:true,checkpointId:checkpoint,protectedUntil:new Date(protectedUntil).toISOString(),sourceRevision:String(saved&&saved.sourceRevision||saved&&saved.manifest&&saved.manifest.sourceRevision||''),source:selected.id});
       },
-      publishPresent:async result=>{progress('finalize','Finalizing recovery…');return managedProviderPresent(providerSelected,result,{sourceNeeded:mode==='bring-in',sourceCheckpoint:mode==='restore-version'?row.item.id:''});}
+      // Drive takes a restored older version as its newest at the next
+      // upload, so the other devices get it too.
+      publishPresent:async result=>{progress('finalize','Finalizing recovery…');return managedProviderPresent(providerSelected,result,{sourceNeeded:mode==='bring-in'||selected.shared===true,sourceCheckpoint:mode==='restore-version'?row.item.id:''});}
     }));
     return RepositoryCheckpointPipeline.inspect(row.manifest,readObject,{interactive:!quiet,signal:operation.signal,committed:true,sharedHead,managedRecovery,managedProgress:onProgress,...(note&&mode==='bring-in'?{note}:{})});
   }
@@ -1434,7 +1443,7 @@ registry.define('backup-provider',1,input=>{
       OperationDiagnostics.mark('provider-background-preemption-start',{provider:selected.id},traceId);await foreground.settled;OperationDiagnostics.mark('provider-background-preemption-complete',{provider:selected.id},traceId);
       OperationDiagnostics.mark('provider-authorization-start',{provider:selected.id},traceId);await authorize(selected,'export');OperationDiagnostics.mark('provider-authorization-complete',{provider:selected.id},traceId);
       statusText(`Backing up to ${selected.label}…`);
-      const result=await backupRepositoryProvider(selected.id,{signal:foreground.signal,foregroundPriority:true}),followUp=result&&result.warning?' '+result.warning:'',done=result&&result.unchanged?`✓ ${selected.label} already has your latest data.`:`✓ External backup verified in ${selected.label}.`;
+      const result=await backupRepositoryProvider(selected.id,{signal:foreground.signal,foregroundPriority:true}),followUp=result&&result.warning?' '+result.warning:'',done=result&&result.unchanged?`✓ ${selected.label} already has your latest data.`:`✓ Backed up to ${selected.label}.`;
       statusText(done+followUp);finishForegroundView(selected,{message:done+followUp,ok:true});
       OperationDiagnostics.finish({objectsWritten:Number(result&&result.objectsWritten)||0,objectsReused:Number(result&&result.objectsReused)||0,writtenBytes:Number(result&&result.writtenBytes)||0},traceId);return true;
     }catch(error){
@@ -1498,13 +1507,13 @@ registry.define('backup-provider',1,input=>{
     try{
       OperationDiagnostics.mark('provider-background-preemption-start',{provider:selected.id},traceId);await foreground.settled;OperationDiagnostics.mark('provider-background-preemption-complete',{provider:selected.id},traceId);
       OperationDiagnostics.mark('provider-authorization-start',{provider:selected.id},traceId);await authorize(selected,'import');OperationDiagnostics.mark('provider-authorization-complete',{provider:selected.id},traceId);
-      statusText(`Choose a version from ${selected.label}…`);
+      statusText(`Reading ${selected.label}…`);
       const candidate=await loadRepositoryProvider(selected,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'restore-version',onProgress:typeof options?.onProgress==='function'?options.onProgress:null});
       if(!candidate){statusText('Version restore cancelled.');finishForegroundView(selected,{message:'Version restore cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return Object.freeze({cancelled:true});}
       const result=await RepositoryCheckpointPipeline.restoreVersion(candidate,{confirmed:options&&options.confirmed===true});
       if(result&&result.cancelled){statusText('Version restore cancelled.');finishForegroundView(selected,{message:'Version restore cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return result;}
       const convergence=result&&result.managedRecovery&&result.managedRecovery.present||freeze({status:'pending',source:freeze({status:'failed',reason:'post-operation backup status unavailable'}),others:freeze([])});
-      const sourceReady=convergence.source&&convergence.source.status==='completed';
+      const sourceReady=convergence.source&&(convergence.source.status==='completed'||convergence.source.status==='pending'&&convergence.source.retryQueued===true);
       const finalMessage=presentation.outcome('restore-version',selected.label,convergence,result&&result.summary);statusText(finalMessage,sourceReady);finishForegroundView(selected,{message:finalMessage,ok:true});
 
       OperationDiagnostics.finish({cancelled:false},traceId);return Object.freeze({...result,convergence});
@@ -1569,11 +1578,11 @@ registry.define('backup-provider',1,input=>{
     notifyStatus();
     return true;
   }
-  function list(){return Object.freeze([...providers.values()].map(item=>Object.freeze({id:item.id,label:item.label,connected:providerConnected(item)})));}
+  function list(){return Object.freeze([...providers.values()].map(item=>Object.freeze({id:item.id,label:item.label,shared:item.shared===true,connected:providerConnected(item)})));}
   function backgroundStatus(){return freeze([...providerBackgroundCoordinators.entries()].flatMap(([id,coordinator])=>[freeze({job:id+' maintenance',...(providerMaintenanceSchedulers.get(id)?.status()||coordinator.jobStatus('maintenance'))}),freeze({job:id+' integrity',...(providerIntegritySchedulers.get(id)?.status()||coordinator.jobStatus('integrity'))}),freeze({job:id+' convergence',...coordinator.jobStatus('convergence')})]));}
   function diagnosticConnections(){return freeze([...providers.values()].map(selected=>freeze({id:selected.id,connected:providerConnected(selected),formats:formatsByProvider.get(selected.id)||null,scopeBound:repositoryScopeByProvider.has(selected.id),retryAttempt:providerConvergenceRetryAttempts.get(selected.id)||0,retryBackoffCapped:(providerConvergenceRetryAttempts.get(selected.id)||0)>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length})));}
   function status(){return Object.freeze({busy,cancellable:!!foregroundController&&!foregroundController.signal.aborted,operation:foregroundView()?Object.freeze({...foregroundView()}):null});}
-  return Object.freeze({register,list,status,locationStatus,reviewSync,unlockSync,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},cancelForeground,history:historyRepositoryProvider,noteVersions:noteVersionsRepositoryProvider,backup:backupProvider,backupRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeProtectedRepositoryProvider,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,suspendBackground,repositoryScope});
+  return Object.freeze({register,list,syncing:()=>sharingActive(),status,locationStatus,reviewSync,unlockSync,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},cancelForeground,history:historyRepositoryProvider,noteVersions:noteVersionsRepositoryProvider,backup:backupProvider,backupRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeProtectedRepositoryProvider,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,suspendBackground,repositoryScope});
 
   }
   return freeze({format:'study-director.backup-provider-module',contractVersion:1,createRuntime});

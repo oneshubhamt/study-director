@@ -69,7 +69,7 @@ registry.define('repository-background',1,input=>{
     if(uncertain||(observation.uncommitted||[]).length||(observation.orphanCommits||[]).length)return true;
     const rows=Array.isArray(observation.valid)?observation.valid:Array.isArray(observation.rows)?observation.rows:[];
     if(typeof selectRetention!=='function'||!rows.length)return false;
-    const normalized=freeze(rows.map(row=>freeze({id:String(row.id||row.item?.id||''),manifest:row.manifest||row.item?.history&&freeze({exportedAt:row.item.history.exportedAt,retention:row.item.history.retention})||null})).filter(row=>row.id&&row.manifest));
+    const normalized=freeze(rows.map(row=>freeze({id:String(row.id||row.item?.id||''),manifest:row.manifest||row.item?.history&&freeze({exportedAt:row.item.history.exportedAt,retention:row.item.history.retention,installationId:String(row.item.history.origin||'')})||null})).filter(row=>row.id&&row.manifest));
     if(!normalized.length)return false;
     try{return selectRetention(normalized,{now:new Date(Number(now))}).remove.length>0;}catch{return true;}
   }

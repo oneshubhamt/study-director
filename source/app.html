@@ -1070,33 +1070,36 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
             <summary><span class="backup-model-summary"><span class="backup-model-summary-title">Backup model</span><span class="backup-model-summary-copy">Local-first · syncs through Drive</span></span></summary>
             <div class="backup-model-body ui-helper">
               <dl class="backup-model-explainer">
-                <div><dt>Managed checkpoints</dt><dd>Device Folder keeps verified versions in a folder you choose on this device. Google Drive keeps the same managed checkpoint model off-device. Each version behaves as a complete recovery point even though unchanged data is reused internally.</dd></div>
+                <div><dt>Versions</dt><dd>The Device Folder keeps verified versions in a folder you choose on this device; Google Drive keeps the same history off this device. Each version is a complete copy of your data, even though unchanged parts are stored once.</dd></div>
                 <div><dt>Several devices</dt><dd>While a device is signed in to Google Drive it syncs: it takes in what your other devices changed, then uploads its own changes. A change made on one side only is taken for you. Where both sides changed the same thing, the newer shows and the other is kept for you, marked Needs review; edits to different paragraphs of a note are joined for you. Saved data and the Active Session travel too; changes to a session running here wait until it ends. Without Drive, each device keeps working on its own.</dd></div>
-                <div><dt>Portable backup</dt><dd>Export backup creates one complete <span class="ui-mono">.sdbackup</span> file for manual transfer or safekeeping. Import it on any Study Director device when needed; it does not join Device Folder or Google Drive version history.</dd></div>
+                <div><dt>Portable backup</dt><dd>Export backup creates one complete <span class="ui-mono">.sdbackup</span> file for manual transfer or safekeeping. Restore it on any Study Director device when needed; it is not part of Version History.</dd></div>
               </dl>
-              <div class="backup-model-included-label ui-label">Included in a complete checkpoint</div>
-              <div class="backup-model-included-grid" aria-label="Data included in each backup checkpoint">
+              <div class="backup-model-included-label ui-label">In every version</div>
+              <div class="backup-model-included-grid" aria-label="Data in every version">
                 <span>✓ Saved Days / Diary &amp; Reflections</span><span>✓ Notes</span><span>✓ Active Session</span><span>✓ Settings / personal data</span><span>✓ Referenced attachments</span><span>✓ Independently retained attachments</span>
               </div>
             </div>
           </details>
           <section class="backup-section backup-locations-section" aria-labelledby="managed-backup-heading">
-            <div class="backup-section-heading-row"><div class="backup-section-title ui-label" id="managed-backup-heading">Automatic backup</div></div>
-            <p class="ui-helper" id="backup-retention-note">Each location keeps 15 versions: the latest, 6 daily, 4 weekly and 4 monthly, so about four to five months back. It also keeps one version per hour from the last 24 hours when your notes changed, up to 10 more.</p>
+            <div class="backup-section-heading-row"><div class="backup-section-title ui-label" id="managed-backup-heading">Automatic backup</div>
+              <div class="backup-shared-actions" id="backup-shared-actions" role="group" aria-label="Backup actions" hidden>
+                <button class="mini-btn ui-btn" id="backup-now" type="button" data-action="backup-now">Back up now</button>
+                <button class="mini-btn ui-btn" id="open-version-history" type="button" data-action="open-version-history" aria-haspopup="dialog" aria-controls="managed-version-history">Version History</button>
+              </div>
+            </div>
+            <p class="ui-helper" id="backup-retention-note">Your backups keep 15 versions: the latest, 6 daily, 4 weekly and 4 monthly, so about four to five months back. They also keep one version per hour from the last 24 hours when your notes changed, up to 10 more. Before a restore, each device also keeps a safety version for 7 days. The Device Folder and Google Drive keep the same history.</p>
             <div class="backup-location-stack" aria-label="Automatic backup locations">
               <div class="backup-location-row backup-device-row">
                 <div class="backup-row-copy">
                   <div class="backup-location-heading">
-                    <span class="ui-label">Device Folder</span><span class="backup-location-badge primary">Primary</span>
-                    <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="device-backup-info" aria-label="About Device Folder backup" aria-expanded="false" aria-controls="device-backup-info">i</button><span class="pnote-info-popover" id="device-backup-info" role="note" hidden>Automatic versioned backup in a folder you choose. Versions shows only Device Folder checkpoints and never opens Google Drive. Use a folder only this device uses, not one that Dropbox, OneDrive or iCloud syncs between devices.</span></span>
+                    <span class="ui-label">Device Folder</span>
+                    <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="device-backup-info" aria-label="About Device Folder backup" aria-expanded="false" aria-controls="device-backup-info">i</button><span class="pnote-info-popover" id="device-backup-info" role="note" hidden>Versions saved automatically in a folder you choose on this device. With Google Drive connected too, both keep the same history. Use a folder only this device uses, not one that Dropbox, OneDrive or iCloud syncs between devices.</span></span>
                   </div>
                 </div>
                 <strong class="backup-status-value standard ui-mono" id="device-backup-status">Off</strong>
                 <div class="device-backup-actions" id="device-backup-actions">
                   <button class="mini-btn ui-btn" id="connect-device-backup" type="button" data-action="connect-device-backup">Choose folder…</button>
-                  <button class="mini-btn ui-btn" id="device-backup-now" type="button" data-action="device-backup-now" hidden>Back up now</button>
                   <button class="mini-btn ui-btn" id="cancel-device-backup" type="button" data-action="cancel-device-backup" hidden>Cancel</button>
-                  <button class="mini-btn ui-btn" id="recover-device-backup" type="button" data-action="recover-device-backup" aria-haspopup="dialog" aria-controls="managed-version-history" hidden>Versions</button>
                   <button class="mini-btn ui-btn" id="device-backup-settings" type="button" data-action="toggle-backup-settings" data-backup-settings="device" aria-expanded="false" aria-controls="device-backup-settings-panel" hidden>Settings</button>
                 </div>
               </div>
@@ -1106,6 +1109,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                 <div class="backup-settings-grid ui-helper">
                   <span>Automatic backup</span><strong id="device-backup-settings-state">On</strong>
                   <span>Selected folder</span><strong id="device-backup-folder-name">Connected folder</strong>
+                  <span>Backup folder</span><strong id="device-backup-repository-name">—</strong>
                   <span>Backup status</span><strong id="device-backup-settings-last">Not yet verified</strong>
                 </div>
                 <div class="backup-settings-actions">
@@ -1115,23 +1119,21 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
               <div class="backup-location-row backup-drive-row">
                 <div class="backup-row-copy">
                   <div class="backup-location-heading">
-                    <span class="ui-label">Google Drive</span><span class="backup-location-badge optional">Optional</span>
+                    <span class="ui-label">Google Drive</span>
                     <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="drive-backup-info" aria-label="About Google Drive backup" aria-expanded="false" aria-controls="drive-backup-info">i</button><span class="pnote-info-popover" id="drive-backup-info" role="note" hidden>Off-device version history, and where your devices meet. While you are signed in, this device takes in what your other devices changed, then backs up its own changes; where both sides changed the same thing, the other version is kept for your review. Connect asks Google for drive.file access: Study Director creates, reads, verifies and deletes only its own backup files, never your other Drive files. Google ends a sign-in after about an hour; until then it stays signed in across reloads.</span></span>
                   </div>
                 </div>
                 <strong class="backup-status-value standard ui-mono" id="backup-provider-row-status-google-drive">Not connected</strong>
                 <div class="backup-provider-actions" id="backup-provider-actions" role="group" aria-label="Google Drive backup actions">
                   <button class="mini-btn ui-btn" id="connect-drive-backup" type="button" data-action="connect-drive-backup" hidden>Connect</button>
-                  <button class="mini-btn ui-btn" id="drive-backup-now" type="button" data-action="drive-backup-now" aria-label="Back up now to Google Drive" hidden>Back up now</button>
                   <button class="mini-btn ui-btn" id="cancel-drive-backup" type="button" data-action="cancel-drive-backup" hidden>Cancel</button>
-                  <button class="mini-btn ui-btn" id="recover-drive-backup" type="button" data-action="recover-provider-backup" data-provider-id="google-drive" aria-haspopup="dialog" aria-controls="managed-version-history" hidden>Versions</button>
                   <button class="mini-btn ui-btn" id="drive-backup-settings" type="button" data-action="toggle-backup-settings" data-backup-settings="drive" aria-expanded="false" aria-controls="drive-backup-settings-panel" hidden>Settings</button>
                 </div>
               </div>
               <div class="backup-inline-note ui-helper" id="backup-operation-note-google-drive" role="status" aria-live="polite" aria-atomic="true" hidden></div>
               <div class="backup-inline-settings" id="drive-backup-settings-panel" hidden>
                 <div class="backup-settings-grid ui-helper">
-                  <span>Automatic backup</span><strong>While signed in</strong>
+                  <span>Sync</span><strong>While signed in</strong>
                   <span>Access</span><strong>Study Director backup files only · <a href="privacy.html" target="_blank" rel="noopener noreferrer">Privacy</a></strong>
                   <span>Backup status</span><strong id="drive-backup-settings-last">Not yet verified</strong>
                 </div>
@@ -1146,7 +1148,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
             <div class="backup-advanced-body">
               <section class="backup-section backup-advanced-section" aria-labelledby="backup-file-heading">
                 <div class="backup-compact-row">
-                  <span class="backup-location-heading"><span class="ui-label" id="backup-file-heading">Portable backup</span><span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="standalone-backup-info" aria-label="About portable backups" aria-expanded="false" aria-controls="standalone-backup-info">i</button><span class="pnote-info-popover" id="standalone-backup-info" role="note" hidden>A complete standalone .sdbackup file for manual transfer or safekeeping. It can be imported on another Study Director device, but it does not participate in Device Folder or Google Drive version history. When importing, choose whether to Replace or Combine.</span></span></span>
+                  <span class="backup-location-heading"><span class="ui-label" id="backup-file-heading">Portable backup</span><span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="standalone-backup-info" aria-label="About portable backups" aria-expanded="false" aria-controls="standalone-backup-info">i</button><span class="pnote-info-popover" id="standalone-backup-info" role="note" hidden>A complete standalone .sdbackup file for manual transfer or safekeeping. It can be restored on another Study Director device, but it is not part of Version History. When restoring, you choose whether to combine it with your data or replace it.</span></span></span>
                   <div class="backup-file-actions">
                     <button class="mini-btn ui-btn" id="download-backup" type="button" data-action="export-backup" aria-busy="false">Export backup…</button>
                     <button class="mini-btn ui-btn" type="button" data-action="pick-import-file">Restore from file…</button>
@@ -1391,7 +1393,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
   <div class="managed-version-history-head">
     <div>
       <div class="managed-version-history-kicker ui-label" id="managed-version-history-kicker">Versions</div>
-      <div class="managed-version-history-title" id="managed-version-history-title">Backup checkpoints</div>
+      <div class="managed-version-history-title" id="managed-version-history-title">Version History</div>
     </div>
     <button class="managed-version-history-close ui-btn" type="button" data-action="close-version-history" aria-label="Close recovery">×</button>
   </div>
@@ -2004,7 +2006,7 @@ async function showBackupPresentation(source,kind){
   if(source==='device-folder'&&kind==='permission')return DeviceBackup?.connect();
   // Reconnecting straight from the toast keeps it to one click.
   if(kind==='permission'&&source!=='file'&&await (source==='google-drive'?connectDriveForProfile():BackupProviderRuntime.connect(source)))return true;
-  if(['history','restore-version','bring-in','remove-safety'].includes(kind))return BackupRecoveryHost?.history.openSource(source);
+  if(['history','restore-version','bring-in','remove-safety'].includes(kind))return BackupRecoveryHost?.history.open();
   // A review opens Combine, which waits while today's session runs.
   if(kind==='sync-review')return BackupProviderRuntime.reviewSync(source);
   if(kind==='sync-password')return BackupProviderRuntime.unlockSync(source);
@@ -2043,7 +2045,7 @@ function renderNotificationSurfaces(state){
   }
 }
 NoticeCoordinator.subscribe(renderNotificationSurfaces);
-const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze({notifications:NoticeCoordinator,timeLabel:storageHealthTime,verified:source=>verifiedRecoveryState.providers[source]||null,action:(source,kind)=>Object.freeze({label:kind==='permission'?(source==='device-folder'?'Allow access':'Reconnect'):kind==='sync-review'?'Review':kind==='sync-password'?'Enter password':'Show details',run:()=>showBackupPresentation(source,kind)})}));
+const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze({notifications:NoticeCoordinator,timeLabel:storageHealthTime,synced:()=>BackupProviderRuntime.syncing()===true,verified:source=>verifiedRecoveryState.providers[source]||null,action:(source,kind)=>Object.freeze({label:kind==='permission'?(source==='device-folder'?'Allow access':'Reconnect'):kind==='sync-review'?'Review':kind==='sync-password'?'Enter password':'Show details',run:()=>showBackupPresentation(source,kind)})}));
 const Interactions=InteractionsModule.createController(Object.freeze({ports:Object.freeze({
   environment:Object.freeze({
     clearTimeout:id=>clearTimeout(id),document,
@@ -3009,33 +3011,47 @@ function toggleBackupSettings(kind){
 // Before the Drive integration registers, the row keeps its static "Not connected".
 function renderDriveBackup(){
   const state=BackupProviderRuntime.locationStatus('google-drive');if(!state)return;
-  const node=id=>document.getElementById(id),status=node('backup-provider-row-status-google-drive'),connect=node('connect-drive-backup'),backupNow=node('drive-backup-now'),cancel=node('cancel-drive-backup'),versions=node('recover-drive-backup'),settings=node('drive-backup-settings'),panel=node('drive-backup-settings-panel'),last=node('drive-backup-settings-last'),disconnect=node('disconnect-drive-backup');
-  const connected=state.connected,working=state.busy||state.backingUp,recoveryActive=state.busy&&['history','restore-version','bring-in'].includes(state.foregroundKind);
+  const node=id=>document.getElementById(id),status=node('backup-provider-row-status-google-drive'),connect=node('connect-drive-backup'),cancel=node('cancel-drive-backup'),settings=node('drive-backup-settings'),panel=node('drive-backup-settings-panel'),last=node('drive-backup-settings-last'),disconnect=node('disconnect-drive-backup');
+  const connected=state.connected,working=state.busy||state.backingUp;
   if(status){status.textContent=BackupPresentation.locationLabel('google-drive',state);status.classList.toggle('protected',connected&&!working);status.classList.toggle('standard',!connected||working);}
   if(connect){const label=state.wasConnected?'Reconnect':'Connect';connect.hidden=connected;connect.textContent=label;connect.disabled=state.engineBusy;connect.setAttribute('aria-label',`${label} Google Drive`);}
-  if(backupNow){backupNow.hidden=!connected||state.cancellable;backupNow.disabled=state.engineBusy;}
   if(cancel){cancel.hidden=!state.cancellable;cancel.disabled=!state.cancellable;}
-  if(versions){versions.hidden=!connected&&state.wasConnected;versions.textContent='Versions';versions.disabled=state.engineBusy&&!recoveryActive;versions.setAttribute('aria-label','Google Drive backup versions');}
   if(settings){settings.hidden=!connected;settings.disabled=state.engineBusy;settings.setAttribute('aria-expanded',panel&&!panel.hidden?'true':'false');}
   if(panel&&!connected)panel.hidden=true;
   if(last){const at=verifiedRecoveryState.providers['google-drive']?.at;last.textContent=at?`Last verified ${storageHealthTime(at)}`:'Not yet verified';}
   if(disconnect)disconnect.disabled=state.engineBusy;
   // Kept versions waiting for review show as Needs review too.
   const sync=node('sb-sync');if(sync){const syncing=BackupPresentation.syncLabel(state),kept=KeptVersions.count()>0&&syncing!=='Syncing…'&&syncing!=='Needs password',label=kept?'Needs review':syncing;sync.hidden=!label;if(sync.textContent!==label)sync.textContent=label;sync.dataset.state=state.sync?.review||state.sync?.password||kept?'review':'';}
-  renderProfile();if(FirstStart.isOpen())FirstStart.render();
+  renderBackupActions();renderProfile();if(FirstStart.isOpen())FirstStart.render();
+}
+// One Back up now and one Version History for every location, shown while
+// any location is connected. Version History stays available during a
+// restore so it can be reopened.
+function renderBackupActions(){
+  const group=document.getElementById('backup-shared-actions'),backupNow=document.getElementById('backup-now'),versions=document.getElementById('open-version-history');if(!group)return;
+  const rows=['device-folder','google-drive'].map(id=>BackupProviderRuntime.locationStatus(id)).filter(Boolean),connected=rows.some(row=>row.connected===true),busy=rows.some(row=>row.busy===true||row.engineBusy===true),recovering=rows.some(row=>row.busy===true&&['history','restore-version','bring-in','remove-safety'].includes(String(row.foregroundKind||'')));
+  group.hidden=!connected;
+  if(backupNow){backupNow.disabled=busy;backupNow.title=rows.some(row=>row.maintenanceBusy)?'Background backup maintenance will yield to Back up now.':'';}
+  if(versions){versions.disabled=busy&&!recovering;versions.title=recovering?'Reopen the active recovery operation.':'';}
+}
+// The Device Folder backs up first, so Drive can take its version.
+async function backUpEverywhere(){
+  let done=false;
+  if(DeviceBackup.status().connected)done=await DeviceBackup.backupNow()!==false||done;
+  if(BackupProviderRuntime.connected('google-drive'))done=await BackupProviderRuntime.backup('google-drive')!==false||done;
+  return done;
 }
 function renderDeviceBackup(state){
   if(!state)return;
   const status=document.getElementById('device-backup-status');
   const actions=document.getElementById('device-backup-actions');
   const connect=document.getElementById('connect-device-backup');
-  const backupNow=document.getElementById('device-backup-now');
   const cancel=document.getElementById('cancel-device-backup');
-  const recover=document.getElementById('recover-device-backup');
   const settings=document.getElementById('device-backup-settings');
   const settingsPanel=document.getElementById('device-backup-settings-panel');
   const settingsState=document.getElementById('device-backup-settings-state');
   const folderName=document.getElementById('device-backup-folder-name');
+  const repositoryName=document.getElementById('device-backup-repository-name');
   const settingsLast=document.getElementById('device-backup-settings-last');
   const disconnect=document.getElementById('disconnect-device-backup');
   const note=document.getElementById('device-backup-note');
@@ -3053,24 +3069,25 @@ function renderDeviceBackup(state){
     connect.disabled=operationBusy;
     connect.textContent=state.mode==='permission'?'Allow access':'Choose folder…';
   }
-  if(backupNow){backupNow.hidden=!connected||state.cancellable===true;backupNow.disabled=state.busy===true;backupNow.title=state.maintenanceBusy?'Background backup maintenance will yield to Back up now.':'';}
   if(cancel){cancel.hidden=state.cancellable!==true;cancel.disabled=state.cancellable!==true;}
-  if(recover){recover.hidden=!connected;recover.disabled=state.busy===true&&!recoveryActive;recover.title=recoveryActive?'Reopen the active recovery operation.':state.maintenanceBusy?'Background backup maintenance will yield to Versions.':'';}
   if(settings){settings.hidden=!connected;settings.disabled=operationBusy;settings.setAttribute('aria-expanded',settingsPanel&&!settingsPanel.hidden?'true':'false');}
   if(settingsPanel&&!connected)settingsPanel.hidden=true;
   if(settingsState)settingsState.textContent=connected?'On':'Off';
   if(folderName)folderName.textContent=state.folderName||'Connected folder';
+  // The folder inside it that holds this profile and device's versions.
+  if(repositoryName)repositoryName.textContent=state.repositoryName||'—';
   if(settingsLast)settingsLast.textContent=last?`Last verified ${last}`:'Not yet verified';
   if(disconnect){disconnect.hidden=!connected;disconnect.disabled=operationBusy;}
   if(note){
     const fallback=state.mode==='unsupported'?'Automatic folder backup is unavailable in this browser. Portable and Google Drive backups still work.':
-      connected?(state.pending?'Changes are waiting for the next automatic backup checkpoint.':'Your automatic backup checkpoint is up to date.') : '';
+      connected?(state.pending?'Changes wait for the next automatic backup.':'Your automatic backup is up to date.') : '';
     // Messages and progress show in the row's inline note; this note only says how the folder is doing.
     const message=state.hasNote?'':fallback;
     note.hidden=!message||recoveryActive;
     if(note.textContent!==message)note.textContent=message;
   }
 
+  renderBackupActions();
   if(state.installed&&!operationBusy)schedulePwaUpdateEvaluation(250);
 }
 function markStorageHealthOk(source,key=''){
@@ -3886,12 +3903,14 @@ async function maybePromptBackupNudge(force=false){
       due=Array.isArray(summaries)&&summaries.length>=7;
     }catch(e){}
   }
-  backupNudgeMessage=due?'Backup reminder: the last backup is over a week old. Open Library -> Data.':'';
+  // Someone who backs up to Google Drive gets back to it by signing in again.
+  const drive=!!backups.providers?.['google-drive'];
+  backupNudgeMessage=due?(drive?'Backup reminder: your changes have not reached Google Drive for over a week. Sign in again in Library → Data.':'Backup reminder: the last backup is over a week old. Open Library → Data.'):'';
   refreshStorageFallbackWarning();
   const notifyDate=todayISO();
   if(due&&backupNudgeNotifiedDate!==notifyDate){
     backupNudgeNotifiedDate=notifyDate;
-    notifyUser('Create a Study Director backup','It has been at least seven days since the last backup.',`sdm-backup-${notifyDate}`);
+    notifyUser(drive?'Sign in to Google Drive':'Back up Study Director',drive?'Your changes have not been backed up for at least seven days.':'It has been at least seven days since the last backup.',`sdm-backup-${notifyDate}`);
   }
 }
 /* LIVE DRAFT AND ACTIVE SESSION STORE */
@@ -9407,12 +9426,6 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
   }),
   hooks:Object.freeze({
     capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
-    chooseCheckpoint:async (rows,{mode='restore-version'}={})=>Interactions.choose({
-      title:mode==='bring-in'?'Combine from Device Folder backup':'Restore Device Folder version',
-      message:mode==='bring-in'?'Choose a retained verified backup. Differences with this device will be reviewed before data changes.':'Choose a retained verified version. The complete portable Study Director state will be restored to match it; device-local settings remain unchanged.',
-      cancelLabel:'Cancel',
-      choices:rows.map((row,index)=>({value:row.id,label:`${index===0?'Latest · ':''}${new Date(row.exportedAt).toLocaleString()}`,description:`${Number(row.counts?.dailyRecord)||0} Saved Dates / Reflections · ${Number(row.counts?.note)||0} Notes${row.encrypted?' · Encrypted':''}`,kind:index===0?'primary':''}))
-    }),
     // Several repository folders in the chosen folder and none of this
     // profile and device's: use one of them here, or start a new one.
     chooseRepository:rows=>Interactions.choose({
@@ -10087,14 +10100,12 @@ const CLICK_ACTIONS=Object.freeze({
   'dismiss-install-notice': ()=>NativeCapabilities.dismissInstallNotice(),
   'toggle-system-alerts': ()=>SystemNotifications.toggle(),
   'connect-device-backup': ()=>connectDeviceBackupWithRecovery(),
-  'device-backup-now': ()=>DeviceBackup.backupNow(),
+  'backup-now': ()=>backUpEverywhere(),
   'cancel-device-backup': ()=>DeviceBackup.cancelForeground(),
   'toggle-backup-settings': ev=>toggleBackupSettings(ev.target.closest('[data-backup-settings]')?.dataset.backupSettings),
   'disconnect-device-backup': ()=>DeviceBackup.disconnect(),
-  'recover-device-backup': ()=>BackupRecoveryHost.history.openSource('device-folder'),
-  'recover-provider-backup': ev=>BackupRecoveryHost.history.openSource(ev.target.closest('[data-provider-id]')?.dataset.providerId),
+  'open-version-history': ()=>BackupRecoveryHost.history.open(),
   'connect-drive-backup': connectDriveForProfile,
-  'drive-backup-now': ()=>BackupProviderRuntime.backup('google-drive'),
   'cancel-drive-backup': ()=>BackupProviderRuntime.cancelForeground(undefined,'google-drive'),
   'disconnect-drive-backup': ()=>BackupProviderRuntime.disconnect('google-drive'),
   'refresh-version-history': ()=>BackupRecoveryHost.history.refresh(),
@@ -10223,13 +10234,13 @@ const OWNER_REQUIRED_CLICK_ACTIONS=new Set([
   'load-default','apply-schedule','clear-schedule-draft','take-pomodoro-break',
   'gap-focus','gap-break','gap-split','gap-ignore','gap-apply','profile-drive','switch-profile','add-profile','delete-profile','first-start-drive','first-start-continue','first-start-skip',
   'font-smaller','font-reset','font-larger','set-theme','set-presentation',
-  'connect-device-backup','device-backup-now','disconnect-device-backup','recover-device-backup','recover-provider-backup','connect-drive-backup','drive-backup-now','disconnect-drive-backup','recover-managed-version','compare-managed-note'
+  'connect-device-backup','disconnect-device-backup','connect-drive-backup','disconnect-drive-backup','backup-now','open-version-history','recover-managed-version','compare-managed-note'
 ]);
 const OWNER_REQUIRED_CHANGE_ACTIONS=new Set(['import-backup','change-reflection-date','keep-screen-awake','sound-mode']);
 const OWNER_REQUIRED_INPUT_ACTIONS=new Set(['pnote-progress','save-reflection','quote','schedule-draft','unfinished-note','practice-setup']);
 const OWNER_REQUIRED_BLUR_ACTIONS=new Set(['profile-name','save-reflection']);
 const OWNER_REQUIRED_KEYDOWN_ACTIONS=new Set(['profile-name','first-start','gap-split','practice-start']);
-const ACTIVE_SESSION_BLOCKED_CLICK_ACTIONS=new Set(['clear-library','pick-import-file','recover-device-backup','recover-provider-backup','recover-managed-version']);
+const ACTIVE_SESSION_BLOCKED_CLICK_ACTIONS=new Set(['clear-library','pick-import-file','open-version-history','recover-managed-version']);
 const ACTIVE_SESSION_BLOCKED_CHANGE_ACTIONS=new Set(['import-backup']);
 const ACTIVE_SESSION_BLOCKED_IDS=new Set([]);
 const ACTIVE_SESSION_DISABLED_REASON='Suspend or reset today’s active session to restore a backup or clear Library data.';

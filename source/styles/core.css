@@ -1959,7 +1959,9 @@ html[data-study-director-ui-mutable="0"] [data-ownership-ui="drag"]{cursor:not-a
 .backup-section{display:grid;gap:7px;min-width:0}
 .backup-section+.backup-section{padding-top:9px;border-top:1px solid var(--sd-line-neutral-soft)}
 .backup-section-title{color:var(--sd-color-text-secondary);letter-spacing:2.2px}
-.backup-section-heading-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.backup-section-heading-row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.backup-shared-actions{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}
+.backup-shared-actions[hidden]{display:none!important}
 .backup-model-disclosure{border-color:var(--sd-line-neutral-soft);background:rgba(var(--sd-rgb-neutral-overlay),.006)}
 .backup-model-disclosure>summary{padding:8px 10px;color:var(--sd-color-text-secondary);font-size:var(--sd-type-role-label-size)}
 .backup-model-summary{display:flex;align-items:baseline;gap:8px 12px;min-width:0;flex-wrap:wrap}
@@ -1984,9 +1986,6 @@ html[data-study-director-ui-mutable="0"] [data-ownership-ui="drag"]{cursor:not-a
 .backup-settings-grid strong{font-weight:600;color:var(--sd-color-text-primary);overflow-wrap:anywhere}
 .backup-settings-actions{display:flex;justify-content:flex-end;gap:7px;flex-wrap:wrap}
 .backup-location-heading{display:flex;align-items:center;gap:7px;min-width:0;flex-wrap:wrap}
-.backup-location-badge{display:inline-flex;align-items:center;min-height:18px;padding:1px 6px;border:1px solid var(--sd-line-neutral-strong);border-radius:999px;font:700 var(--sd-text-micro)/1.2 var(--sd-font-condensed);letter-spacing:.9px;text-transform:uppercase;color:var(--sd-color-text-secondary-strong)}
-.backup-location-badge.primary{border-color:var(--sd-state-accent-line);background:var(--sd-state-accent-bg-faint);color:var(--sd-color-accent-primary)}
-.backup-location-badge.optional{opacity:.78}
 .backup-advanced-disclosure{border-color:var(--sd-line-neutral-soft);background:rgba(var(--sd-rgb-neutral-overlay),.008)}
 .backup-advanced-disclosure>summary{padding:9px 10px;background:rgba(var(--sd-rgb-neutral-overlay),.012);border-bottom-color:var(--sd-line-neutral-soft);color:var(--sd-color-text-secondary);font-size:var(--sd-type-role-label-size);letter-spacing:1.7px}
 .backup-advanced-disclosure>summary::after{content:"OPEN";padding:3px 6px;font-size:var(--sd-text-micro)}

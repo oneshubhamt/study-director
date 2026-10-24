@@ -20,7 +20,7 @@ const providerHooks={recovery:null,pending:null};
 const deviceEntry=freeze({logicalId:'state_'+'a'.repeat(64),logicalFingerprint:'a'.repeat(64),exportedAt:'2026-09-20T12:00:00.000Z',counts:freeze({dailyRecord:2,note:1}),location:freeze({sourceId:'device-folder',sourceLabel:'Device Folder',checkpointId:CHECKPOINT('a'),exportedAt:'2026-09-20T12:00:00.000Z',tier:'latest',encrypted:false})});
 const driveEntry=freeze({logicalId:'state_'+'b'.repeat(64),logicalFingerprint:'b'.repeat(64),exportedAt:'2026-09-20T11:00:00.000Z',counts:freeze({dailyRecord:1,note:1}),location:freeze({sourceId:'google-drive',sourceLabel:'Google Drive',checkpointId:CHECKPOINT('b'),exportedAt:'2026-09-20T11:00:00.000Z',tier:'latest',encrypted:false})});
 let deviceHistory=freeze({available:true,sourceId:'device-folder',sourceLabel:'Device Folder',entries:freeze([deviceEntry])});
-const driveHistory=freeze({available:true,sourceId:'google-drive',sourceLabel:'Google Drive',entries:freeze([driveEntry])});
+const driveHistory=freeze({available:true,sourceId:'google-drive',sourceLabel:'Google Drive',entries:freeze([driveEntry])});let driveHistoryNow=driveHistory;
 
 function node(){return {dataset:{},hidden:false,textContent:'',className:'',open:false,children:[],append(...items){this.children.push(...items);},appendChild(item){this.children.push(item);},replaceChildren(...items){this.children=[...items];},showModal(){this.open=true;},close(){this.open=false;}};}
 const nodes=new Map([['managed-version-history',node()],['managed-version-history-kicker',node()],['managed-version-history-title',node()],['managed-version-history-copy',node()],['managed-version-history-progress',node()],['managed-version-history-progress-stage',node()],['managed-version-history-progress-detail',node()],['managed-version-history-list',node()],['managed-version-history-status',node()],['cancel-backup-import',node()]]);
@@ -34,7 +34,7 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
   document,
   interactions:freeze({choose:async options=>{
     events.push(`choose:${options.title}`);
-    if(options.title==='Restore or combine checkpoint'){lastUseBackupOptions=options;return chooseMode;}
+    if(options.title==='Use this version'){lastUseBackupOptions=options;return chooseMode;}
     if(options.title==='Remove safety backup?')return 'remove';
     return null;
   }}),
@@ -57,8 +57,8 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
     cancelForeground:(_reason,id)=>{if(id==='device-folder')deviceCancelCalls+=1;else providerCancelCalls+=1;lastProviderCancelId=String(id||'');return true;},
     configureManagedRecovery:config=>{providerHooks.recovery=config;return true;},
     configurePendingBackupRetry:config=>{providerHooks.pending=config;return true;},
-    history:async id=>{if(id==='device-folder'){deviceHistoryReads+=1;return deviceHistory;}providerHistoryReads+=1;assert.equal(id,'google-drive');return driveHistory;},
-    list:()=>freeze([freeze({id:'device-folder',label:'Device Folder',connected:deviceConnected}),freeze({id:'google-drive',label:'Google Drive',connected:driveConnected})]),
+    history:async id=>{if(id==='device-folder'){deviceHistoryReads+=1;return deviceHistory;}providerHistoryReads+=1;assert.equal(id,'google-drive');return driveHistoryNow;},
+    list:()=>freeze([freeze({id:'google-drive',label:'Google Drive',shared:true,connected:driveConnected}),freeze({id:'device-folder',label:'Device Folder',connected:deviceConnected})]),
     noteVersions:(id,noteId,options)=>noteVersionsImpl(id,noteId,options),
     removeProtectedRepositoryProvider:async()=>freeze({removed:true,entries:freeze([])}),
     restoreRepositoryProviderVersion:async(id,options)=>{
@@ -86,8 +86,9 @@ storageReadError=null;assert.equal(await providerHooks.pending.read('google-driv
 const recovery=await host.managedRecovery(freeze({kind:'restore-version',label:'Device Folder',createSafety:async()=>freeze({verified:true,checkpointId:CHECKPOINT('c'),sourceRevision:'2026-09-20T12:00:00.000Z'}),apply:async()=>{events.push('apply');return freeze({ok:true});},publishPresent:async()=>freeze({status:'completed',checkpointId:CHECKPOINT('e')})}));
 assert.equal(recovery.managedRecovery.present.status,'completed');assert.equal(suspended,0);
 
-await host.history.openSource('device-folder');await new Promise(resolve=>setImmediate(resolve));
-assert.equal(deviceHistoryReads,1);assert.equal(providerHistoryReads,0,'Device Folder recovery must not inspect or authorize Google Drive');
+await host.history.open();await new Promise(resolve=>setImmediate(resolve));
+assert.equal(deviceHistoryReads,1);assert.equal(providerHistoryReads,0,'Version History reads only the locations that are connected');
+assert.equal(nodes.get('managed-version-history-title').textContent,'Version History');
 const deviceButton={dataset:{versionHistorySource:'device-folder',versionHistoryCheckpoint:CHECKPOINT('a')}};
 const presentation=[];host.history.subscribePresentation(value=>presentation.push(value));
 assert.equal(await host.history.recover({target:{closest:()=>deviceButton}}),true);
@@ -95,28 +96,29 @@ assert.equal(presentation.at(-1).active,false);assert.equal(presentation.at(-1).
 assert.equal(restoredCheckpoint,CHECKPOINT('a'));assert.equal(restoredConfirmed,true,'provider-owned Replace choice must be the only confirmation before exact restore');
 assert.equal(lastUseBackupOptions.cancelLabel,'Keep current');assert.deepEqual(lastUseBackupOptions.choices.map(choice=>choice.value),['missing','combine','replace']);
 
-chooseMode='combine';await host.history.openSource('google-drive');await new Promise(resolve=>setImmediate(resolve));
-assert.equal(deviceHistoryReads,1,'Google Drive recovery must not inspect Device Folder');assert.equal(providerHistoryReads,1);
+chooseMode='combine';driveConnected=true;await host.history.open();await new Promise(resolve=>setImmediate(resolve));
+assert.equal(deviceHistoryReads,2);assert.equal(providerHistoryReads,1,'with Drive connected too, one list reads both');
+assert.deepEqual(host.history.status().entries.map(entry=>[entry.location.sourceId,entry.location.checkpointId]),[['device-folder',CHECKPOINT('a')],['google-drive',CHECKPOINT('b')]],'each version once, read from where it is held');
 const driveButton={dataset:{versionHistorySource:'google-drive',versionHistoryCheckpoint:CHECKPOINT('b')}};
 assert.equal(await host.history.recover({target:{closest:()=>driveButton}}),true);assert.equal(providerBringInCheckpoint,CHECKPOINT('b'));
 
 
 
 // Close dismisses only the recovery surface; it must not abort an in-flight restore. Reopening reattaches to the same live presentation.
-chooseMode='replace';providerBringInResult=freeze({ok:true});await host.history.openSource('google-drive');await new Promise(resolve=>setImmediate(resolve));
+chooseMode='replace';providerBringInResult=freeze({ok:true});await host.history.open();await new Promise(resolve=>setImmediate(resolve));
 let releaseCloseRestore,lateProgress;providerRestoreImpl=async(_id,options)=>new Promise(resolve=>{lateProgress=options.onProgress;options.onProgress?.(freeze({stage:'download',message:'Downloading backup data…',current:2,total:8,bytesDone:2048,bytesTotal:8192}));releaseCloseRestore=resolve;});
 const closeRestore=host.history.recover({target:{closest:()=>driveButton}});await new Promise(resolve=>setImmediate(resolve));
 assert.equal(host.history.status().busy,true);assert.equal(host.history.status().progress.current,2);assert.equal(nodes.get('managed-version-history').open,true);
 const restorePresentationId=presentation.at(-1).operationId;assert.match(presentation.at(-1).message,/Downloading/);
 host.history.close();assert.equal(nodes.get('managed-version-history').open,false,'Close must dismiss the modal while recovery continues.');assert.equal(cancelImportCalls,0);assert.equal(deviceCancelCalls,0);assert.equal(providerCancelCalls,0,'Close must not cancel provider recovery.');
-await host.history.openSource('google-drive');assert.equal(nodes.get('managed-version-history').open,true,'Reopening Version History must reattach to the live recovery.');assert.equal(nodes.get('managed-version-history-progress-stage').textContent,'Downloading backup data…');assert.match(nodes.get('managed-version-history-progress-detail').textContent,/2 of 8 complete/);
+await host.history.open();assert.equal(nodes.get('managed-version-history').open,true,'Reopening Version History must reattach to the live recovery.');assert.equal(nodes.get('managed-version-history-progress-stage').textContent,'Downloading backup data…');assert.match(nodes.get('managed-version-history-progress-detail').textContent,/2 of 8 complete/);
 assert.equal(presentation.at(-1).operationId,restorePresentationId,'reopening retains the operation identity');
-releaseCloseRestore(freeze({ok:true,convergence:{source:{status:'completed'},others:[{label:'Device Folder',status:'pending'}]}}));assert.equal(await closeRestore,true);assert.match(presentation.at(-1).message,/Google Drive backup state is verified/);assert.match(presentation.at(-1).message,/Device Folder backup update is pending/);
+releaseCloseRestore(freeze({ok:true,convergence:{source:{status:'completed'},others:[{label:'Device Folder',status:'pending'}]}}));assert.equal(await closeRestore,true);assert.match(presentation.at(-1).message,/Google Drive already holds it/);assert.match(presentation.at(-1).message,/Device Folder backs it up next/);
 
 const finalMessage=presentation.at(-1).message;lateProgress({message:'Late stale download'});assert.equal(presentation.at(-1).message,finalMessage,'completed restore callbacks cannot revive progress');
 
 // Cancel must abort only the active provider/import operation and surface safe cancellation locally.
-await host.history.openSource('google-drive');await new Promise(resolve=>setImmediate(resolve));
+await host.history.open();await new Promise(resolve=>setImmediate(resolve));
 providerRestoreImpl=async(_id,options)=>new Promise((resolve,reject)=>{const fail=()=>reject(options.signal?.reason||Object.assign(new Error('cancelled'),{name:'AbortError',code:'STUDY_DIRECTOR_IMPORT_CANCELLED'}));if(options.signal?.aborted)fail();else options.signal?.addEventListener('abort',fail,{once:true});});
 const cancelBefore={import:cancelImportCalls,device:deviceCancelCalls,provider:providerCancelCalls};
 const cancelRestore=host.history.recover({target:{closest:()=>driveButton}});await new Promise(resolve=>setImmediate(resolve));
@@ -126,7 +128,7 @@ assert.equal(presentation.at(-1).lifecycle,'cancelled');assert.equal(presentatio
 providerRestoreImpl=async()=>freeze({ok:true});
 
 chooseMode='combine';providerBringInResult=freeze({ok:false,error:new Error('repository manifest invalid')});
-await host.history.openSource('google-drive');await new Promise(resolve=>setImmediate(resolve));assert.equal(await host.history.recover({target:{closest:()=>driveButton}}),false);
+await host.history.open();await new Promise(resolve=>setImmediate(resolve));assert.equal(await host.history.recover({target:{closest:()=>driveButton}}),false);
 assert.equal(nodes.get('managed-version-history-status').textContent,'The selected backup could not be applied safely.');
 assert.equal(presentation.at(-1).lifecycle,'failed');
 assert.equal(diagnostics.length,0,'recoverable return values should not be misreported as thrown diagnostics');
@@ -169,11 +171,12 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
 // version skips the Restore or Combine choice, and an outcome that changes
 // nothing keeps the list open.
 {
+  driveConnected=false;
   noteVersionsImpl=async id=>freeze({available:true,entries:freeze(id==='device-folder'?[freeze({sourceId:'device-folder',sourceLabel:'Device Folder',checkpointId:CHECKPOINT('a'),exportedAt:deviceEntry.exportedAt,text:'earlier text'})]:[])});
   const ethicsId='n_00000000000e7a1c',restoredNotes=[],chooseCount=()=>events.filter(event=>event.startsWith('choose:')).length,noteButton={dataset:{action:'compare-managed-note',versionHistorySource:'device-folder',versionHistoryCheckpoint:CHECKPOINT('a')}};
   // An active study session blocks whole-library recovery but not one note.
   sessionBlocking=true;
-  assert.equal(await host.history.openSource('device-folder'),false,'whole-library recovery still waits for the session to be suspended');
+  assert.equal(await host.history.open(),false,'whole-library recovery still waits for the session to be suspended');
   assert.deepEqual(await host.history.openNote({id:ethicsId,label:'GS2 > Ethics',text:'current text',onRestored:value=>restoredNotes.push(value)}),{opened:true},'a note opens its earlier versions during a study session');
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(await host.history.recover({target:{closest:()=>deviceButton}}),false,'the whole-library button does nothing in note mode');
@@ -185,8 +188,8 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   assert.equal(await host.history.recover({target:{closest:()=>noteButton}}),true);
   assert.equal(chooseCount(),choicesBefore,'a note comparison never asks Restore or Combine');assert.deepEqual(restoredNotes.map(value=>value.exportedAt),[deviceEntry.exportedAt]);
   // Opening Version History from Data & Backup leaves note mode.
-  sessionBlocking=false;await host.history.openSource('device-folder');await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(nodes.get('managed-version-history-title').textContent,'Device Folder backups');
+  sessionBlocking=false;await host.history.open();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(nodes.get('managed-version-history-title').textContent,'Version History');
   deviceConnected=false;assert.deepEqual(await host.history.openNote({id:'n_0123456789abcdef',label:'Ethics'}),{opened:false,reason:'no-source'},'without a connected backup nothing opens');deviceConnected=true;
   deviceCombineResult=freeze({ok:true});host.history.close();
 }
@@ -194,7 +197,7 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
 // runs the missing-only Combine and explains when something needs a choice.
 {
   chooseMode='missing';deviceCombineResult=freeze({ok:false,reason:'needs-decision'});
-  await host.history.openSource('device-folder');await new Promise(resolve=>setImmediate(resolve));
+  await host.history.open();await new Promise(resolve=>setImmediate(resolve));
   assert.equal(await host.history.recover({target:{closest:()=>deviceButton}}),false);
   assert.deepEqual(lastUseBackupOptions.choices.map(choice=>choice.value),['missing','combine','replace']);
   assert.equal(lastDeviceCombine.missingOnly,true);assert.match(host.history.status().status.message,/needs your choice, so nothing was changed/u);
@@ -207,10 +210,44 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   const entry=(letter,exportedAt,tier)=>freeze({...deviceEntry,logicalId:'state_'+letter.repeat(64),exportedAt,location:freeze({...deviceEntry.location,checkpointId:CHECKPOINT(letter),exportedAt,tier})});
   const scrambled=[entry('c','2026-06-01T08:00:00.000Z','monthly'),entry('d','2026-09-20T12:00:00.000Z','latest'),entry('e','2026-07-15T09:00:00.000Z','saved'),entry('f','2026-09-18T21:00:00.000Z','daily'),entry('a','2026-09-10T07:00:00.000Z','before-restore'),entry('b','2026-08-30T10:00:00.000Z','weekly')];
   const previous=deviceHistory;deviceHistory=freeze({...previous,entries:freeze(scrambled)});
-  await host.history.openSource('device-folder');await new Promise(resolve=>setImmediate(resolve));
+  await host.history.open();await new Promise(resolve=>setImmediate(resolve));
   const listed=host.history.status().entries.map(item=>item.exportedAt),rendered=nodes.get('managed-version-history-list').children.map(card=>card.dataset.logicalVersion);
   assert.deepEqual(listed,[...listed].sort().reverse(),'newest first');assert.deepEqual(rendered,host.history.status().entries.map(item=>item.logicalId),'the dialog shows them in that order');
   deviceHistory=previous;host.history.close();
+}
+// One Version History for both locations. A version both hold shows once and
+// is read from the Device Folder: the same id (a copy), or the same data under
+// another id. Each location keeps its own safety version. The newest version is
+// Latest whichever location made it, and a version only one location holds
+// says where it is.
+{
+  const entry=(sourceId,sourceLabel,letter,data,exportedAt,tier,extra={})=>freeze({...deviceEntry,logicalId:'state_'+data.repeat(64),logicalFingerprint:data.repeat(64),exportedAt,location:freeze({sourceId,sourceLabel,checkpointId:CHECKPOINT(letter),exportedAt,tier,encrypted:false,...extra})});
+  const folder=(...args)=>entry('device-folder','Device Folder',...args),drive=(...args)=>entry('google-drive','Google Drive',...args);
+  const previous=deviceHistory;
+  deviceHistory=freeze({...previous,entries:freeze([folder('c','c','2026-09-20T10:00:00.000Z','latest'),folder('d','d','2026-09-20T09:00:00.000Z','hourly'),folder('s','s','2026-09-19T08:00:00.000Z','before-restore',{safetyCheckpointId:CHECKPOINT('s')})])});
+  driveHistoryNow=freeze({...driveHistory,entries:freeze([drive('e','e','2026-09-20T11:00:00.000Z','latest'),drive('c','c','2026-09-20T10:00:00.000Z','hourly'),drive('f','d','2026-09-20T09:00:05.000Z','hourly'),drive('t','t','2026-09-19T07:00:00.000Z','before-restore',{safetyCheckpointId:CHECKPOINT('t')})])});
+  driveConnected=true;await host.history.open();await new Promise(resolve=>setImmediate(resolve));
+  const listed=host.history.status().entries;
+  assert.deepEqual(listed.map(item=>[item.location.sourceId,item.location.checkpointId,item.location.tier,item.held.join('+')]),[
+    ['google-drive',CHECKPOINT('e'),'latest','Google Drive'],
+    ['device-folder',CHECKPOINT('c'),'hourly','Device Folder+Google Drive'],
+    ['device-folder',CHECKPOINT('d'),'hourly','Device Folder+Google Drive'],
+    ['device-folder',CHECKPOINT('s'),'before-restore','Device Folder'],
+    ['google-drive',CHECKPOINT('t'),'before-restore','Google Drive']
+  ],'each version once, read locally when both hold it; each safety version on its own');
+  const statusText=card=>card.children[1].children[0].children[0].textContent,cards=nodes.get('managed-version-history-list').children;
+  assert.deepEqual(cards.map(statusText).map(text=>text.replace(/^.*?(?= · Only in|$)/u,'')),[' · Only in Google Drive','','',' · Only in Device Folder',' · Only in Google Drive'],'only a version one location holds says where it is');
+  assert.match(statusText(cards[0]),/^Latest/u);assert.equal(nodes.get('managed-version-history-status').textContent,'5 versions.');
+  // Restoring a version both hold reads it from the Device Folder.
+  chooseMode='replace';restoredCheckpoint='';
+  assert.equal(await host.history.recover({target:{closest:()=>cards[2].children[1].children[1].children[0]}}),true);assert.equal(restoredCheckpoint,CHECKPOINT('d'));
+  // With one location connected, rows do not say where a version is.
+  driveConnected=false;await host.history.open();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(nodes.get('managed-version-history-list').children.map(statusText).some(text=>text.includes('Only in')),false);
+  // A location that cannot be read is named; the other's versions still list.
+  driveConnected=true;driveHistoryNow=freeze({available:false,reason:'permission'});await host.history.open();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(host.history.status().entries.length,3);assert.equal(nodes.get('managed-version-history-status').textContent,'3 versions. Google Drive needs permission again.');
+  deviceHistory=previous;driveHistoryNow=driveHistory;driveConnected=false;host.history.close();
 }
 // A note's earlier versions combine every connected location: one entry per
 // distinct text, newest first, never the note's current text. Labels read in
@@ -219,12 +256,14 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
 {
   driveConnected=true;const calls=[];
   const version=(sourceId,sourceLabel,letter,exportedAt,text)=>freeze({sourceId,sourceLabel,checkpointId:CHECKPOINT(letter),exportedAt,text});
-  noteVersionsImpl=async(id,noteId)=>{calls.push([id,noteId]);return id==='device-folder'
-    ?freeze({available:true,entries:freeze([version('device-folder','Device Folder','c','2026-09-20T12:00:00.000Z','current text'),version('device-folder','Device Folder','d','2026-09-19T12:00:00.000Z','older text'),version('device-folder','Device Folder','e','2026-09-18T09:00:00.000Z','oldest text')])})
+  const covered=freeze({checkpointIds:freeze([CHECKPOINT('c'),CHECKPOINT('d'),CHECKPOINT('e')]),contents:freeze(['c'.repeat(64)])});let driveSkip=null;
+  noteVersionsImpl=async(id,noteId,options)=>{calls.push([id,noteId]);if(id==='google-drive')driveSkip=options.skip||null;return id==='device-folder'
+    ?freeze({available:true,covered,entries:freeze([version('device-folder','Device Folder','c','2026-09-20T12:00:00.000Z','current text'),version('device-folder','Device Folder','d','2026-09-19T12:00:00.000Z','older text'),version('device-folder','Device Folder','e','2026-09-18T09:00:00.000Z','oldest text')])})
     :freeze({available:true,entries:freeze([version('google-drive','Google Drive','f','2026-09-19T18:00:00.000Z','older text'),version('google-drive','Google Drive','g','2026-09-18T20:00:00.000Z','text only on Drive')])});};
   const opened=await host.history.openNote(freeze({id:'n_0123456789abcdef',label:'Ethics',text:'current text',onRestored:()=>{}}));
   assert.equal(opened.opened,true);await new Promise(resolve=>setImmediate(resolve));
   assert.deepEqual(calls,[['device-folder','n_0123456789abcdef'],['google-drive','n_0123456789abcdef']],'every connected location is asked for the note by id');
+  assert.deepEqual(driveSkip&&{checkpointIds:[...driveSkip.checkpointIds],contents:[...driveSkip.contents]},{checkpointIds:covered.checkpointIds.slice(),contents:covered.contents.slice()},'Drive skips the versions the Device Folder already read');
   const cards=nodes.get('managed-version-history-list').children,buttons=cards.map(card=>card.children[0].children[2]),labels=cards.map(card=>card.children[0].children[0].textContent);
   assert.deepEqual(buttons.map(button=>button.dataset.versionHistoryCheckpoint),[CHECKPOINT('f'),CHECKPOINT('g'),CHECKPOINT('e')],'one entry per distinct text, newest first, without the current text');
   assert.equal(labels[0].includes(','),false,'a date with one version shows the day only');assert.ok(labels[1].includes(',')&&labels[2].includes(','),'two versions on one date show their times');
@@ -234,4 +273,4 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   assert.equal(providerBringInCheckpoint,CHECKPOINT('g'));assert.equal(lastProviderBringIn.note,'n_0123456789abcdef','Review compares only this note');
   host.history.close();driveConnected=false;
 }
-console.log(JSON.stringify({status:'PASS',suite:'backup-recovery-host',combinedNoteVersions:true,providerScopedRecovery:true,noCrossProviderDiscovery:true,replaceAndCombine:true,durableProviderRetry:true,pendingMutationFailClosed:true,managedRecoveryLifecycle:true,closeDoesNotCancel:true,reopenReattaches:true,cancelSourceScoped:true},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'backup-recovery-host',oneVersionHistory:true,noteVersionsReadOnce:true,combinedNoteVersions:true,providerScopedRecovery:true,noCrossProviderDiscovery:true,replaceAndCombine:true,durableProviderRetry:true,pendingMutationFailClosed:true,managedRecoveryLifecycle:true,closeDoesNotCancel:true,reopenReattaches:true,cancelSourceScoped:true},null,2));

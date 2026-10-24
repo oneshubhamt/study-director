@@ -84,7 +84,6 @@
   let profilePort=null,boundFolder='',seenFolder=null,deletionChecked='',libraryDeleted='';
   let folderEpoch=0;
   let folderResolutionFlight=null;
-  let picker=null;
   let pendingAuthorization=null;
   let maxBackupBytes=DEFAULT_MAX_BACKUP_BYTES;
   const repositoryUploads=new Map(),MAX_RETAINED_UPLOADS=16;
@@ -194,8 +193,7 @@
     });}catch{}
   }
   function clearAccessToken(){const changed=!!accessToken||tokenExpiresAt!==0;forgetSession(accessToken);clearConnectionExpiryTimer();accessToken='';tokenExpiresAt=0;if(changed)notifyConnectionChange();}
-  function clearPickerMetadata(){if(picker&&picker.list)picker.list.replaceChildren();}
-  function clearSession(){clearAccessToken();invalidateFolderIdentity();cancelFolderResolution();clearPickerMetadata();}
+  function clearSession(){clearAccessToken();invalidateFolderIdentity();cancelFolderResolution();}
   function grantedScopeSet(response){return new Set(String(response&&response.scope||'').split(/\s+/).filter(Boolean));}
   function settleAuthorization(error,response){
     const pending=pendingAuthorization;
@@ -980,7 +978,6 @@
       renewMaintenance:ref=>renewRepositoryMaintenance(ref,base),
       endMaintenance:ref=>endRepositoryMaintenance(ref,driveOperationContext({folderState:base.folderState})),
       scope:()=>repositoryScope(base),
-      choose:chooseRepositoryCheckpoint,
       historyReadConcurrency:8
     });
   }
@@ -1074,91 +1071,6 @@
     if(!response.ok)throw await apiError(response,'Could not verify the Google Drive backup.');
     return await jsonResponse(response);
   }
-  function dateLabel(value){
-    const date=new Date(value);
-    return Number.isFinite(date.getTime())?date.toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'Unknown date';
-  }
-  function sizeLabel(value){
-    const bytes=Math.max(0,Number(value)||0);
-    if(bytes<1048576)return `${Math.max(1,Math.round(bytes/1024))} KB`;
-    return `${Math.round(bytes/1048576*10)/10} MB`;
-  }
-  function injectPickerStyles(){
-    if(document.getElementById('sd-drive-picker-style'))return;
-    const style=document.createElement('style');
-    style.id='sd-drive-picker-style';
-    style.textContent=`
-      .sd-drive-picker{width:min(620px,calc(100vw - 28px));border:1px solid var(--sd-color-border-2);padding:0;background:var(--sd-color-surface-1);color:var(--sd-color-text-primary);box-shadow:var(--sd-depth-overlay)}
-      .sd-drive-picker::backdrop{background:var(--sd-material-modal-backdrop);backdrop-filter:var(--sd-material-modal-filter);-webkit-backdrop-filter:var(--sd-material-modal-filter)}
-      .sd-drive-picker-form{display:grid;gap:14px;padding:20px}
-      .sd-drive-picker-title{font-family:var(--sd-font-condensed);font-size:var(--sd-type-role-title-size);letter-spacing:2px}
-      .sd-drive-picker-copy{color:var(--sd-color-text-secondary)}
-      .sd-drive-picker-list{width:100%;min-height:220px;background:var(--sd-color-surface-2);color:var(--sd-color-text-primary);border:1px solid var(--sd-color-border-2);padding:6px;font-family:var(--sd-font-mono);font-size:var(--sd-type-role-copy-size)}
-      .sd-drive-picker-list option{padding:10px 8px}
-      .sd-drive-picker-actions{display:flex;justify-content:flex-end;gap:9px;flex-wrap:wrap}
-      @media(max-width:560px){.sd-drive-picker-form{padding:16px}.sd-drive-picker-actions{display:grid;grid-template-columns:1fr 1fr}.sd-drive-picker-actions .ui-btn{width:100%;min-height:44px}}
-    `;
-    document.head.appendChild(style);
-  }
-  function ensurePicker(){
-    if(picker)return picker;
-    injectPickerStyles();
-    const dialog=document.createElement('dialog');
-    dialog.className='sd-drive-picker';
-    dialog.setAttribute('aria-labelledby','sd-drive-picker-title');
-    dialog.setAttribute('aria-describedby','sd-drive-picker-copy');
-    const form=document.createElement('form');form.method='dialog';form.className='sd-drive-picker-form';
-    const title=document.createElement('div');title.className='sd-drive-picker-title';title.id='sd-drive-picker-title';title.textContent='Combine from Drive';
-    const copy=document.createElement('div');copy.className='sd-drive-picker-copy';copy.id='sd-drive-picker-copy';copy.textContent='Select a Study Director backup.';
-    const list=document.createElement('select');list.className='sd-drive-picker-list';list.size=7;list.setAttribute('aria-label','Google Drive backups');
-    const actions=document.createElement('div');actions.className='sd-drive-picker-actions';
-    for(const [value,label] of [['cancel','Cancel'],['confirm','Combine selected']]){const button=document.createElement('button');button.type='submit';button.value=value;button.className='ui-btn'+(value==='confirm'?' primary':'');button.textContent=label;actions.appendChild(button);}
-    form.append(title,copy,list,actions);dialog.appendChild(form);
-    document.body.appendChild(dialog);
-    picker={dialog,list:dialog.querySelector('select'),copy:dialog.querySelector('.sd-drive-picker-copy')};
-    return picker;
-  }
-  async function chooseBackup(files,{ignored=0,mode='bring-in'}={}){
-    const {dialog,list,copy}=ensurePicker();
-    const restoring=mode==='restore-version';
-    const title=dialog.querySelector('.sd-drive-picker-title'),confirm=dialog.querySelector('button[value="confirm"]');
-    if(title)title.textContent=restoring?'Replace from Drive':'Combine from Drive';
-    if(confirm)confirm.textContent=restoring?'Replace current data':'Combine selected';
-    if(copy)copy.textContent=`${files.length} eligible Study Director backup${files.length===1?'':'s'}${ignored?` · ${ignored} unrecognised or invalid file${ignored===1?'':'s'} ignored`:''}. ${restoring?'The selected version will be completely verified before the portable app state is replaced.':'The selected backup will be completely verified before differences are reviewed.'}`;
-    list.replaceChildren(...files.map((file,index)=>{
-      const option=document.createElement('option');
-      option.value=String(index);
-      option.textContent=`${dateLabel(file.modifiedTime||file.createdTime)} · ${sizeLabel(file.size)}`;
-      if(index===0)option.selected=true;
-      return option;
-    }));
-    return new Promise(resolve=>{
-      dialog.returnValue='';
-      let fallbackClick=null;
-      const finish=()=>{
-        dialog.removeEventListener('close',finish);
-        if(fallbackClick)dialog.removeEventListener('click',fallbackClick);
-        const selected=dialog.returnValue==='confirm'?files[Number(list.value)]||null:null;
-        clearPickerMetadata();
-        resolve(selected);
-      };
-      dialog.addEventListener('close',finish);
-      if(typeof dialog.showModal==='function')dialog.showModal();
-      else{
-        dialog.setAttribute('open','');
-        fallbackClick=event=>{
-          const button=event.target.closest('button[value]');
-          if(!button)return;
-          event.preventDefault();dialog.returnValue=button.value;dialog.removeAttribute('open');dialog.dispatchEvent(new Event('close'));
-        };
-        dialog.addEventListener('click',fallbackClick);
-      }
-    });
-  }
-  async function chooseRepositoryCheckpoint(items,{ignored=0,mode='bring-in'}={}){
-    const selected=await chooseBackup((items||[]).map(item=>Object.freeze({...item,modifiedTime:item.exportedAt,createdTime:item.exportedAt})),{ignored,mode});
-    return selected?selected.id:null;
-  }
   async function readBoundedBlob(response,expectedSize,context=EMPTY_DRIVE_OPERATION,onProgress=null){
     const expected=finiteSize(expectedSize);
     if(expected===null||expected<=0||expected>maxBackupBytes)throw noRetry(new Error('The selected Google Drive backup has invalid size metadata.'));
@@ -1191,7 +1103,7 @@
     }
     throw lastError||new Error('Could not download the selected Google Drive backup.');
   }
-  function release(){clearPickerMetadata();if(accessToken&&Date.now()>=tokenExpiresAt)clearSession();}
+  function release(){if(accessToken&&Date.now()>=tokenExpiresAt)clearSession();}
   async function disconnect(){
     await prepare();
     const token=requireAccessToken();
@@ -1239,7 +1151,7 @@
       subscribeConnection,
       disconnect,
       release,
-      repository:Object.freeze({discardUploads:()=>repositoryUploads.clear(),list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:beginRepositoryPublication,listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,scope:()=>repositoryScope(),choose:chooseRepositoryCheckpoint,beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
+      repository:Object.freeze({discardUploads:()=>repositoryUploads.clear(),list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:beginRepositoryPublication,listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,scope:()=>repositoryScope(),beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
     }));
   }
 

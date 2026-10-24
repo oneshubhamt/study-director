@@ -15,10 +15,13 @@ assert.match(repository,/if\(manifest\.logicalFingerprint&&manifest\.logicalFing
 
 assert.match(provider,/async function historyRepositoryProvider\(id,options=\{\}\)[\s\S]*repositoryProviderInventory\(scoped,[\s\S]*repositoryInventoryHistoryEntries/u,'provider history must remain independently readable');
 assert.match(provider,/async function historyRepositoryProvider\(id,options=\{\}\)[\s\S]*beginForeground\(selected,options&&options\.signal\|\|null\)[\s\S]*repositoryInventoryHistoryEntries/u,'every location, the Device Folder included, exposes independent committed history; interactive history stays cancellable and foreground-safe.');
-assert.match(app,/id="managed-version-history"[\s\S]*id="managed-version-history-title">Backup checkpoints/u,'one reusable recovery dialog may render the selected provider history');
+assert.match(app,/id="managed-version-history"[\s\S]*id="managed-version-history-title">Version History/u,'one Version History dialog for every location');
 assert.match(host,/function sourceDescriptor\(sourceId\)[\s\S]*input\.providers\.list\(\)\.find/u);assert.doesNotMatch(host,/input\.device\b/u,'the recovery host has no Device-only path');
-assert.match(host,/async function collectSource\(sourceId[\s\S]*await input\.providers\.history\(source\.id/u);
-assert.doesNotMatch(host,/mergeHistory|sources\.push|for\(const provider of input\.providers\.list/u,'recovery history must stay provider-scoped instead of constructing a global timeline');
+// One list: each connected location's own history is read, then each
+// version shows once, read from the Device Folder when it holds it.
+assert.match(host,/async function collectAll\([\s\S]*for\(const source of sources\)\{[\s\S]*await input\.providers\.history\(source\.id/u);
+assert.match(host,/function connectedSources\(\)\{return input\.providers\.list\(\)\.filter\(item=>item\.connected===true\)\.sort\(\(a,b\)=>Number\(a\.shared===true\)-Number\(b\.shared===true\)\)/u,'the Device Folder is read before Drive');
+assert.match(host,/function mergeHistories\(results\)[\s\S]*location\.tier!=='before-restore'[\s\S]*byId\.get\(location\.checkpointId\)\|\|\(entry\.logicalId\?byData\.get\(entry\.logicalId\):null\)/u,'a version two locations hold shows once; each safety version shows on its own');
 assert.match(host,/choice==='replace'\?await input\.providers\.restoreRepositoryProviderVersion\(sourceId,options\):await input\.providers\.bringInRepositoryProvider\(sourceId,options\)/u,'Replace and Combine must route only through the owning location');
 assert.match(host,/remove\.dataset\.action='remove-managed-safety'/u);assert.match(host,/await input\.providers\.removeProtectedRepositoryProvider\(sourceId,checkpointId\)/u);
 assert.match(provider,/async function removeProtectedRepositoryProvider/u);
@@ -26,4 +29,4 @@ for(const forbidden of ['import-file','importLocal','.sdbackup','import-archive'
 assert.doesNotMatch(drive,/DeviceBackup|device-backup|projectManagedRepositoryHistory|mergeManagedRepositoryHistory/u,'Google Drive transport must not know about Device Folder');
 assert.doesNotMatch(device,/google-drive|Google Drive|BackupProviderRuntime/u,'the Device Folder controller must not know about Drive; it reaches the engine only through its injected port');
 
-console.log(JSON.stringify({status:'PASS',suite:'managed-version-history-contract',providerScopedHistory:true,independentHistories:true,noCrossProviderDiscovery:true,manualFileExcluded:true,explicitSafetyRemoval:true},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'managed-version-history-contract',oneVersionHistory:true,independentHistories:true,noCrossProviderDiscovery:true,manualFileExcluded:true,explicitSafetyRemoval:true},null,2));

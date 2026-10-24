@@ -12,7 +12,24 @@ Smart merge (`mergeThreeWay`) is out of scope (`HANDOFF.md` 5.8).
 
 ## Status
 
-Report only. Nothing has been changed. Findings wait for your decisions.
+All findings are fixed (2026-10-24). You decided: one Version History list, one safety version per device on Drive, and no Primary / Optional labels. The findings below are the report as written; this table says what was done.
+
+| Finding | Outcome |
+|---|---|
+| S1 | Fixed. Replace now says "Make your data match this backup". While Drive is connected, the restore choices, Version History and the file restore say "your other devices get the result at their next sync", and the outcome says "Your other devices get it at their next sync" instead of "verified". A restore from the Device Folder or a file now reaches Drive too. Test T1 added. |
+| S2 | Confirmed by test T2, then fixed: Drive copies the Device Folder's version within a second. Also fixed: Drive's "waiting for the Device Folder" mark was never cleared. |
+| S3, S4 | Fixed. One Version History and one Back up now (Device Folder first, then Drive). Each version shows once, read from the Device Folder when it holds it; "Only in …" when one location holds it. A note's earlier versions: Drive skips what the Device Folder already read. |
+| S5 | Removed both pickers and the engine branch. A restore without a chosen version is now refused before anything is read. |
+| S6 | Confirmed, and worse than reported: Drive received the same data again under a new id, re-uploading every file ("echo"). Fixed: a copy whose data matches Drive's newest is not written. The Device Folder still saves its own version of synced data (copying Drive's would download every file); the one list shows the two as one. |
+| S7 | One safety version per device, on every location, for 7 days. |
+| S8 | All texts changed. Badges removed. Device Folder settings show the backup folder name. The 7-day reminder asks someone who uses Drive to sign in again, and uses "→". |
+| S9 | "Checkpoint" and "External backup verified" replaced with "version" and "Backed up to …". |
+| S10 | Renamed: `lastSharedBase` in `backup.js`; the test file is `sync-shared-base.mjs`. |
+| T1, T2 | Added to `sync-shared-base.mjs`. |
+
+Two things noticed while testing, both safe and left as they are:
+- Replacing with an older version asks about each note that changed since, because an older version shares no base with this device. Nothing changes without a choice.
+- Replace's own confirmation (`confirmed:false`) is reachable only from tests: every app path confirms in the restore dialog first.
 
 ## Verdict
 

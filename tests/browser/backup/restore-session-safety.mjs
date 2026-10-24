@@ -73,7 +73,7 @@ try{
   page1=await createPage();
   assert.equal(await page1.evaluate(`__RestoreSafetyQA.AppOwnership.status().hasControl`),true,'primary tab did not acquire control');
 
-  const initial=await page1.evaluate(`(()=>{const q=s=>document.querySelector(s);return {blocked:__RestoreSafetyQA.hasBlockingActiveSession(),open:q('[data-action="pick-import-file"]').disabled,recoverDevice:q('[data-action="recover-device-backup"]').disabled,clear:q('[data-action="clear-library"]').disabled,export:q('[data-action="export-backup"]').disabled};})()`);
+  const initial=await page1.evaluate(`(()=>{const q=s=>document.querySelector(s);return {blocked:__RestoreSafetyQA.hasBlockingActiveSession(),open:q('[data-action="pick-import-file"]').disabled,recoverDevice:q('[data-action="open-version-history"]').disabled,clear:q('[data-action="clear-library"]').disabled,export:q('[data-action="export-backup"]').disabled};})()`);
   assert.deepEqual(initial,{blocked:false,open:false,recoverDevice:false,clear:false,export:false},'idle primary tab should allow recovery entry, file import, Clear Library and export');
 
   const active=await page1.evaluate(`(async()=>{
@@ -91,7 +91,7 @@ try{
     const created=await d.BackupController.createCheckpoint(),candidate=await d.BackupController.inspect(created.blob,{filename:created.filename}),parsed=await d.BackupCodec.inspect(created.blob,{filename:created.filename});
     window.__RestoreSafetyQAFile=created;window.__RestoreSafetyQACandidate=candidate;window.__RestoreSafetyQAExpected=parsed.importedActiveSession;
     d.TimerState.paused=true;d.OwnershipUiProjection.apply();
-    const q=s=>document.querySelector(s),open=q('[data-action="pick-import-file"]'),recoverDevice=q('[data-action="recover-device-backup"]'),clear=q('[data-action="clear-library"]'),file=q('#import-file');
+    const q=s=>document.querySelector(s),open=q('[data-action="pick-import-file"]'),recoverDevice=q('[data-action="open-version-history"]'),clear=q('[data-action="clear-library"]'),file=q('#import-file');
     return {blocked:d.hasBlockingActiveSession(),paused:d.TimerState.paused,open:open.disabled,recoverDevice:recoverDevice.disabled,clear:clear.disabled,file:file.disabled,export:q('[data-action="export-backup"]').disabled,title:open.dataset.ownershipUiReason,revision:parsed.importedActiveSession?.revision||0,backupReview:parsed.importedActiveSession?.snapshot?.review?.reflection||''};
   })()`);
   assert.equal(active.blocked,true,'applied/paused session did not block destructive import surfaces');
@@ -113,7 +113,7 @@ try{
   const suspended=await page1.evaluate(`(async()=>{
     const d=__RestoreSafetyQA,loaded=await d.AppData.activeSession.load(),session=structuredClone(loaded.value);session.status='suspended';session.suspendedAt=new Date().toISOString();session.updatedAt=session.suspendedAt;const saved=await d.AppData.activeSession.save(session);if(!saved?.ok)throw saved?.error||new Error('could not persist suspended fixture');
     d.resetRuntimeSessionState({lifecycleManaged:true,source:'qa-qa',date:d.todayISO()});d.setSessionPanelMode('suspended');d.setTimerMode(d.TIMER_MODES.SUSPENDED,'qa-qa');d.OwnershipUiProjection.apply();
-    const q=s=>document.querySelector(s);return {blocked:d.hasBlockingActiveSession(),open:q('[data-action="pick-import-file"]').disabled,recoverDevice:q('[data-action="recover-device-backup"]').disabled,clear:q('[data-action="clear-library"]').disabled,file:q('#import-file').disabled,mode:d.TimerState.mode};
+    const q=s=>document.querySelector(s);return {blocked:d.hasBlockingActiveSession(),open:q('[data-action="pick-import-file"]').disabled,recoverDevice:q('[data-action="open-version-history"]').disabled,clear:q('[data-action="clear-library"]').disabled,file:q('#import-file').disabled,mode:d.TimerState.mode};
   })()`);
   assert.deepEqual(suspended,{blocked:false,open:false,recoverDevice:false,clear:false,file:false,mode:'suspended'},'genuinely suspended session should allow recovery entry, file import and Clear Library');
 

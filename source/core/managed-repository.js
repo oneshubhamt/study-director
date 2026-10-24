@@ -259,10 +259,22 @@ function validateRepositoryRetention(value,exportedAt,{legacy=false}={}){
 function repositoryDateKeyFromOrdinal(value){const date=new Date(Number(value)*86400000);return `${date.getUTCFullYear()}-${repositoryPad2(date.getUTCMonth()+1)}-${repositoryPad2(date.getUTCDate())}`;}
 function repositoryWeekStartOrdinal(value){const date=new Date(Number(value)*86400000),day=date.getUTCDay(),delta=(day-REPOSITORY_RETENTION_POLICY.weekStartsOn+7)%7;return Number(value)-delta;}
 function newestRepositoryRow(rows){return rows.reduce((best,row)=>!best||Date.parse(row.manifest.exportedAt)>Date.parse(best.manifest.exportedAt)||Date.parse(row.manifest.exportedAt)===Date.parse(best.manifest.exportedAt)&&String(row.id).localeCompare(String(best.id))>0?row:best,null);}
-function activeProtectedRepositoryRow(rowsValue,now=Date.now()){
+// The device that made a version.
+function repositoryRowDevice(row){return String(row?.manifest?.installationId||row?.manifest?.checkpoint?.originInstallationId||'');}
+// Each device keeps its newest unexpired safety version (protectedLimit per
+// device), so a restore on one device never pushes out another device's way
+// back. Every location selects alike.
+function activeProtectedRepositoryRows(rowsValue,now=Date.now()){
   const rows=Array.isArray(rowsValue)?rowsValue:[],nowMs=now instanceof Date?now.getTime():Number(now);
   if(!Number.isFinite(nowMs))throw new Error('Repository protection evaluation time is invalid.');
-  return newestRepositoryRow(rows.filter(row=>row&&row.manifest?.retention?.role==='before-restore'&&Date.parse(row.manifest.retention.protectedUntil)>nowMs));
+  const byDevice=new Map();
+  for(const row of rows)if(row&&row.manifest?.retention?.role==='before-restore'&&Date.parse(row.manifest.retention.protectedUntil)>nowMs){const device=repositoryRowDevice(row);byDevice.set(device,newestRepositoryRow([byDevice.get(device),row].filter(Boolean)));}
+  return freeze([...byDevice.values()]);
+}
+// The newest unexpired safety version, of one device when device is given.
+function activeProtectedRepositoryRow(rowsValue,now=Date.now(),device=null){
+  const rows=activeProtectedRepositoryRows(rowsValue,now);
+  return newestRepositoryRow(device===null?rows:rows.filter(row=>repositoryRowDevice(row)===String(device)));
 }
 function classifyRepositoryState(input={}){
   const manifests=Array.isArray(input.manifests)?input.manifests:[],commits=Array.isArray(input.commits)?input.commits:[],commitById=new Map(),manifestIds=new Set(),committed=[],uncommitted=[],invalidPairs=[];
@@ -279,7 +291,7 @@ function classifyRepositoryState(input={}){
 function selectRepositoryRetention(rowsValue,{now=new Date()}={}){
   const rows=Array.isArray(rowsValue)?[...rowsValue]:[];rows.sort((a,b)=>Date.parse(a.manifest?.exportedAt||0)-Date.parse(b.manifest?.exportedAt||0)||String(a.id||'').localeCompare(String(b.id||'')));
   const nowMs=now instanceof Date?now.getTime():Date.parse(now);if(!Number.isFinite(nowMs))throw new Error('Repository retention evaluation time is invalid.');
-  const activeProtected=activeProtectedRepositoryRow(rows,nowMs),everyNormal=rows.filter(row=>row&&row.manifest?.retention?.role==='normal');
+  const protectedRows=activeProtectedRepositoryRows(rows,nowMs),activeProtected=newestRepositoryRow(protectedRows),everyNormal=rows.filter(row=>row&&row.manifest?.retention?.role==='normal');
   // Once a version in the current format exists, versions in older formats
   // retire: Version History and the next cleanup keep current ones only, so a
   // location ends up holding one format.
@@ -332,9 +344,9 @@ function selectRepositoryRetention(rowsValue,{now=new Date()}={}){
       keep(row,'hourly');hourly+=1;after=row;
     }
   }
-  if(activeProtected)keep(activeProtected,'before-restore');
+  for(const row of protectedRows)keep(row,'before-restore');
   const retained=rows.filter(row=>selected.has(row.id)),remove=rows.filter(row=>!selected.has(row.id));
-  return freeze({retained:freeze(retained),remove:freeze(remove),activeProtected:activeProtected||null,tiers:freeze(Object.fromEntries(tiers)),normalRetained:retained.filter(row=>row!==activeProtected).length,policy:REPOSITORY_RETENTION_POLICY});
+  return freeze({retained:freeze(retained),remove:freeze(remove),activeProtected:activeProtected||null,activeProtectedRows:protectedRows,tiers:freeze(Object.fromEntries(tiers)),normalRetained:retained.filter(row=>!protectedRows.includes(row)).length,policy:REPOSITORY_RETENTION_POLICY});
 }
 function projectManagedRepositoryHistory(rowsValue,source,{now=new Date(),quarantinedObjectIds=null}={}){
   const rows=Array.isArray(rowsValue)?rowsValue:[],sourceId=String(source&&source.id||''),sourceLabel=clampText(source&&source.label||'',80),quarantined=new Set(repositoryScrubObjectIds(quarantinedObjectIds));
@@ -1078,11 +1090,16 @@ async function refreshRepositoryPublicationProtection(state,options){
 // same content (logical fingerprint) built from exactly the same stored
 // objects, none of them new. A repair that replaces a damaged object, and a
 // protected safety version, always get written.
-function repositoryUnchangedVersion(history,prepared){
-  const base=repositoryPreparedState.get(prepared)?.manifestBase;if(!base||base.retention?.role!=='normal'||prepared.objects.some(entry=>!entry.reused))return null;
+// sameData: the version is a copy of this device's current data. Its objects
+// may carry other ids than the newest version here (each device names its own
+// objects), so the same data is enough: copying it would only upload every
+// object again.
+function repositoryUnchangedVersion(history,prepared,{sameData=false}={}){
+  const base=repositoryPreparedState.get(prepared)?.manifestBase;if(!base||base.retention?.role!=='normal'||!sameData&&prepared.objects.some(entry=>!entry.reused))return null;
   let newest=null;
   for(const manifest of Array.isArray(history)?history:[])if((manifest?.retention?.role||'normal')==='normal'&&(!newest||Date.parse(manifest.exportedAt)>Date.parse(newest.exportedAt)))newest=manifest;
   if(!newest||!newest.logicalFingerprint||newest.logicalFingerprint!==base.logicalFingerprint)return null;
+  if(sameData)return String(newest.protectionId||'')===String(base.protectionId||'')&&newest.encrypted===base.encrypted?newest:null;
   const ids=list=>(list||[]).map(entry=>String(entry.objectId)).sort().join('|');
   return ids(newest.objects)===ids(base.objects)?newest:null;
 }
@@ -1123,7 +1140,7 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
     check();
     // Nothing changed since the newest version: write nothing (no requests,
     // no history slot), but record that the current changes are backed up.
-    const unchanged=repositoryUnchangedVersion(history,prepared);
+    const unchanged=repositoryUnchangedVersion(history,prepared,{sameData:!!copy&&current});
     if(unchanged){
       const checkpointId=unchanged.checkpoint.checkpointId,publication=freeze({name:checkpointId+'.sdcheckpoint',unchanged:true}),objectsReused=prepared.objects.length;
       if(!copy)adoptRepositoryPreparation(prepared,checkpointId);if(options.shared&&current)await postCommit('reconciliation-base','The backup was already up to date, but this device could not record it as shared.',()=>establishRepositoryBase(checkpointId));

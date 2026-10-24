@@ -21,7 +21,7 @@ registry.define('device-backup',1,()=>{
     exactObject(input.environment,['canMutate','clearTimeout','setTimeout','showDirectoryPicker'],'Device-backup environment');
     functions(input.engine,['backup','cancelForeground','disconnect','forget','locationStatus','register','subscribeStatus'],'Device-backup engine port');
     functions(input.settings,['read','remove','write'],'Device-backup settings port');
-    functions(input.hooks,['capture','chooseCheckpoint','chooseRepository','render','repositoryOwner','sourceRevision','verifiedAt'],'Device-backup hooks');
+    functions(input.hooks,['capture','chooseRepository','render','repositoryOwner','sourceRevision','verifiedAt'],'Device-backup hooks');
     if(typeof input.transport!=='function')throw new TypeError('Device-backup transport port is invalid.');
     if(!Object.isFrozen(input.presentation)||['current','feedback','notice','read','resolve','reset'].some(key=>typeof input.presentation[key]!=='function'))throw new TypeError('Backup presentation port is invalid.');
     const {configuration:config,engine,environment,settings,hooks,presentation}=input;
@@ -183,7 +183,7 @@ registry.define('device-backup',1,()=>{
       automaticBaseline:()=>connected()?baseline||EPOCH:'',
       subscribeConnection:listener=>{connectionListener=listener;},
       authorize,disconnect:disconnectFolder,disconnectLabel:'Turn off',
-      repository:freeze({...transport,choose:(choices,{mode:kind='restore-version'}={})=>choices.length<2?choices[0]?.id||null:hooks.chooseCheckpoint(choices,freeze({mode:kind}))})
+      repository:transport
     })))throw new Error('Device Folder backup location could not be registered.');
     if(supported)engine.subscribeStatus(()=>{if(installed)publish();});
 
@@ -244,7 +244,7 @@ registry.define('device-backup',1,()=>{
           if(previous!==chosen)await engine.forget(ID);
           baseline=versions?sourceRevision():'';initial=!versions;
           await settings.write(config.metadataKey,settingsValue());settingsUnverified=false;mode='connected';
-          presentation.feedback(ID,versions?'Existing Study Director backups found. Choose Versions to recover one, or Back up now to keep this device’s current data.':'');
+          presentation.feedback(ID,versions?'Existing Study Director backups found. Open Version History to recover one, or Back up now to keep this device’s current data.':'');
         }catch(error){handle=previous;repositoryName=previous?previousName:'';permission=previous?await query(previous):'unknown';throw error;}
       }catch(error){
         if(error&&error.name==='AbortError')presentation.feedback(ID,handle?'':'Folder selection was cancelled.');

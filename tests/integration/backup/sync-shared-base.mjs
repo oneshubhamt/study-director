@@ -121,7 +121,9 @@ function baseStore(state){
   };
 }
 
-function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=null,hasLiveTasks=false,fileMode='combine',extrasMode='keep',preflightFailure=''}={}){
+// inertTimers: scheduled engine work never fires, so a test drives every
+// backup itself.
+function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=null,hasLiveTasks=false,fileMode='combine',extrasMode='keep',preflightFailure='',inertTimers=false}={}){
   state.deletions??=[];state.noteDeletions??=[];state.attachmentDeletions??=[];state.reviews??=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
   let injectedFailure=String(preflightFailure||'');
   const prompts=[];const statuses=[];const events=[];const diagnosticMarks=[];const fn=()=>false;
@@ -159,7 +161,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
     }),
     operations:freeze({assertAuthority:()=>{if(injectedFailure==='ownership')throw new Error('QA_FIXTURE ownership failure');return true;},clearFault:fn,failClosed:message=>{throw new Error(String(message));},runExclusive:async(kind,operation)=>operation()}),
     interactions:freeze({choose:async options=>{prompts.push(options);return options&&options.title==='Use this backup'?fileMode:options&&options.title==='Keep what isn’t in this backup?'?extrasMode:null;},configure:async config=>{prompts.push(config);const out={...decisions};for(const group of config.groups||[]){if(group.id.startsWith('kept__')){out[group.id]=state.keptChoice||group.defaultValue;continue;}if(group.id.startsWith('savedDay__')){const remoteRecord=group.choices.find(choice=>String(choice.label||'').startsWith('Use '));const remoteDeletion=group.choices.find(choice=>String(choice.label||'').startsWith('Apply deletion'));if(decisions.dailyRecords==='replace'&&remoteRecord)out[group.id]=remoteRecord.value;else if(decisions.savedDayDeletions==='apply'&&remoteDeletion)out[group.id]=remoteDeletion.value;else out[group.id]=group.defaultValue;}else if(String(group.label||'').startsWith('Note · ')){const remoteDeletion=group.choices.find(choice=>choice.label==='Delete it');out[group.id]=(decisions.noteByKey?.[String(group.label).slice('Note · '.length)]||decisions.noteDeletions)==='apply'&&remoteDeletion?remoteDeletion.value:group.defaultValue;}else if(group.id==='activeSession'){const incoming=group.choices.find(choice=>String(choice.label||'').startsWith('Use session'));out.activeSession=decisions.activeSession==='checkpoint'&&incoming?incoming.value:group.defaultValue;}}return freeze(out);},notify:fn}),
-    environment:freeze({AbortController,clearTimeout,yieldTask:async()=>{},setTimeout:callback=>(callback(),1)}),diagnostics:freeze({capture:fn,start:()=>'',mark:(name,details={})=>(diagnosticMarks.push([String(name),details]),true),finish:()=>false,fail:()=>false})
+    environment:freeze({AbortController,clearTimeout:inertTimers?()=>{}:clearTimeout,yieldTask:async()=>{},setTimeout:inertTimers?()=>0:callback=>(callback(),1)}),diagnostics:freeze({capture:fn,start:()=>'',mark:(name,details={})=>(diagnosticMarks.push([String(name),details]),true),finish:()=>false,fail:()=>false})
   })}));
   return {runtime,prompts,statuses,events,diagnosticMarks,setPreflightFailure:value=>{injectedFailure=String(value||'');}};
 }
@@ -294,22 +296,22 @@ assert.equal(collisionState.notes['a b'].text,'keep a b');assert.equal(Object.ha
 assert.deepEqual(collisionState.noteDeletions.map(item=>item.key),['a_b']);
 
 // Explicit incoming choices: selected checkpoint states are applied, but unrelated local Saved Days survive.
-const handoffState=createState({withActive:true});
-const handoffHarness=createHarness(handoffState,{decisions:{dailyRecords:'replace',reflections:'incoming',savedDayDeletions:'apply',activeSession:'checkpoint',plans:'replace',personalSettings:'replace'}});
-const handoffCandidate=await handoffHarness.runtime.controller.inspect(blob,{filename:'checkpoint.sdbackup'});
-const handoffResult=await handoffHarness.runtime.controller.restore(handoffCandidate);
-assert.equal(handoffResult.mode,'reconcile');
-assert.equal(handoffState.records.get('2026-08-01').reflection,'local only','Reconciliation must preserve unrelated local Saved Days.');
-assert.equal(handoffState.records.get('2026-08-02').reflection,'checkpoint conflict older','Explicit checkpoint choice must win even when its timestamp is older.');
-assert.equal(handoffState.records.has('2026-08-03'),false,'Explicit checkpoint deletion must remove the matching local Saved Day.');
-assert.equal(handoffState.records.get('2026-08-04').reflection,'checkpoint revives local deletion','Checkpoint record choice must be able to replace a local deletion.');
-assert.equal(handoffState.records.get('2026-08-05').reflection,'checkpoint new');
-assert.deepEqual(handoffState.deletions.map(item=>item.date),['2026-08-03','2026-08-06']);
-assert.deepEqual(Object.keys(handoffState.notes).sort(),['Checkpoint','Local'],'Reconciliation must add missing Areas without clearing local-only notes.');
-assert.equal(handoffState.activeSession.date,'2026-08-07','Handoff must restore a non-today interrupted session.');
-assert.match(handoffState.schedule,/CHECKPOINT/u);
-assert.equal(handoffState.personal.preferences.studentName,'Checkpoint User');
-assert.equal(handoffHarness.prompts.some(prompt=>prompt.groups?.some(group=>group.id==='restoreMode')),false,'Current checkpoints must use one reconciliation flow rather than exposing Import versus Handoff.');
+const combineState=createState({withActive:true});
+const combineHarness=createHarness(combineState,{decisions:{dailyRecords:'replace',reflections:'incoming',savedDayDeletions:'apply',activeSession:'checkpoint',plans:'replace',personalSettings:'replace'}});
+const combineCandidate=await combineHarness.runtime.controller.inspect(blob,{filename:'checkpoint.sdbackup'});
+const combineResult=await combineHarness.runtime.controller.restore(combineCandidate);
+assert.equal(combineResult.mode,'reconcile');
+assert.equal(combineState.records.get('2026-08-01').reflection,'local only','Reconciliation must preserve unrelated local Saved Days.');
+assert.equal(combineState.records.get('2026-08-02').reflection,'checkpoint conflict older','Explicit checkpoint choice must win even when its timestamp is older.');
+assert.equal(combineState.records.has('2026-08-03'),false,'Explicit checkpoint deletion must remove the matching local Saved Day.');
+assert.equal(combineState.records.get('2026-08-04').reflection,'checkpoint revives local deletion','Checkpoint record choice must be able to replace a local deletion.');
+assert.equal(combineState.records.get('2026-08-05').reflection,'checkpoint new');
+assert.deepEqual(combineState.deletions.map(item=>item.date),['2026-08-03','2026-08-06']);
+assert.deepEqual(Object.keys(combineState.notes).sort(),['Checkpoint','Local'],'Reconciliation must add missing Areas without clearing local-only notes.');
+assert.equal(combineState.activeSession.date,'2026-08-07','Handoff must restore a non-today interrupted session.');
+assert.match(combineState.schedule,/CHECKPOINT/u);
+assert.equal(combineState.personal.preferences.studentName,'Checkpoint User');
+assert.equal(combineHarness.prompts.some(prompt=>prompt.groups?.some(group=>group.id==='restoreMode')),false,'Current checkpoints must use one reconciliation flow rather than exposing Import versus Handoff.');
 
 // Explicit local conflict choices must be honored; there is no timestamp-based automatic winner.
 const keepState=createState({withActive:true});
@@ -420,7 +422,7 @@ assert.equal(extrasKeepState.records.get('2026-08-30').reflection,'standalone ex
 assert.equal(replaceState.records.get('2026-08-30').reflection,'standalone exact replacement');
 assert.equal(replaceInput.value,'','standalone Replace should reset the file input after verified completion.');
 
-// A → B → A sequential handoff: later divergence, explicit deletion and interrupted-session state remain coherent.
+// A → B → A sequential Combine: later divergence, explicit deletion and interrupted-session state remain coherent.
 const aRoundTrip=createState({withActive:true});
 const aFirstBlob=await makeCheckpoint({
   records:[...aRoundTrip.records.values()],deletions:aRoundTrip.deletions,notes:aRoundTrip.notes,
@@ -431,7 +433,7 @@ const bFirstHarness=createHarness(bRoundTrip,{decisions:{dailyRecords:'replace',
 await bFirstHarness.runtime.controller.restore(await bFirstHarness.runtime.controller.inspect(aFirstBlob,{filename:'a-to-b.sdbackup'}));
 assert.equal(bRoundTrip.records.get('2026-08-02').reflection,'local conflict newer');
 assert.equal(bRoundTrip.activeSession.date,'2026-08-10');
-// Both devices now diverge independently after the first handoff.
+// Both devices now diverge independently after the first Combine.
 aRoundTrip.records.set('2026-08-02',record('2026-08-02','A divergent after handoff','2026-08-26T12:00:00.000Z'));
 aRoundTrip.records.set('2026-08-13',record('2026-08-13','A local-only after handoff','2026-08-26T13:00:00.000Z'));
 bRoundTrip.records.set('2026-08-02',record('2026-08-02','B divergent authoritative choice','2026-08-25T09:00:00.000Z'));
@@ -458,30 +460,38 @@ let syncWorld=null;
 // difference made on both waits for the person, and a session running here
 // keeps its own state while everything else merges.
 {
-  const drive=new Map(),key=(kind,id)=>kind+':'+id;
+  const drive=new Map(),key=(kind,id)=>kind+':'+id,keepAll={on:false};
   const describe=file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,digest:file.digest,remoteId:'remote-'+key(file.kind,file.id),...(file.historySummary?{history:freeze({...file.historySummary,exportedAt:file.exportedAt})}:{})});
-  const transport=freeze({
-    list:async({kind})=>freeze({items:freeze([...drive.values()].filter(file=>file.kind===kind).map(describe)),overflow:false}),
-    upload:async file=>{const stored=freeze({...file,createdAt:new Date().toISOString()});drive.set(key(file.kind,file.id),stored);return describe(stored);},
-    download:async ref=>{const stored=drive.get(key(ref.kind,ref.id));if(!stored)throw new Error('QA_FIXTURE missing Drive file');return freeze({blob:stored.blob,release:async()=>{}});},
-    delete:async ref=>drive.delete(key(ref.kind,ref.id))
-  });
+  const store=files=>freeze({
+    list:async({kind})=>freeze({items:freeze([...files.values()].filter(file=>file.kind===kind).map(describe)),overflow:false}),
+    upload:async file=>{const stored=freeze({...file,createdAt:new Date().toISOString()});files.set(key(file.kind,file.id),stored);return describe(stored);},
+    download:async ref=>{const stored=files.get(key(ref.kind,ref.id));if(!stored)throw new Error('QA_FIXTURE missing backup file');return freeze({blob:stored.blob,release:async()=>{}});},
+    // A test can hold on to every version (all of them fall in one hour, so
+    // retention would keep only the newest).
+    delete:async ref=>{if(!keepAll.on)files.delete(key(ref.kind,ref.id));}
+  }),transport=store(drive),versions=files=>[...files.values()].filter(file=>file.kind==='checkpoint'&&file.historySummary?.retention?.role!=='before-restore').map(file=>file.id).sort();
   const head=()=>[...drive.values()].filter(file=>file.kind==='checkpoint'&&file.historySummary?.retention?.role!=='before-restore').sort((a,b)=>Date.parse(b.exportedAt)-Date.parse(a.exportedAt))[0]?.id||'';
-  const device=state=>{
+  // folder: this device also backs up to a Device Folder of its own.
+  const device=(state,{folder=null}={})=>{
     // A review of kept versions takes state.keptChoice ('use' or the default)
     // and, for note texts, state.reviewText(conflict) or the current text.
     const reviewTexts=(options,current)=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:typeof current.reviewText==='function'?current.reviewText(item,options):item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))});
-    const harness=createHarness(state,{noteResolver:reviewTexts}),providers=harness.runtime.providers,recovery=ManagedRecoveryModule.createCoordinator(freeze({
+    const harness=createHarness(state,{noteResolver:reviewTexts,inertTimers:!!folder}),providers=harness.runtime.providers,recovery=ManagedRecoveryModule.createCoordinator(freeze({
       automaticBackup:freeze({suspend:async()=>freeze({}),resume:async()=>true}),diagnostics:freeze({capture:()=>{},mark:()=>false}),
       lifecycle:freeze({settle:async()=>{},quiesce:async operation=>operation(),revision:()=>'2026-08-23T00:00:00.000Z',rebuild:async()=>{}}),mutation:freeze({run:async(_kind,operation)=>operation()})
     }));
     providers.configureManagedRecovery(freeze({run:spec=>recovery.execute(spec)}));
     assert.equal(providers.register(freeze({id:'drive',label:'Google Drive',shared:true,connected:()=>true,repository:transport})),true);
+    // The change clock: every capture in this harness has the same source revision.
+    if(folder){assert.equal(providers.register(freeze({id:'folder',label:'Device Folder',connected:()=>true,repository:store(folder)})),true);providers.configureAutomaticBackup(freeze({covered:()=>'',current:()=>'2026-08-23T00:00:00.000Z'}));providers.configurePendingBackupRetry(freeze({read:async()=>null,mark:async()=>true,clear:async()=>true}));}
     return freeze({
+      backUpFolder:()=>providers.backupRepositoryProvider('folder',{interactive:false}),
       upload:async()=>{await new Promise(resolve=>setTimeout(resolve,3));return providers.backupRepositoryProvider('drive',{interactive:false});},
       sync:()=>providers.bringInRepositoryProvider('drive',{quiet:true,sync:true,checkpointId:head()}),
       review:()=>providers.bringInRepositoryProvider('drive',{checkpointId:head(),review:true}),
-      reviewKept:(options={})=>harness.runtime.controller.reviewKeptVersions(options)
+      restore:checkpointId=>providers.restoreRepositoryProviderVersion('drive',{checkpointId,confirmed:true}),
+      reviewKept:(options={})=>harness.runtime.controller.reviewKeptVersions(options),
+      noteVersions:(id,noteId,options={})=>providers.noteVersions(id,noteId,{interactive:false,...options})
     });
   };
   const note=text=>freeze({Shared:freeze({version:2,key:'Shared',text,updatedAt:new Date().toISOString()})});
@@ -490,7 +500,7 @@ let syncWorld=null;
   const A=device(a),B=device(b);
   // A new device takes in everything.
   const v1=await A.upload();assert.equal(a.reconciliationBase.checkpointId,v1.checkpointId,'a Drive backup is what this device shares');
-  syncWorld=freeze({drive,head,device,note});
+  syncWorld=freeze({drive,head,device,note,keepAll,versions});
   assert.equal((await B.sync()).cancelled,false);
   assert.deepEqual([...b.records.keys()].sort(),['2026-08-01','2026-08-02']);assert.equal(b.notes.Shared.text,'first');
   assert.deepEqual(b.followed,[{protectionId:'',encrypted:false,removedElsewhere:false}],'a sync tells the backup password what the newest version uses');assert.equal(b.reconciliationBase.checkpointId,v1.checkpointId,'what a device takes in from Drive is what it shares');
@@ -565,6 +575,70 @@ let syncWorld=null;
   assert.equal((await A.sync()).cancelled,false);
   assert.equal(a.activeSession.snapshot.label,'A-SESSION','an unsaved earlier session is not replaced by a new one from another device');
   assert.equal(a.reviews.open().find(review=>review.subject==='session').kept.snapshot.label,'B-SESSION','the other session is kept for review');
+}
+
+// Restoring an older version reaches every device: the restoring device makes
+// it Drive's newest at its next upload, the other device takes it in at its
+// next sync, and versions kept for review on either device stay.
+{
+  syncWorld.drive.clear();syncWorld.keepAll.on=true;
+  const {device,note}=syncWorld;
+  const a={installationId:'inst_restore_device_a',records:new Map([['2026-08-01',record('2026-08-01','first day')]]),deletions:[],noteDeletions:[],notes:note('version one'),activeSession:null,schedule:'',personal:personal('Restore User'),journal:null};
+  const b={installationId:'inst_restore_device_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Restore User'),journal:null};
+  const A=device(a),B=device(b);
+  const first=await A.upload();assert.equal((await B.sync()).cancelled,false);assert.equal(b.notes.Shared.text,'version one');
+  // The same Saved Day changed on both leaves a version kept for review on both devices.
+  a.notes=note('version two');a.records.set('2026-08-01',record('2026-08-01','first day by A','2026-08-31T09:00:00.000Z'));await A.upload();
+  b.records.set('2026-08-01',record('2026-08-01','first day by B','2026-08-31T10:00:00.000Z'));
+  assert.equal((await B.sync()).cancelled,false);assert.equal(b.notes.Shared.text,'version two');
+  const kept=b.reviews.open().find(review=>review.subject==='savedDay');assert.ok(kept,'a version is kept for review');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);assert.deepEqual(a.reviews.open().map(review=>review.id),[kept.id]);
+  // An older version does not descend from what both last shared, so Replace
+  // shows the notes it changes; the person takes the backup's copy.
+  a.reviewText=item=>item.incomingValue;const restored=await A.restore(first.checkpointId);a.reviewText=null;assert.notEqual(restored.cancelled,true);
+  assert.equal(a.notes.Shared.text,'version one','the restore applies here at once');
+  assert.deepEqual(a.reviews.open().map(review=>review.id),[kept.id],'versions kept for review stay through a restore');
+  assert.equal(restored.convergence?.source?.shared,true,'the restore came from Drive');
+  const after=await A.upload();assert.notEqual(after.checkpointId,first.checkpointId,'the restored state becomes Drive’s newest version');
+  assert.equal((await B.sync()).cancelled,false,'the other device takes the restore in without a question');
+  assert.equal(b.notes.Shared.text,'version one','and gets the restored note');
+  assert.deepEqual(b.reviews.open().map(review=>review.id),[kept.id],'its versions kept for review stay too');
+  syncWorld.keepAll.on=false;
+}
+
+// Two devices that each back up to a Device Folder too. A version this device
+// makes is made once: its Device Folder and Drive hold it under the same id.
+// After taking in the other device's changes, the Device Folder saves that
+// same data as a version of its own (objects are not shared between devices,
+// so copying Drive's would download them all), and Drive takes nothing new.
+{
+  syncWorld.drive.clear();
+  const {device,note,head,versions,drive}=syncWorld;
+  const folderA=new Map(),folderB=new Map(),content=(files,id)=>[...files.values()].find(file=>file.kind==='checkpoint'&&file.id===id)?.historySummary?.logicalFingerprint;
+  const a={installationId:'inst_both_device_a',records:new Map([['2026-08-01',record('2026-08-01','first day')]]),deletions:[],noteDeletions:[],notes:note('one'),activeSession:null,schedule:'',personal:personal('Both User'),journal:null};
+  const b={installationId:'inst_both_device_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Both User'),journal:null};
+  const A=device(a,{folder:folderA}),B=device(b,{folder:folderB});
+  const made=await A.backUpFolder(),copied=await A.upload();
+  assert.equal(copied.checkpointId,made.checkpointId,'Drive takes the Device Folder version under the same id');assert.deepEqual(versions(drive),versions(folderA));
+  assert.equal((await B.sync()).cancelled,false);assert.equal(b.notes.Shared.text,'one');
+  const taken=await B.backUpFolder();assert.ok(content(folderB,taken.checkpointId),'the Device Folder records what its version holds');
+  assert.equal(content(folderB,taken.checkpointId),content(drive,head()),'after a sync with nothing of its own, the Device Folder holds the same data as Drive’s newest version');
+  assert.equal((await B.upload()).unchanged,true,'and Drive has nothing new to take');assert.deepEqual(versions(drive),[made.checkpointId]);
+  // B changes: its Device Folder makes the version and Drive takes it under the same id.
+  b.notes=note('two by B');const madeB=await B.backUpFolder(),copiedB=await B.upload();
+  assert.equal(copiedB.checkpointId,madeB.checkpointId);assert.equal(head(),madeB.checkpointId);
+  // A takes it in; nothing goes back up, and A's Device Folder holds the same data.
+  assert.equal((await A.sync()).cancelled,false);assert.equal(a.notes.Shared.text,'two by B');
+  const takenA=await A.backUpFolder();assert.equal(content(folderA,takenA.checkpointId),content(drive,head()));
+  assert.equal((await A.upload()).unchanged,true,'no device uploads again what it only took in');
+  // A note's earlier versions: what the Device Folder read is not read again
+  // from Drive, whether Drive holds it under the same id or another.
+  const local=await A.noteVersions('folder','Shared');
+  assert.equal(local.available,true);assert.deepEqual(local.entries.map(entry=>entry.text),['two by B']);assert.deepEqual(local.covered.checkpointIds,versions(folderA));
+  assert.notDeepEqual(versions(drive),versions(folderA),'Drive holds the same data under its own id');
+  assert.deepEqual((await A.noteVersions('drive','Shared')).entries.map(entry=>entry.text),['two by B'],'read alone, Drive offers it');
+  const shared=await A.noteVersions('drive','Shared',{skip:local.covered});
+  assert.equal(shared.available,true);assert.deepEqual(shared.entries,[],'after the Device Folder, Drive offers nothing new');assert.deepEqual(shared.covered.checkpointIds,[],'and reads none of its versions');
 }
 
 // A study session belongs to the device running it. Another device keeps a
@@ -643,4 +717,4 @@ let syncWorld=null;
   assert.equal((await A.sync()).cancelled,false);assert.equal(a.activeSession.snapshot.label,'A-UNSEEN','a session the other side never had is not ended by it');assert.equal(a.running,true);
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'checkpoint-handoff',preflightVariants:preflightCases.length,coverage:['two-device Drive sync','versions kept for review travel and resolve everywhere','study session hand-off and takeover','current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential handoff','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'sync-shared-base',preflightVariants:preflightCases.length,coverage:['two-device Drive sync','a restore reaches every device and keeps reviews','versions kept for review travel and resolve everywhere','study session hand-off and takeover','current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential Combine','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));

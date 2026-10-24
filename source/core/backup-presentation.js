@@ -14,18 +14,29 @@ registry.define('backup-presentation',1,()=>{
   }
   // The three ways a verified backup can be applied, worded once for every
   // backup location. Adding only what is missing leaves everything current as
-  // it is and stops, unchanged, at anything that would need a choice.
+  // it is and stops, unchanged, at anything that would need a choice. While
+  // Google Drive is signed in, what a restore changes reaches every device
+  // (reach): the next sync uploads it and the other devices take it in.
   const RESTORE_CHOICES=freeze({
     missing:freeze({value:'missing',label:'Add only what’s missing',description:'Bring back Saved Days and attachments this device doesn’t have. Nothing you have now changes.'}),
     combine:freeze({value:'combine',label:'Combine with current data',kind:'primary',description:'Add what’s new. Notes, plans and settings changed on one side only since your last sync are taken for you; you choose the rest. Nothing is deleted unless it was deleted on purpose.'}),
-    replace:freeze({value:'replace',label:'Replace current data',kind:'caution',description:'Make this device match this backup. You choose whether to keep what isn’t in it; notes it deleted go to Recently deleted.'}),
-    needsDecision:'Some data differs from this backup and needs your choice, so nothing was changed. Use Combine to review the differences.'
+    replace:freeze({value:'replace',label:'Replace current data',kind:'caution',description:'Make your data match this backup. You choose whether to keep what isn’t in it; notes it deleted go to Recently deleted.'}),
+    needsDecision:'Some data differs from this backup and needs your choice, so nothing was changed. Use Combine to review the differences.',
+    reach:'Google Drive is connected, so your other devices get the result at their next sync.'
   });
-  // detail, when given, says what the restore or combine changed.
+  // detail, when given, says what the restore or combine changed. A shared
+  // location (Drive) carries the result to the other devices; every other
+  // location says whether it already holds it or backs it up next.
   function outcome(kind,label,convergence,detail=''){
-    const message=String(detail||'')||(kind==='restore-version'?'Backup restored locally and verified.':'Backup combined locally and verified.'),external=convergence?.source||convergence,parts=[message];
-    const append=(name,state)=>{if(state?.status==='pending')parts.push(`${name} backup update is pending.`);else if(state?.status==='completed')parts.push(`${name} backup state is verified.`);else if(state?.status==='failed')parts.push(`${name} backup status needs attention.`);};
-    append(label,external);for(const other of convergence?.others||[])append(other.label,other);return parts.join(' ');
+    const message=String(detail||'')||(kind==='restore-version'?'Backup restored locally and verified.':'Backup combined locally and verified.'),external=convergence?.source||convergence,parts=[message];let reach=false;
+    const append=(name,state)=>{
+      if(state?.status==='failed'){parts.push(`${name} backup needs attention.`);return;}
+      if(state?.shared===true){if(['pending','completed'].includes(state?.status))reach=true;return;}
+      if(state?.status==='pending')parts.push(`${name} backs it up next.`);else if(state?.status==='completed')parts.push(`${name} already holds it.`);
+    };
+    append(label,external);for(const other of convergence?.others||[])append(other.label,other);
+    if(reach)parts.push('Your other devices get it at their next sync.');
+    return parts.join(' ');
   }
   function createPresentation(input){
     if(!input||!Object.isFrozen(input)||!input.notifications||typeof input.notifications.readEvent!=='function')throw new TypeError('Backup presentation requires the notification coordinator.');
@@ -81,7 +92,7 @@ registry.define('backup-presentation',1,()=>{
         const event=current();if(!event||event.lifecycle!=='running')return false;
         const lifecycle=patch.lifecycle||'succeeded',condition=notifications.eventStatus().events.some(row=>row.source===source&&['permission','retry-exhausted'].includes(row.id));
         const result=handle.update({progress:null,...patch,lifecycle,severity:patch.severity||(lifecycle==='failed'?'error':lifecycle==='succeeded'?'success':'info'),announce:options.foreground!==false&&kind!=='history'&&lifecycle!=='cancelled'&&!(lifecycle==='failed'&&condition),surface:'inline'});
-        if(result&&kind==='backup'&&lifecycle==='succeeded')notifications.emit({source,id:'backup-verified',severity:'success',lifecycle:'succeeded',foreground:false,surface:'quiet',message:`External backup verified in ${options.label||source}.`,outcome:'external-backup-verified',completedAt:new Date().toISOString()});
+        if(result&&kind==='backup'&&lifecycle==='succeeded')notifications.emit({source,id:'backup-verified',severity:'success',lifecycle:'succeeded',foreground:false,surface:'quiet',message:`Backed up to ${options.label||source}.`,outcome:'external-backup-verified',completedAt:new Date().toISOString()});
         return result;
       };
       return freeze({operationId:handle.operationId,read:current,update,finish,resolve:handle.resolve});
@@ -92,8 +103,10 @@ registry.define('backup-presentation',1,()=>{
     // that closes on its own or when dismissed. Repeating the same notice
     // does not show it again until it is resolved.
     function notice(source,id,message){return notifications.emit({source,id,message,severity:'warning',lifecycle:'succeeded',foreground:false,title:source==='device-folder'?'Device Folder backup':'Google Drive backup',action:action(source,id),surface:'toast',duration:12000});}
+    // The reach line for a restore or combine dialog, while Drive syncs.
+    function reach(){try{return typeof input.synced==='function'&&input.synced()===true?RESTORE_CHOICES.reach:'';}catch{return '';}}
     function reset(source){for(const event of notifications.eventStatus().events)if(event.source===source)notifications.resolveEvent(source,event.id);}
-    return freeze({begin,read,current,feedback,condition,notice,bytes,detail,outcome,locationLabel,syncLabel,summary,restoreChoices:RESTORE_CHOICES,resolve:(source,id='backup-operation')=>notifications.resolveEvent(source,id),reset,subscribe:notifications.subscribe});
+    return freeze({begin,read,current,feedback,condition,notice,bytes,detail,outcome,locationLabel,syncLabel,summary,reach,restoreChoices:RESTORE_CHOICES,resolve:(source,id='backup-operation')=>notifications.resolveEvent(source,id),reset,subscribe:notifications.subscribe});
   }
   return freeze({format:'study-director.backup-presentation-module',contractVersion:1,createPresentation});
 });

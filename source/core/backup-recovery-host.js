@@ -142,7 +142,9 @@ registry.define('backup-recovery-host',1,()=>{
     let busy=false,activeSourceId='',activeSourceLabel='',lastEntries=freeze([]),activeController=null,noteTarget=null;
     function currentPresentation(){return activeSourceId?presentation.read(activeSourceId):null;}
     function progressValue(){const event=currentPresentation();return event?.progress?freeze({...event.progress,message:event.message,ok:event.severity!=='error'}):null;}
-    function statusValue(){const event=(activeSourceId?presentation.read(activeSourceId,'backup-status'):null)||currentPresentation();return freeze({message:event?.message||'',ok:event?.severity!=='error'});}
+    // Without a location (none connected) the dialog keeps its own line.
+    let detachedStatus=freeze({message:'',ok:true});
+    function statusValue(){if(!activeSourceId)return detachedStatus;const event=presentation.read(activeSourceId,'backup-status')||currentPresentation();return freeze({message:event?.message||'',ok:event?.severity!=='error'});}
     function subscribePresentation(listener){return presentation.subscribe(state=>{for(const event of state.events)if(event.source===activeSourceId&&event.id==='backup-operation')listener(freeze({...event,sourceId:event.source,sourceLabel:event.title,active:event.lifecycle==='running',ok:event.severity!=='error',progress:event.progress?{...event.progress,message:event.message}:null}));});}
     const elements=()=>freeze({
       dialog:input.document.getElementById('managed-version-history'),
@@ -160,12 +162,13 @@ registry.define('backup-recovery-host',1,()=>{
     const tierLabel=(value,purpose='')=>value==='before-restore'?safetyLabel(purpose):value==='latest'?'Latest':value==='hourly'?'Hourly':value==='daily'?'Daily':value==='weekly'?'Weekly':value==='monthly'?'Monthly':'Saved';
     const dateLabel=value=>{const date=new Date(value);return Number.isFinite(date.getTime())?date.toLocaleString():String(value||'');};
     function sourceDescriptor(sourceId){
-      const id=String(sourceId||'').trim(),provider=input.providers.list().find(item=>item.id===id);return provider?freeze({id:provider.id,label:provider.label}):null;
+      const id=String(sourceId||'').trim(),provider=input.providers.list().find(item=>item.id===id);return provider?freeze({id:provider.id,label:provider.label,shared:provider.shared===true}):null;
     }
     function setHistoryStatus(message='',ok=true,lifecycle=''){
       presentationLifecycle=lifecycle||(ok?'succeeded':'failed');
       if(presentationScope?.read()?.lifecycle==='running'){presentation.feedback(activeSourceId,'');presentationScope.update({message:String(message||''),severity:ok?'info':'error'});}
       else if(activeSourceId)presentation.feedback(activeSourceId,String(message||''),ok);
+      else detachedStatus=freeze({message:String(message||''),ok});
       renderHistoryPresentation();
     }
     function clearHistoryProgress(){presentationScope?.update({progress:null});renderHistoryPresentation();}
@@ -195,11 +198,11 @@ registry.define('backup-recovery-host',1,()=>{
       if(activeSourceId){try{input.providers.cancelForeground('Recovery operation was cancelled by the user.',activeSourceId);}catch{}}
       setHistoryStatus('');setHistoryProgress({stage:'cancelling',message:'Cancelling safely…'});return true;
     }
-    function setDialogSource(source){
+    function setDialogMode(){
       const {kicker,title,copy}=elements();
-      if(kicker)kicker.textContent=noteTarget?'Earlier versions':'Versions';
-      if(title)title.textContent=noteTarget?noteTarget.label:`${source.label} backups`;
-      if(copy)copy.textContent=noteTarget?'Choose an earlier version of this note. You review the differences before anything changes.':`Choose a verified ${source.label} version to restore.`;
+      if(kicker)kicker.textContent=noteTarget?'Earlier versions':'Backups';
+      if(title)title.textContent=noteTarget?noteTarget.label:'Version History';
+      if(copy)copy.textContent=noteTarget?'Choose an earlier version of this note. You review the differences before anything changes.':'Every version your backups keep, newest first. Choose one to restore.';
     }
     // A note's earlier versions read in plain time: "Today, 14:05",
     // "Yesterday", "3 days ago", "2 weeks ago", "4 months ago". The time is
@@ -229,7 +232,9 @@ registry.define('backup-recovery-host',1,()=>{
     function render(entries=lastEntries){
       const {list}=elements();if(!list)return;list.replaceChildren();
       if(noteTarget){renderNoteVersions(entries);return;}
-      if(!entries.length){const empty=input.document.createElement('div');empty.className='managed-version-history-empty ui-helper';empty.textContent=`No ${activeSourceLabel||'managed'} backup checkpoints are available yet.`;list.appendChild(empty);return;}
+      if(!entries.length){const empty=input.document.createElement('div');empty.className='managed-version-history-empty ui-helper';empty.textContent=busy?'':'No versions yet.';list.appendChild(empty);return;}
+      // Where a version is kept, said only when one location of several holds it.
+      const several=connectedSources().length>1;
       for(const entry of entries){
         const location=entry&&entry.location;if(!location)continue;
         const card=input.document.createElement('section');card.className='managed-version-card';card.dataset.logicalVersion=entry.logicalId;
@@ -239,7 +244,7 @@ registry.define('backup-recovery-host',1,()=>{
         head.append(when,counts);card.appendChild(head);
         const row=input.document.createElement('div');row.className='managed-version-location';
         const copy=input.document.createElement('div');copy.className='managed-version-location-copy';
-        const status=input.document.createElement('span');status.className='ui-helper';status.textContent=`${tierLabel(location.tier,location.safetyPurpose)}${location.encrypted?' · Encrypted':''}${location.health==='degraded'?' · Degraded capture':''}`;copy.appendChild(status);
+        const status=input.document.createElement('span');status.className='ui-helper';status.textContent=`${tierLabel(location.tier,location.safetyPurpose)}${location.encrypted?' · Encrypted':''}${location.health==='degraded'?' · Degraded capture':''}${several&&Array.isArray(entry.held)&&entry.held.length===1?` · Only in ${entry.held[0]}`:''}`;copy.appendChild(status);
         if(location.warning){const warning=input.document.createElement('span');warning.className='ui-status warn';warning.textContent=String(location.warning);copy.appendChild(warning);}
         const actions=input.document.createElement('div');actions.className='managed-version-location-actions';
         const use=input.document.createElement('button');use.type='button';use.className='mini-btn ui-btn';use.dataset.action=noteTarget?'compare-managed-note':'recover-managed-version';use.dataset.versionHistorySource=location.sourceId;use.dataset.versionHistoryCheckpoint=location.checkpointId;use.textContent=noteTarget?'Restore note…':'Restore…';actions.appendChild(use);
@@ -247,47 +252,78 @@ registry.define('backup-recovery-host',1,()=>{
         row.append(copy,actions);card.appendChild(row);list.appendChild(card);
       }
     }
-    async function collectSource(sourceId,{interactive=true}={}){
-      const source=sourceDescriptor(sourceId);if(!source)throw new Error('Backup location is unavailable.');
-      if(busy)return freeze({entries:lastEntries,source:freeze({sourceId:activeSourceId,sourceLabel:activeSourceLabel})});
-      const controller=new AbortController();activeSourceId=source.id;activeSourceLabel=source.label;setOperationBusy(true,controller);setDialogSource(source);clearHistoryProgress();setHistoryStatus(`Reading ${source.label} backups…`);
+    // One list for every location. A version two locations hold (the same id,
+    // or the same data under another id) shows once and is read from the first
+    // location that holds it; each location's safety version shows on its own.
+    // The newest version is Latest, whichever location made it.
+    function mergeHistories(results){
+      const rows=[],byId=new Map(),byData=new Map(),time=entry=>Date.parse(entry.exportedAt||entry.location.exportedAt||0)||0;
+      for(const {source,entries} of results)for(const entry of entries){
+        const location=entry&&entry.location;if(!location)continue;
+        if(location.tier!=='before-restore'){
+          const match=byId.get(location.checkpointId)||(entry.logicalId?byData.get(entry.logicalId):null);
+          if(match&&!match.held.includes(source.label)){match.held.push(source.label);match.tiers.push(location.tier);continue;}
+        }
+        const row={entry,held:[source.label],tiers:[location.tier]};rows.push(row);
+        if(location.tier!=='before-restore'){byId.set(location.checkpointId,row);if(entry.logicalId&&!byData.has(entry.logicalId))byData.set(entry.logicalId,row);}
+      }
+      rows.sort((a,b)=>time(b.entry)-time(a.entry)||String(b.entry.location.checkpointId).localeCompare(String(a.entry.location.checkpointId)));
+      let latest=true;
+      return freeze(rows.map(row=>{
+        let tier=row.entry.location.tier;
+        if(tier!=='before-restore'){tier=latest?'latest':row.tiers.find(value=>value!=='latest')||'retained';latest=false;}
+        return freeze({...row.entry,held:freeze([...row.held]),location:freeze({...row.entry.location,tier})});
+      }));
+    }
+    async function collectAll({interactive=true}={}){
+      if(busy)return freeze({entries:lastEntries});
+      const sources=connectedSources();
+      if(!sources.length){activeSourceId='';activeSourceLabel='';lastEntries=freeze([]);render();setHistoryStatus('Choose a Device Folder or connect Google Drive to keep versions.',false);return freeze({entries:lastEntries});}
+      const controller=new AbortController();activeSourceId=sources[0].id;activeSourceLabel=sources[0].label;setOperationBusy(true,controller);setDialogMode();clearHistoryProgress();
       try{
-        const result=await input.providers.history(source.id,freeze({interactive,signal:controller.signal,presentation:presentationScope}));
-        const entries=result&&result.available&&Array.isArray(result.entries)?[...result.entries]:[];
-        entries.sort((a,b)=>Date.parse(b?.exportedAt||b?.location?.exportedAt||0)-Date.parse(a?.exportedAt||a?.location?.exportedAt||0)||String(b?.location?.checkpointId||'').localeCompare(String(a?.location?.checkpointId||'')));
-        lastEntries=freeze(entries);render();
-        if(!result||result.available!==true){
-          const reason=String(result&&result.reason||'');
-          if(result&&result.cancelled||reason==='cancelled')setHistoryStatus('Cancelled.',true,'cancelled');
-          else{const message=reason==='not-connected'?`${source.label} is not connected.`:reason==='permission'?`${source.label} permission is required.`:userMessage(reason,`Could not read ${source.label} backups safely.`);setHistoryStatus(message,false);}
-        }else setHistoryStatus(lastEntries.length?`${lastEntries.length} backup checkpoint${lastEntries.length===1?'':'s'} available.`:`No ${source.label} backup checkpoints are available yet.`);
-        return freeze({entries:lastEntries,source:freeze({sourceId:source.id,sourceLabel:source.label})});
-      }catch(error){lastEntries=freeze([]);render();const message=userMessage(error,`Could not read ${source.label} backups safely.`);setHistoryStatus(message,false);input.diagnostics.capture('backup.source-history',error,'warn');return freeze({entries:lastEntries,source:freeze({sourceId:source.id,sourceLabel:source.label}),error});}
+        const results=[],unread=[];
+        for(const source of sources){
+          setHistoryStatus(`Reading ${source.label}…`);
+          const result=await input.providers.history(source.id,freeze({interactive,signal:controller.signal,presentation:presentationScope}));
+          if(result&&(result.cancelled||result.reason==='cancelled')){setHistoryStatus('Cancelled.',true,'cancelled');return freeze({entries:lastEntries});}
+          if(result&&result.available===true&&Array.isArray(result.entries))results.push(freeze({source,entries:result.entries}));
+          else unread.push(String(result&&result.reason||'')==='permission'?`${source.label} needs permission again.`:`${source.label} could not be read.`);
+        }
+        lastEntries=mergeHistories(results);render();
+        const missing=unread.length?' '+unread.join(' '):'';
+        setHistoryStatus(lastEntries.length?`${lastEntries.length} version${lastEntries.length===1?'':'s'}.${missing}`:`No versions yet.${missing}`,!unread.length);
+        return freeze({entries:lastEntries});
+      }catch(error){lastEntries=freeze([]);render();setHistoryStatus(userMessage(error,'Version History could not be read safely.'),false);input.diagnostics.capture('backup.version-history',error,'warn');return freeze({entries:lastEntries,error});}
       finally{if(activeController===controller)setOperationBusy(false);}
     }
-    async function openSource(sourceId,note=null){
-      const source=sourceDescriptor(sourceId);if(!source)return false;
+    // Version History for every location. While something runs, it reopens on
+    // that work.
+    async function open(){
       const {dialog}=elements();if(!dialog)return false;
-      if(busy){if(activeSourceId!==source.id)return false;setDialogSource(source);renderOperationPresentation();if(!dialog.open)dialog.showModal();return true;}
-      noteTarget=note;
+      if(busy){setDialogMode();renderOperationPresentation();if(!dialog.open)dialog.showModal();return true;}
+      noteTarget=null;const sources=connectedSources();activeSourceId=sources[0]?.id||'';activeSourceLabel=sources[0]?.label||'';
       // Restoring one note leaves today's session as it is, so it stays
-      // available while a study session is active.
-      if(!noteTarget&&input.session.hasBlocking()){activeSourceId=source.id;activeSourceLabel=source.label;setDialogSource(source);lastEntries=freeze([]);render();clearHistoryProgress();setHistoryStatus('Suspend or reset today’s active session before recovering a backup.',false);if(!dialog.open)dialog.showModal();return false;}
-      activeSourceId=source.id;activeSourceLabel=source.label;setDialogSource(source);lastEntries=freeze([]);render();clearHistoryProgress();setHistoryStatus('Loading backups…');if(!dialog.open)dialog.showModal();void collectSource(source.id,{interactive:true});return true;
+      // available while a study session is active; the whole library waits.
+      if(input.session.hasBlocking()){setDialogMode();lastEntries=freeze([]);render();clearHistoryProgress();setHistoryStatus('Suspend or reset today’s active session before recovering a backup.',false);if(!dialog.open)dialog.showModal();return false;}
+      setDialogMode();lastEntries=freeze([]);render();clearHistoryProgress();setHistoryStatus('Loading versions…');if(!dialog.open)dialog.showModal();void collectAll({interactive:true});return true;
     }
+    // This device's own location (the Device Folder) first, then the shared
+    // one (Drive), so a version both hold is read locally.
+    function connectedSources(){return input.providers.list().filter(item=>item.connected===true).sort((a,b)=>Number(a.shared===true)-Number(b.shared===true)).map(item=>sourceDescriptor(item.id)).filter(Boolean);}
     // Earlier versions of one note come from every connected backup location
     // together: one entry per distinct text, newest first, never the text the
-    // note has now.
-    function connectedSources(){return input.providers.list().filter(item=>item.connected===true).map(item=>sourceDescriptor(item.id)).filter(Boolean);}
+    // note has now. A version the Device Folder already read is not read again
+    // from Drive.
     async function collectNoteVersions({interactive=true}={}){
       const sources=connectedSources(),note=noteTarget;if(!note||!sources.length||busy)return freeze({entries:lastEntries});
       const controller=new AbortController();activeSourceId=sources[0].id;activeSourceLabel=sources[0].label;setOperationBusy(true,controller);lastEntries=freeze([]);render();setHistoryStatus('Looking for earlier versions in your backups…');
       try{
-        const found=[],failed=[];
+        const found=[],failed=[];let skip=null;
         for(const source of sources){
-          const result=await input.providers.noteVersions(source.id,note.id,freeze({interactive,signal:controller.signal,presentation:presentationScope}));
+          const result=await input.providers.noteVersions(source.id,note.id,freeze({interactive,signal:controller.signal,presentation:presentationScope,...(skip?{skip}:{})}));
           if(result&&result.cancelled){setHistoryStatus('Cancelled.',true,'cancelled');return freeze({entries:lastEntries});}
-          if(result&&result.available)found.push(...result.entries);else failed.push(source.label);
+          if(result&&result.available){found.push(...result.entries);if(result.covered)skip=freeze({checkpointIds:freeze([...(skip?.checkpointIds||[]),...(result.covered.checkpointIds||[])]),contents:freeze([...(skip?.contents||[]),...(result.covered.contents||[])])});}
+          else failed.push(source.label);
         }
         const seen=new Set([note.text]),entries=[];
         for(const entry of found.sort((a,b)=>Date.parse(b.exportedAt)-Date.parse(a.exportedAt)||String(b.checkpointId).localeCompare(String(a.checkpointId)))){
@@ -307,7 +343,7 @@ registry.define('backup-recovery-host',1,()=>{
       const sources=connectedSources();if(!sources.length)return freeze({opened:false,reason:'no-source'});
       const {dialog}=elements();if(!dialog)return freeze({opened:false,reason:'unavailable'});
       noteTarget=freeze({id,label,text:String(target.text??''),onRestored:typeof target.onRestored==='function'?target.onRestored:()=>{}});
-      activeSourceId=sources[0].id;activeSourceLabel=sources[0].label;setDialogSource(sources[0]);lastEntries=freeze([]);render();clearHistoryProgress();
+      activeSourceId=sources[0].id;activeSourceLabel=sources[0].label;setDialogMode();lastEntries=freeze([]);render();clearHistoryProgress();
       if(!dialog.open)dialog.showModal();void collectNoteVersions({interactive:true});
       return freeze({opened:true});
     }
@@ -316,12 +352,14 @@ registry.define('backup-recovery-host',1,()=>{
     function selectedEntry(sourceId,checkpointId){return lastEntries.find(entry=>entry?.location?.sourceId===sourceId&&entry.location.checkpointId===checkpointId)||null;}
     async function recover(event){
       if(busy)return false;const button=eventButton(event,'[data-action="recover-managed-version"][data-version-history-source][data-version-history-checkpoint],[data-action="compare-managed-note"][data-version-history-source][data-version-history-checkpoint]');if(!button||(button.dataset.action==='compare-managed-note')!==!!noteTarget)return false;
-      const sourceId=String(button.dataset.versionHistorySource||''),checkpointId=String(button.dataset.versionHistoryCheckpoint||''),entry=selectedEntry(sourceId,checkpointId),location=entry&&entry.location;if(!location)return false;
-      const note=noteTarget;
+      const sourceId=String(button.dataset.versionHistorySource||''),checkpointId=String(button.dataset.versionHistoryCheckpoint||''),entry=selectedEntry(sourceId,checkpointId),location=entry&&entry.location,source=sourceDescriptor(sourceId);if(!location||!source)return false;
+      // The version is read from the location the list chose for it.
+      activeSourceId=source.id;activeSourceLabel=source.label;
+      const note=noteTarget,from=fromDevice(entry,lastEntries),reach=typeof presentation.reach==='function'?presentation.reach():'';
       const choice=note?'combine':await input.interactions.choose({
-        title:'Restore or combine checkpoint',
-        message:`Verified backup checkpoint from ${location.sourceLabel}, saved ${dateLabel(location.exportedAt)}.`,
-        details:['Device-local settings stay unchanged.','A verified safety backup protects the current state before recovery.'],
+        title:'Use this version',
+        message:`Saved ${dateLabel(location.exportedAt)}${from?`, ${from}`:''}.`,
+        details:['A safety version is kept first, so you can go back.','Settings that belong to this device stay as they are.',...(reach?[reach]:[])],
         cancelLabel:'Keep current',
         choices:[presentation.restoreChoices.missing,presentation.restoreChoices.combine,presentation.restoreChoices.replace]
       });
@@ -345,12 +383,13 @@ registry.define('backup-recovery-host',1,()=>{
       if(busy)return false;const button=eventButton(event,'[data-action="remove-managed-safety"][data-version-history-source][data-version-history-checkpoint]');if(!button)return false;
       const sourceId=String(button.dataset.versionHistorySource||''),checkpointId=String(button.dataset.versionHistoryCheckpoint||''),entry=selectedEntry(sourceId,checkpointId),location=entry&&entry.location;
       if(!location||location.tier!=='before-restore')return false;
+      activeSourceId=location.sourceId;activeSourceLabel=location.sourceLabel;
       const choice=await input.interactions.choose({title:'Remove safety backup?',message:`Remove the temporary Before restore safety backup from ${location.sourceLabel}?`,details:['This does not change your current Study Director data.','After removal, this safety backup can no longer be used to undo that recovery.'],cancelLabel:'Keep safety backup',choices:[{value:'remove',label:'Remove safety backup',kind:'danger',description:'Delete this temporary safety backup from this backup location.'}]});
       if(choice!=='remove')return false;setOperationBusy(true,null,'remove-safety');setHistoryStatus(`Removing safety backup from ${location.sourceLabel}…`);
       try{
         const result=await input.providers.removeProtectedRepositoryProvider(sourceId,checkpointId);
         if(!result||result.removed!==true){setHistoryStatus(userMessage(result&&result.error,'The safety backup could not be removed safely.'),false);return false;}
-        if(Array.isArray(result.entries)){lastEntries=freeze([...result.entries].sort((a,b)=>Date.parse(b?.exportedAt||b?.location?.exportedAt||0)-Date.parse(a?.exportedAt||a?.location?.exportedAt||0)));render();}
+        lastEntries=freeze(lastEntries.filter(item=>!(item.location.sourceId===sourceId&&item.location.checkpointId===location.checkpointId)));render();
         setHistoryStatus(result.warning?'Safety backup removed. Unused backup storage will be cleaned up later.':'Safety backup removed.');return true;
       }catch(error){setHistoryStatus(userMessage(error,'The safety backup could not be removed safely.'),false);input.diagnostics.capture('backup.version-history-remove-safety',error,'warn');return false;}
       finally{setOperationBusy(false);}
@@ -358,7 +397,7 @@ registry.define('backup-recovery-host',1,()=>{
     return freeze({
       format:'study-director.backup-recovery-host',contractVersion:1,
       managedRecovery:spec=>coordinator.execute(spec),
-      history:freeze({subscribePresentation,openSource:sourceId=>openSource(sourceId),openNote,close,cancel:cancelActive,refresh:()=>noteTarget?collectNoteVersions({interactive:true}):activeSourceId?collectSource(activeSourceId,{interactive:true}):false,recover,removeSafety,status:()=>freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})}),
+      history:freeze({subscribePresentation,open,openNote,close,cancel:cancelActive,refresh:()=>noteTarget?collectNoteVersions({interactive:true}):collectAll({interactive:true}),recover,removeSafety,status:()=>freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})}),
       status:()=>freeze({managedRecovery:coordinator.status(),history:freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})})
     });
   }

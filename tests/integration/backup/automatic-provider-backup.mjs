@@ -8,8 +8,10 @@ import {createFakeClock} from '../../helpers/fake-clock.mjs';
 // sign-in ends, catch-up on the next sign-in, and one quiet expiry notice
 // only for people who back up to Drive.
 const freeze=Object.freeze,noop=()=>{},MINUTE=60*1000;
-function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE}={}){
-  const clock=createFakeClock('2026-10-06T08:00:00.000Z'),emitted=[],publishedAt=[];
+// both: a Device Folder too, with Drive as the shared location, as on a
+// computer that uses both.
+function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false}={}){
+  const clock=createFakeClock('2026-10-06T08:00:00.000Z'),emitted=[],publishedAt=[],publishedBy=[],coveredBy=new Map();
   let current=new clock.Date().toISOString(),authorized=signedIn,expiresAt=clock.now()+expiresInMs,listener=null,publicationHook=noop,durable=null;
   const context={Object,Symbol,TypeError,Error,Date:clock.Date,AbortController,Blob,Promise,Map,Set,TextEncoder,Uint8Array,console,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout};context.globalThis=context;vm.createContext(context);
   for(const name of ['internal','operation-lifecycle','repository-policy','repository-background','backup-provider','backup-recovery-host','notice-coordinator','backup-presentation'])vm.runInContext(fs.readFileSync(`source/core/${name}.js`,'utf8'),context,{filename:`source/core/${name}.js`});
@@ -22,22 +24,24 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE}={}){
   const pipeline=freeze({noteObject:unexpected,readNote:unexpected,createPublication:unexpected,publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,sharedBase:async()=>null,establishBase:unexpected,spine:()=>null,verifyObject:unexpected,inspectCommit:unexpected,
     publish:async(_history,options,executor)=>{
       assert.equal(options.interactive,false,'automatic backups never prompt');
-      const captured=current;publishedAt.push(clock.now());await publicationHook(options);
+      const captured=current;publishedAt.push(clock.now());publishedBy.push(freeze({by:both&&options.shared!==true?'device-folder':'google-drive',at:clock.now()}));await publicationHook(options);
       await executor.onCommitted(freeze({sourceRevision:captured,exportedAt:captured}));
       return {checkpointId:'cp_'+'a'.repeat(32),sourceRevision:captured,publication:{name:'cp_'+'a'.repeat(32)},manifest:{objects:[]}};
     },
-    scrub:async()=>({status:'completed',complete:true}),cleanup:async()=>({gcPending:false}),retention:freeze({}),validatePolicy:noop,classifyState:()=>({committed:[],uncommitted:[],orphanCommits:[],invalidPairs:[]}),activeProtected:()=>null,selectRetention:()=>({retained:[],remove:[]}),projectHistory:()=>[],markCompleted:({copy})=>{if(copy)covered=copy.sourceRevision;}});
+    scrub:async()=>({status:'completed',complete:true}),cleanup:async()=>({gcPending:false}),retention:freeze({}),validatePolicy:noop,classifyState:()=>({committed:[],uncommitted:[],orphanCommits:[],invalidPairs:[]}),activeProtected:()=>null,selectRetention:()=>({retained:[],remove:[]}),projectHistory:()=>[],markCompleted:({copy})=>{if(copy)coveredBy.set(copy.source,copy.sourceRevision);}});
   const runtime=registry.require('backup-provider',1,freeze({repositoryPolicy:policy})).createRuntime(freeze({background:freeze({format:background.format,contractVersion:1,createCoordinator:background.createCoordinator,maintenance:background.maintenance,maintenanceActionable:background.maintenanceActionable}),repository:pipeline,ports:freeze({
     configuration:freeze({appVersion:'qa'}),controller:freeze({beginImport:noop,cancelImport:noop,finishImport:noop}),exports:freeze({followProtection:async()=>false,run:unexpected}),domain:freeze({clampText:value=>String(value||'')}),view:freeze({presentation}),
     ownership:freeze({canRunBackground:()=>true,requireMutationControl:noop}),environment:freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}),diagnostics:freeze({capture:noop,start:()=>'trace',mark:noop,finish:noop,fail:noop})
   })}));
   const connected=()=>authorized&&clock.now()<expiresAt;
-  runtime.register(freeze({id:'google-drive',label:'Google Drive',connected,backgroundAvailable:connected,connectionExpiresAt:()=>connected()?expiresAt:0,subscribeConnection:fn=>{listener=fn;},
+  if(both)runtime.register(freeze({id:'device-folder',label:'Device Folder',connected:()=>true,backgroundAvailable:()=>true,
+    repository:freeze({scope:async()=>'folder-scope',list:async()=>({items:[],overflow:false,ignored:0}),upload:unexpected,download:unexpected,delete:unexpected})}));
+  runtime.register(freeze({id:'google-drive',label:'Google Drive',...(both?{shared:true}:{}),connected,backgroundAvailable:connected,connectionExpiresAt:()=>connected()?expiresAt:0,subscribeConnection:fn=>{listener=fn;},
     repository:freeze({scope:async()=>'repo-scope',list:async()=>({items:[],overflow:false,ignored:0}),upload:unexpected,download:unexpected,delete:unexpected})}));
   runtime.configurePendingBackupRetry(freeze(pending));
-  runtime.configureAutomaticBackup(freeze({covered:()=>covered,current:()=>current}));
+  runtime.configureAutomaticBackup(freeze({covered:id=>coveredBy.has(id)?coveredBy.get(id):covered,current:()=>current}));
   return {
-    clock,runtime,policy:policy.protocol,publishedAt,onPublication:fn=>{publicationHook=fn;},
+    clock,runtime,policy:policy.protocol,publishedAt,publishedBy,onPublication:fn=>{publicationHook=fn;},
     change:(urgent=false)=>{current=new clock.Date(clock.now()).toISOString();runtime.noteChange({urgent});},
     expire:()=>{expiresAt=clock.now();listener?.();},
     signIn:(lifetime=59*MINUTE)=>{authorized=true;expiresAt=clock.now()+lifetime;listener?.();},
@@ -103,5 +107,20 @@ const cases=[];
   await t.runtime.flushAutomatic('app-update');await tick(t,5000);assert.equal(t.publishedAt.length,1,'nothing waiting, nothing backed up');
   assert.equal(t.runtime.automaticWaiting(),false);t.change();assert.equal(t.runtime.automaticWaiting(),true);
   cases.push('backs up at once when the app goes to the background or updates');
+}
+{
+  // A computer with both locations: Drive copies the Device Folder's version,
+  // so it waits for the folder first, and still goes at once when the app goes
+  // to the background, not at its usual 20-minute slot.
+  const t=fixture({covered:'2026-10-06T08:00:00.000Z',both:true});await tick(t,1000);t.publishedBy.length=0;
+  t.change();await tick(t,MINUTE);assert.equal(t.publishedBy.length,0);
+  const start=t.clock.now();await t.runtime.flushAutomatic('app-hidden');await tick(t,30*1000);
+  const folder=t.publishedBy.find(row=>row.by==='device-folder'),drive=t.publishedBy.find(row=>row.by==='google-drive');
+  assert.ok(folder&&folder.at-start<=5000,'the Device Folder backs up at once');
+  assert.ok(drive,'Drive backs up too, without waiting for its usual slot');assert.ok(drive.at>=folder.at&&drive.at-start<=30*1000,'after the Device Folder, within seconds');
+  // The next round of changes waits for the Device Folder again.
+  t.publishedBy.length=0;t.change(true);await tick(t,t.policy.automaticUrgentMs+30*1000);
+  assert.deepEqual(t.publishedBy.map(row=>row.by),['device-folder','google-drive'],'every round, the Device Folder goes first');
+  cases.push('both locations: Drive follows the Device Folder at once');
 }
 console.log(JSON.stringify({status:'PASS',suite:'automatic-provider-backup',productionRuntime:true,cases},null,2));

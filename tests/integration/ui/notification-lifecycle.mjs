@@ -112,8 +112,24 @@ class Element {
   const {notices:n}=coordinator();for(let i=0;i<200;i++)n.emit({source:'maintenance',id:`quiet-${i}`,foreground:false,lifecycle:'succeeded',message:'Done'});
   assert.ok(n.eventStatus().events.length<=64,'quiet background results also have bounded retention');n.clear();
   const html=fs.readFileSync('source/app.html','utf8'),start=html.indexOf('function renderDeviceBackup(state){'),end=html.indexOf('\nfunction markStorageHealthOk',start),status=new Element(),note=new Element(),recover=new Element(),cleared=[];
-  new Function('document','storageHealthTime','schedulePwaUpdateEvaluation','NoticeCoordinator','BackupPresentation',html.slice(start,end)+`;renderDeviceBackup({busy:true,foregroundKind:'restore-version',cancellable:false,connected:true,hasNote:true});`)({getElementById:id=>({'device-backup-status':status,'device-backup-note':note,'recover-device-backup':recover}[id]||null)},()=>'',()=>{}, {resolveEvent:(...args)=>cleared.push(args)},registry.require('backup-presentation',1).createPresentation(freeze({notifications:n})));
-  assert.equal(status.textContent,'Restoring…');assert.equal(recover.disabled,false,'a cancelling recovery remains reopenable');assert.equal(note.hidden,true);assert.equal(cleared.length,0,'Device state cannot erase the coordinator summary during cancellation');
+  let actionsDrawn=0;
+  new Function('document','storageHealthTime','schedulePwaUpdateEvaluation','NoticeCoordinator','BackupPresentation','renderBackupActions',html.slice(start,end)+`;renderDeviceBackup({busy:true,foregroundKind:'restore-version',cancellable:false,connected:true,hasNote:true});`)({getElementById:id=>({'device-backup-status':status,'device-backup-note':note}[id]||null)},()=>'',()=>{}, {resolveEvent:(...args)=>cleared.push(args)},registry.require('backup-presentation',1).createPresentation(freeze({notifications:n})),()=>{actionsDrawn+=1;});
+  assert.equal(status.textContent,'Restoring…');assert.equal(note.hidden,true);assert.equal(cleared.length,0,'Device state cannot erase the coordinator summary during cancellation');assert.equal(actionsDrawn,1,'the shared actions follow the Device Folder row');
+}
+{
+  // One Back up now and one Version History for every location: shown while
+  // any location is connected; a running restore can still be reopened.
+  const html=fs.readFileSync('source/app.html','utf8'),start=html.indexOf('function renderBackupActions(){'),end=html.indexOf('\n// The Device Folder backs up first',start);
+  const draw=states=>{
+    const nodes=new Map(['backup-shared-actions','backup-now','open-version-history'].map(id=>[id,new Element()]));
+    new Function('document','BackupProviderRuntime',html.slice(start,end)+';renderBackupActions();')({getElementById:id=>nodes.get(id)||null},{locationStatus:id=>states[id]||null});
+    return {group:nodes.get('backup-shared-actions').hidden,backupNow:nodes.get('backup-now').disabled,versions:nodes.get('open-version-history').disabled};
+  };
+  const off={connected:false},on={connected:true,busy:false};
+  assert.deepEqual(draw({'device-folder':off,'google-drive':off}).group,true,'nothing to back up or restore while no location is connected');
+  assert.deepEqual(draw({'device-folder':off,'google-drive':on}),{group:false,backupNow:false,versions:false},'Drive alone shows both');
+  assert.deepEqual(draw({'device-folder':{...on,busy:true,foregroundKind:'restore-version'},'google-drive':on}),{group:false,backupNow:true,versions:false},'a running restore can be reopened, and nothing else starts');
+  assert.deepEqual(draw({'device-folder':{...on,busy:true,foregroundKind:'backup'},'google-drive':on}),{group:false,backupNow:true,versions:true});
 }
 {
   // The portable-file row is drawn by the app too: Export and Cancel follow the
@@ -136,20 +152,20 @@ class Element {
   // Google Drive's row is drawn by the app from engine status, with the same
   // parts as the Device Folder row.
   const html=fs.readFileSync('source/app.html','utf8'),start=html.indexOf('function renderDriveBackup(){'),end=html.indexOf('\nfunction renderDeviceBackup(',start);
-  const ids=['backup-provider-row-status-google-drive','connect-drive-backup','drive-backup-now','cancel-drive-backup','recover-drive-backup','drive-backup-settings','drive-backup-settings-panel','drive-backup-settings-last','disconnect-drive-backup'];
+  const ids=['backup-provider-row-status-google-drive','connect-drive-backup','cancel-drive-backup','drive-backup-settings','drive-backup-settings-panel','drive-backup-settings-last','disconnect-drive-backup'];
   const draw=(state,verifiedAt='')=>{
     const nodes=new Map(ids.map(id=>[id,new Element()]));nodes.get('drive-backup-settings-panel').hidden=false;
     new Function('document','BackupProviderRuntime','BackupPresentation','verifiedRecoveryState','storageHealthTime','renderProfile','FirstStart',html.slice(start,end)+';renderDriveBackup();')(
       {getElementById:id=>nodes.get(id)||null},{locationStatus:()=>state},{locationLabel:(_id,value)=>value.connected?'On':value.wasConnected?'Signed out':'Off'},
       {providers:verifiedAt?{'google-drive':{at:verifiedAt}}:{}},()=>'09:30',()=>{profileDraws++;},{isOpen:()=>false,render(){}});
-    const view=id=>nodes.get(id);return {shown:ids.slice(1,6).filter(id=>!view(id).hidden),view};
+    const view=id=>nodes.get(id);return {shown:ids.slice(1,4).filter(id=>!view(id).hidden),view};
   };
   const base={connected:false,wasConnected:false,engineBusy:false,busy:false,backingUp:false,cancellable:false,foregroundKind:''};
   let profileDraws=0;
-  let row=draw(base);assert.equal(profileDraws,1,'the profile panel follows the Drive row');assert.deepEqual(row.shown,['connect-drive-backup','recover-drive-backup']);assert.equal(row.view('connect-drive-backup').textContent,'Connect');assert.equal(row.view('recover-drive-backup').textContent,'Versions');
+  let row=draw(base);assert.equal(profileDraws,1,'the profile panel follows the Drive row');assert.deepEqual(row.shown,['connect-drive-backup']);assert.equal(row.view('connect-drive-backup').textContent,'Connect');
   row=draw({...base,wasConnected:true});assert.deepEqual(row.shown,['connect-drive-backup'],'a lapsed sign-in leaves one Reconnect button');assert.equal(row.view('connect-drive-backup').textContent,'Reconnect');assert.equal(row.view('drive-backup-settings-panel').hidden,true,'settings close when Drive is not connected');
-  row=draw({...base,connected:true,wasConnected:true},'2026-10-10T09:30:00.000Z');assert.deepEqual(row.shown,['drive-backup-now','recover-drive-backup','drive-backup-settings']);assert.equal(row.view('recover-drive-backup').textContent,'Versions');assert.equal(row.view('drive-backup-settings-last').textContent,'Last verified 09:30');
-  row=draw({...base,connected:true,wasConnected:true,engineBusy:true,busy:true,cancellable:true,foregroundKind:'backup'});assert.deepEqual(row.shown,['cancel-drive-backup','recover-drive-backup','drive-backup-settings'],'a running backup offers Cancel in place of Back up now');assert.equal(row.view('disconnect-drive-backup').disabled,true);
+  row=draw({...base,connected:true,wasConnected:true},'2026-10-10T09:30:00.000Z');assert.deepEqual(row.shown,['drive-backup-settings'],'Back up now and Version History are shared by both locations');assert.equal(row.view('drive-backup-settings-last').textContent,'Last verified 09:30');
+  row=draw({...base,connected:true,wasConnected:true,engineBusy:true,busy:true,cancellable:true,foregroundKind:'backup'});assert.deepEqual(row.shown,['cancel-drive-backup','drive-backup-settings'],'a running backup offers Cancel');assert.equal(row.view('disconnect-drive-backup').disabled,true);
 }
 {
   const {notices:n,time}=coordinator(),actions=[];
@@ -167,7 +183,7 @@ class Element {
   presentation.condition('google-drive','permission','');presentation.condition('google-drive','permission','Reconnect to resume backup.');assert.equal(n.eventStatus().toasts.length,1,'resolved permission failures can recur');presentation.condition('google-drive','permission','');
   const recovery=presentation.begin('device-folder','restore-version',{label:'Device Folder'});recovery.finish({message:presentation.outcome('restore-version','Device Folder',{status:'pending'})});
   const automatic=presentation.begin('device-folder','backup',{id:'external-backup',label:'Device Folder',foreground:false});automatic.finish({message:'External backup verified.'});
-  assert.match(presentation.read('device-folder').message,/restored locally.*pending/);assert.equal(n.eventStatus().toasts.length,1,'automatic success does not add a confirmation');
+  assert.match(presentation.read('device-folder').message,/restored locally.*backs it up next/);assert.equal(n.eventStatus().toasts.length,1,'automatic success does not add a confirmation');
   const cancel=presentation.begin('file','import',{label:'File backup'});cancel.finish({message:'Cancelled safely.',lifecycle:'cancelled'});assert.equal(cancel.update({message:'late'}),false);assert.equal(n.eventStatus().toasts.filter(row=>row.source==='file').length,0);
   presentation.reset('google-drive');assert.equal(presentation.read('google-drive'),null);assert.equal(presentation.read('google-drive','backup-verified'),null,'disconnect clears stale source summaries');
   n.clear();assert.equal(time.count(),0);
@@ -219,7 +235,11 @@ class Element {
   assert.equal(presentation.summary({...external.read(),lifecycle:'cancelled',severity:'info',message:'Cancelled.'}),'Cancelled.');
   assert.equal(presentation.summary({...external.read(),lifecycle:'failed',severity:'error',message:'Failed.'}),'Failed.');
   const restored=presentation.begin('device-folder','restore-version');restored.finish({message:presentation.outcome('restore-version','Device Folder',{status:'pending'})});
-  assert.match(presentation.summary(restored.read()),/^✓ Backup restored locally and verified\..*pending/,'success mark refers to completed local recovery, not pending external convergence');
+  assert.match(presentation.summary(restored.read()),/^✓ Backup restored locally and verified\. Device Folder backs it up next\.$/u,'success mark refers to completed local recovery, not pending external convergence');
+  // Drive carries a restore to the other devices; other locations say whether they hold it.
+  assert.equal(presentation.outcome('restore-version','Google Drive',{source:{status:'pending',shared:true},others:[{label:'Device Folder',status:'pending'}]}),'Backup restored locally and verified. Device Folder backs it up next. Your other devices get it at their next sync.');
+  assert.equal(presentation.outcome('restore-version','Device Folder',{source:{status:'completed'},others:[{label:'Google Drive',status:'failed',shared:true}]}),'Backup restored locally and verified. Device Folder already holds it. Google Drive backup needs attention.');
+  assert.equal(presentation.reach(),'','no reach line without a syncing location');
   n.clear();
 }
 // A condition that only a decision can clear stays on screen until it is resolved.

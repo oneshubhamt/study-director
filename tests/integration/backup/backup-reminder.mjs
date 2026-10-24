@@ -50,9 +50,12 @@ for(const [label,options] of [['Device Folder',{device:true}],['Drive while sign
     const recent=await reminder({file:copy(iso(now-20*DAY)),providers:{[id]:copy(iso(now-3*DAY))},lastLocalSaveAt:iso(now-1000)});
     assert.equal(recent.message,'',`a recent ${id} backup must count`);
     const old=await reminder({providers:{[id]:copy(iso(now-8*DAY))},lastLocalSaveAt:iso(now-1000),savedDays:9});
-    assert.match(old.message,/over a week old/u);assert.equal(old.notified.length,1);
+    assert.equal(old.notified.length,1);
+    // Someone who backs up to Drive is asked to sign in again.
+    if(id==='google-drive'){assert.match(old.message,/have not reached Google Drive for over a week\. Sign in again in Library → Data\./u);assert.equal(old.notified[0][0],'Sign in to Google Drive');}
+    else{assert.match(old.message,/over a week old\. Open Library → Data\./u);assert.equal(old.notified[0][0],'Back up Study Director');}
   }
-  cases.push('a Drive or Device Folder backup counts: reminded only a week after it');
+  cases.push('a Drive or Device Folder backup counts: reminded only a week after it; Drive users are asked to sign in');
 }
 {
   // A download cannot be read back, but the person did back up, and it holds

@@ -270,7 +270,7 @@
       records:[
         "The daily records created by Save Today.",
         "Task evidence, reflections, quality and unfinished notes.",
-        "External backup copies only when you back up manually or configure automatic backup."
+        "Backup copies only when you back up or turn on automatic backup."
       ],
       referenceTabs:[
         {id:"surfaces",label:"Surfaces",heading:"How to read this pane",kind:"pairs",items:[
@@ -285,17 +285,17 @@
         ]},
         {id:"data-tools",label:"Data Tools",heading:"Backup and recovery",kind:"pairs",items:[
           ["Data model","Local-first: each device keeps all its data and works on its own. While a device is signed in to Google Drive, it syncs: it takes in what your other devices changed, then uploads its own changes. Where both sides changed the same thing, the newer shows and the other is kept for you, marked Needs review; edits to different paragraphs of a note are joined for you."],
-          ["Managed checkpoints","Device Folder keeps verified versions in a folder on this device. Google Drive keeps the same versions off-device, shared by your devices: a version made here goes to both locations under the same name."],
-          ["Recover","Choose a verified backup from that location, then Keep current, Add only what’s missing, Combine with current data, or Replace current data."],
+          ["Version History","Your backups keep verified versions: the Device Folder in a folder on this device, Google Drive off this device and shared by your devices. A version made here goes to both under the same name, and Version History lists each version once."],
+          ["Recover","Open Version History and choose a version, then Keep current, Add only what’s missing, Combine with current data, or Replace current data. While Google Drive is connected, your other devices get the result at their next sync."],
           ["Add only what’s missing","Brings back Saved Days and attachments this device doesn’t have and changes nothing you have now. If something differs and needs a choice, nothing is changed and Combine is the way to review it."],
-          ["Replace current data","Makes this device match the selected backup. One question asks whether to keep what this device has that the backup neither has nor deleted (kept by default); notes the backup deleted go to Recently deleted. Device-local settings stay on this device."],
+          ["Replace current data","Makes your data match the selected backup. One question asks whether to keep what this device has that the backup neither has nor deleted (kept by default); notes the backup deleted go to Recently deleted. Device-local settings stay on this device."],
           ["Combine with current data","Adds what’s new. Notes, plans and settings changed on only one side since your last Drive sync are taken without asking; where both sides changed, or Saved Days differ, you choose: notes side by side (one click can settle all remaining), the rest in one dialog with this device preselected. Nothing is deleted unless it was deleted on purpose, and deleted notes go to Recently deleted. An optional checkbox can also download an extra standalone safety copy; automatic rollback protection remains on."],
           ["Export backup","Creates one complete standalone .sdbackup file for manual transfer or safekeeping. You choose where it is saved; Study Director then reads the saved file back to verify it (browsers without a save dialog download it instead). It is separate from Device Folder and Google Drive version history."],
-          ["Import backup","Verifies a standalone backup, then lets you Add only what’s missing, Combine with current data, or Replace current data."],
+          ["Restore from file","Verifies a standalone backup, then lets you Add only what’s missing, Combine with current data, or Replace current data."],
           ["Delete Day","Removes a saved day deliberately; back up first if the record may matter later."],
         ]},
       ],
-      saved:["Library contains saved Study Days and dated Diary reflections.","Managed backup history and standalone backup files are separate recovery options.","Use only trusted Study Director backups when replacing or combining data.","Delete removes a saved day."],
+      saved:["Library contains saved Study Days and dated Diary reflections.","Version History and standalone backup files are separate ways to recover.","Use only trusted Study Director backups when replacing or combining data.","Delete removes a saved day."],
       flow:["Study Days / Diary","Open Record","Inspect / Edit Reflection","Insights"],
       remember:"Library is your durable record collection. Keep backups if the data matters."
     }),
