@@ -174,18 +174,17 @@ assert.equal(manifest.protectedCheckpointManifest.version,3);assert.equal(manife
   const readOlder=async entry=>files.get(entry.objectId)||null,noteKey=members.find(member=>member.kind==='areaNote').key;
   assert.equal(runtime.repository.noteObject(manifest,legacyNoteKey('Ethics')),null,'a current manifest keys notes by id, never by name');
   assert.ok(runtime.repository.noteObject(manifest,noteKey),'a current manifest offers an earlier version of one note');
-  for(const version of [1,2,3,4,5,6]){
+  for(const version of [1,2,3,4,5]){
     // Before version 5 the counts also named the checkpoint manifest and personal data.
     const olderCounts=freeze(version<5?{...counts,checkpointManifest:1,personalData:members.some(item=>item.kind==='personalData')?1:0}:counts);
     const older=freeze({...manifest,version,counts:olderCounts,protectedCheckpointManifest:protectedV2,objects:freeze(version<4?unpackedLayout:packedLayout)});
     const candidate=await runtime.repository.inspect(older,readOlder,{interactive:false,committed:true});
     assert.ok(candidate,`a version ${version} checkpoint can still be inspected for restore`);await candidate.release?.();
-    if(version===6)assert.ok(runtime.repository.noteObject(older,noteKey),'a version 6 checkpoint keys notes by id, so it offers an earlier version of one note');
-    else assert.equal(runtime.repository.noteObject(older,legacyNoteKey('Ethics')),null,`a version ${version} checkpoint names notes by title, so it offers no earlier version of a note`);
+    assert.equal(runtime.repository.noteObject(older,legacyNoteKey('Ethics')),null,`a version ${version} checkpoint names notes by title, so it offers no earlier version of a note`);
   }
-  // A version 6 manifest file keeps the logical-state fingerprint it was
+  // A version 5 manifest file keeps the logical-state fingerprint it was
   // written with: the same fields, in the same order, under the old names.
-  const v6Identity=value=>{
+  const olderIdentity=value=>{
     const rows=[];for(const entry of value.objects){if(entry.kind==='structuredPack')rows.push(...entry.members.map(({kind,key,fingerprint,sourceBytes})=>({kind,key,fingerprint,sourceBytes})));else rows.push({kind:entry.kind,key:entry.key,fingerprint:entry.fingerprint,sourceBytes:entry.sourceBytes});}
     rows.sort((a,b)=>byKindKey(a,b)||a.fingerprint.localeCompare(b.fingerprint)||a.sourceBytes-b.sourceBytes);
     const assets=value.assets.map(entry=>entry.missing===true?{assetId:entry.assetId,missing:true}:{assetId:entry.assetId,mimeType:entry.mimeType,size:entry.size,checksum:entry.checksum,name:entry.name,library:entry.library===true}).sort((a,b)=>a.assetId.localeCompare(b.assetId));
@@ -193,18 +192,14 @@ assert.equal(manifest.protectedCheckpointManifest.version,3);assert.equal(manife
     return {format:'study-director.managed-backup-logical-state',version:1,counts:value.counts,objects:rows,assets,deletions:{savedDays:deletions(p.savedDayDeletions,'date'),areaNotes:deletions(p.areaNoteDeletions,'key'),attachments:deletions(p.attachmentDeletions,'assetId')}};
   };
   const publishedV8=JSON.parse(await plainText(publishedManifestBlob,false));assert.equal(publishedV8.version,8);
-  const v6Base={...publishedV8,version:6,counts,protectedCheckpointManifest:protectedV2,objects:packedLayout},v6Fingerprint=await sha256(JSON.stringify(v6Identity(v6Base)));
-  assert.notEqual(v6Fingerprint,publishedV8.logicalFingerprint,'the old names give a different fingerprint');
-  const v6Manifest=await runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...v6Base,logicalFingerprint:v6Fingerprint})])),{interactive:false});
-  assert.equal(v6Manifest.version,6);assert.equal(v6Manifest.logicalFingerprint,v6Fingerprint,'a version 6 manifest verifies against the fingerprint it was written with');
-  assert.equal(v6Manifest.counts.note,manifest.counts.note,'its note count reads under the current name');assert.deepEqual(v6Manifest.protectedCheckpointManifest.noteDeletions,current.noteDeletions);
-  await assert.rejects(runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...v6Base,logicalFingerprint:publishedV8.logicalFingerprint})])),{interactive:false}),/logical-state fingerprint failed verification/u,'a version 6 manifest is not checked under the new names');
-  // A version 7 manifest was written before versions kept for review: current
-  // names, no count for them, and the identity it was written with.
-  const v7Identity=value=>{const identity=v6Identity({...value,protectedCheckpointManifest:{...value.protectedCheckpointManifest,areaNoteDeletions:value.protectedCheckpointManifest.noteDeletions}});return {...identity,deletions:{savedDays:identity.deletions.savedDays,notes:identity.deletions.areaNotes,attachments:identity.deletions.attachments}};};
-  const v7Base={...publishedV8,version:7,counts:Object.fromEntries(Object.entries(publishedV8.counts).filter(([type])=>type!=='pendingReview'))},v7Fingerprint=await sha256(JSON.stringify(v7Identity(v7Base)));
-  const v7Manifest=await runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...v7Base,logicalFingerprint:v7Fingerprint})])),{interactive:false});
-  assert.equal(v7Manifest.version,7);assert.equal(v7Manifest.logicalFingerprint,v7Fingerprint,'a version 7 manifest verifies against the fingerprint it was written with');assert.equal(Number(v7Manifest.counts.pendingReview)||0,0,'it holds no versions kept for review');
+  const olderBase={...publishedV8,version:5,counts,protectedCheckpointManifest:protectedV2,objects:packedLayout},olderFingerprint=await sha256(JSON.stringify(olderIdentity(olderBase)));
+  assert.notEqual(olderFingerprint,publishedV8.logicalFingerprint,'the old names give a different fingerprint');
+  const olderManifest=await runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...olderBase,logicalFingerprint:olderFingerprint})])),{interactive:false});
+  assert.equal(olderManifest.version,5);assert.equal(olderManifest.logicalFingerprint,olderFingerprint,'a version 5 manifest verifies against the fingerprint it was written with');
+  assert.equal(olderManifest.counts.note,manifest.counts.note,'its note count reads under the current name');assert.deepEqual(olderManifest.protectedCheckpointManifest.noteDeletions,current.noteDeletions);
+  await assert.rejects(runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...olderBase,logicalFingerprint:publishedV8.logicalFingerprint})])),{interactive:false}),/logical-state fingerprint failed verification/u,'a version 5 manifest is not checked under the new names');
+  // Versions 6 and 7 were made only by unreleased builds: refused.
+  for(const version of [6,7])await assert.rejects(runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...olderBase,version,logicalFingerprint:olderFingerprint})])),{interactive:false}),/checkpoint is invalid/u,`a version ${version} manifest is refused`);
 }
 // Simulate another installation receiving this checkpoint rather than the publishing installation's newly established local ancestry.
 reconciliationBase=null;reconciliationBaseNotes=Object.create(null);

@@ -2020,11 +2020,10 @@ async function showBackupPresentation(source,kind){
   for(let node=target.parentElement;node;node=node.parentElement)if(node.tagName==='DETAILS')node.open=true;
   requestAnimationFrame(()=>target.scrollIntoView({block:source==='restore'?'start':'center',behavior:preferredScrollBehavior()}));return true;
 }
-// A restore opens the versions of the backup location this tab is connected
-// to; otherwise Library → Data with every way to restore.
+// A restore opens Version History when a backup location is connected;
+// otherwise Library → Data with every way to restore.
 async function openBackupRestore(){
-  const source=DeviceBackup.status().connected?'device-folder':BackupProviderRuntime.connected('google-drive')?'google-drive':'';
-  return source?showBackupPresentation(source,'history'):showBackupPresentation('restore','status');
+  return showBackupPresentation('restore',DeviceBackup.status().connected||BackupProviderRuntime.connected('google-drive')?'history':'status');
 }
 function backupRestoreChoices(){return DeviceBackup.status().supported?'your Device Folder, Google Drive or a backup file':'Google Drive or a backup file';}
 function renderNotificationSurfaces(state){

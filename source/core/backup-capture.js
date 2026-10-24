@@ -380,7 +380,6 @@ async function establishManagedPreparationBaseline(capture,units){
     return freeze({
       format:'study-director.backup-capture',contractVersion:1,
       logicalFormat:LOGICAL_CHECKPOINT_CAPTURE_FORMAT,logicalVersion:LOGICAL_CHECKPOINT_CAPTURE_VERSION,
-      preparationFormat:MANAGED_PREPARATION_CAPTURE_FORMAT,preparationVersion:MANAGED_PREPARATION_CAPTURE_VERSION,
       requireLogicalCheckpointCapture,verifyAnomalousPhysicalAssetAliases,captureLogicalCheckpoint,assertLogicalCheckpointCurrent,
       beginManagedPreparationCapture,readManagedPreparationUnits,finalizeManagedPreparationCapture,establishManagedPreparationBaseline
     });

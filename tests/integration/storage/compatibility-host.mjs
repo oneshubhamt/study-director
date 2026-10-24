@@ -264,10 +264,12 @@ metadataRows.set('restoreJournalPayload',{key:'restoreJournalPayload',version:1,
 await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/interrupted restore from an older version has an unknown shape/u);
 assert.equal(metadataRows.get('restoreJournalPayload').value,unknownJournal);metadataRows.delete('restoreJournalPayload');
 
-// Version 6 kept fixed device/drive slots; it converts to the location-keyed record.
-metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',version:1,value:{version:6,device:scrubDevice,drive:scrubDrive},updatedAt:'2026-09-20T03:00:00.000Z'});
-await Host.createFacade(malformedInput).migrateLive();
-assert.deepEqual(metadataRows.get('repositoryIntegrityScrub').value,scrub,'version 6 converts to the same location-keyed record');
+// Version 6 was made only by unreleased builds: refused and kept as it is.
+const unreleasedScrub={version:6,device:scrubDevice,drive:scrubDrive};
+metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',version:1,value:unreleasedScrub,updatedAt:'2026-09-20T03:00:00.000Z'});
+await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/backup verification state has an unknown shape and was preserved without modification/u);
+assert.equal(metadataRows.get('repositoryIntegrityScrub').value,unreleasedScrub,'version 6 is preserved untouched');
+metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',version:1,value:scrub,updatedAt:'2026-09-20T03:00:00.000Z'});
 // A record under its old name moves once; a differing copy under the new name stops the move and keeps both.
 const pendingRow=metadataRows.get('repositoryMaintenancePending');
 metadataRows.set('repositoryMaintenancePending.v2',{...pendingRow,key:'repositoryMaintenancePending.v2'});
@@ -280,15 +282,18 @@ await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/differ
 assert.equal(metadataRows.get('repositoryMaintenancePending.v2'),differing);assert.deepEqual(metadataRows.get('repositoryMaintenancePending').value,pendingRow.value,'both copies are kept for the person to resolve');
 metadataRows.delete('repositoryMaintenancePending.v2');
 
-// Version 2 kept the last download apart from the file; the newer of the two becomes the file entry.
-metadataRows.set('verifiedRecoveryBackups',{key:'verifiedRecoveryBackups',version:1,value:{version:2,file:{type:'file',id:'file',label:'Portable backup',verifiedAt:'2026-09-20T08:00:00.000Z',sourceRevision:'2026-09-20T07:59:00.000Z',baselineId:'old',backupFormatVersion:20},download:{startedAt:'2026-09-21T08:00:00.000Z'},providers:{'google-drive':{type:'provider',id:'google-drive',label:'Google Drive',verifiedAt:'2026-09-20T09:00:00.000Z',sourceRevision:'2026-09-20T08:58:00.000Z',baselineId:'old',backupFormatVersion:20}}},updatedAt:'2026-09-21T08:00:00.000Z'});
+// Version 1 entries keep their copies; the format comes from backupFormatVersion.
+metadataRows.set('verifiedRecoveryBackups',{key:'verifiedRecoveryBackups',version:1,value:{version:1,file:{type:'file',id:'file',label:'Portable backup',verifiedAt:'2026-09-20T08:00:00.000Z',sourceRevision:'2026-09-20T07:59:00.000Z',baselineId:'old',backupFormatVersion:20},providers:{'google-drive':{type:'provider',id:'google-drive',label:'Google Drive',verifiedAt:'2026-09-20T09:00:00.000Z',sourceRevision:'2026-09-20T08:58:00.000Z',baselineId:'old',backupFormatVersion:20}}},updatedAt:'2026-09-21T08:00:00.000Z'});
 assert.equal((await Host.createFacade(malformedInput).verifyCanonicalInstallation()).compatibilityRetired,false,'an older last-backup record keeps the compatibility facade in place');
 await Host.createFacade(malformedInput).migrateLive();
-assert.deepEqual(metadataRows.get('verifiedRecoveryBackups').value,{version:3,file:{at:'2026-09-21T08:00:00.000Z',sourceRevision:'2026-09-21T08:00:00.000Z',format:null,verified:false},providers:{'google-drive':{at:'2026-09-20T09:00:00.000Z',sourceRevision:'2026-09-20T08:58:00.000Z',format:20}}});
+assert.deepEqual(metadataRows.get('verifiedRecoveryBackups').value,{version:3,file:{at:'2026-09-20T08:00:00.000Z',sourceRevision:'2026-09-20T07:59:00.000Z',format:20,verified:true},providers:{'google-drive':{at:'2026-09-20T09:00:00.000Z',sourceRevision:'2026-09-20T08:58:00.000Z',format:20}}});
 const convertedRecord=metadataRows.get('verifiedRecoveryBackups');
-metadataRows.set('verifiedRecoveryBackups',{key:'verifiedRecoveryBackups',version:1,value:{version:7},updatedAt:'2026-09-21T08:00:00.000Z'});
-await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/last-backup record has an unknown shape/u);
-assert.deepEqual(metadataRows.get('verifiedRecoveryBackups').value,{version:7},'an unknown shape is preserved untouched');metadataRows.set('verifiedRecoveryBackups',convertedRecord);
+// Version 2 was made only by unreleased builds; it and unknown shapes are refused and kept as they are.
+for(const unknown of [{version:2,file:null,download:{startedAt:'2026-09-21T08:00:00.000Z'},providers:{}},{version:7}]){
+  metadataRows.set('verifiedRecoveryBackups',{key:'verifiedRecoveryBackups',version:1,value:unknown,updatedAt:'2026-09-21T08:00:00.000Z'});
+  await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/last-backup record has an unknown shape/u);
+  assert.deepEqual(metadataRows.get('verifiedRecoveryBackups').value,unknown,`version ${unknown.version} is preserved untouched`);
+}metadataRows.set('verifiedRecoveryBackups',convertedRecord);
 
 const validators=HostMetadata.createAppMetaValidators(freeze({
   keys:freeze({verifiedRecoveryBackups:'a',backupProtection:'b',attachmentIntegrityAudit:'c',deviceFolder:'d',repositoryIntegrityScrub:'e',managedProviderBackupPending:'f',repositoryMaintenancePending:'h',reconciliationBase:'g2',reconciliationBaseNotePrefix:'g3',reconciliationBaseDayPrefix:'g4'}),

@@ -113,10 +113,10 @@ export const COMPATIBILITY_REGISTRY=freeze({
     },
     {
       id:'name-keyed-notes-in-backups',owner:'backup-codec/managed-repository',kind:'import-adapter',
-      source:'portable backups before v21 and backup-location manifests before version 6, which key Notes and their deletion history by note name',
+      source:'released portable backups (v20 and older) and backup-location manifests version 5 and older, which key Notes and their deletion history by note name',
       target:'notes and note deletion history keyed by the permanent id worked out from each name, the same id the live conversion gives that note',
       proof:'a v20 file is read as current apart from its notes; an older manifest converts its notes when the version is restored or combined whole, and offers no earlier version of one note',
-      retirement:'no supported backup older than portable v21 or manifest 6 remains',
+      retirement:'no supported backup older than portable v23 or manifest 8 remains',
       sourceFiles:freeze(['source/core/backup-codec.js','source/core/backup.js','source/core/compatibility-codecs.js'])
     },
     {
@@ -137,19 +137,11 @@ export const COMPATIBILITY_REGISTRY=freeze({
     },
     {
       id:'area-note-names-in-backups',owner:'backup-codec/managed-repository',kind:'import-adapter',
-      source:'portable backups v21 and older (entity areaNote, data.areaNotes, protected manifest version 2 with areaNoteDeletions) and backup-location manifests version 6 and older (kind areaNote, units areaNote:*, counts.areaNote)',
-      target:'the current note entity, kind and deletion list names; checksums and completion proofs are still checked against the names the file was written with',
-      proof:'a v21 file and a version-6 manifest read back as the same notes, deletions and counts as before the rename',
-      retirement:'no supported backup older than portable v22 or manifest 7 remains',
-      sourceFiles:freeze(['source/core/backup-codec.js','source/core/managed-repository.js','source/core/device-folder-storage.js'])
-    },
-    {
-      id:'backups-before-pending-reviews',owner:'backup-codec/managed-repository',kind:'import-adapter',
-      source:'portable backups v22 and backup-location manifests version 7, written before versions kept for review existed',
-      target:'the current restore model with no version kept for review; checksums, counts and completion proofs are checked against the entity list and logical identity the file was written with',
-      proof:'a v22 file and a version-7 manifest read back as the same data and counts, with an empty list of versions kept for review',
+      source:'released portable backups (v20 and older: entity areaNote, data.areaNotes, protected manifest version 2 with areaNoteDeletions) and backup-location manifests version 5 and older (kind areaNote, units areaNote:*, counts.areaNote), written before versions kept for review existed',
+      target:'the current note entity, kind and deletion list names, with no version kept for review; checksums and completion proofs are still checked against the names the file was written with',
+      proof:'a v20 file and a version-5 manifest read back as the same notes, deletions and counts, with an empty list of versions kept for review. Portable v21 and v22 and manifests 6 and 7 were made only by unreleased builds and are refused',
       retirement:'no supported backup older than portable v23 or manifest 8 remains',
-      sourceFiles:freeze(['source/core/backup-codec.js','source/core/managed-repository.js'])
+      sourceFiles:freeze(['source/core/backup-codec.js','source/core/managed-repository.js','source/core/device-folder-storage.js'])
     },
     {
       id:'daily-record-historical-shapes',owner:'record-codecs/repositories',kind:'live-canonicalization',
@@ -277,7 +269,7 @@ export const COMPATIBILITY_REGISTRY=freeze({
     },
     {
       id:'backup-repository-v1-v4',owner:'managed-repository',kind:'import-adapter',
-      source:'Device Folder and Google Drive checkpoints in repository manifest versions 1 to 7 (version 1 without retention or a commit marker; up to version 4 with Reflection Draft packs and older Active Session shapes; up to version 7 without kept reviews), history entries without summaries, and older Drive maintenance markers',
+      source:'Device Folder and Google Drive checkpoints in repository manifest versions 1 to 5, the ones released builds wrote (version 1 without retention or a commit marker; up to version 4 with Reflection Draft packs and older Active Session shapes; all without kept reviews), history entries without summaries, and older Drive maintenance markers',
       target:'the current restore model; every new checkpoint is written as manifest version 8',
       proof:'old checkpoints are only read, never rewritten; their contents pass through the compatibility codecs and current validation before restore. Once a location holds a version-8 checkpoint, older ones leave Version History and the next cleanup removes them (selectRepositoryRetention)',
       retirement:'after every location of every device keeps only version-8 backup checkpoints (Copy diagnostics, Format cleanup, reads ready on every device in use)',

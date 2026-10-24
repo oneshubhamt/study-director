@@ -43,21 +43,21 @@ registry.define('compatibility-host',1,()=>{
     const isoTime=value=>validTimestamp(value)?new Date(value).toISOString():'';
     // The last-backup record, version 3, keeps one shape for every copy: when
     // it was made, the change it holds and its backup format; the last portable
-    // file (downloads included) is file. Versions 1 and 2 kept a type, id, label
-    // and app version on every entry (derivable or unused) and called the time
-    // verifiedAt; version 2 kept the last download apart. Storage health once
-    // kept a last-backup time of any kind. A download or that time becomes an
-    // unverified file copy holding the changes made before it.
+    // file (downloads included) is file. Version 1, the released one, kept a
+    // type, id, label and app version on every entry (derivable or unused) and
+    // called the time verifiedAt (version 2 was never released). Storage health
+    // once kept a last-backup time of any kind; that time becomes an unverified
+    // file copy holding the changes made before it.
     function legacyVerifiedRecovery(value,backupAt){
       const version=value?Number(value.version):3;
       let file=null,providers={};
       if(version===3){const current=metadata.normalizeVerifiedRecovery(value);file=current.file;providers={...current.providers};}
-      else if(version===1||version===2){
+      else if(version===1){
         const copy=row=>{const at=isoTime(row&&row.verifiedAt),sourceRevision=isoTime(row&&row.sourceRevision);return at&&sourceRevision?{at,sourceRevision,format:Number.isSafeInteger(row.backupFormatVersion)?row.backupFormatVersion:null}:null;};
         for(const [id,row] of Object.entries(value.providers&&typeof value.providers==='object'?value.providers:{})){const entry=copy(row);if(entry)providers[id]=entry;}
         const saved=copy(value.file);file=saved?{...saved,verified:true}:null;
       }else return null;
-      for(const at of [version===2?isoTime(value.download&&value.download.startedAt):'',isoTime(backupAt)])if(at&&(!file||Date.parse(at)>Date.parse(file.at)))file={at,sourceRevision:at,format:null,verified:false};
+      const at=isoTime(backupAt);if(at&&(!file||Date.parse(at)>Date.parse(file.at)))file={at,sourceRevision:at,format:null,verified:false};
       return metadata.normalizeVerifiedRecovery({version:3,file,providers});
     }
     // Storage health keeps three facts: the change clock, when study data was
@@ -67,15 +67,16 @@ registry.define('compatibility-host',1,()=>{
     // (measured at each launch) and the last error (shown live, never read back).
     const RETIRED_STORAGE_HEALTH_FIELDS=freeze(['lastBackupAt','lastLiveSaveAt','lastDailyRecordSaveAt','lastNotesSaveAt','lastIdbOkAt','lastError','lastErrorAt','lastErrorSource','updatedAt','storagePersisted','usageBytes','quotaBytes','usageRatio','lastEstimateAt']);
     const retiredHealthFields=health=>health&&typeof health==='object'?RETIRED_STORAGE_HEALTH_FIELDS.filter(field=>Object.hasOwn(health,field)):[];
-    // Repository verification state versions 2 to 6 kept one slot per known
-    // location; versions 3 to 5 also kept the Device Folder's directory handle,
-    // which the repository scope replaces. The current record is keyed by
-    // location id. Progress and quarantine carry over.
+    // Repository verification state versions 2 to 5 (the released ones) kept
+    // one slot per known location; versions 3 to 5 also kept the Device
+    // Folder's directory handle, which the repository scope replaces. The
+    // current record is keyed by location id. Progress and quarantine carry
+    // over. Version 6 was never released.
     const INTEGRITY_SLOTS=freeze({device:'device-folder',drive:'google-drive'});
     function legacyRepositoryIntegrity(value){
       const version=Number(value?.version);
-      if(!value||!exactKeys(value,['version','device','drive'])||!Number.isSafeInteger(version)||version<2||version>6)return null;
-      const stored=target=>{if(version<3||version>5||!target||typeof target!=='object')return target;const {repositoryHandle,...rest}=target;return rest;};
+      if(!value||!exactKeys(value,['version','device','drive'])||!Number.isSafeInteger(version)||version<2||version>5)return null;
+      const stored=target=>{if(version<3||!target||typeof target!=='object')return target;const {repositoryHandle,...rest}=target;return rest;};
       const shape=target=>{
         const scan={completedAt:target.completedAt,cycleStartedAt:target.cycleStartedAt,cursor:target.cursor,failedAt:target.failedAt,quarantinedObjectIds:target.quarantinedObjectIds};
         if(version===2)return scan;if(version===3)return {repositoryScope:target.repositoryScope,scanId:target.scanId,...scan};

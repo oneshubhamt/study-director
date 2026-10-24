@@ -2,7 +2,7 @@
 
 Status of the work on this branch (`refactor/background-coordination`, draft PR #1). Read sections 1 and 5 first; sections 2 to 4 are closed summaries.
 
-**Current state (2026-10-18):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). **In progress: Drive sync and profiles (section 5).** Done: the small items (5.5), sync (5.1), merge rules (5.2), and the first-start form (5.4) with profiles and device names (5.3). Next: removing code section 5 made redundant, then a fresh audit of the backup system and app behaviour (5.6). Last of all: Wordgard as its own module, with two items to explore alongside it: notification sounds made in code, and the editor toolbar order (section 6).
+**Current state (2026-10-24):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). Drive sync and profiles (section 5) are done: the small items (5.5), sync (5.1), merge rules (5.2), profiles and device names (5.3, 5.3a), the first-start form (5.4), the removal of what section 5 made redundant, and a fresh audit of the backup system with its fixes (5.6). Release B (removing the readers of older backup formats) waits until "Format cleanup" reads ready on every device in use (5.3a). **Next, last of all:** Wordgard as its own module, with two items to explore alongside it: notification sounds made in code, and the editor toolbar order (section 6).
 
 ---
 
@@ -124,7 +124,7 @@ Build this next, before Wordgard (section 6). The decisions below are the user's
 
 **Done** (2026-10-18). Design and rules: `docs/BACKUP-ENGINE.md`, "Kept for review". What was built, against the table below:
 - A sync never stops for a choice. Smart merge joins notes changed in different paragraphs; everything else changed on both sides shows the newer and keeps the other as a `PendingReview` record (contract `PendingReview.v1`, appMeta `pendingReview:<id>`).
-- Kept versions are synced data: backup v23 and manifest v8 carry them (v22 files and v7 manifests read with none), every device gets them, a resolved one wins everywhere, and at most 2000 may wait (more stops the write; nothing is dropped). Their images are kept.
+- Kept versions are synced data: backup v23 and manifest v8 carry them (released v20 files and v5 manifests read with none; v21, v22 and manifests 6, 7 came only from unreleased builds and are refused), every device gets them, a resolved one wins everywhere, and at most 2000 may wait (more stops the write; nothing is dropped). Their images are kept.
 - Review: a quiet "Needs review" mark on the note, a count in Library → Data, and "Needs review" in the sidebar. Choices first (titles, deletions, Saved Days, plans and settings, the session), then note texts in `reconciliation-ui.js` with Smart merge from what both last shared. Each choice is an ordinary edit that syncs; nothing that changed while the person chose is overwritten. A kept session waits while a session runs here and comes back suspended.
 - A takeover no longer stops the sync: the device taken over from shows the running session and keeps its own progress for review.
 - "Needs review" on Drive's version itself now appears only for what a sync cannot keep (an older backup format, or more than 2000 waiting).
@@ -235,7 +235,10 @@ Backup password  [ Optional            ]   (a confirm box appears once you type)
 1. The small items (5.5). **Done.**
 2. The sync engine and merge rules (5.1, 5.2), with sync designed around profile ids. **Done.**
 3. The first-start form (5.4) and profiles (5.3), in one pass, with device names (5.3) folded in. **Done.**
-4. Remove what section 5 made redundant, then a cleanup pass.
+4. Remove what section 5 made redundant, then a cleanup pass. **Done** (2026-10-24):
+   - Formats only unreleased builds of this branch wrote are refused, not read: portable backup v21 and v22, manifests 6 and 7, last-backup record version 2 and verification state version 6. Released formats (v20 and older, manifest 5 and older) still read. The compatibility entry `backups-before-pending-reviews` is gone.
+   - Restore from a notice opens the one Version History whenever a backup location is connected.
+   - Unused exports removed from the backup modules (capture, repository, background scheduling).
 5. Audit the backup system and app behaviour again (noted by the user, 2026-10-18). Drive went from a manual handoff (back up, then Combine or Replace on the other device) to automatic sync, so much has changed. Check whether everything is still in its best shape, and what can be improved, refined or corrected:
    - Device Folder and Drive backups end to end, after sync and one history.
    - Version History: one history now shared by both locations, with keep-15 plus up to 10 hourly versions. How each location keeps, copies and prunes them.

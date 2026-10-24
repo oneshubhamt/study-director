@@ -45,7 +45,9 @@ registry.define('managed-repository',1,()=>{
     }
     validateRepositoryRetentionPolicy(REPOSITORY_RETENTION_POLICY);
 // Manifest 6 keys notes by permanent id; earlier manifests keyed them by name.
-const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=8,REPOSITORY_NOTE_ID_MANIFEST_VERSION=6,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,6,7,8]));
+const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=8,REPOSITORY_NOTE_ID_MANIFEST_VERSION=6,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,8]));
+// Released builds wrote manifests 1 to 5. Versions 6 and 7 were made only by
+// unreleased builds, so nothing reads them.
 // Manifest 8 added the versions kept for review (pendingReview objects).
 const REPOSITORY_PENDING_REVIEW_VERSION=8,PENDING_REVIEW_KIND='pendingReview';
 // Manifests before version 7 call a note areaNote: in object kinds, pack
@@ -131,7 +133,7 @@ async function repositoryPreparationPlan(preparation,reconciliationBase,{baseUpd
   if(String(index.epochToken||'')===String(preparation&&preparation.epochToken||'')){if(changed.length||current.size!==previous.size)return null;}
   else if(!changed.length)return null;
   const entries=repositoryPreparationEntryMap(index),structuredChanged=changed.filter(unit=>!!repositoryPreparationDescriptor(unit));
-  return freeze({index,entries,currentStamps:current,changed:freeze(changed),structuredChanged:freeze(structuredChanged),baseUpdate});
+  return freeze({index,entries,changed:freeze(changed),structuredChanged:freeze(structuredChanged),baseUpdate});
 }
 async function repositoryNoteSetIdentity(entries){
   const noteKeys=[...entries.values()].filter(entry=>entry&&entry.present&&entry.kind==='note').map(entry=>String(entry.key)).sort(),noteKeyFingerprint=await Exports.run('checksum',{value:JSON.stringify(noteKeys),algorithm:'sha256'});
@@ -346,7 +348,7 @@ function selectRepositoryRetention(rowsValue,{now=new Date()}={}){
   }
   for(const row of protectedRows)keep(row,'before-restore');
   const retained=rows.filter(row=>selected.has(row.id)),remove=rows.filter(row=>!selected.has(row.id));
-  return freeze({retained:freeze(retained),remove:freeze(remove),activeProtected:activeProtected||null,activeProtectedRows:protectedRows,tiers:freeze(Object.fromEntries(tiers)),normalRetained:retained.filter(row=>!protectedRows.includes(row)).length,policy:REPOSITORY_RETENTION_POLICY});
+  return freeze({retained:freeze(retained),remove:freeze(remove),activeProtected:activeProtected||null,tiers:freeze(Object.fromEntries(tiers)),normalRetained:retained.filter(row=>!protectedRows.includes(row)).length,policy:REPOSITORY_RETENTION_POLICY});
 }
 function projectManagedRepositoryHistory(rowsValue,source,{now=new Date(),quarantinedObjectIds=null}={}){
   const rows=Array.isArray(rowsValue)?rowsValue:[],sourceId=String(source&&source.id||''),sourceLabel=clampText(source&&source.label||'',80),quarantined=new Set(repositoryScrubObjectIds(quarantinedObjectIds));
@@ -1041,7 +1043,7 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
     });
     let released=false;
     const release=async()=>{if(released)return false;released=true;for(const opened of attachmentLeases.values())await opened.release().catch(()=>{});attachmentLeases.clear();return true;};
-    return freeze({capture,release,repositoryCheckpoint:manifest.checkpoint,repositoryEncrypted:manifest.encrypted,verifiedSourceBytes:(noteKey?[...structuredEntries,...manifest.objects.filter(entry=>referencedAttachmentIds.has(entry.objectId))]:manifest.objects).reduce((total,entry)=>total+Math.max(0,Number(entry.sourceBytes)||0),0),storedBytes:manifest.objects.reduce((total,entry)=>total+Math.max(0,Number(entry.storedBytes)||0),0)});
+    return freeze({capture,release,verifiedSourceBytes:(noteKey?[...structuredEntries,...manifest.objects.filter(entry=>referencedAttachmentIds.has(entry.objectId))]:manifest.objects).reduce((total,entry)=>total+Math.max(0,Number(entry.sourceBytes)||0),0),storedBytes:manifest.objects.reduce((total,entry)=>total+Math.max(0,Number(entry.storedBytes)||0),0)});
   }catch(error){for(const opened of attachmentLeases.values())await opened.release().catch(()=>{});attachmentLeases.clear();throw error;}
 }
 async function inspectRepositoryCheckpoint(manifest,readObject,options={}){

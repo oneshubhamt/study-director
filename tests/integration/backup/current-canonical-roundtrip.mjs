@@ -64,28 +64,9 @@ async function writeOlder(version,olderPlan,noteItems){
   const completion=await writer.encodeCompletion(chunks.length,writtenCounts(withoutReviews(counts)),chunks.map(c=>c.checksum),algorithm,descriptors);
   return writer.createV10Container(new Blob([JSON.stringify(olderManifest)+'\n',...chunks.map(c=>c.line+'\n'),JSON.stringify(completion)+'\n']),{compression:'none',assetBlobs:blobs});
 }
-// A v22 file was written before versions kept for review existed: it reads
-// as the same data with none kept.
 const withoutReviews=value=>Object.fromEntries(Object.entries(value||{}).filter(([type])=>type!=='pendingReview'));
-const v22File=await (async()=>{
-  const writer=registry.require('backup-codec',1).createBackupCodec(freeze({...codecInput,dataContract:freeze({...dataContract,schemas:freeze({...dataContract.schemas,Backup:freeze({...dataContract.schemas.Backup,version:22})})})}));
-  const created=writer.createManifest(plan,{compression:'none',algorithm}),chunks=[],v22Groups=[['checkpointManifest',[writer.createProtectedManifest(plan,created.checkpoint)]],...groups.slice(1)];
-  for(let i=0;i<v22Groups.length;i++)chunks.push(await writer.encodeChunk(i,v22Groups[i][0],v22Groups[i][1],algorithm));
-  const completion=await writer.encodeCompletion(chunks.length,withoutReviews(counts),chunks.map(c=>c.checksum),algorithm,descriptors);
-  return writer.createV10Container(new Blob([JSON.stringify({...created,declaredCounts:withoutReviews(created.declaredCounts)})+'\n',...chunks.map(c=>c.line+'\n'),JSON.stringify(completion)+'\n']),{compression:'none',assetBlobs:blobs});
-})();
-await assert.rejects(reader.inspectCurrent(v22File),/compatibility adapter/u,'a v22 file is not current');
-const v22Parsed=await reader.inspectLegacy(v22File);
-assert.equal(v22Parsed.formatVersion,22);assert.deepEqual([...v22Parsed.pendingReviews],[],'a v22 file has no versions kept for review');
-assert.deepEqual(v22Parsed.records,parsed.records);assert.deepEqual({...v22Parsed.data.notes},{...parsed.data.notes});assert.deepEqual(v22Parsed.importedActiveSession,parsed.importedActiveSession);
-// A v21 file keys notes by id, as today; only the names differ.
-const v21File=await writeOlder(21,plan,[note]);
-await assert.rejects(reader.inspectCurrent(v21File),/compatibility adapter/u,'a v21 file is not current');
-const v21Parsed=await reader.inspectLegacy(v21File);
-assert.equal(v21Parsed.formatVersion,21);assert.deepEqual({...v21Parsed.data.notes},{[note.key]:note},'a v21 note reads under the current entity name');
-for(const key of ['savedDayDeletions','noteDeletions','attachmentDeletions'])assert.deepEqual(v21Parsed.protectedCheckpointManifest[key],plan[key],`v21 ${key} read under the current names`);
-assert.equal(v21Parsed.protectedCheckpointManifest.authority.notes,'pairwise-explicit-deletions');assert.equal(Object.hasOwn(v21Parsed.protectedCheckpointManifest.authority,'areaNotes'),false);
-assert.deepEqual(v21Parsed.records,parsed.records);
+// Versions 21 and 22 were made only by unreleased builds: refused.
+for(const version of [21,22])await assert.rejects(reader.inspectLegacy(await writeOlder(version,plan,[note])),/not supported by this build/u,`a v${version} file is refused`);
 // A v20 file keeps notes and their deletion history under note names. Reading
 // it gives each note, and each deletion, the id the live conversion gives that
 // note, so older backups and this device agree on which note is which.
@@ -97,8 +78,8 @@ assert.equal(v20Parsed.formatVersion,20);
 assert.deepEqual({...v20Parsed.data.notes},{[note.key]:note},'a name-keyed note takes the id the live conversion gives it');
 assert.deepEqual(v20Parsed.protectedCheckpointManifest.noteDeletions,[{key:noteId('deleted note'),deletedAt:stamp}],'its deletion history takes ids too');
 assert.deepEqual(v20Parsed.records,parsed.records,'everything else reads as current');
-// A file that mixes the names fails closed: v21 with the v22 entity name.
-const mixed=await (async()=>{const writer=registry.require('backup-codec',1).createBackupCodec(freeze({...codecInput,dataContract:freeze({...dataContract,schemas:freeze({...dataContract.schemas,Backup:freeze({...dataContract.schemas.Backup,version:21})})})}));const created=writer.createManifest(plan,{compression:'none',algorithm});const chunks=[];for(let i=0;i<groups.length;i++)chunks.push(await writer.encodeChunk(i,groups[i][0],groups[i][1],algorithm));const completion=await writer.encodeCompletion(chunks.length,counts,chunks.map(c=>c.checksum),algorithm,descriptors);return writer.createV10Container(new Blob([JSON.stringify(created)+'\n',...chunks.map(c=>c.line+'\n'),JSON.stringify(completion)+'\n']),{compression:'none',assetBlobs:blobs});})();
-await assert.rejects(reader.inspectLegacy(mixed),'a v21 file written with v22 names is rejected');
+// A file that mixes the names fails closed: v20 with the current entity name.
+const mixed=await (async()=>{const writer=registry.require('backup-codec',1).createBackupCodec(freeze({...codecInput,dataContract:freeze({...dataContract,schemas:freeze({...dataContract.schemas,Backup:freeze({...dataContract.schemas.Backup,version:20})})})}));const created=writer.createManifest(plan,{compression:'none',algorithm});const chunks=[];for(let i=0;i<groups.length;i++)chunks.push(await writer.encodeChunk(i,groups[i][0],groups[i][1],algorithm));const completion=await writer.encodeCompletion(chunks.length,counts,chunks.map(c=>c.checksum),algorithm,descriptors);return writer.createV10Container(new Blob([JSON.stringify(created)+'\n',...chunks.map(c=>c.line+'\n'),JSON.stringify(completion)+'\n']),{compression:'none',assetBlobs:blobs});})();
+await assert.rejects(reader.inspectLegacy(mixed),'a v20 file written with current names is rejected');
 
-console.log(JSON.stringify({status:'PASS',suite:'current-canonical-roundtrip',backupVersion:23,v22WithoutKeptVersions:true,v21NamesRead:true,nameKeyedV20NotesConverted:true,dailyRecordVersion:16,activeSessionVersion:10,logicalAttachments:4,uniquePayloads:3,encryptedRoundtrip:true,strictCurrentCodecs:true}));
+console.log(JSON.stringify({status:'PASS',suite:'current-canonical-roundtrip',backupVersion:23,unreleasedVersionsRefused:true,nameKeyedV20NotesConverted:true,dailyRecordVersion:16,activeSessionVersion:10,logicalAttachments:4,uniquePayloads:3,encryptedRoundtrip:true,strictCurrentCodecs:true}));

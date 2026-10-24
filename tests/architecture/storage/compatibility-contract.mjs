@@ -41,7 +41,7 @@ assert.equal(MIGRATION_FACADE_CONTRACT.verification.backupCheck,'freshBackup');
 assert.equal(CANONICAL_BASELINE.policy.ordinaryRuntime,'current-canonical-only');
 
 const entries=allCompatibilityEntries();
-assert.equal(entries.length,27,'Every temporary compatibility path must remain explicitly inventoried until retirement.');
+assert.equal(entries.length,26,'Every temporary compatibility path must remain explicitly inventoried until retirement.');
 assert.equal(new Set(entries.map(entry=>entry.id)).size,entries.length);
 for(const entry of entries){
   for(const file of entry.sourceFiles)assert.ok(fs.existsSync(path.join(root,file)),`${entry.id} references missing source ${file}`);
@@ -75,7 +75,6 @@ const evidenceByCompatibilityId=Object.freeze({
   'device-folder-single-repository':['tests/integration/backup/device-folder-layout.mjs'],
   'name-keyed-notes-in-backups':['tests/integration/backup/current-canonical-roundtrip.mjs','tests/integration/backup/repository-restore.mjs','tests/integration/storage/canonical-schema-separation.mjs'],
   'legacy-service-worker-update-bridge':['tests/integration/pwa/service-worker-lifecycle.mjs'],
-  'backups-before-pending-reviews':['tests/integration/backup/current-canonical-roundtrip.mjs','tests/integration/backup/repository-restore.mjs']
 });
 assert.deepEqual(Object.keys(evidenceByCompatibilityId).sort(),entries.map(entry=>entry.id).sort(),'every disposable compatibility path must have explicit regression evidence');
 for(const files of Object.values(evidenceByCompatibilityId))for(const file of files)assert.ok(fs.existsSync(path.join(root,file)),`compatibility evidence test is missing: ${file}`);

@@ -30,12 +30,13 @@ registry.define('backup-codec',1,()=>{
     // Backup v23 added the versions kept for review (pendingReview), waiting
     // and resolved ones together.
     const PENDING_REVIEW_VERSION=23,PENDING_REVIEW_TYPE='pendingReview',PENDING_REVIEW_LIMIT=2*Math.max(1,Number(APP_LIMITS.maxPendingReviews)||2000);
-    const BACKUP_ENTITY_TYPES_V22=freeze([...SOURCE_ENTITY_TYPES,'personalData','checkpointManifest']);
-    const BACKUP_ENTITY_TYPES=freeze([...BACKUP_ENTITY_TYPES_V22,PENDING_REVIEW_TYPE]);
-    // Backup v22 renamed the note entity (areaNote before). A file is checked
-    // under the names it was written with; what it holds reads under the
-    // current ones.
-    const NOTE_ENTITY_VERSION=22,WRITTEN_NOTE_ENTITY='areaNote';
+    const BACKUP_ENTITY_TYPES_WITHOUT_REVIEWS=freeze([...SOURCE_ENTITY_TYPES,'personalData','checkpointManifest']);
+    const BACKUP_ENTITY_TYPES=freeze([...BACKUP_ENTITY_TYPES_WITHOUT_REVIEWS,PENDING_REVIEW_TYPE]);
+    // Released backups (v20 and older) name the note entity areaNote. A file is
+    // checked under the names it was written with; what it holds reads under
+    // the current ones. Versions 21 and 22 were made only by unreleased builds,
+    // so nothing reads them.
+    const NOTE_ENTITY_VERSION=22,WRITTEN_NOTE_ENTITY='areaNote',UNRELEASED_BACKUP_VERSIONS=freeze(new Set([21,22]));
     const currentBackupEntity=type=>type===WRITTEN_NOTE_ENTITY?'note':type;
     const writtenBackupEntities=types=>freeze(types.map(type=>type==='note'?WRITTEN_NOTE_ENTITY:type));
     const currentBackupCounts=counts=>freeze(Object.fromEntries(Object.entries(counts||{}).map(([type,count])=>[currentBackupEntity(type),count])));
@@ -43,7 +44,7 @@ registry.define('backup-codec',1,()=>{
     const ActiveSessionCodec=input.activeSessionCodec;
     const CompatibilityCodec=input.compatibilityCodec;
     // Historical completion proofs depend on the original entity order.
-    const BACKUP_ENTITY_TYPES_V19_TO_V21=writtenBackupEntities(BACKUP_ENTITY_TYPES_V22);
+    const BACKUP_ENTITY_TYPES_V19_TO_V20=writtenBackupEntities(BACKUP_ENTITY_TYPES_WITHOUT_REVIEWS);
     const LEGACY_SOURCE_ENTITY_TYPES=writtenBackupEntities([...SOURCE_ENTITY_TYPES,LEGACY_REFLECTION_DRAFT_TYPE]);
     const BACKUP_ENTITY_TYPES_V15_TO_V18=freeze([...LEGACY_SOURCE_ENTITY_TYPES,'personalData','checkpointManifest']);
     const LEGACY_SYNC_ENTITY_TYPES=writtenBackupEntities([...SOURCE_ENTITY_TYPES,LEGACY_TOMBSTONE_TYPE,LEGACY_REFLECTION_DRAFT_TYPE]);
@@ -52,7 +53,7 @@ registry.define('backup-codec',1,()=>{
     const LEGACY_BACKUP_ENTITY_TYPES=writtenBackupEntities([...SOURCE_ENTITY_TYPES,LEGACY_TOMBSTONE_TYPE]);
     function backupEntityTypesForVersion(version){
       const value=Number(version);
-      return value>=PENDING_REVIEW_VERSION?BACKUP_ENTITY_TYPES:value>=NOTE_ENTITY_VERSION?BACKUP_ENTITY_TYPES_V22:value>=19?BACKUP_ENTITY_TYPES_V19_TO_V21:value>=15?BACKUP_ENTITY_TYPES_V15_TO_V18:value>=11?BACKUP_ENTITY_TYPES_V11_TO_V14:value>=9?BACKUP_ENTITY_TYPES_V9_TO_V10:LEGACY_BACKUP_ENTITY_TYPES;
+      return value>=PENDING_REVIEW_VERSION?BACKUP_ENTITY_TYPES:value>=19?BACKUP_ENTITY_TYPES_V19_TO_V20:value>=15?BACKUP_ENTITY_TYPES_V15_TO_V18:value>=11?BACKUP_ENTITY_TYPES_V11_TO_V14:value>=9?BACKUP_ENTITY_TYPES_V9_TO_V10:LEGACY_BACKUP_ENTITY_TYPES;
     }
     const BACKUP_V10_MAGIC='SDBK10\r\n';
     const BACKUP_V10_HEADER_BYTES=13;
@@ -307,7 +308,7 @@ function validateBackupManifest(manifest,gzip,{binaryV10=false}={}){
   if(!manifest||manifest.type!=='manifest'||manifest.format!==DATA_CONTRACT.schemas.Backup.format)throw new Error('File is not a chunked Study Director backup.');
   const version=Number(manifest.version)||0;
   if(version>DATA_CONTRACT.schemas.Backup.version)throw new Error('This backup was created by a newer Study Director version. Update the app before importing it.');
-  if(!(Number.isInteger(version)&&version>=7&&version<=DATA_CONTRACT.schemas.Backup.version))throw new Error('This backup version is not supported by this build.');
+  if(!(Number.isInteger(version)&&version>=7&&version<=DATA_CONTRACT.schemas.Backup.version)||UNRELEASED_BACKUP_VERSIONS.has(version))throw new Error('This backup version is not supported by this build.');
   if(version>=10&&!binaryV10)throw new Error('Backup v10 must use the binary-framed Study Director backup format.');
   if(version<10&&binaryV10)throw new Error('Binary backup framing is only valid for Study Director backup v10.');
   if(version>=10&&manifest.container!=='binary-v1')throw new Error('Backup v10 container metadata is invalid.');
@@ -332,9 +333,10 @@ function validateBackupManifest(manifest,gzip,{binaryV10=false}={}){
   if(!backupCountsEqual(counts,manifest.declaredCounts||{},entityTypes))throw new Error('Backup manifest contains unsafe entity counts.');
   return {manifest,counts,entityTypes};
 }
-// Backup v21 gave notes permanent ids and changed nothing else: a v20 file
-// is current apart from its notes, whose name keys are converted, along with
-// the names in its note deletion history.
+// Released backups (v20 and older) key notes by name: a v20 file is current
+// apart from its notes, whose name keys are converted, along with the names
+// in its note deletion history. The thresholds below date from v21, which no
+// released build wrote.
 const NOTE_ID_BACKUP_VERSION=21;
 // A session saved before it named its device (v9) comes in as this device's.
 function olderActiveSession(value){return Number(value&&value.version)<DATA_CONTRACT.schemas.ActiveSession.version;}
