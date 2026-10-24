@@ -239,6 +239,7 @@ Backup password  [ Optional            ]   (a confirm box appears once you type)
    - Formats only unreleased builds of this branch wrote are refused, not read: portable backup v21 and v22, manifests 6 and 7, last-backup record version 2 and verification state version 6. Released formats (v20 and older, manifest 5 and older) still read. The compatibility entry `backups-before-pending-reviews` is gone.
    - Restore from a notice opens the one Version History whenever a backup location is connected.
    - Unused exports removed from the backup modules (capture, repository, background scheduling).
+   - **Audited again** (2026-10-24): `docs/AUDIT-BACKUP-AFTER-CLEANUP.md`. Report only; two questions for the user (D1, D2).
 5. Audit the backup system and app behaviour again (noted by the user, 2026-10-18). Drive went from a manual handoff (back up, then Combine or Replace on the other device) to automatic sync, so much has changed. Check whether everything is still in its best shape, and what can be improved, refined or corrected:
    - Device Folder and Drive backups end to end, after sync and one history.
    - Version History: one history now shared by both locations, with keep-15 plus up to 10 hourly versions. How each location keeps, copies and prunes them.
