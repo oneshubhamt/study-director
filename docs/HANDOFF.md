@@ -242,6 +242,7 @@ Backup password  [ Optional            ]   (a confirm box appears once you type)
    - A note's earlier-versions list gathers Drive and Device Folder versions separately; with one history this may now be redundant.
    - Every app behaviour built for manual handoff: restore flows, Combine and Replace, wording, reminders, status and notices.
    - Report findings to the user first, as with the earlier audits.
+   - **Audited** (2026-10-24): `docs/AUDIT-BACKUP-AFTER-SYNC.md`. Findings wait for the user's decisions.
 
 For each build step: make all the changes, build, test with two simulated devices in a real browser, fix, document, commit.
 
