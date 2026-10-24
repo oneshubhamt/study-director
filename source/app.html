@@ -1171,12 +1171,12 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                   <div class="backup-inline-note ui-helper" id="backup-protection-hint" hidden>Sync and encrypted backups wait until this profile’s backup password is entered.</div>
                 </div>
               </section>
-              <section class="backup-section backup-advanced-section" id="profile-remove-section" aria-label="This profile" hidden>
+              <section class="backup-section backup-advanced-section" id="profile-delete-section" aria-label="This profile">
                 <div class="backup-compact-row">
                   <span class="ui-label">This profile</span>
-                  <button class="mini-btn ui-btn danger" id="profile-remove" type="button" data-action="remove-profile">Remove from this device…</button>
+                  <button class="mini-btn ui-btn danger" id="profile-delete" type="button" data-action="delete-profile">Delete this profile…</button>
                 </div>
-                <div class="backup-inline-note ui-helper">Deletes this profile’s data from this device only. Other profiles are not changed.</div>
+                <div class="backup-inline-note ui-helper">From this device only, or everywhere: here, in Google Drive and in this device’s Device Folder backups. Other profiles are not changed.</div>
               </section>
             </div>
           </details>
@@ -1810,6 +1810,17 @@ const InstallationIdentity=PersistenceModule.createInstallationIdentity(Object.f
 }));
 // "iPhone · Safari", "This device", or '' when an ID does not say.
 const deviceName=(id,others=[])=>String(id||'')===InstallationIdentity.getId()?'This device':PersistenceModule.deviceName(id,[...others,InstallationIdentity.getId()]);
+// The folders a profile's backups live in: "Study Director – Ana" on Google
+// Drive, "Study Director - Ana - iPhone Safari" in the Device Folder. The
+// names are for people; a marker inside each says whose it is. Device Folder
+// names use plain letters only (accents dropped, other scripts left out),
+// because some file systems map other characters onto another folder.
+function backupFolderName({device=false}={}){
+  const plain=value=>device?String(value||'').normalize('NFKD').replace(/[\u0300-\u036f]/gu,'').replace(/[^\x20-\x7e]+/gu,' '):String(value||'');
+  const clean=value=>plain(value).replace(/[\u0000-\u001f\\/:*?"<>|]+/gu,' ').replace(/\s+/gu,' ').trim().replace(/[. ]+$/u,'').slice(0,48).trim();
+  const parts=[clean(Profiles.current()?.name),device?clean(PersistenceModule.deviceName(InstallationIdentity.getId()).replace(' · ',' '))||'Device':''].filter(Boolean),separator=device?' - ':' – ';
+  return parts.length?`${EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix}${separator}${parts.join(separator)}`:EXTERNAL_REPOSITORY_IDENTITIES.driveFolder;
+}
 // The people who use Study Director on this device (core/profiles.js).
 const Profiles=ProfilesModule.createController(Object.freeze({ports:Object.freeze({
   scope:Object.freeze({pattern:ProfileScope.pattern,registryKey:ProfileScope.registryKey,scope:ProfileScope.scope,separator:ProfileScope.separator}),
@@ -5702,7 +5713,6 @@ function renderProfileBadge(){
   let label='',locked=false;
   try{label=driveSyncLabel();const protection=BackupProtection.status();locked=protection.enabled&&!protection.unlocked;}catch{/* Drawn again once backups are set up. */}
   const name=getStudentNameFromDisplay(),letter=profileInitial(name),problem=['Needs review','Needs password','Needs attention'].includes(label)||locked;
-  const remove=document.getElementById('profile-remove-section');if(remove)remove.hidden=Profiles.list().length<2;
   const badge=document.getElementById('profile-badge');
   if(badge){const glyph=badge.querySelector('.profile-badge-letter');if(glyph&&glyph.textContent!==letter)glyph.textContent=letter;badge.setAttribute('aria-label',`Profile: ${name}${problem?` · ${label||'Needs password'}`:''}`);}
   const dot=document.getElementById('profile-badge-dot');if(dot)dot.hidden=!problem;
@@ -5769,19 +5779,70 @@ function switchProfile(ev){
   return Profiles.switchTo(id);
 }
 function addProfile(){void flushProtectedPreferences().catch(()=>{});return Profiles.add();}
-// Removing this profile from the device, from Library → Data. Its data stays
-// wherever it was synced; on this device it is deleted.
-async function removeThisProfile(){
-  const mine=Profiles.current(),others=Profiles.list().filter(row=>row.scope!==mine?.scope);if(!mine||!others.length)return false;
-  const name=getStudentNameFromDisplay(),drive=BackupProviderRuntime.locationStatus('google-drive'),synced=!!(drive?.connected&&drive.sync?.syncedAt&&!drive.waiting&&!drive.sync.syncing);
-  const ok=await Interactions.confirm({
-    title:`Remove ${name} from this device?`,
-    message:synced?`Everything in this profile is synced to ${mine.email||'Google Drive'}. Connecting that account on any device brings it back.`:'This profile is not fully synced to Google Drive. Removing it deletes its notes, Saved Days, plans and attachments from this device for good.',
-    details:[`Other profiles on this device are not changed.`,synced?'Its Device Folder backups stay where they are.':'Its Device Folder backups and backup files, if any, stay where they are.'],
-    confirmLabel:'Remove from this device',danger:!synced,caution:synced
+// Deleting this profile, from Library → Data: from this device only (its
+// data stays wherever it was synced), or everywhere: its Google Drive library
+// goes to the Drive Trash with a marker that makes every other device remove
+// it at its next sign-in, and its Device Folder backups here are deleted. The
+// last profile on a device is replaced by a new, empty one.
+async function deleteThisProfile(){
+  const mine=Profiles.current();if(!mine)return false;
+  const name=getStudentNameFromDisplay(),last=Profiles.list().length<2,drive=BackupProviderRuntime.locationStatus('google-drive'),synced=!!(drive?.connected&&drive.sync?.syncedAt&&!drive.waiting&&!drive.sync.syncing),folder=DeviceBackup.status();
+  const afterwards=last?' A new, empty profile starts afterwards.':'';
+  const choice=await Interactions.choose({
+    title:`Delete ${name}?`,
+    message:last?'This is the only profile on this device.':'Other profiles on this device are not changed.',
+    choices:[
+      {value:'device',label:'Remove from this device',description:(synced?`Its data stays in ${mine.email||'Google Drive'} and in any Device Folder backups.`:'Its data is deleted from this device. Google Drive and Device Folder backups, if any, stay.')+afterwards,kind:'caution'},
+      {value:'everywhere',label:'Delete everywhere',description:`Here, in Google Drive (to its Trash) and in this device’s Device Folder backups. Other devices remove it when they next sign in.${afterwards}`,kind:'danger'}
+    ]
   });
-  if(!ok)return false;
-  return Profiles.remove();
+  if(choice==='device'){
+    if(!synced&&!await Interactions.confirm({title:`Remove ${name} from this device?`,message:'This profile is not fully synced to Google Drive. Removing it deletes its notes, Saved Days, plans and attachments from this device for good.',details:['Its Device Folder backups and backup files, if any, stay where they are.'],confirmLabel:'Remove from this device',danger:true}))return false;
+    return Profiles.remove();
+  }
+  if(choice!=='everywhere')return false;
+  if(mine.email&&!drive?.connected){Interactions.notify({key:'profile-delete',title:'Sign in to Google Drive first',message:`${name}’s library is in ${mine.email}. Sign in from the Profile panel, then delete the profile everywhere.`});return false;}
+  const places=[drive?.connected?`its library in ${mine.email||'Google Drive'} moves to the Drive Trash, where it can be brought back for 30 days`:'',folder.connected?'its Device Folder backups on this device are deleted':''].filter(Boolean);
+  const ok=await Interactions.confirm({
+    title:`Delete ${name} everywhere?`,
+    message:`Its notes, Saved Days, plans, reflections and attachments are deleted from this device${places.length?`; ${places.join('; ')}`:''}.`,
+    details:['Other devices remove this profile the next time they sign in to Google Drive.',...(last?['A new, empty profile starts afterwards.']:[])],
+    confirmLabel:'Delete everywhere',danger:true
+  });
+  return ok?deleteProfileHere({drive:!!drive?.connected}):false;
+}
+// What Google Drive lets the app do with this profile's library.
+let driveLibrary=null;
+async function deleteProfileHere({drive=false}={}){
+  let hold=null;try{hold=BackupProviderRuntime.suspendBackground('profile-delete');}catch{hold=null;}
+  try{
+    if(drive){if(!driveLibrary)throw new Error('Google Drive is not ready yet. Try again in a moment.');await driveLibrary.deleteLibrary();}
+    await DeviceBackup.deleteBackups();
+    return Profiles.remove();
+  }catch(error){
+    hold?.release();AppDiagnostics.capture('profile.delete',error,'warn');
+    Interactions.notify({key:'profile-delete',title:'The profile was not deleted',message:`${String(error?.message||error)} Nothing was removed from this device; try again.`});
+    return false;
+  }
+}
+// Another device deleted this profile everywhere; Google Drive says so at the
+// first sign-in after. With nothing here that Drive did not have, it goes
+// without a question; otherwise the person decides.
+let profileDeletionQuestion=null;
+async function driveProfileDeleted(info){
+  const mine=Profiles.current();if(!mine||String(info?.profile||'')!==mine.id||profileDeletionQuestion)return false;
+  const name=getStudentNameFromDisplay(),synced=verifiedRecoveryState.providers['google-drive']?.sourceRevision||'';
+  if(synced&&synced===currentBackupSourceRevision())return deleteProfileHere();
+  profileDeletionQuestion=Interactions.confirm({
+    title:`${name} was deleted on another device`,
+    message:'This device has changes that never reached Google Drive.',
+    details:['Delete here too: they are deleted with the profile, and so are its Device Folder backups on this device.','Keep on this device: the profile stays here and stops syncing. Connecting Google Drive again starts a new library.'],
+    confirmLabel:'Delete here too',cancelLabel:'Keep on this device',danger:true
+  }).finally(()=>{profileDeletionQuestion=null;});
+  if(await profileDeletionQuestion)return deleteProfileHere();
+  Profiles.renew();renderProfile();
+  Interactions.notify({key:'profile-kept',title:`${name} is kept on this device`,message:'It no longer syncs with Google Drive. Connect Google Drive again to start a new library.'});
+  return false;
 }
 // The Drive connection a person asked for in the last few minutes may ask
 // them about the library it finds; one that just happens (a restored sign-in,
@@ -9352,15 +9413,25 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
       cancelLabel:'Cancel',
       choices:rows.map((row,index)=>({value:row.id,label:`${index===0?'Latest · ':''}${new Date(row.exportedAt).toLocaleString()}`,description:`${Number(row.counts?.dailyRecord)||0} Saved Dates / Reflections · ${Number(row.counts?.note)||0} Notes${row.encrypted?' · Encrypted':''}`,kind:index===0?'primary':''}))
     }),
+    // Several repository folders in the chosen folder and none of this
+    // profile and device's: use one of them here, or start a new one.
+    chooseRepository:rows=>Interactions.choose({
+      title:'This folder already has Study Director backups',
+      message:'Use one of them on this device, for example after clearing this browser, or start a new backup folder for this profile and device.',
+      cancelLabel:'Cancel',
+      choices:[...rows.map(row=>({value:row.name,label:row.name,description:`${row.versions} version${row.versions===1?'':'s'}${row.newest?` · newest ${new Date(row.newest).toLocaleString()}`:''}`})),{value:'',label:'Start a new backup folder',description:backupFolderName({device:true}),kind:'primary'}]
+    }),
+    repositoryOwner:()=>Object.freeze({profile:Profiles.current()?.id||'',scope:ProfileScope.scope,device:InstallationIdentity.getId(),name:backupFolderName({device:true})}),
     render:renderDeviceBackup,
     sourceRevision:()=>currentBackupSourceRevision(),
     verifiedAt:()=>verifiedRecoveryState.providers['device-folder']?.at||''
   }),
   presentation:BackupPresentation,
   settings:exactAppMetaStorage(DeviceFolderAppMeta,'deviceFolder',APP_META_KEYS.deviceFolder,'Device Backup'),
-  transport:folder=>DeviceFolderStorageModule.createStorage(Object.freeze({
+  transport:(folder,repository)=>DeviceFolderStorageModule.createStorage(Object.freeze({
     folder,
-    identities:Object.freeze({root:ProfileScope.scoped(EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderRoot),objects:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects,checkpoints:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints,commits:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits}),
+    identities:Object.freeze({root:repository,legacyRoot:ProfileScope.scoped(EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderLegacyRoot),prefix:EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix,objects:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects,checkpoints:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints,commits:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits}),
+    owner:()=>Object.freeze({profile:Profiles.current()?.id||'',scope:ProfileScope.scope,device:InstallationIdentity.getId()}),
     checksum:(blob,{signal}={})=>Exports.run('checksum',{value:blob},{signal}),
     inspectManifest:(file,options)=>RepositoryCheckpointPipeline.inspectManifest(file,options),
     environment:Object.freeze({canMutate:()=>appCanMutate(),now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'})}),
@@ -9971,8 +10042,19 @@ function currentBackupDiagnosticStates(){
   sample('App update',()=>PwaLifecycle.status(),pwa=>[{job:'App update',state:pwa.phase,busy:pwa.applying||pwa.reloading||pwa.checking,pending:pwa.updateReady,scheduled:pwaUpdateCheckDueAt>0,nextEligibleAt:pwaUpdateCheckDueAt?new Date(pwaUpdateCheckDueAt).toISOString():'',completedAt:pwaLastUpdateCheckAt()?new Date(pwaLastUpdateCheckAt()).toISOString():'',retryAttempt:pwaUpdateCheckFailureCount,bootState:pwa.bootState,cacheState:pwa.cacheState||'',reason:pwa.cacheReason||''}]);
   sample('Attachment verification',()=>AttachmentIntegrityJob.status(),value=>[{job:'Attachment verification',...value,completedAt:attachmentIntegrityView?.checkedAt||'',attemptedAt:attachmentIntegrityView?.attemptedAt||'',cursor:attachmentIntegrityView?.progress?.cursor||0,total:attachmentIntegrityView?.progress?.total||0,coverage:'presence-and-size'}]);
   for(const [target,value] of Object.entries(repositoryIntegrityView?.locations||{})){const bound=!!value?.repositoryScope&&repositoryIntegrityBoundScopes[target]===value.repositoryScope;states.push({job:target+' verification',reason:bound?value?.blockedReason||'':'awaiting-connection',state:!bound?'unbound':value?.recheck?'recheck-pending':value?.partial||value?.cursor?'partial':value?.lastOutcome||'never',completedAt:bound?value?.completedAt||'':'',attemptedAt:bound?value?.attemptedAt||'':'',failedAt:bound?value?.failedAt||'':'',progressBytes:bound?value?.partial?.stored?.offset||0:0,quarantined:bound?value?.quarantinedObjectIds?.length||0:0,history:bound?(value?.history||[]).map(row=>row.at+':'+row.outcome+(row.complete?':full':'')).join(' | '):''});}
+  // The proof that the code reading older formats can be removed (release B):
+  // this device's data is canonical (checked at start), the Device Folder's
+  // old backup folder is gone, and every connected location keeps versions in
+  // the current format only.
+  sample('Format cleanup',()=>({local:canonicalProof,device:DeviceBackup.status(),locations:BackupProviderRuntime.diagnosticConnections().filter(row=>row.connected)}),value=>{
+    const rows=value.locations.map(row=>({job:`${row.id} formats`,state:!row.formats?'unknown':row.formats.older?'pending':'ready',currentVersions:row.formats?.current??0,olderVersions:row.formats?.older??0,completedAt:row.formats?.checkedAt||''}));
+    const ready=value.local?.retirementDataReady===true&&!value.device.oldFolder&&rows.every(row=>row.state==='ready');
+    return [{job:'Format cleanup',state:ready?'ready':!value.local||rows.some(row=>row.state==='unknown')?'unknown':'pending',canonical:value.local?.canonical===true,retirementReady:value.local?.retirementDataReady===true,oldFolder:value.device.oldFolder===true,completedAt:value.local?.checkedAt||''},...rows];
+  });
   sample('Provider background',()=>BackupProviderRuntime.backgroundStatus(),values=>values);return states;
 }
+// The start-up check of this device's data (verifyCanonicalInstallation).
+let canonicalProof=null;
 async function readDataDiagnosticStates(){
   const samples=[
     {job:'Canonical maintenance record',read:()=>AppData.metadata.diagnostics(),project:value=>({job:'Canonical maintenance record',state:value.maintenanceStatus,pending:value.maintenanceStatus==='pending',completedAt:value.completedAt,queuedDeletions:value.deletions,localRecovery:value.localRecovery})},
@@ -10094,7 +10176,7 @@ const CLICK_ACTIONS=Object.freeze({
   'profile-drive': profileDriveAction,
   'switch-profile': switchProfile,
   'add-profile': addProfile,
-  'remove-profile': removeThisProfile,
+  'delete-profile': deleteThisProfile,
   'first-start-drive': ()=>FirstStart.connect(),
   'first-start-continue': ()=>FirstStart.finish(),
   'first-start-skip': ()=>FirstStart.skip(),
@@ -10139,7 +10221,7 @@ const OWNER_REQUIRED_CLICK_ACTIONS=new Set([
   'generate-carry-forward','close-unfinished-note','save-day','clear-library','pick-import-file',
   'toggle-pomodoro','toggle-system-alerts','restore-session','suspend-session','finish-session','reset-session','edit-plan','confirm-plan-edit','cancel-plan-edit',
   'load-default','apply-schedule','clear-schedule-draft','take-pomodoro-break',
-  'gap-focus','gap-break','gap-split','gap-ignore','gap-apply','profile-drive','switch-profile','add-profile','remove-profile','first-start-drive','first-start-continue','first-start-skip',
+  'gap-focus','gap-break','gap-split','gap-ignore','gap-apply','profile-drive','switch-profile','add-profile','delete-profile','first-start-drive','first-start-continue','first-start-skip',
   'font-smaller','font-reset','font-larger','set-theme','set-presentation',
   'connect-device-backup','device-backup-now','disconnect-device-backup','recover-device-backup','recover-provider-backup','connect-drive-backup','drive-backup-now','disconnect-drive-backup','recover-managed-version','compare-managed-note'
 ]);
@@ -10572,7 +10654,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
       installBackgroundOwners();scheduleDataMaintenance();BackgroundOperations.wake('startup');void KeptVersions.refresh();
       void Profiles.collect().then(result=>{if(result.error)AppDiagnostics.capture('profiles.collect',result.error,'warn');});askProfilePassword();
       void BackupFiles.collect().catch(error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn'));
-      document.documentElement.dataset.studyDirectorCanonicalBaseline=proof.canonical?'verified':'not-proven';
+      canonicalProof=proof;document.documentElement.dataset.studyDirectorCanonicalBaseline=proof.canonical?'verified':'not-proven';
       document.documentElement.dataset.studyDirectorRetirementData=proof.retirementDataReady?'ready':proof.canonical?'backup-required':'not-ready';
       document.documentElement.dataset.studyDirectorStartupState='ready';
       document.documentElement.dataset.studyDirectorReady='true';
@@ -10639,7 +10721,7 @@ const StudyDirectorPublicAPI=Object.freeze({
     }),
     repositoryPolicy:RepositoryPolicyModule.protocol,
     // The active profile, and who decides which Drive library it may use.
-    profile:Object.freeze({id:()=>Profiles.current()?.id||'',bind:info=>bindDriveLibrary(info)}),
+    profile:Object.freeze({id:()=>Profiles.current()?.id||'',name:()=>backupFolderName(),bind:info=>bindDriveLibrary(info),deleted:info=>driveProfileDeleted(info),controls:control=>{driveLibrary=control;}}),
     providers:Object.freeze({
       register:BackupProviderRuntime.register,
       list:BackupProviderRuntime.list

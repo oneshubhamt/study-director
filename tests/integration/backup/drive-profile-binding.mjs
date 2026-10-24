@@ -83,4 +83,59 @@ const patches=state=>state.requests.filter(request=>request.method==='PATCH').le
   assert.equal(state.binds.length,2);
   cases.push('a changed profile id settles the folder again');
 }
+{
+  // The library folder is named after its profile, and follows a rename once per sign-in.
+  let name='Study Director – Ana';
+  const {state,provider}=await connected({profileName:()=>name});
+  await provider.repository.list({kind:'object'});
+  assert.equal(state.folderNames.get(state.folders[0]),'Study Director – Ana','a new folder carries the profile name');assert.equal(patches(state),0);
+  name='Study Director – Ana M';
+  await provider.repository.list({kind:'object'});assert.equal(patches(state),0,'a rename waits for the next sign-in');
+  await provider.disconnect();await provider.authorize();await provider.repository.list({kind:'object'});
+  assert.equal(state.folderNames.get(state.folders[0]),'Study Director – Ana M');assert.equal(patches(state),1);
+  assert.equal(state.folders.length,1,'the same folder is used: the name never says whose it is');
+  cases.push('the folder is named after its profile');
+}
+{
+  // A folder from before profiles is named as it is claimed; a failed rename never stops a backup.
+  const harness=createDriveHarness({profileName:()=>'Study Director – Ben'});const {state,provider}=harness;
+  state.folders.push('folder-3');state.folderProperties.set('folder-3',{});state.folderRenameFails=true;
+  await provider.prepare();await provider.authorize();await provider.repository.list({kind:'object'});
+  assert.equal(state.folderProperties.get('folder-3')[MARKER],QA_PROFILE_ID);assert.equal(state.folderNames.has('folder-3'),false,'the old name stays when Drive refuses the rename');
+  state.folderRenameFails=false;await provider.disconnect();await provider.authorize();await provider.repository.list({kind:'object'});
+  assert.equal(state.folderNames.get('folder-3'),'Study Director – Ben','the next sign-in names it');
+  cases.push('a claimed folder is renamed, and a failed rename is harmless');
+}
+{
+  // Delete everywhere: a marker first, then the library goes to the Drive Trash.
+  const {state,provider}=await connected({profileName:()=>'Study Director – Ana'});
+  await provider.repository.list({kind:'object'});const library=state.folders[0];
+  assert.equal(typeof state.libraryControl?.deleteLibrary,'function','the app is handed what it can do with the library');
+  assert.equal(await state.libraryControl.deleteLibrary(),true);
+  assert.deepEqual(state.deletionMarkers.map(row=>[row.name,row.profile]),[['Study Director – Ana (deleted)',QA_PROFILE_ID]]);
+  assert.equal(state.trashedFolders.has(library),true,'the library is in the Trash, where it can be brought back');
+  await assert.rejects(provider.repository.list({kind:'object'}),error=>error.studyDirectorProfileDeleted===true,'this page never uses the library again');
+  assert.equal(state.folders.filter(id=>!state.trashedFolders.has(id)).length,0,'no new library is made');
+  cases.push('delete everywhere leaves a marker and trashes the library');
+}
+{
+  // Another device of the same profile: at its next sign-in it learns of the deletion and never makes the library again.
+  const harness=createDriveHarness();const {state,provider}=harness;
+  state.deletionMarkers.push({id:'marker-9',name:'Study Director – QA (deleted)',profile:QA_PROFILE_ID});
+  await provider.prepare();await provider.authorize();
+  await assert.rejects(provider.repository.list({kind:'object'}),error=>error.studyDirectorProfileDeleted===true&&/deleted on another device/u.test(error.message));
+  await settle();
+  assert.deepEqual(state.deletedSignals.map(row=>row.profile),[QA_PROFILE_ID],'the app is told, to remove the profile here');
+  assert.equal(state.folders.length,0,'no library is made');assert.equal(provider.connected(),false,'the sign-in is forgotten');
+  assert.equal(state.binds.length,0);
+  cases.push('another device learns of the deletion at its next sign-in');
+}
+{
+  // A marker for another profile changes nothing.
+  const harness=createDriveHarness();const {state,provider}=harness;
+  state.deletionMarkers.push({id:'marker-8',name:'Study Director – Ben (deleted)',profile:OTHER});
+  await provider.prepare();await provider.authorize();await provider.repository.list({kind:'object'});
+  assert.equal(state.folders.length,1);assert.equal(state.deletedSignals.length,0);
+  cases.push('another profile’s marker is ignored');
+}
 console.log(JSON.stringify({status:'PASS',suite:'drive-profile-binding',cases},null,2));

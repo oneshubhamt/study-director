@@ -115,7 +115,7 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
 {
   const {state,provider}=createHarness();await provider.prepare();state.scope='https://www.googleapis.com/auth/drive.file';await provider.authorize();
   await provider.repository.list({kind:'object'});
-  const folderVerificationCount=()=>state.requests.filter(request=>{if(request.method!=='GET')return false;const url=new URL(request.url);return url.pathname==='/drive/v3/files/folder-1'||url.pathname==='/drive/v3/files'&&String(url.searchParams.get('q')||'').includes("mimeType='application/vnd.google-apps.folder'");}).length;
+  const folderVerificationCount=()=>state.requests.filter(request=>{if(request.method!=='GET')return false;const url=new URL(request.url);const q=String(url.searchParams.get('q')||'');return url.pathname==='/drive/v3/files/folder-1'||url.pathname==='/drive/v3/files'&&q.includes("mimeType='application/vnd.google-apps.folder'")&&!q.includes('studyDirectorDeletedProfile');}).length;
   const directBefore=folderVerificationCount();
   await provider.repository.list({kind:'checkpoint'});await provider.repository.list({kind:'commit'});await provider.repository.list({kind:'object'});
   const directChecks=folderVerificationCount()-directBefore;assert.equal(directChecks,3,'independent Drive operations must retain fresh folder verification');

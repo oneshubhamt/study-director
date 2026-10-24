@@ -33,7 +33,7 @@ registry.define('backup-presentation',1,()=>{
     const action=(source,kind)=>{const key=JSON.stringify([source,kind]);if(!actions.has(key))actions.set(key,typeof input.action==='function'?input.action(source,kind):null);return actions.get(key);};
     const read=(source,id='backup-operation')=>notifications.readEvent(source,id);
     function locationLabel(source,state={}){
-      if(state.busy)return state.stalled?'Still working…':({history:'Reading backups…','restore-version':'Restoring…','bring-in':'Combining…','remove-safety':'Removing safety backup…'}[state.foregroundKind]||'Backing up…');
+      if(state.busy)return state.stalled?'Still working…':({prepare:'Preparing the backup folder…',history:'Reading backups…','restore-version':'Restoring…','bring-in':'Combining…','remove-safety':'Removing safety backup…'}[state.foregroundKind]||'Backing up…');
       if(state.backingUp)return state.sync?'Syncing…':'Backing up…';
       if(state.maintenanceBusy)return 'Maintaining backups…';
       if(state.mode==='unsupported')return 'Unavailable';

@@ -279,7 +279,11 @@ function classifyRepositoryState(input={}){
 function selectRepositoryRetention(rowsValue,{now=new Date()}={}){
   const rows=Array.isArray(rowsValue)?[...rowsValue]:[];rows.sort((a,b)=>Date.parse(a.manifest?.exportedAt||0)-Date.parse(b.manifest?.exportedAt||0)||String(a.id||'').localeCompare(String(b.id||'')));
   const nowMs=now instanceof Date?now.getTime():Date.parse(now);if(!Number.isFinite(nowMs))throw new Error('Repository retention evaluation time is invalid.');
-  const activeProtected=activeProtectedRepositoryRow(rows,nowMs),normalRows=rows.filter(row=>row&&row.manifest?.retention?.role==='normal');
+  const activeProtected=activeProtectedRepositoryRow(rows,nowMs),everyNormal=rows.filter(row=>row&&row.manifest?.retention?.role==='normal');
+  // Once a version in the current format exists, versions in older formats
+  // retire: Version History and the next cleanup keep current ones only, so a
+  // location ends up holding one format.
+  const currentRows=everyNormal.filter(row=>Number(row.manifest.version)===REPOSITORY_MANIFEST_VERSION),normalRows=currentRows.length?currentRows:everyNormal;
   const selected=new Map(),tiers=new Map();
   const keep=(row,tier)=>{if(!row)return;selected.set(row.id,row);if(!tiers.has(row.id))tiers.set(row.id,tier);};
   const latest=newestRepositoryRow(normalRows);keep(latest,'latest');
@@ -484,13 +488,19 @@ function rethrowCleanupControl(error){
   const code=String(error&&error.code||'');
   if(error&&error.name==='AbortError'||/_MAINTENANCE_BUDGET$/u.test(code))throw error;
 }
+// Which formats a location's kept versions are in: once none is older than
+// the current format, the code that reads older ones can be removed.
+function repositoryFormats(rows){
+  let current=0,older=0;for(const row of rows)if(Number(row?.manifest?.version)===REPOSITORY_MANIFEST_VERSION)current+=1;else older+=1;
+  return freeze({version:REPOSITORY_MANIFEST_VERSION,current,older});
+}
 async function cleanupRepositoryRetention(input){
   const rows=Array.isArray(input&&input.checkpoints)?[...input.checkpoints]:[];
   rows.sort((a,b)=>Date.parse(a.manifest?.exportedAt||0)-Date.parse(b.manifest?.exportedAt||0)||String(a.id||'').localeCompare(String(b.id||'')));
   const checkpointUncertain=Math.max(0,Number(input&&input.invalidCount)||0)+Math.max(0,Number(input&&input.ignoredCount)||0),overflow=input&&input.overflow===true;
   // Missing and unreadable are different states. An incomplete inventory cannot
   // prove that any manifest, commit or shared object is safe to remove.
-  if(overflow||checkpointUncertain)return freeze({warning:'Repository cleanup was deferred because backup history could not be read completely. No backup files were removed.',retained:freeze(rows),removedCheckpoints:0,removedUncommitted:0,removedOrphanCommits:0,deferredIncomplete:0,checkpointDeferred:0,checkpointFailures:0,gcRemoved:0,gcDeferred:0,gcBudgetDeferred:0,gcFailures:0,gcSkipped:true,gcPending:true,uncertainCount:checkpointUncertain+(overflow?1:0),objectGcBlocked:input&&input.blockObjectGc===true,overflow,selection:null});
+  if(overflow||checkpointUncertain)return freeze({warning:'Repository cleanup was deferred because backup history could not be read completely. No backup files were removed.',retained:freeze(rows),formats:null,removedCheckpoints:0,removedUncommitted:0,removedOrphanCommits:0,deferredIncomplete:0,checkpointDeferred:0,checkpointFailures:0,gcRemoved:0,gcDeferred:0,gcBudgetDeferred:0,gcFailures:0,gcSkipped:true,gcPending:true,uncertainCount:checkpointUncertain+(overflow?1:0),objectGcBlocked:input&&input.blockObjectGc===true,overflow,selection:null});
   const preparedObjects=input&&input.inventoryBeforeDelete===true?await input.listObjects():null;
   await input.beginDeletion?.();
   const selection=selectRepositoryRetention(rows,{now:input&&input.now||new Date()}),keep=[...selection.retained],remove=[...selection.remove],retainedIds=new Set();for(const row of keep)for(const entry of row.manifest?.objects||[])retainedIds.add(entry.objectId);
@@ -537,7 +547,7 @@ async function cleanupRepositoryRetention(input){
   if(gcFailures)parts.push(`${gcFailures} unused object${gcFailures===1?' could':'s could'} not be removed and will be retried later.`);
   const uncertain=objectListingInvalid+(objectListingFailed?1:0);if(objectListingInvalid)parts.push(`${objectListingInvalid} repository object entr${objectListingInvalid===1?'y was':'ies were'} unreadable and left untouched.`);if(objectListingFailed)parts.push('Repository object enumeration failed and was left untouched.');if(objectListingOverflow)parts.push('Repository object enumeration exceeded its safety bound and was left untouched.');
   const actualRetained=[...keep,...failedRows,...deferredRows].sort((a,b)=>Date.parse(a.manifest?.exportedAt||0)-Date.parse(b.manifest?.exportedAt||0)||String(a.id||'').localeCompare(String(b.id||'')));
-  return freeze({warning:parts.join(' '),retained:freeze(actualRetained),removedCheckpoints,removedUncommitted,removedOrphanCommits,deferredIncomplete,checkpointDeferred,checkpointFailures:deletionFailures,gcRemoved,gcDeferred,gcBudgetDeferred,gcFailures,gcSkipped,gcPending:gcSkipped||deferredIncomplete>0||checkpointDeferred>0||gcDeferred>0||gcBudgetDeferred>0||gcFailures>0,uncertainCount:uncertain,objectGcBlocked:input&&input.blockObjectGc===true,objectListingFailed,overflow:objectListingOverflow,selection});
+  return freeze({warning:parts.join(' '),retained:freeze(actualRetained),formats:repositoryFormats(actualRetained),removedCheckpoints,removedUncommitted,removedOrphanCommits,deferredIncomplete,checkpointDeferred,checkpointFailures:deletionFailures,gcRemoved,gcDeferred,gcBudgetDeferred,gcFailures,gcSkipped,gcPending:gcSkipped||deferredIncomplete>0||checkpointDeferred>0||gcDeferred>0||gcBudgetDeferred>0||gcFailures>0,uncertainCount:uncertain,objectGcBlocked:input&&input.blockObjectGc===true,objectListingFailed,overflow:objectListingOverflow,selection});
 }
 
 async function prepareRepositoryCheckpointWork(previousManifests=null,{interactive=false,availableObjectIds=null,excludedObjectIds=null,retention=null,signal=null,baseUpdate=false}={}){

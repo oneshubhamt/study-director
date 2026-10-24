@@ -87,7 +87,7 @@ for(const groups of [DATA_ARCHITECTURE.localStorage,DATA_ARCHITECTURE.appMeta.ex
 assert.equal(DATA_ARCHITECTURE.cacheStorage.applicationShell.identity,CACHE_STORAGE_IDENTITIES.shellPrefix);
 assert.equal(DATA_ARCHITECTURE.cacheStorage.updateBridge.identity,CACHE_STORAGE_IDENTITIES.updateBridge);
 assert.equal(DATA_ARCHITECTURE.cacheStorage.updateBridge.recoveryPrefix,CACHE_STORAGE_IDENTITIES.updateRecoveryPrefix);
-assert.equal(DATA_ARCHITECTURE.external.deviceBackup.repositoryRoot,EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderRoot);
+assert.equal(DATA_ARCHITECTURE.external.deviceBackup.repositoryPrefix,EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix);assert.equal(DATA_ARCHITECTURE.external.deviceBackup.legacyRepositoryRoot,EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderLegacyRoot);
 assert.equal(DATA_ARCHITECTURE.external.driveBackup.repositoryRoot,EXTERNAL_REPOSITORY_IDENTITIES.driveFolder);
 assert.match(app,/sessionTabKey:SESSION_STORAGE_KEYS\.appTab/u);
 const pwaLifecycle=read('source/core/pwa-lifecycle.js');
@@ -216,7 +216,7 @@ const sw=read('source/platform/sw.js'),deviceBackupSource=read('source/core/devi
 assert.match(sw,/@@SD_CACHE_STORAGE_IDENTITIES@@/u,'service worker cache identities must come from the canonical contract');
 assert.doesNotMatch(sw,/const CACHE_PREFIX=['"]study-director-shell-/u,'service worker must not mint the shell cache prefix');
 assert.doesNotMatch(sw,/const bridgeCache=['"]study-director-update-bridge-v2/u,'service worker must not mint the update bridge cache');
-assert.match(app,/const EXTERNAL_REPOSITORY_IDENTITIES=Object\.freeze\(@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@\)/u,'Device Backup repository directories must come from the canonical contract');assert.match(app,/identities:Object\.freeze\(\{root:ProfileScope\.scoped\(EXTERNAL_REPOSITORY_IDENTITIES\.deviceFolderRoot\)/u,'Device Folder storage receives its directory names from the canonical contract');
+assert.match(app,/const EXTERNAL_REPOSITORY_IDENTITIES=Object\.freeze\(@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@\)/u,'Device Backup repository directories must come from the canonical contract');assert.match(app,/identities:Object\.freeze\(\{root:repository,legacyRoot:ProfileScope\.scoped\(EXTERNAL_REPOSITORY_IDENTITIES\.deviceFolderLegacyRoot\),prefix:EXTERNAL_REPOSITORY_IDENTITIES\.backupFolderPrefix,/u,'Device Folder storage receives its directory names from the canonical contract');
 assert.doesNotMatch(deviceBackupSource,/Study-Director-Automatic-Backup-Repository/u,'Device Backup must not mint its repository root');
 assert.doesNotMatch(deviceBackupSource,/id:['"]study-director-device-backup/u,'Device Backup must not mint its persistent picker identity');
 assert.match(app,/pickerId:EXTERNAL_REPOSITORY_IDENTITIES\.deviceFolderPickerId/u,'Device Backup picker identity must come from the canonical contract');

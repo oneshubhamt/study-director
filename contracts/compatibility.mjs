@@ -1,4 +1,4 @@
-import {INDEXED_DB,OBSOLETE_INDEXED_DB,CURRENT_SCHEMA_VERSIONS,OPFS_IDENTITIES,EXTERNAL_FORMATS} from './canonical-identities.mjs';
+import {INDEXED_DB,OBSOLETE_INDEXED_DB,CURRENT_SCHEMA_VERSIONS,OPFS_IDENTITIES,EXTERNAL_FORMATS,EXTERNAL_REPOSITORY_IDENTITIES} from './canonical-identities.mjs';
 const freeze=Object.freeze;
 export const LEGACY_BACKUP_SCHEMA_VERSION=1;
 const item=value=>freeze(value);
@@ -277,11 +277,19 @@ export const COMPATIBILITY_REGISTRY=freeze({
     },
     {
       id:'backup-repository-v1-v4',owner:'managed-repository',kind:'import-adapter',
-      source:'Device Folder and Google Drive checkpoints written before SDVB75F10: repository manifest versions 1 to 4 (version 1 without retention or a commit marker; up to version 4 with Reflection Draft packs and older Active Session shapes), history entries without summaries, and older Drive maintenance markers',
-      target:'the current restore model; every new checkpoint is written as manifest version 5',
-      proof:'old checkpoints are only read, never rewritten; their contents pass through the compatibility codecs and current validation before restore',
-      retirement:'after every repository holds only version-5 checkpoints, older backup versions having aged out under the 15-point retention or been replaced',
+      source:'Device Folder and Google Drive checkpoints in repository manifest versions 1 to 7 (version 1 without retention or a commit marker; up to version 4 with Reflection Draft packs and older Active Session shapes; up to version 7 without kept reviews), history entries without summaries, and older Drive maintenance markers',
+      target:'the current restore model; every new checkpoint is written as manifest version 8',
+      proof:'old checkpoints are only read, never rewritten; their contents pass through the compatibility codecs and current validation before restore. Once a location holds a version-8 checkpoint, older ones leave Version History and the next cleanup removes them (selectRepositoryRetention)',
+      retirement:'after every location of every device keeps only version-8 backup checkpoints (Copy diagnostics, Format cleanup, reads ready on every device in use)',
       sourceFiles:freeze(['source/core/managed-repository.js','source/core/backup.js','source/core/backup-provider.js','source/external/drive.js'])
+    },
+    {
+      id:'device-folder-single-repository',owner:'device-folder-storage',kind:'import-adapter',
+      source:`the single repository folder ${EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderLegacyRoot} that earlier versions kept in the chosen Device Folder`,
+      target:'the profile and device own repository folder (Study Director - <profile> - <device>, marker version 2)',
+      proof:'every file is copied and checked (size, and contents for versions and markers) before the old folder is deleted; an interrupted move continues where it stopped',
+      retirement:'after every device has moved its Device Folder backups (Copy diagnostics, Format cleanup, reads ready on every device in use)',
+      sourceFiles:freeze(['source/core/device-folder-storage.js','source/core/device-backup.js'])
     },
   ]),
   protocolCompatibility:items([

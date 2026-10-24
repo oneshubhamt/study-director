@@ -46,14 +46,18 @@ const appUrl=`http://127.0.0.1:${server.address().port}/${manifest.main}`;
 const browser=await launchChromium({profilePrefix:'qa-device-browser-'});
 let page=null;
 const prelude=`(()=>{
+  (localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));
   window.__devicePickerCalls=()=>Number(sessionStorage.getItem('qa-picker-calls')||0);
   Object.defineProperty(window,'showDirectoryPicker',{configurable:true,value:async()=>{
     sessionStorage.setItem('qa-picker-calls',String(window.__devicePickerCalls()+1));
     return navigator.storage.getDirectory();
   }});
   window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';
+  // The backup folder named for this profile and device, and the versions in
+  // it, read from the folder itself.
+  window.__deviceRepository=async()=>{const root=await navigator.storage.getDirectory();for await(const [name,handle] of root.entries())if(handle.kind==='directory'&&name.startsWith('Study Director - '))return handle;throw new Error('no backup folder');};
   // The versions in the folder, read from the folder itself.
-  window.__deviceVersions=async()=>{try{const root=await navigator.storage.getDirectory(),repo=await root.getDirectoryHandle('Study-Director-Automatic-Backup-Repository'),commits=await repo.getDirectoryHandle('commits'),out=[];for await(const [name] of commits.entries())if(/^cp_[a-f0-9]{32}\\.sdcommit$/.test(name))out.push(name.slice(0,-'.sdcommit'.length));return out.sort();}catch{return [];}};
+  window.__deviceVersions=async()=>{try{const repo=await __deviceRepository(),commits=await repo.getDirectoryHandle('commits'),out=[];for await(const [name] of commits.entries())if(/^cp_[a-f0-9]{32}\\.sdcommit$/.test(name))out.push(name.slice(0,-'.sdcommit'.length));return out.sort();}catch{return [];}};
 })();`;
 const evidence={status:'PASS',release:manifest.release,checks:{}};
 
@@ -86,7 +90,7 @@ try{
   await page.evaluate(`document.getElementById('connect-device-backup').click()`);
   await waitFor(()=>page.evaluate(`(async()=>{const state=__DeviceBackupDebug.DeviceBackup.status();return state.connected&&!state.busy&&(await __deviceVersions()).length===1;})()`),{timeout:90000,label:'initial verified repository checkpoint'});
   const first=await page.evaluate(`(async()=>{
-    const root=await navigator.storage.getDirectory(),repo=await root.getDirectoryHandle('Study-Director-Automatic-Backup-Repository');
+    const repo=await __deviceRepository();
     const checkpoints=await repo.getDirectoryHandle('checkpoints'),objects=await repo.getDirectoryHandle('objects'),checkpointNames=[],objectNames=[];
     for await(const [name] of checkpoints.entries())checkpointNames.push(name);for await(const [name] of objects.entries())objectNames.push(name);
     checkpointNames.sort();const file=await (await checkpoints.getFileHandle(checkpointNames[0])).getFile();
@@ -106,7 +110,7 @@ try{
   await page.evaluate(`(async()=>{__DeviceBackupDebug.AppData.notes.update('Rotation','Rotation','A change worth a new version');await __DeviceBackupDebug.AppData.notes.flush();})()`);
   await page.evaluate(`document.getElementById('device-backup-now').click()`);
   await waitFor(()=>page.evaluate(`(async()=>!__DeviceBackupDebug.DeviceBackup.status().busy&&(await __deviceVersions()).length===2)()`),{timeout:90000,label:'second verified repository checkpoint'});
-  const rotation=await page.evaluate(`(async()=>{const root=await navigator.storage.getDirectory(),repo=await root.getDirectoryHandle('Study-Director-Automatic-Backup-Repository'),checkpoints=await repo.getDirectoryHandle('checkpoints'),out=[];for await(const [name,handle] of checkpoints.entries()){const file=await handle.getFile();out.push({name,size:file.size});}return out.sort((a,b)=>a.name.localeCompare(b.name));})()`);
+  const rotation=await page.evaluate(`(async()=>{const repo=await __deviceRepository(),checkpoints=await repo.getDirectoryHandle('checkpoints'),out=[];for await(const [name,handle] of checkpoints.entries()){const file=await handle.getFile();out.push({name,size:file.size});}return out.sort((a,b)=>a.name.localeCompare(b.name));})()`);
   assert.equal(rotation.length,2);assert.ok(rotation.every(row=>/^cp_[a-f0-9]{32}\.sdcheckpoint$/u.test(row.name)&&row.size>0));
   evidence.checks.rotation={immutableCheckpointNames:true,repositoryManifestReadback:true,twoManifests:true,retentionTarget:15};
 

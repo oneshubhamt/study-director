@@ -8,10 +8,10 @@ for(const name of ['internal','device-folder-storage'])vm.runInThisContext(fs.re
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],freeze=Object.freeze;
 const sha256=async blob=>Buffer.from(await webcrypto.subtle.digest('SHA-256',await blob.arrayBuffer())).toString('hex');
 let now=Date.parse('2026-10-06T08:00:00.000Z'),folder=null,canMutate=true;
-const faults={corruptReadOf:new Set()},identities=freeze({root:'Study-Director-Automatic-Backup-Repository',objects:'objects',checkpoints:'checkpoints',commits:'commits'});
+const faults={corruptReadOf:new Set()},identities=freeze({root:'Study Director - QA - Test Device',legacyRoot:'Study-Director-Automatic-Backup-Repository',prefix:'Study Director',objects:'objects',checkpoints:'checkpoints',commits:'commits'});
 const manifestFor=id=>freeze({checkpoint:freeze({checkpointId:id}),logicalFingerprint:'a'.repeat(64),exportedAt:new Date(now).toISOString(),counts:freeze({dailyRecord:3,note:2}),encrypted:false,retention:freeze({role:'normal',protectedUntil:'',purpose:'',calendar:freeze({localDate:'2026-10-06',weekStart:'2026-10-05',month:'2026-10',utcOffsetMinutes:0})})});
 const storage=registry.require('device-folder-storage',1).createStorage(freeze({
-  folder:()=>folder,identities,
+  folder:()=>folder,identities,owner:()=>({profile:'prof_qa_mve00000_abcdef01',scope:'',device:'inst_qa_test_mve00000_abcdef01'}),
   checksum:async blob=>sha256(blob),
   inspectManifest:async file=>{const value=JSON.parse(await file.text());if(value.locked)throw Object.assign(new Error('locked'),{code:'BACKUP_LOCKED'});return manifestFor(value.id);},
   environment:freeze({canMutate:()=>canMutate,now:()=>now,setTimeout,clearTimeout,yieldTask:async()=>{}}),
@@ -41,7 +41,7 @@ assert.equal(await storage.scope(),listed[0].verificationScope);
   const stalled=createMemoryDirectory({now:()=>now,faults});
   const stallWrites=directory=>new Proxy(directory,{get:(target,key)=>key==='getFileHandle'?async(name,options)=>{const handle=await target.getFileHandle(name,options);return new Proxy(handle,{get:(file,prop)=>prop==='createWritable'?async()=>({write:()=>new Promise(()=>{}),close:async()=>{},abort:async()=>{}}):typeof file[prop]==='function'?file[prop].bind(file):file[prop]});}:key==='getDirectoryHandle'?async(name,options)=>stallWrites(await target.getDirectoryHandle(name,options)):typeof target[key]==='function'?target[key].bind(target):target[key]});
   const timers=[];const stalledStorage=registry.require('device-folder-storage',1).createStorage(freeze({
-    folder:()=>stallWrites(stalled),identities,checksum:async blob=>sha256(blob),inspectManifest:async()=>manifestFor(id(9)),
+    folder:()=>stallWrites(stalled),identities,owner:()=>({profile:'prof_qa_mve00000_abcdef01',scope:'',device:'inst_qa_test_mve00000_abcdef01'}),checksum:async blob=>sha256(blob),inspectManifest:async()=>manifestFor(id(9)),
     environment:freeze({canMutate:()=>true,now:()=>now,setTimeout:(callback,ms)=>{timers.push(callback);return timers.length;},clearTimeout:()=>{},yieldTask:async()=>{}}),
     limits:freeze({publicationMaxAgeMs:24*3600000,publicationAssertionMarginMs:30*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,responseTimeoutMs:10000})
   }));

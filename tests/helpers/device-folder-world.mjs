@@ -14,9 +14,18 @@ import {createMemoryDirectory} from './memory-directory.mjs';
 const freeze=Object.freeze;
 export const MINUTE=60*1000,DAY=24*60*MINUTE;
 const sha256=async blob=>Buffer.from(await webcrypto.subtle.digest('SHA-256',await blob.arrayBuffer())).toString('hex');
-export const IDENTITIES=freeze({root:'Study-Director-Automatic-Backup-Repository',objects:'objects',checkpoints:'checkpoints',commits:'commits'});
+// Each profile and device has its own repository folder in the chosen folder;
+// earlier versions kept one folder of a fixed name, which is moved into it.
+export const LEGACY_ROOT='Study-Director-Automatic-Backup-Repository',REPOSITORY_NAME='Study Director - QA - Test Device',QA_DEVICE='inst_qa_test_mve00000_abcdef01',QA_PROFILE='prof_qa_mve00000_abcdef01';
+export const IDENTITIES=freeze({root:REPOSITORY_NAME,legacyRoot:LEGACY_ROOT,prefix:'Study Director',objects:'objects',checkpoints:'checkpoints',commits:'commits'});
 
-export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',supported=true,protection=null}={}){
+// Each world numbers its versions apart, as random ids would be.
+let worlds=0;
+export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',supported=true,protection=null,device=QA_DEVICE,profile=QA_PROFILE,name=REPOSITORY_NAME}={}){
+  // Who this page is (profile and device), and the answer to "use one of the
+  // backup folders already here?" (null cancels, '' starts a new one).
+  const worldNumber=++worlds;
+  let owner=freeze({profile,scope:'',device,name}),repositoryChoice=rows=>rows[0].name;const repositoryChoices=[];
   const clock=createFakeClock(start),notices=[],published=[],verified=new Map(),settingsStore=new Map(),rendered=[],captures=[];
   let current=new clock.Date(clock.now()-MINUTE).toISOString(),localEmpty=false,canMutate=true,pickerResult=null,pickerCalls=0,sequence=0,durablePending=null;
   const context={Object,Symbol,TypeError,Error,Date:clock.Date,AbortController,Blob,File,Promise,Map,Set,WeakMap,TextEncoder,Uint8Array,JSON,Math,Number,String,Array,console,crypto:webcrypto,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,DOMException};
@@ -37,7 +46,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   }));
   const calendar=at=>{const date=new Date(at),day=(date.getUTCDay()+6)%7,monday=new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),date.getUTCDate()-day));return freeze({localDate:at.slice(0,10),weekStart:monday.toISOString().slice(0,10),month:at.slice(0,7),utcOffsetMinutes:0});};
   async function publish(_history,options,executor){
-    const exportedAt=new clock.Date(clock.now()).toISOString(),sourceRevision=current,checkpointId='cp_'+(++sequence).toString(16).padStart(32,'0'),role=options.retention?.role==='before-restore'?'before-restore':'normal';
+    const exportedAt=new clock.Date(clock.now()).toISOString(),sourceRevision=current,checkpointId='cp_'+(worldNumber*0x100000+(++sequence)).toString(16).padStart(32,'0'),role=options.retention?.role==='before-restore'?'before-restore':'normal';
     const seal=async raw=>protection?(await protection.protect({blob:raw,filename:'backup'},{interactive:options.interactive!==false,signal:options.signal})).blob:raw;
     const blob=await seal(new Blob([`library at ${sourceRevision}`])),objectId='obj_'+(await sha256(new Blob([sourceRevision]))).slice(0,32),storedChecksum=await sha256(blob),reused=options.availableObjectIds instanceof Set&&options.availableObjectIds.has(objectId);
     const entry=freeze({objectId,blob,storedBytes:blob.size,storedChecksum,reused,checkProtection:async()=>{}}),prepared=freeze({exportedAt,objects:freeze([entry])});
@@ -72,8 +81,8 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   runtime.configureRepositoryMaintenance(freeze({read:async id=>maintenance.get(id)||null,mark:async(id,state)=>{maintenance.set(id,freeze({...state,providerId:id}));return true;},clear:async id=>{maintenance.delete(id);return true;}}));
   runtime.configureAutomaticBackup(freeze({covered:id=>verified.get(id)?.sourceRevision||'',current:()=>current,ready:async()=>!localEmpty}));
   let folder=null;
-  const storageFor=folderPort=>registry.require('device-folder-storage',1).createStorage(freeze({
-    folder:folderPort,identities:IDENTITIES,checksum:(blob)=>sha256(blob),inspectManifest,
+  const storageFor=(folderPort,repositoryPort=()=>IDENTITIES.root)=>registry.require('device-folder-storage',1).createStorage(freeze({
+    folder:folderPort,identities:freeze({...IDENTITIES,root:repositoryPort}),checksum:(blob)=>sha256(blob),inspectManifest,owner:()=>owner,
     environment:freeze({canMutate:()=>canMutate,now:()=>clock.now(),setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,yieldTask:async()=>{}}),
     limits:freeze({publicationMaxAgeMs:policy.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:policy.protocol.publicationAssertionMarginMs,maintenanceMaxAgeMs:policy.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:policy.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
   }));
@@ -84,11 +93,11 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
     configuration:freeze({metadataKey:'deviceFolder',pickerId:'study-director-device-backup',settingsTimeoutMs:10*1000}),
     engine:freeze({backup:id=>runtime.backup(id),cancelForeground:(reason,id)=>runtime.cancelForeground(reason,id),disconnect:id=>runtime.disconnect(id),forget:id=>runtime.forget(id),locationStatus:id=>runtime.locationStatus(id),register:config=>runtime.register(config),subscribeStatus:listener=>runtime.subscribeStatus(listener)}),
     environment:freeze({canMutate:()=>canMutate,clearTimeout:clock.clearTimeout,setTimeout:clock.setTimeout,showDirectoryPicker}),
-    hooks:freeze({capture:(scope,error)=>captures.push(freeze({scope,message:String(error?.message||error)})),chooseCheckpoint:async rows=>rows[0].id,render:state=>rendered.push(state),sourceRevision:()=>current,verifiedAt:()=>verified.get('device-folder')?.at||''}),
+    hooks:freeze({capture:(scope,error)=>captures.push(freeze({scope,message:String(error?.message||error)})),chooseCheckpoint:async rows=>rows[0].id,chooseRepository:async rows=>{repositoryChoices.push([...rows]);return repositoryChoice(rows);},render:state=>rendered.push(state),repositoryOwner:()=>owner,sourceRevision:()=>current,verifiedAt:()=>verified.get('device-folder')?.at||''}),
     presentation,
     // Writes pass the app's own stored-record validator, as the real store does.
     settings:freeze({read:async key=>settingsStore.get(key)||null,write:async(key,value)=>{if(!settingsValid(value,{key}))throw new Error(`appMeta ${key} value is not canonical.`);settingsStore.set(key,value);return true;},remove:async key=>{settingsStore.delete(key);return true;}}),
-    transport:folderPort=>storageFor(folderPort)
+    transport:(folderPort,repositoryPort)=>storageFor(folderPort,repositoryPort)
   }));
   // A browser directory handle with readwrite permission state.
   function directory({permission='granted',grant='granted'}={}){
@@ -99,7 +108,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   // Real work (hashing, file reads) finishes between timers, so simulated time
   // moves from one due timer to the next only once the work started by the
   // previous one has settled.
-  const idle=()=>!runtime.status().busy&&runtime.backgroundStatus().every(row=>!row.busy&&!row.running);
+  const idle=()=>!runtime.status().busy&&!controller.status().busy&&runtime.backgroundStatus().every(row=>!row.busy&&!row.running);
   // Waits for real work (up to 20 s of wall time), never for simulated time.
   async function settle(){const until=Date.now()+20000;let quiet=0;for(let turn=0;quiet<3&&Date.now()<until;turn++){await new Promise(resolve=>setImmediate(resolve));if(turn%25===24)quiet=idle()?quiet+1:0;}}
   async function tick(ms){
@@ -107,11 +116,13 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
     for(;;){await settle();const next=clock.nextAt();if(next===null||next>target)break;await clock.advance(Math.max(0,next-clock.now()));}
     await clock.advance(Math.max(0,target-clock.now()));await settle();
   }
-  async function commits(handle){try{const root=await handle.getDirectoryHandle(IDENTITIES.root);return (await root.getDirectoryHandle(IDENTITIES.commits)).names();}catch{return [];}}
-  async function locks(handle){const root=await handle.getDirectoryHandle(IDENTITIES.root);return (await root.getDirectoryHandle(IDENTITIES.objects)).names().filter(name=>/\.sd(?:publication|maintenance)$/u.test(name));}
+  async function commits(handle,folderName=owner.name){try{const root=await handle.getDirectoryHandle(folderName);return (await root.getDirectoryHandle(IDENTITIES.commits)).names();}catch{return [];}}
+  async function locks(handle,folderName=owner.name){const root=await handle.getDirectoryHandle(folderName);return (await root.getDirectoryHandle(IDENTITIES.objects)).names().filter(name=>/\.sd(?:publication|maintenance)$/u.test(name));}
   return {
     clock,runtime,controller,published,verified,settingsStore,notices,rendered,captures,directory,tick,settle,commits,locks,storageFor,
     get pickerCalls(){return pickerCalls;},
+    get repositoryChoices(){return repositoryChoices;},
+    setOwner:value=>{owner=freeze({...owner,...value});},chooseRepositoryWith:fn=>{repositoryChoice=fn;},
     // The file name the next backup's object will have.
     nextObjectName:async()=>'obj_'+(await sha256(new Blob([current]))).slice(0,32)+'.sdobject',
     choose:value=>{pickerResult=value;},

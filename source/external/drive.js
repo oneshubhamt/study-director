@@ -25,7 +25,7 @@
   const FOLDER_MIME='application/vnd.google-apps.folder';
   const FOLDER_MARKER=Object.freeze({key:REPOSITORY_IDENTITIES.driveFolderMarker,value:'true'});
   // The profile whose library the folder holds. Two people's data never mix.
-  const PROFILE_MARKER=REPOSITORY_IDENTITIES.driveFolderProfileMarker,PROFILE_PATTERN=/^prof_[a-z0-9]{1,24}_[a-z0-9]{6,12}_[a-f0-9]{8}$/u;
+  const PROFILE_MARKER=REPOSITORY_IDENTITIES.driveFolderProfileMarker,DELETED_MARKER=REPOSITORY_IDENTITIES.driveDeletedProfileMarker,PROFILE_PATTERN=/^prof_[a-z0-9]{1,24}_[a-z0-9]{6,12}_[a-f0-9]{8}$/u;
   const FILE_SECURITY_VERSION='1';
   const FILE_SECURITY_MARKER=REPOSITORY_IDENTITIES.driveFileSecurityMarker;
   const FILE_DIGEST_MARKER=REPOSITORY_IDENTITIES.driveFileDigestMarker;
@@ -80,7 +80,8 @@
   let connectionExpiryTimer=null;
   const connectionListeners=new Set();
   let folderId='';
-  let profilePort=null,boundFolder='',seenFolder=null;
+  // deletionChecked: the profile already checked for a deletion marker in this sign-in.
+  let profilePort=null,boundFolder='',seenFolder=null,deletionChecked='',libraryDeleted='';
   let folderEpoch=0;
   let folderResolutionFlight=null;
   let picker=null;
@@ -107,7 +108,7 @@
       folderState:parent.folderState
     });
   }
-  function invalidateFolderIdentity(){folderId='';boundFolder='';seenFolder=null;folderEpoch+=1;}
+  function invalidateFolderIdentity(){folderId='';boundFolder='';seenFolder=null;deletionChecked='';folderEpoch+=1;}
   function verifiedFolderReceipt(context=EMPTY_DRIVE_OPERATION){
     const state=context&&context.folderState,receipt=state&&state.receipt;
     if(!receipt)return '';
@@ -438,7 +439,7 @@
     const response=await authorizedFetch(`${DRIVE_API}/files?fields=${encodeURIComponent(fields)}`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({name:FOLDER_NAME,mimeType:FOLDER_MIME,appProperties:{[FOLDER_MARKER.key]:FOLDER_MARKER.value,[PROFILE_MARKER]:expectedProfile()}})
+      body:JSON.stringify({name:libraryName(),mimeType:FOLDER_MIME,appProperties:{[FOLDER_MARKER.key]:FOLDER_MARKER.value,[PROFILE_MARKER]:expectedProfile()}})
     },API_TIMEOUT_MS,context);
     if(!response.ok)throw await apiError(response,'Could not create the Study Director backup folder.');
     const payload=await jsonResponse(response);
@@ -447,7 +448,19 @@
     return await findFolder(context);
   }
   async function resolveFolder(context=EMPTY_DRIVE_OPERATION){
-    if(!expectedProfile())throw new Error('This profile is still starting. Try again in a moment.');
+    const expected=expectedProfile();
+    if(!expected)throw new Error('This profile is still starting. Try again in a moment.');
+    if(libraryDeleted===expected)throw noRetry(Object.assign(new Error('This profile was deleted. Google Drive was not used.'),{studyDirectorProfileDeleted:true}));
+    // Before its library is looked for (or made again), once per sign-in: was
+    // this profile deleted on another device?
+    if(deletionChecked!==expected){
+      if(await deletionMarker(expected,context)){
+        setTimeout(()=>{clearSession();signedInBefore=false;},0);
+        Promise.resolve().then(()=>profilePort.deleted?.(Object.freeze({profile:expected}))).catch(()=>{});
+        throw noRetry(Object.assign(new Error('This profile was deleted on another device. Google Drive was not used.'),{studyDirectorProfileDeleted:true}));
+      }
+      deletionChecked=expected;
+    }
     const found=await findFolder(context)||await createFolder(context);
     await bindFolder(found,context);
     return found;
@@ -467,12 +480,52 @@
     const decision=await profilePort.bind(Object.freeze({email,folder:String(id),found,mine,library}));
     if(mine&&decision==='continue'){}
     else if(!found&&decision==='claim')await markFolder(id,expected,context);
-    else if(!(found&&decision==='adopt'&&expectedProfile()===found)){
+    else if(found&&decision==='adopt'&&expectedProfile()===found){}
+    else{
       // Forget this sign-in so Connect offers the choice of account again.
       setTimeout(()=>{clearSession();signedInBefore=false;},0);
       throw noRetry(Object.assign(new Error(found?'This Google account holds the library of another profile. Drive was not used.':'This Google account already holds a Study Director library. Drive was not used.'),{studyDirectorProfileRefused:true}));
     }
     boundFolder=`${id}\n${expectedProfile()}`;
+    // The folder is named after its profile ("Study Director – Ana") and
+    // follows a rename; only its properties say whose it is.
+    const name=libraryName();if(name&&metadata&&metadata.name!==name)await renameFolder(id,name,context).catch(()=>{});
+  }
+  function libraryName(){try{const name=String(profilePort.name()||'').trim();return name&&name.length<=200?name:FOLDER_NAME;}catch{return FOLDER_NAME;}}
+  async function renameFolder(id,name,context=EMPTY_DRIVE_OPERATION){
+    const response=await authorizedFetch(`${DRIVE_API}/files/${encodeURIComponent(id)}?fields=${encodeURIComponent('id,name')}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})},API_TIMEOUT_MS,context);
+    if(!response.ok)throw await apiError(response,'Could not rename the Study Director backup folder.');
+  }
+  // Deleting a profile everywhere leaves a marker: a small folder named
+  // "Study Director – Ana (deleted)" carrying the profile id, which every
+  // device checks for before it uses or makes that profile's library.
+  async function deletionMarker(profile,context=EMPTY_DRIVE_OPERATION){
+    const q=driveQuery([`mimeType='${FOLDER_MIME}'`,`appProperties has { key='${DELETED_MARKER}' and value='${profile}' }`,'trashed=false']);
+    const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'1',fields:'files(id)'});
+    const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);
+    if(!response.ok)throw await apiError(response,'Could not check whether this profile was deleted.');
+    const payload=await jsonResponse(response);
+    return Array.isArray(payload&&payload.files)&&payload.files.length>0;
+  }
+  // Delete everywhere: the marker first, so no device makes the library
+  // again, then the library folder goes to the Drive Trash, where it can be
+  // brought back for 30 days.
+  async function deleteLibrary(){
+    const expected=expectedProfile(),context=EMPTY_DRIVE_OPERATION;
+    if(!expected)throw new Error('This profile is still starting.');
+    if(!tokenValid())throw new Error('Sign in to Google Drive first.');
+    if(!await deletionMarker(expected,context)){
+      const response=await authorizedFetch(`${DRIVE_API}/files?fields=id`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:`${libraryName()} (deleted)`,mimeType:FOLDER_MIME,appProperties:{[DELETED_MARKER]:expected}})},API_TIMEOUT_MS,context);
+      if(!response.ok)throw await apiError(response,'Could not mark this profile as deleted in Google Drive.');
+    }
+    libraryDeleted=expected;repositoryUploads.clear();
+    const id=await findFolder(context);
+    if(id&&folderProfile(seenFolder)===expected){
+      const response=await authorizedFetch(`${DRIVE_API}/files/${encodeURIComponent(id)}?fields=id`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({trashed:true})},API_TIMEOUT_MS,context);
+      if(!response.ok)throw await apiError(response,'Could not move the library to the Google Drive Trash.');
+    }
+    invalidateFolderIdentity();
+    return true;
   }
   async function markFolder(id,profile,context=EMPTY_DRIVE_OPERATION){
     const fields='id,name,mimeType,ownedByMe,shared,trashed,appProperties,capabilities(canAddChildren)';
@@ -1169,7 +1222,9 @@
     releaseFile=api.backup.releaseFile||releaseFile;
     receiveBackupStream=typeof api.backup.receiveStream==='function'?api.backup.receiveStream:null;
     if(!receiveBackupStream)return false;
-    profilePort=api.backup.profile&&typeof api.backup.profile.id==='function'&&typeof api.backup.profile.bind==='function'?api.backup.profile:null;
+    profilePort=api.backup.profile&&['id','name','bind'].every(key=>typeof api.backup.profile[key]==='function')?api.backup.profile:null;
+    // What the app can do with the profile's library.
+    if(profilePort&&typeof profilePort.controls==='function')profilePort.controls(Object.freeze({deleteLibrary}));
     if(!profilePort)return false;
     restoreSession();
     return api.backup.providers.register(Object.freeze({

@@ -99,14 +99,24 @@ registry.define('profiles',1,()=>{
     }
     const switchTo=id=>{const list=read();return id!==current(list)?.id&&activate(id,list);};
     // Removes the page's profile from this device and opens another; its data
-    // is deleted from this device once no tab holds it (collect).
+    // is deleted from this device once no tab holds it (collect). The last
+    // profile is replaced by a new, empty one, which starts with its first start.
     function remove(){
       const list=read(),mine=current(list),others=list.profiles.filter(row=>row.scope!==pageScope);
-      if(!mine||!others.length)return false;
+      if(!mine)return false;
+      const removing=[...new Set([...list.removing,pageScope])];
+      if(!others.length){
+        const id=newId('profile'),row=entry({id,scope:id,name:'',email:'',folder:'',createdAt:new Date(platform.now()).toISOString(),fresh:true,from:null});
+        write({...list,profiles:[row],active:id,removing});platform.reload();return true;
+      }
       const back=mine.from!==null?others.find(row=>row.scope===mine.from):null,next=back||others.find(row=>row.id===list.active&&row.scope!==pageScope)||others[0];
-      write({...list,profiles:others,active:next.id,removing:[...new Set([...list.removing,pageScope])]});
+      write({...list,profiles:others,active:next.id,removing});
       platform.reload();return true;
     }
+    // Kept on this device after it was deleted everywhere else: the profile
+    // takes a new id and leaves its Google account, so a later sign-in starts
+    // a new library instead of meeting the deletion again.
+    const renew=()=>update(mine=>({id:newId(mine.name),email:'',folder:''}));
     // Deletes what removed profiles left on this device.
     async function collect(){
       const pending=read().removing.filter(scope=>scope!==pageScope);
@@ -127,7 +137,7 @@ registry.define('profiles',1,()=>{
       return platform.listen(key=>{if(key!==registryKey&&key!==null)return;const list=read(),mine=current(list),active=list.profiles.find(row=>row.id===list.active);if(!mine||active&&active.scope!==pageScope)platform.reload();});
     }
     const list=()=>read().profiles;
-    return freeze({current:()=>current(),list,ensure,rename,setAccount,adopt,finishFirstStart,add,switchTo,remove,collect,watch});
+    return freeze({current:()=>current(),list,ensure,rename,setAccount,adopt,renew,finishFirstStart,add,switchTo,remove,collect,watch});
   }
   return freeze({format:'study-director.profiles-module',contractVersion:1,createController});
 });

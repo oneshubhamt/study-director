@@ -446,7 +446,7 @@ records.push(freeze({version:16,recordKind:'study',date:'2026-09-21',reflection:
 {
   const saved={records:[...records],notes:{...notes},assets:new Map(assets),deletions:[...deletions],currentPersonal};
   const folder=createMemoryDirectory(),deviceStorage=registry.require('device-folder-storage',1).createStorage(freeze({
-    folder:()=>folder,identities:freeze({root:'Study-Director-Automatic-Backup-Repository',objects:'objects',checkpoints:'checkpoints',commits:'commits'}),
+    folder:()=>folder,identities:freeze({root:'Study Director - QA - Test Device',legacyRoot:'Study-Director-Automatic-Backup-Repository',prefix:'Study Director',objects:'objects',checkpoints:'checkpoints',commits:'commits'}),owner:()=>({profile:'prof_qa_mve00000_abcdef01',scope:'',device:'inst_qa_test_mve00000_abcdef01'}),
     checksum:async blob=>codec.checksumBlob(blob),inspectManifest:(file,options)=>runtime.repository.inspectManifest(file,options),
     environment:freeze({canMutate:()=>true,now:()=>Date.now(),setTimeout,clearTimeout,yieldTask:async()=>{}}),
     limits:freeze({publicationMaxAgeMs:24*3600000,publicationAssertionMarginMs:30*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,responseTimeoutMs:10000})
@@ -455,7 +455,7 @@ records.push(freeze({version:16,recordKind:'study',date:'2026-09-21',reflection:
   notes={Ethics:normalizeArea({key:'Ethics',text:'folder version',updatedAt:'2026-09-21T01:00:00.000Z'},'Ethics')};
   const published=await runtime.providers.backupRepositoryProvider('device-folder-engine',{interactive:false});
   assert.match(published.checkpointId,/^cp_[a-f0-9]{32}$/u);
-  const repositoryRoot=await folder.getDirectoryHandle('Study-Director-Automatic-Backup-Repository');
+  const repositoryRoot=await folder.getDirectoryHandle('Study Director - QA - Test Device');
   assert.deepEqual((await repositoryRoot.getDirectoryHandle('checkpoints')).names(),[published.checkpointId+'.sdcheckpoint'],'the version lands in the existing folder layout');
   const history=await runtime.providers.history('device-folder-engine',{interactive:false});
   assert.equal(history.available,true);assert.deepEqual(history.entries.map(entry=>entry.location.checkpointId),[published.checkpointId]);assert.equal(history.entries[0].location.tier,'latest');

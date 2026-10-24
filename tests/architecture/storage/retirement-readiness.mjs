@@ -41,6 +41,7 @@ const migrationEvidence=Object.freeze({
   'canonical-note-and-folder-names':['tests/integration/storage/compatibility-host.mjs','tests/integration/storage/indexeddb-topology-retirement.mjs'],
   'area-note-names-in-backups':['tests/integration/backup/current-canonical-roundtrip.mjs','tests/integration/backup/repository-restore.mjs'],
   'backup-repository-v1-v4':['tests/integration/backup/repository-restore.mjs'],
+  'device-folder-single-repository':['tests/integration/backup/device-folder-layout.mjs'],
   'name-keyed-notes-in-backups':['tests/integration/backup/current-canonical-roundtrip.mjs','tests/integration/backup/repository-restore.mjs','tests/integration/storage/canonical-schema-separation.mjs'],
   'legacy-service-worker-update-bridge':['tests/integration/pwa/service-worker-lifecycle.mjs']
 });

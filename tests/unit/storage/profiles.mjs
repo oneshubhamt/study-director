@@ -57,7 +57,6 @@ function device(){
   d.store.set('studyDirector.theme.v1~'+added.scope,'director-light');d.store.set('studyDirector.theme.v1','director-dark');
   assert.equal(second.remove(),true);assert.equal(d.events.reloads,2);
   assert.deepEqual(d.list().profiles.map(row=>row.id),[ana.id]);assert.equal(d.list().active,ana.id);assert.deepEqual(d.list().removing,[added.scope]);
-  assert.equal(first.remove(),false,'the last profile cannot be removed');
   const collected=await first.collect();assert.equal(collected.removed,true);assert.equal(collected.error,null);
   assert.equal(d.store.has('studyDirector.theme.v1~'+added.scope),false,'the removed profile browser storage is deleted');assert.equal(d.store.get('studyDirector.theme.v1'),'director-dark','the open profile keeps its own');
   assert.deepEqual(d.events.databases,['sdmLocalAppDB.v1~'+added.scope]);assert.deepEqual(d.events.directories,['study-director-assets-v2~'+added.scope,'study-director-backup-files-v1~'+added.scope]);
@@ -99,4 +98,20 @@ function device(){
   for(let index=1;index<12;index++){d.tick(1);first.add();}
   assert.equal(d.list().profiles.length,12);assert.throws(()=>first.add(),/most profiles/u);
 }
-console.log(JSON.stringify({status:'PASS',suite:'profiles',cases:['first start id follows the name','existing data','add, cancel and delete','switch and follow','first profile removed','adopt a library id','twelve at most']},null,2));
+{
+  // The last profile: a new, empty profile replaces it, and its data is deleted.
+  const d=device(),first=d.page('');const ana=first.ensure('Ana');d.store.set('studyDirector.theme.v1','director-dark');
+  d.tick(1000);assert.equal(first.remove(),true);assert.equal(d.events.reloads,1);
+  const [fresh]=d.list().profiles;assert.equal(d.list().profiles.length,1);assert.notEqual(fresh.id,ana.id);
+  assert.equal(fresh.scope,fresh.id,'the new profile has storage of its own');assert.equal(fresh.fresh,true);assert.equal(fresh.from,null,'its first start has nothing to cancel back to');
+  assert.equal(d.list().active,fresh.id);assert.deepEqual(d.list().removing,['']);
+  await d.page(fresh.scope).collect();
+  assert.equal(d.store.has('studyDirector.theme.v1'),false,'the deleted profile data goes');assert.deepEqual(d.events.databases,['sdmLocalAppDB.v1']);assert.deepEqual(d.list().removing,[]);
+}
+{
+  // Kept on this device after it was deleted elsewhere: a new id, no Google account, the same storage.
+  const d=device(),first=d.page('');first.ensure('Ana');first.setAccount({email:'ana@example.com',folder:'folder-1'});const before=first.current();
+  d.tick(1000);const kept=first.renew();
+  assert.notEqual(kept.id,before.id);assert.match(kept.id,/^prof_ana_/u);assert.equal(kept.scope,before.scope);assert.equal(kept.email,'');assert.equal(kept.folder,'');assert.equal(d.list().active,kept.id);
+}
+console.log(JSON.stringify({status:'PASS',suite:'profiles',cases:['first start id follows the name','existing data','add, cancel and delete','switch and follow','first profile removed','adopt a library id','twelve at most','the last profile is replaced by a new one','kept after a deletion elsewhere']},null,2));

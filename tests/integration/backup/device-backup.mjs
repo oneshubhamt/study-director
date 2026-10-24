@@ -48,7 +48,8 @@ await test('a folder that already holds backups is not published to on choose; t
 
 await test('a stored folder found on start backs up waiting changes only while local data is present',async()=>{
   const w=world(),folder=w.directory();w.store(folder,'2026-10-06T07:00:00.000Z');w.setLocalEmpty(true);
-  await w.controller.install();assert.equal(w.controller.status().connected,true);await w.tick(MINUTE);
+  // The backup folder inside it is settled just after start, in the background.
+  await w.controller.install();await w.settle();assert.equal(w.controller.status().connected,true);await w.tick(MINUTE);
   assert.equal(w.published.length,0,'an emptied browser never becomes the newest version');
   w.setLocalEmpty(false);w.runtime.wakeBackground('activation');await w.tick(MINUTE);
   assert.equal(w.published.length,1,'with local data present, start-up catches up without waiting for an edit');

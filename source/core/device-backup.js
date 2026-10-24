@@ -21,24 +21,27 @@ registry.define('device-backup',1,()=>{
     exactObject(input.environment,['canMutate','clearTimeout','setTimeout','showDirectoryPicker'],'Device-backup environment');
     functions(input.engine,['backup','cancelForeground','disconnect','forget','locationStatus','register','subscribeStatus'],'Device-backup engine port');
     functions(input.settings,['read','remove','write'],'Device-backup settings port');
-    functions(input.hooks,['capture','chooseCheckpoint','render','sourceRevision','verifiedAt'],'Device-backup hooks');
+    functions(input.hooks,['capture','chooseCheckpoint','chooseRepository','render','repositoryOwner','sourceRevision','verifiedAt'],'Device-backup hooks');
     if(typeof input.transport!=='function')throw new TypeError('Device-backup transport port is invalid.');
     if(!Object.isFrozen(input.presentation)||['current','feedback','notice','read','resolve','reset'].some(key=>typeof input.presentation[key]!=='function'))throw new TypeError('Backup presentation port is invalid.');
     const {configuration:config,engine,environment,settings,hooks,presentation}=input;
     const supported=typeof environment.showDirectoryPicker==='function';
     let installed=false,handle=null,permission='unknown',baseline='',mode=supported?'off':'unsupported',settingsUnverified=supported,connectionListener=null,connecting=false,permissionNoticeShown=false;
+    // The repository folder inside the chosen folder this profile and device
+    // use; '' until it is settled (found, moved in or made).
+    let repositoryName='',preparing=null,oldFolder=false;
 
     function capture(scope,error){try{hooks.capture(scope,error);}catch{}}
-    const connected=()=>supported&&!!handle&&permission==='granted';
+    const connected=()=>supported&&!!handle&&permission==='granted'&&!!repositoryName;
     const sourceRevision=()=>{try{const value=String(hooks.sourceRevision()||'');return Number.isFinite(Date.parse(value))?value:'';}catch{return '';}};
     function snapshot(){
       const engineState=supported?engine.locationStatus(ID):null;
       return freeze({
         format:'study-director.device-backup-status',contractVersion:1,
         installed,supported,mode,connected:connected(),permission,folderName:handle&&typeof handle.name==='string'?handle.name:'',
-        busy:engineState?.busy===true||connecting,cancellable:engineState?.cancellable===true,foregroundKind:connecting?'connect':String(engineState?.foregroundKind||''),
+        busy:engineState?.busy===true||connecting||!!preparing,cancellable:engineState?.cancellable===true,foregroundKind:connecting?'connect':preparing?'prepare':String(engineState?.foregroundKind||''),
         backingUp:engineState?.backingUp===true,maintenanceBusy:engineState?.maintenanceBusy===true,paused:engineState?.paused===true,locked:engineState?.locked===true,pending:engineState?.waiting===true,nextEligibleAt:String(engineState?.nextEligibleAt||''),
-        retryAttempt:Number(engineState?.retryAttempt)||0,retryBackoffCapped:engineState?.retryBackoffCapped===true,
+        retryAttempt:Number(engineState?.retryAttempt)||0,retryBackoffCapped:engineState?.retryBackoffCapped===true,repositoryName,oldFolder,
         lastBackupAt:String(hooks.verifiedAt()||'')||null,
         // The row's inline note shows the location's messages; this says whether it has one.
         hasNote:!!presentation.current(ID)
@@ -84,7 +87,7 @@ registry.define('device-backup',1,()=>{
       catch(error){capture('device-backup.permission-request',error);return 'denied';}
     }
     function forgetFolder(text=''){
-      handle=null;permission='unknown';baseline='';mode=supported?'off':'unsupported';
+      handle=null;permission='unknown';baseline='';repositoryName='';oldFolder=false;mode=supported?'off':'unsupported';
       presentation.resolve(ID,'permission');if(text)presentation.feedback(ID,text,false);
       publish();
     }
@@ -106,11 +109,70 @@ registry.define('device-backup',1,()=>{
       for(const [key,value] of Object.entries(transport))out[key]=typeof value==='function'?key==='beginOperation'?options=>guardTransport(value(options)):watchMissing(value):value;
       return freeze(out);
     }
-    const transport=guardTransport(input.transport(()=>handle));
+    const {layout:rawLayout,...engineTransport}=input.transport(()=>handle,()=>repositoryName);
+    const transport=guardTransport(engineTransport),layout=guardTransport(rawLayout);
+    // Settles which repository folder this profile and device use: its own
+    // (known by the marker inside), the folder of earlier versions moved into a
+    // new one named for the profile and device, one the person picks from those
+    // already there (only when choosing a folder), or a new one.
+    function prepareRepository({choose=false}={}){
+      if(repositoryName)return Promise.resolve(repositoryName);
+      if(preparing)return preparing;
+      const target=handle;
+      preparing=(async()=>{
+        publish();
+        const mine=hooks.repositoryOwner(),found=await layout.inspect();
+        if(handle!==target)throw Object.assign(new Error('The backup folder changed.'),{name:'AbortError'});
+        const mineRows=found.repositories.filter(row=>row.scope===mine.scope&&row.device===mine.device);
+        // A move whose old folder has since gone is finished with what it has.
+        const own=mineRows.find(row=>!row.moving)||(!found.legacy&&mineRows[0])||null;
+        // Folders of other devices can be taken over (after a browser data
+        // clear this device has a new id); other profiles here keep theirs.
+        const offered=found.repositories.filter(row=>row.device!==mine.device);
+        let name='';
+        if(own){
+          name=own.name;
+          // The profile took another id (a Drive library from another device).
+          if(own.profile!==mine.profile||own.moving)await layout.claim(own.name);
+        }else if(found.legacy&&found.legacy.versions>0){
+          presentation.feedback(ID,'Moving backups to a folder named for this profile and device…');publish();
+          name=await layout.move(mine.name,{onProgress:(done,total)=>{presentation.feedback(ID,`Moving backups to “${mine.name}”… ${done} of ${total} files`);publish();}});
+          presentation.feedback(ID,`Backups moved to “${name}”.`);
+        }else if(choose&&offered.length){
+          const picked=await hooks.chooseRepository(offered);
+          if(picked===null)throw Object.assign(new Error('Folder selection was cancelled.'),{name:'AbortError'});
+          name=picked?await layout.claim(picked):await layout.create(mine.name);
+        }else name=await layout.create(mine.name);
+        // The old folder goes once its versions are in this one (a move that
+        // could not delete it), or when it never held a version.
+        if(found.legacy&&(!found.legacy.versions||own?.movedFrom===found.legacy.name))await layout.removeLegacy().catch(error=>capture('device-backup.remove-old-folder',error));
+        // Whether the folder of earlier versions is still there (diagnostics).
+        oldFolder=found.legacy?await layout.legacyPresent().catch(()=>true):false;
+        if(handle!==target)throw Object.assign(new Error('The backup folder changed.'),{name:'AbortError'});
+        repositoryName=name;return name;
+      })().finally(()=>{preparing=null;connectionChanged();});
+      return preparing;
+    }
+    function prepareFailed(error){
+      if(error?.name==='AbortError')return;
+      capture('device-backup.prepare',error);presentation.feedback(ID,`${String(error?.message||'The backup folder could not be prepared.')} Normal app saving continues.`,false);publish();
+    }
+    function prepareInBackground(){
+      if(!connectedFolder()||repositoryName||preparing)return;
+      prepareRepository().catch(prepareFailed);
+    }
+    // Back up now also finishes preparing the folder (a move that stopped).
+    async function backupNow(){
+      if(!supported)return false;
+      if(connectedFolder()&&!repositoryName){try{await prepareRepository();}catch(error){prepareFailed(error);return false;}}
+      return engine.backup(ID);
+    }
+    const connectedFolder=()=>supported&&!!handle&&permission==='granted';
     async function authorize({operation=''}={}){
       if(operation==='disconnect')return;
       if(!handle)throw new Error('Choose the backup folder first.');
       if(permission!=='granted'){permission=await query();if(permission==='prompt')permission=await request();if(permission!=='granted'){permissionNeeded();publish();throw new Error('Folder permission is required. Choose Allow access.');}mode='connected';connectionChanged();}
+      await prepareRepository();
     }
     async function disconnectFolder(){
       await settings.remove(config.metadataKey);forgetFolder();
@@ -138,7 +200,7 @@ registry.define('device-backup',1,()=>{
         settingsUnverified=true;mode='error';capture('device-backup.restore-settings',error);
         presentation.feedback(ID,'Automatic Device Folder backup settings could not be read. Normal app saving continues.',false);
       }
-      connectionChanged();return snapshot();
+      connectionChanged();prepareInBackground();return snapshot();
     }
     // Permission can change while the app is open (another tab, the browser's
     // site settings); it is checked again whenever the app comes back.
@@ -147,9 +209,9 @@ registry.define('device-backup',1,()=>{
       if(settingsUnverified){installed=false;return install();}
       if(!handle)return snapshot();
       const before=permission;permission=await query();
-      if(permission===before)return snapshot();
+      if(permission===before){prepareInBackground();return snapshot();}
       if(permission==='granted')mode='connected';else permissionNeeded();
-      connectionChanged();return snapshot();
+      connectionChanged();prepareInBackground();return snapshot();
     }
     // The folder picker or permission prompt opens from the click itself,
     // before anything is awaited, so the browser allows it.
@@ -166,14 +228,16 @@ registry.define('device-backup',1,()=>{
         if(reconnect){
           permission=await pending;
           if(permission!=='granted'){permissionNeeded();feedback(permissionMessage(),false);return snapshot();}
-          mode='connected';presentation.feedback(ID,'');return snapshot();
+          mode='connected';presentation.feedback(ID,'');prepareInBackground();return snapshot();
         }
         const chosen=await pending;
         if(!chosen||typeof chosen.getDirectoryHandle!=='function')throw new Error('The selected folder is not writable.');
         let granted=await query(chosen);if(granted!=='granted')granted=await request(chosen);
         if(granted!=='granted')throw new Error('Write permission was not granted for the selected folder.');
-        const previous=handle;handle=chosen;permission='granted';
+        if(preparing)await preparing.catch(()=>{});
+        const previous=handle,previousName=repositoryName;handle=chosen;permission='granted';repositoryName='';
         try{
+          await prepareRepository({choose:true});
           // A folder that already holds backups is kept as it is: this device's
           // data goes in with its next change, or with Back up now.
           const versions=(await transport.list({kind:'commit'})).items.length;
@@ -181,7 +245,7 @@ registry.define('device-backup',1,()=>{
           baseline=versions?sourceRevision():'';initial=!versions;
           await settings.write(config.metadataKey,settingsValue());settingsUnverified=false;mode='connected';
           presentation.feedback(ID,versions?'Existing Study Director backups found. Choose Versions to recover one, or Back up now to keep this device’s current data.':'');
-        }catch(error){handle=previous;permission=previous?await query(previous):'unknown';throw error;}
+        }catch(error){handle=previous;repositoryName=previous?previousName:'';permission=previous?await query(previous):'unknown';throw error;}
       }catch(error){
         if(error&&error.name==='AbortError')presentation.feedback(ID,handle?'':'Folder selection was cancelled.');
         else{capture('device-backup.connect',error);presentation.feedback(ID,error?.code==='DEVICE_FOLDER_MISSING'?error.message:`${String(error&&error.message||'The backup folder could not be used safely.')} Normal app saving continues.`,false);}
@@ -197,6 +261,18 @@ registry.define('device-backup',1,()=>{
       if(!done&&handle)feedback('Automatic device backup could not be turned off. Try again; normal app saving continues.',false);
       connectionChanged();return snapshot();
     }
+    // Delete everywhere: this profile's backup folder in the Device Folder is
+    // deleted and Device Folder backup is turned off. Returns the deleted
+    // folder's name, or '' when there was none to reach.
+    async function deleteBackups(){
+      if(!supported||!handle)return '';
+      if(preparing)await preparing.catch(()=>{});
+      if(permission!=='granted'||!repositoryName)return '';
+      const folder=handle,name=repositoryName;
+      if(!await engine.disconnect(ID))throw new Error('Device Folder backup could not be turned off, so its backups were not deleted.');
+      try{await folder.removeEntry(name,{recursive:true});}catch(error){if(error?.name!=='NotFoundError')throw error;}
+      return name;
+    }
     // Clearing browser data removes the stored folder while this page still
     // holds it. It is written back once local data is whole again, so a later
     // launch finds the same folder.
@@ -207,8 +283,8 @@ registry.define('device-backup',1,()=>{
     }
     return freeze({
       format:'study-director.device-backup',contractVersion:1,
-      install,status:snapshot,connect,disconnect,refreshPermission,rememberAfterStorageReset,
-      backupNow:()=>supported?engine.backup(ID):Promise.resolve(false),
+      install,status:snapshot,connect,disconnect,refreshPermission,rememberAfterStorageReset,deleteBackups,
+      backupNow,
       cancelForeground:reason=>supported?engine.cancelForeground(reason,ID):false
     });
   }

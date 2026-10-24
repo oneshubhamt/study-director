@@ -70,13 +70,19 @@ export const CACHE_STORAGE_IDENTITIES=freeze({
 
 export const EXTERNAL_REPOSITORY_IDENTITIES=freeze({
   deviceFolderPickerId:'study-director-device-backup',
-  deviceFolderRoot:'Study-Director-Automatic-Backup-Repository',
+  // Earlier versions kept one repository folder in the chosen folder; it is
+  // moved into the profile and device's own ("Study Director - Ana - iPhone Safari").
+  deviceFolderLegacyRoot:'Study-Director-Automatic-Backup-Repository',
+  backupFolderPrefix:'Study Director',
   deviceFolderObjects:'objects',
   deviceFolderCheckpoints:'checkpoints',
   deviceFolderCommits:'commits',
   driveFolder:'Study Director Backups',
   driveFolderMarker:'studyDirectorFolder',
   driveFolderProfileMarker:'studyDirectorProfile',
+  // A small folder left when a profile is deleted everywhere: every device
+  // that signs in for that profile removes it too.
+  driveDeletedProfileMarker:'studyDirectorDeletedProfile',
   driveFileSecurityMarker:'studyDirectorSecurity',
   driveFileDigestMarker:'studyDirectorSha256',
   driveRepositoryMarker:'studyDirectorRepository',

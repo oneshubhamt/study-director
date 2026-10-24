@@ -1,6 +1,6 @@
 # Backup engine
 
-This is the design of automatic backups. Device Folder and Google Drive are two storage adapters of one engine. The repository format (immutable versions, shared objects, commit markers and lock files) is unchanged, so existing backups stay readable without a compatibility layer.
+This is the design of automatic backups. Device Folder and Google Drive are two storage adapters of one engine. The repository format (immutable versions, shared objects, commit markers and lock files) is shared by both; older versions stay readable until release B ("One format", below).
 
 ## Why
 
@@ -61,6 +61,15 @@ Each profile has its own library: its own database, Device Folder repository and
 - **Drive library.** The Drive folder carries its profile's id (appProperty `studyDirectorProfile`). Once per sign-in, before any Drive operation, Drive tells the app the account email and what the folder holds (`api.backup.profile.bind`), and the app settles it: its own folder continues; an unmarked folder (from before profiles) is claimed; a library from another device is offered as "Continue with your library?" with its counts and date (only within 5 minutes of tapping Connect), and the profile takes its id; a library or email that belongs to another profile on this device is refused without touching anything, and the sign-in is forgotten. A newly bound folder clears the shared base, so the first sync is a two-way merge.
 - **Password.** The record (`BackupProtection.v3`) keeps a non-extractable key next to the verifier. With one profile on the device it opens the profile at start; with two or more, each start asks ("Not now" keeps sync and encrypted backups waiting). Sync follows the library's password (above).
 - **First start.** Someone new gives a name, an optional password and optionally connects Drive; the password is set before Drive is used, so no unencrypted version reaches it.
+- **Backup folders.** Names are for people; markers say whose a folder is. Drive: "Study Director – Ana", renamed once per sign-in to follow the profile name (found by its properties, never by name). Device Folder: one folder per profile and device inside the chosen folder, "Study Director - Ana - iPhone Safari" (" (2)" when the name is taken; plain ASCII only, accents dropped and other scripts left out, because some file systems map other characters onto another folder: Chromium's own browser storage hands back the chosen folder itself; a new folder must also show up in the folder's listing under its name), known by `repository.sdscope` version 2 (`{id, profile, scope, device}`); its id is kept when it is moved or taken over, so what was verified stays verified. The controller settles the folder before any backup (`prepareRepository`): its own; else the single folder of earlier versions (`Study-Director-Automatic-Backup-Repository`, `~<scope>` for later profiles) copied in and checked, then deleted (the marker records `moving`, then `movedFrom`; an interrupted move continues); else, when a folder is chosen, one of another device's folders (after a browser data clear) or a new one; else a new one.
+- **Deleting a profile everywhere.** The deleting device leaves a marker in Drive first (a folder "Study Director – Ana (deleted)" with appProperty `studyDirectorDeletedProfile=<profile id>`, without the library marker), then moves the library folder to the Drive Trash and deletes its own Device Folder backup folder for the profile. Every device checks for the marker once per sign-in, before it finds or makes the library (`resolveFolder`), and tells the app (`api.backup.profile.deleted`): a device with nothing Drive did not have removes the profile; otherwise the person chooses. A device that keeps it gives it a new id (`Profiles.renew`), so it never meets the marker again.
+
+## One format
+
+Every new version is written in the current format (manifest 8). Older versions are only read.
+
+- **Release A (this one).** Once a location holds a current version, older ones leave Version History and the next cleanup removes them (`selectRepositoryRetention`). The Device Folder's old single folder is moved into the named one. Copy diagnostics, "Format cleanup": `canonical` and `retirementReady` (this device's data, `verifyCanonicalInstallation`), `oldFolder` (the Device Folder's old folder still there), and per connected location `currentVersions` and `olderVersions` as its last cleanup left them; the row reads ready when all agree.
+- **Release B (a later, separate release).** Removes the compatibility code that reads older formats. It ships only after "Format cleanup" reads ready on every device in use.
 
 ## Standalone backup files
 
