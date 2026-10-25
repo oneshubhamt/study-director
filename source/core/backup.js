@@ -25,7 +25,7 @@ registry.define('backup',1,input=>{
     domain:freeze(['clampText','filenameSafeStudentName','getStudentName','materializeDailyRecordView','sanitizeCurrentDailyRecord','todayISO']),
     view:freeze(['presentation','refreshPnote','refreshReview','renderSchedule']),
     events:freeze(['libraryChanged','backupCompleted','reconcileNotes','restoreNotesSnapshot','restoreSessionState','verifyActiveSessionRuntime','restoredFromFile']),
-    operations:freeze(['assertAuthority','clearFault','failClosed','runExclusive']),
+    operations:freeze(['assertAuthority','canShare','clearFault','failClosed','runExclusive']),
     interactions:freeze(['choose','configure','notify']),
     environment:freeze(['AbortController','clearTimeout','setTimeout','yieldTask']),
     diagnostics:freeze(['capture','fail','finish','mark','start']),
@@ -2062,7 +2062,7 @@ const BackupProviderRuntime=BackupProviderModule.createRuntime(freeze({
     exports:freeze({run:Exports.run,followProtection:Exports.followProtection}),
     domain:freeze({clampText}),
     view:freeze({presentation:ports.view.presentation}),
-    ownership:freeze({canRunBackground:()=>!appCanMutate()?'awaiting-control':Exports.backgroundAvailable(),requireMutationControl:requireBackupMutationControl}),
+    ownership:freeze({canRunBackground:()=>!appCanMutate()?'awaiting-control':Exports.backgroundAvailable(),canShare:()=>ports.operations.canShare(),requireMutationControl:requireBackupMutationControl}),
     environment:freeze({clearTimeout,setTimeout}),
     diagnostics:freeze({capture:AppDiagnostics.capture,start:OperationDiagnostics.start,mark:OperationDiagnostics.mark,finish:OperationDiagnostics.finish,fail:OperationDiagnostics.fail})
   })

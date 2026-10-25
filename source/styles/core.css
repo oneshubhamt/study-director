@@ -1321,6 +1321,9 @@ input,textarea,select{border-radius:var(--sd-shape-field-radius)}
 .managed-version-history-list{display:grid;flex:1 1 auto;min-height:0;gap:10px;padding:0 18px 16px;overflow:auto;overscroll-behavior:contain}
 .managed-version-card{border:1px solid var(--sd-color-border-2);background:var(--sd-color-surface-2);padding:12px;display:grid;gap:10px}
 .managed-version-card-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+/* A version this app cannot read: muted, its Restore disabled, Remove in red. */
+.managed-version-card.unreadable{background:var(--sd-color-surface-1);border-style:dashed}
+.managed-version-card.unreadable .managed-version-date,.managed-version-card.unreadable .managed-version-counts,.managed-version-card.unreadable .managed-version-location-copy{color:var(--sd-color-text-secondary)}
 .managed-version-date{font-family:var(--sd-font-mono);font-size:var(--sd-type-role-control-size)}
 .managed-version-counts{white-space:nowrap}
 .managed-version-location{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid var(--sd-color-border-1);padding-top:8px}
@@ -1401,6 +1404,7 @@ input,textarea,select{border-radius:var(--sd-shape-field-radius)}
 .profile-item-text small{color:var(--sd-color-text-secondary);font:400 var(--sd-type-role-copy-compact-size)/1.3 var(--sd-font-body);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .profile-item-tag{color:var(--sd-color-accent-primary);white-space:nowrap}
 .profile-add{justify-self:start}
+.profile-note{margin:0;color:var(--sd-color-text-secondary);font:400 var(--sd-type-role-copy-compact-size)/1.35 var(--sd-font-body)}
 .profile-actions{align-items:center;justify-content:space-between}
 .profile-device{min-width:0;color:var(--sd-color-text-secondary);font:400 var(--sd-type-role-copy-compact-size)/1.35 var(--sd-font-body)}
 .first-start-drive{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:10px 12px;padding:10px 12px;border:1px dashed var(--sd-line-neutral-soft);border-radius:var(--sd-shape-control-radius)}

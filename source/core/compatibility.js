@@ -36,7 +36,7 @@ registry.define('compatibility',1,()=>{
     exactObject(input,['baselineId','live','backups','verification'],'Compatibility facade input');
     if(typeof input.baselineId!=='string'||!input.baselineId)throw new TypeError('Compatibility baseline identity is required.');
     functions(input.live,[
-      'renameIdentities','cleanupLegacyStorage','migratePlan','migrateReflections','migrateHostMetadata','migrateActiveSession','migrateNotes','migrateNoteRecovery','migrateDailyRecords','migrateDeletionState','migrateInsightsRevisionEnvelope','cleanupLegacyAttachments','cleanupObsoleteMetadata','retireTopology','retireLegacyIdentity'
+      'renameIdentities','cleanupLegacyStorage','migratePlan','migrateReflections','migrateHostMetadata','migrateActiveSession','migrateNotes','migrateNoteRecovery','migrateDailyRecords','migrateDeletionState','migrateInsightsRevisionEnvelope','cleanupLegacyAttachments','cleanupObsoleteMetadata','settleUnsupported','retireTopology','retireLegacyIdentity'
     ],'Compatibility live adapters');
     functions(input.backups,['inspectCurrent','inspectLegacy'],'Compatibility backup adapters');
     functions(input.verification,['planLegacy','reflectionLegacy','activeSession','notes','noteRecovery','dailyRecords','deletionState','insightsRevisionEnvelope','canonicalStores','legacyStorage','legacyAttachments','obsoleteMetadata','topology','retiredIdentity','retiredHostCompatibility','freshBackup'],'Compatibility verification adapters');
@@ -85,6 +85,9 @@ registry.define('compatibility',1,()=>{
         results.attachments=await input.live.cleanupLegacyAttachments();
         results.obsoleteMetadata=await input.live.cleanupObsoleteMetadata();
         results.legacyStorage=await input.live.cleanupLegacyStorage();
+        // What the steps above left that this build still cannot read stays
+        // as it is and out of everything below (see UnsupportedData in app.html).
+        results.unsupported=await input.live.settleUnsupported();
         if(Object.values(results).some(retryableResult)){
           // A secondary tab may continue only when migration is unnecessary because
           // every runtime-facing local surface is already current canonical state.

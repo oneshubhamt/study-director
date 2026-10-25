@@ -22,12 +22,12 @@ registry.define('compatibility-host',1,()=>{
     functions(input.local,['getText','getJson','setText','remove','lastError'],'Compatibility-host local storage');
     functions(input.ownership,['issueWriteToken','assertWriteToken','isOwnershipLostError'],'Compatibility-host ownership');
     functions(input.plan,['hydrate','library','readDraft','writeDraft','writeLibrary','settled','readCanonical'],'Compatibility-host Plan adapter');
-    exactObject(input.preferences,['readRawRow','read','write','current','legacy','create','plans','accept','refreshMirrors','applyRuntime','normalizeTheme','normalizePresentation','normalizeFontScale','normalizeStudentName','normalizeQuote','normalizePracticeCueMode','normalizePracticeTargetMs'],'Compatibility-host Preferences adapter');
+    exactObject(input.preferences,['readRawRow','held','read','write','current','legacy','create','plans','accept','refreshMirrors','applyRuntime','normalizeTheme','normalizePresentation','normalizeFontScale','normalizeStudentName','normalizeQuote','normalizePracticeCueMode','normalizePracticeTargetMs'],'Compatibility-host Preferences adapter');
     for(const key of Object.keys(input.preferences))if(typeof input.preferences[key]!=='function')throw new TypeError(`Compatibility-host Preferences adapter ${key} must be a function.`);
     exactObject(input.identity,['getId','installationKey','legacyKey'],'Compatibility-host installation identity adapter');
     if(typeof input.identity.getId!=='function')throw new TypeError('Compatibility-host installation identity getId is required.');
     functions(input.metadata,['readRow','listRows','isCurrentDataMaintenance','writeValue','removeRow','releaseBackupFile','normalizeVerifiedRecovery','normalizeAttachmentIntegrity','normalizeRepositoryIntegrity','normalizeRepositoryIntegrityTarget','renameRows','updateStorageHealth'],'Compatibility-host metadata adapter');
-    functions(input.live,['migrateActiveSession','migrateNotes','migrateNoteRecovery','migrateDeletionState','migrateDailyRecords','migrateInsightsRevisionEnvelope','cleanupLegacyAttachments','cleanupObsoleteMetadata'],'Compatibility-host live adapters');
+    functions(input.live,['migrateActiveSession','migrateNotes','migrateNoteRecovery','migrateDeletionState','migrateDailyRecords','migrateInsightsRevisionEnvelope','cleanupLegacyAttachments','cleanupObsoleteMetadata','settleUnsupported'],'Compatibility-host live adapters');
     functions(input.topology,['retire'],'Compatibility-host topology adapter');
     functions(input.verification,['activeSession','notes','noteRecovery','deletionState','dailyRecords','insightsRevisionEnvelope','canonicalStores','legacyAttachments','obsoleteMetadata','topology','freshBackup'],'Compatibility-host verification adapters');
     functions(input.backups,['inspectCurrent','inspectLegacy'],'Compatibility-host backup adapters');
@@ -362,18 +362,26 @@ registry.define('compatibility-host',1,()=>{
           practiceTargetMs:legacyProtected?.practiceTargetMs??historicalPracticeTarget,
           nudge:legacyNudge,updatedAt:helpers.nowIso()
         });
-        const written=await preferences.write(next,{ownershipToken:token,allowHydrating:true});
-        verifiedPreferences=await preferences.read();
-        if(!verifiedPreferences||!helpers.same(written,verifiedPreferences)||!preferences.current(verifiedPreferences))throw new Error('Portable Preferences were not verified after migration. Historical preference sources were preserved.');
-        migrated++;
+        // Preferences a newer Study Director saved stay as they are: this
+        // build uses defaults for the session and saves none over them.
+        if(preferences.held())verifiedPreferences=next;
+        else{
+          const written=await preferences.write(next,{ownershipToken:token,allowHydrating:true});
+          verifiedPreferences=await preferences.read();
+          if(!verifiedPreferences||!helpers.same(written,verifiedPreferences)||!preferences.current(verifiedPreferences))throw new Error('Portable Preferences were not verified after migration. Historical preference sources were preserved.');
+          migrated++;
+        }
       }
       preferences.accept(verifiedPreferences);preferences.refreshMirrors(verifiedPreferences);preferences.applyRuntime(verifiedPreferences);
       await plan.settled();requireOwnership();
       const verifiedPlans=preferences.plans(await plan.readCanonical());
       if(legacyDraftNeedsCopy&&verifiedPlans.draft!==legacy)throw new Error('Legacy Plan draft was not verified after migration. The source key was preserved.');
       if(defaultSchedule&&!verifiedPlans.savedPlans.some(row=>row.scheduleText===defaultSchedule))throw new Error('Legacy default schedule was not verified after migration. The source key was preserved.');
-      if(!preferences.current(await preferences.read()))throw new Error('Portable Preferences migration did not establish the current canonical schema. Historical sources were preserved.');
+      // Held preferences keep their historical sources too: nothing was moved.
+      const held=preferences.held();
+      if(!held&&!preferences.current(await preferences.read()))throw new Error('Portable Preferences migration did not establish the current canonical schema. Historical sources were preserved.');
       requireOwnership();if(typeof legacy==='string'&&!local.remove(obsolete.schedule))throw local.lastError()||new Error('Legacy Plan draft key could not be removed after verified migration.');
+      if(held)return freeze({status:migrated?'migrated':'not-needed',records:migrated,preferences:'held'});
       requireOwnership();if(defaults&&!local.remove(obsolete.defaults))throw local.lastError()||new Error('Legacy personal settings could not be retired after verified migration.');
       requireOwnership();if(legacyQuote!==null&&!local.remove(obsolete.quote))throw local.lastError()||new Error('Legacy quote could not be retired after verified migration.');
       requireOwnership();if(legacyNudge!==null&&!local.remove(obsolete.nudge))throw local.lastError()||new Error('Legacy nudge preference could not be retired after verified migration.');
@@ -417,7 +425,8 @@ registry.define('compatibility-host',1,()=>{
     }
     async function verifyPlanLegacy(){
       const legacy=local.getText(obsolete.schedule,null),defaults=local.getText(obsolete.defaults,null),quote=local.getText(obsolete.quote,null),nudge=local.getText(obsolete.nudge,null),storageError=local.lastError(),prefs=await preferences.read();
-      return freeze({ok:!storageError&&legacy===null&&defaults===null&&quote===null&&nudge===null&&!!preferences.current(prefs),legacyDraft:legacy!==null,legacyDefaults:defaults!==null,legacyQuote:quote!==null,legacyNudge:nudge!==null});
+      const held=preferences.held();
+      return freeze({ok:!storageError&&legacy===null&&(held||defaults===null&&quote===null&&nudge===null&&!!preferences.current(prefs)),legacyDraft:legacy!==null,legacyDefaults:defaults!==null,legacyQuote:quote!==null,legacyNudge:nudge!==null});
     }
     async function verifyReflectionLegacy(){const collection=local.getText(obsolete.reflectionDrafts,null),single=local.getText(obsolete.reflectionLegacy,null),storageError=local.lastError();return freeze({ok:!storageError&&collection===null&&single===null,collection:collection!==null,single:single!==null});}
     async function verifyLegacyStorage(){const present=[];for(const key of residueKeys)if(local.getText(key,null)!==null)present.push(key);return freeze({ok:!local.lastError()&&present.length===0,present:freeze(present)});}
@@ -428,7 +437,7 @@ registry.define('compatibility-host',1,()=>{
         renameIdentities,cleanupLegacyStorage,migratePlan,migrateReflections,migrateHostMetadata,migrateActiveSession:input.live.migrateActiveSession,migrateNotes:input.live.migrateNotes,
         migrateNoteRecovery:input.live.migrateNoteRecovery,migrateDeletionState:input.live.migrateDeletionState,migrateDailyRecords:input.live.migrateDailyRecords,
         migrateInsightsRevisionEnvelope:input.live.migrateInsightsRevisionEnvelope,cleanupLegacyAttachments:input.live.cleanupLegacyAttachments,
-        cleanupObsoleteMetadata:input.live.cleanupObsoleteMetadata,retireTopology,retireLegacyIdentity:migrateIdentity
+        cleanupObsoleteMetadata:input.live.cleanupObsoleteMetadata,settleUnsupported:input.live.settleUnsupported,retireTopology,retireLegacyIdentity:migrateIdentity
       }),
       backups:input.backups,
       verification:freeze({

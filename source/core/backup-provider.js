@@ -15,7 +15,7 @@ registry.define('backup-provider',1,input=>{
     exports:freeze(['followProtection','run']),
     domain:freeze(['clampText']),
     view:freeze(['presentation']),
-    ownership:freeze(['canRunBackground','requireMutationControl']),
+    ownership:freeze(['canRunBackground','canShare','requireMutationControl']),
     environment:freeze(['clearTimeout','setTimeout']),
     diagnostics:freeze(['capture','fail','finish','mark','start'])
   });
@@ -83,6 +83,7 @@ registry.define('backup-provider',1,input=>{
   const userProviderMessage=(error,fallback)=>{const code=String(error&&error.code||'');if(code==='STUDY_DIRECTOR_REPOSITORY_MAINTENANCE_BUSY'||code==='STUDY_DIRECTOR_RECOVERY_MAINTENANCE_YIELD_TIMEOUT')return 'Another Study Director device is still finishing backup maintenance. Wait a moment, then retry the restore.';if(code==='STUDY_DIRECTOR_REPOSITORY_MAINTENANCE_UNCERTAIN')return 'Backup maintenance state could not be verified safely. Retry after the other device has finished its backup work.';const raw=String(error&&error.message||error||'').trim();if(!raw)return fallback;return /\b(?:repository|checkpoint|manifest|commit marker|reconciliation)\b/iu.test(raw)?fallback:raw;};
   const providerBackgroundAvailability=selected=>{
     const local=ports.ownership.canRunBackground();if(local!==true)return String(local||'awaiting-control');
+    if(selected?.shared){const share=ports.ownership.canShare();if(share!==true)return String(share||'awaiting-control');}
     if(!selected||typeof selected.backgroundAvailable!=='function')return 'awaiting-connection';
     try{return selected.backgroundAvailable()===true?true:'awaiting-connection';}
     catch(error){AppDiagnostics.capture('backup-provider.background-availability',error,'warn');return 'awaiting-connection';}
@@ -719,13 +720,18 @@ registry.define('backup-provider',1,input=>{
       // A shared location takes one device's backup at a time, and only from
       // a device that has taken in its newest version.
       const shared=selected.shared===true&&role==='normal';
+      // A device holding data this build cannot read uploads no shared
+      // version: one without that data would read as its deletion elsewhere.
+      if(shared&&ports.ownership.canShare()!==true)throw Object.assign(new Error(`This device has data from a newer version of Study Director, so it does not upload to ${selected.label} until the app is updated.`),{code:'STUDY_DIRECTOR_SHARE_HELD'});
       if(shared){
         // Another device's upload that started first goes first. A marker older
         // than the turn window is taken as abandoned (an upload cut off by a
         // closed tab or an ended sign-in), so it never holds sync up for long.
         if(publicationLease){const listed=await selected.repository.listPublications(),rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],mine=Date.parse(publicationLease.createdAt);
           if(rows.some(row=>{const id=String(row&&row.id||''),at=Date.parse(String(row&&row.createdAt||''));return id!==publicationLease.id&&!ownPublications.has(id)&&row.sameDevice!==true&&Number.isFinite(at)&&Date.now()-at<SYNC_TURN_WINDOW_MS&&(at<mine||at===mine&&id<publicationLease.id);}))throw syncError('REPOSITORY_SYNC_TURN',`Another device is saving to ${selected.label}.`);}
-        if(base.inventory&&await sharedAhead(base.inventory))throw syncError('REPOSITORY_SYNC_BEHIND',`${selected.label} has newer changes to take in first.`);
+        const ahead=base.inventory?await sharedAhead(base.inventory,selected):null;
+        if(ahead?.unreadable){waitForNewerVersion(selected,ahead.item.id);throw syncError('REPOSITORY_SYNC_NEEDS_UPDATE',`${selected.label} has a version this app can’t read. Update the app, or remove that version in Version History, to sync again.`);}
+        if(ahead)throw syncError('REPOSITORY_SYNC_BEHIND',`${selected.label} has newer changes to take in first.`);
       }
       OperationDiagnostics.mark('provider-repository-scan-complete',{provider:selected.id,history:history.length,invalid:Number(base.invalidCount)||0,reused:!!repositorySnapshot});
       const maintenancePendingState=deferredMaintenance?await maintenanceState(selected):null,maintenanceWasActionable=maintenanceActionable(maintenancePendingState),maintenanceReason=String(maintenancePendingState&&maintenancePendingState.reason||''),maintenanceDeferred=!maintenanceWasActionable&&maintenanceReason==='publication-contention',inventory=base.inventory;
@@ -830,7 +836,10 @@ registry.define('backup-provider',1,input=>{
       await providerMaintenanceScheduler(selected)?.adopt(cleanup,{trigger:'safety-removal',pending:servicedPending});
       const retained=Array.isArray(cleanup.retained)?cleanup.retained:after.rows.map(row=>Object.freeze({id:row.item.id,ref:Object.freeze({checkpoint:row.item,commit:row.commitItem}),manifest:row.manifest}));
       const quarantinedObjectIds=integrityScrubHooks?await integrityScrubHooks.quarantine(selected.id):[],entries=RepositoryCheckpointPipeline.projectHistory(Object.freeze(retained.map(row=>Object.freeze({id:row.id,manifest:row.manifest}))),Object.freeze({id:selected.id,label:selected.label}),{quarantinedObjectIds});
-      clearRecentHistory(selected);return freeze({removed:true,checkpointId:requested,kind:safety?'safety':'unreadable',gcRemoved:Number(cleanup.gcRemoved)||0,warning:String(cleanup.warning||''),entries});
+      clearRecentHistory(selected);
+      // The version sync waited on is gone: sync looks again at once.
+      if(selected.shared&&syncState(selected).newer===requested){newerVersionGone(selected);syncState(selected).behind=true;schedulePendingProviderBackup(selected,1000);}
+      return freeze({removed:true,checkpointId:requested,kind:safety?'safety':'unreadable',gcRemoved:Number(cleanup.gcRemoved)||0,warning:String(cleanup.warning||''),entries});
     }finally{if(maintenanceLease)await endRepositoryMaintenance(selected,maintenanceLease);}
   }
   async function pendingRetryState(selected){
@@ -942,15 +951,35 @@ registry.define('backup-provider',1,input=>{
   // Waiting for another device's upload asks again after 15 seconds, then a
   // minute, then every five minutes, up to the turn window.
   const SYNC_RECHECK_MS=60*1000,SYNC_TURN_WINDOW_MS=15*60*1000,SYNC_TURN_RETRY_DELAYS=freeze([15*1000,60*1000,5*60*1000]),syncByProvider=new Map();
-  function syncState(selected){const id=safeId(selected&&selected.id);let state=syncByProvider.get(id);if(!state){state={checkedAt:0,review:'',password:'',catching:false,behind:false,syncedAt:'',waitedAt:0,turnWaits:0};syncByProvider.set(id,state);}return state;}
-  function syncView(selected){const state=syncState(selected);return freeze({syncedAt:state.syncedAt,review:!!state.review,password:!!state.password,syncing:state.catching});}
+  function syncState(selected){const id=safeId(selected&&selected.id);let state=syncByProvider.get(id);if(!state){state={checkedAt:0,review:'',password:'',newer:'',catching:false,behind:false,syncedAt:'',waitedAt:0,turnWaits:0};syncByProvider.set(id,state);}return state;}
+  function syncView(selected){const state=syncState(selected);return freeze({syncedAt:state.syncedAt,review:!!state.review,password:!!state.password,newer:!!state.newer,syncing:state.catching});}
   function sharedSyncing(selected){return !!selected?.shared&&!!selected.repository&&!!pendingRetryHooks&&providerConnected(selected);}
   function sharingActive(){return [...providers.values()].some(sharedSyncing);}
   // Drive's newest ordinary version, when this device has not taken it in.
-  async function sharedAhead(inventory){
+  // Drive's newest version when this device has not taken it in yet. One
+  // this build cannot read (from a newer Study Director, or damaged) comes
+  // back marked unreadable: sync waits on it and never uploads over it, since
+  // a device that can read it would take an upload without its changes as
+  // newer than them.
+  async function sharedAhead(inventory,selected=null){
     let head=null;for(const pair of inventory&&inventory.pairs||[])if(pair.item.history?.retention?.role!=='before-restore')head=pair;
     if(!head)return null;const base=await RepositoryCheckpointPipeline.sharedBase();
-    return head.item.id===String(base&&base.checkpointId||'')?null:head;
+    if(head.item.id===String(base&&base.checkpointId||''))return null;
+    const unreadable=head.item.unreadable===true||!!(selected&&unreadableByProvider.get(selected.id)?.has(head.item.id));
+    return unreadable?freeze({...head,unreadable:true}):head;
+  }
+  function markUnreadable(selected,id){
+    const known=new Set(unreadableByProvider.get(selected.id)||[]);known.add(String(id));unreadableByProvider.set(selected.id,known);
+  }
+  // Sync stops at a version this build cannot read until the app is updated
+  // or the person removes that version in Version History.
+  function waitForNewerVersion(selected,id){
+    const state=syncState(selected);if(state.newer===id)return false;state.newer=id;
+    presentation.notice(selected.id,'sync-newer',`${selected.label} has a version this app can’t read, from a newer Study Director or damaged. Sync waits until the app is updated, or until you remove that version in Version History.`);
+    notifyStatus();return true;
+  }
+  function newerVersionGone(selected){
+    const state=syncState(selected);if(!state.newer)return false;state.newer='';presentation.resolve(selected.id,'sync-newer');notifyStatus();return true;
   }
   function syncCheckDue(selected,trigger){
     if(!sharedSyncing(selected))return false;
@@ -972,6 +1001,8 @@ registry.define('backup-provider',1,input=>{
       catch(error){
         // Another device set or changed the backup password: sync waits for it.
         if(['BACKUP_LOCKED','BACKUP_AUTH_FAILED'].includes(String(error?.code||''))){state.password=head.item.id;summary.finish({message:`${selected.label} needs this profile’s backup password.`,outcome:'sync-password'});presentation.notice(selected.id,'sync-password',`Your backup password was set or changed on another device. Enter it to keep syncing with ${selected.label}.`);}
+        // A version this build cannot read is not retried: sync waits on it.
+        else if(error?.repositoryUnreadable===true||String(error?.code||'')==='BACKUP_ENCRYPTION_UNSUPPORTED'){markUnreadable(selected,head.item.id);summary.finish({message:`${selected.label} has a version this app can’t read.`,outcome:'sync-newer'});waitForNewerVersion(selected,head.item.id);}
         else{AppDiagnostics.capture('backup-provider.sync-catch-up',error,'warn');state.behind=true;summary.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'failed'});schedulePendingProviderBackup(selected,nextConvergenceRetryDelay(selected,{sync:true}));}
       }
       finally{state.catching=false;notifyStatus();}
@@ -1062,14 +1093,14 @@ registry.define('backup-provider',1,input=>{
       // Each round of changes waits afresh: the wait ends once Drive goes on.
       const copy=spineCopy(selected),leader=copy?null:spineLeader(selected);if(!leader&&selected.shared)syncState(selected).waitedAt=0;
       if(leader){providerConvergenceJob(leader)?.schedule(1000,'spine','earliest');summary.finish({message:`Backing up to the ${leader.label} first.`,lifecycle:'cancelled',outcome:'external-backup-pending'});return freeze({status:'pending',reason:'spine'});}
-      const saved=await saveRepositoryProvider(selected,{interactive:false,signal,preemptBackground:false,pendingIntent:pending,copy,recoveryProgress:value=>summary.update({message:value.message,progress:value})}).catch(error=>{if(copy&&!['REPOSITORY_SYNC_TURN','REPOSITORY_SYNC_BEHIND'].includes(String(error?.code||''))&&!signal?.aborted)copyFailed.set(selected.id,copy.checkpointId);throw error;}),covered=publicationCoversPending(saved,pending),cleared=covered&&(!pending||await clearPendingRetry(selected,pending));
+      const saved=await saveRepositoryProvider(selected,{interactive:false,signal,preemptBackground:false,pendingIntent:pending,copy,recoveryProgress:value=>summary.update({message:value.message,progress:value})}).catch(error=>{if(copy&&!['REPOSITORY_SYNC_TURN','REPOSITORY_SYNC_BEHIND','REPOSITORY_SYNC_NEEDS_UPDATE','STUDY_DIRECTOR_SHARE_HELD'].includes(String(error?.code||''))&&!signal?.aborted)copyFailed.set(selected.id,copy.checkpointId);throw error;}),covered=publicationCoversPending(saved,pending),cleared=covered&&(!pending||await clearPendingRetry(selected,pending));
       summary.finish({message:cleared?`Backed up to ${selected.label}.`:covered?`Backed up to ${selected.label}; its status updates shortly.`:`Backed up to ${selected.label}; newer changes back up next.`,outcome:cleared?'external-backup-verified':'external-backup-pending'});
       return freeze({status:cleared?'completed':'pending',checkpointId:String(saved&&saved.checkpointId||saved&&saved.name||''),reason:cleared?'':covered?'retry marker could not be cleared':'source',maintenancePending:saved&&saved.maintenancePending===true});
     }catch(error){
-      const code=String(error&&error.code||''),turn=code==='REPOSITORY_SYNC_TURN',behind=code==='REPOSITORY_SYNC_BEHIND';
-      summary.finish({message:behind?`Catching up with ${selected.label} first.`:turn?`Another device is saving to ${selected.label}; this backup goes next.`:'External backup update is pending.',lifecycle:signal?.aborted||behind||turn?'cancelled':'failed',outcome:'external-backup-pending'});
-      if(!behind&&!turn)AppDiagnostics.capture('backup-provider.pending-retry',error,'warn');
-      return freeze({status:'pending',reason:behind?'behind':turn?'turn':String(error&&error.message||error)});
+      const code=String(error&&error.code||''),turn=code==='REPOSITORY_SYNC_TURN',behind=code==='REPOSITORY_SYNC_BEHIND',newer=code==='REPOSITORY_SYNC_NEEDS_UPDATE'||code==='STUDY_DIRECTOR_SHARE_HELD';
+      summary.finish({message:newer?`Sync with ${selected.label} waits for an app update.`:behind?`Catching up with ${selected.label} first.`:turn?`Another device is saving to ${selected.label}; this backup goes next.`:'External backup update is pending.',lifecycle:signal?.aborted||behind||turn||newer?'cancelled':'failed',outcome:'external-backup-pending'});
+      if(!behind&&!turn&&!newer)AppDiagnostics.capture('backup-provider.pending-retry',error,'warn');
+      return freeze({status:'pending',reason:newer?'needs-update':behind?'behind':turn?'turn':String(error&&error.message||error)});
     }finally{notifyStatus();}
   }
   function providerConvergenceJob(selected){
@@ -1098,7 +1129,9 @@ registry.define('backup-provider',1,input=>{
         if(sync&&(sync.behind||sync.review||!owed&&!automaticNeeded(selected))){
           sync.behind=false;
           const inventory=await repositoryProviderInventory(repositoryOperationSelected(selected,{signal:scope.signal}),{signal:scope.signal});rememberRecentHistory(selected,inventory);sync.checkedAt=Date.now();
-          const ahead=await sharedAhead(inventory),finish=(status,reason)=>{OperationDiagnostics.mark('background-transition',background.transition('convergence','running',status,{reason,actionable:false}),traceId);OperationDiagnostics.finish({status,reason},traceId);return freeze({status,reason});};
+          const ahead=await sharedAhead(inventory,selected),finish=(status,reason)=>{OperationDiagnostics.mark('background-transition',background.transition('convergence','running',status,{reason,actionable:false}),traceId);OperationDiagnostics.finish({status,reason},traceId);return freeze({status,reason});};
+          if(ahead?.unreadable){waitForNewerVersion(selected,ahead.item.id);return finish('idle','needs-update');}
+          newerVersionGone(selected);
           if(ahead&&sync.review!==ahead.item.id){scope.release();scope=null;catchUpSharedProvider(selected,ahead);return finish('deferred','catching-up');}
           if(ahead)return finish('idle','needs-review');
           if(sync.review){sync.review='';presentation.resolve(selected.id,'sync-review');}
@@ -1110,12 +1143,15 @@ registry.define('backup-provider',1,input=>{
           const candidate=fillDue?await backfillCandidate(selected,{signal:scope.signal}):null,finish=(status,reason)=>{OperationDiagnostics.mark('background-transition',background.transition('convergence','running',status,{reason,actionable:false}),traceId);OperationDiagnostics.finish({status,reason},traceId);return freeze({status,reason});};
           if(!candidate){resetConvergenceRetry(selected);return finish('completed','none');}
           try{await saveRepositoryProvider(selected,{interactive:false,signal:scope.signal,preemptBackground:false,copy:candidate});}
-          catch(error){if(scope.signal.aborted)throw error;if(!['REPOSITORY_SYNC_TURN','REPOSITORY_SYNC_BEHIND'].includes(String(error?.code||''))){fillSkipped.add(candidate.checkpointId);AppDiagnostics.capture('backup-provider.backfill-copy',error,'warn');}return finish('completed','copy-skipped');}
+          catch(error){if(scope.signal.aborted)throw error;if(!['REPOSITORY_SYNC_TURN','REPOSITORY_SYNC_BEHIND','REPOSITORY_SYNC_NEEDS_UPDATE','STUDY_DIRECTOR_SHARE_HELD'].includes(String(error?.code||''))){fillSkipped.add(candidate.checkpointId);AppDiagnostics.capture('backup-provider.backfill-copy',error,'warn');}return finish('completed','copy-skipped');}
           job.schedule(5000,'backfill','earliest');return finish('completed','copied');
         }
         OperationDiagnostics.mark('convergence-publication-start',{provider:selected.id},traceId);const result=await retryPendingProviderBackup(selected,{signal:scope.signal});{const state=syncState(selected);state.turnWaits=result.reason==='turn'?state.turnWaits+1:0;}OperationDiagnostics.mark('convergence-publication-complete',{provider:selected.id,status:String(result.status||''),maintenancePending:result.maintenancePending===true},traceId);OperationDiagnostics.mark('background-transition',background.transition('convergence','running',result.status==='completed'?'completed':'deferred',{reason:String(result.reason||''),actionable:false}),traceId);OperationDiagnostics.finish({status:String(result.status||'pending'),reason:String(result.reason||''),maintenancePending:result.maintenancePending===true},traceId);
         if(result.status==='completed'){resetConvergenceRetry(selected);background.wake('publication');scheduleAutomaticBackup(selected);}
         else if(['none','local-empty'].includes(result.reason))resetConvergenceRetry(selected);
+        // Waiting for an app update is not a failure: no retry ladder, and the
+        // regular check looks again (removing that version wakes it sooner).
+        else if(result.reason==='needs-update'){resetConvergenceRetry(selected);schedulePendingProviderBackup(selected,AUTOMATIC_QUIET_MS);}
         // Drive moved on, or another device is backing up there: catch up or take turns.
         else if(['behind','turn'].includes(result.reason)){if(sync&&result.reason==='behind')sync.behind=true;const turns=syncState(selected).turnWaits;schedulePendingProviderBackup(selected,result.reason==='behind'?1000:SYNC_TURN_RETRY_DELAYS[Math.min(Math.max(0,turns-1),SYNC_TURN_RETRY_DELAYS.length-1)]);}
         // Waiting for the Device Folder's version: it is due already, so the
@@ -1446,7 +1482,7 @@ registry.define('backup-provider',1,input=>{
     // copied under the same id, so both histories match; if the copy fails,
     // this location makes its own.
     const copy=saveOptions.retention?.role==='before-restore'?null:spineCopy(selected),save=value=>saveRepositoryProvider(selected,{...saveOptions,pendingIntent:pending,copy:value});
-    const saved=await save(copy).catch(error=>{if(!copy||saveOptions.signal?.aborted||['REPOSITORY_SYNC_TURN','REPOSITORY_SYNC_BEHIND'].includes(String(error?.code||'')))throw error;copyFailed.set(selected.id,copy.checkpointId);AppDiagnostics.capture('backup-provider.spine-copy',error,'warn');return save(null);});presentation.condition(selected.id,'permission','');if(pendingRead&&publicationCoversPending(saved,pending))await clearPendingRetry(selected,pending);else schedulePendingProviderBackup(selected);return saved;
+    const saved=await save(copy).catch(error=>{if(!copy||saveOptions.signal?.aborted||['REPOSITORY_SYNC_TURN','REPOSITORY_SYNC_BEHIND','REPOSITORY_SYNC_NEEDS_UPDATE','STUDY_DIRECTOR_SHARE_HELD'].includes(String(error?.code||'')))throw error;copyFailed.set(selected.id,copy.checkpointId);AppDiagnostics.capture('backup-provider.spine-copy',error,'warn');return save(null);});presentation.condition(selected.id,'permission','');if(pendingRead&&publicationCoversPending(saved,pending))await clearPendingRetry(selected,pending);else schedulePendingProviderBackup(selected);return saved;
   }
   async function loadRepositoryProviderCandidate(id,operation,options={}){
     const selected=providers.get(safeId(id));if(!selected||!selected.repository)throw new Error('Repository backup provider is unavailable.');
@@ -1522,6 +1558,10 @@ registry.define('backup-provider',1,input=>{
       if(cancelled){OperationDiagnostics.finish({cancelled:true},traceId);statusText('Backup cancelled safely.',true);finishForegroundView(selected,{message:'Backup cancelled safely.',ok:true,lifecycle:'cancelled'});return false;}
       // Drive moved on, or another device is saving there: sync takes it from here.
       const code=String(error?.code||''),behind=code==='REPOSITORY_SYNC_BEHIND';
+      if(code==='REPOSITORY_SYNC_NEEDS_UPDATE'||code==='STUDY_DIRECTOR_SHARE_HELD'){
+        const text=String(error.message||`Sync with ${selected.label} waits for an app update.`);
+        OperationDiagnostics.finish({status:'pending',reason:'needs-update'},traceId);statusText(text,false);finishForegroundView(selected,{message:text,ok:false,lifecycle:'cancelled'});return false;
+      }
       if(behind||code==='REPOSITORY_SYNC_TURN'){
         if(behind)syncState(selected).behind=true;await markPendingRetry(selected).catch(()=>{});schedulePendingProviderBackup(selected,behind?1000:PROVIDER_CONVERGENCE_BUSY_RETRY_MS);
         const text=behind?`Taking in newer changes from ${selected.label} first; your backup follows.`:`Another device is saving to ${selected.label}; your backup goes next.`;
@@ -1638,7 +1678,7 @@ registry.define('backup-provider',1,input=>{
   function list(){return Object.freeze([...providers.values()].map(item=>Object.freeze({id:item.id,label:item.label,shared:item.shared===true,connected:providerConnected(item)})));}
   function backgroundStatus(){return freeze([...providerBackgroundCoordinators.entries()].flatMap(([id,coordinator])=>[freeze({job:id+' maintenance',...(providerMaintenanceSchedulers.get(id)?.status()||coordinator.jobStatus('maintenance'))}),freeze({job:id+' integrity',...(providerIntegritySchedulers.get(id)?.status()||coordinator.jobStatus('integrity'))}),freeze({job:id+' convergence',...coordinator.jobStatus('convergence')})]));}
   // Sync state of each shared location, for diagnostics: times and flags only.
-  function diagnosticSync(){return freeze([...providers.values()].filter(selected=>selected.shared).map(selected=>{const state=syncState(selected),job=providerBackgroundCoordinators.get(selected.id)?.jobStatus('convergence');let endsAt=NaN;try{endsAt=Number(selected.connectionExpiresAt?.());}catch{}return freeze({id:selected.id,connected:providerConnected(selected),syncedAt:state.syncedAt,checkedAt:state.checkedAt?new Date(state.checkedAt).toISOString():'',nextEligibleAt:String(job?.nextEligibleAt||''),needsReview:!!state.review,needsPassword:!!state.password,behind:!!state.behind,catchingUp:!!state.catching,waitingForDeviceFolder:!!state.waitedAt,turnWaits:Math.max(0,Number(state.turnWaits)||0),signInEndsAt:Number.isFinite(endsAt)&&endsAt>0?new Date(endsAt).toISOString():''});}));}
+  function diagnosticSync(){return freeze([...providers.values()].filter(selected=>selected.shared).map(selected=>{const state=syncState(selected),job=providerBackgroundCoordinators.get(selected.id)?.jobStatus('convergence');let endsAt=NaN;try{endsAt=Number(selected.connectionExpiresAt?.());}catch{}return freeze({id:selected.id,connected:providerConnected(selected),syncedAt:state.syncedAt,checkedAt:state.checkedAt?new Date(state.checkedAt).toISOString():'',nextEligibleAt:String(job?.nextEligibleAt||''),needsReview:!!state.review,needsUpdate:!!state.newer,needsPassword:!!state.password,behind:!!state.behind,catchingUp:!!state.catching,waitingForDeviceFolder:!!state.waitedAt,turnWaits:Math.max(0,Number(state.turnWaits)||0),signInEndsAt:Number.isFinite(endsAt)&&endsAt>0?new Date(endsAt).toISOString():''});}));}
   function diagnosticConnections(){return freeze([...providers.values()].map(selected=>freeze({id:selected.id,connected:providerConnected(selected),formats:formatsByProvider.get(selected.id)||null,scopeBound:repositoryScopeByProvider.has(selected.id),retryAttempt:providerConvergenceRetryAttempts.get(selected.id)||0,retryBackoffCapped:(providerConvergenceRetryAttempts.get(selected.id)||0)>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length})));}
   function status(){return Object.freeze({busy,cancellable:!!foregroundController&&!foregroundController.signal.aborted,operation:foregroundView()?Object.freeze({...foregroundView()}):null});}
   return Object.freeze({register,list,syncing:()=>sharingActive(),status,locationStatus,reviewSync,unlockSync,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,diagnosticSync,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},cancelForeground,history:historyRepositoryProvider,noteVersions:noteVersionsRepositoryProvider,backup:backupProvider,backupRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeRepositoryProviderVersion,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,suspendBackground,repositoryScope});

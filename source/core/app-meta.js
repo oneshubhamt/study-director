@@ -14,9 +14,9 @@ registry.define('app-meta',1,()=>{
     const storeName=String(input.store||'');if(!storeName)throw new TypeError('appMeta store name is required.');
     const definitions=new Map(),exactKeys=new Map(),prefixes=[];
     for(const [name,raw] of Object.entries(input.registry)){
-      exactObject(raw,['name','kind','key','owner','validatorOwner','schema'],`appMeta registry ${name}`);
-      if(raw.name!==name||!['exact','prefix'].includes(raw.kind)||!raw.key||!raw.owner||!raw.validatorOwner||!raw.schema)throw new TypeError(`appMeta registry ${name} is invalid.`);
-      const definition=freeze({name,kind:raw.kind,key:String(raw.key),owner:String(raw.owner),validatorOwner:String(raw.validatorOwner),schema:String(raw.schema)});
+      exactObject(raw,['name','kind','key','owner','validatorOwner','schema','protection'],`appMeta registry ${name}`);
+      if(raw.name!==name||!['exact','prefix'].includes(raw.kind)||!raw.key||!raw.owner||!raw.validatorOwner||!raw.schema||!raw.protection)throw new TypeError(`appMeta registry ${name} is invalid.`);
+      const definition=freeze({name,kind:raw.kind,key:String(raw.key),owner:String(raw.owner),validatorOwner:String(raw.validatorOwner),schema:String(raw.schema),protection:String(raw.protection)});
       definitions.set(name,definition);
       if(definition.kind==='exact'){
         if(exactKeys.has(definition.key))throw new Error(`Duplicate appMeta exact identity ${definition.key}.`);
@@ -132,6 +132,12 @@ registry.define('app-meta',1,()=>{
       const capability=freeze({format:'study-director.app-meta-owner',contractVersion:1,owner:cleanOwner,read,readEntry,write,remove,list,transaction,view:tx=>createView(cleanOwner,tx)});
       capabilities.set(cleanOwner,capability);return capability;
     }
+    // Whether this build reads a stored row: a family it knows, the current
+    // envelope and a value its validator accepts.
+    function readable(row){
+      const resolved=resolveKey(row&&row.key);if(!resolved)return false;
+      try{entryFromRow(resolved.definition,resolved.key,resolved.suffix,row);return true;}catch{return false;}
+    }
     async function verifyAll(){
       const issues=[];let rows=[];
       try{rows=await input.indexedDb.getAll(storeName,'app metadata verification aborted');}
@@ -142,7 +148,7 @@ registry.define('app-meta',1,()=>{
       }
       return freeze({ok:issues.length===0,rows:(rows||[]).length,issues:freeze(issues)});
     }
-    return freeze({format:'study-director.app-meta-gateway',contractVersion:1,registerValidators,bind,resolve:key=>{const resolved=resolveKey(key);return resolved&&freeze({family:resolved.definition.name,kind:resolved.definition.kind,key:resolved.key,suffix:resolved.suffix,owner:resolved.definition.owner,validatorOwner:resolved.definition.validatorOwner,schema:resolved.definition.schema});},verifyAll});
+    return freeze({format:'study-director.app-meta-gateway',contractVersion:1,registerValidators,bind,resolve:key=>{const resolved=resolveKey(key);return resolved&&freeze({family:resolved.definition.name,kind:resolved.definition.kind,key:resolved.key,suffix:resolved.suffix,owner:resolved.definition.owner,validatorOwner:resolved.definition.validatorOwner,schema:resolved.definition.schema,protection:resolved.definition.protection});},readable,verifyAll});
   }
   return freeze({format:'study-director.app-meta',contractVersion:1,create});
 });

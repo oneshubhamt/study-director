@@ -35,6 +35,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('storage-failures','tests/browser/storage/storage-failure-recovery.mjs',['storage','failure-injection','recovery']),
     test('site-data-clear','tests/browser/storage/site-data-clear.mjs',['storage','site-data-clear','recovery','indexeddb','notifications','reload']),
     test('upgrade-renamed-names','tests/browser/storage/upgrade-renamed-names.mjs',['storage','upgrade','compatibility','indexeddb','notes','reload']),
+    test('unsupported-data','tests/browser/storage/unsupported-data.mjs',['storage','compatibility','indexeddb','profiles','reload'],240000),
     test('interactions','tests/browser/ui/interactions.mjs',['dialogs','history','navigation','keyboard','notifications'])
   ]),
   extended:Object.freeze([

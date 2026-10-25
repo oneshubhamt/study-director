@@ -307,8 +307,8 @@ export const DATA_ARCHITECTURE=freeze({
 });
 
 export const APP_META_RUNTIME_REGISTRY=freeze(Object.fromEntries([
-  ...Object.entries(DATA_ARCHITECTURE.appMeta.exact).map(([name,value])=>[name,freeze({name,kind:'exact',key:APP_META_KEYS[name],owner:value.owner,validatorOwner:appMetaValidationOwner(name),schema:value.schema})]),
-  ...Object.entries(DATA_ARCHITECTURE.appMeta.prefixes).map(([name,value])=>[name,freeze({name,kind:'prefix',key:APP_META_KEYS[name],owner:value.owner,validatorOwner:appMetaValidationOwner(name),schema:value.schema})])
+  ...Object.entries(DATA_ARCHITECTURE.appMeta.exact).map(([name,value])=>[name,freeze({name,kind:'exact',key:APP_META_KEYS[name],owner:value.owner,validatorOwner:appMetaValidationOwner(name),schema:value.schema,protection:value.protection})]),
+  ...Object.entries(DATA_ARCHITECTURE.appMeta.prefixes).map(([name,value])=>[name,freeze({name,kind:'prefix',key:APP_META_KEYS[name],owner:value.owner,validatorOwner:appMetaValidationOwner(name),schema:value.schema,protection:value.protection})])
 ]));
 
 export function assertDataArchitecture(contract=DATA_ARCHITECTURE,keys=APP_META_KEYS,obsoleteKeys=OBSOLETE_APP_META_KEYS,localKeys=LOCAL_STORAGE_KEYS,obsoleteLocalKeys=OBSOLETE_LOCAL_STORAGE_KEYS,validationOwners=APP_META_VALIDATION_OWNERS){

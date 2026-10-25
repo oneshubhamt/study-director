@@ -68,6 +68,7 @@ registry.define('backup-presentation',1,()=>{
       if(sync.syncing||state.backingUp)return 'Syncing…';
       if(sync.password)return 'Needs password';
       if(sync.review)return 'Needs review';
+      if(sync.newer)return 'Needs app update';
       return sync.syncedAt?`${state.waiting?'Changes since':'Synced'} ${timeText(sync.syncedAt)}`:'';
     }
     // What a location's row shows: its running operation, otherwise the newest

@@ -39,16 +39,23 @@ registry.define('profiles',1,()=>{
       const from=value.from===''||validId(value.from)?value.from:null;
       return freeze({id:value.id,scope:value.scope,name:cleanName(value.name),email:cleanEmail(value.email),folder:cleanFolder(value.folder),createdAt:time(value.createdAt),fresh:value.fresh===true,from:value.fresh===true?from:null});
     }
-    // The list as stored, or an empty one. Duplicate ids or scopes keep the first.
+    // The list as stored, or an empty one. Duplicate ids or scopes keep the
+    // first. A list this build cannot read (a newer version's, or one it
+    // cannot parse) is unsupported: what can be read of it is used, nothing
+    // of it is changed, and adding, switching or removing profiles waits for
+    // an update (removed profiles' data is not deleted meanwhile).
     function read(){
-      let raw=null;try{raw=JSON.parse(storage.read()||'null');}catch{raw=null;}
+      const text=storage.read();let raw=null,parsed=true;try{raw=JSON.parse(text||'null');}catch{raw=null;parsed=false;}
+      const unsupported=text!==null&&text!==''&&(!parsed||!raw||typeof raw!=='object'||raw.version!==VERSION);
       const profiles=[],ids=new Set(),scopes=new Set();
-      if(raw&&raw.version===VERSION&&Array.isArray(raw.profiles))for(const value of raw.profiles.slice(0,MAX_PROFILES)){const row=entry(value);if(!row||ids.has(row.id)||scopes.has(row.scope))continue;ids.add(row.id);scopes.add(row.scope);profiles.push(row);}
-      const removing=raw&&Array.isArray(raw.removing)?[...new Set(raw.removing.filter(scope=>(scope===''||validId(scope))&&!scopes.has(scope)))]:[];
+      if(raw&&(raw.version===VERSION||unsupported)&&Array.isArray(raw.profiles))for(const value of raw.profiles.slice(0,MAX_PROFILES)){const row=entry(value);if(!row||ids.has(row.id)||scopes.has(row.scope))continue;ids.add(row.id);scopes.add(row.scope);profiles.push(row);}
+      const removing=!unsupported&&raw&&Array.isArray(raw.removing)?[...new Set(raw.removing.filter(scope=>(scope===''||validId(scope))&&!scopes.has(scope)))]:[];
       const active=profiles.some(row=>row.id===raw?.active)?raw.active:(profiles[0]?.id||'');
-      return freeze({version:VERSION,active,profiles:freeze(profiles),removing:freeze(removing)});
+      return freeze({version:VERSION,active,profiles:freeze(profiles),removing:freeze(removing),unsupported});
     }
+    function unsupportedError(){return Object.assign(new Error('The profile list on this device was saved by a newer version of Study Director. Update the app to add, switch or remove profiles.'),{code:'STUDY_DIRECTOR_PROFILES_UNSUPPORTED'});}
     function write(next){
+      if(read().unsupported)throw unsupportedError();
       const value={version:VERSION,active:next.active,profiles:next.profiles.map(row=>({...row})),removing:[...next.removing]};
       if(!storage.write(JSON.stringify(value)))throw new Error('The profile list on this device could not be saved.');
       return read();
@@ -62,13 +69,14 @@ registry.define('profiles',1,()=>{
     const current=(list=read())=>list.profiles.find(row=>row.scope===pageScope)||null;
     function update(change){
       const list=read(),mine=current(list);if(!mine)return null;
+      if(list.unsupported)return mine;
       const next=change(mine,list);if(!next)return mine;
       return current(write({...list,profiles:list.profiles.map(row=>row.scope===pageScope?entry({...row,...next}):row),active:list.active===mine.id&&next.id?next.id:list.active}));
     }
     // The page's profile. A device's first is made here: for someone new its
     // first start is still to come (fresh), for existing data it is done.
     function ensure(name,{fresh=false}={}){
-      const list=read(),mine=current(list);if(mine)return mine;
+      const list=read(),mine=current(list);if(mine||list.unsupported)return mine;
       if(list.profiles.length>=MAX_PROFILES)throw new Error('This device already holds the most profiles it can.');
       const row=entry({id:newId(name),scope:pageScope,name,email:'',folder:'',createdAt:new Date(platform.now()).toISOString(),fresh:fresh===true,from:null});
       const next=write({...list,profiles:[...list.profiles,row],active:list.profiles.some(other=>other.id===list.active&&other.scope!==pageScope)?list.active:row.id,removing:list.removing.filter(scope=>scope!==pageScope)});
@@ -119,6 +127,7 @@ registry.define('profiles',1,()=>{
     const renew=()=>update(mine=>({id:newId(mine.name),email:'',folder:''}));
     // Deletes what removed profiles left on this device.
     async function collect(){
+      if(read().unsupported)return freeze({removed:false,error:null});
       const pending=read().removing.filter(scope=>scope!==pageScope);
       for(const scope of pending){
         const scoped=name=>scope?`${name}${separator}${scope}`:String(name);
@@ -134,12 +143,14 @@ registry.define('profiles',1,()=>{
     }
     // Another tab switched, added or removed a profile: every tab follows.
     function watch(){
-      return platform.listen(key=>{if(key!==registryKey&&key!==null)return;const list=read(),mine=current(list),active=list.profiles.find(row=>row.id===list.active);if(!mine||active&&active.scope!==pageScope)platform.reload();});
+      return platform.listen(key=>{if(key!==registryKey&&key!==null)return;const list=read(),mine=current(list),active=list.profiles.find(row=>row.id===list.active);if(list.unsupported)return;if(!mine||active&&active.scope!==pageScope)platform.reload();});
     }
     const list=()=>read().profiles;
     // Removed profiles whose data still waits to be deleted here (diagnostics).
     const removalPending=()=>read().removing.filter(scope=>scope!==pageScope).length;
-    return freeze({current:()=>current(),list,ensure,rename,setAccount,adopt,renew,finishFirstStart,add,switchTo,remove,collect,watch,removalPending});
+    // The list on this device is a newer version's: profiles cannot change here.
+    const unsupported=()=>read().unsupported;
+    return freeze({current:()=>current(),list,ensure,rename,setAccount,adopt,renew,finishFirstStart,add,switchTo,remove,collect,watch,removalPending,unsupported});
   }
   return freeze({format:'study-director.profiles-module',contractVersion:1,createController});
 });

@@ -257,18 +257,22 @@ registry.define('backup-recovery-host',1,()=>{
     }
     function removeButton(location,label){const remove=input.document.createElement('button');remove.type='button';remove.className='mini-btn ui-btn';remove.dataset.action='remove-managed-version';remove.dataset.versionHistorySource=location.sourceId;remove.dataset.versionHistoryCheckpoint=location.safetyCheckpointId||location.checkpointId;remove.textContent=label;return remove;}
     // A version this app cannot read: it may come from a newer Study Director
-    // on another device, or its file is damaged. It cannot be restored; the
-    // person can keep it or remove it.
+    // on another device, or its file is damaged. It is shown muted, with its
+    // Restore disabled; the one thing that works on it is Remove, and nothing
+    // removes it unless the person chooses that.
     function unreadableCard(entry,location,several){
-      const card=input.document.createElement('section');card.className='managed-version-card';card.dataset.logicalVersion=entry.logicalId;
+      const card=input.document.createElement('section');card.className='managed-version-card unreadable';card.dataset.logicalVersion=entry.logicalId;card.setAttribute('aria-disabled','true');
       const head=input.document.createElement('div');head.className='managed-version-card-head';
       const when=input.document.createElement('strong');when.className='managed-version-date';when.textContent=dateLabel(entry.exportedAt||location.exportedAt);
       const note=input.document.createElement('span');note.className='managed-version-counts ui-helper';note.textContent='Can’t be read by this app';
       head.append(when,note);card.appendChild(head);
       const row=input.document.createElement('div');row.className='managed-version-location';
       const copy=input.document.createElement('div');copy.className='managed-version-location-copy';
-      const status=input.document.createElement('span');status.className='ui-status warn';status.textContent=`It may come from a newer Study Director, or the file is damaged.${several?` In ${location.sourceLabel}.`:''}`;copy.appendChild(status);
-      const actions=input.document.createElement('div');actions.className='managed-version-location-actions';actions.appendChild(removeButton(location,'Remove…'));
+      const status=input.document.createElement('span');status.className='ui-helper';status.textContent=`From a newer Study Director, or the file is damaged. Update the app to restore it.${several?` In ${location.sourceLabel}.`:''}`;copy.appendChild(status);
+      const actions=input.document.createElement('div');actions.className='managed-version-location-actions';
+      const restore=input.document.createElement('button');restore.type='button';restore.className='mini-btn ui-btn';restore.textContent='Restore…';restore.disabled=true;restore.title='This app can’t read this version';
+      const remove=removeButton(location,'Remove…');remove.classList.add('danger');
+      actions.append(restore,remove);
       row.append(copy,actions);card.appendChild(row);return card;
     }
     // One list for every location. A version two locations hold (the same id,
