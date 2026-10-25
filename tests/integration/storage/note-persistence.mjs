@@ -354,6 +354,22 @@ for(const failEpochRead of [false,true]){
   assert.deepEqual([...app.notes.normalizePayload({[pharm]:{...record,links:[heart]}})[pharm].links],[heart]);
 }
 
+// 14. A backup note that takes this device's id (same title, made separately)
+// keeps every link to it: other backup notes' bars and #note= text follow it.
+{
+  const {app}=await setup();
+  app.notes.update('pharm','pharm','Local pharmacology','');await app.notes.flush({strict:true});
+  const local=app.notes.get('pharm').id,remote='n_00000000000000aa',cardio='n_00000000000000bb',other='n_00000000000000cc';
+  const at='2026-09-15T13:00:00.000Z',row=(key,label,text,links)=>({version:3,key,label,text,updatedAt:at,...(links?{links}:{})});
+  const aligned=app.notes.alignByTitle({[remote]:row(remote,'pharm','Backup pharmacology'),
+    [cardio]:row(cardio,'cardio',`See #note=${remote} and #note=${other}`,[remote,other]),[other]:row(other,'other','')});
+  assert.deepEqual(Object.keys(aligned).sort(),[cardio,other,local].sort(),'the backup note takes the local id');
+  assert.deepEqual([...aligned[cardio].links],[local,other],'the bar follows the moved note');
+  assert.equal(aligned[cardio].text,`See #note=${local} and #note=${other}`,'so does the link in the text');
+  await app.notes.reconcile(aligned);
+  assert.deepEqual(app.notes.linkedFrom('pharm').map(note=>note.label),['cardio'],'the backlink survives the combine');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'note-persistence',contracts:[
   'queued batches use the revision committed by the earlier batch',
   'rows lost to a browser data clear are rewritten from memory',
@@ -367,5 +383,6 @@ console.log(JSON.stringify({status:'PASS',suite:'note-persistence',contracts:[
   'rename changes only titles: a note and its children keep their ids; a taken title merges only when asked',
   'a clash stores its copy in the transaction that finds it; names never run out; the limit never drops either version',
   'Recently deleted gives way at the note limit; the rescue names notes it cannot hold',
-  'a bar links notes by id; Linked from comes from bars and text; deletion keeps the bar and restore brings it back'
+  'a bar links notes by id; Linked from comes from bars and text; deletion keeps the bar and restore brings it back',
+  'a backup note that takes a local id keeps the bars and text links that point to it'
 ]},null,2));

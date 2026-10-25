@@ -396,6 +396,10 @@ Measured on 200 MB of attachments:
 ### Study session
 - `6109402`, `4837fef` Away time counted only while the running block's study time lasted; the inactive-gap dialog is released when its timer already stopped.
 
+### Review fixes (Codex, 2026-10-25)
+- A backup note that takes this device's id (same title, made separately) keeps every link to it: other backup notes' linked-notes bars and `#note=` text links follow it (`alignByTitle`).
+- Moving the old Device Folder backup folder checks every copied file by contents, stored objects included; a same-size object left by an interrupted move is copied again, and the old folder stays until all match.
+
 ### Tests and QA
 - `8891f6c`, `eb77264`, `3d91713`, `8338f5b`, `7105b02`: fixtures, suite policy, native visibility in browser tests, de-duplicated harnesses.
 - The commit after `ddb7e1d`: the pwa-update flake had two causes. A read-only secondary window that briefly held control kept waiting for its session state to settle, so it never reloaded onto the new release; it now reloads, and finishing a session-state change re-checks a waiting update at once. A window whose service worker has already moved to the new release retries every 5 seconds instead of every 5 minutes, which also covers the hidden window taking control while the visible one reloads. The test clicked Skip on the first-start form before the form had opened; `skipFirstStart` in the browser harness now waits for it.

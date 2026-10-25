@@ -61,6 +61,23 @@ await test('a copy that does not match keeps the old folder; the next try contin
   assert.equal((await w.commits(legacy.folder)).length,3);assert.equal((await marker(legacy.folder,REPOSITORY_NAME)).movedFrom,LEGACY_ROOT);
 });
 
+await test('stored objects are checked by contents too: a bad copy keeps the old folder, a wrong leftover is copied again',async()=>{
+  const w=world({start:'2026-10-06T12:00:00.000Z'}),legacy=await legacyFolder(w,2),objectName=legacy.objects[0];
+  const bytes=async(name,file)=>Buffer.from(await (await (await (await (await legacy.folder.getDirectoryHandle(name)).getDirectoryHandle(IDENTITIES.objects)).getFileHandle(file)).getFile()).arrayBuffer());
+  const original=await bytes(LEGACY_ROOT,objectName);
+  // The copy of a stored object comes out wrong: the move stops and the old folder stays.
+  legacy.folder.faults.corruptReadOf.add(objectName);
+  w.store(legacy.folder);await w.controller.install();await w.settle();
+  assert.equal(w.controller.status().connected,false);assert.match(w.note(),/did not match\. The old folder was kept/u);
+  assert.deepEqual(legacy.folder.names(),[LEGACY_ROOT,REPOSITORY_NAME].sort());assert.deepEqual(await bytes(LEGACY_ROOT,objectName),original,'the original is untouched');
+  // An interrupted move left a same-size object with the wrong contents: the next try copies it again.
+  const wrong=Buffer.from(original);wrong[0]^=0xff;
+  const writable=await (await (await (await legacy.folder.getDirectoryHandle(REPOSITORY_NAME)).getDirectoryHandle(IDENTITIES.objects)).getFileHandle(objectName)).createWritable();await writable.write(new Blob([wrong]));await writable.close();
+  assert.equal(await w.controller.backupNow(),true);await w.settle();
+  assert.deepEqual(legacy.folder.names(),[REPOSITORY_NAME],'the move finished');
+  assert.deepEqual(await bytes(REPOSITORY_NAME,objectName),original,'the moved object holds the original bytes');
+});
+
 await test('an old folder that holds no version is simply removed',async()=>{
   const w=world(),folder=w.directory();await (await folder.getDirectoryHandle(LEGACY_ROOT,{create:true})).getDirectoryHandle('objects',{create:true});
   await w.controller.install();w.choose(folder);await w.controller.connect();await w.settle();

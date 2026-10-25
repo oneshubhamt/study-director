@@ -686,12 +686,20 @@ const repository=(()=>{
   // made separately (on another device, or before ids): it takes this
   // device's id, so a combine compares the two instead of keeping both. A
   // note this device deleted or holds in Recently deleted is known, so it
-  // keeps its id and its deletion still applies.
+  // keeps its id and its deletion still applies. Links to a note that took a
+  // local id (in the linked-notes bar and #note= in the text) follow it.
   function alignByTitle(payload,deletedIds=[]){
-    const incoming=normalizePayload(payload),out=KeyedRecord.create(),claimed=new Set(Object.keys(incoming)),deleted=new Set(deletedIds);
+    const incoming=normalizePayload(payload),out=KeyedRecord.create(),claimed=new Set(Object.keys(incoming)),deleted=new Set(deletedIds),moved=new Map();
     for(const [key,entry] of Object.entries(incoming)){
       const known=isTrashKey(key)||notes[key]||notes[NoteKeys.trash(key)]||deleted.has(key),local=known?'':idForTitle(titleOf(entry));
-      if(local&&!claimed.has(local)){claimed.add(local);out[local]={...entry,key:local};}else out[key]=entry;
+      if(local&&!claimed.has(local)){claimed.add(local);moved.set(key,local);}
+    }
+    const follow=id=>moved.get(id)||id;
+    for(const [key,entry] of Object.entries(incoming)){
+      const next={...entry,key:follow(key)};
+      if(moved.size&&next.links){const links=[...new Set(next.links.map(follow))].filter(id=>id!==next.key);if(links.length)next.links=links;else delete next.links;}
+      if(moved.size&&next.text)next.text=String(next.text).replace(/#note=([A-Za-z0-9_-]+)/g,(marker,id)=>moved.has(id)?`#note=${moved.get(id)}`:marker);
+      out[next.key]=next;
     }
     return out;
   }

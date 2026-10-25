@@ -288,7 +288,7 @@ registry.define('device-folder-storage',1,()=>{
     }
     const LOCK_FILE=/^(?:pub|mnt)_[a-f0-9]{32}\.(?:sdpublication|sdmaintenance)$/u;
     // Moves the single repository folder of earlier versions into this
-    // profile and device's own: every file is copied and checked, the marker
+    // profile and device's own: every file is copied and its contents checked, the marker
     // keeps its identity and records the move, and only then is the old folder
     // deleted. An interrupted move continues where it stopped.
     async function move(base,{onProgress=null}={}){
@@ -305,14 +305,17 @@ registry.define('device-folder-storage',1,()=>{
         for(const [fileName,handle] of await entries(from,`Device Folder ${directoryName}`,null))if(handle&&handle.kind==='file'&&!LOCK_FILE.test(String(fileName)))plan.push({handle,to,name:String(fileName),object:directoryName===identities.objects});
       }
       let done=0;onProgress?.(0,plan.length);
+      const original=item=>bounded(item.handle.getFile(),`Device Folder ${item.name}`),digest=async file=>String(await input.checksum(file,{}));
       for(const item of plan){
-        const file=await bounded(item.handle.getFile(),`Device Folder ${item.name}`),present=await fileOrNull(item.to,item.name);
-        if(!item.object||!present||present.size!==file.size)await writeFile(item.to,item.name,file);
+        // A stored object an interrupted move already copied is kept only when
+        // its contents match; versions and markers are small and always copied.
+        const file=await original(item),present=item.object?await fileOrNull(item.to,item.name):null;
+        if(!present||present.size!==file.size||await digest(present)!==await digest(file))await writeFile(item.to,item.name,file);
         const copied=await fileOrNull(item.to,item.name);
         if(!copied||copied.size!==file.size)throw new Error('A backup file could not be copied to the new backup folder. The old folder was kept.');
-        // Versions and markers are small: their contents are compared too,
-        // against a fresh read of the original.
-        if(!item.object&&String(await input.checksum(copied,{}))!==String(await input.checksum(await bounded(item.handle.getFile(),`Device Folder ${item.name}`),{})))throw new Error('A copied backup file did not match. The old folder was kept.');
+        // Every file, stored objects too, is compared by contents against a
+        // fresh read of the original before the old folder can go.
+        if(await digest(copied)!==await digest(await original(item)))throw new Error('A copied backup file did not match. The old folder was kept.');
         done+=1;onProgress?.(done,plan.length);if(done%LIST_YIELD_EVERY===0)await environment.yieldTask();
       }
       await writeFile(target,SCOPE_FILE,markerBlob(id,{movedFrom:legacyName}));
