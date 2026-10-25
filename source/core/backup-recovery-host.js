@@ -67,7 +67,7 @@ registry.define('backup-recovery-host',1,()=>{
     functions(input.lifecycle,['activeSessionIssue','activeSessionLoad','activeSessionSettled','attachmentBusy','canonicalPlanDraft','deletionRecoveryFlush','flushNotes','flushPlanDraft','hasTasks','noteFailure','planDraft','planInputValue','quiesce','savePlanDraft','settleAttachmentWriters','settlePlan','writeLiveDraft'],'Backup recovery host lifecycle port');
     functions(input.managedRecovery,['createCoordinator'],'Backup recovery host managed-recovery port');
     functions(input.mutation,['run'],'Backup recovery host mutation port');
-    functions(input.providers,['bringInRepositoryProvider','cancelForeground','configureManagedRecovery','configurePendingBackupRetry','history','list','noteVersions','removeProtectedRepositoryProvider','restoreRepositoryProviderVersion','suspendBackground'],'Backup recovery host provider port');
+    functions(input.providers,['bringInRepositoryProvider','cancelForeground','configureManagedRecovery','configurePendingBackupRetry','history','list','noteVersions','removeRepositoryProviderVersion','restoreRepositoryProviderVersion','suspendBackground'],'Backup recovery host provider port');
     functions(input.session,['hasBlocking'],'Backup recovery host session port');
     if(typeof input.sourceRevision!=='function')throw new TypeError('Backup recovery host sourceRevision port is invalid.');
     functions(input.storage,['read','remove','write'],'Backup recovery host storage port');
@@ -160,6 +160,8 @@ registry.define('backup-recovery-host',1,()=>{
     });
     const safetyLabel=value=>(value==='before-clear-library'||value==='before-clear-archive')?'Before Clear Library':value==='before-combine'?'Before Combine':'Before Restore';
     const tierLabel=(value,purpose='')=>value==='before-restore'?safetyLabel(purpose):value==='latest'?'Latest':value==='hourly'?'Hourly':value==='daily'?'Daily':value==='weekly'?'Weekly':value==='monthly'?'Monthly':'Saved';
+    // "12 Saved Days · 1 note".
+    const countLabel=counts=>{const days=Number(counts?.dailyRecord)||0,notes=Number(counts?.note)||0;return `${days} Saved Day${days===1?'':'s'} · ${notes} note${notes===1?'':'s'}`;};
     const dateLabel=value=>{const date=new Date(value);return Number.isFinite(date.getTime())?date.toLocaleString():String(value||'');};
     function sourceDescriptor(sourceId){
       const id=String(sourceId||'').trim(),provider=input.providers.list().find(item=>item.id===id);return provider?freeze({id:provider.id,label:provider.label,shared:provider.shared===true}):null;
@@ -237,10 +239,11 @@ registry.define('backup-recovery-host',1,()=>{
       const several=connectedSources().length>1;
       for(const entry of entries){
         const location=entry&&entry.location;if(!location)continue;
+        if(location.tier==='unreadable'){list.appendChild(unreadableCard(entry,location,several));continue;}
         const card=input.document.createElement('section');card.className='managed-version-card';card.dataset.logicalVersion=entry.logicalId;
         const head=input.document.createElement('div');head.className='managed-version-card-head';
         const when=input.document.createElement('strong');when.className='managed-version-date';when.textContent=dateLabel(entry.exportedAt||location.exportedAt);
-        const counts=input.document.createElement('span');counts.className='managed-version-counts ui-helper';counts.textContent=[`${Number(entry.counts?.dailyRecord)||0} Saved Days · ${Number(entry.counts?.note)||0} Notes`,fromDevice(entry,entries)].filter(Boolean).join(' · ');
+        const counts=input.document.createElement('span');counts.className='managed-version-counts ui-helper';counts.textContent=entry.locked?'Locked: enter the backup password to see this version':[countLabel(entry.counts),fromDevice(entry,entries)].filter(Boolean).join(' · ');
         head.append(when,counts);card.appendChild(head);
         const row=input.document.createElement('div');row.className='managed-version-location';
         const copy=input.document.createElement('div');copy.className='managed-version-location-copy';
@@ -248,31 +251,51 @@ registry.define('backup-recovery-host',1,()=>{
         if(location.warning){const warning=input.document.createElement('span');warning.className='ui-status warn';warning.textContent=String(location.warning);copy.appendChild(warning);}
         const actions=input.document.createElement('div');actions.className='managed-version-location-actions';
         const use=input.document.createElement('button');use.type='button';use.className='mini-btn ui-btn';use.dataset.action=noteTarget?'compare-managed-note':'recover-managed-version';use.dataset.versionHistorySource=location.sourceId;use.dataset.versionHistoryCheckpoint=location.checkpointId;use.textContent=noteTarget?'Restore note…':'Restore…';actions.appendChild(use);
-        if(location.tier==='before-restore'&&!noteTarget){const remove=input.document.createElement('button');remove.type='button';remove.className='mini-btn ui-btn';remove.dataset.action='remove-managed-safety';remove.dataset.versionHistorySource=location.sourceId;remove.dataset.versionHistoryCheckpoint=location.safetyCheckpointId||location.checkpointId;remove.textContent='Remove safety backup';actions.appendChild(remove);}
+        if(location.tier==='before-restore'&&!noteTarget)actions.appendChild(removeButton(location,'Remove safety version'));
         row.append(copy,actions);card.appendChild(row);list.appendChild(card);
       }
     }
+    function removeButton(location,label){const remove=input.document.createElement('button');remove.type='button';remove.className='mini-btn ui-btn';remove.dataset.action='remove-managed-version';remove.dataset.versionHistorySource=location.sourceId;remove.dataset.versionHistoryCheckpoint=location.safetyCheckpointId||location.checkpointId;remove.textContent=label;return remove;}
+    // A version this app cannot read: it may come from a newer Study Director
+    // on another device, or its file is damaged. It cannot be restored; the
+    // person can keep it or remove it.
+    function unreadableCard(entry,location,several){
+      const card=input.document.createElement('section');card.className='managed-version-card';card.dataset.logicalVersion=entry.logicalId;
+      const head=input.document.createElement('div');head.className='managed-version-card-head';
+      const when=input.document.createElement('strong');when.className='managed-version-date';when.textContent=dateLabel(entry.exportedAt||location.exportedAt);
+      const note=input.document.createElement('span');note.className='managed-version-counts ui-helper';note.textContent='Can’t be read by this app';
+      head.append(when,note);card.appendChild(head);
+      const row=input.document.createElement('div');row.className='managed-version-location';
+      const copy=input.document.createElement('div');copy.className='managed-version-location-copy';
+      const status=input.document.createElement('span');status.className='ui-status warn';status.textContent=`It may come from a newer Study Director, or the file is damaged.${several?` In ${location.sourceLabel}.`:''}`;copy.appendChild(status);
+      const actions=input.document.createElement('div');actions.className='managed-version-location-actions';actions.appendChild(removeButton(location,'Remove…'));
+      row.append(copy,actions);card.appendChild(row);return card;
+    }
     // One list for every location. A version two locations hold (the same id,
     // or the same data under another id) shows once and is read from the first
-    // location that holds it; each location's safety version shows on its own.
+    // location that holds it (copies lists the others, tried if that read
+    // fails); each location's safety version, and each version it cannot
+    // read, shows on its own.
     // The newest version is Latest, whichever location made it.
     function mergeHistories(results){
       const rows=[],byId=new Map(),byData=new Map(),time=entry=>Date.parse(entry.exportedAt||entry.location.exportedAt||0)||0;
       for(const {source,entries} of results)for(const entry of entries){
         const location=entry&&entry.location;if(!location)continue;
+        if(location.tier==='unreadable'){rows.push({entry,held:[source.label],tiers:[location.tier],copies:[]});continue;}
         if(location.tier!=='before-restore'){
           const match=byId.get(location.checkpointId)||(entry.logicalId?byData.get(entry.logicalId):null);
-          if(match&&!match.held.includes(source.label)){match.held.push(source.label);match.tiers.push(location.tier);continue;}
+          // A copy waiting for the password gives way to one that can be read.
+          if(match&&!match.held.includes(source.label)){match.held.push(source.label);match.tiers.push(location.tier);if(match.entry.locked&&!entry.locked){match.copies.push(match.entry.location);match.entry=entry;}else match.copies.push(location);continue;}
         }
-        const row={entry,held:[source.label],tiers:[location.tier]};rows.push(row);
+        const row={entry,held:[source.label],tiers:[location.tier],copies:[]};rows.push(row);
         if(location.tier!=='before-restore'){byId.set(location.checkpointId,row);if(entry.logicalId&&!byData.has(entry.logicalId))byData.set(entry.logicalId,row);}
       }
       rows.sort((a,b)=>time(b.entry)-time(a.entry)||String(b.entry.location.checkpointId).localeCompare(String(a.entry.location.checkpointId)));
       let latest=true;
       return freeze(rows.map(row=>{
         let tier=row.entry.location.tier;
-        if(tier!=='before-restore'){tier=latest?'latest':row.tiers.find(value=>value!=='latest')||'retained';latest=false;}
-        return freeze({...row.entry,held:freeze([...row.held]),location:freeze({...row.entry.location,tier})});
+        if(tier!=='before-restore'&&tier!=='unreadable'){tier=latest?'latest':row.tiers.find(value=>value!=='latest')||'retained';latest=false;}
+        return freeze({...row.entry,held:freeze([...row.held]),copies:freeze([...row.copies]),location:freeze({...row.entry.location,tier})});
       }));
     }
     async function collectAll({interactive=true}={}){
@@ -290,8 +313,8 @@ registry.define('backup-recovery-host',1,()=>{
           else unread.push(String(result&&result.reason||'')==='permission'?`${source.label} needs permission again.`:`${source.label} could not be read.`);
         }
         lastEntries=mergeHistories(results);render();
-        const missing=unread.length?' '+unread.join(' '):'';
-        setHistoryStatus(lastEntries.length?`${lastEntries.length} version${lastEntries.length===1?'':'s'}.${missing}`:`No versions yet.${missing}`,!unread.length);
+        const missing=unread.length?' '+unread.join(' '):'',unreadable=lastEntries.filter(entry=>entry.location.tier==='unreadable').length,readable=lastEntries.length-unreadable,cannot=unreadable?` ${unreadable} can’t be read by this app.`:'';
+        setHistoryStatus(readable?`${readable} version${readable===1?'':'s'}.${cannot}${missing}`:`No versions yet.${cannot}${missing}`,!unread.length);
         return freeze({entries:lastEntries});
       }catch(error){lastEntries=freeze([]);render();setHistoryStatus(userMessage(error,'Version History could not be read safely.'),false);input.diagnostics.capture('backup.version-history',error,'warn');return freeze({entries:lastEntries,error});}
       finally{if(activeController===controller)setOperationBusy(false);}
@@ -365,39 +388,51 @@ registry.define('backup-recovery-host',1,()=>{
       });
       if(!choice)return false;const controller=new AbortController();setOperationBusy(true,controller,choice==='replace'?'restore-version':'bring-in');setHistoryStatus('');setHistoryProgress({message:choice==='replace'?'Preparing restore…':'Preparing comparison…'});
       try{
-        const options=freeze({presentation:presentationScope,checkpointId,confirmed:choice==='replace',note:note?note.id:'',missingOnly:choice==='missing',signal:controller.signal,onProgress:value=>{if(activeController===controller&&!controller.signal.aborted)setHistoryProgress(value);}});
-        const result=choice==='replace'?await input.providers.restoreRepositoryProviderVersion(sourceId,options):await input.providers.bringInRepositoryProvider(sourceId,options);
+        // A read that fails before anything changed (repositoryReadFailed) is
+        // tried again from the next location that holds the version.
+        const sources=[location,...(Array.isArray(entry.copies)?entry.copies:[])].filter(at=>sourceDescriptor(at.sourceId));let result;
+        for(let index=0;;index+=1){
+          const at=sources[index];activeSourceId=at.sourceId;activeSourceLabel=at.sourceLabel;
+          const options=freeze({presentation:presentationScope,checkpointId:at.checkpointId,confirmed:choice==='replace',note:note?note.id:'',missingOnly:choice==='missing',signal:controller.signal,onProgress:value=>{if(activeController===controller&&!controller.signal.aborted)setHistoryProgress(value);}});
+          try{result=choice==='replace'?await input.providers.restoreRepositoryProviderVersion(at.sourceId,options):await input.providers.bringInRepositoryProvider(at.sourceId,options);break;}
+          catch(error){const next=sources[index+1];if(!next||error?.repositoryReadFailed!==true||controller.signal.aborted)throw error;input.diagnostics.capture('backup.version-history-other-copy',error,'warn');setHistoryProgress({message:`${at.sourceLabel} could not be read. Reading ${next.sourceLabel} instead…`});}
+        }
         clearHistoryProgress();
         const saved=dateLabel(location.exportedAt),noteOutcome=note?{'note-missing':`This note isn’t in the backup from ${saved}.`,'note-unchanged':`The backup from ${saved} has the same text as this note.`,'note-kept':'No changes were made.'}[String(result?.reason||'')]:'';
         if(noteOutcome){setHistoryStatus(noteOutcome,true,'cancelled');return false;}
         if(choice==='missing'&&String(result?.reason||'')==='needs-decision'){setHistoryStatus(presentation.restoreChoices.needsDecision,true,'cancelled');return false;}
         if(result&&result.cancelled||result&&result.reason==='cancelled'){setHistoryStatus('Recovery cancelled safely.',true,'cancelled');return false;}
         if(result&&result.ok===false){const message=userMessage(result.error,'The selected backup could not be applied safely.');setHistoryStatus(message,false);return false;}
-        setHistoryStatus(presentation.outcome(choice==='replace'?'restore-version':'bring-in',location.sourceLabel,result?.convergence,result?.summary));lastEntries=freeze([]);setOperationBusy(false);close();
-        if(note)try{note.onRestored(freeze({exportedAt:location.exportedAt,sourceLabel:location.sourceLabel}));}catch(error){input.diagnostics.capture('backup.note-restored',error,'warn');}
+        setHistoryStatus(presentation.outcome(choice==='replace'?'restore-version':'bring-in',activeSourceLabel,result?.convergence,result?.summary));lastEntries=freeze([]);setOperationBusy(false);close();
+        if(note)try{note.onRestored(freeze({exportedAt:location.exportedAt,sourceLabel:activeSourceLabel}));}catch(error){input.diagnostics.capture('backup.note-restored',error,'warn');}
         return true;
       }catch(error){clearHistoryProgress();const cancelled=error?.name==='AbortError'||String(error?.code||'')==='STUDY_DIRECTOR_IMPORT_CANCELLED',message=cancelled?'Recovery cancelled safely.':userMessage(error,'The selected backup could not be applied safely.');setHistoryStatus(message,cancelled,cancelled?'cancelled':'failed');if(!cancelled)input.diagnostics.capture('backup.provider-scoped-recovery',error,'warn');return false;}
       finally{if(activeController===controller)setOperationBusy(false);}
     }
-    async function removeSafety(event){
-      if(busy)return false;const button=eventButton(event,'[data-action="remove-managed-safety"][data-version-history-source][data-version-history-checkpoint]');if(!button)return false;
+    // Removes this device's safety version, or a version this app cannot read,
+    // after the person confirms.
+    async function removeVersion(event){
+      if(busy)return false;const button=eventButton(event,'[data-action="remove-managed-version"][data-version-history-source][data-version-history-checkpoint]');if(!button)return false;
       const sourceId=String(button.dataset.versionHistorySource||''),checkpointId=String(button.dataset.versionHistoryCheckpoint||''),entry=selectedEntry(sourceId,checkpointId),location=entry&&entry.location;
-      if(!location||location.tier!=='before-restore')return false;
+      if(!location||!['before-restore','unreadable'].includes(location.tier))return false;
+      const safety=location.tier==='before-restore',what=safety?'safety version':'version';
       activeSourceId=location.sourceId;activeSourceLabel=location.sourceLabel;
-      const choice=await input.interactions.choose({title:'Remove safety backup?',message:`Remove the temporary Before restore safety backup from ${location.sourceLabel}?`,details:['This does not change your current Study Director data.','After removal, this safety backup can no longer be used to undo that recovery.'],cancelLabel:'Keep safety backup',choices:[{value:'remove',label:'Remove safety backup',kind:'danger',description:'Delete this temporary safety backup from this backup location.'}]});
-      if(choice!=='remove')return false;setOperationBusy(true,null,'remove-safety');setHistoryStatus(`Removing safety backup from ${location.sourceLabel}…`);
+      const choice=await input.interactions.choose(safety
+        ?{title:'Remove safety version?',message:`Remove the temporary Before restore safety version from ${location.sourceLabel}?`,details:['This does not change your current Study Director data.','After removal, this safety version can no longer be used to undo that recovery.'],cancelLabel:'Keep safety version',choices:[{value:'remove',label:'Remove safety version',kind:'danger',description:'Delete this temporary safety version from this backup location.'}]}
+        :{title:'Remove this version?',message:`The version from ${dateLabel(location.exportedAt)} in ${location.sourceLabel} can’t be read by this app.`,details:['If another device runs a newer Study Director, it may still use this version. Update this app first to keep it.','Otherwise the file is damaged and can’t be restored.','Removing it does not change your current Study Director data.'],cancelLabel:'Keep version',choices:[{value:'remove',label:'Remove version',kind:'danger',description:'Delete this version from this backup location.'}]});
+      if(choice!=='remove')return false;setOperationBusy(true,null,'remove-version');setHistoryStatus(`Removing ${what} from ${location.sourceLabel}…`);
       try{
-        const result=await input.providers.removeProtectedRepositoryProvider(sourceId,checkpointId);
-        if(!result||result.removed!==true){setHistoryStatus(userMessage(result&&result.error,'The safety backup could not be removed safely.'),false);return false;}
+        const result=await input.providers.removeRepositoryProviderVersion(sourceId,checkpointId);
+        if(!result||result.removed!==true){setHistoryStatus(userMessage(result&&result.error,`The ${what} could not be removed safely.`),false);return false;}
         lastEntries=freeze(lastEntries.filter(item=>!(item.location.sourceId===sourceId&&item.location.checkpointId===location.checkpointId)));render();
-        setHistoryStatus(result.warning?'Safety backup removed. Unused backup storage will be cleaned up later.':'Safety backup removed.');return true;
-      }catch(error){setHistoryStatus(userMessage(error,'The safety backup could not be removed safely.'),false);input.diagnostics.capture('backup.version-history-remove-safety',error,'warn');return false;}
+        const removed=safety?'Safety version removed.':'Version removed.';setHistoryStatus(result.warning?`${removed} Unused backup storage will be cleaned up later.`:removed);return true;
+      }catch(error){setHistoryStatus(userMessage(error,`The ${what} could not be removed safely.`),false);input.diagnostics.capture('backup.version-history-remove',error,'warn');return false;}
       finally{setOperationBusy(false);}
     }
     return freeze({
       format:'study-director.backup-recovery-host',contractVersion:1,
       managedRecovery:spec=>coordinator.execute(spec),
-      history:freeze({subscribePresentation,open,openNote,close,cancel:cancelActive,refresh:()=>noteTarget?collectNoteVersions({interactive:true}):collectAll({interactive:true}),recover,removeSafety,status:()=>freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})}),
+      history:freeze({subscribePresentation,open,openNote,close,cancel:cancelActive,refresh:()=>noteTarget?collectNoteVersions({interactive:true}):collectAll({interactive:true}),recover,removeVersion,status:()=>freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})}),
       status:()=>freeze({managedRecovery:coordinator.status(),history:freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})})
     });
   }

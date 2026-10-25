@@ -490,6 +490,8 @@ let syncWorld=null;
       sync:()=>providers.bringInRepositoryProvider('drive',{quiet:true,sync:true,checkpointId:head()}),
       review:()=>providers.bringInRepositoryProvider('drive',{checkpointId:head(),review:true}),
       restore:checkpointId=>providers.restoreRepositoryProviderVersion('drive',{checkpointId,confirmed:true}),
+      // Combine from Version History, read from the location the list chose.
+      combine:(id,checkpointId)=>providers.bringInRepositoryProvider(id,{checkpointId}),
       reviewKept:(options={})=>harness.runtime.controller.reviewKeptVersions(options),
       noteVersions:(id,noteId,options={})=>providers.noteVersions(id,noteId,{interactive:false,...options})
     });
@@ -641,6 +643,30 @@ let syncWorld=null;
   assert.equal(shared.available,true);assert.deepEqual(shared.entries,[],'after the Device Folder, Drive offers nothing new');assert.deepEqual(shared.covered.checkpointIds,[],'and reads none of its versions');
 }
 
+// Combining Drive's newest version from Version History while this device is
+// behind (its sync waits for a review or a password) makes it what this device
+// and Drive share, also when the list reads it from this device's Device
+// Folder copy of it, so the next sync does not merge it again.
+{
+  syncWorld.drive.clear();syncWorld.keepAll.on=true;
+  const {device,note,head,drive}=syncWorld;
+  const folderA=new Map(),folderB=new Map();
+  const a={installationId:'inst_head_device_a',records:new Map([['2026-08-01',record('2026-08-01','first day')]]),deletions:[],noteDeletions:[],notes:note('one'),activeSession:null,schedule:'',personal:personal('Both User'),journal:null};
+  const b={installationId:'inst_head_device_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Both User'),journal:null};
+  const A=device(a,{folder:folderA}),B=device(b,{folder:folderB});
+  await A.backUpFolder();await A.upload();
+  assert.equal((await B.sync()).cancelled,false);const first=head();assert.equal(b.reconciliationBase.checkpointId,first);
+  a.notes=note('two by A');await A.backUpFolder();await A.upload();const newest=head();assert.notEqual(newest,first);
+  // B's Device Folder holds a copy of it under the same id, as the
+  // background fill makes one.
+  for(const [key,file] of drive)if(file.kind==='object'||file.id===newest)folderB.set(key,file);
+  const combined=await B.combine('folder',newest);assert.equal(combined.cancelled,false);assert.equal(b.notes.Shared.text,'two by A');
+  assert.equal(b.reconciliationBase.checkpointId,newest,'Combining Drive’s newest moves the shared base, read from either location');
+  // An older version read the same way leaves the base alone.
+  const older=await B.combine('drive',first);assert.equal(older.cancelled,false);assert.equal(b.reconciliationBase.checkpointId,newest);
+  syncWorld.keepAll.on=false;
+}
+
 // A study session belongs to the device running it. Another device keeps a
 // copy it never runs, edits notes freely, and continues the session only when
 // it is handed over (Suspend) or taken over (Continue here); the device taken
@@ -717,4 +743,4 @@ let syncWorld=null;
   assert.equal((await A.sync()).cancelled,false);assert.equal(a.activeSession.snapshot.label,'A-UNSEEN','a session the other side never had is not ended by it');assert.equal(a.running,true);
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'sync-shared-base',preflightVariants:preflightCases.length,coverage:['two-device Drive sync','a restore reaches every device and keeps reviews','versions kept for review travel and resolve everywhere','study session hand-off and takeover','current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential Combine','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'sync-shared-base',preflightVariants:preflightCases.length,coverage:['two-device Drive sync','a restore reaches every device and keeps reviews','Combining Drive’s newest from any location moves the shared base','versions kept for review travel and resolve everywhere','study session hand-off and takeover','current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential Combine','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));

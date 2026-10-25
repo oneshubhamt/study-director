@@ -1110,10 +1110,10 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                   <span>Automatic backup</span><strong id="device-backup-settings-state">On</strong>
                   <span>Selected folder</span><strong id="device-backup-folder-name">Connected folder</strong>
                   <span>Backup folder</span><strong id="device-backup-repository-name">—</strong>
-                  <span>Backup status</span><strong id="device-backup-settings-last">Not yet verified</strong>
+                  <span>Backup status</span><strong id="device-backup-settings-last">No backup yet</strong>
                 </div>
                 <div class="backup-settings-actions">
-                  <button class="mini-btn ui-btn" id="disconnect-device-backup" type="button" data-action="disconnect-device-backup">Turn off Device backup</button>
+                  <button class="mini-btn ui-btn" id="disconnect-device-backup" type="button" data-action="disconnect-device-backup">Turn off Device Folder</button>
                 </div>
               </div>
               <div class="backup-location-row backup-drive-row">
@@ -1135,7 +1135,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                 <div class="backup-settings-grid ui-helper">
                   <span>Sync</span><strong>While signed in</strong>
                   <span>Access</span><strong>Study Director backup files only · <a href="privacy.html" target="_blank" rel="noopener noreferrer">Privacy</a></strong>
-                  <span>Backup status</span><strong id="drive-backup-settings-last">Not yet verified</strong>
+                  <span>Backup status</span><strong id="drive-backup-settings-last">No backup yet</strong>
                 </div>
                 <div class="backup-settings-actions">
                   <button class="mini-btn ui-btn" id="disconnect-drive-backup" type="button" data-action="disconnect-drive-backup">Disconnect Drive</button>
@@ -2006,7 +2006,7 @@ async function showBackupPresentation(source,kind){
   if(source==='device-folder'&&kind==='permission')return DeviceBackup?.connect();
   // Reconnecting straight from the toast keeps it to one click.
   if(kind==='permission'&&source!=='file'&&await (source==='google-drive'?connectDriveForProfile():BackupProviderRuntime.connect(source)))return true;
-  if(['history','restore-version','bring-in','remove-safety'].includes(kind))return BackupRecoveryHost?.history.open();
+  if(['history','restore-version','bring-in','remove-version'].includes(kind))return BackupRecoveryHost?.history.open();
   // A review opens Combine, which waits while today's session runs.
   if(kind==='sync-review')return BackupProviderRuntime.reviewSync(source);
   if(kind==='sync-password')return BackupProviderRuntime.unlockSync(source);
@@ -3017,7 +3017,7 @@ function renderDriveBackup(){
   if(cancel){cancel.hidden=!state.cancellable;cancel.disabled=!state.cancellable;}
   if(settings){settings.hidden=!connected;settings.disabled=state.engineBusy;settings.setAttribute('aria-expanded',panel&&!panel.hidden?'true':'false');}
   if(panel&&!connected)panel.hidden=true;
-  if(last){const at=verifiedRecoveryState.providers['google-drive']?.at;last.textContent=at?`Last verified ${storageHealthTime(at)}`:'Not yet verified';}
+  if(last){const at=verifiedRecoveryState.providers['google-drive']?.at;last.textContent=at?`Last backup ${storageHealthTime(at)}`:'No backup yet';}
   if(disconnect)disconnect.disabled=state.engineBusy;
   // Kept versions waiting for review show as Needs review too.
   const sync=node('sb-sync');if(sync){const syncing=BackupPresentation.syncLabel(state),kept=KeptVersions.count()>0&&syncing!=='Syncing…'&&syncing!=='Needs password',label=kept?'Needs review':syncing;sync.hidden=!label;if(sync.textContent!==label)sync.textContent=label;sync.dataset.state=state.sync?.review||state.sync?.password||kept?'review':'';}
@@ -3028,7 +3028,7 @@ function renderDriveBackup(){
 // restore so it can be reopened.
 function renderBackupActions(){
   const group=document.getElementById('backup-shared-actions'),backupNow=document.getElementById('backup-now'),versions=document.getElementById('open-version-history');if(!group)return;
-  const rows=['device-folder','google-drive'].map(id=>BackupProviderRuntime.locationStatus(id)).filter(Boolean),connected=rows.some(row=>row.connected===true),busy=rows.some(row=>row.busy===true||row.engineBusy===true),recovering=rows.some(row=>row.busy===true&&['history','restore-version','bring-in','remove-safety'].includes(String(row.foregroundKind||'')));
+  const rows=['device-folder','google-drive'].map(id=>BackupProviderRuntime.locationStatus(id)).filter(Boolean),connected=rows.some(row=>row.connected===true),busy=rows.some(row=>row.busy===true||row.engineBusy===true),recovering=rows.some(row=>row.busy===true&&['history','restore-version','bring-in','remove-version'].includes(String(row.foregroundKind||'')));
   group.hidden=!connected;
   if(backupNow){backupNow.disabled=busy;backupNow.title=rows.some(row=>row.maintenanceBusy)?'Background backup maintenance will yield to Back up now.':'';}
   if(versions){versions.disabled=busy&&!recovering;versions.title=recovering?'Reopen the active recovery operation.':'';}
@@ -3075,7 +3075,7 @@ function renderDeviceBackup(state){
   if(folderName)folderName.textContent=state.folderName||'Connected folder';
   // The folder inside it that holds this profile and device's versions.
   if(repositoryName)repositoryName.textContent=state.repositoryName||'—';
-  if(settingsLast)settingsLast.textContent=last?`Last verified ${last}`:'Not yet verified';
+  if(settingsLast)settingsLast.textContent=last?`Last backup ${last}`:'No backup yet';
   if(disconnect){disconnect.hidden=!connected;disconnect.disabled=operationBusy;}
   if(note){
     const fallback=state.mode==='unsupported'?'Automatic folder backup is unavailable in this browser. Portable and Google Drive backups still work.':
@@ -5981,6 +5981,13 @@ function askProfilePassword(){
   if(Profiles.list().length<2||FirstStart.isOpen()||!appCanMutate())return;
   void BackupProtection.ask().catch(setBackupProtectionSurfaceError);
 }
+// Version History reads each encrypted version for its date and counts, so a
+// password put off at start is asked for first. Not now still opens the list,
+// with those versions shown as locked.
+async function withBackupPassword(open){
+  try{const protection=BackupProtection.status();if(protection.enabled&&!protection.unlocked)await BackupProtection.ask();}catch(error){setBackupProtectionSurfaceError(error);}
+  return open();
+}
 function onQuoteChange(options={}){
   if(options.markChanged!==false)markDayContentChanged();
   const input=document.getElementById('quote-input');
@@ -8576,7 +8583,7 @@ const LibraryClearCoordinator=LibraryClearModule.createCoordinator(Object.freeze
     const location=BackupProviderRuntime.list().find(item=>item.id==='device-folder'&&item.connected)||BackupProviderRuntime.list().find(item=>item.connected);
     if(!location)return Object.freeze({verified:false,skipped:true,reason:'no-backup-location'});
     const safety=await BackupProviderRuntime.createProtectedSafety(location.id,purpose);
-    if(!safety||safety.verified!==true)throw new Error(`Clear Library stopped because the protected ${location.label} safety backup could not be verified. Your Library data was not changed.`);
+    if(!safety||safety.verified!==true)throw new Error(`Clear Library stopped because the ${location.label} safety version could not be verified. Your Library data was not changed.`);
     return safety;
   },capture:LibraryClearState.capture,
   deleteNotes:()=>AppData.notes.clearAll(),deleteSavedDays:()=>AppData.dailyRecords.clearAll(),removeReferences:LibraryClearState.rewriteReferences,verifyLogical:LibraryClearState.verifyLogical,
@@ -8690,7 +8697,7 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     tags:()=>NoteLinks.tags(),
     trash:key=>AppData.notes.trash(key),
     trashSnapshot:()=>AppData.notes.trashSnapshot(),
-    versions:target=>BackupRecoveryHost.history.openNote(target),
+    versions:target=>withBackupPassword(()=>BackupRecoveryHost.history.openNote(target)),
     print:(key,title)=>{RichTextRuntime.flushEditors();const note=AppData.notes.get(key);return note?printNote(title,note.text):false;}
   }),
   attachments:Object.freeze({
@@ -9273,7 +9280,7 @@ async function offerDeviceRecoveryIfLocalEmpty(options={}){
     const accepted=await Interactions.confirm({
       title:'Recover from Device Folder?',
       message:'This browser has no local study data, but an existing Device Folder backup is available.',
-      details:[`Latest backup: ${new Date(candidate.location.exportedAt).toLocaleString()}.`,'Study Director will verify the backup before replacing local portable data. Nothing is restored unless you choose Recover latest.'],
+      details:[`Latest backup: ${new Date(candidate.location.exportedAt).toLocaleString()}.`,'Study Director checks the backup before replacing this device’s data. Nothing is restored unless you choose Recover latest.'],
       confirmLabel:'Recover latest',cancelLabel:'Not now'
     });
     deviceRecoveryOfferDismissed=true;
@@ -9471,7 +9478,7 @@ BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze({
   providers:Object.freeze({
     bringInRepositoryProvider:(id,options)=>BackupProviderRuntime.bringInRepositoryProvider(id,options),cancelForeground:(reason,id)=>BackupProviderRuntime.cancelForeground(reason,id),
     configureManagedRecovery:config=>BackupProviderRuntime.configureManagedRecovery(config),configurePendingBackupRetry:config=>BackupProviderRuntime.configurePendingBackupRetry(config),
-    history:(id,options)=>BackupProviderRuntime.history(id,options),list:()=>BackupProviderRuntime.list(),noteVersions:(id,noteId,options)=>BackupProviderRuntime.noteVersions(id,noteId,options),removeProtectedRepositoryProvider:(id,checkpointId)=>BackupProviderRuntime.removeProtectedRepositoryProvider(id,checkpointId),
+    history:(id,options)=>BackupProviderRuntime.history(id,options),list:()=>BackupProviderRuntime.list(),noteVersions:(id,noteId,options)=>BackupProviderRuntime.noteVersions(id,noteId,options),removeRepositoryProviderVersion:(id,checkpointId)=>BackupProviderRuntime.removeRepositoryProviderVersion(id,checkpointId),
     restoreRepositoryProviderVersion:(id,options)=>BackupProviderRuntime.restoreRepositoryProviderVersion(id,options),suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason)
   }),
   session:Object.freeze({hasBlocking:()=>hasBlockingActiveSession()}),
@@ -10057,9 +10064,9 @@ function currentBackupDiagnosticStates(){
   // The proof that the code reading older formats can be removed (release B):
   // this device's data is canonical (checked at start), the Device Folder's
   // old backup folder is gone, and every connected location keeps versions in
-  // the current format only.
+  // the current format only (a version it cannot read may be in any format).
   sample('Format cleanup',()=>({local:canonicalProof,device:DeviceBackup.status(),locations:BackupProviderRuntime.diagnosticConnections().filter(row=>row.connected)}),value=>{
-    const rows=value.locations.map(row=>({job:`${row.id} formats`,state:!row.formats?'unknown':row.formats.older?'pending':'ready',currentVersions:row.formats?.current??0,olderVersions:row.formats?.older??0,completedAt:row.formats?.checkedAt||''}));
+    const rows=value.locations.map(row=>({job:`${row.id} formats`,state:!row.formats?'unknown':row.formats.older||row.formats.unreadable?'pending':'ready',currentVersions:row.formats?.current??0,olderVersions:row.formats?.older??0,unreadableVersions:row.formats?.unreadable??0,completedAt:row.formats?.checkedAt||''}));
     const ready=value.local?.retirementDataReady===true&&!value.device.oldFolder&&rows.every(row=>row.state==='ready');
     return [{job:'Format cleanup',state:ready?'ready':!value.local||rows.some(row=>row.state==='unknown')?'unknown':'pending',canonical:value.local?.canonical===true,retirementReady:value.local?.retirementDataReady===true,oldFolder:value.device.oldFolder===true,completedAt:value.local?.checkedAt||''},...rows];
   });
@@ -10103,7 +10110,7 @@ const CLICK_ACTIONS=Object.freeze({
   'cancel-device-backup': ()=>DeviceBackup.cancelForeground(),
   'toggle-backup-settings': ev=>toggleBackupSettings(ev.target.closest('[data-backup-settings]')?.dataset.backupSettings),
   'disconnect-device-backup': ()=>DeviceBackup.disconnect(),
-  'open-version-history': ()=>BackupRecoveryHost.history.open(),
+  'open-version-history': ()=>withBackupPassword(()=>BackupRecoveryHost.history.open()),
   'connect-drive-backup': connectDriveForProfile,
   'cancel-drive-backup': ()=>BackupProviderRuntime.cancelForeground(undefined,'google-drive'),
   'disconnect-drive-backup': ()=>BackupProviderRuntime.disconnect('google-drive'),
@@ -10112,7 +10119,7 @@ const CLICK_ACTIONS=Object.freeze({
   'cancel-version-history-operation': ()=>BackupRecoveryHost.history.cancel(),
   'recover-managed-version': ev=>BackupRecoveryHost.history.recover(ev),
   'compare-managed-note': ev=>BackupRecoveryHost.history.recover(ev),
-  'remove-managed-safety': ev=>BackupRecoveryHost.history.removeSafety(ev),
+  'remove-managed-version': ev=>BackupRecoveryHost.history.removeVersion(ev),
   'toggle-pause': togglePause,
   'practice-mode': ev=>PracticePacer.setSetupMode(ev.target.closest('[data-practice-mode]')?.dataset.practiceMode),
   'practice-total-toggle': ()=>PracticePacer.toggleTotal(),

@@ -558,7 +558,7 @@ async function buildRestoreReconciliationPlan(parsed,preview,{missingOnly=false,
   const currentCheckpoint=Number(parsed&&parsed.formatVersion)>=15&&!!parsed.protectedCheckpointManifest;
   const rawIncomingSession=parsed&&parsed.importedActiveSession||null;
   const incomingSession=note?null:currentCheckpoint?rawIncomingSession:(rawIncomingSession&&rawIncomingSession.date===todayISO()?rawIncomingSession:null);
-  const backupAt=Date.parse(String(preview&&preview.exportedAt||'')),incomingLabel=note&&Number.isFinite(backupAt)?`Backup from ${new Date(backupAt).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}`:currentCheckpoint?'Backup copy':(preview&&preview.filename||'Backup file');
+  const backupAt=Date.parse(String(preview&&preview.exportedAt||'')),incomingLabel=note&&Number.isFinite(backupAt)?`Backup from ${new Date(backupAt).toLocaleString(undefined,{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}`:currentCheckpoint?'Backup copy':(preview&&preview.filename||'Backup file');
   const checkpointId=String(parsed&&parsed.protectedCheckpointManifest&&parsed.protectedCheckpointManifest.checkpointId||preview&&preview.checkpoint&&preview.checkpoint.checkpointId||'incoming');
   return Reconciliation.createPlan({
     local:{id:'local',label:'This device',savedDays:localRecords,savedDayDeletions:localDeletions,notes:localNotes,noteDeletions:allLocalNoteDeletions,activeSession:localSession},
@@ -570,9 +570,11 @@ function savedDayChoiceLabel(candidate){
   if(candidate.kind==='deleted')return local?'Keep deleted':`Apply deletion from ${source?.label||'backup'}`;
   return local?'Keep this device’s Saved Day':`Use ${source?.label||'Backup copy'} Saved Day`;
 }
+// "12 Saved Days · 1 note".
+function savedDaysAndNotes(counts){const days=Number(counts&&counts.dailyRecord)||0,notes=Number(counts&&counts.note)||0;return `${days} Saved Day${days===1?'':'s'} · ${notes} note${notes===1?'':'s'}`;}
 function savedDayDecisionTimestamp(value){
   const parsed=Date.parse(String(value||''));if(!Number.isFinite(parsed))return '';
-  try{return new Date(parsed).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});}catch{return new Date(parsed).toISOString();}
+  try{return new Date(parsed).toLocaleString(undefined,{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});}catch{return new Date(parsed).toISOString();}
 }
 function savedDayChoiceDescription(candidate){
   const source=candidate.sources.find(item=>candidate.local?item.local:!item.local)||candidate.sources[0],origin=candidate.local?'This device':(source?.label||'Backup copy');
@@ -1253,7 +1255,7 @@ function managedParsedSnapshot(capture,metadata={}){
   const recordDates=managedSnapshotStage('daily-records-membership','MANAGED_CHECKPOINT_DAILY_RECORDS_FAILED',()=>{const actual=records.map(record=>String(record.date)),declared=[...(plan.recordDates||[])].map(String).sort();if(actual.length!==declared.length||actual.some((date,index)=>date!==declared[index]))throw new Error('Managed repository Saved-Day membership failed verification.');return actual;});
   // Versions saved before notes had permanent ids (manifest 5 and older) keep
   // notes, and their deletion history, under note names; both convert to ids.
-  const nameKeyedNotes=Number(repositoryManifest.version)<ManagedRepository.noteIdManifestVersion;
+  const nameKeyedNotes=Number(repositoryManifest.version)<=ManagedRepository.releasedManifestVersion;
   const notes=managedSnapshotStage('notes','MANAGED_CHECKPOINT_NOTES_FAILED',()=>{const out=Object.create(null);for(const raw of plan.noteItems||[]){const key=String(raw&&raw.key||''),clean=nameKeyedNotes?BackupCodec.legacyNote(raw,key):BackupCodec.normalizeNote(raw,key);if(!clean||!key||Object.prototype.hasOwnProperty.call(out,clean.key))throw new Error('Managed repository note failed current-schema verification.');out[clean.key]=clean;}return out;});
   const activeSession=managedSnapshotStage('active-session','MANAGED_CHECKPOINT_ACTIVE_SESSION_FAILED',()=>{const clean=plan.activeSession?BackupCodec.normalizeImportedActiveSession(plan.activeSession,{legacy:Number(repositoryManifest.version)<=4}):null;if(plan.activeSession&&!clean)throw new Error('Managed repository Active Session failed schema verification.');return clean;});
   const personalData=managedSnapshotStage('personal-data','MANAGED_CHECKPOINT_PERSONAL_DATA_FAILED',()=>plan.personalData?BackupCodec.normalizePersonalData(plan.personalData):null);
@@ -1514,7 +1516,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       title:'Different versions found',
       message:'Choose what to keep where this device and the backup differ. This device is selected by default; nothing missing from the backup is treated as deleted.',
       details:[
-        `${currentCheckpoint?'Backup copy':(preview.filename||'Backup file')} · ${preview.exportedAt?new Date(preview.exportedAt).toLocaleString('en-IN'):'date unavailable'}`,
+        `${currentCheckpoint?'Backup copy':(preview.filename||'Backup file')} · ${preview.exportedAt?new Date(preview.exportedAt).toLocaleString():'date unavailable'}`,
         `Saved Days: ${impact.savedDays.conflicts} conflict${impact.savedDays.conflicts===1?'':'s'} · Active Session: ${impact.activeSession.conflicts} conflict${impact.activeSession.conflicts===1?'':'s'}.`,
         'Study Director automatically keeps verified rollback protection while changes are applied.'
       ],groups:decisionSetup.groups,checkboxes:[{id:'safetyCopy',label:'Download an extra standalone safety copy before applying',description:'Optional. This does not replace Study Director’s automatic rollback protection.',defaultChecked:false}],confirmLabel:'Apply choices',cancelLabel:'Keep current'
@@ -1730,7 +1732,7 @@ async function planReplacement(stored,parsed){
 }
 // "2 notes (“Geography”, “Essay”), 1 Saved Day (12 Oct)": counts, naming the first few.
 function replacementExtrasSummary(plan){
-  const extras=plan.extras,dayLabel=date=>{const at=new Date(date+'T12:00:00');return Number.isFinite(at.getTime())?at.toLocaleDateString('en-IN',{day:'numeric',month:'short'}):date;};
+  const extras=plan.extras,dayLabel=date=>{const at=new Date(date+'T12:00:00');return Number.isFinite(at.getTime())?at.toLocaleDateString(undefined,{day:'numeric',month:'short'}):date;};
   const part=(items,one,many,name)=>{if(!items.length)return '';const names=name?items.slice(0,3).map(name):[];return `${items.length} ${items.length===1?one:many}${names.length?` (${names.join(', ')}${items.length>3?` and ${items.length-3} more`:''})`:''}`;};
   return [part(extras.notes,'note','notes',key=>`“${String(plan.local[key].label||'Untitled')}”`),part(extras.days,'Saved Day','Saved Days',dayLabel),part(extras.assets,'attachment','attachments'),part(extras.plans,'saved plan','saved plans')].filter(Boolean).join(', ');
 }
@@ -1825,7 +1827,7 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
       title:'Replace current data?',
       message:'Your data will match this backup. A note the backup changed takes the backup’s copy, or opens for review when this device changed it too. A note the backup deleted moves to Recently deleted. Device-local settings and browser permissions stay on this device.',
       details:[
-        `${preview.exportedAt?new Date(preview.exportedAt).toLocaleString('en-IN'):'Date unavailable'} · ${Number(preview.counts&&preview.counts.dailyRecord)||0} Saved Days · ${Number(preview.counts&&preview.counts.note)||0} Notes`,
+        `${preview.exportedAt?new Date(preview.exportedAt).toLocaleString():'Date unavailable'} · ${savedDaysAndNotes(preview.counts)}`,
         'A verified safety copy protects the current local state if this operation fails.',
         ...[presentation.reach?.()||''].filter(Boolean)
       ],
@@ -1964,7 +1966,7 @@ async function importPortableBackup(ev){
     const captureAuthority=String(parsed&&parsed.captureAuthority||'unknown'),exactCapable=Number(parsed&&parsed.formatVersion)>=18&&captureAuthority==='canonical-complete'&&!!parsed&&!!parsed.protectedCheckpointManifest,rescuePartial=captureAuthority==='rescue-partial';
     const restoreChoices=presentation.restoreChoices,choices=[...(preview.reconciliationCapable?[restoreChoices.missing]:[]),restoreChoices.combine,...(exactCapable?[restoreChoices.replace]:[])];
     const decisionDetails=[exactCapable?'Choose how this backup should be applied.':rescuePartial?'This backup was saved while browser storage was failing. It can bring back what it holds, but it cannot replace current data.':'This backup is from an older version of Study Director. It can be combined with current data, but it cannot replace it.',...[presentation.reach?.()||''].filter(Boolean)];
-    OperationDiagnostics.mark('standalone-decision-start',{},traceId);const mode=await choose({title:'Use this backup',message:`Verified backup${preview.exportedAt?` from ${new Date(preview.exportedAt).toLocaleString('en-IN')}`:''}.`,details:decisionDetails,cancelLabel:'Keep current',choices});
+    OperationDiagnostics.mark('standalone-decision-start',{},traceId);const mode=await choose({title:'Use this backup',message:`Verified backup${preview.exportedAt?` from ${new Date(preview.exportedAt).toLocaleString()}`:''}.`,details:decisionDetails,cancelLabel:'Keep current',choices});
     OperationDiagnostics.mark('standalone-decision-complete',{mode:mode||'keep-current'},traceId);if(!mode){finishPortablePresentation({message:'Backup import cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,stage:'decision'},traceId);return freeze({cancelled:true});}
     consumed=true;OperationDiagnostics.mark('standalone-apply-start',{mode},traceId);
     const result=mode==='replace'?await restoreStandaloneVersion(candidate,{confirmed:true}):await restoreBackup(candidate,{missingOnly:mode==='missing'});OperationDiagnostics.mark('standalone-apply-complete',{mode,cancelled:result&&result.cancelled===true},traceId);

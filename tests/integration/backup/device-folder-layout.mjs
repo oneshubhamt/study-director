@@ -15,16 +15,15 @@ async function copyTree(from,to){
   }
 }
 async function names(folder,name,kind){try{return (await (await folder.getDirectoryHandle(name)).getDirectoryHandle(kind)).names();}catch{return [];}}
-// A folder as earlier versions left it: one repository folder of a fixed
-// name, with a version-1 marker, holding `count` versions. It is written by
-// another page and copied into a folder of `into` (on that world's clock).
+// A folder as released versions left it: one repository folder of a fixed
+// name, with no marker, holding `count` versions. It is written by another
+// page and copied into a folder of `into` (on that world's clock).
 async function legacyFolder(into,count=2){
   const w=world(),source=w.directory(),folder=into.directory();await w.controller.install();w.choose(source);await w.controller.connect();await w.settle();
   for(let index=1;index<count;index++){await w.tick(60*60*1000);w.change(true);await w.tick(10*1000);}
   await copyTree(await source.getDirectoryHandle(REPOSITORY_NAME),await folder.getDirectoryHandle(LEGACY_ROOT,{create:true}));
-  const old=await marker(folder,LEGACY_ROOT),writable=await (await (await folder.getDirectoryHandle(LEGACY_ROOT)).getFileHandle(SCOPE_FILE)).createWritable();
-  await writable.write(new Blob([JSON.stringify({format:'study-director.device-folder-scope',version:1,id:old.id})]));await writable.close();
-  return {folder,id:old.id,commits:await names(folder,LEGACY_ROOT,IDENTITIES.commits),checkpoints:await names(folder,LEGACY_ROOT,IDENTITIES.checkpoints),objects:await names(folder,LEGACY_ROOT,IDENTITIES.objects)};
+  await (await folder.getDirectoryHandle(LEGACY_ROOT)).removeEntry(SCOPE_FILE);
+  return {folder,commits:await names(folder,LEGACY_ROOT,IDENTITIES.commits),checkpoints:await names(folder,LEGACY_ROOT,IDENTITIES.checkpoints),objects:await names(folder,LEGACY_ROOT,IDENTITIES.objects)};
 }
 
 await test('a new folder holds one backup folder named for the profile and device, marked as theirs',async()=>{
@@ -43,7 +42,7 @@ await test('the folder of earlier versions moves into the new one: every version
   assert.deepEqual(await names(legacy.folder,REPOSITORY_NAME,IDENTITIES.commits),legacy.commits,'every version moved');
   assert.deepEqual(await names(legacy.folder,REPOSITORY_NAME,IDENTITIES.objects),legacy.objects);
   const value=await marker(legacy.folder,REPOSITORY_NAME);
-  assert.equal(value.id,legacy.id,'the folder keeps its identity, so what was checked stays checked');assert.equal(value.movedFrom,LEGACY_ROOT);assert.equal(value.moving,undefined);
+  assert.match(value.id,/^[a-f0-9]{32}$/u,'the moved folder gets its identity');assert.equal(value.version,2);assert.equal(value.movedFrom,LEGACY_ROOT);assert.equal(value.moving,undefined);
   assert.match(w.note(),/Backups moved to “Study Director - QA - Test Device”/u);
   w.change(true);await w.tick(10*1000);
   assert.equal(w.published.length,1);assert.ok((await w.commits(legacy.folder)).some(name=>name.startsWith(w.published[0].checkpointId)),'the next backup lands next to the moved versions');assert.deepEqual(legacy.folder.names(),[REPOSITORY_NAME]);

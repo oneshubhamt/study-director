@@ -57,7 +57,7 @@ assert.match(host,/const result=await input\.providers\.history\(source\.id,/u,'
 assert.doesNotMatch(host,/input\.repository\.mergeHistory/u,'the host merges what the locations return; the repository is not asked to');
 assert.match(host,/Every version your backups keep, newest first\. Choose one to restore\./u);assert.match(host,/'Restore…'/u);assert.match(host,/Before Clear Library/u,'protected bulk-delete safety checkpoints must be clearly labelled in history');
 assert.match(host,/cancelLabel:'Keep current'/u);assert.match(host,/choices:\[presentation\.restoreChoices\.missing,presentation\.restoreChoices\.combine,presentation\.restoreChoices\.replace\]/u);assert.match(presentation,/label:'Replace current data'[\s\S]*Make your data match this backup\. You choose whether to keep what isn’t in it/u);assert.match(presentation,/reach:'Google Drive is connected, so your other devices get the result at their next sync\.'/u,'while Drive syncs, a restore says it reaches every device');assert.match(presentation,/label:'Combine with current data'[\s\S]*changed on one side only since your last sync are taken for you; you choose the rest/u);assert.match(presentation,/label:'Add only what’s missing'[\s\S]*Nothing you have now changes/u);
-assert.match(host,/choice==='replace'\?await input\.providers\.restoreRepositoryProviderVersion\(sourceId,options\):await input\.providers\.bringInRepositoryProvider\(sourceId,options\)/u);
+assert.match(host,/choice==='replace'\?await input\.providers\.restoreRepositoryProviderVersion\(at\.sourceId,options\):await input\.providers\.bringInRepositoryProvider\(at\.sourceId,options\)/u);
 assert.match(app,/id="managed-version-history-progress"[\s\S]*id="managed-version-history-progress-stage"[\s\S]*id="managed-version-history-progress-detail"/u,'Version History must own its structured recovery progress surface.');
 assert.match(host,/function setHistoryProgress[\s\S]*progressStage[\s\S]*progressDetail/u,'managed recovery progress must be rendered inside Version History rather than a generic page footer.');
 assert.match(styles,/\.managed-version-history\{position:fixed;inset:0;[\s\S]*margin:auto/u,'Version History must be explicitly centered as an application modal.');
@@ -66,7 +66,7 @@ assert.doesNotMatch(provider,/document\.|getElementById|classList|requestAnimati
 assert.doesNotMatch(app,/backup-provider-overlay|BackupProviderRuntime\.open\(/u,'there is no separate Drive dialog');
 assert.match(app,/'cancel-drive-backup': \(\)=>BackupProviderRuntime\.cancelForeground\(undefined,'google-drive'\)/u,'Drive Cancel stays coupled to the live foreground operation');
 assert.match(provider,/async function connectProvider\(selected\)[\s\S]*Promise\.all\(\[foreground\.settled,selected\.prepare\?selected\.prepare\(\):null\]\)[\s\S]*statusText\(''\);return true;/u,'Connect prepares sign-in alongside background work giving way, and a success leaves no message: the row says On');
-assert.match(app,/function renderBackupActions\(\)\{[\s\S]*recovering=rows\.some\(row=>row\.busy===true&&\['history','restore-version','bring-in','remove-safety'\]\.includes[\s\S]*versions\.disabled=busy&&!recovering/u,'Version History must remain available to reattach to an active recovery operation.');
+assert.match(app,/function renderBackupActions\(\)\{[\s\S]*recovering=rows\.some\(row=>row\.busy===true&&\['history','restore-version','bring-in','remove-version'\]\.includes[\s\S]*versions\.disabled=busy&&!recovering/u,'Version History must remain available to reattach to an active recovery operation.');
 assert.match(device,/async function refreshPermission\(\)[\s\S]*permission=await query\(\)[\s\S]*permissionNeeded\(\)/u,'Device Folder must re-check persisted directory permission without prompting automatically.');
 assert.doesNotMatch(device,/if\(handle\)\{[\s\S]{0,300}storage\.remove\(config\.metadataKey\)/u,'temporary Device Folder permission loss must never discard the configured directory handle.');
 assert.match(app,/connect\.textContent=state\.mode==='permission'\?'Allow access':'Choose folder…'/u,'configured Device Folder permission renewal must be presented as Allow access rather than folder reselection.');
@@ -86,9 +86,9 @@ assert.match(backup,/rescuePartial=captureAuthority==='rescue-partial'/u,'verifi
 
 
 assert.match(app,/BackupProviderRuntime\.createProtectedSafety\(location\.id,purpose\)/u,'Clear Library must require a verified protected safety version at the connected backup location');
-assert.match(app,/Clear Library stopped because the protected \$\{location\.label\} safety backup could not be verified/u);
+assert.match(app,/Clear Library stopped because the \$\{location\.label\} safety version could not be verified/u);
 assert.match(app,/'backup-now': \(\)=>backUpEverywhere\(\)/u);assert.match(app,/async function backUpEverywhere\(\)\{[\s\S]*DeviceBackup\.backupNow\(\)[\s\S]*BackupProviderRuntime\.backup\('google-drive'\)/u,'one Back up now: the Device Folder first, so Drive can take its version');
-assert.match(app,/'open-version-history': \(\)=>BackupRecoveryHost\.history\.open\(\)/u);
+assert.match(app,/'open-version-history': \(\)=>withBackupPassword\(\(\)=>BackupRecoveryHost\.history\.open\(\)\)/u);
 assert.match(app,/'recover-managed-version': ev=>BackupRecoveryHost\.history\.recover\(ev\)/u);
 assert.doesNotMatch(app,/'restore-latest-backup'|'recover-device-backup'|'recover-provider-backup'|'bring-in-managed-backup'|'restore-managed-version'/u);
 assert.match(app,/ACTIVE_SESSION_BLOCKED_CLICK_ACTIONS=new Set\(\[[^\]]*'open-version-history'[^\]]*'recover-managed-version'/u);

@@ -21,7 +21,9 @@ export const IDENTITIES=freeze({root:REPOSITORY_NAME,legacyRoot:LEGACY_ROOT,pref
 
 // Each world numbers its versions apart, as random ids would be.
 let worlds=0;
-export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',supported=true,protection=null,device=QA_DEVICE,profile=QA_PROFILE,name=REPOSITORY_NAME}={}){
+// `manifestVersion` is the format this world's backups are written in (8 is
+// current; 1 to 5 are the released ones this build still reads).
+export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',supported=true,protection=null,device=QA_DEVICE,profile=QA_PROFILE,name=REPOSITORY_NAME,manifestVersion=8}={}){
   // Who this page is (profile and device), and the answer to "use one of the
   // backup folders already here?" (null cancels, '' starts a new one).
   const worldNumber=++worlds;
@@ -51,17 +53,20 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
     const blob=await seal(new Blob([`library at ${sourceRevision}`])),objectId='obj_'+(await sha256(new Blob([sourceRevision]))).slice(0,32),storedChecksum=await sha256(blob),reused=options.availableObjectIds instanceof Set&&options.availableObjectIds.has(objectId);
     const entry=freeze({objectId,blob,storedBytes:blob.size,storedChecksum,reused,checkProtection:async()=>{}}),prepared=freeze({exportedAt,objects:freeze([entry])});
     if(!reused)await executor.writeObject(entry,prepared);
-    const manifest=freeze({format:'study-director.backup-repository-checkpoint',version:7,checkpoint:freeze({checkpointId,createdAt:exportedAt,originInstallationId:'qa'}),exportedAt,sourceRevision,logicalFingerprint:storedChecksum,counts:freeze({dailyRecord:1,note:1}),encrypted:!!protection,
+    const manifest=freeze({format:'study-director.backup-repository-checkpoint',version:manifestVersion,checkpoint:freeze({checkpointId,createdAt:exportedAt,originInstallationId:'qa'}),exportedAt,sourceRevision,logicalFingerprint:storedChecksum,counts:freeze({dailyRecord:1,note:1}),encrypted:!!protection,
       retention:freeze({role,purpose:role==='before-restore'?options.retention.purpose:'',protectedUntil:role==='before-restore'?new Date(clock.now()+7*DAY).toISOString():'',calendar:calendar(exportedAt)}),objects:freeze([freeze({objectId,storedBytes:blob.size,storedChecksum})])});
     await executor.writeManifest(freeze({blob:await seal(new Blob([JSON.stringify(manifest)])),manifest,exportedAt,checkSource:async()=>{},checkProtection:async()=>{}}));
-    const marker={format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt,sourceRevision,manifestVersion:7},markerBlob=new Blob([JSON.stringify(marker)]);
+    const marker={format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt,sourceRevision,manifestVersion},markerBlob=new Blob([JSON.stringify(marker)]);
     await executor.commit(freeze({...marker,blob:markerBlob,size:markerBlob.size,digest:await sha256(markerBlob),checkSource:async()=>{},checkProtection:async()=>{}}));
     published.push(freeze({checkpointId,sourceRevision,role,at:clock.now()}));
     const committedResult=await executor.onCommitted(freeze({sourceRevision,exportedAt,publication:freeze({name:checkpointId+'.sdcheckpoint'}),manifest}));
     const cleanupResult=executor.cleanup?await executor.cleanup(freeze({manifest})):null;
     return freeze({checkpointId,manifest,sourceRevision,exportedAt,publication:freeze({name:checkpointId+'.sdcheckpoint'}),objectsWritten:reused?0:1,objectsReused:reused?1:0,writtenBytes:blob.size,attachmentBytesWritten:0,committedResult,cleanupResult,warning:''});
   }
-  const inspectManifest=async(file,options={})=>{const opened=protection?(await protection.unprotect(file,{interactive:options.interactive!==false})).blob:file,value=JSON.parse(await opened.text());if(value.format!=='study-director.backup-repository-checkpoint')throw new Error('not a manifest');return value;};
+  // As the real reader does, a manifest this build cannot interpret is marked
+  // unreadable (repositoryUnreadable); a locked one is not.
+  const unreadable=error=>Object.assign(error,{repositoryUnreadable:true});
+  const inspectManifest=async(file,options={})=>{const opened=protection?(await protection.unprotect(file,{interactive:options.interactive!==false})).blob:file;let value;try{value=JSON.parse(await opened.text());}catch(error){throw unreadable(error);}if(value.format!=='study-director.backup-repository-checkpoint')throw unreadable(new Error('not a manifest'));if(![1,2,3,4,5,8].includes(value.version))throw unreadable(new Error('Backup manifest version is not supported by this build.'));return value;};
   const notSupported=()=>{throw new Error('Restore is covered by the browser and repository-restore suites.');};
   const pipeline=freeze({noteObject:notSupported,readNote:notSupported,createPublication:notSupported,publish,publishInline:publish,inspectManifest,inspect:notSupported,bringIn:notSupported,restoreVersion:notSupported,verifyCheckpoint:notSupported,sharedBase:async()=>null,establishBase:notSupported,spine:()=>null,verifyObject:notSupported,scrub:notSupported,cleanup:rules.cleanup,inspectCommit:rules.inspectCommit,
     retention:rules.retention,validatePolicy:rules.validatePolicy,classifyState:rules.classifyState,activeProtected:rules.activeProtected,selectRetention:rules.selectRetention,projectHistory:rules.projectHistory,
@@ -116,10 +121,22 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
     for(;;){await settle();const next=clock.nextAt();if(next===null||next>target)break;await clock.advance(Math.max(0,next-clock.now()));}
     await clock.advance(Math.max(0,target-clock.now()));await settle();
   }
+  // Writes one committed version straight into the folder, as another build
+  // would (no cleanup runs): `version` is its manifest format, and a version
+  // this build cannot read (newer than 8) is still listed.
+  async function plant(handle,{version=5,at=clock.now()-DAY,role='normal',folderName=owner.name}={}){
+    const root=await handle.getDirectoryHandle(folderName,{create:true}),exportedAt=new Date(at).toISOString(),checkpointId='cp_'+(worldNumber*0x100000+0x80000+(++sequence)).toString(16).padStart(32,'0');
+    const manifest={format:'study-director.backup-repository-checkpoint',version,checkpoint:{checkpointId,createdAt:exportedAt,originInstallationId:'qa'},exportedAt,sourceRevision:exportedAt,logicalFingerprint:await sha256(new Blob([checkpointId])),counts:{dailyRecord:2,note:3},encrypted:false,
+      retention:{role,purpose:role==='before-restore'?'before-restore':'',protectedUntil:role==='before-restore'?new Date(at+7*DAY).toISOString():'',calendar:calendar(exportedAt)},objects:[]};
+    const write=async(directory,name,blob)=>{const file=await (await root.getDirectoryHandle(directory,{create:true})).getFileHandle(name,{create:true}),writable=await file.createWritable();await writable.write(blob);await writable.close();};
+    await write(IDENTITIES.checkpoints,checkpointId+'.sdcheckpoint',new Blob([JSON.stringify(manifest)]));
+    await write(IDENTITIES.commits,checkpointId+'.sdcommit',new Blob([JSON.stringify({format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt,sourceRevision:exportedAt,manifestVersion:version})]));
+    return checkpointId;
+  }
   async function commits(handle,folderName=owner.name){try{const root=await handle.getDirectoryHandle(folderName);return (await root.getDirectoryHandle(IDENTITIES.commits)).names();}catch{return [];}}
   async function locks(handle,folderName=owner.name){const root=await handle.getDirectoryHandle(folderName);return (await root.getDirectoryHandle(IDENTITIES.objects)).names().filter(name=>/\.sd(?:publication|maintenance)$/u.test(name));}
   return {
-    clock,runtime,controller,published,verified,settingsStore,notices,rendered,captures,directory,tick,settle,commits,locks,storageFor,
+    clock,runtime,controller,published,verified,settingsStore,notices,rendered,captures,directory,tick,settle,commits,locks,storageFor,plant,
     get pickerCalls(){return pickerCalls;},
     get repositoryChoices(){return repositoryChoices;},
     setOwner:value=>{owner=freeze({...owner,...value});},chooseRepositoryWith:fn=>{repositoryChoice=fn;},

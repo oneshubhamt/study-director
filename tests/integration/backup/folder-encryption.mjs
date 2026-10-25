@@ -37,9 +37,13 @@ await w.controller.install();w.choose(folder);await w.controller.connect();await
   protection=makeProtection(()=>false);await protection.refresh();assert.equal(protection.status().unlocked,false);const promptsBefore=unlockPrompts;
   w.change();await w.tick(25*MINUTE);
   assert.equal(await commits(),1,'a locked app writes nothing automatically');assert.equal(w.controller.status().pending,true,'the row says changes are waiting');assert.equal(unlockPrompts,promptsBefore,'nothing prompts on its own');
+  // Version History while locked, on a page that has not read the versions yet: they are listed as locked, without counts.
+  const other=createDeviceFolderWorld({protection:sealed});await other.controller.install();other.choose(folder);await other.controller.connect();await other.settle();
+  const lockedHistory=await other.runtime.history('device-folder',{interactive:false});
+  assert.equal(lockedHistory.entries.length,1);assert.equal(lockedHistory.entries[0].locked,true,'a version waiting for the password is listed as locked');assert.equal(lockedHistory.entries[0].counts,null,'with no counts it cannot know yet');assert.equal(unlockPrompts,promptsBefore);
   await protection.manage();assert.equal(protection.status().unlocked,true);w.runtime.wakeBackground('encryption-unlocked');await w.tick(5000);
   assert.equal(await commits(),2,'unlocking backs up what waited');assert.equal(w.controller.status().pending,false);
-  cases.push('locked encryption pauses automatic backups until unlocked');
+  cases.push('locked encryption pauses automatic backups until unlocked, and Version History lists versions as locked');
 }
 {
   protection=makeProtection(()=>false);await protection.refresh();const before=unlockPrompts;

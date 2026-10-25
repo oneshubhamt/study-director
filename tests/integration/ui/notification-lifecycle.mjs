@@ -164,7 +164,7 @@ class Element {
   let profileDraws=0;
   let row=draw(base);assert.equal(profileDraws,1,'the profile panel follows the Drive row');assert.deepEqual(row.shown,['connect-drive-backup']);assert.equal(row.view('connect-drive-backup').textContent,'Connect');
   row=draw({...base,wasConnected:true});assert.deepEqual(row.shown,['connect-drive-backup'],'a lapsed sign-in leaves one Reconnect button');assert.equal(row.view('connect-drive-backup').textContent,'Reconnect');assert.equal(row.view('drive-backup-settings-panel').hidden,true,'settings close when Drive is not connected');
-  row=draw({...base,connected:true,wasConnected:true},'2026-10-10T09:30:00.000Z');assert.deepEqual(row.shown,['drive-backup-settings'],'Back up now and Version History are shared by both locations');assert.equal(row.view('drive-backup-settings-last').textContent,'Last verified 09:30');
+  row=draw({...base,connected:true,wasConnected:true},'2026-10-10T09:30:00.000Z');assert.deepEqual(row.shown,['drive-backup-settings'],'Back up now and Version History are shared by both locations');assert.equal(row.view('drive-backup-settings-last').textContent,'Last backup 09:30');
   row=draw({...base,connected:true,wasConnected:true,engineBusy:true,busy:true,cancellable:true,foregroundKind:'backup'});assert.deepEqual(row.shown,['cancel-drive-backup','drive-backup-settings'],'a running backup offers Cancel');assert.equal(row.view('disconnect-drive-backup').disabled,true);
 }
 {
@@ -219,7 +219,7 @@ class Element {
   const {notices:n}=coordinator(),verified={at:'2026-10-01T06:44:00.000Z'};
   const presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications:n,timeLabel:()=> '06:44',verified:()=>verified}));
   assert.equal(presentation.locationLabel('device-folder',{connected:true,lastBackupAt:verified.at}),presentation.locationLabel('google-drive',{connected:true}));
-  assert.equal(presentation.locationLabel('google-drive',{connected:true}),'On · Last verified 06:44','resting state uses the same compact timestamp and retained verification metadata');
+  assert.equal(presentation.locationLabel('google-drive',{connected:true}),'On · Last backup 06:44','resting state uses the same compact timestamp and retained verification metadata');
   for(const source of ['device-folder','google-drive'])for(const [kind,label] of [['backup','Backing up…'],['history','Reading backups…'],['restore-version','Restoring…'],['bring-in','Combining…']])assert.equal(presentation.locationLabel(source,{connected:true,busy:true,foregroundKind:kind}),label);
   assert.equal(presentation.locationLabel('google-drive',{wasConnected:true}),'Signed out');
   for(const source of ['device-folder','google-drive'])assert.equal(presentation.locationLabel(source,{connected:true,locked:true}),'Needs password','with encryption locked, a row never claims automatic backups are on');
@@ -229,7 +229,7 @@ class Element {
   const external=presentation.begin('google-drive','backup',{id:'external-backup',foreground:false});
   assert.equal(presentation.locationLabel('google-drive',{connected:true,backingUp:external.read().lifecycle==='running'}),'Backing up…');
   external.finish({message:'External backup verified in Google Drive.'});
-  assert.equal(presentation.locationLabel('google-drive',{connected:true,backingUp:external.read().lifecycle==='running'}),'On · Last verified 06:44');
+  assert.equal(presentation.locationLabel('google-drive',{connected:true,backingUp:external.read().lifecycle==='running'}),'On · Last backup 06:44');
   assert.equal(presentation.summary(external.read()),'✓ External backup verified in Google Drive.');
   assert.equal(presentation.summary({...external.read(),message:'✓ External backup verified in Google Drive.'}),'✓ External backup verified in Google Drive.','success marks cannot duplicate');
   assert.equal(presentation.summary({...external.read(),lifecycle:'cancelled',severity:'info',message:'Cancelled.'}),'Cancelled.');

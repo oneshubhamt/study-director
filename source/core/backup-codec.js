@@ -32,11 +32,11 @@ registry.define('backup-codec',1,()=>{
     const PENDING_REVIEW_VERSION=23,PENDING_REVIEW_TYPE='pendingReview',PENDING_REVIEW_LIMIT=2*Math.max(1,Number(APP_LIMITS.maxPendingReviews)||2000);
     const BACKUP_ENTITY_TYPES_WITHOUT_REVIEWS=freeze([...SOURCE_ENTITY_TYPES,'personalData','checkpointManifest']);
     const BACKUP_ENTITY_TYPES=freeze([...BACKUP_ENTITY_TYPES_WITHOUT_REVIEWS,PENDING_REVIEW_TYPE]);
-    // Released backups (v20 and older) name the note entity areaNote. A file is
-    // checked under the names it was written with; what it holds reads under
-    // the current ones. Versions 21 and 22 were made only by unreleased builds,
-    // so nothing reads them.
-    const NOTE_ENTITY_VERSION=22,WRITTEN_NOTE_ENTITY='areaNote',UNRELEASED_BACKUP_VERSIONS=freeze(new Set([21,22]));
+    // Released builds wrote backups up to v20, which name the note entity
+    // areaNote. A file is checked under the names it was written with; what it
+    // holds reads under the current ones. Versions between v20 and the current
+    // one came only from unreleased builds, so nothing reads them.
+    const RELEASED_BACKUP_VERSION=20,WRITTEN_NOTE_ENTITY='areaNote';
     const currentBackupEntity=type=>type===WRITTEN_NOTE_ENTITY?'note':type;
     const writtenBackupEntities=types=>freeze(types.map(type=>type==='note'?WRITTEN_NOTE_ENTITY:type));
     const currentBackupCounts=counts=>freeze(Object.fromEntries(Object.entries(counts||{}).map(([type,count])=>[currentBackupEntity(type),count])));
@@ -308,7 +308,7 @@ function validateBackupManifest(manifest,gzip,{binaryV10=false}={}){
   if(!manifest||manifest.type!=='manifest'||manifest.format!==DATA_CONTRACT.schemas.Backup.format)throw new Error('File is not a chunked Study Director backup.');
   const version=Number(manifest.version)||0;
   if(version>DATA_CONTRACT.schemas.Backup.version)throw new Error('This backup was created by a newer Study Director version. Update the app before importing it.');
-  if(!(Number.isInteger(version)&&version>=7&&version<=DATA_CONTRACT.schemas.Backup.version)||UNRELEASED_BACKUP_VERSIONS.has(version))throw new Error('This backup version is not supported by this build.');
+  if(!(Number.isInteger(version)&&version>=7&&version<=DATA_CONTRACT.schemas.Backup.version)||version>RELEASED_BACKUP_VERSION&&version<DATA_CONTRACT.schemas.Backup.version)throw new Error('This backup version is not supported by this build.');
   if(version>=10&&!binaryV10)throw new Error('Backup v10 must use the binary-framed Study Director backup format.');
   if(version<10&&binaryV10)throw new Error('Binary backup framing is only valid for Study Director backup v10.');
   if(version>=10&&manifest.container!=='binary-v1')throw new Error('Backup v10 container metadata is invalid.');
@@ -323,7 +323,7 @@ function validateBackupManifest(manifest,gzip,{binaryV10=false}={}){
     if(new Date(String(manifest.checkpoint.createdAt)).toISOString()!==new Date(String(manifest.exportedAt)).toISOString())throw new Error('Backup checkpoint timestamp does not match the backup timestamp.');
   }
   if(version>=15){
-    const protectedContract=DATA_CONTRACT.schemas.CheckpointProtectedManifest,descriptor=manifest.protectedManifest,expectedProtectedVersion=version===15?1:version<NOTE_ENTITY_VERSION?2:Number(protectedContract.version);
+    const protectedContract=DATA_CONTRACT.schemas.CheckpointProtectedManifest,descriptor=manifest.protectedManifest,expectedProtectedVersion=version===15?1:version<=RELEASED_BACKUP_VERSION?2:Number(protectedContract.version);
     if(!descriptor||typeof descriptor!=='object'||Array.isArray(descriptor)||Object.keys(descriptor).sort().join('|')!==['entityType','format','version'].sort().join('|')||descriptor.entityType!=='checkpointManifest'||descriptor.format!==protectedContract.format||Number(descriptor.version)!==expectedProtectedVersion)throw new Error('Backup protected-manifest descriptor is invalid.');
   }
   if(version>=11&&manifest.declaredCounts?.personalData!==1)throw new Error('Backup is missing its personal-data section.');
@@ -335,12 +335,10 @@ function validateBackupManifest(manifest,gzip,{binaryV10=false}={}){
 }
 // Released backups (v20 and older) key notes by name: a v20 file is current
 // apart from its notes, whose name keys are converted, along with the names
-// in its note deletion history. The thresholds below date from v21, which no
-// released build wrote.
-const NOTE_ID_BACKUP_VERSION=21;
+// in its note deletion history.
 // A session saved before it named its device (v9) comes in as this device's.
 function olderActiveSession(value){return Number(value&&value.version)<DATA_CONTRACT.schemas.ActiveSession.version;}
-function legacyBackupItem(version,entityType){return Number(version)<(entityType==='note'?NOTE_ID_BACKUP_VERSION:NOTE_ID_BACKUP_VERSION-1);}
+function legacyBackupItem(version,entityType){return entityType==='note'?Number(version)<=RELEASED_BACKUP_VERSION:Number(version)<RELEASED_BACKUP_VERSION;}
 function withNoteIdDeletions(manifest,nameKeyed){
   if(!manifest||!nameKeyed||!manifest.noteDeletions.length)return manifest;
   const noteDeletions=normalizeCheckpointNoteDeletions(manifest.noteDeletions.map(entry=>({key:CompatibilityCodec.noteKey(entry.key),deletedAt:entry.deletedAt})));
@@ -443,7 +441,7 @@ async function parseChunkedBackupMetadata(file,options={},context={}){
   const proofChecksum=await backupChecksumText(proofBody,manifest.checksumAlgorithm);
   if(proofChecksum!==complete.checksum)throw new Error('Backup completion proof failed its integrity check.');
   if(Number(manifest.version)>=15){
-    protectedCheckpointManifest=withNoteIdDeletions(validateProtectedCheckpointManifest(protectedCheckpointManifest,manifest.checkpoint,{normalizedLegacy:true}),Number(manifest.version)<NOTE_ID_BACKUP_VERSION);
+    protectedCheckpointManifest=withNoteIdDeletions(validateProtectedCheckpointManifest(protectedCheckpointManifest,manifest.checkpoint,{normalizedLegacy:true}),Number(manifest.version)<=RELEASED_BACKUP_VERSION);
     const recordDates=identities.dailyRecord,noteKeys=identities.note,assetIds=new Set(assetDescriptors.map(item=>item.assetId));
     if(protectedCheckpointManifest.savedDayDeletions.some(entry=>recordDates.has(entry.date)))throw new Error('Checkpoint contains contradictory Saved-Day record/deletion state.');
     if(protectedCheckpointManifest.noteDeletions.some(entry=>noteKeys.has(entry.key)))throw new Error('Checkpoint contains contradictory note record/deletion state.');

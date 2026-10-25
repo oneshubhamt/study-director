@@ -44,17 +44,16 @@ registry.define('managed-repository',1,()=>{
       return value;
     }
     validateRepositoryRetentionPolicy(REPOSITORY_RETENTION_POLICY);
-// Manifest 6 keys notes by permanent id; earlier manifests keyed them by name.
-const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=8,REPOSITORY_NOTE_ID_MANIFEST_VERSION=6,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,8]));
-// Released builds wrote manifests 1 to 5. Versions 6 and 7 were made only by
-// unreleased builds, so nothing reads them.
-// Manifest 8 added the versions kept for review (pendingReview objects).
-const REPOSITORY_PENDING_REVIEW_VERSION=8,PENDING_REVIEW_KIND='pendingReview';
-// Manifests before version 7 call a note areaNote: in object kinds, pack
-// members, counts and the deletion list. A version is verified under the names
-// it was written with; its notes leave the reader under the current name.
-const REPOSITORY_NOTE_KIND_VERSION=7,WRITTEN_NOTE_KIND='areaNote';
-const repositoryNoteKind=manifestVersion=>Number(manifestVersion)<REPOSITORY_NOTE_KIND_VERSION?WRITTEN_NOTE_KIND:'note';
+// Released builds wrote manifests 1 to 5; this one writes 8 (6 and 7 came
+// only from unreleased builds, so nothing reads them). A released manifest
+// keys notes by name and calls a note areaNote (in object kinds, pack members,
+// counts and the deletion list), and holds no versions kept for review. It is
+// verified under the names it was written with; its notes leave the reader
+// under the current name.
+const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=8,REPOSITORY_RELEASED_MANIFEST_VERSION=5,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,8]));
+const releasedRepositoryManifest=manifestVersion=>Number(manifestVersion)<=REPOSITORY_RELEASED_MANIFEST_VERSION;
+const PENDING_REVIEW_KIND='pendingReview',WRITTEN_NOTE_KIND='areaNote';
+const repositoryNoteKind=manifestVersion=>releasedRepositoryManifest(manifestVersion)?WRITTEN_NOTE_KIND:'note';
 const LEGACY_REFLECTION_DRAFT_PACK_KIND='reflectionDraftPack';
 const REPOSITORY_COMMIT_FORMAT='study-director.backup-repository-commit',REPOSITORY_COMMIT_VERSION=1,REPOSITORY_COMMIT_REQUIRED_MANIFEST_VERSION=2;
 const REPOSITORY_OBJECT_FORMAT='study-director.backup-repository-object',REPOSITORY_OBJECT_VERSION=1;
@@ -206,7 +205,7 @@ function repositoryLogicalIdentityPayload(value){
   // A version written before the note rename keeps the identity it was
   // written with: the same fields, in the same order, under the old names.
   const shaped=BackupCodec.countShape(manifest.counts||{}),written=repositoryNoteKind(manifest.version)!=='note';
-  const counts=Number(manifest.version)<REPOSITORY_PENDING_REVIEW_VERSION?Object.fromEntries(Object.entries(shaped).filter(([type])=>type!==PENDING_REVIEW_KIND)):shaped;
+  const counts=releasedRepositoryManifest(manifest.version)?Object.fromEntries(Object.entries(shaped).filter(([type])=>type!==PENDING_REVIEW_KIND)):shaped;
   const identityCounts=written?Object.fromEntries(Object.entries(counts).map(([type,count])=>[type==='note'?WRITTEN_NOTE_KIND:type,count])):{...counts};
   const deletions=written?{savedDays:freeze(savedDayDeletions),areaNotes:freeze(noteDeletions),attachments:freeze(attachmentDeletions)}:{savedDays:freeze(savedDayDeletions),notes:freeze(noteDeletions),attachments:freeze(attachmentDeletions)};
   return freeze({format:'study-director.managed-backup-logical-state',version:1,counts:freeze(identityCounts),objects:freeze(objects),assets:freeze(assets),deletions:freeze(deletions)});
@@ -348,7 +347,7 @@ function selectRepositoryRetention(rowsValue,{now=new Date()}={}){
   }
   for(const row of protectedRows)keep(row,'before-restore');
   const retained=rows.filter(row=>selected.has(row.id)),remove=rows.filter(row=>!selected.has(row.id));
-  return freeze({retained:freeze(retained),remove:freeze(remove),activeProtected:activeProtected||null,tiers:freeze(Object.fromEntries(tiers)),normalRetained:retained.filter(row=>!protectedRows.includes(row)).length,policy:REPOSITORY_RETENTION_POLICY});
+  return freeze({retained:freeze(retained),remove:freeze(remove),activeProtected:activeProtected||null,tiers:freeze(Object.fromEntries(tiers)),normalRetained:retained.filter(row=>!protectedRows.includes(row)).length,currentFormat:currentRows.length>0,policy:REPOSITORY_RETENTION_POLICY});
 }
 function projectManagedRepositoryHistory(rowsValue,source,{now=new Date(),quarantinedObjectIds=null}={}){
   const rows=Array.isArray(rowsValue)?rowsValue:[],sourceId=String(source&&source.id||''),sourceLabel=clampText(source&&source.label||'',80),quarantined=new Set(repositoryScrubObjectIds(quarantinedObjectIds));
@@ -375,7 +374,15 @@ function validateRepositoryCommitValue(value,manifest=null){
   return normalized;
 }
 async function createRepositoryCommitMarker(manifest,checks={}){const value=validateRepositoryCommitValue({format:REPOSITORY_COMMIT_FORMAT,version:REPOSITORY_COMMIT_VERSION,checkpointId:manifest.checkpoint.checkpointId,exportedAt:manifest.exportedAt,sourceRevision:manifest.sourceRevision,manifestVersion:manifest.version},manifest),text=JSON.stringify(value),blob=new Blob([text],{type:'application/json'}),digest=await Exports.run('checksum',{value:blob},{signal:checks.signal||null});return freeze({...value,blob,size:blob.size,digest,checkProtection:checks.checkProtection,checkSource:checks.checkSource});}
-async function inspectRepositoryCommitMarker(file,manifest=null){if(!(file instanceof Blob)||file.size<=0||file.size>4096)throw new Error('Repository checkpoint commit marker is unreadable.');let value;try{value=JSON.parse(await file.text());}catch{throw new Error('Repository checkpoint commit marker is invalid JSON.');}return validateRepositoryCommitValue(value,manifest);}
+// Marks a failure as the file's own content: its bytes were read, but this
+// build cannot interpret them (another format, or damaged). Only such a version
+// is shown as unreadable and offered for removal; any other failure is retried.
+function unreadableVersion(error){if(error&&typeof error==='object'&&Object.isExtensible(error))error.repositoryUnreadable=true;return error;}
+async function inspectRepositoryCommitMarker(file,manifest=null){
+  if(!(file instanceof Blob)||file.size<=0||file.size>4096)throw unreadableVersion(new Error('Repository checkpoint commit marker is unreadable.'));
+  const text=await file.text();let value;try{value=JSON.parse(text);}catch{throw unreadableVersion(new Error('Repository checkpoint commit marker is invalid JSON.'));}
+  try{return validateRepositoryCommitValue(value,manifest);}catch(error){throw unreadableVersion(error);}
+}
 
 function validateRepositoryManifest(value){
   const manifestVersion=Number(value&&value.version);
@@ -503,17 +510,21 @@ function rethrowCleanupControl(error){
   if(error&&error.name==='AbortError'||/_MAINTENANCE_BUDGET$/u.test(code))throw error;
 }
 // Which formats a location's kept versions are in: once none is older than
-// the current format, the code that reads older ones can be removed.
-function repositoryFormats(rows){
+// the current format and none is unreadable (its format is unknown), the code
+// that reads older ones can be removed.
+function repositoryFormats(rows,unreadable=0){
   let current=0,older=0;for(const row of rows)if(Number(row?.manifest?.version)===REPOSITORY_MANIFEST_VERSION)current+=1;else older+=1;
-  return freeze({version:REPOSITORY_MANIFEST_VERSION,current,older});
+  return freeze({version:REPOSITORY_MANIFEST_VERSION,current,older,unreadable:Math.max(0,Number(unreadable)||0)});
 }
 async function cleanupRepositoryRetention(input){
   const rows=Array.isArray(input&&input.checkpoints)?[...input.checkpoints]:[];
   rows.sort((a,b)=>Date.parse(a.manifest?.exportedAt||0)-Date.parse(b.manifest?.exportedAt||0)||String(a.id||'').localeCompare(String(b.id||'')));
-  const checkpointUncertain=Math.max(0,Number(input&&input.invalidCount)||0)+Math.max(0,Number(input&&input.ignoredCount)||0),overflow=input&&input.overflow===true;
+  const checkpointUncertain=Math.max(0,Number(input&&input.invalidCount)||0)+Math.max(0,Number(input&&input.ignoredCount)||0),overflow=input&&input.overflow===true,unreadable=Math.max(0,Number(input&&input.unreadableCount)||0);
   // Missing and unreadable are different states. An incomplete inventory cannot
-  // prove that any manifest, commit or shared object is safe to remove.
+  // prove that any manifest, commit or shared object is safe to remove. A
+  // version this build cannot read (unreadableCount) is known and kept: the
+  // versions around it are still cleaned up, but no shared object is removed,
+  // since nothing says which ones it uses.
   if(overflow||checkpointUncertain)return freeze({warning:'Repository cleanup was deferred because backup history could not be read completely. No backup files were removed.',retained:freeze(rows),formats:null,removedCheckpoints:0,removedUncommitted:0,removedOrphanCommits:0,deferredIncomplete:0,checkpointDeferred:0,checkpointFailures:0,gcRemoved:0,gcDeferred:0,gcBudgetDeferred:0,gcFailures:0,gcSkipped:true,gcPending:true,uncertainCount:checkpointUncertain+(overflow?1:0),objectGcBlocked:input&&input.blockObjectGc===true,overflow,selection:null});
   const preparedObjects=input&&input.inventoryBeforeDelete===true?await input.listObjects():null;
   await input.beginDeletion?.();
@@ -534,7 +545,7 @@ async function cleanupRepositoryRetention(input){
     try{if(await input.deleteCheckpoint(row)!==false){removedCheckpoints+=1;input.workBudget?.advance();}else throw new Error('Checkpoint deletion was not confirmed.');}
     catch(error){rethrowCleanupControl(error);deletionFailures+=1;failedRows.push(row);for(const entry of row.manifest?.objects||[])retainedIds.add(entry.objectId);try{input.onError?.('checkpoint-delete',error,row);}catch(reportingError){}}
   }
-  let gcRemoved=0,gcDeferred=0,gcBudgetDeferred=0,gcFailures=0,gcDeleteAttempts=0,objectListingInvalid=0,objectListingOverflow=false,objectListingFailed=false,gcSkipped=Math.max(0,Number(input&&input.invalidCount)||0)>0||Math.max(0,Number(input&&input.ignoredCount)||0)>0||deletionFailures>0||checkpointDeferred>0||input&&input.blockObjectGc===true;
+  let gcRemoved=0,gcDeferred=0,gcBudgetDeferred=0,gcFailures=0,gcDeleteAttempts=0,objectListingInvalid=0,objectListingOverflow=false,objectListingFailed=false,gcSkipped=Math.max(0,Number(input&&input.invalidCount)||0)>0||Math.max(0,Number(input&&input.ignoredCount)||0)>0||unreadable>0||deletionFailures>0||checkpointDeferred>0||input&&input.blockObjectGc===true;
   const graceBefore=Date.parse(String(input&&input.objectGraceBefore||''));
   if(!gcSkipped){
     try{
@@ -555,13 +566,18 @@ async function cleanupRepositoryRetention(input){
   if(deferredIncomplete)parts.push(`${deferredIncomplete} incomplete publication artifact${deferredIncomplete===1?' was':'s were'} retained because another repository publication may still be in progress.`);
   if(deletionFailures)parts.push(`${deletionFailures} backup file${deletionFailures===1?' was':'s were'} retained because deletion could not be confirmed.`);
   if(checkpointDeferred)parts.push(`${checkpointDeferred} backup file${checkpointDeferred===1?' was':'s were'} deferred to keep this maintenance pass bounded.`);
-  if(gcSkipped)parts.push(input&&input.blockObjectGc===true?'Shared-object cleanup was deferred because another repository publication may still be in progress.':objectListingOverflow||objectListingInvalid||objectListingFailed?'Shared-object cleanup was deferred because the repository object listing could not be read or interpreted safely.':'Shared-object cleanup was deferred because checkpoint state still needs a later safe maintenance pass.');
+  if(unreadable)parts.push(`${unreadable} backup version${unreadable===1?'':'s'} could not be read by this app and ${unreadable===1?'was':'were'} kept.`);
+  if(gcSkipped)parts.push(unreadable&&input?.blockObjectGc!==true&&!deletionFailures&&!checkpointDeferred?'Shared-object cleanup waits until unreadable versions are removed.':input&&input.blockObjectGc===true?'Shared-object cleanup was deferred because another repository publication may still be in progress.':objectListingOverflow||objectListingInvalid||objectListingFailed?'Shared-object cleanup was deferred because the repository object listing could not be read or interpreted safely.':'Shared-object cleanup was deferred because checkpoint state still needs a later safe maintenance pass.');
   if(gcDeferred)parts.push(`${gcDeferred} recently created unreferenced object${gcDeferred===1?' was':'s were'} retained until a later maintenance pass.`);
   if(gcBudgetDeferred)parts.push(`${gcBudgetDeferred} unused object${gcBudgetDeferred===1?' was':'s were'} deferred to keep this maintenance pass bounded.`);
   if(gcFailures)parts.push(`${gcFailures} unused object${gcFailures===1?' could':'s could'} not be removed and will be retried later.`);
   const uncertain=objectListingInvalid+(objectListingFailed?1:0);if(objectListingInvalid)parts.push(`${objectListingInvalid} repository object entr${objectListingInvalid===1?'y was':'ies were'} unreadable and left untouched.`);if(objectListingFailed)parts.push('Repository object enumeration failed and was left untouched.');if(objectListingOverflow)parts.push('Repository object enumeration exceeded its safety bound and was left untouched.');
   const actualRetained=[...keep,...failedRows,...deferredRows].sort((a,b)=>Date.parse(a.manifest?.exportedAt||0)-Date.parse(b.manifest?.exportedAt||0)||String(a.id||'').localeCompare(String(b.id||'')));
-  return freeze({warning:parts.join(' '),retained:freeze(actualRetained),formats:repositoryFormats(actualRetained),removedCheckpoints,removedUncommitted,removedOrphanCommits,deferredIncomplete,checkpointDeferred,checkpointFailures:deletionFailures,gcRemoved,gcDeferred,gcBudgetDeferred,gcFailures,gcSkipped,gcPending:gcSkipped||deferredIncomplete>0||checkpointDeferred>0||gcDeferred>0||gcBudgetDeferred>0||gcFailures>0,uncertainCount:uncertain,objectGcBlocked:input&&input.blockObjectGc===true,objectListingFailed,overflow:objectListingOverflow,selection});
+  // Shared objects that wait only on unreadable versions are not retried on a
+  // timer: nothing changes until a version is removed, and removing one runs
+  // cleanup at once.
+  const waitsOnUnreadable=unreadable>0&&!(Math.max(0,Number(input&&input.invalidCount)||0)>0||Math.max(0,Number(input&&input.ignoredCount)||0)>0||deletionFailures>0||checkpointDeferred>0||input&&input.blockObjectGc===true);
+  return freeze({warning:parts.join(' '),retained:freeze(actualRetained),formats:repositoryFormats(actualRetained,unreadable),removedCheckpoints,removedUncommitted,removedOrphanCommits,deferredIncomplete,checkpointDeferred,checkpointFailures:deletionFailures,gcRemoved,gcDeferred,gcBudgetDeferred,gcFailures,gcSkipped,gcPending:gcSkipped&&!waitsOnUnreadable||deferredIncomplete>0||checkpointDeferred>0||gcDeferred>0||gcBudgetDeferred>0||gcFailures>0,uncertainCount:uncertain,unreadableCount:unreadable,objectGcBlocked:input&&input.blockObjectGc===true,objectListingFailed,overflow:objectListingOverflow,selection});
 }
 
 async function prepareRepositoryCheckpointWork(previousManifests=null,{interactive=false,availableObjectIds=null,excludedObjectIds=null,retention=null,signal=null,baseUpdate=false}={}){
@@ -776,13 +792,12 @@ async function establishRepositoryBase(checkpointId){
 }
 async function inspectRepositoryManifest(file,{interactive=false}={}){
   if(!(file instanceof Blob))throw new TypeError('Repository checkpoint file is unreadable.');
-  const decoded=await Exports.unprotect(file,{interactive});
+  const decoded=await Exports.unprotect(file,{interactive}).catch(error=>{throw String(error?.code||'')==='BACKUP_ENCRYPTION_UNSUPPORTED'?unreadableVersion(error):error;});
   try{
-    const parsed=await Exports.run('parseBlob',{file:decoded.blob,maxBytes:Math.min(Number(APP_LIMITS.backupMaxCompressedBytes)||67108864,67108864)});
-    const manifest=validateRepositoryManifest(parsed);
-    if(decoded.encrypted!==manifest.encrypted)throw new Error('Repository checkpoint protection metadata is inconsistent.');
+    const parsed=await Exports.run('parseBlob',{file:decoded.blob,maxBytes:Math.min(Number(APP_LIMITS.backupMaxCompressedBytes)||67108864,67108864)}).catch(error=>{throw error?.name==='SyntaxError'?unreadableVersion(error):error;});
+    let manifest;try{manifest=validateRepositoryManifest(parsed);if(decoded.encrypted!==manifest.encrypted)throw new Error('Repository checkpoint protection metadata is inconsistent.');}catch(error){throw unreadableVersion(error);}
     const logicalFingerprint=await repositoryLogicalFingerprint(manifest);
-    if(manifest.logicalFingerprint&&manifest.logicalFingerprint!==logicalFingerprint)throw new Error('Repository checkpoint logical-state fingerprint failed verification.');
+    if(manifest.logicalFingerprint&&manifest.logicalFingerprint!==logicalFingerprint)throw unreadableVersion(new Error('Repository checkpoint logical-state fingerprint failed verification.'));
     return manifest.logicalFingerprint===logicalFingerprint?manifest:freeze({...manifest,logicalFingerprint});
   }finally{if(decoded.blob!==file)await Exports.run('file.release',{file:decoded.blob});}
 }
@@ -962,7 +977,7 @@ async function openRepositoryAttachment(manifest,entry,descriptor,readObject,opt
 // without reading them. Versions from before note ids name notes by title,
 // so they hold no earlier version of a note.
 function repositoryNoteObject(manifest,noteId){
-  const id=String(noteId||''),noteKind=repositoryNoteKind(manifest.version);if(!id||Number(manifest.version)<REPOSITORY_NOTE_ID_MANIFEST_VERSION)return null;
+  const id=String(noteId||''),noteKind=repositoryNoteKind(manifest.version);if(!id||releasedRepositoryManifest(manifest.version))return null;
   for(const entry of manifest.objects||[]){
     if(entry.kind===noteKind&&entry.key===id)return freeze({entry,fingerprint:entry.fingerprint});
     if(entry.kind==='structuredPack'){const member=repositoryPackManifestMembers(entry.members,manifest.version).find(item=>item.kind===noteKind&&item.key===id);if(member)return freeze({entry,fingerprint:member.fingerprint});}
@@ -981,7 +996,7 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
   throwIfImportAborted(signal);
   if(manifest.installationId&&manifest.installationId!==manifest.checkpoint.originInstallationId)throw new Error('Repository checkpoint installation provenance is inconsistent.');
   const objectById=new Map(manifest.objects.map(entry=>[entry.objectId,entry]));
-  const noteKind=repositoryNoteKind(manifest.version),allowedKinds=new Set(['dailyRecordPack',noteKind,'activeSession','personalData','structuredPack','attachment']);if(manifest.version<=4)allowedKinds.add(LEGACY_REFLECTION_DRAFT_PACK_KIND);if(manifest.version>=REPOSITORY_PENDING_REVIEW_VERSION)allowedKinds.add(PENDING_REVIEW_KIND);
+  const noteKind=repositoryNoteKind(manifest.version),allowedKinds=new Set(['dailyRecordPack',noteKind,'activeSession','personalData','structuredPack','attachment']);if(manifest.version<=4)allowedKinds.add(LEGACY_REFLECTION_DRAFT_PACK_KIND);if(!releasedRepositoryManifest(manifest.version))allowedKinds.add(PENDING_REVIEW_KIND);
   for(const entry of manifest.objects)if(!allowedKinds.has(entry.kind))throw new Error(`Repository object kind ${entry.kind} is unsupported.`);
   const dailyDocuments=[],noteItems=[],pendingReviewItems=[];let activeSession=null,personalData=null,legacyReflectionDraftCount=0;
   // A one-note read names the note by id.
@@ -1007,7 +1022,7 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
       if(entry.key!=='active'||activeSession!==null)throw new Error('Repository Active Session object is invalid.');activeSession=payload;
     }else if(entry.kind==='personalData'){
       if(entry.key!=='personal'||personalData!==null)throw new Error('Repository personal-data object is invalid.');personalData=payload;
-    }else if(entry.kind===PENDING_REVIEW_KIND&&manifest.version>=REPOSITORY_PENDING_REVIEW_VERSION){
+    }else if(entry.kind===PENDING_REVIEW_KIND&&!releasedRepositoryManifest(manifest.version)){
       if(!payload||typeof payload!=='object'||Array.isArray(payload)||String(payload.id||'')!==entry.key||seenReviewIds.has(entry.key))throw new Error('Repository object kept for review is invalid.');
       seenReviewIds.add(entry.key);pendingReviewItems.push(payload);
     }else throw new Error(`Repository logical object kind ${entry.kind} is unsupported.`);
@@ -1188,7 +1203,7 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
 }
 
     return freeze({
-      format:'study-director.managed-repository',contractVersion:1,noteIdManifestVersion:REPOSITORY_NOTE_ID_MANIFEST_VERSION,
+      format:'study-director.managed-repository',contractVersion:1,releasedManifestVersion:REPOSITORY_RELEASED_MANIFEST_VERSION,
       noteObject:repositoryNoteObject,readNote:readRepositoryNote,
       createPublication:createRepositoryPublication,publish:publishRepositoryCheckpoint,inspectManifest:inspectRepositoryManifest,inspect:inspectRepositoryCheckpoint,verifyCheckpoint:verifyRepositoryCheckpoint,verifyObject:verifyRepositoryObject,scrub:scrubRepositoryIntegrity,cleanup:cleanupRepositoryRetention,inspectCommit:inspectRepositoryCommitMarker,
       retention:REPOSITORY_RETENTION_POLICY,validatePolicy:validateRepositoryRetentionPolicy,classifyState:classifyRepositoryState,activeProtected:activeProtectedRepositoryRow,selectRetention:selectRepositoryRetention,projectHistory:projectManagedRepositoryHistory,invalidatePreparation:invalidateRepositoryPreparation,establishBase:establishRepositoryBase,

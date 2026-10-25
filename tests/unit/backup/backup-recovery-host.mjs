@@ -15,6 +15,7 @@ let storedPending=null,storageReadError=null,providerBringInResult=freeze({ok:tr
 let deletionResults=[];
 let providerRestoreImpl=async()=>freeze({ok:true});
 let driveConnected=false,noteVersionsImpl=async()=>freeze({available:true,entries:freeze([])}),lastProviderBringIn=null;
+let deviceRestoreFailure=null;const removedVersions=[];
 let deviceHistoryReads=0,providerHistoryReads=0,providerBringInCheckpoint='',lastUseBackupOptions=null,deviceCombineResult=freeze({ok:true}),lastDeviceCombine=null,deviceConnected=true,sessionBlocking=false;
 const providerHooks={recovery:null,pending:null};
 const deviceEntry=freeze({logicalId:'state_'+'a'.repeat(64),logicalFingerprint:'a'.repeat(64),exportedAt:'2026-09-20T12:00:00.000Z',counts:freeze({dailyRecord:2,note:1}),location:freeze({sourceId:'device-folder',sourceLabel:'Device Folder',checkpointId:CHECKPOINT('a'),exportedAt:'2026-09-20T12:00:00.000Z',tier:'latest',encrypted:false})});
@@ -35,7 +36,7 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
   interactions:freeze({choose:async options=>{
     events.push(`choose:${options.title}`);
     if(options.title==='Use this version'){lastUseBackupOptions=options;return chooseMode;}
-    if(options.title==='Remove safety backup?')return 'remove';
+    if(options.title==='Remove safety version?'||options.title==='Remove this version?')return 'remove';
     return null;
   }}),
   lifecycle:freeze({
@@ -60,8 +61,9 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
     history:async id=>{if(id==='device-folder'){deviceHistoryReads+=1;return deviceHistory;}providerHistoryReads+=1;assert.equal(id,'google-drive');return driveHistoryNow;},
     list:()=>freeze([freeze({id:'google-drive',label:'Google Drive',shared:true,connected:driveConnected}),freeze({id:'device-folder',label:'Device Folder',connected:deviceConnected})]),
     noteVersions:(id,noteId,options)=>noteVersionsImpl(id,noteId,options),
-    removeProtectedRepositoryProvider:async()=>freeze({removed:true,entries:freeze([])}),
+    removeRepositoryProviderVersion:async(id,checkpointId)=>{removedVersions.push([id,checkpointId]);return freeze({removed:true,entries:freeze([])});},
     restoreRepositoryProviderVersion:async(id,options)=>{
+      if(id==='device-folder'&&deviceRestoreFailure){const error=deviceRestoreFailure;deviceRestoreFailure=null;throw error;}
       if(id==='device-folder'){restoredCheckpoint=options.checkpointId;restoredConfirmed=options.confirmed===true;events.push(`restore:${restoredCheckpoint}`);return freeze({ok:true});}
       return providerRestoreImpl(id,options);
     },
@@ -163,7 +165,7 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   assert.equal((await host.managedRecovery(spec(true))).ok,true,'a session-preserving recovery is not stopped by its own settlement');
   assert.equal(session.writes,1,'the session is written once, before the safety backup');
   session.writes=0;
-  await assert.rejects(()=>host.managedRecovery(spec(false)),/changed while the Before restore safety backup/,'a recovery that may replace the session keeps the stale-safety protection');
+  await assert.rejects(()=>host.managedRecovery(spec(false)),/changed while the Before restore safety version/,'a recovery that may replace the session keeps the stale-safety protection');
   assert.equal(session.writes,2);assert.equal(suspended,0);
   Object.assign(session,{tasks:false,writes:0});
 }
@@ -248,6 +250,39 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   driveConnected=true;driveHistoryNow=freeze({available:false,reason:'permission'});await host.history.open();await new Promise(resolve=>setImmediate(resolve));
   assert.equal(host.history.status().entries.length,3);assert.equal(nodes.get('managed-version-history-status').textContent,'3 versions. Google Drive needs permission again.');
   deviceHistory=previous;driveHistoryNow=driveHistory;driveConnected=false;host.history.close();
+}
+// A version this app cannot read shows on its own with Remove. A copy waiting
+// for the password gives way to one that can be read, and one with no other
+// copy says it is locked. A version the Device Folder cannot read is read from
+// Drive instead, but only when nothing changed yet.
+{
+  const entry=(sourceId,sourceLabel,letter,data,exportedAt,tier,extra={})=>freeze({...deviceEntry,logicalId:'state_'+data.repeat(64),logicalFingerprint:data.repeat(64),exportedAt,location:freeze({sourceId,sourceLabel,checkpointId:CHECKPOINT(letter),exportedAt,tier,encrypted:false,...extra})});
+  const folder=(...args)=>entry('device-folder','Device Folder',...args),drive=(...args)=>entry('google-drive','Google Drive',...args);
+  const special=(kind,letter,exportedAt,tier)=>freeze({logicalId:`${kind}_${CHECKPOINT(letter)}`,logicalFingerprint:'',exportedAt,counts:null,origin:'',[kind]:true,location:freeze({sourceId:'device-folder',sourceLabel:'Device Folder',checkpointId:CHECKPOINT(letter),exportedAt,tier,encrypted:kind==='locked'})});
+  const previous=deviceHistory;
+  deviceHistory=freeze({...previous,entries:freeze([special('unreadable','u','2026-09-20T13:00:00.000Z','unreadable'),special('locked','l','2026-09-20T10:00:00.000Z','latest'),folder('c','c','2026-09-20T09:00:00.000Z','retained'),special('locked','m','2026-09-20T08:00:00.000Z','retained')])});
+  driveHistoryNow=freeze({...driveHistory,entries:freeze([drive('l','l','2026-09-20T10:00:00.000Z','latest'),drive('c','c','2026-09-20T09:00:00.000Z','hourly')])});
+  driveConnected=true;await host.history.open();await new Promise(resolve=>setImmediate(resolve));
+  const listed=host.history.status().entries,cards=nodes.get('managed-version-history-list').children;
+  assert.deepEqual(listed.map(item=>[item.location.sourceId,item.location.checkpointId,item.location.tier]),[['device-folder',CHECKPOINT('u'),'unreadable'],['google-drive',CHECKPOINT('l'),'latest'],['device-folder',CHECKPOINT('c'),'retained'],['device-folder',CHECKPOINT('m'),'retained']],'an unreadable version is never Latest; a locked copy gives way to Drive’s');
+  assert.deepEqual(listed[1].copies.map(at=>at.sourceId),['device-folder']);assert.deepEqual(listed[2].copies.map(at=>at.sourceId),['google-drive']);
+  assert.equal(nodes.get('managed-version-history-status').textContent,'3 versions. 1 can’t be read by this app.');
+  assert.equal(cards[0].children[0].children[1].textContent,'Can’t be read by this app');assert.match(cards[0].children[1].children[0].children[0].textContent,/newer Study Director, or the file is damaged/u);
+  const remove=cards[0].children[1].children[1].children[0];assert.equal(remove.dataset.action,'remove-managed-version');assert.equal(cards[0].children[1].children[1].children.length,1,'no Restore for it');
+  assert.match(cards[3].children[0].children[1].textContent,/^Locked: enter the backup password/u);
+  // Restore: the Device Folder's read fails before anything changed, so Drive's copy is read.
+  let driveRestored='';providerRestoreImpl=async(id,options)=>{driveRestored=`${id}:${options.checkpointId}`;return freeze({ok:true});};
+  chooseMode='replace';deviceRestoreFailure=Object.assign(new Error('Repository object obj_x is unavailable.'),{repositoryReadFailed:true});
+  assert.equal(await host.history.recover({target:{closest:()=>cards[2].children[1].children[1].children[0]}}),true);assert.equal(driveRestored,`google-drive:${CHECKPOINT('c')}`);
+  assert.ok(diagnostics.some(row=>row.scope==='backup.version-history-other-copy'));
+  // Any other failure is reported, not tried elsewhere.
+  await host.history.open();await new Promise(resolve=>setImmediate(resolve));driveRestored='';deviceRestoreFailure=new Error('This device’s data changed. Nothing was restored.');
+  assert.equal(await host.history.recover({target:{closest:()=>nodes.get('managed-version-history-list').children[2].children[1].children[1].children[0]}}),false);assert.equal(driveRestored,'');
+  // Remove asks first, then removes it from the list.
+  await host.history.open();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(await host.history.removeVersion({target:{closest:()=>nodes.get('managed-version-history-list').children[0].children[1].children[1].children[0]}}),true);
+  assert.deepEqual(removedVersions.at(-1),['device-folder',CHECKPOINT('u')]);assert.ok(host.history.status().entries.every(item=>item.location.tier!=='unreadable'));assert.equal(nodes.get('managed-version-history-status').textContent,'Version removed.');
+  providerRestoreImpl=async()=>freeze({ok:true});deviceHistory=previous;driveHistoryNow=driveHistory;driveConnected=false;host.history.close();
 }
 // A note's earlier versions combine every connected location: one entry per
 // distinct text, newest first, never the note's current text. Labels read in

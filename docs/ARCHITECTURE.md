@@ -158,7 +158,7 @@ The layer is reached through a fixed set of entry points, pinned by `compatibili
 4. In the contracts: the compatibility registry, the obsolete and renamed identity lists and the `dailyRecordMigration` family.
 5. Their tests (`compatibility-*`, `retirement-readiness`) and legacy fixtures.
 
-Readers for old backup files (`backup-codec` versions 7 to 20) and for repository checkpoints version 5 and older, the ones released builds wrote, are a separate choice: keep them while old `.sdbackup` files and checkpoints should still open. Version 20 differs from today's in note names and ids and has no versions kept for review (registry: `name-keyed-notes-in-backups`, `area-note-names-in-backups`).
+Readers for old backup files (`backup-codec` versions 7 to 20) and for repository checkpoints version 5 and older, the ones released builds wrote, are a separate choice: keep them while old `.sdbackup` files and checkpoints should still open. Version 20 differs from today's in note names and ids and has no versions kept for review (registry: `name-keyed-notes-in-backups`).
 
 ## 11. UI and responsive architecture
 

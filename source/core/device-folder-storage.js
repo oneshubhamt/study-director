@@ -87,11 +87,11 @@ registry.define('device-folder-storage',1,()=>{
     }
     // Each repository folder carries a random identity, so caches and pending
     // maintenance never carry over to a different folder. The same marker says
-    // which profile and device it belongs to (version 2; version 1 is the
-    // single folder of earlier versions).
+    // which profile and device it belongs to (version 2). The single folder
+    // of earlier versions has none.
     const randomId=()=>globalThis.crypto.randomUUID().replace(/-/gu,'');
     function parseMarker(text){
-      try{const value=JSON.parse(text),version=Number(value&&value.version);if(value&&value.format===SCOPE_FORMAT&&(version===1||version===2)&&/^[a-f0-9]{32}$/u.test(String(value.id||'')))return freeze({id:String(value.id),version,profile:version===2?String(value.profile||''):'',scope:version===2?String(value.scope||''):'',device:version===2?String(value.device||''):'',moving:String(value.moving||''),movedFrom:String(value.movedFrom||'')});}catch{}
+      try{const value=JSON.parse(text),version=Number(value&&value.version);if(value&&value.format===SCOPE_FORMAT&&version===2&&/^[a-f0-9]{32}$/u.test(String(value.id||'')))return freeze({id:String(value.id),version,profile:String(value.profile||''),scope:String(value.scope||''),device:String(value.device||''),moving:String(value.moving||''),movedFrom:String(value.movedFrom||'')});}catch{}
       return null;
     }
     async function readMarker(directory){const file=await fileOrNull(directory,SCOPE_FILE);return file?parseMarker(await file.text()):null;}
@@ -112,18 +112,20 @@ registry.define('device-folder-storage',1,()=>{
       digestCache.set(cacheKey,digest);if(digestCache.size>512)digestCache.delete(digestCache.keys().next().value);return digest;
     }
     // A version's summary comes from its manifest, so history shows dates,
-    // counts and tiers without reading anything else.
+    // counts and tiers without reading anything else. A manifest this build
+    // cannot read is marked unreadable, and one waiting for the password
+    // locked; a read that failed is tried again on the next listing.
     async function summaryOf(file,cacheKey){
       if(summaryCache.has(cacheKey))return summaryCache.get(cacheKey);
-      let summary=null;
-      try{const manifest=await input.inspectManifest(file,{interactive:false});summary=freeze({logicalFingerprint:manifest.logicalFingerprint,exportedAt:manifest.exportedAt,counts:freeze({dailyRecord:Number(manifest.counts?.dailyRecord)||0,note:Number(manifest.counts?.note)||0}),encrypted:manifest.encrypted===true,retention:manifest.retention,origin:String(manifest.installationId||'')});}
-      catch(error){if(error&&error.code==='BACKUP_LOCKED')return null;summary=null;}
+      let summary;
+      try{const manifest=await input.inspectManifest(file,{interactive:false});summary=freeze({history:freeze({format:Number(manifest.version)||0,logicalFingerprint:manifest.logicalFingerprint,exportedAt:manifest.exportedAt,counts:freeze({dailyRecord:Number(manifest.counts?.dailyRecord)||0,note:Number(manifest.counts?.note)||0}),encrypted:manifest.encrypted===true,retention:manifest.retention,origin:String(manifest.installationId||'')})});}
+      catch(error){if(error&&error.code==='BACKUP_LOCKED')return freeze({locked:true});if(error?.repositoryUnreadable!==true)return freeze({});summary=freeze({unreadable:true});}
       summaryCache.set(cacheKey,summary);if(summaryCache.size>256)summaryCache.delete(summaryCache.keys().next().value);return summary;
     }
     async function describe(kind,id,name,file,repositoryScope,signal){
       const modifiedAt=iso(file.lastModified||nowMs()),cacheKey=`${repositoryScope}\u0000${name}\u0000${file.lastModified}\u0000${file.size}`,item={kind,id,name,size:file.size,createdAt:modifiedAt,modifiedAt,remoteId:name,remoteVersion:String(Math.max(1,Math.floor(Number(file.lastModified)||1))),verificationScope:repositoryScope};
       if(kind!=='object')item.digest=await digestOf(file,cacheKey,signal);
-      if(kind==='checkpoint'){const summary=await summaryOf(file,cacheKey);if(summary)item.history=summary;}
+      if(kind==='checkpoint')Object.assign(item,await summaryOf(file,cacheKey));
       return freeze(item);
     }
     async function list({kind,signal=null}={}){

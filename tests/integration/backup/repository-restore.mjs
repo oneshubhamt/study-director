@@ -133,13 +133,12 @@ assert.equal(manifest.protectedCheckpointManifest.version,3);assert.equal(manife
 // the repository (registry: backup-repository-v1-v4). Versions 4 to 6 pack
 // small objects into shards; versions 1 to 3 kept one object per record, so
 // the fixture unpacks this checkpoint's shards into that older layout.
-// Before version 7 a note was written as areaNote: in the manifest's objects,
-// pack members and counts, inside each object, and in the shard it lands in;
-// its protected manifest (version 2) named the note deletions areaNoteDeletions
-// (registry: area-note-names-in-backups). The fixture writes them that way.
-// Before version 6 notes are keyed by title: such a version restores whole,
-// its notes converted, but offers no earlier version of one note
-// (registry: name-keyed-notes-in-backups).
+// Released manifests (version 5 and older) write a note as areaNote: in the
+// manifest's objects, pack members and counts, inside each object, and in the
+// shard it lands in; the protected manifest (version 2) names the note
+// deletions areaNoteDeletions. The fixture writes them that way. Notes are
+// keyed by title: such a version restores whole, its notes converted, but
+// offers no earlier version of one note (registry: name-keyed-notes-in-backups).
 {
   const sha256=async text=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))].map(byte=>byte.toString(16).padStart(2,'0')).join('');
   const plainText=async (blob,gzip)=>{let stream=(await decryptBlob(blob)).stream();if(gzip)stream=stream.pipeThrough(new DecompressionStream('gzip'));return new Response(stream).text();};

@@ -113,11 +113,11 @@ export const COMPATIBILITY_REGISTRY=freeze({
     },
     {
       id:'name-keyed-notes-in-backups',owner:'backup-codec/managed-repository',kind:'import-adapter',
-      source:'released portable backups (v20 and older) and backup-location manifests version 5 and older, which key Notes and their deletion history by note name',
-      target:'notes and note deletion history keyed by the permanent id worked out from each name, the same id the live conversion gives that note',
-      proof:'a v20 file is read as current apart from its notes; an older manifest converts its notes when the version is restored or combined whole, and offers no earlier version of one note',
+      source:'released portable backups (v20 and older: entity areaNote, data.areaNotes, protected manifest version 2 with areaNoteDeletions) and backup-location manifests version 5 and older (kind areaNote, units areaNote:*, counts.areaNote), which key Notes and their deletion history by note name and hold no versions kept for review',
+      target:'the current note entity, kind and deletion list names, notes and note deletion history keyed by the permanent id worked out from each name (the same id the live conversion gives that note), and no version kept for review; checksums and completion proofs are still checked against the names the file was written with',
+      proof:'a v20 file and a version-5 manifest read back as the same notes, deletions and counts, with an empty list of versions kept for review; an older manifest converts its notes when the version is restored or combined whole, and offers no earlier version of one note. Portable v21 and v22 and manifests 6 and 7 were made only by unreleased builds and are refused',
       retirement:'no supported backup older than portable v23 or manifest 8 remains',
-      sourceFiles:freeze(['source/core/backup-codec.js','source/core/backup.js','source/core/compatibility-codecs.js'])
+      sourceFiles:freeze(['source/core/backup-codec.js','source/core/backup.js','source/core/compatibility-codecs.js','source/core/managed-repository.js'])
     },
     {
       id:'note-recovery-v1',owner:'repositories',kind:'live-migration',
@@ -134,14 +134,6 @@ export const COMPATIBILITY_REGISTRY=freeze({
       proof:'the store is renamed inside the bridge upgrade (version 8), so no row is copied; every record and the rescue copy move with their formats before any other step reads them, and an old and a new copy that differ stop the move with nothing changed',
       retirement:'baseline verified on all supported installations',
       sourceFiles:freeze(['contracts/canonical-identities.mjs','contracts/data-architecture.mjs','source/core/compatibility.js','source/core/compatibility-host.js','source/core/persistence.js','source/app.html'])
-    },
-    {
-      id:'area-note-names-in-backups',owner:'backup-codec/managed-repository',kind:'import-adapter',
-      source:'released portable backups (v20 and older: entity areaNote, data.areaNotes, protected manifest version 2 with areaNoteDeletions) and backup-location manifests version 5 and older (kind areaNote, units areaNote:*, counts.areaNote), written before versions kept for review existed',
-      target:'the current note entity, kind and deletion list names, with no version kept for review; checksums and completion proofs are still checked against the names the file was written with',
-      proof:'a v20 file and a version-5 manifest read back as the same notes, deletions and counts, with an empty list of versions kept for review. Portable v21 and v22 and manifests 6 and 7 were made only by unreleased builds and are refused',
-      retirement:'no supported backup older than portable v23 or manifest 8 remains',
-      sourceFiles:freeze(['source/core/backup-codec.js','source/core/managed-repository.js','source/core/device-folder-storage.js'])
     },
     {
       id:'daily-record-historical-shapes',owner:'record-codecs/repositories',kind:'live-canonicalization',

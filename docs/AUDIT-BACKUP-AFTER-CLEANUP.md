@@ -4,6 +4,19 @@ This is a read-only audit, asked for after the step 4 cleanup (`HANDOFF.md` 5.6)
 
 Smart merge (`mergeThreeWay`) is out of scope (`HANDOFF.md` 5.8), and decisions already in section 5 are not reopened.
 
+## Status (2026-10-25)
+
+All findings are fixed. Your answers: D1, no device ran a build of this branch against real backups; D2, show an unreadable version with Remove.
+
+| # | Done |
+|---|---|
+| M1 | A version whose content this build cannot read is listed on its own ("Can’t be read by this app") with Remove…, which a fresh scan must confirm. Cleanup goes on around it and holds only shared-object cleanup, with no timed retry. "Format cleanup" counts it. Only content failures count; a failed read or a password wait does not. Test T2 |
+| M2 | The listing summary carries the manifest format (Device Folder from the manifest, Drive from `sdHistoryFormat`), so Version History applies the one-format rule before any cleanup. Test T1 |
+| L1 | Confirmed by test T3, then fixed: a Combine of Drive's newest moves the shared base wherever it is read from. Drive's newest now comes from a fresh listing, which also fixed a stale 30-second cache that could move the base back |
+| L2 | Opening Version History asks for a put-off password first. A version still waiting for it shows as "Locked", and a readable copy is shown instead where one exists |
+| L3 | A restore whose read fails before anything changed is tried from the next location that holds the version |
+| C1–C5, W1–W5 | Done as suggested. C3 kept one "released" threshold per format and merged the two compatibility entries. C5 is one shared start, finish and failure path for the four foreground operations |
+
 ## Verdict
 
 The system is in good shape, and nothing found loses data. Each risky path fails safe: it stops and keeps everything.

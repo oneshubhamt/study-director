@@ -44,7 +44,7 @@ registry.define('backup-presentation',1,()=>{
     const action=(source,kind)=>{const key=JSON.stringify([source,kind]);if(!actions.has(key))actions.set(key,typeof input.action==='function'?input.action(source,kind):null);return actions.get(key);};
     const read=(source,id='backup-operation')=>notifications.readEvent(source,id);
     function locationLabel(source,state={}){
-      if(state.busy)return state.stalled?'Still working…':({prepare:'Preparing the backup folder…',history:'Reading backups…','restore-version':'Restoring…','bring-in':'Combining…','remove-safety':'Removing safety backup…'}[state.foregroundKind]||'Backing up…');
+      if(state.busy)return state.stalled?'Still working…':({prepare:'Preparing the backup folder…',history:'Reading backups…','restore-version':'Restoring…','bring-in':'Combining…','remove-version':'Removing version…'}[state.foregroundKind]||'Backing up…');
       if(state.backingUp)return state.sync?'Syncing…':'Backing up…';
       if(state.maintenanceBusy)return 'Maintaining backups…';
       if(state.mode==='unsupported')return 'Unavailable';
@@ -56,7 +56,7 @@ registry.define('backup-presentation',1,()=>{
       const synced=syncLabel(state);if(synced)return synced;
       const saved=typeof input.verified==='function'?input.verified(source):null;
       const when=timeText(state.lastBackupAt||read(source,'backup-verified')?.completedAt||saved?.at);
-      return `On${when?' · Last verified '+when:''}`;
+      return `On${when?' · Last backup '+when:''}`;
     }
     function timeText(at){return at&&Number.isFinite(Date.parse(at))?(typeof input.timeLabel==='function'?input.timeLabel(at):new Date(at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',hour12:false})):'';}
     // A shared location (Drive) says how this device stands with it: Syncing…,
