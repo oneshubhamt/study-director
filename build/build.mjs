@@ -191,6 +191,7 @@ export function renderBuild(){
   const templateSource=sourceFile(htmlSource);
   const template=target=>renderPlatformTokens(templateSource,identity,htmlSource,{
     EXTERNAL_GLASS_FILENAME:externalNames[target].get('glass'),
+    EXTERNAL_AURORA_FILENAME:externalNames[target].get('aurora'),
     EXTERNAL_GUIDE_FILENAME:externalNames[target].get('guide'),
     EXTERNAL_INSIGHTS_FILENAME:externalNames[target].get('insights'),
     EXTERNAL_DRIVE_FILENAME:externalNames[target].get('drive'),
@@ -326,8 +327,8 @@ export function validateBuild(build){
   const srcPattern=/<script\b[^>]*\bsrc="([^"]+)"[^>]*><\/script>/gi;
   const devScripts=[...devHtml.matchAll(srcPattern)].map(match=>match[1]);
   const deployScripts=[...deployHtml.matchAll(srcPattern)].map(match=>match[1]);
-  const expectedDevScripts=[externalNames.development.get('glass'),...privateModules.map(row=>privateNames.get(row.id)),externalNames.development.get('rich-text'),externalNames.development.get('drive')];
-  const expectedDeployScripts=[externalNames.deployment.get('glass'),...privateModules.map(row=>privateNames.get(row.id)),externalNames.deployment.get('rich-text'),externalNames.deployment.get('drive')];
+  const expectedDevScripts=[externalNames.development.get('glass'),externalNames.development.get('aurora'),...privateModules.map(row=>privateNames.get(row.id)),externalNames.development.get('rich-text'),externalNames.development.get('drive')];
+  const expectedDeployScripts=[externalNames.deployment.get('glass'),externalNames.deployment.get('aurora'),...privateModules.map(row=>privateNames.get(row.id)),externalNames.deployment.get('rich-text'),externalNames.deployment.get('drive')];
   invariant(JSON.stringify(devScripts)===JSON.stringify(expectedDevScripts),'Development script order or inventory is invalid.');
   invariant(JSON.stringify(deployScripts)===JSON.stringify(expectedDeployScripts),'Deployment script order or inventory is invalid.');
   for(const target of ['development','deployment']){
@@ -373,7 +374,7 @@ export function validateBuild(build){
     .replace(privateModules.map(row=>`<script src="${privateNames.get(row.id)}"></script>`).join('\n'),privateModuleMarker);
   const normalizeHost=(value,target)=>{
     let normalized=normalizePrivateBlock(value).replaceAll(pwa[target].assetId,'__SD_PAGE_ASSET_ID__');
-    for(const id of ['glass','guide','insights','drive','rich-text'])normalized=normalized.replaceAll(externalNames[target].get(id),`@@SD_EXTERNAL_${id.toUpperCase()}_FILENAME@@`);
+    for(const id of ['glass','aurora','guide','insights','drive','rich-text'])normalized=normalized.replaceAll(externalNames[target].get(id),`@@SD_EXTERNAL_${id.toUpperCase()}_FILENAME@@`);
     for(const module of styleModules)normalized=normalized.replaceAll(styleNames.get(module.id),`@@SD_${module.id.toUpperCase()}_STYLE_FILENAME@@`);
     return normalized;
   };

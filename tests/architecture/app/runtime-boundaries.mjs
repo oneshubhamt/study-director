@@ -202,17 +202,25 @@ assert.match(core,/@supports \(-webkit-touch-callout:none\)\{[\s\S]*?@media \(mi
 assert.match(core,/@media \(max-width: 560px\)\{[\s\S]*?#pane-plan \.si\.draft \.plan-draft-fields\{[\s\S]*?grid-template-columns:repeat\(2,minmax\(0,1fr\)\);[\s\S]*?grid-template-areas:[\s\S]*?"name name"[\s\S]*?"start dur"[\s\S]*?"kind kind"[\s\S]*?"area area"[\s\S]*?"measure target"[\s\S]*?gap:9px 8px;[\s\S]*?#pane-plan \.si\.draft \.plan-draft-fields>\.start\{grid-area:start\}[\s\S]*?#pane-plan \.si\.draft \.plan-draft-fields>\.dur\{grid-area:dur\}[\s\S]*?#pane-plan \.si\.draft \.plan-draft-fields>\.measure\{grid-area:measure\}[\s\S]*?#pane-plan \.si\.draft \.plan-draft-fields>\.target\{grid-area:target\}/s,
   'Phone Plan rows explicitly pair Start/Duration and Measure/Target while Task, Kind and Area remain full width');
 
-// Motion remains part of the Presentation contract, but native snapshot View Transitions are retired.
+// Motion is part of the Presentation contract. Native View Transitions are
+// reserved for synchronous appearance changes; asynchronous navigation and lazy
+// feature surfaces stay snapshot-free so a slow load can never freeze or ghost.
 for(const token of ['--sd-motion-workspace-open-duration','--sd-motion-workspace-close-duration','--sd-motion-workspace-ease','--sd-motion-feedback-duration','--sd-motion-feedback-ease','--sd-motion-anchored-transition']){
   assert.ok(app.includes(token),`presentation manifest exposes ${token}`);
   assert.ok(core.includes(token),`core presentation profile defines ${token}`);
 }
-for(const source of [app,core,glass,insights,fs.readFileSync('source/core/navigation.js','utf8'),fs.readFileSync('source/core/library.js','utf8'),fs.readFileSync('source/external/guide.js','utf8')]){
-  assert.doesNotMatch(source,/startViewTransition|viewTransitionName|::view-transition|sd-secondary-view|sd-main-view/,
-    'native View Transition snapshot machinery is fully absent from the runtime');
+for(const source of [insights,fs.readFileSync('source/core/navigation.js','utf8'),fs.readFileSync('source/core/library.js','utf8'),fs.readFileSync('source/external/guide.js','utf8')]){
+  assert.doesNotMatch(source,/startViewTransition|viewTransitionName|view-transition-name/,
+    'navigation and lazy feature surfaces must not start snapshot transitions');
 }
+assert.equal((app.match(/startViewTransition\(/g)||[]).length,1,'the app starts native View Transitions from one appearance boundary only');
+const appearanceChange=app.slice(app.indexOf('function runAppearanceChange'),app.indexOf('function renderThemeControls'));
+assert.match(appearanceChange,/prefers-reduced-motion: reduce[\s\S]*?typeof document\.startViewTransition!=='function'[\s\S]*?document\.startViewTransition\(\(\)=>\{change\(\);\}\)/,
+  'appearance transitions fall back to an immediate change under reduced motion or without the API, and only run a synchronous update');
+const tabCommit=app.slice(app.indexOf('async function presentTabCommit'),app.indexOf('async function prepareTabDeparture'));
+assert.doesNotMatch(tabCommit,/startViewTransition/,'primary tab presentation never waits behind a snapshot');
 assert.doesNotMatch(app,/motion:\s*PRESENTATION_KERNEL\.motion|PRESENTATION_KERNEL\.motion/,
-  'Presentation no longer exposes a snapshot-transition runtime API');
+  'Presentation does not expose a snapshot-transition runtime API to plugins');
 assert.ok(app.includes('present:presentTabCommit'),'navigation retains one presentation boundary for state/focus arbitration');
 const tabPresentation=app.slice(app.indexOf('async function presentTabCommit'),app.indexOf('async function prepareTabDeparture'));
 assert.match(tabPresentation,/const result=await update\(\);/,

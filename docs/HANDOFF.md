@@ -1,8 +1,8 @@
 # Handoff
 
-Status of the work on this branch (`refactor/background-coordination`, PR #1, ready for review). Read sections 1 and 5 first; sections 2 to 4 are closed summaries.
+Status of the work. It was built on `refactor/background-coordination` and merged into `main` through PR #1; the original release is kept on the branch `SDVB75F10`. Read sections 1 and 5 first; sections 2 to 4 are closed summaries.
 
-**Current state (2026-10-25):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). Drive sync and profiles (section 5) are done: the small items (5.5), sync (5.1), merge rules (5.2), profiles and device names (5.3, 5.3a), the first-start form (5.4), the removal of what section 5 made redundant, and a fresh audit of the backup system with its fixes (5.6). Release B (removing the readers of older backup formats) waits until "Format cleanup" reads ready on every device in use (5.3a). Wordgard is now 0.6.2 and its own module (section 6, done 2026-10-25). The editor toolbar is in its new order, and the notification sounds are made in code (no sound files ship).
+**Current state (2026-10-25):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). Drive sync and profiles (section 5) are done: the small items (5.5), sync (5.1), merge rules (5.2), profiles and device names (5.3, 5.3a), the first-start form (5.4), the removal of what section 5 made redundant, and a fresh audit of the backup system with its fixes (5.6). Release B (removing the readers of older backup formats) waits until "Format cleanup" reads ready on every device in use (5.3a). Wordgard is now 0.6.2 and its own module (section 6, done 2026-10-25). The editor toolbar is in its new order, and the notification sounds are made in code (no sound files ship). The UI overhaul (branch `claude/wizardly-curie-qopkrx`: Dark/Light themes independent of the Director, Glass and Aurora skins, typography roles, heroes, area atmospheres, motion) is merged on top, and every screen added here is styled for it (section 7, "UI overhaul merged").
 
 ---
 
@@ -400,6 +400,14 @@ Measured on 200 MB of attachments:
 - A backup note that takes this device's id (same title, made separately) keeps every link to it: other backup notes' linked-notes bars and `#note=` text links follow it (`alignByTitle`).
 - Moving the old Device Folder backup folder checks every copied file by contents, stored objects included; a same-size object left by an interrupted move is copied again, and the old folder stays until all match.
 
+### UI overhaul merged (2026-10-25)
+- Merged `claude/wizardly-curie-qopkrx` (six commits on `SDVB75F10`) into this work. Theme IDs are now `dark` and `light`; stored `director-dark` / `director-light` still restore, and the next deliberate change writes the new ID. Aurora is a third skin (`external/aurora.js`).
+- Screens added here follow the UI branch's rules: capitals and caps tracking come from the typography roles (Library title, Notes crumbs, profile section titles, Library section switch); the profile initials are capitalised in code, so no rule hard-codes `uppercase`. Main's Glass changes (Recently deleted, Notes rows, gap box, no backup-provider overlay) are carried into Aurora.
+- Text that main drew in the faintest grey (note edit times, empty-note names, the note's meta line, "+ Link note", the backup-model summary) uses the secondary text colour, so it passes WCAG AA contrast in all six skin and theme pairs. axe finds nothing on the Notes, Recently deleted, Data, profile and first-start screens in any of them.
+- Two speed fixes for the UI branch's motion. Insights no longer plays the pane entrance (it made the Insights render about 300 ms slower, over its 1-second budget). The area colours glide on the background layer alone instead of on the whole page (about 100 ms more). Insights is back to main's timing.
+- Tests: `settleMotion` in the browser harness waits for finite animations; clicks and the accessibility and dialog-size checks use it, so they no longer measure a pane or disclosure mid-animation.
+- Still as on main: skipping the first-start form leaves the profile unnamed, so the profile list says "New profile" while the heading shows the student name.
+
 ### Tests and QA
 - `8891f6c`, `eb77264`, `3d91713`, `8338f5b`, `7105b02`: fixtures, suite policy, native visibility in browser tests, de-duplicated harnesses.
 - The commit after `ddb7e1d`: the pwa-update flake had two causes. A read-only secondary window that briefly held control kept waiting for its session state to settle, so it never reloaded onto the new release; it now reloads, and finishing a session-state change re-checks a waiting update at once. A window whose service worker has already moved to the new release retries every 5 seconds instead of every 5 minutes, which also covers the hidden window taking control while the visible one reloads. The test clicked Skip on the first-start form before the form had opened; `skipFirstStart` in the browser harness now waits for it.
@@ -409,7 +417,7 @@ Measured on 200 MB of attachments:
 ## 8. Working notes
 
 - **Testing rhythm (user's rule, 2026-10-10).** Make all the app changes for a piece of work first, then build once and run the suites once. Fix what fails, then rerun only the failing tests. Do not rerun tests after each small edit.
-- **Chromium for browser tests:** `CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome`. On a fresh profile, preset `localStorage` user defaults so the name dialog does not block clicks.
+- **Chromium for browser tests:** `CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome`. On a fresh profile, call `skipFirstStart(page)` so the first-start form does not block clicks.
 - **Rebuild the worker bundles** after changing `portable/`: `node build/wordgard-bundle.mjs --write`.
 - **Fake-clock tests** that hash or encrypt must wait for real background work (`realWorkSettled` in `repository-checkpoint.mjs`).
 - **Shell heredocs mangle backticks.** Use quoted heredocs or small Python edit scripts with exact-match assertions.

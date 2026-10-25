@@ -58,6 +58,7 @@ html[data-typography="glass"]{
   --sd-type-transform-label:none;
   --sd-type-transform-control:none;
   --sd-type-transform-title:none;
+  --sd-type-caps-tracking-scale:0;
   --sd-type-label-family:var(--sd-font-body);
   --sd-type-label-size:var(--sd-text-label);
   --sd-type-label-weight:var(--sd-font-weight-semibold);
@@ -239,19 +240,176 @@ html[data-material="glass"]{
   --sd-material-insights-window-control:rgba(var(--sd-rgb-surface-1),.28);
 }
 
-html[data-theme="director-light"][data-material="glass"]{
-  --sd-glass-surface-alpha:.74;
-  --sd-glass-surface-soft-alpha:.56;
-  --sd-glass-panel-alpha:.68;
-  --sd-glass-field-alpha:.72;
-  --sd-glass-floating-alpha:.84;
-  --sd-glass-navigation-alpha:.78;
-  --sd-glass-readable-alpha:.88;
+/* GLASS PALETTES ---------------------------------------------------------
+   Glass is a different room, not Director with rounded corners. It keeps the
+   host's semantic roles (accent, info, success, warning, danger, execute,
+   pacer) but gives them its own calm, luminous values, and puts a soft
+   aurora behind the frosted surfaces so the material has something to
+   refract. Director's palettes remain untouched. */
+html[data-presentation="glass"][data-theme="dark"]{
+  --sd-meta-theme-color:#080a14;
+  --sd-color-canvas:#080a14;
+  --sd-color-surface-1:#121422;
+  --sd-color-surface-2:#1a1d2e;
+  --sd-color-border-1:#1f2236;
+  --sd-color-border-2:#2a2e47;
+  --sd-color-border-3:#383d5a;
+  --sd-color-accent-primary:#a5b4fc;
+  --sd-color-accent-secondary:#ff9b7a;
+  --sd-color-info:#7dd3fc;
+  --sd-color-text-primary:#eef0fb;
+  --sd-color-text-secondary:#a3a8c3;
+  --sd-color-text-tertiary:#d9dcef;
+  --sd-color-text-muted:#5d6282;
+  --sd-color-text-secondary-strong:#bfc3da;
+  --sd-color-text-accessible-muted:#b6bbd3;
+  --sd-color-danger:#fb7185;
+  --sd-color-warning:#fbbf24;
+  --sd-color-success:#6ee7b7;
+  --sd-color-text-inverse:#0b0d1a;
+  --sd-rgb-canvas:8,10,20;
+  --sd-rgb-surface-1:18,20,34;
+  --sd-rgb-surface-2:26,29,46;
+  --sd-rgb-surface-deep:12,14,26;
+  --sd-rgb-shadow:2,3,12;
+  --sd-rgb-accent-primary:165,180,252;
+  --sd-rgb-accent-secondary:255,155,122;
+  --sd-rgb-info:125,211,252;
+  --sd-rgb-danger:251,113,133;
+  --sd-rgb-warning:251,191,36;
+  --sd-rgb-success:110,231,183;
+  --sd-rgb-shell-brand-deep:58,48,120;
+  --sd-rgb-shell-deep:12,14,28;
+  --sd-rgb-text-placeholder:120,126,160;
+  --sd-rgb-field-deep:10,12,24;
+  --sd-rgb-border-muted:52,57,88;
+  --sd-rgb-owner-deep:10,12,24;
+  --sd-color-shell-deep-1:#0c0e1a;
+  --sd-color-shell-deep-2:#0a0c16;
+  --sd-color-execute-lime:#c7d0ff;
+  --sd-color-execute-blue:#93c5fd;
+  --sd-color-execute-amber:#fcd34d;
+  --sd-color-execute-text-strong:#e3e6f6;
+  --sd-color-execute-text-soft:#9da3c0;
+  --sd-color-execute-danger-text:#fda4af;
+  --sd-color-execute-session-title:#ffb59c;
+  --sd-rgb-execute-lime:199,208,255;
+  --sd-rgb-execute-blue:147,197,253;
+  --sd-rgb-execute-amber:252,211,77;
+  --sd-rgb-execute-danger:251,113,133;
+  --sd-color-pacer-accent:#c4b5fd;
+  --sd-color-pacer-accent-strong:#d4c8ff;
+  --sd-color-pacer-accent-muted:#b3a5ef;
+  --sd-rgb-pacer-primary:167,139,250;
+  --sd-rgb-pacer-accent:196,181,253;
+  --sd-color-fitness:#6ee7b7;
+  --sd-color-brain:#7dd3fc;
+  --sd-rgb-fitness:110,231,183;
+  --sd-rgb-brain:125,211,252;
+  --sd-rgb-insights-nav-1:16,18,32;
+  --sd-rgb-insights-nav-2:20,22,38;
+  --sd-rgb-chart-divider:14,16,28;
+  --sd-chart-series-03:#ffb38a;
+  --sd-chart-series-04:#c4b5fd;
+}
+
+html[data-presentation="glass"][data-theme="light"]{
+  --sd-meta-theme-color:#eceef6;
+  --sd-color-canvas:#eceef6;
+  --sd-color-surface-1:#ffffff;
+  --sd-color-surface-2:#f3f4fa;
+  --sd-color-border-1:#e0e3ee;
+  --sd-color-border-2:#cdd1e2;
+  --sd-color-border-3:#b4b9cf;
+  --sd-color-accent-primary:#4f46e5;
+  --sd-color-accent-secondary:#b23a0b;
+  --sd-color-info:#0369a1;
+  --sd-color-text-primary:#141629;
+  --sd-color-text-secondary:#555b78;
+  --sd-color-text-tertiary:#2d3150;
+  --sd-color-text-muted:#8f94ad;
+  --sd-color-text-secondary-strong:#3d4262;
+  --sd-color-text-accessible-muted:#3d4262;
+  --sd-color-danger:#c81e1e;
+  --sd-color-warning:#8f5600;
+  --sd-color-success:#12703a;
+  --sd-color-text-inverse:#ffffff;
+  --sd-rgb-canvas:236,238,246;
+  --sd-rgb-surface-1:255,255,255;
+  --sd-rgb-surface-2:243,244,250;
+  --sd-rgb-surface-deep:228,231,242;
+  --sd-rgb-neutral-overlay:20,22,48;
+  --sd-rgb-shadow:40,44,90;
+  --sd-rgb-accent-primary:79,70,229;
+  --sd-rgb-accent-secondary:178,58,11;
+  --sd-rgb-info:3,105,161;
+  --sd-rgb-danger:200,30,30;
+  --sd-rgb-warning:143,86,0;
+  --sd-rgb-success:18,112,58;
+  --sd-rgb-shell-brand-deep:79,70,229;
+  --sd-rgb-shell-deep:255,255,255;
+  --sd-rgb-text-placeholder:118,123,150;
+  --sd-rgb-field-deep:255,255,255;
+  --sd-rgb-border-muted:190,195,215;
+  --sd-color-shell-deep-1:#f6f7fc;
+  --sd-color-shell-deep-2:#eff1f8;
+  --sd-color-execute-lime:#4f46e5;
+  --sd-color-execute-blue:#2b5f9e;
+  --sd-color-execute-amber:#8f5600;
+  --sd-color-execute-text-strong:#1d2038;
+  --sd-color-execute-text-soft:#5a6080;
+  --sd-color-execute-danger-text:#b4232c;
+  --sd-color-execute-session-title:#a3340a;
+  --sd-rgb-execute-lime:79,70,229;
+  --sd-rgb-execute-blue:43,95,158;
+  --sd-rgb-execute-amber:143,86,0;
+  --sd-rgb-execute-danger:200,30,30;
+  --sd-color-pacer-accent:#6d28d9;
+  --sd-color-pacer-accent-strong:#5b21b6;
+  --sd-color-pacer-accent-muted:#6b4fb0;
+  --sd-rgb-pacer-primary:109,40,217;
+  --sd-rgb-pacer-accent:109,40,217;
+  --sd-color-fitness:#047857;
+  --sd-color-brain:#0369a1;
+  --sd-rgb-fitness:4,120,87;
+  --sd-rgb-brain:3,105,161;
+  --sd-rgb-insights-nav-1:255,255,255;
+  --sd-rgb-insights-nav-2:246,247,252;
+  --sd-rgb-chart-divider:216,220,234;
+  --sd-surface-accent-panel:rgba(var(--sd-rgb-accent-primary),.022);
+  --sd-state-accent-bg-soft:rgba(var(--sd-rgb-accent-primary),.018);
+}
+
+html[data-theme="light"][data-material="glass"]{
+  --sd-glass-surface-alpha:.62;
+  --sd-glass-surface-soft-alpha:.46;
+  --sd-glass-panel-alpha:.58;
+  --sd-glass-field-alpha:.78;
+  --sd-glass-floating-alpha:.82;
+  --sd-glass-navigation-alpha:.56;
+  --sd-glass-readable-alpha:.90;
   --sd-glass-sticky-alpha:.92;
-  --sd-glass-specular:rgba(var(--sd-rgb-on-strong),.22);
-  --sd-glass-specular-soft:rgba(var(--sd-rgb-on-strong),.12);
-  --sd-glass-edge:rgba(var(--sd-rgb-shadow),.30);
-  --sd-glass-control-edge:rgba(var(--sd-rgb-shadow),.46);
+  --sd-glass-specular:rgba(var(--sd-rgb-on-strong),.55);
+  --sd-glass-specular-soft:rgba(var(--sd-rgb-on-strong),.30);
+  --sd-glass-edge:rgba(var(--sd-rgb-shadow),.13);
+  --sd-glass-control-edge:rgba(var(--sd-rgb-shadow),.30);
+}
+
+/* The aurora sits on its own fixed layer so it never scrolls, repaints or
+   multiplies; every frosted surface samples the same light field. */
+html[data-material="glass"]{background:var(--sd-color-canvas)}
+html[data-material="glass"] body{background:transparent}
+html[data-material="glass"] body::before{
+  content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:var(--sd-glass-aurora,var(--sd-color-canvas));
+}
+html[data-material="glass"]{
+  --sd-material-document:transparent;
+  --sd-material-navigation:
+    linear-gradient(180deg,rgba(var(--sd-rgb-accent-primary),.08),transparent 220px),
+    linear-gradient(145deg,var(--sd-glass-specular-soft),transparent 46%),
+    rgba(var(--sd-rgb-surface-1),var(--sd-glass-navigation-alpha));
+  --sd-material-shell-header:transparent;
 }
 
 html[data-depth="glass"]{
@@ -325,7 +483,216 @@ html[data-presentation="glass"] #pane-execute .execute-note-desk .pnote-title{
 html[data-presentation="glass"] .next-strip .nxt,
 html[data-presentation="glass"] .practice-inline-btn,
 html[data-presentation="glass"] .practice-variable-examples span{
-  font-family:var(--sd-font-body);text-transform:none;letter-spacing:.01em;
+  font-family:var(--sd-font-body);letter-spacing:.01em;
+}
+
+/* GLASS VOICE ------------------------------------------------------------
+   Director speaks in condensed capitals and terminal mono. Glass speaks in
+   sentence case with proportional, tabular figures: the same information,
+   read as a calm document rather than a heads-up display. */
+html[data-typography="glass"]{
+  --sd-font-mono:"Barlow",sans-serif;
+  --sd-type-mono-tracking:.01em;
+  font-variant-numeric:tabular-nums;
+}
+html[data-presentation="glass"] :is(.np-name,.si-name,.review-date,.rcard-name,.library-title,.execute-overlay-title,.gap-title,.journal-date-wrap,.library-diary-month,.timer-focus-line,.managed-version-history-kicker){
+  letter-spacing:-.012em;
+}
+html[data-presentation="glass"] :is(.np-name,.review-date,.library-title,.execute-overlay-title,.gap-title){
+  font-family:var(--sd-font-display);font-weight:var(--sd-font-weight-semibold);letter-spacing:-.022em;
+}
+html[data-presentation="glass"] .primary-controls .btn{letter-spacing:var(--sd-type-control-tracking)}
+html[data-presentation="glass"] .si-name{font-family:var(--sd-font-body);font-weight:var(--sd-font-weight-semibold)}
+html[data-presentation="glass"] :is(.ui-disclosure>summary,.plan-composer>summary){
+  letter-spacing:.005em;font-family:var(--sd-font-body);font-weight:var(--sd-font-weight-semibold);
+}
+html[data-presentation="glass"] :is(.ui-disclosure,.plan-composer,.review-collapse,.backup-advanced-disclosure)>summary::after,
+html[data-presentation="glass"] .rt-actions-collapsed .rt-actions-summary::after{
+  content:"";width:8px;height:8px;padding:0;margin:0 6px 4px;border:0;
+  border-right:1.6px solid currentColor;border-bottom:1.6px solid currentColor;border-radius:1px;
+  color:var(--sd-color-text-secondary);transform:rotate(45deg);
+  transition:transform var(--sd-motion-duration-medium) var(--sd-motion-ease-standard);
+}
+html[data-presentation="glass"] :is(.ui-disclosure,.plan-composer,.review-collapse,.backup-advanced-disclosure)[open]>summary::after,
+html[data-presentation="glass"] .rt-actions-collapsed[open] .rt-actions-summary::after{transform:translateY(4px) rotate(-135deg)}
+html[data-presentation="glass"] .review-collapse:not([open])>summary::after{content:""}
+
+/* The clock and countdown lose their HUD glow and become quiet, luminous
+   numerals; state colour still arrives through the same classes. */
+html[data-presentation="glass"] #clock{
+  font-family:var(--sd-font-display);font-weight:var(--sd-font-weight-semibold);letter-spacing:.01em;
+  color:var(--sd-color-text-primary);
+}
+html[data-presentation="glass"] #cd{
+  font-family:var(--sd-font-display);font-weight:var(--sd-font-weight-semibold);letter-spacing:-.035em;
+  background:linear-gradient(180deg,var(--sd-color-text-primary) 18%,var(--sd-color-execute-lime) 100%);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;text-shadow:none;
+}
+html[data-presentation="glass"] #cd.warn{background-image:linear-gradient(180deg,var(--sd-color-text-primary) 10%,var(--sd-color-warning) 100%)}
+html[data-presentation="glass"] #cd.urg{background-image:linear-gradient(180deg,var(--sd-color-text-primary) 10%,var(--sd-color-danger) 100%)}
+
+/* Glass reveals a new appearance as a feathered bloom from the chosen control
+   (the animated radius is registered in core.css). */
+html[data-presentation="glass"][data-sd-appearance-reveal]::view-transition-new(root){
+  -webkit-mask-image:radial-gradient(circle at var(--sd-reveal-x,50%) var(--sd-reveal-y,50%),#000 calc(var(--sd-reveal-progress) - 140px),transparent var(--sd-reveal-progress));
+  mask-image:radial-gradient(circle at var(--sd-reveal-x,50%) var(--sd-reveal-y,50%),#000 calc(var(--sd-reveal-progress) - 140px),transparent var(--sd-reveal-progress));
+}
+
+/* GLASS ATMOSPHERE --------------------------------------------------------
+   Each area of the app has its own light: clear sky for Plan, deep iris for
+   Execute, dusk for Review, forest for Library, cyan for Insights. The four
+   aurora colours are registered so navigation glides between moods instead
+   of cutting; a fine grain keeps the gradients from banding. They live on
+   the background layer alone, so the glide restyles that one layer, not the
+   whole page (an inherited glide slowed Insights by about 100 ms). */
+@property --sd-aurora-a{syntax:"<color>";inherits:false;initial-value:transparent}
+@property --sd-aurora-b{syntax:"<color>";inherits:false;initial-value:transparent}
+@property --sd-aurora-c{syntax:"<color>";inherits:false;initial-value:transparent}
+@property --sd-aurora-d{syntax:"<color>";inherits:false;initial-value:transparent}
+html[data-material="glass"] body::before{
+  transition:--sd-aurora-a 1.1s ease,--sd-aurora-b 1.1s ease,--sd-aurora-c 1.1s ease,--sd-aurora-d 1.1s ease;
+  --sd-glass-aurora:
+    radial-gradient(62vmax 48vmax at 4% -8%,var(--sd-aurora-a),transparent 62%),
+    radial-gradient(48vmax 42vmax at 102% 6%,var(--sd-aurora-b),transparent 60%),
+    radial-gradient(56vmax 46vmax at 74% 108%,var(--sd-aurora-c),transparent 62%),
+    radial-gradient(40vmax 36vmax at 16% 96%,var(--sd-aurora-d),transparent 60%),
+    var(--sd-color-canvas);
+}
+html[data-material="glass"][data-theme="dark"] body::before{--sd-aurora-a:rgba(56,189,248,.22);--sd-aurora-b:rgba(124,92,255,.20);--sd-aurora-c:rgba(45,212,191,.12);--sd-aurora-d:rgba(99,102,241,.10)}
+html[data-material="glass"][data-theme="dark"][data-sd-area="execute"] body::before{--sd-aurora-a:rgba(124,92,255,.32);--sd-aurora-b:rgba(56,189,248,.14);--sd-aurora-c:rgba(236,72,153,.13);--sd-aurora-d:rgba(79,70,229,.14)}
+html[data-material="glass"][data-theme="dark"][data-sd-area="review"] body::before{--sd-aurora-a:rgba(251,146,60,.20);--sd-aurora-b:rgba(244,114,182,.19);--sd-aurora-c:rgba(124,92,255,.14);--sd-aurora-d:rgba(251,191,36,.08)}
+html[data-material="glass"][data-theme="dark"][data-sd-area="library"] body::before{--sd-aurora-a:rgba(16,185,129,.19);--sd-aurora-b:rgba(45,212,191,.15);--sd-aurora-c:rgba(56,189,248,.12);--sd-aurora-d:rgba(132,204,22,.07)}
+html[data-material="glass"][data-theme="dark"][data-sd-area="insights"] body::before{--sd-aurora-a:rgba(34,211,238,.20);--sd-aurora-b:rgba(99,102,241,.21);--sd-aurora-c:rgba(167,139,250,.12);--sd-aurora-d:rgba(14,165,233,.10)}
+html[data-material="glass"][data-theme="dark"][data-sd-area="guide"] body::before{--sd-aurora-a:rgba(167,139,250,.22);--sd-aurora-b:rgba(244,114,182,.13);--sd-aurora-c:rgba(56,189,248,.10);--sd-aurora-d:rgba(124,92,255,.08)}
+html[data-material="glass"][data-theme="light"] body::before{--sd-aurora-a:rgba(125,211,252,.46);--sd-aurora-b:rgba(196,181,253,.40);--sd-aurora-c:rgba(153,246,228,.36);--sd-aurora-d:rgba(191,219,254,.40)}
+html[data-material="glass"][data-theme="light"][data-sd-area="execute"] body::before{--sd-aurora-a:rgba(167,139,250,.44);--sd-aurora-b:rgba(255,183,150,.42);--sd-aurora-c:rgba(125,211,252,.36);--sd-aurora-d:rgba(244,170,214,.28)}
+html[data-material="glass"][data-theme="light"][data-sd-area="review"] body::before{--sd-aurora-a:rgba(253,186,116,.46);--sd-aurora-b:rgba(251,182,206,.44);--sd-aurora-c:rgba(196,181,253,.32);--sd-aurora-d:rgba(254,215,170,.36)}
+html[data-material="glass"][data-theme="light"][data-sd-area="library"] body::before{--sd-aurora-a:rgba(134,239,172,.40);--sd-aurora-b:rgba(153,246,228,.42);--sd-aurora-c:rgba(186,230,253,.36);--sd-aurora-d:rgba(217,249,157,.30)}
+html[data-material="glass"][data-theme="light"][data-sd-area="insights"] body::before{--sd-aurora-a:rgba(165,243,252,.44);--sd-aurora-b:rgba(165,180,252,.42);--sd-aurora-c:rgba(196,181,253,.32);--sd-aurora-d:rgba(186,230,253,.36)}
+html[data-material="glass"][data-theme="light"][data-sd-area="guide"] body::before{--sd-aurora-a:rgba(221,214,254,.46);--sd-aurora-b:rgba(251,207,232,.38);--sd-aurora-c:rgba(186,230,253,.34);--sd-aurora-d:rgba(199,210,254,.32)}
+html[data-material="glass"] body::after{
+  content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:var(--sd-glass-grain-opacity,.05);
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+html[data-material="glass"][data-theme="light"]{--sd-glass-grain-opacity:.07}
+
+/* GLASS · EXECUTE LAYERS --------------------------------------------------
+   The countdown is the one object that should feel lit. In Dark it is a
+   frosted slab with a luminous gradient rim; in Light it becomes a vivid,
+   saturated hero card (a local colour island, so its children keep reading
+   semantic tokens). Notes sit on a calmer, denser writing sheet. */
+html[data-presentation="glass"][data-theme="dark"] #pane-execute .cd-card{
+  border:1px solid transparent;
+  background:
+    radial-gradient(90% 120% at 12% -12%,rgba(124,92,255,.36),transparent 60%) padding-box,
+    radial-gradient(70% 90% at 104% 112%,rgba(56,189,248,.15),transparent 60%) padding-box,
+    linear-gradient(rgba(18,20,34,.58),rgba(18,20,34,.58)) padding-box,
+    linear-gradient(140deg,rgba(199,208,255,.95),rgba(125,211,252,.40) 34%,rgba(255,255,255,.06) 60%,rgba(244,114,182,.70)) border-box;
+  box-shadow:0 0 0 1px rgba(165,180,252,.08),0 40px 100px -34px rgba(124,92,255,.70),inset 0 1px 0 rgba(255,255,255,.14);
+}
+html[data-presentation="glass"][data-theme="dark"] #pane-execute .cd-card.paused{
+  background:
+    radial-gradient(90% 120% at 12% -12%,rgba(251,191,36,.20),transparent 60%) padding-box,
+    linear-gradient(rgba(18,20,34,.62),rgba(18,20,34,.62)) padding-box,
+    linear-gradient(140deg,rgba(252,211,77,.65),rgba(251,113,133,.25) 45%,rgba(255,255,255,.05)) border-box;
+  box-shadow:0 34px 90px -40px rgba(251,191,36,.35),inset 0 1px 0 rgba(255,255,255,.10);
+}
+html[data-presentation="glass"][data-theme="dark"] #pane-execute .cd-card #cd{filter:drop-shadow(0 0 36px rgba(165,180,252,.32))}
+html[data-presentation="glass"] #pane-execute .cd-card::before{opacity:0}
+
+html[data-presentation="glass"][data-theme="light"] :is(#pane-execute .cd-card,#pane-review .review-hero){
+  color-scheme:dark;
+  --sd-color-text-primary:#ffffff;--sd-color-text-secondary:#e6e3ff;--sd-color-text-tertiary:#ffffff;--sd-color-text-muted:#cfc9fb;
+  --sd-color-text-secondary-strong:#f3f1ff;--sd-color-text-accessible-muted:#f0eeff;
+  --sd-color-accent-primary:#ffffff;--sd-rgb-accent-primary:255,255,255;--sd-color-accent-secondary:#ffd0bd;--sd-rgb-accent-secondary:255,208,189;
+  --sd-color-info:#d6f1ff;--sd-rgb-info:214,241,255;
+  --sd-color-warning:#ffe08a;--sd-rgb-warning:255,224,138;--sd-color-danger:#ffd0d5;--sd-rgb-danger:255,208,213;--sd-color-success:#c3f9dc;--sd-rgb-success:195,249,220;
+  --sd-rgb-neutral-overlay:255,255,255;--sd-rgb-on-strong:255,255,255;--sd-rgb-surface-1:60,48,190;--sd-rgb-canvas:49,40,160;
+  --sd-color-border-1:rgba(255,255,255,.18);--sd-color-border-2:rgba(255,255,255,.24);--sd-color-border-3:rgba(255,255,255,.34);
+  --sd-line-neutral-soft:rgba(255,255,255,.16);--sd-line-neutral-default:rgba(255,255,255,.18);--sd-line-neutral-mid:rgba(255,255,255,.22);--sd-line-neutral-strong:rgba(255,255,255,.28);
+  --sd-color-execute-lime:#ddd8ff;--sd-rgb-execute-lime:221,216,255;--sd-color-execute-amber:#ffe08a;--sd-rgb-execute-amber:255,224,138;
+  --execute-lime:#ffffff;--execute-lime-line:rgba(255,255,255,.30);--execute-amber:#ffe08a;--execute-amber-line:rgba(255,224,138,.40);--execute-blue:#d6f1ff;
+  --execute-text-strong:#ffffff;--execute-text-soft:#e6e3ff;--execute-danger-text:#ffd0d5;
+  color:#ffffff;
+}
+html[data-presentation="glass"][data-theme="light"] #pane-execute .cd-card{
+border-color:rgba(255,255,255,.22);
+  background:
+    radial-gradient(120% 140% at -6% -10%,rgba(139,123,255,.95),transparent 55%),
+    radial-gradient(80% 100% at 104% 112%,rgba(162,28,175,.78),transparent 58%),
+    radial-gradient(60% 70% at 92% -8%,rgba(14,165,233,.42),transparent 60%),
+    linear-gradient(135deg,#4f46e5 0%,#5b3fd9 55%,#6d28d9 100%);
+  box-shadow:0 34px 70px -30px rgba(79,70,229,.62),0 2px 0 rgba(255,255,255,.4) inset,inset 0 0 0 1px rgba(255,255,255,.08);
+}
+html[data-presentation="glass"][data-theme="light"] #pane-execute .cd-card.paused{
+  background:
+    radial-gradient(120% 140% at -6% -10%,rgba(234,88,12,.85),transparent 55%),
+    radial-gradient(80% 100% at 104% 112%,rgba(159,18,57,.80),transparent 58%),
+    linear-gradient(135deg,#b45309 0%,#9a3412 55%,#9f1239 100%);
+  box-shadow:0 34px 70px -30px rgba(180,83,9,.55),0 2px 0 rgba(255,255,255,.35) inset;
+}
+html[data-presentation="glass"][data-theme="light"] #pane-execute .cd-card #cd{filter:drop-shadow(0 10px 30px rgba(30,12,120,.40))}
+html[data-presentation="glass"][data-theme="light"] #pane-execute .cd-card .execute-state-overlay{
+  background:linear-gradient(135deg,rgba(79,70,229,.94),rgba(109,40,217,.94));
+}
+
+/* Review's summary is the dusk-coloured hero of its area. */
+html[data-presentation="glass"][data-theme="light"] #pane-review .review-hero{
+  --panel-line:rgba(255,255,255,.24);
+  --panel-bg:radial-gradient(120% 150% at -5% -20%,rgba(234,88,12,.92),transparent 55%),radial-gradient(90% 120% at 105% 115%,rgba(109,40,217,.85),transparent 60%),linear-gradient(120deg,#b4410f 0%,#be185d 58%,#7e22ce 100%);
+  --panel-shadow:0 34px 70px -32px rgba(190,24,93,.55),inset 0 2px 0 rgba(255,255,255,.35);
+}
+html[data-presentation="glass"][data-theme="dark"] #pane-review .review-hero{
+  --panel-line:transparent;
+  --panel-bg:radial-gradient(90% 140% at 0% -20%,rgba(251,146,60,.22),transparent 58%) padding-box,radial-gradient(70% 100% at 104% 110%,rgba(244,114,182,.18),transparent 60%) padding-box,linear-gradient(rgba(18,20,34,.58),rgba(18,20,34,.58)) padding-box,linear-gradient(130deg,rgba(253,186,116,.85),rgba(244,114,182,.45) 40%,rgba(255,255,255,.05) 70%,rgba(167,139,250,.55)) border-box;
+  --panel-shadow:0 40px 90px -40px rgba(244,114,182,.5),inset 0 1px 0 rgba(255,255,255,.12);
+}
+html[data-presentation="glass"] #pane-review .review-hero .rstat{--card-bg:rgba(255,255,255,.10);--card-line:rgba(255,255,255,.20);--card-shadow:inset 0 1px 0 rgba(255,255,255,.14)}
+html[data-presentation="glass"][data-theme="dark"] #pane-review .review-hero .rstat{--card-bg:rgba(255,255,255,.04);--card-line:rgba(255,255,255,.10)}
+
+html[data-presentation="glass"][data-theme="dark"] #pane-execute .execute-note-desk{
+  --panel-bg:linear-gradient(180deg,rgba(255,255,255,.05),transparent 34%),rgba(24,26,44,.78);
+}
+html[data-presentation="glass"][data-theme="dark"] #pane-execute .execute-note-desk .sd-rte{background:rgba(9,11,22,.42)}
+html[data-presentation="glass"][data-theme="light"] #pane-execute .execute-note-desk{
+  --panel-bg:linear-gradient(180deg,#ffffff,rgba(255,255,255,.90));
+  box-shadow:0 26px 50px -30px rgba(var(--sd-rgb-shadow),.34),inset 0 1px 0 #ffffff;
+}
+html[data-presentation="glass"][data-theme="light"] #pane-execute .execute-note-desk .sd-rte{background:#ffffff}
+
+html[data-presentation="glass"] .timer-focus-line{font-size:var(--sd-type-role-caption-size);margin-top:6px}
+
+/* Plan: the current block carries the lit rim. Library: a forest-toned hero. */
+html[data-presentation="glass"][data-theme="dark"] #pane-plan .si.active .si-card{
+  --card-line:transparent;
+  --card-bg:linear-gradient(100deg,rgba(124,92,255,.20),rgba(56,189,248,.06) 60%,transparent) padding-box,linear-gradient(rgba(18,20,34,.62),rgba(18,20,34,.62)) padding-box,linear-gradient(120deg,rgba(199,208,255,.9),rgba(125,211,252,.35) 45%,rgba(244,114,182,.5)) border-box;
+  box-shadow:0 22px 50px -26px rgba(124,92,255,.6);
+}
+html[data-presentation="glass"][data-theme="light"] #pane-plan .si.active .si-card{
+  --card-line:transparent;
+  --card-bg:linear-gradient(100deg,rgba(238,236,255,.98),rgba(255,255,255,.92) 70%) padding-box,linear-gradient(120deg,#6366f1,#a855f7 55%,#0ea5e9) border-box;
+  box-shadow:0 20px 40px -24px rgba(79,70,229,.55);
+}
+html[data-presentation="glass"][data-theme="light"] #pane-library .library-hero{
+  --panel-bg:radial-gradient(90% 160% at 0% -30%,rgba(16,185,129,.20),transparent 60%),radial-gradient(70% 120% at 104% 110%,rgba(14,165,233,.16),transparent 60%),rgba(255,255,255,.72);
+}
+html[data-presentation="glass"][data-theme="dark"] #pane-library .library-hero{
+  --panel-line:transparent;
+  --panel-bg:radial-gradient(90% 160% at 0% -30%,rgba(16,185,129,.20),transparent 60%) padding-box,linear-gradient(rgba(18,20,34,.58),rgba(18,20,34,.58)) padding-box,linear-gradient(130deg,rgba(110,231,183,.75),rgba(45,212,191,.30) 40%,rgba(255,255,255,.05) 70%,rgba(125,211,252,.45)) border-box;
+}
+html[data-presentation="glass"] #pane-library .library-hero::before{opacity:0}
+
+/* One luminous primary action and a lit icon for where you are. */
+html[data-presentation="glass"] .execute-command-rail .btn-done{
+  --btn-bg:linear-gradient(135deg,var(--sd-color-accent-primary),var(--sd-color-pacer-accent));
+  --btn-border:transparent;--btn-color:var(--sd-color-text-inverse);
+  --btn-hover-bg:linear-gradient(135deg,var(--sd-color-pacer-accent),var(--sd-color-accent-primary));
+  --btn-hover-border:transparent;--btn-hover-color:var(--sd-color-text-inverse);
+  box-shadow:0 12px 26px -14px rgba(var(--sd-rgb-accent-primary),.9);
+}
+html[data-presentation="glass"] .sb-nav .nav-item.on .nav-icon{
+  background:linear-gradient(135deg,var(--sd-color-accent-primary),var(--sd-color-pacer-accent));
+  color:var(--sd-color-text-inverse);box-shadow:0 8px 18px -8px rgba(var(--sd-rgb-accent-primary),.9);
 }
 
 /* Subtle Glass-specific rhythm and chart finish; no continuous animation. */
@@ -334,6 +701,21 @@ html[data-presentation="glass"]{
   --sd-motion-duration-fast:.17s;
   --sd-motion-duration-standard:.18s;
   --sd-motion-ease-standard:cubic-bezier(.2,.75,.25,1);
+  --sd-motion-surface-duration:.3s;
+  --sd-motion-surface-ease:cubic-bezier(.16,1,.3,1);
+  --sd-motion-surface-start:translate3d(0,10px,0) scale(.97);
+  --sd-motion-disclosure-duration:.34s;
+  --sd-motion-disclosure-ease:cubic-bezier(.16,1,.3,1);
+  --sd-motion-moment-duration:1.1s;
+  --sd-motion-press-transform:scale(.975);
+  --sd-motion-pane-enter-name:sd-pane-enter-float;
+  --sd-motion-pane-enter-duration:.46s;
+  --sd-motion-pane-enter-ease:cubic-bezier(.16,1,.3,1);
+  --sd-motion-pane-enter-stagger:42ms;
+  --sd-motion-appearance-duration:.42s;
+  --sd-motion-reveal-name:sd-appearance-bloom;
+  --sd-motion-reveal-duration:.78s;
+  --sd-motion-reveal-ease:cubic-bezier(.33,.0,.15,1);
   --sd-chart-grid-color:rgba(var(--sd-rgb-neutral-overlay),.095);
   --sd-chart-line-width:1.5;
   --sd-chart-line-strong-width:2.7;
@@ -414,12 +796,12 @@ html[data-presentation="glass"] .sb-head::before,
 html[data-presentation="glass"] .sb-head::after{display:none}
 html[data-presentation="glass"] .sb-eyebrow{margin-bottom:5px;opacity:.72}
 html[data-presentation="glass"] .sb-name{
-  font-family:var(--sd-font-body);font-weight:600;text-transform:none;letter-spacing:-.025em;line-height:1.08;text-shadow:none;
+  font-family:var(--sd-font-body);font-weight:600;letter-spacing:-.025em;line-height:1.08;text-shadow:none;
 }
 html[data-presentation="glass"] .sb-race{margin-top:8px;opacity:.78}
-html[data-theme="director-light"][data-presentation="glass"] .sb-eyebrow,
-html[data-theme="director-light"][data-presentation="glass"] .sb-race{color:var(--sd-color-text-secondary-strong);opacity:1}
-html[data-theme="director-light"][data-presentation="glass"] .sb-name{color:var(--sd-color-text-primary)}
+html[data-theme="light"][data-presentation="glass"] .sb-eyebrow,
+html[data-theme="light"][data-presentation="glass"] .sb-race{color:var(--sd-color-text-secondary-strong);opacity:1}
+html[data-theme="light"][data-presentation="glass"] .sb-name{color:var(--sd-color-text-primary)}
 html[data-presentation="glass"] .sb-clock{
   margin:0 12px;padding:10px 12px;border:1px solid var(--sd-glass-edge);border-radius:18px;
   background:rgba(var(--sd-rgb-surface-1),.22);box-shadow:inset 0 1px 0 rgba(var(--sd-rgb-on-strong),.055);
@@ -631,7 +1013,7 @@ html[data-material="glass"] .display-tools-trigger,
 html[data-material="glass"] .theme-btn,
 html[data-material="glass"] .presentation-btn,
 html[data-material="glass"] .type-btn{background:var(--sd-material-control)}
-html[data-material="glass"] .gap-box,
+html[data-material="glass"] .gap-box{--panel-bg:var(--sd-material-floating)}
 html[data-material="glass"] .practice-unit-row.head{background:var(--sd-material-inset)}
 
 html[data-material="glass"] .sd-rte{background:var(--sd-material-canvas);border-color:var(--sd-glass-edge)}
@@ -642,7 +1024,7 @@ html[data-presentation="glass"] .library-notes-editor-empty,
 html[data-presentation="glass"] .library-note-read.empty,
 html[data-presentation="glass"] .library-diary-read.empty{color:var(--sd-color-text-secondary)}
 html[data-presentation="glass"] .library-note-nav-item.has-note{color:var(--sd-color-text-primary)}
-html[data-presentation="glass"] .library-note-nav-item.empty-note{color:var(--sd-color-text-muted)}
+html[data-presentation="glass"] .library-note-nav-item.empty-note{color:var(--sd-color-text-secondary)}
 html[data-material="glass"] #pane-execute .nameplate{
   background:linear-gradient(145deg,var(--sd-glass-specular-soft),transparent 42%),linear-gradient(135deg,var(--sd-surface-neutral-wash),rgba(var(--sd-rgb-execute-lime),.018)),rgba(var(--sd-rgb-surface-1),.42);
   border-radius:var(--sd-shape-nameplate-radius);

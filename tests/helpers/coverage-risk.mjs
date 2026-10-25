@@ -36,6 +36,7 @@ const NON_FAST_COVERAGE_OWNERS=Object.freeze([
   Object.freeze({file:'source/external/export-worker.js',owner:'integration-worker',reason:'Executed inside a worker_threads child by the export integration test; parent Inspector coverage does not attach to child workers.'}),
   Object.freeze({file:'source/external/image-worker.js',owner:'browser/worker',reason:'Image worker behavior is owned by browser image workflows and release build checks.'}),
   Object.freeze({file:'source/external/glass.js',owner:'browser',reason:'Visual UI layer.'}),
+  Object.freeze({file:'source/external/aurora.js',owner:'browser',reason:'Visual UI layer.'}),
   Object.freeze({file:'source/external/guide.js',owner:'browser',reason:'Guide UI layer.'}),
   Object.freeze({file:'source/external/insights.js',owner:'browser/release',reason:'Insights presentation, worker transport, and interaction layer; the extracted computation engine is covered directly by the fast suite.'})
 ]);

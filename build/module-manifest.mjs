@@ -124,9 +124,10 @@ export const runtimeDependencies=Object.freeze({
   startup:Object.freeze(['library','backup','pomodoro','plan','repositories','review','session-lifecycle','timer-engine','timer-state'])
 });
 
-export const trustedExternalModuleIds=Object.freeze(['glass','guide','insights','drive','rich-text','search-worker','image-worker','attachment-worker','export-worker']);
+export const trustedExternalModuleIds=Object.freeze(['glass','aurora','guide','insights','drive','rich-text','search-worker','image-worker','attachment-worker','export-worker']);
 export const externalModules=Object.freeze([
   Object.freeze({id:'glass',source:'external/glass.js',stem:'sd.glass',execution:'startup'}),
+  Object.freeze({id:'aurora',source:'external/aurora.js',stem:'sd.aurora',execution:'startup'}),
   Object.freeze({id:'guide',source:'external/guide.js',stem:'sd.guide',execution:'on-demand'}),
   Object.freeze({id:'insights',sources:Object.freeze(['external/insights-model.js','external/insights.js']),stem:'sd.insights',execution:'on-demand'}),
   Object.freeze({id:'drive',source:'external/drive.js',stem:'sd.drive',execution:'startup'}),

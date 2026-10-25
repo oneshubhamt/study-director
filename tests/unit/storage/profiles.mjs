@@ -54,11 +54,11 @@ function device(){
   const [,added]=d.list().profiles;assert.equal(added.scope,added.id,'a later profile is scoped by its first id');assert.equal(added.fresh,true);assert.equal(added.from,'','Cancel goes back to the profile that added it');assert.equal(d.list().active,added.id);
   const second=d.page(added.scope);assert.equal(second.current().id,added.id);
   const renamed=second.rename('Ben');assert.match(renamed.id,/^prof_ben_/u);assert.equal(renamed.scope,added.scope,'its storage stays where it is when the id follows the name');
-  d.store.set('studyDirector.theme.v1~'+added.scope,'director-light');d.store.set('studyDirector.theme.v1','director-dark');
+  d.store.set('studyDirector.theme.v1~'+added.scope,'light');d.store.set('studyDirector.theme.v1','dark');
   assert.equal(second.remove(),true);assert.equal(d.events.reloads,2);
   assert.deepEqual(d.list().profiles.map(row=>row.id),[ana.id]);assert.equal(d.list().active,ana.id);assert.deepEqual(d.list().removing,[added.scope]);
   const collected=await first.collect();assert.equal(collected.removed,true);assert.equal(collected.error,null);
-  assert.equal(d.store.has('studyDirector.theme.v1~'+added.scope),false,'the removed profile browser storage is deleted');assert.equal(d.store.get('studyDirector.theme.v1'),'director-dark','the open profile keeps its own');
+  assert.equal(d.store.has('studyDirector.theme.v1~'+added.scope),false,'the removed profile browser storage is deleted');assert.equal(d.store.get('studyDirector.theme.v1'),'dark','the open profile keeps its own');
   assert.deepEqual(d.events.databases,['sdmLocalAppDB.v1~'+added.scope]);assert.deepEqual(d.events.directories,['study-director-assets-v2~'+added.scope,'study-director-backup-files-v1~'+added.scope]);
   assert.deepEqual(d.list().removing,[],'nothing is left to delete');
   assert.equal((await first.collect()).removed,false,'collect runs once per removal');
@@ -77,7 +77,7 @@ function device(){
   // The first profile removed: its plain names, database, folders and the old attachment folder go.
   const d=device(),first=d.page('');const ana=first.ensure('Ana');first.add();const ben=d.list().profiles[1];
   const second=d.page(ben.scope);second.finishFirstStart();second.switchTo(ana.id);
-  d.store.set('studyDirector.theme.v1','director-dark');d.store.set('studyDirector.installationId.v1','inst_iphone_safari_mve00000_abcdef01');d.store.set('studyDirector.noteRescue.v1~'+ben.scope,'{}');
+  d.store.set('studyDirector.theme.v1','dark');d.store.set('studyDirector.installationId.v1','inst_iphone_safari_mve00000_abcdef01');d.store.set('studyDirector.noteRescue.v1~'+ben.scope,'{}');
   assert.equal(first.remove(),true);assert.equal(d.list().active,ben.id,'with nothing to go back to, another profile opens');
   await second.collect();
   assert.equal(d.store.has('studyDirector.theme.v1'),false);assert.equal(d.store.has('studyDirector.installationId.v1'),true,'device-wide names stay');assert.equal(d.store.has('studyDirector.noteRescue.v1~'+ben.scope),true,'the open profile keeps its own');
@@ -100,7 +100,7 @@ function device(){
 }
 {
   // The last profile: a new, empty profile replaces it, and its data is deleted.
-  const d=device(),first=d.page('');const ana=first.ensure('Ana');d.store.set('studyDirector.theme.v1','director-dark');
+  const d=device(),first=d.page('');const ana=first.ensure('Ana');d.store.set('studyDirector.theme.v1','dark');
   d.tick(1000);assert.equal(first.remove(),true);assert.equal(d.events.reloads,1);
   const [fresh]=d.list().profiles;assert.equal(d.list().profiles.length,1);assert.notEqual(fresh.id,ana.id);
   assert.equal(fresh.scope,fresh.id,'the new profile has storage of its own');assert.equal(fresh.fresh,true);assert.equal(fresh.from,null,'its first start has nothing to cancel back to');
