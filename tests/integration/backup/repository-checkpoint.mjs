@@ -604,6 +604,29 @@ runtime.providers.configurePendingBackupRetry(freeze({read:async id=>pendingProv
     assert.deepEqual(versions(drive),versions(device),'both locations hold the same versions');
   }finally{runtime.providers.configureAutomaticBackup(null);connected=false;reconciliationBase=baseBefore;reconciliationBaseNotes=baseNotesBefore;}
 }
+// Taking turns at Drive: another device's recent upload marker makes this one
+// wait, but a marker an earlier page of this device left behind (an upload cut
+// off by a closed page) never does.
+{
+  const files=new Map(),markers=new Map(),key=(kind,id)=>kind+':'+id,describe=file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,remoteId:'turn-'+key(file.kind,file.id)});
+  let leases=0;const lease=prefix=>freeze({id:prefix+'_'+String(++leases).padStart(32,'0'),createdAt:new Date().toISOString()});
+  const transport=freeze({list:async({kind})=>freeze({items:freeze([...files.values()].filter(file=>file.kind===kind).map(describe)),overflow:false}),upload:async file=>{const stored=freeze({...file,createdAt:new Date().toISOString()});files.set(key(file.kind,file.id),stored);return describe(stored);},download:async ref=>{const stored=files.get(key(ref.kind,ref.id));if(!stored)throw new Error('missing turn file');return freeze({blob:stored.blob,release:async()=>{}});},delete:async ref=>files.delete(key(ref.kind,ref.id)),
+    beginPublication:async()=>{const row=lease('pub');markers.set(row.id,row);return row;},listPublications:async()=>freeze({items:freeze([...markers.values()]),overflow:false,ignored:0}),assertPublication:async row=>row,endPublication:async row=>markers.delete(row.id),
+    beginMaintenance:async()=>lease('mnt'),listMaintenances:async()=>freeze({items:freeze([]),overflow:false,ignored:0}),assertMaintenance:async row=>row,endMaintenance:async()=>true});
+  const baseBefore=reconciliationBase,baseNotesBefore=reconciliationBaseNotes;
+  assert.equal(runtime.providers.register(freeze({id:'turn-drive',label:'Google Drive',shared:true,connected:()=>true,repository:transport})),true);
+  try{
+    sourceRevision='2026-09-19T03:00:00.000Z';snapshotRevision='turn-1';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'turn one',updatedAt:sourceRevision})};
+    const leftover=freeze({id:'pub_'+'e'.repeat(32),createdAt:new Date(Date.now()-60*1000).toISOString(),sameDevice:true});markers.set(leftover.id,leftover);
+    const first=await runtime.providers.backupRepositoryProvider('turn-drive',{interactive:false});
+    assert.ok(first.checkpointId,'a marker this device left behind does not make it wait for itself');
+    markers.delete(leftover.id);
+    const other=freeze({id:'pub_'+'0'.repeat(32),createdAt:new Date(Date.now()-60*1000).toISOString()});markers.set(other.id,other);
+    sourceRevision='2026-09-19T03:10:00.000Z';snapshotRevision='turn-2';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'turn two',updatedAt:sourceRevision})};
+    await assert.rejects(()=>runtime.providers.backupRepositoryProvider('turn-drive',{interactive:false}),{code:'REPOSITORY_SYNC_TURN'},'another device\'s recent upload goes first');
+    assert.equal([...markers.keys()].filter(id=>id!==other.id).length,0,'the refused upload removes its own marker');
+  }finally{reconciliationBase=baseBefore;reconciliationBaseNotes=baseNotesBefore;}
+}
 const retainedManifests=[];
 for(const file of remoteFiles.values())if(file.kind==='checkpoint')retainedManifests.push(await runtime.repository.inspectManifest(file.blob,{interactive:false}));
 const retainedObjectIds=new Set(retainedManifests.flatMap(manifest=>manifest.objects.map(entry=>entry.objectId)));

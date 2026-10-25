@@ -23,7 +23,9 @@ export const IDENTITIES=freeze({root:REPOSITORY_NAME,legacyRoot:LEGACY_ROOT,pref
 let worlds=0;
 // `manifestVersion` is the format this world's backups are written in (8 is
 // current; 1 to 5 are the released ones this build still reads).
-export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',supported=true,protection=null,device=QA_DEVICE,profile=QA_PROFILE,name=REPOSITORY_NAME,manifestVersion=8}={}){
+// lock: a Web Lock shared with another world, as two tabs of one browser share it.
+export function sharedLock(){let chain=Promise.resolve();return work=>{const run=chain.then(()=>work());chain=run.catch(()=>{});return run;};}
+export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',supported=true,protection=null,device=QA_DEVICE,profile=QA_PROFILE,name=REPOSITORY_NAME,manifestVersion=8,lock=sharedLock()}={}){
   // Who this page is (profile and device), and the answer to "use one of the
   // backup folders already here?" (null cancels, '' starts a new one).
   const worldNumber=++worlds;
@@ -97,7 +99,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   const controller=registry.require('device-backup',1).createController(freeze({
     configuration:freeze({metadataKey:'deviceFolder',pickerId:'study-director-device-backup',settingsTimeoutMs:10*1000}),
     engine:freeze({backup:id=>runtime.backup(id),cancelForeground:(reason,id)=>runtime.cancelForeground(reason,id),disconnect:id=>runtime.disconnect(id),forget:id=>runtime.forget(id),locationStatus:id=>runtime.locationStatus(id),register:config=>runtime.register(config),subscribeStatus:listener=>runtime.subscribeStatus(listener)}),
-    environment:freeze({canMutate:()=>canMutate,clearTimeout:clock.clearTimeout,setTimeout:clock.setTimeout,showDirectoryPicker}),
+    environment:freeze({backgroundBlocker:()=>canMutate?'':'awaiting-control',canMutate:()=>canMutate,clearTimeout:clock.clearTimeout,setTimeout:clock.setTimeout,showDirectoryPicker,withLock:lock}),
     hooks:freeze({capture:(scope,error)=>captures.push(freeze({scope,message:String(error?.message||error)})),chooseRepository:async rows=>{repositoryChoices.push([...rows]);return repositoryChoice(rows);},render:state=>rendered.push(state),repositoryOwner:()=>owner,sourceRevision:()=>current,verifiedAt:()=>verified.get('device-folder')?.at||''}),
     presentation,
     // Writes pass the app's own stored-record validator, as the real store does.

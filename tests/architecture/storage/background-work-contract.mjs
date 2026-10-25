@@ -37,6 +37,13 @@ assert.match(app,/function mutateRepositoryMaintenancePending[\s\S]*BackupAppMet
 assert.doesNotMatch(device,/MAINTENANCE_(?:CATCHUP|GRACE|BLOCKED|ERROR|CONTENTION)_RETRY_MS/u,'Device must not retain a private maintenance cadence table');
 assert.doesNotMatch(provider,/PROVIDER_MAINTENANCE_(?:CATCHUP|GRACE|BLOCKED|ERROR|CONTENTION)_RETRY_MS/u,'Drive must not retain a private maintenance cadence table');
 assert.doesNotMatch(device,/createMaintenanceScheduler|createIntegrityScheduler|registerJob|beginBackground|beginForeground|setTimeout\(\(\)=>[^,]*schedule/u,'the Device Folder runs no jobs of its own: maintenance, integrity and automatic backups are the engine\'s per-location jobs');
+// The Device Folder's own folder (made, claimed or moved from the old single
+// folder) is written only by the writing tab, behind the shared gate and one
+// tab at a time.
+assert.match(device,/function prepareInBackground\(\)\{[\s\S]{0,400}environment\.backgroundBlocker\(\)[\s\S]{0,120}if\(blocked\)return;/u,'Device Folder preparation in the background waits for the shared gate');
+assert.match(device,/function prepareRepository\(\{choose=false\}=\{\}\)\{[\s\S]{0,200}if\(!environment\.canMutate\(\)\)return Promise\.reject[\s\S]{0,240}preparing=environment\.withLock\(/u,'only the writing tab prepares the folder, under a lock');
+assert.match(app,/backgroundBlocker:\(\)=>backgroundBlocker\(\),canMutate:\(\)=>appCanMutate\(\)[\s\S]{0,400}withLock:work=>navigator\.locks\?\.request\?navigator\.locks\.request\(ProfileScope\.scoped\('study-director-device-folder-prepare'\)/u,'the app hands the Device Folder the shared gate and a profile-scoped Web Lock');
+assert.match(app,/\['device-folder',Object\.freeze\(\{wake:\(\)=>DeviceBackup\.wake\(\)\}\)\],\s*\['backup-locations'/u,'the folder is prepared when the gate opens, before the backup locations wake');
 assert.match(provider,/background\.createMaintenanceScheduler/u,'Drive maintenance must use the per-target shared lifecycle scheduler');
 assert.match(provider,/scheduler\.observe\(observation/u,'Drive inspection must feed repository observations into durable maintenance intent');
 assert.match(provider,/async function historyRepositoryProvider[\s\S]*observeRepositoryMaintenance\(selected,repositoryInventoryObservation\(inventory\)\)/u,'history inspection must create durable maintenance intent when repository debris is observed, for every location');

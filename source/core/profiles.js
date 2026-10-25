@@ -137,7 +137,9 @@ registry.define('profiles',1,()=>{
       return platform.listen(key=>{if(key!==registryKey&&key!==null)return;const list=read(),mine=current(list),active=list.profiles.find(row=>row.id===list.active);if(!mine||active&&active.scope!==pageScope)platform.reload();});
     }
     const list=()=>read().profiles;
-    return freeze({current:()=>current(),list,ensure,rename,setAccount,adopt,renew,finishFirstStart,add,switchTo,remove,collect,watch});
+    // Removed profiles whose data still waits to be deleted here (diagnostics).
+    const removalPending=()=>read().removing.filter(scope=>scope!==pageScope).length;
+    return freeze({current:()=>current(),list,ensure,rename,setAccount,adopt,renew,finishFirstStart,add,switchTo,remove,collect,watch,removalPending});
   }
   return freeze({format:'study-director.profiles-module',contractVersion:1,createController});
 });

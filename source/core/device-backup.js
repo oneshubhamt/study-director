@@ -18,7 +18,7 @@ registry.define('device-backup',1,()=>{
   function createController(input){
     exactObject(input,['configuration','engine','environment','hooks','presentation','settings','transport'],'Device-backup input');
     exactObject(input.configuration,['metadataKey','pickerId','settingsTimeoutMs'],'Device-backup configuration');
-    exactObject(input.environment,['canMutate','clearTimeout','setTimeout','showDirectoryPicker'],'Device-backup environment');
+    exactObject(input.environment,['backgroundBlocker','canMutate','clearTimeout','setTimeout','showDirectoryPicker','withLock'],'Device-backup environment');
     functions(input.engine,['backup','cancelForeground','disconnect','forget','locationStatus','register','subscribeStatus'],'Device-backup engine port');
     functions(input.settings,['read','remove','write'],'Device-backup settings port');
     functions(input.hooks,['capture','chooseRepository','render','repositoryOwner','sourceRevision','verifiedAt'],'Device-backup hooks');
@@ -114,12 +114,15 @@ registry.define('device-backup',1,()=>{
     // Settles which repository folder this profile and device use: its own
     // (known by the marker inside), the folder of earlier versions moved into a
     // new one named for the profile and device, one the person picks from those
-    // already there (only when choosing a folder), or a new one.
+    // already there (only when choosing a folder), or a new one. Only the tab
+    // that writes prepares it, one at a time (a Web Lock), so two tabs opened
+    // together never move the same files.
     function prepareRepository({choose=false}={}){
       if(repositoryName)return Promise.resolve(repositoryName);
       if(preparing)return preparing;
+      if(!environment.canMutate())return Promise.reject(Object.assign(new Error('Another tab is writing; it prepares the backup folder.'),{name:'AbortError'}));
       const target=handle;
-      preparing=(async()=>{
+      preparing=environment.withLock(async()=>{
         publish();
         const mine=hooks.repositoryOwner(),found=await layout.inspect();
         if(handle!==target)throw Object.assign(new Error('The backup folder changed.'),{name:'AbortError'});
@@ -150,15 +153,20 @@ registry.define('device-backup',1,()=>{
         oldFolder=found.legacy?await layout.legacyPresent().catch(()=>true):false;
         if(handle!==target)throw Object.assign(new Error('The backup folder changed.'),{name:'AbortError'});
         repositoryName=name;return name;
-      })().finally(()=>{preparing=null;connectionChanged();});
+      }).finally(()=>{preparing=null;connectionChanged();});
       return preparing;
     }
     function prepareFailed(error){
       if(error?.name==='AbortError')return;
       capture('device-backup.prepare',error);presentation.feedback(ID,`${String(error?.message||'The backup folder could not be prepared.')} Normal app saving continues.`,false);publish();
     }
+    // In the background it waits for the shared gate (start-up finished, this
+    // tab writes, no browser-data clear unresolved); wake() tries again when
+    // the gate opens.
     function prepareInBackground(){
       if(!connectedFolder()||repositoryName||preparing)return;
+      let blocked='';try{blocked=String(environment.backgroundBlocker()||'');}catch(error){capture('device-backup.background-gate',error);blocked='unavailable';}
+      if(blocked)return;
       prepareRepository().catch(prepareFailed);
     }
     // Back up now also finishes preparing the folder (a move that stopped).
@@ -284,7 +292,7 @@ registry.define('device-backup',1,()=>{
     return freeze({
       format:'study-director.device-backup',contractVersion:1,
       install,status:snapshot,connect,disconnect,refreshPermission,rememberAfterStorageReset,deleteBackups,
-      backupNow,
+      backupNow,wake:()=>{prepareInBackground();return true;},
       cancelForeground:reason=>supported?engine.cancelForeground(reason,ID):false
     });
   }

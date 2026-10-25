@@ -43,6 +43,9 @@
   const DEFAULT_MAX_BACKUP_BYTES=20*1024*1024;
   const UPLOAD_CHUNK_BYTES=2*1024*1024;
   const MULTIPART_UPLOAD_MAX_BYTES=5*1024*1024;
+  // The device an upload marker comes from, so a device never waits its turn
+  // for a marker an earlier page of its own left behind.
+  const PUBLICATION_DEVICE_MARKER='sdPublicationDevice',DEVICE_PATTERN=/^inst_[a-z0-9_]{1,80}$/u;
   const HISTORY_FINGERPRINT_MARKER='sdHistoryFingerprint';
   const HISTORY_COUNTS_MARKER='sdHistoryCounts';
   const HISTORY_ENCRYPTED_MARKER='sdHistoryEncrypted';
@@ -83,7 +86,8 @@
   const connectionListeners=new Set();
   let folderId='';
   // deletionChecked: the profile already checked for a deletion marker in this sign-in.
-  let profilePort=null,boundFolder='',seenFolder=null,deletionChecked='',libraryDeleted='';
+  let profilePort=null,devicePort=null,boundFolder='',seenFolder=null,deletionChecked='',libraryDeleted='';
+  function thisDevice(){try{const id=String(devicePort?.()||'');return DEVICE_PATTERN.test(id)?id:'';}catch{return '';}}
   let folderEpoch=0;
   let folderResolutionFlight=null;
   let pendingAuthorization=null;
@@ -634,8 +638,8 @@
   }
   function publicationDescriptor(file,parent){
     if(!validPublicationMetadata(file,parent))throw noRetry(new Error('Google Drive returned unsafe Study Director publication metadata.'));
-    const id=String(file.appProperties[REPOSITORY_ID_MARKER]),createdAt=String(file.createdTime||'');
-    return Object.freeze({kind:PUBLICATION_KIND,id,remoteId:String(file.id),verificationScope:coordinationVerificationScope(parent),name:String(file.name),createdAt,modifiedAt:String(file.modifiedTime||''),expiresAt:Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+PUBLICATION_MAX_AGE_MS).toISOString():''});
+    const id=String(file.appProperties[REPOSITORY_ID_MARKER]),createdAt=String(file.createdTime||''),device=thisDevice();
+    return Object.freeze({kind:PUBLICATION_KIND,id,sameDevice:!!device&&file.appProperties[PUBLICATION_DEVICE_MARKER]===device,remoteId:String(file.id),verificationScope:coordinationVerificationScope(parent),name:String(file.name),createdAt,modifiedAt:String(file.modifiedTime||''),expiresAt:Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+PUBLICATION_MAX_AGE_MS).toISOString():''});
   }
   function trustedCoordinationRemoteId(ref,parent,kind,idValid){
     const id=String(ref&&ref.id||''),remoteId=String(ref&&ref.remoteId||''),scope=String(ref&&ref.verificationScope||'');
@@ -683,7 +687,8 @@
     const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id='pub_'+Platform.crypto.randomUUID().replace(/-/gu,''),now=new Date().toISOString();
     const metadata={name:publicationFilename(id),parents:[parent],mimeType:'application/octet-stream',appProperties:{
       [REPOSITORY_MARKER.key]:REPOSITORY_MARKER.value,[REPOSITORY_VERSION_MARKER]:REPOSITORY_VERSION,[REPOSITORY_KIND_MARKER]:PUBLICATION_KIND,[REPOSITORY_ID_MARKER]:id,
-      [FILE_SECURITY_MARKER]:FILE_SECURITY_VERSION,[REPOSITORY_IDENTITIES.driveAppVersionMarker]:PLUGIN_VERSION,[REPOSITORY_IDENTITIES.driveExportedAtMarker]:now
+      [FILE_SECURITY_MARKER]:FILE_SECURITY_VERSION,[REPOSITORY_IDENTITIES.driveAppVersionMarker]:PLUGIN_VERSION,[REPOSITORY_IDENTITIES.driveExportedAtMarker]:now,
+      ...(thisDevice()?{[PUBLICATION_DEVICE_MARKER]:thisDevice()}:{})
     }};
     let response=null,file=null;
     try{response=await authorizedFetch(`${DRIVE_API}/files?fields=${encodeURIComponent(REPOSITORY_FIELDS)}`,{method:'POST',headers:{'Content-Type':'application/json; charset=UTF-8'},body:JSON.stringify(metadata)},API_TIMEOUT_MS,context);}
@@ -1138,6 +1143,7 @@
     receiveBackupStream=typeof api.backup.receiveStream==='function'?api.backup.receiveStream:null;
     if(!receiveBackupStream)return false;
     profilePort=api.backup.profile&&['id','name','bind'].every(key=>typeof api.backup.profile[key]==='function')?api.backup.profile:null;
+    devicePort=typeof api.backup.device==='function'?api.backup.device:null;
     // What the app can do with the profile's library.
     if(profilePort&&typeof profilePort.controls==='function')profilePort.controls(Object.freeze({deleteLibrary}));
     if(!profilePort)return false;

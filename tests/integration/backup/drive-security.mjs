@@ -231,6 +231,17 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
 }
 
 {
+  // An upload marker names the device it comes from, so a device never waits
+  // its turn for a marker an earlier page of its own left behind.
+  let device='inst_qa_laptop_mve00000_aaaaaaaa';const {state,provider}=createHarness({device:()=>device});await provider.prepare();await provider.authorize();
+  const mine=await provider.repository.beginPublication();device='inst_qa_phone_mve00000_bbbbbbbb';const theirs=await provider.repository.beginPublication();
+  const older=[...state.files.values()].find(file=>file.appProperties.studyDirectorRepositoryId===theirs.id);const legacy={...older,id:'repo-legacy-marker',appProperties:{...older.appProperties,studyDirectorRepositoryId:'pub_'+'c'.repeat(32)}};delete legacy.appProperties.sdPublicationDevice;legacy.name='pub_'+'c'.repeat(32)+older.name.slice(older.name.indexOf('.'));state.files.set(legacy.id,legacy);
+  device='inst_qa_laptop_mve00000_aaaaaaaa';const listed=new Map((await provider.repository.listPublications()).items.map(row=>[row.id,row.sameDevice]));
+  assert.equal(listed.get(mine.id),true,'a marker this device started reads as its own');assert.equal(listed.get(theirs.id),false,'another device\'s marker does not');assert.equal(listed.get('pub_'+'c'.repeat(32)),false,'a marker from an older build, with no device, counts as another device\'s');
+  device='';assert.equal((await provider.repository.listPublications()).items.every(row=>row.sameDevice===false),true,'without a known device nothing reads as its own');
+}
+
+{
   const {state,provider}=createHarness();await provider.prepare();await provider.authorize();
   const operation=provider.repository.beginOperation();state.networkFailCoordinationPostOnce=true;const marker=await operation.beginMaintenance();assert.match(marker.id,/^mnt_[a-f0-9]{32}$/u);assert.equal(marker.kind,'maintenance');assert.equal([...state.files.values()].filter(file=>file.appProperties.studyDirectorRepositoryKind==='maintenance').length,1,'ambiguous maintenance creation must recover the exact pre-generated marker instead of creating a duplicate');
   let active=await operation.listMaintenances();assert.equal(active.items.length,1,'a live Drive maintenance marker must be visible to publication coordination');assert.equal(active.ignored,0);

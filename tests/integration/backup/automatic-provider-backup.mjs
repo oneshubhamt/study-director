@@ -10,7 +10,9 @@ import {createFakeClock} from '../../helpers/fake-clock.mjs';
 const freeze=Object.freeze,noop=()=>{},MINUTE=60*1000;
 // both: a Device Folder too, with Drive as the shared location, as on a
 // computer that uses both.
-function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false}={}){
+// shared, driveList, driveDownload and sharedBase: Drive as the shared
+// location with versions of its own, for the sync catch-up.
+function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shared=both,driveList=null,driveDownload=null,sharedBase=async()=>null}={}){
   const clock=createFakeClock('2026-10-06T08:00:00.000Z'),emitted=[],publishedAt=[],publishedBy=[],coveredBy=new Map();
   let current=new clock.Date().toISOString(),authorized=signedIn,expiresAt=clock.now()+expiresInMs,listener=null,publicationHook=noop,durable=null;
   const context={Object,Symbol,TypeError,Error,Date:clock.Date,AbortController,Blob,Promise,Map,Set,TextEncoder,Uint8Array,console,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout};context.globalThis=context;vm.createContext(context);
@@ -21,7 +23,7 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false}={})
   const presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications}));
   const pending=registry.require('backup-recovery-host',1).createPendingStore(freeze({sourceRevision:()=>current,diagnostics:freeze({capture:noop}),storage:freeze({read:async()=>durable,write:async value=>{durable=value;},remove:async()=>{durable=null;}})}));
   const unexpected=()=>{throw new Error('Unexpected executor in the automatic backup test');};
-  const pipeline=freeze({noteObject:unexpected,readNote:unexpected,createPublication:unexpected,publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,sharedBase:async()=>null,establishBase:unexpected,spine:()=>null,verifyObject:unexpected,inspectCommit:unexpected,
+  const pipeline=freeze({noteObject:unexpected,readNote:unexpected,createPublication:unexpected,publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,sharedBase,establishBase:unexpected,spine:()=>null,verifyObject:unexpected,inspectCommit:unexpected,
     publish:async(_history,options,executor)=>{
       assert.equal(options.interactive,false,'automatic backups never prompt');
       const captured=current;publishedAt.push(clock.now());publishedBy.push(freeze({by:both&&options.shared!==true?'device-folder':'google-drive',at:clock.now()}));await publicationHook(options);
@@ -30,14 +32,14 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false}={})
     },
     scrub:async()=>({status:'completed',complete:true}),cleanup:async()=>({gcPending:false}),retention:freeze({}),validatePolicy:noop,classifyState:()=>({committed:[],uncommitted:[],orphanCommits:[],invalidPairs:[]}),activeProtected:()=>null,selectRetention:()=>({retained:[],remove:[]}),projectHistory:()=>[],markCompleted:({copy})=>{if(copy)coveredBy.set(copy.source,copy.sourceRevision);}});
   const runtime=registry.require('backup-provider',1,freeze({repositoryPolicy:policy})).createRuntime(freeze({background:freeze({format:background.format,contractVersion:1,createCoordinator:background.createCoordinator,maintenance:background.maintenance,maintenanceActionable:background.maintenanceActionable}),repository:pipeline,ports:freeze({
-    configuration:freeze({appVersion:'qa'}),controller:freeze({beginImport:noop,cancelImport:noop,finishImport:noop}),exports:freeze({followProtection:async()=>false,run:unexpected}),domain:freeze({clampText:value=>String(value||'')}),view:freeze({presentation}),
+    configuration:freeze({appVersion:'qa'}),controller:freeze({beginImport:()=>freeze({cancel:noop}),cancelImport:noop,finishImport:noop}),exports:freeze({followProtection:async()=>false,run:unexpected}),domain:freeze({clampText:value=>String(value||'')}),view:freeze({presentation}),
     ownership:freeze({canRunBackground:()=>true,requireMutationControl:noop}),environment:freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}),diagnostics:freeze({capture:noop,start:()=>'trace',mark:noop,finish:noop,fail:noop})
   })}));
   const connected=()=>authorized&&clock.now()<expiresAt;
   if(both)runtime.register(freeze({id:'device-folder',label:'Device Folder',connected:()=>true,backgroundAvailable:()=>true,
     repository:freeze({scope:async()=>'folder-scope',list:async()=>({items:[],overflow:false,ignored:0}),upload:unexpected,download:unexpected,delete:unexpected})}));
-  runtime.register(freeze({id:'google-drive',label:'Google Drive',...(both?{shared:true}:{}),connected,backgroundAvailable:connected,connectionExpiresAt:()=>connected()?expiresAt:0,subscribeConnection:fn=>{listener=fn;},
-    repository:freeze({scope:async()=>'repo-scope',list:async()=>({items:[],overflow:false,ignored:0}),upload:unexpected,download:unexpected,delete:unexpected})}));
+  runtime.register(freeze({id:'google-drive',label:'Google Drive',...(shared?{shared:true}:{}),connected,backgroundAvailable:connected,connectionExpiresAt:()=>connected()?expiresAt:0,subscribeConnection:fn=>{listener=fn;},
+    repository:freeze({scope:async()=>'repo-scope',list:driveList||(async()=>({items:[],overflow:false,ignored:0})),upload:unexpected,download:driveDownload||unexpected,delete:unexpected})}));
   runtime.configurePendingBackupRetry(freeze(pending));
   runtime.configureAutomaticBackup(freeze({covered:id=>coveredBy.has(id)?coveredBy.get(id):covered,current:()=>current}));
   return {
@@ -45,8 +47,8 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false}={})
     change:(urgent=false)=>{current=new clock.Date(clock.now()).toISOString();runtime.noteChange({urgent});},
     expire:()=>{expiresAt=clock.now();listener?.();},
     signIn:(lifetime=59*MINUTE)=>{authorized=true;expiresAt=clock.now()+lifetime;listener?.();},
-    notices:()=>emitted.filter(raw=>raw.source==='google-drive'&&raw.id==='permission'),
-    noticeEvent:()=>coordinator.eventStatus().events.find(row=>row.source==='google-drive'&&row.id==='permission')
+    notices:(id='permission')=>emitted.filter(raw=>raw.source==='google-drive'&&raw.id===id),
+    noticeEvent:(id='permission')=>coordinator.eventStatus().events.find(row=>row.source==='google-drive'&&row.id===id)
   };
 }
 // Small steps, so work started by a timer finishes before the clock moves on.
@@ -122,5 +124,28 @@ const cases=[];
   t.publishedBy.length=0;t.change(true);await tick(t,t.policy.automaticUrgentMs+30*1000);
   assert.deepEqual(t.publishedBy.map(row=>row.by),['device-folder','google-drive'],'every round, the Device Folder goes first');
   cases.push('both locations: Drive follows the Device Folder at once');
+}
+{
+  // Drive holds a version this device has not taken in. A catch-up that fails
+  // is tried again on the backoff (30 seconds, then 2 and 10 minutes), not at
+  // the next 20-minute check; after four failures the notice speaks of
+  // syncing, and it goes once Drive is in step again.
+  const id='cp_'+'b'.repeat(32),item=kind=>freeze({kind,id,name:id+(kind==='commit'?'.sdcommit':'.sdcheckpoint'),size:100,createdAt:'2026-10-06T07:30:00.000Z',modifiedAt:'2026-10-06T07:30:00.000Z',remoteId:kind+'-1'});
+  const reads=[];let inStep=false;
+  const t=fixture({covered:'2026-10-06T09:00:00.000Z',shared:true,sharedBase:async()=>inStep?freeze({checkpointId:id}):null,
+    driveList:async({kind})=>({items:kind==='checkpoint'||kind==='commit'?[item(kind)]:[],overflow:false,ignored:0}),
+    driveDownload:async()=>{reads.push(t.clock.now());throw Object.assign(new Error('network down'),{code:'DRIVE_NETWORK'});}});
+  const start=t.clock.now(),attempts=()=>[...new Set(reads.map(at=>Math.round((at-start)/1000)))];
+  await tick(t,10*1000);assert.equal(attempts().length,1,'signing in catches up at once');
+  await tick(t,40*1000);assert.equal(attempts().length,2,'a failed catch-up is tried again within a minute');
+  await tick(t,2*MINUTE);assert.equal(attempts().length,3,'then after two minutes');
+  assert.ok(attempts().at(-1)<5*MINUTE,'long before the next 20-minute check');
+  await tick(t,11*MINUTE);assert.equal(attempts().length,4,'then after ten');
+  const failing=t.notices('retry-exhausted');assert.equal(failing.length,1,'four failures in a row are mentioned once');
+  assert.match(String(failing[0].message||''),/^Syncing with Google Drive keeps failing/u,'in words about syncing, not backing up');
+  inStep=true;await tick(t,31*MINUTE);
+  assert.equal(attempts().length,4,'once Drive is in step nothing more is read');
+  assert.equal(t.noticeEvent('retry-exhausted'),undefined,'and the notice goes');
+  cases.push('a failed sync catch-up retries on the backoff, not the 20-minute check');
 }
 console.log(JSON.stringify({status:'PASS',suite:'automatic-provider-backup',productionRuntime:true,cases},null,2));

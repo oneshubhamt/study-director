@@ -5164,6 +5164,8 @@ function installBackgroundOwners(){
     ['attachments',Object.freeze({wake:trigger=>RichTextAssetMaintenance.wake(trigger)})],
     ['attachment-integrity',Object.freeze({wake:trigger=>AttachmentIntegrityJob.wake(trigger,true)})],
     ['temporary-files',BackupFiles],
+    // The Device Folder's own folder is settled before its backups run.
+    ['device-folder',Object.freeze({wake:()=>DeviceBackup.wake()})],
     ['backup-locations',Object.freeze({wake:BackupProviderRuntime.wakeBackground})]
   ])BackgroundOperations.register(id,owner);
   backgroundOwnersInstalled=true;
@@ -9427,8 +9429,9 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
   configuration:Object.freeze({metadataKey:APP_META_KEYS.deviceFolder,pickerId:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderPickerId,settingsTimeoutMs:10*1000}),
   engine:Object.freeze({backup:id=>BackupProviderRuntime.backup(id),cancelForeground:(reason,id)=>BackupProviderRuntime.cancelForeground(reason,id),disconnect:id=>BackupProviderRuntime.disconnect(id),forget:id=>BackupProviderRuntime.forget(id),locationStatus:id=>BackupProviderRuntime.locationStatus(id),register:config=>BackupProviderRuntime.register(config),subscribeStatus:listener=>BackupProviderRuntime.subscribeStatus(listener)}),
   environment:Object.freeze({
-    canMutate:()=>appCanMutate(),clearTimeout:timer=>clearTimeout(timer),setTimeout:(callback,delay)=>setTimeout(callback,delay),
-    showDirectoryPicker:typeof window.showDirectoryPicker==='function'?options=>window.showDirectoryPicker(options):null
+    backgroundBlocker:()=>backgroundBlocker(),canMutate:()=>appCanMutate(),clearTimeout:timer=>clearTimeout(timer),setTimeout:(callback,delay)=>setTimeout(callback,delay),
+    showDirectoryPicker:typeof window.showDirectoryPicker==='function'?options=>window.showDirectoryPicker(options):null,
+    withLock:work=>navigator.locks?.request?navigator.locks.request(ProfileScope.scoped('study-director-device-folder-prepare'),{mode:'exclusive'},()=>work()):Promise.resolve().then(work)
   }),
   hooks:Object.freeze({
     capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
@@ -10070,6 +10073,10 @@ function currentBackupDiagnosticStates(){
     const ready=value.local?.retirementDataReady===true&&!value.device.oldFolder&&rows.every(row=>row.state==='ready');
     return [{job:'Format cleanup',state:ready?'ready':!value.local||rows.some(row=>row.state==='unknown')?'unknown':'pending',canonical:value.local?.canonical===true,retirementReady:value.local?.retirementDataReady===true,oldFolder:value.device.oldFolder===true,completedAt:value.local?.checkedAt||''},...rows];
   });
+  // Sync with Drive and the profiles on this device: what to read first when
+  // a device does not sync.
+  sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,waitingForDeviceFolder:value.waitingForDeviceFolder,turnWaits:value.turnWaits,keptVersions:KeptVersions.count()})));
+  sample('Profiles',()=>({count:Profiles.list().length,pending:Profiles.removalPending()}),value=>[{job:'Profiles',state:value.pending?'pending':'observed',profiles:value.count,removalPending:value.pending>0}]);
   sample('Provider background',()=>BackupProviderRuntime.backgroundStatus(),values=>values);return states;
 }
 // The start-up check of this device's data (verifyCanonicalInstallation).
@@ -10737,6 +10744,8 @@ const StudyDirectorPublicAPI=Object.freeze({
       maxFileBytes:APP_LIMITS.backupMaxFileBytes
     }),
     repositoryPolicy:RepositoryPolicyModule.protocol,
+    // This device, named on Drive's upload markers.
+    device:()=>AppData.provenance.installationId(),
     // The active profile, and who decides which Drive library it may use.
     profile:Object.freeze({id:()=>Profiles.current()?.id||'',name:()=>backupFolderName(),bind:info=>bindDriveLibrary(info),deleted:info=>driveProfileDeleted(info),controls:control=>{driveLibrary=control;}}),
     providers:Object.freeze({
