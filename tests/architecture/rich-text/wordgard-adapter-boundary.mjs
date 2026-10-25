@@ -56,6 +56,6 @@ assert.match(buildSource,/source\/external\/rich-text\.js/,'Rich-text build must
 assert.match(buildSource,/source\/external\/wordgard\.js/,'Wordgard ships as its own module.');
 // The Wordgard module re-exports Wordgard packages and nothing of Study Director's.
 const wordgardModule=read('rich-text/wordgard-module.ts').replace(/^\s*\/\/.*$/gmu,'').trim().split('\n');
-assert.ok(wordgardModule.every(line=>/^export \* as [a-zA-Z]+ from 'wordgard\/[a-z-]+';$/u.test(line)),'The Wordgard module holds Wordgard packages only.');
+assert.ok(wordgardModule.every(line=>/^export \* as [a-zA-Z]+ from \x27wordgard\/[a-z-]+\x27;$/u.test(line)),'The Wordgard module holds Wordgard packages only.');
 
 console.log(JSON.stringify({status:'PASS',boundary:'wordgard-adapter'},null,2));

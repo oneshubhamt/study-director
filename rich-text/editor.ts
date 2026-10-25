@@ -164,7 +164,7 @@ interface EditorInteractionHooks{
   pointerDown(event:PointerEvent,wg:Wordgard):boolean;
   pointerMove(event:PointerEvent,wg:Wordgard):void;
   pointerLeave(event:PointerEvent,wg:Wordgard):void;
-  paste?(event:InputEvent,wg:Wordgard):boolean;
+  paste?(event:InputEvent|ClipboardEvent,wg:Wordgard):boolean;
   beforeInput?(event:InputEvent,wg:Wordgard):boolean;
   tab(wg:Wordgard,shift:boolean):boolean;
   backspace(wg:Wordgard):boolean;
@@ -205,6 +205,10 @@ function editorBehaviorExtensions(hooks:EditorInteractionHooks):GardState.Extens
   KeyBinding.of({key:'Mod-b',run:strongAction.run}),KeyBinding.of({key:'Mod-i',run:emphasisAction.run}),KeyBinding.of({key:'Mod-u',run:underlineAction.run}),KeyBinding.of({key:'Mod-Shift-x',run:strikethroughAction.run}),KeyBinding.of({key:'Mod-.',run:superscriptAction.run}),KeyBinding.of({key:'Mod-,',run:subscriptAction.run}),
   InputRule.wrapping(/^ ?- $/,BulletList,true),InputRule.wrapping(/^ ?(\d+)\. $/,match=>OrderedList.of(+match[1]!.text),true),horizontalRuleInputRule,InputRule.wrapping(/^> $/,Blockquote,true),
   GardState.prec.highest(Wordgard.pasteHandler.of((wg,event)=>hooks.paste?.(event,wg)||false)),
+  // An image is taken from the paste event itself: Wordgard hands a paste to
+  // its paste handlers only when the paste's target is its own selection,
+  // which an empty editor focused from the keyboard may not yet match.
+  GardState.prec.highest(Wordgard.domEventHandler('paste',(event,wg)=>hooks.paste?.(event,wg)||false)),
   tableCore,history(),cutHandling,autoLinkOnSpace.extension,
   // Typing [[ opens the note picker in place of the brackets. Pickers open
   // once the keystroke is done, so it does not land in the picker's field.
@@ -690,7 +694,7 @@ async function mountRichTextEditor(options:MountOptions):Promise<MountedRichText
   const startLinkedAttachmentPicker=(kind:AttachmentKind)=>{closePopups();if(!options.attachments){updateEditorStatus('Attachment Library is unavailable here.','error');return}pendingAttachmentKind=kind;editor.dispatch({effects:setPendingLinkedAttachmentSelection.of(editor.state.selection)});linkedAttachmentInput.accept=kind==='pdf'?'application/pdf,.pdf':'audio/mpeg,audio/wav,audio/ogg,audio/flac,audio/mp4,audio/webm,.mp3,.wav,.ogg,.flac,.m4a,.mp4,.webm';linkedAttachmentInput.setAttribute('aria-label',kind==='pdf'?'Choose a PDF to attach':'Choose an audio file to attach');field.dataset.richAssetPicker='active';updateEditorStatus(`Choose ${kind==='pdf'?'a PDF':'an audio file'} to attach…`,'busy');try{linkedAttachmentInput.click()}catch{finishLinkedAttachmentPicker();updateEditorStatus('The attachment picker could not open. Retry, or choose a different file.','error')}};
   pdfMenuItem=createButton('PDF','Attach PDF',()=>startLinkedAttachmentPicker('pdf'));audioMenuItem=createButton('Audio','Attach audio',()=>startLinkedAttachmentPicker('audio'));setDisabled(pdfMenuItem,!options.attachments);setDisabled(audioMenuItem,!options.attachments);
   const attachmentMenu=document.createElement('div');attachmentMenu.append(imageMenuItem,pdfMenuItem,audioMenuItem);const attachmentTrigger=popupTrigger('', 'Attach', attachmentMenu,'sd-rte-attachment-trigger');const attachmentIcon=document.createElementNS('http://www.w3.org/2000/svg','svg');attachmentIcon.setAttribute('viewBox','0 0 24 24');attachmentIcon.setAttribute('aria-hidden','true');const attachmentPath=document.createElementNS('http://www.w3.org/2000/svg','path');attachmentPath.setAttribute('d','M8.5 12.5 15.8 5.2a3 3 0 0 1 4.2 4.2l-9 9a5 5 0 0 1-7.1-7.1l8.4-8.4');attachmentIcon.appendChild(attachmentPath);attachmentTrigger.appendChild(attachmentIcon);
-  const pasteImage=(event:InputEvent,wg:Wordgard)=>{if(options.allowAssetInsert===false)return false;const file=event.dataTransfer?.files[0];if(!file?.type.startsWith('image/'))return false;if(!imageBusy){wg.dispatch({effects:setPendingImageSelection.of(wg.state.selection)});void attachImage(file)}return true};
+  const pasteImage=(event:InputEvent|ClipboardEvent,wg:Wordgard)=>{if(options.allowAssetInsert===false)return false;const file=('clipboardData' in event?event.clipboardData:event.dataTransfer)?.files[0];if(!file?.type.startsWith('image/'))return false;if(!imageBusy){wg.dispatch({effects:setPendingImageSelection.of(wg.state.selection)});void attachImage(file)}return true};
   const tableButton=createButton('Table','Insert 2 × 2 table',()=>{if(tablePosition(editor)){updateEditorStatus('Nested tables are not supported.','error');return}insertStructuralBlock(editor,makeTable(2,2),'insert.table',true);editor.focus()}),ruleButton=createButton('―','Horizontal rule',()=>{if(cellPosition(editor)){updateEditorStatus('Horizontal rules cannot be inserted inside tables.','error');return}insertStructuralBlock(editor,HorizontalRule,'insert.horizontal-rule');editor.focus()});
   const historyGroup=toolbarGroup('History',undoControl,redoControl),textGroup=toolbarGroup('Text formatting',styleTrigger,boldButton,italicButton,highlightButton,moreFormatTrigger),listGroup=toolbarGroup('Paragraph and lists',quoteButton,bulletButton,numberButton,checkButton),attachmentGroup=toolbarGroup('Links and attachments',linkTrigger,...(options.allowAssetInsert===false?[]:[attachmentTrigger])),structureGroup=toolbarGroup('Insert blocks',tableButton,ruleButton);historyGroup.classList.add('sd-rte-toolbar-group-history');
   const listOutdentButton=createButton('←','Outdent list item',()=>listNesting(editor,true)),listIndentButton=createButton('→','Indent list item',()=>listNesting(editor,false));listTools.append(listToolsLabel,listOutdentButton,listIndentButton);

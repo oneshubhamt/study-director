@@ -304,6 +304,7 @@ For each build step: make all the changes, build, test with two simulated device
 **Changes for 0.6.**
 - Position sets come from `wordgard/set`; `create` takes `[value, pos]` and `[value, from, to]`.
 - Pastes arrive as `beforeinput` `insertFromPaste` (an `InputEvent` with `dataTransfer`). Browser tests send the paste the way the browser does (`pasteInPage` in `tests/helpers/browser-harness.mjs`).
+- Wordgard hands a paste to its paste handlers only when the paste lands on its own selection. In an empty editor focused from the keyboard the browser's caret can sit outside that, so a pasted image is taken from the `paste` event itself.
 - `Decoration.Tag.shape.dynamic` is now `.derived`.
 - Wordgard re-renders an atom's attributes from its shape. Audio is therefore drawn with its loaded address and status, as images are, and the editor no longer marks the player with its own attributes.
 - Key bindings carry descriptions from Wordgard's phrase table, so the module includes it (about 120 lines).

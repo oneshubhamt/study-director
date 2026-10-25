@@ -21,7 +21,7 @@ try{
     const seedMount=await StudyDirectorRichText.mountRichTextEditor({field:seed,label:'Seed',initialValue:'',maxWords:10000,maxBytes:917504,assets});
     const canvas=document.createElement('canvas');canvas.width=1200;canvas.height=900;canvas.getContext('2d').fillRect(0,0,1200,900);
     const blob=await new Promise(r=>canvas.toBlob(r,'image/jpeg',.72)),dt=new DataTransfer();dt.items.add(new File([blob],'seed.jpg',{type:'image/jpeg'}));
-    ${pasteInPage}(document.querySelector('#seed + .sd-rte .sd-rte-editor'),dt);
+    const seedEditor=document.querySelector('#seed + .sd-rte .sd-rte-editor');seedEditor.focus();${pasteInPage}(seedEditor,dt);
     while(!seed.value.includes('SDImage'))await new Promise(r=>setTimeout(r,20));
     const parsed=JSON.parse(seed.value.slice(4)),image=parsed.doc.content.find(n=>n.type==='SDImage'),paragraph=parsed.doc.content.find(n=>n.type==='Paragraph')||{type:'Paragraph'};
     const canonicalBlob=[...assetMap.values()][0];await seedMount.destroy();seed.remove();
