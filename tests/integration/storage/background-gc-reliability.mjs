@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
 import {createHarness} from '../../helpers/repository-harness.mjs';
 import {noteRow,TRASH_PREFIX} from '../../helpers/note-ids.mjs';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 const source=fs.readFileSync('source/app.html','utf8');
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 function fixture(){
@@ -94,7 +95,7 @@ cases.push('untrusted rich text, source changes and unavailable revisions forbid
 // End-to-end conservation: an incomplete reachability proof must change neither
 // metadata nor bytes. Once reads recover, only the unreachable object may go.
 {
-  const richContext={URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask,structuredClone};vm.createContext(richContext);vm.runInContext(fs.readFileSync('source/external/rich-text.js','utf8'),richContext);
+  const richContext={URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask,structuredClone};vm.createContext(richContext);vm.runInContext(richTextRuntimeSource(),richContext);
   const rich=richContext.StudyDirectorRichText,ids=['note','session','day','trash','orphan'].map((_,i)=>'att-'+String(i+1).padStart(32,'0'));
   const reference=id=>rich.insertAttachmentReference('',{id,name:'Diagram',mode:'inline-image'}).value;
   const session=reflection=>({id:'active',type:'activeSession',version:1,date:'2026-10-01',status:'suspended',scheduleText:'',suspendedAt:'2026-10-01T12:00:00.000Z',revision:20,updatedAt:'2026-10-01T12:20:00.000Z',snapshot:{review:{reflection}}});

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import {artifactPath,writeArtifact} from '../../helpers/artifacts.mjs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor,instrumentedHtml} from '../../helpers/browser-harness.mjs';
+import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor,instrumentedHtml,pasteInPage} from '../../helpers/browser-harness.mjs';
 import {deploymentDirectoryName} from '../../../release.config.mjs';
 const server=await startReleaseServer(),browser=await launchChromium({profilePrefix:'qa-runtime-security-'});
 const policy="worker-src 'self'; require-trusted-types-for 'script'; trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-google-signin";
@@ -40,7 +40,7 @@ try{
  await page.click('#cd-card');assert.equal(await page.evaluate('__PWA6.TimerState.paused'),true);
  await page.click('#cd-card');assert.equal(await page.evaluate('__PWA6.TimerState.paused'),false);
  // Repeat HTML paste to catch duplicate policy creation under enforcement.
- await page.evaluate(`(async()=>{const field=document.createElement('textarea');field.id='security-note';document.body.appendChild(field);window.testEditor=await StudyDirectorRichText.mountRichTextEditor({field,label:'Security paste',initialValue:'',maxWords:10000,maxBytes:917504,assets:{get:async()=>null,put:async()=>{},remove:async()=>{}}});for(let i=0;i<2;i++){const editor=document.querySelector('#security-note + .sd-rte .sd-rte-editor');editor.focus();const data=new DataTransfer();data.setData('text/html','<p><strong>Safe text</strong><img src=x onerror="window.badPaste=true"><a href="javascript:alert(1)">bad link</a></p>');data.setData('text/plain','Safe text');editor.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));await new Promise(r=>setTimeout(r,50));}})()`);
+ await page.evaluate(`(async()=>{const field=document.createElement('textarea');field.id='security-note';document.body.appendChild(field);window.testEditor=await StudyDirectorRichText.mountRichTextEditor({field,label:'Security paste',initialValue:'',maxWords:10000,maxBytes:917504,assets:{get:async()=>null,put:async()=>{},remove:async()=>{}}});for(let i=0;i<2;i++){const editor=document.querySelector('#security-note + .sd-rte .sd-rte-editor');editor.focus();const data=new DataTransfer();data.setData('text/html','<p><strong>Safe text</strong><img src=x onerror="window.badPaste=true"><a href="javascript:alert(1)">bad link</a></p>');data.setData('text/plain','Safe text');${pasteInPage}(editor,data);await new Promise(r=>setTimeout(r,50));}})()`);
  assert.equal(await page.evaluate('window.badPaste===true'),false);
  assert.match(await page.evaluate('document.querySelector("#security-note + .sd-rte").textContent'),/Safe text/);
  assert.equal(await page.evaluate('document.querySelector("#security-note + .sd-rte a[href^=javascript]")===null'),true);

@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import {spawnSync} from 'node:child_process';
 import releaseConfig from '../../../release.config.mjs';
-import {buildWordgardBundle} from '../../../build/wordgard-bundle.mjs';
+import {buildLeanRichText} from '../../../build/wordgard-bundle.mjs';
 import {DEPENDENCY_AUDIT_POLICY,DEPENDENCY_INVENTORY,VENDORED_DEPENDENCIES} from '../../../contracts/dependency-inventory.mjs';
 
 const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8'));
@@ -24,7 +24,7 @@ for(const row of locked){
   assert.equal(declared.direct,Object.hasOwn(rootDevDependencies,row.name),`${row.name} direct/transitive classification drifted.`);
 }
 
-const bundle=await buildWordgardBundle();
+const bundle=await buildLeanRichText();
 const bundledPackages=new Set(bundle.inputs.filter(path=>path.startsWith('node_modules/')).map(path=>{
   const parts=path.slice('node_modules/'.length).split('/');
   return parts[0].startsWith('@')?`${parts[0]}/${parts[1]}`:parts[0];

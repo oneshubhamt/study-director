@@ -4,6 +4,7 @@ import {webcrypto} from 'node:crypto';
 import {createHarness} from '../../helpers/repository-harness.mjs';
 import {noteRow} from '../../helpers/note-ids.mjs';
 import assert from 'node:assert/strict';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
 // Library clear is one transactional contract: planning, scaling, reference rewrites, rollback, and commit semantics.
 
@@ -371,7 +372,7 @@ console.log(JSON.stringify({status:'PASS',suite:'library-clear-transaction',faul
 // retirement of its durable journal requires a complete restoration proof.
 {
   const context={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask,structuredClone,crypto:webcrypto};vm.createContext(context);
-  vm.runInContext(fs.readFileSync('source/external/rich-text.js','utf8'),context);
+  vm.runInContext(richTextRuntimeSource(),context);
   for(const file of ['internal','attachments','library-clear'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),context);
   const registry=context[Symbol.for('studyDirector.internalModules.v1')],Clear=registry.require('library-clear',1),Attachments=registry.require('attachments',1),rich=context.StudyDirectorRichText;
   const id='att-'+ 'd'.repeat(32),reference=rich.insertAttachmentReference('',{id,name:'Study diagram',mode:'inline-image'}).value;

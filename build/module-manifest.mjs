@@ -130,7 +130,8 @@ export const externalModules=Object.freeze([
   Object.freeze({id:'guide',source:'external/guide.js',stem:'sd.guide',execution:'on-demand'}),
   Object.freeze({id:'insights',sources:Object.freeze(['external/insights-model.js','external/insights.js']),stem:'sd.insights',execution:'on-demand'}),
   Object.freeze({id:'drive',source:'external/drive.js',stem:'sd.drive',execution:'startup'}),
-  Object.freeze({id:'rich-text',source:'external/rich-text.js',stem:'sd.richtext',execution:'startup'}),
+  // Wordgard is its own module, loaded with (before) Study Director's editor.
+  Object.freeze({id:'rich-text',sources:Object.freeze(['external/wordgard.js','external/rich-text.js']),stem:'sd.richtext',execution:'startup'}),
   Object.freeze({id:'search-worker',source:'external/search-worker.js',stem:'sd.note-search',execution:'worker'}),
   Object.freeze({id:'image-worker',source:'external/image-worker.js',stem:'sd.image-worker',execution:'worker'}),
   Object.freeze({id:'attachment-worker',source:'external/attachment-worker.js',stem:'sd.attachment-worker',execution:'worker'}),

@@ -2,7 +2,7 @@
 
 Status of the work on this branch (`refactor/background-coordination`, draft PR #1). Read sections 1 and 5 first; sections 2 to 4 are closed summaries.
 
-**Current state (2026-10-24):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). Drive sync and profiles (section 5) are done: the small items (5.5), sync (5.1), merge rules (5.2), profiles and device names (5.3, 5.3a), the first-start form (5.4), the removal of what section 5 made redundant, and a fresh audit of the backup system with its fixes (5.6). Release B (removing the readers of older backup formats) waits until "Format cleanup" reads ready on every device in use (5.3a). **Next, last of all:** Wordgard as its own module, with two items to explore alongside it: notification sounds made in code, and the editor toolbar order (section 6).
+**Current state (2026-10-25):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). Drive sync and profiles (section 5) are done: the small items (5.5), sync (5.1), merge rules (5.2), profiles and device names (5.3, 5.3a), the first-start form (5.4), the removal of what section 5 made redundant, and a fresh audit of the backup system with its fixes (5.6). Release B (removing the readers of older backup formats) waits until "Format cleanup" reads ready on every device in use (5.3a). Wordgard is now 0.6.2 and its own module (section 6, done 2026-10-25). Two items noted there are still only to explore: notification sounds made in code, and the editor toolbar order.
 
 ---
 
@@ -280,21 +280,34 @@ For each build step: make all the changes, build, test with two simulated device
 
 ---
 
-## 6. Last of all: Wordgard as its own module (decided 2026-10-11)
+## 6. Done: Wordgard as its own module (decided 2026-10-11, built 2026-10-25)
 
-Do this at the very end, after Drive sync and profiles.
+| What | Where |
+|---|---|
+| Upstream source, exact | `vendor/wordgard` is Wordgard 0.6.2, checked against `build/wordgard-metadata.mjs`. |
+| Wordgard's own module | `source/external/wordgard.js`: readable (not minified), the parts of each Wordgard package the editor uses, on `globalThis.StudyDirectorWordgard`. Entry `rich-text/wordgard-module.ts`. |
+| Study Director's editor | `source/external/rich-text.js` reads Wordgard from that global (`wordgardGlobalPlugin` in `build/wordgard-bundle.mjs`); it holds no Wordgard code. |
+| How they ship | Development and the plain deployment load both as one script, Wordgard first (`rich-text` has two sources in `build/module-manifest.mjs`). The minified deployment (`stage:firebase:minified`) ships the lean build instead: the editor and only the Wordgard code it reaches, tree-shaken and minified together. |
+| Our changes to Wordgard | Build-time rewrites (`build/wordgard-source-patches.mjs`) and runtime additions behind `rich-text/wordgard-adapter.ts`, unchanged in kind. |
+| New version | Replace `vendor/wordgard`, run `npm run build:richtext`; a rewrite whose upstream text moved fails by name. Record the snapshot in `build/wordgard-metadata.mjs`. |
+| Tests | Tests that load the editor read both files through `tests/helpers/rich-text-runtime.mjs`. |
 
-**Already so.**
-- `vendor/wordgard` is the exact upstream source, checked against `build/wordgard-metadata.mjs`.
-- Study Director's few changes are trims applied only at build time (`build/wordgard-source-patches.mjs`) and runtime additions behind `rich-text/wordgard-adapter.ts`.
-- Features use Wordgard's own capabilities where they exist (its Strikethrough mark, its decoration API for search matches); a patch or workaround is the last resort.
+**Checked with 0.6.2: still needed.**
 
-**To do.**
-- Ship Wordgard as its own replaceable module in `source/`, unminified and untouched, separate from Study Director's editor code (`source/external/rich-text.js` currently holds both, already minified).
-- Build the lean version only when the minified deployment is made: tree-shaken to what Study Director uses, with the build-time trims applied.
-- A newer Wordgard then drops in by replacing that one module; the build names any trim whose upstream text moved.
-- At the same time, check whether newer Wordgard versions make the two runtime workarounds (`inert-html.ts`, `cut.ts`) or the build-time trims unnecessary, and drop those that are.
-- Ship only what Study Director uses, so the payload stays as small as possible.
+| Workaround | Why it stays |
+|---|---|
+| `inert-html.ts` and the two parsing rewrites | Wordgard still creates a Trusted Types policy on every HTML parse, which the app's policy list refuses. |
+| `cut.ts` | Copy and cut still read the selection without first reading the DOM, and `deleteByCut` still maps to no command. |
+| `Node.slice` rewrite | Still spelled in a way esbuild rejects. |
+| History menu trim | Upstream history still ships undo/redo menu buttons. |
+
+**Changes for 0.6.**
+- Position sets come from `wordgard/set`; `create` takes `[value, pos]` and `[value, from, to]`.
+- Pastes arrive as `beforeinput` `insertFromPaste` (an `InputEvent` with `dataTransfer`). Browser tests send the paste the way the browser does (`pasteInPage` in `tests/helpers/browser-harness.mjs`).
+- `Decoration.Tag.shape.dynamic` is now `.derived`.
+- Wordgard re-renders an atom's attributes from its shape. Audio is therefore drawn with its loaded address and status, as images are, and the editor no longer marks the player with its own attributes.
+- Key bindings carry descriptions from Wordgard's phrase table, so the module includes it (about 120 lines).
+- Size: the lean deployment build grew from 112.2 KB to 115.8 KB Brotli.
 
 **Also to explore with it (noted 2026-10-17; not yet audited or built).**
 

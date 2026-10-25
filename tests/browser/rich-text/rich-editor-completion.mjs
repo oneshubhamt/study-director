@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {launchChromium,waitFor} from '../../helpers/browser-harness.mjs';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
-const bundle=fs.readFileSync('source/external/rich-text.js','utf8');
+const bundle=richTextRuntimeSource();
 const browser=await launchChromium({profilePrefix:'qa-editor-completion-'});let page;
 const keySpec=value=>({ArrowDown:{code:'ArrowDown',keyCode:40},ArrowUp:{code:'ArrowUp',keyCode:38},Home:{code:'Home',keyCode:36},End:{code:'End',keyCode:35},Enter:{code:'Enter',keyCode:13},Backspace:{code:'Backspace',keyCode:8}}[value]||{code:value,keyCode:0});
 const key=async(value,modifiers=0)=>{const {code,keyCode}=keySpec(value),payload={key:value,code,modifiers,windowsVirtualKeyCode:keyCode,nativeVirtualKeyCode:keyCode};await page.send('Input.dispatchKeyEvent',{type:'keyDown',...payload});await page.send('Input.dispatchKeyEvent',{type:'keyUp',...payload})};

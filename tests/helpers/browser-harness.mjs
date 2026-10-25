@@ -30,6 +30,10 @@ function contentType(name){
   return 'application/octet-stream';
 }
 
+// A paste as the browser delivers it, for use inside page.evaluate: the
+// "paste" event, then (unless a handler took it) "beforeinput" insertFromPaste
+// carrying the data and the selection's range. Wordgard reads the second.
+export const pasteInPage=`((target,data)=>{const paste=new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true});target.dispatchEvent(paste);if(paste.defaultPrevented)return paste;const selection=getSelection(),range=selection&&selection.rangeCount?selection.getRangeAt(0):null;const input=new InputEvent('beforeinput',{inputType:'insertFromPaste',dataTransfer:data,targetRanges:range?[new StaticRange(range)]:[],bubbles:true,cancelable:true});target.dispatchEvent(input);return input;})`;
 export function withoutPwaChecks(html){
   return html.replace(/void PwaLifecycle\.install\(\)(?:\.then\(\(\)=>schedulePwaUpdateCheck\(750\)\))?;/,'/* Dedicated PWA browser tests cover installation. */')
     .replace(/async function checkPwaUpdateIfDue\([^\n]+\)\{/,'$& return false; /* Dedicated PWA browser tests cover update checks. */');

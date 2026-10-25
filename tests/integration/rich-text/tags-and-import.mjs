@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {importRichTextNoteTextSource} from '../../helpers/typescript-source.mjs';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
 // Tags are read from note text by one set of rules, and renaming one changes
 // only the text: links, attachments and other tags stay as they are.
 const text=await importRichTextNoteTextSource();
-const richSandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask};richSandbox.globalThis=richSandbox;vm.createContext(richSandbox);vm.runInContext(fs.readFileSync('source/external/rich-text.js','utf8'),richSandbox);
+const richSandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask};richSandbox.globalThis=richSandbox;vm.createContext(richSandbox);vm.runInContext(richTextRuntimeSource(),richSandbox);
 const rich=richSandbox.StudyDirectorRichText;
 const plain=value=>[...value];
 

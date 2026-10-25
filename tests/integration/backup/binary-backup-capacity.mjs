@@ -6,10 +6,11 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {PRODUCTION_LIMITS as limits} from '../../../contracts/production-limits.mjs';
 import {testPendingReviewCodec} from '../../helpers/pending-review-codec.mjs';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
 const read=file=>fs.readFileSync(new URL('../../../'+file,import.meta.url),'utf8');
 for(const file of ['source/core/internal.js','source/core/persistence.js','source/core/record-codecs.js','source/core/backup-codec.js'])vm.runInThisContext(read(file),{filename:file});
-const richSandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask};vm.createContext(richSandbox);vm.runInContext(read('source/external/rich-text.js'),richSandbox,{filename:'rich-text.js'});
+const richSandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask};vm.createContext(richSandbox);vm.runInContext(richTextRuntimeSource(),richSandbox,{filename:'rich-text.js'});
 const richApi=vm.runInContext('globalThis.StudyDirectorRichText',richSandbox);
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],Persistence=registry.require('persistence',1),freeze=Object.freeze;
 const RecordCodecs=registry.require('record-codecs',1);

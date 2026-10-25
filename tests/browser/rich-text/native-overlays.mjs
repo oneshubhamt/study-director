@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import {artifactPath,writeArtifact} from '../../helpers/artifacts.mjs';
 import fs from 'node:fs';
 import {launchChromium,startReleaseServer,waitForStudyDirector,waitFor,sleep} from '../../helpers/browser-harness.mjs';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
-const bundle=fs.readFileSync('source/external/rich-text.js','utf8');
+const bundle=richTextRuntimeSource();
 const browser=await launchChromium({profilePrefix:'qa-overlays-'});
 const results=[];
 let server;

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {launchChromium} from '../../helpers/browser-harness.mjs';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
-const bundle=fs.readFileSync('source/external/rich-text.js','utf8');
+const bundle=richTextRuntimeSource();
 const id='img-12345678901234567890';
 const value='WG1:'+JSON.stringify({version:1,doc:{type:'Doc',content:[
   {type:'Heading',param:2,marks:{SDLineHeight:1.55},content:[{type:'Text',param:'Typography probe'}]},

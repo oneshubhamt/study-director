@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {buildSearchWorkerBundle,buildWordgardBundle} from '../../../build/wordgard-bundle.mjs';
+import {buildSearchWorkerBundle,buildLeanRichText} from '../../../build/wordgard-bundle.mjs';
 
 const buildSource=fs.readFileSync('build/wordgard-bundle.mjs','utf8');
-const bundle=await buildWordgardBundle();
+const bundle=await buildLeanRichText();
 const searchWorker=await buildSearchWorkerBundle();
 
 // Retain editor semantics while admitting the reviewed CR2/CR3 reconciliation engine module and
 // the adapter's cut handling, which replaced a rewrite of upstream input.ts.
-assert.ok(bundle.inputs.length<=66,`Wordgard/reconciliation boundary unexpectedly widened the reviewed graph: ${bundle.inputs.length} modules.`);
+// Wordgard 0.6 moved position sets into their own package (6 modules) and its
+// key bindings carry descriptions from its phrase table.
+assert.ok(bundle.inputs.length<=77,`Wordgard/reconciliation boundary unexpectedly widened the reviewed graph: ${bundle.inputs.length} modules.`);
 for(const retained of [
   'vendor/wordgard/src/table/cellselection.ts',
   'vendor/wordgard/src/table/correct.ts',
@@ -28,9 +30,11 @@ assert.doesNotMatch(buildSource,/\btoplevel\s*:\s*true\b/u,'Pass E must not intr
 // into the editor runtime for scratch-note comparison while Wordgard upstream remains unchanged.
 // Ancestor-aware three-way reconciliation and the read-only imported editor define the current graph;
 // grouped publishing for large documents added about 0.2 KB, and cut handling as an adapter
-// extension instead of an upstream rewrite about 0.2 KB more. Keep a tight 108,400 B Brotli ceiling
-// around the reviewed baseline so future growth requires explicit review.
-assert.ok(bundle.metrics.brotli<=108400,`Rich-text Brotli bundle exceeded the reviewed reconciliation ceiling: ${bundle.metrics.brotli} bytes.`);
+// extension instead of an upstream rewrite about 0.2 KB more. The 108,400 B ceiling had fallen
+// behind (Wordgard 0.5.2 built to 112,189 B); Wordgard 0.6.2 adds about 3.6 KB (its position-set
+// package and English phrase table). Keep a tight 116,500 B Brotli ceiling around the reviewed
+// baseline so future growth requires explicit review. This is the lean deployment build.
+assert.ok(bundle.metrics.brotli<=116500,`Rich-text Brotli bundle exceeded the reviewed reconciliation ceiling: ${bundle.metrics.brotli} bytes.`);
 
 console.log(JSON.stringify({
   status:'PASS',

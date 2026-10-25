@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {PRODUCTION_LIMITS as limits} from '../../../contracts/production-limits.mjs';
 import {testPendingReviewCodec} from '../../helpers/pending-review-codec.mjs';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
 const read=file=>fs.readFileSync(new URL('../../../'+file,import.meta.url),'utf8');
 for(const file of ['source/core/internal.js','source/core/persistence.js','source/core/record-codecs.js','source/core/backup-codec.js'])vm.runInThisContext(read(file),{filename:file});
@@ -15,7 +16,7 @@ const BackupCodecs=registry.require('backup-codec',1);
 const Persistence=registry.require('persistence',1),freeze=Object.freeze,MiB=1024*1024;
 
 const richSandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask};
-vm.createContext(richSandbox);vm.runInContext(read('source/external/rich-text.js'),richSandbox,{filename:'rich-text.js'});
+vm.createContext(richSandbox);vm.runInContext(richTextRuntimeSource(),richSandbox,{filename:'rich-text.js'});
 const rich=vm.runInContext('globalThis.StudyDirectorRichText',richSandbox);
 assert.equal(limits.backupMaxEntryBytes,5*MiB);
 assert.equal(limits.backupMaxLineBytes,16*MiB);

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {launchChromium,waitFor} from '../../helpers/browser-harness.mjs';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
-const bundle=fs.readFileSync('source/external/rich-text.js','utf8');
+const bundle=richTextRuntimeSource();
 const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 const ids=['img-12345678901234567890','img-abcdefghijklmnopqrstuv'];
 const value=id=>'WG1:'+JSON.stringify({version:1,doc:{type:'Doc',content:[{type:'SDImage',param:{assetId:id,alt:'',widthPct:68}},{type:'Paragraph',content:[{type:'Text',param:'After image'}]}]}});

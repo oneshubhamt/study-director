@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {launchChromium} from '../../helpers/browser-harness.mjs';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 const internal=fs.readFileSync('source/core/internal.js','utf8');
 const overlayModule=fs.readFileSync('source/core/workspace-overlay.js','utf8');
 const css=fs.readFileSync('source/styles/core.css','utf8');
-const bundle=fs.readFileSync('source/external/rich-text.js','utf8');
+const bundle=richTextRuntimeSource();
 const browser=await launchChromium({profilePrefix:'qa-mobile-rich-editor-'});let page;
 const metrics={width:390,height:844,deviceScaleFactor:3,mobile:true};
 try{

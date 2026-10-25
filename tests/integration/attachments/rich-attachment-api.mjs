@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
-const source=fs.readFileSync('source/external/rich-text.js','utf8');
+const source=richTextRuntimeSource();
 const sandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask,structuredClone};sandbox.globalThis=sandbox;vm.createContext(sandbox);vm.runInContext(source,sandbox,{filename:'rich-text.js'});
 const rich=sandbox.StudyDirectorRichText;
 const A='att-1234567890abcdefghij',B='att-abcdefghij1234567890';

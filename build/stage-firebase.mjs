@@ -3,7 +3,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 import {renderBuild,validateBuild,releaseIdentity} from './build.mjs';
-import {platformFiles} from './module-manifest.mjs';
+import {platformFiles,externalModules} from './module-manifest.mjs';
 import {trustedTypesEnforcementCandidate} from './security-candidate.mjs';
 import {deploymentDirectoryName} from '../release.config.mjs';
 
@@ -57,7 +57,16 @@ if(JSON.stringify(publicFiles)!==JSON.stringify(expectedPublicFiles)){
 let minifiedStage=null;
 if(process.argv.includes('--minified')){
   minifiedStage=path.join(root,'dist',deploymentDirectoryName);
-  const minified=spawnSync('python3',[path.join(root,'build','minify-release.py'),stage,minifiedStage],{cwd:root,encoding:'utf8'});
+  // The minified deployment ships the lean rich-text build: the editor and only
+  // the Wordgard code it reaches, in place of the two separate modules.
+  // Only this step needs the npm build tools; plain staging works from source alone.
+  const {buildLeanRichText}=await import('./wordgard-bundle.mjs');
+  const lean=(await buildLeanRichText()).source.replaceAll('@@SD_RELEASE@@',releaseIdentity().release);
+  if(lean.includes('@@SD_'))throw new Error('The lean rich-text build has an unrendered token.');
+  const leanFile=path.join(root,'dist','rich-text.lean.js');write(leanFile,lean);
+  const richText=externalModules.find(module=>module.id==='rich-text');
+  const minified=spawnSync('python3',[path.join(root,'build','minify-release.py'),stage,minifiedStage,'--substitute',`${richText.stem}=${leanFile}`],{cwd:root,encoding:'utf8'});
+  fs.rmSync(leanFile,{force:true});
   if(minified.status!==0)throw new Error(minified.stderr||minified.stdout||'Minified Firebase staging failed.');
 }
 console.log(JSON.stringify({status:'PASS',release:releaseIdentity().release,stage,minifiedStage,publicFiles:publicFiles.length,project:firebaseProjectId,supportFiles:['firebase.json','firebase.enforcement-candidate.json','.firebaserc',supportName,...supportDocs]},null,2));
