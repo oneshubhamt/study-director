@@ -86,7 +86,7 @@ for(const failure of ['read','write']){
     readHostAppMetaValue:async()=>{if(failure==='read')throw new Error('read unavailable');return {version:1,checkedAt:'',issues:[{id:'asset-good',kind:'size-mismatch'}]};},
     writeHostAppMetaValue:async(_,__,options)=>{writes++;assert.equal(options.strict,true);throw new Error('write unavailable');},
     AttachmentStorage:{supported:()=>true,shallowAudit:async()=>({checked:1,issues:[]})},AttachmentReferences:{sources:async()=>[{ids:['asset-good']}]},
-    AppDiagnostics:{capture(){}},BackupOperationDiagnostics:{start:()=>'',mark(){},finish(){},fail(){}},appCanMutate:()=>true,backgroundMaintenanceForegroundBusy:()=>false,
+    AppDiagnostics:{capture(){}},BackupOperationDiagnostics:{start:()=>'',mark(){},finish(){},fail(){}},appCanMutate:()=>true,UnsupportedData:{held:()=>false},backgroundMaintenanceForegroundBusy:()=>false,
     BackgroundTasks:{yieldTask:async()=>{},budget:()=>()=>false},markStorageHealthError(){},markStorageHealthOk(){cleared++;},invalidateAttachmentLibrary(){},
     setTimeout:(_fn,ms)=>{scheduled.push(ms);return scheduled.length;},clearTimeout(){}
   });

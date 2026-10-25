@@ -1,6 +1,6 @@
 # Background coordination: recovery and protected cleanup
 
-4 October 2026. Branch: `refactor/background-coordination`. The current correction addresses the two confirmed blockers from the fresh source audit: Notes recovery could replace an intervening edit, and Drive cleanup could retry indefinitely while its metadata requests succeeded.
+4 October 2026. Branch: `refactor/background-coordination`. A dated record: what it says about retention and the safety snapshot was true then; `BACKUP-ENGINE.md` describes them today (each device keeps its newest protected safety version), and later audits are listed in `HANDOFF.md`. The current correction addresses the two confirmed blockers from the fresh source audit: Notes recovery could replace an intervening edit, and Drive cleanup could retry indefinitely while its metadata requests succeeded.
 
 ## Recovery ownership
 

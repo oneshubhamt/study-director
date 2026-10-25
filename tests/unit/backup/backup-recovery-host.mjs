@@ -23,7 +23,7 @@ const driveEntry=freeze({logicalId:'state_'+'b'.repeat(64),logicalFingerprint:'b
 let deviceHistory=freeze({available:true,sourceId:'device-folder',sourceLabel:'Device Folder',entries:freeze([deviceEntry])});
 const driveHistory=freeze({available:true,sourceId:'google-drive',sourceLabel:'Google Drive',entries:freeze([driveEntry])});let driveHistoryNow=driveHistory;
 
-function node(){return {dataset:{},hidden:false,textContent:'',className:'',open:false,children:[],append(...items){this.children.push(...items);},appendChild(item){this.children.push(item);},replaceChildren(...items){this.children=[...items];},showModal(){this.open=true;},close(){this.open=false;}};}
+function node(){const made={dataset:{},attributes:{},hidden:false,textContent:'',className:'',open:false,children:[],setAttribute(name,value){this.attributes[name]=String(value);},append(...items){this.children.push(...items);},appendChild(item){this.children.push(item);},replaceChildren(...items){this.children=[...items];},showModal(){this.open=true;},close(){this.open=false;}};made.classList={add:(...names)=>{made.className=[...new Set([...made.className.split(/\s+/u).filter(Boolean),...names])].join(' ');},contains:name=>made.className.split(/\s+/u).includes(name)};return made;}
 const nodes=new Map([['managed-version-history',node()],['managed-version-history-kicker',node()],['managed-version-history-title',node()],['managed-version-history-copy',node()],['managed-version-history-progress',node()],['managed-version-history-progress-stage',node()],['managed-version-history-progress-detail',node()],['managed-version-history-list',node()],['managed-version-history-status',node()],['cancel-backup-import',node()]]);
 const document={getElementById:id=>nodes.get(id)||null,createElement:()=>node()};
 const plan={input:null,cached:'',persisted:'',stored:'',writable:true,saves:[]};
@@ -268,7 +268,9 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   assert.deepEqual(listed[1].copies.map(at=>at.sourceId),['device-folder']);assert.deepEqual(listed[2].copies.map(at=>at.sourceId),['google-drive']);
   assert.equal(nodes.get('managed-version-history-status').textContent,'3 versions. 1 can’t be read by this app.');
   assert.equal(cards[0].children[0].children[1].textContent,'Can’t be read by this app');assert.match(cards[0].children[1].children[0].children[0].textContent,/newer Study Director, or the file is damaged/u);
-  const remove=cards[0].children[1].children[1].children[0];assert.equal(remove.dataset.action,'remove-managed-version');assert.equal(cards[0].children[1].children[1].children.length,1,'no Restore for it');
+  const [restore,remove]=cards[0].children[1].children[1].children;assert.equal(cards[0].children[1].children[1].children.length,2);
+  assert.ok(cards[0].classList.contains('unreadable')&&cards[0].attributes['aria-disabled']==='true','it shows muted');assert.equal(restore.disabled,true,'Restore is there but disabled');
+  assert.equal(remove.dataset.action,'remove-managed-version');assert.ok(remove.classList.contains('danger')&&!remove.disabled,'Remove is red and enabled');
   assert.match(cards[3].children[0].children[1].textContent,/^Locked: enter the backup password/u);
   // Restore: the Device Folder's read fails before anything changed, so Drive's copy is read.
   let driveRestored='';providerRestoreImpl=async(id,options)=>{driveRestored=`${id}:${options.checkpointId}`;return freeze({ok:true});};
@@ -280,7 +282,7 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   assert.equal(await host.history.recover({target:{closest:()=>nodes.get('managed-version-history-list').children[2].children[1].children[1].children[0]}}),false);assert.equal(driveRestored,'');
   // Remove asks first, then removes it from the list.
   await host.history.open();await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(await host.history.removeVersion({target:{closest:()=>nodes.get('managed-version-history-list').children[0].children[1].children[1].children[0]}}),true);
+  assert.equal(await host.history.removeVersion({target:{closest:()=>nodes.get('managed-version-history-list').children[0].children[1].children[1].children[1]}}),true);
   assert.deepEqual(removedVersions.at(-1),['device-folder',CHECKPOINT('u')]);assert.ok(host.history.status().entries.every(item=>item.location.tier!=='unreadable'));assert.equal(nodes.get('managed-version-history-status').textContent,'Version removed.');
   providerRestoreImpl=async()=>freeze({ok:true});deviceHistory=previous;driveHistoryNow=driveHistory;driveConnected=false;host.history.close();
 }

@@ -804,7 +804,7 @@ registry.define('backup-provider',1,input=>{
       }));
     }finally{if(copied)await copied.release().catch(()=>{});if(continuation&&!continuation.status().pending)await discardProviderPublication(publicationOwner);if(publicationLease){const lease=publicationLease;publicationLease=null;OperationDiagnostics.mark('provider-publication-release-start',{provider:selected.id});const released=await endRepositoryPublication(signal&&signal.aborted?publicationOwner:selected,lease);OperationDiagnostics.mark('provider-publication-release-complete',{provider:selected.id,released});if(released&&maintenanceHooks){const pending=await maintenanceState(publicationOwner);if(pending&&String(pending.reason||'')==='publication-contention'&&!maintenanceActionable(pending))await providerMaintenanceScheduler(publicationOwner)?.request('repository-state',MAINTENANCE_POLICY.busyMs,{mode:'replace'});}}}
     const warning=[String(published&&published.warning||''),String(published&&published.cleanupResult&&published.cleanupResult.warning||'')].filter(Boolean).join(' '),item=published&&published.publication||{};
-    clearRecentHistory(selected);if(role==='normal'&&(!copy||copy.current)){placedSpine(published.checkpointId,publicationOwner);if(publicationOwner.shared)syncState(publicationOwner).syncedAt=new Date().toISOString();}
+    clearRecentHistory(selected);if(role==='normal'&&(!copy||copy.current)){placedSpine(published.checkpointId,publicationOwner);if(publicationOwner.shared)syncState(publicationOwner).failed=false;if(publicationOwner.shared)syncState(publicationOwner).syncedAt=new Date().toISOString();}
     return Object.freeze({name:item.name||published.checkpointId,unchanged:published.unchanged===true,checkpointId:published.checkpointId,manifest:published.manifest,warning,maintenancePending:deferredMaintenance&&maintenanceQueued,sourceRevision:published.sourceRevision,requestId:publication?.requestId||String(pendingIntent?.requestedAt||''),objectsWritten:published.objectsWritten,objectsReused:published.objectsReused,writtenBytes:published.writtenBytes,attachmentBytesWritten:published.attachmentBytesWritten});
   }
   // The protected safety version of the device that made checkpointId.
@@ -951,8 +951,8 @@ registry.define('backup-provider',1,input=>{
   // Waiting for another device's upload asks again after 15 seconds, then a
   // minute, then every five minutes, up to the turn window.
   const SYNC_RECHECK_MS=60*1000,SYNC_TURN_WINDOW_MS=15*60*1000,SYNC_TURN_RETRY_DELAYS=freeze([15*1000,60*1000,5*60*1000]),syncByProvider=new Map();
-  function syncState(selected){const id=safeId(selected&&selected.id);let state=syncByProvider.get(id);if(!state){state={checkedAt:0,review:'',password:'',newer:'',catching:false,behind:false,syncedAt:'',waitedAt:0,turnWaits:0};syncByProvider.set(id,state);}return state;}
-  function syncView(selected){const state=syncState(selected);return freeze({syncedAt:state.syncedAt,review:!!state.review,password:!!state.password,newer:!!state.newer,syncing:state.catching});}
+  function syncState(selected){const id=safeId(selected&&selected.id);let state=syncByProvider.get(id);if(!state){state={checkedAt:0,review:'',password:'',newer:'',catching:false,behind:false,failed:false,syncedAt:'',waitedAt:0,turnWaits:0};syncByProvider.set(id,state);}return state;}
+  function syncView(selected){const state=syncState(selected);return freeze({syncedAt:state.syncedAt,review:!!state.review,password:!!state.password,newer:!!state.newer,failed:!!state.failed,syncing:state.catching});}
   function sharedSyncing(selected){return !!selected?.shared&&!!selected.repository&&!!pendingRetryHooks&&providerConnected(selected);}
   function sharingActive(){return [...providers.values()].some(sharedSyncing);}
   // Drive's newest ordinary version, when this device has not taken it in.
@@ -990,6 +990,11 @@ registry.define('backup-provider',1,input=>{
     if(['connection','registered','sync'].includes(reason)||reason.startsWith('flush:'))return true;
     return since>=(['activation','resume','foreground-released'].includes(reason)?SYNC_RECHECK_MS:AUTOMATIC_QUIET_MS);
   }
+  // Not after a failed catch-up: that one waits for its retry.
+  function syncRecheckDue(selected,trigger){
+    if(!['activation','resume','foreground-released'].includes(String(trigger||''))||!sharedSyncing(selected))return false;
+    const state=syncState(selected);return !state.behind&&!state.catching&&Date.now()-state.checkedAt>=SYNC_RECHECK_MS;
+  }
   function syncError(code,message){const error=new Error(message);error.code=code;error.studyDirectorDriveNoRetry=true;return error;}
   // Take in Drive's newest version quietly. What it cannot settle on its own
   // waits for the person; their Combine of that version resumes the sync.
@@ -1003,7 +1008,7 @@ registry.define('backup-provider',1,input=>{
         if(['BACKUP_LOCKED','BACKUP_AUTH_FAILED'].includes(String(error?.code||''))){state.password=head.item.id;summary.finish({message:`${selected.label} needs this profile’s backup password.`,outcome:'sync-password'});presentation.notice(selected.id,'sync-password',`Your backup password was set or changed on another device. Enter it to keep syncing with ${selected.label}.`);}
         // A version this build cannot read is not retried: sync waits on it.
         else if(error?.repositoryUnreadable===true||String(error?.code||'')==='BACKUP_ENCRYPTION_UNSUPPORTED'){markUnreadable(selected,head.item.id);summary.finish({message:`${selected.label} has a version this app can’t read.`,outcome:'sync-newer'});waitForNewerVersion(selected,head.item.id);}
-        else{AppDiagnostics.capture('backup-provider.sync-catch-up',error,'warn');state.behind=true;summary.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'failed'});schedulePendingProviderBackup(selected,nextConvergenceRetryDelay(selected,{sync:true}));}
+        else{AppDiagnostics.capture('backup-provider.sync-catch-up',error,'warn');state.behind=true;state.failed=true;summary.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'failed'});schedulePendingProviderBackup(selected,nextConvergenceRetryDelay(selected,{sync:true}));}
       }
       finally{state.catching=false;notifyStatus();}
     },0);
@@ -1013,7 +1018,7 @@ registry.define('backup-provider',1,input=>{
     const state=syncState(selected);
     if(result&&result.cancelled&&result.reason==='needs-decision'){state.review=headId;summary?.finish({message:`${selected.label} has changes that need your review.`,outcome:'sync-review'});presentation.notice(selected.id,'sync-review',`${selected.label} has changes from another device that need your review.`);}
     else if(result&&result.cancelled){state.behind=true;summary?.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'cancelled'});schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS);}
-    else{state.review='';state.password='';state.syncedAt=new Date().toISOString();resetConvergenceRetry(selected);presentation.resolve(selected.id,'sync-review');presentation.resolve(selected.id,'sync-password');summary?.finish({message:`Synced with ${selected.label}.`,outcome:'sync-complete'});if(automaticWaiting(selected))schedulePendingProviderBackup(selected,1000);}
+    else{state.review='';state.password='';state.failed=false;state.syncedAt=new Date().toISOString();resetConvergenceRetry(selected);presentation.resolve(selected.id,'sync-review');presentation.resolve(selected.id,'sync-password');summary?.finish({message:`Synced with ${selected.label}.`,outcome:'sync-complete'});if(automaticWaiting(selected))schedulePendingProviderBackup(selected,1000);}
   }
   // The person enters the password the newest version needs; the sync then
   // takes that version in and keeps the password for this device.
@@ -1135,7 +1140,7 @@ registry.define('backup-provider',1,input=>{
           if(ahead&&sync.review!==ahead.item.id){scope.release();scope=null;catchUpSharedProvider(selected,ahead);return finish('deferred','catching-up');}
           if(ahead)return finish('idle','needs-review');
           if(sync.review){sync.review='';presentation.resolve(selected.id,'sync-review');}
-          sync.syncedAt=new Date().toISOString();notifyStatus();
+          sync.failed=false;sync.syncedAt=new Date().toISOString();notifyStatus();
           if(!owed&&!automaticNeeded(selected)&&!fillDue){resetConvergenceRetry(selected);return finish('completed','in-sync');}
         }
         // Nothing to back up: fill in a version another location holds.
@@ -1178,8 +1183,12 @@ registry.define('backup-provider',1,input=>{
     if(!selected?.repository)return false;
     try{
       // Declare every job before the owner reconciles eligibility and intent.
-      providerMaintenanceScheduler(selected);providerIntegrityScheduler(selected);providerConvergenceJob(selected);
-      return providerBackground(selected).wake(trigger);
+      providerMaintenanceScheduler(selected);providerIntegrityScheduler(selected);const job=providerConvergenceJob(selected);
+      const woke=providerBackground(selected).wake(trigger);
+      // Coming back to the app a minute or more after the last check looks
+      // at Drive now; a wake keeps an already scheduled run where it is.
+      if(woke&&job&&syncRecheckDue(selected,trigger))job.schedule(0,String(trigger),'earliest');
+      return woke;
     }catch(error){AppDiagnostics.capture('backup-provider.background-configuration',error,'error');return false;}
   }
   // After a restore, every other location that backs up on its own picks up

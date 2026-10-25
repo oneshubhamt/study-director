@@ -191,3 +191,29 @@ Each point below was checked in the code.
 | 5 | L3 | Small | D1 |
 | 6 | C1–C3 and W1–W4 | Small | D2 (for W3) |
 | 7 | T4 | Medium | No |
+
+## Status
+
+Every finding is fixed on this branch. Your answers: D1, keep Remove and never break on data this build cannot read; D2, "Last synced" after a failed sync.
+
+| # | Fixed | Where |
+|---|---|---|
+| M1 | A failed or cancelled catch-up marks the location behind, so its retry looks again; a success resets the count | `backup-provider.js` |
+| L1 | Markers carry the device; this device's own leftover no longer makes it wait. Turn retries back off: 15 s, 1 min, 5 min | `backup-provider.js`, `drive.js`, `device-backup.js` |
+| L2 | Device Folder preparation waits for the shared gate and holds a Web Lock around the one-time move | `device-backup.js`, `app.html` |
+| L3 | A Drive version this build cannot read makes sync wait: one notice, "Needs app update", no retry ladder, no upload over it. It shows muted in Version History with Restore disabled and a red Remove. Data this build cannot read on this device is kept as it is (`ARCHITECTURE.md` section 2) | `backup-provider.js`, `persistence.js`, `app.html` |
+| L4 | "Drive sync" and "Profiles" rows in Copy diagnostics | `backup-operation-diagnostics.js`, `app.html` |
+| C1 | Four rows added to the map | `HANDOFF.md` section 4 |
+| C2 | The gate paragraph names Device Folder preparation and profile removal; "going to the background with changes waiting" | `BACKGROUND-OPERATIONS.md` |
+| C3 | Linked as the 4 October record, with a note that `BACKUP-ENGINE.md` describes retention today | `BACKGROUND-OPERATIONS.md`, `BACKGROUND-AUDIT.md` |
+| W1 | Back up now and Version History say "Syncing with Google Drive…" while greyed out | `app.html` |
+| W2 | "Syncing with Google Drive keeps failing…" | `backup-provider.js` |
+| W3 | "Last synced 10:42" after a failed sync, until one succeeds | `backup-presentation.js` |
+| W4 | Goes with L1 | — |
+| T1 | Failed catch-up retried on the backoff | `automatic-provider-backup.mjs` |
+| T2 | A leftover marker from this device | `repository-checkpoint.mjs` |
+| T3 | Two tabs with the old single folder | `device-folder` integration suites |
+| T4 | Two browsers share a simulated Drive: a sign-in kept across a reload, the second device receiving notes, the check on return, adding, switching and removing a profile | `tests/browser/backup/sync-and-profiles.mjs` |
+| T5 | Rejects a Device Folder writer outside the gate | `background-work-contract.mjs` |
+
+T4 found one more bug, now fixed: coming back to the app a minute after the last check did not check Drive. The wake kept the next scheduled check, up to 20 minutes away. It now checks at once, except after a failed catch-up, which keeps its backoff (`automatic-provider-backup.mjs` covers it).

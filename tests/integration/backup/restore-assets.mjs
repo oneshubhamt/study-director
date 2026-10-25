@@ -65,7 +65,7 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
   domain:freeze({clampText,filenameSafeStudentName:()=> 'student',getStudentName:()=> 'Student',materializeDailyRecordView:v=>v,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-08-31'}),
   view:freeze({presentation:createBackupPresentation(),refreshPnote:fn,refreshReview:fn,renderSchedule:fn}),
   events:freeze({libraryChanged:fn,backupCompleted:fn,reconcileNotes:async payload=>{events.push('reconcile-notes');notes={...notes,...payload};return notes;},restoreNotesSnapshot:async payload=>{notes={...payload};return notes;},restoreSessionState:async()=>true,verifyActiveSessionRuntime:async()=>true,restoredFromFile:()=>false}),
-  operations:freeze({assertAuthority:()=>true,clearFault:fn,failClosed:fn,runExclusive:async(kind,op)=>op()}),interactions:freeze({choose:async()=>null,configure:async()=>configureResult,notify:fn}),
+  operations:freeze({canShare:()=>true,assertAuthority:()=>true,clearFault:fn,failClosed:fn,runExclusive:async(kind,op)=>op()}),interactions:freeze({choose:async()=>null,configure:async()=>configureResult,notify:fn}),
   environment:freeze({AbortController,clearTimeout,yieldTask:async()=>{},setTimeout:cb=>{cb();return 1;}}),diagnostics:freeze({capture:fn,start:()=>'',mark:()=>false,finish:()=>false,fail:()=>false})
 })}));
 

@@ -12,7 +12,9 @@ const freeze=Object.freeze,noop=()=>{},MINUTE=60*1000;
 // computer that uses both.
 // shared, driveList, driveDownload and sharedBase: Drive as the shared
 // location with versions of its own, for the sync catch-up.
-function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shared=both,driveList=null,driveDownload=null,sharedBase=async()=>null}={}){
+// share: whether this device may upload to the shared location (no while it
+// holds data from a newer version).
+function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shared=both,driveList=null,driveDownload=null,sharedBase=async()=>null,share=()=>true}={}){
   const clock=createFakeClock('2026-10-06T08:00:00.000Z'),emitted=[],publishedAt=[],publishedBy=[],coveredBy=new Map();
   let current=new clock.Date().toISOString(),authorized=signedIn,expiresAt=clock.now()+expiresInMs,listener=null,publicationHook=noop,durable=null;
   const context={Object,Symbol,TypeError,Error,Date:clock.Date,AbortController,Blob,Promise,Map,Set,TextEncoder,Uint8Array,console,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout};context.globalThis=context;vm.createContext(context);
@@ -33,7 +35,7 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shar
     scrub:async()=>({status:'completed',complete:true}),cleanup:async()=>({gcPending:false}),retention:freeze({}),validatePolicy:noop,classifyState:()=>({committed:[],uncommitted:[],orphanCommits:[],invalidPairs:[]}),activeProtected:()=>null,selectRetention:()=>({retained:[],remove:[]}),projectHistory:()=>[],markCompleted:({copy})=>{if(copy)coveredBy.set(copy.source,copy.sourceRevision);}});
   const runtime=registry.require('backup-provider',1,freeze({repositoryPolicy:policy})).createRuntime(freeze({background:freeze({format:background.format,contractVersion:1,createCoordinator:background.createCoordinator,maintenance:background.maintenance,maintenanceActionable:background.maintenanceActionable}),repository:pipeline,ports:freeze({
     configuration:freeze({appVersion:'qa'}),controller:freeze({beginImport:()=>freeze({cancel:noop}),cancelImport:noop,finishImport:noop}),exports:freeze({followProtection:async()=>false,run:unexpected}),domain:freeze({clampText:value=>String(value||'')}),view:freeze({presentation}),
-    ownership:freeze({canRunBackground:()=>true,requireMutationControl:noop}),environment:freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}),diagnostics:freeze({capture:noop,start:()=>'trace',mark:noop,finish:noop,fail:noop})
+    ownership:freeze({canShare:()=>share(),canRunBackground:()=>true,requireMutationControl:noop}),environment:freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}),diagnostics:freeze({capture:noop,start:()=>'trace',mark:noop,finish:noop,fail:noop})
   })}));
   const connected=()=>authorized&&clock.now()<expiresAt;
   if(both)runtime.register(freeze({id:'device-folder',label:'Device Folder',connected:()=>true,backgroundAvailable:()=>true,
@@ -43,7 +45,7 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shar
   runtime.configurePendingBackupRetry(freeze(pending));
   runtime.configureAutomaticBackup(freeze({covered:id=>coveredBy.has(id)?coveredBy.get(id):covered,current:()=>current}));
   return {
-    clock,runtime,policy:policy.protocol,publishedAt,publishedBy,onPublication:fn=>{publicationHook=fn;},
+    clock,runtime,presentation,policy:policy.protocol,publishedAt,publishedBy,onPublication:fn=>{publicationHook=fn;},
     change:(urgent=false)=>{current=new clock.Date(clock.now()).toISOString();runtime.noteChange({urgent});},
     expire:()=>{expiresAt=clock.now();listener?.();},
     signIn:(lifetime=59*MINUTE)=>{authorized=true;expiresAt=clock.now()+lifetime;listener?.();},
@@ -137,6 +139,8 @@ const cases=[];
     driveDownload:async()=>{reads.push(t.clock.now());throw Object.assign(new Error('network down'),{code:'DRIVE_NETWORK'});}});
   const start=t.clock.now(),attempts=()=>[...new Set(reads.map(at=>Math.round((at-start)/1000)))];
   await tick(t,10*1000);assert.equal(attempts().length,1,'signing in catches up at once');
+  assert.equal(t.runtime.locationStatus('google-drive').sync.failed,true,'a failed sync is known');
+  assert.match(t.presentation.syncLabel({...t.runtime.locationStatus('google-drive'),sync:{...t.runtime.locationStatus('google-drive').sync,syncedAt:'2026-10-06T07:00:00.000Z'}}),/^Last synced /u,'so the sidebar says "Last synced", not "Synced"');
   await tick(t,40*1000);assert.equal(attempts().length,2,'a failed catch-up is tried again within a minute');
   await tick(t,2*MINUTE);assert.equal(attempts().length,3,'then after two minutes');
   assert.ok(attempts().at(-1)<5*MINUTE,'long before the next 20-minute check');
@@ -146,6 +150,56 @@ const cases=[];
   inStep=true;await tick(t,31*MINUTE);
   assert.equal(attempts().length,4,'once Drive is in step nothing more is read');
   assert.equal(t.noticeEvent('retry-exhausted'),undefined,'and the notice goes');
+  assert.equal(t.runtime.locationStatus('google-drive').sync.failed,false,'and the sidebar says "Synced" again');
   cases.push('a failed sync catch-up retries on the backoff, not the 20-minute check');
+}
+{
+  // Drive's newest version is one this app cannot read (from a newer Study
+  // Director, or damaged). Sync reads it once, then waits: no retry ladder,
+  // one notice, "Needs app update", and no upload over it. Once that version
+  // is gone, the regular check takes sync up again and the notice goes.
+  const id='cp_'+'c'.repeat(32),item=kind=>freeze({kind,id,name:id+(kind==='commit'?'.sdcommit':'.sdcheckpoint'),size:100,createdAt:'2026-10-06T07:30:00.000Z',modifiedAt:'2026-10-06T07:30:00.000Z',remoteId:kind+'-2'});
+  const reads=[];let present=true;
+  const t=fixture({covered:'2026-10-06T09:00:00.000Z',shared:true,
+    driveList:async({kind})=>({items:present&&(kind==='checkpoint'||kind==='commit')?[item(kind)]:[],overflow:false,ignored:0}),
+    driveDownload:async()=>{reads.push(t.clock.now());throw Object.assign(new Error('Repository checkpoint manifest version is not supported.'),{repositoryUnreadable:true});}});
+  await tick(t,10*1000);assert.equal(reads.length>0,true,'signing in tries to catch up');
+  const firstReads=reads.length;
+  t.change();await tick(t,15*MINUTE);
+  assert.equal(reads.length,firstReads,'a version this app cannot read is not retried');
+  assert.equal(t.notices('retry-exhausted').length,0,'waiting for an update is not a failure');
+  assert.equal(t.notices('sync-newer').length,1,'the person is told once');
+  assert.match(String(t.notices('sync-newer')[0].message||''),/can’t read/u);
+  assert.equal(t.runtime.locationStatus('google-drive').sync.newer,true,'the sync status says it needs an app update');
+  assert.equal(t.presentation.syncLabel(t.runtime.locationStatus('google-drive')),'Needs app update');
+  assert.equal(t.runtime.diagnosticSync()[0].needsUpdate,true,'and diagnostics too');
+  assert.equal(t.publishedAt.length,0,'nothing is uploaded over a version this app cannot read');
+  present=false;await tick(t,25*MINUTE);
+  assert.equal(t.runtime.locationStatus('google-drive').sync.newer,false,'once that version is gone sync carries on');
+  assert.equal(t.noticeEvent('sync-newer'),undefined,'and the notice goes');
+  cases.push('a Drive version this app cannot read makes sync wait for an update');
+}
+{
+  // Coming back to the app checks Drive when the last check is a minute or
+  // more old, not at the next 20-minute check; sooner than that it waits.
+  const t=fixture({covered:'2026-10-06T08:00:00.000Z',shared:true});await tick(t,10*1000);
+  const checked=()=>t.runtime.diagnosticSync()[0].checkedAt,first=checked();
+  assert.ok(first,'signing in checks Drive');
+  await tick(t,20*1000);t.runtime.wakeBackground('activation');await tick(t,5000);
+  assert.equal(checked(),first,'a return within a minute does not check again');
+  await tick(t,40*1000);t.runtime.wakeBackground('activation');await tick(t,5000);
+  assert.notEqual(checked(),first,'a return after a minute checks Drive at once');
+  cases.push('coming back to the app after a minute checks Drive at once');
+}
+{
+  // While this device holds data from a newer version, it uploads nothing to
+  // Drive: a version without that data would read as its deletion elsewhere.
+  let allowed=false;
+  const t=fixture({covered:'2026-10-06T08:00:00.000Z',shared:true,share:()=>allowed?true:'unsupported-data'});await tick(t,1000);t.publishedAt.length=0;
+  t.change();await tick(t,25*MINUTE);
+  assert.equal(t.publishedAt.length,0,'no Drive upload while newer data is held');
+  allowed=true;t.change();await tick(t,25*MINUTE);
+  assert.ok(t.publishedAt.length>0,'uploads resume once it may share again');
+  cases.push('no Drive upload while this device holds data from a newer version');
 }
 console.log(JSON.stringify({status:'PASS',suite:'automatic-provider-backup',productionRuntime:true,cases},null,2));

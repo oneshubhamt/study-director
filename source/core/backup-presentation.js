@@ -69,7 +69,8 @@ registry.define('backup-presentation',1,()=>{
       if(sync.password)return 'Needs password';
       if(sync.review)return 'Needs review';
       if(sync.newer)return 'Needs app update';
-      return sync.syncedAt?`${state.waiting?'Changes since':'Synced'} ${timeText(sync.syncedAt)}`:'';
+      // After a sync that failed, the last time it was in step (it keeps trying).
+      return sync.syncedAt?`${sync.failed?'Last synced':state.waiting?'Changes since':'Synced'} ${timeText(sync.syncedAt)}`:'';
     }
     // What a location's row shows: its running operation, otherwise the newest
     // of its last operation, automatic backup or status message.

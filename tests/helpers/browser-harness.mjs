@@ -100,7 +100,7 @@ export async function startReleaseServer(){
 
 export class CdpPage{
   constructor(socket,targetId){
-    this.socket=socket;this.targetId=targetId;this.nextId=0;this.pending=new Map();this.events=[];this.warnings=[];this.loadCount=0;this.coverageStarted=false;this.closed=false;
+    this.socket=socket;this.targetId=targetId;this.nextId=0;this.pending=new Map();this.events=[];this.warnings=[];this.loadCount=0;this.coverageStarted=false;this.closed=false;this.listeners=new Map();
     socket.onmessage=event=>{
       const message=JSON.parse(event.data);
       if(message.id){
@@ -108,6 +108,7 @@ export class CdpPage{
         this.pending.delete(message.id);
         message.error?pending.reject(new Error(JSON.stringify(message.error))):pending.resolve(message.result);return;
       }
+      for(const listener of this.listeners.get(message.method)||[]){try{listener(message.params||{});}catch(error){this.events.push({kind:'listener-error',text:String(error&&error.stack||error)});}}
       if(message.method==='Page.loadEventFired')this.loadCount+=1;
       if(message.method==='Runtime.exceptionThrown')this.events.push({kind:'exception',text:message.params.exceptionDetails.exception?.description||message.params.exceptionDetails.text||'Runtime exception'});
       if(message.method==='Runtime.consoleAPICalled'&&message.params.type==='error')this.events.push({kind:'console-error',text:message.params.args.map(arg=>arg.value??arg.description??'').join(' ')});
@@ -119,6 +120,8 @@ export class CdpPage{
     const socket=new WebSocket(url);await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject;});
     return new CdpPage(socket,targetId);
   }
+  // Calls listener with the params of every CDP event named method.
+  on(method,listener){if(!this.listeners.has(method))this.listeners.set(method,new Set());this.listeners.get(method).add(listener);return ()=>this.listeners.get(method)?.delete(listener);}
   send(method,params={}){
     return new Promise((resolve,reject)=>{const id=++this.nextId;this.pending.set(id,{resolve,reject});this.socket.send(JSON.stringify({id,method,params}));});
   }

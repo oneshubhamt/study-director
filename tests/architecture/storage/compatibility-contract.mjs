@@ -105,7 +105,8 @@ assert.match(compatibility,/error&&error\.code==='STUDY_DIRECTOR_LEGACY_BACKUP'/
 assert.match(compatibility,/async function verifyCanonicalInstallation\(\)/u);
 assert.match(compatibility,/retirementDataReady:canonical&&backupReady&&compatibilityRetired/u);
 assert.match(app,/const CompatibilityFacade=CompatibilityHostModule\.createFacade/u);
-assert.match(app,/migrateCompatibility:\(\)=>CompatibilityFacade\.migrateLive\(\)/u);
+// Data this build cannot read is set aside before anything migrates.
+assert.match(app,/migrateCompatibility:async\(\)=>\{await UnsupportedData\.census\(\);return CompatibilityFacade\.migrateLive\(\);\}/u);
 assert.match(app,/verifyReady:\(\)=>CompatibilityFacade\.verifyCanonicalInstallation\(\)/u,'actual installations must run the canonical proof before publishing startup-ready');
 assert.match(app,/studyDirectorCanonicalBaseline=proof\.canonical\?'verified':'not-proven'/u);
 assert.match(app,/studydirector:canonicalstatus/u);

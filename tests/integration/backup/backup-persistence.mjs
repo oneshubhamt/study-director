@@ -103,7 +103,7 @@ const compatibilityFacade=CompatibilityModule.createFacade(freeze({
   baselineId:'QA_FIXTURE',
   live:freeze({
     renameIdentities:compatibilityNoop,cleanupLegacyStorage:compatibilityNoop,migratePlan:compatibilityNoop,migrateReflections:compatibilityNoop,migrateHostMetadata:compatibilityNoop,migrateActiveSession:compatibilityNoop,migrateNotes:compatibilityNoop,
-    migrateNoteRecovery:compatibilityNoop,migrateDailyRecords:compatibilityNoop,migrateDeletionState:compatibilityNoop,migrateInsightsRevisionEnvelope:compatibilityNoop,cleanupLegacyAttachments:compatibilityNoop,cleanupObsoleteMetadata:compatibilityNoop,retireTopology:compatibilityNoop,retireLegacyIdentity:compatibilityNoop
+    migrateNoteRecovery:compatibilityNoop,migrateDailyRecords:compatibilityNoop,migrateDeletionState:compatibilityNoop,migrateInsightsRevisionEnvelope:compatibilityNoop,cleanupLegacyAttachments:compatibilityNoop,cleanupObsoleteMetadata:compatibilityNoop,settleUnsupported:compatibilityNoop,retireTopology:compatibilityNoop,retireLegacyIdentity:compatibilityNoop
   }),
   backups:freeze({inspectCurrent:codec.inspectCurrent,inspectLegacy:codec.inspectLegacy}),
   verification:freeze({
@@ -215,7 +215,7 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
     restoreSessionState:async()=>{events.push('restore-session-state');return true;},
     verifyActiveSessionRuntime:async()=>true,restoredFromFile:()=>false
   }),
-  operations:freeze({assertAuthority:()=>true,clearFault:fn,failClosed:fn,runExclusive:async(kind,operation)=>operation()}),
+  operations:freeze({canShare:()=>true,assertAuthority:()=>true,clearFault:fn,failClosed:fn,runExclusive:async(kind,operation)=>operation()}),
   interactions:freeze({
     choose:async()=>null,
     configure:async config=>{

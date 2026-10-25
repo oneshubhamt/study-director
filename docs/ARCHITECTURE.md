@@ -49,6 +49,21 @@ The store is renamed in place inside the upgrade (rows are never copied): an old
 
 **Storage health** keeps three facts in browser storage: the change clock's fast copy (`lastLocalSaveAt`), when Saved Days or notes were last saved here (`lastStudyDataSaveAt`, for the start-up hint) and an unresolved browser-data clear. Issues are shown live and never stored. The browser's storage estimate is measured at launch and again on returning to the app (at most hourly), and kept in memory for diagnostics. When the database fails, the record is rewritten once to show at once whether browser storage can still be written. The Device Folder settings record (version 4) holds only the folder handle and `baseline`, the change from which it backs up on its own.
 
+**Data this version cannot read.** Nothing a build cannot read is changed, deleted or shown; the app works with everything else, so a newer version's data never stops an older one from starting. At every start, before anything reads stored data, a census (`UnsupportedData` in `app.html`) holds:
+
+| What | Held as |
+|---|---|
+| A record whose `version` is above this build's (Saved Day, summary, note, session, attachment) | newer; a Saved Day and its summary are held together |
+| An appMeta row whose envelope `version` is above 1, or whose key this build does not know (and is not one it retires) | newer or unknown |
+| An appMeta value whose `version` is above its family's schema and that this build cannot validate | newer |
+| An appMeta value still unreadable once the compatibility steps are done | unreadable |
+
+The storage layer (`persistence.js`) then keeps held records out of every read, refuses a write or delete of one (`STUDY_DIRECTOR_UNSUPPORTED_DATA`) and leaves them in place on a clear or a range delete; with nothing held, every transaction is the plain browser one. Bookkeeping whose family is `operational` in the data contract (leases, maintenance progress, caches) is held too but replaced as usual. While protected data is held, local clean-up waits (it decides what nothing refers to, and held data may refer to attachments) and Drive uploads wait (a version without that data would read as its deletion on other devices); Device Folder and file backups go on with what this build can read. The person is told once, Library → Data names what is held, and diagnostics has an "Unsupported data" row.
+
+A newer database opens as it is, never upgraded or downgraded. If a store this build needs is gone or keyed differently, the profile does not open: start-up says it needs a newer version and offers another profile, and nothing in it is touched. A profile list from a newer version is used read-only: nothing in it is rewritten, and adding, switching or removing profiles (and deleting removed profiles' data) waits for an update. On Drive, a version this build cannot read shows muted in Version History with Restore disabled and Remove in red; sync waits on it ("Needs app update") instead of retrying, and never uploads over it.
+
+For this to keep working, a later build bumps a record's `version` when its shape changes, gives new appMeta families names an older build does not know, and treats removing or re-keying a store as a change that older builds meet by leaving the profile alone.
+
 **Emergency copies.** When IndexedDB fails, the session recovery copy, unsaved notes, delete recovery and fallback Saved Days share one browser-storage budget (`localRescueBytes`, 4 MiB) in that priority order. Each copy may use what the higher-priority copies leave, up to its own ceiling, so the most important copy is never crowded out.
 
 ## 3. Active Session and timer
@@ -213,6 +228,7 @@ The following invariants should be preserved by future changes:
 7. Compatibility retirement and historical backup readability are separate decisions.
 8. Temporary UI locks must release into state derived from the current runtime, not a stale pre-operation DOM snapshot.
 9. Generated deployment output is derived from source and is never the canonical place to make changes.
+10. Data a build cannot read is never changed, deleted or uploaded over; the build works with everything else (section 2, "Data this version cannot read").
 
 ## Backup presentation ownership
 

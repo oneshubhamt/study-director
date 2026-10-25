@@ -185,5 +185,5 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
     })();}
   }
   const context=vm.createContext({Error,TypeError,Date:clock?.Date||Date,console,setTimeout:harnessSetTimeout,clearTimeout:harnessClearTimeout,queueMicrotask,Blob,Headers,Response,XMLHttpRequest:uploadProgressTransport?MockXMLHttpRequest:undefined,ReadableStream,TextEncoder,URL,URLSearchParams,Uint8Array,AbortController,crypto:webcrypto,fetch:mockFetch,document,Event:class Event{constructor(type){this.type=type;}},CustomEvent:class CustomEvent{},localStorage,addEventListener,removeEventListener(){},dispatchEvent(){},google:{accounts:{oauth2:oauth}},StudyDirector:{registerPlugin(descriptor){return descriptor.setup(api);}}});
-  context.window=context;context.globalThis=context;context[Symbol.for('studyDirector.profileScope.v1')]=Object.freeze({scoped:name=>String(name)});vm.runInContext(source,context,{filename:'source/external/drive.js'});assert.ok(provider,'Drive provider must register');return {state,provider,context};
+  context.window=context;context.globalThis=context;context[Symbol.for('studyDirector.profileScope.v1')]=Object.freeze({scoped:name=>String(name)});vm.runInContext(source,context,{filename:'source/external/drive.js'});assert.ok(provider,'Drive provider must register');return {state,provider,context,fetch:mockFetch};
 }

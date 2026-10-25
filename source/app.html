@@ -3036,9 +3036,11 @@ function renderDriveBackup(){
 function renderBackupActions(){
   const group=document.getElementById('backup-shared-actions'),backupNow=document.getElementById('backup-now'),versions=document.getElementById('open-version-history');if(!group)return;
   const rows=['device-folder','google-drive'].map(id=>BackupProviderRuntime.locationStatus(id)).filter(Boolean),connected=rows.some(row=>row.connected===true),busy=rows.some(row=>row.busy===true||row.engineBusy===true),recovering=rows.some(row=>row.busy===true&&['history','restore-version','bring-in','remove-version'].includes(String(row.foregroundKind||'')));
+  // A sync greys both out for a moment; the tooltip says why.
+  const syncText=rows.some(row=>row.sync?.syncing===true)?'Syncing with Google Drive…':'';
   group.hidden=!connected;
-  if(backupNow){backupNow.disabled=busy;backupNow.title=rows.some(row=>row.maintenanceBusy)?'Background backup maintenance will yield to Back up now.':'';}
-  if(versions){versions.disabled=busy&&!recovering;versions.title=recovering?'Reopen the active recovery operation.':'';}
+  if(backupNow){backupNow.disabled=busy;backupNow.title=busy&&syncText?syncText:rows.some(row=>row.maintenanceBusy)?'Background backup maintenance will yield to Back up now.':'';}
+  if(versions){versions.disabled=busy&&!recovering;versions.title=recovering?'Reopen the active recovery operation.':busy&&syncText?syncText:'';}
 }
 // The Device Folder backs up first, so Drive can take its version.
 async function backUpEverywhere(){
