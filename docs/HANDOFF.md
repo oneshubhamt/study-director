@@ -22,6 +22,7 @@ Nothing below is built or audited yet. Each item starts with an audit or a measu
 | 8 | Backup speed and safety | Confirm that the backup speed work is in use everywhere, including the faster hashing, for both Drive and the Device Folder. | Measure backup and restore speed for both, and check reliability. |
 | 9 | Still waiting from before | Removing the migration code (the compatibility layer and Release B, section 5.3a), a better Smart merge, and the open items in section 5.8. | As already planned. |
 | 10 | Optional size work | The deployment build is not minified, and Wordgard ships unminified. The compressed download is already 7% smaller than SDVB75F10. | Owner's choice: minify the build, or only `wordgard.js`, with a full test run. |
+| 11 | Whole-app quality pass | Is the app clean, lean, elegant, efficient and reliable after this round of work (backups, data topology, background services, notes)? Is the notes system first-class in speed, reliability and features? | One broad review across those four areas: what to clean up, correct or refine, and how the notes system compares with a first-class notes app. Measure the resource envelope too: memory over a long session, CPU and battery while idle and while studying (timers, background jobs, sync, animations). Then propose where to trim. Report only. |
 
 ---
 
