@@ -856,6 +856,8 @@ html[data-theme="light"][data-presentation="director-current"] #pane-plan .si.ac
   --card-line:#0b0c0f;--row-name-color:#f0f2ff;
   box-shadow:0 18px 32px -22px rgba(var(--sd-rgb-shadow),.65);
 }
+/* Hover must not swap the island for the light row surface; the border still answers. */
+html[data-theme="light"][data-presentation="director-current"] #pane-plan .si.active .si-card:hover:not(.no-hover){background:var(--card-bg)}
 html[data-theme="light"][data-presentation="director-current"] #pane-plan .si.active .si-time{color:var(--sd-color-text-primary)}
 /* Notes are a white sheet on the desk, with a margin rule like ruled paper. */
 html[data-theme="light"][data-presentation="director-current"] #pane-execute .execute-note-desk{

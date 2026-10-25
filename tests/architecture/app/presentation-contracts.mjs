@@ -57,6 +57,7 @@ assert.match(glassCss,/--sd-type-caps-tracking-scale:0;/u,'Glass drops capitals 
 
 assert.match(coreCss,/html\[data-theme="light"\]\[data-presentation="director-current"\] :is\(#pane-execute \.cd-card,#pane-review \.review-hero,#pane-plan \.si\.active \.si-card\)\{\s*color-scheme:dark;[\s\S]*?--sd-color-accent-primary:#e8ff00;/u,'Director Light heroes are dark instrument islands that re-declare the semantic roles their children read.');
 assert.match(glassCss,/html\[data-presentation="glass"\]\[data-theme="light"\] :is\(#pane-execute \.cd-card,#pane-review \.review-hero\)\{\s*color-scheme:dark;/u,'Glass Light heroes are colour islands rather than recoloured light surfaces.');
+assert.match(coreCss,/html\[data-theme="light"\]\[data-presentation="director-current"\] #pane-plan \.si\.active \.si-card:hover:not\(\.no-hover\)\{background:var\(--card-bg\)\}/u,'the dark active Plan row keeps its island background on hover so its light text stays readable.');
 assert.match(glassCss,/@property --sd-aurora-a\{syntax:"<color>"/u,'Glass aurora colours are registered so area moods interpolate.');
 assert.match(glassCss,/\[data-theme="dark"\]\[data-sd-area="execute"\] body::before\{--sd-aurora-a:/u,'each area sets its own Glass atmosphere.');
 // The glide restyles the background layer only; inherited aurora colours on
