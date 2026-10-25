@@ -24,7 +24,7 @@ try{
     const parse=s=>{if(s.startsWith('rgb'))return s.slice(s.indexOf('(')+1,s.indexOf(')')).split(',').slice(0,3).map(Number);if(s.startsWith('color(srgb '))return s.slice(11,s.lastIndexOf(')')).split(' ').filter(Boolean).slice(0,3).map(v=>Number(v)*255);return [0,0,0]},lum=rgb=>{const a=rgb.map(v=>{v/=255;return v<=.03928?v/12.92:((v+.055)/1.055)**2.4});return .2126*a[0]+.7152*a[1]+.0722*a[2]},ratio=(a,b)=>{const x=lum(a),y=lum(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05)};
     return {labels:groups.map(g=>g.getAttribute('aria-label')),separators:groups.filter(g=>g.previousElementSibling?.classList.contains('sd-rte-toolbar-group')).map(g=>({width:getComputedStyle(g).borderLeftWidth,style:getComputedStyle(g).borderLeftStyle,color:getComputedStyle(g).borderLeftColor})),boldColor:getComputedStyle(bold).color,boldOpacity:getComputedStyle(bold).opacity,contrast:ratio(parse(getComputedStyle(bold).color),parse(panel)),utilityClass:!!root.querySelector('.sd-rte-toolbar-group-utility')};
   })()`);
-  assert.deepEqual(toolbar.labels,['History','Text formatting','Paragraph and lists','Links and attachments','Insert blocks']);
+  assert.deepEqual(toolbar.labels,['History','Text formatting','Lists','Block quote','Links and blocks','Attachments']);
   assert.ok(toolbar.separators.every(x=>x.width==='1px'&&x.style==='solid'&&!/rgba\([^,]+,[^,]+,[^,]+,\s*0\)/.test(x.color)),'Toolbar groups must have visible vertical separators.');
   assert.ok(toolbar.contrast>=7,`Toolbar enabled-control contrast is too faint (${toolbar.contrast.toFixed(2)}:1).`);
   assert.equal(toolbar.boldOpacity,'1');

@@ -8367,6 +8367,9 @@ function completeLifecycleTransition(context){
   if(writable&&document.getElementById('pane-review')?.classList.contains('on'))ReviewView.activate({restoreScroll:false});
   document.documentElement.dataset.studyDirectorLifecycle=writable?'ready':(context.reconciled?'read-only':'blocked');
   document.documentElement.dataset.studyDirectorLifecycleRevision=String(context.revision);
+  // A waiting update blocked by the transition retries now, not at the safety retry.
+  // Deferred: start-up transitions finish before the update state is declared.
+  setTimeout(()=>schedulePwaUpdateEvaluation(250),0);
 }
 const SessionLifecycle=SessionLifecycleModule.createCoordinator(Object.freeze({hooks:Object.freeze({
   canMutate:()=>appCanMutate(),
@@ -9707,6 +9710,9 @@ async function installRepositoryIntegrityScrub(){
 /* PWA SHELL AND SAFE UPDATE COORDINATION */
 const PWA_UPDATE_READY_DELAY_MS=650;
 const PWA_UPDATE_SAFETY_RETRY_MS=5*60*1000;
+// A window whose service worker already moved to the new release runs old page
+// code against it, so it retries within seconds rather than at the safety retry.
+const PWA_UPDATE_EXTERNAL_RETRY_MS=5000;
 const PWA_UPDATE_CHECK_INTERVAL_MS=24*60*60*1000;
 const PWA_UPDATE_CHECK_RETRY_BASE_MS=5*60*1000;
 const PWA_UPDATE_CHECK_RETRY_MAX_MS=60*60*1000;
@@ -9737,8 +9743,10 @@ function pwaUpdateBlockReason(options={}){
   }
   const follower=options.external===true&&ownership.state===OWNERSHIP_STATES.SECONDARY;
   if(ownership.state!==OWNERSHIP_STATES.PRIMARY&&!follower)return automatic?'The primary Study Director window will apply this update when saved state is safe.':'This is a read-only secondary window. Update from the Study Director window that currently has control.';
+  // A read-only follower holds nothing to save, so a lifecycle left unreconciled
+  // (for example after it lost primary control) must not keep it on the old release.
   const lifecycle=SessionLifecycle.status();
-  if(lifecycle.transitioning||!lifecycle.ready)return 'Study Director is still reconciling session state. Try again when it is ready.';
+  if(lifecycle.transitioning||!lifecycle.ready&&!follower)return 'Study Director is still reconciling session state. Try again when it is ready.';
   const mutation=AppMutationCoordinator.status();
   if(mutation.active&&!(ownReservation&&mutation.active==='pwa-update'))return `A ${mutation.active} operation is still active. The update will retry after it finishes.`;
   if(mutation.foreign&&!follower)return 'Another Study Director window is changing stored data. The update will retry after it finishes.';
@@ -9873,7 +9881,8 @@ async function prepareApplicationUpdate(context={}){
   if(reservation)reservation.workRevision=pwaWorkRevision;
   return Object.freeze({ok:true,reason:''});
 }
-function schedulePwaUpdateEvaluation(delay=PWA_UPDATE_SAFETY_RETRY_MS){
+function pwaUpdateRetryDelay(){return pwaLatestUpdateState?.externalUpdate?PWA_UPDATE_EXTERNAL_RETRY_MS:PWA_UPDATE_SAFETY_RETRY_MS;}
+function schedulePwaUpdateEvaluation(delay=pwaUpdateRetryDelay()){
   if(pwaUpdateRetryTimer!==null){clearTimeout(pwaUpdateRetryTimer);pwaUpdateRetryTimer=null;}
   if(!pwaLatestUpdateState||(!pwaLatestUpdateState.updateReady&&!pwaLatestUpdateState.applying))return false;
   const editDelay=pwaLastEditableInputAt?Math.max(0,pwaLastEditableInputAt+PWA_EDIT_IDLE_MS+50-Date.now()):0;
@@ -9902,7 +9911,7 @@ async function evaluateAutomaticPwaUpdate(){
   }finally{
     pwaUpdateEvaluationRunning=false;
     if(pwaLatestUpdateState&&!pwaLatestUpdateState.applying)renderPwaUpdateStatus(pwaLatestUpdateState);
-    if(pwaLatestUpdateState?.updateReady&&!pwaLatestUpdateState.applying&&pwaUpdateRetryTimer===null)schedulePwaUpdateEvaluation(PWA_UPDATE_SAFETY_RETRY_MS);
+    if(pwaLatestUpdateState?.updateReady&&!pwaLatestUpdateState.applying&&pwaUpdateRetryTimer===null)schedulePwaUpdateEvaluation(pwaUpdateRetryDelay());
   }
 }
 function pwaUpdateActionLabel(){
@@ -9951,7 +9960,7 @@ function renderPwaUpdateStatus(state){
   }
   const newlyReady=!previous?.updateReady||previous.waitingReleaseId!==state.waitingReleaseId;
   if(newlyReady)schedulePwaUpdateEvaluation(PWA_UPDATE_READY_DELAY_MS);
-  else if(pwaUpdateRetryTimer===null)schedulePwaUpdateEvaluation(PWA_UPDATE_SAFETY_RETRY_MS);
+  else if(pwaUpdateRetryTimer===null)schedulePwaUpdateEvaluation(pwaUpdateRetryDelay());
 }
 function pwaLastUpdateCheckAt(){
   let stored=0;

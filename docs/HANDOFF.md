@@ -1,8 +1,8 @@
 # Handoff
 
-Status of the work on this branch (`refactor/background-coordination`, draft PR #1). Read sections 1 and 5 first; sections 2 to 4 are closed summaries.
+Status of the work on this branch (`refactor/background-coordination`, PR #1, ready for review). Read sections 1 and 5 first; sections 2 to 4 are closed summaries.
 
-**Current state (2026-10-25):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). Drive sync and profiles (section 5) are done: the small items (5.5), sync (5.1), merge rules (5.2), profiles and device names (5.3, 5.3a), the first-start form (5.4), the removal of what section 5 made redundant, and a fresh audit of the backup system with its fixes (5.6). Release B (removing the readers of older backup formats) waits until "Format cleanup" reads ready on every device in use (5.3a). Wordgard is now 0.6.2 and its own module (section 6, done 2026-10-25). Two items noted there are still only to explore: notification sounds made in code, and the editor toolbar order.
+**Current state (2026-10-25):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). Drive sync and profiles (section 5) are done: the small items (5.5), sync (5.1), merge rules (5.2), profiles and device names (5.3, 5.3a), the first-start form (5.4), the removal of what section 5 made redundant, and a fresh audit of the backup system with its fixes (5.6). Release B (removing the readers of older backup formats) waits until "Format cleanup" reads ready on every device in use (5.3a). Wordgard is now 0.6.2 and its own module (section 6, done 2026-10-25). The editor toolbar is in its new order; notification sounds made in code wait until the user asks.
 
 ---
 
@@ -15,8 +15,9 @@ Status of the work on this branch (`refactor/background-coordination`, draft PR 
 2. Audit it and report to the user what I think. **Done.**
 3. Hold a brainstorming session with the user to understand how to improve notes. Discuss first; build only after agreement. **Done.**
 4. Then the background services (section 4). **Done.**
-5. Then Drive sync and profiles (section 5, decided 2026-10-17). **In progress.**
-6. The session concludes only once all four — backup, notes, background services, sync — are as good as we can reasonably make them.
+5. Then Drive sync and profiles (section 5, decided 2026-10-17). **Done.**
+6. Then Wordgard as its own module (section 6). **Done** (2026-10-25).
+7. The session concludes only once all four — backup, notes, background services, sync — are as good as we can reasonably make them.
 
 **Migration (user's rule, 2026-10-10).** Older data is read once, converted into the current canonical form, verified and retired, never used again. Only the compatibility host (`compatibility-host.js`, plus repository adapters where a transaction requires it) reads old forms; the ordinary runtime reads only current forms. Every conversion is listed in `contracts/compatibility.mjs` with its retirement condition, so the whole migration machinery can be deleted later, leaving one clean canonical data structure.
 
@@ -271,6 +272,7 @@ For each build step: make all the changes, build, test with two simulated device
 | Drive full or unreachable | Sync pauses, the app carries on locally, with the existing toasts |
 | Restoring a Drive version | Applies to all devices; pending reviews are kept |
 | Large attachments on mobile | Downloaded only when missing, as now |
+| Data from a newer version, or two versions that disagree on how data is laid out | **Decided** (user, 2026-10-25): what this build cannot read is held untouched and shown read-only; nothing is converted, merged or deleted. A database another profile or version holds offers "Open <other profile>" or "Start a new profile", as now. No side copies through Needs review. |
 
 ### 5.8 Later (noted, not planned)
 
@@ -310,12 +312,12 @@ For each build step: make all the changes, build, test with two simulated device
 - Key bindings carry descriptions from Wordgard's phrase table, so the module includes it (about 120 lines).
 - Size: the lean deployment build grew from 112.2 KB to 115.8 KB Brotli.
 
-**Also to explore with it (noted 2026-10-17; not yet audited or built).**
+**Also noted with it (2026-10-17).** Sounds made in code stay unexplored until the user asks (2026-10-25).
 
 | Item | What to explore |
 |---|---|
 | Sounds made in code | The 13 notification sounds ship as WAV files in `source/assets/sounds` (about 525 KB, each 1 to 3 seconds). Explore making them with the browser's Web Audio API instead, so the files no longer ship and the app stays lean. Keep the current sounds as the reference for how each should sound. They are already synthesized from short note phrases by `build/compose-sounds.py`, so the recipe exists. |
-| Editor toolbar order | Now: undo/redo · text (Aa, B, I, HL, ⋮) · block quote, bullets, numbers, checklist · link, attachment · table, horizontal rule · focus. Wanted: undo/redo · text · bullets, numbers, checklist · block quote · link, table, horizontal rule · attachment · focus. (The editor has no code-block button; the button meant is block quote ❝.) |
+| Editor toolbar order | **Done** (2026-10-25): undo/redo · text · bullets, numbers, checklist · block quote · link, table, horizontal rule · attachment · focus. |
 
 ---
 
@@ -396,6 +398,7 @@ Measured on 200 MB of attachments:
 
 ### Tests and QA
 - `8891f6c`, `eb77264`, `3d91713`, `8338f5b`, `7105b02`: fixtures, suite policy, native visibility in browser tests, de-duplicated harnesses.
+- The commit after `ddb7e1d`: the pwa-update flake had two causes. A read-only secondary window that briefly held control kept waiting for its session state to settle, so it never reloaded onto the new release; it now reloads, and finishing a session-state change re-checks a waiting update at once. A window whose service worker has already moved to the new release retries every 5 seconds instead of every 5 minutes, which also covers the hidden window taking control while the visible one reloads. The test clicked Skip on the first-start form before the form had opened; `skipFirstStart` in the browser harness now waits for it.
 
 ---
 

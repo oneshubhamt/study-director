@@ -14,7 +14,7 @@ assert.match(editor,/Decoration\.Range\.wrapper\('span'/,'Differences must be ed
 assert.match(editor,/setTransientRanges\(ranges:readonly MergeRange\[\]\)/,'Mounted editor must expose transient reconciliation ranges.');
 assert.match(editor,/setValue\(value:string\)/,'Mounted editor must expose scratch value replacement.');
 assert.match(editor,/allowAssetInsert\?:boolean/,'Scratch editor must be able to disable new attachments.');
-assert.match(editor,/options\.allowAssetInsert===false\?\[\]:\[attachmentTrigger\]/,'Scratch mode must remove the attachment trigger.');
+assert.match(editor,/attachmentGroup=options\.allowAssetInsert===false\?null:toolbarGroup\('Attachments',attachmentTrigger\)/,'Scratch mode must remove the attachment trigger.');
 assert.match(editor,/compareRichText,mergeIncomingAdditions,appendIncomingAdditions,mergeThreeWay,mountRichTextEditor/,'CR2/three-way engine must be exposed through the rich-text runtime for reconciliation.');
 
 for(const label of ['Keep this device’s','Smart merge','Append additions','Use the backup’s','Apply resolved note','All remaining:'])assert.ok(ui.includes(label),`Missing reconciliation action: ${label}`);

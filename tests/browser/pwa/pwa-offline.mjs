@@ -4,7 +4,7 @@ import {writeArtifact} from '../../helpers/artifacts.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import {launchChromium} from '../../helpers/browser-harness.mjs';
+import {launchChromium,skipFirstStart} from '../../helpers/browser-harness.mjs';
 
 const root=process.cwd();
 const deployment=path.join(root,'dist','deployment');
@@ -64,7 +64,7 @@ const browser=await launchChromium({profilePrefix:'study-director-pwa-qa-'});
 async function createPage(url=appUrl){
   const page=await browser.createPage(url,{preload:"window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';"});
   await waitForStartup(page);
-  await page.evaluate(`document.querySelector('[data-action="first-start-skip"]')?.click()`);
+  await skipFirstStart(page);
   return page;
 }
 async function waitForStartup(page){

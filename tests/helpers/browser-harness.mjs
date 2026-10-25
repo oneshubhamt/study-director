@@ -15,6 +15,13 @@ export async function waitFor(fn,{timeout=45000,interval=100,label='condition'}=
   throw new Error(`Timed out waiting for ${label}${last instanceof Error?`: ${last.message}`:''}`);
 }
 
+// The first-start form opens only after an async storage check, so a single
+// Skip click can land before it exists. Skip it once it opens and wait until
+// this page's profile has finished its first start (secondary pages never open it).
+export async function skipFirstStart(page,{timeout=45000}={}){
+  return waitFor(()=>page.evaluate(`(()=>{const dialog=document.getElementById('first-start-dialog');if(dialog&&dialog.open){document.querySelector('[data-action="first-start-skip"]').click();return false;}const scope=window[Symbol.for('studyDirector.profileScope.v1')];let list=null;try{list=JSON.parse(localStorage.getItem(scope.registryKey)||'null');}catch{}const mine=Array.isArray(list&&list.profiles)?list.profiles.find(entry=>entry&&entry.scope===scope.scope):null;return !!mine&&mine.fresh!==true;})()`),{timeout,label:'first start finished'});
+}
+
 function readBuildManifest(){
   return JSON.parse(fs.readFileSync(path.join(root,'dist','build-manifest.json'),'utf8'));
 }

@@ -23,7 +23,7 @@ function fixture(){
   const window={addEventListener(type,fn){const set=listeners.get(type)||new Set();set.add(fn);listeners.set(type,set);},removeEventListener(type,fn){listeners.get(type)?.delete(fn);}};
   const record=async label=>{calls.push(label);};
   const sandbox={console,AbortController,Promise,Date:class extends Date{static now(){return state.now;}},Object,backUpBeforeUpdate:async()=>{calls.push('backup');},
-    pwaUpdateReservation:null,pwaWorkRevision:0,pwaUpdateRetryTimer:null,pwaLatestUpdateState:{updateReady:true},pwaLastEditableInputAt:0,PWA_EDIT_IDLE_MS:1800,PWA_UPDATE_SAFETY_RETRY_MS:300000,evaluateAutomaticPwaUpdate:()=>calls.push('automatic-update'),imagePreparationCount:0,attachmentIntegrityRunning:Promise.resolve(),
+    pwaUpdateReservation:null,pwaWorkRevision:0,pwaUpdateRetryTimer:null,pwaLatestUpdateState:{updateReady:true},pwaLastEditableInputAt:0,PWA_EDIT_IDLE_MS:1800,PWA_UPDATE_SAFETY_RETRY_MS:300000,PWA_UPDATE_EXTERNAL_RETRY_MS:5000,evaluateAutomaticPwaUpdate:()=>calls.push('automatic-update'),imagePreparationCount:0,attachmentIntegrityRunning:Promise.resolve(),
     OWNERSHIP_STATES:{PRIMARY:'primary',SECONDARY:'secondary'},TIMER_MODES:{RUNNING:'running'},TimerState:{paused:false,mode:'running'},TASKS:[{}],
     document:{body:element('body'),createElement:element,querySelector:()=>state.dialog?{}:null,getElementById:()=>({value:state.draft})},window,
     StartupLifecycle:{status:()=>({fullyInitialized:state.startup})},AppOwnership:{status:()=>({...state.owner})},SessionLifecycle:{status:()=>({...state.lifecycle})},
@@ -152,13 +152,22 @@ await test('secondary window retries an external activation after transient bloc
     PWA_UPDATE_READY_DELAY_MS:650,PWA_UPDATE_SAFETY_RETRY_MS:300000,schedulePwaUpdateEvaluation(){},renderPwaUpdateStatus(){},pwaAppliedPlanEnded:()=>false});
   h.sandbox.PwaLifecycle.apply=async()=>{h.calls.push('external-apply');return true;};
   vm.runInContext(source.slice(source.indexOf('async function evaluateAutomaticPwaUpdate('),source.indexOf('async function applyPwaUpdateFromUi(')),h.sandbox);
-  h.state.lifecycle.ready=false;assert.equal(await h.sandbox.evaluateAutomaticPwaUpdate(),false);assert.ok(!h.calls.includes('external-apply'));
-  h.state.lifecycle.ready=true;h.state.timer=true;assert.equal(h.sandbox.pwaUpdateActionLabel(),'Update Now');assert.equal(await h.sandbox.evaluateAutomaticPwaUpdate(),true);assert.ok(h.calls.includes('external-apply'));
+  h.state.lifecycle.transitioning=true;assert.equal(await h.sandbox.evaluateAutomaticPwaUpdate(),false);assert.ok(!h.calls.includes('external-apply'));
+  // A follower left unreconciled (it lost primary control) has nothing to save and still follows the new release.
+  h.state.lifecycle.transitioning=false;h.state.lifecycle.ready=false;assert.equal(await h.sandbox.evaluateAutomaticPwaUpdate(),true);assert.equal(h.calls.filter(c=>c==='external-apply').length,1);
+  h.state.lifecycle.ready=true;h.state.timer=true;assert.equal(h.sandbox.pwaUpdateActionLabel(),'Update Now');assert.equal(await h.sandbox.evaluateAutomaticPwaUpdate(),true);assert.equal(h.calls.filter(c=>c==='external-apply').length,2);
+  // A primary window still waits for its own session state to reconcile.
+  h.state.owner.state='primary';h.state.timer=false;h.state.lifecycle.ready=false;assert.equal(await h.sandbox.evaluateAutomaticPwaUpdate(),false);assert.equal(h.calls.filter(c=>c==='external-apply').length,2);
+});
+await test('an external activation retries within seconds; an ordinary waiting update keeps the slow safety retry',async()=>{
+  const h=fixture();h.sandbox.pwaLatestUpdateState={updateReady:true,externalUpdate:true};
+  assert.equal(h.sandbox.pwaUpdateRetryDelay(),5000);h.sandbox.schedulePwaUpdateEvaluation();assert.equal([...h.state.timers.values()][0].delay,5000);
+  h.sandbox.pwaLatestUpdateState={updateReady:true,externalUpdate:false};assert.equal(h.sandbox.pwaUpdateRetryDelay(),300000);
 });
 await test('pending boot confirmation has a visible retry action and clears only after proof',async()=>{
  const elements=new Map(['pwa-update-control','pwa-update-apply','pwa-update-message','pwa-update-progress-message'].map(id=>[id,{}])),notices=[],checks=[],evaluations=[];
  const state={supported:true,registered:true,updateReady:false,applying:false,checking:false,bootState:'pending',phase:'boot-pending',message:'Update confirmation is pending.'};
- const context={Object,String,backUpBeforeUpdate:async()=>{},document:{getElementById:id=>elements.get(id)},pwaLatestUpdateState:null,pwaAutomaticBlockMessage:'old automatic block',pwaUpdateCheckRunning:false,pwaUpdateRetryTimer:null,PWA_UPDATE_READY_DELAY_MS:1500,PWA_UPDATE_SAFETY_RETRY_MS:1000,
+ const context={Object,String,backUpBeforeUpdate:async()=>{},document:{getElementById:id=>elements.get(id)},pwaLatestUpdateState:null,pwaAutomaticBlockMessage:'old automatic block',pwaUpdateCheckRunning:false,pwaUpdateRetryTimer:null,PWA_UPDATE_READY_DELAY_MS:1500,PWA_UPDATE_SAFETY_RETRY_MS:1000,pwaUpdateRetryDelay:()=>1000,
   NoticeCoordinator:{publish:(_,value)=>notices.push(value)},pwaUpdateActionLabel:()=> 'Update Now',clearTimeout(){},schedulePwaUpdateEvaluation:delay=>evaluations.push(delay),recordPwaUpdateCheckFailure(){},schedulePwaUpdateCheck(){},clearPwaUpdateCheckFailure(){},checkPwaUpdateIfDue:async options=>{checks.push(options);return true;},PwaLifecycle:{status:()=>state}};
  vm.createContext(context);vm.runInContext(source.slice(source.indexOf('async function applyPwaUpdateFromUi('),source.indexOf('function pwaLastUpdateCheckAt(')),context);
  context.renderPwaUpdateStatus(state);assert.equal(notices.at(-1).visible,true);assert.equal(notices.at(-1).title,'Update confirmation pending');assert.equal(elements.get('pwa-update-apply').textContent,'Retry confirmation');assert.equal(elements.get('pwa-update-message').textContent,state.message);assert.equal(evaluations.length,0);

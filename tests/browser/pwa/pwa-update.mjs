@@ -2,7 +2,7 @@ import {createPwaVariant} from '../../helpers/pwa-variant.mjs';
 import assert from 'node:assert/strict';
 import {writeArtifact} from '../../helpers/artifacts.mjs';
 import http from 'node:http';
-import {launchChromium} from '../../helpers/browser-harness.mjs';
+import {launchChromium,skipFirstStart} from '../../helpers/browser-harness.mjs';
 import {renderBuild,validateBuild} from '../../../build/build.mjs';
 
 const build=renderBuild();
@@ -68,7 +68,7 @@ const browser=await launchChromium({profilePrefix:'study-director-qa-pwa-'});
 async function createPage(url=appUrl){
   const page=await browser.createPage(url,{preload:"window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';window.__sd73iViolations=[];document.addEventListener('securitypolicyviolation',event=>window.__sd73iViolations.push({directive:event.effectiveDirective,disposition:event.disposition,blocked:event.blockedURI||''}));const nativeUpdate=ServiceWorkerRegistration.prototype.update;ServiceWorkerRegistration.prototype.update=function(){localStorage.setItem('qa.pwaExplicitChecks',String(Number(localStorage.getItem('qa.pwaExplicitChecks')||0)+1));return nativeUpdate.call(this)};"});
   await waitForStartup(page);
-  await page.evaluate(`document.querySelector('[data-action="first-start-skip"]')?.click()`);
+  await skipFirstStart(page);
   return page;
 }
 async function waitForStartup(page){
