@@ -83,6 +83,8 @@ Every decision is in `docs/NOTES.md` (items 1 to 15), with the order of work. Al
 - *One reservation for local upkeep and backups.* See "One way to wait": the backup busy signals cover automatic backups too.
 - *New or merged services.* None is missing, and none duplicates another: the Device Folder and Drive already share every job.
 
+**Audited again** (2026-10-25), after sync and profiles: `docs/AUDIT-BACKGROUND-SERVICES.md`. Nothing loses data. Found: a failed sync catch-up waits for the next 20-minute check (M1, confirmed on a fake clock); four smaller gaps (L1–L4); docs, wording and tests. Two questions for the user (D1, D2). Report only; nothing changed yet.
+
 ## 5. Next: Drive sync and profiles (decided 2026-10-17)
 
 Build this next, before Wordgard (section 6). The decisions below are the user's, settled over several rounds; do not reopen them. Take it slowly and thoroughly: the user expects edge cases to be many, and robustness must not be traded for convenience.
