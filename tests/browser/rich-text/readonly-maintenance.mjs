@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {launchChromium,waitFor} from '../../helpers/browser-harness.mjs';
-const bundle=fs.readFileSync('source/external/rich-text.js','utf8');
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
+const bundle=richTextRuntimeSource();
 const browser=await launchChromium({profilePrefix:'qa-final-polish-'});let page;
 try{
   page=await browser.createPage('about:blank',{viewport:{width:900,height:700,mobile:false,scale:1}});

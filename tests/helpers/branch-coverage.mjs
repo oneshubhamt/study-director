@@ -11,7 +11,7 @@ const runtimeRoots=['source/core','source/external','portable'];
 function walk(directory){if(!fs.existsSync(directory))return [];return fs.readdirSync(directory,{withFileTypes:true}).flatMap(entry=>{const target=path.join(directory,entry.name);return entry.isDirectory()?walk(target):entry.isFile()?[target]:[];});}
 const production=new Set(runtimeRoots.flatMap(dir=>walk(path.join(root,dir))).filter(file=>file.endsWith('.js')).map(file=>path.resolve(file)));
 const byBase=new Map();for(const file of production){const base=path.basename(file),list=byBase.get(base)||[];list.push(file);byBase.set(base,list);}
-const rawObjectTokens=new Set(['PRODUCTION_LIMITS','LOCAL_STORAGE_KEYS','SESSION_STORAGE_KEYS','OBSOLETE_LOCAL_STORAGE_KEYS','APP_META_KEYS','APP_META_REGISTRY','OBSOLETE_APP_META_KEYS','RUNTIME_DATA_CONTRACT','INDEXED_DB_STORE_NAMES','OBSOLETE_INDEXED_DB','CACHE_STORAGE_IDENTITIES','EXTERNAL_REPOSITORY_IDENTITIES']);
+const rawObjectTokens=new Set(['PRODUCTION_LIMITS','LOCAL_STORAGE_KEYS','SESSION_STORAGE_KEYS','OBSOLETE_LOCAL_STORAGE_KEYS','APP_META_KEYS','APP_META_REGISTRY','OBSOLETE_APP_META_KEYS','RENAMED_APP_META_KEYS','RUNTIME_DATA_CONTRACT','INDEXED_DB_STORE_NAMES','OBSOLETE_INDEXED_DB','CACHE_STORAGE_IDENTITIES','EXTERNAL_REPOSITORY_IDENTITIES']);
 function renderCoverageTemplate(source){return source.replace(/@@SD_([A-Z_]+)@@/gu,(token,name)=>{const value=rawObjectTokens.has(name)?'{}':name==='LEGACY_BACKUP_SCHEMA_VERSION'?'1':name==='PWA_ASSET_MANIFEST'?'[]':'qa';return value.padEnd(token.length,' ');});}
 function normalize(url){
   if(!url)return null;

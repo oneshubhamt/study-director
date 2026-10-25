@@ -15,6 +15,13 @@ export async function waitFor(fn,{timeout=45000,interval=100,label='condition'}=
   throw new Error(`Timed out waiting for ${label}${last instanceof Error?`: ${last.message}`:''}`);
 }
 
+// The first-start form opens only after an async storage check, so a single
+// Skip click can land before it exists. Skip it once it opens and wait until
+// this page's profile has finished its first start (secondary pages never open it).
+export async function skipFirstStart(page,{timeout=45000}={}){
+  return waitFor(()=>page.evaluate(`(()=>{const dialog=document.getElementById('first-start-dialog');if(dialog&&dialog.open){document.querySelector('[data-action="first-start-skip"]').click();return false;}const scope=window[Symbol.for('studyDirector.profileScope.v1')];let list=null;try{list=JSON.parse(localStorage.getItem(scope.registryKey)||'null');}catch{}const mine=Array.isArray(list&&list.profiles)?list.profiles.find(entry=>entry&&entry.scope===scope.scope):null;return !!mine&&mine.fresh!==true;})()`),{timeout,label:'first start finished'});
+}
+
 function readBuildManifest(){
   return JSON.parse(fs.readFileSync(path.join(root,'dist','build-manifest.json'),'utf8'));
 }
@@ -30,14 +37,23 @@ function contentType(name){
   return 'application/octet-stream';
 }
 
+// A paste as the browser delivers it, for use inside page.evaluate: the
+// "paste" event, then (unless a handler took it) "beforeinput" insertFromPaste
+// carrying the data and the selection's range. Wordgard reads the second.
+export const pasteInPage=`((target,data)=>{const paste=new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true});target.dispatchEvent(paste);if(paste.defaultPrevented)return paste;const selection=getSelection(),range=selection&&selection.rangeCount?selection.getRangeAt(0):null;const input=new InputEvent('beforeinput',{inputType:'insertFromPaste',dataTransfer:data,targetRanges:range?[new StaticRange(range)]:[],bubbles:true,cancelable:true});target.dispatchEvent(input);return input;})`;
+export function withoutPwaChecks(html){
+  return html.replace(/void PwaLifecycle\.install\(\)(?:\.then\(\(\)=>schedulePwaUpdateCheck\(750\)\))?;/,'/* Dedicated PWA browser tests cover installation. */')
+    .replace(/async function checkPwaUpdateIfDue\([^\n]+\)\{/,'$& return false; /* Dedicated PWA browser tests cover update checks. */');
+}
+
 export function instrumentedHtml(kind='deployment',options={}){
   const manifest=readBuildManifest();
   let html=fs.readFileSync(path.join(root,'dist',kind,manifest.main),'utf8');
   const marker='/* PUBLIC PLUGIN API */';
   if(!html.includes(marker))throw new Error(`PWA6 instrumentation marker missing from ${kind}.`);
-  const exposure=`window.__PWA6=Object.freeze({StartupLifecycle,SessionLifecycle,AppOwnership,TimerState,TimerEngine,PracticePacer,Interactions,SystemNotifications,Pomodoro,NoticeCoordinator,AppData,IndexedDb,BackupController,BackupProviderRuntime,DeviceBackup,NativeCapabilities,PwaLifecycle,SessionEvidenceGateway,ReviewModel,ReviewView,ReviewEditor,LibraryView,PlanDraftEditor,applySchedule,goTab,commitTaskNoteEditor,setStudyQuality,saveDayRecord,flushLiveDraft,todayISO,readStorageHealth,loadScheduleIntoDraft,resetTodaySession,markDone,togglePause,setCurrentTask,refreshPnote,RichTextRuntime,RichTextAssets,renderRichTextContent});\n`;
+  const exposure=`window.__PWA6=Object.freeze({StartupLifecycle,SessionLifecycle,AppOwnership,TimerState,TimerEngine,PracticePacer,Interactions,SystemNotifications,Pomodoro,NoticeCoordinator,AppData,IndexedDb,UnsupportedData,Profiles,BackupController,BackupProviderRuntime,DeviceBackup,NativeCapabilities,PwaLifecycle,SessionEvidenceGateway,ReviewModel,ReviewView,ReviewEditor,LibraryView,PlanDraftEditor,applySchedule,goTab,commitTaskNoteEditor,setStudyQuality,saveDayRecord,flushLiveDraft,todayISO,readStorageHealth,loadScheduleIntoDraft,resetTodaySession,markDone,togglePause,setCurrentTask,refreshPnote,RichTextRuntime,RichTextAssets,withRichTextAssetMaintenancePaused,renderRichTextContent});\n`;
   html=html.replace(marker,exposure+marker);
-  if(options.disablePwa!==false)html=html.replace(/void PwaLifecycle\.install\(\)(?:\.then\(\(\)=>schedulePwaUpdateCheck\(750\)\))?;/,'/* PWA6 instrumented runtime: sealed PWA lifecycle tested separately. */');
+  if(options.disablePwa!==false)html=withoutPwaChecks(html);
   return html;
 }
 
@@ -59,14 +75,14 @@ export async function startReleaseServer(){
       response.writeHead(failure.status||503,{'content-type':'text/plain','cache-control':'no-store'});
       response.end(failure.body||'injected network failure');return;
     }
-    if(relative==='instrumented.html'){
-      response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});
-      response.end(instrumentedHtml(kind));return;
-    }
     const override=overrides.get(pathname);
     if(override!==undefined){
       response.writeHead(200,{'content-type':contentType(relative),'cache-control':'no-store','service-worker-allowed':`/${kind}/`});
       response.end(override);return;
+    }
+    if(relative==='instrumented.html'){
+      response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});
+      response.end(instrumentedHtml(kind));return;
     }
     const base=path.resolve(root,'dist',kind),file=path.resolve(base,relative||manifest.main);
     if(!file.startsWith(base+path.sep)||!fs.existsSync(file)||!fs.statSync(file).isFile()){
@@ -95,7 +111,7 @@ export async function startReleaseServer(){
 
 export class CdpPage{
   constructor(socket,targetId){
-    this.socket=socket;this.targetId=targetId;this.nextId=0;this.pending=new Map();this.events=[];this.coverageStarted=false;this.closed=false;
+    this.socket=socket;this.targetId=targetId;this.nextId=0;this.pending=new Map();this.events=[];this.warnings=[];this.loadCount=0;this.coverageStarted=false;this.closed=false;this.listeners=new Map();
     socket.onmessage=event=>{
       const message=JSON.parse(event.data);
       if(message.id){
@@ -103,8 +119,11 @@ export class CdpPage{
         this.pending.delete(message.id);
         message.error?pending.reject(new Error(JSON.stringify(message.error))):pending.resolve(message.result);return;
       }
+      for(const listener of this.listeners.get(message.method)||[]){try{listener(message.params||{});}catch(error){this.events.push({kind:'listener-error',text:String(error&&error.stack||error)});}}
+      if(message.method==='Page.loadEventFired')this.loadCount+=1;
       if(message.method==='Runtime.exceptionThrown')this.events.push({kind:'exception',text:message.params.exceptionDetails.exception?.description||message.params.exceptionDetails.text||'Runtime exception'});
       if(message.method==='Runtime.consoleAPICalled'&&message.params.type==='error')this.events.push({kind:'console-error',text:message.params.args.map(arg=>arg.value??arg.description??'').join(' ')});
+      if(message.method==='Runtime.consoleAPICalled'&&message.params.type==='warning')this.warnings.push(message.params.args.map(arg=>arg.value??arg.description??'').join(' '));
       if(message.method==='Log.entryAdded'&&message.params.entry.level==='error')this.events.push({kind:'log-error',text:message.params.entry.text});
     };
   }
@@ -112,6 +131,8 @@ export class CdpPage{
     const socket=new WebSocket(url);await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject;});
     return new CdpPage(socket,targetId);
   }
+  // Calls listener with the params of every CDP event named method.
+  on(method,listener){if(!this.listeners.has(method))this.listeners.set(method,new Set());this.listeners.get(method).add(listener);return ()=>this.listeners.get(method)?.delete(listener);}
   send(method,params={}){
     return new Promise((resolve,reject)=>{const id=++this.nextId;this.pending.set(id,{resolve,reject});this.socket.send(JSON.stringify({id,method,params}));});
   }
@@ -147,12 +168,13 @@ export class CdpPage{
     return state;
   }
   async navigate(url){
+    const previous=await this.evaluate('performance.timeOrigin');
     const result=await this.send('Page.navigate',{url});
     if(result?.errorText)throw new Error(`Chromium navigation failed for ${url}: ${result.errorText}`);
-    await waitFor(()=>this.evaluate(`document.readyState==='complete'`),{label:`navigation ${url}`});
+    await waitFor(()=>this.evaluate(`performance.timeOrigin!==${previous}&&document.readyState==='complete'`),{label:`navigation ${url}`});
     await this.assertHealthyNavigation(url);
   }
-  async reload(){await this.send('Page.reload',{ignoreCache:false});await waitFor(()=>this.evaluate(`document.readyState==='complete'`),{label:'reload'});await this.assertHealthyNavigation('reload');}
+  async reload(){const previous=await this.evaluate('performance.timeOrigin');await this.send('Page.reload',{ignoreCache:false});await waitFor(()=>this.evaluate(`performance.timeOrigin!==${previous}&&document.readyState==='complete'`),{label:'reload'});await this.assertHealthyNavigation('reload');}
   async settle(frames=2){
     const count=Math.max(1,Math.min(8,Number(frames)||2));
     await this.evaluate(`new Promise(resolve=>{let remaining=${count};const step=()=>{remaining-=1;if(remaining<=0)resolve(true);else requestAnimationFrame(step)};requestAnimationFrame(step)})`);
@@ -162,7 +184,15 @@ export class CdpPage{
     await this.send('Emulation.setTouchEmulationEnabled',mobile?{enabled:true,maxTouchPoints:5}:{enabled:false});
   }
   async elementPoint(selector){
+    // Preserve the page's position when the target is already available to a
+    // user. Forced centering would contaminate scroll-stability assertions.
+    await this.evaluate(`(()=>{const element=document.querySelector(${JSON.stringify(selector)});if(!element)return;const r=element.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);if(!hit||!(hit===element||element.contains(hit)))element.scrollIntoView({block:'center',inline:'nearest'});})()`);
+    await this.settle();
     const point=await this.evaluate(`(()=>{const element=document.querySelector(${JSON.stringify(selector)});if(!element)throw new Error('Missing input target: '+${JSON.stringify(selector)});element.scrollIntoView({block:'nearest',inline:'nearest'});const rect=element.getBoundingClientRect(),style=getComputedStyle(element);if(rect.width<=0||rect.height<=0||style.display==='none'||style.visibility==='hidden')throw new Error('Hidden input target: '+${JSON.stringify(selector)});return {x:rect.left+rect.width/2,y:rect.top+rect.height/2};})()`);
+    await this.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:point.x,y:point.y});
+    await this.settle();
+    const hit=await this.evaluate(`(()=>{const target=document.querySelector(${JSON.stringify(selector)}),hit=document.elementFromPoint(${point.x},${point.y});return {ok:!!hit&&(hit===target||target.contains(hit)),hit:hit?.outerHTML.slice(0,300)};})()`);
+    if(!hit.ok)throw new Error(`Covered input target: ${selector}; hit=${hit.hit}`);
     return point;
   }
   async click(selector){
@@ -188,6 +218,14 @@ export class CdpPage{
   close(){this.closed=true;this.socket.close();}
 }
 
+// Browser tests build plans and Saved Days around the current time. A whole-hour
+// zone whose local time is about noon keeps them clear of the app's 04:00
+// study-day boundary and of midnight, whenever the suite runs, and keeps the
+// page's calendar date equal to the UTC date the test runner uses.
+export function studyTimezone(at=new Date()){
+  const offset=12-at.getUTCHours();
+  return offset===0?'Etc/UTC':`Etc/GMT${offset>0?'-':'+'}${Math.abs(offset)}`;
+}
 export function resolveChromiumExecutable(preferred=''){
   const candidates=[
     preferred,
@@ -221,7 +259,7 @@ export async function launchChromium(options={}){
     const target=await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`,{method:'PUT'})).json();
     const page=await CdpPage.connect(target.webSocketDebuggerUrl,target.id);
     pages.add(page);await page.send('Runtime.enable');await page.send('Page.enable');await page.send('Log.enable');await page.send('Network.enable');await page.send('Accessibility.enable');await page.startCoverage();
-    await page.send('Emulation.setTimezoneOverride',{timezoneId:'Asia/Kolkata'});
+    await page.send('Emulation.setTimezoneOverride',{timezoneId:settings.timezoneId||studyTimezone()});
     if(settings.userAgent)await page.send('Network.setUserAgentOverride',{userAgent:settings.userAgent,platform:settings.platform||''});
     await page.setViewport(settings.viewport||{width:1365,height:900,mobile:false,scale:1});
     if(settings.preload)await page.send('Page.addScriptToEvaluateOnNewDocument',{source:String(settings.preload)});
@@ -252,5 +290,6 @@ export async function waitForStudyDirector(page,{instrumented=false,timeout=4500
   const expression=instrumented
     ? `!!(window.StudyDirector&&window.__PWA6&&__PWA6.StartupLifecycle.status().fullyInitialized)`
     : `!!(window.StudyDirector&&document.documentElement.dataset.studyDirectorReady==='true')`;
-  return waitFor(()=>page.evaluate(expression),{timeout,label:'Study Director startup'});
+  try{return await waitFor(()=>page.evaluate(expression),{timeout,label:'Study Director startup'});}
+  catch(error){const state=await page.evaluate(`({href:location.href,startup:window.__PWA6?.StartupLifecycle.status(),lifecycle:document.documentElement.dataset.studyDirectorLifecycle,body:document.body.innerText.slice(-1500)})`).catch(()=>null);throw new Error(`${error.message}; state=${JSON.stringify(state)}; errors=${JSON.stringify(page.events)}`,{cause:error});}
 }

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import {artifactPath,writeArtifact} from '../../helpers/artifacts.mjs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor,instrumentedHtml} from '../../helpers/browser-harness.mjs';
+import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor,instrumentedHtml,pasteInPage} from '../../helpers/browser-harness.mjs';
 import {deploymentDirectoryName} from '../../../release.config.mjs';
 const server=await startReleaseServer(),browser=await launchChromium({profilePrefix:'qa-runtime-security-'});
 const policy="worker-src 'self'; require-trusted-types-for 'script'; trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-google-signin";
@@ -13,8 +13,8 @@ if(process.env.SD_MINIFIED_TEST==='1'){
  const expose=html.match(/window\.__PWA6=Object\.freeze\(\{[^;]+;\n/)[0];
  html=fs.readFileSync(path.join(root,'index.html'),'utf8').replace('window.StudyDirector=StudyDirectorPublicAPI;',expose+'window.StudyDirector=StudyDirectorPublicAPI;').replace(/void PwaLifecycle\.install\(\)(?:\.then\(\(\)=>schedulePwaUpdateCheck\(750\)\))?;/,'');
 }
-server.setOverride('deployment','runtime-security.html',html.replace('<head>','<head><meta http-equiv="Content-Security-Policy" content="'+policy+'">').replace('Object.freeze({StartupLifecycle,','Object.freeze({mutateBackupProtection,readAppMetaValue,trustedAssetURL,trustedTypeViolations,StartupLifecycle,'));
-const preload=`(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'Security QA',updatedAt:d.toISOString()}));localStorage.setItem('studyDirector.nameSetupSkippedDate.v1',today);})();`;
+server.setOverride('deployment','runtime-security.html',html.replace('<head>','<head><meta http-equiv="Content-Security-Policy" content="'+policy+'">').replace('Object.freeze({StartupLifecycle,','Object.freeze({mutateBackupProtection,ExportsAppMeta,trustedAssetURL,trustedTypeViolations,StartupLifecycle,'));
+const preload=`(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'Security QA',updatedAt:d.toISOString()}));(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));})();`;
 let page;
 try{
  page=await browser.createPage(server.url('deployment','runtime-security.html'),{preload});await waitForStudyDirector(page,{instrumented:true});await waitFor(()=>page.evaluate('__PWA6.AppOwnership.status().hasControl'));
@@ -24,11 +24,11 @@ try{
  const searchWorkerName=html.match(/sd\.note-search\.[a-f0-9]+\.js/)[0];
  assert.deepEqual(await page.evaluate(`new Promise((resolve,reject)=>{const w=new Worker(__PWA6.trustedAssetURL(${JSON.stringify(searchWorkerName)}));w.onmessage=({data})=>{w.terminate();resolve(data.keys)};w.onerror=()=>{w.terminate();reject(Error('Search worker failed under Trusted Types'))};w.postMessage({type:'sync',documents:[{key:'qa',plain:'search boundary'}]});w.postMessage({type:'query',id:1,query:'boundary'})})`),['qa']);
  const policyWrites=await page.evaluate(`(async()=>{
-   const mutate=__PWA6.mutateBackupProtection,record={version:1,id:'qa-policy',verifier:new Blob(['proof'])};
+   const mutate=__PWA6.mutateBackupProtection,record={version:3,id:'qa-policy',verifier:new Blob(['proof']),key:null,setAt:new Date().toISOString()};
    const writes=await Promise.allSettled([mutate(record,{expectedId:'',check(){}}),mutate({...record,id:'stale-policy'},{expectedId:'',check(){}})]);
-   const current=await __PWA6.readAppMetaValue('backupProtection');
+   const current=await __PWA6.ExportsAppMeta.read('backupProtection');
    const refused=await mutate(null,{expectedId:current.id,check(){throw Error('ownership lost')}}).then(()=>false,()=>true);
-   const retained=(await __PWA6.readAppMetaValue('backupProtection')).id===current.id;
+   const retained=(await __PWA6.ExportsAppMeta.read('backupProtection')).id===current.id;
    await mutate(null,{expectedId:current.id,check(){}});
    return {commits:writes.filter(x=>x.status==='fulfilled').length,refused,retained};
  })()`);
@@ -40,7 +40,7 @@ try{
  await page.click('#cd-card');assert.equal(await page.evaluate('__PWA6.TimerState.paused'),true);
  await page.click('#cd-card');assert.equal(await page.evaluate('__PWA6.TimerState.paused'),false);
  // Repeat HTML paste to catch duplicate policy creation under enforcement.
- await page.evaluate(`(async()=>{const field=document.createElement('textarea');field.id='security-note';document.body.appendChild(field);window.testEditor=await StudyDirectorRichText.mountRichTextEditor({field,label:'Security paste',initialValue:'',maxWords:10000,maxBytes:917504,assets:{get:async()=>null,put:async()=>{},remove:async()=>{}}});for(let i=0;i<2;i++){const editor=document.querySelector('#security-note + .sd-rte .sd-rte-editor');editor.focus();const data=new DataTransfer();data.setData('text/html','<p><strong>Safe text</strong><img src=x onerror="window.badPaste=true"><a href="javascript:alert(1)">bad link</a></p>');data.setData('text/plain','Safe text');editor.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));await new Promise(r=>setTimeout(r,50));}})()`);
+ await page.evaluate(`(async()=>{const field=document.createElement('textarea');field.id='security-note';document.body.appendChild(field);window.testEditor=await StudyDirectorRichText.mountRichTextEditor({field,label:'Security paste',initialValue:'',maxWords:10000,maxBytes:917504,assets:{get:async()=>null,put:async()=>{},remove:async()=>{}}});for(let i=0;i<2;i++){const editor=document.querySelector('#security-note + .sd-rte .sd-rte-editor');editor.focus();const data=new DataTransfer();data.setData('text/html','<p><strong>Safe text</strong><img src=x onerror="window.badPaste=true"><a href="javascript:alert(1)">bad link</a></p>');data.setData('text/plain','Safe text');${pasteInPage}(editor,data);await new Promise(r=>setTimeout(r,50));}})()`);
  assert.equal(await page.evaluate('window.badPaste===true'),false);
  assert.match(await page.evaluate('document.querySelector("#security-note + .sd-rte").textContent'),/Safe text/);
  assert.equal(await page.evaluate('document.querySelector("#security-note + .sd-rte a[href^=javascript]")===null'),true);

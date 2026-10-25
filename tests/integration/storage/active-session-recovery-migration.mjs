@@ -24,7 +24,7 @@ assert.equal(result.recoveryRewritten,1,'legacy recovery envelope must be rewrit
 const current=local.get('recovery');
 assert.ok(current);
 assert.deepEqual(Object.keys(current).sort(),['revision','shell','snapshot','updatedAt','version']);
-assert.deepEqual(Object.keys(current.shell).sort(),['date','id','revision','scheduleText','status','suspendedAt','type','updatedAt','version']);
+assert.deepEqual(Object.keys(current.shell).sort(),['date','id','revision','runningOn','scheduleText','status','suspendedAt','type','updatedAt','version']);assert.equal(current.shell.runningOn,'inst_test','an older recovery copy belongs to this device');
 for(const key of ['entityType','entityId','schemaVersion','deviceId','createdAt','deleted','syncStatus']){
   assert.equal(Object.hasOwn(current.shell,key),false,`legacy shell field ${key} must be retired`);
 }

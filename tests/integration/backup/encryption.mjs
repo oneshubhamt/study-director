@@ -14,8 +14,9 @@ assert.equal(await verifyPasswordVerifier(verifier,key),true);
 await assert.rejects(verifyPasswordVerifier(verifier,await passwordKey('wrong password')),{code:'BACKUP_AUTH_FAILED'});
 const verifierBytes=new Uint8Array(await verifier.arrayBuffer());verifierBytes[verifierBytes.length-1]^=1;
 await assert.rejects(verifyPasswordVerifier(new Blob([verifierBytes]),key),{code:'BACKUP_AUTH_FAILED'});
-const copiedReceipt=await engine.run('file.copy',{file:plain,proof:true});assert.equal(copiedReceipt.file instanceof Blob,true);assert.match(copiedReceipt.hash,/^[a-f0-9]{64}$/u);assert.equal(copiedReceipt.hash,await engine.run('file.hash',{file:copiedReceipt.file}),'staged-copy receipt must describe the exact output bytes without a second source read');
-const sealedReceipt=await engine.run('crypto.stream.encrypt',{file:plain,key,proof:true});assert.equal(sealedReceipt.file instanceof Blob,true);assert.match(sealedReceipt.hash,/^[a-f0-9]{64}$/u);assert.equal(sealedReceipt.hash,await engine.run('file.hash',{file:sealedReceipt.file}),'encrypted-output receipt must describe the exact ciphertext bytes');
+const copied=await engine.run('file.copy',{file:plain});assert.equal(copied instanceof Blob,true,'a staged copy is a plain file; saves compare it byte for byte');assert.equal(await engine.run('equalFiles',{left:plain,right:copied}),true);
+const tampered=new Uint8Array(await copied.arrayBuffer());tampered[tampered.length>>1]^=1;assert.equal(await engine.run('equalFiles',{left:plain,right:new Blob([tampered])}),false,'one changed byte fails the comparison');
+const sealedCopy=await engine.run('crypto.stream.encrypt',{file:plain,key});assert.equal(sealedCopy instanceof Blob,true);assert.equal(await engine.run('equalFiles',{left:sealedCopy,right:new Blob([sealedCopy])}),true);
 const small=await engine.run('crypto.stream.encrypt',{file:plain,key}),smallAgain=await engine.run('crypto.stream.encrypt',{file:plain,key});
 assert.equal((await streamEncryptionInfo(small)).version,2);assert.notDeepEqual(new Uint8Array(await small.arrayBuffer()),new Uint8Array(await smallAgain.arrayBuffer()),'fresh SDENC02 salt/nonce prefix per export');
 assert.equal(await (await engine.run('crypto.stream.decrypt',{file:small,key})).text(),await plain.text());
@@ -26,9 +27,11 @@ assert.equal(await streamEncryptionInfo(plain),null);
   const descriptor=Object.getOwnPropertyDescriptor(globalThis,'navigator'),scratch=await outputHandle();let seenDirectory='',seenName='';
   Object.defineProperty(globalThis,'navigator',{configurable:true,value:{storage:{getDirectory:async()=>({getDirectoryHandle:async name=>{seenDirectory=name;return {getFileHandle:async fileName=>{seenName=fileName;return scratch;}};}})}}});
   try{
-    const name='backup-00000000-0000-4000-8000-000000000001',writer=await openOutput({kind:'opfs',name});await writer.write(new Uint8Array([1,2,3]));await writer.close();
+    const name='backup-00000000-0000-4000-8000-000000000001',writer=await openOutput({kind:'opfs',name,directory:'@@SD_BACKUP_FILES_OPFS_DIRECTORY@@'});await writer.write(new Uint8Array([1,2,3]));await writer.close();
     assert.equal(seenDirectory,'@@SD_BACKUP_FILES_OPFS_DIRECTORY@@');assert.equal(seenName,name);assert.deepEqual(new Uint8Array(await (await writer.file()).arrayBuffer()),new Uint8Array([1,2,3]));
-    await assert.rejects(openOutput({kind:'opfs',name:'unsafe'}),/identity is invalid/u);
+    await assert.rejects(openOutput({kind:'opfs',name:'unsafe',directory:'@@SD_BACKUP_FILES_OPFS_DIRECTORY@@'}),/identity is invalid/u);
+    await assert.rejects(openOutput({kind:'opfs',name,directory:'elsewhere'}),/folder is invalid/u,'the worker opens only a backup scratch folder');
+    const profileFolder='@@SD_BACKUP_FILES_OPFS_DIRECTORY@@@@SD_PROFILE_SCOPE_SEPARATOR@@prof_ben_mve00000_abcdef01';await (await openOutput({kind:'opfs',name,directory:profileFolder})).close();assert.equal(seenDirectory,profileFolder,'a later profile keeps its scratch files in its own folder');
   }finally{if(descriptor)Object.defineProperty(globalThis,'navigator',descriptor);else delete globalThis.navigator;}
 }
 for(const file of ['internal','operation-lifecycle','exports'])vm.runInThisContext(fs.readFileSync(`source/core/${file}.js`,'utf8'));
@@ -37,21 +40,39 @@ let saved=null,state,answers=[],choice='unlock',writes=0,readError=false;
 const processing={run:engine.run,check:()=>{},job:fn=>fn()};
 const storage={read:async()=>{if(readError)throw new Error('IDB unavailable');return saved;},write:async(k,v)=>{saved=v;writes++;},remove:async()=>{saved=null;writes++;}};
 const interactions={input:async()=>answers.shift()??null,choose:async()=>choice,confirm:async()=>true};
-const factory=()=>module.createProtection({processing,storage,interactions,settingKey:'backupProtection',onState:s=>{state=s;}});
-const protection=factory();answers=[{value:password}];await protection.manage();assert.equal(state.unlocked,true);assert.equal(writes,1);assert.equal(saved.version,2);assert.equal(saved.verifier instanceof Blob,true);assert.deepEqual(Object.keys(saved).sort(),['id','verifier','version']);
+const factory=(options={})=>module.createProtection({processing,storage,interactions,settingKey:'backupProtection',onState:s=>{state=s;},...options});
+const protection=factory();answers=[{value:password}];await protection.manage();assert.equal(state.unlocked,true);assert.equal(writes,1);assert.equal(saved.version,3);assert.equal(saved.verifier instanceof Blob,true);assert.deepEqual(Object.keys(saved).sort(),['id','key','setAt','verifier','version']);
+assert.ok(saved.key instanceof CryptoKey&&saved.key.extractable===false&&saved.key.algorithm.name==='PBKDF2','only a non-extractable key made from the password is kept, never the password');
 const exported=await protection.protect({blob:plain},{interactive:false});assert.equal(exported.encrypted,true);
 assert.equal(await (await protection.unprotect(exported.blob,{interactive:false})).blob.text(),await plain.text());
-const restarted=factory();await restarted.refresh();assert.equal(state.unlocked,false);await assert.rejects(restarted.protect({blob:plain},{interactive:false}),{code:'BACKUP_LOCKED'});assert.equal(writes,1);
-answers=[{value:'wrong'},{value:password}];await restarted.manage();assert.equal(state.unlocked,true);assert.equal(answers.length,0);assert.equal(writes,1);
+// One profile on the device: its kept key opens it again after a restart.
+const reopened=factory();await reopened.refresh();assert.equal(state.unlocked,true,'a device with one profile does not ask again');assert.equal((await reopened.protect({blob:plain},{interactive:false})).encrypted,true);assert.equal(writes,1);
+// Several profiles: the key stays kept but each start asks; Not now stays locked.
+const restarted=factory({remember:()=>false});await restarted.refresh();assert.equal(state.unlocked,false);await assert.rejects(restarted.protect({blob:plain},{interactive:false}),{code:'BACKUP_LOCKED'});assert.equal(writes,1);
+answers=[null];assert.equal(await restarted.ask(),false,'Not now leaves the profile locked');assert.equal(state.unlocked,false);
+answers=[{value:'wrong'},{value:password}];await restarted.manage();assert.equal(state.unlocked,true);assert.equal(answers.length,0);assert.equal(writes,1,'unlocking keeps the stored key as it is');
+restarted.lock();answers=[{value:password}];assert.equal(await restarted.ask(),true);assert.equal(state.unlocked,true);
 restarted.lock();answers=[null];await assert.rejects(restarted.protect({blob:plain}),{name:'AbortError'});
 let resolvePassword,asked;const originalInput=interactions.input;const waiting=new Promise(resolve=>{asked=resolve;});
 interactions.input=()=>{asked();return new Promise(resolve=>{resolvePassword=resolve;});};
 const interruptedUnlock=restarted.manage();await waiting;restarted.lock();resolvePassword({value:password});await assert.rejects(interruptedUnlock,{name:'AbortError'});assert.equal(state.unlocked,false);interactions.input=originalInput;
 readError=true;await assert.rejects(restarted.protect({blob:plain},{interactive:false}),/IDB unavailable/);readError=false;
-// Remote settings changes invalidate retained keys; no fallback to plaintext.
-saved={...saved,id:'changed-in-other-tab'};await assert.rejects(protection.protect({blob:plain},{interactive:false}),{code:'BACKUP_LOCKED'});
-choice='disable';answers=[{value:password}];await protection.manage();await protection.manage();assert.equal(saved,null);assert.equal((await protection.protect({blob:plain})).encrypted,false);
-console.log(JSON.stringify({status:'PASS',suite:'encryption',checks:['Unicode and whitespace password','independent OpenSSL decryption','fresh salt and IV','authenticated header/cipher/tag','wrong password','truncated/trailing data','32 MiB admission','no persisted key/password','restart locked','retry','cancel','storage failure closed','cross-tab invalidation','explicit disabling','copy/encryption output receipts']},null,2));
+// A record changed elsewhere invalidates held keys; no fallback to plaintext.
+saved={...saved,id:'changed-in-other-tab',key:null};await assert.rejects(protection.protect({blob:plain},{interactive:false}),{code:'BACKUP_LOCKED'});
+answers=[{value:password}];await protection.manage();assert.equal(state.unlocked,true);assert.equal(saved.id,'changed-in-other-tab');assert.ok(saved.key instanceof CryptoKey,'unlocking a record without a key keeps it');
+// The library moved on: another device changed the password. The password typed
+// to open its newest version is kept under the library's id.
+const otherPassword='another long passphrase for the library',otherKey=await engine.run('crypto.key',{password:otherPassword}),otherVersion=await engine.run('crypto.stream.encrypt',{file:plain,key:otherKey});
+answers=[{value:otherPassword}];assert.equal(await (await protection.unprotect(otherVersion)).blob.text(),await plain.text());
+assert.equal(await protection.follow({protectionId:'library-password-2',encrypted:true}),true);assert.equal(saved.id,'library-password-2');assert.equal(state.unlocked,true);
+const followed=await protection.protect({blob:plain},{interactive:false});assert.equal(followed.protectionId,'library-password-2');assert.equal(await (await engine.run('crypto.stream.decrypt',{file:followed.blob,key:otherKey})).text(),await plain.text(),'versions made from now on use the library password');
+assert.equal(await protection.follow({protectionId:'library-password-2',encrypted:true}),false,'the same password changes nothing');
+// Removed on another device: the plain head built on an encrypted one removes it here.
+assert.equal(await protection.follow({encrypted:false,removedElsewhere:true}),true);assert.equal(saved,null);assert.equal(state.enabled,false);assert.equal((await protection.protect({blob:plain})).encrypted,false);
+// First start: the password typed in the form is set before anything uploads.
+assert.equal(await protection.enable(password),true);assert.equal(saved.version,3);assert.equal(state.unlocked,true);assert.equal(await protection.enable('a second long passphrase'),false,'an existing password is never replaced by the form');
+choice='remove';await protection.manage();assert.equal(saved,null);assert.equal((await protection.protect({blob:plain})).encrypted,false);
+console.log(JSON.stringify({status:'PASS',suite:'encryption',checks:['Unicode and whitespace password','independent OpenSSL decryption','fresh salt and IV','authenticated header/cipher/tag','wrong password','truncated/trailing data','32 MiB admission','only a non-extractable key kept','one profile reopens unlocked','several profiles ask','follow a changed or removed password','first-start password','retry','cancel','storage failure closed','cross-tab invalidation','explicit disabling','copy/encryption output receipts']},null,2));
 
 // Streaming envelope: >32 MiB, independent OpenSSL frame authentication, and
 // no whole-file reads. The production transform writes a real disk-backed Blob.

@@ -2,19 +2,21 @@
  * Upstream layout is normalized by the build-only wordgard-source facades;
  * Study Director compatibility behavior is normalized by wordgard-patches.
  * Application/editor code should import Wordgard primitives only from here. */
-export {parseInertHTML} from './wordgard-patches/inert-html';
+export {parseInertHTML} from 'wordgard/inert-html';
+export {cutHandling} from './wordgard-patches/cut';
 
-export {Wordgard,Decoration,PointSet,RangeSet,Widget,InputRule,KeyBinding,placeholder} from 'wordgard/editor';
+export {Wordgard,Decoration,Widget,InputRule,KeyBinding,placeholder} from 'wordgard/editor';
+export {PointSet,RangeSet} from 'wordgard/set';
 export {GardState,GardSelection,Transaction} from 'wordgard/state';
 export {
   Command,listIsActive,setTextblockType,setAlignment,toggleBlock,toggleList,toggleMark,
   canAddMarkInRange,selectedTextblocks,
 } from 'wordgard/command';
 export {history,redo,redoDepth,undo,undoDepth} from 'wordgard/history';
-export {CellSelection,tableCore} from './wordgard-source/table';
+export {CellSelection,tableCore} from 'wordgard/table';
 export {ChangeSet,Elt,Leaf,Node,Plot,Mark,parse,serialize} from 'wordgard/doc';
 export {
   Alignment,BlockCell,BlockHeaderCell,Blockquote,BulletList,Doc,Heading,HorizontalRule,
-  LineBreak,Link,ListItem,OrderedList,Paragraph,Subscript,Strong,Superscript,
+  LineBreak,Link,ListItem,OrderedList,Paragraph,Strikethrough,Subscript,Strong,Superscript,
   Table,TableRow,Underline,Emphasis,
 } from 'wordgard/types';

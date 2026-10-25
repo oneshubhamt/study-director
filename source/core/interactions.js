@@ -65,7 +65,8 @@ registry.define('interactions',1,()=>{
           const value=String(result);
           const error=typeof options.validate==='function'?cleanText(options.validate(value,String(options.defaultOption||'')),300):'';
           if(error){nativeConfirm(error);return Promise.resolve(null);}
-          return Promise.resolve(freeze({value,option:String(options.defaultOption||'')}));
+          const checkbox=options.checkbox&&options.checkbox.label?{checked:!!nativeConfirm([cleanText(options.checkbox.label,180),'OK = yes · Cancel = no'].join('\n'))}:{};
+          return Promise.resolve(freeze({value,option:String(options.defaultOption||''),...checkbox}));
         }
         if(type==='choose'){
           const choices=Array.isArray(options.choices)?options.choices:[];
@@ -156,7 +157,17 @@ registry.define('interactions',1,()=>{
       header.append(eyebrow,title);shell.appendChild(header);
       const body=document.createElement('div');body.className='interaction-body';appendCopy(body,options);shell.appendChild(body);
       const error=document.createElement('div');error.className='interaction-error ui-status';error.id='sd-interaction-error';error.setAttribute('role','alert');error.hidden=true;
-      let inputElement=null,confirmationElement=null,selectedOption=String(options.defaultOption||''),configuredValues=null;
+      let inputElement=null,inputCheckbox=null,confirmationElement=null,selectedOption=String(options.defaultOption||''),configuredValues=null;
+      // One tick-box row with its description, for input's tick box and configure's list.
+      const checkboxRow=(checkbox,label,onChange=null)=>{
+        const row=document.createElement('label');row.className='interaction-checkbox-row ui-body';
+        const box=document.createElement('input');box.type='checkbox';box.className='interaction-checkbox';box.checked=checkbox.defaultChecked===true;
+        const copy=document.createElement('span');copy.className='interaction-checkbox-copy';
+        const title=document.createElement('strong');title.textContent=label;copy.appendChild(title);
+        if(checkbox.description){const description=document.createElement('span');description.textContent=cleanText(checkbox.description,300);copy.appendChild(description);}
+        if(onChange)box.addEventListener('change',()=>onChange(box.checked));
+        row.append(box,copy);return Object.freeze({row,box});
+      };
       if(request.type==='input'){
         const optionRows=Array.isArray(options.options)?options.options.filter(option=>option&&option.value!==undefined&&option.label):[];
         if(optionRows.length){
@@ -186,6 +197,11 @@ registry.define('interactions',1,()=>{
         field.appendChild(inputElement);body.appendChild(field);
         if(options.inputType==='password'){inputElement.spellcheck=false;inputElement.autocomplete=options.confirmPassword?'new-password':'current-password';if(options.confirmPassword){const confirm=document.createElement('label');confirm.className='interaction-field ui-body';confirm.textContent='Confirm password';confirmationElement=inputElement.cloneNode();confirmationElement.value='';confirm.appendChild(confirmationElement);body.appendChild(confirm);}}
         if(options.hint){const hint=document.createElement('div');hint.className='interaction-hint ui-helper';hint.textContent=cleanText(options.hint,500);body.appendChild(hint);}
+        // One optional tick box; when shown, the result carries `checked`.
+        if(options.checkbox&&options.checkbox.label){
+          const checks=document.createElement('div'),made=checkboxRow(options.checkbox,cleanText(options.checkbox.label,180));checks.className='interaction-checks';
+          inputCheckbox=made.box;checks.appendChild(made.row);body.appendChild(checks);
+        }
         if(typeof options.preview==='function'){
           const preview=document.createElement('div');preview.className='interaction-preview ui-mono';preview.textContent=cleanText(options.preview(inputElement.value,selectedOption),300);body.appendChild(preview);
           inputElement.addEventListener('input',()=>{preview.textContent=cleanText(options.preview(inputElement.value,selectedOption),300);error.hidden=true;});
@@ -194,7 +210,7 @@ registry.define('interactions',1,()=>{
       if(request.type==='choose'){
         const choices=document.createElement('div');choices.className='interaction-choices';
         (Array.isArray(options.choices)?options.choices:[]).forEach(choice=>{
-          const action=button(choice.label,choice.kind==='danger'?'danger':choice.kind==='primary'?'primary':'');
+          const action=button(choice.label,['danger','caution','primary'].includes(choice.kind)?choice.kind:'');
           action.classList.add('interaction-choice');
           if(choice.description){const description=document.createElement('span');description.className='interaction-choice-description';description.textContent=cleanText(choice.description,300);action.appendChild(description);}
           action.addEventListener('click',()=>settle(String(choice.value)));
@@ -247,13 +263,8 @@ registry.define('interactions',1,()=>{
         if(checkboxRows.length){
           const checks=document.createElement('div');checks.className='interaction-checks';
           for(const {checkbox,id,label} of checkboxRows){
-            const row=document.createElement('label');row.className='interaction-checkbox-row ui-body';
-            const input=document.createElement('input');input.type='checkbox';input.className='interaction-checkbox';input.checked=checkbox.defaultChecked===true;configuredValues[id]=input.checked;
-            const copy=document.createElement('span');copy.className='interaction-checkbox-copy';
-            const title=document.createElement('strong');title.textContent=label;copy.appendChild(title);
-            if(checkbox.description){const description=document.createElement('span');description.textContent=cleanText(checkbox.description,300);copy.appendChild(description);}
-            input.addEventListener('change',()=>{configuredValues[id]=input.checked;});
-            row.append(input,copy);checks.appendChild(row);
+            const made=checkboxRow(checkbox,label,checked=>{configuredValues[id]=checked;});
+            configuredValues[id]=made.box.checked;checks.appendChild(made.row);
           }
           form.appendChild(checks);
         }
@@ -265,7 +276,7 @@ registry.define('interactions',1,()=>{
       actions.appendChild(cancel);
       let primary=null;
       if(request.type!=='choose'){
-        primary=button(options.confirmLabel||(request.type==='input'?'Continue':'Confirm'),options.danger?'danger':'primary');
+        primary=button(options.confirmLabel||(request.type==='input'?'Continue':'Confirm'),options.danger?'danger':options.caution?'caution':'primary');
         primary.addEventListener('click',()=>{
           if(request.type==='confirm'){settle(true);return;}
           if(request.type==='configure'){settle(freeze({...configuredValues}));return;}
@@ -273,12 +284,12 @@ registry.define('interactions',1,()=>{
           if(confirmationElement&&confirmationElement.value!==value){error.textContent='Passwords do not match.';error.hidden=false;confirmationElement.focus();return;}
           const validation=typeof options.validate==='function'?cleanText(options.validate(value,selectedOption),300):(options.required&&!value?cleanText(options.requiredMessage||'Enter a value to continue.',300):'');
           if(validation){error.textContent=validation;error.hidden=false;inputElement?.focus();return;}
-          settle(freeze({value,option:selectedOption}));
+          settle(freeze({value,option:selectedOption,...(inputCheckbox?{checked:inputCheckbox.checked}:{})}));
         });
         actions.appendChild(primary);
       }
       shell.appendChild(actions);dialog.appendChild(shell);
-      dialog.setAttribute('aria-labelledby','sd-interaction-title');dialog.className='interaction-dialog'+(options.danger?' danger':'');
+      dialog.setAttribute('aria-labelledby','sd-interaction-title');dialog.className='interaction-dialog'+(options.danger?' danger':options.caution?' caution':'');
       dialog.oncancel=event=>{event.preventDefault();settle(request.type==='confirm'?false:null);};
       const historyDescriptor=freeze({kind:'prompt',token:`prompt:${historyNonce}:${++historySequence}`});
       active={...request,dialog,historyDescriptor,restoreFocus:document.activeElement&&typeof document.activeElement.focus==='function'?document.activeElement:null};
@@ -356,8 +367,8 @@ registry.define('interactions',1,()=>{
           for(const [event,reason,paused] of [['mouseenter','hover',true],['mouseleave','hover',false],['focusin','focus',true],['focusout','focus',false]]){
             toast.addEventListener(event,eventValue=>{if(event==='focusout'&&toast.contains(eventValue.relatedTarget))return;notifications.pauseEvent(row.key,row.deliveryId,reason,paused);});
           }
-          copy.append(title,message);toast.append(copy,close);region.appendChild(toast);
-          entry={toast,copy,title,message,deliveryId:row.deliveryId,action:null,actionSpec:null};renderedToasts.set(row.key,entry);
+          copy.append(title,message);toast.append(copy);if(row.dismissible!==false)toast.append(close);region.appendChild(toast);
+          entry={toast,copy,title,message,deliveryId:row.deliveryId,action:null,actionSpec:null,secondary:null,secondarySpec:null};renderedToasts.set(row.key,entry);
           requestAnimationFrame(()=>toast.classList.remove('entering'));
         }
         const {toast,title,message,copy}=entry;
@@ -366,12 +377,11 @@ registry.define('interactions',1,()=>{
         if(title.textContent!==row.title)title.textContent=row.title;
         if(message.textContent!==row.message)message.textContent=row.message;
         message.hidden=!row.message;
-        if(entry.actionSpec?.run!==row.action?.run||entry.actionSpec?.label!==row.action?.label){
-          entry.action?.remove();entry.action=null;entry.actionSpec=row.action;
-          if(row.action){
-            const action=button(row.action.label);action.addEventListener('click',()=>{try{Promise.resolve(row.action.run()).catch(error=>capture('notification.action',error));}catch(error){capture('notification.action',error);}});
-            copy.appendChild(action);entry.action=action;
-          }
+        const actionButton=spec=>{const control=button(spec.label);control.addEventListener('click',()=>{try{Promise.resolve(spec.run()).catch(error=>capture('notification.action',error));}catch(error){capture('notification.action',error);}});return control;};
+        if(entry.actionSpec?.run!==row.action?.run||entry.actionSpec?.label!==row.action?.label||entry.secondarySpec?.run!==row.secondaryAction?.run||entry.secondarySpec?.label!==row.secondaryAction?.label){
+          entry.action?.remove();entry.secondary?.remove();entry.action=entry.secondary=null;entry.actionSpec=row.action;entry.secondarySpec=row.secondaryAction||null;
+          if(row.action){entry.action=actionButton(row.action);copy.appendChild(entry.action);}
+          if(row.action&&row.secondaryAction){entry.secondary=actionButton(row.secondaryAction);copy.appendChild(entry.secondary);}
         }
       }
     }

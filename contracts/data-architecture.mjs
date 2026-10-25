@@ -42,8 +42,7 @@ export const LOCAL_STORAGE_KEYS=freeze({
   installationId:'studyDirector.installationId.v1',
   deletionRecovery:'studyDirector.deletionRecovery.v1',
   fallbackDailyRecords:'studyDirector.dailyRecordsFallback.v1',
-  areaNoteRescue:'studyDirector.areaNoteRescue.v1',
-  nameSetupSkipped:'studyDirector.nameSetupSkippedDate.v1',
+  noteRescue:'studyDirector.noteRescue.v1',
   fontScale:'studyDirector.fontScale.v1',
   keepScreenAwake:'studyDirector.keepScreenAwake.v1',
   installNoticeShown:'studyDirector.installNoticeShown.v1',
@@ -51,10 +50,18 @@ export const LOCAL_STORAGE_KEYS=freeze({
   theme:'studyDirector.theme.v1',
   presentation:'studyDirector.presentation.v1',
   pwaUpdateCheck:'studyDirector.pwaUpdateCheck.v1',
-  attachmentMaintenanceDay:'studyDirector.attachmentMaintenanceDay.v2',
-  attachmentMaintenancePending:'studyDirector.attachmentMaintenancePending.v1',
-  insightsWindow:'studyDirector.insights.window.v1'
+  insightsWindow:'studyDirector.insights.window.v1',
+  libraryView:'studyDirector.library.view.v1',
+  driveSession:'studyDirector.driveSession.v1',
+  profiles:'studyDirector.profiles.v1'
 });
+
+// Profiles (5.3): these belong to the device and are shared by every profile
+// on it. Every other durable name belongs to one profile: the first profile
+// keeps the plain names, a later one adds ~<its scope> (IndexedDB, browser
+// storage, attachment files, locks and the Device Folder repository).
+export const DEVICE_WIDE_LOCAL_STORAGE_KEYS=freeze(['installationId','installNoticeShown','pwaUpdateCheck','profiles']);
+export const PROFILE_SCOPE_SEPARATOR='~';
 
 export const SESSION_STORAGE_KEYS=freeze({
   appTab:'studyDirector.appTab.v1',
@@ -66,7 +73,7 @@ export const OBSOLETE_LOCAL_STORAGE_KEYS=freeze({
   quote:'studyDirector.quote',
   reflectionDrafts:'studyDirector.reflectionDrafts.v1',
   reflectionLegacy:'studyDirector.reflectionDraft',
-  areaNotesPending:'studyDirector.areaNotesPending.v1',
+  notesPending:'studyDirector.areaNotesPending.v1',
   defaults:'studyDirector.userDefaults.v1',
   liveDraft:'studyDirector.liveDraft',
   activeSession:'studyDirector.activeSession.v1',
@@ -76,38 +83,75 @@ export const OBSOLETE_LOCAL_STORAGE_KEYS=freeze({
   syncEmergency:'studyDirector.syncEmergency.v1',
   nudge:'studyDirector.nudgeConfig',
   legacyOwnershipLease:'studyDirector.timerOwner.v1',
-  attachmentMaintenanceAttemptDay:'studyDirector.attachmentMaintenanceDay.v1'
+  attachmentMaintenanceAttemptDay:'studyDirector.attachmentMaintenanceDay.v1',
+  // Attachment cleanup now follows the daily upkeep and keeps no record of its own.
+  attachmentMaintenanceDay:'studyDirector.attachmentMaintenanceDay.v2',
+  attachmentMaintenancePending:'studyDirector.attachmentMaintenancePending.v1',
+  // The first-start form (5.4) replaced the name prompt and its skip date.
+  nameSetupSkipped:'studyDirector.nameSetupSkippedDate.v1',
+  // Renamed: moved once to noteRescue before anything reads it.
+  noteRescueLegacy:'studyDirector.areaNoteRescue.v1'
 });
 
-// One authoritative identity map for the heterogeneous appMeta store.
+// One authoritative identity map for the heterogeneous appMeta store. Names are
+// stable; a record's version lives inside its value.
 export const APP_META_KEYS=freeze({
   dailyRecordMigration:'dailyRecordMigration',
+  planDraft:'planDraft',
+  planLibrary:'planLibrary',
+  personalPreferences:'personalPreferences',
+  canonicalMutationEpoch:'canonicalMutationEpoch',
+  backupPreparationUnitPrefix:'backupPreparationUnit:',
+  insightsDatasetRevision:'insightsDatasetRevision',
+  dataMaintenance:'dataMaintenance',
+  savedDayDeletionPrefix:'savedDayDeletion:',
+  noteDeletionPrefix:'noteDeletion:',
+  attachmentDeletionPrefix:'attachmentDeletion:',
+  pendingReviewPrefix:'pendingReview:',
+  libraryClearJournalState:'libraryClearJournalState',
+  libraryClearJournalPayloadPrefix:'libraryClearJournalPayload:',
+  restoreJournalState:'restoreJournalState',
+  restoreJournalPayload:'restoreJournalPayload',
+  mutationLease:'mutationLease',
+  verifiedRecoveryBackups:'verifiedRecoveryBackups',
+  backupProtection:'backupProtection',
+  attachmentIntegrityAudit:'attachmentIntegrityAudit',
+  deviceFolder:'deviceFolder',
+  repositoryIntegrityScrub:'repositoryIntegrityScrub',
+  managedProviderBackupPending:'managedProviderBackupPending',
+  repositoryMaintenancePending:'repositoryMaintenancePending',
+  reconciliationBase:'reconciliationBase',
+  reconciliationBaseNotePrefix:'reconciliationBaseNote:',
+  reconciliationBaseDayPrefix:'reconciliationBaseDays:'
+});
+// Earlier names of these records: while names carried a version, and before
+// notes and the Device Folder had their current names. The compatibility host
+// moves each record to its current name once, before anything reads it.
+export const RENAMED_APP_META_KEYS=freeze({
   planDraft:'planDraft.v1',
   planLibrary:'planLibrary.v1',
   personalPreferences:'personalPreferences.v1',
   canonicalMutationEpoch:'canonicalMutationEpoch.v1',
   backupPreparationUnitPrefix:'backupPreparationUnit.v1:',
-  insightsDatasetRevision:'insightsDatasetRevision',
-  dataMaintenance:'dataMaintenance',
-  areaNoteRecoveryPrefix:'areaNoteRecovery.v1:',
   savedDayDeletionPrefix:'savedDayDeletion.v1:',
-  areaNoteDeletionPrefix:'areaNoteDeletion.v1:',
+  noteDeletionPrefix:freeze(['areaNoteDeletion.v1:','areaNoteDeletion:']),
   attachmentDeletionPrefix:'attachmentDeletion.v1:',
   libraryClearJournalState:'libraryClearJournalState.v1',
   libraryClearJournalPayloadPrefix:'libraryClearJournalPayload.v1:',
   restoreJournalState:'restoreJournalState.v1',
   restoreJournalPayload:'restoreJournalPayload.v1',
   mutationLease:'mutationLease.v1',
-  verifiedRecoveryBackups:'verifiedRecoveryBackups',
-  backupProtection:'backupProtection',
-  attachmentIntegrityAudit:'attachmentIntegrityAudit',
-  automaticDeviceBackup:'automaticDeviceBackup',
-  repositoryIntegrityScrub:'repositoryIntegrityScrub',
   managedProviderBackupPending:'managedProviderBackupPending.v1',
   repositoryMaintenancePending:'repositoryMaintenancePending.v2',
-  reconciliationBaseLegacy:'reconciliationBase.v1',
   reconciliationBase:'reconciliationBase.v2',
-  reconciliationBaseNotePrefix:'reconciliationBaseNote.v1:'
+  reconciliationBaseNotePrefix:'reconciliationBaseNote.v1:',
+  deviceFolder:'automaticDeviceBackup'
+});
+// Value formats renamed with their records; a moved value takes the new one.
+export const RENAMED_VALUE_FORMATS=freeze({
+  'study-director.area-note-deletion':'study-director.note-deletion',
+  'study-director.area-note-rescue':'study-director.note-rescue',
+  'study-director.device-backup-settings':'study-director.device-folder-settings'
 });
 export const APP_META_FAMILY_COUNT=Object.keys(APP_META_KEYS).length;
 export const APP_META_FAMILY_LABEL=`${APP_META_FAMILY_COUNT} typed appMeta families`;
@@ -116,13 +160,15 @@ export const OBSOLETE_APP_META_KEYS=freeze({
   reflectionDraftMigration:'reflectionDraftMigration.v1',
   repositoryMaintenancePendingLegacy:'repositoryMaintenancePending.v1',
   archiveClearJournalStateLegacy:'archiveClearJournalState.v1',
-  archiveClearJournalPayloadPrefixLegacy:'archiveClearJournalPayload.v1:'
+  archiveClearJournalPayloadPrefixLegacy:'archiveClearJournalPayload.v1:',
+  reconciliationBaseLegacy:'reconciliationBase.v1',
+  noteRecoveryPrefix:'areaNoteRecovery.v1:'
 });
 
 export const APP_META_VALIDATION_OWNERS=freeze({
-  repositories:freeze(['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','areaNoteRecoveryPrefix','savedDayDeletionPrefix','areaNoteDeletionPrefix','attachmentDeletionPrefix']),
+  repositories:freeze(['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','savedDayDeletionPrefix','noteDeletionPrefix','attachmentDeletionPrefix','pendingReviewPrefix']),
   journals:freeze(['libraryClearJournalState','libraryClearJournalPayloadPrefix','restoreJournalState','restoreJournalPayload','mutationLease']),
-  host:freeze(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBaseLegacy','reconciliationBase','reconciliationBaseNotePrefix'])
+  host:freeze(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseDayPrefix'])
 });
 
 function appMetaValidationOwner(name){
@@ -137,7 +183,7 @@ export const DATA_ARCHITECTURE=freeze({
   indexedDb:freeze({
     dailyRecords:surface('canonical','repositories','protect','retained',INDEXED_DB.stores.dailyRecords.schema),
     dailySummaries:surface('derived','repositories','protect','rebuildable-from-dailyRecords',INDEXED_DB.stores.dailySummaries.schema,{rebuildFrom:'indexedDb.dailyRecords'}),
-    areaNotes:surface('canonical','repositories','protect','retained',INDEXED_DB.stores.areaNotes.schema),
+    notes:surface('canonical','repositories','protect','retained',INDEXED_DB.stores.notes.schema),
     activeSessions:surface('canonical-live','repositories','protect','until-session-finalization',INDEXED_DB.stores.activeSessions.schema),
     appMeta:containerSurface('typed-container','app-meta-gateway','mixed','key-family-specific',INDEXED_DB.stores.appMeta.schema,APP_META_FAMILY_LABEL),
     assets:surface('canonical-metadata','attachment-storage','protect','while attachment is retained/referenced',INDEXED_DB.stores.assets.schema)
@@ -162,8 +208,7 @@ export const DATA_ARCHITECTURE=freeze({
     installationId:surface('coordination-identity','persistence','protect-identifiers','retained'),
     deletionRecovery:surface('recovery','repositories','protect-identifiers','until the failed DailyRecord/ActiveSession delete is reconciled','',{protects:'DailyRecord/ActiveSession deletion intent',created:'when authoritative deletion cannot complete atomically',cleared:'after canonical deletion state is verified',supersededBy:'verified canonical record/deletion state'}),
     fallbackDailyRecords:surface('recovery','repositories','protect','until migrated to IndexedDB','',{protects:'indexedDb.dailyRecords',created:'when a DailyRecord cannot be persisted to IndexedDB',cleared:'after replay and verification in canonical IndexedDB',supersededBy:'verified canonical DailyRecord'}),
-    areaNoteRescue:surface('recovery','repositories','protect','until Ongoing Note canonical/recovery persistence recovers','',{protects:'indexedDb.areaNotes/appMeta.areaNoteRecoveryPrefix',created:'when Ongoing Note persistence is degraded',cleared:'after canonical/recovery persistence verifies',supersededBy:'newer canonical AreaNote or deletion state'}),
-    nameSetupSkipped:surface('preference','host','operational','short-lived'),
+    noteRescue:surface('recovery','repositories','protect','until the unsaved notes it holds are saved','',{protects:'indexedDb.notes',created:'when a note save fails or the page is hidden or closed before a save finishes',cleared:'after the matching canonical Note/deletion commits',supersededBy:'newer canonical Note or deletion state',capacity:'noteRescueBytes (1 MiB), newest notes first; the save failure names any unsaved note left out'}),
     fontScale:surface('startup-mirror','host','operational','disposable mirror of appMeta portable Preferences fontScale','',{mirrorOf:'appMeta.personalPreferences.fontScale'}),
     keepScreenAwake:surface('preference','native-capabilities','operational','retained'),
     installNoticeShown:surface('preference','native-capabilities','operational','retained'),
@@ -171,9 +216,10 @@ export const DATA_ARCHITECTURE=freeze({
     theme:surface('startup-mirror','host','operational','disposable mirror of appMeta portable Preferences theme','',{mirrorOf:'appMeta.personalPreferences.theme'}),
     presentation:surface('startup-mirror','host','operational','disposable mirror of appMeta portable Preferences presentation','',{mirrorOf:'appMeta.personalPreferences.presentation'}),
     pwaUpdateCheck:surface('operational','host','operational','retained'),
-    attachmentMaintenancePending:surface('operational','asset-maintenance','operational','durable pending attachment cleanup intent; cleared only after completed work'),
-    attachmentMaintenanceDay:surface('operational','asset-maintenance','operational','last local calendar day whose attachment cleanup completed'),
-    insightsWindow:surface('preference','insights','operational','retained')
+    insightsWindow:surface('preference','insights','operational','retained'),
+    libraryView:surface('preference','library','operational','retained'),
+    driveSession:surface('operational','drive','operational','until the Drive sign-in expires (about an hour), is disconnected or is rejected; keeps the sign-in across reloads and reopening'),
+    profiles:surface('coordination-identity','profiles','protect-identifiers','retained; the device profile list: the active profile and each profile name, scope and Google account email')
   }),
   sessionStorage:freeze({
     appTab:surface('coordination-identity','ownership','operational','tab-session lifetime'),
@@ -186,14 +232,14 @@ export const DATA_ARCHITECTURE=freeze({
   memory:freeze({
     insightsModels:surface('derived','insights','protect','ephemeral/rebuildable','',{rebuildFrom:'canonical study records'}),
     searchIndex:surface('derived','search','protect','ephemeral/rebuildable','',{rebuildFrom:'canonical searchable records'}),
-    driveAccessToken:surface('operational','drive','protect','authorization-session only; never intentionally persisted')
+    driveAccessToken:surface('operational','drive','protect','authorization-session only; kept across reloads only through localStorage.driveSession until it expires')
   }),
   obsoleteLocalStorage:freeze({
     schedule:surface('legacy-migration','compatibility','protect','remove after canonical Plan migration'),
     quote:surface('legacy-migration','compatibility','protect','remove after protected-preference migration'),
     reflectionDrafts:surface('legacy-residue','compatibility','operational','remove during ReflectionDraft retirement'),
     reflectionLegacy:surface('legacy-residue','compatibility','operational','remove during ReflectionDraft retirement'),
-    areaNotesPending:surface('legacy-migration','compatibility','protect','remove after Area Note recovery migration'),
+    notesPending:surface('legacy-migration','compatibility','protect','remove after Note recovery migration'),
     defaults:surface('legacy-migration','compatibility','protect','remove after Plan/protected-preference migration'),
     liveDraft:surface('legacy-residue','compatibility','protect','remove after verified legacy cleanup'),
     activeSession:surface('legacy-residue','compatibility','protect','remove after verified legacy cleanup'),
@@ -203,7 +249,11 @@ export const DATA_ARCHITECTURE=freeze({
     syncEmergency:surface('legacy-migration','compatibility','protect-identifiers','convert delete intents to deletionRecovery; discard obsolete upsert intents after verified conversion'),
     nudge:surface('legacy-migration','compatibility','operational','migrate once into PortablePreferences.v2 and retire as an authoritative LocalStorage key'),
     legacyOwnershipLease:surface('legacy-residue','compatibility','operational','remove after app-scoped ownership identity is active'),
-    attachmentMaintenanceAttemptDay:surface('legacy-residue','compatibility','operational','old scheduled-attempt day cannot certify completed attachment cleanup')
+    attachmentMaintenanceAttemptDay:surface('legacy-residue','compatibility','operational','old scheduled-attempt day cannot certify completed attachment cleanup'),
+    attachmentMaintenanceDay:surface('legacy-residue','compatibility','operational','remove; attachment cleanup now follows the daily upkeep'),
+    attachmentMaintenancePending:surface('legacy-residue','compatibility','operational','remove; a cleanup request lost to a reload is caught by the next daily sweep'),
+    nameSetupSkipped:surface('legacy-residue','compatibility','operational','remove; the first-start form replaced the name prompt'),
+    noteRescueLegacy:surface('legacy-migration','compatibility','protect','moved once to noteRescue, its format renamed, before notes load')
   }),
   appMeta:freeze({
     exact:freeze({
@@ -213,41 +263,43 @@ export const DATA_ARCHITECTURE=freeze({
       personalPreferences:surface('canonical-preferences','repositories','protect','retained','PortablePreferences.v2'),
       canonicalMutationEpoch:surface('coordination','repositories','operational','replace atomically with portable canonical mutations; reseed after verified startup compatibility','CanonicalMutationEpoch.v1'),
       insightsDatasetRevision:surface('derived-revision','repositories','operational','rebuildable','InsightsDatasetRevision.v2',{rebuildFrom:'canonical IndexedDB data revisions'}),
-      dataMaintenance:surface('operational','repositories','operational','replace on maintenance','DataMaintenance.v5'),
+      dataMaintenance:surface('operational','repositories','operational','replace on maintenance','DataMaintenance.v6'),
       libraryClearJournalState:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','LibraryClearJournalState.v1',{protects:'Library clear mutation',created:'before destructive Library clear commit',cleared:'after verified completion or rollback',supersededBy:'verified post-operation canonical state'}),
       restoreJournalState:surface('recovery-journal','repository-journals','operational','until verified completion/rollback','RestoreJournalState.v1',{protects:'checkpoint restore mutation',created:'before destructive restore commit',cleared:'after verified completion or rollback',supersededBy:'verified post-restore canonical state'}),
-      restoreJournalPayload:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','RestoreJournalPayload.v4 (reads v1-v3)',{protects:'canonical dataset rollback image',created:'before destructive restore commit',cleared:'after verified completion or rollback',supersededBy:'verified post-restore canonical state'}),
+      restoreJournalPayload:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','RestoreJournalPayload.v5',{protects:'canonical dataset rollback image',created:'before destructive restore commit',cleared:'after verified completion or rollback',supersededBy:'verified post-restore canonical state'}),
       mutationLease:surface('coordination','repository-journals','operational','lease lifetime','MutationLease.v1'),
-      verifiedRecoveryBackups:surface('operational','host','operational','replace on verified backup','VerifiedRecoveryBackups.v1'),
-      backupProtection:surface('security-policy','exports','operational','while backup protection enabled','BackupProtection.v2'),
-      attachmentIntegrityAudit:surface('derived-health','host','protect','replace on audit; opaque identity/error details only','AttachmentIntegrityAudit.v1',{rebuildFrom:'indexedDb.assets + opfs.attachments'}),
-      automaticDeviceBackup:surface('backup-configuration','device-backup','operational','while connected','DeviceBackupSettings.v3'),
-      repositoryIntegrityScrub:surface('derived-health','backup','operational','transactional progress/completion bound to repository identity; opaque quarantined object ids only; device repository handle; no user-content details','RepositoryIntegrityScrub.v3',{rebuildFrom:'external backup repository manifests and objects'}),
+      verifiedRecoveryBackups:surface('operational','host','operational','replace on every backup','VerifiedRecoveryBackups.v3'),
+      backupProtection:surface('security-policy','exports','operational','while a backup password is set; holds a check value and the non-extractable key made from the password, never the password','BackupProtection.v3'),
+      attachmentIntegrityAudit:surface('derived-health','host','protect','replace on audit; opaque identity/error details only','AttachmentIntegrityAudit.v2',{rebuildFrom:'indexedDb.assets + opfs.attachments'}),
+      deviceFolder:surface('backup-configuration','device-backup','operational','while connected','DeviceFolderSettings.v4'),
+      repositoryIntegrityScrub:surface('derived-health','backup','operational','transactional progress/completion bound to repository identity; opaque quarantined object ids only; no user-content details','RepositoryIntegrityScrub.v7',{rebuildFrom:'external backup repository manifests and objects'}),
       managedProviderBackupPending:surface('operational','backup','operational','until the affected managed provider successfully publishes a later current backup or is explicitly disconnected','ManagedProviderBackupPending.v1'),
-      repositoryMaintenancePending:surface('operational','backup','operational','until post-commit repository retention and safe orphan reclamation complete','RepositoryMaintenancePending.v2'),
-      reconciliationBaseLegacy:surface('legacy-migration','host','protect','remove after verified ReconciliationBase.v2 migration','ReconciliationBase.v1'),
-      reconciliationBase:surface('reconciliation-base','host','protect','advance atomically after a verified current-checkpoint reconciliation','ReconciliationBase.v2')
+      repositoryMaintenancePending:surface('operational','backup','operational','until post-commit repository retention and safe orphan reclamation complete','RepositoryMaintenancePending.v4'),
+      reconciliationBase:surface('reconciliation-base','host','protect','advance atomically when a version this device shares through Drive is placed there or caught up to','ReconciliationBase.v3')
     }),
     prefixes:freeze({
       backupPreparationUnitPrefix:surface('derived-performance','repositories','operational','disposable; rebuild from canonical data after loss, uncertainty or representation change','BackupPreparationUnit.v1',{rebuildFrom:'portable canonical IndexedDB state'}),
-      areaNoteRecoveryPrefix:surface('recovery-journal','repositories','protect','until canonical note commit settles','AreaNoteRecovery.v1',{protects:'indexedDb.areaNotes',created:'before/while an Ongoing Note canonical commit is pending',cleared:'after matching canonical AreaNote/deletion settles',supersededBy:'newer canonical AreaNote/deletion revision'}),
       savedDayDeletionPrefix:surface('canonical-deletion-history','repositories','protect','retain until the same Saved Day is recreated','SavedDayDeletion.v1'),
-      areaNoteDeletionPrefix:surface('canonical-deletion-history','repositories','protect','retain until the same Ongoing Note is recreated','AreaNoteDeletion.v1'),
+      noteDeletionPrefix:surface('canonical-deletion-history','repositories','protect','retain until the same Note is recreated','NoteDeletion.v1'),
       attachmentDeletionPrefix:surface('canonical-deletion-history','repositories','protect-identifiers','retain until the same Attachment Library identity is explicitly restored/recreated','AttachmentDeletion.v1'),
+      pendingReviewPrefix:surface('canonical','repositories','protect','a kept version stays until the person resolves it; a resolved one keeps only its id, so other devices learn of it, and the newest of those are kept','PendingReview.v1'),
       libraryClearJournalPayloadPrefix:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','LibraryClearJournalChunk.v1',{protects:'canonical Library rollback chunks',created:'before destructive Library clear commit',cleared:'after verified completion or rollback',supersededBy:'verified post-operation canonical state'}),
-      reconciliationBaseNotePrefix:surface('reconciliation-base','host','protect','update/delete only changed Ongoing Note baselines; lazily read only for actual reconciliation conflicts','ReconciliationBaseNote.v1')
+      reconciliationBaseNotePrefix:surface('reconciliation-base','host','protect','update/delete only changed Note baselines; lazily read only for actual reconciliation conflicts','ReconciliationBaseNote.v1'),
+      reconciliationBaseDayPrefix:surface('reconciliation-base','host','protect','one row of Saved-Day fingerprints per month; update/delete only changed months; read only for differing Saved Days','ReconciliationBaseDays.v1')
     }),
     obsolete:freeze({
       reflectionDraftMigration:surface('legacy-residue','compatibility','operational','remove during compatibility migration','ReflectionDraftMigration.v1'),
-      repositoryMaintenancePendingLegacy:surface('legacy-migration','compatibility','operational','migrate provider maintenance intent to RepositoryMaintenancePending.v2, then remove after verified replacement','RepositoryMaintenancePending.v1'),
+      repositoryMaintenancePendingLegacy:surface('legacy-migration','compatibility','operational','migrate provider maintenance intent to the current repositoryMaintenancePending record, then remove after verified replacement','RepositoryMaintenancePending.v1'),
       archiveClearJournalStateLegacy:surface('legacy-migration','compatibility','protect','migrate once to LibraryClearJournalState.v1, then remove after verified replacement','ArchiveClearJournalState.v1'),
-      archiveClearJournalPayloadPrefixLegacy:surface('legacy-migration','compatibility','protect','migrate once to LibraryClearJournalChunk.v1, then remove after verified replacement','ArchiveClearJournalChunk.v1')
+      archiveClearJournalPayloadPrefixLegacy:surface('legacy-migration','compatibility','protect','migrate once to LibraryClearJournalChunk.v1, then remove after verified replacement','ArchiveClearJournalChunk.v1'),
+      reconciliationBaseLegacy:surface('legacy-migration','compatibility','protect','migrate once to ReconciliationBase.v2 plus ReconciliationBaseNote.v1 rows, then remove after verified replacement','ReconciliationBase.v1'),
+      noteRecoveryPrefix:surface('legacy-migration','compatibility','protect','fold once into canonical Note rows (newer revision wins), then remove in the same transaction','AreaNoteRecovery.v1')
     })
   }),
   external:freeze({
     completeBackup:surface('external-backup','backup','protect-when-data-protection-enabled','user-retained/current-format-only after compatibility retirement; public provenance + protected checkpoint manifest'),
-    deviceBackup:surface('external-backup','device-backup','protect-when-data-protection-enabled','incremental repository with deterministic 15-point tiered retention, one temporary protected Before-restore point, immutable commit markers, shared verified objects, independent provider-neutral Version History projection, Bring-in reconciliation and exact historical Version Restore','',{repositoryRoot:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderRoot,objectsDirectory:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects,checkpointsDirectory:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints,commitsDirectory:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits}),
-    driveBackup:surface('external-backup','drive','protect-when-data-protection-enabled','incremental repository with deterministic 15-point tiered retention, one temporary protected Before-restore point, immutable commit markers and shared verified objects; independently projects into provider-neutral Version History while provider transport supports separate Bring-in and exact historical Version Restore orchestration','',{repositoryRoot:EXTERNAL_REPOSITORY_IDENTITIES.driveFolder}),
+    deviceBackup:surface('external-backup','device-backup','protect-when-data-protection-enabled','incremental repository with deterministic 15-point tiered retention, one temporary protected Before-restore point, immutable commit markers, shared verified objects, independent provider-neutral Version History projection, Bring-in reconciliation and exact historical Version Restore','',{repositoryPrefix:EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix,repositoryNaming:'Study Director - <profile> - <device>, found by its marker file (profile scope and device id); the folder of earlier versions is moved into it',legacyRepositoryRoot:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderLegacyRoot,objectsDirectory:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects,checkpointsDirectory:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints,commitsDirectory:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits}),
+    driveBackup:surface('external-backup','drive','protect-when-data-protection-enabled','incremental repository with deterministic 15-point tiered retention, one temporary protected Before-restore point, immutable commit markers and shared verified objects; independently projects into provider-neutral Version History while provider transport supports separate Bring-in and exact historical Version Restore orchestration','',{repositoryRoot:EXTERNAL_REPOSITORY_IDENTITIES.driveFolder,repositoryNaming:'Study Director – <profile>, renamed with the profile; found by its properties'}),
     attachmentArchive:surface('explicit-export','attachments','user-choice','user-controlled file lifetime'),
     markdownExport:surface('explicit-export','note-export','user-choice','user-controlled file lifetime'),
     zipExport:surface('explicit-export','note-export','user-choice','user-controlled file lifetime')
@@ -255,8 +307,8 @@ export const DATA_ARCHITECTURE=freeze({
 });
 
 export const APP_META_RUNTIME_REGISTRY=freeze(Object.fromEntries([
-  ...Object.entries(DATA_ARCHITECTURE.appMeta.exact).map(([name,value])=>[name,freeze({name,kind:'exact',key:APP_META_KEYS[name],owner:value.owner,validatorOwner:appMetaValidationOwner(name),schema:value.schema})]),
-  ...Object.entries(DATA_ARCHITECTURE.appMeta.prefixes).map(([name,value])=>[name,freeze({name,kind:'prefix',key:APP_META_KEYS[name],owner:value.owner,validatorOwner:appMetaValidationOwner(name),schema:value.schema})])
+  ...Object.entries(DATA_ARCHITECTURE.appMeta.exact).map(([name,value])=>[name,freeze({name,kind:'exact',key:APP_META_KEYS[name],owner:value.owner,validatorOwner:appMetaValidationOwner(name),schema:value.schema,protection:value.protection})]),
+  ...Object.entries(DATA_ARCHITECTURE.appMeta.prefixes).map(([name,value])=>[name,freeze({name,kind:'prefix',key:APP_META_KEYS[name],owner:value.owner,validatorOwner:appMetaValidationOwner(name),schema:value.schema,protection:value.protection})])
 ]));
 
 export function assertDataArchitecture(contract=DATA_ARCHITECTURE,keys=APP_META_KEYS,obsoleteKeys=OBSOLETE_APP_META_KEYS,localKeys=LOCAL_STORAGE_KEYS,obsoleteLocalKeys=OBSOLETE_LOCAL_STORAGE_KEYS,validationOwners=APP_META_VALIDATION_OWNERS){
@@ -265,6 +317,7 @@ export function assertDataArchitecture(contract=DATA_ARCHITECTURE,keys=APP_META_
   if(Object.keys(contract.indexedDb).sort().join('|')!==storeNames.sort().join('|'))throw new Error('IndexedDB data architecture inventory is incomplete.');
   for(const [name,value] of Object.entries(contract.indexedDb))if(typeof value.schema!=='string'||!value.schema)throw new Error(`IndexedDB data surface ${name} is missing its canonical schema.`);
   if(Object.keys(contract.localStorage).sort().join('|')!==Object.keys(localKeys).sort().join('|'))throw new Error('Current localStorage inventory differs from the authoritative identities.');
+  if(!Object.isFrozen(DEVICE_WIDE_LOCAL_STORAGE_KEYS)||DEVICE_WIDE_LOCAL_STORAGE_KEYS.some(name=>!Object.hasOwn(localKeys,name)))throw new Error('Device-wide localStorage identities must be current identities.');
   if(Object.keys(contract.obsoleteLocalStorage).sort().join('|')!==Object.keys(obsoleteLocalKeys).sort().join('|'))throw new Error('Obsolete localStorage inventory differs from the authoritative identities.');
   const exactNames=Object.keys(contract.appMeta.exact),prefixNames=Object.keys(contract.appMeta.prefixes),obsoleteNames=Object.keys(contract.appMeta.obsolete);
   const currentAppMetaNames=[...exactNames,...prefixNames].sort();
@@ -314,7 +367,7 @@ export function assertDataArchitecture(contract=DATA_ARCHITECTURE,keys=APP_META_
   if(Object.values(contract.localStorage).some(value=>value.authorityClass===PERSISTENCE_CLASSES.canonical))throw new Error('LocalStorage must not own canonical user data.');
   for(const name of ['theme','presentation','fontScale'])if(contract.localStorage[name].authorityClass!==PERSISTENCE_CLASSES.deviceLocal||!contract.localStorage[name].mirrorOf.startsWith('appMeta.personalPreferences.'))throw new Error(`Appearance mirror ${name} is not disposable/non-authoritative.`);
   if(contract.cacheStorage.applicationShell.identity!==CACHE_STORAGE_IDENTITIES.shellPrefix||contract.cacheStorage.updateBridge.identity!==CACHE_STORAGE_IDENTITIES.updateBridge||contract.cacheStorage.updateBridge.recoveryPrefix!==CACHE_STORAGE_IDENTITIES.updateRecoveryPrefix)throw new Error('Cache Storage identities drifted from the authoritative identity contract.');
-  if(contract.external.deviceBackup.repositoryRoot!==EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderRoot||contract.external.deviceBackup.objectsDirectory!==EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects||contract.external.deviceBackup.checkpointsDirectory!==EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints||contract.external.deviceBackup.commitsDirectory!==EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits||contract.external.driveBackup.repositoryRoot!==EXTERNAL_REPOSITORY_IDENTITIES.driveFolder)throw new Error('External repository identities drifted from the authoritative identity contract.');
+  if(contract.external.deviceBackup.repositoryPrefix!==EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix||contract.external.deviceBackup.legacyRepositoryRoot!==EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderLegacyRoot||contract.external.deviceBackup.objectsDirectory!==EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects||contract.external.deviceBackup.checkpointsDirectory!==EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints||contract.external.deviceBackup.commitsDirectory!==EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits||contract.external.driveBackup.repositoryRoot!==EXTERNAL_REPOSITORY_IDENTITIES.driveFolder)throw new Error('External repository identities drifted from the authoritative identity contract.');
   return true;
 }
 assertDataArchitecture();

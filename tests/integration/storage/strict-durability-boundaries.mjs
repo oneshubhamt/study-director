@@ -19,17 +19,16 @@ await app.activeSession.save({id:'active',revision:2,date:'2026-09-15',status:'a
 assert.equal(strictCount(),beforeSessionStrict,'active-session checkpoints must not use strict durability');
 
 await app.notes.load();
-const beforeRecoveryStrict=strictCount(),beforeRecoveryNormal=normalCount();
+const beforeTypingStrict=strictCount(),beforeTypingNormal=normalCount();
 const changed=app.notes.update('durability','Durability','recover me','');
 assert.equal(changed.status,'changed');
 await clock.drainMicrotasks(12);
-assert.equal(strictCount(),beforeRecoveryStrict,'rapid Ongoing Note recovery journaling must remain normal/default durability');
-assert.ok(normalCount()>beforeRecoveryNormal,'Ongoing Note recovery must still write its crash-recovery record');
+assert.equal(strictCount()+normalCount(),beforeTypingStrict+beforeTypingNormal,'typing writes nothing until it pauses');
 
 // Canonical user-data boundaries opt into strict durability.
 const beforeNoteFlush=strictCount();
 await app.notes.flush({strict:true});
-assert.ok(strictCount()>beforeNoteFlush,'canonical Ongoing Note commit must use strict IndexedDB durability');
+assert.ok(strictCount()>beforeNoteFlush,'canonical note commit must use strict IndexedDB durability');
 
 const beforeDaily=strictCount();
 await app.dailyRecords.save({version:1,date:'2026-09-15',updatedAt:'2026-09-15T12:01:00.000Z',savedAt:'2026-09-15T12:01:00.000Z'});

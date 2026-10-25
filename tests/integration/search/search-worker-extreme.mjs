@@ -3,31 +3,33 @@ import fs from 'node:fs';
 import {Worker} from 'node:worker_threads';
 import {performance} from 'node:perf_hooks';
 import {PERFORMANCE_BUDGETS} from '../../../contracts/performance-budgets.mjs';
-import {createAreaNoteSnapshotHarness} from '../../helpers/area-note-snapshot-harness.mjs';
+import {createNoteSnapshotHarness} from '../../helpers/note-snapshot-harness.mjs';
 
 const read=file=>fs.readFileSync(new URL('../../../'+file,import.meta.url),'utf8');
 const workerSource=read('source/external/search-worker.js');
-const areaNotesRepository=read('source/core/repositories-area-notes.js');
+const notesRepository=read('source/core/repositories-notes.js');
 
-const NOTES=1000,WORDS_PER_NOTE=10000,BATCH_CHARS=2*1024*1024;
+// The note limit, with ten million words between them.
+const NOTES=2000,WORDS_PER_NOTE=5000,BATCH_CHARS=2*1024*1024;
 
 const hundredWords=Array.from({length:100},()=>"word");
 function makeDocument(i){
-  const content=Array.from({length:100},(_,paragraph)=>{
+  const content=Array.from({length:WORDS_PER_NOTE/100},(_,paragraph)=>{
     const words=hundredWords.slice();
-    if(paragraph===99)words[99]=`x${String(i).padStart(3,'0')}`;
+    if(paragraph===WORDS_PER_NOTE/100-1)words[99]=`x${String(i).padStart(4,'0')}`;
     return {type:'Paragraph',content:[{type:'Text',param:words.join(' ')}]};
   });
   return {key:`k${i}`,revision:'r1',value:'WG1:'+JSON.stringify({version:1,doc:{type:'Doc',content}})};
 }
 
+// Search finds notes by their title key, the label normalised.
 const canonicalEntries=Array.from({length:NOTES},(_,i)=>{const row=makeDocument(i);return {key:row.key,label:`Area ${i}`,text:row.value,updatedAt:row.revision}});
-const hostHarness=createAreaNoteSnapshotHarness(areaNotesRepository,canonicalEntries);
+const hostHarness=createNoteSnapshotHarness(notesRepository,canonicalEntries);
 let hostStart=performance.now();const hostSnapshot=hostHarness.api.searchSnapshot();const hostColdSnapshotMs=performance.now()-hostStart;
 const documents=hostSnapshot.documents;
 const hostHotSamples=[];for(let i=0;i<100;i++){hostStart=performance.now();assert.strictEqual(hostHarness.api.searchSnapshot(),hostSnapshot);hostHotSamples.push(performance.now()-hostStart)}
 hostHotSamples.sort((a,b)=>a-b);const hostHotSnapshotP95=hostHotSamples[Math.floor(hostHotSamples.length*.95)];
-assert.ok(hostHotSnapshotP95<PERFORMANCE_BUDGETS.ongoingNotesHostSnapshotHotP95Ms,`Extreme host snapshot p95 ${hostHotSnapshotP95.toFixed(3)} ms indicates cache loss.`);
+assert.ok(hostHotSnapshotP95<PERFORMANCE_BUDGETS.notesHostSnapshotHotP95Ms,`Extreme host snapshot p95 ${hostHotSnapshotP95.toFixed(3)} ms indicates cache loss.`);
 const serializedBytes=documents.reduce((sum,row)=>sum+Buffer.byteLength(row.value),0);
 assert.ok(documents.every(row=>row.value.length<70000),'Fixture must remain inside the production note character ceiling.');
 
@@ -70,25 +72,25 @@ while(cursor<documents.length){
   maxPostMs=Math.max(maxPostMs,performance.now()-postStart);
   await new Promise(resolve=>setImmediate(resolve));
 }
-const first=await query(1,'x999');
+const first=await query(1,'x1999');
 const coldIndexMs=performance.now()-coldStart;
 if(workerFailure)throw workerFailure;
-assert.deepEqual(first.keys,['k999']);
+assert.deepEqual(first.keys,['area 1999']);
 
 const hotSamples=[];
 for(let i=0;i<20;i++){
   const start=performance.now();
-  const result=await query(100+i,`x${String(999-i).padStart(3,'0')}`);
+  const result=await query(100+i,`x${String(NOTES-1-i).padStart(4,'0')}`);
   hotSamples.push(performance.now()-start);
-  assert.deepEqual(result.keys,[`k${999-i}`]);
+  assert.deepEqual(result.keys,[`area ${NOTES-1-i}`]);
 }
 hotSamples.sort((a,b)=>a-b);
 const hotP95=hotSamples[Math.floor(hotSamples.length*.95)];
 
 // These are catastrophic-regression guards, not optimisation targets. Normal results are far below them.
-assert.ok(coldIndexMs<PERFORMANCE_BUDGETS.ongoingNotesExtremeColdMs,`Extreme cold index ${coldIndexMs.toFixed(1)} ms indicates a scaling regression.`);
-assert.ok(hotP95<PERFORMANCE_BUDGETS.ongoingNotesExtremeHotP95Ms,`Extreme hot-query p95 ${hotP95.toFixed(1)} ms is no longer interactively responsive.`);
-assert.ok(maxPostMs<PERFORMANCE_BUDGETS.ongoingNotesExtremePostMs,`A bounded Worker post blocked for ${maxPostMs.toFixed(1)} ms.`);
+assert.ok(coldIndexMs<PERFORMANCE_BUDGETS.notesExtremeColdMs,`Extreme cold index ${coldIndexMs.toFixed(1)} ms indicates a scaling regression.`);
+assert.ok(hotP95<PERFORMANCE_BUDGETS.notesExtremeHotP95Ms,`Extreme hot-query p95 ${hotP95.toFixed(1)} ms is no longer interactively responsive.`);
+assert.ok(maxPostMs<PERFORMANCE_BUDGETS.notesExtremePostMs,`A bounded Worker post blocked for ${maxPostMs.toFixed(1)} ms.`);
 
 const report={
   status:'PASS',suite:'search-worker-extreme',notes:NOTES,wordsPerNote:WORDS_PER_NOTE,totalWords:NOTES*WORDS_PER_NOTE,

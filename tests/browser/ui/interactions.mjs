@@ -9,9 +9,10 @@ import {root,startReleaseServer,launchChromium,waitForStudyDirector,waitFor,slee
 const axeSource=fs.readFileSync(path.join(root,'node_modules','axe-core','axe.min.js'),'utf8');
 
 const identity=`(()=>{
+  if(localStorage.getItem('__qaIdentitySeeded'))return;localStorage.setItem('__qaIdentitySeeded','1');
   const date=new Date(),today=[date.getFullYear(),String(date.getMonth()+1).padStart(2,'0'),String(date.getDate()).padStart(2,'0')].join('-');
   localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'Interaction QA',updatedAt:new Date().toISOString()}));
-  localStorage.setItem('studyDirector.nameSetupSkippedDate.v1',today);
+  (localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));
 })();`;
 const notificationHarness=`(()=>{
   let permission='default';window.__notificationQA={permissionRequests:0,constructors:[],shown:[]};
@@ -19,7 +20,7 @@ const notificationHarness=`(()=>{
   Object.defineProperty(FakeNotification,'permission',{get:()=>permission});
   FakeNotification.requestPermission=async()=>{window.__notificationQA.permissionRequests+=1;permission='granted';return permission;};
   Object.defineProperty(window,'Notification',{configurable:true,value:FakeNotification});
-  Object.defineProperty(navigator,'serviceWorker',{configurable:true,value:{getRegistration:async()=>({showNotification:async(title,options)=>window.__notificationQA.shown.push({title,options})})}});
+  Object.defineProperty(navigator,'serviceWorker',{configurable:true,value:{getRegistration:async()=>({active:{state:'activated'},showNotification:async(title,options)=>window.__notificationQA.shown.push({title,options})})}});
   window.__nativeDialogQA={confirm:0,prompt:0};window.confirm=()=>{window.__nativeDialogQA.confirm+=1;return true;};window.prompt=()=>{window.__nativeDialogQA.prompt+=1;return '';};
 })();`;
 
@@ -42,17 +43,17 @@ try{
     d.TimerEngine.startCur(3);await wait(30);d.TimerEngine.stopExecution();
     return {applied,requests:__notificationQA.permissionRequests,label:document.getElementById('system-alert-toggle').textContent.trim()};
   })()`);
-  assert.deepEqual(automatic,{applied:true,requests:0,label:'Enable system alerts'});
+  assert.deepEqual(automatic,{applied:true,requests:0,label:'Enable'});
   result.checks.noAutomaticPermissionPrompts=true;
 
   await page.evaluate(`document.getElementById('system-alert-toggle').click()`);
   await waitFor(()=>page.evaluate(`__notificationQA.permissionRequests===1&&__PWA6.SystemNotifications.status().enabled`),{label:'explicit notification permission'});
   const delivered=await page.evaluate(`(async()=>{
-    const ok=await __PWA6.SystemNotifications.notify('Delivery check','Service worker path','qa-delivery');
+    const ok=await __PWA6.SystemNotifications.notify('Delivery check','Service worker path','qa-delivery','qa-delivery',true);
     return {ok,requests:__notificationQA.permissionRequests,shown:__notificationQA.shown,constructors:__notificationQA.constructors,label:document.getElementById('system-alert-toggle').textContent.trim()};
   })()`);
   assert.equal(delivered.ok,true);assert.equal(delivered.requests,1);assert.equal(delivered.shown.length,1);assert.equal(delivered.constructors.length,0);
-  assert.equal(delivered.shown[0].title,'Delivery check');assert.equal(delivered.shown[0].options.tag,'qa-delivery');assert.equal(delivered.label,'Disable system alerts');
+  assert.equal(delivered.shown[0].title,'Delivery check');assert.equal(delivered.shown[0].options.tag,'qa-delivery');assert.equal(delivered.label,'On');
   result.checks.explicitPermissionAndServiceWorkerDelivery=true;
 
   await page.evaluate(`(()=>{
@@ -72,7 +73,7 @@ try{
 
   await page.evaluate(`(()=>{
     window.__inputValue='pending';
-    __PWA6.Interactions.input({title:'New ongoing note',message:'Choose where it belongs, then name it.',inputLabel:'Area or topic name',required:true,requiredMessage:'Enter an Area or topic name.',defaultOption:'nested',options:[{value:'nested',label:'Inside Ethics'},{value:'top',label:'At top level'}],preview:(value,scope)=>scope==='nested'?'Ethics › '+(value||'…'):(value||'New top-level Area'),confirmLabel:'Create note'}).then(value=>{window.__inputValue=value;});
+    __PWA6.Interactions.input({title:'New note',message:'Choose where it belongs, then name it.',inputLabel:'Area or topic name',required:true,requiredMessage:'Enter an Area or topic name.',defaultOption:'nested',options:[{value:'nested',label:'Inside Ethics'},{value:'top',label:'At top level'}],preview:(value,scope)=>scope==='nested'?'Ethics › '+(value||'…'):(value||'New top-level Area'),confirmLabel:'Create note'}).then(value=>{window.__inputValue=value;});
   })()`);
   await waitFor(()=>page.evaluate(`document.getElementById('sd-interaction-dialog').open&&!!document.querySelector('.interaction-input')`),{label:'themed note input'});
   await page.evaluate(`document.querySelector('.interaction-actions .primary').click()`);
@@ -161,10 +162,10 @@ try{
 
   const ipad=await browser.createPage(server.url('deployment','instrumented.html'),{
     userAgent:'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605.1.15 CriOS/149.0.0.0 Mobile/15E148 Safari/604.1',
-    platform:'MacIntel',preload:identity,viewport:{width:820,height:1080,mobile:true,scale:2}
+    platform:'MacIntel',preload:identity+`window.addEventListener('beforeinstallprompt',event=>event.stopImmediatePropagation(),true);`,viewport:{width:820,height:1080,mobile:true,scale:2}
   });pages.push(ipad);await waitForStudyDirector(ipad,{instrumented:true});
   await ipad.evaluate(`__PWA6.goTab('guide')`);
-  await waitFor(()=>ipad.evaluate(`!!document.querySelector('#guide-install-card .mini-btn')`),{timeout:60000,label:'iPad install card'});
+  await waitFor(()=>ipad.evaluate(`!!document.querySelector('#guide-install-card .mini-btn:not(:disabled)')`),{timeout:60000,label:'iPad install card'});
   await ipad.evaluate(`document.querySelector('#guide-install-card .mini-btn').click()`);
   await waitFor(()=>ipad.evaluate(`!!document.getElementById('guide-install-help')`),{timeout:60000,label:'iPad install guide'});
   const guide=await ipad.evaluate(`({context:document.querySelector('.guide-install-context').textContent.trim(),steps:[...document.querySelectorAll('.guide-install-steps li')].map(item=>item.textContent.trim()),refresh:document.querySelector('#guide-install-card .mini-btn')?.textContent.trim()||''})`);

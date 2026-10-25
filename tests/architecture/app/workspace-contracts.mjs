@@ -20,10 +20,10 @@ const backup=fs.readFileSync('source/core/backup.js','utf8');
 const provider=fs.readFileSync('source/core/backup-provider.js','utf8');
 const styles=fs.readFileSync('source/styles/core.css','utf8');
 
-const applicable=app.match(/function applicableAreaNotesForTask\(t\)\{[\s\S]*?\n\}/u)?.[0]||'';
-assert.ok(applicable,'applicableAreaNotesForTask must remain present');
-assert.match(applicable,/AppData\.notes\.get\(exactKey,exactLabel\)/u,'viewing an Ongoing Note may read the current note');
-assert.doesNotMatch(applicable,/create\s*:\s*true/u,'read-only Ongoing-Note rendering must not create a noncanonical placeholder in the repository cache');
+const applicable=app.match(/function applicableNotesForTask\(t\)\{[\s\S]*?\n\}/u)?.[0]||'';
+assert.ok(applicable,'applicableNotesForTask must remain present');
+assert.match(applicable,/AppData\.notes\.get\(exactKey,exactLabel\)/u,'viewing a note may read the current note');
+assert.doesNotMatch(applicable,/create\s*:\s*true/u,'read-only Note rendering must not create a noncanonical placeholder in the repository cache');
 
 assert.match(app,/id="backup-file-status"[^>]*role="status"/u,'standalone backup must have a status surface beside its own controls');
 const exportFn=backup.match(/async function exportPortableBackup\(\)\{[\s\S]*?\n\}/u)?.[0]||'';
@@ -32,7 +32,8 @@ assert.match(exportFn,/setLocalExportStatus\(message/u,'successful standalone do
 assert.match(exportFn,/message=cancelled\?'Backup export cancelled\.'[\s\S]*setLocalExportStatus\(message,cancelled\)/u,'standalone export cancellation and failures must stay on the standalone backup surface');
 assert.doesNotMatch(exportFn,/setStatus\('library-status'/u,'standalone export must not leak its routine status to the bottom-of-Library global status surface');
 assert.doesNotMatch(backup,/Exports\.status\(\)/u,'Backup runtime must not depend on the restricted Exports port exposing internal coordinator status');
-assert.match(backup,/else if\(!activeImportOperation\)cancel\.hidden=true/u,'standalone export cleanup must use Backup-owned operation state when restoring Cancel visibility');
+assert.doesNotMatch(backup,/document\.|getElementById/u,'the backup runtime draws nothing: the app draws the file row from its status');
+assert.match(app,/if\(cancel\)cancel\.hidden=!\(exporting\|\|Exports\.status\(\)\.fileBusy\);/u,'one renderer decides the file row Cancel from export and file-processor state');
 
 
 
@@ -48,7 +49,7 @@ assert.match(backup,/else setLocalExportStatus\(message\)/u,'standalone import b
 assert.match(backup,/setLocalExportStatus\(message,ok\);return false;/u,'standalone deep restore status must stay on standalone backup surface');
 assert.match(provider,/BackupController\.cancelImport\(reason,freeze\(\{announce:false\}\)\)/u,'managed-provider cancellation must not leak into standalone or global Library status');
 
-console.log(JSON.stringify({ongoingNoteReadOnly:true,standaloneStatusLocal:true,libraryFallbackRetained:true,backupProtectionStatusLocal:true,managedCancellationLocal:true},null,2));
+console.log(JSON.stringify({noteReadOnly:true,standaloneStatusLocal:true,libraryFallbackRetained:true,backupProtectionStatusLocal:true,managedCancellationLocal:true},null,2));
 }
 
 { // diary-record-contract
@@ -69,7 +70,7 @@ assert.match(library,/const listed=!!String\(record\?\.reflection\|\|''\)\.trim\
 assert.doesNotMatch(library,/Empty reflections/u,'Empty reflection rows must not remain in Diary.');
 assert.match(app,/const DailyReflectionPersistence=[\s\S]*current\?\.recordKind==='study'[\s\S]*reflection:candidate/u,'Shared reflection persistence must update a Study Day reflection without replacing study data.');
 assert.match(app,/const DailyReflectionPersistence=[\s\S]*current\?\.recordKind==='diary'[\s\S]*dailyRecords\.remove\(date/u,'Shared reflection persistence must delete an empty diary-only record.');
-assert.match(library,/diaryPendingValue=null;[\s\S]*await diaryPendingSave\.catch\(\(\)=>\{\}\);[\s\S]*current=await getDailyRecord\(date\);[\s\S]*deleteDiaryEntryRecord\(date\)/u,'Diary deletion must wait for an already-started autosave, refresh the canonical record, then delete it.');
+assert.match(library,/const writing=settleDiaryEditor\(field\);clearDiaryEditor\(field\);await writing;[\s\S]*current=await getDailyRecord\(date\);[\s\S]*deleteDiaryEntryRecord\(date\)/u,'Diary deletion drops unsaved typing, waits for a write already under way, refreshes the canonical record, then deletes it.');
 assert.match(review,/existing\?\.recordKind==='diary'[\s\S]*doc=\{\.\.\.doc,reflection:existingReflection\}/u,'Diary-only dates must promote to Study Days without losing an existing reflection.');
 assert.match(repositories,/getDailyRecordsForWindow[\s\S]*recordKind==='study'/u,'Insights record windows must exclude diary-only records.');
 assert.match(app,/getDailySummaries\(\)[\s\S]*recordKind==='study'/u,'Insights summaries must exclude diary-only records.');
@@ -83,7 +84,7 @@ assert.match(app,/data-tab="library"[^>]*>[\s\S]*Library<\/button>/u,'Library mu
 assert.match(review,/function syncReviewSurfaceMode\(\)[\s\S]*review-stats[\s\S]*review-summary[\s\S]*practice-review[\s\S]*review-blocks-collapse[\s\S]*quality-wrap[\s\S]*copy-report-control/u,'Reflection-only Review must suppress study-only surfaces.');
 assert.match(review,/if\(!reviewHasStudyDay\(\)\)return queueReflectionOnlySave/u,'Reflection-only Review autosave must use canonical Daily Reflection persistence.');
 assert.match(review,/if\(!reviewHasStudyDay\(\)\)return saveReflectionOnlyRecord\(\)/u,'The Review save action must become reflection-only when no Study Day exists.');
-assert.match(review,/settled:\(\)=>Promise\.all\(\[AppData\.activeSession\.settled\(\),reflectionOnlyTail\]\)/u,'Reflection-only writes must participate in Review quiescence.');
+assert.match(review,/settled:\(\)=>Promise\.all\(\[AppData\.activeSession\.settled\(\),reflectionLane\.tail\(\)\]\)/u,'Reflection-only writes must participate in Review quiescence.');
 
 console.log(JSON.stringify({
   status:'PASS',suite:'diary-record-contract',checks:24,contentOnly:true,noNewStore:true,
@@ -111,4 +112,29 @@ assert.doesNotMatch(overlay,/history\.pushState|history\.replaceState|popstate/)
 assert.doesNotMatch(interactions,/history\.pushState|history\.replaceState|popstate/);
 
 console.log(JSON.stringify({status:'PASS',suite:'workspace-history-ownership',owner:'source/core/navigation.js',consumers:['Legal Center','workspace overlay','interaction dialogs']},null,2));
+}
+
+{ // library-sections-contract
+const app=fs.readFileSync('source/app.html','utf8');
+const library=fs.readFileSync('source/core/library.js','utf8');
+const editor=fs.readFileSync('rich-text/editor.ts','utf8');
+// Notes · Days · Data: one switch, one panel each, Notes first.
+const tabs=[...app.matchAll(/role="tab" id="library-tab-(\w+)" data-library-section="\1" aria-controls="library-\1"/gu)].map(match=>match[1]);
+assert.deepEqual(tabs,['notes','days','data'],'The Library switch names its three sections in order.');
+for(const name of tabs)assert.match(app,new RegExp(`<section class="[^"]*" id="library-${name}" role="tabpanel" aria-labelledby="library-tab-${name}"`,'u'),`The ${name} section is a tab panel.`);
+assert.match(app,/Lasting notes for each subject and topic\. A note opens alongside any block whose Area has the same name\./u);
+assert.doesNotMatch(app,/library-data-drawer|id="library-notes-drawer"|Ongoing Notes|Area Notes/u,'The old Library drawers and the "Ongoing Notes" name are gone.');
+// The Diary and Files stay one-click panels inside Days and Data.
+assert.ok(app.indexOf('id="library-diary"')>app.indexOf('id="library-days"')&&app.indexOf('id="library-diary"')<app.indexOf('id="library-data"'),'The Diary sits in Days.');
+assert.ok(app.indexOf('id="library-attachments"')>app.indexOf('id="library-data"'),'Files sit in Data.');
+assert.match(app,/openLibrary:\(\)=>\{LibraryView\.showSection\('data'\);/u,'An attachment link opens Data → Files.');
+// Only the shown section renders, and the view is remembered.
+assert.match(library,/function notesShown\(\)\{return libraryActive&&librarySection==='notes';\}/u);
+assert.match(library,/ports\.preferences\.write\(\{section:librarySection,diary:!!diaryDrawer\(\)\?\.open,sort:noteSort,\.\.\.\(noteListWidth\?\{listWidth:noteListWidth\}:\{\}\)\}\)/u);
+assert.match(app,/class="library-notes-resizer" id="library-notes-resizer" role="separator" aria-orientation="vertical"/u,'The notes list has a keyboard-reachable resize handle.');
+// Search lands on matches through Wordgard's own decoration API; strikethrough is Wordgard's mark.
+assert.match(editor,/const searchMatches=GardState\.Field\.define<SearchMatches\|null>/u);
+assert.match(editor,/moreMenu\.append\(underlineButton,strikethroughButton,subscriptButton,superscriptButton\)/u);
+assert.doesNotMatch(editor,/vendor\/wordgard/u,'The editor reaches Wordgard only through the adapter.');
+console.log(JSON.stringify({status:'PASS',suite:'library-sections',sections:tabs},null,2));
 }

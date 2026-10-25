@@ -61,7 +61,7 @@ function referenceFixture({scanTrusted=true,rewriteMode='success',liveFields=[]}
     withPersistenceSuppressed:work=>work(),
     review:{hydrate(options){reviewEvents.push(['hydrate',structuredClone(options)]);},invalidateBindings(){reviewEvents.push('invalidate');}},
     background:{budget:()=>{let first=true;return()=>{const answer=first;first=false;return answer;}},yieldTask:async options=>{yieldPriorities.push(options?.priority||'');}},
-    live:{fields:()=>liveFields,reviewDate:()=> '2026-09-13',todayIso:()=> '2026-09-13',normalizeAreaName:value=>String(value||'').trim().toLowerCase()}
+    live:{fields:()=>liveFields,reviewDate:()=> '2026-09-13',todayIso:()=> '2026-09-13',noteKey:value=>String(value||'').trim().toLowerCase()}
   };
   const refs=attachments.createReferenceCoordinator(ports);
   return {refs,ports,marker,notes,days,getSession:()=>session,reviewEvents,yieldPriorities};
@@ -113,6 +113,7 @@ for(const failure of ['saved-days','active-session']){
   const field=(kind,value,dataset={})=>({id:kind==='reflection'?'daily-reflection':'',dataset,value,matches:selector=>selector==='.library-diary-textarea'&&kind==='diary'});
   const t=referenceFixture({liveFields:[
     field('area',`live ${ID}`,{areaKey:' Focus '}),
+    field('area',`edited ${ID}`,{areaKey:' N '}),
     field('diary',`live ${ID}`,{diaryDate:'2026-09-13'}),
     field('reflection',`live ${ID}`,{reflectionDate:''})
   ]});
@@ -121,6 +122,8 @@ for(const failure of ['saved-days','active-session']){
   const day=rows.find(row=>row.kind==='day'&&row.key==='2026-09-13');
   const sessionRow=rows.find(row=>row.kind==='session'&&row.key==='current');
   assert.ok(focus?.ids.has(ID),'live Area-note fields join canonical reference discovery');
+  const stored=rows.filter(row=>row.kind==='note'&&row.key==='n');
+  assert.equal(stored.length,1,'an open note merges with its stored note, named by the same key');assert.equal(stored[0].value,`edited ${ID}`,'the open text is the one checked');
   assert.ok(day?.ids.has(ID),'live Diary fields merge with the persisted Saved-Day source');
   assert.ok(sessionRow?.ids.has(ID),'live Reflection fields merge with the persisted Active Session source');
 }

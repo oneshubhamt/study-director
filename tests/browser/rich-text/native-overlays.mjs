@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import {artifactPath,writeArtifact} from '../../helpers/artifacts.mjs';
 import fs from 'node:fs';
 import {launchChromium,startReleaseServer,waitForStudyDirector,waitFor,sleep} from '../../helpers/browser-harness.mjs';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
-const bundle=fs.readFileSync('source/external/rich-text.js','utf8');
+const bundle=richTextRuntimeSource();
 const browser=await launchChromium({profilePrefix:'qa-overlays-'});
 const results=[];
 let server;
@@ -35,6 +36,7 @@ try{
     assert.equal(await page.evaluate(`document.querySelectorAll('.sd-rte-menu:not([hidden])').length`),0,`${mode}: outside dismissal`);
     await page.evaluate(`document.querySelector('button[aria-label="More text formatting"]').focus()`);await key(page,'ArrowDown');await page.settle();
     assert.equal(await page.evaluate(`document.activeElement.getAttribute('aria-label')`),'Underline');
+    await key(page,'ArrowDown');assert.equal(await page.evaluate(`document.activeElement.getAttribute('aria-label')`),'Strikethrough');
     await key(page,'ArrowDown');assert.equal(await page.evaluate(`document.activeElement.getAttribute('aria-label')`),'Subscript');
     await key(page,'Escape');assert.equal(await page.evaluate(`document.activeElement.getAttribute('aria-label')`),'More text formatting');
     assert.equal(await page.evaluate(`document.querySelector('button[aria-label="More text formatting"]').getAttribute('aria-expanded')`),'false');
@@ -73,7 +75,7 @@ try{
   await waitForStudyDirector(page,{instrumented:true});
   await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`));
   await page.evaluate(`(()=>{const now=new Date(),time=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');document.getElementById('plan-input').value=time+' | 30 | Study | work | History | pages | 10';__PWA6.applySchedule({skipNotify:true});__PWA6.setCurrentTask(0,{force:true});__PWA6.goTab('execute');__PWA6.refreshPnote({force:true})})()`);
-  await waitFor(()=>page.evaluate(`document.querySelector('#pnote .sd-rte')!==null`),{label:'mounted ongoing-notes editor'});
+  await waitFor(()=>page.evaluate(`document.querySelector('#pnote .sd-rte')!==null`),{label:'mounted notes editor'});
   await page.click('#pn-info-btn');
   assert.equal(await page.evaluate(`document.getElementById('pn-info-popover').matches(':popover-open')`),true);
   await page.click('#display-tools-trigger');
@@ -81,11 +83,16 @@ try{
   assert.equal(await page.evaluate(`document.getElementById('display-tools-menu').matches(':popover-open')`),true);
   await key(page,'Escape');
   await page.click('#pnote .sd-rte .sd-rte-focus-trigger');
+  const statusPosition=await page.evaluate(`(()=>{const r=document.querySelector('.sd-rte-focus-sync').getBoundingClientRect(),close=document.querySelector('.workspace-overlay-rich-text .workspace-overlay-close').getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,closeX:close.x,closeY:close.y}})()`);
   await page.evaluate(`document.querySelector('.sd-rte-focus-sync').focus()`);await page.settle();
   const tip=await page.evaluate(`(()=>{const p=document.getElementById('note-sync-popover'),r=p.getBoundingClientRect(),t=document.querySelector('.sd-rte-focus-sync');return {native:p.matches(':popover-open'),inside:!!p.closest('.workspace-overlay-rich-text'),inert:p.inert,described:t.getAttribute('aria-describedby'),right:r.right,bottom:r.bottom}})()`);
   assert.equal(tip.native,true);assert.equal(tip.inside,true);assert.equal(tip.inert,false);assert.equal(tip.described,'note-sync-popover');assert.ok(tip.right<=1365&&tip.bottom<=900);
+  assert.deepEqual(await page.evaluate(`(()=>{const r=document.querySelector('.sd-rte-focus-sync').getBoundingClientRect(),close=document.querySelector('.workspace-overlay-rich-text .workspace-overlay-close').getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,closeX:close.x,closeY:close.y}})()`),statusPosition,'Showing the tooltip must not move its toolbar control or the close button.');
   await page.screenshot(artifactPath('focus-tooltip.png'));
-  await key(page,'Escape');assert.equal(await page.evaluate(`!!document.querySelector('dialog.workspace-overlay-rich-text')`),true);
+  await page.setViewport({width:390,height:844,mobile:true,scale:2});await page.settle();
+  const mobileTip=await page.evaluate(`(()=>{const r=document.getElementById('note-sync-popover').getBoundingClientRect(),v=visualViewport;return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,viewLeft:v.offsetLeft,viewTop:v.offsetTop,viewRight:v.offsetLeft+v.width,viewBottom:v.offsetTop+v.height}})()`);
+  assert.ok(mobileTip.left>=mobileTip.viewLeft&&mobileTip.right<=mobileTip.viewRight&&mobileTip.top>=mobileTip.viewTop&&mobileTip.bottom<=mobileTip.viewBottom,JSON.stringify(mobileTip));
+  await page.evaluate(`document.querySelector('.workspace-overlay-rich-text .workspace-overlay-close').focus()`);await page.settle();assert.equal(await page.evaluate(`!!document.querySelector('dialog.workspace-overlay-rich-text')`),true);
   assert.equal(await page.evaluate(`document.querySelector('.sd-rte-focus-sync').hasAttribute('aria-describedby')`),false);
   await page.click('.workspace-overlay-rich-text .workspace-overlay-close');
   results.push({host:tip});await browser.closePage(page);

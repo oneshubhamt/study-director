@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {launchChromium,waitFor} from '../../helpers/browser-harness.mjs';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
-const bundle=fs.readFileSync('source/external/rich-text.js','utf8');
+const bundle=richTextRuntimeSource();
 const browser=await launchChromium({profilePrefix:'qa-link-context-'});let page;
 const selectTextByPointer=async(selector,start,end,expected)=>{const points=await page.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),t=e.firstChild,r=document.createRange();r.setStart(t,${start});r.setEnd(t,${end});const a=document.createRange(),b=document.createRange();a.setStart(t,${start});a.setEnd(t,${start+1});b.setStart(t,${end-1});b.setEnd(t,${end});const x=a.getBoundingClientRect(),y=b.getBoundingClientRect();return {sx:x.left+1,sy:x.top+x.height/2,ex:y.right-1,ey:y.top+y.height/2}})()`);await page.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:points.sx,y:points.sy});await page.send('Input.dispatchMouseEvent',{type:'mousePressed',x:points.sx,y:points.sy,button:'left',buttons:1,clickCount:1});await page.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:points.ex,y:points.ey,button:'left',buttons:1});await page.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:points.ex,y:points.ey,button:'left',buttons:0,clickCount:1});await waitFor(()=>page.evaluate(`getSelection().toString()===${JSON.stringify(expected)}`),{timeout:3000,label:`pointer selection ${expected}`})};
 try{

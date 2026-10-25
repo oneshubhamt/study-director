@@ -33,8 +33,8 @@ send({type:'batch',documents:[{key:'geography',revision:'r1',value:wg1('Monsoon 
 send({type:'query',id:31,query:'orographic'});
 assert.deepEqual([...result().keys],['geography']);
 
-// Active editor updates may share the same throttled revision, so an explicit derived-text update
-// must replace the cached text even when revision has not advanced.
+// An explicit derived-text update from the active editor replaces the cached text even when the
+// revision has not advanced.
 send({type:'upsert',document:{key:'biology',revision:'r1',plain:'Mitochondria oxidative phosphorylation'}});
 send({type:'query',id:4,query:'photosynthesis'});assert.deepEqual([...result().keys],[]);
 send({type:'query',id:5,query:'oxidative'});assert.deepEqual([...result().keys],['biology']);

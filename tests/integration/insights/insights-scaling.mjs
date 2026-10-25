@@ -9,6 +9,30 @@ const context=vm.createContext({console});
 vm.runInContext(source,context,{filename:sourcePath});
 const {Config,PacerEvidence:Pacer,ModelEngine}=context.StudyDirectorInsightsModel;
 
+// Formatter reuse must preserve calendar labels across local year boundaries,
+// leap days, daylight-saving changes and both extremes of time-zone offsets.
+const originalTimezone=process.env.TZ;
+try{
+  const {Primitives}=context.StudyDirectorInsightsModel;
+  const year=Number(Primitives.localIsoDate().slice(0,4));
+  const dates=[...Array.from({length:12},(_,month)=>`${year}-${String(month+1).padStart(2,'0')}-15`),
+    ...Array.from({length:7},(_,index)=>`${year}-01-${String(index+1).padStart(2,'0')}`),
+    `${year-1}-12-31`,`${year+1}-01-01`,'2024-02-29','2024-03-31','2024-11-03'];
+  for(const timezone of ['UTC','Asia/Kolkata','America/Adak','Europe/Berlin','Pacific/Kiritimati']){
+    process.env.TZ=timezone;
+    const currentYear=Primitives.localIsoDate().slice(0,4);
+    for(const date of dates){
+      const native=new Date(date+'T00:00:00');
+      assert.equal(Primitives.dayName(date),native.toLocaleDateString('en-IN',{weekday:'short'}));
+      assert.equal(Primitives.shortDate(date),native.toLocaleDateString('en-IN',{day:'numeric',month:'short',...(date.slice(0,4)!==currentYear?{year:'2-digit'}:{})}));
+    }
+  }
+  assert.equal(Primitives.dayName('invalid'),'');
+  assert.equal(Primitives.shortDate('invalid'),'No date');
+}finally{
+  if(originalTimezone===undefined)delete process.env.TZ;else process.env.TZ=originalTimezone;
+}
+
 const DAY_MS=86400000;
 const isoFromDay=day=>new Date(day*DAY_MS).toISOString().slice(0,10);
 const dayFromIso=date=>Math.floor(Date.parse(`${date}T00:00:00Z`)/DAY_MS);

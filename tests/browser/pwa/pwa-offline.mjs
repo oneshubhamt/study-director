@@ -1,12 +1,10 @@
 import {createPwaVariant} from '../../helpers/pwa-variant.mjs';
 import assert from 'node:assert/strict';
-import {artifactPath,writeArtifact} from '../../helpers/artifacts.mjs';
-import crypto from 'node:crypto';
+import {writeArtifact} from '../../helpers/artifacts.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
-import os from 'node:os';
 import path from 'node:path';
-import {spawn} from 'node:child_process';
+import {launchChromium,skipFirstStart} from '../../helpers/browser-harness.mjs';
 
 const root=process.cwd();
 const deployment=path.join(root,'dist','deployment');
@@ -15,10 +13,7 @@ const originalIndex=fs.readFileSync(path.join(deployment,manifest.main),'utf8');
 const originalWorker=fs.readFileSync(path.join(deployment,'sw.js'),'utf8');
 const originalPwa=manifest.pwa.deployment;
 const build={identity:{main:manifest.main},pwa:manifest.pwa,deployment:new Map([[manifest.main,originalIndex],['sw.js',originalWorker],['firebase-hosting-headers.merge.json',fs.readFileSync(path.join(deployment,'firebase-hosting-headers.merge.json'),'utf8')]])};
-const chromium=process.env.CHROMIUM_PATH||['/usr/bin/chromium','/tmp/chromium'].find(fs.existsSync)||'/usr/bin/chromium';
-if(!fs.existsSync(chromium))throw new Error(`Chromium not found: ${chromium}`);
 
-const sha256=value=>crypto.createHash('sha256').update(value).digest('hex');
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function waitFor(operation,{timeout=45000,interval=100,label='condition'}={}){
   const started=Date.now();let last;
@@ -64,54 +59,12 @@ const server=http.createServer((request,response)=>{
 await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
 const appUrl=`http://127.0.0.1:${server.address().port}/${manifest.main}`;
 
-class CdpPage{
-  constructor(socket){
-    this.socket=socket;this.nextId=0;this.pending=new Map();this.events=[];this.loadCount=0;
-    socket.onmessage=event=>{
-      const message=JSON.parse(event.data);
-      if(message.id){
-        const pending=this.pending.get(message.id);if(!pending)return;
-        this.pending.delete(message.id);
-        message.error?pending.reject(new Error(JSON.stringify(message.error))):pending.resolve(message.result);return;
-      }
-      if(message.method==='Page.loadEventFired')this.loadCount+=1;
-      if(message.method==='Runtime.exceptionThrown')this.events.push({kind:'exception',text:message.params.exceptionDetails.exception?.description||message.params.exceptionDetails.text||'Runtime exception'});
-      if(message.method==='Runtime.consoleAPICalled'&&message.params.type==='error')this.events.push({kind:'console-error',text:message.params.args.map(arg=>arg.value??arg.description??'').join(' ')});
-    };
-  }
-  static async connect(url){
-    const socket=new WebSocket(url);
-    await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject;});
-    return new CdpPage(socket);
-  }
-  send(method,params={}){return new Promise((resolve,reject)=>{const id=++this.nextId;this.pending.set(id,{resolve,reject});this.socket.send(JSON.stringify({id,method,params}));});}
-  async evaluate(expression){
-    const result=await this.send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true,userGesture:true});
-    if(result.exceptionDetails)throw new Error(result.exceptionDetails.exception?.description||result.exceptionDetails.text||'Evaluation failed');
-    return result.result.value;
-  }
-  close(){this.socket.close();}
-}
-
-const profile=fs.mkdtempSync(path.join(os.tmpdir(),'study-director-pwa-qa-'));
-const browser=spawn(chromium,[
-  '--headless=new','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check',
-  '--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'
-],{stdio:['ignore','ignore','pipe'],env:{...process.env,TERM:process.env.TERM||'xterm'}});
-let browserError='';browser.stderr.on('data',chunk=>{browserError+=chunk;});
-const activePath=path.join(profile,'DevToolsActivePort');
-await waitFor(()=>fs.existsSync(activePath),{timeout:20000,label:'Chromium DevTools port'});
-const [browserPort]=fs.readFileSync(activePath,'utf8').trim().split(/\r?\n/);
-await waitFor(async()=>{try{return (await fetch(`http://127.0.0.1:${browserPort}/json/version`)).ok;}catch{return false;}},{label:'Chromium endpoint'});
+const browser=await launchChromium({profilePrefix:'study-director-pwa-qa-'});
 
 async function createPage(url=appUrl){
-  const target=await (await fetch(`http://127.0.0.1:${browserPort}/json/new?${encodeURIComponent(url)}`,{method:'PUT'})).json();
-  const page=await CdpPage.connect(target.webSocketDebuggerUrl);
-  await page.send('Runtime.enable');await page.send('Page.enable');await page.send('Network.enable');
-  await page.send('Emulation.setTimezoneOverride',{timezoneId:'Asia/Kolkata'});
-  await page.send('Emulation.setDeviceMetricsOverride',{width:1365,height:900,deviceScaleFactor:1,mobile:false});
-  await waitFor(()=>page.evaluate(`!!(window.StudyDirector&&document.querySelector('[data-tab="plan"]'))`),{label:'Study Director shell'});
-  await page.evaluate(`document.querySelector('[data-action="skip-name-setup"]')?.click()`);
+  const page=await browser.createPage(url,{preload:"window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';"});
+  await waitForStartup(page);
+  await skipFirstStart(page);
   return page;
 }
 async function waitForStartup(page){
@@ -178,7 +131,7 @@ try{
   served='next';
   await page1.send('Page.bringToFront');
   await forceUpdate(page1);
-  await waitFor(()=>page1.evaluate(`navigator.serviceWorker.getRegistration().then(r=>!!r.waiting)&&!document.getElementById('pwa-update-control').hidden`),{timeout:60000,label:'waiting update control'});
+  await waitFor(()=>page1.evaluate(`navigator.serviceWorker.getRegistration().then(r=>!!r.waiting&&!document.getElementById('pwa-update-control').hidden)`),{timeout:60000,label:'waiting update control'});
   assert.equal(await workerIdentity(page1,'waiting'),next.releaseId);
   assert.equal(await page1.evaluate(`document.getElementById('pwa-update-apply').textContent`),'Pause & Update');
   assert.equal(await workerIdentity(page1),originalPwa.releaseId);
@@ -202,13 +155,10 @@ try{
   writeArtifact('pwa-offline-results.json',JSON.stringify(evidence,null,2)+'\n');
   console.log(JSON.stringify(evidence,null,2));
 }catch(error){
-  let pageDiagnostic=null;
+  let pageDiagnostic=null;console.error('Reload counts',JSON.stringify({page1:page1?.loadCount,page2:page2?.loadCount}));console.error('Second tab',await page2?.evaluate(`({lifecycle:document.documentElement.dataset.studyDirectorLifecycle,ui:document.documentElement.dataset.studyDirectorUiState,update:document.getElementById('pwa-update-message')?.textContent,body:document.body?.innerText.slice(-1800)})`).catch(()=>null));
   try{pageDiagnostic=await page1?.evaluate(`(async()=>({href:location.href,title:document.title,body:(document.body?.innerText||'').slice(0,500),controller:!!navigator.serviceWorker?.controller,caches:typeof caches==='undefined'?[]:await caches.keys()}))()`);}catch(diagnosticError){pageDiagnostic={error:String(diagnosticError)};}
-  throw new Error(`${error.stack||error}\nPage diagnostic: ${JSON.stringify(pageDiagnostic)}\nChromium stderr:\n${browserError.slice(-6000)}`);
+  throw new Error(`${error.stack||error}\nPage diagnostic: ${JSON.stringify(pageDiagnostic)}\nChromium stderr:\n${browser.stderr().slice(-6000)}`);
 }finally{
-  try{page1?.close();page2?.close();}catch{}
-  browser.kill('SIGTERM');
-  await Promise.race([new Promise(resolve=>browser.once('exit',resolve)),sleep(3000)]);
-  server.close();
-  fs.rmSync(profile,{recursive:true,force:true});
+  await browser.close();
+  await new Promise(resolve=>server.close(resolve));
 }

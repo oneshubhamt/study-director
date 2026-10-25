@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {launchChromium} from '../../helpers/browser-harness.mjs';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
-const bundle=fs.readFileSync('source/external/rich-text.js','utf8');
+const bundle=richTextRuntimeSource();
 const id='img-12345678901234567890';
 const value='WG1:'+JSON.stringify({version:1,doc:{type:'Doc',content:[
   {type:'Heading',param:2,marks:{SDLineHeight:1.55},content:[{type:'Text',param:'Typography probe'}]},
@@ -31,9 +32,9 @@ try{
 
   // Image mode: same Aa trigger, only L/C/R, no overflow, alignment persists/rendering changes.
   await page.click(`${root} .sd-rte-image`);await page.settle();
-  const trigger=await page.evaluate(`(()=>{const b=document.querySelector('${root} button[aria-label="Typography"]');return {disabled:b.disabled,expanded:b.getAttribute('aria-expanded')}})()`);
+  const trigger=await page.evaluate(`(()=>{const b=document.querySelector('${root} button[aria-label="Image position"]');return {disabled:b.disabled,expanded:b.getAttribute('aria-expanded')}})()`);
   assert.equal(trigger.disabled,false,'Aa must stay available for an image node selection.');
-  await page.click(`${root} button[aria-label="Typography"]`);await page.settle();
+  await page.click(`${root} button[aria-label="Image position"]`);await page.settle();
   const imageUI=await page.evaluate(`(()=>{const menu=document.querySelector('${root} .sd-rte-typography'),visible=[...menu.querySelectorAll('button')].filter(b=>!b.hidden&&b.getClientRects().length>0).map(b=>b.getAttribute('aria-label'));return {mode:menu.dataset.mode,visible,overflow:menu.scrollWidth>menu.clientWidth}})()`);
   assert.equal(imageUI.mode,'image');
   assert.deepEqual(imageUI.visible,['Align left','Align center','Align right']);

@@ -9,7 +9,7 @@ const freeze=Object.freeze;
 const CHECKPOINT='cp_'+'a'.repeat(32);
 
 function harness(options={}){
-  const events=[],diagnostics=[];
+  const events=[],diagnostics=[],settles=[];
   let suspended=0,activeLock=false,revision='2026-09-20T12:00:00.000Z';
   const coordinator=module.createCoordinator(freeze({
     automaticBackup:freeze({
@@ -18,7 +18,7 @@ function harness(options={}){
     }),
     diagnostics:freeze({capture:(scope,error,severity)=>diagnostics.push(freeze({scope,message:String(error?.message||error),severity})),mark:(phase,details)=>diagnostics.push(freeze({scope:'phase',message:phase,level:'info'}))}),
     lifecycle:freeze({
-      settle:async kind=>{events.push(`settle:${kind}`);if(options.failSettle)throw new Error('settle failed');},
+      settle:async(kind,phase)=>{events.push(`settle:${kind}`);if(phase)settles.push(phase);if(options.failSettle)throw new Error('settle failed');},
       quiesce:async operation=>{events.push('quiesce:enter');try{return await operation();}finally{events.push('quiesce:exit');}},
       rebuild:async kind=>{events.push(`rebuild:${kind}`);if(options.failRebuild)throw new Error('rebuild failed');},
       revision:()=>revision
@@ -31,7 +31,7 @@ function harness(options={}){
     apply:async()=>{events.push('apply');if(options.failApply)throw new Error('apply failed');return options.cancelled?freeze({cancelled:true}):freeze({cancelled:false,value:'restored'});},
     publishPresent:async()=>{events.push('present');if(options.failPresent)throw new Error('present failed');return freeze({status:'completed',checkpointId:'cp_'+'b'.repeat(32)});}
   });
-  return {coordinator,spec,events,diagnostics,state:()=>freeze({suspended,activeLock})};
+  return {coordinator,spec,events,diagnostics,settles,state:()=>freeze({suspended,activeLock})};
 }
 
 {
@@ -86,6 +86,18 @@ function harness(options={}){
   assert.equal(result.managedRecovery.present.status,'completed');
   assert.equal(h.diagnostics.some(row=>row.scope==='managed-recovery.resume-automatic-backup'),true,'Resume failures must be surfaced diagnostically rather than masking a completed restore.');
   assert.equal(h.coordinator.status().active,false);
+}
+
+// The final settlement tells the host whether the operation keeps today's
+// session, so it does not rewrite a session the safety backup already holds.
+{
+  const h=harness({kind:'bring-in'});
+  await h.coordinator.execute(h.spec);
+  assert.deepEqual(h.settles,[{phase:'final',keepsActiveSession:false}],'only the final settlement carries the phase');
+  const kept=harness({kind:'bring-in'});
+  await kept.coordinator.execute(Object.freeze({...kept.spec,keepsActiveSession:true}));
+  assert.deepEqual(kept.settles,[{phase:'final',keepsActiveSession:true}]);
+  await assert.rejects(()=>kept.coordinator.execute(Object.freeze({...kept.spec,unexpected:true})),/Managed recovery operation/,'unknown operation fields are still rejected');
 }
 
 {

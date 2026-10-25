@@ -30,16 +30,16 @@ const indexedDb=freeze({
 });
 const hostKeys=freeze({
   verifiedRecoveryBackups:APP_META_KEYS.verifiedRecoveryBackups,backupProtection:APP_META_KEYS.backupProtection,
-  attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,automaticDeviceBackup:APP_META_KEYS.automaticDeviceBackup,
+  attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,deviceFolder:APP_META_KEYS.deviceFolder,
   repositoryIntegrityScrub:APP_META_KEYS.repositoryIntegrityScrub,managedProviderBackupPending:APP_META_KEYS.managedProviderBackupPending,
-  repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,reconciliationBaseLegacy:APP_META_KEYS.reconciliationBaseLegacy,
-  reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix
+  repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,
+  reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix,reconciliationBaseDayPrefix:APP_META_KEYS.reconciliationBaseDayPrefix
 });
 function gateway(){
   const value=AppMeta.create(freeze({indexedDb,store:'meta',registry:APP_META_RUNTIME_REGISTRY}));
   value.registerValidators('host',HostMetadata.createAppMetaValidators(freeze({
     keys:hostKeys,same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),
-    normalizers:freeze({verifiedRecovery:v=>v,attachmentIntegrity:v=>v,repositoryIntegrity:v=>v,reconciliationBaseLegacy:v=>v,reconciliationBase:v=>v,reconciliationBaseNote:v=>v})
+    normalizers:freeze({verifiedRecovery:v=>v,attachmentIntegrity:v=>v,repositoryIntegrity:v=>v,reconciliationBase:v=>v,reconciliationBaseNote:v=>v,reconciliationBaseDays:v=>v})
   })));
   return value;
 }
@@ -55,7 +55,7 @@ await restartedBackupMeta.remove('managedProviderBackupPending','',{strict:true}
 assert.equal(await restartedBackupMeta.read('managedProviderBackupPending'),null,'successful retry/disconnect must be able to clear the durable pending intent strictly');
 assert.equal(strictWrites,2,'pending intent removal must use strict durability too');
 
-const maintenance=freeze({format:'study-director.repository-maintenance-pending',version:2,entries:freeze([freeze({providerId:'google-drive',requestedAt:'2026-09-20T12:05:00.000Z',nextEligibleAt:'2026-09-20T18:05:00.000Z',reason:'gc-grace'})])});
+const maintenance=freeze({format:'study-director.repository-maintenance-pending',version:4,entries:freeze([freeze({providerId:'google-drive',requestedAt:'2026-09-20T12:05:00.000Z',nextEligibleAt:'2026-09-20T18:05:00.000Z',reason:'gc-grace',repositoryScope:'',requestId:''})])});
 await restartedBackupMeta.write('repositoryMaintenancePending',maintenance,{strict:true,updatedAt:'2026-09-20T12:05:00.000Z'});
 assert.equal(strictWrites,3,'repository-maintenance intent must use a strict durable appMeta write');
 const maintenanceRestart=gateway().bind('backup');assert.deepEqual(await maintenanceRestart.read('repositoryMaintenancePending'),maintenance,'repository-maintenance intent must survive runtime reconstruction over the same IndexedDB state');
@@ -97,8 +97,14 @@ for(const fault of ['read','write','commit']){
 {
  const h=host();await h.mark('device-folder',{reason:'device-work',nextEligibleAt:new Date().toISOString()});const device=await h.read('device-folder');await h.mark('google-drive',{reason:'drive-work',nextEligibleAt:new Date().toISOString()});await h.clear('google-drive',await h.read('google-drive'));assert.deepEqual(await h.read('device-folder'),device);await h.clear('device-folder',device);intentCases.push('independent providers');
 }
+// Older payload versions are converted once by the compatibility host; the ordinary runtime rejects them.
 for(const version of [1,2,3]){
- const h=host(),at=new Date().toISOString(),entry={providerId:'google-drive',requestedAt:at};if(version>=2)Object.assign(entry,{nextEligibleAt:at,reason:'legacy-work'});if(version>=3)entry.repositoryScope='actual-repository';await gateway().bind('backup').write('repositoryMaintenancePending',{format:'study-director.repository-maintenance-pending',version,entries:[entry]},{strict:true});const old=await h.read('google-drive');assert.equal(old.requestId,'');await h.mark('google-drive',{reason:'resumed',nextEligibleAt:at},old);const current=await h.read('google-drive');assert.match(current.requestId,/^[a-f0-9-]{36}$/u);assert.equal(await h.clear('google-drive',old),'superseded');assert.equal(await h.clear('google-drive',current),true);intentCases.push('legacy payload '+version);
+ const at=new Date().toISOString(),entry={providerId:'google-drive',requestedAt:at};if(version>=2)Object.assign(entry,{nextEligibleAt:at,reason:'legacy-work'});if(version>=3)entry.repositoryScope='actual-repository';
+ await assert.rejects(gateway().bind('backup').write('repositoryMaintenancePending',{format:'study-director.repository-maintenance-pending',version,entries:[entry]},{strict:true}),/not canonical/u);intentCases.push('older payload '+version+' rejected');
+}
+{
+ // A converted intent carries no request identity yet; the next mark assigns one.
+ const h=host(),at=new Date().toISOString();await gateway().bind('backup').write('repositoryMaintenancePending',{format:'study-director.repository-maintenance-pending',version:4,entries:[{providerId:'google-drive',requestedAt:at,nextEligibleAt:at,reason:'legacy',repositoryScope:'',requestId:''}]},{strict:true});const old=await h.read('google-drive');assert.equal(old.requestId,'');await h.mark('google-drive',{reason:'resumed',nextEligibleAt:at},old);const current=await h.read('google-drive');assert.match(current.requestId,/^[a-f0-9-]{36}$/u);assert.equal(await h.clear('google-drive',old),'superseded');assert.equal(await h.clear('google-drive',current),true);intentCases.push('converted intent without request identity');
 }
 // Requests accepted after a conditional commit must also retain their timer.
 for(const path of ['adopt-complete','adopt-pending','run-complete']){

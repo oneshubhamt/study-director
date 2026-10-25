@@ -35,7 +35,7 @@ const commit=field=>{
   repository.Area={...repository.Area,text:field.value};return true;
 };
 oldField.value='stale overwrite';
-await coordinator.run('imported-area-notes',{},async()=>{
+await coordinator.run('imported-notes',{},async()=>{
   assert.equal(commit(oldField),false,'retained Review field must be unable to write during import');
   repository={Area:{key:'Area',text:'imported canonical'}};
 });

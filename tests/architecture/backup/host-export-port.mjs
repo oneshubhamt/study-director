@@ -13,7 +13,7 @@ assert.ok(contract&&wired,'Backup exports contract and production host wiring mu
 const expected=vm.runInNewContext(contract[1]);
 const stub=Object.freeze(Object.fromEntries(expected.map(key=>[key,()=>{}])));
 const actual=vm.runInNewContext(wired[1],{
-  Object,BackupProtection:stub,Exports:stub,AttachmentStorage:{during:operation=>operation()}
+  Object,backupBackgroundAvailability:()=>true,BackupProtection:Object.freeze({...stub,follow:()=>{}}),Exports:stub,AttachmentStorage:{during:operation=>operation()}
 });
 assert.ok(Object.isFrozen(actual),'Production exports port must be immutable.');
 assert.deepEqual(Object.keys(actual).sort(),[...expected].sort(),'Production exports port must exactly match the backup runtime contract.');

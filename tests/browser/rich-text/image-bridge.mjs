@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {launchChromium,waitFor} from '../../helpers/browser-harness.mjs';
+import {launchChromium,waitFor,pasteInPage} from '../../helpers/browser-harness.mjs';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
-const bundle=fs.readFileSync('source/external/rich-text.js','utf8');
+const bundle=richTextRuntimeSource();
 const fixture=path.join(os.tmpdir(),'qa-image.png');
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
 fs.writeFileSync(fixture,png);
@@ -17,7 +18,7 @@ try{
 
   await page.click('#picker + .sd-rte .sd-rte-editor p:nth-of-type(2)');await page.settle();
   await page.send('Page.setInterceptFileChooserDialog',{enabled:true});
-  await page.click('#picker + .sd-rte .sd-rte-toolbar button[aria-label="Insert image"]');
+  await page.click('#picker + .sd-rte .sd-rte-attachment-trigger');await page.click('#picker + .sd-rte button[aria-label="Insert image"]');
   // Reproduce the user's observed browser caret jump while the native chooser owns focus.
   await page.evaluate(`selectPara('picker',0,0)`);await page.settle();
   const doc=await page.send('DOM.getDocument',{depth:-1,pierce:true}),input=await page.send('DOM.querySelector',{nodeId:doc.root.nodeId,selector:'#picker + .sd-rte .sd-rte-asset-input'});
@@ -25,7 +26,7 @@ try{
   await waitFor(()=>page.evaluate(`document.getElementById('picker').value.includes('"type":"SDImage"')`),{timeout:10000,label:'picker image insertion'});
   assert.deepEqual(await page.evaluate(`[...document.querySelector('#picker + .sd-rte .sd-rte-editor').children].map(n=>n.tagName)`),['P','P','FIGURE','P'],'Picker image must use the selection captured before toolbar/native-dialog focus changes.');
 
-  await page.click('#paste + .sd-rte .sd-rte-editor p:nth-of-type(2)');await page.evaluate(`(()=>{const bytes=Uint8Array.from(atob(${JSON.stringify(png.toString('base64'))}),c=>c.charCodeAt(0)),file=new File([bytes],'clipboard.png',{type:'image/png'}),dt=new DataTransfer();dt.items.add(file);dt.setData('text/plain','true');const ev=new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true});document.querySelector('#paste + .sd-rte .sd-rte-editor').dispatchEvent(ev)})()`);
+  await page.click('#paste + .sd-rte .sd-rte-editor p:nth-of-type(2)');await page.evaluate(`(()=>{const bytes=Uint8Array.from(atob(${JSON.stringify(png.toString('base64'))}),c=>c.charCodeAt(0)),file=new File([bytes],'clipboard.png',{type:'image/png'}),dt=new DataTransfer();dt.items.add(file);dt.setData('text/plain','true');${pasteInPage}(document.querySelector('#paste + .sd-rte .sd-rte-editor'),dt)})()`);
   await waitFor(()=>page.evaluate(`document.getElementById('paste').value.includes('"type":"SDImage"')`),{timeout:10000,label:'clipboard image insertion'});
   const pasted=await page.evaluate(`({children:[...document.querySelector('#paste + .sd-rte .sd-rte-editor').children].map(n=>n.tagName),text:document.querySelector('#paste + .sd-rte .sd-rte-editor').innerText,assets:assetMap.size})`);
   assert.deepEqual(pasted.children,['P','P','FIGURE','P']);

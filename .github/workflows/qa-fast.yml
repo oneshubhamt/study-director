@@ -31,6 +31,18 @@ jobs:
           tests/integration/storage/background-gc-reliability.mjs
           tests/integration/library/library-clear.mjs
           tests/integration/backup/capture-safety.mjs
+          tests/unit/app/operation-lifecycle.mjs
+          tests/unit/backup/repository-background.mjs
+          tests/integration/storage/data-maintenance.mjs
+          tests/integration/storage/deletion-recovery.mjs
+          tests/integration/backup/device-backup.mjs
+          tests/integration/backup/repository-checkpoint.mjs
+          tests/integration/backup/drive-security.mjs
+          tests/integration/storage/attachment-integrity-audit.mjs
+          tests/integration/storage/integrity-continuation.mjs
+          tests/integration/exports/scratch-gc.mjs
+          tests/architecture/storage/background-work-contract.mjs
+          tests/architecture/storage/managed-recovery-contract.mjs
           tests/architecture/test-suite/suite-governance.mjs
           tests/architecture/test-suite/suite-structure.mjs
           tests/architecture/test-suite/suite-policy.mjs

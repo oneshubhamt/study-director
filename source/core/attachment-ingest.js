@@ -4,12 +4,17 @@ const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 registry.define('attachment-ingest',1,()=>{
   const MiB=1048576,MIN_HEADROOM=32*MiB,MAX_HEADROOM=256*MiB;
   const cancelled=()=>Object.assign(new Error('Attachment operation cancelled.'),{name:'AbortError'});
-  function create({createWorker,storage,randomUUID=()=>crypto.randomUUID(),setTimeout:schedule=setTimeout,clearTimeout:clear=clearTimeout,stallTimeoutMs=120000,cancelTimeoutMs=2000,estimateTimeoutMs=5000,onAbandoned=()=>{}}){
+  function create({createWorker,storage,directory,randomUUID=()=>crypto.randomUUID(),setTimeout:schedule=setTimeout,clearTimeout:clear=clearTimeout,stallTimeoutMs=120000,cancelTimeoutMs=2000,estimateTimeoutMs=5000,idleTimeoutMs=120000,onAbandoned=()=>{}}){
     if(typeof createWorker!=='function')throw new TypeError('Attachment worker factory is required.');
-    let worker=null,sequence=0;const pending=new Map();
+    if(typeof directory!=='string'||!directory)throw new TypeError('Attachment folder is required.');
+    // The worker is started on demand and let go after two quiet minutes, so an
+    // occasional attachment does not hold its memory for the whole session.
+    let worker=null,sequence=0,idleTimer=null;const pending=new Map();
+    function disarmIdle(){if(idleTimer!==null){clear(idleTimer);idleTimer=null;}}
+    function idle(){disarmIdle();if(worker&&!pending.size)idleTimer=schedule(()=>{idleTimer=null;if(!pending.size)stop();},Math.max(1,idleTimeoutMs));}
     const safeProgress=(callback,value)=>{if(typeof callback!=='function')return;try{callback(Object.freeze(value));}catch{}};
     function stop(error=new Error('Attachment ingest worker stopped.')){
-      const stopped=worker;worker=null;
+      disarmIdle();const stopped=worker;worker=null;
       if(stopped){stopped.onmessage=stopped.onerror=stopped.onmessageerror=null;try{stopped.terminate();}catch{}}
       const requests=[...pending.values()];pending.clear();for(const request of requests){request.reject(error);if(request.type==='ingest')try{onAbandoned();}catch{}}
     }
@@ -46,15 +51,15 @@ registry.define('attachment-ingest',1,()=>{
       return new Promise((resolve,reject)=>{
         let settled=false,timer=null,cancelTimer=null;
         const cleanup=()=>{if(timer!==null)clear(timer);if(cancelTimer!==null)clear(cancelTimer);signal?.removeEventListener('abort',abort);};
-        const finish=(fn,value)=>{if(settled)return;settled=true;cleanup();fn(value);};
+        const finish=(fn,value)=>{if(settled)return;settled=true;cleanup();fn(value);idle();};
         const request={type,resolve:value=>finish(resolve,value),reject:error=>finish(reject,error),onProgress,cancelling:false,watch:()=>{if(timer!==null)clear(timer);timer=schedule(()=>stop(Object.assign(new Error('Attachment processing stopped making progress. Retry the attachment.'),{code:'ATTACHMENT_WORKER_TIMEOUT'})),Math.max(1,stallTimeoutMs));}};
         const abort=()=>{
           if(settled||request.cancelling)return;request.cancelling=true;if(timer!==null)clear(timer);
           cancelTimer=schedule(()=>stop(cancelled()),Math.max(1,cancelTimeoutMs));
           try{worker?.postMessage({type:'cancel',target:id});}catch{stop(cancelled());}
         };
-        pending.set(id,request);signal?.addEventListener('abort',abort,{once:true});request.watch();
-        try{ensure().postMessage({id,type,data});if(signal?.aborted)abort();}catch(error){stop(error);}
+        disarmIdle();pending.set(id,request);signal?.addEventListener('abort',abort,{once:true});request.watch();
+        try{ensure().postMessage({id,type,data:{...data,directory}});if(signal?.aborted)abort();}catch(error){stop(error);}
       });
     }
     async function ingest(file,{signal,onProgress}={}){

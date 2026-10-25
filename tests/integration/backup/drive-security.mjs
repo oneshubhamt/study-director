@@ -1,135 +1,15 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import {webcrypto} from 'node:crypto';
-import {EXTERNAL_REPOSITORY_IDENTITIES} from '../../../contracts/canonical-identities.mjs';
-
-const driveSource=new URL('../../../source/external/drive.js',import.meta.url);
-const source=fs.readFileSync(driveSource,'utf8')
-  .replaceAll('@@SD_RELEASE@@','QA_FIXTURE').replaceAll('@@SD_RELEASE_ID@@','vb8')
-  .replaceAll('@@SD_GOOGLE_OAUTH_CLIENT_ID@@','306494096916-p48tjuv0ni01c11a0dp4ini9gp3dafdi.apps.googleusercontent.com')
-  .replaceAll('@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@',JSON.stringify(EXTERNAL_REPOSITORY_IDENTITIES));
-const digest=async blob=>Buffer.from(await webcrypto.subtle.digest('SHA-256',await blob.arrayBuffer())).toString('hex');
+import {createDriveHarness as createHarness,repositoryDigest as digest} from '../../helpers/drive-harness.mjs';
+import {createFakeClock} from '../../helpers/fake-clock.mjs';
 let folderVerificationMeasurement=null;
-function json(payload,status=200,headers={}){return new Response(JSON.stringify(payload),{status,headers:{'Content-Type':'application/json',...headers}});}
 async function waitFor(predicate,message){
   for(let attempt=0;attempt<100;attempt++){if(predicate())return;await new Promise(resolve=>setTimeout(resolve,0));}
   assert.fail(message);
 }
 
-function createHarness({expiresIn=3600,clock=null}={}){
-  const state={rangeMode:'valid',expiresIn,folders:[],files:new Map(),uploads:new Map(),requests:[],deletions:[],trashedFolders:new Set(),nextId:1,nextFolderId:1,nextVersion:1,scope:'https://www.googleapis.com/auth/drive.file',force401Once:false,evilUploadLocation:false,networkFailPutOnce:false,networkFailCoordinationPostOnce:false,networkFailCoordinationDeleteOnce:false,folderShared:false,folderCreateDenied:false,folderListGate:null,folderListStarted:0,uploadPutGate:null,uploadPutStarted:0};
-  const folderMetadata=(id='folder-1')=>({id,name:EXTERNAL_REPOSITORY_IDENTITIES.driveFolder,mimeType:'application/vnd.google-apps.folder',ownedByMe:true,shared:!!state.folderShared,trashed:state.trashedFolders.has(id),appProperties:{studyDirectorFolder:'true'},capabilities:{canAddChildren:true}});
-  const fileMetadata=file=>({id:file.id,name:file.name,size:String(file.content.size),version:String(file.version||''),modifiedTime:file.modifiedTime,createdTime:file.createdTime,mimeType:file.mimeType,parents:[...file.parents],ownedByMe:file.ownedByMe,shared:file.shared,trashed:file.trashed,sha256Checksum:String(file.sha256Checksum||''),appProperties:{...file.appProperties},capabilities:{canDownload:file.canDownload}});
-  const findId=pathname=>decodeURIComponent(pathname.split('/').at(-1));
-  async function mockFetch(input,options={}){
-    const url=new URL(String(input)),method=String(options.method||'GET').toUpperCase(),headers=new Headers(options.headers||{});
-    state.requests.push({url:url.href,method,authorization:headers.get('Authorization')||''});
-    assert.equal(url.origin,'https://www.googleapis.com','token-bearing requests must remain on the exact Google API origin');
-    assert.match(headers.get('Authorization')||'',/^Bearer token-/u);
-    const fault=state.jsonFault;
-    if(fault&&url.pathname==='/drive/v3/files'&&method==='GET'&&!String(url.searchParams.get('q')||'').includes("mimeType='application/vnd.google-apps.folder'")&&(fault.remaining===undefined||fault.remaining>0)){
-      if(fault.remaining!==undefined)fault.remaining--;
-      state.bodyRequests=(state.bodyRequests||0)+1;
-      const status=fault.status||200;
-      if(fault.mode==='invalid')return new Response('{truncated',{status,headers:{'Content-Type':'application/json'}});
-      if(fault.mode==='shape')return json(fault.payload,status);
-      if(fault.mode==='complete')return json(fault.payload,status);
-      let closed=false,abort;const body={signal:options.signal,aborted:false,cancelled:false,finish:null};(state.bodies??=[]).push(body);
-      const stream=new ReadableStream({
-        start(controller){
-          const close=()=>{if(closed)return;closed=true;options.signal?.removeEventListener('abort',abort);controller.enqueue(new TextEncoder().encode('{"files":[]}'));controller.close();};body.finish=close;
-          abort=()=>{body.aborted=true;if(closed)return;closed=true;options.signal?.removeEventListener('abort',abort);controller.error(Object.assign(new Error('QA_FIXTURE body aborted'),{name:'AbortError'}));};
-          options.signal?.addEventListener('abort',abort,{once:true});
-          if(fault.mode==='interrupted'){closed=true;options.signal?.removeEventListener('abort',abort);controller.error(new TypeError('QA_FIXTURE network body read interrupted'));}
-          else if(options.signal?.aborted)abort();
-        },
-        cancel(){body.cancelled=true;closed=true;options.signal?.removeEventListener('abort',abort);}
-      });
-      return new Response(stream,{status,headers:{'Content-Type':'application/json'}});
-    }
-    if(state.force401Once){state.force401Once=false;return json({error:{message:'expired token'}},401);}
-    if(url.pathname==='/drive/v3/files'&&method==='GET'){
-      const q=url.searchParams.get('q')||'';
-      if(q.includes("mimeType='application/vnd.google-apps.folder'")){state.folderListStarted+=1;if(state.folderListGate)await state.folderListGate;return json({files:state.folders.filter(id=>!state.trashedFolders.has(id)).map(folderMetadata)});}
-      let rows=[...state.files.values()].filter(file=>!file.trashed);
-      const kindMatch=q.match(/key='studyDirectorRepositoryKind' and value='([^']+)'/u),idMatch=q.match(/key='studyDirectorRepositoryId' and value='([^']+)'/u);
-      if(kindMatch)rows=rows.filter(file=>String(file.appProperties?.studyDirectorRepositoryKind||'')===kindMatch[1]);
-      if(idMatch)rows=rows.filter(file=>String(file.appProperties?.studyDirectorRepositoryId||'')===idMatch[1]);
-      const files=rows.map(fileMetadata).sort((a,b)=>String(b.createdTime).localeCompare(String(a.createdTime)));
-      return json({files:files.slice(0,Number(url.searchParams.get('pageSize'))||1000)});
-    }
-    if(url.pathname==='/drive/v3/files'&&method==='POST'){
-      if(state.folderCreateDenied)return json({error:{message:'folder creation denied'}},403);
-      const metadata=JSON.parse(String(options.body||'{}'));
-      if(metadata.mimeType==='application/vnd.google-apps.folder'){
-        const id=`folder-${state.nextFolderId++}`;state.folders.push(id);return json(folderMetadata(id));
-      }
-      const id=`repo-${state.nextId++}`,stamp=new Date().toISOString(),file={id,name:metadata.name,mimeType:metadata.mimeType||'application/octet-stream',parents:[...(metadata.parents||[])],appProperties:{...(metadata.appProperties||{})},content:new Blob([]),ownedByMe:true,shared:false,trashed:false,canDownload:true,version:state.nextVersion++,createdTime:stamp,modifiedTime:stamp};state.files.set(id,file);
-      if(state.networkFailCoordinationPostOnce&&['publication','maintenance'].includes(String(metadata.appProperties?.studyDirectorRepositoryKind||''))){state.networkFailCoordinationPostOnce=false;throw new TypeError('simulated ambiguous coordination create');}
-      return json(fileMetadata(file));
-    }
-    if(url.pathname==='/upload/drive/v3/files'&&method==='POST'){
-      const uploadType=String(url.searchParams.get('uploadType')||'');
-      if(uploadType==='multipart'){
-        if(state.networkFailPutOnce){state.networkFailPutOnce=false;throw new TypeError('simulated transient upload network loss');}
-        state.uploadPutStarted+=1;if(state.uploadPutGate)await state.uploadPutGate;
-        assert.ok(options.body instanceof Blob,'multipart upload body must be a Blob');
-        const contentType=String(headers.get('Content-Type')||''),boundary=contentType.match(/boundary=([^;]+)/u)?.[1];assert.ok(boundary,'multipart upload must declare a boundary');
-        const bodyText=await options.body.text(),parts=bodyText.split(`--${boundary}`);assert.ok(parts.length>=4,'multipart upload must contain metadata and binary parts');
-        const metadataPart=parts[1],binaryPart=parts[2],metadata=JSON.parse(metadataPart.slice(metadataPart.indexOf('\r\n\r\n')+4).trim());
-        const binaryStart=binaryPart.indexOf('\r\n\r\n')+4,binaryText=binaryPart.slice(binaryStart).replace(/\r\n$/u,''),content=new Blob([binaryText]),id=`repo-${state.nextId++}`,stamp=new Date(Date.UTC(2026,0,1,0,0,state.files.size)).toISOString();
-        const file={id,name:metadata.name,mimeType:metadata.mimeType||'application/octet-stream',parents:[...(metadata.parents||[])],appProperties:{...(metadata.appProperties||{})},content,sha256Checksum:await digest(content),ownedByMe:true,shared:false,trashed:false,canDownload:true,version:state.nextVersion++,createdTime:stamp,modifiedTime:stamp};state.files.set(id,file);return json(fileMetadata(file));
-      }
-      const metadata=JSON.parse(String(options.body||'{}')),uploadId=`upload-${state.nextId++}`,id=`repo-${state.nextId++}`;
-      state.uploads.set(uploadId,{id,metadata});
-      const location=state.evilUploadLocation?'https://attacker.example/upload?upload_id=stolen':`https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=${uploadId}`;
-      state.evilUploadLocation=false;return json({},200,{Location:location});
-    }
-    if(url.pathname==='/upload/drive/v3/files'&&method==='PUT'){
-      const uploadId=url.searchParams.get('upload_id'),pending=state.uploads.get(uploadId);assert.ok(pending,'upload session must exist');
-      const range=String(headers.get('Content-Range')||'');
-      if(range.startsWith('bytes */')){
-        const complete=state.files.get(pending.id);if(complete)return json(fileMetadata(complete),200);
-        const received=Math.max(0,Number(pending.received)||0);return new Response(null,{status:308,headers:received?{'Range':`bytes=0-${received-1}`}:{}});
-      }
-      if(state.networkFailPutOnce){state.networkFailPutOnce=false;throw new TypeError('simulated transient upload network loss');}
-      state.uploadPutStarted+=1;if(state.uploadPutGate)await state.uploadPutGate;
-      const match=range.match(/^bytes (\d+)-(\d+)\/(\d+)$/u);assert.ok(match,'resumable PUT must declare a valid byte range');const start=Number(match[1]),end=Number(match[2]),total=Number(match[3]);assert.equal(start,Math.max(0,Number(pending.received)||0),'resumable chunks must continue from the confirmed server offset');
-      const chunk=options.body instanceof Blob?options.body:new Blob([options.body||'']);assert.equal(chunk.size,end-start+1);pending.parts=pending.parts||[];pending.parts.push(chunk);pending.received=end+1;
-      if(pending.received<total)return new Response(null,{status:308,headers:{'Range':`bytes=0-${end}`}});
-      const content=new Blob(pending.parts),stamp=new Date(Date.UTC(2026,0,1,0,0,state.files.size)).toISOString(),file={id:pending.id,name:pending.metadata.name,mimeType:pending.metadata.mimeType,parents:[...pending.metadata.parents],appProperties:{...pending.metadata.appProperties},content,sha256Checksum:await digest(content),ownedByMe:true,shared:false,trashed:false,canDownload:true,version:state.nextVersion++,createdTime:stamp,modifiedTime:stamp};state.files.set(pending.id,file);return json(fileMetadata(file),200);
-    }
-    if(url.pathname.startsWith('/drive/v3/files/')&&method==='GET'){
-      const id=findId(url.pathname);
-      if(state.folders.includes(id)&&url.searchParams.get('alt')!=='media')return json(folderMetadata(id));
-      const file=state.files.get(id);if(!file)return json({error:{message:'not found'}},404);
-      if(url.searchParams.get('alt')==='media'){
-        const range=headers.get('Range');if(range&&state.rangeMode!=='ignored'){
-          const match=/^bytes=(\d+)-(\d+)$/u.exec(range),start=Number(match[1]),end=Number(match[2]);let content=file.content.slice(start,end+1);if(state.rangeMode==='truncated')content=content.slice(0,-1);
-          return new Response(content,{status:206,headers:{'Content-Range':state.rangeMode==='wrong-range'?`bytes 1-2/${file.content.size}`:`bytes ${start}-${end}/${file.content.size}`}});
-        }
-        return new Response(file.content,{status:200,headers:{'Content-Length':String(file.content.size),'Content-Type':file.mimeType}});
-      }
-      return json(fileMetadata(file));
-    }
-    if(url.pathname.startsWith('/drive/v3/files/')&&method==='DELETE'){
-      const id=findId(url.pathname),file=state.files.get(id),kind=String(file?.appProperties?.studyDirectorRepositoryKind||'');
-      if(state.networkFailCoordinationDeleteOnce&&['publication','maintenance'].includes(kind)){state.networkFailCoordinationDeleteOnce=false;throw new TypeError('simulated ambiguous coordination delete');}
-      state.deletions.push(id);state.files.delete(id);return new Response(null,{status:204});
-    }
-    throw new Error(`unhandled Drive request ${method} ${url.href}`);
-  }
-  let provider=null;const scripts=[];
-  const document={scripts,head:{appendChild(node){scripts.push(node);queueMicrotask(()=>node.onload&&node.onload());return node;}},body:{appendChild(){return null;}},createElement(tag){return {tagName:String(tag).toUpperCase(),remove(){},setAttribute(){},appendChild(){},style:{},src:'',async:false,defer:false,onload:null,onerror:null};},getElementById(){return null;}};
-  const oauth={hasGrantedAllScopes(response,scope){return String(response.scope||'').split(/\s+/).includes(scope);},initTokenClient(config){return {requestAccessToken(){queueMicrotask(()=>config.callback({access_token:`token-${state.requests.length+1}`,expires_in:state.expiresIn,token_type:'Bearer',scope:state.scope}));}};},revoke(token,callback){queueMicrotask(()=>callback({successful:true}));}};
-  state.releasedDownloads=0;
-  const api={capabilities:{pluginApi:1,backupController:1,backupProviders:1},backup:{repositoryPolicy:Object.freeze({publicationMaxAgeMs:24*60*60*1000,publicationAssertionMarginMs:30*60*1000,maintenanceWorkBudgetMs:30*1000,maintenanceReleaseGraceMs:30*1000,maintenanceMaxAgeMs:60*1000,maintenanceAssertionMarginMs:30*1000,objectGcGraceMs:48*60*60*1000}),receiveStream:async(stream,size,options={})=>{if(options.signal?.aborted)throw new Error('cancelled');const blob=await new Response(stream).blob();assert.equal(blob.size,size);options.onProgress?.({phase:'downloading',loaded:blob.size,total:size});return blob;},releaseFile:async()=>{state.releasedDownloads+=1;},limits:{maxFileBytes:20*1024*1024},providers:{register(config){provider=config;return true;}}}};
-  const harnessSetTimeout=(fn,ms,...args)=>{if(clock)return clock.setTimeout(()=>fn(...args),ms);const timer=setTimeout(fn,ms,...args);if(Number(ms)>5000)timer.unref?.();return timer;};
-  const harnessClearTimeout=id=>clock?clock.clearTimeout(id):clearTimeout(id);
-  const context=vm.createContext({console,setTimeout:harnessSetTimeout,clearTimeout:harnessClearTimeout,queueMicrotask,Blob,Headers,Response,ReadableStream,TextEncoder,URL,URLSearchParams,Uint8Array,AbortController,crypto:webcrypto,fetch:mockFetch,document,Event:class Event{constructor(type){this.type=type;}},CustomEvent:class CustomEvent{},addEventListener(){},removeEventListener(){},dispatchEvent(){},google:{accounts:{oauth2:oauth}},StudyDirector:{registerPlugin(descriptor){return descriptor.setup(api);}}});
-  context.window=context;context.globalThis=context;vm.runInContext(source,context,{filename:'source/external/drive.js'});assert.ok(provider,'Drive provider must register');return {state,provider,context};
-}
+
 
 
 {
@@ -145,7 +25,42 @@ function createHarness({expiresIn=3600,clock=null}={}){
   await new Promise(resolve=>setTimeout(resolve,1100));assert.equal(provider.connected(),false,'Drive connected state must expire without requiring a user action');assert.equal(changes,2,'scheduled OAuth expiry must notify provider UI so stale Backup/Versions/Settings controls disappear');
 }
 
+// The sign-in lasts across a reload until it expires: it is kept in this
+// browser's storage, forgotten on expiry, rejection and disconnect, and
+// picked up by other tabs.
+{
+  const KEY='studyDirector.driveSession.v1',rows=new Map(),storage={getItem:key=>rows.has(key)?rows.get(key):null,setItem:(key,value)=>{rows.set(key,String(value));},removeItem:key=>{rows.delete(key);}};
+  const first=createHarness({localStorage:storage});await first.provider.prepare();await first.provider.authorize();
+  const saved=JSON.parse(rows.get(KEY));assert.match(saved.token,/^token-/u);assert.ok(saved.expiresAt>Date.now()&&saved.expiresAt<=Date.now()+3600000);assert.deepEqual(Object.keys(saved).sort(),['expiresAt','token'],'only the token and its expiry are kept');
+  const reloaded=createHarness({localStorage:storage});assert.equal(reloaded.provider.connected(),true,'a reload keeps the Drive sign-in for the rest of its hour');assert.equal(reloaded.provider.connectionExpiresAt(),saved.expiresAt);
+  await reloaded.provider.repository.list({kind:'object'});assert.equal(reloaded.state.requests.at(-1).authorization,'Bearer '+saved.token,'the kept sign-in is used without asking again');
+  reloaded.state.force401Once=true;await assert.rejects(()=>reloaded.provider.repository.list({kind:'object'}),/authorization expired/u);assert.equal(rows.has(KEY),false,'a sign-in Google rejects is forgotten');
+  rows.set(KEY,JSON.stringify({token:'token-old',expiresAt:Date.now()-1000}));assert.equal(createHarness({localStorage:storage}).provider.connected(),false);assert.equal(rows.has(KEY),false,'an expired sign-in is removed, not used');
+  rows.set(KEY,JSON.stringify({token:'token-far',expiresAt:Date.now()+86400000}));assert.equal(createHarness({localStorage:storage}).provider.connected(),false,'a sign-in claiming to last a day is not trusted');
+  rows.set(KEY,'{broken');assert.equal(createHarness({localStorage:storage}).provider.connected(),false);assert.equal(rows.has(KEY),false);
+  const listeners=[],tab=createHarness({localStorage:storage,addEventListener:(type,listener)=>{if(type==='storage')listeners.push(listener);}});assert.equal(tab.provider.connected(),false);
+  const signer=createHarness({localStorage:storage});await signer.provider.prepare();await signer.provider.authorize();const value=rows.get(KEY);
+  for(const listener of listeners)listener({key:KEY,newValue:value,oldValue:null});assert.equal(tab.provider.connected(),true,'another tab picks up a new sign-in');
+  await signer.provider.disconnect();assert.equal(rows.has(KEY),false,'disconnect forgets the sign-in');
+  for(const listener of listeners)listener({key:KEY,newValue:null,oldValue:value});assert.equal(tab.provider.connected(),false,'disconnecting in one tab signs out the others');
+  const plain=createHarness();await plain.provider.prepare();await plain.provider.authorize();assert.equal(plain.provider.connected(),true,'without browser storage Drive still signs in');
+}
+
 const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSource=async()=>{})=>{const blob=new Blob([text],{type:'application/octet-stream'});return {kind,id,name:id+(kind==='object'?'.sdobject':kind==='commit'?'.sdcommit':'.sdcheckpoint'),blob,size:blob.size,digest:await digest(blob),exportedAt:'2026-09-19T00:00:00.000Z',appVersion:'QA_FIXTURE',checkProtection,checkSource};};
+
+// Complete history discovery is independent of retention capacity. Page work
+// stays bounded, while incomplete searches and repeated tokens cannot certify it.
+{
+ const {state,provider}=createHarness();await provider.prepare();await provider.authorize();state.pageSizes={checkpoint:1,commit:1};
+ for(const kind of ['checkpoint','commit']){
+  const seed=await provider.repository.upload(await makeRepositoryFile(kind,'cp_'+(9000).toString(16).padStart(32,'0'),'inventory transport proof')),template=state.files.get(seed.remoteId);
+  for(let index=1;index<110;index++){const id='cp_'+(9000+index).toString(16).padStart(32,'0'),remoteId=kind+'-page-'+index;state.files.set(remoteId,{...template,id:remoteId,name:id+(kind==='commit'?'.sdcommit':'.sdcheckpoint'),appProperties:{...template.appProperties,studyDirectorRepositoryId:id}});}
+  const inventory=await provider.repository.list({kind});assert.equal(inventory.items.length,110);assert.equal(inventory.overflow,false,'a healthy finite history must cross both former inventory bounds');
+ }
+ state.incompleteSearchKinds=new Set(['checkpoint']);const incomplete=await provider.repository.list({kind:'checkpoint'});assert.equal(incomplete.overflow,true);assert.equal(incomplete.items.length,0,'an explicitly incomplete Drive search cannot become a complete inventory');
+ state.incompleteSearchKinds.clear();state.repeatPageKinds=new Set(['checkpoint']);await assert.rejects(()=>provider.repository.list({kind:'checkpoint'}),/repeated a backup inventory page/u);
+ assert.equal(state.deletions.length,0);await provider.disconnect();
+}
 
 {
  const {state,provider}=createHarness();await provider.prepare();await provider.authorize();const original=await makeRepositoryFile('object','obj_'+'f'.repeat(32),'ranged repository bytes'),ref=await provider.repository.upload(original);
@@ -179,7 +94,7 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   await assert.rejects(()=>provider.repository.delete({...uploaded,digest:'f'.repeat(64)}),/changed before deletion/u);assert.equal(state.deletions.length,0,'digest mismatch must fail closed before deletion');
   remote.version=Number(uploaded.remoteVersion)+1;await assert.rejects(()=>provider.repository.delete(uploaded),/changed version before deletion/u);assert.equal(state.deletions.length,0,'remote-version mismatch must fail closed before deletion even when digest metadata is unchanged');remote.version=Number(uploaded.remoteVersion);
   assert.equal(await provider.repository.delete(uploaded),true);assert.equal((await provider.repository.list({kind:'object'})).items.length,0);
-  const historyCheckpointId='cp_'+'b'.repeat(32),historyCheckpoint={...(await makeRepositoryFile('checkpoint',historyCheckpointId,'history-metadata-proof')),historySummary:{logicalFingerprint:'c'.repeat(64),counts:{dailyRecord:4,areaNote:3},encrypted:false,retention:{role:'normal',protectedUntil:'',calendar:{localDate:'2026-09-19',weekStart:'2026-09-14',month:'2026-09',utcOffsetMinutes:0}}}},uploadedHistoryCheckpoint=await provider.repository.upload(historyCheckpoint),listedHistoryCheckpoints=await provider.repository.list({kind:'checkpoint'});assert.equal(listedHistoryCheckpoints.items.length,1);assert.deepEqual(JSON.parse(JSON.stringify(listedHistoryCheckpoints.items[0].history.retention.calendar)),{localDate:'2026-09-19',weekStart:'2026-09-14',month:'2026-09',utcOffsetMinutes:0},'Drive checkpoint metadata must round-trip the retention calendar so history can be tiered without downloading manifests');assert.equal(await provider.repository.delete(uploadedHistoryCheckpoint),true);
+  const historyCheckpointId='cp_'+'b'.repeat(32),historyCheckpoint={...(await makeRepositoryFile('checkpoint',historyCheckpointId,'history-metadata-proof')),historySummary:{logicalFingerprint:'c'.repeat(64),counts:{dailyRecord:4,note:3},encrypted:false,retention:{role:'normal',protectedUntil:'',calendar:{localDate:'2026-09-19',weekStart:'2026-09-14',month:'2026-09',utcOffsetMinutes:0}}}},uploadedHistoryCheckpoint=await provider.repository.upload(historyCheckpoint),listedHistoryCheckpoints=await provider.repository.list({kind:'checkpoint'});assert.equal(listedHistoryCheckpoints.items.length,1);assert.deepEqual(JSON.parse(JSON.stringify(listedHistoryCheckpoints.items[0].history.retention.calendar)),{localDate:'2026-09-19',weekStart:'2026-09-14',month:'2026-09',utcOffsetMinutes:0},'Drive checkpoint metadata must round-trip the retention calendar so history can be tiered without downloading manifests');assert.equal(await provider.repository.delete(uploadedHistoryCheckpoint),true);
   const checkpointId='cp_'+'9'.repeat(32),commit=await makeRepositoryFile('commit',checkpointId,JSON.stringify({format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt:'2026-09-19T00:00:00.000Z',sourceRevision:'2026-09-19T00:00:00.000Z',manifestVersion:2})),uploadedCommit=await provider.repository.upload(commit);assert.equal(uploadedCommit.kind,'commit');assert.equal(uploadedCommit.name,checkpointId+'.sdcommit');const listedCommits=await provider.repository.list({kind:'commit'});assert.equal(listedCommits.items.length,1);assert.equal(listedCommits.items[0].id,checkpointId);const downloadedCommit=await provider.repository.download(uploadedCommit);assert.equal(JSON.parse(await downloadedCommit.blob.text()).checkpointId,checkpointId);await downloadedCommit.release();assert.equal(await provider.repository.delete(uploadedCommit),true);assert.equal((await provider.repository.list({kind:'commit'})).items.length,0,'Drive commit markers must use the same exact-identity transport lifecycle as manifests and objects');
   assert.ok(state.requests.filter(request=>request.authorization).every(request=>request.authorization.startsWith('Bearer token-')));
 }
@@ -200,7 +115,7 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
 {
   const {state,provider}=createHarness();await provider.prepare();state.scope='https://www.googleapis.com/auth/drive.file';await provider.authorize();
   await provider.repository.list({kind:'object'});
-  const folderVerificationCount=()=>state.requests.filter(request=>{if(request.method!=='GET')return false;const url=new URL(request.url);return url.pathname==='/drive/v3/files/folder-1'||url.pathname==='/drive/v3/files'&&String(url.searchParams.get('q')||'').includes("mimeType='application/vnd.google-apps.folder'");}).length;
+  const folderVerificationCount=()=>state.requests.filter(request=>{if(request.method!=='GET')return false;const url=new URL(request.url);const q=String(url.searchParams.get('q')||'');return url.pathname==='/drive/v3/files/folder-1'||url.pathname==='/drive/v3/files'&&q.includes("mimeType='application/vnd.google-apps.folder'")&&!q.includes('studyDirectorDeletedProfile');}).length;
   const directBefore=folderVerificationCount();
   await provider.repository.list({kind:'checkpoint'});await provider.repository.list({kind:'commit'});await provider.repository.list({kind:'object'});
   const directChecks=folderVerificationCount()-directBefore;assert.equal(directChecks,3,'independent Drive operations must retain fresh folder verification');
@@ -316,14 +231,67 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
 }
 
 {
+  // An upload marker names the device it comes from, so a device never waits
+  // its turn for a marker an earlier page of its own left behind.
+  let device='inst_qa_laptop_mve00000_aaaaaaaa';const {state,provider}=createHarness({device:()=>device});await provider.prepare();await provider.authorize();
+  const mine=await provider.repository.beginPublication();device='inst_qa_phone_mve00000_bbbbbbbb';const theirs=await provider.repository.beginPublication();
+  const older=[...state.files.values()].find(file=>file.appProperties.studyDirectorRepositoryId===theirs.id);const legacy={...older,id:'repo-legacy-marker',appProperties:{...older.appProperties,studyDirectorRepositoryId:'pub_'+'c'.repeat(32)}};delete legacy.appProperties.sdPublicationDevice;legacy.name='pub_'+'c'.repeat(32)+older.name.slice(older.name.indexOf('.'));state.files.set(legacy.id,legacy);
+  device='inst_qa_laptop_mve00000_aaaaaaaa';const listed=new Map((await provider.repository.listPublications()).items.map(row=>[row.id,row.sameDevice]));
+  assert.equal(listed.get(mine.id),true,'a marker this device started reads as its own');assert.equal(listed.get(theirs.id),false,'another device\'s marker does not');assert.equal(listed.get('pub_'+'c'.repeat(32)),false,'a marker from an older build, with no device, counts as another device\'s');
+  device='';assert.equal((await provider.repository.listPublications()).items.every(row=>row.sameDevice===false),true,'without a known device nothing reads as its own');
+}
+
+{
   const {state,provider}=createHarness();await provider.prepare();await provider.authorize();
   const operation=provider.repository.beginOperation();state.networkFailCoordinationPostOnce=true;const marker=await operation.beginMaintenance();assert.match(marker.id,/^mnt_[a-f0-9]{32}$/u);assert.equal(marker.kind,'maintenance');assert.equal([...state.files.values()].filter(file=>file.appProperties.studyDirectorRepositoryKind==='maintenance').length,1,'ambiguous maintenance creation must recover the exact pre-generated marker instead of creating a duplicate');
   let active=await operation.listMaintenances();assert.equal(active.items.length,1,'a live Drive maintenance marker must be visible to publication coordination');assert.equal(active.ignored,0);
   const verified=await operation.assertMaintenance(marker);assert.equal(verified.id,marker.id,'destructive maintenance must be able to reverify its provider-visible protection');
-  const markerFile=state.files.get(marker.remoteId);markerFile.createdTime=new Date(Date.now()-31*1000).toISOString();markerFile.modifiedTime=markerFile.createdTime;await assert.rejects(()=>operation.assertMaintenance(marker),/too old/u,'Drive maintenance protection must stop authorizing destructive work once the bounded 30-second maintenance budget has elapsed');markerFile.createdTime=marker.createdAt;markerFile.modifiedTime=marker.createdAt;
+  const markerFile=state.files.get(marker.remoteId);assert.equal(markerFile.appProperties.studyDirectorRepositoryVersion,'2','the longer network lease must not be mistaken for the legacy 60-second marker');
+  const maxAge=Date.parse(marker.expiresAt)-Date.parse(marker.createdAt);assert.equal(maxAge,300000);
+  markerFile.createdTime=new Date(Date.now()-31*1000).toISOString();await operation.assertMaintenance(marker);
+  markerFile.createdTime=new Date(Date.now()-(maxAge-75000)).toISOString();await assert.rejects(()=>operation.assertMaintenance(marker),/too old/u,'network protection must retain room for a bounded request and release');
+  markerFile.appProperties.studyDirectorRepositoryVersion='1';markerFile.createdTime=new Date(Date.now()-31*1000).toISOString();await assert.rejects(()=>operation.assertMaintenance(marker),/too old/u,'legacy markers retain their original assertion and expiry semantics');
+  markerFile.createdTime=marker.createdAt;assert.equal(Date.parse((await operation.listMaintenances()).items[0].expiresAt)-Date.parse(marker.createdAt),60000);
+  markerFile.appProperties.studyDirectorRepositoryVersion='3';const unknown=await operation.listMaintenances();assert.equal(unknown.items.length,0);assert.equal(unknown.ignored,1,'unrecognized marker protocols remain uncertainty, which blocks coordinated writers and cleanup');
+  markerFile.appProperties.studyDirectorRepositoryVersion='2';markerFile.createdTime=marker.createdAt;markerFile.modifiedTime=marker.createdAt;
   const maintenanceReleaseStart=state.requests.length;state.networkFailCoordinationDeleteOnce=true;assert.equal(await operation.endMaintenance(marker),true);const maintenanceReleaseRequests=state.requests.slice(maintenanceReleaseStart).map(request=>({method:request.method,url:new URL(request.url)}));assert.equal(maintenanceReleaseRequests.some(request=>request.method==='GET'&&request.url.pathname===`/drive/v3/files/${marker.remoteId}`),false,'known verified maintenance release must DELETE directly instead of paying for a redundant metadata GET');active=await operation.listMaintenances();assert.equal(active.items.length,0,'ambiguous maintenance deletion must recheck exact identity and retry until the marker is confirmed absent');
   await assert.rejects(()=>operation.assertMaintenance(marker),/disappeared during cleanup/u,'maintenance whose provider-visible protection disappeared must fail closed before more deletion');
   assert.equal([...state.files.values()].some(file=>file.appProperties.studyDirectorRepositoryKind==='maintenance'),false,'maintenance markers must not leak into repository history after release');
+}
+
+// Renewal preserves exclusion across immutable-marker rotation, including
+// ambiguous transport outcomes, and rejects missing/expired/foreign protection.
+for(const failure of ['none','legacy','missing','expired','unreadable-age','foreign']){
+ const clock=createFakeClock('2026-10-03T12:00:00.000Z'),h=createHarness({clock});await h.provider.prepare();await h.provider.authorize();
+ const operation=h.provider.repository.beginOperation(),marker=await operation.beginMaintenance();
+ if(failure==='missing')h.state.files.delete(marker.remoteId);
+ if(failure==='expired')await clock.advance(Date.parse(marker.expiresAt)-clock.now()+1000);
+ if(failure==='legacy')h.state.files.get(marker.remoteId).appProperties.studyDirectorRepositoryVersion='1';
+ if(failure==='unreadable-age')h.state.files.get(marker.remoteId).createdTime='unreadable';
+ if(failure==='foreign')h.state.files.get(marker.remoteId).parents=['foreign-folder'];
+ if(failure==='none'||failure==='legacy'){
+  await clock.advance(failure==='legacy'?10000:40000);h.state.networkFailCoordinationPostOnce=true;h.state.networkFailCoordinationDeleteOnce=true;
+  const next=await operation.renewMaintenance(marker);assert.notEqual(next.id,marker.id);assert.equal(h.state.files.has(marker.remoteId),false);
+  assert.equal((await operation.listMaintenances()).items.length,1);assert.equal(h.state.files.get(next.remoteId).appProperties.studyDirectorRepositoryVersion,'2');await operation.assertMaintenance(next);await operation.endMaintenance(next);
+ }else{
+  await assert.rejects(operation.renewMaintenance(marker),/interrupted|fresh inventory/u);
+  assert.equal([...h.state.files.values()].filter(file=>file.appProperties.studyDirectorRepositoryKind==='maintenance').length,failure==='missing'?0:1,'failed renewal removes only its new candidate marker');
+ }
+ assert.equal(h.state.requests.some(request=>request.method==='PATCH'),false,'renewal retains immutable metadata and the existing endpoint policy');
+ await h.provider.disconnect();assert.equal(clock.pending(),0);
+}
+
+// Cancellation releases only coordination artifacts, using the same verified
+// operation scope. Invalidating that scope still forces a fresh folder check.
+for(const invalidate of [false,true]){
+ const h=createHarness(),controller=new AbortController();await h.provider.prepare();await h.provider.authorize();
+ const operation=h.provider.repository.beginOperation({signal:controller.signal}),marker=await operation.beginMaintenance();
+ if(invalidate){h.state.trashedFolders.add('folder-1');await h.provider.repository.scope();}
+ const start=h.state.requests.length;controller.abort();await operation.endMaintenance(marker);
+ const metadataReads=h.state.requests.slice(start).filter(request=>request.method==='GET');
+ if(invalidate){assert.ok(metadataReads.length);assert.ok(h.state.files.has(marker.remoteId),'release cannot delete an old-folder marker after repository identity changes');}
+ else{assert.equal(metadataReads.length,0,'known marker release must not rediscover its already verified folder after cancellation');assert.equal(h.state.files.has(marker.remoteId),false);}
+ await h.provider.disconnect();
 }
 
 // Exercise actual response streams after headers, not only pending fetch calls.
@@ -383,4 +351,116 @@ for(const fault of [{mode:'interrupted'},{mode:'invalid'},{mode:'shape',payload:
  await h.provider.release();assert.deepEqual(h.clock.pending(),[]);bodyContractCases.push('401 invalidates authorization without waiting for unused body');
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'drive-repository-security',bodyContractCases,folderVerificationMeasurement,transportOnly:true,commitMarkerTransport:true,legacyWholeBlobRetired:true,driveFileScopeOnly:true,endpointConfined:true,tinyMultipartUpload:true,largeResumableUpload:true,opaqueMarkers:true,boundedStreamingDownload:true,coldFolderSingleFlight:true,coldFolderFailureRetry:true,folderAmbiguityRejected:true,policyBoundaryFailClosed:true,duplicateIdentityFailClosed:true,sourceFenceThroughUpload:true,parallelCancellationIsolated:true,parallelSourceFenceIsolated:true,parallelProtectionFenceIsolated:true,folderVerificationCoalesced:true,folderReceiptInvalidation:true,exactDeletion:true,temporaryDownloadRelease:true,publicationProtectionLifecycle:true,maintenanceProtectionLifecycle:true,externalRepositoryDeletionSelfHeals:true,trashedRepositorySelfHeals:true,boundedMaintenanceLease:true},null,2));
+const productiveTransferCases=[];
+async function settleTransfer(task,clock,state,limitMs=2000000){
+ let outcome;task.then(value=>{outcome={ok:true,value};},error=>{outcome={ok:false,error};});
+ const started=clock.now(),wallStarted=performance.now();
+ while(!outcome&&clock.now()-started<limitMs&&performance.now()-wallStarted<10000){await new Promise(resolve=>setImmediate(resolve));if(!outcome&&!state.nativeUploadReplies)await clock.advance(1000);}
+ assert.ok(outcome,'transfer must settle within its productive or stalled bound');return outcome;
+}
+for(const chunkDelay of [9000,35000,90000]){
+ const clock=createFakeClock(),h=createHarness({clock});await h.provider.prepare();await h.provider.authorize();
+ const file=await makeRepositoryFile('object','obj_'+'c'.repeat(32),'x'.repeat(1048576)),ref=await h.provider.repository.upload(file);
+ h.state.rangeChunkDelayMs=chunkDelay;const read=await settleTransfer(h.provider.repository.download(ref,{offset:0,length:1048576}),clock,h.state);
+ assert.equal(read.ok,true,read.error?.message);assert.equal(await digest(read.value.blob),file.digest);assert.equal(h.state.rangeTransfers[0].loaded,file.size);
+ await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push('verified range completes with '+chunkDelay+'ms between chunks');
+}
+for(const mode of ['no-bytes','empty-progress']){
+ const clock=createFakeClock(),h=createHarness({clock});await h.provider.prepare();await h.provider.authorize();
+ const ref=await h.provider.repository.upload(await makeRepositoryFile('object','obj_'+'d'.repeat(32),'x'.repeat(1048576)));
+ h.state.rangeChunkDelayMs=mode==='no-bytes'?150000:30000;h.state.rangeMode=mode==='empty-progress'?mode:'valid';const started=clock.now();
+ const read=await settleTransfer(h.provider.repository.download(ref,{offset:0,length:1048576}),clock,h.state);
+ assert.equal(read.ok,false);assert.match(read.error.message,/timed out/u);assert.ok(clock.now()-started<=122000);assert.equal(h.state.rangeTransfers[0].loaded,0);assert.equal(h.state.rangeTransfers[0].cancelled,true);
+ await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push(mode+' does not renew the stalled download watchdog');
+}
+for(const size of [4096,5*1048576+1]){
+ const clock=createFakeClock(),h=createHarness({clock});await h.provider.prepare();await h.provider.authorize();
+ h.state.uploadProgressSteps=4;h.state.uploadProgressStepMs=90000;const file=await makeRepositoryFile('object','obj_'+size.toString(16).padStart(32,'0'),'u'.repeat(size));
+ const started=clock.now(),upload=await settleTransfer(h.provider.repository.upload(file),clock,h.state);
+ assert.equal(upload.ok,true,upload.error?.message);assert.equal(upload.value.serverDigest,file.digest);assert.ok(clock.now()-started>=360000);assert.ok(h.state.uploadProgressStarted>0);assert.equal(h.state.uploadAborts||0,0);
+ await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push('byte-progress watchdog permits slow '+(size>5000000?'resumable':'multipart')+' upload');
+}
+for(const repeated of [false,true]){
+ const clock=createFakeClock(),h=createHarness({clock});await h.provider.prepare();await h.provider.authorize();
+ h.state.uploadProgressSteps=10;h.state.uploadProgressStepMs=repeated?30000:150000;h.state.uploadRepeatProgress=repeated;
+ const file=await makeRepositoryFile('object','obj_'+'e'.repeat(32),'x'.repeat(4096)),result=await settleTransfer(h.provider.repository.upload(file),clock,h.state);
+ assert.equal(result.ok,false);assert.match(result.error.message,/timed out/u);assert.ok(h.state.uploadAborts>0);assert.equal(h.state.files.size,0,'stalled uploads cannot publish a verified immutable object');
+ await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push((repeated?'repeated':'absent')+' upload progress remains bounded');
+}
+for(const direction of ['upload','download']){
+ const clock=createFakeClock(),h=createHarness({clock});h.clock=clock;await h.provider.prepare();await h.provider.authorize();
+ const file=await makeRepositoryFile('object','obj_'+'a'.repeat(32),'x'.repeat(1048576)),ref=direction==='download'?await h.provider.repository.upload(file):null;
+ const bg=repositoryBackground(h),scope=await bg.beginBackground(direction==='upload'?'convergence':'integrity');
+ h.state.rangeChunkDelayMs=90000;h.state.uploadProgressSteps=4;h.state.uploadProgressStepMs=90000;
+ const task=(direction==='upload'?h.provider.repository.upload(file,{signal:scope.signal}):h.provider.repository.download(ref,{offset:0,length:file.size,signal:scope.signal})).finally(()=>scope.release());
+ const rejected=assert.rejects(task,{name:'AbortError'});
+ await waitFor(()=>direction==='upload'?h.state.uploadProgressStarted>0:h.state.rangeTransfers?.length>0,'transfer must start before foreground preemption');
+ const foreground=bg.beginForeground();await rejected;await foreground.settled;assert.equal(bg.status().active.length,0);foreground.release();
+ if(direction==='upload')assert.equal(h.state.files.size,0);else assert.equal(h.state.rangeTransfers[0].cancelled,true);
+ await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push('foreground cancels a slow '+direction+' and waits for actual release');
+}
+{
+ const h=createHarness({uploadProgressTransport:false});await h.provider.prepare();await h.provider.authorize();
+ const file=await makeRepositoryFile('object','obj_'+'b'.repeat(32),'fetch-only receipt proof');const uploaded=await h.provider.repository.upload(file);
+ assert.equal(uploaded.serverDigest,file.digest);await h.provider.disconnect();productiveTransferCases.push('fetch-only capability fallback retains immutable server receipt validation');
+}
+// Retained upload progress is a server-acknowledged prefix, never a guessed
+// client byte count. Exercise the production adapter and lifecycle together.
+const resumableUploadCases=[];
+async function settleUpload(task,h){
+ let result;task.then(value=>{result={ok:true,value};},error=>{result={ok:false,error};});
+ const started=h.clock.now();
+ while(!result&&h.clock.now()-started<4*3600000){await new Promise(resolve=>setImmediate(resolve));if(!result&&!h.state.nativeUploadReplies)await h.clock.advance(1000);}
+ assert.ok(result,'productive upload must settle within the simulated authorization windows');return result;
+}
+for(const bytes of [6*1048576,18*1048576]){
+ const clock=createFakeClock(),h=createHarness({clock});h.clock=clock;await h.provider.prepare();
+ const bg=repositoryBackground(h),file=await makeRepositoryFile('object','obj_'+'d'.repeat(32),new Blob([new Uint8Array(bytes)]));let outcome;
+ const job=bg.registerJob('convergence',{initialDelayMs:null,discover:false,isAvailable:()=>h.provider.backgroundAvailable()?true:'awaiting-connection',capture:error=>{throw error;},execute:async()=>{
+  const scope=await bg.beginBackground('convergence');assert.ok(scope);try{outcome=await settleUpload(h.provider.repository.upload(file,{signal:scope.signal}),h);return {status:outcome.ok?'completed':'interrupted',pending:!outcome.ok};}finally{scope.release();}
+ }});
+ const unsubscribe=h.provider.subscribeConnection(()=>bg.wake('connection'));h.state.uploadProgressSteps=14;h.state.uploadProgressStepMs=90000;
+ let previous=0,attempts=0;
+ for(;attempts<8;){await h.provider.authorize();attempts++;const start=h.state.requests.length;await job.run('reauthorized');
+  const session=[...h.state.uploads.values()][0];assert.ok(session);const acknowledged=session.received||0;assert.ok(acknowledged>previous,'every ordinary authorization window must advance a confirmed prefix');
+  for(const request of h.state.requests.slice(start)){const match=request.contentRange.match(/^bytes (\d+)-/u);if(match)assert.ok(Number(match[1])>=previous,'a confirmed prefix must never be retransmitted after reconnection');}
+  assert.equal(h.state.uploads.size,1,'reauthorization must retain one session for the same immutable payload');assert.equal(bg.status().active.length,0);
+  previous=acknowledged;if(outcome.ok)break;assert.equal(h.provider.connected(),false);assert.equal(h.state.files.size,0,'partial progress is not a completed repository object');
+ }
+ assert.equal(outcome.ok,true,outcome.error?.message);assert.equal(previous,bytes);assert.equal(outcome.value.serverDigest,file.digest);assert.equal(h.state.files.size,1);assert.ok(attempts>=2);
+ unsubscribe();bg.clearAllScheduled();await h.provider.disconnect();assert.equal(clock.pending(),0);resumableUploadCases.push({bytes,attempts,confirmedPrefixMonotone:true,oneSession:true});
+}
+for(const boundary of ['payload-change','repository-change','expired-session','regressed-offset','explicit-discard','foreground','partial-prefix','partial-regression']){
+ const clock=createFakeClock(),h=createHarness({clock});h.clock=clock;await h.provider.prepare();await h.provider.authorize();
+ const file=await makeRepositoryFile('object','obj_'+'e'.repeat(32),new Blob([new Uint8Array(6*1048576)])),controller=new AbortController();h.state.uploadProgressSteps=14;h.state.uploadProgressStepMs=90000;
+ const first=h.provider.repository.upload(file,{signal:controller.signal});let settled;first.then(value=>{settled={value};},error=>{settled={error};});
+ for(let steps=0;![...h.state.uploads.values()].some(row=>row.received===2*1048576)&&steps<1300;steps++){await new Promise(resolve=>setImmediate(resolve));if(!h.state.nativeUploadReplies)await clock.advance(1000);}
+ assert.equal([...h.state.uploads.values()][0]?.received,2*1048576);controller.abort(Object.assign(new Error('foreground preemption'),{name:'AbortError',code:'REPOSITORY_BACKGROUND_PREEMPTED'}));await assert.rejects(first,{name:'AbortError'});assert.ok(settled.error);
+ const before=h.state.requests.length,oldSession=[...h.state.uploads.keys()][0];h.state.uploadProgressSteps=1;h.state.uploadProgressStepMs=0;
+ if(boundary==='partial-prefix'||boundary==='partial-regression'){
+  const row=h.state.uploads.get(oldSession);row.parts.push(file.blob.slice(2*1048576,3*1048576));row.received=3*1048576;
+  if(boundary==='partial-regression'){
+   const second=new AbortController(),started=h.state.uploadProgressStarted;h.state.uploadProgressSteps=14;h.state.uploadProgressStepMs=90000;
+   const resumed=h.provider.repository.upload(file,{signal:second.signal}),rejected=assert.rejects(resumed,{name:'AbortError'});await waitFor(()=>h.state.uploadProgressStarted>started&&h.state.awaitingUploadProgress>0,'resume must poll the newer partial acknowledgement before sending');second.abort(Object.assign(new Error('preemption'),{name:'AbortError',code:'REPOSITORY_BACKGROUND_PREEMPTED'}));await rejected;
+   row.parts=row.parts.slice(0,1);row.received=2*1048576;await assert.rejects(()=>h.provider.repository.upload(file),/regressed upload position/u);assert.equal(h.state.files.size,0);
+  }else{
+   const result=await settleUpload(h.provider.repository.upload(file),h);assert.equal(result.ok,true,result.error?.message);assert.equal(result.value.serverDigest,file.digest);
+   assert.ok(h.state.requests.slice(before).some(value=>value.contentRange.startsWith('bytes '+3*1048576+'-')),'resume uses an extra server-confirmed partial chunk prefix');
+  }
+ }else if(boundary==='payload-change'){
+  const changed={...file,blob:new Blob(['different'.repeat(1048576)])};changed.digest=await digest(changed.blob);await assert.rejects(()=>h.provider.repository.upload(changed),/different content/u);
+  assert.equal(h.state.requests.slice(before).some(row=>row.method==='PUT'||row.method==='POST'),false);
+ }else if(boundary==='regressed-offset'){
+  const row=h.state.uploads.get(oldSession);row.received=0;row.parts=[];await assert.rejects(()=>h.provider.repository.upload(file),/regressed upload position/u);assert.equal(h.state.files.size,0);
+ }else{
+  if(boundary==='repository-change')h.state.trashedFolders.add('folder-1');
+  if(boundary==='expired-session')h.state.uploads.delete(oldSession);
+  if(boundary==='explicit-discard')h.provider.repository.discardUploads();
+  const result=await settleUpload(h.provider.repository.upload(file),h);assert.equal(result.ok,true,result.error?.message);assert.equal(result.value.serverDigest,file.digest);
+  const resumed=h.state.requests.slice(before).filter(row=>row.method==='PUT'&&/^bytes \d+-/u.test(row.contentRange));assert.ok(resumed.length);
+  assert.equal(Number(resumed[0].contentRange.match(/^bytes (\d+)-/u)[1]),boundary==='foreground'?2*1048576:0);
+  if(boundary==='repository-change')assert.notEqual(result.value.verificationScope,'drive-repository:1:1:folder-1');
+ }
+ await h.provider.disconnect();assert.equal(clock.pending(),0);resumableUploadCases.push(boundary);
+}
+console.log(JSON.stringify({status:'PASS',suite:'drive-repository-security',resumableUploadCases,productiveTransferCases,bodyContractCases,folderVerificationMeasurement,transportOnly:true,commitMarkerTransport:true,legacyWholeBlobRetired:true,driveFileScopeOnly:true,endpointConfined:true,tinyMultipartUpload:true,largeResumableUpload:true,opaqueMarkers:true,boundedStreamingDownload:true,coldFolderSingleFlight:true,coldFolderFailureRetry:true,folderAmbiguityRejected:true,policyBoundaryFailClosed:true,duplicateIdentityFailClosed:true,sourceFenceThroughUpload:true,parallelCancellationIsolated:true,parallelSourceFenceIsolated:true,parallelProtectionFenceIsolated:true,folderVerificationCoalesced:true,folderReceiptInvalidation:true,exactDeletion:true,temporaryDownloadRelease:true,publicationProtectionLifecycle:true,maintenanceProtectionLifecycle:true,externalRepositoryDeletionSelfHeals:true,trashedRepositorySelfHeals:true,boundedMaintenanceLease:true},null,2));

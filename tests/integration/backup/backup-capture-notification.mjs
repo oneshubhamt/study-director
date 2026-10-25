@@ -7,16 +7,16 @@ const end=html.indexOf('\nasync function refreshPersistedSessionBadge()',start);
 assert.ok(start>=0&&end>start,'The reference-aware canonical commit handler must be available.');
 const commits=[],notifications=[],maintenanceDelays=[];
 const RichTextApi={scanAttachmentReferences:value=>({trusted:true,assetIds:[...String(value||'').matchAll(/img-[a-z0-9-]{20,80}/g)].map(match=>match[0])})};
-const handler=new Function('writeStorageHealth','renderStorageHealth','document','NativeCapabilities','DeviceBackup','scheduleRichTextAssetMaintenance','invalidateAttachmentLibrary','RichTextApi','ACTIVE_SESSION_ID',
+const handler=new Function('writeStorageHealth','renderStorageHealth','document','NativeCapabilities','notifyBackupChange','scheduleRichTextAssetMaintenance','invalidateAttachmentLibrary','RichTextApi','ACTIVE_SESSION_ID',
   `let richAssetReferenceRevision=0;const canonicalAttachmentReferenceSignatures=new Map();${html.slice(start,end)};return {handleCanonicalCommit,getRevision:()=>richAssetReferenceRevision};`)(
-  state=>commits.push(state),()=>{}, {querySelector:()=>null},null,{notifyChange:change=>notifications.push(change)},delay=>maintenanceDelays.push(delay),()=>{},RichTextApi,'active-session'
+  state=>commits.push(state),()=>{}, {querySelector:()=>null},null,change=>notifications.push(change),delay=>maintenanceDelays.push(delay),()=>{},RichTextApi,'active-session'
 );
 handler.handleCanonicalCommit({entityType:'activeSession',operation:'upsert',value:{snapshot:{review:{reflection:'',studyQuality:null}}},committedAt:'2026-09-23T17:00:00.000Z',backupCapture:true});
 assert.equal(commits.length,1,'A backup session flush still updates local storage health.');
 assert.equal(notifications.length,0,'A backup capture cannot schedule another automatic device backup.');
 assert.equal(maintenanceDelays.length,0,'The first routine active-session snapshot must not manufacture attachment GC work.');
-for(const entityType of ['planData','areaNote','dailyRecord']){
-  const before=notifications.length,value=entityType==='areaNote'?{key:'BackupCaptureQA',text:''}:entityType==='dailyRecord'?{date:'2026-09-22',reflection:''}:null;
+for(const entityType of ['planData','note','dailyRecord']){
+  const before=notifications.length,value=entityType==='note'?{key:'BackupCaptureQA',text:''}:entityType==='dailyRecord'?{date:'2026-09-22',reflection:''}:null;
   handler.handleCanonicalCommit({entityType,operation:'upsert',value,committedAt:'2026-09-23T17:00:30.000Z',backupCapture:true});
   assert.equal(notifications.length,before,`${entityType} flushed for backup capture must not recursively schedule another Device backup.`);
 }

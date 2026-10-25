@@ -79,10 +79,26 @@ assert.equal(evidence.savedRevision,6);
 assert.equal(Object.isFrozen(evidence),true);
 assert.deepEqual({...gateway.taskEvidence('same')},{completion:50});
 
+// Renaming a note with its Area relabels today's blocks in place: ids, the
+// current block, adjustments and the running timer stay as they are.
+const renameDemo=timer.createStateController(Object.freeze({
+  helpers:Object.freeze({makeTaskId:(task,index)=>`task-${index}`}),diagnostics:Object.freeze({capture:()=>{}}),effects:Object.freeze({modeChanged:()=>{}})
+}));
+renameDemo.loadSchedule([{id:'a',name:'Read',area:'GS2 > Polity'},{id:'b',name:'Notes',area:'GS2 > Polity > Rights'},{id:'c',name:'Maths',area:'Maths'}],{studyDate:'2026-09-13'});
+renameDemo.originalSchedule=[{id:'a',area:'GS2 > Polity'},{id:'c',area:'Maths'}];
+renameDemo.currentIndex=1;renameDemo.runtime={taskIdx:1,startMs:100,durationSec:600};renameDemo.setAdjustment(1,{start:60,end:90});
+const renameTo=row=>{const area=String(row.area||'');return area==='GS2 > Polity'||area.startsWith('GS2 > Polity > ')?'Paper 2'+area.slice('GS2 > Polity'.length):undefined;};
+assert.equal(renameDemo.renameTaskAreas(renameTo),2,'two blocks use the renamed Area or one inside it');
+assert.deepEqual(renameDemo.tasks.map(task=>[task.id,task.area]),[['a','Paper 2'],['b','Paper 2 > Rights'],['c','Maths']]);
+assert.deepEqual(renameDemo.originalSchedule.map(task=>task.area),['Paper 2','Maths'],'the original schedule follows');
+assert.equal(renameDemo.currentIndex,1);assert.equal(renameDemo.currentTaskId,'b');assert.equal(renameDemo.runtime.startMs,100,'the running timer is untouched');
+assert.deepEqual({...renameDemo.captureAdjustmentsByTaskId()},{b:{start:60,end:90}},'adjustments stay with their blocks');
+assert.equal(renameDemo.renameTaskAreas(()=>undefined),0,'nothing to rename changes nothing');
+
 controller.clearSession();
 assert.equal(controller.mode,'empty');
 assert.equal(controller.tasks.length,0);
 assert.equal(controller.studyDate,null);
 assert.equal(controller.runtime.startMs,null);
 
-console.log(JSON.stringify({status:'PASS',contract:'timer-state',taskIdentity:true,runtimeNormalization:true,transitions:true,snapshots:true},null,2));
+console.log(JSON.stringify({status:'PASS',contract:'timer-state',taskIdentity:true,runtimeNormalization:true,transitions:true,snapshots:true,areaRenameInPlace:true},null,2));

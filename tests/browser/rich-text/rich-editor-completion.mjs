@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {launchChromium,waitFor} from '../../helpers/browser-harness.mjs';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
-const bundle=fs.readFileSync('source/external/rich-text.js','utf8');
+const bundle=richTextRuntimeSource();
 const browser=await launchChromium({profilePrefix:'qa-editor-completion-'});let page;
 const keySpec=value=>({ArrowDown:{code:'ArrowDown',keyCode:40},ArrowUp:{code:'ArrowUp',keyCode:38},Home:{code:'Home',keyCode:36},End:{code:'End',keyCode:35},Enter:{code:'Enter',keyCode:13},Backspace:{code:'Backspace',keyCode:8}}[value]||{code:value,keyCode:0});
 const key=async(value,modifiers=0)=>{const {code,keyCode}=keySpec(value),payload={key:value,code,modifiers,windowsVirtualKeyCode:keyCode,nativeVirtualKeyCode:keyCode};await page.send('Input.dispatchKeyEvent',{type:'keyDown',...payload});await page.send('Input.dispatchKeyEvent',{type:'keyUp',...payload})};
@@ -28,20 +29,20 @@ try{
   await page.settle();
 
   // Heading state comes from the authoritative Wordgard command, and the style popup is keyboard navigable.
-  await page.evaluate(`selectText('#heading + .sd-rte .sd-rte-editor p',4,4);document.querySelector('#heading + .sd-rte button[aria-label="Text style"]').focus()`);await page.settle();
+  await page.evaluate(`selectText('#heading + .sd-rte .sd-rte-editor p',4,4);document.querySelector('#heading + .sd-rte button[aria-label="Typography"]').focus()`);await page.settle();
   await key('ArrowDown');await page.settle();
-  assert.equal(await page.evaluate(`document.activeElement?.getAttribute('aria-label')`),'Normal text','ArrowDown on a closed style trigger should open it and focus the first option.');
+  assert.equal(await page.evaluate(`document.activeElement?.getAttribute('aria-label')`),'Heading 1','ArrowDown on a closed style trigger should open it and focus the first option.');
   await key('ArrowDown');await page.settle();
-  assert.equal(await page.evaluate(`document.activeElement?.getAttribute('aria-label')`),'Heading','ArrowDown should move focus within the style popup.');
+  assert.equal(await page.evaluate(`document.activeElement?.getAttribute('aria-label')`),'Heading 2','ArrowDown should move focus within the style popup.');
   await page.evaluate(`document.activeElement.click()`);await page.settle();
-  const headingState=await page.evaluate(`(()=>{const root=document.querySelector('#heading + .sd-rte'),trigger=root.querySelector('button[aria-label="Text style"]');return {tag:root.querySelector('.sd-rte-editor').firstElementChild?.tagName,label:trigger.textContent,canonical:heading.value}})()`);
-  assert.equal(headingState.tag,'H2');assert.match(headingState.label,/^Heading/,'Heading toolbar label must follow Wordgard command activity.');
-  await page.evaluate(`document.querySelector('#heading + .sd-rte button[aria-label="Text style"]').focus()`);await key('ArrowDown');await page.settle();
-  assert.equal(await page.evaluate(`document.querySelector('#heading + .sd-rte button[aria-label="Heading"]').getAttribute('aria-pressed')`),'true','Heading option must report active after reopening the popup.');
+  const headingState=await page.evaluate(`(()=>{const root=document.querySelector('#heading + .sd-rte'),trigger=root.querySelector('button[aria-label="Typography"]');return {tag:root.querySelector('.sd-rte-editor').firstElementChild?.tagName,label:trigger.textContent,canonical:heading.value}})()`);
+  assert.equal(headingState.tag,'H2');assert.match(headingState.label,/^Aa/,'Heading toolbar label must follow Wordgard command activity.');
+  await key('Escape');await page.evaluate(`document.querySelector('#heading + .sd-rte button[aria-label="Typography"]').focus()`);await key('ArrowDown');await page.settle();
+  assert.equal(await page.evaluate(`document.querySelector('#heading + .sd-rte button[aria-label="Heading 2"]').getAttribute('aria-pressed')`),'true','Heading option must report active after reopening the popup.');
   await key('Home');await page.settle();
-  assert.equal(await page.evaluate(`document.activeElement?.getAttribute('aria-label')`),'Normal text','Home should move popup focus to the first option.');
+  assert.equal(await page.evaluate(`document.activeElement?.getAttribute('aria-label')`),'Heading 1','Home should move popup focus to the first option.');
   await key('End');await page.settle();
-  assert.equal(await page.evaluate(`document.activeElement?.getAttribute('aria-label')`),'Heading','End should move popup focus to the last option.');
+  assert.equal(await page.evaluate(`document.activeElement?.getAttribute('aria-label')`),'Justify','End should move popup focus to the last option.');
   await page.evaluate(`document.querySelector('#heading + .sd-rte .sd-rte-editor').focus()`);
 
   // Checklist role must be genuinely keyboard-operable.
@@ -71,11 +72,12 @@ try{
   await page.evaluate(`document.querySelector('#table + .sd-rte button[aria-label="Delete column"]').focus();document.activeElement.click()`);await page.settle();
   const removed=await page.evaluate(`(()=>{const n=JSON.parse(table.value.slice(4)).doc.content.find(x=>x.type==='Table');return n.content[0].content.map(c=>c.marks.SDCellWidth)})()`);
   assert.equal(removed.length,2);assert.ok(Math.abs(removed[0]/removed[1]-ratioBefore)<0.02,'Deleting the inserted column must preserve survivor proportions.');
-  const rowBefore=await page.evaluate(`JSON.parse(table.value.slice(4)).doc.content.find(x=>x.type==='Table').content[0].content[0].marks.SDCellHeight`);
-  await page.evaluate(`(()=>{const cell=document.querySelector('#table + .sd-rte tr:first-child th:first-child'),r=cell.getBoundingClientRect();window.__qa={x:r.left+r.width/2,y:r.bottom-1};cell.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,clientX:__qa.x,clientY:__qa.y,pointerId:572,pointerType:'mouse',buttons:1}))})()`);
-  await page.evaluate(`window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,cancelable:true,clientX:__qa.x,clientY:__qa.y+26,pointerId:572,pointerType:'mouse',buttons:1}));window.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,cancelable:true,clientX:__qa.x,clientY:__qa.y+26,pointerId:572,pointerType:'mouse',buttons:0}))`);await page.settle();
-  const rowAfter=await page.evaluate(`JSON.parse(table.value.slice(4)).doc.content.find(x=>x.type==='Table').content[0].content[0].marks.SDCellHeight`);
-  assert.ok(rowAfter>rowBefore,'Direct row-edge resizing must increase row height.');
+  // Row height is content-driven; column proportions are the stored geometry.
+  const rowBefore=await page.evaluate(`document.querySelector('#table + .sd-rte tr').getBoundingClientRect().height`);
+  await page.evaluate(`(()=>{const cell=document.querySelector('#table + .sd-rte th p');cell.closest('[contenteditable=true]').focus();const r=document.createRange();r.selectNodeContents(cell);r.collapse(false);const selection=getSelection();selection.removeAllRanges();selection.addRange(r);document.dispatchEvent(new Event('selectionchange'));})()`);
+  await page.send('Input.insertText',{text:'Long cell content '.repeat(30)});await page.settle();
+  const rowAfter=await page.evaluate(`document.querySelector('#table + .sd-rte tr').getBoundingClientRect().height`);
+  assert.ok(rowAfter>rowBefore,'Rows must grow to display their content without storing fixed row heights');
 
   await page.evaluate(`document.querySelector('#table + .sd-rte button[aria-label=\"Toggle header row\"]').click()`);await page.settle();
   tableState=await page.evaluate(`(()=>{const n=JSON.parse(table.value.slice(4)).doc.content.find(x=>x.type==='Table');return {th:document.querySelectorAll('#table + .sd-rte th').length,types:n.content[0].content.map(c=>c.type),markdown:StudyDirectorRichText.toMarkdown(table.value)}})()`);

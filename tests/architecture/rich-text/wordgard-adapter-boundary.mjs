@@ -11,7 +11,7 @@ function walk(dir){
   });
 }
 
-for(const file of ['rich-text/wordgard-adapter.ts','rich-text/typography.ts','rich-text/wordgard-patches/inert-html.ts','rich-text/wordgard-patches/history-core.ts','build/wordgard-source-patches.mjs'])
+for(const file of ['rich-text/wordgard-adapter.ts','rich-text/typography.ts','rich-text/wordgard-patches/inert-html.ts','rich-text/wordgard-patches/cut.ts','build/wordgard-source-patches.mjs'])
   assert.ok(fs.existsSync(file),`Missing Wordgard architecture boundary: ${file}`);
 
 const editor=read('rich-text/editor.ts');
@@ -39,20 +39,23 @@ assert.match(app,/if\(candidate&&!mounted\.has\(candidate\)&&!pending\.has\(cand
 assert.match(app,/function onFocusIn\(event\).*activate\(field,\{focus:true\}\);/,'Explicit textarea focus must preserve the user focus intent across rich-editor mounting.');
 assert.match(app,/focusOnMount:options\.focus===true/,'Application focus intent must be forwarded explicitly to the rich editor.');
 
-for(const file of walk('rich-text').filter(file=>file.endsWith('.ts')&&!posix(file).includes('/wordgard-source/')&&!posix(file).includes('/wordgard-patches/')&&!file.endsWith('wordgard-adapter.ts'))){
+for(const file of walk('rich-text').filter(file=>file.endsWith('.ts')&&!posix(file).includes('/wordgard-source/')&&!posix(file).includes('/wordgard-patches/')&&!file.endsWith('wordgard-adapter.ts')&&!file.endsWith('wordgard-module.ts'))){
   assert.doesNotMatch(read(file),/vendor\/wordgard|from ['"]wordgard\//,`${file} bypasses wordgard-adapter.ts.`);
 }
 
 const typography=read('rich-text/typography.ts');
 assert.match(typography,/from ['"]\.\/wordgard-adapter['"]/,'Typography extensions must use the adapter.');
-const historyFacade=read('rich-text/wordgard-source/history.ts');
-const historyCore=read('rich-text/wordgard-patches/history-core.ts');
-assert.match(historyFacade,/historyCore as history/,'History facade must use the Study Director lean-history patch.');
-assert.doesNotMatch(historyCore,/\bMenu\b|phrases|undoButton|redoButton/u,'Menu UI must not enter the lean history core.');
+assert.match(read('rich-text/wordgard-source/history.ts'),/\bvendor\/wordgard\/src\/history\/history'/u,'History comes from upstream; the build removes its menu buttons.');
+assert.match(read('rich-text/wordgard-adapter.ts'),/export \{cutHandling\}[^\n]*\/wordgard-patches\/cut'/u,'Cut handling is a Study Director extension behind the adapter.');
+assert.match(editor,/tableCore,history\(\),cutHandling,/u,'The editor installs the adapter cut handling.');
 assert.match(read('rich-text/wordgard-source/command.ts'),/killToLineEnd, yankKilled/,'Command facade must resolve keymap imports without enabling the default keymap.');
 
 const buildSource=read('build/wordgard-bundle.mjs');
-assert.match(buildSource,/plugins:\[wordgardSourcePatchPlugin\(\{root:ROOT\}\)\]/,'Rich-text build must apply the explicit Wordgard source patch layer.');
-assert.match(buildSource,/source\/external\/rich-text\.js/,'Rich-text build must retain one external bundle target.');
+assert.match(buildSource,/plugins:wordgardGlobal\?\[wordgardGlobalPlugin\(\)\]:\[wordgardSourcePatchPlugin\(\{root:ROOT\}\)\]/,'Wordgard builds apply the explicit source patch layer; the editor reads Wordgard from its module.');
+assert.match(buildSource,/source\/external\/rich-text\.js/,'Rich-text build must retain the editor bundle target.');
+assert.match(buildSource,/source\/external\/wordgard\.js/,'Wordgard ships as its own module.');
+// The Wordgard module re-exports Wordgard packages and nothing of Study Director's.
+const wordgardModule=read('rich-text/wordgard-module.ts').replace(/^\s*\/\/.*$/gmu,'').trim().split('\n');
+assert.ok(wordgardModule.every(line=>/^export \* as [a-zA-Z]+ from \x27wordgard\/[a-z-]+\x27;$/u.test(line)),'The Wordgard module holds Wordgard packages only.');
 
 console.log(JSON.stringify({status:'PASS',boundary:'wordgard-adapter'},null,2));

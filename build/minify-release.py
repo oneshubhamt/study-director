@@ -395,13 +395,17 @@ def minify_index(path: Path) -> None:
     path.write_text(source, encoding="utf-8", newline="\n")
 
 
-def rename_hashed_js(public: Path) -> dict[str, str]:
+def rename_hashed_js(public: Path, substitutes: dict[str, Path]) -> dict[str, str]:
     replacements: dict[str, str] = {}
     for path in sorted(public.glob("sd.*.js")):
         if path.name == "sw.js":
             continue
         original_name = path.name
-        minified = minify_js(path.read_text(encoding="utf-8"))
+        stem = ".".join(original_name.split(".")[:-2])
+        # A module with a lean build ships that instead (the rich-text editor
+        # with only the Wordgard code it reaches, in place of both modules).
+        source = substitutes[stem].read_text(encoding="utf-8") if stem in substitutes else path.read_text(encoding="utf-8")
+        minified = minify_js(source)
         path.write_text(minified, encoding="utf-8", newline="\n")
         digest = sha256_file(path)
         parts = original_name.split(".")
@@ -522,12 +526,22 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path)
     parser.add_argument("destination", type=Path)
+    parser.add_argument("--substitute", action="append", default=[], help="stem=path: ship this file for that module")
     args = parser.parse_args()
+    substitutes: dict[str, Path] = {}
+    for item in args.substitute:
+        stem, _, file = item.partition("=")
+        if not stem or not file or not Path(file).is_file():
+            raise SystemExit(f"Invalid --substitute {item!r}")
+        substitutes[stem] = Path(file)
     if args.destination.exists():
         shutil.rmtree(args.destination)
     shutil.copytree(args.source, args.destination)
     public = args.destination / "public"
-    replacements = rename_hashed_js(public)
+    unused = [stem for stem in substitutes if not any(public.glob(stem + ".*.js"))]
+    if unused:
+        raise SystemExit(f"No module to substitute: {unused}")
+    replacements = rename_hashed_js(public, substitutes)
     replacements.update(rename_hashed_css(public))
     apply_replacements(public / "index.html", replacements)
     minify_index(public / "index.html")

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import * as esbuild from 'esbuild-wasm';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
 const built=await esbuild.build({entryPoints:['rich-text/wg1-codec.ts'],bundle:true,write:false,format:'iife',globalName:'WG1Codec',platform:'browser',target:['es2020'],logLevel:'silent'});
 let codecParses=0,richParses=0;
@@ -10,7 +11,7 @@ const codecSandbox={console,TextEncoder,TextDecoder,JSON:codecJson};codecSandbox
 const codec=codecSandbox.WG1Codec;
 
 const richJson={parse(value){richParses++;return JSON.parse(value)},stringify:JSON.stringify};
-const richSandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask,JSON:richJson};richSandbox.globalThis=richSandbox;vm.createContext(richSandbox);vm.runInContext(fs.readFileSync('source/external/rich-text.js','utf8'),richSandbox,{filename:'rich-text.js'});
+const richSandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask,JSON:richJson};richSandbox.globalThis=richSandbox;vm.createContext(richSandbox);vm.runInContext(richTextRuntimeSource(),richSandbox,{filename:'rich-text.js'});
 const rich=richSandbox.StudyDirectorRichText;
 
 const text=(param,marks)=>marks?{type:'Text',param,marks}:{type:'Text',param};

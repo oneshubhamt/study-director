@@ -9,13 +9,12 @@ import {hashSnapshot} from '../../../portable/integrity-hash.js';
 // boundaries with injectable read/write/commit failures and real handle identity.
 const app=fs.readFileSync('source/app.html','utf8');
 const normalization=app.slice(app.indexOf('function normalizeRepositoryIntegrityTarget('),app.indexOf('async function libraryClearSnapshot('));
-const persistence=app.slice(app.indexOf('let repositoryIntegrityWriteChain='),app.indexOf('function repositoryIntegrityUnsafe('));
+const persistence=app.slice(app.indexOf('let repositoryIntegrityWriteChain='),app.indexOf('const RepositoryIntegrityContinuation='));
 const objectId=char=>'obj_'+char.repeat(32),scanId='a'.repeat(64),stamp='2026-09-01T00:00:00.000Z';
-function handle(identity){return {getDirectoryHandle(){},async isSameEntry(other){return other?.identity===identity;},identity};}
 function fixture(){
-  const state={readFailed:false,txReadFailed:false,writeFailed:false,commitFailed:false,owner:true,drive:'drive-one',device:handle('folder-one'),durable:null,writes:0,health:[],transactions:0};
+  const state={readFailed:false,txReadFailed:false,writeFailed:false,commitFailed:false,owner:true,drive:'drive-one',device:'device-one',durable:null,writes:0,health:[],transactions:0};
   const context={console,Object,Date,Promise,crypto:webcrypto,appCanMutate:()=>state.owner,
-    DeviceBackup:{repositoryHandle:async()=>state.device},BackupProviderRuntime:{repositoryScope:async()=>state.drive},AppDiagnostics:{capture(){}},
+    BackupProviderRuntime:{repositoryScope:async id=>id==='device-folder'?state.device:state.drive},AppDiagnostics:{capture(){}},
     repositoryIntegrityBoundScopes:{},renderIntegrityStatuses(){},markStorageHealthError:(key,message)=>state.health.push({kind:'warn',key,message}),markStorageHealthOk:key=>state.health.push({kind:'ok',key}),
     BackupAppMeta:{read:async()=>{if(state.readFailed)throw new Error('read unavailable');return state.durable;},transaction:(_mode,operation,options)=>{
       assert.equal(options.strict,true);state.transactions++;
@@ -28,53 +27,60 @@ function fixture(){
     }}
   };
   vm.createContext(context);for(const name of ['internal','integrity-continuation'])vm.runInContext(fs.readFileSync('source/core/'+name+'.js','utf8'),context);context.IntegrityContinuationModule=context[Symbol.for('studyDirector.internalModules.v1')].require('integrity-continuation',1);vm.runInContext(normalization+persistence,context);
-  state.durable=context.normalizeRepositoryIntegrityState({version:3,
-    device:{repositoryScope:'device-one',repositoryHandle:handle('folder-one'),completedAt:stamp},
-    drive:{repositoryScope:'drive-one',completedAt:stamp,failedAt:stamp,cursor:objectId('b'),scanId,quarantinedObjectIds:[objectId('c')]}});
+  state.durable=context.normalizeRepositoryIntegrityState({version:7,locations:{
+    'device-folder':{repositoryScope:'device-one',completedAt:stamp},
+    'google-drive':{repositoryScope:'drive-one',completedAt:stamp,failedAt:stamp,cursor:objectId('b'),scanId,quarantinedObjectIds:[objectId('c')]}}});
   return {state,context};
 }
 const cases=[];async function test(name,run){await run();cases.push(name);}
 await test('read, transactional read, write and commit failures preserve both providers',async()=>{
   for(const field of ['readFailed','txReadFailed','writeFailed','commitFailed']){
     const h=fixture(),before=h.state.durable;h.state[field]=true;
-    await assert.rejects(h.context.updateRepositoryIntegrityTarget('device',{repositoryScope:'device-one',status:'completed',complete:true}));
-    assert.equal(h.state.durable,before,field);assert.equal(h.state.writes,0,field);assert.deepEqual(Array.from(h.state.durable.drive.quarantinedObjectIds),[objectId('c')]);
-    h.state[field]=false;const saved=await h.context.updateRepositoryIntegrityTarget('device',{repositoryScope:'device-one',status:'completed',complete:true});assert.ok(saved.completedAt);assert.equal(h.state.writes,1);assert.equal(JSON.stringify(h.state.durable.drive),JSON.stringify(before.drive),'transaction must preserve unrelated target');
+    await assert.rejects(h.context.updateRepositoryIntegrityTarget('device-folder',{repositoryScope:'device-one',status:'completed',complete:true}));
+    assert.equal(h.state.durable,before,field);assert.equal(h.state.writes,0,field);assert.deepEqual(Array.from(h.state.durable.locations['google-drive'].quarantinedObjectIds),[objectId('c')]);
+    h.state[field]=false;const saved=await h.context.updateRepositoryIntegrityTarget('device-folder',{repositoryScope:'device-one',status:'completed',complete:true});assert.ok(saved.completedAt);assert.equal(h.state.writes,1);assert.equal(JSON.stringify(h.state.durable.locations['google-drive']),JSON.stringify(before.locations['google-drive']),'transaction must preserve unrelated target');
   }
 });
 await test('budget yield and restart preserve last verified cursor and scan identity',async()=>{
-  const h=fixture();await h.context.updateRepositoryIntegrityTarget('device',{repositoryScope:'device-one',status:'yielded',reason:'budget',cursor:objectId('d'),scanId});
-  const restarted=await h.context.readRepositoryIntegrityTarget('device');assert.equal(restarted.cursor,objectId('d'));assert.equal(restarted.scanId,scanId);assert.ok(restarted.cycleStartedAt);assert.equal(restarted.completedAt,stamp);
+  const h=fixture();await h.context.updateRepositoryIntegrityTarget('device-folder',{repositoryScope:'device-one',status:'yielded',reason:'budget',cursor:objectId('d'),scanId});
+  const restarted=await h.context.readRepositoryIntegrityTarget('device-folder');assert.equal(restarted.cursor,objectId('d'));assert.equal(restarted.scanId,scanId);assert.ok(restarted.cycleStartedAt);assert.equal(restarted.completedAt,stamp);
 });
 await test('unavailable reads retain quarantine and do not manufacture a corrupt object',async()=>{
-  const h=fixture();await h.context.updateRepositoryIntegrityTarget('drive',{repositoryScope:'drive-one',status:'unavailable',reason:'timeout'});
-  assert.deepEqual(Array.from(h.state.durable.drive.quarantinedObjectIds),[objectId('c')]);assert.equal(h.state.durable.drive.cursor,objectId('b'));assert.equal(h.state.durable.drive.scanId,scanId);assert.equal(h.state.durable.drive.completedAt,stamp);assert.ok(h.state.durable.drive.failedAt);
+  const h=fixture();for(const quarantined of [undefined,[],[objectId('c')]])await h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',status:'unavailable',reason:'timeout',complete:true,quarantined});
+  assert.equal(h.state.durable.locations['google-drive'].history.at(-1).complete,false,'unavailable cannot claim complete verification even with a stale progress flag');
+  assert.deepEqual(Array.from(h.state.durable.locations['google-drive'].quarantinedObjectIds),[objectId('c')]);assert.equal(h.state.durable.locations['google-drive'].cursor,objectId('b'));assert.equal(h.state.durable.locations['google-drive'].scanId,scanId);assert.equal(h.state.durable.locations['google-drive'].completedAt,stamp);assert.ok(h.state.durable.locations['google-drive'].failedAt);
 });
 await test('partial progress cannot clear unresolved failure or quarantine health',async()=>{
-  const h=fixture();await h.context.updateRepositoryIntegrityTarget('drive',{repositoryScope:'drive-one',status:'yielded',cursor:objectId('d'),scanId});assert.equal(h.state.durable.drive.failedAt,stamp);assert.equal(h.state.health.at(-1).kind,'warn');
-  await h.context.updateRepositoryIntegrityTarget('drive',{repositoryScope:'drive-one',status:'completed',complete:true,quarantined:[objectId('c')]});assert.equal(h.state.durable.drive.failedAt,'');assert.equal(h.state.health.at(-1).kind,'warn','a cycle that skipped quarantine is not healthy');
+  const h=fixture();await h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',status:'yielded',cursor:objectId('d'),scanId});assert.equal(h.state.durable.locations['google-drive'].failedAt,stamp);assert.equal(h.state.health.at(-1).kind,'warn');
+  await h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',status:'completed',complete:true,quarantined:[objectId('c')]});assert.equal(h.state.durable.locations['google-drive'].failedAt,'');assert.equal(h.state.health.at(-1).kind,'warn','a cycle that skipped quarantine is not healthy');
 });
-await test('same physical folder keeps state across cloned handles; replacement invalidates it',async()=>{
-  const h=fixture();h.state.device=handle('folder-one');assert.equal((await h.context.readRepositoryIntegrityTarget('device')).repositoryScope,'device-one');assert.equal(h.state.writes,0);
-  h.state.device=handle('folder-two');const target=await h.context.readRepositoryIntegrityTarget('device');assert.notEqual(target.repositoryScope,'device-one');assert.equal(target.completedAt,'');assert.equal(target.cursor,'');assert.equal(target.repositoryHandle,h.state.device);
+await test('the same Device Folder repository keeps state; a replaced one starts over',async()=>{
+  const h=fixture();assert.equal((await h.context.readRepositoryIntegrityTarget('device-folder')).repositoryScope,'device-one');assert.equal(h.state.writes,0);
+  h.state.device='device-two';const target=await h.context.readRepositoryIntegrityTarget('device-folder');assert.equal(target.repositoryScope,'device-two');assert.equal(target.completedAt,'');assert.equal(target.cursor,'');
+});
+await test('a location with no record yet starts its own entry and leaves the others untouched',async()=>{
+  const h=fixture(),drive=h.state.durable.locations['google-drive'];h.state.durable={version:7,locations:{'google-drive':drive}};
+  const bound=await h.context.readRepositoryIntegrityTarget('device-folder');assert.equal(bound.repositoryScope,'device-one');assert.equal(bound.completedAt,'');
+  await h.context.updateRepositoryIntegrityTarget('device-folder',{repositoryScope:'device-one',status:'yielded',cursor:objectId('d'),scanId});
+  assert.equal(h.state.durable.locations['device-folder'].cursor,objectId('d'));assert.equal(JSON.stringify(h.state.durable.locations['google-drive']),JSON.stringify(drive));
 });
 await test('Drive recreation and stale scan results cannot contaminate the new repository',async()=>{
-  const h=fixture();h.state.drive='drive-two';await assert.rejects(h.context.updateRepositoryIntegrityTarget('drive',{repositoryScope:'drive-one',status:'failed',quarantined:[objectId('e')]}),{code:'REPOSITORY_CHANGED'});
-  const target=h.state.durable.drive;assert.equal(target.repositoryScope,'drive-two');assert.equal(target.completedAt,'');assert.equal(target.failedAt,'');assert.equal(target.quarantinedObjectIds.length,0);
+  const h=fixture();h.state.drive='drive-two';await assert.rejects(h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',status:'failed',quarantined:[objectId('e')]}),{code:'REPOSITORY_CHANGED'});
+  const target=h.state.durable.locations['google-drive'];assert.equal(target.repositoryScope,'drive-two');assert.equal(target.completedAt,'');assert.equal(target.failedAt,'');assert.equal(target.quarantinedObjectIds.length,0);
 });
 await test('concurrent provider progress is serialized and preserves each checkpoint',async()=>{
   const h=fixture();await Promise.all([
-    h.context.updateRepositoryIntegrityTarget('device',{repositoryScope:'device-one',status:'yielded',cursor:objectId('d'),scanId}),
-    h.context.updateRepositoryIntegrityTarget('drive',{repositoryScope:'drive-one',status:'yielded',cursor:objectId('e'),scanId})]);
-  assert.equal(h.state.durable.device.cursor,objectId('d'));assert.equal(h.state.durable.drive.cursor,objectId('e'));assert.deepEqual(Array.from(h.state.durable.drive.quarantinedObjectIds),[objectId('c')]);
+    h.context.updateRepositoryIntegrityTarget('device-folder',{repositoryScope:'device-one',status:'yielded',cursor:objectId('d'),scanId}),
+    h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',status:'yielded',cursor:objectId('e'),scanId})]);
+  assert.equal(h.state.durable.locations['device-folder'].cursor,objectId('d'));assert.equal(h.state.durable.locations['google-drive'].cursor,objectId('e'));assert.deepEqual(Array.from(h.state.durable.locations['google-drive'].quarantinedObjectIds),[objectId('c')]);
 });
-await test('unscoped legacy completion cannot postpone a new repository scan',async()=>{
-  const h=fixture();h.state.durable={version:2,device:{completedAt:stamp},drive:{completedAt:stamp,quarantinedObjectIds:[objectId('c')]}};
-  const bound=await h.context.readRepositoryIntegrityTarget('drive');assert.equal(bound.repositoryScope,'drive-one');assert.equal(bound.completedAt,'');assert.equal(bound.quarantinedObjectIds.length,0);assert.equal(h.state.durable.device.completedAt,stamp);
+await test('unscoped completion cannot postpone a new repository scan',async()=>{
+  const h=fixture();h.state.durable={version:7,locations:{'device-folder':{completedAt:stamp},'google-drive':{completedAt:stamp,quarantinedObjectIds:[objectId('c')]}}};
+  const bound=await h.context.readRepositoryIntegrityTarget('google-drive');assert.equal(bound.repositoryScope,'drive-one');assert.equal(bound.completedAt,'');assert.equal(bound.quarantinedObjectIds.length,0);assert.equal(h.state.durable.locations['device-folder'].completedAt,stamp);
 });
 await test('lost write ownership and results without repository identity fail closed',async()=>{
-  const h=fixture();h.state.owner=false;const before=h.state.durable;await assert.rejects(h.context.updateRepositoryIntegrityTarget('device',{repositoryScope:'device-one',status:'completed',complete:true}));assert.equal(h.state.durable,before);
-  await assert.rejects(h.context.updateRepositoryIntegrityTarget('device',{status:'completed',complete:true}));assert.equal(h.state.durable,before);
+  const h=fixture();h.state.owner=false;const before=h.state.durable;await assert.rejects(h.context.updateRepositoryIntegrityTarget('device-folder',{repositoryScope:'device-one',status:'completed',complete:true}));assert.equal(h.state.durable,before);
+  await assert.rejects(h.context.updateRepositoryIntegrityTarget('device-folder',{status:'completed',complete:true}));assert.equal(h.state.durable,before);
 });
 await test('Drive executor quarantines confirmed corruption while retaining availability and yield progress',async()=>{
   const source=fs.readFileSync('source/core/backup-provider.js','utf8'),start=source.indexOf('  async function runConfiguredIntegrityScrub('),end=source.indexOf('  async function backupRepositoryProvider(',start);
@@ -86,60 +92,57 @@ await test('Drive executor quarantines confirmed corruption while retaining avai
     assert.equal(result.status,status,code);assert.equal(result.repositoryScope,'drive-one');assert.equal(result.cursor,objectId('e'));assert.equal(result.scanId,scanId);assert.equal(result.quarantined.includes(objectId('d')),quarantine,code);assert.ok(result.quarantined.includes(objectId('c')));
   }
 });
-await test('metadata gateway accepts canonical scoped state and readable legacy state',async()=>{
+await test('the ordinary validator accepts only the current record; older versions belong to the compatibility host',async()=>{
   const h=fixture(),context=h.context;
   for(const file of ['source/core/host-metadata.js'])vm.runInContext(fs.readFileSync(file,'utf8'),context);
   vm.runInContext(app.slice(app.indexOf('function sameDataValue('),app.indexOf('function normalizeStudyQuality(')),context);
-  const module=context[Symbol.for('studyDirector.internalModules.v1')].require('host-metadata',1),names=['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','automaticDeviceBackup','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBaseLegacy','reconciliationBase','reconciliationBaseNotePrefix'];
-  const validators=module.createAppMetaValidators(Object.freeze({keys:Object.freeze(Object.fromEntries(names.map(name=>[name,name]))),same:context.sameDataValue,normalizers:Object.freeze({verifiedRecovery:value=>value,attachmentIntegrity:value=>value,repositoryIntegrity:context.normalizeRepositoryIntegrityState,reconciliationBaseLegacy:value=>value,reconciliationBase:value=>value,reconciliationBaseNote:value=>value})}));
+  const module=context[Symbol.for('studyDirector.internalModules.v1')].require('host-metadata',1),names=['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseDayPrefix'];
+  const validators=module.createAppMetaValidators(Object.freeze({keys:Object.freeze(Object.fromEntries(names.map(name=>[name,name]))),same:context.sameDataValue,normalizers:Object.freeze({verifiedRecovery:value=>value,attachmentIntegrity:value=>value,repositoryIntegrity:context.normalizeRepositoryIntegrityState,reconciliationBase:value=>value,reconciliationBaseNote:value=>value,reconciliationBaseDays:value=>value})}));
   const validate=value=>validators.repositoryIntegrityScrub(value,{key:'repositoryIntegrityScrub'});
-  assert.equal(validate(h.state.durable),true);const old=target=>({completedAt:target.completedAt,cycleStartedAt:target.cycleStartedAt,cursor:target.cursor,failedAt:target.failedAt,quarantinedObjectIds:target.quarantinedObjectIds});
-  assert.equal(validate({version:2,device:old(h.state.durable.device),drive:old(h.state.durable.drive)}),true);
-  const v4=target=>{const {recheckCursor,...prior}=target;return prior;};
-  assert.equal(h.state.durable.version,5);assert.equal(validate({version:4,device:v4(h.state.durable.device),drive:v4(h.state.durable.drive)}),true);
-  const v3=target=>({repositoryScope:target.repositoryScope,repositoryHandle:target.repositoryHandle,scanId:target.scanId,...old(target)});
-  assert.equal(validate({version:3,device:v3(h.state.durable.device),drive:v3(h.state.durable.drive)}),true);
-  const large={...h.state.durable.drive,quarantinedObjectIds:Array.from({length:257},(_,i)=>'obj_'+(i+1).toString(16).padStart(32,'0'))};
-  for(const [version,project] of [[2,old],[3,v3],[4,v4],[5,value=>value]]){
-    const record={version,device:project(h.state.durable.device),drive:project(large)};assert.equal(validate(record),true);assert.equal(context.normalizeRepositoryIntegrityState(record).drive.quarantinedObjectIds.length,257);
-  }
-  assert.equal(validate({...h.state.durable,drive:{...h.state.durable.drive,recheck:true,recheckCursor:'invalid'}}),false);
+  assert.equal(h.state.durable.version,7);assert.equal(validate(h.state.durable),true);
+  const drive=h.state.durable.locations['google-drive'],device=h.state.durable.locations['device-folder'];
+  for(const record of [{version:2,device,drive},{version:6,device,drive},{...h.state.durable,version:6}])assert.equal(validate(record),false,`version ${record.version} is not read by the ordinary runtime`);
+  const large={...drive,quarantinedObjectIds:Array.from({length:257},(_,i)=>'obj_'+(i+1).toString(16).padStart(32,'0'))};
+  const record={version:7,locations:{'device-folder':device,'google-drive':large}};assert.equal(validate(record),true);assert.equal(context.normalizeRepositoryIntegrityState(record).locations['google-drive'].quarantinedObjectIds.length,257);
+  assert.equal(validate({...h.state.durable,locations:{...h.state.durable.locations,'google-drive':{...drive,recheck:true,recheckCursor:'invalid'}}}),false);
+  assert.equal(validate({...h.state.durable,locations:{...h.state.durable.locations,'Bad Id':drive}}),false,'location ids are validated');
+  assert.equal(validate({...h.state.durable,locations:{...h.state.durable.locations,'device-folder':{...device,repositoryHandle:null}}}),false);
   assert.equal(validate({...h.state.durable,unknownField:true}),false);assert.equal(validate({...h.state.durable,version:99}),false);
 });
 await test('the recheck action is scoped, retains quarantine, and requires write control',async()=>{
- const h=fixture(),queued=[];h.context.DeviceBackup.status=()=>({connected:true});h.context.DeviceRepositoryIntegrity={schedule:(...args)=>queued.push(args)};h.context.BackupProviderRuntime.requestIntegrity=id=>queued.push(id);h.context.setStatus=()=>{};
+ const h=fixture(),queued=[];h.context.BackupProviderRuntime.locationStatus=()=>({connected:true});h.context.BackupProviderRuntime.requestIntegrity=id=>queued.push(id);h.context.setStatus=()=>{};
  const start=app.indexOf('async function requestRepositoryIntegrityRecheck('),end=app.indexOf('const ATTACHMENT_INTEGRITY_META_KEY=',start);vm.runInContext(app.slice(start,end),h.context);
- await h.context.mutateRepositoryIntegrityTarget('drive',current=>({...current,recheck:true,recheckCursor:objectId('c')}));
- assert.equal(await h.context.requestRepositoryIntegrityRecheck('drive'),true);assert.equal(h.state.durable.drive.recheckCursor,'');assert.equal(queued[0],'google-drive');assert.equal(h.state.durable.drive.recheck,true);assert.ok(h.state.durable.drive.requestId);assert.equal(h.state.durable.drive.quarantinedObjectIds.length,1);
- const before=h.state.durable;h.state.owner=false;assert.equal(await h.context.requestRepositoryIntegrityRecheck('device'),false);assert.equal(h.state.durable,before);
+ await h.context.mutateRepositoryIntegrityTarget('google-drive',current=>({...current,recheck:true,recheckCursor:objectId('c')}));
+ assert.equal(await h.context.requestRepositoryIntegrityRecheck('google-drive'),true);assert.equal(h.state.durable.locations['google-drive'].recheckCursor,'');assert.equal(queued[0],'google-drive');assert.equal(h.state.durable.locations['google-drive'].recheck,true);assert.ok(h.state.durable.locations['google-drive'].requestId);assert.equal(h.state.durable.locations['google-drive'].quarantinedObjectIds.length,1);
+ const before=h.state.durable;h.state.owner=false;assert.equal(await h.context.requestRepositoryIntegrityRecheck('device-folder'),false);assert.equal(h.state.durable,before);
 });
 await test('a new recheck rejects older results and clears quarantine only after successful verification',async()=>{
- const h=fixture(),before=h.state.durable.drive,requestId='00000000-0000-0000-0000-000000000001';
- await h.context.mutateRepositoryIntegrityTarget('drive',current=>({...current,requestId,recheck:true,cursor:'',scanId:'',partial:null,cycleStartedAt:stamp}));
- await assert.rejects(h.context.updateRepositoryIntegrityTarget('drive',{repositoryScope:'drive-one',status:'completed',complete:true,quarantined:[]}),{code:'REPOSITORY_CHANGED'});assert.equal(h.state.durable.drive.recheck,true);assert.deepEqual(Array.from(h.state.durable.drive.quarantinedObjectIds),Array.from(before.quarantinedObjectIds));
- await h.context.updateRepositoryIntegrityTarget('drive',{repositoryScope:'drive-one',requestId,status:'unavailable'});assert.equal(h.state.durable.drive.recheck,true);assert.ok(h.state.durable.drive.quarantinedObjectIds.length);
- await h.context.updateRepositoryIntegrityTarget('drive',{repositoryScope:'drive-one',requestId,status:'completed',complete:true,quarantined:[]});assert.equal(h.state.durable.drive.recheck,false);assert.equal(h.state.durable.drive.quarantinedObjectIds.length,0);assert.equal(h.state.durable.drive.history.length,1,'durable target history summarizes each day, not every segment');
+ const h=fixture(),before=h.state.durable.locations['google-drive'],requestId='00000000-0000-0000-0000-000000000001';
+ await h.context.mutateRepositoryIntegrityTarget('google-drive',current=>({...current,requestId,recheck:true,cursor:'',scanId:'',partial:null,cycleStartedAt:stamp}));
+ await assert.rejects(h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',status:'completed',complete:true,quarantined:[]}),{code:'REPOSITORY_CHANGED'});assert.equal(h.state.durable.locations['google-drive'].recheck,true);assert.deepEqual(Array.from(h.state.durable.locations['google-drive'].quarantinedObjectIds),Array.from(before.quarantinedObjectIds));
+ await h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',requestId,status:'unavailable'});assert.equal(h.state.durable.locations['google-drive'].recheck,true);assert.ok(h.state.durable.locations['google-drive'].quarantinedObjectIds.length);
+ await h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',requestId,status:'completed',complete:true,quarantined:[]});assert.equal(h.state.durable.locations['google-drive'].recheck,false);assert.equal(h.state.durable.locations['google-drive'].quarantinedObjectIds.length,0);assert.equal(h.state.durable.locations['google-drive'].history.length,1,'durable target history summarizes each day, not every segment');
 });
 const recheckRequest='00000000-0000-0000-0000-000000000002';
-async function beginRecheck(h){await h.context.mutateRepositoryIntegrityTarget('drive',current=>({...current,recheck:true,requestId:recheckRequest,cursor:'',recheckCursor:'',scanId:'',partial:null,cycleStartedAt:stamp}));}
+async function beginRecheck(h){await h.context.mutateRepositoryIntegrityTarget('google-drive',current=>({...current,recheck:true,requestId:recheckRequest,cursor:'',recheckCursor:'',scanId:'',partial:null,cycleStartedAt:stamp}));}
 await test('attempted corrupt progress persists independently of healthy progress and survives metadata failures',async()=>{
  const h=fixture();await beginRecheck(h);
- await h.context.updateRepositoryIntegrityTarget('drive',{repositoryScope:'drive-one',requestId:recheckRequest,status:'yielded',corruption:true,cursor:'',recheckCursor:objectId('c'),scanId,partial:null,quarantined:[objectId('c')]});
- const saved=await h.context.readRepositoryIntegrityTarget('drive');assert.equal(saved.cursor,'');assert.equal(saved.recheckCursor,objectId('c'));assert.equal(saved.recheck,true);assert.equal(saved.blockedReason,'corrupt');
- for(const field of ['readFailed','txReadFailed','writeFailed','commitFailed']){const before=h.state.durable;h.state[field]=true;await assert.rejects(h.context.updateRepositoryIntegrityTarget('drive',{repositoryScope:'drive-one',requestId:recheckRequest,status:'yielded',cursor:objectId('d'),recheckCursor:objectId('d'),scanId}));assert.equal(h.state.durable,before);h.state[field]=false;}
- await h.context.updateRepositoryIntegrityTarget('drive',{repositoryScope:'drive-one',requestId:recheckRequest,status:'unavailable'});assert.equal(h.state.durable.drive.recheckCursor,objectId('c'));assert.equal(h.state.durable.drive.recheck,true);
- h.state.drive='drive-two';const replaced=await h.context.readRepositoryIntegrityTarget('drive');assert.equal(replaced.recheckCursor,'');assert.equal(replaced.recheck,false);assert.equal(replaced.quarantinedObjectIds.length,0);
+ await h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',requestId:recheckRequest,status:'yielded',corruption:true,cursor:'',recheckCursor:objectId('c'),scanId,partial:null,quarantined:[objectId('c')]});
+ const saved=await h.context.readRepositoryIntegrityTarget('google-drive');assert.equal(saved.cursor,'');assert.equal(saved.recheckCursor,objectId('c'));assert.equal(saved.recheck,true);assert.equal(saved.blockedReason,'corrupt');
+ for(const field of ['readFailed','txReadFailed','writeFailed','commitFailed']){const before=h.state.durable;h.state[field]=true;await assert.rejects(h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',requestId:recheckRequest,status:'yielded',cursor:objectId('d'),recheckCursor:objectId('d'),scanId}));assert.equal(h.state.durable,before);h.state[field]=false;}
+ await h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',requestId:recheckRequest,status:'unavailable'});assert.equal(h.state.durable.locations['google-drive'].recheckCursor,objectId('c'));assert.equal(h.state.durable.locations['google-drive'].recheck,true);
+ h.state.drive='drive-two';const replaced=await h.context.readRepositoryIntegrityTarget('google-drive');assert.equal(replaced.recheckCursor,'');assert.equal(replaced.recheck,false);assert.equal(replaced.quarantinedObjectIds.length,0);
 });
 await test('earlier confirmed corruption does not discard the next object segment checkpoint',async()=>{
  const h=fixture();await beginRecheck(h);const hash=new Sha256();hash.update(new Uint8Array(1048576));
  const partial={version:1,objectId:objectId('d'),storedChecksum:'d'.repeat(64),storedBytes:2*1048576,phase:'stored',sourceVersion:'verified-source-v1',stored:{name:'backup-00000000-0000-0000-0000-000000000001',offset:1048576,hash:hashSnapshot(hash),frame:0}};
- await h.context.updateRepositoryIntegrityTarget('drive',{repositoryScope:'drive-one',requestId:recheckRequest,status:'yielded',checkpointOnly:true,corruption:true,cursor:'',recheckCursor:objectId('c'),scanId,partial,quarantined:[objectId('c'),objectId('d')]});
- const restarted=await h.context.readRepositoryIntegrityTarget('drive');assert.equal(restarted.recheckCursor,objectId('c'));assert.equal(restarted.partial.objectId,objectId('d'));assert.equal(restarted.partial.stored.offset,1048576);assert.equal(restarted.history.length,0);assert.equal(restarted.quarantinedObjectIds.length,2);
+ await h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',requestId:recheckRequest,status:'yielded',checkpointOnly:true,corruption:true,cursor:'',recheckCursor:objectId('c'),scanId,partial,quarantined:[objectId('c'),objectId('d')]});
+ const restarted=await h.context.readRepositoryIntegrityTarget('google-drive');assert.equal(restarted.recheckCursor,objectId('c'));assert.equal(restarted.partial.objectId,objectId('d'));assert.equal(restarted.partial.stored.offset,1048576);assert.equal(restarted.history.length,0);assert.equal(restarted.quarantinedObjectIds.length,2);
 });
 await test('a full unhealthy recheck ends its request and retains an explicit corruption warning',async()=>{
  const h=fixture();await beginRecheck(h);const base={repositoryScope:'drive-one',requestId:recheckRequest,status:'failed',corruption:true,quarantined:[objectId('c')]};
- await h.context.updateRepositoryIntegrityTarget('drive',{...base,complete:true});assert.equal(h.state.durable.drive.recheck,true,'a plain failed result is not proof of a full recheck');
- await h.context.updateRepositoryIntegrityTarget('drive',{...base,complete:true,recheckComplete:true});const value=h.state.durable.drive;
+ await h.context.updateRepositoryIntegrityTarget('google-drive',{...base,complete:true});assert.equal(h.state.durable.locations['google-drive'].recheck,true,'a plain failed result is not proof of a full recheck');
+ await h.context.updateRepositoryIntegrityTarget('google-drive',{...base,complete:true,recheckComplete:true});const value=h.state.durable.locations['google-drive'];
  assert.equal(value.recheck,false);assert.equal(value.recheckCursor,'');assert.equal(value.cursor,'');assert.equal(value.scanId,'');assert.equal(value.partial,null);assert.ok(value.failedAt);assert.equal(value.completedAt,value.failedAt);assert.equal(value.lastOutcome,'failed');assert.equal(value.blockedReason,'corrupt');assert.equal(value.quarantinedObjectIds.length,1);assert.equal(value.history.at(-1).complete,true);assert.equal(h.state.health.at(-1).kind,'warn');
 });
 await test('recheck status distinguishes pending corruption, unavailability and terminal findings',async()=>{
@@ -149,26 +152,21 @@ await test('recheck status distinguishes pending corruption, unavailability and 
  assert.match(h.context.integrityStatusText({recheck:false,lastOutcome:'failed',blockedReason:'corrupt',completedAt:stamp,quarantinedObjectIds:[objectId('c')]}),/^Objects need attention.*Last full scan/u);
  assert.match(h.context.integrityStatusText({recheck:true,blockedReason:'locked'}),/^Paused until backup encryption is unlocked/u);
 });
-await test('restored Device permission and write control wake a dormant integrity scan',async()=>{
-  const source=app.slice(app.indexOf('async function handleDeviceIntegrityActivation('),app.indexOf('AppActivation.subscribe(event=>{void handleDeviceIntegrityActivation('));
-  const state={connected:false,granted:true,owner:true,refreshes:0,schedules:[]},kinds={ORDINARY_FOCUS:'focus',VISIBILITY_RETURN:'visible',OWNERSHIP_TAKEOVER:'takeover'};
-  const context={APP_ACTIVATION_KINDS:kinds,appCanMutate:()=>state.owner,DeviceBackup:{status:()=>({connected:state.connected}),refreshPermission:async()=>{state.refreshes++;state.connected=state.granted;return {connected:state.connected};}},DeviceRepositoryIntegrity:{schedule:(delay,trigger)=>state.schedules.push({delay,trigger})}};
-  vm.createContext(context);vm.runInContext(source,context);
-  await context.handleDeviceIntegrityActivation({kind:'focus'});assert.deepEqual(state.schedules,[{delay:1500,trigger:'device-permission-opportunity'}]);
-  await context.handleDeviceIntegrityActivation({kind:'visible'});assert.equal(state.schedules.length,1,'ordinary focus must not reset an existing connected cadence');
-  await context.handleDeviceIntegrityActivation({kind:'takeover'});assert.equal(state.schedules.at(-1).trigger,'device-control-opportunity');
-  state.connected=false;state.owner=false;await context.handleDeviceIntegrityActivation({kind:'focus'});assert.equal(state.schedules.length,2,'read-only tab must not wake verification');
-  state.owner=true;state.granted=false;await context.handleDeviceIntegrityActivation({kind:'takeover'});assert.equal(state.schedules.length,2,'unavailable folder must remain dormant');
-  const refreshed=state.refreshes;await context.handleDeviceIntegrityActivation({kind:'background'});assert.equal(state.refreshes,refreshed);
+await test('activation refreshes Device permission without owning integrity scheduling',async()=>{
+ const start=app.indexOf('async function refreshDeviceBackgroundPermission('),source=app.slice(start,app.indexOf('AppActivation.subscribe(',start));
+ const kinds={ORDINARY_FOCUS:'focus',VISIBILITY_RETURN:'visible',OWNERSHIP_TAKEOVER:'takeover'};let refreshes=0;
+ const context={APP_ACTIVATION_KINDS:kinds,DeviceBackup:{refreshPermission:async()=>{refreshes++;}}};vm.createContext(context);vm.runInContext(source,context);
+ for(const kind of ['focus','visible','takeover'])await context.refreshDeviceBackgroundPermission({kind});assert.equal(refreshes,3);
+ await context.refreshDeviceBackgroundPermission({kind:'background'});assert.equal(refreshes,3);
 });
-await test('large quarantine remains lossless across commits, restart, legacy payloads and repository replacement',async()=>{
+await test('large quarantine remains lossless across commits, restart and repository replacement',async()=>{
  const h=fixture(),ids=Array.from({length:257},(_,i)=>'obj_'+(i+1).toString(16).padStart(32,'0'));
- await h.context.mutateRepositoryIntegrityTarget('drive',current=>({...current,quarantinedObjectIds:[...ids,'invalid',ids[0]]}));
- assert.deepEqual(Array.from((await h.context.readRepositoryIntegrityTarget('drive')).quarantinedObjectIds),ids);
- const prior=h.state.durable;await h.context.updateRepositoryIntegrityTarget('device',{repositoryScope:'device-one',status:'completed',complete:true});assert.deepEqual(Array.from(h.state.durable.drive.quarantinedObjectIds),ids);
- h.state.commitFailed=true;await assert.rejects(h.context.updateRepositoryIntegrityTarget('drive',{repositoryScope:'drive-one',status:'failed',corruption:true,objectId:'obj_'+ 'f'.repeat(32)}));assert.deepEqual(Array.from(h.state.durable.drive.quarantinedObjectIds),ids);h.state.commitFailed=false;
- for(const version of [2,3,4,5])assert.deepEqual(Array.from(h.context.normalizeRepositoryIntegrityState({...prior,version}).drive.quarantinedObjectIds),ids);
- h.state.drive='drive-replaced';assert.equal((await h.context.readRepositoryIntegrityTarget('drive')).quarantinedObjectIds.length,0);
+ await h.context.mutateRepositoryIntegrityTarget('google-drive',current=>({...current,quarantinedObjectIds:[...ids,'invalid',ids[0]]}));
+ assert.deepEqual(Array.from((await h.context.readRepositoryIntegrityTarget('google-drive')).quarantinedObjectIds),ids);
+ const prior=h.state.durable;await h.context.updateRepositoryIntegrityTarget('device-folder',{repositoryScope:'device-one',status:'completed',complete:true});assert.deepEqual(Array.from(h.state.durable.locations['google-drive'].quarantinedObjectIds),ids);
+ h.state.commitFailed=true;await assert.rejects(h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',status:'failed',corruption:true,objectId:'obj_'+ 'f'.repeat(32)}));assert.deepEqual(Array.from(h.state.durable.locations['google-drive'].quarantinedObjectIds),ids);h.state.commitFailed=false;
+ assert.deepEqual(Array.from(h.context.normalizeRepositoryIntegrityState(prior).locations['google-drive'].quarantinedObjectIds),ids);
+ h.state.drive='drive-replaced';assert.equal((await h.context.readRepositoryIntegrityTarget('google-drive')).quarantinedObjectIds.length,0);
 });
 
 console.log(JSON.stringify({status:'PASS',suite:'repository-integrity-state',cases},null,2));

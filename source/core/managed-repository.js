@@ -9,7 +9,7 @@ registry.define('managed-repository',1,()=>{
   const freeze=Object.freeze;
   const PORT_FIELDS=freeze({
     configuration:freeze(['backupVersion','limits','logicalCaptureFormat','logicalCaptureVersion']),
-    persistence:freeze(['reconciliationBaseRead','reconciliationBaseWrite']),
+    persistence:freeze(['reconciliationBaseRead','reconciliationBaseWrite','personalFingerprint','dayFingerprints','sessionFingerprint']),
     assets:freeze(['get','verifyAliases']),
     files:freeze(['protect','unprotect','run','scope']),
     checkpoint:freeze(['capture','beginPreparation','readPreparationUnits','finalizePreparation','establishPreparationBaseline','assertCurrent','inspectVerifiedCapture','verifyVerifiedCapture','currentImportSignal']),
@@ -28,14 +28,14 @@ registry.define('managed-repository',1,()=>{
     if(!Object.isFrozen(ports.configuration.limits))throw new TypeError('Managed repository limits must be frozen.');
     const APP_LIMITS=ports.configuration.limits,backupVersion=ports.configuration.backupVersion;
     const LOGICAL_CHECKPOINT_CAPTURE_FORMAT=ports.configuration.logicalCaptureFormat,LOGICAL_CHECKPOINT_CAPTURE_VERSION=ports.configuration.logicalCaptureVersion;
-    const AppData=freeze({reconciliationBase:freeze({read:ports.persistence.reconciliationBaseRead,write:ports.persistence.reconciliationBaseWrite})});
+    const AppData=freeze({reconciliationBase:freeze({read:ports.persistence.reconciliationBaseRead,write:ports.persistence.reconciliationBaseWrite,personalFingerprint:ports.persistence.personalFingerprint,dayFingerprints:ports.persistence.dayFingerprints,sessionFingerprint:ports.persistence.sessionFingerprint})});
     const AssetData=freeze({get:ports.assets.get,verifyAliases:ports.assets.verifyAliases});
     const Exports=ports.files;
     const captureLogicalCheckpoint=ports.checkpoint.capture,beginPreparationCapture=ports.checkpoint.beginPreparation,readPreparationUnits=ports.checkpoint.readPreparationUnits,finalizePreparationCapture=ports.checkpoint.finalizePreparation,establishPreparationBaseline=ports.checkpoint.establishPreparationBaseline,assertLogicalCheckpointCurrent=ports.checkpoint.assertCurrent,inspectVerifiedCapture=ports.checkpoint.inspectVerifiedCapture,verifyVerifiedCapture=ports.checkpoint.verifyVerifiedCapture,currentImportSignal=ports.checkpoint.currentImportSignal;
     const clampText=ports.domain.clampText,throwIfImportAborted=ports.environment.throwIfAborted,yieldTask=ports.environment.yieldTask;
     const AppDiagnostics=freeze({capture:ports.diagnostics.capture});
     const REPOSITORY_RETENTION_POLICY=freeze({
-      format:'study-director.repository-retention-policy',version:1,normalLimit:15,dailyDays:6,weeklyPeriods:4,monthlyPeriods:4,protectedLimit:1,beforeRestoreProtectionMs:7*24*60*60*1000,weekStartsOn:1,calendar:'local-at-capture'
+      format:'study-director.repository-retention-policy',version:2,normalLimit:15,dailyDays:6,weeklyPeriods:4,monthlyPeriods:4,hourlyLimit:10,hourlyWindowHours:24,protectedLimit:1,beforeRestoreProtectionMs:7*24*60*60*1000,weekStartsOn:1,calendar:'local-at-capture'
     });
     const REPOSITORY_RECONCILIATION_ANCESTRY_MAX_BYTES=Math.max(8192,Math.floor((Number(APP_LIMITS.backupMaxEntryBytes)||2097152)/8));
     function validateRepositoryRetentionPolicy(value){
@@ -44,17 +44,31 @@ registry.define('managed-repository',1,()=>{
       return value;
     }
     validateRepositoryRetentionPolicy(REPOSITORY_RETENTION_POLICY);
-const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=5,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5]));
+// Released builds wrote manifests 1 to 5; this one writes 8 (6 and 7 came
+// only from unreleased builds, so nothing reads them). A released manifest
+// keys notes by name and calls a note areaNote (in object kinds, pack members,
+// counts and the deletion list), and holds no versions kept for review. It is
+// verified under the names it was written with; its notes leave the reader
+// under the current name.
+const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=8,REPOSITORY_RELEASED_MANIFEST_VERSION=5,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,8]));
+const releasedRepositoryManifest=manifestVersion=>Number(manifestVersion)<=REPOSITORY_RELEASED_MANIFEST_VERSION;
+const PENDING_REVIEW_KIND='pendingReview',WRITTEN_NOTE_KIND='areaNote';
+const repositoryNoteKind=manifestVersion=>releasedRepositoryManifest(manifestVersion)?WRITTEN_NOTE_KIND:'note';
 const LEGACY_REFLECTION_DRAFT_PACK_KIND='reflectionDraftPack';
 const REPOSITORY_COMMIT_FORMAT='study-director.backup-repository-commit',REPOSITORY_COMMIT_VERSION=1,REPOSITORY_COMMIT_REQUIRED_MANIFEST_VERSION=2;
 const REPOSITORY_OBJECT_FORMAT='study-director.backup-repository-object',REPOSITORY_OBJECT_VERSION=1;
 const REPOSITORY_PACK_FORMAT='study-director.backup-repository-structured-pack',REPOSITORY_PACK_VERSION=1,REPOSITORY_PACK_SHARDS=4,REPOSITORY_PACK_MEMBER_MAX_BYTES=64*1024;
-const REPOSITORY_PACKABLE_KINDS=freeze(new Set(['areaNote','personalData']));
+const REPOSITORY_PACKABLE_KINDS=freeze(new Set(['note','personalData',PENDING_REVIEW_KIND])),WRITTEN_PACKABLE_KINDS=freeze(new Set([WRITTEN_NOTE_KIND,'personalData']));
 const repositoryPreparedState=new WeakMap();
-const REPOSITORY_PREPARATION_INDEX_VERSION=2;
+const repositoryPublicationStates=new Map();
+const REPOSITORY_PREPARATION_INDEX_VERSION=3;
 const REPOSITORY_OBJECT_IO_CONCURRENCY=8;
 const REPOSITORY_LARGE_OBJECT_BYTES=8*1024*1024;
-let repositoryPreparationIndex=null;
+// What the last prepared version held (its units and their fingerprints),
+// and what changed since the base. The newest prepared version also keeps
+// its base update, so placing that same version in Drive later makes it
+// the base.
+let repositoryPreparationIndex=null,repositorySpine=null;
 async function mapRepositoryBounded(values,worker,limit=REPOSITORY_OBJECT_IO_CONCURRENCY){
   const rows=Array.isArray(values)?values:[],results=new Array(rows.length),concurrency=Math.max(1,Math.min(REPOSITORY_OBJECT_IO_CONCURRENCY,Math.floor(Number(limit)||1)));let next=0,failure=null;
   async function run(){for(;;){if(failure)return;const index=next++;if(index>=rows.length)return;try{results[index]=await worker(rows[index],index);}catch(error){if(!failure)failure=error;}}}
@@ -71,28 +85,30 @@ function repositoryPackShard(kind,key){
 function repositoryPackKey(shard){const value=Number(shard);if(!Number.isInteger(value)||value<0||value>=REPOSITORY_PACK_SHARDS)throw new Error('Repository structured-pack shard is invalid.');return `shard:${value}`;}
 function repositoryPackableEntry(entry){return !!(entry&&entry.present&&REPOSITORY_PACKABLE_KINDS.has(String(entry.kind))&&Number(entry.sourceBytes)>0&&Number(entry.sourceBytes)<=REPOSITORY_PACK_MEMBER_MAX_BYTES);}
 function repositoryPackMembersKey(members){return (members||[]).map(member=>`${member.kind}\u0000${member.key}\u0000${member.fingerprint}\u0000${member.sourceBytes}`).join('\u0001');}
-function repositoryPackManifestMembers(value){
-  const rows=Array.isArray(value)?value:[],seen=new Set(),out=[];
+function repositoryPackManifestMembers(value,manifestVersion=REPOSITORY_MANIFEST_VERSION){
+  const rows=Array.isArray(value)?value:[],seen=new Set(),out=[],packable=repositoryNoteKind(manifestVersion)==='note'?REPOSITORY_PACKABLE_KINDS:WRITTEN_PACKABLE_KINDS;
   for(const raw of rows){
     if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new Error('Repository structured-pack member is invalid.');
     const kind=String(raw.kind||''),key=String(raw.key||''),fingerprint=String(raw.fingerprint||'').toLowerCase(),sourceBytes=Number(raw.sourceBytes),unit=repositoryUnitKey(kind,key);
-    if(!REPOSITORY_PACKABLE_KINDS.has(kind)||!key||!/^[a-f0-9]{64}$/u.test(fingerprint)||!Number.isSafeInteger(sourceBytes)||sourceBytes<=0||sourceBytes>REPOSITORY_PACK_MEMBER_MAX_BYTES||seen.has(unit))throw new Error('Repository structured-pack member is malformed.');
+    if(!packable.has(kind)||!key||!/^[a-f0-9]{64}$/u.test(fingerprint)||!Number.isSafeInteger(sourceBytes)||sourceBytes<=0||sourceBytes>REPOSITORY_PACK_MEMBER_MAX_BYTES||seen.has(unit))throw new Error('Repository structured-pack member is malformed.');
     seen.add(unit);out.push(freeze({kind,key,fingerprint,sourceBytes}));
   }
   out.sort((a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key));if(!out.length)throw new Error('Repository structured-pack contains no members.');return freeze(out);
 }
 function repositoryPreparationUnit(kind,key){
   if(kind==='dailyRecordPack')return `dailyRecordPack:${String(key)}`;
-  if(kind==='areaNote')return `areaNote:${String(key)}`;
+  if(kind==='note')return `note:${String(key)}`;
   if(kind==='personalData'&&String(key)==='personal')return 'personalData';
+  if(kind===PENDING_REVIEW_KIND&&/^pr_[a-f0-9]{32}$/u.test(String(key)))return `pendingReview:${String(key)}`;
   if(kind==='activeSession'&&String(key)==='active')return 'activeSession';
   throw new Error('Repository structured preparation unit is invalid.');
 }
 function repositoryPreparationDescriptor(unit){
   const value=String(unit||'');
   if(/^dailyRecordPack:\d{4}-(?:0[1-9]|1[0-2])$/u.test(value))return freeze({unit:value,kind:'dailyRecordPack',key:value.slice('dailyRecordPack:'.length)});
-  if(value.startsWith('areaNote:')&&value.length>'areaNote:'.length)return freeze({unit:value,kind:'areaNote',key:value.slice('areaNote:'.length)});
+  if(value.startsWith('note:')&&value.length>'note:'.length)return freeze({unit:value,kind:'note',key:value.slice('note:'.length)});
   if(value==='personalData')return freeze({unit:value,kind:'personalData',key:'personal'});
+  if(/^pendingReview:pr_[a-f0-9]{32}$/u.test(value))return freeze({unit:value,kind:PENDING_REVIEW_KIND,key:value.slice('pendingReview:'.length)});
   if(value==='activeSession')return freeze({unit:value,kind:'activeSession',key:'active'});
   return null;
 }
@@ -102,9 +118,13 @@ function repositoryPreparationEntry(kind,key,payload,fingerprint='',sourceBytes=
   return freeze({unit,kind,key:String(key),present:present===true,fingerprint:present?String(fingerprint||''):'',sourceBytes:present?Math.max(0,Number(sourceBytes)||0):0,members,assetIds});
 }
 function repositoryPreparationEntryMap(index){const map=new Map();for(const entry of index&&index.entries||[])map.set(String(entry.unit),entry);return map;}
-async function repositoryPreparationPlan(preparation,reconciliationBase){
+// What the reconciliation base keeps of a note: its title and text.
+function baseNoteState(note){return freeze({label:String(note&&note.label||''),text:String(note&&note.text||'')});}
+async function repositoryPreparationPlan(preparation,reconciliationBase,{baseUpdate=false}={}){
   const index=repositoryPreparationIndex;if(!index||Number(index.version)!==REPOSITORY_PREPARATION_INDEX_VERSION)return null;
-  if(String(index.checkpointId||'')!==String(reconciliationBase&&reconciliationBase.checkpointId||''))return null;
+  // A version that may become what is shared through Drive must say what
+  // changed since the base; when that is unknown the whole state is read.
+  if(baseUpdate&&!(reconciliationBase&&Array.isArray(index.sinceBase)&&String(index.baseCheckpointId||'')===String(reconciliationBase.checkpointId||'')))return null;
   const current=repositoryPreparationStampMap(preparation&&preparation.stamps),previous=repositoryPreparationStampMap(index.stamps);if(!current||!previous||current.has('*'))return null;
   for(const unit of current.keys())if(!repositoryPreparationDescriptor(unit)&&!/^attachmentAsset:(?:att|img)-[a-z0-9-]{20,80}$/u.test(unit))return null;
   for(const unit of previous.keys())if(!current.has(unit))return null;
@@ -112,35 +132,41 @@ async function repositoryPreparationPlan(preparation,reconciliationBase){
   if(String(index.epochToken||'')===String(preparation&&preparation.epochToken||'')){if(changed.length||current.size!==previous.size)return null;}
   else if(!changed.length)return null;
   const entries=repositoryPreparationEntryMap(index),structuredChanged=changed.filter(unit=>!!repositoryPreparationDescriptor(unit));
-  if(!reconciliationBase||Number(reconciliationBase.noteCount)!==Number(index.noteCount)||String(reconciliationBase.noteKeyFingerprint||'')!==String(index.noteKeyFingerprint||''))return null;
-  return freeze({index,entries,currentStamps:current,changed:freeze(changed),structuredChanged:freeze(structuredChanged)});
+  return freeze({index,entries,changed:freeze(changed),structuredChanged:freeze(structuredChanged),baseUpdate});
 }
 async function repositoryNoteSetIdentity(entries){
-  const noteKeys=[...entries.values()].filter(entry=>entry&&entry.present&&entry.kind==='areaNote').map(entry=>String(entry.key)).sort(),noteKeyFingerprint=await Exports.run('checksum',{value:JSON.stringify(noteKeys),algorithm:'sha256'});
+  const noteKeys=[...entries.values()].filter(entry=>entry&&entry.present&&entry.kind==='note').map(entry=>String(entry.key)).sort(),noteKeyFingerprint=await Exports.run('checksum',{value:JSON.stringify(noteKeys),algorithm:'sha256'});
   return freeze({noteKeys:freeze(noteKeys),noteCount:noteKeys.length,noteKeyFingerprint:String(noteKeyFingerprint||'')});
 }
 async function repositoryPreparationIndexCandidate(epochToken,stamps,entries){
   const rows=[...entries.values()].sort((a,b)=>a.unit.localeCompare(b.unit));
-  const maxUnits=Math.max(1024,Number(APP_LIMITS.maxImportRecords||10000)+Number(APP_LIMITS.maxImportAreaNotes||1000)+16);if(rows.length>maxUnits)return null;
+  const maxUnits=Math.max(1024,Number(APP_LIMITS.maxImportRecords||10000)+Number(APP_LIMITS.maxNotes||1000)+2*Number(APP_LIMITS.maxPendingReviews||2000)+16);if(rows.length>maxUnits)return null;
   const noteSet=await repositoryNoteSetIdentity(entries);
   return freeze({version:REPOSITORY_PREPARATION_INDEX_VERSION,epochToken:String(epochToken||''),checkpointId:'',noteCount:noteSet.noteCount,noteKeyFingerprint:noteSet.noteKeyFingerprint,stamps:freeze([...(stamps||[])]),entries:freeze(rows)});
 }
+// One fingerprint for every note in a checkpoint, so retention can tell
+// which versions changed notes.
+async function repositoryNotesFingerprint(entries){
+  const notes=[...entries.values()].filter(entry=>entry&&entry.present&&entry.kind==='note').map(entry=>[String(entry.key),String(entry.fingerprint)]).sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);
+  return String(await Exports.run('checksum',{value:JSON.stringify(notes),algorithm:'sha256'})||'').toLowerCase();
+}
 function repositoryPreparationCounts(entries){
-  let dailyRecord=0,areaNote=0,activeSession=0,personalData=0;
-  for(const entry of entries.values())if(entry&&entry.present){if(entry.kind==='dailyRecordPack')dailyRecord+=entry.members.length;else if(entry.kind==='areaNote')areaNote+=1;else if(entry.kind==='activeSession')activeSession=1;else if(entry.kind==='personalData')personalData=1;}
-  return BackupCodec.countShape({checkpointManifest:1,personalData,dailyRecord,areaNote,activeSession});
+  let dailyRecord=0,note=0,activeSession=0,personalData=0,pendingReview=0;
+  for(const entry of entries.values())if(entry&&entry.present){if(entry.kind==='dailyRecordPack')dailyRecord+=entry.members.length;else if(entry.kind==='note')note+=1;else if(entry.kind==='activeSession')activeSession=1;else if(entry.kind==='personalData')personalData=1;else if(entry.kind===PENDING_REVIEW_KIND)pendingReview+=1;}
+  return BackupCodec.countShape({checkpointManifest:1,personalData,dailyRecord,note,activeSession,pendingReview});
 }
 function repositoryPreparationInventory(entries){
-  const recordDates=[],noteKeys=[],assetIds=new Set();
-  for(const entry of entries.values())if(entry&&entry.present){if(entry.kind==='dailyRecordPack')recordDates.push(...entry.members);else if(entry.kind==='areaNote')noteKeys.push(entry.key);for(const id of entry.assetIds||[])assetIds.add(String(id));}
-  recordDates.sort();noteKeys.sort();return freeze({recordDates:freeze(recordDates),noteKeys:freeze(noteKeys),assetIds:freeze([...assetIds].sort()),counts:repositoryPreparationCounts(entries)});
+  const recordDates=[],noteKeys=[],pendingReviewIds=[],assetIds=new Set();
+  for(const entry of entries.values())if(entry&&entry.present){if(entry.kind==='dailyRecordPack')recordDates.push(...entry.members);else if(entry.kind==='note')noteKeys.push(entry.key);else if(entry.kind===PENDING_REVIEW_KIND)pendingReviewIds.push(entry.key);for(const id of entry.assetIds||[])assetIds.add(String(id));}
+  recordDates.sort();noteKeys.sort();pendingReviewIds.sort();return freeze({recordDates:freeze(recordDates),noteKeys:freeze(noteKeys),pendingReviewIds:freeze(pendingReviewIds),assetIds:freeze([...assetIds].sort()),counts:repositoryPreparationCounts(entries)});
 }
 function repositoryMonth(value){const match=/^(\d{4}-\d{2})-\d{2}$/u.exec(String(value||''));if(!match)throw new Error('Repository record date is invalid.');return match[1];}
-function repositoryManifestCounts(value,manifestVersion){
+function repositoryManifestCounts(written,manifestVersion){
+  const value=repositoryNoteKind(manifestVersion)!=='note'&&written&&Object.hasOwn(written,WRITTEN_NOTE_KIND)?{...written,note:written[WRITTEN_NOTE_KIND]}:written;
   const current=BackupCodec.countShape(value||{});
   if(Number(manifestVersion)>=5)return freeze({...current});
   const raw=Number(value&&value.reflectionDraft||0),reflectionDraft=Number.isSafeInteger(raw)&&raw>=0&&raw<=Math.max(1,Number(APP_LIMITS.maxImportRecords)||10000)?raw:0;
-  return freeze({dailyRecord:Number(current.dailyRecord||0),areaNote:Number(current.areaNote||0),activeSession:Number(current.activeSession||0),reflectionDraft,personalData:Number(current.personalData||0),checkpointManifest:Number(current.checkpointManifest||0)});
+  return freeze({dailyRecord:Number(current.dailyRecord||0),note:Number(current.note||0),activeSession:Number(current.activeSession||0),reflectionDraft,personalData:Number(current.personalData||0),checkpointManifest:Number(current.checkpointManifest||0)});
 }
 function repositoryCountsEqualForManifest(actual,expected,manifestVersion){
   const a=repositoryManifestCounts(actual,manifestVersion),b=repositoryManifestCounts(expected,manifestVersion);
@@ -160,7 +186,7 @@ function repositoryLogicalObjectRows(manifest){
   for(const entry of Array.isArray(manifest&&manifest.objects)?manifest.objects:[]){
     const kind=String(entry&&entry.kind||'');
     if(kind==='reflectionDraftPack')continue; // Legacy-only data intentionally retired from the current canonical state.
-    if(kind==='structuredPack'){for(const member of repositoryPackManifestMembers(entry.members))out.push(freeze({...member}));}
+    if(kind==='structuredPack'){for(const member of repositoryPackManifestMembers(entry.members,manifest.version))out.push(freeze({...member}));}
     else out.push(freeze({kind,key:String(entry&&entry.key||''),fingerprint:String(entry&&entry.fingerprint||''),sourceBytes:Number(entry&&entry.sourceBytes)||0}));
   }
   return freeze(out.sort((a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key)||a.fingerprint.localeCompare(b.fingerprint)||a.sourceBytes-b.sourceBytes));
@@ -171,13 +197,18 @@ function repositoryLogicalIdentityPayload(value){
   const assets=(Array.isArray(manifest.assets)?manifest.assets:[]).map(entry=>entry&&entry.missing===true?freeze({assetId:String(entry.assetId||''),missing:true}):freeze({assetId:String(entry&&entry.assetId||''),mimeType:String(entry&&entry.mimeType||''),size:Number(entry&&entry.size)||0,checksum:String(entry&&entry.checksum||''),name:String(entry&&entry.name||''),library:entry&&entry.library===true})).sort((a,b)=>a.assetId.localeCompare(b.assetId));
   const protectedManifest=manifest.protectedCheckpointManifest&&typeof manifest.protectedCheckpointManifest==='object'?manifest.protectedCheckpointManifest:{};
   const savedDayDeletions=(Array.isArray(protectedManifest.savedDayDeletions)?protectedManifest.savedDayDeletions:[]).map(entry=>freeze({date:String(entry&&entry.date||''),deletedAt:String(entry&&entry.deletedAt||'')})).sort((a,b)=>a.date.localeCompare(b.date)||a.deletedAt.localeCompare(b.deletedAt));
-  const areaNoteDeletions=(Array.isArray(protectedManifest.areaNoteDeletions)?protectedManifest.areaNoteDeletions:[]).map(entry=>freeze({key:String(entry&&entry.key||''),deletedAt:String(entry&&entry.deletedAt||'')})).sort((a,b)=>a.key.localeCompare(b.key)||a.deletedAt.localeCompare(b.deletedAt));
+  const noteDeletions=(Array.isArray(protectedManifest.noteDeletions)?protectedManifest.noteDeletions:[]).map(entry=>freeze({key:String(entry&&entry.key||''),deletedAt:String(entry&&entry.deletedAt||'')})).sort((a,b)=>a.key.localeCompare(b.key)||a.deletedAt.localeCompare(b.deletedAt));
   const attachmentDeletions=(Array.isArray(protectedManifest.attachmentDeletions)?protectedManifest.attachmentDeletions:[]).map(entry=>freeze({assetId:String(entry&&entry.assetId||''),deletedAt:String(entry&&entry.deletedAt||'')})).sort((a,b)=>a.assetId.localeCompare(b.assetId)||a.deletedAt.localeCompare(b.deletedAt));
   // Logical identity is defined by the current portable canonical domains. Legacy-only
   // Reflection Draft counts are verified when reading old manifests but are deliberately
   // excluded here because L16F discards that retired domain during compatibility migration.
-  const counts=BackupCodec.countShape(manifest.counts||{});
-  return freeze({format:'study-director.managed-backup-logical-state',version:1,counts:freeze({...counts}),objects:freeze(objects),assets:freeze(assets),deletions:freeze({savedDays:freeze(savedDayDeletions),areaNotes:freeze(areaNoteDeletions),attachments:freeze(attachmentDeletions)})});
+  // A version written before the note rename keeps the identity it was
+  // written with: the same fields, in the same order, under the old names.
+  const shaped=BackupCodec.countShape(manifest.counts||{}),written=repositoryNoteKind(manifest.version)!=='note';
+  const counts=releasedRepositoryManifest(manifest.version)?Object.fromEntries(Object.entries(shaped).filter(([type])=>type!==PENDING_REVIEW_KIND)):shaped;
+  const identityCounts=written?Object.fromEntries(Object.entries(counts).map(([type,count])=>[type==='note'?WRITTEN_NOTE_KIND:type,count])):{...counts};
+  const deletions=written?{savedDays:freeze(savedDayDeletions),areaNotes:freeze(noteDeletions),attachments:freeze(attachmentDeletions)}:{savedDays:freeze(savedDayDeletions),notes:freeze(noteDeletions),attachments:freeze(attachmentDeletions)};
+  return freeze({format:'study-director.managed-backup-logical-state',version:1,counts:freeze(identityCounts),objects:freeze(objects),assets:freeze(assets),deletions:freeze(deletions)});
 }
 async function repositoryLogicalFingerprint(value){
   const payload=repositoryLogicalIdentityPayload(value),serialized=await Exports.run('stringify',{value:payload});
@@ -190,13 +221,13 @@ function repositoryLocalWeekStartKey(value){const date=value instanceof Date?new
 function repositoryRetentionCalendar(value){const date=value instanceof Date?new Date(value.getTime()):new Date(value);if(!Number.isFinite(date.getTime()))throw new Error('Repository retention calendar date is invalid.');const localDate=repositoryLocalDateKey(date);return freeze({localDate,weekStart:repositoryLocalWeekStartKey(date),month:localDate.slice(0,7),utcOffsetMinutes:-date.getTimezoneOffset()});}
 function repositoryUtcDateKey(value){const date=value instanceof Date?new Date(value.getTime()):new Date(value);if(!Number.isFinite(date.getTime()))throw new Error('Repository retention calendar date is invalid.');return `${date.getUTCFullYear()}-${repositoryPad2(date.getUTCMonth()+1)}-${repositoryPad2(date.getUTCDate())}`;}
 function repositoryOffsetDateKey(value,offsetMinutes){const date=value instanceof Date?new Date(value.getTime()):new Date(value),offset=Number(offsetMinutes);if(!Number.isFinite(date.getTime())||!Number.isInteger(offset)||Math.abs(offset)>14*60)throw new Error('Repository retention calendar offset is invalid.');return repositoryUtcDateKey(new Date(date.getTime()+offset*60000));}
-function repositoryLegacyRetentionDescriptor(exportedAt){const date=new Date(exportedAt);if(!Number.isFinite(date.getTime()))throw new Error('Repository retention calendar date is invalid.');const localDate=repositoryUtcDateKey(date),localOrdinal=repositoryDateOrdinal(localDate),weekStart=repositoryDateKeyFromOrdinal(repositoryWeekStartOrdinal(localOrdinal));return freeze({format:'study-director.repository-retention',version:1,role:'normal',protectedUntil:'',calendar:freeze({localDate,weekStart,month:localDate.slice(0,7),utcOffsetMinutes:0})});}
+function repositoryLegacyRetentionDescriptor(exportedAt){const date=new Date(exportedAt);if(!Number.isFinite(date.getTime()))throw new Error('Repository retention calendar date is invalid.');const localDate=repositoryUtcDateKey(date),localOrdinal=repositoryDateOrdinal(localDate),weekStart=repositoryDateKeyFromOrdinal(repositoryWeekStartOrdinal(localOrdinal));return freeze({format:'study-director.repository-retention',version:1,role:'normal',protectedUntil:'',calendar:freeze({localDate,weekStart,month:localDate.slice(0,7),utcOffsetMinutes:0}),notesFingerprint:''});}
 function canonicalRepositorySafetyPurpose(value,{legacy=false}={}){
   const purpose=String(value||'before-restore');
   if(legacy&&purpose==='before-clear-archive')return 'before-clear-library';
   return ['before-restore','before-combine','before-clear-library'].includes(purpose)?purpose:'';
 }
-function repositoryRetentionDescriptor(exportedAt,input=null){
+function repositoryRetentionDescriptor(exportedAt,input=null,notesFingerprint=''){
   // `role` is a stable wire field; `purpose` identifies the current safety operation.
   const role=input&&input.role==='before-restore'?'before-restore':'normal',calendar=repositoryRetentionCalendar(exportedAt);let protectedUntil='',purpose='';
   if(role==='before-restore'){
@@ -204,7 +235,7 @@ function repositoryRetentionDescriptor(exportedAt,input=null){
     protectedUntil=Number.isFinite(parsed)&&parsed>minimum?new Date(parsed).toISOString():new Date(minimum+REPOSITORY_RETENTION_POLICY.beforeRestoreProtectionMs).toISOString();
     purpose=canonicalRepositorySafetyPurpose(input&&input.purpose)||'before-restore';
   }
-  return freeze({format:'study-director.repository-retention',version:1,role,protectedUntil,purpose,calendar});
+  return freeze({format:'study-director.repository-retention',version:1,role,protectedUntil,purpose,calendar,notesFingerprint:/^[a-f0-9]{64}$/u.test(String(notesFingerprint||''))?String(notesFingerprint):''});
 }
 function repositoryDateOrdinal(key){
   const match=/^(\d{4})-(\d{2})-(\d{2})$/u.exec(String(key||''));if(!match)return NaN;
@@ -223,16 +254,28 @@ function validateRepositoryRetention(value,exportedAt,{legacy=false}={}){
   if(role==='normal'&&(protectedUntil||rawPurpose))throw new Error('Normal repository checkpoints cannot carry safety metadata.');
   const calendar=value.calendar,localDate=String(calendar&&calendar.localDate||''),weekStart=String(calendar&&calendar.weekStart||''),month=String(calendar&&calendar.month||''),offset=Number(calendar&&calendar.utcOffsetMinutes),localOrdinal=repositoryDateOrdinal(localDate),weekOrdinal=repositoryDateOrdinal(weekStart);
   if(!calendar||typeof calendar!=='object'||Array.isArray(calendar)||!Number.isFinite(localOrdinal)||!Number.isFinite(weekOrdinal)||!/^(?:\d{4})-(?:0[1-9]|1[0-2])$/u.test(month)||month!==localDate.slice(0,7)||!Number.isInteger(offset)||Math.abs(offset)>14*60||repositoryOffsetDateKey(exportedAt,offset)!==localDate||weekOrdinal>localOrdinal||localOrdinal-weekOrdinal>6||new Date(weekOrdinal*86400000).getUTCDay()!==REPOSITORY_RETENTION_POLICY.weekStartsOn)throw new Error('Device repository retention calendar is invalid.');
-  return freeze({format:'study-director.repository-retention',version:1,role,protectedUntil:role==='before-restore'?new Date(protectedUntilMs).toISOString():'',purpose,calendar:freeze({localDate,weekStart,month,utcOffsetMinutes:offset})});
+  const notesFingerprint=String(value.notesFingerprint||'');if(notesFingerprint&&!/^[a-f0-9]{64}$/u.test(notesFingerprint))throw new Error('Device repository retention notes fingerprint is invalid.');
+  return freeze({format:'study-director.repository-retention',version:1,role,protectedUntil:role==='before-restore'?new Date(protectedUntilMs).toISOString():'',purpose,calendar:freeze({localDate,weekStart,month,utcOffsetMinutes:offset}),notesFingerprint});
 }
 function repositoryDateKeyFromOrdinal(value){const date=new Date(Number(value)*86400000);return `${date.getUTCFullYear()}-${repositoryPad2(date.getUTCMonth()+1)}-${repositoryPad2(date.getUTCDate())}`;}
 function repositoryWeekStartOrdinal(value){const date=new Date(Number(value)*86400000),day=date.getUTCDay(),delta=(day-REPOSITORY_RETENTION_POLICY.weekStartsOn+7)%7;return Number(value)-delta;}
-function repositoryPreviousMonthKey(value,offset){const match=/^(\d{4})-(\d{2})$/u.exec(String(value||''));if(!match||!Number.isInteger(offset)||offset<0)throw new Error('Repository retention month is invalid.');const date=new Date(Date.UTC(Number(match[1]),Number(match[2])-1-offset,1));return `${date.getUTCFullYear()}-${repositoryPad2(date.getUTCMonth()+1)}`;}
 function newestRepositoryRow(rows){return rows.reduce((best,row)=>!best||Date.parse(row.manifest.exportedAt)>Date.parse(best.manifest.exportedAt)||Date.parse(row.manifest.exportedAt)===Date.parse(best.manifest.exportedAt)&&String(row.id).localeCompare(String(best.id))>0?row:best,null);}
-function activeProtectedRepositoryRow(rowsValue,now=Date.now()){
+// The device that made a version.
+function repositoryRowDevice(row){return String(row?.manifest?.installationId||row?.manifest?.checkpoint?.originInstallationId||'');}
+// Each device keeps its newest unexpired safety version (protectedLimit per
+// device), so a restore on one device never pushes out another device's way
+// back. Every location selects alike.
+function activeProtectedRepositoryRows(rowsValue,now=Date.now()){
   const rows=Array.isArray(rowsValue)?rowsValue:[],nowMs=now instanceof Date?now.getTime():Number(now);
   if(!Number.isFinite(nowMs))throw new Error('Repository protection evaluation time is invalid.');
-  return newestRepositoryRow(rows.filter(row=>row&&row.manifest?.retention?.role==='before-restore'&&Date.parse(row.manifest.retention.protectedUntil)>nowMs));
+  const byDevice=new Map();
+  for(const row of rows)if(row&&row.manifest?.retention?.role==='before-restore'&&Date.parse(row.manifest.retention.protectedUntil)>nowMs){const device=repositoryRowDevice(row);byDevice.set(device,newestRepositoryRow([byDevice.get(device),row].filter(Boolean)));}
+  return freeze([...byDevice.values()]);
+}
+// The newest unexpired safety version, of one device when device is given.
+function activeProtectedRepositoryRow(rowsValue,now=Date.now(),device=null){
+  const rows=activeProtectedRepositoryRows(rowsValue,now);
+  return newestRepositoryRow(device===null?rows:rows.filter(row=>repositoryRowDevice(row)===String(device)));
 }
 function classifyRepositoryState(input={}){
   const manifests=Array.isArray(input.manifests)?input.manifests:[],commits=Array.isArray(input.commits)?input.commits:[],commitById=new Map(),manifestIds=new Set(),committed=[],uncommitted=[],invalidPairs=[];
@@ -249,29 +292,62 @@ function classifyRepositoryState(input={}){
 function selectRepositoryRetention(rowsValue,{now=new Date()}={}){
   const rows=Array.isArray(rowsValue)?[...rowsValue]:[];rows.sort((a,b)=>Date.parse(a.manifest?.exportedAt||0)-Date.parse(b.manifest?.exportedAt||0)||String(a.id||'').localeCompare(String(b.id||'')));
   const nowMs=now instanceof Date?now.getTime():Date.parse(now);if(!Number.isFinite(nowMs))throw new Error('Repository retention evaluation time is invalid.');
-  const activeProtected=activeProtectedRepositoryRow(rows,nowMs),normalRows=rows.filter(row=>row&&row.manifest?.retention?.role==='normal');
+  const protectedRows=activeProtectedRepositoryRows(rows,nowMs),activeProtected=newestRepositoryRow(protectedRows),everyNormal=rows.filter(row=>row&&row.manifest?.retention?.role==='normal');
+  // Once a version in the current format exists, versions in older formats
+  // retire: Version History and the next cleanup keep current ones only, so a
+  // location ends up holding one format.
+  const currentRows=everyNormal.filter(row=>Number(row.manifest.version)===REPOSITORY_MANIFEST_VERSION),normalRows=currentRows.length?currentRows:everyNormal;
   const selected=new Map(),tiers=new Map();
   const keep=(row,tier)=>{if(!row)return;selected.set(row.id,row);if(!tiers.has(row.id))tiers.set(row.id,tier);};
   const latest=newestRepositoryRow(normalRows);keep(latest,'latest');
   if(latest){
-    const anchorOrdinal=repositoryDateOrdinal(latest.manifest.retention.calendar.localDate);
-    if(!Number.isFinite(anchorOrdinal))throw new Error('Repository retention calendar anchor is invalid.');
-    const dailyStartOrdinal=anchorOrdinal-REPOSITORY_RETENTION_POLICY.dailyDays;
-    for(let offset=1;offset<=REPOSITORY_RETENTION_POLICY.dailyDays;offset++){
-      const key=repositoryDateKeyFromOrdinal(anchorOrdinal-offset),candidate=newestRepositoryRow(normalRows.filter(row=>row.manifest.retention.calendar.localDate===key));keep(candidate,'daily');
+    // Each tier keeps the newest checkpoint from its most recent periods that
+    // have one, counting only periods wholly older than the one holding the
+    // oldest checkpoint kept so far: no Weekly shares a week with a Daily and
+    // no Monthly a month with a Weekly. Periods without a checkpoint are
+    // skipped, so a break of any length never empties a tier.
+    const calendar=row=>row.manifest.retention.calendar,policy=REPOSITORY_RETENTION_POLICY;
+    let oldest=latest;
+    for(const [tier,count,period] of [['daily',policy.dailyDays,value=>value.localDate],['weekly',policy.weeklyPeriods,value=>value.weekStart],['monthly',policy.monthlyPeriods,value=>value.month]]){
+      const limit=period(calendar(oldest)),newest=new Map();
+      // Dates, weeks and months are zero-padded, so text order is time order.
+      for(const row of normalRows){const key=period(calendar(row));if(key<limit)newest.set(key,newest.has(key)?newestRepositoryRow([newest.get(key),row]):row);}
+      const kept=[...newest.keys()].sort().reverse().slice(0,count);
+      if(!kept.length)break;
+      for(const key of kept)keep(newest.get(key),tier);
+      oldest=newest.get(kept.at(-1));
     }
-    const firstWeeklyStart=repositoryWeekStartOrdinal(dailyStartOrdinal-1);
-    for(let offset=0;offset<REPOSITORY_RETENTION_POLICY.weeklyPeriods;offset++){
-      const weekStart=firstWeeklyStart-offset*7,key=repositoryDateKeyFromOrdinal(weekStart),candidate=newestRepositoryRow(normalRows.filter(row=>row.manifest.retention.calendar.weekStart===key&&repositoryDateOrdinal(row.manifest.retention.calendar.localDate)<dailyStartOrdinal));keep(candidate,'weekly');
+    // Slots the tiers cannot use (a young history, a long break) go to the
+    // newest checkpoint of the remaining days, closing the widest gaps in time
+    // first and the newer on a tie. A day's older checkpoints still give way
+    // to its newest, but no day is dropped while a slot is free.
+    const time=row=>Date.parse(row.manifest.exportedAt),days=new Map(),covered=new Set([...selected.values()].map(row=>calendar(row).localDate));
+    for(const row of normalRows){const day=calendar(row).localDate;if(!covered.has(day))days.set(day,days.has(day)?newestRepositoryRow([days.get(day),row]):row);}
+    const spare=[...days.values()];
+    while(selected.size<policy.normalLimit&&spare.length){
+      let pick=0,widest=-1;
+      spare.forEach((row,index)=>{let gap=Infinity;for(const kept of selected.values())gap=Math.min(gap,Math.abs(time(row)-time(kept)));if(gap>widest||gap===widest&&newestRepositoryRow([spare[pick],row])===row){pick=index;widest=gap;}});
+      keep(spare.splice(pick,1)[0],'saved');
     }
-    const oldestWeeklyStart=firstWeeklyStart-(REPOSITORY_RETENTION_POLICY.weeklyPeriods-1)*7,monthlyBoundaryOrdinal=oldestWeeklyStart-1,boundaryMonth=repositoryDateKeyFromOrdinal(monthlyBoundaryOrdinal).slice(0,7);
-    for(let offset=0;offset<REPOSITORY_RETENTION_POLICY.monthlyPeriods;offset++){
-      const key=repositoryPreviousMonthKey(boundaryMonth,offset),candidate=newestRepositoryRow(normalRows.filter(row=>row.manifest.retention.calendar.month===key&&repositoryDateOrdinal(row.manifest.retention.calendar.localDate)<oldestWeeklyStart));keep(candidate,'monthly');
+    // On top of these, the 24 hours before the latest checkpoint keep up to
+    // hourlyLimit more, for notes: walking back from the latest, the newest
+    // checkpoint of each earlier local hour whose notes differ from the
+    // version kept after it. Versions whose notes did not change would only
+    // crowd Version History. The window follows the latest checkpoint rather
+    // than the clock, so every device selects alike.
+    const windowStart=time(latest)-policy.hourlyWindowHours*3600000,hour=row=>Math.floor((time(row)+calendar(row).utcOffsetMinutes*60000)/3600000),notes=row=>String(row.manifest.retention.notesFingerprint||'');
+    let after=latest,hourly=0;
+    for(const row of [...normalRows].reverse()){
+      if(hourly>=policy.hourlyLimit||time(row)<=windowStart)break;
+      if(row===latest)continue;
+      if(selected.has(row.id)){after=row;continue;}
+      if(hour(row)===hour(after)||notes(row)&&notes(row)===notes(after))continue;
+      keep(row,'hourly');hourly+=1;after=row;
     }
   }
-  if(activeProtected)keep(activeProtected,'before-restore');
+  for(const row of protectedRows)keep(row,'before-restore');
   const retained=rows.filter(row=>selected.has(row.id)),remove=rows.filter(row=>!selected.has(row.id));
-  return freeze({retained:freeze(retained),remove:freeze(remove),activeProtected:activeProtected||null,tiers:freeze(Object.fromEntries(tiers)),normalRetained:retained.filter(row=>row!==activeProtected).length,policy:REPOSITORY_RETENTION_POLICY});
+  return freeze({retained:freeze(retained),remove:freeze(remove),activeProtected:activeProtected||null,tiers:freeze(Object.fromEntries(tiers)),normalRetained:retained.filter(row=>!protectedRows.includes(row)).length,currentFormat:currentRows.length>0,policy:REPOSITORY_RETENTION_POLICY});
 }
 function projectManagedRepositoryHistory(rowsValue,source,{now=new Date(),quarantinedObjectIds=null}={}){
   const rows=Array.isArray(rowsValue)?rowsValue:[],sourceId=String(source&&source.id||''),sourceLabel=clampText(source&&source.label||'',80),quarantined=new Set(repositoryScrubObjectIds(quarantinedObjectIds));
@@ -298,7 +374,15 @@ function validateRepositoryCommitValue(value,manifest=null){
   return normalized;
 }
 async function createRepositoryCommitMarker(manifest,checks={}){const value=validateRepositoryCommitValue({format:REPOSITORY_COMMIT_FORMAT,version:REPOSITORY_COMMIT_VERSION,checkpointId:manifest.checkpoint.checkpointId,exportedAt:manifest.exportedAt,sourceRevision:manifest.sourceRevision,manifestVersion:manifest.version},manifest),text=JSON.stringify(value),blob=new Blob([text],{type:'application/json'}),digest=await Exports.run('checksum',{value:blob},{signal:checks.signal||null});return freeze({...value,blob,size:blob.size,digest,checkProtection:checks.checkProtection,checkSource:checks.checkSource});}
-async function inspectRepositoryCommitMarker(file,manifest=null){if(!(file instanceof Blob)||file.size<=0||file.size>4096)throw new Error('Repository checkpoint commit marker is unreadable.');let value;try{value=JSON.parse(await file.text());}catch{throw new Error('Repository checkpoint commit marker is invalid JSON.');}return validateRepositoryCommitValue(value,manifest);}
+// Marks a failure as the file's own content: its bytes were read, but this
+// build cannot interpret them (another format, or damaged). Only such a version
+// is shown as unreadable and offered for removal; any other failure is retried.
+function unreadableVersion(error){if(error&&typeof error==='object'&&Object.isExtensible(error))error.repositoryUnreadable=true;return error;}
+async function inspectRepositoryCommitMarker(file,manifest=null){
+  if(!(file instanceof Blob)||file.size<=0||file.size>4096)throw unreadableVersion(new Error('Repository checkpoint commit marker is unreadable.'));
+  const text=await file.text();let value;try{value=JSON.parse(text);}catch{throw unreadableVersion(new Error('Repository checkpoint commit marker is invalid JSON.'));}
+  try{return validateRepositoryCommitValue(value,manifest);}catch(error){throw unreadableVersion(error);}
+}
 
 function validateRepositoryManifest(value){
   const manifestVersion=Number(value&&value.version);
@@ -320,7 +404,7 @@ function validateRepositoryManifest(value){
     let members;
     if(kind==='structuredPack'){
       if(manifestVersion<4||!/^shard:[0-3]$/u.test(key))throw new Error('Device repository structured-pack reference is invalid.');
-      members=repositoryPackManifestMembers(raw.members);const shard=Number(key.slice('shard:'.length));
+      members=repositoryPackManifestMembers(raw.members,manifestVersion);const shard=Number(key.slice('shard:'.length));
       for(const member of members){const logicalUnit=repositoryUnitKey(member.kind,member.key);if(repositoryPackShard(member.kind,member.key)!==shard||logicalUnitKeys.has(logicalUnit))throw new Error('Device repository structured-pack membership is invalid.');logicalUnitKeys.add(logicalUnit);}
     }else if(kind!=='attachment'){const logicalUnit=repositoryUnitKey(kind,key);if(logicalUnitKeys.has(logicalUnit))throw new Error('Device repository logical object index contains duplicates.');logicalUnitKeys.add(logicalUnit);}
     objectIds.add(objectId);unitKeys.add(unit);objects.push(freeze({objectId,kind,key,fingerprint,compression,sourceBytes,storedBytes,storedChecksum,...(members?{members}:{})}));
@@ -338,7 +422,7 @@ function validateRepositoryManifest(value){
   const rawAncestorIds=Array.isArray(value.reconciliationAncestorIds)?value.reconciliationAncestorIds:(reconciliationBaseId?[reconciliationBaseId]:[]),reconciliationAncestorIds=[],reconciliationAncestorSet=new Set();
   for(const rawId of rawAncestorIds){const id=String(rawId||'');if(!/^cp_[a-f0-9]{32}$/u.test(id)||id===String(checkpoint.checkpointId||'')||reconciliationAncestorSet.has(id))throw new Error('Device repository reconciliation ancestry is invalid.');reconciliationAncestorSet.add(id);reconciliationAncestorIds.push(id);}
   if((reconciliationBaseId&&reconciliationAncestorIds[0]!==reconciliationBaseId)||(!reconciliationBaseId&&reconciliationAncestorIds.length)||repositoryReconciliationAncestryBytes(reconciliationAncestorIds)>REPOSITORY_RECONCILIATION_ANCESTRY_MAX_BYTES)throw new Error('Device repository reconciliation ancestry is invalid.');
-  const protectedCheckpointManifest=value.protectedCheckpointManifest;
+  const protectedCheckpointManifest=repositoryNoteKind(manifestVersion)==='note'?value.protectedCheckpointManifest:BackupCodec.currentProtectedManifestNames(value.protectedCheckpointManifest);
   if(Number(backupVersion)>=15&&(!protectedCheckpointManifest||protectedCheckpointManifest.checkpointId!==checkpoint.checkpointId||protectedCheckpointManifest.sourceRevision!==new Date(sourceRevision).toISOString()))throw new Error('Device repository protected checkpoint manifest is invalid.');
   const logicalFingerprint=String(value.logicalFingerprint||'').toLowerCase();
   if(manifestVersion>=3&&!/^[a-f0-9]{64}$/u.test(logicalFingerprint))throw new Error('Device repository logical checkpoint fingerprint is invalid.');
@@ -425,60 +509,88 @@ function rethrowCleanupControl(error){
   const code=String(error&&error.code||'');
   if(error&&error.name==='AbortError'||/_MAINTENANCE_BUDGET$/u.test(code))throw error;
 }
+// Which formats a location's kept versions are in: once none is older than
+// the current format and none is unreadable (its format is unknown), the code
+// that reads older ones can be removed.
+function repositoryFormats(rows,unreadable=0){
+  let current=0,older=0;for(const row of rows)if(Number(row?.manifest?.version)===REPOSITORY_MANIFEST_VERSION)current+=1;else older+=1;
+  return freeze({version:REPOSITORY_MANIFEST_VERSION,current,older,unreadable:Math.max(0,Number(unreadable)||0)});
+}
 async function cleanupRepositoryRetention(input){
   const rows=Array.isArray(input&&input.checkpoints)?[...input.checkpoints]:[];
   rows.sort((a,b)=>Date.parse(a.manifest?.exportedAt||0)-Date.parse(b.manifest?.exportedAt||0)||String(a.id||'').localeCompare(String(b.id||'')));
-  if(input&&input.overflow===true)return freeze({warning:'Checkpoint saved and verified, but retention cleanup stopped because the repository listing overflowed its safety bound.',retained:freeze(rows),removedCheckpoints:0,checkpointDeferred:0,checkpointFailures:0,gcRemoved:0,gcDeferred:0,gcBudgetDeferred:0,gcFailures:0,gcSkipped:true,gcPending:true,uncertainCount:1,objectGcBlocked:false,overflow:true,selection:null});
+  const checkpointUncertain=Math.max(0,Number(input&&input.invalidCount)||0)+Math.max(0,Number(input&&input.ignoredCount)||0),overflow=input&&input.overflow===true,unreadable=Math.max(0,Number(input&&input.unreadableCount)||0);
+  // Missing and unreadable are different states. An incomplete inventory cannot
+  // prove that any manifest, commit or shared object is safe to remove. A
+  // version this build cannot read (unreadableCount) is known and kept: the
+  // versions around it are still cleaned up, but no shared object is removed,
+  // since nothing says which ones it uses.
+  if(overflow||checkpointUncertain)return freeze({warning:'Repository cleanup was deferred because backup history could not be read completely. No backup files were removed.',retained:freeze(rows),formats:null,removedCheckpoints:0,removedUncommitted:0,removedOrphanCommits:0,deferredIncomplete:0,checkpointDeferred:0,checkpointFailures:0,gcRemoved:0,gcDeferred:0,gcBudgetDeferred:0,gcFailures:0,gcSkipped:true,gcPending:true,uncertainCount:checkpointUncertain+(overflow?1:0),objectGcBlocked:input&&input.blockObjectGc===true,overflow,selection:null});
+  const preparedObjects=input&&input.inventoryBeforeDelete===true?await input.listObjects():null;
+  await input.beginDeletion?.();
   const selection=selectRepositoryRetention(rows,{now:input&&input.now||new Date()}),keep=[...selection.retained],remove=[...selection.remove],retainedIds=new Set();for(const row of keep)for(const entry of row.manifest?.objects||[])retainedIds.add(entry.objectId);
   const checkpointDeleteLimit=Number.isSafeInteger(Number(input&&input.maxCheckpointDeletes))?Math.max(1,Number(input.maxCheckpointDeletes)):Number.POSITIVE_INFINITY;
   const objectDeleteLimit=Number.isSafeInteger(Number(input&&input.maxObjectDeletes))?Math.max(1,Number(input.maxObjectDeletes)):Number.POSITIVE_INFINITY;
-  let deletionFailures=0,removedCheckpoints=0,checkpointDeferred=0,checkpointDeleteAttempts=0;const failedRows=[],deferredRows=[];
+  let deletionFailures=0,removedCheckpoints=0,checkpointDeferred=0,checkpointDeleteAttempts=0,removedUncommitted=0,removedOrphanCommits=0;
+  const failedRows=[],deferredRows=[],incomplete=Array.isArray(input&&input.incompleteArtifacts)?input.incompleteArtifacts:[],deferredIncomplete=input&&input.blockObjectGc===true?incomplete.length:0;
+  if(!deferredIncomplete)for(const artifact of incomplete){
+    if(checkpointDeleteAttempts>=checkpointDeleteLimit){checkpointDeferred+=1;continue;}
+    input.workBudget?.check();checkpointDeleteAttempts+=1;
+    try{if(await input.deleteIncompleteArtifact(artifact)===false)throw new Error('Incomplete artifact deletion was not confirmed.');if(artifact.kind==='checkpoint')removedUncommitted+=1;else removedOrphanCommits+=1;input.workBudget?.advance();}
+    catch(error){rethrowCleanupControl(error);deletionFailures+=1;try{input.onError?.('incomplete-delete',error,artifact);}catch(reportingError){}}
+  }
   for(const row of remove){
     if(checkpointDeleteAttempts>=checkpointDeleteLimit){checkpointDeferred+=1;deferredRows.push(row);for(const entry of row.manifest?.objects||[])retainedIds.add(entry.objectId);continue;}
-    checkpointDeleteAttempts+=1;
-    try{if(await input.deleteCheckpoint(row)!==false)removedCheckpoints+=1;else throw new Error('Checkpoint deletion was not confirmed.');}
+    input.workBudget?.check();checkpointDeleteAttempts+=1;
+    try{if(await input.deleteCheckpoint(row)!==false){removedCheckpoints+=1;input.workBudget?.advance();}else throw new Error('Checkpoint deletion was not confirmed.');}
     catch(error){rethrowCleanupControl(error);deletionFailures+=1;failedRows.push(row);for(const entry of row.manifest?.objects||[])retainedIds.add(entry.objectId);try{input.onError?.('checkpoint-delete',error,row);}catch(reportingError){}}
   }
-  let gcRemoved=0,gcDeferred=0,gcBudgetDeferred=0,gcFailures=0,gcDeleteAttempts=0,objectListingInvalid=0,objectListingOverflow=false,objectListingFailed=false,gcSkipped=Math.max(0,Number(input&&input.invalidCount)||0)>0||Math.max(0,Number(input&&input.ignoredCount)||0)>0||deletionFailures>0||checkpointDeferred>0||input&&input.blockObjectGc===true;
+  let gcRemoved=0,gcDeferred=0,gcBudgetDeferred=0,gcFailures=0,gcDeleteAttempts=0,objectListingInvalid=0,objectListingOverflow=false,objectListingFailed=false,gcSkipped=Math.max(0,Number(input&&input.invalidCount)||0)>0||Math.max(0,Number(input&&input.ignoredCount)||0)>0||unreadable>0||deletionFailures>0||checkpointDeferred>0||input&&input.blockObjectGc===true;
   const graceBefore=Date.parse(String(input&&input.objectGraceBefore||''));
   if(!gcSkipped){
     try{
-      const listing=await input.listObjects(),objects=Array.isArray(listing)?listing:Array.isArray(listing&&listing.items)?listing.items:[];
+      const listing=preparedObjects||await input.listObjects(),objects=Array.isArray(listing)?listing:Array.isArray(listing&&listing.items)?listing.items:[];
       objectListingOverflow=listing&&listing.overflow===true;objectListingInvalid=Math.max(0,Number(listing&&listing.invalidCount)||0);
       if(objectListingOverflow||objectListingInvalid>0)gcSkipped=true;
       else for(const item of objects){
         const id=String(item&&item.id||'');if(!id||retainedIds.has(id))continue;
         if(Number.isFinite(graceBefore)){const observed=Date.parse(String(item&&item.createdAt||item&&item.modifiedAt||''));if(!Number.isFinite(observed)||observed>graceBefore){gcDeferred+=1;continue;}}
         if(gcDeleteAttempts>=objectDeleteLimit){gcBudgetDeferred+=1;continue;}
-        gcDeleteAttempts+=1;
-        try{if(await input.deleteObject(item)!==false)gcRemoved+=1;else gcFailures+=1;}catch(error){rethrowCleanupControl(error);gcFailures+=1;try{input.onError?.('object-delete',error,item);}catch(reportingError){}}
+        input.workBudget?.check();gcDeleteAttempts+=1;
+        try{if(await input.deleteObject(item)!==false){gcRemoved+=1;input.workBudget?.advance();}else gcFailures+=1;}catch(error){rethrowCleanupControl(error);gcFailures+=1;try{input.onError?.('object-delete',error,item);}catch(reportingError){}}
       }
     }catch(error){rethrowCleanupControl(error);gcSkipped=true;objectListingFailed=true;try{input.onError?.('object-list',error,null);}catch(reportingError){}
     }
   }
   const parts=[];
-  if(deletionFailures)parts.push(`${deletionFailures} old checkpoint${deletionFailures===1?' was':'s were'} retained because deletion could not be confirmed.`);
-  if(checkpointDeferred)parts.push(`${checkpointDeferred} old checkpoint${checkpointDeferred===1?' was':'s were'} deferred to keep this maintenance pass bounded.`);
-  if(gcSkipped)parts.push(input&&input.blockObjectGc===true?'Shared-object cleanup was deferred because another repository publication may still be in progress.':objectListingOverflow||objectListingInvalid||objectListingFailed?'Shared-object cleanup was deferred because the repository object listing could not be read or interpreted safely.':'Shared-object cleanup was deferred because checkpoint state still needs a later safe maintenance pass.');
+  if(deferredIncomplete)parts.push(`${deferredIncomplete} incomplete publication artifact${deferredIncomplete===1?' was':'s were'} retained because another repository publication may still be in progress.`);
+  if(deletionFailures)parts.push(`${deletionFailures} backup file${deletionFailures===1?' was':'s were'} retained because deletion could not be confirmed.`);
+  if(checkpointDeferred)parts.push(`${checkpointDeferred} backup file${checkpointDeferred===1?' was':'s were'} deferred to keep this maintenance pass bounded.`);
+  if(unreadable)parts.push(`${unreadable} backup version${unreadable===1?'':'s'} could not be read by this app and ${unreadable===1?'was':'were'} kept.`);
+  if(gcSkipped)parts.push(unreadable&&input?.blockObjectGc!==true&&!deletionFailures&&!checkpointDeferred?'Shared-object cleanup waits until unreadable versions are removed.':input&&input.blockObjectGc===true?'Shared-object cleanup was deferred because another repository publication may still be in progress.':objectListingOverflow||objectListingInvalid||objectListingFailed?'Shared-object cleanup was deferred because the repository object listing could not be read or interpreted safely.':'Shared-object cleanup was deferred because checkpoint state still needs a later safe maintenance pass.');
   if(gcDeferred)parts.push(`${gcDeferred} recently created unreferenced object${gcDeferred===1?' was':'s were'} retained until a later maintenance pass.`);
   if(gcBudgetDeferred)parts.push(`${gcBudgetDeferred} unused object${gcBudgetDeferred===1?' was':'s were'} deferred to keep this maintenance pass bounded.`);
   if(gcFailures)parts.push(`${gcFailures} unused object${gcFailures===1?' could':'s could'} not be removed and will be retried later.`);
-  const checkpointUncertain=Math.max(0,Number(input&&input.invalidCount)||0)+Math.max(0,Number(input&&input.ignoredCount)||0),uncertain=checkpointUncertain+objectListingInvalid+(objectListingFailed?1:0);if(checkpointUncertain)parts.push(`${checkpointUncertain} unrecognised or unreadable checkpoint${checkpointUncertain===1?' was':'s were'} left untouched.`);if(objectListingInvalid)parts.push(`${objectListingInvalid} repository object entr${objectListingInvalid===1?'y was':'ies were'} unreadable and left untouched.`);if(objectListingFailed)parts.push('Repository object enumeration failed and was left untouched.');if(objectListingOverflow)parts.push('Repository object enumeration exceeded its safety bound and was left untouched.');
+  const uncertain=objectListingInvalid+(objectListingFailed?1:0);if(objectListingInvalid)parts.push(`${objectListingInvalid} repository object entr${objectListingInvalid===1?'y was':'ies were'} unreadable and left untouched.`);if(objectListingFailed)parts.push('Repository object enumeration failed and was left untouched.');if(objectListingOverflow)parts.push('Repository object enumeration exceeded its safety bound and was left untouched.');
   const actualRetained=[...keep,...failedRows,...deferredRows].sort((a,b)=>Date.parse(a.manifest?.exportedAt||0)-Date.parse(b.manifest?.exportedAt||0)||String(a.id||'').localeCompare(String(b.id||'')));
-  return freeze({warning:parts.join(' '),retained:freeze(actualRetained),removedCheckpoints,checkpointDeferred,checkpointFailures:deletionFailures,gcRemoved,gcDeferred,gcBudgetDeferred,gcFailures,gcSkipped,gcPending:gcSkipped||checkpointDeferred>0||gcDeferred>0||gcBudgetDeferred>0||gcFailures>0,uncertainCount:uncertain,objectGcBlocked:input&&input.blockObjectGc===true,objectListingFailed,overflow:objectListingOverflow,selection});
+  // Shared objects that wait only on unreadable versions are not retried on a
+  // timer: nothing changes until a version is removed, and removing one runs
+  // cleanup at once.
+  const waitsOnUnreadable=unreadable>0&&!(Math.max(0,Number(input&&input.invalidCount)||0)>0||Math.max(0,Number(input&&input.ignoredCount)||0)>0||deletionFailures>0||checkpointDeferred>0||input&&input.blockObjectGc===true);
+  return freeze({warning:parts.join(' '),retained:freeze(actualRetained),formats:repositoryFormats(actualRetained,unreadable),removedCheckpoints,removedUncommitted,removedOrphanCommits,deferredIncomplete,checkpointDeferred,checkpointFailures:deletionFailures,gcRemoved,gcDeferred,gcBudgetDeferred,gcFailures,gcSkipped,gcPending:gcSkipped&&!waitsOnUnreadable||deferredIncomplete>0||checkpointDeferred>0||gcDeferred>0||gcBudgetDeferred>0||gcFailures>0,uncertainCount:uncertain,unreadableCount:unreadable,objectGcBlocked:input&&input.blockObjectGc===true,objectListingFailed,overflow:objectListingOverflow,selection});
 }
 
-async function prepareRepositoryCheckpointWork(previousManifests=null,{interactive=false,availableObjectIds=null,excludedObjectIds=null,retention=null,signal=null}={}){
+async function prepareRepositoryCheckpointWork(previousManifests=null,{interactive=false,availableObjectIds=null,excludedObjectIds=null,retention=null,signal=null,baseUpdate=false}={}){
   throwIfImportAborted(signal);
   const history=repositoryHistory(previousManifests);
   const context=await repositoryProtectionContext({interactive});
   const exportedAt=new Date().toISOString();
   const preparation=await beginPreparationCapture(exportedAt);throwIfImportAborted(signal);
   const reconciliationBase=await AppData.reconciliationBase.read().catch(()=>null),reconciliationBaseId=String(reconciliationBase&&reconciliationBase.checkpointId||''),reconciliationAncestorIds=repositoryReconciliationAncestors(history,reconciliationBaseId);
-  const plan=preparation?await repositoryPreparationPlan(preparation,reconciliationBase):null;
+  const plan=preparation?await repositoryPreparationPlan(preparation,reconciliationBase,{baseUpdate}):null;
   if(!plan&&repositoryPreparationIndex)repositoryPreparationIndex=null;
   const excluded=new Set(repositoryScrubObjectIds(excludedObjectIds)),available=availableObjectIds instanceof Set?new Set([...availableObjectIds].filter(id=>!excluded.has(id))):availableObjectIds;
-  const reuseIndex=repositoryReuseIndex(history,context.protectionId,available),objects=[],leases=[],structuredObjects=new Map(),packedPayloads=new Map(),currentByUnit=new Map(),candidateEntries=plan?new Map(plan.entries):new Map(),readNoteText=new Map();
+  const reuseIndex=repositoryReuseIndex(history,context.protectionId,available),objects=[],leases=[],structuredObjects=new Map(),packedPayloads=new Map(),currentByUnit=new Map(),candidateEntries=plan?new Map(plan.entries):new Map(),readNoteStates=new Map(),readMonths=new Map();let readPersonal,readSession;
   let capture=null,assetItems=[],candidateIndex=null,reconciliationUpdate=null;
   const serializeStructured=async(kind,key,payload)=>{
     const body=freeze({format:REPOSITORY_OBJECT_FORMAT,version:REPOSITORY_OBJECT_VERSION,kind,key,payload}),serialized=await repositorySerializedJson(body,{signal}),fingerprint=await Exports.run('checksum',{value:serialized.text,algorithm:'sha256'},{signal});
@@ -498,7 +610,10 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       }
       structuredObjects.set(unit,object);packedPayloads.delete(unit);
     }
-    if(kind==='areaNote')readNoteText.set(String(key),String(payload&&payload.text||''));
+    if(kind==='note')readNoteStates.set(String(key),baseNoteState(payload));
+    if(kind==='personalData')readPersonal=payload;
+    if(kind==='dailyRecordPack')readMonths.set(String(key),payload);
+    if(kind==='activeSession')readSession=payload;
     return entry;
   };
   const packGroups=entries=>{const groups=new Map();for(const entry of entries.values())if(repositoryPackableEntry(entry)){const shard=repositoryPackShard(entry.kind,entry.key);if(!groups.has(shard))groups.set(shard,[]);groups.get(shard).push(entry);}for(const rows of groups.values())rows.sort((a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key));return groups;};
@@ -522,9 +637,12 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
     leases.push(file.release);return freeze({objectId,kind:'structuredPack',key,fingerprint,compression:payloadFile.compression,sourceBytes:payloadFile.sourceBytes,storedBytes:file.blob.size,storedChecksum:file.storedChecksum,members:manifestMembers,reused:false,blob:file.blob,checkProtection:file.checkProtection});
   };
   const grouped=(items,dateKey)=>{const map=new Map();for(const item of items){const month=repositoryMonth(item&&item[dateKey]);if(!map.has(month))map.set(month,[]);map.get(month).push(item);}return [...map.entries()].sort((a,b)=>a[0].localeCompare(b[0]));};
+  // The Saved-Day fingerprints of the months read here (null: none left).
+  const daysUpdate=async full=>{const out=Object.create(null);for(const [month,records] of readMonths){if(records===null){if(!full)out[month]=null;continue;}const months=await AppData.reconciliationBase.dayFingerprints(records);if(months[month])out[month]=months[month];}return freeze(out);};
   try{
     if(plan){
       const readUnits=new Set(plan.structuredChanged);
+      if(plan.baseUpdate)for(const unit of plan.index.sinceBase)if(repositoryPreparationDescriptor(unit))readUnits.add(unit);
       for(const entry of candidateEntries.values()){
         if(!entry.present||repositoryPackableEntry(entry))continue;
         const old=reuseIndex.structured.get(repositoryUnitKey(entry.kind,entry.key)+'\u0000'+entry.fingerprint);
@@ -534,28 +652,29 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       const reads=readUnits.size?await readPreparationUnits(preparation,[...readUnits].sort()):freeze([]);
       for(const result of reads){
         const descriptor=repositoryPreparationDescriptor(result&&result.unit);if(!descriptor)throw new Error('Incremental repository preparation returned an unknown unit.');
-        if(!result.present){candidateEntries.set(descriptor.unit,repositoryPreparationEntry(descriptor.kind,descriptor.key,null,'',0,{present:false}));structuredObjects.delete(descriptor.unit);if(descriptor.kind==='areaNote')readNoteText.set(descriptor.key,null);continue;}
+        if(!result.present){candidateEntries.set(descriptor.unit,repositoryPreparationEntry(descriptor.kind,descriptor.key,null,'',0,{present:false}));structuredObjects.delete(descriptor.unit);if(descriptor.kind==='note')readNoteStates.set(descriptor.key,null);if(descriptor.kind==='personalData')readPersonal=null;if(descriptor.kind==='dailyRecordPack')readMonths.set(descriptor.key,null);if(descriptor.kind==='activeSession')readSession=null;continue;}
         await materializeStructured(descriptor.kind,descriptor.key,result.payload);
       }
       const inventory=repositoryPreparationInventory(candidateEntries),catalogue=new Map((preparation.assetCatalogue||[]).map(row=>[String(row&&row.id||''),row])),ids=new Set((preparation.assetCatalogue||[]).filter(row=>row&&row.library===true).map(row=>String(row.id)));
       for(const id of inventory.assetIds)ids.add(id);
       await AssetData.verifyAliases(preparation.assetCatalogue,[...ids]);
       assetItems=[...ids].filter(Boolean).sort().map(assetId=>{const row=catalogue.get(assetId);if(!row)return freeze({descriptor:freeze({assetId,missing:true}),blob:null});return freeze({descriptor:freeze({assetId,mimeType:row.type,size:row.size,checksum:row.hash,name:row.name,library:row.library===true}),blob:null});});
-      capture=await finalizePreparationCapture(preparation,freeze({recordDates:inventory.recordDates,noteKeys:inventory.noteKeys,assetIds:assetItems.map(item=>item.descriptor.assetId),counts:inventory.counts}));
-      const updates=Object.create(null),deletes=[];for(const [key,text] of readNoteText){if(text===null)deletes.push(key);else updates[key]=text;}
+      capture=await finalizePreparationCapture(preparation,freeze({recordDates:inventory.recordDates,noteKeys:inventory.noteKeys,pendingReviewIds:inventory.pendingReviewIds,assetIds:assetItems.map(item=>item.descriptor.assetId),counts:inventory.counts}));
+      const updates=Object.create(null),deletes=[];for(const [key,state] of readNoteStates){if(state===null)deletes.push(key);else updates[key]=state;}
       candidateIndex=await repositoryPreparationIndexCandidate(preparation.epochToken,preparation.stamps,candidateEntries);if(!candidateIndex)throw new Error('Incremental repository preparation index could not be rebuilt.');
-      reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:1,full:false,baseCheckpointId:reconciliationBaseId,noteCount:candidateIndex.noteCount,noteKeyFingerprint:candidateIndex.noteKeyFingerprint,noteKeys:null,updates:freeze(updates),deletes:freeze(deletes.sort())});
+      if(plan.baseUpdate)reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:2,full:false,baseCheckpointId:reconciliationBaseId,noteCount:candidateIndex.noteCount,noteKeyFingerprint:candidateIndex.noteKeyFingerprint,personalFingerprint:readPersonal===undefined?null:await AppData.reconciliationBase.personalFingerprint(readPersonal),sessionFingerprint:readSession===undefined?null:await AppData.reconciliationBase.sessionFingerprint(readSession),noteKeys:null,updates:freeze(updates),deletes:freeze(deletes.sort()),days:await daysUpdate(false)});
     }else{
       capture=await captureLogicalCheckpoint(exportedAt,preparation?{includeAssetBlobs:false,assumeFlushed:true,requireCanonicalComplete:true}:{includeAssetBlobs:false,requireCanonicalComplete:true});
       for(const [month,items] of grouped(capture.dailyDocuments,'date'))await materializeStructured('dailyRecordPack',month,freeze([...items]));
-      for(const note of capture.areaNoteItems)await materializeStructured('areaNote',String(note.key),note);
+      for(const note of capture.noteItems)await materializeStructured('note',String(note.key),note);
       if(capture.activeSession)await materializeStructured('activeSession','active',capture.activeSession);
       if(capture.personalData)await materializeStructured('personalData','personal',capture.personalData);
+      for(const review of capture.pendingReviewItems||[])await materializeStructured(PENDING_REVIEW_KIND,review.id,review);
       assetItems=[...(capture.assetItems||[])];
-      const updates=Object.create(null),noteKeys=[];for(const note of capture.areaNoteItems||[]){const key=String(note&&note.key||'').trim();if(!key)continue;noteKeys.push(key);updates[key]=String(note&&note.text||'');}
-      noteKeys.sort();reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:1,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([])});
+      const updates=Object.create(null),noteKeys=[];for(const note of capture.noteItems||[]){const key=String(note&&note.key||'').trim();if(!key)continue;noteKeys.push(key);updates[key]=baseNoteState(note);}
+      noteKeys.sort();if(baseUpdate)reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:2,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await AppData.reconciliationBase.personalFingerprint(capture.personalData||null),sessionFingerprint:await AppData.reconciliationBase.sessionFingerprint(capture.activeSession||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([]),days:await daysUpdate(true)});
     }
-    const structuredRank=freeze({dailyRecordPack:0,activeSession:1,personalData:2,areaNote:3});
+    const structuredRank=freeze({dailyRecordPack:0,activeSession:1,personalData:2,note:3,[PENDING_REVIEW_KIND]:4});
     for(const entry of [...candidateEntries.values()].filter(entry=>entry.present&&!repositoryPackableEntry(entry)).sort((a,b)=>(structuredRank[a.kind]??9)-(structuredRank[b.kind]??9)||String(a.key).localeCompare(String(b.key)))){
       const object=structuredObjects.get(entry.unit);if(!object)throw new Error('A reusable structured repository object became unavailable during checkpoint preparation.');objects.push(object);currentByUnit.set(repositoryUnitKey(object.kind,object.key),object);
     }
@@ -590,18 +709,21 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
     const logicalFingerprint=await repositoryLogicalFingerprint(identitySource);
     const manifestBase=freeze({
       format:REPOSITORY_MANIFEST_FORMAT,version:REPOSITORY_MANIFEST_VERSION,checkpoint:capture.checkpoint,exportedAt:capture.exportedAt,sourceRevision:capture.sourceRevision,
-      installationId:capture.installationId,protectionId:context.protectionId,encrypted:context.encrypted,counts:freeze({...capture.counts}),protectedCheckpointManifest:capture.protectedCheckpointManifest,reconciliationBaseId,reconciliationAncestorIds,retention:repositoryRetentionDescriptor(capture.exportedAt,retention),logicalFingerprint,
+      installationId:capture.installationId,protectionId:context.protectionId,encrypted:context.encrypted,counts:freeze({...capture.counts}),protectedCheckpointManifest:capture.protectedCheckpointManifest,reconciliationBaseId,reconciliationAncestorIds,retention:repositoryRetentionDescriptor(capture.exportedAt,retention,await repositoryNotesFingerprint(candidateEntries)),logicalFingerprint,
       objects:manifestObjects,assets:manifestAssets,warning:capture.warning
     });
     const prepared=freeze({
       format:'study-director.prepared-repository-checkpoint',version:1,checkpoint:capture.checkpoint,exportedAt:capture.exportedAt,sourceRevision:capture.sourceRevision,
       protectionId:context.protectionId,encrypted:context.encrypted,counts:freeze({...capture.counts}),objects:freeze(objects),warning:capture.warning
     });
-    repositoryPreparedState.set(prepared,{capture,context,manifestBase,leases,released:false,manifestFinalized:false,reconciliationUpdate,preparationIndexCandidate:candidateIndex});
+    // What changed since the base carries forward until the base moves.
+    const sinceBase=plan&&Array.isArray(plan.index.sinceBase)?freeze([...new Set([...plan.index.sinceBase,...plan.structuredChanged])].sort()):null;
+    const indexCandidate=candidateIndex?freeze({...candidateIndex,baseCheckpointId:plan?String(plan.index.baseCheckpointId||''):reconciliationBaseId,sinceBase}):null;
+    repositoryPreparedState.set(prepared,{capture,context,manifestBase,leases,released:false,manifestFinalized:false,reconciliationUpdate,preparationIndexCandidate:indexCandidate});
     return prepared;
   }catch(error){for(const release of leases.splice(0))await release().catch(()=>{});throw error;}
 }
-function invalidateRepositoryPreparation(){repositoryPreparationIndex=null;return true;}
+function invalidateRepositoryPreparation(){repositoryPreparationIndex=null;repositorySpine=null;for(const continuation of repositoryPublicationStates.keys())void continuation.release();return true;}
 function repositoryPreparationDiagnosticReason(error){
   const message=String(error&&error.message||'');
   if(message==='Incremental repository preparation index could not be rebuilt.')return 'incremental-index-rebuild';
@@ -653,44 +775,48 @@ async function finalizeRepositoryCheckpointManifest(prepared,{interactive=false,
     checkSource:async()=>true,release:()=>protectedFile.blob!==source?Exports.run('file.release',{file:protectedFile.blob}):Promise.resolve()
   });
 }
-async function establishRepositoryReconciliationBase(prepared){
-  const state=repositoryPreparedState.get(prepared);
-  if(!state||state.released||!state.manifestFinalized)throw new Error('Finalized repository checkpoint manifest is unavailable for reconciliation ancestry.');
-  const checkpointId=String(state.capture&&state.capture.checkpoint&&state.capture.checkpoint.checkpointId||'');
-  if(!/^cp_[a-f0-9]{32}$/u.test(checkpointId))throw new Error('Committed repository checkpoint identity is invalid.');
-  const update=state.reconciliationUpdate;if(!update)throw new Error('Prepared repository checkpoint reconciliation update is unavailable.');
-  const written=await AppData.reconciliationBase.write(checkpointId,update);
-  if(written!==false&&state.preparationIndexCandidate)repositoryPreparationIndex=freeze({...state.preparationIndexCandidate,checkpointId});else if(written===false)repositoryPreparationIndex=null;
-  return checkpointId;
+// A placed version becomes what the next backup builds on. A normal version
+// is also remembered with its base update, for placing it in Drive.
+function adoptRepositoryPreparation(prepared,checkpointId){
+  const state=repositoryPreparedState.get(prepared);if(!state||state.released)return false;
+  if(state.preparationIndexCandidate)repositoryPreparationIndex=freeze({...state.preparationIndexCandidate,checkpointId});
+  if(state.manifestBase.retention.role==='normal')repositorySpine=freeze({checkpointId,sourceRevision:String(state.capture&&state.capture.sourceRevision||''),update:state.reconciliationUpdate||null});
+  return true;
+}
+// This version is now what this device and Drive share.
+async function establishRepositoryBase(checkpointId){
+  const id=String(checkpointId||''),spine=repositorySpine;if(!/^cp_[a-f0-9]{32}$/u.test(id)||!spine||spine.checkpointId!==id||!spine.update)return false;
+  const written=await AppData.reconciliationBase.write(id,spine.update)!==false,index=repositoryPreparationIndex;
+  if(index)repositoryPreparationIndex=freeze({...index,...(written&&index.checkpointId===id?{baseCheckpointId:id,sinceBase:freeze([])}:{sinceBase:null})});
+  return written;
 }
 async function inspectRepositoryManifest(file,{interactive=false}={}){
   if(!(file instanceof Blob))throw new TypeError('Repository checkpoint file is unreadable.');
-  const decoded=await Exports.unprotect(file,{interactive});
+  const decoded=await Exports.unprotect(file,{interactive}).catch(error=>{throw String(error?.code||'')==='BACKUP_ENCRYPTION_UNSUPPORTED'?unreadableVersion(error):error;});
   try{
-    const parsed=await Exports.run('parseBlob',{file:decoded.blob,maxBytes:Math.min(Number(APP_LIMITS.backupMaxCompressedBytes)||67108864,67108864)});
-    const manifest=validateRepositoryManifest(parsed);
-    if(decoded.encrypted!==manifest.encrypted)throw new Error('Repository checkpoint protection metadata is inconsistent.');
+    const parsed=await Exports.run('parseBlob',{file:decoded.blob,maxBytes:Math.min(Number(APP_LIMITS.backupMaxCompressedBytes)||67108864,67108864)}).catch(error=>{throw error?.name==='SyntaxError'?unreadableVersion(error):error;});
+    let manifest;try{manifest=validateRepositoryManifest(parsed);if(decoded.encrypted!==manifest.encrypted)throw new Error('Repository checkpoint protection metadata is inconsistent.');}catch(error){throw unreadableVersion(error);}
     const logicalFingerprint=await repositoryLogicalFingerprint(manifest);
-    if(manifest.logicalFingerprint&&manifest.logicalFingerprint!==logicalFingerprint)throw new Error('Repository checkpoint logical-state fingerprint failed verification.');
+    if(manifest.logicalFingerprint&&manifest.logicalFingerprint!==logicalFingerprint)throw unreadableVersion(new Error('Repository checkpoint logical-state fingerprint failed verification.'));
     return manifest.logicalFingerprint===logicalFingerprint?manifest:freeze({...manifest,logicalFingerprint});
   }finally{if(decoded.blob!==file)await Exports.run('file.release',{file:decoded.blob});}
 }
 function repositoryCorruption(message){const error=new Error(message);error.code='REPOSITORY_INTEGRITY_CORRUPT';return error;}
 async function verifyRepositoryObject(file,entry,options={}){
-  const expected=repositoryManifestObject(entry);
+  const expected=freeze({storedBytes:Number(entry&&entry.storedBytes)||0,storedChecksum:String(entry&&entry.storedChecksum||'')});
   if(!(file instanceof Blob)||file.size!==expected.storedBytes)throw repositoryCorruption('Repository object size did not match after reopening.');
   const checksum=await Exports.run('checksum',{value:file},{signal:options.signal||null,onProgress:typeof options.onProgress==='function'?options.onProgress:null});
   if(checksum!==expected.storedChecksum)throw repositoryCorruption('Repository object failed read-back verification.');
   return true;
 }
 const REPOSITORY_SCRUB_SKIPPED_KINDS=freeze(new Set(['activeSession',LEGACY_REFLECTION_DRAFT_PACK_KIND]));
-const REPOSITORY_SCRUB_KIND_PRIORITY=freeze(new Map([['attachment',0],['structuredPack',1],['areaNote',2],['dailyRecordPack',3],['personalData',4]]));
+const REPOSITORY_SCRUB_KIND_PRIORITY=freeze(new Map([['attachment',0],['structuredPack',1],['note',2],['dailyRecordPack',3],['personalData',4]]));
 function repositoryScrubObjectIds(value){
   const rows=Array.isArray(value)?value:[],seen=new Set(),out=[];
   for(const raw of rows){const id=String(raw||'');if(!/^obj_[a-f0-9]{32}$/u.test(id)||seen.has(id))continue;seen.add(id);out.push(id);}
   return freeze(out);
 }
-async function scrubRepositoryIntegrity(manifests,readObjectValue,{cursor='',recheckCursor='',scanId='',partial=null,recheck=false,verifyIncremental=null,readRange=null,maxObjects=4,maxBytes=256*1024*1024,signal=null,skipObjectIds=null,onProgress=null}={}){
+async function scrubRepositoryIntegrity(manifests,readObjectValue,{cursor='',recheckCursor='',scanId='',partial=null,recheck=false,verifyIncremental=null,readRange=null,maxObjects=4,maxBytes=256*1024*1024,signal=null,skipObjectIds=null,onProgress=null,storedDigest=null}={}){
   const history=repositoryHistory(manifests),readObject=repositoryReadPort(readObjectValue),firstByObject=new Map(),skipped=new Set(repositoryScrubObjectIds(skipObjectIds)),quarantinedPresent=new Set();
   for(const manifest of history)for(const entry of manifest.objects||[]){
     if(REPOSITORY_SCRUB_SKIPPED_KINDS.has(entry.kind)||firstByObject.has(entry.objectId))continue;
@@ -698,7 +824,7 @@ async function scrubRepositoryIntegrity(manifests,readObjectValue,{cursor='',rec
     firstByObject.set(entry.objectId,freeze({manifest,entry}));
   }
   const rows=[...firstByObject.values()].sort((a,b)=>{
-    const pa=REPOSITORY_SCRUB_KIND_PRIORITY.get(a.entry.kind)??99,pb=REPOSITORY_SCRUB_KIND_PRIORITY.get(b.entry.kind)??99;
+    const pa=REPOSITORY_SCRUB_KIND_PRIORITY.get(a.entry.kind===WRITTEN_NOTE_KIND?'note':a.entry.kind)??99,pb=REPOSITORY_SCRUB_KIND_PRIORITY.get(b.entry.kind===WRITTEN_NOTE_KIND?'note':b.entry.kind)??99;
     return pa-pb||Date.parse(a.manifest.exportedAt)-Date.parse(b.manifest.exportedAt)||a.entry.objectId.localeCompare(b.entry.objectId);
   });
   const currentScanId=await Exports.run('checksum',{value:JSON.stringify(rows.map(({entry})=>[entry.objectId,entry.storedChecksum,entry.fingerprint]))},{signal});
@@ -715,11 +841,15 @@ async function scrubRepositoryIntegrity(manifests,readObjectValue,{cursor='',rec
   const progress=()=>freeze({complete:false,cursor:lastCursor,recheckCursor:lastRecheckCursor,scanId:currentScanId,partial:checkpoint,checked,checkedBytes,attempted,total:rows.length,quarantined:freeze([...quarantinedPresent]),...(recheck?{corruption}:{} )});
   try{for(;index<rows.length;index+=1){
     throwIfImportAborted(signal);
-    const {manifest,entry}=rows[index],projected=attemptedBytes+Number(entry.storedBytes||0);
-    if(attempted>0&&(attempted>=objectLimit||projected>byteLimit))break;
+    // A location that keeps its own checksum of each stored object (Drive)
+    // is checked against it without downloading; it costs no budget.
+    const {manifest,entry}=rows[index],reported=typeof storedDigest==='function'?String(storedDigest(entry)||'').toLowerCase():'',projected=attemptedBytes+(reported?0:Number(entry.storedBytes||0));
+    if(!reported&&attempted>0&&(attempted>=objectLimit||projected>byteLimit))break;
     let healthy=true;
     try{
-      if(typeof verifyIncremental==='function'&&typeof readRange==='function'){
+      if(reported){
+        if(reported!==String(entry.storedChecksum||'').toLowerCase())throw repositoryCorruption(`Repository object ${entry.objectId} no longer matches its stored checksum.`);
+      }else if(typeof verifyIncremental==='function'&&typeof readRange==='function'){
         const verified=await verifyIncremental({entry,manifest,readRange,checkpoint,signal,onCheckpoint:async value=>{checkpoint=value;if(typeof onProgress==='function')await onProgress(progress());}});
         if(!verified.complete)break;
         if(entry.kind!=='attachment')await readRepositoryStructuredObject(manifest,entry,readObject,{interactive:false,signal,opened:verified.opened});
@@ -743,10 +873,10 @@ async function scrubRepositoryIntegrity(manifests,readObjectValue,{cursor='',rec
         error.repositoryObjectId=entry.objectId;error.repositoryObjectKind=entry.kind;error.repositoryScrubCursor=lastCursor;error.repositoryQuarantined=freeze([...quarantinedPresent]);throw error;
       }
     }
-    checkpoint=null;attempted+=1;attemptedBytes+=Number(entry.storedBytes)||0;
+    checkpoint=null;attempted+=reported?0:1;attemptedBytes+=reported?0:Number(entry.storedBytes)||0;
     if(recheck)lastRecheckCursor=entry.objectId;
     if(healthy){quarantinedPresent.delete(entry.objectId);checked+=1;checkedBytes+=Number(entry.storedBytes)||0;lastCursor=entry.objectId;}
-    if(typeof onProgress==='function')await onProgress(progress());
+    if(!reported&&typeof onProgress==='function')await onProgress(progress());
     await yieldTask({priority:'background'});
   }}catch(error){error.repositoryScrubCursor=lastCursor;error.repositoryScrubProgress=progress();throw error;}
   const complete=index>=rows.length;
@@ -804,7 +934,7 @@ async function readRepositoryStructuredObject(manifest,entry,readObject,options=
         }
         const shard=Number(String(entry.key).slice('shard:'.length));
         if(!body||typeof body!=='object'||Array.isArray(body)||body.format!==REPOSITORY_PACK_FORMAT||Number(body.version)!==REPOSITORY_PACK_VERSION||Number(body.shard)!==shard||!Array.isArray(body.members))throw repositoryCorruption(`Repository structured pack ${entry.objectId} identity is invalid.`);
-        const expected=repositoryPackManifestMembers(entry.members),actual=[];
+        const expected=repositoryPackManifestMembers(entry.members,manifest.version),actual=[];
         for(const raw of body.members){
           if(!raw||typeof raw!=='object'||Array.isArray(raw))throw repositoryCorruption(`Repository structured pack ${entry.objectId} contains an invalid member.`);
           const kind=String(raw.kind||''),key=String(raw.key||''),encoded=await (async()=>{const logicalBody=freeze({format:REPOSITORY_OBJECT_FORMAT,version:REPOSITORY_OBJECT_VERSION,kind,key,payload:raw.payload}),text=await Exports.run('stringify',{value:logicalBody}),bytes=BackupCodec.utf8Bytes(text).byteLength,hash=await Exports.run('checksum',{value:text,algorithm:'sha256'},{signal:options.signal});return freeze({bytes,hash});})();
@@ -818,6 +948,15 @@ async function readRepositoryStructuredObject(manifest,entry,readObject,options=
     });
   }finally{await opened.release().catch(()=>{});}
 }
+// An attachment already on this device with the same size and checksum is
+// read from here instead of the backup location; its bytes are hashed and
+// must match the verified manifest, so nothing is trusted unchecked.
+async function localRepositoryAttachment(descriptor,{signal=null}={}){
+  let local=null;try{local=await AssetData.get(descriptor.assetId);}catch{return null;}
+  if(!(local instanceof Blob)||local.size!==Number(descriptor.size))return null;
+  throwIfImportAborted(signal);
+  return await Exports.run('checksum',{value:local},{signal})===descriptor.checksum?local:null;
+}
 async function openRepositoryAttachment(manifest,entry,descriptor,readObject,options={}){
   if(entry.kind!=='attachment'||entry.compression!=='none')throw new Error('Repository attachment object metadata is invalid.');
   const opened=await openRepositoryObject(manifest,entry,readObject,options);
@@ -828,28 +967,54 @@ async function openRepositoryAttachment(manifest,entry,descriptor,readObject,opt
     return opened;
   }catch(error){await opened.release().catch(()=>{});throw error;}
 }
-async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectValue,{interactive=true,signal=null}={}){
-  const manifest=validateRepositoryManifest(manifestValue),readObject=repositoryReadPort(readObjectValue);
+// With note set, only the objects holding that note and the images its text
+// uses are read. Each is still verified against the verified manifest; the
+// whole-checkpoint cross-checks need every object and are left out.
+// localAttachments (restores only) lets attachments already on this device be
+// used instead of downloaded; verifying the backup copy itself never does.
+// Where one note sits in a version: its own object, or a pack listing it,
+// with the fingerprint of its stored record, so versions can be told apart
+// without reading them. Versions from before note ids name notes by title,
+// so they hold no earlier version of a note.
+function repositoryNoteObject(manifest,noteId){
+  const id=String(noteId||''),noteKind=repositoryNoteKind(manifest.version);if(!id||releasedRepositoryManifest(manifest.version))return null;
+  for(const entry of manifest.objects||[]){
+    if(entry.kind===noteKind&&entry.key===id)return freeze({entry,fingerprint:entry.fingerprint});
+    if(entry.kind==='structuredPack'){const member=repositoryPackManifestMembers(entry.members,manifest.version).find(item=>item.kind===noteKind&&item.key===id);if(member)return freeze({entry,fingerprint:member.fingerprint});}
+  }
+  return null;
+}
+// Reads one note's stored record from a version, and nothing else.
+async function readRepositoryNote(manifest,readObject,noteId,options={}){
+  const found=repositoryNoteObject(manifest,noteId);if(!found)return null;
+  const rows=await readRepositoryStructuredObject(manifest,found.entry,repositoryReadPort(readObject),options);
+  const row=rows.find(item=>item.kind===repositoryNoteKind(manifest.version)&&item.key===String(noteId));
+  return row?row.payload:null;
+}
+async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectValue,{interactive=true,signal=null,note='',localAttachments=false}={}){
+  const manifest=validateRepositoryManifest(manifestValue),readObject=repositoryReadPort(readObjectValue),noteKey=String(note||'');
   throwIfImportAborted(signal);
   if(manifest.installationId&&manifest.installationId!==manifest.checkpoint.originInstallationId)throw new Error('Repository checkpoint installation provenance is inconsistent.');
   const objectById=new Map(manifest.objects.map(entry=>[entry.objectId,entry]));
-  const allowedKinds=new Set(['dailyRecordPack','areaNote','activeSession','personalData','structuredPack','attachment']);if(manifest.version<=4)allowedKinds.add(LEGACY_REFLECTION_DRAFT_PACK_KIND);
+  const noteKind=repositoryNoteKind(manifest.version),allowedKinds=new Set(['dailyRecordPack',noteKind,'activeSession','personalData','structuredPack','attachment']);if(manifest.version<=4)allowedKinds.add(LEGACY_REFLECTION_DRAFT_PACK_KIND);if(!releasedRepositoryManifest(manifest.version))allowedKinds.add(PENDING_REVIEW_KIND);
   for(const entry of manifest.objects)if(!allowedKinds.has(entry.kind))throw new Error(`Repository object kind ${entry.kind} is unsupported.`);
-  const dailyDocuments=[],areaNoteItems=[];let activeSession=null,personalData=null,legacyReflectionDraftCount=0;
-  const seenDates=new Set(),seenNoteKeys=new Set(),seenDraftDates=new Set(),structuredEntries=manifest.objects.filter(entry=>entry.kind!=='attachment');
+  const dailyDocuments=[],noteItems=[],pendingReviewItems=[];let activeSession=null,personalData=null,legacyReflectionDraftCount=0;
+  // A one-note read names the note by id.
+  const holdsNote=entry=>entry.kind===noteKind&&entry.key===noteKey||entry.kind==='structuredPack'&&repositoryPackManifestMembers(entry.members,manifest.version).some(member=>member.kind===noteKind&&member.key===noteKey);
+  const seenDates=new Set(),seenNoteKeys=new Set(),seenReviewIds=new Set(),seenDraftDates=new Set(),structuredEntries=manifest.objects.filter(entry=>entry.kind!=='attachment'&&(!noteKey||holdsNote(entry)));
   const structuredPayloads=await mapRepositoryBounded(structuredEntries,async entry=>{
     throwIfImportAborted(signal);
     return readRepositoryStructuredObject(manifest,entry,readObject,{interactive,signal});
   });
-  const logicalRows=[];for(const rows of structuredPayloads)logicalRows.push(...rows);logicalRows.sort((a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key));
+  const logicalRows=[];for(const rows of structuredPayloads)logicalRows.push(...rows.filter(row=>!noteKey||row.kind===noteKind&&row.key===noteKey));logicalRows.sort((a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key));
   for(const logical of logicalRows){
     throwIfImportAborted(signal);const entry=logical,payload=logical.payload;
     if(entry.kind==='dailyRecordPack'){
       if(!Array.isArray(payload))throw new Error('Repository Saved-Day pack is invalid.');
       for(const record of payload){const date=String(record&&record.date||'');if(repositoryMonth(date)!==entry.key||seenDates.has(date))throw new Error('Repository Saved-Day pack contains an invalid or duplicate date.');seenDates.add(date);dailyDocuments.push(record);}
-    }else if(entry.kind==='areaNote'){
-      if(!payload||typeof payload!=='object'||Array.isArray(payload)||String(payload.key||'')!==entry.key||seenNoteKeys.has(entry.key))throw new Error('Repository Ongoing Note object is invalid.');
-      seenNoteKeys.add(entry.key);areaNoteItems.push(payload);
+    }else if(entry.kind===noteKind){
+      if(!payload||typeof payload!=='object'||Array.isArray(payload)||String(payload.key||'')!==entry.key||seenNoteKeys.has(entry.key))throw new Error('Repository note object is invalid.');
+      seenNoteKeys.add(entry.key);noteItems.push(payload);
     }else if(entry.kind===LEGACY_REFLECTION_DRAFT_PACK_KIND){
       if(manifest.version>4||!Array.isArray(payload))throw new Error('Legacy repository Reflection Draft pack is invalid.');
       for(const draft of payload){const date=String(draft&&draft.date||'');if(repositoryMonth(date)!==entry.key||seenDraftDates.has(date))throw new Error('Legacy repository Reflection Draft pack contains an invalid or duplicate date.');seenDraftDates.add(date);legacyReflectionDraftCount++;}
@@ -857,46 +1022,51 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
       if(entry.key!=='active'||activeSession!==null)throw new Error('Repository Active Session object is invalid.');activeSession=payload;
     }else if(entry.kind==='personalData'){
       if(entry.key!=='personal'||personalData!==null)throw new Error('Repository personal-data object is invalid.');personalData=payload;
+    }else if(entry.kind===PENDING_REVIEW_KIND&&!releasedRepositoryManifest(manifest.version)){
+      if(!payload||typeof payload!=='object'||Array.isArray(payload)||String(payload.id||'')!==entry.key||seenReviewIds.has(entry.key))throw new Error('Repository object kept for review is invalid.');
+      seenReviewIds.add(entry.key);pendingReviewItems.push(payload);
     }else throw new Error(`Repository logical object kind ${entry.kind} is unsupported.`);
   }
-  dailyDocuments.sort((a,b)=>String(a.date).localeCompare(String(b.date)));areaNoteItems.sort((a,b)=>String(a.key).localeCompare(String(b.key)));
-  const counts=repositoryManifestCounts({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:dailyDocuments.length,areaNote:areaNoteItems.length,activeSession:activeSession?1:0,reflectionDraft:legacyReflectionDraftCount},manifest.version);
-  if(!repositoryCountsEqualForManifest(counts,manifest.counts,manifest.version))throw new Error('Repository checkpoint counts do not match its reconstructed contents.');
-  const referencedAttachmentIds=new Set(),attachmentLeases=new Map(),assetItems=[];
+  dailyDocuments.sort((a,b)=>String(a.date).localeCompare(String(b.date)));noteItems.sort((a,b)=>String(a.key).localeCompare(String(b.key)));pendingReviewItems.sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+  const counts=repositoryManifestCounts({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:dailyDocuments.length,note:noteItems.length,activeSession:activeSession?1:0,pendingReview:pendingReviewItems.length,reflectionDraft:legacyReflectionDraftCount},manifest.version);
+  if(!noteKey&&!repositoryCountsEqualForManifest(counts,manifest.counts,manifest.version))throw new Error('Repository checkpoint counts do not match its reconstructed contents.');
+  const referencedAttachmentIds=new Set(),attachmentLeases=new Map(),assetItems=[],noteAssetIds=noteKey?new Set(noteItems.flatMap(item=>[...BackupCodec.assetIds(item)])):null;
   try{
     for(const raw of manifest.assets){
+      if(noteAssetIds&&!noteAssetIds.has(raw.assetId))continue;
       throwIfImportAborted(signal);
       if(raw.missing===true){assetItems.push(freeze({descriptor:freeze({assetId:raw.assetId,missing:true}),blob:null}));continue;}
       const entry=objectById.get(raw.objectId);
       if(!entry||entry.kind!=='attachment')throw new Error(`Repository attachment ${raw.assetId} references an unavailable object.`);
       referencedAttachmentIds.add(entry.objectId);
+      const descriptor=freeze({assetId:raw.assetId,mimeType:raw.mimeType,size:raw.size,checksum:raw.checksum,name:raw.name,library:raw.library});
+      if(localAttachments&&entry.fingerprint===raw.checksum&&entry.sourceBytes===raw.size){const local=await localRepositoryAttachment(raw,{signal});if(local){assetItems.push(freeze({descriptor,blob:local}));continue;}}
       let opened=attachmentLeases.get(entry.objectId);
       if(!opened){opened=await openRepositoryAttachment(manifest,entry,raw,readObject,{interactive,signal});attachmentLeases.set(entry.objectId,opened);}
       else if(opened.blob.size!==raw.size||entry.fingerprint!==raw.checksum)throw new Error(`Repository attachment ${raw.assetId} shares an object with inconsistent metadata.`);
-      const descriptor=freeze({assetId:raw.assetId,mimeType:raw.mimeType,size:raw.size,checksum:raw.checksum,name:raw.name,library:raw.library});
       assetItems.push(freeze({descriptor,blob:opened.blob}));
     }
-    for(const entry of manifest.objects)if(entry.kind==='attachment'&&!referencedAttachmentIds.has(entry.objectId))throw new Error('Repository checkpoint contains an unreferenced attachment object.');
+    if(!noteKey)for(const entry of manifest.objects)if(entry.kind==='attachment'&&!referencedAttachmentIds.has(entry.objectId))throw new Error('Repository checkpoint contains an unreferenced attachment object.');
     const installationId=manifest.installationId||manifest.checkpoint.originInstallationId;
     const capture=freeze({
       format:LOGICAL_CHECKPOINT_CAPTURE_FORMAT,version:LOGICAL_CHECKPOINT_CAPTURE_VERSION,
       dailyDocuments:freeze(dailyDocuments),exportedAt:manifest.exportedAt,sourceRevision:manifest.sourceRevision,
       studentName:String(personalData&&personalData.preferences&&personalData.preferences.studentName||'Study Director'),installationId,checkpoint:manifest.checkpoint,
-      recordDates:freeze(dailyDocuments.map(record=>String(record.date))),areaNoteItems:freeze(areaNoteItems),activeSession,personalData,
-      savedDayDeletions:freeze([...(manifest.protectedCheckpointManifest.savedDayDeletions||[])]),areaNoteDeletions:freeze([...(manifest.protectedCheckpointManifest.areaNoteDeletions||[])]),attachmentDeletions:freeze([...(manifest.protectedCheckpointManifest.attachmentDeletions||[])]),counts,assetItems:freeze(assetItems),warning:manifest.warning,
-      protectedCheckpointManifest:manifest.protectedCheckpointManifest
+      recordDates:freeze(dailyDocuments.map(record=>String(record.date))),noteItems:freeze(noteItems),activeSession,personalData,pendingReviewItems:freeze(pendingReviewItems),
+      savedDayDeletions:freeze([...(manifest.protectedCheckpointManifest.savedDayDeletions||[])]),noteDeletions:freeze([...(manifest.protectedCheckpointManifest.noteDeletions||[])]),attachmentDeletions:freeze([...(manifest.protectedCheckpointManifest.attachmentDeletions||[])]),counts,assetItems:freeze(assetItems),warning:manifest.warning,
+      protectedCheckpointManifest:manifest.protectedCheckpointManifest,noteScope:noteKey
     });
     let released=false;
     const release=async()=>{if(released)return false;released=true;for(const opened of attachmentLeases.values())await opened.release().catch(()=>{});attachmentLeases.clear();return true;};
-    return freeze({capture,release,repositoryCheckpoint:manifest.checkpoint,repositoryEncrypted:manifest.encrypted,verifiedSourceBytes:manifest.objects.reduce((total,entry)=>total+Math.max(0,Number(entry.sourceBytes)||0),0),storedBytes:manifest.objects.reduce((total,entry)=>total+Math.max(0,Number(entry.storedBytes)||0),0)});
+    return freeze({capture,release,verifiedSourceBytes:(noteKey?[...structuredEntries,...manifest.objects.filter(entry=>referencedAttachmentIds.has(entry.objectId))]:manifest.objects).reduce((total,entry)=>total+Math.max(0,Number(entry.sourceBytes)||0),0),storedBytes:manifest.objects.reduce((total,entry)=>total+Math.max(0,Number(entry.storedBytes)||0),0)});
   }catch(error){for(const opened of attachmentLeases.values())await opened.release().catch(()=>{});attachmentLeases.clear();throw error;}
 }
 async function inspectRepositoryCheckpoint(manifest,readObject,options={}){
   const signal=options.signal||currentImportSignal()||null,managedRecovery=options.managedRecovery;
   if(managedRecovery!==undefined&&managedRecovery!==null&&typeof managedRecovery!=='function')throw new TypeError('Managed repository recovery orchestration is invalid.');
-  const normalizedManifest=validateRepositoryManifest(manifest),reconstructed=await reconstructVerifiedRepositoryCheckpoint(normalizedManifest,readObject,{interactive:options.interactive!==false,signal});
+  const normalizedManifest=validateRepositoryManifest(manifest),reconstructed=await reconstructVerifiedRepositoryCheckpoint(normalizedManifest,readObject,{interactive:options.interactive!==false,signal,note:typeof options.note==='string'?options.note:'',localAttachments:true});
   try{
-    return await inspectVerifiedCapture(reconstructed.capture,freeze({signal,release:reconstructed.release,sourceEncrypted:normalizedManifest.encrypted,repositoryManifest:normalizedManifest,repositoryCommitted:options.committed===true,managedRecovery:managedRecovery||null,managedProgress:typeof options.managedProgress==='function'?options.managedProgress:null,verifiedSourceBytes:reconstructed.verifiedSourceBytes,storedBytes:reconstructed.storedBytes}));
+    return await inspectVerifiedCapture(reconstructed.capture,freeze({signal,release:reconstructed.release,sourceEncrypted:normalizedManifest.encrypted,repositoryManifest:normalizedManifest,repositoryCommitted:options.committed===true,sharedHead:options.sharedHead===true,managedRecovery:managedRecovery||null,managedProgress:typeof options.managedProgress==='function'?options.managedProgress:null,verifiedSourceBytes:reconstructed.verifiedSourceBytes,storedBytes:reconstructed.storedBytes}));
   }catch(error){await reconstructed.release().catch(()=>{});throw error;}
 }
 async function verifyRepositoryCheckpoint(manifest,readObject,options={}){
@@ -908,17 +1078,98 @@ async function releaseRepositoryCheckpoint(prepared){
   const state=repositoryPreparedState.get(prepared);if(!state||state.released)return false;state.released=true;repositoryPreparedState.delete(prepared);
   for(const release of state.leases.splice(0))await release().catch(()=>{});return true;
 }
+async function releaseRepositoryPublication(state){
+  const {prepared,manifestFile}=state;state.prepared=null;state.manifestFile=null;state.commitMarker=null;
+  await manifestFile?.release?.().catch(error=>AppDiagnostics.capture('repository.publication-release',error,'warn'));
+  if(prepared)await releaseRepositoryCheckpoint(prepared).catch(error=>AppDiagnostics.capture('repository.publication-release',error,'warn'));
+}
+function createRepositoryPublication(){
+  const state={prepared:null,manifestFile:null,commitMarker:null,busy:false,invalidated:false,settled:Promise.resolve(),releaseTask:null};
+  const continuation=freeze({
+    status:()=>freeze({pending:!!state.prepared,busy:state.busy,invalidated:state.invalidated,role:repositoryPreparedState.get(state.prepared)?.manifestBase.retention.role||'normal'}),
+    release:()=>{state.invalidated=true;return state.releaseTask||(state.releaseTask=state.settled.then(()=>releaseRepositoryPublication(state)).finally(()=>repositoryPublicationStates.delete(continuation)));}
+  });
+  repositoryPublicationStates.set(continuation,state);return continuation;
+}
+async function refreshRepositoryPublicationProtection(state,options){
+  const previous=repositoryPreparedState.get(state.prepared),context=await repositoryProtectionContext(options);
+  if(!previous||previous.released||context.protectionId!==previous.context.protectionId||context.encrypted!==previous.context.encrypted)throw Object.assign(new Error('Backup encryption changed. Retry the backup with the current settings.'),{name:'AbortError',code:'BACKUP_POLICY_CHANGED'});
+  if(previous.manifestBase.retention.role==='before-restore')await assertLogicalCheckpointCurrent(previous.capture);
+  if(state.prepared.objects.some(entry=>entry.reused&&(options.availableObjectIds instanceof Set&&!options.availableObjectIds.has(entry.objectId)||(options.excludedObjectIds||[]).includes(entry.objectId))))throw Object.assign(new Error('A reusable backup object is no longer available. Prepare a fresh checkpoint.'),{code:'BACKUP_REPOSITORY_BASE_CHANGED'});
+  // The immutable bytes outlive an attempt; its abort signal and file-worker
+  // generation do not. Rebind policy checks without re-encrypting the payload.
+  const prepared=freeze({...state.prepared,objects:freeze(state.prepared.objects.map(entry=>freeze({...entry,checkProtection:context.checkProtection})))});
+  repositoryPreparedState.delete(state.prepared);previous.context=context;repositoryPreparedState.set(prepared,previous);state.prepared=prepared;
+  if(state.manifestFile)state.manifestFile=freeze({...state.manifestFile,checkProtection:context.checkProtection});
+  if(state.commitMarker)state.commitMarker=freeze({...state.commitMarker,checkProtection:context.checkProtection});
+}
+// The newest ordinary version a prepared backup would duplicate, if any: the
+// same content (logical fingerprint) built from exactly the same stored
+// objects, none of them new. A repair that replaces a damaged object, and a
+// protected safety version, always get written.
+// sameData: the version is a copy of this device's current data. Its objects
+// may carry other ids than the newest version here (each device names its own
+// objects), so the same data is enough: copying it would only upload every
+// object again.
+function repositoryUnchangedVersion(history,prepared,{sameData=false}={}){
+  const base=repositoryPreparedState.get(prepared)?.manifestBase;if(!base||base.retention?.role!=='normal'||!sameData&&prepared.objects.some(entry=>!entry.reused))return null;
+  let newest=null;
+  for(const manifest of Array.isArray(history)?history:[])if((manifest?.retention?.role||'normal')==='normal'&&(!newest||Date.parse(manifest.exportedAt)>Date.parse(newest.exportedAt)))newest=manifest;
+  if(!newest||!newest.logicalFingerprint||newest.logicalFingerprint!==base.logicalFingerprint)return null;
+  if(sameData)return String(newest.protectionId||'')===String(base.protectionId||'')&&newest.encrypted===base.encrypted?newest:null;
+  const ids=list=>(list||[]).map(entry=>String(entry.objectId)).sort().join('|');
+  return ids(newest.objects)===ids(base.objects)?newest:null;
+}
+// A version another location already holds, placed here as it is: the same
+// manifest file, and each object this location lacks read from there.
+async function prepareRepositoryCopy(copy,{availableObjectIds=null,interactive=false,signal=null}={}){
+  if(!copy||!(copy.manifestBlob instanceof Blob)||typeof copy.readObject!=='function')throw new TypeError('Repository version copy is invalid.');
+  const manifest=await inspectRepositoryManifest(copy.manifestBlob,{interactive}),noCheck=async()=>true,leases=[],objects=[];
+  if(manifest.checkpoint.checkpointId!==String(copy.checkpointId||''))throw new Error('The copied backup version does not match the version selected.');
+  try{
+    for(const entry of manifest.objects){
+      throwIfImportAborted(signal);
+      if(availableObjectIds instanceof Set&&availableObjectIds.has(entry.objectId)){objects.push(freeze({...entry,reused:true,blob:null,checkProtection:noCheck}));continue;}
+      const read=await copy.readObject(entry);leases.push(read.release);
+      if(!(read.blob instanceof Blob)||read.blob.size!==entry.storedBytes)throw new Error(`Backup object ${entry.objectId} could not be read for copying.`);
+      objects.push(freeze({...entry,reused:false,blob:read.blob,checkProtection:noCheck}));
+    }
+  }catch(error){for(const release of leases.splice(0))await release().catch(()=>{});throw error;}
+  const prepared=freeze({format:'study-director.prepared-repository-checkpoint',version:1,checkpoint:manifest.checkpoint,exportedAt:manifest.exportedAt,sourceRevision:manifest.sourceRevision,protectionId:manifest.protectionId,encrypted:manifest.encrypted,counts:manifest.counts,objects:freeze(objects),warning:manifest.warning});
+  repositoryPreparedState.set(prepared,{capture:null,context:freeze({checkProtection:noCheck}),manifestBase:manifest,leases,released:false,manifestFinalized:true,reconciliationUpdate:null,preparationIndexCandidate:null,copy:true});
+  const manifestFile=freeze({blob:copy.manifestBlob,manifest,exportedAt:manifest.exportedAt,sourceRevision:manifest.sourceRevision,counts:manifest.counts,protectionId:manifest.protectionId,encrypted:manifest.encrypted,checkProtection:noCheck,checkSource:noCheck,release:async()=>{}});
+  return freeze({prepared,manifestFile});
+}
 async function publishRepositoryCheckpoint(history,options={},transport={}){
   if(!transport||typeof transport!=='object'||typeof transport.writeObject!=='function'||typeof transport.writeManifest!=='function'||typeof transport.commit!=='function')throw new TypeError('Repository publication transport is invalid.');
-  let prepared=null,manifestFile=null,publication=null,commitReceipt=null,committed=false;const written=[],warnings=[];
+  const continuation=options.continuation||null,state=continuation?repositoryPublicationStates.get(continuation):{prepared:null,manifestFile:null,commitMarker:null,busy:false,invalidated:false};
+  if(!state||state.invalidated||state.busy)throw new TypeError('Repository publication continuation is unavailable or already running.');
+  state.busy=true;let settle;state.settled=new Promise(resolve=>{settle=resolve;});
+  let prepared=state.prepared,manifestFile=state.manifestFile,publication=null,commitReceipt=null,committed=false,retained=false;const written=[],warnings=[];
+  const check=()=>{throwIfImportAborted(options.signal);if(state.invalidated)throw Object.assign(new Error('Repository publication was retired.'),{name:'AbortError',code:'BACKUP_SOURCE_FENCE_CHANGED'});};
   const postCommit=async(phase,message,work)=>{try{return await work();}catch(error){warnings.push(message);AppDiagnostics.capture(`repository.publication-${phase}`,error,'warn');return null;}};
   try{
-    prepared=await prepareRepositoryCheckpoint(history,options);
+    check();
+    const copy=options.copy||null,current=!copy||copy.current===true;
+    if(prepared){await refreshRepositoryPublicationProtection(state,options);prepared=state.prepared;manifestFile=state.manifestFile;}
+    else if(copy){const copied=await prepareRepositoryCopy(copy,options);prepared=copied.prepared;manifestFile=copied.manifestFile;state.prepared=prepared;state.manifestFile=manifestFile;}
+    else{prepared=await prepareRepositoryCheckpoint(history,options);state.prepared=prepared;}
+    check();
+    // Nothing changed since the newest version: write nothing (no requests,
+    // no history slot), but record that the current changes are backed up.
+    const unchanged=repositoryUnchangedVersion(history,prepared,{sameData:!!copy&&current});
+    if(unchanged){
+      const checkpointId=unchanged.checkpoint.checkpointId,publication=freeze({name:checkpointId+'.sdcheckpoint',unchanged:true}),objectsReused=prepared.objects.length;
+      if(!copy)adoptRepositoryPreparation(prepared,checkpointId);if(options.shared&&current)await postCommit('reconciliation-base','The backup was already up to date, but this device could not record it as shared.',()=>establishRepositoryBase(checkpointId));
+      const context=freeze({prepared,manifest:unchanged,sourceRevision:prepared.sourceRevision,exportedAt:unchanged.exportedAt,publication,commitReceipt:null,objectsWritten:0,objectsReused,writtenBytes:0,attachmentBytesWritten:0,unchanged:true});
+      const committedResult=current&&typeof transport.onCommitted==='function'?await postCommit('bookkeeping','The backup was already up to date, but local backup status could not be updated.',()=>transport.onCommitted(context)):null;
+      return freeze({checkpointId,manifest:unchanged,sourceRevision:prepared.sourceRevision,exportedAt:unchanged.exportedAt,publication,commitReceipt:null,objectsWritten:0,objectsReused,writtenBytes:0,attachmentBytesWritten:0,committedResult,cleanupResult:null,unchanged:true,warning:warnings.join(' ')});
+    }
     let objectsWritten=0,objectsReused=0,writtenBytes=0,attachmentBytesWritten=0;
     const freshObjects=[];
     for(const entry of prepared.objects){if(entry.reused)objectsReused+=1;else freshObjects.push(entry);}
     const receipts=await mapRepositoryBounded(freshObjects,async entry=>{
-      await entry.checkProtection?.();
+      check();await entry.checkProtection?.();check();
       const receipt=await transport.writeObject(entry,prepared),row=freeze({entry,receipt});
       written.push(row);
       return row;
@@ -926,31 +1177,39 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
     for(const row of receipts){
       objectsWritten+=1;writtenBytes+=Number(row.entry.storedBytes)||0;if(row.entry.kind==='attachment')attachmentBytesWritten+=Number(row.entry.sourceBytes)||0;
     }
-    manifestFile=await finalizeRepositoryCheckpointManifest(prepared,options);
-    await manifestFile.checkProtection?.();await manifestFile.checkSource?.();
+    check();if(!manifestFile){manifestFile=await finalizeRepositoryCheckpointManifest(prepared,options);state.manifestFile=manifestFile;}
+    await manifestFile.checkProtection?.();await manifestFile.checkSource?.();check();
     publication=await transport.writeManifest(manifestFile,prepared);
     await manifestFile.checkSource?.();
-    const commitMarker=await createRepositoryCommitMarker(manifestFile.manifest,{checkProtection:manifestFile.checkProtection,checkSource:manifestFile.checkSource,signal:options.signal||null});
+    check();const commitMarker=state.commitMarker||(state.commitMarker=await createRepositoryCommitMarker(manifestFile.manifest,{checkProtection:manifestFile.checkProtection,checkSource:manifestFile.checkSource,signal:options.signal||null}));check();
     commitReceipt=await transport.commit(commitMarker,prepared,publication);
     committed=true;
-    const baseEstablished=await postCommit('reconciliation-base','The checkpoint was saved and verified, but local reconciliation ancestry could not be updated. A later backup will retry completion bookkeeping.',async()=>{await establishRepositoryReconciliationBase(prepared);return true;});
+    // A copied older version only fills in history: no bookkeeping, no base.
+    const checkpointId=manifestFile.manifest.checkpoint.checkpointId;if(!copy)adoptRepositoryPreparation(prepared,checkpointId);
+    const baseEstablished=!current?false:!options.shared||await postCommit('reconciliation-base','The checkpoint was saved and verified, but this device could not record it as shared. A later backup will retry completion bookkeeping.',async()=>{if(!await establishRepositoryBase(checkpointId))throw new Error('The shared base could not be recorded.');return true;});
     const context=freeze({prepared,manifest:manifestFile.manifest,sourceRevision:manifestFile.sourceRevision,exportedAt:manifestFile.exportedAt,publication,commitReceipt,objectsWritten,objectsReused,writtenBytes,attachmentBytesWritten});
     const committedResult=baseEstablished&&typeof transport.onCommitted==='function'?await postCommit('bookkeeping','The checkpoint was saved and verified, but local backup status could not be updated. A later backup will retry completion bookkeeping.',()=>transport.onCommitted(context)):null;
     const cleanupResult=typeof transport.cleanup==='function'?await postCommit('retention-cleanup','The checkpoint was saved and verified, but repository retention cleanup did not complete.',()=>transport.cleanup(freeze({...context,committedResult}))):null;
     return freeze({checkpointId:manifestFile.manifest.checkpoint.checkpointId,manifest:manifestFile.manifest,sourceRevision:manifestFile.sourceRevision,exportedAt:manifestFile.exportedAt,publication,commitReceipt,objectsWritten,objectsReused,writtenBytes,attachmentBytesWritten,committedResult,cleanupResult,warning:warnings.join(' ')});
   }catch(error){
-    if(typeof transport.onFailure==='function')try{await transport.onFailure(error,freeze({prepared,publication,commitReceipt,committed,written:freeze([...written])}));}catch(cleanupError){AppDiagnostics.capture('repository.publication-cleanup',cleanupError,'warn');}
+    if(['BACKUP_POLICY_CHANGED','BACKUP_SOURCE_FENCE_CHANGED','BACKUP_REPOSITORY_BASE_CHANGED'].includes(String(error?.code||'')))state.invalidated=true;
+    if(continuation&&state.prepared&&!state.invalidated&&!committed&&typeof transport.retainOnFailure==='function')try{retained=await transport.retainOnFailure(error)===true;}catch(retainError){AppDiagnostics.capture('repository.publication-retain',retainError,'warn');}
+    if(typeof transport.onFailure==='function')try{await transport.onFailure(error,freeze({prepared,publication,commitReceipt,committed,retained,written:freeze([...written])}));}catch(cleanupError){AppDiagnostics.capture('repository.publication-cleanup',cleanupError,'warn');}
     throw error;
   }finally{
-    await manifestFile?.release?.().catch(()=>{});
-    if(prepared)await releaseRepositoryCheckpoint(prepared).catch(error=>AppDiagnostics.capture('repository.publication-release',error,'warn'));
+    if(!retained||state.invalidated)await releaseRepositoryPublication(state);
+    state.busy=false;settle();
   }
 }
 
     return freeze({
-      format:'study-director.managed-repository',contractVersion:1,
-      publish:publishRepositoryCheckpoint,inspectManifest:inspectRepositoryManifest,inspect:inspectRepositoryCheckpoint,verifyCheckpoint:verifyRepositoryCheckpoint,verifyObject:verifyRepositoryObject,scrub:scrubRepositoryIntegrity,cleanup:cleanupRepositoryRetention,inspectCommit:inspectRepositoryCommitMarker,
-      retention:REPOSITORY_RETENTION_POLICY,validatePolicy:validateRepositoryRetentionPolicy,classifyState:classifyRepositoryState,activeProtected:activeProtectedRepositoryRow,selectRetention:selectRepositoryRetention,projectHistory:projectManagedRepositoryHistory,invalidatePreparation:invalidateRepositoryPreparation
+      format:'study-director.managed-repository',contractVersion:1,releasedManifestVersion:REPOSITORY_RELEASED_MANIFEST_VERSION,
+      noteObject:repositoryNoteObject,readNote:readRepositoryNote,
+      createPublication:createRepositoryPublication,publish:publishRepositoryCheckpoint,inspectManifest:inspectRepositoryManifest,inspect:inspectRepositoryCheckpoint,verifyCheckpoint:verifyRepositoryCheckpoint,verifyObject:verifyRepositoryObject,scrub:scrubRepositoryIntegrity,cleanup:cleanupRepositoryRetention,inspectCommit:inspectRepositoryCommitMarker,
+      retention:REPOSITORY_RETENTION_POLICY,validatePolicy:validateRepositoryRetentionPolicy,classifyState:classifyRepositoryState,activeProtected:activeProtectedRepositoryRow,selectRetention:selectRepositoryRetention,projectHistory:projectManagedRepositoryHistory,invalidatePreparation:invalidateRepositoryPreparation,establishBase:establishRepositoryBase,
+      // The newest version this device made (any location), and whether
+      // placing it in Drive can make it the shared base.
+      spine:()=>repositorySpine?freeze({checkpointId:repositorySpine.checkpointId,sourceRevision:repositorySpine.sourceRevision,shareable:!!repositorySpine.update}):null
     });
   }
   return freeze({format:'study-director.managed-repository-module',contractVersion:1,createEngine});

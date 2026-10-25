@@ -1,13 +1,19 @@
 // A bounded writer shared by worker encryption, copying and downloads.
-const OPFS_DIRECTORY='@@SD_BACKUP_FILES_OPFS_DIRECTORY@@';
+// Each profile keeps its scratch files in its own folder: the plain one, or
+// the plain one followed by ~<profile scope>. The folder is split rather than
+// measured: the bundler would fix a name's length before the build fills it in.
+const OPFS_DIRECTORY='@@SD_BACKUP_FILES_OPFS_DIRECTORY@@',SEPARATOR='@@SD_PROFILE_SCOPE_SEPARATOR@@',PROFILE_SCOPE=/^prof_[a-z0-9]{1,24}_[a-z0-9]{6,12}_[a-f0-9]{8}$/u;
+const profileFolder=value=>{const [base,scope,...rest]=String(value).split(SEPARATOR);return base===OPFS_DIRECTORY&&(scope===undefined||!rest.length&&PROFILE_SCOPE.test(scope));};
 const OPFS_NAME=/^backup-[a-f0-9-]{36}$/u;
 export async function resolveHandle(output){
   if(output?.kind!=='opfs')return output;
   const name=String(output.name||'');
   if(!OPFS_NAME.test(name))throw new Error('Backup scratch-file identity is invalid.');
+  const folder=String(output.directory||'');
+  if(!profileFolder(folder))throw new Error('Backup scratch-file folder is invalid.');
   const storage=globalThis.navigator?.storage;
   if(!storage||typeof storage.getDirectory!=='function')throw new Error('Browser file storage is unavailable to the file worker.');
-  const root=await storage.getDirectory(),directory=await root.getDirectoryHandle(OPFS_DIRECTORY,{create:true});
+  const root=await storage.getDirectory(),directory=await root.getDirectoryHandle(folder,{create:true});
   return directory.getFileHandle(name,{create:true});
 }
 export async function openOutput(output){

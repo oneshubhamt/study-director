@@ -25,7 +25,7 @@
 <li><strong>Transport security:</strong> the public web application is served over HTTPS by Firebase Hosting.</li>
 <li><strong>Browser controls:</strong> the production Hosting configuration uses a restrictive Content Security Policy and additional response headers intended to reduce script-injection, framing and unnecessary browser-permission risks.</li>
 <li><strong>Google Drive least privilege:</strong> optional Drive access requests only the <code>drive.file</code> scope.</li>
-<li><strong>Short-lived authorization:</strong> the Study Director Drive provider keeps its OAuth access token in memory rather than intentionally persisting it to <code>localStorage</code> or <code>sessionStorage</code>.</li>
+<li><strong>Short-lived authorization:</strong> the Study Director Drive provider keeps its OAuth access token in memory and in this browser's <code>localStorage</code> only until it expires (about an hour), so a reload does not ask for a new sign-in. It is removed on expiry, disconnection or rejection. No refresh token is requested or stored.</li>
 <li><strong>Backup integrity:</strong> Study Director verifies supported backups, including per-image SHA-256 checks in binary-framed backup v10 and SHA-256 read-back checks for Drive operations. Integrity verification is not encryption. Optional encrypted backups use native AES-256-GCM with authenticated headers and PBKDF2-HMAC-SHA-256 (600,000 iterations). Encryption covers backup contents; it does not encrypt browser storage or internal recovery journals.</li>
 <li><strong>Defensive restore:</strong> backup imports are validated and previewed before destructive restore operations are committed.</li>
 </ul>

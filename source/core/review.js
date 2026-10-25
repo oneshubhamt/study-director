@@ -26,7 +26,7 @@ registry.define('review',1,()=>{
       'originalStartMin','scheduleFingerprint'
     ]),
     evidence:freeze([
-      'actualRecordsSnapshot','applicableAreaNotesForTask','clearManualCompletionOverride',
+      'actualRecordsSnapshot','applicableNotesForTask','clearManualCompletionOverride',
       'liveTaskOutcome','progressInputState','recordCurrentActiveToTask',
       'resolveTaskCompletion','storeResolvedCompletion','syncProgressInputsToState','updateTimerFocusMetrics'
     ]),
@@ -38,9 +38,9 @@ registry.define('review',1,()=>{
       'writeLiveDraftNow'
     ]),
     notesDefaults:freeze([
-      'areaNoteStoredValueForKey','bindTaskNoteEditor','closeRichTextField','commitTaskNoteEditor','currentOngoingNoteEntriesForWorkTasks',
+      'noteStoredValueForKey','bindTaskNoteEditor','closeRichTextField','commitTaskNoteEditor','currentNoteEntriesForWorkTasks',
       'refreshPlanAfterSessionReset',
-      'renderInheritedAreaNotes','setPlanStatus','syncUnfinishedNoteDraft','unfinishedNoteDraftText'
+      'renderInheritedNotes','setPlanStatus','syncUnfinishedNoteDraft','unfinishedNoteDraftText'
     ]),
     view:freeze(['markStorageHealthTimestamp','notifyUser','on','refreshLibraryAfterSave','refreshStorageFallbackWarning','setStatus','updateBadges']),
     interactions:freeze(['confirm','notify']),
@@ -53,7 +53,7 @@ registry.define('review',1,()=>{
       'limits','dataContract','completionSources','taskOutcomes','timerModes'
     ],'Review constants');
     exactObject(input.services,[
-      'appData','diagnostics','practicePacer','taskIdentity','taskSessionState','keyedRecord','evidenceGateway','dailyReflection'
+      'appData','diagnostics','practicePacer','taskIdentity','taskSessionState','keyedRecord','evidenceGateway','dailyReflection','saveLane'
     ],'Review services');
     exactObject(input.runtime,[
       'tasks','sessionState','scheduleDerivedState','currentIndex','timerMode','isPaused','pendingGap',
@@ -75,6 +75,8 @@ registry.define('review',1,()=>{
     const KeyedRecord=input.services.keyedRecord;
     const SessionEvidenceGateway=input.services.evidenceGateway;
     const DailyReflection=functions(input.services.dailyReflection,['commit','load'],'Review Daily Reflection service');
+    const SaveLane=input.services.saveLane;
+    if(!SaveLane||SaveLane.format!=='study-director.save-lane-module'||SaveLane.contractVersion!==1)throw new TypeError('Review save lane is unavailable or incompatible.');
     const Runtime=input.runtime;
     const TASKS=Runtime.tasks;
     const SessionState=Runtime.sessionState;
@@ -96,7 +98,7 @@ registry.define('review',1,()=>{
       originalStartMin,scheduleFingerprint
     }=ports.schedule;
     const {
-      actualRecordsSnapshot,applicableAreaNotesForTask,clearManualCompletionOverride,
+      actualRecordsSnapshot,applicableNotesForTask,clearManualCompletionOverride,
       liveTaskOutcome,progressInputState,recordCurrentActiveToTask,
       resolveTaskCompletion,storeResolvedCompletion,syncProgressInputsToState,updateTimerFocusMetrics
     }=ports.evidence;
@@ -108,8 +110,8 @@ registry.define('review',1,()=>{
       writeLiveDraftNow
     }=ports.session;
     const {
-      areaNoteStoredValueForKey,bindTaskNoteEditor,closeRichTextField,commitTaskNoteEditor,currentOngoingNoteEntriesForWorkTasks,
-      refreshPlanAfterSessionReset,renderInheritedAreaNotes,setPlanStatus,syncUnfinishedNoteDraft,unfinishedNoteDraftText
+      noteStoredValueForKey,bindTaskNoteEditor,closeRichTextField,commitTaskNoteEditor,currentNoteEntriesForWorkTasks,
+      refreshPlanAfterSessionReset,renderInheritedNotes,setPlanStatus,syncUnfinishedNoteDraft,unfinishedNoteDraftText
     }=ports.notesDefaults;
     const {markStorageHealthTimestamp,notifyUser,on,refreshLibraryAfterSave,refreshStorageFallbackWarning,setStatus,updateBadges}=ports.view;
     const {confirm,notify}=ports.interactions;
@@ -120,9 +122,8 @@ registry.define('review',1,()=>{
     let currentReview=freeze({date:'',reflection:'',studyQuality:null,unfinished:''});
     let persistedReview=freeze({date:'',reflection:'',studyQuality:null});
     let reflectionOnlyState=freeze({date:'',canonical:'',recordKind:null});
-    let reflectionOnlyTimer=0,reflectionOnlyPending=null,reflectionOnlyTail=Promise.resolve(),reflectionOnlyHydration=0,reflectionOnlyLoading=false;
+    let reflectionOnlyHydration=0,reflectionOnlyLoading=false;
     const REVIEW_EDITOR_BINDING_VERSION='review-v2';
-    const REVIEW_SAVE_DEBOUNCE_MS=450;
     const REVIEW_RICH_INPUT_META=Symbol.for('studyDirector.richValidatedInput.v1');
 
     function validReviewDate(value){
@@ -209,7 +210,7 @@ registry.define('review',1,()=>{
     }
     function hydrateReviewState(options={}){
       const target=reviewDate(options.date||getReviewDate());
-      const review=options.snapshotReview&&typeof options.snapshotReview==='object'?options.snapshotReview:{reflection:'',studyQuality:null};
+      const review=options.snapshotReview===undefined&&persistedReview.date===target?persistedReview:options.snapshotReview&&typeof options.snapshotReview==='object'?options.snapshotReview:{reflection:'',studyQuality:null};
       const dd=document.getElementById('day-date');if(dd&&dd.value!==target)dd.value=target;
       return applyReviewState(review,target);
     }
@@ -259,29 +260,39 @@ async function hydrateReflectionOnlyState(date=getReviewDate()){
     AppDiagnostics.capture('review.reflection-only-load',error,'warn');return false;
   }
 }
+// Today's reflection saves through the shared save lane: into its Saved Day
+// on a day without a study session, otherwise into the session. Each pending
+// value names its date and store, so a date change mid-save still writes the
+// right day.
+async function writeReflection(pending,options={}){
+  if(pending.mode==='session'){
+    const result=await writeLiveDraftNow({markChanged:false,backupCapture:pending.backupCapture||options.backupCapture===true});
+    if(!result||result.ok!==true)throw result&&result.error||new Error('the session could not be saved');
+    return result;
+  }
+  const expected=reflectionOnlyState.date===pending.date?reflectionOnlyState.canonical:'';
+  const saved=await DailyReflection.commit(pending.date,pending.reflection,{expectedCanonical:expected,backupCapture:pending.backupCapture||options.backupCapture===true});
+  reflectionOnlyState=freeze({date:pending.date,canonical:String(saved.canonical||''),recordKind:saved.recordKind||null});
+  if(reviewDate(getReviewDate())===pending.date){persistedReview=normalizeReviewState({reflection:reflectionOnlyState.canonical,studyQuality:null},pending.date,{validatedRich:true});syncReviewSurfaceMode();}
+  markStorageHealthTimestamp('lastStudyDataSaveAt');await refreshLibraryAfterSave(pending.date);return saved;
+}
+function reflectionLaneState(state,error){
+  if(state==='saving')setReflectionRichSync('saving','Saving…');
+  else if(state==='saved')setReflectionRichSync('saved','Saved');
+  else{setReflectionRichSync('error',SaveLane.failureMessage('Reflection',error));AppDiagnostics.capture('review.reflection-save',error,'warn');}
+}
+const reflectionLane=SaveLane.createLane(freeze({label:'Reflection',write:writeReflection,onState:reflectionLaneState,environment:freeze({setTimeout,clearTimeout})}));
 function queueReflectionOnlySave(binding,options={}){
   if(!binding||!lifecycleCanWrite())return false;
   const clean=normalizeReviewState({reflection:binding.reflection,studyQuality:null},binding.date,{validatedRich:true});
-  persistedReview=clean;reflectionOnlyPending=freeze({date:clean.date,reflection:clean.reflection,backupCapture:options.backupCapture===true});
-  if(reflectionOnlyTimer)clearTimeout(reflectionOnlyTimer);
-  setReflectionRichSync('saving','Saving…');
-  reflectionOnlyTimer=setTimeout(()=>{reflectionOnlyTimer=0;void flushReflectionOnlySave().catch(()=>{});},REVIEW_SAVE_DEBOUNCE_MS);
+  persistedReview=clean;reflectionLane.schedule(freeze({mode:'saved-day',date:clean.date,reflection:clean.reflection,backupCapture:options.backupCapture===true}));
   if(document.getElementById('pane-review')?.classList.contains('on'))ReviewView.sync();
   return true;
 }
 function flushReflectionOnlySave(options={}){
-  if(reflectionOnlyTimer){clearTimeout(reflectionOnlyTimer);reflectionOnlyTimer=0;}
   const bound=resolveReviewEditorBinding(getReviewDate(),options.event||null);
-  if(bound)reflectionOnlyPending=freeze({date:bound.date,reflection:bound.reflection,backupCapture:options.backupCapture===true});
-  const pending=reflectionOnlyPending;if(!pending)return reflectionOnlyTail;reflectionOnlyPending=null;
-  reflectionOnlyTail=reflectionOnlyTail.catch(()=>{}).then(async()=>{
-    const expected=reflectionOnlyState.date===pending.date?reflectionOnlyState.canonical:'';
-    const saved=await DailyReflection.commit(pending.date,pending.reflection,{expectedCanonical:expected,backupCapture:pending.backupCapture||options.backupCapture===true});
-    reflectionOnlyState=freeze({date:pending.date,canonical:String(saved.canonical||''),recordKind:saved.recordKind||null});
-    if(reviewDate(getReviewDate())===pending.date){persistedReview=normalizeReviewState({reflection:reflectionOnlyState.canonical,studyQuality:null},pending.date,{validatedRich:true});setReflectionRichSync('saved','Saved');syncReviewSurfaceMode();}
-    markStorageHealthTimestamp('lastDailyRecordSaveAt');await refreshLibraryAfterSave(pending.date);return saved;
-  }).catch(error=>{if(reviewDate(getReviewDate())===pending.date)setReflectionRichSync('error','Save failed');AppDiagnostics.capture('review.reflection-only-save',error,'warn');throw error;});
-  return reflectionOnlyTail;
+  if(bound)reflectionLane.schedule(freeze({mode:'saved-day',date:bound.date,reflection:bound.reflection,backupCapture:options.backupCapture===true}));
+  return reflectionLane.flush(options);
 }
 function persistReviewBinding(binding,options={}){
   if(!binding||!lifecycleCanWrite())return false;
@@ -289,8 +300,7 @@ function persistReviewBinding(binding,options={}){
   persistedReview=normalizeReviewState(binding,binding.date,{validatedRich:true});
   if(options.markChanged!==false)markDayContentChanged();
   if(document.getElementById('pane-review')?.classList.contains('on'))ReviewView.sync();
-  setReflectionRichSync('saving','Saving…');
-  saveLiveDraft({markChanged:false,delayMs:REVIEW_SAVE_DEBOUNCE_MS,backupCapture:options.backupCapture===true});
+  reflectionLane.schedule(freeze({mode:'session',date:binding.date,backupCapture:options.backupCapture===true}));
   return true;
 }
 function saveReviewState(options={}){
@@ -305,9 +315,13 @@ function queueReviewSave(options={}){
   return persistReviewBinding(binding,options);
 }
 function flushPendingReviewSave(options={}){
+  SaveLane.prepareFlush();
   if(!reviewHasStudyDay())return flushReflectionOnlySave(options);
   const binding=resolveReviewEditorBinding(getReviewDate(),options.event||null);
   if(binding)persistedReview=normalizeReviewState(binding,binding.date,{validatedRich:true});
+  // The session is written at once, with its synchronous recovery copy; a
+  // queued session save would only repeat it.
+  if(reflectionLane.pending())reflectionLane.cancel();
   const result=flushLiveDraft({markChanged:false,backupCapture:options.backupCapture===true});
   return result===null?lifecycleCanWrite():true;
 }
@@ -450,7 +464,6 @@ async function saveReflectionOnlyRecord(){
   const notice=notifications.begin({id:'save-reflection',surfaceId:'save-status',title:'Save reflection',message:'Saving reflection…'});
   let committed=false;
   try{
-    reflectionOnlyPending=freeze({date:binding.date,reflection:binding.reflection,backupCapture:false});
     const saved=await flushReflectionOnlySave();
     const hasContent=!!String(saved?.canonical||'').trim();committed=true;
     ReviewView.sync();
@@ -483,7 +496,7 @@ async function saveDayRecord(){
     await flushLiveDraft();
     const metrics=ReviewView.refresh({includeRecords:true,force:true});
     const {doc,rec}=await commitDailyRecord(metrics.evidence,'canonical daily record');committed=rec;
-    markStorageHealthTimestamp('lastDailyRecordSaveAt');
+    markStorageHealthTimestamp('lastStudyDataSaveAt');
     clearSaveReminder(rec.date,doc.sourceRevision);
     await writeLiveDraftNow({markChanged:false});
     await refreshLibraryAfterSave(rec.date);
@@ -540,7 +553,7 @@ async function handleStudyDayRollover(){
       saveReviewState({markChanged:false,strict:true});
       await flushLiveDraft();
       const {doc,rec}=await commitDailyRecord(SessionEvidenceGateway.snapshot({includeRecords:true}),'canonical rollover record');
-        markStorageHealthTimestamp('lastDailyRecordSaveAt');
+        markStorageHealthTimestamp('lastStudyDataSaveAt');
       markDayContentSaved(rec.date,doc.sourceRevision);
       notifyUser('Study day auto-saved',`${prettyDate(endedDate)} was saved to Library. Apply today’s schedule when ready.`,`sdm-rollover-${endedDate}`);
       Runtime.setSafetyMessage(`New study day: ${prettyDate(endedDate)} was auto-saved to Library. Apply today’s schedule when ready.`);
@@ -907,7 +920,7 @@ function buildReviewCardModel(task,evidence=null){
   const actualSeconds=evidence?evidence.actualTime[idx]:TaskSessionState.getField(idx,'actualTime');
   const tracked=actualSeconds!==undefined;
   const clock=row?.clock||TaskSessionState.getField(idx,'actualClock')||{};
-  const noteInfo=applicableAreaNotesForTask(task);
+  const noteInfo=applicableNotesForTask(task);
   return {
     task,idx,resolved,pct,progress,measure,target,hasPct,shifted,tracked,actualSeconds,clock,
     statusInfo:taskOutcomeInfo(row?.outcome||liveTaskOutcome(idx,{actualSnapshot:evidence?.actualTime,resolved,exactPct:pct})),
@@ -939,8 +952,8 @@ function renderReviewCard(model){
   noteBox.className='review-block-note ui-body';
   noteBox.dataset.areaKey=model.noteAreaKey;
   noteBox.dataset.noteSupport=model.task.kind==='support'?'true':'false';
-  const emptyNoteText=model.task.kind==='support'?'No current shared support note.':'No current ongoing subject note for this area.';
-  renderRichTextContent(noteBox,areaNoteStoredValueForKey(model.noteAreaKey),emptyNoteText,`Ongoing note for ${model.noteAreaLabel}`);
+  const emptyNoteText=model.task.kind==='support'?'No current shared support note.':'No current note for this area.';
+  renderRichTextContent(noteBox,noteStoredValueForKey(model.noteAreaKey),emptyNoteText,`Note for ${model.noteAreaLabel}`);
   if(!model.noteText)noteBox.classList.add('review-block-empty');
   const noteShare=textEl('div','review-flow-note ui-helper',model.task.kind==='support'?'Shared by all support activities':`Shared by Area: ${model.noteAreaLabel}`);
   const actions=document.createElement('div');
@@ -972,10 +985,10 @@ function renderReviewCard(model){
   const noteEdit=document.createElement('textarea');
   noteEdit.className='review-edit-note ui-field task-note-field';
   bindTaskNoteEditor(noteEdit,model.idx,'review');
-  noteEdit.value=model.noteText;noteEdit.placeholder=model.task.kind==='support'?'Edit the shared support note...':'Edit current ongoing notes for this subject/area...';
+  noteEdit.value=model.noteText;noteEdit.placeholder=model.task.kind==='support'?'Edit the shared support note...':'Edit current notes for this subject/area...';
   editPanel.append(measureRow,pctField,summary,noteEdit);
   const inheritedNotes=document.createElement('div');
-  renderInheritedAreaNotes(inheritedNotes,model.noteAreaKey,true);
+  renderInheritedNotes(inheritedNotes,model.noteAreaKey,true);
   card.append(
     createTaskReviewHeader({name:model.task.name,area:taskAreaValue(model.task),pct:model.hasPct?model.pct:0,statusInfo:model.statusInfo,shifted:model.shifted,tracked:model.tracked,pctId:`rpct-${model.idx}`,source:model.resolved.source}),
     createTaskTimingRow({
@@ -1210,7 +1223,7 @@ function reviewViewEvidenceKey(evidence){
     const progress=TaskSessionState.getField(idx,'notes')||{};
     const clock=row.clock||TaskSessionState.getField(idx,'actualClock')||{};
     const record=TaskSessionState.getField(idx,'actualRecords')||{};
-    const noteInfo=applicableAreaNotesForTask(task);
+    const noteInfo=applicableNotesForTask(task);
     const pauseEvents=Array.isArray(record.pauseEvents)?record.pauseEvents.map(event=>[
       String(event&&event.type||event&&event.reason||'').trim().toLowerCase(),
       Math.max(0,Math.round(Number(event&&event.seconds)||0)),
@@ -1431,7 +1444,7 @@ const REVIEW_REPORT_CATALOG=freeze([
   freeze({id:'summary',label:'Summary / statistics',compose:composeReviewSummary}),
   freeze({id:'diary',label:'Diary reflection',compose:composeReviewDiary}),
   freeze({id:'subjects',label:'Subject details',children:reviewReportSubjectChildren,compose:composeReviewSubjects}),
-  freeze({id:'ongoing',label:'Ongoing notes',children:reviewReportOngoingChildren,compose:composeReviewOngoing}),
+  freeze({id:'ongoing',label:'Notes',children:reviewReportOngoingChildren,compose:composeReviewOngoing}),
   freeze({id:'other',label:'Other details',children:()=>[freeze({id:'other:unfinished',label:'Unfinished note'})],compose:composeReviewOther})
 ]);
 const copyReportExcluded=new Set(),copyReportExpanded=new Set();
@@ -1452,7 +1465,7 @@ function reviewReportSections(context){
   return REVIEW_REPORT_CATALOG.map(section=>freeze({...section,children:typeof section.children==='function'?section.children(context):[]}));
 }
 function reviewReportSelectorContext(){
-  return freeze({reportTasks:TASKS.filter(isTrackableBlock),subjectEntries:currentOngoingNoteEntriesForWorkTasks(TASKS)});
+  return freeze({reportTasks:TASKS.filter(isTrackableBlock),subjectEntries:currentNoteEntriesForWorkTasks(TASKS)});
 }
 function copyReportSectionState(section){
   if(!section.children.length)return freeze({checked:!copyReportExcluded.has(section.id),indeterminate:false});
@@ -1599,7 +1612,7 @@ function copyReview(){
     m,rec,reviewDay,quality,refl:clipboardPlainText(currentReview.reflection,{rich:true}),
     dowFull:['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][reviewDay.getDay()],
     monFull:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][reviewDay.getMonth()],
-    reportTasks:rec.tasks,subjectEntries:currentOngoingNoteEntriesForWorkTasks(TASKS),unfinished:String(rec.carryForwardDraft||Runtime.carryForward()||'').trim()
+    reportTasks:rec.tasks,subjectEntries:currentNoteEntriesForWorkTasks(TASKS),unfinished:String(rec.carryForwardDraft||Runtime.carryForward()||'').trim()
   });
   const txt=composeReviewReport(context);
   const notice=notifications.begin({id:'copy-report',surfaceId:'save-status',title:'Copy report',message:'Copying report…'});
@@ -1625,7 +1638,7 @@ function copyReview(){
       saveReview:saveReviewState,
       queueReview:queueReviewSave,
       flushPending:flushPendingReviewSave,
-      settled:()=>Promise.all([AppData.activeSession.settled(),reflectionOnlyTail]).then(()=>true),
+      settled:()=>Promise.all([AppData.activeSession.settled(),reflectionLane.tail()]).then(()=>true),
       hydrate:hydrateReviewState,
       selectDate:selectReviewDate,
       state:currentReviewState,

@@ -4,7 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {SHIPPED_BASELINE_PERSISTENCE_CONTRACT as BASELINE} from '../../fixtures/shipped-baseline-persistence-contract.mjs';
 import {INDEXED_DB,OBSOLETE_INDEXED_DB} from '../../../contracts/canonical-identities.mjs';
-import {LOCAL_STORAGE_KEYS,OBSOLETE_LOCAL_STORAGE_KEYS,APP_META_KEYS,OBSOLETE_APP_META_KEYS} from '../../../contracts/data-architecture.mjs';
+import {LOCAL_STORAGE_KEYS,OBSOLETE_LOCAL_STORAGE_KEYS,APP_META_KEYS,OBSOLETE_APP_META_KEYS,RENAMED_APP_META_KEYS} from '../../../contracts/data-architecture.mjs';
 import {allCompatibilityEntries} from '../../../contracts/compatibility.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
@@ -21,9 +21,11 @@ for(const [id,old] of Object.entries(BASELINE.indexedDb.stores)){
     assert.equal(OBSOLETE_INDEXED_DB.stores[id],old.name,`${id} must be explicitly retired`);
     continue;
   }
-  const current=INDEXED_DB.stores[id];
+  // A renamed store keeps its rows; the upgrade gives it its current name.
+  const renamedTo=Object.keys(OBSOLETE_INDEXED_DB.renamedStores).find(current=>OBSOLETE_INDEXED_DB.renamedStores[current]===old.name);
+  const current=INDEXED_DB.stores[renamedTo||id];
   assert.ok(current,`Shipped baseline store ${id} has no current home`);
-  assert.equal(current.name,old.name,`Shipped baseline store ${id} identity drifted`);
+  assert.equal(current.name,renamedTo?INDEXED_DB.stores[renamedTo].name:old.name,`Shipped baseline store ${id} identity drifted`);
   assert.ok(current.schemaVersion>=old.schemaVersion,`Shipped baseline store ${id} schema regressed`);
 }
 
@@ -32,7 +34,7 @@ assert.equal(BASELINE.localStorage.length,26,'Fixture must retain every shipped-
 for(const key of BASELINE.localStorage)assert.ok(durableKeys.has(key),`Shipped-baseline LocalStorage identity is unaccounted for: ${key}`);
 
 const currentMeta=new Set(Object.values(APP_META_KEYS));
-const obsoleteMeta=new Set(Object.values(OBSOLETE_APP_META_KEYS));
+const obsoleteMeta=new Set([...Object.values(OBSOLETE_APP_META_KEYS),...Object.values(RENAMED_APP_META_KEYS).flat()]);
 for(const key of BASELINE.appMeta){
   if(key==='backupProviderOperation:'){
     assert.match(compatibilityHost,/LEGACY_BACKUP_PROVIDER_OPERATION_PREFIX='backupProviderOperation:'/u);
@@ -42,12 +44,12 @@ for(const key of BASELINE.appMeta){
 }
 
 const compatibilityIds=new Set(allCompatibilityEntries().map(entry=>entry.id));
-for(const id of ['daily-record-historical-shapes','active-session-v7-domain-separation','area-note-historical-rows','r10-indexeddb-topology-retirement','l7-host-metadata-normalization','l7-backup-protection-policy-v1','legacy-protected-backup-v1','complete-backup-v7-v19']){
+for(const id of ['daily-record-historical-shapes','active-session-v7-domain-separation','note-historical-rows','r10-indexeddb-topology-retirement','l7-host-metadata-normalization','complete-backup-v7-v19']){
   assert.ok(compatibilityIds.has(id),`Shipped-baseline compatibility path is not inventoried: ${id}`);
 }
 assert.ok(BASELINE.external.backupMetadataVersion>=7&&BASELINE.external.backupMetadataVersion<=16);
-assert.match(backupCodec,/!\[7,8,9,10,11,12,13,14,15,16,17,18,19,20\]\.includes\(version\)/u,'The shipped backup version must remain inside the isolated complete-backup compatibility range.');
-assert.match(exportsSource,/legacyDecryptBackup\(file,current\)/u,'The shipped protected-backup format must route through the historical reader.');
+assert.match(backupCodec,/version>=7&&version<=DATA_CONTRACT\.schemas\.Backup\.version/u,'The shipped backup version must remain inside the isolated complete-backup compatibility range.');
+assert.doesNotMatch(exportsSource,/SDENC01|legacyDecryptBackup/u,'No encrypted backups exist in the retired SDENC01 format, so the app has no reader for it.');
 
 console.log(JSON.stringify({
   status:'PASS',suite:'shipped-baseline-contract',release:BASELINE.release,

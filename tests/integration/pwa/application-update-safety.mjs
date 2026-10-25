@@ -7,6 +7,7 @@ import {createHarness as repositoryHarness} from '../../helpers/repository-harne
 // these fixtures expose save failures, lock lifetime, and background drain races.
 const source=fs.readFileSync('source/app.html','utf8');
 const preparation=source.slice(source.indexOf('function pwaRecoveryReadBackIssue('),source.indexOf('function schedulePwaUpdateEvaluation('));
+const updateScheduler=source.slice(source.indexOf('function schedulePwaUpdateEvaluation('),source.indexOf('async function evaluateAutomaticPwaUpdate('));
 const scheduler=source.slice(source.indexOf('function pwaLastUpdateCheckAt('),source.indexOf('const PwaLifecycle=PwaLifecycleModule'));
 const flush=async()=>{for(let i=0;i<40;i++)await Promise.resolve();};
 function deferred(){let resolve;const promise=new Promise(yes=>{resolve=yes;});return {promise,resolve};}
@@ -15,14 +16,14 @@ function fixture(){
   const state={owner:{state:'primary',revision:1},mutation:{active:'',foreign:false},lifecycle:{ready:true,revision:1},
     startup:true,timer:false,pacer:false,attachment:false,providerBusy:false,dialog:false,diary:true,planFlush:true,reflection:true,
     deletionFlush:true,draft:'edited plan',storedDraft:'edited plan',noteFailure:null,loaded:{value:{revision:7},storage:{idb:true}},
-    live:{ok:true,value:{revision:7},storage:{idb:true}},maintenance:Promise.resolve(),device:Promise.resolve({token:'device'}),
+    live:{ok:true,value:{revision:7},storage:{idb:true}},maintenance:Promise.resolve(),backups:Promise.resolve(),
     diaryWait:Promise.resolve(),lockCount:0,quiesced:0,updates:0,checkSuccess:true,online:true,now:1000000,
     status:{supported:true,registered:true,updateReady:false},lastCheck:0,timers:new Map()};
   function element(tag){const node={tag,children:[],open:false,removed:false,setAttribute(){},addEventListener(type,fn){this[type]=fn;},append(...nodes){this.children.push(...nodes);},contains(target){return target===this||this.children.some(n=>n.contains(target));},showModal(){this.open=true;},close(){this.open=false;},remove(){this.removed=true;}};elements.push(node);return node;}
   const window={addEventListener(type,fn){const set=listeners.get(type)||new Set();set.add(fn);listeners.set(type,set);},removeEventListener(type,fn){listeners.get(type)?.delete(fn);}};
   const record=async label=>{calls.push(label);};
-  const sandbox={console,AbortController,Promise,Date:class extends Date{static now(){return state.now;}},Object,
-    pwaUpdateReservation:null,pwaWorkRevision:0,imagePreparationCount:0,attachmentIntegrityRunning:Promise.resolve(),
+  const sandbox={console,AbortController,Promise,Date:class extends Date{static now(){return state.now;}},Object,backUpBeforeUpdate:async()=>{calls.push('backup');},
+    pwaUpdateReservation:null,pwaWorkRevision:0,pwaUpdateRetryTimer:null,pwaLatestUpdateState:{updateReady:true},pwaLastEditableInputAt:0,PWA_EDIT_IDLE_MS:1800,PWA_UPDATE_SAFETY_RETRY_MS:300000,PWA_UPDATE_EXTERNAL_RETRY_MS:5000,evaluateAutomaticPwaUpdate:()=>calls.push('automatic-update'),imagePreparationCount:0,attachmentIntegrityRunning:Promise.resolve(),
     OWNERSHIP_STATES:{PRIMARY:'primary',SECONDARY:'secondary'},TIMER_MODES:{RUNNING:'running'},TimerState:{paused:false,mode:'running'},TASKS:[{}],
     document:{body:element('body'),createElement:element,querySelector:()=>state.dialog?{}:null,getElementById:()=>({value:state.draft})},window,
     StartupLifecycle:{status:()=>({fullyInitialized:state.startup})},AppOwnership:{status:()=>({...state.owner})},SessionLifecycle:{status:()=>({...state.lifecycle})},
@@ -31,9 +32,9 @@ function fixture(){
       try{return await run({assert(){assert.equal(state.owner.state,'primary');}});}finally{state.mutation.active='';state.lockCount--;calls.push('unlock');}
     }},
     ReviewSaveService:{status:()=>({})},AttachmentLibrary:{status:()=>({busy:state.attachment})},AttachmentIngest:{status:()=>({busy:false})},Exports:{status:()=>({busy:false})},BackupController:{status:()=>({busy:false})},
-    BackupProviderRuntime:{status:()=>({busy:state.providerBusy}),suspendBackground:()=>{calls.push('provider-suspend');holds.add('provider');return {settled:Promise.resolve(),release:()=>{holds.delete('provider');calls.push('provider-resume');}};}},
-    DeviceBackup:{status:()=>({busy:false}),suspendAutomatic:()=>{holds.add('device');return state.device;},resumeAutomatic:()=>{holds.delete('device');calls.push('device-resume');}},
-    RichTextAssetMaintenance:{settled:()=>state.maintenance},OwnershipUiProjection:{apply(){calls.push('project');}},
+    BackupProviderRuntime:{status:()=>({busy:state.providerBusy}),suspendBackground:()=>{calls.push('provider-suspend');holds.add('provider');return {settled:state.backups,release:()=>{holds.delete('provider');calls.push('provider-resume');}};}},
+    DeviceBackup:{status:()=>({busy:false})},
+    AttachmentIntegrityJob:{settled:()=>Promise.resolve()},RichTextAssetMaintenance:{settled:()=>state.maintenance},OwnershipUiProjection:{apply(){calls.push('project');}},
     RichTextRuntime:{quiesce:async run=>{state.quiesced++;try{return await run();}finally{state.quiesced--;}}},
     quiesceManagedRecoveryRuntime:async run=>{state.quiesced++;try{return await run();}finally{state.quiesced--;}},
     PracticePacer:{status:()=>({running:state.pacer})},isLiveTrackableTimer:()=>state.timer,appCanMutate:()=>state.owner.state==='primary',pwaRecentEditableInput:()=>false,
@@ -44,13 +45,13 @@ function fixture(){
     AppData:{maintenance:{settled:()=>Promise.resolve()},planData:{read:async()=>({draft:state.storedDraft})},
       notes:{flush:()=>record('notes'),failure:()=>state.noteFailure},deletionRecovery:{flush:async()=>{await record('deletions');return state.deletionFlush;}},
       activeSession:{settled:()=>record('session-settled'),load:async()=>state.loaded},local:{getText:()=>state.lastCheck,setText:(_,value)=>{state.lastCheck=Number(value);return true;}}},
-    AppDiagnostics:{capture(){}},PwaLifecycle:{status:()=>state.status,checkForUpdate:async()=>{state.updates++;if(state.checkSuccess)state.status.registered=true;return state.checkSuccess;}},
+    AppDiagnostics:{capture(){}},foregroundChanged:()=>{state.foregroundReleases=(state.foregroundReleases||0)+1;},PwaLifecycle:{status:()=>state.status,checkForUpdate:async()=>{state.updates++;if(state.checkSuccess)state.status.registered=true;return state.checkSuccess;}},
     navigator:{get onLine(){return state.online;},locks:{request:async(_,__,run)=>run()}},STORAGE_KEYS:{pwaUpdateCheck:'last'},PWA_UPDATE_CHECK_LOCK:'update',
     PWA_UPDATE_CHECK_INTERVAL_MS:86400000,PWA_UPDATE_CHECK_RETRY_BASE_MS:30000,PWA_UPDATE_CHECK_RETRY_MAX_MS:900000,
     pwaLastSuccessfulUpdateCheckMemoryAt:0,pwaUpdateCheckFailureCount:0,pwaUpdateCheckRetryAt:0,pwaUpdateCheckTimer:null,pwaUpdateCheckRunning:false,
     setTimeout:(fn,delay)=>{const id=Symbol();state.timers.set(id,{fn,delay});return id;},clearTimeout:id=>state.timers.delete(id)
   };
-  vm.createContext(sandbox);vm.runInContext(preparation+'\n'+scheduler,sandbox);
+  vm.createContext(sandbox);vm.runInContext(preparation+'\n'+updateScheduler+'\n'+scheduler,sandbox);
   const context=(extra={})=>({requestId:'request',automatic:false,external:false,signal:new AbortController().signal,...extra});
   return {state,calls,holds,sandbox,elements,listeners,context,reserve:extra=>{const ctx=context(extra);return {ctx,guard:sandbox.reserveApplicationUpdate(ctx)};}};
 }
@@ -63,16 +64,16 @@ await test('primary saves every surface and holds mutation and editor locks unti
   for(const save of ['diary','plan-flush','reflection','live','notes','deletions','session-settled'])assert.ok(h.calls.includes(save),save);
   let prevented=false,stopped=false;for(const block of h.listeners.get('beforeinput'))block({target:{},preventDefault(){prevented=true;},stopImmediatePropagation(){stopped=true;}});
   assert.equal(prevented,true);assert.equal(stopped,true);assert.ok(h.elements.some(e=>e.tag==='dialog'&&e.open));
-  assert.equal(h.state.lockCount,1);assert.equal(h.holds.size,2);await guard.release();await guard.release();
+  assert.equal(h.state.lockCount,1);assert.equal(h.holds.size,1,'one hold pauses every backup location');await guard.release();await guard.release();
   assert.equal(h.state.lockCount,0);assert.equal(h.state.quiesced,0);assert.equal(h.holds.size,0);assert.equal(h.sandbox.pwaUpdateReservation,null);
   assert.ok([...h.listeners.values()].every(set=>set.size===0));assert.ok(h.elements.filter(e=>e.tag==='dialog').every(e=>!e.open&&e.removed));
-  assert.equal(h.calls.filter(c=>c==='device-resume').length,1);
+  assert.equal(h.calls.filter(c=>c==='provider-resume').length,1);
 });
-await test('background drain delays readiness and cancellation releases a late device suspension',async()=>{
-  const h=fixture(),maintenance=deferred(),device=deferred(),abort=new AbortController();h.state.maintenance=maintenance.promise;h.state.device=device.promise;
+await test('background drain delays readiness and cancellation releases the backup hold',async()=>{
+  const h=fixture(),maintenance=deferred(),device=deferred(),abort=new AbortController();h.state.maintenance=maintenance.promise;h.state.backups=device.promise;
   const {guard}=h.reserve({signal:abort.signal});let ready=false;guard.ready.then(()=>{ready=true;},()=>{});await flush();assert.equal(ready,false);
-  abort.abort();await guard.release();assert.equal(h.state.lockCount,0);assert.equal(h.sandbox.pwaUpdateReservation,null);assert.equal(guard.validate(),false);
-  device.resolve({token:'late'});maintenance.resolve();await flush();assert.equal(h.holds.size,0);assert.equal(ready,false);assert.equal(h.calls.filter(c=>c==='device-resume').length,1);
+  abort.abort();await guard.release();assert.equal(h.state.lockCount,0);assert.equal(h.sandbox.pwaUpdateReservation,null);assert.equal(h.state.foregroundReleases,1,'the end of an update lets paused upkeep resume at once');assert.equal(guard.validate(),false);
+  device.resolve();maintenance.resolve();await flush();assert.equal(h.holds.size,0);assert.equal(ready,false);assert.equal(h.calls.filter(c=>c==='provider-resume').length,1);
 });
 await test('successful drain is required before save preparation',async()=>{
   const h=fixture(),gate=deferred();h.state.maintenance=gate.promise;const {guard}=h.reserve();let ready=false;guard.ready.then(()=>{ready=true;});await flush();assert.equal(ready,false);gate.resolve();await guard.ready;assert.equal(ready,true);await guard.release();
@@ -141,7 +142,7 @@ await test('retry notice, progress state and Pause & Update use the correct acti
   assert.equal(await h.sandbox.applyPwaUpdateFromUi(),true);assert.equal(h.state.updates,1);
   h.state.status={supported:true,registered:true,updateReady:true};h.state.timer=true;h.state.attachment=true;
   assert.equal(await h.sandbox.applyPwaUpdateFromUi(),false);assert.ok(!h.calls.includes('pause'));
-  h.state.attachment=false;assert.equal(await h.sandbox.applyPwaUpdateFromUi(),true);assert.deepEqual(h.calls.filter(c=>['pause','apply'].includes(c)),['pause','apply']);
+  h.state.attachment=false;assert.equal(await h.sandbox.applyPwaUpdateFromUi(),true);assert.deepEqual(h.calls.filter(c=>['pause','backup','apply'].includes(c)),['pause','backup','apply'],'waiting automatic backups go out before the update applies');
   h.sandbox.renderPwaUpdateStatus({...h.state.status,applying:true,message:'Applying update…',phase:'activating'});
   assert.equal(nodes.get('pwa-update-apply').disabled,true);assert.equal(nodes.get('pwa-update-progress-message').textContent,'Applying update…');
 });
@@ -151,13 +152,22 @@ await test('secondary window retries an external activation after transient bloc
     PWA_UPDATE_READY_DELAY_MS:650,PWA_UPDATE_SAFETY_RETRY_MS:300000,schedulePwaUpdateEvaluation(){},renderPwaUpdateStatus(){},pwaAppliedPlanEnded:()=>false});
   h.sandbox.PwaLifecycle.apply=async()=>{h.calls.push('external-apply');return true;};
   vm.runInContext(source.slice(source.indexOf('async function evaluateAutomaticPwaUpdate('),source.indexOf('async function applyPwaUpdateFromUi(')),h.sandbox);
-  h.state.lifecycle.ready=false;assert.equal(await h.sandbox.evaluateAutomaticPwaUpdate(),false);assert.ok(!h.calls.includes('external-apply'));
-  h.state.lifecycle.ready=true;h.state.timer=true;assert.equal(h.sandbox.pwaUpdateActionLabel(),'Update Now');assert.equal(await h.sandbox.evaluateAutomaticPwaUpdate(),true);assert.ok(h.calls.includes('external-apply'));
+  h.state.lifecycle.transitioning=true;assert.equal(await h.sandbox.evaluateAutomaticPwaUpdate(),false);assert.ok(!h.calls.includes('external-apply'));
+  // A follower left unreconciled (it lost primary control) has nothing to save and still follows the new release.
+  h.state.lifecycle.transitioning=false;h.state.lifecycle.ready=false;assert.equal(await h.sandbox.evaluateAutomaticPwaUpdate(),true);assert.equal(h.calls.filter(c=>c==='external-apply').length,1);
+  h.state.lifecycle.ready=true;h.state.timer=true;assert.equal(h.sandbox.pwaUpdateActionLabel(),'Update Now');assert.equal(await h.sandbox.evaluateAutomaticPwaUpdate(),true);assert.equal(h.calls.filter(c=>c==='external-apply').length,2);
+  // A primary window still waits for its own session state to reconcile.
+  h.state.owner.state='primary';h.state.timer=false;h.state.lifecycle.ready=false;assert.equal(await h.sandbox.evaluateAutomaticPwaUpdate(),false);assert.equal(h.calls.filter(c=>c==='external-apply').length,2);
+});
+await test('an external activation retries within seconds; an ordinary waiting update keeps the slow safety retry',async()=>{
+  const h=fixture();h.sandbox.pwaLatestUpdateState={updateReady:true,externalUpdate:true};
+  assert.equal(h.sandbox.pwaUpdateRetryDelay(),5000);h.sandbox.schedulePwaUpdateEvaluation();assert.equal([...h.state.timers.values()][0].delay,5000);
+  h.sandbox.pwaLatestUpdateState={updateReady:true,externalUpdate:false};assert.equal(h.sandbox.pwaUpdateRetryDelay(),300000);
 });
 await test('pending boot confirmation has a visible retry action and clears only after proof',async()=>{
  const elements=new Map(['pwa-update-control','pwa-update-apply','pwa-update-message','pwa-update-progress-message'].map(id=>[id,{}])),notices=[],checks=[],evaluations=[];
  const state={supported:true,registered:true,updateReady:false,applying:false,checking:false,bootState:'pending',phase:'boot-pending',message:'Update confirmation is pending.'};
- const context={Object,String,document:{getElementById:id=>elements.get(id)},pwaLatestUpdateState:null,pwaAutomaticBlockMessage:'old automatic block',pwaUpdateCheckRunning:false,pwaUpdateRetryTimer:null,PWA_UPDATE_READY_DELAY_MS:1500,PWA_UPDATE_SAFETY_RETRY_MS:1000,
+ const context={Object,String,backUpBeforeUpdate:async()=>{},document:{getElementById:id=>elements.get(id)},pwaLatestUpdateState:null,pwaAutomaticBlockMessage:'old automatic block',pwaUpdateCheckRunning:false,pwaUpdateRetryTimer:null,PWA_UPDATE_READY_DELAY_MS:1500,PWA_UPDATE_SAFETY_RETRY_MS:1000,pwaUpdateRetryDelay:()=>1000,
   NoticeCoordinator:{publish:(_,value)=>notices.push(value)},pwaUpdateActionLabel:()=> 'Update Now',clearTimeout(){},schedulePwaUpdateEvaluation:delay=>evaluations.push(delay),recordPwaUpdateCheckFailure(){},schedulePwaUpdateCheck(){},clearPwaUpdateCheckFailure(){},checkPwaUpdateIfDue:async options=>{checks.push(options);return true;},PwaLifecycle:{status:()=>state}};
  vm.createContext(context);vm.runInContext(source.slice(source.indexOf('async function applyPwaUpdateFromUi('),source.indexOf('function pwaLastUpdateCheckAt(')),context);
  context.renderPwaUpdateStatus(state);assert.equal(notices.at(-1).visible,true);assert.equal(notices.at(-1).title,'Update confirmation pending');assert.equal(elements.get('pwa-update-apply').textContent,'Retry confirmation');assert.equal(elements.get('pwa-update-message').textContent,state.message);assert.equal(evaluations.length,0);
@@ -165,5 +175,17 @@ await test('pending boot confirmation has a visible retry action and clears only
  context.renderPwaUpdateStatus({...state,checking:true,phase:'checking'});assert.equal(elements.get('pwa-update-apply').disabled,true);
  context.renderPwaUpdateStatus({...state,bootState:'confirmed',phase:'idle',message:'This window’s version is confirmed.'});assert.equal(notices.at(-1).visible,false);
  context.renderPwaUpdateStatus({...state,bootState:'confirmed',phase:'installation-failed',checkError:'network unavailable',message:'The update check failed.'});assert.equal(notices.at(-1).visible,true);assert.equal(elements.get('pwa-update-apply').textContent,'Retry update check');assert.equal(elements.get('pwa-update-message').textContent,'The update check failed.');
+});
+await test('editing idle deadline survives focus, completion, and retry scheduling in every order',async()=>{
+  for(const elapsed of [0,200,1799,1851])for(const requested of [0,250,1800,5000,300000]){
+    const h=fixture(),started=h.state.now;h.sandbox.pwaLastEditableInputAt=started;h.state.now+=elapsed;
+    h.sandbox.schedulePwaUpdateEvaluation(1850);h.sandbox.schedulePwaUpdateEvaluation(requested);
+    assert.equal(h.state.timers.size,1,'Replacing a wake-up must leave exactly one timer.');
+    const timer=[...h.state.timers.values()][0];
+    assert.equal(timer.delay,Math.max(requested,1850-elapsed,0),'A wake-up cannot precede the editing idle deadline.');
+    assert.deepEqual(h.calls,[]);timer.fn();assert.deepEqual(h.calls,['automatic-update']);
+  }
+  const h=fixture();h.sandbox.schedulePwaUpdateEvaluation(250);h.sandbox.pwaLatestUpdateState={updateReady:false};
+  assert.equal(h.sandbox.schedulePwaUpdateEvaluation(0),false);assert.equal(h.state.timers.size,0);
 });
 console.log(JSON.stringify({status:'PASS',suite:'application-update-safety',cases},null,2));

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {WORDGARD_METADATA} from '../../../build/wordgard-metadata.mjs';
 import {applyWordgardSourcePatch,wordgardSourcePatchPlugin} from '../../../build/wordgard-source-patches.mjs';
+const withoutComments=source=>source.replace(/^\s*\/\/.*$/gmu,'');
 
 const sha256=data=>crypto.createHash('sha256').update(data).digest('hex');
 const shaFile=file=>sha256(fs.readFileSync(file));
@@ -30,26 +31,33 @@ assert.equal(shaFile('vendor/wordgard/src/editor/tile.ts'),WORDGARD_METADATA.til
 assert.equal(fs.existsSync('vendor/wordgard/src/inert-html.ts'),false,'Study Director Trusted Types code must not enter upstream Wordgard.');
 assert.equal(fs.existsSync('vendor/wordgard/src/history/core.ts'),false,'Study Director history patches must not enter upstream Wordgard.');
 
+// Build rewrites name the upstream text they replace; they carry no whole-file
+// fingerprints, so a new Wordgard version builds unless that text moved.
+
 const patchedNode=applyWordgardSourcePatch('doc/node.ts',read('vendor/wordgard/src/doc/node.ts'));
 assert.match(patchedNode,/slice\(from: number, to\?: number\)/);
 assert.match(patchedNode,/to === undefined \? this\.length : to/);
-assert.equal(sha256(patchedNode),'5d45e494440ec2c6f66381885b25570bb02c4b4a19c6c27c740c0311b0e86f44','Node compatibility transform drifted.');
 
 const patchedClipboard=applyWordgardSourcePatch('editor/clipboard.ts',read('vendor/wordgard/src/editor/clipboard.ts'),'../inert-html');
-const canonicalClipboard=patchedClipboard.replace(/^import \{parseInertHTML\} from [^\n]+\n/,"import {parseInertHTML} from '../inert-html'\n");
-assert.equal(sha256(canonicalClipboard),'f674a77cdf9f51c8e37409f8079657a4c89e1d65cb62c84a21d2946fb6f9bf47','Clipboard Trusted Types transform drifted.');
+assert.match(patchedClipboard,/^import \{parseInertHTML\}[^\n]*\/inert-html"\n/u,'Clipboard parsing must use the shared inert parser.');
+assert.match(patchedClipboard,/let elt = parseInertHTML\(html\)/u);
 assert.doesNotMatch(patchedClipboard,/createPolicy\("detachedDocument"|detachedDoc\(\)\.createElement/);
 assert.match(patchedClipboard,/function clipboardDoc\(\)/,'Clipboard serialization must retain a detached non-parser document.');
 
-const patchedInput=applyWordgardSourcePatch('editor/input.ts',read('vendor/wordgard/src/editor/input.ts'));
-assert.equal(sha256(patchedInput),'b6f26f21c7722e22cf7c5915d3c708c14fecef23ece2fe90890ca0ffa6176a29','Input Cut transform drifted.');
-assert.match(patchedInput,/if \(!event\.clipboardData\) return false/,'Cut must fall back to native handling when ClipboardEvent data is unavailable.');
-assert.match(patchedInput,/deleteByCut: wg =>/,'beforeinput deleteByCut must have a transactional Wordgard path.');
+assert.throws(()=>applyWordgardSourcePatch('editor/input.ts',read('vendor/wordgard/src/editor/input.ts')),/Unsupported Wordgard patch target/u,'Cut handling lives in the adapter, not in a rewrite of upstream input.');
 
 const patchedState=applyWordgardSourcePatch('state/state.ts',read('vendor/wordgard/src/state/state.ts'),'../inert-html');
-const canonicalState=patchedState.replace(/^import \{parseInertHTML\} from [^\n]+\n/,"import {parseInertHTML} from '../inert-html'\n");
-assert.equal(sha256(canonicalState),'6e8080ceb7a91457b9045f11aaca7398c0c5666a635450ded04d68f3c723bb7f','State Trusted Types transform drifted.');
-assert.throws(()=>applyWordgardSourcePatch('doc/node.ts',read('vendor/wordgard/src/doc/node.ts')+'\n// drift'),/upstream source changed/,'Patch layer must reject unreviewed upstream drift.');
+assert.match(patchedState,/const readHTML = parseInertHTML/u,'State parsing must use the shared inert parser.');
+assert.doesNotMatch(patchedState,/createPolicy\("detachedDocument"/u);
+
+const patchedHistory=withoutComments(applyWordgardSourcePatch('history/history.ts',read('vendor/wordgard/src/history/history.ts')));
+assert.doesNotMatch(patchedHistory,/\bMenu\b|phrases|undoButton|redoButton/u,'Menu UI must not enter the history module.');
+assert.match(patchedHistory,/export function history\(config: HistoryConfig = \{\}\)/u);
+
+// Upstream changes elsewhere in a file pass; a moved anchor fails by name.
+assert.match(applyWordgardSourcePatch('doc/node.ts',read('vendor/wordgard/src/doc/node.ts')+'\n// later upstream change\n'),/to === undefined \? this\.length : to/u);
+assert.throws(()=>applyWordgardSourcePatch('doc/node.ts',read('vendor/wordgard/src/doc/node.ts').replace('slice(from: number, to = this.length) {','slice(start: number, to = this.length) {')),/Wordgard patch anchor changed: Node\.slice build compatibility/u);
+assert.throws(()=>applyWordgardSourcePatch('history/history.ts',read('vendor/wordgard/src/history/history.ts').replace('/// A menu button that undoes a change.','')),/Wordgard patch anchor changed: history menu button definitions/u);
 
 let loader;
 wordgardSourcePatchPlugin({root:process.cwd()}).setup({onLoad(_options,fn){loader=fn;}});

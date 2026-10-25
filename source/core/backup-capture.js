@@ -10,21 +10,22 @@ registry.define('backup-capture',1,()=>{
   function create(input){
     exactObject(input,['configuration','data','codecs','session','personal','assets','exports','persistence','diagnostics','domain','environment'],'Backup capture input');
     const configuration=exactObject(input.configuration,['backupVersion','limits','portableAssets'],'Backup capture configuration');
-    const data=exactObject(input.data,['activeSession','dailyRecords','notes','deletionRecovery','mutationEpoch','preparationUnits','provenance'],'Backup capture data port');
+    const data=exactObject(input.data,['activeSession','dailyRecords','notes','deletionRecovery','mutationEpoch','preparationUnits','provenance','pendingReviews'],'Backup capture data port');
     const activeSessionData=functions(data.activeSession,['save','settled','load'],'Backup capture active-session data port');
     const dailyRecordData=functions(data.dailyRecords,['backupDates','backupMonth'],'Backup capture Saved-Day data port');
-    const noteData=functions(data.notes,['flush','failure','readFreshPayload','exportPayload','readFreshItems'],'Backup capture Ongoing Note data port');
-    const deletionData=functions(data.deletionRecovery,['flush','savedDays','areaNotes','attachments'],'Backup capture deletion data port');
+    const noteData=functions(data.notes,['flush','failure','readFreshPayload','exportPayload','readFreshItems'],'Backup capture note data port');
+    const deletionData=functions(data.deletionRecovery,['flush','savedDays','notes','attachments'],'Backup capture deletion data port');
     const mutationEpochData=functions(data.mutationEpoch,['read'],'Backup capture mutation-epoch data port');
     const preparationData=functions(data.preparationUnits,['list','replace'],'Backup capture preparation-unit data port');
     const provenanceData=functions(data.provenance,['installationId'],'Backup capture provenance data port');
-    const AppData=freeze({activeSession:activeSessionData,dailyRecords:dailyRecordData,notes:noteData,deletionRecovery:deletionData,mutationEpoch:mutationEpochData,preparationUnits:preparationData,provenance:provenanceData});
+    const pendingReviewData=functions(data.pendingReviews,['list','readItems'],'Backup capture pending-review data port');
+    const AppData=freeze({activeSession:activeSessionData,dailyRecords:dailyRecordData,notes:noteData,deletionRecovery:deletionData,mutationEpoch:mutationEpochData,preparationUnits:preparationData,provenance:provenanceData,pendingReviews:pendingReviewData});
     const codecs=exactObject(input.codecs,['activeSession','backup'],'Backup capture codecs');
     if(!Object.isFrozen(codecs.activeSession)||!Object.isFrozen(codecs.backup))throw new TypeError('Backup capture codecs must be frozen.');
     const session=functions(input.session,['canMutate','cancelLiveDraftSave','captureSnapshot','hasTasks','toActiveSession'],'Backup capture session port');
     const personal=functions(input.personal,['settle','export'],'Backup capture personal-data port');
     const exports=functions(input.exports,['check','run'],'Backup capture export port');
-    const persistence=functions(input.persistence,['sourceRevision','snapshotRevision','dailyRecordDocuments'],'Backup capture persistence port');
+    const persistence=functions(input.persistence,['sourceRevision','snapshotRevision','dailyRecordDocuments','storageGeneration'],'Backup capture persistence port');
     const diagnostics=functions(input.diagnostics,['capture','mark'],'Backup capture diagnostics port');
     const domain=functions(input.domain,['getStudentName','currentDailyRecords'],'Backup capture domain port');
     const environment=functions(input.environment,['yieldTask'],'Backup capture environment port');
@@ -36,7 +37,7 @@ registry.define('backup-capture',1,()=>{
     const appCanMutate=session.canMutate,cancelLiveDraftSave=session.cancelLiveDraftSave,captureSessionSnapshot=session.captureSnapshot,activeSessionPayload=session.toActiveSession;
     const TASKS=freeze({get length(){return session.hasTasks()?1:0;}});
     const personalSettle=personal.settle,personalExport=personal.export,Exports=exports;
-    const ports=freeze({persistence:freeze({sourceRevision:persistence.sourceRevision,snapshotRevision:persistence.snapshotRevision})});
+    const ports=freeze({persistence:freeze({sourceRevision:persistence.sourceRevision,snapshotRevision:persistence.snapshotRevision,storageGeneration:persistence.storageGeneration})});
     const getDailyRecordDocumentsByDates=persistence.dailyRecordDocuments;
     const AppDiagnostics=freeze({capture:diagnostics.capture}),OperationDiagnostics=freeze({mark:diagnostics.mark});
     const getStudentNameFromDisplay=domain.getStudentName,currentDailyRecords=domain.currentDailyRecords,yieldTask=environment.yieldTask;
@@ -121,7 +122,16 @@ async function verifyAnomalousPhysicalAssetAliases(catalogue,assetIds,{checkpoin
   }
   return true;
 }
+// The browser can clear this site's storage under an open page. The database
+// layer counts each clear as it reopens storage; a capture that saw the count
+// change read a mix of old and emptied storage, so nothing from it is saved.
+function storageGeneration(){return Number(ports.persistence.storageGeneration())||0;}
+function assertStorageGeneration(expected){
+  if(storageGeneration()!==expected)throw backupPreparationError('BACKUP_STORAGE_CLEARED','checkpoint-source-fence','Browser data was cleared while this backup was being prepared. Nothing was saved.');
+  return true;
+}
 async function captureLogicalCheckpoint(exportedAt=new Date().toISOString(),options={}){
+  const generation=storageGeneration();
   const includeAssetBlobs=options&&options.includeAssetBlobs!==false;
   let yieldedAt=Date.now();
   async function checkpoint(){Exports.check();if(Date.now()-yieldedAt>=8){await yieldTask();yieldedAt=Date.now();Exports.check();}}
@@ -152,39 +162,40 @@ async function captureLogicalCheckpoint(exportedAt=new Date().toISOString(),opti
   // Only rescue export restarts with the broader fence. Normal canonical capture
   // enumerates dates once, inside its fence, and managed capture rejects rescue data.
   if(recordSource.canonical===false&&!forceLegacySnapshotFence&&options.requireCanonicalComplete!==true)return captureLogicalCheckpoint(exportedAt,{...options,legacyRescueFence:true});
-  let areaNotePayload,noteRecoveryWarning='',noteCoverage='canonical';
+  let notePayload,noteRecoveryWarning='',noteCoverage='canonical';
   if(ownsControl&&!assumeFlushed){
     if(noteFailure&&noteFailure.failed){
       try{
-        areaNotePayload=await AppData.notes.readFreshPayload();
-        noteCoverage='recovered-complete';noteRecoveryWarning='Ongoing Notes were included from durable recovery state because their canonical save had not settled.';
+        notePayload=await AppData.notes.readFreshPayload();
+        noteCoverage='recovered-complete';noteRecoveryWarning='Notes were included from durable recovery state because their canonical save had not settled.';
       }catch(error){
         AppDiagnostics.capture('backup.notes-rescue',error,'warn');
-        areaNotePayload=AppData.notes.exportPayload();
-        noteCoverage='rescue-partial';noteRecoveryWarning='Ongoing Notes were included from this primary tab’s in-memory rescue state because IndexedDB could not be read. Keep this backup until browser storage recovers.';
+        notePayload=AppData.notes.exportPayload();
+        noteCoverage='rescue-partial';noteRecoveryWarning='Notes were included from this primary tab’s in-memory rescue state because IndexedDB could not be read. Keep this backup until browser storage recovers.';
       }
-    }else areaNotePayload=AppData.notes.exportPayload();
-  }else areaNotePayload=await AppData.notes.readFreshPayload();
+    }else notePayload=AppData.notes.exportPayload();
+  }else notePayload=await AppData.notes.readFreshPayload();
   const sessionResult=await readSessionForCapture(settledSession);
   const personalData=await backupPreparationStep('BACKUP_PLAN_READ_FAILED','checkpoint-plan-read',()=>personalExport({flush:false,backupCapture:true}));
-  const [savedDayDeletions,areaNoteDeletions,attachmentDeletions]=await Promise.all([AppData.deletionRecovery.savedDays(),AppData.deletionRecovery.areaNotes(),AppData.deletionRecovery.attachments()]);
+  const [savedDayDeletions,noteDeletions,attachmentDeletions,pendingReviewItems]=await Promise.all([AppData.deletionRecovery.savedDays(),AppData.deletionRecovery.notes(),AppData.deletionRecovery.attachments(),AppData.pendingReviews.list()]);
   const completeness=freeze({
     complete:recordSource.canonical!==false&&noteCoverage!=='rescue-partial'&&sessionResult.canonical!==false&&!recoveryWarning,
     dailyRecords:recordSource.canonical===false?'rescue-partial':'canonical',
-    areaNotes:noteCoverage,activeSession:sessionResult.canonical===false?'rescue-partial':'canonical',deletionState:recoveryWarning?'uncertain':'canonical'
+    notes:noteCoverage,activeSession:sessionResult.canonical===false?'rescue-partial':'canonical',deletionState:recoveryWarning?'uncertain':'canonical'
   });
   if(options&&options.requireCanonicalComplete===true&&completeness.complete!==true){const incomplete=Object.entries(completeness).filter(([key,value])=>key!=='complete'&&value!=='canonical'&&value!=='recovered-complete').map(([key,value])=>`${key}:${value}`).join(', ')||'unknown';throw backupPreparationError('BACKUP_CANONICAL_CAPTURE_INCOMPLETE','checkpoint-canonical-completeness',`Managed backup publication stopped because canonical application data could not be captured completely (${incomplete}). No incomplete rescue checkpoint was published.`);}
-  const areaNoteItems=Object.values(areaNotePayload).sort((a,b)=>String(a.key).localeCompare(String(b.key)));
+  const noteItems=Object.values(notePayload).sort((a,b)=>String(a.key).localeCompare(String(b.key)));
   const activeSession=sessionResult.session&&typeof sessionResult.session==='object'
     ? ActiveSessionCodec.sanitizeCurrent(sessionResult.session)
     : null;
-  const counts=BackupCodec.countShape({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:recordDates.length,areaNote:areaNoteItems.length,activeSession:activeSession?1:0});
+  const counts=BackupCodec.countShape({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:recordDates.length,note:noteItems.length,activeSession:activeSession?1:0,pendingReview:pendingReviewItems.length});
   const assetItems=[],dailyDocuments=[];
   if(portableAssets){
     const catalogue=await AssetData.list(),rows=new Map(catalogue.map(row=>[row.id,row])),contentBlobs=new Map();
     const ids=new Set(catalogue.filter(row=>row.library).map(row=>row.id));
     const collect=value=>{for(const id of BackupCodec.assetIds(value))ids.add(id);};
-    for(const item of areaNoteItems){await checkpoint();collect(item);}if(activeSession)collect(activeSession);
+    for(const item of noteItems){await checkpoint();collect(item);}if(activeSession)collect(activeSession);
+    for(const item of pendingReviewItems){await checkpoint();collect(item);}
     for(let offset=0;offset<recordDates.length;offset+=APP_LIMITS.backupChunkItems){
       await checkpoint();
       const dates=recordDates.slice(offset,offset+APP_LIMITS.backupChunkItems);
@@ -213,24 +224,26 @@ async function captureLogicalCheckpoint(exportedAt=new Date().toISOString(),opti
   if(snapshotRevision!==await ports.persistence.snapshotRevision(Object.freeze({legacy:forceLegacySnapshotFence})))throw new Error('Stored data changed while capturing the backup. Retry the backup.');
   const finalSourceRevision=String(await ports.persistence.sourceRevision()||sourceRevision);
   if(finalSourceRevision!==sourceRevision)throw new Error('Stored data changed while capturing the backup. Retry the backup.');
+  assertStorageGeneration(generation);
   const installationId=AppData.provenance.installationId();
   const checkpointMetadata=Number(backupVersion)>=14?BackupCodec.createCheckpointMetadata(installationId,exportedAt):null;
   const captureBase={
     format:LOGICAL_CHECKPOINT_CAPTURE_FORMAT,version:LOGICAL_CHECKPOINT_CAPTURE_VERSION,
     dailyDocuments:freeze([...dailyDocuments]),exportedAt,sourceRevision,studentName:getStudentNameFromDisplay(),installationId,checkpoint:checkpointMetadata,
-    recordDates:freeze([...recordDates]),areaNoteItems:freeze([...areaNoteItems]),activeSession,personalData,
-    savedDayDeletions:freeze([...(savedDayDeletions||[])]),areaNoteDeletions:freeze([...(areaNoteDeletions||[])]),attachmentDeletions:freeze([...(attachmentDeletions||[])]),counts,assetItems:freeze(assetItems),
+    recordDates:freeze([...recordDates]),noteItems:freeze([...noteItems]),activeSession,personalData,pendingReviewItems:freeze([...pendingReviewItems]),
+    savedDayDeletions:freeze([...(savedDayDeletions||[])]),noteDeletions:freeze([...(noteDeletions||[])]),attachmentDeletions:freeze([...(attachmentDeletions||[])]),counts,assetItems:freeze(assetItems),
     warning:[sessionResult.warning,recordSource.warning,recoveryWarning,noteRecoveryWarning].filter(Boolean).join(' '),completeness
   };
   const protectedCheckpointManifest=Number(backupVersion)>=15?BackupCodec.createProtectedManifest(captureBase,checkpointMetadata):null;
   const capture=freeze({...captureBase,protectedCheckpointManifest});
-  logicalCheckpointGuards.set(capture,freeze({snapshotRevision,sourceRevision,forceLegacySnapshotFence}));
+  logicalCheckpointGuards.set(capture,freeze({snapshotRevision,sourceRevision,forceLegacySnapshotFence,generation}));
   return capture;
 }
 async function assertLogicalCheckpointCurrent(capture){
   requireLogicalCheckpointCapture(capture);
   const guard=logicalCheckpointGuards.get(capture);
   if(!guard)throw new Error('Logical checkpoint lifetime expired. Retry the backup.');
+  assertStorageGeneration(guard.generation);
   if(guard.snapshotRevision!==await ports.persistence.snapshotRevision(Object.freeze({legacy:guard.forceLegacySnapshotFence===true})))throw backupPreparationError('BACKUP_SOURCE_FENCE_CHANGED','checkpoint-source-fence','Stored data changed while the backup was being prepared. Retry the backup.');
   const currentSourceRevision=String(await ports.persistence.sourceRevision()||guard.sourceRevision);
   if(currentSourceRevision!==guard.sourceRevision)throw backupPreparationError('BACKUP_SOURCE_FENCE_CHANGED','checkpoint-source-fence','Stored data changed while the backup was being prepared. Retry the backup.');
@@ -239,7 +252,7 @@ async function assertLogicalCheckpointCurrent(capture){
 
 const MANAGED_PREPARATION_CAPTURE_FORMAT='study-director.managed-preparation-capture',MANAGED_PREPARATION_CAPTURE_VERSION=1;
 const managedPreparationGuards=new WeakMap();
-const MANAGED_PREPARATION_STAMP_LIMIT=Math.max(1024,Math.min(100000,Number(APP_LIMITS.backupMaxAssetDescriptors||50000)+Number(APP_LIMITS.maxImportRecords||10000)+Number(APP_LIMITS.maxImportAreaNotes||1000)+16));
+const MANAGED_PREPARATION_STAMP_LIMIT=Math.max(1024,Math.min(100000,Number(APP_LIMITS.backupMaxAssetDescriptors||50000)+Number(APP_LIMITS.maxImportRecords||10000)+Number(APP_LIMITS.maxNotes||1000)+2*Number(APP_LIMITS.maxPendingReviews||2000)+16));
 function fastCaptureEpochToken(value){const text=String(value||''),prefix='study-director.fast-capture-fence.v1|';if(!text.startsWith(prefix))return '';const token=text.slice(prefix.length).split('|',1)[0];return /^[a-f0-9]{32}$/u.test(token)?token:'';}
 function requireManagedPreparationCapture(value){if(!value||!Object.isFrozen(value)||value.format!==MANAGED_PREPARATION_CAPTURE_FORMAT||Number(value.version)!==MANAGED_PREPARATION_CAPTURE_VERSION)throw new TypeError('Managed preparation capture is invalid.');return value;}
 function normalizedPreparationStamps(values){
@@ -248,11 +261,20 @@ function normalizedPreparationStamps(values){
   for(const raw of rows){const unit=String(raw&&raw.unit||''),token=String(raw&&raw.token||'');if(!unit||unit.length>512||!/^[a-f0-9]{32}$/u.test(token)||seen.has(unit))throw backupPreparationError('BACKUP_PREPARATION_INDEX_INVALID','checkpoint-preparation-index','Backup preparation metadata is invalid.');seen.add(unit);out.push(freeze({unit,token}));}
   out.sort((a,b)=>a.unit.localeCompare(b.unit));return freeze(out);
 }
+// Preparation is fenced from before its first storage access; a fallback full
+// capture fences itself the same way.
+const preparationGenerations=new WeakMap();
 async function beginManagedPreparationCapture(exportedAt=new Date().toISOString()){
+  const generation=storageGeneration(),capture=await beginManagedPreparationCaptureAt(exportedAt);
+  assertStorageGeneration(generation);
+  if(capture)preparationGenerations.set(capture,generation);
+  return capture;
+}
+async function beginManagedPreparationCaptureAt(exportedAt){
   if(!appCanMutate())return null;
   await backupPreparationStep('BACKUP_PLAN_SETTLE_FAILED','checkpoint-plan-settle',()=>personalSettle({backupCapture:true}));
   try{await backupPreparationStep('BACKUP_NOTES_SETTLE_FAILED','checkpoint-notes-settle',()=>AppData.notes.flush({strict:true,backupCapture:true}));}catch(error){AppDiagnostics.capture('backup.incremental-notes-flush',error,'warn');throw error;}
-  const noteFailure=AppData.notes.failure();if(noteFailure&&noteFailure.failed)throw backupPreparationError('BACKUP_NOTES_SETTLE_FAILED','checkpoint-notes-settle','Ongoing Notes are not safely settled for repository preparation.');
+  const noteFailure=AppData.notes.failure();if(noteFailure&&noteFailure.failed)throw backupPreparationError('BACKUP_NOTES_SETTLE_FAILED','checkpoint-notes-settle','Notes are not safely settled for repository preparation.');
   const sessionResult=await backupPreparationStep('BACKUP_SESSION_SETTLE_FAILED','checkpoint-session-settle',()=>flushCurrentSessionForBackup());if(sessionResult.canonical===false){OperationDiagnostics.mark('checkpoint-preparation-fallback',{reason:'session-not-canonical'});return null;}
   try{await backupPreparationStep('BACKUP_DELETION_SETTLE_FAILED','checkpoint-deletion-settle',()=>settleDeletionRecovery());}catch(error){AppDiagnostics.capture('backup.incremental-deletion-recovery',error,'warn');OperationDiagnostics.mark('checkpoint-preparation-fallback',{reason:'deletion-settle'});return null;}
   OperationDiagnostics.mark('checkpoint-fast-fence-start');
@@ -282,10 +304,10 @@ async function beginManagedPreparationCapture(exportedAt=new Date().toISOString(
 
   // Deletion state and the attachment catalogue are authoritative snapshot data.
   // Failure to read these cannot be papered over by the incremental fast path.
-  let savedDayDeletions,areaNoteDeletions,attachmentDeletions,assetCatalogue;
+  let savedDayDeletions,noteDeletions,attachmentDeletions,assetCatalogue;
   OperationDiagnostics.mark('checkpoint-canonical-state-read-start');
-  try{[savedDayDeletions,areaNoteDeletions,attachmentDeletions,assetCatalogue]=await Promise.all([
-    AppData.deletionRecovery.savedDays(),AppData.deletionRecovery.areaNotes(),AppData.deletionRecovery.attachments(),portableAssets?AssetData.list():Promise.resolve([])
+  try{[savedDayDeletions,noteDeletions,attachmentDeletions,assetCatalogue]=await Promise.all([
+    AppData.deletionRecovery.savedDays(),AppData.deletionRecovery.notes(),AppData.deletionRecovery.attachments(),portableAssets?AssetData.list():Promise.resolve([])
   ]);}catch(error){throw backupPreparationError('BACKUP_CAPTURE_STATE_READ_FAILED','checkpoint-canonical-state-read','Canonical deletion or attachment state could not be read for backup.',error);}
   OperationDiagnostics.mark('checkpoint-canonical-state-read-complete',{assets:Array.isArray(assetCatalogue)?assetCatalogue.length:0});
 
@@ -296,8 +318,8 @@ async function beginManagedPreparationCapture(exportedAt=new Date().toISOString(
     const installationId=AppData.provenance.installationId(),checkpointMetadata=Number(backupVersion)>=14?BackupCodec.createCheckpointMetadata(installationId,exportedAt):null;
     const capture=freeze({
       format:MANAGED_PREPARATION_CAPTURE_FORMAT,version:MANAGED_PREPARATION_CAPTURE_VERSION,exportedAt,sourceRevision,installationId,checkpoint:checkpointMetadata,epochToken,stamps:normalizedStamps,
-      savedDayDeletions:freeze([...(savedDayDeletions||[])]),areaNoteDeletions:freeze([...(areaNoteDeletions||[])]),attachmentDeletions:freeze([...(attachmentDeletions||[])]),
-      assetCatalogue:freeze((assetCatalogue||[]).map(row=>freeze({...row}))),warning:String(sessionResult.warning||''),completeness:freeze({complete:true,dailyRecords:'canonical',areaNotes:'canonical',activeSession:'canonical',deletionState:'canonical'})
+      savedDayDeletions:freeze([...(savedDayDeletions||[])]),noteDeletions:freeze([...(noteDeletions||[])]),attachmentDeletions:freeze([...(attachmentDeletions||[])]),
+      assetCatalogue:freeze((assetCatalogue||[]).map(row=>freeze({...row}))),warning:String(sessionResult.warning||''),completeness:freeze({complete:true,dailyRecords:'canonical',notes:'canonical',activeSession:'canonical',deletionState:'canonical'})
     });
     managedPreparationGuards.set(capture,freeze({snapshotRevision,sourceRevision,session:capturedSession.session||null}));OperationDiagnostics.mark('checkpoint-preparation-capture-complete',{incremental:true});return capture;
   }catch(error){throw backupPreparationError('BACKUP_PREPARATION_CAPTURE_FAILED','checkpoint-preparation-capture','Incremental backup preparation could not be finalized.',error);}
@@ -305,15 +327,18 @@ async function beginManagedPreparationCapture(exportedAt=new Date().toISOString(
 
 async function readManagedPreparationUnits(preparation,units){
   requireManagedPreparationCapture(preparation);const guard=managedPreparationGuards.get(preparation);if(!guard)throw new Error('Managed preparation capture lifetime expired. Retry the backup.');
+  assertStorageGeneration(preparationGenerations.get(preparation));
   const requested=[...new Set((units||[]).map(value=>String(value||'')).filter(Boolean))];if(requested.length>MANAGED_PREPARATION_STAMP_LIMIT)throw new Error('Too many changed backup preparation units.');
-  const results=new Map(),noteUnits=[],noteKeys=[];
+  const results=new Map(),noteUnits=[],noteKeys=[],reviewUnits=[],reviewIds=[];
   for(const unit of requested){
     if(/^dailyRecordPack:\d{4}-(?:0[1-9]|1[0-2])$/u.test(unit)){const month=unit.slice('dailyRecordPack:'.length);let rows;try{rows=await AppData.dailyRecords.backupMonth(month,{requireCanonical:true});}catch(error){throw backupPreparationError('BACKUP_CANONICAL_CAPTURE_INCOMPLETE','checkpoint-canonical-completeness','Managed backup publication stopped because Saved Days could not be read completely from canonical IndexedDB storage. No incomplete rescue checkpoint was published.',error);}const payload=freeze([...(rows||[])]);results.set(unit,freeze({unit,present:payload.length>0,payload}));continue;}
-    if(unit.startsWith('areaNote:')){const key=unit.slice('areaNote:'.length);if(!key)throw new Error('Ongoing Note preparation unit is invalid.');noteUnits.push(unit);noteKeys.push(key);continue;}
+    if(unit.startsWith('note:')){const key=unit.slice('note:'.length);if(!key)throw new Error('Note preparation unit is invalid.');noteUnits.push(unit);noteKeys.push(key);continue;}
+    if(/^pendingReview:pr_[a-f0-9]{32}$/u.test(unit)){reviewUnits.push(unit);reviewIds.push(unit.slice('pendingReview:'.length));continue;}
     if(unit==='personalData'){const payload=await personalExport({flush:false});results.set(unit,freeze({unit,present:!!payload,payload:payload||null}));continue;}
     if(unit==='activeSession'){const payload=guard.session&&typeof guard.session==='object'?ActiveSessionCodec.sanitizeCurrent(guard.session):null;results.set(unit,freeze({unit,present:!!payload,payload:payload||null}));continue;}
     throw new Error('Unknown backup preparation unit.');
   }
+  if(reviewIds.length){const rows=await AppData.pendingReviews.readItems(reviewIds);reviewUnits.forEach((unit,index)=>{const payload=rows[index]||null;results.set(unit,freeze({unit,present:!!payload,payload}));});}
   if(noteKeys.length){const rows=await AppData.notes.readFreshItems(noteKeys);for(let index=0;index<noteKeys.length;index++){const unit=noteUnits[index],payload=rows[index]||null;results.set(unit,freeze({unit,present:!!payload,payload}));}}
   if(guard.snapshotRevision!==await ports.persistence.snapshotRevision(freeze({legacy:false})))throw backupPreparationError('BACKUP_SOURCE_FENCE_CHANGED','checkpoint-source-fence','Stored data changed while reading incremental backup units. Retry the backup.');
   const currentSourceRevision=String(await ports.persistence.sourceRevision()||guard.sourceRevision);if(currentSourceRevision!==guard.sourceRevision)throw backupPreparationError('BACKUP_SOURCE_FENCE_CHANGED','checkpoint-source-fence','Stored data changed while reading incremental backup units. Retry the backup.');
@@ -328,18 +353,19 @@ async function finalizeManagedPreparationCapture(preparation,inventory){
   try{dailyRecordCoverage=await backupPreparationStep('BACKUP_CANONICAL_CAPTURE_INCOMPLETE','checkpoint-canonical-completeness',()=>AppData.dailyRecords.backupDates());}
   catch(error){throw backupPreparationError('BACKUP_CANONICAL_CAPTURE_INCOMPLETE','checkpoint-canonical-completeness','Managed backup publication stopped because Saved Days could not be read completely from canonical IndexedDB storage. No incomplete rescue checkpoint was published.',error);}
   if(dailyRecordCoverage&&dailyRecordCoverage.canonical===false)throw backupPreparationError('BACKUP_CANONICAL_CAPTURE_INCOMPLETE','checkpoint-canonical-completeness','Managed backup publication stopped because Saved Days could not be read completely from canonical IndexedDB storage. No incomplete rescue checkpoint was published.');
-  const value=inventory&&typeof inventory==='object'?inventory:{},recordDates=freeze([...(value.recordDates||[])].map(String).sort()),noteKeys=freeze([...(value.noteKeys||[])].map(String).sort()),assetIds=freeze([...(value.assetIds||[])].map(String).sort()),counts=BackupCodec.countShape(value.counts||{});
+  const value=inventory&&typeof inventory==='object'?inventory:{},recordDates=freeze([...(value.recordDates||[])].map(String).sort()),noteKeys=freeze([...(value.noteKeys||[])].map(String).sort()),pendingReviewIds=freeze([...(value.pendingReviewIds||[])].map(String).sort()),assetIds=freeze([...(value.assetIds||[])].map(String).sort()),counts=BackupCodec.countShape(value.counts||{});
   const canonicalRecordDates=freeze([...(dailyRecordCoverage&&dailyRecordCoverage.dates||[])].map(String).sort());
   if(canonicalRecordDates.length!==recordDates.length||canonicalRecordDates.some((date,index)=>date!==recordDates[index]))throw backupPreparationError('BACKUP_PREPARATION_INDEX_INVALID','checkpoint-canonical-completeness','Managed backup publication stopped because the incremental Saved-Day inventory did not match canonical IndexedDB storage. A full canonical checkpoint will be required.');
   if(guard.snapshotRevision!==await ports.persistence.snapshotRevision(freeze({legacy:false})))throw backupPreparationError('BACKUP_SOURCE_FENCE_CHANGED','checkpoint-source-fence','Stored data changed while finalizing the incremental backup capture. Retry the backup.');
   const currentSourceRevision=String(await ports.persistence.sourceRevision()||guard.sourceRevision);if(currentSourceRevision!==guard.sourceRevision)throw backupPreparationError('BACKUP_SOURCE_FENCE_CHANGED','checkpoint-source-fence','Stored data changed while finalizing the incremental backup capture. Retry the backup.');
-  const areaNoteItems=freeze(noteKeys.map(key=>freeze({key}))),assetItems=freeze(assetIds.map(assetId=>freeze({descriptor:freeze({assetId}),blob:null})));
+  const noteItems=freeze(noteKeys.map(key=>freeze({key}))),pendingReviewItems=freeze(pendingReviewIds.map(id=>freeze({id}))),assetItems=freeze(assetIds.map(assetId=>freeze({descriptor:freeze({assetId}),blob:null})));
   const captureBase=freeze({
     format:LOGICAL_CHECKPOINT_CAPTURE_FORMAT,version:LOGICAL_CHECKPOINT_CAPTURE_VERSION,dailyDocuments:freeze([]),exportedAt:preparation.exportedAt,sourceRevision:preparation.sourceRevision,studentName:getStudentNameFromDisplay(),installationId:preparation.installationId,checkpoint:preparation.checkpoint,
-    recordDates,areaNoteItems,activeSession:null,personalData:null,savedDayDeletions:preparation.savedDayDeletions,areaNoteDeletions:preparation.areaNoteDeletions,attachmentDeletions:preparation.attachmentDeletions,counts,assetItems,warning:preparation.warning,completeness:preparation.completeness
+    recordDates,noteItems,activeSession:null,personalData:null,pendingReviewItems,savedDayDeletions:preparation.savedDayDeletions,noteDeletions:preparation.noteDeletions,attachmentDeletions:preparation.attachmentDeletions,counts,assetItems,warning:preparation.warning,completeness:preparation.completeness
   });
   const protectedCheckpointManifest=Number(backupVersion)>=15?BackupCodec.createProtectedManifest(captureBase,preparation.checkpoint):null,capture=freeze({...captureBase,protectedCheckpointManifest});
-  logicalCheckpointGuards.set(capture,freeze({snapshotRevision:guard.snapshotRevision,sourceRevision:guard.sourceRevision,forceLegacySnapshotFence:false}));return capture;
+  const generation=preparationGenerations.get(preparation);assertStorageGeneration(generation);
+  logicalCheckpointGuards.set(capture,freeze({snapshotRevision:guard.snapshotRevision,sourceRevision:guard.sourceRevision,forceLegacySnapshotFence:false,generation}));return capture;
 }
 async function establishManagedPreparationBaseline(capture,units){
   requireLogicalCheckpointCapture(capture);const guard=logicalCheckpointGuards.get(capture);if(!guard||guard.forceLegacySnapshotFence===true||!fastCaptureEpochToken(guard.snapshotRevision))return null;
@@ -354,7 +380,6 @@ async function establishManagedPreparationBaseline(capture,units){
     return freeze({
       format:'study-director.backup-capture',contractVersion:1,
       logicalFormat:LOGICAL_CHECKPOINT_CAPTURE_FORMAT,logicalVersion:LOGICAL_CHECKPOINT_CAPTURE_VERSION,
-      preparationFormat:MANAGED_PREPARATION_CAPTURE_FORMAT,preparationVersion:MANAGED_PREPARATION_CAPTURE_VERSION,
       requireLogicalCheckpointCapture,verifyAnomalousPhysicalAssetAliases,captureLogicalCheckpoint,assertLogicalCheckpointCurrent,
       beginManagedPreparationCapture,readManagedPreparationUnits,finalizeManagedPreparationCapture,establishManagedPreparationBaseline
     });

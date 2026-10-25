@@ -72,3 +72,9 @@ restoreTrace.fail(Object.assign(new Error('private failure'),{code:'RESTORE_PREF
 assert.equal(restoreTrace.snapshot()[0].phases.filter(phase=>phase.name.startsWith('restore-preflight-')).length,7);assert.match(restoreTrace.text(),/errorStage=notes/u);assert.match(restoreTrace.text(),/errorReason=notes/u);
 for(const phase of ['prepared','committing','applying-assets','version-restore-active-session','startup-rolling-back','verified'])assert.match(restoreTrace.text([{job:'Restore journal',state:'pending',phase}]),new RegExp('phase='+phase,'u'));
 console.log(JSON.stringify({status:'PASS',suite:'restore-diagnostic-labels',preflightStages:7,journalPhasesPreserved:true},null,2));
+
+stored='';const uploadTrace=make(),uploadTraceId=uploadTrace.start('provider-convergence','Google Drive');
+for(const name of ['provider-publication-retained','provider-publication-resumed'])uploadTrace.mark(name,{provider:'google-drive',uploadUrl:'https://www.googleapis.com/private-upload-session'},uploadTraceId);
+uploadTrace.fail(Object.assign(new Error('private repository detail'),{code:'BACKUP_REPOSITORY_BASE_CHANGED'}),{},uploadTraceId);
+const uploadReport=uploadTrace.text();assert.match(uploadReport,/provider-publication-retained/u);assert.match(uploadReport,/provider-publication-resumed/u);assert.match(uploadReport,/BACKUP_REPOSITORY_BASE_CHANGED/u);assert.doesNotMatch(uploadReport,/private-upload-session|private repository detail/u);
+console.log(JSON.stringify({status:'PASS',suite:'upload-continuation-diagnostics',progressPhasesPreserved:true,sessionLocationPrivate:true},null,2));

@@ -44,10 +44,10 @@ const noop=()=>{};
 // cancellation action, and never accept callbacks from a prior generation.
 {
   const {coordinator:n,port}=createNotifications('library');let cancelled=0;
-  const first=port.begin({id:'export',surfaceId:'ongoing-notes-status',title:'Export',action:{label:'Cancel',run:()=>cancelled++}});
+  const first=port.begin({id:'export',surfaceId:'notes-status',title:'Export',action:{label:'Cancel',run:()=>cancelled++}});
   const row=first.read();n.dismissEvent(row.key,row.deliveryId);first.update({message:'Packaging'});assert.equal(n.eventStatus().toasts.length,0);assert.equal(cancelled,0);
   let projected;const unsubscribe=n.subscribe(state=>{projected=state.events.find(event=>event.id==='export');});assert.equal(projected.message,'Packaging');unsubscribe();
-  const second=port.begin({id:'export',surfaceId:'ongoing-notes-status',title:'Export'});assert.equal(first.finish('failed','Old error'),false);assert.equal(first.resolve(),false);
+  const second=port.begin({id:'export',surfaceId:'notes-status',title:'Export'});assert.equal(first.finish('failed','Old error'),false);assert.equal(first.resolve(),false);
   second.finish('cancelled','Cancelled.');assert.equal(n.eventStatus().toasts.length,0);assert.equal(second.update({message:'Late callback'}),false);
   const third=port.begin({id:'export',title:'Export'});third.finish('succeeded','Download started.');assert.equal(n.eventStatus().toasts.length,1);
   n.publish('reminder',{kind:'safety',title:'Reminder',message:'Save today'});n.publish('disk',{kind:'critical',title:'Local save failed',message:'Keep this tab open'});n.publish('update',{kind:'update',title:'Update',message:'Available'});assert.equal(n.status().active.id,'disk');n.dismiss('disk');assert.equal(n.status().active.id,'reminder');n.clear();
@@ -57,11 +57,11 @@ const noop=()=>{};
 {
   const source=fs.readFileSync('source/core/library.js','utf8'),{coordinator,port}=createNotifications('library');
   let result={status:'cancelled'},failure=null;
-  const context={notifications:port,ongoingNoteExportBusy:false,ongoingNoteSelection:new Set(['one']),ongoingNoteSelectionMode:true,ongoingNoteEntries:()=>[],updateOngoingNoteSelectionControls:noop,renderOngoingNotes:noop,console:{error:noop},exportKeys:async()=>{if(failure)throw failure;return result;}};
-  vm.createContext(context);vm.runInContext(source.slice(source.indexOf('    async function exportSelectedOngoingNotes('),source.indexOf('    function updateOngoingNotesSummary(')),context);
-  assert.equal(await context.exportSelectedOngoingNotes(),false);assert.equal(context.ongoingNoteSelection.size,1);assert.equal(coordinator.readEvent('library','ongoing-note-export').lifecycle,'cancelled');assert.equal(coordinator.eventStatus().toasts.length,0);
-  failure=new Error('file access denied');assert.equal(await context.exportSelectedOngoingNotes(),false);assert.equal(coordinator.readEvent('library','ongoing-note-export').lifecycle,'failed');assert.equal(context.ongoingNoteSelection.size,1);
-  failure=null;result={status:'downloaded',kind:'markdown'};assert.equal(await context.exportSelectedOngoingNotes(),true);assert.equal(context.ongoingNoteSelection.size,0);assert.match(coordinator.readEvent('library','ongoing-note-export').message,/download started/);assert.equal(coordinator.eventStatus().toasts.length,1);
-  context.ongoingNoteSelection.add('two');result={status:'saved',kind:'zip',notes:2,assets:1,missing:1};assert.equal(await context.exportSelectedOngoingNotes(),true);assert.match(coordinator.readEvent('library','ongoing-note-export').message,/saved and verified.*unavailable image/);assert.equal(coordinator.eventStatus().toasts.length,1);coordinator.clear();
+  const context={notifications:port,noteExportBusy:false,noteSelection:new Set(['one']),noteSelectionMode:true,noteEntries:()=>[],updateNoteSelectionControls:noop,renderNotes:noop,console:{error:noop},exportKeys:async()=>{if(failure)throw failure;return result;}};
+  vm.createContext(context);vm.runInContext(source.slice(source.indexOf('    async function exportSelectedNotes('),source.indexOf('    function setNotesStatus(')),context);
+  assert.equal(await context.exportSelectedNotes(),false);assert.equal(context.noteSelection.size,1);assert.equal(coordinator.readEvent('library','note-export').lifecycle,'cancelled');assert.equal(coordinator.eventStatus().toasts.length,0);
+  failure=new Error('file access denied');assert.equal(await context.exportSelectedNotes(),false);assert.equal(coordinator.readEvent('library','note-export').lifecycle,'failed');assert.equal(context.noteSelection.size,1);
+  failure=null;result={status:'downloaded',kind:'markdown'};assert.equal(await context.exportSelectedNotes(),true);assert.equal(context.noteSelection.size,0);assert.match(coordinator.readEvent('library','note-export').message,/download started/);assert.equal(coordinator.eventStatus().toasts.length,1);
+  context.noteSelection.add('two');result={status:'saved',kind:'zip',notes:2,assets:1,missing:1};assert.equal(await context.exportSelectedNotes(),true);assert.match(coordinator.readEvent('library','note-export').message,/saved and verified.*unavailable image/);assert.equal(coordinator.eventStatus().toasts.length,1);coordinator.clear();
 }
 console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));

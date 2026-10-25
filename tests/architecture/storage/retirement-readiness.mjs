@@ -20,8 +20,8 @@ const migrationEvidence=Object.freeze({
   'plan-legacy-schedule':['tests/integration/storage/compatibility-retirement.mjs','tests/integration/plans/saved-plans-logic.mjs'],
   'reflection-drafts-retirement':['tests/integration/storage/compatibility-retirement.mjs','tests/integration/review/reflection-session-codec.mjs'],
   'active-session-v7-domain-separation':['tests/integration/review/reflection-session-codec.mjs'],
-  'area-note-historical-rows':['tests/integration/storage/canonical-baseline.mjs','tests/integration/rich-text/editor-persistence.mjs'],
-  'area-note-recovery-v1':['tests/integration/rich-text/editor-persistence.mjs'],
+  'note-historical-rows':['tests/integration/storage/canonical-baseline.mjs','tests/integration/rich-text/editor-persistence.mjs'],
+  'note-recovery-v1':['tests/integration/rich-text/editor-persistence.mjs'],
   'daily-record-historical-shapes':['tests/integration/storage/canonical-baseline.mjs'],
   'insights-revision-appmeta-envelope':['tests/integration/storage/appmeta-contract.mjs'],
   'r10-sync-delete-state':['tests/integration/storage/deletion-recovery.mjs'],
@@ -32,11 +32,15 @@ const migrationEvidence=Object.freeze({
   'legacy-attachment-storage':['tests/integration/attachments/legacy-attachment-cleanup.mjs'],
   'obsolete-reflection-migration-meta':['tests/integration/storage/data-maintenance.mjs'],
   'legacy-json-backups':['tests/integration/backup/backup-persistence.mjs'],
-  'complete-backup-v7-v19':['tests/integration/backup/backup-persistence.mjs','tests/integration/backup/checkpoint-handoff.mjs'],
+  'complete-backup-v7-v19':['tests/integration/backup/backup-persistence.mjs','tests/integration/backup/sync-shared-base.mjs'],
   'l7-host-metadata-normalization':['tests/integration/storage/compatibility-host.mjs'],
+  'appmeta-stable-names':['tests/integration/storage/compatibility-host.mjs'],
   'l13e-repository-maintenance-v1':['tests/integration/storage/compatibility-host.mjs','tests/integration/backup/repository-incremental-preparation.mjs','tests/integration/backup/repository-restore.mjs'],
-  'l7-backup-protection-policy-v1':['tests/integration/backup/encryption.mjs','tests/integration/storage/compatibility-host.mjs'],
-  'legacy-protected-backup-v1':['tests/integration/backup/encryption.mjs'],
+  'restore-journal-payload-v1-v4':['tests/integration/storage/compatibility-host.mjs','tests/integration/storage/repository-journals.mjs'],
+  'canonical-note-and-folder-names':['tests/integration/storage/compatibility-host.mjs','tests/integration/storage/indexeddb-topology-retirement.mjs'],
+  'backup-repository-v1-v4':['tests/integration/backup/repository-restore.mjs'],
+  'device-folder-single-repository':['tests/integration/backup/device-folder-layout.mjs'],
+  'name-keyed-notes-in-backups':['tests/integration/backup/current-canonical-roundtrip.mjs','tests/integration/backup/repository-restore.mjs','tests/integration/storage/canonical-schema-separation.mjs'],
   'legacy-service-worker-update-bridge':['tests/integration/pwa/service-worker-lifecycle.mjs']
 });
 assertEvidence('migration',migrationEvidence,allCompatibilityEntries(COMPATIBILITY_REGISTRY).map(entry=>entry.id));
@@ -47,11 +51,11 @@ const recoveryEvidence=Object.freeze({
   activeSessionRecovery:['tests/integration/app/runtime-resilience.mjs'],
   dailyRecordFallback:['tests/integration/storage/canonical-baseline.mjs'],
   scheduleProgressRemap:['tests/unit/app/practice-pacer.mjs','tests/unit/app/timer-state.mjs'],
-  areaNoteRecovery:['tests/integration/rich-text/editor-persistence.mjs'],
+  noteRecovery:['tests/integration/rich-text/editor-persistence.mjs'],
   deletionRecovery:['tests/integration/storage/deletion-recovery.mjs','tests/integration/app/runtime-resilience.mjs'],
   savedDayDeletionLedger:['tests/integration/storage/deletion-recovery.mjs'],
   restoreAndLibraryClearJournals:['tests/integration/storage/repository-journals.mjs','tests/integration/library/library-clear.mjs','tests/integration/backup/import-lifecycle.mjs'],
-  currentBackupValidation:['tests/integration/backup/backup-persistence.mjs','tests/integration/backup/portable-backup.mjs','tests/integration/backup/checkpoint-handoff.mjs','tests/integration/backup/repository-restore.mjs'],
+  currentBackupValidation:['tests/integration/backup/backup-persistence.mjs','tests/integration/backup/portable-backup.mjs','tests/integration/backup/sync-shared-base.mjs','tests/integration/backup/repository-restore.mjs'],
   currentAttachmentArchiveValidation:['tests/integration/attachments/attachment-archive.mjs']
 });
 assertEvidence('permanent recovery/validation',recoveryEvidence,Object.keys(PERMANENT_NON_MIGRATION));
@@ -59,7 +63,7 @@ assertEvidence('permanent recovery/validation',recoveryEvidence,Object.keys(PERM
 const externalEvidence=Object.freeze({
   attachmentArchive:['tests/integration/attachments/attachment-archive.mjs'],
   noteExports:['tests/unit/exports/note-export.mjs'],
-  completeBackup:['tests/integration/backup/backup-persistence.mjs','tests/integration/backup/checkpoint-handoff.mjs','tests/integration/backup/device-backup.mjs','tests/integration/backup/repository-restore.mjs','tests/integration/backup/drive-security.mjs'],
+  completeBackup:['tests/integration/backup/backup-persistence.mjs','tests/integration/backup/sync-shared-base.mjs','tests/integration/backup/device-backup.mjs','tests/integration/backup/repository-restore.mjs','tests/integration/backup/drive-security.mjs'],
   protectedBackup:['tests/integration/backup/encryption.mjs','tests/integration/backup/folder-encryption.mjs','tests/integration/backup/repository-restore.mjs','tests/integration/backup/drive-security.mjs']
 });
 assertEvidence('external format',externalEvidence,Object.keys(CURRENT_FORMATS_OUTSIDE_MIGRATION));

@@ -1,4 +1,4 @@
-/* Study Director transient Ongoing Notes search worker. No persistence, DOM, or Wordgard editor runtime. */
+/* Study Director transient notes search worker. No persistence, DOM, or Wordgard editor runtime. */
 import {wg1ToPlainText} from './wg1-codec';
 
 type SearchDocument={key:string;revision?:string;value?:string;plain?:string};

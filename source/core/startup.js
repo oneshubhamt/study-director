@@ -17,7 +17,7 @@ registry.define('startup-lifecycle',1,()=>{
     ],'Startup/lifecycle ownership');
     functions(input.timer,['stopPresentation','syncAfterWake'],'Startup/lifecycle Timer adapter');
     functions(input.flushers,[
-      'planDraft','preferences','activeSession','areaNotes','deletionRecovery'
+      'planDraft','preferences','activeSession','notes','deletionRecovery'
     ],'Startup/lifecycle flushers');
     functions(input.startup,[
       'migrateCompatibility','restoreAppearance','bindDom','recoverInterruptedLibraryClear','recoverInterruptedRestore','loadNotes','hydrateDrafts','previewPlan',
@@ -91,7 +91,7 @@ registry.define('startup-lifecycle',1,()=>{
       diagnostics.guard('lifecycle.flush-schedule',flushers.planDraft);
       diagnostics.guard('lifecycle.flush-preferences',flushers.preferences);
       diagnostics.guard('lifecycle.flush-session',flushers.activeSession);
-      diagnostics.guard('lifecycle.flush-area-notes',flushers.areaNotes);
+      diagnostics.guard('lifecycle.flush-notes',flushers.notes);
       diagnostics.guard('lifecycle.flush-deletion-recovery',flushers.deletionRecovery);
       return true;
     }

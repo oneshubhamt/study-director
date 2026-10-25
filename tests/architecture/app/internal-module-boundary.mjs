@@ -27,6 +27,6 @@ const localDeclared=coreFiles.filter(name=>/function\s+requireFunctions\s*\(/u.t
 assert.deepEqual(localExact,['interactions.js','reconciliation-ui.js'],'only the intentional diagnostic/non-frozen exact-object validators remain local');
 assert.deepEqual(localFunctions,['interactions.js'],'only the diagnostic interaction function validator remains local');
 assert.deepEqual(localDeclared,[],'declared-function validation is fully centralized');
-assert.equal(coreFiles.filter(name=>sources.get(name).includes('registry.contracts')).length,38,'all modules using the ordinary shared validators consume the registry primitives');
+assert.equal(coreFiles.filter(name=>sources.get(name).includes('registry.contracts')).length,42,'all modules using the ordinary shared validators consume the registry primitives');
 
 console.log(JSON.stringify({status:'PASS',boundary:'internal-modules',validatedHostLoads:privateModules.length-1,sharedValidatorConsumers:38,localExactExceptions:localExact},null,2));

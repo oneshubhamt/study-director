@@ -1,8 +1,9 @@
 /* DOM-free WG1 envelope/text helpers shared by the editor bundle and search worker. */
+import {PRODUCTION_LIMITS} from '../contracts/production-limits.mjs';
 export const WG1_STORAGE_PREFIX='WG1:';
 export const WG1_VERSION=1;
 export const WG1_DEFAULT_MAX_DEPTH=64;
-export const WG1_DEFAULT_MAX_NODES=30000;
+export const WG1_DEFAULT_MAX_NODES=PRODUCTION_LIMITS.maxRichTextNodes;
 
 type JsonNode={type?:unknown,param?:unknown,content?:unknown};
 export type WG1Envelope={version:number;doc:JsonNode};

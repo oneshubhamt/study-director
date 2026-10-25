@@ -2,6 +2,7 @@
 // array of accumulated ciphertext/plaintext chunks. Used in the export worker.
 export const FRAME_BYTES=1024*1024;
 export const HEADER_BYTES=64;
+const FRAME_WINDOW=4;
 const ITERATIONS=600000,TAG_BYTES=16,MAX_CHUNKS=0xfffffffe;
 const MAGIC=new TextEncoder().encode('SDENC02\n');
 const VERIFIER_MAGIC=new TextEncoder().encode('SDKEY01\n'),VERIFIER_BYTES=64;
@@ -64,20 +65,28 @@ export async function transformEncrypted(file,key,writer,{decrypt=false,progress
     header.set(crypto.getRandomValues(new Uint8Array(16)),20);header.set(crypto.getRandomValues(new Uint8Array(4)),36);u64(header,40,size);
   }
   const aes=await derive(key,header);check();if(!decrypt)await writer.write(header);
-  let offset=decrypt?HEADER_BYTES:0,done=0,index=0;
-  for(;;){
-    check();const length=Math.min(FRAME_BYTES,size-done),terminal=length===0;
-    const bytes=new Uint8Array(await file.slice(offset,offset+length+(decrypt?TAG_BYTES:0)).arrayBuffer());
-    let result;
-    try{
-      result=new Uint8Array(await crypto.subtle[decrypt?'decrypt':'encrypt'](params(header,index,length,terminal),aes,bytes));
-      check();await writer.write(result);
-    }catch(error){if(decrypt&&error.name==='OperationError')throw invalid('The password is incorrect or the encrypted backup is damaged.','BACKUP_AUTH_FAILED');throw error;}
-    finally{bytes.fill(0);result?.fill(0);}
-    offset+=length+(decrypt?TAG_BYTES:0);done+=length;index++;
-    progress({loaded:done,total:size,phase:decrypt?'decrypting':'encrypting'});
-    if(terminal)break;
-  }
-  if(decrypt&&offset!==file.size)throw invalid('Encrypted backup has trailing data.');
+  // Up to FRAME_WINDOW frames are read and sealed (or opened) at once, so the
+  // browser's AES runs alongside the reads; results are written strictly in
+  // order and every buffer is zeroed after use. The last frame is empty and
+  // marks the end.
+  // Only the last data frame can be short, so frame i starts after min(i·FRAME, size)
+  // plaintext bytes (plus one tag per earlier frame when decrypting).
+  const frames=Math.ceil(size/FRAME_BYTES)+1,frameLength=index=>Math.max(0,Math.min(FRAME_BYTES,size-index*FRAME_BYTES)),frameStart=index=>(decrypt?HEADER_BYTES+index*TAG_BYTES:0)+Math.min(index*FRAME_BYTES,size);
+  const transform=async index=>{
+    const length=frameLength(index),start=frameStart(index),bytes=new Uint8Array(await file.slice(start,start+length+(decrypt?TAG_BYTES:0)).arrayBuffer());
+    try{return new Uint8Array(await crypto.subtle[decrypt?'decrypt':'encrypt'](params(header,index,length,index===frames-1),aes,bytes));}
+    catch(error){if(decrypt&&error.name==='OperationError')throw invalid('The password is incorrect or the encrypted backup is damaged.','BACKUP_AUTH_FAILED');throw error;}
+    finally{bytes.fill(0);}
+  };
+  const pending=[];let launched=0,done=0;
+  try{
+    for(let index=0;index<frames;index++){
+      check();while(pending.length<FRAME_WINDOW&&launched<frames){const task=transform(launched++);task.catch(()=>{});pending.push(task);}
+      const result=await pending.shift();
+      try{check();await writer.write(result);}finally{result.fill(0);}
+      done+=frameLength(index);progress({loaded:done,total:size,phase:decrypt?'decrypting':'encrypting'});
+    }
+  }finally{for(const row of await Promise.allSettled(pending))row.value?.fill(0);}
+  if(decrypt&&HEADER_BYTES+size+frames*TAG_BYTES!==file.size)throw invalid('Encrypted backup has trailing data.');
   return decrypt?size:encryptedSize(size);
 }

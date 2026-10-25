@@ -1,11 +1,11 @@
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import {WORDGARD_METADATA} from './wordgard-metadata.mjs';
 
-const EXPECTED_UPSTREAM_SHA256=WORDGARD_METADATA.patchInputSha256;
-
-const sha256=value=>crypto.createHash('sha256').update(value).digest('hex');
+// Study Director's build-only rewrites of vendored Wordgard. vendor/wordgard
+// stays the exact upstream source; each rewrite names the upstream text it
+// replaces, so a new Wordgard version builds unchanged unless that text moved,
+// and then fails with the rewrite's name. Runtime behaviour Study Director adds
+// lives in rich-text/wordgard-patches behind rich-text/wordgard-adapter.ts.
 const posix=value=>value.split(path.sep).join('/');
 
 function exactReplace(source,from,to,label){
@@ -86,91 +86,48 @@ function patchState(source,helperImport){
 }
 
 
-function patchInput(source){
+// Upstream history ships undo/redo menu buttons, which pull in Wordgard's
+// generic menu and phrase tables. Study Director has its own toolbar.
+function patchHistory(source){
   source=exactReplace(source,
-`function copy(wg: Wordgard, event: ClipboardEvent) {
-  let {state} = wg
-  if (!state.selection.empty && event.clipboardData) { // FIXME block-wise copying
-    let {slice, context} = selectionSlice(state)
-    writeClipboard(state, slice, context, event.clipboardData)
-    if (event.type == "cut" && !state.readOnly)
-      wg.dispatch({
-        changes: state.selection.ranges.map(r => ({from: r.from, to: r.to, fit: true})),
-        selection: (cx, changes) => GardSelection.near(cx, changes.mapPos(state.selection.from, -1), 1),
-        scrollIntoView: true,
-        userEvent: "delete.cut"
-      })
-  }
-  return true
-}`,
-`function copy(wg: Wordgard, event: ClipboardEvent) {
-  wg.flush()
-  let {state} = wg
-  if (state.selection.empty) return false
-  if (!event.clipboardData) return false
-  let {slice, context} = selectionSlice(state)
-  writeClipboard(state, slice, context, event.clipboardData)
-  if (event.type == "cut" && !state.readOnly)
-    wg.dispatch({
-      changes: state.selection.ranges.map(r => ({from: r.from, to: r.to, fit: true})),
-      selection: (cx, changes) => GardSelection.near(cx, changes.mapPos(state.selection.from, -1), 1),
-      scrollIntoView: true,
-      userEvent: "delete.cut"
-    })
-  return true
-}`,
-'input native cut fallback');
-  return exactReplace(source,
-`  deleteContent: wg => {
-    let tr = deleteSelection(wg.state)
-    if (tr) wg.dispatch(tr)
-    return !!tr
-  },`,
-`  deleteContent: wg => {
-    let tr = deleteSelection(wg.state)
-    if (tr) wg.dispatch(tr)
-    return !!tr
-  },
-  deleteByCut: wg => {
-    wg.flush()
-    let {state} = wg
-    if (state.readOnly || state.selection.empty) return false
-    wg.dispatch({
-      changes: state.selection.ranges.map(r => ({from: r.from, to: r.to, fit: true})),
-      selection: (cx, changes) => GardSelection.near(cx, changes.mapPos(state.selection.from, -1), 1),
-      scrollIntoView: true,
-      userEvent: "delete.cut"
-    })
-    return true
-  },`,
-'input beforeinput cut deletion');
+`import {Command, Menu, undo as undoCmd, redo as redoCmd} from "wordgard/command"
+import {phrases} from "wordgard/phrases"
+`,
+`import {Command, undo as undoCmd, redo as redoCmd} from "wordgard/command"
+`,
+'history menu imports');
+  source=exactReplace(source,
+`    undoButton,
+    redoButton,
+`,
+``,
+'history menu buttons in the extension');
+  const buttons=source.indexOf('/// A menu button that undoes a change.');
+  if(buttons<0||!/^export const redoButton = Menu\.Button\.define\(\{[\s\S]*?\n\}\)\n?$/mu.test(source.slice(buttons)))throw new Error('Wordgard patch anchor changed: history menu button definitions');
+  return source.slice(0,buttons).replace(/\n+$/u,'\n');
 }
 
+const PATCHES=Object.freeze({
+  'doc/node.ts':source=>patchNode(source),
+  'editor/clipboard.ts':(source,helperImport)=>patchClipboard(source,helperImport),
+  'state/state.ts':(source,helperImport)=>patchState(source,helperImport),
+  'history/history.ts':source=>patchHistory(source)
+});
+
 export function applyWordgardSourcePatch(rel,source,helperImport='./inert-html'){
-  const expected=EXPECTED_UPSTREAM_SHA256[rel];
-  if(!expected)throw new Error(`Unsupported Wordgard patch target: ${rel}`);
-  const actual=sha256(source);
-  if(actual!==expected)
-    throw new Error(`Wordgard upstream source changed at ${rel}; expected ${expected}, got ${actual}. Rebase the Study Director patch explicitly.`);
-  if(rel==='doc/node.ts')return patchNode(source);
-  if(rel==='editor/clipboard.ts')return patchClipboard(source,helperImport);
-  if(rel==='editor/input.ts')return patchInput(source);
-  return patchState(source,helperImport);
+  const patch=PATCHES[rel];
+  if(!patch)throw new Error(`Unsupported Wordgard patch target: ${rel}`);
+  return patch(source,helperImport);
 }
 
 export function wordgardSourcePatchPlugin({root}){
   const vendorRoot=path.join(root,'vendor/wordgard/src');
   const inertHelper=path.join(root,'rich-text/wordgard-patches/inert-html.ts');
-  const targets=new Map([
-    [path.join(vendorRoot,'doc/node.ts'),'doc/node.ts'],
-    [path.join(vendorRoot,'editor/clipboard.ts'),'editor/clipboard.ts'],
-    [path.join(vendorRoot,'editor/input.ts'),'editor/input.ts'],
-    [path.join(vendorRoot,'state/state.ts'),'state/state.ts'],
-  ]);
+  const targets=new Map(Object.keys(PATCHES).map(rel=>[path.join(vendorRoot,rel),rel]));
   return {
     name:'study-director-wordgard-patches',
     setup(build){
-      build.onLoad({filter:/[\\/]vendor[\\/]wordgard[\\/]src[\\/](?:doc[\\/]node|editor[\\/](?:clipboard|input)|state[\\/]state)\.ts$/},args=>{
+      build.onLoad({filter:/[\\/]vendor[\\/]wordgard[\\/]src[\\/](?:doc[\\/]node|editor[\\/]clipboard|state[\\/]state|history[\\/]history)\.ts$/},args=>{
         const rel=targets.get(path.normalize(args.path));
         if(!rel)throw new Error(`Unexpected Wordgard patch target: ${args.path}`);
         const upstream=fs.readFileSync(args.path,'utf8');

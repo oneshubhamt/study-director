@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {importRichTextReconciliationSource} from '../../helpers/typescript-source.mjs';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
 const R=await importRichTextReconciliationSource();
-const sandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask,JSON};sandbox.globalThis=sandbox;vm.createContext(sandbox);vm.runInContext(fs.readFileSync('source/external/rich-text.js','utf8'),sandbox,{filename:'source/external/rich-text.js'});
+const sandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask,JSON};sandbox.globalThis=sandbox;vm.createContext(sandbox);vm.runInContext(richTextRuntimeSource(),sandbox,{filename:'source/external/rich-text.js'});
 const runtime=sandbox.StudyDirectorRichText;
 const text=(param,marks)=>marks?{type:'Text',param,marks}:{type:'Text',param};
 const p=(...content)=>({type:'Paragraph',content:content.flat().map(node=>typeof node==='string'?text(node):node)});

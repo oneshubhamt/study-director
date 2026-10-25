@@ -39,6 +39,10 @@ registry.define('persistence',1,()=>{
       remove(key){
         try{globalThis.localStorage.removeItem(key);lastError=null;onOk('write');return true;}
         catch(error){lastError=error;onError('write',error);return false;}
+      },
+      keys(){
+        try{const keys=Object.keys(globalThis.localStorage);lastError=null;onOk('read');return keys;}
+        catch(error){lastError=error;onError('read',error);return [];}
       }
     };
     return freeze(api);
@@ -52,24 +56,54 @@ registry.define('persistence',1,()=>{
       return Math.random().toString(36).slice(2,12)+Date.now().toString(36);
     }
   }
+  // A device ID says what the device is, so any device can name any other
+  // with nothing typed and nothing else stored:
+  // inst_<type>_<browser>_<first use, base 36>_<random>.
+  const DEVICE_TYPES=freeze({iphone:'iPhone',ipad:'iPad',android:'Android',windows:'Windows',mac:'Mac',chromeos:'ChromeOS',linux:'Linux',device:'Device'});
+  const BROWSERS=freeze({safari:'Safari',chrome:'Chrome',edge:'Edge',firefox:'Firefox',opera:'Opera',samsung:'Samsung Internet',browser:'Browser'});
+  const INSTALLATION_ID=/^inst_([a-z]+)_([a-z]+)_([a-z0-9]{6,12})_([a-f0-9]{8})$/u;
+  // Read once, when the ID is made. Some iPads report themselves as a Mac;
+  // a touch screen tells them apart.
+  function describeDevice(nav){
+    const ua=String(nav&&nav.userAgent||''),platform=String(nav&&(nav.userAgentData&&nav.userAgentData.platform||nav.platform)||''),touch=Number(nav&&nav.maxTouchPoints)||0;
+    const type=/iPhone|iPod/u.test(ua)?'iphone':/iPad/u.test(ua)||/Macintosh/u.test(ua)&&touch>1?'ipad':/Android/u.test(ua)?'android':/CrOS/u.test(ua)?'chromeos':/Windows/u.test(ua)||/^Win/u.test(platform)?'windows':/Macintosh|Mac OS X/u.test(ua)||/^Mac/u.test(platform)?'mac':/Linux/u.test(ua)||/Linux/u.test(platform)?'linux':'device';
+    const browser=/SamsungBrowser/u.test(ua)?'samsung':/Edg(?:e|A|iOS)?\//u.test(ua)?'edge':/OPR\/|Opera/u.test(ua)?'opera':/Firefox\/|FxiOS/u.test(ua)?'firefox':/Chrome\/|CriOS|Chromium/u.test(ua)?'chrome':/Safari\//u.test(ua)?'safari':'browser';
+    return freeze({type,browser});
+  }
+  // "iPhone · Safari", with the first-use date added only when another of
+  // the given devices would read the same. '' for an ID that does not say.
+  function deviceName(id,others=[]){
+    const parse=value=>{const match=INSTALLATION_ID.exec(String(value||''));return match&&DEVICE_TYPES[match[1]]&&BROWSERS[match[2]]?freeze({label:`${DEVICE_TYPES[match[1]]} · ${BROWSERS[match[2]]}`,since:parseInt(match[3],36)}):null;};
+    const own=parse(id);if(!own)return '';
+    const alike=[...others].some(other=>String(other||'')!==String(id)&&parse(other)?.label===own.label);
+    return alike?`${own.label} (since ${new Date(own.since).toLocaleDateString(undefined,{day:'numeric',month:'short'})})`:own.label;
+  }
   function createInstallationIdentity(input){
-    exactObject(input,['local','keys'],'Installation identity input');
+    exactObject(input,['local','keys','describe'],'Installation identity input');
     exactObject(input.keys,['installationId'],'Installation identity keys');
-    if(!Object.isFrozen(input.local))throw new TypeError('Installation identity storage must be frozen.');
+    if(!Object.isFrozen(input.local)||typeof input.describe!=='function')throw new TypeError('Installation identity storage must be frozen.');
     const LocalStorageContract=input.local,key=input.keys.installationId;
     let cached='';
-    function normalize(value){return /^inst_[a-z0-9_]{8,128}$/i.test(String(value||''))?String(value):'';}
+    function normalize(value){const match=INSTALLATION_ID.exec(String(value||''));return match&&DEVICE_TYPES[match[1]]&&BROWSERS[match[2]]?String(value):'';}
     function getId(){
       if(cached)return cached;
       const current=normalize(LocalStorageContract.getText(key,''));
       if(current){cached=current;return current;}
-      const id=`inst_${Date.now().toString(36)}_${randomIdPart(8)}`;
+      const kind=input.describe()||{},type=DEVICE_TYPES[kind.type]?kind.type:'device',browser=BROWSERS[kind.browser]?kind.browser:'browser';
+      const id=`inst_${type}_${browser}_${Date.now().toString(36)}_${randomIdPart(4)}`;
       if(!LocalStorageContract.setText(key,id))throw LocalStorageContract.lastError||new Error('Installation identity could not be persisted.');
       const verified=normalize(LocalStorageContract.getText(key,''));
       if(verified!==id)throw new Error('Installation identity write could not be verified.');
       cached=id;return id;
     }
-    return freeze({format:'study-director.installation-identity',contractVersion:3,getId});
+    // After a browser-data clear the open tab writes its ID back, so the device
+    // keeps its name and its Device Folder backups. An ID another tab has
+    // written since is left alone.
+    function keep(){
+      if(!cached||normalize(LocalStorageContract.getText(key,'')))return true;
+      return LocalStorageContract.setText(key,cached)&&normalize(LocalStorageContract.getText(key,''))===cached;
+    }
+    return freeze({format:'study-director.installation-identity',contractVersion:4,getId,keep});
   }
   function normalizeTimestamp(value,fallback=null){
     const n=Date.parse(value||'');
@@ -91,18 +125,18 @@ registry.define('persistence',1,()=>{
     if(!input||!Object.isFrozen(input))throw new TypeError('IndexedDB input must be frozen.');
     const inputKeys=Object.keys(input).sort(),allowedKeys=['config','hooks','upgrade'];
     if(inputKeys.some(key=>!allowedKeys.includes(key))||!inputKeys.includes('config')||!inputKeys.includes('hooks'))throw new TypeError('IndexedDB input is incomplete, mutable, or contains unexpected fields.');
-    exactObject(input.config,['dbName','dbVersion','legacyBaselineVersion','stores','legacyStores'],'IndexedDB config');
-    exactObject(input.config.stores,['dailyRecords','dailySummaries','areaNotes','activeSessions','appMeta','assets'],'IndexedDB stores');
+    exactObject(input.config,['dbName','dbVersion','bridgeVersion','stores','legacyStores'],'IndexedDB config');
+    exactObject(input.config.stores,['dailyRecords','dailySummaries','notes','activeSessions','appMeta','assets'],'IndexedDB stores');
     exactObject(input.config.legacyStores,['syncQueue','tombstones','reflectionDrafts'],'IndexedDB legacy stores');
-    functions(input.hooks,['onError','onOk','capture'],'IndexedDB hooks');
-    if(input.upgrade!==undefined)functions(input.upgrade,['apply'],'IndexedDB upgrade adapter');
-    const applyUpgrade=input.upgrade?input.upgrade.apply:()=>false;
+    functions(input.hooks,Object.hasOwn(input.hooks,'onReset')?['onError','onOk','capture','onReset']:['onError','onOk','capture'],'IndexedDB hooks');
+    if(input.upgrade!==undefined)functions(input.upgrade,['renameStores','apply'],'IndexedDB upgrade adapter');
+    const applyUpgrade=input.upgrade?input.upgrade.apply:()=>false,renameStores=input.upgrade?input.upgrade.renameStores:()=>0;
     const DB_NAME=input.config.dbName;
     const DB_VER=input.config.dbVersion;
-    const LEGACY_BASELINE_VER=input.config.legacyBaselineVersion;
+    const BRIDGE_VER=input.config.bridgeVersion;
     const DB_DAILY_RECORD_STORE=input.config.stores.dailyRecords;
     const DB_DAILY_SUMMARY_STORE=input.config.stores.dailySummaries;
-    const DB_AREA_NOTES_STORE=input.config.stores.areaNotes;
+    const DB_NOTES_STORE=input.config.stores.notes;
     const DB_ACTIVE_SESSION_STORE=input.config.stores.activeSessions;
     const DB_APP_META_STORE=input.config.stores.appMeta;
     const DB_ASSET_STORE=input.config.stores.assets;
@@ -113,9 +147,24 @@ registry.define('persistence',1,()=>{
     const markStorageHealthError=input.hooks.onError;
     const markStorageHealthOk=input.hooks.onOk;
     const AppDiagnostics=freeze({capture:input.hooks.capture});
+    const onReset=typeof input.hooks.onReset==='function'?input.hooks.onReset:null;
     let appDbConnection=null;
     let appDbOpenPromise=null;
+    // The key each current store is read by (null: the key is given apart from the record).
+    const STORE_KEY_PATHS=new Map([[DB_DAILY_RECORD_STORE,'date'],[DB_DAILY_SUMMARY_STORE,'date'],[DB_NOTES_STORE,'key'],[DB_ACTIVE_SESSION_STORE,'id'],[DB_APP_META_STORE,'key'],[DB_ASSET_STORE,null]]);
+    let newerDatabase=null;
     const freshlyCreatedDatabases=new WeakSet();
+    // A database created after this page already held a connection was not
+    // opened for the first time: the browser deleted the site's data while the
+    // page stayed open (for example, Clear browsing data). Callers must not
+    // treat their in-memory "already saved" knowledge as durable after that.
+    let establishedConnection=false,startedFresh=false,resetCount=0,lastResetAt='';
+    function noteRecreatedDatabase(){
+      resetCount++;lastResetAt=new Date().toISOString();
+      const event=freeze({detectedAt:lastResetAt,count:resetCount});
+      AppDiagnostics.capture('storage.idb-recreated',new Error('The browser database was recreated while the app was open.'),'warn');
+      if(onReset)setTimeout(()=>{try{onReset(event);}catch(error){AppDiagnostics.capture('storage.idb-recreated-hook',error);}},0);
+    }
     function clearAppDBConnection(db=null){
       if(db&&appDbConnection!==db)return false;
       appDbConnection=null;
@@ -124,7 +173,7 @@ registry.define('persistence',1,()=>{
     function ensureCurrentStores(db){
       if(!db.objectStoreNames.contains(DB_DAILY_RECORD_STORE))db.createObjectStore(DB_DAILY_RECORD_STORE,{keyPath:'date'});
       if(!db.objectStoreNames.contains(DB_DAILY_SUMMARY_STORE))db.createObjectStore(DB_DAILY_SUMMARY_STORE,{keyPath:'date'});
-      if(!db.objectStoreNames.contains(DB_AREA_NOTES_STORE))db.createObjectStore(DB_AREA_NOTES_STORE,{keyPath:'key'});
+      if(!db.objectStoreNames.contains(DB_NOTES_STORE))db.createObjectStore(DB_NOTES_STORE,{keyPath:'key'});
       if(!db.objectStoreNames.contains(DB_ACTIVE_SESSION_STORE))db.createObjectStore(DB_ACTIVE_SESSION_STORE,{keyPath:'id'});
       if(!db.objectStoreNames.contains(DB_APP_META_STORE))db.createObjectStore(DB_APP_META_STORE,{keyPath:'key'});
       if(!db.objectStoreNames.contains(DB_ASSET_STORE))db.createObjectStore(DB_ASSET_STORE);
@@ -137,27 +186,30 @@ registry.define('persistence',1,()=>{
       for(const name of LEGACY_STORES)if(db.objectStoreNames.contains(name))db.deleteObjectStore(name);
     }
     function attachConnection(db){
-      appDbConnection=db;
+      appDbConnection=db;establishedConnection=true;
       db.onversionchange=()=>{
         if(appDbConnection===db)clearAppDBConnection(db);
         try{db.close();}catch(error){AppDiagnostics.capture('storage.db-versionchange-close',error);}
       };
       if('onclose' in db)db.onclose=()=>clearAppDBConnection(db);
-      markStorageHealthOk('lastIdbOkAt');
+      markStorageHealthOk();
       return db;
     }
     function openRequest(version=null,{legacyBridge=false,retireLegacy=false,fresh=false}={}){
       return new Promise((resolve,reject)=>{
         if(typeof globalThis.indexedDB?.open!=='function'){markStorageHealthError('IndexedDB unavailable');reject(new Error('IndexedDB unavailable'));return;}
-        let settled=false;
+        let settled=false,blocked=false;
         const finish=(fn,val)=>{if(settled)return;settled=true;clearTimeout(timer);fn(val);};
-        const timer=setTimeout(()=>{markStorageHealthError('IndexedDB open timed out');finish(reject,new Error('IndexedDB open timed out'));},2500);
+        const timer=setTimeout(()=>{const message=blocked?'IndexedDB open blocked':'IndexedDB open timed out';markStorageHealthError(message);finish(reject,new Error(message));},2500);
         let req;
         try{req=version===null?globalThis.indexedDB.open(DB_NAME):globalThis.indexedDB.open(DB_NAME,version);}catch(error){markStorageHealthError(error&&error.message?error.message:'IndexedDB open failed');finish(reject,error);return;}
         req.onupgradeneeded=e=>{
+          // An open that was given up on never upgrades in the background.
+          if(settled){try{e.target.transaction&&e.target.transaction.abort();}catch(abortError){}return;}
           try{
             const db=e.target.result,tx=e.target.transaction;
             if(version===null&&Number(e.oldVersion||0)===0)freshlyCreatedDatabases.add(db);
+            if(!fresh)renameStores(Object.freeze({db,transaction:tx}));
             ensureCurrentStores(db);
             if(legacyBridge)ensureLegacyStores(db);
             if(retireLegacy)removeLegacyStores(db);
@@ -168,9 +220,12 @@ registry.define('persistence',1,()=>{
             finish(reject,error||new Error('IndexedDB upgrade failed'));
           }
         };
-        req.onsuccess=()=>finish(resolve,req.result);
-        req.onerror=()=>{markStorageHealthError((req.error&&req.error.message)||'IndexedDB open failed');finish(reject,req.error||new Error('IndexedDB open failed'));};
-        req.onblocked=()=>{markStorageHealthError('IndexedDB open blocked');finish(reject,new Error('IndexedDB open blocked'));};
+        req.onsuccess=()=>{if(settled){try{req.result.close();}catch(closeError){}return;}finish(resolve,req.result);};
+        req.onerror=()=>{if(settled)return;markStorageHealthError((req.error&&req.error.message)||'IndexedDB open failed');finish(reject,req.error||new Error('IndexedDB open failed'));};
+        // Another tab still holds the database while it closes its connection
+        // (each tab closes on a version change); the open waits for it within
+        // the same time limit.
+        req.onblocked=()=>{blocked=true;};
       });
     }
     async function openBootstrapDatabase(){
@@ -180,17 +235,27 @@ registry.define('persistence',1,()=>{
       if(Number(db.version)===1&&freshlyCreatedDatabases.has(db)){
         db.close();
         db=await openRequest(DB_VER,{retireLegacy:true,fresh:true});
+        if(establishedConnection)noteRecreatedDatabase();else startedFresh=true;
         return db;
       }
-      if(Number(db.version)<LEGACY_BASELINE_VER){
+      if(Number(db.version)<BRIDGE_VER){
         db.close();
-        db=await openRequest(LEGACY_BASELINE_VER,{legacyBridge:true});
+        db=await openRequest(BRIDGE_VER,{legacyBridge:true});
       }
-      if(Number(db.version)>DB_VER){
-        const version=db.version;db.close();
-        throw new Error(`IndexedDB version ${version} is newer than this Study Director build supports.`);
-      }
+      // A newer Study Director upgraded this database. It opens as it is
+      // (never upgraded, never downgraded); the stores this build knows are
+      // used where they still have their shape, everything else is left alone.
+      if(Number(db.version)>DB_VER)newerDatabase=inspectNewerDatabase(db);
       return db;
+    }
+    function inspectNewerDatabase(db){
+      const missing=[],changed=[];
+      for(const [name,keyPath] of STORE_KEY_PATHS){
+        if(!db.objectStoreNames.contains(name)){missing.push(name);continue;}
+        try{const actual=db.transaction(name,'readonly').objectStore(name).keyPath;if((actual??null)!==keyPath)changed.push(name);}
+        catch(error){changed.push(name);}
+      }
+      return freeze({version:Number(db.version),missing:freeze(missing),changed:freeze(changed),usable:missing.length===0&&changed.length===0});
     }
     function openAppDB(){
       if(appDbConnection)return Promise.resolve(appDbConnection);
@@ -202,8 +267,8 @@ registry.define('persistence',1,()=>{
     }
     async function topology(){
       const db=await openAppDB();
-      const stores=[...db.objectStoreNames];
-      return freeze({version:Number(db.version),stores:freeze(stores),legacyStores:freeze(LEGACY_STORES.filter(name=>stores.includes(name))),current:stores.filter(name=>LEGACY_STORES.includes(name)).length===0&&Number(db.version)===DB_VER});
+      const stores=[...db.objectStoreNames],newer=Number(db.version)>DB_VER?(newerDatabase||inspectNewerDatabase(db)):null;
+      return freeze({version:Number(db.version),stores:freeze(stores),legacyStores:freeze(LEGACY_STORES.filter(name=>stores.includes(name))),current:stores.filter(name=>LEGACY_STORES.includes(name)).length===0&&Number(db.version)===DB_VER,newer:!!newer,usable:newer?newer.usable:true,missing:newer?newer.missing:freeze([]),changed:newer?newer.changed:freeze([])});
     }
     async function hasStore(name){const db=await openAppDB();return db.objectStoreNames.contains(String(name));}
     async function getAllIfPresent(storeName,abortMessage='read aborted'){
@@ -217,7 +282,8 @@ registry.define('persistence',1,()=>{
         if(present.length)throw new Error('Current IndexedDB version still contains retired compatibility stores.');
         return freeze({status:'current',version:DB_VER,removed:0});
       }
-      if(Number(current.version)>DB_VER)throw new Error('IndexedDB is newer than the current Study Director topology.');
+      // A newer build owns this topology: nothing is retired or upgraded.
+      if(Number(current.version)>DB_VER)return freeze({status:'newer',version:Number(current.version),removed:0});
       clearAppDBConnection(current);try{current.close();}catch(error){}
       const upgraded=await openRequest(DB_VER,{retireLegacy:true});
       attachConnection(upgraded);
@@ -247,14 +313,141 @@ registry.define('persistence',1,()=>{
         throw error;
       }
     }
-    async function runIdbTransaction(stores,mode,fn,abortMessage='transaction aborted',strict=false,retry=0){
+    // Data this build cannot read: records a newer Study Director wrote, or
+    // ones in a shape this build does not know. They stay exactly as they are.
+    // Reads do not see them; a write or delete of one is refused, and a clear
+    // or a range delete leaves them in place. The list is empty for almost
+    // every start, and then every transaction is the plain browser one.
+    const unsupported=new Map();
+    const keyId=key=>`${typeof key}:${typeof key==='string'?key:JSON.stringify(key)}`;
+    // replaceable: the record is this build's own bookkeeping (a lease,
+    // maintenance progress, a cache), which the data contract lets any build
+    // replace; writing it takes it back. Everything else is never changed.
+    function hold(storeName,key,reason='unsupported',{replaceable=false}={}){
+      const name=String(storeName||'');if(!STORE_KEY_PATHS.has(name)||key===undefined||key===null)return false;
+      if(!unsupported.has(name))unsupported.set(name,new Map());
+      const rows=unsupported.get(name),id=keyId(key);if(rows.has(id))return false;
+      rows.set(id,freeze({key,reason:String(reason||'unsupported'),replaceable:replaceable===true}));return true;
+    }
+    const heldRow=(storeName,key)=>unsupported.get(storeName)?.get(keyId(key))||null;
+    const isHeld=(storeName,key)=>!!unsupported.get(storeName)?.has(keyId(key));
+    const heldIn=storeName=>unsupported.get(storeName)?.size>0;
+    function unsupportedSummary(){
+      const stores={},reasons={};let total=0,protectedTotal=0;
+      for(const [name,rows] of unsupported){if(!rows.size)continue;stores[name]=rows.size;total+=rows.size;for(const row of rows.values()){reasons[row.reason]=(reasons[row.reason]||0)+1;if(!row.replaceable)protectedTotal++;}}
+      return freeze({total,protected:protectedTotal,stores:freeze(stores),reasons:freeze(reasons)});
+    }
+    const unsupportedKeys=storeName=>freeze([...(unsupported.get(String(storeName||''))?.values()||[])].map(row=>row.key));
+    function unsupportedDataError(storeName){
+      return Object.assign(new Error('This was saved by a newer version of Study Director, so this version keeps it as it is and does not change it. Update the app to change it.'),{name:'UnsupportedDataError',code:'STUDY_DIRECTOR_UNSUPPORTED_DATA',store:String(storeName||'')});
+    }
+    const isRange=value=>typeof globalThis.IDBKeyRange==='function'&&value instanceof globalThis.IDBKeyRange;
+    const passThrough=(target,prop)=>{const value=Reflect.get(target,prop,target);return typeof value==='function'?value.bind(target):value;};
+    const eventFor=(event,view)=>new Proxy(event,{get:(target,prop)=>prop==='target'||prop==='currentTarget'?view:passThrough(target,prop)});
+    // A request answered by this guard. It always answers later, inside the
+    // same transaction, like a browser request.
+    function answeredRequest(source,transaction){
+      const listeners={success:new Set(),error:new Set()};
+      const request={result:undefined,error:null,readyState:'pending',source,transaction,onsuccess:null,onerror:null,
+        addEventListener:(type,listener)=>{if(listeners[type]&&typeof listener==='function')listeners[type].add(listener);},
+        removeEventListener:(type,listener)=>{listeners[type]?.delete(listener);}};
+      const fire=type=>{request.readyState='done';const event={type,target:request,currentTarget:request,preventDefault(){},stopPropagation(){}};const handler=type==='success'?request.onsuccess:request.onerror;if(typeof handler==='function')handler.call(request,event);for(const listener of listeners[type])listener.call(request,event);};
+      return freeze({request,succeed:value=>{request.result=value;fire('success');},fail:error=>{request.error=error;fire('error');}});
+    }
+    // A browser request whose success reaches the caller only for records it may see.
+    function viewedRequest(real,{result=value=>value,skip=()=>false}={}){
+      let onsuccess=null;const listeners=new Map();
+      const view=new Proxy(real,{
+        get(target,prop){
+          if(prop==='result')return result(target.result);
+          if(prop==='onsuccess')return onsuccess;
+          if(prop==='addEventListener')return (type,listener,options)=>{if(type!=='success'||typeof listener!=='function')return target.addEventListener(type,listener,options);const wrapped=event=>{if(!skip(target))listener.call(view,eventFor(event,view));};listeners.set(listener,wrapped);target.addEventListener(type,wrapped,options);};
+          if(prop==='removeEventListener')return (type,listener,options)=>target.removeEventListener(type,type==='success'&&listeners.get(listener)||listener,options);
+          return passThrough(target,prop);
+        },
+        set(target,prop,value){
+          if(prop==='onsuccess'){onsuccess=value;target.onsuccess=typeof value==='function'?event=>{if(!skip(target))value.call(view,eventFor(event,view));}:null;return true;}
+          return Reflect.set(target,prop,value,target);
+        }
+      });
+      return view;
+    }
+    function guardStore(store,{transaction,view:transactionView},state){
+      const name=store.name,keyPath=store.keyPath;
+      const keyOf=(value,key)=>{
+        if(key!==undefined||typeof keyPath!=='string')return key;
+        let current=value;for(const part of keyPath.split('.'))current=current&&typeof current==='object'?current[part]:undefined;return current;
+      };
+      const refuse=()=>{const error=unsupportedDataError(name);state.error=error;try{transaction.abort();}catch{}throw error;};
+      // A write or delete of a held record: bookkeeping is taken back (and
+      // held again if the transaction does not commit); anything else is refused.
+      const claim=key=>{
+        const row=heldRow(name,key);if(!row)return;
+        if(!row.replaceable)refuse();
+        unsupported.get(name).delete(keyId(key));
+        transaction.addEventListener('abort',()=>{if(!heldRow(name,key))hold(name,row.key,row.reason,{replaceable:true});});
+      };
+      const heldInRange=range=>[...(unsupported.get(name)?.values()||[])].some(row=>{try{return range.includes(row.key);}catch{return false;}});
+      // Walks the store with a cursor, past the records this build keeps.
+      function walk(query,{keys=false,limit=Infinity,visit,done}){
+        const answer=answeredRequest(view,transactionView),cursorRequest=keys&&typeof store.openKeyCursor==='function'?store.openKeyCursor(query??null):store.openCursor(query??null);
+        let seen=0;
+        cursorRequest.onerror=()=>answer.fail(cursorRequest.error);
+        cursorRequest.onsuccess=()=>{
+          const cursor=cursorRequest.result;
+          if(!cursor){answer.succeed(done());return;}
+          if(!isHeld(name,cursor.primaryKey)){visit(cursor);if(++seen>=limit){answer.succeed(done());return;}}
+          cursor.continue();
+        };
+        return answer.request;
+      }
+      const methods={
+        get:query=>{
+          if(isRange(query)){let found;return walk(query,{limit:1,visit:cursor=>{found=cursor.value;},done:()=>found});}
+          return isHeld(name,query)?viewedRequest(store.count(query),{result:()=>undefined}):store.get(query);
+        },
+        getKey:query=>{
+          if(isRange(query)){let found;return walk(query,{keys:true,limit:1,visit:cursor=>{found=cursor.primaryKey;},done:()=>found});}
+          return isHeld(name,query)?viewedRequest(store.count(query),{result:()=>undefined}):store.getKey(query);
+        },
+        getAll:(query,count)=>{const out=[];return walk(query,{limit:Number(count)>0?Number(count):Infinity,visit:cursor=>out.push(cursor.value),done:()=>out});},
+        getAllKeys:(query,count)=>{const out=[];return walk(query,{keys:true,limit:Number(count)>0?Number(count):Infinity,visit:cursor=>out.push(cursor.primaryKey),done:()=>out});},
+        count:query=>{let total=0;return walk(query,{keys:true,visit:()=>{total++;},done:()=>total});},
+        openCursor:(query,direction)=>viewedRequest(store.openCursor(query??null,direction),{skip:target=>{const cursor=target.result;if(cursor&&isHeld(name,cursor.primaryKey)){cursor.continue();return true;}return false;}}),
+        openKeyCursor:(query,direction)=>viewedRequest(store.openKeyCursor(query??null,direction),{skip:target=>{const cursor=target.result;if(cursor&&isHeld(name,cursor.primaryKey)){cursor.continue();return true;}return false;}}),
+        put:(value,key)=>{claim(keyOf(value,key));return key===undefined?store.put(value):store.put(value,key);},
+        add:(value,key)=>{claim(keyOf(value,key));return key===undefined?store.add(value):store.add(value,key);},
+        delete:query=>{
+          if(!isRange(query)){claim(query);return store.delete(query);}
+          if(!heldInRange(query))return store.delete(query);
+          return walk(query,{visit:cursor=>{cursor.delete();},done:()=>undefined});
+        },
+        clear:()=>walk(null,{visit:cursor=>{cursor.delete();},done:()=>undefined}),
+        index:()=>{throw unsupportedDataError(name);}
+      };
+      const view=new Proxy(store,{get:(target,prop)=>Object.hasOwn(methods,prop)?methods[prop]:prop==='transaction'?transactionView:passThrough(target,prop),set:(target,prop,value)=>Reflect.set(target,prop,value,target)});
+      return view;
+    }
+    function guardTransaction(tx,state){
+      const guarded=new Map();
+      const view=new Proxy(tx,{
+        get(target,prop){
+          if(prop==='objectStore')return storeName=>{const store=target.objectStore(storeName);if(!heldIn(store.name))return store;if(!guarded.has(store.name))guarded.set(store.name,guardStore(store,{transaction:target,view},state));return guarded.get(store.name);};
+          return passThrough(target,prop);
+        },
+        set:(target,prop,value)=>Reflect.set(target,prop,value,target)
+      });
+      return view;
+    }
+    const touchesHeld=stores=>(Array.isArray(stores)?stores:[stores]).some(name=>heldIn(String(name)));
+    async function runIdbTransaction(stores,mode,fn,abortMessage='transaction aborted',strict=false,retry=0,raw=false){
       const db=await openAppDB();
       return new Promise((resolve,reject)=>{
         let tx;
         try{tx=createIdbTransaction(db,stores,mode,strict);}
         catch(error){
           if(appDbConnection===db){clearAppDBConnection(db);try{db.close();}catch(closeError){}}
-          if(retry<1){runIdbTransaction(stores,mode,fn,abortMessage,strict,retry+1).then(resolve,reject);return;}
+          if(retry<1){runIdbTransaction(stores,mode,fn,abortMessage,strict,retry+1,raw).then(resolve,reject);return;}
           markStorageHealthError((error&&error.message)||abortMessage);reject(error);return;
         }
         let settled=false;
@@ -263,15 +456,33 @@ registry.define('persistence',1,()=>{
           if(ok){markStorageHealthOk();resolve(val);}
           else{markStorageHealthError((val&&val.message)||abortMessage);reject(val);}
         };
-        tx.onerror=()=>finish(false,tx.error||new Error(abortMessage));
-        tx.onabort=()=>finish(false,tx.error||new Error(abortMessage));
-        try{fn(tx,finish);}catch(error){try{tx.abort();}catch{}finish(false,error);}
+        const state={error:null},view=!raw&&touchesHeld(stores)?guardTransaction(tx,state):tx;
+        tx.onerror=()=>finish(false,state.error||tx.error||new Error(abortMessage));
+        tx.onabort=()=>finish(false,state.error||tx.error||new Error(abortMessage));
+        try{fn(view,finish);}catch(error){try{tx.abort();}catch{}finish(false,error);}
       });
     }
     function idbTransaction(stores,mode,fn,abortMessage='transaction aborted'){return runIdbTransaction(stores,mode,fn,abortMessage,false);}
     function idbStrictTransaction(stores,mode,fn,abortMessage='transaction aborted'){return runIdbTransaction(stores,mode,fn,abortMessage,true);}
     function idbStoreTransaction(storeName,mode,fn,abortMessage='transaction aborted'){return idbTransaction(storeName,mode,(tx,finish)=>fn(tx.objectStore(storeName),tx,finish),abortMessage);}
     function idbStrictStoreTransaction(storeName,mode,fn,abortMessage='transaction aborted'){return idbStrictTransaction(storeName,mode,(tx,finish)=>fn(tx.objectStore(storeName),tx,finish),abortMessage);}
+    // Reads every record of a store as stored (unsupported ones included) and
+    // holds each one classify names a reason for (a string, or {reason,replaceable}). A store this build
+    // knows but the database lacks reads as empty.
+    async function scanUnsupported(storeName,classify,abortMessage='unsupported data scan aborted'){
+      if(!(await hasStore(storeName)))return 0;
+      return runIdbTransaction(storeName,'readonly',(tx,finish)=>{
+        const request=tx.objectStore(storeName).openCursor();let found=0;
+        request.onerror=()=>finish(false,request.error||new Error(abortMessage));
+        request.onsuccess=()=>{
+          const cursor=request.result;if(!cursor){finish(true,found);return;}
+          let verdict='';try{verdict=classify(cursor.value,cursor.primaryKey);}catch(error){verdict='unreadable';}
+          const reason=typeof verdict==='string'?verdict:String(verdict&&verdict.reason||'');
+          if(reason&&hold(storeName,cursor.primaryKey,reason,{replaceable:!!verdict&&verdict.replaceable===true}))found++;
+          cursor.continue();
+        };
+      },abortMessage,false,0,true);
+    }
     function idbGet(storeName,key,abortMessage='read aborted'){
       return idbStoreTransaction(storeName,'readonly',(store,tx,finish)=>{const req=store.get(key);req.onsuccess=()=>finish(true,req.result||null);req.onerror=()=>finish(false,req.error||new Error(abortMessage));},abortMessage);
     }
@@ -282,7 +493,9 @@ registry.define('persistence',1,()=>{
       format:'study-director.indexeddb-primitives',contractVersion:2,
       isAvailable:()=>typeof globalThis.indexedDB?.open==='function',clearConnection:clearAppDBConnection,open:openAppDB,
       transaction:idbTransaction,strictTransaction:idbStrictTransaction,storeTransaction:idbStoreTransaction,strictStoreTransaction:idbStrictStoreTransaction,
-      get:idbGet,getAll:idbGetAll,getAllIfPresent,hasStore,topology,retireLegacyStores
+      get:idbGet,getAll:idbGetAll,getAllIfPresent,hasStore,topology,retireLegacyStores,
+      unsupported:freeze({scan:scanUnsupported,hold,has:(storeName,key)=>isHeld(String(storeName||''),key),keys:unsupportedKeys,summary:unsupportedSummary}),
+      lifecycle:()=>freeze({startedFresh,resets:resetCount,lastResetAt})
     });
   }
 
@@ -290,7 +503,7 @@ registry.define('persistence',1,()=>{
     format:'study-director.persistence-primitives',
     contractVersion:1,
     createLocalStorage,
-    createInstallationIdentity,
+    createInstallationIdentity,describeDevice,deviceName,
     randomIdPart,normalizeTimestamp,normalizeImportedTimestamp,normalizeImportedEpochMillis,jsonByteLength,
     createIndexedDb
   });

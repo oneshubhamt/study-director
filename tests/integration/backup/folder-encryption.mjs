@@ -1,54 +1,69 @@
-import {createBackupPresentation} from '../../helpers/backup-presentation.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createProcessingEngine} from '../../helpers/file-processing.mjs';
-import {EXTERNAL_REPOSITORY_IDENTITIES} from '../../../contracts/canonical-identities.mjs';
-for(const name of ['internal','operation-lifecycle','exports','repository-background'])vm.runInThisContext(fs.readFileSync(`source/core/${name}.js`,'utf8'));
-vm.runInThisContext(fs.readFileSync('source/core/repository-policy.js','utf8'));
-vm.runInThisContext(fs.readFileSync('source/core/device-backup.js','utf8').replaceAll('@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@',JSON.stringify(EXTERNAL_REPOSITORY_IDENTITIES)));
-const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],engine=createProcessingEngine(),metadata=new Map();
-const processing={...engine,check:()=>{},job:fn=>fn()},storage={read:async k=>metadata.get(k)||null,write:async(k,v)=>metadata.set(k,v),remove:async k=>metadata.delete(k)};
-const interactions={input:async()=>({value:'folder encryption passphrase'}),choose:async()=> 'unlock',confirm:async()=>true};
-const makeProtection=()=>registry.require('exports',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})).createProtection({processing,storage,interactions,settingKey:'backupProtection'});let protection=makeProtection();await protection.manage();
-function dir(shared={corruptNextWriteRead:false}){const entries=new Map();const d={kind:'directory',permission:'granted',queryPermission:async()=>d.permission,requestPermission:async()=>d.permission,
-  async getDirectoryHandle(name,{create=false}={}){if(entries.has(name))return entries.get(name);if(!create)throw Object.assign(new Error('missing'),{name:'NotFoundError'});const child=dir(shared);entries.set(name,child);return child;},
-  async getFileHandle(name,{create=false}={}){if(entries.has(name))return entries.get(name);if(!create)throw Object.assign(new Error('missing'),{name:'NotFoundError'});let content=new Blob(),corruptReadback=false;const h={kind:'file',async createWritable(){let parts=[];return {write:async blob=>parts.push(blob),close:async()=>{content=new Blob(parts);if(shared.corruptNextWriteRead&&!/\.sd(?:publication|maintenance)$/u.test(String(name))){shared.corruptNextWriteRead=false;corruptReadback=true;}},abort:async()=>{parts=[];}};},async getFile(){const stamp=shared.now?shared.now():Date.now();const coordination=/\.sd(?:publication|maintenance)$/u.test(String(name));if(!corruptReadback||coordination){if(!Number.isFinite(Number(content.lastModified)))Object.defineProperty(content,'lastModified',{value:stamp,configurable:true});return content;}corruptReadback=false;const bytes=new Uint8Array(await content.arrayBuffer());if(bytes.length)bytes[bytes.length-1]^=1;const damaged=new Blob([bytes]);Object.defineProperty(damaged,'lastModified',{value:stamp,configurable:true});return damaged;}};entries.set(name,h);return h;},
-  async *entries(){for(const row of entries.entries())yield row;},async removeEntry(name){entries.delete(name);},entriesMap:entries,state:shared};return d;}
-const TEST_NOW=Date.parse('2026-09-19T00:00:00.000Z'),root=dir();root.state.now=()=>TEST_NOW;const counts=Object.freeze({dailyRecord:0,areaNote:1,activeSession:0,reflectionDraft:0,personalData:1,checkpointManifest:1}),retentionPolicy=Object.freeze({format:'study-director.repository-retention-policy',version:1,normalLimit:15,dailyDays:6,weeklyPeriods:4,monthlyPeriods:4,protectedLimit:1,beforeRestoreProtectionMs:7*24*60*60*1000,weekStartsOn:1,calendar:'local-at-capture'});let completed=0,sequence=0;
+import {createDeviceFolderWorld,IDENTITIES,MINUTE} from '../../helpers/device-folder-world.mjs';
 
-const validateRetentionPolicy=value=>{if(!value||value.format!=='study-director.repository-retention-policy'||Number(value.version)!==1||Number(value.normalLimit)!==1+Number(value.dailyDays)+Number(value.weeklyPeriods)+Number(value.monthlyPeriods))throw new TypeError('invalid policy');return value;};
-const classifyRepositoryState=({manifests=[],commits=[]}={})=>{const commitById=new Map(commits.map(row=>[row.id,row])),manifestIds=new Set(manifests.map(row=>row.id)),committed=[],uncommitted=[],invalidPairs=[];for(const row of manifests){const commit=commitById.get(row.id)||null;if(Number(row.manifest.version)>=2&&!commit){uncommitted.push(row);continue;}if(commit&&(commit.marker.checkpointId!==row.manifest.checkpoint.checkpointId||commit.marker.exportedAt!==row.manifest.exportedAt||commit.marker.sourceRevision!==row.manifest.sourceRevision||Number(commit.marker.manifestVersion)!==Number(row.manifest.version))){invalidPairs.push(Object.freeze({manifest:row,commit,error:new Error('commit mismatch')}));continue;}committed.push(Object.freeze({...row,commitRef:commit?.ref||null}));}committed.sort((a,b)=>Date.parse(a.manifest.exportedAt)-Date.parse(b.manifest.exportedAt)||a.id.localeCompare(b.id));return Object.freeze({committed:Object.freeze(committed),uncommitted:Object.freeze(uncommitted),invalidPairs:Object.freeze(invalidPairs),orphanCommits:Object.freeze(commits.filter(row=>!manifestIds.has(row.id))),latest:committed.at(-1)||null});};
-const activeProtected=(rows,now=Date.now())=>rows.filter(row=>row.manifest?.retention?.role==='before-restore'&&Date.parse(row.manifest.retention.protectedUntil)>Number(now)).reduce((best,row)=>!best||Date.parse(row.manifest.exportedAt)>Date.parse(best.manifest.exportedAt)||Date.parse(row.manifest.exportedAt)===Date.parse(best.manifest.exportedAt)&&row.id.localeCompare(best.id)>0?row:best,null);
-async function prepareRepository(_previous,options){assert.equal(options.interactive,false);sequence+=1;const raw=new Blob([`secret-object-${sequence}`]);const protectedObject=await protection.protect({blob:raw,filename:'obj'},options);return Object.freeze({checkpoint:Object.freeze({checkpointId:'cp_'+String(sequence).padStart(32,'0'),createdAt:'2026-09-19T00:00:00.000Z',originInstallationId:'inst_folder_enc'}),exportedAt:'2026-09-19T00:00:00.000Z',sourceRevision:'2026-09-19T00:00:00.000Z',counts,objects:Object.freeze([Object.freeze({objectId:'obj_'+String(sequence).padStart(32,'a'),kind:'areaNote',key:'Secret',fingerprint:String(sequence).padStart(64,'b'),compression:'none',sourceBytes:raw.size,storedBytes:protectedObject.blob.size,storedChecksum:'c'.repeat(64),reused:false,blob:protectedObject.blob,checkProtection:protectedObject.checkProtection})]),_protectedObject:protectedObject});}
-async function commitRepository(prepared,options){const manifest={format:'study-director.backup-repository-checkpoint',version:2,checkpoint:prepared.checkpoint,exportedAt:prepared.exportedAt,sourceRevision:prepared.sourceRevision,installationId:'inst_folder_enc',protectionId:prepared._protectedObject.protectionId,encrypted:true,counts,protectedCheckpointManifest:{checkpointId:prepared.checkpoint.checkpointId,sourceRevision:prepared.sourceRevision},objects:prepared.objects.map(({blob,checkProtection,reused,...rest})=>rest),assets:[],retention:{format:'study-director.repository-retention',version:1,role:'normal',protectedUntil:'',calendar:{localDate:'2026-09-19',weekStart:'2026-09-14',month:'2026-09',utcOffsetMinutes:0}},warning:'',committedAt:prepared.exportedAt};const raw=new Blob([JSON.stringify(manifest)]),out=await protection.protect({blob:raw,filename:'manifest'},options);return Object.freeze({blob:out.blob,manifest,checkProtection:out.checkProtection,checkSource:async()=>{},release:async()=>true});}
-const repository={retention:retentionPolicy,validatePolicy:validateRetentionPolicy,classifyState:classifyRepositoryState,activeProtected,
-  async cleanup(){return Object.freeze({warning:'',gcRemoved:0});},
-  async publish(history,options,transport){let prepared=null,manifestFile=null,publication=null,commitReceipt=null,committed=false;try{prepared=await prepareRepository(history,options);let objectsWritten=0,writtenBytes=0,attachmentBytesWritten=0;for(const entry of prepared.objects){await entry.checkProtection?.();await transport.writeObject(entry,prepared);objectsWritten+=1;writtenBytes+=entry.storedBytes;if(entry.kind==='attachment')attachmentBytesWritten+=entry.sourceBytes;}manifestFile=await commitRepository(prepared,options);await manifestFile.checkProtection?.();await manifestFile.checkSource?.();publication=await transport.writeManifest(manifestFile,prepared);await manifestFile.checkSource?.();const markerValue={format:'study-director.backup-repository-commit',version:1,checkpointId:manifestFile.manifest.checkpoint.checkpointId,exportedAt:manifestFile.manifest.exportedAt,sourceRevision:manifestFile.manifest.sourceRevision,manifestVersion:manifestFile.manifest.version},marker=Object.freeze({...markerValue,blob:new Blob([JSON.stringify(markerValue)]),checkProtection:manifestFile.checkProtection,checkSource:manifestFile.checkSource});commitReceipt=await transport.commit(marker,prepared,publication);committed=true;const context=Object.freeze({checkpointId:prepared.checkpoint.checkpointId,sourceRevision:prepared.sourceRevision,publication,commitReceipt,prepared,manifest:manifestFile.manifest});const committedResult=await transport.onCommitted?.(context);const cleanupResult=await transport.cleanup?.(context);return Object.freeze({checkpointId:prepared.checkpoint.checkpointId,objectsWritten,objectsReused:0,writtenBytes,attachmentBytesWritten,publication,commitReceipt,committedResult:committedResult||null,cleanupResult:cleanupResult||null});}catch(error){await transport.onFailure?.(error,Object.freeze({committed,publication,commitReceipt,prepared,manifest:manifestFile?.manifest||null}));throw error;}finally{await manifestFile?.release?.();}},
-  async publishInline(history,options,transport){return repository.publish(history,options,transport);},
-  async inspect(manifest,reader,options={}){return Object.freeze({kind:'study-director.backup-candidate',managedRecovery:typeof options.managedRecovery==='function'?options.managedRecovery:null,release:async()=>{}});},
-  async bringIn(candidate){const apply=async()=>Object.freeze({mode:'reconcile'});return candidate?.managedRecovery?candidate.managedRecovery(Object.freeze({kind:'bring-in',apply})):apply();},
-  async restoreVersion(candidate){const apply=async()=>Object.freeze({mode:'restore-version'});return candidate?.managedRecovery?candidate.managedRecovery(Object.freeze({kind:'restore-version',apply})):apply();},
-  projectHistory:()=>Object.freeze([]),
-    selectRetention:rows=>{const retained=Object.freeze([...(rows||[])]);return Object.freeze({retained,remove:Object.freeze([]),activeProtected:null,tiers:Object.freeze({}),normalRetained:retained.length,policy:retentionPolicy});},
-  async inspectManifest(file,options){const decoded=await protection.unprotect(file,options);return JSON.parse(await decoded.blob.text());},
-  async inspectCommit(file,manifest=null){const marker=JSON.parse(await file.text());assert.equal(marker.format,'study-director.backup-repository-commit');assert.equal(marker.version,1);if(manifest){assert.equal(marker.checkpointId,manifest.checkpoint.checkpointId);assert.equal(marker.exportedAt,manifest.exportedAt);assert.equal(marker.sourceRevision,manifest.sourceRevision);assert.equal(marker.manifestVersion,manifest.version);}return Object.freeze(marker);},
-  async verifyCheckpoint(manifest,reader){for(const entry of manifest.objects)await repository.verifyObject(await reader(entry),entry);return true;},
-  async verifyObject(file){const decoded=await protection.unprotect(file,{interactive:false});assert.equal((await decoded.blob.text()).startsWith('secret-object-'),true);return true;},
-  async scrub(){return Object.freeze({complete:true,cursor:'',checked:0,checkedBytes:0,total:0});},
-  markCompleted:()=>completed++
-};
-let maintenancePending=false;
-const background=registry.require('repository-background',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})).createCoordinator(Object.freeze({target:'device-folder',environment:Object.freeze({AbortController:globalThis.AbortController,now:()=>TEST_NOW,clearTimeout:()=>{},setTimeout:()=>1})}));
-const RepositoryPolicyModule=registry.require('repository-policy',1);
-const controller=registry.require('device-backup',1,Object.freeze({repositoryPolicy:RepositoryPolicyModule})).createController(Object.freeze({presentation:createBackupPresentation(),background,configuration:Object.freeze({metadataKey:'automaticDeviceBackup',quietDelayMs:600000,maxDelayMs:1800000,urgentDelayMs:3000}),environment:Object.freeze({now:()=>TEST_NOW,clearTimeout:()=>{},setTimeout:()=>1,showDirectoryPicker:async()=>root}),storage:Object.freeze(storage),repository:Object.freeze(repository),ownership:Object.freeze({canMutate:()=>true}),hooks:Object.freeze({capture:()=>{},chooseCheckpoint:async rows=>rows[0]?.id||null,excludedObjectIds:async()=>Object.freeze([]),localRecoveryEmpty:async()=>false,managedRecovery:async spec=>{const safety=await spec.createSafety(),result=await spec.apply(),present=result?.cancelled?Object.freeze({status:'skipped',reason:'cancelled'}):await spec.publishPresent(result);return Object.freeze({...result,managedRecovery:Object.freeze({safety,present})});},maintenanceRead:async()=>maintenancePending,maintenanceMark:async()=>{maintenancePending=true;return true;},maintenanceClear:async()=>{maintenancePending=false;return true;},operationFail:()=>true,operationFinish:()=>true,operationMark:()=>true,operationStart:()=>'',render:()=>{},sourceRevision:()=> '2026-09-19T00:00:00.000Z'})}));
-await controller.install();const first=await controller.connect();assert.equal(first.ok,true);assert.equal(completed,1);
-const repo=await root.getDirectoryHandle('Study-Director-Automatic-Backup-Repository'),objects=await repo.getDirectoryHandle('objects'),checkpoints=await repo.getDirectoryHandle('checkpoints'),commits=await repo.getDirectoryHandle('commits');
-const firstObject=await (await objects.getFileHandle(objects.entriesMap.keys().next().value)).getFile();assert.equal(await firstObject.slice(0,8).text(),'SDENC02\n');
-const firstName=metadata.get('automaticDeviceBackup').lastFilename;const firstManifest=await (await checkpoints.getFileHandle(firstName)).getFile();assert.equal(await firstManifest.slice(0,8).text(),'SDENC02\n','checkpoint manifest must also be encrypted');const firstCommit=await (await commits.getFileHandle(firstName.replace(/\.sdcheckpoint$/u,'.sdcommit'))).getFile();assert.equal(JSON.parse(await firstCommit.text()).format,'study-director.backup-repository-commit','commit marker should remain small non-content repository metadata');
-await controller.backupNow();assert.equal(completed,2);assert.match(metadata.get('automaticDeviceBackup').lastFilename,/^cp_[a-f0-9]{32}\.sdcheckpoint$/u);assert.notEqual(metadata.get('automaticDeviceBackup').lastFilename,firstName);
-// Restart locks the durable policy. Automatic repository backup must write nothing until unlocked.
-protection=makeProtection();await protection.refresh();const slotBefore=metadata.get('automaticDeviceBackup').lastFilename;const locked=await controller.backupNow();assert.equal(locked.ok,false);assert.equal(completed,2);assert.equal(metadata.get('automaticDeviceBackup').lastFilename,slotBefore);assert.match(controller.status().message,/paused/i);
-await protection.manage();// Corrupt the next written object/manifest read-back via shared filesystem flag.
-root.state.corruptNextWriteRead=true;const corrupted=await controller.backupNow();assert.equal(corrupted.ok,false);assert.equal(completed,2);assert.equal(metadata.get('automaticDeviceBackup').lastFilename,slotBefore);
-console.log(JSON.stringify({status:'PASS',suite:'folder-encryption',encryptedRepositoryObjects:true,encryptedCheckpointManifest:true,commitMarkerMetadata:true,lockedRestartNoWrites:true,corruptReadbackNoRotation:true},null,2));
+// Encrypted Device Folder backups through the shared engine, with the real
+// backup encryption: objects and version files are sealed, commit markers
+// carry metadata only, a locked app writes nothing on its own, Back up now
+// asks to unlock, and a write that reads back wrong never becomes a version.
+for(const name of ['internal','operation-lifecycle','exports'])vm.runInThisContext(fs.readFileSync(`source/core/${name}.js`,'utf8'),{filename:name+'.js'});
+const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],engine=createProcessingEngine(),settings=new Map();
+let unlockPrompts=0;
+const processing={...engine,check:()=>{},job:fn=>fn()},storage={read:async key=>settings.get(key)||null,write:async(key,value)=>settings.set(key,value),remove:async key=>settings.delete(key)};
+const interactions={input:async()=>{unlockPrompts+=1;return {value:'folder encryption passphrase'};},choose:async()=>'unlock',confirm:async()=>true};
+// remember: the device holds one profile, so its kept key opens it again.
+const makeProtection=(remember=()=>true)=>registry.require('exports',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})).createProtection({processing,storage,interactions,settingKey:'backupProtection',remember});
+let protection=makeProtection();await protection.manage();assert.equal(protection.status().unlocked,true);
+const sealed=Object.freeze({protect:(...args)=>protection.protect(...args),unprotect:(...args)=>protection.unprotect(...args),status:()=>protection.status()});
+const w=createDeviceFolderWorld({protection:sealed}),folder=w.directory();
+const cases=[];
+async function folderFile(kind,name){const root=await folder.getDirectoryHandle(IDENTITIES.root);return (await (await root.getDirectoryHandle(IDENTITIES[kind])).getFileHandle(name)).getFile();}
+const commits=async()=>(await w.commits(folder)).length;
+
+await w.controller.install();w.choose(folder);await w.controller.connect();await w.settle();
+{
+  assert.equal(await commits(),1);
+  const root=await folder.getDirectoryHandle(IDENTITIES.root),objectName=(await root.getDirectoryHandle(IDENTITIES.objects)).names().find(name=>name.endsWith('.sdobject')),commitName=(await w.commits(folder))[0];
+  assert.equal(await (await folderFile('objects',objectName)).slice(0,8).text(),'SDENC02\n','backup objects are encrypted');
+  assert.equal(await (await folderFile('checkpoints',commitName.replace(/\.sdcommit$/u,'.sdcheckpoint'))).slice(0,8).text(),'SDENC02\n','version files are encrypted');
+  const marker=JSON.parse(await (await folderFile('commits',commitName)).text());assert.equal(marker.checkpointId+'.sdcommit',commitName,'commit markers hold metadata only');
+  const history=await w.runtime.history('device-folder',{interactive:false});assert.equal(history.entries.length,1);assert.equal(history.entries[0].location.encrypted,true);
+  cases.push('objects and versions are sealed; commit markers hold metadata only');
+}
+{
+  // With several profiles on the device, reopening locks encryption: nothing is written on its own.
+  protection=makeProtection(()=>false);await protection.refresh();assert.equal(protection.status().unlocked,false);const promptsBefore=unlockPrompts;
+  w.change();await w.tick(25*MINUTE);
+  assert.equal(await commits(),1,'a locked app writes nothing automatically');assert.equal(w.controller.status().pending,true,'the row says changes are waiting');assert.equal(unlockPrompts,promptsBefore,'nothing prompts on its own');
+  // Version History while locked, on a page that has not read the versions yet: they are listed as locked, without counts.
+  const other=createDeviceFolderWorld({protection:sealed});await other.controller.install();other.choose(folder);await other.controller.connect();await other.settle();
+  const lockedHistory=await other.runtime.history('device-folder',{interactive:false});
+  assert.equal(lockedHistory.entries.length,1);assert.equal(lockedHistory.entries[0].locked,true,'a version waiting for the password is listed as locked');assert.equal(lockedHistory.entries[0].counts,null,'with no counts it cannot know yet');assert.equal(unlockPrompts,promptsBefore);
+  await protection.manage();assert.equal(protection.status().unlocked,true);w.runtime.wakeBackground('encryption-unlocked');await w.tick(5000);
+  assert.equal(await commits(),2,'unlocking backs up what waited');assert.equal(w.controller.status().pending,false);
+  cases.push('locked encryption pauses automatic backups until unlocked, and Version History lists versions as locked');
+}
+{
+  protection=makeProtection(()=>false);await protection.refresh();const before=unlockPrompts;
+  w.change();assert.equal(await w.controller.backupNow(),true);
+  assert.equal(unlockPrompts,before+1,'Back up now asks to unlock');assert.equal(await commits(),3);
+  cases.push('Back up now while locked asks to unlock, then backs up');
+}
+{
+  await w.tick(1000);w.change();folder.faults.corruptReadOf.add(await w.nextObjectName());
+  assert.equal(await w.controller.backupNow(),false);
+  assert.equal(await commits(),3,'a write that reads back wrong never becomes a version');assert.match(w.note(),/failed verification/u);
+  const root=await folder.getDirectoryHandle(IDENTITIES.root),objects=(await root.getDirectoryHandle(IDENTITIES.objects)).names();assert.ok(!objects.includes(await w.nextObjectName()),'the bad file is removed');
+  assert.equal(await w.controller.backupNow(),true,'the next attempt succeeds');assert.equal(await commits(),4);
+  cases.push('a corrupt read-back fails the backup and leaves nothing behind');
+}
+{
+  // One profile on the device: reopening keeps encryption open, so automatic backups go on without asking.
+  protection=makeProtection();await protection.refresh();assert.equal(protection.status().unlocked,true);const before=unlockPrompts,lastBefore=w.controller.status().lastBackupAt;
+  await w.tick(1000);w.change();await w.tick(25*MINUTE);
+  assert.ok(w.controller.status().lastBackupAt>lastBefore,'the automatic backup is written');assert.equal(w.controller.status().pending,false);assert.equal(unlockPrompts,before,'nothing asks for the password');
+  cases.push('one profile reopens with encryption open and keeps backing up');
+}
+console.log(JSON.stringify({status:'PASS',suite:'folder-encryption',productionEngine:true,cases},null,2));

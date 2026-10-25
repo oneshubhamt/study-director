@@ -8,7 +8,8 @@ const {exactFrozenObject:exactObject,functionPort:functions}=registry.contracts;
 registry.define('compatibility-codecs',1,()=>{
   const freeze=Object.freeze;
   function create(input){
-    exactObject(input,['limits','dataContract','keyedRecord','dailyRecordCodec','activeSessionCodec','personalDataCodec','helpers','timestamps','domain'],'Compatibility codec input');
+    exactObject(input,['limits','dataContract','keyedRecord','dailyRecordCodec','activeSessionCodec','personalDataCodec','helpers','timestamps','domain','installationId'],'Compatibility codec input');
+    if(typeof input.installationId!=='function')throw new TypeError('Compatibility codec installation identity is required.');
     if(!Object.isFrozen(input.limits)||!Object.isFrozen(input.dataContract)||!Object.isFrozen(input.keyedRecord)||!Object.isFrozen(input.dailyRecordCodec)||!Object.isFrozen(input.activeSessionCodec)||!Object.isFrozen(input.personalDataCodec)||!Object.isFrozen(input.domain))throw new TypeError('Compatibility codec contracts must be frozen.');
     functions(input.helpers,['boundedInt','boundedNumber','optionalBoundedNumber','optionalText','clampText','clampEditorContent','editorContentWithinLimits','sameDataValue','sanitizePracticeRun','activeSessionScheduleFingerprint','isValidIsoDate','isCanonicalScheduleText'],'Compatibility codec helpers');
     functions(input.timestamps,['normalizeTimestamp','normalizeImportedTimestamp'],'Compatibility timestamp contract');
@@ -114,12 +115,30 @@ registry.define('compatibility-codecs',1,()=>{
       const candidate={version:DATA_CONTRACT.schemas.DailyRecord.version,recordKind:'study',date:String(historical.date),savedAt:normalizeImportedTimestamp(historical.savedAt,updatedAt),updatedAt,sourceRevision:boundedInt(historical.sourceRevision,{min:0,max:Number.MAX_SAFE_INTEGER,fallback:0}),quote:String(historical.quote??''),reflection:String(historical.reflection??''),studyQuality:historical.studyQuality===null?null:boundedInt(historical.studyQuality,{min:1,max:5,fallback:null}),realTimeSnapshot:historical.realTimeSnapshot?DailyRecordCodec.compactRealTimeSnapshot(historical.realTimeSnapshot):null,schedule,results,practiceRuns:runs,carryForwardDraft:String(historical.carryForwardDraft??'')};
       return DailyRecordCodec.sanitizeCurrentDailyRecord(candidate);
     }
-    function areaNote(value,keyHint=''){
+    // Notes saved before permanent ids were keyed by their name. Each such key
+    // becomes an id worked out from the name (FNV-1a, 64 bits, over its UTF-8
+    // bytes), so every older copy of a note, on this device or in a backup,
+    // turns into the same id. A deleted note's old key gets the same treatment
+    // behind the trash prefix.
+    const NoteKeys=DailyRecordCodec.noteKeys,TRASH_PREFIX=String(DATA_CONTRACT.schemas.Note.trashKeyPrefix||''),utf8=new TextEncoder();
+    function derivedNoteId(name){
+      let hash=0xcbf29ce484222325n;
+      for(const byte of utf8.encode(name)){hash^=BigInt(byte);hash=(hash*0x100000001b3n)&0xffffffffffffffffn;}
+      return 'n_'+hash.toString(16).padStart(16,'0');
+    }
+    function noteKey(value){
+      const raw=String(value||'');if(NoteKeys.isKey(raw))return raw;
+      if(raw.startsWith(TRASH_PREFIX)){const old=raw.slice(TRASH_PREFIX.length).trim();return old?TRASH_PREFIX+derivedNoteId(TRASH_PREFIX+old):'';}
+      const name=normalizeAreaName(raw);return name?derivedNoteId(name):'';
+    }
+    function note(value,keyHint=''){
       const source=value&&typeof value==='object'&&!Array.isArray(value)?value:null;if(!source||source.deleted===true)return null;
-      const key=normalizeAreaName(source.key||keyHint),text=optionalEditorContent(source.text,APP_LIMITS.maxNoteChars);if(!key||text===null)return null;
+      const current=DailyRecordCodec.sanitizeCurrentNote(source,keyHint);if(current)return current;
+      const oldKey=String(source.key||keyHint||''),name=normalizeAreaName(oldKey.startsWith(TRASH_PREFIX)?'':oldKey),key=noteKey(oldKey),text=optionalEditorContent(source.text,APP_LIMITS.maxNoteChars);if(!key||text===null)return null;
       const label=optionalText(source.label,APP_LIMITS.maxAreaNameChars),updatedAt=normalizeImportedTimestamp(source.updatedAt,new Date().toISOString());if(!updatedAt)return null;
-      const candidate={version:DATA_CONTRACT.schemas.AreaNote.version,key,label:label===null?clampText(displayAreaName(key),APP_LIMITS.maxAreaNameChars):label,text,updatedAt};
-      return DailyRecordCodec.sanitizeCurrentAreaNote(candidate,key);
+      const title=label!==null&&normalizeAreaName(label)?label:name?clampText(displayAreaName(name),APP_LIMITS.maxAreaNameChars):null;if(!title)return null;
+      const candidate={version:DATA_CONTRACT.schemas.Note.version,key,label:title,text,updatedAt};
+      return DailyRecordCodec.sanitizeCurrentNote(candidate,key);
     }
     function migrateSessionSnapshot(snapshot){
       if(!snapshot||typeof snapshot!=='object'||Array.isArray(snapshot))return snapshot;
@@ -136,7 +155,7 @@ registry.define('compatibility-codecs',1,()=>{
     function activeSession(session){
       if(!session||typeof session!=='object'||session.deleted===true)return null;
       const version=Number(session.version);if(!Number.isSafeInteger(version)||version<1||version>DATA_CONTRACT.schemas.ActiveSession.version)return null;
-      const candidate=ActiveSessionCodec.normalize({id:DATA_CONTRACT.schemas.ActiveSession.key,type:'activeSession',version:DATA_CONTRACT.schemas.ActiveSession.version,revision:session.revision,date:session.date,status:session.status,scheduleText:session.scheduleText,snapshot:migrateSessionSnapshot(session.snapshot),suspendedAt:session.suspendedAt??null,updatedAt:session.updatedAt});
+      const candidate=ActiveSessionCodec.normalize({id:DATA_CONTRACT.schemas.ActiveSession.key,type:'activeSession',version:DATA_CONTRACT.schemas.ActiveSession.version,revision:session.revision,date:session.date,status:session.status,runningOn:session.runningOn||input.installationId(),scheduleText:session.scheduleText,snapshot:migrateSessionSnapshot(session.snapshot),suspendedAt:session.suspendedAt??null,updatedAt:session.updatedAt});
       return candidate?ActiveSessionCodec.sanitizeCurrent(candidate):null;
     }
     function localRecoveryEnvelope(raw){
@@ -146,7 +165,7 @@ registry.define('compatibility-codecs',1,()=>{
       const revision=boundedNumber(raw.revision||shell.revision,{min:1,max:Number.MAX_SAFE_INTEGER,fallback:0});if(!revision)return null;
       const snapshot=ActiveSessionCodec.sanitizeSessionSnapshot(migrateSessionSnapshot(raw.snapshot),shell.date,activeSessionScheduleFingerprint(shell),revision);if(!snapshot)return null;
       const updatedAt=normalizeTimestamp(raw.updatedAt||shell.updatedAt,new Date().toISOString());
-      const cleanShell={id:DATA_CONTRACT.schemas.ActiveSession.key,type:'activeSession',version:DATA_CONTRACT.schemas.ActiveSession.version,revision,date:shell.date,status:shell.status==='suspended'?'suspended':'active',scheduleText:shell.scheduleText,suspendedAt:shell.suspendedAt||null,updatedAt};
+      const cleanShell={id:DATA_CONTRACT.schemas.ActiveSession.key,type:'activeSession',version:DATA_CONTRACT.schemas.ActiveSession.version,revision,date:shell.date,status:shell.status==='suspended'?'suspended':'active',runningOn:shell.runningOn||input.installationId(),scheduleText:shell.scheduleText,suspendedAt:shell.suspendedAt||null,updatedAt};
       return {version:DATA_CONTRACT.schemas.LocalRecoveryEnvelope.version,revision,shell:cleanShell,snapshot,updatedAt};
     }
     function protectedPreferences(value){
@@ -171,7 +190,7 @@ registry.define('compatibility-codecs',1,()=>{
       if(Number(value.version)!==1)throw new Error('Unsupported legacy personal-data version.');
       return {version:2,plans:PersonalDataCodec.plans(value.plans),preferences:PersonalDataCodec.preferences(value.preferences)};
     }
-    return freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord,areaNote,activeSession,localRecoveryEnvelope,protectedPreferences,personalData});
+    return freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord,note,noteKey,activeSession,localRecoveryEnvelope,protectedPreferences,personalData});
   }
   return freeze({format:'study-director.compatibility-codecs-module',contractVersion:1,create});
 });

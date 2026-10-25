@@ -24,14 +24,15 @@ class MemoryFileHandle{
   async getFile(){return new Blob([this.bytes])}
 }
 function createHarness(mode='sync'){
-  const files=new Map(),messages=[],waiters=new Map();let cancelOnFirstCopy=false;
+  const files=new Map(),messages=[],waiters=new Map(),folders=[];let cancelOnFirstCopy=false;
   const dir={async getFileHandle(name,{create=false}={}){if(!files.has(name)){if(!create)throw new DOMException('missing','NotFoundError');files.set(name,new MemoryFileHandle(mode))}return files.get(name)},async removeEntry(name){if(!files.delete(name))throw new DOMException('missing','NotFoundError')}};
   const self={postMessage(message){messages.push(message);if(cancelOnFirstCopy&&message.progress?.phase==='copying'){cancelOnFirstCopy=false;self.onmessage({data:{type:'cancel',target:message.id}})}if(message.value||message.error){waiters.get(message.id)?.(message);waiters.delete(message.id)}}};
-  const context={console,Blob,DOMException,Map,Set,Promise,Number,String,Math,Uint8Array,Uint32Array,DataView,setTimeout,clearTimeout,navigator:{storage:{getDirectory:async()=>({getDirectoryHandle:async()=>dir})}},self};
-  context.globalThis=context;vm.createContext(context);const source=fs.readFileSync('source/external/attachment-worker.js','utf8').replaceAll('@@SD_ATTACHMENT_OPFS_DIRECTORY@@',OPFS_IDENTITIES.attachments);vm.runInContext(source,context,{filename:'attachment-worker.js'});
+  const context={console,Blob,DOMException,Map,Set,Promise,Number,String,Math,Uint8Array,Uint32Array,DataView,setTimeout,clearTimeout,navigator:{storage:{getDirectory:async()=>({getDirectoryHandle:async name=>{folders.push(name);return dir;}})}},self};
+  context.globalThis=context;vm.createContext(context);const source=fs.readFileSync('source/external/attachment-worker.js','utf8').replaceAll('@@SD_ATTACHMENT_OPFS_DIRECTORY@@',OPFS_IDENTITIES.attachments).replaceAll('@@SD_PROFILE_SCOPE_SEPARATOR@@','~');vm.runInContext(source,context,{filename:'attachment-worker.js'});
   let nextId=0;
-  const request=(type,data,{cancelAfterFirstCopy=false}={})=>new Promise(resolve=>{const id=++nextId;cancelOnFirstCopy=cancelAfterFirstCopy;waiters.set(id,resolve);self.onmessage({data:{id,type,data}})});
-  return {request,files,messages};
+  // Each request names the open profile's attachment folder.
+  const request=(type,data,{cancelAfterFirstCopy=false,directory=OPFS_IDENTITIES.attachments}={})=>new Promise(resolve=>{const id=++nextId;cancelOnFirstCopy=cancelAfterFirstCopy;waiters.set(id,resolve);self.onmessage({data:{id,type,data:{...data,directory}}})});
+  return {request,files,messages,folders};
 }
 const digest=async blob=>Array.from(new Uint8Array(await webcrypto.subtle.digest('SHA-256',await blob.arrayBuffer())),b=>b.toString(16).padStart(2,'0')).join('');
 
@@ -50,5 +51,12 @@ const digest=async blob=>Array.from(new Uint8Array(await webcrypto.subtle.digest
   const h=createHarness('sync'),file=new Blob([new Uint8Array(9*MiB).fill(11)]),name='attblob-32345678-1234-1234-1234-123456789012';
   const result=await h.request('ingest',{file,storageName:name},{cancelAfterFirstCopy:true});assert.equal(result.error?.name,'AbortError');assert.equal(h.files.has(name),false,'cancelled staged file must be deleted');
   console.log('ok - built worker cancellation removes partial staged bytes');
+}
+{
+  // Profiles: each request names its profile's folder; any other folder is refused.
+  const h=createHarness('sync'),file=new Blob([new Uint8Array(1024).fill(5)]),name='attblob-42345678-1234-1234-1234-123456789012',profileFolder=OPFS_IDENTITIES.attachments+'~prof_ben_mve00000_abcdef01';
+  const result=await h.request('ingest',{file,storageName:name},{directory:profileFolder});assert.ok(result.value,JSON.stringify(result.error));assert.equal(h.folders.at(-1),profileFolder,'a later profile stores attachments in its own folder');
+  for(const directory of ['',OPFS_IDENTITIES.attachments+'~other',OPFS_IDENTITIES.attachments+'/../x','elsewhere']){const refused=await h.request('ingest',{file,storageName:name},{directory});assert.ok(refused.error,'an unknown attachment folder is refused: '+directory);}
+  console.log('ok - attachment worker opens only the profile attachment folder it is given');
 }
 console.log(JSON.stringify({status:'PASS',suite:'worker-behavior',pass:'attachment worker behavioral QA'},null,2));

@@ -416,12 +416,10 @@ html[data-presentation="glass"] .sb-eyebrow{margin-bottom:5px;opacity:.72}
 html[data-presentation="glass"] .sb-name{
   font-family:var(--sd-font-body);font-weight:600;text-transform:none;letter-spacing:-.025em;line-height:1.08;text-shadow:none;
 }
-html[data-presentation="glass"] .sb-name-input{font-family:inherit;font-weight:inherit;text-transform:none;letter-spacing:inherit}
 html[data-presentation="glass"] .sb-race{margin-top:8px;opacity:.78}
 html[data-theme="director-light"][data-presentation="glass"] .sb-eyebrow,
 html[data-theme="director-light"][data-presentation="glass"] .sb-race{color:var(--sd-color-text-secondary-strong);opacity:1}
-html[data-theme="director-light"][data-presentation="glass"] .sb-name,
-html[data-theme="director-light"][data-presentation="glass"] .sb-name-input{color:var(--sd-color-text-primary)}
+html[data-theme="director-light"][data-presentation="glass"] .sb-name{color:var(--sd-color-text-primary)}
 html[data-presentation="glass"] .sb-clock{
   margin:0 12px;padding:10px 12px;border:1px solid var(--sd-glass-edge);border-radius:18px;
   background:rgba(var(--sd-rgb-surface-1),.22);box-shadow:inset 0 1px 0 rgba(var(--sd-rgb-on-strong),.055);
@@ -487,7 +485,6 @@ html[data-presentation="glass"] .sb-stats{
   html[data-presentation="glass"] #pane-plan{padding-top:max(18px,var(--sd-density-pane-padding-top));padding-bottom:var(--sd-glass-mobile-content-clearance)}
   html[data-presentation="glass"] .display-tools,
   html[data-presentation="glass"] #nudge-overlay,
-  html[data-presentation="glass"] #backup-provider-overlay,
   html[data-presentation="glass"] .pwa-update-control,
   html[data-presentation="glass"] .ownership-banner{bottom:var(--sd-glass-mobile-content-clearance)}
   html[data-presentation="glass"] .status-bar{border-radius:20px;overflow-x:auto}
@@ -570,6 +567,12 @@ html[data-material="glass"] .library-notes-nav-head{
   backdrop-filter:var(--sd-glass-filter-soft);
   -webkit-backdrop-filter:var(--sd-glass-filter-soft);
 }
+html[data-material="glass"] .library-notes-trash{
+  border-top-color:var(--sd-glass-edge);
+  background:linear-gradient(145deg,var(--sd-glass-specular-soft),transparent 46%),rgba(var(--sd-rgb-surface-1),var(--sd-glass-sticky-alpha));
+  backdrop-filter:var(--sd-glass-filter-soft);
+  -webkit-backdrop-filter:var(--sd-glass-filter-soft);
+}
 
 /* Data & Backup keeps Director's information hierarchy while adopting Glass
    materials instead of its legacy near-transparent local washes. */
@@ -629,7 +632,6 @@ html[data-material="glass"] .theme-btn,
 html[data-material="glass"] .presentation-btn,
 html[data-material="glass"] .type-btn{background:var(--sd-material-control)}
 html[data-material="glass"] .gap-box,
-html[data-material="glass"] .name-setup-box{--panel-bg:var(--sd-material-floating)}
 html[data-material="glass"] .practice-unit-row.head{background:var(--sd-material-inset)}
 
 html[data-material="glass"] .sd-rte{background:var(--sd-material-canvas);border-color:var(--sd-glass-edge)}
@@ -637,8 +639,10 @@ html[data-material="glass"] .sd-rte-toolbar{background:var(--sd-material-inset);
 html[data-presentation="glass"] .library-note-nav-item,
 html[data-presentation="glass"] .library-note-nav-path,
 html[data-presentation="glass"] .library-notes-editor-empty,
-html[data-presentation="glass"] .library-ongoing-note-read.empty,
+html[data-presentation="glass"] .library-note-read.empty,
 html[data-presentation="glass"] .library-diary-read.empty{color:var(--sd-color-text-secondary)}
+html[data-presentation="glass"] .library-note-nav-item.has-note{color:var(--sd-color-text-primary)}
+html[data-presentation="glass"] .library-note-nav-item.empty-note{color:var(--sd-color-text-muted)}
 html[data-material="glass"] #pane-execute .nameplate{
   background:linear-gradient(145deg,var(--sd-glass-specular-soft),transparent 42%),linear-gradient(135deg,var(--sd-surface-neutral-wash),rgba(var(--sd-rgb-execute-lime),.018)),rgba(var(--sd-rgb-surface-1),.42);
   border-radius:var(--sd-shape-nameplate-radius);
@@ -764,7 +768,6 @@ function installOverlayCoordinator(){
   const root=document.documentElement;
   if(!root||root.dataset.glassOverlayCoordinator==='installed')return;
   const surfaces=[
-    {id:'backup',element:document.getElementById('backup-provider-overlay'),visible:element=>element.classList.contains('on'),blocksTools:true},
     {id:'owner',element:document.querySelector('.ownership-banner'),visible:element=>element.classList.contains('on'),blocksTools:true},
     {id:'update',element:document.querySelector('.pwa-update-control'),visible:element=>!element.hidden,blocksTools:false},
     {id:'nudge',element:document.getElementById('nudge-overlay'),visible:element=>element.classList.contains('on'),blocksTools:true}

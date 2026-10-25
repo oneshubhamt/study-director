@@ -255,7 +255,7 @@ const library=attachments.create({notifications:createNotifications('attachments
   processing:{check(){},job:fn=>fn(),cancel(){},run:async()=>'',chooseSave:async()=>null,download(){}},document,
   interactions:{choose:async()=>null,confirm:async()=>false,notify(){},input:async()=>null},
   canMutate:()=>true,requireOwner(){},token:()=>1,isActive:()=>true,cleanup(){},renderReference(){},sources:async()=>[],integrityIssue:assetId=>assetId===id?issue:null,
-  destinations:async()=>[{key:'note',label:'Ongoing Note'}],settle:async()=>{},openLibrary(){},openSource(){},deletionGuard:async()=>()=>true,runExclusive:async(_k,fn)=>fn(),quiesce:async fn=>fn(),removeReferences:async()=>null,insert:async()=>{throw new Error('must not offer insertion for unhealthy attachment');}
+  destinations:async()=>[{key:'note',label:'Note'}],settle:async()=>{},openLibrary(){},openSource(){},deletionGuard:async()=>()=>true,runExclusive:async(_k,fn)=>fn(),quiesce:async fn=>fn(),removeReferences:async()=>null,insert:async()=>{throw new Error('must not offer insertion for unhealthy attachment');}
 });
 library.install();
 await library.refresh();

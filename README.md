@@ -23,13 +23,13 @@ Study Director keeps its authoritative working data locally. Structured records 
 
 The backup system uses immutable managed repositories for Google Drive and Device Folder providers. Checkpoints reference verified logical objects; restore is journaled and protected by a Before-restore checkpoint. Foreground publication/restore has priority over bounded background maintenance. Provider state is scoped to the actual repository generation so deleting and recreating a Drive repository does not inherit stale history or maintenance assumptions.
 
-Background settlement, current-state snapshots and attempt outcomes share one lifecycle contract. Diagnostic traces retain concurrent jobs independently, distinguish deferred/unavailable/partial work from completion, and include current cleanup, worker, repository and updater states when copied.
+Background settlement, current-state snapshots and attempt outcomes share one lifecycle contract. Housekeeping yields at resumable units after its short allowance; slow successful preparation must still allow progress. Integrity saves bounded byte/frame checkpoints before yielding. Drive uploads and range downloads use byte-inactivity watchdogs, so slow productive transfers continue while foreground cancellation remains active. Diagnostic traces retain concurrent jobs independently, distinguish deferred/unavailable/partial work from completion, and include current cleanup, worker, repository and updater states when copied.
 
 Compatibility code remains isolated from current canonical data handling. Live-install migration may be retired only when its explicit retirement contract says it is safe; historical backup readers may remain independently for recovery value.
 
-Notifications share one presentation coordinator for visual notices, app sounds and device alerts. A separate playback engine plays the bundled original Quiet Wood acoustic-style cues. Full / Minimal / Off is a portable preference, initially Full. Execute provides an inline Pomodoro rhythm panel and a separate Focus & Alerts panel, available before a session begins.
+Notifications share one presentation coordinator for visual notices, app sounds and device alerts. A separate playback engine makes the original Quiet Wood acoustic-style cues in code and plays them; no sound files ship. Full / Minimal / Off is a portable preference, initially Full. Execute provides an inline Pomodoro rhythm panel and a separate Focus & Alerts panel, available before a session begins.
 
-The sound family uses lean 22.05-kHz mono PCM. Device Folder and Drive share compact verification/progress labels and completion ticks. Execute note titles and Area context use the same baseline in Director and Glass.
+The cues are made at 22.05 kHz mono when sound is first unlocked. Device Folder and Drive share compact verification/progress labels and completion ticks. Execute note titles and Area context use the same baseline in Director and Glass.
 
 See `docs/ARCHITECTURE.md` for the full current-state summary.
 

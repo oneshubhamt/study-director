@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {createHarness} from '../../helpers/repository-harness.mjs';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
+import {noteId} from '../../helpers/note-ids.mjs';
 
 const clock=createFakeClock('2026-09-22T04:45:00.000Z');
 const commits=[],controls={clock,onCanonicalCommit:event=>commits.push(event)};
@@ -61,7 +62,8 @@ await assertAdvances('Daily Record save',()=>app.dailyRecords.save({version:1,da
 await app.notes.load();
 const noteChange=app.notes.update('general','General','epoch note','');
 assert.equal(noteChange.status,'changed');
-await assertAdvances('Ongoing Note canonical flush',()=>app.notes.flush({strict:true}),'areaNote:general');
+const generalUnit=`note:${app.notes.get('general').id}`;
+await assertAdvances('Note canonical flush',()=>app.notes.flush({strict:true}),generalUnit);
 
 await assertAdvances('Review-state Active Session save',()=>app.activeSession.save({id:'active',revision:1,date:'2026-09-22',status:'active',scheduleText:'',snapshot:{elapsedMs:1,review:{reflection:'draft',studyQuality:null}},updatedAt:'2026-09-22T04:45:02.000Z'}),'activeSession');
 assert.equal(commits.at(-1).entityType,'activeSession','Review persistence must invalidate the Active Session backup unit, not a separate draft family.');
@@ -80,15 +82,15 @@ await assertAdvances('Portable preference save',()=>app.personalPreferences.writ
 await assertAdvances('Backup-capture Plan draft save',()=>app.planData.writeDraft('Plan epoch draft captured',{backupCapture:true}),'personalData');
 assert.equal(commits.at(-1).entityType,'planData');assert.equal(commits.at(-1).backupCapture,true);
 const backupNoteBase=app.notes.get('general');const backupNoteChange=app.notes.update('general','General','epoch note captured',backupNoteBase.updatedAt);assert.equal(backupNoteChange.status,'changed');
-await assertAdvances('Backup-capture Ongoing Note flush',()=>app.notes.flush({strict:true,backupCapture:true}),'areaNote:general');
-assert.equal(commits.at(-1).entityType,'areaNote');assert.equal(commits.at(-1).backupCapture,true);
+await assertAdvances('Backup-capture note flush',()=>app.notes.flush({strict:true,backupCapture:true}),generalUnit);
+assert.equal(commits.at(-1).entityType,'note');assert.equal(commits.at(-1).backupCapture,true);
 await assertAdvances('Backup-capture Daily Record save',()=>app.dailyRecords.save({version:1,date:'2026-09-22',reflection:'captured diary',updatedAt:'2026-09-22T04:45:06.000Z',savedAt:'2026-09-22T04:45:01.000Z'},{backupCapture:true}),'dailyRecordPack:2026-09');
 assert.equal(commits.at(-1).entityType,'dailyRecord');assert.equal(commits.at(-1).backupCapture,true);
 await assertAdvances('Backup-capture Portable preference save',()=>app.personalPreferences.write({studentName:'Epoch Capture',theme:'glass',presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null},{backupCapture:true}),'personalData');
 assert.equal(commits.at(-1).entityType,'planData');assert.equal(commits.at(-1).backupCapture,true);
 
 await assertAdvances('Saved-Day deletion ledger replacement',()=>app.deletionRecovery.replaceSavedDays([{date:'2026-09-21',deletedAt:'2026-09-22T04:45:04.000Z'}]));
-await assertAdvances('Ongoing Note deletion ledger replacement',()=>app.deletionRecovery.replaceAreaNotes([{key:'old-note',deletedAt:'2026-09-22T04:45:05.000Z'}]));
+await assertAdvances('Note deletion ledger replacement',()=>app.deletionRecovery.replaceNotes([{key:noteId('old-note'),deletedAt:'2026-09-22T04:45:05.000Z'}]));
 const assetId='att-aaaaaaaaaaaaaaaaaaaa';
 await assertAdvances('Attachment deletion ledger write',()=>app.deletionRecovery.recordAttachment(assetId,'2026-09-22T04:45:06.000Z'));
 await assertAdvances('Attachment deletion ledger clear',()=>app.deletionRecovery.clearAttachment(assetId));
@@ -97,6 +99,30 @@ await assertAdvances('Daily Record deletion',()=>app.dailyRecords.remove('2026-0
 await assertAdvances('Active Session final clear',()=>app.activeSession.clear(),'activeSession');
 
 assert.equal(app.mutationEpoch.eligible(),true,'Healthy canonical storage must be eligible for the O(1) fence.');
+
+// One change clock: the epoch each save writes inside its transaction and the
+// commit notice after it only move forward, even when the system clock goes
+// back, so "has anything changed since the last backup?" stays right. After a
+// reload the clock is seeded from what was saved and keeps moving forward.
+{
+  let now=Date.parse('2026-09-22T05:00:00.000Z');
+  class BackDate extends Date{constructor(...args){super(...(args.length?args:[now]));}static now(){return now;}}
+  const notices=[],backClock=Object.freeze({Date:BackDate,setTimeout,clearTimeout});
+  const back=createHarness(new Map(),null,{clock:backClock,onCanonicalCommit:event=>notices.push(event.committedAt)});
+  await back.app.mutationEpoch.reseed();
+  await back.app.planData.writeDraft('before the clock goes back');const first=(await back.app.mutationEpoch.read()).committedAt;
+  now-=3600000;
+  await back.app.planData.writeDraft('after the clock goes back');const second=(await back.app.mutationEpoch.read()).committedAt;
+  assert.ok(second>first,'a later save keeps a later change time when the system clock goes back');
+  assert.ok(notices.at(-1)>notices.at(-2)&&notices.at(-1)>=second,'the commit notice follows the same clock');
+  const reloaded=createHarness(new Map(),back.stores,{clock:backClock});
+  assert.equal(await reloaded.app.mutationEpoch.latestChangeAt('2000-01-01T00:00:00.000Z'),second,'a stale last-save copy is repaired from the change time saved with the data');
+  assert.equal(await reloaded.app.mutationEpoch.latestChangeAt(notices.at(-1)),notices.at(-1),'an up-to-date copy is kept');
+  await reloaded.app.mutationEpoch.reseed();
+  assert.equal((await reloaded.app.mutationEpoch.read()).committedAt,second,'a startup reseed is not a data change and keeps the last change time');
+  await reloaded.app.planData.writeDraft('after a reload');
+  assert.ok((await reloaded.app.mutationEpoch.read()).committedAt>notices.at(-1),'after a reload the change clock continues past every earlier change');
+}
 
 // If IndexedDB cannot commit a Daily Record, the existing emergency fallback is
 // allowed to preserve the record. That fallback must not fabricate an IDB epoch;
@@ -113,4 +139,4 @@ assert.equal(degraded.app.mutationEpoch.eligible(),false,'Emergency fallback dat
 const degradedCoverage=await degraded.app.dailyRecords.backupDates();
 assert.equal(degradedCoverage.canonical,false,'Unreconciled emergency fallback Saved Days must keep backup capture classified as rescue/degraded even after IndexedDB is readable again.');
 assert.match(degradedCoverage.warning,/fallback records.*not yet been reconciled|rescue data/i,'Unreconciled fallback coverage must carry an explicit rescue warning.');
-console.log(JSON.stringify({status:'PASS',suite:'canonical-mutation-epoch',covered:['startup reseed','cross-context visibility','operational-write exclusion','daily records','ongoing notes','review in active session','active session','plans','preferences','deletion ledgers','per-unit preparation stamps','failed transaction','backup-capture propagation'],epochFormat:(await epoch())?.format},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'canonical-mutation-epoch',covered:['monotonic change clock','startup reseed','cross-context visibility','operational-write exclusion','daily records','notes','review in active session','active session','plans','preferences','deletion ledgers','per-unit preparation stamps','failed transaction','backup-capture propagation'],epochFormat:(await epoch())?.format},null,2));

@@ -54,16 +54,19 @@ fakeWindow.showSaveFilePicker=()=>{pickerCalled=true;return Promise.resolve(hand
 const picked=coordinator.chooseSave('test.sdbackup',{'application/octet-stream':['.sdbackup']});assert.equal(pickerCalled,true,'picker is invoked before yielding');
 workerTypes.length=0;const result=await coordinator.save({blob:png,filename:'test.sdbackup'},await picked);assert.equal(result.status,'saved');assert.equal(result.filename,'Chosen.sdbackup');assert.equal(writes,1);assert.equal(closed,1);assert.equal(alive,0);assert.equal(workerTypes.includes('equalFiles'),true,'unknown file provenance must retain exact byte-for-byte save verification');
 
-// Staged outputs produced by our own copy/encryption stream carry a SHA-256 receipt.
-// Native Save As may then hash only the reopened destination instead of rereading both files.
+// Staged outputs from our own copy/encryption stream are plain scratch files.
+// Save As compares the reopened destination with them byte for byte, which is
+// bound by reading speed, and rejects any difference.
 let proofStage=0;const proofNames=new WeakMap(),proofWorkerTypes=[],proofWorkerOutputs=[];
-const proofFiles={stage:async()=>({name:'proof-'+(++proofStage),handle:{}}),bind:(blob,name)=>{proofNames.set(blob,name);return blob;},nameOf:blob=>proofNames.get(blob)||null,release:async()=>true,collect:async()=>true};
-function createProofWorker(){let stopped=false;const wrapper={terminate:()=>{stopped=true;},postMessage:message=>{proofWorkerTypes.push(message.type);structuredClone(message);if(message.data?.output)proofWorkerOutputs.push(message.data.output);queueMicrotask(async()=>{if(stopped)return;try{let value;if(message.type==='file.copy'){const file=new Blob([message.data.file],{type:message.data.file.type});value={file,hash:await engine.run('file.hash',{file})};}else value=await engine.run(message.type,message.data);wrapper.onmessage?.({data:{id:message.id,value}});}catch(error){wrapper.onmessage?.({data:{id:message.id,error:{name:error.name,message:error.message,code:error.code}}});}});}};return wrapper;}
+const proofFiles={stage:async()=>({name:'staged-'+(++proofStage),directory:'scratch~prof_ben_mve00000_abcdef01',handle:{}}),bind:(blob,name)=>{proofNames.set(blob,name);return blob;},nameOf:blob=>proofNames.get(blob)||null,release:async()=>true,collect:async()=>true};
+function createProofWorker(){let stopped=false;const wrapper={terminate:()=>{stopped=true;},postMessage:message=>{proofWorkerTypes.push(message.type);structuredClone(message);if(message.data?.output)proofWorkerOutputs.push(message.data.output);queueMicrotask(async()=>{if(stopped)return;try{let value;if(message.type==='file.copy'){assert.equal(message.data.proof,undefined,'staged copies carry no hash receipt');value=new Blob([message.data.file],{type:message.data.file.type});}else value=await engine.run(message.type,message.data);wrapper.onmessage?.({data:{id:message.id,value}});}catch(error){wrapper.onmessage?.({data:{id:message.id,error:{name:error.name,message:error.message,code:error.code}}});}});}};return wrapper;}
 const proofCoordinator=module.createCoordinator({createWorker:createProofWorker,window:fakeWindow,document,files:proofFiles}),proofed=await proofCoordinator.run('file.copy',{file:png});
-assert.deepEqual(proofWorkerOutputs,[{kind:'opfs',name:'proof-1'}],'worker file operations must receive only an opaque scratch identity');
+assert.deepEqual(proofWorkerOutputs,[{kind:'opfs',name:'staged-1',directory:'scratch~prof_ben_mve00000_abcdef01'}],'worker file operations must receive only an opaque scratch identity and the profile folder it lives in');
 let proofStored=null;const proofHandle={name:'Proof.sdbackup',async createWritable(){const parts=[];return {write:async part=>parts.push(part),close:async()=>{proofStored=new Blob(parts);},abort:async()=>{}};},getFile:async()=>proofStored};
-proofWorkerTypes.length=0;const proofSaved=await proofCoordinator.save({blob:proofed,filename:'proof.sdbackup'},proofHandle);assert.equal(proofSaved.status,'saved');assert.equal(proofWorkerTypes.includes('file.hash'),true,'receipt save must hash the reopened destination');assert.equal(proofWorkerTypes.includes('equalFiles'),false,'receipt save must not reread the staged source for byte comparison');
-const goodProofStored=proofStored;proofHandle.getFile=async()=>new Blob([goodProofStored,new Uint8Array([1])]);await assert.rejects(proofCoordinator.save({blob:proofed,filename:'proof.sdbackup'},proofHandle),error=>error.fileWritten&&/did not match/.test(error.message),'receipt verification must still reject a changed reopened destination');proofHandle.getFile=async()=>proofStored;scenarios.push('staged output receipt avoids source reread and still rejects changed destination');
+proofWorkerTypes.length=0;const progress=[];const proofSaved=await proofCoordinator.save({blob:proofed,filename:'proof.sdbackup'},proofHandle,{onProgress:value=>progress.push(value)});assert.equal(proofSaved.status,'saved');assert.deepEqual(proofWorkerTypes,['equalFiles'],'Save As verifies by byte comparison alone');assert.ok(progress.some(value=>value.loaded===png.size&&value.total===png.size),'writing and checking report progress');
+const goodProofStored=proofStored;proofHandle.getFile=async()=>new Blob([goodProofStored,new Uint8Array([1])]);await assert.rejects(proofCoordinator.save({blob:proofed,filename:'proof.sdbackup'},proofHandle),error=>error.fileWritten&&/did not match/.test(error.message),'a changed reopened destination is rejected');
+const flipped=new Uint8Array(await goodProofStored.arrayBuffer());flipped[flipped.length-1]^=1;proofHandle.getFile=async()=>new Blob([flipped]);await assert.rejects(proofCoordinator.save({blob:proofed,filename:'proof.sdbackup'},proofHandle),error=>error.fileWritten&&/did not match/.test(error.message),'one changed byte is rejected');
+proofHandle.getFile=async()=>proofStored;scenarios.push('Save As compares the saved file with the staged one and rejects any difference');
 handle.getFile=async()=>new Blob([new Uint8Array(png.size)]);
 await assert.rejects(coordinator.save({blob:png,filename:'test'},handle),error=>error.fileWritten&&/did not match/.test(error.message));
 handle.createWritable=async()=>({write:async()=>{throw new Error('disk full');},abort:async()=>{aborted++;}});
@@ -125,4 +128,17 @@ for(const mode of ['success','write-failure','cancel-close']){
   assert.equal(releases,mode==='success'?0:1);assert.equal(writerAborts,mode==='write-failure'?1:0);
 }
 scenarios.push('failed stream-reader acquisition releases scratch; staging cancellation prevents worker dispatch');
+// Small parts stored back to back are checked with one read: each digest is
+// the standard SHA-256 of its part, and a changed byte shows in that part only.
+{
+  const parts=[new Uint8Array(1000).fill(1),new Uint8Array(0),new Uint8Array(70000).fill(7),new Uint8Array(5).fill(9)],file=new Blob(parts);let at=0;
+  const ranges=parts.map(part=>{const range={start:at,end:at+part.length};at+=part.length;return range;});
+  const digests=await engine.run('checksum.ranges',{file,ranges});
+  assert.deepEqual(digests,await Promise.all(parts.map(part=>engine.run('checksum',{value:new Blob([part])}))));
+  const changed=new Uint8Array(await file.arrayBuffer());changed[1500]^=1;const after=await engine.run('checksum.ranges',{file:new Blob([changed]),ranges});
+  assert.deepEqual(after.map((digest,index)=>digest===digests[index]),[true,true,false,true]);
+  for(const bad of [[],[{start:0,end:file.size+1}],[{start:10,end:5}],[{start:0,end:20},{start:10,end:30}]])await assert.rejects(engine.run('checksum.ranges',{file,ranges:bad}),/Checksum ranges are invalid/u);
+  await assert.rejects(engine.run('checksum.ranges',{file:new Blob([new Uint8Array(17*1048576)]),ranges:[{start:0,end:17*1048576}]}),/Checksum ranges are invalid/u,'one read stays bounded to 16 MB');
+  scenarios.push('back-to-back parts checked with one bounded read');
+}
 console.log(JSON.stringify({status:'PASS',scenarios,workersCreated:created,workersRemaining:alive},null,2));

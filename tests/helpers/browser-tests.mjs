@@ -3,7 +3,7 @@ const test=(id,script,coverage,timeoutMs=0)=>Object.freeze({id,script,coverage:O
 export const BROWSER_TEST_MANIFEST=Object.freeze({
   smoke:Object.freeze([
     test('core-flow','tests/browser/app/core-flow.mjs',['plan','execute','review','library','indexeddb','backup']),
-    test('ongoing-notes-management','tests/browser/library/ongoing-notes-management.mjs',['library','ongoing-notes']),
+    test('notes-management','tests/browser/library/notes-management.mjs',['library','notes']),
     test('attachment-editor','tests/browser/attachments/attachment-editor.mjs',['attachments','pdf','audio','rich-editor','overlay']),
     test('restore-session-safety','tests/browser/backup/restore-session-safety.mjs',['backup','restore','execute','library','recovery','multi-tab','ownership','reflection']),
     test('exports','tests/browser/exports/exports.mjs',['export','worker','backup','files','cancellation','images']),
@@ -15,9 +15,11 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
   ]),
   feature:Object.freeze([
     test('library-selection','tests/browser/library/library-selection.mjs',['library','selection']),
+    test('app-sounds','tests/browser/ui/app-sounds.mjs',['sound','audio','notifications']),
     test('complete-encrypted-library','tests/browser/backup/complete-library.mjs',['encryption','attachments','opfs','recovery','trusted-types','pwa']),
     test('backup-encryption','tests/browser/backup/encryption.mjs',['encryption','password','files','cancellation','recovery','worker']),
     test('pwa-device-backup','tests/browser/backup/pwa-device-backup.mjs',['pwa','device-backup']),
+    test('sync-and-profiles','tests/browser/backup/sync-and-profiles.mjs',['sync','google-drive','two-devices','reload','activation','profiles'],300000),
     test('insights-populated','tests/browser/insights/insights-populated-ui.mjs',['insights','populated-history']),
     test('pwa-update','tests/browser/pwa/pwa-update.mjs',['pwa','service-worker','trusted-types','multi-tab','offline','recovery','update']),
     test('image-clipboard-bridge','tests/browser/rich-text/image-bridge.mjs',['rich-editor','wordgard','native-file-selection','clipboard-image','selection','asset-storage']),
@@ -33,12 +35,16 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('workspace-overlay','tests/browser/rich-text/workspace-overlay.mjs',['rich-editor','focus-mode','overlay','pdf']),
     test('runtime-boundary','tests/browser/security/runtime-boundary.mjs',['security','trusted-types','paste','worker','execute','backup-protection','legal-center','export-worker']),
     test('storage-failures','tests/browser/storage/storage-failure-recovery.mjs',['storage','failure-injection','recovery']),
+    test('site-data-clear','tests/browser/storage/site-data-clear.mjs',['storage','site-data-clear','recovery','indexeddb','notifications','reload']),
+    test('upgrade-renamed-names','tests/browser/storage/upgrade-renamed-names.mjs',['storage','upgrade','compatibility','indexeddb','notes','reload']),
+    test('unsupported-data','tests/browser/storage/unsupported-data.mjs',['storage','compatibility','indexeddb','profiles','reload'],240000),
     test('interactions','tests/browser/ui/interactions.mjs',['dialogs','history','navigation','keyboard','notifications'])
   ]),
   extended:Object.freeze([
     test('attachment-library','tests/browser/attachments/attachments.mjs',['attachments','pdf','audio','opfs','references','streaming','atomic-import','trusted-types'],180000),
     test('insights-performance','tests/browser/insights/insights-performance.mjs',['insights','performance','worker','progressive-rendering','fallback']),
     test('maximum-insights','tests/browser/insights/insights-maximum-import.mjs',['insights','maximum-import']),
+    test('notes-at-limit','tests/browser/library/notes-at-limit.mjs',['library','notes','performance','capacity','search','tags','backup'],240000),
     test('production-capacity','tests/browser/storage/capacity.mjs',['capacity','restore','reload','re-export','rollback'],300000),
     test('rich-editor-hotpath','tests/browser/rich-text/rich-editor-hotpath.mjs',['rich-editor','performance','persistence']),
     test('lifecycle-concurrency-memory','tests/browser/rich-text/image-memory.mjs',['rich-editor','wordgard','memory','lifecycle','background','image','multi-editor']),

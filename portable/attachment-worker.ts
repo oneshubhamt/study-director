@@ -2,7 +2,12 @@ import {Sha256} from './sha256.js';
 
 const CHUNK_BYTES=4*1024*1024;
 const YIELD_EVERY_CHUNKS=8;
-const DIRECTORY='@@SD_ATTACHMENT_OPFS_DIRECTORY@@';
+// Each profile keeps its attachments in its own folder: the plain one, or
+// the plain one followed by ~<profile scope>. The folder is split rather than
+// measured: the bundler would fix a name's length before the build fills it in.
+const DIRECTORY='@@SD_ATTACHMENT_OPFS_DIRECTORY@@',SEPARATOR='@@SD_PROFILE_SCOPE_SEPARATOR@@',PROFILE_SCOPE=/^prof_[a-z0-9]{1,24}_[a-z0-9]{6,12}_[a-f0-9]{8}$/u;
+let folder=DIRECTORY;
+function useFolder(value:unknown){const name=String(value||''),[base,scope,...rest]=name.split(SEPARATOR);if(base!==DIRECTORY||scope!==undefined&&(rest.length>0||!PROFILE_SCOPE.test(scope)))throw new TypeError('Attachment folder is invalid.');folder=name}
 type ProgressPhase='preparing'|'copying'|'verifying'|'complete';
 type TaskState={cancelled:boolean;storageName?:string};
 const tasks=new Map<number,TaskState>();
@@ -12,7 +17,7 @@ function check(id:number){if(tasks.get(id)?.cancelled)throw abortError();}
 function validStorageName(value:unknown):value is string{return typeof value==='string'&&/^attblob-[a-f0-9-]{20,80}$/i.test(value)}
 function progress(id:number,phase:ProgressPhase,loaded:number,total:number,mode?:string){self.postMessage({id,progress:{phase,loaded,total,mode}})}
 const yieldToWorker=()=>new Promise<void>(resolve=>setTimeout(resolve,0));
-async function directory(){const root=await navigator.storage.getDirectory();return root.getDirectoryHandle(DIRECTORY,{create:true})}
+async function directory(){const root=await navigator.storage.getDirectory();return root.getDirectoryHandle(folder,{create:true})}
 async function removeEntry(storageName:string){if(!validStorageName(storageName))throw new TypeError('Attachment storage identity is invalid.');const dir=await directory();try{await dir.removeEntry(storageName)}catch(error){if((error as DOMException)?.name!=='NotFoundError')throw error}}
 
 async function openSync(handle:FileSystemFileHandle){
@@ -95,6 +100,7 @@ self.onmessage=(event:MessageEvent)=>{
   const id=Number(message.id);if(!Number.isSafeInteger(id)||id<=0)return;
   const state:TaskState={cancelled:false};tasks.set(id,state);
   Promise.resolve().then(async()=>{
+    useFolder(message.data?.directory);
     if(message.type==='ingest')return ingest(id,message.data?.file,message.data?.storageName);
     if(message.type==='verify')return verify(id,message.data?.storageName,message.data?.expectedHash,message.data?.size);
     if(message.type==='remove'){await removeEntry(message.data?.storageName);return true}

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createHash,webcrypto} from 'node:crypto';
+import {createDriveHarness} from '../../helpers/drive-harness.mjs';
+import {createFakeClock} from '../../helpers/fake-clock.mjs';
 import {outputHandle} from '../../helpers/file-processing.mjs';
 import {Sha256} from '../../../portable/sha256.js';
 import {hashSnapshot,restoreHash} from '../../../portable/integrity-hash.js';
@@ -10,7 +12,6 @@ import {openIntegrityOutput} from '../../../portable/integrity-output.js';
 import {passwordKey,transformEncrypted} from '../../../portable/stream-encryption.js';
 import {openOutput} from '../../../portable/file-output.js';
 import {createProcessingEngine} from '../../../portable/processing.js';
-import {integrityWorkerCompanion,companionMarker} from '../../../build/integrity-worker-companion.mjs';
 for(const file of ['internal','integrity-continuation'])vm.runInThisContext(fs.readFileSync('source/core/'+file+'.js','utf8'),{filename:'source/core/'+file+'.js'});
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('integrity-continuation',1),digest=blob=>blob.arrayBuffer().then(bytes=>createHash('sha256').update(new Uint8Array(bytes)).digest('hex'));
 const size=2*1048576+177,bytes=new Uint8Array(size);for(let i=0;i<size;i++)bytes[i]=i%251;
@@ -83,14 +84,14 @@ const key=await passwordKey('long passphrase for integrity QA'),writer=await ope
  const wrong=await passwordKey('wrong passphrase'),h=harness(encrypted,{encrypted:true,key:wrong,segments:8});await assert.rejects(h.pass(),{code:'BACKUP_AUTH_FAILED'});assert.equal(h.durable.phase,'plain');assert.equal(h.held.size,0);cases.push('a wrong password is unavailable verification, never confirmed corruption');
 }
 {
- const h=harness(source,{segments:8});h.entry.kind='areaNote';const result=await h.pass();assert.equal(result.complete,true);assert.equal(await digest(result.opened.blob),fingerprint);assert.equal(h.held.size,1);await result.opened.release();assert.equal(h.held.size,0);cases.push('structured verification receives a leased file for its original semantic checks');
+ const h=harness(source,{segments:8});h.entry.kind='note';const result=await h.pass();assert.equal(result.complete,true);assert.equal(await digest(result.opened.blob),fingerprint);assert.equal(h.held.size,1);await result.opened.release();assert.equal(h.held.size,0);cases.push('structured verification receives a leased file for its original semantic checks');
 }
 {
- const h=harness(encrypted,{encrypted:true,key,segments:2});h.entry.kind='areaNote';let result;for(let i=0;i<8;i++){result=await h.pass();if(result.complete)break;}
+ const h=harness(encrypted,{encrypted:true,key,segments:2});h.entry.kind='note';let result;for(let i=0;i<8;i++){result=await h.pass();if(result.complete)break;}
  assert.ok(result.opened);assert.equal(await digest(result.opened.blob),fingerprint);assert.equal(h.held.size,2);await result.opened.release();assert.equal(h.held.size,0);cases.push('encrypted structured staging resumes and retains both leases through semantic verification');
 }
 {
- const h=harness(source,{segments:8});h.entry.kind='areaNote';const verified=await h.pass();await verified.opened.release();const handle=h.handles.get(h.durable.stored.name),writer=await handle.createSyncAccessHandle();writer.write(new Uint8Array([255]),{at:0});writer.flush();writer.close();
+ const h=harness(source,{segments:8});h.entry.kind='note';const verified=await h.pass();await verified.opened.release();const handle=h.handles.get(h.durable.stored.name),writer=await handle.createSyncAccessHandle();writer.write(new Uint8Array([255]),{at:0});writer.flush();writer.close();
  await assert.rejects(h.pass(),error=>!error.code&&/scratch verification failed|staging is damaged/.test(error.message));assert.equal(h.durable,null);cases.push('staging corruption restarts the read instead of quarantining repository data');
 }
 {
@@ -101,9 +102,33 @@ for(const corruptAt of [100,encrypted.size-1]){
  let failure;for(let i=0;i<5;i++){try{await h.pass();}catch(error){failure=error;break;}}assert.ok(failure&&!failure.code&&/staging is damaged/.test(failure.message));assert.equal(h.durable,null);let result;for(let i=0;i<8;i++){result=await h.pass();if(result.complete)break;}assert.equal(result.complete,true);cases.push('damaged cached '+(corruptAt===100?'ciphertext':'terminal tag')+' restarts with bounded range proofs');
 }
 {
- const bundle=fs.readFileSync('source/external/export-worker.js','utf8');assert.equal(bundle.slice(bundle.indexOf(companionMarker)),integrityWorkerCompanion());
+ const bundle=fs.readFileSync('source/external/export-worker.js','utf8');
  const handle=await outputHandle(),messages=[],context=vm.createContext({Blob,TextEncoder,TextDecoder,Uint8Array,Uint32Array,DataView,WeakMap,Map,Set,crypto:webcrypto,performance,navigator:{storage:{getDirectory:async()=>({getDirectoryHandle:async()=>({getFileHandle:async()=>handle})})}},self:{postMessage:value=>messages.push(value)}});
- vm.runInContext(bundle,context,{filename:'source/external/export-worker.js'});await context.self.onmessage({data:{id:1,type:'integrity.append',data:{chunk:new Blob(['worker segment']),offset:0,hash:null,output:{kind:'opfs',name:'backup-00000000-0000-0000-0000-000000000001'}}}});assert.equal(messages.at(-1).value.offset,14);
- await context.self.onmessage({data:{id:2,type:'checksum',data:{value:'existing worker operation'}}});assert.equal(messages.at(-1).value,createHash('sha256').update('existing worker operation').digest('hex'));cases.push('checked-in worker dispatches the generated companion and retains existing operations');
+ vm.runInContext(bundle,context,{filename:'source/external/export-worker.js'});await context.self.onmessage({data:{id:1,type:'integrity.append',data:{chunk:new Blob(['worker segment']),offset:0,hash:null,output:{kind:'opfs',name:'backup-00000000-0000-0000-0000-000000000001',directory:'@@SD_BACKUP_FILES_OPFS_DIRECTORY@@'}}}});assert.equal(messages.at(-1).value?.offset,14,JSON.stringify(messages.at(-1).error));
+ await context.self.onmessage({data:{id:2,type:'checksum',data:{value:'existing worker operation'}}});assert.equal(messages.at(-1).value,createHash('sha256').update('existing worker operation').digest('hex'));cases.push('the one worker build runs integrity segments and every other operation');
+}
+// Compose the real Drive range transport, continuation/hash implementation and
+// shared scheduler. A slow segment exceeding the pass allowance must be saved
+// before yielding, then resumed without redownloading that completed segment.
+{
+ const clock=createFakeClock(),drive=createDriveHarness({clock});await drive.provider.prepare();await drive.provider.authorize();
+ const h=harness(),ref=await drive.provider.repository.upload({kind:'object',id:objectId,name:objectId+'.sdobject',blob:source,size:source.size,digest:fingerprint,exportedAt:'2026-09-01T00:00:00.000Z',appVersion:'QA_FIXTURE'});
+ for(const file of ['internal','operation-lifecycle','repository-background'])vm.runInContext(fs.readFileSync('source/core/'+file+'.js','utf8'),drive.context);
+ const registry=drive.context[Symbol.for('studyDirector.internalModules.v1')],bg=registry.require('repository-background',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})).createCoordinator(Object.freeze({target:'google-drive',environment:Object.freeze({AbortController,now:clock.now,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout})}));
+ drive.state.rangeChunkDelayMs=35000;const readOffsets=[];let completed=false,passes=0,transferring=0;
+ const scheduler=bg.createIntegrityScheduler(Object.freeze({budgetMs:120000,budgetCode:'TEST_BUDGET',budgetMessage:'budget',preemptCode:'TEST_PREEMPT',preemptMessage:'preempt',capture:error=>assert.fail(error),isAvailable:()=>true,isUnsafe:()=>false,readTarget:async()=>({scanId:'slow-proof',partial:structuredClone(h.durable)}),writeResult:async result=>{if(result.complete)completed=true;},yieldTask:async()=>{},execute:async({signal,checkpoint})=>{
+  try{const result=await h.pass({signal,readRange:async(_entry,range)=>{if(range.length>64)readOffsets.push(range.offset);transferring++;try{return await drive.provider.repository.download(ref,range);}finally{transferring--;}},onCheckpoint:async value=>{h.durable=structuredClone(value);checkpoint({scanId:'slow-proof',partial:value});}});return {...result,status:result.complete?'completed':'yielded'};}
+  catch(error){if(error.code==='TEST_BUDGET')return {status:'yielded',reason:'budget',complete:false};throw error;}
+ }}));
+ for(;passes<8&&!completed;passes++){
+  let outcome;const before=h.durable?.stored?.offset||0;scheduler.run().then(value=>{outcome=value;});
+  // Fake time moves only while the simulated Drive download waits on it. Real
+  // hashing and scratch writes finish on their own schedule, so a loaded
+  // machine cannot let fake deadlines outrun them.
+  for(let elapsed=0,turns=0;!outcome&&elapsed<500000&&turns<1000000;turns++){await new Promise(resolve=>setImmediate(resolve));if(!outcome&&transferring){await clock.advance(1000);elapsed+=1000;}else await clock.advance(0);}
+  assert.ok(outcome);assert.ok(completed||h.durable.stored.offset>before,'each healthy slow pass must persist a useful segment');assert.equal(h.held.size,0);
+ }
+ assert.equal(completed,true);assert.ok(passes>1);assert.deepEqual(readOffsets,[0,1048576,2097152]);assert.equal(h.durable.phase,'verified');assert.equal(bg.status().active.length,0);
+ await drive.provider.disconnect();cases.push('slow Drive transport persists each segment before cooperative yield and completes without repeated prefixes');
 }
 console.log(JSON.stringify({status:'PASS',suite:'integrity-continuation',cases},null,2));

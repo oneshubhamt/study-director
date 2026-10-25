@@ -30,5 +30,7 @@ export function createFakeClock(start='2026-09-01T00:00:00.000Z'){
       await advance(Math.max(0,next-now));
     }
   }
-  return Object.freeze({Date:FakeDate,setTimeout,clearTimeout,advance,runAll,drainMicrotasks,now:()=>now,pending:()=>timers.size});
+  // The time the next timer is due, or null: lets a test step from timer to timer.
+  const nextAt=()=>timers.size?Math.min(...[...timers.values()].map(timer=>timer.at)):null;
+  return Object.freeze({Date:FakeDate,setTimeout,clearTimeout,advance,runAll,drainMicrotasks,nextAt,now:()=>now,pending:()=>timers.size});
 }

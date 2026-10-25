@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
 for(const file of ['source/core/internal.js','source/core/operation-lifecycle.js','source/core/repository-background.js'])vm.runInThisContext(fs.readFileSync(file,'utf8'),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
@@ -16,10 +17,18 @@ function coordinator(fake,target='device-folder'){
 }
 
 {
+ const fake=clock(),bg=coordinator(fake),scope=await bg.beginBackground('maintenance',{budgetCode:'DELETION_BUDGET'});
+ await fake.advance(45000);assert.equal(scope.signal.aborted,false,'responsive read-only discovery has no destructive deadline');
+ assert.equal(scope.workBudget.start(1000),true);await fake.advance(600);assert.equal(scope.workBudget.start(1000),false,'a repeated phase notification cannot extend an allowance');
+ await fake.advance(401);assert.equal(scope.signal.aborted,false,'elapsed preparation must not kill the first protected unit');scope.workBudget.check();scope.workBudget.advance();assert.throws(()=>scope.workBudget.check(),{code:'DELETION_BUDGET',name:'AbortError'});scope.release();scope.release();assert.equal(fake.pending().length,0);assert.equal(scope.workBudget.start(1000),false);
+ const transfer=await bg.beginBackground('automatic');assert.throws(()=>transfer.workBudget.start(1000),/progress watchdogs/u);transfer.release();
+}
+
+{
   const fake=clock(),bg=coordinator(fake),cancelled=new AbortController();cancelled.abort();assert.equal(await bg.beginBackground('integrity',{externalSignal:cancelled.signal}),null);
   const foreground=bg.beginForeground({externalSignal:cancelled.signal});await assert.rejects(foreground.settled,{name:'AbortError'});foreground.release();assert.equal(fake.pending().length,0);
-  bg.schedule('maintenance',1000,()=>{});const state=bg.jobStatus('maintenance',false,{status:'pending',reason:'gc-grace'});assert.equal(state.state,'scheduled');assert.equal(state.lastOutcome,'deferred');assert.equal(Date.parse(state.nextEligibleAt),fake.now()+1000);
-  const hold=bg.suspend();assert.equal(bg.jobStatus('maintenance').state,'paused');assert.equal(bg.jobStatus('maintenance').scheduled,true);await hold.settled;bg.resume(hold);bg.clearAllScheduled();
+  bg.schedule('maintenance',1000,()=>{});const state=bg.jobStatus('maintenance',false,{status:'pending',reason:'gc-grace'});assert.equal(state.state,'scheduled');assert.equal(state.lastOutcome,'deferred');assert.equal(Date.parse(state.nextEligibleAt),fake.now()+1000);assert.equal(bg.status().nextEligibleAt,state.nextEligibleAt);
+  const hold=bg.suspend();assert.equal(bg.jobStatus('maintenance').state,'paused');assert.equal(bg.jobStatus('maintenance').scheduled,false);await hold.settled;bg.resume(hold);bg.clearAllScheduled();
   const pending=bg.maintenanceDetails({phase:'pending',reason:'delete-failure',cleanup:{gcPending:true,gcFailures:1}});assert.equal(bg.outcome(pending),'failed');assert.equal(pending.gcFailures,1);
   const integrity=bg.integrityDetails({status:'completed',complete:false,checked:2,total:4});assert.equal(bg.outcome(integrity),'yielded');assert.equal(integrity.checked,2);
   assert.equal(bg.integrityDetails({status:'unavailable',reason:'private transport path'}).reason,'repository-unavailable');
@@ -27,6 +36,7 @@ function coordinator(fake,target='device-folder'){
 }
 
 {
+  assert.equal(module.integrityDetails({status:'unavailable',complete:true}).complete,false,'unavailable verification cannot report completion');assert.equal(module.maintenanceDetails({phase:'yielded',reason:'bounded-continuation'}).pending,true,'a yielded attempt retains pending work');
   assert.equal(module.maintenancePlan(freeze({gcPending:true,checkpointDeferred:1})).reason,'bounded-continuation');
   const fallbackContention=module.maintenancePlan(freeze({gcPending:true,maintenanceBlocked:true}));assert.equal(fallbackContention.reason,'publication-contention');assert.equal(fallbackContention.retryMs,module.maintenance.contentionMs);const hintedContention=module.maintenancePlan(freeze({gcPending:true,maintenanceBlocked:true,contentionRetryMs:1234567}));assert.equal(hintedContention.retryMs,1234567,'coordination-aware maintenance must honor the actual marker-expiry retry hint');
   assert.equal(module.maintenancePlan(freeze({gcPending:true,gcFailures:1})).reason,'delete-failure');
@@ -114,6 +124,7 @@ for(const pair of [['maintenance','automatic'],['maintenance','convergence'],['a
   const fake=clock(),bg=coordinator(fake);let stored=freeze({requestedAt:new Date(fake.now()).toISOString(),nextEligibleAt:new Date(fake.now()).toISOString(),reason:'repository-state'}),seenTrigger='';
   const intent=bg.maintenanceIntent(freeze({scope:()=>'actual-repository',capture:()=>{},read:async()=>stored,mark:async value=>{stored=freeze({requestedAt:stored.requestedAt,...value});return true;},clear:async()=>{stored=null;return true;},selectRetention:()=>freeze({remove:freeze([])})}));
   const scheduler=bg.createMaintenanceScheduler(freeze({intent,budgetMs:1000,budgetCode:'TEST_BUDGET',budgetMessage:'budget',preemptCode:'TEST_PREEMPT',preemptMessage:'preempt',capture:()=>{},isAvailable:()=>true,isBusy:()=>false,execute:async({trigger})=>{seenTrigger=trigger;return freeze({gcPending:false});},report:()=>{}}));
+  bg.clearScheduled('maintenance'); // Isolate explicit-request coalescing from initial durable discovery.
   scheduler.schedule(1000,'first-trigger','earliest');scheduler.schedule(5000,'later-trigger','earliest');await fake.advance(1000);while(scheduler.status().running)await Promise.resolve();assert.equal(seenTrigger,'first-trigger','an earlier retained maintenance timer must keep the trigger that actually scheduled it');
 }
 
@@ -176,5 +187,53 @@ for(const phase of ['read','write']){
   const fake=clock(),bg=coordinator(fake);let failing=true,executed=0;
   const scheduler=bg.createIntegrityScheduler(freeze({budgetMs:120000,budgetCode:'TEST_BUDGET',budgetMessage:'budget',preemptCode:'TEST_PREEMPT',preemptMessage:'preempted',capture:()=>{},execute:async()=>{executed++;return {status:'completed',complete:true};},isAvailable:()=>true,isUnsafe:()=>false,readTarget:async()=>{if(phase==='read'&&failing)throw new Error('read unavailable');return {};},writeResult:async()=>{if(phase==='write'&&failing)throw new Error('commit unavailable');},yieldTask:async()=>{}}));
   assert.equal((await scheduler.run()).status,'unavailable');assert.equal(fake.pending()[0],module.integrity.stateRetryMs,'failed state persistence must retain a short retry instead of a completion interval');failing=false;assert.equal((await scheduler.run()).status,'completed');assert.equal(fake.pending()[0],module.integrity.intervalMs);assert.ok(executed>0);
+}
+// Eligibility loss cancels active work without claiming its native operations
+// settled. Reconnection refreshes the same lifecycle, never a second executor.
+{
+ const clock=createFakeClock(),bg=coordinator(clock);let available=true,scope=null,resolveNative,attempts=0;
+ const native=new Promise(resolve=>{resolveNative=resolve;});
+ const job=bg.registerJob('maintenance',{isAvailable:()=>available,capture:()=>{},retryMs:1000,execute:async()=>{
+  attempts++;scope=await bg.beginBackground('maintenance');try{if(attempts===1)await native;return {status:scope.signal.aborted?'yielded':'completed'};}finally{scope.release();}
+ }});
+ await clock.advance(1000);await clock.drainMicrotasks(80);assert.equal(attempts,1);available='awaiting-control';bg.wake('ownership');assert.equal(scope.signal.aborted,true);assert.equal(job.status().busy,true);assert.equal(bg.status().active.length,1);
+ available=true;bg.wake('ownership');assert.equal(clock.pending(),0);assert.equal(attempts,1);resolveNative();await job.settled();assert.equal(bg.status().active.length,0);assert.equal(job.status().pending,true);
+ await clock.advance(1000);await clock.drainMicrotasks(80);assert.equal(attempts,2);assert.equal(job.status().pending,false);assert.equal(clock.pending(),0);
+}
+// Discovery is a state predicate: known idle jobs stay idle, while unknown
+// settings and dirty repositories are rediscovered after eligibility changes.
+for(const blocked of [false,true]){
+ const fake=createFakeClock(),bg=coordinator(fake);let dirty=false,available=blocked?'awaiting-control':true,attempts=0;
+ const job=bg.registerJob('automatic',{initialDelayMs:null,discover:()=>dirty,isAvailable:()=>available,capture:()=>{},retryMs:1000,execute:async()=>{attempts++;dirty=false;return {status:'completed'};}});
+ bg.wake('startup');assert.equal(job.status().pending,false);assert.equal(fake.pending(),0);
+ dirty=true;bg.wake('permission');assert.equal(job.status().pending,true);
+ if(blocked){assert.equal(fake.pending(),0);available=true;bg.wake('control');}
+ await fake.advance(1000);await fake.drainMicrotasks(80);assert.equal(attempts,1);assert.equal(job.status().pending,false);
+ bg.wake('unchanged');await fake.advance(1000);assert.equal(attempts,1);
+ // Explicit pending intent must wake even when discovery already reports clean.
+ job.schedule(1000,'retained');bg.wake('reconnect');await fake.advance(1000);await fake.drainMicrotasks(80);assert.equal(attempts,2);
+}
+{
+ const fake=createFakeClock(),bg=coordinator(fake);let errors=0,attempts=0;
+ bg.registerJob('automatic',{initialDelayMs:null,discover:()=>{throw new Error('state unavailable');},isAvailable:()=>true,capture:()=>{errors++;},execute:async()=>{attempts++;return {status:'completed'};}});
+ bg.wake('startup');await fake.advance(1000);await fake.drainMicrotasks(80);assert.equal(errors,1);assert.equal(attempts,1,'uncertain discovery retains an execution opportunity');
+}
+// The elapsed allowance is enforced at an executor's durable checkpoint,
+// never halfway through useful slow IO. Foreground cancellation remains immediate.
+for(const elapsed of [19999,20000,20001,180000]){
+ const fake=clock(),bg=coordinator(fake);let persisted=0,observed=null;
+ const scheduler=bg.createIntegrityScheduler(freeze({budgetMs:20000,budgetCode:'TEST_BUDGET',budgetMessage:'budget',preemptCode:'TEST_PREEMPT',preemptMessage:'preempt',capture:()=>{},isAvailable:()=>true,isUnsafe:()=>false,readTarget:async()=>({}),writeResult:async()=>{},yieldTask:async()=>{},execute:async({signal,checkpoint})=>{
+  await fake.advance(elapsed);assert.equal(signal.aborted,false,'elapsed time alone cannot discard a productive segment');persisted=1;checkpoint();return {status:'completed',complete:true};
+ }}));
+ observed=await scheduler.run();assert.equal(persisted,1);assert.equal(observed.reason,elapsed>=20000?'budget':undefined);assert.equal(observed.status,elapsed>=20000?'skipped':'completed');assert.equal(bg.status().active.length,0);
+}
+{
+ const fake=clock(),bg=coordinator(fake);let savedOffset=0;
+ const prior={scanId:'same',partial:{objectId:'object',stored:{offset:1024},plain:{offset:0,frame:0}}};
+ const scheduler=bg.createIntegrityScheduler(freeze({budgetMs:20000,budgetCode:'TEST_BUDGET',budgetMessage:'budget',preemptCode:'TEST_PREEMPT',preemptMessage:'preempt',capture:()=>{},isAvailable:()=>true,isUnsafe:()=>false,readTarget:async()=>prior,writeResult:async()=>{},yieldTask:async()=>{},execute:async({checkpoint,signal})=>{
+  await fake.advance(180000);checkpoint({...prior,partial:{...prior.partial,plain:{name:'new-scratch',offset:0,frame:0}}});assert.equal(signal.aborted,false,'scratch initialization cannot starve productive work after slow preparation');
+  savedOffset=2048;checkpoint({...prior,partial:{...prior.partial,stored:{offset:savedOffset}}});assert.fail('a saved segment beyond the allowance must yield');
+ }}));
+ assert.equal((await scheduler.run()).reason,'budget');assert.equal(savedOffset,2048);
 }
 console.log(JSON.stringify({status:'PASS',suite:'repository-background',sharedPolicy:true,priority:true,foregroundPreemption:true,suspensionSettlement:true,durableIntent:true,maintenanceLifecycle:true,triggerAttribution:true,integrityRecurrence:true,integrityStateFailureRetry:true},null,2));

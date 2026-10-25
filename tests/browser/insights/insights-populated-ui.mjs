@@ -1,3 +1,4 @@
+import {CdpPage as SharedCdpPage,withoutPwaChecks,studyTimezone} from '../../helpers/browser-harness.mjs';
 import fs from 'node:fs';
 import {artifactPath,writeArtifact} from '../../helpers/artifacts.mjs';
 import path from 'node:path';
@@ -24,10 +25,10 @@ async function waitFor(fn,{timeout=45000,interval=100,label='condition'}={}){
 
 let main=fs.readFileSync(path.join(deployment,manifest.main),'utf8');
 const marker='/* PUBLIC PLUGIN API */';
-const exposure='window.__InsightsUiDebug=Object.freeze({StartupLifecycle,AppData,goTab});\n';
+const exposure='window.__InsightsUiDebug=Object.freeze({StartupLifecycle,AppData,CompatibilityCodecs,goTab});\n';
 if(!main.includes(marker))throw new Error('Insights UI browser harness hook is unavailable.');
 main=main.replace(marker,exposure+marker);
-main=main.replace('void PwaLifecycle.install();','/* PWA lifecycle is covered by the dedicated sealed-origin gate. */');
+main=withoutPwaChecks(main);
 
 const server=http.createServer((request,response)=>{
   const url=new URL(request.url||'/','http://127.0.0.1');
@@ -42,21 +43,7 @@ const server=http.createServer((request,response)=>{
 await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
 const appUrl=`http://127.0.0.1:${server.address().port}/${manifest.main}`;
 
-class CdpPage{
-  constructor(socket){
-    this.socket=socket;this.nextId=0;this.pending=new Map();this.events=[];
-    socket.onmessage=event=>{
-      const message=JSON.parse(event.data);
-      if(message.id){const pending=this.pending.get(message.id);if(!pending)return;this.pending.delete(message.id);message.error?pending.reject(new Error(JSON.stringify(message.error))):pending.resolve(message.result);return;}
-      if(message.method==='Runtime.exceptionThrown')this.events.push({kind:'exception',text:message.params.exceptionDetails.exception?.description||message.params.exceptionDetails.text||'Runtime exception'});
-      if(message.method==='Runtime.consoleAPICalled'&&message.params.type==='error')this.events.push({kind:'console-error',text:message.params.args.map(arg=>arg.value??arg.description??'').join(' ')});
-    };
-  }
-  static async connect(url){const socket=new WebSocket(url);await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject;});return new CdpPage(socket);}
-  send(method,params={}){return new Promise((resolve,reject)=>{const id=++this.nextId;this.pending.set(id,{resolve,reject});this.socket.send(JSON.stringify({id,method,params}));});}
-  async evaluate(expression){const result=await this.send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true,userGesture:true});if(result.exceptionDetails)throw new Error(result.exceptionDetails.exception?.description||result.exceptionDetails.text||'Evaluation failed');return result.result.value;}
-  close(){this.socket.close();}
-}
+const CdpPage=SharedCdpPage;
 
 const profile=fs.mkdtempSync(path.join(os.tmpdir(),'study-director-qa-insights-'));
 const browser=spawn(chromium,['--headless=new','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore','ignore','pipe']});
@@ -71,7 +58,7 @@ try{
   const target=await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(appUrl)}`,{method:'PUT'})).json();
   page=await CdpPage.connect(target.webSocketDebuggerUrl);
   await page.send('Runtime.enable');await page.send('Page.enable');await page.send('Log.enable');
-  await page.send('Emulation.setTimezoneOverride',{timezoneId:'Asia/Kolkata'});
+  await page.send('Emulation.setTimezoneOverride',{timezoneId:studyTimezone()});
   await page.send('Emulation.setDeviceMetricsOverride',{width:1365,height:900,deviceScaleFactor:1,mobile:false});
   await waitFor(()=>page.evaluate(`!!(window.__InsightsUiDebug&&__InsightsUiDebug.StartupLifecycle.status().fullyInitialized)`),{label:'Study Director startup'});
   const seeded=await page.evaluate(`(async()=>{
@@ -98,7 +85,7 @@ try{
         },
         practiceRuns:[{taskId:taskA,targetMs,totalUnits:4,unitMs:[actualMs,actualMs,actualMs,actualMs]}]});
     }
-    const saved=await __InsightsUiDebug.AppData.dailyRecords.saveBatch(records);
+    const saved=await __InsightsUiDebug.AppData.dailyRecords.saveBatch(records.map((record,index)=>{const converted=__InsightsUiDebug.CompatibilityCodecs.dailyRecord(record);if(!converted)throw new Error('Invalid legacy fixture at '+index+': '+JSON.stringify(record));return converted;}));
     localStorage.setItem('studyDirector.insights.window.v1','all');
     const started=performance.now();__InsightsUiDebug.goTab('insights');
     return {saved,started,total};

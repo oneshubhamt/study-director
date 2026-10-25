@@ -80,7 +80,7 @@ registry.define('reconciliation',1,input=>{
     }));
   }
   function buildNotes(local,incoming){
-    const options={records:source=>Object.values(source.notes||{}),deletions:source=>source.noteDeletions,keyOf:value=>String(value&&value.key||''),entityLabel:'Ongoing Note'};
+    const options={records:source=>Object.values(source.notes||{}),deletions:source=>source.noteDeletions,keyOf:value=>String(value&&value.key||''),entityLabel:'Note'};
     const localMap=buildStateMap(local,options),incomingMap=buildStateMap(incoming,options),keys=new Set([...localMap.keys(),...incomingMap.keys()]);
     return freeze([...keys].sort().map((key,index)=>{
       // Plan-local identities never depend on display names or lossy sanitization.
@@ -142,10 +142,10 @@ registry.define('reconciliation',1,input=>{
     const notes=freeze(plan.notes.map(item=>{
       const decision=noteDecisions[item.key];
       if(decision&&typeof decision==='object'&&!Array.isArray(decision)&&Object.prototype.hasOwnProperty.call(decision,'value')){
-        const value=decision.value,localCandidate=item.candidates.find(candidate=>candidate.id===item.localCandidateId)||null;if(!value||typeof value!=='object'||Array.isArray(value))throw new Error(`Ongoing Note ${item.key} reconciliation value is invalid.`);
+        const value=decision.value,localCandidate=item.candidates.find(candidate=>candidate.id===item.localCandidateId)||null;if(!value||typeof value!=='object'||Array.isArray(value))throw new Error(`Note ${item.key} reconciliation value is invalid.`);
         return freeze({key:item.key,state:'record',candidateId:null,value,deletedAt:null,changed:!localCandidate||localCandidate.kind!=='record'||!Canonical.same(value,localCandidate.value),hadLocal:!!item.localCandidateId,local:false,sources:freeze(item.candidates.flatMap(candidate=>candidate.sources))});
       }
-      const candidate=selectedCandidate(item,decision,`Ongoing Note ${item.key}`),changed=!!candidate&&(changedFromLocal(item,candidate)||(candidate.kind==='deleted'&&candidate.local&&!!candidate.localDeletedAt&&candidate.deletedAt!==candidate.localDeletedAt));
+      const candidate=selectedCandidate(item,decision,`Note ${item.key}`),changed=!!candidate&&(changedFromLocal(item,candidate)||(candidate.kind==='deleted'&&candidate.local&&!!candidate.localDeletedAt&&candidate.deletedAt!==candidate.localDeletedAt));
       return freeze({key:item.key,state:candidate?.kind||'none',candidateId:candidate?.id||null,value:candidate?.kind==='record'?candidate.value:null,deletedAt:candidate?.kind==='deleted'?candidate.deletedAt:null,changed,hadLocal:!!item.localCandidateId,local:!!candidate?.local,sources:candidate?.sources||freeze([])});
     }));
     const activeCandidate=selectedCandidate(plan.activeSession,decisions.activeSession,'Active Session'),activeSession=freeze({candidateId:activeCandidate?.id||null,value:activeCandidate?.value||null,changed:!!activeCandidate&&changedFromLocal(plan.activeSession,activeCandidate),hadLocal:!!plan.activeSession.localCandidateId,local:!!activeCandidate?.local,sources:activeCandidate?.sources||freeze([])});

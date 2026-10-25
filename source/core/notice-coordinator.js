@@ -97,7 +97,7 @@ registry.define('notice-coordinator',1,()=>{
       if(raw.cue&&raw.cue!=='none'&&!Object.hasOwn(CUES,raw.cue))throw new TypeError('Notification cue is invalid.');
       const operationId=raw.operationId==null?'':identity(raw.operationId,'operation id');
       const title=String(raw.title||'Study Director').trim().slice(0,120),message=String(raw.message||'').trim().slice(0,surface==='toast'?500:2000);
-      let progress=null,action=null;
+      let progress=null,action=null,secondaryAction=null;
       if(raw.progress){
         const number=key=>{const value=Number(raw.progress[key]||0);if(!Number.isFinite(value)||value<0)throw new TypeError('Notification progress is invalid.');return value;};
         progress=freeze({stage:String(raw.progress.stage||''),current:number('current'),total:number('total'),completedBytes:number('completedBytes'),totalBytes:number('totalBytes'),loadedBytes:number('loadedBytes'),activeBytes:number('activeBytes')});
@@ -106,11 +106,18 @@ registry.define('notice-coordinator',1,()=>{
         if(!String(raw.action.label||'').trim()||typeof raw.action.run!=='function')throw new TypeError('Notification action is invalid.');
         action=freeze({label:String(raw.action.label).trim().slice(0,100),run:raw.action.run});
       }
+      // A decision notice may offer a second choice beside its primary action.
+      if(action&&raw.secondaryAction){
+        if(!String(raw.secondaryAction.label||'').trim()||typeof raw.secondaryAction.run!=='function')throw new TypeError('Notification secondary action is invalid.');
+        secondaryAction=freeze({label:String(raw.secondaryAction.label).trim().slice(0,100),run:raw.secondaryAction.run});
+      }
       const persistent=raw.persistent===true||lifecycle==='running'||lifecycle==='failed';
+      // A condition that only a decision can clear (dismissible:false) keeps its toast until resolved.
+      const dismissible=!(persistent&&raw.dismissible===false&&raw.action);
       const duration=persistent?0:Math.max(1800,Math.min(12000,Number(raw.duration)|| (severity==='warning'?7000:4200)));
-      return freeze({source,id,operationId,surfaceId:String(raw.surfaceId||''),retainInline:raw.retainInline!==false,occurrence:String(raw.occurrence||''),cue:String(raw.cue||''),system:raw.system===true,kind:String(raw.kind||''),outcome:String(raw.outcome||''),completedAt:String(raw.completedAt||''),announce:raw.announce===true,severity,lifecycle,foreground:raw.foreground!==false,title,message,progress,action,surface,persistent,duration});
+      return freeze({source,id,operationId,surfaceId:String(raw.surfaceId||''),retainInline:raw.retainInline!==false,occurrence:String(raw.occurrence||''),cue:String(raw.cue||''),system:raw.system===true,kind:String(raw.kind||''),outcome:String(raw.outcome||''),completedAt:String(raw.completedAt||''),announce:raw.announce===true,severity,lifecycle,foreground:raw.foreground!==false,title,message,progress,action,secondaryAction,surface,persistent,dismissible,duration});
     }
-    function signature(event){return JSON.stringify({...event,action:event.action?event.action.label:null});}
+    function signature(event){return JSON.stringify({...event,action:event.action?event.action.label:null,secondaryAction:event.secondaryAction?event.secondaryAction.label:null});}
     function publicEvent(row){return freeze({...row.event,key:row.key,deliveryId:String(row.sequence),revision:row.revision,surfaceRevision:row.surfaceRevision,dismissed:row.dismissed});}
     function visibleEvents(){
       return [...events.values()].filter(row=>!row.dismissed&&(row.event.surface==='toast'||row.event.announce)&&row.event.lifecycle!=='resolved')
@@ -139,7 +146,7 @@ registry.define('notice-coordinator',1,()=>{
     }
     function storeEvent(event,{fresh=false,dismissed=false}={}){
       const key=eventKey(event.source,event.id),previous=events.get(key),sig=signature(event);
-      if(!fresh&&previous&&previous.signature===sig&&previous.event.action?.run===event.action?.run)return publicEvent(previous);
+      if(!fresh&&previous&&previous.signature===sig&&previous.event.action?.run===event.action?.run&&previous.event.secondaryAction?.run===event.secondaryAction?.run)return publicEvent(previous);
       accountTime();
       const row={key,event,signature:sig,revision:++eventRevision,surfaceRevision:event.operationId&&!fresh&&previous?previous.surfaceRevision:eventRevision,sequence:fresh||!previous?++sequence:previous.sequence,dismissed,remaining:event.duration,started:null,pauses:previous&&!fresh?previous.pauses:new Set()};
       if(activeSound?.key===key&&(fresh||event.lifecycle!==previous?.event.lifecycle||event.occurrence!==previous?.event.occurrence))stopSound();
@@ -171,7 +178,7 @@ registry.define('notice-coordinator',1,()=>{
       accountTime();events.delete(key);failureSounds.delete(key);if(activeSound?.key===key)stopSound();publishEvents();return true;
     }
     function dismissEvent(key,deliveryId){
-      const row=events.get(key);if(!row||String(row.sequence)!==String(deliveryId))return false;
+      const row=events.get(key);if(!row||String(row.sequence)!==String(deliveryId)||row.event.dismissible===false)return false;
       accountTime();row.dismissed=true;publishEvents();return true;
     }
     function pauseEvent(key,deliveryId,reason,paused){

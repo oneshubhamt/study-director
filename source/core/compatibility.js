@@ -21,14 +21,25 @@ registry.define('compatibility',1,()=>{
     });
     return true;
   }
+  // A store renamed since (notes was areaNotes) keeps its rows: IndexedDB
+  // renames it inside the upgrade, before the current stores are created.
+  function renameIndexedDbStores({db,transaction,renamedStores}){
+    let renamed=0;
+    if(!transaction)return renamed;
+    for(const [current,previous] of Object.entries(renamedStores||{})){
+      if(!db.objectStoreNames.contains(previous)||db.objectStoreNames.contains(current))continue;
+      transaction.objectStore(previous).name=current;renamed++;
+    }
+    return renamed;
+  }
   function createFacade(input){
     exactObject(input,['baselineId','live','backups','verification'],'Compatibility facade input');
     if(typeof input.baselineId!=='string'||!input.baselineId)throw new TypeError('Compatibility baseline identity is required.');
     functions(input.live,[
-      'cleanupLegacyStorage','migratePlan','migrateReflections','migrateHostMetadata','migrateActiveSession','migrateAreaNotes','migrateAreaNoteRecovery','migrateDailyRecords','migrateDeletionState','migrateInsightsRevisionEnvelope','cleanupLegacyAttachments','cleanupObsoleteMetadata','retireTopology','retireLegacyIdentity'
+      'renameIdentities','cleanupLegacyStorage','migratePlan','migrateReflections','migrateHostMetadata','migrateActiveSession','migrateNotes','migrateNoteRecovery','migrateDailyRecords','migrateDeletionState','migrateInsightsRevisionEnvelope','cleanupLegacyAttachments','cleanupObsoleteMetadata','settleUnsupported','retireTopology','retireLegacyIdentity'
     ],'Compatibility live adapters');
     functions(input.backups,['inspectCurrent','inspectLegacy'],'Compatibility backup adapters');
-    functions(input.verification,['planLegacy','reflectionLegacy','activeSession','areaNotes','areaNoteRecovery','dailyRecords','deletionState','insightsRevisionEnvelope','canonicalStores','legacyStorage','legacyAttachments','obsoleteMetadata','topology','retiredIdentity','retiredHostCompatibility','freshBackup'],'Compatibility verification adapters');
+    functions(input.verification,['planLegacy','reflectionLegacy','activeSession','notes','noteRecovery','dailyRecords','deletionState','insightsRevisionEnvelope','canonicalStores','legacyStorage','legacyAttachments','obsoleteMetadata','topology','retiredIdentity','retiredHostCompatibility','freshBackup'],'Compatibility verification adapters');
     let liveRun=null,lastReport=null,lastVerification=null;
     const retryableResult=value=>!!(value&&typeof value==='object'&&value.status==='skipped'&&value.reason==='not-primary');
     async function proof(name,operation){
@@ -42,7 +53,7 @@ registry.define('compatibility',1,()=>{
     }
     const localCanonicalChecks=freeze([
       ['planLegacy',input.verification.planLegacy],['reflectionLegacy',input.verification.reflectionLegacy],['activeSession',input.verification.activeSession],
-      ['areaNotes',input.verification.areaNotes],['areaNoteRecovery',input.verification.areaNoteRecovery],['dailyRecords',input.verification.dailyRecords],['deletionState',input.verification.deletionState],
+      ['notes',input.verification.notes],['noteRecovery',input.verification.noteRecovery],['dailyRecords',input.verification.dailyRecords],['deletionState',input.verification.deletionState],
       ['insightsRevisionEnvelope',input.verification.insightsRevisionEnvelope],['canonicalStores',input.verification.canonicalStores],['legacyStorage',input.verification.legacyStorage],['legacyAttachments',input.verification.legacyAttachments],
       ['obsoleteMetadata',input.verification.obsoleteMetadata]
     ]);
@@ -58,13 +69,15 @@ registry.define('compatibility',1,()=>{
         const results={};
         // Ordering is deliberate: migrate sources before generic residue cleanup.
         // Legacy localStorage may still contain the only copy of Plan/preferences,
-        // Active Session recovery, or Area Note recovery data. Retired standalone
+        // Active Session recovery, or Note recovery data. Retired standalone
         // Reflection Draft keys are deliberately discarded by their compatibility step.
+        // Renamed records move first: every later step reads them by their new name.
+        results.identities=await input.live.renameIdentities();
         results.plan=await input.live.migratePlan();
         results.reflections=await input.live.migrateReflections();
         results.activeSession=await input.live.migrateActiveSession();
-        results.areaNotes=await input.live.migrateAreaNotes();
-        results.areaNoteRecovery=await input.live.migrateAreaNoteRecovery();
+        results.notes=await input.live.migrateNotes();
+        results.noteRecovery=await input.live.migrateNoteRecovery();
         results.dailyRecords=await input.live.migrateDailyRecords();
         results.deletionState=await input.live.migrateDeletionState();
         results.insightsRevisionEnvelope=await input.live.migrateInsightsRevisionEnvelope();
@@ -72,6 +85,9 @@ registry.define('compatibility',1,()=>{
         results.attachments=await input.live.cleanupLegacyAttachments();
         results.obsoleteMetadata=await input.live.cleanupObsoleteMetadata();
         results.legacyStorage=await input.live.cleanupLegacyStorage();
+        // What the steps above left that this build still cannot read stays
+        // as it is and out of everything below (see UnsupportedData in app.html).
+        results.unsupported=await input.live.settleUnsupported();
         if(Object.values(results).some(retryableResult)){
           // A secondary tab may continue only when migration is unnecessary because
           // every runtime-facing local surface is already current canonical state.
@@ -117,11 +133,11 @@ registry.define('compatibility',1,()=>{
       const checks={};
       for(const [name,operation] of [
         ['planLegacy',input.verification.planLegacy],['reflectionLegacy',input.verification.reflectionLegacy],['activeSession',input.verification.activeSession],
-        ['areaNotes',input.verification.areaNotes],['areaNoteRecovery',input.verification.areaNoteRecovery],['dailyRecords',input.verification.dailyRecords],['deletionState',input.verification.deletionState],
+        ['notes',input.verification.notes],['noteRecovery',input.verification.noteRecovery],['dailyRecords',input.verification.dailyRecords],['deletionState',input.verification.deletionState],
         ['insightsRevisionEnvelope',input.verification.insightsRevisionEnvelope],['canonicalStores',input.verification.canonicalStores],['legacyStorage',input.verification.legacyStorage],['legacyAttachments',input.verification.legacyAttachments],
         ['obsoleteMetadata',input.verification.obsoleteMetadata],['topology',input.verification.topology],['retiredIdentity',input.verification.retiredIdentity],['retiredHostCompatibility',input.verification.retiredHostCompatibility],['freshBackup',input.verification.freshBackup]
       ])checks[name]=await proof(name,operation);
-      const canonicalNames=['planLegacy','reflectionLegacy','activeSession','areaNotes','areaNoteRecovery','dailyRecords','deletionState','insightsRevisionEnvelope','canonicalStores','legacyStorage','legacyAttachments','obsoleteMetadata','topology','retiredIdentity'];
+      const canonicalNames=['planLegacy','reflectionLegacy','activeSession','notes','noteRecovery','dailyRecords','deletionState','insightsRevisionEnvelope','canonicalStores','legacyStorage','legacyAttachments','obsoleteMetadata','topology','retiredIdentity'];
       const canonical=canonicalNames.every(name=>checks[name].ok===true),backupReady=checks.freshBackup.ok===true,compatibilityRetired=checks.retiredHostCompatibility.ok===true;
       lastVerification=freeze({
         format:'study-director.canonical-installation-proof',contractVersion:1,baselineId:input.baselineId,
@@ -135,6 +151,6 @@ registry.define('compatibility',1,()=>{
     }
     return freeze({format:'study-director.compatibility-facade',contractVersion:1,migrateLive,inspectBackup,verifyCanonicalInstallation,status});
   }
-  return freeze({format:'study-director.compatibility-module',contractVersion:1,applyIndexedDbUpgrade,createFacade});
+  return freeze({format:'study-director.compatibility-module',contractVersion:1,applyIndexedDbUpgrade,renameIndexedDbStores,createFacade});
 });
 })();

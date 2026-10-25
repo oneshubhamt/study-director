@@ -24,8 +24,8 @@ function createPrimitiveHarness({strictUnsupported=false}={}){
   const module=context[Symbol.for('studyDirector.internalModules.v1')].require('persistence',1);
   const api=module.createIndexedDb(Object.freeze({
     config:Object.freeze({
-      dbName:'durability-test',dbVersion:7,legacyBaselineVersion:6,
-      stores:Object.freeze({dailyRecords:'daily',dailySummaries:'summary',areaNotes:'area',activeSessions:'session',appMeta:'meta',assets:'assets'}),
+      dbName:'durability-test',dbVersion:9,bridgeVersion:8,
+      stores:Object.freeze({dailyRecords:'daily',dailySummaries:'summary',notes:'notes',activeSessions:'session',appMeta:'meta',assets:'assets'}),
       legacyStores:Object.freeze({syncQueue:'sync',tombstones:'tombstones',reflectionDrafts:'reflection'})
     }),
     hooks:Object.freeze({onError:()=>{},onOk:()=>{},capture:(scope,error,level)=>captures.push({scope,error:String(error&&error.message||error),level})})

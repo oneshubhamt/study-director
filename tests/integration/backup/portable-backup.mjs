@@ -8,6 +8,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
+import {testPendingReviewCodec} from '../../helpers/pending-review-codec.mjs';
 
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
@@ -21,26 +22,27 @@ const limits=freeze({
   backupChunkItems:10,backupChunkTargetBytes:65536,backupMaxEntryBytes:65536,backupMaxLineBytes:262144,
   backupMaxCompressedBytes:4*1024*1024,backupMaxFileBytes:16*1024*1024,backupMaxUncompressedBytes:8*1024*1024,
   backupMaxAssetDescriptors:100,richAssetMaxBytes:8*1024*1024,maxBackupChunks:1000,importBytes:4*1024*1024,
-  maxImportRecords:100,maxImportAreaNotes:100,maxLegacyImportTombstones:100,maxImportReflectionDrafts:100,maxReflectionChars:10000
+  maxImportRecords:100,maxNotes:100,maxLegacyImportTombstones:100,maxImportReflectionDrafts:100,maxReflectionChars:10000
 });
 const dataContract=RUNTIME_DATA_CONTRACT;
 const defs=freeze({
-  dailyRecord:freeze({idField:'date',backupLimit:100}),areaNote:freeze({idField:'key',backupLimit:100}),
+  dailyRecord:freeze({idField:'date',backupLimit:100}),note:freeze({idField:'key',backupLimit:100}),
   activeSession:freeze({idField:'id',backupLimit:1})
 });
 const isDate=value=>/^\d{4}-\d{2}-\d{2}$/.test(String(value||''));
 const normalizeArea=(item,key)=>item&&String(key||item.key||'')?freeze({key:String(key||item.key),text:String(item.text||''),updatedAt:String(item.updatedAt||'2026-08-31T00:00:00.000Z')}):null;
 const normalizeDrafts=value=>(Array.isArray(value)?value:[]).filter(x=>x&&isDate(x.date)).map(x=>freeze({...x,reflection:String(x.reflection||'')}));
-const dailyRecordCodec=freeze({sanitizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item}):null,canonicalizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:15}):null,sanitizeCurrentDailyRecord:item=>item&&isDate(item.date)?freeze({...item}):null,sanitizeImportedAreaNote:normalizeArea,sanitizeCurrentAreaNote:normalizeArea,isSupportedSavedDate:isDate});
+const dailyRecordCodec=freeze({sanitizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item}):null,canonicalizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:15}):null,sanitizeCurrentDailyRecord:item=>item&&isDate(item.date)?freeze({...item}):null,sanitizeImportedNote:normalizeArea,sanitizeCurrentNote:normalizeArea,isSupportedSavedDate:isDate});
 const activeSessionCodec=freeze({sanitizeCurrent:item=>item&&item.id==='current'?freeze({...item}):null});
 const reflectionDraftCodec=freeze({format:'study-director.reflection-draft-codec',contractVersion:1,sanitizeCurrent:item=>item&&isDate(item.date)?freeze({...item,reflection:String(item.reflection||'')}):null});
-const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:item=>dailyRecordCodec.sanitizeCurrentDailyRecord(item),areaNote:normalizeArea,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
+const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:item=>dailyRecordCodec.sanitizeCurrentDailyRecord(item),note:normalizeArea,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
 const keyedRecord=freeze({create:()=>Object.create(null)});
 const entityDefinition=type=>defs[type]||null,entityIdentity=(type,item)=>String(item?.[defs[type]?.idField]||'');
 const boundedInt=(value,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
 const jsonByteLength=value=>new TextEncoder().encode(typeof value==='string'?value:JSON.stringify(value)).byteLength;
 const personalDataCodec=RecordCodecs.createPersonalDataCodec(limits);
-const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,processing:testProcessing,
+const pendingReviewCodec=testPendingReviewCodec(RecordCodecs,{personalDataCodec});
+const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingReviewCodec,processing:testProcessing,
   appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),
   entityTypes:freeze(Object.keys(defs)),keyedRecord,entities:freeze({entityDefinition,entityIdentity}),
   helpers:freeze({boundedInt,jsonByteLength}),
@@ -56,24 +58,24 @@ const personalData=freeze({
   plans:freeze({draft:null,savedPlans:freeze([]),defaultId:null}),
   preferences:freeze({studentName:'Student',theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null})
 });
-const counts=codec.countShape({dailyRecord:0,areaNote:1,activeSession:0,personalData:1,checkpointManifest:1});
+const counts=codec.countShape({dailyRecord:0,note:1,activeSession:0,personalData:1,checkpointManifest:1});
 const checkpoint=codec.createCheckpointMetadata('inst_device_a','2026-08-31T00:00:00.000Z');
-const plan=freeze({studentName:'Student',installationId:'inst_device_a',exportedAt:'2026-08-31T00:00:00.000Z',sourceRevision:'2026-08-31T00:00:00.000Z',checkpoint,recordDates:freeze([]),savedDayDeletions:freeze([]),areaNoteDeletions:freeze([]),attachmentDeletions:freeze([]),counts});
+const plan=freeze({studentName:'Student',installationId:'inst_device_a',exportedAt:'2026-08-31T00:00:00.000Z',sourceRevision:'2026-08-31T00:00:00.000Z',checkpoint,recordDates:freeze([]),savedDayDeletions:freeze([]),noteDeletions:freeze([]),attachmentDeletions:freeze([]),counts});
 const algorithm=codec.checksumAlgorithm();
 const image=new Blob([new Uint8Array([137,80,78,71,13,10,26,10,1,2,3,4])],{type:'image/png'});
 const descriptor=freeze({assetId,mimeType:'image/png',size:image.size,checksum:await codec.checksumBlob(image)});
 const manifest=codec.createManifest(plan,{compression:'none',algorithm});
 assert.equal(manifest.checkpoint,checkpoint,'Portable materialisation must reuse the checkpoint identity captured before serialisation.');
 assert.equal('studentName' in manifest,false,'Current backup manifest must not duplicate protected studentName outside the canonical personal-data section.');
-assert.equal(Object.hasOwn(manifest,'schemaVersion'),false,'Current v20 checkpoint manifests must not write legacy sync schemaVersion baggage.');
+assert.equal(Object.hasOwn(manifest,'schemaVersion'),false,'Current checkpoint manifests must not write legacy sync schemaVersion baggage.');
 const checkpointChunk=await codec.encodeChunk(0,'checkpointManifest',[codec.createProtectedManifest(plan,manifest.checkpoint)],algorithm);
 const personalChunk=await codec.encodeChunk(1,'personalData',[personalData],algorithm);
-const chunk=await codec.encodeChunk(2,'areaNote',area,algorithm);
+const chunk=await codec.encodeChunk(2,'note',area,algorithm);
 const complete=await codec.encodeCompletion(3,counts,[checkpointChunk.checksum,personalChunk.checksum,chunk.checksum],algorithm,[descriptor]);
 const metadata=new Blob([JSON.stringify(manifest)+'\n'+checkpointChunk.line+'\n'+personalChunk.line+'\n'+chunk.line+'\n'+JSON.stringify(complete)+'\n']);
 const portable=codec.createV10Container(metadata,{compression:'none',assetBlobs:[image]});
 const parsed=await codec.inspectCurrent(portable,{filename:'portable.sdbackup'});
-assert.equal(parsed.formatVersion,20);
+assert.equal(parsed.formatVersion,23);
 assert.equal(parsed.captureAuthority,'canonical-complete','Current standalone backups must persist canonical-complete authority inside the protected completion proof.');
 assert.equal(parsed.protectedCheckpointManifest.checkpointId,parsed.manifest.checkpoint.checkpointId);
 assert.equal(parsed.manifest.deviceId,undefined);

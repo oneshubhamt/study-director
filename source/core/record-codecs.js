@@ -353,15 +353,57 @@ function createDiaryRecord(date,reflection,options={}){
   const candidate={version:DATA_CONTRACT.schemas.DailyRecord.version,recordKind:'diary',date:String(date),savedAt,updatedAt,sourceRevision:boundedInt(options.sourceRevision,{min:0,max:Number.MAX_SAFE_INTEGER,fallback:0}),reflection:text};
   return sanitizeCurrentDailyRecord(candidate);
 }
-function sanitizeCurrentAreaNote(value,keyHint=''){
-  const source=value&&typeof value==='object'&&!Array.isArray(value)?value:null;if(!source||Number(source.version)!==DATA_CONTRACT.schemas.AreaNote.version)return null;
-  const expected=['version','key','label','text','updatedAt'];
+// A note's key is its permanent id, given when it is created and never
+// changed by a rename or move; its title is the label. A deleted note keeps
+// its id behind the trash prefix until it is restored or its retention ends.
+const NOTE_ID_PATTERN=/^n_[0-9a-f]{16}$/u,NOTE_TRASH_PREFIX=String(DATA_CONTRACT.schemas.Note.trashKeyPrefix||'');
+const noteKeys=freeze({
+  isId:value=>NOTE_ID_PATTERN.test(String(value||'')),
+  isTrash:value=>String(value||'').startsWith(NOTE_TRASH_PREFIX)&&NOTE_ID_PATTERN.test(String(value).slice(NOTE_TRASH_PREFIX.length)),
+  isKey:value=>noteKeys.isId(value)||noteKeys.isTrash(value),
+  trash:id=>noteKeys.isId(id)?NOTE_TRASH_PREFIX+id:'',
+  id:key=>noteKeys.isTrash(key)?String(key).slice(NOTE_TRASH_PREFIX.length):noteKeys.isId(key)?String(key):''
+});
+// links, when present, lists the other notes on the note's bar by id: never
+// empty, never the note itself, no repeats.
+function noteLinks(value,key){
+  if(!Array.isArray(value)||!value.length||value.length>APP_LIMITS.maxNoteLinks)return null;
+  const self=noteKeys.id(key),seen=new Set();
+  for(const id of value){if(!noteKeys.isId(id)||id===self||seen.has(id))return null;seen.add(id);}
+  return [...value];
+}
+// A note's text is checked once: the text last found sound for each note is
+// kept, so reading the same notes again (at start-up, for backups and upkeep)
+// compares rather than parses. Those copies are the ones handed on, so the
+// texts are held once.
+const soundNoteText=new Map();
+function noteText(key,value){
+  const known=soundNoteText.get(key);if(known!==undefined&&known===value){soundNoteText.delete(key);soundNoteText.set(key,known);return known;}
+  const text=optionalEditorContent(value,APP_LIMITS.maxNoteChars);if(text===null)return null;
+  soundNoteText.delete(key);soundNoteText.set(key,text);
+  if(soundNoteText.size>APP_LIMITS.maxNotes)soundNoteText.delete(soundNoteText.keys().next().value);
+  return text;
+}
+function sanitizeCurrentNote(value,keyHint=''){
+  const source=value&&typeof value==='object'&&!Array.isArray(value)?value:null;if(!source||Number(source.version)!==DATA_CONTRACT.schemas.Note.version)return null;
+  const expected=['version','key','label','text','updatedAt',...('links' in source?['links']:[])];
   if(Object.keys(source).sort().join('|')!==expected.sort().join('|'))return null;
-  const key=normalizeAreaName(source.key||keyHint),label=optionalText(source.label,APP_LIMITS.maxAreaNameChars),text=optionalEditorContent(source.text,APP_LIMITS.maxNoteChars);
-  if(!key||label===null||text===null)return null;
+  const key=String(source.key||keyHint||''),label=optionalText(source.label,APP_LIMITS.maxAreaNameChars),text=noteText(key,source.text);
+  if(!noteKeys.isKey(key)||label===null||!normalizeAreaName(label)||text===null)return null;
   const updatedAt=normalizeImportedTimestamp(source.updatedAt,null);if(!updatedAt)return null;
-  const clean={version:DATA_CONTRACT.schemas.AreaNote.version,key,label,text,updatedAt};
+  const links='links' in source?noteLinks(source.links,key):undefined;if(links===null)return null;
+  const clean={version:DATA_CONTRACT.schemas.Note.version,key,label,text,updatedAt,...(links?{links}:{})};
   return sameDataValue(source,clean)?clean:null;
+}
+// A note's title or text on its own (either or both), checked as the note
+// checks them: for a version kept for review. null when unsound.
+function sanitizeNoteFields(value){
+  const source=value&&typeof value==='object'&&!Array.isArray(value)?value:null,keys=source?Object.keys(source):[];
+  if(!keys.length||keys.some(key=>key!=='label'&&key!=='text'))return null;
+  const clean={};
+  if('label' in source){const label=optionalText(source.label,APP_LIMITS.maxAreaNameChars);if(label===null||label!==source.label||!normalizeAreaName(label))return null;clean.label=label;}
+  if('text' in source){const text=optionalEditorContent(source.text,APP_LIMITS.maxNoteChars);if(text===null||text!==source.text)return null;clean.text=text;}
+  return clean;
 }
 function dailyResultAdjustedEnd(entry,result){
   const start=result&&result.adjustedStart||entry.start;
@@ -442,7 +484,7 @@ function materializeDailyRecordSummary(summary){
       buildDailyRecordSummary,compactPauseEvents,compactRealTimeSnapshot,
       sanitizeTimerRuntimePayload,compactAdjustedSchedule,normalizeDailyResultEntry,
       dailyRecordMetricsFromEvidence,sanitizeCurrentDailyRecord,createDiaryRecord,
-      sanitizeCurrentAreaNote,materializeDailyRecordView,sanitizeDailyRecordSummary,materializeDailyRecordSummary,isSupportedSavedDate
+      sanitizeCurrentNote,sanitizeNoteFields,noteKeys,materializeDailyRecordView,sanitizeDailyRecordSummary,materializeDailyRecordSummary,isSupportedSavedDate
     });
   }
   function createActiveSessionCodec(input){
@@ -459,6 +501,8 @@ function materializeDailyRecordSummary(summary){
     const APP_LIMITS=input.limits;
     const DATA_CONTRACT=input.dataContract;
     const ACTIVE_SESSION_ID=input.activeSessionId;
+    // The installation running the session (persistence.js installation identity).
+    const INSTALLATION_ID=/^inst_[a-z0-9_]{8,128}$/iu;
     const KeyedRecord=input.keyedRecord;
     const CompletionModel=input.domain.CompletionModel;
     const COMPLETION_SOURCES=input.domain.COMPLETION_SOURCES;
@@ -624,19 +668,20 @@ function materializeDailyRecordSummary(summary){
       revision,
       date:String(session.date||''),
       status:session.status==='suspended'?'suspended':'active',
+      runningOn:String(session.runningOn||''),
       scheduleText,
       snapshot:null,
       suspendedAt:session.suspendedAt?normalizeImportedTimestamp(session.suspendedAt,null):null,
       updatedAt:normalizeImportedTimestamp(session.updatedAt,new Date().toISOString())
     };
-    if(!isValidIsoDate(clean.date)||!isCanonicalScheduleText(clean.scheduleText))return null;
+    if(!isValidIsoDate(clean.date)||!isCanonicalScheduleText(clean.scheduleText)||!INSTALLATION_ID.test(clean.runningOn))return null;
     clean.snapshot=normalizeCurrentSessionSnapshot(session.snapshot,clean.date,activeSessionScheduleFingerprint(clean),revision);
     if(!clean.snapshot)return null;
     return clean;
   }
   function sanitizeCurrentActiveSession(session){
     if(!session||typeof session!=='object'||Array.isArray(session))return null;
-    const expected=['id','type','version','revision','date','status','scheduleText','snapshot','suspendedAt','updatedAt'];
+    const expected=['id','type','version','revision','date','status','runningOn','scheduleText','snapshot','suspendedAt','updatedAt'];
     if(Object.keys(session).sort().join('|')!==expected.sort().join('|'))return null;
     const clean=normalizeCurrentActiveSession(session);
     return clean&&sameDataValue(session,clean)?clean:null;
@@ -701,12 +746,81 @@ function materializeDailyRecordSummary(summary){
     return freeze({plans,preferences,portablePreferences,currentPortablePreferences,normalize,maxBytes});
   }
 
+  // A version kept for review (PendingReview): when both sides changed the
+  // same thing, the newer one shows and the other is kept here until the
+  // person reviews it. subject says what it belongs to and ref which one: a
+  // note (its id), a Saved Day (its date), plans and settings, or the
+  // session. kept is the other side's version, or null where that side had
+  // deleted it (or had no session); for a note it holds only the title or
+  // text that differed, and base what both last shared of them, for Smart
+  // merge. A resolved review keeps only its identity and resolvedAt, so
+  // every device learns it is done.
+  function createPendingReviewCodec(input){
+    exactObject(input,['dataContract','dailyRecordCodec','activeSessionCodec','personalDataCodec','helpers'],'Pending-review codec input');
+    functions(input.helpers,['sameDataValue','randomBytes'],'Pending-review codec helpers');
+    const VERSION=Number(input.dataContract.schemas.PendingReview.version),DailyRecordCodec=input.dailyRecordCodec,ActiveSessionCodec=input.activeSessionCodec,PersonalDataCodec=input.personalDataCodec;
+    const {sameDataValue,randomBytes}=input.helpers,NoteKeys=DailyRecordCodec.noteKeys;
+    const ID=/^pr_[a-f0-9]{32}$/u,DATE=/^\d{4}-\d{2}-\d{2}$/u,KEYS=['base','id','kept','keptAt','ref','resolvedAt','subject','version'].join('|');
+    const iso=value=>{if(typeof value!=='string')return null;const ms=Date.parse(value);return Number.isFinite(ms)&&new Date(ms).toISOString()===value?value:null;};
+    const refValid=(subject,ref)=>subject==='note'?NoteKeys.isId(ref):subject==='savedDay'?DATE.test(ref):subject==='personal'?ref==='personal':subject==='session'?ref==='session':false;
+    // The other side's version; undefined when unsound.
+    function keptValue(subject,ref,value){
+      if(value===null)return subject==='personal'?undefined:null;
+      try{
+        const clean=subject==='note'?DailyRecordCodec.sanitizeNoteFields(value):subject==='savedDay'?DailyRecordCodec.sanitizeCurrentDailyRecord(value):subject==='personal'?PersonalDataCodec.normalize(value):ActiveSessionCodec.sanitizeCurrent(value);
+        return clean&&(subject!=='savedDay'||clean.date===ref)&&sameDataValue(clean,value)?clean:undefined;
+      }catch{return undefined;}
+    }
+    function normalize(value){
+      // Only a canonical record passes: every field exactly as stored.
+      if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join('|')!==KEYS||value.version!==VERSION||[value.id,value.subject,value.ref].some(field=>typeof field!=='string'))return null;
+      const id=value.id,subject=value.subject,ref=value.ref,keptAt=iso(value.keptAt);
+      if(!ID.test(id)||!keptAt||!refValid(subject,ref))return null;
+      if(value.resolvedAt!==''){const resolvedAt=iso(value.resolvedAt);return resolvedAt&&value.kept===null&&value.base===null?{version:VERSION,id,subject,ref,keptAt,kept:null,base:null,resolvedAt}:null;}
+      const kept=keptValue(subject,ref,value.kept);if(kept===undefined)return null;
+      let base=null;
+      if(value.base!==null){base=subject==='note'&&kept?DailyRecordCodec.sanitizeNoteFields(value.base):null;if(!base||Object.keys(base).some(key=>!(key in kept)))return null;}
+      return {version:VERSION,id,subject,ref,keptAt,kept,base,resolvedAt:''};
+    }
+    function create({subject,ref,kept,base=null,keptAt=new Date().toISOString()}){
+      const id='pr_'+[...randomBytes(16)].map(byte=>byte.toString(16).padStart(2,'0')).join('');
+      const clean=normalize({version:VERSION,id,subject,ref,keptAt:new Date(keptAt).toISOString(),kept,base,resolvedAt:''});
+      if(!clean)throw new TypeError('A version kept for review is invalid.');
+      return clean;
+    }
+    function resolved(review,resolvedAt=new Date().toISOString()){
+      const clean=normalize(review);if(!clean)throw new TypeError('The review to resolve is invalid.');
+      return clean.resolvedAt?clean:normalize({...clean,kept:null,base:null,resolvedAt:new Date(resolvedAt).toISOString()});
+    }
+    // Reviews merge by id: a resolved one wins, so a review resolved on any
+    // device ends everywhere. Only the newest resolved ones are kept, as many
+    // as may wait at once.
+    function merge(lists,limit){
+      const byId=new Map();
+      for(const list of lists)for(const raw of list||[]){
+        const review=normalize(raw);if(!review)throw new TypeError('A version kept for review is invalid.');
+        const held=byId.get(review.id);
+        if(!held||review.resolvedAt&&(!held.resolvedAt||review.resolvedAt>held.resolvedAt))byId.set(review.id,review);
+      }
+      const all=[...byId.values()],open=all.filter(review=>!review.resolvedAt),done=all.filter(review=>review.resolvedAt).sort((a,b)=>b.resolvedAt.localeCompare(a.resolvedAt)||a.id.localeCompare(b.id)).slice(0,Math.max(0,Number(limit)||0));
+      return [...open,...done].sort((a,b)=>a.id.localeCompare(b.id));
+    }
+    // The rich texts a stored review holds, which may use attachments.
+    function richTexts(review){
+      const kept=review&&!review.resolvedAt?review.kept:null;if(!kept)return [];
+      const values=review.subject==='note'?[kept.text,review.base&&review.base.text]:review.subject==='savedDay'?[kept.reflection]:review.subject==='session'?[kept.snapshot&&kept.snapshot.review&&kept.snapshot.review.reflection]:[];
+      return values.filter(value=>typeof value==='string'&&value);
+    }
+    return freeze({format:'study-director.pending-review-codec',contractVersion:1,version:VERSION,normalize,create,resolved,merge,richTexts});
+  }
+
   return freeze({
     format:'study-director.record-codecs',
     contractVersion:1,
     createDailyRecordCodec,
     createActiveSessionCodec,
-    createPersonalDataCodec
+    createPersonalDataCodec,
+    createPendingReviewCodec
   });
 });
 })();

@@ -7,7 +7,7 @@ const scripts=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match=>mat
 const presentationSource=scripts.find(source=>source.includes('studyDirector.presentationKernel.v1'));
 assert.ok(presentationSource,'Presentation Kernel bootstrap must remain inline and discoverable.');
 
-function loadKernel({storedTheme=null,storedPresentation=null}={}){
+function loadKernel({storedTheme=null,storedPresentation=null,scope=''}={}){
   const root={dataset:{theme:'director-dark',presentation:'glass',typography:'glass',shape:'glass',material:'glass',depth:'glass',density:'standard',responsive:'adaptive',motion:'precise',charts:'analytical'},style:{}};
   const meta={
     themeColor:{content:'#04050a',setAttribute(name,value){if(name==='content')this.content=String(value);}},
@@ -18,10 +18,12 @@ function loadKernel({storedTheme=null,storedPresentation=null}={}){
     querySelector:selector=>selector==='meta[name="theme-color"]'?meta.themeColor:selector==='meta[name="apple-mobile-web-app-status-bar-style"]'?meta.statusBar:null
   };
   const storage=new Map();
-  if(storedTheme!==null)storage.set('studyDirector.theme.v1',String(storedTheme));
-  if(storedPresentation!==null)storage.set('studyDirector.presentation.v1',String(storedPresentation));
+  // The open profile's names (the first profile keeps the plain ones).
+  const scoped=name=>scope?`${name}~${scope}`:name;
+  if(storedTheme!==null)storage.set(scoped('studyDirector.theme.v1'),String(storedTheme));
+  if(storedPresentation!==null)storage.set(scoped('studyDirector.presentation.v1'),String(storedPresentation));
   const localStorage={getItem:key=>storage.has(key)?storage.get(key):null,setItem:(key,value)=>storage.set(key,String(value))};
-  const window={};
+  const window={[Symbol.for('studyDirector.profileScope.v1')]:Object.freeze({scoped})};
   const context=vm.createContext({
     console,Symbol,Object,Set,Map,Promise,TypeError,Error,window,document,localStorage,
     getComputedStyle:()=>({getPropertyValue:name=>{
@@ -88,6 +90,12 @@ for(const [storedPresentation,storedTheme,expectedColor,expectedStatus] of [
   assert.equal(meta.statusBar.content,expectedStatus,'Standalone status-bar mode must match the restored saved theme.');
 }
 
+{
+  // A later profile reads its own appearance, not the first profile's.
+  const {root,storage}=loadKernel({storedTheme:'director-light',scope:'prof_ben_mve00000_abcdef01'});
+  assert.equal(root.dataset.theme,'director-light','the profile theme applies before the app starts');
+  assert.equal(storage.has('studyDirector.theme.v1'),false,'the first profile keeps its own theme');
+}
 assert.equal('motion' in loadKernel().kernel,false,'Presentation Kernel must not expose native snapshot-transition machinery.');
 
 console.log(JSON.stringify({status:'PASS',contract:'presentation-defaults',paths:['implicit-glass-dark','saved-director-dark','saved-director-light','saved-glass-dark','saved-glass-light','prepaint-browser-chrome','no-native-view-transition-api']},null,2));

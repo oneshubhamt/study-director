@@ -42,19 +42,26 @@ owner=false;c.setSoundMode('full');cue('overtime',{system:true});assert.equal(at
 // Playback uses actual engine behavior with a controllable browser audio boundary.
 vm.runInThisContext(fs.readFileSync('source/core/audio-engine.js','utf8'),{filename:'source/core/audio-engine.js'});
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('audio-engine',1);
-let context,fetches=0,starts=0,disconnections=0;const assets=[],sources=[],listeners=new Map();
+let context,starts=0,disconnections=0,made=0,failMake=false;const sources=[],listeners=new Map(),idle=[];
 class Context {
  constructor(){context=this;this.state='suspended';this.currentTime=0;this.destination={};}
  async resume(){this.state='running';}
  async close(){this.state='closed';}
- async decodeAudioData(){return {duration:.6};}
+ createBuffer(channels,length,rate){assert.equal(channels,1);assert.equal(rate,22050);if(failMake){failMake=false;throw new Error('no memory');}made++;const data=new Float32Array(length);return {duration:length/rate,getChannelData:()=>data};}
  createBufferSource(){const node={connect(){},disconnect(){disconnections++;},start(){starts++;},stop(){node.onended?.();}};sources.push(node);return node;}
  createGain(){return {connect(){},disconnect(){disconnections++;},gain:{value:.8,setValueAtTime(){},linearRampToValueAtTime(){},cancelScheduledValues(){}}};}
 }
-const engine=module.createEngine({window:{AudioContext:Context},document:{addEventListener:(k,v)=>listeners.set(k,v),removeEventListener:k=>listeners.delete(k)},fetch:()=>{fetches++;const gate=deferred();assets.push(gate);return gate.promise;},baseUrl:'https://example.test/'});
-engine.install();assert.equal(engine.status(),'needs-interaction');assert.equal(await engine.play('begin'),false);assert.equal(fetches,0,'locked events are discarded, never queued');await engine.unlock();assert.equal(starts,0,'unlock must never drain a backlog');
-let eligible=true;const first=engine.play('begin',{isCurrent:()=>eligible});await settle();eligible=false;assets.shift().resolve({ok:true,arrayBuffer:async()=>new ArrayBuffer(4)});assert.equal(await first,false);assert.equal(starts,0,'expiry during loading is checked after decoding');
-eligible=true;const playing=engine.play('begin',{isCurrent:()=>eligible});await settle();assert.equal(starts,1);engine.stop();await playing;assert.equal(disconnections,2,'both the source and gain are released');assert.equal(fetches,1,'decoded assets are reused');
-const inFlight=engine.play('pause');await settle();engine.stop();assets.shift().resolve({ok:true,arrayBuffer:async()=>new ArrayBuffer(4)});assert.equal(await inFlight,false);assert.equal(starts,1,'mute fences pending loading');
-const failed=engine.play('confirm');await settle();assets.shift().resolve({ok:false});assert.equal(await failed,false);const retry=engine.play('confirm');await settle();assets.shift().resolve({ok:true,arrayBuffer:async()=>new ArrayBuffer(4)});await settle();sources.at(-1).onended();assert.equal(await retry,true,'failed downloads may retry for a new event');engine.dispose();assert.equal(context.state,'closed');assert.equal(listeners.size,0);assert.equal(engine.status(),'unavailable');
-console.log(JSON.stringify({status:'PASS',suite:'sound-delivery',checks:['Full default and modes','explicit test while Off','mute active and pending','deduplication and dismissal','stale generations and cancellation','expiry without unlock backlog','priority and combined transition','resolution and recurring failures','quiet background success','OS ownership and silence','asset cache retry and resource cleanup']}));
+const runIdle=()=>{while(idle.length)idle.shift()();};
+const engine=module.createEngine({window:{AudioContext:Context,requestIdleCallback:step=>idle.push(step)},document:{addEventListener:(k,v)=>listeners.set(k,v),removeEventListener:k=>listeners.delete(k)}});
+engine.install();assert.equal(engine.status(),'needs-interaction');assert.equal(await engine.play('begin'),false);assert.equal(made,0,'locked events are discarded, never queued');
+await engine.unlock();assert.equal(starts,0,'unlock must never drain a backlog');assert.equal(made,0,'cues are made later, in idle moments');assert.equal(idle.length,1,'one cue at a time');
+let eligible=false;assert.equal(await engine.play('begin',{isCurrent:()=>eligible}),false);assert.equal(starts,0,'an expired cue never plays');
+eligible=true;const playing=engine.play('begin',{isCurrent:()=>eligible});await settle();assert.equal(starts,1);assert.equal(made,1);engine.stop();await playing;assert.equal(disconnections,2,'both the source and gain are released');
+const explicit=engine.play('pause',{explicit:true});engine.stop();assert.equal(await explicit,false);assert.equal(starts,1,'mute fences pending playback');
+runIdle();assert.equal(made,13,'every cue is made once; the one already made is kept');
+const again=engine.play('begin');await settle();sources.at(-1).onended();assert.equal(await again,true);assert.equal(made,13,'made cues are reused');
+const engine2=module.createEngine({window:{AudioContext:Context,requestIdleCallback:step=>idle.push(step)},document:{addEventListener(){},removeEventListener(){}}});
+await engine2.unlock();idle.length=0;failMake=true;assert.equal(await engine2.play('confirm'),false,'a cue that cannot be made stays silent');
+const retry=engine2.play('confirm');await settle();sources.at(-1).onended();assert.equal(await retry,true,'it is made again for a new event');engine2.dispose();
+engine.dispose();assert.equal(context.state,'closed');assert.equal(listeners.size,0);assert.equal(engine.status(),'unavailable');
+console.log(JSON.stringify({status:'PASS',suite:'sound-delivery',checks:['Full default and modes','explicit test while Off','mute active and pending','deduplication and dismissal','stale generations and cancellation','expiry without unlock backlog','priority and combined transition','resolution and recurring failures','quiet background success','OS ownership and silence','cues made in idle moments, kept, retried, and resources released']}));

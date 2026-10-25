@@ -2,7 +2,9 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
 import {createHarness} from '../../helpers/repository-harness.mjs';
+import {noteRow} from '../../helpers/note-ids.mjs';
 import assert from 'node:assert/strict';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
 // Library clear is one transactional contract: planning, scaling, reference rewrites, rollback, and commit semantics.
 
@@ -110,10 +112,10 @@ function createState({data=noopData(),references={},attachments={},review={},now
   const data=noopData();data.notes={readFreshPayload:async()=>structuredClone(notePayload),replace:async()=>{},updateValidatedRich:()=>({status:'unchanged'}),flush:async()=>true,failure:()=>({failed:false})};
   const state=createState({data,attachments:{inventory:async()=>structuredClone(inventory),verifyMetadata:async()=>true}});
   const rewriteTargets=[{kind:'note',key:'target',label:'Target',attachmentIds:[inventory[0].id]}];
-  const plan={selection:{savedDays:false,ongoingNotes:false,attachments:true},signature:'sig',attachments:{rewriteTargets}};
+  const plan={selection:{savedDays:false,notes:false,attachments:true},signature:'sig',attachments:{rewriteTargets}};
   const sparse=await state.capture(plan,{forceReferenced:true,deleteIds:[inventory[0].id]});
   assert.equal(sparse.notes.mode,'selected');assert.deepEqual(Object.keys(sparse.notes.entries),['target']);assert.equal(sparse.notes.entries.unrelated,undefined);
-  const full=await state.capture({...plan,selection:{...plan.selection,ongoingNotes:true}},{forceReferenced:true,deleteIds:[inventory[0].id]});
+  const full=await state.capture({...plan,selection:{...plan.selection,notes:true}},{forceReferenced:true,deleteIds:[inventory[0].id]});
   assert.equal(full.notes.mode,'all');assert.deepEqual(Object.keys(full.notes.entries).sort(),['target','unrelated']);
 }
 
@@ -151,7 +153,7 @@ const sources=[
   {kind:'note',key:'unrelated',label:'Unrelated',ids:new Set()}
 ];
 
-const forcePlan=mod.createPlan({selection:{savedDays:false,ongoingNotes:false,attachments:true},attachments,sources});
+const forcePlan=mod.createPlan({selection:{savedDays:false,notes:false,attachments:true},attachments,sources});
 assert.equal(forcePlan.attachments.rewriteTargets.length,3,'references must be grouped by canonical source');
 const biology=forcePlan.attachments.rewriteTargets.find(target=>target.kind==='note'&&target.key==='biology');
 assert.ok(biology,'Biology rewrite target is missing');
@@ -166,7 +168,7 @@ assert.deepEqual([...scope.savedDays.keys],['2026-09-10'],'retained Saved Days m
 assert.equal(scope.session.capture,true);
 assert.deepEqual([...scope.session.keys],['current']);
 
-const fullPlan=mod.createPlan({selection:{savedDays:true,ongoingNotes:true,attachments:true},attachments,sources});
+const fullPlan=mod.createPlan({selection:{savedDays:true,notes:true,attachments:true},attachments,sources});
 const fullScope=mod.createRollbackScope(fullPlan,{forceReferenced:true,deleteIds:attachments.map(row=>row.id)});
 assert.equal(fullScope.notes.mode,'all','whole Notes deletion must retain a full collection rollback snapshot');
 assert.equal(fullScope.savedDays.mode,'all','whole Saved Days deletion must retain a full collection rollback snapshot');
@@ -177,12 +179,12 @@ let removeCalls=0,receivedTargets=null;
 const fixtureSnapshot={attachments,sources};
 const coordinator=mod.createCoordinator({
   runExclusive:async(_kind,fn)=>fn(),assertAuthority:()=>true,canMutate:()=>true,assertEligible:async()=>{},settle:async()=>{},snapshot:async()=>fixtureSnapshot,createProtectedSafety:async()=>({verified:true}),
-  capture:async(plan,policy)=>({format:'test',plan,policy}),deleteOngoingNotes:async()=>({count:0}),deleteSavedDays:async()=>({count:0}),
+  capture:async(plan,policy)=>({format:'test',plan,policy}),deleteNotes:async()=>({count:0}),deleteSavedDays:async()=>({count:0}),
   removeReferences:async targets=>{removeCalls++;receivedTargets=targets;return targets.length;},verifyLogical:async()=>{},removeAttachmentMetadata:async ids=>({removed:ids.length}),verifyFinal:async()=>{},
   restore:async()=>{},verifyRestore:async()=>{},sweep:async()=>0,failClosed:()=>{},clearFault:()=>{},
   journal:{prepare:async input=>({state:{id:input.id},payload:input.payload}),read:async()=>null,mark:async()=>{},clear:async()=>{}}
 });
-const preflight=await coordinator.preflight({savedDays:false,ongoingNotes:false,attachments:true});
+const preflight=await coordinator.preflight({savedDays:false,notes:false,attachments:true});
 await coordinator.execute({selection:preflight.selection,signature:preflight.signature,forceReferenced:true});
 assert.equal(removeCalls,1,'bulk force-delete must invoke the reference-rewrite phase once');
 assert.ok(Array.isArray(receivedTargets)&&receivedTargets.length===3,'coordinator must pass grouped per-source rewrite targets');
@@ -218,7 +220,7 @@ function fixture({failAt='',stale=false,recoveryJournal=null,readFailure=false,c
       mark:async(id,phase)=>{order.push('journal:'+phase);fail(phase);journal.state.phase=phase;return journal.state;},
       clear:async()=>{order.push('journal:clear');fail('journal-clear');journal=null;return true;}
     },
-    deleteOngoingNotes:async()=>{order.push('delete:notes');fail('delete-notes');return {count:1};},
+    deleteNotes:async()=>{order.push('delete:notes');fail('delete-notes');return {count:1};},
     deleteSavedDays:async()=>{order.push('delete:days');fail('delete-days');return {count:2};},
     removeReferences:async targets=>{order.push('references:'+targets.map(target=>`${target.kind}:${target.key}:${target.attachmentIds.join('|')}`).join(';'));fail('references');return {changed:true};},
     verifyLogical:async()=>{order.push('verify:logical');fail('verify-logical');return true;},
@@ -236,7 +238,7 @@ function fixture({failAt='',stale=false,recoveryJournal=null,readFailure=false,c
 
 {
   const t=fixture();
-  const preflight=await t.coordinator.preflight({savedDays:true,ongoingNotes:true,attachments:true});
+  const preflight=await t.coordinator.preflight({savedDays:true,notes:true,attachments:true});
   const result=await t.coordinator.execute({selection:preflight.selection,signature:preflight.signature,forceReferenced:true});
   assert.equal(result.attachmentsRemoved,2);
   assert.deepEqual(t.order,[
@@ -247,7 +249,7 @@ function fixture({failAt='',stale=false,recoveryJournal=null,readFailure=false,c
 }
 {
   const t=fixture({failAt:'metadata'});
-  const preflight=await t.coordinator.preflight({savedDays:false,ongoingNotes:false,attachments:true});
+  const preflight=await t.coordinator.preflight({savedDays:false,notes:false,attachments:true});
   await assert.rejects(()=>t.coordinator.execute({selection:preflight.selection,signature:preflight.signature,forceReferenced:true}),/injected metadata/);
   assert.equal(t.state().restored,1);
   assert.equal(t.state().journal,null,'successful rollback must clear journal');
@@ -257,7 +259,7 @@ function fixture({failAt='',stale=false,recoveryJournal=null,readFailure=false,c
 }
 {
   const t=fixture({failAt:['metadata','restore']});
-  const preflight=await t.coordinator.preflight({savedDays:false,ongoingNotes:false,attachments:true});
+  const preflight=await t.coordinator.preflight({savedDays:false,notes:false,attachments:true});
   await assert.rejects(()=>t.coordinator.execute({selection:preflight.selection,signature:preflight.signature,forceReferenced:true}),/Automatic Library rollback also failed/);
   assert.ok(t.state().journal,'failed rollback must retain the journal');
   assert.match(t.state().fault,/Library data recovery required/);
@@ -265,7 +267,7 @@ function fixture({failAt='',stale=false,recoveryJournal=null,readFailure=false,c
 }
 {
   const t=fixture();
-  const preflight=await t.coordinator.preflight({savedDays:false,ongoingNotes:false,attachments:true});
+  const preflight=await t.coordinator.preflight({savedDays:false,notes:false,attachments:true});
   t.coordinator._testSetSnapshot?.();
   const stale=fixture({stale:true});
   await assert.rejects(()=>stale.coordinator.execute({selection:preflight.selection,signature:preflight.signature,forceReferenced:false}),/changed while Clear Library was open/);
@@ -274,7 +276,7 @@ function fixture({failAt='',stale=false,recoveryJournal=null,readFailure=false,c
 }
 {
   const t=fixture({failAt:'safety'});
-  const preflight=await t.coordinator.preflight({savedDays:true,ongoingNotes:false,attachments:false});
+  const preflight=await t.coordinator.preflight({savedDays:true,notes:false,attachments:false});
   await assert.rejects(()=>t.coordinator.execute({selection:preflight.selection,signature:preflight.signature,forceReferenced:false}),/injected safety/);
   assert.ok(!t.order.includes('journal:prepare'),'Clear Library safety failure must abort before durable deletion work');
   assert.ok(!t.order.includes('delete:days'),'Clear Library safety failure must leave Saved Days untouched');
@@ -292,7 +294,7 @@ function fixture({failAt='',stale=false,recoveryJournal=null,readFailure=false,c
 }
 {
   const t=fixture({failAt:'sweep'});
-  const preflight=await t.coordinator.preflight({savedDays:false,ongoingNotes:false,attachments:true});
+  const preflight=await t.coordinator.preflight({savedDays:false,notes:false,attachments:true});
   const result=await t.coordinator.execute({selection:preflight.selection,signature:preflight.signature,forceReferenced:false});
   assert.equal(result.sweepPending,true);
   assert.equal(t.state().journal,null,'sweep failure occurs after logical commit/journal clear');
@@ -308,7 +310,7 @@ function fixture({failAt='',stale=false,recoveryJournal=null,readFailure=false,c
 
 {
   const clean=fixture();
-  const preflight=await clean.coordinator.preflight({savedDays:true,ongoingNotes:true,attachments:true});
+  const preflight=await clean.coordinator.preflight({savedDays:true,notes:true,attachments:true});
   for(const phase of ['eligible','settle','snapshot','safety','capture','prepare']){
     const t=fixture({failAt:phase});
     await assert.rejects(()=>t.coordinator.execute({selection:preflight.selection,signature:preflight.signature,forceReferenced:true}),new RegExp('injected '+phase));
@@ -320,7 +322,7 @@ function fixture({failAt='',stale=false,recoveryJournal=null,readFailure=false,c
 }
 {
   const clean=fixture();
-  const preflight=await clean.coordinator.preflight({savedDays:true,ongoingNotes:true,attachments:true});
+  const preflight=await clean.coordinator.preflight({savedDays:true,notes:true,attachments:true});
   const phases=['deleting-records','delete-notes','delete-days','removing-references','references','verify-logical','removing-attachment-metadata','metadata','verify-final','verified'];
   for(const phase of phases){
     const t=fixture({failAt:phase});
@@ -333,7 +335,7 @@ function fixture({failAt='',stale=false,recoveryJournal=null,readFailure=false,c
 }
 {
   const clean=fixture();
-  const preflight=await clean.coordinator.preflight({savedDays:true,ongoingNotes:true,attachments:true});
+  const preflight=await clean.coordinator.preflight({savedDays:true,notes:true,attachments:true});
   const t=fixture({failAt:'journal-clear'});
   await assert.rejects(()=>t.coordinator.execute({selection:preflight.selection,signature:preflight.signature,forceReferenced:true}),/Automatic Library rollback also failed/);
   assert.ok(t.state().journal,'a journal that cannot be cleared must remain fail-closed');
@@ -357,7 +359,7 @@ function fixture({failAt='',stale=false,recoveryJournal=null,readFailure=false,c
 for(const fault of ['', 'verify-logical', 'restore']){
  const events=[],diagnostics={start:(kind)=>{events.push(['start',kind]);return 'trace';},mark:(phase)=>events.push(['mark',phase]),finish:()=>events.push(['finish']),fail:()=>events.push(['fail'])};
  const t=fixture({failAt:fault==='restore'?['verify-logical','restore']:fault,diagnostics});
- const run=()=>t.coordinator.execute({selection:{savedDays:true,ongoingNotes:true,attachments:true},forceReferenced:true});
+ const run=()=>t.coordinator.execute({selection:{savedDays:true,notes:true,attachments:true},forceReferenced:true});
  if(fault)await assert.rejects(run);else await run();assert.equal(events[0][1],'library-clear');assert.equal(events.at(-1)[0],fault?'fail':'finish');
  assert.ok(events.some(row=>row[1]===(fault==='restore'?'clear-rollback-failed':fault?'clear-rollback-complete':'clear-journal-retired')));
 }
@@ -370,7 +372,7 @@ console.log(JSON.stringify({status:'PASS',suite:'library-clear-transaction',faul
 // retirement of its durable journal requires a complete restoration proof.
 {
   const context={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask,structuredClone,crypto:webcrypto};vm.createContext(context);
-  vm.runInContext(fs.readFileSync('source/external/rich-text.js','utf8'),context);
+  vm.runInContext(richTextRuntimeSource(),context);
   for(const file of ['internal','attachments','library-clear'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),context);
   const registry=context[Symbol.for('studyDirector.internalModules.v1')],Clear=registry.require('library-clear',1),Attachments=registry.require('attachments',1),rich=context.StudyDirectorRichText;
   const id='att-'+ 'd'.repeat(32),reference=rich.insertAttachmentReference('',{id,name:'Study diagram',mode:'inline-image'}).value;
@@ -379,10 +381,11 @@ console.log(JSON.stringify({status:'PASS',suite:'library-clear-transaction',faul
     const controls={dailyKeyEnumeration:true},h=createHarness(new Map(),null,controls);let phase='setup',armed=false,enableFault=true,deletes=0,faultClosed=0;
     const session={id:'active',type:'activeSession',version:1,date:'2026-10-01',status:'suspended',scheduleText:'',suspendedAt:'2026-10-01T12:00:00.000Z',revision:20,updatedAt:'2026-10-01T12:20:00.000Z',snapshot:{review:{reflection:reference}}};
     h.stores.session.set('active',session);
-    await h.app.notes.replace({biology:{version:2,key:'biology',label:'Biology',text:reference,updatedAt:'2026-10-01T12:20:00.000Z'},unrelated:{version:2,key:'unrelated',label:'Other note',text:'Preserve this note',updatedAt:'2026-10-01T12:20:00.000Z'}});
+    const biologyNote=noteRow('Biology',reference,'2026-10-01T12:20:00.000Z'),otherNote=noteRow('Other note','Preserve this note','2026-10-01T12:20:00.000Z');
+    await h.app.notes.replace({[biologyNote.key]:biologyNote,[otherNote.key]:otherNote});
     await h.app.dailyRecords.saveBatch(['2026-09-30','2026-10-01'].map((date,i)=>({version:1,date,savedAt:'2026-10-01T12:20:00.000Z',updatedAt:'2026-10-01T12:20:00.000Z',reflection:i?reference:'Preserve this day'})));
     const meta={id,name:'Diagram',library:false},metadata=new Map([[id,meta]]),phases=[];
-    let state;const references=Attachments.createReferenceCoordinator({data:h.app,scan:rich.scanAttachmentReferences,rewriteReferences:targets=>state.rewriteReferences(targets),withPersistenceSuppressed:work=>work(),review:{hydrate(){},invalidateBindings(){}},background:{budget:()=>()=>false,yieldTask:async()=>{}},live:{fields:()=>[],reviewDate:()=>'',todayIso:()=> '2026-10-01',normalizeAreaName:value=>value}});
+    let state;const references=Attachments.createReferenceCoordinator({data:h.app,scan:rich.scanAttachmentReferences,rewriteReferences:targets=>state.rewriteReferences(targets),withPersistenceSuppressed:work=>work(),review:{hydrate(){},invalidateBindings(){}},background:{budget:()=>()=>false,yieldTask:async()=>{}},live:{fields:()=>[],reviewDate:()=>'',todayIso:()=> '2026-10-01',noteKey:value=>value}});
     state=Clear.createState({data:h.app,createRollbackScope:Clear.createRollbackScope,withPersistenceSuppressed:work=>work(),references:{scan:rich.scanAttachmentReferences,remove:rich.removeAttachmentReferences,listSources:()=>references.sources({includeLive:false})},attachments:{inventory:async()=>[...metadata.values()],verifyMetadata:async()=>true,restoreMetadata:async rows=>{for(const row of rows)metadata.set(row.id,structuredClone(row));}},review:{hydrate(){},invalidateBindings(){}}});
     const snapshot=async()=>({days:Array.from(await h.app.dailyRecords.list({strict:true})),notes:await h.app.notes.readFreshPayload(),session:(await h.app.activeSession.load(0,{strict:true})).value?.snapshot,metadata:[...metadata]});
     const before=JSON.stringify(await snapshot());
@@ -396,8 +399,8 @@ console.log(JSON.stringify({status:'PASS',suite:'library-clear-transaction',faul
     };
     controls.onStorageRead=async({store})=>{if(armed&&phase===stage&&((fault==='days'&&store==='daily')||(fault==='notes'&&store==='area')||(fault.startsWith('session')&&store==='session')))throw new Error('Unavailable '+fault+' safety read');};
     const coordinator=Clear.createCoordinator({runExclusive:(_kind,work)=>work(),canMutate:()=>true,assertAuthority(){},assertEligible:async()=>{},settle:async()=>{},snapshot:async()=>({attachments:[...metadata.values()],sources:await references.sources({includeLive:false})}),createProtectedSafety:async()=>({verified:false,skipped:true,reason:'device-backup-not-connected'}),
-      capture:async(plan,policy)=>{phase='capture';if(stage==='capture')await arm();return state.capture(plan,policy);},deleteOngoingNotes:async()=>{phase='delete';deletes++;return h.app.notes.clearAll();},deleteSavedDays:async()=>{deletes++;return h.app.dailyRecords.clearAll();},removeReferences:state.rewriteReferences,verifyLogical:state.verifyLogical,removeAttachmentMetadata:async ids=>{for(const key of ids)metadata.delete(key);return {removed:ids.length};},verifyFinal:async()=>{throw new Error('Injected late verification failure');},restore:async payload=>{phase='restore';return state.restore(payload);},verifyRestore:async payload=>{phase='verify-rollback';if(stage==='verify-rollback'&&enableFault)await arm();return state.verifyRestore(payload);},sweep:async()=>{assert.fail('Uncommitted clear must not sweep bytes');},failClosed:()=>{faultClosed++;},clearFault(){},journal:h.app.libraryClearJournal,diagnostics:{start:()=>'',mark:name=>phases.push(name),finish(){},fail(){}}});
-    await assert.rejects(()=>coordinator.execute({selection:{savedDays:true,ongoingNotes:true,attachments:true},forceReferenced:true}));
+      capture:async(plan,policy)=>{phase='capture';if(stage==='capture')await arm();return state.capture(plan,policy);},deleteNotes:async()=>{phase='delete';deletes++;return h.app.notes.clearAll();},deleteSavedDays:async()=>{deletes++;return h.app.dailyRecords.clearAll();},removeReferences:state.rewriteReferences,verifyLogical:state.verifyLogical,removeAttachmentMetadata:async ids=>{for(const key of ids)metadata.delete(key);return {removed:ids.length};},verifyFinal:async()=>{throw new Error('Injected late verification failure');},restore:async payload=>{phase='restore';return state.restore(payload);},verifyRestore:async payload=>{phase='verify-rollback';if(stage==='verify-rollback'&&enableFault)await arm();return state.verifyRestore(payload);},sweep:async()=>{assert.fail('Uncommitted clear must not sweep bytes');},failClosed:()=>{faultClosed++;},clearFault(){},journal:h.app.libraryClearJournal,diagnostics:{start:()=>'',mark:name=>phases.push(name),finish(){},fail(){}}});
+    await assert.rejects(()=>coordinator.execute({selection:{savedDays:true,notes:true,attachments:true},forceReferenced:true}));
     if(stage==='capture'){
       assert.equal(deletes,0,fault+' unavailable safety image must prevent every deletion');assert.equal(await h.app.libraryClearJournal.read(),null);assert.equal(faultClosed,0);assert.equal(phases.includes('clear-rollback-complete'),false);
     }else{
@@ -415,7 +418,7 @@ console.log(JSON.stringify({status:'PASS',suite:'library-clear-transaction',faul
     const h=createHarness(new Map(),null,{dailyKeyEnumeration:true});
     const rows=Array.from({length:size},(_,i)=>({version:1,date:'2026-09-'+String(i+1).padStart(2,'0'),savedAt:'2026-10-01T12:20:00.000Z',updatedAt:'2026-10-01T12:20:00.000Z',reflection:'Day '+i}));await h.app.dailyRecords.saveBatch(rows);
     const state=Clear.createState({data:h.app,createRollbackScope:Clear.createRollbackScope,withPersistenceSuppressed:work=>work(),references:{scan:()=>({trusted:true,assetIds:[]}),remove:()=>{},listSources:async()=>[]},attachments:{inventory:async()=>[],verifyMetadata:async()=>{},restoreMetadata:async()=>{}},review:{hydrate(){},invalidateBindings(){}}});
-    const coordinator=Clear.createCoordinator({runExclusive:(_kind,work)=>work(),canMutate:()=>true,assertAuthority(){},assertEligible:async()=>{},settle:async()=>{},snapshot:async()=>({attachments:[],sources:[]}),createProtectedSafety:async()=>({verified:false,skipped:true,reason:'device-backup-not-connected'}),capture:state.capture,deleteOngoingNotes:h.app.notes.clearAll,deleteSavedDays:h.app.dailyRecords.clearAll,removeReferences:state.rewriteReferences,verifyLogical:state.verifyLogical,removeAttachmentMetadata:async()=>({removed:0}),verifyFinal:async()=>{throw new Error('Late failure');},restore:state.restore,verifyRestore:state.verifyRestore,sweep:async()=>assert.fail('Uncommitted clear cannot sweep'),failClosed:()=>assert.fail('Healthy rollback must be proven'),clearFault(){},journal:h.app.libraryClearJournal});
+    const coordinator=Clear.createCoordinator({runExclusive:(_kind,work)=>work(),canMutate:()=>true,assertAuthority(){},assertEligible:async()=>{},settle:async()=>{},snapshot:async()=>({attachments:[],sources:[]}),createProtectedSafety:async()=>({verified:false,skipped:true,reason:'device-backup-not-connected'}),capture:state.capture,deleteNotes:h.app.notes.clearAll,deleteSavedDays:h.app.dailyRecords.clearAll,removeReferences:state.rewriteReferences,verifyLogical:state.verifyLogical,removeAttachmentMetadata:async()=>({removed:0}),verifyFinal:async()=>{throw new Error('Late failure');},restore:state.restore,verifyRestore:state.verifyRestore,sweep:async()=>assert.fail('Uncommitted clear cannot sweep'),failClosed:()=>assert.fail('Healthy rollback must be proven'),clearFault(){},journal:h.app.libraryClearJournal});
     await assert.rejects(()=>coordinator.execute({selection:{savedDays:true}}),/Late failure/);assert.equal(JSON.stringify(Array.from(await h.app.dailyRecords.list({strict:true}))),JSON.stringify(rows));assert.equal(await h.app.libraryClearJournal.read(),null);cases.push('complete safety image with '+size+' days restores exactly');
   }
   for(const rescued of [false,true]){

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
 // Current runtime boundary invariants: decision time, pacing, presentation, and bounded background/display work.
 
@@ -81,7 +82,7 @@ const core=fs.readFileSync('source/styles/core.css','utf8');
 const glass=fs.readFileSync('source/external/glass.js','utf8');
 const insights=fs.readFileSync('source/external/insights.js','utf8');
 const editorSource=fs.readFileSync('rich-text/editor.ts','utf8');
-const editorBundle=fs.readFileSync('source/external/rich-text.js','utf8');
+const editorBundle=richTextRuntimeSource();
 
 for(const token of ['--sd-material-inset','--sd-material-canvas','--sd-depth-inset','--sd-depth-canvas']){
   assert.match(app,new RegExp(token.replaceAll('-','\\-')),
@@ -167,13 +168,13 @@ assert.match(glass,/html\[data-presentation="glass"\]\[data-shape="glass"\] \.pw
 assert.doesNotMatch(core,/\.execute-command-rail \.ctrl-block\{[^}]*border-radius|\.progress-rail\{[^}]*border-radius|\.ownership-banner\{[^}]*border-radius|\.pwa-update-control\{[^}]*border-radius/s,
   'Director/core geometry remains free of Glass-specific radius overrides');
 assert.match(glass,/html\[data-presentation="glass"\] #pane-execute \.execute-note-desk \.pnote-hdr\{[\s\S]*?grid-template-columns:minmax\(0,1fr\) 26px[\s\S]*?html\[data-presentation="glass"\] #pane-execute \.execute-note-desk \.pnote-title\{[\s\S]*?font-size:var\(--sd-type-role-section-size\)[\s\S]*?letter-spacing:\.01em/s,
-  'Glass Ongoing Notes header reserves the sync slot and restores Glass typography at every width');
+  'Glass notes header reserves the sync slot and restores Glass typography at every width');
 assert.match(glass,/@media\(max-width:560px\)\{[\s\S]*?#pane-execute \.execute-note-desk \.pnote-title\{font-size:clamp\(1rem,5vw,var\(--sd-type-role-metric-size\)\)\}/s,
-  'Glass narrows only the Ongoing Notes title size on small screens');
+  'Glass narrows only the notes title size on small screens');
 assert.match(glass,/html\[data-presentation="glass"\] \.focus-rhythm-title,[\s\S]*?\.backup-section-title,[\s\S]*?\.execute-overlay-kicker,[\s\S]*?\.interaction-eyebrow\{letter-spacing:var\(--sd-type-label-tracking\)\}/s,
   'Glass section and overlay labels consume the shared Glass tracking token');
 assert.doesNotMatch(core,/pnote-title[^}]*clamp\(1rem,5vw|execute-note-desk \.pnote-hdr[^}]*grid-template-columns:minmax\(0,1fr\) 26px/s,
-  'Director Ongoing Notes typography/layout is not changed by the Glass correction');
+  'Director notes typography/layout is not changed by the Glass correction');
 
 // Plan draft rows use one coherent control geometry rather than browser/intrinsic sizing.
 assert.match(core,/\.plan-draft-fields\{[^}]*--plan-draft-control-height:36px[^}]*grid-template-columns:minmax\(180px,2fr\) repeat\(6,minmax\(88px,1fr\)\)[^}]*align-items:stretch/s,
@@ -325,7 +326,7 @@ const app=fs.readFileSync('source/app.html','utf8');
 const review=fs.readFileSync('source/core/review.js','utf8');
 const provider=fs.readFileSync('source/core/backup-provider.js','utf8');
 const background=fs.readFileSync('source/core/repository-background.js','utf8');
-const device=fs.readFileSync('source/core/device-backup.js','utf8');
+const backupEngine=fs.readFileSync('source/core/backup-provider.js','utf8');
 const css=fs.readFileSync('source/styles/core.css','utf8');
 const architecture=fs.readFileSync('contracts/data-architecture.mjs','utf8');
 const drive=fs.readFileSync('source/external/drive.js','utf8');
@@ -333,8 +334,10 @@ assert.doesNotMatch(timer,/requestAnimationFrame\(step\)[\s\S]{0,240}requestAnim
 assert.match(timer,/The one-second timer tick already advances progress/u);
 assert.match(ownership,/if\(!\(renewing&&hasControl\)\)setPrimary/u,'Ownership heartbeat renewal must not replay primary UI hooks.');
 assert.match(app,/TIMER_SNAPSHOT_INTERVAL_MS=60\*1000/u,'Routine active-session crash checkpoints must use the agreed one-minute cadence.');
-assert.match(review,/const REVIEW_SAVE_DEBOUNCE_MS=450/u,'Review reflection and study-quality edits must retain the 450 ms priority persistence window.');
-assert.match(review,/function persistReviewBinding[\s\S]{0,520}saveLiveDraft\(\{markChanged:false,delayMs:REVIEW_SAVE_DEBOUNCE_MS/u,'Review autosave must use Active Session persistence rather than a separate Reflection Draft repository.');
+assert.match(review,/const reflectionLane=SaveLane\.createLane\(/u,'Review reflection and study-quality edits save through the shared save lane.');
+assert.doesNotMatch(review,/REVIEW_SAVE_DEBOUNCE_MS|reflectionOnlyTimer/u,'Review keeps no save timer of its own.');
+assert.match(review,/function persistReviewBinding[\s\S]{0,520}reflectionLane\.schedule\(freeze\(\{mode:'session'/u,'Review autosave on a study day goes through the save lane into the session.');
+assert.match(review,/async function writeReflection[\s\S]{0,200}mode==='session'[\s\S]{0,120}writeLiveDraftNow\(/u,'Review autosave must use Active Session persistence rather than a separate Reflection Draft repository.');
 assert.match(app,/review:currentReviewSnapshot\(\)/u,'Active Session snapshots must carry the current Review reflection and study quality.');
 assert.match(app,/function flushLiveDraft\(options=\{\}\)[\s\S]{0,520}writeLiveDraftNow\(\{\.\.\.pending,emergency:true\}\)/u,'Review/page-exit flushes must use the existing emergency Active Session recovery path.');
 assert.match(app,/window\.addEventListener\('pagehide',[\s\S]{0,180}flushPendingReviewSave\(\{strict:false\}\)/u,'Page hide must flush pending Review state before asynchronous work can be suspended.');
@@ -355,27 +358,26 @@ assert.doesNotMatch(app,/ACTIVE_SESSION_ASSET_MAINTENANCE_DELAY_MS/u,'Routine ac
 assert.match(app,/canonicalCommitChangesAttachmentReferences/u,'Attachment maintenance must be gated by reference changes rather than every canonical commit.');
 assert.match(app,/else if\(type==='activeSession'\)\{identity=String\(value&&value\.id\|\|ACTIVE_SESSION_ID\);text=String\(value&&value\.snapshot&&value\.snapshot\.review&&value\.snapshot\.review\.reflection\|\|''\);\}/u,'Active Session attachment tracking must inspect only the current Review reflection now that unsaved Reflection state lives there.');
 assert.match(app,/if\(referencesChanged&&event\?\.backupCapture!==true\)\{[\s\S]{0,140}scheduleRichTextAssetMaintenance\(\)/u,'Active Session checkpoints may schedule attachment maintenance only when their Review attachment-reference signature actually changes, and never recursively during backup capture.');
-assert.match(app,/function scheduleDailyAttachmentMaintenance\(\)\{[\s\S]{0,180}if\(!appCanMutate\(\)\)return false/u,'The daily orphan sweep must be owned by the primary instance so a secondary startup cannot consume the day gate.');
-const dailyAttachmentMaintenance=app.slice(app.indexOf('function scheduleDailyAttachmentMaintenance('),app.indexOf('function installApplicationDomBindings('));
-assert.match(dailyAttachmentMaintenance,/scheduleRichTextAssetMaintenance\(0\)/u,'The delayed daily opportunity must request the verified sweep.');
-assert.doesNotMatch(dailyAttachmentMaintenance,/AppData\.local\.setText/u,'Scheduling or starting an attempt must not certify daily cleanup.');
-assert.match(app,/completed:\(\)=>\{if\(!AppData\.local\.setText\(STORAGE_KEYS\.attachmentMaintenanceDay,todayISO\(\)\)\|\|!AppData\.local\.remove\(STORAGE_KEYS\.attachmentMaintenancePending\)\)throw/u,'Only completed cleanup may durably consume the daily success gate; failed storage writes must remain retryable.');
-assert.match(architecture,/attachmentMaintenanceDay:'studyDirector\.attachmentMaintenanceDay\.v2'/u,'Daily attachment-maintenance startup gating must use a declared local-storage identity.');
+const dailyUpkeep=app.slice(app.indexOf('const DataMaintenanceJob=OperationLifecycle.createJob('),app.indexOf('function scheduleDataMaintenance('));
+assert.match(dailyUpkeep,/else if\(status==='completed'\)\{[\s\S]*?scheduleRichTextAssetMaintenance\(ATTACHMENT_CLEANUP_AFTER_UPKEEP_MS\)/u,'The daily orphan sweep follows the canonical daily upkeep, which only the primary instance runs.');
+assert.doesNotMatch(app,/(?<!OBSOLETE_)STORAGE_KEYS\.attachmentMaintenance(?:Day|Pending)/u,'Attachment cleanup keeps no browser-storage day or pending record; only the compatibility host names them, to remove them.');
+assert.match(architecture,/attachmentMaintenanceDay:'studyDirector\.attachmentMaintenanceDay\.v2'/u,'The retired daily record keeps a declared identity so the compatibility host can remove it.');
 assert.match(app,/pane-plan'\)\?\.classList\.contains\('on'\)\)updateRealTimeAwareness/u,'The global second clock must not repaint hidden Plan realtime UI.');
 assert.match(app,/pane-execute'\)\?\.classList\.contains\('on'\)\)refreshExecuteIdleDisplay/u,'The global second clock must not repaint hidden Execute idle UI.');
-assert.match(provider,/maintenanceWorkBudgetMs:PROVIDER_MAINTENANCE_BUDGET_MS[\s\S]*budgetMs:PROVIDER_MAINTENANCE_BUDGET_MS/u,'Remote repository maintenance must derive and enforce the shared 30-second hard work budget.');
+assert.match(provider,/maintenanceWorkBudgetMs:PROVIDER_MAINTENANCE_BUDGET_MS[\s\S]*workBudget\.start\(PROVIDER_MAINTENANCE_BUDGET_MS\)/u,'Remote repository maintenance must consume the shared work allowance; assembled behavioral suites verify productive boundaries.');
 assert.match(background,/const PRIORITY=freeze\(\{integrity:10,maintenance:20,automatic:30,convergence:40\}\)[\s\S]*scheduled=new Map\(\),active=new Map\(\)/u,'Drive maintenance, integrity scrub and deferred convergence must be explicitly tracked by the shared coordinator so foreground work can pre-empt them.');
 assert.match(background,/function beginForeground[\s\S]*suspendTimers\(\)[\s\S]*row\.controller\.abort[\s\S]*waitForSettlement\(waiting,controller\.signal\)/u,'Shared foreground ownership must disarm queued background starts and abort/await active maintenance, integrity and convergence work before continuing.');
 assert.match(provider,/async function saveRepositoryProvider\(selected,[\s\S]{0,280}if\(preemptBackground\)await preemptProviderBackground\(selected\)/u,'Repository publication must take priority over active background repository work.');
 assert.match(provider,/async function loadRepositoryProvider\(selected,[\s\S]*?await preemptProviderBackground\(selected\);[\s\S]*?repositoryOperationSelected\(selected/u,'Foreground provider recovery must take priority over active background repository work.');
 assert.doesNotMatch(provider,/PROVIDER_GC_RETRY_MS/u,'Retired high-frequency remote GC polling must not return.');
 assert.match(background,/graceMs:6\*60\*60\*1000[\s\S]*nextEligibleAt[\s\S]*reason[\s\S]*gc-grace/u,'Deferred Drive GC must preserve an explicit eligibility deadline through the shared maintenance state instead of becoming immediately actionable on restart.');
-assert.match(provider,/cleanup:deferredMaintenance\?async\(\)=>\{if\(!maintenanceNeeded\)return[\s\S]*scheduler\?\.request\('repository-state',MAINTENANCE_POLICY\.busyMs[\s\S]*finally\{if\(publicationLease\)\{[\s\S]*await endRepositoryPublication/u,'Committed Drive publication must queue maintenance through the shared scheduler while keeping publication-marker release on the awaited foreground boundary.');
+assert.match(provider,/cleanup:deferredMaintenance\?async\(\)=>\{if\(!maintenanceNeeded\)return[\s\S]*scheduler\?\.request\('repository-state',MAINTENANCE_POLICY\.busyMs[\s\S]*finally\{(?:if\(copied\)[^;]*;)?(?:if\(continuation[^;]*;)?if\(publicationLease\)\{[\s\S]*await endRepositoryPublication/u,'Committed Drive publication must queue maintenance through the shared scheduler while keeping publication-marker release on the awaited foreground boundary.');
 assert.match(background,/function arm\(entry\)\{[\s\S]*if\(!entry\|\|foreground\|\|suspensions\.size[\s\S]*function beginForeground[\s\S]*suspendTimers\(\)[\s\S]*release:[\s\S]*foreground=null;resumeTimers\(\)/u,'Foreground ownership must keep queued repository maintenance disarmed until the foreground operation has fully released.');
-assert.match(provider,/finally\{[\s\S]{0,220}await release\(selected,'export'\);setBusy\(false\);foreground\.release\(\);[\s\S]{0,120}if\(backgroundAfter\)scheduleProviderIntegrityScrub\(selected,1500\);\}/u,'Drive integrity may be offered after provider busy state and shared foreground ownership are released; presentation detachment may occur before scheduler handoff.');
-assert.match(drive,/function release\(\)\{clearPickerMetadata\(\);if\(accessToken&&Date\.now\(\)>=tokenExpiresAt\)clearSession\(\);\}/u,'Drive operation release must retain an unexpired access token so bounded post-operation maintenance can use the existing authorization.');
+assert.match(provider,/finally\{[\s\S]*await release\(selected,'export'\);setBusy\(false\);foreground\.release\(\);/u,'foreground completion releases its owner without a second scheduling handoff');
+assert.match(drive,/function release\(\)\{if\(accessToken&&Date\.now\(\)>=tokenExpiresAt\)clearSession\(\);\}/u,'Drive operation release must retain an unexpired access token so bounded post-operation maintenance can use the existing authorization.');
 assert.doesNotMatch(provider,/PROVIDER_BUSY_RETRY_MS/u,'Retired timed provider busy polling must not remain after background work became opportunistic and foreground-pre-emptible.');
-assert.match(device,/if\(scheduledUrgent\|\|scheduledRetry\|\|!urgent\)return true/u,'Routine dirty commits must not re-arm an already scheduled Device Folder backup.');
+assert.match(backupEngine,/job\.schedule\(Math\.max\(0,automaticDueAt\(selected\)-now\),urgent\?'important-change':'automatic','earliest'\)/u,'routine commits must preserve the earliest automatic-backup deadline');
+assert.match(backupEngine,/due>Date\.now\(\)\+50\)\{job\.schedule\(due-Date\.now\(\),'automatic','earliest'\);return freeze\(\{status:'idle',reason:'not-due'\}\)/u,'any earlier wake-up keeps the waiting changes\' deadline instead of backing them up early');
 assert.match(css,/--sd-motion-progress-transition:width var\(--sd-motion-duration-progress\) linear/u,'Timer progress must regain smooth CSS interpolation without a display-rate JavaScript loop.');
 console.log(JSON.stringify({status:'PASS',suite:'runtime-energy-boundary',silentHeartbeat:true,timerRafBounded:true,sessionCheckpoint60s:true,attachmentMaintenanceReferenceDriven:true,dailyAttachmentSweep:true,activeSessionAssetGcReferenceDriven:true,hiddenPaneTicksBounded:true,providerMaintenanceBounded:true,providerMaintenancePreemptible:true,driveAuthorizationRetained:true,deviceScheduleStable:true,smoothCssProgress:true}));
 }

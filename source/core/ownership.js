@@ -43,7 +43,7 @@ registry.define('ownership',1,()=>{
     functions(input.diagnostics,['capture','guard'],'App ownership diagnostics');
     functions(input.hooks,[
       'render','refreshStorage','stopExecution','isInitialized','hydrate','finalizeHydration','resume','refreshCore',
-      'scheduleMaintenance','practiceRender','blocked','invalidate','flush','settled'
+      'scheduleMaintenance','practiceRender','blocked','invalidate','flush','settled',...(Object.hasOwn(input.hooks,'peerStorageReset')?['peerStorageReset']:[])
     ],'App ownership hooks');
     const config=input.config;
     const env=input.environment;
@@ -242,7 +242,7 @@ registry.define('ownership',1,()=>{
       if(!channel)return Promise.resolve(true);
       if(probePending)return probePending.promise;
       const yieldedControl=hasControl;
-      transition(OWNERSHIP_STATES.RESOLVING,'checking recorded owner');
+      if(yieldedControl||state!==OWNERSHIP_STATES.SECONDARY)transition(OWNERSHIP_STATES.RESOLVING,'checking recorded owner');
       if(yieldedControl)stopExecution();
       hooks.render();
       const probeId='probe_'+env.now().toString(36)+'_'+env.randomIdPart(6);
@@ -257,7 +257,9 @@ registry.define('ownership',1,()=>{
       if(!webLocks)return Promise.resolve(writeLease({force,hydrate}));
       if(webLockHeld)return Promise.resolve(writeLease({force:true,hydrate}));
       if(webLockAttempt)return webLockAttempt;
-      transition(OWNERSHIP_STATES.ACQUIRING,force?'explicit takeover':'web lock check');
+      // A routine availability check does not change a read-only tab's authority.
+      // If the lock is granted, writeLease performs the actual acquiring transition.
+      if(force||state!==OWNERSHIP_STATES.SECONDARY)transition(OWNERSHIP_STATES.ACQUIRING,force?'explicit takeover':'web lock check');
       hooks.render();
       let resolveAttempt;
       const attempt=new Promise(resolve=>{resolveAttempt=resolve;});
@@ -346,6 +348,9 @@ registry.define('ownership',1,()=>{
             }
             if(message.type==='owner-alive'&&probePending&&message.probeId===probePending.probeId){resolveProbe(true);return;}
             if(message.type==='owner-takeover-request'&&message.requestId){void flushAndRelease(message.requestId);return;}
+            // Another tab was first to reopen storage after the browser cleared it;
+            // the tab in control writes its copy back.
+            if(message.type==='storage-reset'){if(canMutate()&&hooks.peerStorageReset)diagnostics.guard('ownership.peer-storage-reset',()=>hooks.peerStorageReset(String(message.detectedAt||'')));return;}
             if(message.type==='owner-takeover-ready'&&takeoverPending&&message.requestId===takeoverPending.requestId){takeoverPending.resolve(true);return;}
             if(message.type==='owner-heartbeat'&&Number(message.expiresAt)>env.now()&&!webLockHeld)setPrimary(false);
             else if(message.type==='owner-release'&&!takeoverPending)void evaluate();
@@ -422,7 +427,8 @@ registry.define('ownership',1,()=>{
       assertWriteToken:{value:assertWriteToken,enumerable:true},
       isOwnershipLostError:{value:isOwnershipLostError,enumerable:true},
       requirePrimary:{value:requirePrimary,enumerable:true},
-      status:{value:status,enumerable:true}
+      status:{value:status,enumerable:true},
+      announceStorageReset:{value:detectedAt=>{post({type:'storage-reset',detectedAt:String(detectedAt||'')});return true;},enumerable:true}
     });
     return freeze(controller);
   }

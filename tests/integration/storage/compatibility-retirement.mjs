@@ -9,18 +9,20 @@ const freeze=Object.freeze;
 
 const order=[];
 const live=freeze({
+  renameIdentities:async()=>{order.push('identities');return freeze({status:'renamed'});},
   cleanupLegacyStorage:async()=>{order.push('legacyStorage');return freeze({status:'cleaned'});},
   migratePlan:async()=>{order.push('plan');return freeze({status:'migrated'});},
   migrateReflections:async()=>{order.push('reflections');return freeze({status:'migrated'});},
   migrateHostMetadata:async()=>{order.push('hostMetadata');return freeze({status:'migrated'});},
   migrateActiveSession:async()=>{order.push('activeSession');return freeze({status:'migrated'});},
-  migrateAreaNotes:async()=>{order.push('areaNotes');return freeze({status:'migrated'});},
-  migrateAreaNoteRecovery:async()=>{order.push('areaNoteRecovery');return freeze({status:'migrated'});},
+  migrateNotes:async()=>{order.push('notes');return freeze({status:'migrated'});},
+  migrateNoteRecovery:async()=>{order.push('noteRecovery');return freeze({status:'migrated'});},
   migrateDailyRecords:async()=>{order.push('dailyRecords');return freeze({status:'migrated'});},
   migrateDeletionState:async()=>{order.push('deletionState');return freeze({status:'migrated'});},
   migrateInsightsRevisionEnvelope:async()=>{order.push('insightsRevisionEnvelope');return freeze({status:'migrated'});},
   cleanupLegacyAttachments:async()=>{order.push('attachments');return freeze({status:'cleaned'});},
   cleanupObsoleteMetadata:async()=>{order.push('obsoleteMetadata');return freeze({status:'cleaned'});},
+  settleUnsupported:async()=>{order.push('unsupported');return freeze({status:'none'});},
   retireTopology:async()=>{order.push('topology');return freeze({status:'retired'});},
   retireLegacyIdentity:async()=>{order.push('retiredIdentity');return freeze({status:'retired'});}
 });
@@ -30,7 +32,7 @@ const backups=freeze({
   inspectLegacy:async()=>{legacyInspections++;return freeze({kind:'legacy'});}
 });
 const checkState={};
-const names=['planLegacy','reflectionLegacy','activeSession','areaNotes','areaNoteRecovery','dailyRecords','deletionState','insightsRevisionEnvelope','canonicalStores','legacyStorage','legacyAttachments','obsoleteMetadata','topology','retiredIdentity','retiredHostCompatibility','freshBackup'];
+const names=['planLegacy','reflectionLegacy','activeSession','notes','noteRecovery','dailyRecords','deletionState','insightsRevisionEnvelope','canonicalStores','legacyStorage','legacyAttachments','obsoleteMetadata','topology','retiredIdentity','retiredHostCompatibility','freshBackup'];
 const verification=freeze(Object.fromEntries(names.map(name=>[name,async()=>{
   const state=checkState[name];
   if(state instanceof Error)throw state;
@@ -66,7 +68,7 @@ assert.equal(Compatibility.applyIndexedDbUpgrade({oldVersion:3,db:upgradeDb,tran
 
 const [first,second]=await Promise.all([facade.migrateLive(),facade.migrateLive()]);
 assert.equal(first,second,'concurrent migration callers must share one facade run');
-assert.deepEqual(order,['plan','reflections','activeSession','areaNotes','areaNoteRecovery','dailyRecords','deletionState','insightsRevisionEnvelope','hostMetadata','attachments','obsoleteMetadata','legacyStorage','topology','retiredIdentity'],'physical retirement must occur only after migratable sources are consumed and local canonical proofs pass');
+assert.deepEqual(order,['identities','plan','reflections','activeSession','notes','noteRecovery','dailyRecords','deletionState','insightsRevisionEnvelope','hostMetadata','attachments','obsoleteMetadata','legacyStorage','unsupported','topology','retiredIdentity'],'physical retirement must occur only after migratable sources are consumed and local canonical proofs pass');
 assert.equal(facade.status().migrated,true);
 
 assert.equal((await facade.inspectBackup('current')).kind,'current');

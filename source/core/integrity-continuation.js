@@ -31,7 +31,7 @@ registry.define('integrity-continuation',1,()=>{
           check();const offset=state.stored.offset,length=Math.min(CHUNK,entry.storedBytes-offset),part=await readRange(entry,{offset,length,signal});check();
           if(!part||!(part.blob instanceof Blob)||part.blob.size!==length||part.totalBytes!==entry.storedBytes||typeof part.version!=='string'||!part.version||part.version.length>160)throw new Error('The repository range could not be verified.');
           if(state.sourceVersion&&state.sourceVersion!==part.version){await reset();throw Object.assign(new Error('The repository object changed during verification. Verification will restart.'),{code:'REPOSITORY_OBJECT_CHANGED'});}
-          const result=await processing.run('integrity.append',{chunk:part.blob,offset,hash:state.stored.hash,output:{kind:'opfs',name:stored.name}},{signal});
+          const result=await processing.run('integrity.append',{chunk:part.blob,offset,hash:state.stored.hash,output:{kind:'opfs',name:stored.name,directory:stored.directory}},{signal});
           state={...state,sourceVersion:part.version,stored:{...state.stored,offset:result.offset,hash:result.hash}};
           if(result.offset===entry.storedBytes){if(result.checksum!==entry.storedChecksum)throw Object.assign(new Error('Repository object failed stored-byte verification.'),{code:'REPOSITORY_INTEGRITY_CORRUPT'});state.phase=manifest.encrypted?'plain':'verified';}
           await save();await yieldTask();
@@ -53,23 +53,12 @@ registry.define('integrity-continuation',1,()=>{
         // it to the current source version before trusting cached ciphertext.
         await proveStaging(0,Math.min(64,entry.storedBytes));
         const info=await processing.run('crypto.info',{file:storedFile},{signal});
-        if(!manifest.encrypted&&(info||await storedFile.slice(0,8).text()==='SDENC01\n'))throw Object.assign(new Error('Repository object protection does not match its checkpoint.'),{code:'REPOSITORY_INTEGRITY_CORRUPT'});
-        if(manifest.encrypted&&!info){
-          // The historical authenticated format is limited to 32 MiB and uses
-          // the existing bounded compatibility reader.
-          const decoded=await protection.unprotect(storedFile,{interactive:false,signal});
-          if(!decoded.encrypted)throw Object.assign(new Error('Repository object protection does not match its checkpoint.'),{code:'REPOSITORY_INTEGRITY_CORRUPT'});
-          if(entry.kind==='attachment'){
-            try{if(decoded.blob.size!==entry.sourceBytes||await processing.run('checksum',{value:decoded.blob},{signal})!==entry.fingerprint)throw Object.assign(new Error('Repository attachment failed plaintext verification.'),{code:'REPOSITORY_INTEGRITY_CORRUPT'});return freeze({complete:true});}
-            finally{await processing.run('file.release',{file:decoded.blob});}
-          }
-          handedOff=true;return freeze({complete:true,opened:freeze({blob:decoded.blob,release:async()=>{await processing.run('file.release',{file:decoded.blob});await files.release(stored.name);}})});
-        }
+        if(!!manifest.encrypted!==!!info)throw Object.assign(new Error('Repository object protection does not match its checkpoint.'),{code:'REPOSITORY_INTEGRITY_CORRUPT'});
         if(state.phase==='plain'){
           if(entry.kind!=='attachment'&&!plain){plain=await files.stage();state={...state,plain:{...state.plain,name:plain.name}};await save();}
           while(state.phase==='plain'&&units++<maxSegments){
             check();let result;
-            try{result=await protection.verifyFrame({file:storedFile,hash:state.plain.hash,frame:state.plain.frame,output:plain?{kind:'opfs',name:plain.name}:null},{signal});}
+            try{result=await protection.verifyFrame({file:storedFile,hash:state.plain.hash,frame:state.plain.frame,output:plain?{kind:'opfs',name:plain.name,directory:plain.directory}:null},{signal});}
             catch(error){
               if(error?.code==='BACKUP_AUTH_FAILED'){
                 // Distinguish a wrong key from local staging damage with at

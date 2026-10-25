@@ -14,7 +14,9 @@ registry.define('asset-storage',1,()=>{
   }
   function create(ports){
     const {read,keys,commit,validId,validType,maxBytes,storage,locks,issueToken,assertToken,canMutate,ingest}=ports;
-    const writeLock=ports.name+':attachment-metadata.v2',retainLock=ports.name+':attachment-retention.v2',DIRECTORY='@@SD_ATTACHMENT_OPFS_DIRECTORY@@',LEGACY_DIRECTORY='@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@';
+    const writeLock=ports.name+':attachment-metadata.v2',retainLock=ports.name+':attachment-retention.v2',DIRECTORY=String(ports.directory||'@@SD_ATTACHMENT_OPFS_DIRECTORY@@');
+    // Only the first profile can hold the attachment folder of earlier versions.
+    const LEGACY_DIRECTORY=ports.directory?String(ports.legacyDirectory||''):'@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@';
     const supported=()=>ports.protocol!=='file:'&&typeof storage?.getDirectory==='function'&&typeof locks?.request==='function'&&typeof ingest?.ingest==='function';
     function available(){if(!supported()){const error=new Error(ports.protocol==='file:'?'Attachments cannot be stored when index.html is opened directly. Close this copy and use Start-Study-Director from the deployment folder, or open the hosted app.':'Attachment storage is unavailable. Use a supported browser with site storage enabled.');error.name='NotSupportedError';throw error;}}
     const id=value=>{if(typeof value!=='string'||!validId(value))throw new TypeError('Invalid attachment identity.');return value;};
@@ -37,7 +39,7 @@ registry.define('asset-storage',1,()=>{
         let legacyMetadataCount=0;
         for(const [,row] of await allEntries())if(legacyMetadata(row))legacyMetadataCount++;
         let legacyDirectory=false;
-        try{await (await storage.getDirectory()).getDirectoryHandle(LEGACY_DIRECTORY);legacyDirectory=true;}
+        try{if(LEGACY_DIRECTORY){await (await storage.getDirectory()).getDirectoryHandle(LEGACY_DIRECTORY);legacyDirectory=true;}}
         catch(error){if(error?.name!=='NotFoundError')throw error;}
         return Object.freeze({ok:legacyMetadataCount===0&&!legacyDirectory,status:'verified',legacyMetadata:legacyMetadataCount,legacyDirectory});
       });
@@ -52,7 +54,7 @@ registry.define('asset-storage',1,()=>{
         assertToken(token);if(remove.length)await commit([],remove,token);
         assertToken(token);
         let directoryRemoved=false;
-        try{await (await storage.getDirectory()).removeEntry(LEGACY_DIRECTORY,{recursive:true});directoryRemoved=true;}catch(error){if(error?.name!=='NotFoundError')directoryRemoved=false;}
+        try{if(LEGACY_DIRECTORY){await (await storage.getDirectory()).removeEntry(LEGACY_DIRECTORY,{recursive:true});directoryRemoved=true;}}catch(error){if(error?.name!=='NotFoundError')directoryRemoved=false;}
         assertToken(token);
         legacyCleanupResult=Object.freeze({status:'completed',removed:remove.length,directoryRemoved});return legacyCleanupResult;
       });
@@ -75,7 +77,7 @@ registry.define('asset-storage',1,()=>{
         const issues=cursor&&Array.isArray(prior?.issues)?[...prior.issues]:[];
         const issue=row=>issues.push(Object.freeze(row));let dir=null;
         try{for(;cursor<total;cursor++){
-          check();if(visited>=maxEntries||now()-started>=workMs)break;visited++;
+          check();if(visited>=maxEntries||visited>0&&now()-started>=workMs)break;visited++;
           if(cursor>=entries.length)issue({id:missing[cursor-entries.length],kind:'missing-metadata'});
           else{
             const [rawKey,value]=entries[cursor],key=String(rawKey||'');let row;
@@ -131,7 +133,7 @@ registry.define('asset-storage',1,()=>{
         check();return locked(async()=>{
           check();if(!canMutate())return {status:'skipped',reason:'not-primary',removed:0};
           const token=issueToken();
-          const removeMany=async(ids,guard=()=>true,allowLibrary=false)=>{const remove=[];for(const key of ids){check();id(key);const row=await read(key);check();if(row&&metadata(row).library&&!allowLibrary)continue;if(row)remove.push(key);}assertToken(token);if(remove.length){if(!guard())throw new Error('Attachment references changed during cleanup.');await commit([],remove,token,guard);}return remove.length;};
+          const removeMany=async(ids,guard=()=>true,allowLibrary=false)=>{const remove=[];for(const key of ids){check();id(key);const row=await read(key);check();if(row&&(!metadata(row).library||allowLibrary))remove.push(key);if(options.shouldYield?.())break;}assertToken(token);if(remove.length){if(!guard())throw new Error('Attachment references changed during cleanup.');await commit([],remove,token,guard);}return remove.length;};
           const sweep=async()=>{
             check();const retained=await storedFiles(),dir=await directory();check();let removed=0,visited=0;
             if(!sweepIterator)sweepIterator=dir.entries()[Symbol.asyncIterator]();sweepPending=true;
@@ -139,7 +141,7 @@ registry.define('asset-storage',1,()=>{
               check();if(!sweepEntry)sweepEntry=await sweepIterator.next();check();if(sweepEntry.done){sweepIterator=null;sweepEntry=null;sweepPending=false;break;}visited++;
               const [name,entry]=sweepEntry.value;
               if(entry.kind==='file'&&opaqueFile(name)&&!retained.has(name)){assertToken(token);check();await dir.removeEntry(name);removed++;}
-              sweepEntry=null;if(visited%16===0)await options.yieldTask?.();
+              sweepEntry=null;options.progress?.();if(visited%16===0)await options.yieldTask?.();
             }}catch(error){if(error?.code!=='ASSET_MAINTENANCE_YIELDED'){sweepIterator=null;sweepEntry=null;}throw error;}return removed;
           };
           const collectibleKeys=async()=>{const pinned=new Set((await list()).filter(row=>row.library).map(row=>row.id));return(await keys()).filter(key=>!pinned.has(key));};

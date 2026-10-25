@@ -137,7 +137,7 @@
           ["Mins","How long the block runs."],
           ["Task","The visible activity name."],
           ["Kind","Work covers study, writing and tests; Support covers exercise, admin and routines; Fixed covers meals, rest and sleep."],
-          ["Area","The subject or domain used for grouping. Tasks with the same exact Area share one ongoing note."],
+          ["Area","The subject or domain used for grouping. Tasks with the same exact Area share one note."],
           ["Measure","Optional unit: pages, questions, cases."],
           ["Target","Optional goal number for that unit."],
         ]},
@@ -175,18 +175,19 @@
       ],
       referenceTabs:[
         {id:"surfaces",label:"Surfaces",heading:"How to read this pane",kind:"pairs",items:[
-          ["Now Studying","Shows the current block and its Area. Work blocks use Area-specific ongoing notes; every support block uses the shared Support Activities note."],
+          ["Now Studying","Shows the current block and its Area. Work blocks use Area-specific notes; every support block uses the shared Support Activities note."],
           ["Session Status","Shows No Session, Plan Ready, Live Session, Session Paused, Suspended or Complete from the real Timer state."],
           ["Countdown","Shows remaining time for the running block. Extra Time appears after the planned duration is crossed."],
           ["Finish Block","Ends the current block, records focus evidence, and advances the schedule. If no explicit progress was entered, focus time becomes the editable fallback completion."],
           ["Skip Block","Leaves the block zero-complete, records the skip, and moves to the next block."],
           ["Block Progress","Done/Total converts pages, questions, cases, or other units into a percentage for the block. Manual % can override; focus time is only the fallback when stronger progress evidence is missing."],
           ["Practice Pacer","Starts or resumes only during a running work block. Use Simple for one target or Paper Plan for fixed-time or marks-weighted groups. Live guidance is derived; completed unit times are saved."],
-          ["Ongoing Notes","Persistent notes for the current Work Area, useful for doubts, mistakes, reminders, and subject-level carry-over. With no Work Area selected, the editor clears and links to Library notes."],
+          ["Notes","Persistent notes for the current Work Area, useful for doubts, mistakes, reminders, and subject-level carry-over. With no Work Area selected, the editor clears and links to Library notes."],
+          ["Linked notes","Under the note, the block's own note comes first, then the notes it links to. Tap one to read or edit it here; tap the first to come back. + links another note, × removes one. In the text, Link → Note or typing [[ links a word to a note."],
           ["Alignment","Compares the wall-clock schedule with the timer block so you can see drift clearly."],
           ["Adjust Plan","Manual recovery tools: jump to now, start full block, use remaining time, push work that still fits before 04:00, or make an unfinished note. Overflow becomes unfinished work."],
           ["Pomodoro Rhythm","Work-only break cues. The cue does not pause focus; the accepted Pomodoro break is timed separately and saved as planned recovery."],
-          ["Session Controls","Suspend keeps today recoverable. Reset clears today's live progress but keeps saved Library records and ongoing notes."],
+          ["Session Controls","Suspend keeps today recoverable. Reset clears today's live progress but keeps saved Library records and notes."],
         ]},
         {id:"actions",label:"Controls",heading:"What you can do",kind:"list",items:[
           "Tap the big timer to pause or resume",
@@ -203,11 +204,11 @@
           ["Work Completion","Explicit Done/Total or manual % counts first. If missing, actual focus can fill completion as a time-derived fallback. Skipped blocks stay 0%."],
           ["Schedule Drift","Original versus adjusted timing, shifted blocks, and recovery choices."],
           ["Session Shape","Starts, ends, overtime, sessions per block, and interruptions."],
-          ["Subject Evidence","Area-linked ongoing notes and progress by subject/workstream."],
+          ["Subject Evidence","Area-linked notes and progress by subject/workstream."],
           ["Practice Evidence","Completed pacer runs are shown in Review, Library, and the Practice Pacing view inside Execution. They do not change focus, work completion, Pomodoro, or any non-pacing metric."],
         ]},
       ],
-      saved:["Live timer state is saved for same-day recovery. If the browser is reopened after the study day changes, the previous unsaved session can be loaded into Review without restarting its timer.","Actual focus, pause time, work completion, skips, and adjustments are captured.","Practice Pacer stores only completed unit durations, the linked task, one governing target, optional compact plan groups, and compact segment boundaries/labels when used. Session totals, remaining pace and displayed statistics are derived.","Ongoing subject notes are saved by Area and reused across days.","Review uses Timer evidence to create the saved daily record that Library and Insights can read."],
+      saved:["Live timer state is saved for same-day recovery. If the browser is reopened after the study day changes, the previous unsaved session can be loaded into Review without restarting its timer.","Actual focus, pause time, work completion, skips, and adjustments are captured.","Practice Pacer stores only completed unit durations, the linked task, one governing target, optional compact plan groups, and compact segment boundaries/labels when used. Session totals, remaining pace and displayed statistics are derived.","Notes are saved by Area and reused across days.","Review uses Timer evidence to create the saved daily record that Library and Insights can read."],
       flow:["Applied Plan","Active Block","Pause / Focus / Overtime","Complete / Skip / Adjust","Review"],
       remember:"Execute is not only a clock. It supplies the evidence later used by Review, Library and Insights."
     }),
@@ -236,7 +237,7 @@
           ["Today's Blocks","Shows each applied plan block as review evidence: what was planned, what happened, and how complete it is."],
           ["Progress Fields","Done/Total and work completion can be corrected before saving. The app shows whether completion came from units, manual %, focus-time fallback, finished status, or skip."],
           ["Practice Pacer","Shows one compact row per completed run and an in-table total only when several runs exist. Open a run to inspect its units or delete that run from today’s review."],
-          ["Ongoing Notes","Work Areas keep reusable subject or workstream notes. All support activities share one Support Activities note. Review uses them as context, not as a forced diary."],
+          ["Notes","Work Areas keep reusable subject or workstream notes. All support activities share one Support Activities note. Review uses them as context, not as a forced diary."],
           ["Diary Reflection","Optional. Use it for causes, decisions, lessons, mood, or anything that explains the day."],
           ["Save Today","Stores one canonical Study Day for the date. Saving again replaces that same Study Day; it never creates a second copy."],
           ["Save Reflection","When no Study Day is active, stores a non-empty Daily Reflection in Diary for that date."],
@@ -257,7 +258,7 @@
       label:"Library",
       title:"Library keeps your saved records organized.",
       purpose:[
-        "Library holds saved Study Days plus the Diary collection of dated reflections. Filter or sort Study Days, open a date, or work directly with reflections and Ongoing Notes.",
+        "Library holds saved Study Days plus the Diary collection of dated reflections. Filter or sort Study Days, open a date, or work directly with reflections and notes.",
         "Library also holds backup and restore tools. Back up regularly if the records matter; restore only trusted Study Director backups. Deleting a saved date removes that record."
       ],
       actions:[
@@ -269,7 +270,7 @@
       records:[
         "The daily records created by Save Today.",
         "Task evidence, reflections, quality and unfinished notes.",
-        "External backup copies only when you back up manually or configure automatic backup."
+        "Backup copies only when you back up or turn on automatic backup."
       ],
       referenceTabs:[
         {id:"surfaces",label:"Surfaces",heading:"How to read this pane",kind:"pairs",items:[
@@ -278,20 +279,23 @@
           ["Day Detail","Shows the saved record for one day: study/work metrics, Pomodoro recovery, Practice Pacer summary when present, quality, reflection, unfinished note, and block evidence."],
           ["Task Details","Lets you inspect each saved block: planned duration, actual focus, work completion, progress units, explicit skip or other outcome state, area, and saved pause evidence."],
           ["Reflection / Unfinished","Keeps the diary reflection and carry-forward note visible beside the measurable record."],
-          ["Record Retrieval","Library lets you inspect saved Study Days while Diary and Ongoing Notes remain editable in their own Library sections."],
+          ["Record Retrieval","Library lets you inspect saved Study Days while Diary and notes remain editable in their own Library sections."],
+          ["Tags","Write #tag anywhere in a note. Under the notes search, tap tags to show only notes that have all of them; × Clear shows every note again. With one tag picked, Rename changes it in every note, and a name already in use merges the two. Typing # and a letter offers the tags in use."],
+          ["Import","Import, beside + New, turns .txt and .md files into new notes named after them, inside the open note or at the top level. Images and links to other files stay as their Markdown text."],
         ]},
         {id:"data-tools",label:"Data Tools",heading:"Backup and recovery",kind:"pairs",items:[
-          ["Data model","Local-first, versioned handoff: your device stays authoritative until you explicitly back up or recover a checkpoint. Google Drive is the intended computer ↔ phone/tablet handoff path; it is not continuous sync."],
-          ["Managed checkpoints","Device Folder keeps verified versions in a folder on this device. Google Drive keeps the same managed checkpoint model off-device and lets another Study Director device recover that history after authorization."],
-          ["Recover","Choose a verified backup from that location, then Keep current, Combine with current data, or Replace current data."],
-          ["Replace current data","Makes the selected backup authoritative for portable Study Director data. Device-local settings stay on this device."],
-          ["Combine with current data","Keeps current data and reviews genuine differences before applying them. An optional checkbox can also download an extra standalone safety copy; automatic rollback protection remains on."],
-          ["Export backup","Creates one complete standalone .sdbackup file for manual transfer or safekeeping. It is separate from Device Folder and Google Drive version history."],
-          ["Import backup","Verifies a standalone backup, then lets you Replace current data or Combine with current data."],
+          ["Data model","Local-first: each device keeps all its data and works on its own. While a device is signed in to Google Drive, it syncs: it takes in what your other devices changed, then uploads its own changes. Where both sides changed the same thing, the newer shows and the other is kept for you, marked Needs review; edits to different paragraphs of a note are joined for you."],
+          ["Version History","Your backups keep verified versions: the Device Folder in a folder on this device, Google Drive off this device and shared by your devices. A version made here goes to both under the same name, and Version History lists each version once."],
+          ["Recover","Open Version History and choose a version, then Keep current, Add only what’s missing, Combine with current data, or Replace current data. While Google Drive is connected, your other devices get the result at their next sync."],
+          ["Add only what’s missing","Brings back Saved Days and attachments this device doesn’t have and changes nothing you have now. If something differs and needs a choice, nothing is changed and Combine is the way to review it."],
+          ["Replace current data","Makes your data match the selected backup. One question asks whether to keep what this device has that the backup neither has nor deleted (kept by default); notes the backup deleted go to Recently deleted. Device-local settings stay on this device."],
+          ["Combine with current data","Adds what’s new. Notes, plans and settings changed on only one side since your last Drive sync are taken without asking; where both sides changed, or Saved Days differ, you choose: notes side by side (one click can settle all remaining), the rest in one dialog with this device preselected. Nothing is deleted unless it was deleted on purpose, and deleted notes go to Recently deleted. An optional checkbox can also download an extra standalone safety copy; automatic rollback protection remains on."],
+          ["Export backup","Creates one complete standalone .sdbackup file for manual transfer or safekeeping. You choose where it is saved; Study Director then reads the saved file back to verify it (browsers without a save dialog download it instead). It is separate from Device Folder and Google Drive version history."],
+          ["Restore from file","Verifies a standalone backup, then lets you Add only what’s missing, Combine with current data, or Replace current data."],
           ["Delete Day","Removes a saved day deliberately; back up first if the record may matter later."],
         ]},
       ],
-      saved:["Library contains saved Study Days and dated Diary reflections.","Managed backup history and standalone backup files are separate recovery options.","Use only trusted Study Director backups when replacing or combining data.","Delete removes a saved day."],
+      saved:["Library contains saved Study Days and dated Diary reflections.","Version History and standalone backup files are separate ways to recover.","Use only trusted Study Director backups when replacing or combining data.","Delete removes a saved day."],
       flow:["Study Days / Diary","Open Record","Inspect / Edit Reflection","Insights"],
       remember:"Library is your durable record collection. Keep backups if the data matters."
     }),
@@ -1083,8 +1087,9 @@
     const dataGrid=el('div','guide-data-grid');
     [
       ['Save the day','Review → Save Today creates the Study Day record used by Library and Insights.'],
-      ['Keep a backup','Library → Data & Backup explains managed checkpoints and multi-device handoff. For computer ↔ phone/tablet, back up to Google Drive on the device you are leaving, then open Versions on the other device and Combine or Replace. Advanced → Export backup… creates a separate standalone file.'],
-      ['Google Drive','Optional. Before Google authorization, Study Director explains that drive.file access is used only to create, list, read, verify, rotate or delete Study Director backup files and related metadata. Backups are integrity-checked; optional backup encryption can be enabled in Library.'],
+      ['Keep a backup','Library → Data explains backups and sync. To use Study Director on a computer and a phone or tablet, connect Google Drive on each; while signed in, they sync on their own. Today’s session runs on one device at a time: Suspend Today hands it over, and Continue Here picks it up on the other device. Notes and everything else can be edited on either device meanwhile. Advanced → Export backup… creates a separate standalone file.'],
+      ['Device Folder','Optional, where the browser supports it. Choose a folder once; Study Director then backs up to it on its own, within 20 minutes of a change and within seconds of finishing the day. If the browser asks for permission again, you get one notice with Allow access.'],
+      ['Google Drive','Optional. Before Google authorization, Study Director explains that drive.file access is used only to create, list, read, verify, rotate or delete Study Director backup files and related metadata. Backups are integrity-checked; optional backup encryption can be enabled in Library. While you are signed in, the device syncs: on sign-in, on opening or returning to the app, every 20 minutes and on leaving it; its own changes go up on the same schedule as the Device Folder. The sidebar shows Synced, Changes since or Needs review. Google ends the sign-in after about an hour (it lasts across reloads until then); you get one notice you can dismiss, and changes made while signed out sync when you reconnect.'],
       ['Sample data',`The ${PREVIEW_SAMPLE_DAYS}-day preview is temporary, read-only and never included in exports.`]
     ].forEach(([title,copy])=>{
       const item=el('div','guide-data-item');
@@ -1095,7 +1100,7 @@
     wrap.appendChild(data);
     const legal=el('section','guide-section guide-legal ui-card');
     const legalCopy=el('div');
-    legalCopy.append(el('h2','guide-label ui-label','Privacy, Legal & Security'),el('div','ui-body','Study Director is local-first with checkpoint-based handoff. Review the policies for local storage, optional Google Drive backup, software use, third-party notices and responsible security reporting.'));
+    legalCopy.append(el('h2','guide-label ui-label','Privacy, Legal & Security'),el('div','ui-body','Study Director is local-first, with optional sync through Google Drive. Review the policies for local storage, optional Google Drive backup, software use, third-party notices and responsible security reporting.'));
     const legalLinks=el('nav','guide-legal-links');
     legalLinks.setAttribute('aria-label','Study Director legal documents');
     LegalCenter.documents.forEach(documentDefinition=>{

@@ -56,7 +56,7 @@ assert.deepEqual(events.slice(0,4),[
 
 let releaseAsync;
 const asyncGate=new Promise(resolve=>{releaseAsync=resolve;});
-const asyncTransition=coordinator.run('imported-area-notes',{date:'2026-08-05'},async()=>{
+const asyncTransition=coordinator.run('imported-notes',{date:'2026-08-05'},async()=>{
   await asyncGate;
   return 'imported';
 });
@@ -70,7 +70,7 @@ assert.equal(coordinator.transitioning,false);
 assert.equal(coordinator.canWrite(),false);
 releaseAsync();
 assert.equal(await asyncTransition,'imported');
-assert.equal(events.some(event=>event==='reconcile:imported-area-notes:imported'),false,'superseded async transition must not reconcile');
+assert.equal(events.some(event=>event==='reconcile:imported-notes:imported'),false,'superseded async transition must not reconcile');
 assert.equal(coordinator.status().last.kind,'primary-tab-loss');
 
 mutable=true;

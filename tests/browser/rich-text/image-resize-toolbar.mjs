@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {launchChromium,waitFor} from '../../helpers/browser-harness.mjs';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
-const bundle=fs.readFileSync('source/external/rich-text.js','utf8');
+const bundle=richTextRuntimeSource();
 const browser=await launchChromium({profilePrefix:'qa-image-resize-toolbar-'});let page;
 try{
   page=await browser.createPage('about:blank',{viewport:{width:1120,height:820,mobile:false,scale:1}});
@@ -21,13 +22,13 @@ try{
   const toolbar=await page.evaluate(`(()=>{
     const root=document.querySelector('#plain + .sd-rte'),groups=[...root.querySelectorAll('.sd-rte-toolbar-group')],bold=root.querySelector('button[aria-label="Bold"]'),panel=getComputedStyle(root.querySelector('.sd-rte-toolbar')).backgroundColor;
     const parse=s=>{if(s.startsWith('rgb'))return s.slice(s.indexOf('(')+1,s.indexOf(')')).split(',').slice(0,3).map(Number);if(s.startsWith('color(srgb '))return s.slice(11,s.lastIndexOf(')')).split(' ').filter(Boolean).slice(0,3).map(v=>Number(v)*255);return [0,0,0]},lum=rgb=>{const a=rgb.map(v=>{v/=255;return v<=.03928?v/12.92:((v+.055)/1.055)**2.4});return .2126*a[0]+.7152*a[1]+.0722*a[2]},ratio=(a,b)=>{const x=lum(a),y=lum(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05)};
-    return {labels:groups.map(g=>g.getAttribute('aria-label')),separators:groups.slice(1).map(g=>({width:getComputedStyle(g).borderLeftWidth,style:getComputedStyle(g).borderLeftStyle,color:getComputedStyle(g).borderLeftColor})),boldColor:getComputedStyle(bold).color,boldOpacity:getComputedStyle(bold).opacity,contrast:ratio(parse(getComputedStyle(bold).color),parse(panel)),utilityClass:groups.at(-1).classList.contains('sd-rte-toolbar-group-utility')};
+    return {labels:groups.map(g=>g.getAttribute('aria-label')),separators:groups.filter(g=>g.previousElementSibling?.classList.contains('sd-rte-toolbar-group')).map(g=>({width:getComputedStyle(g).borderLeftWidth,style:getComputedStyle(g).borderLeftStyle,color:getComputedStyle(g).borderLeftColor})),boldColor:getComputedStyle(bold).color,boldOpacity:getComputedStyle(bold).opacity,contrast:ratio(parse(getComputedStyle(bold).color),parse(panel)),utilityClass:!!root.querySelector('.sd-rte-toolbar-group-utility')};
   })()`);
-  assert.deepEqual(toolbar.labels,['History','Text formatting','Paragraph and lists','Links and attachments','Insert blocks','Editor view']);
+  assert.deepEqual(toolbar.labels,['History','Text formatting','Lists','Block quote','Links and blocks','Attachments']);
   assert.ok(toolbar.separators.every(x=>x.width==='1px'&&x.style==='solid'&&!/rgba\([^,]+,[^,]+,[^,]+,\s*0\)/.test(x.color)),'Toolbar groups must have visible vertical separators.');
   assert.ok(toolbar.contrast>=7,`Toolbar enabled-control contrast is too faint (${toolbar.contrast.toFixed(2)}:1).`);
   assert.equal(toolbar.boldOpacity,'1');
-  assert.equal(toolbar.utilityClass,true);
+  assert.equal(toolbar.utilityClass,false,'Standalone editors without an overlay port must omit the focus-mode control.');
 
   // Begin a live resize while the image is still unresolved, then force a Wordgard image render
   // replacement during the drag. The visible width must not snap back to the stored 68%.

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {launchChromium,waitFor} from '../../helpers/browser-harness.mjs';
+import {launchChromium,waitFor,pasteInPage} from '../../helpers/browser-harness.mjs';
+import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
-const bundle=fs.readFileSync('source/external/rich-text.js','utf8');
+const bundle=richTextRuntimeSource();
 const browser=await launchChromium({profilePrefix:'qa-image-memory-',args:['--js-flags=--expose-gc']});let page;
 try{
   page=await browser.createPage('about:blank',{viewport:{width:1280,height:900,mobile:false,scale:1}});
@@ -20,7 +21,7 @@ try{
     const seedMount=await StudyDirectorRichText.mountRichTextEditor({field:seed,label:'Seed',initialValue:'',maxWords:10000,maxBytes:917504,assets});
     const canvas=document.createElement('canvas');canvas.width=1200;canvas.height=900;canvas.getContext('2d').fillRect(0,0,1200,900);
     const blob=await new Promise(r=>canvas.toBlob(r,'image/jpeg',.72)),dt=new DataTransfer();dt.items.add(new File([blob],'seed.jpg',{type:'image/jpeg'}));
-    document.querySelector('#seed + .sd-rte .sd-rte-editor').dispatchEvent(new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true}));
+    const seedEditor=document.querySelector('#seed + .sd-rte .sd-rte-editor');seedEditor.focus();${pasteInPage}(seedEditor,dt);
     while(!seed.value.includes('SDImage'))await new Promise(r=>setTimeout(r,20));
     const parsed=JSON.parse(seed.value.slice(4)),image=parsed.doc.content.find(n=>n.type==='SDImage'),paragraph=parsed.doc.content.find(n=>n.type==='Paragraph')||{type:'Paragraph'};
     const canonicalBlob=[...assetMap.values()][0];await seedMount.destroy();seed.remove();

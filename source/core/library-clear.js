@@ -57,16 +57,16 @@ registry.define('library-clear',1,()=>{
           const fresh=await data.notes.readFreshPayload()||{},expected=new Map();
           for(const target of noteTargets){
             const current=fresh[target.key];
-            if(!current)throw new Error('An Ongoing Note changed before attachment removal.');
-            const value=transformReference(current.text,target,'The Ongoing Note');
+            if(!current)throw new Error('A note changed before attachment removal.');
+            const value=transformReference(current.text,target,'The note');
             const result=data.notes.updateValidatedRich(target.key,current.label||target.label,value,current.updatedAt||'');
-            if(!['changed','unchanged'].includes(result.status))throw new Error('The Ongoing Note changed during attachment removal.');
+            if(!['changed','unchanged'].includes(result.status))throw new Error('The note changed during attachment removal.');
             expected.set(target.key,value);changed++;
           }
           await data.notes.flush({strict:true});
-          if(data.notes.failure().failed)throw new Error('Ongoing Note reference removal did not save safely.');
+          if(data.notes.failure().failed)throw new Error('Note reference removal did not save safely.');
           const verified=await data.notes.readFreshPayload()||{};
-          for(const [key,value] of expected)if(String(verified[key]?.text||'')!==value)throw new Error('Ongoing Note reference removal verification failed.');
+          for(const [key,value] of expected)if(String(verified[key]?.text||'')!==value)throw new Error('Note reference removal verification failed.');
         }
         const dayTargets=grouped.filter(target=>target.kind==='day');
         if(dayTargets.length){
@@ -104,7 +104,7 @@ registry.define('library-clear',1,()=>{
       if(scope.notes.mode==='all')noteSnapshot={mode:'all',entries:clone(notePayload||{})};
       else if(scope.notes.mode==='selected'){
         const entries={};
-        for(const key of scope.notes.keys){const note=notePayload?.[key];if(!note)throw new Error('An Ongoing Note changed before the Library safety journal could be prepared. No Library data was changed.');entries[key]=clone(note);}
+        for(const key of scope.notes.keys){const note=notePayload?.[key];if(!note)throw new Error('A note changed before the Library safety journal could be prepared. No Library data was changed.');entries[key]=clone(note);}
         noteSnapshot={mode:'selected',entries};
       }
       let daySnapshot=null;
@@ -128,7 +128,7 @@ registry.define('library-clear',1,()=>{
     }
 
     async function verifyLogical(plan,policy){
-      if(plan.selection.ongoingNotes&&Object.keys(await data.notes.readFreshPayload()||{}).length)throw new Error('Ongoing Notes deletion did not verify.');
+      if(plan.selection.notes&&Object.keys(await data.notes.readFreshPayload()||{}).length)throw new Error('Notes deletion did not verify.');
       if(plan.selection.savedDays&&(await data.dailyRecords.list({strict:true})).length)throw new Error('Saved Days deletion did not verify.');
       const ids=new Set(policy.deleteIds||[]),sources=await references.listSources();
       for(const source of sources)for(const id of source.ids||[])if(ids.has(id))throw new Error('An attachment selected for deletion is still referenced by retained data.');
@@ -146,11 +146,11 @@ registry.define('library-clear',1,()=>{
     async function restoreNotes(snapshot){
       if(!snapshot)return;
       if(snapshot.mode==='all'){await data.notes.replace(clone(snapshot.entries||{}));await data.notes.flush({strict:true});return;}
-      if(snapshot.mode!=='selected')throw new Error('Ongoing Notes rollback scope is invalid.');
+      if(snapshot.mode!=='selected')throw new Error('Notes rollback scope is invalid.');
       const current=await data.notes.readFreshPayload()||{};
       for(const [key,original] of Object.entries(snapshot.entries||{})){
         const live=current[key]||null,result=data.notes.updateValidatedRich(key,original.label||key,original.text||'',live?.updatedAt||'');
-        if(!['changed','unchanged'].includes(result.status))throw new Error('Ongoing Note rollback could not restore a targeted record.');
+        if(!['changed','unchanged'].includes(result.status))throw new Error('Note rollback could not restore a targeted record.');
       }
       await data.notes.flush({strict:true});
     }
@@ -181,8 +181,8 @@ registry.define('library-clear',1,()=>{
     async function verifyRestore(payload){
       if(payload.notes){
         const notes=await data.notes.readFreshPayload()||{},expected=payload.notes.entries||{};
-        if(payload.notes.mode==='all'&&Object.keys(notes).length!==Object.keys(expected).length)throw new Error('Ongoing Notes rollback restored an unexpected record count.');
-        for(const [key,original] of Object.entries(expected)){const actual=notes[key];if(!actual||String(actual.label||'')!==String(original.label||'')||String(actual.text||'')!==String(original.text||''))throw new Error('Ongoing Notes rollback verification failed.');}
+        if(payload.notes.mode==='all'&&Object.keys(notes).length!==Object.keys(expected).length)throw new Error('Notes rollback restored an unexpected record count.');
+        for(const [key,original] of Object.entries(expected)){const actual=notes[key];if(!actual||String(actual.label||'')!==String(original.label||'')||String(actual.text||'')!==String(original.text||''))throw new Error('Notes rollback verification failed.');}
       }
       if(payload.dailyRecords){
         const current=await data.dailyRecords.list({strict:true}),map=new Map(current.map(row=>[row.date,row])),expected=payload.dailyRecords.entries||[];
@@ -207,10 +207,10 @@ registry.define('library-clear',1,()=>{
 
   const cleanSelection=value=>freeze({
     savedDays:!!value?.savedDays,
-    ongoingNotes:!!value?.ongoingNotes,
+    notes:!!value?.notes,
     attachments:!!value?.attachments
   });
-  const sourceDeleted=(source,selection)=>source?.kind==='note'?selection.ongoingNotes:source?.kind==='day'?selection.savedDays:false;
+  const sourceDeleted=(source,selection)=>source?.kind==='note'?selection.notes:source?.kind==='day'?selection.savedDays:false;
   const sortedUnique=values=>[...new Set(values.map(value=>String(value||'')).filter(Boolean))].sort();
   function normalizeSource(source){
     return freeze({
@@ -246,7 +246,7 @@ registry.define('library-clear',1,()=>{
     const keys=kind=>freeze(sortedUnique(rewriteTargets.filter(target=>target.kind===kind).map(target=>target.key)));
     const notes=keys('note'),days=keys('day'),sessions=keys('session');
     return freeze({
-      notes:freeze({mode:plan?.selection?.ongoingNotes?'all':notes.length?'selected':'none',keys:notes}),
+      notes:freeze({mode:plan?.selection?.notes?'all':notes.length?'selected':'none',keys:notes}),
       savedDays:freeze({mode:plan?.selection?.savedDays?'all':days.length?'selected':'none',keys:days}),
       session:freeze({capture:sessions.length>0,keys:sessions})
     });
@@ -288,11 +288,11 @@ registry.define('library-clear',1,()=>{
   }
   function createCoordinator(ports){
     if(!ports||typeof ports!=='object')throw new TypeError('Library-clear coordinator ports are required.');
-    const required=['runExclusive','canMutate','assertAuthority','assertEligible','settle','snapshot','createProtectedSafety','capture','deleteOngoingNotes','deleteSavedDays','removeReferences','verifyLogical','removeAttachmentMetadata','verifyFinal','restore','verifyRestore','sweep','failClosed','clearFault'];
+    const required=['runExclusive','canMutate','assertAuthority','assertEligible','settle','snapshot','createProtectedSafety','capture','deleteNotes','deleteSavedDays','removeReferences','verifyLogical','removeAttachmentMetadata','verifyFinal','restore','verifyRestore','sweep','failClosed','clearFault'];
     if(required.some(key=>typeof ports[key]!=='function'))throw new TypeError('Library-clear coordinator ports are incomplete.');
     if(!ports.journal||['prepare','read','mark','clear'].some(key=>typeof ports.journal[key]!=='function'))throw new TypeError('Library-clear journal ports are incomplete.');
     function record(method,...args){try{return ports.diagnostics?.[method]?.(...args);}catch{return '';}}
-    async function traced(kind,work){const id=record('start',kind,'Local data',{target:'local-data'}),trace={mark:(name,details={})=>record('mark',name,details,id)};try{const result=await work(trace);record('finish',{status:result.status||'completed',pending:result.pending===true,recovered:result.recovered===true,savedDays:Number(result.savedDays)||0,notes:Number(result.ongoingNotes)||0,attachmentsRemoved:Number(result.attachmentsRemoved)||0,sweepPending:result.sweepPending===true},id);return result;}catch(error){record('fail',error,{},id);throw error;}}
+    async function traced(kind,work){const id=record('start',kind,'Local data',{target:'local-data'}),trace={mark:(name,details={})=>record('mark',name,details,id)};try{const result=await work(trace);record('finish',{status:result.status||'completed',pending:result.pending===true,recovered:result.recovered===true,savedDays:Number(result.savedDays)||0,notes:Number(result.notes)||0,attachmentsRemoved:Number(result.attachmentsRemoved)||0,sweepPending:result.sweepPending===true},id);return result;}catch(error){record('fail',error,{},id);throw error;}}
     const makeId=()=>`libraryclear_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,12)}`;
     async function freshPlan(selection){
       await ports.settle();
@@ -334,13 +334,13 @@ registry.define('library-clear',1,()=>{
         const safety=await ports.createProtectedSafety('before-clear-library');trace.mark('clear-safety-verified',{available:safety?.verified===true});
         ports.assertAuthority();
         const payload=await ports.capture(plan,policy),id=makeId();
-        let journal=null,logicalCommitted=false,savedDays=0,ongoingNotes=0,attachmentsRemoved=0;
+        let journal=null,logicalCommitted=false,savedDays=0,notes=0,attachmentsRemoved=0;
         try{
           ports.assertAuthority();
           journal=await ports.journal.prepare({id,signature:plan.signature,payload});trace.mark('clear-journal-prepared');
           ports.assertAuthority();
           await ports.journal.mark(id,'deleting-records');
-          if(selection.ongoingNotes){ports.assertAuthority();const result=await ports.deleteOngoingNotes();ongoingNotes=Math.max(0,Number(result?.count)||0);}
+          if(selection.notes){ports.assertAuthority();const result=await ports.deleteNotes();notes=Math.max(0,Number(result?.count)||0);}
           if(selection.savedDays){ports.assertAuthority();const result=await ports.deleteSavedDays();savedDays=Math.max(0,Number(result?.count)||0);}
           if(selection.attachments&&forceReferenced&&plan.attachments.rewriteTargets.length){
             ports.assertAuthority();
@@ -368,7 +368,7 @@ registry.define('library-clear',1,()=>{
         }
         let swept=0,sweepPending=false;
         try{swept=await ports.sweep();}catch{ sweepPending=true; }
-        trace.mark('clear-sweep-complete',{sweepPending,swept});return freeze({status:'completed',selection:plan.selection,signature:plan.signature,savedDays,ongoingNotes,attachmentsRemoved,attachmentsProtected:selection.attachments&&!forceReferenced?plan.attachments.protectedIds.length:0,safety:safety&&typeof safety==='object'?freeze({...safety}):null,swept,sweepPending});
+        trace.mark('clear-sweep-complete',{sweepPending,swept});return freeze({status:'completed',selection:plan.selection,signature:plan.signature,savedDays,notes,attachmentsRemoved,attachmentsProtected:selection.attachments&&!forceReferenced?plan.attachments.protectedIds.length:0,safety:safety&&typeof safety==='object'?freeze({...safety}):null,swept,sweepPending});
       }));
     }
     async function recoverInterrupted(){return traced('library-clear-recovery',async trace=>{
