@@ -2201,7 +2201,7 @@ const SystemNotifications=(()=>{
   return Object.freeze({format:'study-director.system-notifications',contractVersion:1,install,status,render,toggle,notify,deliver,test});
 })();
 /* SHARED SCALAR HELPERS */
-const AppAudio=AudioEngineModule.createEngine({window,document,fetch:(...args)=>fetch(...args),baseUrl:location.href,onStatus:()=>renderSoundSettings()});
+const AppAudio=AudioEngineModule.createEngine({window,document,onStatus:()=>renderSoundSettings()});
 NoticeCoordinator.configureDelivery({audio:AppAudio,system:(...args)=>SystemNotifications.deliver(...args),context:()=>({owner:appCanMutate(),foreground:!document.hidden})});
 function renderSoundSettings(){
   const state=NoticeCoordinator.soundStatus();

@@ -154,21 +154,6 @@ export const platformFiles=Object.freeze({
 
 const bothTargets=Object.freeze(['development','deployment']);
 export const staticAssets=Object.freeze([
-  Object.freeze({source:'assets/sounds/PROVENANCE.md',output:'assets/sounds/PROVENANCE.md',targets:bothTargets,precache:false}),
-  Object.freeze({source:'assets/sounds/attention.wav',output:'assets/sounds/attention.wav',targets:bothTargets,precache:true}),
-  Object.freeze({source:'assets/sounds/begin.wav',output:'assets/sounds/begin.wav',targets:bothTargets,precache:true}),
-  Object.freeze({source:'assets/sounds/complete.wav',output:'assets/sounds/complete.wav',targets:bothTargets,precache:true}),
-  Object.freeze({source:'assets/sounds/confirm.wav',output:'assets/sounds/confirm.wav',targets:bothTargets,precache:true}),
-  Object.freeze({source:'assets/sounds/day.wav',output:'assets/sounds/day.wav',targets:bothTargets,precache:true}),
-  Object.freeze({source:'assets/sounds/hint.wav',output:'assets/sounds/hint.wav',targets:bothTargets,precache:true}),
-  Object.freeze({source:'assets/sounds/invitation.wav',output:'assets/sounds/invitation.wav',targets:bothTargets,precache:true}),
-  Object.freeze({source:'assets/sounds/manifest.json',output:'assets/sounds/manifest.json',targets:bothTargets,precache:false}),
-  Object.freeze({source:'assets/sounds/overtime.wav',output:'assets/sounds/overtime.wav',targets:bothTargets,precache:true}),
-  Object.freeze({source:'assets/sounds/pause.wav',output:'assets/sounds/pause.wav',targets:bothTargets,precache:true}),
-  Object.freeze({source:'assets/sounds/resume.wav',output:'assets/sounds/resume.wav',targets:bothTargets,precache:true}),
-  Object.freeze({source:'assets/sounds/return.wav',output:'assets/sounds/return.wav',targets:bothTargets,precache:true}),
-  Object.freeze({source:'assets/sounds/skip.wav',output:'assets/sounds/skip.wav',targets:bothTargets,precache:true}),
-  Object.freeze({source:'assets/sounds/target.wav',output:'assets/sounds/target.wav',targets:bothTargets,precache:true}),
   Object.freeze({source:'assets/fonts/barlow-condensed-latin-400-normal.woff2',output:'assets/fonts/barlow-condensed-latin-400-normal.woff2',targets:bothTargets,precache:true}),
   Object.freeze({source:'assets/fonts/barlow-condensed-latin-700-normal.woff2',output:'assets/fonts/barlow-condensed-latin-700-normal.woff2',targets:bothTargets,precache:true}),
   Object.freeze({source:'assets/fonts/barlow-latin-400-normal.woff2',output:'assets/fonts/barlow-latin-400-normal.woff2',targets:bothTargets,precache:true}),

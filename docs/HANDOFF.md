@@ -2,7 +2,7 @@
 
 Status of the work on this branch (`refactor/background-coordination`, PR #1, ready for review). Read sections 1 and 5 first; sections 2 to 4 are closed summaries.
 
-**Current state (2026-10-25):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). Drive sync and profiles (section 5) are done: the small items (5.5), sync (5.1), merge rules (5.2), profiles and device names (5.3, 5.3a), the first-start form (5.4), the removal of what section 5 made redundant, and a fresh audit of the backup system with its fixes (5.6). Release B (removing the readers of older backup formats) waits until "Format cleanup" reads ready on every device in use (5.3a). Wordgard is now 0.6.2 and its own module (section 6, done 2026-10-25). The editor toolbar is in its new order; notification sounds made in code wait until the user asks.
+**Current state (2026-10-25):** the backup and data work is finished. The notes plan in `docs/NOTES.md` (items 1 to 16) is fully built, all five steps, including the measurement at 2,000 notes. The background services are mapped and held to one standard (section 4). Drive sync and profiles (section 5) are done: the small items (5.5), sync (5.1), merge rules (5.2), profiles and device names (5.3, 5.3a), the first-start form (5.4), the removal of what section 5 made redundant, and a fresh audit of the backup system with its fixes (5.6). Release B (removing the readers of older backup formats) waits until "Format cleanup" reads ready on every device in use (5.3a). Wordgard is now 0.6.2 and its own module (section 6, done 2026-10-25). The editor toolbar is in its new order, and the notification sounds are made in code (no sound files ship).
 
 ---
 
@@ -312,11 +312,11 @@ For each build step: make all the changes, build, test with two simulated device
 - Key bindings carry descriptions from Wordgard's phrase table, so the module includes it (about 120 lines).
 - Size: the lean deployment build grew from 112.2 KB to 115.8 KB Brotli.
 
-**Also noted with it (2026-10-17).** Sounds made in code stay unexplored until the user asks (2026-10-25).
+**Also noted with it (2026-10-17).** Both done (2026-10-25).
 
 | Item | What to explore |
 |---|---|
-| Sounds made in code | The 13 notification sounds ship as WAV files in `source/assets/sounds` (about 525 KB, each 1 to 3 seconds). Explore making them with the browser's Web Audio API instead, so the files no longer ship and the app stays lean. Keep the current sounds as the reference for how each should sound. They are already synthesized from short note phrases by `build/compose-sounds.py`, so the recipe exists. |
+| Sounds made in code | **Done** (2026-10-25): the 13 cues are made in `audio-engine.js` from the same recipe, matching the old WAV files sample for sample (three samples one step apart). The WAV files (about 525 KB) and `build/compose-sounds.py` are gone; nothing about sound is precached. |
 | Editor toolbar order | **Done** (2026-10-25): undo/redo · text · bullets, numbers, checklist · block quote · link, table, horizontal rule · attachment · focus. |
 
 ---
