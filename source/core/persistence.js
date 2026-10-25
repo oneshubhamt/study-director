@@ -96,7 +96,14 @@ registry.define('persistence',1,()=>{
       if(verified!==id)throw new Error('Installation identity write could not be verified.');
       cached=id;return id;
     }
-    return freeze({format:'study-director.installation-identity',contractVersion:4,getId});
+    // After a browser-data clear the open tab writes its ID back, so the device
+    // keeps its name and its Device Folder backups. An ID another tab has
+    // written since is left alone.
+    function keep(){
+      if(!cached||normalize(LocalStorageContract.getText(key,'')))return true;
+      return LocalStorageContract.setText(key,cached)&&normalize(LocalStorageContract.getText(key,''))===cached;
+    }
+    return freeze({format:'study-director.installation-identity',contractVersion:4,getId,keep});
   }
   function normalizeTimestamp(value,fallback=null){
     const n=Date.parse(value||'');

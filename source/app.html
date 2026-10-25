@@ -9423,7 +9423,7 @@ async function connectDeviceBackupWithRecovery(){
 // reduced data cannot become the newest backup. The unresolved clear is noted in
 // storage health, so a reload brings the notice and the pause back.
 const STORAGE_RESET_RETRY_MS=Object.freeze([3000,10000,30000]);
-const STORAGE_RESET_PARTS=Object.freeze({notes:'notes',plans:'plans',settings:'settings',session:'today’s session'});
+const STORAGE_RESET_PARTS=Object.freeze({device:'this device’s ID',notes:'notes',plans:'plans',settings:'settings',session:'today’s session'});
 function storageResetUnresolved(){return !!storageResetHold||IndexedDb.lifecycle().resets>storageResetAcknowledged;}
 function storageResetList(names){const parts=names.map(name=>STORAGE_RESET_PARTS[name]||name);return parts.length<2?parts.join(''):`${parts.slice(0,-1).join(', ')} and ${parts.at(-1)}`;}
 function showStorageResetDecision({unsaved=[],retrying=false}={}){
@@ -9449,6 +9449,7 @@ function beginStorageResetHold(clearedAt){
   return hold;
 }
 const storageResetSteps=Object.freeze({
+  device:()=>InstallationIdentity.keep(),
   notes:()=>AppData.notes.recoverAfterStorageLoss(),
   plans:()=>PlanData.rewriteAfterStorageReset(),
   settings:()=>{protectedPreferencesDirty=true;return flushProtectedPreferences();},

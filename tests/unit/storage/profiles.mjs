@@ -21,7 +21,7 @@ function device(){
       limits:freeze({maxName:60})
     })}));
   }
-  return {store,events,page,list:()=>JSON.parse(store.get(REGISTRY)),tick:ms=>{clock+=ms;}};
+  return {store,events,listeners,page,list:()=>JSON.parse(store.get(REGISTRY)),tick:ms=>{clock+=ms;}};
 }
 
 {
@@ -114,4 +114,13 @@ function device(){
   d.tick(1000);const kept=first.renew();
   assert.notEqual(kept.id,before.id);assert.match(kept.id,/^prof_ana_/u);assert.equal(kept.scope,before.scope);assert.equal(kept.email,'');assert.equal(kept.folder,'');assert.equal(d.list().active,kept.id);
 }
-console.log(JSON.stringify({status:'PASS',suite:'profiles',cases:['first start id follows the name','existing data','add, cancel and delete','switch and follow','first profile removed','adopt a library id','twelve at most','the last profile is replaced by a new one','kept after a deletion elsewhere']},null,2));
+{
+  // Clearing the browser's site data empties the list: the page puts back the
+  // list it last saw (no reload), so the profile keeps its id and the app's
+  // own recovery writes back the rest.
+  const d=device(),first=d.page('');first.ensure('Ana');first.setAccount({email:'ana@example.com',folder:'folder-1'});const before=first.current();first.watch();
+  const reloads=d.events.reloads;d.store.clear();for(const listener of d.listeners)listener(null);
+  assert.equal(d.events.reloads,reloads,'a site-data clear does not reload the page');
+  assert.deepEqual(first.current(),before,'the profile keeps its id, account and library');
+}
+console.log(JSON.stringify({status:'PASS',suite:'profiles',cases:['first start id follows the name','existing data','add, cancel and delete','switch and follow','first profile removed','adopt a library id','twelve at most','the last profile is replaced by a new one','kept after a deletion elsewhere','kept through a site-data clear']},null,2));

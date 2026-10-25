@@ -27,7 +27,7 @@ const read=`(async()=>{const d=__PWA6,session=await d.AppData.activeSession.load
   return {message:notice?notice.textContent:'',cleared:d.readStorageHealth().browserDataClearedAt||null,note:Object.values(notes).find(row=>String(row?.label||'').toLowerCase()==='medicine')?.text||null,draft:String(plans.draft||''),savedPlans:plans.savedPlans.length,session:!!session.value,mode:d.TimerState.mode,name:(await d.AppData.personalPreferences.read())?.studentName||null,yesterday:yesterday?.reflection||null,
     notice:notice?{dismissible:!!notice.querySelector('.interaction-toast-close'),buttons:[...notice.querySelectorAll('button:not(.interaction-toast-close)')].map(button=>button.textContent.trim())}:null,paused:d.DeviceBackup.status().paused,folder:d.DeviceBackup.status().connected};})()`;
 const startSession=(name)=>`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms)),now=new Date(),m=now.getHours()*60+now.getMinutes(),fmt=v=>String(Math.floor((v+1440)%1440/60)).padStart(2,'0')+':'+String((v+1440)%1440%60).padStart(2,'0');
-  const input=document.getElementById('student-display');input.value='${name}';input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('blur',{bubbles:true}));
+  const input=document.getElementById('profile-name-input');input.value='${name}';document.getElementById('profile-dialog').dispatchEvent(new Event('close'));await wait(100);
   document.getElementById('plan-input').value=[fmt(m-5)+' | 60 | ${name} Block | work | Medicine | pages | 12',fmt(m+55)+' | 30 | Lunch | fixed | Meal | |'].join('\\n');await d.PlanDraftEditor.save();
   d.goTab('plan');await wait(100);document.getElementById('saved-plan-name').value='${name} plan';document.querySelector('[data-saved-plan="save"]').click();await wait(300);
   if(!d.applySchedule({skipNotify:true}))throw new Error('schedule did not apply');d.goTab('execute');await wait(50);d.setCurrentTask(0);d.TimerEngine.startCur();await wait(200);
@@ -114,6 +114,7 @@ try{
       assert.equal(backup,true);
       const before=await page.evaluate(read);
       assert.equal(before.yesterday,'FolderQA yesterday');assert.equal(before.folder,true);assert.equal(before.mode,'running');
+      const repository=await page.evaluate(`__PWA6.DeviceBackup.status().repositoryName`);assert.ok(repository);
 
       await page.send('Storage.clearDataForOrigin',{origin:server.origin,storageTypes:'indexeddb,local_storage,cache_storage,service_workers'});
       assert.equal(await page.evaluate(editNote('FolderQA note edited after clearing')),'changed');
@@ -131,10 +132,15 @@ try{
       const reloaded=await page.evaluate(read);
       assert.equal(reloaded.yesterday,'FolderQA yesterday');assert.equal(reloaded.note,'FolderQA note edited after clearing');assert.equal(reloaded.session,true);
       assert.equal(reloaded.folder,true,'the Device Folder is remembered after the clear');
+      // The open tab wrote the device ID back, so the reload keeps backing up
+      // into the same folder rather than starting a new one.
+      await waitFor(()=>page.evaluate(`__PWA6.DeviceBackup.status().repositoryName===${JSON.stringify(repository)}`),{label:'same backup folder after the clear'});
       result.checks.folderRemembered=true;
 
       // Without a connected folder the clear needs a decision; after a reload,
-      // reconnecting the folder adds the missing Saved Day back by itself.
+      // reconnecting the folder adds the missing Saved Day back by itself. The
+      // open tab wrote this device's ID back, so the folder's backups are
+      // still this device's: nothing to pick.
       await page.evaluate(`__PWA6.DeviceBackup.disconnect()`);
       await page.send('Storage.clearDataForOrigin',{origin:server.origin,storageTypes:'indexeddb,local_storage,cache_storage,service_workers'});
       assert.equal(await page.evaluate(editNote('FolderQA note edited after second clear')),'changed');

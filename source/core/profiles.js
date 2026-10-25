@@ -44,8 +44,11 @@ registry.define('profiles',1,()=>{
     // cannot parse) is unsupported: what can be read of it is used, nothing
     // of it is changed, and adding, switching or removing profiles waits for
     // an update (removed profiles' data is not deleted meanwhile).
+    // The list this page last saw, put back if the browser's site data is
+    // cleared (the app then writes back what it holds; the profile keeps its id).
+    let lastText=null;
     function read(){
-      const text=storage.read();let raw=null,parsed=true;try{raw=JSON.parse(text||'null');}catch{raw=null;parsed=false;}
+      const text=storage.read();if(text)lastText=text;let raw=null,parsed=true;try{raw=JSON.parse(text||'null');}catch{raw=null;parsed=false;}
       const unsupported=text!==null&&text!==''&&(!parsed||!raw||typeof raw!=='object'||raw.version!==VERSION);
       const profiles=[],ids=new Set(),scopes=new Set();
       if(raw&&(raw.version===VERSION||unsupported)&&Array.isArray(raw.profiles))for(const value of raw.profiles.slice(0,MAX_PROFILES)){const row=entry(value);if(!row||ids.has(row.id)||scopes.has(row.scope))continue;ids.add(row.id);scopes.add(row.scope);profiles.push(row);}
@@ -143,7 +146,9 @@ registry.define('profiles',1,()=>{
     }
     // Another tab switched, added or removed a profile: every tab follows.
     function watch(){
-      return platform.listen(key=>{if(key!==registryKey&&key!==null)return;const list=read(),mine=current(list),active=list.profiles.find(row=>row.id===list.active);if(list.unsupported)return;if(!mine||active&&active.scope!==pageScope)platform.reload();});
+      return platform.listen(key=>{if(key!==registryKey&&key!==null)return;
+        if(!storage.read()&&lastText){storage.write(lastText);return;}
+        const list=read(),mine=current(list),active=list.profiles.find(row=>row.id===list.active);if(list.unsupported)return;if(!mine||active&&active.scope!==pageScope)platform.reload();});
     }
     const list=()=>read().profiles;
     // Removed profiles whose data still waits to be deleted here (diagnostics).

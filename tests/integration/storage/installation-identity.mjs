@@ -35,6 +35,13 @@ assert.equal(fresh.backing.get('installation'),generated,'fresh current identity
 assert.equal(fresh.identity.getId(),generated,'the ID is made once');
 assert.equal(fresh.backing.get('legacyDevice'),'dev_legacy_installation','historical identity must remain exclusively for the compatibility facade to migrate/retire');
 
+// A browser-data clear removes the stored ID; the open tab writes it back,
+// and leaves alone an ID another tab has written since.
+fresh.backing.delete('installation');
+assert.equal(fresh.identity.keep(),true);assert.equal(fresh.backing.get('installation'),generated,'the open tab writes its ID back after a clear');
+fresh.backing.set('installation','inst_android_chrome_mve00001_12345678');
+assert.equal(fresh.identity.keep(),true);assert.equal(fresh.backing.get('installation'),'inst_android_chrome_mve00001_12345678','an ID written since is kept');
+
 const unnamed=runtime({installation:'inst_current_installation'},{type:'toaster',browser:'lynx'}).identity.getId();
 assert.match(unnamed,/^inst_device_browser_[a-z0-9]{6,12}_[a-f0-9]{8}$/u,'an ID that does not say what the device is is made again; an unknown device reads as Device · Browser');
 
