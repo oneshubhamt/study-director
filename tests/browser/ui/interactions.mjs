@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {root,startReleaseServer,launchChromium,waitForStudyDirector,waitFor,sleep} from '../../helpers/browser-harness.mjs';
+import {root,startReleaseServer,launchChromium,waitForStudyDirector,waitFor,sleep,settleMotion} from '../../helpers/browser-harness.mjs';
 
 // Browser interaction-system contract: full-app guidance/safety plus real History API traversal ordering.
 
@@ -153,7 +153,7 @@ try{
 
   await page.setViewport({width:390,height:844,mobile:true,scale:2});
   await page.evaluate(`(()=>{window.__mobileConfirm='pending';__PWA6.Interactions.confirm({title:'Mobile confirmation',message:'Contained on a phone.'}).then(value=>{window.__mobileConfirm=value;});return true;})()`);
-  await waitFor(()=>page.evaluate(`document.getElementById('sd-interaction-dialog').open`),{label:'mobile confirmation'});
+  await waitFor(()=>page.evaluate(`document.getElementById('sd-interaction-dialog').open`),{label:'mobile confirmation'});await settleMotion(page);
   const mobile=await page.evaluate(`(()=>{const dialog=document.getElementById('sd-interaction-dialog'),r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('.interaction-action')].map(button=>button.getBoundingClientRect().height);return {left:r.left,right:r.right,width:r.width,viewport:innerWidth,overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,buttons};})()`);
   assert.ok(mobile.left>=-1&&mobile.right<=mobile.viewport+1&&mobile.overflow<=1);assert.ok(mobile.buttons.every(value=>value>=42));
   await page.evaluate(`document.querySelector('[data-interaction-cancel]').click()`);

@@ -8,7 +8,7 @@ const presentationSource=scripts.find(source=>source.includes('studyDirector.pre
 assert.ok(presentationSource,'Presentation Kernel bootstrap must remain inline and discoverable.');
 
 function loadKernel({storedTheme=null,storedPresentation=null,scope=''}={}){
-  const root={dataset:{theme:'director-dark',presentation:'glass',typography:'glass',shape:'glass',material:'glass',depth:'glass',density:'standard',responsive:'adaptive',motion:'precise',charts:'analytical'},style:{}};
+  const root={dataset:{theme:'dark',presentation:'glass',typography:'glass',shape:'glass',material:'glass',depth:'glass',density:'standard',responsive:'adaptive',motion:'precise',charts:'analytical'},style:{}};
   const meta={
     themeColor:{content:'#04050a',setAttribute(name,value){if(name==='content')this.content=String(value);}},
     statusBar:{content:'black-translucent',setAttribute(name,value){if(name==='content')this.content=String(value);}}
@@ -27,8 +27,8 @@ function loadKernel({storedTheme=null,storedPresentation=null,scope=''}={}){
   const context=vm.createContext({
     console,Symbol,Object,Set,Map,Promise,TypeError,Error,window,document,localStorage,
     getComputedStyle:()=>({getPropertyValue:name=>{
-      if(name==='--sd-meta-theme-color')return root.dataset.theme==='director-light'?'#eef1ec':'#04050a';
-      if(name==='--sd-meta-apple-status-bar-style')return root.dataset.theme==='director-light'?'default':'black-translucent';
+      if(name==='--sd-meta-theme-color')return root.dataset.theme==='light'?'#f2f0ea':'#04050a';
+      if(name==='--sd-meta-apple-status-bar-style')return root.dataset.theme==='light'?'default':'black-translucent';
       return '';
     }})
   });
@@ -57,25 +57,25 @@ const GLASS_PROFILE=Object.freeze({
 
 {
   const {kernel,storage,root,meta}=loadKernel();
-  assert.equal(kernel.manifest.defaults.theme,'director-dark','Dark is the new-user default theme.');
+  assert.equal(kernel.manifest.defaults.theme,'dark','Dark is the new-user default theme.');
   assert.equal(kernel.manifest.defaults.preferredPresentation,'glass','Glass is the preferred presentation for users without a saved choice.');
-  assert.equal(kernel.activeThemeId(),'director-dark');
+  assert.equal(kernel.activeThemeId(),'dark');
   assert.equal(kernel.activePresentationId(),'glass','Glass is the pre-hydration presentation for users without a saved choice.');
   assert.equal(storage.has('studyDirector.presentation.v1'),false,'Choosing the new-user default must not manufacture a persisted preference.');
   assert.equal(kernel.registerPresentation(GLASS_PROFILE),true);
   assert.equal(kernel.activePresentationId(),'glass','Glass remains active when its presentation pack registers.');
   assert.equal(storage.has('studyDirector.presentation.v1'),false,'Default Glass remains an implicit default, not a migration/write.');
   kernel.synchronizeMetadata();
-  assert.equal(root.dataset.theme,'director-dark');
+  assert.equal(root.dataset.theme,'dark');
   assert.equal(meta.themeColor.content,'#04050a');
   assert.equal(meta.statusBar.content,'black-translucent');
 }
 
 for(const [storedPresentation,storedTheme,expectedColor,expectedStatus] of [
-  ['director-current','director-dark','#04050a','black-translucent'],
-  ['director-current','director-light','#eef1ec','default'],
-  ['glass','director-dark','#04050a','black-translucent'],
-  ['glass','director-light','#eef1ec','default']
+  ['director-current','dark','#04050a','black-translucent'],
+  ['director-current','light','#f2f0ea','default'],
+  ['glass','dark','#04050a','black-translucent'],
+  ['glass','light','#f2f0ea','default']
 ]){
   const {kernel,storage,root,meta}=loadKernel({storedTheme,storedPresentation});
   assert.equal(kernel.activeThemeId(),storedTheme,`Saved ${storedTheme} theme must be restored during pre-hydration.`);
@@ -92,10 +92,36 @@ for(const [storedPresentation,storedTheme,expectedColor,expectedStatus] of [
 
 {
   // A later profile reads its own appearance, not the first profile's.
-  const {root,storage}=loadKernel({storedTheme:'director-light',scope:'prof_ben_mve00000_abcdef01'});
-  assert.equal(root.dataset.theme,'director-light','the profile theme applies before the app starts');
+  const {root,storage}=loadKernel({storedTheme:'light',scope:'prof_ben_mve00000_abcdef01'});
+  assert.equal(root.dataset.theme,'light','the profile theme applies before the app starts');
   assert.equal(storage.has('studyDirector.theme.v1'),false,'the first profile keeps its own theme');
 }
-assert.equal('motion' in loadKernel().kernel,false,'Presentation Kernel must not expose native snapshot-transition machinery.');
+// Aurora preserves the pre-reimagining Glass as its own skin; a saved choice
+// must restore at first paint, before its pack script registers.
+for(const theme of ['dark','light']){
+  const {kernel,storage,root}=loadKernel({storedTheme:theme,storedPresentation:'aurora'});
+  assert.equal(kernel.activePresentationId(),'aurora','Saved Aurora must restore during pre-hydration.');
+  assert.deepEqual([root.dataset.typography,root.dataset.shape,root.dataset.material,root.dataset.depth],['aurora','aurora','aurora','aurora'],'Aurora owns its own presentation axes.');
+  assert.equal(kernel.registerPresentation(GLASS_PROFILE),true);
+  assert.equal(kernel.activePresentationId(),'aurora','Registering Glass must not override a saved Aurora choice.');
+  assert.equal(storage.get('studyDirector.presentation.v1'),'aurora');
+}
 
-console.log(JSON.stringify({status:'PASS',contract:'presentation-defaults',paths:['implicit-glass-dark','saved-director-dark','saved-director-light','saved-glass-dark','saved-glass-light','prepaint-browser-chrome','no-native-view-transition-api']},null,2));
+// Releases before the dark/light rename stored Director-prefixed theme IDs.
+// They must keep restoring the same appearance without a migration write.
+for(const [legacy,expected,expectedColor] of [['director-dark','dark','#04050a'],['director-light','light','#f2f0ea']]){
+  const {kernel,storage,root,meta}=loadKernel({storedTheme:legacy,storedPresentation:'glass'});
+  assert.equal(kernel.activeThemeId(),expected,`Legacy ${legacy} must restore as ${expected}.`);
+  assert.equal(root.dataset.theme,expected,'The document must carry the canonical theme ID, never the legacy alias.');
+  assert.equal(kernel.normalizeThemeId(legacy),expected,'Legacy theme IDs from backups and canonical preferences must resolve.');
+  assert.equal(storage.get('studyDirector.theme.v1'),legacy,'Restoring a legacy theme must not rewrite stored preferences.');
+  kernel.synchronizeMetadata();
+  assert.equal(meta.themeColor.content,expectedColor);
+  assert.equal(kernel.switchTheme(legacy,{persist:true}),expected);
+  assert.equal(storage.get('studyDirector.theme.v1'),expected,'A deliberate theme change persists the canonical ID.');
+}
+assert.equal(loadKernel().kernel.normalizeThemeId('director-sepia'),'dark','Unknown theme IDs still fall back to the default.');
+
+assert.equal('motion' in loadKernel().kernel,false,'Presentation Kernel must not expose snapshot-transition machinery to plugins; appearance transitions are host-owned.');
+
+console.log(JSON.stringify({status:'PASS',contract:'presentation-defaults',paths:['implicit-glass-dark','saved-director-dark','saved-director-light','saved-glass-dark','saved-glass-light','legacy-director-theme-aliases','saved-aurora','profile-scoped-appearance','prepaint-browser-chrome','no-plugin-snapshot-api']},null,2));

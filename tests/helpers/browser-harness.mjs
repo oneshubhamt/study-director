@@ -22,6 +22,14 @@ export async function skipFirstStart(page,{timeout=45000}={}){
   return waitFor(()=>page.evaluate(`(()=>{const dialog=document.getElementById('first-start-dialog');if(dialog&&dialog.open){document.querySelector('[data-action="first-start-skip"]').click();return false;}const scope=window[Symbol.for('studyDirector.profileScope.v1')];let list=null;try{list=JSON.parse(localStorage.getItem(scope.registryKey)||'null');}catch{}const mine=Array.isArray(list&&list.profiles)?list.profiles.find(entry=>entry&&entry.scope===scope.scope):null;return !!mine&&mine.fresh!==true;})()`),{timeout,label:'first start finished'});
 }
 
+// Pane entrances and dialog surfaces animate opacity and scale for a moment.
+// Wait for those finite animations to end before measuring colours or sizes
+// (looping indicators are left alone).
+export async function settleMotion(page,{timeout=5000}={}){
+  return page.evaluate(`(()=>{const finite=document.getAnimations().filter(a=>a.playState==='running'&&Number.isFinite(a.effect?.getComputedTiming?.().endTime));
+    return Promise.race([Promise.all(finite.map(a=>a.finished.catch(()=>{}))),new Promise(r=>setTimeout(r,${Number(timeout)}))]).then(()=>finite.length);})()`);
+}
+
 function readBuildManifest(){
   return JSON.parse(fs.readFileSync(path.join(root,'dist','build-manifest.json'),'utf8'));
 }
@@ -184,6 +192,8 @@ export class CdpPage{
     await this.send('Emulation.setTouchEmulationEnabled',mobile?{enabled:true,maxTouchPoints:5}:{enabled:false});
   }
   async elementPoint(selector){
+    // Disclosures and panes animate open; aim only once the layout has stopped.
+    await settleMotion(this);
     // Preserve the page's position when the target is already available to a
     // user. Forced centering would contaminate scroll-stability assertions.
     await this.evaluate(`(()=>{const element=document.querySelector(${JSON.stringify(selector)});if(!element)return;const r=element.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);if(!hit||!(hit===element||element.contains(hit)))element.scrollIntoView({block:'center',inline:'nearest'});})()`);
