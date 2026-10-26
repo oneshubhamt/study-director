@@ -988,11 +988,11 @@ registry.define('backup-provider',1,input=>{
     if(syncState(selected).behind)return true;
     const reason=String(trigger||''),since=Date.now()-syncState(selected).checkedAt;
     if(['connection','registered','sync'].includes(reason)||reason.startsWith('flush:'))return true;
-    return since>=(['activation','resume','foreground-released'].includes(reason)?SYNC_RECHECK_MS:AUTOMATIC_QUIET_MS);
+    return since>=(['activation','resume','foreground-released','session-watch'].includes(reason)?SYNC_RECHECK_MS:AUTOMATIC_QUIET_MS);
   }
   // Not after a failed catch-up: that one waits for its retry.
   function syncRecheckDue(selected,trigger){
-    if(!['activation','resume','foreground-released'].includes(String(trigger||''))||!sharedSyncing(selected))return false;
+    if(!['activation','resume','foreground-released','session-watch'].includes(String(trigger||''))||!sharedSyncing(selected))return false;
     const state=syncState(selected);return !state.behind&&!state.catching&&Date.now()-state.checkedAt>=SYNC_RECHECK_MS;
   }
   function syncError(code,message){const error=new Error(message);error.code=code;error.studyDirectorDriveNoRetry=true;return error;}
