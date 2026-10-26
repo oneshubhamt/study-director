@@ -2746,6 +2746,28 @@ async function backUpBeforeUpdate(){
   try{await Promise.race([flushAutomaticBackups('app-update'),new Promise(resolve=>{timer=setTimeout(resolve,PWA_UPDATE_BACKUP_WAIT_MS);})]);}
   finally{clearTimeout(timer);}
 }
+// A plan applied by hand goes to Drive within seconds, like Suspend and
+// Continue Here, so the other device sees today's session at its next check.
+function uploadSoonAfterPlanApply(result){
+  // After the session is saved: with nothing waiting yet the signal is dropped.
+  const done=applied=>{if(applied)void Promise.resolve(flushLiveDraft()).catch(error=>AppDiagnostics.capture('backup.plan-apply-flush',error,'warn')).then(()=>notifyBackupChange({urgent:true,reason:'plan-apply'}));return applied;};
+  return result&&typeof result.then==='function'?result.then(done):done(result);
+}
+// While today's session runs here or on another device and the app is open,
+// look at Drive every two minutes instead of every twenty, so a plan applied
+// or a session moved on the other device shows up here without a reload.
+const SESSION_WATCH_MS=2*60*1000;
+let sessionWatchTimer=null;
+function installSessionWatch(){
+  if(sessionWatchTimer)return false;
+  sessionWatchTimer=setInterval(()=>{
+    if(document.visibilityState!=='visible'||!StartupLifecycle.status().fullyInitialized)return;
+    if(!TASKS.length&&sessionPanelMode!=='elsewhere')return;
+    try{if(BackupProviderRuntime.syncing())BackupProviderRuntime.wakeBackground('session-watch');}
+    catch(error){AppDiagnostics.capture('backup-provider.session-watch',error,'warn');}
+  },SESSION_WATCH_MS);
+  return true;
+}
 function notifyDeviceBackupIfStudyDayResolved(reason='study-day-completed'){
   const trackable=TASKS.map((task,index)=>({task,index})).filter(row=>isTrackableBlock(row.task));
   if(!trackable.length||!trackable.every(row=>isTaskResolved(row.index)))return false;
@@ -10365,10 +10387,10 @@ const CLICK_ACTIONS=Object.freeze({
   'finish-session': finishTodaySession,
   'reset-session': resetTodaySession,
   'edit-plan': PlanDraftEditor.enter,
-  'confirm-plan-edit': PlanDraftEditor.confirm,
+  'confirm-plan-edit': ()=>uploadSoonAfterPlanApply(PlanDraftEditor.confirm()),
   'cancel-plan-edit': PlanDraftEditor.cancel,
   'load-default': loadDefaultPlan,
-  'apply-schedule': async()=>{if(sessionPanelMode==='elsewhere'&&!TASKS.length&&!await confirmSessionTakeover(sessionPanelSession,{replace:true}))return false;const result=applySchedule();if(result&&typeof result.finally==='function')return result.finally(()=>schedulePwaUpdateEvaluation(250));schedulePwaUpdateEvaluation(250);return result;},
+  'apply-schedule': async()=>{if(sessionPanelMode==='elsewhere'&&!TASKS.length&&!await confirmSessionTakeover(sessionPanelSession,{replace:true}))return false;const result=uploadSoonAfterPlanApply(applySchedule());if(result&&typeof result.finally==='function')return result.finally(()=>schedulePwaUpdateEvaluation(250));schedulePwaUpdateEvaluation(250);return result;},
   'clear-schedule-draft': PlanDraftEditor.clear,
   'open-notes': openNotesLibrary,
   'toggle-pnote-info': togglePnoteInfo,
@@ -10867,7 +10889,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
         catch(error){AppDiagnostics.capture('startup.canonical-mutation-epoch',error,'warn');}
       }
       resumeUnresolvedStorageReset();
-      installBackgroundOwners();scheduleDataMaintenance();BackgroundOperations.wake('startup');void KeptVersions.refresh();UnsupportedData.announce();renderUnsupportedData();
+      installBackgroundOwners();scheduleDataMaintenance();BackgroundOperations.wake('startup');installSessionWatch();void KeptVersions.refresh();UnsupportedData.announce();renderUnsupportedData();
       void Profiles.collect().then(result=>{if(result.error)AppDiagnostics.capture('profiles.collect',result.error,'warn');});askProfilePassword();
       void BackupFiles.collect().catch(error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn'));
       canonicalProof=proof;document.documentElement.dataset.studyDirectorCanonicalBaseline=proof.canonical?'verified':'not-proven';
