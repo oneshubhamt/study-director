@@ -9,21 +9,23 @@ const root=process.cwd();
 const manifest=JSON.parse(fs.readFileSync(path.join(root,'dist/build-manifest.json'),'utf8'));
 const deployment=path.join(root,'dist/deployment');
 const marker='/* PUBLIC PLUGIN API */';
-const exposure=`window.__DeviceBackupDebug=Object.freeze({DeviceBackup,BackupProviderRuntime,BackupController,RepositoryCheckpointPipeline,StartupLifecycle,TimerState,TIMER_MODES,AppData,pwaUpdateBlockReason});\n`;
+const exposure=`window.__DeviceBackupDebug=Object.freeze({DeviceBackup,BackupProviderRuntime,BackupController,RepositoryCheckpointPipeline,StartupLifecycle,TimerState,TIMER_MODES,AppData,pwaUpdateBlockReason,integrity:()=>repositoryIntegrityView?.locations?.['device-folder']||null});\n`;
 let main=fs.readFileSync(path.join(deployment,manifest.main),'utf8');
 if(!main.includes(marker))throw new Error('Device-backup browser harness hook is unavailable.');
 main=main.replace(marker,exposure+marker);
 main=withoutPwaChecks(main);
 
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-async function waitFor(fn,{timeout=60000,interval=100,label='condition'}={}){
+async function waitFor(fn,{timeout=60000,interval=100,label='condition',describe=null}={}){
   const started=Date.now();let last;
   while(Date.now()-started<timeout){
     try{last=await fn();if(last)return last;}catch(error){last=error;}
     await sleep(interval);
   }
-  throw new Error(`Timed out waiting for ${label}${last instanceof Error?`: ${last.message}`:''}`);
+  let state='';if(describe)try{state=` (last state: ${JSON.stringify(await describe())})`;}catch{}
+  throw new Error(`Timed out waiting for ${label}${last instanceof Error?`: ${last.message}`:''}${state}`);
 }
+const rowState=()=>page.evaluate(`({row:document.getElementById('device-backup-status').textContent.trim(),device:__DeviceBackupDebug.DeviceBackup.status(),integrity:__DeviceBackupDebug.integrity(),background:__DeviceBackupDebug.BackupProviderRuntime.backgroundStatus?.()||null})`);
 
 const server=http.createServer((req,res)=>{
   const url=new URL(req.url||'/','http://127.0.0.1');
@@ -100,7 +102,15 @@ try{
   assert.equal(first.checkpointNames.length,1);assert.match(first.checkpointNames[0],/^cp_[a-f0-9]{32}\.sdcheckpoint$/u);
   assert.ok(first.size>0);assert.equal(first.format,'study-director.backup-repository-checkpoint');assert.equal(first.version,8);assert.ok(first.objectNames.length>0);assert.equal(first.pickerCalls,1);
   // Maintenance may run just after the first backup; the row then settles on On.
-  await waitFor(()=>page.evaluate(`/^On(?:\\s|$)/.test(document.getElementById('device-backup-status').textContent.trim())`),{timeout:60000,label:'Device Folder row at rest after the first backup'});
+  await waitFor(()=>page.evaluate(`/^On(?:\\s|$)/.test(document.getElementById('device-backup-status').textContent.trim())`),{timeout:60000,label:'Device Folder row at rest after the first backup',describe:rowState});
+  // The Device Folder's integrity check reads every object back in ranges and
+  // completes, so the row never warns that backup verification is unavailable.
+  await page.evaluate(`__DeviceBackupDebug.BackupProviderRuntime.requestIntegrity('device-folder')`);
+  const integrity=await waitFor(()=>page.evaluate(`(()=>{const state=__DeviceBackupDebug.integrity();return state&&(state.lastOutcome==='completed'&&state.completedAt||state.failedAt)?state:null;})()`),{timeout:90000,label:'Device Folder integrity check'});
+  assert.equal(integrity.failedAt,'',`the integrity check failed: ${integrity.lastOutcome} ${integrity.blockedReason}`);
+  assert.equal(integrity.lastOutcome,'completed');
+  await waitFor(()=>page.evaluate(`/^On(?:\\s|$)/.test(document.getElementById('device-backup-status').textContent.trim())`),{timeout:15000,label:'Device Folder row back to On after the integrity check',describe:rowState});
+  evidence.checks.integrity={completed:true,rowAtRest:true};
 
   // Nothing changed: Back up now confirms the folder is current and adds no version.
   await page.evaluate(`document.getElementById('backup-now').click()`);

@@ -80,6 +80,11 @@ registry.define('repository-background',1,input=>{
     const TargetAbortController=environment.AbortController;
     if(typeof TargetAbortController!=='function'||typeof environment.clearTimeout!=='function'||typeof environment.now!=='function'||typeof environment.setTimeout!=='function')throw new TypeError('Repository-background environment is invalid.');
     const target=String(input.target||'repository').slice(0,80),scheduled=new Map(),active=new Map(),suspensions=new Set(),jobs=new Map(),discoverable=new Map();let foreground=null,suspensionSequence=0;
+    // Told after a background job gives back its slot, so a status shown as
+    // busy while the job ran is drawn again once it is not.
+    const releaseListeners=new Set();
+    function onRelease(listener){if(typeof listener!=='function')throw new TypeError('Repository-background release listener is invalid.');releaseListeners.add(listener);return ()=>releaseListeners.delete(listener);}
+    function notifyRelease(job){for(const listener of releaseListeners){try{listener(job);}catch{}}}
     const nowMs=()=>{const value=Number(environment.now());return Number.isFinite(value)?value:Date.now();};
     const waitForSettlement=(waiting,signal=null)=>Lifecycle.waitForSettlement(waiting,{signal,setTimeout:environment.setTimeout,clearTimeout:environment.clearTimeout,ignoreFailures:true,timeoutCode:'REPOSITORY_BACKGROUND_UNSETTLED',timeoutMessage:'Background file work has not stopped yet. Retry after it finishes.',cancelError:()=>backgroundAbort('REPOSITORY_FOREGROUND_CANCELLED','Backup operation was cancelled.')});
     function priority(job){return PRIORITY[String(job||'')]||0;}
@@ -135,7 +140,7 @@ registry.define('repository-background',1,input=>{
       const workBudget=freeze({...allowance,start:milliseconds=>{if(['automatic','convergence'].includes(name))throw new TypeError('Background transfers require progress watchdogs, not a total housekeeping deadline.');return !released&&!controller.signal.aborted&&allowance.start(milliseconds);}});
       if(Number(budgetMs)>0)workBudget.start(budgetMs);
       const row={controller,settlement,preemptCode:String(preemptCode),preemptMessage:String(preemptMessage)};active.set(name,row);
-      return freeze({job:name,signal:controller.signal,controller,settlement,workBudget,release:()=>{if(released)return;released=true;if(externalSignal)externalSignal.removeEventListener('abort',relay);if(active.get(name)===row)active.delete(name);resolveSettlement?.();resumeTimers();}});
+      return freeze({job:name,signal:controller.signal,controller,settlement,workBudget,release:()=>{if(released)return;released=true;if(externalSignal)externalSignal.removeEventListener('abort',relay);if(active.get(name)===row)active.delete(name);resolveSettlement?.();resumeTimers();notifyRelease(name);}});
     }
     function beginForeground({externalSignal=null,cancelCode='REPOSITORY_FOREGROUND_CANCELLED',cancelMessage='Repository foreground operation was cancelled.'}={}){
       if(foreground)return null;suspendTimers();
@@ -155,7 +160,7 @@ registry.define('repository-background',1,input=>{
     }
     function status(){const owned=[...jobs.keys()].map(name=>jobStatus(name)),due=[...scheduled.values()].map(row=>row.dueAt).concat(owned.map(row=>Date.parse(row.nextEligibleAt))).filter(Number.isFinite);return freeze({...Lifecycle.snapshot({busy:!!foreground||active.size>0||owned.some(row=>row.busy),pending:scheduled.size>0||owned.some(row=>row.pending),scheduled:[...scheduled.values()].some(row=>row.timer!==null),suspended:suspensions.size>0||owned.some(row=>row.suspended),nextEligibleAt:due.length?new Date(Math.min(...due)).toISOString():''}),target,foreground:!!foreground,held:suspensions.size>0,scheduled:freeze([...scheduled.keys()]),active:freeze([...active.keys()])});}
     let api=null;const maintenanceIntent=ports=>createMaintenanceIntent(freeze({...ports,coordinator:api})),createBoundMaintenanceScheduler=ports=>createMaintenanceScheduler(freeze({...ports,coordinator:api})),createBoundIntegrityScheduler=ports=>createIntegrityScheduler(freeze({...ports,coordinator:api}));
-    api=freeze({format:'study-director.repository-background-coordinator',contractVersion:1,now:nowMs,maintenance:MAINTENANCE,integrity:INTEGRITY,maintenanceActionable,maintenanceDefersAcrossObservation,maintenancePlan,maintenanceDetails,integrityDetails,outcome:Lifecycle.outcome,maintenanceIntent,createMaintenanceScheduler:createBoundMaintenanceScheduler,createIntegrityScheduler:createBoundIntegrityScheduler,registerJob,unregisterJob,wake,schedule,clearScheduled,clearAllScheduled,suspend,resume,beginBackground,beginForeground,cancelForeground,preemptBackground,status,jobStatus,transition,priority});return api;
+    api=freeze({format:'study-director.repository-background-coordinator',contractVersion:1,now:nowMs,maintenance:MAINTENANCE,integrity:INTEGRITY,maintenanceActionable,maintenanceDefersAcrossObservation,maintenancePlan,maintenanceDetails,integrityDetails,outcome:Lifecycle.outcome,maintenanceIntent,createMaintenanceScheduler:createBoundMaintenanceScheduler,createIntegrityScheduler:createBoundIntegrityScheduler,registerJob,unregisterJob,wake,schedule,clearScheduled,clearAllScheduled,suspend,resume,beginBackground,beginForeground,cancelForeground,preemptBackground,onRelease,status,jobStatus,transition,priority});return api;
   }
   function createMaintenanceIntent(input){
     exactObject(input,['capture','clear','coordinator','mark','read','scope','selectRetention'],'Repository maintenance-intent input');

@@ -143,7 +143,14 @@ registry.define('device-folder-storage',1,()=>{
       const spec=KINDS[item&&item.kind];if(!spec||!spec.pattern.test(String(item.id||'')+spec.suffix))throw new Error('A Study Director backup download has an invalid identity.');
       const dirs=await directories(),file=await fileOrNull(dirs[spec.directory],item.id+spec.suffix,options.signal||null);
       if(!file){const error=new Error('A file required by this backup version is missing from the Device Folder.');error.code='REPOSITORY_OBJECT_MISSING';throw error;}
-      if(Object.hasOwn(options,'offset'))return file.slice(options.offset,options.offset+options.length);
+      // A range read (integrity verification) also returns the file's size and
+      // version (its modified time, as listed), so a file that changes between
+      // ranges restarts verification instead of mixing bytes from two files.
+      if(Object.hasOwn(options,'offset')){
+        const offset=options.offset,length=options.length,total=Number(file.size);
+        if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(length)||length<1||length>1024*1024||offset+length>total)throw new Error('Repository download range is invalid.');
+        return freeze({blob:file.slice(offset,offset+length),totalBytes:total,version:String(Math.max(1,Math.floor(Number(file.lastModified)||1)))});
+      }
       return file;
     }
     async function writeFile(directory,name,blob,{checks=null,onProgress=null}={}){

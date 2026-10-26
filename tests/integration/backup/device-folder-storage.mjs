@@ -28,6 +28,16 @@ assert.deepEqual(root.names(),['checkpoints','commits','objects','repository.sds
 assert.deepEqual((await root.getDirectoryHandle('objects')).names(),[objectId(1)+'.sdobject']);
 assert.equal(object.kind,'object');assert.equal(object.size,12);assert.equal(manifest.digest,await sha256(new Blob([JSON.stringify({id:id(1)})])));assert.equal(commit.kind,'commit');
 assert.equal(await (await storage.download(object)).text(),'object bytes');
+// A range read (integrity verification) carries the file's size and version,
+// the same shape Drive returns; a range outside the file is refused.
+{
+  const range=await storage.download(object,{offset:7,length:5});
+  assert.ok(range.blob instanceof Blob,'a range read returns its bytes as a Blob');
+  assert.equal(await range.blob.text(),'bytes');assert.equal(range.totalBytes,12);
+  assert.equal(range.version,object.remoteVersion,'a range is tied to the listed version of the file');
+  await assert.rejects(()=>storage.download(object,{offset:8,length:5}),/range is invalid/u);
+  await assert.rejects(()=>storage.download(object,{offset:-1,length:1}),/range is invalid/u);
+}
 
 // A version's listing carries its summary from the manifest, so history needs no other reads.
 const listed=(await storage.list({kind:'checkpoint'})).items;
