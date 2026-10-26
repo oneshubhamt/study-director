@@ -28,6 +28,7 @@ export const FEATURE_CONTRACTS=Object.freeze([
   contract('insights.render-lifecycle','tests/integration/insights/render-lifecycle.mjs'),
   contract('backup.create-inspect','tests/integration/backup/backup-persistence.mjs'),
   contract('backup.restore-session-safety','tests/browser/backup/restore-session-safety.mjs'),
+  contract('backup.session-plan-sync','tests/browser/backup/session-plan-sync.mjs'),
   contract('backup.current-canonical-roundtrip','tests/integration/backup/current-canonical-roundtrip.mjs'),
   contract('attachments.pdf-reader-lifetime','tests/integration/attachments/pdf-reader-lifetime.mjs'),
   contract('backup.encryption','tests/integration/backup/encryption.mjs'),

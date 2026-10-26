@@ -21,6 +21,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('backup-encryption','tests/browser/backup/encryption.mjs',['encryption','password','files','cancellation','recovery','worker']),
     test('pwa-device-backup','tests/browser/backup/pwa-device-backup.mjs',['pwa','device-backup']),
     test('sync-and-profiles','tests/browser/backup/sync-and-profiles.mjs',['sync','google-drive','two-devices','reload','activation','profiles'],300000),
+    test('session-plan-sync','tests/browser/backup/session-plan-sync.mjs',['sync','google-drive','two-devices','active-session','plan','takeover'],300000),
     test('insights-populated','tests/browser/insights/insights-populated-ui.mjs',['insights','populated-history']),
     test('pwa-update','tests/browser/pwa/pwa-update.mjs',['pwa','service-worker','trusted-types','multi-tab','offline','recovery','update']),
     test('image-clipboard-bridge','tests/browser/rich-text/image-bridge.mjs',['rich-editor','wordgard','native-file-selection','clipboard-image','selection','asset-storage']),
