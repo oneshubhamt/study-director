@@ -3,6 +3,7 @@ const test=(id,script,coverage,timeoutMs=0)=>Object.freeze({id,script,coverage:O
 export const BROWSER_TEST_MANIFEST=Object.freeze({
   smoke:Object.freeze([
     test('core-flow','tests/browser/app/core-flow.mjs',['plan','execute','review','library','indexeddb','backup']),
+    test('session-draft-edit','tests/browser/app/session-draft-edit.mjs',['plan','execute','practice-pacer','backup']),
     test('notes-management','tests/browser/library/notes-management.mjs',['library','notes']),
     test('attachment-editor','tests/browser/attachments/attachment-editor.mjs',['attachments','pdf','audio','rich-editor','overlay']),
     test('restore-session-safety','tests/browser/backup/restore-session-safety.mjs',['backup','restore','execute','library','recovery','multi-tab','ownership','reflection']),
