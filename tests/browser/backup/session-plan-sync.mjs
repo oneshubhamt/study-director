@@ -8,7 +8,8 @@ import {faults,ledger,sync,open,connect,markers,uploadsBy,waiting,sleep} from '.
 // seconds without waiting for the app to go to the background. The phone,
 // open on its timer, takes it in at its next session check (every two
 // minutes while a session runs) and shows the session running on the PC
-// with the new plan; Continue Here brings that plan's timer to the phone.
+// with the new plan, its Execute header naming the PC; Continue Here brings
+// that plan's timer to the phone.
 
 const sched=name=>`(()=>{const now=new Date(),m=now.getHours()*60+now.getMinutes(),fmt=v=>String(Math.floor((v+1440)%1440/60)).padStart(2,'0')+':'+String((v+1440)%1440%60).padStart(2,'0');return [fmt(m-5)+' | 60 | ${name} Block | work | Medicine | pages | 12',fmt(m+55)+' | 30 | ${name} Next | work | Ethics | pages | 5'].join('\\n');})()`;
 // Accept the takeover question the way a person would.
@@ -17,7 +18,7 @@ const pasteAndApply=name=>`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>set
   const input=document.getElementById('plan-input');input.value=${sched(name)};input.dispatchEvent(new Event('input',{bubbles:true}));await wait(400);
   document.querySelector('[data-action="apply-schedule"]').click();await wait(1500);clearInterval(window.__acceptTimer);d.goTab('execute');await wait(150);return window.__accepted;})()`;
 const screen=page=>page.evaluate(`(async()=>{const d=__PWA6;d.goTab('execute');await new Promise(r=>setTimeout(r,150));const panel=document.getElementById('session-panel'),session=(await d.AppData.activeSession.load()).value;
-  return {mode:d.TimerState.snapshot().mode,panel:panel.checkVisibility()?document.getElementById('session-panel-title').textContent:'',stored:String(session?.scheduleText||''),now:document.getElementById('pane-execute').innerText.replace(/\\s+/g,' ').slice(0,200)};})()`);
+  return {mode:d.TimerState.snapshot().mode,panel:panel.checkVisibility()?document.getElementById('session-panel-title').textContent:'',stored:String(session?.scheduleText||''),header:document.getElementById('status-session-label').textContent,overlay:document.getElementById('execute-overlay-title').textContent,now:document.getElementById('pane-execute').innerText.replace(/\\s+/g,' ').slice(0,200)};})()`);
 const runSession=name=>`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms));document.getElementById('plan-input').value=${sched(name)};const result=d.applySchedule({skipNotify:true});if(result&&result.then)await result;d.goTab('execute');await wait(50);d.setCurrentTask(0);d.TimerEngine.startCur();await wait(300);await d.flushLiveDraft();return d.TimerState.snapshot().mode;})()`;
 async function checkAgain(page,label){
   for(let wait=1;wait>0;){wait=(Date.parse((await sync(page)).checkedAt)||0)+61000-Date.now();if(wait>0)await sleep(wait);}
@@ -48,10 +49,17 @@ try{
   const phone=await screen(b);
   assert.equal(phone.panel,'Running on Another Device','the phone shows the session running on the PC');
   assert.notEqual(phone.mode,'running','the phone stops its own timer');
+  assert.match(phone.header,/^RUNNING ON /u,`the Execute header names the device running the session (${phone.header})`);
+  assert.equal(phone.overlay,'Running on Another Device','the Execute card says so too');
+  assert.doesNotMatch(phone.now,/No Schedule Loaded/u,'no "No Schedule Loaded" next to the panel');
 
-  await b.evaluate(`(async()=>{${acceptDialogs}__PWA6.goTab('plan');await new Promise(r=>setTimeout(r,150));document.querySelector('[data-action="restore-session"]').click();await new Promise(r=>setTimeout(r,2000));clearInterval(window.__acceptTimer);})()`);
+  // Continue Here, once the phone has finished taking in the plan (buttons
+  // are locked while a sync applies changes).
+  await waitFor(async()=>!markers()&&!await waiting(b)&&await b.evaluate(`(()=>{const button=[...document.querySelectorAll('[data-action="restore-session"]')].find(item=>!item.hidden);return !!button&&!button.disabled;})()`)&&!(await sync(b)).catchingUp,{label:'the phone settles',timeout:90000});
+  await b.evaluate(`(async()=>{${acceptDialogs}__PWA6.goTab('plan');await new Promise(r=>setTimeout(r,150));[...document.querySelectorAll('[data-action="restore-session"]')].find(item=>!item.hidden).click();await new Promise(r=>setTimeout(r,2000));clearInterval(window.__acceptTimer);})()`);
   const moved=await screen(b);
   assert.equal(moved.mode,'running','Continue Here runs the session on the phone');
+  assert.equal(moved.header,'LIVE SESSION','the header follows the session back to this device');
   assert.match(moved.now,/PC Block/u,'with the plan applied on the PC');
   for(const page of [a,b])assert.deepEqual(page.warnings.filter(text=>/\[Study Director\]/u.test(text)),[]);
   assert.deepEqual(faults,[]);
