@@ -25,6 +25,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '26.12.1'
+      - name: Install npm 12.2.1
+        run: npm install -g npm@12.2.1
       - name: Hermetic correctness gate
         run: node tests/helpers/run-category.mjs fast
       - name: Risk coverage

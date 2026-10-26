@@ -472,7 +472,7 @@ try{
     const rect=element=>{const r=element.getBoundingClientRect();return {width:r.width,height:r.height}};
     return {add:rect(add),addLabel:add.getAttribute('aria-label'),addText:add.textContent,overflow:root.scrollWidth-root.clientWidth};
   })()`);
-  assert.ok(mobile.add.width>=44&&mobile.add.height>=44);assert.equal(mobile.addLabel,'Create a note');assert.equal(mobile.addText,'+ New');assert.ok(mobile.overflow<=1);
+  assert.ok(mobile.add.width>=44&&mobile.add.height>=44);assert.equal(mobile.addLabel,'New note');assert.equal(mobile.addText,'+ New');assert.ok(mobile.overflow<=1);
   result.checks.compactAccessibleTouchControlsAndNoHorizontalOverflow=true;
 
   // Phones show the list or one note: opening a note hides the list, and the

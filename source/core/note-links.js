@@ -162,7 +162,7 @@ registry.define('note-links',1,()=>{
           row.append(chip);
         }
         if(writable){
-          const add=button('note-links-add',linked.length?'+':'+ Link note','Link another note');
+          const add=button('note-links-add',linked.length?'+':'+ Link note',linked.length?'Link another note':'Link note');
           add.addEventListener('click',async()=>{const chosen=await pick({exclude:[id,...linked.map(other=>other.id)]});if(chosen&&notes.link(ref,chosen.id,{label}).status==='changed'){render();onChange();}});
           row.append(add);
         }

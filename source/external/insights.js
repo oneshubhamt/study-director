@@ -1571,15 +1571,19 @@
     const nodeLayer=svgEl('g',{class:'risk-node-layer'});
     const groups=[];
     points.slice().sort((a,b)=>num(a.coverageWatchScore)-num(b.coverageWatchScore)).forEach(point=>{
-      const group=svgEl('g',{class:'risk-node',tabindex:'0',role:'button','aria-label':`${point.label}: ${riskLabel(point)}, watch score ${point.coverageWatchScore}, ${coverageRecencyLabel(point)}`});
-      const titleElement=svgEl('title');titleElement.textContent=`${point.label}: ${riskLabel(point)}; watch score ${point.coverageWatchScore}; ${coverageRecencyLabel(point)}; ${point.windowAbsent?'Absent in this window':`work ${percentLabel(point.coverageCompletion)}`}; ${point.allocation||'saved allocation'}; evidence confidence ${point.evidenceConfidence}%`;
-      group.appendChild(titleElement);
+      // The name starts with the node's visible text (its code and, for the top
+      // three, its short name), as WCAG 2.5.3 asks.
+      const fullName=String(point.label||'Area'),shownName=!compact&&point.index<3?fullName.slice(0,18):'';
+      const nodeName=shownName===fullName?`${point.code} ${fullName}`:`${point.code}${shownName?` ${shownName}`:''}, ${fullName}`;
+      const group=svgEl('g',{class:'risk-node',tabindex:'0',role:'button','aria-label':`${nodeName}: ${riskLabel(point)}, watch score ${point.coverageWatchScore}, ${coverageRecencyLabel(point)}`});
+      // Hover and focus fill the chart's detail panel, so the node needs no SVG
+      // tooltip (its text would also count as visible label text).
       group.append(svgEl('circle',{class:'risk-hit',cx:point.cx,cy:point.cy,r:Math.max(compact?22:15,point.r+(compact?10:8))}),svgEl('circle',{class:'point '+point.tone,cx:point.cx,cy:point.cy,r:point.r}));
       const code=svgEl('text',{class:'risk-code',x:point.cx,y:point.cy+0.5});code.textContent=point.code;group.appendChild(code);
-      if(!compact&&point.index<3){
+      if(shownName){
         const alignRight=point.cx>plotLeft+plotW*.58;
         const label=svgEl('text',{class:'risk-name',x:alignRight?point.cx-point.r-7:point.cx+point.r+7,y:point.cy+(point.index%2?12:-8),'text-anchor':alignRight?'end':'start'});
-        label.textContent=String(point.label||'Area').slice(0,18);group.appendChild(label);
+        label.textContent=shownName;group.append(' ',label);
       }
       point.group=group;point.node=group;groups.push(point);nodeLayer.appendChild(group);
     });
@@ -1668,11 +1672,14 @@
       const row=el('div','row');row.dataset.riskIndex=String(point.index);
       const visible=`${String(point.label||'Area').slice(0,18)} · watch ${point.coverageWatchScore} · ${coverageRecencyLabel(point,true)} · ${point.windowAbsent?'Absent in this window':`work ${percentLabel(point.coverageCompletion)}`}`;
       const detail=`${point.label||'Area'} · watch ${point.coverageWatchScore} · ${point.allocation||'saved allocation'} · ${coverageRecencyLabel(point)} · ${point.windowAbsent?'Absent in this window':`work ${percentLabel(point.coverageCompletion)}`} · evidence confidence ${point.evidenceConfidence}%`;
-      row.append(el('span','code',point.code),document.createTextNode(visible));
+      row.append(el('span','code',point.code),' ',document.createTextNode(visible));
       row.title=detail;
       row.tabIndex=0;
       row.setAttribute('role','button');
-      row.setAttribute('aria-label',detail);
+      // The name starts with the row's visible text, then adds the detail the
+      // tooltip shows.
+      const shortName=String(point.label||'Area').slice(0,18);
+      row.setAttribute('aria-label',`${point.code} ${visible}${shortName===String(point.label||'Area')?'':` · ${point.label}`} · ${point.allocation||'saved allocation'} · ${coverageRecencyLabel(point)} · evidence confidence ${point.evidenceConfidence}%`);
       keyRows[point.index]=row;key.appendChild(row);
     });
     bindCoverageRiskInteraction(points,nodeView,keyRows);
