@@ -50,14 +50,11 @@ function run(script,limitMs=timeoutMs){
 // serial). Tests marked alone always run afterwards with nothing else running.
 const jobs=Math.max(1,Math.min(8,Math.floor(Number(process.env.BROWSER_TEST_JOBS)||2)));
 const runEntry=entry=>{console.log(`\n[browser] ${entry.script}`);return run(entry.script,Math.max(timeoutMs,Number(entry.timeoutMs)||0));};
-if(jobs===1){
-  for(const entry of entries)await runEntry(entry);
-}else{
-  const shared=entries.filter(entry=>!entry.alone),failures=[];let next=0;
-  await Promise.all(Array.from({length:Math.min(jobs,shared.length)},async()=>{
-    while(next<shared.length){const entry=shared[next++];try{await runEntry(entry);}catch(error){failures.push(error);}}
-  }));
-  if(failures.length)throw new AggregateError(failures,`${failures.length} browser test(s) failed: ${failures.map(error=>error.message).join(' | ')}`);
-  for(const entry of entries.filter(entry=>entry.alone))await runEntry(entry);
-}
+const failures=[];
+const attempt=async entry=>{try{await runEntry(entry);}catch(error){failures.push(error);}};
+const shared=jobs===1?entries:entries.filter(entry=>!entry.alone);let next=0;
+await Promise.all(Array.from({length:Math.min(jobs,shared.length)},async()=>{while(next<shared.length)await attempt(shared[next++]);}));
+if(jobs>1)for(const entry of entries.filter(entry=>entry.alone))await attempt(entry);
+// Run everything, then report every failure together.
+if(failures.length)throw new AggregateError(failures,`${failures.length} browser test(s) failed: ${failures.map(error=>error.message).join(' | ')}`);
 console.log(JSON.stringify({status:'PASS',release:releaseConfig.release,tier,domain:domain||null,chromium,tests:scripts.length,quarantined:skipped.length,timeoutMs,jobs},null,2));
