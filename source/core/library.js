@@ -490,8 +490,10 @@ registry.define('library',1,()=>{
       if(node.children)twisty.addEventListener('click',event=>{event.stopPropagation();toggleNoteBranch(entry.key,!node.expanded);});
       const meta=document.createElement('span');meta.className='library-note-nav-tags';
       if(entry.current)meta.appendChild(textEl('span','library-note-tag current','TODAY'));
-      if(edited)meta.appendChild(textEl('span','library-note-nav-edited',edited));
-      row.append(twisty,textEl('span','library-note-nav-name',leaf),meta);
+      if(edited){if(meta.childNodes.length)meta.append(' ');meta.appendChild(textEl('span','library-note-nav-edited',edited));}
+      // Spaces between the parts keep words apart for assistive technology; a
+      // grid does not draw them.
+      row.append(twisty,' ',textEl('span','library-note-nav-name',leaf),' ',meta);
       row.addEventListener('click',()=>selectNote(entry.key));
       return row;
     }

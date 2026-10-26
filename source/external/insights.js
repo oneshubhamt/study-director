@@ -1576,14 +1576,14 @@
       const fullName=String(point.label||'Area'),shownName=!compact&&point.index<3?fullName.slice(0,18):'';
       const nodeName=shownName===fullName?`${point.code} ${fullName}`:`${point.code}${shownName?` ${shownName}`:''}, ${fullName}`;
       const group=svgEl('g',{class:'risk-node',tabindex:'0',role:'button','aria-label':`${nodeName}: ${riskLabel(point)}, watch score ${point.coverageWatchScore}, ${coverageRecencyLabel(point)}`});
-      const titleElement=svgEl('title');titleElement.textContent=`${point.label}: ${riskLabel(point)}; watch score ${point.coverageWatchScore}; ${coverageRecencyLabel(point)}; ${point.windowAbsent?'Absent in this window':`work ${percentLabel(point.coverageCompletion)}`}; ${point.allocation||'saved allocation'}; evidence confidence ${point.evidenceConfidence}%`;
-      group.appendChild(titleElement);
+      // Hover and focus fill the chart's detail panel, so the node needs no SVG
+      // tooltip (its text would also count as visible label text).
       group.append(svgEl('circle',{class:'risk-hit',cx:point.cx,cy:point.cy,r:Math.max(compact?22:15,point.r+(compact?10:8))}),svgEl('circle',{class:'point '+point.tone,cx:point.cx,cy:point.cy,r:point.r}));
       const code=svgEl('text',{class:'risk-code',x:point.cx,y:point.cy+0.5});code.textContent=point.code;group.appendChild(code);
       if(shownName){
         const alignRight=point.cx>plotLeft+plotW*.58;
         const label=svgEl('text',{class:'risk-name',x:alignRight?point.cx-point.r-7:point.cx+point.r+7,y:point.cy+(point.index%2?12:-8),'text-anchor':alignRight?'end':'start'});
-        label.textContent=shownName;group.appendChild(label);
+        label.textContent=shownName;group.append(' ',label);
       }
       point.group=group;point.node=group;groups.push(point);nodeLayer.appendChild(group);
     });
@@ -1672,7 +1672,7 @@
       const row=el('div','row');row.dataset.riskIndex=String(point.index);
       const visible=`${String(point.label||'Area').slice(0,18)} · watch ${point.coverageWatchScore} · ${coverageRecencyLabel(point,true)} · ${point.windowAbsent?'Absent in this window':`work ${percentLabel(point.coverageCompletion)}`}`;
       const detail=`${point.label||'Area'} · watch ${point.coverageWatchScore} · ${point.allocation||'saved allocation'} · ${coverageRecencyLabel(point)} · ${point.windowAbsent?'Absent in this window':`work ${percentLabel(point.coverageCompletion)}`} · evidence confidence ${point.evidenceConfidence}%`;
-      row.append(el('span','code',point.code),document.createTextNode(visible));
+      row.append(el('span','code',point.code),' ',document.createTextNode(visible));
       row.title=detail;
       row.tabIndex=0;
       row.setAttribute('role','button');
