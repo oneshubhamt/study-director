@@ -121,4 +121,16 @@ function countingDb(backend,errors){
   assert.equal(hung.events.opens,2,'a hung open is tried twice, not more');
   assert.deepEqual(hungErrors,['IndexedDB open timed out'],'the storage error is reported once, after the last attempt');
 }
-console.log(JSON.stringify({status:'PASS',suite:'canonical-topology',currentPreserved:true,unsupportedUntouched:true,freshCreation:true,recreationDetected:true,newerNotDowngraded:true,slowOpenRetriedOnce:true}));
+// A transaction that cannot start while the open checks the stores is a
+// storage failure: reported as one, never as an unsupported database.
+{
+  const errors=[],events={closed:0},broken={open(){
+    const req={result:null,error:null,onupgradeneeded:null,onsuccess:null,onerror:null,onblocked:null};
+    queueMicrotask(()=>{req.result={version:9,objectStoreNames:new StoreNames(new Set(canonicalNames)),createObjectStore(){},deleteObjectStore(){},transaction(){throw new Error('forced transaction failure');},close(){events.closed++;},onversionchange:null,onclose:null};req.onsuccess?.();});
+    return req;
+  }};
+  await assert.rejects(countingDb(broken,errors).open(),error=>error.message==='forced transaction failure'&&error.code!=='STUDY_DIRECTOR_UNSUPPORTED_TOPOLOGY');
+  assert.deepEqual(errors,['forced transaction failure'],'the failure is reported as a storage error');
+  assert.equal(events.closed,1,'the connection is closed');
+}
+console.log(JSON.stringify({status:'PASS',suite:'canonical-topology',currentPreserved:true,unsupportedUntouched:true,freshCreation:true,recreationDetected:true,newerNotDowngraded:true,slowOpenRetriedOnce:true,transactionFailureNotUnsupported:true}));

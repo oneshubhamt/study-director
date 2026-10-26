@@ -226,7 +226,7 @@ registry.define('persistence',1,()=>{
       let db;
       try{db=await openRequest(DB_VER);}
       catch(error){if(error?.name!=='VersionError')throw error;db=await openRequest();}
-      const state=inspectNewerDatabase(db);
+      let state;try{state=inspectNewerDatabase(db);}catch(error){try{db.close();}catch{}throw error;}
       if(Number(db.version)<DB_VER||Number(db.version)===DB_VER&&(!state.usable||db.objectStoreNames.length!==STORE_KEY_PATHS.size)){
         db.close();throw Object.assign(new Error('This database is not in the supported canonical topology. No data was converted or deleted.'),{code:'STUDY_DIRECTOR_UNSUPPORTED_TOPOLOGY'});
       }
@@ -238,8 +238,12 @@ registry.define('persistence',1,()=>{
       const missing=[],changed=[];
       for(const [name,keyPath] of STORE_KEY_PATHS){
         if(!db.objectStoreNames.contains(name)){missing.push(name);continue;}
-        try{const actual=db.transaction(name,'readonly').objectStore(name).keyPath;if((actual??null)!==keyPath)changed.push(name);}
-        catch(error){changed.push(name);}
+        // A store whose transaction cannot start is a storage failure, reported
+        // as one; only a different key path makes the topology unsupported.
+        let actual;
+        try{actual=db.transaction(name,'readonly').objectStore(name).keyPath;}
+        catch(error){markStorageHealthError((error&&error.message)||'IndexedDB transaction failed');throw error;}
+        if((actual??null)!==keyPath)changed.push(name);
       }
       return freeze({version:Number(db.version),missing:freeze(missing),changed:freeze(changed),usable:missing.length===0&&changed.length===0});
     }
