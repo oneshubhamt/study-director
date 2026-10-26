@@ -73,7 +73,10 @@ registry.define('backup-provider',1,input=>{
   function providerBackground(selected){
     const id=safeId(selected&&selected.id);if(!id)throw new Error('Backup provider background target is invalid.');
     let coordinator=providerBackgroundCoordinators.get(id);if(coordinator)return coordinator;
-    coordinator=Background.createCoordinator(freeze({target:id,environment:freeze({AbortController:globalThis.AbortController,clearTimeout,now:()=>Date.now(),setTimeout})}));providerBackgroundCoordinators.set(id,coordinator);return coordinator;
+    coordinator=Background.createCoordinator(freeze({target:id,environment:freeze({AbortController:globalThis.AbortController,clearTimeout,now:()=>Date.now(),setTimeout})}));providerBackgroundCoordinators.set(id,coordinator);
+    // Maintenance and integrity show as busy until their slot is released, after
+    // their own last status update: draw the row again then.
+    coordinator.onRelease(()=>notifyStatus());return coordinator;
   }
   function providerMaintenanceIntent(selected){
     if(!maintenanceHooks)return null;const id=safeId(selected&&selected.id);if(!id)throw new Error('Backup provider maintenance target is invalid.');selected=registeredProvider(selected);

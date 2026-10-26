@@ -236,4 +236,16 @@ for(const elapsed of [19999,20000,20001,180000]){
  }}));
  assert.equal((await scheduler.run()).reason,'budget');assert.equal(savedOffset,2048);
 }
+// A job that gives back its slot tells its listeners once it is no longer
+// active, so a status drawn while it ran ("Maintaining backups…") is redrawn.
+{
+  const fake=clock(),bg=coordinator(fake),seen=[];
+  const stop=bg.onRelease(job=>seen.push({job,active:[...bg.status().active]}));
+  const scope=await bg.beginBackground('integrity');assert.deepEqual(seen,[],'acquiring a slot is not a release');
+  assert.deepEqual([...bg.status().active],['integrity']);
+  scope.release();scope.release();
+  assert.deepEqual(seen,[{job:'integrity',active:[]}],'released once, after the job left the active list');
+  stop();const again=await bg.beginBackground('maintenance');again.release();assert.equal(seen.length,1,'an unsubscribed listener is not told');
+  assert.throws(()=>bg.onRelease(null),/listener is invalid/u);
+}
 console.log(JSON.stringify({status:'PASS',suite:'repository-background',sharedPolicy:true,priority:true,foregroundPreemption:true,suspensionSettlement:true,durableIntent:true,maintenanceLifecycle:true,triggerAttribution:true,integrityRecurrence:true,integrityStateFailureRetry:true},null,2));
