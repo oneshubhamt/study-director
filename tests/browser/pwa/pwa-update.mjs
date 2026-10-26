@@ -19,13 +19,15 @@ const trusted=rootHeaders.find(header=>header.key==='Content-Security-Policy-Rep
 const enforcedCsp=`${enforced}; ${trusted}`;
 
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-async function waitFor(operation,{timeout=60000,interval=100,label='condition'}={}){
+async function waitFor(operation,{timeout=60000,interval=100,label='condition',describe=null}={}){
   const started=Date.now();let last;
   while(Date.now()-started<timeout){
     try{last=await operation();if(last)return last;}catch(error){last=error;}
     await sleep(interval);
   }
-  throw new Error(`Timed out waiting for ${label}${last instanceof Error?`: ${last.message}`:''}`);
+  let state='';
+  if(describe){try{state=` (last state: ${JSON.stringify(await describe())})`;}catch(error){state=` (state unavailable: ${error.message})`;}}
+  throw new Error(`Timed out waiting for ${label}${last instanceof Error?`: ${last.message}`:''}${state}`);
 }
 function variant(label,{corruptPrecache=false}={}){return createPwaVariant(build,label,{corruptAsset:corruptPrecache?'/icon-192.png':''});}
 
@@ -87,6 +89,15 @@ async function reloadOffline(page,label){
 }
 async function workerIdentity(page,slot='active'){
   return page.evaluate(`(async()=>{const registration=await navigator.serviceWorker.getRegistration();const worker=registration&&registration['${slot}'];if(!worker)return '';return new Promise(resolve=>{const channel=new MessageChannel();const timer=setTimeout(()=>resolve('timeout'),3000);channel.port1.onmessage=event=>{clearTimeout(timer);channel.port1.close();resolve(event.data&&event.data.releaseId||'')};worker.postMessage({type:'SD_PWA_IDENTIFY'},[channel.port2])})})()`);
+}
+// What each tab sees of the update, for timeout messages.
+async function updateState(pages){
+  return Promise.all(pages.map(async page=>({
+    hidden:await page.evaluate('document.hidden'),
+    active:await workerIdentity(page),
+    waiting:await page.evaluate(`navigator.serviceWorker.getRegistration().then(registration=>registration?.waiting?.state||'none')`),
+    message:await page.evaluate(`document.getElementById('pwa-update-message')?.textContent||''`)
+  })));
 }
 // Browser registration may perform native checks too. Count only explicit calls
 // to registration.update(), including the application's automatic checks.
@@ -170,7 +181,7 @@ try{
   await sleep(700);
   assert.equal(page1.loadCount,loadsBefore.page1,'automatic update interrupted a recent edit before the idle guard elapsed');
   assert.equal(await workerIdentity(page1),originalPwa.releaseId,'waiting update activated while recent edit guard was active');
-  await waitFor(async()=>(await workerIdentity(page1))===next.releaseId&&(await workerIdentity(page2))===next.releaseId,{timeout:60000,label:'automatic safe activation'});
+  await waitFor(async()=>(await workerIdentity(page1))===next.releaseId&&(await workerIdentity(page2))===next.releaseId,{timeout:60000,label:'automatic safe activation',describe:()=>updateState([page1,page2])});
   await waitFor(()=>page1.loadCount>loadsBefore.page1&&page2.loadCount>loadsBefore.page2,{timeout:60000,label:'all controlled tabs immediate reload'});
   assert.equal(page1.loadCount-loadsBefore.page1,1);
   assert.equal(page2.loadCount-loadsBefore.page2,1,'hidden secondary tab did not reload immediately after controller change');

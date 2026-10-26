@@ -38,4 +38,5 @@ Stop and ask before you:
 - Change first-party code only in `source`, `portable` or `rich-text`. Never hand-edit generated `dist` output or external bundles.
 - `release.config.mjs` is the only source of release identity. `LICENSE` must stay identical to `source/legal/LICENSE.txt`.
 - A pull request titled like a bug fix (for example `fix: ...`) must include a regression test; CI enforces this.
+- Run browser tests one at a time, as `npm run test:browser*` does. Before you treat a browser test failure as a bug, reproduce it with the test running alone. [tests/README.md](tests/README.md#browser-test-reliability) has the full rules.
 - Storage, backup and restore code protects the owner's data. Changes there need targeted tests at the right layer.

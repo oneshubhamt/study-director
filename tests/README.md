@@ -59,6 +59,18 @@ Non-browser release certification is `npm run test:release`. Full promotion is `
 9. Every browser test appears exactly once in the browser manifest. Every release-gated test appears exactly once in the release manifest.
 10. Generated QA evidence belongs outside the repository unless explicitly requested through the artifact path helper.
 
+## Browser test reliability
+
+A browser test that sometimes fails is a defect, either in the test or in the app. These rules keep the browser tiers trustworthy:
+
+1. Run browser tests one at a time. The `npm run test:browser*` scripts already do this. Do not start several browser test files at once: Chromium slows service-worker activation, timers and rendering under CPU contention, and tests that pass alone then time out.
+2. A failure seen only while other browser tests run in parallel is not evidence of a bug. Rerun that test alone before acting on it.
+3. A failure seen in a serial run is real until diagnosed. Decide whether the test, the app or the browser is at fault, and fix that. Never add a retry loop, raise a timeout or skip an assertion just to get green.
+4. Wait for observable state (a DOM value, a stored record, a counter, a service-worker state), never for a fixed sleep. A sleep is acceptable only when the elapsed time is itself the contract, such as a debounce or a re-check interval.
+5. A new or changed browser test must pass 5 consecutive serial runs before it is merged.
+6. When a test times out, its failure message must say what it was waiting for and the last observed state, so a single failure can be diagnosed without a rerun.
+7. Quarantine is the last resort, follows the governance rules below and never applies to the smoke tier.
+
 ## Coverage and mutation
 
 `node tests/helpers/coverage.mjs` uses V8 coverage over the hermetic unit/integration runtime. Global percentages are diagnostic; enforcement is risk-based through `helpers/coverage-risk.mjs`, which combines conservative floors for safety-critical modules with explicit critical-path anchors and named owners for production code exercised only outside the fast runtime.
