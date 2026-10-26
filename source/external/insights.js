@@ -3242,7 +3242,7 @@
     const section=labSection('4. Execution mechanics','Where does execution break down?',true);
     const grid=el('div','insights-dossier-grid');
     const delayCard=el('section','insights-card soft ui-card');
-    delayCard.appendChild(sectionTitle('Start-delay evidence','Timezone-stable captured starts only; legacy records are excluded from delay buckets.'));
+    delayCard.appendChild(sectionTitle('Start-delay evidence','Timezone-stable captured starts only; days without them are excluded from delay buckets.'));
     const delayRows=(model.startDelays||[]).filter(row=>num(row.blocks)>0);
     delayCard.appendChild(delayRows.length
       ? labTable(['Delay bucket','Blocks','Completion','Avg delay'],delayRows.map(row=>[

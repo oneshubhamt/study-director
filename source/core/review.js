@@ -829,7 +829,7 @@ function pomodoroSummaryFromTasks(tasks){
 }
 function pomodoroSummaryText(summary){
   const s=summary||{};
-  const excluded=s.excludedUnknown?` · ${s.excludedUnknown} legacy break${s.excludedUnknown===1?'':'s'} without a saved allowance excluded`:'';
+  const excluded=s.excludedUnknown?` · ${s.excludedUnknown} break${s.excludedUnknown===1?'':'s'} without a saved allowance excluded`:'';
   if(!s.breaks)return `Pomodoro: no comparable accepted work-block breaks saved yet${excluded}.`;
   const breakLabel=s.breaks===1?'break':'breaks';
   const recovery=durationLabel(minutesFromSeconds(s.recoverySeconds));

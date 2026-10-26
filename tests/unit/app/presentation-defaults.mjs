@@ -107,21 +107,15 @@ for(const theme of ['dark','light']){
   assert.equal(storage.get('studyDirector.presentation.v1'),'aurora');
 }
 
-// Releases before the dark/light rename stored Director-prefixed theme IDs.
-// They must keep restoring the same appearance without a migration write.
-for(const [legacy,expected,expectedColor] of [['director-dark','dark','#04050a'],['director-light','light','#f2f0ea']]){
-  const {kernel,storage,root,meta}=loadKernel({storedTheme:legacy,storedPresentation:'glass'});
-  assert.equal(kernel.activeThemeId(),expected,`Legacy ${legacy} must restore as ${expected}.`);
-  assert.equal(root.dataset.theme,expected,'The document must carry the canonical theme ID, never the legacy alias.');
-  assert.equal(kernel.normalizeThemeId(legacy),expected,'Legacy theme IDs from backups and canonical preferences must resolve.');
-  assert.equal(storage.get('studyDirector.theme.v1'),legacy,'Restoring a legacy theme must not rewrite stored preferences.');
-  kernel.synchronizeMetadata();
-  assert.equal(meta.themeColor.content,expectedColor);
-  assert.equal(kernel.switchTheme(legacy,{persist:true}),expected);
-  assert.equal(storage.get('studyDirector.theme.v1'),expected,'A deliberate theme change persists the canonical ID.');
+// Only current theme IDs are read. The Director-prefixed IDs of releases before
+// the dark/light rename are unknown here and fall back to the default theme.
+for(const retired of ['director-dark','director-light']){
+  const {kernel,root}=loadKernel({storedTheme:retired,storedPresentation:'glass'});
+  assert.equal(kernel.activeThemeId(),'dark',`Retired ${retired} falls back to the default theme.`);
+  assert.equal(root.dataset.theme,'dark');assert.equal(kernel.normalizeThemeId(retired),'dark');
 }
 assert.equal(loadKernel().kernel.normalizeThemeId('director-sepia'),'dark','Unknown theme IDs still fall back to the default.');
 
 assert.equal('motion' in loadKernel().kernel,false,'Presentation Kernel must not expose snapshot-transition machinery to plugins; appearance transitions are host-owned.');
 
-console.log(JSON.stringify({status:'PASS',contract:'presentation-defaults',paths:['implicit-glass-dark','saved-director-dark','saved-director-light','saved-glass-dark','saved-glass-light','legacy-director-theme-aliases','saved-aurora','profile-scoped-appearance','prepaint-browser-chrome','no-plugin-snapshot-api']},null,2));
+console.log(JSON.stringify({status:'PASS',contract:'presentation-defaults',paths:['implicit-glass-dark','saved-director-dark','saved-director-light','saved-glass-dark','saved-glass-light','retired-theme-ids-fall-back','saved-aurora','profile-scoped-appearance','prepaint-browser-chrome','no-plugin-snapshot-api']},null,2));

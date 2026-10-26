@@ -104,7 +104,7 @@ for(const version of [1,2,3]){
 }
 {
  // A converted intent carries no request identity yet; the next mark assigns one.
- const h=host(),at=new Date().toISOString();await gateway().bind('backup').write('repositoryMaintenancePending',{format:'study-director.repository-maintenance-pending',version:4,entries:[{providerId:'google-drive',requestedAt:at,nextEligibleAt:at,reason:'legacy',repositoryScope:'',requestId:''}]},{strict:true});const old=await h.read('google-drive');assert.equal(old.requestId,'');await h.mark('google-drive',{reason:'resumed',nextEligibleAt:at},old);const current=await h.read('google-drive');assert.match(current.requestId,/^[a-f0-9-]{36}$/u);assert.equal(await h.clear('google-drive',old),'superseded');assert.equal(await h.clear('google-drive',current),true);intentCases.push('converted intent without request identity');
+ const h=host(),at=new Date().toISOString();await gateway().bind('backup').write('repositoryMaintenancePending',{format:'study-director.repository-maintenance-pending',version:4,entries:[{providerId:'google-drive',requestedAt:at,nextEligibleAt:at,reason:'requested',repositoryScope:'',requestId:''}]},{strict:true});const old=await h.read('google-drive');assert.equal(old.requestId,'');await h.mark('google-drive',{reason:'resumed',nextEligibleAt:at},old);const current=await h.read('google-drive');assert.match(current.requestId,/^[a-f0-9-]{36}$/u);assert.equal(await h.clear('google-drive',old),'superseded');assert.equal(await h.clear('google-drive',current),true);intentCases.push('converted intent without request identity');
 }
 // Requests accepted after a conditional commit must also retain their timer.
 for(const path of ['adopt-complete','adopt-pending','run-complete']){

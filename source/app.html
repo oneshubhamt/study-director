@@ -104,10 +104,6 @@
     'dark':freeze({id:'dark',label:'Dark'}),
     'light':freeze({id:'light',label:'Light'})
   });
-  // Earlier releases stored Director-prefixed theme IDs. Stored
-  // preferences, startup mirrors and backups keep them verbatim; every read
-  // resolves them here, and the next deliberate change writes the new ID.
-  const legacyThemes=freeze({'director-dark':'dark','director-light':'light'});
   const breakpoints=freeze({
     core:freeze({
       widePlan:1100,
@@ -382,7 +378,6 @@
     version:1,
     defaults:freeze({theme:'dark',preferredPresentation:'glass',fallbackPresentation:'director-current'}),
     themes,
-    legacyThemes,
     presentations,
     breakpoints,
     tokens:freeze({
@@ -419,8 +414,7 @@
   const owns=(record,value)=>Object.prototype.hasOwnProperty.call(record,value);
   const safePresentationId=value=>String(value||'').trim().toLowerCase().match(presentationIdPattern)?.[0]||'';
   const normalizeThemeId=value=>{
-    const raw=String(value||'').trim();
-    const candidate=owns(manifest.legacyThemes,raw)?manifest.legacyThemes[raw]:raw;
+    const candidate=String(value||'').trim();
     return owns(manifest.themes,candidate)?candidate:manifest.defaults.theme;
   };
   const normalizePresentationId=value=>{
@@ -9214,7 +9208,7 @@ BackupPresentation.subscribe(()=>{
 const REPOSITORY_MAINTENANCE_FORMAT='study-director.repository-maintenance-pending';
 const REPOSITORY_MAINTENANCE_VERSION=4;
 let repositoryMaintenanceWriteChain=Promise.resolve();
-function maintenanceReason(value){const reason=String(value||'legacy').trim().toLowerCase();return /^[a-z][a-z0-9-]{0,47}$/u.test(reason)?reason:'legacy';}
+function maintenanceReason(value){const reason=String(value||'requested').trim().toLowerCase();return /^[a-z][a-z0-9-]{0,47}$/u.test(reason)?reason:'requested';}
 function maintenanceIso(value,fallback=''){const text=String(value||'');return Number.isFinite(Date.parse(text))?text:fallback;}
 function normalizeRepositoryMaintenancePending(value){
   const entries=[],seen=new Set(),rows=value&&value.format===REPOSITORY_MAINTENANCE_FORMAT&&Number(value.version)===REPOSITORY_MAINTENANCE_VERSION&&Array.isArray(value.entries)?value.entries:[];
