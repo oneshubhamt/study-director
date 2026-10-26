@@ -132,7 +132,7 @@ export class CdpPage{
       if(message.method==='Runtime.exceptionThrown')this.events.push({kind:'exception',text:message.params.exceptionDetails.exception?.description||message.params.exceptionDetails.text||'Runtime exception'});
       if(message.method==='Runtime.consoleAPICalled'&&message.params.type==='error')this.events.push({kind:'console-error',text:message.params.args.map(arg=>arg.value??arg.description??'').join(' ')});
       if(message.method==='Runtime.consoleAPICalled'&&message.params.type==='warning')this.warnings.push(message.params.args.map(arg=>arg.value??arg.description??'').join(' '));
-      if(message.method==='Log.entryAdded'&&message.params.entry.level==='error')this.events.push({kind:'log-error',text:message.params.entry.text});
+      if(message.method==='Log.entryAdded'&&message.params.entry.level==='error')this.events.push({kind:'log-error',text:message.params.entry.text,...(message.params.entry.url?{url:message.params.entry.url}:{})});
     };
   }
   static async connect(url,targetId){
