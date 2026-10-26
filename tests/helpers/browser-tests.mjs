@@ -39,7 +39,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('workspace-overlay','tests/browser/rich-text/workspace-overlay.mjs',['rich-editor','focus-mode','overlay','pdf']),
     test('runtime-boundary','tests/browser/security/runtime-boundary.mjs',['security','trusted-types','paste','worker','execute','backup-protection','legal-center','export-worker']),
     test('storage-failures','tests/browser/storage/storage-failure-recovery.mjs',['storage','failure-injection','recovery']),
-    test('site-data-clear','tests/browser/storage/site-data-clear.mjs',['storage','site-data-clear','recovery','indexeddb','notifications','reload'],0,{alone:'The app gives up opening IndexedDB after 2.5 s (persistence.js); right after a storage clear that reopen can take longer on a busy CPU.'}),
+    test('site-data-clear','tests/browser/storage/site-data-clear.mjs',['storage','site-data-clear','recovery','indexeddb','notifications','reload'],0,{alone:'The app gives up opening IndexedDB after two 2.5 s attempts (persistence.js); right after a storage clear that reopen can take longer on a busy CPU.'}),
     test('canonical-storage','tests/browser/storage/canonical-storage.mjs',['storage','canonical','indexeddb','notes','reload']),
     test('unsupported-data','tests/browser/storage/unsupported-data.mjs',['storage','canonical','indexeddb','profiles','reload'],240000),
     test('interactions','tests/browser/ui/interactions.mjs',['dialogs','history','navigation','keyboard','notifications'])

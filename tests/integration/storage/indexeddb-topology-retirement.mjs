@@ -93,4 +93,32 @@ assert.equal((await makeDb(newerMissing).topology()).usable,false,'startup can i
 const fresh=fakeIndexedDb(),resets=[],freshDb=makeDb(fresh,event=>resets.push(event));
 await freshDb.open();assert.deepEqual(fresh.requests,[9],'fresh installation creates the current version in one atomic open');assert.deepEqual(fresh.snapshot(),{version:9,stores:canonicalNames});assert.equal(freshDb.lifecycle().startedFresh,true);
 fresh.clearSiteData();await freshDb.open();await new Promise(resolve=>setTimeout(resolve,0));assert.equal(resets.length,1);assert.equal(freshDb.lifecycle().resets,1);
-console.log(JSON.stringify({status:'PASS',suite:'canonical-topology',currentPreserved:true,unsupportedUntouched:true,freshCreation:true,recreationDetected:true,newerNotDowngraded:true}));
+// A slow open (nothing blocking it) gets one fresh attempt before the app
+// stops; the first request, if it finishes late, is closed unused. Two silent
+// attempts fail with one storage error.
+function silentIndexedDb({answerFrom,lateAfter=null}){
+  const events={opens:0,closed:0};
+  const answer=req=>{req.result={version:9,objectStoreNames:new StoreNames(new Set(canonicalNames)),createObjectStore(){},deleteObjectStore(){},transaction(name){return {objectStore:()=>({keyPath:({dailyRecords:'date',dailySummaries:'date',notes:'key',activeSessions:'id',appMeta:'key',assets:null})[name]})};},close(){events.closed++;},onversionchange:null,onclose:null};req.onsuccess?.();};
+  return {events,open(){
+    const attempt=++events.opens,req={result:null,error:null,onupgradeneeded:null,onsuccess:null,onerror:null,onblocked:null};
+    if(attempt>=answerFrom)queueMicrotask(()=>answer(req));
+    else if(lateAfter!==null)setTimeout(()=>answer(req),lateAfter);
+    return req;
+  }};
+}
+function countingDb(backend,errors){
+  const {persistence}=loadModules(backend);
+  return persistence.createIndexedDb(Object.freeze({config:Object.freeze({dbName:'StudyDirectorDB',dbVersion:9,stores:currentStores}),hooks:Object.freeze({onError:message=>errors.push(String(message)),onOk:()=>{},capture:()=>{}})}));
+}
+{
+  const errors=[],slow=silentIndexedDb({answerFrom:2,lateAfter:2700});
+  assert.equal(Number((await countingDb(slow,errors).open()).version),9,'a slow open succeeds on its second attempt');
+  await new Promise(resolve=>setTimeout(resolve,500));
+  assert.deepEqual(slow.events,{opens:2,closed:1},'the late first request is closed unused');
+  assert.deepEqual(errors,[],'a slow open that recovers reports no storage error');
+  const hungErrors=[],hung=silentIndexedDb({answerFrom:Infinity});
+  await assert.rejects(countingDb(hung,hungErrors).open(),/IndexedDB open timed out/u,'an open that never answers fails after the second attempt');
+  assert.equal(hung.events.opens,2,'a hung open is tried twice, not more');
+  assert.deepEqual(hungErrors,['IndexedDB open timed out'],'the storage error is reported once, after the last attempt');
+}
+console.log(JSON.stringify({status:'PASS',suite:'canonical-topology',currentPreserved:true,unsupportedUntouched:true,freshCreation:true,recreationDetected:true,newerNotDowngraded:true,slowOpenRetriedOnce:true}));

@@ -180,12 +180,24 @@ registry.define('persistence',1,()=>{
       markStorageHealthOk();
       return db;
     }
+    // A slow open gets one fresh attempt before the app stops: a busy phone can
+    // take longer than the time limit. The first request, if it finishes late,
+    // is closed without upgrading. An open blocked by another tab fails at once.
     function openRequest(version=null){
+      return openAttempt(version,false).catch(error=>{
+        if(error?.code!=='IDB_OPEN_TIMEOUT')throw error;
+        return openAttempt(version,true);
+      });
+    }
+    function openAttempt(version,last){
       return new Promise((resolve,reject)=>{
         if(typeof globalThis.indexedDB?.open!=='function'){markStorageHealthError('IndexedDB unavailable');reject(new Error('IndexedDB unavailable'));return;}
         let settled=false,blocked=false;
         const finish=(fn,val)=>{if(settled)return;settled=true;clearTimeout(timer);fn(val);};
-        const timer=setTimeout(()=>{const message=blocked?'IndexedDB open blocked':'IndexedDB open timed out';markStorageHealthError(message);finish(reject,new Error(message));},2500);
+        const timer=setTimeout(()=>{
+          const error=new Error(blocked?'IndexedDB open blocked':'IndexedDB open timed out');error.code=blocked?'IDB_OPEN_BLOCKED':'IDB_OPEN_TIMEOUT';
+          if(blocked||last)markStorageHealthError(error.message);finish(reject,error);
+        },2500);
         let req;
         try{req=version===null?globalThis.indexedDB.open(DB_NAME):globalThis.indexedDB.open(DB_NAME,version);}catch(error){markStorageHealthError(error&&error.message?error.message:'IndexedDB open failed');finish(reject,error);return;}
         req.onupgradeneeded=e=>{
