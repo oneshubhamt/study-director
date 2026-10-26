@@ -1,4 +1,6 @@
-const test=(id,script,coverage,timeoutMs=0)=>Object.freeze({id,script,coverage:Object.freeze(coverage),timeoutMs});
+// alone: the test must run with no other browser test running. Use it only when
+// a diagnosed browser behaviour under CPU contention makes the test unreliable.
+const test=(id,script,coverage,timeoutMs=0,{alone=false}={})=>Object.freeze({id,script,coverage:Object.freeze(coverage),timeoutMs,alone});
 
 export const BROWSER_TEST_MANIFEST=Object.freeze({
   smoke:Object.freeze([
@@ -23,7 +25,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('sync-and-profiles','tests/browser/backup/sync-and-profiles.mjs',['sync','google-drive','two-devices','reload','activation','profiles'],300000),
     test('session-plan-sync','tests/browser/backup/session-plan-sync.mjs',['sync','google-drive','two-devices','active-session','plan','takeover'],300000),
     test('insights-populated','tests/browser/insights/insights-populated-ui.mjs',['insights','populated-history']),
-    test('pwa-update','tests/browser/pwa/pwa-update.mjs',['pwa','service-worker','trusted-types','multi-tab','offline','recovery','update']),
+    test('pwa-update','tests/browser/pwa/pwa-update.mjs',['pwa','service-worker','trusted-types','multi-tab','offline','recovery','update'],0,{alone:true}),
     test('image-clipboard-bridge','tests/browser/rich-text/image-bridge.mjs',['rich-editor','wordgard','native-file-selection','clipboard-image','selection','asset-storage']),
     test('image-controls','tests/browser/rich-text/image-controls.mjs',['rich-editor','image','controls','mobile']),
     test('image-resize-toolbar-coherence','tests/browser/rich-text/image-resize-toolbar.mjs',['rich-editor','wordgard','image','resize','toolbar','contrast','mobile','desktop']),

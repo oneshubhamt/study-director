@@ -63,13 +63,14 @@ Non-browser release certification is `npm run test:release`. Full promotion is `
 
 A browser test that sometimes fails is a defect, either in the test or in the app. These rules keep the browser tiers trustworthy:
 
-1. Run browser tests one at a time. The `npm run test:browser*` scripts already do this. Do not start several browser test files at once: Chromium slows service-worker activation, timers and rendering under CPU contention, and tests that pass alone then time out.
-2. A failure seen only while other browser tests run in parallel is not evidence of a bug. Rerun that test alone before acting on it.
-3. A failure seen in a serial run is real until diagnosed. Decide whether the test, the app or the browser is at fault, and fix that. Never add a retry loop, raise a timeout or skip an assertion just to get green.
-4. Wait for observable state (a DOM value, a stored record, a counter, a service-worker state), never for a fixed sleep. A sleep is acceptable only when the elapsed time is itself the contract, such as a debounce or a re-check interval.
-5. A new or changed browser test must pass 5 consecutive serial runs before it is merged.
-6. When a test times out, its failure message must say what it was waiting for and the last observed state, so a single failure can be diagnosed without a rerun.
-7. Quarantine is the last resort, follows the governance rules below and never applies to the smoke tier.
+1. **Tests marked `alone` run with no other browser test running.** Today that is only `pwa-update`. Chromium delays service-worker activation while the CPU is busy, so this test can time out when other browser tests run beside it, and it passes when run alone. Never start it in parallel with another browser test, whether through the runner or by running the file directly.
+2. Other browser tests may run concurrently. `npm run test:browser*` runs one at a time by default; `BROWSER_TEST_JOBS=3 npm run test:browser:feature` runs up to three at once, then runs the `alone` tests by themselves.
+3. A failure seen only while tests run concurrently is not yet evidence of a bug. Rerun that test alone first. If it passes alone but fails under load more than once, diagnose it like any other failure. Mark it `alone` only when the cause is a browser behaviour under load that the test cannot avoid. Write the cause beside the manifest entry.
+4. A failure seen in a test running alone is real until diagnosed. Decide whether the test, the app or the browser is at fault, and fix that. Never add a retry loop, raise a timeout or skip an assertion just to get green.
+5. Wait for observable state (a DOM value, a stored record, a service-worker registration state), never for a fixed sleep. A sleep is acceptable only when the elapsed time is itself the contract, such as a debounce or a re-check interval. A wait must not disturb what it watches. For example, messaging a service worker in a polling loop delays its activation.
+6. A new or changed browser test must pass 5 consecutive runs before it is merged.
+7. When a test times out, its failure message must say what it was waiting for and the last observed state, so a single failure can be diagnosed without a rerun.
+8. Quarantine is the last resort, follows the governance rules below and never applies to the smoke tier.
 
 ## Coverage and mutation
 
