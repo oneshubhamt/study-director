@@ -21,7 +21,7 @@ try{
   // Text mode: H1/H2/N order, no overflow, spacing reset.
   await page.evaluate(`(()=>{const h=document.querySelector('${root} h2'),t=h.firstChild,r=document.createRange(),s=getSelection();document.querySelector('${root} .sd-rte-editor').focus();r.setStart(t,1);r.collapse(true);s.removeAllRanges();s.addRange(r);document.dispatchEvent(new Event('selectionchange'))})()`);await page.settle();
   await page.click(`${root} button[aria-label="Typography"]`);await page.settle();
-  const textUI=await page.evaluate(`(()=>{const menu=document.querySelector('${root} .sd-rte-typography'),align=menu.querySelector('.sd-rte-typography-align');return {presets:[...menu.querySelectorAll('.sd-rte-typography-presets button')].map(b=>b.textContent),labels:[...align.querySelectorAll('button')].map(b=>b.getAttribute('aria-label')),menuOverflow:menu.scrollWidth>menu.clientWidth,alignOverflow:align.scrollWidth>align.clientWidth}})()`);
+  const textUI=await page.evaluate(`(()=>{const menu=document.querySelector('${root} .sd-rte-typography'),align=menu.querySelector('.sd-rte-typography-align');return {presets:[...menu.querySelectorAll('.sd-rte-typography-presets button')].map(b=>b.querySelector('.sd-rte-glyph')?.dataset.glyph||b.textContent),labels:[...align.querySelectorAll('button')].map(b=>b.getAttribute('aria-label')),menuOverflow:menu.scrollWidth>menu.clientWidth,alignOverflow:align.scrollWidth>align.clientWidth}})()`);
   assert.deepEqual(textUI.presets,['H1','H2','N']);
   assert.deepEqual(textUI.labels,['Align left','Align center','Align right','Justify']);
   assert.equal(textUI.menuOverflow,false);assert.equal(textUI.alignOverflow,false);

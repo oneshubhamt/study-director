@@ -496,10 +496,16 @@ function createAnchoredPopover(popup:HTMLElement,{align='start',side='bottom',ma
 }
 
 function setStatus(element:HTMLElement,message:string,onStatus?:((value:string)=>void),state:''|'busy'|'error'|'success'=''){if(element.textContent!==message)element.textContent=message;if(state){if(element.dataset.state!==state)element.dataset.state=state}else if(element.dataset.state)delete element.dataset.state;if(onStatus)onStatus(message)}
-// A toolbar button shows a short glyph (B, HL, 1.) and is named by its title.
-// CSS draws the glyph, as for an icon, so the button's text is its name alone.
-function setButtonGlyph(button:HTMLElement,label:string){const glyph=document.createElement('span');glyph.className='sd-rte-glyph';glyph.dataset.glyph=label;button.replaceChildren(glyph);}
-function createButton(label:string,title:string,action:()=>void,className=''){const button=document.createElement('button');button.type='button';setButtonGlyph(button,label);button.title=title;button.setAttribute('aria-label',title);if(className)button.className=className;button.addEventListener('mousedown',event=>event.preventDefault());button.addEventListener('click',event=>{event.preventDefault();action()});return button}
+// A button's visible label must be part of its name (WCAG 2.5.3). A short
+// label that is not (HL for Highlight, H1 for Heading 1) works as an icon, so
+// CSS draws it and the button's text is its name alone.
+const labelWords=(value:string)=>value.toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+function setButtonGlyph(button:HTMLElement,label:string){
+  const words=labelWords(label),name=` ${labelWords(button.getAttribute('aria-label')||button.title||'')} `;
+  if(!words||/^\p{L}$/u.test(words)||name.includes(` ${words} `)){button.textContent=label;return;}
+  const glyph=document.createElement('span');glyph.className='sd-rte-glyph';glyph.dataset.glyph=label;button.replaceChildren(glyph);
+}
+function createButton(label:string,title:string,action:()=>void,className=''){const button=document.createElement('button');button.type='button';button.title=title;button.setAttribute('aria-label',title);setButtonGlyph(button,label);if(className)button.className=className;button.addEventListener('mousedown',event=>event.preventDefault());button.addEventListener('click',event=>{event.preventDefault();action()});return button}
 function toolbarGroup(label:string,...controls:HTMLElement[]){const group=document.createElement('div');group.className='sd-rte-toolbar-group';group.setAttribute('role','group');group.setAttribute('aria-label',label);group.append(...controls);return group}
 function annotateShortcut(button:HTMLButtonElement,keys:string,hint:string){button.setAttribute('aria-keyshortcuts',keys);button.title=`${button.title} (${hint})`}
 function currentLink(editor:Wordgard){const {selection,doc}=editor.state;if(selection.isCursor)return Link.isInSet(editor.state.sel.activeMarks)||null;let found:Mark|null=null;for(const range of selection.ranges){doc.iterate(range.from,range.to,node=>{found=Link.isInSet(node.marks)||found;return !found});if(found)break}return found}

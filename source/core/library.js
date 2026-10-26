@@ -480,14 +480,17 @@ registry.define('library',1,()=>{
       row.className='library-note-nav-item library-note-tree-item '+(entry.hasNote?'has-note':'empty-note')+(entry.support?' support-note':'')+(active?' active':'');
       row.style.setProperty('--note-indent',`${Math.min(6,node.depth)*15}px`);
       row.dataset.noteKey=entry.key;row.setAttribute('role','treeitem');row.setAttribute('aria-level',String(node.depth+1));row.setAttribute('aria-selected',active?'true':'false');
-      row.setAttribute('aria-label',`${leaf}${entry.hasNote?'':', empty'}${entry.current?', in today’s plan':''}`);
+      // The name starts with the row's visible text (name, TODAY, last edit), as
+      // WCAG 2.5.3 asks, then adds what the row shows only by style.
+      const edited=editedLabel(entry.updatedAt);
+      row.setAttribute('aria-label',`${leaf}${entry.current?' TODAY':''}${edited?` ${edited}`:''}${entry.hasNote?'':', empty'}${entry.current?', in today’s plan':''}`);
       if(node.children)row.setAttribute('aria-expanded',node.expanded?'true':'false');
       row.tabIndex=-1;
       const twisty=textEl('span','library-note-twisty',node.children?(node.expanded?'▾':'▸'):'');twisty.setAttribute('aria-hidden','true');
       if(node.children)twisty.addEventListener('click',event=>{event.stopPropagation();toggleNoteBranch(entry.key,!node.expanded);});
       const meta=document.createElement('span');meta.className='library-note-nav-tags';
       if(entry.current)meta.appendChild(textEl('span','library-note-tag current','TODAY'));
-      const edited=editedLabel(entry.updatedAt);if(edited)meta.appendChild(textEl('span','library-note-nav-edited',edited));
+      if(edited)meta.appendChild(textEl('span','library-note-nav-edited',edited));
       row.append(twisty,textEl('span','library-note-nav-name',leaf),meta);
       row.addEventListener('click',()=>selectNote(entry.key));
       return row;
