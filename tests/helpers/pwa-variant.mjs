@@ -12,3 +12,12 @@ export function createPwaVariant(build,label,{corruptAsset=''}={}){
  let csp=originalCsp;const oldScripts=scripts(original),newScripts=scripts(index);oldScripts.forEach((source,i)=>{if(source!==newScripts[i])csp=csp.replaceAll(`'sha256-${crypto.createHash('sha256').update(source).digest('base64')}'`,`'sha256-${crypto.createHash('sha256').update(newScripts[i]).digest('base64')}'`);});
  return Object.freeze({label,index,assetId,worker,releaseId,precache,csp});
 }
+
+// True once the registration has no waiting or installing worker and its active
+// worker is activated. Wait on this, not on messages to the workers: Chromium
+// activates a waiting worker only when the old one is idle, so messaging the
+// old worker in a polling loop delays activation, badly so under CPU load.
+export const REGISTRATION_SETTLED=`navigator.serviceWorker.getRegistration().then(registration=>!!registration&&!registration.waiting&&!registration.installing&&registration.active?.state==='activated')`;
+export async function registrationsSettled(pages){
+  return (await Promise.all(pages.map(page=>page.evaluate(REGISTRATION_SETTLED)))).every(Boolean);
+}

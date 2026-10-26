@@ -1,4 +1,4 @@
-import {withoutPwaChecks,studyTimezone} from '../../helpers/browser-harness.mjs';
+import {withoutPwaChecks,studyTimezone,devToolsPort} from '../../helpers/browser-harness.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -51,9 +51,7 @@ class CdpPage{
 const profile=fs.mkdtempSync(path.join(os.tmpdir(),'qa-safety-'));
 const proc=spawn(chromium,['--headless=new','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore','ignore','pipe']});
 let stderr='';proc.stderr.on('data',chunk=>{stderr+=chunk;});
-const activePath=path.join(profile,'DevToolsActivePort');
-await waitFor(()=>fs.existsSync(activePath),{timeout:20000,label:'Chromium DevTools port'});
-const [browserPort]=fs.readFileSync(activePath,'utf8').trim().split(/\r?\n/);
+const browserPort=await devToolsPort(profile);
 await waitFor(async()=>{try{return (await fetch(`http://127.0.0.1:${browserPort}/json/version`)).ok;}catch{return false;}},{label:'CDP endpoint'});
 
 async function createPage(){

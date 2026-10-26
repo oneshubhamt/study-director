@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {CdpPage,withoutPwaChecks,studyTimezone} from '../../helpers/browser-harness.mjs';
+import {CdpPage,withoutPwaChecks,studyTimezone,devToolsPort} from '../../helpers/browser-harness.mjs';
 
 const root=process.cwd();
 const chromium=process.env.CHROMIUM_PATH||['/usr/bin/chromium','/tmp/chromium'].find(fs.existsSync)||'/usr/bin/chromium';
@@ -51,9 +51,7 @@ const browser=spawn(chromium,[
   '--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'
 ],{stdio:['ignore','ignore','pipe']});
 let browserError='';browser.stderr.on('data',chunk=>{browserError+=chunk;});
-const activePortFile=path.join(profile,'DevToolsActivePort');
-await waitFor(()=>fs.existsSync(activePortFile),{timeout:20000,label:'Chromium DevTools port'});
-const [browserPort]=fs.readFileSync(activePortFile,'utf8').trim().split(/\r?\n/);
+const browserPort=await devToolsPort(profile);
 await waitFor(async()=>{try{return (await fetch(`http://127.0.0.1:${browserPort}/json/version`)).ok;}catch{return false;}},{label:'Chromium CDP endpoint'});
 
 const controllableLocalStorage=`(()=>{

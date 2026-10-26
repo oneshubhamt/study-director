@@ -26,7 +26,7 @@ const downgrade=`(async()=>{const n=${names};${idb}
   const dump={};
   for(const store of db.objectStoreNames){const tx=db.transaction(store,'readonly'),os=tx.objectStore(store);dump[store]={keyPath:os.keyPath,keys:await req(os.getAllKeys()),values:await req(os.getAll())};}
   db.close();
-  await new Promise((resolve,reject)=>{const r=indexedDB.deleteDatabase(n.db);r.onsuccess=resolve;r.onerror=()=>reject(r.error);r.onblocked=()=>reject(new Error('delete blocked'));});
+  await new Promise((resolve,reject)=>{const r=indexedDB.deleteDatabase(n.db);r.onsuccess=resolve;r.onerror=()=>reject(r.error);r.onblocked=()=>{setTimeout(()=>reject(new Error('delete stayed blocked for 20 s: a connection is still open')),20000);};});
   const notes=dump[n.notes].values,kept=notes.find(row=>row.label==='Ethics'),gone=notes.find(row=>row.label==='Polity');
   if(!kept||!gone)throw new Error('the current build did not store both notes');
   const template=dump.appMeta.values[0],deletedAt=new Date(Date.now()-60000).toISOString(),renamedTo=store=>store===n.notes?n.oldNotes:store;

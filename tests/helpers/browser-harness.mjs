@@ -254,15 +254,20 @@ export function resolveChromiumExecutable(preferred=''){
   return match;
 }
 
+// Chromium can create DevToolsActivePort before it has written the port, so
+// read until the file holds one; under CPU load that gap gets longer.
+export async function devToolsPort(profile,{timeout=20000}={}){
+  const file=path.join(profile,'DevToolsActivePort');
+  return waitFor(()=>{try{const value=fs.readFileSync(file,'utf8').split(/\r?\n/)[0].trim();return /^[1-9]\d{0,4}$/u.test(value)?value:'';}catch{return '';}},{timeout,label:'Chromium DevTools port'});
+}
+
 export async function launchChromium(options={}){
   const chromium=resolveChromiumExecutable(options.executable||'');
   const profile=fs.mkdtempSync(path.join(os.tmpdir(),options.profilePrefix||'study-director-pwa6-'));
   const args=['--headless=new','--no-sandbox','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank',...(options.args||[])];
   const processHandle=spawn(chromium,args,{stdio:['ignore','ignore','pipe'],env:{...process.env,TERM:process.env.TERM||'xterm'}});
   let stderr='';processHandle.stderr.on('data',chunk=>{stderr+=chunk;});
-  const activePath=path.join(profile,'DevToolsActivePort');
-  await waitFor(()=>fs.existsSync(activePath),{timeout:20000,label:'Chromium DevTools port'});
-  const [port]=fs.readFileSync(activePath,'utf8').trim().split(/\r?\n/);
+  const port=await devToolsPort(profile);
   await waitFor(async()=>{try{return (await fetch(`http://127.0.0.1:${port}/json/version`)).ok;}catch{return false;}},{label:'Chromium CDP endpoint'});
   const pages=new Set();
   async function createPage(url,settings={}){
