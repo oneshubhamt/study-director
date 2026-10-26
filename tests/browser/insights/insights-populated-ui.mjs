@@ -25,7 +25,7 @@ async function waitFor(fn,{timeout=45000,interval=100,label='condition'}={}){
 
 let main=fs.readFileSync(path.join(deployment,manifest.main),'utf8');
 const marker='/* PUBLIC PLUGIN API */';
-const exposure='window.__InsightsUiDebug=Object.freeze({StartupLifecycle,AppData,goTab});\n';
+const exposure='window.__InsightsUiDebug=Object.freeze({StartupLifecycle,AppData,goTab,dailyRecordVersion:DATA_CONTRACT.schemas.DailyRecord.version,sanitizeCurrentDailyRecord});\n';
 if(!main.includes(marker))throw new Error('Insights UI browser harness hook is unavailable.');
 main=main.replace(marker,exposure+marker);
 main=withoutPwaChecks(main);
@@ -62,17 +62,16 @@ try{
   const seeded=await page.evaluate(`(async()=>{
     const total=590,now=new Date(),end=Math.floor(Date.UTC(now.getFullYear(),now.getMonth(),now.getDate())/86400000),records=[];
     const iso=day=>new Date(day*86400000).toISOString().slice(0,10);
-    const dayNames=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    // Saved at 18:00 that day, or now for today: a save time is never in the future.
+    const savedAt=date=>new Date(Math.min(Date.parse(date+'T18:00:00.000Z'),Date.now())).toISOString();
     for(let index=0;index<total;index+=1){
       const date=iso(end-total+1+index),recent=true,recentIndex=index;
       const pace=recent?125-recentIndex*.06:65+index*.12,targetMs=60000,actualMs=Math.max(1000,Math.round(targetMs*pace/100));
       const completionA=Math.max(5,Math.min(100,recent?45+recentIndex*.05:95-index*.08));
       const completionB=Math.max(0,100-completionA/2),actualSecondsA=Math.round(completionA*18),actualSecondsB=1200;
-      const completedEquivalentMinutes=30*completionA/100+30*completionB/100,actualFocusMinutes=(actualSecondsA+actualSecondsB)/60;
-      const taskA='a-'+index,taskB='b-'+index,dayOfWeek=new Date(date+'T00:00:00Z').getUTCDay();
-      records.push({version:13,date,dayOfWeek,dayName:dayNames[dayOfWeek],savedAt:date+'T18:00:00.000Z',sourceRevision:1,
+      const taskA='a-'+index,taskB='b-'+index;
+      records.push({version:__InsightsUiDebug.dailyRecordVersion,recordKind:'study',date,savedAt:savedAt(date),updatedAt:savedAt(date),sourceRevision:1,
         quote:'',reflection:'',carryForwardDraft:'',studyQuality:index%5+1,realTimeSnapshot:null,
-        metrics:{originalPlannedStudyMinutes:60,completedEquivalentMinutes,actualFocusMinutes,completionPercent:completedEquivalentMinutes/60*100,averageBlockCompletion:(completionA+completionB)/2,actualVsPlannedMinutes:actualFocusMinutes-60,actualVsCompletedMinutes:actualFocusMinutes-completedEquivalentMinutes,shiftedStudyBlocks:0,totalScheduleShiftMinutes:0,netScheduleShiftMinutes:0},
         schedule:[
           {id:taskA,start:'08:00',duration:30,name:'Practice set',kind:'work',area:'Practice',measure:'questions',target:4},
           {id:taskB,start:'08:30',duration:30,name:'Review set',kind:'work',area:'Review',measure:'items',target:10}
@@ -83,7 +82,7 @@ try{
         },
         practiceRuns:[{taskId:taskA,targetMs,totalUnits:4,unitMs:[actualMs,actualMs,actualMs,actualMs]}]});
     }
-    const saved=await __InsightsUiDebug.AppData.dailyRecords.saveBatch(records.map((record,index)=>{const converted=__InsightsUiDebug.,.dailyRecord(record);if(!converted)throw new Error('Invalid legacy fixture at '+index+': '+JSON.stringify(record));return converted;}));
+    const saved=await __InsightsUiDebug.AppData.dailyRecords.saveBatch(records.map((record,index)=>{const current=__InsightsUiDebug.sanitizeCurrentDailyRecord(record);if(!current)throw new Error('Invalid Saved Day fixture at '+index+': '+JSON.stringify(record));return current;}));
     localStorage.setItem('studyDirector.insights.window.v1','all');
     const started=performance.now();__InsightsUiDebug.goTab('insights');
     return {saved,started,total};

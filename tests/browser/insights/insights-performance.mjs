@@ -3,24 +3,26 @@ import {PERFORMANCE_BUDGETS} from '../../../contracts/performance-budgets.mjs';
 import {launchChromium,sleep,instrumentedHtml,startReleaseServer,waitFor,waitForStudyDirector} from '../../helpers/browser-harness.mjs';
 
 const server=await startReleaseServer();
-server.setOverride('deployment','instrumented.html',instrumentedHtml().replace('Object.freeze({StartupLifecycle,','Object.freeze({StartupLifecycle,'));
-if(process.env.SD_SECURITY_TEST==='1')server.setOverride('deployment','instrumented.html',instrumentedHtml().replace('Object.freeze({StartupLifecycle,','Object.freeze({StartupLifecycle,').replace('<head>',"<head><meta http-equiv=\"Content-Security-Policy\" content=\"worker-src 'self'; require-trusted-types-for 'script'; trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-google-signin\">"));
+server.setOverride('deployment','instrumented.html',instrumentedHtml().replace('Object.freeze({StartupLifecycle,','Object.freeze({dailyRecordVersion:DATA_CONTRACT.schemas.DailyRecord.version,sanitizeCurrentDailyRecord,StartupLifecycle,'));
+if(process.env.SD_SECURITY_TEST==='1')server.setOverride('deployment','instrumented.html',instrumentedHtml().replace('Object.freeze({StartupLifecycle,','Object.freeze({dailyRecordVersion:DATA_CONTRACT.schemas.DailyRecord.version,sanitizeCurrentDailyRecord,StartupLifecycle,').replace('<head>',"<head><meta http-equiv=\"Content-Security-Policy\" content=\"worker-src 'self'; require-trusted-types-for 'script'; trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-google-signin\">"));
 const browser=await launchChromium({profilePrefix:'study-director-qa-insights-'});
 const pages=[];
 const url=server.url('deployment','instrumented.html');
 
 const seed=`(async()=>{
   const total=${PERFORMANCE_BUDGETS.referenceInsightsDays},now=new Date(),end=Math.floor(Date.UTC(now.getFullYear(),now.getMonth(),now.getDate())/86400000),records=[];
-  const iso=day=>new Date(day*86400000).toISOString().slice(0,10),dayNames=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const iso=day=>new Date(day*86400000).toISOString().slice(0,10);
+  // Saved at 18:00 that day, or now for today: a save time is never in the future.
+  const savedAt=date=>new Date(Math.min(Date.parse(date+'T18:00:00.000Z'),Date.now())).toISOString();
   for(let index=0;index<total;index+=1){
     const date=iso(end-total+1+index),pace=125-index*.06,targetMs=60000,actualMs=Math.max(1000,Math.round(targetMs*pace/100));
-    const a='a-'+index,b='b-'+index,completionA=Math.max(5,Math.min(100,45+index*.05)),completionB=Math.max(0,100-completionA/2),dayOfWeek=new Date(date+'T00:00:00Z').getUTCDay();
-    records.push({version:13,date,dayOfWeek,dayName:dayNames[dayOfWeek],savedAt:date+'T18:00:00.000Z',sourceRevision:1,studyQuality:index%5+1,
+    const a='a-'+index,b='b-'+index,completionA=Math.max(5,Math.min(100,45+index*.05)),completionB=Math.max(0,100-completionA/2);
+    records.push({version:__PWA6.dailyRecordVersion,recordKind:'study',date,savedAt:savedAt(date),updatedAt:savedAt(date),sourceRevision:1,quote:'',reflection:'',carryForwardDraft:'',studyQuality:index%5+1,realTimeSnapshot:null,
       schedule:[{id:a,start:'08:00',duration:30,name:'Practice set',kind:'work',area:'Practice',measure:'questions',target:4},{id:b,start:'08:30',duration:30,name:'Review set',kind:'work',area:'Review',measure:'items',target:10}],
       results:{[a]:{completion:completionA,completionSource:'manual',actualSeconds:Math.round(completionA*18)},[b]:{completion:completionB,completionSource:'manual',actualSeconds:1200}},
       practiceRuns:[{taskId:a,targetMs,totalUnits:4,unitMs:[actualMs,actualMs,actualMs,actualMs]}]});
   }
-  await __PWA6.AppData.dailyRecords.saveBatch(records.map(record=>__PWA6.,.dailyRecord(record)));localStorage.setItem('studyDirector.insights.window.v1','all');return total;
+  await __PWA6.AppData.dailyRecords.saveBatch(records.map((record,index)=>{const current=__PWA6.sanitizeCurrentDailyRecord(record);if(!current)throw new Error('Invalid Saved Day fixture at '+index);return current;}));localStorage.setItem('studyDirector.insights.window.v1','all');return total;
 })()`;
 
 async function open(preload=''){

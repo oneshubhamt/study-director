@@ -8,7 +8,7 @@ const manifest=JSON.parse(fs.readFileSync(path.join(root,'dist','build-manifest.
 let html=fs.readFileSync(path.join(root,'dist','deployment',manifest.main),'utf8');
 const marker='/* PUBLIC PLUGIN API */';
 if(!html.includes(marker))throw new Error('Insights browser harness hook is unavailable.');
-html=html.replace(marker,`window.__InsightsMaximumQA=Object.freeze({StartupLifecycle,AppData,BackupCodec,PlanData,goTab});\n${marker}`);
+html=html.replace(marker,`window.__InsightsMaximumQA=Object.freeze({StartupLifecycle,AppData,BackupCodec,PlanData,goTab,dailyRecordVersion:DATA_CONTRACT.schemas.DailyRecord.version,sanitizeCurrentDailyRecord});\n${marker}`);
 html=withoutPwaChecks(html);
 const insightsName=manifest.externalRuntimeFiles.find(name=>name.startsWith('sd.insights.'));
 assert.ok(insightsName,'content-hashed Insights runtime is missing');
@@ -33,10 +33,11 @@ try{
       const date=new Date(stamp).toISOString().slice(0,10),schedule=[],results={};
       for(let taskIndex=0;taskIndex<8;taskIndex++){
         const id='d'+dayIndex+'-t'+taskIndex;
-        schedule.push({id,start:String(7+taskIndex).padStart(2,'0')+':00',duration:50,name:('Study '+taskIndex+' '+repeated).slice(0,300),kind:'work',area:'Area '+(taskIndex%12),measure:'pages',target:20+taskIndex,note:repeated});
+        schedule.push({id,start:String(7+taskIndex).padStart(2,'0')+':00',duration:50,name:('Study '+taskIndex+' '+repeated).slice(0,160),kind:'work',area:'Area '+(taskIndex%12),measure:'pages',target:20+taskIndex});
         results[id]={completion:55+(dayIndex+taskIndex)%46,completionSource:'manual',actualSeconds:1800+(taskIndex*120)};
       }
-      records.push(qa.,.dailyRecord({version:13,date,dayName:'Study day',studyQuality:1+(dayIndex%5),schedule,results,practiceRuns:[]}));
+      const record={version:qa.dailyRecordVersion,recordKind:'study',date,savedAt:date+'T18:00:00.000Z',updatedAt:date+'T18:00:00.000Z',sourceRevision:1,quote:'',reflection:repeated,carryForwardDraft:'',studyQuality:1+(dayIndex%5),realTimeSnapshot:null,schedule,results,practiceRuns:[]};
+      const current=qa.sanitizeCurrentDailyRecord(record);if(!current)throw new Error('Invalid Saved Day fixture for '+date);records.push(current);
     }
     const codec=qa.BackupCodec,counts=codec.countShape({checkpointManifest:1,personalData:1,dailyRecord:records.length,note:0,activeSession:0});
     const manifest=codec.createManifest({studentName:'Maximum Import QA',installationId:'inst_maximum_import_browser',exportedAt:'2026-08-13T00:00:00.000Z',counts},{compression:'none',algorithm:'sha256'});
