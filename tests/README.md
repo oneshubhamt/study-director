@@ -59,6 +59,23 @@ Non-browser release certification is `npm run test:release`. Full promotion is `
 9. Every browser test appears exactly once in the browser manifest. Every release-gated test appears exactly once in the release manifest.
 10. Generated QA evidence belongs outside the repository unless explicitly requested through the artifact path helper.
 
+## Browser test reliability
+
+A browser test that sometimes fails is a defect, either in the test or in the app. These rules keep the browser tiers trustworthy:
+
+1. **Tests marked `alone` run with no other browser test running.** The manifest (`tests/helpers/browser-tests.mjs`) gives each one a written reason. Never start one in parallel with another browser test, whether through the runner or by running the file directly.
+   - `pwa-update` drives real service-worker activation across tabs. Its wait used to message the old worker in a loop, which delays activation; it failed about 5 times in 12 with four copies running at once. It now watches the registration and passed 12 of 12 under the same load. It still runs alone, as a safeguard.
+   - `site-data-clear` reopens the database right after wiping site storage. The app gives up opening IndexedDB after 2.5 seconds, and under CPU load that reopen can take longer.
+   - `backup-encryption` failed only under concurrent load and passes alone. Its reason starts "Not yet diagnosed": it needs a root cause, and once fixed it may run concurrently again.
+2. Other browser tests run concurrently. `npm run test:browser*` runs up to two at a time, then the `alone` tests by themselves. `BROWSER_TEST_JOBS=N` changes the limit; `BROWSER_TEST_JOBS=1` runs everything one at a time.
+3. A failure seen only while tests run concurrently is not yet evidence of a bug. Rerun that test alone first. If it passes alone but fails under load more than once, diagnose it like any other failure. Fix the cause when the test can avoid it. Otherwise, or until it is diagnosed, mark it `alone` with the reason.
+4. A failure seen in a test running alone is real until diagnosed. Decide whether the test, the app or the browser is at fault, and fix that. Never add a retry loop, raise a timeout or skip an assertion just to get green.
+5. Wait for observable state (a DOM value, a stored record, a service-worker registration state), never for a fixed sleep. A sleep is acceptable only when the elapsed time is itself the contract, such as a debounce or a re-check interval. A wait must not disturb what it watches. For example, messaging a service worker in a polling loop delays its activation. Wait for the outcome, not the first event on the way to it. A blocked database delete completes once the old connection closes. The first save after a storage clear may abort and be retried. A file can exist before it is fully written.
+6. A new or changed browser test must pass 5 consecutive runs before it is merged.
+7. Report a run as one summary: the totals plus each failure. Do not report passing tests one by one.
+8. When a test times out, its failure message must say what it was waiting for and the last observed state, so a single failure can be diagnosed without a rerun.
+9. Quarantine is the last resort, follows the governance rules below and never applies to the smoke tier.
+
 ## Coverage and mutation
 
 `node tests/helpers/coverage.mjs` uses V8 coverage over the hermetic unit/integration runtime. Global percentages are diagnostic; enforcement is risk-based through `helpers/coverage-risk.mjs`, which combines conservative floors for safety-critical modules with explicit critical-path anchors and named owners for production code exercised only outside the fast runtime.

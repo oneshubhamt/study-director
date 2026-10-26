@@ -6,6 +6,26 @@ Status of the work. It was built on `refactor/background-coordination` and merge
 
 ---
 
+## 0. Next: owner's observations (noted 2026-10-25, not started)
+
+Nothing below is built or audited yet. Each item starts with an audit or a measurement, and the owner decides before anything is changed.
+
+| # | Item | What was seen | What to do first |
+|---|---|---|---|
+| 1 | Seamless first start with Drive | A new install on the phone, with data already on the laptop, showed the name form and "Connect Google Drive". If Drive is connected, the name prompt seems unnecessary: the profile could be picked from what Drive already holds. Today each Drive library belongs to one profile. | Audit the first-start, profile and Drive flow. Answer: can connecting Drive come first and offer the profiles found there, so a second device needs no name and no setup? |
+| 2 | Catch-up when Drive connects | On the iPad, connecting Drive said it was backing up and took a while. It was unclear whether anything happened, and the laptop's latest changes did not arrive. Restoring from Version History worked. Expected: a new install, or a device with very old data, catches up automatically once Drive connects. The owner can share the exact messages. | Audit sync catch-up on connect: what runs first (upload or catch-up), what the person sees, and why it did not adopt the newer data. Then make it automatic and clearly shown. |
+| 3 | "From a newer version · Check for update" row | A permanent row with a button sits at the top of Library → Data. Its purpose is unclear. | Find what it does and whether it needs to be visible all the time; remove or hide it unless it has a use. |
+| 4 | Audit the backup system again | | Full audit, report only. |
+| 5 | Audit the background services twice more | | Two separate passes, report only. |
+| 6 | Audit the notes system again | | Full audit, report only. |
+| 7 | Performance check | Smooth on the phone and iPad; unknown on an old PC after the UI overhaul and the many changes since. | Measure app performance on a slow, throttled profile (start-up, tab switches, Library, Insights, typing in notes). |
+| 8 | Backup speed and safety | Confirm that the backup speed work is in use everywhere, including the faster hashing, for both Drive and the Device Folder. | Measure backup and restore speed for both, and check reliability. |
+| 9 | Still waiting from before | Removing the migration code (the compatibility layer and Release B, section 5.3a), a better Smart merge, and the open items in section 5.8. | As already planned. |
+| 10 | Optional size work | The deployment build is not minified, and Wordgard ships unminified. The compressed download is already 7% smaller than SDVB75F10. | Owner's choice: minify the build, or only `wordgard.js`, with a full test run. |
+| 11 | Whole-app quality pass | Is the app clean, lean, elegant, efficient and reliable after this round of work (backups, data topology, background services, notes)? Is the notes system first-class in speed, reliability and features? | One broad review across those four areas: what to clean up, correct or refine, and how the notes system compares with a first-class notes app. Measure the resource envelope too: memory over a long session, CPU and battery while idle and while studying (timers, background jobs, sync, animations). Then propose where to trim. Report only. |
+
+---
+
 ## 1. How we proceed (agreed 2026-10-06)
 
 **Philosophy.** The app is clean, lean, efficient, elegant and reliable. No extravagant or unnecessary features. Everything works rock solid within the range it is meant for. Do the simple things very well; do not over-engineer.
