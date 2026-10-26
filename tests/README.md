@@ -65,7 +65,7 @@ A browser test that sometimes fails is a defect, either in the test or in the ap
 
 1. **Tests marked `alone` run with no other browser test running.** The manifest (`tests/helpers/browser-tests.mjs`) gives each one a written reason. Never start one in parallel with another browser test, whether through the runner or by running the file directly.
    - `pwa-update` drives real service-worker activation across tabs. Its wait used to message the old worker in a loop, which delays activation; it failed about 5 times in 12 with four copies running at once. It now watches the registration and passed 12 of 12 under the same load. It still runs alone, as a safeguard.
-   - `site-data-clear` reopens the database right after wiping site storage. The app gives up opening IndexedDB after 2.5 seconds, and under CPU load that reopen can take longer.
+   - `site-data-clear` reopens the database right after wiping site storage. The app tries to open IndexedDB twice, 2.5 seconds each, before it stops, and under CPU load that reopen can take longer.
    - `backup-encryption` failed only under concurrent load and passes alone. Its reason starts "Not yet diagnosed": it needs a root cause, and once fixed it may run concurrently again.
 2. Other browser tests run concurrently. `npm run test:browser*` runs up to two at a time, then the `alone` tests by themselves. `BROWSER_TEST_JOBS=N` changes the limit; `BROWSER_TEST_JOBS=1` runs everything one at a time.
 3. A failure seen only while tests run concurrently is not yet evidence of a bug. Rerun that test alone first. If it passes alone but fails under load more than once, diagnose it like any other failure. Fix the cause when the test can avoid it. Otherwise, or until it is diagnosed, mark it `alone` with the reason.

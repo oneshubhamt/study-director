@@ -178,7 +178,43 @@ function blockingIndexedDb({releaseAfter}){
   assert.deepEqual(late.events,{aborted:1,closed:1},'a late result is not upgraded and its connection is closed');
 }
 
+// A slow open (nothing blocking it) gets one fresh attempt before the app
+// stops; the first request, if it finishes late, is closed and never upgrades.
+// Two silent attempts fail with one storage error.
+function silentIndexedDb({answerFrom,lateAfter=null}){
+  const events={opens:0,aborted:0,closed:0};
+  const answer=req=>{
+    const db={version:9,objectStoreNames:new StoreNames(new Set(canonicalNames)),createObjectStore(){},deleteObjectStore(){},close(){events.closed++;},onversionchange:null,onclose:null};
+    req.result=db;req.onupgradeneeded?.({oldVersion:8,target:{result:db,transaction:{abort(){events.aborted++;},objectStore(){return {};}}}});req.onsuccess?.();
+  };
+  return {events,open(){
+    const attempt=++events.opens,req={result:null,error:null,onupgradeneeded:null,onsuccess:null,onerror:null,onblocked:null};
+    if(attempt>=answerFrom)queueMicrotask(()=>answer(req));
+    else if(lateAfter!==null)setTimeout(()=>answer(req),lateAfter);
+    return req;
+  }};
+}
+function countingDb(indexedDB,errors){
+  const {persistence,compatibility}=loadModules(indexedDB);
+  return persistence.createIndexedDb(Object.freeze({
+    config:Object.freeze({dbName:'StudyDirectorDB',dbVersion:9,bridgeVersion:8,stores:currentStores,legacyStores}),
+    hooks:Object.freeze({onError:message=>errors.push(String(message)),onOk:()=>{},capture:()=>{}}),
+    upgrade:upgradeWith(compatibility,()=>false)
+  }));
+}
+{
+  const errors=[],slow=silentIndexedDb({answerFrom:2,lateAfter:2700});
+  assert.equal(Number((await countingDb(slow,errors).open()).version),9,'a slow open succeeds on its second attempt');
+  await new Promise(resolve=>setTimeout(resolve,500));
+  assert.deepEqual(slow.events,{opens:2,aborted:1,closed:1},'the late first request is closed without upgrading');
+  assert.deepEqual(errors,[],'a slow open that recovers reports no storage error');
+  const hungErrors=[],hung=silentIndexedDb({answerFrom:Infinity});
+  await assert.rejects(countingDb(hung,hungErrors).open(),/IndexedDB open timed out/u,'an open that never answers fails after the second attempt');
+  assert.equal(hung.events.opens,2,'a hung open is tried twice, not more');
+  assert.deepEqual(hungErrors,['IndexedDB open timed out'],'the storage error is reported once, after the last attempt');
+}
+
 console.log(JSON.stringify({
   status:'PASS',suite:'indexeddb-topology-retirement',
-  migrated:{from:5,to:9,removed:['syncQueue','tombstones','reflectionDrafts'],renamed:{areaNotes:'notes'}},previousBuildBridged:true,briefBlockWaited:true,freshInstallLean:true,historicalV1Bridged:true,siteDataClearDetected:true
+  migrated:{from:5,to:9,removed:['syncQueue','tombstones','reflectionDrafts'],renamed:{areaNotes:'notes'}},previousBuildBridged:true,briefBlockWaited:true,slowOpenRetriedOnce:true,freshInstallLean:true,historicalV1Bridged:true,siteDataClearDetected:true
 },null,2));
