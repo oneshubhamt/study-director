@@ -2338,7 +2338,11 @@ function updateExecutePanels(state=null,options={}){
     }
   }catch(e){}
 }
+// Today's session as another device runs it, while this one shows it there.
+function sessionShownElsewhere(){return sessionPanelMode==='elsewhere'&&!TASKS.length?sessionPanelSession:null;}
 function executeSessionStatusModel(){
+  const elsewhere=sessionShownElsewhere();
+  if(elsewhere)return {state:'elsewhere',label:`RUNNING ${sessionDevice(elsewhere).toUpperCase()}`};
   if(!TASKS.length)return {state:'empty',label:'NO SESSION'};
   if(TimerState.mode===TIMER_MODES.SUSPENDED)return {state:'suspended',label:'SUSPENDED'};
   if(TimerState.mode===TIMER_MODES.DONE)return {state:'complete',label:'COMPLETE'};
@@ -4257,6 +4261,9 @@ function isRecoverablePreviousActiveSession(session){
 function setSessionPanelMode(mode,session=null){
   sessionPanelMode=mode||'none';
   sessionPanelSession=['suspended','elsewhere'].includes(sessionPanelMode)?session:null;
+  // The Execute header names the device running the session, or stops doing
+  // so. Before the panel's own controls, which the idle display disables.
+  try{updateExecuteSessionStatus();refreshExecuteIdleDisplay(new Date(),{force:true});}catch(error){AppDiagnostics.capture('execute.session-elsewhere-header',error,'warn');}
   updateSessionControls();
 }
 async function recoverPreviousSessionForReview(session){
@@ -8040,6 +8047,8 @@ function executeIdlePresentation(d=new Date(),options={}){
     if(explicitMessage)view.overlayMessage=explicitMessage;
     return view;
   };
+  const elsewhere=sessionShownElsewhere();
+  if(elsewhere)return applyOverrides(executeIdleView('Running on Another Device',sessionDevice(elsewhere).replace(/^on /,'').toUpperCase(),'Running on Another Device',`Today’s session is running ${sessionDevice(elsewhere)} (last update ${sessionUpdateTime(elsewhere)}). Continue Here, below, moves it to this device.`,'NEXT: —'));
   if(!hasRows)return applyOverrides(executeIdleView('No Schedule Loaded','—','No Schedule Loaded','Open Plan and apply today’s schedule to begin.','NEXT: —'));
   if(!hasTrackable)return applyOverrides(executeIdleView('Plan Has No Study Blocks','FIXED / NON-TRACKABLE ONLY','No Trackable Blocks','This plan has no work or support blocks for the timer to run. Edit it in Plan before starting.','NEXT: —'));
   if(TimerState.mode===TIMER_MODES.DONE){
