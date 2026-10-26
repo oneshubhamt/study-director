@@ -139,7 +139,8 @@ try{
       await waitFor(()=>page.evaluate(`__PWA6.DeviceBackup.status().connected`),{label:'remembered Device Folder after reload'});
       const reloaded=await page.evaluate(read);
       assert.equal(reloaded.yesterday,'FolderQA yesterday');assert.equal(reloaded.note,'FolderQA note edited after clearing');assert.equal(reloaded.session,true);
-      assert.equal(reloaded.folder,true,'the Device Folder is remembered after the clear');
+      // The folder reconnects in the background just after startup.
+      await waitFor(()=>page.evaluate(`__PWA6.DeviceBackup.status().connected`),{label:'the Device Folder is remembered after the clear'});
       // The open tab wrote the device ID back, so the reload keeps backing up
       // into the same folder rather than starting a new one.
       await waitFor(()=>page.evaluate(`__PWA6.DeviceBackup.status().repositoryName===${JSON.stringify(repository)}`),{label:'same backup folder after the clear'});

@@ -124,8 +124,8 @@ for(const entry of entries){
 }
 const release=selectedBrowserTests('release');
 assert.equal(release.length,entries.length,'release browser QA must include every active browser test');
-// Chromium delays service-worker activation under CPU contention (tests/README.md).
-assert.deepEqual(entries.filter(entry=>entry.alone).map(entry=>entry.id),['pwa-update'],'only diagnosed contention-sensitive browser tests run alone');
+// Diagnosed load-sensitive tests; tests/README.md says why each one runs alone.
+assert.deepEqual(entries.filter(entry=>entry.alone).map(entry=>entry.id).sort(),['pwa-update','site-data-clear'],'only diagnosed contention-sensitive browser tests run alone');
 assert.deepEqual(selectedBrowserTests('smoke'),[...BROWSER_TEST_MANIFEST.smoke]);
 assert.deepEqual(selectedBrowserTests('feature'),[...BROWSER_TEST_MANIFEST.feature]);
 assert.deepEqual(selectedBrowserTests('extended'),[...BROWSER_TEST_MANIFEST.extended]);
