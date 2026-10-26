@@ -1,9 +1,10 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
-for(const file of ['source/core/internal.js','source/core/operation-lifecycle.js','source/core/repository-background.js'])vm.runInThisContext(fs.readFileSync(file,'utf8'),{filename:file});
+for(const file of ['source/core/internal.js','source/core/operation-lifecycle.ts','source/core/repository-background.js'])vm.runInThisContext(readScript(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const module=registry.require('repository-background',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})),freeze=Object.freeze;
 

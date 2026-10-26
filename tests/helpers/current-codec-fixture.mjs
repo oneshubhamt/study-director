@@ -1,9 +1,10 @@
+import {readScript} from '../../build/source-script.mts';
 import {PRODUCTION_LIMITS} from '../../contracts/production-limits.mjs';
 import {RUNTIME_DATA_CONTRACT} from '../../contracts/canonical-identities.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-for(const file of ['source/core/internal.js','source/core/domain.js','source/core/record-codecs.js','source/core/backup-codec.js','source/core/attachments.js','source/core/persistence.js'])vm.runInThisContext(fs.readFileSync(file,'utf8'),{filename:file});
+for(const file of ['source/core/internal.js','source/core/domain.ts','source/core/record-codecs.js','source/core/backup-codec.js','source/core/attachments.js','source/core/persistence.js'])vm.runInThisContext(readScript(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const Domain=registry.require('domain',1,Object.freeze({maxAreaNameChars:200,maxDurationMinutes:1440,maxScheduleChars:50000,maxScheduleRows:200,maxTaskNameChars:300,maxTasksPerDay:100,maxUnitChars:80}));
 const RecordCodecs=registry.require('record-codecs',1);

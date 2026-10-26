@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import {createStoreZip} from '../../../portable/zip.js';
-import {createProcessingEngine} from '../../../portable/processing.js';
+import {createStoreZip} from '../../../portable/zip.ts';
+import {createProcessingEngine} from '../../../portable/processing.ts';
 
 const run=file=>vm.runInThisContext(fs.readFileSync(new URL(file,import.meta.url),'utf8'),{filename:file});
 run('../../../source/core/internal.js');run('../../../source/core/note-export.js');

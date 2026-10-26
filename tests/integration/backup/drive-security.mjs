@@ -1,3 +1,4 @@
+import {readCoreScript} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -314,7 +315,7 @@ async function settleBody(task,clock){
 }
 async function bodyFixture(){const clock=bodyClock(),h=createHarness({clock});await h.provider.prepare();await h.provider.authorize();await h.provider.repository.list({kind:'object'});return {...h,clock};}
 function repositoryBackground(h){
- for(const name of ['internal','operation-lifecycle','repository-background'])vm.runInContext(fs.readFileSync(`source/core/${name}.js`,'utf8'),h.context);
+ for(const name of ['internal','operation-lifecycle','repository-background'])vm.runInContext(readCoreScript(name),h.context);
  const registry=h.context[Symbol.for('studyDirector.internalModules.v1')],lifecycle=registry.require('operation-lifecycle',1),background=registry.require('repository-background',1,Object.freeze({lifecycle}));
  return background.createCoordinator(Object.freeze({target:'google-drive',environment:Object.freeze({AbortController,now:h.clock.now,setTimeout:h.clock.setTimeout,clearTimeout:h.clock.clearTimeout})}));
 }

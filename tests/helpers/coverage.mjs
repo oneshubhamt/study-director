@@ -1,5 +1,5 @@
 import {coverageSelection} from './coverage-selection.mjs';
-import {compileScript} from '../../build/source-script.mts';
+import {eraseTypes} from '../../build/source-script.mts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -93,7 +93,7 @@ function mapRange(range,lines){
   }
 }
 function summarize(file,script){
-  const source=compileScript(fs.readFileSync(file,'utf8'),file);
+  const source=eraseTypes(fs.readFileSync(file,'utf8'),file);
   const lines=makeLines(source);
   let totalBranches=0,coveredBranches=0,totalFunctions=0,coveredFunctions=0;
   for(let i=0;i<script.functions.length;i++){

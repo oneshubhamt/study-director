@@ -1,11 +1,12 @@
+import {readCoreScript,coreScriptPath} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {Worker} from 'node:worker_threads';
-import {createProcessingEngine} from '../../../portable/processing.js';
+import {createProcessingEngine} from '../../../portable/processing.ts';
 import {nextTurn} from '../../helpers/async-tools.mjs';
 
-for(const file of ['internal','operation-lifecycle','exports']){const filename=`source/core/${file}.js`;vm.runInThisContext(fs.readFileSync(filename,'utf8'),{filename});}
+for(const file of ['internal','operation-lifecycle','exports']){const filename=coreScriptPath(file);vm.runInThisContext(readCoreScript(file),{filename});}
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('exports',1,Object.freeze({lifecycle:globalThis[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1)}));
 const workerSource=fs.readFileSync('source/external/export-worker.js','utf8');
 let alive=0,created=0,downloads=0,failStart=false,hold=false,lastWorker=null;const workerTypes=[];
@@ -141,4 +142,13 @@ scenarios.push('failed stream-reader acquisition releases scratch; staging cance
   await assert.rejects(engine.run('checksum.ranges',{file:new Blob([new Uint8Array(17*1048576)]),ranges:[{start:0,end:17*1048576}]}),/Checksum ranges are invalid/u,'one read stays bounded to 16 MB');
   scenarios.push('back-to-back parts checked with one bounded read');
 }
+// Malformed transport requests must reject through the emitted worker and release it.
+for(const [type,data,pattern] of [
+ ['file.hash',{file:'not a Blob'},/file is required/],
+ ['encode.write',{id:'wrong',line:'{}'},/finite number/],
+ ['integrity.digest',{hash:{version:1,length:0,state:[1],tail:[]}},/checkpoint/],
+ ['markdown',{doc:{content:[null]},paths:{}},/Markdown child/]
+]){await assert.rejects(coordinator.run(type,data),pattern);assert.equal(alive,0);assert.equal(coordinator.status().busy,false);}
+assert.equal(await coordinator.run('file.hash',{file:new Blob(['abc'])}),'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+scenarios.push('malformed transport rejects through real workers; subsequent hash succeeds');
 console.log(JSON.stringify({status:'PASS',scenarios,workersCreated:created,workersRemaining:alive},null,2));

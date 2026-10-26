@@ -1,4 +1,4 @@
-import {createProcessingEngine} from '../../../portable/processing.js';
+import {createProcessingEngine} from '../../../portable/processing.ts';
 const testProcessing=Object.freeze({...createProcessingEngine(),scope:operation=>operation()});
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

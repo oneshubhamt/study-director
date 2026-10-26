@@ -1,7 +1,7 @@
 export const COVERAGE_FLOORS=Object.freeze([
   Object.freeze({file:'source/core/canonical.ts',lines:90,branches:70,functions:100}),
   Object.freeze({file:'source/core/save-lane.ts',lines:90,branches:65,functions:85}),
-  Object.freeze({file:'portable/stream-encryption.js',lines:90,branches:80,functions:90}),
+  Object.freeze({file:'portable/stream-encryption.ts',lines:90,branches:80,functions:90}),
   Object.freeze({file:'source/core/library-clear.js',lines:80,branches:55,functions:90}),
   Object.freeze({file:'source/core/asset-maintenance.js',lines:95,branches:50,functions:85}),
   Object.freeze({file:'source/core/asset-storage.js',lines:90,branches:58,functions:70}),
@@ -16,7 +16,7 @@ export const COVERAGE_FLOORS=Object.freeze([
 ]);
 
 export const CRITICAL_PATHS=Object.freeze([
-  Object.freeze({id:'encrypted-backup-exact-envelope',file:'portable/stream-encryption.js',snippet:'if(encryptedSize(size)!==file.size)',reason:'reject truncated or trailing encrypted backup bytes'}),
+  Object.freeze({id:'encrypted-backup-exact-envelope',file:'portable/stream-encryption.ts',snippet:'if(encryptedSize(size)!==file.size)',reason:'reject truncated or trailing encrypted backup bytes'}),
   Object.freeze({id:'backup-chunk-integrity-rejection',file:'source/core/backup-codec.js',snippet:'if(checksum!==entry.checksum)',reason:'reject corrupted backup chunks before restore'}),
   Object.freeze({id:'attachment-reference-rollback',file:'source/core/attachments.js',snippet:'await referenceChange.rollback();assertAuthority({allowDurableProtected:true});return error;',reason:'restore references after attachment metadata failure'}),
   Object.freeze({id:'post-restore-record-verification',file:'source/core/backup.js',snippet:'Post-restore verification failed for saved day',reason:'detect corrupted committed restore state'}),

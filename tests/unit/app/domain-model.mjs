@@ -1,10 +1,11 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const execute=file=>vm.runInThisContext(fs.readFileSync(new URL(file,import.meta.url),'utf8'),{filename:file});
+const execute=file=>vm.runInThisContext(readScript(new URL(file,import.meta.url).pathname),{filename:file});
 execute('../../../source/core/internal.js');
-execute('../../../source/core/domain.js');
+execute('../../../source/core/domain.ts');
 
 const limits=Object.freeze({
   maxAreaNameChars:80,

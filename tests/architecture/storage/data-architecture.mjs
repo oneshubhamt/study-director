@@ -126,7 +126,7 @@ for(const name of idbStores){
 assert.deepEqual(CANONICAL_OPFS_IDENTITIES,OPFS_IDENTITIES);
 assert.equal(EXTERNAL_FORMATS.completeBackup.metadataVersion,RUNTIME_DATA_CONTRACT.schemas.Backup.version);
 const attachmentWorkerSource=read('portable/attachment-worker.ts');
-const streamEncryptionSource=read('portable/stream-encryption.js');
+const streamEncryptionSource=read('portable/stream-encryption.ts');
 assert.ok(attachmentWorkerSource.includes("const DIRECTORY='@@SD_ATTACHMENT_OPFS_DIRECTORY@@',SEPARATOR='@@SD_PROFILE_SCOPE_SEPARATOR@@',"),'standalone attachment worker must consume the build-injected canonical OPFS identity');
 // The worker bundles are built before the release fills in folder names, so a
 // folder check that measured a name would keep the placeholder's length.
@@ -139,7 +139,7 @@ const literal=value=>String(value).replaceAll('\\','\\\\').replaceAll('\r','\\r'
 assert.ok(read('source/core/asset-storage.js').includes("DIRECTORY=String(ports.directory||'@@SD_ATTACHMENT_OPFS_DIRECTORY@@')"),'attachment storage must consume the build-injected canonical OPFS identity');
 
 assert.ok(read('source/core/exports.js').includes("ROOT=String(root||'@@SD_BACKUP_FILES_OPFS_DIRECTORY@@')"),'backup temporary-file storage must consume the build-injected canonical OPFS identity');
-assert.ok(read('portable/file-output.js').includes("OPFS_DIRECTORY='@@SD_BACKUP_FILES_OPFS_DIRECTORY@@'"),'portable worker output must resolve the same canonical scratch directory itself');
+assert.ok(read('portable/file-output.ts').includes("OPFS_DIRECTORY='@@SD_BACKUP_FILES_OPFS_DIRECTORY@@'"),'portable worker output must resolve the same canonical scratch directory itself');
 assert.match(read('source/core/exports.js'),/output:Object\.freeze\(\{kind:'opfs',name:staged\.name,directory:staged\.directory\}\)/u,'portable file work must send only an opaque scratch identity (name and profile folder) to the worker, never a FileSystemHandle');
 assert.doesNotMatch(read('source/core/exports.js'),/data=\{\.\.\.data,output:staged\.handle/u,'portable worker messages must not structured-clone an OPFS FileSystemHandle');
 assert.ok(read('source/core/backup-codec.js').includes(`BACKUP_V10_MAGIC='${literal(EXTERNAL_FORMATS.completeBackup.containerMagic)}'`),'backup container magic must mechanically match the canonical manifest');

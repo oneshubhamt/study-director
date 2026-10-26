@@ -23,7 +23,18 @@
   },
   "files": [
     "contracts/production-limits.d.mts",
+    "types/portable-file.ts",
+    "portable/file-output.ts",
+    "portable/integrity-hash.ts",
+    "portable/integrity-output.ts",
+    "portable/integrity-segments.ts",
+    "types/portable-processing.ts",
+    "portable/processing.ts",
+    "portable/request-decoder.ts",
+    "portable/sha256.ts",
+    "portable/stream-encryption.ts",
     "portable/worker-contracts.ts",
+    "portable/zip.ts",
     "rich-text/editor.ts",
     "rich-text/image-preparation.ts",
     "rich-text/image-processing.ts",
@@ -46,9 +57,15 @@
     "rich-text/wordgard-source/table.ts",
     "rich-text/wordgard-source/types.ts",
     "source/core/canonical.ts",
+    "source/core/domain.ts",
+    "source/core/operation-lifecycle.ts",
+    "source/core/repository-policy.ts",
     "source/core/save-lane.ts",
     "types/checks/browser.ts",
-    "types/pilot.ts",
-    "types/checks/rich-text.ts"
+    "types/checks/phase3.ts",
+    "types/checks/rich-text.ts",
+    "types/domain.ts",
+    "types/lifecycle.ts",
+    "types/pilot.ts"
   ]
 }

@@ -25,11 +25,11 @@ Running coverage without selection flags retains the complete final-certificatio
 
 `build/typecheck.mjs` checks every environment project and inventories all first-party `.ts`/`.mts`. New typed files must be admitted explicitly; stale/overlapping entries fail. Phase 2 admitted all 25 existing authored editor/worker TS files; the unchecked inventory is now empty. Generated upstream declarations are separately inventoried and reproduced before compilation.
 
-| Project | Implementation admitted through Phase 2 | Environment |
+| Project | Implementation admitted through Phase 3 | Environment |
 | --- | --- | --- |
-| browser | canonical/save-lane, editor, typography, image browser adapter, vendor facades | ES2022 + DOM |
-| portable | shared contracts, WG1, Markdown, tags and reconciliation | ES2022 only |
-| worker | search/image/attachment/export workers and their shared modules | ES2022 + WebWorker |
+| browser | canonical/save-lane, domain/time, lifecycle/policy, portable file/codec modules, editor and browser adapters | ES2022 + DOM |
+| portable | shared contracts, domain/time, WG1, Markdown, tags and reconciliation | ES2022 only |
+| worker | search/image/attachment/export workers, validated processing requests and portable file/codec modules | ES2022 + WebWorker |
 | service-worker | boundary assertions; implementation deferred | ES2022 + WebWorker, service-worker scope |
 | node | source-script helper and canonical behavioral test | ES2022 + Node 26 |
 
@@ -58,4 +58,13 @@ The upstream signatures retain upstream types; our code has no explicit or unsaf
 
 `portable/worker-contracts.ts` defines attachment/search/image requests, replies, progress and errors; incoming structured-clone values remain unknown and are checked before use. Editor asset, attachment, note, overlay and mounted-editor ports are exported, along with the inferred public API. WG1 records represent the current version only; envelope checks do not pretend to replace Wordgard schema validation. DOM-free image resizing uses a narrow canvas port, supplied separately by browser and worker adapters.
 
-Three narrow `.d.ts` bridges describe existing portable JS. The processing/integrity relays deliberately return `unknown`, not caller-selected generic results; full operation/result maps belong with those implementations in Phase 3. Existing JS hosts, storage records and registry remain unchecked until their implementation phases; Phase 2 does not claim whole-app type safety. Build-time `.mjs` contracts will be converted in Phase 6; the limits declaration exposes only the current readonly consumer API.
+Phase 3 removed all three portable `.d.ts` bridges after converting their implementations. `types/portable-processing.ts` maps each operation to its inputs and result; JSON results remain `unknown` until validated. `portable/request-decoder.ts` validates transport shapes before the typed dispatcher, and integrity requests validate checkpoint words/tails before restoration. Opaque CryptoKey and file-handle assertions follow capability checks; WebCrypto and file operations still enforce actual capabilities. Format, size, authentication and read-back checks remain in the operation implementations. Existing JS hosts, storage records and registry remain unchecked until their implementation phases; Phase 2 does not claim whole-app type safety. Build-time `.mjs` contracts will be converted in Phase 6; the limits declaration exposes only the current readonly consumer API.
+
+
+## Phase 3 leaves and codecs
+
+Eleven JavaScript modules now have checked implementations: the eight portable hashing/file-output/encryption/integrity/processing/ZIP modules, plus domain, operation-lifecycle and repository-policy. The registry contract now links module construction inputs to exports. Lifecycle jobs preserve result types and distinguish completion from outstanding work; cancellation uses a narrow signal port so DOM globals do not leak into the ES-only graph. Binary WebCrypto/writer ports require ArrayBuffer-backed bytes. Bounded SHA/CRC indices retain explicit invariant-based assertions.
+
+Classic build/VM loading still uses `compileScript`/`readScript`, which reject runtime module syntax. Coverage uses the shared offset-preserving `eraseTypes` primitive for both classic scripts and portable ESM; Node executes the portable `.ts` imports directly. Dynamic core-test loaders resolve source filenames from the production manifest. Type-only contracts live under `types/`, outside runtime coverage inventory. No coverage thresholds were reduced.
+
+The remaining record/backup codecs depend on storage/session contracts and move with those dependencies in Phase 4. This avoids an additional unchecked declaration facade. The JS host and registry remain transitional boundaries; whole-application type safety is still a later-phase goal.

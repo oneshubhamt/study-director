@@ -9,7 +9,7 @@ const mutations=Object.freeze([
   Object.freeze({id:'canonical-sorts-object-keys',file:'source/core/canonical.ts',find:'Object.keys(input).sort()',replace:'Object.keys(input)',tests:Object.freeze(['tests/unit/app/canonical.mts'])}),
   Object.freeze({id:'save-lane-retries-only-current-value',file:'source/core/save-lane.ts',find:'if(sequence===taken)',replace:'if(true)',tests:Object.freeze(['tests/integration/storage/save-lane.mjs'])}),
   Object.freeze({
-    id:'settlement-clears-its-deadline',file:'source/core/operation-lifecycle.js',
+    id:'settlement-clears-its-deadline',file:'source/core/operation-lifecycle.ts',
     find:'if(timer!==null)clear(timer);',replace:'if(false)clear(timer);',
     tests:Object.freeze(['tests/unit/app/operation-lifecycle.mjs'])
   }),
@@ -19,12 +19,12 @@ const mutations=Object.freeze([
     tests:Object.freeze(['tests/unit/backup/backup-operation-diagnostics.mjs'])
   }),
   Object.freeze({
-    id:'partial-integrity-remains-unfinished',file:'source/core/operation-lifecycle.js',
+    id:'partial-integrity-remains-unfinished',file:'source/core/operation-lifecycle.ts',
     find:'details.complete===false',replace:'false',
     tests:Object.freeze(['tests/unit/app/operation-lifecycle.mjs'])
   }),
   Object.freeze({
-    id:'encrypted-backup-password-verifier-is-enforced',file:'portable/stream-encryption.js',
+    id:'encrypted-backup-password-verifier-is-enforced',file:'portable/stream-encryption.ts',
     find:"if(!await crypto.subtle.verify('HMAC',hmac,bytes.slice(32),VERIFIER_PROOF))throw invalid('The password is incorrect.','BACKUP_AUTH_FAILED');",replace:"if(false)throw invalid('The password is incorrect.','BACKUP_AUTH_FAILED');",
     tests:Object.freeze(['tests/integration/backup/encryption.mjs'])
   }),

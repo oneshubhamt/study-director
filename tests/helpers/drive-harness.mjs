@@ -1,3 +1,4 @@
+import {readCoreScript} from './core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -9,7 +10,7 @@ const source=fs.readFileSync(new URL('../../source/external/drive.js',import.met
  .replaceAll('@@SD_DRIVE_SESSION_STORAGE_KEY@@','studyDirector.driveSession.v1')
  .replaceAll('@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@',JSON.stringify(EXTERNAL_REPOSITORY_IDENTITIES));
 const policyContext=vm.createContext({});
-for(const file of ['internal','repository-policy'])vm.runInContext(fs.readFileSync(new URL(`../../source/core/${file}.js`,import.meta.url),'utf8'),policyContext);
+for(const file of ['internal','repository-policy'])vm.runInContext(readCoreScript(file),policyContext);
 const repositoryPolicy=policyContext[Symbol.for('studyDirector.internalModules.v1')].require('repository-policy',1).protocol;
 // Digests run on a background thread; tests on a fake clock wait for them
 // (pendingRepositoryDigests) before moving simulated time on.

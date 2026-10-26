@@ -1,3 +1,5 @@
+import {readScript} from '../../../build/source-script.mts';
+import {readCoreScript,coreScriptPath} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -10,7 +12,7 @@ const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {
 function fixture(){
   const timers=new Map();let seq=0;const state={owner:true,busy:false,revision:'one',refs:0,failure:false,commitFailure:false,completed:0,scans:[],keys:['late'],removed:[],journal:null,removedPasses:[],invalidated:0,now:0};
   const ports={canMutate:()=>state.owner,mutationActive:()=>state.busy,collect:async fn=>{if(state.failure)throw new Error('IO');return fn({keys:async()=>state.keys.slice(),removeMany:async ids=>{state.removed.push(...ids);state.removedPasses.push(ids.length);state.keys=state.keys.filter(key=>!ids.includes(key));return ids.length;},sweep:async()=>0});},readRestoreJournal:async()=>state.journal,readLibraryClearJournal:async()=>null,liveFields:()=>[],getReferenceRevision:()=>state.refs,getDatasetRevision:async()=>state.revision,scanReferences:value=>{state.scans.push(value);return {trusted:true,assetIds:value==='last'?['late']:[]};},readNotes:async()=>({}),loadActiveSession:async()=>({ok:true,value:null,error:null}),readPendingReviewTexts:async()=>[],listDailyRecords:async()=>['a','b','c','d','last'].map(reflection=>({reflection})),budget:()=>()=>true,yieldTask:async()=>{},invalidate:()=>state.invalidated++,captureError:()=>{},completed:async()=>{if(state.commitFailure)throw new Error('completion write');state.completed++;},now:()=>state.now,setTimeout:(fn,ms)=>{timers.set(++seq,{fn,ms});return seq;},clearTimeout:id=>timers.delete(id)};
-  const context={setTimeout:ports.setTimeout,clearTimeout:ports.clearTimeout};vm.createContext(context);for(const file of ['internal','operation-lifecycle','asset-maintenance'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),context,{filename:`source/core/${file}.js`});
+  const context={setTimeout:ports.setTimeout,clearTimeout:ports.clearTimeout};vm.createContext(context);for(const file of ['internal','operation-lifecycle','asset-maintenance'])vm.runInContext(readCoreScript(file),context,{filename:coreScriptPath(file)});
   const mod=context[Symbol.for('studyDirector.internalModules.v1')].require('asset-maintenance',1,Object.freeze({lifecycle:context[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1)})),api=mod.create(ports,{lease:{protect(){},release(){},isProtected:()=>false},batchSize:2});return {state,ports,api,timers};
 }
 const cases=[];
@@ -54,7 +56,7 @@ const cases=[];
 // Conservative reachability, source fencing and lease contention.
 {
 const context={console,Object,Set,Map,Math,Number,String,Promise,Date,TypeError,Symbol,setTimeout:()=>1,clearTimeout:()=>{}};context.globalThis=context;vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/operation-lifecycle.js','source/core/asset-storage.js','source/core/asset-maintenance.js'])vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});
+for(const file of ['source/core/internal.js','source/core/operation-lifecycle.ts','source/core/asset-storage.js','source/core/asset-maintenance.js'])vm.runInContext(readScript(file),context,{filename:file});
 const registry=context[Symbol.for('studyDirector.internalModules.v1')],storage=registry.require('asset-storage',1),mod=registry.require('asset-maintenance',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)}));
 const lease=()=>storage.createLease(5000,()=>1000);
 const assetId='img-prune-safety-12345678901234567890';let uncertain=true,removeCalls=0,referenceRevision=0,datasetRevision='stable';
@@ -118,7 +120,7 @@ cases.push('untrusted rich text, source changes and unavailable revisions forbid
     controls.onStorageRead=async({store})=>{if(failed&&((fault==='notes'&&store==='area')||(fault==='day'&&store==='daily')||(fault.startsWith('session')&&store==='session')))throw new Error('Temporary '+fault+' read failure');};
     controls.failLocalGetKeys=new Set(fault==='local-session'?['recovery']:fault==='local-day'?['fallback']:fault==='local-deletions'?['deletionRecovery']:[]);
     const context={Blob,TextEncoder,crypto:webcrypto,setTimeout:(fn,ms)=>{timers.set(++sequence,{fn,ms});return sequence;},clearTimeout:id=>timers.delete(id)};vm.createContext(context);
-    for(const file of ['internal','operation-lifecycle','asset-storage','asset-maintenance'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),context);
+    for(const file of ['internal','operation-lifecycle','asset-storage','asset-maintenance'])vm.runInContext(readCoreScript(file),context);
     const registry=context[Symbol.for('studyDirector.internalModules.v1')],Assets=registry.require('asset-storage',1);
     const metadata=new Map(ids.map((id,i)=>[id,{version:2,storage:'opfs',file:'attblob-12345678-1234-1234-1234-'+String(i+1).padStart(12,'0'),hash,size:blob.size,type:blob.type,name:'Diagram',library:false}]));
     const physical=new Map([...metadata.values()].map(row=>[row.file,blob]));
@@ -142,7 +144,7 @@ cases.push('untrusted rich text, source changes and unavailable revisions forbid
 for(const latency of [4999,5000,6000,20000]){
  const timers=new Map();let stamp=0,sequence=0,completed=0,sourceRevision=1,busy=false,preempt=false;
  const context=vm.createContext({Blob,TextEncoder,crypto:webcrypto,setTimeout:(fn,ms)=>{timers.set(++sequence,{fn,ms});return sequence;},clearTimeout:id=>timers.delete(id)});
- for(const file of ['internal','operation-lifecycle','asset-storage','asset-maintenance'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),context);
+ for(const file of ['internal','operation-lifecycle','asset-storage','asset-maintenance'])vm.runInContext(readCoreScript(file),context);
  const registry=context[Symbol.for('studyDirector.internalModules.v1')],Assets=registry.require('asset-storage',1),blob=new Blob(['orphan']);
  const rows=new Map(Array.from({length:4},(_,i)=>['att-'+String(i+1).padStart(32,'0'),{version:2,storage:'opfs',file:'attblob-'+String(i+1).padStart(32,'0'),hash:'c'.repeat(64),size:blob.size,type:'application/pdf',name:'orphan.pdf',library:false}])),files=new Map([...rows.values()].map(row=>[row.file,blob]));
  const slow=()=>{stamp+=latency;if(preempt)busy=true;};

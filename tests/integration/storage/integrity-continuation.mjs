@@ -1,3 +1,4 @@
+import {readCoreScript} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -5,14 +6,14 @@ import {createHash,webcrypto} from 'node:crypto';
 import {createDriveHarness} from '../../helpers/drive-harness.mjs';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
 import {outputHandle} from '../../helpers/file-processing.mjs';
-import {Sha256} from '../../../portable/sha256.js';
-import {hashSnapshot,restoreHash} from '../../../portable/integrity-hash.js';
-import {integritySegment} from '../../../portable/integrity-segments.js';
-import {openIntegrityOutput} from '../../../portable/integrity-output.js';
-import {passwordKey,transformEncrypted} from '../../../portable/stream-encryption.js';
-import {openOutput} from '../../../portable/file-output.js';
-import {createProcessingEngine} from '../../../portable/processing.js';
-for(const file of ['internal','integrity-continuation'])vm.runInThisContext(fs.readFileSync('source/core/'+file+'.js','utf8'),{filename:'source/core/'+file+'.js'});
+import {Sha256} from '../../../portable/sha256.ts';
+import {hashSnapshot,restoreHash} from '../../../portable/integrity-hash.ts';
+import {integritySegment} from '../../../portable/integrity-segments.ts';
+import {openIntegrityOutput} from '../../../portable/integrity-output.ts';
+import {passwordKey,transformEncrypted} from '../../../portable/stream-encryption.ts';
+import {openOutput} from '../../../portable/file-output.ts';
+import {createProcessingEngine} from '../../../portable/processing.ts';
+for(const file of ['internal','integrity-continuation'])vm.runInThisContext(readCoreScript(file),{filename:'source/core/'+file+'.js'});
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('integrity-continuation',1),digest=blob=>blob.arrayBuffer().then(bytes=>createHash('sha256').update(new Uint8Array(bytes)).digest('hex'));
 const size=2*1048576+177,bytes=new Uint8Array(size);for(let i=0;i<size;i++)bytes[i]=i%251;
 const source=new Blob([bytes]),fingerprint=await digest(source),objectId='obj_'+'a'.repeat(32),cases=[];
@@ -117,7 +118,7 @@ for(const corruptAt of [100,encrypted.size-1]){
 {
  const clock=createFakeClock(),drive=createDriveHarness({clock});await drive.provider.prepare();await drive.provider.authorize();
  const h=harness(),ref=await drive.provider.repository.upload({kind:'object',id:objectId,name:objectId+'.sdobject',blob:source,size:source.size,digest:fingerprint,exportedAt:'2026-09-01T00:00:00.000Z',appVersion:'QA_FIXTURE'});
- for(const file of ['internal','operation-lifecycle','repository-background'])vm.runInContext(fs.readFileSync('source/core/'+file+'.js','utf8'),drive.context);
+ for(const file of ['internal','operation-lifecycle','repository-background'])vm.runInContext(readCoreScript(file),drive.context);
  const registry=drive.context[Symbol.for('studyDirector.internalModules.v1')],bg=registry.require('repository-background',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})).createCoordinator(Object.freeze({target:'google-drive',environment:Object.freeze({AbortController,now:clock.now,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout})}));
  drive.state.rangeChunkDelayMs=35000;const readOffsets=[];let completed=false,passes=0,transferring=0;
  const scheduler=bg.createIntegrityScheduler(Object.freeze({budgetMs:120000,budgetCode:'TEST_BUDGET',budgetMessage:'budget',preemptCode:'TEST_PREEMPT',preemptMessage:'preempt',capture:error=>assert.fail(error),isAvailable:()=>true,isUnsafe:()=>false,readTarget:async()=>({scanId:'slow-proof',partial:structuredClone(h.durable)}),writeResult:async result=>{if(result.complete)completed=true;},yieldTask:async()=>{},execute:async({signal,checkpoint})=>{

@@ -11,7 +11,7 @@ const metadata=fs.readFileSync('source/core/host-metadata.js','utf8');
 const backup=fs.readFileSync('source/core/backup.js','utf8');
 const backupCapture=fs.readFileSync('source/core/backup-capture.js','utf8');
 const managedRepository=fs.readFileSync('source/core/managed-repository.js','utf8');
-const policy=fs.readFileSync('source/core/repository-policy.js','utf8');
+const policy=fs.readFileSync('source/core/repository-policy.ts','utf8');
 const mutation=fs.readFileSync('source/core/mutation-coordinator.js','utf8');
 const host=fs.readFileSync('source/core/backup-recovery-host.js','utf8');
 const drive=fs.readFileSync('source/external/drive.js','utf8');
@@ -117,7 +117,7 @@ assert.doesNotMatch(drive,/function readWithTimeout\b/u,'retired Drive timeout h
 
 // Coordination boundaries, rather than historical timer/flag spellings. The
 // unit and assembled integration suites establish the behavioral invariants.
-const lifecycle=fs.readFileSync('source/core/operation-lifecycle.js','utf8');
+const lifecycle=fs.readFileSync('source/core/operation-lifecycle.ts','utf8');
 assert.match(lifecycle,/function createJob[\s\S]*function reconcile[\s\S]*function wake[\s\S]*function complete/u);
 assert.match(background,/Lifecycle\.createJob/u);assert.match(background,/registerJob\('maintenance'/u);assert.match(background,/registerJob\('integrity'/u);
 assert.match(provider,/background\.registerJob\('convergence'/u);

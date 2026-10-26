@@ -1,9 +1,10 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {APP_META_KEYS,APP_META_RUNTIME_REGISTRY} from '../../../contracts/data-architecture.mjs';
 
-for(const file of ['source/core/internal.js','source/core/app-meta.js','source/core/host-metadata.js','source/core/operation-lifecycle.js','source/core/repository-background.js'])vm.runInThisContext(fs.readFileSync(file,'utf8'),{filename:file});
+for(const file of ['source/core/internal.js','source/core/app-meta.js','source/core/host-metadata.js','source/core/operation-lifecycle.ts','source/core/repository-background.js'])vm.runInThisContext(readScript(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],freeze=Object.freeze;
 const AppMeta=registry.require('app-meta',1),HostMetadata=registry.require('host-metadata',1);
 const rows=new Map();let strictWrites=0;

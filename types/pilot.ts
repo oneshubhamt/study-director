@@ -1,3 +1,5 @@
+import type {LifecycleModule,RepositoryPolicyModule} from './lifecycle.ts';
+import type {DomainModule,DomainLimits} from './domain.ts';
 // Transitional declaration of the existing JS registry, limited to checked modules.
 // The registry implementation remains unchecked until its implementation phase; its runtime contract
 // is covered by internal-modules and the pilot boundary tests.
@@ -39,14 +41,15 @@ export interface SaveLaneModule {
   onBeforeFlush(callback: () => void): void;
   prepareFlush(): void;
 }
-export interface PilotModules { canonical: CanonicalModule; 'save-lane': SaveLaneModule }
+export interface PilotModules { canonical: CanonicalModule; 'save-lane': SaveLaneModule;domain:DomainModule;'operation-lifecycle':LifecycleModule;'repository-policy':RepositoryPolicyModule }
+export interface ModuleInputs{canonical:[];'save-lane':[];domain:[limits:DomainLimits];'operation-lifecycle':[];'repository-policy':[]}
 export interface PilotRegistry {
   readonly format: 'study-director.internal-module-registry';
   readonly version: 1;
   readonly contracts: {
     exactFrozenObject<T>(input: T, keys: readonly string[], label: string): T;
   };
-  define<K extends keyof PilotModules>(name: K, version: 1, factory: () => PilotModules[K]): boolean;
-  require<K extends keyof PilotModules>(name: K, version: 1): Readonly<PilotModules[K]>;
-  load<K extends keyof PilotModules>(name: K, version: 1, format: PilotModules[K]['format'], contractVersion: 1): Readonly<PilotModules[K]>;
+  define<K extends keyof PilotModules>(name: K, version: 1, factory: (...input:ModuleInputs[K]) => PilotModules[K]): boolean;
+  require<K extends keyof PilotModules>(name: K, version: 1,...input:ModuleInputs[K]): Readonly<PilotModules[K]>;
+  load<K extends keyof PilotModules>(name: K, version: 1, format: PilotModules[K]['format'], contractVersion: 1,...input:ModuleInputs[K]): Readonly<PilotModules[K]>;
 }

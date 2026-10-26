@@ -1,5 +1,5 @@
-import {messageObject,type WorkerReply,type AttachmentResult} from './worker-contracts';
-import {Sha256} from './sha256.js';
+import {messageObject,type WorkerReply,type AttachmentResult} from './worker-contracts.ts';
+import {Sha256} from './sha256.ts';
 
 const CHUNK_BYTES=4*1024*1024;
 const YIELD_EVERY_CHUNKS=8;

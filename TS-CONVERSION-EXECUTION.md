@@ -15,8 +15,8 @@
 
 0. Canonical-only preparation (completed through `512fc9c`; follow-up evidence below supersedes the initial incomplete checkpoint).
 1. **Pipeline and pilot (complete):** pinned compiler, strict environment configurations, typed lint, mixed JS/TS build/test/coverage/mutation tooling, and a small canonical/save-lane pilot.
-2. **Contracts and existing TS:** module ports, records, worker messages, platform adapters and accurate Wordgard declarations; strictly check existing authored TS.
-3. **Leaves and codecs:** foundational domain/time logic, portable primitives, codecs and isolated state machines.
+2. **Contracts and existing TS (complete):** module ports, records, worker messages, platform adapters and accurate Wordgard declarations; strictly check existing authored TS.
+3. **Leaves and codecs (complete):** foundational domain/time logic, portable primitives, codecs and isolated state machines.
 4. **Persistence and orchestration:** storage/repositories, ownership, sessions/timers, attachments, backup and recovery in dependency order.
 5. **Host and features:** mechanically extract host scripts, then complete typed composition, UI, workers and service worker.
 6. **Tooling and tests:** finish first-party build/contracts/test conversion and remove transitional bridges/source-text extraction.
@@ -221,3 +221,35 @@ QA ran with Node 26.12.1/npm 12.2.1. Build/release/browser checks used a disposa
 | Source boundary | PASS: all 90 vendor files unchanged; final generated bundles identical to tested disposable outputs; reconciliation/tags executable ASTs unchanged; whitespace checks pass |
 
 Phase 2 is complete. Full fast/browser/coverage/mutation/release certification was deliberately not rerun; it remains Phase 7. GitHub-hosted workflow execution is separate from the local verification above. Next is **Phase 3 — leaves and codecs**, starting with the portable JS implementations behind the temporary declarations and foundational domain modules. Keep checked caller/result relationships and runtime rejection tests together as those bridges are removed. No Phase 3 implementation has begun.
+
+## Phase 3: leaves and codecs (complete)
+
+Start `f2ae545`, confirmed equal to GitHub `TS-Conversion`; `main` remains `9afbda7` with no newer commits to port. Begin by replacing the portable JS declaration bridges with checked implementations and operation/result contracts, then convert foundational domain/time logic, isolated state machines and canonical codec leaves. Keep the pinned Node 26.12.1/npm 12.2.1/TS 7.0.2 toolchain, immutable vendor source and targeted-QA policy. Per-pass factual scratchpad: `/tmp/ts-phase3-scratch.md`.
+
+
+### Phase 3 implementation and decisions
+
+- Converted **11** JS implementations: domain/time/completion/outcomes, operation lifecycle, repository policy, and all eight portable SHA-256/checkpoint/file-output/encryption/integrity/processing/ZIP modules. Removed the three temporary portable declarations. Five strict projects now admit **55** authored files/contracts/fixtures with zero unchecked TS; Node/npm/TS remain 26.12.1/12.2.1/7.0.2.
+- Added operation/input/result maps, discriminated schedule parsing, typed job outcomes and construction dependencies, narrow cancellation/file writer ports, and ArrayBuffer-backed crypto bytes. Parsing arbitrary JSON still returns `unknown`. No first-party `any`, production suppression, compiler exemption or caller-selected result assertion was added.
+- Processing handlers are checked individually against their operation contracts. Worker transport requests are validated before dispatch, including checkpoint state, files, numeric bounds and Markdown structure. Existing cryptographic/domain validation remains. Wrong reader/writer session operations reject without deleting the valid session. Correct canonical requests retain their behavior; malformed messages now receive deliberate errors rather than accidental property-access failures.
+- Preserved encryption magic/framing/KDF/authentication, bounded streaming, OPFS identities, integrity checkpoint flushing and read-back verification. WebCrypto errors are narrowed structurally to preserve cross-realm authentication errors. Domain and repository-policy executable ASTs match the baseline after erasure (ignoring inert empty statements).
+- Shared erasure now supports ESM coverage while the classic build/VM wrapper still rejects runtime imports/exports. Core test loaders use the production manifest for filenames; direct portable imports use `.ts`. Type-only contracts live outside the runtime coverage inventory. Existing coverage floors and mutation intent stay intact.
+- **Sequencing refinement:** Phase 3 covers the portable codecs and independent domain/lifecycle leaves. Record and backup codecs depend on session/timer/storage contracts; convert these together in **Phase 4**, rather than invent permissive temporary facades. Host feature composition remains Phase 5 and build/test conversion Phase 6. Canonical-only topology and immutable Wordgard requirements remain unchanged.
+
+### Phase 3 verification and handoff
+
+Targeted checks used Node 26.12.1/npm 12.2.1. Build/browser validation used `/tmp/ts-phase3-validation`; evidence and the per-pass scratchpad remain outside the repository. No full QA suite was run.
+
+| Check | Result and scope |
+| --- | --- |
+| Strict compiler and typed lint | PASS: five environment projects, 55 admitted files; new negative fixtures reject mismatched operation payload/results, unchecked JSON access, missing domain dependencies and invalid job outcomes |
+| Targeted behavior/architecture | PASS: **43 distinct hermetic executables** covering domain/lifecycle, hashing and new transport/session tests; encryption, folder/portable/canonical backups, restore/checkpoint/sync, exports, attachments, integrity continuation, maintenance and changed test readers; build pipeline, responsibility boundaries and QA governance |
+| Focused authored coverage | PASS: seven requested sources observed. Encryption 100% lines, 83.33% branches, 100% functions clears unchanged 90/80/90 floors; lifecycle 100% lines and 97.6% functions. Domain coverage is 76.7% lines; identical executable AST plus existing behavior/browser checks support its mechanical conversion. This is not aggregate certification |
+| Focused mutations | PASS: all three killed — settlement deadline cleanup, partial integrity remaining unfinished, password verifier enforcement |
+| Browser checks | PASS: four journeys run serially — core-flow, exports, backup encryption, strict runtime boundary. Includes real worker messages, cancellation/retry, OPFS output, encrypted read-back and Trusted Types |
+| Build and source boundary | PASS: development/deployment verification (98/99 files), source/generated syntax, binary backup capacity, all six reproducible bundles. Final bundles match browser-tested outputs; all 90 vendored Wordgard files and the generated Wordgard bundle are unchanged |
+| New regression evidence | PASS: 11 SHA padding/chunk sizes and checkpoint resume; corrupt checkpoints and malformed transport rejected; gzip/plain streaming round trips; cross-mode session mistakes preserve the live session; emitted-worker rejection followed by successful reuse |
+
+Initial test failures were loader/source-shape assumptions following renames and dispatcher conversion; corrected loaders and boundary assertions pass. Two disposable-build setup attempts failed (wrong working directory, then an overbroad copy filter omitting dependency `dist` folders); corrected setup built successfully. No application regression was identified by the completed targeted checks. Full correctness/coverage/mutation/browser/release certification remains Phase 7.
+
+Next: **Phase 4 — persistence and orchestration**, including the record/backup codecs and their session/timer/storage dependencies. Do not start Phase 4 automatically at this checkpoint.

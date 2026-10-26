@@ -1,3 +1,4 @@
+import {readCoreScript,coreScriptPath} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -7,7 +8,7 @@ function fixture(){
   const name=i=>'backup-'+String(i).padStart(8,'0')+'-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
   const dir={async *entries(){for(const key of files.keys())yield [key,{kind:'file'}];},getFileHandle:async(key,{create}={})=>{if(create)files.set(key,new Blob(['x']));return {getFile:async()=>files.get(key)};},removeEntry:async key=>{files.delete(key);}};
   const locks={request:async(key,options,work)=>{if(options.ifAvailable&&locksHeld.has(key))return work(null);return work({key});}};
-  const context={Blob,TextEncoder,AbortController,crypto:webcrypto,setTimeout:(fn,ms)=>{timers.set(++sequence,{fn,ms});return sequence;},clearTimeout:id=>timers.delete(id)};vm.createContext(context);for(const file of ['internal','operation-lifecycle','exports'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),context,{filename:`source/core/${file}.js`});
+  const context={Blob,TextEncoder,AbortController,crypto:webcrypto,setTimeout:(fn,ms)=>{timers.set(++sequence,{fn,ms});return sequence;},clearTimeout:id=>timers.delete(id)};vm.createContext(context);for(const file of ['internal','operation-lifecycle','exports'])vm.runInContext(readCoreScript(file),context,{filename:coreScriptPath(file)});
   const api=context[Symbol.for('studyDirector.internalModules.v1')].require('exports',1,Object.freeze({lifecycle:context[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1)})).createFileStore({storage:{getDirectory:async()=>({getDirectoryHandle:async()=>dir})},locks,retained:async()=>{stamp+=readDelay;readHook?.();if(fail)throw new Error('journal unavailable');return [...keep];},maxEntries:3,now:()=>stamp,onError:error=>errors.push(error)});
   return {files,keep,timers,locksHeld,errors,api,name,fail:value=>fail=value,advance:ms=>stamp+=ms,delay:ms=>readDelay=ms,onRead:hook=>readHook=hook};
 }

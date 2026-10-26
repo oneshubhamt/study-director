@@ -15,7 +15,9 @@
     "rich-text/reconciliation.ts",
     "rich-text/tags.ts",
     "rich-text/wg1-codec.ts",
+    "source/core/domain.ts",
     "types/checks/portable.ts",
+    "types/domain.ts",
     "types/pilot.ts"
   ]
 }

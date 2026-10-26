@@ -4,13 +4,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
-import {compileScript,readScript} from '../../../build/source-script.mts';
+import {compileScript,readScript,eraseTypes} from '../../../build/source-script.mts';
 import {renderBuild,validateBuild} from '../../../build/build.mjs';
 
 // The exact erased program is consumed by both the build and VM harnesses.
 const build=renderBuild();
 assert.equal(validateBuild(build),true);
-for(const id of ['canonical','save-lane']){
+for(const id of ['canonical','save-lane','domain','operation-lifecycle','repository-policy']){
   const file=`source/core/${id}.ts`,source=fs.readFileSync(file,'utf8'),output=readScript(file);
   assert.equal(output.length,source.length);
   assert.equal(output.split('\n').length,source.split('\n').length);
@@ -24,6 +24,10 @@ assert.throws(()=>vm.runInNewContext(output,{}, {filename:'offset-probe.ts'}),er
 assert.throws(()=>compileScript('enum State { Ready }','enum.ts'),/not supported/);
 assert.throws(()=>compileScript("import './runtime.js';",'import.ts'),/import statement/);
 assert.throws(()=>compileScript('export const value: number=1;','export.ts'),/export/);
+const moduleSource="import {value} from './runtime.ts';\nexport const copy: number=value;";
+const erasedModule=eraseTypes(moduleSource,'portable-probe.ts');
+assert.equal(erasedModule.length,moduleSource.length);assert.equal(erasedModule.indexOf('=value'),moduleSource.indexOf('=value'));
+assert.ok(erasedModule.includes("import {value}"));
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),'sd-erasure-'));
 try{
   const file=path.join(temp,'fresh.ts');

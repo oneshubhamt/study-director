@@ -1,4 +1,4 @@
-import {compileScript} from '../../build/source-script.mts';
+import {eraseTypes} from '../../build/source-script.mts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,7 +28,7 @@ try{
   for(const file of fs.readdirSync(coverageDir).filter(name=>name.startsWith('coverage-')&&name.endsWith('.json'))){const json=JSON.parse(fs.readFileSync(path.join(coverageDir,file),'utf8'));for(const script of json.result||[]){const normalized=normalize(script.url);if(!normalized)continue;const list=scripts.get(normalized)||[];list.push(script);scripts.set(normalized,list);}}
   const rows=[];
   for(const [file,observations] of scripts){
-    const source=compileScript(renderCoverageTemplate(fs.readFileSync(file,'utf8')),file),ast=parse(source,{ecmaVersion:'latest',sourceType:'module',allowHashBang:true});
+    const source=eraseTypes(renderCoverageTemplate(fs.readFileSync(file,'utf8')),file),ast=parse(source,{ecmaVersion:'latest',sourceType:'module',allowHashBang:true});
     const countAt=offset=>observations.reduce((sum,script)=>{let best=null;for(const fn of script.functions||[])for(const range of fn.ranges||[])if(range.startOffset<=offset&&range.endOffset>offset&&(!best||range.endOffset-range.startOffset<best.endOffset-best.startOffset))best=range;return sum+(best?.count||0);},0);
     let total=0,covered=0;
     const edge=count=>{total++;if(count>0)covered++;};
@@ -45,7 +45,7 @@ try{
   }
   const covered=rows.reduce((n,row)=>n+row.branches.covered,0),total=rows.reduce((n,row)=>n+row.branches.total,0);
   if(!total)throw new Error('AST branch coverage observed no branch edges.');
-  for(const critical of ['source/core/canonical.ts','source/core/save-lane.ts','portable/stream-encryption.js','source/core/library-clear.js','source/core/attachments.js','source/core/backup.js'])if(!rows.some(row=>row.file===critical))throw new Error(`Critical branch-coverage module was not observed: ${critical}`);
+  for(const critical of ['source/core/canonical.ts','source/core/save-lane.ts','portable/stream-encryption.ts','source/core/library-clear.js','source/core/attachments.js','source/core/backup.js'])if(!rows.some(row=>row.file===critical))throw new Error(`Critical branch-coverage module was not observed: ${critical}`);
   const summary={status:'PASS',scope:'fast-runtime-ast-branch-edges',branches:{covered,total,percent:Math.round(covered/total*10000)/100},files:rows.sort((a,b)=>a.file.localeCompare(b.file))};
   console.log(JSON.stringify(summary,null,2));
   const outIndex=process.argv.indexOf('--json');if(outIndex>=0){const target=process.argv[outIndex+1];if(!target)throw new Error('--json requires an output path.');fs.writeFileSync(externalOutputPath(target,'AST branch coverage JSON output'),JSON.stringify(summary,null,2)+'\n');}

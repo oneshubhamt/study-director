@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {createProcessingEngine as pureEngine} from '../../portable/processing.js';
+import {createProcessingEngine as pureEngine} from '../../portable/processing.ts';
 let directory,sequence=0;
 export async function outputHandle(){
   if(!directory){directory=fs.mkdtempSync(path.join(os.tmpdir(),'sd-file-processing-'));process.once('exit',()=>fs.rmSync(directory,{recursive:true,force:true}));}

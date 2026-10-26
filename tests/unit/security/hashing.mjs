@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {Sha256,hashBlob} from '../../../portable/sha256.js';
+import {Sha256,hashBlob} from '../../../portable/sha256.ts';
 
 const deterministicBytes=size=>Uint8Array.from({length:size},(_,index)=>(index*131+size*17+29)&255);
 for(const size of [0,1,55,56,63,64,65,1000,1048581]){

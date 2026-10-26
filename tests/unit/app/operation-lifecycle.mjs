@@ -1,8 +1,9 @@
+import {readCoreScript,coreScriptPath} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
-for(const file of ['internal','operation-lifecycle'])vm.runInThisContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),{filename:`source/core/${file}.js`});
+for(const file of ['internal','operation-lifecycle'])vm.runInThisContext(readCoreScript(file),{filename:coreScriptPath(file)});
 const lifecycle=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1);
 const cases=[];
 const timers=new Map();let sequence=0;

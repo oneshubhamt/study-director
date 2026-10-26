@@ -1,3 +1,4 @@
+import {readCoreScript} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -5,7 +6,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import {createHash} from 'node:crypto';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
-for(const name of ['internal','operation-lifecycle','exports'])vm.runInThisContext(fs.readFileSync(`source/core/${name}.js`,'utf8'));
+for(const name of ['internal','operation-lifecycle','exports'])vm.runInThisContext(readCoreScript(name));
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('exports',1,Object.freeze({lifecycle:globalThis[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1)}));
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'sd-file-lifetimes-')),readers=new Map(),retained=new Set();let failRetentionScan=false;
 const locks={async request(name,options,callback){if(options.mode==='shared'){readers.set(name,(readers.get(name)||0)+1);try{return await callback({name});}finally{readers.set(name,readers.get(name)-1)}}return callback(readers.get(name)?null:{name});}};

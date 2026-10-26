@@ -1,3 +1,4 @@
+import {readCoreScript} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -8,7 +9,7 @@ import {createDeviceFolderWorld,IDENTITIES,MINUTE} from '../../helpers/device-fo
 // backup encryption: objects and version files are sealed, commit markers
 // carry metadata only, a locked app writes nothing on its own, Back up now
 // asks to unlock, and a write that reads back wrong never becomes a version.
-for(const name of ['internal','operation-lifecycle','exports'])vm.runInThisContext(fs.readFileSync(`source/core/${name}.js`,'utf8'),{filename:name+'.js'});
+for(const name of ['internal','operation-lifecycle','exports'])vm.runInThisContext(readCoreScript(name),{filename:name+'.js'});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],engine=createProcessingEngine(),settings=new Map();
 let unlockPrompts=0;
 const processing={...engine,check:()=>{},job:fn=>fn()},storage={read:async key=>settings.get(key)||null,write:async(key,value)=>settings.set(key,value),remove:async key=>settings.delete(key)};

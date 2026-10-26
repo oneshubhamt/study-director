@@ -1,6 +1,6 @@
 import {RUNTIME_DATA_CONTRACT} from '../../../contracts/canonical-identities.mjs';
-import {createProcessingEngine} from '../../../portable/processing.js';
-import {passwordKey,streamEncryptionInfo,transformEncrypted} from '../../../portable/stream-encryption.js';
+import {createProcessingEngine} from '../../../portable/processing.ts';
+import {passwordKey,streamEncryptionInfo,transformEncrypted} from '../../../portable/stream-encryption.ts';
 const testProcessing=Object.freeze({...createProcessingEngine(),scope:operation=>operation()});
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

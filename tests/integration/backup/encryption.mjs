@@ -1,10 +1,11 @@
+import {readCoreScript} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {pbkdf2Sync,createDecipheriv} from 'node:crypto';
-import {FRAME_BYTES,HEADER_BYTES,passwordKey,createPasswordVerifier,verifyPasswordVerifier,streamEncryptionInfo} from '../../../portable/stream-encryption.js';
+import {FRAME_BYTES,HEADER_BYTES,passwordKey,createPasswordVerifier,verifyPasswordVerifier,streamEncryptionInfo} from '../../../portable/stream-encryption.ts';
 import {createProcessingEngine,outputHandle} from '../../helpers/file-processing.mjs';
-import {openOutput} from '../../../portable/file-output.js';
+import {openOutput} from '../../../portable/file-output.ts';
 
 const password='  密码 strong passphrase 🌱  ',key=await passwordKey(password),plain=new Blob(['WG1:private study data',new Uint8Array(4096)]),engine=createProcessingEngine();
 assert.equal(key.extractable,false);
@@ -34,7 +35,7 @@ assert.equal(await streamEncryptionInfo(plain),null);
     const profileFolder='@@SD_BACKUP_FILES_OPFS_DIRECTORY@@@@SD_PROFILE_SCOPE_SEPARATOR@@prof_ben_mve00000_abcdef01';await (await openOutput({kind:'opfs',name,directory:profileFolder})).close();assert.equal(seenDirectory,profileFolder,'a later profile keeps its scratch files in its own folder');
   }finally{if(descriptor)Object.defineProperty(globalThis,'navigator',descriptor);else delete globalThis.navigator;}
 }
-for(const file of ['internal','operation-lifecycle','exports'])vm.runInThisContext(fs.readFileSync(`source/core/${file}.js`,'utf8'));
+for(const file of ['internal','operation-lifecycle','exports'])vm.runInThisContext(readCoreScript(file));
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('exports',1,Object.freeze({lifecycle:globalThis[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1)}));
 let saved=null,state,answers=[],choice='unlock',writes=0,readError=false;
 const processing={run:engine.run,check:()=>{},job:fn=>fn()};
