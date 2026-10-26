@@ -1,3 +1,4 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -10,7 +11,7 @@ import {createFakeClock} from '../../helpers/fake-clock.mjs';
 const clock=createFakeClock('2026-10-05T10:00:00.000Z');
 const context=vm.createContext({console,Promise,Object,Symbol,Error,TypeError,String,Number,Math,Array,Set,Map,WeakMap,JSON,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,queueMicrotask});
 vm.runInContext(fs.readFileSync('source/core/internal.js','utf8'),context,{filename:'internal.js'});
-vm.runInContext(fs.readFileSync('source/core/save-lane.js','utf8'),context,{filename:'save-lane.js'});
+vm.runInContext(readScript('source/core/save-lane.ts'),context,{filename:'source/core/save-lane.ts'});
 const SaveLane=context[Symbol.for('studyDirector.internalModules.v1')].require('save-lane',1);
 const settle=()=>clock.drainMicrotasks(32);
 function lane(write){
@@ -21,10 +22,10 @@ function lane(write){
 
 { // The first edit is written at once; typing that follows waits for the pause.
   const writes=[],{api,states}=lane(async value=>{writes.push(value);});
-  api.schedule('a');await clock.advance(0);await settle();assert.deepEqual(writes,['a'],'an edit after a quiet moment is written immediately');
+  api.schedule('a');assert.equal(api.pending(),true);await clock.advance(0);await settle();assert.deepEqual(writes,['a'],'an edit after a quiet moment is written immediately');
   await clock.advance(100);api.schedule('ab');await clock.advance(100);api.schedule('abc');
   await clock.advance(SaveLane.DELAY_MS-201);await settle();assert.deepEqual(writes,['a'],'edits during the pause wait');
-  await clock.advance(1);await settle();assert.deepEqual(writes,['a','abc'],'only the latest value is written');assert.equal(states.at(-1),'saved');
+  await clock.advance(1);await settle();assert.deepEqual(writes,['a','abc'],'only the latest value is written');assert.equal(states.at(-1),'saved');assert.equal(api.pending(),false);assert.equal(api.writing(),false);await api.tail();assert.equal(await api.settled(),true);
 }
 { // Continuous typing is never more than one pause behind.
   const writes=[],{api}=lane(async value=>{writes.push([clock.now(),value]);});
@@ -36,14 +37,14 @@ function lane(write){
 }
 { // A failed write keeps its value and retries without another edit.
   let fail=true;const writes=[],{api,states}=lane(async value=>{writes.push(value);if(fail)throw new Error('Storage unavailable');});
-  api.schedule('keep this draft');await assert.rejects(api.flush(),/Storage unavailable/);
+  api.schedule('keep this draft');await assert.rejects(api.flush(),/Storage unavailable/);assert.equal(await api.settled(),false);assert.equal(api.pending(),true);assert.equal(api.writing(),false);
   assert.match(states.at(-1),/^error:Storage unavailable/);assert.match(api.failure().message,/Diary reflection could not be saved: Storage unavailable\. Study Director keeps retrying/);
   fail=false;await clock.advance(SaveLane.RETRY_DELAYS_MS[0]);await settle();
   assert.deepEqual(writes,['keep this draft','keep this draft']);assert.equal(api.failure(),null);assert.equal(states.at(-1),'saved');
 }
 { // A failed older write never replaces a newer queued value.
   let rejectFirst;const writes=[],{api}=lane(value=>{writes.push(value);return value==='old'?new Promise((_,reject)=>{rejectFirst=reject;}):Promise.resolve();});
-  api.schedule('old');const first=api.flush();const failed=assert.rejects(first,/old failed/);await settle();
+  api.schedule('old');const first=api.flush();assert.equal(api.writing(),true);const failed=assert.rejects(first,/old failed/);await settle();
   api.schedule('new');const newer=api.flush();rejectFirst(new Error('old failed'));await failed;await newer;await api.flush();
   assert.deepEqual(writes,['old','new']);
 }

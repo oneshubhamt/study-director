@@ -12,7 +12,7 @@ const managedRepository=read('source/core/managed-repository.js');
 const repositoryBackground=read('source/core/repository-background.js');
 const backupProvider=read('source/core/backup-provider.js');
 const reconciliation=read('source/core/reconciliation.js');
-const canonicalCore=read('source/core/canonical.js');
+const canonicalCore=read('source/core/canonical.ts');
 const codec=read('source/core/backup-codec.js');
 const device=read('source/core/device-backup.js');
 const drive=read('source/external/drive.js');
@@ -87,7 +87,7 @@ assert.doesNotMatch(backup,/function (?:resolve|merge|reconcile)Repository(?:Con
 assert.match(reconciliation,/function createPlan\(input\)[\s\S]*Object\.keys\(input\)\.sort\(\)\.join\('\|'\)!=='incoming\|local'[\s\S]*input\.local[\s\S]*input\.incoming/u,'reconciliation planner must mechanically accept exactly one local and one incoming source');
 assert.doesNotMatch(reconciliation,/resolveSavedDayCandidates|groupEquivalent|orderedGroups/u,'retired N-way reconciliation machinery must stay absent');
 assert.doesNotMatch(reconciliation,/sameCanonical/u,'canonical equality must not be reimplemented or re-exported by reconciliation');
-assert.match(canonicalCore,/function same\(a,b\)\{return signature\(a\)===signature\(b\);\}/u,'canonical equality must have one shared implementation');
+assert.match(canonicalCore,/function same\(a: unknown,b: unknown\)\{return signature\(a\)===signature\(b\);\}/u,'canonical equality must have one shared implementation');
 for(const stale of ['handoffCapable','chooseRestoreMode'])assert.equal(backup.includes(stale),false,`stale Handoff terminology must stay absent from current backup orchestration: ${stale}`);
 assert.match(backup,/async function restoreManagedVersion\(candidate,options=\{\}\)[\s\S]*finally\{try\{await candidate\.release\(\)/u,'managed Replace must release its selected candidate exactly at its public consumption boundary');
 assert.match(backup,/async function restoreStandaloneVersion\(candidate,options=\{\}\)[\s\S]*finally\{try\{await candidate\.release\(\)/u,'standalone Replace must release its selected candidate exactly at its public consumption boundary');

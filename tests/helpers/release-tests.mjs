@@ -1,4 +1,5 @@
 export const RELEASE_TEST_SCRIPTS=Object.freeze([
+  'tests/architecture/build/typescript-gates.mjs',
   'tests/architecture/build/syntax-check.mjs',
   'tests/architecture/build/dependency-assurance.mjs',
   'tests/architecture/build/deployment-contract.mjs',

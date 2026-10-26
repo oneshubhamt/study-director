@@ -1,3 +1,4 @@
+import {compileScript} from './source-script.mts';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -152,7 +153,7 @@ export function renderBuild(){
   const identity=releaseIdentity();
   const privateSources=new Map(privateModules.map(module=>[
     module.id,
-    renderTokens(sourceFile(module.source),identity,module.source)
+    compileScript(renderTokens(sourceFile(module.source),identity,module.source),module.source)
   ]));
   const oauth=releaseConfig.googleOAuth&&typeof releaseConfig.googleOAuth==='object'?releaseConfig.googleOAuth:{};
   const productionClientId=String(oauth.productionClientId||'').trim();

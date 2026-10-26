@@ -1,3 +1,5 @@
+import {coverageSelection} from './coverage-selection.mjs';
+import {compileScript} from '../../build/source-script.mts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,6 +8,7 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 import {COVERAGE_FLOORS,CRITICAL_PATHS,nonFastCoverageOwner} from './coverage-risk.mjs';
 import {externalOutputPath} from './output-paths.mjs';
 
+const selection=coverageSelection(process.argv.slice(2));
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const runtimeRoots=['source','rich-text','portable'];
 const extensions=new Set(['.js','.mjs','.ts']);
@@ -19,9 +22,12 @@ function walk(dir){
     return entry.isDirectory()?walk(full):[full];
   });
 }
-const productionFiles=runtimeRoots.flatMap(dir=>walk(path.join(root,dir)))
+const allProductionFiles=runtimeRoots.flatMap(dir=>walk(path.join(root,dir)))
   .filter(file=>extensions.has(path.extname(file)))
   .map(file=>path.resolve(file));
+const requested=new Set(selection.files.map(file=>path.resolve(root,file)));
+for(const file of requested)if(!allProductionFiles.includes(file))throw new Error(`Unknown production coverage source: ${file}`);
+const productionFiles=selection.targeted?allProductionFiles.filter(file=>requested.has(file)):allProductionFiles;
 const productionSet=new Set(productionFiles);
 const byBase=new Map();
 for(const file of productionFiles){
@@ -87,7 +93,7 @@ function mapRange(range,lines){
   }
 }
 function summarize(file,script){
-  const source=fs.readFileSync(file,'utf8');
+  const source=compileScript(fs.readFileSync(file,'utf8'),file);
   const lines=makeLines(source);
   let totalBranches=0,coveredBranches=0,totalFunctions=0,coveredFunctions=0;
   for(let i=0;i<script.functions.length;i++){
@@ -133,14 +139,14 @@ function total(rows,key){
 function riskAssessment(rows){
   const byFile=new Map(rows.map(row=>[row.file,row]));
   const failures=[];
-  const floors=COVERAGE_FLOORS.map(rule=>{
+  const floors=COVERAGE_FLOORS.filter(rule=>!selection.targeted||requested.has(path.resolve(root,rule.file))).map(rule=>{
     const row=byFile.get(rule.file);
     const result={...rule,observed:!!row,actual:row?{lines:row.lines.percent,branches:row.branches.percent,functions:row.functions.percent}:null};
     if(!row)failures.push(`${rule.file} was not executed by the fast suite.`);
     else for(const metric of ['lines','branches','functions'])if(row[metric].percent<rule[metric])failures.push(`${rule.file} ${metric} coverage ${row[metric].percent}% is below risk floor ${rule[metric]}%.`);
     return result;
   });
-  const criticalPaths=CRITICAL_PATHS.map(rule=>{
+  const criticalPaths=CRITICAL_PATHS.filter(rule=>!selection.targeted||requested.has(path.resolve(root,rule.file))).map(rule=>{
     const row=byFile.get(rule.file),file=path.join(root,rule.file);
     const source=fs.readFileSync(file,'utf8'),index=source.indexOf(rule.snippet);
     if(index<0){failures.push(`Critical coverage anchor ${rule.id} is missing from ${rule.file}.`);return {...rule,covered:false,line:null};}
@@ -165,8 +171,9 @@ function printTable(rows){
 
 const coverageDir=fs.mkdtempSync(path.join(os.tmpdir(),'study-director-coverage-'));
 try{
-  for(const category of ['unit','integration']){
-    const result=spawnSync(process.execPath,['tests/helpers/run-category.mjs',category],{
+  const runs=selection.targeted?[['targeted',...selection.tests]]:[['unit'],['integration']];
+  for(const args of runs){
+    const result=spawnSync(process.execPath,['tests/helpers/run-category.mjs',...args],{
       cwd:root,env:{...process.env,SD_COVERAGE_DIR:coverageDir},stdio:'inherit',timeout:900000
     });
     if(result.error)throw result.error;
@@ -177,14 +184,14 @@ try{
   const observed=new Set(scripts.keys());
   const unobserved=productionFiles.filter(file=>!observed.has(file)).map(file=>path.relative(root,file).split(path.sep).join('/')).sort();
   const risk=riskAssessment(rows);
-  const expectedUnobserved=unobserved.map(file=>({file,rule:nonFastCoverageOwner(file)})).filter(item=>item.rule).map(item=>({file:item.file,owner:item.rule.owner,reason:item.rule.reason}));
-  const unexpectedUnobserved=unobserved.filter(file=>!nonFastCoverageOwner(file));
+  const expectedUnobserved=selection.targeted?[]:unobserved.map(file=>({file,rule:nonFastCoverageOwner(file)})).filter(item=>item.rule).map(item=>({file:item.file,owner:item.rule.owner,reason:item.rule.reason}));
+  const unexpectedUnobserved=unobserved.filter(file=>selection.targeted||!nonFastCoverageOwner(file));
   if(unexpectedUnobserved.length){
     risk.passed=false;
     for(const file of unexpectedUnobserved)risk.failures.push(`Production file has no fast coverage and no explicit non-fast owner: ${file}`);
   }
   const summary={
-    status:risk.passed?'PASS':'FAIL',scope:'hermetic-fast-production',observedFiles:rows.length,productionFiles:productionFiles.length,
+    status:risk.passed?'PASS':'FAIL',scope:selection.targeted?'targeted-fast-production':'hermetic-fast-production',selectedTests:selection.targeted?selection.tests:null,observedFiles:rows.length,productionFiles:productionFiles.length,
     lines:total(rows,'lines'),branches:total(rows,'branches'),functions:total(rows,'functions'),unobservedFiles:unobserved,
     expectedUnobserved,unexpectedUnobserved,risk
   };
@@ -202,11 +209,9 @@ try{
     console.error('\nUNOWNED production coverage gaps:');
     for(const file of unexpectedUnobserved)console.error(`  ${file}`);
   }
-  const outIndex=process.argv.indexOf('--json');
   if(!risk.passed)process.exitCode=1;
-  if(outIndex>=0){
-    const target=process.argv[outIndex+1];
-    if(!target)throw new Error('--json requires an output path.');
+  if(selection.json){
+    const target=selection.json;
     fs.writeFileSync(externalOutputPath(target,'Coverage JSON output'),JSON.stringify({...summary,files:rows.map(publicRow)},null,2)+'\n');
   }
 }finally{

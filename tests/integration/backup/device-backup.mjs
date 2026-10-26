@@ -8,7 +8,7 @@ async function test(name,run){await run();cases.push(name);}
 
 await test('a browser without folder access never registers a location and every backup path stays quiet',async()=>{
   const w=world({supported:false});await w.controller.install();
-  assert.equal(w.controller.status().mode,'unsupported');assert.equal(w.runtime.list({hosted:true}).length,0);
+  assert.equal(w.controller.status().mode,'unsupported');assert.equal(w.controller.cancelForeground('unsupported'),false);assert.equal(w.controller.wake(),true);assert.equal(await w.controller.deleteBackups(),'');assert.equal(w.runtime.list({hosted:true}).length,0);
   assert.equal(await w.controller.backupNow(),false);w.change(true);await w.runtime.flushAutomatic('app-hidden');await w.tick(30*MINUTE);
   assert.equal(w.published.length,0);assert.equal(w.runtime.automaticActive(),false);assert.equal(w.runtime.automaticWaiting(),false);assert.equal(w.notices.length,0);
 });
@@ -63,6 +63,14 @@ await test('a folder that needs permission again asks once, never prompts on its
   assert.equal(w.permissionNotices().length,1,'one notice per launch');assert.equal(w.published.length,0,'nothing is written without permission');
   const allowing=w.controller.connect();assert.equal(folder.requests,1,'the permission prompt opens from the click');await allowing;await w.tick(5000);
   assert.equal(w.controller.status().connected,true);assert.equal(w.published.length,1,'changes made meanwhile are backed up');assert.equal(w.settingsStore.get('deviceFolder').directoryHandle,folder,'the same folder is kept');
+});
+
+await test('denied permission on a remembered folder preserves the connection record and existing backups',async()=>{
+  const w=world(),folder=w.directory({grant:'denied'});await w.controller.install();w.choose(folder);await w.controller.connect();await w.settle();
+  const commits=await w.commits(folder);folder.permission='prompt';await w.controller.refreshPermission();await w.controller.connect();
+  assert.equal(folder.requests,1);assert.equal(w.controller.status().connected,false);assert.match(w.note(),/access is blocked by the browser/u);
+  assert.equal(w.settingsStore.get('deviceFolder').directoryHandle,folder);assert.deepEqual(await w.commits(folder),commits);
+  w.change(true);await w.tick(30*MINUTE);assert.equal(w.published.length,1,'denied permission never publishes or discards a backup');
 });
 
 await test('cancelling the picker or refusing permission leaves a clean, unconnected state',async()=>{
@@ -138,6 +146,16 @@ await test('a version this app cannot read is listed with Remove, cleanup goes o
   assert.ok(!(await w.commits(folder)).includes(newer+'.sdcommit'),'its commit is gone');assert.equal(formats()?.unreadable,0);
   const after=await w.runtime.history('device-folder',{interactive:false});assert.ok(after.entries.every(entry=>entry.location.tier!=='unreadable'));
   assert.deepEqual(await w.locks(folder),[],'no lock files remain');
+});
+
+await test('deleting Device Folder backups disconnects first and preserves unrelated folder contents',async()=>{
+  const w=world(),folder=w.directory();await w.controller.install();w.choose(folder);await w.controller.connect();await w.settle();
+  await folder.getDirectoryHandle('unrelated',{create:true});
+  const deleted=await w.controller.deleteBackups();
+  assert.equal(deleted,IDENTITIES.root);assert.equal(w.controller.status().connected,false);assert.equal(w.settingsStore.size,0);
+  await assert.rejects(()=>folder.getDirectoryHandle(deleted),error=>error.name==='NotFoundError');
+  assert.ok(await folder.getDirectoryHandle('unrelated'),'only the profile backup repository is deleted');
+  w.change(true);await w.tick(30*MINUTE);assert.equal(w.published.length,1,'deletion leaves automatic backup disconnected');
 });
 
 console.log(JSON.stringify({status:'PASS',suite:'device-backup',productionEngine:true,cases},null,2));

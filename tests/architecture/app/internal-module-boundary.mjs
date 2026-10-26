@@ -6,7 +6,7 @@ import {privateModules} from '../../../build/module-manifest.mjs';
 const coreRoot='source/core';
 const internal=fs.readFileSync(path.join(coreRoot,'internal.js'),'utf8');
 const app=fs.readFileSync('source/app.html','utf8');
-const coreFiles=fs.readdirSync(coreRoot).filter(name=>name.endsWith('.js')).sort();
+const coreFiles=fs.readdirSync(coreRoot).filter(name=>/\.(?:js|ts)$/u.test(name)).sort();
 const sources=new Map(coreFiles.map(name=>[name,fs.readFileSync(path.join(coreRoot,name),'utf8')]));
 
 assert.match(internal,/const contracts=freeze\(\{exactFrozenObject,functionPort,declaredFunctions\}\)/u,'the registry owns the canonical shared contract validators');

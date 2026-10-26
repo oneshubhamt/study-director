@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2022"
+    ],
+    "types": [
+      "node"
+    ]
+  },
+  "files": [
+    "build/source-script.mts",
+    "tests/unit/app/canonical.mts",
+    "types/checks/node.ts"
+  ]
+}

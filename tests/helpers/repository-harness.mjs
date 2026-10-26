@@ -1,3 +1,4 @@
+import {readScript} from '../../build/source-script.mts';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {APP_META_RUNTIME_REGISTRY} from '../../contracts/data-architecture.mjs';
@@ -95,7 +96,7 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
   const dataContract=freeze({schemas:freeze({LocalRecoveryEnvelope:freeze({version:1}),ActiveSession:freeze({version:1}),DailyRecord:freeze({version:1}),DailySummary:freeze({version:1}),Note:freeze({version:3,trashKeyPrefix:'~deleted '})})});
   const IDBKeyRange=freeze({bound:(lower,upper)=>freeze({lower:String(lower),upper:String(upper)})});
   const context=vm.createContext({console,structuredClone,Buffer,setTimeout:timerSet,clearTimeout:timerClear,queueMicrotask,Date:ClockDate,Promise,Map,Set,Object,Array,String,Number,Math,JSON,RegExp,Error,RangeError,IDBKeyRange,TextEncoder,TextDecoder,Uint8Array,ArrayBuffer,Blob,localStorage,crypto:globalThis.crypto,globalThis:null});context.globalThis=context;
-  vm.runInContext(fs.readFileSync('source/core/internal.js','utf8'),context,{filename:'internal.js'});vm.runInContext(persistence,context,{filename:'persistence.js'});vm.runInContext(appMetaSource,context,{filename:'app-meta.js'});vm.runInContext(repositoryJournals,context,{filename:'repository-journals.js'});vm.runInContext(fs.readFileSync('source/core/save-lane.js','utf8'),context,{filename:'save-lane.js'});vm.runInContext(notesRepository,context,{filename:'repositories-notes.js'});vm.runInContext(repositories,context,{filename:'repositories.js'});vm.runInContext(recordCodecs,context,{filename:'record-codecs.js'});
+  vm.runInContext(fs.readFileSync('source/core/internal.js','utf8'),context,{filename:'internal.js'});vm.runInContext(persistence,context,{filename:'persistence.js'});vm.runInContext(appMetaSource,context,{filename:'app-meta.js'});vm.runInContext(repositoryJournals,context,{filename:'repository-journals.js'});vm.runInContext(readScript('source/core/save-lane.ts'),context,{filename:'source/core/save-lane.ts'});vm.runInContext(notesRepository,context,{filename:'repositories-notes.js'});vm.runInContext(repositories,context,{filename:'repositories.js'});vm.runInContext(recordCodecs,context,{filename:'record-codecs.js'});
   const registry=context[Symbol.for('studyDirector.internalModules.v1')];
   const local=registry.require('persistence',1).createLocalStorage();
   const appMetaModule=registry.require('app-meta',1),journalModule=registry.require('repository-journals',1),notesModule=registry.require('repositories-notes',1),saveLaneModule=registry.require('save-lane',1),module=registry.require('repositories',1);

@@ -6,19 +6,23 @@
 - Keep this document current after each phase: decisions, implementation, checks, remaining work and corrections must be sufficient for another session to resume.
 - Use a second, temporary scratchpad outside the repository for individual passes. Never put private reasoning, credentials or user data in this record.
 - Vendored `vendor/wordgard/**` is immutable. Do not edit upstream source or the generated Wordgard bundle by hand. Our editor, adapters and customizations may change.
+- During implementation passes, run targeted QA on affected surfaces and add meaningful tests/coverage as needed. Reserve full, thorough QA for Phase 7; do not repeat broad suites for each pass or minor correction. This owner instruction supersedes the earlier broad per-pass verification approach.
 - Use strict TypeScript to improve the application's actual contracts. Preserve canonical application behavior, data integrity, ownership, recovery, timers, workers, offline operation and UI behavior.
 - This branch supports one current canonical data model. Historical backups, record shapes, storage topologies and upgrade/migration adapters are deliberately unsupported. Reject unsupported input without silently converting or deleting it.
 - Current-format backup/restore, interrupted-operation recovery, fallback saves, journals and malformed/newer-data protection remain required. These are not historical compatibility.
 
 ## Program plan
 
-0. Remove historical migration/compatibility code and establish the canonical-only baseline (current pass).
-1. Establish a pinned compiler, strict project configurations and TypeScript-aware build/test/coverage/mutation tooling; complete a small pilot.
-2. Type module ports, records, worker messages and platform adapters; bring existing authored TypeScript under checking without modifying Wordgard.
-3. Convert foundational domain logic and codecs, then persistence, repositories, sessions/timers and backup/recovery in dependency order.
-4. Complete typed host composition, UI features, workers and service worker.
-5. Complete first-party tooling/tests, remove transitional bridges, and certify correctness, browser behavior, coverage/mutation and output budgets.
+0. Canonical-only preparation (completed through `512fc9c`; follow-up evidence below supersedes the initial incomplete checkpoint).
+1. **Pipeline and pilot (complete):** pinned compiler, strict environment configurations, typed lint, mixed JS/TS build/test/coverage/mutation tooling, and a small canonical/save-lane pilot.
+2. **Contracts and existing TS:** module ports, records, worker messages, platform adapters and accurate Wordgard declarations; strictly check existing authored TS.
+3. **Leaves and codecs:** foundational domain/time logic, portable primitives, codecs and isolated state machines.
+4. **Persistence and orchestration:** storage/repositories, ownership, sessions/timers, attachments, backup and recovery in dependency order.
+5. **Host and features:** mechanically extract host scripts, then complete typed composition, UI, workers and service worker.
+6. **Tooling and tests:** finish first-party build/contracts/test conversion and remove transitional bridges/source-text extraction.
+7. **Certification:** full correctness, browser, coverage, mutation, release and performance gates; inspect generated deployment.
 
+This restores the original audit's seven conversion phases after preparation; the previous summary combined phases 3/4 and 6/7.
 Each slice stays runnable. Separate mechanical extraction, typing and behavior fixes. Preserve runtime validation at all external/storage/message boundaries. A renamed file is not proof its implementation is checked.
 
 ## Pass 0: canonical-only baseline
@@ -134,3 +138,50 @@ The policy's `maintenanceMaxAgeMs`/`maintenanceAssertionMarginMs` stay because t
 | Browser, each run alone: `pwa-update`, `pwa-offline`, `core-flow`, `pwa-device-backup`, `sync-and-profiles`, `site-data-clear` | PASS: 6 of 6 |
 
 `pwa-update` covers the PWA multi-tab reload scenario that left the earlier smoke run incomplete. It passes now, after the `pwa-update` fix carried over from `main`. The full browser smoke, extended-browser and coverage gates were not rerun in this pass. They remain gates for the TypeScript program.
+
+
+## Phase 1: pipeline and pilot (complete)
+
+Starting commit verified directly against GitHub: `512fc9c364ff007ea9e74b5391ac10a9349696a9` on `TS-Conversion`. The local checkout was fast-forwarded before implementation. Pass 0 follow-up reports the previous PWA reload case passing; Phase 1 will verify the generated app again.
+
+Owner requires the latest published npm and TypeScript. Registry versions at this pass: npm 12.2.1 and TypeScript 7.0.2. Tooling must use these exact pins and must not substitute an older compiler to satisfy a lint dependency.
+
+
+### Phase 1 implementation and decisions
+
+- Restored the original seven-phase sequence after Pass 0. The owner specifically requested current npm/TypeScript: installed npm **12.2.1**, pinned TypeScript **7.0.2**, and updated the complete dependency/license inventory. Typed lint uses Oxlint **1.89.0** with its TypeScript 7 backend **7.0.2005**; typescript-eslint 8.72.0 only supports compilers below 6.1 and was not installed or forced past its peer requirement.
+- Pinned local Node **22.23.4**, matching Node 22 declarations and npm's supported engines. Verified the new gates, pilot tests and build on the existing CI runtime **26.12.1** too: generated deployment hashes match Node 22 exactly. Workflows were not edited; the lightweight repository job still does not run installed compiler/lint gates. Release/promotion scripts now run them.
+- Added five strict projects (browser, portable, dedicated worker, service worker, Node), environment/negative type fixtures, zero-error type/lint commands and an admission inventory. The 25 existing authored editor/worker TS files remain explicitly unchecked until Phase 2. Worker/portable projects currently establish boundaries, not converted implementations. No `allowJs`, `skipLibCheck`, production type suppression or explicit `any` was introduced.
+- Converted **canonical** and **save-lane**, plus the shared script reader and a canonical behavioral test. The closed pilot module map relates IDs, versions, exports, generic lane values/results and current flush options (including backup capture). The JS registry and existing JS callers remain unchecked; the narrow declared seam is documented and runtime contract validation remains. Normalized executable ASTs for both converted app modules are identical to `512fc9c`; only types, comments and filenames changed.
+- Build and VM tests share synchronous, cache-free Node type erasure before output hashes/CSP/precache generation. Erasure preserves UTF-16 offsets and line counts; coverage uses this direct mapping to authored TS. Classic scripts reject runtime imports/exports and non-erasable syntax. `.mts` test discovery, governance and syntax validation are included. Existing bundled editor/worker coverage remains a separate Phase 2/later boundary.
+- Coverage inventories and AST parsing include TS; pilot floors require actual execution. Two added mutations alter authored TS and execute fresh erasure. Ten compiler/lint probes prove rejection of wrong types, unchecked indexing, invalid optional fields, unsafe values/calls, floating/misused promises and non-exhaustive switches. Build/test equivalence, erased import behavior, stack line positions and fresh mutation inputs have executable checks.
+- The first full coverage run exposed missing pilot startup-rejection tests and existing baseline gaps. Added absent/incompatible-registry tests; strengthened Device Folder tests to verify destructive deletion disconnects and preserves unrelated folder contents, plus unsupported cancellation. Assigned the existing note-links and immutable Wordgard runtimes to their actual browser/release tests. Existing coverage floors were not lowered. No application behavior changed in these corrections.
+- `docs/TYPESCRIPT.md` records checking scope, reviewed boundary assertions, toolchain commands, host-extraction route and remaining CI/vendor obligations. Wordgard's 90 vendor files and generated bundle remain byte-for-byte identical to the starting commit, including after bundle regeneration in the disposable release checkout.
+
+
+Owner course correction during Phase 1: subsequent passes must use targeted QA on affected surfaces, with additional regression tests/coverage where useful. Full and thorough QA is reserved for final certification. The last repeated aggregate coverage run was stopped on that instruction; completed checks remain evidence, but the stopped run is not a pass. Phase 1's remaining verification is focused on its changed pilots and tooling.
+
+
+### Phase 1 verification and handoff
+
+The initial broad checks below were run before the owner's targeted-QA correction. Subsequent corrections used only focused checks. Logs/JSON remain outside the repository under `/tmp/ts-phase1-*`; the outcomes below are the durable record.
+
+| Check | Result and scope |
+| --- | --- |
+| Clean `npm ci --ignore-scripts`, compiler and typed lint | PASS with npm 12.2.1 / TS 7.0.2; five environment projects, 10 admitted files including fixtures/contracts, 25 pre-existing TS files explicitly deferred |
+| Compiler/lint rejection probes | PASS: all 10 positive/negative probes; incorrect types and unsafe/promise/exhaustiveness cases produce real diagnostics |
+| Behavioral/architecture regression | PASS: initial 142-test fast run; final 24 unit + 90 integration tests during coverage, plus 29 architecture executables (143 total). Later test/helper changes passed their targeted checks |
+| Pilot focused coverage | PASS: canonical and save-lane both have 100% line/function coverage in the focused report; existing branch floors pass |
+| Device Folder focused coverage | PASS: four relevant integration executables; 97.29% lines and 91.07% functions, above the unchanged floors. Tests include denied permission, deletion preserving unrelated contents, unsupported wake/cancellation and current backup flows |
+| Coverage/mutation pipeline | PASS: AST branch coverage observed both TS implementations; all 10 mutations killed, including authored-TS canonical ordering and save-lane superseded-retry faults |
+| Full release check (before QA correction) | PASS: dependency audit (0 vulnerabilities), capacity/performance, reproducible bundles, syntax/build/CSP/precache verification, minified output and budgets |
+| Browser smoke (before QA correction) | PASS: 11 journeys, zero quarantines, one browser test at a time |
+| Runtime compatibility | PASS: compiler/lint and four relevant executable tests on Node 26.12.1; generated deployment hashes identical to Node 22.23.4 |
+| Vendor/source boundary | PASS: 90 vendor files plus generated Wordgard bundle identical to `512fc9c`; app/build/contracts sources match the disposable release certification |
+| QA selection/governance | PASS: focused coverage requires explicit tests and source files, rejects invalid selection and unobserved requested sources, keeps applicable floors and labels its scope; three affected governance/policy checks pass |
+
+The last completed aggregate coverage run reported the existing Device Folder function floor at 89.29% against 90%. Focused regression tests now clear that floor without changing application code. Its broad rerun was stopped on the owner's instruction; do not report aggregate coverage as finally certified. Exhaustive browser/coverage/release certification remains Phase 7.
+
+Added `--test` / `--file` selection to the existing coverage runner so later passes can verify affected modules without rerunning the entire suite. Default full mode and its thresholds remain available for final certification. Strengthened save-lane tests verify pending/writing status, retained failures, tail completion and settlement as well as the existing persistence behavior.
+
+Next: **Phase 2 — contracts and existing TypeScript**. Bring existing authored editor/worker TS into the strict projects, establish accurate Wordgard declaration and platform boundaries, and expand checked module/record/message contracts. Keep vendor immutable. Work in small slices with targeted QA and update this record after each slice; do not advance into Phase 2 automatically as part of this checkpoint.

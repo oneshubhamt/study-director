@@ -35,7 +35,7 @@ See `docs/ARCHITECTURE.md` for the full current-state summary.
 
 ## Get started
 
-Prerequisites: Node.js 22 (the test runner supports 20+), npm for dependency rebuilding, and Python 3 for the local launcher.
+Prerequisites: Node.js 22.23.4 (pinned in `.node-version`), npm 12.2.1, and Python 3 for the local launcher. TypeScript 7.0.2 and the typed linter are exact development dependencies. See `docs/TYPESCRIPT.md` for the incremental checking boundary and commands.
 
 ```bash
 git clone https://github.com/oneshubhamt/study-director.git
@@ -61,6 +61,7 @@ To regenerate the rich-text bundle and build with the reviewed lockfile:
 
 ```bash
 npm ci --ignore-scripts
+npm run check:types
 npm run build
 npm run verify
 ```

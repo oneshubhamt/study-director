@@ -18,7 +18,7 @@ function executableFiles(directory){
   return fs.readdirSync(directory,{withFileTypes:true}).flatMap(entry=>{
     const target=path.join(directory,entry.name);
     if(entry.isDirectory())return executableFiles(target);
-    return entry.isFile()&&entry.name.endsWith('.mjs')?[target.split(path.sep).join('/')]:[];
+    return entry.isFile()&&/\.(?:mjs|mts)$/u.test(entry.name)?[target.split(path.sep).join('/')]:[];
   });
 }
 
@@ -36,7 +36,7 @@ for(const layer of layers){
     assert.equal(parts.length,2,`test must have exactly one authoritative product-domain home: ${file}`);
     const [domain,name]=parts;
     assert.ok(allowedDomains.has(domain),`unknown product domain ${domain}: ${file}`);
-    assert.match(name,/^[a-z0-9]+(?:-[a-z0-9]+)*\.mjs$/,`non-semantic test filename: ${file}`);
+    assert.match(name,/^[a-z0-9]+(?:-[a-z0-9]+)*\.(?:mjs|mts)$/,`non-semantic test filename: ${file}`);
     assert.ok(!/(?:^|-)(?:sdv[ab]\d|[lr]\d+[a-z0-9.]*)|^n\d+-/i.test(name),`release-era test filename: ${file}`);
     assert.ok(!/(?:^|[-_])(tmp|temp|debug|repro)(?:[-_.]|$)/i.test(name),`diagnostic test leaked into suite: ${file}`);
     testFiles.push(file);
@@ -44,7 +44,7 @@ for(const layer of layers){
 }
 for(const support of supportRoots)assert.ok(fs.statSync(path.join('tests',support)).isDirectory(),`missing support root: ${support}`);
 assert.equal(fs.existsSync('tests/release-only'),false,'release cadence must not be represented as a structural test type');
-assert.deepEqual(fs.readdirSync('tests',{withFileTypes:true}).filter(entry=>entry.isFile()&&entry.name.endsWith('.mjs')),[],'executable tests/runners must live in a layer or helpers');
+assert.deepEqual(fs.readdirSync('tests',{withFileTypes:true}).filter(entry=>entry.isFile()&&/\.(?:mjs|mts)$/u.test(entry.name)),[],'executable tests/runners must live in a layer or helpers');
 assert.equal(fs.existsSync('qa'),false,'historical QA evidence must not live in the source tree');
 assert.equal(new Set(testFiles).size,testFiles.length,'classified test paths must be unique');
 
@@ -93,7 +93,7 @@ function browserFiles(directory='tests/browser'){
   return fs.readdirSync(directory,{withFileTypes:true}).flatMap(entry=>{
     const target=path.join(directory,entry.name);
     if(entry.isDirectory())return browserFiles(target);
-    return entry.isFile()&&entry.name.endsWith('.mjs')?[target.split(path.sep).join('/')]:[];
+    return entry.isFile()&&/\.(?:mjs|mts)$/u.test(entry.name)?[target.split(path.sep).join('/')]:[];
   });
 }
 
@@ -112,7 +112,7 @@ assert.equal(new Set(scripts).size,scripts.length,'browser-test scripts must be 
 assert.deepEqual([...scripts].sort(),files,'every browser test must be represented exactly once in the canonical manifest');
 for(const entry of entries){
   assert.match(entry.id,/^[a-z0-9]+(?:-[a-z0-9]+)*$/,'browser id must be semantic kebab-case');
-  assert.match(entry.script,/^tests\/browser\/[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9]+(?:-[a-z0-9]+)*\.mjs$/,'browser path must include one semantic product domain');
+  assert.match(entry.script,/^tests\/browser\/[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9]+(?:-[a-z0-9]+)*\.(?:mjs|mts)$/,'browser path must include one semantic product domain');
   assert.ok(fs.existsSync(entry.script),`browser test is missing: ${entry.script}`);
   assert.ok(Array.isArray(entry.coverage)&&entry.coverage.length>0,`${entry.id} needs coverage metadata`);
   assert.equal(new Set(entry.coverage).size,entry.coverage.length,`${entry.id} coverage metadata must not contain duplicates`);

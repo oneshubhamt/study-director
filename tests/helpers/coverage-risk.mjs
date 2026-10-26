@@ -1,4 +1,6 @@
 export const COVERAGE_FLOORS=Object.freeze([
+  Object.freeze({file:'source/core/canonical.ts',lines:90,branches:70,functions:100}),
+  Object.freeze({file:'source/core/save-lane.ts',lines:90,branches:65,functions:85}),
   Object.freeze({file:'portable/stream-encryption.js',lines:90,branches:80,functions:90}),
   Object.freeze({file:'source/core/library-clear.js',lines:80,branches:55,functions:90}),
   Object.freeze({file:'source/core/asset-maintenance.js',lines:95,branches:50,functions:85}),
@@ -28,6 +30,8 @@ export const CRITICAL_PATHS=Object.freeze([
 
 
 const NON_FAST_COVERAGE_OWNERS=Object.freeze([
+  Object.freeze({file:'source/core/note-links.js',owner:'browser/library/notes-management',reason:'The real picker, backlinks and tags are exercised in notes-management; Library selection uses a mocked UI port.'}),
+  Object.freeze({file:'source/external/wordgard.js',owner:'browser/rich-text + release/bundle',reason:'Immutable generated vendor runtime; browser rich-editor journeys exercise it and release QA verifies bundle provenance.'}),
   Object.freeze({prefix:'rich-text/',owner:'browser/release',reason:'TypeScript editor source is compiled and exercised through browser/release QA rather than the Node fast runtime.'}),
   Object.freeze({file:'portable/attachment-worker.ts',owner:'build/worker',reason:'Worker build source; runtime behavior is exercised through the emitted worker/integration path.'}),
   Object.freeze({file:'portable/worker.ts',owner:'build/worker',reason:'Worker build source; runtime behavior is exercised through emitted worker tests.'}),

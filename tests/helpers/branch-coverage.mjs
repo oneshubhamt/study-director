@@ -1,3 +1,4 @@
+import {compileScript} from '../../build/source-script.mts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,7 +10,7 @@ import {externalOutputPath} from './output-paths.mjs';
 const root=process.cwd(),coverageDir=fs.mkdtempSync(path.join(os.tmpdir(),'study-director-branch-coverage-'));
 const runtimeRoots=['source/core','source/external','portable'];
 function walk(directory){if(!fs.existsSync(directory))return [];return fs.readdirSync(directory,{withFileTypes:true}).flatMap(entry=>{const target=path.join(directory,entry.name);return entry.isDirectory()?walk(target):entry.isFile()?[target]:[];});}
-const production=new Set(runtimeRoots.flatMap(dir=>walk(path.join(root,dir))).filter(file=>file.endsWith('.js')).map(file=>path.resolve(file)));
+const production=new Set(runtimeRoots.flatMap(dir=>walk(path.join(root,dir))).filter(file=>/\.(?:js|ts)$/u.test(file)&&!file.endsWith('.d.ts')).map(file=>path.resolve(file)));
 const byBase=new Map();for(const file of production){const base=path.basename(file),list=byBase.get(base)||[];list.push(file);byBase.set(base,list);}
 const rawObjectTokens=new Set(['PRODUCTION_LIMITS','LOCAL_STORAGE_KEYS','SESSION_STORAGE_KEYS','APP_META_KEYS','APP_META_REGISTRY','RUNTIME_DATA_CONTRACT','INDEXED_DB_STORE_NAMES','CACHE_STORAGE_IDENTITIES','EXTERNAL_REPOSITORY_IDENTITIES']);
 function renderCoverageTemplate(source){return source.replace(/@@SD_([A-Z_]+)@@/gu,(token,name)=>{const value=rawObjectTokens.has(name)?'{}':name==='LEGACY_BACKUP_SCHEMA_VERSION'?'1':name==='PWA_ASSET_MANIFEST'?'[]':'qa';return value.padEnd(token.length,' ');});}
@@ -27,7 +28,7 @@ try{
   for(const file of fs.readdirSync(coverageDir).filter(name=>name.startsWith('coverage-')&&name.endsWith('.json'))){const json=JSON.parse(fs.readFileSync(path.join(coverageDir,file),'utf8'));for(const script of json.result||[]){const normalized=normalize(script.url);if(!normalized)continue;const list=scripts.get(normalized)||[];list.push(script);scripts.set(normalized,list);}}
   const rows=[];
   for(const [file,observations] of scripts){
-    const source=renderCoverageTemplate(fs.readFileSync(file,'utf8')),ast=parse(source,{ecmaVersion:'latest',sourceType:'module',allowHashBang:true});
+    const source=compileScript(renderCoverageTemplate(fs.readFileSync(file,'utf8')),file),ast=parse(source,{ecmaVersion:'latest',sourceType:'module',allowHashBang:true});
     const countAt=offset=>observations.reduce((sum,script)=>{let best=null;for(const fn of script.functions||[])for(const range of fn.ranges||[])if(range.startOffset<=offset&&range.endOffset>offset&&(!best||range.endOffset-range.startOffset<best.endOffset-best.startOffset))best=range;return sum+(best?.count||0);},0);
     let total=0,covered=0;
     const edge=count=>{total++;if(count>0)covered++;};
@@ -44,7 +45,7 @@ try{
   }
   const covered=rows.reduce((n,row)=>n+row.branches.covered,0),total=rows.reduce((n,row)=>n+row.branches.total,0);
   if(!total)throw new Error('AST branch coverage observed no branch edges.');
-  for(const critical of ['portable/stream-encryption.js','source/core/library-clear.js','source/core/attachments.js','source/core/backup.js'])if(!rows.some(row=>row.file===critical))throw new Error(`Critical branch-coverage module was not observed: ${critical}`);
+  for(const critical of ['source/core/canonical.ts','source/core/save-lane.ts','portable/stream-encryption.js','source/core/library-clear.js','source/core/attachments.js','source/core/backup.js'])if(!rows.some(row=>row.file===critical))throw new Error(`Critical branch-coverage module was not observed: ${critical}`);
   const summary={status:'PASS',scope:'fast-runtime-ast-branch-edges',branches:{covered,total,percent:Math.round(covered/total*10000)/100},files:rows.sort((a,b)=>a.file.localeCompare(b.file))};
   console.log(JSON.stringify(summary,null,2));
   const outIndex=process.argv.indexOf('--json');if(outIndex>=0){const target=process.argv[outIndex+1];if(!target)throw new Error('--json requires an output path.');fs.writeFileSync(externalOutputPath(target,'AST branch coverage JSON output'),JSON.stringify(summary,null,2)+'\n');}

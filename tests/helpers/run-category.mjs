@@ -19,7 +19,7 @@ function discover(dir){
   return fs.readdirSync(dir,{withFileTypes:true}).flatMap(entry=>{
     const file=path.join(dir,entry.name);
     if(entry.isDirectory())return discover(file);
-    return entry.isFile()&&entry.name.endsWith('.mjs')?[file]:[];
+    return entry.isFile()&&/\.(?:mjs|mts)$/u.test(entry.name)?[file]:[];
   });
 }
 function fastFiles(category){
@@ -64,8 +64,9 @@ function isolatedEnvironment(tempRoot){
   return env;
 }
 function runtimePreflight(){
-  const major=Number(process.versions.node.split('.')[0]);
-  if(!Number.isInteger(major)||major<20)throw new Error(`Fast tests require Node.js 20+; found ${process.versions.node}. npm is not required.`);
+  const [major,minor,patch]=process.versions.node.split('.').map(Number);
+  const supported=major===22&&(minor>23||minor===23&&patch>=4)||major===24&&minor>=15||major>=26;
+  if(!supported)throw new Error(`Fast tests require Node.js 22.23.4+; found ${process.versions.node}. npm is not required.`);
   for(const [name,value] of [['Blob',globalThis.Blob],['structuredClone',globalThis.structuredClone],['crypto',globalThis.crypto],['MessageChannel',globalThis.MessageChannel]]){
     if(value===undefined)throw new Error(`Fast-test runtime is missing ${name}; use a current Node.js runtime. npm is not required.`);
   }

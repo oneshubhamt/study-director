@@ -1,6 +1,8 @@
+import type {PilotRegistry, LaneInput, FlushOptions, SaveState} from '../../types/pilot.ts';
 (()=>{
 'use strict';
-const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
+// Narrow bridge to the unchanged JS registry; runtime identity is checked below.
+const registry=(globalThis as typeof globalThis & {[key: symbol]: PilotRegistry | undefined})[Symbol.for('studyDirector.internalModules.v1')];
 if(!registry||registry.format!=='study-director.internal-module-registry'||registry.version!==1){
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
 }
@@ -16,50 +18,52 @@ const {exactFrozenObject:exactObject}=registry.contracts;
 registry.define('save-lane',1,()=>{
   const freeze=Object.freeze;
   const DELAY_MS=250;
-  const RETRY_DELAYS_MS=freeze([2000,5000,15000,30000,60000]);
+  const RETRY_DELAYS_MS=freeze([2000,5000,15000,30000,60000] as const);
   // Editors that group keystrokes publish them before any lane writes, so a
   // write always carries what is on screen.
-  let beforeFlush=null,preparing=false;
-  function onBeforeFlush(callback){if(typeof callback!=='function')throw new TypeError('Save lane flush preparation must be a function.');beforeFlush=callback;}
+  let beforeFlush: (()=>void) | null=null,preparing=false;
+  function onBeforeFlush(callback: ()=>void){if(typeof callback!=='function')throw new TypeError('Save lane flush preparation must be a function.');beforeFlush=callback;}
   function prepareFlush(){if(!beforeFlush||preparing)return;preparing=true;try{beforeFlush();}catch{}finally{preparing=false;}}
-  function reasonOf(error){return String(error&&error.message||error||'storage is unavailable').replace(/[.\s]+$/u,'');}
+  function reasonOf(error: unknown){return String(error&&(error as {readonly message?: unknown}).message||error||'storage is unavailable').replace(/[.\s]+$/u,'');}
   // The same wording for every lane while a retry is pending.
-  function failureMessage(label,error){return `${label} could not be saved: ${reasonOf(error)}. Study Director keeps retrying; keep this tab open or export a backup.`;}
-  function createLane(input){
+  function failureMessage(label: string,error: unknown){return `${label} could not be saved: ${reasonOf(error)}. Study Director keeps retrying; keep this tab open or export a backup.`;}
+  function createLane<T, R>(input: Readonly<LaneInput<T, R>>){
     exactObject(input,['label','write','onState','environment'],'Save lane input');
     const environment=exactObject(input.environment,['setTimeout','clearTimeout'],'Save lane environment');
     if(typeof input.write!=='function'||typeof input.onState!=='function'||typeof environment.setTimeout!=='function'||typeof environment.clearTimeout!=='function')throw new TypeError('Save lane ports are invalid.');
     const label=String(input.label||'Changes'),write=input.write,onState=input.onState,{setTimeout,clearTimeout}=environment;
     // timer: the next automatic write (now, or after a failed write's pause).
     // cooling: the pause after a write starts, during which new values wait.
-    let timer=0,cooling=0,pending=false,value,sequence=0,tail=Promise.resolve(),attempt=0,lastError=null,writing=0;
-    function arm(delay){if(timer)clearTimeout(timer);timer=setTimeout(()=>{timer=0;void flush().catch(()=>{});},delay);}
-    function report(state,error=null){try{onState(state,error);}catch{}}
+    let timer=0,cooling=0,pending=false,value: T | undefined,sequence=0,tail: Promise<R | void>=Promise.resolve(),attempt=0,lastError: unknown=null,writing=0;
+    function arm(delay: number){if(timer)clearTimeout(timer);timer=setTimeout(()=>{timer=0;void flush().catch(()=>{});},delay);}
+    function report(state: SaveState,error: unknown=null){try{onState(state,error);}catch{}}
     // Starts the next automatic write when nothing holds it back.
     function wake(){if(pending&&!writing&&!cooling&&!timer)arm(0);}
     // Records the latest value. A newer value ends a failed write's retry pause.
-    function schedule(next){
+    function schedule(next: T){
       value=next;pending=true;sequence++;
       if(attempt){attempt=0;if(timer){clearTimeout(timer);timer=0;}}
       wake();report('saving');return true;
     }
     // Writes the pending value now; resolves when this lane has written it.
-    function flush(options={}){
+    function flush(options: FlushOptions={}){
       prepareFlush();
       if(timer){clearTimeout(timer);timer=0;}
       if(!pending)return tail;
-      const current=value,taken=sequence;pending=false;value=undefined;writing++;
+      // pending is set only by schedule or retry, both of which retain a T.
+      const current=value as T,taken=sequence;pending=false;value=undefined;writing++;
       if(cooling)clearTimeout(cooling);
       cooling=setTimeout(()=>{cooling=0;wake();},DELAY_MS);
       tail=tail.catch(()=>{}).then(()=>write(current,options)).then(result=>{
         writing--;lastError=null;attempt=0;
         if(!pending&&!writing)report('saved');else wake();
         return result;
-      },error=>{
+      },(error: unknown)=>{
         writing--;lastError=error;
         // Only a value nothing has replaced is retried after a pause. A newer
         // value keeps its own timing.
-        if(sequence===taken){pending=true;value=current;arm(RETRY_DELAYS_MS[Math.min(attempt,RETRY_DELAYS_MS.length-1)]);attempt++;}
+        // attempt starts at zero and increments; this index is clamped to the nonempty tuple.
+        if(sequence===taken){pending=true;value=current;arm(RETRY_DELAYS_MS[Math.min(attempt,RETRY_DELAYS_MS.length-1)]!);attempt++;}
         else wake();
         report('error',error);throw error;
       });

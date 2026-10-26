@@ -1,3 +1,4 @@
+import {compileScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,7 +14,7 @@ function walk(directory){
   for(const entry of fs.readdirSync(directory,{withFileTypes:true})){
     const absolute=path.join(directory,entry.name);
     if(entry.isDirectory())walk(absolute);
-    else if(/\.(?:js|mjs)$/.test(entry.name))files.push(absolute);
+    else if(/\.(?:js|mjs|ts|mts)$/.test(entry.name))files.push(absolute);
   }
 }
 roots.forEach(relative=>walk(path.join(ROOT,relative)));
@@ -39,10 +40,10 @@ try{
     let target=file;
     if(file.startsWith(path.join(ROOT,'source')+path.sep)){
       const source=fs.readFileSync(file,'utf8');
-      if(/@@SD_[A-Z_]+@@/u.test(source)){
-        const rendered=renderSyntaxTemplate(source);
+      if(file.endsWith('.ts')||/@@SD_[A-Z_]+@@/u.test(source)){
+        const rendered=compileScript(renderSyntaxTemplate(source),file);
         assert.doesNotMatch(rendered,/@@SD_[A-Z_]+@@/u,`Unresolved syntax template token in ${path.relative(ROOT,file)}.`);
-        target=path.join(tempRoot,`${renderedTemplates++}-${path.basename(file)}`);
+        target=path.join(tempRoot,`${renderedTemplates++}-${path.basename(file)}.js`);
         fs.writeFileSync(target,rendered);
       }
     }

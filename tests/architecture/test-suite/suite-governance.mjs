@@ -23,7 +23,7 @@ const structuralContainmentThreshold=0.30;
 function walk(directory){
   return fs.readdirSync(directory,{withFileTypes:true}).flatMap(entry=>{
     const target=path.join(directory,entry.name);
-    return entry.isDirectory()?walk(target):entry.isFile()&&entry.name.endsWith('.mjs')?[target.split(path.sep).join('/')]:[];
+    return entry.isDirectory()?walk(target):entry.isFile()&&/\.(?:mjs|mts)$/u.test(entry.name)?[target.split(path.sep).join('/')]:[];
   });
 }
 function normalizedSource(file){return fs.readFileSync(file,'utf8').replace(/\r\n?/g,'\n').replace(/[ \t]+$/gm,'').replace(/\n{3,}/g,'\n\n').trim();}
@@ -80,7 +80,7 @@ for(const key of overlapExceptions.keys())assert.ok(actualSemanticExceptions.has
 
 // Same semantic domain/name across layers is allowed only when the layers prove different things.
 const byContract=new Map();
-for(const file of tests){const [,layer,domain,name]=file.split('/');const key=`${domain}/${name.replace(/\.mjs$/,'')}`;const list=byContract.get(key)||[];list.push({layer,file});byContract.set(key,list);}
+for(const file of tests){const [,layer,domain,name]=file.split('/');const key=`${domain}/${name.replace(/\.(?:mjs|mts)$/,'')}`;const list=byContract.get(key)||[];list.push({layer,file});byContract.set(key,list);}
 const actualCrossLayer=new Set();
 for(const [key,entries] of byContract){
   if(entries.length<2)continue;actualCrossLayer.add(key);const rationale=crossLayerContracts.get(key);

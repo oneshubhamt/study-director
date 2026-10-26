@@ -6,6 +6,8 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const mutations=Object.freeze([
+  Object.freeze({id:'canonical-sorts-object-keys',file:'source/core/canonical.ts',find:'Object.keys(input).sort()',replace:'Object.keys(input)',tests:Object.freeze(['tests/unit/app/canonical.mts'])}),
+  Object.freeze({id:'save-lane-retries-only-current-value',file:'source/core/save-lane.ts',find:'if(sequence===taken)',replace:'if(true)',tests:Object.freeze(['tests/integration/storage/save-lane.mjs'])}),
   Object.freeze({
     id:'settlement-clears-its-deadline',file:'source/core/operation-lifecycle.js',
     find:'if(timer!==null)clear(timer);',replace:'if(false)clear(timer);',

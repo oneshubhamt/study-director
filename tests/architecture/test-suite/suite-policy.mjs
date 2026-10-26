@@ -1,3 +1,4 @@
+import {coverageSelection} from '../../helpers/coverage-selection.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -12,7 +13,7 @@ import {Worker} from 'node:worker_threads';
 function filesUnder(directory){
   return fs.readdirSync(directory,{withFileTypes:true}).flatMap(entry=>{
     const target=path.join(directory,entry.name);
-    return entry.isDirectory()?filesUnder(target):entry.isFile()&&entry.name.endsWith('.mjs')?[target]:[];
+    return entry.isDirectory()?filesUnder(target):entry.isFile()&&/\.(?:mjs|mts)$/u.test(entry.name)?[target]:[];
   });
 }
 
@@ -54,7 +55,7 @@ const forbiddenNetworkBuiltins=new Set(['http','https','http2','net','tls','dns'
 function filesUnder(directory){
   return fs.readdirSync(directory,{withFileTypes:true}).flatMap(entry=>{
     const target=path.join(directory,entry.name);
-    return entry.isDirectory()?filesUnder(target):entry.isFile()&&entry.name.endsWith('.mjs')?[target.split(path.sep).join('/')]:[];
+    return entry.isDirectory()?filesUnder(target):entry.isFile()&&/\.(?:mjs|mts)$/u.test(entry.name)?[target.split(path.sep).join('/')]:[];
   });
 }
 const fastFiles=['unit','integration','architecture'].flatMap(layer=>filesUnder(`tests/${layer}`)).filter(file=>!RELEASE_TEST_SET.has(file));
@@ -84,7 +85,7 @@ const runtime=fs.readFileSync('tests/helpers/hermetic-runtime.mjs','utf8'),loade
 assert.match(runtime,/spawnSync/);assert.match(runtime,/childProcess\[name\]/);assert.match(runtime,/hermetic-worker\.cjs/);assert.match(loader,/node:http2/);assert.match(loader,/node:dns\/promises/);
 assert.match(runner,/repositoryDiff\(baseline,repositorySnapshot\(\)\)/);
 assert.match(runner,/SD_ENCRYPTED_TEST:'0',SD_MINIFIED_TEST:'0'/);
-assert.match(runner,/Node\.js 20\+/);
+assert.match(runner,/Node\.js 22\.23\.4\+/);
 
 console.log(JSON.stringify({status:'PASS',policy:'fast-suite-hermetic',fastTests:fastFiles.length,npmRequired:false,networkAllowed:false,repositoryWritesAllowed:false},null,2));
 }
@@ -97,4 +98,12 @@ const networkError=await new Promise((resolve,reject)=>{
 });
 assert.match(String(networkError?.message||networkError),/cannot load network-capable builtin module/,'worker threads must inherit hermetic network restrictions');
 console.log(JSON.stringify({status:'PASS',childProcessesBlocked:true,workerNetworkBlocked:true}));
+}
+
+
+{ // focused coverage must never imply full-suite certification
+  assert.equal(coverageSelection([]).targeted,false);
+  const focused=coverageSelection(['--test','tests/unit/app/canonical.mts','--file','source/core/canonical.ts','--json','/tmp/coverage.json']);
+  assert.equal(focused.targeted,true);assert.deepEqual(focused.tests,['tests/unit/app/canonical.mts']);assert.deepEqual(focused.files,['source/core/canonical.ts']);
+  for(const args of [['--test','only-test'],['--file','only-source'],['--test'],['--typo','value'],['--json','a','--json','b']])assert.throws(()=>coverageSelection(args));
 }
