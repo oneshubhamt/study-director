@@ -35,7 +35,7 @@ try{
   await key('ArrowDown');await page.settle();
   assert.equal(await page.evaluate(`document.activeElement?.getAttribute('aria-label')`),'Heading 2','ArrowDown should move focus within the style popup.');
   await page.evaluate(`document.activeElement.click()`);await page.settle();
-  const headingState=await page.evaluate(`(()=>{const root=document.querySelector('#heading + .sd-rte'),trigger=root.querySelector('button[aria-label="Typography"]');return {tag:root.querySelector('.sd-rte-editor').firstElementChild?.tagName,label:trigger.textContent,canonical:heading.value}})()`);
+  const headingState=await page.evaluate(`(()=>{const root=document.querySelector('#heading + .sd-rte'),trigger=root.querySelector('button[aria-label="Typography"]');return {tag:root.querySelector('.sd-rte-editor').firstElementChild?.tagName,label:trigger.querySelector('.sd-rte-glyph')?.dataset.glyph||'',canonical:heading.value}})()`);
   assert.equal(headingState.tag,'H2');assert.match(headingState.label,/^Aa/,'Heading toolbar label must follow Wordgard command activity.');
   await key('Escape');await page.evaluate(`document.querySelector('#heading + .sd-rte button[aria-label="Typography"]').focus()`);await key('ArrowDown');await page.settle();
   assert.equal(await page.evaluate(`document.querySelector('#heading + .sd-rte button[aria-label="Heading 2"]').getAttribute('aria-pressed')`),'true','Heading option must report active after reopening the popup.');
