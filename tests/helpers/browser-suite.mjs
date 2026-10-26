@@ -46,8 +46,18 @@ function run(script,limitMs=timeoutMs){
   });
 }
 
-for(const entry of entries){
-  console.log(`\n[browser] ${entry.script}`);
-  await run(entry.script,Math.max(timeoutMs,Number(entry.timeoutMs)||0));
+// One at a time by default. BROWSER_TEST_JOBS=N runs up to N tests at once;
+// tests marked alone always run afterwards with nothing else running.
+const jobs=Math.max(1,Math.min(8,Math.floor(Number(process.env.BROWSER_TEST_JOBS)||1)));
+const runEntry=entry=>{console.log(`\n[browser] ${entry.script}`);return run(entry.script,Math.max(timeoutMs,Number(entry.timeoutMs)||0));};
+if(jobs===1){
+  for(const entry of entries)await runEntry(entry);
+}else{
+  const shared=entries.filter(entry=>!entry.alone),failures=[];let next=0;
+  await Promise.all(Array.from({length:Math.min(jobs,shared.length)},async()=>{
+    while(next<shared.length){const entry=shared[next++];try{await runEntry(entry);}catch(error){failures.push(error);}}
+  }));
+  if(failures.length)throw new AggregateError(failures,`${failures.length} browser test(s) failed: ${failures.map(error=>error.message).join(' | ')}`);
+  for(const entry of entries.filter(entry=>entry.alone))await runEntry(entry);
 }
-console.log(JSON.stringify({status:'PASS',release:releaseConfig.release,tier,domain:domain||null,chromium,tests:scripts.length,quarantined:skipped.length,timeoutMs},null,2));
+console.log(JSON.stringify({status:'PASS',release:releaseConfig.release,tier,domain:domain||null,chromium,tests:scripts.length,quarantined:skipped.length,timeoutMs,jobs},null,2));
