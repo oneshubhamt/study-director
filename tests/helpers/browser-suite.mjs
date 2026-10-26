@@ -46,9 +46,9 @@ function run(script,limitMs=timeoutMs){
   });
 }
 
-// Up to 3 tests at once by default (BROWSER_TEST_JOBS=N changes it; 1 is fully
+// Up to 2 tests at once by default (BROWSER_TEST_JOBS=N changes it; 1 is fully
 // serial). Tests marked alone always run afterwards with nothing else running.
-const jobs=Math.max(1,Math.min(8,Math.floor(Number(process.env.BROWSER_TEST_JOBS)||3)));
+const jobs=Math.max(1,Math.min(8,Math.floor(Number(process.env.BROWSER_TEST_JOBS)||2)));
 const runEntry=entry=>{console.log(`\n[browser] ${entry.script}`);return run(entry.script,Math.max(timeoutMs,Number(entry.timeoutMs)||0));};
 if(jobs===1){
   for(const entry of entries)await runEntry(entry);
