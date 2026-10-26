@@ -1,4 +1,4 @@
-import {createPwaVariant} from '../../helpers/pwa-variant.mjs';
+import {createPwaVariant,registrationsSettled} from '../../helpers/pwa-variant.mjs';
 import assert from 'node:assert/strict';
 import {writeArtifact} from '../../helpers/artifacts.mjs';
 import fs from 'node:fs';
@@ -155,12 +155,13 @@ try{
   assert.equal(await workerIdentity(page1),originalPwa.releaseId);
   const loadsBefore={page1:page1.loadCount,page2:page2.loadCount};
   await page1.evaluate(`document.getElementById('pwa-update-apply').click()`);
-  await waitFor(async()=>(await workerIdentity(page1))===next.releaseId&&(await workerIdentity(page2))===next.releaseId,{timeout:60000,label:'coordinated activation'});
+  await waitFor(()=>registrationsSettled([page1,page2]),{timeout:60000,label:'coordinated activation'});
   await waitFor(()=>page1.loadCount>loadsBefore.page1&&page2.loadCount>loadsBefore.page2,{timeout:60000,label:'all controlled tabs reload after activation'});
   await waitFor(()=>page1.evaluate(`!!window.StudyDirector`),{label:'first tab reload'});
   await waitFor(()=>page2.evaluate(`!!window.StudyDirector`),{label:'second tab reload'});
   assert.equal(page1.loadCount-loadsBefore.page1,1);
   assert.equal(page2.loadCount-loadsBefore.page2,1);
+  assert.equal(await workerIdentity(page1),next.releaseId);assert.equal(await workerIdentity(page2),next.releaseId);
   const markers=await Promise.all([page1,page2].map(page=>page.evaluate(`sessionStorage.getItem('studyDirector.pwaReload.v1')`)));
   await waitFor(async()=>(await Promise.all([page1,page2].map(page=>page.evaluate(`sessionStorage.getItem('studyDirector.pwaReload.v1')`)))).every(value=>value===null),{label:'intended release boot confirmation'});
   assert.ok(markers.every(value=>value===null||JSON.parse(value).releaseId===next.releaseId));

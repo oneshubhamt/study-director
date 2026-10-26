@@ -32,7 +32,14 @@ const startSession=(name)=>`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>se
   d.goTab('plan');await wait(100);document.getElementById('saved-plan-name').value='${name} plan';document.querySelector('[data-saved-plan="save"]').click();await wait(300);
   if(!d.applySchedule({skipNotify:true}))throw new Error('schedule did not apply');d.goTab('execute');await wait(50);d.setCurrentTask(0);d.TimerEngine.startCur();await wait(200);
   d.AppData.notes.update('medicine','Medicine','${name} note before clearing','');await d.AppData.notes.flush({strict:true});await d.flushLiveDraft();})()`;
-const editNote=text=>`(async()=>{const d=__PWA6,current=d.AppData.notes.get('medicine'),status=d.AppData.notes.update('medicine','Medicine','${text}',current?.updatedAt||'').status;await d.AppData.notes.flush({strict:true});return status;})()`;
+// Right after a clear, Chromium may still be closing the cleared database, so
+// the first save can abort; the app keeps the edit and retries. Wait for the
+// save rather than requiring the first attempt to succeed.
+const editNote=async(page,text)=>{
+  const status=await page.evaluate(`(()=>{const d=__PWA6,current=d.AppData.notes.get('medicine');return d.AppData.notes.update('medicine','Medicine','${text}',current?.updatedAt||'').status;})()`);
+  await waitFor(()=>page.evaluate(`__PWA6.AppData.notes.flush({strict:true}).then(()=>true)`),{label:'note edit saved'});
+  return status;
+};
 const reload=async page=>{await page.reload();await waitForStudyDirector(page,{instrumented:true});await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'ownership after reload'});};
 const noRuntimeErrors=page=>assert.deepEqual(page.events.filter(event=>!/favicon|ResizeObserver loop/i.test(event.text||'')),[]);
 const appWarnings=page=>page.warnings.filter(text=>/\[Study Director\]/.test(text));
@@ -54,7 +61,7 @@ try{
       assert.equal(before.note,'SiteDataQA note before clearing');assert.equal(before.savedPlans,1);assert.equal(before.session,true);assert.equal(before.name,'SiteDataQA');assert.equal(before.paused,false);
 
       await page.send('Storage.clearDataForOrigin',{origin:server.origin,storageTypes:'all'});
-      assert.equal(await page.evaluate(editNote('SiteDataQA note edited after clearing')),'changed','an edit after clearing is accepted rather than rejected as outdated');
+      assert.equal(await editNote(page,'SiteDataQA note edited after clearing'),'changed','an edit after clearing is accepted rather than rejected as outdated');
       await waitFor(()=>page.evaluate(`${read}.then(state=>!!state.notice)`),{label:'browser-data-clear notice'});
       const cleared=await page.evaluate(read);
       assert.equal(cleared.note,'SiteDataQA note edited after clearing');assert.match(cleared.draft,/SiteDataQA Block/);assert.equal(cleared.savedPlans,1);
@@ -117,7 +124,7 @@ try{
       const repository=await page.evaluate(`__PWA6.DeviceBackup.status().repositoryName`);assert.ok(repository);
 
       await page.send('Storage.clearDataForOrigin',{origin:server.origin,storageTypes:'indexeddb,local_storage,cache_storage,service_workers'});
-      assert.equal(await page.evaluate(editNote('FolderQA note edited after clearing')),'changed');
+      assert.equal(await editNote(page,'FolderQA note edited after clearing'),'changed');
       await waitFor(()=>page.evaluate(`!!${restoredToast}`),{label:'automatic restore toast',timeout:60000});
       const restored=await page.evaluate(read);
       assert.equal(restored.yesterday,'FolderQA yesterday','the missing Saved Day is added back from the latest backup');
@@ -144,7 +151,7 @@ try{
       // still this device's: nothing to pick.
       await page.evaluate(`__PWA6.DeviceBackup.disconnect()`);
       await page.send('Storage.clearDataForOrigin',{origin:server.origin,storageTypes:'indexeddb,local_storage,cache_storage,service_workers'});
-      assert.equal(await page.evaluate(editNote('FolderQA note edited after second clear')),'changed');
+      assert.equal(await editNote(page,'FolderQA note edited after second clear'),'changed');
       await waitFor(()=>page.evaluate(`${read}.then(state=>!!state.notice)`),{label:'decision notice without folder'});
       await reload(page);await page.evaluate(remember);
       await waitFor(()=>page.evaluate(`${read}.then(state=>!!state.notice&&!state.folder)`),{label:'notice after reload'});

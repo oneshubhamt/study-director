@@ -1,4 +1,4 @@
-import {createPwaVariant} from '../../helpers/pwa-variant.mjs';
+import {createPwaVariant,registrationsSettled} from '../../helpers/pwa-variant.mjs';
 import assert from 'node:assert/strict';
 import {writeArtifact} from '../../helpers/artifacts.mjs';
 import http from 'node:http';
@@ -181,9 +181,7 @@ try{
   await sleep(700);
   assert.equal(page1.loadCount,loadsBefore.page1,'automatic update interrupted a recent edit before the idle guard elapsed');
   assert.equal(await workerIdentity(page1),originalPwa.releaseId,'waiting update activated while recent edit guard was active');
-  // Watch the registration, not the workers: Chromium activates a waiting worker
-  // only once the old one is idle, so messaging it in a loop delays activation.
-  await waitFor(async()=>(await Promise.all([page1,page2].map(page=>page.evaluate(`navigator.serviceWorker.getRegistration().then(registration=>!!registration&&!registration.waiting&&!registration.installing&&registration.active?.state==='activated')`)))).every(Boolean),{timeout:60000,label:'automatic safe activation',describe:()=>updateState([page1,page2])});
+  await waitFor(()=>registrationsSettled([page1,page2]),{timeout:60000,label:'automatic safe activation',describe:()=>updateState([page1,page2])});
   await waitFor(()=>page1.loadCount>loadsBefore.page1&&page2.loadCount>loadsBefore.page2,{timeout:60000,label:'all controlled tabs immediate reload'});
   assert.equal(page1.loadCount-loadsBefore.page1,1);
   assert.equal(page2.loadCount-loadsBefore.page2,1,'hidden secondary tab did not reload immediately after controller change');

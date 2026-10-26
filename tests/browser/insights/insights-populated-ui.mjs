@@ -1,4 +1,4 @@
-import {CdpPage as SharedCdpPage,withoutPwaChecks,studyTimezone} from '../../helpers/browser-harness.mjs';
+import {CdpPage as SharedCdpPage,withoutPwaChecks,studyTimezone,devToolsPort} from '../../helpers/browser-harness.mjs';
 import fs from 'node:fs';
 import {artifactPath,writeArtifact} from '../../helpers/artifacts.mjs';
 import path from 'node:path';
@@ -48,9 +48,7 @@ const CdpPage=SharedCdpPage;
 const profile=fs.mkdtempSync(path.join(os.tmpdir(),'study-director-qa-insights-'));
 const browser=spawn(chromium,['--headless=new','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore','ignore','pipe']});
 let stderr='';browser.stderr.on('data',chunk=>{stderr+=chunk;});
-const activePath=path.join(profile,'DevToolsActivePort');
-await waitFor(()=>fs.existsSync(activePath),{timeout:20000,label:'Chromium DevTools port'});
-const [port]=fs.readFileSync(activePath,'utf8').trim().split(/\r?\n/);
+const port=await devToolsPort(profile);
 await waitFor(async()=>{try{return (await fetch(`http://127.0.0.1:${port}/json/version`)).ok;}catch{return false;}},{label:'Chromium endpoint'});
 
 let page;
