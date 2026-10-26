@@ -8,7 +8,6 @@ import {noteKeys,noteId,noteRow,storedNote} from '../../helpers/note-ids.mjs';
 // rewritten from memory. No extra persisted state is involved.
 async function setup(){
   const clock=createFakeClock('2026-09-15T12:00:00.000Z'),reports=[],controls={clock,onNoteConflict:info=>reports.push(info),onStorageRead:({store,key})=>{if(controls.failEpochRead&&store==='meta'&&key==='canonicalMutationEpoch')throw new Error('QA_FIXTURE metadata read failure');}},h=createHarness(new Map(),null,controls);
-  h.stores.meta.set('dailyRecordMigration',{key:'dailyRecordMigration',version:1,value:{recordVersion:1,summaryVersion:1,complete:true,recordCount:0},updatedAt:'2026-09-15T12:00:00.000Z'});
   await h.app.notes.load();
   return {clock,controls,reports,...h};
 }
@@ -104,6 +103,17 @@ const deletionRecord=key=>({key:`noteDeletion:${key}`,version:1,value:{format:'s
   assert.equal(storedNote(stores.area,'physics (unsaved copy)')?.text,'local line','the rejected edit is kept as its own note');
   assert.equal(storedNote(stores.area,'chemistry (unsaved copy)')?.text,'edited here');
   assert.deepEqual(reports.map(report=>report.copyLabel),['Physics (unsaved copy)','Chemistry (unsaved copy)'],'the notice names the kept copy');
+}
+
+// A strict save interrupted by a confirmed browser-data clear retries the
+// current note after recreation, before reporting it as unsaved.
+{
+  const {app,stores,clock,controls,reports}=await setup();
+  app.notes.update('anatomy','Anatomy','before clearing','');await app.notes.flush({strict:true});await clock.advance(2000);
+  clearSiteData(stores);controls.storageResets=1;controls.failNextAreaWrite=true;
+  app.notes.update('anatomy','Anatomy','edited after interrupted clear',app.notes.get('anatomy').updatedAt);
+  await app.notes.flush({strict:true});
+  assert.equal(storedNote(stores.area,'anatomy')?.text,'edited after interrupted clear');assert.deepEqual(reports,[]);
 }
 
 // 6. The database layer counts a clear the moment it reopens storage. An edit

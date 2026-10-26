@@ -16,7 +16,7 @@ registry.define('profiles',1,()=>{
   const PORT_FIELDS=freeze({
     scope:freeze(['pattern','registryKey','scope','separator']),
     storage:freeze(['keys','read','remove','write']),
-    names:freeze(['database','directories','keys','legacyDirectory']),
+    names:freeze(['database','directories','keys']),
     platform:freeze(['deleteDatabase','listen','now','random','reload','removeDirectory']),
     limits:freeze(['maxName'])
   });
@@ -138,7 +138,6 @@ registry.define('profiles',1,()=>{
           for(const key of storage.keys())if(scope?key.endsWith(separator+scope):names.keys.includes(key))storage.remove(key);
           await platform.deleteDatabase(scoped(names.database));
           for(const directory of names.directories)await platform.removeDirectory(scoped(directory));
-          if(!scope&&names.legacyDirectory)await platform.removeDirectory(names.legacyDirectory);
           const list=read();write({...list,removing:list.removing.filter(value=>value!==scope)});
         }catch(error){return freeze({removed:false,error});}
       }

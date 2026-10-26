@@ -75,14 +75,14 @@ const deviceActivation=app.slice(app.indexOf('async function refreshDeviceBackgr
 assert.match(deviceActivation,/DeviceBackup\.refreshPermission\(\)/u,'foreground return must refresh Device Folder permission state without opening a permission prompt.');
 assert.doesNotMatch(deviceActivation,/requestPermission|DeviceBackup\.connect\(/u,'activation opportunities must not prompt for folder access.');
 
-assert.match(backup,/title:'Use this backup'/u);assert.match(backup,/cancelLabel:'Keep current'/u);assert.match(backup,/choices=\[\.\.\.\(preview\.reconciliationCapable\?\[restoreChoices\.missing\]:\[\]\),restoreChoices\.combine,\.\.\.\(exactCapable\?\[restoreChoices\.replace\]:\[\]\)\]/u);
+assert.match(backup,/title:'Use this backup'/u);assert.match(backup,/cancelLabel:'Keep current'/u);assert.match(backup,/choices=\[restoreChoices\.missing,restoreChoices\.combine,\.\.\.\(exactCapable\?\[restoreChoices\.replace\]:\[\]\)\]/u);
 assert.match(backup,/checkboxes:\[\{id:'safetyCopy',label:'Download an extra standalone safety copy before applying'/u,'optional file safety copy must be a compact checkbox on the existing reconciliation surface');
 assert.doesNotMatch(backup,/id:'safetyCopy',label:'Optional extra backup copy'[\s\S]*choices:/u,'optional file safety copy must not render as another radio-choice conflict row');
 assert.match(backup,/if\(decisions\.safetyCopy===true\)/u,'checkbox must only trigger the optional standalone download while automatic rollback remains independent');
 assert.match(backup,/restoreStandaloneVersion\(candidate,\{confirmed:true\}\)/u,'standalone Replace must use exact verified restore');
 assert.match(backup,/restoreBackup\(candidate,\{missingOnly:mode==='missing'\}\)/u,'standalone Combine must keep the reconciliation engine');
-assert.match(backup,/exactCapable=Number\(parsed&&parsed\.formatVersion\)>=18&&captureAuthority==='canonical-complete'&&!!parsed&&!!parsed\.protectedCheckpointManifest/u,'standalone Replace must require current complete-capture authority rather than merely a protected manifest');
-assert.match(backup,/rescuePartial=captureAuthority==='rescue-partial'/u,'verified rescue-partial standalone backups must remain recoverable without becoming exact-replacement authority');
+assert.match(backup,/exactCapable=captureAuthority==='canonical-complete'&&!!parsed&&!!parsed\.protectedCheckpointManifest/u,'standalone Replace must require current complete-capture authority rather than merely a protected manifest');
+assert.match(backup,/exactCapable\?'Choose how this backup should be applied\.':'This backup was saved while browser storage was failing/u,'verified rescue-partial standalone backups must remain recoverable without becoming exact-replacement authority');
 
 
 assert.match(app,/BackupProviderRuntime\.createProtectedSafety\(location\.id,purpose\)/u,'Clear Library must require a verified protected safety version at the connected backup location');

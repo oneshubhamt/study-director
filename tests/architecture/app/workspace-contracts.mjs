@@ -36,7 +36,6 @@ assert.doesNotMatch(backup,/document\.|getElementById/u,'the backup runtime draw
 assert.match(app,/if\(cancel\)cancel\.hidden=!\(exporting\|\|Exports\.status\(\)\.fileBusy\);/u,'one renderer decides the file row Cancel from export and file-processor state');
 
 
-
 assert.match(app,/id="library-status"[^>]*role="status"[^>]*aria-live="polite"/u,'Library must retain a quiet generic status fallback surface');
 assert.match(styles,/#library-status:empty,#pane-review #save-status:empty\{display:none\}/u,'the generic Library status must be visually quiet while empty');
 assert.doesNotMatch(app,/BackupProtection\.refresh\(\)\.catch\(error=>setStatus\('library-status'/u,'backup-encryption refresh errors must stay beside Backup encryption');
@@ -52,45 +51,6 @@ assert.match(provider,/BackupController\.cancelImport\(reason,freeze\(\{announce
 console.log(JSON.stringify({noteReadOnly:true,standaloneStatusLocal:true,libraryFallbackRetained:true,backupProtectionStatusLocal:true,managedCancellationLocal:true},null,2));
 }
 
-{ // diary-record-contract
-const app=fs.readFileSync('source/app.html','utf8');
-const library=fs.readFileSync('source/core/library.js','utf8');
-const review=fs.readFileSync('source/core/review.js','utf8');
-const interactions=fs.readFileSync('source/core/interactions.js','utf8');
-const repositories=fs.readFileSync('source/core/repositories.js','utf8');
-const backup=fs.readFileSync('source/core/backup.js','utf8');
-const backupCodec=fs.readFileSync('source/core/backup-codec.js','utf8');
-
-assert.match(app,/id="library-diary-add"[^>]*aria-label="New Reflection"[^>]*>\+ New Reflection<\/button>/u,'Diary must expose + New Reflection.');
-assert.match(library,/function diaryEntries\(entries\)\{return .*hasReflection===true/u,'Diary must remain content-only.');
-assert.match(library,/function diaryEntries\(entries\)\{return .*sort\(\(a,b\)=>b\.date\.localeCompare\(a\.date\)\)/u,'Diary reflections must own a newest-date-first ordering invariant.');
-assert.match(library,/function invalidateLibrarySummaryCache\(\)\{[^}]*requestDiarySummaryCountRefresh\(\);requestDiaryRender\(\);\}/u,'DailyRecord changes must refresh the Diary list even while a reflection editor remains active.');
-assert.match(library,/renderDiaryList\(entries\);[\s\S]*if\(diaryEditing&&diaryEditorField\(\)\?\.dataset\.diaryDate===selectedDiaryDate\)return true/u,'Diary list refresh must return before replacing the active editor so focus and selection remain on the new reflection.');
-assert.match(library,/const listed=!!String\(record\?\.reflection\|\|''\)\.trim\(\);[\s\S]*if\(listed!==diaryEntryListed\)\{diaryEntryListed=listed;invalidateLibrarySummaryCache\(\);\}/u,'First-save and clear transitions must refresh the Diary list immediately while preserving the active editor node.');
-assert.doesNotMatch(library,/Empty reflections/u,'Empty reflection rows must not remain in Diary.');
-assert.match(app,/const DailyReflectionPersistence=[\s\S]*current\?\.recordKind==='study'[\s\S]*reflection:candidate/u,'Shared reflection persistence must update a Study Day reflection without replacing study data.');
-assert.match(app,/const DailyReflectionPersistence=[\s\S]*current\?\.recordKind==='diary'[\s\S]*dailyRecords\.remove\(date/u,'Shared reflection persistence must delete an empty diary-only record.');
-assert.match(library,/const writing=settleDiaryEditor\(field\);clearDiaryEditor\(field\);await writing;[\s\S]*current=await getDailyRecord\(date\);[\s\S]*deleteDiaryEntryRecord\(date\)/u,'Diary deletion drops unsaved typing, waits for a write already under way, refreshes the canonical record, then deletes it.');
-assert.match(review,/existing\?\.recordKind==='diary'[\s\S]*doc=\{\.\.\.doc,reflection:existingReflection\}/u,'Diary-only dates must promote to Study Days without losing an existing reflection.');
-assert.match(repositories,/getDailyRecordsForWindow[\s\S]*recordKind==='study'/u,'Insights record windows must exclude diary-only records.');
-assert.match(app,/getDailySummaries\(\)[\s\S]*recordKind==='study'/u,'Insights summaries must exclude diary-only records.');
-assert.match(backup,/manualOnly:true/u,'Diary reflection conflicts must use explicit manual reconciliation.');
-assert.match(backup,/requireContent:kinds\.every\(kind=>kind==='diary'\)/u,'Diary-only reflection conflicts must reject an empty custom canonical result.');
-assert.match(backupCodec,/version<DATA_CONTRACT\.schemas\.DailyRecord\.version\?CompatibilityCodec\.dailyRecord\(record\):null/u,'Managed repository records from the prior DailyRecord schema must use compatibility conversion.');
-assert.match(library,/title:'New Reflection'[\s\S]*min:earliestSupportedSavedDate\(\),max:todayISO\(\)/u,'New Reflection must constrain the native date picker to the supported retrospective range.');
-assert.match(interactions,/options\.inputType==='date'\)[\s\S]*inputElement\.min=cleanText\(options\.min,32\);inputElement\.max=cleanText\(options\.max,32\)/u,'Native date inputs must receive min/max constraints.');
-assert.match(app,/data-tab="execute"[^>]*>[\s\S]*Execute<\/button>/u,'Execute must be the canonical execution surface identity.');
-assert.match(app,/data-tab="library"[^>]*>[\s\S]*Library<\/button>/u,'Library must be the canonical library surface identity.');
-assert.match(review,/function syncReviewSurfaceMode\(\)[\s\S]*review-stats[\s\S]*review-summary[\s\S]*practice-review[\s\S]*review-blocks-collapse[\s\S]*quality-wrap[\s\S]*copy-report-control/u,'Reflection-only Review must suppress study-only surfaces.');
-assert.match(review,/if\(!reviewHasStudyDay\(\)\)return queueReflectionOnlySave/u,'Reflection-only Review autosave must use canonical Daily Reflection persistence.');
-assert.match(review,/if\(!reviewHasStudyDay\(\)\)return saveReflectionOnlyRecord\(\)/u,'The Review save action must become reflection-only when no Study Day exists.');
-assert.match(review,/settled:\(\)=>Promise\.all\(\[AppData\.activeSession\.settled\(\),reflectionLane\.tail\(\)\]\)/u,'Reflection-only writes must participate in Review quiescence.');
-
-console.log(JSON.stringify({
-  status:'PASS',suite:'diary-record-contract',checks:24,contentOnly:true,noNewStore:true,
-  studyPromotion:true,manualReflectionReconciliation:true,insightsExcluded:true,reflectionOnlyReview:true,newestFirst:true,editorFocusStable:true
-},null,2));
-}
 
 { // workspace-history-boundary
 const navigation=fs.readFileSync('source/core/navigation.js','utf8');

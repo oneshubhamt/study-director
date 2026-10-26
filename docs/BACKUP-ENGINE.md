@@ -75,7 +75,7 @@ Each profile has its own library: its own database, Device Folder repository and
 Every new version is written in the current format (manifest 8). Older versions are only read.
 
 - **Release A (this one).** Once a location holds a current version, older ones leave Version History and the next cleanup removes them (`selectRepositoryRetention`). The Device Folder's old single folder is moved into the named one. Copy diagnostics, "Format cleanup": `canonical` and `retirementReady` (this device's data, `verifyCanonicalInstallation`), `oldFolder` (the Device Folder's old folder still there), and per connected location `currentVersions`, `olderVersions` and `unreadableVersions` as its last cleanup left them; the row reads ready when all agree. Version History follows the same rule from the listing's format, before any cleanup runs.
-- **Release B (a later, separate release).** Removes the compatibility code that reads older formats. It ships only after "Format cleanup" reads ready on every device in use.
+- **Release B (a later, separate release).** Historical readers are retired on TS-Conversion under the owner’s assumption that migration has completed on every supported installation. See `TS-CONVERSION-EXECUTION.md` for current scope and validation.
 
 ## Standalone backup files
 

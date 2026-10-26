@@ -465,20 +465,20 @@ registry.define('backup-provider',1,input=>{
     for(const pair of rows){const summary=pair.item.history,calendar=summary?.retention?.calendar;if(!summary||!calendar||unreadable(pair))continue;retentionRows.push(freeze({id:pair.item.id,manifest:freeze({version:summary.format,exportedAt:summary.exportedAt,retention:summary.retention,installationId:String(summary.origin||'')})}));}
     let retainedIds=null,tiers={},currentFormat=false;
     if(retentionRows.length){const selection=RepositoryCheckpointPipeline.selectRetention(freeze(retentionRows),{now:new Date(now)});retainedIds=new Set(selection.retained.map(row=>row.id));tiers=selection.tiers;currentFormat=selection.currentFormat===true;}
-    const legacyLimit=Math.max(1,Number(RepositoryCheckpointPipeline.retention?.normalLimit)||15);let legacyKept=0;
+    const opaqueLimit=Math.max(1,Number(RepositoryCheckpointPipeline.retention?.normalLimit)||15);let opaqueKept=0;
     return freeze(rows.map(pair=>{
       // A version this build cannot read is listed on its own (never matched
       // with another location's copy) so the person can see it and remove it.
-      if(unreadable(pair)){const at=repositoryMetadataTimestamp(pair.item);return Number.isFinite(Date.parse(at))?freeze({logicalId:'unreadable_'+pair.item.id,logicalFingerprint:'',exportedAt:at,counts:null,origin:'',unreadable:true,location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:pair.item.id,exportedAt:at,tier:'unreadable',encrypted:false,verification:'unreadable',legacyMetadata:false,quarantineDeferred:false})}):null;}
+      if(unreadable(pair)){const at=repositoryMetadataTimestamp(pair.item);return Number.isFinite(Date.parse(at))?freeze({logicalId:'unreadable_'+pair.item.id,logicalFingerprint:'',exportedAt:at,counts:null,origin:'',unreadable:true,location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:pair.item.id,exportedAt:at,tier:'unreadable',encrypted:false,verification:'unreadable',quarantineDeferred:false})}):null;}
       const item=pair.item,summary=item.history,exportedAt=summary?.exportedAt||repositoryMetadataTimestamp(item),fingerprint=summary?.logicalFingerprint||item.digest;
       if(!/^[a-f0-9]{64}$/u.test(String(fingerprint||''))||!Number.isFinite(Date.parse(exportedAt)))return null;
       let tier='retained';
       if(summary?.retention?.calendar){if(!retainedIds?.has(item.id))return null;tier=String(tiers[item.id]||'retained');}
       // A version waiting for the password (item.locked) has no summary yet:
       // it is listed as locked, never matched by data with another copy.
-      else{if(currentFormat&&!item.locked||legacyKept>=legacyLimit)return null;legacyKept+=1;tier=legacyKept===1?'latest':'retained';}
-      if(item.locked)return freeze({logicalId:'locked_'+item.id,logicalFingerprint:'',exportedAt,counts:null,origin:'',locked:true,location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:item.id,exportedAt,tier,encrypted:true,verification:'on-restore',legacyMetadata:true,quarantineDeferred:quarantined.length>0})});
-      return freeze({logicalId:'state_'+fingerprint,logicalFingerprint:fingerprint,exportedAt,counts:summary?.counts||freeze({dailyRecord:0,note:0}),origin:String(summary?.origin||''),location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:item.id,exportedAt,tier,encrypted:summary?.encrypted===true,verification:'on-restore',legacyMetadata:!summary,quarantineDeferred:quarantined.length>0})});
+      else{if(currentFormat&&!item.locked||opaqueKept>=opaqueLimit)return null;opaqueKept+=1;tier=opaqueKept===1?'latest':'retained';}
+      if(item.locked)return freeze({logicalId:'locked_'+item.id,logicalFingerprint:'',exportedAt,counts:null,origin:'',locked:true,location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:item.id,exportedAt,tier,encrypted:true,verification:'on-restore',quarantineDeferred:quarantined.length>0})});
+      return freeze({logicalId:'state_'+fingerprint,logicalFingerprint:fingerprint,exportedAt,counts:summary?.counts||freeze({dailyRecord:0,note:0}),origin:String(summary?.origin||''),location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:item.id,exportedAt,tier,encrypted:summary?.encrypted===true,verification:'on-restore',quarantineDeferred:quarantined.length>0})});
     }).filter(Boolean));
   }
 

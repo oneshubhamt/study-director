@@ -1,15 +1,16 @@
+import {
+  LOCAL_STORAGE_KEYS,SESSION_STORAGE_KEYS,APP_META_KEYS,APP_META_FAMILY_COUNT,APP_META_FAMILY_LABEL,APP_META_VALIDATION_OWNERS,APP_META_RUNTIME_REGISTRY,
+  OPFS_IDENTITIES,PERSISTENCE_CLASSES,DATA_ARCHITECTURE,assertDataArchitecture
+} from '../../../contracts/data-architecture.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {
-  INDEXED_DB,INDEXED_DB_STORE_NAMES,OBSOLETE_INDEXED_DB,RUNTIME_DATA_CONTRACT,OPFS_IDENTITIES as CANONICAL_OPFS_IDENTITIES,
+  INDEXED_DB,INDEXED_DB_STORE_NAMES,RUNTIME_DATA_CONTRACT,OPFS_IDENTITIES as CANONICAL_OPFS_IDENTITIES,
   EXTERNAL_FORMATS,CHECKPOINT_METADATA,CACHE_STORAGE_IDENTITIES,EXTERNAL_REPOSITORY_IDENTITIES,assertCanonicalIdentities
 } from '../../../contracts/canonical-identities.mjs';
-import {
-  LOCAL_STORAGE_KEYS,SESSION_STORAGE_KEYS,OBSOLETE_LOCAL_STORAGE_KEYS,APP_META_KEYS,OBSOLETE_APP_META_KEYS,APP_META_FAMILY_COUNT,APP_META_FAMILY_LABEL,APP_META_VALIDATION_OWNERS,APP_META_RUNTIME_REGISTRY,
-  OPFS_IDENTITIES,OBSOLETE_OPFS_IDENTITIES,PERSISTENCE_CLASSES,DATA_ARCHITECTURE,assertDataArchitecture
-} from '../../../contracts/data-architecture.mjs';
+
 
 assert.equal(assertCanonicalIdentities(),true);
 assert.equal(assertDataArchitecture(),true);
@@ -30,28 +31,25 @@ assert.match(app,/const themeStorageKey=profileScope\.scoped\('@@SD_THEME_STORAG
 assert.match(app,/const presentationStorageKey=profileScope\.scoped\('@@SD_PRESENTATION_STORAGE_KEY@@'\);/u);
 assert.doesNotMatch(app,/['"]studyDirector\.(?:theme|presentation)\.v1['"]/u,'pre-hydration presentation bootstrap must use build-injected storage identities');
 assert.match(app,/const SESSION_STORAGE_KEYS=Object\.freeze\(@@SD_SESSION_STORAGE_KEYS@@\);/u);
-assert.match(app,/const OBSOLETE_STORAGE_KEYS=Object\.freeze\(@@SD_OBSOLETE_LOCAL_STORAGE_KEYS@@\);/u);
+
 assert.match(app,/const APP_META_KEYS=Object\.freeze\(@@SD_APP_META_KEYS@@\);/u);
-assert.match(app,/const OBSOLETE_APP_META_KEYS=Object\.freeze\(@@SD_OBSOLETE_APP_META_KEYS@@\);/u);
+
 assert.equal(Object.keys(LOCAL_STORAGE_KEYS).length,19,'current localStorage inventory; attachment cleanup keeps no record of its own');
 assert.equal(LOCAL_STORAGE_KEYS.driveSession,'studyDirector.driveSession.v1');
 for(const key of ['attachmentMaintenancePending','attachmentMaintenanceDay']){assert.equal(Object.hasOwn(LOCAL_STORAGE_KEYS,key),false,key+' is retired');assert.equal(Object.hasOwn(DATA_ARCHITECTURE.localStorage,key),false,key+' has no live surface');}
-assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.attachmentMaintenancePending,'studyDirector.attachmentMaintenancePending.v1');
-assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.attachmentMaintenanceDay,'studyDirector.attachmentMaintenanceDay.v2');
-assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.attachmentMaintenanceAttemptDay,'studyDirector.attachmentMaintenanceDay.v1','old scheduling records cannot certify completion in F2');
-assert.equal(Object.keys(OBSOLETE_LOCAL_STORAGE_KEYS).length,19);
-assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.nameSetupSkipped,'studyDirector.nameSetupSkippedDate.v1','the first-start form replaced the name prompt');
+
+
 assert.equal(Object.hasOwn(LOCAL_STORAGE_KEYS,'nudge'),false,'nudge must not remain a current LocalStorage authority');
-assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.nudge,'studyDirector.nudgeConfig');
-assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.legacyOwnershipLease,'studyDirector.timerOwner.v1');
+
+
 assert.equal(DATA_ARCHITECTURE.localStorage.theme.role,'startup-mirror');
 assert.equal(DATA_ARCHITECTURE.localStorage.presentation.role,'startup-mirror');
 assert.equal(DATA_ARCHITECTURE.localStorage.fontScale.role,'startup-mirror');
 assert.equal(DATA_ARCHITECTURE.appMeta.exact.personalPreferences.schema,'PortablePreferences.v2');
 assert.equal(LOCAL_STORAGE_KEYS.installationId,'studyDirector.installationId.v1');
-assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.deviceId,'studyDirector.deviceId.v1');
+
 assert.equal(LOCAL_STORAGE_KEYS.deletionRecovery,'studyDirector.deletionRecovery.v1');
-assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.syncEmergency,'studyDirector.syncEmergency.v1');
+
 assert.equal(CHECKPOINT_METADATA.format,'study-director.checkpoint-metadata');
 assert.deepEqual(CHECKPOINT_METADATA.fields,Object.freeze(['format','version','checkpointId','createdAt','originInstallationId']));
 
@@ -85,20 +83,20 @@ for(const surface of Object.values(DATA_ARCHITECTURE.localStorage))assert.notEqu
 for(const [name,surface] of Object.entries(DATA_ARCHITECTURE.appMeta.exact))if(surface.authorityClass===PERSISTENCE_CLASSES.derived)assert.ok(surface.rebuildFrom,`derived appMeta ${name} must identify rebuild source`);
 for(const groups of [DATA_ARCHITECTURE.localStorage,DATA_ARCHITECTURE.appMeta.exact,DATA_ARCHITECTURE.appMeta.prefixes,DATA_ARCHITECTURE.opfs])for(const [name,surface] of Object.entries(groups))if(surface.authorityClass===PERSISTENCE_CLASSES.recovery)for(const field of ['protects','created','cleared','supersededBy'])assert.ok(surface[field],`recovery surface ${name} must declare ${field}`);
 assert.equal(DATA_ARCHITECTURE.cacheStorage.applicationShell.identity,CACHE_STORAGE_IDENTITIES.shellPrefix);
-assert.equal(DATA_ARCHITECTURE.cacheStorage.updateBridge.identity,CACHE_STORAGE_IDENTITIES.updateBridge);
-assert.equal(DATA_ARCHITECTURE.cacheStorage.updateBridge.recoveryPrefix,CACHE_STORAGE_IDENTITIES.updateRecoveryPrefix);
-assert.equal(DATA_ARCHITECTURE.external.deviceBackup.repositoryPrefix,EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix);assert.equal(DATA_ARCHITECTURE.external.deviceBackup.legacyRepositoryRoot,EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderLegacyRoot);
+
+
+assert.equal(DATA_ARCHITECTURE.external.deviceBackup.repositoryPrefix,EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix);
 assert.equal(DATA_ARCHITECTURE.external.driveBackup.repositoryRoot,EXTERNAL_REPOSITORY_IDENTITIES.driveFolder);
 assert.match(app,/sessionTabKey:SESSION_STORAGE_KEYS\.appTab/u);
 const pwaLifecycle=read('source/core/pwa-lifecycle.js');
 assert.doesNotMatch(pwaLifecycle,/['"]studyDirector\.pwaReload\.v1['"]/u);
 assert.match(app,/reloadSessionKey:SESSION_STORAGE_KEYS\.pwaReload/u);
-for(const family of ['exact','prefixes','obsolete'])for(const [name,surface] of Object.entries(DATA_ARCHITECTURE.appMeta[family]))assert.ok(surface.schema,`appMeta ${family}.${name} must declare its canonical value schema`);
+for(const family of ['exact','prefixes'])for(const [name,surface] of Object.entries(DATA_ARCHITECTURE.appMeta[family]))assert.ok(surface.schema,`appMeta ${family}.${name} must declare its canonical value schema`);
 const currentAppMetaFamilies=[...Object.keys(DATA_ARCHITECTURE.appMeta.exact),...Object.keys(DATA_ARCHITECTURE.appMeta.prefixes)].sort();
 const validationFamilies=Object.values(APP_META_VALIDATION_OWNERS).flat();
 assert.equal(validationFamilies.length,new Set(validationFamilies).size,'each current appMeta family must have exactly one validation owner');
 assert.deepEqual([...validationFamilies].sort(),currentAppMetaFamilies,'every current appMeta family must be assigned to a validator');
-assert.deepEqual(APP_META_VALIDATION_OWNERS.repositories,Object.freeze(['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','savedDayDeletionPrefix','noteDeletionPrefix','attachmentDeletionPrefix','pendingReviewPrefix']));
+
 assert.deepEqual(APP_META_VALIDATION_OWNERS.journals,Object.freeze(['libraryClearJournalState','libraryClearJournalPayloadPrefix','restoreJournalState','restoreJournalPayload','mutationLease']));
 assert.deepEqual(APP_META_VALIDATION_OWNERS.host,Object.freeze(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseDayPrefix']));
 assert.equal(Object.hasOwn(APP_META_VALIDATION_OWNERS,'provider'),false,'retired monolithic provider-operation journal must not remain a validation family');
@@ -106,7 +104,7 @@ assert.equal(APP_META_FAMILY_COUNT,Object.keys(APP_META_KEYS).length,'appMeta fa
 assert.equal(APP_META_FAMILY_LABEL,`${APP_META_FAMILY_COUNT} typed appMeta families`);
 assert.equal(DATA_ARCHITECTURE.indexedDb.appMeta.contains,APP_META_FAMILY_LABEL,'physical appMeta container description must derive from the current typed family inventory');
 assert.equal(Object.keys(APP_META_RUNTIME_REGISTRY).length,APP_META_FAMILY_COUNT,'runtime appMeta registry must be mechanically derived for every current family');
-for(const [name,entry] of Object.entries(APP_META_RUNTIME_REGISTRY)){assert.equal(entry.name,name);assert.equal(entry.key,APP_META_KEYS[name]);assert.ok(['exact','prefix'].includes(entry.kind));assert.ok(['repositories','compatibility','repository-journals','host','exports','device-backup','backup'].includes(entry.owner));assert.ok(['repositories','journals','host'].includes(entry.validatorOwner));assert.ok(entry.schema);}
+for(const [name,entry] of Object.entries(APP_META_RUNTIME_REGISTRY)){assert.equal(entry.name,name);assert.equal(entry.key,APP_META_KEYS[name]);assert.ok(['exact','prefix'].includes(entry.kind));assert.ok(['repositories','repository-journals','host','exports','device-backup','backup'].includes(entry.owner));assert.ok(['repositories','journals','host'].includes(entry.validatorOwner));assert.ok(entry.schema);}
 
 
 const idbStores=Object.keys(DATA_ARCHITECTURE.indexedDb).sort();
@@ -116,7 +114,7 @@ assert.equal(RUNTIME_DATA_CONTRACT.storage.dbName,INDEXED_DB.name);
 assert.equal(RUNTIME_DATA_CONTRACT.storage.dbVersion,INDEXED_DB.version);
 assert.match(app,/const DATA_CONTRACT=\(\(\)=>\{[\s\S]{0,600}@@SD_RUNTIME_DATA_CONTRACT@@/u,'host data contract must be build-injected from the canonical identity manifest');
 assert.match(app,/const DB_STORES=Object\.freeze\(@@SD_INDEXED_DB_STORE_NAMES@@\);/u,'host physical store names must be build-injected from the canonical identity manifest');
-assert.match(app,/const OBSOLETE_DB=Object\.freeze\(@@SD_OBSOLETE_INDEXED_DB@@\);/u,'legacy migration store names must be injected separately from the canonical topology');
+
 assert.doesNotMatch(app,/dbName:\s*['"]sdmLocalAppDB\.v1['"]/u,'host must not redeclare the IndexedDB identity');
 for(const name of idbStores){
   const surface=DATA_ARCHITECTURE.indexedDb[name],identity=INDEXED_DB.stores[name],runtime=RUNTIME_DATA_CONTRACT.storage.stores[name];
@@ -139,7 +137,7 @@ assert.ok(streamEncryptionSource.includes(`new TextEncoder().encode('${protected
 assert.ok(streamEncryptionSource.includes(`header[8]!==${EXTERNAL_FORMATS.protectedBackup.version}`),'standalone encryption reader version must mechanically match the canonical manifest');
 const literal=value=>String(value).replaceAll('\\','\\\\').replaceAll('\r','\\r').replaceAll('\n','\\n').replaceAll("'","\\'");
 assert.ok(read('source/core/asset-storage.js').includes("DIRECTORY=String(ports.directory||'@@SD_ATTACHMENT_OPFS_DIRECTORY@@')"),'attachment storage must consume the build-injected canonical OPFS identity');
-assert.ok(read('source/core/asset-storage.js').includes("LEGACY_DIRECTORY=ports.directory?String(ports.legacyDirectory||''):'@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@'"),'legacy attachment cleanup must consume the build-injected obsolete OPFS identity');
+
 assert.ok(read('source/core/exports.js').includes("ROOT=String(root||'@@SD_BACKUP_FILES_OPFS_DIRECTORY@@')"),'backup temporary-file storage must consume the build-injected canonical OPFS identity');
 assert.ok(read('portable/file-output.js').includes("OPFS_DIRECTORY='@@SD_BACKUP_FILES_OPFS_DIRECTORY@@'"),'portable worker output must resolve the same canonical scratch directory itself');
 assert.match(read('source/core/exports.js'),/output:Object\.freeze\(\{kind:'opfs',name:staged\.name,directory:staged\.directory\}\)/u,'portable file work must send only an opaque scratch identity (name and profile folder) to the worker, never a FileSystemHandle');
@@ -157,20 +155,17 @@ assert.match(appMeta,/function bind\(owner\)/u,'appMeta gateway must expose sepa
 assert.match(appMeta,/view:tx=>createView\(cleanOwner,tx\)/u,'appMeta gateway must expose transaction-scoped typed views');
 assert.match(appMeta,/function canonicalEnvelope\(row,key\)/u,'appMeta gateway must centrally validate canonical envelopes');
 assert.match(appMeta,/validateValue\(definition,row\.value,key,suffix\)/u,'appMeta gateway must centrally apply family value validation');
-assert.match(app,/compatibilityAppMeta:CompatibilityAppMeta/u,'AppData migration paths must receive the compatibility-owned metadata capability explicitly');
+
 assert.match(app,/return ExportsAppMeta\.transaction\('readwrite'/u,'backup-protection policy mutation must use the exports-owned metadata capability');
 assert.match(app,/settings:exactAppMetaStorage\(DeviceFolderAppMeta,'deviceFolder'/u,'Device Backup settings must use the device-backup-owned metadata capability');
 assert.match(app,/BackupAppMeta\.read\('repositoryIntegrityScrub'\)/u,'repository scrub state must use the backup-owned metadata capability');
 
-for(const pattern of [
-  /reflectionDraftMigration\.v1/u,/const PLAN_DRAFT_KEY=['"]/u,/const KEY='insightsDatasetRevision'/u,
-  /const NOTE_RECOVERY_META_PREFIX=['"]/u,/idbGetMeta\('dailyRecordMigration'\)/u,/idbGetMeta\('dataMaintenance'\)/u,/idbPutMeta\('dataMaintenance'/u
-])assert.doesNotMatch(repositories,pattern,'repository appMeta identities must come from the central contract');
+
 for(const pattern of [
   /const LIBRARY_CLEAR_JOURNAL_STATE_KEY=['"]/u,/const LIBRARY_CLEAR_JOURNAL_CHUNK_PREFIX=['"]/u,
   /const RESTORE_JOURNAL_STATE_KEY=['"]/u,/const RESTORE_JOURNAL_PAYLOAD_KEY=['"]/u,/const MUTATION_LEASE_KEY=['"]/u
 ])assert.doesNotMatch(journals,pattern,'journal appMeta identities must come from the host contract');
-assert.doesNotMatch(persistence,/key:'dailyRecordMigration'/u,'IndexedDB upgrade metadata identity must be injected from the central contract');
+
 
 // Insights preference is part of the same authoritative localStorage identity map.
 
@@ -187,11 +182,8 @@ for(const file of sourceFiles){
 
 assert.equal(DATA_ARCHITECTURE.indexedDb.dailySummaries.role,'derived');
 assert.equal(Object.keys(DATA_ARCHITECTURE.indexedDb).length,6,'current IndexedDB topology must be six stores after Reflection Draft retirement');
-assert.deepEqual(Object.keys(DATA_ARCHITECTURE.obsoleteIndexedDb).sort(),Object.keys(OBSOLETE_INDEXED_DB.stores).sort());
-assert.equal(DATA_ARCHITECTURE.obsoleteIndexedDb.syncQueue.role,'legacy-migration');
-assert.equal(DATA_ARCHITECTURE.obsoleteIndexedDb.tombstones.role,'legacy-migration');
-assert.match(DATA_ARCHITECTURE.obsoleteIndexedDb.syncQueue.lifecycle,/removed after verified/u);
-assert.match(DATA_ARCHITECTURE.obsoleteIndexedDb.tombstones.lifecycle,/removed after verified/u);
+
+
 assert.equal(DATA_ARCHITECTURE.appMeta.exact.canonicalMutationEpoch.role,'coordination','canonical mutation epoch must remain non-portable coordination metadata, not user authority');
 assert.match(DATA_ARCHITECTURE.appMeta.exact.canonicalMutationEpoch.lifecycle,/atomically with portable canonical mutations/u);
 assert.equal(DATA_ARCHITECTURE.appMeta.prefixes.savedDayDeletionPrefix.role,'canonical-deletion-history');
@@ -201,13 +193,8 @@ assert.equal(DATA_ARCHITECTURE.appMeta.exact.attachmentIntegrityAudit.protection
 assert.equal(DATA_ARCHITECTURE.appMeta.exact.repositoryIntegrityScrub.role,'derived-health');
 assert.match(DATA_ARCHITECTURE.appMeta.exact.repositoryIntegrityScrub.lifecycle,/no user-content details/u);
 assert.match(DATA_ARCHITECTURE.localStorage.storageHealth.lifecycle,/no user-content details/u);
-assert.deepEqual(Object.keys(DATA_ARCHITECTURE.obsoleteLocalStorage).sort(),Object.keys(OBSOLETE_LOCAL_STORAGE_KEYS).sort());
-assert.equal(OBSOLETE_APP_META_KEYS.reflectionDraftMigration,'reflectionDraftMigration.v1');
-assert.equal(DATA_ARCHITECTURE.appMeta.obsolete.reflectionDraftMigration.role,'legacy-residue');
-assert.equal(OBSOLETE_APP_META_KEYS.repositoryMaintenancePendingLegacy,'repositoryMaintenancePending.v1');
-assert.equal(DATA_ARCHITECTURE.appMeta.obsolete.repositoryMaintenancePendingLegacy.role,'legacy-migration');
-assert.match(DATA_ARCHITECTURE.appMeta.obsolete.repositoryMaintenancePendingLegacy.lifecycle,/verified replacement/u);
-assert.equal(OBSOLETE_OPFS_IDENTITIES.attachmentsV1,'study-director-assets-v1');
+
+
 assert.equal(OPFS_IDENTITIES.attachments,'study-director-assets-v2');
 for(const boundary of ['completeBackup','deviceBackup','driveBackup','attachmentArchive','markdownExport','zipExport'])assert.ok(DATA_ARCHITECTURE.external[boundary],`external boundary ${boundary} must be classified`);
 
@@ -216,7 +203,7 @@ const sw=read('source/platform/sw.js'),deviceBackupSource=read('source/core/devi
 assert.match(sw,/@@SD_CACHE_STORAGE_IDENTITIES@@/u,'service worker cache identities must come from the canonical contract');
 assert.doesNotMatch(sw,/const CACHE_PREFIX=['"]study-director-shell-/u,'service worker must not mint the shell cache prefix');
 assert.doesNotMatch(sw,/const bridgeCache=['"]study-director-update-bridge-v2/u,'service worker must not mint the update bridge cache');
-assert.match(app,/const EXTERNAL_REPOSITORY_IDENTITIES=Object\.freeze\(@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@\)/u,'Device Backup repository directories must come from the canonical contract');assert.match(app,/identities:Object\.freeze\(\{root:repository,legacyRoot:ProfileScope\.scoped\(EXTERNAL_REPOSITORY_IDENTITIES\.deviceFolderLegacyRoot\),prefix:EXTERNAL_REPOSITORY_IDENTITIES\.backupFolderPrefix,/u,'Device Folder storage receives its directory names from the canonical contract');
+assert.match(app,/const EXTERNAL_REPOSITORY_IDENTITIES=Object\.freeze\(@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@\)/u,'Device Backup repository directories must come from the canonical contract');
 assert.doesNotMatch(deviceBackupSource,/Study-Director-Automatic-Backup-Repository/u,'Device Backup must not mint its repository root');
 assert.doesNotMatch(deviceBackupSource,/id:['"]study-director-device-backup/u,'Device Backup must not mint its persistent picker identity');
 assert.match(app,/pickerId:EXTERNAL_REPOSITORY_IDENTITIES\.deviceFolderPickerId/u,'Device Backup picker identity must come from the canonical contract');
@@ -233,16 +220,13 @@ const appDirectLocal=[...app.matchAll(/\blocalStorage\.(?:getItem|setItem|remove
 assert.equal(appDirectLocal.length,3,'host direct localStorage access must be limited to the profile scope read and the two pre-hydration appearance mirror helpers');
 assert.ok(appDirectLocal.every(match=>match.index<app.indexOf('const LocalStorageContract=')),'direct host localStorage must occur only before the persistence abstraction is created');
 
-// Obsolete metadata cleanup belongs to the temporary compatibility port, not recurring maintenance.
-assert.match(repositories,/cleanupObsoleteMetadata:removeObsoleteMetadata/u);
+// Current repositories have no historical metadata cleanup capability.
+assert.doesNotMatch(repositories,/cleanupObsoleteMetadata:|AppData\.compatibility/u,'ordinary repositories have no historical cleanup capability');
 const maintenanceStart=repositories.indexOf('async function runDataMaintenance');
 const maintenanceEnd=repositories.indexOf('function scheduleDataMaintenance',maintenanceStart);
 const maintenance=maintenanceStart>=0&&maintenanceEnd>maintenanceStart?repositories.slice(maintenanceStart,maintenanceEnd):'';
 assert.doesNotMatch(maintenance,/removeObsoleteMetadata/u,'normal recurring maintenance must not retain migration cleanup');
 
-console.log(JSON.stringify({
-  status:'PASS',suite:'data-architecture',indexedDbStores:idbStores.length,
-  localStorageKeys:Object.keys(LOCAL_STORAGE_KEYS).length,obsoleteLocalStorageKeys:Object.keys(OBSOLETE_LOCAL_STORAGE_KEYS).length,
-  appMetaIdentities:Object.keys(APP_META_KEYS).length,obsoleteAppMetaIdentities:Object.keys(OBSOLETE_APP_META_KEYS).length,
-  externalBoundaries:Object.keys(DATA_ARCHITECTURE.external).length,sessionStorageKeys:Object.keys(SESSION_STORAGE_KEYS).length
-},null,2));
+
+assert.equal(DATA_ARCHITECTURE.cacheStorage.clientState.identity,CACHE_STORAGE_IDENTITIES.clientState);
+assert.equal(Object.hasOwn(DATA_ARCHITECTURE,'obsoleteIndexedDb'),false);

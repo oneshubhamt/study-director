@@ -93,28 +93,11 @@ const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new 
 ])};
 const {app}=createHarness(new Map(),stores);
 
-const before=await app.compatibility.verifyInsightsRevisionEnvelope();
-assert.equal(before.ok,false,'legacy direct appMeta revision row must not count as canonical');
-assert.equal(before.legacy,true);
-
-const migrated=await app.compatibility.migrateInsightsRevisionEnvelope();
-assert.equal(migrated.status,'migrated');
-const row=stores.meta.get(key);
-assert.deepEqual(Object.keys(row).sort(),['key','updatedAt','value','version']);
-assert.equal(row.key,key);
-assert.equal(row.version,1);
-assert.equal(row.updatedAt,updatedAt);
-assert.deepEqual(Object.keys(row.value).sort(),['counter','format','updatedAt','version']);
-assert.equal(row.value.format,'study-director.insights-dataset-revision');
-assert.equal(row.value.version,2);
-assert.equal(row.value.counter,7);
-assert.equal(row.value.updatedAt,updatedAt);
-
-const after=await app.compatibility.verifyInsightsRevisionEnvelope();
-assert.equal(after.ok,true);
-assert.equal(after.legacy,false);
-
-console.log(JSON.stringify({status:'PASS',suite:'appmeta-insights-envelope',migrated,after},null,2));
+const original=structuredClone(stores.meta.get(key));
+const gateway=createHarness(new Map(),stores).repositoryMeta;
+await assert.rejects(gateway.read('insightsDatasetRevision'),/envelope is not canonical/);
+assert.deepEqual(stores.meta.get(key),original,'unsupported metadata is not converted or rewritten');
+console.log(JSON.stringify({status:'PASS',suite:'appmeta-insights-envelope',unsupportedRejected:true}));
 }
 
 { // personal-preferences-resilience

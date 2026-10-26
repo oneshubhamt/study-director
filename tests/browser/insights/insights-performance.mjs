@@ -3,8 +3,8 @@ import {PERFORMANCE_BUDGETS} from '../../../contracts/performance-budgets.mjs';
 import {launchChromium,sleep,instrumentedHtml,startReleaseServer,waitFor,waitForStudyDirector} from '../../helpers/browser-harness.mjs';
 
 const server=await startReleaseServer();
-server.setOverride('deployment','instrumented.html',instrumentedHtml().replace('Object.freeze({StartupLifecycle,','Object.freeze({CompatibilityCodecs,StartupLifecycle,'));
-if(process.env.SD_SECURITY_TEST==='1')server.setOverride('deployment','instrumented.html',instrumentedHtml().replace('Object.freeze({StartupLifecycle,','Object.freeze({CompatibilityCodecs,StartupLifecycle,').replace('<head>',"<head><meta http-equiv=\"Content-Security-Policy\" content=\"worker-src 'self'; require-trusted-types-for 'script'; trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-google-signin\">"));
+server.setOverride('deployment','instrumented.html',instrumentedHtml().replace('Object.freeze({StartupLifecycle,','Object.freeze({StartupLifecycle,'));
+if(process.env.SD_SECURITY_TEST==='1')server.setOverride('deployment','instrumented.html',instrumentedHtml().replace('Object.freeze({StartupLifecycle,','Object.freeze({StartupLifecycle,').replace('<head>',"<head><meta http-equiv=\"Content-Security-Policy\" content=\"worker-src 'self'; require-trusted-types-for 'script'; trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-google-signin\">"));
 const browser=await launchChromium({profilePrefix:'study-director-qa-insights-'});
 const pages=[];
 const url=server.url('deployment','instrumented.html');
@@ -20,7 +20,7 @@ const seed=`(async()=>{
       results:{[a]:{completion:completionA,completionSource:'manual',actualSeconds:Math.round(completionA*18)},[b]:{completion:completionB,completionSource:'manual',actualSeconds:1200}},
       practiceRuns:[{taskId:a,targetMs,totalUnits:4,unitMs:[actualMs,actualMs,actualMs,actualMs]}]});
   }
-  await __PWA6.AppData.dailyRecords.saveBatch(records.map(record=>__PWA6.CompatibilityCodecs.dailyRecord(record)));localStorage.setItem('studyDirector.insights.window.v1','all');return total;
+  await __PWA6.AppData.dailyRecords.saveBatch(records.map(record=>__PWA6.,.dailyRecord(record)));localStorage.setItem('studyDirector.insights.window.v1','all');return total;
 })()`;
 
 async function open(preload=''){

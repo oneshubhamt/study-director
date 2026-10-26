@@ -1543,8 +1543,6 @@ if(!INTERNAL_MODULES||INTERNAL_MODULES.format!=='study-director.internal-module-
 const AttachmentsModule=INTERNAL_MODULES.load('attachments',1,'study-director.attachments-module',1);
 const AttachmentIngestModule=INTERNAL_MODULES.load('attachment-ingest',1,'study-director.attachment-ingest',1);
 const AssetStorageModule=INTERNAL_MODULES.load('asset-storage',1,'study-director.asset-storage',3);
-const CompatibilityModule=INTERNAL_MODULES.load('compatibility',1,'study-director.compatibility-module',1);
-const CompatibilityHostModule=INTERNAL_MODULES.load('compatibility-host',1,'study-director.compatibility-host-module',1);
 const OperationLifecycle=INTERNAL_MODULES.load('operation-lifecycle',1,'study-director.operation-lifecycle',1);
 const AssetMaintenanceModule=INTERNAL_MODULES.load('asset-maintenance',1,'study-director.asset-maintenance-module',2,Object.freeze({lifecycle:OperationLifecycle}));
 const PersistenceModule=INTERNAL_MODULES.load('persistence',1,'study-director.persistence-primitives',1);
@@ -1552,7 +1550,6 @@ const AppMetaModule=INTERNAL_MODULES.load('app-meta',1,'study-director.app-meta'
 const HostMetadataModule=INTERNAL_MODULES.load('host-metadata',1,'study-director.host-metadata-module',1);
 const ReconciliationBaselineModule=INTERNAL_MODULES.load('reconciliation-baseline',1,'study-director.reconciliation-baseline-module',1);
 const RecordCodecsModule=INTERNAL_MODULES.load('record-codecs',1,'study-director.record-codecs',1);
-const CompatibilityCodecsModule=INTERNAL_MODULES.load('compatibility-codecs',1,'study-director.compatibility-codecs-module',1);
 const BackupCodecModule=INTERNAL_MODULES.load('backup-codec',1,'study-director.backup-codec',1);
 const CanonicalModule=INTERNAL_MODULES.load('canonical',1,'study-director.canonical',1);
 const ReconciliationModule=INTERNAL_MODULES.load('reconciliation',1,'study-director.reconciliation-module',1,Object.freeze({canonical:CanonicalModule}));
@@ -1643,13 +1640,9 @@ const ProfileScope=window[Symbol.for('studyDirector.profileScope.v1')];
 const DEVICE_WIDE_STORAGE_KEYS=Object.freeze(@@SD_DEVICE_WIDE_LOCAL_STORAGE_KEYS@@);
 const STORAGE_KEYS=Object.freeze(Object.fromEntries(Object.entries(@@SD_LOCAL_STORAGE_KEYS@@).map(([name,key])=>[name,DEVICE_WIDE_STORAGE_KEYS.includes(name)?key:ProfileScope.scoped(key)])));
 const SESSION_STORAGE_KEYS=Object.freeze(@@SD_SESSION_STORAGE_KEYS@@);
-const OBSOLETE_STORAGE_KEYS=Object.freeze(@@SD_OBSOLETE_LOCAL_STORAGE_KEYS@@);
 const APP_META_KEYS=Object.freeze(@@SD_APP_META_KEYS@@);
 const EXTERNAL_REPOSITORY_IDENTITIES=Object.freeze(@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@);
 const APP_META_REGISTRY=Object.freeze(Object.fromEntries(Object.entries(@@SD_APP_META_REGISTRY@@).map(([name,definition])=>[name,Object.freeze(definition)])));
-const OBSOLETE_APP_META_KEYS=Object.freeze(@@SD_OBSOLETE_APP_META_KEYS@@);
-const RENAMED_APP_META_KEYS=Object.freeze(@@SD_RENAMED_APP_META_KEYS@@);
-const RENAMED_VALUE_FORMATS=Object.freeze(@@SD_RENAMED_VALUE_FORMATS@@);
 const FACTORY_DEFAULTS = {
   studentName: APP_CONFIG.defaultName,
   scheduleText: APP_CONFIG.factorySchedule
@@ -1661,21 +1654,15 @@ const DATA_CONTRACT=(()=>{
   return Object.freeze({...raw,storage:Object.freeze({...raw.storage,stores}),schemas});
 })();
 const DB_STORES=Object.freeze(@@SD_INDEXED_DB_STORE_NAMES@@);
-const OBSOLETE_DB=Object.freeze(@@SD_OBSOLETE_INDEXED_DB@@);
-const OBSOLETE_DB_STORES=OBSOLETE_DB.stores;
 const DB_NAME=ProfileScope.scoped(DATA_CONTRACT.storage.dbName);
 const DB_DAILY_RECORD_STORE=DB_STORES.dailyRecords;
 const DB_DAILY_SUMMARY_STORE=DB_STORES.dailySummaries;
 const DB_NOTES_STORE=DB_STORES.notes;
 const DB_ACTIVE_SESSION_STORE=DB_STORES.activeSessions;
 const DB_APP_META_STORE=DB_STORES.appMeta;
-const DB_LEGACY_SYNC_QUEUE_STORE=OBSOLETE_DB_STORES.syncQueue;
-const DB_LEGACY_TOMBSTONE_STORE=OBSOLETE_DB_STORES.tombstones;
 const DB_ASSET_STORE=DB_STORES.assets;
-const DB_RETIRED_REFLECTION_DRAFT_STORE=OBSOLETE_DB_STORES.reflectionDrafts;
 const DB_VER=DATA_CONTRACT.storage.dbVersion;
 const ACTIVE_SESSION_ID=DATA_CONTRACT.schemas.ActiveSession.key;
-const LEGACY_BACKUP_SCHEMA_VERSION=@@SD_LEGACY_BACKUP_SCHEMA_VERSION@@;
 const STUDY_DIRECTOR_CAPABILITIES=Object.freeze({
   pluginApi:1,
   tabRegistry:1,
@@ -1858,7 +1845,7 @@ const Profiles=ProfilesModule.createController(Object.freeze({ports:Object.freez
     keys:()=>LocalStorageContract.keys(),
     remove:key=>LocalStorageContract.remove(key)
   }),
-  names:Object.freeze({database:DATA_CONTRACT.storage.dbName,directories:Object.freeze(['@@SD_ATTACHMENT_OPFS_DIRECTORY@@','@@SD_BACKUP_FILES_OPFS_DIRECTORY@@']),keys:Object.freeze(Object.entries(@@SD_LOCAL_STORAGE_KEYS@@).filter(([name])=>!DEVICE_WIDE_STORAGE_KEYS.includes(name)).map(([,key])=>key)),legacyDirectory:'@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@'}),
+  names:Object.freeze({database:DATA_CONTRACT.storage.dbName,directories:Object.freeze(['@@SD_ATTACHMENT_OPFS_DIRECTORY@@','@@SD_BACKUP_FILES_OPFS_DIRECTORY@@']),keys:Object.freeze(Object.entries(@@SD_LOCAL_STORAGE_KEYS@@).filter(([name])=>!DEVICE_WIDE_STORAGE_KEYS.includes(name)).map(([,key])=>key))}),
   platform:Object.freeze({
     deleteDatabase:name=>new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase(name);request.onsuccess=()=>resolve(true);request.onerror=()=>reject(request.error||new Error('A removed profile could not be deleted.'));}),
     listen:handler=>{const listener=event=>{if(event.storageArea===localStorage)handler(event.key);};window.addEventListener('storage',listener);return ()=>window.removeEventListener('storage',listener);},
@@ -2611,7 +2598,7 @@ const AppOwnership=OwnershipModule.createOwnershipController(Object.freeze({
       return result;
     },
     finalizeHydration:async()=>{
-      await CompatibilityFacade.migrateLive();
+      await UnsupportedData.census();
       await hydrateSavedDrafts({forcePreferences:true,failClosed:true});
     },
     resume:()=>resumeTimerLoopAfterPrimaryRestore(),
@@ -3399,12 +3386,6 @@ const {
 }=DailyRecordCodec;
 
 
-
-
-
-
-
-
 function activePauseEventSnapshot(idx){
   if(!TimerState.paused||!TimerState.activeBreak||TimerState.activeBreak.taskIdx!==idx)return null;
   const seconds=getCurrentBreakSeconds();
@@ -3456,19 +3437,6 @@ function timerRuntimePayload(){
   }
   return runtime;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 /* DATE AND REVIEW-DAY HELPERS */
@@ -3766,7 +3734,7 @@ function applyRows(rows,options={}){
     return SessionLifecycle.reconcile(source,{
       scheduleIdentity:true,date:getReviewDate(),
       autoDate:document.getElementById('day-date')?.dataset.autoDate==='1',
-      
+
     });
   }
   function read(){
@@ -3998,7 +3966,6 @@ function activeSessionPayload(snapshot=null,options={}){
     scheduleText,snapshot,suspendedAt:options.suspendedAt||null,updatedAt:nowIso
   };
 }
-
 
 
 function readLocalRecoverySession(){return AppData.activeSession.readLocal();}
@@ -4346,12 +4313,6 @@ const IndexedDb=PersistenceModule.createIndexedDb(Object.freeze({
       appMeta:DB_APP_META_STORE,
       assets:DB_ASSET_STORE
     }),
-    bridgeVersion:OBSOLETE_DB.bridgeVersion,
-    legacyStores:Object.freeze({syncQueue:DB_LEGACY_SYNC_QUEUE_STORE,tombstones:DB_LEGACY_TOMBSTONE_STORE,reflectionDrafts:DB_RETIRED_REFLECTION_DRAFT_STORE})
-  }),
-  upgrade:Object.freeze({
-    renameStores:context=>CompatibilityModule.renameIndexedDbStores(Object.freeze({...context,renamedStores:Object.freeze(Object.fromEntries(Object.entries(OBSOLETE_DB.renamedStores).map(([id,from])=>[DB_STORES[id],from])))})),
-    apply:context=>CompatibilityModule.applyIndexedDbUpgrade(Object.freeze({...context,dailyRecordMigrationKey:APP_META_KEYS.dailyRecordMigration}))
   }),
   hooks:Object.freeze({
     onError:message=>markStorageHealthError('indexedDB',`Browser database is unavailable: ${message}`),
@@ -4369,8 +4330,7 @@ const AppMetaGateway=AppMetaModule.create(Object.freeze({
 // Data this build cannot read stays exactly as it is. Every start, before
 // anything reads stored data, the census finds it: a record whose version is
 // above this build's, an appMeta row of a family this build does not know or
-// in a newer shape and, once the compatibility steps are done, an appMeta row
-// this build still cannot read. The storage layer then keeps it out of every
+// in an unsupported shape. The storage layer then keeps it out of every
 // read and refuses every change to it, and the app works with everything else
 // (local clean-up and Drive uploads wait while any of it is here, since both
 // would read its absence as a deletion). Bookkeeping the data contract lets
@@ -4380,21 +4340,16 @@ const AppMetaGateway=AppMetaModule.create(Object.freeze({
 // an update and the person can use another profile meanwhile.
 const UnsupportedData=(()=>{
   const schemaVersion=schema=>{const match=/\.v(\d+)$/u.exec(String(schema||''));return match?Number(match[1]):0;};
-  const recordStores=Object.freeze(Object.entries(DATA_CONTRACT.storage.stores).filter(([id])=>id!=='appMeta').map(([id,value])=>Object.freeze([DB_STORES[id],schemaVersion(value.schema)])));
+  const recordStores=Object.freeze(Object.entries(DATA_CONTRACT.storage.stores).filter(([id])=>id!=='appMeta').map(([id,value])=>Object.freeze([DB_STORES[id],schemaVersion(value.schema),id==='dailySummaries'?'summaryVersion':'version'])));
   const envelopeVersion=Number(DATA_CONTRACT.schemas.AppMeta?.version)||1;
-  const retired=Object.freeze([...Object.values(OBSOLETE_APP_META_KEYS),...Object.values(RENAMED_APP_META_KEYS).flat()].map(String));
-  const isRetired=key=>retired.some(old=>old.endsWith(':')?key.startsWith(old):key===old);
-  const newerRecord=max=>value=>value&&typeof value==='object'&&Number(value.version)>max?'newer':'';
-  // settled: the compatibility steps are done, so a row this build cannot
-  // read is no longer one they will convert.
-  function metaVerdict(row,settled){
+  const recordVerdict=(max,field)=>value=>value&&typeof value==='object'&&Number(value[field])===max?'':Number(value?.[field])>max?'newer':'unreadable';
+  function metaVerdict(row){
     const key=String(row&&row.key||'');if(!key)return '';
     if(row&&typeof row==='object'&&Number(row.version)>envelopeVersion)return 'newer';
     const family=AppMetaGateway.resolve(key);
-    if(!family)return isRetired(key)?'':'unknown';
+    if(!family)return 'unknown';
     if(AppMetaGateway.readable(row))return '';
     const value=row&&row.value,newer=!!value&&typeof value==='object'&&Number(value.version)>schemaVersion(family.schema);
-    if(!newer&&!settled)return '';
     return Object.freeze({reason:newer?'newer':'unreadable',replaceable:family.protection==='operational'});
   }
   let blocked=null;
@@ -4404,13 +4359,12 @@ const UnsupportedData=(()=>{
       blocked=Object.freeze({version:topology.version,missing:topology.missing,changed:topology.changed});
       throw Object.assign(new Error(`This profile was saved by a newer version of Study Director (database ${topology.version}), which this version cannot open.`),{code:'STUDY_DIRECTOR_PROFILE_NEEDS_UPDATE'});
     }
-    for(const [store,max] of recordStores)await IndexedDb.unsupported.scan(store,newerRecord(max));
+    for(const [store,max,field] of recordStores)await IndexedDb.unsupported.scan(store,recordVerdict(max,field));
     // A Saved Day and its summary are one item: either one held holds the other.
     for(const [from,to] of [[DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE],[DB_DAILY_SUMMARY_STORE,DB_DAILY_RECORD_STORE]])for(const key of IndexedDb.unsupported.keys(from))IndexedDb.unsupported.hold(to,key,'same-day');
-    await IndexedDb.unsupported.scan(DB_APP_META_STORE,row=>metaVerdict(row,false));
+    await IndexedDb.unsupported.scan(DB_APP_META_STORE,metaVerdict);
     return summary();
   }
-  const settle=async()=>{await IndexedDb.unsupported.scan(DB_APP_META_STORE,row=>metaVerdict(row,true));return summary();};
   // What the person is told about: Saved Days, notes, attachments, a session
   // and settings, never the bookkeeping this build replaces.
   function summary(){
@@ -4447,7 +4401,7 @@ const UnsupportedData=(()=>{
       secondaryAction:others.length?{label:`Open ${others[0].name||'another profile'}`,run:()=>{try{Profiles.switchTo(others[0].id);}catch(error){AppDiagnostics.capture('unsupported-data.switch-profile',error,'warn');}}}:{label:'Start a new profile',run:()=>{try{Profiles.add();}catch(error){AppDiagnostics.capture('unsupported-data.add-profile',error,'warn');}}}});
     return true;
   }
-  return Object.freeze({census,settle,summary,held,describe,announce,reportBlocked,blocked:()=>blocked});
+  return Object.freeze({census,summary,held,describe,announce,reportBlocked,blocked:()=>blocked});
 })();
 const RepositoryAppMetaValidators=RepositoryModule.createAppMetaValidators(Object.freeze({
   limits:APP_LIMITS,
@@ -4473,7 +4427,6 @@ AppMetaGateway.registerValidators('host',HostMetadataModule.createAppMetaValidat
   })
 })));
 const RepositoryAppMeta=AppMetaGateway.bind('repositories');
-const CompatibilityAppMeta=AppMetaGateway.bind('compatibility');
 const JournalAppMeta=AppMetaGateway.bind('repository-journals');
 const HostAppMeta=AppMetaGateway.bind('host');
 const ExportsAppMeta=AppMetaGateway.bind('exports');
@@ -4506,7 +4459,7 @@ const AttachmentIngest=AttachmentIngestModule.create({
 });
 window.addEventListener('pagehide',()=>AttachmentIngest.destroy());
 const AttachmentStorage=AssetStorageModule.create({
-  name:DB_NAME,directory:ProfileScope.scoped('@@SD_ATTACHMENT_OPFS_DIRECTORY@@'),legacyDirectory:ProfileScope.scope?'':'@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@',maxBytes:APP_LIMITS.richAssetMaxBytes,validId:AttachmentsModule.validId,validType:AttachmentsModule.validType,limitForType:AttachmentsModule.limitForType,
+  name:DB_NAME,directory:ProfileScope.scoped('@@SD_ATTACHMENT_OPFS_DIRECTORY@@'),maxBytes:APP_LIMITS.richAssetMaxBytes,validId:AttachmentsModule.validId,validType:AttachmentsModule.validType,limitForType:AttachmentsModule.limitForType,
   storage:navigator.storage,locks:navigator.locks,protocol:location.protocol,ingest:AttachmentIngest,onReleased:()=>notifyRichTextAssetLeaseReleased(),
   canMutate:()=>appCanMutate(),issueToken:options=>AppOwnership.issueWriteToken('write attachment',options),assertToken:token=>AppOwnership.assertWriteToken(token,'write attachment'),
   read:id=>IndexedDb.get(DB_ASSET_STORE,id,'attachment metadata read aborted'),
@@ -4662,13 +4615,6 @@ async function installVerifiedRecoveryFreshness(){
   verifiedRecoveryState=await readVerifiedRecoveryState();
   BackupProviderRuntime.refresh();return verifiedRecoveryState;
 }
-async function verifyFreshCurrentBackup(){
-  const state=normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY).catch(()=>null));
-  const currentSave=Date.parse(readStorageHealth().lastLocalSaveAt||'');
-  // Only a verified copy in the current backup format that holds the latest change counts.
-  const candidates=verifiedRecoveryEntries(state).filter(entry=>entry.verified!==false&&entry.format===DATA_CONTRACT.schemas.Backup.version&&(!Number.isFinite(currentSave)||Date.parse(entry.sourceRevision)>=currentSave));
-  return Object.freeze({ok:candidates.length>0,verifiedCopies:candidates.length,latestVerifiedAt:candidates.sort((a,b)=>Date.parse(b.at)-Date.parse(a.at))[0]?.at||''});
-}
 // Compare policy identity and ownership inside the same typed metadata transaction.
 function mutateBackupProtection(value,options){
   return ExportsAppMeta.transaction('readwrite',(meta,tx,finish)=>{
@@ -4684,19 +4630,6 @@ function mutateBackupProtection(value,options){
     tx.oncomplete=()=>finish(true,true);
   },{abortMessage:'backup encryption update aborted'});
 }
-const CompatibilityCodecs=CompatibilityCodecsModule.create(Object.freeze({
-  limits:APP_LIMITS,
-  dataContract:DATA_CONTRACT,
-  keyedRecord:KeyedRecord,
-  dailyRecordCodec:DailyRecordCodec,
-  activeSessionCodec:ActiveSessionCodec,
-  personalDataCodec:PersonalDataCodec,
-  helpers:Object.freeze({boundedInt,boundedNumber,optionalBoundedNumber,optionalText,clampText,clampEditorContent,editorContentWithinLimits,sameDataValue,sanitizePracticeRun,activeSessionScheduleFingerprint,isValidIsoDate,isCanonicalScheduleText}),
-  timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp}),
-  domain:DomainModule,
-  installationId:()=>InstallationIdentity.getId()
-}));
-
 /* APPDATA REPOSITORY FACADE */
 function handleRepositoryDailyRecordsChanged(change){
   richAssetReferenceRevision++;
@@ -4787,11 +4720,9 @@ const AppData=RepositoryModule.createAppData(Object.freeze({
   local:LocalStorageContract,
   indexedDb:IndexedDb,
   appMeta:RepositoryAppMeta,
-  compatibilityAppMeta:CompatibilityAppMeta,
   installationIdentity:InstallationIdentity,
   dailyRecordCodec:DailyRecordCodec,
   activeSessionCodec:ActiveSessionCodec,
-  compatibilityCodec:CompatibilityCodecs,
   personalDataCodec:PersonalDataCodec,
   pendingReviewCodec:PendingReviewCodec,
   keyedRecord:KeyedRecord,
@@ -4807,17 +4738,13 @@ const AppData=RepositoryModule.createAppData(Object.freeze({
     activeSessions:DB_ACTIVE_SESSION_STORE,
     appMeta:DB_APP_META_STORE
   }),
-  legacyStores:Object.freeze({syncQueue:DB_LEGACY_SYNC_QUEUE_STORE,tombstones:DB_LEGACY_TOMBSTONE_STORE}),
   keys:Object.freeze({
     recovery:STORAGE_KEYS.recovery,
     fallbackDailyRecords:STORAGE_KEYS.fallbackDailyRecords,
     noteRescue:STORAGE_KEYS.noteRescue,
-    deletionRecovery:STORAGE_KEYS.deletionRecovery,
-    legacySyncEmergency:OBSOLETE_STORAGE_KEYS.syncEmergency
+    deletionRecovery:STORAGE_KEYS.deletionRecovery
   }),
-  legacyKeys:Object.freeze({notesPending:OBSOLETE_STORAGE_KEYS.notesPending,noteRecoveryPrefix:OBSOLETE_APP_META_KEYS.noteRecoveryPrefix}),
   metaKeys:Object.freeze({
-    dailyRecordMigration:APP_META_KEYS.dailyRecordMigration,
     planDraft:APP_META_KEYS.planDraft,
     planLibrary:APP_META_KEYS.planLibrary,
     personalPreferences:APP_META_KEYS.personalPreferences,
@@ -4830,7 +4757,6 @@ const AppData=RepositoryModule.createAppData(Object.freeze({
     attachmentDeletionPrefix:APP_META_KEYS.attachmentDeletionPrefix,
     pendingReviewPrefix:APP_META_KEYS.pendingReviewPrefix,
   }),
-  obsoleteMetaKeys:Object.freeze(Object.values(OBSOLETE_APP_META_KEYS)),
   activeSessionId:ACTIVE_SESSION_ID,
   clock:Object.freeze({nowMs:DecisionClock.nowMs}),
   helpers:Object.freeze({
@@ -4897,7 +4823,7 @@ function resetRuntimeSessionState(options={}){
   setTimerMode(TIMER_MODES.EMPTY,'session-reset');
   TimerState.clearSession();
   hydrateReviewState({date:isValidIsoDate(opts.date)?opts.date:todayISO(),snapshotReview:null});
-  
+
   invalidateScheduleDerived({identity:true,adjustments:true,render:true});
   PlanRuntime.resetSession();
   clearProgressRuntime();
@@ -8931,7 +8857,6 @@ const BackupCodec=BackupCodecModule.createBackupCodec(Object.freeze({
   }),
   limits:APP_LIMITS,
   dataContract:DATA_CONTRACT,
-  legacy:Object.freeze({schemaVersion:LEGACY_BACKUP_SCHEMA_VERSION,tombstoneLimit:APP_LIMITS.maxLegacyImportTombstones}),
   entityTypes:BACKUP_ENTITY_TYPES,
   keyedRecord:KeyedRecord,
   entities:Object.freeze({entityDefinition,entityIdentity}),
@@ -8939,144 +8864,11 @@ const BackupCodec=BackupCodecModule.createBackupCodec(Object.freeze({
   richText:Object.freeze({assetIds:value=>RichTextApi.scanAttachmentReferences(value).assetIds,assetIdValid:AttachmentsModule.validId,imageMimeTypeValid:AttachmentsModule.validType}),
   dailyRecordCodec:DailyRecordCodec,
   activeSessionCodec:ActiveSessionCodec,
-  compatibilityCodec:CompatibilityCodecs,
   personalDataCodec:PersonalDataCodec,
   pendingReviewCodec:PendingReviewCodec
 }));
 
-const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
-  baselineId:APP_VERSION,
-  facadeFactory:CompatibilityModule.createFacade,
-  keys:Object.freeze({
-    storage:Object.freeze({theme:STORAGE_KEYS.theme,presentation:STORAGE_KEYS.presentation,fontScale:STORAGE_KEYS.fontScale,storageHealth:STORAGE_KEYS.storageHealth}),
-    renamedAppMeta:Object.freeze(Object.entries(RENAMED_APP_META_KEYS).flatMap(([name,from])=>[from].flat().map(old=>Object.freeze([old,APP_META_KEYS[name]])))),
-    renamedLocal:Object.freeze([Object.freeze([OBSOLETE_STORAGE_KEYS.noteRescueLegacy,STORAGE_KEYS.noteRescue])]),
-    renamedFormats:RENAMED_VALUE_FORMATS,
-    obsolete:Object.freeze({
-      schedule:OBSOLETE_STORAGE_KEYS.schedule,defaults:OBSOLETE_STORAGE_KEYS.defaults,quote:OBSOLETE_STORAGE_KEYS.quote,nudge:OBSOLETE_STORAGE_KEYS.nudge,
-      reflectionDrafts:OBSOLETE_STORAGE_KEYS.reflectionDrafts,reflectionLegacy:OBSOLETE_STORAGE_KEYS.reflectionLegacy,
-      deviceId:OBSOLETE_STORAGE_KEYS.deviceId,liveDraft:OBSOLETE_STORAGE_KEYS.liveDraft,activeSession:OBSOLETE_STORAGE_KEYS.activeSession,
-      storageCapability:OBSOLETE_STORAGE_KEYS.storageCapability,diagnostics:OBSOLETE_STORAGE_KEYS.diagnostics,
-      legacyOwnershipLease:OBSOLETE_STORAGE_KEYS.legacyOwnershipLease,attachmentMaintenanceAttemptDay:OBSOLETE_STORAGE_KEYS.attachmentMaintenanceAttemptDay,
-      attachmentMaintenanceDay:OBSOLETE_STORAGE_KEYS.attachmentMaintenanceDay,attachmentMaintenancePending:OBSOLETE_STORAGE_KEYS.attachmentMaintenancePending,nameSetupSkipped:OBSOLETE_STORAGE_KEYS.nameSetupSkipped
-    }),
-    appMeta:Object.freeze({
-      personalPreferences:APP_META_KEYS.personalPreferences,dataMaintenance:APP_META_KEYS.dataMaintenance,verifiedRecoveryBackups:APP_META_KEYS.verifiedRecoveryBackups,
-      attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,deviceFolder:APP_META_KEYS.deviceFolder,restoreJournalPayload:APP_META_KEYS.restoreJournalPayload,
-      repositoryIntegrityScrub:APP_META_KEYS.repositoryIntegrityScrub,reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix,reconciliationBaseDayPrefix:APP_META_KEYS.reconciliationBaseDayPrefix,
-      reconciliationBaseLegacy:OBSOLETE_APP_META_KEYS.reconciliationBaseLegacy,repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,repositoryMaintenancePendingLegacy:OBSOLETE_APP_META_KEYS.repositoryMaintenancePendingLegacy,
-      libraryClearJournalState:APP_META_KEYS.libraryClearJournalState,libraryClearJournalPayloadPrefix:APP_META_KEYS.libraryClearJournalPayloadPrefix,
-      archiveClearJournalStateLegacy:OBSOLETE_APP_META_KEYS.archiveClearJournalStateLegacy,archiveClearJournalPayloadPrefixLegacy:OBSOLETE_APP_META_KEYS.archiveClearJournalPayloadPrefixLegacy,
-      backupPreparationUnitPrefix:APP_META_KEYS.backupPreparationUnitPrefix
-    })
-  }),
-  local:Object.freeze({
-    getText:(key,fallback)=>AppData.local.getText(key,fallback),getJson:(key,fallback)=>AppData.local.getJson(key,fallback),
-    setText:(key,value)=>AppData.local.setText(key,value),remove:key=>AppData.local.remove(key),lastError:()=>AppData.lastStorageError
-  }),
-  ownership:Object.freeze({
-    issueWriteToken:(reason,options)=>AppOwnership.issueWriteToken(reason,options),
-    assertWriteToken:(token,reason)=>AppOwnership.assertWriteToken(token,reason),isOwnershipLostError:error=>AppOwnership.isOwnershipLostError(error)
-  }),
-  plan:Object.freeze({
-    hydrate:()=>PlanData.hydrate(),library:()=>PlanData.library(),readDraft:()=>PlanData.readDraft(),
-    writeDraft:(value,options)=>PlanData.writeDraft(value,options),writeLibrary:(value,options)=>PlanData.writeLibrary(value,options),
-    settled:()=>PlanData.settled(),readCanonical:()=>AppData.planData.read()
-  }),
-  preferences:Object.freeze({
-    readRawRow:()=>IndexedDb.get(DB_APP_META_STORE,APP_META_KEYS.personalPreferences,'portable Preferences compatibility read aborted'),
-    held:()=>IndexedDb.unsupported.has(DB_APP_META_STORE,APP_META_KEYS.personalPreferences),
-    read:()=>AppData.personalPreferences.read(),write:(value,options)=>AppData.personalPreferences.write(value,options),
-    current:value=>PersonalDataCodec.currentPortablePreferences(value),legacy:value=>CompatibilityCodecs.protectedPreferences(value),
-    create:value=>PersonalDataCodec.portablePreferences(value),plans:value=>PersonalDataCodec.plans(value),
-    accept:value=>acceptProtectedPreferences(value),refreshMirrors:value=>refreshAppearanceMirrors(value),applyRuntime:value=>applyPortablePreferencesToRuntime(value),
-    normalizeTheme:value=>PRESENTATION_KERNEL.normalizeThemeId(value),normalizePresentation:value=>PRESENTATION_KERNEL.normalizePresentationId(value),
-    normalizeFontScale:value=>normalizeFontScale(value),normalizeStudentName:value=>normalizeStudentName(value),
-    normalizeQuote:value=>clampText(value,APP_LIMITS.maxQuoteChars),normalizePracticeCueMode:value=>sanitizePracticeCueMode(value),
-    normalizePracticeTargetMs:value=>validPracticeMs(value,{min:APP_LIMITS.minPracticeTargetMs})||null
-  }),
-  identity:Object.freeze({getId:()=>InstallationIdentity.getId(),installationKey:STORAGE_KEYS.installationId,legacyKey:OBSOLETE_STORAGE_KEYS.deviceId}),
-  metadata:Object.freeze({
-    readRow:key=>IndexedDb.get(DB_APP_META_STORE,String(key),'historical host metadata read aborted'),
-    listRows:()=>IndexedDb.getAll(DB_APP_META_STORE,'historical host metadata list aborted'),
-    isCurrentDataMaintenance:value=>RepositoryAppMetaValidators.dataMaintenance(value)===true,
-    writeValue:(key,value,updatedAt)=>IndexedDb.strictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{const timestamp=Number.isFinite(Date.parse(String(updatedAt||'')))?new Date(String(updatedAt)).toISOString():new Date().toISOString(),request=store.put({key:String(key),version:1,value,updatedAt:timestamp});request.onerror=()=>finish(false,request.error||new Error('historical host metadata write failed'));tx.oncomplete=()=>finish(true,true);},'historical host metadata write aborted'),
-    removeRow:key=>IndexedDb.strictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{const request=store.delete(String(key));request.onerror=()=>finish(false,request.error||new Error('historical host metadata removal failed'));tx.oncomplete=()=>finish(true,true);},'historical host metadata removal aborted'),
-    releaseBackupFile:async _name=>BackupFiles.collect(),normalizeVerifiedRecovery:value=>normalizeVerifiedRecoveryState(value),normalizeAttachmentIntegrity:value=>normalizeAttachmentIntegrityState(value),
-    normalizeRepositoryIntegrity:value=>normalizeRepositoryIntegrityState(value),normalizeRepositoryIntegrityTarget:value=>normalizeRepositoryIntegrityTarget(value),
-    updateStorageHealth:patch=>{writeStorageHealth(patch);return true;},
-    // Moves every renamed record in one transaction, renaming its value format
-    // with it; an old and a new copy that disagree stop the move with nothing
-    // changed.
-    renameRows:(pairs,formats)=>IndexedDb.strictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{
-      const request=store.getAll();request.onerror=()=>finish(false,request.error||new Error('renamed records could not be read'));
-      request.onsuccess=()=>{
-        const rows=request.result||[],byKey=new Map(rows.map(row=>[String(row&&row.key||''),row]));let count=0;
-        for(const row of rows){
-          const key=String(row&&row.key||''),pair=pairs.find(([from])=>from.endsWith(':')?key.startsWith(from):key===from);if(!pair)continue;
-          const target=pair[1]+key.slice(pair[0].length),existing=byKey.get(target),format=row.value&&typeof row.value==='object'?String(row.value.format||''):'';
-          const value=Object.hasOwn(formats,format)?{...row.value,format:formats[format]}:row.value;
-          if(existing&&!sameDataValue(existing.value,value)){try{tx.abort();}catch{}finish(false,new Error(`Record ${key} and its renamed copy ${target} differ. Nothing was renamed.`));return;}
-          if(!existing){store.put({...row,key:target,value});byKey.set(target,{...row,key:target,value});}store.delete(key);count++;
-        }
-        tx.oncomplete=()=>finish(true,count);
-      };
-    },'renamed record transaction aborted')
-  }),
-  live:Object.freeze({
-    migrateActiveSession:()=>AppData.compatibility.migrateActiveSession(),migrateNotes:()=>AppData.compatibility.migrateNotes(),
-    migrateNoteRecovery:()=>AppData.compatibility.migrateNoteRecovery(),migrateDeletionState:()=>AppData.compatibility.migrateDeletionState(),
-    migrateDailyRecords:()=>AppData.compatibility.migrateDailyRecords(),migrateInsightsRevisionEnvelope:()=>AppData.compatibility.migrateInsightsRevisionEnvelope(),
-    cleanupLegacyAttachments:()=>AttachmentStorage.cleanupLegacy(),cleanupObsoleteMetadata:()=>AppData.compatibility.cleanupObsoleteMetadata(),
-    settleUnsupported:()=>UnsupportedData.settle()
-  }),
-  topology:Object.freeze({retire:()=>IndexedDb.retireLegacyStores()}),
-  verification:Object.freeze({
-    activeSession:()=>AppData.compatibility.verifyActiveSession(),notes:()=>AppData.compatibility.verifyNotes(),
-    noteRecovery:()=>AppData.compatibility.verifyNoteRecovery(),deletionState:()=>AppData.compatibility.verifyDeletionState(),
-    dailyRecords:()=>AppData.compatibility.verifyDailyRecords(),insightsRevisionEnvelope:()=>AppData.compatibility.verifyInsightsRevisionEnvelope(),
-    legacyAttachments:()=>AttachmentStorage.verifyLegacyClean(),
-    canonicalStores:async()=>{
-      const issues=[];
-      try{
-        const [noteRows,sessionRows,appMetaProof,repositoryMetadata,libraryState,libraryChunks,restoreState,restorePayload]=await Promise.all([
-          IndexedDb.getAll(DB_NOTES_STORE,'canonical Note verification aborted'),
-          IndexedDb.getAll(DB_ACTIVE_SESSION_STORE,'canonical active-session verification aborted'),
-          AppMetaGateway.verifyAll(),
-          AppData.metadata.verifyCurrent(),
-          JournalAppMeta.read('libraryClearJournalState'),
-          JournalAppMeta.list('libraryClearJournalPayloadPrefix'),
-          JournalAppMeta.read('restoreJournalState'),
-          JournalAppMeta.read('restoreJournalPayload')
-        ]);
-        if(!appMetaProof?.ok)for(const issue of appMetaProof?.issues||[])issues.push(`app-meta:${issue}`);
-        if(!repositoryMetadata?.ok)for(const issue of repositoryMetadata?.issues||[])issues.push(`app-meta:${issue}`);
-        for(const row of noteRows||[]){const clean=DailyRecordCodec.sanitizeCurrentNote(row,row&&row.key);if(!clean||!sameDataValue(row,clean))issues.push(`note:${String(row&&row.key||'?')}`);}
-        for(const row of sessionRows||[]){const clean=ActiveSessionCodec.sanitizeCurrent(row);if(!clean||!sameDataValue(row,clean))issues.push(`active-session:${String(row&&row.id||'?')}`);}
-        if(libraryChunks.length&&!libraryState)issues.push('app-meta-library-orphan-chunks');
-        if(libraryState||libraryChunks.length){try{await AppData.libraryClearJournal.read();}catch(error){issues.push(`app-meta-library-integrity:${String(error&&error.message||error)}`);}}
-        if(!!restoreState!==!!restorePayload)issues.push('app-meta-restore-pair');
-        if(restoreState||restorePayload){try{await AppData.restoreJournal.read();}catch(error){issues.push(`app-meta-restore-integrity:${String(error&&error.message||error)}`);}}
-        const assetKeys=await AttachmentStorage.keys(),assetRows=await AttachmentStorage.list();if(assetKeys.length!==assetRows.length)issues.push('attachment-metadata-noncanonical');
-      }catch(error){issues.push(`verification-error:${String(error&&error.message||error||'unknown')}`);}
-      return Object.freeze({ok:issues.length===0,issues:Object.freeze(issues)});
-    },
-    obsoleteMetadata:()=>AppData.compatibility.verifyObsoleteMetadata(),
-    topology:async()=>{
-      const state=await IndexedDb.topology(),expected=Object.values(DB_STORES).slice().sort(),actual=state.stores.slice().sort();
-      // A newer build's database keeps its own topology; it holds what this build needs.
-      if(state.newer)return Object.freeze({ok:state.usable,newer:true,version:state.version,stores:Object.freeze(actual),legacyStores:state.legacyStores});
-      return Object.freeze({ok:state.version===DB_VER&&state.legacyStores.length===0&&sameDataValue(actual,expected),version:state.version,stores:Object.freeze(actual),legacyStores:state.legacyStores});
-    },
-    freshBackup:verifyFreshCurrentBackup
-  }),
-  backups:Object.freeze({inspectCurrent:(file,options)=>BackupCodec.inspectCurrent(file,options),inspectLegacy:(file,options)=>BackupCodec.inspectLegacy(file,options)}),
-  helpers:Object.freeze({same:sameDataValue,randomUuid:()=>crypto.randomUUID(),nowIso:()=>new Date().toISOString(),isNoteKey:DailyRecordCodec.noteKeys.isKey})
-}));
-const RuntimeBackupCodec=Object.freeze(Object.fromEntries([
-  ...Object.entries(BackupCodec).filter(([key])=>!['inspectCurrent','inspectLegacy'].includes(key)),
-  ['inspect',(file,options)=>CompatibilityFacade.inspectBackup(file,options)]
-]));
+const RuntimeBackupCodec=Object.freeze({...BackupCodec,inspect:BackupCodec.inspectCurrent});
 
 async function reconcileNotesThroughLifecycle(importedNotes,deletions=[]){
   return SessionLifecycle.run('reconciled-notes',{
@@ -9190,16 +8982,16 @@ function currentBackupSourceRevision(){
   const stored=AppData.local.getJson(STORAGE_KEYS.storageHealth,null);
   return stored&&stored.lastLocalSaveAt||readStorageHealth().lastLocalSaveAt||'';
 }
-async function legacyBackupSnapshotRevision(){
+async function fullBackupSnapshotRevision(){
   return JSON.stringify([await AppData.dailyRecords.datasetRevision(),await AppData.deletionRecovery.savedDays(),await AppData.deletionRecovery.notes(),await AppData.deletionRecovery.attachments(),richAssetReferenceRevision,await PlanData.exportData({flush:false}),document.getElementById('plan-input')?.value,await AttachmentStorage.list()]);
 }
 async function backupSnapshotRevision(options={}){
-  if(options&&options.legacy===true||!backupFastFenceReady||!AppData.mutationEpoch.eligible())return legacyBackupSnapshotRevision();
+  if(options&&options.full===true||!backupFastFenceReady||!AppData.mutationEpoch.eligible())return fullBackupSnapshotRevision();
   try{
     const epoch=await AppData.mutationEpoch.read();
-    if(!epoch)return legacyBackupSnapshotRevision();
+    if(!epoch)return fullBackupSnapshotRevision();
     return `study-director.fast-capture-fence.v1|${epoch.token}|${captureMutationGeneration}|${currentBackupSourceRevision()}`;
-  }catch(error){AppDiagnostics.capture('backup.fast-capture-fence',error,'warn');return legacyBackupSnapshotRevision();}
+  }catch(error){AppDiagnostics.capture('backup.fast-capture-fence',error,'warn');return fullBackupSnapshotRevision();}
 }
 const NoteReconciliationUI=ReconciliationUIModule.createController(Object.freeze({ports:Object.freeze({
   configuration:Object.freeze({maxWords:APP_LIMITS.maxRichTextWords,maxBytes:APP_LIMITS.maxRichTextBytes}),
@@ -9636,7 +9428,7 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
   settings:exactAppMetaStorage(DeviceFolderAppMeta,'deviceFolder',APP_META_KEYS.deviceFolder,'Device Backup'),
   transport:(folder,repository)=>DeviceFolderStorageModule.createStorage(Object.freeze({
     folder,
-    identities:Object.freeze({root:repository,legacyRoot:ProfileScope.scoped(EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderLegacyRoot),prefix:EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix,objects:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects,checkpoints:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints,commits:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits}),
+    identities:Object.freeze({root:repository,prefix:EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix,objects:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects,checkpoints:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints,commits:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits}),
     owner:()=>Object.freeze({profile:Profiles.current()?.id||'',scope:ProfileScope.scope,device:InstallationIdentity.getId()}),
     checksum:(blob,{signal}={})=>Exports.run('checksum',{value:blob},{signal}),
     inspectManifest:(file,options)=>RepositoryCheckpointPipeline.inspectManifest(file,options),
@@ -9962,7 +9754,8 @@ function schedulePwaUpdateEvaluation(delay=pwaUpdateRetryDelay()){
 async function evaluateAutomaticPwaUpdate(){
   const state=pwaLatestUpdateState;
   if(!state||!state.updateReady||state.applying||pwaUpdateEvaluationRunning)return false;
-  if(state.bootState==='mismatch'){pwaAutomaticBlockMessage='The loaded release needs confirmation. Use Update Now after saving current work.';return false;}
+  const readOnlyFollower=state.externalUpdate===true&&AppOwnership.status().state===OWNERSHIP_STATES.SECONDARY;
+  if(state.bootState==='mismatch'&&!readOnlyFollower){pwaAutomaticBlockMessage='The loaded release needs confirmation. Use Update Now after saving current work.';return false;}
   pwaUpdateEvaluationRunning=true;
   try{
     const blocker=pwaUpdateBlockReason({automatic:true,external:state.externalUpdate===true});
@@ -10254,15 +10047,6 @@ function currentBackupDiagnosticStates(){
   sample('App update',()=>PwaLifecycle.status(),pwa=>[{job:'App update',state:pwa.phase,busy:pwa.applying||pwa.reloading||pwa.checking,pending:pwa.updateReady,scheduled:pwaUpdateCheckDueAt>0,nextEligibleAt:pwaUpdateCheckDueAt?new Date(pwaUpdateCheckDueAt).toISOString():'',completedAt:pwaLastUpdateCheckAt()?new Date(pwaLastUpdateCheckAt()).toISOString():'',retryAttempt:pwaUpdateCheckFailureCount,bootState:pwa.bootState,cacheState:pwa.cacheState||'',reason:pwa.cacheReason||''}]);
   sample('Attachment verification',()=>AttachmentIntegrityJob.status(),value=>[{job:'Attachment verification',...value,completedAt:attachmentIntegrityView?.checkedAt||'',attemptedAt:attachmentIntegrityView?.attemptedAt||'',cursor:attachmentIntegrityView?.progress?.cursor||0,total:attachmentIntegrityView?.progress?.total||0,coverage:'presence-and-size'}]);
   for(const [target,value] of Object.entries(repositoryIntegrityView?.locations||{})){const bound=!!value?.repositoryScope&&repositoryIntegrityBoundScopes[target]===value.repositoryScope;states.push({job:target+' verification',reason:bound?value?.blockedReason||'':'awaiting-connection',state:!bound?'unbound':value?.recheck?'recheck-pending':value?.partial||value?.cursor?'partial':value?.lastOutcome||'never',completedAt:bound?value?.completedAt||'':'',attemptedAt:bound?value?.attemptedAt||'':'',failedAt:bound?value?.failedAt||'':'',progressBytes:bound?value?.partial?.stored?.offset||0:0,quarantined:bound?value?.quarantinedObjectIds?.length||0:0,history:bound?(value?.history||[]).map(row=>row.at+':'+row.outcome+(row.complete?':full':'')).join(' | '):''});}
-  // The proof that the code reading older formats can be removed (release B):
-  // this device's data is canonical (checked at start), the Device Folder's
-  // old backup folder is gone, and every connected location keeps versions in
-  // the current format only (a version it cannot read may be in any format).
-  sample('Format cleanup',()=>({local:canonicalProof,device:DeviceBackup.status(),locations:BackupProviderRuntime.diagnosticConnections().filter(row=>row.connected)}),value=>{
-    const rows=value.locations.map(row=>({job:`${row.id} formats`,state:!row.formats?'unknown':row.formats.older||row.formats.unreadable?'pending':'ready',currentVersions:row.formats?.current??0,olderVersions:row.formats?.older??0,unreadableVersions:row.formats?.unreadable??0,completedAt:row.formats?.checkedAt||''}));
-    const ready=value.local?.retirementDataReady===true&&!value.device.oldFolder&&rows.every(row=>row.state==='ready');
-    return [{job:'Format cleanup',state:ready?'ready':!value.local||rows.some(row=>row.state==='unknown')?'unknown':'pending',canonical:value.local?.canonical===true,retirementReady:value.local?.retirementDataReady===true,oldFolder:value.device.oldFolder===true,completedAt:value.local?.checkedAt||''},...rows];
-  });
   // Sync with Drive and the profiles on this device: what to read first when
   // a device does not sync.
   sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,waitingForDeviceFolder:value.waitingForDeviceFolder,turnWaits:value.turnWaits,keptVersions:KeptVersions.count()})));
@@ -10271,7 +10055,6 @@ function currentBackupDiagnosticStates(){
   sample('Provider background',()=>BackupProviderRuntime.backgroundStatus(),values=>values);return states;
 }
 // The start-up check of this device's data (verifyCanonicalInstallation).
-let canonicalProof=null;
 async function readDataDiagnosticStates(){
   const samples=[
     {job:'Canonical maintenance record',read:()=>AppData.metadata.diagnostics(),project:value=>({job:'Canonical maintenance record',state:value.maintenanceStatus,pending:value.maintenanceStatus==='pending',completedAt:value.completedAt,queuedDeletions:value.deletions,localRecovery:value.localRecovery})},
@@ -10831,7 +10614,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
     deletionRecovery:AppData.deletionRecovery.flush
   }),
   startup:Object.freeze({
-    migrateCompatibility:async()=>{await UnsupportedData.census();return CompatibilityFacade.migrateLive();},
+    prepareCanonicalData:()=>UnsupportedData.census(),
     restoreAppearance:()=>{
       if(protectedPreferencesHydrated){applyPortablePreferencesToRuntime(protectedPreferencesState);return;}
       applyTheme(PRESENTATION_KERNEL.readStoredTheme((key,fallback)=>AppData.local.getText(key,fallback)),{persist:false});
@@ -10859,7 +10642,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
     applyLaunchRoute:applyPwaLaunchRoute,
     showNameSetup:startProfile,
     inspectStorage:async()=>{const state=await inspectStorageCapability();await NativeCapabilities.offerInstallNotice();return state;},
-    verifyReady:()=>CompatibilityFacade.verifyCanonicalInstallation(),
+    verifyReady:async()=>{const topology=await IndexedDb.topology();if(!topology.usable)throw new Error('Canonical database topology is unavailable.');return Object.freeze({canonical:true});},
     markReady:async proof=>{
       backupFastFenceReady=false;
       if(proof&&proof.canonical===true){
@@ -10870,13 +10653,12 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
       installBackgroundOwners();scheduleDataMaintenance();BackgroundOperations.wake('startup');void KeptVersions.refresh();UnsupportedData.announce();renderUnsupportedData();
       void Profiles.collect().then(result=>{if(result.error)AppDiagnostics.capture('profiles.collect',result.error,'warn');});askProfilePassword();
       void BackupFiles.collect().catch(error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn'));
-      canonicalProof=proof;document.documentElement.dataset.studyDirectorCanonicalBaseline=proof.canonical?'verified':'not-proven';
-      document.documentElement.dataset.studyDirectorRetirementData=proof.retirementDataReady?'ready':proof.canonical?'backup-required':'not-ready';
+      document.documentElement.dataset.studyDirectorCanonicalBaseline=proof.canonical?'verified':'not-proven';
       document.documentElement.dataset.studyDirectorStartupState='ready';
       document.documentElement.dataset.studyDirectorReady='true';
       NoticeCoordinator.dismiss('startup-failure');
       window.dispatchEvent(new CustomEvent('studydirector:canonicalstatus',{detail:proof}));
-      window.dispatchEvent(new CustomEvent('studydirector:startupready',{detail:Object.freeze({version:APP_VERSION,canonical:proof.canonical,retirementDataReady:proof.retirementDataReady})}));
+      window.dispatchEvent(new CustomEvent('studydirector:startupready',{detail:Object.freeze({version:APP_VERSION,canonical:proof.canonical})}));
       void PwaLifecycle.confirmBoot().catch(error=>AppDiagnostics.capture('pwa.boot-confirmation',error,'warn'));
       setTimeout(()=>{void offerDeviceRecoveryIfLocalEmpty({reason:'startup'}).catch(error=>AppDiagnostics.capture('backup.device-recovery-offer',error,'warn'));},0);
       return proof;
@@ -10895,7 +10677,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
     },
     reconcileLifecycle:()=>SessionLifecycle.reconcile('app-restart-ready',{
       date:getReviewDate(),autoDate:document.getElementById('day-date')?.dataset.autoDate==='1',
-      
+
     })
   })
 }));

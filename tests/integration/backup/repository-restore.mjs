@@ -7,7 +7,7 @@ import vm from 'node:vm';
 import {fileURLToPath} from 'node:url';
 import {createProcessingEngine} from '../../helpers/file-processing.mjs';
 import {createMemoryDirectory} from '../../helpers/memory-directory.mjs';
-import {legacyNoteKey} from '../../helpers/note-ids.mjs';
+import {fixtureNoteKey} from '../../helpers/note-ids.mjs';
 import {passwordKey,streamEncryptionInfo,transformEncrypted} from '../../../portable/stream-encryption.js';
 import {testPendingReviewCodec,memoryPendingReviews,paragraphMerge} from '../../helpers/pending-review-codec.mjs';
 
@@ -27,14 +27,14 @@ const defs=freeze({dailyRecord:freeze({idField:'date',backupLimit:100}),note:fre
 const isDate=value=>/^\d{4}-\d{2}-\d{2}$/.test(String(value||''));
 const normalizeArea=(item,key)=>item&&String(key||item.key||'')?freeze({version:2,key:String(key||item.key),text:String(item.text||''),updatedAt:String(item.updatedAt||'2026-09-19T00:00:00.000Z')}):null;
 const dailyRecordCodec=freeze({
-  sanitizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item}):null,
-  canonicalizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:15}):null,
+
+
   sanitizeCurrentDailyRecord:item=>item&&isDate(item.date)&&Number(item.version)===16?freeze({...item}):null,
-  sanitizeImportedNote:normalizeArea,sanitizeCurrentNote:normalizeArea,isSupportedSavedDate:isDate
+  sanitizeCurrentNote:normalizeArea,isSupportedSavedDate:isDate
 });
 const activeSessionCodec=freeze({sanitizeCurrent:item=>item&&item.id==='current'?freeze({...item}):null});
-const reflectionDraftCodec=freeze({format:'study-director.reflection-draft-codec',contractVersion:1,sanitizeCurrent:item=>item&&isDate(item.date)?freeze({...item,reflection:String(item.reflection||'')}):null});
-const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:item=>dailyRecordCodec.sanitizeCurrentDailyRecord(item),note:normalizeArea,noteKey:legacyNoteKey,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
+
+
 const keyedRecord=freeze({create:()=>Object.create(null)}),entityDefinition=type=>defs[type]||null,entityIdentity=(type,item)=>String(item?.[defs[type]?.idField]||'');
 const boundedInt=(value,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
 const jsonByteLength=value=>new TextEncoder().encode(typeof value==='string'?value:JSON.stringify(value)).byteLength;
@@ -43,9 +43,9 @@ const pendingReviewCodec=testPendingReviewCodec(RecordCodecs,{personalDataCodec}
 const assetId='img-1234567890abcdefghijklmn';
 const codec=BackupCodecs.createBackupCodec(freeze({
   personalDataCodec,pendingReviewCodec,processing:freeze({...processing,scope:operation=>operation()}),appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,
-  legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),entityTypes:freeze(Object.keys(defs)),keyedRecord,entities:freeze({entityDefinition,entityIdentity}),helpers:freeze({boundedInt,jsonByteLength}),
+  entityTypes:freeze(Object.keys(defs)),keyedRecord,entities:freeze({entityDefinition,entityIdentity}),helpers:freeze({boundedInt,jsonByteLength}),
   richText:freeze({assetIds:()=>freeze([]),assetIdValid:value=>/^img-[A-Za-z0-9_-]{16,128}$/.test(String(value||'')),imageMimeTypeValid:value=>['image/png','image/jpeg','image/webp','image/gif','image/avif'].includes(String(value||''))}),
-  dailyRecordCodec,activeSessionCodec,compatibilityCodec
+  dailyRecordCodec,activeSessionCodec
 }));
 
 const personalData=freeze({version:2,plans:freeze({draft:null,savedPlans:freeze([]),defaultId:null}),preferences:freeze({studentName:'Repository Source',theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null})});
@@ -75,7 +75,7 @@ const runtimeBackupCodec=freeze({...codec,
 });
 const runtime=BackupModule.createRuntime(freeze({ports:freeze({
   configuration:freeze({appVersion:'repository-restore-test',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits}),
-  
+
   persistence:freeze({
     activeSessionLoad:async()=>({ok:true,value:activeSession,error:null,storage:{idb:true}}),activeSessionSave:async value=>(activeSession=value,{ok:true,value}),activeSessionClear:async()=>(activeSession=null,{ok:true}),activeSessionSettled:async()=>true,
     dailyRecordBackupDates:async()=>({dates:records.map(record=>record.date).sort(),warning:''}),dailyRecordBackupMonth:async month=>records.filter(record=>String(record.date).startsWith(String(month)+'-')).sort((a,b)=>a.date.localeCompare(b.date)),dailyRecordDocuments:async dates=>dates.map(date=>records.find(record=>record.date===date)).filter(Boolean),
@@ -140,66 +140,9 @@ assert.equal(manifest.protectedCheckpointManifest.version,3);assert.equal(manife
 // keyed by title: such a version restores whole, its notes converted, but
 // offers no earlier version of one note (registry: name-keyed-notes-in-backups).
 {
-  const sha256=async text=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))].map(byte=>byte.toString(16).padStart(2,'0')).join('');
-  const plainText=async (blob,gzip)=>{let stream=(await decryptBlob(blob)).stream();if(gzip)stream=stream.pipeThrough(new DecompressionStream('gzip'));return new Response(stream).text();};
-  const written=kind=>kind==='note'?'areaNote':kind,byKindKey=(a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key);
-  const packShard=(kind,key)=>{let hash=2166136261;for(const byte of new TextEncoder().encode(kind+'\u0000'+key)){hash^=byte;hash=Math.imul(hash,16777619)>>>0;}return hash%4;};
-  const files=new Map(objectFiles);let sequence=0;
-  const store=async(row,text)=>{const stored=await encryptBlob(new Blob([text])),objectId='obj_'+String(++sequence).padStart(32,'0');files.set(objectId,stored);return freeze({objectId,...row,fingerprint:await sha256(text),compression:'none',sourceBytes:new TextEncoder().encode(text).byteLength,storedBytes:stored.size,storedChecksum:await codec.checksumBlob(stored)});};
-  const objectText=(kind,key,payload)=>JSON.stringify({format:'study-director.backup-repository-object',version:1,kind,key,payload});
-  const members=[];
-  for(const entry of manifest.objects.filter(item=>item.kind==='structuredPack')){
-    const pack=JSON.parse(await plainText(objectFiles.get(entry.objectId),entry.compression==='gzip'));
-    for(const member of pack.members){
-      const expected=entry.members.find(row=>row.kind===member.kind&&row.key===member.key);assert.equal(await sha256(objectText(member.kind,member.key,member.payload)),expected.fingerprint,'the unpacked object matches its packed fingerprint');
-      members.push(freeze({kind:written(member.kind),key:member.key,payload:member.payload}));
-    }
-  }
-  assert.ok(members.some(member=>member.kind==='areaNote'),'the fixture has packed notes to write under the old name');
-  assert.equal(manifest.objects.some(item=>item.kind==='note'),false,'every note in this checkpoint is packed');
-  const plain=manifest.objects.filter(item=>item.kind!=='structuredPack');
-  const unpackedLayout=[...plain];for(const member of members)unpackedLayout.push(await store({kind:member.kind,key:member.key},objectText(member.kind,member.key,member.payload)));
-  const shards=new Map();for(const member of members){const shard=packShard(member.kind,member.key);if(!shards.has(shard))shards.set(shard,[]);shards.get(shard).push(member);}
-  const packedLayout=[...plain];
-  for(const [shard,rows] of [...shards].sort((a,b)=>a[0]-b[0])){
-    rows.sort(byKindKey);
-    const listed=await Promise.all(rows.map(async row=>{const text=objectText(row.kind,row.key,row.payload);return freeze({kind:row.kind,key:row.key,fingerprint:await sha256(text),sourceBytes:new TextEncoder().encode(text).byteLength});}));
-    packedLayout.push(freeze({...await store({kind:'structuredPack',key:`shard:${shard}`},JSON.stringify({format:'study-director.backup-repository-structured-pack',version:1,shard,members:rows})),members:freeze(listed)}));
-  }
-  // Manifests before version 8 had no versions kept for review, so no count for them.
-  const counts=Object.fromEntries(Object.entries(manifest.counts).filter(([type])=>type!=='pendingReview').map(([type,count])=>[written(type),count]));
-  const current=manifest.protectedCheckpointManifest,protectedV2=freeze({format:current.format,version:2,checkpointId:current.checkpointId,sourceRevision:current.sourceRevision,
-    authority:freeze(Object.fromEntries(Object.entries(current.authority).map(([name,mode])=>[name==='notes'?'areaNotes':name,mode]))),savedDayDeletions:current.savedDayDeletions,areaNoteDeletions:current.noteDeletions,attachmentDeletions:current.attachmentDeletions});
-  const readOlder=async entry=>files.get(entry.objectId)||null,noteKey=members.find(member=>member.kind==='areaNote').key;
-  assert.equal(runtime.repository.noteObject(manifest,legacyNoteKey('Ethics')),null,'a current manifest keys notes by id, never by name');
-  assert.ok(runtime.repository.noteObject(manifest,noteKey),'a current manifest offers an earlier version of one note');
-  for(const version of [1,2,3,4,5]){
-    // Before version 5 the counts also named the checkpoint manifest and personal data.
-    const olderCounts=freeze(version<5?{...counts,checkpointManifest:1,personalData:members.some(item=>item.kind==='personalData')?1:0}:counts);
-    const older=freeze({...manifest,version,counts:olderCounts,protectedCheckpointManifest:protectedV2,objects:freeze(version<4?unpackedLayout:packedLayout)});
-    const candidate=await runtime.repository.inspect(older,readOlder,{interactive:false,committed:true});
-    assert.ok(candidate,`a version ${version} checkpoint can still be inspected for restore`);await candidate.release?.();
-    assert.equal(runtime.repository.noteObject(older,legacyNoteKey('Ethics')),null,`a version ${version} checkpoint names notes by title, so it offers no earlier version of a note`);
-  }
-  // A version 5 manifest file keeps the logical-state fingerprint it was
-  // written with: the same fields, in the same order, under the old names.
-  const olderIdentity=value=>{
-    const rows=[];for(const entry of value.objects){if(entry.kind==='structuredPack')rows.push(...entry.members.map(({kind,key,fingerprint,sourceBytes})=>({kind,key,fingerprint,sourceBytes})));else rows.push({kind:entry.kind,key:entry.key,fingerprint:entry.fingerprint,sourceBytes:entry.sourceBytes});}
-    rows.sort((a,b)=>byKindKey(a,b)||a.fingerprint.localeCompare(b.fingerprint)||a.sourceBytes-b.sourceBytes);
-    const assets=value.assets.map(entry=>entry.missing===true?{assetId:entry.assetId,missing:true}:{assetId:entry.assetId,mimeType:entry.mimeType,size:entry.size,checksum:entry.checksum,name:entry.name,library:entry.library===true}).sort((a,b)=>a.assetId.localeCompare(b.assetId));
-    const p=value.protectedCheckpointManifest,deletions=(list,key)=>list.map(entry=>({[key]:entry[key],deletedAt:entry.deletedAt})).sort((a,b)=>a[key].localeCompare(b[key])||a.deletedAt.localeCompare(b.deletedAt));
-    return {format:'study-director.managed-backup-logical-state',version:1,counts:value.counts,objects:rows,assets,deletions:{savedDays:deletions(p.savedDayDeletions,'date'),areaNotes:deletions(p.areaNoteDeletions,'key'),attachments:deletions(p.attachmentDeletions,'assetId')}};
-  };
-  const publishedV8=JSON.parse(await plainText(publishedManifestBlob,false));assert.equal(publishedV8.version,8);
-  const olderBase={...publishedV8,version:5,counts,protectedCheckpointManifest:protectedV2,objects:packedLayout},olderFingerprint=await sha256(JSON.stringify(olderIdentity(olderBase)));
-  assert.notEqual(olderFingerprint,publishedV8.logicalFingerprint,'the old names give a different fingerprint');
-  const olderManifest=await runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...olderBase,logicalFingerprint:olderFingerprint})])),{interactive:false});
-  assert.equal(olderManifest.version,5);assert.equal(olderManifest.logicalFingerprint,olderFingerprint,'a version 5 manifest verifies against the fingerprint it was written with');
-  assert.equal(olderManifest.counts.note,manifest.counts.note,'its note count reads under the current name');assert.deepEqual(olderManifest.protectedCheckpointManifest.noteDeletions,current.noteDeletions);
-  await assert.rejects(runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...olderBase,logicalFingerprint:publishedV8.logicalFingerprint})])),{interactive:false}),/logical-state fingerprint failed verification/u,'a version 5 manifest is not checked under the new names');
-  // Versions 6 and 7 were made only by unreleased builds: refused.
-  for(const version of [6,7])await assert.rejects(runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...olderBase,version,logicalFingerprint:olderFingerprint})])),{interactive:false}),/checkpoint is invalid/u,`a version ${version} manifest is refused`);
+ for(const version of [1,2,3,4,5,6,7,9])await assert.rejects(runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...manifest,version})])),{interactive:false}),/invalid|unsupported/);
 }
+
 // Simulate another installation receiving this checkpoint rather than the publishing installation's newly established local ancestry.
 reconciliationBase=null;reconciliationBaseNotes=Object.create(null);
 
@@ -209,7 +152,7 @@ const localAssetsBeforeLeaseCheck=new Map(assets);assets.clear();
 const managedPortableBefore=freeze({...portablePathMetrics}),candidate=await runtime.repository.inspect(manifest,leasedReadObject,{interactive:false,committed:true});
 assert.equal(portablePathMetrics.containers,managedPortableBefore.containers,'Managed repository inspection must not encode a temporary .sdbackup container.');
 assert.equal(portablePathMetrics.inspections,managedPortableBefore.inspections,'Managed repository inspection must not reopen/decode a temporary .sdbackup container.');
-assert.equal(candidate.kind,'study-director.backup-candidate');assert.equal(candidate.preview.formatVersion,23);assert.equal(candidate.preview.reconciliationCapable,true);assert.equal(candidate.preview.encrypted,true,'repository-source encryption state must survive the internal verified-snapshot boundary');assert.equal(candidate.preview.authenticated,true);assert.equal(candidate.preview.checkpoint.checkpointId,checkpointId);
+assert.equal(candidate.kind,'study-director.backup-candidate');assert.equal(candidate.preview.formatVersion,23);assert.equal(candidate.preview.captureAuthority,'canonical-complete');assert.equal(candidate.preview.encrypted,true,'repository-source encryption state must survive the internal verified-snapshot boundary');assert.equal(candidate.preview.authenticated,true);assert.equal(candidate.preview.checkpoint.checkpointId,checkpointId);
 for(const objectId of attachmentObjectIds)assert.equal(leaseReleaseCounts.get(objectId)||0,0,'Managed candidate inspection must retain verified attachment leases until candidate restore/release.');
 const forgedCandidate=freeze({kind:'study-director.backup-candidate',verified:true,preview:candidate.preview,release:async()=>{}});
 await assert.rejects(()=>runtime.repository.bringIn(forgedCandidate),/current verified Study Director inspection/i,'A look-alike candidate must not cross the private verified-snapshot seal.');
@@ -440,7 +383,7 @@ records.push(freeze({version:16,recordKind:'study',date:'2026-09-21',reflection:
 {
   const saved={records:[...records],notes:{...notes},assets:new Map(assets),deletions:[...deletions],currentPersonal};
   const folder=createMemoryDirectory(),deviceStorage=registry.require('device-folder-storage',1).createStorage(freeze({
-    folder:()=>folder,identities:freeze({root:'Study Director - QA - Test Device',legacyRoot:'Study-Director-Automatic-Backup-Repository',prefix:'Study Director',objects:'objects',checkpoints:'checkpoints',commits:'commits'}),owner:()=>({profile:'prof_qa_mve00000_abcdef01',scope:'',device:'inst_qa_test_mve00000_abcdef01'}),
+    folder:()=>folder,identities:freeze({root:'Study Director - QA - Test Device',prefix:'Study Director',objects:'objects',checkpoints:'checkpoints',commits:'commits'}),owner:()=>({profile:'prof_qa_mve00000_abcdef01',scope:'',device:'inst_qa_test_mve00000_abcdef01'}),
     checksum:async blob=>codec.checksumBlob(blob),inspectManifest:(file,options)=>runtime.repository.inspectManifest(file,options),
     environment:freeze({canMutate:()=>true,now:()=>Date.now(),setTimeout,clearTimeout,yieldTask:async()=>{}}),
     limits:freeze({publicationMaxAgeMs:24*3600000,publicationAssertionMarginMs:30*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,responseTimeoutMs:10000})

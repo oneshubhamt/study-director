@@ -153,33 +153,5 @@ assert.equal(budget.app.notes.protectUnsaved(),true);
 // deletion records permanent ids, then folds the journal rows and v1
 // localStorage payload into the stored notes once, the newer revision winning,
 // and removes them.
-const legacyEntry={key:'legacy',label:'Legacy',text:'legacy-unsaved',updatedAt:'2026-09-04T05:00:00.000Z',entityType:'areaNote',entityId:'legacy',schemaVersion:1,deviceId:'dev_legacy',createdAt:'2026-09-04T05:00:00.000Z',deleted:false,syncStatus:'pending'};
-const journalRow=(key,entry,updatedAt)=>[`areaNoteRecovery.v1:${key}`,{key:`areaNoteRecovery.v1:${key}`,version:1,value:{format:'study-director.area-note-recovery',version:1,key,entry,updatedAt},updatedAt}];
-const legacyLocal=new Map([['pending',{version:1,updatedAt:'2026-09-04T05:00:01.000Z',pending:{legacy:structuredClone(legacyEntry)}}]]),legacyStores=emptyStores();
-legacyStores.area.set('journaled',{version:2,key:'journaled',label:'Journaled',text:'stored',updatedAt:'2026-09-04T05:00:00.000Z'});
-legacyStores.area.set('outdated',{version:2,key:'outdated',label:'Outdated',text:'stored newer',updatedAt:'2026-09-04T05:10:00.000Z'});
-legacyStores.area.set('removed',{version:2,key:'removed',label:'Removed',text:'deleted in the journal',updatedAt:'2026-09-04T05:00:00.000Z'});
-for(const [key,value] of [
-  journalRow('journaled',{version:2,key:'journaled',label:'Journaled',text:'journaled newer',updatedAt:'2026-09-04T05:05:00.000Z'},'2026-09-04T05:05:00.000Z'),
-  journalRow('outdated',{version:2,key:'outdated',label:'Outdated',text:'journaled older',updatedAt:'2026-09-04T05:05:00.000Z'},'2026-09-04T05:05:00.000Z'),
-  journalRow('removed',{key:'removed',deleted:true,updatedAt:'2026-09-04T05:05:00.000Z'},'2026-09-04T05:05:00.000Z'),
-  journalRow('later-deleted',{version:2,key:'later-deleted',label:'Later deleted',text:'edit before deletion',updatedAt:'2026-09-04T05:00:00.000Z'},'2026-09-04T05:00:00.000Z'),
-  ['noteDeletion:later-deleted',{key:'noteDeletion:later-deleted',version:1,value:{format:'study-director.note-deletion',version:1,key:'later-deleted',deletedAt:'2026-09-04T05:01:00.000Z'},updatedAt:'2026-09-04T05:01:00.000Z'}]
-])legacyStores.meta.set(key,value);
-const legacy=createHarness(legacyLocal,legacyStores);
-assert.equal((await legacy.app.compatibility.migrateNotes()).status,'migrated','name-keyed notes take their ids first');
-const folded=await legacy.app.compatibility.migrateNoteRecovery();assert.equal(folded.status,'migrated');
-assert.equal(legacyStores.area.get(noteId('legacy')).text,'legacy-unsaved','the v1 localStorage payload is stored');
-assert.equal(legacyStores.area.get(noteId('journaled')).text,'journaled newer','a newer journal entry is stored');
-assert.equal(legacyStores.area.get(noteId('outdated')).text,'stored newer','a newer stored note is kept');
-assert.equal(legacyStores.area.has(noteId('removed')),false,'a newer journal deletion is applied');assert.ok(legacyStores.meta.has(`noteDeletion:${noteId('removed')}`),'the deletion is recorded');
-assert.equal(legacyStores.area.has(noteId('later-deleted')),false,'a note deleted after the journaled edit stays deleted');
-assert.equal([...legacyStores.area.keys()].every(key=>/^n_[0-9a-f]{16}$/u.test(key)),true,'no name-keyed row remains');
-assert.equal(journalRows(legacyStores).length,0,'every journal row is removed');assert.equal(legacyLocal.has('pending'),false,'the v1 payload is removed');
-assert.equal((await legacy.app.compatibility.verifyNoteRecovery()).ok,true);
-assert.equal((await legacy.app.compatibility.migrateNoteRecovery()).status,'not-needed');
-await legacy.app.notes.load();assert.equal(legacy.app.notes.get('journaled').text,'journaled newer');
-legacyStores.meta.set(...journalRow('residue',{version:2,key:'residue',label:'Residue',text:'left behind',updatedAt:'2026-09-04T05:00:00.000Z'},'2026-09-04T05:00:00.000Z'));
-assert.deepEqual([...(await legacy.app.compatibility.verifyNoteRecovery()).issues],['note-recovery-residue'],'verification reports journal rows that remain');
-
-console.log(JSON.stringify({status:'PASS',rapidEdits:100,uniqueRapidRevisions:new Set(revisions).size,browserCopyWritesWhileSaving:first.localWrites.all,clockSkewSafe:true,closeRecovered:true,staleCopyDropped:true,emptyRecovered:true,explicitDelete:true,reloadKeepsEdit:true,failedWriteRecovered:true,conflictCopyKept:true,unsavedSetCopied:true,largeNoteSaved:Buffer.byteLength(largeText),legacyFolded:true,validatedRichFastPath:true,canonicalNoOpFastPath:true},null,2));
+assert.equal(first.app.compatibility,undefined,'historical migration is not part of the repository API');
+console.log(JSON.stringify({status:'PASS',rapidEdits:100,uniqueRapidRevisions:new Set(revisions).size,browserCopyWritesWhileSaving:first.localWrites.all,clockSkewSafe:true,closeRecovered:true,staleCopyDropped:true,emptyRecovered:true,explicitDelete:true,reloadKeepsEdit:true,failedWriteRecovered:true,conflictCopyKept:true,unsavedSetCopied:true,largeNoteSaved:Buffer.byteLength(largeText),validatedRichFastPath:true,canonicalNoOpFastPath:true},null,2));

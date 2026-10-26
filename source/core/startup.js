@@ -20,7 +20,7 @@ registry.define('startup-lifecycle',1,()=>{
       'planDraft','preferences','activeSession','notes','deletionRecovery'
     ],'Startup/lifecycle flushers');
     functions(input.startup,[
-      'migrateCompatibility','restoreAppearance','bindDom','recoverInterruptedLibraryClear','recoverInterruptedRestore','loadNotes','hydrateDrafts','previewPlan',
+      'prepareCanonicalData','restoreAppearance','bindDom','recoverInterruptedLibraryClear','recoverInterruptedRestore','loadNotes','hydrateDrafts','previewPlan',
       'startClock','startHeaderClock','refreshCoreUi','renderRecovery','checkBackup',
       'showEmptyIfNeeded','openInitialTab','restoreActiveSession','showNameSetup','inspectStorage','reconcileLifecycle','applyLaunchRoute','verifyReady','markReady','reportFailure','clearFailure'
     ],'Startup stages');
@@ -168,7 +168,7 @@ registry.define('startup-lifecycle',1,()=>{
         try{
           await runStage('ownership-install',ownership.install);
           await runStage('ownership-evaluate',ownership.evaluate);
-          await runStage('compatibility-migration',startup.migrateCompatibility);
+          await runStage('canonical-data-validation',startup.prepareCanonicalData);
           await runStage('lifecycle-install',installLifecycle);
           await runStage('appearance-restore',startup.restoreAppearance);
           await runStage('dom-bindings-install',installDomBindings);

@@ -5,7 +5,6 @@ import {createFakeClock} from '../../helpers/fake-clock.mjs';
 const clock=createFakeClock('2026-09-15T12:00:00.000Z');
 const h=createHarness(new Map(),null,{clock});
 const {app,idbDurability,stores}=h;
-stores.meta.set('dailyRecordMigration',{key:'dailyRecordMigration',version:1,value:{recordVersion:1,summaryVersion:1,complete:true,recordCount:0},updatedAt:'2026-09-15T12:00:00.000Z'});
 const strictCount=()=>idbDurability.strict;
 const normalCount=()=>idbDurability.normal;
 

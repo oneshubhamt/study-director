@@ -19,7 +19,6 @@ registry.define('repositories',1,()=>{
     const attachmentId=value=>/^(?:att|img)-[a-z0-9-]{20,80}$/u.test(String(value||''));
     const backupPreparationUnit=value=>{const unit=String(value||'');if(unit==='*'||unit==='personalData'||unit==='activeSession')return true;if(/^dailyRecordPack:\d{4}-(?:0[1-9]|1[0-2])$/u.test(unit))return true;if(unit.startsWith('note:'))return isNoteKey(unit.slice('note:'.length));if(unit.startsWith('pendingReview:'))return /^pr_[a-f0-9]{32}$/u.test(unit.slice('pendingReview:'.length));if(unit.startsWith('attachmentAsset:'))return attachmentId(unit.slice('attachmentAsset:'.length));return false;};
     return freeze({
-      dailyRecordMigration:value=>!!(exactValue(value,['recordVersion','summaryVersion','complete','recordCount'])&&Number(value.recordVersion)===DATA_CONTRACT.schemas.DailyRecord.version&&Number(value.summaryVersion)===DATA_CONTRACT.schemas.DailySummary.version&&value.complete===true&&Number.isSafeInteger(Number(value.recordCount))&&Number(value.recordCount)>=0),
       planDraft:value=>value===null||(typeof value==='string'&&value.length<=APP_LIMITS.maxScheduleChars),
       planLibrary:value=>{if(!exactValue(value,['savedPlans','defaultId']))return false;try{const clean=PersonalDataCodec.plans({draft:null,savedPlans:value.savedPlans,defaultId:value.defaultId});return sameDataValue(value,{savedPlans:clean.savedPlans,defaultId:clean.defaultId});}catch{return false;}},
       personalPreferences:value=>!!PersonalDataCodec.currentPortablePreferences(value),
@@ -35,22 +34,19 @@ registry.define('repositories',1,()=>{
   }
   function createAppData(input){
     exactObject(input,[
-      'local','indexedDb','appMeta','compatibilityAppMeta','installationIdentity','dailyRecordCodec','activeSessionCodec','compatibilityCodec','personalDataCodec','pendingReviewCodec','keyedRecord','journals',
-      'limits','dataContract','stores','legacyStores','keys','legacyKeys','metaKeys','obsoleteMetaKeys','activeSessionId','helpers','hooks','clock','notesRepositoryModule','saveLaneModule'
+      'local','indexedDb','appMeta','installationIdentity','dailyRecordCodec','activeSessionCodec','personalDataCodec','pendingReviewCodec','keyedRecord','journals',
+      'limits','dataContract','stores','keys','metaKeys','activeSessionId','helpers','hooks','clock','notesRepositoryModule','saveLaneModule'
     ],'AppData input');
-    if(!Object.isFrozen(input.local)||!Object.isFrozen(input.indexedDb)||!Object.isFrozen(input.appMeta)||!Object.isFrozen(input.compatibilityAppMeta)||!Object.isFrozen(input.installationIdentity)||
-      !Object.isFrozen(input.dailyRecordCodec)||!Object.isFrozen(input.activeSessionCodec)||!Object.isFrozen(input.compatibilityCodec)||!Object.isFrozen(input.personalDataCodec)||!Object.isFrozen(input.pendingReviewCodec)||
-      !Object.isFrozen(input.keyedRecord)||!Object.isFrozen(input.journals)||!Object.isFrozen(input.limits)||!Object.isFrozen(input.dataContract)||!Object.isFrozen(input.metaKeys)||!Object.isFrozen(input.obsoleteMetaKeys)||!Object.isFrozen(input.clock)){
+    if(!Object.isFrozen(input.local)||!Object.isFrozen(input.indexedDb)||!Object.isFrozen(input.appMeta)||!Object.isFrozen(input.installationIdentity)||
+      !Object.isFrozen(input.dailyRecordCodec)||!Object.isFrozen(input.activeSessionCodec)||!Object.isFrozen(input.personalDataCodec)||!Object.isFrozen(input.pendingReviewCodec)||
+      !Object.isFrozen(input.keyedRecord)||!Object.isFrozen(input.journals)||!Object.isFrozen(input.limits)||!Object.isFrozen(input.dataContract)||!Object.isFrozen(input.metaKeys)||!Object.isFrozen(input.clock)){
       throw new TypeError('AppData contracts must be frozen.');
     }
     exactObject(input.stores,[
       'dailyRecords','dailySummaries','notes','activeSessions','appMeta'
     ],'AppData stores');
-    exactObject(input.legacyStores,['syncQueue','tombstones'],'AppData legacy stores');
-    exactObject(input.keys,['recovery','fallbackDailyRecords','noteRescue','deletionRecovery','legacySyncEmergency'],'AppData storage keys');
-    exactObject(input.legacyKeys,['notesPending','noteRecoveryPrefix'],'AppData legacy storage keys');
-    exactObject(input.metaKeys,['dailyRecordMigration','planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','savedDayDeletionPrefix','noteDeletionPrefix','attachmentDeletionPrefix','pendingReviewPrefix'],'AppData metadata keys');
-    if(!Array.isArray(input.obsoleteMetaKeys)||input.obsoleteMetaKeys.some(key=>typeof key!=='string'||!key)||new Set(input.obsoleteMetaKeys).size!==input.obsoleteMetaKeys.length)throw new TypeError('AppData obsolete metadata keys are invalid.');
+    exactObject(input.keys,['recovery','fallbackDailyRecords','noteRescue','deletionRecovery'],'AppData storage keys');
+    exactObject(input.metaKeys,['planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance','backupPreparationUnitPrefix','savedDayDeletionPrefix','noteDeletionPrefix','attachmentDeletionPrefix','pendingReviewPrefix'],'AppData metadata keys');
     functions(input.helpers,[
       'boundedInt','boundedNumber','clampText','clampEditorContent','editorContentWithinLimits','wipeObject','isValidIsoDate','isCanonicalScheduleText','sameDataValue',
       'activeSessionScheduleFingerprint','normalizeAreaName','displayAreaName','isoDateDay','normalizeTimestamp','jsonByteLength'
@@ -73,9 +69,7 @@ registry.define('repositories',1,()=>{
     const APP_LIMITS=input.limits;
     const DATA_CONTRACT=input.dataContract;
     const STORAGE_KEYS=input.keys;
-    const LEGACY_STORAGE_KEYS=input.legacyKeys;
     const META_KEYS=input.metaKeys;
-    const OBSOLETE_META_KEYS=input.obsoleteMetaKeys;
     const ACTIVE_SESSION_ID=input.activeSessionId;
     const decisionNowMs=input.clock.nowMs;
     const DB_DAILY_RECORD_STORE=input.stores.dailyRecords;
@@ -83,21 +77,15 @@ registry.define('repositories',1,()=>{
     const DB_NOTES_STORE=input.stores.notes;
     const DB_ACTIVE_SESSION_STORE=input.stores.activeSessions;
     const DB_APP_META_STORE=input.stores.appMeta;
-    const DB_LEGACY_SYNC_QUEUE_STORE=input.legacyStores.syncQueue;
-    const DB_LEGACY_TOMBSTONE_STORE=input.legacyStores.tombstones;
     const LocalStorageContract=input.local;
     const IndexedDb=input.indexedDb;
     const Meta=input.appMeta;
-    const CompatibilityMeta=input.compatibilityAppMeta;
     if(Meta.format!=='study-director.app-meta-owner'||Meta.contractVersion!==1||Meta.owner!=='repositories')throw new TypeError('Repository appMeta capability is invalid.');
-    if(CompatibilityMeta.format!=='study-director.app-meta-owner'||CompatibilityMeta.contractVersion!==1||CompatibilityMeta.owner!=='compatibility')throw new TypeError('Compatibility appMeta capability is invalid.');
     const InstallationIdentity=input.installationIdentity;
     if(InstallationIdentity.format!=='study-director.installation-identity'||InstallationIdentity.contractVersion!==4||typeof InstallationIdentity.getId!=='function')throw new TypeError('Installation identity contract is invalid.');
     const DailyRecordCodec=input.dailyRecordCodec,NoteKeys=DailyRecordCodec.noteKeys;
     if(!NoteKeys||!Object.isFrozen(NoteKeys)||typeof NoteKeys.isId!=='function'||typeof NoteKeys.isKey!=='function')throw new TypeError('Note key contract is invalid.');
     const ActiveSessionCodec=input.activeSessionCodec;
-    const CompatibilityCodec=input.compatibilityCodec;
-    if(CompatibilityCodec.format!=='study-director.compatibility-codecs'||CompatibilityCodec.contractVersion!==1)throw new TypeError('Compatibility codec contract is invalid.');
     const PersonalDataCodec=input.personalDataCodec;
     const PendingReviewCodec=input.pendingReviewCodec;
     if(PendingReviewCodec.format!=='study-director.pending-review-codec'||PendingReviewCodec.contractVersion!==1)throw new TypeError('Pending-review codec contract is invalid.');
@@ -124,10 +112,7 @@ registry.define('repositories',1,()=>{
       onCanonicalCommit
     }=input.hooks;
     const AppDiagnostics=freeze({capture});
-    function compatibilityWriteToken(reason){
-      try{return issueWriteToken(reason,{allowHydrating:true});}
-      catch(error){if(isOwnershipLostError(error))return null;throw error;}
-    }
+
     const getInstallationId=InstallationIdentity.getId;
     const {
       buildDailyRecordSummary,sanitizeCurrentDailyRecord,sanitizeCurrentNote,
@@ -467,7 +452,7 @@ const InsightsDatasetRevision=(()=>{
   }
   function committed(state){if(state&&state.value){accept(state.value,state.reason);refreshActive();}}
   function invalidateVolatile(reason='fallback-record-change'){volatileRevision+=1;lastReason=clampText(reason||'',80);refreshActive();return snapshot();}
-  async function bump(reason='daily-record-change'){let state=null;try{await Meta.transaction('readwrite',(meta,tx,finish)=>{state=stage(tx,reason);tx.oncomplete=()=>finish(true);tx.onabort=()=>finish(false,tx.error||new Error('Insights dataset revision is not canonical. Compatibility migration must complete first.'));},{abortMessage:'insights revision update aborted'});committed(state);}catch(error){capture('insights.revision-bump',error);invalidateVolatile(reason);}return snapshot();}
+  async function bump(reason='daily-record-change'){let state=null;try{await Meta.transaction('readwrite',(meta,tx,finish)=>{state=stage(tx,reason);tx.oncomplete=()=>finish(true);tx.onabort=()=>finish(false,tx.error||new Error('Insights dataset revision is not canonical. Only current canonical metadata is supported.'));},{abortMessage:'insights revision update aborted'});committed(state);}catch(error){capture('insights.revision-bump',error);invalidateVolatile(reason);}return snapshot();}
   function snapshot(){return Object.freeze({format:FORMAT,version:VALUE_VERSION,counter:current&&current.counter||null,updatedAt:current&&current.updatedAt||null,revision:revisionKey(current),volatileRevision,lastReason,lastError});}
   return Object.freeze({get,bump,stage,committed,invalidateVolatile,snapshot,normalize,key:KEY});
 })();
@@ -703,7 +688,7 @@ async function idbGetRecordsByMonth(month){
 function currentDailyRecordDocuments(records,label='Daily Records'){
   const input=Array.isArray(records)?records:[];
   const docs=input.map(sanitizeCurrentDailyRecord);
-  if(docs.some(record=>!record))throw new Error(`${label} contain noncanonical data. Compatibility migration or import conversion must complete before persistence.`);
+  if(docs.some(record=>!record))throw new Error(`${label} contain noncanonical data. Only current canonical data may be persisted.`);
   return docs;
 }
 async function idbPutDailyRecordBatch(records,{bumpRevision=true,ownershipToken=null,preserveNewer=false}={}){
@@ -847,14 +832,14 @@ async function loadActiveSessionRecord(retry=0,options={}){
   let localSession=null;
   try{
     const rawLocal=readLocalRecoverySession();
-    const migratedLocal=rawLocal?ActiveSessionCodec.sanitizeCurrent(rawLocal):null;
-    if(rawLocal&&!migratedLocal)throw canonicalRuntimeError('Active Session recovery resolved to a non-current canonical session.');
-    localSession=pendingDeletionShadowsEntity('activeSession',ACTIVE_SESSION_ID,migratedLocal)?null:migratedLocal;
+    const canonicalLocal=rawLocal?ActiveSessionCodec.sanitizeCurrent(rawLocal):null;
+    if(rawLocal&&!canonicalLocal)throw canonicalRuntimeError('Active Session recovery resolved to a non-current canonical session.');
+    localSession=pendingDeletionShadowsEntity('activeSession',ACTIVE_SESSION_ID,canonicalLocal)?null:canonicalLocal;
     const rawIdb=await idbGetActiveSession();
     if(readEpoch!==activeSessionMutationEpoch)return activeSessionEpochFallback(retry,options);
-    const migratedIdb=rawIdb?ActiveSessionCodec.sanitizeCurrent(rawIdb):null;
-    if(rawIdb&&!migratedIdb)throw canonicalRuntimeError('Stored Active Session is not in the current canonical schema.');
-    const idbSession=migratedIdb&&!pendingDeletionShadowsEntity('activeSession',ACTIVE_SESSION_ID,migratedIdb)?migratedIdb:null;
+    const canonicalIdb=rawIdb?ActiveSessionCodec.sanitizeCurrent(rawIdb):null;
+    if(rawIdb&&!canonicalIdb)throw canonicalRuntimeError('Stored Active Session is not in the current canonical schema.');
+    const idbSession=canonicalIdb&&!pendingDeletionShadowsEntity('activeSession',ACTIVE_SESSION_ID,canonicalIdb)?canonicalIdb:null;
     const value=newerActiveSession(idbSession,localSession);
     if(value&&value.revision)lastSessionRevision=Math.max(lastSessionRevision,Number(value.revision)||0);
     let reconciliationError=null;
@@ -980,24 +965,24 @@ function mergeDailyRecordSets(...sets){
   });
   return [...byDate.values()];
 }
-async function migrateFallbackDailyRecords(records,{strict=false}={}){
+async function replayFallbackDailyRecords(records,{strict=false}={}){
   if(!records.length)return true;
-  if(!appCanMutate()){if(strict)throw new Error('Fallback migration requires study control.');return;}
+  if(!appCanMutate()){if(strict)throw new Error('Fallback replay requires study control.');return;}
   let ownershipToken;
-  try{ownershipToken=issueWriteToken('migrating fallback daily records');}catch(error){if(strict)throw error;return;}
+  try{ownershipToken=issueWriteToken('replaying fallback daily records');}catch(error){if(strict)throw error;return;}
   const finishWrite=beginAuthoritativeWrite();
-  const migratedDates=new Set();
+  const replayedDates=new Set();
   try{
     for(const record of records){
       try{
-        assertWriteToken(ownershipToken,'the fallback-record migration');
+        assertWriteToken(ownershipToken,'the fallback-record replay');
         await idbPut(record,{ownershipToken,preserveNewer:true});
-        if(record&&isValidIsoDate(record.date))migratedDates.add(record.date);
+        if(record&&isValidIsoDate(record.date))replayedDates.add(record.date);
       }catch(e){if(strict)throw e;break;}
     }
-    if(!migratedDates.size)return;
+    if(!replayedDates.size)return;
     assertWriteToken(ownershipToken,'the fallback-record cleanup');
-    const remaining=retireFallbackDailyRecords(records.filter(record=>migratedDates.has(record.date)));
+    const remaining=retireFallbackDailyRecords(records.filter(record=>replayedDates.has(record.date)));
     if(strict&&remaining.length)throw new Error('Fallback Daily Records still require reconciliation.');
     if(!remaining.length)confirmDailyRecordStorage();
     return true;
@@ -1087,7 +1072,7 @@ async function getDailyRecordSummaries(){
       return records.map(record=>materializeDailyRecordSummary(buildDailyRecordSummary(record)));
     }
     const records=filterPendingDeletedEntities(mergeDailyRecordSets(await idbAllRecords(),fallback),'dailyRecord','date');
-    migrateFallbackDailyRecords(fallback);
+    replayFallbackDailyRecords(fallback);
     return records.map(record=>materializeDailyRecordSummary(buildDailyRecordSummary(record)));
   }catch(e){
     if(isCanonicalRuntimeError(e))throw e;
@@ -1129,7 +1114,7 @@ async function getDailyRecord(date,options={}){
   const fallback=fallbackDailyRecordsGet().find(r=>r.date===date)||null;
   try{
     const record=newerDailyRecord(readableDailyRecord(await idbGetRecord(date)),fallback);
-    if(fallback)migrateFallbackDailyRecords([fallback]);
+    if(fallback)replayFallbackDailyRecords([fallback]);
     else confirmDailyRecordStorage();
     const value=pendingDeletionShadowsEntity('dailyRecord',date,record)?null:materializeDailyRecordView(record);
     return value;
@@ -1143,7 +1128,7 @@ async function getDailyRecords(options={}){
   const fallback=fallbackDailyRecordsGet();
   try{
     const raw=filterPendingDeletedEntities(mergeDailyRecordSets(await idbAllRecords(),fallback),'dailyRecord','date');
-    if(fallback.length)migrateFallbackDailyRecords(fallback);
+    if(fallback.length)replayFallbackDailyRecords(fallback);
     else confirmDailyRecordStorage();
     return raw.map(materializeDailyRecordView).filter(Boolean);
   }catch(e){if(options?.strict||isCanonicalRuntimeError(e))throw e;showStorageFallbackWarning(e&&e.message?e.message:'saved-date database failed');return fallback.map(materializeDailyRecordView).filter(Boolean);}
@@ -1191,7 +1176,7 @@ async function clearAllDailyRecords(){
   const finishWrite=beginAuthoritativeWrite();
   try{
     const fallback=fallbackDailyRecordsGet();
-    if(fallback.length)await migrateFallbackDailyRecords(fallback);
+    if(fallback.length)await replayFallbackDailyRecords(fallback);
     if(fallbackDailyRecordsGet().length)throw new Error('Saved-date fallback records could not be moved into IndexedDB. Nothing was deleted. Export a backup and retry after browser storage recovers.');
     assertWriteToken(ownershipToken,'the atomic Library clear');
     const result=await idbStrictTransaction([DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
@@ -1287,7 +1272,7 @@ async function runDataMaintenance(options={}){
     const source=await readSource();
     if(force||dataMaintenanceContinuation?.owner!==ownershipRevision||!sameSource(source,dataMaintenanceContinuation.source))dataMaintenanceContinuation={owner:ownershipRevision,source,phase:0};
     const continuation=dataMaintenanceContinuation,phases=[
-      async()=>{const fallback=fallbackDailyRecordsGet();if(fallback.length)await migrateFallbackDailyRecords(fallback,{strict:true});},
+      async()=>{const fallback=fallbackDailyRecordsGet();if(fallback.length)await replayFallbackDailyRecords(fallback,{strict:true});},
       async()=>{if(await NotesRepository.load({strict:true})!==true)throw new Error('Notes could not be loaded for maintenance.');},
       async()=>{await NotesRepository.flush({strict:true});},
       async()=>{const rawRecovery=readLocalRecoveryJson(STORAGE_KEYS.recovery,null);if(rawRecovery&&!sessionFromRecoveryEnvelope(rawRecovery)&&!LocalStorageContract.remove(STORAGE_KEYS.recovery))throw LocalStorageContract.lastError||new Error('Invalid session recovery could not be removed.');},
@@ -1538,462 +1523,7 @@ async function runDataMaintenance(options={}){
       const localRecovery=LocalStorageContract.getText(STORAGE_KEYS.recovery,null)!==null;if(LocalStorageContract.lastError)throw LocalStorageContract.lastError;
       return freeze({maintenanceStatus:maintenance?.status||'never',completedAt:maintenance?.completedAt||'',deletions:deletions.length,localRecovery});
     }});
-/* COMPATIBILITY ---------------------------------------------------------
-   Read-once conversions of older stored forms. They are reached only through
-   the compatibility namespace just below (AppData.compatibility), which only
-   the compatibility host calls at start-up. Retiring the compatibility layer
-   deletes this block and its wiring; nothing else depends on it.
-   ---------------------------------------------------------------------- */
-// Historical appMeta residue is intentionally raw only inside this compatibility cleanup path.
-function rawLegacyMetaGet(key){return idbGet(DB_APP_META_STORE,String(key),'legacy metadata read aborted');}
-function rawLegacyMetaList(){return idbGetAll(DB_APP_META_STORE,'legacy metadata list aborted');}
-function rawLegacyMetaDelete(key,{ownershipToken=null,reason='legacy metadata delete'}={}){
-  return idbStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{
-    if(ownershipToken)assertWriteToken(ownershipToken,reason);
-    const req=store.delete(String(key));req.onerror=()=>finish(false,req.error||new Error('legacy metadata delete failed'));
-    req.onsuccess=()=>{if(!ownershipToken)return;try{assertWriteToken(ownershipToken,reason);}catch(error){try{tx.abort();}catch{}finish(false,error);}};
-    tx.oncomplete=()=>finish(true,true);
-  },'legacy metadata delete aborted');
-}
-function legacySyncDeleteEntries(){
-  const raw=readLocalRecoveryJson(STORAGE_KEYS.legacySyncEmergency,null),entries=Array.isArray(raw&&raw.entries)?raw.entries:[];
-  return sanitizeDeletionRecoveryEntries(entries.filter(entry=>entry&&entry.op==='delete').map(entry=>({
-    kind:entry.entityType,id:entry.entityId,deletedAt:entry.updatedAt||entry.deletedAt
-  })));
-}
-async function verifyDeletionState(){
-  const issues=[];let savedDay=[],note=[],attachment=[];
-  try{[savedDay,note,attachment]=await Promise.all([listSavedDayDeletions(),listNoteDeletions(),listAttachmentDeletions()]);}catch(error){issues.push(`canonical-deletion-ledger:${String(error&&error.message||error)}`);}
-  const legacyQueue=await idbGetAllIfPresent(DB_LEGACY_SYNC_QUEUE_STORE,'legacy sync queue verification aborted'),legacyTombstones=await idbGetAllIfPresent(DB_LEGACY_TOMBSTONE_STORE,'legacy tombstone verification aborted');
-  if(legacyQueue.length)issues.push('legacy-sync-queue-not-empty');if(legacyTombstones.length)issues.push('legacy-tombstones-not-empty');
-  if(LocalStorageContract.getText(STORAGE_KEYS.legacySyncEmergency,null)!==null)issues.push('legacy-sync-emergency-present');
-  return freeze({ok:issues.length===0,issues:freeze(issues),pendingRecovery:pendingDeletionEntries().length,savedDayDeletions:savedDay.length,noteDeletions:note.length,attachmentDeletions:attachment.length});
-}
-// Insights revision rows from before the value envelope.
-const INSIGHTS_REVISION_FORMAT='study-director.insights-dataset-revision';
-function exactRowKeys(value,keys){return !!(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('|')===[...keys].sort().join('|'));}
-function insightsRevisionFromLegacyRow(row){if(!exactRowKeys(row,['key','format','version','counter','updatedAt'])||row.key!==InsightsDatasetRevision.key||row.format!==INSIGHTS_REVISION_FORMAT||Number(row.version)!==1)return null;const counter=Number(row.counter),updatedAt=String(row.updatedAt||'');if(!Number.isSafeInteger(counter)||counter<1||!Number.isFinite(Date.parse(updatedAt)))return null;return Object.freeze({format:INSIGHTS_REVISION_FORMAT,version:2,counter,updatedAt});}
-function insightsRevisionFromCurrentRow(saved){if(!saved)return null;if(!exactRowKeys(saved,['key','version','value','updatedAt'])||saved.key!==InsightsDatasetRevision.key||Number(saved.version)!==1)return null;const clean=InsightsDatasetRevision.normalize(saved.value);return clean&&saved.updatedAt===clean.updatedAt?clean:null;}
-async function migrateInsightsRevisionEnvelope(){
-  const token=compatibilityWriteToken('migrate Insights revision metadata');if(!token)return Object.freeze({status:'skipped',reason:'not-primary'});
-  return idbStrictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{
-    const guard=()=>{try{assertWriteToken(token,'migrate Insights revision metadata');return true;}catch(error){try{tx.abort();}catch{}finish(false,error);return false;}};if(!guard())return;
-    const req=store.get(InsightsDatasetRevision.key);req.onerror=()=>finish(false,req.error||new Error('insights revision migration read failed'));req.onsuccess=()=>{if(!guard())return;const saved=req.result;if(!saved){tx.oncomplete=()=>finish(true,Object.freeze({status:'not-needed'}));return;}if(insightsRevisionFromCurrentRow(saved)){tx.oncomplete=()=>finish(true,Object.freeze({status:'current'}));return;}const migrated=insightsRevisionFromLegacyRow(saved);if(!migrated){try{tx.abort();}catch{}finish(false,new Error('Legacy Insights dataset revision could not be converted safely.'));return;}const put=Meta.view(tx).put('insightsDatasetRevision',migrated,{updatedAt:migrated.updatedAt});put.onerror=()=>finish(false,put.error||new Error('insights revision migration write failed'));put.onsuccess=()=>{guard();};tx.oncomplete=()=>finish(true,Object.freeze({status:'migrated'}));};
-  },'insights revision migration aborted');
-}
-async function verifyInsightsRevisionEnvelope(){const saved=await rawLegacyMetaGet(InsightsDatasetRevision.key);return Object.freeze({ok:!saved||!!insightsRevisionFromCurrentRow(saved),present:!!saved,legacy:!!saved&&!insightsRevisionFromCurrentRow(saved)&&!!insightsRevisionFromLegacyRow(saved)});}
-function storageMigrationMetaValue(complete=false,count=0){
-  return {
-    recordVersion:DATA_CONTRACT.schemas.DailyRecord.version,
-    summaryVersion:DATA_CONTRACT.schemas.DailySummary.version,
-    complete:!!complete,
-    recordCount:boundedInt(count,{min:0,max:APP_LIMITS.maxImportRecords*10,fallback:0})
-  };
-}
-async function removeObsoleteMetadata(){
-  const token=compatibilityWriteToken('clean obsolete metadata');
-  if(!token)return Object.freeze({status:'skipped',reason:'not-primary',removed:0});
-  let removed=0;
-  const rows=await rawLegacyMetaList();
-  for(const identity of OBSOLETE_META_KEYS){
-    const keys=String(identity).endsWith(':')?(rows||[]).map(row=>String(row&&row.key||'')).filter(key=>key.startsWith(identity)):[String(identity)];
-    for(const key of keys){assertWriteToken(token,'clean obsolete metadata');const row=await rawLegacyMetaGet(key);if(!row)continue;assertWriteToken(token,'clean obsolete metadata');await rawLegacyMetaDelete(key,{ownershipToken:token,reason:'clean obsolete metadata'});removed++;}
-  }
-  return removed;
-}
-function legacyDeleteTimestamp(entry){return normalizeTimestamp(entry&&entry.deletedAt||entry&&entry.updatedAt,null);}
-async function migrateLegacyDeletionState(){
-  const token=compatibilityWriteToken('migrate legacy deletion state');
-  if(!token)return freeze({status:'skipped',reason:'not-primary',savedDayDeletions:0,recoveryEntries:0});
-  const [queueRows,tombstoneRows,records,active]=await Promise.all([
-    idbGetAllIfPresent(DB_LEGACY_SYNC_QUEUE_STORE,'legacy sync queue read aborted'),idbGetAllIfPresent(DB_LEGACY_TOMBSTONE_STORE,'legacy tombstone read aborted'),idbAllRecords(),idbGetActiveSession()
-  ]);
-  const recordMap=new Map((records||[]).map(record=>[String(record&&record.date||''),record]));
-  const dailyDeletes=new Map(),recovery=[];
-  const consider=(type,id,deletedAt)=>{
-    const when=normalizeTimestamp(deletedAt,null);if(!when)return;
-    if(type==='dailyRecord'&&isValidIsoDate(id)){
-      const current=recordMap.get(id);if(current&&entityTimestamp(current,'dailyRecord')>Date.parse(when))return;
-      const previous=dailyDeletes.get(id);if(!previous||Date.parse(when)>Date.parse(previous))dailyDeletes.set(id,when);
-      recovery.push({kind:'dailyRecord',id,deletedAt:when});
-    }else if(type==='activeSession'&&String(id)===ACTIVE_SESSION_ID){
-      if(active&&entityTimestamp(active,'activeSession')>Date.parse(when))return;
-      recovery.push({kind:'activeSession',id:ACTIVE_SESSION_ID,deletedAt:when});
-    }
-  };
-  for(const row of tombstoneRows||[])consider(String(row&&row.entityType||''),String(row&&row.entityId||''),legacyDeleteTimestamp(row));
-  for(const row of queueRows||[])if(row&&row.op==='delete')consider(String(row.entityType||''),String(row.entityId||''),legacyDeleteTimestamp(row));
-  for(const entry of legacySyncDeleteEntries())consider(entry.kind,entry.id,entry.deletedAt);
-  const currentRecovery=currentDeletionRecoveryEntries(),nextRecovery=sanitizeDeletionRecoveryEntries([...currentRecovery,...recovery]);
-  if(!writeDeletionRecoveryEntries(nextRecovery))throw new Error('Legacy deletion recovery could not be persisted safely.');
-  assertWriteToken(token,'migrate legacy deletion state');
-  const legacyStores=[];
-  if(await idbHasStore(DB_LEGACY_SYNC_QUEUE_STORE))legacyStores.push(DB_LEGACY_SYNC_QUEUE_STORE);
-  if(await idbHasStore(DB_LEGACY_TOMBSTONE_STORE))legacyStores.push(DB_LEGACY_TOMBSTONE_STORE);
-  await idbStrictTransaction([DB_APP_META_STORE,...legacyStores],'readwrite',(tx,finish)=>{
-    assertWriteToken(token,'migrate legacy deletion state');
-    const meta=Meta.view(tx);
-    for(const [date,deletedAt] of dailyDeletes){const deletion=savedDayDeletionValue(date,deletedAt);meta.put('savedDayDeletionPrefix',deletion,{suffix:date,updatedAt:deletion.deletedAt});}
-    for(const storeName of legacyStores)tx.objectStore(storeName).clear();
-    tx.oncomplete=()=>finish(true,true);
-  },'legacy deletion-state migration aborted');
-  if(!LocalStorageContract.remove(STORAGE_KEYS.legacySyncEmergency))throw new Error('Legacy sync emergency state could not be retired after verified conversion.');
-  await flushDeletionRecovery();
-  return freeze({status:(queueRows.length||tombstoneRows.length||recovery.length)?'migrated':'not-needed',savedDayDeletions:dailyDeletes.size,recoveryEntries:nextRecovery.length});
-}
-function dailyRecordMigrationMarkerIsCurrent(row){
-  const value=row&&row.value||{};
-  return value.complete===true&&
-    Number(value.recordVersion)===DATA_CONTRACT.schemas.DailyRecord.version&&
-    Number(value.summaryVersion)===DATA_CONTRACT.schemas.DailySummary.version;
-}
-function canonicalizeFallbackDailyRecords(raw){
-  if(!Array.isArray(raw))throw new Error('Fallback Daily Records are not in a recognized array format. The source was preserved unchanged.');
-  const source=raw;
-  const records=[];let changed=false;
-  for(const record of source){
-    const current=sanitizeCurrentDailyRecord(record);
-    if(current&&sameDataValue(record,current)){records.push(current);continue;}
-    const canonical=CompatibilityCodec.dailyRecord(record);
-    if(!canonical)throw new Error('A fallback Daily Record could not be converted to the current canonical schema. The source was preserved unchanged.');
-    records.push(canonical);changed=true;
-  }
-  return Object.freeze({records:Object.freeze(records),changed});
-}
-async function migrateHistoricalDailyRecords(){
-  const rawFallback=readLocalRecoveryJson(STORAGE_KEYS.fallbackDailyRecords,[]);
-  const fallback=canonicalizeFallbackDailyRecords(rawFallback);
-  const marker=await rawLegacyMetaGet(META_KEYS.dailyRecordMigration);
-  if(dailyRecordMigrationMarkerIsCurrent(marker)&&!fallback.changed){
-    return Object.freeze({status:'current',records:Number(marker.value.recordCount)||0,rewritten:0,fallbackRecords:fallback.records.length});
-  }
-  const token=compatibilityWriteToken('migrate Daily Records');
-  if(!token)return Object.freeze({status:'skipped',reason:'not-primary',records:Number(marker?.value?.recordCount)||0,rewritten:0,fallbackRecords:fallback.records.length});
-  if(dailyRecordMigrationMarkerIsCurrent(marker)){
-    assertWriteToken(token,'migrate fallback Daily Records');
-    if(!LocalStorageContract.setJson(STORAGE_KEYS.fallbackDailyRecords,capFallbackDailyRecords(fallback.records))){
-      throw LocalStorageContract.lastError||new Error('Fallback Daily Records could not be rewritten to the current schema.');
-    }
-    return Object.freeze({status:'fallback-migrated',records:Number(marker.value.recordCount)||0,rewritten:0,fallbackRecords:fallback.records.length});
-  }
-  const result=await idbStrictTransaction([DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
-    const records=tx.objectStore(DB_DAILY_RECORD_STORE),summaries=tx.objectStore(DB_DAILY_SUMMARY_STORE),meta=CompatibilityMeta.view(tx);
-    const fail=error=>{try{tx.abort();}catch{}finish(false,error);};
-    const guard=()=>{try{assertWriteToken(token,'migrate Daily Records');return true;}catch(error){fail(error);return false;}};
-    if(!guard())return;
-    const clear=summaries.clear();
-    clear.onerror=()=>fail(clear.error||new Error('daily summary migration clear failed'));
-    let count=0,changed=0;
-    const req=records.openCursor();
-    req.onerror=()=>fail(req.error||new Error('daily record migration read failed'));
-    req.onsuccess=event=>{
-      if(!guard())return;
-      const cursor=event.target.result;
-      if(!cursor){
-        const markerValue=storageMigrationMetaValue(true,count),markerUpdatedAt=new Date().toISOString();
-        const markerRequest=meta.put('dailyRecordMigration',markerValue,{updatedAt:markerUpdatedAt});
-        markerRequest.onerror=()=>fail(markerRequest.error||new Error('daily record migration marker write failed'));
-        markerRequest.onsuccess=()=>{guard();};
-        return;
-      }
-      const current=sanitizeCurrentDailyRecord(cursor.value);
-      const canonical=current&&sameDataValue(cursor.value,current)?current:CompatibilityCodec.dailyRecord(cursor.value);
-      if(!canonical){fail(new Error(`Daily Record ${String(cursor.key||'')} could not be converted to the current canonical schema. The migration transaction was rolled back.`));return;}
-      if(!current||!sameDataValue(cursor.value,current)){const update=cursor.update(canonical);update.onerror=()=>fail(update.error||new Error('daily record migration write failed'));changed++;}
-      const summaryWrite=summaries.put(buildDailyRecordSummary(canonical));summaryWrite.onerror=()=>fail(summaryWrite.error||new Error('daily summary migration write failed'));
-      count++;cursor.continue();
-    };
-    tx.oncomplete=()=>finish(true,{records:count,rewritten:changed});
-  },'daily record canonical migration aborted');
-  assertWriteToken(token,'migrate fallback Daily Records');
-  if(fallback.changed&&!LocalStorageContract.setJson(STORAGE_KEYS.fallbackDailyRecords,capFallbackDailyRecords(fallback.records))){
-    throw LocalStorageContract.lastError||new Error('Fallback Daily Records could not be rewritten to the current schema.');
-  }
-  return Object.freeze({status:'migrated',...result,fallbackRecords:fallback.records.length});
-}
-async function verifyDailyRecordCanonicalBaseline(){
-  const issues=[];
-  let meta=null;
-  try{meta=await rawLegacyMetaGet(META_KEYS.dailyRecordMigration);}catch(error){issues.push('migration-marker-unreadable');}
-  const marker=meta&&meta.value||{};
-  if(!(marker.complete&&Number(marker.recordVersion)===DATA_CONTRACT.schemas.DailyRecord.version&&Number(marker.summaryVersion)===DATA_CONTRACT.schemas.DailySummary.version))issues.push('migration-marker-incomplete');
-  const [records,summaries]=await Promise.all([idbAllRecords(),idbAllSummaries()]);
-  const byDate=new Map();
-  for(const raw of records){
-    const clean=sanitizeCurrentDailyRecord(raw);
-    if(!clean||!sameDataValue(raw,clean)){issues.push(`daily-record:${String(raw&&raw.date||'?')}`);continue;}
-    byDate.set(clean.date,clean);
-  }
-  const summaryByDate=new Map();
-  for(const raw of summaries){
-    const clean=sanitizeDailyRecordSummary(raw);
-    if(!clean||!sameDataValue(raw,clean)){issues.push(`daily-summary:${String(raw&&raw.date||'?')}`);continue;}
-    summaryByDate.set(clean.date,clean);
-  }
-  if(summaryByDate.size!==byDate.size)issues.push('daily-summary-count-mismatch');
-  for(const [date,record] of byDate){
-    const summary=summaryByDate.get(date),expected=buildDailyRecordSummary(record);
-    if(!summary||!sameDataValue(summary,expected))issues.push(`daily-summary-mismatch:${date}`);
-  }
-  const rawFallback=readLocalRecoveryJson(STORAGE_KEYS.fallbackDailyRecords,[]),fallback=Array.isArray(rawFallback)?rawFallback:[];
-  if(!Array.isArray(rawFallback))issues.push('fallback-daily-records-invalid');
-  for(const raw of fallback){const clean=sanitizeCurrentDailyRecord(raw);if(!clean||!sameDataValue(raw,clean))issues.push(`fallback-daily-record:${String(raw&&raw.date||'?')}`);}
-  return freeze({ok:issues.length===0,records:records.length,summaries:summaries.length,fallbackRecords:fallback.length,issues:freeze(issues)});
-}
-async function migrateHistoricalActiveSession(){
-  const token=compatibilityWriteToken('canonicalize Active Session');
-  if(!token)return freeze({status:'skipped',reason:'not-primary',rewritten:0,recoveryRewritten:0});
-  let rewritten=0,recoveryRewritten=0;
-  const rawRecoveryText=LocalStorageContract.getText(STORAGE_KEYS.recovery,null);
-  if(LocalStorageContract.lastError)throw new Error('The Active Session recovery envelope could not be read safely. Migration was not attempted.');
-  if(rawRecoveryText!==null){
-    let rawRecovery;
-    try{rawRecovery=JSON.parse(rawRecoveryText);}catch(error){throw new Error('The stored Active Session recovery envelope is malformed. It was preserved unchanged.');}
-    const canonicalRecovery=CompatibilityCodec.localRecoveryEnvelope(rawRecovery);
-    if(!canonicalRecovery)throw new Error('The stored Active Session recovery envelope could not be converted to the current canonical schema. It was preserved unchanged.');
-    if(!sameDataValue(rawRecovery,canonicalRecovery)){
-      assertWriteToken(token,'canonicalize Active Session recovery');
-      if(!LocalStorageContract.setJson(STORAGE_KEYS.recovery,canonicalRecovery))throw LocalStorageContract.lastError||new Error('Active Session recovery canonicalization could not be persisted.');
-      const verified=readLocalRecoveryJson(STORAGE_KEYS.recovery,null);
-      if(!verified||!sameDataValue(sanitizeCurrentLocalRecoveryEnvelope(verified),canonicalRecovery))throw new Error('Active Session recovery canonicalization could not be verified.');
-      recoveryRewritten=1;
-    }
-  }
-  const raw=await idbGetActiveSession();
-  if(raw){
-    const current=ActiveSessionCodec.canonicalize(raw);
-    if(!(current&&sameDataValue(raw,current))){
-      const canonical=CompatibilityCodec.activeSession(raw);
-      if(!canonical)throw new Error('The stored Active Session could not be converted to the current canonical schema. The source was preserved unchanged.');
-      assertWriteToken(token,'canonicalize Active Session');
-      await idbStrictStoreTransaction(DB_ACTIVE_SESSION_STORE,'readwrite',(store,tx,finish)=>{
-        try{assertWriteToken(token,'canonicalize Active Session');}catch(error){finish(false,error);return;}
-        const request=store.put(canonical);
-        request.onerror=()=>finish(false,request.error||new Error('Active Session canonicalization write failed.'));
-        tx.oncomplete=()=>finish(true,true);
-      },'Active Session canonicalization aborted');
-      rewritten=1;
-    }
-  }
-  return freeze({status:(rewritten||recoveryRewritten)?'migrated':'current',rewritten,recoveryRewritten});
-}
-async function verifyHistoricalActiveSession(){
-  const issues=[];
-  const rawRecoveryText=LocalStorageContract.getText(STORAGE_KEYS.recovery,null);
-  if(LocalStorageContract.lastError)issues.push('active-session-recovery-unreadable');
-  else if(rawRecoveryText!==null){
-    try{
-      const rawRecovery=JSON.parse(rawRecoveryText),canonicalRecovery=sanitizeCurrentLocalRecoveryEnvelope(rawRecovery);
-      if(!canonicalRecovery||!sameDataValue(rawRecovery,canonicalRecovery))issues.push('active-session-recovery-noncanonical');
-    }catch(error){issues.push('active-session-recovery-invalid');}
-  }
-  try{
-    const raw=await idbGetActiveSession();
-    if(raw){const current=ActiveSessionCodec.sanitizeCurrent(raw);if(!current)issues.push('active-session-record-noncanonical');}
-  }catch(error){issues.push('active-session-record-unreadable');}
-  return freeze({ok:issues.length===0,issues:freeze(issues)});
-}
-// Notes saved before permanent ids were keyed by their name. Each
-// moves to the id the compatibility codec works out from that name, with its
-// deletion records, its journal rows and the browser's emergency copy, so the
-// notes repository only ever reads current notes. Earlier versions journaled
-// unsaved edits in appMeta, and before that in localStorage; both are folded
-// in once, the newer revision winning and a later deletion staying.
-const NOTE_RECOVERY_PREFIX=LEGACY_STORAGE_KEYS.noteRecoveryPrefix,NOTE_RECOVERY_FORMAT='study-director.area-note-recovery';
-const NOTE_RESCUE_FORMAT='study-director.note-rescue',NOTE_DELETION_PREFIX=META_KEYS.noteDeletionPrefix;
-function noteRecoveryKey(name){const safe=normalizeAreaName(name);return safe?`${NOTE_RECOVERY_PREFIX}${safe}`:'';}
-function noteTime(entry){const value=Date.parse(String(entry&&entry.updatedAt||''));return Number.isFinite(value)?value:0;}
-function convertNoteRescue(){
-  const raw=LocalStorageContract.getJson(STORAGE_KEYS.noteRescue,null);if(LocalStorageContract.lastError)throw LocalStorageContract.lastError;
-  if(!raw||raw.format!==NOTE_RESCUE_FORMAT||Number(raw.version)!==1||!raw.entries||typeof raw.entries!=='object'||Array.isArray(raw.entries))return 0;
-  const out=Object.create(null);let converted=0;
-  for(const [rawKey,rawEntry] of Object.entries(raw.entries)){
-    if(!rawEntry||typeof rawEntry!=='object')continue;
-    const oldKey=String(rawEntry.key||rawKey),key=CompatibilityCodec.noteKey(oldKey);if(!key)throw new Error(`Note rescue ${oldKey||'?'} could not be converted safely. The browser copy was preserved.`);
-    if(rawEntry.deleted){const updatedAt=normalizeTimestamp(rawEntry.updatedAt,null);if(updatedAt)out[key]={key,deleted:true,updatedAt};}
-    else{const clean=CompatibilityCodec.note(rawEntry,oldKey);if(!clean)throw new Error(`Note rescue ${oldKey||'?'} could not be converted safely. The browser copy was preserved.`);out[clean.key]=clean;}
-    if(key!==oldKey)converted++;
-  }
-  if(converted&&!LocalStorageContract.setJson(STORAGE_KEYS.noteRescue,{...raw,entries:out}))throw LocalStorageContract.lastError||new Error('Note rescue could not be converted.');
-  return converted;
-}
-// One transaction moves every name-keyed row, deletion record and journal
-// entry; the next backup reads every note afresh under its new key.
-async function migrateNoteRows(){
-  const token=compatibilityWriteToken('canonicalize notes');
-  if(!token)return freeze({status:'skipped',reason:'not-primary',records:0,recoveryRows:0});
-  const rescue=convertNoteRescue();
-  let records=0,recoveryRows=0,deletions=0,staged=false;
-  return idbStrictTransaction([DB_NOTES_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
-    const fail=error=>{try{tx.abort();}catch{}finish(false,error);};
-    const guard=()=>{try{assertWriteToken(token,'canonicalize notes');return true;}catch(error){fail(error);return false;}};
-    if(!guard())return;
-    const notesStore=tx.objectStore(DB_NOTES_STORE),metaStore=tx.objectStore(DB_APP_META_STORE),meta=Meta.view(tx);
-    const stage=()=>{if(!staged){stageCanonicalMutationEpoch(tx,['*']);staged=true;}};
-    const writeFailed=(request,message)=>{request.onerror=()=>fail(request.error||new Error(message));};
-    const rows=notesStore.openCursor();
-    rows.onerror=()=>fail(rows.error||new Error('Note canonicalization read failed.'));
-    rows.onsuccess=event=>{
-      if(!guard())return;
-      const cursor=event.target.result;if(!cursor)return;
-      const row=cursor.value;
-      if(sanitizeCurrentNote(row,row&&row.key)){cursor.continue();return;}
-      const canonical=CompatibilityCodec.note(row,row&&row.key);
-      if(!canonical){fail(new Error(`Note ${String(row&&row.key||'?')} could not be converted safely. The historical row was preserved.`));return;}
-      stage();
-      if(canonical.key===String(row&&row.key))writeFailed(cursor.update(canonical),'Note canonicalization write failed.');
-      else{cursor.delete();writeFailed(notesStore.add(canonical),'Note canonicalization write failed.');}
-      records++;cursor.continue();
-    };
-    // Deletion records are read raw: a name-keyed one is not a current record.
-    const Range=globalThis.IDBKeyRange,prefixRange=prefix=>Range&&typeof Range.bound==='function'?Range.bound(prefix,`${prefix}￿`):null;
-    const ledger=metaStore.openCursor(prefixRange(NOTE_DELETION_PREFIX));
-    ledger.onerror=()=>fail(ledger.error||new Error('Note deletion canonicalization read failed.'));
-    ledger.onsuccess=event=>{
-      if(!guard())return;
-      const cursor=event.target.result;if(!cursor)return;
-      const row=cursor.value,rowKey=String(row&&row.key||'');if(!rowKey.startsWith(NOTE_DELETION_PREFIX)){cursor.continue();return;}
-      const suffix=rowKey.slice(NOTE_DELETION_PREFIX.length),key=CompatibilityCodec.noteKey(row&&row.value&&row.value.key);
-      if(!NoteKeys.isId(key)){fail(new Error(`Note deletion ${suffix||'?'} could not be converted safely.`));return;}
-      if(key!==suffix){
-        stage();cursor.delete();
-        const value=noteDeletionValue(key,row.value.deletedAt);meta.put('noteDeletionPrefix',value,{suffix:key,updatedAt:value.deletedAt});deletions++;
-      }
-      cursor.continue();
-    };
-    const journal=metaStore.openCursor(prefixRange(NOTE_RECOVERY_PREFIX));
-    journal.onerror=()=>fail(journal.error||new Error('Note recovery canonicalization read failed.'));
-    journal.onsuccess=event=>{
-      if(!guard())return;
-      const cursor=event.target.result;if(!cursor)return;
-      const row=cursor.value;if(!String(row&&row.key||'').startsWith(NOTE_RECOVERY_PREFIX)){cursor.continue();return;}
-      const value=row&&row.value,name=normalizeAreaName(value&&value.key);
-      if(!value||value.format!==NOTE_RECOVERY_FORMAT||Number(value.version)!==1||!name||String(row.key||'')!==noteRecoveryKey(name)){
-        fail(new Error(`Note recovery ${String(row&&row.key||'?')} could not be converted safely. The historical row was preserved.`));return;
-      }
-      const entry=value.entry&&value.entry.deleted
-        ?{key:name,deleted:true,updatedAt:normalizeTimestamp(value.entry.updatedAt||value.updatedAt||row.updatedAt,new Date().toISOString())}
-        :CompatibilityCodec.note(value.entry,name);
-      if(!entry){fail(new Error(`Note recovery ${name} could not be converted safely. The historical row was preserved.`));return;}
-      const updatedAt=normalizeTimestamp(value.updatedAt||row.updatedAt,entry.updatedAt||new Date().toISOString());
-      const canonical={key:noteRecoveryKey(name),version:1,value:{format:NOTE_RECOVERY_FORMAT,version:1,key:name,entry,updatedAt},updatedAt};
-      if(!sameDataValue(row,canonical)){writeFailed(cursor.update(canonical),'Note recovery canonicalization write failed.');recoveryRows++;}
-      cursor.continue();
-    };
-    tx.oncomplete=()=>finish(true,freeze({status:(records||recoveryRows||deletions||rescue)?'migrated':'not-needed',records,recoveryRows,deletions,rescue}));
-  },'Note canonicalization aborted');
-}
-async function readNoteRecoveryRows(){
-  const rows=await idbGetAll(DB_APP_META_STORE,'Note recovery read aborted');
-  return (rows||[]).filter(row=>String(row&&row.key||'').startsWith(NOTE_RECOVERY_PREFIX)).map(row=>freeze({key:String(row.key),suffix:String(row.key).slice(NOTE_RECOVERY_PREFIX.length),value:row.value}));
-}
-// A journal entry, already given its id by migrateNoteRows.
-function noteRecoveryEntry(value,suffix){
-  const name=normalizeAreaName(value&&value.key);
-  if(!value||value.format!==NOTE_RECOVERY_FORMAT||Number(value.version)!==1||!name||name!==normalizeAreaName(suffix)||!Number.isFinite(Date.parse(String(value.updatedAt||''))))return null;
-  if(value.entry&&value.entry.deleted){
-    const valid=Object.keys(value.entry).sort().join('|')==='deleted|key|updatedAt'&&value.entry.deleted===true&&normalizeAreaName(value.entry.key)===name&&Number.isFinite(Date.parse(String(value.entry.updatedAt||'')));
-    const id=CompatibilityCodec.noteKey(name);return valid&&id?{key:id,deleted:true,updatedAt:String(value.entry.updatedAt)}:null;
-  }
-  return sanitizeCurrentNote(value.entry,'');
-}
-function readLegacyPendingNotes(){
-  let parsed=null;try{parsed=LocalStorageContract.getJson(LEGACY_STORAGE_KEYS.notesPending,null);}catch(error){AppDiagnostics.capture('notes.pending-legacy-read',error);return Object.create(null);}
-  const out=Object.create(null);if(!parsed||Number(parsed.version)!==1||!parsed.pending||typeof parsed.pending!=='object')return out;
-  for(const [rawKey,rawVal] of Object.entries(parsed.pending).slice(0,APP_LIMITS.maxNotes)){
-    const source=rawVal&&typeof rawVal==='object'?rawVal:{text:String(rawVal||'')},key=String(source.key||rawKey||'');if(!key)continue;
-    const clean=CompatibilityCodec.note(source,key);if(!clean)throw new Error(`Historical note ${key} could not be converted safely.`);out[clean.key]=clean;
-  }
-  return out;
-}
-// The newer of two versions of one note; a deletion at or after a version removes it.
-function newerNote(current,incoming){
-  if(!incoming)return current;
-  if(incoming.deleted)return current&&noteTime(incoming)<noteTime(current)?current:null;
-  return !current||noteTime(incoming)>=noteTime(current)?incoming:current;
-}
-async function migrateNoteRecovery(){
-  const token=compatibilityWriteToken('migrate note recovery');
-  if(!token)return freeze({status:'skipped',reason:'not-primary',records:0});
-  const legacy=readLegacyPendingNotes(),journal=Object.create(null),journalRows=new Map();
-  for(const row of await readNoteRecoveryRows()){
-    const entry=noteRecoveryEntry(row.value,row.suffix);
-    if(!entry)throw canonicalRuntimeError(`Note recovery ${String(row.key||'?')} is not in the current canonical schema.`);
-    journal[entry.key]=entry;journalRows.set(entry.key,row.key);
-  }
-  const keys=[...new Set([...Object.keys(legacy),...Object.keys(journal)])];
-  if(!keys.length)return freeze({status:'not-needed',records:0});
-  assertWriteToken(token,'migrate note recovery');
-  let records=0;
-  await idbStrictTransaction([DB_NOTES_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
-    const store=tx.objectStore(DB_NOTES_STORE),rawMeta=tx.objectStore(DB_APP_META_STORE),meta=Meta.view(tx);let staged=false,failed=false;
-    const fail=error=>{if(failed)return;failed=true;try{tx.abort();}catch{}finish(false,error);};
-    for(const key of keys){
-      // Requests complete in issue order: the deletion record is read first.
-      const deletion=meta.get('noteDeletionPrefix',key),row=store.get(key);
-      row.onerror=()=>fail(row.error||new Error('Note recovery read failed.'));
-      deletion.request.onerror=()=>fail(deletion.request.error||new Error('Note deletion read failed.'));
-      row.onsuccess=()=>{
-        try{assertWriteToken(token,'migrate note recovery');}catch(error){fail(error);return;}
-        const current=row.result?sanitizeCurrentNote(row.result,key):null,deletedAt=Date.parse(String(deletion.value()?.deletedAt||''));
-        if(row.result&&!current){fail(canonicalRuntimeError(`Note ${key} is not in the current canonical schema.`));return;}
-        const next=newerNote(newerNote(current,legacy[key]||null),journal[key]||null);
-        if(journalRows.has(key))rawMeta.delete(journalRows.get(key));
-        // A note deleted after the unsaved edit stays deleted.
-        if(sameDataValue(next,current)||next&&Number.isFinite(deletedAt)&&deletedAt>=noteTime(next))return;
-        if(!staged){stageCanonicalMutationEpoch(tx,keys.map(notePreparationUnit));staged=true;}
-        if(next){store.put(next);meta.remove('noteDeletionPrefix',key);}
-        else{store.delete(key);const value=noteDeletionValue(key,new Date().toISOString());meta.put('noteDeletionPrefix',value,{suffix:key,updatedAt:value.deletedAt});}
-        records++;
-      };
-    }
-    tx.oncomplete=()=>finish(true);
-  },'Note recovery migration aborted');
-  assertWriteToken(token,'migrate note recovery');
-  if((await readNoteRecoveryRows()).length)throw new Error('Note recovery rows remain after migration.');
-  if(Object.keys(legacy).length&&!LocalStorageContract.remove(LEGACY_STORAGE_KEYS.notesPending))throw new Error('Legacy note recovery could not be retired after verified migration.');
-  return freeze({status:'migrated',records});
-}
-// Proof that no journal row or older browser copy is left, and that the
-// emergency copy holds only current notes.
-async function verifyNoteRecovery(){
-  const issues=[];let rows=0;
-  try{rows=(await readNoteRecoveryRows()).length;if(rows)issues.push('note-recovery-residue');}
-  catch(error){issues.push(`note-recovery:${String(error&&error.message||error)}`);}
-  const rescue=NotesRepository.verifyRescue();issues.push(...rescue.issues);
-  if(LocalStorageContract.getText(LEGACY_STORAGE_KEYS.notesPending,null)!==null)issues.push('legacy-note-recovery-source');
-  return freeze({ok:issues.length===0,rows:rows+rescue.rows,issues:freeze(issues)});
-}
-    const compatibility=freeze({
-      migrateDailyRecords:migrateHistoricalDailyRecords,
-      migrateActiveSession:migrateHistoricalActiveSession,
-      migrateNotes:migrateNoteRows,
-      migrateNoteRecovery,
-      migrateDeletionState:migrateLegacyDeletionState,
-      cleanupObsoleteMetadata:removeObsoleteMetadata,
-      verifyDailyRecords:verifyDailyRecordCanonicalBaseline,
-      verifyActiveSession:verifyHistoricalActiveSession,
-      verifyNotes:async()=>{
-        const issues=[];
-        for(const row of await idbGetAll(DB_NOTES_STORE,'Note canonical baseline verification aborted')){
-          const clean=sanitizeCurrentNote(row,row&&row.key);if(!clean||!sameDataValue(row,clean))issues.push(`note:${String(row&&row.key||'?')}`);
-        }
-        return freeze({ok:issues.length===0,issues:freeze(issues)});
-      },
-      migrateInsightsRevisionEnvelope,
-      verifyInsightsRevisionEnvelope,
-      verifyDeletionState,
-      verifyNoteRecovery,
-      verifyObsoleteMetadata:async()=>{
-        const rows=await rawLegacyMetaList(),present=[];
-        for(const identity of OBSOLETE_META_KEYS){
-          if(String(identity).endsWith(':')){for(const row of rows||[])if(String(row&&row.key||'').startsWith(identity))present.push(String(row.key));}
-          else if(await rawLegacyMetaGet(identity))present.push(String(identity));
-        }
-        return freeze({ok:present.length===0,present:freeze(present)});
-      }
-    });
-/* END COMPATIBILITY */
+
     const restoreJournal=RepositoryJournals.restoreJournal;
     const libraryClearJournal=RepositoryJournals.libraryClearJournal;
     const mutationLease=RepositoryJournals.mutationLease;
@@ -2001,7 +1531,7 @@ async function verifyNoteRecovery(){
       format:'study-director.app-data',
       contractVersion:1,
       get lastStorageError(){return LocalStorageContract.lastError;},
-      local,planData,personalPreferences,dailyRecords,notes,activeSession,pendingReviews,provenance,mutationEpoch,preparationUnits,deletionRecovery,restoreJournal,libraryClearJournal,mutationLease,maintenance:maintenanceApi,metadata,compatibility
+      local,planData,personalPreferences,dailyRecords,notes,activeSession,pendingReviews,provenance,mutationEpoch,preparationUnits,deletionRecovery,restoreJournal,libraryClearJournal,mutationLease,maintenance:maintenanceApi,metadata
     });
   }
   return freeze({

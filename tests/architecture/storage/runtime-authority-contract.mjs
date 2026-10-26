@@ -4,7 +4,7 @@ import fs from 'node:fs';
 const app=fs.readFileSync('source/app.html','utf8');
 const startup=fs.readFileSync('source/core/startup.js','utf8');
 const persistence=fs.readFileSync('source/core/persistence.js','utf8');
-const compatibilityHost=fs.readFileSync('source/core/compatibility-host.js','utf8');
+
 
 const identitySource=persistence.slice(persistence.indexOf('function createInstallationIdentity'),persistence.indexOf('function normalizeTimestamp'));
 assert.doesNotMatch(identitySource,/legacyDeviceId|compatibilityDeviceId|retireLegacy|verifyRetired/u,'normal persistence identity capability must be current-only');
@@ -29,28 +29,20 @@ const flushBlock=app.slice(flushStart,flushEnd);
 assert.ok(flushBlock.indexOf('const saved=await run;')<flushBlock.indexOf('refreshAppearanceMirrors(saved)'),'appearance mirrors must refresh only after the canonical write resolves');
 assert.match(startup,/lifecycle\.flush-preferences/u,'page/background lifecycle must proactively flush a pending Preferences write');
 
-const migrationStart=compatibilityHost.indexOf('async function migratePlan(){');
-const migrationEnd=compatibilityHost.indexOf('async function migrateReflections(){',migrationStart);
-const migration=compatibilityHost.slice(migrationStart,migrationEnd);
-assert.ok(migrationStart>=0&&migrationEnd>migrationStart,'legacy Plan/Preferences migration must remain isolated in the compatibility host');
-assert.match(migration,/if\(!currentPreferences\)\{/u,'legacy mirrors are migration inputs only when no current PortablePreferences.v2 row exists');
-assert.ok(migration.indexOf('const written=await preferences.write(next')<migration.indexOf('local.remove(obsolete.nudge)'),'legacy nudge authority must survive until canonical Preferences are written and verified');
-assert.match(app,/CompatibilityHostModule\.createFacade/u,'ordinary runtime must consume the isolated compatibility host instead of re-embedding migration logic');
-
 
 const maintenanceStart=app.indexOf('function scheduleDataMaintenance(delay=1200');
 const maintenanceEnd=app.indexOf('/* ONGOING SUBJECT NOTES */',maintenanceStart);
 const maintenanceBlock=app.slice(maintenanceStart,maintenanceEnd);
-assert.match(maintenanceBlock,/if\(!StartupLifecycle\.status\(\)\.fullyInitialized\)return false;/u,'data maintenance must not start before compatibility migration and canonical startup verification complete');
+assert.match(maintenanceBlock,/if\(!StartupLifecycle\.status\(\)\.fullyInitialized\)return false;/u,'data maintenance must not start before canonical startup verification completes');
 const maintenanceAdmission=app.slice(app.indexOf('const DataMaintenanceJob=OperationLifecycle.createJob('),maintenanceStart);
 assert.match(maintenanceAdmission,/isAvailable:\(\)=>upkeepBlocker\(/u,'the owned maintenance job must recheck the shared gate at execution admission');
 assert.match(app,/function backgroundBlocker\([^)]*\)\{[^}]*if\(!StartupLifecycle\.status\(\)\.fullyInitialized\)return 'startup';/u,'the shared background gate rechecks startup');
 assert.match(app,/markReady:async proof=>\{[\s\S]*proof&&proof\.canonical===true[\s\S]*AppData\.mutationEpoch\.reseed\(\)[\s\S]*scheduleDataMaintenance\(\);/u,'initial maintenance must remain inside the verified-ready boundary after canonical epoch reseeding');
-assert.match(app,/normalizePracticeTargetMs:value=>validPracticeMs\(value,\{min:APP_LIMITS\.minPracticeTargetMs\}\)\|\|null/u,'historical optional Practice targets must normalize absent/invalid values to null rather than zero');
+
 
 const applyPreferencesStart=app.indexOf('async function applyPreferences(raw)');
 const applyPreferencesEnd=app.indexOf('async function importData(value)',applyPreferencesStart);
 const applyPreferences=app.slice(applyPreferencesStart,applyPreferencesEnd);
 assert.doesNotMatch(applyPreferences,/keepScreenAwake|systemAlerts/u,'portable backup import must not touch destination device-local settings');
 
-console.log(JSON.stringify({status:'PASS',suite:'runtime-authority-contract',installationIdentityCurrentOnly:true,ownershipTakeoverFreshPreferences:true,mirrorCommitOrdering:true,migrationPrecedence:true,deviceLocalImportPreserved:true,independentHydrationFailureDomains:true,startupMaintenanceGated:true,optionalPracticeTargetCanonical:true},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'runtime-authority-contract',installationIdentityCurrentOnly:true,ownershipTakeoverFreshPreferences:true,mirrorCommitOrdering:true,canonicalOnly:true,deviceLocalImportPreserved:true,independentHydrationFailureDomains:true,startupMaintenanceGated:true},null,2));

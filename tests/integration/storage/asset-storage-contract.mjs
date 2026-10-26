@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
-import {OPFS_IDENTITIES,OBSOLETE_OPFS_IDENTITIES} from '../../../contracts/canonical-identities.mjs';
+import {OPFS_IDENTITIES} from '../../../contracts/canonical-identities.mjs';
 
 const render=source=>source
   .replaceAll('@@SD_ATTACHMENT_OPFS_DIRECTORY@@',OPFS_IDENTITIES.attachments)
-  .replaceAll('@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@',OBSOLETE_OPFS_IDENTITIES.attachmentsV1);
+  .replaceAll('@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@'.attachmentsV1);
 const context={console,Blob,TextEncoder,TextDecoder,Uint8Array,ArrayBuffer,Map,Set,Object,Promise,Number,String,Math,Date,JSON,crypto:webcrypto,Symbol,TypeError,Error};
 context.globalThis=context;vm.createContext(context);
 vm.runInContext(fs.readFileSync('source/core/internal.js','utf8'),context,{filename:'source/core/internal.js'});
@@ -25,8 +25,8 @@ function fileDirectory(map){return {
   async *entries(){for(const name of map.keys())yield [name,{kind:'file'}];}
 };}
 const currentDir=fileDirectory(files),legacyDir=fileDirectory(legacyFiles),root={legacyPresent:false,
-  async getDirectoryHandle(name,{create=false}={}){if(name===OPFS_IDENTITIES.attachments)return currentDir;if(name===OBSOLETE_OPFS_IDENTITIES.attachmentsV1&&this.legacyPresent)return legacyDir;if(name===OBSOLETE_OPFS_IDENTITIES.attachmentsV1&&!create)throw notFound();throw notFound();},
-  async removeEntry(name){if(name!==OBSOLETE_OPFS_IDENTITIES.attachmentsV1||!this.legacyPresent)throw notFound();this.legacyPresent=false;legacyFiles.clear();}
+  async getDirectoryHandle(name,{create=false}={}){if(name===OPFS_IDENTITIES.attachments)return currentDir;if(name==='study-director-assets-v1'&&this.legacyPresent)return legacyDir;if(name==='study-director-assets-v1'&&!create)throw notFound();throw notFound();},
+  async removeEntry(name){if(name!=='study-director-assets-v1'||!this.legacyPresent)throw notFound();this.legacyPresent=false;legacyFiles.clear();}
 };
 const locks={async request(name,options,callback){if(typeof options==='function'){callback=options;options={};}
   if(name.includes('retention')&&options.mode==='shared'){sharedReaders++;try{return await callback({name});}finally{sharedReaders--;}}
@@ -50,9 +50,6 @@ const store=mod.create(ports),A='att-aaaaaaaaaaaaaaaaaaaa',B='att-bbbbbbbbbbbbbb
 assert.equal(store.supported(),true);store.requireAvailable();await assert.rejects(()=>store.get('bad'),/Invalid attachment identity/);
 const unsupported=mod.create({...ports,protocol:'file:'});assert.equal(unsupported.supported(),false);assert.throws(()=>unsupported.requireAvailable(),/opened directly/);
 
-let verification=await store.verifyLegacyClean();assert.equal(verification.ok,true);
-metadata.set('att-eeeeeeeeeeeeeeeeeeee',new Blob(['legacy']));root.legacyPresent=true;verification=await store.verifyLegacyClean();assert.equal(verification.ok,false);assert.equal(verification.legacyMetadata,1);assert.equal(verification.legacyDirectory,true);
-const cleaned=await store.cleanupLegacy();assert.equal(cleaned.removed,1);assert.equal(cleaned.directoryRemoved,true);assert.equal((await store.cleanupLegacy()).removed,0);
 
 const pdf=new Blob(['same-pdf-bytes'],{type:'application/pdf'}),audio=new Blob(['audio-bytes'],{type:'audio/mpeg'});
 await assert.rejects(()=>store.put(A,new Blob([],{type:'application/pdf'})),/supported file limits/);

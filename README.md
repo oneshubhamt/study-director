@@ -25,7 +25,7 @@ The backup system uses immutable managed repositories for Google Drive and Devic
 
 Background settlement, current-state snapshots and attempt outcomes share one lifecycle contract. Housekeeping yields at resumable units after its short allowance; slow successful preparation must still allow progress. Integrity saves bounded byte/frame checkpoints before yielding. Drive uploads and range downloads use byte-inactivity watchdogs, so slow productive transfers continue while foreground cancellation remains active. Diagnostic traces retain concurrent jobs independently, distinguish deferred/unavailable/partial work from completion, and include current cleanup, worker, repository and updater states when copied.
 
-Compatibility code remains isolated from current canonical data handling. Live-install migration may be retired only when its explicit retirement contract says it is safe; historical backup readers may remain independently for recovery value.
+On TS-Conversion, all supported installations are assumed to have completed the previous upgrade to the current canonical model. Historical record, backup and topology converters are retired. Current validation, backup/restore and interrupted-operation recovery remain required.
 
 Notifications share one presentation coordinator for visual notices, app sounds and device alerts. A separate playback engine makes the original Quiet Wood acoustic-style cues in code and plays them; no sound files ship. Full / Minimal / Off is a portable preference, initially Full. Execute provides an inline Pomodoro rhythm panel and a separate Focus & Alerts panel, available before a session begins.
 

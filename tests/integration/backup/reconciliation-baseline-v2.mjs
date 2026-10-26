@@ -21,8 +21,7 @@ gateway.registerValidators('host',freeze(validators));
 const host=gateway.bind('host'),store=BaselineModule.createStore(freeze({codec,meta:host,families:freeze({days:'reconciliationBaseDayPrefix',header:'reconciliationBase',notes:'reconciliationBaseNotePrefix'})}));
 const cp=n=>'cp_'+String(n).padStart(32,'0');
 const identity=async keys=>({noteCount:keys.length,noteKeyFingerprint:await codec.keyFingerprint(keys)});
-// The first base is a full write; older bases are dropped by the compatibility
-// host (tests/integration/storage/compatibility-host.mjs).
+// The first canonical base is a full write.
 const seed=freeze({format:'study-director.reconciliation-base-update',version:2,full:true,baseCheckpointId:'',noteCount:2,noteKeyFingerprint:'',personalFingerprint:'',sessionFingerprint:'',noteKeys:freeze([E,P]),updates:freeze({[E]:freeze({label:'Ethics',text:'ethics v1'}),[P]:freeze({label:'Polity',text:'polity v1'})}),deletes:freeze([]),days:freeze({})});
 assert.equal(await store.write(cp(1),seed),true);
 const first=await store.readHeader();

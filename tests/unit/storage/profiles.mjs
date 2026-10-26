@@ -16,7 +16,7 @@ function device(){
     return ProfilesModule.createController(freeze({ports:freeze({
       scope:freeze({pattern,registryKey:REGISTRY,scope,separator:'~'}),
       storage:freeze({keys:()=>[...store.keys()],read:()=>store.get(REGISTRY)??null,remove:key=>store.delete(key),write:text=>{store.set(REGISTRY,text);for(const listener of listeners)listener(REGISTRY);return true;}}),
-      names:freeze({database:'sdmLocalAppDB.v1',directories:freeze(['study-director-assets-v2','study-director-backup-files-v1']),keys:freeze(['studyDirector.theme.v1','studyDirector.noteRescue.v1']),legacyDirectory:'study-director-assets'}),
+      names:freeze({database:'sdmLocalAppDB.v1',directories:freeze(['study-director-assets-v2','study-director-backup-files-v1']),keys:freeze(['studyDirector.theme.v1','studyDirector.noteRescue.v1'])}),
       platform:freeze({deleteDatabase:async name=>{events.databases.push(name);return true;},listen:handler=>{listeners.add(handler);return ()=>listeners.delete(handler);},now:()=>clock,random:bytes=>(++counter).toString(16).padStart(bytes*2,'0'),reload:()=>{events.reloads+=1;},removeDirectory:async name=>{events.directories.push(name);}}),
       limits:freeze({maxName:60})
     })}));
@@ -81,7 +81,7 @@ function device(){
   assert.equal(first.remove(),true);assert.equal(d.list().active,ben.id,'with nothing to go back to, another profile opens');
   await second.collect();
   assert.equal(d.store.has('studyDirector.theme.v1'),false);assert.equal(d.store.has('studyDirector.installationId.v1'),true,'device-wide names stay');assert.equal(d.store.has('studyDirector.noteRescue.v1~'+ben.scope),true,'the open profile keeps its own');
-  assert.deepEqual(d.events.databases,['sdmLocalAppDB.v1']);assert.deepEqual(d.events.directories,['study-director-assets-v2','study-director-backup-files-v1','study-director-assets']);
+  assert.deepEqual(d.events.databases,['sdmLocalAppDB.v1']);assert.deepEqual(d.events.directories,['study-director-assets-v2','study-director-backup-files-v1']);
 }
 {
   // Adopting a Drive library id: never another local profile's.

@@ -42,14 +42,14 @@ const normalizeTimestamp=value=>Number.isFinite(Date.parse(String(value||'')))?n
 const normalizeArea=(item,key)=>item&&String(key||item.key||'')?freeze({version:2,key:String(key||item.key),...(item.label?{label:String(item.label)}:{}),text:String(item.text||''),updatedAt:normalizeTimestamp(item.updatedAt)||'2026-08-01T00:00:00.000Z',...(item.links?{links:[...item.links]}:{})}):null;
 const normalizeDrafts=value=>(Array.isArray(value)?value:[]).filter(item=>item&&isDate(item.date)).map(item=>freeze({...item,version:1,date:String(item.date),reflection:String(item.reflection||''),revision:Number(item.revision)||0,sessionRevision:Number(item.sessionRevision)||0,updatedAt:normalizeTimestamp(item.updatedAt)||'2026-08-01T00:00:00.000Z'})).sort((a,b)=>a.date.localeCompare(b.date));
 const dailyRecordCodec=freeze({
-  sanitizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item}):null,
-  canonicalizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:15}):null,
+
+
   sanitizeCurrentDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:16,recordKind:'study',date:String(item.date)}):null,
-  sanitizeImportedNote:normalizeArea,sanitizeCurrentNote:normalizeArea,isSupportedSavedDate:isDate
+  sanitizeCurrentNote:normalizeArea,isSupportedSavedDate:isDate
 });
 const activeSessionCodec=freeze({sanitizeCurrent:item=>item&&item.id==='current'?freeze({...item,version:RUNTIME_DATA_CONTRACT.schemas.ActiveSession.version,runningOn:item.runningOn||'inst_device_local'}):null});
-const reflectionDraftCodec=freeze({format:'study-director.reflection-draft-codec',contractVersion:1,sanitizeCurrent:item=>item&&isDate(item.date)?freeze({...item,version:1,date:String(item.date),reflection:String(item.reflection||''),revision:Number(item.revision)||0,sessionRevision:Number(item.sessionRevision)||0,updatedAt:normalizeTimestamp(item.updatedAt)||'2026-08-01T00:00:00.000Z'}):null});
-const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:item=>dailyRecordCodec.canonicalizeHistoricalDailyRecord(item),note:normalizeArea,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
+
+
 const keyedRecord=freeze({create:()=>Object.create(null)});
 const entityDefinition=type=>defs[type]||null,entityIdentity=(type,item)=>String(item?.[defs[type]?.idField]||'');
 const boundedInt=(value,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
@@ -57,10 +57,10 @@ const jsonByteLength=value=>new TextEncoder().encode(typeof value==='string'?val
 const personalDataCodec=RecordCodecs.createPersonalDataCodec(limits);
 const pendingReviewCodec=testPendingReviewCodec(RecordCodecs,{personalDataCodec});
 const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingReviewCodec,processing,
-  appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),entityTypes:freeze(Object.keys(defs)),keyedRecord,
+  appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,entityTypes:freeze(Object.keys(defs)),keyedRecord,
   entities:freeze({entityDefinition,entityIdentity}),helpers:freeze({boundedInt,jsonByteLength}),
   richText:freeze({assetIds:()=>freeze([]),assetIdValid:value=>/^img-[A-Za-z0-9_-]{16,128}$/.test(String(value||'')),imageMimeTypeValid:value=>['image/png','image/jpeg','image/webp','image/gif','image/avif'].includes(String(value||''))}),
-  dailyRecordCodec,activeSessionCodec,compatibilityCodec
+  dailyRecordCodec,activeSessionCodec
 }));
 const runtimeCodec=freeze({...codec,inspect:codec.inspectCurrent});
 const personal=(name='Checkpoint User')=>freeze({version:2,plans:freeze({draft:null,savedPlans:freeze([]),defaultId:null}),preferences:freeze({studentName:name,theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null})});
@@ -133,7 +133,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
   presentation.subscribe(()=>{const message=presentation.current('file')?.message||'';if(message&&statuses.at(-1)!==message)statuses.push(message);});
   const runtime=BackupModule.createRuntime(freeze({ports:freeze({
     configuration:freeze({appVersion:'QA_B3',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits}),
-    
+
     persistence:freeze({
       activeSessionLoad:async()=>{if(injectedFailure==='session-read')return {ok:false,value:null,error:new Error('QA_FIXTURE session read failure'),storage:{idb:true}};return {ok:true,value:state.activeSession,error:null,storage:{idb:true}};},activeSessionSave:async value=>{events.push('preflight-session-save');if(injectedFailure==='session-save')return {ok:false,value:null,error:new Error('QA_FIXTURE session save failure')};state.activeSession=value;return {ok:true,value};},activeSessionClear:async()=>(state.activeSession=null,{ok:true}),activeSessionSettled:async()=>{if(injectedFailure==='session-settle')throw new Error('QA_FIXTURE session settle failure');return true;},
       dailyRecordBackupDates:async()=>({dates:[...state.records.keys()].sort(),warning:''}),dailyRecordBackupMonth:async month=>[...state.records.values()].filter(record=>String(record.date).startsWith(String(month)+'-')).sort((a,b)=>a.date.localeCompare(b.date)),dailyRecordDocuments:async dates=>dates.map(date=>state.records.get(date)).filter(Boolean),
@@ -216,7 +216,7 @@ assert.equal(validated.protectedCheckpointManifest.checkpointId,parsed.manifest.
 const importState=createState();
 const importHarness=createHarness(importState);
 const importCandidate=await importHarness.runtime.controller.inspect(blob,{filename:'checkpoint.sdbackup'});
-assert.equal(importCandidate.preview.reconciliationCapable,true);
+assert.equal(importCandidate.preview.formatVersion,23);
 const importResult=await importHarness.runtime.controller.restore(importCandidate);
 assert.equal(importResult.mode,'reconcile');
 const savedDayPrompt=importHarness.prompts.find(prompt=>prompt.groups?.some(group=>group.id==='savedDaysBulk'));
@@ -349,7 +349,6 @@ const clearHarness=createHarness(clearState,{decisions:{activeSession:'checkpoin
 const clearCandidate=await clearHarness.runtime.controller.inspect(noSessionBlob,{filename:'checkpoint-no-session.sdbackup'});
 await clearHarness.runtime.controller.restore(clearCandidate);
 assert.equal(clearState.activeSession.date,'2026-08-10','Checkpoint absence must not clear a local Active Session.');
-
 
 
 // CR3 Note reconciliation remains scratch-only until the resolved note enters the journaled restore commit.

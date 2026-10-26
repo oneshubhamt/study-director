@@ -64,9 +64,7 @@ function fixture({badPath='',active=null,windows=[],rejectDelete='',failMetadata
 {
  const h=fixture({active:{}}),page=h.client('page');h.windows.push(page);h.seed(current,assetId);h.seed('study-director-shell-orphan','b'.repeat(24),{state:'installed'});h.self.registration.waiting={};await h.report(page,assetId);assert.equal(h.stores.has('study-director-shell-orphan'),true);h.self.registration.waiting=null;await h.report(page,assetId);assert.equal(h.stores.has('study-director-shell-orphan'),false);cases.push('waiting candidate is retained and a later abandoned candidate is reclaimed');
 }
-{
- const h=fixture({active:{}});h.seed(current,assetId);h.seed('study-director-shell-old','b'.repeat(24));h.stores.set(CACHE_STORAGE_IDENTITIES.updateRecoveryPrefix+'current',new Map());await h.emit('activate');assert.equal(h.claims.includes('claim'),false);assert.equal(h.messages.some(row=>row.type==='SD_PWA_ACTIVATED'),false);assert.equal(h.stores.has('study-director-shell-old'),true);cases.push('legacy recovery handoff preserves its no-claim path and old assets');
-}
+
 {
  const h=fixture({active:{}}),page=h.client('page');h.windows.push(page);h.seed(current,assetId);h.stores.set('study-director-shell-downloading',new Map());h.self.registration.installing={};await h.report(page,assetId);assert.equal(h.stores.has('study-director-shell-downloading'),true,'an installing cache without final metadata must remain intact');h.self.registration.installing=null;await h.report(page,assetId);assert.equal(h.stores.has('study-director-shell-downloading'),false);cases.push('retirement cannot delete a downloading candidate before metadata is written');
 }

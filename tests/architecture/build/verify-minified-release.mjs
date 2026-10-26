@@ -80,14 +80,11 @@ assert.ok(richScript&&manifest.some(row=>row.path===`./${richScript}`),'Eager ri
 const searchWorker=externalScripts.find(name=>/^sd\.note-search\./.test(name));
 assert.ok(searchWorker&&manifest.some(row=>row.path===`./${searchWorker}`),'Lazy search Worker runtime must be precached without being eagerly executed.');
 const releaseId=sha(JSON.stringify(manifest)).slice(0,24);assert.ok(sw.includes(`const RELEASE_ID='${releaseId}';`));
-assert.match(sw,/const CompatibilityFacade=Object\.freeze/);
+assert.doesNotMatch(sw,/CompatibilityFacade|installBridgeRequired|recoveryHandoff/,'deployment must contain no historical updater bridge');
 const cacheIdentityMatch=sw.match(/const CACHE_IDENTITIES=Object\.freeze\((\{[^\n]+\})\);/);
 assert.ok(cacheIdentityMatch,'Service worker must embed the centralized Cache Storage identities.');
 assert.deepEqual(JSON.parse(cacheIdentityMatch[1]),CACHE_STORAGE_IDENTITIES,'Service-worker Cache Storage identities drifted from the canonical contract.');
-assert.match(sw,/const bridgeCache=CACHE_IDENTITIES\.updateBridge/);
-assert.match(sw,/const recoveryCache=CACHE_IDENTITIES\.updateRecoveryPrefix\+RELEASE_ID/);
-assert.match(sw,/CompatibilityFacade\.installBridgeRequired\(\)/);
-assert.match(sw,/CompatibilityFacade\.recoveryHandoff\(\)/);
+assert.match(sw,/caches\.open\(CACHE_IDENTITIES\.clientState\)/,'current client acknowledgements must still protect live shell generations');
 assert.match(sw,/SD_PWA_ACTIVATION_ACK/);
 assert.match(sw,/SD_PWA_ACTIVATED/);
 const identity=JSON.parse(read(minified,'DEPLOYMENT-IDENTITY.json'));

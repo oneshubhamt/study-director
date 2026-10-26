@@ -54,6 +54,8 @@ try{
       let page=await browser.createPage(server.url('deployment','instrumented.html'),{preload});
       await waitForStudyDirector(page,{instrumented:true});
       await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'ownership'});
+      await page.evaluate(`(()=>{const name=document.getElementById('profile-name-input');name.value='QA';name.dispatchEvent(new Event('blur',{bubbles:true}));})()`);
+      await waitFor(()=>page.evaluate(`__PWA6.AppData.personalPreferences.read().then(value=>value?.studentName==='QA')`),{label:'current preferences saved'});
       await page.evaluate(`(async()=>{const d=__PWA6;d.AppData.notes.update('ethics','Ethics','Kept text','');await d.AppData.notes.flush({strict:true});})()`);
       await browser.closePage(page);await new Promise(resolve=>setTimeout(resolve,600));
       const seedPage=await browser.createPage(server.url('deployment','seed.html'));

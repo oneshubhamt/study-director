@@ -62,8 +62,8 @@ export function createProcessingEngine(renderMarkdown=()=>{throw new Error('Mark
       return {line,checksum:hash};
     }
     if(type==='parseBlob'){
-      if(data.file.size>data.maxBytes)throw new Error('Legacy JSON backup is too large.');
-      const text=await data.file.text();if(utf8(text).length>data.maxBytes)throw new Error('Legacy JSON backup exceeds the safe in-memory limit after reading.');return JSON.parse(text);
+      if(data.file.size>data.maxBytes)throw new Error('JSON payload exceeds the safe size limit.');
+      const text=await data.file.text();if(utf8(text).length>data.maxBytes)throw new Error('JSON payload exceeds the safe in-memory limit.');return JSON.parse(text);
     }
     if(type==='decode.open'){const id=++sequence;sessions.set(id,{iterator:decoded(data.file,data)[Symbol.asyncIterator]()});return id;}
     if(type==='decode.next'){const session=sessions.get(data.id);if(!session)throw new Error('Backup reader expired.');const next=await session.iterator.next();if(next.done)sessions.delete(data.id);return next;}

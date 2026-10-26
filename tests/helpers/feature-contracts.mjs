@@ -59,7 +59,7 @@ export const FEATURE_CONTRACTS=Object.freeze([
   contract('storage.capacity','tests/browser/storage/capacity.mjs'),
   contract('storage.failure-recovery','tests/browser/storage/storage-failure-recovery.mjs'),
   contract('storage.site-data-clear','tests/browser/storage/site-data-clear.mjs'),
-  contract('storage.upgrade-renamed-names','tests/browser/storage/upgrade-renamed-names.mjs'),
+  contract('storage.canonical-topology','tests/browser/storage/canonical-storage.mjs'),
   contract('storage.durable-journals','tests/integration/storage/repository-journals.mjs'),
   contract('storage.multi-tab','tests/browser/storage/multi-tab.mjs'),
   contract('security.runtime-boundary','tests/browser/security/runtime-boundary.mjs'),

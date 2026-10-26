@@ -92,7 +92,7 @@ await test('Drive executor quarantines confirmed corruption while retaining avai
     assert.equal(result.status,status,code);assert.equal(result.repositoryScope,'drive-one');assert.equal(result.cursor,objectId('e'));assert.equal(result.scanId,scanId);assert.equal(result.quarantined.includes(objectId('d')),quarantine,code);assert.ok(result.quarantined.includes(objectId('c')));
   }
 });
-await test('the ordinary validator accepts only the current record; older versions belong to the compatibility host',async()=>{
+await test('the validator accepts only the current record and rejects older versions',async()=>{
   const h=fixture(),context=h.context;
   for(const file of ['source/core/host-metadata.js'])vm.runInContext(fs.readFileSync(file,'utf8'),context);
   vm.runInContext(app.slice(app.indexOf('function sameDataValue('),app.indexOf('function normalizeStudyQuality(')),context);

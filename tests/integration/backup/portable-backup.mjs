@@ -32,10 +32,10 @@ const defs=freeze({
 const isDate=value=>/^\d{4}-\d{2}-\d{2}$/.test(String(value||''));
 const normalizeArea=(item,key)=>item&&String(key||item.key||'')?freeze({key:String(key||item.key),text:String(item.text||''),updatedAt:String(item.updatedAt||'2026-08-31T00:00:00.000Z')}):null;
 const normalizeDrafts=value=>(Array.isArray(value)?value:[]).filter(x=>x&&isDate(x.date)).map(x=>freeze({...x,reflection:String(x.reflection||'')}));
-const dailyRecordCodec=freeze({sanitizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item}):null,canonicalizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:15}):null,sanitizeCurrentDailyRecord:item=>item&&isDate(item.date)?freeze({...item}):null,sanitizeImportedNote:normalizeArea,sanitizeCurrentNote:normalizeArea,isSupportedSavedDate:isDate});
+const dailyRecordCodec=freeze({sanitizeCurrentDailyRecord:item=>item&&isDate(item.date)?freeze({...item}):null,sanitizeCurrentNote:normalizeArea,isSupportedSavedDate:isDate});
 const activeSessionCodec=freeze({sanitizeCurrent:item=>item&&item.id==='current'?freeze({...item}):null});
-const reflectionDraftCodec=freeze({format:'study-director.reflection-draft-codec',contractVersion:1,sanitizeCurrent:item=>item&&isDate(item.date)?freeze({...item,reflection:String(item.reflection||'')}):null});
-const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:item=>dailyRecordCodec.sanitizeCurrentDailyRecord(item),note:normalizeArea,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
+
+
 const keyedRecord=freeze({create:()=>Object.create(null)});
 const entityDefinition=type=>defs[type]||null,entityIdentity=(type,item)=>String(item?.[defs[type]?.idField]||'');
 const boundedInt=(value,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
@@ -43,11 +43,10 @@ const jsonByteLength=value=>new TextEncoder().encode(typeof value==='string'?val
 const personalDataCodec=RecordCodecs.createPersonalDataCodec(limits);
 const pendingReviewCodec=testPendingReviewCodec(RecordCodecs,{personalDataCodec});
 const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingReviewCodec,processing:testProcessing,
-  appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),
+  appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,
   entityTypes:freeze(Object.keys(defs)),keyedRecord,entities:freeze({entityDefinition,entityIdentity}),
   helpers:freeze({boundedInt,jsonByteLength}),
-  richText:freeze({assetIds:value=>String(value||'').includes(assetId)?freeze([assetId]):freeze([]),assetIdValid:value=>/^img-[A-Za-z0-9_-]{16,128}$/.test(String(value||'')),imageMimeTypeValid:value=>['image/png','image/jpeg','image/webp','image/gif','image/avif'].includes(String(value||''))}),dailyRecordCodec,activeSessionCodec,
-  compatibilityCodec
+  richText:freeze({assetIds:value=>String(value||'').includes(assetId)?freeze([assetId]):freeze([]),assetIdValid:value=>/^img-[A-Za-z0-9_-]{16,128}$/.test(String(value||'')),imageMimeTypeValid:value=>['image/png','image/jpeg','image/webp','image/gif','image/avif'].includes(String(value||''))}),dailyRecordCodec,activeSessionCodec
 }));
 
 const assetId='img-1234567890abcdefghijklmn';

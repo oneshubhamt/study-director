@@ -129,6 +129,7 @@ try{
       result.checks.restoredStateBacksUp=true;
 
       await reload(page);await page.evaluate(remember);
+      await waitFor(()=>page.evaluate(`__PWA6.DeviceBackup.status().connected`),{label:'remembered Device Folder after reload'});
       const reloaded=await page.evaluate(read);
       assert.equal(reloaded.yesterday,'FolderQA yesterday');assert.equal(reloaded.note,'FolderQA note edited after clearing');assert.equal(reloaded.session,true);
       assert.equal(reloaded.folder,true,'the Device Folder is remembered after the clear');

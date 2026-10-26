@@ -159,6 +159,19 @@ await test('secondary window retries an external activation after transient bloc
   // A primary window still waits for its own session state to reconcile.
   h.state.owner.state='primary';h.state.timer=false;h.state.lifecycle.ready=false;assert.equal(await h.sandbox.evaluateAutomaticPwaUpdate(),false);assert.equal(h.calls.filter(c=>c==='external-apply').length,2);
 });
+await test('a read-only follower retries a mismatched boot against an activated external release',async()=>{
+  const h=fixture();h.state.owner.state='secondary';
+  Object.assign(h.sandbox,{pwaLatestUpdateState:{updateReady:true,externalUpdate:true,bootState:'mismatch'},pwaAutomaticBlockMessage:'',pwaUpdateRetryTimer:null,pwaUpdateEvaluationRunning:false,
+    PWA_UPDATE_READY_DELAY_MS:650,PWA_UPDATE_SAFETY_RETRY_MS:300000,schedulePwaUpdateEvaluation(){},renderPwaUpdateStatus(){},pwaAppliedPlanEnded:()=>false});
+  h.sandbox.PwaLifecycle.apply=async()=>{h.calls.push('external-apply');return true;};
+  vm.runInContext(source.slice(source.indexOf('async function evaluateAutomaticPwaUpdate('),source.indexOf('async function applyPwaUpdateFromUi(')),h.sandbox);
+  h.state.lifecycle.transitioning=true;assert.equal(await h.sandbox.evaluateAutomaticPwaUpdate(),false,'transitioning followers still wait');
+  h.state.lifecycle.transitioning=false;assert.equal(await h.sandbox.evaluateAutomaticPwaUpdate(),true,'an already-activated release must not strand a settled read-only follower');
+  assert.equal(h.calls.filter(c=>c==='external-apply').length,1);
+  h.state.owner.state='primary';assert.equal(await h.sandbox.evaluateAutomaticPwaUpdate(),false,'primary mismatches still require explicit confirmation');
+  h.state.owner.state='secondary';h.sandbox.pwaLatestUpdateState.externalUpdate=false;assert.equal(await h.sandbox.evaluateAutomaticPwaUpdate(),false,'an ordinary mismatch cannot bypass confirmation');
+  assert.equal(h.calls.filter(c=>c==='external-apply').length,1);
+});
 await test('an external activation retries within seconds; an ordinary waiting update keeps the slow safety retry',async()=>{
   const h=fixture();h.sandbox.pwaLatestUpdateState={updateReady:true,externalUpdate:true};
   assert.equal(h.sandbox.pwaUpdateRetryDelay(),5000);h.sandbox.schedulePwaUpdateEvaluation();assert.equal([...h.state.timers.values()][0].delay,5000);

@@ -17,15 +17,14 @@ const sha256=async blob=>Buffer.from(await webcrypto.subtle.digest('SHA-256',awa
 // Each profile and device has its own repository folder in the chosen folder;
 // earlier versions kept one folder of a fixed name, which is moved into it.
 export const LEGACY_ROOT='Study-Director-Automatic-Backup-Repository',REPOSITORY_NAME='Study Director - QA - Test Device',QA_DEVICE='inst_qa_test_mve00000_abcdef01',QA_PROFILE='prof_qa_mve00000_abcdef01';
-export const IDENTITIES=freeze({root:REPOSITORY_NAME,legacyRoot:LEGACY_ROOT,prefix:'Study Director',objects:'objects',checkpoints:'checkpoints',commits:'commits'});
+export const IDENTITIES=freeze({root:REPOSITORY_NAME,prefix:'Study Director',objects:'objects',checkpoints:'checkpoints',commits:'commits'});
 
 // Each world numbers its versions apart, as random ids would be.
 let worlds=0;
-// `manifestVersion` is the format this world's backups are written in (8 is
-// current; 1 to 5 are the released ones this build still reads).
 // lock: a Web Lock shared with another world, as two tabs of one browser share it.
 export function sharedLock(){let chain=Promise.resolve();return work=>{const run=chain.then(()=>work());chain=run.catch(()=>{});return run;};}
-export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',supported=true,protection=null,device=QA_DEVICE,profile=QA_PROFILE,name=REPOSITORY_NAME,manifestVersion=8,lock=sharedLock()}={}){
+export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',supported=true,protection=null,device=QA_DEVICE,profile=QA_PROFILE,name=REPOSITORY_NAME,lock=sharedLock()}={}){
+  const manifestVersion=8;
   // Who this page is (profile and device), and the answer to "use one of the
   // backup folders already here?" (null cancels, '' starts a new one).
   const worldNumber=++worlds;
@@ -68,7 +67,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   // As the real reader does, a manifest this build cannot interpret is marked
   // unreadable (repositoryUnreadable); a locked one is not.
   const unreadable=error=>Object.assign(error,{repositoryUnreadable:true});
-  const inspectManifest=async(file,options={})=>{const opened=protection?(await protection.unprotect(file,{interactive:options.interactive!==false})).blob:file;let value;try{value=JSON.parse(await opened.text());}catch(error){throw unreadable(error);}if(value.format!=='study-director.backup-repository-checkpoint')throw unreadable(new Error('not a manifest'));if(![1,2,3,4,5,8].includes(value.version))throw unreadable(new Error('Backup manifest version is not supported by this build.'));return value;};
+  const inspectManifest=async(file,options={})=>{const opened=protection?(await protection.unprotect(file,{interactive:options.interactive!==false})).blob:file;let value;try{value=JSON.parse(await opened.text());}catch(error){throw unreadable(error);}if(value.format!=='study-director.backup-repository-checkpoint')throw unreadable(new Error('not a manifest'));if(value.version!==8)throw unreadable(new Error('Backup manifest version is not supported by this build.'));return value;};
   const notSupported=()=>{throw new Error('Restore is covered by the browser and repository-restore suites.');};
   const pipeline=freeze({noteObject:notSupported,readNote:notSupported,createPublication:notSupported,publish,publishInline:publish,inspectManifest,inspect:notSupported,bringIn:notSupported,restoreVersion:notSupported,verifyCheckpoint:notSupported,sharedBase:async()=>null,establishBase:notSupported,spine:()=>null,verifyObject:notSupported,scrub:notSupported,cleanup:rules.cleanup,inspectCommit:rules.inspectCommit,
     retention:rules.retention,validatePolicy:rules.validatePolicy,classifyState:rules.classifyState,activeProtected:rules.activeProtected,selectRetention:rules.selectRetention,projectHistory:rules.projectHistory,

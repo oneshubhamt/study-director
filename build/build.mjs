@@ -4,9 +4,8 @@ import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import releaseConfig from '../release.config.mjs';
 import {PRODUCTION_LIMITS,assertProductionLimits} from '../contracts/production-limits.mjs';
-import {LOCAL_STORAGE_KEYS,DEVICE_WIDE_LOCAL_STORAGE_KEYS,PROFILE_SCOPE_SEPARATOR,SESSION_STORAGE_KEYS,OBSOLETE_LOCAL_STORAGE_KEYS,APP_META_KEYS,OBSOLETE_APP_META_KEYS,RENAMED_APP_META_KEYS,RENAMED_VALUE_FORMATS,APP_META_RUNTIME_REGISTRY,assertDataArchitecture} from '../contracts/data-architecture.mjs';
-import {RUNTIME_DATA_CONTRACT,INDEXED_DB_STORE_NAMES,OBSOLETE_INDEXED_DB,OPFS_IDENTITIES,OBSOLETE_OPFS_IDENTITIES,CACHE_STORAGE_IDENTITIES,EXTERNAL_REPOSITORY_IDENTITIES,assertCanonicalIdentities} from '../contracts/canonical-identities.mjs';
-import {LEGACY_BACKUP_SCHEMA_VERSION,assertCompatibilityContract} from '../contracts/compatibility.mjs';
+import {LOCAL_STORAGE_KEYS,DEVICE_WIDE_LOCAL_STORAGE_KEYS,PROFILE_SCOPE_SEPARATOR,SESSION_STORAGE_KEYS,APP_META_KEYS,APP_META_RUNTIME_REGISTRY,assertDataArchitecture} from '../contracts/data-architecture.mjs';
+import {RUNTIME_DATA_CONTRACT,INDEXED_DB_STORE_NAMES,OPFS_IDENTITIES,CACHE_STORAGE_IDENTITIES,EXTERNAL_REPOSITORY_IDENTITIES,assertCanonicalIdentities} from '../contracts/canonical-identities.mjs';
 import {
   privateModules,externalModules,styleModules,trustedExternalModuleIds,runtimeDependencies,htmlSource,privateModuleMarker,
   platformFiles,staticAssets,legalReaderAssets
@@ -52,7 +51,6 @@ function renderTokens(value,identity,sourceName){
   assertProductionLimits(PRODUCTION_LIMITS);
   assertCanonicalIdentities();
   assertDataArchitecture();
-  assertCompatibilityContract();
   const rendered=value
     .replaceAll('@@SD_RELEASE@@',identity.release)
     .replaceAll('@@SD_RELEASE_ID@@',identity.id)
@@ -66,21 +64,14 @@ function renderTokens(value,identity,sourceName){
     .replaceAll('@@SD_PROFILE_SCOPE_SEPARATOR@@',PROFILE_SCOPE_SEPARATOR)
     .replaceAll('@@SD_DEVICE_WIDE_LOCAL_STORAGE_KEYS@@',JSON.stringify(DEVICE_WIDE_LOCAL_STORAGE_KEYS))
     .replaceAll('@@SD_SESSION_STORAGE_KEYS@@',JSON.stringify(SESSION_STORAGE_KEYS))
-    .replaceAll('@@SD_OBSOLETE_LOCAL_STORAGE_KEYS@@',JSON.stringify(OBSOLETE_LOCAL_STORAGE_KEYS))
     .replaceAll('@@SD_APP_META_KEYS@@',JSON.stringify(APP_META_KEYS))
     .replaceAll('@@SD_APP_META_REGISTRY@@',JSON.stringify(APP_META_RUNTIME_REGISTRY))
-    .replaceAll('@@SD_OBSOLETE_APP_META_KEYS@@',JSON.stringify(OBSOLETE_APP_META_KEYS))
-    .replaceAll('@@SD_RENAMED_APP_META_KEYS@@',JSON.stringify(RENAMED_APP_META_KEYS))
-    .replaceAll('@@SD_RENAMED_VALUE_FORMATS@@',JSON.stringify(RENAMED_VALUE_FORMATS))
     .replaceAll('@@SD_RUNTIME_DATA_CONTRACT@@',JSON.stringify(RUNTIME_DATA_CONTRACT))
     .replaceAll('@@SD_INDEXED_DB_STORE_NAMES@@',JSON.stringify(INDEXED_DB_STORE_NAMES))
-    .replaceAll('@@SD_OBSOLETE_INDEXED_DB@@',JSON.stringify(OBSOLETE_INDEXED_DB))
     .replaceAll('@@SD_ATTACHMENT_OPFS_DIRECTORY@@',OPFS_IDENTITIES.attachments)
     .replaceAll('@@SD_BACKUP_FILES_OPFS_DIRECTORY@@',OPFS_IDENTITIES.backupFiles)
-    .replaceAll('@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@',OBSOLETE_OPFS_IDENTITIES.attachmentsV1)
     .replaceAll('@@SD_CACHE_STORAGE_IDENTITIES@@',JSON.stringify(CACHE_STORAGE_IDENTITIES))
     .replaceAll('@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@',JSON.stringify(EXTERNAL_REPOSITORY_IDENTITIES))
-    .replaceAll('@@SD_LEGACY_BACKUP_SCHEMA_VERSION@@',String(LEGACY_BACKUP_SCHEMA_VERSION))
 
   invariant(!/@@SD_[A-Z_]+@@/.test(rendered),`Unresolved release token in ${sourceName}.`);
   return rendered;

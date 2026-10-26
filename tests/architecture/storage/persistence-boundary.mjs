@@ -24,25 +24,16 @@ assert.match(notes,/async function idbApplyDelta[\s\S]*?idbStrictTransaction\(\[
 assert.match(repositories,/async function idbPutDailyRecordBatch[\s\S]*?idbStrictTransaction\(stores,'readwrite'/,'authoritative Daily Record commits must opt into strict durability');
 
 const functionSlice=(source,name,next)=>{const start=source.indexOf(name),end=next?source.indexOf(next,start+name.length):-1;assert.ok(start>=0,`${name} must exist`);return source.slice(start,end>start?end:source.length);};
-for(const [label,slice] of [
-  ['DailyRecord batch write',functionSlice(repositories,'async function idbPutDailyRecordBatch','async function idbGet')],
-  ['DailyRecord delete',functionSlice(repositories,'async function idbDelete(','async function idbAll')],
-  ['ActiveSession write',functionSlice(repositories,'async function idbPutActiveSession','async function idbGetActiveSession')],
-  ['Note commit',functionSlice(notes,'async function idbApplyDelta','async function idbReplace')]
-]){
-  assert.doesNotMatch(slice,/DB_SYNC_QUEUE_STORE|DB_TOMBSTONE_STORE/u,`${label} must not depend on legacy sync stores`);
-}
-assert.match(repositories,/async function migrateLegacyDeletionState[\s\S]*DB_LEGACY_SYNC_QUEUE_STORE[\s\S]*DB_LEGACY_TOMBSTONE_STORE/,'legacy sync stores may only remain as compatibility migration sources');
-assert.match(persistence,/if\(retireLegacy\)removeLegacyStores\(db\)/u,'physical legacy-store deletion must be gated by explicit topology retirement');
-assert.match(persistence,/async function retireLegacyStores\(\)[\s\S]*openRequest\(DB_VER,\{retireLegacy:true\}\)/u,'topology retirement must perform the version upgrade through the retirement gate');
+
+
 assert.match(repositories,/study-director\.saved-day-deletion/,'Saved-Day deletion history must have a purpose-specific repository contract');
 assert.match(repositories,/function randomCoordinationToken\(\)[\s\S]*crypto\.getRandomValues/,'canonical coordination tokens must come from fresh opaque random bytes rather than portable/domain authority');
 assert.match(repositories,/function newCanonicalMutationEpoch\(\)\{\s*return freeze\(\{format:'study-director\.canonical-mutation-epoch',version:1,token:randomCoordinationToken\(\)/u,'canonical mutation fencing must use the opaque coordination-token generator');
 assert.match(repositories,/function stageCanonicalMutationEpoch\(tx,preparationUnits=null\)[\s\S]*Meta\.view\(tx\)\.put\('canonicalMutationEpoch'/,'canonical epoch publication and preparation-unit attribution must be stageable inside the same IndexedDB transaction as canonical data');
-assert.match(app,/async function legacyBackupSnapshotRevision\(\)[\s\S]*AppData\.dailyRecords\.datasetRevision\(\)[\s\S]*PlanData\.exportData\(\{flush:false\}\)[\s\S]*AttachmentStorage\.list\(\)/,'the legacy heavyweight fence must remain available as a conservative fallback');
-assert.match(app,/async function backupSnapshotRevision\(options=\{\}\)[\s\S]*options&&options\.legacy===true[\s\S]*AppData\.mutationEpoch\.eligible\(\)[\s\S]*study-director\.fast-capture-fence\.v1/,'healthy backup fencing must use the constant-size epoch/generation guard and fail back to the legacy fence when explicitly requested or ineligible');
+assert.match(app,/async function fullBackupSnapshotRevision\(\)[\s\S]*AppData\.dailyRecords\.datasetRevision\(\)[\s\S]*PlanData\.exportData\(\{flush:false\}\)[\s\S]*AttachmentStorage\.list\(\)/,'the full snapshot fence must remain available as a conservative fallback');
+assert.match(app,/async function backupSnapshotRevision\(options=\{\}\)[\s\S]*options&&options\.full===true[\s\S]*AppData\.mutationEpoch\.eligible\(\)[\s\S]*study-director\.fast-capture-fence\.v1/,'healthy backup fencing must use the constant-size epoch/generation guard and fail back to the full snapshot fence when explicitly requested or ineligible');
 assert.match(app,/captureMutationGeneration\+\+/,'in-process textarea mutations must advance the local capture generation before canonical persistence necessarily settles');
-assert.match(app,/markReady:async proof=>\{[\s\S]*backupFastFenceReady=false;[\s\S]*proof&&proof\.canonical===true[\s\S]*AppData\.mutationEpoch\.reseed\(\)[\s\S]*backupFastFenceReady=true/,'the fast fence must activate only after startup proves canonical compatibility and successfully reseeds the durable epoch');
+assert.match(app,/markReady:async proof=>\{[\s\S]*backupFastFenceReady=false;[\s\S]*proof&&proof\.canonical===true[\s\S]*AppData\.mutationEpoch\.reseed\(\)[\s\S]*backupFastFenceReady=true/,'the fast fence must activate only after startup proves canonical readiness and successfully reseeds the durable epoch');
 
 assert.match(app,/commit:\(rows,remove,token,guard=\(\)=>true,deletionState=null\)=>IndexedDb\.strictTransaction\(\[DB_ASSET_STORE,DB_APP_META_STORE\],'readwrite',[\s\S]*AppData\.deletionRecovery\.stageAttachments\(tx,deletionState\)/u,'verified attachment metadata, deletion state, and the canonical mutation epoch must publish atomically with strict durability');
 assert.match(app,/const units=\[\.\.\.new Set\(\[\.\.\.rows\.map\(\(\[id\]\)=>`attachmentAsset:\$\{String\(id\)\}`\),\.\.\.remove\.map\(id=>`attachmentAsset:\$\{String\(id\)\}`\)\]\)\];[\s\S]*AppData\.mutationEpoch\.stage\(tx,units\)/u,'attachment metadata publication/removal must invalidate exactly the affected attachment preparation identities inside the canonical transaction');

@@ -34,13 +34,12 @@ const jsonByteLength=value=>new TextEncoder().encode(typeof value==='string'?val
 const personalDataCodec=RecordCodecs.createPersonalDataCodec(limits);
 const pendingReviewCodec=testPendingReviewCodec(RecordCodecs,{personalDataCodec});
 const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingReviewCodec,processing:testProcessing,
-  appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),
+  appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,
   entityTypes:freeze(Object.keys(defs)),keyedRecord:freeze({create:()=>Object.create(null)}),entities:freeze({entityDefinition,entityIdentity}),
   helpers:freeze({boundedInt,jsonByteLength}),
   richText:freeze({assetIds:value=>rich.assetIds(value),assetIdValid:value=>rich.isAssetId(value),imageMimeTypeValid:value=>rich.isSupportedImageType(value)}),
-  dailyRecordCodec:freeze({sanitizeHistoricalDailyRecord:value=>value,canonicalizeHistoricalDailyRecord:value=>value,sanitizeCurrentDailyRecord:value=>value,sanitizeImportedNote:value=>value,sanitizeCurrentNote:value=>value,isSupportedSavedDate:()=>true}),
-  activeSessionCodec:freeze({sanitizeCurrent:value=>value}),
-  compatibilityCodec:freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:value=>value,note:value=>value,activeSession:value=>value,reflectionDraft:value=>value})
+  dailyRecordCodec:freeze({sanitizeCurrentDailyRecord:value=>value,sanitizeCurrentNote:value=>value,isSupportedSavedDate:()=>true}),
+  activeSessionCodec:freeze({sanitizeCurrent:value=>value})
 }));
 
 const paragraph=param=>({type:'Paragraph',content:[{type:'Text',param}]});

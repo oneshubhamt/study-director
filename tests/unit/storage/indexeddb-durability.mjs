@@ -8,9 +8,10 @@ const persistence=fs.readFileSync('source/core/persistence.js','utf8');
 function createPrimitiveHarness({strictUnsupported=false}={}){
   const calls=[],captures=[];
   const db={
-    objectStoreNames:{contains:()=>true},
+    version:9,objectStoreNames:Object.assign(['daily','summary','notes','session','meta','assets'],{contains:()=>true}),
     close(){},
     transaction(stores,mode,options){
+      if(mode==='readonly')return {objectStore:()=>({keyPath:({daily:'date',summary:'date',notes:'key',session:'id',meta:'key',assets:null})[stores]})};
       calls.push({stores:Array.isArray(stores)?[...stores]:stores,mode,args:arguments.length,options:options?{...options}:null});
       if(strictUnsupported&&arguments.length>=3)throw new TypeError('durability options unsupported');
       return {durability:options?.durability||'default',onerror:null,onabort:null,oncomplete:null,objectStore:()=>({})};
@@ -24,9 +25,8 @@ function createPrimitiveHarness({strictUnsupported=false}={}){
   const module=context[Symbol.for('studyDirector.internalModules.v1')].require('persistence',1);
   const api=module.createIndexedDb(Object.freeze({
     config:Object.freeze({
-      dbName:'durability-test',dbVersion:9,bridgeVersion:8,
-      stores:Object.freeze({dailyRecords:'daily',dailySummaries:'summary',notes:'notes',activeSessions:'session',appMeta:'meta',assets:'assets'}),
-      legacyStores:Object.freeze({syncQueue:'sync',tombstones:'tombstones',reflectionDrafts:'reflection'})
+      dbName:'durability-test',dbVersion:9,
+      stores:Object.freeze({dailyRecords:'daily',dailySummaries:'summary',notes:'notes',activeSessions:'session',appMeta:'meta',assets:'assets'})
     }),
     hooks:Object.freeze({onError:()=>{},onOk:()=>{},capture:(scope,error,level)=>captures.push({scope,error:String(error&&error.message||error),level})})
   }));

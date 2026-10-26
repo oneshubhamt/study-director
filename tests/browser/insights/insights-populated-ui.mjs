@@ -25,7 +25,7 @@ async function waitFor(fn,{timeout=45000,interval=100,label='condition'}={}){
 
 let main=fs.readFileSync(path.join(deployment,manifest.main),'utf8');
 const marker='/* PUBLIC PLUGIN API */';
-const exposure='window.__InsightsUiDebug=Object.freeze({StartupLifecycle,AppData,CompatibilityCodecs,goTab});\n';
+const exposure='window.__InsightsUiDebug=Object.freeze({StartupLifecycle,AppData,goTab});\n';
 if(!main.includes(marker))throw new Error('Insights UI browser harness hook is unavailable.');
 main=main.replace(marker,exposure+marker);
 main=withoutPwaChecks(main);
@@ -85,7 +85,7 @@ try{
         },
         practiceRuns:[{taskId:taskA,targetMs,totalUnits:4,unitMs:[actualMs,actualMs,actualMs,actualMs]}]});
     }
-    const saved=await __InsightsUiDebug.AppData.dailyRecords.saveBatch(records.map((record,index)=>{const converted=__InsightsUiDebug.CompatibilityCodecs.dailyRecord(record);if(!converted)throw new Error('Invalid legacy fixture at '+index+': '+JSON.stringify(record));return converted;}));
+    const saved=await __InsightsUiDebug.AppData.dailyRecords.saveBatch(records.map((record,index)=>{const converted=__InsightsUiDebug.,.dailyRecord(record);if(!converted)throw new Error('Invalid legacy fixture at '+index+': '+JSON.stringify(record));return converted;}));
     localStorage.setItem('studyDirector.insights.window.v1','all');
     const started=performance.now();__InsightsUiDebug.goTab('insights');
     return {saved,started,total};

@@ -24,7 +24,7 @@ const persistence=read('source/core/persistence.js');
 const hostMetadata=read('source/core/host-metadata.js');
 const backupRecoveryHost=read('source/core/backup-recovery-host.js');
 const canonical=read('contracts/canonical-identities.mjs');
-const compatibility=read('contracts/compatibility.mjs');
+
 const dataArchitecture=read('contracts/data-architecture.mjs');
 const build=read('build/build.mjs');
 const currentSource=[app,backup,managedRepository,backupProvider,device,repositories,startup,persistence].join('\n');
@@ -55,7 +55,7 @@ assert.match(backup,/const LogicalCheckpointCapture=freeze\(\{capture:captureLog
 assert.match(backup,/const PortableCheckpointMaterializer=freeze\(\{materialize:materializePortableCheckpoint\}\);/u,'portable .sdbackup materialisation must remain separate from logical checkpoint capture');
 assert.match(backup,/async function createCanonicalCheckpoint\(options=\{\},report=null\)\{[\s\S]*LogicalCheckpointCapture\.capture\(new Date\(\)\.toISOString\(\),options\)[\s\S]*PortableCheckpointMaterializer\.materialize\(capture,\{preferCompression:true,verify:true,report\}\);/u,'current checkpoint creation must capture once and then materialise the existing portable format');
 assert.match(codec,/plan&&plan\.checkpoint\?validateCheckpointMetadata\(plan\.checkpoint\):backupCheckpointMetadata/u,'portable manifest creation must reuse captured checkpoint provenance when supplied');
-assert.match(backupCapture,/protectedCheckpointManifest=Number\(backupVersion\)>=15\?BackupCodec\.createProtectedManifest\(captureBase,checkpointMetadata\):null/u,'logical capture must bind protected deletion/authority state to the same checkpoint identity before materialisation');
+assert.match(backupCapture,/protectedCheckpointManifest=BackupCodec\.createProtectedManifest\(captureBase,checkpointMetadata\)/u,'logical capture must bind protected deletion/authority state to the same checkpoint identity before materialisation');
 assert.match(backup,/BackupCaptureModule\.create/u,'backup façade must compose logical capture and incremental preparation through the extracted capture module');
 assert.match(backup,/const CheckpointPipeline=freeze\(\{\s*create:BackupController\.createCheckpoint,inspect:BackupController\.inspect,restore:BackupController\.restore,markCompleted:BackupController\.markCompleted\s*\}\);/su,'portable checkpoint pipeline must remain the explicit .sdbackup transport port');
 assert.match(backup,/const \{controller:BackupController,repository:RepositoryCheckpointPipeline\}=\(\(\)=>\{[\s\S]*const repository=freeze\(\{[\s\S]*publish:\(\.\.\.args\)=>track\(\(\)=>ManagedRepository\.publish\(\.\.\.args\),true\),[\s\S]*publishInline:ManagedRepository\.publish,[\s\S]*inspectManifest:ManagedRepository\.inspectManifest,[\s\S]*bringIn:controller\.restore,[\s\S]*restoreVersion:\(\.\.\.args\)=>track\(\(\)=>restoreManagedVersion\(\.\.\.args\),true\),[\s\S]*retention:ManagedRepository\.retention,[\s\S]*projectHistory:ManagedRepository\.projectHistory,[\s\S]*markCompleted:controller\.markCompleted[\s\S]*return freeze\(\{controller,repository\}\);/u,'backup runtime must return sibling frozen controller and repository capabilities so repository ownership semantics remain private without proxying pure repository methods through the controller');
@@ -153,7 +153,7 @@ assert.match(backupProvider,/RepositoryCheckpointPipeline\.inspect\(row\.manifes
 assert.match(backupProvider,/result=await RepositoryCheckpointPipeline\.bringIn\(candidate,\{note,missingOnly,sync,review:/u,'provider Combine must continue to use the existing Bring-in reconciliation engine');
 assert.match(backupProvider,/async function restoreRepositoryProviderVersion\(id,options=\{\}\)[\s\S]*RepositoryCheckpointPipeline\.restoreVersion\(candidate,\{confirmed:options&&options\.confirmed===true\}\)[\s\S]*presentRecovery\(selected,'restore-version',result\)/u,'provider-scoped Replace must use exact replacement and honor its already-made mode choice');
 assert.match(backupProvider,/function presentRecovery\(selected,kind,result\)\{\s*const convergence=result&&result\.managedRecovery&&result\.managedRecovery\.present/u,'Combine and Replace receive their fresh managed present from the shared P4 transaction');
-assert.match(managedRepository,/const LEGACY_REFLECTION_DRAFT_PACK_KIND='reflectionDraftPack';[\s\S]*const REPOSITORY_SCRUB_SKIPPED_KINDS=freeze\(new Set\(\['activeSession',LEGACY_REFLECTION_DRAFT_PACK_KIND\]\)\)/u,'repository integrity scrub may still recognize legacy Reflection Draft packs for compatibility, but only through an explicitly legacy constant');
+
 assert.match(managedRepository,/REPOSITORY_SCRUB_KIND_PRIORITY=freeze\(new Map\(\[\['attachment',0\],\['structuredPack',1\],\['note',2\],\['dailyRecordPack',3\],\['personalData',4\]\]\)\)/u,'repository integrity scrub must prioritize attachments, packed tiny structured state, standalone notes, Saved Days, then standalone personal data');
 assert.match(device,/repository:transport\n/u,'the Device Folder hands the engine its transport only: every restore names its version');assert.doesNotMatch(device+drive,/chooseCheckpoint|chooseRepositoryCheckpoint/u,'no location has a version picker of its own');
 assert.doesNotMatch(device,/lastSlot|Automatic-Checkpoint-A|Automatic-Checkpoint-B/u,'retired Device A/B settings residue must not remain in production code');
@@ -192,26 +192,9 @@ assert.match(dataArchitecture,/deviceFolder:surface\('backup-configuration','dev
 assert.match(dataArchitecture,/deviceBackup:surface\('external-backup',[\s\S]*Bring-in reconciliation and exact historical Version Restore/u,'Device Folder architecture must classify distinct managed Bring-in and Version Restore semantics');
 assert.match(dataArchitecture,/driveBackup:surface\('external-backup',[\s\S]*separate Bring-in and exact historical Version Restore orchestration/u,'Drive architecture must classify distinct managed Bring-in and Version Restore semantics');
 
-assert.match(codec,/const LEGACY_TOMBSTONE_TYPE='tombstone',LEGACY_REFLECTION_DRAFT_TYPE='reflectionDraft'/u,'historical backup adapter must retain explicit tombstone and retired Reflection Draft vocabulary only inside compatibility parsing');
-assert.match(codec,/Historical completion proofs depend on the original entity order/u,'historical completion-proof ordering must be documented and isolated');
-assert.equal(currentEntities.includes('LEGACY_TOMBSTONE_TYPE'),false,'historical backup vocabulary must not leak into current domain entities');
 
 // Current checkpoint purity: the contract no longer writes or owns the retired distributed-sync schema version.
-assert.equal(canonical.includes('LEGACY_SYNC_SCHEMA_VERSION'),false,'legacy sync schema naming must be absent from the current identity contract');
-assert.match(compatibility,/export const LEGACY_BACKUP_SCHEMA_VERSION=1;/u,'historical backup schema ceiling must live in compatibility, not the current data contract');
-assert.match(app,/const LEGACY_BACKUP_SCHEMA_VERSION=@@SD_LEGACY_BACKUP_SCHEMA_VERSION@@;/u,'host must receive the historical backup ceiling through explicit compatibility injection');
-assert.match(build,/@@SD_LEGACY_BACKUP_SCHEMA_VERSION@@/u,'build must own compatibility-value injection');
+
+
 assert.doesNotMatch(codec,/schemaVersion:DATA_CONTRACT\.schemas\.Backup/u,'current v19 manifest writer must not emit retired schemaVersion baggage');
 assert.doesNotMatch(backup,/schemaVersion:Number\(manifest\.schemaVersion/u,'current restore preview must not expose a retired sync-era schema API');
-
-
-console.log(JSON.stringify({
-  status:'PASS',suite:'cleer-integration',
-  currentSyncRuntimeRemoved:true,
-  maintenanceMetadata:'v6-lean',
-  startupSyncFlushRemoved:true,
-  checkpointTransports:['file'],
-  repositoryTransports:['device-folder-tiered-15-plus-1','google-drive-tiered-15-plus-1','restore-adapter'],
-  historicalBackupCompatibilityIsolated:true,
-  currentCheckpointSyncSchemaBaggage:false
-},null,2));

@@ -27,15 +27,6 @@ export const CURRENT_SCHEMA_VERSIONS=freeze({
   CheckpointProtectedManifest:3
 });
 
-// A database below bridgeVersion opens there first: its stores take their
-// current names and the retired stores stay readable until the compatibility
-// steps finish, which then move it to the current version.
-export const OBSOLETE_INDEXED_DB=freeze({
-  baselineVersion:5,
-  bridgeVersion:8,
-  stores:freeze({syncQueue:'syncQueue',tombstones:'tombstones',reflectionDrafts:'reflectionDrafts'}),
-  renamedStores:freeze({notes:'areaNotes'})
-});
 
 export const ACTIVE_SESSION_ID='current';
 // Portable checkpoint provenance is deliberately separate from user-domain records.
@@ -56,7 +47,6 @@ export const OPFS_IDENTITIES=freeze({
   attachments:'study-director-assets-v2',
   backupFiles:'study-director-backup-files-v1'
 });
-export const OBSOLETE_OPFS_IDENTITIES=freeze({attachmentsV1:'study-director-assets-v1'});
 export const ATTACHMENT_OPFS_DIRECTORY=OPFS_IDENTITIES.attachments;
 export const BACKUP_FILES_OPFS_DIRECTORY=OPFS_IDENTITIES.backupFiles;
 
@@ -64,15 +54,13 @@ export const BACKUP_FILES_OPFS_DIRECTORY=OPFS_IDENTITIES.backupFiles;
 // consume these identities rather than minting cache/repository directories.
 export const CACHE_STORAGE_IDENTITIES=freeze({
   shellPrefix:'study-director-shell-',
-  updateBridge:'study-director-update-bridge-v2',
-  updateRecoveryPrefix:'study-director-update-bridge-v2-'
+  clientState:'study-director-update-bridge-v2',
 });
 
 export const EXTERNAL_REPOSITORY_IDENTITIES=freeze({
   deviceFolderPickerId:'study-director-device-backup',
   // Earlier versions kept one repository folder in the chosen folder; it is
   // moved into the profile and device's own ("Study Director - Ana - iPhone Safari").
-  deviceFolderLegacyRoot:'Study-Director-Automatic-Backup-Repository',
   backupFolderPrefix:'Study Director',
   deviceFolderObjects:'objects',
   deviceFolderCheckpoints:'checkpoints',
@@ -131,7 +119,6 @@ export const RUNTIME_DATA_CONTRACT=freeze({
 export const INDEXED_DB_STORE_NAMES=freeze(Object.fromEntries(Object.entries(INDEXED_DB.stores).map(([id,value])=>[id,value.name])));
 
 export function assertCanonicalIdentities(){
-  if(!Object.isFrozen(INDEXED_DB)||!Object.isFrozen(INDEXED_DB.stores)||!Object.isFrozen(CURRENT_SCHEMA_VERSIONS)||!Object.isFrozen(OPFS_IDENTITIES)||!Object.isFrozen(OBSOLETE_OPFS_IDENTITIES)||!Object.isFrozen(CACHE_STORAGE_IDENTITIES)||!Object.isFrozen(EXTERNAL_REPOSITORY_IDENTITIES)||!Object.isFrozen(EXTERNAL_FORMATS)||!Object.isFrozen(CHECKPOINT_METADATA)||!Object.isFrozen(CHECKPOINT_METADATA.fields)||!Object.isFrozen(CHECKPOINT_PROTECTED_MANIFEST)||!Object.isFrozen(CHECKPOINT_PROTECTED_MANIFEST.fields)||!Object.isFrozen(OBSOLETE_INDEXED_DB)||!Object.isFrozen(OBSOLETE_INDEXED_DB.stores)||!Object.isFrozen(OBSOLETE_INDEXED_DB.renamedStores)||!Object.isFrozen(RUNTIME_DATA_CONTRACT))throw new TypeError('Canonical persistence identities must be frozen.');
   if(!INDEXED_DB.name||!Number.isSafeInteger(INDEXED_DB.version)||INDEXED_DB.version<1)throw new Error('IndexedDB identity is invalid.');
   const physicalNames=Object.values(INDEXED_DB_STORE_NAMES);
   if(physicalNames.length!==6||new Set(physicalNames).size!==physicalNames.length)throw new Error('IndexedDB store identities are incomplete or duplicated.');
@@ -139,14 +126,8 @@ export function assertCanonicalIdentities(){
     if(!value.name||!value.key||!value.schema||!Number.isSafeInteger(value.schemaVersion)||value.schemaVersion<1)throw new Error(`IndexedDB store ${id} identity is invalid.`);
     if(!value.schema.endsWith(`.v${value.schemaVersion}`))throw new Error(`IndexedDB store ${id} schema name/version drifted.`);
   }
-  if(OBSOLETE_INDEXED_DB.baselineVersion>=INDEXED_DB.version||new Set(Object.values(OBSOLETE_INDEXED_DB.stores)).size!==Object.values(OBSOLETE_INDEXED_DB.stores).length)throw new Error('Obsolete IndexedDB identities are invalid.');
-  if(Object.values(OBSOLETE_INDEXED_DB.stores).some(name=>physicalNames.includes(name)))throw new Error('Obsolete IndexedDB stores must not remain canonical stores.');
-  if(!(OBSOLETE_INDEXED_DB.bridgeVersion>OBSOLETE_INDEXED_DB.baselineVersion&&OBSOLETE_INDEXED_DB.bridgeVersion<INDEXED_DB.version))throw new Error('IndexedDB bridge version must sit between the shipped baseline and the current version.');
-  for(const [id,name] of Object.entries(OBSOLETE_INDEXED_DB.renamedStores))if(!INDEXED_DB.stores[id]||physicalNames.includes(name)||Object.values(OBSOLETE_INDEXED_DB.stores).includes(name))throw new Error(`Renamed IndexedDB store ${id} is invalid.`);
   if(new Set(Object.values(OPFS_IDENTITIES)).size!==Object.values(OPFS_IDENTITIES).length)throw new Error('Current OPFS identities must be unique.');
-  if(new Set(Object.values(OBSOLETE_OPFS_IDENTITIES)).size!==Object.values(OBSOLETE_OPFS_IDENTITIES).length||Object.values(OBSOLETE_OPFS_IDENTITIES).some(value=>Object.values(OPFS_IDENTITIES).includes(value)))throw new Error('Obsolete OPFS identities must be unique and outside the current identity set.');
   if(new Set(Object.values(CACHE_STORAGE_IDENTITIES)).size!==Object.values(CACHE_STORAGE_IDENTITIES).length)throw new Error('Cache Storage identities must be unique.');
-  if(!CACHE_STORAGE_IDENTITIES.updateRecoveryPrefix.startsWith(CACHE_STORAGE_IDENTITIES.updateBridge))throw new Error('Update recovery cache identity must derive from the update bridge identity.');
   if(new Set(Object.values(EXTERNAL_REPOSITORY_IDENTITIES)).size!==Object.values(EXTERNAL_REPOSITORY_IDENTITIES).length)throw new Error('External repository identities must be unique.');
   if(RUNTIME_DATA_CONTRACT.storage.dbName!==INDEXED_DB.name||RUNTIME_DATA_CONTRACT.storage.dbVersion!==INDEXED_DB.version)throw new Error('Runtime data contract database identity drifted.');
   for(const [id,value] of Object.entries(INDEXED_DB.stores)){

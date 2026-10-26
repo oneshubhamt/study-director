@@ -29,7 +29,7 @@ registry.define('device-backup',1,()=>{
     let installed=false,handle=null,permission='unknown',baseline='',mode=supported?'off':'unsupported',settingsUnverified=supported,connectionListener=null,connecting=false,permissionNoticeShown=false;
     // The repository folder inside the chosen folder this profile and device
     // use; '' until it is settled (found, moved in or made).
-    let repositoryName='',preparing=null,oldFolder=false;
+    let repositoryName='',preparing=null;
 
     function capture(scope,error){try{hooks.capture(scope,error);}catch{}}
     const connected=()=>supported&&!!handle&&permission==='granted'&&!!repositoryName;
@@ -41,7 +41,7 @@ registry.define('device-backup',1,()=>{
         installed,supported,mode,connected:connected(),permission,folderName:handle&&typeof handle.name==='string'?handle.name:'',
         busy:engineState?.busy===true||connecting||!!preparing,cancellable:engineState?.cancellable===true,foregroundKind:connecting?'connect':preparing?'prepare':String(engineState?.foregroundKind||''),
         backingUp:engineState?.backingUp===true,maintenanceBusy:engineState?.maintenanceBusy===true,paused:engineState?.paused===true,locked:engineState?.locked===true,pending:engineState?.waiting===true,nextEligibleAt:String(engineState?.nextEligibleAt||''),
-        retryAttempt:Number(engineState?.retryAttempt)||0,retryBackoffCapped:engineState?.retryBackoffCapped===true,repositoryName,oldFolder,
+        retryAttempt:Number(engineState?.retryAttempt)||0,retryBackoffCapped:engineState?.retryBackoffCapped===true,repositoryName,
         lastBackupAt:String(hooks.verifiedAt()||'')||null,
         // The row's inline note shows the location's messages; this says whether it has one.
         hasNote:!!presentation.current(ID)
@@ -87,7 +87,7 @@ registry.define('device-backup',1,()=>{
       catch(error){capture('device-backup.permission-request',error);return 'denied';}
     }
     function forgetFolder(text=''){
-      handle=null;permission='unknown';baseline='';repositoryName='';oldFolder=false;mode=supported?'off':'unsupported';
+      handle=null;permission='unknown';baseline='';repositoryName='';mode=supported?'off':'unsupported';
       presentation.resolve(ID,'permission');if(text)presentation.feedback(ID,text,false);
       publish();
     }
@@ -128,7 +128,7 @@ registry.define('device-backup',1,()=>{
         if(handle!==target)throw Object.assign(new Error('The backup folder changed.'),{name:'AbortError'});
         const mineRows=found.repositories.filter(row=>row.scope===mine.scope&&row.device===mine.device);
         // A move whose old folder has since gone is finished with what it has.
-        const own=mineRows.find(row=>!row.moving)||(!found.legacy&&mineRows[0])||null;
+        const own=mineRows[0]||null;
         // Folders of other devices can be taken over (after a browser data
         // clear this device has a new id); other profiles here keep theirs.
         const offered=found.repositories.filter(row=>row.device!==mine.device);
@@ -136,11 +136,7 @@ registry.define('device-backup',1,()=>{
         if(own){
           name=own.name;
           // The profile took another id (a Drive library from another device).
-          if(own.profile!==mine.profile||own.moving)await layout.claim(own.name);
-        }else if(found.legacy&&found.legacy.versions>0){
-          presentation.feedback(ID,'Moving backups to a folder named for this profile and device…');publish();
-          name=await layout.move(mine.name,{onProgress:(done,total)=>{presentation.feedback(ID,`Moving backups to “${mine.name}”… ${done} of ${total} files`);publish();}});
-          presentation.feedback(ID,`Backups moved to “${name}”.`);
+          if(own.profile!==mine.profile)await layout.claim(own.name);
         }else if(choose&&offered.length){
           const picked=await hooks.chooseRepository(offered);
           if(picked===null)throw Object.assign(new Error('Folder selection was cancelled.'),{name:'AbortError'});
@@ -148,9 +144,7 @@ registry.define('device-backup',1,()=>{
         }else name=await layout.create(mine.name);
         // The old folder goes once its versions are in this one (a move that
         // could not delete it), or when it never held a version.
-        if(found.legacy&&(!found.legacy.versions||own?.movedFrom===found.legacy.name))await layout.removeLegacy().catch(error=>capture('device-backup.remove-old-folder',error));
         // Whether the folder of earlier versions is still there (diagnostics).
-        oldFolder=found.legacy?await layout.legacyPresent().catch(()=>true):false;
         if(handle!==target)throw Object.assign(new Error('The backup folder changed.'),{name:'AbortError'});
         repositoryName=name;return name;
       }).finally(()=>{preparing=null;connectionChanged();});

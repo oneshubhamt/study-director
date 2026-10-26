@@ -7,12 +7,11 @@ import {fileURLToPath} from 'node:url';
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
 const read=relative=>fs.readFileSync(path.join(ROOT,relative),'utf8');
-for(const file of ['source/core/internal.js','source/core/domain.js','source/core/timer-state.js','source/core/record-codecs.js','source/core/compatibility-codecs.js'])vm.runInThisContext(read(file),{filename:file});
+for(const file of ['source/core/internal.js','source/core/domain.js','source/core/timer-state.js','source/core/record-codecs.js'])vm.runInThisContext(read(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const Domain=registry.require('domain',1,Object.freeze({maxAreaNameChars:200,maxDurationMinutes:1440,maxScheduleChars:50000,maxScheduleRows:200,maxTaskNameChars:300,maxTasksPerDay:100,maxUnitChars:80}));
 const TimerStateModule=registry.require('timer-state',1);
 const RecordCodecs=registry.require('record-codecs',1);
-const CompatibilityCodecs=registry.require('compatibility-codecs',1);
 
 const timer=TimerStateModule.createStateController(Object.freeze({
   helpers:Object.freeze({makeTaskId:(task,index)=>String(task.id||`task-${index+1}`)}),
@@ -58,12 +57,6 @@ const codec=RecordCodecs.createActiveSessionCodec(Object.freeze({
 }));
 const optionalText=(value,max)=>typeof value==='string'&&value.length<=max?value:null;
 const optionalBoundedNumber=(value,options={})=>{const n=boundedNumber(value,{...options,fallback:null});return options.integer&&n!==null&&!Number.isInteger(n)?null:n;};
-const compatibility=CompatibilityCodecs.create(Object.freeze({
-  limits,dataContract,keyedRecord,personalDataCodec:Object.freeze({normalize:value=>value}),dailyRecordCodec,activeSessionCodec:codec,
-  helpers:Object.freeze({boundedInt,boundedNumber,optionalBoundedNumber,optionalText,clampText,clampEditorContent:clampText,editorContentWithinLimits:()=>true,sameDataValue:helpers.sameDataValue,sanitizePracticeRun:value=>value,activeSessionScheduleFingerprint:helpers.activeSessionScheduleFingerprint,isValidIsoDate,isCanonicalScheduleText:helpers.isCanonicalScheduleText}),
-  timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp}),domain:Domain,installationId:()=>'inst_review_device'
-}));
-
 const session={
   id:'current',type:'activeSession',version:10,revision:12,date:'2026-08-05',status:'active',runningOn:'inst_review_other_device',
   scheduleText:'07:00 | 60 | A | Study | Area | pages | 10',snapshot,suspendedAt:null,updatedAt:'2026-08-05T08:01:00.000Z'
@@ -75,16 +68,9 @@ const legacySnapshot=structuredClone(snapshot);legacySnapshot.version=5;delete l
 legacySnapshot.reflectionDraft={version:1,date:'2026-08-05',reflection:'Legacy diary',studyQuality:3,revision:6,sessionRevision:12,updatedAt:'2026-08-05T08:00:00.000Z'};
 const {runningOn:_runner,...sessionWithoutRunner}=session,legacyV8={...structuredClone(sessionWithoutRunner),version:8,snapshot:legacySnapshot,entityType:'activeSession',entityId:'current',schemaVersion:1,deviceId:'dev_r10',createdAt:'2026-08-05T07:00:00.000Z',deleted:false,syncStatus:'pending'};
 assert.equal(codec.sanitizeCurrent(legacyV8),null,'ordinary codec must reject the retired ActiveSession schema');
-const migrated=compatibility.activeSession(legacyV8);
-assert.ok(migrated,'compatibility codec must migrate historical ActiveSession review state');
-assert.equal(migrated.version,10);assert.equal(migrated.runningOn,'inst_review_device','an older session belongs to the device converting it');assert.equal(compatibility.activeSession(session).runningOn,'inst_review_other_device','a current session keeps the device running it');assert.equal(migrated.snapshot.version,6);
-assert.deepEqual(migrated.snapshot.review,{reflection:'Legacy diary',studyQuality:3});
-assert.equal(Object.hasOwn(migrated.snapshot,'reflectionDraft'),false);
-for(const key of ['entityType','entityId','schemaVersion','deviceId','createdAt','deleted','syncStatus'])assert.equal(Object.hasOwn(migrated,key),false,`retired sync field ${key} must not enter ActiveSession.v9`);
-
 const invalid=structuredClone(session);delete invalid.snapshot.review;
 assert.equal(codec.canonicalize(invalid),null,'current ActiveSession requires one canonical Review snapshot');
 const extra=structuredClone(session);extra.snapshot.review.revision=1;
 assert.equal(codec.canonicalize(extra),null,'retired ReflectionDraft lineage fields must not survive inside Review state');
 
-console.log(JSON.stringify({status:'PASS',suite:'review-active-session-codec',reviewInActiveSession:true,legacyDraftMigrated:true,currentRequiresReview:true,retiredDraftLineageRejected:true},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'review-active-session-codec',reviewInActiveSession:true,currentRequiresReview:true,retiredDraftLineageRejected:true},null,2));

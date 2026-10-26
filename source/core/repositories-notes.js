@@ -616,7 +616,10 @@ const repository=(()=>{
       // Edits that arrived while a clash was settled were moved to its copy;
       // store them now so a strict flush never ends with them only in memory.
       if(dirtyKeys.size&&!saveFailed)await writeNow();
-      if(dirtyKeys.size)throw new Error(saveMessage||'current notes are not safely stored');
+      if(dirtyKeys.size){
+        if((await storageAppearsRecreated())&&storageLossKnown()&&(await recoverAfterStorageLoss()))return true;
+        throw new Error(saveMessage||'current notes are not safely stored');
+      }
       if(saveFailed&&!(await repairStaleFailureIfCanonical())){
         if(!(await storageAppearsRecreated())||!(await recoverAfterStorageLoss()))throw new Error(saveMessage||'current notes are not safely stored');
       }

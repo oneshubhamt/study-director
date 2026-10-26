@@ -12,12 +12,7 @@ const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new 
 ])};
 const {app}=createHarness(new Map(),stores);
 
-const removed=await app.compatibility.cleanupObsoleteMetadata();
-assert.equal(removed,1,'obsolete metadata cleanup belongs to the temporary compatibility surface');
-assert.equal(stores.meta.has(obsoleteKey),false,'obsolete reflection migration residue must be removed by compatibility migration');
-assert.equal(stores.meta.has(retainedKey),true,'classified canonical metadata must be retained');
-
-await app.compatibility.migrateDailyRecords();
+assert.equal(app.compatibility,undefined);
 const report=await app.maintenance.run();
 assert.equal(report.status,'completed','maintenance must run after the canonical Daily Record baseline is established');
 assert.equal(report.version,6);
@@ -29,14 +24,14 @@ assert.equal(recent.status,'skipped');
 assert.equal(recent.reason,'recent');
 assert.equal(stores.meta.has(obsoleteKey),true,'recurring maintenance must not own compatibility cleanup after consolidation');
 
-console.log(JSON.stringify({status:'PASS',suite:'data-maintenance',compatibilityRemoved:removed,report,recent},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'data-maintenance',compatibilityRemoved:report,recent},null,2));
 
 // Canonical automatic maintenance respects foreground work between operations
 // and never writes a completion after an unavailable metadata read.
 const {default:fs}=await import('node:fs'),{default:vm}=await import('node:vm');
 const source=fs.readFileSync('source/core/repositories.js','utf8');
 const preemptionControls={},preemption=createHarness(new Map(),null,preemptionControls);
-await preemption.app.compatibility.migrateDailyRecords();await preemption.app.notes.load();
+await preemption.app.notes.load();
 let blocked=false,notesReads=0,sessionReads=0;
 preemptionControls.onAreaRead=async()=>{notesReads++;blocked=true;};preemptionControls.onSessionRead=async()=>{sessionReads++;};
 const yielded=await preemption.app.maintenance.run({check:()=>{if(blocked)throw Object.assign(new Error('foreground'),{code:'DATA_MAINTENANCE_YIELDED',reason:'foreground-busy'});}});
@@ -55,7 +50,7 @@ console.log(JSON.stringify({status:'PASS',suite:'daily-record-strict-gc-read',un
 
 const failureCases=[];
 async function maintenanceFailure(name,prepare,verify){
- const controls={},h=createHarness(new Map(),null,controls);await h.app.compatibility.migrateDailyRecords();await h.app.notes.load();
+ const controls={},h=createHarness(new Map(),null,controls);await h.app.notes.load();
  const recover=await prepare(h,controls),previous=h.stores.meta.get('dataMaintenance');
  const failed=await h.app.maintenance.run({force:true});assert.equal(failed.status,'failed',name);const marker=h.stores.meta.get('dataMaintenance');assert.ok(marker===previous||marker?.value?.status==='pending',name+' must not commit completion');
  await verify(h);await recover();const retry=await h.app.maintenance.run();assert.equal(retry.status,'completed',name+' must remain eligible for immediate retry');assert.equal(retry.version,6);assert.equal((await h.app.maintenance.run()).reason,'recent');failureCases.push(name);
@@ -76,10 +71,10 @@ await maintenanceFailure('fallback migration cleanup failure',async(h,c)=>{h.sha
 await maintenanceFailure('pending intent commit failure',async(_h,c)=>{c.failNextMetaOnlyWrite=true;return async()=>{};},async()=>{});
 await maintenanceFailure('completion metadata commit failure',async(_h,c)=>{c.failNextMaintenanceCompletion=true;return async()=>{};},async h=>assert.equal(h.stores.meta.get('dataMaintenance').value.status,'pending'));
 {
- const c={},h=createHarness(new Map(),null,c);await h.app.compatibility.migrateDailyRecords();c.onAreaRead=async()=>{throw new Error('initial notes unavailable');};await h.app.notes.load();assert.equal((await h.app.maintenance.run()).status,'failed');c.onAreaRead=null;assert.equal((await h.app.maintenance.run()).status,'completed');failureCases.push('initial fallback note load recovers strictly');
+ const c={},h=createHarness(new Map(),null,c);c.onAreaRead=async()=>{throw new Error('initial notes unavailable');};await h.app.notes.load();assert.equal((await h.app.maintenance.run()).status,'failed');c.onAreaRead=null;assert.equal((await h.app.maintenance.run()).status,'completed');failureCases.push('initial fallback note load recovers strictly');
 }
 {
- const c={},h=createHarness(new Map(),null,c);await h.app.compatibility.migrateDailyRecords();const completed=await h.app.maintenance.run();h.app.notes.update('restart-pending','Restart Pending','retained after failed forced pass','');c.failNextAreaWrite=true;assert.equal((await h.app.maintenance.run({force:true})).status,'failed');const pending=h.stores.meta.get('dataMaintenance').value;assert.equal(pending.status,'pending');assert.equal(pending.completedAt,completed.completedAt);
+ const c={},h=createHarness(new Map(),null,c);const completed=await h.app.maintenance.run();h.app.notes.update('restart-pending','Restart Pending','retained after failed forced pass','');c.failNextAreaWrite=true;assert.equal((await h.app.maintenance.run({force:true})).status,'failed');const pending=h.stores.meta.get('dataMaintenance').value;assert.equal(pending.status,'pending');assert.equal(pending.completedAt,completed.completedAt);
  const restarted=createHarness(h.sharedLocal,h.stores,{});assert.equal((await restarted.app.maintenance.run()).status,'completed','durable pending work bypasses a recent prior success after restart');assert.equal(storedNote(h.stores.area,'restart-pending').text,'retained after failed forced pass');failureCases.push('failure after recent success remains pending across restart');
 }
 console.log(JSON.stringify({status:'PASS',suite:'data-maintenance-phase-outcomes',cases:failureCases.length,failureCases,immediateRetry:true,recoveryPreserved:true},null,2));
@@ -100,14 +95,14 @@ function automaticMaintenance(h,clock,controls){
 }
 const progressCases=[];
 for(const slowStore of ['area','session','meta','all'])for(const delayMs of [0,1000,19999,20000,35000]){
- const clock=createFakeClock(),controls={clock},h=createHarness(new Map(),null,controls);await h.app.compatibility.migrateDailyRecords();await h.app.notes.load();
+ const clock=createFakeClock(),controls={clock},h=createHarness(new Map(),null,controls);await h.app.notes.load();
  let reads=0;controls.onStorageRead=async({store})=>{if(store==='area')reads++;if(slowStore==='all'||store===slowStore)await clock.advance(delayMs);};
  const job=automaticMaintenance(h,clock,controls),phases=[];let result;
  for(let attempt=0;attempt<8;attempt++){result=await job.run('latency');if(result.status==='completed')break;assert.equal(result.status,'yielded',`${slowStore} ${delayMs}`);assert.equal(result.reason,'budget');assert.ok(result.phase>0&&result.phase<7);assert.ok(!phases.length||result.phase>phases.at(-1),'stable source must advance monotonically');phases.push(result.phase);assert.equal(h.stores.meta.get('dataMaintenance').value.status,'pending');}
  assert.equal(result.status,'completed',`${slowStore} ${delayMs} must finish within the finite phase count`);assert.deepEqual(controls.cleanups,[5000],'attachment cleanup follows each completed daily upkeep');assert.equal(reads,1,'successful strict Notes preparation is not repeated');assert.ok(h.stores.meta.get('dataMaintenance').value.completedAt);job.dispose();progressCases.push({slowStore,delayMs,attempts:phases.length+1});
 }
 for(const change of ['canonical','unsaved-note','rescue','ownership','reload','unavailable','local-unavailable']){
- const clock=createFakeClock(),controls={clock},h=createHarness(new Map(),null,controls);await h.app.compatibility.migrateDailyRecords();await h.app.notes.load();
+ const clock=createFakeClock(),controls={clock},h=createHarness(new Map(),null,controls);await h.app.notes.load();
  let reads=0;controls.onAreaRead=async()=>{reads++;await clock.advance(21000);};let current=h,job=automaticMaintenance(h,clock,controls);
  const first=await job.run('initial');assert.equal(first.status,'yielded');assert.equal(first.phase,2);
  if(change==='canonical')await h.app.mutationEpoch.reseed();
@@ -127,7 +122,7 @@ console.log(JSON.stringify({status:'PASS',suite:'canonical-maintenance-progress'
 // A change during an awaited later phase cannot be adopted as proof that the
 // already completed earlier phase processed it.
 {
- const controls={},h=createHarness(new Map(),null,controls);await h.app.compatibility.migrateDailyRecords();await h.app.notes.load();let changed=false;
+ const controls={},h=createHarness(new Map(),null,controls);await h.app.notes.load();let changed=false;
  controls.onSessionRead=async()=>{if(!changed){changed=true;h.app.notes.update('during-session','During Session','must be flushed before maintenance completes','');}};
  assert.equal((await h.app.maintenance.run()).status,'completed');assert.equal(storedNote(h.stores.area,'during-session').text,'must be flushed before maintenance completes');assert.equal(h.app.notes.failure().failed,false);
  console.log(JSON.stringify({status:'PASS',suite:'canonical-maintenance-source-fence',latePhaseChangeRevalidated:true}));
@@ -180,7 +175,7 @@ for(const delayMs of [19999,20000,35000])for(const preempt of [false,true]){
  const clock=createFakeClock(),controls={clock},local=new Map();let reads=0,armed=false;
  class SlowRecords extends Map{get(key){if(armed&&this.has(key)){reads++;void clock.advance(delayMs);if(preempt&&reads===2)controls.foreground=true;}return super.get(key);}}
  const dates=['2026-09-01','2026-09-02','2026-09-03','2026-09-04'],records=new SlowRecords(dates.map(date=>[date,{version:1,date,savedAt:'2026-09-17T08:00:00.000Z',updatedAt:'2026-09-17T08:00:00.000Z',reflection:'pending deletion'}]));
- const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:records,summary:new Map(),session:new Map(),meta:new Map()},h=createHarness(local,stores,controls);await h.app.compatibility.migrateDailyRecords();await h.app.notes.load();
+ const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:records,summary:new Map(),session:new Map(),meta:new Map()},h=createHarness(local,stores,controls);await h.app.notes.load();
  local.set('deletionRecovery',{format:'study-director.deletion-recovery',version:1,updatedAt:'2026-09-17T09:00:00.000Z',entries:dates.map(date=>({key:'dailyRecord:'+date,kind:'dailyRecord',id:date,deletedAt:'2026-09-17T09:00:00.000Z'}))});armed=true;
  const job=automaticMaintenance(h,clock,controls);let result,preempted=false;
  for(let attempt=0;attempt<dates.length*2+2;attempt++){
@@ -195,7 +190,7 @@ console.log(JSON.stringify({status:'PASS',suite:'canonical-recovery-progress',pr
 // While the person is busy, upkeep waits under a named reason with no timer of
 // its own; one watcher checks back and wakes every job when the work ends.
 {
- const clock=createFakeClock(),controls={clock},h=createHarness(new Map(),null,controls);await h.app.compatibility.migrateDailyRecords();await h.app.notes.load();
+ const clock=createFakeClock(),controls={clock},h=createHarness(new Map(),null,controls);await h.app.notes.load();
  const job=automaticMaintenance(h,clock,controls),host=controls.host,watch=()=>vm.runInContext('foregroundWatch',host);controls.foreground=true;
  const deferred=await job.run('interval');assert.equal(deferred.status,'deferred');assert.equal(deferred.reason,'foreground-busy');
  assert.equal(job.status().blocker,'foreground-busy');assert.equal(job.status().scheduled,false,'no job timer while the person is busy');assert.notEqual(watch(),null,'the shared watcher is armed');

@@ -14,7 +14,7 @@ import {testPendingReviewCodec,memoryPendingReviews,paragraphMerge} from '../../
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
 const read=relative=>fs.readFileSync(path.join(ROOT,relative),'utf8');
-for(const file of ['source/core/internal.js','source/core/operation-lifecycle.js','source/core/persistence.js','source/core/record-codecs.js','source/core/backup-codec.js','source/core/compatibility.js','source/core/canonical.js','source/core/reconciliation.js','source/core/managed-repository.js','source/core/repository-policy.js','source/core/repository-background.js','source/core/backup-provider.js','source/core/backup-capture.js','source/core/backup.js']){
+for(const file of ['source/core/internal.js','source/core/operation-lifecycle.js','source/core/persistence.js','source/core/record-codecs.js','source/core/backup-codec.js','source/core/canonical.js','source/core/reconciliation.js','source/core/managed-repository.js','source/core/repository-policy.js','source/core/repository-background.js','source/core/backup-provider.js','source/core/backup-capture.js','source/core/backup.js']){
   vm.runInThisContext(read(file),{filename:file});
 }
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
@@ -29,7 +29,6 @@ const BackupProviderModule=registry.require('backup-provider',1,Object.freeze({r
 const BackupCaptureModule=registry.require('backup-capture',1);
 const BackupModule=registry.require('backup',1,Object.freeze({backupCapture:BackupCaptureModule,backupProvider:BackupProviderModule,canonical:CanonicalModule,managedRepository:ManagedRepositoryModule,repositoryBackground:RepositoryBackgroundModule}));
 const ReconciliationModule=registry.require('reconciliation',1,Object.freeze({canonical:CanonicalModule}));
-const CompatibilityModule=registry.require('compatibility',1);
 const freeze=Object.freeze;
 
 const limits=freeze({
@@ -76,13 +75,7 @@ const dailyRecordCodec=freeze({
   isSupportedSavedDate:isDate
 });
 const activeSessionCodec=freeze({sanitizeCurrent:item=>item&&item.id==='current'?freeze({...item}):null});
-const compatibilityCodec=freeze({
-  format:'study-director.compatibility-codecs',contractVersion:1,
-  dailyRecord:item=>item&&isDate(item.date)?freeze({...item,date:item.date,version:15}):null,
-  note:normalizeNote,activeSession:item=>item&&item.id==='current'?freeze({...item}):null,
-  localRecoveryEnvelope:()=>null,reflectionDraft:item=>normalizeDrafts([item])[0]||null,
-  personalData:item=>personalDataCodec.normalize(item)
-});
+
 const keyedRecord=freeze({create:()=>Object.create(null)});
 const entityDefinition=type=>entityDefinitions[type]||null;
 const entityIdentity=(type,item)=>String(item?.[entityDefinition(type)?.idField]||'');
@@ -94,26 +87,12 @@ const personalDataCodec=RecordCodecs.createPersonalDataCodec(limits);
 const pendingReviewCodec=testPendingReviewCodec(RecordCodecs,{personalDataCodec}),keptReviews=memoryPendingReviews(pendingReviewCodec);
 const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingReviewCodec,processing:testProcessing,
   appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,
-  legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),entityTypes:freeze(Object.keys(entityDefinitions)),keyedRecord,
+  entityTypes:freeze(Object.keys(entityDefinitions)),keyedRecord,
   entities:freeze({entityDefinition,entityIdentity}),helpers:freeze({boundedInt,jsonByteLength}),
-  richText:freeze({assetIds:()=>freeze([]),assetIdValid:value=>/^img-[A-Za-z0-9_-]{16,128}$/.test(String(value||'')),imageMimeTypeValid:value=>['image/png','image/jpeg','image/webp','image/gif','image/avif'].includes(String(value||''))}),dailyRecordCodec,activeSessionCodec,compatibilityCodec
-}));
-const compatibilityNoop=async()=>freeze({status:'not-needed'});
-const compatibilityFacade=CompatibilityModule.createFacade(freeze({
-  baselineId:'QA_FIXTURE',
-  live:freeze({
-    renameIdentities:compatibilityNoop,cleanupLegacyStorage:compatibilityNoop,migratePlan:compatibilityNoop,migrateReflections:compatibilityNoop,migrateHostMetadata:compatibilityNoop,migrateActiveSession:compatibilityNoop,migrateNotes:compatibilityNoop,
-    migrateNoteRecovery:compatibilityNoop,migrateDailyRecords:compatibilityNoop,migrateDeletionState:compatibilityNoop,migrateInsightsRevisionEnvelope:compatibilityNoop,cleanupLegacyAttachments:compatibilityNoop,cleanupObsoleteMetadata:compatibilityNoop,settleUnsupported:compatibilityNoop,retireTopology:compatibilityNoop,retireLegacyIdentity:compatibilityNoop
-  }),
-  backups:freeze({inspectCurrent:codec.inspectCurrent,inspectLegacy:codec.inspectLegacy}),
-  verification:freeze({
-    planLegacy:async()=>freeze({ok:true}),reflectionLegacy:async()=>freeze({ok:true}),activeSession:async()=>freeze({ok:true}),notes:async()=>freeze({ok:true}),noteRecovery:async()=>freeze({ok:true}),
-    dailyRecords:async()=>freeze({ok:true}),deletionState:async()=>freeze({ok:true}),insightsRevisionEnvelope:async()=>freeze({ok:true}),canonicalStores:async()=>freeze({ok:true}),legacyStorage:async()=>freeze({ok:true}),
-    legacyAttachments:async()=>freeze({ok:true}),obsoleteMetadata:async()=>freeze({ok:true}),topology:async()=>freeze({ok:true}),retiredIdentity:async()=>freeze({ok:true}),retiredHostCompatibility:async()=>freeze({ok:true}),freshBackup:async()=>freeze({ok:true})
-  })
+  richText:freeze({assetIds:()=>freeze([]),assetIdValid:value=>/^img-[A-Za-z0-9_-]{16,128}$/.test(String(value||'')),imageMimeTypeValid:value=>['image/png','image/jpeg','image/webp','image/gif','image/avif'].includes(String(value||''))}),dailyRecordCodec,activeSessionCodec
 }));
 let backupCodecInspectCalls=0;
-const runtimeCodec=freeze(Object.fromEntries([...Object.entries(codec).filter(([key])=>!['inspectCurrent','inspectLegacy'].includes(key)),['inspect',(file,options)=>{backupCodecInspectCalls+=1;return compatibilityFacade.inspectBackup(file,options);}]]));
+const runtimeCodec=freeze({...codec,inspect:(file,options)=>{backupCodecInspectCalls++;return codec.inspectCurrent(file,options);}});
 
 const notes=freeze({
   Ethics:freeze({version:2,key:'Ethics',label:'Ethics',text:'shared text',updatedAt:'2026-08-05T01:00:00.000Z'}),
@@ -163,7 +142,7 @@ const backupPresentation=createBackupPresentation();
 let runtime;
 runtime=BackupModule.createRuntime(freeze({ports:freeze({
   configuration:freeze({appVersion:'QA_FIXTURE',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits}),
-  
+
   persistence:freeze({
     activeSessionLoad:async()=>({ok:true,value:null,error:null,storage:{local:false,idb:false}}),activeSessionSave:async value=>({ok:true,value}),activeSessionClear:async()=>true,activeSessionSettled:async()=>true,
     dailyRecordBackupDates:async()=>{if(changeSourceRevisionDuringExport){changeSourceRevisionDuringExport=false;sourceRevision='2026-09-15T12:00:01.000Z';}return {dates:[...new Set(['2026-08-03',...importedDailyRecords.map(record=>record.date)])].sort(),warning:dailyRecordCanonical?'':'Saved-day IndexedDB was unavailable, so this backup contains only emergency fallback records.',canonical:dailyRecordCanonical};},dailyRecordBackupMonth:async(month,options={})=>{if(!dailyRecordCanonical&&options.requireCanonical===true)throw new Error('Canonical Daily Records are unavailable.');const dates=[...new Set(['2026-08-03',...importedDailyRecords.map(record=>record.date)])].filter(date=>String(date).startsWith(String(month)+'-')).sort();return dates.map(date=>[...importedDailyRecords].reverse().find(record=>record.date===date)||(date==='2026-08-03'?freeze({version:16,recordKind:'study',date,reflection:'saved historical reflection',studyQuality:5,savedAt:'2026-08-03T20:00:00.000Z'}):null)).filter(Boolean);},dailyRecordDocuments:async(dates,options={})=>{if(!dailyRecordCanonical&&options.requireCanonical===true)throw new Error('Canonical Daily Records are unavailable.');
@@ -190,7 +169,7 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
     restoreJournalRead:async()=>restoreJournal,
     restoreJournalMark:async(id,phase)=>{assert.equal(id,restoreJournal.state.id);restoreJournal.state.phase=phase;return restoreJournal.state;},
     restoreJournalClear:async id=>{if(id)assert.equal(id,restoreJournal.state.id);restoreJournal=null;return true;},
-    personalSettle:async()=>true,personalExport:async()=>personalDataFixture,personalImport:async()=>true,personalVerify:async()=>true,storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async options=>{snapshotFenceOptions.push(Object.freeze({...options}));return options?.legacy===true?'legacy-stable':'fast-stable';},canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],scheduleRead:()=> '08:00 | 60 | Existing | work | Ethics | block | 1',
+    personalSettle:async()=>true,personalExport:async()=>personalDataFixture,personalImport:async()=>true,personalVerify:async()=>true,storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async options=>{snapshotFenceOptions.push(Object.freeze({...options}));return options?.full===true?'full-stable':'fast-stable';},canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],scheduleRead:()=> '08:00 | 60 | Existing | work | Ethics | block | 1',
     installationId:()=> 'inst_device_a',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryNotes:async()=>[],deletionRecoveryReplaceNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>null,reconciliationBaseReadNotes:async()=>freeze({}),reconciliationBaseReadDays:async()=>freeze({}),...keptReviews.ports,reconciliationBaseWrite:async()=>true
   }),
   exports:freeze({...testProcessing,followProtection:async()=>false,backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():file,unprotect:async blob=>({blob,encrypted:false}),check:()=>{},job:exclusiveFileJob,download:()=>({status:'downloaded'}),chooseSave:(filename,accept,options)=>{chosenNames.push(filename);assert.equal(options?.id,'study-director-backups');return chooseSaveResult();},save:async(file,handle,options)=>{assert.ok(file.blob.size>0,'A backup file must never receive an empty backup.');assert.equal(typeof options?.onProgress,'function');return handle?{status:'saved',filename:handle.name}:{status:exportSaveStatus};}}),
@@ -243,7 +222,7 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
 snapshotFenceOptions.length=0;
 const created=await runtime.controller.createCheckpoint();
 assert.ok(snapshotFenceOptions.length>=2,'A checkpoint must fence both capture and prepared publication.');
-assert.ok(snapshotFenceOptions.every(options=>options.legacy!==true),'Healthy canonical capture must use the fast snapshot fence.');
+assert.ok(snapshotFenceOptions.every(options=>options.full!==true),'Healthy canonical capture must use the fast snapshot fence.');
 assert.equal(created.counts.dailyRecord,1);
 assert.equal(created.counts.note,2);
 const parsed=await codec.inspectCurrent(created.blob,{filename:created.filename});
@@ -348,7 +327,7 @@ assert.equal(currentNotes.Ethics.version,2);
 
 // Highly compressible input is stopped at the expanded-byte boundary before parsing or mutation.
 const gzipBomb=new Blob([gzipSync('\n'.repeat(limits.backupMaxUncompressedBytes+1024))],{type:'application/gzip'});
-await assert.rejects(()=>compatibilityFacade.inspectBackup(gzipBomb,{filename:'gzip-bomb.sdbackup.gz'}),/expands beyond the 8 MB safe uncompressed limit/u);
+await assert.rejects(()=>codec.inspectCurrent(gzipBomb,{filename:'gzip-bomb.sdbackup.gz'}),/retired|unsupported/u);
 
 // Post-commit verification detects a corrupted write and restores the safety snapshot.
 // Make the local Saved Day genuinely divergent so the v15 conflict contract performs an explicit replacement rather than treating it as identical.
@@ -406,7 +385,7 @@ noteFailure={failed:true,message:'IndexedDB note flush failed'};
 snapshotFenceOptions.length=0;
 const rescuedCheckpoint=await runtime.controller.createCheckpoint();
 assert.ok(snapshotFenceOptions.length>=2,'Recovery capture must remain fenced through publication.');
-assert.ok(snapshotFenceOptions.every(options=>options.legacy===true),'Degraded/recovery capture must explicitly force the legacy heavyweight fence.');
+assert.ok(snapshotFenceOptions.every(options=>options.full===true),'Degraded/recovery capture must explicitly force the full snapshot fence.');
 assert.match(rescuedCheckpoint.warning,/durable recovery state/i);
 await rescuedCheckpoint.release();
 noteFailure={failed:false};

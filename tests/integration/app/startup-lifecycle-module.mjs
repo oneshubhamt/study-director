@@ -39,7 +39,7 @@ const coordinator=Startup.createCoordinator(Object.freeze({
     notes:fn('flush-notes'),deletionRecovery:fn('flush-deletion-recovery')
   }),
   startup:Object.freeze({
-    migrateCompatibility:asyncFn('compatibility-migration',1),restoreAppearance:fn('appearance'),bindDom:fn('bind-dom'),
+    prepareCanonicalData:asyncFn('canonical-data-validation',1),restoreAppearance:fn('appearance'),bindDom:fn('bind-dom'),
     recoverInterruptedLibraryClear:asyncFn('library-clear-recovery',2),
     recoverInterruptedRestore:asyncFn('restore-recovery',2),
     loadNotes:asyncFn('notes-load',4),hydrateDrafts:fn('drafts'),previewPlan:fn('preview'),
@@ -61,8 +61,8 @@ assert.equal(status.failed,false);
 assert.equal(status.failedStage,'');
 assert.equal(status.lastFailure,null);
 const index=name=>sequence.indexOf(name);
-assert.ok(index('ownership-evaluate:end')<index('compatibility-migration:begin'));
-assert.ok(index('compatibility-migration:end')<index('library-clear-recovery:begin'));
+assert.ok(index('ownership-evaluate:end')<index('canonical-data-validation:begin'));
+assert.ok(index('canonical-data-validation:end')<index('library-clear-recovery:begin'));
 assert.ok(index('library-clear-recovery:end')<index('restore-recovery:begin'));
 assert.ok(index('restore-recovery:end')<index('notes-load:begin'));
 assert.ok(index('notes-load:end')<index('session-restore:begin'));
@@ -113,7 +113,7 @@ const failureCoordinator=Startup.createCoordinator(Object.freeze({
   timer:Object.freeze({stopPresentation:()=>true,syncAfterWake:()=>true}),
   flushers:Object.freeze({planDraft:()=>true,preferences:()=>true,activeSession:()=>true,notes:()=>true,deletionRecovery:()=>true}),
   startup:Object.freeze({
-    migrateCompatibility:async()=>true,restoreAppearance:()=>true,bindDom:()=>true,recoverInterruptedLibraryClear:async()=>true,recoverInterruptedRestore:async()=>true,
+    prepareCanonicalData:async()=>true,restoreAppearance:()=>true,bindDom:()=>true,recoverInterruptedLibraryClear:async()=>true,recoverInterruptedRestore:async()=>true,
     loadNotes:async()=>true,hydrateDrafts:()=>true,previewPlan:()=>true,startClock:()=>true,startHeaderClock:()=>true,refreshCoreUi:()=>true,renderRecovery:()=>true,
     checkBackup:()=>true,showEmptyIfNeeded:()=>true,openInitialTab:()=>true,restoreActiveSession:async()=>true,showNameSetup:()=>true,inspectStorage:async()=>true,
     reconcileLifecycle:()=>true,applyLaunchRoute:()=>true,

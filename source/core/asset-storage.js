@@ -16,7 +16,6 @@ registry.define('asset-storage',1,()=>{
     const {read,keys,commit,validId,validType,maxBytes,storage,locks,issueToken,assertToken,canMutate,ingest}=ports;
     const writeLock=ports.name+':attachment-metadata.v2',retainLock=ports.name+':attachment-retention.v2',DIRECTORY=String(ports.directory||'@@SD_ATTACHMENT_OPFS_DIRECTORY@@');
     // Only the first profile can hold the attachment folder of earlier versions.
-    const LEGACY_DIRECTORY=ports.directory?String(ports.legacyDirectory||''):'@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@';
     const supported=()=>ports.protocol!=='file:'&&typeof storage?.getDirectory==='function'&&typeof locks?.request==='function'&&typeof ingest?.ingest==='function';
     function available(){if(!supported()){const error=new Error(ports.protocol==='file:'?'Attachments cannot be stored when index.html is opened directly. Close this copy and use Start-Study-Director from the deployment folder, or open the hosted app.':'Attachment storage is unavailable. Use a supported browser with site storage enabled.');error.name='NotSupportedError';throw error;}}
     const id=value=>{if(typeof value!=='string'||!validId(value))throw new TypeError('Invalid attachment identity.');return value;};
@@ -24,8 +23,7 @@ registry.define('asset-storage',1,()=>{
     const cleanName=value=>String(value||'').replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,160);
     const opaqueFile=value=>typeof value==='string'&&/^attblob-[a-f0-9-]{20,80}$/i.test(value);
     const locked=work=>{available();return locks.request(writeLock,work);};
-    const legacyMetadata=value=>value instanceof Blob||!!value&&value.version===1;
-    let legacyCleanupResult=null;
+    const unsupportedMetadata=value=>!value||value.version!==2;
     function metadata(value){
       if(!value||value.version!==2||value.storage!=='opfs'||!opaqueFile(value.file)||typeof value.hash!=='string'||! /^[a-f0-9]{64}$/.test(value.hash)||!Number.isSafeInteger(value.size)||value.size<=0||value.size>limit(value.type)||!validType(value.type)||typeof value.library!=='boolean'||typeof value.name!=='string'||value.name.length>160||/[\u0000-\u001f\u007f]/.test(value.name))throw new Error('Attachment metadata is invalid.');
       return {version:2,storage:'opfs',file:value.file,hash:value.hash,size:value.size,type:value.type,name:value.name,library:value.library};
@@ -33,35 +31,11 @@ registry.define('asset-storage',1,()=>{
     async function directory(){try{return await (await storage.getDirectory()).getDirectoryHandle(DIRECTORY,{create:true});}catch(error){if(['SecurityError','NotAllowedError','UnknownError'].includes(error.name))throw new Error('Attachment storage could not be opened. Open Study Director through its local launcher or hosted address, and allow site storage in your browser.',{cause:error});throw error;}}
     async function file(dir,name){try{return await (await dir.getFileHandle(name)).getFile();}catch(error){if(error.name==='NotFoundError')return null;throw error;}}
     async function allEntries(){return ports.entries?await ports.entries():Promise.all((await keys()).map(async key=>[key,await read(key)]));}
-    async function verifyLegacyClean(){
-      if(!supported())return Object.freeze({ok:false,status:'unverified',reason:'storage-unavailable',legacyMetadata:0,legacyDirectory:null});
-      return locked(async()=>{
-        let legacyMetadataCount=0;
-        for(const [,row] of await allEntries())if(legacyMetadata(row))legacyMetadataCount++;
-        let legacyDirectory=false;
-        try{if(LEGACY_DIRECTORY){await (await storage.getDirectory()).getDirectoryHandle(LEGACY_DIRECTORY);legacyDirectory=true;}}
-        catch(error){if(error?.name!=='NotFoundError')throw error;}
-        return Object.freeze({ok:legacyMetadataCount===0&&!legacyDirectory,status:'verified',legacyMetadata:legacyMetadataCount,legacyDirectory});
-      });
-    }
-    async function cleanupLegacy(){
-      if(legacyCleanupResult)return {status:'completed',removed:0,directoryRemoved:false};
-      if(!supported())return {status:'skipped',reason:'storage-unavailable',removed:0,directoryRemoved:false};
-      let token;try{token=issueToken({allowHydrating:true});}catch{return {status:'skipped',reason:'not-primary',removed:0,directoryRemoved:false};}
-      return locked(async()=>{
-        assertToken(token);
-        const remove=[];for(const [key,row] of await allEntries()){assertToken(token);if(legacyMetadata(row)){id(key);remove.push(key);}}
-        assertToken(token);if(remove.length)await commit([],remove,token);
-        assertToken(token);
-        let directoryRemoved=false;
-        try{if(LEGACY_DIRECTORY){await (await storage.getDirectory()).removeEntry(LEGACY_DIRECTORY,{recursive:true});directoryRemoved=true;}}catch(error){if(error?.name!=='NotFoundError')directoryRemoved=false;}
-        assertToken(token);
-        legacyCleanupResult=Object.freeze({status:'completed',removed:remove.length,directoryRemoved});return legacyCleanupResult;
-      });
-    }
-    async function list(){const result=[];for(const [key,row] of await allEntries()){if(row==null)continue;id(key);if(legacyMetadata(row))throw new Error(`Attachment ${key} uses historical metadata and must be migrated before normal runtime access.`);result.push({id:key,...metadata(row)});}return result;}
+
+
+    async function list(){const result=[];for(const [key,row] of await allEntries()){if(row==null)continue;id(key);if(unsupportedMetadata(row))throw new Error(`Attachment ${key} uses unsupported metadata; only the current canonical format is accepted.`);result.push({id:key,...metadata(row)});}return result;}
     async function storedFiles(){return new Set((await list()).map(row=>row.file));}
-    async function get(assetId){const key=id(assetId);available();return during(async()=>{const value=await read(key);if(value==null)return null;if(legacyMetadata(value))throw new Error(`Attachment ${key} uses historical metadata and must be migrated before normal runtime access.`);const row=metadata(value),blob=await file(await directory(),row.file);if(!blob||blob.size!==row.size)throw new Error('Attachment file is missing or incomplete. Restore it from a backup.');return blob.slice(0,blob.size,row.type);});}
+    async function get(assetId){const key=id(assetId);available();return during(async()=>{const value=await read(key);if(value==null)return null;if(unsupportedMetadata(value))throw new Error(`Attachment ${key} uses unsupported metadata; only the current canonical format is accepted.`);const row=metadata(value),blob=await file(await directory(),row.file);if(!blob||blob.size!==row.size)throw new Error('Attachment file is missing or incomplete. Restore it from a backup.');return blob.slice(0,blob.size,row.type);});}
     async function shallowAudit(referenceIds=[],options={}){
       available();
       const references=new Set((referenceIds||[]).map(value=>String(value||'')).filter(validId));
@@ -81,7 +55,7 @@ registry.define('asset-storage',1,()=>{
           if(cursor>=entries.length)issue({id:missing[cursor-entries.length],kind:'missing-metadata'});
           else{
             const [rawKey,value]=entries[cursor],key=String(rawKey||'');let row;
-            try{id(key);if(legacyMetadata(value))throw new Error('legacy metadata');row={id:key,...metadata(value)};}catch{issue({id:key,kind:'metadata-invalid'});}
+            try{id(key);if(unsupportedMetadata(value))throw new Error('unsupported metadata');row={id:key,...metadata(value)};}catch{issue({id:key,kind:'metadata-invalid'});}
             if(shouldYield())await yieldTask();
             if(row&&(row.library||references.has(key))){
               check();if(!dir)dir=await directory();const blob=await file(dir,row.file);check();
@@ -111,7 +85,7 @@ registry.define('asset-storage',1,()=>{
           if(options.stage){keepResult=true;return next;}
           const upserts=new Map();
           for(const [rowId,value] of await allEntries()){
-            if(value==null)continue;if(legacyMetadata(value))throw new Error(`Attachment ${rowId} uses historical metadata and must be migrated before normal runtime access.`);
+            if(value==null)continue;if(unsupportedMetadata(value))throw new Error(`Attachment ${rowId} uses unsupported metadata; only the current canonical format is accepted.`);
             const row=metadata(value);
             if(row.hash===next.hash&&row.size===next.size&&row.file!==next.file){upserts.set(rowId,{...row,file:next.file});}
           }
@@ -175,7 +149,7 @@ registry.define('asset-storage',1,()=>{
         const canonical=new Map(),upserts=new Map();
         for(const [,row] of incoming){const group=row.hash+':'+row.size;if(!canonical.has(group))canonical.set(group,row.file);}
         for(const [rowId,value] of await allEntries()){
-          if(value==null)continue;if(legacyMetadata(value))throw new Error(`Attachment ${rowId} uses historical metadata and must be migrated before normal runtime access.`);
+          if(value==null)continue;if(unsupportedMetadata(value))throw new Error(`Attachment ${rowId} uses unsupported metadata; only the current canonical format is accepted.`);
           const row=metadata(value),fileName=canonical.get(row.hash+':'+row.size);
           if(fileName&&row.file!==fileName){upserts.set(rowId,{...row,file:fileName});}
         }
@@ -198,7 +172,7 @@ registry.define('asset-storage',1,()=>{
         return removed;
       });
     }
-    return Object.freeze({get,put,keys,retain,during,collect,shallowAudit,removeMetadata,supported,requireAvailable:available,list,rename,setLibrary,publish,discard,verifyMetadata,restoreMetadata,cleanupLegacy,verifyLegacyClean});
+    return Object.freeze({get,put,keys,retain,during,collect,shallowAudit,removeMetadata,supported,requireAvailable:available,list,rename,setLibrary,publish,discard,verifyMetadata,restoreMetadata});
   }
   return freeze({format:'study-director.asset-storage',contractVersion:3,createLease,create});
 });

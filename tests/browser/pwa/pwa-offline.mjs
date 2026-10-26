@@ -6,6 +6,24 @@ import http from 'node:http';
 import path from 'node:path';
 import {launchChromium,skipFirstStart} from '../../helpers/browser-harness.mjs';
 
+// Read only whitelisted update/ownership status after a failure; never dump app data.
+async function scopedDiagnostic(page){
+ const f=await page.send('Runtime.evaluate',{expression:'StudyDirector.plan.getDraft',returnByValue:false});
+ const props=await page.send('Runtime.getProperties',{objectId:f.result.objectId,ownProperties:true});
+ const scopeId=props.internalProperties.find(p=>p.name==='[[Scopes]]').value.objectId;
+ const scopes=await page.send('Runtime.getProperties',{objectId:scopeId,ownProperties:true}),result={};
+ for(const scope of scopes.result.filter(p=>/^\d+$/.test(p.name))){
+  const fields=await page.send('Runtime.getProperties',{objectId:scope.value.objectId,ownProperties:true});
+  for(const field of fields.result){
+   const name=field.name;
+   if(['PwaLifecycle','AppOwnership','SessionLifecycle'].includes(name)&&field.value?.objectId){const value=await page.send('Runtime.callFunctionOn',{objectId:field.value.objectId,functionDeclaration:'function(){return this.status()}',returnByValue:true});result[name]=value.result.value;}
+   else if(['pwaUpdateBlockReason'].includes(name)&&field.value?.objectId){const value=await page.send('Runtime.callFunctionOn',{objectId:field.value.objectId,functionDeclaration:'function(){return this({external:true,automatic:true})}',returnByValue:true});result[name]=value.result.value;}
+   else if(['pwaAutomaticBlockMessage','pwaUpdateRetryTimer','pwaUpdateEvaluationRunning'].includes(name))result[name]=field.value?.value;
+  }
+ }
+ return result;
+}
+
 const root=process.cwd();
 const deployment=path.join(root,'dist','deployment');
 const manifest=JSON.parse(fs.readFileSync(path.join(root,'dist','build-manifest.json'),'utf8'));
@@ -68,7 +86,7 @@ async function createPage(url=appUrl){
   return page;
 }
 async function waitForStartup(page){
-  await waitFor(()=>page.evaluate(`document.documentElement.dataset.studyDirectorLifecycle==='ready'||document.documentElement.dataset.studyDirectorLifecycle==='read-only'`),{label:'session lifecycle ready'});
+  await waitFor(()=>page.evaluate(`document.documentElement.dataset.studyDirectorReady==='true'&&(document.documentElement.dataset.studyDirectorLifecycle==='ready'||document.documentElement.dataset.studyDirectorLifecycle==='read-only')`),{label:'session lifecycle ready'});
 }
 async function workerIdentity(page,slot='active'){
   return page.evaluate(`(async()=>{const registration=await navigator.serviceWorker.getRegistration();const worker=registration&&registration['${slot}'];if(!worker)return '';return new Promise(resolve=>{const channel=new MessageChannel();const timer=setTimeout(()=>resolve('timeout'),3000);channel.port1.onmessage=event=>{clearTimeout(timer);channel.port1.close();resolve(event.data&&event.data.releaseId||'')};worker.postMessage({type:'SD_PWA_IDENTIFY'},[channel.port2])})})()`);
@@ -155,6 +173,7 @@ try{
   writeArtifact('pwa-offline-results.json',JSON.stringify(evidence,null,2)+'\n');
   console.log(JSON.stringify(evidence,null,2));
 }catch(error){
+  console.error('Update diagnostic',JSON.stringify(await scopedDiagnostic(page2).catch(error=>({error:error.message}))));
   let pageDiagnostic=null;console.error('Reload counts',JSON.stringify({page1:page1?.loadCount,page2:page2?.loadCount}));console.error('Second tab',await page2?.evaluate(`({lifecycle:document.documentElement.dataset.studyDirectorLifecycle,ui:document.documentElement.dataset.studyDirectorUiState,update:document.getElementById('pwa-update-message')?.textContent,body:document.body?.innerText.slice(-1800)})`).catch(()=>null));
   try{pageDiagnostic=await page1?.evaluate(`(async()=>({href:location.href,title:document.title,body:(document.body?.innerText||'').slice(0,500),controller:!!navigator.serviceWorker?.controller,caches:typeof caches==='undefined'?[]:await caches.keys()}))()`);}catch(diagnosticError){pageDiagnostic={error:String(diagnosticError)};}
   throw new Error(`${error.stack||error}\nPage diagnostic: ${JSON.stringify(pageDiagnostic)}\nChromium stderr:\n${browser.stderr().slice(-6000)}`);

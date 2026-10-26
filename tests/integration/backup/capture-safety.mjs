@@ -12,7 +12,7 @@ function harness(overrides={}){
   const token=()=>revision.toString(16).padStart(32,'0'),sourceRevision=()=>new Date(Date.UTC(2026,8,28,0,revision)).toISOString();
   const load=async()=>{await hook('sessionRead');return {ok:true,error:null,value:session,storage:{idb:true}};};
   const capture=module.create(freeze({
-    configuration:freeze({backupVersion:20,limits:freeze({backupChunkItems:100}),portableAssets:true}),
+    configuration:freeze({limits:freeze({backupChunkItems:100})}),
     data:freeze(overrides.data||{
       activeSession:freeze({save:async value=>({ok:true,value,storage:{idb:true}}),settled:async()=>{},load}),
       dailyRecords:freeze({backupDates:async()=>{await hook('datesRead');return {dates:[...dates],canonical:true};},backupMonth:async()=>[]}),
@@ -84,7 +84,7 @@ for(const route of ['canonical','assumed-settled','rescue','incremental'])for(co
   controls.failNextDailyWrite=true;await h.app.dailyRecords.remove(date);
   assert.equal(h.stores.daily.has(date),true);assert.ok(h.sharedLocal.has('deletionRecovery'));assert.equal((await h.app.deletionRecovery.savedDays()).length,0);
   const host={AppData:h.app,backupFastFenceReady:true,richAssetReferenceRevision:0,captureMutationGeneration:0,currentBackupSourceRevision:()=> '2026-09-17T10:00:00.000Z',PlanData:{exportData:async()=>({})},document:{getElementById:()=>null},AttachmentStorage:{list:async()=>[]},AppDiagnostics:{capture(){}}};vm.createContext(host);
-  vm.runInContext(appSource.slice(appSource.indexOf('async function legacyBackupSnapshotRevision('),appSource.indexOf('const NoteReconciliationUI=')),host);
+  vm.runInContext(appSource.slice(appSource.indexOf('async function fullBackupSnapshotRevision('),appSource.indexOf('const NoteReconciliationUI=')),host);
   let failing=true;const settlements=[];
   const flush=async()=>{
     if(failing&&fault==='throws')throw new Error('Temporary deletion reconciliation failure');
@@ -111,7 +111,7 @@ for(const route of ['canonical','assumed-settled','rescue','incremental'])for(co
 }
 // Without write control, only a canonical fast fence proves settled state.
 for(const proven of [true,false]){
-  const base=harness({session:freeze({canMutate:()=>false,cancelLiveDraftSave(){},captureSnapshot:()=>null,hasTasks:()=>false,toActiveSession:value=>value}),persistence:freeze({storageGeneration:()=>0,sourceRevision:async()=> '2026-10-01T12:00:00.000Z',snapshotRevision:async()=>proven?'study-director.fast-capture-fence.v1|'+'a'.repeat(32)+'|stable':'legacy-unsettled',dailyRecordDocuments:async dates=>dates.map(date=>({date}))})});
+  const base=harness({session:freeze({canMutate:()=>false,cancelLiveDraftSave(){},captureSnapshot:()=>null,hasTasks:()=>false,toActiveSession:value=>value}),persistence:freeze({storageGeneration:()=>0,sourceRevision:async()=> '2026-10-01T12:00:00.000Z',snapshotRevision:async()=>proven?'study-director.fast-capture-fence.v1|'+'a'.repeat(32)+'|stable':'full-unsettled',dailyRecordDocuments:async dates=>dates.map(date=>({date}))})});
   const captured=await base.capture.captureLogicalCheckpoint();assert.equal(captured.completeness.complete,proven);assert.equal(captured.completeness.deletionState,proven?'canonical':'uncertain');assert.ok(!base.calls.includes('deletionSettle'),'read-only capture must not reconcile deletions');await base.capture.assertLogicalCheckpointCurrent(captured);
   cases.push('read-only completeness requires '+(proven?'proven':'unavailable')+' canonical fence');
 }

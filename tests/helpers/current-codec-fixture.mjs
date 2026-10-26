@@ -3,11 +3,10 @@ import {RUNTIME_DATA_CONTRACT} from '../../contracts/canonical-identities.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-for(const file of ['source/core/internal.js','source/core/domain.js','source/core/record-codecs.js','source/core/compatibility-codecs.js','source/core/backup-codec.js','source/core/attachments.js','source/core/persistence.js'])vm.runInThisContext(fs.readFileSync(file,'utf8'),{filename:file});
+for(const file of ['source/core/internal.js','source/core/domain.js','source/core/record-codecs.js','source/core/backup-codec.js','source/core/attachments.js','source/core/persistence.js'])vm.runInThisContext(fs.readFileSync(file,'utf8'),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const Domain=registry.require('domain',1,Object.freeze({maxAreaNameChars:200,maxDurationMinutes:1440,maxScheduleChars:50000,maxScheduleRows:200,maxTaskNameChars:300,maxTasksPerDay:100,maxUnitChars:80}));
 const RecordCodecs=registry.require('record-codecs',1);
-const CompatibilityCodecs=registry.require('compatibility-codecs',1);
 const freeze=Object.freeze;
 const boundedNumber=(value,{min=-Infinity,max=Infinity,fallback=null}={})=>{const number=Number(value);return Number.isFinite(number)&&number>=min&&number<=max?number:fallback;};
 const boundedInt=(value,options={})=>{const number=boundedNumber(value,options);return number!==null&&Number.isInteger(number)?number:(options.fallback??null);};
@@ -29,4 +28,4 @@ const dailyRecordCodec=RecordCodecs.createDailyRecordCodec(freeze({
 }));
 
 
-export {registry,Domain,RecordCodecs,CompatibilityCodecs,freeze,boundedNumber,boundedInt,clampText,optionalText,optionalBoundedNumber,normalizeTimestamp,sameDataValue,helpers,limits,dataContract,dailyRecordCodec};
+export {registry,Domain,RecordCodecs,freeze,boundedNumber,boundedInt,clampText,optionalText,optionalBoundedNumber,normalizeTimestamp,sameDataValue,helpers,limits,dataContract,dailyRecordCodec};
