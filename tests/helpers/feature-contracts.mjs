@@ -6,6 +6,7 @@ export const FEATURE_CONTRACTS=Object.freeze([
   contract('plan.saved-plans','tests/browser/plans/saved-plans-ui.mjs'),
   contract('execute.execution','tests/browser/app/core-flow.mjs'),
   contract('execute.pause-resume','tests/browser/app/core-flow.mjs'),
+  contract('execute.session-ignores-plan-draft','tests/browser/app/session-draft-edit.mjs'),
   contract('execute.state-machine','tests/unit/app/timer-engine-logic.mjs'),
   contract('execute.practice-pacer','tests/unit/app/practice-pacer.mjs'),
   contract('execute.multi-tab-ownership','tests/browser/storage/multi-tab.mjs'),
