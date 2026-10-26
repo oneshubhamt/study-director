@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [],
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "noCheck": true,
+    "rootDir": "vendor/wordgard/src",
+    "outDir": "types/wordgard",
+    "paths": {
+      "wordgard/*": [
+        "./vendor/wordgard/src/*/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "vendor/wordgard/src/**/*.ts"
+  ]
+}

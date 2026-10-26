@@ -21,10 +21,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: '26.12.1'
+      - name: Use pinned npm
+        run: npm install --global npm@12.2.1
       - name: Hermetic correctness gate
         run: node tests/helpers/run-category.mjs fast
       - name: Risk coverage

@@ -31,9 +31,10 @@ export const CRITICAL_PATHS=Object.freeze([
 
 const NON_FAST_COVERAGE_OWNERS=Object.freeze([
   Object.freeze({file:'source/core/note-links.js',owner:'browser/library/notes-management',reason:'The real picker, backlinks and tags are exercised in notes-management; Library selection uses a mocked UI port.'}),
-  Object.freeze({file:'source/external/wordgard.js',owner:'browser/rich-text + release/bundle',reason:'Immutable generated vendor runtime; browser rich-editor journeys exercise it and release QA verifies bundle provenance.'}),
+  Object.freeze({file:'source/external/wordgard.js',owner:'browser/rich-text + release/bundle',reason:'Generated vendor runtime; browser rich-editor journeys exercise it and release QA verifies bundle provenance.'}),
   Object.freeze({prefix:'rich-text/',owner:'browser/release',reason:'TypeScript editor source is compiled and exercised through browser/release QA rather than the Node fast runtime.'}),
   Object.freeze({file:'portable/attachment-worker.ts',owner:'build/worker',reason:'Worker build source; runtime behavior is exercised through the emitted worker/integration path.'}),
+  Object.freeze({file:'portable/worker-contracts.ts',owner:'build/worker + browser/rich-text',reason:'Shared message validation runs in emitted workers and the editor bundle; authored source coverage awaits bundle mapping.'}),
   Object.freeze({file:'portable/worker.ts',owner:'build/worker',reason:'Worker build source; runtime behavior is exercised through emitted worker tests.'}),
   Object.freeze({file:'source/core/library.js',owner:'browser',reason:'Library UI orchestration is exercised through browser workflows; destructive data logic lives in fast library-clear contracts.'}),
   Object.freeze({file:'source/core/review.js',owner:'browser',reason:'Review UI orchestration is exercised through the core browser journey.'}),

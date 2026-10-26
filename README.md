@@ -35,7 +35,7 @@ See `docs/ARCHITECTURE.md` for the full current-state summary.
 
 ## Get started
 
-Prerequisites: Node.js 22.23.4 (pinned in `.node-version`), npm 12.2.1, and Python 3 for the local launcher. TypeScript 7.0.2 and the typed linter are exact development dependencies. See `docs/TYPESCRIPT.md` for the incremental checking boundary and commands.
+Prerequisites: Node.js 26.12.1 (pinned in `.node-version`), npm 12.2.1, and Python 3 for the local launcher. TypeScript 7.0.2 and the typed linter are exact development dependencies. See `docs/TYPESCRIPT.md` for the incremental checking boundary and commands.
 
 ```bash
 git clone https://github.com/oneshubhamt/study-director.git

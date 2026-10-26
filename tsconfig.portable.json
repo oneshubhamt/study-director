@@ -4,10 +4,18 @@
     "lib": [
       "ES2022"
     ],
-    "types": []
+    "types": [],
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
   },
   "files": [
-    "types/pilot.ts",
-    "types/checks/portable.ts"
+    "contracts/production-limits.d.mts",
+    "portable/worker-contracts.ts",
+    "rich-text/markdown.ts",
+    "rich-text/reconciliation.ts",
+    "rich-text/tags.ts",
+    "rich-text/wg1-codec.ts",
+    "types/checks/portable.ts",
+    "types/pilot.ts"
   ]
 }

@@ -8,14 +8,14 @@ export const DEPENDENCY_INVENTORY=Object.freeze([
   dependency('@jridgewell/sourcemap-codec','1.6.0','build-only',false,'MIT'),
   dependency('@jridgewell/trace-mapping','0.3.31','build-only',false,'MIT'),
   dependency('@marijn/find-cluster-break','1.0.4','bundled-runtime',true,'MIT'),
-  dependency('acorn','8.18.0','build-only',true,'MIT'),
-  dependency('axe-core','4.13.0','test-only',true,'MPL-2.0'),
+  dependency('acorn','8.19.0','build-only',true,'MIT'),
+  dependency('axe-core','4.14.0','test-only',true,'MPL-2.0'),
   dependency('buffer-from','1.1.2','build-only',false,'MIT'),
   dependency('commander','2.20.3','build-only',false,'MIT'),
   dependency('esbuild-wasm','0.28.2','build-only',true,'MIT'),
   dependency('source-map','0.6.1','build-only',false,'BSD-3-Clause'),
   dependency('source-map-support','0.5.21','build-only',false,'MIT'),
-  dependency('style-mod','4.1.3','bundled-runtime',true,'MIT'),
+  dependency('style-mod','4.1.4','bundled-runtime',true,'MIT'),
   dependency('terser','5.51.2','build-only',true,'BSD-2-Clause'),
   dependency('@oxlint-tsgolint/darwin-arm64','7.0.2005','build-only',false,'MIT'),
   dependency('@oxlint-tsgolint/darwin-x64','7.0.2005','build-only',false,'MIT'),
@@ -42,7 +42,7 @@ export const DEPENDENCY_INVENTORY=Object.freeze([
   dependency('@oxlint/binding-win32-arm64-msvc','1.89.0','build-only',false,'MIT'),
   dependency('@oxlint/binding-win32-ia32-msvc','1.89.0','build-only',false,'MIT'),
   dependency('@oxlint/binding-win32-x64-msvc','1.89.0','build-only',false,'MIT'),
-  dependency('@types/node','22.20.5','build-only',true,'MIT'),
+  dependency('@types/node','26.6.5','build-only',true,'MIT'),
   dependency('@typescript/typescript-aix-ppc64','7.0.2','build-only',false,'Apache-2.0'),
   dependency('@typescript/typescript-darwin-arm64','7.0.2','build-only',false,'Apache-2.0'),
   dependency('@typescript/typescript-darwin-x64','7.0.2','build-only',false,'Apache-2.0'),
@@ -66,7 +66,7 @@ export const DEPENDENCY_INVENTORY=Object.freeze([
   dependency('oxlint','1.89.0','build-only',true,'MIT'),
   dependency('oxlint-tsgolint','7.0.2005','build-only',true,'MIT'),
   dependency('typescript','7.0.2','build-only',true,'Apache-2.0'),
-  dependency('undici-types','6.21.0','build-only',false,'MIT')
+  dependency('undici-types','8.9.0','build-only',false,'MIT')
 ]);
 
 export const VENDORED_DEPENDENCIES=Object.freeze([

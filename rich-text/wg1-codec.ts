@@ -5,8 +5,8 @@ export const WG1_VERSION=1;
 export const WG1_DEFAULT_MAX_DEPTH=64;
 export const WG1_DEFAULT_MAX_NODES=PRODUCTION_LIMITS.maxRichTextNodes;
 
-type JsonNode={type?:unknown,param?:unknown,content?:unknown};
-export type WG1Envelope={version:number;doc:JsonNode};
+export type JsonNode={type?:unknown,param?:unknown,content?:unknown};
+export type WG1Envelope={version:1;doc:JsonNode};
 export type DecodedWG1Envelope=
   |{kind:'plain';text:string}
   |{kind:'invalid-envelope';text:string}
@@ -30,7 +30,7 @@ export function jsonTreeWithinBudget(value:unknown,maxDepth=WG1_DEFAULT_MAX_DEPT
   return valid;
 }
 
-function parsedObject(value:unknown){return !!value&&typeof value==='object'&&!Array.isArray(value)}
+function parsedObject(value:unknown):value is Record<string,unknown>{return !!value&&typeof value==='object'&&!Array.isArray(value)}
 function envelopeIntent(value:Record<string,unknown>){return Object.hasOwn(value,'version')||Object.hasOwn(value,'doc')}
 
 export function decodeWG1Envelope(value:unknown,maxDepth=WG1_DEFAULT_MAX_DEPTH,maxNodes=WG1_DEFAULT_MAX_NODES):DecodedWG1Envelope{
@@ -42,9 +42,9 @@ export function decodeWG1Envelope(value:unknown,maxDepth=WG1_DEFAULT_MAX_DEPTH,m
   const object=parsed as Record<string,unknown>;
   if(!envelopeIntent(object))return {kind:'plain',text};
   const keys=Object.keys(object).sort();
-  if(keys.length!==2||keys[0]!=='doc'||keys[1]!=='version'||object.version!==WG1_VERSION||!parsedObject(object.doc))return {kind:'invalid-envelope',text};
-  if(!jsonTreeWithinBudget(object.doc,maxDepth,maxNodes))return {kind:'invalid-envelope',text};
-  return {kind:'valid-envelope',text,envelope:object as WG1Envelope};
+  if(keys.length!==2||keys[0]!=='doc'||keys[1]!=='version'||object['version']!==WG1_VERSION||!parsedObject(object['doc']))return {kind:'invalid-envelope',text};
+  if(!jsonTreeWithinBudget(object['doc'],maxDepth,maxNodes))return {kind:'invalid-envelope',text};
+  return {kind:'valid-envelope',text,envelope:{version:object['version'],doc:object['doc']}};
 }
 
 export function encodeWG1Document(doc:unknown){return WG1_STORAGE_PREFIX+JSON.stringify({version:WG1_VERSION,doc})}

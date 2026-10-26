@@ -16,12 +16,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: '26.12.1'
+      - name: Use pinned npm
+        run: npm install --global npm@12.2.1
+      - name: Install type-checking toolchain
+        run: npm ci --ignore-scripts
+      - name: Strict TypeScript and typed lint
+        run: npm run check:types
       - name: Bug regression policy
         if: github.event_name == 'pull_request'
         run: node tests/helpers/bug-regression-policy.mjs

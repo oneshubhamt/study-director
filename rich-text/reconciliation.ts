@@ -57,13 +57,13 @@ const samePath=(a:NodePath|null,b:NodePath|null)=>!!a&&!!b&&a.length===b.length&
 const pathStarts=(path:NodePath,prefix:NodePath)=>prefix.length<=path.length&&prefix.every((value,index)=>path[index]===value);
 
 function cloneValue<T>(value:T):T{
-  if(Array.isArray(value))return value.map(cloneValue) as T;
+  if(Array.isArray(value))return (value as unknown[]).map(cloneValue) as T;
   if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value as Record<string,unknown>).map(([key,item])=>[key,cloneValue(item)])) as T;
   return value;
 }
 function cloneNode(node:JsonNode){return cloneValue(node)}
 function stable(value:unknown):unknown{
-  if(Array.isArray(value))return value.map(stable);
+  if(Array.isArray(value))return (value as unknown[]).map(stable);
   if(value&&typeof value==='object')return Object.fromEntries(Object.keys(value as Record<string,unknown>).sort().map(key=>[key,stable((value as Record<string,unknown>)[key])]));
   return value;
 }
@@ -103,6 +103,7 @@ function setOverlap(a:Set<string>,b:Set<string>){let common=0;for(const item of 
 function dice(a:Set<string>,b:Set<string>){if(!a.size&&!b.size)return 1;const common=setOverlap(a,b);return 2*common/(a.size+b.size)}
 function jaccard(a:Set<string>,b:Set<string>){if(!a.size&&!b.size)return 1;const common=setOverlap(a,b),total=a.size+b.size-common;return total?common/total:1}
 function ngrams(value:string,n=3){const text=fuzzyText(value).replace(/\s+/gu,' ');const out=new Set<string>();if(text.length<n){if(text)out.add(text);return out}for(let i=0;i<=text.length-n;i++)out.add(text.slice(i,i+n));return out}
+// Indexed accesses in these bounded loops are within fully populated arrays.
 function levenshteinRatio(a:string,b:string){
   if(a===b)return 1;if(!a.length||!b.length)return 0;
   if(a.length>260||b.length>260)return dice(ngrams(a),ngrams(b));
@@ -110,10 +111,10 @@ function levenshteinRatio(a:string,b:string){
   let previous=Array.from({length:a.length+1},(_,index)=>index),current=new Array<number>(a.length+1);
   for(let row=1;row<=b.length;row++){
     current[0]=row;const bc=b.charCodeAt(row-1);
-    for(let col=1;col<=a.length;col++)current[col]=Math.min(current[col-1]+1,previous[col]+1,previous[col-1]+(a.charCodeAt(col-1)===bc?0:1));
+    for(let col=1;col<=a.length;col++)current[col]=Math.min(current[col-1]!+1,previous[col]!+1,previous[col-1]!+(a.charCodeAt(col-1)===bc?0:1));
     [previous,current]=[current,previous];
   }
-  return 1-previous[a.length]/Math.max(a.length,b.length);
+  return 1-previous[a.length]!/Math.max(a.length,b.length);
 }
 export function fuzzyMergeSimilarity(a:unknown,b:unknown){
   const left=fuzzyText(a),right=fuzzyText(b);if(!left||!right)return 0;if(left===right)return 1;
@@ -122,23 +123,23 @@ export function fuzzyMergeSimilarity(a:unknown,b:unknown){
 }
 
 function previousWord(text:string,index:number){
-  const before=text.slice(0,index).trimEnd(),match=before.match(/([\p{L}.]+)$/u);return match?match[1].toLocaleLowerCase('en-US').replace(/\.$/u,''):'';
+  const before=text.slice(0,index).trimEnd(),match=before.match(/([\p{L}.]+)$/u);return match?match[1]!.toLocaleLowerCase('en-US').replace(/\.$/u,''):'';
 }
 function isSentenceStop(text:string,index:number){
   const char=text[index];
   if(char==='\n')return true;
   if(char!=='.'&&char!=='?'&&char!=='!')return false;
-  if(char==='.'&&index>0&&index+1<text.length&&/\d/u.test(text[index-1])&&/\d/u.test(text[index+1]))return false;
+  if(char==='.'&&index>0&&index+1<text.length&&/\d/u.test(text[index-1]!)&&/\d/u.test(text[index+1]!))return false;
   if(char==='.'&&ABBREVIATIONS.has(previousWord(text,index)))return false;
-  let next=index+1;while(next<text.length&&/["'’”\])}]/u.test(text[next]))next++;
-  return next>=text.length||/\s/u.test(text[next]);
+  let next=index+1;while(next<text.length&&/["'’”\])}]/u.test(text[next]!))next++;
+  return next>=text.length||/\s/u.test(text[next]!);
 }
 export function segmentSentenceRanges(value:unknown){
   const text=String(value??'');if(!text)return freeze([] as {from:number;to:number}[]);
   const ranges:{from:number;to:number}[]=[];let start=0,index=0;
   while(index<text.length){
     if(!isSentenceStop(text,index)){index++;continue}
-    let end=index+1;while(end<text.length&&text[end]!=='\n'&&/\s/u.test(text[end]))end++;
+    let end=index+1;while(end<text.length&&text[end]!=='\n'&&/\s/u.test(text[end]!))end++;
     if(end>start&&text.slice(start,end).trim())ranges.push({from:start,to:end});
     start=end;index=end;
   }
@@ -177,18 +178,18 @@ function sliceInline(content:JsonNode[],spans:readonly InternalSpan[],from:numbe
   }
   return out;
 }
-function textRangeToDoc(unit:InternalUnit,from:number,to:number){
+function textRangeToDoc(unit:Pick<InternalUnit,'spans'|'from'|'to'>,from:number,to:number){
   if(!unit.spans.length)return {from:unit.from,to:unit.to};
   const overlaps=unit.spans.filter(span=>span.textTo>from&&span.textFrom<to);if(!overlaps.length)return {from:unit.from,to:unit.to};
-  const first=overlaps[0],last=overlaps[overlaps.length-1];
+  const first=overlaps[0]!,last=overlaps[overlaps.length-1]!;
   const docFrom=first.kind==='text'?first.docFrom+Math.max(0,from-first.textFrom):first.docFrom;
   const docTo=last.kind==='text'?last.docFrom+Math.min(last.textTo-last.textFrom,Math.max(0,to-last.textFrom)):last.docTo;
   return {from:docFrom,to:Math.max(docFrom,docTo)};
 }
 function atomicText(node:JsonNode){
   const type=typeOf(node),param=node.param&&typeof node.param==='object'&&!Array.isArray(node.param)?node.param as Record<string,unknown>:{};
-  if(type==='SDImage')return `image:${String(param.assetId||'')}`;
-  if(type==='SDAudio')return `audio:${String(param.attachmentId||'')}`;
+  if(type==='SDImage')return `image:${String(param['assetId']||'')}`;
+  if(type==='SDAudio')return `audio:${String(param['attachmentId']||'')}`;
   if(type==='HorizontalRule')return '---';
   if(type==='Table')return `table:${signature(node)}`;
   return `${type}:${signature(node)}`;
@@ -203,8 +204,8 @@ function collectUnits(parsed:ParsedDocument,side:Side){
     const flat=inlineText(node,pos),ranges=kind==='heading'?freeze(flat.text.trim()?[{from:0,to:flat.text.length}]:[]):segmentSentenceRanges(flat.text);
     for(const range of ranges){
       const text=flat.text.slice(range.from,range.to),trimmed=text.trim();if(!trimmed)continue;
-      let lead=0;while(lead<text.length&&/\s/u.test(text[lead]))lead++;let tail=text.length;while(tail>lead&&/\s/u.test(text[tail-1]))tail--;
-      const rawStart=range.from,rawEnd=range.to,textStart=range.from+lead,textEnd=range.from+tail,docRange=textRangeToDoc({spans:flat.spans,from:pos,to:pos+nodeLength(node)} as InternalUnit,textStart,textEnd);
+      let lead=0;while(lead<text.length&&/\s/u.test(text[lead]!))lead++;let tail=text.length;while(tail>lead&&/\s/u.test(text[tail-1]!))tail--;
+      const rawStart=range.from,rawEnd=range.to,textStart=range.from+lead,textEnd=range.from+tail,docRange=textRangeToDoc({spans:flat.spans,from:pos,to:pos+nodeLength(node)},textStart,textEnd);
       const fragment=sliceInline(contentOf(node),flat.spans,rawStart,rawEnd),formatSignature=signature({block:{type:typeOf(node),param:node.param??null,marks:marksOf(node)},context,fragment});
       units.push({id:`${side}_${order+1}`,side,order:order++,kind,nodeType:typeOf(node),text:trimmed,normalized:normalizeMergeText(trimmed),path:freeze([...path]),blockPath:freeze([...path]),topIndex,listPath:listPath?freeze([...listPath]):null,listItemPath:listItemPath?freeze([...listItemPath]):null,textStart,textEnd,from:docRange.from,to:docRange.to,formatSignature,rawStart,rawEnd,spans:freeze(flat.spans.map(freeze)),fragment:freeze(fragment.map(node=>freeze(node)))});
     }
@@ -218,9 +219,9 @@ function collectUnits(parsed:ParsedDocument,side:Side){
     }
     const content=contentOf(node);let childPos=pos+(type==='Doc'?0:1);
     const nextList=LIST_TYPES.has(type)?path:listPath,nextItem=type==='ListItem'?path:listItemPath,nextContext=(LIST_TYPES.has(type)||type==='ListItem'||type==='Blockquote')?[...context,{type,param:node.param??null,marks:marksOf(node)}]:context;
-    for(let index=0;index<content.length;index++){const child=content[index],childPath=[...path,index];walk(child,childPath,childPos,topIndex,nextList,nextItem,nextContext);childPos+=nodeLength(child)}
+    for(let index=0;index<content.length;index++){const child=content[index]!,childPath=[...path,index];walk(child,childPath,childPos,topIndex,nextList,nextItem,nextContext);childPos+=nodeLength(child)}
   };
-  let pos=0;for(let index=0;index<top.length;index++){walk(top[index],[index],pos,index,null,null,[]);pos+=nodeLength(top[index])}
+  let pos=0;for(let index=0;index<top.length;index++){walk(top[index]!,[index],pos,index,null,null,[]);pos+=nodeLength(top[index]!)}
   return freeze(units.map(unit=>freeze(unit)));
 }
 function publicMergeUnit(unit:InternalUnit):MergeUnit{return freeze({id:unit.id,side:unit.side,order:unit.order,kind:unit.kind,nodeType:unit.nodeType,text:unit.text,normalized:unit.normalized,path:unit.path,blockPath:unit.blockPath,topIndex:unit.topIndex,listPath:unit.listPath,listItemPath:unit.listItemPath,textStart:unit.textStart,textEnd:unit.textEnd,from:unit.from,to:unit.to,formatSignature:unit.formatSignature})}
@@ -257,11 +258,12 @@ function fuzzyMatches(local:InternalUnit[],incoming:InternalUnit[],unmatchedLoca
 
 type DiffToken={value:string,key:string;from:number;to:number};
 function diffTokens(text:string):DiffToken[]{const out:DiffToken[]=[];const re=/[\p{L}\p{N}]+|[^\s\p{L}\p{N}]/gu;let match:RegExpExecArray|null;while((match=re.exec(text))){out.push({value:match[0],key:normalizeMergeText(match[0]),from:match.index,to:match.index+match[0].length})}return out}
+// The LCS matrix has rows/columns including the zero boundary; all reads are initialized.
 function unmatchedTokenRanges(a:string,b:string){
   const left=diffTokens(a),right=diffTokens(b),rows=left.length+1,cols=right.length+1,dp=Array.from({length:rows},()=>new Uint16Array(cols));
-  for(let i=1;i<rows;i++)for(let j=1;j<cols;j++)dp[i][j]=left[i-1].key===right[j-1].key?dp[i-1][j-1]+1:Math.max(dp[i-1][j],dp[i][j-1]);
-  const keepLeft=new Set<number>(),keepRight=new Set<number>();let i=left.length,j=right.length;while(i&&j){if(left[i-1].key===right[j-1].key){keepLeft.add(i-1);keepRight.add(j-1);i--;j--}else if(dp[i-1][j]>=dp[i][j-1])i--;else j--}
-  const ranges=(tokens:DiffToken[],keep:Set<number>)=>{const raw=tokens.filter((_,index)=>!keep.has(index)).map(token=>({from:token.from,to:token.to}));if(!raw.length)return raw;const merged=[{...raw[0]}];for(const range of raw.slice(1)){const last=merged[merged.length-1];if(range.from<=last.to+1)last.to=range.to;else merged.push({...range})}return merged};
+  for(let i=1;i<rows;i++)for(let j=1;j<cols;j++)dp[i]![j]=left[i-1]!.key===right[j-1]!.key?dp[i-1]![j-1]!+1:Math.max(dp[i-1]![j]!,dp[i]![j-1]!);
+  const keepLeft=new Set<number>(),keepRight=new Set<number>();let i=left.length,j=right.length;while(i&&j){if(left[i-1]!.key===right[j-1]!.key){keepLeft.add(i-1);keepRight.add(j-1);i--;j--}else if(dp[i-1]![j]!>=dp[i]![j-1]!)i--;else j--}
+  const ranges=(tokens:DiffToken[],keep:Set<number>)=>{const raw=tokens.filter((_,index)=>!keep.has(index)).map(token=>({from:token.from,to:token.to}));if(!raw.length)return raw;const merged=[{...raw[0]!}];for(const range of raw.slice(1)){const last=merged[merged.length-1]!;if(range.from<=last.to+1)last.to=range.to;else merged.push({...range})}return merged};
   return {left:ranges(left,keepLeft),right:ranges(right,keepRight)};
 }
 function buildDifferenceRanges(local:InternalUnit[],incoming:InternalUnit[],correspondences:readonly Correspondence[],localOnly:Set<string>,incomingOnly:Set<string>){
@@ -286,12 +288,12 @@ function compareInternal(localValue:unknown,incomingValue:unknown){
 }
 export function compareRichText(localValue:unknown,incomingValue:unknown):RichTextComparison{return compareInternal(localValue,incomingValue).comparison}
 
-function nodeAtPath(root:JsonNode,path:NodePath){let node=root;for(const index of path){const content=contentOf(node);if(index<0||index>=content.length)return null;node=content[index]}return node}
+function nodeAtPath(root:JsonNode,path:NodePath){let node=root;for(const index of path){const content=contentOf(node);if(index<0||index>=content.length)return null;node=content[index]!}return node}
 function setContent(node:JsonNode,content:JsonNode[]){node.content=content;return node}
 function textOfInline(content:JsonNode[]){let text='';for(const node of content){const type=typeOf(node);if(type==='Text')text+=stringParam(node);else if(type==='LineBreak')text+='\n';else if(contentOf(node).length)text+=textOfInline(contentOf(node))}return text}
 function mergeAdjacentText(content:JsonNode[]){const out:JsonNode[]=[];for(const node of content){const copy=cloneNode(node),last=out[out.length-1];if(typeOf(copy)==='Text'&&last&&typeOf(last)==='Text'&&signature(marksOf(copy))===signature(marksOf(last)))last.param=stringParam(last)+stringParam(copy);else out.push(copy)}return out}
 function trimInlineOuterWhitespace(content:JsonNode[]){
-  const out=mergeAdjacentText(content);while(out.length&&typeOf(out[0])==='Text'){const text=stringParam(out[0]).replace(/^\s+/u,'');if(text){out[0]={...out[0],param:text};break}out.shift()}while(out.length&&typeOf(out[out.length-1])==='Text'){const index=out.length-1,text=stringParam(out[index]).replace(/\s+$/u,'');if(text){out[index]={...out[index],param:text};break}out.pop()}return out
+  const out=mergeAdjacentText(content);while(out.length&&typeOf(out[0]!)==='Text'){const text=stringParam(out[0]!).replace(/^\s+/u,'');if(text){out[0]={...out[0]!,param:text};break}out.shift()}while(out.length&&typeOf(out[out.length-1]!)==='Text'){const index=out.length-1,text=stringParam(out[index]!).replace(/\s+$/u,'');if(text){out[index]={...out[index]!,param:text};break}out.pop()}return out
 }
 function addBoundarySpacing(existing:JsonNode[],offset:number,fragment:JsonNode[]){
   const before=textOfInline(existing).slice(0,offset),after=textOfInline(existing).slice(offset),fragText=textOfInline(fragment);if(!fragText)return fragment;
@@ -311,7 +313,7 @@ function replaceInlineTextRange(node:JsonNode,from:number,to:number,fragment:rea
   setContent(node,mergeAdjacentText([...before,...fragment.map(cloneNode),...after]));
 }
 function replaceNodeAtPath(root:JsonNode,path:NodePath,replacement:JsonNode){
-  if(!path.length)return false;const parent=nodeAtPath(root,path.slice(0,-1));if(!parent)return false;const content=contentOf(parent),index=path[path.length-1];if(index<0||index>=content.length)return false;content[index]=cloneNode(replacement);return true;
+  if(!path.length)return false;const parent=nodeAtPath(root,path.slice(0,-1));if(!parent)return false;const content=contentOf(parent),index=path[path.length-1]!;if(index<0||index>=content.length)return false;content[index]=cloneNode(replacement);return true;
 }
 function localUnitById(units:readonly InternalUnit[]){return new Map(units.map(unit=>[unit.id,unit]))}
 function incomingUnitById(units:readonly InternalUnit[]){return new Map(units.map(unit=>[unit.id,unit]))}
@@ -334,8 +336,8 @@ function uniqueIncomingItemPaths(incoming:readonly InternalUnit[],incomingOnly:S
   const paths=new Map<string,NodePath>();for(const unit of incoming)if(unit.listItemPath)paths.set(pathKey(unit.listItemPath),unit.listItemPath);const out:NodePath[]=[];for(const path of paths.values()){const itemUnits=simpleListItemUnits(incoming,path);if(itemUnits.length&&itemUnits.every(unit=>incomingOnly.has(unit.id)))out.push(path)}return out;
 }
 function mappedListItemIndex(itemPath:NodePath,incoming:readonly InternalUnit[],correspondences:readonly Correspondence[],localById:Map<string,InternalUnit>,incomingById:Map<string,InternalUnit>,localListPath:NodePath){
-  const itemIndex=itemPath[itemPath.length-1],incomingListPath=itemPath.slice(0,-1),matches=correspondences.map(match=>({local:localById.get(match.localId),incoming:incomingById.get(match.incomingId)})).filter(pair=>pair.local&&pair.incoming&&pair.incoming!.listItemPath&&pair.local!.listItemPath&&samePath(pair.incoming!.listPath,incomingListPath)&&samePath(pair.local!.listPath,localListPath));
-  let next:number|null=null,prev:number|null=null;for(const pair of matches){const sourceIndex=pair.incoming!.listItemPath![pair.incoming!.listItemPath!.length-1],targetIndex=pair.local!.listItemPath![pair.local!.listItemPath!.length-1];if(sourceIndex>itemIndex&&(next===null||sourceIndex<next))next=targetIndex;if(sourceIndex<itemIndex&&(prev===null||sourceIndex>prev))prev=targetIndex}return next!==null?next:prev!==null?prev+1:Infinity;
+  const itemIndex=itemPath[itemPath.length-1]!,incomingListPath=itemPath.slice(0,-1),matches=correspondences.map(match=>({local:localById.get(match.localId),incoming:incomingById.get(match.incomingId)})).filter(pair=>pair.local&&pair.incoming&&pair.incoming!.listItemPath&&pair.local!.listItemPath&&samePath(pair.incoming!.listPath,incomingListPath)&&samePath(pair.local!.listPath,localListPath));
+  let next:number|null=null,prev:number|null=null;for(const pair of matches){const sourceIndex=pair.incoming!.listItemPath![pair.incoming!.listItemPath!.length-1]!,targetIndex=pair.local!.listItemPath![pair.local!.listItemPath!.length-1]!;if(sourceIndex>itemIndex&&(next===null||sourceIndex<next))next=targetIndex;if(sourceIndex<itemIndex&&(prev===null||sourceIndex>prev))prev=targetIndex}return next!==null?next:prev!==null?prev+1:Infinity;
 }
 function topInsertionIndex(topIndex:number,incoming:readonly InternalUnit[],correspondences:readonly Correspondence[],localById:Map<string,InternalUnit>,incomingById:Map<string,InternalUnit>,localTopCount:number){
   let prev:{source:number;target:number}|null=null,next:{source:number;target:number}|null=null;for(const match of correspondences){const local=localById.get(match.localId),remote=incomingById.get(match.incomingId);if(!local||!remote||remote.topIndex===topIndex)continue;if(remote.topIndex<topIndex&&(!prev||remote.topIndex>prev.source))prev={source:remote.topIndex,target:local.topIndex};if(remote.topIndex>topIndex&&(!next||remote.topIndex<next.source))next={source:remote.topIndex,target:local.topIndex}}return next?next.target:prev?prev.target+1:localTopCount;
@@ -351,7 +353,7 @@ function filteredNode(node:JsonNode,path:NodePath,incoming:readonly InternalUnit
   }
   if(ATOMIC_TYPES.has(type)){unique.forEach(unit=>processed.add(unit.id));return cloneNode(node)}
   const children=contentOf(node);if(!children.length)return null;
-  const kept:JsonNode[]=[];for(let index=0;index<children.length;index++){const child=filteredNode(children[index],[...path,index],incoming,incomingOnly,processed);if(child)kept.push(child)}
+  const kept:JsonNode[]=[];for(let index=0;index<children.length;index++){const child=filteredNode(children[index]!,[...path,index],incoming,incomingOnly,processed);if(child)kept.push(child)}
   if(!kept.length)return null;const copy=cloneNode(node);copy.content=kept;return copy;
 }
 function filteredTopBlock(parsed:ParsedDocument,topIndex:number,incoming:readonly InternalUnit[],incomingOnly:Set<string>,processed:Set<string>){
@@ -371,7 +373,7 @@ function performMerge(localValue:unknown,incomingValue:unknown,mode:'contextual'
     for(const itemPath of uniqueIncomingItemPaths(incoming,candidateIncoming)){
       const units=simpleListItemUnits(incoming,itemPath);if(units.every(unit=>processed.has(unit.id)))continue;const sourceListPath=itemPath.slice(0,-1),targetListPath=listMap.get(pathKey(sourceListPath));if(!targetListPath)continue;const sourceItem=nodeAtPath(incomingParsed.doc,itemPath);if(!sourceItem)continue;const index=mappedListItemIndex(itemPath,incoming,correspondences,localById,incomingById,targetListPath),ids=units.filter(unit=>candidateIncoming.has(unit.id)).map(unit=>unit.id);itemOps.push({listPath:targetListPath,index,item:cloneNode(sourceItem),sourceOrder:units[0]?.order||0});ids.forEach(id=>processed.add(id))}
     const groupedItems=new Map<string,typeof itemOps>();for(const op of itemOps){const key=pathKey(op.listPath),group=groupedItems.get(key)||[];group.push(op);groupedItems.set(key,group)}
-    for(const group of groupedItems.values()){const list=nodeAtPath(doc,group[0].listPath);if(!list)continue;const content=contentOf(list);group.sort((a,b)=>b.index-a.index||b.sourceOrder-a.sourceOrder);for(const op of group){const index=Number.isFinite(op.index)?Math.max(0,Math.min(content.length,op.index)):content.length;content.splice(index,0,cloneNode(op.item))}}
+    for(const group of groupedItems.values()){const list=nodeAtPath(doc,group[0]!.listPath);if(!list)continue;const content=contentOf(list);group.sort((a,b)=>b.index-a.index||b.sourceOrder-a.sourceOrder);for(const op of group){const index=Number.isFinite(op.index)?Math.max(0,Math.min(content.length,op.index)):content.length;content.splice(index,0,cloneNode(op.item))}}
   }
 
   const root=contentOf(doc),topOps:{index:number;node:JsonNode;sourceOrder:number}[]=[];

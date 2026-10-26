@@ -1,5 +1,5 @@
 // Transitional declaration of the existing JS registry, limited to checked modules.
-// The registry implementation remains unchecked until phase 2; its runtime contract
+// The registry implementation remains unchecked until its implementation phase; its runtime contract
 // is covered by internal-modules and the pilot boundary tests.
 export interface CanonicalModule {
   readonly format: 'study-director.canonical';

@@ -103,9 +103,13 @@ for(const corruptAt of [100,encrypted.size-1]){
 }
 {
  const bundle=fs.readFileSync('source/external/export-worker.js','utf8');
- const handle=await outputHandle(),messages=[],context=vm.createContext({Blob,TextEncoder,TextDecoder,Uint8Array,Uint32Array,DataView,WeakMap,Map,Set,crypto:webcrypto,performance,navigator:{storage:{getDirectory:async()=>({getDirectoryHandle:async()=>({getFileHandle:async()=>handle})})}},self:{postMessage:value=>messages.push(value)}});
- vm.runInContext(bundle,context,{filename:'source/external/export-worker.js'});await context.self.onmessage({data:{id:1,type:'integrity.append',data:{chunk:new Blob(['worker segment']),offset:0,hash:null,output:{kind:'opfs',name:'backup-00000000-0000-0000-0000-000000000001',directory:'@@SD_BACKUP_FILES_OPFS_DIRECTORY@@'}}}});assert.equal(messages.at(-1).value?.offset,14,JSON.stringify(messages.at(-1).error));
- await context.self.onmessage({data:{id:2,type:'checksum',data:{value:'existing worker operation'}}});assert.equal(messages.at(-1).value,createHash('sha256').update('existing worker operation').digest('hex'));cases.push('the one worker build runs integrity segments and every other operation');
+ let receive=()=>{};
+ const handle=await outputHandle(),messages=[],context=vm.createContext({Blob,TextEncoder,TextDecoder,Uint8Array,Uint32Array,DataView,WeakMap,Map,Set,crypto:webcrypto,performance,navigator:{storage:{getDirectory:async()=>({getDirectoryHandle:async()=>({getFileHandle:async()=>handle})})}},self:{postMessage:value=>{messages.push(value);receive(value);}}});
+ vm.runInContext(bundle,context,{filename:'source/external/export-worker.js'});
+ // Browser event dispatch ignores return values; completion is the correlated reply.
+ const request=message=>new Promise(resolve=>{receive=value=>{if(value.id===message.data.id&&('value' in value||'error' in value))resolve(value);};context.self.onmessage(message);});
+ await request({data:{id:1,type:'integrity.append',data:{chunk:new Blob(['worker segment']),offset:0,hash:null,output:{kind:'opfs',name:'backup-00000000-0000-0000-0000-000000000001',directory:'@@SD_BACKUP_FILES_OPFS_DIRECTORY@@'}}}});assert.equal(messages.at(-1).value?.offset,14,JSON.stringify(messages.at(-1).error));
+ await request({data:{id:2,type:'checksum',data:{value:'existing worker operation'}}});assert.equal(messages.at(-1).value,createHash('sha256').update('existing worker operation').digest('hex'));cases.push('the one worker build runs integrity segments and every other operation');
 }
 // Compose the real Drive range transport, continuation/hash implementation and
 // shared scheduler. A slow segment exceeding the pass allowance must be saved

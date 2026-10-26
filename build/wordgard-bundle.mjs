@@ -19,6 +19,7 @@ const WORDGARD_FACADE=path.join(ROOT,'rich-text/wordgard-source');
 // Where each Wordgard package specifier comes from in vendor/wordgard (through
 // the build-only facades, which pick what Study Director reaches).
 const WORDGARD_SOURCE_ALIASES=Object.freeze({
+  'wordgard-vendor':path.join(ROOT,'vendor/wordgard/src'),
   'wordgard/doc':path.join(WORDGARD_FACADE,'doc.ts'),
   'wordgard/types':path.join(WORDGARD_FACADE,'types.ts'),
   'wordgard/state':path.join(WORDGARD_FACADE,'state.ts'),

@@ -26,7 +26,7 @@ class MemoryFileHandle{
 function createHarness(mode='sync'){
   const files=new Map(),messages=[],waiters=new Map(),folders=[];let cancelOnFirstCopy=false;
   const dir={async getFileHandle(name,{create=false}={}){if(!files.has(name)){if(!create)throw new DOMException('missing','NotFoundError');files.set(name,new MemoryFileHandle(mode))}return files.get(name)},async removeEntry(name){if(!files.delete(name))throw new DOMException('missing','NotFoundError')}};
-  const self={postMessage(message){messages.push(message);if(cancelOnFirstCopy&&message.progress?.phase==='copying'){cancelOnFirstCopy=false;self.onmessage({data:{type:'cancel',target:message.id}})}if(message.value||message.error){waiters.get(message.id)?.(message);waiters.delete(message.id)}}};
+  const self={postMessage(message){messages.push(message);if(cancelOnFirstCopy&&message.progress?.phase==='copying'){cancelOnFirstCopy=false;self.onmessage({data:{type:'cancel',target:message.id}})}if(Object.hasOwn(message,'value')||message.error){waiters.get(message.id)?.(message);waiters.delete(message.id)}}};
   const context={console,Blob,DOMException,Map,Set,Promise,Number,String,Math,Uint8Array,Uint32Array,DataView,setTimeout,clearTimeout,navigator:{storage:{getDirectory:async()=>({getDirectoryHandle:async name=>{folders.push(name);return dir;}})}},self};
   context.globalThis=context;vm.createContext(context);const source=fs.readFileSync('source/external/attachment-worker.js','utf8').replaceAll('@@SD_ATTACHMENT_OPFS_DIRECTORY@@',OPFS_IDENTITIES.attachments).replaceAll('@@SD_PROFILE_SCOPE_SEPARATOR@@','~');vm.runInContext(source,context,{filename:'attachment-worker.js'});
   let nextId=0;
@@ -60,3 +60,18 @@ const digest=async blob=>Array.from(new Uint8Array(await webcrypto.subtle.digest
   console.log('ok - attachment worker opens only the profile attachment folder it is given');
 }
 console.log(JSON.stringify({status:'PASS',suite:'worker-behavior',pass:'attachment worker behavioral QA'},null,2));
+
+{
+  const h=createHarness('sync');
+  for(const [type,data] of [['ingest',{file:'not binary',storageName:'attblob-12345678-1234-1234-1234-123456789012'}],['verify',{storageName:'wrong',size:'1',expectedHash:4}],['remove',{storageName:7}],['unknown',{}]]){
+    const result=await h.request(type,data);assert.ok(result.error,`${type} rejects malformed request`);assert.equal(h.files.size,0,'invalid requests cannot create or delete attachment files');
+  }
+}
+
+{
+  const h=createHarness('sync'),file=new Blob(['verify and remove']),storageName='attblob-52345678-1234-1234-1234-123456789012';
+  const stored=await h.request('ingest',{file,storageName});assert.ok(stored.value);
+  const verified=await h.request('verify',{storageName,expectedHash:stored.value.hash,size:file.size});assert.equal(verified.value,true);
+  const mismatch=await h.request('verify',{storageName,expectedHash:'0'.repeat(64),size:file.size});assert.equal(mismatch.value,false,'a differing hash must not verify');
+  const removed=await h.request('remove',{storageName});assert.equal(removed.value,true);assert.equal(h.files.size,0);
+}

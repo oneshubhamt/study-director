@@ -23,7 +23,7 @@ function walk(dir){
   });
 }
 const allProductionFiles=runtimeRoots.flatMap(dir=>walk(path.join(root,dir)))
-  .filter(file=>extensions.has(path.extname(file)))
+  .filter(file=>extensions.has(path.extname(file))&&!file.endsWith('.d.ts'))
   .map(file=>path.resolve(file));
 const requested=new Set(selection.files.map(file=>path.resolve(root,file)));
 for(const file of requested)if(!allProductionFiles.includes(file))throw new Error(`Unknown production coverage source: ${file}`);

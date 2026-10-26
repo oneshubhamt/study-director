@@ -38,23 +38,37 @@
     "typecheck": "node build/typecheck.mjs",
     "lint:types": "node build/typecheck.mjs --lint",
     "check:types": "npm run typecheck && npm run lint:types",
-    "test:release:types": "node tests/architecture/build/typescript-gates.mjs"
+    "test:release:types": "node tests/architecture/build/typescript-gates.mjs",
+    "types:wordgard": "node build/wordgard-declarations.mjs --write",
+    "types:wordgard:check": "node build/wordgard-declarations.mjs"
   },
   "devDependencies": {
     "@marijn/find-cluster-break": "1.0.4",
-    "@types/node": "22.20.5",
-    "acorn": "8.18.0",
-    "axe-core": "4.13.0",
+    "@types/node": "26.6.5",
+    "acorn": "8.19.0",
+    "axe-core": "4.14.0",
     "esbuild-wasm": "0.28.2",
     "oxlint": "1.89.0",
     "oxlint-tsgolint": "7.0.2005",
-    "style-mod": "4.1.3",
+    "style-mod": "4.1.4",
     "terser": "5.51.2",
     "typescript": "7.0.2"
   },
   "packageManager": "npm@12.2.1",
   "engines": {
-    "node": "^22.23.4 || ^24.15.0 || >=26.0.0",
+    "node": "26.12.1",
     "npm": "12.2.1"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "26.12.1",
+      "onFail": "error"
+    },
+    "packageManager": {
+      "name": "npm",
+      "version": "12.2.1",
+      "onFail": "error"
+    }
   }
 }

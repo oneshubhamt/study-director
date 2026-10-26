@@ -1,13 +1,15 @@
+import {messageObject,errorDescription,type WorkerProgress,type WorkerReply} from './worker-contracts';
 import {createProcessingEngine} from './processing.js';
 import {integritySegment} from './integrity-segments.js';
 import {markdownDocument} from '../rich-text/markdown';
 const engine=createProcessingEngine(markdownDocument);
 // The host sends at most one request at a time per job, bounding queued work.
-self.onmessage=async(event:MessageEvent)=>{
-  const {id,type,data}=event.data||{};
+async function processMessage(event:MessageEvent<unknown>){
+  const {id,type,data}=messageObject(event.data);
   let lastProgress=0;
-  const report=(progress:any)=>{const now=performance.now();if(now-lastProgress>=100||progress.loaded===progress.total){lastProgress=now;self.postMessage({id,progress});}};
+  const report=(progress:WorkerProgress)=>{const now=performance.now();if(now-lastProgress>=100||progress.loaded===progress.total){lastProgress=now;self.postMessage({id,progress} satisfies WorkerReply<unknown>);}};
   // Integrity checks run one bounded segment per request and report no progress.
-  try{self.postMessage({id,value:String(type).startsWith('integrity.')?await integritySegment(type,data):await engine.run(type,data,report)});}
-  catch(error){self.postMessage({id,error:{code:(error as any)?.code,name:error instanceof Error?error.name:'Error',message:error instanceof Error?error.message:'Export processing failed.'}});}
-};
+  try{if(typeof type!=='string')throw new TypeError('Invalid processing operation.');self.postMessage({id,value:String(type).startsWith('integrity.')?await integritySegment(type,data):await engine.run(type,data,report)} satisfies WorkerReply<unknown>);}
+  catch(error){self.postMessage({id,error:errorDescription(error,'Export processing failed.')} satisfies WorkerReply<unknown>);}
+}
+self.onmessage=(event:MessageEvent<unknown>)=>{void processMessage(event)};

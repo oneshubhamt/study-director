@@ -31,3 +31,22 @@ try{
 }finally{fs.rmSync(temp,{recursive:true,force:true});}
 
 console.log(JSON.stringify({status:'PASS',suite:'typescript-gates',checks:10,negativeTypeAndLintGates:true}));
+
+// Exercise declaration provenance in an isolated fixture, including consumer imports.
+const declarationTemp=fs.mkdtempSync(path.join(os.tmpdir(),'sd-vendor-type-gates-'));
+try{
+ for(const directory of ['build','types'])fs.mkdirSync(path.join(declarationTemp,directory));
+ fs.cpSync(path.join(root,'vendor'),path.join(declarationTemp,'vendor'),{recursive:true});
+ fs.copyFileSync(path.join(root,'tsconfig.wordgard-declarations.json'),path.join(declarationTemp,'tsconfig.wordgard-declarations.json'));
+ fs.copyFileSync(path.join(root,'build/wordgard-declarations.mjs'),path.join(declarationTemp,'build/wordgard-declarations.mjs'));
+ fs.symlinkSync(path.join(root,'node_modules'),path.join(declarationTemp,'node_modules'),'dir');
+ const run=(...args)=>spawnSync(process.execPath,['build/wordgard-declarations.mjs',...args],{cwd:declarationTemp,encoding:'utf8'});
+ const generated=run('--write');assert.equal(generated.status,0,generated.stderr);assert.equal(run().status,0);
+ const declaration=path.join(declarationTemp,'types/wordgard/types/schema.d.ts');
+ fs.appendFileSync(declaration,'\nexport declare const unreviewed: string;\n');
+ const stale=run();assert.notEqual(stale.status,0);assert.match(stale.stderr,/declaration drift/);
+ assert.equal(run('--write').status,0);
+ fs.appendFileSync(path.join(declarationTemp,'vendor/wordgard/src/types/schema.ts'),'\n// simulated upstream change\n');
+ const changed=run();assert.notEqual(changed.status,0);assert.match(changed.stderr,/manifest.json/,'even a non-executable vendor change invalidates provenance');
+ console.log(JSON.stringify({status:'PASS',suite:'wordgard-declaration-gates',reproducible:true,detectsDeclarationTamper:true,detectsVendorDrift:true}));
+}finally{fs.rmSync(declarationTemp,{recursive:true,force:true});}

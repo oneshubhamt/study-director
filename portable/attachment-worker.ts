@@ -1,3 +1,4 @@
+import {messageObject,type WorkerReply,type AttachmentResult} from './worker-contracts';
 import {Sha256} from './sha256.js';
 
 const CHUNK_BYTES=4*1024*1024;
@@ -15,7 +16,7 @@ const tasks=new Map<number,TaskState>();
 function abortError(){const error=new Error('Attachment operation cancelled.');error.name='AbortError';return error;}
 function check(id:number){if(tasks.get(id)?.cancelled)throw abortError();}
 function validStorageName(value:unknown):value is string{return typeof value==='string'&&/^attblob-[a-f0-9-]{20,80}$/i.test(value)}
-function progress(id:number,phase:ProgressPhase,loaded:number,total:number,mode?:string){self.postMessage({id,progress:{phase,loaded,total,mode}})}
+function progress(id:number,phase:ProgressPhase,loaded:number,total:number,mode?:string){self.postMessage({id,progress:{phase,loaded,total,mode}} satisfies WorkerReply<AttachmentResult|boolean>)}
 const yieldToWorker=()=>new Promise<void>(resolve=>setTimeout(resolve,0));
 async function directory(){const root=await navigator.storage.getDirectory();return root.getDirectoryHandle(folder,{create:true})}
 async function removeEntry(storageName:string){if(!validStorageName(storageName))throw new TypeError('Attachment storage identity is invalid.');const dir=await directory();try{await dir.removeEntry(storageName)}catch(error){if((error as DOMException)?.name!=='NotFoundError')throw error}}
@@ -94,16 +95,16 @@ async function verify(id:number,storageName:string,expectedHash:string,size:numb
   return actual===expectedHash;
 }
 
-self.onmessage=(event:MessageEvent)=>{
-  const message=event.data||{};
-  if(message.type==='cancel'){const state=tasks.get(Number(message.target));if(state)state.cancelled=true;return}
-  const id=Number(message.id);if(!Number.isSafeInteger(id)||id<=0)return;
+self.onmessage=(event:MessageEvent<unknown>)=>{
+  const message=messageObject(event.data);
+  if(message['type']==='cancel'){const state=tasks.get(Number(message['target']));if(state)state.cancelled=true;return}
+  const id=Number(message['id']);if(!Number.isSafeInteger(id)||id<=0)return;
   const state:TaskState={cancelled:false};tasks.set(id,state);
-  Promise.resolve().then(async()=>{
-    useFolder(message.data?.directory);
-    if(message.type==='ingest')return ingest(id,message.data?.file,message.data?.storageName);
-    if(message.type==='verify')return verify(id,message.data?.storageName,message.data?.expectedHash,message.data?.size);
-    if(message.type==='remove'){await removeEntry(message.data?.storageName);return true}
+  void Promise.resolve().then(async()=>{
+    const data=messageObject(message['data']);useFolder(data['directory']);
+    if(message['type']==='ingest'){if(!(data['file'] instanceof Blob)||typeof data['storageName']!=='string')throw new TypeError('Attachment file is invalid.');return ingest(id,data['file'],data['storageName']);}
+    if(message['type']==='verify'){if(typeof data['storageName']!=='string'||typeof data['expectedHash']!=='string'||typeof data['size']!=='number')throw new TypeError('Attachment verification request is invalid.');return verify(id,data['storageName'],data['expectedHash'],data['size']);}
+    if(message['type']==='remove'){if(typeof data['storageName']!=='string')throw new TypeError('Attachment storage identity is invalid.');await removeEntry(data['storageName']);return true}
     throw new Error('Unknown attachment worker operation.');
-  }).then(value=>self.postMessage({id,value}),error=>self.postMessage({id,error:{name:error instanceof Error?error.name:'Error',message:error instanceof Error?error.message:'Attachment ingestion failed.'}})).finally(()=>tasks.delete(id));
+  }).then(value=>self.postMessage({id,value} satisfies WorkerReply<AttachmentResult|boolean>),error=>self.postMessage({id,error:{name:error instanceof Error?error.name:'Error',message:error instanceof Error?error.message:'Attachment ingestion failed.'}})).finally(()=>tasks.delete(id));
 };

@@ -1,3 +1,4 @@
+import {PRODUCTION_LIMITS} from '../../../contracts/production-limits.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -30,3 +31,7 @@ try{
   fs.writeFileSync(file,'const value: number=2;');assert.notEqual(readScript(file),first,'mutated authored sources must never use a stale compile cache');
 }finally{fs.rmSync(temp,{recursive:true,force:true});}
 console.log(JSON.stringify({status:'PASS',suite:'typescript-pipeline',identicalBuildAndTestProgram:true,offsetPreservation:true,classicScriptBoundary:true,freshMutationInput:true}));
+
+// The transitional declaration cannot silently invent a limit or misstate its primitive type.
+const limitTypes=Object.fromEntries([...fs.readFileSync('contracts/production-limits.d.mts','utf8').matchAll(/^  (\w+): (string|number);$/gmu)].map(match=>[match[1],match[2]]));
+assert.deepEqual(limitTypes,Object.fromEntries(Object.entries(PRODUCTION_LIMITS).map(([key,value])=>[key,typeof value])));

@@ -4,7 +4,7 @@ This is a private, source-available project. Contributions require the copyright
 
 ## Development
 
-Use the pinned Node.js 22.23.4 and npm 12.2.1 toolchain, plus Python 3. Run `npm ci --ignore-scripts` and `npm run check:types` for typed changes; see [TypeScript tooling](docs/TYPESCRIPT.md). See the [README](README.md) for building and running the app. Source belongs at the repository root; generated `dist`, installed dependencies, personal backups and QA output do not belong in commits.
+Use the pinned Node.js 26.12.1 and npm 12.2.1 toolchain, plus Python 3. Run `npm ci --ignore-scripts` and `npm run check:types` for typed changes; see [TypeScript tooling](docs/TYPESCRIPT.md). See the [README](README.md) for building and running the app. Source belongs at the repository root; generated `dist`, installed dependencies, personal backups and QA output do not belong in commits.
 
 Create a branch for each coherent change and open a pull request to `main`. Describe the resulting behaviour and the checks actually run. Keep runtime changes separate from unrelated formatting or repository maintenance.
 

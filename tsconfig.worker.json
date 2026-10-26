@@ -5,9 +5,24 @@
       "ES2022",
       "WebWorker"
     ],
-    "types": []
+    "types": [],
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
   },
   "files": [
+    "contracts/production-limits.d.mts",
+    "portable/attachment-worker.ts",
+    "portable/integrity-segments.d.ts",
+    "portable/processing.d.ts",
+    "portable/sha256.d.ts",
+    "portable/worker-contracts.ts",
+    "portable/worker.ts",
+    "rich-text/image-worker.ts",
+    "rich-text/markdown.ts",
+    "rich-text/reconciliation.ts",
+    "rich-text/search-worker.ts",
+    "rich-text/tags.ts",
+    "rich-text/wg1-codec.ts",
     "types/checks/worker.ts"
   ]
 }

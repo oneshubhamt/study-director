@@ -6,12 +6,49 @@
       "DOM",
       "DOM.Iterable"
     ],
-    "types": []
+    "types": [],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "paths": {
+      "wordgard/inert-html": [
+        "./rich-text/wordgard-patches/inert-html.ts"
+      ],
+      "wordgard/*": [
+        "./rich-text/wordgard-source/*.ts"
+      ],
+      "wordgard-vendor/*": [
+        "./types/wordgard/*.d.ts"
+      ]
+    }
   },
   "files": [
+    "contracts/production-limits.d.mts",
+    "portable/worker-contracts.ts",
+    "rich-text/editor.ts",
+    "rich-text/image-preparation.ts",
+    "rich-text/image-processing.ts",
+    "rich-text/markdown.ts",
+    "rich-text/reconciliation.ts",
+    "rich-text/tags.ts",
+    "rich-text/typography.ts",
+    "rich-text/wg1-codec.ts",
+    "rich-text/wordgard-adapter.ts",
+    "rich-text/wordgard-module.ts",
+    "rich-text/wordgard-patches/cut.ts",
+    "rich-text/wordgard-patches/inert-html.ts",
+    "rich-text/wordgard-source/command.ts",
+    "rich-text/wordgard-source/doc.ts",
+    "rich-text/wordgard-source/editor.ts",
+    "rich-text/wordgard-source/history.ts",
+    "rich-text/wordgard-source/phrases.ts",
+    "rich-text/wordgard-source/set.ts",
+    "rich-text/wordgard-source/state.ts",
+    "rich-text/wordgard-source/table.ts",
+    "rich-text/wordgard-source/types.ts",
     "source/core/canonical.ts",
     "source/core/save-lane.ts",
+    "types/checks/browser.ts",
     "types/pilot.ts",
-    "types/checks/browser.ts"
+    "types/checks/rich-text.ts"
   ]
 }

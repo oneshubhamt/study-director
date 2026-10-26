@@ -7,7 +7,7 @@ import {Script} from 'node:vm';
 // Runtime imports/exports and non-erasable syntax fail instead of changing loading.
 export function compileScript(source: string, filename: string): string {
   if (!filename.endsWith('.ts')) return source;
-  const output=stripTypeScriptTypes(source,{mode:'strip',sourceMap:false});
+  const output=stripTypeScriptTypes(source,{mode:'strip'});
   if (output.length!==source.length || output.split('\n').length!==source.split('\n').length) {
     throw new Error(`Type erasure changed source positions: ${filename}`);
   }

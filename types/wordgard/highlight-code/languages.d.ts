@@ -1,0 +1,60 @@
+// Generated from vendor/wordgard/src/highlight-code/languages.ts; MIT license: vendor/wordgard/LICENSE.
+// Regenerate with npm run types:wordgard; do not edit.
+import { StreamParser } from "@codemirror/streamparser";
+export declare class Language {
+    readonly name: string;
+    readonly alias: readonly string[];
+    readonly parser: StreamParser<unknown>;
+    private constructor();
+    static of(spec: {
+        name: string;
+        alias?: readonly string[];
+        parser: StreamParser<unknown>;
+    }): Language;
+}
+export declare const C: Language;
+export declare const Cpp: Language;
+export declare const Csharp: Language;
+export declare const Dart: Language;
+export declare const Java: Language;
+export declare const Kotlin: Language;
+export declare const ObjectiveC: Language;
+export declare const Scala: Language;
+export declare const CSS: Language;
+export declare const Less: Language;
+export declare const Go: Language;
+export declare const HTML: Language;
+export declare const XML: Language;
+export declare const JavaScript: Language;
+export declare const TypeScript: Language;
+export declare const JSON: Language;
+export declare const Jinja2: Language;
+export declare const SQL: Language;
+export declare const MSSQL: Language;
+export declare const MySQL: Language;
+export declare const PostgreSQL: Language;
+export declare const SQLite: Language;
+export declare const Python: Language;
+export declare const Rust: Language;
+export declare const Sass: Language;
+export declare const WebAssembly: Language;
+export declare const YAML: Language;
+export declare const Cobol: Language;
+export declare const Clojure: Language;
+export declare const CommonLisp: Language;
+export declare const Elm: Language;
+export declare const Erlang: Language;
+export declare const Haskell: Language;
+export declare const Julia: Language;
+export declare const Lua: Language;
+export declare const OCaml: Language;
+export declare const FSharp: Language;
+export declare const SML: Language;
+export declare const Perl: Language;
+export declare const R: Language;
+export declare const Ruby: Language;
+export declare const Scheme: Language;
+export declare const Shell: Language;
+export declare const Swift: Language;
+export declare const LaTeX: Language;
+export declare const baseLanguages: readonly Language[];
