@@ -53,7 +53,7 @@ const personalData=freeze({
   plans:freeze({draft:null,savedPlans:freeze([]),defaultId:null}),
   preferences:freeze({studentName:'Capacity',theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null})
 });
-const counts=freeze({dailyRecord:0,note:1,activeSession:0,personalData:1,checkpointManifest:1});
+const counts=codec.countShape({dailyRecord:0,note:1,activeSession:0,personalData:1,checkpointManifest:1});
 const plan=freeze({studentName:'Capacity',installationId:'inst_capacity_device',exportedAt:'2026-09-01T00:00:00.000Z',sourceRevision:'2026-09-01T00:00:00.000Z',recordDates:freeze([]),savedDayDeletions:freeze([]),noteItems:area,noteDeletions:freeze([]),attachmentDeletions:freeze([]),assetItems:freeze([]),counts});
 const manifest=codec.createManifest(plan,{compression:'none',algorithm});
 const checkpointChunk=await codec.encodeChunk(0,'checkpointManifest',[codec.createProtectedManifest(plan,manifest.checkpoint)],algorithm),personalChunk=await codec.encodeChunk(1,'personalData',[personalData],algorithm),chunk=await codec.encodeChunk(2,'note',area,algorithm),complete=await codec.encodeCompletion(3,counts,[checkpointChunk.checksum,personalChunk.checksum,chunk.checksum],algorithm,descriptors);
