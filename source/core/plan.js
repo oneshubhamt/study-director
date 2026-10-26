@@ -514,6 +514,7 @@ function completeScheduleApply(preparation,parsed,rawOriginal,opts,draft){
   if(preparation.cancelled)return false;
   setParsedScheduleDraft(parsed);
   PlanDraftEditor.deactivate();
+  lastAppliedScheduleText='';
   const applyResult=scheduleGateway.apply(lastParsed,{
     appliedScheduleText:rawOriginal,studyDate:opts.studyDate,source:opts.source,
     progressMigration:preparation.progressMigration,reviewOnly:!!opts.reviewOnly,
@@ -1040,7 +1041,8 @@ const PlanDraftEditor=(()=>{
     async function renameArea(fromTitle,toLabel){
       const from=taskAreaKey({area:fromTitle}),label=String(toLabel||'').trim();if(!from||!label)return freeze({blocks:0,savedPlans:0});
       const blocks=scheduleGateway.renameAreas(row=>renamedArea(row,from,label));
-      if(lastParsed.some(row=>areaMatches(row,from))){lastParsed=lastParsed.map(row=>{const area=renamedArea(row,from,label);return area===undefined?row:{...row,area};});if(lastAppliedScheduleText)lastAppliedScheduleText=scheduleTextFromRows(lastParsed);}
+      if(lastParsed.some(row=>areaMatches(row,from))){lastParsed=lastParsed.map(row=>{const area=renamedArea(row,from,label);return area===undefined?row:{...row,area};});}
+      if(lastAppliedScheduleText)lastAppliedScheduleText=renameAreaInText(lastAppliedScheduleText,from,label)??lastAppliedScheduleText;
       const input=document.getElementById('plan-input'),draft=input?renameAreaInText(input.value,from,label):null;
       if(draft!==null){input.value=draft;await persistence.writeDraft(draft);}
       const library=persistence.readLibrary(),now=new Date().toISOString();let savedPlans=0;
@@ -1049,7 +1051,9 @@ const PlanDraftEditor=(()=>{
       if(blocks)renderSched();
       return freeze({blocks,savedPlans});
     }
-    function appliedScheduleText(){return String(lastAppliedScheduleText||scheduleTextFromRows(lastParsed.length?lastParsed:TASKS)||'');}
+    // The running plan, never the draft: the saved session's fingerprint is
+    // taken from TASKS, so a draft edited or synced mid-session must not leak in.
+    function appliedScheduleText(){return String(lastAppliedScheduleText||scheduleTextFromRows(TASKS)||'');}
     const api=freeze({
       format:'study-director.plan-controller',contractVersion:1,
       savedPlans:SavedPlans,draft:PlanDraftEditor,
