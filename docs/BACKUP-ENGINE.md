@@ -20,6 +20,7 @@ The Device Folder and Drive used to carry their own copies of the same machinery
   - Foreground and background coordination, and status.
 - **Storage adapters**. Each one only knows how to reach its storage:
   - `list(kind)`, `download(item)`, `upload(file)` (verified) and `delete(item)` for checkpoints, commits and objects.
+  - `download(item,{offset,length})` reads a range of at most 1 MB for the integrity scrub and returns `{blob,totalBytes,version}`. The version is the one the listing gave (Drive's revision, the Device Folder file's modified time), so a file that changes between ranges restarts verification.
   - The lock files, with the same names and formats as today, so devices on different app versions still coordinate.
   - Connection state, permission and authorization.
   - Device Folder: a local directory handle (`device-folder-storage.js`). A thin controller (`device-backup.js`) keeps the chosen folder, its permission, remembering it across launches and its status row.
