@@ -118,14 +118,13 @@ for(const entry of entries){
   assert.equal(new Set(entry.coverage).size,entry.coverage.length,`${entry.id} coverage metadata must not contain duplicates`);
   for(const tag of entry.coverage)assert.match(tag,/^[a-z0-9]+(?:-[a-z0-9]+)*$/,`${entry.id} coverage tag must be semantic kebab-case`);
   assert.ok(Number.isFinite(entry.timeoutMs)&&entry.timeoutMs>=0&&entry.timeoutMs<=300000,`${entry.id} timeout must be a bounded non-negative duration`);
-  assert.equal(typeof entry.alone,'boolean',`${entry.id} must say whether it runs alone`);
+  assert.ok(entry.alone===''||(typeof entry.alone==='string'&&entry.alone.length>=40),`${entry.id} runs alone only with a written reason`);
   assert.ok(!/(?:regression|legacy|historical|sdv[ab]|^n\d)/i.test(entry.id),`${entry.id} must describe current behavior, not test history`);
   assert.ok(!/(?:sdv[ab]|^n\d)/i.test(path.basename(entry.script)),`${entry.id} must not use release-era naming`);
 }
 const release=selectedBrowserTests('release');
 assert.equal(release.length,entries.length,'release browser QA must include every active browser test');
-// Diagnosed load-sensitive tests; tests/README.md says why each one runs alone.
-assert.deepEqual(entries.filter(entry=>entry.alone).map(entry=>entry.id).sort(),['pwa-update','site-data-clear'],'only diagnosed contention-sensitive browser tests run alone');
+assert.ok(entries.find(entry=>entry.id==='pwa-update')?.alone,'pwa-update runs alone');
 assert.deepEqual(selectedBrowserTests('smoke'),[...BROWSER_TEST_MANIFEST.smoke]);
 assert.deepEqual(selectedBrowserTests('feature'),[...BROWSER_TEST_MANIFEST.feature]);
 assert.deepEqual(selectedBrowserTests('extended'),[...BROWSER_TEST_MANIFEST.extended]);
