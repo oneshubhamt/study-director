@@ -2,6 +2,13 @@
   "name": "study-director-canonical-source",
   "private": true,
   "type": "module",
+  "devEngines": {
+    "packageManager": {
+      "name": "npm",
+      "version": "12.2.1",
+      "onFail": "error"
+    }
+  },
   "scripts": {
     "build": "npm run build:richtext && node build/build.mjs",
     "build:richtext": "node build/wordgard-bundle.mjs --write",
