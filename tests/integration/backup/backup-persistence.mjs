@@ -228,7 +228,7 @@ assert.equal(created.counts.note,2);
 const parsed=await codec.inspectCurrent(created.blob,{filename:created.filename});
 assert.equal(parsed.records[0].reflection,'saved historical reflection');
 assert.equal(parsed.records[0].studyQuality,5);
-assert.equal(parsed.manifest.deviceId,undefined,'Current backups must not recreate legacy device identity metadata.');
+assert.equal(parsed.manifest.deviceId,undefined,'Backups must not contain device identity metadata.');
 assert.equal(parsed.manifest.checkpoint?.format,'study-director.checkpoint-metadata');
 assert.equal(parsed.manifest.checkpoint?.originInstallationId,'inst_device_a');
 assert.equal(parsed.manifest.checkpoint?.createdAt,parsed.manifest.exportedAt);

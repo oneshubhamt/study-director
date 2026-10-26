@@ -8558,7 +8558,7 @@ function integrityStatusText(target,{shallow=false}={}){
   const progress=value.partial?` · ${Math.floor(value.partial.stored.offset/1048576)} of ${Math.ceil(value.partial.storedBytes/1048576)} MB downloaded${value.partial.phase==='plain'?'; verifying decrypted content':''}`:value.progress?` · ${value.progress.cursor} of ${value.progress.total} records`:'';
   const history=completed?` · Last full ${shallow?'presence and size check':'scan'}: ${new Date(completed).toLocaleString()}`:'';
   const quarantine=value.quarantinedObjectIds?.length?` · ${value.quarantinedObjectIds.length} quarantined object(s)`:'';
-  return state+progress+history+quarantine+(shallow?' · File contents are not checked.':' · Active sessions and historical reflection drafts are excluded.');
+  return state+progress+history+quarantine+(shallow?' · File contents are not checked.':' · Active sessions are excluded.');
 }
 function renderIntegrityStatuses(){
   for(const [id,label,location] of [['attachment-verification-status','Attachment presence and size',''],['device-verification-status','Device Folder','device-folder'],['drive-verification-status','Google Drive','google-drive']]){

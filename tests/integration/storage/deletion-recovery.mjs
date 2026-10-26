@@ -80,13 +80,10 @@ const retired=h.app.notes.exportPayload()['~deleted '+obsoleteId];
 assert.equal(h.app.notes.exportPayload()[obsoleteId],undefined);assert.equal(retired&&retired.text,'restored text','the deleted note’s text stays in Recently deleted');
 assert.equal((await h.app.deletionRecovery.notes()).some(row=>row.key===obsoleteId),true,'and its deletion is recorded');
 
-// Review working state now belongs to Active Session and historical reflection
-// belongs to the Daily Record. There is no separate Reflection Draft register or
-// deletion/tombstone domain to maintain.
-assert.equal(Object.prototype.hasOwnProperty.call(h.app,'reflectionDrafts'),false,'Current canonical repositories must not expose the retired Reflection Draft domain.');
+// A past day's reflection is saved in its Daily Record.
 const reviewDate='2026-09-13';
 await h.app.dailyRecords.save(day(reviewDate,'2026-09-17T13:00:00.000Z'));
-assert.ok(await h.app.dailyRecords.get(reviewDate),'Saving a historical day must not depend on Reflection Draft state.');
+assert.ok(await h.app.dailyRecords.get(reviewDate),'Saving a past day must work on its own.');
 
 
 // Standalone Attachment Library deletion history is a minimal portable ledger.

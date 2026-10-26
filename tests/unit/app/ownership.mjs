@@ -91,4 +91,17 @@ assert.equal(ownership.status().format,'study-director.app-ownership-status');
   const token=tab.issueWriteToken('peer released');tab.release();assert.throws(()=>tab.assertWriteToken(token),error=>ownershipModule.isOwnershipLostError(error));
 }
 
+// Only the current lease shape names an owner. A lease without a page id or
+// with another version is not a live owner, so this tab can take over.
+for(const lease of [{version:1,tabId:'old-tab',claimId:'old-claim',expiresAt:ownershipNow+10000},{version:2,tabId:'old-tab',claimId:'old-claim',expiresAt:ownershipNow+10000}]){
+  const values=new Map([['owner',lease]]),sessions=new Map();
+  const input=Object.freeze({...ownershipInput,
+    environment:Object.freeze({...ownershipInput.environment,window:{sessionStorage:{getItem:key=>sessions.get(key)||null,setItem:(key,value)=>sessions.set(key,String(value))},navigator:{},addEventListener:()=>{}}}),
+    local:Object.freeze({getJson:(key,fallback)=>values.has(key)?values.get(key):fallback,setJson:(key,value)=>{values.set(key,value);return true;},remove:key=>values.delete(key),lastError:()=>null})
+  });
+  const tab=ownershipModule.createOwnershipController(input);
+  assert.equal(await tab.evaluate(),true,`a version ${lease.version} lease without a page id must not keep this tab secondary`);
+  assert.equal(values.get('owner').version,2);assert.ok(values.get('owner').pageId);
+}
+
 console.log(JSON.stringify({status:'PASS',contract:'ownership',ownershipWriteFence:true,appScopedContract:true},null,2));

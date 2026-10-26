@@ -102,10 +102,10 @@ registry.define('ownership',1,()=>{
     }
     function readOwner(){
       const owner=local.getJson(config.storageKey,null);
-      return owner&&typeof owner==='object'&&(owner.version===1||owner.version===2)&&owner.tabId&&owner.claimId?owner:null;
+      return owner&&typeof owner==='object'&&owner.version===2&&owner.tabId&&owner.pageId&&owner.claimId?owner:null;
     }
     function expiresAt(owner){return owner&&typeof owner==='object'?Number(owner.expiresAt)||0:0;}
-    function isSelf(owner){return !!(owner&&owner.tabId===tabId&&(owner.version===1||owner.pageId===pageId));}
+    function isSelf(owner){return !!(owner&&owner.tabId===tabId&&owner.pageId===pageId);}
     function otherActive(owner=readOwner(),now=env.now()){
       return !!(owner&&!isSelf(owner)&&expiresAt(owner)>now);
     }
@@ -136,9 +136,10 @@ registry.define('ownership',1,()=>{
     async function completePrimaryHydration(){
       const owner=readOwner();
       if(state!==OWNERSHIP_STATES.HYDRATING||!isSelf(owner)||owner.claimId!==claimId||!fenceValid())return;
-      // Keep ordinary mutation disabled while deferred compatibility work finishes.
-      // Compatibility writers use explicit allowHydrating write tokens, so an
-      // unrelated UI/editor write cannot slip into this takeover window.
+      // Keep ordinary mutation disabled while the takeover finishes loading
+      // (unsupported-data census, saved drafts). Only writers holding explicit
+      // allowHydrating tokens (active-session reconciliation) run meanwhile, so
+      // an unrelated UI/editor write cannot slip into this takeover window.
       await hooks.finalizeHydration();
       const verified=readOwner();
       if(state!==OWNERSHIP_STATES.HYDRATING||!isSelf(verified)||verified.claimId!==claimId||!fenceValid())return;

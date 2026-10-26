@@ -5,7 +5,6 @@ if(!registry||registry.format!=='study-director.internal-module-registry'||regis
 const {exactFrozenObject:exactObject,functionPort:functions}=registry.contracts;
 registry.define('repository-journals',1,()=>{
   const freeze=Object.freeze;
-  // Version 5 renamed the note deletion list to noteDeletions.
   const RESTORE_JOURNAL_VERSION=5;
   function exactValue(value,keys){return !!(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('|')===[...keys].sort().join('|'));}
   function createAppMetaValidators(input){

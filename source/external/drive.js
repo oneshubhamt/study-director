@@ -38,7 +38,6 @@
   const PUBLICATION_KIND='publication',MAINTENANCE_KIND='maintenance';
   const MAINTENANCE_VERSION='2';
   let PUBLICATION_MAX_AGE_MS=0,PUBLICATION_ASSERTION_MARGIN_MS=0,MAINTENANCE_MAX_AGE_MS=0,MAINTENANCE_ASSERTION_MARGIN_MS=0;
-  let LEGACY_MAINTENANCE_MAX_AGE_MS=0,LEGACY_MAINTENANCE_ASSERTION_MARGIN_MS=0;
   const REQUIRED_CAPABILITIES=Object.freeze({pluginApi:1,backupController:1,backupProviders:1});
   const DEFAULT_MAX_BACKUP_BYTES=20*1024*1024;
   const UPLOAD_CHUNK_BYTES=2*1024*1024;
@@ -729,11 +728,11 @@
   function validMaintenanceMetadata(file,parent){
     const properties=file&&file.appProperties||{},id=String(properties[REPOSITORY_ID_MARKER]||'');
     return !!(file&&file.id&&maintenanceIdValid(id)&&file.name===maintenanceFilename(id)&&file.ownedByMe===true&&file.shared===false&&file.trashed===false&&exactParent(file,parent)&&
-      properties[REPOSITORY_MARKER.key]===REPOSITORY_MARKER.value&&[REPOSITORY_VERSION,MAINTENANCE_VERSION].includes(properties[REPOSITORY_VERSION_MARKER])&&properties[REPOSITORY_KIND_MARKER]===MAINTENANCE_KIND);
+      properties[REPOSITORY_MARKER.key]===REPOSITORY_MARKER.value&&properties[REPOSITORY_VERSION_MARKER]===MAINTENANCE_VERSION&&properties[REPOSITORY_KIND_MARKER]===MAINTENANCE_KIND);
   }
   function maintenanceDescriptor(file,parent){
     if(!validMaintenanceMetadata(file,parent))throw noRetry(new Error('Google Drive returned unsafe Study Director maintenance metadata.'));
-    const id=String(file.appProperties[REPOSITORY_ID_MARKER]),createdAt=String(file.createdTime||''),maxAge=file.appProperties[REPOSITORY_VERSION_MARKER]===MAINTENANCE_VERSION?MAINTENANCE_MAX_AGE_MS:LEGACY_MAINTENANCE_MAX_AGE_MS;
+    const id=String(file.appProperties[REPOSITORY_ID_MARKER]),createdAt=String(file.createdTime||''),maxAge=MAINTENANCE_MAX_AGE_MS;
     return Object.freeze({kind:MAINTENANCE_KIND,id,remoteId:String(file.id),verificationScope:coordinationVerificationScope(parent),name:String(file.name),createdAt,modifiedAt:String(file.modifiedTime||''),expiresAt:Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+maxAge).toISOString():''});
   }
   async function findRepositoryMaintenance(parent,id,context=EMPTY_DRIVE_OPERATION){
@@ -782,7 +781,7 @@
     const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id=String(ref&&ref.id||'');let metadata=null;
     if(ref&&ref.remoteId){const candidate=await getFileMetadata(ref.remoteId,context).catch(error=>{if(Number(error&&error.driveStatus)===404)return null;throw error;});if(candidate&&validMaintenanceMetadata(candidate,parent)&&candidate.appProperties[REPOSITORY_ID_MARKER]===id)metadata=candidate;}
     if(!metadata)metadata=await findRepositoryMaintenance(parent,id,context);if(!metadata)throw noRetry(new Error('The Google Drive repository-maintenance marker disappeared during cleanup. Maintenance stopped safely.'));
-    const descriptor=maintenanceDescriptor(metadata,parent),expires=Date.parse(descriptor.expiresAt),margin=metadata.appProperties[REPOSITORY_VERSION_MARKER]===MAINTENANCE_VERSION?MAINTENANCE_ASSERTION_MARGIN_MS:LEGACY_MAINTENANCE_ASSERTION_MARGIN_MS;if(!Number.isFinite(expires)||Date.now()>=expires-margin)throw noRetry(new Error('The Google Drive repository-maintenance marker is too old to continue destructive cleanup safely.'));
+    const descriptor=maintenanceDescriptor(metadata,parent),expires=Date.parse(descriptor.expiresAt),margin=MAINTENANCE_ASSERTION_MARGIN_MS;if(!Number.isFinite(expires)||Date.now()>=expires-margin)throw noRetry(new Error('The Google Drive repository-maintenance marker is too old to continue destructive cleanup safely.'));
     return descriptor;
   }
   async function endRepositoryMaintenance(ref,baseContext=EMPTY_DRIVE_OPERATION){
@@ -1133,10 +1132,10 @@
     if(!supportsCapabilities(api,REQUIRED_CAPABILITIES)||!api.backup||!api.backup.providers||typeof api.backup.providers.register!=='function')return false;
     const policy=api.backup.repositoryPolicy;
     if(!policy||typeof policy!=='object')return false;
-    const publicationMaxAgeMs=Number(policy.publicationMaxAgeMs),publicationAssertionMarginMs=Number(policy.publicationAssertionMarginMs),maintenanceMaxAgeMs=Number(policy.maintenanceMaxAgeMs),maintenanceAssertionMarginMs=Number(policy.maintenanceAssertionMarginMs);
+    const publicationMaxAgeMs=Number(policy.publicationMaxAgeMs),publicationAssertionMarginMs=Number(policy.publicationAssertionMarginMs);
     const metadataTimeoutMs=Number(policy.driveMetadataTimeoutMs),driveMaintenanceMaxAgeMs=Number(policy.driveMaintenanceMaxAgeMs),driveMaintenanceAssertionMarginMs=Number(policy.driveMaintenanceAssertionMarginMs);
-    if(![publicationMaxAgeMs,publicationAssertionMarginMs,maintenanceMaxAgeMs,maintenanceAssertionMarginMs,metadataTimeoutMs,driveMaintenanceMaxAgeMs,driveMaintenanceAssertionMarginMs].every(value=>Number.isFinite(value)&&value>0)||publicationAssertionMarginMs>=publicationMaxAgeMs||maintenanceAssertionMarginMs>=maintenanceMaxAgeMs||driveMaintenanceAssertionMarginMs>=driveMaintenanceMaxAgeMs)return false;
-    PUBLICATION_MAX_AGE_MS=publicationMaxAgeMs;PUBLICATION_ASSERTION_MARGIN_MS=publicationAssertionMarginMs;LEGACY_MAINTENANCE_MAX_AGE_MS=maintenanceMaxAgeMs;LEGACY_MAINTENANCE_ASSERTION_MARGIN_MS=maintenanceAssertionMarginMs;API_TIMEOUT_MS=metadataTimeoutMs;MAINTENANCE_MAX_AGE_MS=driveMaintenanceMaxAgeMs;MAINTENANCE_ASSERTION_MARGIN_MS=driveMaintenanceAssertionMarginMs;
+    if(![publicationMaxAgeMs,publicationAssertionMarginMs,metadataTimeoutMs,driveMaintenanceMaxAgeMs,driveMaintenanceAssertionMarginMs].every(value=>Number.isFinite(value)&&value>0)||publicationAssertionMarginMs>=publicationMaxAgeMs||driveMaintenanceAssertionMarginMs>=driveMaintenanceMaxAgeMs)return false;
+    PUBLICATION_MAX_AGE_MS=publicationMaxAgeMs;PUBLICATION_ASSERTION_MARGIN_MS=publicationAssertionMarginMs;API_TIMEOUT_MS=metadataTimeoutMs;MAINTENANCE_MAX_AGE_MS=driveMaintenanceMaxAgeMs;MAINTENANCE_ASSERTION_MARGIN_MS=driveMaintenanceAssertionMarginMs;
     const publishedLimit=Number(api.backup.limits&&api.backup.limits.maxFileBytes);
     if(Number.isFinite(publishedLimit)&&publishedLimit>0)maxBackupBytes=publishedLimit;
     releaseFile=api.backup.releaseFile||releaseFile;

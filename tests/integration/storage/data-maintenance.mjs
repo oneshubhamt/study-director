@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import {createHarness} from '../../helpers/repository-harness.mjs';
 import {storedNote} from '../../helpers/note-ids.mjs';
 
-const obsoleteKey='reflectionDraftMigration.v1';
+const unknownKey='unknownMetadata';
 const retainedKey='planDraft';
 const recentAt=new Date().toISOString(),oldAt=new Date(Date.now()-2*24*60*60*1000).toISOString();
 const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map([
-  [obsoleteKey,{key:obsoleteKey,version:1,value:{complete:true},updatedAt:recentAt}],
+  [unknownKey,{key:unknownKey,version:1,value:{complete:true},updatedAt:recentAt}],
   [retainedKey,{key:retainedKey,version:1,value:{scheduleText:'keep'},updatedAt:recentAt}],
   ['dataMaintenance',{key:'dataMaintenance',version:1,value:{version:6,status:'completed',completedAt:oldAt},updatedAt:recentAt}]
 ])};
@@ -18,11 +18,11 @@ assert.equal(report.status,'completed','maintenance must run after the canonical
 assert.equal(report.version,6);
 assert.equal(stores.meta.has(retainedKey),true,'maintenance must preserve canonical Plan metadata');
 
-stores.meta.set(obsoleteKey,{key:obsoleteKey,version:1,value:{complete:true},updatedAt:recentAt});
+stores.meta.set(unknownKey,{key:unknownKey,version:1,value:{complete:true},updatedAt:recentAt});
 const recent=await app.maintenance.run();
 assert.equal(recent.status,'skipped');
 assert.equal(recent.reason,'recent');
-assert.equal(stores.meta.has(obsoleteKey),true,'recurring maintenance must not own compatibility cleanup after consolidation');
+assert.equal(stores.meta.has(unknownKey),true,'recurring maintenance must leave metadata it does not own alone');
 
 console.log(JSON.stringify({status:'PASS',suite:'data-maintenance',compatibilityRemoved:report,recent},null,2));
 

@@ -248,7 +248,7 @@ function validateBackupManifest(manifest,gzip,{binaryFramed=false}={}){
   if(manifest.checksumAlgorithm!=='sha256')throw new Error('Binary backup requires SHA-256 integrity checks.');
   {
     validateCheckpointMetadata(manifest.checkpoint);
-    if(Object.prototype.hasOwnProperty.call(manifest,'deviceId'))throw new Error('Current backups must not contain legacy device identity metadata.');
+    if(Object.prototype.hasOwnProperty.call(manifest,'deviceId'))throw new Error('Backups must not contain device identity metadata.');
     if(new Date(String(manifest.checkpoint.createdAt)).toISOString()!==new Date(String(manifest.exportedAt)).toISOString())throw new Error('Backup checkpoint timestamp does not match the backup timestamp.');
   }
   {

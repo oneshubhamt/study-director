@@ -101,3 +101,36 @@ Fast, release and focused storage checks passed. Browser certification remains i
 Remaining before declaring preparation fully certified: diagnose/fix the PWA multi-tab reload issue and rerun browser smoke. Exhaustive extended-browser and full coverage certification were not run in this preparation pass; they remain final TypeScript-program gates. No compiler/configuration migration or JavaScript-to-TypeScript conversion has begun.
 
 Next planned program phase is the TypeScript foundation/pilot described above. Do not treat generated/transpiled TS or renamed files as typechecked implementation. Complete pinned compiler/environment configurations and mixed build/test/coverage/mutation support before broad conversion. Continue only on `TS-Conversion`, maintaining this record and the temporary per-pass scratchpad.
+
+## Pass 0 follow-up: ported fixes and canonical-only audit
+
+The owner confirmed that every device will run the latest background-refactor build before this branch goes live. Anything kept only for older builds is therefore removed.
+
+| Change | Commit(s) |
+| --- | --- |
+| Ported from `main`: the Device Folder integrity range read returns `{blob,totalBytes,version}`, the background coordinator announces released slots, and a slow IndexedDB open gets one fresh attempt | 167ed8a, eadf3f2 |
+| A failed transaction while opening is a storage error, not an unsupported database | 85dc8bc |
+| Insights and overlay browser tests seed current DailyRecord v16 data and the profile registry | 6f2a9ac |
+| Removed old theme aliases, the `legacy` maintenance reason and legacy wording in Review and Insights | ed658db |
+| Drive accepts only version-2 maintenance markers. Other versions are counted as ignored, and the old age/margin policy is no longer read | this pass |
+| Service worker: a cache without release metadata is an incomplete install and is deleted unless an install is still running. The bridge for old builds' unlabelled caches is gone | this pass |
+| Ownership recognises only the version-2 lease `{version,tabId,pageId,claimId,expiresAt}` | this pass |
+| Removed an unused diagnostics label (`oldFolder`) and an unused code (`STUDY_DIRECTOR_LEGACY_BACKUP`), a journal-history comment, and the "historical reflection drafts" integrity text | this pass |
+| Tests: an ownership regression for the old lease shape (fails before, passes after); Drive version-1/3 markers rejected; fixtures that seeded retired keys now use neutral data | this pass |
+
+Kept as current behaviour:
+- schedule-edit progress remapping;
+- fallback-record replay;
+- the generic guards for unsupported or newer data;
+- current editor table-size ranges (stored notes may use them);
+- architecture tests that stop retired domains from coming back.
+
+The policy's `maintenanceMaxAgeMs`/`maintenanceAssertionMarginMs` stay because the Device Folder uses them.
+
+| Check (this pass) | Result |
+| --- | --- |
+| `node build/build.mjs`, `node build/verify-build.mjs` | PASS: 99 deployment files |
+| `node tests/helpers/run-category.mjs targeted` on 32 tests touching the changed files, plus `suite-policy` and `suite-structure` | PASS |
+| Browser, each run alone: `pwa-update`, `pwa-offline`, `core-flow`, `pwa-device-backup`, `sync-and-profiles`, `site-data-clear` | PASS: 6 of 6 |
+
+`pwa-update` covers the PWA multi-tab reload scenario that left the earlier smoke run incomplete. It passes now, after the `pwa-update` fix carried over from `main`. The full browser smoke, extended-browser and coverage gates were not rerun in this pass. They remain gates for the TypeScript program.

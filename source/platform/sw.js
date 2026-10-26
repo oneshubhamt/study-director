@@ -68,9 +68,10 @@ function scopedClient(client){
 }
 async function shellMetadata(name){
   const cache=await caches.open(name),stored=await cache.match(RELEASE_META_URL);
-  if(stored){const value=await stored.json();if(typeof value.buildId==='string')return value;}
-  const index=await cache.match(INDEX_URL),html=index?await index.text():'';
-  return {buildId:html.match(/<meta\s+name="study-director-build"\s+content="([^"]+)"/u)?.[1]||'',assetId:html.match(/<meta\s+name="study-director-assets"\s+content="([^"]+)"/u)?.[1]||'',state:'legacy'};
+  if(stored){const value=await stored.json();if(typeof value.buildId==='string'&&typeof value.assetId==='string')return value;}
+  // Every release writes its metadata once all its files are cached, so a
+  // cache without it is an install still downloading or one that stopped.
+  return {buildId:'',assetId:'',state:'incomplete'};
 }
 async function cleanupOldShellCaches({force=false}={}){
   if(retirement)return retirement;
@@ -92,11 +93,10 @@ async function cleanupOldShellCaches({force=false}={}){
     if([...assets].some(asset=>asset!==ASSET_ID&&!rows.some(row=>row.assetId===asset)))return {state:'deferred',reason:'unknown-client-release'};
     // Keep one recent unused generation for history/BFCache return. Live
     // generations remain pinned; installations stop at the cache cap.
-    const previous=[...assets].some(asset=>asset!==ASSET_ID)?'':rows.filter(row=>(row.assetId&&row.assetId!==ASSET_ID||!row.assetId&&row.buildId)&&row.state!=='installed').sort((a,b)=>(Number(b.activatedAt)||0)-(Number(a.activatedAt)||0))[0]?.name;
+    const previous=[...assets].some(asset=>asset!==ASSET_ID)?'':rows.filter(row=>row.assetId&&row.assetId!==ASSET_ID&&row.state!=='installed').sort((a,b)=>(Number(b.activatedAt)||0)-(Number(a.activatedAt)||0))[0]?.name;
     const removed=[];
     for(const row of rows){
       if(row.name===previous||assets.has(row.assetId)&&row.assetId!==ASSET_ID)continue;
-      if(!row.assetId&&windows.length&&[...assets].some(asset=>asset!==ASSET_ID))continue;
       // An installing candidate has no release metadata until every asset is
       // verified. Protect it as well as a completed waiting candidate.
       if(row.state!=='active'&&(self.registration.installing||self.registration.waiting))continue;
