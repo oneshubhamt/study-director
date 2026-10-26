@@ -38,5 +38,5 @@ Stop and ask before you:
 - Change first-party code only in `source`, `portable` or `rich-text`. Never hand-edit generated `dist` output or external bundles.
 - `release.config.mjs` is the only source of release identity. `LICENSE` must stay identical to `source/legal/LICENSE.txt`.
 - A pull request titled like a bug fix (for example `fix: ...`) must include a regression test; CI enforces this.
-- Never run the `pwa-update` browser test at the same time as another browser test; it fails under CPU load. Other browser tests may run concurrently (`BROWSER_TEST_JOBS=N`). Before you treat a failure seen under concurrency as a bug, rerun that test alone. [tests/README.md](tests/README.md#browser-test-reliability) has the full rules.
+- Never run the `pwa-update` browser test at the same time as another browser test; it fails under CPU load. `npm run test:browser*` runs the others three at a time and `pwa-update` by itself. Report browser runs as one summary, not test by test. Before you treat a failure seen under concurrency as a bug, rerun that test alone. [tests/README.md](tests/README.md#browser-test-reliability) has the full rules.
 - Storage, backup and restore code protects the owner's data. Changes there need targeted tests at the right layer.
