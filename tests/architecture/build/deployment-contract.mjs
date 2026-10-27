@@ -12,6 +12,8 @@ const manifest=JSON.parse(read('source/platform/manifest.webmanifest'));
 const merge=JSON.parse(read('source/platform/firebase-hosting-headers.merge.json'));
 
 assert.ok(build.deployment.has('firebase-hosting-headers.merge.json'));
+const deploymentIndex=build.deployment.get(build.identity.main),richTextName=build.externalNames.deployment.get('rich-text');
+assert.ok(deploymentIndex.includes(`<link rel="preload" as="script" href="${richTextName}">`),'deployment must preload the blocking RichText runtime');
 assert.equal(build.deployment.has('firebase.json'),false,'generated Firebase project configuration must remain outside public build output');
 assert.equal(Object.prototype.hasOwnProperty.call(merge.hosting,'public'),false,'the merge file must not replace the existing public directory setting');
 const headers=new Map(merge.hosting.headers.map(item=>[item.source,new Map(item.headers.map(row=>[row.key.toLowerCase(),row.value]))]));

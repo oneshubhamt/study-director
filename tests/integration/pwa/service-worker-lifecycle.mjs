@@ -7,8 +7,8 @@ const template=fs.readFileSync('source/platform/sw.js','utf8'),sha=value=>crypto
 const scope='https://study.test/app/',current='study-director-shell-current',assetId='a'.repeat(24),meta=scope+'__sd_pwa_release__';
 const rows=Array.from({length:9},(_,i)=>({path:`./asset-${i}.js`,body:`asset-${i}`})),manifest=rows.map(row=>({path:row.path,sha256:sha(row.body)}));
 const cases=[];
-function fixture({badPath='',active=null,windows=[],rejectDelete='',failMetadata=false}={}){
- const stores=new Map(),listeners=new Map(),deletions=[],messages=[],fetches=[],claims=[];let concurrent=0,maximum=0;
+function fixture({badPath='',active=null,windows=[],rejectDelete='',failMetadata=false,delays={}}={}){
+ const stores=new Map(),listeners=new Map(),deletions=[],messages=[],fetches=[],fetchEvents=[],claims=[];let concurrent=0,maximum=0;
  const ensure=name=>{if(!stores.has(name))stores.set(name,new Map());return stores.get(name);};
  const caches={
   async has(name){return stores.has(name);},async keys(){return [...stores.keys()];},
@@ -22,7 +22,7 @@ function fixture({badPath='',active=null,windows=[],rejectDelete='',failMetadata
  };
  const self={registration:{scope,active,installing:null,waiting:null},location:{origin:'https://study.test'},addEventListener(type,fn){listeners.set(type,fn);},async skipWaiting(){claims.push('skip');}};
  const clients={async matchAll(){return windows;},async claim(){claims.push('claim');}};
- const fetch=async request=>{fetches.push(request.url);const row=rows.find(row=>new URL(row.path,scope).href===request.url);if(!row)throw new Error('offline');concurrent++;maximum=Math.max(maximum,concurrent);await new Promise(resolve=>setTimeout(resolve,1));concurrent--;return new Response(row.body+(row.path===badPath?'corrupt':''));};
+ const fetch=async request=>{const row=rows.find(row=>new URL(row.path,scope).href===request.url);fetches.push({url:request.url,cache:request.cache});fetchEvents.push(`start:${row?.path||request.url}:${request.cache}`);if(!row)throw new Error('offline');concurrent++;maximum=Math.max(maximum,concurrent);await new Promise(resolve=>setTimeout(resolve,Number(delays[row.path])||1));concurrent--;fetchEvents.push(`finish:${row.path}:${request.cache}`);return new Response(row.body+(row.path===badPath?'corrupt':''));};
  const context=vm.createContext({self,caches,clients,URL,Request,Response,crypto:webcrypto,fetch,Date,console});
  const rendered=template.replaceAll('@@SD_RELEASE@@','QA_FIXTURE').replaceAll('@@SD_BUILD_ID@@','qa-build').replaceAll('@@SD_PAGE_ASSET_ID@@',assetId).replaceAll('@@SD_PWA_RELEASE_ID@@','current').replaceAll('@@SD_PWA_ASSET_MANIFEST@@',JSON.stringify(manifest)).replaceAll('@@SD_CACHE_STORAGE_IDENTITIES@@',JSON.stringify(CACHE_STORAGE_IDENTITIES));
  vm.runInContext(rendered,context,{filename:'source/platform/sw.js'});
@@ -30,13 +30,31 @@ function fixture({badPath='',active=null,windows=[],rejectDelete='',failMetadata
  function seed(name,id,{activatedAt=1,state='active',asset='old.js'}={}){const map=ensure(name);map.set(meta,new Response(JSON.stringify({assetId:id,buildId:'qa-'+id,state,activatedAt})));map.set(scope+asset,new Response(name+' offline bytes'));return map;}
  function client(id){return {id,url:scope,postMessage(value){messages.push({id,...value});}};}
  async function report(client,id){await emit('message',{source:client,data:{type:'SD_PWA_CLIENT_STATE',assetId:id,ready:true}});}
- return {stores,windows,deletions,messages,fetches,claims,self,seed,client,report,emit,maximum:()=>maximum};
+ return {stores,windows,deletions,messages,fetches,fetchEvents,claims,self,seed,client,report,emit,maximum:()=>maximum};
 }
 {
- const h=fixture();await h.emit('install');assert.equal(h.stores.get(current).size,rows.length+1);assert.equal(h.maximum(),4);assert.deepEqual(h.claims,['skip']);assert.equal(h.deletions.length,0);cases.push('four-way verified precache and first installation');
+ const h=fixture();await h.emit('install');assert.equal(h.stores.get(current).size,rows.length+1);assert.equal(h.maximum(),8);assert.equal(h.fetches.length,rows.length);assert.ok(h.fetches.every(row=>row.cache==='default'));assert.deepEqual(h.claims,['skip']);assert.equal(h.deletions.length,0);cases.push('eight-way verified precache and first installation');
 }
 {
- const h=fixture({badPath:'./asset-4.js',active:{}});h.seed('study-director-shell-old','b'.repeat(24));await assert.rejects(h.emit('install'),/identity failed/);assert.equal(h.stores.has(current),false);assert.equal(h.stores.has('study-director-shell-old'),true);assert.deepEqual(h.deletions,[current]);assert.equal(h.claims.length,0);cases.push('failed new candidate preserves active offline shell');
+ const h=fixture({delays:{'./asset-0.js':30}});await h.emit('install');
+ const startNinth=h.fetchEvents.findIndex(value=>value.startsWith('start:./asset-8.js:')),finishSlow=h.fetchEvents.findIndex(value=>value.startsWith('finish:./asset-0.js:'));
+ assert.ok(startNinth>=0&&finishSlow>=0&&startNinth<finishSlow,'a free precache worker must start the next asset without waiting for the slowest request in the first eight');
+ cases.push('bounded worker queue has no eight-item batch barrier');
+}
+{
+ const h=fixture({active:{}}),old=h.seed('study-director-shell-old','b'.repeat(24));
+ for(const row of rows.slice(0,4))old.set(new URL(row.path,scope).href,new Response(row.body));
+ await h.emit('install');
+ assert.equal(h.fetches.length,rows.length-4,'verified assets already present in a retained shell must not hit the network');
+ const currentCache=h.stores.get(current);
+ for(const row of rows.slice(0,4))assert.equal(await currentCache.get(new URL(row.path,scope).href).clone().text(),row.body);
+ cases.push('verified retained-shell assets are copied into the new release without network fetch');
+}
+{
+ const h=fixture({badPath:'./asset-4.js',active:{}});h.seed('study-director-shell-old','b'.repeat(24));await assert.rejects(h.emit('install'),/identity failed/);
+ const badUrl=new URL('./asset-4.js',scope).href,badRequests=h.fetches.filter(row=>row.url===badUrl);
+ assert.deepEqual(badRequests.map(row=>row.cache),['default','reload'],'an ordinary cached/network response is verified before the forced reload fallback');
+ assert.equal(h.stores.has(current),false);assert.equal(h.stores.has('study-director-shell-old'),true);assert.deepEqual(h.deletions,[current]);assert.equal(h.claims.length,0);cases.push('failed new candidate retries a mismatched response with reload and preserves active offline shell');
 }
 {
  const h=fixture({badPath:'./asset-4.js',active:{}}),map=h.seed(current,assetId);map.set(scope+'asset-0.js',new Response(rows[0].body));await assert.rejects(h.emit('install'),/identity failed/);assert.equal(await map.get(scope+'asset-0.js').clone().text(),rows[0].body);assert.equal(h.deletions.length,0);cases.push('failed same-identity retry preserves existing verified entries');

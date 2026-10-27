@@ -337,6 +337,8 @@ export function validateBuild(build){
       const name=externalNames[target].get(id);
       invariant(html.includes(`src:'${name}'`),`${target} ${id} on-demand plugin identity is invalid.`);
     }
+    const richTextName=externalNames[target].get('rich-text');
+    invariant(html.includes(`<link rel="preload" as="script" href="${richTextName}">`),`${target} rich-text startup preload is missing.`);
   }
   for(const module of privateModules){
     const name=privateNames.get(module.id),expected=privateSources.get(module.id);

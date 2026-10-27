@@ -27,7 +27,7 @@ const CompatibilityFacade=Object.freeze((()=>{
   });
 })());
 const PRECACHE=Object.freeze(JSON.parse('@@SD_PWA_ASSET_MANIFEST@@'));
-const PRECACHE_CONCURRENCY=4;
+const PRECACHE_CONCURRENCY=8;
 const resolveAssets=assets=>new Map(assets.map(asset=>[
   new URL(asset.path,self.registration.scope).href,
   Object.freeze({...asset,url:new URL(asset.path,self.registration.scope).href})
@@ -38,32 +38,52 @@ const LEGAL_NAVIGATION_URLS=new Set(['./privacy.html','./terms.html','./security
 
 function bytesToHex(bytes){return [...new Uint8Array(bytes)].map(value=>value.toString(16).padStart(2,'0')).join('');}
 async function responseSha256(response){return bytesToHex(await crypto.subtle.digest('SHA-256',await response.arrayBuffer()));}
+async function verifiedAssetResponse(asset,response){
+  if(!response||!response.ok)return null;
+  return await responseSha256(response.clone())===asset.sha256?response:null;
+}
 async function fetchVerifiedAsset(asset){
-  const request=new Request(asset.url,{cache:'reload',credentials:'same-origin'});
-  const response=await fetch(request);
+  let response=null;
+  try{response=await fetch(new Request(asset.url,{credentials:'same-origin'}));}catch{}
+  const ordinary=await verifiedAssetResponse(asset,response);
+  if(ordinary)return ordinary;
+  try{response=await fetch(new Request(asset.url,{cache:'reload',credentials:'same-origin'}));}
+  catch{throw new Error(`Required app asset failed: ${asset.path}.`);}
   if(!response.ok)throw new Error(`Required app asset failed: ${asset.path} (${response.status}).`);
-  const actual=await responseSha256(response.clone());
-  if(actual!==asset.sha256)throw new Error(`Required app asset identity failed: ${asset.path}.`);
-  return response;
+  const reloaded=await verifiedAssetResponse(asset,response);
+  if(!reloaded)throw new Error(`Required app asset identity failed: ${asset.path}.`);
+  return reloaded;
+}
+async function reusableVerifiedAsset(asset,cacheList){
+  for(const cache of cacheList){
+    const stored=await cache.match?.(asset.url);
+    const verified=await verifiedAssetResponse(asset,stored);
+    if(verified)return verified;
+  }
+  return null;
 }
 async function installRelease(){
-  const existed=await caches.has(CACHE_NAME);
-  if(!existed&&(await caches.keys()).filter(name=>name.startsWith(CACHE_PREFIX)).length>=MAX_SHELL_CACHES){
+  const cacheNames=await caches.keys(),shellNames=cacheNames.filter(name=>name.startsWith(CACHE_PREFIX)),existed=shellNames.includes(CACHE_NAME);
+  if(!existed&&shellNames.length>=MAX_SHELL_CACHES){
     const error=new Error('Close older Study Director windows and retry the update.');error.code='SD_PWA_CACHE_LIMIT';throw error;
   }
   const cache=await caches.open(CACHE_NAME);
+  const reusableCaches=[cache,...await Promise.all(shellNames.filter(name=>name!==CACHE_NAME).map(name=>caches.open(name)))];
   try{
-    for(let offset=0;offset<PRECACHE.length;offset+=PRECACHE_CONCURRENCY){
-      const batch=PRECACHE.slice(offset,offset+PRECACHE_CONCURRENCY).map(async asset=>{
-        const resolved=PRECACHE_BY_URL.get(new URL(asset.path,self.registration.scope).href);
-        const previous=await cache.match?.(resolved.url);
-        if(previous&&await responseSha256(previous.clone())===resolved.sha256)return;
-        await cache.put(resolved.url,await fetchVerifiedAsset(resolved));
-      });
-      const settled=await Promise.allSettled(batch);
-      const failure=settled.find(result=>result.status==='rejected');
-      if(failure)throw failure.reason;
-    }
+    let next=0,failure=null;
+    const worker=async()=>{
+      while(!failure){
+        const index=next++;
+        if(index>=PRECACHE.length)return;
+        const resolved=PRECACHE_BY_URL.get(new URL(PRECACHE[index].path,self.registration.scope).href);
+        try{
+          const reusable=await reusableVerifiedAsset(resolved,reusableCaches);
+          await cache.put(resolved.url,reusable||await fetchVerifiedAsset(resolved));
+        }catch(error){failure??=error;}
+      }
+    };
+    await Promise.all(Array.from({length:Math.min(PRECACHE_CONCURRENCY,PRECACHE.length)},()=>worker()));
+    if(failure)throw failure;
     await cache.put(RELEASE_META_URL,new Response(JSON.stringify({releaseId:RELEASE_ID,buildId:BUILD_ID,assetId:ASSET_ID,state:'installed',installedAt:Date.now()}),{headers:{'Content-Type':'application/json'}}));
   }catch(error){
     // A same-identity retry may be serving a page. Preserve its verified entries.
