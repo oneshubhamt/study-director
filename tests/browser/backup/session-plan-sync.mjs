@@ -19,7 +19,7 @@ const pasteAndApply=name=>`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>set
   document.querySelector('[data-action="apply-schedule"]').click();await wait(1500);clearInterval(window.__acceptTimer);d.goTab('execute');await wait(150);return window.__accepted;})()`;
 const screen=page=>page.evaluate(`(async()=>{const d=__PWA6;d.goTab('execute');await new Promise(r=>setTimeout(r,150));const panel=document.getElementById('session-panel'),session=(await d.AppData.activeSession.load()).value;
   return {mode:d.TimerState.snapshot().mode,panel:panel.checkVisibility()?document.getElementById('session-panel-title').textContent:'',stored:String(session?.scheduleText||''),owner:String(session?.runningOn||''),revision:Number(session?.revision)||0,header:document.getElementById('status-session-label').textContent,overlay:document.getElementById('execute-overlay-title').textContent,now:document.getElementById('pane-execute').innerText.replace(/\\s+/g,' ').slice(0,200)};})()`);
-const claimsBy=who=>ledger.filter(line=>line.split(' ')[1]===who&&/ POST \\S+ sc_[a-f0-9]+\\.sdsessionclaim session-claim /u.test(line)).length;
+const claimsBy=who=>ledger.filter(line=>line.split(' ')[1]===who&&/ POST \S+ sc_[a-f0-9]+\.sdsessionclaim session-claim /u.test(line)).length;
 async function latestClaim(){
   const rows=[...drive.state.files.values()].filter(file=>!file.trashed&&file.appProperties?.studyDirectorRepositoryKind==='session-claim').sort((a,b)=>String(b.appProperties.studyDirectorRepositoryId||'').localeCompare(String(a.appProperties.studyDirectorRepositoryId||'')));
   return rows[0]?JSON.parse(await rows[0].content.text()):null;
