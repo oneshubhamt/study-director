@@ -25,7 +25,7 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shar
   const presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications}));
   const pending=registry.require('backup-recovery-host',1).createPendingStore(freeze({sourceRevision:()=>current,diagnostics:freeze({capture:noop}),storage:freeze({read:async()=>durable,write:async value=>{durable=value;},remove:async()=>{durable=null;}})}));
   const unexpected=()=>{throw new Error('Unexpected executor in the automatic backup test');};
-  const pipeline=freeze({noteObject:unexpected,readNote:unexpected,createPublication:unexpected,publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,sharedBase,establishBase:unexpected,spine:()=>null,verifyObject:unexpected,inspectCommit:unexpected,
+  const pipeline=freeze({noteObject:unexpected,readNote:unexpected,createPublication:unexpected,publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,sharedBase,establishBase:unexpected,verifyObject:unexpected,inspectCommit:unexpected,
     publish:async(_history,options,executor)=>{
       assert.equal(options.interactive,false,'automatic backups never prompt');
       const captured=current;publishedAt.push(clock.now());publishedBy.push(freeze({by:both&&options.shared!==true?'device-folder':'google-drive',at:clock.now()}));await publicationHook(options);
@@ -113,19 +113,20 @@ const cases=[];
   cases.push('backs up at once when the app goes to the background or updates');
 }
 {
-  // A computer with both locations: Drive copies the Device Folder's version,
-  // so it waits for the folder first, and still goes at once when the app goes
-  // to the background, not at its usual 20-minute slot.
+  // A computer with both locations publishes the same canonical local state
+  // independently to each destination. Neither location waits for or copies
+  // a checkpoint from the other.
   const t=fixture({covered:'2026-10-06T08:00:00.000Z',both:true});await tick(t,1000);t.publishedBy.length=0;
   t.change();await tick(t,MINUTE);assert.equal(t.publishedBy.length,0);
   const start=t.clock.now();await t.runtime.flushAutomatic('app-hidden');await tick(t,30*1000);
   const folder=t.publishedBy.find(row=>row.by==='device-folder'),drive=t.publishedBy.find(row=>row.by==='google-drive');
   assert.ok(folder&&folder.at-start<=5000,'the Device Folder backs up at once');
-  assert.ok(drive,'Drive backs up too, without waiting for its usual slot');assert.ok(drive.at>=folder.at&&drive.at-start<=30*1000,'after the Device Folder, within seconds');
-  // The next round of changes waits for the Device Folder again.
+  assert.ok(drive&&drive.at-start<=5000,'Drive independently backs up the same local state at once');
+  // The next urgent round independently reaches both locations again; order is
+  // deliberately not part of the contract.
   t.publishedBy.length=0;t.change(true);await tick(t,t.policy.automaticUrgentMs+30*1000);
-  assert.deepEqual(t.publishedBy.map(row=>row.by),['device-folder','google-drive'],'every round, the Device Folder goes first');
-  cases.push('both locations: Drive follows the Device Folder at once');
+  assert.equal(t.publishedBy.length,2);assert.deepEqual(new Set(t.publishedBy.map(row=>row.by)),new Set(['device-folder','google-drive']));
+  cases.push('both locations: each publishes canonical local state independently');
 }
 {
   // Drive holds a version this device has not taken in. A catch-up that fails
