@@ -2780,13 +2780,13 @@ async function checkSessionOwnershipClaim(){
   try{
     const [claim,loaded]=await Promise.all([BackupProviderRuntime.readSessionClaim('google-drive'),AppData.activeSession.load(0,{strict:true})]);
     if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be checked safely.');
-    const session=loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null,me=InstallationIdentity.getId(),remote=!!(claim&&session&&claim.date===session.date&&claim.owner!==me),mine=!!(session&&session.runningOn===me);
+    const session=loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null,mine=!!(session&&session.runningOn===InstallationIdentity.getId()),remote=!!(claim&&!claim.expired&&claim.applies&&!claim.ownedHere);
     if(remote&&mine&&TASKS.length){
-      const now=DecisionClock.nowMs(),same=sessionClaimFreeze&&sessionClaimFreeze.epoch===claim.epoch&&sessionClaimFreeze.owner===claim.owner;
+      const now=DecisionClock.nowMs(),same=sessionClaimFreeze&&sessionClaimFreeze.epoch===claim.epoch;
       if(!same){
         try{await flushLiveDraft();}catch(error){AppDiagnostics.capture('session.claim-flush',error,'warn');}
         const frozenSinceMs=DecisionClock.nowMs();TimerEngine.stopExecution();
-        sessionClaimFreeze=Object.freeze({epoch:claim.epoch,owner:claim.owner,date:claim.date,frozenSinceMs,lastSyncAt:0});
+        sessionClaimFreeze=Object.freeze({epoch:claim.epoch,frozenSinceMs,lastSyncAt:0});
         setPlanStatus('Today’s session moved to another device. Syncing its latest state…');
       }
       const current=sessionClaimFreeze;
@@ -2797,7 +2797,7 @@ async function checkSessionOwnershipClaim(){
       return true;
     }
     if(sessionClaimFreeze){
-      if(mine&&(!claim||claim.owner===me||claim.date!==session?.date))return resumeAfterReleasedSessionClaim(session);
+      if(mine&&(!claim||claim.expired||claim.ownedHere||!claim.applies))return resumeAfterReleasedSessionClaim(session);
       if(!mine||!TASKS.length)sessionClaimFreeze=null;
     }
     return false;
@@ -9863,7 +9863,6 @@ AppActivation.subscribe(event=>{if([APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTI
 BackupProviderRuntime.configureAutomaticBackup(Object.freeze({covered:id=>verifiedRecoveryState.providers[id]?.sourceRevision||'',current:()=>currentBackupSourceRevision(),ready:async()=>await canonicalLocalRecoveryEmpty()===false}));
 BackupProviderRuntime.configureSessionOwnership(Object.freeze({
   installationId:()=>InstallationIdentity.getId(),
-  today:()=>todayISO(),
   read:async()=>{const loaded=await AppData.activeSession.load(0,{strict:true});if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be read safely.');const value=loaded.value;return value?Object.freeze({date:value.date,runningOn:value.runningOn,revision:value.revision}):null;}
 }));
 // Each location's integrity state is kept under its location id.
