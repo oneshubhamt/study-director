@@ -3958,10 +3958,16 @@
     };
     const loadSession=async({dataSource,source,sourceKey,currentStudyDate,datasetRevision,token,profile})=>{
       const loadStarted=performance.now();
-      const readCanonicalInputs=async()=>Promise.all([
-        typeof dataSource.getDailySummaries==='function'?dataSource.getDailySummaries():[],
-        dataSource.getDailyRecords({})
-      ]);
+      const readCanonicalInputs=async()=>{
+        if(typeof dataSource.getDailySnapshot==='function'){
+          const snapshot=await dataSource.getDailySnapshot();
+          return [Array.isArray(snapshot&&snapshot.summaries)?snapshot.summaries:[],Array.isArray(snapshot&&snapshot.records)?snapshot.records:[]];
+        }
+        return Promise.all([
+          typeof dataSource.getDailySummaries==='function'?dataSource.getDailySummaries():[],
+          dataSource.getDailyRecords({})
+        ]);
+      };
       let [rawSummaries,rawRecords]=await readCanonicalInputs();
       let summaries=normalizeSummaries(rawSummaries),records=Array.isArray(rawRecords)?rawRecords:[];
       if(!InsightsRenderCoordinator.isCurrent(token))return null;

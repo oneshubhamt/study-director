@@ -739,6 +739,17 @@ async function idbPut(rec,options={}){
 }
 function idbAllRecords(){return idbGetAll(DB_DAILY_RECORD_STORE,'read aborted');}
 function idbAllSummaries(){return idbGetAll(DB_DAILY_SUMMARY_STORE,'summary read aborted');}
+function idbInsightsDailySnapshot(){
+  return idbTransaction([DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE],'readonly',(tx,finish)=>{
+    const recordsRequest=tx.objectStore(DB_DAILY_RECORD_STORE).getAll(),summariesRequest=tx.objectStore(DB_DAILY_SUMMARY_STORE).getAll();
+    let records=null,summaries=null,pending=2,failed=false;
+    const complete=()=>{if(!failed&&--pending===0)finish(true,{records:records||[],summaries:summaries||[]});};
+    recordsRequest.onsuccess=()=>{records=recordsRequest.result||[];complete();};
+    summariesRequest.onsuccess=()=>{summaries=summariesRequest.result||[];complete();};
+    const fail=request=>{if(failed)return;failed=true;finish(false,request.error||new Error('Insights snapshot read failed'));};
+    recordsRequest.onerror=()=>fail(recordsRequest);summariesRequest.onerror=()=>fail(summariesRequest);
+  },'Insights snapshot read aborted');
+}
 async function idbDailyRecordKeys(){
   return idbStoreTransaction(DB_DAILY_RECORD_STORE,'readonly',(store,tx,finish)=>{
     if(typeof store.getAllKeys==='function'){const request=store.getAllKeys();request.onsuccess=()=>finish(true,(request.result||[]).map(String));request.onerror=()=>finish(false,request.error);return;}
@@ -1069,6 +1080,28 @@ async function storeDailyRecordBatch(records){
     notifyDailyRecordsChanged('','batch');
     return true;
   }finally{finishWrite();}
+}
+async function getDailyRecordInsightsSnapshot(options={}){
+  const fallback=fallbackDailyRecordsGet(),yieldProjection=options&&options.yieldProjection===true;
+  try{
+    const snapshot=await idbInsightsDailySnapshot(),storedRecords=Array.isArray(snapshot.records)?snapshot.records:[],storedSummaries=Array.isArray(snapshot.summaries)?snapshot.summaries:[],cleanSummaries=storedSummaries.map(sanitizeDailyRecordSummary);
+    const summaryKeys=cleanSummaries.filter(Boolean).map(row=>row.date).sort(),recordKeys=storedRecords.map(row=>String(row&&row.date||'')).filter(isValidIsoDate).sort();
+    const projectionCurrent=!fallback.length&&!cleanSummaries.some(row=>!row)&&summaryKeys.length===recordKeys.length&&summaryKeys.every((date,index)=>date===recordKeys[index]);
+    const canonicalRecords=filterPendingDeletedEntities(mergeDailyRecordSets(storedRecords,fallback),'dailyRecord','date');
+    let summaries;
+    if(projectionCurrent)summaries=filterPendingDeletedEntities(cleanSummaries,'dailyRecord','date').map(materializeDailyRecordSummary);
+    else{
+      summaries=canonicalRecords.map(record=>materializeDailyRecordSummary(buildDailyRecordSummary(record))).filter(Boolean);
+      if(!fallback.length&&appCanMutate())void repairDailySummaries().catch(error=>AppDiagnostics.capture('daily-summaries.repair',error,'warn'));
+    }
+    if(fallback.length)migrateFallbackDailyRecords(fallback);else confirmDailyRecordStorage();
+    const records=sortDailyRecordsAsc(await materializeDailyRecordViews(canonicalRecords,{yieldProjection})).filter(record=>record.recordKind==='study');
+    return freeze({summaries:freeze(sortDailySummariesAsc(summaries)),records:freeze(records)});
+  }catch(error){
+    if(isCanonicalRuntimeError(error))throw error;
+    const [summaries,records]=await Promise.all([getSortedDailyRecordSummaries(),getDailyRecordsForWindow({yieldProjection})]);
+    return freeze({summaries:freeze(summaries),records:freeze(records)});
+  }
 }
 async function getDailyRecordSummaries(){
   const fallback=fallbackDailyRecordsGet();
@@ -1450,6 +1483,7 @@ async function runDataMaintenance(options={}){
       clearAll:clearAllDailyRecords,
       sortedSummaries:getSortedDailyRecordSummaries,
       sortedList:getSortedDailyRecords,
+      insightsSnapshot:getDailyRecordInsightsSnapshot,
       'window':getDailyRecordsForWindow,
       normalizeWindow:normalizeInsightsRecordWindowOptions,
       documents:getDailyRecordDocumentsByDates,

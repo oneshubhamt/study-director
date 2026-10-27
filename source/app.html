@@ -10336,6 +10336,12 @@ const PreviewRuntime=(()=>{
   return Object.freeze({registerProvider,useSample,setRecords,clear,clearExcept,status,summaries,records});
 })();
 const InsightsDataSource=Object.freeze({
+  async getDailySnapshot(){
+    const previewRecords=PreviewRuntime.records('insights',{});
+    if(previewRecords)return Object.freeze({records:previewRecords,summaries:PreviewRuntime.summaries('insights')||[]});
+    const snapshot=await AppData.dailyRecords.insightsSnapshot({yieldProjection:true});
+    return Object.freeze({records:snapshot.records,summaries:snapshot.summaries.filter(summary=>summary?.recordKind==='study')});
+  },
   async getDailySummaries(){
     const preview=PreviewRuntime.summaries('insights');
     if(preview)return preview;
