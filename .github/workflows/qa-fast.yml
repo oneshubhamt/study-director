@@ -44,10 +44,11 @@ jobs:
           tests/architecture/storage/background-work-contract.mjs
           tests/architecture/storage/managed-recovery-contract.mjs
           tests/integration/pwa/service-worker-lifecycle.mjs
-          tests/architecture/build/deployment-contract.mjs
           tests/architecture/test-suite/suite-governance.mjs
           tests/architecture/test-suite/suite-structure.mjs
           tests/architecture/test-suite/suite-policy.mjs
+      - name: PWA deployment contract
+        run: node tests/architecture/build/deployment-contract.mjs
       - name: Source build
         run: node build/build.mjs
       - name: Verify generated build
