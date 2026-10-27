@@ -1105,15 +1105,6 @@ async function getDailyRecordSummaries(){
 }
 function sortDailySummariesAsc(summaries){return (summaries||[]).map(summary=>{const {dayOfWeek,dayName,...raw}=summary||{};return materializeDailyRecordSummary(raw);}).filter(Boolean).sort((a,b)=>a.date.localeCompare(b.date));}
 function sortDailyRecordsAsc(records){return (records||[]).filter(r=>r&&isValidIsoDate(r.date)).sort((a,b)=>a.date.localeCompare(b.date));}
-async function materializeDailyRecordViews(records,{yieldProjection=false}={}){
-  const source=Array.isArray(records)?records:[],out=[],batchSize=128;
-  for(let start=0;start<source.length;start+=batchSize){
-    const end=Math.min(source.length,start+batchSize);
-    for(let index=start;index<end;index+=1){const value=materializeDailyRecordView(source[index]);if(value)out.push(value);}
-    if(yieldProjection&&end<source.length)await new Promise(resolve=>setTimeout(resolve,0));
-  }
-  return out;
-}
 async function getSortedDailyRecordSummaries(){return sortDailySummariesAsc(await getDailyRecordSummaries());}
 async function getSortedDailyRecords(options={}){return sortDailyRecordsAsc(await getDailyRecords(options));}
 async function getDailyRecordsForWindow(options={}){
@@ -1160,6 +1151,15 @@ async function getDailyRecords(options={}){
     showStorageFallbackWarning(e&&e.message?e.message:'saved-date database failed');
     return materializeDailyRecordViews(fallback);
   }
+}
+async function materializeDailyRecordViews(records,{yieldProjection=false}={}){
+  const source=Array.isArray(records)?records:[],out=[],batchSize=128;
+  for(let start=0;start<source.length;start+=batchSize){
+    const end=Math.min(source.length,start+batchSize);
+    for(let index=start;index<end;index+=1){const value=materializeDailyRecordView(source[index]);if(value)out.push(value);}
+    if(yieldProjection&&end<source.length)await new Promise(resolve=>setTimeout(resolve,0));
+  }
+  return out;
 }
 async function removeDailyRecord(date,options={}){
   const rollback=options&&options.rollback===true;
