@@ -3679,7 +3679,7 @@
       if(message.type!=='SD_INSIGHTS_BUILD')return;
       const started=performance.now();
       try{
-        const prepared=engine.prepare(message.modelRecords,message.revision);
+        const prepared=engine.reusePrepared(message.modelRecords,message.revision);
         const model=engine.buildPrepared(message.records,prepared,message.options||{});
         self.postMessage({type:'SD_INSIGHTS_RESULT',id:message.id,model,computeMs:performance.now()-started});
       }catch(error){
@@ -3929,18 +3929,18 @@
     };
     const loadSession=async({dataSource,source,sourceKey,currentStudyDate,datasetRevision,token,profile})=>{
       const loadStarted=performance.now();
-      let summaries=normalizeSummaries(typeof dataSource.getDailySummaries==='function'
-        ? await dataSource.getDailySummaries()
-        : []);
+      const readCanonicalInputs=async()=>Promise.all([
+        typeof dataSource.getDailySummaries==='function'?dataSource.getDailySummaries():[],
+        dataSource.getDailyRecords({})
+      ]);
+      let [rawSummaries,rawRecords]=await readCanonicalInputs();
+      let summaries=normalizeSummaries(rawSummaries),records=Array.isArray(rawRecords)?rawRecords:[];
       if(!InsightsRenderCoordinator.isCurrent(token))return null;
-      let rawRecords=await dataSource.getDailyRecords({});
-      let records=Array.isArray(rawRecords)?rawRecords:[];
       let after=await readDatasetRevision(dataSource,source);
       if(datasetRevision&&after&&datasetRevision!==after){
         const retryRevision=after;
-        summaries=normalizeSummaries(typeof dataSource.getDailySummaries==='function'?await dataSource.getDailySummaries():[]);
-        rawRecords=await dataSource.getDailyRecords({});
-        records=Array.isArray(rawRecords)?rawRecords:[];
+        [rawSummaries,rawRecords]=await readCanonicalInputs();
+        summaries=normalizeSummaries(rawSummaries);records=Array.isArray(rawRecords)?rawRecords:[];
         after=await readDatasetRevision(dataSource,source);
         datasetRevision=retryRevision&&after===retryRevision?after:null;
       }else if(!(datasetRevision&&after===datasetRevision))datasetRevision=null;
