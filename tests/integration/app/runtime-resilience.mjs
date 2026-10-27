@@ -38,17 +38,18 @@ controls.onSessionRead=null;
 
 const insights=fs.readFileSync('source/external/insights.js','utf8');
 const controller=insights.match(/  const InsightsWorkerModel=\(\(\)=>\{[\s\S]*?\n  \}\)\(\);/)[0];
-let lastWorker,timer,terminated=0,builds=0;
-class Worker{constructor(url){assert.equal(url,'https://test/sd.insights.js');lastWorker=this;}postMessage(data){this.request=data;}terminate(){terminated++;}}
+let lastWorker,timer,terminated=0,builds=0,constructed=0;
+class Worker{constructor(url){assert.equal(url,'https://test/sd.insights.js');constructed++;lastWorker=this;}postMessage(data){this.request=data;}terminate(){terminated++;}}
 const workerContext=vm.createContext({performance,Worker,INSIGHTS_RUNTIME_URL:'https://test/sd.insights.js',trustedWorkerURL:()=> 'https://test/sd.insights.js',setTimeout:fn=>{timer=fn;return 1;},clearTimeout:()=>{},console});
 vm.runInContext(controller+'\nglobalThis.factory=InsightsWorkerModel;',workerContext);
 const modelEngine={buildPrepared:()=>{builds++;return {};},getLabEvidence:()=>({audit:true})};
 const api={logic:{classifyTaskOutcome:()=> 'done',summarizePracticeRuns:()=>({})}};
 const processor=workerContext.factory.create(api,modelEngine),records=Array.from({length:120},()=>({})),prepared={records,revision:'r1'};
-let job=processor.build(records,prepared,{});lastWorker.onmessage({data:{type:'SD_INSIGHTS_RESULT',id:lastWorker.request.id,model:{value:1},computeMs:3}});let result=await job;assert.equal(result.model.value,1);assert.equal(result.model.getLabEvidence().audit,true);assert.equal(builds,0);
-job=processor.build(records,prepared,{});lastWorker.onmessageerror();await assert.rejects(job,e=>e.cause?.message.includes('unreadable'));assert.equal(builds,0,'failed heavy computation must not rerun synchronously');
-job=processor.build(records,prepared,{});timer();await assert.rejects(job,e=>e.cause?.message.includes('timed out'));
-job=processor.build(records,prepared,{});processor.cancel();await assert.rejects(job,{name:'AbortError'});
-job=processor.build(records,prepared,{});lastWorker.onmessage({data:{type:'SD_INSIGHTS_RESULT',id:lastWorker.request.id,model:{value:2}}});assert.equal((await job).model.value,2,'retry starts a clean worker');
-assert.ok(terminated>=5);
+let job=processor.build(records,prepared,{}),retained=lastWorker;retained.onmessage({data:{type:'SD_INSIGHTS_RESULT',id:retained.request.id,model:{value:1},computeMs:3}});let result=await job;assert.equal(result.model.value,1);assert.equal(result.model.getLabEvidence().audit,true);assert.equal(builds,0);
+job=processor.build(records,prepared,{});assert.equal(lastWorker,retained,'successful retained Insights builds must reuse one worker');lastWorker.onmessage({data:{type:'SD_INSIGHTS_RESULT',id:lastWorker.request.id,model:{value:11},computeMs:2}});assert.equal((await job).model.value,11);assert.equal(terminated,0,'successful retained builds must not churn the worker');
+job=processor.build(records,prepared,{});lastWorker.onmessageerror();await assert.rejects(job,e=>e.cause?.message.includes('unreadable'));assert.equal(builds,0,'failed heavy computation must not rerun synchronously');assert.equal(terminated,1);
+job=processor.build(records,prepared,{});timer();await assert.rejects(job,e=>e.cause?.message.includes('timed out'));assert.equal(terminated,2);
+job=processor.build(records,prepared,{});processor.cancel();await assert.rejects(job,{name:'AbortError'});assert.equal(terminated,3,'cancellation retires only the superseded worker');const prewarmed=lastWorker;
+job=processor.build(records,prepared,{});assert.equal(lastWorker,prewarmed,'retry after cancellation must reuse the prewarmed replacement');lastWorker.onmessage({data:{type:'SD_INSIGHTS_RESULT',id:lastWorker.request.id,model:{value:2}}});assert.equal((await job).model.value,2,'retry uses the clean retained worker');
+assert.equal(processor.dispose(),true);assert.equal(terminated,4,'view disposal must retire the final retained worker');assert.equal(constructed,4,'worker lifecycle must avoid per-render constructor churn');
 console.log(JSON.stringify({status:'PASS',suite:'runtime-resilience',routineSessionWrites:8,routineLocalSnapshotBytes:0,emergencyFallback:true,recoveryPromotion:true,ownership:true,schedulerAndFallback:true,workerTimeoutCancellationRetry:true,emptyActiveSessionRead:true},null,2));
