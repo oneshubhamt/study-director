@@ -51,8 +51,15 @@ function enforcePerformance(result,label,{strictMainThread=true}={}){
 function reportedProfile({modelSignature,...profile}){return profile;}
 
 try{
+  // Seed the established-history fixture outside the timed page. The benchmark
+  // is for opening Insights with 590 already-saved days, not for competing
+  // against the write/import aftermath that created the fixture itself.
+  const seedPage=await open();
+  assert.equal(await seedPage.evaluate(seed),PERFORMANCE_BUDGETS.referenceInsightsDays);
+  await browser.closePage(seedPage);await sleep(100);
+
   const workerPage=await open();
-  const workerResult=await render(workerPage,{seedData:true});
+  const workerResult=await render(workerPage);
   assert.equal(workerResult.profile.mode,'worker',JSON.stringify(reportedProfile(workerResult.profile)));console.log('Worker render profile:',JSON.stringify(reportedProfile(workerResult.profile)));enforcePerformance(workerResult,'Worker path');
 
   const fallbackPage=await open(`Object.defineProperty(window,'Worker',{configurable:true,writable:true,value:undefined});`);
