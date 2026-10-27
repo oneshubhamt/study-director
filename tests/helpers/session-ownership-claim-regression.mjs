@@ -20,6 +20,7 @@ const files=new Map();let publicationId=0;
 const descriptor=file=>freeze({kind:'session-claim',id:file.id,name:file.name,size:file.blob.size,digest:file.digest,serverDigest:file.digest,createdAt:file.exportedAt,modifiedAt:file.exportedAt,remoteId:'claim-'+file.id});
 const repository=freeze({
   scope:async()=>'claim-scope',
+  list:async()=>freeze({items:freeze([]),overflow:false,ignored:0}),upload:unexpected,download:unexpected,delete:unexpected,
   beginPublication:async()=>freeze({id:'pub_'+(++publicationId),createdAt:new Date().toISOString(),sameDevice:false}),
   listPublications:async()=>freeze({items:freeze([]),overflow:false,ignored:0}),assertPublication:async()=>true,endPublication:async()=>true,
   listSessionClaims:async()=>freeze({items:freeze([...files.values()].map(descriptor)),overflow:false,ignored:0}),
