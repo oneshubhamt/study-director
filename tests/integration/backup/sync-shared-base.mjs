@@ -608,11 +608,9 @@ let syncWorld=null;
   syncWorld.keepAll.on=false;
 }
 
-// Two devices that each back up to a Device Folder too. A version this device
-// makes is made once: its Device Folder and Drive hold it under the same id.
-// After taking in the other device's changes, the Device Folder saves that
-// same data as a version of its own (objects are not shared between devices,
-// so copying Drive's would download them all), and Drive takes nothing new.
+// Two devices that each back up to a Device Folder too. Drive and Device
+// Folder publish the same canonical local state independently; neither waits
+// for, downloads, or backfills a checkpoint from the other.
 {
   syncWorld.drive.clear();
   const {device,note,head,versions,drive}=syncWorld;
@@ -620,36 +618,36 @@ let syncWorld=null;
   const a={installationId:'inst_both_device_a',records:new Map([['2026-08-01',record('2026-08-01','first day')]]),deletions:[],noteDeletions:[],notes:note('one'),activeSession:null,schedule:'',personal:personal('Both User'),journal:null};
   const b={installationId:'inst_both_device_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Both User'),journal:null};
   const A=device(a,{folder:folderA}),B=device(b,{folder:folderB});
-  const made=await A.backUpFolder(),copied=await A.upload();
-  assert.equal(copied.checkpointId,made.checkpointId,'Drive takes the Device Folder version under the same id');assert.deepEqual(versions(drive),versions(folderA));
+  const folderFirst=await A.backUpFolder(),driveFirst=await A.upload();
+  assert.notEqual(driveFirst.checkpointId,folderFirst.checkpointId,'independent locations do not share checkpoint identities');
+  assert.equal(content(folderA,folderFirst.checkpointId),content(drive,driveFirst.checkpointId),'both destinations describe the same canonical local state');
   assert.equal((await B.sync()).cancelled,false);assert.equal(b.notes.Shared.text,'one');
   const taken=await B.backUpFolder();assert.ok(content(folderB,taken.checkpointId),'the Device Folder records what its version holds');
-  assert.equal(content(folderB,taken.checkpointId),content(drive,head()),'after a sync with nothing of its own, the Device Folder holds the same data as Drive’s newest version');
-  assert.equal((await B.upload()).unchanged,true,'and Drive has nothing new to take');assert.deepEqual(versions(drive),[made.checkpointId]);
-  // B changes: its Device Folder makes the version and Drive takes it under the same id.
-  b.notes=note('two by B');const madeB=await B.backUpFolder(),copiedB=await B.upload();
-  assert.equal(copiedB.checkpointId,madeB.checkpointId);assert.equal(head(),madeB.checkpointId);
-  // A takes it in; nothing goes back up, and A's Device Folder holds the same data.
+  assert.equal(content(folderB,taken.checkpointId),content(drive,head()),'after sync, Device Folder independently captures the same state as Drive head');
+  assert.equal((await B.upload()).unchanged,true,'Drive has nothing new to take after B only absorbed its current head');
+  // B changes: each destination independently publishes the resulting state.
+  b.notes=note('two by B');const folderBChanged=await B.backUpFolder(),driveBChanged=await B.upload();
+  assert.notEqual(driveBChanged.checkpointId,folderBChanged.checkpointId);assert.equal(content(folderB,folderBChanged.checkpointId),content(drive,driveBChanged.checkpointId));
+  // A takes it in; nothing goes back up, and A's Device Folder independently captures it.
   assert.equal((await A.sync()).cancelled,false);assert.equal(a.notes.Shared.text,'two by B');
   const takenA=await A.backUpFolder();assert.equal(content(folderA,takenA.checkpointId),content(drive,head()));
   assert.equal((await A.upload()).unchanged,true,'no device uploads again what it only took in');
-  // A note's earlier versions: what the Device Folder read is not read again
-  // from Drive, whether Drive holds it under the same id or another.
+  // A note's earlier versions deduplicate by covered logical history rather
+  // than by shared checkpoint ids.
   const local=await A.noteVersions('folder','Shared');
-  assert.equal(local.available,true);assert.deepEqual(local.entries.map(entry=>entry.text),['two by B']);assert.deepEqual(local.covered.checkpointIds,versions(folderA));
-  assert.notDeepEqual(versions(drive),versions(folderA),'Drive holds the same data under its own id');
-  assert.deepEqual((await A.noteVersions('drive','Shared')).entries.map(entry=>entry.text),['two by B'],'read alone, Drive offers it');
+  assert.equal(local.available,true);assert.deepEqual(local.entries.map(entry=>entry.text),['two by B']);
+  assert.notDeepEqual(versions(drive),versions(folderA),'independent locations retain independent checkpoint identities');
+  assert.deepEqual((await A.noteVersions('drive','Shared')).entries.map(entry=>entry.text),['two by B'],'read alone, Drive offers its copy');
   const shared=await A.noteVersions('drive','Shared',{skip:local.covered});
-  assert.equal(shared.available,true);assert.deepEqual(shared.entries,[],'after the Device Folder, Drive offers nothing new');assert.deepEqual(shared.covered.checkpointIds,[],'and reads none of its versions');
+  assert.equal(shared.available,true);assert.deepEqual(shared.entries,[],'after Device Folder coverage, Drive offers no duplicate logical note version');
 }
 
-// Combining Drive's newest version from Version History while this device is
-// behind (its sync waits for a review or a password) makes it what this device
-// and Drive share, also when the list reads it from this device's Device
-// Folder copy of it, so the next sync does not merge it again.
+// Combining Drive's newest version moves the shared base only when Drive's
+// verified shared head is the source. Device Folder remains an independent
+// recovery destination and does not impersonate Drive ancestry.
 {
   syncWorld.drive.clear();syncWorld.keepAll.on=true;
-  const {device,note,head,drive}=syncWorld;
+  const {device,note,head}=syncWorld;
   const folderA=new Map(),folderB=new Map();
   const a={installationId:'inst_head_device_a',records:new Map([['2026-08-01',record('2026-08-01','first day')]]),deletions:[],noteDeletions:[],notes:note('one'),activeSession:null,schedule:'',personal:personal('Both User'),journal:null};
   const b={installationId:'inst_head_device_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Both User'),journal:null};
@@ -657,13 +655,9 @@ let syncWorld=null;
   await A.backUpFolder();await A.upload();
   assert.equal((await B.sync()).cancelled,false);const first=head();assert.equal(b.reconciliationBase.checkpointId,first);
   a.notes=note('two by A');await A.backUpFolder();await A.upload();const newest=head();assert.notEqual(newest,first);
-  // B's Device Folder holds a copy of it under the same id, as the
-  // background fill makes one.
-  for(const [key,file] of drive)if(file.kind==='object'||file.id===newest)folderB.set(key,file);
-  const combined=await B.combine('folder',newest);assert.equal(combined.cancelled,false);assert.equal(b.notes.Shared.text,'two by A');
-  assert.equal(b.reconciliationBase.checkpointId,newest,'Combining Drive’s newest moves the shared base, read from either location');
-  // An older version read the same way leaves the base alone.
-  const older=await B.combine('drive',first);assert.equal(older.cancelled,false);assert.equal(b.reconciliationBase.checkpointId,newest);
+  const combined=await B.combine('drive',newest);assert.equal(combined.cancelled,false);assert.equal(b.notes.Shared.text,'two by A');
+  assert.equal(b.reconciliationBase.checkpointId,newest,'Combining Drive’s newest verified head moves the shared base');
+  const older=await B.combine('drive',first);assert.equal(older.cancelled,false);assert.equal(b.reconciliationBase.checkpointId,newest,'combining an older Drive version leaves the shared base alone');
   syncWorld.keepAll.on=false;
 }
 
