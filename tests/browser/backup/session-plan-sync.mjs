@@ -118,7 +118,8 @@ try{
   assert.ok(ended?.checkpointId,'the owner publishes the ended-session checkpoint');
   await waitFor(async()=>{const claim=await latestClaim();return claim?.state==='released';},{label:'released session ownership',timeout:10000});
   await a.evaluate(`__PWA6.checkSessionOwnershipClaim()`);
-  assert.notEqual((await screen(a)).mode,'running','a released claim never resurrects a stale frozen timer');
+  assert.equal(await a.evaluate(`__PWA6.TimerEngine.status().loopActive`),false,'a released claim never restarts the stale frozen runtime clock');
+  assert.equal((await screen(a)).mode,'running','release leaves stale canonical session semantics untouched until the ended-session checkpoint reconciles');
   await releaseBackground(a,'__qaClaimSyncHold');
   a.evaluate(`__PWA6.BackupProviderRuntime.scheduleSharedSync('google-drive','qa-release')`);
   for(const page of [a,b])assert.deepEqual(page.warnings.filter(text=>/\[Study Director\]/u.test(text)),[]);
