@@ -5001,17 +5001,33 @@ async function confirmSessionTakeover(session,{replace=false}={}){
 }
 async function continueSessionHere(){
   if(!appCanMutate())return false;
+  let previous=null,claim=null,claimCommitted=false;
   try{
     const loaded=await AppData.activeSession.load(),session=loaded&&loaded.value||null;
     if(!session){setSessionPanelMode('none');return false;}
     if(!sessionFromElsewhere(session))return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
     if(sessionRunsElsewhere(session)&&!await confirmSessionTakeover(session))return false;
     if(!appCanMutate())return false;
-    const claimed=await AppData.activeSession.save({...session,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(session.revision),updatedAt:new Date().toISOString()});
+    previous=ActiveSessionCodec.sanitizeCurrent(session);
+    claim=ActiveSessionCodec.sanitizeCurrent({...session,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(session.revision),updatedAt:new Date().toISOString()});
+    if(!claim)throw new Error('the transferred session state is invalid');
+    const claimed=await AppData.activeSession.save(claim);
     if(!handleActiveSessionRepositoryResult(claimed,'save'))throw claimed.error||new Error('the session could not be moved to this device');
+    const publication=await BackupProviderRuntime.publishSharedStateNow('google-drive',{reason:'session-continue'});
+    if(!publication?.ok)throw Object.assign(new Error(publication?.message||'Google Drive could not confirm the session ownership transfer.'),{code:String(publication?.code||'SESSION_OWNERSHIP_UNCONFIRMED')});
+    const current=(await AppData.activeSession.load())?.value||null;
+    if(!CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),claim))throw new Error('the session changed locally before its ownership transfer could finish');
+    claimCommitted=true;
     notifyBackupChange({urgent:true,reason:'session-continue'});
     return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
   }catch(error){
+    if(!claimCommitted&&previous&&claim){
+      try{
+        const current=(await AppData.activeSession.load())?.value||null;
+        if(CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),claim))await AppData.activeSession.save({...previous,updatedAt:new Date().toISOString()});
+      }catch(rollbackError){AppDiagnostics.capture('session.continue-claim-rollback',rollbackError,'warn');}
+    }
+    try{BackupProviderRuntime.wakeBackground('session-watch');}catch{}
     setPlanStatus('Could not continue today’s session here: '+(error&&error.message?error.message:error),false);
     return false;
   }

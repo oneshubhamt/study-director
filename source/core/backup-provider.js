@@ -1513,6 +1513,43 @@ registry.define('backup-provider',1,input=>{
       return false;
     }finally{if(foregroundView()&&foregroundView().providerId===selected.id)finishForegroundView(selected);await release(selected,'export');setBusy(false);foreground.release();}
   }
+  async function publishSharedStateNow(id='',options={}){
+    const selected=providers.get(safeId(id));if(!selected||!selected.repository||selected.shared!==true)return freeze({ok:false,reason:'unavailable',checkpointId:'',headId:''});
+    if(busy)return freeze({ok:false,reason:'busy',checkpointId:'',headId:''});
+    const reason=String(options&&options.reason||'shared-state'),traceId=OperationDiagnostics.start('provider-backup',selected.label,{provider:selected.id,foreground:true,trigger:reason}),foreground=beginForeground(selected);
+    if(!foreground){OperationDiagnostics.finish({status:'skipped',reason:'busy'},traceId);return freeze({ok:false,reason:'busy',checkpointId:'',headId:''});}
+    beginForegroundView(selected,'backup',`Publishing shared state to ${selected.label}…`);setBusy(true);
+    try{
+      await enterForeground(selected,foreground,traceId,{prepare:true,authorizeAs:'export'});
+      const saved=await backupRepositoryProvider(selected.id,{signal:foreground.signal,foregroundPriority:true}),checkpointId=String(saved&&saved.checkpointId||'');
+      if(!/^cp_[a-f0-9]{32}$/u.test(checkpointId))throw new Error('Shared-state publication did not return a committed checkpoint identity.');
+      clearRecentHistory(selected);
+      const scoped=repositoryOperationSelected(selected,{signal:foreground.signal}),inventory=await repositoryProviderInventory(scoped,{signal:foreground.signal});
+      if(inventory.overflow)throw new Error('Shared-state publication could not re-read the complete repository head.');
+      rememberRecentHistory(selected,inventory);
+      const head=[...inventory.pairs].reverse().find(pair=>pair.item.history?.retention?.role!=='before-restore')||null,headId=String(head&&head.item&&head.item.id||'');
+      const state=syncState(selected);state.checkedAt=Date.now();
+      if(headId!==checkpointId){
+        state.behind=!!headId;state.failed=false;if(headId)schedulePendingProviderBackup(selected,1000);notifyStatus();
+        const error=new Error(headId?'Google Drive changed before session ownership could be confirmed. Sync the newer state and try again.':'Google Drive did not expose the committed session-ownership checkpoint when it was re-read.');
+        error.code='REPOSITORY_SHARED_HEAD_MOVED';error.repositoryHeadId=headId;throw error;
+      }
+      state.behind=false;state.failed=false;state.syncedAt=new Date().toISOString();resetConvergenceRetry(selected);notifyStatus();
+      OperationDiagnostics.finish({status:'completed'},traceId);finishForegroundView(selected,{message:`✓ Shared state confirmed in ${selected.label}.`,ok:true});
+      return freeze({ok:true,reason:'confirmed',checkpointId,headId});
+    }catch(error){
+      const code=String(error&&error.code||''),reasonCode=code==='REPOSITORY_SYNC_BEHIND'?'behind':code==='REPOSITORY_SYNC_TURN'?'turn':code==='REPOSITORY_SHARED_HEAD_MOVED'?'head-moved':error?.name==='AbortError'?'cancelled':'failed';
+      if(code==='REPOSITORY_SYNC_BEHIND')syncState(selected).behind=true;
+      if(['REPOSITORY_SYNC_BEHIND','REPOSITORY_SYNC_TURN'].includes(code))schedulePendingProviderBackup(selected,code==='REPOSITORY_SYNC_BEHIND'?1000:PROVIDER_CONVERGENCE_BUSY_RETRY_MS);
+      if(!['REPOSITORY_SYNC_BEHIND','REPOSITORY_SYNC_TURN','REPOSITORY_SHARED_HEAD_MOVED'].includes(code)&&error?.name!=='AbortError')AppDiagnostics.capture('backup-provider.shared-state-publication',error,'warn');
+      OperationDiagnostics.fail(error,{status:reasonCode==='cancelled'?'cancelled':'unavailable'},traceId);
+      finishForegroundView(selected,{message:'Shared state was not confirmed in Google Drive.',ok:false,lifecycle:reasonCode==='cancelled'?'cancelled':'failed'});
+      return freeze({ok:false,reason:reasonCode,code,message:userProviderMessage(error,'Google Drive could not confirm the session ownership transfer.'),checkpointId:'',headId:String(error&&error.repositoryHeadId||'')});
+    }finally{
+      if(foregroundView()&&foregroundView().providerId===selected.id)finishForegroundView(selected);await release(selected,'shared-state');setBusy(false);foreground.release();
+    }
+  }
+
   // A quiet run (adding what is missing after browser data was cleared) never
   // prompts: it runs only while already connected and never asks for sign-in.
   async function bringInRepositoryProvider(id,options={}){
@@ -1623,7 +1660,7 @@ registry.define('backup-provider',1,input=>{
   function diagnosticSync(){return freeze([...providers.values()].filter(selected=>selected.shared).map(selected=>{const state=syncState(selected),job=providerBackgroundCoordinators.get(selected.id)?.jobStatus('convergence');let endsAt=NaN;try{endsAt=Number(selected.connectionExpiresAt?.());}catch{}return freeze({id:selected.id,connected:providerConnected(selected),syncedAt:state.syncedAt,checkedAt:state.checkedAt?new Date(state.checkedAt).toISOString():'',nextEligibleAt:String(job?.nextEligibleAt||''),needsReview:!!state.review,needsUpdate:!!state.newer,needsPassword:!!state.password,behind:!!state.behind,catchingUp:!!state.catching,waitingForDeviceFolder:!!state.waitedAt,turnWaits:Math.max(0,Number(state.turnWaits)||0),signInEndsAt:Number.isFinite(endsAt)&&endsAt>0?new Date(endsAt).toISOString():''});}));}
   function diagnosticConnections(){return freeze([...providers.values()].map(selected=>freeze({id:selected.id,connected:providerConnected(selected),formats:formatsByProvider.get(selected.id)||null,scopeBound:repositoryScopeByProvider.has(selected.id),retryAttempt:providerConvergenceRetryAttempts.get(selected.id)||0,retryBackoffCapped:(providerConvergenceRetryAttempts.get(selected.id)||0)>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length})));}
   function status(){return Object.freeze({busy,cancellable:!!foregroundController&&!foregroundController.signal.aborted,operation:foregroundView()?Object.freeze({...foregroundView()}):null});}
-  return Object.freeze({register,list,syncing:()=>sharingActive(),status,locationStatus,reviewSync,unlockSync,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,diagnosticSync,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},cancelForeground,history:historyRepositoryProvider,noteVersions:noteVersionsRepositoryProvider,backup:backupProvider,backupRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeRepositoryProviderVersion,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,suspendBackground,repositoryScope});
+  return Object.freeze({register,list,syncing:()=>sharingActive(),status,locationStatus,reviewSync,unlockSync,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,diagnosticSync,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,publishSharedStateNow,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},cancelForeground,history:historyRepositoryProvider,noteVersions:noteVersionsRepositoryProvider,backup:backupProvider,backupRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeRepositoryProviderVersion,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,suspendBackground,repositoryScope});
 
   }
   return freeze({format:'study-director.backup-provider-module',contractVersion:1,createRuntime});

@@ -56,13 +56,16 @@ try{
   // Continue Here, once the phone has finished taking in the plan (buttons
   // are locked while a sync applies changes).
   await waitFor(async()=>!markers()&&!await waiting(b)&&await b.evaluate(`(()=>{const button=[...document.querySelectorAll('[data-action="restore-session"]')].find(item=>!item.hidden);return !!button&&!button.disabled;})()`)&&!(await sync(b)).catchingUp,{label:'the phone settles',timeout:90000});
-  await b.evaluate(`(async()=>{${acceptDialogs}__PWA6.goTab('plan');await new Promise(r=>setTimeout(r,150));[...document.querySelectorAll('[data-action="restore-session"]')].find(item=>!item.hidden).click();await new Promise(r=>setTimeout(r,2000));clearInterval(window.__acceptTimer);})()`);
+  const returnUploads=uploadsBy('B');
+  await b.evaluate(`(async()=>{${acceptDialogs}__PWA6.goTab('plan');await new Promise(r=>setTimeout(r,150));[...document.querySelectorAll('[data-action="restore-session"]')].find(item=>!item.hidden).click();})()`);
+  await waitFor(async()=>{const moved=await screen(b);if(uploadsBy('B')===returnUploads)assert.notEqual(moved.mode,'running','Continue Here must not run before Drive confirms ownership');return uploadsBy('B')>returnUploads&&moved.mode==='running';},{label:'Continue Here ownership commit',timeout:60000});
+  await b.evaluate(`clearInterval(window.__acceptTimer)`);
   const moved=await screen(b);
-  assert.equal(moved.mode,'running','Continue Here runs the session on the phone');
+  assert.equal(moved.mode,'running','Continue Here runs only after the phone ownership checkpoint is confirmed');
   assert.equal(moved.header,'LIVE SESSION','the header follows the session back to this device');
   assert.match(moved.now,/PC Block/u,'with the plan applied on the PC');
   for(const page of [a,b])assert.deepEqual(page.warnings.filter(text=>/\[Study Director\]/u.test(text)),[]);
   assert.deepEqual(faults,[]);
-  console.log(JSON.stringify({status:'PASS',checks:{asksBeforeTakeover:true,uploadsAtOnce:true,phoneShowsNewPlan:true,continueHere:true}}));
+  console.log(JSON.stringify({status:'PASS',checks:{asksBeforeTakeover:true,uploadsAtOnce:true,phoneShowsNewPlan:true,continueHere:true,ownershipConfirmedBeforeRun:true}}));
 }catch(error){console.error(ledger.slice(-30).join('\n'));throw error;}
 finally{await first.close();await second.close();await server.close();}
