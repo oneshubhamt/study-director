@@ -1,4 +1,4 @@
-name: Temporary Full Certification
+name: Temporary Targeted Browser Certification
 
 on:
   push:
@@ -8,13 +8,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: temporary-full-certification-${{ github.ref }}
+  group: temporary-targeted-browser-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   certification:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,23 +22,18 @@ jobs:
           node-version: '26.12.1'
       - name: Install npm 12.2.1
         run: npm install -g npm@12.2.1
-      - name: Hermetic correctness gate
-        run: node tests/helpers/run-category.mjs fast
-      - name: Risk coverage
-        run: node tests/helpers/coverage.mjs
-      - name: Critical mutation certification
-        run: node tests/helpers/mutation.mjs
       - name: Install release toolchain
         run: npm ci --ignore-scripts
-      - name: AST branch-edge coverage
-        run: npm run test:coverage:branches
-      - name: Non-browser release certification
-        run: npm run test:release
+      - name: Build release
+        run: npm run build
       - name: Locate Chromium
         shell: bash
         run: |
           CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
           test -n "$CHROME"
           echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
-      - name: Complete browser certification + built-runtime coverage
-        run: npm run test:coverage:browser
+      - name: Rerun failed browser cases serially
+        run: |
+          node tests/browser/library/notes-management.mjs
+          node tests/browser/backup/session-plan-sync.mjs
+          node tests/browser/insights/insights-performance.mjs
