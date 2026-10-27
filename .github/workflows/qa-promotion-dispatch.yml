@@ -1,0 +1,28 @@
+name: Promotion QA dispatcher
+
+on:
+  push:
+    branches:
+      - current-fixes
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: promotion-qa-dispatch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch full Promotion QA for this exact ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REF: ${{ github.ref_name }}
+        run: |
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/qa-promotion.yml/dispatches" \
+            -f ref="${TARGET_REF}" \
+            -F "inputs[run_browser]=true"
