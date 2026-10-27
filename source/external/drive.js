@@ -45,7 +45,7 @@
   const MULTIPART_UPLOAD_MAX_BYTES=5*1024*1024;
   // The device an upload marker comes from, so a device never waits its turn
   // for a marker an earlier page of its own left behind.
-  const PUBLICATION_DEVICE_MARKER='sdPublicationDevice',DEVICE_PATTERN=/^inst_[a-z0-9_]{1,80}$/u;
+  const PUBLICATION_DEVICE_MARKER='sdPublicationDevice',MAINTENANCE_DEVICE_MARKER='sdMaintenanceDevice',DEVICE_PATTERN=/^inst_[a-z0-9_]{1,80}$/u;
   const HISTORY_FINGERPRINT_MARKER='sdHistoryFingerprint';
   const HISTORY_COUNTS_MARKER='sdHistoryCounts';
   const HISTORY_ENCRYPTED_MARKER='sdHistoryEncrypted';
@@ -734,7 +734,7 @@
   function maintenanceDescriptor(file,parent){
     if(!validMaintenanceMetadata(file,parent))throw noRetry(new Error('Google Drive returned unsafe Study Director maintenance metadata.'));
     const id=String(file.appProperties[REPOSITORY_ID_MARKER]),createdAt=String(file.createdTime||''),maxAge=file.appProperties[REPOSITORY_VERSION_MARKER]===MAINTENANCE_VERSION?MAINTENANCE_MAX_AGE_MS:LEGACY_MAINTENANCE_MAX_AGE_MS;
-    return Object.freeze({kind:MAINTENANCE_KIND,id,remoteId:String(file.id),verificationScope:coordinationVerificationScope(parent),name:String(file.name),createdAt,modifiedAt:String(file.modifiedTime||''),expiresAt:Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+maxAge).toISOString():''});
+    const device=thisDevice();return Object.freeze({kind:MAINTENANCE_KIND,id,sameDevice:!!device&&file.appProperties[MAINTENANCE_DEVICE_MARKER]===device,remoteId:String(file.id),verificationScope:coordinationVerificationScope(parent),name:String(file.name),createdAt,modifiedAt:String(file.modifiedTime||''),expiresAt:Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+maxAge).toISOString():''});
   }
   async function findRepositoryMaintenance(parent,id,context=EMPTY_DRIVE_OPERATION){
     if(!maintenanceIdValid(id))throw noRetry(new Error('A Study Director maintenance marker has an invalid identity.'));
@@ -757,7 +757,8 @@
       // Older clients classify this version as uncertain and defer. They must
       // not expire a network lease using their former 60-second lifetime.
       [REPOSITORY_MARKER.key]:REPOSITORY_MARKER.value,[REPOSITORY_VERSION_MARKER]:MAINTENANCE_VERSION,[REPOSITORY_KIND_MARKER]:MAINTENANCE_KIND,[REPOSITORY_ID_MARKER]:id,
-      [FILE_SECURITY_MARKER]:FILE_SECURITY_VERSION,[REPOSITORY_IDENTITIES.driveAppVersionMarker]:PLUGIN_VERSION,[REPOSITORY_IDENTITIES.driveExportedAtMarker]:now
+      [FILE_SECURITY_MARKER]:FILE_SECURITY_VERSION,[REPOSITORY_IDENTITIES.driveAppVersionMarker]:PLUGIN_VERSION,[REPOSITORY_IDENTITIES.driveExportedAtMarker]:now,
+      ...(thisDevice()?{[MAINTENANCE_DEVICE_MARKER]:thisDevice()}:{})
     }};
     let response=null,file=null;
     try{response=await authorizedFetch(`${DRIVE_API}/files?fields=${encodeURIComponent(REPOSITORY_FIELDS)}`,{method:'POST',headers:{'Content-Type':'application/json; charset=UTF-8'},body:JSON.stringify(metadata)},API_TIMEOUT_MS,context);}

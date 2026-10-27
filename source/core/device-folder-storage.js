@@ -187,14 +187,14 @@ registry.define('device-folder-storage',1,()=>{
       const spec=LOCKS[kind],id=spec.prefix+globalThis.crypto.randomUUID().replace(/-/gu,''),name=id+spec.suffix,{objects}=await directories();
       await writeFile(objects,name,new Blob([JSON.stringify({format:spec.format,version:1,id,startedAt:iso(nowMs())})],{type:'application/json'}));
       const written=await fileOrNull(objects,name);if(!written)throw new Error('The Device Folder lock could not be written.');
-      return freeze({kind,id,name,createdAt:iso(written.lastModified||nowMs())});
+      return freeze({kind,id,name,createdAt:iso(written.lastModified||nowMs()),sameDevice:true});
     }
     async function listLocks(kind){
       const spec=LOCKS[kind],{objects}=await directories(),items=[];let ignored=0;
       for(const [name,handle] of await entries(objects,'Device Folder lock folder',null)){
         const match=spec.pattern.exec(String(name));if(!match)continue;
         if(!handle||handle.kind!=='file'){ignored+=1;continue;}
-        try{const file=await bounded(handle.getFile(),`Device Folder lock ${name}`);items.push(freeze({kind,id:match[1],name:String(name),createdAt:iso(file.lastModified)}));}catch{ignored+=1;}
+        try{const file=await bounded(handle.getFile(),`Device Folder lock ${name}`);items.push(freeze({kind,id:match[1],name:String(name),createdAt:iso(file.lastModified),sameDevice:true}));}catch{ignored+=1;}
       }
       return freeze({items:freeze(items),overflow:false,ignored});
     }

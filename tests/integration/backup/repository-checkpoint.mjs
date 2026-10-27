@@ -582,26 +582,26 @@ const providerCommittedAfterFailure=[];for(const file of remoteFiles.values())if
 
 const pendingProviderBackups=new Map();
 runtime.providers.configurePendingBackupRetry(freeze({read:async id=>pendingProviderBackups.get(id)||null,mark:async id=>(pendingProviderBackups.set(id,freeze({providerId:id})),true),clear:async id=>(pendingProviderBackups.delete(id),true)}));
-// One history for every location: a version made in one location is copied
-// to the next under the same id, so the Device Folder and Drive hold the
-// same versions, whichever backs up first.
+// Each location publishes canonical local state independently. Neither provider
+// downloads from, waits for, or backfills from the other.
 {
-  const store=()=>{const files=new Map(),key=(kind,id)=>kind+':'+id,describe=file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,digest:file.digest,remoteId:'spine-'+key(file.kind,file.id)});
-    return freeze({files,transport:freeze({list:async({kind})=>freeze({items:freeze([...files.values()].filter(file=>file.kind===kind).map(describe)),overflow:false}),upload:async file=>{const stored=freeze({...file,createdAt:new Date().toISOString()});files.set(key(file.kind,file.id),stored);return describe(stored);},download:async ref=>{const stored=files.get(key(ref.kind,ref.id));if(!stored)throw new Error('missing spine file');return freeze({blob:stored.blob,release:async()=>{}});},delete:async ref=>files.delete(key(ref.kind,ref.id))})});};
+  const store=()=>{const files=new Map(),key=(kind,id)=>kind+':'+id,describe=file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,digest:file.digest,remoteId:'independent-'+key(file.kind,file.id)});
+    return freeze({files,transport:freeze({list:async({kind})=>freeze({items:freeze([...files.values()].filter(file=>file.kind===kind).map(describe)),overflow:false}),upload:async file=>{const stored=freeze({...file,createdAt:new Date().toISOString()});files.set(key(file.kind,file.id),stored);return describe(stored);},download:async ref=>{const stored=files.get(key(ref.kind,ref.id));if(!stored)throw new Error('missing independent-provider file');return freeze({blob:stored.blob,release:async()=>{}});},delete:async ref=>files.delete(key(ref.kind,ref.id))})});};
   let connected=true;const baseBefore=reconciliationBase,baseNotesBefore=reconciliationBaseNotes;
   const device=store(),drive=store(),versions=location=>[...location.files.values()].filter(file=>file.kind==='checkpoint').map(file=>file.id).sort(),uploads=location=>[...location.files.values()].filter(file=>file.kind==='object').length;
-  assert.equal(runtime.providers.register(freeze({id:'spine-device',label:'Device Folder',connected:()=>connected,repository:device.transport})),true);
-  assert.equal(runtime.providers.register(freeze({id:'spine-drive',label:'Google Drive',shared:true,connected:()=>connected,repository:drive.transport})),true);
+  assert.equal(runtime.providers.register(freeze({id:'independent-device',label:'Device Folder',connected:()=>connected,repository:device.transport})),true);
+  assert.equal(runtime.providers.register(freeze({id:'independent-drive',label:'Google Drive',shared:true,connected:()=>connected,repository:drive.transport})),true);
   runtime.providers.configureAutomaticBackup(freeze({covered:()=>sourceRevision,current:()=>sourceRevision}));
   try{
-    sourceRevision='2026-09-19T02:00:00.000Z';snapshotRevision='spine-1';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'spine one',updatedAt:sourceRevision})};
-    const made=await runtime.providers.backupRepositoryProvider('spine-device',{interactive:false}),copied=await runtime.providers.backupRepositoryProvider('spine-drive',{interactive:false});
-    assert.equal(copied.checkpointId,made.checkpointId,'Drive takes the Device Folder version under the same id');assert.deepEqual(versions(drive),versions(device));assert.equal(uploads(drive),uploads(device),'with every object it needs');
-    assert.equal(reconciliationBase.checkpointId,made.checkpointId,'the copied version is what this device shares with Drive');
-    sourceRevision='2026-09-19T02:10:00.000Z';snapshotRevision='spine-2';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'spine two',updatedAt:sourceRevision})};
-    const second=await runtime.providers.backupRepositoryProvider('spine-drive',{interactive:false}),back=await runtime.providers.backupRepositoryProvider('spine-device',{interactive:false});
-    assert.notEqual(second.checkpointId,made.checkpointId);assert.equal(back.checkpointId,second.checkpointId,'the Device Folder takes the Drive version under the same id');
-    assert.deepEqual(versions(drive),versions(device),'both locations hold the same versions');
+    sourceRevision='2026-09-19T02:00:00.000Z';snapshotRevision='independent-1';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'independent one',updatedAt:sourceRevision})};
+    const deviceFirst=await runtime.providers.backupRepositoryProvider('independent-device',{interactive:false}),driveFirst=await runtime.providers.backupRepositoryProvider('independent-drive',{interactive:false});
+    assert.ok(deviceFirst.checkpointId&&driveFirst.checkpointId,'both independent destinations publish a verified checkpoint');
+    assert.equal(versions(device).length,1);assert.equal(versions(drive).length,1);assert.ok(uploads(device)>0&&uploads(drive)>0,'each destination receives canonical objects directly');
+    assert.equal(reconciliationBase.checkpointId,driveFirst.checkpointId,'Drive publication alone establishes the shared reconciliation base');
+    sourceRevision='2026-09-19T02:10:00.000Z';snapshotRevision='independent-2';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'independent two',updatedAt:sourceRevision})};
+    const driveSecond=await runtime.providers.backupRepositoryProvider('independent-drive',{interactive:false}),deviceSecond=await runtime.providers.backupRepositoryProvider('independent-device',{interactive:false});
+    assert.ok(driveSecond.checkpointId&&deviceSecond.checkpointId);assert.equal(versions(device).length,2);assert.equal(versions(drive).length,2);
+    assert.equal(reconciliationBase.checkpointId,driveSecond.checkpointId,'Device Folder publication does not replace Drive shared ancestry');
   }finally{runtime.providers.configureAutomaticBackup(null);connected=false;reconciliationBase=baseBefore;reconciliationBaseNotes=baseNotesBefore;}
 }
 // Taking turns at Drive: another device's recent upload marker makes this one
