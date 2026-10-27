@@ -4036,7 +4036,7 @@
       dateRange:{start:records[0]?.date||null,end:records[records.length-1]?.date||null},
       calendarRange:{start:analyticalRecords[0]?.date||null,end:analyticalRecords[analyticalRecords.length-1]?.date||null},
       daily,
-      overview:{planned,completed,actual,completion:pct(completed,planned),actualVsPlanned:actual-planned,strongDays,averageQuality:reusable?.overview?.averageQuality??(quality.length?round(quality.reduce((a,b)=>a+b,0)/quality.length):null)},
+      overview:{planned,completed,actual,completion:pct(completed,planned),actualVsPlanned:actual-planned,strongDays,averageQuality:reusable?.overview?reusable.overview.averageQuality:(quality.length?round(quality.reduce((a,b)=>a+b,0)/quality.length):null)},
       streak:streakSummaries.length?computeSummaryStreak(streakSummaries,currentStudyDate):computeStreak(evidence,currentStudyDate),
       subjects:reusable?.subjects||computeSubjects(evidence,subjectReferenceDate,options.subjectReferenceSummaries),startDelays:computeStartDelayBuckets(evidence),blockOrder:computeBlockOrder(evidence),
       interruption:reusable?.interruption||computeInterruption(evidence),frictionSources:computeFocusFrictionSources(evidence),completionSources:computeCompletionSources(evidence),progressEvidence:computeProgressEvidence(evidence),
