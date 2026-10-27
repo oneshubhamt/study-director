@@ -5057,7 +5057,7 @@ async function transferSessionOwnershipHere(session){
   let next=planned;
   let ownershipClaim=null,backgroundHold=null,localSaved=false,rolledBack=false;
   try{
-    backgroundHold=BackupProviderRuntime.suspendBackground('session-takeover');await backgroundHold.settled;
+    backgroundHold=BackupProviderRuntime.suspendBackground('session-continue');await backgroundHold.settled;
     setPlanStatus('Transferring today’s session to this device…');
     const claimed=await BackupProviderRuntime.claimSessionOwnership('google-drive',{date:previous.date,observedOwner:previous.runningOn,observedRevision:previous.revision,revision:planned.revision});
     if(!claimed||claimed.status!=='completed'||!claimed.claim)throw new Error('Google Drive did not confirm the Active Session ownership claim.');
