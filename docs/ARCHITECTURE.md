@@ -6,7 +6,7 @@ This document describes the current Study Director architecture. It intentionall
 
 Application subsystems are registered as private internal modules and composed by the host. Modules receive narrow frozen capability ports instead of resolving one another freely. The internal registry validates module identity and exported contract versions at the host boundary.
 
-Large feature areas remain separate when their failure models differ. Google Drive and the Device Folder are two locations of one backup engine (`backup-provider.js`): they share every backup, history, restore, cleanup, integrity and scheduling path, and keep only their transport and permission behaviour apart (`drive.js`, `device-folder-storage.js` with the thin `device-backup.js` controller).
+Large feature areas remain separate when their failure models differ. Google Drive and the Device Folder are two independent destinations served by one backup engine (`backup-provider.js`): they share repository format, publication/verification algorithms, restore, cleanup, integrity and scheduling code, but each owns its transport state and checkpoint history. A device publishes verified canonical local state independently to each destination; providers never wait for or copy checkpoints from one another. Drive additionally owns multi-device synchronization and the lightweight Active Session ownership-claim transport (`drive.js`); Device Folder remains a local backup destination (`device-folder-storage.js` with the thin `device-backup.js` controller).
 
 ## 2. Canonical local data
 
@@ -117,15 +117,19 @@ Google Drive and Device Folder use the same managed-repository model:
 - bounded concurrent reads where appropriate;
 - cancellation and foreground/background coordination.
 
-The providers are intentionally not collapsed into one transport implementation because Drive authorization/remote consistency and File System Access permission/handle semantics differ materially.
+The providers are intentionally not collapsed into one transport implementation because Drive authorization/remote consistency and File System Access permission/handle semantics differ materially. A shared UI may deduplicate logically equivalent versions from the independent repositories, but shared presentation never creates a storage dependency between them.
+
+Drive is the only shared synchronization repository. Its normal convergence lane is pull/inspect newest head → reconcile into canonical local state → verify the committed logical units → publish the resulting canonical state. Device Folder independently receives that resulting local state when enabled. Repository retention, orphan cleanup, integrity scans and garbage collection are secondary housekeeping; their backlog does not gate healthy publication. Only an already-active destructive maintenance unit may briefly hold a foreground publication until that unit yields or its bounded marker is safely reaped.
 
 ## 6. Restore and reconciliation
 
 Restore/Bring-in first verifies the selected checkpoint and reconstructs a verified portable snapshot. Destructive local replacement is protected by recovery journaling and a Before-restore checkpoint where required.
 
-Combine/reconciliation handles Saved Days, Notes, Active Session and attachments through explicit domain rules. Reconciliation ancestry is incremental and provider history is scoped to the repository being inspected.
+Combine/reconciliation handles Saved Days, Notes, Active Session and attachments through explicit domain rules. Reconciliation ancestry is incremental and provider history is scoped to the repository being inspected. Combine verification is receipt-driven and domain-scoped: Saved Days, Notes, attachments, personal data, Pending Reviews, deletion ledgers and Active Session report/verify the canonical units actually committed. Exact Replace retains complete-membership verification.
 
 A sync through Drive never asks. Where both sides changed the same thing it shows the newer and keeps the other as a `PendingReview` record (5.2; `docs/BACKUP-ENGINE.md`, "Kept for review"); a note changed in different paragraphs is joined by Smart merge. The records travel in every version and merge by id, a resolved one winning. `reviewKeptVersions` (backup runtime) is the review: choices, then note texts in `reconciliation-ui.js` (`purpose: 'kept'`), applied through the same write paths as Combine inside one exclusive operation, skipping anything that changed while the person chose. A Library clear leaves kept versions as they are; their review still works for notes that are gone ("Keep for later" or discard).
+
+Active Session ownership is a separate lightweight Drive protocol from its content revision. Continue Here obtains a monotonic, protected v2 ownership epoch using hashed session/owner tokens, then publishes and re-observes the full Drive checkpoint before the new device starts its timer. The newest applicable epoch remains authoritative until superseded or explicitly released; it never becomes stale merely because time passed. An old open owner freezes its runtime clock on the lightweight claim, preserves canonical progress, and forces ordinary Drive reconciliation, which can retain divergent progress for review. Obsolete claim files are compacted best-effort only after the corresponding full checkpoint is verified.
 
 A deletion travels to other copies only as a deletion record (Saved Days, Notes, attachments); absence never means deletion. Each ledger keeps its newest records within its limit (`maxImportRecords`, `maxNotes` and 50,000 respectively), so it stays bounded without ever dropping a recent deletion: only once a ledger is full do its oldest records go. Listing applies that rule, so a full ledger never stops a backup or an integrity check; data maintenance removes the same records from storage, so pruning never changes what a backup or restore reads; and a restore verifies the ledger it stored. Backup import and the restore journal still reject a ledger over its limit. A dropped record matters only when a backup older than that many later deletions is combined, which could bring the oldest deleted items back.
 
