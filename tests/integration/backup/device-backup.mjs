@@ -91,6 +91,17 @@ await test('Turn off forgets the folder and stops automatic backups; the backups
   assert.equal(w.runtime.list({hosted:true})[0].connected,false);
 });
 
+await test('Delete backups removes only the Study Director repository and turns off Device Folder',async()=>{
+  const w=world(),folder=w.directory();await w.controller.install();w.choose(folder);await w.controller.connect();await w.settle();
+  const repositoryName=w.controller.status().repositoryName;assert.ok(repositoryName);assert.equal((await w.commits(folder,repositoryName)).length,1);
+  const deleted=await w.controller.deleteBackups();
+  assert.equal(deleted,repositoryName,'the deleted repository is identified exactly');
+  assert.equal(w.controller.status().connected,false,'deleting backups also turns off Device Folder');
+  assert.equal(w.settingsStore.size,0,'the remembered folder is removed only after the engine disconnects safely');
+  assert.deepEqual(await w.commits(folder,repositoryName),[],'the Study Director repository subfolder is gone');
+  await folder.getDirectoryHandle('parent-still-usable',{create:true});
+});
+
 await test('after a browser data clear the open tab writes the folder back',async()=>{
   const w=world(),folder=w.directory();await w.controller.install();w.choose(folder);await w.controller.connect();await w.settle();
   w.settingsStore.clear();assert.equal(await w.controller.rememberAfterStorageReset(),true);assert.equal(w.settingsStore.get('deviceFolder').directoryHandle,folder);
