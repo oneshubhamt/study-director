@@ -1514,18 +1514,31 @@ registry.define('backup-provider',1,input=>{
     }finally{if(foregroundView()&&foregroundView().providerId===selected.id)finishForegroundView(selected);await release(selected,'export');setBusy(false);foreground.release();}
   }
   async function publishSharedStateNow(id='',options={}){
-    const selected=providers.get(safeId(id));if(!selected||!selected.repository||selected.shared!==true)return freeze({ok:false,reason:'unavailable',checkpointId:'',headId:''});
-    if(busy)return freeze({ok:false,reason:'busy',checkpointId:'',headId:''});
+    const selected=providers.get(safeId(id));if(!selected||!selected.repository||selected.shared!==true)return freeze({ok:false,committed:false,reobserved:false,reason:'unavailable',checkpointId:'',headId:''});
+    if(busy)return freeze({ok:false,committed:false,reobserved:false,reason:'busy',checkpointId:'',headId:''});
     const reason=String(options&&options.reason||'shared-state'),traceId=OperationDiagnostics.start('provider-backup',selected.label,{provider:selected.id,foreground:true,trigger:reason}),foreground=beginForeground(selected);
-    if(!foreground){OperationDiagnostics.finish({status:'skipped',reason:'busy'},traceId);return freeze({ok:false,reason:'busy',checkpointId:'',headId:''});}
+    if(!foreground){OperationDiagnostics.finish({status:'skipped',reason:'busy'},traceId);return freeze({ok:false,committed:false,reobserved:false,reason:'busy',checkpointId:'',headId:''});}
     beginForegroundView(selected,'backup',`Publishing shared state to ${selected.label}…`);setBusy(true);
+    let checkpointId='';
     try{
       await enterForeground(selected,foreground,traceId,{prepare:true,authorizeAs:'export'});
-      const saved=await backupRepositoryProvider(selected.id,{signal:foreground.signal,foregroundPriority:true}),checkpointId=String(saved&&saved.checkpointId||'');
+      const saved=await backupRepositoryProvider(selected.id,{signal:foreground.signal,foregroundPriority:true});checkpointId=String(saved&&saved.checkpointId||'');
       if(!/^cp_[a-f0-9]{32}$/u.test(checkpointId))throw new Error('Shared-state publication did not return a committed checkpoint identity.');
       clearRecentHistory(selected);
-      const scoped=repositoryOperationSelected(selected,{signal:foreground.signal}),inventory=await repositoryProviderInventory(scoped,{signal:foreground.signal});
-      if(inventory.overflow)throw new Error('Shared-state publication could not re-read the complete repository head.');
+      let inventory=null;
+      try{
+        const scoped=repositoryOperationSelected(selected,{signal:foreground.signal});inventory=await repositoryProviderInventory(scoped,{signal:foreground.signal});
+      }catch(error){
+        AppDiagnostics.capture('backup-provider.shared-state-reobserve',error,'warn');
+        const state=syncState(selected);state.failed=false;state.syncedAt=new Date().toISOString();notifyStatus();
+        OperationDiagnostics.finish({status:'completed',reason:'publication'},traceId);finishForegroundView(selected,{message:`✓ Shared state committed in ${selected.label}.`,ok:true});
+        return freeze({ok:true,committed:true,reobserved:false,reason:'committed',checkpointId,headId:''});
+      }
+      if(inventory.overflow){
+        const state=syncState(selected);state.failed=false;state.syncedAt=new Date().toISOString();notifyStatus();
+        OperationDiagnostics.finish({status:'completed',reason:'publication'},traceId);finishForegroundView(selected,{message:`✓ Shared state committed in ${selected.label}.`,ok:true});
+        return freeze({ok:true,committed:true,reobserved:false,reason:'committed',checkpointId,headId:''});
+      }
       rememberRecentHistory(selected,inventory);
       const head=[...inventory.pairs].reverse().find(pair=>pair.item.history?.retention?.role!=='before-restore')||null,headId=String(head&&head.item&&head.item.id||'');
       const state=syncState(selected);state.checkedAt=Date.now();
@@ -1536,7 +1549,7 @@ registry.define('backup-provider',1,input=>{
       }
       state.behind=false;state.failed=false;state.syncedAt=new Date().toISOString();resetConvergenceRetry(selected);notifyStatus();
       OperationDiagnostics.finish({status:'completed'},traceId);finishForegroundView(selected,{message:`✓ Shared state confirmed in ${selected.label}.`,ok:true});
-      return freeze({ok:true,reason:'confirmed',checkpointId,headId});
+      return freeze({ok:true,committed:true,reobserved:true,reason:'confirmed',checkpointId,headId});
     }catch(error){
       const code=String(error&&error.code||''),reasonCode=code==='REPOSITORY_SYNC_BEHIND'?'behind':code==='REPOSITORY_SYNC_TURN'?'turn':code==='REPOSITORY_SHARED_HEAD_MOVED'?'head-moved':error?.name==='AbortError'?'cancelled':'failed';
       if(code==='REPOSITORY_SYNC_BEHIND')syncState(selected).behind=true;
@@ -1544,7 +1557,7 @@ registry.define('backup-provider',1,input=>{
       if(!['REPOSITORY_SYNC_BEHIND','REPOSITORY_SYNC_TURN','REPOSITORY_SHARED_HEAD_MOVED'].includes(code)&&error?.name!=='AbortError')AppDiagnostics.capture('backup-provider.shared-state-publication',error,'warn');
       OperationDiagnostics.fail(error,{status:reasonCode==='cancelled'?'cancelled':'unavailable'},traceId);
       finishForegroundView(selected,{message:'Shared state was not confirmed in Google Drive.',ok:false,lifecycle:reasonCode==='cancelled'?'cancelled':'failed'});
-      return freeze({ok:false,reason:reasonCode,code,message:userProviderMessage(error,'Google Drive could not confirm the session ownership transfer.'),checkpointId:'',headId:String(error&&error.repositoryHeadId||'')});
+      return freeze({ok:false,committed:!!checkpointId,reobserved:false,reason:reasonCode,code,message:userProviderMessage(error,'Google Drive could not confirm the session ownership transfer.'),checkpointId,headId:String(error&&error.repositoryHeadId||'')});
     }finally{
       if(foregroundView()&&foregroundView().providerId===selected.id)finishForegroundView(selected);await release(selected,'shared-state');setBusy(false);foreground.release();
     }
