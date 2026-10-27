@@ -980,7 +980,10 @@
       beginPublication:()=>beginRepositoryPublication(base),
       listPublications:()=>listRepositoryPublications(base),
       assertPublication:ref=>assertRepositoryPublication(ref,base),
-      endPublication:ref=>endRepositoryPublication(ref,base),
+      // Marker retirement is cleanup, not operation work. Like maintenance
+      // release, it must survive the operation signal being aborted by an
+      // expected foreground preemption.
+      endPublication:ref=>endRepositoryPublication(ref,driveOperationContext({folderState:base.folderState})),
       beginMaintenance:()=>beginRepositoryMaintenance(base),
       listMaintenances:()=>listRepositoryMaintenances(base),
       assertMaintenance:ref=>assertRepositoryMaintenance(ref,base),
