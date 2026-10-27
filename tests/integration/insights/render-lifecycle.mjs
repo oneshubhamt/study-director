@@ -12,7 +12,7 @@ function harness({failSource=false,supersede=false,retained=false}={}){
   const pane=element(),state={rendered:retained,errorTimer:null,renderedBaseKey:'source|2026-09-28|revision',renderedWindowKey:'all'};
   const values={
     observePane:()=>{},state,restoreScroll:()=>{},clearTimeout,performance:{now:()=>0},
-    InsightsRenderCoordinator:{begin:()=>++generation,isCurrent:token=>token===generation},computation:{cancel:()=>{}},
+    InsightsRenderCoordinator:{begin:()=>++generation,isCurrent:token=>token===generation},computation:{cancel:()=>{},warm:()=>true},
     PerformanceObserver:class{static supportedEntryTypes=['longtask'];constructor(){observers++;}observe(){}disconnect(){disconnects++;}},
     renderInitialInsightsLoading:()=>pane.setAttribute('aria-busy','true'),requestAnimationFrame:callback=>callback(),
     api:{insights:{notifications:port,dataSource:{getRecordSource:()=>{if(failSource)throw new Error('Source unavailable');return null;}}}},
