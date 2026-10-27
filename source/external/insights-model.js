@@ -829,6 +829,20 @@
       .forEach(record=>byDate.set(record.date,chooseCanonicalRecord(byDate.get(record.date),record)));
     return [...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date));
   }
+  async function normalizeRecordsAsync(records,yieldTask=null,batchSize=64){
+    const source=Array.isArray(records)?records:[],byDate=new Map(),size=Math.max(8,Math.min(256,Math.floor(Number(batchSize)||64)));
+    for(let start=0;start<source.length;start+=size){
+      const end=Math.min(source.length,start+size);
+      for(let index=start;index<end;index+=1){
+        const row=source[index];
+        if(!row||typeof row!=='object'||!isIsoDate(row.date))continue;
+        const record={...row,tasks:Array.isArray(row.tasks)?row.tasks.filter(task=>task&&typeof task==='object'&&taskPlanned(task)>0):[]};
+        byDate.set(record.date,chooseCanonicalRecord(byDate.get(record.date),record));
+      }
+      if(end<source.length&&typeof yieldTask==='function')await yieldTask();
+    }
+    return [...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date));
+  }
   function normalizeSummaries(summaries){
     return (Array.isArray(summaries)?summaries:[]).filter(s=>s&&typeof s==='object'&&isIsoDate(s.date)).sort((a,b)=>a.date.localeCompare(b.date));
   }
@@ -892,7 +906,7 @@
     });
   }
     return Object.freeze({
-      filterCanonicalRecordsForInsightWindow,filterSummariesForInsightWindow,insightWindowByKey,normalizeRecords,
+      filterCanonicalRecordsForInsightWindow,filterSummariesForInsightWindow,insightWindowByKey,normalizeRecords,normalizeRecordsAsync,
       normalizeInsightWindowKey,normalizeSummaries,recordsRevisionKey,summariesRevisionKey
     });
   })(InsightsConfig,InsightsPrimitives);
@@ -3923,7 +3937,7 @@
       dateDay,dateFromDay,isIsoDate,localIsoDate,mean,num,pct,round
     }=Primitives;
     const {
-      filterCanonicalRecordsForInsightWindow,insightWindowByKey,normalizeRecords,normalizeSummaries,
+      filterCanonicalRecordsForInsightWindow,insightWindowByKey,normalizeRecords,normalizeRecordsAsync,normalizeSummaries,
       recordsRevisionKey,summariesRevisionKey
     }=Records;
     const {
@@ -4063,14 +4077,21 @@
       const clean=String(value||'').trim();
       return clean&&clean.length<=160?`dataset:${clean}`:'';
     };
-    const prepare=(recordsInput,revisionHint=null)=>{
-      const external=trustedRevision(revisionHint);
-      if(external&&preparedRevisions.has(external))return remember(preparedRevisions,external,preparedRevisions.get(external),PREPARED_REVISION_CACHE_LIMIT);
-      const records=normalizeRecords(recordsInput),revision=external||recordsRevisionKey(records);
-      const cached=preparedRevisions.get(revision);
+    const finishPrepared=(records,external='')=>{
+      const revision=external||recordsRevisionKey(records),cached=preparedRevisions.get(revision);
       return cached
         ?remember(preparedRevisions,revision,cached,PREPARED_REVISION_CACHE_LIMIT)
         :remember(preparedRevisions,revision,Object.freeze({records:Object.freeze(records),revision}),PREPARED_REVISION_CACHE_LIMIT);
+    };
+    const prepare=(recordsInput,revisionHint=null)=>{
+      const external=trustedRevision(revisionHint);
+      if(external&&preparedRevisions.has(external))return remember(preparedRevisions,external,preparedRevisions.get(external),PREPARED_REVISION_CACHE_LIMIT);
+      return finishPrepared(normalizeRecords(recordsInput),external);
+    };
+    const prepareAsync=async(recordsInput,revisionHint=null,yieldTask=null)=>{
+      const external=trustedRevision(revisionHint);
+      if(external&&preparedRevisions.has(external))return remember(preparedRevisions,external,preparedRevisions.get(external),PREPARED_REVISION_CACHE_LIMIT);
+      return finishPrepared(await normalizeRecordsAsync(recordsInput,yieldTask),external);
     };
     // A worker receives records already normalized by this same engine on the
     // host. Re-walking and copying the full history there buys no additional
@@ -4114,6 +4135,7 @@
         return buildPrepared(records,prepared,options);
       },
       prepare,
+      prepareAsync,
       reusePrepared,
       buildPrepared,
       releaseTransient,

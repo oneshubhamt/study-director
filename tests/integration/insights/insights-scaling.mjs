@@ -140,6 +140,11 @@ const historyRecords=Array.from({length:historyDays},(_,index)=>{
 const classifyTaskOutcome=task=>task.completion>=100?'full':task.completion>0?'partial':'zero-output';
 const engine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
 const canonicalPrepared=engine.prepare(historyRecords,'canonical-worker-reuse');
+const asyncEngine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
+let asyncYields=0;
+const asyncPrepared=await asyncEngine.prepareAsync(historyRecords,'canonical-worker-reuse',async()=>{asyncYields++;await Promise.resolve();});
+assert.deepEqual(asyncPrepared,canonicalPrepared,'cooperative Insights preparation must be semantically identical to synchronous preparation');
+assert.ok(asyncYields>0,'large Insights preparation must yield cooperatively');
 const workerPrepared=engine.reusePrepared(canonicalPrepared.records,canonicalPrepared.revision);
 assert.equal(workerPrepared.records,canonicalPrepared.records,'the worker handoff must reuse host-normalized canonical records instead of normalizing them again');
 assert.equal(workerPrepared.revision,canonicalPrepared.revision);

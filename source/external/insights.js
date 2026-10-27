@@ -3956,8 +3956,11 @@
       profile.recordLoadMs+=performance.now()-loadStarted;
       const evidenceStarted=performance.now();
       records=computation.enrichRecords(records);
+      const yieldPreparation=()=>globalThis.scheduler&&typeof globalThis.scheduler.yield==='function'
+        ?globalThis.scheduler.yield()
+        :new Promise(resolve=>setTimeout(resolve,0));
+      const prepared=await engine.prepareAsync(records,datasetRevision,yieldPreparation);
       profile.evidencePreparationMs+=performance.now()-evidenceStarted;
-      const prepared=engine.prepare(records,datasetRevision);
       const summaryRevision=summariesRevisionKey(summaries);
       const finalSourceRevision=datasetRevision||String(source&&source.revision||'');
       const baseKey=`${sourceKey}|${currentStudyDate}|${finalSourceRevision||'fallback'}`;
