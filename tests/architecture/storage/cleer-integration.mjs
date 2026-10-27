@@ -179,6 +179,7 @@ assert.doesNotMatch(backupProvider,/claim=freeze\(\{format:SESSION_CLAIM_FORMAT,
 assert.doesNotMatch(backupProvider,/claim=freeze\(\{format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,[^\n]*\bowner[,}]/u,'new Active Session claims must not persist an installation id.');
 assert.match(app,/claim\.applies&&claim\.state==='owned'&&!claim\.ownedHere/u,'the live watcher must consume provider-projected ownership rather than remote identifiers.');
 assert.match(backupProvider,/state:'released'/u,'session end must use a higher-epoch released ownership state rather than deleting the current claim');
+assert.match(backupProvider,/claim\.state==='released'&&current\.claim\.revision>=observedRevision/u,'a released ownership epoch blocks only the session revision it closed or an older one; a strictly newer same-day canonical session may establish a fresh handoff epoch.');
 assert.doesNotMatch(backupProvider,/publishSharedStateNow/u,'live ownership transfer must not put a full checkpoint publication on the timer critical path');
 const sessionClaimRelease=backupProvider.slice(backupProvider.indexOf('async function releaseSessionClaim('),backupProvider.indexOf('async function readSessionClaim('));
 assert.doesNotMatch(sessionClaimRelease,/deleteSessionClaim/u,'failed takeover rollback must never delete the newest immutable claim and expose an older owner');
