@@ -1431,6 +1431,19 @@ function restoreSurfaceStatus(stored,message,ok=true,stage='local',details={}){
   if(typeof report==='function'){try{report(freeze({stage:String(stage||'local'),message:String(message||''),ok:ok!==false,...details}));}catch(error){AppDiagnostics.capture('backup.managed-recovery-progress',error,'warn');}return true;}
   portablePresentation?.update({progress:{stage,...details}});setLocalExportStatus(message,ok);return false;
 }
+const RESTORE_MUTATION_STAGES=freeze(new Set(['assets','saved-day-state','notes','pending-reviews','active-session','personal-data','verification']));
+function restoreMutationFailure(error,stage){
+  const failure=error instanceof Error?error:new Error(String(error||'Restore mutation failed.'));
+  if(!failure.backupStage)try{Object.defineProperty(failure,'backupStage',{value:'restore-'+stage,configurable:true});}catch{}
+  return failure;
+}
+async function runRestoreMutationStage(stage,work){
+  if(!RESTORE_MUTATION_STAGES.has(stage)||typeof work!=='function')throw new TypeError('Restore mutation stage is invalid.');
+  const phase='restore-mutation-'+stage;
+  OperationDiagnostics.mark(phase+'-start');
+  try{const value=await work();OperationDiagnostics.mark(phase+'-complete');return value;}
+  catch(error){const failure=restoreMutationFailure(error,stage);OperationDiagnostics.mark(phase+'-failed',{stage:String(failure.backupStage||''),errorCode:String(failure.code||failure.name||'Error')});throw failure;}
+}
 async function restoreBackupAttemptWithOperation(candidate,operation,options={}){
   // A sync runs without questions like adding what is missing, but takes
   // everything one side alone changed; anything needing a choice is left
@@ -1591,45 +1604,54 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     journalPrepared=true;OperationDiagnostics.mark('restore-journal-prepare-complete');
     let assetResult=freeze({written:0,published:0,reused:0,deleted:0,changed:false,expected:freeze([]),expectedRemovedIds:freeze([]),references:freeze([]),expectedDeletions:freeze([])});
     if(portableAssets&&Number(parsed.formatVersion)>=10){
-      await AppData.restoreJournal.mark(restoreId,'applying-assets');
-      const currentAssessment=await assessImportedAssets(parsed,signal);
-      const selectedAssets=await selectResolvedImportedAssets(currentAssessment,resolvedPlan,signal,attachmentPlan,resolvedAssetReferences);
-      assetResult=await commitImportedAssets(selectedAssets,signal,attachmentPlan);
-      if(assetResult.published)committedDescription=`${assetResult.published} selected attachment${assetResult.published===1?' was':'s were'} already updated`;
-      await AppData.restoreJournal.mark(restoreId,'assets-committed');
-      throwIfImportAborted(signal);await yieldImport(signal);
+      assetResult=await runRestoreMutationStage('assets',async()=>{
+        await AppData.restoreJournal.mark(restoreId,'applying-assets');
+        const currentAssessment=await assessImportedAssets(parsed,signal);
+        const selectedAssets=await selectResolvedImportedAssets(currentAssessment,resolvedPlan,signal,attachmentPlan,resolvedAssetReferences);
+        const result=await commitImportedAssets(selectedAssets,signal,attachmentPlan);
+        if(result.published)committedDescription=String(result.published)+' selected attachment'+(result.published===1?' was':'s were')+' already updated';
+        await AppData.restoreJournal.mark(restoreId,'assets-committed');
+        throwIfImportAborted(signal);await yieldImport(signal);return result;
+      });
     }
-    await AppData.restoreJournal.mark(restoreId,'applying-saved-day-state');
     const report={...(parsed.report||{}),warnings:[...((parsed.report&&parsed.report.warnings)||[])]};
-    const dailyResult=await applyResolvedSavedDays(resolvedPlan,operation,(message,progress)=>restoreSurfaceStatus(stored,message,true,'local-apply',{current:Number(progress&&progress.committed)||0,total:Number(progress&&progress.total)||0}));
+    const dailyResult=await runRestoreMutationStage('saved-day-state',async()=>{
+      await AppData.restoreJournal.mark(restoreId,'applying-saved-day-state');
+      const result=await applyResolvedSavedDays(resolvedPlan,operation,(message,progress)=>restoreSurfaceStatus(stored,message,true,'local-apply',{current:Number(progress&&progress.committed)||0,total:Number(progress&&progress.total)||0}));
+      const committedRecords=result.count+result.replaced;
+      if(committedRecords)committedDescription+=(committedDescription?' and ':'')+String(committedRecords)+' Saved Day'+(committedRecords===1?' was':'s were')+' already saved';
+      if(result.changed&&result.expectedDeletions)committedDescription+=(committedDescription?' and ':'')+'Saved-Day choices were already saved';
+      await AppData.restoreJournal.mark(restoreId,'saved-day-state-committed');
+      throwIfImportAborted(signal);await yieldImport(signal);return result;
+    });
     const {count,replaced,deleted,kept,identical,batches,appliedRecords,expectedDeletions}=dailyResult;
-    const committedRecords=count+replaced;
-    if(committedRecords)committedDescription+=(committedDescription?' and ':'')+`${committedRecords} Saved Day${committedRecords===1?' was':'s were'} already saved`;
-    if(dailyResult.changed&&expectedDeletions)committedDescription+=(committedDescription?' and ':'')+'Saved-Day choices were already saved';
-    await AppData.restoreJournal.mark(restoreId,'saved-day-state-committed');
-    throwIfImportAborted(signal);await yieldImport(signal);
-    await AppData.restoreJournal.mark(restoreId,'applying-notes');
-    const noteResult=await applyResolvedNotes(resolvedPlan);
-    if(noteResult.changed)committedDescription+=(committedDescription?' and ':'')+'Notes were already saved';
-    await AppData.restoreJournal.mark(restoreId,'notes-committed');
-    throwIfImportAborted(signal);await yieldImport(signal);
+    const noteResult=await runRestoreMutationStage('notes',async()=>{
+      await AppData.restoreJournal.mark(restoreId,'applying-notes');
+      const result=await applyResolvedNotes(resolvedPlan);
+      if(result.changed)committedDescription+=(committedDescription?' and ':'')+'Notes were already saved';
+      await AppData.restoreJournal.mark(restoreId,'notes-committed');
+      throwIfImportAborted(signal);await yieldImport(signal);return result;
+    });
     let reviewResult=freeze({changed:false,expected:null,kept:0});
     if(incomingReviews.length){
-      await AppData.restoreJournal.mark(restoreId,'applying-pending-reviews');
-      const expected=freeze(PendingReviewCodec.merge([await AppData.pendingReviews.list(),incomingReviews],APP_LIMITS.maxPendingReviews));
-      const changedIds=await AppData.pendingReviews.merge(incomingReviews);
-      reviewResult=freeze({changed:changedIds.length>0,expected,kept:keptReviews.length});
-      if(reviewResult.changed)committedDescription+=(committedDescription?' and ':'')+'versions kept for review were already saved';
+      reviewResult=await runRestoreMutationStage('pending-reviews',async()=>{
+        await AppData.restoreJournal.mark(restoreId,'applying-pending-reviews');
+        const expected=freeze(PendingReviewCodec.merge([await AppData.pendingReviews.list(),incomingReviews],APP_LIMITS.maxPendingReviews));
+        const changedIds=await AppData.pendingReviews.merge(incomingReviews),result=freeze({changed:changedIds.length>0,expected,kept:keptReviews.length});
+        if(result.changed)committedDescription+=(committedDescription?' and ':'')+'versions kept for review were already saved';
+        return result;
+      });
     }
-    await AppData.restoreJournal.mark(restoreId,'applying-active-session');
-    const sessionResult=await applyResolvedActiveSession(resolvedPlan,{clear:clearSession});
-    if(sessionResult.changed)committedDescription+=(committedDescription?' and ':'')+'the Active Session was already saved';
-    await AppData.restoreJournal.mark(restoreId,'active-session-committed');
+    const sessionResult=await runRestoreMutationStage('active-session',async()=>{
+      await AppData.restoreJournal.mark(restoreId,'applying-active-session');
+      const result=await applyResolvedActiveSession(resolvedPlan,{clear:clearSession});
+      if(result.changed)committedDescription+=(committedDescription?' and ':'')+'the Active Session was already saved';
+      await AppData.restoreJournal.mark(restoreId,'active-session-committed');return result;
+    });
     const localPersonal=rollbackJournal.importedPersonalData;
     const expectedPersonal=localPersonal?{version:2,plans:decisions.plans==='replace'&&parsed.importedPersonalData?parsed.importedPersonalData.plans:localPersonal.plans,preferences:decisions.personalSettings==='replace'&&parsed.importedPersonalData?parsed.importedPersonalData.preferences:localPersonal.preferences}:null;
-    if(expectedPersonal){await AppData.restoreJournal.mark(restoreId,'applying-personal-data');await personalImport(expectedPersonal);}
+    if(expectedPersonal)await runRestoreMutationStage('personal-data',async()=>{await AppData.restoreJournal.mark(restoreId,'applying-personal-data');return personalImport(expectedPersonal);});
     const personalChanged=!!parsed.importedPersonalData&&(decisions.plans==='replace'||decisions.personalSettings==='replace');
-    await AppData.restoreJournal.mark(restoreId,'verifying');
     const expectedCommit={
       personalData:expectedPersonal,records:appliedRecords,
       notes:noteResult.expected,
@@ -1641,10 +1663,13 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       ...(reviewResult.expected?{pendingReviews:reviewResult.expected}:{})
     };
     if(sessionResult.changed){expectedCommit.activeSession=sessionResult.expected;expectedCommit.scheduleText=sessionResult.scheduleText||'';}
-    await verifyRestoreCommit(expectedCommit,signal);
-    throwIfImportAborted(signal);
-    await AppData.restoreJournal.mark(restoreId,'verified');
-    OperationDiagnostics.mark('canonical-verification-complete');
+    await runRestoreMutationStage('verification',async()=>{
+      await AppData.restoreJournal.mark(restoreId,'verifying');
+      await verifyRestoreCommit(expectedCommit,signal);
+      throwIfImportAborted(signal);
+      await AppData.restoreJournal.mark(restoreId,'verified');
+      OperationDiagnostics.mark('canonical-verification-complete');
+    });
     const changed=!!(dailyResult.changed||assetResult.changed||noteResult.changed||sessionResult.changed||personalChanged||reviewResult.changed);
     if(changed)await rebaseRepositoryPreparationAcceleration('combine');
     await AppData.restoreJournal.clear(restoreId);journalPrepared=false;clearFault();
