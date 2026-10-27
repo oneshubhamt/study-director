@@ -634,22 +634,24 @@
     let hessian=null;
     for(let iteration=0;iteration<10;iteration+=1){
       hessian=zeroMatrix(dimension);const gradient=Array(dimension).fill(0);
-      design.forEach(row=>{
-        const {x,weight}=row;
-        const probability=sigmoid(sum(x.map((value,index)=>value*coefficients[index])));
-        const variance=Math.max(1e-5,probability*(1-probability))*weight;
+      for(const row of design){
+        const {x,weight}=row;let eta=0;
+        for(let index=0;index<dimension;index+=1)eta+=x[index]*coefficients[index];
+        const probability=sigmoid(eta),variance=Math.max(1e-5,probability*(1-probability))*weight,residual=(row.y-probability)*weight;
         for(let left=0;left<dimension;left+=1){
-          gradient[left]+=x[left]*(row.y-probability)*weight;
-          for(let right=left;right<dimension;right+=1)hessian[left][right]+=x[left]*x[right]*variance;
+          gradient[left]+=x[left]*residual;
+          const weightedLeft=x[left]*variance;
+          for(let right=left;right<dimension;right+=1)hessian[left][right]+=weightedLeft*x[right];
         }
-      });
+      }
       for(let left=1;left<dimension;left+=1)for(let right=0;right<left;right+=1)hessian[left][right]=hessian[right][left];
       for(let index=1;index<dimension;index+=1){hessian[index][index]+=lambda;gradient[index]-=lambda*coefficients[index];}
       hessian[0][0]+=.05;
       const step=solveLinearSystem(hessian,gradient);
       if(!step)break;
-      coefficients=coefficients.map((value,index)=>clamp(value+step[index],-20,20));
-      if(Math.max(...step.map(Math.abs))<1e-6)break;
+      let maximumStep=0;
+      for(let index=0;index<dimension;index+=1){const delta=step[index];maximumStep=Math.max(maximumStep,Math.abs(delta));coefficients[index]=clamp(coefficients[index]+delta,-20,20);}
+      if(maximumStep<1e-6)break;
     }
     const covariance=hessian&&invertMatrix(hessian);
     const positives=rows.filter(row=>row.y>=.5).length;
@@ -657,7 +659,8 @@
   }
   function predictRegularizedLogistic(fit,features,interval=.95){
     if(!fit||!fit.ready)return {mean:null,low:null,high:null,width:null};
-    const x=[1,...features.map(num)],eta=sum(x.map((value,index)=>value*num(fit.coefficients[index])));
+    const x=[1,...features.map(num)];let eta=0;
+    for(let index=0;index<x.length;index+=1)eta+=x[index]*num(fit.coefficients[index]);
     const multiplier=interval>=.95?1.96:1.282;
     const standardError=Math.sqrt(Math.max(0,quadraticForm(x,fit.covariance)));
     const low=sigmoid(eta-multiplier*standardError),high=sigmoid(eta+multiplier*standardError);
