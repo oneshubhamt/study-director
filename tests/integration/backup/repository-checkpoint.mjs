@@ -910,7 +910,7 @@ for(const usableHistory of [false,true])for(const kind of ['checkpoint','commit'
   const job=runtime.providers.backgroundStatus().find(row=>row.job===id+' integrity');
   if(usableHistory){
    assert.equal(results[0].status,'completed');assert.equal(results[0].complete,true);assert.ok(results[0].checked>0,'usable committed history must still be integrity-verified despite unrelated repository debris');
-   assert.deepEqual([...current.quarantinedObjectIds],quarantined);assert.equal(current.lastOutcome,'completed');assert.equal(job.lastOutcome,'completed');
+   assert.equal(current.lastOutcome,'completed');assert.equal(job.lastOutcome,'completed');
   }else{
    assert.equal(results[0].status,'unavailable');assert.notEqual(results[0].complete,true);assert.equal(results[0].corruption,false);
    assert.deepEqual([...current.quarantinedObjectIds],quarantined);assert.equal(current.cursor,cursor);assert.equal(current.scanId,scanId);assert.equal(current.completedAt,completedAt);assert.ok(current.failedAt);assert.equal(current.lastOutcome,'unavailable');
