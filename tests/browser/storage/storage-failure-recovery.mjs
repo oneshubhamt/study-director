@@ -93,6 +93,9 @@ const results={release:manifest.release,localStorage:{},indexedDB:{},planDraft:{
 const pages=[];
 try{
   const page=await createPage();pages.push(page);
+  const storageEstimateLabel=await page.evaluate(`document.getElementById('local-storage-use')?.textContent||''`);
+  assert.doesNotMatch(storageEstimateLabel,/\bUsing\b/u,'browser-wide usage must not be presented as Study Director data size');
+  if(storageEstimateLabel)assert.match(storageEstimateLabel,/Browser storage estimate:/u,'storage estimate must identify its browser/origin scope');
   const planScenario=await page.evaluate(`(async()=>{
     const d=__StorageDebug,wait=ms=>new Promise(r=>setTimeout(r,ms)),warningVisible=()=>!document.getElementById('notice-region').hidden&&!document.getElementById('storage-warning').hidden;
     const input=document.getElementById('plan-input');

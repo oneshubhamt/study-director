@@ -3178,7 +3178,7 @@ async function inspectStorageCapability(){
   const usage=Number(estimate&&estimate.usage),quota=Number(estimate&&estimate.quota);
   const ratio=Number.isFinite(usage)&&Number.isFinite(quota)&&quota>0?usage/quota:null;
   const use=document.getElementById('local-storage-use');
-  if(use)use.textContent=Number.isFinite(usage)?` · Using ${storageSizeLabel(usage)}${ratio!==null?` of ${storageSizeLabel(quota)}`:''}`:'';
+  if(use)use.textContent=Number.isFinite(usage)?` · Browser storage estimate: ${storageSizeLabel(usage)}${ratio!==null?` of ${storageSizeLabel(quota)}`:''}`:'';
   const payload={version:1,persisted:persisted===true,usageBytes:Number.isFinite(usage)?usage:null,quotaBytes:Number.isFinite(quota)?quota:null,usageRatio:ratio,checkedAt:new Date().toISOString()};
   storageEstimate=Object.freeze({persisted,usageBytes:payload.usageBytes,quotaBytes:payload.quotaBytes});
   if(ratio!==null&&ratio>=APP_LIMITS.storageCriticalRatio){
@@ -9745,7 +9745,9 @@ async function readRepositoryIntegrityState(){
 }
 function applyRepositoryIntegrityHealth(state){
   repositoryIntegrityView=state;renderIntegrityStatuses();
-  const targets=Object.values(state?.locations||{}),quarantined=targets.some(target=>target?.quarantinedObjectIds?.length),failed=targets.some(target=>target?.failedAt);
+  const targets=Object.entries(state?.locations||{}).filter(([id,target])=>!!target?.repositoryScope&&repositoryIntegrityBoundScopes[id]===target.repositoryScope).map(([,target])=>target);
+  const quarantined=targets.some(target=>target.quarantinedObjectIds?.length);
+  const failed=targets.some(target=>{const failure=Date.parse(String(target.failedAt||'')),completed=Date.parse(String(target.completedAt||''));return Number.isFinite(failure)&&(!Number.isFinite(completed)||failure>=completed);});
   if(quarantined)markStorageHealthError('repositoryIntegrity','Some backup objects failed integrity verification. Keep the local copy and use a healthy backup version.',{level:'warn'});
   else if(failed)markStorageHealthError('repositoryIntegrity','Backup verification is incomplete or unavailable. Study Director will retry; keep the local copy until verification succeeds.',{level:'warn'});
   else markStorageHealthOk('repositoryIntegrity');
@@ -9776,15 +9778,15 @@ function repositoryIntegrityChanged(){const error=new Error('The backup reposito
 async function readRepositoryIntegrityTarget(target){
   const actual=await BackupProviderRuntime.repositoryScope(target);
   if(!actual)throw new Error('The backup repository identity is unavailable.');
-  const prior=(await readRepositoryIntegrityState()).locations[target]||normalizeRepositoryIntegrityTarget(null);
+  const state=await readRepositoryIntegrityState(),prior=state.locations[target]||normalizeRepositoryIntegrityTarget(null);
   const same=prior.repositoryScope===actual;
-  if(same&&prior.repositoryScope){repositoryIntegrityBoundScopes[target]=prior.repositoryScope;renderIntegrityStatuses();return prior;}
+  if(same&&prior.repositoryScope){repositoryIntegrityBoundScopes[target]=prior.repositoryScope;applyRepositoryIntegrityHealth(state);return prior;}
   const repositoryScope=String(actual);
   const bound=await mutateRepositoryIntegrityTarget(target,current=>{
     if(current.repositoryScope!==prior.repositoryScope)throw repositoryIntegrityChanged();
     return {...normalizeRepositoryIntegrityTarget(null),repositoryScope};
   });
-  repositoryIntegrityBoundScopes[target]=bound.repositoryScope;renderIntegrityStatuses();return bound;
+  repositoryIntegrityBoundScopes[target]=bound.repositoryScope;applyRepositoryIntegrityHealth(await readRepositoryIntegrityState());return bound;
 }
 async function updateRepositoryIntegrityTarget(target,result){
   if(!result?.repositoryScope)throw new Error('Integrity results require their repository identity.');

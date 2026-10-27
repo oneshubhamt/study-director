@@ -68,7 +68,7 @@ const REPOSITORY_LARGE_OBJECT_BYTES=8*1024*1024;
 // and what changed since the base. The newest prepared version also keeps
 // its base update, so placing that same version in Drive later makes it
 // the base.
-let repositoryPreparationIndex=null,repositorySpine=null;
+let repositoryPreparationIndex=null,repositoryBaseCandidate=null;
 async function mapRepositoryBounded(values,worker,limit=REPOSITORY_OBJECT_IO_CONCURRENCY){
   const rows=Array.isArray(values)?values:[],results=new Array(rows.length),concurrency=Math.max(1,Math.min(REPOSITORY_OBJECT_IO_CONCURRENCY,Math.floor(Number(limit)||1)));let next=0,failure=null;
   async function run(){for(;;){if(failure)return;const index=next++;if(index>=rows.length)return;try{results[index]=await worker(rows[index],index);}catch(error){if(!failure)failure=error;}}}
@@ -723,7 +723,7 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
     return prepared;
   }catch(error){for(const release of leases.splice(0))await release().catch(()=>{});throw error;}
 }
-function invalidateRepositoryPreparation(){repositoryPreparationIndex=null;repositorySpine=null;for(const continuation of repositoryPublicationStates.keys())void continuation.release();return true;}
+function invalidateRepositoryPreparation(){repositoryPreparationIndex=null;repositoryBaseCandidate=null;for(const continuation of repositoryPublicationStates.keys())void continuation.release();return true;}
 function repositoryPreparationDiagnosticReason(error){
   const message=String(error&&error.message||'');
   if(message==='Incremental repository preparation index could not be rebuilt.')return 'incremental-index-rebuild';
@@ -775,18 +775,18 @@ async function finalizeRepositoryCheckpointManifest(prepared,{interactive=false,
     checkSource:async()=>true,release:()=>protectedFile.blob!==source?Exports.run('file.release',{file:protectedFile.blob}):Promise.resolve()
   });
 }
-// A placed version becomes what the next backup builds on. A normal version
-// is also remembered with its base update, for placing it in Drive.
+// A committed preparation becomes what the next backup builds on. A normal
+// shared publication also carries the reconciliation-base update it can establish.
 function adoptRepositoryPreparation(prepared,checkpointId){
   const state=repositoryPreparedState.get(prepared);if(!state||state.released)return false;
   if(state.preparationIndexCandidate)repositoryPreparationIndex=freeze({...state.preparationIndexCandidate,checkpointId});
-  if(state.manifestBase.retention.role==='normal')repositorySpine=freeze({checkpointId,sourceRevision:String(state.capture&&state.capture.sourceRevision||''),update:state.reconciliationUpdate||null});
+  if(state.manifestBase.retention.role==='normal')repositoryBaseCandidate=freeze({checkpointId,update:state.reconciliationUpdate||null});
   return true;
 }
 // This version is now what this device and Drive share.
 async function establishRepositoryBase(checkpointId){
-  const id=String(checkpointId||''),spine=repositorySpine;if(!/^cp_[a-f0-9]{32}$/u.test(id)||!spine||spine.checkpointId!==id||!spine.update)return false;
-  const written=await AppData.reconciliationBase.write(id,spine.update)!==false,index=repositoryPreparationIndex;
+  const id=String(checkpointId||''),candidate=repositoryBaseCandidate;if(!/^cp_[a-f0-9]{32}$/u.test(id)||!candidate||candidate.checkpointId!==id||!candidate.update)return false;
+  const written=await AppData.reconciliationBase.write(id,candidate.update)!==false,index=repositoryPreparationIndex;
   if(index)repositoryPreparationIndex=freeze({...index,...(written&&index.checkpointId===id?{baseCheckpointId:id,sinceBase:freeze([])}:{sinceBase:null})});
   return written;
 }
@@ -1107,38 +1107,13 @@ async function refreshRepositoryPublicationProtection(state,options){
 // same content (logical fingerprint) built from exactly the same stored
 // objects, none of them new. A repair that replaces a damaged object, and a
 // protected safety version, always get written.
-// sameData: the version is a copy of this device's current data. Its objects
-// may carry other ids than the newest version here (each device names its own
-// objects), so the same data is enough: copying it would only upload every
-// object again.
-function repositoryUnchangedVersion(history,prepared,{sameData=false}={}){
-  const base=repositoryPreparedState.get(prepared)?.manifestBase;if(!base||base.retention?.role!=='normal'||!sameData&&prepared.objects.some(entry=>!entry.reused))return null;
+function repositoryUnchangedVersion(history,prepared){
+  const base=repositoryPreparedState.get(prepared)?.manifestBase;if(!base||base.retention?.role!=='normal'||prepared.objects.some(entry=>!entry.reused))return null;
   let newest=null;
   for(const manifest of Array.isArray(history)?history:[])if((manifest?.retention?.role||'normal')==='normal'&&(!newest||Date.parse(manifest.exportedAt)>Date.parse(newest.exportedAt)))newest=manifest;
   if(!newest||!newest.logicalFingerprint||newest.logicalFingerprint!==base.logicalFingerprint)return null;
-  if(sameData)return String(newest.protectionId||'')===String(base.protectionId||'')&&newest.encrypted===base.encrypted?newest:null;
   const ids=list=>(list||[]).map(entry=>String(entry.objectId)).sort().join('|');
   return ids(newest.objects)===ids(base.objects)?newest:null;
-}
-// A version another location already holds, placed here as it is: the same
-// manifest file, and each object this location lacks read from there.
-async function prepareRepositoryCopy(copy,{availableObjectIds=null,interactive=false,signal=null}={}){
-  if(!copy||!(copy.manifestBlob instanceof Blob)||typeof copy.readObject!=='function')throw new TypeError('Repository version copy is invalid.');
-  const manifest=await inspectRepositoryManifest(copy.manifestBlob,{interactive}),noCheck=async()=>true,leases=[],objects=[];
-  if(manifest.checkpoint.checkpointId!==String(copy.checkpointId||''))throw new Error('The copied backup version does not match the version selected.');
-  try{
-    for(const entry of manifest.objects){
-      throwIfImportAborted(signal);
-      if(availableObjectIds instanceof Set&&availableObjectIds.has(entry.objectId)){objects.push(freeze({...entry,reused:true,blob:null,checkProtection:noCheck}));continue;}
-      const read=await copy.readObject(entry);leases.push(read.release);
-      if(!(read.blob instanceof Blob)||read.blob.size!==entry.storedBytes)throw new Error(`Backup object ${entry.objectId} could not be read for copying.`);
-      objects.push(freeze({...entry,reused:false,blob:read.blob,checkProtection:noCheck}));
-    }
-  }catch(error){for(const release of leases.splice(0))await release().catch(()=>{});throw error;}
-  const prepared=freeze({format:'study-director.prepared-repository-checkpoint',version:1,checkpoint:manifest.checkpoint,exportedAt:manifest.exportedAt,sourceRevision:manifest.sourceRevision,protectionId:manifest.protectionId,encrypted:manifest.encrypted,counts:manifest.counts,objects:freeze(objects),warning:manifest.warning});
-  repositoryPreparedState.set(prepared,{capture:null,context:freeze({checkProtection:noCheck}),manifestBase:manifest,leases,released:false,manifestFinalized:true,reconciliationUpdate:null,preparationIndexCandidate:null,copy:true});
-  const manifestFile=freeze({blob:copy.manifestBlob,manifest,exportedAt:manifest.exportedAt,sourceRevision:manifest.sourceRevision,counts:manifest.counts,protectionId:manifest.protectionId,encrypted:manifest.encrypted,checkProtection:noCheck,checkSource:noCheck,release:async()=>{}});
-  return freeze({prepared,manifestFile});
 }
 async function publishRepositoryCheckpoint(history,options={},transport={}){
   if(!transport||typeof transport!=='object'||typeof transport.writeObject!=='function'||typeof transport.writeManifest!=='function'||typeof transport.commit!=='function')throw new TypeError('Repository publication transport is invalid.');
@@ -1150,19 +1125,17 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
   const postCommit=async(phase,message,work)=>{try{return await work();}catch(error){warnings.push(message);AppDiagnostics.capture(`repository.publication-${phase}`,error,'warn');return null;}};
   try{
     check();
-    const copy=options.copy||null,current=!copy||copy.current===true;
     if(prepared){await refreshRepositoryPublicationProtection(state,options);prepared=state.prepared;manifestFile=state.manifestFile;}
-    else if(copy){const copied=await prepareRepositoryCopy(copy,options);prepared=copied.prepared;manifestFile=copied.manifestFile;state.prepared=prepared;state.manifestFile=manifestFile;}
     else{prepared=await prepareRepositoryCheckpoint(history,options);state.prepared=prepared;}
     check();
     // Nothing changed since the newest version: write nothing (no requests,
     // no history slot), but record that the current changes are backed up.
-    const unchanged=repositoryUnchangedVersion(history,prepared,{sameData:!!copy&&current});
+    const unchanged=repositoryUnchangedVersion(history,prepared);
     if(unchanged){
       const checkpointId=unchanged.checkpoint.checkpointId,publication=freeze({name:checkpointId+'.sdcheckpoint',unchanged:true}),objectsReused=prepared.objects.length;
-      if(!copy)adoptRepositoryPreparation(prepared,checkpointId);if(options.shared&&current)await postCommit('reconciliation-base','The backup was already up to date, but this device could not record it as shared.',()=>establishRepositoryBase(checkpointId));
+      adoptRepositoryPreparation(prepared,checkpointId);if(options.shared)await postCommit('reconciliation-base','The backup was already up to date, but this device could not record it as shared.',()=>establishRepositoryBase(checkpointId));
       const context=freeze({prepared,manifest:unchanged,sourceRevision:prepared.sourceRevision,exportedAt:unchanged.exportedAt,publication,commitReceipt:null,objectsWritten:0,objectsReused,writtenBytes:0,attachmentBytesWritten:0,unchanged:true});
-      const committedResult=current&&typeof transport.onCommitted==='function'?await postCommit('bookkeeping','The backup was already up to date, but local backup status could not be updated.',()=>transport.onCommitted(context)):null;
+      const committedResult=typeof transport.onCommitted==='function'?await postCommit('bookkeeping','The backup was already up to date, but local backup status could not be updated.',()=>transport.onCommitted(context)):null;
       return freeze({checkpointId,manifest:unchanged,sourceRevision:prepared.sourceRevision,exportedAt:unchanged.exportedAt,publication,commitReceipt:null,objectsWritten:0,objectsReused,writtenBytes:0,attachmentBytesWritten:0,committedResult,cleanupResult:null,unchanged:true,warning:warnings.join(' ')});
     }
     let objectsWritten=0,objectsReused=0,writtenBytes=0,attachmentBytesWritten=0;
@@ -1184,9 +1157,8 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
     check();const commitMarker=state.commitMarker||(state.commitMarker=await createRepositoryCommitMarker(manifestFile.manifest,{checkProtection:manifestFile.checkProtection,checkSource:manifestFile.checkSource,signal:options.signal||null}));check();
     commitReceipt=await transport.commit(commitMarker,prepared,publication);
     committed=true;
-    // A copied older version only fills in history: no bookkeeping, no base.
-    const checkpointId=manifestFile.manifest.checkpoint.checkpointId;if(!copy)adoptRepositoryPreparation(prepared,checkpointId);
-    const baseEstablished=!current?false:!options.shared||await postCommit('reconciliation-base','The checkpoint was saved and verified, but this device could not record it as shared. A later backup will retry completion bookkeeping.',async()=>{if(!await establishRepositoryBase(checkpointId))throw new Error('The shared base could not be recorded.');return true;});
+    const checkpointId=manifestFile.manifest.checkpoint.checkpointId;adoptRepositoryPreparation(prepared,checkpointId);
+    const baseEstablished=!options.shared||await postCommit('reconciliation-base','The checkpoint was saved and verified, but this device could not record it as shared. A later backup will retry completion bookkeeping.',async()=>{if(!await establishRepositoryBase(checkpointId))throw new Error('The shared base could not be recorded.');return true;});
     const context=freeze({prepared,manifest:manifestFile.manifest,sourceRevision:manifestFile.sourceRevision,exportedAt:manifestFile.exportedAt,publication,commitReceipt,objectsWritten,objectsReused,writtenBytes,attachmentBytesWritten});
     const committedResult=baseEstablished&&typeof transport.onCommitted==='function'?await postCommit('bookkeeping','The checkpoint was saved and verified, but local backup status could not be updated. A later backup will retry completion bookkeeping.',()=>transport.onCommitted(context)):null;
     const cleanupResult=typeof transport.cleanup==='function'?await postCommit('retention-cleanup','The checkpoint was saved and verified, but repository retention cleanup did not complete.',()=>transport.cleanup(freeze({...context,committedResult}))):null;
@@ -1206,10 +1178,7 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
       format:'study-director.managed-repository',contractVersion:1,releasedManifestVersion:REPOSITORY_RELEASED_MANIFEST_VERSION,
       noteObject:repositoryNoteObject,readNote:readRepositoryNote,
       createPublication:createRepositoryPublication,publish:publishRepositoryCheckpoint,inspectManifest:inspectRepositoryManifest,inspect:inspectRepositoryCheckpoint,verifyCheckpoint:verifyRepositoryCheckpoint,verifyObject:verifyRepositoryObject,scrub:scrubRepositoryIntegrity,cleanup:cleanupRepositoryRetention,inspectCommit:inspectRepositoryCommitMarker,
-      retention:REPOSITORY_RETENTION_POLICY,validatePolicy:validateRepositoryRetentionPolicy,classifyState:classifyRepositoryState,activeProtected:activeProtectedRepositoryRow,selectRetention:selectRepositoryRetention,projectHistory:projectManagedRepositoryHistory,invalidatePreparation:invalidateRepositoryPreparation,establishBase:establishRepositoryBase,
-      // The newest version this device made (any location), and whether
-      // placing it in Drive can make it the shared base.
-      spine:()=>repositorySpine?freeze({checkpointId:repositorySpine.checkpointId,sourceRevision:repositorySpine.sourceRevision,shareable:!!repositorySpine.update}):null
+      retention:REPOSITORY_RETENTION_POLICY,validatePolicy:validateRepositoryRetentionPolicy,classifyState:classifyRepositoryState,activeProtected:activeProtectedRepositoryRow,selectRetention:selectRepositoryRetention,projectHistory:projectManagedRepositoryHistory,invalidatePreparation:invalidateRepositoryPreparation,establishBase:establishRepositoryBase
     });
   }
   return freeze({format:'study-director.managed-repository-module',contractVersion:1,createEngine});

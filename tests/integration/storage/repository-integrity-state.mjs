@@ -54,6 +54,13 @@ await test('partial progress cannot clear unresolved failure or quarantine healt
   const h=fixture();await h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',status:'yielded',cursor:objectId('d'),scanId});assert.equal(h.state.durable.locations['google-drive'].failedAt,stamp);assert.equal(h.state.health.at(-1).kind,'warn');
   await h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',status:'completed',complete:true,quarantined:[objectId('c')]});assert.equal(h.state.durable.locations['google-drive'].failedAt,'');assert.equal(h.state.health.at(-1).kind,'warn','a cycle that skipped quarantine is not healthy');
 });
+await test('health projects only the currently bound repository and a later successful verification supersedes an old failure',async()=>{
+  const h=fixture();h.context.repositoryIntegrityBoundScopes['device-folder']='device-one';
+  h.context.applyRepositoryIntegrityHealth(h.state.durable);assert.equal(h.state.health.at(-1).kind,'ok','an unbound historical Drive failure must not poison current health');
+  h.context.repositoryIntegrityBoundScopes['google-drive']='drive-one';h.context.applyRepositoryIntegrityHealth(h.state.durable);assert.equal(h.state.health.at(-1).kind,'warn','the same failure warns once its repository is the current bound Drive');
+  const later='2026-09-02T00:00:00.000Z',resolved=h.context.normalizeRepositoryIntegrityState({version:7,locations:{'device-folder':{repositoryScope:'device-one',completedAt:stamp},'google-drive':{repositoryScope:'drive-one',failedAt:stamp,completedAt:later,lastOutcome:'completed'}}});
+  h.context.applyRepositoryIntegrityHealth(resolved);assert.equal(h.state.health.at(-1).kind,'ok','a later complete verification supersedes the older failedAt timestamp');
+});
 await test('the same Device Folder repository keeps state; a replaced one starts over',async()=>{
   const h=fixture();assert.equal((await h.context.readRepositoryIntegrityTarget('device-folder')).repositoryScope,'device-one');assert.equal(h.state.writes,0);
   h.state.device='device-two';const target=await h.context.readRepositoryIntegrityTarget('device-folder');assert.equal(target.repositoryScope,'device-two');assert.equal(target.completedAt,'');assert.equal(target.cursor,'');
