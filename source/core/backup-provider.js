@@ -1061,7 +1061,9 @@ registry.define('backup-provider',1,input=>{
   async function assertSharedSessionOwnership(selected,{signal=null}={}){
     if(!sessionOwnershipHooks||!repositorySessionClaimCapable(selected))return true;
     const current=await readRepositorySessionClaim(selected,{signal});if(!current||current.expired)return true;
-    const projected=await projectSessionClaim(current,{signal});if(!projected?.applies||projected.ownedHere)return true;
+    const local=await localSessionOwnership();if(!local)return true;
+    const [sessionToken,canonicalOwnerToken]=await Promise.all([sessionClaimToken('session',local.date,{signal}),sessionClaimToken('owner',local.runningOn,{signal})]);
+    if(sessionToken!==current.claim.sessionToken||canonicalOwnerToken===current.claim.ownerToken)return true;
     throw syncError('REPOSITORY_SESSION_OWNERSHIP_AHEAD',`Today’s Active Session is owned by another device in ${selected.label}; this device must take in that ownership before publishing.`);
   }
   // Take in Drive's newest version quietly. What it cannot settle on its own
