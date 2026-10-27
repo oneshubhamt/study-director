@@ -61,7 +61,11 @@ try{
   releasePlanClaim();
   const asked=await applying;
   assert.ok(asked.some(text=>/Continue here|running on/iu.test(text)),`applying asks before taking over (${asked.join(' / ')})`);
-  await waitFor(async()=>claimsBy('A')>beforeClaims&&(await screen(a)).mode==='running',{label:'the PC ownership claim starts the timer',timeout:10000});
+  try{await waitFor(async()=>claimsBy('A')>beforeClaims&&(await screen(a)).mode==='running',{label:'the PC ownership claim starts the timer',timeout:10000});}
+  catch(error){
+    const diagnostic=await a.evaluate(`(async()=>{const d=__PWA6,session=(await d.AppData.activeSession.load()).value;return {timer:d.TimerState.snapshot(),session,lifecycle:d.SessionLifecycle.status(),claim:await d.BackupProviderRuntime.readSessionClaim('google-drive'),planStatus:document.getElementById('plan-status')?.textContent||'',panel:document.getElementById('session-panel-title')?.textContent||'',accepted:window.__accepted||[]};})()`).catch(cause=>({diagnosticError:String(cause&&cause.message||cause)}));
+    console.error('[session-plan-sync] takeover failure diagnostic',JSON.stringify(diagnostic));throw error;
+  }
   const pcClaim=await latestClaim(),pc=await screen(a),pcProjection=await a.evaluate(`__PWA6.BackupProviderRuntime.readSessionClaim('google-drive')`);
   assert.equal(pcClaim.state,'owned');assert.match(pcClaim.ownerToken,/^[a-f0-9]{64}$/u);assert.match(pcClaim.sessionToken,/^[a-f0-9]{64}$/u);assert.equal(Object.hasOwn(pcClaim,'owner'),false);assert.equal(Object.hasOwn(pcClaim,'date'),false);assert.equal(pcProjection.ownedHere,true);assert.equal(pcProjection.applies,true);assert.ok(pc.revision>=pcClaim.revision,'local session revision must cover the accepted ownership revision');
   assert.equal(uploadsBy('A'),before,'a full Drive checkpoint is not on the live ownership critical path');
