@@ -34,7 +34,7 @@
   const REPOSITORY_KIND_MARKER=REPOSITORY_IDENTITIES.driveRepositoryKindMarker;
   const REPOSITORY_ID_MARKER=REPOSITORY_IDENTITIES.driveRepositoryIdMarker;
   const REPOSITORY_VERSION='1';
-  const REPOSITORY_KINDS=Object.freeze(new Set(['object','checkpoint','commit']));
+  const REPOSITORY_KINDS=Object.freeze(new Set(['object','checkpoint','commit','session-claim']));
   const PUBLICATION_KIND='publication',MAINTENANCE_KIND='maintenance';
   const MAINTENANCE_VERSION='2';
   let PUBLICATION_MAX_AGE_MS=0,PUBLICATION_ASSERTION_MARGIN_MS=0,MAINTENANCE_MAX_AGE_MS=0,MAINTENANCE_ASSERTION_MARGIN_MS=0;
@@ -605,8 +605,8 @@
   }
   async function repositoryScope(context=EMPTY_DRIVE_OPERATION){return repositoryVerificationScope(await ensureFolder(context));}
   const REPOSITORY_FIELDS='id,name,size,version,modifiedTime,createdTime,mimeType,parents,ownedByMe,shared,trashed,sha256Checksum,appProperties,capabilities(canDownload)';
-  function repositoryIdValid(kind,id){return kind==='object'?/^obj_[a-f0-9]{32}$/u.test(String(id||'')):['checkpoint','commit'].includes(kind)?/^cp_[a-f0-9]{32}$/u.test(String(id||'')):false;}
-  function repositoryFilename(kind,id){return String(id)+(kind==='object'?'.sdobject':kind==='commit'?'.sdcommit':'.sdcheckpoint');}
+  function repositoryIdValid(kind,id){return kind==='object'?/^obj_[a-f0-9]{32}$/u.test(String(id||'')):['checkpoint','commit'].includes(kind)?/^cp_[a-f0-9]{32}$/u.test(String(id||'')):kind==='session-claim'?/^sc_[a-f0-9]{16}$/u.test(String(id||'')):false;}
+  function repositoryFilename(kind,id){return String(id)+(kind==='object'?'.sdobject':kind==='commit'?'.sdcommit':kind==='session-claim'?'.sdsessionclaim':'.sdcheckpoint');}
   function validRepositoryMetadata(file,parent,kind=''){
     const properties=file&&file.appProperties||{},actualKind=String(properties[REPOSITORY_KIND_MARKER]||''),id=String(properties[REPOSITORY_ID_MARKER]||''),size=finiteSize(file&&file.size);
     if(kind&&actualKind!==kind)return false;
@@ -986,6 +986,10 @@
       assertMaintenance:ref=>assertRepositoryMaintenance(ref,base),
       renewMaintenance:ref=>renewRepositoryMaintenance(ref,base),
       endMaintenance:ref=>endRepositoryMaintenance(ref,driveOperationContext({folderState:base.folderState})),
+      listSessionClaims:opts=>repositoryList(Object.freeze({...opts,kind:'session-claim'}),base),
+      uploadSessionClaim:file=>repositoryUpload(file,base),
+      downloadSessionClaim:(ref,opts)=>repositoryDownload(ref,opts,base),
+      deleteSessionClaim:(ref,opts)=>repositoryDelete(ref,opts,base),
       scope:()=>repositoryScope(base),
       historyReadConcurrency:8
     });
@@ -1161,7 +1165,7 @@
       subscribeConnection,
       disconnect,
       release,
-      repository:Object.freeze({discardUploads:()=>repositoryUploads.clear(),list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:beginRepositoryPublication,listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,scope:()=>repositoryScope(),beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
+      repository:Object.freeze({discardUploads:()=>repositoryUploads.clear(),list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:beginRepositoryPublication,listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,listSessionClaims:opts=>repositoryList(Object.freeze({...opts,kind:'session-claim'})),uploadSessionClaim:repositoryUpload,downloadSessionClaim:repositoryDownload,deleteSessionClaim:repositoryDelete,scope:()=>repositoryScope(),beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
     }));
   }
 

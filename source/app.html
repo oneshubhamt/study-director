@@ -5001,36 +5001,42 @@ async function confirmSessionTakeover(session,{replace=false}={}){
 }
 async function continueSessionHere(){
   if(!appCanMutate())return false;
-  let previous=null,claim=null,claimCommitted=false;
+  let previous=null,localClaim=null,ownershipClaim=null,backgroundHold=null,committed=false;
   try{
     const loaded=await AppData.activeSession.load(),session=loaded&&loaded.value||null;
     if(!session){setSessionPanelMode('none');return false;}
     if(!sessionFromElsewhere(session))return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
     if(sessionRunsElsewhere(session)&&!await confirmSessionTakeover(session))return false;
     if(!appCanMutate())return false;
+    if(!BackupProviderRuntime.connected('google-drive'))throw new Error('Google Drive must be connected to transfer a session that belongs to another device.');
     previous=ActiveSessionCodec.sanitizeCurrent(session);
-    claim=ActiveSessionCodec.sanitizeCurrent({...session,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(session.revision),updatedAt:new Date().toISOString()});
-    if(!claim)throw new Error('the transferred session state is invalid');
-    const claimed=await AppData.activeSession.save(claim);
-    if(!handleActiveSessionRepositoryResult(claimed,'save'))throw claimed.error||new Error('the session could not be moved to this device');
+    localClaim=ActiveSessionCodec.sanitizeCurrent({...session,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(session.revision),updatedAt:new Date().toISOString()});
+    if(!previous||!localClaim)throw new Error('the transferred session state is invalid');
+    backgroundHold=BackupProviderRuntime.suspendBackground('session-takeover');await backgroundHold.settled;
+    setPlanStatus('Transferring today’s session to this device…');
+    const saved=await AppData.activeSession.save(localClaim);
+    if(!handleActiveSessionRepositoryResult(saved,'save'))throw saved.error||new Error('the session could not be prepared on this device');
+    const claimed=await BackupProviderRuntime.claimSessionOwnership('google-drive',{date:session.date,observedOwner:session.runningOn,observedRevision:session.revision});
+    if(!claimed||claimed.status!=='completed'||!claimed.claim)throw new Error('Google Drive did not confirm the Active Session ownership claim.');
+    ownershipClaim=claimed.claim;
     const publication=await BackupProviderRuntime.publishSharedStateNow('google-drive',{reason:'session-continue'});
     if(!publication?.ok)throw Object.assign(new Error(publication?.message||'Google Drive could not confirm the session ownership transfer.'),{code:String(publication?.code||'SESSION_OWNERSHIP_UNCONFIRMED')});
     const current=(await AppData.activeSession.load())?.value||null;
-    if(!CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),claim))throw new Error('the session changed locally before its ownership transfer could finish');
-    claimCommitted=true;
+    if(!CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),localClaim))throw new Error('the session changed locally before its ownership transfer could finish');
+    committed=true;backgroundHold.release();backgroundHold=null;
     notifyBackupChange({urgent:true,reason:'session-continue'});
     return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
   }catch(error){
-    if(!claimCommitted&&previous&&claim){
-      try{
-        const current=(await AppData.activeSession.load())?.value||null;
-        if(CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),claim))await AppData.activeSession.save({...previous,updatedAt:new Date().toISOString()});
-      }catch(rollbackError){AppDiagnostics.capture('session.continue-claim-rollback',rollbackError,'warn');}
+    if(!committed&&previous&&localClaim){
+      try{const current=(await AppData.activeSession.load())?.value||null;if(CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),localClaim)){const restored=await AppData.activeSession.save(previous);if(!restored?.ok)throw restored?.error||new Error('session rollback failed');}}
+      catch(rollbackError){AppDiagnostics.capture('session.continue-claim-rollback',rollbackError,'warn');}
     }
+    if(ownershipClaim)await BackupProviderRuntime.releaseSessionClaim('google-drive',ownershipClaim);
     try{BackupProviderRuntime.wakeBackground('session-watch');}catch{}
     setPlanStatus('Could not continue today’s session here: '+(error&&error.message?error.message:error),false);
+    if(previous)setSessionPanelMode(sessionRunsElsewhere(previous)?'elsewhere':'suspended',previous);
     return false;
-  }
+  }finally{backgroundHold?.release();}
 }
 // Another device continued today's session after this one changed it: the
 // timer stops here and this device's progress stays as a suspended session,
@@ -9809,6 +9815,11 @@ AppActivation.subscribe(event=>{if([APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTI
 // Device Folder from when it was chosen). A change found on start is backed up
 // only while local data is present.
 BackupProviderRuntime.configureAutomaticBackup(Object.freeze({covered:id=>verifiedRecoveryState.providers[id]?.sourceRevision||'',current:()=>currentBackupSourceRevision(),ready:async()=>await canonicalLocalRecoveryEmpty()===false}));
+BackupProviderRuntime.configureSessionOwnership(Object.freeze({
+  installationId:()=>InstallationIdentity.getId(),
+  today:()=>todayISO(),
+  read:async()=>{const loaded=await AppData.activeSession.load(0,{strict:true});if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be read safely.');const value=loaded.value;return value?Object.freeze({date:value.date,runningOn:value.runningOn,revision:value.revision}):null;}
+}));
 // Each location's integrity state is kept under its location id.
 BackupProviderRuntime.configureIntegrityScrub(Object.freeze({
   readTarget:id=>readRepositoryIntegrityTarget(id),
