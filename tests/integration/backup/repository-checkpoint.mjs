@@ -595,12 +595,12 @@ runtime.providers.configurePendingBackupRetry(freeze({read:async id=>pendingProv
   try{
     sourceRevision='2026-09-19T02:00:00.000Z';snapshotRevision='independent-1';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'independent one',updatedAt:sourceRevision})};
     const deviceFirst=await runtime.providers.backupRepositoryProvider('independent-device',{interactive:false}),driveFirst=await runtime.providers.backupRepositoryProvider('independent-drive',{interactive:false});
-    assert.ok(deviceFirst.checkpointId&&driveFirst.checkpointId,'both independent destinations publish a verified checkpoint');
+    assert.ok(deviceFirst.checkpointId&&driveFirst.checkpointId,'both independent destinations publish a verified checkpoint');assert.notEqual(deviceFirst.checkpointId,driveFirst.checkpointId,'independent destinations must not share checkpoint identity');
     assert.equal(versions(device).length,1);assert.equal(versions(drive).length,1);assert.ok(uploads(device)>0&&uploads(drive)>0,'each destination receives canonical objects directly');
     assert.equal(reconciliationBase.checkpointId,driveFirst.checkpointId,'Drive publication alone establishes the shared reconciliation base');
     sourceRevision='2026-09-19T02:10:00.000Z';snapshotRevision='independent-2';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'independent two',updatedAt:sourceRevision})};
     const driveSecond=await runtime.providers.backupRepositoryProvider('independent-drive',{interactive:false}),deviceSecond=await runtime.providers.backupRepositoryProvider('independent-device',{interactive:false});
-    assert.ok(driveSecond.checkpointId&&deviceSecond.checkpointId);assert.equal(versions(device).length,2);assert.equal(versions(drive).length,2);
+    assert.ok(driveSecond.checkpointId&&deviceSecond.checkpointId);assert.notEqual(driveSecond.checkpointId,deviceSecond.checkpointId);assert.deepEqual(versions(device),[deviceSecond.checkpointId],'same-day retention keeps only the newest independent Device Folder version');assert.deepEqual(versions(drive),[driveSecond.checkpointId],'same-day retention keeps only the newest independent Drive version');
     assert.equal(reconciliationBase.checkpointId,driveSecond.checkpointId,'Device Folder publication does not replace Drive shared ancestry');
   }finally{runtime.providers.configureAutomaticBackup(null);connected=false;reconciliationBase=baseBefore;reconciliationBaseNotes=baseNotesBefore;}
 }
