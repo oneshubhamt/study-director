@@ -1097,7 +1097,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
             <summary><span class="backup-model-summary"><span class="backup-model-summary-title">Backup model</span><span class="backup-model-summary-copy">Local-first · syncs through Drive</span></span></summary>
             <div class="backup-model-body ui-helper">
               <dl class="backup-model-explainer">
-                <div><dt>Versions</dt><dd>The Device Folder keeps verified versions in a folder you choose on this device; Google Drive keeps the same history off this device. Each version is a complete copy of your data, even though unchanged parts are stored once.</dd></div>
+                <div><dt>Versions</dt><dd>The Device Folder and Google Drive each keep verified versions independently, using the same retention rules. Each version is a complete copy of your data, even though unchanged parts are stored once.</dd></div>
                 <div><dt>Several devices</dt><dd>While a device is signed in to Google Drive it syncs: it takes in what your other devices changed, then uploads its own changes. A change made on one side only is taken for you. Where both sides changed the same thing, the newer shows and the other is kept for you, marked Needs review; edits to different paragraphs of a note are joined for you. Saved data and the Active Session travel too; changes to a session running here wait until it ends. Without Drive, each device keeps working on its own.</dd></div>
                 <div><dt>Portable backup</dt><dd>Export backup creates one complete <span class="ui-mono">.sdbackup</span> file for manual transfer or safekeeping. Restore it on any Study Director device when needed; it is not part of Version History.</dd></div>
               </dl>
@@ -1114,13 +1114,13 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                 <button class="mini-btn ui-btn" id="open-version-history" type="button" data-action="open-version-history" aria-haspopup="dialog" aria-controls="managed-version-history">Version History</button>
               </div>
             </div>
-            <p class="ui-helper" id="backup-retention-note">Your backups keep 15 versions: the latest, 6 daily, 4 weekly and 4 monthly, so about four to five months back. They also keep one version per hour from the last 24 hours when your notes changed, up to 10 more. Before a restore, each device also keeps a safety version for 7 days. The Device Folder and Google Drive keep the same history.</p>
+            <p class="ui-helper" id="backup-retention-note">Your backups keep 15 versions: the latest, 6 daily, 4 weekly and 4 monthly, so about four to five months back. They also keep one version per hour from the last 24 hours when your notes changed, up to 10 more. Before a restore, each device also keeps a safety version for 7 days. The Device Folder and Google Drive use the same retention rules but keep independent version histories.</p>
             <div class="backup-location-stack" aria-label="Automatic backup locations">
               <div class="backup-location-row backup-device-row">
                 <div class="backup-row-copy">
                   <div class="backup-location-heading">
                     <span class="ui-label">Device Folder</span>
-                    <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="device-backup-info" aria-label="About Device Folder backup" aria-expanded="false" aria-controls="device-backup-info">i</button><span class="pnote-info-popover" id="device-backup-info" role="note" hidden>Versions saved automatically in a folder you choose on this device. With Google Drive connected too, both keep the same history. Use a folder only this device uses, not one that Dropbox, OneDrive or iCloud syncs between devices.</span></span>
+                    <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="device-backup-info" aria-label="About Device Folder backup" aria-expanded="false" aria-controls="device-backup-info">i</button><span class="pnote-info-popover" id="device-backup-info" role="note" hidden>Versions saved automatically in a folder you choose on this device. With Google Drive connected too, each destination backs up this device’s canonical data independently. Use a folder only this device uses, not one that Dropbox, OneDrive or iCloud syncs between devices.</span></span>
                   </div>
                 </div>
                 <strong class="backup-status-value standard ui-mono" id="device-backup-status">Off</strong>
@@ -3137,7 +3137,8 @@ function renderBackupActions(){
   if(backupNow){backupNow.disabled=busy;backupNow.title=busy&&syncText?syncText:rows.some(row=>row.maintenanceBusy)?'Background backup maintenance will yield to Back up now.':'';}
   if(versions){versions.disabled=busy&&!recovering;versions.title=recovering?'Reopen the active recovery operation.':busy&&syncText?syncText:'';}
 }
-// The Device Folder backs up first, so Drive can take its version.
+// Back up each enabled destination independently. The sequential UI action
+// avoids overlapping foreground operations; neither destination consumes the other.
 async function backUpEverywhere(){
   let done=false;
   if(DeviceBackup.status().connected)done=await DeviceBackup.backupNow()!==false||done;
@@ -10391,7 +10392,7 @@ function currentBackupDiagnosticStates(){
   });
   // Sync with Drive and the profiles on this device: what to read first when
   // a device does not sync.
-  sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,waitingForDeviceFolder:value.waitingForDeviceFolder,turnWaits:value.turnWaits,keptVersions:KeptVersions.count()})));
+  sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,turnWaits:value.turnWaits,keptVersions:KeptVersions.count()})));
   sample('Profiles',()=>({count:Profiles.list().length,pending:Profiles.removalPending(),unsupported:Profiles.unsupported()}),value=>[{job:'Profiles',state:value.unsupported?'unsupported':value.pending?'pending':'observed',profiles:value.count,removalPending:value.pending>0}]);
   sample('Unsupported data',()=>UnsupportedData.summary(),value=>[{job:'Unsupported data',state:value.blocked?'blocked':value.protected?'held':value.held?'replaceable':'none',held:value.held,protectedCount:value.protected,savedDays:value.items.days,notes:value.items.notes,assets:value.items.attachments,sessions:value.items.sessions,settings:value.items.settings}]);
   sample('Provider background',()=>BackupProviderRuntime.backgroundStatus(),values=>values);return states;
