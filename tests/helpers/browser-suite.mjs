@@ -13,19 +13,21 @@ const timeoutMs=Math.max(30000,Number(process.env.BROWSER_TEST_TIMEOUT_MS)||1200
 const tier=process.argv[2]||process.env.BROWSER_TEST_TIER||'smoke';
 const domain=process.argv[3]||process.env.BROWSER_TEST_DOMAIN||'';
 const requested=selectedBrowserTests(tier,domain);
+const excludedIds=new Set(String(process.env.BROWSER_TEST_EXCLUDE_IDS||'').split(',').map(value=>value.trim()).filter(Boolean));
 const all=[
   ...BROWSER_TEST_MANIFEST.smoke.map(entry=>({...entry,tier:'smoke'})),
   ...BROWSER_TEST_MANIFEST.feature.map(entry=>({...entry,tier:'feature'})),
   ...BROWSER_TEST_MANIFEST.extended.map(entry=>({...entry,tier:'extended'})),
 ];
 const quarantined=quarantinedBrowserScripts({browserEntries:all});
-const skipped=requested.filter(entry=>quarantined.has(entry.script));
-const entries=requested.filter(entry=>!quarantined.has(entry.script)),scripts=entries.map(entry=>entry.script);
+const skipped=requested.filter(entry=>quarantined.has(entry.script)),excluded=requested.filter(entry=>excludedIds.has(entry.id));
+const entries=requested.filter(entry=>!quarantined.has(entry.script)&&!excludedIds.has(entry.id)),scripts=entries.map(entry=>entry.script);
 if(new Set(entries.map(entry=>entry.id)).size!==entries.length)throw new Error(`Duplicate browser-test id in ${tier}.`);
 for(const entry of all)if(!fs.existsSync(path.join(root,entry.script)))throw new Error(`Browser-test manifest path is missing: ${entry.script}`);
 if(!entries.length&&requested.length)throw new Error(`Browser-test tier ${tier}${domain?` for domain ${domain}`:''} has no runnable tests after quarantine.`);
 if(!requested.length)throw new Error(`Browser-test tier ${tier}${domain?` for domain ${domain}`:''} selected no tests.`);
 if(skipped.length)console.warn(`[browser] QUARANTINED (${skipped.length}): ${skipped.map(entry=>entry.script).join(', ')}`);
+if(excluded.length)console.warn(`[browser] EXCLUDED BY CERTIFICATION OWNER (${excluded.length}): ${excluded.map(entry=>entry.id).join(', ')}`);
 
 function run(script,limitMs=timeoutMs){
   return new Promise((resolve,reject)=>{
@@ -60,4 +62,4 @@ await Promise.all(Array.from({length:Math.min(jobs,shared.length)},async()=>{whi
 for(const entry of remainingIsolated)await attempt(entry);
 // Run everything, then report every failure together.
 if(failures.length)throw new AggregateError(failures,`${failures.length} browser test(s) failed: ${failures.map(error=>error.message).join(' | ')}`);
-console.log(JSON.stringify({status:'PASS',release:releaseConfig.release,tier,domain:domain||null,chromium,tests:scripts.length,quarantined:skipped.length,timeoutMs,jobs},null,2));
+console.log(JSON.stringify({status:'PASS',release:releaseConfig.release,tier,domain:domain||null,chromium,tests:scripts.length,quarantined:skipped.length,excluded:excluded.map(entry=>entry.id),timeoutMs,jobs},null,2));
