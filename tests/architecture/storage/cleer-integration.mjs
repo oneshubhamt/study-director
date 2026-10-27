@@ -203,9 +203,19 @@ assert.match(attachments,/store\.removeMetadata\(\[id\],guard,\{deletionState:\{
 assert.match(attachments,/store\.restoreMetadata\(values,\{deletionState:\{clear:values\.map\(row=>row\?\.id\)\.filter\(Boolean\)\}\}\)/u,'attachment metadata rollback must clear matching deletion markers in the same metadata commit');
 assert.match(backupProvider,/async function cleanupRepositoryProviderState\([\s\S]*assertLease=checkMaintenance\|\|\(async\(\)=>\{if\(maintenanceLease\)await assertRepositoryMaintenance\(selected,maintenanceLease\);\}\)[\s\S]*deleteCheckpoint:async row=>\{await assertLease\(\)[\s\S]*deleteObject:async item=>\{await assertLease\(\)/u,'destructive provider cleanup must reassert its shared renewable guard or maintenance lease before checkpoint and object deletion');
 const engineCleanup=backupProvider.slice(backupProvider.indexOf('async function cleanupRepositoryProviderSafely('),backupProvider.indexOf('async function saveRepositoryProvider('));
-const cleanupStages=['beginRepositoryMaintenance(scoped,','repositoryOperationSelected(owner,{signal,checkProtection:keepAlive})','repositoryProviderState(protectedSelection,{interactive:false,signal,forCleanup:true})','cleanupRepositoryProviderState(protectedSelection,state,{workBudget,checkMaintenance:()=>keepAlive(true),inventoryBeforeDelete:true','endRepositoryMaintenance(scoped,maintenanceLease)'];
+const cleanupStages=[
+  'repositoryProviderState(planning,{interactive:false,signal,forCleanup:true})',
+  'repositoryObjectInventory(planning,{signal})',
+  'beginRepositoryMaintenance(planning,',
+  'repositoryOperationSelected(owner,{signal,checkProtection:keepAlive})',
+  'repositoryProviderInventory(protectedSelection,{signal})',
+  'repositoryCleanupInventoryMatches(state,currentInventory)',
+  'cleanupRepositoryProviderState(protectedSelection,state,{workBudget,preparedObjectListing,checkMaintenance:()=>keepAlive(true),inventoryBeforeDelete:true',
+  'endRepositoryMaintenance(planning,maintenanceLease)'
+];
 let previousStage=-1;
-for(const stage of cleanupStages){const at=engineCleanup.indexOf(stage);assert.ok(at>previousStage,`Repository cleanup must retain renewable exclusion through inspection and cleanup, then release it: ${stage}`);previousStage=at;}
+for(const stage of cleanupStages){const at=engineCleanup.indexOf(stage);assert.ok(at>previousStage,`Repository cleanup must plan without exclusion, acquire its lease only for destructive revalidation/deletion, then release it: ${stage}`);previousStage=at;}
+assert.ok(engineCleanup.indexOf('repositoryObjectInventory(planning,{signal})')<engineCleanup.indexOf('beginRepositoryMaintenance(planning,'),'read-only object inventory must not hold the maintenance exclusion.');
 
 for(const forbidden of ['prepareRepositoryCheckpoint','commitRepositoryCheckpoint','materializeRepositoryCheckpoint','resolveRepositoryConflict'])assert.equal(drive.includes(forbidden),false,`Drive transport must not duplicate repository engine logic: ${forbidden}`);
 assert.match(drive,/MULTIPART_UPLOAD_MAX_BYTES=5\*1024\*1024/u,'Drive must keep an explicit small-object multipart threshold');
