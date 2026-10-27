@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {startReleaseServer,launchChromium,waitFor} from '../../helpers/browser-harness.mjs';
-import {faults,ledger,sync,open,connect,markers,uploadsBy,waiting,sleep} from '../../helpers/drive-browser.mjs';
+import {drive,faults,ledger,sync,open,connect,markers,uploadsBy,waiting,sleep} from '../../helpers/drive-browser.mjs';
 
 // A plan applied on one device reaches the other quickly during a session.
 // The phone (B) runs today's session. The PC (A) shows it running elsewhere,
@@ -18,7 +18,21 @@ const pasteAndApply=name=>`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>set
   const input=document.getElementById('plan-input');input.value=${sched(name)};input.dispatchEvent(new Event('input',{bubbles:true}));await wait(400);
   document.querySelector('[data-action="apply-schedule"]').click();await wait(1500);clearInterval(window.__acceptTimer);d.goTab('execute');await wait(150);return window.__accepted;})()`;
 const screen=page=>page.evaluate(`(async()=>{const d=__PWA6;d.goTab('execute');await new Promise(r=>setTimeout(r,150));const panel=document.getElementById('session-panel'),session=(await d.AppData.activeSession.load()).value;
-  return {mode:d.TimerState.snapshot().mode,panel:panel.checkVisibility()?document.getElementById('session-panel-title').textContent:'',stored:String(session?.scheduleText||''),header:document.getElementById('status-session-label').textContent,overlay:document.getElementById('execute-overlay-title').textContent,now:document.getElementById('pane-execute').innerText.replace(/\\s+/g,' ').slice(0,200)};})()`);
+  return {mode:d.TimerState.snapshot().mode,panel:panel.checkVisibility()?document.getElementById('session-panel-title').textContent:'',stored:String(session?.scheduleText||''),owner:String(session?.runningOn||''),revision:Number(session?.revision)||0,header:document.getElementById('status-session-label').textContent,overlay:document.getElementById('execute-overlay-title').textContent,now:document.getElementById('pane-execute').innerText.replace(/\\s+/g,' ').slice(0,200)};})()`);
+const claimsBy=who=>ledger.filter(line=>line.split(' ')[1]===who&&/ POST \\S+ sc_[a-f0-9]+\\.sdsessionclaim session-claim /u.test(line)).length;
+async function latestClaim(){
+  const rows=[...drive.state.files.values()].filter(file=>!file.trashed&&file.appProperties?.studyDirectorRepositoryKind==='session-claim').sort((a,b)=>String(b.appProperties.studyDirectorRepositoryId||'').localeCompare(String(a.appProperties.studyDirectorRepositoryId||'')));
+  return rows[0]?JSON.parse(await rows[0].content.text()):null;
+}
+const openUploadGates=new Set();
+function gateUploads(){
+  let resolve;const gate=new Promise(done=>{resolve=done;});drive.state.uploadPutGate=gate;
+  const release=()=>{resolve();if(drive.state.uploadPutGate===gate)drive.state.uploadPutGate=null;openUploadGates.delete(release);};openUploadGates.add(release);return release;
+}
+async function holdBackground(page,key){
+  await page.evaluate(`(async()=>{const hold=__PWA6.BackupProviderRuntime.suspendBackground('qa-session-ownership');window[${JSON.stringify(key)}]=hold;await hold.settled;})()`);
+}
+async function releaseBackground(page,key){await page.evaluate(`(()=>{window[${JSON.stringify(key)}]?.release();window[${JSON.stringify(key)}]=null;})()`);}
 const runSession=name=>`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms));document.getElementById('plan-input').value=${sched(name)};const result=d.applySchedule({skipNotify:true});if(result&&result.then)await result;d.goTab('execute');await wait(50);d.setCurrentTask(0);d.TimerEngine.startCur();await wait(300);await d.flushLiveDraft();return d.TimerState.snapshot().mode;})()`;
 async function checkAgain(page,label){
   for(let wait=1;wait>0;){wait=(Date.parse((await sync(page)).checkedAt)||0)+61000-Date.now();if(wait>0)await sleep(wait);}
@@ -39,10 +53,20 @@ try{
   await waitFor(async()=>(await screen(a)).panel==='Running on Another Device',{label:'the PC shows the phone\'s session',timeout:30000});
   await waitFor(async()=>!markers()&&!await waiting(a),{label:'A settles',timeout:90000});
 
-  const before=uploadsBy('A'),asked=await a.evaluate(pasteAndApply('PC'));
+  await holdBackground(a,'__qaOwnershipHold');
+  const before=uploadsBy('A'),beforeClaims=claimsBy('A'),releasePlanClaim=gateUploads(),applying=a.evaluate(pasteAndApply('PC'));
+  await sleep(250);
+  assert.equal(claimsBy('A'),beforeClaims,'the ownership claim remains uncommitted while its Drive write is held');
+  assert.notEqual((await screen(a)).mode,'running','the PC timer stays stopped until the ownership claim is durably verified');
+  releasePlanClaim();
+  const asked=await applying;
   assert.ok(asked.some(text=>/Continue here|running on/iu.test(text)),`applying asks before taking over (${asked.join(' / ')})`);
-  assert.equal((await screen(a)).mode,'running','the PC runs the new plan');
-  await waitFor(async()=>uploadsBy('A')>before&&!await waiting(a),{label:'the PC uploads the new plan without going to the background',timeout:45000});
+  await waitFor(async()=>claimsBy('A')>beforeClaims&&(await screen(a)).mode==='running',{label:'the PC ownership claim starts the timer',timeout:10000});
+  const pcClaim=await latestClaim(),pc=await screen(a);
+  assert.equal(pcClaim.state,'owned');assert.equal(pcClaim.owner,pc.owner);assert.ok(pc.revision>=pcClaim.revision,'local session revision must cover the accepted ownership revision');
+  assert.equal(uploadsBy('A'),before,'a full Drive checkpoint is not on the live ownership critical path');
+  await releaseBackground(a,'__qaOwnershipHold');
+  await waitFor(async()=>uploadsBy('A')>before&&!await waiting(a),{label:'the PC publishes its full state after ownership',timeout:45000});
 
   await checkAgain(b,'B');
   await waitFor(async()=>/PC Block/u.test((await screen(b)).stored),{label:'the phone takes in the new plan',timeout:30000});
@@ -56,16 +80,45 @@ try{
   // Continue Here, once the phone has finished taking in the plan (buttons
   // are locked while a sync applies changes).
   await waitFor(async()=>!markers()&&!await waiting(b)&&await b.evaluate(`(()=>{const button=[...document.querySelectorAll('[data-action="restore-session"]')].find(item=>!item.hidden);return !!button&&!button.disabled;})()`)&&!(await sync(b)).catchingUp,{label:'the phone settles',timeout:90000});
-  const returnUploads=uploadsBy('B');
+  await holdBackground(b,'__qaOwnershipHold');
+  const returnUploads=uploadsBy('B'),returnClaims=claimsBy('B'),releaseReturnClaim=gateUploads();
   await b.evaluate(`(async()=>{${acceptDialogs}__PWA6.goTab('plan');await new Promise(r=>setTimeout(r,150));[...document.querySelectorAll('[data-action="restore-session"]')].find(item=>!item.hidden).click();})()`);
-  await waitFor(async()=>{const moved=await screen(b);if(uploadsBy('B')===returnUploads)assert.notEqual(moved.mode,'running','Continue Here must not run before Drive confirms ownership');return uploadsBy('B')>returnUploads&&moved.mode==='running';},{label:'Continue Here ownership commit',timeout:60000});
+  await sleep(250);
+  assert.equal(claimsBy('B'),returnClaims,'Continue Here has not committed while its ownership write is held');
+  assert.notEqual((await screen(b)).mode,'running','Continue Here keeps the timer stopped before the small ownership claim is durable');
+  releaseReturnClaim();
+  await waitFor(async()=>claimsBy('B')>returnClaims&&(await screen(b)).mode==='running',{label:'Continue Here ownership claim',timeout:10000});
   await b.evaluate(`clearInterval(window.__acceptTimer)`);
-  const moved=await screen(b);
-  assert.equal(moved.mode,'running','Continue Here runs only after the phone ownership checkpoint is confirmed');
+  const moved=await screen(b),phoneClaim=await latestClaim();
+  assert.equal(moved.mode,'running','Continue Here runs after the verified ownership claim');
+  assert.equal(phoneClaim.state,'owned');assert.equal(phoneClaim.owner,moved.owner);assert.ok(moved.revision>=phoneClaim.revision);
+  assert.equal(uploadsBy('B'),returnUploads,'Continue Here does not wait for the full session checkpoint');
   assert.equal(moved.header,'LIVE SESSION','the header follows the session back to this device');
   assert.match(moved.now,/PC Block/u,'with the plan applied on the PC');
+
+  // Hold A's ordinary sync so its stale local owner remains testable. Even an
+  // artificially huge local revision must not beat B's newer ownership epoch.
+  await holdBackground(a,'__qaClaimSyncHold');
+  const stale=await a.evaluate(`(async()=>{const d=__PWA6,loaded=await d.AppData.activeSession.load(),session=structuredClone(loaded.value);session.revision=Math.min(Number.MAX_SAFE_INTEGER-1024,Math.max(1,Number(session.revision)||1)+1000000000);session.updatedAt=new Date().toISOString();const saved=await d.AppData.activeSession.save(session);if(!saved?.ok)throw saved?.error||new Error('stale fixture save failed');try{await d.BackupProviderRuntime.backupRepositoryProvider('google-drive',{interactive:false});return {ok:true};}catch(error){return {ok:false,code:String(error&&error.code||error&&error.name||''),message:String(error&&error.message||error)};}})()`);
+  assert.equal(stale.ok,false);assert.equal(stale.code,'REPOSITORY_SESSION_OWNERSHIP_AHEAD','a stale former owner cannot overwrite the new owner even with a larger local revision');
+  await a.evaluate(`__PWA6.checkSessionOwnershipClaim()`);
+  assert.notEqual((await screen(a)).mode,'running','the old runtime clock stops from the lightweight claim before full reconciliation');
+
+  await releaseBackground(b,'__qaOwnershipHold');
+  await waitFor(async()=>uploadsBy('B')>returnUploads&&!await waiting(b),{label:'the phone publishes its full state after ownership',timeout:45000});
+
+  // Ending the owner session publishes the no-session checkpoint first, then a
+  // higher-epoch released claim. A stale frozen device must not interpret that
+  // release as permission to resume its old timer.
+  const ended=await b.evaluate(`(async()=>{const d=__PWA6;d.TimerEngine.stopExecution();const cleared=await d.AppData.activeSession.clear();if(cleared?.ok===false)throw cleared.error||new Error('session clear failed');return d.BackupProviderRuntime.backupRepositoryProvider('google-drive',{interactive:false});})()`);
+  assert.ok(ended?.checkpointId,'the owner publishes the ended-session checkpoint');
+  await waitFor(async()=>{const claim=await latestClaim();return claim?.state==='released';},{label:'released session ownership',timeout:10000});
+  await a.evaluate(`__PWA6.checkSessionOwnershipClaim()`);
+  assert.notEqual((await screen(a)).mode,'running','a released claim never resurrects a stale frozen timer');
+  await releaseBackground(a,'__qaClaimSyncHold');
+  a.evaluate(`__PWA6.BackupProviderRuntime.scheduleSharedSync('google-drive','qa-release')`);
   for(const page of [a,b])assert.deepEqual(page.warnings.filter(text=>/\[Study Director\]/u.test(text)),[]);
   assert.deepEqual(faults,[]);
-  console.log(JSON.stringify({status:'PASS',checks:{asksBeforeTakeover:true,uploadsAtOnce:true,phoneShowsNewPlan:true,continueHere:true,ownershipConfirmedBeforeRun:true}}));
+  console.log(JSON.stringify({status:'PASS',checks:{asksBeforeTakeover:true,lightweightOwnershipBeforeTimer:true,planTakeoverUsesSameFence:true,staleOwnerFence:true,releasedClaimDoesNotResume:true,uploadsAtOnce:true,phoneShowsNewPlan:true,continueHere:true}}));
 }catch(error){console.error(ledger.slice(-30).join('\n'));throw error;}
-finally{await first.close();await second.close();await server.close();}
+finally{for(const release of [...openUploadGates])release();drive.state.uploadPutGate=null;await first.close();await second.close();await server.close();}

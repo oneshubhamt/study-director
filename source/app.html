@@ -1097,7 +1097,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
             <summary><span class="backup-model-summary"><span class="backup-model-summary-title">Backup model</span><span class="backup-model-summary-copy">Local-first · syncs through Drive</span></span></summary>
             <div class="backup-model-body ui-helper">
               <dl class="backup-model-explainer">
-                <div><dt>Versions</dt><dd>The Device Folder and Google Drive each keep verified versions independently, using the same retention rules. Each version is a complete copy of your data, even though unchanged parts are stored once.</dd></div>
+                <div><dt>Versions</dt><dd>The Device Folder keeps verified versions in a folder you choose on this device; Google Drive keeps the same history off this device. Each version is a complete copy of your data, even though unchanged parts are stored once.</dd></div>
                 <div><dt>Several devices</dt><dd>While a device is signed in to Google Drive it syncs: it takes in what your other devices changed, then uploads its own changes. A change made on one side only is taken for you. Where both sides changed the same thing, the newer shows and the other is kept for you, marked Needs review; edits to different paragraphs of a note are joined for you. Saved data and the Active Session travel too; changes to a session running here wait until it ends. Without Drive, each device keeps working on its own.</dd></div>
                 <div><dt>Portable backup</dt><dd>Export backup creates one complete <span class="ui-mono">.sdbackup</span> file for manual transfer or safekeeping. Restore it on any Study Director device when needed; it is not part of Version History.</dd></div>
               </dl>
@@ -1114,13 +1114,13 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                 <button class="mini-btn ui-btn" id="open-version-history" type="button" data-action="open-version-history" aria-haspopup="dialog" aria-controls="managed-version-history">Version History</button>
               </div>
             </div>
-            <p class="ui-helper" id="backup-retention-note">Your backups keep 15 versions: the latest, 6 daily, 4 weekly and 4 monthly, so about four to five months back. They also keep one version per hour from the last 24 hours when your notes changed, up to 10 more. Before a restore, each device also keeps a safety version for 7 days. The Device Folder and Google Drive use the same retention rules but keep independent version histories.</p>
+            <p class="ui-helper" id="backup-retention-note">Your backups keep 15 versions: the latest, 6 daily, 4 weekly and 4 monthly, so about four to five months back. They also keep one version per hour from the last 24 hours when your notes changed, up to 10 more. Before a restore, each device also keeps a safety version for 7 days. The Device Folder and Google Drive keep the same history.</p>
             <div class="backup-location-stack" aria-label="Automatic backup locations">
               <div class="backup-location-row backup-device-row">
                 <div class="backup-row-copy">
                   <div class="backup-location-heading">
                     <span class="ui-label">Device Folder</span>
-                    <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="device-backup-info" aria-label="About Device Folder backup" aria-expanded="false" aria-controls="device-backup-info">i</button><span class="pnote-info-popover" id="device-backup-info" role="note" hidden>Versions saved automatically in a folder you choose on this device. With Google Drive connected too, each destination backs up this device’s canonical data independently. Use a folder only this device uses, not one that Dropbox, OneDrive or iCloud syncs between devices.</span></span>
+                    <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="device-backup-info" aria-label="About Device Folder backup" aria-expanded="false" aria-controls="device-backup-info">i</button><span class="pnote-info-popover" id="device-backup-info" role="note" hidden>Versions saved automatically in a folder you choose on this device. With Google Drive connected too, both keep the same history. Use a folder only this device uses, not one that Dropbox, OneDrive or iCloud syncs between devices.</span></span>
                   </div>
                 </div>
                 <strong class="backup-status-value standard ui-mono" id="device-backup-status">Off</strong>
@@ -2780,13 +2780,13 @@ async function checkSessionOwnershipClaim(){
   try{
     const [claim,loaded]=await Promise.all([BackupProviderRuntime.readSessionClaim('google-drive'),AppData.activeSession.load(0,{strict:true})]);
     if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be checked safely.');
-    const session=loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null,mine=!!(session&&session.runningOn===InstallationIdentity.getId()),remote=!!(claim&&claim.applies&&!claim.ownedHere);
+    const session=loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null,me=InstallationIdentity.getId(),remote=!!(claim&&session&&claim.date===session.date&&claim.owner!==me),mine=!!(session&&session.runningOn===me);
     if(remote&&mine&&TASKS.length){
-      const now=DecisionClock.nowMs(),same=sessionClaimFreeze&&sessionClaimFreeze.epoch===claim.epoch;
+      const now=DecisionClock.nowMs(),same=sessionClaimFreeze&&sessionClaimFreeze.epoch===claim.epoch&&sessionClaimFreeze.owner===claim.owner;
       if(!same){
         try{await flushLiveDraft();}catch(error){AppDiagnostics.capture('session.claim-flush',error,'warn');}
         const frozenSinceMs=DecisionClock.nowMs();TimerEngine.stopExecution();
-        sessionClaimFreeze=Object.freeze({epoch:claim.epoch,frozenSinceMs,lastSyncAt:0});
+        sessionClaimFreeze=Object.freeze({epoch:claim.epoch,owner:claim.owner,date:claim.date,frozenSinceMs,lastSyncAt:0});
         setPlanStatus('Today’s session moved to another device. Syncing its latest state…');
       }
       const current=sessionClaimFreeze;
@@ -2797,8 +2797,14 @@ async function checkSessionOwnershipClaim(){
       return true;
     }
     if(sessionClaimFreeze){
-      if(mine&&(!claim||claim.ownedHere||!claim.applies))return resumeAfterReleasedSessionClaim(session);
-      if(!mine||!TASKS.length)sessionClaimFreeze=null;
+      if(mine&&claim?.state==='owned'&&claim.owner===me&&claim.date===session?.date)return resumeAfterReleasedSessionClaim(session);
+      if(!mine||!TASKS.length){sessionClaimFreeze=null;return false;}
+      const now=DecisionClock.nowMs(),current=sessionClaimFreeze;
+      if(!current.lastSyncAt||now-current.lastSyncAt>=SESSION_CLAIM_SYNC_RETRY_MS){
+        sessionClaimFreeze=Object.freeze({...current,lastSyncAt:now});
+        BackupProviderRuntime.scheduleSharedSync('google-drive','session-claim-release');
+      }
+      return true;
     }
     return false;
   }catch(error){AppDiagnostics.capture('session.claim-watch',error,'warn');return false;}
@@ -3131,8 +3137,7 @@ function renderBackupActions(){
   if(backupNow){backupNow.disabled=busy;backupNow.title=busy&&syncText?syncText:rows.some(row=>row.maintenanceBusy)?'Background backup maintenance will yield to Back up now.':'';}
   if(versions){versions.disabled=busy&&!recovering;versions.title=recovering?'Reopen the active recovery operation.':busy&&syncText?syncText:'';}
 }
-// Back up each enabled destination independently. The sequential UI action
-// avoids overlapping foreground operations; neither destination consumes the other.
+// The Device Folder backs up first, so Drive can take its version.
 async function backUpEverywhere(){
   let done=false;
   if(DeviceBackup.status().connected)done=await DeviceBackup.backupNow()!==false||done;
@@ -5043,47 +5048,61 @@ async function confirmSessionTakeover(session,{replace=false}={}){
     confirmLabel:replace?'Apply here':'Continue here',cancelLabel:'Not now'
   });
 }
+async function transferSessionOwnershipHere(session){
+  if(!appCanMutate())throw new Error('Study Director does not currently have write control.');
+  if(!BackupProviderRuntime.connected('google-drive'))throw new Error('Google Drive must be connected to transfer a session that belongs to another device.');
+  const previous=ActiveSessionCodec.sanitizeCurrent(session),planned=previous?ActiveSessionCodec.sanitizeCurrent({...previous,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(previous.revision),updatedAt:new Date().toISOString()}):null;
+  if(!previous||!planned)throw new Error('the transferred session state is invalid');
+  let next=planned;
+  let ownershipClaim=null,backgroundHold=null,localSaved=false,rolledBack=false;
+  try{
+    backgroundHold=BackupProviderRuntime.suspendBackground('session-takeover');await backgroundHold.settled;
+    setPlanStatus('Transferring today’s session to this device…');
+    const claimed=await BackupProviderRuntime.claimSessionOwnership('google-drive',{date:previous.date,observedOwner:previous.runningOn,observedRevision:previous.revision,revision:planned.revision});
+    if(!claimed||claimed.status!=='completed'||!claimed.claim)throw new Error('Google Drive did not confirm the Active Session ownership claim.');
+    ownershipClaim=claimed.claim;
+    next=ActiveSessionCodec.sanitizeCurrent({...planned,revision:Math.max(planned.revision,Number(ownershipClaim.revision)||0),updatedAt:new Date().toISOString()});
+    if(!next)throw new Error('the accepted Active Session ownership revision is invalid');
+    const saved=await AppData.activeSession.save(next);
+    if(!handleActiveSessionRepositoryResult(saved,'save'))throw saved.error||new Error('the session could not be saved on this device');
+    localSaved=true;
+    const current=(await AppData.activeSession.load())?.value||null;
+    if(!CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),next))throw new Error('the session changed locally before its ownership transfer could finish');
+    backgroundHold.release();backgroundHold=null;
+    notifyBackupChange({urgent:true,reason:'session-continue'});
+    return Object.freeze({previous,session:saved.value||next,claim:ownershipClaim});
+  }catch(error){
+    if(localSaved){
+      try{
+        const current=(await AppData.activeSession.load())?.value||null;
+        if(CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),next)){const restored=await AppData.activeSession.save(previous);if(!restored?.ok)throw restored?.error||new Error('session rollback failed');rolledBack=true;}
+      }catch(rollbackError){AppDiagnostics.capture('session.takeover-local-rollback',rollbackError,'warn');}
+    }
+    if(ownershipClaim&&(!localSaved||rolledBack))await BackupProviderRuntime.releaseSessionClaim('google-drive',ownershipClaim);
+    else if(ownershipClaim)notifyBackupChange({urgent:true,reason:'session-continue'});
+    try{BackupProviderRuntime.wakeBackground('session-watch');}catch{}
+    throw error;
+  }finally{backgroundHold?.release();}
+}
 async function continueSessionHere(){
   if(!appCanMutate())return false;
-  let previous=null,localClaim=null,ownershipClaim=null,backgroundHold=null,committed=false;
+  let previous=null;
   try{
     const loaded=await AppData.activeSession.load(),session=loaded&&loaded.value||null;
     if(!session){setSessionPanelMode('none');return false;}
     if(!sessionFromElsewhere(session))return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
     if(sessionRunsElsewhere(session)&&!await confirmSessionTakeover(session))return false;
     if(!appCanMutate())return false;
-    if(!BackupProviderRuntime.connected('google-drive'))throw new Error('Google Drive must be connected to transfer a session that belongs to another device.');
     previous=ActiveSessionCodec.sanitizeCurrent(session);
-    localClaim=ActiveSessionCodec.sanitizeCurrent({...session,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(session.revision),updatedAt:new Date().toISOString()});
-    if(!previous||!localClaim)throw new Error('the transferred session state is invalid');
-    backgroundHold=BackupProviderRuntime.suspendBackground('session-takeover');await backgroundHold.settled;
-    setPlanStatus('Transferring today’s session to this device…');
-    const saved=await AppData.activeSession.save(localClaim);
-    if(!handleActiveSessionRepositoryResult(saved,'save'))throw saved.error||new Error('the session could not be prepared on this device');
-    const claimed=await BackupProviderRuntime.claimSessionOwnership('google-drive',{date:session.date,observedOwner:session.runningOn,observedRevision:session.revision});
-    if(!claimed||claimed.status!=='completed'||!claimed.claim)throw new Error('Google Drive did not confirm the Active Session ownership claim.');
-    ownershipClaim=claimed.claim;
-    const publication=await BackupProviderRuntime.publishSharedStateNow('google-drive',{reason:'session-continue'});
-    if(!publication?.ok)throw Object.assign(new Error(publication?.message||'Google Drive could not confirm the session ownership transfer.'),{code:String(publication?.code||'SESSION_OWNERSHIP_UNCONFIRMED')});
-    const current=(await AppData.activeSession.load())?.value||null;
-    if(!CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),localClaim))throw new Error('the session changed locally before its ownership transfer could finish');
-    committed=true;backgroundHold.release();backgroundHold=null;
-    void BackupProviderRuntime.compactSessionClaims('google-drive',ownershipClaim).catch(error=>AppDiagnostics.capture('session.claim-compact',error,'warn'));
-    notifyBackupChange({urgent:true,reason:'session-continue'});
-    return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
+    const moved=await transferSessionOwnershipHere(session);
+    return moved.previous.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
   }catch(error){
-    if(!committed&&previous&&localClaim){
-      try{const current=(await AppData.activeSession.load())?.value||null;if(CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),localClaim)){const restored=await AppData.activeSession.save(previous);if(!restored?.ok)throw restored?.error||new Error('session rollback failed');}}
-      catch(rollbackError){AppDiagnostics.capture('session.continue-claim-rollback',rollbackError,'warn');}
-    }
-    if(ownershipClaim)await BackupProviderRuntime.releaseSessionClaim('google-drive',ownershipClaim);
-    try{BackupProviderRuntime.wakeBackground('session-watch');}catch{}
     setPlanStatus('Could not continue today’s session here: '+(error&&error.message?error.message:error),false);
     if(previous)setSessionPanelMode(sessionRunsElsewhere(previous)?'elsewhere':'suspended',previous);
     return false;
-  }finally{backgroundHold?.release();}
+  }
 }
-// Another device continued today's session after this one changed it: the
+// Another device continued today's session// Another device continued today's session after this one changed it: the
 // timer stops here and this device's progress stays as a suspended session,
 // so the review can offer both.
 async function yieldSessionToOtherDevice(){
@@ -9865,6 +9884,7 @@ AppActivation.subscribe(event=>{if([APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTI
 BackupProviderRuntime.configureAutomaticBackup(Object.freeze({covered:id=>verifiedRecoveryState.providers[id]?.sourceRevision||'',current:()=>currentBackupSourceRevision(),ready:async()=>await canonicalLocalRecoveryEmpty()===false}));
 BackupProviderRuntime.configureSessionOwnership(Object.freeze({
   installationId:()=>InstallationIdentity.getId(),
+  today:()=>todayISO(),
   read:async()=>{const loaded=await AppData.activeSession.load(0,{strict:true});if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be read safely.');const value=loaded.value;return value?Object.freeze({date:value.date,runningOn:value.runningOn,revision:value.revision}):null;}
 }));
 // Each location's integrity state is kept under its location id.
@@ -10371,7 +10391,7 @@ function currentBackupDiagnosticStates(){
   });
   // Sync with Drive and the profiles on this device: what to read first when
   // a device does not sync.
-  sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,turnWaits:value.turnWaits,keptVersions:KeptVersions.count()})));
+  sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,waitingForDeviceFolder:value.waitingForDeviceFolder,turnWaits:value.turnWaits,keptVersions:KeptVersions.count()})));
   sample('Profiles',()=>({count:Profiles.list().length,pending:Profiles.removalPending(),unsupported:Profiles.unsupported()}),value=>[{job:'Profiles',state:value.unsupported?'unsupported':value.pending?'pending':'observed',profiles:value.count,removalPending:value.pending>0}]);
   sample('Unsupported data',()=>UnsupportedData.summary(),value=>[{job:'Unsupported data',state:value.blocked?'blocked':value.protected?'held':value.held?'replaceable':'none',held:value.held,protectedCount:value.protected,savedDays:value.items.days,notes:value.items.notes,assets:value.items.attachments,sessions:value.items.sessions,settings:value.items.settings}]);
   sample('Provider background',()=>BackupProviderRuntime.backgroundStatus(),values=>values);return states;
@@ -10474,7 +10494,19 @@ const CLICK_ACTIONS=Object.freeze({
   'confirm-plan-edit': ()=>uploadSoonAfterPlanApply(PlanDraftEditor.confirm()),
   'cancel-plan-edit': PlanDraftEditor.cancel,
   'load-default': loadDefaultPlan,
-  'apply-schedule': async()=>{if(sessionPanelMode==='elsewhere'&&!TASKS.length&&!await confirmSessionTakeover(sessionPanelSession,{replace:true}))return false;const result=uploadSoonAfterPlanApply(applySchedule());if(result&&typeof result.finally==='function')return result.finally(()=>schedulePwaUpdateEvaluation(250));schedulePwaUpdateEvaluation(250);return result;},
+  'apply-schedule': async()=>{
+    let takeover=null;
+    if(sessionPanelMode==='elsewhere'&&!TASKS.length){
+      if(!await confirmSessionTakeover(sessionPanelSession,{replace:true}))return false;
+      try{takeover=await transferSessionOwnershipHere(sessionPanelSession);}
+      catch(error){setPlanStatus('Could not move today’s session here: '+(error&&error.message?error.message:error),false);return false;}
+    }
+    try{
+      let result=uploadSoonAfterPlanApply(applySchedule(takeover?{source:'ownership-takeover'}:{}));if(result&&typeof result.then==='function')result=await result;
+      if(result===false&&takeover)await attemptAutoRestoreActiveSession();
+      return result;
+    }finally{schedulePwaUpdateEvaluation(250);}
+  },
   'clear-schedule-draft': PlanDraftEditor.clear,
   'open-notes': openNotesLibrary,
   'toggle-pnote-info': togglePnoteInfo,
