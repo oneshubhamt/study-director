@@ -4065,6 +4065,15 @@
         ?remember(preparedRevisions,revision,cached,PREPARED_REVISION_CACHE_LIMIT)
         :remember(preparedRevisions,revision,Object.freeze({records:Object.freeze(records),revision}),PREPARED_REVISION_CACHE_LIMIT);
     };
+    // A worker receives records already normalized by this same engine on the
+    // host. Re-walking and copying the full history there buys no additional
+    // canonicalization, so preserve that prepared representation directly.
+    const reusePrepared=(recordsInput,revision)=>{
+      if(!Array.isArray(recordsInput))throw new TypeError('Prepared Insights records are invalid.');
+      const key=String(revision||'').trim();
+      if(!key||key.length>200)throw new TypeError('Prepared Insights revision is invalid.');
+      return Object.freeze({records:Object.freeze(recordsInput),revision:key});
+    };
     const historyEntry=(prepared,options={})=>{
       const currentStudyDate=isIsoDate(options.currentStudyDate)?options.currentStudyDate:localIsoDate();
       const key=`${prepared.revision}|${currentStudyDate}|${options.subjectReferenceRevision||summariesRevisionKey(options.subjectReferenceSummaries)}`;
@@ -4087,6 +4096,7 @@
         return buildPrepared(records,prepared,options);
       },
       prepare,
+      reusePrepared,
       buildPrepared,
       releaseTransient,
       getLabEvidence:(prepared,options)=>labEvidence(historyEntry(prepared,options)),
