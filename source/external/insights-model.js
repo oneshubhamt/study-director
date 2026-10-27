@@ -3193,11 +3193,18 @@
       : {ready:false,rows:strongPredictions.length,reason:`Need ${MIN_FORECAST_BACKTESTS}+ rolling strong-day forecasts with both outcomes.`};
     const foldCounters={0:0,1:0};
     const foldAssignments=strongPredictions.map(row=>{const key=row.actualStrong?1:0;return foldCounters[key]++%FORECAST_CALIBRATION_FOLDS;});
-    const crossCalibrated=calibrator.ready?strongPredictions.map((row,index)=>{
-      const training=strongPredictions.filter((candidate,candidateIndex)=>foldAssignments[candidateIndex]!==foldAssignments[index]);
+    // Every row assigned to the same fold has the exact same cross-fit
+    // training set. Fit that set once per fold instead of recomputing an
+    // identical regularized model for every held-out prediction.
+    const foldFits=calibrator.ready?Array.from({length:FORECAST_CALIBRATION_FOLDS},(_,fold)=>{
+      const training=strongPredictions.filter((_candidate,candidateIndex)=>foldAssignments[candidateIndex]!==fold);
       if(training.filter(candidate=>candidate.actualStrong).length<2||training.filter(candidate=>!candidate.actualStrong).length<2)return null;
-      const foldFit=fitRegularizedLogistic(training.map(candidate=>({x:[logit(candidate.rawStrongProbability)],y:candidate.actualStrong})),{lambda:4,minimumRows:Math.max(10,Math.floor(MIN_FORECAST_BACKTESTS*2/3))});
-      return foldFit.ready?predictRegularizedLogistic(foldFit,[logit(row.rawStrongProbability)],.8).mean:null;
+      const fit=fitRegularizedLogistic(training.map(candidate=>({x:[logit(candidate.rawStrongProbability)],y:candidate.actualStrong})),{lambda:4,minimumRows:Math.max(10,Math.floor(MIN_FORECAST_BACKTESTS*2/3))});
+      return fit.ready?fit:null;
+    }):[];
+    const crossCalibrated=calibrator.ready?strongPredictions.map((row,index)=>{
+      const foldFit=foldFits[foldAssignments[index]];
+      return foldFit?predictRegularizedLogistic(foldFit,[logit(row.rawStrongProbability)],.8).mean:null;
     }):[];
     const crossFitReady=strongPredictions.length>=MIN_FORECAST_BACKTESTS&&crossCalibrated.length===strongPredictions.length&&crossCalibrated.every(Number.isFinite);
     const evaluated=strongPredictions.map((row,index)=>({...row,calibrated:crossFitReady?crossCalibrated[index]:row.rawStrongProbability}));
