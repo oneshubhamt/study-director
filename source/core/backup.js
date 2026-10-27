@@ -402,7 +402,7 @@ async function applyResolvedSavedDays(resolvedPlan,operation,reportProgress=null
   if(deletionLedgerChanged)await AppData.deletionRecovery.replaceSavedDays(expectedDeletions);
   // Mutation receipts come from canonical storage after its own normalization.
   // The resolved intent is checked before the receipt is trusted.
-  const storedDeletions=deletionLedgerChanged?await AppData.deletionRecovery.savedDays():currentDeletions;
+  const storedDeletions=deletionLedgerChanged?freeze([...(await AppData.deletionRecovery.savedDays())]):null;
   let committedRecords=freeze([]);
   if(recordsToSave.length){
     committedRecords=freeze(currentDailyRecords(await getDailyRecordDocumentsByDates(recordsToSave.map(record=>record.date)),'Committed Saved Days'));
@@ -420,7 +420,7 @@ async function applyResolvedSavedDays(resolvedPlan,operation,reportProgress=null
   const replaced=items.filter(item=>item.changed&&item.state==='record'&&item.hadLocal).length;
   const kept=items.filter(item=>{const planItem=planItems.get(item.date);return !!(planItem&&planItem.conflict&&planItem.localCandidateId&&item.candidateId===planItem.localCandidateId);}).length;
   const identical=[...planItems.values()].filter(item=>item.identical).length;
-  return freeze({changed:recordsToSave.length>0||deletionsToApply.length>0||deletionLedgerChanged,count:added,replaced,deleted,kept,identical,batches,appliedRecords:committedRecords,expectedDeletions:freeze([...storedDeletions])});
+  return freeze({changed:recordsToSave.length>0||deletionsToApply.length>0||deletionLedgerChanged,count:added,replaced,deleted,kept,identical,batches,appliedRecords:committedRecords,removedRecordDates:freeze(deletionsToApply.map(item=>item.date).sort()),expectedDeletions:storedDeletions});
 }
 async function applyResolvedNotes(resolvedPlan){
   const changed=(resolvedPlan&&resolvedPlan.notes||[]).filter(item=>item.changed),writes=changed.filter(item=>item.state==='record'&&item.value&&typeof item.value==='object'),deletions=changed.filter(item=>item.state==='deleted'&&item.deletedAt).map(item=>freeze({key:item.key,deletedAt:item.deletedAt}));
@@ -1156,17 +1156,17 @@ async function selectResolvedImportedAssets(assessment,resolvedPlan,signal,attac
   return freeze({available:freeze(selected),toWrite:freeze(toWrite),reused:selected.length-toWrite.length,references});
 }
 async function commitImportedAssets(selection,signal,attachmentPlan=null){
-  if(!portableAssets||!selection)return freeze({written:0,published:0,reused:0,deleted:0,expected:freeze([]),expectedRemovedIds:freeze([]),references:freeze([]),expectedDeletions:freeze([])});
+  if(!portableAssets||!selection)return freeze({written:0,published:0,reused:0,deleted:0,expected:freeze([]),expectedRemovedIds:freeze([]),references:freeze([]),expectedDeletions:null});
   throwIfImportAborted(signal);
   const selected=selection.available||freeze([]),published=selected.length;
   if(published)await AssetData.importAll(selected,signal);
   throwIfImportAborted(signal);
   const deleteLocalIds=attachmentPlan&&attachmentPlan.deleteLocalIds||freeze([]);let deleted=0;
   if(deleteLocalIds.length){const result=await AssetData.removeMetadata(deleteLocalIds);deleted=Math.max(0,Number(result&&result.removed)||0);}
-  const expectedDeletions=attachmentPlan&&attachmentPlan.expectedDeletions||freeze([]);
-  await AppData.deletionRecovery.replaceAttachments(expectedDeletions);
-  const storedDeletions=freeze([...(await AppData.deletionRecovery.attachments())]);
-  return freeze({written:(selection.toWrite||[]).length,published,reused:Number(selection.reused)||0,deleted,changed:!!(published||deleted||attachmentPlan?.deletionLedgerChanged),expected:freeze([...selected]),expectedRemovedIds:freeze([...deleteLocalIds]),references:selection.references||freeze([]),expectedDeletions:storedDeletions});
+  const expectedDeletions=attachmentPlan&&attachmentPlan.expectedDeletions||freeze([]),deletionLedgerChanged=attachmentPlan?.deletionLedgerChanged===true;
+  if(deletionLedgerChanged)await AppData.deletionRecovery.replaceAttachments(expectedDeletions);
+  const storedDeletions=deletionLedgerChanged?freeze([...(await AppData.deletionRecovery.attachments())]):null;
+  return freeze({written:(selection.toWrite||[]).length,published,reused:Number(selection.reused)||0,deleted,changed:!!(published||deleted||deletionLedgerChanged),expected:freeze([...selected]),expectedRemovedIds:freeze([...deleteLocalIds]),references:selection.references||freeze([]),expectedDeletions:storedDeletions});
 }
 async function restoreSnapshotAssets(snapshot){
   if(!portableAssets||Number(snapshot&&snapshot.formatVersion)<10)return freeze({restored:false,removed:0,written:0});
@@ -1190,12 +1190,12 @@ async function verifyRestoreDomain(domain,work){
 async function verifyRestoreCommit(expected,signal,authorityOptions=null){
   throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);
   const records=Array.isArray(expected.records)?expected.records:[];
-  if(records.length||Array.isArray(expected.recordDatesExact))await verifyRestoreDomain('saved-days',async()=>{
+  if(records.length||Array.isArray(expected.removedRecordDates)||Array.isArray(expected.recordDatesExact))await verifyRestoreDomain('saved-days',async()=>{
     if(records.length){
       const stored=await getDailyRecordDocumentsByDates(records.map(record=>record.date)),byDate=new Map(stored.map(record=>[record.date,sanitizeCurrentDailyRecord(record)]));
       for(const record of records)if(!Canonical.same(byDate.get(record.date),sanitizeCurrentDailyRecord(record)))throw new Error(`Post-restore verification failed for saved day ${record.date}.`);
     }
-    if(Array.isArray(expected.recordDatesExact)){const actual=[...((await AppData.dailyRecords.backupDates()).dates||[])].sort(),wanted=[...expected.recordDatesExact].sort();if(actual.length!==wanted.length||actual.some((date,index)=>date!==wanted[index]))throw new Error('Post-restore verification found Saved Days outside the selected version.');}
+    if(Array.isArray(expected.removedRecordDates)&&expected.removedRecordDates.length){const remaining=new Set((await getDailyRecordDocumentsByDates(expected.removedRecordDates)).map(record=>record.date));for(const date of expected.removedRecordDates)if(remaining.has(date))throw new Error(`Post-restore verification failed to remove saved day ${date}.`);}if(Array.isArray(expected.recordDatesExact)){const actual=[...((await AppData.dailyRecords.backupDates()).dates||[])].sort(),wanted=[...expected.recordDatesExact].sort();if(actual.length!==wanted.length||actual.some((date,index)=>date!==wanted[index]))throw new Error('Post-restore verification found Saved Days outside the selected version.');}
   });
   if(expected.notes||Array.isArray(expected.noteItems))await verifyRestoreDomain('notes',async()=>{
     if(expected.notes){const stored=AppData.notes.normalizePayload(await AppData.notes.readFreshPayload());if(!Canonical.same(stored,expected.notes))throw new Error('Post-restore verification failed for notes.');}
@@ -1636,7 +1636,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       await AppData.restoreJournal.mark(restoreId,'saved-day-state-committed');
       throwIfImportAborted(signal);await yieldImport(signal);return result;
     });
-    const {count,replaced,deleted,kept,identical,batches,appliedRecords,expectedDeletions}=dailyResult;
+    const {count,replaced,deleted,kept,identical,batches,appliedRecords,removedRecordDates,expectedDeletions}=dailyResult;
     const noteResult=await runRestoreMutationStage('notes',async()=>{
       await AppData.restoreJournal.mark(restoreId,'applying-notes');
       const result=await applyResolvedNotes(resolvedPlan);
@@ -1662,19 +1662,22 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       if(result.changed)committedDescription+=(committedDescription?' and ':'')+'the Active Session was already saved';
       await AppData.restoreJournal.mark(restoreId,'active-session-committed');return result;
     });
-    const localPersonal=rollbackJournal.importedPersonalData;
-    const intendedPersonal=localPersonal?BackupCodec.normalizePersonalData({version:2,plans:decisions.plans==='replace'&&parsed.importedPersonalData?parsed.importedPersonalData.plans:localPersonal.plans,preferences:decisions.personalSettings==='replace'&&parsed.importedPersonalData?parsed.importedPersonalData.preferences:localPersonal.preferences}):null;
+    const localPersonal=rollbackJournal.importedPersonalData,personalChanged=!!parsed.importedPersonalData&&(decisions.plans==='replace'||decisions.personalSettings==='replace');
     let committedPersonal=null;
-    if(intendedPersonal)committedPersonal=await runRestoreMutationStage('personal-data',async()=>{await AppData.restoreJournal.mark(restoreId,'applying-personal-data');await personalImport(intendedPersonal);const committed=BackupCodec.normalizePersonalData(await personalExport({flush:false}));if(!committed||!Canonical.same(committed,intendedPersonal))throw new Error('Personal-data reconciliation commit did not match the resolved state.');return freeze(committed);});
-    const personalChanged=!!parsed.importedPersonalData&&(decisions.plans==='replace'||decisions.personalSettings==='replace');
+    if(personalChanged){
+      const intendedPersonal=BackupCodec.normalizePersonalData(localPersonal?{version:2,plans:decisions.plans==='replace'?parsed.importedPersonalData.plans:localPersonal.plans,preferences:decisions.personalSettings==='replace'?parsed.importedPersonalData.preferences:localPersonal.preferences}:parsed.importedPersonalData);
+      if(!intendedPersonal)throw new Error('Resolved Personal Data is outside the current canonical schema.');
+      committedPersonal=await runRestoreMutationStage('personal-data',async()=>{await AppData.restoreJournal.mark(restoreId,'applying-personal-data');await personalImport(intendedPersonal);const committed=BackupCodec.normalizePersonalData(await personalExport({flush:false}));if(!committed||!Canonical.same(committed,intendedPersonal))throw new Error('Personal-data reconciliation commit did not match the resolved state.');return freeze(committed);});
+    }
     const expectedCommit={
-      personalData:committedPersonal,records:appliedRecords,
-      noteItems:noteResult.expectedItems,
-      assets:portableAssets&&Number(parsed.formatVersion)>=10?assetResult.expected:undefined,
-      removedAssetIds:portableAssets&&Number(parsed.formatVersion)>=10?assetResult.expectedRemovedIds:undefined,
-      savedDayDeletions:expectedDeletions,
-      noteDeletions:noteResult.expectedDeletions,
-      attachmentDeletions:assetResult.expectedDeletions,
+      ...(committedPersonal?{personalData:committedPersonal}:{}),
+      ...(appliedRecords.length?{records:appliedRecords}:{}),
+      ...(removedRecordDates.length?{removedRecordDates}:{}),
+      ...(noteResult.expectedItems?.length?{noteItems:noteResult.expectedItems}:{}),
+      ...(portableAssets&&Number(parsed.formatVersion)>=10&&assetResult.changed?{assets:assetResult.expected,removedAssetIds:assetResult.expectedRemovedIds}:{}),
+      ...(Array.isArray(expectedDeletions)?{savedDayDeletions:expectedDeletions}:{}),
+      ...(Array.isArray(noteResult.expectedDeletions)?{noteDeletions:noteResult.expectedDeletions}:{}),
+      ...(Array.isArray(assetResult.expectedDeletions)?{attachmentDeletions:assetResult.expectedDeletions}:{}),
       ...(reviewResult.expectedItems?.length?{pendingReviewItems:reviewResult.expectedItems}:{})
     };
     if(sessionResult.changed){expectedCommit.activeSession=sessionResult.expected;expectedCommit.scheduleText=sessionResult.scheduleText||'';}
