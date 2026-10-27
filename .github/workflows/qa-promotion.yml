@@ -43,12 +43,12 @@ jobs:
       - name: Non-browser release certification
         run: npm run test:release
       - name: Locate Chromium
-        if: inputs.run_browser || github.event_name == 'push'
+        if: inputs.run_browser || github.event_name == 'push' || github.event_name == 'push'
         shell: bash
         run: |
           CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
           test -n "$CHROME"
           echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
       - name: Complete browser certification + built-runtime coverage
-        if: inputs.run_browser || github.event_name == 'push'
+        if: inputs.run_browser || github.event_name == 'push' || github.event_name == 'push'
         run: npm run test:coverage:browser
