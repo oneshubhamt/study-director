@@ -199,7 +199,7 @@ for(const [stage,code,hasLiveTasks] of preflightCases){
   assert.equal(preflightHarness.diagnosticMarks.at(-1)[1].errorCode,code);
 }
 
-const verificationReview=pendingReviewCodec.create({subject:'note',ref:'Checkpoint',kept:checkpointNotes.Checkpoint,keptAt:'2026-08-20T13:00:00.000Z'});
+const verificationReview=pendingReviewCodec.create({subject:'note',ref:'Checkpoint',kept:freeze({text:checkpointNotes.Checkpoint.text}),keptAt:'2026-08-20T13:00:00.000Z'});
 const verificationBlob=await makeCheckpoint({records:checkpointRecords,deletions:checkpointDeletions,notes:checkpointNotes,activeSession:checkpointSession,pendingReviews:[verificationReview]});
 for(const domain of ['saved-days','notes','attachments','personal','pending-reviews','deletions','active-session']){
   const verificationState=createState(),verificationHarness=createHarness(verificationState,{verificationFailure:domain});
