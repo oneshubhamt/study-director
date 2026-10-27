@@ -1146,8 +1146,8 @@ registry.define('backup-provider',1,input=>{
         const owed=!!await pendingRetryState(selected)||providerPublications.get(selected.id)?.continuation.status().pending===true,syncDue=syncCheckDue(selected,trigger),sync=sharedSyncing(selected)?syncState(selected):null;
         if(sync)job.schedule(AUTOMATIC_QUIET_MS,'sync','earliest');
         if(!owed&&!automaticNeeded(selected)&&!syncDue){resetConvergenceRetry(selected);return freeze({status:'idle',reason:'none'});}
-        // Any other wake-up before the waiting changes are due keeps their
-        // deadline; Drive asking the Device Folder to go first does not.
+        // Any other wake-up before waiting local changes are due keeps their
+        // existing deadline; an explicit flush still runs immediately.
         const due=automaticDueAt(selected),now=String(trigger||'').startsWith('flush:');
         if(!owed&&!syncDue&&!now&&due>Date.now()+50){job.schedule(due-Date.now(),'automatic','earliest');return freeze({status:'idle',reason:'not-due'});}
         if(busy||sync?.catching){schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS);return freeze({status:'deferred',reason:'busy'});}
@@ -1269,14 +1269,11 @@ registry.define('backup-provider',1,input=>{
     // location that holds it (repositoryReadFailed).
     let applying=false;const readFailure=error=>{if(!applying&&error&&typeof error==='object'&&error.name!=='AbortError'&&Object.isExtensible(error)&&!['PROVIDER_FOREGROUND_CANCELLED','STUDY_DIRECTOR_IMPORT_CANCELLED','BACKUP_LOCKED'].includes(String(error.code||'')))error.repositoryReadFailed=true;return error;};
     const pair=newest.find(candidate=>candidate.item.id===chosenId);if(!pair)throw readFailure(new Error('The selected backup version is no longer available.'));
-    // Combining Drive's newest ordinary version as a whole makes it what this
-    // device and Drive share, wherever it is read from: the Device Folder's
-    // copy of it has the same id and the same data. Drive's newest comes from
-    // a fresh listing, never a recent one that may miss a newer version.
+    // Only a verified read of Drive's own newest ordinary version advances
+    // the shared reconciliation base. Device Folder has an independent
+    // checkpoint history and never impersonates Drive ancestry.
     const ordinary=candidate=>candidate.item.history?.retention?.role!=='before-restore',whole=mode==='bring-in'&&!note&&!missingOnly,newestOf=listed=>!listed.overflow&&[...listed.pairs].reverse().find(ordinary)?.item.id===pair.item.id;
-    let sharedHead=false;
-    if(whole&&selected.shared===true)sharedHead=newestOf(inventory)&&(!reusedHistory||newestOf(await repositoryProviderInventory(selected,{signal:operation.signal})));
-    else if(whole){const shared=[...providers.values()].find(sharedSyncing);if(shared)try{sharedHead=newestOf(await repositoryProviderInventory(repositoryOperationSelected(shared,{signal:operation.signal}),{signal:operation.signal}));}catch(error){if(operation.signal?.aborted)throw error;AppDiagnostics.capture('backup-provider.shared-head',error,'warn');}}
+    const sharedHead=whole&&selected.shared===true&&newestOf(inventory)&&(!reusedHistory||newestOf(await repositoryProviderInventory(selected,{signal:operation.signal})));
     OperationDiagnostics.mark('checkpoint-selected',{provider:selected.id});
     progress('verify',`Verifying selected backup in ${selected.label}…`);
     const verificationTask=(async()=>{OperationDiagnostics.mark('selected-checkpoint-verification-start',{provider:selected.id});const row=await verifyRepositoryInventoryPair(selected,pair,{interactive:!quiet||password,signal:operation.signal}).catch(error=>{if(error?.repositoryUnreadable===true)unreadableByProvider.set(providerSelected.id,new Set([...(unreadableByProvider.get(providerSelected.id)||[]),pair.item.id]));throw readFailure(error);});OperationDiagnostics.mark('selected-checkpoint-verification-complete',{provider:selected.id,objects:Number(row.manifest.objects&&row.manifest.objects.length)||0});return row;})();
