@@ -625,20 +625,25 @@
     const rows=(Array.isArray(examples)?examples:[]).filter(row=>Array.isArray(row.x)&&Number.isFinite(row.y)&&row.y>=0&&row.y<=1);
     if(rows.length<minimumRows)return {ready:false,rows:rows.length,reason:`Need ${Math.max(0,minimumRows-rows.length)} more eligible observations.`};
     const dimension=rows[0].x.length+1;
+    // The design vector and observation weight are invariant across Newton
+    // iterations. Materialize them once, then accumulate only one triangle of
+    // the symmetric Hessian before mirroring it.
+    const design=rows.map(row=>({x:[1,...row.x.map(num)],y:row.y,weight:Math.max(.05,num(row.weight,1))}));
     let coefficients=Array(dimension).fill(0);
     coefficients[0]=logit(clamp(mean(rows.map(row=>row.y)),.02,.98));
     let hessian=null;
     for(let iteration=0;iteration<10;iteration+=1){
       hessian=zeroMatrix(dimension);const gradient=Array(dimension).fill(0);
-      rows.forEach(row=>{
-        const x=[1,...row.x.map(num)],weight=Math.max(.05,num(row.weight,1));
+      design.forEach(row=>{
+        const {x,weight}=row;
         const probability=sigmoid(sum(x.map((value,index)=>value*coefficients[index])));
         const variance=Math.max(1e-5,probability*(1-probability))*weight;
         for(let left=0;left<dimension;left+=1){
           gradient[left]+=x[left]*(row.y-probability)*weight;
-          for(let right=0;right<dimension;right+=1)hessian[left][right]+=x[left]*x[right]*variance;
+          for(let right=left;right<dimension;right+=1)hessian[left][right]+=x[left]*x[right]*variance;
         }
       });
+      for(let left=1;left<dimension;left+=1)for(let right=0;right<left;right+=1)hessian[left][right]=hessian[right][left];
       for(let index=1;index<dimension;index+=1){hessian[index][index]+=lambda;gradient[index]-=lambda*coefficients[index];}
       hessian[0][0]+=.05;
       const step=solveLinearSystem(hessian,gradient);
@@ -3007,12 +3012,13 @@
       const load=(row.planned-loadMean)/loadSd,state=(row.priorState-stateMean)/stateSd;
       return [load,load*load-1,state];
     };
-    const completionFit=fitRegularizedLogistic(rows.map(row=>({x:features(row),y:clamp(row.completion/100,.001,.999)})),{lambda:3,minimumRows:minimumDays});
+    const preparedRows=rows.map(row=>({row,x:features(row)}));
+    const completionFit=fitRegularizedLogistic(preparedRows.map(({row,x})=>({x,y:clamp(row.completion/100,.001,.999)})),{lambda:3,minimumRows:minimumDays});
     const strongDays=rows.filter(row=>row.strong).length,nonStrongDays=rows.length-strongDays;
     const strongFit=strongDays>=5&&nonStrongDays>=5
-      ? fitRegularizedLogistic(rows.map(row=>({x:features(row),y:row.strong?1:0})),{lambda:3.5,minimumRows:minimumDays})
+      ? fitRegularizedLogistic(preparedRows.map(({row,x})=>({x,y:row.strong?1:0})),{lambda:3.5,minimumRows:minimumDays})
       : {ready:false,rows:rows.length,strongDays,nonStrongDays,reason:'Need five strong and five non-strong days.'};
-    const residuals=completionFit.ready?rows.map(row=>row.completion/100-predictRegularizedLogistic(completionFit,features(row),.8).mean):[];
+    const residuals=completionFit.ready?preparedRows.map(({row,x})=>row.completion/100-predictRegularizedLogistic(completionFit,x,.8).mean):[];
     return {
       ready:!!completionFit.ready,completionReady:!!completionFit.ready,strongReady:!!strongFit.ready,
       rows:rows.length,span,loadMean,loadSd,stateMean,stateSd,features,completionFit,strongFit,strongDays,nonStrongDays,
@@ -3077,12 +3083,13 @@
       const load=(row.planned-loadMean)/loadSd;
       return [load,load*load-1,...stateKeys.map(key=>(row.fitness[key]-stateMeans[key])/stateSds[key])];
     };
-    const completionFit=fitRegularizedLogistic(complete.map(row=>({x:features(row),y:clamp(row.completion/100,.001,.999)})),{lambda:6,minimumRows:minimumDays});
+    const preparedRows=complete.map(row=>({row,x:features(row)}));
+    const completionFit=fitRegularizedLogistic(preparedRows.map(({row,x})=>({x,y:clamp(row.completion/100,.001,.999)})),{lambda:6,minimumRows:minimumDays});
     const strongDays=complete.filter(row=>row.strong).length,nonStrongDays=complete.length-strongDays;
     const strongFit=strongDays>=5&&nonStrongDays>=5
-      ? fitRegularizedLogistic(complete.map(row=>({x:features(row),y:row.strong?1:0})),{lambda:6.5,minimumRows:minimumDays})
+      ? fitRegularizedLogistic(preparedRows.map(({row,x})=>({x,y:row.strong?1:0})),{lambda:6.5,minimumRows:minimumDays})
       : {ready:false,rows:complete.length,strongDays,nonStrongDays,reason:'Need five strong and five non-strong state-complete days.'};
-    const residuals=completionFit.ready?complete.map(row=>row.completion/100-predictRegularizedLogistic(completionFit,features(row),.8).mean):[];
+    const residuals=completionFit.ready?preparedRows.map(({row,x})=>row.completion/100-predictRegularizedLogistic(completionFit,x,.8).mean):[];
     return {
       ready:!!completionFit.ready,completionReady:!!completionFit.ready,strongReady:!!strongFit.ready,rows:complete.length,span,
       loadMean,loadSd,stateKeys,stateMeans,stateSds,features,completionFit,strongFit,strongDays,nonStrongDays,
