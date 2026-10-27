@@ -10344,7 +10344,7 @@ const InsightsDataSource=Object.freeze({
   async getDailyRecords(options={}){
     const preview=PreviewRuntime.records('insights',options);
     if(preview)return preview;
-    return AppData.dailyRecords.window(options);
+    return AppData.dailyRecords.window({...options,yieldProjection:true});
   },
   getRecordSource(){
     return PreviewRuntime.status('insights');

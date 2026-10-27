@@ -1105,8 +1105,17 @@ async function getDailyRecordSummaries(){
 }
 function sortDailySummariesAsc(summaries){return (summaries||[]).map(summary=>{const {dayOfWeek,dayName,...raw}=summary||{};return materializeDailyRecordSummary(raw);}).filter(Boolean).sort((a,b)=>a.date.localeCompare(b.date));}
 function sortDailyRecordsAsc(records){return (records||[]).filter(r=>r&&isValidIsoDate(r.date)).sort((a,b)=>a.date.localeCompare(b.date));}
+async function materializeDailyRecordViews(records,{yieldProjection=false}={}){
+  const source=Array.isArray(records)?records:[],out=[],batchSize=128;
+  for(let start=0;start<source.length;start+=batchSize){
+    const end=Math.min(source.length,start+batchSize);
+    for(let index=start;index<end;index+=1){const value=materializeDailyRecordView(source[index]);if(value)out.push(value);}
+    if(yieldProjection&&end<source.length)await new Promise(resolve=>setTimeout(resolve,0));
+  }
+  return out;
+}
 async function getSortedDailyRecordSummaries(){return sortDailySummariesAsc(await getDailyRecordSummaries());}
-async function getSortedDailyRecords(){return sortDailyRecordsAsc(await getDailyRecords());}
+async function getSortedDailyRecords(options={}){return sortDailyRecordsAsc(await getDailyRecords(options));}
 async function getDailyRecordsForWindow(options={}){
   const opts=options&&typeof options==='object'?options:{};
   if(opts.windowDays||opts.from||opts.to||opts.limit){
@@ -1116,14 +1125,14 @@ async function getDailyRecordsForWindow(options={}){
       const fallback=fallbackDailyRecordsGet();
       const idbRecords=await idbGetRecordsByDates(recordWindow.dates);
       const records=filterPendingDeletedEntities(mergeDailyRecordSets(idbRecords,fallback.filter(r=>recordWindow.dates.includes(r.date))),'dailyRecord','date');
-      return sortDailyRecordsAsc(records.map(materializeDailyRecordView)).filter(record=>record.recordKind==='study');
+      return sortDailyRecordsAsc(await materializeDailyRecordViews(records,{yieldProjection:opts.yieldProjection===true})).filter(record=>record.recordKind==='study');
     }catch(e){
       if(isCanonicalRuntimeError(e))throw e;
       const records=await Promise.all(recordWindow.dates.map(date=>getDailyRecord(date)));
       return sortDailyRecordsAsc(records).filter(record=>record.recordKind==='study');
     }
   }
-  return (await getSortedDailyRecords()).filter(record=>record.recordKind==='study');
+  return (await getSortedDailyRecords({yieldProjection:opts.yieldProjection===true})).filter(record=>record.recordKind==='study');
 }
 async function getDailyRecord(date,options={}){
   const fallback=fallbackDailyRecordsGet().find(r=>r.date===date)||null;
@@ -1145,8 +1154,12 @@ async function getDailyRecords(options={}){
     const raw=filterPendingDeletedEntities(mergeDailyRecordSets(await idbAllRecords(),fallback),'dailyRecord','date');
     if(fallback.length)migrateFallbackDailyRecords(fallback);
     else confirmDailyRecordStorage();
-    return raw.map(materializeDailyRecordView).filter(Boolean);
-  }catch(e){if(options?.strict||isCanonicalRuntimeError(e))throw e;showStorageFallbackWarning(e&&e.message?e.message:'saved-date database failed');return fallback.map(materializeDailyRecordView).filter(Boolean);}
+    return materializeDailyRecordViews(raw,{yieldProjection:options?.yieldProjection===true});
+  }catch(e){
+    if(options?.strict||isCanonicalRuntimeError(e))throw e;
+    showStorageFallbackWarning(e&&e.message?e.message:'saved-date database failed');
+    return materializeDailyRecordViews(fallback);
+  }
 }
 async function removeDailyRecord(date,options={}){
   const rollback=options&&options.rollback===true;
