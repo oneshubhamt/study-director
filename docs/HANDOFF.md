@@ -120,13 +120,13 @@ Build this next, before Wordgard (section 6). The decisions below are the user's
 
 ### 5.1 Sync
 
-**Done** (2026-10-17). Design and rules: `docs/BACKUP-ENGINE.md`, "Sync through Drive" and "One history". What was built, against the table below:
+**Done** (2026-10-17; provider-independence refinement completed 2026-10-27). Current design and rules: `docs/BACKUP-ENGINE.md`, "Sync through Drive" and "Independent destinations". What was built, against the table below:
 - Catch up first, then upload; an upload that finds Drive moved on stops and the device catches up; another device's recent publication marker makes it wait its turn.
 - The shared base (v3) also holds one fingerprint per Saved Day and one of the Active Session, so Saved Days and the session merge three-way. Only Drive moves it.
 - Sync never asks: anything that needs a choice leaves the data untouched and shows "Needs review" (sidebar and Drive row); Review opens Combine on Drive's version, after the study session if one runs. Making review marks that do not stop the rest of the sync is 5.2.
 - The running session waits ("hold") while everything else merges.
 - Sign-in kept across reloads for the rest of its hour.
-- **Changed from the table (user, 2026-10-17):** the Device Folder and Drive keep one history. A version is made once and copied to the other location under the same id, so both show the same versions. The Device Folder is still not a sync channel.
+- **Historical decision, superseded 2026-10-27:** an earlier implementation made one version and copied the same checkpoint id between Device Folder and Drive. The current architecture keeps the useful part—the Device Folder is not a sync channel—but publishes canonical local state independently to each destination. The Version History UI can still deduplicate equivalent logical states without making the repositories operationally dependent.
 - **Study session across devices (user, 2026-10-18).** The session names the device running it (ActiveSession v10, `runningOn`); only that device runs the timer. Another device shows "Running on another device" and edits notes and everything else freely; notes from it reach the running device without stopping its session. Suspend hands the session over (uploads at once; the other device offers Continue here). Continue Here on a device whose copy still runs elsewhere asks first; the device taken over from stops at its next sync and keeps its unsynced progress for review. "Needs review" opens during a running session and leaves the session as it is.
 - Known limit: a fresh device whose plans and settings differ from Drive's keeps Drive's for review on its first sync (5.4 settles this).
 
@@ -268,9 +268,9 @@ Backup password  [ Optional            ]   (a confirm box appears once you type)
    - Unused exports removed from the backup modules (capture, repository, background scheduling).
    - **Audited again** (2026-10-24): `docs/AUDIT-BACKUP-AFTER-CLEANUP.md`. The user answered D1 (no device ran a branch build against real backups) and D2 (show an unreadable version, with Remove). Every finding is fixed; its Status section says how.
 5. Audit the backup system and app behaviour again (noted by the user, 2026-10-18). Drive went from a manual handoff (back up, then Combine or Replace on the other device) to automatic sync, so much has changed. Check whether everything is still in its best shape, and what can be improved, refined or corrected:
-   - Device Folder and Drive backups end to end, after sync and one history.
-   - Version History: one history now shared by both locations, with keep-15 plus up to 10 hourly versions. How each location keeps, copies and prunes them.
-   - A note's earlier-versions list gathers Drive and Device Folder versions separately; with one history this may now be redundant.
+   - Device Folder and Drive backups end to end after sync, with independent destination publication.
+   - Version History: one logical UI over independent repository histories, with keep-15 plus up to 10 hourly versions per repository policy; verify how each location independently keeps and prunes them.
+   - A note's earlier-versions list gathers Drive and Device Folder versions and deduplicates by logical coverage rather than shared checkpoint identity.
    - Every app behaviour built for manual handoff: restore flows, Combine and Replace, wording, reminders, status and notices.
    - Report findings to the user first, as with the earlier audits.
    - **Audited** (2026-10-24): `docs/AUDIT-BACKUP-AFTER-SYNC.md`.
@@ -346,7 +346,7 @@ For each build step: make all the changes, build, test with two simulated device
 Commits since `main` (newest first), grouped:
 
 ### Backups (this and recent sessions)
-- The commit after `ebb49fa`: sync through Drive (5.1) and one history for the Device Folder and Drive.
+- The commit after `ebb49fa`: sync through Drive (5.1) and the original same-id history design; this historical design was later superseded by independent Drive/Device Folder publication with a unified logical-history UI.
 - `ebb49fa` Hourly versions where notes changed; Combine blue, Replace amber; audit fixes (5.5).
 - `d8000e4` and the commit after `9afe06d`: the Device Folder runs through the shared backup engine. It was saved mid-move, then finished, with the due-time, lease-renewal and aborted-maintenance fixes.
 - `d27570f` Prepare the backup engine to host the Device Folder (hosted locations, server-digest receipts, operation views, protected safety API).
