@@ -1,0 +1,37 @@
+name: Temporary F14 deployment artifact
+
+on:
+  push:
+    branches:
+      - current-fixes
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.12.1'
+      - name: Install exact npm
+        run: npm install -g npm@12.2.1
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Build canonical minified deployment
+        run: npm run stage:firebase:minified
+      - name: Package deployment ZIP
+        shell: bash
+        run: |
+          cd dist
+          zip -r ../StudyDirector-SDVB75F14-Deployment.zip StudyDirector-SDVB75F14-Deployment
+      - name: Upload deployment ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: StudyDirector-SDVB75F14-Deployment
+          path: StudyDirector-SDVB75F14-Deployment.zip
+          if-no-files-found: error
+          retention-days: 1
