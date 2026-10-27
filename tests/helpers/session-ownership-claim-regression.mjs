@@ -45,7 +45,7 @@ function makeRuntime(installationId,read){
     })
   }));
   runtime.register(freeze({id:'google-drive',label:'Google Drive',shared:true,connected:()=>true,backgroundAvailable:()=>true,repository}));
-  runtime.configureSessionOwnership(freeze({installationId,read:async()=>read(),today:()=>DATE}));
+  runtime.configureSessionOwnership(freeze({installationId:()=>installationId,read:async()=>read(),today:()=>DATE}));
   return runtime;
 }
 let sessionA=freeze({date:DATE,runningOn:B,revision:50}),sessionB=freeze({date:DATE,runningOn:B,revision:50});
