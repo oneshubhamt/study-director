@@ -12,7 +12,7 @@ registry.define('backup-provider',1,input=>{
   const PORT_FIELDS=freeze({
     configuration:freeze(['appVersion']),
     controller:freeze(['beginImport','cancelImport','finishImport']),
-    exports:freeze(['followProtection','run']),
+    exports:freeze(['followProtection','protect','run','unprotect']),
     domain:freeze(['clampText']),
     view:freeze(['presentation']),
     ownership:freeze(['canRunBackground','canShare','requireMutationControl']),
@@ -1000,7 +1000,7 @@ registry.define('backup-provider',1,input=>{
     const current=version===SESSION_CLAIM_VERSION&&keys==='claimedAt|date|epoch|format|observedOwner|observedRevision|owner|revision|state|version';
     if(!legacy&&!current)return null;
     const date=String(value.date||''),epoch=Number(value.epoch),owner=String(value.owner||''),observedOwner=legacy?'':String(value.observedOwner||''),observedRevision=Number(value.observedRevision),revision=legacy?observedRevision+1:Number(value.revision),state=legacy?'owned':String(value.state||''),claimedAt=String(value.claimedAt||'');
-    if(value.format!==SESSION_CLAIM_FORMAT||!/^d{4}-d{2}-d{2}$/u.test(date)||!Number.isSafeInteger(epoch)||epoch<1||!SESSION_OWNER_PATTERN.test(owner)||current&&!SESSION_OWNER_PATTERN.test(observedOwner)||!Number.isSafeInteger(observedRevision)||observedRevision<1||!Number.isSafeInteger(revision)||revision<1||!['owned','released'].includes(state)||!Number.isFinite(Date.parse(claimedAt)))return null;
+    if(value.format!==SESSION_CLAIM_FORMAT||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(date)||!Number.isSafeInteger(epoch)||epoch<1||!SESSION_OWNER_PATTERN.test(owner)||current&&!SESSION_OWNER_PATTERN.test(observedOwner)||!Number.isSafeInteger(observedRevision)||observedRevision<1||!Number.isSafeInteger(revision)||revision<1||!['owned','released'].includes(state)||!Number.isFinite(Date.parse(claimedAt)))return null;
     return freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,date,epoch,state,owner,revision,observedOwner,observedRevision,claimedAt:new Date(claimedAt).toISOString()});
   }
   async function readRepositorySessionClaim(selected,{signal=null}={}){
@@ -1010,23 +1010,34 @@ registry.define('backup-provider',1,input=>{
     let latest=null,latestEpoch=0;
     for(const raw of rows){const item=repositoryProviderItem(raw,'session-claim'),epoch=sessionClaimEpoch(item.id);if(!epoch)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state has an invalid identity.');if(epoch>latestEpoch){latest=item;latestEpoch=epoch;}}
     if(!latest)return null;
-    const lease=repositoryDownloadLease(await selected.repository.downloadSessionClaim(latest,freeze({signal})));
+    const lease=repositoryDownloadLease(await selected.repository.downloadSessionClaim(latest,freeze({signal})));let decoded=null;
     try{
       if(lease.blob.size<=0||lease.blob.size>SESSION_CLAIM_MAX_BYTES||latest.size&&lease.blob.size!==latest.size)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state changed size unexpectedly.');
       const digest=await Exports.run('checksum',{value:lease.blob},{signal});
       if(latest.digest&&latest.digest!==digest||latest.serverDigest&&latest.serverDigest!==digest)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state failed content verification.');
-      let parsed=null;try{parsed=JSON.parse(await lease.blob.text());}catch{}
+      decoded=await Exports.unprotect(lease.blob,{interactive:false,signal});
+      if(!decoded||!(decoded.blob instanceof Blob))throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state could not be opened safely.');
+      let parsed=null;try{parsed=JSON.parse(await decoded.blob.text());}catch{}
       const claim=normalizeSessionClaim(parsed);if(!claim||sessionClaimId(claim.epoch)!==latest.id)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state is malformed.');
       return freeze({claim,item:latest});
-    }finally{await lease.release().catch(()=>{});}
+    }finally{
+      if(decoded&&decoded.blob instanceof Blob&&decoded.blob!==lease.blob)await Exports.run('file.release',{file:decoded.blob}).catch(()=>{});
+      await lease.release().catch(()=>{});
+    }
   }
-  async function writeRepositorySessionClaim(selected,claim,{signal=null}={}){
+  async function writeRepositorySessionClaim(selected,claim,{signal=null,interactive=false}={}){
     const normalized=normalizeSessionClaim(claim);if(Number(claim&&claim.version)!==SESSION_CLAIM_VERSION||!normalized||normalized.version!==SESSION_CLAIM_VERSION||!SESSION_OWNER_PATTERN.test(normalized.observedOwner))throw new TypeError('Active-session ownership claim is invalid.');
-    const id=sessionClaimId(normalized.epoch),blob=new Blob([JSON.stringify(normalized)],{type:'application/json'});if(blob.size<=0||blob.size>SESSION_CLAIM_MAX_BYTES)throw new Error('Active-session ownership claim is too large.');
-    const digest=await Exports.run('checksum',{value:blob},{signal}),item=repositoryProviderItem(await selected.repository.uploadSessionClaim(freeze({kind:'session-claim',id,name:id+'.sdsessionclaim',blob,size:blob.size,digest,exportedAt:normalized.claimedAt,appVersion:APP_VERSION,knownAbsent:true})),'session-claim');
-    if(item.digest!==digest||item.serverDigest&&item.serverDigest!==digest)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The shared repository did not verify the active-session ownership claim.');
-    const verified=await readRepositorySessionClaim(selected,{signal});if(!verified||verified.item.id!==id||JSON.stringify(verified.claim)!==JSON.stringify(normalized))throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The active-session ownership claim could not be read back exactly.');
-    return verified;
+    const id=sessionClaimId(normalized.epoch),source=new Blob([JSON.stringify(normalized)],{type:'application/json'});let protectedFile=null;
+    try{
+      protectedFile=await Exports.protect({blob:source,filename:id+'.sdsessionclaim'},{interactive,signal});
+      if(!protectedFile||!(protectedFile.blob instanceof Blob)||protectedFile.blob.size<=0||protectedFile.blob.size>SESSION_CLAIM_MAX_BYTES)throw new Error('Active-session ownership claim is too large.');
+      await protectedFile.checkProtection?.();
+      const digest=await Exports.run('checksum',{value:protectedFile.blob},{signal}),item=repositoryProviderItem(await selected.repository.uploadSessionClaim(freeze({kind:'session-claim',id,name:id+'.sdsessionclaim',blob:protectedFile.blob,size:protectedFile.blob.size,digest,exportedAt:normalized.claimedAt,appVersion:APP_VERSION,knownAbsent:true,checkProtection:protectedFile.checkProtection})),'session-claim');
+      await protectedFile.checkProtection?.();
+      if(item.digest!==digest||item.serverDigest&&item.serverDigest!==digest)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The shared repository did not verify the active-session ownership claim.');
+      const verified=await readRepositorySessionClaim(selected,{signal});if(!verified||verified.item.id!==id||JSON.stringify(verified.claim)!==JSON.stringify(normalized))throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The active-session ownership claim could not be read back exactly.');
+      return verified;
+    }finally{if(protectedFile&&protectedFile.blob instanceof Blob&&protectedFile.blob!==source)await Exports.run('file.release',{file:protectedFile.blob}).catch(()=>{});}
   }
   async function assertSharedPublicationTurn(selected,publicationLease){
     if(!publicationLease||!repositoryPublicationCapable(selected))return true;
@@ -1039,7 +1050,7 @@ registry.define('backup-provider',1,input=>{
     const raw=await sessionOwnershipHooks.read(),today=String(sessionOwnershipHooks.today()||'');
     if(raw===null||raw===undefined)return freeze({today,value:null});
     const date=String(raw.date||''),runningOn=String(raw.runningOn||''),revision=Number(raw.revision);
-    if(!/^d{4}-d{2}-d{2}$/u.test(date)||!SESSION_OWNER_PATTERN.test(runningOn)||!Number.isSafeInteger(revision)||revision<1)throw new Error('Canonical Active Session ownership state is invalid.');
+    if(!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(date)||!SESSION_OWNER_PATTERN.test(runningOn)||!Number.isSafeInteger(revision)||revision<1)throw new Error('Canonical Active Session ownership state is invalid.');
     return freeze({today,value:freeze({date,runningOn,revision})});
   }
   async function assertSharedSessionOwnership(selected,{signal=null}={}){
@@ -1064,7 +1075,7 @@ registry.define('backup-provider',1,input=>{
     }
   }
 
-  // Take in Drive's newest version quietly.  // Take in Drive's newest version quietly.  // Take in Drive's newest version quietly. What it cannot settle on its own
+  // Take in Drive's newest version quietly. What it cannot settle on its own
   // waits for the person; their Combine of that version resumes the sync.
   function catchUpSharedProvider(selected,head){
     const state=syncState(selected);if(state.catching)return false;state.catching=true;notifyStatus();
@@ -1566,7 +1577,7 @@ registry.define('backup-provider',1,input=>{
     const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected))return freeze({status:'unavailable',reason:'not-connected'});
     if(!repositorySessionClaimCapable(selected))return freeze({status:'unavailable',reason:'unsupported'});
     const date=String(request&&request.date||''),observedOwner=String(request&&request.observedOwner||''),observedRevision=Number(request&&request.observedRevision),revision=Number(request&&request.revision),owner=String(sessionOwnershipHooks&&sessionOwnershipHooks.installationId()||'');
-    if(!sessionOwnershipHooks||!/^d{4}-d{2}-d{2}$/u.test(date)||!SESSION_OWNER_PATTERN.test(observedOwner)||!SESSION_OWNER_PATTERN.test(owner)||!Number.isSafeInteger(observedRevision)||observedRevision<1||!Number.isSafeInteger(revision)||revision<=observedRevision)throw new TypeError('Active-session takeover request is invalid.');
+    if(!sessionOwnershipHooks||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(date)||!SESSION_OWNER_PATTERN.test(observedOwner)||!SESSION_OWNER_PATTERN.test(owner)||!Number.isSafeInteger(observedRevision)||observedRevision<1||!Number.isSafeInteger(revision)||revision<=observedRevision)throw new TypeError('Active-session takeover request is invalid.');
     const foreground=beginForeground(selected,request&&request.signal||null);if(!foreground)return freeze({status:'busy',reason:'busy'});
     setBusy(true);let publicationLease=null;
     try{
@@ -1576,7 +1587,7 @@ registry.define('backup-provider',1,input=>{
       if(current&&current.claim.date===date&&current.claim.state==='owned'&&current.claim.owner===owner&&current.claim.observedOwner===observedOwner&&current.claim.observedRevision===observedRevision&&current.claim.revision>=revision)return freeze({status:'completed',claim:current.claim,reused:true});
       if(current&&current.claim.date===date&&current.claim.state==='released')throw syncError('REPOSITORY_SESSION_CLAIM_STALE','The shared Active Session has already ended. Sync before starting it again.');
       if(current&&current.claim.date===date&&current.claim.state==='owned'&&(current.claim.owner!==observedOwner||current.claim.revision>observedRevision))throw syncError('REPOSITORY_SESSION_CLAIM_STALE','Active Session ownership changed on another device before this takeover could be confirmed.');
-      const epoch=Math.max(0,Number(current&&current.claim&&current.claim.epoch)||0)+1,claim=freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,date,epoch,state:'owned',owner,revision,observedOwner,observedRevision,claimedAt:new Date().toISOString()}),verified=await writeRepositorySessionClaim(scoped,claim,{signal:foreground.signal});
+      const epoch=Math.max(0,Number(current&&current.claim&&current.claim.epoch)||0)+1,claim=freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,date,epoch,state:'owned',owner,revision,observedOwner,observedRevision,claimedAt:new Date().toISOString()}),verified=await writeRepositorySessionClaim(scoped,claim,{signal:foreground.signal,interactive:true});
       return freeze({status:'completed',claim:verified.claim,reused:false});
     }finally{if(publicationLease)await endRepositoryPublication(selected,publicationLease);await release(selected,'session-claim');setBusy(false);foreground.release();}
   }
@@ -1591,7 +1602,7 @@ registry.define('backup-provider',1,input=>{
       const current=await readRepositorySessionClaim(scoped,{signal:foreground.signal});
       if(!current||current.item.id!==sessionClaimId(expected.epoch)||current.claim.owner!==expected.owner||current.claim.state!=='owned')return false;
       const rollback=freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,date:expected.date,epoch:expected.epoch+1,state:'owned',owner:expected.observedOwner,revision:expected.observedRevision,observedOwner:expected.owner,observedRevision:expected.revision,claimedAt:new Date().toISOString()});
-      await writeRepositorySessionClaim(scoped,rollback,{signal:foreground.signal});return true;
+      await writeRepositorySessionClaim(scoped,rollback,{signal:foreground.signal,interactive:true});return true;
     }catch(error){AppDiagnostics.capture('backup-provider.session-claim-release',error,'warn');return false;}
     finally{if(publicationLease)await endRepositoryPublication(selected,publicationLease);await release(selected,'session-claim-release');setBusy(false);foreground.release();}
   }
