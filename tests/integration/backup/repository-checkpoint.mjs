@@ -914,8 +914,12 @@ for(const usableHistory of [false,true])for(const kind of ['checkpoint','commit'
   vm.createContext(host);vm.runInContext(hostSource.slice(hostSource.indexOf('async function updateRepositoryIntegrityTarget('),hostSource.indexOf('const RepositoryIntegrityContinuation=')),host);
   runtime.providers.configureIntegrityScrub(freeze({readTarget:async()=>current,writeResult:async(providerId,result)=>{assert.equal(providerId,id);results.push(result);await host.updateRepositoryIntegrityTarget('drive',result);},prepare:async(_id,target)=>({repositoryScope:scope,requestId:target.requestId,cursor:target.cursor,scanId:target.scanId,skipObjectIds:target.quarantinedObjectIds}),isAvailable:providerId=>providerId===id,isUnsafe:()=>false,yieldTask:async()=>{},quarantine:async()=>current.quarantinedObjectIds}));
   assert.equal(runtime.providers.requestIntegrity(id),true,'integrity-result propagation test must explicitly schedule the integrity owner instead of depending on configuration wake timing');
-  for(let elapsed=0;elapsed<120000;elapsed+=1000){await clock.drainMicrotasks(220);await new Promise(resolve=>setImmediate(resolve));if(results.length&&!runtime.providers.backgroundStatus().find(row=>row.job===id+' integrity').busy)break;await clock.advance(1000);}
-  assert.equal(results.length,1);
+  for(let elapsed=0;elapsed<120000;elapsed+=1000){
+    await clock.drainMicrotasks(220);await new Promise(resolve=>setImmediate(resolve));await realWorkSettled();await clock.drainMicrotasks(220);
+    if(results.length&&!runtime.providers.backgroundStatus().find(row=>row.job===id+' integrity').busy)break;
+    await clock.advance(1000);
+  }
+  assert.equal(results.length,1,JSON.stringify({usableHistory,kind,fault,status:runtime.providers.backgroundStatus().find(row=>row.job===id+' integrity'),diagnostics:diagnosticFailures.slice(-2)}));
   const job=runtime.providers.backgroundStatus().find(row=>row.job===id+' integrity');
   if(usableHistory){
    assert.equal(results[0].status,'completed');assert.equal(results[0].complete,true);assert.ok(results[0].checked>0,'usable committed history must still be integrity-verified despite unrelated repository debris');
