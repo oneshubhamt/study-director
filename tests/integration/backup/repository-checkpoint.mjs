@@ -906,10 +906,18 @@ for(const usableHistory of [false,true])for(const kind of ['checkpoint','commit'
   vm.createContext(host);vm.runInContext(hostSource.slice(hostSource.indexOf('async function updateRepositoryIntegrityTarget('),hostSource.indexOf('const RepositoryIntegrityContinuation=')),host);
   runtime.providers.configureIntegrityScrub(freeze({readTarget:async()=>current,writeResult:async(providerId,result)=>{assert.equal(providerId,id);results.push(result);await host.updateRepositoryIntegrityTarget('drive',result);},prepare:async(_id,target)=>({repositoryScope:scope,requestId:target.requestId,cursor:target.cursor,scanId:target.scanId,skipObjectIds:target.quarantinedObjectIds}),isAvailable:providerId=>providerId===id,isUnsafe:()=>false,yieldTask:async()=>{},quarantine:async()=>current.quarantinedObjectIds}));
   for(let elapsed=0;elapsed<120000;elapsed+=1000){await clock.drainMicrotasks(220);await new Promise(resolve=>setImmediate(resolve));if(results.length&&!runtime.providers.backgroundStatus().find(row=>row.job===id+' integrity').busy)break;await clock.advance(1000);}
-  assert.equal(results.length,1);assert.equal(results[0].status,'unavailable');assert.notEqual(results[0].complete,true);assert.equal(results[0].corruption,false);
-  assert.deepEqual([...current.quarantinedObjectIds],quarantined);assert.equal(current.cursor,cursor);assert.equal(current.scanId,scanId);assert.equal(current.completedAt,completedAt);assert.ok(current.failedAt);assert.equal(current.lastOutcome,'unavailable');
-  const job=runtime.providers.backgroundStatus().find(row=>row.job===id+' integrity');assert.equal(job.lastOutcome,'unavailable');assert.equal(job.scheduled,true);assert.ok(Date.parse(job.nextEligibleAt)-clock.now()<=600000,'uncertainty uses availability retry, not the full-scan interval');assert.deepEqual([...h.state.files.keys()].sort(),beforeFiles,'uncertainty cannot cause repair publication or deletion');
-  incompleteInventoryCases.push({usableHistory,kind,fault});
+  assert.equal(results.length,1);
+  const job=runtime.providers.backgroundStatus().find(row=>row.job===id+' integrity');
+  if(usableHistory){
+   assert.equal(results[0].status,'completed');assert.equal(results[0].complete,true);assert.ok(results[0].checked>0,'usable committed history must still be integrity-verified despite unrelated repository debris');
+   assert.deepEqual([...current.quarantinedObjectIds],quarantined);assert.equal(current.lastOutcome,'completed');assert.equal(job.lastOutcome,'completed');
+  }else{
+   assert.equal(results[0].status,'unavailable');assert.notEqual(results[0].complete,true);assert.equal(results[0].corruption,false);
+   assert.deepEqual([...current.quarantinedObjectIds],quarantined);assert.equal(current.cursor,cursor);assert.equal(current.scanId,scanId);assert.equal(current.completedAt,completedAt);assert.ok(current.failedAt);assert.equal(current.lastOutcome,'unavailable');
+   assert.equal(job.lastOutcome,'unavailable');assert.equal(job.scheduled,true);assert.ok(Date.parse(job.nextEligibleAt)-clock.now()<=600000,'uncertainty uses availability retry, not the full-scan interval');
+  }
+  assert.deepEqual([...h.state.files.keys()].sort(),beforeFiles,'integrity verification cannot cause repair publication or deletion for unrelated repository debris');
+  incompleteInventoryCases.push({usableHistory,kind,fault,status:results[0].status});
  }finally{runtime.providers.configureIntegrityScrub(null);await h.provider.disconnect();globalThis.Date=realDate;backgroundClock=null;}
 }
 // Finite backlogs cross both former limits (64 versions / 100 pages), then
