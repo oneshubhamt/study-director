@@ -1352,7 +1352,7 @@ registry.define('backup-provider',1,input=>{
     const actualScope=typeof selected.repository.scope==='function'?String(await selected.repository.scope()||''):'';
     if(options.repositoryScope&&options.repositoryScope!==actualScope){const error=new Error('The backup repository changed.');error.code='REPOSITORY_CHANGED';throw error;}
     const history=Object.freeze(state.rows.map(row=>row.manifest));
-    const anomalousHistory=Number(state.invalid?.length||0)+Number(state.uncommitted?.length||0)+Number(state.orphanCommits?.length||0)+Number(state.unreadable?.length||0);
+    const anomalousHistory=Math.max(0,Number(state.ignored)||0)+Number(state.invalid?.length||0)+Number(state.uncommitted?.length||0)+Number(state.orphanCommits?.length||0)+Number(state.unreadable?.length||0);
     if(!history.length&&anomalousHistory)throw new Error('No committed backup version could be verified from the repository history.');
     if(!history.length)return Object.freeze({complete:true,cursor:'',checked:0,checkedBytes:0,total:0,quarantined:Object.freeze([])});
     const readObject=entry=>selected.repository.download(Object.freeze({kind:'object',id:entry.objectId,size:entry.storedBytes,digest:entry.storedChecksum}),Object.freeze({signal:options&&options.signal||null}));
