@@ -90,8 +90,9 @@ assert.match(sw,/CompatibilityFacade\.installBridgeRequired\(\)/);
 assert.match(sw,/CompatibilityFacade\.recoveryHandoff\(\)/);
 assert.match(sw,/SD_PWA_ACTIVATION_ACK/);
 assert.match(sw,/SD_PWA_ACTIVATED/);
-const identity=JSON.parse(read(minified,'DEPLOYMENT-IDENTITY.json'));
-assert.equal(identity.surfaceRelease,releaseConfig.release);assert.equal(identity.buildId,releaseConfig.buildId);assert.equal(identity.serviceWorkerReleaseId,releaseId);
+const identity=JSON.parse(read(minified,'DEPLOYMENT-IDENTITY.json')),sourceCommit=index.match(/<meta name="study-director-source-commit" content="([0-9a-f]{40})">/)?.[1]||'';
+assert.match(sourceCommit,/^[0-9a-f]{40}$/u,'Minified index must carry exact source commit provenance.');
+assert.equal(identity.version,2);assert.equal(identity.surfaceRelease,releaseConfig.release);assert.equal(identity.buildId,releaseConfig.buildId);assert.equal(identity.sourceCommit,sourceCommit);assert.equal(identity.serviceWorkerReleaseId,releaseId);
 assert.equal(identity.indexSha256,sha(read(publicDir,'index.html')));assert.equal(identity.serviceWorkerSha256,sha(read(publicDir,'sw.js')));
 assert.equal(identity.publicFileCount,files.length);assert.deepEqual(identity.publicFiles,files);
 
