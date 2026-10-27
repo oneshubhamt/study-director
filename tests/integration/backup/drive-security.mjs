@@ -132,6 +132,11 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   await operation.list({kind:'checkpoint'});await operation.list({kind:'commit'});await operation.list({kind:'object'});
   const scopedChecks=folderVerificationCount()-scopedBefore;assert.equal(scopedChecks,1,'one Drive repository operation must reuse one verified folder receipt');
 
+  const controller=new AbortController(),preemptible=provider.repository.beginOperation({signal:controller.signal}),publication=await preemptible.beginPublication();
+  controller.abort(Object.assign(new Error('foreground preemption'),{name:'AbortError',code:'REPOSITORY_BACKGROUND_PREEMPTED'}));
+  assert.equal(await preemptible.endPublication(publication),true,'publication-marker retirement must survive an expected operation abort');
+  assert.equal((await provider.repository.listPublications()).items.some(row=>row.id===publication.id),false,'preempted publication marker must be physically retired');
+
   const invalidated=provider.repository.beginOperation();await invalidated.list({kind:'object'});const beforeContradiction=folderVerificationCount();
   state.folderShared=true;await assert.rejects(()=>provider.repository.list({kind:'object'}),/no longer private and owned/u,'contradictory folder metadata must fail closed and invalidate prior receipts');
   state.folderShared=false;const beforeRevalidation=folderVerificationCount();await invalidated.list({kind:'object'});
