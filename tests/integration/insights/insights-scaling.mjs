@@ -181,6 +181,17 @@ assert.equal(model.dynamics.allocation.dynamic.trendBasis.label,'Latest 2 years'
 assert.equal(model.dynamics.allocation.dynamic.trendBasis.capped,true);
 assert.ok(model.dynamics.allocation.dynamic.trendBasis.selectedPeriods>model.dynamics.allocation.dynamic.trendBasis.periods);
 
+// The 590-day browser performance fixture stays inside the 730-day directional
+// horizon. Its first All-history render may reuse the all-history evidence
+// index and daily series, but the result must be byte-for-byte equivalent to
+// the ordinary path that receives an independent window array.
+const reuseRecords=historyRecords.slice(-590),reuseOptions={windowKey:'all',windowLabel:'All records',allRecordCount:590,currentStudyDate:endDate};
+const reuseEngine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns}),reusePrepared=reuseEngine.prepare(reuseRecords,'uncapped-reuse');
+const reusedModel=reuseEngine.buildPrepared(reuseEngine.filterPreparedWindow(reusePrepared,'all',endDate).records,reusePrepared,reuseOptions);
+const referenceEngine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns}),referencePrepared=referenceEngine.prepare(reuseRecords,'uncapped-reference');
+const referenceModel=referenceEngine.buildPrepared([...referencePrepared.records],referencePrepared,reuseOptions);
+assert.deepEqual(JSON.parse(JSON.stringify(reusedModel)),JSON.parse(JSON.stringify(referenceModel)),'uncapped All-history intermediate reuse must not change Insights model output');
+
 
 const evidence={
   status:'PASS',
@@ -188,7 +199,8 @@ const evidence={
   boundedAnnualSample:{eligibleDays:annualPractice.trend.eligibleDays,sampledDays:annualPractice.trend.sampledDays,pairs:annualPractice.trend.pairCount,blocks:annualPractice.trend.blockCount},
   boundedLargeSample:{eligibleDays:denseFirst.trend.eligibleDays,sampledDays:denseFirst.trend.sampledDays,pairs:denseFirst.trend.pairCount,blocks:denseFirst.trend.blockCount},
   horizon:{selectedDays:model.recordCount,trendDays:model.advanced.trendCompletionDayCount,label:model.trendBasis.label,descriptivePracticeDays:model.practice.practiceDays,trendPracticeDays:model.practice.trendBasis.practiceDays},
-  fullModel:{days:historyDays}
+  fullModel:{days:historyDays},
+  uncappedAllHistoryReuse:{days:reuseRecords.length,parity:true}
 };
 writeArtifact('insights-scaling.json',`${JSON.stringify(evidence,null,2)}\n`);
 console.log(JSON.stringify(evidence,null,2));

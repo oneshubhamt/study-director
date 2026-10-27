@@ -3998,8 +3998,8 @@
     const fitness=computeStudyFitness({...dynamicsModel,dynamics},modelEvidence,{performanceState});
     return Object.freeze({dynamics,fitness:detail?fitness:compactFitnessResult(fitness)});
   }
-  function buildInsightsFromCanonical(records,options,allHistory,classifyTaskOutcome,summarizePracticeRuns){
-    const evidence=createEvidenceIndex(records,classifyTaskOutcome);
+  function buildInsightsFromCanonical(records,options,allHistory,classifyTaskOutcome,summarizePracticeRuns,reusable=null){
+    const evidence=reusable&&reusable.evidence||createEvidenceIndex(records,classifyTaskOutcome);
     const work=evidence.work;
     const planned=rowsPlanned(work),completed=rowsCompleted(work),actual=rowsActual(work);
     const quality=records.map(r=>Number(r.studyQuality)).filter(v=>Number.isFinite(v)&&v>0);
@@ -4016,7 +4016,7 @@
       ?records.filter(record=>{const day=dateDay(record.date);return Number.isFinite(day)&&day>=trendBasis.fromDay&&day<=trendBasis.toDay;})
       :records;
     const analyticalEvidence=analyticalRecords===records?evidence:createEvidenceIndex(analyticalRecords,classifyTaskOutcome);
-    const daily=computeDailySeries(analyticalEvidence);
+    const daily=reusable&&analyticalEvidence===evidence&&reusable.daily?reusable.daily:computeDailySeries(analyticalEvidence);
     const trendDaily=filterDailyForDirectionalBasis(daily,trendBasis);
     const strongDays=records.reduce((count,record)=>{
       const rows=recordRows(evidence,record,'work'),completion=pct(rowsCompleted(rows),rowsPlanned(rows));
@@ -4080,12 +4080,18 @@
       if(historyCache.has(key))return remember(historyCache,key,historyCache.get(key),HISTORY_CACHE_LIMIT);
       const contextOptions=Object.freeze({currentStudyDate,subjectReferenceSummaries:options.subjectReferenceSummaries});
       const context=createAllHistoryContext(prepared.records,contextOptions,classifyTaskOutcome);
-      return remember(historyCache,key,{prepared,contextOptions,compact:buildAllHistoryInsights(context,false),audit:null},HISTORY_CACHE_LIMIT);
+      return remember(historyCache,key,{prepared,contextOptions,compact:buildAllHistoryInsights(context,false),reusable:context,audit:null},HISTORY_CACHE_LIMIT);
     };
     const labEvidence=entry=>entry.audit||(entry.audit=buildAllHistoryInsights(createAllHistoryContext(entry.prepared.records,entry.contextOptions,classifyTaskOutcome),true));
     const releaseTransient=()=>{historyCache.forEach(entry=>{entry.audit=null;});};
     const buildPrepared=(records,prepared,options={})=>{
-      const entry=historyEntry(prepared,options),model=buildInsightsFromCanonical(records,options,entry.compact,classifyTaskOutcome,summarizePracticeRuns);
+      const entry=historyEntry(prepared,options),context=entry.reusable;
+      const reusable=context&&records===prepared.records&&context.historyMeta.capped===false
+        ?{evidence:context.modelEvidence,daily:context.dynamicsModel.daily}
+        :null;
+      let model;
+      try{model=buildInsightsFromCanonical(records,options,entry.compact,classifyTaskOutcome,summarizePracticeRuns,reusable);}
+      finally{entry.reusable=null;}
       Object.defineProperty(model,'getLabEvidence',{enumerable:false,value:()=>labEvidence(entry)});
       return model;
     };
