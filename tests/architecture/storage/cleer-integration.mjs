@@ -145,6 +145,8 @@ assert.match(backup,/const summary=Reconciliation\.summarizePlan\(reconciliation
 assert.doesNotMatch(backupProvider,/selected\.(?:save|load)\b|confirmPendingReplacement/u,'retired portable-provider fallback must stay absent from core provider runtime');
 assert.match(backupProvider,/SESSION_CLAIM_VERSION=2[\s\S]{0,180}SESSION_CLAIM_MAX_AGE_MS=10\*60\*1000/u,'Active Session claims must be bounded handoff evidence, not a second permanent authority.');
 assert.match(backupProvider,/ownerToken,sessionToken,claimedAt/u,'new Active Session claims must persist only opaque ownership/session tokens plus lifecycle metadata.');
+assert.match(backupProvider,/Exports\.protect\(\{blob:source,filename:id\+'\.sdsessionclaim'\},\{interactive:true,signal\}\)/u,'Active Session handoff claims must use the same protection layer as backup data before leaving the device.');
+assert.match(backupProvider,/Exports\.unprotect\(lease\.blob,\{interactive:false,signal\}\)/u,'background handoff-claim reads must unprotect only after remote ciphertext integrity verification and must never prompt.');
 assert.doesNotMatch(backupProvider,/claim=freeze\(\{format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,date[,}]/u,'new Active Session claims must not persist the session date in plaintext.');
 assert.doesNotMatch(backupProvider,/claim=freeze\(\{format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,[^\n]*\bowner[,}]/u,'new Active Session claims must not persist the installation identity in plaintext.');
 assert.doesNotMatch(backupProvider,/claim=freeze\(\{format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,[^\n]*observedRevision/u,'new Active Session claims must not persist the observed session revision.');

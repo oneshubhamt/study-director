@@ -2101,7 +2101,7 @@ const BackupProviderRuntime=BackupProviderModule.createRuntime(freeze({
   ports:freeze({
     configuration:freeze({appVersion:APP_VERSION}),
     controller:freeze({beginImport:BackupController.beginImport,cancelImport:BackupController.cancelImport,finishImport:BackupController.finishImport}),
-    exports:freeze({run:Exports.run,followProtection:Exports.followProtection}),
+    exports:freeze({run:Exports.run,protect:Exports.protect,unprotect:Exports.unprotect,followProtection:Exports.followProtection}),
     domain:freeze({clampText}),
     view:freeze({presentation:ports.view.presentation}),
     ownership:freeze({canRunBackground:()=>!appCanMutate()?'awaiting-control':Exports.backgroundAvailable(),canShare:()=>ports.operations.canShare(),requireMutationControl:requireBackupMutationControl}),

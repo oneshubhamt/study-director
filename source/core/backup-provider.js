@@ -12,7 +12,7 @@ registry.define('backup-provider',1,input=>{
   const PORT_FIELDS=freeze({
     configuration:freeze(['appVersion']),
     controller:freeze(['beginImport','cancelImport','finishImport']),
-    exports:freeze(['followProtection','run']),
+    exports:freeze(['followProtection','protect','run','unprotect']),
     domain:freeze(['clampText']),
     view:freeze(['presentation']),
     ownership:freeze(['canRunBackground','canShare','requireMutationControl']),
@@ -1020,23 +1020,34 @@ registry.define('backup-provider',1,input=>{
     let latest=null,latestEpoch=0;
     for(const raw of rows){const item=repositoryProviderItem(raw,'session-claim'),epoch=sessionClaimEpoch(item.id);if(!epoch)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state has an invalid identity.');if(epoch>latestEpoch){latest=item;latestEpoch=epoch;}}
     if(!latest)return null;
-    const lease=repositoryDownloadLease(await selected.repository.downloadSessionClaim(latest,freeze({signal})));
+    const lease=repositoryDownloadLease(await selected.repository.downloadSessionClaim(latest,freeze({signal})));let decoded=null;
     try{
       if(lease.blob.size<=0||lease.blob.size>SESSION_CLAIM_MAX_BYTES||latest.size&&lease.blob.size!==latest.size)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state changed size unexpectedly.');
       const digest=await Exports.run('checksum',{value:lease.blob},{signal});
       if(latest.digest&&latest.digest!==digest||latest.serverDigest&&latest.serverDigest!==digest)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state failed content verification.');
-      let parsed=null;try{parsed=JSON.parse(await lease.blob.text());}catch{}
+      decoded=await Exports.unprotect(lease.blob,{interactive:false,signal});
+      if(!decoded||!(decoded.blob instanceof Blob))throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state could not be opened safely.');
+      let parsed=null;try{parsed=JSON.parse(await decoded.blob.text());}catch{}
       const claim=await decodeSessionClaim(parsed,{signal});if(!claim||sessionClaimId(claim.epoch)!==latest.id)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state is malformed.');
       return freeze({claim,item:latest,expired:Date.now()-Date.parse(claim.claimedAt)>SESSION_CLAIM_MAX_AGE_MS});
-    }finally{await lease.release().catch(()=>{});}
+    }finally{
+      if(decoded&&decoded.blob instanceof Blob&&decoded.blob!==lease.blob)await Exports.run('file.release',{file:decoded.blob}).catch(()=>{});
+      await lease.release().catch(()=>{});
+    }
   }
   async function writeRepositorySessionClaim(selected,claim,{signal=null}={}){
     const normalized=normalizeSessionClaim(claim);if(!normalized)throw new TypeError('Active-session ownership claim is invalid.');
-    const id=sessionClaimId(normalized.epoch),blob=new Blob([JSON.stringify(normalized)],{type:'application/json'});if(blob.size<=0||blob.size>SESSION_CLAIM_MAX_BYTES)throw new Error('Active-session ownership claim is too large.');
-    const digest=await Exports.run('checksum',{value:blob},{signal}),item=repositoryProviderItem(await selected.repository.uploadSessionClaim(freeze({kind:'session-claim',id,name:id+'.sdsessionclaim',blob,size:blob.size,digest,exportedAt:normalized.claimedAt,appVersion:APP_VERSION,knownAbsent:true})),'session-claim');
-    if(item.digest!==digest||item.serverDigest&&item.serverDigest!==digest)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The shared repository did not verify the active-session ownership claim.');
-    const verified=await readRepositorySessionClaim(selected,{signal});if(!verified||verified.item.id!==id||JSON.stringify(verified.claim)!==JSON.stringify(normalized))throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The active-session ownership claim could not be read back exactly.');
-    return verified;
+    const id=sessionClaimId(normalized.epoch),source=new Blob([JSON.stringify(normalized)],{type:'application/json'});let protectedFile=null;
+    try{
+      protectedFile=await Exports.protect({blob:source,filename:id+'.sdsessionclaim'},{interactive:true,signal});
+      if(!protectedFile||!(protectedFile.blob instanceof Blob)||protectedFile.blob.size<=0||protectedFile.blob.size>SESSION_CLAIM_MAX_BYTES)throw new Error('Active-session ownership claim is too large.');
+      await protectedFile.checkProtection?.();
+      const digest=await Exports.run('checksum',{value:protectedFile.blob},{signal}),item=repositoryProviderItem(await selected.repository.uploadSessionClaim(freeze({kind:'session-claim',id,name:id+'.sdsessionclaim',blob:protectedFile.blob,size:protectedFile.blob.size,digest,exportedAt:normalized.claimedAt,appVersion:APP_VERSION,knownAbsent:true,checkProtection:protectedFile.checkProtection})),'session-claim');
+      await protectedFile.checkProtection?.();
+      if(item.digest!==digest||item.serverDigest&&item.serverDigest!==digest)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The shared repository did not verify the active-session ownership claim.');
+      const verified=await readRepositorySessionClaim(selected,{signal});if(!verified||verified.item.id!==id||JSON.stringify(verified.claim)!==JSON.stringify(normalized))throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The active-session ownership claim could not be read back exactly.');
+      return verified;
+    }finally{if(protectedFile&&protectedFile.blob instanceof Blob&&protectedFile.blob!==source)await Exports.run('file.release',{file:protectedFile.blob}).catch(()=>{});}
   }
   async function assertSharedPublicationTurn(selected,publicationLease){
     if(!publicationLease||!repositoryPublicationCapable(selected))return true;
