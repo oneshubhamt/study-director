@@ -1081,7 +1081,7 @@ registry.define('backup-provider',1,input=>{
     const state=syncState(selected);if(state.catching)return false;state.catching=true;notifyStatus();
     setTimeout(async()=>{
       const summary=presentation.begin(selected.id,'sync',{id:'external-sync',label:selected.label,foreground:false,message:`Syncing with ${selected.label}…`});
-      try{settleCatchUp(selected,head.item.id,await bringInRepositoryProvider(selected.id,{quiet:true,sync:true,checkpointId:head.item.id,presentation:summary}),summary);}
+      try{settleCatchUp(selected,head.item.id,await syncRepositoryProvider(selected.id,{checkpointId:head.item.id,presentation:summary}),summary);}
       catch(error){
         // Another device set or changed the backup password: sync waits for it.
         if(['BACKUP_LOCKED','BACKUP_AUTH_FAILED'].includes(String(error?.code||''))){state.password=head.item.id;summary.finish({message:`${selected.label} needs this profile’s backup password.`,outcome:'sync-password'});presentation.notice(selected.id,'sync-password',`Your backup password was set or changed on another device. Enter it to keep syncing with ${selected.label}.`);}
@@ -1105,7 +1105,7 @@ registry.define('backup-provider',1,input=>{
     const selected=providers.get(safeId(id));if(!selected||!selected.shared)return freeze({cancelled:true,reason:'unavailable'});
     const state=syncState(selected),head=state.password;if(!head||state.catching)return freeze({cancelled:true,reason:head?'busy':'none'});
     state.catching=true;notifyStatus();
-    try{const result=await bringInRepositoryProvider(selected.id,{quiet:true,sync:true,password:true,checkpointId:head});settleCatchUp(selected,head,result,null);return result;}
+    try{const result=await syncRepositoryProvider(selected.id,{checkpointId:head,password:true});settleCatchUp(selected,head,result,null);return result;}
     finally{state.catching=false;notifyStatus();}
   }
   // Open the versions that need review in the Combine dialog.
@@ -1267,14 +1267,11 @@ registry.define('backup-provider',1,input=>{
     // location that holds it (repositoryReadFailed).
     let applying=false;const readFailure=error=>{if(!applying&&error&&typeof error==='object'&&error.name!=='AbortError'&&Object.isExtensible(error)&&!['PROVIDER_FOREGROUND_CANCELLED','STUDY_DIRECTOR_IMPORT_CANCELLED','BACKUP_LOCKED'].includes(String(error.code||'')))error.repositoryReadFailed=true;return error;};
     const pair=newest.find(candidate=>candidate.item.id===chosenId);if(!pair)throw readFailure(new Error('The selected backup version is no longer available.'));
-    // Combining Drive's newest ordinary version as a whole makes it what this
-    // device and Drive share, wherever it is read from: the Device Folder's
-    // copy of it has the same id and the same data. Drive's newest comes from
-    // a fresh listing, never a recent one that may miss a newer version.
+    // Only Drive's own freshly verified newest ordinary version can become the
+    // shared reconciliation base. Device Folder has an independent checkpoint
+    // history and never impersonates Drive ancestry.
     const ordinary=candidate=>candidate.item.history?.retention?.role!=='before-restore',whole=mode==='bring-in'&&!note&&!missingOnly,newestOf=listed=>!listed.overflow&&[...listed.pairs].reverse().find(ordinary)?.item.id===pair.item.id;
-    let sharedHead=false;
-    if(whole&&selected.shared===true)sharedHead=newestOf(inventory)&&(!reusedHistory||newestOf(await repositoryProviderInventory(selected,{signal:operation.signal})));
-    else if(whole){const shared=[...providers.values()].find(sharedSyncing);if(shared)try{sharedHead=newestOf(await repositoryProviderInventory(repositoryOperationSelected(shared,{signal:operation.signal}),{signal:operation.signal}));}catch(error){if(operation.signal?.aborted)throw error;AppDiagnostics.capture('backup-provider.shared-head',error,'warn');}}
+    const sharedHead=whole&&selected.shared===true&&newestOf(inventory)&&(!reusedHistory||newestOf(await repositoryProviderInventory(selected,{signal:operation.signal})));
     OperationDiagnostics.mark('checkpoint-selected',{provider:selected.id});
     progress('verify',`Verifying selected backup in ${selected.label}…`);
     const verificationTask=(async()=>{OperationDiagnostics.mark('selected-checkpoint-verification-start',{provider:selected.id});const row=await verifyRepositoryInventoryPair(selected,pair,{interactive:!quiet||password,signal:operation.signal}).catch(error=>{if(error?.repositoryUnreadable===true)unreadableByProvider.set(providerSelected.id,new Set([...(unreadableByProvider.get(providerSelected.id)||[]),pair.item.id]));throw readFailure(error);});OperationDiagnostics.mark('selected-checkpoint-verification-complete',{provider:selected.id,objects:Number(row.manifest.objects&&row.manifest.objects.length)||0});return row;})();
@@ -1648,13 +1645,43 @@ registry.define('backup-provider',1,input=>{
       return false;
     }finally{if(foregroundView()&&foregroundView().providerId===selected.id)finishForegroundView(selected);await release(selected,'export');setBusy(false);foreground.release();}
   }
+  // Normal Drive synchronization is its own operation: pull one verified Drive
+  // head, reconcile it into canonical local state, verify the changed units and
+  // publish the resulting local state. It reuses the same transaction/rollback
+  // primitives as recovery without entering the user-facing Combine workflow.
+  async function syncRepositoryProvider(id,options={}){
+    if(busy)return freeze({cancelled:true,reason:'busy'});
+    const selected=providers.get(safeId(id));
+    if(!selected||!selected.shared||!selected.repository)return freeze({cancelled:true,reason:'unavailable'});
+    if(!providerConnected(selected))return freeze({cancelled:true,reason:'not-connected'});
+    const traceId=OperationDiagnostics.start('provider-sync',selected.label,{provider:selected.id}),foreground=beginForeground(selected,options&&options.signal||null);
+    if(!foreground){OperationDiagnostics.finish({status:'skipped',reason:'busy'},traceId);return freeze({cancelled:true,reason:'busy'});}
+    const operation=BackupController.beginImport(),cancelImport=()=>operation.cancel?.('Synchronization was cancelled.');
+    if(foreground.signal.aborted)cancelImport();else foreground.signal.addEventListener('abort',cancelImport,{once:true});
+    beginForegroundView(selected,'sync',`Syncing with ${selected.label}…`,options.presentation);setBusy(true);
+    try{
+      await enterForeground(selected,foreground,traceId,{prepare:true});
+      const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',quiet:true,sync:true,password:options&&options.password===true,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});
+      if(!candidate){OperationDiagnostics.finish({cancelled:true,reason:'unavailable'},traceId);return freeze({cancelled:true,reason:'unavailable'});}
+      const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{sync:true});
+      if(result&&result.cancelled){OperationDiagnostics.finish({cancelled:true,reason:String(result.reason||'cancelled')},traceId);return freeze({...result,cancelled:true,exportedAt});}
+      OperationDiagnostics.finish({cancelled:false},traceId);return freeze({...result,exportedAt});
+    }catch(error){
+      if(String(error&&error.code||'')==='STUDY_DIRECTOR_IMPORT_CANCELLED'){OperationDiagnostics.finish({cancelled:true,reason:'cancelled'},traceId);return freeze({cancelled:true,reason:'cancelled'});}
+      OperationDiagnostics.fail(error,{},traceId);throw error;
+    }finally{
+      if(foregroundView()&&foregroundView().providerId===selected.id)finishForegroundView(selected);
+      foreground.signal.removeEventListener('abort',cancelImport);BackupController.finishImport(operation);await release(selected,'sync');setBusy(false);foreground.release();
+    }
+  }
+
   // A quiet run (adding what is missing after browser data was cleared) never
   // prompts: it runs only while already connected and never asks for sign-in.
   async function bringInRepositoryProvider(id,options={}){
     if(busy)return freeze({cancelled:true,reason:'busy'});
     const selected=providers.get(safeId(id));
     if(!selected||!selected.repository)throw new Error('Backup location is unavailable.');
-    const quiet=options?.quiet===true,missingOnly=options?.missingOnly===true,sync=quiet&&!missingOnly&&options?.sync===true,note=!missingOnly&&!sync&&typeof options?.note==='string'?options.note:'';
+    const quiet=options?.quiet===true,missingOnly=options?.missingOnly===true,note=!missingOnly&&typeof options?.note==='string'?options.note:'';
     if(quiet&&!providerConnected(selected))return freeze({cancelled:true,reason:'not-connected'});
     const traceId=OperationDiagnostics.start('provider-combine',selected.label,{provider:selected.id}),foreground=beginForeground(selected,options&&options.signal||null);
     if(!foreground){OperationDiagnostics.finish({status:'skipped',reason:'busy'},traceId);return freeze({cancelled:true,reason:'busy'});}
@@ -1664,8 +1691,8 @@ registry.define('backup-provider',1,input=>{
     try{
       await enterForeground(selected,foreground,traceId,{prepare:true,authorizeAs:quiet?'':'import'});
       statusText(`Reading ${selected.label}…`);
-      const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',note,missingOnly,before:String(options?.before||''),quiet,sync,password:sync&&options?.password===true,review:!quiet&&!note&&options?.review===true,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});if(!candidate){const message=missingOnly?'No version saved before browser data was cleared was found. Nothing was changed.':'Combine cancelled.';statusText(message);finishForegroundView(selected,{message,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({cancelled:true,...(missingOnly?{reason:'needs-decision'}:{})});}
-      const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{note,missingOnly,sync,review:!quiet&&!note&&options?.review===true});
+      const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',note,missingOnly,before:String(options?.before||''),quiet,review:!quiet&&!note&&options?.review===true,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});if(!candidate){const message=missingOnly?'No version saved before browser data was cleared was found. Nothing was changed.':'Combine cancelled.';statusText(message);finishForegroundView(selected,{message,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({cancelled:true,...(missingOnly?{reason:'needs-decision'}:{})});}
+      const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{note,missingOnly,review:!quiet&&!note&&options?.review===true});
       if(result&&result.cancelled){const message=String(result.reason||'').startsWith('note-')||result.reason==='needs-decision'?'No changes were made.':'Combine cancelled.';statusText(message);finishForegroundView(selected,{message,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({...result,cancelled:true});}
       const convergence=presentRecovery(selected,'bring-in',result);
 
@@ -1758,7 +1785,7 @@ registry.define('backup-provider',1,input=>{
   function diagnosticSync(){return freeze([...providers.values()].filter(selected=>selected.shared).map(selected=>{const state=syncState(selected),job=providerBackgroundCoordinators.get(selected.id)?.jobStatus('convergence');let endsAt=NaN;try{endsAt=Number(selected.connectionExpiresAt?.());}catch{}return freeze({id:selected.id,connected:providerConnected(selected),syncedAt:state.syncedAt,checkedAt:state.checkedAt?new Date(state.checkedAt).toISOString():'',nextEligibleAt:String(job?.nextEligibleAt||''),needsReview:!!state.review,needsUpdate:!!state.newer,needsPassword:!!state.password,behind:!!state.behind,catchingUp:!!state.catching,turnWaits:Math.max(0,Number(state.turnWaits)||0),signInEndsAt:Number.isFinite(endsAt)&&endsAt>0?new Date(endsAt).toISOString():''});}));}
   function diagnosticConnections(){return freeze([...providers.values()].map(selected=>freeze({id:selected.id,connected:providerConnected(selected),formats:formatsByProvider.get(selected.id)||null,scopeBound:repositoryScopeByProvider.has(selected.id),retryAttempt:providerConvergenceRetryAttempts.get(selected.id)||0,retryBackoffCapped:(providerConvergenceRetryAttempts.get(selected.id)||0)>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length})));}
   function status(){return Object.freeze({busy,cancellable:!!foregroundController&&!foregroundController.signal.aborted,operation:foregroundView()?Object.freeze({...foregroundView()}):null});}
-  return Object.freeze({register,list,syncing:()=>sharingActive(),status,locationStatus,reviewSync,unlockSync,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,diagnosticSync,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},cancelForeground,history:historyRepositoryProvider,noteVersions:noteVersionsRepositoryProvider,backup:backupProvider,backupRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeRepositoryProviderVersion,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,configureSessionOwnership,claimSessionOwnership,releaseSessionClaim,readSessionClaim,scheduleSharedSync,suspendBackground,repositoryScope});
+  return Object.freeze({register,list,syncing:()=>sharingActive(),status,locationStatus,reviewSync,unlockSync,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,diagnosticSync,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},cancelForeground,history:historyRepositoryProvider,noteVersions:noteVersionsRepositoryProvider,backup:backupProvider,backupRepositoryProvider,syncRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeRepositoryProviderVersion,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,configureSessionOwnership,claimSessionOwnership,releaseSessionClaim,readSessionClaim,scheduleSharedSync,suspendBackground,repositoryScope});
 
   }
   return freeze({format:'study-director.backup-provider-module',contractVersion:1,createRuntime});

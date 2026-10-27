@@ -512,7 +512,7 @@ let syncWorld=null;
     return freeze({
       backUpFolder:()=>providers.backupRepositoryProvider('folder',{interactive:false}),
       upload:async()=>{await new Promise(resolve=>setTimeout(resolve,3));return providers.backupRepositoryProvider('drive',{interactive:false});},
-      sync:()=>providers.bringInRepositoryProvider('drive',{quiet:true,sync:true,checkpointId:head()}),
+      sync:()=>providers.syncRepositoryProvider('drive',{checkpointId:head()}),
       review:()=>providers.bringInRepositoryProvider('drive',{checkpointId:head(),review:true}),
       restore:checkpointId=>providers.restoreRepositoryProviderVersion('drive',{checkpointId,confirmed:true}),
       // Combine from Version History, read from the location the list chose.
