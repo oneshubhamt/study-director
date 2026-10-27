@@ -5,7 +5,7 @@ export const COVERAGE_FLOORS=Object.freeze([
   Object.freeze({file:'source/core/asset-storage.js',lines:90,branches:58,functions:70}),
   Object.freeze({file:'source/core/attachments.js',lines:65,branches:50,functions:50}),
   Object.freeze({file:'source/core/backup.js',lines:70,branches:58,functions:70}),
-  Object.freeze({file:'source/core/device-backup.js',lines:85,branches:60,functions:88.33}),
+  Object.freeze({file:'source/core/device-backup.js',lines:85,branches:60,functions:90}),
   Object.freeze({file:'source/core/practice-pacer.js',lines:55,branches:45,functions:55}),
   Object.freeze({file:'source/core/timer-engine.js',lines:42,branches:38,functions:42}),
   Object.freeze({file:'source/core/backup-codec.js',lines:85,branches:58,functions:90}),

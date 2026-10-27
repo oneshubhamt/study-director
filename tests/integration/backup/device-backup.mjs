@@ -74,6 +74,16 @@ await test('cancelling the picker or refusing permission leaves a clean, unconne
   assert.equal(w.controller.status().connected,false);assert.match(w.note(),/Write permission was not granted/u);assert.equal(w.settingsStore.size,0);assert.equal(w.published.length,0);
 });
 
+await test('a remembered folder whose renewed permission is denied stays configured but clearly blocked',async()=>{
+  const w=world(),folder=w.directory({permission:'prompt',grant:'denied'});w.store(folder,'2026-10-06T07:00:00.000Z');
+  await w.controller.install();assert.equal(w.controller.status().mode,'permission');assert.equal(w.controller.status().connected,false);
+  await w.controller.connect();
+  assert.equal(w.controller.status().mode,'permission');assert.equal(w.controller.status().connected,false);
+  assert.match(w.note(),/Folder access is blocked by the browser/u,'a denied renewal explains how to recover access');
+  assert.equal(w.settingsStore.get('deviceFolder').directoryHandle,folder,'denied renewal does not discard the remembered folder');
+  assert.equal(w.published.length,0,'no backup is attempted without renewed permission');
+});
+
 await test('a deleted repository folder heals in the next backup; a deleted chosen folder is forgotten cleanly',async()=>{
   const w=world(),folder=w.directory();await w.controller.install();w.choose(folder);await w.controller.connect();await w.settle();
   await folder.removeEntry(IDENTITIES.root);w.change(true);await w.tick(10*1000);
@@ -89,6 +99,17 @@ await test('Turn off forgets the folder and stops automatic backups; the backups
   await w.controller.disconnect();assert.equal(w.controller.status().connected,false);assert.equal(w.settingsStore.size,0);
   w.change(true);await w.tick(30*MINUTE);assert.equal(w.published.length,1,'no automatic backups after turning off');assert.equal((await w.commits(folder)).length,1,'existing backups are untouched');
   assert.equal(w.runtime.list({hosted:true})[0].connected,false);
+});
+
+await test('Delete backups removes only the Study Director repository and turns off Device Folder',async()=>{
+  const w=world(),folder=w.directory();await w.controller.install();w.choose(folder);await w.controller.connect();await w.settle();
+  const repositoryName=w.controller.status().repositoryName;assert.ok(repositoryName);assert.equal((await w.commits(folder,repositoryName)).length,1);
+  const deleted=await w.controller.deleteBackups();
+  assert.equal(deleted,repositoryName,'the deleted repository is identified exactly');
+  assert.equal(w.controller.status().connected,false,'deleting backups also turns off Device Folder');
+  assert.equal(w.settingsStore.size,0,'the remembered folder is removed only after the engine disconnects safely');
+  assert.deepEqual(await w.commits(folder,repositoryName),[],'the Study Director repository subfolder is gone');
+  await folder.getDirectoryHandle('parent-still-usable',{create:true});
 });
 
 await test('after a browser data clear the open tab writes the folder back',async()=>{
