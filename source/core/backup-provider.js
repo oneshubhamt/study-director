@@ -1044,7 +1044,7 @@ registry.define('backup-provider',1,input=>{
     }
   }
   async function writeRepositorySessionClaim(selected,claim,{signal=null,interactive=false}={}){
-    const normalized=normalizeSessionClaim(claim);if(Number(claim&&claim.version)!==SESSION_CLAIM_VERSION||!normalized||normalized.version!==SESSION_CLAIM_VERSION||!SESSION_OWNER_PATTERN.test(normalized.observedOwner))throw new TypeError('Active-session ownership claim is invalid.');
+    const normalized=normalizeSessionClaim(claim);if(Number(claim&&claim.version)!==SESSION_CLAIM_VERSION||!normalized||normalized.version!==SESSION_CLAIM_VERSION)throw new TypeError('Active-session ownership claim is invalid.');
     const id=sessionClaimId(normalized.epoch),source=new Blob([JSON.stringify(normalized)],{type:'application/json'});let protectedFile=null;
     try{
       protectedFile=await Exports.protect({blob:source,filename:id+'.sdsessionclaim'},{interactive,signal});

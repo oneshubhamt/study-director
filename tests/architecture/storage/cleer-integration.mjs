@@ -174,6 +174,7 @@ assert.match(backupProvider,/exports:freeze\(\['followProtection','protect','run
 assert.match(backupProvider,/Exports\.protect\(\{blob:source,filename:id\+'\.sdsessionclaim'\},\{interactive,signal\}\)/u,'Active Session ownership claims must be protected before leaving the device.');
 assert.match(backupProvider,/Exports\.unprotect\(lease\.blob,\{interactive:false,signal\}\)/u,'background ownership reads must unprotect only after stored-byte integrity verification and must never prompt.');
 assert.match(backupProvider,/sessionToken,epoch,state:'owned',ownerToken,revision,observedOwnerToken,observedRevision/u,'new ownership claims must persist opaque session/owner tokens rather than raw identifiers.');
+assert.doesNotMatch(backupProvider,/normalized\.observedOwner\b/u,'the opaque claim writer must not validate a retired plaintext owner field.');
 assert.doesNotMatch(backupProvider,/claim=freeze\(\{format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,date[,}]/u,'new Active Session claims must not persist the session date.');
 assert.doesNotMatch(backupProvider,/claim=freeze\(\{format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,[^\n]*\bowner[,}]/u,'new Active Session claims must not persist an installation id.');
 assert.match(app,/claim\.applies&&claim\.state==='owned'&&!claim\.ownedHere/u,'the live watcher must consume provider-projected ownership rather than remote identifiers.');
