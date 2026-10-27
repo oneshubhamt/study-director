@@ -23,7 +23,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('backup-encryption','tests/browser/backup/encryption.mjs',['encryption','password','files','cancellation','recovery','worker'],0,{alone:'Not yet diagnosed: under concurrent load the password dialog did not open in time.'}),
     test('pwa-device-backup','tests/browser/backup/pwa-device-backup.mjs',['pwa','device-backup']),
     test('sync-and-profiles','tests/browser/backup/sync-and-profiles.mjs',['sync','google-drive','two-devices','reload','activation','profiles'],300000),
-    test('session-plan-sync','tests/browser/backup/session-plan-sync.mjs',['sync','google-drive','two-devices','active-session','plan','takeover'],300000),
+    test('session-plan-sync','tests/browser/backup/session-plan-sync.mjs',['sync','google-drive','two-devices','active-session','plan','takeover'],300000,{alone:'Two-device ownership handoff has deliberate network gates and short post-claim timing assertions; unrelated Chromium CPU load can delay the local continuation path without testing a synchronization invariant.'}),
     test('insights-populated','tests/browser/insights/insights-populated-ui.mjs',['insights','populated-history']),
     test('pwa-update','tests/browser/pwa/pwa-update.mjs',['pwa','service-worker','trusted-types','multi-tab','offline','recovery','update'],0,{alone:'Chromium activates a new service worker only when the old one is idle and the CPU has time; diagnosed and fixed, kept alone as a safeguard.'}),
     test('image-clipboard-bridge','tests/browser/rich-text/image-bridge.mjs',['rich-editor','wordgard','native-file-selection','clipboard-image','selection','asset-storage']),
@@ -46,7 +46,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
   ]),
   extended:Object.freeze([
     test('attachment-library','tests/browser/attachments/attachments.mjs',['attachments','pdf','audio','opfs','references','streaming','atomic-import','trusted-types'],180000),
-    test('insights-performance','tests/browser/insights/insights-performance.mjs',['insights','performance','worker','progressive-rendering','fallback']),
+    test('insights-performance','tests/browser/insights/insights-performance.mjs',['insights','performance','worker','progressive-rendering','fallback'],0,{alone:'This suite enforces wall-clock and long-task performance budgets, so it must run without another browser workload competing for CPU.'}),
     test('maximum-insights','tests/browser/insights/insights-maximum-import.mjs',['insights','maximum-import']),
     test('notes-at-limit','tests/browser/library/notes-at-limit.mjs',['library','notes','performance','capacity','search','tags','backup'],240000),
     test('production-capacity','tests/browser/storage/capacity.mjs',['capacity','restore','reload','re-export','rollback'],300000),
