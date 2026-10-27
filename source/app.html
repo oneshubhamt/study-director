@@ -2780,13 +2780,13 @@ async function checkSessionOwnershipClaim(){
   try{
     const [claim,loaded]=await Promise.all([BackupProviderRuntime.readSessionClaim('google-drive'),AppData.activeSession.load(0,{strict:true})]);
     if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be checked safely.');
-    const session=loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null,me=InstallationIdentity.getId(),remote=!!(claim&&session&&claim.date===session.date&&claim.owner!==me),mine=!!(session&&session.runningOn===me);
+    const session=loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null,me=InstallationIdentity.getId(),remote=!!(claim&&session&&claim.applies&&claim.state==='owned'&&!claim.ownedHere),mine=!!(session&&session.runningOn===me);
     if(remote&&mine&&TASKS.length){
-      const now=DecisionClock.nowMs(),same=sessionClaimFreeze&&sessionClaimFreeze.epoch===claim.epoch&&sessionClaimFreeze.owner===claim.owner;
+      const now=DecisionClock.nowMs(),same=sessionClaimFreeze&&sessionClaimFreeze.epoch===claim.epoch;
       if(!same){
         try{await flushLiveDraft();}catch(error){AppDiagnostics.capture('session.claim-flush',error,'warn');}
         const frozenSinceMs=DecisionClock.nowMs();TimerEngine.stopExecution();
-        sessionClaimFreeze=Object.freeze({epoch:claim.epoch,owner:claim.owner,date:claim.date,frozenSinceMs,lastSyncAt:0});
+        sessionClaimFreeze=Object.freeze({epoch:claim.epoch,frozenSinceMs,lastSyncAt:0});
         setPlanStatus('Today’s session moved to another device. Syncing its latest state…');
       }
       const current=sessionClaimFreeze;
@@ -2797,7 +2797,7 @@ async function checkSessionOwnershipClaim(){
       return true;
     }
     if(sessionClaimFreeze){
-      if(mine&&claim?.state==='owned'&&claim.owner===me&&claim.date===session?.date)return resumeAfterReleasedSessionClaim(session);
+      if(mine&&claim?.state==='owned'&&claim.ownedHere&&claim.applies)return resumeAfterReleasedSessionClaim(session);
       if(!mine||!TASKS.length){sessionClaimFreeze=null;return false;}
       const now=DecisionClock.nowMs(),current=sessionClaimFreeze;
       if(!current.lastSyncAt||now-current.lastSyncAt>=SESSION_CLAIM_SYNC_RETRY_MS){

@@ -62,8 +62,8 @@ try{
   const asked=await applying;
   assert.ok(asked.some(text=>/Continue here|running on/iu.test(text)),`applying asks before taking over (${asked.join(' / ')})`);
   await waitFor(async()=>claimsBy('A')>beforeClaims&&(await screen(a)).mode==='running',{label:'the PC ownership claim starts the timer',timeout:10000});
-  const pcClaim=await latestClaim(),pc=await screen(a);
-  assert.equal(pcClaim.state,'owned');assert.equal(pcClaim.owner,pc.owner);assert.ok(pc.revision>=pcClaim.revision,'local session revision must cover the accepted ownership revision');
+  const pcClaim=await latestClaim(),pc=await screen(a),pcProjection=await a.evaluate(`__PWA6.BackupProviderRuntime.readSessionClaim('google-drive')`);
+  assert.equal(pcClaim.state,'owned');assert.match(pcClaim.ownerToken,/^[a-f0-9]{64}$/u);assert.match(pcClaim.sessionToken,/^[a-f0-9]{64}$/u);assert.equal(Object.hasOwn(pcClaim,'owner'),false);assert.equal(Object.hasOwn(pcClaim,'date'),false);assert.equal(pcProjection.ownedHere,true);assert.equal(pcProjection.applies,true);assert.ok(pc.revision>=pcClaim.revision,'local session revision must cover the accepted ownership revision');
   assert.equal(uploadsBy('A'),before,'a full Drive checkpoint is not on the live ownership critical path');
   await releaseBackground(a,'__qaOwnershipHold');
   await waitFor(async()=>uploadsBy('A')>before&&!await waiting(a),{label:'the PC publishes its full state after ownership',timeout:45000});
@@ -89,9 +89,9 @@ try{
   releaseReturnClaim();
   await waitFor(async()=>claimsBy('B')>returnClaims&&(await screen(b)).mode==='running',{label:'Continue Here ownership claim',timeout:10000});
   await b.evaluate(`clearInterval(window.__acceptTimer)`);
-  const moved=await screen(b),phoneClaim=await latestClaim();
+  const moved=await screen(b),phoneClaim=await latestClaim(),phoneProjection=await b.evaluate(`__PWA6.BackupProviderRuntime.readSessionClaim('google-drive')`);
   assert.equal(moved.mode,'running','Continue Here runs after the verified ownership claim');
-  assert.equal(phoneClaim.state,'owned');assert.equal(phoneClaim.owner,moved.owner);assert.ok(moved.revision>=phoneClaim.revision);
+  assert.equal(phoneClaim.state,'owned');assert.match(phoneClaim.ownerToken,/^[a-f0-9]{64}$/u);assert.equal(Object.hasOwn(phoneClaim,'owner'),false);assert.equal(phoneProjection.ownedHere,true);assert.equal(phoneProjection.applies,true);assert.ok(moved.revision>=phoneClaim.revision);
   assert.equal(uploadsBy('B'),returnUploads,'Continue Here does not wait for the full session checkpoint');
   assert.equal(moved.header,'LIVE SESSION','the header follows the session back to this device');
   assert.match(moved.now,/PC Block/u,'with the plan applied on the PC');
