@@ -46,15 +46,18 @@ function run(script,limitMs=timeoutMs){
   });
 }
 
-// Up to 2 tests at once by default (BROWSER_TEST_JOBS=N changes it; 1 is fully
-// serial). Tests marked alone always run afterwards with nothing else running.
+// Up to 2 ordinary tests run at once by default (BROWSER_TEST_JOBS=N changes
+// it; 1 is fully serial). Isolated wall-clock performance tests run first on a
+// clean browser runner; other tests marked alone still run by themselves.
 const jobs=Math.max(1,Math.min(8,Math.floor(Number(process.env.BROWSER_TEST_JOBS)||2)));
 const runEntry=entry=>{console.log(`\n[browser] ${entry.script}`);return run(entry.script,Math.max(timeoutMs,Number(entry.timeoutMs)||0));};
 const failures=[];
 const attempt=async entry=>{try{await runEntry(entry);}catch(error){failures.push(error);}};
-const shared=jobs===1?entries:entries.filter(entry=>!entry.alone);let next=0;
+const isolated=entries.filter(entry=>entry.alone),performanceIsolated=isolated.filter(entry=>entry.coverage.includes('performance')),remainingIsolated=isolated.filter(entry=>!entry.coverage.includes('performance'));
+for(const entry of performanceIsolated)await attempt(entry);
+const shared=entries.filter(entry=>!entry.alone);let next=0;
 await Promise.all(Array.from({length:Math.min(jobs,shared.length)},async()=>{while(next<shared.length)await attempt(shared[next++]);}));
-if(jobs>1)for(const entry of entries.filter(entry=>entry.alone))await attempt(entry);
+for(const entry of remainingIsolated)await attempt(entry);
 // Run everything, then report every failure together.
 if(failures.length)throw new AggregateError(failures,`${failures.length} browser test(s) failed: ${failures.map(error=>error.message).join(' | ')}`);
 console.log(JSON.stringify({status:'PASS',release:releaseConfig.release,tier,domain:domain||null,chromium,tests:scripts.length,quarantined:skipped.length,timeoutMs,jobs},null,2));

@@ -32,8 +32,8 @@ jobs:
           CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
           test -n "$CHROME"
           echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
-      - name: Rerun failed browser cases serially
+      - name: Rerun targeted browser cases serially
         run: |
+          node tests/browser/insights/insights-performance.mjs
           node tests/browser/library/notes-management.mjs
           node tests/browser/backup/session-plan-sync.mjs
-          node tests/browser/insights/insights-performance.mjs
