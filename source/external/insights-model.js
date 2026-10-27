@@ -4001,8 +4001,8 @@
   function buildInsightsFromCanonical(records,options,allHistory,classifyTaskOutcome,summarizePracticeRuns,reusable=null){
     const evidence=reusable&&reusable.evidence||createEvidenceIndex(records,classifyTaskOutcome);
     const work=evidence.work;
-    const planned=rowsPlanned(work),completed=rowsCompleted(work),actual=rowsActual(work);
-    const quality=records.map(r=>Number(r.studyQuality)).filter(v=>Number.isFinite(v)&&v>0);
+    const planned=reusable?.overview?.planned??rowsPlanned(work),completed=reusable?.overview?.completed??rowsCompleted(work),actual=reusable?.overview?.actual??rowsActual(work);
+    const quality=reusable?.overview?null:records.map(r=>Number(r.studyQuality)).filter(v=>Number.isFinite(v)&&v>0);
     const currentStudyDate=isIsoDate(options.currentStudyDate)?options.currentStudyDate:localIsoDate();
     const windowEndDay=isIsoDate(options.windowTo)?dateDay(options.windowTo):null;
     const currentStudyDay=dateDay(currentStudyDate);
@@ -4017,7 +4017,7 @@
       :records;
     const analyticalEvidence=analyticalRecords===records?evidence:createEvidenceIndex(analyticalRecords,classifyTaskOutcome);
     const daily=reusable&&analyticalEvidence===evidence&&reusable.daily?reusable.daily:computeDailySeries(analyticalEvidence);
-    const trendDaily=filterDailyForDirectionalBasis(daily,trendBasis);
+    const trendDaily=reusable&&reusable.advanced?null:filterDailyForDirectionalBasis(daily,trendBasis);
     const strongDays=records.reduce((count,record)=>{
       const rows=recordRows(evidence,record,'work'),completion=pct(rowsCompleted(rows),rowsPlanned(rows));
       return count+(Number.isFinite(completion)&&Math.round(completion)>=80?1:0);
@@ -4029,14 +4029,14 @@
       dateRange:{start:records[0]?.date||null,end:records[records.length-1]?.date||null},
       calendarRange:{start:analyticalRecords[0]?.date||null,end:analyticalRecords[analyticalRecords.length-1]?.date||null},
       daily,
-      overview:{planned,completed,actual,completion:pct(completed,planned),actualVsPlanned:actual-planned,strongDays,averageQuality:quality.length?round(quality.reduce((a,b)=>a+b,0)/quality.length):null},
+      overview:{planned,completed,actual,completion:pct(completed,planned),actualVsPlanned:actual-planned,strongDays,averageQuality:reusable?.overview?.averageQuality??(quality.length?round(quality.reduce((a,b)=>a+b,0)/quality.length):null)},
       streak:streakSummaries.length?computeSummaryStreak(streakSummaries,currentStudyDate):computeStreak(evidence,currentStudyDate),
-      subjects:computeSubjects(evidence,subjectReferenceDate,options.subjectReferenceSummaries),startDelays:computeStartDelayBuckets(evidence),blockOrder:computeBlockOrder(evidence),
-      interruption:computeInterruption(evidence),frictionSources:computeFocusFrictionSources(evidence),completionSources:computeCompletionSources(evidence),progressEvidence:computeProgressEvidence(evidence),
-      outcomes:computeOutcomes(evidence),qualityEvidence:computeQualityEvidence(daily),sampleAudit:computeSampleAudit(evidence),support:computeKindSummary(evidence.support),fixed:computeKindSummary(evidence.fixed),
-      resourceMix:computeResourceMix(evidence),practice:computePracticePacer(records,summarizePracticeRuns,trendBasis),schedule:computeScheduleSummary(records)
+      subjects:reusable?.subjects||computeSubjects(evidence,subjectReferenceDate,options.subjectReferenceSummaries),startDelays:computeStartDelayBuckets(evidence),blockOrder:computeBlockOrder(evidence),
+      interruption:reusable?.interruption||computeInterruption(evidence),frictionSources:computeFocusFrictionSources(evidence),completionSources:computeCompletionSources(evidence),progressEvidence:computeProgressEvidence(evidence),
+      outcomes:computeOutcomes(evidence),qualityEvidence:computeQualityEvidence(daily),sampleAudit:reusable?.sampleAudit||computeSampleAudit(evidence),support:computeKindSummary(evidence.support),fixed:computeKindSummary(evidence.fixed),
+      resourceMix:computeResourceMix(evidence),practice:computePracticePacer(records,summarizePracticeRuns,trendBasis),schedule:reusable?.schedule||computeScheduleSummary(records)
     };
-    model.advanced=computeAdvanced(daily,trendDaily);
+    model.advanced=reusable?.advanced||computeAdvanced(daily,trendDaily);
     model.dynamics=allHistory.dynamics;
     model.fitness=allHistory.fitness;
     model.guardrails={sample:sampleStrength(records.length,work.length),trend:trendStrength(model.advanced.completionSlopePerWeek,model.advanced.trendCompletionDayCount),variability:model.advanced.outputStability,progress:progressEvidenceStrength(model.progressEvidence)};
@@ -4087,7 +4087,12 @@
     const buildPrepared=(records,prepared,options={})=>{
       const entry=historyEntry(prepared,options),context=entry.reusable;
       const reusable=context&&records===prepared.records&&context.historyMeta.capped===false
-        ?{evidence:context.modelEvidence,daily:context.dynamicsModel.daily}
+        ?{
+          evidence:context.modelEvidence,daily:context.dynamicsModel.daily,
+          overview:context.dynamicsModel.overview,subjects:context.dynamicsModel.subjects,
+          advanced:context.dynamicsModel.advanced,interruption:context.dynamicsModel.interruption,
+          sampleAudit:context.dynamicsModel.sampleAudit,schedule:context.dynamicsModel.schedule
+        }
         :null;
       let model;
       try{model=buildInsightsFromCanonical(records,options,entry.compact,classifyTaskOutcome,summarizePracticeRuns,reusable);}
