@@ -231,7 +231,7 @@ registry.define('backup-provider',1,input=>{
     if(requested&&active&&requested!==active)return false;
     if(!foregroundController||foregroundController.signal.aborted)return false;
     foregroundController.abort(providerBackgroundAbort('PROVIDER_FOREGROUND_CANCELLED',reason));
-    if(foregroundView()&&['bring-in','restore-version'].includes(foregroundView().kind))try{BackupController.cancelImport(reason,freeze({announce:false}));}catch{}
+    if(foregroundView()&&['bring-in','restore-version','sync'].includes(foregroundView().kind))try{BackupController.cancelImport(reason,freeze({announce:false}));}catch{}
     if(foregroundView())updateForegroundView({id:foregroundView().providerId},{stage:'cancelling',message:'Cancelling safely…',ok:true});
     writeStatus('Cancelling safely…',true);setBusy(true);return true;
   }
@@ -1662,13 +1662,13 @@ registry.define('backup-provider',1,input=>{
     try{
       await enterForeground(selected,foreground,traceId,{prepare:true});
       const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',quiet:true,sync:true,password:options&&options.password===true,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});
-      if(!candidate){OperationDiagnostics.finish({cancelled:true,reason:'unavailable'},traceId);return freeze({cancelled:true,reason:'unavailable'});}
+      if(!candidate){finishForegroundView(selected,{message:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:'unavailable'},traceId);return freeze({cancelled:true,reason:'unavailable'});}
       const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{sync:true});
-      if(result&&result.cancelled){OperationDiagnostics.finish({cancelled:true,reason:String(result.reason||'cancelled')},traceId);return freeze({...result,cancelled:true,exportedAt});}
+      if(result&&result.cancelled){finishForegroundView(selected,{message:result.reason==='needs-decision'?`${selected.label} has changes that need your review.`:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:String(result.reason||'cancelled')},traceId);return freeze({...result,cancelled:true,exportedAt});}
       OperationDiagnostics.finish({cancelled:false},traceId);return freeze({...result,exportedAt});
     }catch(error){
-      if(String(error&&error.code||'')==='STUDY_DIRECTOR_IMPORT_CANCELLED'){OperationDiagnostics.finish({cancelled:true,reason:'cancelled'},traceId);return freeze({cancelled:true,reason:'cancelled'});}
-      OperationDiagnostics.fail(error,{},traceId);throw error;
+      if(String(error&&error.code||'')==='STUDY_DIRECTOR_IMPORT_CANCELLED'){finishForegroundView(selected,{message:'Sync cancelled safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:'cancelled'},traceId);return freeze({cancelled:true,reason:'cancelled'});}
+      finishForegroundView(selected,{message:`Sync failed: ${userProviderMessage(error,'The newest shared version could not be verified safely.')}`,ok:false});OperationDiagnostics.fail(error,{},traceId);throw error;
     }finally{
       if(foregroundView()&&foregroundView().providerId===selected.id)finishForegroundView(selected);
       foreground.signal.removeEventListener('abort',cancelImport);BackupController.finishImport(operation);await release(selected,'sync');setBusy(false);foreground.release();
