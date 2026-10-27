@@ -2081,8 +2081,7 @@ const repository=freeze({
   // What this device last shared through Drive, and recording a version
   // placed there as shared.
   sharedBase:()=>AppData.reconciliationBase.read().catch(()=>null),
-  establishBase:checkpointId=>ManagedRepository.establishBase(checkpointId),
-  spine:()=>ManagedRepository.spine()
+  establishBase:checkpointId=>ManagedRepository.establishBase(checkpointId)
 });
 return freeze({controller,repository});
 })();
