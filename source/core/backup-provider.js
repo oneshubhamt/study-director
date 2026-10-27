@@ -1343,10 +1343,17 @@ registry.define('backup-provider',1,input=>{
     const providerSelected=providers.get(safeId(id));if(!providerSelected||!providerSelected.repository)throw new Error('Repository backup provider is unavailable.');
     const selected=repositoryOperationSelected(providerSelected,{signal:options&&options.signal||null});
     const state=await repositoryProviderState(selected,{interactive:false,signal:options&&options.signal||null});
-    if(state.overflow||state.ignored||state.invalid?.length||state.uncommitted?.length||state.orphanCommits?.length)throw new Error('Repository history is incomplete or unreadable; integrity verification is unavailable.');
+    // Integrity scrub is read-only. Verify every committed version we can prove
+    // valid even when unrelated incomplete/orphan publication debris exists.
+    // An incomplete listing is different: we cannot prove which committed
+    // versions exist, so that remains fail-closed. Destructive maintenance has
+    // its own stricter anomaly gates and is deliberately unchanged here.
+    if(state.overflow)throw new Error('Repository history could not be listed completely; integrity verification is unavailable.');
     const actualScope=typeof selected.repository.scope==='function'?String(await selected.repository.scope()||''):'';
     if(options.repositoryScope&&options.repositoryScope!==actualScope){const error=new Error('The backup repository changed.');error.code='REPOSITORY_CHANGED';throw error;}
     const history=Object.freeze(state.rows.map(row=>row.manifest));
+    const anomalousHistory=Number(state.invalid?.length||0)+Number(state.uncommitted?.length||0)+Number(state.orphanCommits?.length||0)+Number(state.unreadable?.length||0);
+    if(!history.length&&anomalousHistory)throw new Error('No committed backup version could be verified from the repository history.');
     if(!history.length)return Object.freeze({complete:true,cursor:'',checked:0,checkedBytes:0,total:0,quarantined:Object.freeze([])});
     const readObject=entry=>selected.repository.download(Object.freeze({kind:'object',id:entry.objectId,size:entry.storedBytes,digest:entry.storedChecksum}),Object.freeze({signal:options&&options.signal||null}));
     const readRange=async(entry,range)=>selected.repository.download(Object.freeze({kind:'object',id:entry.objectId,size:entry.storedBytes,digest:entry.storedChecksum}),Object.freeze({...range,signal:options&&options.signal||null}));
