@@ -68,8 +68,8 @@ const record=(date,reflection,updatedAt='2026-08-20T12:00:00.000Z')=>freeze({ver
 const session=(date,label,{runningOn='inst_device_local',status='suspended',revision=2}={})=>freeze({id:'current',type:'activeSession',version:RUNTIME_DATA_CONTRACT.schemas.ActiveSession.version,revision,date,status,runningOn,scheduleText:`08:00 | 60 | ${label} | work | Ethics | block | 1`,snapshot:freeze({label}),suspendedAt:'2026-08-20T13:00:00.000Z',updatedAt:'2026-08-20T13:00:00.000Z'});
 const draft=(date,text,revision=1,updatedAt='2026-08-20T12:00:00.000Z')=>freeze({version:1,date,reflection:text,studyQuality:3,revision,sessionRevision:0,updatedAt});
 
-async function makeCheckpoint({records=[],deletions=[],notes={},noteDeletions=[],activeSession=null,personalData=personal(),installationId='inst_checkpoint_a',exportedAt='2026-08-20T14:00:00.000Z'}={}){
-  const counts=codec.countShape({checkpointManifest:1,personalData:1,dailyRecord:records.length,note:Object.keys(notes).length,activeSession:activeSession?1:0});
+async function makeCheckpoint({records=[],deletions=[],notes={},noteDeletions=[],activeSession=null,pendingReviews=[],personalData=personal(),installationId='inst_checkpoint_a',exportedAt='2026-08-20T14:00:00.000Z'}={}){
+  const counts=codec.countShape({checkpointManifest:1,personalData:1,dailyRecord:records.length,note:Object.keys(notes).length,activeSession:activeSession?1:0,pendingReview:pendingReviews.length});
   const plan=freeze({studentName:'Checkpoint User',installationId,exportedAt,sourceRevision:exportedAt,recordDates:freeze(records.map(item=>item.date).sort()),savedDayDeletions:freeze(deletions),noteItems:freeze(Object.values(notes)),noteDeletions:freeze(noteDeletions),counts});
   const algorithm=codec.checksumAlgorithm(),manifest=codec.createManifest(plan,{compression:'none',algorithm});
   let seq=0;const hashes=[],lines=[JSON.stringify(manifest)];
@@ -78,6 +78,7 @@ async function makeCheckpoint({records=[],deletions=[],notes={},noteDeletions=[]
   await add('dailyRecord',records);
   await add('note',Object.values(notes));
   if(activeSession)await add('activeSession',[activeSession]);
+  await add('pendingReview',pendingReviews);
   await add('personalData',[personalData]);
   const complete=await codec.encodeCompletion(seq,counts,hashes,algorithm,[]);lines.push(JSON.stringify(complete));
   return codec.createV10Container(new Blob([lines.join('\n')+'\n']),{compression:'none',assetBlobs:[]});
@@ -123,9 +124,10 @@ function baseStore(state){
 
 // inertTimers: scheduled engine work never fires, so a test drives every
 // backup itself.
-function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=null,hasLiveTasks=false,fileMode='combine',extrasMode='keep',preflightFailure='',inertTimers=false}={}){
+function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=null,hasLiveTasks=false,fileMode='combine',extrasMode='keep',preflightFailure='',verificationFailure='',inertTimers=false}={}){
   state.deletions??=[];state.noteDeletions??=[];state.attachmentDeletions??=[];state.reviews??=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
-  let injectedFailure=String(preflightFailure||'');
+  let injectedFailure=String(preflightFailure||''),verificationFault=String(verificationFailure||'');
+  const verifying=()=>state.journal?.state?.phase==='verifying';
   const prompts=[];const statuses=[];const events=[];const diagnosticMarks=[];const fn=()=>false;
   const normalizeNotes=value=>Object.fromEntries(Object.entries(value||{}).map(([key,item])=>[key,normalizeArea(item,key)]).filter(([,item])=>item));
   // The file row shows the 'file' presentation's current message; record each one it shows.
@@ -135,17 +137,17 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
     configuration:freeze({appVersion:'QA_B3',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits}),
     
     persistence:freeze({
-      activeSessionLoad:async()=>{if(injectedFailure==='session-read')return {ok:false,value:null,error:new Error('QA_FIXTURE session read failure'),storage:{idb:true}};return {ok:true,value:state.activeSession,error:null,storage:{idb:true}};},activeSessionSave:async value=>{events.push('preflight-session-save');if(injectedFailure==='session-save')return {ok:false,value:null,error:new Error('QA_FIXTURE session save failure')};state.activeSession=value;return {ok:true,value};},activeSessionClear:async()=>(state.activeSession=null,{ok:true}),activeSessionSettled:async()=>{if(injectedFailure==='session-settle')throw new Error('QA_FIXTURE session settle failure');return true;},
-      dailyRecordBackupDates:async()=>({dates:[...state.records.keys()].sort(),warning:''}),dailyRecordBackupMonth:async month=>[...state.records.values()].filter(record=>String(record.date).startsWith(String(month)+'-')).sort((a,b)=>a.date.localeCompare(b.date)),dailyRecordDocuments:async dates=>dates.map(date=>state.records.get(date)).filter(Boolean),
+      activeSessionLoad:async()=>{if(injectedFailure==='session-read')return {ok:false,value:null,error:new Error('QA_FIXTURE session read failure'),storage:{idb:true}};if(verificationFault==='active-session'&&verifying())return {ok:true,value:null,error:null,storage:{idb:true}};return {ok:true,value:state.activeSession,error:null,storage:{idb:true}};},activeSessionSave:async value=>{events.push('preflight-session-save');if(injectedFailure==='session-save')return {ok:false,value:null,error:new Error('QA_FIXTURE session save failure')};state.activeSession=value;return {ok:true,value};},activeSessionClear:async()=>(state.activeSession=null,{ok:true}),activeSessionSettled:async()=>{if(injectedFailure==='session-settle')throw new Error('QA_FIXTURE session settle failure');return true;},
+      dailyRecordBackupDates:async()=>({dates:[...state.records.keys()].sort(),warning:''}),dailyRecordBackupMonth:async month=>[...state.records.values()].filter(record=>String(record.date).startsWith(String(month)+'-')).sort((a,b)=>a.date.localeCompare(b.date)),dailyRecordDocuments:async dates=>verificationFault==='saved-days'&&verifying()?[]:dates.map(date=>state.records.get(date)).filter(Boolean),
       dailyRecordImportBatches:async values=>{for(const value of values){state.records.set(value.date,freeze({...value}));state.deletions=state.deletions.filter(item=>item.date!==value.date);}return {batches:values.length?1:0};},
       dailyRecordRemove:async date=>(state.records.delete(date),true),dailyRecordTimestamp:value=>Date.parse(value?.updatedAt||value?.savedAt||'')||0,
-      notesExportPayload:()=>state.notes,notesReadFreshPayload:async()=>state.notes,notesReadFreshItems:async keys=>(keys||[]).map(key=>state.notes[key]||null),notesFlush:async()=>{events.push('preflight-notes-flush');if(injectedFailure==='notes')throw new Error('QA_FIXTURE notes preflight failure');return true;},notesNormalizePayload:normalizeNotes,notesTrashKey:key=>String(key).startsWith('~')?'':'~deleted '+key,notesAlignByTitle:value=>value,notesFailure:()=>({failed:false}),
+      notesExportPayload:()=>state.notes,notesReadFreshPayload:async()=>verificationFault==='notes'&&verifying()?{}:state.notes,notesReadFreshItems:async keys=>(keys||[]).map(key=>state.notes[key]||null),notesFlush:async()=>{events.push('preflight-notes-flush');if(injectedFailure==='notes')throw new Error('QA_FIXTURE notes preflight failure');return true;},notesNormalizePayload:normalizeNotes,notesTrashKey:key=>String(key).startsWith('~')?'':'~deleted '+key,notesAlignByTitle:value=>value,notesFailure:()=>({failed:false}),
       restoreJournalPrepare:async value=>(state.journal={state:{id:value.id},payload:value}),restoreJournalRead:async()=>state.journal,restoreJournalMark:async(id,phase)=>(state.journal.state.phase=phase,state.journal.state),restoreJournalClear:async()=>(state.journal=null,true),
-      scheduleRead:()=>state.schedule,personalSettle:async()=>{if(injectedFailure==='personal')throw new Error('QA_FIXTURE personal preflight failure');return true;},personalExport:async()=>state.personal,personalImport:async value=>(state.personal=value,true),personalVerify:async value=>assert.deepEqual(state.personal,value),
+      scheduleRead:()=>state.schedule,personalSettle:async()=>{if(injectedFailure==='personal')throw new Error('QA_FIXTURE personal preflight failure');return true;},personalExport:async()=>state.personal,personalImport:async value=>(state.personal=value,true),personalVerify:async value=>{if(verificationFault==='personal'&&verifying())throw new Error('QA_FIXTURE personal verification failure');assert.deepEqual(state.personal,value);},
       storageGeneration:()=>0,sourceRevision:async()=>'2026-08-23T00:00:00.000Z',snapshotRevision:async()=>'stable-b3',canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],installationId:()=>state.installationId||'inst_device_local',deletionRecoveryFlush:async()=>{events.push('preflight-deletion-flush');if(injectedFailure==='deletions')throw new Error('QA_FIXTURE deletion preflight failure');if(injectedFailure==='deletions-false')return false;if(injectedFailure==='deletions-unknown')return undefined;return true;},
-      deletionRecoverySavedDays:async()=>state.deletions.map(value=>({...value})),deletionRecoveryReplaceSavedDays:async values=>(state.deletions=(values||[]).map(value=>({...value})),true),deletionRecoveryNotes:async()=>state.noteDeletions.map(value=>({...value})),deletionRecoveryReplaceNotes:async values=>(state.noteDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryAttachments:async()=>state.attachmentDeletions.map(value=>({...value})),deletionRecoveryReplaceAttachments:async values=>(state.attachmentDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryClearAttachment:async assetId=>(state.attachmentDeletions=state.attachmentDeletions.filter(item=>item.assetId!==assetId),true),...baseStore(state),...state.reviews.ports
+      deletionRecoverySavedDays:async()=>verificationFault==='deletions'&&verifying()?[{date:'2026-01-01',deletedAt:'2026-01-01T00:00:00.000Z'}]:state.deletions.map(value=>({...value})),deletionRecoveryReplaceSavedDays:async values=>(state.deletions=(values||[]).map(value=>({...value})),true),deletionRecoveryNotes:async()=>state.noteDeletions.map(value=>({...value})),deletionRecoveryReplaceNotes:async values=>(state.noteDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryAttachments:async()=>state.attachmentDeletions.map(value=>({...value})),deletionRecoveryReplaceAttachments:async values=>(state.attachmentDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryClearAttachment:async assetId=>(state.attachmentDeletions=state.attachmentDeletions.filter(item=>item.assetId!==assetId),true),...baseStore(state),...state.reviews.ports,pendingReviewsList:async()=>verificationFault==='pending-reviews'&&verifying()?freeze([]):state.reviews.ports.pendingReviewsList()
     }),
-    assets:freeze({get:async()=>null,put:async()=>true,keys:async()=>[],list:async()=>[],importAll:async()=>0,restoreAll:async()=>true,removeMany:async()=>0,removeMetadata:async()=>0,scheduleMaintenance:fn}),
+    assets:freeze({get:async()=>null,put:async()=>true,keys:async()=>[],list:async()=>{if(verificationFault==='attachments'&&verifying())throw new Error('QA_FIXTURE attachment verification failure');return [];},importAll:async()=>0,restoreAll:async()=>true,removeMany:async()=>0,removeMetadata:async()=>0,scheduleMaintenance:fn}),
     exports:freeze({...processing,followProtection:async value=>{(state.followed??=[]).push({...value});return false;},backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),unprotect:async blob=>({blob,encrypted:false}),check:fn,job:fn=>fn(),download:fn,chooseSave:async()=>null,save:async()=>({status:'downloaded'})}),
     codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec,pendingReview:pendingReviewCodec}),
     reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async options=>noteResolver?noteResolver(options,state):freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:options.manualOnly&&decisions.reflections==='incoming'?item.incomingValue:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
@@ -196,6 +198,16 @@ for(const [stage,code,hasLiveTasks] of preflightCases){
   assert.equal(preflightHarness.diagnosticMarks.at(-1)[0],`restore-preflight-${stage.startsWith('deletions')?'deletions':stage}-failed`);
   assert.equal(preflightHarness.diagnosticMarks.at(-1)[1].errorCode,code);
 }
+
+const verificationReview=pendingReviewCodec.create({subject:'note',ref:'Checkpoint',kept:checkpointNotes.Checkpoint,keptAt:'2026-08-20T13:00:00.000Z'});
+const verificationBlob=await makeCheckpoint({records:checkpointRecords,deletions:checkpointDeletions,notes:checkpointNotes,activeSession:checkpointSession,pendingReviews:[verificationReview]});
+for(const domain of ['saved-days','notes','attachments','personal','pending-reviews','deletions','active-session']){
+  const verificationState=createState(),verificationHarness=createHarness(verificationState,{verificationFailure:domain});
+  const verificationCandidate=await verificationHarness.runtime.controller.inspect(verificationBlob,{filename:`verification-${domain}.sdbackup`});
+  await assert.rejects(()=>verificationHarness.runtime.controller.restore(verificationCandidate),error=>{assert.equal(error.backupStage,`restore-verification-${domain}`);assert.equal(error.code,'RESTORE_VERIFICATION_MISMATCH');return true;});
+  assert.ok(verificationHarness.diagnosticMarks.some(([name,details])=>name===`restore-verification-${domain}-failed`&&details.stage===`restore-verification-${domain}`),`${domain} verification must identify its exact diagnostic stage`);
+}
+
 
 
 // Format/protection boundary: public provenance is separate from integrity-covered authority/deletion metadata.
