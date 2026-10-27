@@ -100,7 +100,7 @@ See `docs/VERIFICATION.md` for the current QA policy and release gates.
 
 Release identity is defined only in `release.config.mjs`. Build and staging tools verify that source and generated deployment identity remain consistent.
 
-Current release: **SDVB75F10**.
+Current release identity is the `release` value in `release.config.mjs`. Do not duplicate the current release number in documentation.
 
 ## Packaging policy
 
