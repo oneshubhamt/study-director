@@ -122,7 +122,7 @@ class Element {
   const html=fs.readFileSync('source/app.html','utf8'),start=html.indexOf('function renderBackupActions(){'),end=html.indexOf('\nasync function backUpEverywhere(){',start);
   const draw=states=>{
     const nodes=new Map(['backup-shared-actions','backup-now','open-version-history'].map(id=>[id,new Element()]));for(const node of nodes.values())node.hidden=false;
-    new Function('document','BackupProviderRuntime',html.slice(start,end)+';renderBackupActions();')({getElementById:id=>nodes.get(id)||null},{locationStatus:id=>states[id]||null});
+    new Function('document','BackupProviderRuntime',html.slice(start,end)+'\n;renderBackupActions();')({getElementById:id=>nodes.get(id)||null},{locationStatus:id=>states[id]||null});
     return {group:nodes.get('backup-shared-actions').hidden,backupNow:nodes.get('backup-now').disabled,versions:nodes.get('open-version-history').disabled};
   };
   const off={connected:false},on={connected:true,busy:false};
