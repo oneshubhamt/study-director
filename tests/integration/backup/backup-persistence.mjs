@@ -350,14 +350,14 @@ assert.equal(currentNotes.Ethics.version,2);
 const gzipBomb=new Blob([gzipSync('\n'.repeat(limits.backupMaxUncompressedBytes+1024))],{type:'application/gzip'});
 await assert.rejects(()=>compatibilityFacade.inspectBackup(gzipBomb,{filename:'gzip-bomb.sdbackup.gz'}),/expands beyond the 8 MB safe uncompressed limit/u);
 
-// Post-commit verification detects a corrupted write and restores the safety snapshot.
+// The canonical commit receipt detects a corrupted write immediately and restores the safety snapshot.
 // Make the local Saved Day genuinely divergent so the v15 conflict contract performs an explicit replacement rather than treating it as identical.
 importedDailyRecords.push(freeze({version:16,recordKind:'study',date:'2026-08-03',reflection:'local divergent reflection',studyQuality:2,savedAt:'2026-08-03T21:00:00.000Z'}));
 restoring=true;safetyReadDone=false;corruptAfterImportOnce=true;selectIncomingSavedDay=true;
 const verificationCandidate=await runtime.controller.inspect(created.blob,{filename:created.filename});
 const verificationFailure=await runtime.controller.restore(verificationCandidate).then(()=>null,error=>error);
 assert.ok(verificationFailure instanceof Error);
-assert.match(verificationFailure.message,/Post-restore verification failed for saved day/u);
+assert.match(verificationFailure.message,/Saved-Day reconciliation commit did not match the resolved state/u);
 assert.equal(verificationFailure.studyDirectorCommittedDescription,'');
 assert.match(verificationFailure.studyDirectorRollbackDescription,/rolled back from the verified safety copy/u);
 
