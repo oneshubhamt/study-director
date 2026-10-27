@@ -44,7 +44,7 @@ registry.define('backup-provider',1,input=>{
   const VERIFIED_HISTORY_INTERPRETATION_VERSION='managed-history-v1:'+APP_VERSION;
   const {publicationMaxAgeMs:PUBLICATION_MAX_AGE_MS,maintenanceWorkBudgetMs:PROVIDER_MAINTENANCE_BUDGET_MS,maintenanceMaxAgeMs:MAINTENANCE_MAX_AGE_MS,objectGcGraceMs:OBJECT_GC_GRACE_MS,automaticQuietMs:AUTOMATIC_QUIET_MS,automaticUrgentMs:AUTOMATIC_URGENT_MS,automaticExpiryLeadMs:AUTOMATIC_EXPIRY_LEAD_MS}=RepositoryPolicy.protocol;
   const PROVIDER_RECOVERY_MAINTENANCE_POLL_MS=500,PROVIDER_RECOVERY_MAINTENANCE_YIELD_MS=MAINTENANCE_MAX_AGE_MS+PROVIDER_RECOVERY_MAINTENANCE_POLL_MS;
-  const SESSION_CLAIM_FORMAT='study-director.active-session-claim',SESSION_CLAIM_VERSION=2,SESSION_CLAIM_LEGACY_VERSION=1,SESSION_CLAIM_MAX_AGE_MS=10*60*1000,SESSION_CLAIM_MAX_BYTES=4096,SESSION_OWNER_PATTERN=/^inst_[a-z0-9_]{8,128}$/iu,SESSION_CLAIM_TOKEN_PATTERN=/^[a-f0-9]{64}$/u;
+  const SESSION_CLAIM_FORMAT='study-director.active-session-claim',SESSION_CLAIM_VERSION=2,SESSION_CLAIM_LEGACY_VERSION=1,SESSION_CLAIM_MAX_BYTES=4096,SESSION_OWNER_PATTERN=/^inst_[a-z0-9_]{8,128}$/iu,SESSION_CLAIM_TOKEN_PATTERN=/^[a-f0-9]{64}$/u;
   const MAINTENANCE_MIN_CHECKPOINT_DELETES=16,MAINTENANCE_MAX_CHECKPOINT_DELETES=128,MAINTENANCE_MAX_OBJECT_DELETES=48,PROVIDER_CONVERGENCE_BUSY_RETRY_MS=15*1000,PROVIDER_CONVERGENCE_RETRY_DELAYS=freeze([30*1000,2*60*1000,10*60*1000,30*60*1000]);
   const MAINTENANCE_POLICY=Background.maintenance;
   // The formats of each location's kept versions, as its last cleanup left them.
@@ -1029,7 +1029,7 @@ registry.define('backup-provider',1,input=>{
       if(!decoded||!(decoded.blob instanceof Blob))throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state could not be opened safely.');
       let parsed=null;try{parsed=JSON.parse(await decoded.blob.text());}catch{}
       const claim=await decodeSessionClaim(parsed,{signal});if(!claim||sessionClaimId(claim.epoch)!==latest.id)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state is malformed.');
-      return freeze({claim,item:latest,expired:Date.now()-Date.parse(claim.claimedAt)>SESSION_CLAIM_MAX_AGE_MS});
+      return freeze({claim,item:latest});
     }finally{
       if(decoded&&decoded.blob instanceof Blob&&decoded.blob!==lease.blob)await Exports.run('file.release',{file:decoded.blob}).catch(()=>{});
       await lease.release().catch(()=>{});
@@ -1067,11 +1067,11 @@ registry.define('backup-provider',1,input=>{
     if(!current)return null;
     const local=await localSessionOwnership(),owner=String(sessionOwnershipHooks&&sessionOwnershipHooks.installationId()||''),ownerToken=await sessionClaimToken('owner',owner,{signal});
     let applies=false;if(local)applies=await sessionClaimToken('session',local.date,{signal})===current.claim.sessionToken;
-    return freeze({epoch:current.claim.epoch,claimedAt:current.claim.claimedAt,expired:current.expired===true,ownedHere:ownerToken===current.claim.ownerToken,applies});
+    return freeze({epoch:current.claim.epoch,claimedAt:current.claim.claimedAt,ownedHere:ownerToken===current.claim.ownerToken,applies});
   }
   async function assertSharedSessionOwnership(selected,{signal=null}={}){
     if(!sessionOwnershipHooks||!repositorySessionClaimCapable(selected))return true;
-    const current=await readRepositorySessionClaim(selected,{signal});if(!current||current.expired)return true;
+    const current=await readRepositorySessionClaim(selected,{signal});if(!current)return true;
     const local=await localSessionOwnership();if(!local)return true;
     const [sessionToken,canonicalOwnerToken]=await Promise.all([sessionClaimToken('session',local.date,{signal}),sessionClaimToken('owner',local.runningOn,{signal})]);
     if(sessionToken!==current.claim.sessionToken||canonicalOwnerToken===current.claim.ownerToken)return true;
@@ -1583,8 +1583,8 @@ registry.define('backup-provider',1,input=>{
       await foreground.settled;const scoped=repositoryOperationSelected(selected,{signal:foreground.signal});await synchronizeRepositoryScope(scoped);
       publicationLease=await beginRepositoryPublication(scoped);await assertSharedPublicationTurn(scoped,publicationLease);
       const [current,ownerToken,observedOwnerToken,sessionToken]=await Promise.all([readRepositorySessionClaim(scoped,{signal:foreground.signal}),sessionClaimToken('owner',owner,{signal:foreground.signal}),sessionClaimToken('owner',observedOwner,{signal:foreground.signal}),sessionClaimToken('session',date,{signal:foreground.signal})]);
-      if(current&&!current.expired&&current.claim.sessionToken===sessionToken&&current.claim.ownerToken===ownerToken)return freeze({status:'completed',claim:current.claim,reused:true});
-      if(current&&!current.expired&&current.claim.sessionToken===sessionToken&&current.claim.ownerToken!==observedOwnerToken)throw syncError('REPOSITORY_SESSION_CLAIM_STALE','Active Session ownership changed on another device before this takeover could be confirmed.');
+      if(current&&current.claim.sessionToken===sessionToken&&current.claim.ownerToken===ownerToken)return freeze({status:'completed',claim:current.claim,reused:true});
+      if(current&&current.claim.sessionToken===sessionToken&&current.claim.ownerToken!==observedOwnerToken)throw syncError('REPOSITORY_SESSION_CLAIM_STALE','Active Session ownership changed on another device before this takeover could be confirmed.');
       const epoch=Math.max(0,Number(current&&current.claim&&current.claim.epoch)||0)+1,claim=freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,epoch,ownerToken,sessionToken,claimedAt:new Date().toISOString()}),verified=await writeRepositorySessionClaim(scoped,claim,{signal:foreground.signal});
       return freeze({status:'completed',claim:verified.claim,reused:false});
     }finally{if(publicationLease)await endRepositoryPublication(selected,publicationLease);await release(selected,'session-claim');setBusy(false);foreground.release();}
@@ -1598,6 +1598,17 @@ registry.define('backup-provider',1,input=>{
   async function readSessionClaim(id='google-drive',options={}){
     const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected)||!repositorySessionClaimCapable(selected))return null;
     const signal=options&&options.signal||null,current=await readRepositorySessionClaim(repositoryOperationSelected(selected,{signal}),{signal});return projectSessionClaim(current,{signal});
+  }
+  async function compactSessionClaims(id='google-drive',claim=null){
+    const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected)||!repositorySessionClaimCapable(selected))return 0;
+    const expected=normalizeSessionClaim(claim);if(!expected)return 0;
+    try{
+      const scoped=repositoryOperationSelected(selected),listed=await scoped.repository.listSessionClaims(),rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[];
+      if(listed?.overflow===true||Math.max(0,Number(listed?.ignored)||0)>0)return 0;
+      const candidates=rows.map(raw=>repositoryProviderItem(raw,'session-claim')).map(item=>freeze({item,epoch:sessionClaimEpoch(item.id)})).filter(row=>row.epoch>0&&row.epoch<expected.epoch).sort((a,b)=>a.epoch-b.epoch).slice(0,16);
+      let removed=0;for(const row of candidates)try{if(await scoped.repository.deleteSessionClaim(row.item))removed+=1;}catch(error){AppDiagnostics.capture('backup-provider.session-claim-compact',error,'warn');}
+      return removed;
+    }catch(error){AppDiagnostics.capture('backup-provider.session-claim-compact',error,'warn');return 0;}
   }
   function scheduleSharedSync(id='google-drive',reason='shared-sync'){
     const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected))return false;
@@ -1797,7 +1808,7 @@ registry.define('backup-provider',1,input=>{
   function diagnosticSync(){return freeze([...providers.values()].filter(selected=>selected.shared).map(selected=>{const state=syncState(selected),job=providerBackgroundCoordinators.get(selected.id)?.jobStatus('convergence');let endsAt=NaN;try{endsAt=Number(selected.connectionExpiresAt?.());}catch{}return freeze({id:selected.id,connected:providerConnected(selected),syncedAt:state.syncedAt,checkedAt:state.checkedAt?new Date(state.checkedAt).toISOString():'',nextEligibleAt:String(job?.nextEligibleAt||''),needsReview:!!state.review,needsUpdate:!!state.newer,needsPassword:!!state.password,behind:!!state.behind,catchingUp:!!state.catching,turnWaits:Math.max(0,Number(state.turnWaits)||0),signInEndsAt:Number.isFinite(endsAt)&&endsAt>0?new Date(endsAt).toISOString():''});}));}
   function diagnosticConnections(){return freeze([...providers.values()].map(selected=>freeze({id:selected.id,connected:providerConnected(selected),formats:formatsByProvider.get(selected.id)||null,scopeBound:repositoryScopeByProvider.has(selected.id),retryAttempt:providerConvergenceRetryAttempts.get(selected.id)||0,retryBackoffCapped:(providerConvergenceRetryAttempts.get(selected.id)||0)>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length})));}
   function status(){return Object.freeze({busy,cancellable:!!foregroundController&&!foregroundController.signal.aborted,operation:foregroundView()?Object.freeze({...foregroundView()}):null});}
-  return Object.freeze({register,list,syncing:()=>sharingActive(),status,locationStatus,reviewSync,unlockSync,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,diagnosticSync,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,publishSharedStateNow,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},cancelForeground,history:historyRepositoryProvider,noteVersions:noteVersionsRepositoryProvider,backup:backupProvider,backupRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeRepositoryProviderVersion,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,configureSessionOwnership,claimSessionOwnership,releaseSessionClaim,readSessionClaim,scheduleSharedSync,suspendBackground,repositoryScope});
+  return Object.freeze({register,list,syncing:()=>sharingActive(),status,locationStatus,reviewSync,unlockSync,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,diagnosticSync,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,publishSharedStateNow,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},cancelForeground,history:historyRepositoryProvider,noteVersions:noteVersionsRepositoryProvider,backup:backupProvider,backupRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeRepositoryProviderVersion,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,configureSessionOwnership,claimSessionOwnership,releaseSessionClaim,readSessionClaim,compactSessionClaims,scheduleSharedSync,suspendBackground,repositoryScope});
 
   }
   return freeze({format:'study-director.backup-provider-module',contractVersion:1,createRuntime});

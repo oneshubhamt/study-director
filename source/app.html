@@ -2780,7 +2780,7 @@ async function checkSessionOwnershipClaim(){
   try{
     const [claim,loaded]=await Promise.all([BackupProviderRuntime.readSessionClaim('google-drive'),AppData.activeSession.load(0,{strict:true})]);
     if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be checked safely.');
-    const session=loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null,mine=!!(session&&session.runningOn===InstallationIdentity.getId()),remote=!!(claim&&!claim.expired&&claim.applies&&!claim.ownedHere);
+    const session=loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null,mine=!!(session&&session.runningOn===InstallationIdentity.getId()),remote=!!(claim&&claim.applies&&!claim.ownedHere);
     if(remote&&mine&&TASKS.length){
       const now=DecisionClock.nowMs(),same=sessionClaimFreeze&&sessionClaimFreeze.epoch===claim.epoch;
       if(!same){
@@ -2797,7 +2797,7 @@ async function checkSessionOwnershipClaim(){
       return true;
     }
     if(sessionClaimFreeze){
-      if(mine&&(!claim||claim.expired||claim.ownedHere||!claim.applies))return resumeAfterReleasedSessionClaim(session);
+      if(mine&&(!claim||claim.ownedHere||!claim.applies))return resumeAfterReleasedSessionClaim(session);
       if(!mine||!TASKS.length)sessionClaimFreeze=null;
     }
     return false;
@@ -5068,6 +5068,7 @@ async function continueSessionHere(){
     const current=(await AppData.activeSession.load())?.value||null;
     if(!CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),localClaim))throw new Error('the session changed locally before its ownership transfer could finish');
     committed=true;backgroundHold.release();backgroundHold=null;
+    void BackupProviderRuntime.compactSessionClaims('google-drive',ownershipClaim).catch(error=>AppDiagnostics.capture('session.claim-compact',error,'warn'));
     notifyBackupChange({urgent:true,reason:'session-continue'});
     return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
   }catch(error){
