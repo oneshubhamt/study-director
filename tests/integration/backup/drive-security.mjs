@@ -46,7 +46,16 @@ async function waitFor(predicate,message){
   const plain=createHarness();await plain.provider.prepare();await plain.provider.authorize();assert.equal(plain.provider.connected(),true,'without browser storage Drive still signs in');
 }
 
-const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSource=async()=>{})=>{const blob=new Blob([text],{type:'application/octet-stream'});return {kind,id,name:id+(kind==='object'?'.sdobject':kind==='commit'?'.sdcommit':'.sdcheckpoint'),blob,size:blob.size,digest:await digest(blob),exportedAt:'2026-09-19T00:00:00.000Z',appVersion:'QA_FIXTURE',checkProtection,checkSource};};
+const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSource=async()=>{})=>{const blob=new Blob([text],{type:'application/octet-stream'});return {kind,id,name:id+(kind==='object'?'.sdobject':kind==='commit'?'.sdcommit':kind==='session-claim'?'.sdsessionclaim':'.sdcheckpoint'),blob,size:blob.size,digest:await digest(blob),exportedAt:'2026-09-19T00:00:00.000Z',appVersion:'QA_FIXTURE',checkProtection,checkSource};};
+
+{
+  const {provider}=createHarness();await provider.prepare();await provider.authorize();
+  const id='sc_'+'1'.padStart(16,'0'),text=JSON.stringify({format:'study-director.active-session-claim',version:1,date:'2026-09-19',epoch:1,owner:'inst_qa_laptop_mve00000_aaaaaaaa',observedRevision:7,claimedAt:'2026-09-19T12:00:00.000Z'}),file=await makeRepositoryFile('session-claim',id,text);
+  const uploaded=await provider.repository.uploadSessionClaim(file),listed=await provider.repository.listSessionClaims();
+  assert.equal(listed.overflow,false);assert.equal(listed.items.length,1);assert.equal(listed.items[0].id,id);assert.equal(listed.items[0].digest,file.digest);
+  const opened=await provider.repository.downloadSessionClaim(listed.items[0]);try{assert.equal(await opened.blob.text(),text);}finally{await opened.release();}
+  assert.equal(await provider.repository.deleteSessionClaim(uploaded),true);assert.equal((await provider.repository.listSessionClaims()).items.length,0);
+}
 
 // Complete history discovery is independent of retention capacity. Page work
 // stays bounded, while incomplete searches and repeated tokens cannot certify it.

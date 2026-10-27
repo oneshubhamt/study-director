@@ -2512,6 +2512,7 @@ let backupNudgeNotifiedDate='';
 let saveReminderDate='';
 let restoreSessionPersistenceSuppressionDepth=0;
 let managedRecoverySessionQuiescenceDepth=0,managedRecoveryTimerFrozenSinceMs=null;
+let sessionClaimFreeze=null;
 let refreshSessionSafetyUi=()=>{};
 function restoreSessionPersistenceSuppressed(){return restoreSessionPersistenceSuppressionDepth>0;}
 function managedRecoverySessionQuiesced(){return managedRecoverySessionQuiescenceDepth>0;}
@@ -2759,19 +2760,59 @@ function uploadSoonAfterPlanApply(result){
   const done=applied=>{if(applied)void Promise.resolve(flushLiveDraft()).catch(error=>AppDiagnostics.capture('backup.plan-apply-flush',error,'warn')).then(()=>notifyBackupChange({urgent:true,reason:'plan-apply'}));return applied;};
   return result&&typeof result.then==='function'?result.then(done):done(result);
 }
-// While today's session runs here or on another device and the app is open,
-// look at Drive every two minutes instead of every twenty, so a plan applied
-// or a session moved on the other device shows up here without a reload.
-const SESSION_WATCH_MS=2*60*1000;
-let sessionWatchTimer=null;
+// During a live session, a tiny ownership claim is checked frequently while
+// full checkpoint reconciliation keeps its ordinary cadence. A remote claim
+// stops only this runtime clock; canonical progress stays untouched until the
+// verified full checkpoint arrives and ordinary reconciliation preserves it.
+const SESSION_WATCH_MS=2*60*1000,SESSION_CLAIM_WATCH_MS=15*1000,SESSION_CLAIM_SYNC_RETRY_MS=30*1000;
+let sessionWatchTimer=null,sessionClaimWatchTimer=null,sessionClaimCheckActive=false;
+function resumeAfterReleasedSessionClaim(session){
+  if(!sessionClaimFreeze||!session||session.runningOn!==InstallationIdentity.getId()||!TASKS.length)return false;
+  const frozenSinceMs=sessionClaimFreeze.frozenSinceMs;sessionClaimFreeze=null;
+  try{TimerEngine.resumeAfterPrimaryRestore({frozenSinceMs});setPlanStatus('✓ Session ownership remains on this device.');return true;}
+  catch(error){AppDiagnostics.capture('session.claim-resume',error,'warn');return false;}
+}
+async function checkSessionOwnershipClaim(){
+  if(sessionClaimCheckActive||document.visibilityState!=='visible'||!StartupLifecycle.status().fullyInitialized)return false;
+  if(!TASKS.length&&!sessionClaimFreeze&&sessionPanelMode!=='elsewhere')return false;
+  if(!BackupProviderRuntime.connected('google-drive'))return false;
+  sessionClaimCheckActive=true;
+  try{
+    const [claim,loaded]=await Promise.all([BackupProviderRuntime.readSessionClaim('google-drive'),AppData.activeSession.load(0,{strict:true})]);
+    if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be checked safely.');
+    const session=loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null,me=InstallationIdentity.getId(),remote=!!(claim&&session&&claim.date===session.date&&claim.owner!==me),mine=!!(session&&session.runningOn===me);
+    if(remote&&mine&&TASKS.length){
+      const now=DecisionClock.nowMs(),same=sessionClaimFreeze&&sessionClaimFreeze.epoch===claim.epoch&&sessionClaimFreeze.owner===claim.owner;
+      if(!same){
+        try{await flushLiveDraft();}catch(error){AppDiagnostics.capture('session.claim-flush',error,'warn');}
+        const frozenSinceMs=DecisionClock.nowMs();TimerEngine.stopExecution();
+        sessionClaimFreeze=Object.freeze({epoch:claim.epoch,owner:claim.owner,date:claim.date,frozenSinceMs,lastSyncAt:0});
+        setPlanStatus('Today’s session moved to another device. Syncing its latest state…');
+      }
+      const current=sessionClaimFreeze;
+      if(current&&(!current.lastSyncAt||now-current.lastSyncAt>=SESSION_CLAIM_SYNC_RETRY_MS)){
+        sessionClaimFreeze=Object.freeze({...current,lastSyncAt:now});
+        BackupProviderRuntime.scheduleSharedSync('google-drive','session-claim');
+      }
+      return true;
+    }
+    if(sessionClaimFreeze){
+      if(mine&&(!claim||claim.owner===me||claim.date!==session?.date))return resumeAfterReleasedSessionClaim(session);
+      if(!mine||!TASKS.length)sessionClaimFreeze=null;
+    }
+    return false;
+  }catch(error){AppDiagnostics.capture('session.claim-watch',error,'warn');return false;}
+  finally{sessionClaimCheckActive=false;}
+}
 function installSessionWatch(){
-  if(sessionWatchTimer)return false;
+  if(sessionWatchTimer||sessionClaimWatchTimer)return false;
   sessionWatchTimer=setInterval(()=>{
     if(document.visibilityState!=='visible'||!StartupLifecycle.status().fullyInitialized)return;
     if(!TASKS.length&&sessionPanelMode!=='elsewhere')return;
     try{if(BackupProviderRuntime.syncing())BackupProviderRuntime.wakeBackground('session-watch');}
     catch(error){AppDiagnostics.capture('backup-provider.session-watch',error,'warn');}
   },SESSION_WATCH_MS);
+  sessionClaimWatchTimer=setInterval(()=>{void checkSessionOwnershipClaim();},SESSION_CLAIM_WATCH_MS);
   return true;
 }
 function notifyDeviceBackupIfStudyDayResolved(reason='study-day-completed'){
@@ -3238,6 +3279,7 @@ function dismissStorageWarning(){
 }
 function resumeTimerLoopAfterPrimaryRestore(){
   try{
+    if(sessionClaimFreeze)return false;
     const resumed=TimerEngine.resumeAfterPrimaryRestore();
     if(StartupLifecycle.status().fullyInitialized)SessionLifecycle.reconcile('ownership-primary',{
       date:getReviewDate(),
@@ -7853,6 +7895,7 @@ async function quiesceManagedRecoveryRuntime(operation){
     if(outer&&managedRecoverySessionQuiescenceDepth===0)void AppMutationCoordinator.settled().then(()=>{
       if(managedRecoverySessionQuiesced()||AppMutationCoordinator.status().active)return;
       const frozenSinceMs=managedRecoveryTimerFrozenSinceMs;managedRecoveryTimerFrozenSinceMs=null;
+      if(sessionClaimFreeze)return;
       try{TimerEngine.resumeAfterPrimaryRestore({frozenSinceMs});}catch(error){AppDiagnostics.capture('managed-recovery.resume-timer',error,'warn');}
     });
   }
