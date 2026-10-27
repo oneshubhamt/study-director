@@ -3768,7 +3768,11 @@
       maxChunkMs=Math.max(maxChunkMs,performance.now()-chunkStarted);chunks+=1;
     };
     const nextChunk=async callback=>{
-      await new Promise(resolve=>requestAnimationFrame(resolve));
+      // Keep secondary sections cooperative without forcing one complete display
+      // frame per section. scheduler.yield lets input, style and paint work run
+      // between chunks without turning nine short DOM units into nine frame waits.
+      if(globalThis.scheduler&&typeof globalThis.scheduler.yield==='function')await globalThis.scheduler.yield();
+      else await new Promise(resolve=>setTimeout(resolve,0));
       if(typeof options.isCurrent==='function'&&!options.isCurrent())return false;
       appendChunk(callback);return true;
     };
