@@ -1605,7 +1605,7 @@ registry.define('backup-provider',1,input=>{
     syncState(selected).behind=true;job.schedule(0,'flush:'+String(reason||'shared-sync'),'replace');return true;
   }
 
-  async function backupProvider  async function backupProvider(id=''){
+  async function backupProvider(id=''){
     const selected=providers.get(safeId(id));
     if(!selected)return false;
     statusSource=selected.id;
