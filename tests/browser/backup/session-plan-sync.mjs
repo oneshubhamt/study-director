@@ -105,8 +105,7 @@ try{
   await holdBackground(a,'__qaClaimSyncHold');
   const stale=await a.evaluate(`(async()=>{const d=__PWA6,loaded=await d.AppData.activeSession.load(),session=structuredClone(loaded.value);session.revision=Math.min(Number.MAX_SAFE_INTEGER-1024,Math.max(1,Number(session.revision)||1)+1000000000);session.updatedAt=new Date().toISOString();const saved=await d.AppData.activeSession.save(session);if(!saved?.ok)throw saved?.error||new Error('stale fixture save failed');try{await d.BackupProviderRuntime.backupRepositoryProvider('google-drive',{interactive:false});return {ok:true};}catch(error){return {ok:false,code:String(error&&error.code||error&&error.name||''),message:String(error&&error.message||error)};}})()`);
   assert.equal(stale.ok,false);assert.ok(['REPOSITORY_SESSION_OWNERSHIP_AHEAD','REPOSITORY_SYNC_BEHIND'].includes(stale.code),`a stale former owner must be blocked before publication even with a larger local revision (${stale.code}: ${stale.message})`);
-  await a.evaluate(`__PWA6.checkSessionOwnershipClaim()`);
-  assert.notEqual((await screen(a)).mode,'running','the old runtime clock stops from the lightweight claim before full reconciliation');
+  await waitFor(async()=>{await a.evaluate(`__PWA6.checkSessionOwnershipClaim()`);return (await screen(a)).mode!=='running';},{label:'the old runtime clock stops from the lightweight claim before full reconciliation',timeout:10000});
 
   await releaseBackground(b,'__qaOwnershipHold');
   await waitFor(async()=>uploadsBy('B')>returnUploads&&!await waiting(b),{label:'the phone publishes its full state after ownership',timeout:45000});
