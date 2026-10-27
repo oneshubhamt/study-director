@@ -831,7 +831,7 @@ watched='presentation-cancel';assert.equal(await runtime.providers.backup('prese
 // Production Drive transport + production provider/classifier/retention +
 // owned scheduler. Only HTTP, storage and the clock are simulated.
 const assembledDriveCases=[];
-for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inventory','foreground-preemption','slow-deletion-1000','slow-deletion-3000','slow-deletion-6000','slow-deletion-11000','slow-deletion-16000','slow-deletion-31000','slow-deletion-44000','slow-deletion-all-44000','foreground-deletion','foreground-deletion-44000','lost-protection','remote-lease']){
+for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inventory','foreground-preemption','slow-deletion-1000','slow-deletion-3000','slow-deletion-6000','slow-deletion-11000','slow-deletion-16000','slow-deletion-31000','slow-deletion-44000','slow-deletion-all-44000','foreground-deletion','foreground-deletion-44000','history-change-before-delete','lost-protection','remote-lease']){
  const realDate=globalThis.Date,clock=createFakeClock('2026-10-03T12:00:00.000Z');backgroundClock=clock;globalThis.Date=clock.Date;backgroundReady=true;dailyRecords=[];notes={};assetDescriptor=null;
  const maintenance=new Map(),progress=[],id='drive-'+scenario,h=createDriveHarness({clock,expiresIn:86400,registerProvider:config=>runtime.providers.register(freeze({...config,id,label:'Drive Background QA'}))});
  // Four slow deletions may require four protected passes plus a final inventory.
@@ -857,7 +857,8 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
   else if(!scenario.includes('deletion')&&scenario!=='lost-protection'){h.state.pageSize=1;h.state.pageDelayMs=10000;}
   await runtime.providers.history(coldId,{interactive:false});
   if(scenario.includes('deletion')){const delayMs=Number(scenario.split('-').at(-1))||6000;h.state.requestDelayMs=({url,method})=>(method==='GET'||scenario.includes('-all-'))&&url.searchParams.get('alt')!=='media'&&!String(url.searchParams.get('q')||'').includes("mimeType='application/vnd.google-apps.folder'")?delayMs:0;}
-  let inventoryObserved=false,protectionLost=false;
+  let inventoryObserved=false,protectionLost=false,historyChanged=false;
+  if(scenario==='history-change-before-delete')h.state.requestDelayMs=({url,method})=>{if(!historyChanged&&method==='POST'&&url.pathname==='/drive/v3/files'){const checkpoint=[...h.state.files.values()].find(file=>kind(file)==='checkpoint');if(checkpoint){historyChanged=true;checkpoint.version=h.state.nextVersion++;checkpoint.modifiedTime=new Date(clock.now()+1).toISOString();}}return 0;};
   if(scenario==='lost-protection')h.state.requestDelayMs=({url,method})=>{if(method==='GET'&&String(url.searchParams.get('q')||'').includes("value='object'"))inventoryObserved=true;const file=h.state.files.get(url.pathname.split('/').at(-1));if(inventoryObserved&&!protectionLost&&method==='GET'&&file&&kind(file)==='maintenance'){protectionLost=true;file.createdTime=new Date(clock.now()-300000).toISOString();}return 0;};
   if(scenario.endsWith('unavailable')){
    await settle(()=>maintenance.get(coldId)?.reason==='blocked-uncertain'&&!runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').busy);
@@ -866,14 +867,21 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
    h.state.failMediaKinds.clear();await clock.advance(Math.max(0,Date.parse(maintenance.get(coldId).nextEligibleAt)-clock.now()-100));
   }else if(scenario==='foreground-preemption'){
    await settle(()=>h.state.activeObjectPages>0);
+   assert.equal([...h.state.files.values()].filter(file=>kind(file)==='maintenance').length,0,'read-only cleanup planning must not hold the destructive maintenance lease');
    const deletions=h.state.deletions.length;await runtime.providers.history(coldId,{interactive:false});
    await settle(()=>h.state.activeObjectPages===0&&maintenance.get(coldId)?.reason==='preempted');
    assert.equal(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length,0,'foreground preemption precedes all destructive work');
    assert.ok(h.state.deletions.length>=deletions);await clock.advance(Math.max(0,Date.parse(maintenance.get(coldId).nextEligibleAt)-clock.now()-100));
   }else if(scenario.startsWith('foreground-deletion')){
    await settle(()=>h.state.deletions.some(remoteId=>allFiles.includes(remoteId)));
+   assert.ok([...h.state.files.values()].some(file=>kind(file)==='maintenance'),'destructive cleanup must hold the maintenance lease while deletion is in flight');
    const removedBefore=h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length;let historySettled=false;const foreground=runtime.providers.history(coldId,{interactive:false}).finally(()=>{historySettled=true;});await settle(()=>historySettled);const outcome=await foreground;assert.equal(outcome.available,true,JSON.stringify({scenario,outcome,errors:diagnosticFailures.slice(-2)}));
    assert.equal(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length,removedBefore,'foreground prevents the next protected deletion');assert.ok(maintenance.has(coldId),'preemption retains intent');
+  }else if(scenario==='history-change-before-delete'){
+   await settle(()=>historyChanged&&maintenance.get(coldId)?.reason==='publication-contention'&&!runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').busy);
+   assert.equal(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length,0,'history that changes between planning and the destructive lease must invalidate the plan before any deletion');
+   assert.equal([...h.state.files.values()].filter(file=>kind(file)==='maintenance').length,0,'an invalidated destructive unit must release its maintenance lease before retrying');
+   h.state.requestDelayMs=null;await clock.advance(Math.max(0,Date.parse(maintenance.get(coldId).nextEligibleAt)-clock.now()-100));
   }else if(scenario==='lost-protection'){
    await settle(()=>protectionLost&&maintenance.get(coldId)?.reason==='error'&&!runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').busy);
    assert.equal(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length,0,'lost protection invalidates inventory before any data deletion');assert.ok(runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').scheduled);
