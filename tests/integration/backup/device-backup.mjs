@@ -21,6 +21,7 @@ await test('choosing an empty folder opens the picker from the click and makes t
   assert.equal(w.controller.status().connected,true);assert.equal(w.published.length,1,'the first backup is made at once');assert.equal((await w.commits(folder)).length,1);
   assert.equal(w.settingsStore.get('deviceFolder').directoryHandle,folder,'the folder is remembered');
   assert.ok(w.controller.status().lastBackupAt,'the row shows when it was last verified');assert.deepEqual(await w.locks(folder),[],'no lock files remain');
+  assert.equal(w.controller.cancelForeground('No active Device Folder operation.'),false,'Cancel is a quiet no-op when no foreground Device Folder operation is active');
 });
 
 await test('automatic backups follow the shared cadence: 20 minutes, seconds after a key moment, at once when hidden',async()=>{
