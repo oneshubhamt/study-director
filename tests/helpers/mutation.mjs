@@ -38,9 +38,9 @@ const mutations=Object.freeze([
     tests:Object.freeze(['tests/integration/attachments/attachment-deletion.mjs'])
   }),
   Object.freeze({
-    id:'restore-verifies-committed-saved-days',file:'source/core/backup.js',
-    find:'if(!Canonical.same(byDate.get(record.date),sanitizeCurrentDailyRecord(record)))throw new Error(`Post-restore verification failed for saved day ${record.date}.`);',
-    replace:'if(false)throw new Error(`Post-restore verification failed for saved day ${record.date}.`);',
+    id:'reconciliation-verifies-committed-saved-days',file:'source/core/backup.js',
+    find:'if(!intended||!committed||!Canonical.same(committed,intended))throw new Error(`Saved-Day reconciliation commit did not match the resolved state for ${record.date}.`);',
+    replace:'if(false)throw new Error(`Saved-Day reconciliation commit did not match the resolved state for ${record.date}.`);',
     tests:Object.freeze(['tests/integration/backup/backup-persistence.mjs'])
   }),
   Object.freeze({
