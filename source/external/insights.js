@@ -51,6 +51,27 @@
   }=InsightsModel;
   try{delete globalThis.StudyDirectorInsightsModel;}catch(error){}
 
+  // Workers need only the already-loaded model. Exit before constructing any
+  // DOM/render/runtime components so worker startup pays no UI initialization cost.
+  if(typeof document==='undefined'&&typeof self!=='undefined'&&typeof self.postMessage==='function'){
+    const classifyTaskOutcome=task=>task&&typeof task.__sdOutcome==='string'?task.__sdOutcome:'untouched';
+    const summarizePracticeRuns=()=>{throw new Error('Worker input is missing precomputed Practice Pacer evidence.');};
+    const engine=InsightsModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
+    self.addEventListener('message',event=>{
+      const message=event.data&&typeof event.data==='object'?event.data:{};
+      if(message.type!=='SD_INSIGHTS_BUILD')return;
+      const started=performance.now();
+      try{
+        const prepared=engine.reusePrepared(message.modelRecords,message.revision);
+        const model=engine.buildPrepared(message.records,prepared,message.options||{});
+        self.postMessage({type:'SD_INSIGHTS_RESULT',id:message.id,model,computeMs:performance.now()-started});
+      }catch(error){
+        self.postMessage({type:'SD_INSIGHTS_ERROR',id:message.id,message:String(error&&error.message||error)});
+      }
+    });
+    return;
+  }
+
   function insightWindowDeviceState(){
     const state=window.StudyDirector?.data?.deviceState;
     if(!state||typeof state.readInsightsWindow!=='function'||typeof state.writeInsightsWindow!=='function')throw new Error('Study Director Insights device-state capability is unavailable.');
@@ -3670,24 +3691,7 @@
     });
   })(InsightsConfig,InsightsPrimitives,InsightsRendering);
 
-  if(typeof document==='undefined'&&typeof self!=='undefined'&&typeof self.postMessage==='function'){
-    const classifyTaskOutcome=task=>task&&typeof task.__sdOutcome==='string'?task.__sdOutcome:'untouched';
-    const summarizePracticeRuns=()=>{throw new Error('Worker input is missing precomputed Practice Pacer evidence.');};
-    const engine=InsightsModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
-    self.addEventListener('message',event=>{
-      const message=event.data&&typeof event.data==='object'?event.data:{};
-      if(message.type!=='SD_INSIGHTS_BUILD')return;
-      const started=performance.now();
-      try{
-        const prepared=engine.reusePrepared(message.modelRecords,message.revision);
-        const model=engine.buildPrepared(message.records,prepared,message.options||{});
-        self.postMessage({type:'SD_INSIGHTS_RESULT',id:message.id,model,computeMs:performance.now()-started});
-      }catch(error){
-        self.postMessage({type:'SD_INSIGHTS_ERROR',id:message.id,message:String(error&&error.message||error)});
-      }
-    });
-    return;
-  }
+
 
   const InsightsWorkerModel=(()=>{
     const MIN_RECORDS=120;
