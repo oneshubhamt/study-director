@@ -201,8 +201,20 @@ for(const [stage,code,hasLiveTasks] of preflightCases){
 
 const verificationReview=pendingReviewCodec.create({subject:'note',ref:'Checkpoint',kept:freeze({text:checkpointNotes.Checkpoint.text}),keptAt:'2026-08-20T13:00:00.000Z'});
 const verificationBlob=await makeCheckpoint({records:checkpointRecords,deletions:checkpointDeletions,notes:checkpointNotes,activeSession:checkpointSession,pendingReviews:[verificationReview]});
-for(const domain of ['saved-days','notes','attachments','personal','pending-reviews','deletions','active-session']){
-  const verificationState=createState(),verificationHarness=createHarness(verificationState,{verificationFailure:domain});
+// This fixture has no physical attachment payload, so changed-only verification
+// correctly does not enter the attachment domain here; restore-assets owns that
+// physical corruption coverage. Every case below creates a real mutation in the
+// domain whose diagnostic stage it expects.
+const verificationCases=freeze([
+  freeze({domain:'saved-days',decisions:freeze({})}),
+  freeze({domain:'notes',decisions:freeze({})}),
+  freeze({domain:'personal',decisions:freeze({plans:'replace',personalSettings:'replace'})}),
+  freeze({domain:'pending-reviews',decisions:freeze({})}),
+  freeze({domain:'deletions',decisions:freeze({})}),
+  freeze({domain:'active-session',decisions:freeze({})})
+]);
+for(const {domain,decisions} of verificationCases){
+  const verificationState=createState(),verificationHarness=createHarness(verificationState,{verificationFailure:domain,decisions});
   const verificationCandidate=await verificationHarness.runtime.controller.inspect(verificationBlob,{filename:`verification-${domain}.sdbackup`});
   await assert.rejects(()=>verificationHarness.runtime.controller.restore(verificationCandidate),error=>{assert.equal(error.backupStage,`restore-verification-${domain}`);assert.equal(error.code,'RESTORE_VERIFICATION_MISMATCH');return true;});
   assert.ok(verificationHarness.diagnosticMarks.some(([name,details])=>name===`restore-verification-${domain}-failed`&&details.stage===`restore-verification-${domain}`),`${domain} verification must identify its exact diagnostic stage`);
