@@ -3697,12 +3697,40 @@
     const MIN_RECORDS=120;
     const WORKER_TIMEOUT_MS=30000;
     function create(api,engine){
-      let active=null,nextId=0;
+      let active=null,nextId=0,worker=null;
       const supported=()=>!!(INSIGHTS_RUNTIME_URL&&typeof Worker==='function');
-      const cancel=()=>{
-        if(!active)return false;
-        active.worker.terminate();active.reject(Object.assign(new Error('Insights computation superseded.'),{name:'AbortError'}));active=null;return true;
+      const retireWorker=()=>{const current=worker;worker=null;try{current?.terminate();}catch{}};
+      const rejectActive=error=>{const current=active;active=null;if(current)current.reject(error);};
+      const ensureWorker=()=>{
+        if(worker)return worker;
+        const created=new Worker(trustedWorkerURL(),{name:'study-director-insights'});
+        created.onmessage=event=>{
+          const message=event.data&&typeof event.data==='object'?event.data:{},current=active;
+          if(!current||message.id!==current.id)return;
+          if(message.type==='SD_INSIGHTS_ERROR')current.reject(new Error(message.message||'Insights worker failed.'));
+          else if(message.type==='SD_INSIGHTS_RESULT')current.resolve(message);
+        };
+        created.onerror=event=>{
+          event.preventDefault?.();
+          const error=new Error(event.message||'Insights worker failed.');
+          retireWorker();rejectActive(error);
+        };
+        created.onmessageerror=()=>{const error=new Error('Insights worker returned an unreadable response.');retireWorker();rejectActive(error);};
+        worker=created;return created;
       };
+      const warm=()=>{
+        if(!supported())return false;
+        try{ensureWorker();return true;}catch(error){retireWorker();return false;}
+      };
+      const abortActive=(rewarm=false)=>{
+        if(!active)return false;
+        const current=active;active=null;retireWorker();
+        current.reject(Object.assign(new Error('Insights computation superseded.'),{name:'AbortError'}));
+        if(rewarm)warm();
+        return true;
+      };
+      const cancel=()=>abortActive(true);
+      const dispose=()=>{const changed=abortActive(false)||!!worker;retireWorker();return changed;};
       const enrichRecords=records=>(Array.isArray(records)?records:[]).map(record=>{
         const tasks=(Array.isArray(record&&record.tasks)?record.tasks:[]).map(task=>({...task,__sdOutcome:api.logic.classifyTaskOutcome(task)}));
         let practiceSummary=null;
@@ -3717,34 +3745,27 @@
         const started=performance.now();
         if(Math.max(records.length,prepared.records.length)<MIN_RECORDS||!supported())return fallback(records,prepared,options,started,supported()?'main-thread-small':'main-thread-unavailable');
         cancel();
-        const id=++nextId;let worker=null,timeout=null;
+        const id=++nextId;let timeout=null;
         try{
-          worker=new Worker(trustedWorkerURL(),{name:'study-director-insights'});
+          const currentWorker=ensureWorker();
           const response=await new Promise((resolve,reject)=>{
-            active={id,worker,reject};
+            active={id,resolve,reject};
             timeout=setTimeout(()=>reject(new Error('Insights processing timed out. Retry the report.')),WORKER_TIMEOUT_MS);
-            worker.onmessage=event=>{
-              const message=event.data&&typeof event.data==='object'?event.data:{};
-              if(message.id!==id)return;
-              if(message.type==='SD_INSIGHTS_ERROR')reject(new Error(message.message||'Insights worker failed.'));
-              else if(message.type==='SD_INSIGHTS_RESULT')resolve(message);
-            };
-            worker.onerror=event=>{event.preventDefault?.();reject(new Error(event.message||'Insights worker failed.'));};
-            worker.onmessageerror=()=>reject(new Error('Insights worker returned an unreadable response.'));
-            worker.postMessage({type:'SD_INSIGHTS_BUILD',id,records,modelRecords:prepared.records,revision:prepared.revision,options});
+            currentWorker.postMessage({type:'SD_INSIGHTS_BUILD',id,records,modelRecords:prepared.records,revision:prepared.revision,options});
           });
           const model=response.model;
           Object.defineProperty(model,'getLabEvidence',{enumerable:false,value:()=>engine.getLabEvidence(prepared,options)});
           return {model,mode:'worker',computeMs:Number(response.computeMs)||0,roundTripMs:performance.now()-started};
         }catch(error){
+          retireWorker();
           if(error&&error.name==='AbortError')throw error;
           throw Object.assign(new Error('Insights processing failed. Retry the report.'),{code:'INSIGHTS_PROCESSING_FAILED',cause:error});
         }finally{
-          clearTimeout(timeout);worker?.terminate();
+          clearTimeout(timeout);
           if(active&&active.id===id)active=null;
         }
       };
-      return Object.freeze({build,cancel,enrichRecords,supported,minimumRecords:MIN_RECORDS});
+      return Object.freeze({build,cancel,dispose,warm,enrichRecords,supported,minimumRecords:MIN_RECORDS});
     }
     return Object.freeze({create,minimumRecords:MIN_RECORDS});
   })();
@@ -3905,7 +3926,7 @@
       state.pane=pane;
       if(typeof MutationObserver!=='function')return;
       state.paneObserver=new MutationObserver(()=>{
-        if(pane.hidden||!pane.classList.contains('on')){computation.cancel();engine.releaseTransient();}
+        if(pane.hidden||!pane.classList.contains('on')){computation.dispose();engine.releaseTransient();}
       });
       state.paneObserver.observe(pane,{attributes:true,attributeFilter:['class','hidden']});
     };
@@ -3995,7 +4016,7 @@
       if(state.errorTimer){clearTimeout(state.errorTimer);state.errorTimer=null;}
       const token=InsightsRenderCoordinator.begin();
       const notice=api.insights.notifications.begin({id:'report',foreground:false,announce:false,title:'Insights',message:'Preparing your saved study history…',action:{label:'Retry',run:()=>render(context)}});
-      computation.cancel();
+      computation.cancel();computation.warm();
       const profile={started:performance.now(),shellMs:0,revisionMs:0,recordLoadMs:0,evidencePreparationMs:0,modelComputeMs:0,workerRoundTripMs:0,domMs:0,maxDomChunkMs:0,domChunks:0,layoutPaintMs:0,maxLongTaskMs:0,mode:'retained',records:0};
       let longTaskObserver=null;
       try{
