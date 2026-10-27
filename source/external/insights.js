@@ -3757,8 +3757,11 @@
           Object.defineProperty(model,'getLabEvidence',{enumerable:false,value:()=>engine.getLabEvidence(prepared,options)});
           return {model,mode:'worker',computeMs:Number(response.computeMs)||0,roundTripMs:performance.now()-started};
         }catch(error){
-          retireWorker();
+          // cancel() already retires the superseded worker and may prewarm its
+          // replacement. Do not immediately kill that replacement from the
+          // cancelled build's rejection path.
           if(error&&error.name==='AbortError')throw error;
+          retireWorker();
           throw Object.assign(new Error('Insights processing failed. Retry the report.'),{code:'INSIGHTS_PROCESSING_FAILED',cause:error});
         }finally{
           clearTimeout(timeout);
