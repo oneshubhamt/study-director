@@ -1290,9 +1290,21 @@ registry.define('backup-provider',1,input=>{
       return woke;
     }catch(error){AppDiagnostics.capture('backup-provider.background-configuration',error,'error');return false;}
   }
-  // After a restore, every other location that backs up on its own picks up
-  // the restored data once automatic backups resume.
-  function otherLocations(selected){return freeze([...providers.values()].filter(other=>other.id!==selected.id&&providerConnected(other)&&automaticEnabled(other)).map(other=>freeze({id:other.id,label:other.label,shared:other.shared===true,status:'pending',queued:true})));}
+  // After a successful recovery, explicitly queue every other automatic
+  // location while recovery still holds the background suspension. Their
+  // existing convergence jobs arm when that suspension is released, so every
+  // destination independently publishes the resulting canonical local state.
+  function queueOtherLocations(selected){
+    const out=[];
+    for(const other of providers.values()){
+      if(other.id===selected.id||!providerConnected(other)||!automaticEnabled(other))continue;
+      let queued=false;
+      try{const job=providerConvergenceJob(other);if(job){job.schedule(1000,'managed-recovery-peer','earliest');queued=true;}}
+      catch(error){AppDiagnostics.capture('backup-provider.recovery-peer-convergence',error,'warn');}
+      out.push(freeze({id:other.id,label:other.label,shared:other.shared===true,status:queued?'pending':'failed',queued}));
+    }
+    return freeze(out);
+  }
   async function queueResolvedProviderState(selected,result,{sourceNeeded=true,sourceCheckpoint=''}={}){
     if(!result||result.cancelled)return freeze({source:freeze({status:'skipped',reason:'cancelled'}),others:freeze([])});
     let source;
@@ -1304,7 +1316,7 @@ registry.define('backup-provider',1,input=>{
       await clearPendingRetry(selected);
       source=freeze({status:'completed',checkpoint:String(sourceCheckpoint||''),unchanged:true,retryQueued:false,shared:selected.shared===true});
     }
-    return freeze({source,others:otherLocations(selected)});
+    return freeze({source,others:queueOtherLocations(selected)});
   }
   async function managedProviderPresent(selected,result,{sourceNeeded=true,sourceCheckpoint=''}={}){
     const convergence=await queueResolvedProviderState(selected,result,{sourceNeeded,sourceCheckpoint}),sourceReady=convergence.source.status==='completed'||convergence.source.status==='pending'&&convergence.source.retryQueued===true;
