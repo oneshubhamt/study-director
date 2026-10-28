@@ -1,0 +1,8 @@
+Promotion QA request
+
+Baseline: d781dc664c136c6be0a19ef1b17fda7d57f00373
+Scope: complete non-browser and browser certification, including Insights performance.
+Purpose: verify the completed background-services refinement and GitHub Actions v7 migration.
+
+This file is an on-demand trigger. Updating it on current-fixes starts Promotion QA.
+Normal application commits do not trigger Promotion QA unless this file changes.
