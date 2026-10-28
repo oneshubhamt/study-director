@@ -1299,7 +1299,7 @@ registry.define('backup-provider',1,input=>{
     for(const other of providers.values()){
       if(other.id===selected.id||!providerConnected(other)||!automaticEnabled(other))continue;
       let queued=false;
-      try{const job=providerConvergenceJob(other);if(job){job.schedule(1000,'managed-recovery-peer','earliest');queued=true;}}
+      try{const job=providerConvergenceJob(other);if(job){job.schedule(1000,'managed-recovery','earliest');queued=true;}}
       catch(error){AppDiagnostics.capture('backup-provider.recovery-peer-convergence',error,'warn');}
       out.push(freeze({id:other.id,label:other.label,shared:other.shared===true,status:queued?'pending':'failed',queued}));
     }
@@ -1310,13 +1310,13 @@ registry.define('backup-provider',1,input=>{
     let source;
     if(sourceNeeded){
       const retryQueued=await markPendingRetry(selected),scheduled=retryQueued&&schedulePendingProviderBackup(selected,1000);
-      source=freeze({status:retryQueued?'pending':'failed',reason:retryQueued?(scheduled?'queued':'durable retry recorded'):'automatic retry could not be queued',retryQueued,scheduled:scheduled===true,shared:selected.shared===true});
+      source=freeze({status:retryQueued?'pending':'failed',reason:retryQueued?(scheduled?'scheduled':'managed-recovery'):'automatic retry could not be queued',retryQueued,scheduled:scheduled===true,shared:selected.shared===true});
     }else{
       providerBackground(selected).clearScheduled('convergence');
       await clearPendingRetry(selected);
       const scheduled=automaticNeeded(selected)&&schedulePendingProviderBackup(selected,1000);
       source=scheduled
-        ?freeze({status:'pending',checkpoint:String(sourceCheckpoint||''),reason:'queued',unchanged:false,retryQueued:false,scheduled:true,shared:selected.shared===true})
+        ?freeze({status:'pending',checkpoint:String(sourceCheckpoint||''),reason:'scheduled',unchanged:false,retryQueued:false,scheduled:true,shared:selected.shared===true})
         :freeze({status:'completed',checkpoint:String(sourceCheckpoint||''),unchanged:true,retryQueued:false,scheduled:false,shared:selected.shared===true});
     }
     return freeze({source,others:queueOtherLocations(selected)});
