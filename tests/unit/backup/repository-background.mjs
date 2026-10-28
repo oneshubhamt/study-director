@@ -21,7 +21,11 @@ function coordinator(fake,target='device-folder'){
  await fake.advance(45000);assert.equal(scope.signal.aborted,false,'responsive read-only discovery has no destructive deadline');
  assert.equal(scope.workBudget.start(1000),true);await fake.advance(600);assert.equal(scope.workBudget.start(1000),false,'a repeated phase notification cannot extend an allowance');
  await fake.advance(401);assert.equal(scope.signal.aborted,false,'elapsed preparation must not kill the first protected unit');scope.workBudget.check();scope.workBudget.advance();assert.throws(()=>scope.workBudget.check(),{code:'DELETION_BUDGET',name:'AbortError'});scope.release();scope.release();assert.equal(fake.pending().length,0);assert.equal(scope.workBudget.start(1000),false);
- const transfer=await bg.beginBackground('automatic');assert.throws(()=>transfer.workBudget.start(1000),/progress watchdogs/u);transfer.release();
+ const transfer=await bg.beginBackground('convergence');assert.throws(()=>transfer.workBudget.start(1000),/progress watchdogs/u);transfer.release();
+  assert.deepEqual(Object.keys(module.priority),['integrity','maintenance','convergence']);
+  await assert.rejects(bg.beginBackground('automatic'),/job is invalid/u);
+  assert.throws(()=>bg.schedule('automatic',1000,()=>{}),/scheduled job is invalid/u);
+  assert.throws(()=>bg.registerJob('automatic',{isAvailable:()=>true,capture:()=>{},execute:async()=>({status:'completed'})}),/job is invalid/u);
 }
 
 {
@@ -53,9 +57,9 @@ assert.equal(module.maintenanceDefersAcrossObservation(freeze({reason:'publicati
 }
 
 {
-  const fake=clock(),bg=coordinator(fake);let fired=0;const automatic=await bg.beginBackground('automatic');assert.ok(automatic);
+  const fake=clock(),bg=coordinator(fake);let fired=0;const convergence=await bg.beginBackground('convergence');assert.ok(convergence);
   bg.schedule('maintenance',1000,()=>{fired+=1;});await fake.advance(1500);assert.equal(fired,0,'lower-priority scheduled work must not fire while a higher-priority background job owns the target');
-  automatic.release();await fake.advance(0);assert.equal(fired,1,'deferred scheduled work must re-arm when the higher-priority owner releases');
+  convergence.release();await fake.advance(0);assert.equal(fired,1,'deferred scheduled work must re-arm when the higher-priority owner releases');
 }
 
 {
@@ -65,7 +69,7 @@ assert.equal(module.maintenanceDefersAcrossObservation(freeze({reason:'publicati
 
 // Different contenders can await the same retiring executor. Admission must
 // recheck all current owners, and an aborted executor remains active until release.
-for(const pair of [['maintenance','automatic'],['maintenance','convergence'],['automatic','convergence']]){
+for(const pair of [['maintenance','convergence']]){
  for(const order of [pair,[...pair].reverse()]){
   const fake=clock(),bg=coordinator(fake),original=await bg.beginBackground('integrity');
   const requests=order.map(job=>bg.beginBackground(job));assert.equal(original.signal.aborted,true);original.release();
@@ -89,7 +93,7 @@ for(const pair of [['maintenance','automatic'],['maintenance','convergence'],['a
 }
 
 {
-  const fake=clock(),bg=coordinator(fake);const running=await bg.beginBackground('automatic');assert.ok(running);let settled=false;
+  const fake=clock(),bg=coordinator(fake);const running=await bg.beginBackground('convergence');assert.ok(running);let settled=false;
   const suspension=bg.suspend('managed-recovery');suspension.settled.then(()=>{settled=true;});await Promise.resolve();assert.equal(running.signal.aborted,true,'suspension must abort active background work');assert.equal(settled,false,'suspension settlement must wait until aborted background work actually releases');
   running.release();await suspension.settled;assert.equal(settled,true);assert.equal(bg.resume(suspension),true);assert.equal(bg.status().suspended,false);
 }
@@ -98,7 +102,7 @@ for(const pair of [['maintenance','automatic'],['maintenance','convergence'],['a
   const fake=clock(),bg=coordinator(fake),low=await bg.beginBackground('maintenance'),foreground=bg.beginForeground();
   const failed=assert.rejects(foreground.settled,{code:'REPOSITORY_BACKGROUND_UNSETTLED'});await fake.advance(10000);await failed;
   assert.deepEqual([...bg.status().active],['maintenance'],'timeout must not pretend the old executor released');foreground.release();
-  const higher=bg.beginBackground('automatic');await fake.advance(10000);assert.equal(await higher,null,'higher-priority work must not overlap an unsettled lower job');
+  const higher=bg.beginBackground('convergence');await fake.advance(10000);assert.equal(await higher,null,'higher-priority work must not overlap an unsettled lower job');
   low.release();const retry=bg.beginForeground();await retry.settled;retry.release();assert.deepEqual(fake.pending(),[],'settlement deadlines must be retired after recovery');
 }
 {
@@ -204,7 +208,7 @@ for(const phase of ['read','write']){
 // settings and dirty repositories are rediscovered after eligibility changes.
 for(const blocked of [false,true]){
  const fake=createFakeClock(),bg=coordinator(fake);let dirty=false,available=blocked?'awaiting-control':true,attempts=0;
- const job=bg.registerJob('automatic',{initialDelayMs:null,discover:()=>dirty,isAvailable:()=>available,capture:()=>{},retryMs:1000,execute:async()=>{attempts++;dirty=false;return {status:'completed'};}});
+ const job=bg.registerJob('convergence',{initialDelayMs:null,discover:()=>dirty,isAvailable:()=>available,capture:()=>{},retryMs:1000,execute:async()=>{attempts++;dirty=false;return {status:'completed'};}});
  bg.wake('startup');assert.equal(job.status().pending,false);assert.equal(fake.pending(),0);
  dirty=true;bg.wake('permission');assert.equal(job.status().pending,true);
  if(blocked){assert.equal(fake.pending(),0);available=true;bg.wake('control');}
@@ -215,7 +219,7 @@ for(const blocked of [false,true]){
 }
 {
  const fake=createFakeClock(),bg=coordinator(fake);let errors=0,attempts=0;
- bg.registerJob('automatic',{initialDelayMs:null,discover:()=>{throw new Error('state unavailable');},isAvailable:()=>true,capture:()=>{errors++;},execute:async()=>{attempts++;return {status:'completed'};}});
+ bg.registerJob('convergence',{initialDelayMs:null,discover:()=>{throw new Error('state unavailable');},isAvailable:()=>true,capture:()=>{errors++;},execute:async()=>{attempts++;return {status:'completed'};}});
  bg.wake('startup');await fake.advance(1000);await fake.drainMicrotasks(80);assert.equal(errors,1);assert.equal(attempts,1,'uncertain discovery retains an execution opportunity');
 }
 // The elapsed allowance is enforced at an executor's durable checkpoint,

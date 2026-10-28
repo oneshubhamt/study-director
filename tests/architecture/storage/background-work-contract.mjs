@@ -55,7 +55,7 @@ assert.match(managedRepository,/function rethrowCleanupControl[\s\S]*AbortError[
 assert.match(managedRepository,/objectListingFailed=true[\s\S]*uncertainCount:uncertain/u,'repository object-list failures must remain diagnosable blocked uncertainty');
 
 // One ownership/pre-emption model; local executors retain only their transport/cadence work.
-assert.match(background,/const PRIORITY=freeze\(\{integrity:10,maintenance:20,automatic:30,convergence:40\}\)/u,'background priority must be explicit and shared');
+assert.match(background,/const PRIORITY=freeze\(\{integrity:10,maintenance:20,convergence:30\}\)/u,'background priority must be explicit and shared');
 assert.match(background,/function beginForeground[\s\S]*suspendTimers\(\)[\s\S]*row\.controller\.abort/u,'foreground work must disarm scheduled work and abort active lower-priority jobs');
 assert.match(background,/function suspend\(reason='suspended'\)[\s\S]*waiting=\[\][\s\S]*row\.settlement[\s\S]*const settled=waitForSettlement\(waiting\)/u,'shared suspension must expose a settlement barrier rather than merely signal abort');
 assert.match(provider,/if\(busy\|\|sync\?\.catching\)\{schedulePendingProviderBackup\(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS\)/u,'automatic backups never start while a foreground operation owns the engine');

@@ -81,17 +81,23 @@ await assert.rejects(store.shallowAudit(['asset-good']),{name:'NotAllowedError'}
 // metadata read failure and failure to durably save a newly clean scan.
 const app=fs.readFileSync('source/app.html','utf8'),begin=app.indexOf('let attachmentIntegrityView='),end=app.indexOf('const REPOSITORY_INTEGRITY_BATCH_BYTES=',begin);
 for(const failure of ['read','write']){
-  const clock=createFakeClock();let cleared=0,writes=0;const retained=new Map([['asset-good',{kind:'size-mismatch'}]]),scheduled=[];
+  const clock=createFakeClock();let cleared=0,writes=0;const retained=new Map([['asset-good',{kind:'size-mismatch'}]]);
   const context=vm.createContext({console,Object,Map,Date:clock.Date,Promise,Symbol,TypeError,StartupLifecycle:{status:()=>({fullyInitialized:true})},APP_META_KEYS:{attachmentIntegrityAudit:'integrity'},AttachmentsModule:{validId:value=>/^asset-/.test(value)},attachmentIntegrityIssues:retained,
     readHostAppMetaValue:async()=>{if(failure==='read')throw new Error('read unavailable');return {version:1,checkedAt:'',issues:[{id:'asset-good',kind:'size-mismatch'}]};},
     writeHostAppMetaValue:async(_,__,options)=>{writes++;assert.equal(options.strict,true);throw new Error('write unavailable');},
     AttachmentStorage:{supported:()=>true,shallowAudit:async()=>({checked:1,issues:[]})},AttachmentReferences:{sources:async()=>[{ids:['asset-good']}]},
     AppDiagnostics:{capture(){}},BackupOperationDiagnostics:{start:()=>'',mark(){},finish(){},fail(){}},appCanMutate:()=>true,UnsupportedData:{held:()=>false},backgroundMaintenanceForegroundBusy:()=>false,
     BackgroundTasks:{yieldTask:async()=>{},budget:()=>()=>false},markStorageHealthError(){},markStorageHealthOk(){cleared++;},invalidateAttachmentLibrary(){},
-    setTimeout:(_fn,ms)=>{scheduled.push(ms);return scheduled.length;},clearTimeout(){}
+    setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout
   });
-  for(const file of ['internal','operation-lifecycle'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),context);context.OperationLifecycle=context[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1);context.document={getElementById:()=>null};context.richAssetReferenceRevision=0;context.AppData={dailyRecords:{datasetRevision:async()=>1}};context.storageResetUnresolved=()=>false;vm.runInContext(app.slice(app.indexOf('function backgroundBlocker('),app.indexOf('const BackgroundOperations=')),context);vm.runInContext(app.slice(begin,end),context);const result=await vm.runInContext('AttachmentIntegrityJob.run()',context);
-  assert.equal(result.status,'unavailable');assert.equal(context.attachmentIntegrityIssues,retained);assert.equal(cleared,0);assert.equal(writes,failure==='write'?1:0);assert.equal(scheduled.at(-1),30*60*1000);
+  for(const file of ['internal','operation-lifecycle'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),context);context.OperationLifecycle=context[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1);context.document={getElementById:()=>null};context.richAssetReferenceRevision=0;context.AppData={dailyRecords:{datasetRevision:async()=>1}};context.storageResetUnresolved=()=>false;vm.runInContext(app.slice(app.indexOf('function backgroundBlocker('),app.indexOf('const BackgroundOperations=')),context);vm.runInContext(app.slice(begin,end),context);const running=vm.runInContext('AttachmentIntegrityJob.run()',context);
+  vm.runInContext("scheduleAttachmentIntegrityAudit(5000,'new-attachment')",context);
+  const result=await running;
+  assert.equal(result.status,'unavailable');assert.equal(context.attachmentIntegrityIssues,retained);assert.equal(cleared,0);assert.equal(writes,failure==='write'?1:0);assert.equal(clock.nextAt(),clock.now()+5000,'a running audit cannot replace a newer five-second request with its later error retry');
+  vm.runInContext("scheduleAttachmentIntegrityAudit(60000,'interval')",context);
+  assert.equal(clock.nextAt(),clock.now()+5000,'a later recurrence cannot postpone pending work');
+  vm.runInContext("scheduleAttachmentIntegrityAudit(2000,'earlier-attachment')",context);
+  assert.equal(clock.nextAt(),clock.now()+2000,'a newly requested earlier deadline must pull verification forward');
 }
 
 console.log(JSON.stringify({status:'PASS',suite:'attachment-integrity-audit',checked:result.checked,issues:result.issues.map(issue=>issue.kind),yieldCalls,unavailableIsNotCorruption:true,failedMetadataPreservesFindings:true},null,2));

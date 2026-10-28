@@ -8790,7 +8790,7 @@ function applyAttachmentIntegrityState(state){
   return normalized;
 }
 function scheduleAttachmentIntegrityAudit(delay=15000,trigger='scheduled'){
-  return AttachmentIntegrityJob.schedule(delay,trigger,'replace');
+  return AttachmentIntegrityJob.schedule(delay,trigger,'earliest');
 }
 function attachmentIntegrityDeferredError(message='Attachment integrity audit deferred.',code='ATTACHMENT_INTEGRITY_DEFERRED'){const error=new Error(message);error.code=code;return error;}
 async function runAttachmentIntegrityAttempt({trigger,nextEligibleAt}){

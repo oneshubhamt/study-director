@@ -10,7 +10,7 @@ registry.define('repository-background',1,input=>{
   const Lifecycle=input.lifecycle;
   if(!Object.isFrozen(Lifecycle)||Lifecycle.format!=='study-director.operation-lifecycle'||Lifecycle.contractVersion!==1||typeof Lifecycle.createJob!=='function'||typeof Lifecycle.createWorkBudget!=='function')throw new TypeError('Operation lifecycle contract is unavailable or incompatible.');
   const freeze=Object.freeze;
-  const PRIORITY=freeze({integrity:10,maintenance:20,automatic:30,convergence:40});
+  const PRIORITY=freeze({integrity:10,maintenance:20,convergence:30});
   const MAINTENANCE=freeze({
     continuationMs:5000,
     busyMs:15000,
@@ -121,7 +121,7 @@ registry.define('repository-background',1,input=>{
     }
     function resume(value){const token=String(value&&value.token||value||'');if(!token||!suspensions.has(token))return false;suspensions.delete(token);resumeTimers();wake('resume');return true;}
     async function beginBackground(job,{externalSignal=null,budgetMs=0,budgetCode='REPOSITORY_BACKGROUND_BUDGET',budgetMessage='Repository background work reached its work limit.',preemptCode='REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage='Repository background work yielded to a higher-priority operation.'}={}){
-      if(['automatic','convergence'].includes(String(job))&&Number(budgetMs)>0)throw new TypeError('Background transfers require progress watchdogs, not a total housekeeping deadline.');
+      if(String(job)==='convergence'&&Number(budgetMs)>0)throw new TypeError('Background transfers require progress watchdogs, not a total housekeeping deadline.');
       const name=String(job||''),rank=priority(name);if(!rank)throw new TypeError('Repository-background job is invalid.');if(foreground||suspensions.size||externalSignal?.aborted)return null;
       const lower=[];for(const [activeJob,row] of active){if(priority(activeJob)>=rank)return null;lower.push(row);}
       for(const row of lower)if(!row.controller.signal.aborted)row.controller.abort(backgroundAbort(row.preemptCode,row.preemptMessage));
@@ -137,7 +137,7 @@ registry.define('repository-background',1,input=>{
       if(externalSignal){if(externalSignal.aborted)relay();else externalSignal.addEventListener('abort',relay,{once:true});}
       let resolveSettlement;const settlement=new Promise(resolve=>{resolveSettlement=resolve;});let released=false;
       const allowance=Lifecycle.createWorkBudget({now:environment.now,check:()=>{if(controller.signal.aborted)throw controller.signal.reason;},yieldError:()=>backgroundAbort(budgetCode,budgetMessage)});
-      const workBudget=freeze({...allowance,start:milliseconds=>{if(['automatic','convergence'].includes(name))throw new TypeError('Background transfers require progress watchdogs, not a total housekeeping deadline.');return !released&&!controller.signal.aborted&&allowance.start(milliseconds);}});
+      const workBudget=freeze({...allowance,start:milliseconds=>{if(name==='convergence')throw new TypeError('Background transfers require progress watchdogs, not a total housekeeping deadline.');return !released&&!controller.signal.aborted&&allowance.start(milliseconds);}});
       if(Number(budgetMs)>0)workBudget.start(budgetMs);
       const row={controller,settlement,preemptCode:String(preemptCode),preemptMessage:String(preemptMessage)};active.set(name,row);
       return freeze({job:name,signal:controller.signal,controller,settlement,workBudget,release:()=>{if(released)return;released=true;if(externalSignal)externalSignal.removeEventListener('abort',relay);if(active.get(name)===row)active.delete(name);resolveSettlement?.();resumeTimers();notifyRelease(name);}});
