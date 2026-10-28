@@ -1309,8 +1309,8 @@ registry.define('backup-provider',1,input=>{
     if(!result||result.cancelled)return freeze({source:freeze({status:'skipped',reason:'cancelled'}),others:freeze([])});
     let source;
     if(sourceNeeded){
-      const retryQueued=await markPendingRetry(selected);
-      source=freeze({status:retryQueued?'pending':'failed',reason:retryQueued?'queued':'automatic retry could not be queued',retryQueued,shared:selected.shared===true});
+      const retryQueued=await markPendingRetry(selected),scheduled=retryQueued&&schedulePendingProviderBackup(selected,1000);
+      source=freeze({status:retryQueued?'pending':'failed',reason:retryQueued?(scheduled?'queued':'durable retry recorded'):'automatic retry could not be queued',retryQueued,scheduled:scheduled===true,shared:selected.shared===true});
     }else{
       providerBackground(selected).clearScheduled('convergence');
       await clearPendingRetry(selected);
