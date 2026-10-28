@@ -1314,12 +1314,15 @@ registry.define('backup-provider',1,input=>{
     }else{
       providerBackground(selected).clearScheduled('convergence');
       await clearPendingRetry(selected);
-      source=freeze({status:'completed',checkpoint:String(sourceCheckpoint||''),unchanged:true,retryQueued:false,shared:selected.shared===true});
+      const scheduled=automaticNeeded(selected)&&schedulePendingProviderBackup(selected,1000);
+      source=scheduled
+        ?freeze({status:'pending',checkpoint:String(sourceCheckpoint||''),reason:'queued',unchanged:false,retryQueued:false,scheduled:true,shared:selected.shared===true})
+        :freeze({status:'completed',checkpoint:String(sourceCheckpoint||''),unchanged:true,retryQueued:false,scheduled:false,shared:selected.shared===true});
     }
     return freeze({source,others:queueOtherLocations(selected)});
   }
   async function managedProviderPresent(selected,result,{sourceNeeded=true,sourceCheckpoint=''}={}){
-    const convergence=await queueResolvedProviderState(selected,result,{sourceNeeded,sourceCheckpoint}),sourceReady=convergence.source.status==='completed'||convergence.source.status==='pending'&&convergence.source.retryQueued===true;
+    const convergence=await queueResolvedProviderState(selected,result,{sourceNeeded,sourceCheckpoint}),sourceReady=convergence.source.status==='completed'||convergence.source.status==='pending'&&(convergence.source.retryQueued===true||convergence.source.scheduled===true);
     const reason=sourceReady?'':[convergence.source.reason||`${selected.label} backup could not be queued`,convergence.source.retryQueued!==true?'automatic retry could not be queued':''].filter(Boolean).join(' · ');
     return freeze({status:sourceReady?'completed':'pending',reason,checkpointId:String(convergence.source.checkpoint||''),source:convergence.source,others:convergence.others});
   }
