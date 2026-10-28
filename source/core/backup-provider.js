@@ -1299,7 +1299,7 @@ registry.define('backup-provider',1,input=>{
     for(const other of providers.values()){
       if(other.id===selected.id||!providerConnected(other)||!automaticEnabled(other))continue;
       let queued=false;
-      try{const job=providerConvergenceJob(other);if(job){job.schedule(1000,'managed-recovery','earliest');queued=true;}}
+      try{const job=providerConvergenceJob(other);if(job)queued=job.schedule(1000,'managed-recovery','earliest')!==false;}
       catch(error){AppDiagnostics.capture('backup-provider.recovery-peer-convergence',error,'warn');}
       out.push(freeze({id:other.id,label:other.label,shared:other.shared===true,status:queued?'pending':'failed',queued}));
     }
@@ -1627,7 +1627,7 @@ registry.define('backup-provider',1,input=>{
   // still have to do.
   function presentRecovery(selected,kind,result){
     const convergence=result&&result.managedRecovery&&result.managedRecovery.present||freeze({status:'pending',source:freeze({status:'failed',reason:'post-operation backup status unavailable'}),others:freeze([])});
-    const sourceReady=convergence.source&&(convergence.source.status==='completed'||convergence.source.status==='pending'&&convergence.source.retryQueued===true);
+    const sourceReady=convergence.source&&(convergence.source.status==='completed'||convergence.source.status==='pending'&&(convergence.source.retryQueued===true||convergence.source.scheduled===true));
     const finalMessage=presentation.outcome(kind,selected.label,convergence,result&&result.summary);statusText(finalMessage,sourceReady);finishForegroundView(selected,{message:finalMessage,ok:true});
     return convergence;
   }
