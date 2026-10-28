@@ -1277,7 +1277,7 @@ registry.define('backup-provider',1,input=>{
       }finally{scope?.release();}
     }});providerConvergenceJobs.set(id,job);return job;
   }
-  function schedulePendingProviderBackup(selected,delay=1000){return providerConvergenceJob(selected)?.schedule(Math.max(1000,Number(delay)||1000),'managed-recovery','replace')||false;}
+  function schedulePendingProviderBackup(selected,delay=1000){const job=providerConvergenceJob(selected);return !!job&&job.schedule(Math.max(1000,Number(delay)||1000),'managed-recovery','replace')!==false;}
   function wakeProviderBackground(selected,trigger='eligibility'){
     if(!selected?.repository)return false;
     try{
