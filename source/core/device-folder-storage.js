@@ -174,7 +174,7 @@ registry.define('device-folder-storage',1,()=>{
       const existing=await fileOrNull(directory,name);
       if(existing){
         const expected=String(file.digest||'');
-        if(!/^[a-f0-9]{64}$/u.test(expected)||existing.size!==file.blob.size||await input.checksum(existing,{})!==expected)
+        if(!/^[a-f0-9]{64}$/u.test(expected)||existing.size!==file.blob.size||await input.checksum(file.blob,{})!==expected||await input.checksum(existing,{})!==expected)
           throw new Error('Device Folder repository identity collision: existing verified backup bytes were preserved.');
         await checks();
         return freeze({...await describe(file.kind,file.id,name,existing,await scope(),null),serverDigest:expected});

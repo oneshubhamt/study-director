@@ -41,6 +41,10 @@ for(const [kind,fileId,original,conflict] of [
   await assert.rejects(()=>upload(kind,fileId,conflict),/identity collision/u,'conflicting '+kind+' replay must fail closed');
   assert.equal(await (await storage.download(initial)).text(),original,'collision must preserve original '+kind+' bytes');
 }
+// A stale caller digest cannot authorize falsely reusing a different Blob.
+const stale=new Blob(['OBJECT bytes']);
+await assert.rejects(()=>storage.upload(freeze({kind:'object',id:objectId(1),blob:stale,size:stale.size,digest:await sha256(new Blob(['object bytes']))})),/identity collision/u);
+assert.equal(await (await storage.download(object)).text(),'object bytes');
 // Absence of a caller checksum cannot authorize replacing an existing file.
 await assert.rejects(()=>storage.upload(freeze({kind:'object',id:objectId(1),blob:new Blob(['object bytes'])})),/identity collision/u);
 assert.equal(await (await storage.download(object)).text(),'object bytes');
