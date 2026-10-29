@@ -14,7 +14,7 @@ const mutations=Object.freeze([
     tests:Object.freeze(['tests/unit/app/operation-lifecycle.mjs'])
   }),
   Object.freeze({
-    id:'diagnostic-history-keeps-live-operations',file:'source/core/backup-operation-diagnostics.js',
+    id:'diagnostic-history-keeps-live-operations',file:'source/core/backup-operation-diagnostics.ts',
     find:"records=records.filter(row=>row.status==='running'||keep.has(row));",replace:'records=records.filter(row=>keep.has(row));',
     tests:Object.freeze(['tests/unit/backup/backup-operation-diagnostics.mjs'])
   }),
@@ -29,13 +29,13 @@ const mutations=Object.freeze([
     tests:Object.freeze(['tests/integration/backup/encryption.mjs'])
   }),
   Object.freeze({
-    id:'backup-chunk-integrity-is-enforced',file:'source/core/backup-codec.js',
+    id:'backup-chunk-integrity-is-enforced',file:'source/core/backup-codec.ts',
     find:'if(checksum!==entry.checksum)throw new Error(`Backup chunk ${entry.seq} failed its integrity check.`);',
     replace:'if(false)throw new Error(`Backup chunk ${entry.seq} failed its integrity check.`);',
     tests:Object.freeze(['tests/integration/backup/portable-backup.mjs'])
   }),
   Object.freeze({
-    id:'attachment-metadata-failure-rolls-references-back',file:'source/core/attachments.js',
+    id:'attachment-metadata-failure-rolls-references-back',file:'source/core/attachments.ts',
     find:'if(!referenceChange?.rollback)return error;',replace:'return error;',
     tests:Object.freeze(['tests/integration/attachments/attachment-deletion.mjs'])
   }),
@@ -46,7 +46,7 @@ const mutations=Object.freeze([
     tests:Object.freeze(['tests/integration/backup/backup-persistence.mjs'])
   }),
   Object.freeze({
-    id:'library-clear-restores-durable-journal',file:'source/core/library-clear.js',
+    id:'library-clear-restores-durable-journal',file:'source/core/library-clear.ts',
     find:'await ports.restore(journal.payload);',replace:'await Promise.resolve();',
     tests:Object.freeze(['tests/integration/library/library-clear.mjs'])
   })

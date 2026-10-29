@@ -1,3 +1,4 @@
+import {readScript} from '../../../build/source-script.mts';
 import {readCoreScript} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -7,7 +8,7 @@ import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
 const context={crypto:webcrypto,TextEncoder,Uint8Array,console,Blob,Object,Set,Map,Math,Number,String,Promise,Date,TypeError,Symbol};
 context.globalThis=context;vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/asset-storage.js'])vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});
+for(const file of ['source/core/internal.js','source/core/asset-storage.ts'])vm.runInContext(readScript(file),context,{filename:file});
 const storageModule=context[Symbol.for('studyDirector.internalModules.v1')].require('asset-storage',1);
 
 const hash='a'.repeat(64);

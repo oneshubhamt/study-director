@@ -22,6 +22,8 @@ const study={version:16,recordKind:'study',date:'2026-09-10',savedAt:stamp,updat
 const diary=dailyRecordCodec.createDiaryRecord('2026-09-09','Diary-only reflection',{savedAt:stamp,updatedAt:stamp});
 assert.ok(dailyRecordCodec.sanitizeCurrentDailyRecord(study));assert.ok(diary);
 const note={version:3,key:noteId('ethics'),label:'Ethics',text,updatedAt:stamp};assert.ok(dailyRecordCodec.sanitizeCurrentNote(note));
+const coercedLink={toString:()=>noteId('linked'),toJSON:()=>noteId('linked')};
+assert.equal(dailyRecordCodec.sanitizeCurrentNote({...note,links:[coercedLink]}),null,'note links must contain canonical string identities, not coercible objects');
 const active=activeSessionCodec.canonicalize({id:'current',type:'activeSession',version:10,revision:12,date:'2026-09-10',status:'suspended',runningOn:'inst_roundtrip_device',scheduleText:'07:00 | 60 | A | Study | Ethics | pages | 10',snapshot:{version:6,date:'2026-09-10',fingerprint:'fp',review:{reflection:'Unsaved Review',studyQuality:4},updatedAt:stamp},suspendedAt:stamp,updatedAt:stamp});assert.ok(active);assert.ok(activeSessionCodec.sanitizeCurrent(active));
 const personal={version:2,plans:{draft:'07:00 | 60 | A | Study | Ethics | pages | 10',savedPlans:[{id:'plan-current-qa',label:'Current plan',scheduleText:'08:00 | 60 | B | Study | Polity | pages | 10',createdAt:stamp,updatedAt:stamp}],defaultId:'plan-current-qa'},preferences:{studentName:'Current User',theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null,soundMode:'minimal'}};
 const blobs=[new Blob(['image bytes'],{type:'image/png'}),new Blob(['%PDF-current bytes'],{type:'application/pdf'}),new Blob(['audio bytes'],{type:'audio/mpeg'})];

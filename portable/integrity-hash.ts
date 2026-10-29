@@ -1,5 +1,5 @@
 import {Sha256} from './sha256.ts';
-export type HashSnapshot={version:1;length:number;state:number[];tail:number[]};
+export type HashSnapshot={version:1;length:number;state:readonly number[];tail:readonly number[]};
 export function hashSnapshot(hash:Sha256):HashSnapshot{if(hash.finished)throw new Error('Hash already finished.');return {version:1,length:hash.length,state:Array.from(hash.state),tail:Array.from(hash.block.slice(0,hash.used))};}
 export function restoreHash(input:unknown){
   const value=input as Partial<HashSnapshot>|null|undefined;

@@ -1,19 +1,20 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const app=fs.readFileSync('source/app.html','utf8');
-const background=fs.readFileSync('source/core/repository-background.js','utf8');
-const device=fs.readFileSync('source/core/device-backup.js','utf8');
+const background=readScript('source/core/repository-background.ts');
+const device=readScript('source/core/device-backup.ts');
 const provider=fs.readFileSync('source/core/backup-provider.js','utf8');
-const assets=fs.readFileSync('source/core/asset-maintenance.js','utf8');
-const repositories=fs.readFileSync('source/core/repositories.js','utf8');
-const metadata=fs.readFileSync('source/core/host-metadata.js','utf8');
+const assets=readScript('source/core/asset-maintenance.ts');
+const repositories=readScript('source/core/repositories.ts');
+const metadata=readScript('source/core/host-metadata.ts');
 const backup=fs.readFileSync('source/core/backup.js','utf8');
-const backupCapture=fs.readFileSync('source/core/backup-capture.js','utf8');
-const managedRepository=fs.readFileSync('source/core/managed-repository.js','utf8');
-const policy=fs.readFileSync('source/core/repository-policy.ts','utf8');
-const mutation=fs.readFileSync('source/core/mutation-coordinator.js','utf8');
-const host=fs.readFileSync('source/core/backup-recovery-host.js','utf8');
+const backupCapture=readScript('source/core/backup-capture.ts');
+const managedRepository=readScript('source/core/managed-repository.ts');
+const policy=readScript('source/core/repository-policy.ts');
+const mutation=readScript('source/core/mutation-coordinator.ts');
+const host=readScript('source/core/backup-recovery-host.ts');
 const drive=fs.readFileSync('source/external/drive.js','utf8');
 
 assert.match(app,/REPOSITORY_MAINTENANCE_VERSION=4/u);
@@ -28,12 +29,12 @@ assert.match(repositories,/flushDeletionRecovery\([^)]*\)!==true/u,'daily comple
 
 // Scheduling policy is shared rather than duplicated in Device and Drive, with suspension settlement and opportunity-driven availability.
 assert.match(background,/const MAINTENANCE=freeze\(\{[\s\S]*continuationMs:5000[\s\S]*contentionMs:15\*60\*1000[\s\S]*errorMs:5\*60\*1000[\s\S]*blockedMs:15\*60\*1000[\s\S]*graceMs:6\*60\*60\*1000/u,'maintenance cadence must be defined once in the repository-background policy');
-assert.match(background,/function maintenancePlan\(cleanup\)[\s\S]*bounded-continuation[\s\S]*contentionRetryMs[\s\S]*publication-contention[\s\S]*delete-failure[\s\S]*blocked-uncertain[\s\S]*gc-grace/u,'shared maintenance policy must distinguish actionable, expiry-aware contention, failures, uncertainty and grace-deferred work');
+assert.match(background,/function maintenancePlan\(cleanup\s*\)[\s\S]*bounded-continuation[\s\S]*contentionRetryMs[\s\S]*publication-contention[\s\S]*delete-failure[\s\S]*blocked-uncertain[\s\S]*gc-grace/u,'shared maintenance policy must distinguish actionable, expiry-aware contention, failures, uncertainty and grace-deferred work');
 assert.match(background,/maintenanceDefersAcrossObservation[\s\S]*preserveDeferred[\s\S]*maintenanceDelay\(pending/u,'repeated inspection must preserve blocked/error deadlines instead of pulling them into a hot loop');
 assert.match(background,/function createMaintenanceScheduler[\s\S]*state-read-failed[\s\S]*marker-clear-failed[\s\S]*intent-write-failed/u,'shared maintenance lifecycle must retain retry opportunities when durable marker operations fail');
 assert.match(background,/function createIntegrityScheduler[\s\S]*integrityTargetDue[\s\S]*beginBackground\('integrity'[\s\S]*signal:scope\.signal[\s\S]*failureRetryMs/u,'repository integrity recurrence, ownership, cancellation and budget enforcement must be centralized in the shared background module');
 assert.match(app,/readRepositoryMaintenancePending\(\{throwOnError=false\}=[\s\S]*if\(throwOnError\)throw error/u,'durable maintenance state reads must be able to fail closed instead of silently becoming empty state');
-assert.match(app,/function mutateRepositoryMaintenancePending[\s\S]*BackupAppMeta\.transaction\('readwrite'[\s\S]*handle\.request\.onerror[\s\S]*outcome='superseded'[\s\S]*strict:true/u,'maintenance mutation must compare requests inside a strict transaction and fail closed on unavailable state');
+assert.match(app,/function mutateRepositoryMaintenancePending[\s\S]*BackupAppMeta\.transaction\s*\('readwrite'[\s\S]*handle\.request\.onerror[\s\S]*outcome='superseded'[\s\S]*strict:true/u,'maintenance mutation must compare requests inside a strict transaction and fail closed on unavailable state');
 assert.doesNotMatch(device,/MAINTENANCE_(?:CATCHUP|GRACE|BLOCKED|ERROR|CONTENTION)_RETRY_MS/u,'Device must not retain a private maintenance cadence table');
 assert.doesNotMatch(provider,/PROVIDER_MAINTENANCE_(?:CATCHUP|GRACE|BLOCKED|ERROR|CONTENTION)_RETRY_MS/u,'Drive must not retain a private maintenance cadence table');
 assert.doesNotMatch(device,/createMaintenanceScheduler|createIntegrityScheduler|registerJob|beginBackground|beginForeground|setTimeout\(\(\)=>[^,]*schedule/u,'the Device Folder runs no jobs of its own: maintenance, integrity and automatic backups are the engine\'s per-location jobs');
@@ -41,7 +42,7 @@ assert.doesNotMatch(device,/createMaintenanceScheduler|createIntegrityScheduler|
 // folder) is written only by the writing tab, behind the shared gate and one
 // tab at a time.
 assert.match(device,/function prepareInBackground\(\)\{[\s\S]{0,400}environment\.backgroundBlocker\(\)[\s\S]{0,120}if\(blocked\)return;/u,'Device Folder preparation in the background waits for the shared gate');
-assert.match(device,/function prepareRepository\(\{choose=false\}=\{\}\)\{[\s\S]{0,200}if\(!environment\.canMutate\(\)\)return Promise\.reject[\s\S]{0,240}preparing=environment\.withLock\(/u,'only the writing tab prepares the folder, under a lock');
+assert.match(device,/function prepareRepository\(\{choose=false\}\s*=\{\}\)\s*\{[\s\S]{0,200}if\(!environment\.canMutate\(\)\)return Promise\.reject[\s\S]{0,240}preparing=environment\.withLock\(/u,'only the writing tab prepares the folder, under a lock');
 assert.match(app,/backgroundBlocker:\(\)=>backgroundBlocker\(\),canMutate:\(\)=>appCanMutate\(\)[\s\S]{0,400}withLock:work=>navigator\.locks\?\.request\?navigator\.locks\.request\(ProfileScope\.scoped\('study-director-device-folder-prepare'\)/u,'the app hands the Device Folder the shared gate and a profile-scoped Web Lock');
 assert.match(app,/\['device-folder',Object\.freeze\(\{wake:\(\)=>DeviceBackup\.wake\(\)\}\)\],\s*\['backup-locations'/u,'the folder is prepared when the gate opens, before the backup locations wake');
 assert.match(provider,/background\.createMaintenanceScheduler/u,'Drive maintenance must use the per-target shared lifecycle scheduler');
@@ -95,7 +96,7 @@ assert.match(app,/BackupOperationDiagnostics\.start\('attachment-integrity'/u);
 assert.match(provider,/OperationDiagnostics\.start\('provider-integrity'[\s\S]*nextEligibleAt/u);
 assert.match(provider,/OperationDiagnostics\.start\('provider-convergence'/u);
 assert.match(app,/configuration:Object\.freeze\(\{release:APP_VERSION,limit:20\}\)/u,'diagnostic history must be large enough to inspect a background/foreground cycle');
-assert.match(repositories,/async function rebaseBackupPreparationState\(\)[\s\S]*Meta\.transaction\('readwrite'[\s\S]*canonicalMutationEpoch[\s\S]*backupPreparationUnitPrefix/u,'authoritative rebase must atomically reset durable acceleration metadata');
+assert.match(repositories,/async function rebaseBackupPreparationState\(\)[\s\S]*Meta\.transaction\s*\('readwrite'[\s\S]*canonicalMutationEpoch[\s\S]*backupPreparationUnitPrefix/u,'authoritative rebase must atomically reset durable acceleration metadata');
 assert.match(backup,/if\(changed\)await rebaseRepositoryPreparationAcceleration\('combine'\)/u);
 assert.match(backup,/await rebaseRepositoryPreparationAcceleration\('replace'\)/u);
 
@@ -105,7 +106,7 @@ assert.match(policy,/publicationMaxAgeMs:24\*60\*60\*1000[\s\S]*publicationAsser
 assert.match(app,/limits:Object\.freeze\(\{publicationMaxAgeMs:RepositoryPolicyModule\.protocol\.publicationMaxAgeMs[\s\S]*maintenanceMaxAgeMs:RepositoryPolicyModule\.protocol\.maintenanceMaxAgeMs/u,'Device Folder storage must use the shared repository protocol policy for its locks');
 assert.match(provider,/RepositoryPolicy=input\.repositoryPolicy[\s\S]*RepositoryPolicy\.protocol/u,'Drive repository transport must consume shared repository protocol policy');
 assert.match(mutation,/async function refreshAuthority[\s\S]*durableAcquire[\s\S]*writeLease\(kind,id\)[\s\S]*loseAuthority\(error,\{durableProtected:true\}\)/u,'local mirror renewal failure must retain the stronger durable lease while failing forward mutation closed');
-assert.match(mutation,/function assertAuthority\(options=\{\}\)[\s\S]*allowDurableProtected[\s\S]*throw active\.authorityError/u,'destructive callers must have an explicit authority assertion with rollback-only durable protection');
+assert.match(mutation,/function assertAuthority\s*\(options\s*=\{\}\)[\s\S]*allowDurableProtected[\s\S]*throw active\.authorityError/u,'destructive callers must have an explicit authority assertion with rollback-only durable protection');
 assert.match(backup,/requireCanonicalComplete:true/u,'managed repository publication must require a complete canonical capture');
 assert.match(backupCapture,/BACKUP_CANONICAL_CAPTURE_INCOMPLETE/u,'incomplete rescue captures must have an explicit managed-publication rejection');
 assert.match(managedRepository,/health:manifest\.warning\?'degraded':'healthy'[\s\S]*warning:String\(manifest\.warning/u,'Version History must preserve and surface legacy degraded checkpoint warnings');
@@ -117,7 +118,7 @@ assert.doesNotMatch(drive,/function readWithTimeout\b/u,'retired Drive timeout h
 
 // Coordination boundaries, rather than historical timer/flag spellings. The
 // unit and assembled integration suites establish the behavioral invariants.
-const lifecycle=fs.readFileSync('source/core/operation-lifecycle.ts','utf8');
+const lifecycle=readScript('source/core/operation-lifecycle.ts');
 assert.match(lifecycle,/function createJob[\s\S]*function reconcile[\s\S]*function wake[\s\S]*function complete/u);
 assert.match(background,/Lifecycle\.createJob/u);assert.match(background,/registerJob\('maintenance'/u);assert.match(background,/registerJob\('integrity'/u);
 assert.match(provider,/background\.registerJob\('convergence'/u);

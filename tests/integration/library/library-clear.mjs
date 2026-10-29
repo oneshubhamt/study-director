@@ -1,3 +1,5 @@
+import {readScript} from '../../../build/source-script.mts';
+import {readCoreScript} from '../../helpers/core-script.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
@@ -12,7 +14,7 @@ import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 const context={console,Map,Set,Object,Promise,Number,String,Math,Date,JSON,structuredClone};
 context.globalThis=context;
 vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/library-clear.js'])vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});
+for(const file of ['source/core/internal.js','source/core/library-clear.ts'])vm.runInContext(readScript(file),context,{filename:file});
 const libraryClear=context[Symbol.for('studyDirector.internalModules.v1')].require('library-clear',1);
 
 let membershipProbes=0;
@@ -36,7 +38,7 @@ console.log(JSON.stringify({status:'PASS',attachments:attachments.length,sources
 { // library-clear-rollback-state
 const context={console,Object,Promise,Map,Set,Date,String,Number,Array,Error,TypeError,structuredClone,Symbol,JSON,Math};
 context.globalThis=context;vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/library-clear.js'])vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});
+for(const file of ['source/core/internal.js','source/core/library-clear.ts'])vm.runInContext(readScript(file),context,{filename:file});
 const registry=context[Symbol.for('studyDirector.internalModules.v1')];
 const libraryClear=registry.require('library-clear',1);
 
@@ -56,6 +58,22 @@ function createState({data=noopData(),references={},attachments={},review={},now
     review:{hydrate:review.hydrate||(()=>{}),invalidateBindings:review.invalidateBindings||(()=>{})},
     nowIso
   });
+}
+
+// A malformed journal container must fail before restoring even valid attachment metadata.
+{
+  let writes=0;
+  const data=noopData();data.notes.replace=async()=>{writes++;};data.dailyRecords.restoreBatch=async()=>{writes++;};
+  const state=createState({data,attachments:{restoreMetadata:async()=>{writes++;}}});
+  const base={format:'study-director.library-clear-rollback',version:1,notes:null,dailyRecords:null,sessionCaptured:false,activeSession:null,attachmentMetadata:[{id:'att-test'}]};
+  for(const patch of [
+    {notes:{mode:'selected',entries:{bad:null}}},
+    {notes:{mode:'unknown',entries:{}}},
+    {dailyRecords:{mode:'all',entries:[{date:42}]}},
+    {attachmentMetadata:[null]},
+    {activeSession:[]}
+  ])await assert.rejects(state.restore({...base,...patch}),/rollback payload is invalid/);
+  assert.equal(writes,0,'invalid rollback shape must not cause partial restoration');
 }
 
 // Sparse rollback touches only journaled Notes; full rollback replaces the collection.
@@ -139,8 +157,8 @@ console.log(JSON.stringify({status:'PASS',suite:'library-clear-rollback-state',c
 { // library-clear-scaling
 const context={console,Map,Set,Object,Promise,Number,String,Math,Date,JSON,structuredClone};
 context.globalThis=context;vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/library-clear.js']){
-  vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});
+for(const file of ['source/core/internal.js','source/core/library-clear.ts']){
+  vm.runInContext(readScript(file),context,{filename:file});
 }
 const mod=context[Symbol.for('studyDirector.internalModules.v1')].require('library-clear',1);
 const id=n=>`att-${String(n).padStart(20,'0')}`;
@@ -196,7 +214,7 @@ console.log(JSON.stringify({status:'PASS',suite:'library-clear-scaling',checks:1
 { // library-clear-transaction
 const context={console,Map,Set,Object,Promise,Number,String,Math,Date,JSON,structuredClone,crypto:globalThis.crypto};
 context.globalThis=context;vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/library-clear.js'])vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});
+for(const file of ['source/core/internal.js','source/core/library-clear.ts'])vm.runInContext(readScript(file),context,{filename:file});
 const mod=context[Symbol.for('studyDirector.internalModules.v1')].require('library-clear',1);
 const A='att-aaaaaaaaaaaaaaaaaaaa',B='att-bbbbbbbbbbbbbbbbbbbb';
 const baseSnapshot=()=>({attachments:[{id:A},{id:B}],sources:[{kind:'note',key:'n1',label:'N1',ids:new Set([B])},{kind:'session',key:'current',label:'Session reflection · 2026-09-11',ids:new Set([B])}]});
@@ -373,7 +391,7 @@ console.log(JSON.stringify({status:'PASS',suite:'library-clear-transaction',faul
 {
   const context={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask,structuredClone,crypto:webcrypto};vm.createContext(context);
   vm.runInContext(richTextRuntimeSource(),context);
-  for(const file of ['internal','attachments','library-clear'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),context);
+  for(const file of ['internal','attachments','library-clear'])vm.runInContext(readCoreScript(file),context);
   const registry=context[Symbol.for('studyDirector.internalModules.v1')],Clear=registry.require('library-clear',1),Attachments=registry.require('attachments',1),rich=context.StudyDirectorRichText;
   const id='att-'+ 'd'.repeat(32),reference=rich.insertAttachmentReference('',{id,name:'Study diagram',mode:'inline-image'}).value;
   const cases=[],stages=['capture','verify-rollback'],faults=['days','notes','session','session-rescue','local-days','local-session','local-deletions'];

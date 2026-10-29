@@ -45,7 +45,7 @@ try{
   }
   const covered=rows.reduce((n,row)=>n+row.branches.covered,0),total=rows.reduce((n,row)=>n+row.branches.total,0);
   if(!total)throw new Error('AST branch coverage observed no branch edges.');
-  for(const critical of ['source/core/canonical.ts','source/core/save-lane.ts','portable/stream-encryption.ts','source/core/library-clear.js','source/core/attachments.js','source/core/backup.js'])if(!rows.some(row=>row.file===critical))throw new Error(`Critical branch-coverage module was not observed: ${critical}`);
+  for(const critical of ['source/core/canonical.ts','source/core/save-lane.ts','portable/stream-encryption.ts','source/core/library-clear.ts','source/core/attachments.ts','source/core/backup.js'])if(!rows.some(row=>row.file===critical))throw new Error(`Critical branch-coverage module was not observed: ${critical}`);
   const summary={status:'PASS',scope:'fast-runtime-ast-branch-edges',branches:{covered,total,percent:Math.round(covered/total*10000)/100},files:rows.sort((a,b)=>a.file.localeCompare(b.file))};
   console.log(JSON.stringify(summary,null,2));
   const outIndex=process.argv.indexOf('--json');if(outIndex>=0){const target=process.argv[outIndex+1];if(!target)throw new Error('--json requires an output path.');fs.writeFileSync(externalOutputPath(target,'AST branch coverage JSON output'),JSON.stringify(summary,null,2)+'\n');}

@@ -4,7 +4,7 @@ import {RUNTIME_DATA_CONTRACT} from '../../contracts/canonical-identities.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-for(const file of ['source/core/internal.js','source/core/domain.ts','source/core/record-codecs.js','source/core/backup-codec.js','source/core/attachments.js','source/core/persistence.js'])vm.runInThisContext(readScript(file),{filename:file});
+for(const file of ['source/core/internal.js','source/core/domain.ts','source/core/record-codecs.ts','source/core/backup-codec.ts','source/core/attachments.ts','source/core/persistence.ts'])vm.runInThisContext(readScript(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const Domain=registry.require('domain',1,Object.freeze({maxAreaNameChars:200,maxDurationMinutes:1440,maxScheduleChars:50000,maxScheduleRows:200,maxTaskNameChars:300,maxTasksPerDay:100,maxUnitChars:80}));
 const RecordCodecs=registry.require('record-codecs',1);

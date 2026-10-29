@@ -2,30 +2,30 @@ export const COVERAGE_FLOORS=Object.freeze([
   Object.freeze({file:'source/core/canonical.ts',lines:90,branches:70,functions:100}),
   Object.freeze({file:'source/core/save-lane.ts',lines:90,branches:65,functions:85}),
   Object.freeze({file:'portable/stream-encryption.ts',lines:90,branches:80,functions:90}),
-  Object.freeze({file:'source/core/library-clear.js',lines:80,branches:55,functions:90}),
-  Object.freeze({file:'source/core/asset-maintenance.js',lines:95,branches:50,functions:85}),
-  Object.freeze({file:'source/core/asset-storage.js',lines:90,branches:58,functions:70}),
-  Object.freeze({file:'source/core/attachments.js',lines:65,branches:50,functions:50}),
+  Object.freeze({file:'source/core/library-clear.ts',lines:80,branches:55,functions:90}),
+  Object.freeze({file:'source/core/asset-maintenance.ts',lines:95,branches:50,functions:85}),
+  Object.freeze({file:'source/core/asset-storage.ts',lines:90,branches:58,functions:70}),
+  Object.freeze({file:'source/core/attachments.ts',lines:65,branches:50,functions:50}),
   Object.freeze({file:'source/core/backup.js',lines:70,branches:58,functions:70}),
-  Object.freeze({file:'source/core/device-backup.js',lines:85,branches:60,functions:90}),
-  Object.freeze({file:'source/core/practice-pacer.js',lines:55,branches:45,functions:55}),
-  Object.freeze({file:'source/core/timer-engine.js',lines:42,branches:38,functions:42}),
-  Object.freeze({file:'source/core/backup-codec.js',lines:85,branches:58,functions:90}),
-  Object.freeze({file:'source/core/repository-journals.js',lines:90,branches:55,functions:75}),
+  Object.freeze({file:'source/core/device-backup.ts',lines:85,branches:60,functions:90}),
+  Object.freeze({file:'source/core/practice-pacer.ts',lines:55,branches:45,functions:55}),
+  Object.freeze({file:'source/core/timer-engine.ts',lines:42,branches:38,functions:42}),
+  Object.freeze({file:'source/core/backup-codec.ts',lines:85,branches:58,functions:90}),
+  Object.freeze({file:'source/core/repository-journals.ts',lines:90,branches:55,functions:75}),
   Object.freeze({file:'source/external/insights-model.js',lines:75,branches:55,functions:70})
 ]);
 
 export const CRITICAL_PATHS=Object.freeze([
   Object.freeze({id:'encrypted-backup-exact-envelope',file:'portable/stream-encryption.ts',snippet:'if(encryptedSize(size)!==file.size)',reason:'reject truncated or trailing encrypted backup bytes'}),
-  Object.freeze({id:'backup-chunk-integrity-rejection',file:'source/core/backup-codec.js',snippet:'if(checksum!==entry.checksum)',reason:'reject corrupted backup chunks before restore'}),
-  Object.freeze({id:'attachment-reference-rollback',file:'source/core/attachments.js',snippet:'await referenceChange.rollback();assertAuthority({allowDurableProtected:true});return error;',reason:'restore references after attachment metadata failure'}),
+  Object.freeze({id:'backup-chunk-integrity-rejection',file:'source/core/backup-codec.ts',snippet:'if(checksum!==entry.checksum)',reason:'reject corrupted backup chunks before restore'}),
+  Object.freeze({id:'attachment-reference-rollback',file:'source/core/attachments.ts',snippet:'await referenceChange.rollback();assertAuthority({allowDurableProtected:true});return error;',reason:'restore references after attachment metadata failure'}),
   Object.freeze({id:'post-restore-record-verification',file:'source/core/backup.js',snippet:'Post-restore verification failed for saved day',reason:'detect corrupted committed restore state'}),
-  Object.freeze({id:'library-clear-journal-rollback',file:'source/core/library-clear.js',snippet:'await ports.restore(journal.payload);',reason:'recover destructive Library clear from durable journal'}),
-  Object.freeze({id:'library-clear-reference-rewrite-verification',file:'source/core/library-clear.js',snippet:"if(String(verified[key]?.text||'')!==value)throw new Error('Note reference removal verification failed.');",reason:'verify retained rich-text references after forced attachment unlink'}),
-  Object.freeze({id:'library-clear-state-restore-verification',file:'source/core/library-clear.js',snippet:"if(!actual||!same(actual,original))throw new Error('Saved Days rollback verification failed.');",reason:'verify journaled Saved-Day state after rollback'}),
-  Object.freeze({id:'timer-inactive-gap-detection',file:'source/core/timer-engine.js',snippet:"openInactiveGapPrompt(TimerState.runtime.taskIdx,gapMs,last,now,source);",reason:'inactive wake gaps must become explicit classified timer state'}),
-  Object.freeze({id:'timer-backward-clock-rebase',file:'source/core/timer-engine.js',snippet:'PracticePacer.rebaseClock(delta);',reason:'backward wall-clock jumps must rebase all coupled timer and Pacer timestamps'}),
-  Object.freeze({id:'timer-restore-evidence-monotonicity',file:'source/core/timer-engine.js',snippet:'return Math.max(0,Math.min(maxSec,Math.max(saved,activeAtSave)));',reason:'restored timer evidence must not regress below saved or elapsed evidence'})
+  Object.freeze({id:'library-clear-journal-rollback',file:'source/core/library-clear.ts',snippet:'await ports.restore(journal.payload);',reason:'recover destructive Library clear from durable journal'}),
+  Object.freeze({id:'library-clear-reference-rewrite-verification',file:'source/core/library-clear.ts',snippet:"if(String(verified[key]?.text||'')!==value)throw new Error('Note reference removal verification failed.');",reason:'verify retained rich-text references after forced attachment unlink'}),
+  Object.freeze({id:'library-clear-state-restore-verification',file:'source/core/library-clear.ts',snippet:"if(!actual||!same(actual,original))throw new Error('Saved Days rollback verification failed.');",reason:'verify journaled Saved-Day state after rollback'}),
+  Object.freeze({id:'timer-inactive-gap-detection',file:'source/core/timer-engine.ts',snippet:"openInactiveGapPrompt(TimerState.runtime.taskIdx,gapMs,last,now,source);",reason:'inactive wake gaps must become explicit classified timer state'}),
+  Object.freeze({id:'timer-backward-clock-rebase',file:'source/core/timer-engine.ts',snippet:'PracticePacer.rebaseClock(delta);',reason:'backward wall-clock jumps must rebase all coupled timer and Pacer timestamps'}),
+  Object.freeze({id:'timer-restore-evidence-monotonicity',file:'source/core/timer-engine.ts',snippet:'return Math.max(0,Math.min(maxSec,Math.max(saved,activeAtSave)));',reason:'restored timer evidence must not regress below saved or elapsed evidence'})
 ]);
 
 

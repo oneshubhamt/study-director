@@ -1,15 +1,16 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const read=file=>fs.readFileSync(file,'utf8');
-const persistence=read('source/core/persistence.js');
-const codecs=read('source/core/record-codecs.js');
-const backup=read('source/core/backup-codec.js');
-const journals=read('source/core/repository-journals.js');
-const repositories=read('source/core/repositories.js');
-const notes=read('source/core/repositories-notes.js');
+const read=file=>readScript(file);
+const persistence=read('source/core/persistence.ts');
+const codecs=read('source/core/record-codecs.ts');
+const backup=read('source/core/backup-codec.ts');
+const journals=read('source/core/repository-journals.ts');
+const repositories=read('source/core/repositories.ts');
+const notes=read('source/core/repositories-notes.ts');
 const app=read('source/app.html');
-const appMeta=read('source/core/app-meta.js');
+const appMeta=read('source/core/app-meta.ts');
 
 assert.match(persistence,/createLocalStorage[\s\S]*createInstallationIdentity[\s\S]*createIndexedDb/,'persistence primitives must retain browser storage ownership and separate installation identity');
 assert.doesNotMatch(persistence,/createSyncMetadata/,'distributed-sync metadata must not remain a current persistence primitive');
@@ -20,8 +21,8 @@ assert.match(persistence,/db\.transaction\(stores,mode,\{durability:'strict'\}\)
 assert.doesNotMatch(repositories,/idbPutReflectionDraft|DB_REFLECTION_DRAFT_STORE/u,'retired Reflection Draft persistence must not remain a current repository boundary');
 assert.match(repositories,/async function idbPutActiveSession[\s\S]*?return idbTransaction\(\[DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE\],'readwrite'/,'high-frequency active-session checkpoints must share their canonical mutation epoch in the same default-durability transaction');
 assert.doesNotMatch(notes,/meta\.put\('noteRecoveryPrefix'/u,'Notes save straight to their canonical rows and never journal edits in appMeta');
-assert.match(notes,/async function idbApplyDelta[\s\S]*?idbStrictTransaction\(\[DB_NOTES_STORE,DB_APP_META_STORE\],'readwrite'/,'canonical note commits and deletion markers must share one strict transaction');
-assert.match(repositories,/async function idbPutDailyRecordBatch[\s\S]*?idbStrictTransaction\(stores,'readwrite'/,'authoritative Daily Record commits must opt into strict durability');
+assert.match(notes,/async function idbApplyDelta[\s\S]*?idbStrictTransaction\s*\(\[DB_NOTES_STORE,DB_APP_META_STORE\],'readwrite'/,'canonical note commits and deletion markers must share one strict transaction');
+assert.match(repositories,/async function idbPutDailyRecordBatch[\s\S]*?idbStrictTransaction\s*\(stores,'readwrite'/,'authoritative Daily Record commits must opt into strict durability');
 
 const functionSlice=(source,name,next)=>{const start=source.indexOf(name),end=next?source.indexOf(next,start+name.length):-1;assert.ok(start>=0,`${name} must exist`);return source.slice(start,end>start?end:source.length);};
 
@@ -48,7 +49,7 @@ assert.doesNotMatch(repositories,/ARCHIVE_CLEAR_JOURNAL_STATE_KEY|RESTORE_JOURNA
 assert.match(repositories,/input\.journals/,'AppData must compose journal capabilities through an injected contract');
 assert.match(repositories,/const Meta=input\.appMeta/,'AppData must consume owner-scoped appMeta capability rather than reacquiring arbitrary metadata access');
 assert.match(journals,/const APP_LIMITS=input\.limits,Meta=input\.appMeta/,'repository journals must consume their owner-scoped appMeta capability');
-assert.match(appMeta,/function family\(name,owner\)/,'appMeta gateway must enforce family ownership');
+assert.match(appMeta,/function family\(name\s*,owner\s*\)/,'appMeta gateway must enforce family ownership');
 assert.match(persistence,/n>Number\(nowMs\)\+10\*60\*1000/,'import timestamp acceptance must use an explicit caller-supplied decision time');
 assert.match(journals,/Number\(current\.expiresAt\)>decisionNowMs\(\)/,'durable mutation lease expiry must use the injected decision clock');
 assert.match(repositories,/decisionNowMs\(\)-lastRun<DATA_MAINTENANCE_INTERVAL_MS/,'repository maintenance recency must use the injected decision clock');

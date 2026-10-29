@@ -15,7 +15,7 @@ import {testPendingReviewCodec,memoryPendingReviews,paragraphMerge} from '../../
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
 const read=relative=>readScript(path.join(ROOT,relative));
-for(const file of ['source/core/internal.js','source/core/operation-lifecycle.ts','source/core/persistence.js','source/core/record-codecs.js','source/core/backup-codec.js','source/core/canonical.ts','source/core/reconciliation.js','source/core/managed-repository.js','source/core/repository-policy.ts','source/core/repository-background.js','source/core/backup-provider.js','source/core/backup-capture.js','source/core/backup.js']){
+for(const file of ['source/core/internal.js','source/core/operation-lifecycle.ts','source/core/persistence.ts','source/core/record-codecs.ts','source/core/backup-codec.ts','source/core/canonical.ts','source/core/reconciliation.ts','source/core/managed-repository.ts','source/core/repository-policy.ts','source/core/repository-background.ts','source/core/backup-provider.js','source/core/backup-capture.ts','source/core/backup.js']){
   vm.runInThisContext(read(file),{filename:file});
 }
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];

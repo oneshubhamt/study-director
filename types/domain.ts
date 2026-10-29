@@ -3,7 +3,7 @@ export type TaskKind='work'|'support'|'fixed';
 export type ScheduleRow={start:string;dur:number;name:string;kind:TaskKind;area:string;measure:string;target:number|null};
 export type Task=ScheduleRow&{id:string};
 // Partial input is accepted by the existing normalization helpers; it is not a stored record.
-export type TaskInput={id?:unknown;start?:string;dur?:number;name?:unknown;kind?:unknown;area?:string;measure?:string;target?:number|null;completionSource?:unknown;completion?:unknown;skipped?:boolean;actualSeconds?:number;doneFlag?:boolean};
+export type TaskInput={id?:unknown;start?:string;dur?:number;duration?:number;name?:unknown;kind?:unknown;area?:string;measure?:string;target?:number|null;completionSource?:unknown;completion?:unknown;skipped?:boolean;actualSeconds?:number|null;doneFlag?:boolean};
 export type RowInput={start:string;dur:number;name:unknown;kind?:unknown;area?:unknown;measure?:unknown;target?:number|null};
 export type TimelineRow={start?:number;end?:number;startMin?:number;endMin?:number;idx?:number};
 export type CompletionSource='units'|'manual'|'time'|'finished-time'|'finished-unverified'|'skipped'|'none';

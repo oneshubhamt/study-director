@@ -1,3 +1,4 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -6,7 +7,7 @@ const freeze=Object.freeze,noop=()=>{};
 const {coordinator}=createNotifications();
 const sounds=[];coordinator.configureDelivery({audio:{stop:noop,status:()=> 'ready',play:async(cue,options)=>{if(options.isCurrent())sounds.push(cue);return true;}},context:()=>({owner:true,foreground:true})});
 const settle=async()=>{for(let i=0;i<4;i++)await Promise.resolve();};
-vm.runInThisContext(fs.readFileSync('source/core/pomodoro.js','utf8'),{filename:'source/core/pomodoro.js'});
+vm.runInThisContext(readScript('source/core/pomodoro.ts'),{filename:'source/core/pomodoro.ts'});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const elements=new Map();
 function element(id){
@@ -27,8 +28,9 @@ element('ns-break').value='';rhythm.configuration.updateFromUi();assert.equal(el
 rhythm.timerEvent('tick',{activeSec:60});await settle();assert.equal(sounds.at(-1),'invitation');const count=sounds.length;rhythm.timerEvent('tick',{activeSec:61});assert.equal(sounds.length,count);rhythm.configuration.toggleNudges();assert.equal(elements.get('nudge-overlay').classList.contains('on'),false);assert.equal(coordinator.readEvent('pomodoro','reminder'),null);
 element('ns-break').value='10';rhythm.configuration.updateFromUi();assert.equal(saved.breakMinutes,10);assert.equal(saved.enabled,false,'disabled rhythm remains editable');assert.equal(Object.hasOwn(saved,'sound'),false);
 // The actual timer transition code emits one coordinated gesture when it advances.
-const src=fs.readFileSync('source/core/timer-engine.js','utf8');
-const helper=src.slice(src.indexOf('    let soundOperation='),src.indexOf('    const {appCanMutate}',src.indexOf('    let soundOperation=')));
+const src=readScript('source/core/timer-engine.ts');
+const helperStart=src.search(/^    let soundOperation\b/m);assert.ok(helperStart>=0,'timer sound helper must be present');
+const helper=src.slice(helperStart,src.indexOf('    const {appCanMutate}',helperStart));
 const start=src.slice(src.indexOf('function startCur('),src.indexOf('function tick(){'));
 const finish=src.slice(src.indexOf('function finishTrackableBlock('),src.indexOf('function markDone(){'));
 const state={currentIndex:0,mode:'ready',paused:false,runtime:{startMs:null}};

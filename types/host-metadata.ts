@@ -1,0 +1,4 @@
+import type {MetaContext,MetaValidator} from './app-meta.ts';
+export type HostMetaFamily='verifiedRecoveryBackups'|'backupProtection'|'attachmentIntegrityAudit'|'deviceFolder'|'repositoryIntegrityScrub'|'managedProviderBackupPending'|'repositoryMaintenancePending'|'reconciliationBase'|'reconciliationBaseNotePrefix'|'reconciliationBaseDayPrefix';
+export interface HostMetaInput{keys:Readonly<Record<HostMetaFamily,string>>;same:(left:unknown,right:unknown)=>boolean;normalizers:Readonly<Record<'verifiedRecovery'|'attachmentIntegrity'|'repositoryIntegrity'|'reconciliationBase',(value:unknown)=>unknown>&Record<'reconciliationBaseNote'|'reconciliationBaseDays',(value:unknown,context:Readonly<MetaContext>)=>unknown>>}
+export interface HostMetadataModule{readonly format:'study-director.host-metadata-module';readonly contractVersion:1;createAppMetaValidators(input:HostMetaInput):Readonly<Record<HostMetaFamily,MetaValidator>>}

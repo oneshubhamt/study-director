@@ -1,3 +1,4 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
@@ -5,11 +6,11 @@ const app=fs.readFileSync('source/app.html','utf8');
 const backup=fs.readFileSync('source/core/backup.js','utf8');
 const provider=fs.readFileSync('source/core/backup-provider.js','utf8');
 const presentation=fs.readFileSync('source/core/backup-presentation.js','utf8');
-const device=fs.readFileSync('source/core/device-backup.js','utf8');
-const host=fs.readFileSync('source/core/backup-recovery-host.js','utf8');
+const device=readScript('source/core/device-backup.ts');
+const host=readScript('source/core/backup-recovery-host.ts');
 const guide=fs.readFileSync('source/external/guide.js','utf8');
 const styles=fs.readFileSync('source/styles/core.css','utf8');
-const reconciliation=fs.readFileSync('source/core/reconciliation.js','utf8');
+const reconciliation=readScript('source/core/reconciliation.ts');
 const reconciliationUi=fs.readFileSync('source/core/reconciliation-ui.js','utf8');
 
 const dataStart=app.indexOf('class="backup-model-disclosure'),dataEnd=app.indexOf('class="library-danger"',dataStart),dataSurface=app.slice(dataStart,dataEnd);
@@ -27,7 +28,7 @@ assert.match(dataSurface,/class="backup-advanced-disclosure ui-disclosure"/u);as
 assert.match(dataSurface,/id="backup-file-heading">Portable backup</u);assert.match(dataSurface,/>Export backup…</u);assert.match(dataSurface,/>Restore from file…</u);
 {
   // How far back versions go is stated once, and matches the retention policy.
-  const repository=fs.readFileSync('source/core/managed-repository.js','utf8'),policy=repository.match(/normalLimit:(\d+),dailyDays:(\d+),weeklyPeriods:(\d+),monthlyPeriods:(\d+),hourlyLimit:(\d+),hourlyWindowHours:(\d+),protectedLimit:1,beforeRestoreProtectionMs:(\d+)\*24\*60\*60\*1000/u);
+  const repository=readScript('source/core/managed-repository.ts'),policy=repository.match(/normalLimit:(\d+),dailyDays:(\d+),weeklyPeriods:(\d+),monthlyPeriods:(\d+),hourlyLimit:(\d+),hourlyWindowHours:(\d+),protectedLimit:1,beforeRestoreProtectionMs:(\d+)\*24\*60\*60\*1000/u);
   assert.ok(policy,'retention policy must be readable');const [,normal,daily,weekly,monthly,hourly,hours,protectedDays]=policy;
   assert.match(dataSurface,new RegExp(`id="backup-retention-note">Your backups keep ${normal} versions: the latest, ${daily} daily, ${weekly} weekly and ${monthly} monthly, so about ${['','one','two','three','four','five','six'][Number(monthly)]} to ${['','one','two','three','four','five','six'][Number(monthly)+1]} months back\\. They also keep one version per hour from the last ${hours} hours when your notes changed, up to ${hourly} more\\. Before a restore, each device also keeps a safety version for ${Number(protectedDays)} days\\. The Device Folder and Google Drive keep the same history\\.<`,'u'),'the retention note must match the retention policy');
   // One verb family for getting data back: Versions, then Restore…, Restore note… or Restore from file….

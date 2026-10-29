@@ -1,3 +1,4 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
@@ -6,9 +7,9 @@ import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
 { // decision-clock-boundary
 const host=fs.readFileSync('source/app.html','utf8');
-const timer=fs.readFileSync('source/core/timer-engine.js','utf8');
-const attachments=fs.readFileSync('source/core/attachments.js','utf8');
-const mutation=fs.readFileSync('source/core/mutation-coordinator.js','utf8');
+const timer=readScript('source/core/timer-engine.ts');
+const attachments=readScript('source/core/attachments.ts');
+const mutation=readScript('source/core/mutation-coordinator.ts');
 
 function section(source,start,end){
   const from=source.indexOf(start),to=source.indexOf(end,from+start.length);
@@ -58,8 +59,8 @@ console.log(JSON.stringify({status:'PASS',boundary:'decision-clock',decisionCloc
 }
 
 { // practice-pacer-boundary
-const pacer=fs.readFileSync('source/core/practice-pacer.js','utf8');
-const timer=fs.readFileSync('source/core/timer-engine.js','utf8');
+const pacer=readScript('source/core/practice-pacer.ts');
+const timer=readScript('source/core/timer-engine.ts');
 const modelAt=pacer.indexOf('function createModel');
 const controllerAt=pacer.indexOf('function createController');
 assert.ok(modelAt>0&&controllerAt>modelAt,'Practice Pacer exposes distinct model/controller boundaries');
@@ -328,4 +329,4 @@ console.log(JSON.stringify({status:'PASS',boundary:'presentation-surfaces',level
 }
 
 
-assert.doesNotMatch(fs.readFileSync('source/core/timer-engine.js','utf8'),/startCueDelayMs/,'start cue spacing must not rely on delayed callbacks');
+assert.doesNotMatch(readScript('source/core/timer-engine.ts'),/startCueDelayMs/,'start cue spacing must not rely on delayed callbacks');

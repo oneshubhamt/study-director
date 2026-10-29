@@ -1,0 +1,46 @@
+import type {ManagedRepositoryModule} from '../source/core/managed-repository.ts';
+import type {BackupRecoveryHostModule} from '../source/core/backup-recovery-host.ts';
+import type {RepositoryBackgroundModule} from '../source/core/repository-background.ts';
+import type {BackgroundModuleInput} from './repository-background.ts';
+import type {AttachmentsModule} from '../source/core/attachments.ts';
+import type {LibraryClearModule} from '../source/core/library-clear.ts';
+import type {PomodoroModule} from '../source/core/pomodoro.ts';
+import type {BackupDiagnosticsModule} from '../source/core/backup-operation-diagnostics.ts';
+import type {BackupDiagnosticsModuleInput} from './backup-operation-diagnostics.ts';
+import type {DeviceBackupModule} from '../source/core/device-backup.ts';
+import type {DeviceFolderStorageModule} from '../source/core/device-folder-storage.ts';
+import type {ReconciliationModule} from '../source/core/reconciliation.ts';
+import type {ReconciliationInput} from './reconciliation.ts';
+import type {ReconciliationBaselineModule} from '../source/core/reconciliation-baseline.ts';
+import type {BackupCaptureModule} from '../source/core/backup-capture.ts';
+import type {ExportsModule} from '../source/core/exports.ts';
+import type {ExportsModuleInput} from './exports.ts';
+import type {TimerEngineModule} from '../source/core/timer-engine.ts';
+import type {PracticePacerModule} from '../source/core/practice-pacer.ts';
+import type {IntegrityContinuationModule} from '../source/core/integrity-continuation.ts';
+import type {ManagedRecoveryModule} from '../source/core/managed-recovery.ts';
+import type {RepositoriesModule} from '../source/core/repositories.ts';
+import type {NotesRepositoryModule} from '../source/core/repositories-notes.ts';
+import type {AssetMaintenanceModule} from '../source/core/asset-maintenance.ts';
+import type {AssetMaintenanceModuleInput} from './asset-maintenance.ts';
+import type {OwnershipModule} from '../source/core/ownership.ts';
+import type {AssetStorageModule} from '../source/core/asset-storage.ts';
+import type {AttachmentIngestModule} from '../source/core/attachment-ingest.ts';
+import type {RepositoryJournalsModule} from '../source/core/repository-journals.ts';
+import type {MutationCoordinatorModule} from '../source/core/mutation-coordinator.ts';
+import type {TimerStateModule} from '../source/core/timer-state.ts';
+import type {BackupCodecModule} from '../source/core/backup-codec.ts';
+import type {RecordCodecsModule} from '../source/core/record-codecs.ts';
+import type {HostMetadataModule} from './host-metadata.ts';
+import type {AppMetaModule} from './app-meta.ts';
+import type {PilotRegistry,PilotModules,ModuleInputs} from './pilot.ts';
+import type {PersistenceModule} from './persistence.ts';
+export interface BrowserModules extends PilotModules{'managed-repository':ManagedRepositoryModule;'backup-recovery-host':BackupRecoveryHostModule;'repository-background':RepositoryBackgroundModule;'attachments':AttachmentsModule;'library-clear':LibraryClearModule;'pomodoro':PomodoroModule;'backup-operation-diagnostics':BackupDiagnosticsModule;'device-backup':DeviceBackupModule;'device-folder-storage':DeviceFolderStorageModule;'reconciliation':ReconciliationModule;'reconciliation-baseline':ReconciliationBaselineModule;'backup-capture':BackupCaptureModule;'exports':ExportsModule;'timer-engine':TimerEngineModule;'practice-pacer':PracticePacerModule;'integrity-continuation':IntegrityContinuationModule;'managed-recovery':ManagedRecoveryModule;'repositories':RepositoriesModule;'repositories-notes':NotesRepositoryModule;'asset-maintenance':AssetMaintenanceModule;'ownership':OwnershipModule;'asset-storage':AssetStorageModule;'attachment-ingest':AttachmentIngestModule;'repository-journals':RepositoryJournalsModule;'mutation-coordinator':MutationCoordinatorModule;'timer-state':TimerStateModule;'backup-codec':BackupCodecModule;'record-codecs':RecordCodecsModule;'host-metadata':HostMetadataModule;'app-meta':AppMetaModule;persistence:PersistenceModule}
+export interface BrowserModuleInputs extends ModuleInputs{'managed-repository':[];'backup-recovery-host':[];'repository-background':[BackgroundModuleInput];'attachments':[];'library-clear':[];'pomodoro':[];'backup-operation-diagnostics':[BackupDiagnosticsModuleInput];'device-backup':[];'device-folder-storage':[];'reconciliation':[ReconciliationInput];'reconciliation-baseline':[];'backup-capture':[];'exports':[ExportsModuleInput];'timer-engine':[];'practice-pacer':[];'integrity-continuation':[];'managed-recovery':[];'repositories':[];'repositories-notes':[];'asset-maintenance':[AssetMaintenanceModuleInput];'ownership':[];'asset-storage':[];'attachment-ingest':[];'repository-journals':[];'mutation-coordinator':[];'timer-state':[];'backup-codec':[];'record-codecs':[];'host-metadata':[];'app-meta':[];persistence:[]}
+// Browser-only modules may use platform ports without importing DOM globals into
+// the ES-only domain/registry contracts.
+export interface BrowserRegistry extends Omit<PilotRegistry,'define'|'require'|'load'>{
+ define<K extends keyof BrowserModules>(name:K,version:K extends 'timer-engine'?2:1,factory:(...input:BrowserModuleInputs[K])=>BrowserModules[K]):boolean;
+ require<K extends keyof BrowserModules>(name:K,version:K extends 'timer-engine'?2:1,...input:BrowserModuleInputs[K]):Readonly<BrowserModules[K]>;
+ load<K extends keyof BrowserModules>(name:K,version:K extends 'timer-engine'?2:1,format:BrowserModules[K]['format'],contractVersion:BrowserModules[K]['contractVersion'],...input:BrowserModuleInputs[K]):Readonly<BrowserModules[K]>;
+}

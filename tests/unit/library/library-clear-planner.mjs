@@ -1,11 +1,12 @@
+import {readScript} from '../../../build/source-script.mts';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
 
 const context={console,Map,Set,Object,Promise,Number,String,Math,Date,JSON,structuredClone};
 context.globalThis=context;vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/library-clear.js']){
-  vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});
+for(const file of ['source/core/internal.js','source/core/library-clear.ts']){
+  vm.runInContext(readScript(file),context,{filename:file});
 }
 const mod=context[Symbol.for('studyDirector.internalModules.v1')].require('library-clear',1);
 const A='att-aaaaaaaaaaaaaaaaaaaa';

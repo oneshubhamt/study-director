@@ -1,8 +1,9 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-for(const file of ['source/core/internal.js','source/core/ownership.js'])vm.runInThisContext(fs.readFileSync(file,'utf8'),{filename:file});
+for(const file of ['source/core/internal.js','source/core/ownership.ts'])vm.runInThisContext(readScript(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const Ownership=registry.require('ownership',1);
 const freeze=Object.freeze;

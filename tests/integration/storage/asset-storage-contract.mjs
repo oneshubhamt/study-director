@@ -1,3 +1,4 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -10,7 +11,7 @@ const render=source=>source
 const context={console,Blob,TextEncoder,TextDecoder,Uint8Array,ArrayBuffer,Map,Set,Object,Promise,Number,String,Math,Date,JSON,crypto:webcrypto,Symbol,TypeError,Error};
 context.globalThis=context;vm.createContext(context);
 vm.runInContext(fs.readFileSync('source/core/internal.js','utf8'),context,{filename:'source/core/internal.js'});
-vm.runInContext(render(fs.readFileSync('source/core/asset-storage.js','utf8')),context,{filename:'source/core/asset-storage.js'});
+vm.runInContext(render(readScript('source/core/asset-storage.ts')),context,{filename:'source/core/asset-storage.ts'});
 const mod=context[Symbol.for('studyDirector.internalModules.v1')].require('asset-storage',1);
 
 let now=1000;const lease=mod.createLease(1500,()=>now);

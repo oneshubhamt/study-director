@@ -1,10 +1,11 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 // Current workspace composition invariants: attachment references, backup surfaces, diary records, and shared history ownership.
 
 { // attachment-reference-boundary
-const attachments=fs.readFileSync('source/core/attachments.js','utf8');
+const attachments=readScript('source/core/attachments.ts');
 const host=fs.readFileSync('source/app.html','utf8');
 assert.match(attachments,/function createReferenceCoordinator\(/,'attachments module owns reference transaction coordination');
 assert.doesNotMatch(attachments,/kind===['\"]draft|Unfinished Reflection/,'retired Reflection Draft references must not remain in current attachment runtime');

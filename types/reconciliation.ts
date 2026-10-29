@@ -1,0 +1,15 @@
+import type {PilotModules} from './pilot.ts';
+import type {DailyRecord,NoteRecord,ActiveSession,NoteFields} from './record-models.ts';
+import type {SavedDayDeletion,NoteDeletion} from './backup-models.ts';
+export type ReconciliationInput={canonical:PilotModules['canonical']};
+export type SourceRef=Readonly<{id:string;label:string;local:boolean}>;
+export type ReconciliationSourceInput={id?:string;label?:string;savedDays?:readonly DailyRecord[];savedDayDeletions?:readonly SavedDayDeletion[];notes?:Readonly<Record<string,NoteRecord>>;noteDeletions?:readonly NoteDeletion[];activeSession?:ActiveSession|null};
+export type ReconciliationSource=SourceRef&Readonly<{savedDays:readonly DailyRecord[];savedDayDeletions:readonly SavedDayDeletion[];notes:Readonly<Record<string,NoteRecord>>;noteDeletions:readonly NoteDeletion[];activeSession:ActiveSession|null}>;
+export type EntityState<T>={kind:'record';value:T}|{kind:'deleted';value:null;deletedAt:string};
+export type CandidateBase={id:string;key:string;local:boolean;sources:readonly SourceRef[]};
+export type EntityCandidate<T>=Readonly<CandidateBase&({kind:'record';value:T;record:T;deletedAt:null;localDeletedAt:null}|{kind:'deleted';value:null;record:null;deletedAt:string;localDeletedAt:string|null})>;
+export type SessionCandidate=Readonly<CandidateBase&{value:ActiveSession}>;
+export type DecisionGroup<C>={candidates:readonly C[];localCandidateId:string|null;defaultCandidateId:string|null;conflict:boolean;identical:boolean;incomingOnly:boolean;decisionKey:string};
+export type ReconciliationPlan=Readonly<{format:'study-director.reconciliation-plan';version:1;localSource:SourceRef;incomingSource:SourceRef;savedDays:readonly Readonly<DecisionGroup<EntityCandidate<DailyRecord>>&{date:string}>[];notes:readonly Readonly<DecisionGroup<EntityCandidate<NoteRecord>>&{key:string;localOnly:boolean}>[];activeSession:Readonly<DecisionGroup<SessionCandidate>&{localOnly:boolean}>}>;
+export type ReconciliationDecisions={savedDays?:Readonly<Record<string,string|{value:DailyRecord}>>;notes?:Readonly<Record<string,string|{value:NoteFields}>>;activeSession?:string|null};
+export type StateMapOptions<T,D>={records(source:ReconciliationSource):readonly T[];deletions(source:ReconciliationSource):readonly D[];keyOf(value:T|D):string;entityLabel:string};

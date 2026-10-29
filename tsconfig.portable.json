@@ -16,8 +16,10 @@
     "rich-text/tags.ts",
     "rich-text/wg1-codec.ts",
     "source/core/domain.ts",
+    "source/core/session-lifecycle.ts",
     "types/checks/portable.ts",
     "types/domain.ts",
-    "types/pilot.ts"
+    "types/pilot.ts",
+    "types/session-lifecycle.ts"
   ]
 }

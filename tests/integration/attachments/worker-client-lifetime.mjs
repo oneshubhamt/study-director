@@ -57,4 +57,19 @@ cases.push('error, unreadable response and throwing teardown still settle');
   const third=h.api.remove('c');assert.equal(h.workers.length,2,'the next request starts a fresh worker');reply(h.workers[1]);assert.equal(await third,true);
   cases.push('an idle attachment worker is released after two quiet minutes');
 }
+// The transport must prove its result before callers can publish metadata.
+{
+  const h=fixture(),file=new Blob(['data']),bad=h.api.ingest(file);
+  const rejected=assert.rejects(bad,/invalid result/);await flush();
+  const worker=h.workers[0],request=worker.messages[0];
+  worker.onmessage({data:{id:request.id,value:{storageName:'different',hash:'a'.repeat(64),size:4,mode:'async'}}});
+  await rejected;assert.equal(h.abandoned,1,'invalid ingestion must schedule orphan cleanup');
+  const retry=h.api.ingest(file);await flush();const next=worker.messages.at(-1);
+  const result={storageName:next.data.storageName,hash:'b'.repeat(64),size:4,mode:'async'};
+  worker.onmessage({data:{id:next.id,value:result}});assert.deepEqual(await retry,result);
+  const verify=h.api.verify(result.storageName,result.hash,result.size),invalid=assert.rejects(verify,/invalid result/);
+  worker.onmessage({data:{id:worker.messages.at(-1).id,value:'true'}});await invalid;
+  const remove=h.api.remove(result.storageName);worker.onmessage({data:{id:worker.messages.at(-1).id,value:true}});assert.equal(await remove,true);
+  h.api.destroy();assert.equal(h.time.timers.size,0);cases.push('invalid transport results reject and permit reuse');
+}
 console.log(JSON.stringify({status:'PASS',suite:'worker-client-lifetime',cases},null,2));

@@ -1,9 +1,10 @@
+import {readCoreScript} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createHarness} from '../../helpers/repository-harness.mjs';
 
-for(const file of ['internal','backup-capture'])vm.runInThisContext(fs.readFileSync(`source/core/${file}.js`,'utf8'));
+for(const file of ['internal','backup-capture'])vm.runInThisContext(readCoreScript(file));
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('backup-capture',1),freeze=Object.freeze;
 function harness(overrides={}){
   let revision=1,generation=0,notes={Subject:{key:'Subject',text:'old'}},session={id:'current',text:'old session'},dates=['2026-09-28'];

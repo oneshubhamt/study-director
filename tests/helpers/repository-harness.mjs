@@ -7,12 +7,12 @@ import {noteKeys,fixtureNoteKey} from './note-ids.mjs';
 import {testPendingReviewCodec} from './pending-review-codec.mjs';
 import {RUNTIME_DATA_CONTRACT} from '../../contracts/canonical-identities.mjs';
 const freeze=Object.freeze;
-const appMetaSource=fs.readFileSync('source/core/app-meta.js','utf8');
-const repositoryJournals=fs.readFileSync('source/core/repository-journals.js','utf8');
-const notesRepository=fs.readFileSync('source/core/repositories-notes.js','utf8');
-const repositories=fs.readFileSync('source/core/repositories.js','utf8');
-const persistence=fs.readFileSync('source/core/persistence.js','utf8');
-const recordCodecs=fs.readFileSync('source/core/record-codecs.js','utf8');
+const appMetaSource=readScript('source/core/app-meta.ts');
+const repositoryJournals=readScript('source/core/repository-journals.ts');
+const notesRepository=readScript('source/core/repositories-notes.ts');
+const repositories=readScript('source/core/repositories.ts');
+const persistence=readScript('source/core/persistence.ts');
+const recordCodecs=readScript('source/core/record-codecs.ts');
 export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={}){
   const ClockDate=controls.clock?.Date||Date;
   const timerSet=controls.clock?.setTimeout||setTimeout;
@@ -96,7 +96,7 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
   const dataContract=freeze({schemas:freeze({LocalRecoveryEnvelope:freeze({version:1}),ActiveSession:freeze({version:1}),DailyRecord:freeze({version:1}),DailySummary:freeze({version:1}),Note:freeze({version:3,trashKeyPrefix:'~deleted '})})});
   const IDBKeyRange=freeze({bound:(lower,upper)=>freeze({lower:String(lower),upper:String(upper)})});
   const context=vm.createContext({console,structuredClone,Buffer,setTimeout:timerSet,clearTimeout:timerClear,queueMicrotask,Date:ClockDate,Promise,Map,Set,Object,Array,String,Number,Math,JSON,RegExp,Error,RangeError,IDBKeyRange,TextEncoder,TextDecoder,Uint8Array,ArrayBuffer,Blob,localStorage,crypto:globalThis.crypto,globalThis:null});context.globalThis=context;
-  vm.runInContext(fs.readFileSync('source/core/internal.js','utf8'),context,{filename:'internal.js'});vm.runInContext(persistence,context,{filename:'persistence.js'});vm.runInContext(appMetaSource,context,{filename:'app-meta.js'});vm.runInContext(repositoryJournals,context,{filename:'repository-journals.js'});vm.runInContext(readScript('source/core/save-lane.ts'),context,{filename:'source/core/save-lane.ts'});vm.runInContext(notesRepository,context,{filename:'repositories-notes.js'});vm.runInContext(repositories,context,{filename:'repositories.js'});vm.runInContext(recordCodecs,context,{filename:'record-codecs.js'});
+  vm.runInContext(fs.readFileSync('source/core/internal.js','utf8'),context,{filename:'internal.js'});vm.runInContext(persistence,context,{filename:'source/core/persistence.ts'});vm.runInContext(appMetaSource,context,{filename:'source/core/app-meta.ts'});vm.runInContext(repositoryJournals,context,{filename:'source/core/repository-journals.ts'});vm.runInContext(readScript('source/core/save-lane.ts'),context,{filename:'source/core/save-lane.ts'});vm.runInContext(notesRepository,context,{filename:'source/core/repositories-notes.ts'});vm.runInContext(repositories,context,{filename:'source/core/repositories.ts'});vm.runInContext(recordCodecs,context,{filename:'source/core/record-codecs.ts'});
   const registry=context[Symbol.for('studyDirector.internalModules.v1')];
   const local=registry.require('persistence',1).createLocalStorage();
   const appMetaModule=registry.require('app-meta',1),journalModule=registry.require('repository-journals',1),notesModule=registry.require('repositories-notes',1),saveLaneModule=registry.require('save-lane',1),module=registry.require('repositories',1);

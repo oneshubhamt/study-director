@@ -1,3 +1,4 @@
+import {readScript} from '../../../build/source-script.mts';
 import {createNotifications} from '../../helpers/notifications.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -5,7 +6,7 @@ import assert from 'node:assert/strict';
 
 const context={console,Object,Map,Set,Promise,Number,String,Math,Date,JSON,Blob,TextEncoder,TextDecoder,crypto:globalThis.crypto,URL:{createObjectURL:()=>'',revokeObjectURL:()=>{}},structuredClone,queueMicrotask};
 context.globalThis=context;vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/attachments.js'])vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});
+for(const file of ['source/core/internal.js','source/core/attachments.ts'])vm.runInContext(readScript(file),context,{filename:file});
 const attachments=context[Symbol.for('studyDirector.internalModules.v1')].require('attachments',1);
 const ID='att-1234567890abcdefghij';
 function documentFixture(){const status={textContent:''},preview={querySelector:()=>null,replaceChildren(){}},root={open:true},detail={replaceChildren(){},append(){},scrollTop:0},list={replaceChildren(){},append(){},children:[],scrollTop:0};return {activeElement:null,getElementById(id){return id==='attachment-status'?status:id==='attachment-preview'?preview:id==='library-attachments'?root:id==='attachment-detail'?detail:id==='attachment-list'?list:{value:'',textContent:'',hidden:false,replaceChildren(){},append(){},addEventListener(){}};},querySelectorAll(){return []},querySelector(){return null},createElement(){return {dataset:{},classList:{add(){}},setAttribute(){},addEventListener(){},append(){},appendChild(){},closest(){return null},focus(){},style:{}}},addEventListener(){}};}

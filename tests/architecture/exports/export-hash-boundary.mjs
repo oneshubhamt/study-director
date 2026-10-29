@@ -3,8 +3,8 @@ import fs from 'node:fs';
 
 const read=path=>fs.readFileSync(path,'utf8');
 const processing=read('portable/processing.ts');
-const attachments=read('source/core/attachments.js');
-const exportsModule=read('source/core/exports.js');
+const attachments=read('source/core/attachments.ts');
+const exportsModule=read('source/core/exports.ts');
 
 assert.doesNotMatch(processing,/attachment\.hash/,'Portable export processing must not expose an ingestion-sounding attachment.hash operation.');
 assert.match(processing,/"file\.hash":async/,'Portable processing must expose file.hash for portable attachment-archive verification.');

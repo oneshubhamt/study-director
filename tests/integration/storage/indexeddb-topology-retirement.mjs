@@ -1,3 +1,4 @@
+import {readCoreScript} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -62,7 +63,7 @@ function loadModules(indexedDB){
     crypto:globalThis.crypto,indexedDB,setTimeout,clearTimeout,queueMicrotask,globalThis:null
   });
   context.globalThis=context;
-  for(const file of ['internal','persistence'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),context,{filename:`${file}.js`});
+  for(const file of ['internal','persistence'])vm.runInContext(readCoreScript(file),context,{filename:`${file}.js`});
   const registry=context[Symbol.for('studyDirector.internalModules.v1')];
   return {persistence:registry.require('persistence',1)};
 }

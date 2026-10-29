@@ -140,3 +140,13 @@ const degradedCoverage=await degraded.app.dailyRecords.backupDates();
 assert.equal(degradedCoverage.canonical,false,'Unreconciled emergency fallback Saved Days must keep backup capture classified as rescue/degraded even after IndexedDB is readable again.');
 assert.match(degradedCoverage.warning,/fallback records.*not yet been reconciled|rescue data/i,'Unreconciled fallback coverage must carry an explicit rescue warning.');
 console.log(JSON.stringify({status:'PASS',suite:'canonical-mutation-epoch',covered:['monotonic change clock','startup reseed','cross-context visibility','operational-write exclusion','daily records','notes','review in active session','active session','plans','preferences','deletion ledgers','per-unit preparation stamps','failed transaction','backup-capture propagation'],epochFormat:(await epoch())?.format},null,2));
+
+// Operational revision values accepted through numeric coercion still advance
+// numerically when a canonical Saved Day is committed.
+{
+  const numeric=createHarness();
+  await numeric.repositoryMeta.write('insightsDatasetRevision',{format:'study-director.insights-dataset-revision',version:2,counter:'7',updatedAt:'2026-09-22T04:45:00.000Z'});
+  await numeric.app.dailyRecords.save({version:1,date:'2026-09-22',savedAt:'2026-09-22T04:45:01.000Z',updatedAt:'2026-09-22T04:45:01.000Z'});
+  assert.equal(numeric.stores.meta.get('insightsDatasetRevision').value.counter,8,'validated numeric revision advances without string concatenation');
+  assert.match(await numeric.app.dailyRecords.datasetRevision(),/^2:8:/);
+}

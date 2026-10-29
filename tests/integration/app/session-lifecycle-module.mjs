@@ -1,3 +1,4 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,8 +7,8 @@ import {fileURLToPath} from 'node:url';
 
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
-const read=relative=>fs.readFileSync(path.join(ROOT,relative),'utf8');
-for(const file of ['source/core/internal.js','source/core/session-lifecycle.js']){
+const read=relative=>readScript(path.join(ROOT,relative));
+for(const file of ['source/core/internal.js','source/core/session-lifecycle.ts']){
   vm.runInThisContext(read(file),{filename:file});
 }
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
@@ -88,7 +89,7 @@ assert.ok(events.includes('complete:failing-transition:failed'));
 
 console.log(JSON.stringify({
   status:'PASS',
-  module:'source/core/session-lifecycle.js',
+  module:'source/core/session-lifecycle.ts',
   finalRevision:coordinator.revision,
   supersessionProtected:true,
   eventCount:events.length

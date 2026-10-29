@@ -5,12 +5,12 @@ import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
-const app=fs.readFileSync('source/app.html','utf8'),repositories=fs.readFileSync('source/core/repositories.js','utf8');
+const app=fs.readFileSync('source/app.html','utf8'),repositories=readScript('source/core/repositories.ts');
 const id='att-'+'a'.repeat(32),otherId='att-'+'c'.repeat(32);
 function fixture(){
   const clock=createFakeClock();
   const context={crypto:webcrypto,TextEncoder,Uint8Array,console,Blob,Object,Set,Map,Math,Number,String,Promise,Date:clock.Date,TypeError,Symbol,structuredClone};context.globalThis=context;vm.createContext(context);
-  for(const file of ['source/core/internal.js','source/core/operation-lifecycle.ts','source/core/asset-storage.js','source/core/attachments.js'])vm.runInContext(readScript(file),context,{filename:file});
+  for(const file of ['source/core/internal.js','source/core/operation-lifecycle.ts','source/core/asset-storage.ts','source/core/attachments.ts'])vm.runInContext(readScript(file),context,{filename:file});
   const registry=context[Symbol.for('studyDirector.internalModules.v1')],Assets=registry.require('asset-storage',1),Attachments=registry.require('attachments',1);
   const metadata={version:2,storage:'opfs',file:'attblob-'+'b'.repeat(32),hash:'a'.repeat(64),size:10,type:'application/pdf',name:'fixture.pdf',library:false};
   const dir={getFileHandle:async()=>{throw Object.assign(new Error('missing'),{name:'NotFoundError'});}},storageRoot={getDirectoryHandle:async()=>dir};

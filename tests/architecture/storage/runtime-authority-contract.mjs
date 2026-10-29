@@ -1,9 +1,10 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const app=fs.readFileSync('source/app.html','utf8');
 const startup=fs.readFileSync('source/core/startup.js','utf8');
-const persistence=fs.readFileSync('source/core/persistence.js','utf8');
+const persistence=readScript('source/core/persistence.ts');
 
 
 const identitySource=persistence.slice(persistence.indexOf('function createInstallationIdentity'),persistence.indexOf('function normalizeTimestamp'));

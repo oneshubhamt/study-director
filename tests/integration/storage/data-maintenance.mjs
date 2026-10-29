@@ -1,3 +1,4 @@
+import {readScript} from '../../../build/source-script.mts';
 import {readCoreScript} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import {createHarness} from '../../helpers/repository-harness.mjs';
@@ -30,7 +31,7 @@ console.log(JSON.stringify({status:'PASS',suite:'data-maintenance',compatibility
 // Canonical automatic maintenance respects foreground work between operations
 // and never writes a completion after an unavailable metadata read.
 const {default:fs}=await import('node:fs'),{default:vm}=await import('node:vm');
-const source=fs.readFileSync('source/core/repositories.js','utf8');
+const source=readScript('source/core/repositories.ts');
 const preemptionControls={},preemption=createHarness(new Map(),null,preemptionControls);
 await preemption.app.notes.load();
 let blocked=false,notesReads=0,sessionReads=0;

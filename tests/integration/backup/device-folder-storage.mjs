@@ -1,10 +1,11 @@
+import {readCoreScript} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
 import {createMemoryDirectory} from '../../helpers/memory-directory.mjs';
 
-for(const name of ['internal','device-folder-storage'])vm.runInThisContext(fs.readFileSync(`source/core/${name}.js`,'utf8'),{filename:name+'.js'});
+for(const name of ['internal','device-folder-storage'])vm.runInThisContext(readCoreScript(name),{filename:name+'.js'});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],freeze=Object.freeze;
 const sha256=async blob=>Buffer.from(await webcrypto.subtle.digest('SHA-256',await blob.arrayBuffer())).toString('hex');
 let now=Date.parse('2026-10-06T08:00:00.000Z'),folder=null,canMutate=true;

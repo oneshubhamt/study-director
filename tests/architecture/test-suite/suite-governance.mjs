@@ -121,7 +121,7 @@ for(const entry of ['node_modules/','dist/','qa/','coverage/','.nyc_output/','te
 
 // CI policy.
 const fastWorkflow=fs.readFileSync('.github/workflows/qa-fast.yml','utf8'),promotionWorkflow=fs.readFileSync('.github/workflows/qa-promotion.yml','utf8');
-assert.match(fastWorkflow,/pull_request:/);assert.match(fastWorkflow,/push:/);assert.match(fastWorkflow,/node tests\/helpers\/run-category\.mjs targeted/,'automatic checks must run the explicit targeted contracts');assert.doesNotMatch(fastWorkflow,/npm (?:ci|install)/);
+assert.match(fastWorkflow,/pull_request:/);assert.match(fastWorkflow,/push:/);assert.match(fastWorkflow,/node tests\/helpers\/run-category\.mjs targeted/,'automatic checks must run the explicit targeted contracts');assert.match(fastWorkflow,/npm ci --ignore-scripts/,'strict compiler and typed lint require the locked toolchain');assert.match(fastWorkflow,/npm run check:types/,'automatic checks must enforce strict TypeScript and typed lint');
 assert.match(fastWorkflow,/bug-regression-policy\.mjs/,'bug-like PRs must be machine-checked for regression protection');
 assert.match(promotionWorkflow,/workflow_dispatch:/);assert.doesNotMatch(promotionWorkflow,/^  (?:push|release|pull_request):/m,'full promotion must be manually invoked');assert.match(promotionWorkflow,/default: false/);assert.match(promotionWorkflow,/if: inputs\.run_browser/,'browser certification must be explicitly requested');assert.match(promotionWorkflow,/node tests\/helpers\/mutation\.mjs/);assert.match(promotionWorkflow,/npm run test:release/);assert.match(promotionWorkflow,/npm run test:coverage:browser/,'promotion QA must collect browser/build runtime coverage');
 

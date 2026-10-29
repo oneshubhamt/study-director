@@ -1,9 +1,10 @@
+import {readScript} from '../../../build/source-script.mts';
 import {createBackupPresentation} from '../../helpers/backup-presentation.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-for(const file of ['source/core/internal.js','source/core/managed-recovery.js','source/core/backup-recovery-host.js'])vm.runInThisContext(fs.readFileSync(file,'utf8'),{filename:file});
+for(const file of ['source/core/internal.js','source/core/managed-recovery.ts','source/core/backup-recovery-host.ts'])vm.runInThisContext(readScript(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const ManagedRecovery=registry.require('managed-recovery',1);
 const BackupRecoveryHost=registry.require('backup-recovery-host',1);

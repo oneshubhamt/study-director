@@ -1,10 +1,11 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 // Copy diagnostics shows only labels on its allow-lists, so no user content can
 // reach it. Every label the code can hand it must therefore be on a list, or it
 // shows as "unclassified" / "Error". This scan keeps the lists complete.
-const diagnostics=fs.readFileSync('source/core/backup-operation-diagnostics.js','utf8');
+const diagnostics=readScript('source/core/backup-operation-diagnostics.ts');
 const allowed=name=>new Set(JSON.parse(diagnostics.match(new RegExp(`const ${name}=new Set\\((\\[[^\\]]*\\])\\)`,'u'))[1]));
 const lists={reasons:allowed('SAFE_REASONS'),phases:allowed('SAFE_PHASES'),codes:allowed('SAFE_CODES')};
 const files=['source/app.html','source/external/drive.js',...fs.readdirSync('source/core').map(file=>'source/core/'+file),...fs.readdirSync('portable').filter(file=>file.endsWith('.js')).map(file=>'portable/'+file)];

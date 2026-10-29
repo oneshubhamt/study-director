@@ -1,10 +1,11 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createNotifications} from '../../helpers/notifications.mjs';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
-for(const file of ['source/core/internal.js','source/core/practice-pacer.js','source/core/timer-engine.js'])vm.runInThisContext(fs.readFileSync(file,'utf8'),{filename:file});
+for(const file of ['source/core/internal.js','source/core/practice-pacer.ts','source/core/timer-engine.ts'])vm.runInThisContext(readScript(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const {coordinator:notifications}=createNotifications();
 const practiceModule=registry.require('practice-pacer',1);

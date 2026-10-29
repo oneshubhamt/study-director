@@ -1,9 +1,10 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
 const internal=fs.readFileSync('source/core/internal.js','utf8');
-const persistence=fs.readFileSync('source/core/persistence.js','utf8');
+const persistence=readScript('source/core/persistence.ts');
 
 function createPrimitiveHarness({strictUnsupported=false}={}){
   const calls=[],captures=[];

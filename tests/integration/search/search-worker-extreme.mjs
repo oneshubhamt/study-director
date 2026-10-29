@@ -7,7 +7,7 @@ import {createNoteSnapshotHarness} from '../../helpers/note-snapshot-harness.mjs
 
 const read=file=>fs.readFileSync(new URL('../../../'+file,import.meta.url),'utf8');
 const workerSource=read('source/external/search-worker.js');
-const notesRepository=read('source/core/repositories-notes.js');
+const notesRepository=read('source/core/repositories-notes.ts');
 
 // The note limit, with ten million words between them.
 const NOTES=2000,WORDS_PER_NOTE=5000,BATCH_CHARS=2*1024*1024;

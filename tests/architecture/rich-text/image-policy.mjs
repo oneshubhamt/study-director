@@ -1,3 +1,4 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {PRODUCTION_LIMITS} from '../../../contracts/production-limits.mjs';
@@ -6,8 +7,8 @@ import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 const processing=fs.readFileSync('rich-text/image-processing.ts','utf8');
 const editor=fs.readFileSync('rich-text/editor.ts','utf8');
 const app=fs.readFileSync('source/app.html','utf8');
-const attachments=fs.readFileSync('source/core/attachments.js','utf8');
-const codec=fs.readFileSync('source/core/backup-codec.js','utf8');
+const attachments=readScript('source/core/attachments.ts');
+const codec=readScript('source/core/backup-codec.ts');
 const richBundle=richTextRuntimeSource();
 const imageWorker=fs.readFileSync('source/external/image-worker.js','utf8');
 

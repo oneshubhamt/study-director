@@ -1,3 +1,4 @@
+import {readScript} from '../../../build/source-script.mts';
 import {createNotifications} from '../../helpers/notifications.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -9,13 +10,13 @@ const MiB=1048576;
 function loadModule(files,name){
   const context={console,Blob,DOMException,AbortController,TextEncoder,TextDecoder,URL,crypto:webcrypto,Map,Set,Object,Promise,Number,String,Math,Uint8Array,Uint32Array,DataView,queueMicrotask,setTimeout,clearTimeout,Symbol};
   context.globalThis=context;vm.createContext(context);
-  for(const file of files)vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});
+  for(const file of files)vm.runInContext(readScript(file),context,{filename:file});
   return {context,module:context[Symbol.for('studyDirector.internalModules.v1')].require(name,1)};
 }
 
 // Coordinator: a 260 MiB attachment is admitted by quota rather than an arbitrary byte ceiling.
 {
-  const {module}=loadModule(['source/core/internal.js','source/core/attachment-ingest.js'],'attachment-ingest');
+  const {module}=loadModule(['source/core/internal.js','source/core/attachment-ingest.ts'],'attachment-ingest');
   let estimateCalls=0;const posted=[];
   const worker={terminate(){},postMessage(message){posted.push(message);if(message.type==='ingest')queueMicrotask(()=>{this.onmessage?.({data:{id:message.id,progress:{phase:'copying',loaded:130*MiB,total:260*MiB,mode:'sync'}}});this.onmessage?.({data:{id:message.id,value:{storageName:message.data.storageName,hash:'a'.repeat(64),size:260*MiB,mode:'sync'}}});});}};
   const coordinator=module.create({createWorker:()=>worker,directory:'study-director-assets-v2',storage:{estimate:async()=>{estimateCalls++;return {quota:1024*MiB,usage:100*MiB};}},randomUUID:()=> '12345678-1234-1234-1234-123456789012'});
@@ -28,7 +29,7 @@ function loadModule(files,name){
 
 // Quota failure and pre-aborted requests stop before worker ingestion.
 {
-  const {module}=loadModule(['source/core/internal.js','source/core/attachment-ingest.js'],'attachment-ingest');
+  const {module}=loadModule(['source/core/internal.js','source/core/attachment-ingest.ts'],'attachment-ingest');
   let estimateCalls=0,workerPosts=0;
   const worker={terminate(){},postMessage(){workerPosts++;}};
   const virtual=Object.create(Blob.prototype);Object.defineProperty(virtual,'size',{value:260*MiB});
@@ -53,7 +54,7 @@ function element(id=''){
 
 // Library-originated ingestion bypasses the global file-job coordinator; Cancel aborts only its own signal.
 {
-  const {module}=loadModule(['source/core/internal.js','source/core/attachments.js'],'attachments');
+  const {module}=loadModule(['source/core/internal.js','source/core/attachments.ts'],'attachments');
   const ids=new Map();
   for(const id of ['library-attachments','attachment-status','attachment-preview','attachment-detail','attachment-list','attachment-search','attachment-count','attachment-cancel','attachment-add','attachment-files','attachment-import','attachment-archive','attachment-export','attachment-progress','attachment-progress-bar','attachment-progress-label','attachment-progress-value'])ids.set(id,element(id));
   let jobCalls=0,cancelCalls=0,putStarted=false,putAborted=false;const lateProgress=[];

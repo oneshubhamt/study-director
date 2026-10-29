@@ -1,3 +1,4 @@
+import {readScript} from '../../../build/source-script.mts';
 import {
   LOCAL_STORAGE_KEYS,SESSION_STORAGE_KEYS,APP_META_KEYS,APP_META_FAMILY_COUNT,APP_META_FAMILY_LABEL,APP_META_VALIDATION_OWNERS,APP_META_RUNTIME_REGISTRY,
   OPFS_IDENTITIES,PERSISTENCE_CLASSES,DATA_ARCHITECTURE,assertDataArchitecture
@@ -15,12 +16,12 @@ import {
 assert.equal(assertCanonicalIdentities(),true);
 assert.equal(assertDataArchitecture(),true);
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
-const read=relative=>fs.readFileSync(path.join(root,relative),'utf8');
+const read=relative=>relative.startsWith('source/core/')?readScript(path.join(root,relative)):readScript(path.join(root,relative));
 const app=read('source/app.html');
-const repositories=read('source/core/repositories.js');
-const journals=read('source/core/repository-journals.js');
-const appMeta=read('source/core/app-meta.js');
-const persistence=read('source/core/persistence.js');
+const repositories=read('source/core/repositories.ts');
+const journals=read('source/core/repository-journals.ts');
+const appMeta=read('source/core/app-meta.ts');
+const persistence=read('source/core/persistence.ts');
 const insights=read('source/external/insights.js');
 const sourceFiles=[];
 const walk=dir=>{for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const full=path.join(dir,entry.name);if(entry.isDirectory())walk(full);else if(/\.(?:js|html)$/u.test(entry.name))sourceFiles.push(full);}};
@@ -136,24 +137,24 @@ const protectedMagicLiteral=JSON.stringify(EXTERNAL_FORMATS.protectedBackup.magi
 assert.ok(streamEncryptionSource.includes(`new TextEncoder().encode('${protectedMagicLiteral}')`),'standalone encryption worker magic must mechanically match the canonical manifest');
 assert.ok(streamEncryptionSource.includes(`header[8]!==${EXTERNAL_FORMATS.protectedBackup.version}`),'standalone encryption reader version must mechanically match the canonical manifest');
 const literal=value=>String(value).replaceAll('\\','\\\\').replaceAll('\r','\\r').replaceAll('\n','\\n').replaceAll("'","\\'");
-assert.ok(read('source/core/asset-storage.js').includes("DIRECTORY=String(ports.directory||'@@SD_ATTACHMENT_OPFS_DIRECTORY@@')"),'attachment storage must consume the build-injected canonical OPFS identity');
+assert.ok(read('source/core/asset-storage.ts').includes("DIRECTORY=String(ports.directory||'@@SD_ATTACHMENT_OPFS_DIRECTORY@@')"),'attachment storage must consume the build-injected canonical OPFS identity');
 
-assert.ok(read('source/core/exports.js').includes("ROOT=String(root||'@@SD_BACKUP_FILES_OPFS_DIRECTORY@@')"),'backup temporary-file storage must consume the build-injected canonical OPFS identity');
+assert.ok(read('source/core/exports.ts').includes("ROOT=String(root||'@@SD_BACKUP_FILES_OPFS_DIRECTORY@@')"),'backup temporary-file storage must consume the build-injected canonical OPFS identity');
 assert.ok(read('portable/file-output.ts').includes("OPFS_DIRECTORY='@@SD_BACKUP_FILES_OPFS_DIRECTORY@@'"),'portable worker output must resolve the same canonical scratch directory itself');
-assert.match(read('source/core/exports.js'),/output:Object\.freeze\(\{kind:'opfs',name:staged\.name,directory:staged\.directory\}\)/u,'portable file work must send only an opaque scratch identity (name and profile folder) to the worker, never a FileSystemHandle');
-assert.doesNotMatch(read('source/core/exports.js'),/data=\{\.\.\.data,output:staged\.handle/u,'portable worker messages must not structured-clone an OPFS FileSystemHandle');
-assert.ok(read('source/core/backup-codec.js').includes(`BACKUP_V10_MAGIC='${literal(EXTERNAL_FORMATS.completeBackup.containerMagic)}'`),'backup container magic must mechanically match the canonical manifest');
-const attachmentsSource=read('source/core/attachments.js');
+assert.match(read('source/core/exports.ts'),/output:Object\.freeze\(\{kind:'opfs',name:staged\.name,directory:staged\.directory\}\)/u,'portable file work must send only an opaque scratch identity (name and profile folder) to the worker, never a FileSystemHandle');
+assert.doesNotMatch(read('source/core/exports.ts'),/data=\{\.\.\.data,output:staged\.handle/u,'portable worker messages must not structured-clone an OPFS FileSystemHandle');
+assert.ok(read('source/core/backup-codec.ts').includes(`BACKUP_V10_MAGIC='${literal(EXTERNAL_FORMATS.completeBackup.containerMagic)}'`),'backup container magic must mechanically match the canonical manifest');
+const attachmentsSource=read('source/core/attachments.ts');
 assert.ok(attachmentsSource.includes(`encode('${literal(EXTERNAL_FORMATS.attachmentArchive.magic)}')`),'attachment archive magic must mechanically match the canonical manifest');
 assert.ok(attachmentsSource.includes(`m.format!=='${literal(EXTERNAL_FORMATS.attachmentArchive.format)}'||m.version!==${EXTERNAL_FORMATS.attachmentArchive.version}`),'attachment archive manifest identity must mechanically match the canonical manifest');
 assert.doesNotMatch(read('source/external/drive.js'),/SDENC02|\.sdbackup/u,'Drive repository transport must remain opaque to portable/protected backup container formats');
 assert.match(app,/const APP_META_REGISTRY=Object\.freeze\(Object\.fromEntries\(Object\.entries\(@@SD_APP_META_REGISTRY@@\)\.map/u,'host must deep-freeze each build-injected typed appMeta registry definition before strict validation');
 assert.match(app,/function exactAppMetaFamily\(capability,key,label=/u,'typed exact-key adapters must enforce logical appMeta ownership');
 assert.match(app,/JournalAppMeta\.read\('restoreJournalPayload'\)/u,'temporary backup-file retention must read the typed restore-journal family only');
-assert.match(appMeta,/function registerValidators\(validationOwner,ownerValidators\)/u,'appMeta gateway must register validators independently by validation owner');
-assert.match(appMeta,/function bind\(owner\)/u,'appMeta gateway must expose separately owner-scoped capabilities');
-assert.match(appMeta,/view:tx=>createView\(cleanOwner,tx\)/u,'appMeta gateway must expose transaction-scoped typed views');
-assert.match(appMeta,/function canonicalEnvelope\(row,key\)/u,'appMeta gateway must centrally validate canonical envelopes');
+assert.match(appMeta,/function registerValidators\(validationOwner\s*,ownerValidators\s*\)/u,'appMeta gateway must register validators independently by validation owner');
+assert.match(appMeta,/function bind\(owner\s*\)/u,'appMeta gateway must expose separately owner-scoped capabilities');
+assert.match(appMeta,/view:\(tx\s*\)=>createView\(cleanOwner,tx\)/u,'appMeta gateway must expose transaction-scoped typed views');
+assert.match(appMeta,/function canonicalEnvelope\(row\s*,key\s*\)/u,'appMeta gateway must centrally validate canonical envelopes');
 assert.match(appMeta,/validateValue\(definition,row\.value,key,suffix\)/u,'appMeta gateway must centrally apply family value validation');
 
 assert.match(app,/return ExportsAppMeta\.transaction\('readwrite'/u,'backup-protection policy mutation must use the exports-owned metadata capability');
@@ -176,7 +177,7 @@ assert.doesNotMatch(insights,/StudyDirector\?\.data\?\.storageKeys/u,'Insights m
 
 // No source module may mint a direct studyDirector.* localStorage identity outside the central contract/build injection.
 for(const file of sourceFiles){
-  const text=fs.readFileSync(file,'utf8');
+  const text=readScript(file);
   assert.doesNotMatch(text,/localStorage\.(?:getItem|setItem|removeItem)\(\s*['"]studyDirector\./u,`raw durable localStorage identity bypass in ${path.relative(root,file)}`);
 }
 
@@ -199,7 +200,7 @@ assert.equal(OPFS_IDENTITIES.attachments,'study-director-assets-v2');
 for(const boundary of ['completeBackup','deviceBackup','driveBackup','attachmentArchive','markdownExport','zipExport'])assert.ok(DATA_ARCHITECTURE.external[boundary],`external boundary ${boundary} must be classified`);
 
 
-const sw=read('source/platform/sw.js'),deviceBackupSource=read('source/core/device-backup.js')+read('source/core/device-folder-storage.js'),driveSource=read('source/external/drive.js');
+const sw=read('source/platform/sw.js'),deviceBackupSource=read('source/core/device-backup.ts')+read('source/core/device-folder-storage.ts'),driveSource=read('source/external/drive.js');
 assert.match(sw,/@@SD_CACHE_STORAGE_IDENTITIES@@/u,'service worker cache identities must come from the canonical contract');
 assert.doesNotMatch(sw,/const CACHE_PREFIX=['"]study-director-shell-/u,'service worker must not mint the shell cache prefix');
 assert.doesNotMatch(sw,/const bridgeCache=['"]study-director-update-bridge-v2/u,'service worker must not mint the update bridge cache');

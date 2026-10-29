@@ -1,13 +1,14 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
-const read=relative=>fs.readFileSync(path.join(root,relative),'utf8');
-const app=read('source/app.html'),backup=read('source/core/backup.js'),repository=read('source/core/managed-repository.js'),repositories=read('source/core/repositories.js'),background=read('source/core/repository-background.js'),provider=read('source/core/backup-provider.js'),device=read('source/core/device-backup.js'),managed=read('source/core/managed-recovery.js'),host=read('source/core/backup-recovery-host.js'),manifest=read('build/module-manifest.mjs');
+const read=relative=>relative.startsWith('source/core/')?readScript(path.join(root,relative)):readScript(path.join(root,relative));
+const app=read('source/app.html'),backup=read('source/core/backup.js'),repository=read('source/core/managed-repository.ts'),repositories=read('source/core/repositories.ts'),background=read('source/core/repository-background.ts'),provider=read('source/core/backup-provider.js'),device=read('source/core/device-backup.ts'),managed=read('source/core/managed-recovery.ts'),host=read('source/core/backup-recovery-host.ts'),manifest=read('build/module-manifest.mjs');
 
-assert.match(manifest,/id:'managed-recovery',source:'core\/managed-recovery\.js'/u,'managed recovery must be a first-class private runtime module rather than host-inline orchestration');
+assert.match(manifest,/id:'managed-recovery',source:'core\/managed-recovery\.ts'/u,'managed recovery must be a first-class private runtime module rather than host-inline orchestration');
 assert.match(manifest,/id:'backup-recovery-host',source:'core\/backup-recovery-host\.js'/u,'managed recovery/history host orchestration must be a first-class private runtime module');
 assert.match(managed,/input\.mutation\.run\('managed-recovery'[\s\S]*automaticBackup\.suspend[\s\S]*lifecycle\.quiesce[\s\S]*lifecycle\.settle[\s\S]*spec\.createSafety\(\)[\s\S]*verifiedSafety\(safety\)[\s\S]*spec\.apply\(\)[\s\S]*lifecycle\.rebuild[\s\S]*spec\.publishPresent/u,'managed recovery coordinator must order mutation protection, backup suspension, quiescence, settlement, verified safety capture, apply, rebuild and post-apply convergence handoff');
 assert.match(managed,/finally\{[\s\S]*automaticBackup\.resume\(suspension\)/u,'automatic Device Folder backup must resume from a finally boundary');

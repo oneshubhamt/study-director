@@ -1,3 +1,4 @@
+import {readScript} from '../../../build/source-script.mts';
 import {createProcessingEngine} from '../../../portable/processing.ts';
 const testProcessing=Object.freeze({...createProcessingEngine(),scope:operation=>operation()});
 import assert from 'node:assert/strict';
@@ -6,8 +7,8 @@ import vm from 'node:vm';
 import {PRODUCTION_LIMITS as limits,CAPACITY_PROFILES} from '../../../contracts/production-limits.mjs';
 import {testPendingReviewCodec} from '../../helpers/pending-review-codec.mjs';
 
-const read=file=>fs.readFileSync(file,'utf8');
-for(const file of ['source/core/internal.js','source/core/persistence.js','source/core/record-codecs.js','source/core/backup-codec.js'])vm.runInThisContext(read(file),{filename:file});
+const read=file=>readScript(file);
+for(const file of ['source/core/internal.js','source/core/persistence.ts','source/core/record-codecs.ts','source/core/backup-codec.ts'])vm.runInThisContext(read(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const RecordCodecs=registry.require('record-codecs',1);
 const BackupCodecs=registry.require('backup-codec',1);

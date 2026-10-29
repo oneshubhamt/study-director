@@ -1,8 +1,10 @@
+import {readScript} from '../../../build/source-script.mts';
+import {readCoreScript,coreScriptPath} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-for(const name of ['internal','notice-coordinator','backup-presentation','interactions'])vm.runInThisContext(fs.readFileSync(`source/core/${name}.js`,'utf8'),{filename:`source/core/${name}.js`});
+for(const name of ['internal','notice-coordinator','backup-presentation','interactions'])vm.runInThisContext(readCoreScript(name),{filename:coreScriptPath(name)});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],module=registry.require('notice-coordinator',1),freeze=Object.freeze;
 function clock(){
   let time=0,sequence=0;const pending=new Map();
@@ -73,7 +75,7 @@ class Element {
   toast.dispatch('focusout',{relatedTarget:null});time.tick(2000);document.hidden=true;document.dispatch('visibilitychange');time.tick(10000);assert.equal(n.eventStatus().toasts.length,1);
   document.hidden=false;document.dispatch('visibilitychange');time.tick(1001);assert.equal(n.eventStatus().toasts.length,0);time.tick(1000);assert.equal(region.children.length,0,'dismissed DOM and exit timer are cleaned up');
   // Exercise the actual attachment error call site, rather than inferring severity from wording.
-  const source=fs.readFileSync('source/core/attachments.js','utf8'),start=source.indexOf('    function reportError('),end=source.indexOf('\n    async function operation',start);
+  const source=readScript('source/core/attachments.ts'),start=source.indexOf('    function reportError('),end=source.indexOf('\n    async function operation',start);
   new Function('notifications',source.slice(start,end)+';reportError(new Error("Disk full"));')(n.presentation('attachments')); 
   const failure=region.children[0];assert.ok(failure.classList.contains('error'));assert.equal(failure.attributes.role,'alert');
   failure.children[1].dispatch('click');time.tick(1000);assert.equal(region.children.length,0);

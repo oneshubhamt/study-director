@@ -52,10 +52,10 @@ registry.define('operation-lifecycle',1,()=>{
   }
   // A job owns its opportunity, blocker and attempt. Executors own storage
   // proofs and progress; a timer disappearing never retires outstanding work.
-  function createJob<R extends JobResult>({environment,isAvailable,execute,capture,onBlocked=()=>{},retryMs=300000,minDelayMs=0}:JobInput<R>){
+  function createJob<R extends JobResult,Timer=number>({environment,isAvailable,execute,capture,onBlocked=()=>{},retryMs=300000,minDelayMs=0}:JobInput<R,Timer>){
     if(!environment||(['now','setTimeout','clearTimeout'] as const).some(key=>typeof environment[key]!=='function')||[isAvailable,execute,capture,onBlocked].some(value=>typeof value!=='function'))throw new TypeError('Background job dependencies are incomplete.');
     const {now,setTimeout:scheduleTimeout,clearTimeout:cancelTimeout}=environment;
-    let timer:number|null=null,dueAt:number|null=null,pending=false,running:Promise<R|DeferredResult>|null=null,blocker='',trigger='requested',lastResult:R|DeferredResult|null=null,disposed=false;
+    let timer:Timer|null=null,dueAt:number|null=null,pending=false,running:Promise<R|DeferredResult>|null=null,blocker='',trigger='requested',lastResult:R|DeferredResult|null=null,disposed=false;
     const report=(error:unknown)=>{try{capture(error);}catch{}};
     function disarm(){if(timer!==null){cancelTimeout(timer);timer=null;}}
     function availability(){try{return isAvailable();}catch(error){report(error);return false;}}

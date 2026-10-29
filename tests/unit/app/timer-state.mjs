@@ -1,10 +1,12 @@
+import {fileURLToPath} from 'node:url';
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const execute=file=>vm.runInThisContext(fs.readFileSync(new URL(file,import.meta.url),'utf8'),{filename:file});
+const execute=file=>vm.runInThisContext(readScript(fileURLToPath(new URL(file,import.meta.url))),{filename:file});
 execute('../../../source/core/internal.js');
-execute('../../../source/core/timer-state.js');
+execute('../../../source/core/timer-state.ts');
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const timer=registry.require('timer-state',1);
 

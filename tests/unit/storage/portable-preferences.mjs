@@ -1,3 +1,4 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,8 +7,8 @@ import {fileURLToPath} from 'node:url';
 
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
-for(const file of ['source/core/internal.js','source/core/record-codecs.js']){
-  vm.runInThisContext(fs.readFileSync(path.join(ROOT,file),'utf8'),{filename:file});
+for(const file of ['source/core/internal.js','source/core/record-codecs.ts']){
+  vm.runInThisContext(readScript(path.join(ROOT,file)),{filename:file});
 }
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const RecordCodecs=registry.require('record-codecs',1);

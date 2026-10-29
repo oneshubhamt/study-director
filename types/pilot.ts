@@ -1,3 +1,4 @@
+import type {SessionLifecycleModule} from './session-lifecycle.ts';
 import type {LifecycleModule,RepositoryPolicyModule} from './lifecycle.ts';
 import type {DomainModule,DomainLimits} from './domain.ts';
 // Transitional declaration of the existing JS registry, limited to checked modules.
@@ -41,12 +42,14 @@ export interface SaveLaneModule {
   onBeforeFlush(callback: () => void): void;
   prepareFlush(): void;
 }
-export interface PilotModules { canonical: CanonicalModule; 'save-lane': SaveLaneModule;domain:DomainModule;'operation-lifecycle':LifecycleModule;'repository-policy':RepositoryPolicyModule }
-export interface ModuleInputs{canonical:[];'save-lane':[];domain:[limits:DomainLimits];'operation-lifecycle':[];'repository-policy':[]}
+export interface PilotModules { 'session-lifecycle':SessionLifecycleModule; canonical: CanonicalModule; 'save-lane': SaveLaneModule;domain:DomainModule;'operation-lifecycle':LifecycleModule;'repository-policy':RepositoryPolicyModule }
+export interface ModuleInputs{'session-lifecycle':[];canonical:[];'save-lane':[];domain:[limits:DomainLimits];'operation-lifecycle':[];'repository-policy':[]}
 export interface PilotRegistry {
   readonly format: 'study-director.internal-module-registry';
   readonly version: 1;
   readonly contracts: {
+    functionPort<T>(input:T,keys:readonly string[],label:string):T;
+    declaredFunctions<T>(input:T,keys:readonly string[],label:string):T;
     exactFrozenObject<T>(input: T, keys: readonly string[], label: string): T;
   };
   define<K extends keyof PilotModules>(name: K, version: 1, factory: (...input:ModuleInputs[K]) => PilotModules[K]): boolean;

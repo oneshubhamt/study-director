@@ -151,4 +151,29 @@ for(const [type,data,pattern] of [
 ]){await assert.rejects(coordinator.run(type,data),pattern);assert.equal(alive,0);assert.equal(coordinator.status().busy,false);}
 assert.equal(await coordinator.run('file.hash',{file:new Blob(['abc'])}),'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
 scenarios.push('malformed transport rejects through real workers; subsequent hash succeeds');
+// A worker response is untrusted even when its request was valid. In particular,
+// a truthy non-boolean must never certify that saved bytes match the source.
+{
+  let response,workers=0,releases=0;
+  const files={stage:async()=>({name:'bad-reply-stage',directory:'scratch',handle:{}}),release:async()=>{releases++;},bind:value=>value,pin:()=>()=>{}};
+  const client=module.createCoordinator({window:fakeWindow,document,files,createWorker:()=>{
+    workers++;let stopped=false;
+    return {terminate(){if(!stopped){stopped=true;workers--;}},postMessage(message){queueMicrotask(()=>this.onmessage({data:{id:message.id,value:response}}));}};
+  }});
+  for(const [type,data,bad] of [
+    ['equalFiles',{a:png,b:png},'yes'],
+    ['chunk',{seq:0,entityType:'note',items:[],algorithm:'sha256',maxLineBytes:65536},{line:'{}',checksum:7}],
+    ['integrity.append',{}, {offset:1,checksum:'digest',hash:{version:1,length:1,state:[0],tail:[0]}}],
+    ['file.copy',{file:png},{size:png.size}]
+  ]){
+    response=bad;
+    await assert.rejects(client.run(type,data),/File processor returned an invalid/);
+    assert.equal(workers,0,'malformed replies must release their worker');
+    assert.equal(client.status().busy,false);
+  }
+  assert.equal(releases,1,'invalid staged-file reply must release scratch storage');
+  response=true;assert.equal(await client.run('equalFiles',{a:png,b:png}),true);
+  assert.equal(workers,0);assert.equal(client.status().busy,false);
+  scenarios.push('malformed worker replies reject, release staged resources, and permit a successful retry');
+}
 console.log(JSON.stringify({status:'PASS',scenarios,workersCreated:created,workersRemaining:alive},null,2));
