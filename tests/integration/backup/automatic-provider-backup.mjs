@@ -69,13 +69,14 @@ const cases=[];
   assert.equal(t.publishedAt.length,1,'later changes do not restart the countdown, and nothing runs before it ends');
   await tick(t,1*MINUTE+1000);assert.equal(t.publishedAt.length,2);assert.ok(t.publishedAt[1]-start>=20*MINUTE&&t.publishedAt[1]-start<=20*MINUTE+5000,'a backup within 20 minutes of the first change');
   await tick(t,60*MINUTE);assert.equal(t.publishedAt.length,2,'no changes, no further backups');
+  assert.ok(t.diagnosticStarts.some(row=>row.name==='provider-convergence'&&row.details?.trigger==='automatic'),'ordinary cadence must retain its automatic trigger');
   cases.push('20-minute cadence from the first change');
 }
 {
   const t=fixture({covered:'2026-10-06T08:00:00.000Z'});await tick(t,1000);t.change();await tick(t,MINUTE);
   const before=t.publishedAt.length;t.change(true);await tick(t,t.policy.automaticUrgentMs+1000);
   assert.equal(t.publishedAt.length,before+1,'a key moment (finishing the day) backs up within seconds');
-  assert.ok(t.diagnosticStarts.some(row=>row.name==='provider-convergence'&&row.details?.trigger==='automatic'),'automatic work must not be mislabeled as managed recovery');
+  assert.ok(t.diagnosticStarts.some(row=>row.name==='provider-convergence'&&row.details?.trigger==='important-change'),'urgent work must retain its important-change trigger rather than being mislabeled managed recovery');
   cases.push('key moments back up within seconds, correctly attributed in diagnostics');
 }
 {
