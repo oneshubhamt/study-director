@@ -168,6 +168,17 @@ registry.define('device-folder-storage',1,()=>{
     async function upload(file){
       const spec=KINDS[file&&file.kind];if(!spec||!spec.pattern.test(String(file.id||'')+spec.suffix)||!(file.blob instanceof Blob))throw new Error('A Study Director backup upload has an invalid identity.');
       const dirs=await directories(),name=file.id+spec.suffix,directory=dirs[spec.directory],checks=async()=>{await file.checkProtection?.();await file.checkSource?.();};
+      // Repository identities are immutable. An ambiguous prior publication
+      // may have left the exact bytes here: reuse them, but never overwrite a
+      // different object/manifest/commit (including when a retry is corrupted).
+      const existing=await fileOrNull(directory,name);
+      if(existing){
+        const expected=String(file.digest||'');
+        if(!/^[a-f0-9]{64}$/u.test(expected)||existing.size!==file.blob.size||await input.checksum(existing,{})!==expected)
+          throw new Error('Device Folder repository identity collision: existing verified backup bytes were preserved.');
+        await checks();
+        return freeze({...await describe(file.kind,file.id,name,existing,await scope(),null),serverDigest:expected});
+      }
       await writeFile(directory,name,file.blob,{checks,onProgress:file.onProgress});
       const written=await fileOrNull(directory,name);
       if(!written||written.size!==file.blob.size){try{await bounded(directory.removeEntry(name),`Device Folder remove ${name}`);}catch{}throw new Error('The Device Folder did not keep the complete backup file.');}

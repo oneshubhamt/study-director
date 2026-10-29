@@ -28,6 +28,23 @@ assert.deepEqual(root.names(),['checkpoints','commits','objects','repository.sds
 assert.deepEqual((await root.getDirectoryHandle('objects')).names(),[objectId(1)+'.sdobject']);
 assert.equal(object.kind,'object');assert.equal(object.size,12);assert.equal(manifest.digest,await sha256(new Blob([JSON.stringify({id:id(1)})])));assert.equal(commit.kind,'commit');
 assert.equal(await (await storage.download(object)).text(),'object bytes');
+// Repeating an uncertain upload may reuse the exact immutable file, but a
+// conflicting payload must not truncate an existing committed object or marker.
+for(const [kind,fileId,original,conflict] of [
+  ['object',objectId(1),'object bytes','different object bytes'],
+  ['checkpoint',id(1),JSON.stringify({id:id(1)}),'{"id":"other"}'],
+  ['commit',id(1),'commit bytes','different commit bytes']
+]){
+  const initial=(await storage.list({kind})).items.find(item=>item.id===fileId);
+  const repeated=await upload(kind,fileId,original);
+  assert.equal(repeated.remoteVersion,initial.remoteVersion,'idempotent '+kind+' replay must preserve existing bytes and version');
+  await assert.rejects(()=>upload(kind,fileId,conflict),/identity collision/u,'conflicting '+kind+' replay must fail closed');
+  assert.equal(await (await storage.download(initial)).text(),original,'collision must preserve original '+kind+' bytes');
+}
+// Absence of a caller checksum cannot authorize replacing an existing file.
+await assert.rejects(()=>storage.upload(freeze({kind:'object',id:objectId(1),blob:new Blob(['object bytes'])})),/identity collision/u);
+assert.equal(await (await storage.download(object)).text(),'object bytes');
+
 // A range read (integrity verification) carries the file's size and version,
 // the same shape Drive returns; a range outside the file is refused.
 {
@@ -68,7 +85,10 @@ await assert.rejects(()=>upload('object',objectId(2),'second object'),/failed ve
 assert.deepEqual((await root.getDirectoryHandle('objects')).names(),[objectId(1)+'.sdobject'],'a bad write leaves nothing behind');
 
 // Deletion refuses a file that changed since it was listed.
-now+=1000;await upload('commit',id(1),'commit bytes again');
+now+=1000;
+// Simulate an external modification, not a repository upload: repository
+// uploads must never replace committed identities.
+const modified=(await root.getDirectoryHandle('commits'));const modifiedHandle=await modified.getFileHandle(id(1)+'.sdcommit'),modifiedWriter=await modifiedHandle.createWritable({keepExistingData:false});await modifiedWriter.write('commit bytes again');await modifiedWriter.close();
 await assert.rejects(()=>storage.delete(commit),/changed before deletion/u);
 assert.equal(await storage.delete((await storage.list({kind:'commit'})).items[0]),true);assert.equal(await storage.delete({kind:'commit',id:id(1)}),false);
 await assert.rejects(()=>storage.download({kind:'commit',id:id(1)}),error=>error.code==='REPOSITORY_OBJECT_MISSING');
@@ -94,4 +114,4 @@ canMutate=false;await assert.rejects(()=>upload('object',objectId(3),'late objec
 folder={getDirectoryHandle:async()=>{throw Object.assign(new Error('gone'),{name:'NotFoundError'});}};
 await assert.rejects(()=>storage.list({kind:'checkpoint'}),error=>error.code==='DEVICE_FOLDER_MISSING');
 
-console.log(JSON.stringify({status:'PASS',suite:'device-folder-storage',checks:['verified writes','listing summaries','folder identity','guarded deletion','locks','locked manifests','control loss','missing folder']},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'device-folder-storage',checks:['verified writes','immutable replay and collision safety','listing summaries','folder identity','guarded deletion','locks','locked manifests','control loss','missing folder']},null,2));
