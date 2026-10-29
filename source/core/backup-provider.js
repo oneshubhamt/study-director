@@ -1234,8 +1234,8 @@ registry.define('backup-provider',1,input=>{
         if(busy||sync?.catching){schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS);return freeze({status:'deferred',reason:'busy'});}
         scope=await background.beginBackground('convergence',{budgetMs:0,preemptCode:'REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage:'An automatic backup yielded to a foreground operation.'});
         if(!scope){schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS);return freeze({status:'deferred',reason:'background-busy'});}
-        traceId=OperationDiagnostics.start('provider-convergence',selected.label,{provider:selected.id,background:true,trigger:'managed-recovery',nextEligibleAt:eligibleAt,actionable:true});
-        OperationDiagnostics.mark('background-transition',background.transition('convergence','scheduled','running',{reason:'managed-recovery',nextEligibleAt:eligibleAt,actionable:true}),traceId);
+        traceId=OperationDiagnostics.start('provider-convergence',selected.label,{provider:selected.id,background:true,trigger:String(trigger||'scheduled'),nextEligibleAt:eligibleAt,actionable:true});
+        OperationDiagnostics.mark('background-transition',background.transition('convergence','scheduled','running',{reason:String(trigger||'scheduled'),nextEligibleAt:eligibleAt,actionable:true}),traceId);
         OperationDiagnostics.mark('convergence-eligibility',{provider:selected.id,nextEligibleAt:eligibleAt,actionable:true},traceId);
         // Catch up before backing up: Drive's newest version comes in first.
         // A backup due now checks this itself, so a separate look is only
@@ -1266,7 +1266,7 @@ registry.define('backup-provider',1,input=>{
         return result;
       }catch(error){
         const preempted=scope?.signal.aborted&&error?.name==='AbortError';
-        if(!traceId)traceId=OperationDiagnostics.start('provider-convergence',selected.label,{provider:selected.id,background:true,trigger:'managed-recovery',nextEligibleAt:eligibleAt,actionable:true});
+        if(!traceId)traceId=OperationDiagnostics.start('provider-convergence',selected.label,{provider:selected.id,background:true,trigger:String(trigger||'scheduled'),nextEligibleAt:eligibleAt,actionable:true});
         OperationDiagnostics.mark('background-transition',background.transition('convergence',scope?'running':'scheduled',preempted?'deferred':'failed',{reason:preempted?String(error?.code||'background-yield'):'unavailable',actionable:false}),traceId);
         if(preempted)OperationDiagnostics.finish({status:'pending',reason:String(error?.code||'background-yield')},traceId);
         else{OperationDiagnostics.fail(error,{background:true,status:'unavailable'},traceId);AppDiagnostics.capture('backup-provider.pending-retry-background',error,'warn');}

@@ -15,7 +15,7 @@ const freeze=Object.freeze,noop=()=>{},MINUTE=60*1000;
 // share: whether this device may upload to the shared location (no while it
 // holds data from a newer version).
 function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shared=both,driveList=null,driveDownload=null,sharedBase=async()=>null,share=()=>true}={}){
-  const clock=createFakeClock('2026-10-06T08:00:00.000Z'),emitted=[],publishedAt=[],publishedBy=[],coveredBy=new Map();
+  const clock=createFakeClock('2026-10-06T08:00:00.000Z'),emitted=[],publishedAt=[],publishedBy=[],diagnosticStarts=[],coveredBy=new Map();
   let current=new clock.Date().toISOString(),authorized=signedIn,expiresAt=clock.now()+expiresInMs,listener=null,publicationHook=noop,durable=null;
   const context={Object,Symbol,TypeError,Error,Date:clock.Date,AbortController,Blob,Promise,Map,Set,TextEncoder,Uint8Array,console,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout};context.globalThis=context;vm.createContext(context);
   for(const name of ['internal','operation-lifecycle','repository-policy','repository-background','backup-provider','backup-recovery-host','notice-coordinator','backup-presentation'])vm.runInContext(fs.readFileSync(`source/core/${name}.js`,'utf8'),context,{filename:`source/core/${name}.js`});
@@ -35,7 +35,7 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shar
     scrub:async()=>({status:'completed',complete:true}),cleanup:async()=>({gcPending:false}),retention:freeze({}),validatePolicy:noop,classifyState:()=>({committed:[],uncommitted:[],orphanCommits:[],invalidPairs:[]}),activeProtected:()=>null,selectRetention:()=>({retained:[],remove:[]}),projectHistory:()=>[],markCompleted:({copy})=>{if(copy)coveredBy.set(copy.source,copy.sourceRevision);}});
   const runtime=registry.require('backup-provider',1,freeze({repositoryPolicy:policy})).createRuntime(freeze({background:freeze({format:background.format,contractVersion:1,createCoordinator:background.createCoordinator,maintenance:background.maintenance,maintenanceActionable:background.maintenanceActionable}),repository:pipeline,ports:freeze({
     configuration:freeze({appVersion:'qa'}),controller:freeze({beginImport:()=>freeze({cancel:noop}),cancelImport:noop,finishImport:noop}),exports:freeze({followProtection:async()=>false,protect:async file=>{const value=typeof file==='function'?await file():file;return freeze({...value,encrypted:false,protectionId:'',checkProtection:async()=>{}});},unprotect:async blob=>freeze({blob,encrypted:false}),run:unexpected}),domain:freeze({clampText:value=>String(value||'')}),view:freeze({presentation}),
-    ownership:freeze({canShare:()=>share(),canRunBackground:()=>true,requireMutationControl:noop}),environment:freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}),diagnostics:freeze({capture:noop,start:()=>'trace',mark:noop,finish:noop,fail:noop})
+    ownership:freeze({canShare:()=>share(),canRunBackground:()=>true,requireMutationControl:noop}),environment:freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}),diagnostics:freeze({capture:noop,start:(name,label,details)=>{diagnosticStarts.push(freeze({name,label,details}));return 'trace';},mark:noop,finish:noop,fail:noop})
   })}));
   const connected=()=>authorized&&clock.now()<expiresAt;
   if(both)runtime.register(freeze({id:'device-folder',label:'Device Folder',connected:()=>true,backgroundAvailable:()=>true,
@@ -45,7 +45,7 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shar
   runtime.configurePendingBackupRetry(freeze(pending));
   runtime.configureAutomaticBackup(freeze({covered:id=>coveredBy.has(id)?coveredBy.get(id):covered,current:()=>current}));
   return {
-    clock,runtime,presentation,policy:policy.protocol,publishedAt,publishedBy,onPublication:fn=>{publicationHook=fn;},
+    clock,runtime,presentation,policy:policy.protocol,publishedAt,publishedBy,diagnosticStarts,onPublication:fn=>{publicationHook=fn;},
     change:(urgent=false)=>{current=new clock.Date(clock.now()).toISOString();runtime.noteChange({urgent});},
     expire:()=>{expiresAt=clock.now();listener?.();},
     signIn:(lifetime=59*MINUTE)=>{authorized=true;expiresAt=clock.now()+lifetime;listener?.();},
@@ -75,7 +75,8 @@ const cases=[];
   const t=fixture({covered:'2026-10-06T08:00:00.000Z'});await tick(t,1000);t.change();await tick(t,MINUTE);
   const before=t.publishedAt.length;t.change(true);await tick(t,t.policy.automaticUrgentMs+1000);
   assert.equal(t.publishedAt.length,before+1,'a key moment (finishing the day) backs up within seconds');
-  cases.push('key moments back up within seconds');
+  assert.ok(t.diagnosticStarts.some(row=>row.name==='provider-convergence'&&row.details?.trigger==='automatic'),'automatic work must not be mislabeled as managed recovery');
+  cases.push('key moments back up within seconds, correctly attributed in diagnostics');
 }
 {
   const t=fixture({covered:'2026-10-06T08:00:00.000Z',expiresInMs:12*MINUTE});await tick(t,1000);
