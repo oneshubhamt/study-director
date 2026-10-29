@@ -17,6 +17,8 @@ const patterns={
     /\bschedule\w*\(\s*[^,()'"]+,\s*'([a-z][a-z0-9-]*)'/gu
   ]
 };
+// Retry provenance is user-safe diagnostics vocabulary, never arbitrary text.
+for(const reason of ["background-preempted","pending-retry","publication-failure","retry-failure","shared-behind","sync-turn"])assert.ok(lists.reasons.has(reason),`Convergence trigger ${reason} must be visible in safe diagnostics.`);
 const counts={};
 for(const [kind,expressions] of Object.entries(patterns)){
   const missing=new Map();let seen=0;
