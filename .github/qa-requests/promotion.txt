@@ -1,9 +1,8 @@
 Promotion QA request
 
-Request: pass-4-reverified-provenance-2026-10-29
-Source revision: 2ba8e915e32e808398be6b5249571c140bc18eab
-Run full Promotion QA on current-fixes: hermetic correctness, risk coverage, critical mutations, AST branches, non-browser release, built-runtime browser suite and Insights performance.
-Confirm Device Folder immutable retries and stale-digest rejection, normal/important-change trace attribution, 1,000/10,000-version retention benchmark, paginated Drive backlog and slow deletion, journal replay, provider convergence, and resumable upload failure-injection.
-Do not mute a Library browser failure or degrade actual invariants. Native physical-device acceptance remains separate.
-
-This is an explicit on-demand request file; ordinary code pushes do not launch Promotion QA.
+Request: corrective-publication-convergence-notes-siteclear-2026-10-30
+Source revision: current-fixes HEAD from this request commit
+Run full Promotion QA on one commit: hermetic correctness, risk/critical mutation, AST branches, non-browser release, complete built-runtime browser certification and three Insights samples.
+Check: failed commit leaves prior latest intact even with orphan manifest; no speculative deletion of a reused/ambiguous manifest or commit; Device Folder digest mismatch refuses delete; genuinely newer urgent revisions take precedence over failed old revision backoff, while same revision obeys backoff; retry provenance remains accurate.
+Do not weaken 2,000-note startup/keystroke budgets, notes UI behavior or cross-tab storage-clear invariants. The notes capacity benchmark must execute without competing Chromium work. Cross-tab clear must establish a previous database connection before expecting the second tab to count a recreation.
+Device/OS quota, eviction and permission lifecycle acceptance is separate and still outstanding.
