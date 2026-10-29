@@ -1,9 +1,9 @@
 Promotion QA request
 
-Request: pass-3-final-source-revision-2026-10-29
-Source revision: 91e7427205e328ce3c6694eb9426144c8abdee8d
-Matrix: standalone backup and restore crash/recovery; 14 interrupted journal phases and rollback retry; source and peer pending destination restart; Device Folder identity reuse and rejected mismatch, stalled storage, missing folder and cleanup; Google Drive multipart/resumable retry and ambiguous sessions; immutable checkpoint/commit publication; bounded fail-closed retention and shared-object GC.
-Scope: all hermetic correctness, risk, mutation, AST branch, release and browser gates with Insights performance.
-Browser Library cases are independently classified if they fail; no source changes should mask unrelated tests.
+Request: pass-4-performance-observability-final-2026-10-29
+Source revision: da13b89552279af3a2a3d7dbf7c2dbad21cf6d7b
+Run complete non-browser and browser Promotion QA on current-fixes: hermetic correctness, risk coverage, critical mutation certification, AST branch-edge coverage, non-browser release certification, built-runtime browser coverage and independent Insights performance samples.
+Specific regression gates: corrected Device Folder immutable replay and stale digest tests, automatic provider trace provenance, 1,000/10,000-version retention performance, long-lived and multi-page Drive cleanup, resumable upload and recovery failure matrices.
+Classify Library browser failure and Chromium startup errors independently from backup fault-injection results. Do not weaken limits or suppress failing assertions.
 
-Explicit on-demand request file for current-fixes. Normal source pushes do not launch promotion.
+Explicit on-demand request on current-fixes. Ordinary code pushes do not trigger Promotion QA.
