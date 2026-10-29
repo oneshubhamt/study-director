@@ -50,7 +50,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('maximum-insights','tests/browser/insights/insights-maximum-import.mjs',['insights','maximum-import']),
     test('notes-at-limit','tests/browser/library/notes-at-limit.mjs',['library','notes','performance','capacity','search','tags','backup'],240000,{alone:'This test enforces startup wall-clock and keystroke latency budgets at two thousand notes; concurrent Chromium workloads would measure shared CPU contention instead of this app.'}),
     test('production-capacity','tests/browser/storage/capacity.mjs',['capacity','restore','reload','re-export','rollback'],300000),
-    test('rich-editor-hotpath','tests/browser/rich-text/rich-editor-hotpath.mjs',['rich-editor','performance','persistence']),
+    test('rich-editor-hotpath','tests/browser/rich-text/rich-editor-hotpath.mjs',['rich-editor','performance','persistence'],120000,{alone:'This test enforces tight editor typing wall-clock budgets under dense tables and near-limit prose; shared Chromium load invalidates the latency measurement.'}),
     test('lifecycle-concurrency-memory','tests/browser/rich-text/image-memory.mjs',['rich-editor','wordgard','memory','lifecycle','background','image','multi-editor']),
     test('rich-editor-readonly-maintenance','tests/browser/rich-text/readonly-maintenance.mjs',['rich-editor','wordgard','readonly','image','lifecycle','asset-storage','markdown','table','maintenance','performance']),
     test('table-capacity-15x15','tests/browser/rich-text/table-capacity.mjs',['rich-editor','wordgard','table','capacity','15x15','toolbar','persistence','mobile','accessibility','responsive']),
