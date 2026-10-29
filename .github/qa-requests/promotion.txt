@@ -1,6 +1,6 @@
 Promotion QA request
 
-Request: corrective-publication-convergence-browser-qa4-2026-10-30
+Request: final-cleer-publication-convergence-browser-qa5-2026-10-30
 Source revision: current-fixes HEAD from this request commit
 Run full Promotion QA on one commit: hermetic correctness, risk/critical mutation, AST branches, non-browser release, complete built-runtime browser certification and three Insights samples.
 Check: failed commit leaves prior latest intact even with orphan manifest; no speculative deletion of a reused/ambiguous manifest or commit; Device Folder digest mismatch refuses delete; genuinely newer urgent revisions take precedence over failed old revision backoff, while same revision obeys backoff; retry provenance remains accurate.
