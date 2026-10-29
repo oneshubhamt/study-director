@@ -1,9 +1,9 @@
 Promotion QA request
 
-Request: pass-4-performance-observability-final-2026-10-29
-Source revision: da13b89552279af3a2a3d7dbf7c2dbad21cf6d7b
-Run complete non-browser and browser Promotion QA on current-fixes: hermetic correctness, risk coverage, critical mutation certification, AST branch-edge coverage, non-browser release certification, built-runtime browser coverage and independent Insights performance samples.
-Specific regression gates: corrected Device Folder immutable replay and stale digest tests, automatic provider trace provenance, 1,000/10,000-version retention performance, long-lived and multi-page Drive cleanup, resumable upload and recovery failure matrices.
-Classify Library browser failure and Chromium startup errors independently from backup fault-injection results. Do not weaken limits or suppress failing assertions.
+Request: pass-4-reverified-provenance-2026-10-29
+Source revision: 2ba8e915e32e808398be6b5249571c140bc18eab
+Run full Promotion QA on current-fixes: hermetic correctness, risk coverage, critical mutations, AST branches, non-browser release, built-runtime browser suite and Insights performance.
+Confirm Device Folder immutable retries and stale-digest rejection, normal/important-change trace attribution, 1,000/10,000-version retention benchmark, paginated Drive backlog and slow deletion, journal replay, provider convergence, and resumable upload failure-injection.
+Do not mute a Library browser failure or degrade actual invariants. Native physical-device acceptance remains separate.
 
-Explicit on-demand request on current-fixes. Ordinary code pushes do not trigger Promotion QA.
+This is an explicit on-demand request file; ordinary code pushes do not launch Promotion QA.
