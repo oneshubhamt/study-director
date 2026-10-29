@@ -6,3 +6,6 @@ Purpose: verify the completed background-services refinement and GitHub Actions 
 
 This file is an on-demand trigger. Updating it on current-fixes starts Promotion QA.
 Normal application commits do not trigger Promotion QA unless this file changes.
+
+Pass 1 QA request: governance and priority-contract reconciliation at 2026-10-29.
+Full Promotion QA requested; verify non-browser correctness, coverage, mutation and release gates.
