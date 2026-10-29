@@ -81,7 +81,7 @@ Before distributing deployment:
 - package the generated deployment directory as-is;
 - do not hand-edit minified public files.
 
-## 7. Current correction scope and safety objectives
+## 7. Historical SDVB75F10 correction scope and safety objectives
 
 SDVB75F10 changes background data safety at three boundaries: attachment reachability, Library-clear rollback and backup deletion reconciliation. It retains the existing bounded cleanup, retry and foreground-preemption architecture. PWA behaviour is outside this correction pass.
 
@@ -102,4 +102,16 @@ npm run test:targeted -- tests/integration/storage/background-gc-reliability.mjs
 
 The same runner accepts selected unit and architecture files, validates each path, isolates each test and checks that execution does not modify the source tree. No default command was changed to run fewer tests.
 
-For this pass, run targeted checks only. Browser smoke, device/provider acceptance, complete regression, dependency rebuilding and production minification are intentionally outside the scope. Source build and archive verification are separate local checks. Exact executed paths, results and mutation-control evidence belong in the accompanying external correction evidence, not in this source tree.
+For that historical SDVB75F10 correction pass, only targeted checks were requested. This limitation does not apply to later full Promotion QA or release certification. Source build and archive verification are separate local checks. Exact executed paths, results and mutation-control evidence belong in the accompanying external correction evidence, not in this source tree.
+
+## 8. Backup and background-services certification (October 2026)
+
+Check that repository checks and **full Promotion QA** both finish successfully on the exact source revision. Promotion includes hermetic tests, risk coverage, mutation certification, AST branch-edge coverage, non-browser release certification, all browser journeys and separate Insights performance samples. Repository checks are not a substitute for Promotion QA. Classify failures by original step rather than suppressing them; an unrelated Library browser failure still means the complete browser gate did not pass.
+
+The authoritative fault-injection suites are `backup-persistence` (standalone rollback and journal phases), `pending-provider-recovery` (independent source/peer restart convergence), `repository-checkpoint` (retention, shared-object GC, long-lived background/foreground coordination, paginated Drive discovery), `repository-restore` and `restore-assets` (interrupted managed restore), `device-folder-storage` (immutable publication/replay/collision), `drive-security` (resumable acknowledgement and authorization expiry), and `automatic-provider-backup` (cadence, backoff and actual diagnostics trigger). Keep tests with existing owners. The 1,000- and 10,000-version retention timings and assembled Drive cleanup wall timings are printed by `repository-checkpoint`; these are controlled simulation benchmarks, not representative physical-device latency measurements.
+
+**Physical-device acceptance is separate and requires an operator.** On a supported desktop Chromium installation with an authorized Device Folder, one installed Android PWA, and an iPad/iOS Safari installation where applicable, test with disposable records and a separate verified safety backup: cold start, permission persistence/regrant, suspend/resume and idle battery/heat, small and large Drive transfers, interrupted/retried restore retaining Before Restore protection, interrupted retention cleanup, offline-to-online convergence, and update with an active backup. Record record/attachment equality before and after restore. Mark unsupported native storage APIs as *unsupported*, not passed. CI cannot certify hardware-level power loss or filesystem synchronization.
+
+**Security decision:** Drive retains a short-lived `drive.file` bearer token in origin-local `localStorage` across reloads but does not store a refresh token. See `BACKUP-ENGINE.md` for the script-exposure trade-off. Revisit persistence versus reauthorization only as an explicit product/security decision.
+
+**Cleanup policy:** Remove only proven unreachable/dead logic with regression evidence. Label historical notes as historical; do not delete compatibility and migration code without proving the persisted-data population no longer needs it.
