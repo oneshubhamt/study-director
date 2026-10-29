@@ -1,10 +1,9 @@
 Promotion QA request
 
-Request: pass-3-immutable-device-file-final-verification-2026-10-29
-Product revision: 02029c660c9501532b21330d82657a038c974bba
-Scope: comprehensive non-browser and browser certification on current-fixes.
-Durability matrix: standalone rollback and interrupted restore journal replay, independent source/peer provider restart convergence, immutable commit and object publication, fail-closed retention, Google Drive resumable uploads and Device Folder immutable file retries.
-Expected evidence: hermetic correctness, risk coverage, critical mutations, AST branch coverage, non-browser release tests, browser runtime, and Insights samples.
-The Library browser-performance/notes-management issues are independent of backup correctness and must not be silently masked.
+Request: pass-3-final-source-revision-2026-10-29
+Source revision: 91e7427205e328ce3c6694eb9426144c8abdee8d
+Matrix: standalone backup and restore crash/recovery; 14 interrupted journal phases and rollback retry; source and peer pending destination restart; Device Folder identity reuse and rejected mismatch, stalled storage, missing folder and cleanup; Google Drive multipart/resumable retry and ambiguous sessions; immutable checkpoint/commit publication; bounded fail-closed retention and shared-object GC.
+Scope: all hermetic correctness, risk, mutation, AST branch, release and browser gates with Insights performance.
+Browser Library cases are independently classified if they fail; no source changes should mask unrelated tests.
 
-This file is an explicit on-demand trigger. Ordinary source commits do not trigger Promotion QA unless this file changes.
+Explicit on-demand request file for current-fixes. Normal source pushes do not launch promotion.
