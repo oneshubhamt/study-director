@@ -1,10 +1,10 @@
 Promotion QA request
 
-Request: pass-3-durability-matrix-2026-10-29
-Baseline: 14ec496232e0a32e4bdfcf942dc8dbfd2904d330
+Request: pass-3-immutable-device-file-final-verification-2026-10-29
+Product revision: 02029c660c9501532b21330d82657a038c974bba
 Scope: comprehensive non-browser and browser certification on current-fixes.
-Durability matrix: standalone rollback phases; per-provider restart and convergence; immutable publication and retention; Drive resumable uploads; Device Folder storage and recovery.
-Expected evidence: full hermetic correctness, risk coverage, critical mutations, AST branches, release tests, built browser runtime, and independent Insights samples.
-Note: the existing browser notes-at-limit performance failure on the earlier baseline is tracked separately. Do not change product code to mask it.
+Durability matrix: standalone rollback and interrupted restore journal replay, independent source/peer provider restart convergence, immutable commit and object publication, fail-closed retention, Google Drive resumable uploads and Device Folder immutable file retries.
+Expected evidence: hermetic correctness, risk coverage, critical mutations, AST branch coverage, non-browser release tests, browser runtime, and Insights samples.
+The Library browser-performance/notes-management issues are independent of backup correctness and must not be silently masked.
 
-This file is an explicit on-demand trigger. Ordinary application commits do not trigger Promotion QA unless this file changes.
+This file is an explicit on-demand trigger. Ordinary source commits do not trigger Promotion QA unless this file changes.
