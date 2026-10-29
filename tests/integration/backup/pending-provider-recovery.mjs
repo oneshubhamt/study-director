@@ -7,7 +7,7 @@ const freeze=Object.freeze,noop=()=>{};
 const marker=()=>({format:'study-director.managed-provider-backup-pending',version:1,entries:[{providerId:'google-drive',requestedAt:'2026-09-01T00:00:00.000Z',sourceRevision:'2026-09-01T00:00:00.000Z'}]});
 // Load complete production modules. Publication is a verified executor port;
 // the repository-checkpoint suite separately exercises the real binary pipeline.
-function fixture({durable=marker(),authorized=true,failReads=[]}={}){
+function fixture({durable=marker(),authorized=true,authorizedFolder=true,both=false,failReads=[]}={}){
   const clock=createFakeClock(),captures=[],traces=[],readTimes=[];let reads=0,writes=0,clears=0,connectionListener=null,readUnavailable=false,control=true,locked=false,maintenance=null,cleanupPasses=0,publicationHook=noop;
   const context={Object,Symbol,TypeError,Error,Date:clock.Date,AbortController,Blob,Promise,Map,Set,TextEncoder,Uint8Array,console,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout};context.globalThis=context;vm.createContext(context);
   for(const name of ['internal','operation-lifecycle','repository-policy','repository-background','backup-provider','backup-recovery-host','notice-coordinator','backup-presentation'])vm.runInContext(fs.readFileSync(`source/core/${name}.js`,'utf8'),context,{filename:`source/core/${name}.js`});
@@ -23,8 +23,9 @@ function fixture({durable=marker(),authorized=true,failReads=[]}={}){
     configuration:freeze({appVersion:'qa'}),controller:freeze({beginImport:noop,cancelImport:noop,finishImport:noop}),exports:freeze({followProtection:async()=>false,protect:async file=>{const value=typeof file==='function'?await file():file;return freeze({...value,encrypted:false,protectionId:'',checkProtection:async()=>{}});},unprotect:async blob=>freeze({blob,encrypted:false}),run:unexpected}),domain:freeze({clampText:value=>String(value||'')}),view:freeze({presentation}),ownership:freeze({canShare:()=>true,canRunBackground:()=>!control?'awaiting-control':locked?'locked':true,requireMutationControl:noop}),environment:freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}),diagnostics:freeze({capture:(...args)=>captures.push(args),start:()=>{traces.push('start');return 'trace';},mark:noop,finish:()=>traces.push('finish'),fail:()=>traces.push('fail')})
   })}));
   const selected=freeze({id:'google-drive',label:'Google Drive',connected:()=>authorized,backgroundAvailable:()=>authorized,subscribeConnection:fn=>{connectionListener=fn;},repository:freeze({scope:async()=>'repo-scope',list:async()=>({items:[],overflow:false,ignored:0}),upload:unexpected,download:unexpected,delete:unexpected})});
-  return {clock,runtime,pending,captures,traces,readTimes,register:()=>runtime.register(selected),configure:()=>runtime.configurePendingBackupRetry(freeze(pending)),
-    authorization:value=>{authorized=value;},control:value=>{control=value;runtime.wakeBackground('ownership');},lock:value=>{locked=value;runtime.wakeBackground('encryption-unlocked');},notify:()=>connectionListener?.(),fail:value=>{readUnavailable=value;},onPublication:fn=>{publicationHook=fn;},
+  const folder=freeze({id:'device-folder',label:'Device Folder',connected:()=>authorizedFolder,backgroundAvailable:()=>authorizedFolder,repository:freeze({scope:async()=>'folder-scope',list:async()=>({items:[],overflow:false,ignored:0}),upload:unexpected,download:unexpected,delete:unexpected})});
+  return {clock,runtime,pending,captures,traces,readTimes,register:()=>{runtime.register(selected);if(both)runtime.register(folder);},configure:()=>runtime.configurePendingBackupRetry(freeze(pending)),
+    authorization:value=>{authorized=value;},folderAuthorization:value=>{authorizedFolder=value;runtime.wakeBackground('folder-permission');},control:value=>{control=value;runtime.wakeBackground('ownership');},lock:value=>{locked=value;runtime.wakeBackground('encryption-unlocked');},notify:()=>connectionListener?.(),fail:value=>{readUnavailable=value;},onPublication:fn=>{publicationHook=fn;},
     maintenance:()=>{maintenance={repositoryScope:'repo-scope',requestedAt:new clock.Date().toISOString(),nextEligibleAt:new clock.Date(clock.now()+1000).toISOString(),reason:'repository-state'};runtime.configureRepositoryMaintenance(freeze({read:async()=>maintenance,mark:async(_id,value)=>{maintenance={...maintenance,...value};return true;},clear:async()=>{maintenance=null;return true;}}));},
     stats:()=>({reads,writes,clears,durable,maintenance,cleanupPasses}),status:()=>runtime.backgroundStatus().find(row=>row.job==='google-drive convergence')};
 }
@@ -75,5 +76,29 @@ for(const blocker of ['control','authorization','lock']){
  await t.clock.drainMicrotasks(240);assert.equal(aborted,1);assert.equal(t.status().busy,false);assert.equal(t.status().pending,true);assert.equal(t.status().state,'paused');assert.equal(t.clock.pending(),0);assert.ok(t.stats().durable);
  t.onPublication(noop);if(blocker==='control')t.control(true);else if(blocker==='lock')t.lock(false);else{t.authorization(true);t.notify();}
  await tick(t,15000);assert.equal(t.stats().writes,2);assert.equal(t.stats().durable,null);assert.equal(t.clock.pending(),0);cases.push('active transfer safely reconnects after '+blocker+' loss');
+}
+// Source and peer locations are independent durability obligations. Rebuilding
+// the runtime from the persisted marker must resume only the destination that
+// was unavailable before the crash, without replaying the already saved one.
+for(const unavailable of ['google-drive','device-folder']){
+  const pendingBoth={format:'study-director.managed-provider-backup-pending',version:1,entries:[
+    {providerId:'google-drive',requestedAt:'2026-09-01T00:00:00.000Z',sourceRevision:'2026-09-01T00:00:00.000Z'},
+    {providerId:'device-folder',requestedAt:'2026-09-01T00:00:00.000Z',sourceRevision:'2026-09-01T00:00:00.000Z'}
+  ]};
+  const first=fixture({durable:pendingBoth,both:true,authorized:unavailable!=='google-drive',authorizedFolder:unavailable!=='device-folder'});
+  first.register();first.configure();await tick(first,1000);
+  assert.equal(first.stats().writes,1,'the connected source or peer must publish independently');
+  assert.equal(first.stats().durable?.entries.length,1,'only the unavailable location may retain a retry marker');
+  assert.equal(first.stats().durable.entries[0].providerId,unavailable);
+  // The next fixture loads the old durable app metadata into a new production
+  // provider runtime. Old in-memory timers and callbacks are deliberately lost.
+  const restarted=fixture({durable:structuredClone(first.stats().durable),both:true});
+  restarted.register();restarted.configure();await tick(restarted,1000);
+  assert.equal(restarted.stats().writes,1,'the restarted runtime must publish only the outstanding location');
+  assert.equal(restarted.stats().durable,null,'the final per-provider marker must be cleared after verified publication');
+  await tick(restarted,3600000);
+  assert.equal(restarted.stats().writes,1,'a completed location must not publish again after restart');
+  assert.equal(restarted.clock.pending(),0,'a fully converged runtime leaves no retry timers');
+  cases.push('crash/restart settles outstanding '+unavailable+' without replaying its peer');
 }
 console.log(JSON.stringify({status:'PASS',suite:'pending-provider-recovery',productionRuntime:true,cases},null,2));
