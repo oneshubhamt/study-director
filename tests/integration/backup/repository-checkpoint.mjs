@@ -581,10 +581,18 @@ const providerLatestBeforeCommitFailure=retainedLineage.at(-1).checkpoint.checkp
 await forceBaseline(providerLatestBeforeCommitFailure,notes);
 sourceRevision='2026-09-19T01:05:15.000Z';snapshotRevision='provider-commit-failure';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'provider commit failure probe',updatedAt:sourceRevision})};failRemoteCommit=true;
 await assert.rejects(()=>runtime.providers.backupRepositoryProvider('repository-qa'),/commit-marker failure/i);
-assert.equal([...remoteFiles.values()].filter(file=>file.kind==='checkpoint').length,providerCheckpointCountBeforeCommitFailure,'failed provider final commit must remove its unpublished manifest');
+// A failed or ambiguous commit upload leaves uncommitted bytes behind for
+// verified inventory cleanup. The publication error path cannot establish
+// ownership: speculative deletion could remove a previously committed version.
+assert.equal([...remoteFiles.values()].filter(file=>file.kind==='checkpoint').length,providerCheckpointCountBeforeCommitFailure+1,'a failed final commit may retain its unpublished manifest for safe later cleanup');
 assert.equal([...remoteFiles.values()].filter(file=>file.kind==='commit').length,providerCommitCountBeforeCommitFailure,'failed provider final commit must not add a committed-history entry');
 assert.equal(reconciliationBaseWrites.length,providerBaselineWritesBeforeCommitFailure,'failed provider final commit must not advance reconciliation provenance');
-const providerCommittedAfterFailure=[];for(const file of remoteFiles.values())if(file.kind==='checkpoint')providerCommittedAfterFailure.push(await runtime.repository.inspectManifest(file.blob,{interactive:false}));providerCommittedAfterFailure.sort((a,b)=>Date.parse(a.exportedAt)-Date.parse(b.exportedAt));assert.equal(providerCommittedAfterFailure.at(-1).checkpoint.checkpointId,providerLatestBeforeCommitFailure,'failed provider final commit must leave the previous Latest intact');
+const providerCommitIds=new Set([...remoteFiles.values()].filter(file=>file.kind==='commit').map(file=>file.id));
+const providerCommittedAfterFailure=[];for(const file of remoteFiles.values())if(file.kind==='checkpoint'&&providerCommitIds.has(file.id))providerCommittedAfterFailure.push(await runtime.repository.inspectManifest(file.blob,{interactive:false}));
+providerCommittedAfterFailure.sort((a,b)=>Date.parse(a.exportedAt)-Date.parse(b.exportedAt));
+assert.equal(providerCommittedAfterFailure.at(-1).checkpoint.checkpointId,providerLatestBeforeCommitFailure,'failed provider final commit must leave the previous committed Latest intact');
+const providerVisibleAfterFailure=await runtime.providers.history('repository-qa',{interactive:false});
+assert.equal(providerVisibleAfterFailure.entries.at(-1)?.location.checkpointId,providerLatestBeforeCommitFailure,'orphan manifest must not become a visible backup version');
 
 const pendingProviderBackups=new Map();
 runtime.providers.configurePendingBackupRetry(freeze({read:async id=>pendingProviderBackups.get(id)||null,mark:async id=>(pendingProviderBackups.set(id,freeze({providerId:id})),true),clear:async id=>(pendingProviderBackups.delete(id),true)}));
