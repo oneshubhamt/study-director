@@ -203,4 +203,15 @@ const cases=[];
   assert.ok(t.publishedAt.length>0,'uploads resume once it may share again');
   cases.push('no Drive upload while this device holds data from a newer version');
 }
+{
+  // A real failed upload is governed by the failure retry, even if another
+  // urgent edit arrives while that failed attempt is still running.
+  const t=fixture({covered:'2026-10-06T08:00:00.000Z'});await tick(t,1000);
+  let attempts=0;t.onPublication(()=>{attempts++;if(attempts===1){t.change(true);throw new Error('Simulated provider outage');}});
+  t.change(true);await tick(t,t.policy.automaticUrgentMs+1000);
+  assert.equal(attempts,1,'the first urgent attempt failed');
+  await tick(t,20*1000);assert.equal(attempts,1,'a concurrent urgent edit must not bypass the failure backoff');
+  await tick(t,12*1000);assert.equal(attempts,2,'the durable canonical change is retried after the governed backoff');
+  cases.push('failure backoff survives urgency arriving during a failed upload');
+}
 console.log(JSON.stringify({status:'PASS',suite:'automatic-provider-backup',productionRuntime:true,cases},null,2));

@@ -316,7 +316,9 @@ registry.define('repository-background',1,input=>{
     exactObject(input,['budgetCode','budgetMessage','budgetMs','capture','coordinator','execute','isAvailable','isUnsafe','preemptCode','preemptMessage','readTarget','writeResult','yieldTask'],'Repository integrity scheduler input');
     if(!input.coordinator||input.coordinator.format!=='study-director.repository-background-coordinator'||input.coordinator.contractVersion!==1)throw new TypeError('Repository integrity coordinator is invalid.');
     for(const key of ['capture','execute','isAvailable','isUnsafe','readTarget','writeResult','yieldTask'])if(typeof input[key]!=='function')throw new TypeError('Repository integrity scheduler port is invalid.');
-    function schedule(delay,reason='scheduled'){return job.schedule(Math.max(1000,Number(delay)||1000),reason,'replace');}
+    // An explicit recheck scheduled during an active scan must survive the scan's
+    // own recurrence or state retry; only the first outstanding deadline wins.
+    function schedule(delay,reason='scheduled'){return job.schedule(Math.max(1000,Number(delay)||1000),reason,'earliest');}
     async function runAttempt({trigger}){
       let stage='state-read';
       return (async()=>{

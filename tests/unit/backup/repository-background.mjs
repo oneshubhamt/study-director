@@ -182,6 +182,28 @@ for(const pair of [['maintenance','convergence']]){
   const result=await scheduler.run('remote-publication');assert.equal(result.reason,'preempted','A remote foreground publication signalled as AbortError must be classified as a maintenance yield even when the local coordinator signal was not directly aborted.');assert.equal(stored.reason,'preempted');assert.equal(fake.pending()[0],module.maintenance.busyMs,'Yielded maintenance must be rescheduled promptly rather than weakened or abandoned.');assert.ok(reports.some(event=>event.phase==='yielded'));
 }
 
+// A fresh recheck is not postponed by an older scan finishing. Cover both
+// the executor and its durable state write, including a failed state write.
+for(const stage of ['execute','write','failed-write']){
+  const fake=clock(),bg=coordinator(fake);let entered=false,release,executes=0,writes=0;
+  const gate=new Promise(resolve=>{release=resolve;});
+  const scheduler=bg.createIntegrityScheduler(freeze({
+    budgetMs:20000,budgetCode:'TEST_INTEGRITY_BUDGET',budgetMessage:'budget',preemptCode:'TEST_INTEGRITY_PREEMPTED',preemptMessage:'preempted',capture:()=>{},
+    isAvailable:()=>true,isUnsafe:()=>false,readTarget:async()=>({completedAt:'',cycleStartedAt:'',cursor:''}),yieldTask:async()=>{},
+    execute:async()=>{executes++;if(stage==='execute'&&executes===1){entered=true;await gate;}return {status:'completed',complete:true};},
+    writeResult:async()=>{writes++;if(stage!=='execute'&&writes===1){entered=true;await gate;if(stage==='failed-write')throw new Error('simulated state write failure');}}
+  }));
+  const running=scheduler.run('old-scan');for(let n=0;n<100&&!entered;n++)await Promise.resolve();
+  assert.equal(entered,true,stage+' reached its paused stage');
+  scheduler.schedule(1000,'manual-recheck');
+  release();const result=await running;
+  assert.equal(result.status,stage==='failed-write'?'unavailable':'completed');
+  assert.equal(fake.pending()[0],1000,'a new recheck must beat older '+stage+' recurrence or retry');
+  await fake.advance(1000);for(let n=0;n<100;n++)await Promise.resolve();
+  assert.equal(executes,2,'the newer request must execute after '+stage);
+  assert.equal(writes,2,'each attempt must reach durable state write after '+stage);
+}
+
 assert.equal(module.integrityResultDelay({status:'yielded',reason:'budget'}),module.integrity.continueMs);
 assert.equal(module.integrityResultDelay({status:'yielded',corruption:true,reason:'corrupt',complete:false}),module.integrity.continueMs);
 assert.equal(module.integrityResultDelay({status:'failed',corruption:true,recheckComplete:true,complete:true}),module.integrity.failureRetryMs);

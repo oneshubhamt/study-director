@@ -1170,7 +1170,7 @@ registry.define('backup-provider',1,input=>{
         if(['BACKUP_LOCKED','BACKUP_AUTH_FAILED'].includes(String(error?.code||''))){state.password=head.item.id;summary.finish({message:`${selected.label} needs this profile’s backup password.`,outcome:'sync-password'});presentation.notice(selected.id,'sync-password',`Your backup password was set or changed on another device. Enter it to keep syncing with ${selected.label}.`);}
         // A version this build cannot read is not retried: sync waits on it.
         else if(error?.repositoryUnreadable===true||String(error?.code||'')==='BACKUP_ENCRYPTION_UNSUPPORTED'){markUnreadable(selected,head.item.id);summary.finish({message:`${selected.label} has a version this app can’t read.`,outcome:'sync-newer'});waitForNewerVersion(selected,head.item.id);}
-        else{AppDiagnostics.capture('backup-provider.sync-catch-up',error,'warn');state.behind=true;state.failed=true;summary.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'failed'});schedulePendingProviderBackup(selected,nextConvergenceRetryDelay(selected,{sync:true}));}
+        else{AppDiagnostics.capture('backup-provider.sync-catch-up',error,'warn');state.behind=true;state.failed=true;summary.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'failed'});schedulePendingProviderBackup(selected,nextConvergenceRetryDelay(selected,{sync:true}),{backoff:true});}
       }
       finally{state.catching=false;notifyStatus();}
     },0);
@@ -1258,11 +1258,11 @@ registry.define('backup-provider',1,input=>{
         else if(['none','local-empty'].includes(result.reason))resetConvergenceRetry(selected);
         // Waiting for an app update is not a failure: no retry ladder, and the
         // regular check looks again (removing that version wakes it sooner).
-        else if(result.reason==='needs-update'){resetConvergenceRetry(selected);schedulePendingProviderBackup(selected,AUTOMATIC_QUIET_MS);}
+        else if(result.reason==='needs-update'){resetConvergenceRetry(selected);schedulePendingProviderBackup(selected,AUTOMATIC_QUIET_MS,{backoff:true});}
         // Drive moved on, or another device is backing up there: catch up or take turns.
-        else if(['behind','turn'].includes(result.reason)){if(sync&&result.reason==='behind')sync.behind=true;const turns=syncState(selected).turnWaits;schedulePendingProviderBackup(selected,result.reason==='behind'?1000:SYNC_TURN_RETRY_DELAYS[Math.min(Math.max(0,turns-1),SYNC_TURN_RETRY_DELAYS.length-1)]);}
+        else if(['behind','turn'].includes(result.reason)){if(sync&&result.reason==='behind')sync.behind=true;const turns=syncState(selected).turnWaits;schedulePendingProviderBackup(selected,result.reason==='behind'?1000:SYNC_TURN_RETRY_DELAYS[Math.min(Math.max(0,turns-1),SYNC_TURN_RETRY_DELAYS.length-1)],{backoff:result.reason==='turn'});}
         else if(result.reason==='source'){resetConvergenceRetry(selected);if(!scheduleAutomaticBackup(selected))schedulePendingProviderBackup(selected,AUTOMATIC_QUIET_MS);}
-        else schedulePendingProviderBackup(selected,scope.signal.aborted?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay(selected));
+        else schedulePendingProviderBackup(selected,scope.signal.aborted?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay(selected),{backoff:!scope.signal.aborted});
         return result;
       }catch(error){
         const preempted=scope?.signal.aborted&&error?.name==='AbortError';
@@ -1272,12 +1272,14 @@ registry.define('backup-provider',1,input=>{
         else{OperationDiagnostics.fail(error,{background:true,status:'unavailable'},traceId);AppDiagnostics.capture('backup-provider.pending-retry-background',error,'warn');}
         // A failed read is unknown, not absence. The next bounded opportunity
         // checks the durable marker again; do not read it again in this handler.
-        schedulePendingProviderBackup(selected,preempted?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay(selected));
+        schedulePendingProviderBackup(selected,preempted?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay(selected),{backoff:!preempted});
         return freeze({status:'unavailable',reason:preempted?'preempted':'state-read-failed'});
       }finally{scope?.release();}
     }});providerConvergenceJobs.set(id,job);return job;
   }
-  function schedulePendingProviderBackup(selected,delay=1000){const job=providerConvergenceJob(selected);return !!job&&job.schedule(Math.max(1000,Number(delay)||1000),'managed-recovery','replace')!==false;}
+  // Ordinary deferrals preserve an earlier urgent request. An actual failure or
+  // cross-device turn explicitly enforces its governed retry/backoff instead.
+  function schedulePendingProviderBackup(selected,delay=1000,{backoff=false}={}){const job=providerConvergenceJob(selected);return !!job&&job.schedule(Math.max(1000,Number(delay)||1000),'managed-recovery',backoff?'replace':'earliest')!==false;}
   function wakeProviderBackground(selected,trigger='eligibility'){
     if(!selected?.repository)return false;
     try{
@@ -1735,7 +1737,7 @@ registry.define('backup-provider',1,input=>{
         OperationDiagnostics.finish({status:'pending',reason:'needs-update'},traceId);statusText(text,false);finishForegroundView(selected,{message:text,ok:false,lifecycle:'cancelled'});return false;
       }
       if(behind||code==='REPOSITORY_SYNC_TURN'){
-        if(behind)syncState(selected).behind=true;await markPendingRetry(selected).catch(()=>{});schedulePendingProviderBackup(selected,behind?1000:PROVIDER_CONVERGENCE_BUSY_RETRY_MS);
+        if(behind)syncState(selected).behind=true;await markPendingRetry(selected).catch(()=>{});schedulePendingProviderBackup(selected,behind?1000:PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{backoff:!behind});
         const text=behind?`Taking in newer changes from ${selected.label} first; your backup follows.`:`Another device is saving to ${selected.label}; your backup goes next.`;
         OperationDiagnostics.finish({status:'pending',reason:behind?'behind':'turn'},traceId);statusText(text,true);finishForegroundView(selected,{message:text,ok:true,lifecycle:'cancelled'});return false;
       }
