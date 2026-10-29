@@ -822,14 +822,22 @@ registry.define('backup-provider',1,input=>{
             const projected=Object.freeze([...history.map(manifest=>Object.freeze({id:manifest.checkpoint.checkpointId,manifest})),Object.freeze({id:verifiedManifest.checkpoint.checkpointId,manifest:verifiedManifest})]);if(RepositoryCheckpointPipeline.selectRetention(projected,{now:new Date(Date.parse(verifiedManifest.exportedAt))}).remove.length)maintenanceNeeded=true;
             rememberVerifiedHistory(selected,item,Object.freeze({kind:'checkpoint',value:verifiedManifest}),item.verificationScope||null);OperationDiagnostics.mark('provider-manifest-upload-complete',{provider:selected.id});return item;
           }catch(error){
-            if(item)await selected.repository.delete(item).catch(()=>{});else await selected.repository.delete(Object.freeze({kind:'checkpoint',id:checkpointId,digest})).catch(()=>{});throw error;
+            // A retry can reuse a previously committed file, or an upload may
+            // succeed remotely before its response fails. Neither case grants
+            // ownership to delete this immutable identity. Verified repository
+            // maintenance, not this speculative error path, collects leftovers.
+            throw error;
           }
         },
         commit:async marker=>{
           requireBackupMutationControl('saving to '+selected.label);await marker.checkProtection?.();await marker.checkSource?.();if(publicationLease)await assertRepositoryPublication(selected,publicationLease);let item=null;
           OperationDiagnostics.mark('provider-commit-start',{provider:selected.id});progress(retention?.role==='before-restore'?'safety-commit':'commit',retention?.role==='before-restore'?`Committing safety version in ${selected.label}…`:`Committing and verifying the backup in ${selected.label}…`);
           try{item=repositoryProviderItem(await selected.repository.upload(Object.freeze({kind:'commit',id:marker.checkpointId,name:marker.checkpointId+'.sdcommit',blob:marker.blob,size:marker.size,digest:marker.digest,exportedAt:marker.exportedAt,appVersion:APP_VERSION,checkProtection:marker.checkProtection,checkSource:marker.checkSource,knownAbsent:!resuming})),'commit');const verifiedCommit=await verifyUploadedRepositoryCommit(selected,item,marker,signal);await marker.checkSource?.();rememberVerifiedHistory(selected,item,Object.freeze({kind:'commit',value:verifiedCommit}),item.verificationScope||null);OperationDiagnostics.mark('provider-commit-complete',{provider:selected.id});return item;}
-          catch(error){if(item)await selected.repository.delete(item).catch(()=>{});else await selected.repository.delete(Object.freeze({kind:'commit',id:marker.checkpointId,digest:marker.digest})).catch(()=>{});throw error;}
+          catch(error){
+            // A published commit can already be visible to readers even when
+            // verification or the upload response fails. Never retract it here.
+            throw error;
+          }
         },
         onCommitted:async context=>{OperationDiagnostics.mark('provider-checkpoint-committed',{provider:selected.id});RepositoryCheckpointPipeline.markCompleted({copy:{source:selected.id,sourceRevision:context.sourceRevision||context.exportedAt||''}});restartAutomaticCountdown(publicationOwner,context.sourceRevision||context.exportedAt);progress(retention?.role==='before-restore'?'safety-complete':'complete',retention?.role==='before-restore'?`Safety version saved in ${selected.label}.`:`Finishing ${selected.label} backup…`);return null;},
         cleanup:deferredMaintenance?async()=>{if(!maintenanceNeeded)return Object.freeze({warning:''});const scheduler=providerMaintenanceScheduler(selected);if(maintenanceDeferred&&maintenancePendingState&&scheduler){const due=Date.parse(String(maintenancePendingState.nextEligibleAt||'')),delay=Number.isFinite(due)?Math.max(1000,due-Date.now()):MAINTENANCE_POLICY.contentionMs;scheduler.schedule(delay,maintenanceReason||'repository-state','earliest');maintenanceQueued=true;}else maintenanceQueued=await scheduler?.request('repository-state',MAINTENANCE_POLICY.busyMs,{mode:'earliest'})===true;return Object.freeze({warning:maintenanceQueued?'':'Backup cleanup is still pending and will be retried on a later backup.'});}:async context=>{progress('finish',`Finishing ${selected.label} backup…`);const after=await repositoryProviderState(selected,{interactive:false}),warning=await cleanupRepositoryProvider(selected,after,context.manifest.checkpoint.checkpointId,{reuseObjectInventory:true});return Object.freeze({warning});},
@@ -842,12 +850,13 @@ registry.define('backup-provider',1,input=>{
           if(context.committed)return;
           if(context.retained){
             OperationDiagnostics.mark('provider-publication-retained',{provider:selected.id,status:'pending',beforeRestore:role==='before-restore'});
-            if(role==='normal')try{if(!await pendingRetryState(publicationOwner))await markPendingRetry(publicationOwner);}finally{schedulePendingProviderBackup(publicationOwner);}
+            if(role==='normal')try{if(!await pendingRetryState(publicationOwner))await markPendingRetry(publicationOwner);}finally{schedulePendingProviderBackup(publicationOwner,1000,{trigger:'publication-failure'});}
             return;
           }
-          if(context.commitReceipt)await selected.repository.delete(context.commitReceipt).catch(()=>{});
-          if(context.publication)await selected.repository.delete(context.publication).catch(()=>{});
-          for(const row of context.written)if(row.receipt)await selected.repository.delete(row.receipt).catch(()=>{});
+          // No receipt here proves creation by this attempt. In particular,
+          // an upload may have succeeded before its response failed, and a
+          // resumed attempt may have reused an already committed identity.
+          // Retention/inventory verification is the only safe deletion path.
           if(deferredMaintenance)await providerMaintenanceScheduler(selected)?.request('failure-cleanup',MAINTENANCE_POLICY.continuationMs,{mode:'earliest'});
         }
       }));
@@ -1218,11 +1227,18 @@ registry.define('backup-provider',1,input=>{
       return freeze({status:'pending',reason:newer?'needs-update':behind?'behind':sessionAhead?'session-owner':turn?'turn':String(error&&error.message||error)});
     }finally{notifyStatus();}
   }
+  // Opaque canonical timestamps are compared for *change*, not ordering:
+  // the attempted revision must not govern a newer edit's urgent deadline.
+  function canonicalConvergenceRevision(){
+    try{const value=String(automaticHooks?.current?.()||'');return Number.isFinite(Date.parse(value))?value:'';}
+    catch(error){AppDiagnostics.capture('backup-provider.canonical-revision',error,'warn');return '';}
+  }
   function providerConvergenceJob(selected){
     if(!selected?.repository||!pendingRetryHooks)return null;const id=safeId(selected.id);
     let job=providerConvergenceJobs.get(id);if(job)return job;const background=providerBackground(selected);
     job=background.registerJob('convergence',{isAvailable:()=>{const available=providerBackgroundAvailability(selected),saved=providerPublications.get(id)?.continuation.status();return available===true&&saved?.pending&&saved.role==='before-restore'?'awaiting-foreground':available;},retryMs:PROVIDER_CONVERGENCE_RETRY_DELAYS[0],capture:error=>AppDiagnostics.capture('backup-provider.convergence-lifecycle',error,'warn'),execute:async({trigger,nextEligibleAt:eligibleAt})=>{
       let scope=null,traceId='';
+      const attemptRevision=canonicalConvergenceRevision();
       try{
         const owed=!!await pendingRetryState(selected)||providerPublications.get(selected.id)?.continuation.status().pending===true,syncDue=syncCheckDue(selected,trigger),sync=sharedSyncing(selected)?syncState(selected):null;
         if(sync)job.schedule(AUTOMATIC_QUIET_MS,'sync','earliest');
@@ -1258,11 +1274,11 @@ registry.define('backup-provider',1,input=>{
         else if(['none','local-empty'].includes(result.reason))resetConvergenceRetry(selected);
         // Waiting for an app update is not a failure: no retry ladder, and the
         // regular check looks again (removing that version wakes it sooner).
-        else if(result.reason==='needs-update'){resetConvergenceRetry(selected);schedulePendingProviderBackup(selected,AUTOMATIC_QUIET_MS,{backoff:true});}
+        else if(result.reason==='needs-update'){resetConvergenceRetry(selected);schedulePendingProviderBackup(selected,AUTOMATIC_QUIET_MS,{backoff:true,attemptRevision,trigger:'needs-update'});}
         // Drive moved on, or another device is backing up there: catch up or take turns.
-        else if(['behind','turn'].includes(result.reason)){if(sync&&result.reason==='behind')sync.behind=true;const turns=syncState(selected).turnWaits;schedulePendingProviderBackup(selected,result.reason==='behind'?1000:SYNC_TURN_RETRY_DELAYS[Math.min(Math.max(0,turns-1),SYNC_TURN_RETRY_DELAYS.length-1)],{backoff:result.reason==='turn'});}
-        else if(result.reason==='source'){resetConvergenceRetry(selected);if(!scheduleAutomaticBackup(selected))schedulePendingProviderBackup(selected,AUTOMATIC_QUIET_MS);}
-        else schedulePendingProviderBackup(selected,scope.signal.aborted?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay(selected),{backoff:!scope.signal.aborted});
+        else if(['behind','turn'].includes(result.reason)){if(sync&&result.reason==='behind')sync.behind=true;const turns=syncState(selected).turnWaits;schedulePendingProviderBackup(selected,result.reason==='behind'?1000:SYNC_TURN_RETRY_DELAYS[Math.min(Math.max(0,turns-1),SYNC_TURN_RETRY_DELAYS.length-1)],{backoff:result.reason==='turn',attemptRevision,trigger:result.reason==='turn'?'sync-turn':'shared-behind'});}
+        else if(result.reason==='source'){resetConvergenceRetry(selected);if(!scheduleAutomaticBackup(selected))schedulePendingProviderBackup(selected,AUTOMATIC_QUIET_MS,{trigger:'source-changed'});}
+        else schedulePendingProviderBackup(selected,scope.signal.aborted?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay(selected),{backoff:!scope.signal.aborted,attemptRevision,trigger:scope.signal.aborted?'background-preempted':'retry-failure'});
         return result;
       }catch(error){
         const preempted=scope?.signal.aborted&&error?.name==='AbortError';
@@ -1272,14 +1288,20 @@ registry.define('backup-provider',1,input=>{
         else{OperationDiagnostics.fail(error,{background:true,status:'unavailable'},traceId);AppDiagnostics.capture('backup-provider.pending-retry-background',error,'warn');}
         // A failed read is unknown, not absence. The next bounded opportunity
         // checks the durable marker again; do not read it again in this handler.
-        schedulePendingProviderBackup(selected,preempted?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay(selected),{backoff:!preempted});
+        schedulePendingProviderBackup(selected,preempted?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay(selected),{backoff:!preempted,attemptRevision,trigger:preempted?'background-preempted':'state-read-failed'});
         return freeze({status:'unavailable',reason:preempted?'preempted':'state-read-failed'});
       }finally{scope?.release();}
     }});providerConvergenceJobs.set(id,job);return job;
   }
-  // Ordinary deferrals preserve an earlier urgent request. An actual failure or
-  // cross-device turn explicitly enforces its governed retry/backoff instead.
-  function schedulePendingProviderBackup(selected,delay=1000,{backoff=false}={}){const job=providerConvergenceJob(selected);return !!job&&job.schedule(Math.max(1000,Number(delay)||1000),'managed-recovery',backoff?'replace':'earliest')!==false;}
+  // Backoff supersedes urgency for the *same* failed revision, but must not
+  // push back a higher-priority request for a newer canonical revision.
+  // A missing revision is treated conservatively as the same failed work.
+  function schedulePendingProviderBackup(selected,delay=1000,{backoff=false,attemptRevision='',trigger='pending-retry'}={}){
+    const job=providerConvergenceJob(selected);
+    if(!job)return false;
+    const newer=backoff&&attemptRevision&&canonicalConvergenceRevision()!==attemptRevision;
+    return job.schedule(Math.max(1000,Number(delay)||1000),String(trigger||'pending-retry'),backoff&&!newer?'replace':'earliest')!==false;
+  }
   function wakeProviderBackground(selected,trigger='eligibility'){
     if(!selected?.repository)return false;
     try{
@@ -1311,7 +1333,7 @@ registry.define('backup-provider',1,input=>{
     if(!result||result.cancelled)return freeze({source:freeze({status:'skipped',reason:'cancelled'}),others:freeze([])});
     let source;
     if(sourceNeeded){
-      const retryQueued=await markPendingRetry(selected),scheduled=retryQueued&&schedulePendingProviderBackup(selected,1000);
+      const retryQueued=await markPendingRetry(selected),scheduled=retryQueued&&schedulePendingProviderBackup(selected,1000,{trigger:'managed-recovery'});
       source=freeze({status:retryQueued?'pending':'failed',reason:retryQueued?(scheduled?'scheduled':'managed-recovery'):'automatic retry could not be queued',retryQueued,scheduled:scheduled===true,shared:selected.shared===true});
     }else{
       providerBackground(selected).clearScheduled('convergence');

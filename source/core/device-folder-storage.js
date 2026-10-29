@@ -190,7 +190,14 @@ registry.define('device-folder-storage',1,()=>{
     async function remove(item){
       const spec=KINDS[item&&item.kind];if(!spec||!spec.pattern.test(String(item.id||'')+spec.suffix))throw new Error('A Study Director backup deletion request has an invalid identity.');
       const dirs=await directories(),name=item.id+spec.suffix,directory=dirs[spec.directory];
-      if(item.remoteVersion){const current=await fileOrNull(directory,name);if(!current)return false;if(String(Math.max(1,Math.floor(Number(current.lastModified)||1)))!==String(item.remoteVersion))throw new Error('A Study Director backup file changed before deletion. Nothing was removed.');}
+      if(item.remoteVersion||item.digest){
+        const current=await fileOrNull(directory,name);if(!current)return false;
+        if(item.remoteVersion&&String(Math.max(1,Math.floor(Number(current.lastModified)||1)))!==String(item.remoteVersion))throw new Error('A Study Director backup file changed before deletion. Nothing was removed.');
+        if(item.digest){
+          const expected=String(item.digest);
+          if(!/^[a-f0-9]{64}$/u.test(expected)||await input.checksum(current,{})!==expected)throw new Error('A Study Director backup file changed checksum before deletion. Nothing was removed.');
+        }
+      }
       try{await bounded(directory.removeEntry(name),`Device Folder remove ${name}`);return true;}catch(error){if(error&&error.name==='NotFoundError')return false;throw error;}
     }
     // Locks are marker files; their age comes from the file's modified time.

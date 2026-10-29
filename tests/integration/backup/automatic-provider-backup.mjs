@@ -206,14 +206,25 @@ const cases=[];
   cases.push('no Drive upload while this device holds data from a newer version');
 }
 {
-  // A real failed upload is governed by the failure retry, even if another
-  // urgent edit arrives while that failed attempt is still running.
+  // A new canonical revision gets its own urgent deadline even if the
+  // preceding revision fails, while a repeated signal for the same revision
+  // must not defeat the failed work's backoff.
   const t=fixture({covered:'2026-10-06T08:00:00.000Z'});await tick(t,1000);
   let attempts=0;t.onPublication(()=>{attempts++;if(attempts===1){t.change(true);throw new Error('Simulated provider outage');}});
   t.change(true);await tick(t,t.policy.automaticUrgentMs+1000);
   assert.equal(attempts,1,'the first urgent attempt failed');
-  await tick(t,20*1000);assert.equal(attempts,1,'a concurrent urgent edit must not bypass the failure backoff');
-  await tick(t,12*1000);assert.equal(attempts,2,'the durable canonical change is retried after the governed backoff');
-  cases.push('failure backoff survives urgency arriving during a failed upload');
+  assert.equal(t.runtime.backgroundStatus().find(row=>row.job==='google-drive convergence').reason,'important-change','a newer revision keeps its urgent trigger');
+  await tick(t,t.policy.automaticUrgentMs+1000);
+  assert.equal(attempts,2,'a new revision must not be delayed by the previous revision backoff');
+  cases.push('new canonical revision retains urgent scheduling through failed attempt');
+}
+{
+  const t=fixture({covered:'2026-10-06T08:00:00.000Z'});await tick(t,1000);
+  let attempts=0;t.onPublication(()=>{attempts++;if(attempts===1){t.runtime.noteChange({urgent:true});throw new Error('Simulated provider outage');}});
+  t.change(true);await tick(t,t.policy.automaticUrgentMs+1000);
+  assert.equal(attempts,1);
+  await tick(t,20*1000);assert.equal(attempts,1,'same-revision urgency cannot bypass backoff');
+  await tick(t,12*1000);assert.equal(attempts,2,'same failed revision retries on the governed backoff');
+  cases.push('same-revision urgency obeys backoff');
 }
 console.log(JSON.stringify({status:'PASS',suite:'automatic-provider-backup',productionRuntime:true,cases},null,2));

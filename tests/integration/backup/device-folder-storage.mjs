@@ -50,6 +50,17 @@ assert.equal(await (await storage.download(object)).text(),'object bytes');
 await assert.rejects(()=>storage.upload(freeze({kind:'object',id:objectId(1),blob:new Blob(['object bytes'])})),/identity collision/u);
 assert.equal(await (await storage.download(object)).text(),'object bytes');
 
+// A digest mismatch in a retry cleanup cannot delete a pre-existing
+// immutable file, even if the caller knows its correct kind and identity.
+for(const [kind,fileId,original] of [
+  ['object',objectId(1),'object bytes'],
+  ['checkpoint',id(1),JSON.stringify({id:id(1)})],
+  ['commit',id(1),'commit bytes']
+]){
+  const wrongDigest=await sha256(new Blob(['not the existing file']));
+  await assert.rejects(()=>storage.delete(freeze({kind,id:fileId,digest:wrongDigest})),/changed checksum before deletion/u);
+  assert.equal(await (await storage.download(freeze({kind,id:fileId}))).text(),original);
+}
 // A range read (integrity verification) carries the file's size and version,
 // the same shape Drive returns; a range outside the file is refused.
 {
