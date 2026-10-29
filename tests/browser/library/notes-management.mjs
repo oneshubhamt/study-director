@@ -345,7 +345,8 @@ try{
   assert.ok(Math.abs((resized.before-resized.narrowerWidth)-64)<=2,`Shift+ArrowLeft should narrow the list by about 64 CSS px (got ${resized.before-resized.narrowerWidth}).`);
   assert.ok(Number.isFinite(resized.savedWidth)&&Math.abs(resized.savedWidth-resized.narrowerWidth)<=2,`remembered list width should match the rendered track within CSS-grid rounding (saved ${resized.savedWidth}, rendered ${resized.narrowerWidth}).`);
   assert.ok(Math.abs(resized.minimum-200)<=2,`Home should clamp the rendered notes list to the 200 px minimum within CSS-grid rounding (got ${resized.minimum}).`);
-  assert.equal(resized.reset,true);assert.equal(resized.cleared,true);
+  assert.equal(resized.reset,true,`Enter must restore one-third layout (before ${resized.before}px; actual delta ${resized.before-resized.narrowerWidth}px).`);
+  assert.equal(resized.cleared,true,`Enter must remove the persisted custom list width: ${JSON.stringify(resized)}`);
   await page.click('#library-notes-resizer');
   result.checks.notesListResizable=true;
 

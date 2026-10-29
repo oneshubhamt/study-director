@@ -48,7 +48,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('attachment-library','tests/browser/attachments/attachments.mjs',['attachments','pdf','audio','opfs','references','streaming','atomic-import','trusted-types'],180000),
     test('insights-performance','tests/browser/insights/insights-performance.mjs',['insights','performance','worker','progressive-rendering','fallback'],0,{alone:'This suite enforces wall-clock and long-task performance budgets, so it must run without another browser workload competing for CPU.'}),
     test('maximum-insights','tests/browser/insights/insights-maximum-import.mjs',['insights','maximum-import']),
-    test('notes-at-limit','tests/browser/library/notes-at-limit.mjs',['library','notes','performance','capacity','search','tags','backup'],240000),
+    test('notes-at-limit','tests/browser/library/notes-at-limit.mjs',['library','notes','performance','capacity','search','tags','backup'],240000,{alone:'This test enforces startup wall-clock and keystroke latency budgets at two thousand notes; concurrent Chromium workloads would measure shared CPU contention instead of this app.'}),
     test('production-capacity','tests/browser/storage/capacity.mjs',['capacity','restore','reload','re-export','rollback'],300000),
     test('rich-editor-hotpath','tests/browser/rich-text/rich-editor-hotpath.mjs',['rich-editor','performance','persistence']),
     test('lifecycle-concurrency-memory','tests/browser/rich-text/image-memory.mjs',['rich-editor','wordgard','memory','lifecycle','background','image','multi-editor']),
