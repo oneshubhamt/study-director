@@ -225,6 +225,10 @@ try{
       await owner.evaluate(`(async()=>{const d=__PWA6;d.AppData.notes.update('medicine','Medicine','TabsQA note','');await d.AppData.notes.flush({strict:true});})()`);
       const other=await browser.createPage(server.url('deployment','instrumented.html'),{preload,viewport:{width:1280,height:860,mobile:false,scale:1}});pages.push(other);
       await waitForStudyDirector(other,{instrumented:true});await waitFor(()=>other.evaluate(`!__PWA6.AppOwnership.status().hasControl`),{label:'background tab'});
+      // A tab cannot classify its first-ever database open as a *reopen*
+      // after deletion. Establish its original connection before clearing,
+      // as a background tab that has already inspected notes would do.
+      assert.ok(await other.evaluate(`__PWA6.AppData.notes.readFreshPayload().then(rows=>Object.values(rows).some(row=>row.text==='TabsQA note'))`),'the background tab must first have seen the old database');
       await owner.send('Storage.clearDataForOrigin',{origin:server.origin,storageTypes:'all'});
       await other.evaluate(`__PWA6.AppData.notes.readFreshPayload().catch(()=>null)`);
       try{
