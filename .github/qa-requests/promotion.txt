@@ -1,18 +1,17 @@
 Promotion QA request
 
-Request: backup-p1-p2-correctness-closure-r4-2026-10-30
-Source/test revision: 90d63f2a1675f3ee1ecb4afe6f6435a7edd9faee (the request commit itself changes only this QA request file)
+Request: backup-p1-p2-correctness-closure-r5-2026-10-30
+Source/test revision: 44a05597de184e2704740b519a3660d67c56887c (the request commit itself changes only this QA request file)
 
 Run full Promotion QA on the current branch.
 
-Correctness objectives:
-- backup source revision uses the freshest valid projection and startup reconciles the durable mutation clock before automatic provider activation;
-- every catch-up/turn/failure backoff carries its attempt revision, so same-revision backoff may govern itself but cannot postpone a newer canonical revision's earlier opportunity;
-- pending-provider scheduling retains exact trigger provenance;
-- automatic Drive catch-up atomically respects provider background suspension before admission and if a suspension arrives after admission, while explicit/manual foreground behavior is unchanged;
-- managed recovery durably records every configured automatic destination that owes recovered canonical state, including temporarily unavailable configured peers;
-- recovery convergence is not reported complete if any configured peer intent failed to persist; explicit disconnect/forget retires that provider's obligation.
+This revision closes the actual revision-ordering seam exposed by r4: when a failed attempt detects that the canonical revision changed while it was running, it explicitly reasserts that newer state's normal automatic/urgent deadline before recording the old attempt's backoff. Same-revision backoff may still replace its own deadline.
 
-The newest behavioral tests assert the actual scheduling contract (deadline preservation) rather than requiring a particular diagnostic label to win when an even-earlier sync request already owns the slot. Provenance is asserted independently at source and runtime when each retry owns execution.
+Also certify:
+- freshest backup source revision projection and startup change-clock reconciliation before automatic-provider activation;
+- exact trigger provenance on all pending-provider schedules;
+- suspension-aware automatic Drive catch-up, without changing manual foreground semantics;
+- durable managed-recovery obligations for every configured automatic destination, including temporarily unavailable peers;
+- recovery convergence remains pending if any configured peer intent could not be persisted; explicit disconnect/forget retires the obligation.
 
-No workflow policy/timing budget changes. Lower-priority efficiency/liveness refinements remain deferred to the next pass.
+No workflow/timing-budget changes. Lower-priority efficiency/liveness refinements remain deferred.
