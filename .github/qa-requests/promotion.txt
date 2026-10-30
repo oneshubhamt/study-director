@@ -1,12 +1,25 @@
 Promotion QA request
 
-Request: current-fixes-manual-turn-diagnostic-2026-10-30
-Source/test revision: b5d46826abb37a05de78f6c0e04de8a9bdd55c88 (trigger commit changes only this QA request file)
+Request: current-fixes-final-promotion-r6-2026-10-30
+Source/test revision: ea287d74a9204ce9832a83a974e34e35f45e9939 (trigger commit changes only this QA request file)
 
-Run Promotion QA. This diagnostic pass changes only the failing manual-turn assertion message so the hermetic result reports:
-- fake-clock time and canonical revision,
-- convergence pending reason/deadline,
-- publication attempt times,
-- provider-convergence triggers/eligibility.
+Run full Promotion QA on current-fixes.
 
-Production behavior is unchanged from bc9ebc0927f584f1235c5388842fd901fad91841. Do not alter workflow policy.
+The two previously failing revision-aware convergence regressions now exercise their intended behavior correctly:
+- async catch-up timing is measured from the actual canonical change and flushes a due-at-now fake-clock task;
+- the manual shared-turn case first creates real canonical work, so its publication hook genuinely runs before creating a second urgent revision and simulating turn loss.
+
+Production behavior remains the scheduler-owned convergence implementation already under test.
+
+Certify the complete branch:
+- backup freshness/startup gating;
+- revision-aware convergence and durable retry intent;
+- suspension/preemption and managed recovery;
+- independent Device Folder/Google Drive publication;
+- shared Active Session ownership;
+- restore verification/rollback, retention, cleanup and integrity;
+- PWA/service-worker and built-runtime behavior;
+- Insights performance;
+- full hermetic, risk, mutation, branch-edge, release and browser certification.
+
+No workflow policy change is part of this request.
