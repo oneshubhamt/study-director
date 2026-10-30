@@ -14,7 +14,7 @@ const freeze=Object.freeze,noop=()=>{},MINUTE=60*1000;
 // location with versions of its own, for the sync catch-up.
 // share: whether this device may upload to the shared location (no while it
 // holds data from a newer version).
-function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shared=both,driveList=null,driveDownload=null,sharedBase=async()=>null,share=()=>true}={}){
+function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shared=both,driveList=null,driveDownload=null,sharedBase=async()=>null,share=()=>true,manual=false}={}){
   const clock=createFakeClock('2026-10-06T08:00:00.000Z'),emitted=[],publishedAt=[],publishedBy=[],diagnosticStarts=[],coveredBy=new Map();
   let current=new clock.Date().toISOString(),authorized=signedIn,expiresAt=clock.now()+expiresInMs,listener=null,publicationHook=noop,durable=null;
   const context={Object,Symbol,TypeError,Error,Date:clock.Date,AbortController,Blob,Promise,Map,Set,TextEncoder,Uint8Array,console,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout};context.globalThis=context;vm.createContext(context);
@@ -27,7 +27,7 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shar
   const unexpected=()=>{throw new Error('Unexpected executor in the automatic backup test');};
   const pipeline=freeze({noteObject:unexpected,readNote:unexpected,createPublication:unexpected,publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,sharedBase,establishBase:unexpected,verifyObject:unexpected,inspectCommit:unexpected,
     publish:async(_history,options,executor)=>{
-      assert.equal(options.interactive,false,'automatic backups never prompt');
+      assert.equal(options.interactive,manual===true,manual?'manual foreground backup must use the interactive provider path':'automatic backups never prompt');
       const captured=current;publishedAt.push(clock.now());publishedBy.push(freeze({by:both&&options.shared!==true?'device-folder':'google-drive',at:clock.now()}));await publicationHook(options);
       await executor.onCommitted(freeze({sourceRevision:captured,exportedAt:captured}));
       return {checkpointId:'cp_'+'a'.repeat(32),sourceRevision:captured,publication:{name:'cp_'+'a'.repeat(32)},manifest:{objects:[]}};
@@ -184,7 +184,7 @@ const cases=[];
 {
   // A manual shared upload that loses its turn may discover a newer local edit
   // during the attempt. That edit keeps its urgent deadline.
-  const t=fixture({covered:'2026-10-06T08:00:00.000Z',shared:true});await tick(t,1000);let first=true;
+  const t=fixture({covered:'2026-10-06T08:00:00.000Z',shared:true,manual:true});await tick(t,1000);let first=true;
   // Give Back up now real canonical work. The publication hook then creates a
   // second urgent revision inside that in-flight attempt before simulating turn loss.
   t.change();
@@ -193,7 +193,7 @@ const cases=[];
   assert.equal(first,false,'manual turn regression must reach the publication hook');
   assert.equal(t.publishedAt.length,1,'manual turn regression must exercise exactly one publication attempt before checking its retry deadline');
   const pending=t.runtime.backgroundStatus().find(row=>row.job==='google-drive convergence'),dueAt=Date.parse(pending?.nextEligibleAt||'');
-  assert.ok(Number.isFinite(dueAt)&&dueAt<=t.clock.now()+t.policy.automaticUrgentMs+1000,`manual-turn deadline state=${JSON.stringify({now:t.clock.now(),urgentMs:t.policy.automaticUrgentMs,pending,publishedAt:t.publishedAt,starts:t.diagnosticStarts.filter(row=>row.name==='provider-convergence')})}`);
+  assert.ok(Number.isFinite(dueAt)&&dueAt<=t.clock.now()+t.policy.automaticUrgentMs+1000,'manual turn backoff must not push the newer canonical revision behind its urgent deadline');
   await tick(t,t.policy.automaticUrgentMs+5000);assert.ok(t.publishedAt.length>=2,'newer local work must run before the turn retry deadline');
   cases.push('manual shared turn backoff preserves a newer canonical revision');
 }
