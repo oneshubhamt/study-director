@@ -4734,13 +4734,15 @@ function recordBackupCopy(copy){
 // backed up. Seeding the clock also keeps later saves later after a reload.
 async function reconcileChangeClock(){
   const recorded=String(readStorageHealth().lastLocalSaveAt||'');let latest=recorded;
-  try{latest=await AppData.mutationEpoch.latestChangeAt(recorded);}catch(error){AppDiagnostics.capture('backup.change-clock-read',error,'warn');return false;}
+  try{latest=await AppData.mutationEpoch.latestChangeAt(recorded);}catch(error){AppDiagnostics.capture('backup.change-clock-read',error,'error');throw error;}
   if(latest===recorded)return false;
   writeStorageHealth({lastLocalSaveAt:latest});return true;
 }
 let startupChangeClockReady=null;
 function reconcileStartupChangeClock(){
-  if(!startupChangeClockReady)startupChangeClockReady=reconcileChangeClock();
+  // An unknown durable clock cannot authorize automatic provider work.
+  // Do not memoize a transient failure as a successful startup check.
+  if(!startupChangeClockReady)startupChangeClockReady=reconcileChangeClock().catch(error=>{startupChangeClockReady=null;throw error;});
   return startupChangeClockReady;
 }
 async function installVerifiedRecoveryFreshness(){
