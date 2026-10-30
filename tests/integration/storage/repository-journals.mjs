@@ -33,6 +33,13 @@ assert.equal(restore.payload.version,5);
 assert.equal(JSON.stringify(restore.payload.savedDayDeletions),JSON.stringify(rollbackDeletions),'restore journal must persist the Saved-Day deletion ledger needed for exact rollback');
 assert.equal(JSON.stringify(restore.payload.noteDeletions),JSON.stringify(rollbackNoteDeletions),'restore journal must persist note deletion history for exact rollback');
 assert.equal(JSON.stringify(restore.payload.attachmentDeletions),JSON.stringify(rollbackAttachmentDeletions),'restore journal must persist Attachment Library deletion history for exact rollback');
+const initialPayload=restore.payload;
+for(const id of [restoreId,'restore_qa-journal-other']){
+  await assert.rejects(()=>app.restoreJournal.prepare(Object.freeze({id,blob:new Blob(['MUST NOT REPLACE']),filename:'override.sdbackup',scheduleText:''})),/still requires recovery/u,'new journal preparation must not overwrite an existing rollback');
+}
+assert.equal((await app.restoreJournal.read()).state.id,restoreId);
+assert.equal(await (await app.restoreJournal.read()).payload.blob.text(),'safety-copy','original recovery data survives duplicate and competing journal preparations');
+
 await app.restoreJournal.mark(restoreId,'committing');
 restore=await app.restoreJournal.read();
 assert.equal(restore.state.phase,'committing');
@@ -41,6 +48,12 @@ await app.restoreJournal.clear(restoreId);
 assert.equal(idbDurability.strict,restoreStrictBefore+1,'restore journal retirement must use strict durability');
 assert.equal(idbDurability.normal,restoreNormalBefore,'restore journal retirement must not fall back to a normal durability transaction');
 assert.equal(await app.restoreJournal.read(),null,'restore journal should disappear only after explicit cleanup');
+await journalMeta.write('restoreJournalPayload',initialPayload);
+await assert.rejects(()=>app.restoreJournal.read(),/incomplete or corrupted/u,'orphan payload must fail closed');
+await assert.rejects(()=>app.restoreJournal.prepare(Object.freeze({id:'restore_qa-orphan-payload',blob:new Blob(['new']),filename:'new.sdbackup',scheduleText:''})),/still requires recovery/u,'orphan payload cannot be overwritten');
+await assert.rejects(()=>app.restoreJournal.clear(),/incomplete or mismatched/u,'clear must preserve orphaned rollback payload');
+await journalMeta.remove('restoreJournalPayload');
+
 
 const libraryClearId='libraryclear_qa-journal-0001';
 const payload=Object.freeze({planSignature:'qa-signature',savedDays:Object.freeze({'2026-09-13':Object.freeze({date:'2026-09-13'})})});
@@ -79,6 +92,12 @@ assert.equal(await app.mutationLease.release('bad'),false);
 const held=await app.mutationLease.acquire(Object.freeze({id:'mutation_qa-journal-0004',owner:'tab_qa-journal-owner-0004',kind:'restore',expiresAt:clock.now()+60_000}));assert.equal(held.acquired,true);assert.equal(await app.mutationLease.release('mutation_qa-journal-wrong'),false);assert.equal(await app.mutationLease.release('mutation_qa-journal-0004'),true);
 await assert.rejects(()=>app.restoreJournal.mark('bad','committing'),/phase is invalid/u);
 await app.restoreJournal.prepare(Object.freeze({id:'restore_qa-journal-0002',blob:new Blob(['rollback']),filename:'qa2.sdbackup',scheduleText:''}));
+const original=await app.restoreJournal.read();
+await journalMeta.write('restoreJournalPayload',Object.freeze({...original.payload,id:'restore_qa-journal-other'}));
+await assert.rejects(()=>app.restoreJournal.read(),/incomplete or corrupted/u,'a mismatched pair cannot be accepted');
+await assert.rejects(()=>app.restoreJournal.clear('restore_qa-journal-0002'),/incomplete or mismatched/u,'a mismatched pair must not be retired');
+await journalMeta.write('restoreJournalPayload',original.payload);
+
 await assert.rejects(()=>app.restoreJournal.mark('restore_qa-journal-other','committing'),/identity changed/u);
 await assert.rejects(()=>app.restoreJournal.clear('restore_qa-journal-other'),/identity changed/u);
 await app.restoreJournal.clear();assert.equal(await app.restoreJournal.read(),null);
@@ -96,7 +115,8 @@ console.log(JSON.stringify({status:'PASS',suite:'repository-journals',contracts:
 await app.restoreJournal.prepare(Object.freeze({id:'restore_qa-diagnostic-0001',blob:new Blob(['PRIVATE DATA']),filename:'private.sdbackup',scheduleText:''}));
 assert.ok(stores.meta.has('restoreJournalPayload'));stores.meta.delete('restoreJournalPayload');assert.equal((await app.restoreJournal.diagnostics()).phase,'prepared');assert.equal(stores.meta.has('restoreJournalPayload'),false,'diagnostics must not repair or write a missing payload');
 assert.equal((await app.metadata.diagnostics()).maintenanceStatus,'never');assert.equal((await app.metadata.diagnostics()).deletions,0);assert.equal((await app.metadata.diagnostics()).localRecovery,false);
-await app.restoreJournal.clear();assert.equal(await app.restoreJournal.diagnostics(),null);assert.equal(await app.libraryClearJournal.diagnostics(),null);
+await assert.rejects(()=>app.restoreJournal.clear(),/incomplete or mismatched/u,'state-only journal must be preserved for manual recovery');
+await journalMeta.remove('restoreJournalState');await app.restoreJournal.clear();assert.equal(await app.restoreJournal.diagnostics(),null);assert.equal(await app.libraryClearJournal.diagnostics(),null);
 console.log(JSON.stringify({status:'PASS',suite:'read-only-data-diagnostics',headerOnly:true,noPayloadRepair:true,metadataSummary:true},null,2));
 
 {const failures=new Set(['deletionRecovery']),h=createHarness(new Map(),null,{failLocalGetKeys:failures});await assert.rejects(h.app.metadata.diagnostics(),/local recovery read failure/u);}
