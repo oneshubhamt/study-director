@@ -141,7 +141,8 @@ registry.define('repository-journals',1,()=>{
           let state,payload;
           try{state=header.value();payload=body.value();}catch(error){fail(error);return;}
           if(!!state!==!!payload||state&&payload&&state.id!==payload.id){fail(new Error('Restore journal is incomplete or mismatched. Recovery evidence was preserved.'));return;}
-          if(expected&&state&&state.id!==expected){fail(new Error('Restore journal identity changed before cleanup.'));return;}
+          if(expected&&!state){fail(new Error('Restore journal disappeared before cleanup. Recovery status is uncertain.'));return;}
+          if(expected&&state.id!==expected){fail(new Error('Restore journal identity changed before cleanup.'));return;}
           try{
             if(state){meta.remove('restoreJournalState');meta.remove('restoreJournalPayload');}
             tx.oncomplete=()=>finish(true,true);
