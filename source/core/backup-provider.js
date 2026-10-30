@@ -1301,12 +1301,13 @@ registry.define('backup-provider',1,input=>{
   function schedulePendingProviderBackup(selected,delay=1000,{backoff=false,attemptRevision='',trigger='pending-retry'}={}){
     const job=providerConvergenceJob(selected);
     if(!job)return false;
-    const newer=backoff&&attemptRevision&&canonicalConvergenceRevision()!==attemptRevision;
-    // Reassert the newer mutation's normal deadline before recording the old
-    // attempt's retry. Correctness must not depend on its timer surviving an
-    // in-flight catch-up/foreground ownership transition.
-    if(newer)scheduleAutomaticBackup(selected,{urgent:Number.isFinite(automaticState(selected).urgentSince)});
-    return job.schedule(Math.max(1000,Number(delay)||1000),String(trigger||'pending-retry'),backoff&&!newer?'replace':'earliest')!==false;
+    const newer=backoff&&attemptRevision&&canonicalConvergenceRevision()!==attemptRevision,automaticDeadline=automaticDueAt(selected);
+    const unspentAutomatic=backoff&&automaticNeeded(selected)&&Number.isFinite(automaticDeadline)&&automaticDeadline>Date.now()+50;
+    // A failure may replace only work it actually attempted. Preserve a newer
+    // revision and any automatic opportunity whose deadline is still ahead;
+    // once that deadline is due, same-revision failure backoff may govern.
+    if(newer||unspentAutomatic)scheduleAutomaticBackup(selected,{urgent:Number.isFinite(automaticState(selected).urgentSince)});
+    return job.schedule(Math.max(1000,Number(delay)||1000),String(trigger||'pending-retry'),backoff&&!newer&&!unspentAutomatic?'replace':'earliest')!==false;
   }
   function wakeProviderBackground(selected,trigger='eligibility'){
     if(!selected?.repository)return false;
