@@ -275,8 +275,9 @@ Each item below records **baseline observation → risk → required investigati
 | app.html freshness/receipt; backup-capture.js; backup-codec.js | F4, F5, F8 | Pass B follows A; preserve old-format readers |
 | app.html reset; repositories-notes.js; profiles.js; repositories.js | F2, F9, F12, F13 | Pass C; retain rescue and ownership semantics |
 | asset-storage.js; managed-repository.js; backup-provider.js; device-folder-storage.js | F10, F11, F14 | Pass D; avoid blanket remote rehash |
-| source/external/drive.js; managed-repository.js; backup-provider.js; production-limits.mjs | F15–F19 | Pass E; record explicit product/security choices |
-| backup-provider.js; backup.js; app.html; relevant helper modules | F20, any remaining duplications | Pass F only after behavior stabilizes |
+| source/external/drive.js; backup-provider.js | F15 | Focused Pass E: Drive upload restart and retry safety |
+| managed-repository.js; backup-provider.js; production-limits.mjs | F16–F19 | Policy entries accepted/deferred in Entry 001; no code task without new evidence |
+| backup-provider.js; backup.js; app.html; relevant helper modules | F20 | Deferred: no module splitting by size alone; only proven necessary cleanup within other passes |
 
 **Baseline must not be treated as current after a new commit.** Recheck exact line numbers at each start.
 
@@ -340,19 +341,16 @@ Each item below records **baseline observation → risk → required investigati
 **Objective verification:** (D1) detected corrupt bytes cannot be silently restored/published as complete; (D2) cache never alone proves a destructive action safe; (D3) reused object verification guarantees are explicit; (D4) no unnecessary full re-download/hash.  
 **Targeted QA:** Missing file, wrong size, same-size modified bytes, stale digest key, quarantine/recovery and reused objects.
 
-### Pass E — Provider resilience, retention policy, security and capacity
+### Pass E — Focused Drive upload continuity (F15 only)
 **Status:** NOT STARTED. **Active ID: F15.** F16–F18 resolved by policy; F19 deferred. **Depends:** B and D.  
-**Audit:** Drive upload continuity/collisions; device-specific transport differences; current/legacy retention; auth token storage and CSP; background eligibility; binary streaming/memory/quota.  
-**Plan:** Choose policies explicitly and do not implement complexity without value. Show per-provider pending/current/permission/failure states truthfully.  
-**Objective verification:** (E1) stopped uploads cannot yield false verified commit; (E2) history policy is justified and safe; (E3) token lifetime and exposure understood; (E4) no false closed-PWA scheduling promises; (E5) large datasets fail safely without destroying canonical data; (E6) two providers remain independent.  
-**Targeted QA:** Interrupted Drive upload/restart, identity collisions, old-version retirement, permission expiry, offline/resume, simulated low quota and capacity bounds.
+**Audit:** Trace Drive multipart/resumable publication, in-memory upload sessions, interruption, expiring uploads, remote identity checks, retry and commit-marker verification. Compare only relevant Device Folder transport contracts.  
+**Plan:** Preserve existing safe retry and server checksum verification. Implement durable upload-session persistence only if a concrete benefit clearly exceeds added security/complexity risk. Do not reopen F16–F19.  
+**Objective verification:** (E1) interrupted/restarted upload cannot produce a false commit; (E2) identical/replayed content resolves safely; (E3) conflicting identity is rejected; (E4) remote errors preserve canonical source and retry eligibility; (E5) no unnecessary auth or data rereads; (E6) independent Device Folder behavior remains unchanged.  
+**Targeted QA:** Interrupted/resumed uploads, process restart, expired resumable session, ambiguous completion, identity collisions, provider checksums and cancellation.
 
-### Pass F — Consolidation, dead-code cleanup and source-level re-audit
+### Pass F — Deferred architecture cleanup (not automatically scheduled)
 **Status:** DEFERRED. **F20 is not an authorized module-splitting pass.** Only reopen for a proven issue and user approval.  
-**Audit:** Re-examine source and the completed ledger de novo; map actual duplicated policies/branches, contracts and call chains; compare post-A–E architecture with invariants.  
-**Plan:** Remove only proven redundancy, preserve compatibility guards still required by shipped data, avoid feature drift.  
-**Objective verification:** (F1-obj) all F1–F20 have evidenced dispositions; (F2-obj) no drift from backup/recovery invariant set; (F3-obj) no new parallel systems or dead adapters; (F4-obj) simpler/equivalent behavior; (F5-obj) targeted QA of all F changes.  
-**Targeted QA:** Focused source/contract, backup/restore, sync, ownership and affected UI workflows. Discuss **separate final comprehensive QA** after programme completion, rather than running it silently on each pass.
+**No code work authorized for this pass now.** If a later specific duplication or unsafe ownership boundary is demonstrated, propose a scoped change within the affected active pass; otherwise leave these modules intact. At the end of F1–F15, review the ledger and decide separately whether a broad source audit or comprehensive QA is warranted. Nothing here authorizes splitting modules by size.
 
 ## 8. Completion rules
 
