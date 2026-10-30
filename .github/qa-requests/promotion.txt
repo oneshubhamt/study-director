@@ -1,11 +1,16 @@
 Promotion QA request
 
-Request: backup-p1-p2-deadline-diagnostic-2026-10-30
-Source/test revision: a1e36b16646a7f6f6f012c0281bf24b9eba3e191 (request commit changes only this QA request file)
+Request: backup-p1-p2-correctness-closure-final2-2026-10-30
+Source/test revision: f3c5e8510a9a14cb2dec4f44c0ec402f21b3bc04 (request commit changes only this QA request file)
 
-Run Promotion QA. This run intentionally carries temporary assertion diagnostics for the revision-aware convergence case so the failing state reports:
-- fake-clock now and current canonical revision,
-- convergence pending reason and nextEligibleAt,
-- provider-convergence execution triggers seen so far.
+Run full Promotion QA on the clean source.
 
-Production logic is unchanged from 44a05597de184e2704740b519a3660d67c56887c. Do not alter workflow policy or timing budgets.
+Certify:
+- P1 freshest backup source-revision projection and startup canonical mutation-clock reconciliation before automatic provider/background-owner activation.
+- P2 revision ordering: all catch-up/turn/failure backoffs carry attemptRevision; newer revisions reassert their normal automatic deadline.
+- P2 pre-deadline sync ownership: a sync-only catch-up that starts before an already-waiting automatic deadline preserves exactly that one publication opportunity. Once the deadline is due and its prerequisite attempt fails, the normal failure backoff may govern, preventing a hot loop.
+- P2 exact trigger provenance at every pending-provider scheduling site.
+- P2 automatic Drive catch-up respects provider background suspension before and after foreground admission without changing explicit/manual foreground semantics.
+- P2 managed recovery durably records every configured automatic destination, including temporarily unavailable configured peers, and remains pending if any peer intent cannot be persisted; explicit disconnect/forget retires the obligation.
+
+The prior diagnostic run established the exact consumed-deadline seam; temporary diagnostic exposure has been removed. No workflow policy, timing budget, storage topology, repository format, or lower-priority efficiency/liveness item is changed in this pass.
