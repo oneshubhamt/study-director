@@ -1,10 +1,16 @@
 Promotion QA request
 
-Request: final-cleer-unchanged-source-performance-recert-2026-10-30
-Source revision: current-fixes HEAD from this request commit
-Run full Promotion QA on one commit: hermetic correctness, risk/critical mutation, AST branches, non-browser release, complete built-runtime browser certification and three Insights samples.
-Check: failed commit leaves prior latest intact even with orphan manifest; no speculative deletion of a reused/ambiguous manifest or commit; Device Folder digest mismatch refuses delete; genuinely newer urgent revisions take precedence over failed old revision backoff, while same revision obeys backoff; retry provenance remains accurate.
-Do not weaken 2,000-note startup/keystroke budgets, notes UI behavior or cross-tab storage-clear invariants. The notes capacity benchmark must execute without competing Chromium work. Cross-tab clear must establish a previous database connection before expecting the second tab to count a recreation.
-Device/OS quota, eviction and permission lifecycle acceptance is separate and still outstanding.
+Request: backup-p1-p2-correctness-closure-2026-10-30
+Source revision: 346085a6670d7332db24e15a4a6a1efb790fe271 (the request commit itself changes only this QA request file)
+Run full Promotion QA on the current source: hermetic correctness, risk/critical mutation, AST branches, non-browser release, complete built-runtime browser certification and the existing Insights samples.
 
-This is a new certification request after the prior complete browser/non-browser promotion jobs passed but all three independent Insights performance samples failed. Do not alter time budgets, browser expectations, or production code. Require one sample to meet the existing 1000 ms complete deadline. Compare sample profiles; no user-data fixtures or deployment.
+Targeted correctness checks for this pass:
+- backup source revision selects the newest valid storage-health projection; stale raw localStorage cannot hide newer in-memory committed state;
+- startup change-clock reconciliation completes before automatic provider/background-owner activation and Device Folder installation shares the same barrier;
+- catch-up and shared-turn failure backoff carry the owning attemptRevision so newer urgent canonical revisions keep their earlier deadline;
+- retry/catch-up scheduling retains exact trigger provenance;
+- automatic Drive catch-up cannot enter through an existing provider background suspension, and a suspension arriving after admission aborts and awaits that automatic handoff without changing explicit/manual foreground semantics;
+- managed recovery durably marks every configured automatic destination that owes the recovered canonical state, including temporarily disconnected peers, and explicit disconnect/forget retires that destination's obligation.
+
+Do not alter workflow policy, timing budgets, retention semantics, repository formats, backup storage topology, or the lower-priority efficiency/liveness items deferred to the next pass.
+Device/OS quota, eviction and permission lifecycle acceptance remains separate physical-device QA.
