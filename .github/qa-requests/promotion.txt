@@ -1,15 +1,16 @@
 Promotion QA request
 
-Request: current-fixes-final-promotion-rerun-after-diagnostics-2026-10-30
-Source/test revision: 85f6df16913fa7961df5bd923189a856f2834a09 (request commit changes only this QA request file)
+Request: current-fixes-final-promotion-after-risk-coverage-2026-10-30
+Source/test revision: 9c62a925cdc4029f51a6a6c4f070ef78f2a57005 (request commit changes only this QA request file)
 
-Run the complete Promotion QA on the exact cleaned current-fixes source above.
+Run the complete Promotion QA on the exact current-fixes source above.
 
-This rerun follows the full-gate findings and targeted corrections:
-- convergence failure backoff now preserves an automatic/urgent opportunity until that opportunity has actually become due, while remaining revision-aware and bounded;
-- the current fixed convergence/recovery trigger vocabulary is complete in the privacy-safe diagnostics allow-list;
+Prior full-gate findings are now closed without relaxing policy:
+- convergence retry/backoff preserves unspent automatic/urgent deadlines and remains revision-aware;
+- the fixed current convergence/recovery trigger vocabulary is complete in privacy-safe diagnostics;
+- Device Folder automaticConfigured behavior is explicitly exercised so the existing risk-coverage floor is preserved rather than lowered;
 - targeted Repository Checks pass on the exact source revision above.
 
-Certify the full release surface: hermetic correctness, risk coverage, mutation certification, AST branch-edge coverage, non-browser release certification, complete browser/built-runtime coverage, Insights performance gate, backup/restore/recovery, Drive synchronization and Active Session ownership, independent Device Folder/Drive publication, background suspension/preemption, PWA/service-worker behavior, storage durability and current architecture contracts.
+Certify the complete release surface: hermetic correctness, risk coverage, mutation certification, AST branch-edge coverage, non-browser release certification, complete browser/built-runtime coverage, Insights performance gate, backup/restore/recovery, Drive synchronization and Active Session ownership, independent Device Folder/Drive publication, background suspension/preemption, PWA/service-worker behavior, storage durability and current architecture contracts.
 
 No runtime or workflow change is part of this request commit.
