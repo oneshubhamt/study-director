@@ -164,7 +164,7 @@ const cases=[];
   const reads=[];let t=null,changed=false;
   t=fixture({covered:'2026-10-06T07:00:00.000Z',shared:true,
     driveList:async({kind})=>({items:kind==='checkpoint'||kind==='commit'?[item(kind)]:[],overflow:false,ignored:0}),
-    driveDownload:async()=>{reads.push(t.clock.now());if(!changed){changed=true;t.change(true);}throw Object.assign(new Error('network down'),{code:'DRIVE_NETWORK'});}});
+    driveDownload:async()=>{reads.push(t.clock.now());if(!changed){changed=true;await t.clock.advance(1);t.change(true);}throw Object.assign(new Error('network down'),{code:'DRIVE_NETWORK'});}});
   await tick(t,10*1000);
   const pending=t.runtime.backgroundStatus().find(row=>row.job==='google-drive convergence'),dueAt=Date.parse(pending?.nextEligibleAt||'');
   assert.ok(Number.isFinite(dueAt)&&dueAt<=t.clock.now()+t.policy.automaticUrgentMs+1000,'catch-up failure backoff must not push a newer revision behind its urgent deadline; an already-earlier sync opportunity may legitimately remain the winning trigger');
