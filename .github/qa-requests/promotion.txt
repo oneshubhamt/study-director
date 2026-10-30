@@ -1,12 +1,24 @@
 Promotion QA request
 
-Request: current-fixes-convergence-diagnostic-2026-10-30
-Source/test revision: 2d954d88325ea602cbf6fe5603baff45ef32eaf4 (trigger commit changes only this QA request file)
+Request: current-fixes-final-promotion-r4-2026-10-30
+Source/test revision: becb45546bd13abff7120a4191ffb90538f4834e (trigger commit changes only this QA request file)
 
-Run Promotion QA. This diagnostic run intentionally changes only the failing automatic-provider-backup assertion message so the hermetic failure reports:
-- canonical change time/current revision,
-- all distinct Drive read times,
-- convergence pending reason/deadline,
-- every provider-convergence trigger and scheduler eligibility time seen in the case.
+Run full Promotion QA on the cleaned and corrected current-fixes source.
 
-Production behavior is unchanged from bc9ebc0927f584f1235c5388842fd901fad91841. Do not alter workflow policy.
+This revision includes:
+- scheduler-eligibility ownership for an unspent automatic/urgent provider opportunity, carried through asynchronous Drive catch-up;
+- the regression test corrected to measure the urgent window from the actual asynchronous canonical change rather than from time advanced before that change occurred;
+- architecture assertions aligned with the explicit ownership contract.
+
+Certify the complete branch:
+- backup freshness/startup gating;
+- revision-aware provider convergence and durable retry intent;
+- suspension/preemption and managed recovery;
+- independent Device Folder/Google Drive publication;
+- shared Active Session ownership;
+- restore verification/rollback, retention, cleanup and integrity;
+- PWA/service-worker and built-runtime behavior;
+- Insights performance;
+- full hermetic, risk, mutation, branch-edge, release and browser certification.
+
+No workflow change is part of this request.
