@@ -1346,9 +1346,9 @@ registry.define('backup-provider',1,input=>{
     return freeze({source,others:await queueOtherLocations(selected)});
   }
   async function managedProviderPresent(selected,result,{sourceNeeded=true,sourceCheckpoint=''}={}){
-    const convergence=await queueResolvedProviderState(selected,result,{sourceNeeded,sourceCheckpoint}),sourceReady=convergence.source.status==='completed'||convergence.source.status==='pending'&&(convergence.source.retryQueued===true||convergence.source.scheduled===true);
-    const reason=sourceReady?'':[convergence.source.reason||`${selected.label} backup could not be queued`,convergence.source.retryQueued!==true?'automatic retry could not be queued':''].filter(Boolean).join(' · ');
-    return freeze({status:sourceReady?'completed':'pending',reason,checkpointId:String(convergence.source.checkpoint||''),source:convergence.source,others:convergence.others});
+    const convergence=await queueResolvedProviderState(selected,result,{sourceNeeded,sourceCheckpoint}),sourceReady=convergence.source.status==='completed'||convergence.source.status==='pending'&&(convergence.source.retryQueued===true||convergence.source.scheduled===true),peerFailed=convergence.others.find(row=>row.queued!==true),ready=sourceReady&&!peerFailed;
+    const reason=ready?'':!sourceReady?[convergence.source.reason||`${selected.label} backup could not be queued`,convergence.source.retryQueued!==true?'automatic retry could not be queued':''].filter(Boolean).join(' · '):`${peerFailed.label} automatic backup retry could not be recorded.`;
+    return freeze({status:ready?'completed':'pending',reason,checkpointId:String(convergence.source.checkpoint||''),source:convergence.source,others:convergence.others});
   }
   function repositoryObjectInventoryForManifest(inventory,manifest){
     if(!inventory||inventory.overflow===true)throw new Error('An unusual number of backup objects was found. Recovery was stopped for review.');
