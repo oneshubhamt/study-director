@@ -62,6 +62,18 @@ try{
   assert.equal(fallback.result.status,'downloaded');assert.equal(fallback.downloads.length,1);result.checks.downloadFallback=true;
   const failed=await page.evaluate(`(async()=>{failWorker=true;try{await __PWA6.BackupController.createCheckpoint();return false;}catch(error){return /startup failure/.test(error.message);}finally{failWorker=false;}})()`);assert.equal(failed,true);
   const cancellation=await page.evaluate(`(async()=>{holdWorker=true;const pending=__PWA6.NoteExporter.exportKeys(['History']);await new Promise(resolve=>setTimeout(resolve,50));__PWA6.Exports.cancel();const result=await pending;holdWorker=false;return {result,live:workerCounts.live};})()`);assert.equal(cancellation.result.status,'cancelled');assert.equal(cancellation.live,0);result.checks.workerFailureCancellation=true;
+  const backupCancellation=await page.evaluate(`(async()=>{
+    holdWorker=true;
+    try{
+      const messages=workerCounts.messages,pending=__PWA6.BackupController.exportLocal();
+      const deadline=performance.now()+10000;
+      while(workerCounts.messages===messages&&performance.now()<deadline)await new Promise(resolve=>setTimeout(resolve,10));
+      const reachedWorker=workerCounts.messages>messages,cancelled=__PWA6.BackupController.cancelStandalone();
+      const outcome=await pending;
+      return {reachedWorker,cancelled,outcome,live:workerCounts.live,active:__PWA6.BackupController.status().standaloneExportActive};
+    }finally{holdWorker=false;}
+  })()`);
+  assert.equal(backupCancellation.reachedWorker,true);assert.equal(backupCancellation.cancelled,true);assert.equal(backupCancellation.outcome.status,'cancelled');assert.equal(backupCancellation.live,0);assert.equal(backupCancellation.active,false);result.checks.backupWorkerCancellation=true;
   const open=await page.evaluate(`(async()=>{window.showOpenFilePicker=async()=>[{getFile:async()=>new File([fixtureBackup.blob],fixtureBackup.filename)}];const file=await __PWA6.Exports.open(document.getElementById('import-file'));return (await __PWA6.BackupController.inspect(file,{filename:file.name})).preview.formatVersion;})()`);assert.equal(open,DATA_CONTRACT.schemas.Backup.version);result.checks.openPreview=true;
 
   const restored=await page.evaluate(`(async()=>{

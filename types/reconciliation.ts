@@ -11,5 +11,5 @@ export type EntityCandidate<T>=Readonly<CandidateBase&({kind:'record';value:T;re
 export type SessionCandidate=Readonly<CandidateBase&{value:ActiveSession}>;
 export type DecisionGroup<C>={candidates:readonly C[];localCandidateId:string|null;defaultCandidateId:string|null;conflict:boolean;identical:boolean;incomingOnly:boolean;decisionKey:string};
 export type ReconciliationPlan=Readonly<{format:'study-director.reconciliation-plan';version:1;localSource:SourceRef;incomingSource:SourceRef;savedDays:readonly Readonly<DecisionGroup<EntityCandidate<DailyRecord>>&{date:string}>[];notes:readonly Readonly<DecisionGroup<EntityCandidate<NoteRecord>>&{key:string;localOnly:boolean}>[];activeSession:Readonly<DecisionGroup<SessionCandidate>&{localOnly:boolean}>}>;
-export type ReconciliationDecisions={savedDays?:Readonly<Record<string,string|{value:DailyRecord}>>;notes?:Readonly<Record<string,string|{value:NoteFields}>>;activeSession?:string|null};
+export type ReconciliationDecisions={savedDays?:Readonly<Record<string,string|{value:DailyRecord}|null|undefined>>;notes?:Readonly<Record<string,string|{value:NoteFields}|null|undefined>>;activeSession?:string|null};
 export type StateMapOptions<T,D>={records(source:ReconciliationSource):readonly T[];deletions(source:ReconciliationSource):readonly D[];keyOf(value:T|D):string;entityLabel:string};

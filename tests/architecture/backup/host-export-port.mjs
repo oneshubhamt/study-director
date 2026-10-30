@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import {fileURLToPath} from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
-const backup=fs.readFileSync(path.join(root,'source/core/backup.js'),'utf8');
+const backup=fs.readFileSync(path.join(root,'source/core/backup.ts'),'utf8');
 const host=fs.readFileSync(path.join(root,'source/app.html'),'utf8');
 const contract=backup.match(/exports:freeze\((\[[^\]]+\])\)/u);
 const wired=host.match(/^\s*exports:(Object\.freeze\(\{[^\n]+\}\)),?$/mu);

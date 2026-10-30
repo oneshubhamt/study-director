@@ -807,7 +807,8 @@ function materializeDailyRecordSummary(summary:unknown){
       const kept=keptValue(subject,ref,value.kept);if(kept===undefined)return null;
       let base=null;
       if(value.base!==null){base=subject==='note'&&kept?DailyRecordCodec.sanitizeNoteFields(value.base):null;if(!base||Object.keys(base).some(key=>!(key in kept!)))return null;}
-      return {version:VERSION,id,subject,ref,keptAt,kept,base,resolvedAt:''};
+      // keptValue validates the payload against this exact subject.
+      return {version:VERSION,id,subject,ref,keptAt,kept,base,resolvedAt:''} as PendingReview;
     }
     function create({subject,ref,kept,base=null,keptAt=new Date().toISOString()}:{subject:ReviewSubject;ref:string;kept:PendingReview['kept'];base?:NoteFields|null;keptAt?:string}){
       const id='pr_'+[...randomBytes(16)].map(byte=>byte.toString(16).padStart(2,'0')).join('');

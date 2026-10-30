@@ -130,8 +130,8 @@ assert.doesNotMatch(fastWorkflow,/npm run test:coverage:browser|run-category\.mj
 assert.equal(fs.readFileSync('LICENSE','utf8'),fs.readFileSync('source/legal/LICENSE.txt','utf8'),'repository and served application must retain the same licence');
 assert.ok(fs.existsSync('CONTRIBUTING.md'));
 const prTemplate=fs.readFileSync('.github/pull_request_template.md','utf8');assert.match(prTemplate,/regression test/i);assert.match(prTemplate,/correct layer/i);
-assert.equal(evaluateBugRegressionPolicy({title:'fix: restore rollback',changedFiles:['source/core/backup.js']}).passed,false);
-assert.equal(evaluateBugRegressionPolicy({title:'fix: restore rollback',changedFiles:['source/core/backup.js','tests/integration/backup/backup-persistence.mjs']}).passed,true);
+assert.equal(evaluateBugRegressionPolicy({title:'fix: restore rollback',changedFiles:['source/core/backup.ts']}).passed,false);
+assert.equal(evaluateBugRegressionPolicy({title:'fix: restore rollback',changedFiles:['source/core/backup.ts','tests/integration/backup/backup-persistence.mjs']}).passed,true);
 assert.equal(evaluateBugRegressionPolicy({title:'feat: new theme',changedFiles:['source/app.html']}).required,false);
 
 console.log(JSON.stringify({status:'PASS',tests:tests.length,exactDuplicates:0,semanticOverlapThreshold:semanticThreshold,structuralContainmentThreshold,overlapExceptions:[...new Set([...actualSemanticExceptions,...actualStructuralExceptions])],crossLayerContracts:[...actualCrossLayer],quarantines:quarantines.length,orphanTests:0,historicalReleaseTokens:0,generatedEvidenceInsideRepository:false,ciGovernance:true,featureContracts:FEATURE_CONTRACTS.length,featureDomains:FEATURE_DOMAINS.length},null,2));

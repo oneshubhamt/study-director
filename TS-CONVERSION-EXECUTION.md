@@ -1,5 +1,7 @@
 # TypeScript conversion execution record
 
+**Current status (2026-10-30): Phase 4 complete.** All 34 persistence/orchestration modules are converted; 126 files are admitted to strict checks. Targeted QA and the export browser journey pass. Full certification remains deferred to Phase 7. Phase 5 has not started.
+
 ## Working agreement
 
 - Work exclusively on `TS-Conversion`; never modify or merge into `main` as part of this program.
@@ -17,7 +19,7 @@
 1. **Pipeline and pilot (complete):** pinned compiler, strict environment configurations, typed lint, mixed JS/TS build/test/coverage/mutation tooling, and a small canonical/save-lane pilot.
 2. **Contracts and existing TS (complete):** module ports, records, worker messages, platform adapters and accurate Wordgard declarations; strictly check existing authored TS.
 3. **Leaves and codecs (complete):** foundational domain/time logic, portable primitives, codecs and isolated state machines.
-4. **Persistence and orchestration:** storage/repositories, ownership, sessions/timers, attachments, backup and recovery in dependency order.
+4. **Persistence and orchestration (complete):** storage/repositories, ownership, sessions/timers, attachments, backup and recovery in dependency order.
 5. **Host and features:** mechanically extract host scripts, then complete typed composition, UI, workers and service worker.
 6. **Tooling and tests:** finish first-party build/contracts/test conversion and remove transitional bridges/source-text extraction.
 7. **Certification:** full correctness, browser, coverage, mutation, release and performance gates; inspect generated deployment.
@@ -254,11 +256,11 @@ Initial test failures were loader/source-shape assumptions following renames and
 
 Next: **Phase 4 — persistence and orchestration**, including the record/backup codecs and their session/timer/storage dependencies. Do not start Phase 4 automatically at this checkpoint.
 
-## Phase 4: persistence and orchestration (in progress)
+## Phase 4: persistence and orchestration (complete)
 
 Start `7bb2695`, verified against GitHub `TS-Conversion`; main remains `9afbda7`. Scope: persistence and metadata, canonical record/backup codecs, repositories and journals, ownership and mutation coordination, session/timer state, attachments, backup and recovery in dependency order. Temporary pass record: `/tmp/ts-phase4-scratch.md`.
 
-**Owner instruction for this phase:** run **full QA this time**, superseding the normal targeted-only phase completion policy. Use focused checks while implementing slices, then complete full correctness, coverage, mutation, browser, release and performance verification for the finished phase. Preserve immutable Wordgard, current canonical formats and all current recovery/protection behavior.
+**Initial owner instruction (superseded by the seventh checkpoint below):** run **full QA this time**, superseding the normal targeted-only phase completion policy. Use focused checks while implementing slices, then complete full correctness, coverage, mutation, browser, release and performance verification for the finished phase. Preserve immutable Wordgard, current canonical formats and all current recovery/protection behavior.
 
 
 ### Phase 4 implementation checkpoints
@@ -303,3 +305,35 @@ Eighth checkpoint (in progress): **31 modules checked, 120 admitted files**, inc
 Ninth checkpoint: **32 modules converted and checked, 122 admitted files**. Managed repository now types retention/commit metadata, preparation inventories, reusable structured objects, publication continuations, transport receipts and resumable integrity work. Reconstructed payloads remain unknown until canonical backup validation; verified byte identity does not imply validated domain records. Manifest metadata rejects malformed deletion containers and non-string checkpoint identities/timestamps; five regression cases cover those boundaries. Removed stale historical-reader comments without removing unsupported-version protection.
 
 Verification: all five strict compiler and typed-lint projects pass. Four focused executables pass (repository checkpoint/publication, incremental preparation, restore, integrity continuation). The checkpoint executable passes again with the new regressions; background-work and managed-version-history architecture checks pass. Build and generated-build verification pass (98 development / 99 deployment files). All **90 vendored Wordgard files match the starting commit byte-for-byte**. Full QA is deferred per the owner. GitHub `TS-Conversion` still points to `7bb2695`; `main` remains `9afbda7`. This record accompanies the first Phase 4 implementation checkpoint commit; publication status is reported in chat and verified against GitHub. **Phase 4 remains in progress: `backup-provider.js` and `backup.js` are the two remaining orchestration implementations.**
+
+
+### Phase 4 completion — 2026-10-30
+
+Completed the final `backup-provider.ts` and `backup.ts` implementations, bringing Phase 4 to **34 converted modules and 126 admitted files**, with zero unchecked existing TypeScript. The earlier checkpoints above remain historical records. Checkpoint 9 was committed and pushed as `0250523`; this final pass started from that commit. A fresh GitHub fetch before publication confirmed `origin/TS-Conversion` still at `0250523` and `origin/main` still at `9afbda7`; there were no new main changes to incorporate. Work remained exclusively on `TS-Conversion`.
+
+Implementation and decisions:
+
+- Provider transports now distinguish whole-object/range reads, leases, publication receipts, verified history and cleanup proofs. Reduced retention proofs cannot be used as full restore manifests. Cache entries preserve checkpoint/commit identity; recovery specifications distinguish sync from operations requiring an external safety checkpoint. Existing mutation protection, cancellation, source-revision fences, retention, quarantine and automatic backup ordering remain in place.
+- Backup orchestration types canonical captures, inspected candidates, private candidate/provenance maps, journals, restore choices, export progress and module ports. Pending reviews correlate each subject with its payload; saved-plan arrays are read-only in the model and retain runtime freezing. Wire/storage values remain unknown until existing validators accept them. Negative compile fixtures reject fabricated candidates, cleanup proofs used for restore, incomplete ranges, missing cancellation and mismatched review payloads.
+- A single-note repository read projects a validated protected manifest with empty deletion ledgers. It remains restricted to that note and cannot authorize whole-app Combine or Replace. Restore tests cover note-only reading and preservation of unrelated days, notes, preferences, Library data and reconciliation state.
+- Fixed two existing export defects exposed by the typed ports: removed a call to the nonexistent `renderPortablePresentation` (the presentation update already notifies subscribers), and connected the required `Exports.cancel` port through host composition. Integration regressions exercise progress updates and cancellation while save selection is pending. A real-browser regression cancels an active standalone backup worker, checks its cancelled outcome, and verifies no worker or active export remains.
+- Removed the residual historical `before-clear-archive` safety-purpose alias; only the current `before-clear-library` purpose remains. This does not remove current safety checkpoints, rollback journals, unsupported-input rejection or current-format recovery. Small guards handle an invalid reused repository snapshot and integrity hooks becoming unavailable during an awaited operation.
+- Updated manifest/registry entries, typed admission, test readers and coverage/mutation source inventories for the final renames. Architecture assertions retain their ordering/boundary requirements while allowing whitespace left by type erasure and the explicit typed recovery specification. Extracted-function fixtures now include the production unknown-field reader. Removed a duplicate test helper import. Full test/tool conversion remains Phase 6.
+
+Final validation used Node **26.12.1**, npm **12.2.1**, TypeScript **7.0.2**:
+
+| Check | Result and scope |
+| --- | --- |
+| Strict compiler and typed lint | PASS: all five environment projects, 126 admitted files, zero unchecked existing TS; negative type fixtures included |
+| Focused behavior and architecture | PASS: **23 distinct executables** across pending-review codec/storage, backup persistence, repository restore, restore assets, shared-base sync, checkpoint publication, incremental preparation, automatic backup, pending recovery, persisted integrity, notification lifecycle, host/export ports, recovery/UI/background/retention contracts, governance and the TS pipeline |
+| Final focused batch | PASS: 15 hermetic executables, including reruns of backup persistence/restore and the corrected fixture/architecture checks; the other checks above passed in earlier closeout batches |
+| Compiler/declaration gates | PASS: strict negative gates, reproducible Wordgard declarations and detection of declaration/vendor tampering |
+| Build and syntax | PASS: development/deployment verification (98/99 files), source syntax (325 files, 49 rendered templates), generated syntax (268 JS files, 20 inline scripts) |
+| Browser | PASS: the exports journey, run alone; real worker failure/cancellation including the new standalone backup case, native save/download fallback, attachment export, import/restore, corrupt and historical input rejection, Markdown parity and responsiveness |
+| Immutable vendor | PASS: all 90 `vendor/wordgard/**` files match Phase 4 start `7bb2695` byte-for-byte; the generated Wordgard bundle has no tracked changes |
+
+Initial closeout failures were stale source-text assertions and extracted test functions missing the newly introduced field reader; corrected checks pass. Final runtime-diff review restored one accidentally removed array freeze and retained malformed-list guards before the last validation/build. Environment interruptions did not discard the working tree. No unresolved failure remains in the targeted scope above. **Full correctness, aggregate coverage, mutation, broader browser, minified release and performance certification were not run** in this closeout, per the owner's instruction to finish the pass and defer full QA.
+
+The durable record is this file; the temporary execution checklist and detailed logs are outside the repository at `/tmp/ts-phase4-scratch.md` and `/tmp/ts-phase4-*`. The completion commit includes all final changes and is pushed only to `TS-Conversion`; its identity is reported in chat and checked against GitHub after pushing.
+
+Next: **Phase 5 — host and features**, beginning with mechanical host-script extraction before typed UI/composition work. Do not begin Phase 5 automatically as part of this closeout. Full program certification remains Phase 7.

@@ -13,7 +13,7 @@ export type ExportInputs=Omit<ProcessingInputs,'file.copy'|'crypto.stream.encryp
 export type CollectionResult={status:string;reason?:string;removed?:number;visited?:number;pending?:boolean};
 export type ExportOutputs=ProcessingOutputs&IntegrityOutputs&{'file.release':void;'file.read':Blob;'file.persist':FileReference;'file.collect':CollectionResult|void};
 export type ExportOperation=keyof ExportInputs;
-export interface ExportOptions extends ProcessingOptions{onProgress?:((value:WorkerProgress)=>void)|null}
+export interface ExportOptions extends ProcessingOptions{onProgress?:((value:WorkerProgress)=>void)|null|undefined}
 export type ExportArguments={[K in ExportOperation]:[type:K,data:ExportInputs[K],options?:ExportOptions|undefined]}[ExportOperation];
 export interface ExportProcessing{
  run<K extends ExportOperation>(type:K,data:ExportInputs[NoInfer<K>],options?:ExportOptions):Promise<ExportOutputs[K]>;
@@ -34,7 +34,7 @@ export type ExportStatus=Readonly<{busy:boolean;jobBusy:boolean;fileBusy:boolean
 export interface FileWorker{onmessage:((event:MessageEvent<unknown>)=>void)|null;onerror:((event:ErrorEvent)=>void)|null;onmessageerror:((event:MessageEvent<unknown>)=>void)|null;terminate():void;postMessage(value:unknown):void}
 export interface ExportWindow{URL:Pick<typeof URL,'createObjectURL'|'revokeObjectURL'>;setTimeout(callback:()=>void,ms:number):number;showSaveFilePicker?:(options:{suggestedName:string;types:{description:string;accept:Record<string,string[]>}[];id?:string})=>Promise<ScratchHandle&{name?:string}>;showOpenFilePicker?:(options:{multiple:boolean;types:{description:string;accept:Record<string,string[]>}[]})=>Promise<(ScratchHandle&{name?:string})[]>}
 export interface CoordinatorInput{createWorker():FileWorker;window:ExportWindow;document:Document;onState?:(status:ExportStatus)=>void;files?:ScratchFiles|null}
-export type PendingExport={resolve(value:unknown):void;reject(error:unknown):void;timeout:number;type:ExportOperation;stallTimeoutMs:number;onProgress:((value:WorkerProgress)=>void)|null};
+export type PendingExport={resolve(value:unknown):void;reject(error:unknown):void;timeout:number;type:ExportOperation;stallTimeoutMs:number;onProgress:((value:WorkerProgress)=>void)|null|undefined};
 export type SaveFile={blob:Blob;filename:string;checkProtection?:()=>Promise<void>};
 export type Policy={version:unknown;id:string;verifier:Blob;key?:CryptoKey|null;setAt?:unknown};
 export type PasswordOptions={confirm?:boolean;title?:string;message?:string;confirmLabel?:string;cancelLabel?:string;signal?:AbortSignal|null|undefined};

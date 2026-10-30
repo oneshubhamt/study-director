@@ -40,7 +40,7 @@ const mutations=Object.freeze([
     tests:Object.freeze(['tests/integration/attachments/attachment-deletion.mjs'])
   }),
   Object.freeze({
-    id:'restore-verifies-committed-saved-days',file:'source/core/backup.js',
+    id:'restore-verifies-committed-saved-days',file:'source/core/backup.ts',
     find:'if(!Canonical.same(byDate.get(record.date),sanitizeCurrentDailyRecord(record)))throw new Error(`Post-restore verification failed for saved day ${record.date}.`);',
     replace:'if(false)throw new Error(`Post-restore verification failed for saved day ${record.date}.`);',
     tests:Object.freeze(['tests/integration/backup/backup-persistence.mjs'])

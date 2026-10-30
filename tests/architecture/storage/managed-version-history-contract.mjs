@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 const read=relative=>readScript(path.join(root,relative));
-const app=read('source/app.html'),repository=read('source/core/managed-repository.ts'),provider=read('source/core/backup-provider.js'),device=read('source/core/device-backup.ts'),host=read('source/core/backup-recovery-host.ts'),drive=read('source/external/drive.js');
+const app=read('source/app.html'),repository=read('source/core/managed-repository.ts'),provider=read('source/core/backup-provider.ts'),device=read('source/core/device-backup.ts'),host=read('source/core/backup-recovery-host.ts'),drive=read('source/external/drive.js');
 
 assert.match(repository,/const REPOSITORY_MANIFEST_FORMAT='study-director\.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=8[;,]/u);
 assert.match(repository,/function repositoryLogicalIdentityPayload\(value\s*\)[\s\S]*format:'study-director\.managed-backup-logical-state'[\s\S]*objects:freeze\(objects\),assets:freeze\(assets\),deletions:/u);
@@ -13,8 +13,8 @@ const identityBody=repository.slice(repository.indexOf('function repositoryLogic
 for(const excluded of ['checkpointId','installationId','sourceRevision','reconciliationBaseId','objectId','protectionId'])assert.equal(identityBody.includes(excluded),false,`provider/capture artifact must not enter logical-state identity: ${excluded}`);
 assert.match(repository,/if\(manifest\.logicalFingerprint&&manifest\.logicalFingerprint!==logicalFingerprint\)throw unreadableVersion\(new Error\('Repository checkpoint logical-state fingerprint failed verification\.'/u);
 
-assert.match(provider,/async function historyRepositoryProvider\(id,options=\{\}\)[\s\S]*repositoryProviderInventory\(scoped,[\s\S]*repositoryInventoryHistoryEntries/u,'provider history must remain independently readable');
-assert.match(provider,/async function historyRepositoryProvider\(id,options=\{\}\)[\s\S]*beginForeground\(selected,options&&options\.signal\|\|null\)[\s\S]*repositoryInventoryHistoryEntries/u,'every location, the Device Folder included, exposes independent committed history; interactive history stays cancellable and foreground-safe.');
+assert.match(provider,/async function historyRepositoryProvider\s*\(id\s*,options\s*=\s*\{\}\s*\)[\s\S]*repositoryProviderInventory\s*\(scoped\s*,[\s\S]*repositoryInventoryHistoryEntries/u,'provider history must remain independently readable');
+assert.match(provider,/async function historyRepositoryProvider\s*\(id\s*,options\s*=\s*\{\}\s*\)[\s\S]*beginForeground\s*\(selected\s*,options&&options\s*\.signal\|\|null\s*\)[\s\S]*repositoryInventoryHistoryEntries/u,'every location, the Device Folder included, exposes independent committed history; interactive history stays cancellable and foreground-safe.');
 assert.match(app,/id="managed-version-history"[\s\S]*id="managed-version-history-title">Version History/u,'one Version History dialog for every location');
 assert.match(host,/function sourceDescriptor\(sourceId\s*\)[\s\S]*input\.providers\.list\(\)\.find/u);assert.doesNotMatch(host,/input\.device\b/u,'the recovery host has no Device-only path');
 // One list: each connected location's own history is read, then each

@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {ManagedRepositoryInput,Fields,Member,ObjectEntry,PreparedObject,RepositoryAsset,Manifest,IdentitySource,Commit,CommitFile,RepositoryRow,Artifact,CleanupInput,StructuredPayload,PreparationEntry,PreparationIndex,PreparationPlan,ProtectionContext,Prepared,PreparedState,ManifestFile,PublicationState,Continuation,BlobLease,ReadObject,Copy,PrepareOptions,PublishOptions,Transport,ReadOptions,ScrubOptions,ScrubProgress,ReconstructedCapture,InspectOptions,Calendar,Retention,RetentionInput,Release,Check,ManifestCheckpoint,ProtectedEnvelope} from '../../types/managed-repository.ts';
+import type {ManagedRepositoryInput,Fields,Member,ObjectEntry,PreparedObject,RepositoryAsset,Manifest,IdentitySource,Commit,CommitFile,RepositoryRow,Artifact,CleanupInput,StructuredPayload,PreparationEntry,PreparationIndex,PreparationPlan,ProtectionContext,Prepared,PreparedState,ManifestFile,PublicationState,Continuation,BlobLease,ReadObject,Copy,PrepareOptions,PublishOptions,Transport,ReadOptions,ScrubOptions,ScrubProgress,ReconstructedCapture,InspectOptions,Calendar,Retention,RetentionInput,Release,Check,ManifestCheckpoint,ProtectedEnvelope,RetentionRow,RetentionProof,CleanupRow} from '../../types/managed-repository.ts';
 import type {LogicalCapture,FullLogicalCapture,ManagedCapture,PreparationStamp,CapturedAsset} from '../../types/backup-capture.ts';
 import type {BaselineHeader,BaselineNote,BaselineDays,BaselineUpdate} from '../../types/reconciliation-baseline.ts';
 import type {Checkpoint,ProtectedManifest,Counts} from '../../types/backup-models.ts';
@@ -246,13 +246,13 @@ function validateRepositoryRetention(input:unknown,exportedAt:string):Retention{
 }
 function repositoryDateKeyFromOrdinal(value:number){const date=new Date(Number(value)*86400000);return `${date.getUTCFullYear()}-${repositoryPad2(date.getUTCMonth()+1)}-${repositoryPad2(date.getUTCDate())}`;}
 function repositoryWeekStartOrdinal(value:number){const date=new Date(Number(value)*86400000),day=date.getUTCDay(),delta=(day-REPOSITORY_RETENTION_POLICY.weekStartsOn+7)%7;return Number(value)-delta;}
-function newestRepositoryRow<R extends RepositoryRow>(rows:readonly R[]):R|null{return rows.reduce((best,row)=>!best||Date.parse(row.manifest.exportedAt)>Date.parse(best.manifest.exportedAt)||Date.parse(row.manifest.exportedAt)===Date.parse(best.manifest.exportedAt)&&String(row.id).localeCompare(String(best.id))>0?row:best,null as R|null);}
+function newestRepositoryRow<R extends RetentionRow>(rows:readonly R[]):R|null{return rows.reduce((best,row)=>!best||Date.parse(row.manifest.exportedAt)>Date.parse(best.manifest.exportedAt)||Date.parse(row.manifest.exportedAt)===Date.parse(best.manifest.exportedAt)&&String(row.id).localeCompare(String(best.id))>0?row:best,null as R|null);}
 // The device that made a version.
-function repositoryRowDevice(row:RepositoryRow){return String(row?.manifest?.installationId||row?.manifest?.checkpoint?.originInstallationId||'');}
+function repositoryRowDevice(row:RetentionRow){return String(row?.manifest?.installationId||row?.manifest?.checkpoint?.originInstallationId||'');}
 // Each device keeps its newest unexpired safety version (protectedLimit per
 // device), so a restore on one device never pushes out another device's way
 // back. Every location selects alike.
-function activeProtectedRepositoryRows<R extends RepositoryRow>(rowsValue:readonly R[],now:number|Date=Date.now()){
+function activeProtectedRepositoryRows<R extends RetentionRow>(rowsValue:readonly R[],now:number|Date=Date.now()){
   const rows:readonly R[]=Array.isArray(rowsValue)?rowsValue as readonly R[]:[],nowMs=now instanceof Date?now.getTime():Number(now);
   if(!Number.isFinite(nowMs))throw new Error('Repository protection evaluation time is invalid.');
   const byDevice=new Map<string,R>();
@@ -260,12 +260,12 @@ function activeProtectedRepositoryRows<R extends RepositoryRow>(rowsValue:readon
   return freeze([...byDevice.values()]);
 }
 // The newest unexpired safety version, of one device when device is given.
-function activeProtectedRepositoryRow<R extends RepositoryRow>(rowsValue:readonly R[],now:number|Date=Date.now(),device:string|null=null){
+function activeProtectedRepositoryRow<R extends RetentionRow>(rowsValue:readonly R[],now:number|Date=Date.now(),device:string|null=null){
   const rows=activeProtectedRepositoryRows(rowsValue,now);
   return newestRepositoryRow(device===null?rows:rows.filter(row=>repositoryRowDevice(row)===String(device)));
 }
-function classifyRepositoryState<R extends RepositoryRow,C extends {id:string;marker:unknown;ref?:unknown}>(input:{manifests?:readonly R[];commits?:readonly C[]}={}){
-  const manifests:readonly R[]=Array.isArray(input.manifests)?input.manifests as readonly R[]:[],commits:readonly C[]=Array.isArray(input.commits)?input.commits as readonly C[]:[],commitById=new Map<string,C>(),manifestIds=new Set<string>(),committed:(R&{commitRef:unknown})[]=[],uncommitted:R[]=[],invalidPairs:{manifest:R;commit:C;error:unknown}[]=[];
+function classifyRepositoryState<R extends CleanupRow,C extends {id:string;marker:unknown;ref?:unknown}>(input:{manifests?:readonly R[];commits?:readonly C[]}={}){
+  const manifests:readonly R[]=Array.isArray(input.manifests)?input.manifests as readonly R[]:[],commits:readonly C[]=Array.isArray(input.commits)?input.commits as readonly C[]:[],commitById=new Map<string,C>(),manifestIds=new Set<string>(),committed:(R&{commitRef:C['ref']|null})[]=[],uncommitted:R[]=[],invalidPairs:{manifest:R;commit:C;error:unknown}[]=[];
   for(const row of commits){const id=String(row&&row.id||'');if(!/^cp_[a-f0-9]{32}$/u.test(id)||commitById.has(id))throw new Error('Managed repository commit classification input is invalid.');commitById.set(id,row);}
   for(const row of manifests){const id=String(row&&row.id||''),manifest=row&&row.manifest;if(!/^cp_[a-f0-9]{32}$/u.test(id)||manifestIds.has(id)||!manifest||manifest.checkpoint?.checkpointId!==id)throw new Error('Managed repository checkpoint classification input is invalid.');manifestIds.add(id);const commit=commitById.get(id)||null;
     if(!commit){uncommitted.push(row);continue;}
@@ -276,7 +276,7 @@ function classifyRepositoryState<R extends RepositoryRow,C extends {id:string;ma
   const orphanCommits=commits.filter(row=>!manifestIds.has(String(row.id||'')));
   return freeze({committed:freeze(committed),uncommitted:freeze(uncommitted),invalidPairs:freeze(invalidPairs),orphanCommits:freeze(orphanCommits),latest:committed.length?committed[committed.length-1]:null});
 }
-function selectRepositoryRetention<R extends RepositoryRow>(rowsValue:readonly R[],{now=new Date()}:{now?:Date|string}={}){
+function selectRepositoryRetention<R extends RetentionRow>(rowsValue:readonly R[],{now=new Date()}:{now?:Date|string}={}){
   const rows:R[]=Array.isArray(rowsValue)?[...rowsValue as readonly R[]]:[];rows.sort((a,b)=>Date.parse(a.manifest?.exportedAt||'0')-Date.parse(b.manifest?.exportedAt||'0')||String(a.id||'').localeCompare(String(b.id||'')));
   const nowMs=now instanceof Date?now.getTime():Date.parse(now);if(!Number.isFinite(nowMs))throw new Error('Repository retention evaluation time is invalid.');
   const protectedRows=activeProtectedRepositoryRows(rows,nowMs),activeProtected=newestRepositoryRow(protectedRows),everyNormal=rows.filter(row=>row&&row.manifest?.retention?.role==='normal');
@@ -290,7 +290,7 @@ function selectRepositoryRetention<R extends RepositoryRow>(rowsValue:readonly R
     // oldest checkpoint kept so far: no Weekly shares a week with a Daily and
     // no Monthly a month with a Weekly. Periods without a checkpoint are
     // skipped, so a break of any length never empties a tier.
-    const calendar=(row:R)=>row.manifest.retention.calendar,policy=REPOSITORY_RETENTION_POLICY;
+    const calendar=(row:R)=>row.manifest.retention.calendar!,policy=REPOSITORY_RETENTION_POLICY;
     let oldest:R=latest;
     for(const [tier,count,period] of [['daily',policy.dailyDays,(value:Calendar)=>value.localDate],['weekly',policy.weeklyPeriods,(value:Calendar)=>value.weekStart],['monthly',policy.monthlyPeriods,(value:Calendar)=>value.month]] as const){
       const limit=period(calendar(oldest)),newest=new Map<string,R>();
@@ -350,7 +350,7 @@ function projectManagedRepositoryHistory(rowsValue:readonly RepositoryRow[],sour
     });
   }));
 }
-function validateRepositoryCommitValue(input:unknown,manifest:Manifest|null=null):Commit{
+function validateRepositoryCommitValue(input:unknown,manifest:RetentionProof|null=null):Commit{
   const value=fields(input);
   if(!input||typeof input!=='object'||Array.isArray(input)||value['format']!==REPOSITORY_COMMIT_FORMAT||Number(value['version'])!==REPOSITORY_COMMIT_VERSION)throw new Error('Repository checkpoint commit marker is invalid.');
   const checkpointId=String(value['checkpointId']||''),exportedAt=String(value['exportedAt']||''),sourceRevision=String(value['sourceRevision']||'');if(!/^cp_[a-f0-9]{32}$/u.test(checkpointId)||!Number.isFinite(Date.parse(exportedAt))||!Number.isFinite(Date.parse(sourceRevision)))throw new Error('Repository checkpoint commit marker provenance is invalid.');
@@ -497,11 +497,11 @@ function rethrowCleanupControl(error:unknown){
   if(error&&fields(error)['name']==='AbortError'||/_MAINTENANCE_BUDGET$/u.test(code))throw error;
 }
 // Report unsupported versions without attempting to convert or delete them.
-function repositoryFormats(rows:readonly RepositoryRow[],unreadable=0){
+function repositoryFormats(rows:readonly CleanupRow[],unreadable=0){
   let current=0,older=0;for(const row of rows)if(Number(row?.manifest?.version)===REPOSITORY_MANIFEST_VERSION)current+=1;else older+=1;
   return freeze({version:REPOSITORY_MANIFEST_VERSION,current,older,unreadable:Math.max(0,Number(unreadable)||0)});
 }
-async function cleanupRepositoryRetention<R extends RepositoryRow,A extends Artifact,O extends Artifact>(input:CleanupInput<R,A,O>){
+async function cleanupRepositoryRetention<R extends CleanupRow,A extends {kind:string},O extends Artifact>(input:CleanupInput<R,A,O>){
   const rows:R[]=Array.isArray(input&&input.checkpoints)?[...input.checkpoints as readonly R[]]:[];
   rows.sort((a,b)=>Date.parse(a.manifest?.exportedAt||'0')-Date.parse(b.manifest?.exportedAt||'0')||String(a.id||'').localeCompare(String(b.id||'')));
   const checkpointUncertain=Math.max(0,Number(input&&input.invalidCount)||0)+Math.max(0,Number(input&&input.ignoredCount)||0),overflow=input&&input.overflow===true,unreadable=Math.max(0,Number(input&&input.unreadableCount)||0);

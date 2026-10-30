@@ -1,12 +1,29 @@
-(()=>{
+import type {AssetRow} from '../../types/asset-storage.ts';
+import type {ModuleRegistration} from '../../types/module-registration.ts';
+import type {BackupModuleInput,BackupRuntimeInput,BackupCodec as BackupCodecType,Parsed,PortableParsed,Preview,Candidate,ImportOperation,Signal,Provenance,VerifiedSnapshot,SnapshotState,StoredCandidate,Metadata,ManagedMetadata,Reporter,Materialized,CheckpointFile,RestoreOptions,DeletionState,ExpectedRestore,ReplaceOptions,NoteTitle,TextConflict,TextResolution,Choice,DecisionGroup,Decisions,Journal,Completion} from '../../types/backup.ts';
+import type {FullLogicalCapture,CaptureOptions,CapturedAsset} from '../../types/backup-capture.ts';
+import type {ReconstructedCapture,Manifest,Release,VerifiedOptions,ReadObject,InspectOptions,PublishOptions,Transport,ManagedRepositoryInput} from '../../types/managed-repository.ts';
+import type {ReconciliationPlan,EntityCandidate,SessionCandidate,ReconciliationDecisions} from '../../types/reconciliation.ts';
+import type {DailyRecord,NoteRecord,NoteFields,ActiveSession,PersonalData,PendingReview,ReviewSubject,OpenReview} from '../../types/record-models.ts';
+import type {ImportedAsset,BackupFile,AssetDescriptor,BackupEntity,BackupEntities,SavedDayDeletion,NoteDeletion,AttachmentDeletion,Counts,PresentAsset} from '../../types/backup-models.ts';
+import type {AuthorityOptions} from '../../types/mutation-coordinator.ts';
+import type {BaselineHeader,BaselineNote,BaselineDays,BaselineUpdate} from '../../types/reconciliation-baseline.ts';
+import type {Progress,PresentationScope,PresentationPatch} from '../../types/backup-recovery-host.ts';
+import type {RecoveryOutcome} from '../../types/backup-provider.ts';
+import type {ProtectionOptions} from '../../types/exports.ts';
+import type {CanonicalReadOptions} from '../../types/repositories.ts';
+const sdBackupFactory=(()=>{
 'use strict';
-const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
+const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'backup','study-director.backup-module',1,[BackupModuleInput]>|undefined;
 if(!registry||registry.format!=='study-director.internal-module-registry'||registry.version!==1){
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
 }
 const {exactFrozenObject:exactObject,declaredFunctions:requireFunctions}=registry.contracts;
-registry.define('backup',1,input=>{
+const createModule=(input:BackupModuleInput)=>{
   const freeze=Object.freeze;
+  const empty=<T>():Record<string,T>=>Object.create(null) as Record<string,T>;
+  const selection=(decisions:Decisions,key:string)=>{const value=decisions[key];return typeof value==='string'?value:null;};
+  const fields=(value:unknown):Record<string,unknown>=>value&&typeof value==='object'?value as Record<string,unknown>:{};
   if(!input||!Object.isFrozen(input)||Object.keys(input).sort().join('|')!=='backupCapture|backupProvider|canonical|managedRepository|repositoryBackground')throw new TypeError('Backup module dependencies are invalid.');
   if(!input.canonical||input.canonical.format!=='study-director.canonical'||input.canonical.contractVersion!==1||typeof input.canonical.same!=='function')throw new TypeError('Backup canonical dependency is invalid.');
   if(!input.managedRepository||input.managedRepository.format!=='study-director.managed-repository-module'||input.managedRepository.contractVersion!==1||typeof input.managedRepository.createEngine!=='function')throw new TypeError('Backup managed-repository dependency is invalid.');
@@ -20,7 +37,7 @@ registry.define('backup',1,input=>{
     codecs:freeze(['activeSession','backup','pendingReview']),
     reconciliation:freeze(['createPlan','resolvePlan','summarizePlan']),
     noteReconciliation:freeze(['resolve','merge']),
-    exports:freeze(['backgroundAvailable','protect','unprotect','followProtection','check','scope','job','run','download','chooseSave','save']),
+    exports:freeze(['backgroundAvailable','cancel','protect','unprotect','followProtection','check','scope','job','run','download','chooseSave','save']),
     session:freeze(['canMutate','cancelLiveDraftSave','captureSnapshot','hasActiveSession','hasTasks','toActiveSession','withPersistenceSuppressed','yieldSession']),
     domain:freeze(['clampText','filenameSafeStudentName','getStudentName','materializeDailyRecordView','sanitizeCurrentDailyRecord','todayISO']),
     view:freeze(['presentation','refreshPnote','refreshReview','renderSchedule']),
@@ -31,11 +48,11 @@ registry.define('backup',1,input=>{
     diagnostics:freeze(['capture','fail','finish','mark','start']),
     assets:freeze(['get','put','keys','list','importAll','restoreAll','removeMany','removeMetadata','scheduleMaintenance'])
   });
-  function createRuntime(input){
+  function createRuntime(input:BackupRuntimeInput){
     exactObject(input,['ports'],'Backup input');
     const rawPorts=input.ports;
     const configuration=exactObject(rawPorts&&rawPorts.configuration,PORT_FIELDS.configuration,'Backup configuration port');
-    const expectedPortNames=Object.keys(PORT_FIELDS);
+    const expectedPortNames=Object.keys(PORT_FIELDS) as (keyof typeof PORT_FIELDS)[];
     const ports=exactObject(rawPorts,expectedPortNames,'Backup ports');
     for(const name of expectedPortNames)exactObject(ports[name],PORT_FIELDS[name],'Backup '+name+' port');
     requireFunctions(ports.exports,PORT_FIELDS.exports,'Backup export port');
@@ -57,7 +74,7 @@ registry.define('backup',1,input=>{
     if(!Object.isFrozen(ports.codecs.backup)||!Object.isFrozen(ports.codecs.activeSession)||!Object.isFrozen(ports.codecs.pendingReview)){
       throw new TypeError('Backup codecs must be frozen.');
     }
-    if(!Object.isFrozen(ports.view.presentation)||['begin','read','feedback','condition','detail','outcome','resolve','reset','subscribe'].some(key=>typeof ports.view.presentation[key]!=='function'))throw new TypeError('Backup presentation port is invalid.');
+    if(!Object.isFrozen(ports.view.presentation)||(['begin','read','feedback','condition','detail','outcome','resolve','reset','subscribe'] as const).some(key=>typeof ports.view.presentation[key]!=='function'))throw new TypeError('Backup presentation port is invalid.');
     const {
       appVersion:APP_VERSION,
       backupVersion,
@@ -96,11 +113,11 @@ registry.define('backup',1,input=>{
     });
     const ReviewView=freeze({refresh:refreshReview});
     const TASKS=freeze({get length(){return hasTasks()?1:0;}});
-    function requireBackupMutationControl(action){
+    function requireBackupMutationControl(action:string){
       if(appCanMutate())return;
       throw new Error(`Study Director control is in another tab. Take control here before ${action}.`);
     }
-    function currentDailyRecords(records,label='Daily Records'){
+    function currentDailyRecords(records:unknown,label='Daily Records'){
       if(!Array.isArray(records))throw new TypeError(`${label} must be an array.`);
       return records.map(record=>{
         const clean=sanitizeCurrentDailyRecord(record);
@@ -110,28 +127,46 @@ registry.define('backup',1,input=>{
     }
 
 const {controller:BackupController,repository:RepositoryCheckpointPipeline}=(()=>{
-const inspectedBackups=new WeakMap(),verifiedPortableSnapshots=new WeakMap();
+
+type DayGroup=ReconciliationPlan['savedDays'][number];
+type DayCandidate=EntityCandidate<DailyRecord>;
+type NoteCandidate=EntityCandidate<NoteRecord>;
+type ResolvedPlan=ReturnType<BackupRuntimeInput['ports']['reconciliation']['resolvePlan']>;
+type DaySelection=string|{value:DailyRecord}|null;
+type DaySettled=Map<string,DaySelection>;
+type NotesState=ReturnType<typeof noteReconciliationState>;
+type Ancestor={checkpointId:string;notes:Readonly<Record<string,BaselineNote>>};
+type Assessment=Awaited<ReturnType<typeof assessImportedAssets>>;
+type AttachmentPlan=Awaited<ReturnType<typeof buildAttachmentDeletionPlan>>;
+type AssetSelection=Awaited<ReturnType<typeof selectResolvedImportedAssets>>;
+type Impact=Awaited<ReturnType<typeof restoreImpactPreview>>;
+type Replacement=Awaited<ReturnType<typeof planReplacement>>;
+type ResolvedDays={savedDays:readonly {date:string;changed:boolean;state:string;record?:DailyRecord|null;deletedAt?:string|null;hadLocal?:boolean;candidateId?:string|null}[];sourcePlan?:{savedDays:readonly DayGroup[]}};
+type ResolvedNotes={notes:readonly {key:string;changed:boolean;state:string;value?:unknown;deletedAt?:string|null}[]};
+type ResolvedSession={activeSession?:{changed:boolean;value:ActiveSession|null}};
+
+const inspectedBackups=new WeakMap<Candidate,StoredCandidate>(),verifiedPortableSnapshots=new WeakMap<VerifiedSnapshot,SnapshotState>();
 let activeOperations=0;
-let activeImportOperation=null,importSequence=0;
-let checkpointPromise=null,localExportPromise=null,localExportRequest=null;
+let activeImportOperation:ImportOperation|null=null,importSequence=0;
+let checkpointPromise:Promise<CheckpointFile>|null=null,localExportPromise:Promise<{status:string;filename?:string}>|null=null,localExportRequest:Promise<{status:string;filename?:string}|undefined>|null=null;
 function importAbortError(reason='Backup import was cancelled.'){
-  const error=new Error(reason);error.name='AbortError';error.code='STUDY_DIRECTOR_IMPORT_CANCELLED';return error;
+  const error=new Error(reason);fields(error)['name']='AbortError';fields(error)['code']='STUDY_DIRECTOR_IMPORT_CANCELLED';return error;
 }
-function throwIfImportCancelled(signal){if(signal&&signal.aborted)throw importAbortError(String(signal.reason&&signal.reason.message||signal.reason||'Backup import was cancelled.'));}
-function throwIfImportAborted(signal,authorityOptions=null){assertAuthority(authorityOptions||undefined);throwIfImportCancelled(signal);}
+function throwIfImportCancelled(signal:Signal){if(signal&&signal.aborted)throw importAbortError(String(signal.reason&&fields(signal.reason)['message']||signal.reason||'Backup import was cancelled.'));}
+function throwIfImportAborted(signal:Signal,authorityOptions:AuthorityOptions|null=null){assertAuthority(authorityOptions||undefined);throwIfImportCancelled(signal);}
 
 // The app draws the file backup row and the import Cancel from status() and
 // the 'file' presentation; listeners hear when an export or import starts or ends.
-const statusListeners=new Set();
-function subscribeStatus(listener){if(typeof listener!=='function')throw new TypeError('Backup status listener is invalid.');statusListeners.add(listener);return ()=>statusListeners.delete(listener);}
+const statusListeners=new Set<()=>void>();
+function subscribeStatus(listener:()=>void){if(typeof listener!=='function')throw new TypeError('Backup status listener is invalid.');statusListeners.add(listener);return ()=>statusListeners.delete(listener);}
 function notifyStatus(){for(const listener of statusListeners)try{listener();}catch(error){AppDiagnostics.capture('backup.status-listener',error,'warn');}}
 function beginImport(){
   if(activeImportOperation)return activeImportOperation;
   const controller=new AbortController(),id=++importSequence;
-  activeImportOperation=freeze({id,signal:controller.signal,cancel:reason=>{if(!controller.signal.aborted)controller.abort(importAbortError(reason));}});
+  activeImportOperation=freeze({id,signal:controller.signal,cancel:(reason?:string)=>{if(!controller.signal.aborted)controller.abort(importAbortError(reason));}});
   notifyStatus();return activeImportOperation;
 }
-function cancelImport(reason='Backup import was cancelled by the user.',options={}){
+function cancelImport(reason='Backup import was cancelled by the user.',options:{announce?:boolean}={}){
   if(!activeImportOperation)return false;
   activeImportOperation.cancel(reason);if(options&&options.announce!==false)setLocalExportStatus('Cancelling backup import safely…',true);return true;
 }
@@ -139,13 +174,13 @@ function finishImport(operation=activeImportOperation){
   if(!operation||!activeImportOperation||operation.id!==activeImportOperation.id)return false;
   activeImportOperation=null;presentation.condition('file','export-busy','');notifyStatus();return true;
 }
-async function yieldImport(signal,authorityOptions=null){
+async function yieldImport(signal:Signal,authorityOptions:AuthorityOptions|null=null){
   throwIfImportAborted(signal,authorityOptions);
   await yieldTask({signal});
   throwIfImportAborted(signal,authorityOptions);
 }
 function status(){return Object.freeze({busy:activeOperations>0,activeOperations,importActive:!!activeImportOperation,importCancelled:!!activeImportOperation?.signal.aborted,standaloneExportActive:!!localExportPromise||!!localExportRequest});}
-async function track(operation,wait=false,surface='managed'){activeOperations+=1;try{return await Exports.job(operation,{wait,surface});}finally{activeOperations=Math.max(0,activeOperations-1);}}
+async function track<T>(operation:()=>Promise<T>,wait=false,surface='managed'){activeOperations+=1;try{return await Exports.job(operation,{wait,surface});}finally{activeOperations=Math.max(0,activeOperations-1);}}
 const BackupCapture=BackupCaptureModule.create(freeze({
   configuration:freeze({limits:APP_LIMITS}),
   data:freeze({
@@ -168,14 +203,14 @@ if(BackupCapture.format!=='study-director.backup-capture'||BackupCapture.contrac
 const LOGICAL_CHECKPOINT_CAPTURE_FORMAT=BackupCapture.logicalFormat,LOGICAL_CHECKPOINT_CAPTURE_VERSION=BackupCapture.logicalVersion;
 const requireLogicalCheckpointCapture=BackupCapture.requireLogicalCheckpointCapture,verifyAnomalousPhysicalAssetAliases=BackupCapture.verifyAnomalousPhysicalAssetAliases,captureLogicalCheckpoint=BackupCapture.captureLogicalCheckpoint,assertLogicalCheckpointCurrent=BackupCapture.assertLogicalCheckpointCurrent;
 const beginManagedPreparationCapture=BackupCapture.beginManagedPreparationCapture,readManagedPreparationUnits=BackupCapture.readManagedPreparationUnits,finalizeManagedPreparationCapture=BackupCapture.finalizeManagedPreparationCapture,establishManagedPreparationBaseline=BackupCapture.establishManagedPreparationBaseline;
-async function* createPortableBackupLines(plan,{compression='none'}={}){
+async function* createPortableBackupLines(plan:FullLogicalCapture,{compression='none'}:{compression?:string}={}){
   const algorithm=BackupCodec.checksumAlgorithm();
   const manifest=BackupCodec.createManifest(plan,{compression,algorithm});
   yield (await Exports.run('stringify',{value:manifest}))+'\n';
-  let seq=0;const chunkHashes=[];const actual=BackupCodec.countShape();
-  const emit=async(entityType,items)=>{
+  let seq=0;const chunkHashes:string[]=[];const actual=BackupCodec.countShape();
+  const emit=async<K extends BackupEntity>(entityType:K,items:BackupEntities[K][])=>{
     const result=await BackupCodec.encodeChunk(seq++,entityType,items,algorithm);
-    chunkHashes.push(result.checksum);actual[entityType]+=items.length;
+    chunkHashes.push(result.checksum);actual[entityType]=(actual[entityType]||0)+items.length;
     return result.line+'\n';
   };
   yield await emit('checkpointManifest',[plan.protectedCheckpointManifest||BackupCodec.createProtectedManifest(plan,manifest.checkpoint)]);
@@ -191,18 +226,18 @@ async function* createPortableBackupLines(plan,{compression='none'}={}){
   const captureAuthority=plan&&plan.completeness&&plan.completeness.complete===true?'canonical-complete':'rescue-partial';
   yield (await Exports.run('stringify',{value:await BackupCodec.encodeCompletion(seq,actual,chunkHashes,algorithm,(plan.assetItems||[]).map(item=>item.descriptor),captureAuthority)}))+'\n';
 }
-async function portableBackupMetadataBlob(plan,compression){
+async function portableBackupMetadataBlob(plan:FullLogicalCapture,compression:string){
   const id=await Exports.run('encode.open',{gzip:compression==='gzip',maxBytes:APP_LIMITS.backupMaxCompressedBytes});
   try{for await(const line of createPortableBackupLines(plan,{compression}))await Exports.run('encode.write',{id,line});return await Exports.run('encode.finish',{id});}
   catch(error){await Exports.run('encode.close',{id}).catch(()=>{});throw error;}
 }
 // The name is known at the click, so the save dialog can open before the
 // backup is prepared.
-function portableBackupFilename(studentName){return filenameSafeStudentName(studentName)+'-study-director-backup-'+todayISO()+'.sdbackup';}
-async function createPortableBackupBlob(plan,{preferCompression=true,verify=true,retainInspection=false,report=null}={}){
+function portableBackupFilename(studentName:string){return filenameSafeStudentName(studentName)+'-study-director-backup-'+todayISO()+'.sdbackup';}
+async function createPortableBackupBlob(plan:FullLogicalCapture,{preferCompression=true,verify=true,retainInspection=false,report=null}:{preferCompression?:boolean;verify?:boolean;retainInspection?:boolean;report?:Reporter|null}={}){
   let compression=preferCompression&&BackupCodec.compressionSupported()?'gzip':'none',blob=null,compressionFallback=false;
   const metadataBlob=await portableBackupMetadataBlob(plan,compression);
-  blob=BackupCodec.createV10Container(metadataBlob,{compression,assetBlobs:[...new Map((plan.assetItems||[]).filter(item=>item.blob instanceof Blob).map(item=>[item.descriptor.checksum+':'+item.blob.size,item.blob])).values()]});
+  blob=BackupCodec.createV10Container(metadataBlob,{compression,assetBlobs:[...new Map((plan.assetItems||[]).filter((item):item is {descriptor:PresentAsset;blob:Blob}=>item.blob instanceof Blob).map(item=>[item.descriptor.checksum+':'+item.blob.size,item.blob])).values()]});
   const maxFileBytes=APP_LIMITS.backupMaxFileBytes;
   if(blob.size>maxFileBytes)throw new Error(`Backup exceeds the ${Math.round(maxFileBytes/1048576)} MB safe file-size limit.`);
   const filename=portableBackupFilename(plan.studentName);
@@ -218,24 +253,24 @@ async function createPortableBackupBlob(plan,{preferCompression=true,verify=true
   return retainInspection&&inspection?{blob,filename,compression,compressionFallback,inspection}:{blob,filename,compression,compressionFallback};
   }catch(error){await Exports.run('file.release',{file:blob});throw error;}
 }
-async function materializePortableCheckpoint(capture,{preferCompression=true,verify=true,retainInspection=false,report=null}={}){
-  const plan=requireLogicalCheckpointCapture(capture);
+async function materializePortableCheckpoint(capture:FullLogicalCapture,{preferCompression=true,verify=true,retainInspection=false,report=null}:{preferCompression?:boolean;verify?:boolean;retainInspection?:boolean;report?:Reporter|null}={}){
+  const plan:FullLogicalCapture=requireLogicalCheckpointCapture(capture);
   const file=await createPortableBackupBlob(plan,{preferCompression,verify,retainInspection,report});
   return freeze({...file,exportedAt:plan.exportedAt,sourceRevision:plan.sourceRevision,warning:plan.warning,counts:freeze({...plan.counts})});
 }
 const LogicalCheckpointCapture=freeze({capture:captureLogicalCheckpoint});
 const PortableCheckpointMaterializer=freeze({materialize:materializePortableCheckpoint});
 
-const ManagedRepository=ManagedRepositoryModule.createEngine(freeze({
+const ManagedRepository=ManagedRepositoryModule.createEngine(freeze<ManagedRepositoryInput<Candidate,boolean>>({
   codec:BackupCodec,
   ports:freeze({
     configuration:freeze({backupVersion,limits:APP_LIMITS,logicalCaptureFormat:LOGICAL_CHECKPOINT_CAPTURE_FORMAT,logicalCaptureVersion:LOGICAL_CHECKPOINT_CAPTURE_VERSION}),
-    persistence:freeze({reconciliationBaseRead:AppData.reconciliationBase.read,reconciliationBaseWrite:AppData.reconciliationBase.write,personalFingerprint:value=>personalFingerprint(value),dayFingerprints:records=>dayFingerprintMonths(records),sessionFingerprint:value=>sessionFingerprint(value)}),
-    assets:freeze({get:assetId=>AssetData.get(assetId),verifyAliases:(catalogue,assetIds)=>verifyAnomalousPhysicalAssetAliases(catalogue,assetIds)}),
+    persistence:freeze({reconciliationBaseRead:AppData.reconciliationBase.read,reconciliationBaseWrite:AppData.reconciliationBase.write,personalFingerprint:(value:unknown)=>personalFingerprint(value),dayFingerprints:(records:readonly DailyRecord[])=>dayFingerprintMonths(records),sessionFingerprint:(value:unknown)=>sessionFingerprint(value)}),
+    assets:freeze({get:(assetId:string)=>AssetData.get(assetId),verifyAliases:(catalogue:readonly AssetRow[],assetIds:readonly string[])=>verifyAnomalousPhysicalAssetAliases(catalogue,assetIds)}),
     files:freeze({protect:Exports.protect,unprotect:Exports.unprotect,run:Exports.run,scope:Exports.scope}),
     checkpoint:freeze({
-      capture:(...args)=>captureLogicalCheckpoint(...args),beginPreparation:(...args)=>beginManagedPreparationCapture(...args),readPreparationUnits:(...args)=>readManagedPreparationUnits(...args),finalizePreparation:(...args)=>finalizeManagedPreparationCapture(...args),establishPreparationBaseline:(...args)=>establishManagedPreparationBaseline(...args),
-      assertCurrent:capture=>assertLogicalCheckpointCurrent(capture),inspectVerifiedCapture:(...args)=>inspectVerifiedLogicalCapture(...args),verifyVerifiedCapture:(...args)=>verifyVerifiedLogicalCapture(...args),
+      capture:(...args:Parameters<typeof captureLogicalCheckpoint>)=>captureLogicalCheckpoint(...args),beginPreparation:(...args:Parameters<typeof beginManagedPreparationCapture>)=>beginManagedPreparationCapture(...args),readPreparationUnits:(...args:Parameters<typeof readManagedPreparationUnits>)=>readManagedPreparationUnits(...args),finalizePreparation:(...args:Parameters<typeof finalizeManagedPreparationCapture>)=>finalizeManagedPreparationCapture(...args),establishPreparationBaseline:(...args:Parameters<typeof establishManagedPreparationBaseline>)=>establishManagedPreparationBaseline(...args),
+      assertCurrent:(capture:Parameters<typeof assertLogicalCheckpointCurrent>[0])=>assertLogicalCheckpointCurrent(capture),inspectVerifiedCapture:(...args:Parameters<typeof inspectVerifiedLogicalCapture>)=>inspectVerifiedLogicalCapture(...args),verifyVerifiedCapture:(...args:Parameters<typeof verifyVerifiedLogicalCapture>)=>verifyVerifiedLogicalCapture(...args),
       currentImportSignal:()=>activeImportOperation&&activeImportOperation.signal||null
     }),
     domain:freeze({clampText}),
@@ -244,55 +279,55 @@ const ManagedRepository=ManagedRepositoryModule.createEngine(freeze({
   })
 }));
 if(!Object.isFrozen(ManagedRepository)||ManagedRepository.format!=='study-director.managed-repository'||ManagedRepository.contractVersion!==1)throw new Error('Managed repository engine is unavailable or incompatible.');
-async function createCanonicalCheckpoint(options={},report=null){
+async function createCanonicalCheckpoint(options:CaptureOptions={},report:Reporter|null=null){
   report?.stage('Collecting your data…');
   const capture=await LogicalCheckpointCapture.capture(new Date().toISOString(),options);
   return PortableCheckpointMaterializer.materialize(capture,{preferCompression:true,verify:true,report});
 }
-async function createCanonicalCheckpointWithInspection(options={}){
+async function createCanonicalCheckpointWithInspection(options:CaptureOptions={}){
   const capture=await LogicalCheckpointCapture.capture(new Date().toISOString(),options);
   return PortableCheckpointMaterializer.materialize(capture,{preferCompression:true,verify:true,retainInspection:true});
 }
 
 // report (optional): stage(message) and progress({loaded,total}) for a person
 // watching the export.
-async function createCheckpoint(options={},report=null){
+async function createCheckpoint(options:ProtectionOptions={},report:Reporter|null=null){
   if(checkpointPromise)return checkpointPromise;
   checkpointPromise=(async()=>{
-    let canonical,result;
-    try{result=await Exports.protect(async()=>{canonical=await createCanonicalCheckpoint({},report);report?.stage('Securing the backup…');return canonical;},{...options,onProgress:report?.progress});return Object.freeze({...result,release:()=>Exports.run('file.release',{file:result.blob})});}
+    let canonical:Materialized|undefined,result:Awaited<ReturnType<typeof Exports.protect<Materialized>>>|undefined;
+    try{result=await Exports.protect(async()=>{canonical=await createCanonicalCheckpoint({},report);report?.stage('Securing the backup…');return canonical;},{...options,onProgress:report?.progress});return Object.freeze({...result,release:()=>Exports.run('file.release',{file:result!.blob})});}
     finally{if(canonical&&canonical.blob!==result?.blob)await Exports.run('file.release',{file:canonical.blob});}
   })();
   try{return await checkpointPromise;}finally{checkpointPromise=null;}
 }
 const presentation=ports.view.presentation;
-let portablePresentation=null;
+let portablePresentation:PresentationScope|null=null;
 function setLocalExportStatus(message='',ok=true){
   if(portablePresentation?.read()?.lifecycle==='running')portablePresentation.update({message:String(message||''),severity:ok?'info':'error'});
   else presentation.feedback('file',message,ok);
 }
-function finishPortablePresentation(patch={}){portablePresentation?.finish(patch);portablePresentation=null;}
-function markBackupCompleted(context={}){if(appCanMutate())backupCompleted(context&&typeof context==='object'?context:{});}
-async function prepareSafetyCopy(options={}){
-  let canonical,file;try{file=await Exports.protect(async()=>{canonical=await createCanonicalCheckpoint(options);return canonical;});
+function finishPortablePresentation(patch:PresentationPatch={}){portablePresentation?.finish(patch);portablePresentation=null;}
+function markBackupCompleted(context:Completion={}){if(appCanMutate())backupCompleted(context&&typeof context==='object'?context:{});}
+async function prepareSafetyCopy(options:CaptureOptions={}){
+  let canonical:Materialized|undefined,file:Awaited<ReturnType<typeof Exports.protect<Materialized>>>|undefined;try{file=await Exports.protect(async()=>{canonical=await createCanonicalCheckpoint(options);return canonical;});
   await Exports.save(file);markBackupCompleted({copy:portableCopy(file,false)});
-  return {canonical,file:Object.freeze({...file,downloadStarted:true})};
-  }catch(error){if(canonical)await Exports.run('file.release',{file:canonical.blob});if(file?.blob!==canonical?.blob)await Exports.run('file.release',{file:file?.blob});throw error;}
+  return {canonical:canonical!,file:Object.freeze({...file,downloadStarted:true})};
+  }catch(error){if(canonical)await Exports.run('file.release',{file:canonical.blob});if(file&&file.blob!==canonical?.blob)await Exports.run('file.release',{file:file.blob});throw error;}
 }
-async function downloadSafetyCopy(options={}){const {canonical,file}=await prepareSafetyCopy(options);if(canonical.blob!==file.blob)await Exports.run('file.release',{file:canonical.blob});return file;}
+async function downloadSafetyCopy(options:CaptureOptions={}){const {canonical,file}=await prepareSafetyCopy(options);if(canonical.blob!==file.blob)await Exports.run('file.release',{file:canonical.blob});return file;}
 // Progress for a person watching an export: each stage at once, and bytes as
 // the large steps (packaging, encrypting, saving, checking) move.
 function exportReporter(){
   let last=0;
   return freeze({
-    stage:message=>{portablePresentation?.update({message:String(message||''),progress:null});last=0;},
-    progress:value=>{const now=Date.now(),loaded=Math.max(0,Number(value&&value.loaded)||0),total=Math.max(0,Number(value&&value.total)||0);if(!total||now-last<150&&loaded<total)return;last=now;portablePresentation?.update({progress:{stage:'export',completedBytes:Math.min(loaded,total),totalBytes:total}});renderPortablePresentation();}
+    stage:(message:string)=>{portablePresentation?.update({message:String(message||''),progress:null});last=0;},
+    progress:(value:{loaded?:number;total?:number})=>{const now=Date.now(),loaded=Math.max(0,Number(value&&value.loaded)||0),total=Math.max(0,Number(value&&value.total)||0);if(!total||now-last<150&&loaded<total)return;last=now;portablePresentation?.update({progress:{stage:'export',completedBytes:Math.min(loaded,total),totalBytes:total}});}
   });
 }
 // A portable backup holds the data as of its capture. A file saved through the
 // save dialog is read back (verified); a download cannot be, but the person
 // still made a backup, so the reminder counts both.
-function portableCopy(file,verified){return freeze({source:'file',sourceRevision:String(file&&file.sourceRevision||''),verified});}
+function portableCopy(file:{sourceRevision?:string},verified:boolean){return freeze({source:'file',sourceRevision:String(file&&file.sourceRevision||''),verified});}
 async function exportPortableBackup(){
   if(localExportPromise)return localExportPromise;
   // The save dialog opens straight from the click, before any waiting, so the
@@ -314,7 +349,7 @@ async function exportPortableBackup(){
       const message=(saved?`Backup saved and verified: ${result.filename}.`:'Verified backup download started. Check that your browser saved it.')+(file.warning?' '+file.warning:'');
       setLocalExportStatus(message);finishPortablePresentation({message,outcome:saved?'saved':'download-started'});OperationDiagnostics.finish({bytes:Number(file.blob.size)||0,saved},traceId);return result;
     }catch(error){
-      const cancelled=error.name==='AbortError'||error.code==='STUDY_DIRECTOR_IMPORT_CANCELLED',message=cancelled?'Backup export cancelled.':'Backup export failed: '+error.message+(error.fileWritten?' The file at that location may be incomplete. Delete it and export again.':'');setLocalExportStatus(message,cancelled);
+      const cancelled=fields(error)['name']==='AbortError'||fields(error)['code']==='STUDY_DIRECTOR_IMPORT_CANCELLED',message=cancelled?'Backup export cancelled.':'Backup export failed: '+fields(error)['message']+(fields(error)['fileWritten']?' The file at that location may be incomplete. Delete it and export again.':'');setLocalExportStatus(message,cancelled);
       finishPortablePresentation({message,lifecycle:cancelled?'cancelled':'failed'});
       if(cancelled)OperationDiagnostics.finish({cancelled:true},traceId);else OperationDiagnostics.fail(error,{},traceId);return {status:cancelled?'cancelled':'failed'};
     }finally{if(file)try{await file.release();}catch(error){AppDiagnostics.capture('backup.export-release',error,'warn');}}
@@ -334,9 +369,9 @@ function exportLocalBackup(){
   // slow Device/Drive filesystem or network work cannot make Export inert.
   presentation.condition('file','export-busy','');
   localExportRequest=Exports.scope(()=>exportPortableBackup())
-    .catch(error=>{
-      const cancelled=error&&error.name==='AbortError';
-      const message=cancelled?'Backup export cancelled.':'Backup export failed: '+String(error&&error.message||error);
+    .catch((error:unknown)=>{
+      const cancelled=error&&fields(error)['name']==='AbortError';
+      const message=cancelled?'Backup export cancelled.':'Backup export failed: '+String(error&&fields(error)['message']||error);
       if(!portablePresentation)portablePresentation=presentation.begin('file','export',{label:'File backup',message});
       finishPortablePresentation({message,lifecycle:cancelled?'cancelled':'failed'});
       return Object.freeze({status:cancelled?'cancelled':'failed'});
@@ -350,8 +385,8 @@ function cancelStandalone(reason='Standalone backup operation was cancelled by t
   let cancelled=false;if(activeImportOperation)cancelled=cancelImport(reason)||cancelled;if(localExportPromise||localExportRequest){Exports.cancel();cancelled=true;}return cancelled;
 }
 
-function normalizeImportedDailyRecordSet(records){
-  const byDate=new Map();
+function normalizeImportedDailyRecordSet(records:readonly DailyRecord[]){
+  const byDate=new Map<string,DailyRecord>();
   for(const record of records||[]){
     const clean=BackupCodec.normalizeRecord(record);
     if(!clean)throw new Error(`Imported Saved Day ${String(record&&record.date||'?')} is outside the current canonical schema.`);
@@ -360,18 +395,18 @@ function normalizeImportedDailyRecordSet(records){
   }
   return {records:[...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date)),skipped:0,duplicates:0};
 }
-async function getDailyRecordDocumentsByDates(dates,options={}){return AppData.dailyRecords.documents(dates,options);}
-async function storeImportedDailyRecordBatches(records,operation,reportProgress=null){
+async function getDailyRecordDocumentsByDates(dates:readonly string[],options:CanonicalReadOptions={}){return AppData.dailyRecords.documents(dates,options);}
+async function storeImportedDailyRecordBatches(records:readonly DailyRecord[],operation:ImportOperation|null,reportProgress:((message:string,progress:{committed:number;total:number;batches:number})=>void)|null=null){
   return AppData.dailyRecords.importBatches(records,{
     signal:operation&&operation.signal,
     yieldControl:()=>yieldImport(operation&&operation.signal),
     onProgress:progress=>{if(operation&&(activeImportOperation!==operation||operation.signal?.aborted))return;const message=`Importing saved days… ${progress.committed} of ${progress.total}`;if(typeof reportProgress==='function')reportProgress(message,progress);else setLocalExportStatus(message);}
   });
 }
-async function applyResolvedSavedDays(resolvedPlan,operation,reportProgress=null){
-  const items=Array.isArray(resolvedPlan&&resolvedPlan.savedDays)?resolvedPlan.savedDays:[];
+async function applyResolvedSavedDays(resolvedPlan:ResolvedDays,operation:ImportOperation|null,reportProgress:((message:string,progress:{committed:number;total:number;batches:number})=>void)|null=null){
+  const items=Array.isArray(resolvedPlan&&resolvedPlan.savedDays)?resolvedPlan.savedDays as ResolvedDays['savedDays']:[];
   const planItems=new Map((resolvedPlan&&resolvedPlan.sourcePlan&&resolvedPlan.sourcePlan.savedDays||[]).map(item=>[item.date,item]));
-  const recordsToSave=items.filter(item=>item.changed&&item.state==='record'&&item.record).map(item=>item.record);
+  const recordsToSave=items.filter(item=>item.changed&&item.state==='record'&&item.record).map(item=>item.record!);
   const deletionsToApply=items.filter(item=>item.changed&&item.state==='deleted');
   let batches=0;
   if(recordsToSave.length){const stored=await storeImportedDailyRecordBatches(recordsToSave,operation,reportProgress);batches=stored.batches;}
@@ -382,7 +417,7 @@ async function applyResolvedSavedDays(resolvedPlan,operation,reportProgress=null
     const existing=await getDailyRecordDocumentsByDates(deletionsToApply.map(item=>item.date)),existingDates=new Set(existing.map(record=>record.date));
     for(const item of deletionsToApply){
       if(existingDates.has(item.date)){await AppData.dailyRecords.remove(item.date);deleted++;}
-      ledger.set(item.date,freeze({date:item.date,deletedAt:item.deletedAt}));
+      ledger.set(item.date,freeze({date:item.date,deletedAt:item.deletedAt!}));
     }
   }
   const expectedDeletions=[...ledger.values()].sort((a,b)=>a.date.localeCompare(b.date));
@@ -403,18 +438,18 @@ async function applyResolvedSavedDays(resolvedPlan,operation,reportProgress=null
     expectedDeletions:freeze([...storedDeletions])
   });
 }
-async function applyResolvedNotes(resolvedPlan){
-  const changed=(resolvedPlan&&resolvedPlan.notes||[]).filter(item=>item.changed),writes=changed.filter(item=>item.state==='record'&&item.value&&typeof item.value==='object'),deletions=changed.filter(item=>item.state==='deleted'&&item.deletedAt).map(item=>freeze({key:item.key,deletedAt:item.deletedAt}));
+async function applyResolvedNotes(resolvedPlan:ResolvedNotes){
+  const changed=(resolvedPlan&&resolvedPlan.notes||[]).filter(item=>item.changed),writes=changed.filter(item=>item.state==='record'&&item.value&&typeof item.value==='object'),deletions=changed.filter(item=>item.state==='deleted'&&item.deletedAt).map(item=>freeze({key:item.key,deletedAt:item.deletedAt!}));
   if(!writes.length&&!deletions.length)return {message:'',changed:false,expected:null,expectedDeletions:null,count:0,deleted:0};
   requireBackupMutationControl('reconciling notes');
-  const payload=Object.create(null);for(const item of writes)payload[item.key]=item.value;
+  const payload:Record<string,unknown>=empty();for(const item of writes)payload[item.key]=item.value;
   const committed=await reconcileNotes(AppData.notes.normalizePayload(payload),deletions);
   if(!committed||typeof committed!=='object'||Array.isArray(committed))throw new Error('Note reconciliation did not return a canonical committed payload.');
   const expected=AppData.notes.normalizePayload(committed),expectedDeletions=freeze([...(await AppData.deletionRecovery.notes())]),count=writes.filter(item=>notesTrashKey(item.key)).length,deleted=deletions.filter(item=>notesTrashKey(item.key)).length;
   const parts=[count?`${count} note${count===1?'':'s'} updated`:'',deleted?`${deleted} note${deleted===1?'':'s'} moved to Recently deleted`:''].filter(Boolean);
   return {message:parts.length?` · ${parts.join(' · ')}`:'',changed:true,expected,expectedDeletions,count,deleted};
 }
-async function applyResolvedActiveSession(resolvedPlan,{clear=false}={}){
+async function applyResolvedActiveSession(resolvedPlan:ResolvedSession,{clear=false}={}){
   const resolved=resolvedPlan&&resolvedPlan.activeSession;
   // The other side ended the session this device had not changed since.
   if(clear&&resolved&&resolved.value){requireBackupMutationControl('reconciling the active session');const scheduleText=scheduleRead();await restoreSessionState(null,scheduleText);return {message:' and active session',changed:true,expected:null,scheduleText};}
@@ -428,23 +463,23 @@ async function applyResolvedActiveSession(resolvedPlan,{clear=false}={}){
 }
 function staleReconciliationError(){
   const error=new Error('Local Study Director data changed while differences were being reviewed. The comparison must be rebuilt from the latest saved state.');
-  error.code='STUDY_DIRECTOR_RECONCILIATION_STALE';
+  fields(error)['code']='STUDY_DIRECTOR_RECONCILIATION_STALE';
   return error;
 }
-function restoreRelevantDates(parsed){
+function restoreRelevantDates(parsed:Parsed){
   const records=normalizeImportedDailyRecordSet(parsed&&parsed.records||[]).records;
-  const deletions=parsed&&parsed.protectedCheckpointManifest&&Array.isArray(parsed.protectedCheckpointManifest.savedDayDeletions)?parsed.protectedCheckpointManifest.savedDayDeletions:[];
+  const deletions=parsed&&parsed.protectedCheckpointManifest&&Array.isArray(parsed.protectedCheckpointManifest.savedDayDeletions)?parsed.protectedCheckpointManifest.savedDayDeletions as readonly SavedDayDeletion[]:[];
   return freeze([...new Set([...records.map(record=>record.date),...deletions.map(entry=>String(entry&&entry.date||''))].filter(Boolean))].sort());
 }
-function restorePreflightFailure(code,stage,message,error=null){
-  const suffix=error?`: ${error&&error.message||error}`:'';
+function restorePreflightFailure(code:string,stage:string,message:string,error:unknown=null){
+  const suffix=error?`: ${error&&fields(error)['message']||error}`:'';
   const failure=new Error(`${message}${suffix}`);
-  failure.code=String(code||'RESTORE_PREFLIGHT_FAILED');
-  failure.backupStage=String(stage||'restore-preflight');
-  failure.diagnosticReason=String(stage||'restore-preflight');
+  fields(failure)['code']=String(code||'RESTORE_PREFLIGHT_FAILED');
+  fields(failure)['backupStage']=String(stage||'restore-preflight');
+  fields(failure)['diagnosticReason']=String(stage||'restore-preflight');
   return failure;
 }
-async function runRestorePreflightStage(stage,code,message,operation){
+async function runRestorePreflightStage<T>(stage:string,code:string,message:string,operation:()=>Promise<T>){
   const name=String(stage||'stage');
   OperationDiagnostics.mark(`restore-preflight-${name}-start`);
   try{
@@ -452,7 +487,7 @@ async function runRestorePreflightStage(stage,code,message,operation){
     OperationDiagnostics.mark(`restore-preflight-${name}-complete`);
     return result;
   }catch(error){
-    if(error&&((error.name==='AbortError')||error.code==='STUDY_DIRECTOR_IMPORT_CANCELLED'))throw error;
+    if(error&&((fields(error)['name']==='AbortError')||fields(error)['code']==='STUDY_DIRECTOR_IMPORT_CANCELLED'))throw error;
     OperationDiagnostics.mark(`restore-preflight-${name}-failed`,{errorCode:String(code||'RESTORE_PREFLIGHT_FAILED')});
     throw restorePreflightFailure(code,name,message,error);
   }
@@ -462,7 +497,7 @@ async function readCanonicalActiveSession(){
   if(loaded?.ok!==true||loaded.error)throw loaded?.error||new Error('The active session could not be read completely for recovery.');
   return loaded;
 }
-async function flushRestorePreflightState(signal){
+async function flushRestorePreflightState(signal:Signal){
   throwIfImportCancelled(signal);
   await runRestorePreflightStage('ownership','RESTORE_PREFLIGHT_OWNERSHIP_LOST','Study Director write control is unavailable before restore reconciliation.',async()=>{
     assertAuthority();
@@ -496,7 +531,7 @@ async function flushRestorePreflightState(signal){
 }
 // A missing-only restore cannot change today's session, so the running timer's
 // own saves are not a reason to rebuild its comparison.
-async function captureRestoreReconciliationRevision(relevantDates,{session:includeSession=true}={}){
+async function captureRestoreReconciliationRevision(relevantDates:readonly string[],{session:includeSession=true}={}){
   const [records,notesRaw,loadedSession,personalData]=await Promise.all([
     getDailyRecordDocumentsByDates(relevantDates||[]),
     AppData.notes.readFreshPayload(),
@@ -504,13 +539,13 @@ async function captureRestoreReconciliationRevision(relevantDates,{session:inclu
     personalExport({flush:false})
   ]);
   const notes=AppData.notes.normalizePayload(notesRaw),noteState=Object.keys(notes).sort().map(key=>{
-    const value=notes[key]||{};return [key,String(value.updatedAt||''),String(value.label||''),String(value.text||'')];
+    const value:Partial<NoteRecord>=notes[key]||{};return [key,String(value.updatedAt||''),String(value.label||''),String(value.text||'')];
   });
   const recordState=currentDailyRecords(records||[],'Restore reconciliation Daily Records').sort((a,b)=>a.date.localeCompare(b.date));
   const session=loadedSession&&loadedSession.value?ActiveSessionCodec.sanitizeCurrent(loadedSession.value):null;
   return JSON.stringify([recordState,noteState,session,personalData||null]);
 }
-async function buildStableRestoreImpact(parsed,preview,signal,options={}){
+async function buildStableRestoreImpact(parsed:Parsed,preview:Preview,signal:Signal,options:RestoreOptions={}){
   const relevantDates=options.note?freeze([]):restoreRelevantDates(parsed);
   for(let attempt=0;attempt<3;attempt+=1){
     throwIfImportAborted(signal);
@@ -523,17 +558,17 @@ async function buildStableRestoreImpact(parsed,preview,signal,options={}){
   }
   throw staleReconciliationError();
 }
-async function assertRestoreReconciliationCurrent(expectedRevision,relevantDates,scope){
+async function assertRestoreReconciliationCurrent(expectedRevision:string,relevantDates:readonly string[],scope:{session:boolean}){
   if(expectedRevision!==await captureRestoreReconciliationRevision(relevantDates,scope))throw staleReconciliationError();
   return true;
 }
 
-async function buildRestoreReconciliationPlan(parsed,preview,{missingOnly=false,note='',holdSession=false}={}){
+async function buildRestoreReconciliationPlan(parsed:Parsed,preview:Preview,{missingOnly=false,note='',holdSession=false}:RestoreOptions={}){
   // A one-note restore compares only that note: no Saved Days, deletions or
   // session, and every other note stays exactly as it is on this device.
   const records=note?[]:normalizeImportedDailyRecordSet(parsed&&parsed.records||[]).records;
-  const checkpointDeletions=!note&&parsed&&parsed.protectedCheckpointManifest&&Array.isArray(parsed.protectedCheckpointManifest.savedDayDeletions)?parsed.protectedCheckpointManifest.savedDayDeletions:[];
-  const checkpointNoteDeletions=!note&&parsed&&parsed.protectedCheckpointManifest&&Array.isArray(parsed.protectedCheckpointManifest.noteDeletions)?parsed.protectedCheckpointManifest.noteDeletions:[];
+  const checkpointDeletions=!note&&parsed&&parsed.protectedCheckpointManifest&&Array.isArray(parsed.protectedCheckpointManifest.savedDayDeletions)?parsed.protectedCheckpointManifest.savedDayDeletions as readonly SavedDayDeletion[]:[];
+  const checkpointNoteDeletions=!note&&parsed&&parsed.protectedCheckpointManifest&&Array.isArray(parsed.protectedCheckpointManifest.noteDeletions)?parsed.protectedCheckpointManifest.noteDeletions as readonly NoteDeletion[]:[];
   const relevantDates=[...new Set([...records.map(record=>record.date),...checkpointDeletions.map(entry=>entry.date)])];
   const localRecords=currentDailyRecords(await getDailyRecordDocumentsByDates(relevantDates),'Local reconciliation Daily Records');
   const allLocalDeletions=await AppData.deletionRecovery.savedDays(),relevantDateSet=new Set(relevantDates);
@@ -541,8 +576,8 @@ async function buildRestoreReconciliationPlan(parsed,preview,{missingOnly=false,
   const localNotes=AppData.notes.normalizePayload(await AppData.notes.readFreshPayload()),allLocalNoteDeletions=await AppData.deletionRecovery.notes();
   // Missing-only recovery adds back what this device lacks (Saved Days,
   // attachments) and never offers the backup's notes or session.
-  const backupNotes=missingOnly?Object.create(null):AppData.notes.alignByTitle(parsed&&parsed.data&&parsed.data.notes||{},allLocalNoteDeletions.map(entry=>entry.key)),incomingNotes=note?Object.create(null):backupNotes;
-  if(note&&Object.prototype.hasOwnProperty.call(backupNotes,note))incomingNotes[note]=backupNotes[note];
+  const backupNotes:Record<string,NoteRecord>=missingOnly?empty():AppData.notes.alignByTitle(parsed&&parsed.data&&parsed.data.notes||{},allLocalNoteDeletions.map(entry=>entry.key)),incomingNotes:Record<string,NoteRecord>=note?empty():backupNotes;
+  if(note&&Object.prototype.hasOwnProperty.call(backupNotes,note))incomingNotes[note]=backupNotes[note]!;
   const loadedSession=await readCanonicalActiveSession(),localSession=loadedSession&&loadedSession.value||null;
   const rawIncomingSession=parsed&&parsed.importedActiveSession||null;
   const incomingSession=note?null:rawIncomingSession;
@@ -553,39 +588,39 @@ async function buildRestoreReconciliationPlan(parsed,preview,{missingOnly=false,
     incoming:{id:checkpointId,label:incomingLabel,savedDays:records,savedDayDeletions:checkpointDeletions,notes:incomingNotes,noteDeletions:missingOnly?[]:checkpointNoteDeletions,activeSession:missingOnly||holdSession?null:incomingSession}
   });
 }
-function savedDayChoiceLabel(candidate){
+function savedDayChoiceLabel(candidate:DayCandidate){
   const source=candidate.sources.find(item=>item.local)||candidate.sources[0],local=!!source&&source.local;
   if(candidate.kind==='deleted')return local?'Keep deleted':`Apply deletion from ${source?.label||'backup'}`;
   return local?'Keep this device’s Saved Day':`Use ${source?.label||'Backup copy'} Saved Day`;
 }
 // "12 Saved Days · 1 note".
-function savedDaysAndNotes(counts){const days=Number(counts&&counts.dailyRecord)||0,notes=Number(counts&&counts.note)||0;return `${days} Saved Day${days===1?'':'s'} · ${notes} note${notes===1?'':'s'}`;}
-function savedDayDecisionTimestamp(value){
+function savedDaysAndNotes(counts:{dailyRecord?:number;note?:number}|null|undefined){const days=Number(counts&&counts.dailyRecord)||0,notes=Number(counts&&counts.note)||0;return `${days} Saved Day${days===1?'':'s'} · ${notes} note${notes===1?'':'s'}`;}
+function savedDayDecisionTimestamp(value:unknown){
   const parsed=Date.parse(String(value||''));if(!Number.isFinite(parsed))return '';
   try{return new Date(parsed).toLocaleString(undefined,{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});}catch{return new Date(parsed).toISOString();}
 }
-function savedDayChoiceDescription(candidate){
+function savedDayChoiceDescription(candidate:Pick<DayCandidate,'kind'|'record'|'local'>&{deletedAt?:string|null;value?:DailyRecord|null}&{sources:readonly {label:string;local:boolean}[]}){
   const source=candidate.sources.find(item=>candidate.local?item.local:!item.local)||candidate.sources[0],origin=candidate.local?'This device':(source?.label||'Backup copy');
   if(candidate.kind==='deleted'){
     const at=savedDayDecisionTimestamp(candidate.deletedAt);return `${origin} · deleted${at?` ${at}`:''}.`;
   }
-  const record=candidate.record||candidate.value||{},stamp=savedDayDecisionTimestamp(record.updatedAt||record.savedAt),blocks=Array.isArray(record.schedule)?record.schedule.length:0,quality=Number(record.studyQuality),parts=[origin];
+  const record=candidate.record||candidate.value!,stamp=savedDayDecisionTimestamp(record.updatedAt||record.savedAt),blocks=record.recordKind==='study'&&Array.isArray(record.schedule)?record.schedule.length:0,quality=Number(record.recordKind==='study'?record.studyQuality:undefined),parts=[origin];
   if(stamp)parts.push(`saved ${stamp}`);
   if(blocks)parts.push(`${blocks} planned block${blocks===1?'':'s'}`);
   if(String(record.reflection||'').trim())parts.push('reflection saved');
   if(Number.isInteger(quality)&&quality>=1&&quality<=5)parts.push(`quality ${quality}/5`);
   return `${parts.join(' · ')}.`;
 }
-function savedDayRecordPair(item){
+function savedDayRecordPair(item:DayGroup){
   if(!item?.conflict)return null;
   const local=item.candidates.find(candidate=>candidate.local&&candidate.kind==='record')||null,incoming=item.candidates.find(candidate=>!candidate.local&&candidate.kind==='record')||null;
   return local&&incoming?freeze({local,incoming}):null;
 }
-function savedDayStudyState(record){
+function savedDayStudyState(record:DailyRecord|null){
   if(!record||record.recordKind!=='study')return null;
   const {reflection,updatedAt,...state}=record;return state;
 }
-function savedDayNeedsWholeDecision(item,settled=null){
+function savedDayNeedsWholeDecision(item:DayGroup,settled:DaySettled|null=null){
   if(!item?.conflict||settled&&settled.has(item.date))return false;
   const pair=savedDayRecordPair(item);if(!pair)return true;
   const localKind=pair.local.record?.recordKind,incomingKind=pair.incoming.record?.recordKind;
@@ -594,9 +629,9 @@ function savedDayNeedsWholeDecision(item,settled=null){
   if(localKind==='study'&&incomingKind==='study'&&Canonical.same(savedDayStudyState(pair.local.record),savedDayStudyState(pair.incoming.record)))return false;
   return true;
 }
-function savedDayPreferredCandidate(item,decisions={},settled=null){
+function savedDayPreferredCandidate(item:DayGroup,decisions:Decisions={},settled:DaySettled|null=null){
   if(settled&&settled.has(item.date))return item.candidates.find(candidate=>candidate.id===settled.get(item.date))||null;
-  const selected=decisions&&decisions[item.decisionKey];if(selected){const found=item.candidates.find(candidate=>candidate.id===selected);if(found)return found;}
+  const selected=decisions&&selection(decisions,item.decisionKey);if(selected){const found=item.candidates.find(candidate=>candidate.id===selected);if(found)return found;}
   const pair=savedDayRecordPair(item);
   if(pair){
     const study=[pair.local,pair.incoming].find(candidate=>candidate.record?.recordKind==='study'),diary=[pair.local,pair.incoming].find(candidate=>candidate.record?.recordKind==='diary');
@@ -604,18 +639,18 @@ function savedDayPreferredCandidate(item,decisions={},settled=null){
   }
   return item.candidates.find(candidate=>candidate.id===item.defaultCandidateId)||item.candidates[0]||null;
 }
-function savedDayReflectionConflicts(plan,settled=null){
+function savedDayReflectionConflicts(plan:ReconciliationPlan,settled:DaySettled|null=null){
   const conflicts=[];
   for(const item of plan.savedDays){
     const pair=savedDayRecordPair(item);if(!pair||settled&&settled.has(item.date))continue;
-    const kinds=[pair.local.record?.recordKind,pair.incoming.record?.recordKind];if(kinds.some(kind=>!['study','diary'].includes(kind)))continue;
+    const kinds=[pair.local.record?.recordKind,pair.incoming.record?.recordKind];if(kinds.some(kind=>!['study','diary'].includes(String(kind))))continue;
     const localValue=String(pair.local.record?.reflection||''),incomingValue=String(pair.incoming.record?.reflection||'');if(localValue===incomingValue)continue;
     conflicts.push(freeze({key:item.date,label:`Diary · ${item.date}`,localCandidateId:pair.local.id,incomingCandidateId:pair.incoming.id,localValue,incomingValue,incomingLabel:pair.incoming.sources[0]?.label||'Backup copy',ancestorAvailable:false,ancestorValue:'',requireContent:kinds.every(kind=>kind==='diary')}));
   }
   return freeze(conflicts);
 }
-function savedDayReflectionSelections(plan,result,decisions={}){
-  const out=Object.create(null),notes=result&&result.notes&&typeof result.notes==='object'?result.notes:{};
+function savedDayReflectionSelections(plan:ReconciliationPlan,result:TextResolution|null,decisions:Decisions={}){
+  const out:Record<string,string|{value:DailyRecord}>=empty(),notes=result&&result.notes&&typeof result.notes==='object'?result.notes:{};
   for(const item of plan.savedDays){
     const resolved=notes[item.date];if(!resolved)continue;
     const base=savedDayPreferredCandidate(item,decisions);if(!base||base.kind!=='record'||!base.record)throw new Error(`Saved Day ${item.date} has no valid reflection reconciliation base.`);
@@ -629,9 +664,9 @@ function savedDayReflectionSelections(plan,result,decisions={}){
   }
   return freeze(out);
 }
-function savedDayBulkDecisionGroup(plan,settled=null){
+function savedDayBulkDecisionGroup(plan:ReconciliationPlan,settled:DaySettled|null=null){
   const conflicts=plan.savedDays.filter(item=>savedDayNeedsWholeDecision(item,settled));if(conflicts.length<2)return null;
-  const localValues=Object.create(null),incomingValues=Object.create(null),reviewValues=Object.create(null);
+  const localValues:Record<string,string>=empty(),incomingValues:Record<string,string>=empty(),reviewValues:Record<string,string|null>=empty();
   for(const item of conflicts){
     const local=item.candidates.find(candidate=>candidate.local),incoming=item.candidates.find(candidate=>!candidate.local);
     if(!local||!incoming)return null;
@@ -648,33 +683,33 @@ function savedDayBulkDecisionGroup(plan,settled=null){
     ])
   });
 }
-function noteChoiceLabel(candidate){
+function noteChoiceLabel(candidate:NoteCandidate){
   if(candidate.kind==='deleted')return candidate.local?freeze({label:'Keep it deleted',description:'The backup’s copy is not added.'}):freeze({label:'Delete it',description:'This device’s copy moves to Recently deleted.'});
   return candidate.local?freeze({label:'Keep this device’s note',description:'The note stays as it is on this device.'}):freeze({label:'Bring back the backup’s note',description:'The backup’s copy of this note is added.'});
 }
-function activeSessionChoiceLabel(candidate){
+function activeSessionChoiceLabel(candidate:SessionCandidate){
   const source=candidate.sources.find(item=>item.local)||candidate.sources[0];
   return source?.local?'Keep this device’s session':`Use session from ${source?.label||'backup'}`;
 }
 // What both sides last shared: the shared base this device last synced, when
 // the backup descends from it, else null.
-async function lastSharedBase(stored){
+async function lastSharedBase(stored:StoredCandidate|null|undefined){
   const snapshot=candidateSnapshotState(stored),manifest=snapshot&&snapshot.provenance&&snapshot.provenance.repositoryManifest,repositoryBaseId=String(manifest&&manifest.reconciliationBaseId||'');if(!repositoryBaseId)return null;
-  const ancestorIds=Array.isArray(manifest.reconciliationAncestorIds)&&manifest.reconciliationAncestorIds.length?manifest.reconciliationAncestorIds:[repositoryBaseId];
+  const ancestorIds=Array.isArray(manifest!.reconciliationAncestorIds)&&manifest!.reconciliationAncestorIds.length?manifest!.reconciliationAncestorIds:[repositoryBaseId];
   const localBase=await AppData.reconciliationBase.read().catch(()=>null);
   return localBase&&ancestorIds.includes(String(localBase.checkpointId||''))?localBase:null;
 }
 // Each note's title and text in the shared base.
-async function noteReconciliationAncestor(base,keys=[]){
+async function noteReconciliationAncestor(base:BaselineHeader|null,keys:readonly string[]=[]){
   if(!base)return null;
-  const notes=keys.length?await AppData.reconciliationBase.readNotes(keys).catch(()=>freeze({})):freeze({});
+  const notes:Readonly<Record<string,BaselineNote>>=keys.length?await AppData.reconciliationBase.readNotes(keys).catch(()=>freeze({})):freeze({});
   return freeze({checkpointId:String(base.checkpointId),notes});
 }
 // Plans and settings are compared as one unit by fingerprint.
-async function personalFingerprint(value){return value?String(await Exports.run('checksum',{value:Canonical.signature(value),algorithm:'sha256'})):'';}
+async function personalFingerprint(value:unknown){return value?String(await Exports.run('checksum',{value:Canonical.signature(value),algorithm:'sha256'})):'';}
 // 'replace' or 'keep' when only one side changed plans and settings since the
 // shared base; null when they match, both changed, or there is no shared history.
-async function personalSettled(base,local,incoming){
+async function personalSettled(base:BaselineHeader|null,local:PersonalData|null,incoming:PersonalData|null){
   const shared=String(base&&base.personalFingerprint||'');if(!shared||!local||!incoming)return null;
   const [mine,theirs]=await Promise.all([personalFingerprint(local),personalFingerprint(incoming)]);
   return mine===theirs?null:mine===shared?'replace':theirs===shared?'keep':null;
@@ -683,32 +718,32 @@ async function personalSettled(base,local,incoming){
 // Session. Both sides are fingerprinted the same way, so a side whose
 // fingerprint matches the base has not changed it since.
 const fingerprintEncoder=new TextEncoder();
-async function valueFingerprint(value){
+async function valueFingerprint(value:unknown){
   if(!value)return '';
   const digest=await globalThis.crypto.subtle.digest('SHA-256',fingerprintEncoder.encode(Canonical.signature(value)));
   return [...new Uint8Array(digest)].map(byte=>byte.toString(16).padStart(2,'0')).join('');
 }
-function dayFingerprint(record){return valueFingerprint(record?sanitizeCurrentDailyRecord(record)||record:null);}
-function sessionFingerprint(session){return valueFingerprint(session?ActiveSessionCodec.sanitizeCurrent(session)||session:null);}
+function dayFingerprint(record:DailyRecord|null){return valueFingerprint(record?sanitizeCurrentDailyRecord(record)||record:null);}
+function sessionFingerprint(session:unknown){return valueFingerprint(session?ActiveSessionCodec.sanitizeCurrent(session)||session:null);}
 // {month: {date: fingerprint}} for these Saved Days.
-async function dayFingerprintMonths(records){
-  const months=Object.create(null);
-  for(const record of records||[]){const date=String(record&&record.date||'');if(!/^\d{4}-\d{2}-\d{2}$/u.test(date))continue;const month=date.slice(0,7);(months[month]||(months[month]=Object.create(null)))[date]=await dayFingerprint(record);}
-  for(const month of Object.keys(months))months[month]=freeze(months[month]);
+async function dayFingerprintMonths(records:readonly DailyRecord[]){
+  const months:Record<string,Record<string,string>>=empty();
+  for(const record of records||[]){const date=String(record&&record.date||'');if(!/^\d{4}-\d{2}-\d{2}$/u.test(date))continue;const month=date.slice(0,7);(months[month]||(months[month]=empty()))[date]=await dayFingerprint(record);}
+  for(const month of Object.keys(months))months[month]=freeze(months[month]!);
   return freeze(months);
 }
 // The base a whole version leaves behind when this device takes it in.
-async function sharedBaseUpdate(parsed){
-  const notes=AppData.notes.normalizePayload(parsed&&parsed.data&&parsed.data.notes||{}),noteKeys=Object.keys(notes).sort(),updates=Object.create(null);
-  for(const key of noteKeys)updates[key]=freeze({label:String(notes[key].label||''),text:String(notes[key].text||'')});
+async function sharedBaseUpdate(parsed:Parsed){
+  const notes=AppData.notes.normalizePayload(parsed&&parsed.data&&parsed.data.notes||{}),noteKeys=Object.keys(notes).sort(),updates:Record<string,BaselineNote>=empty();
+  for(const key of noteKeys)updates[key]=freeze({label:String(notes[key]!.label||''),text:String(notes[key]!.text||'')});
   const records=normalizeImportedDailyRecordSet(parsed&&parsed.records||[]).records;
   return freeze({format:'study-director.reconciliation-base-update',version:2,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await personalFingerprint(parsed&&parsed.importedPersonalData),sessionFingerprint:await sessionFingerprint(parsed&&parsed.importedActiveSession||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([]),days:await dayFingerprintMonths(records)});
 }
 // Saved Days that differ and that one side has not changed since the shared
 // base: that side takes the other's (a record or a deletion).
-async function savedDaySettlement(plan,base){
-  const settled=new Map(),items=base?plan.savedDays.filter(item=>item.conflict):[];if(!items.length)return settled;
-  const shared=await AppData.reconciliationBase.readDays(items.map(item=>item.date)).catch(()=>freeze({}));
+async function savedDaySettlement(plan:ReconciliationPlan,base:BaselineHeader|null){
+  const settled:DaySettled=new Map(),items=base?plan.savedDays.filter(item=>item.conflict):[];if(!items.length)return settled;
+  const shared:Readonly<Record<string,string>>=await AppData.reconciliationBase.readDays(items.map(item=>item.date)).catch(()=>freeze({}));
   for(const item of items){
     const local=item.candidates.find(candidate=>candidate.local),incoming=item.candidates.find(candidate=>!candidate.local);if(!local||!incoming)continue;
     const baseValue=String(shared[item.date]||''),[mine,theirs]=await Promise.all([local,incoming].map(candidate=>candidate.kind==='record'?dayFingerprint(candidate.record):'' ));
@@ -719,9 +754,9 @@ async function savedDaySettlement(plan,base){
 // 5.2: a Saved Day both sides changed since they last shared it (or that
 // differs with no shared history) shows the newer side in a sync; the other
 // is kept for review (null where that side deleted the day).
-function syncSavedDayReviews(plan,settled){
+function syncSavedDayReviews(plan:ReconciliationPlan,settled:DaySettled|null){
   if(!settled)return freeze([]);
-  const reviews=[],time=candidate=>Date.parse(String(candidate.kind==='deleted'?candidate.deletedAt:candidate.record&&(candidate.record.updatedAt||candidate.record.savedAt)||''))||0;
+  const reviews:PendingReview[]=[],time=(candidate:DayCandidate)=>Date.parse(String(candidate.kind==='deleted'?candidate.deletedAt:candidate.record&&(candidate.record.updatedAt||candidate.record.savedAt)||''))||0;
   for(const item of plan.savedDays){
     if(!item.conflict||settled.has(item.date))continue;
     const local=item.candidates.find(candidate=>candidate.local),incoming=item.candidates.find(candidate=>!candidate.local);if(!local||!incoming)continue;
@@ -741,7 +776,7 @@ function syncSavedDayReviews(plan,settled){
 // ended (it has none and saved the session's day since both last shared one)
 // counts as taken over too, or as 'ended' when it does not run here: the
 // other side's ending shows and this device's progress is kept for review.
-async function sessionSettlement(base,parsed,{hold=false,sync=false}={}){
+async function sessionSettlement(base:BaselineHeader|null,parsed:Parsed,{hold=false,sync=false}={}){
   const loaded=await readCanonicalActiveSession(),local=loaded&&loaded.value||null,incoming=parsed&&parsed.importedActiveSession||null;
   if(!local&&!incoming||local&&incoming&&Canonical.same(local,incoming))return 'same';
   const me=installationId(),shared=String(base&&base.sessionFingerprint||'');
@@ -755,8 +790,8 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false}={}){
 }
 // The other side saved this day since both last shared it. When the shared
 // state cannot be read, it did not (the session then stays, as before).
-async function daySavedSinceBase(parsed,date){
-  const record=(Array.isArray(parsed&&parsed.records)?parsed.records:[]).find(item=>item&&item.date===date);if(!record)return false;
+async function daySavedSinceBase(parsed:Parsed,date:string){
+  const record=(Array.isArray(parsed&&parsed.records)?parsed.records as readonly DailyRecord[]:[]).find(item=>item&&item.date===date);if(!record)return false;
   let shared;try{shared=await AppData.reconciliationBase.readDays([date]);}catch(error){AppDiagnostics.capture('backup.session-ended-base',error,'warn');return false;}
   return await dayFingerprint(record)!==String(shared&&shared[date]||'');
 }
@@ -764,12 +799,12 @@ async function daySavedSinceBase(parsed,date){
 // it carries this one on (the same day, not behind it), or ends one that was
 // saved as that day's Saved Day there. Another device's own session, such as
 // a new day started while this one was left unsaved, is the person's choice.
-function sessionFollows(local,incoming,parsed){
+function sessionFollows(local:ActiveSession|null,incoming:ActiveSession|null,parsed:Parsed){
   if(!local)return true;
-  if(!incoming)return (Array.isArray(parsed&&parsed.records)?parsed.records:[]).some(record=>record&&record.date===local.date);
+  if(!incoming)return (Array.isArray(parsed&&parsed.records)?parsed.records as readonly DailyRecord[]:[]).some(record=>record&&record.date===local.date);
   return incoming.date===local.date&&Number(incoming.revision)>=Number(local.revision);
 }
-function nextNoteRevision(...values){return new Date(Math.max(Date.now(),...values.map(value=>(Date.parse(String(value&&value.updatedAt||''))||0)+1))).toISOString();}
+function nextNoteRevision(...values:readonly ({updatedAt?:string}|null|undefined)[]){return new Date(Math.max(Date.now(),...values.map(value=>(Date.parse(String(value&&value.updatedAt||''))||0)+1))).toISOString();}
 // Combine settles a note difference without asking only when nothing on this
 // device can be lost: a side still holds what both sides last shared (the
 // shared base), so only the other side changed it; both changed the text
@@ -779,22 +814,22 @@ function nextNoteRevision(...values){return new Date(Math.max(Date.now(),...valu
 // copy in Recently deleted. Every other difference is the person's: text in
 // the review, deletions and titles in "Different versions found" (a sync
 // keeps it for review instead: syncNoteReviews).
-function noteReconciliationState(plan,ancestor=null){
+function noteReconciliationState(plan:ReconciliationPlan,ancestor:Ancestor|null=null){
   const items=new Map(plan.notes.map(item=>[item.key,item]));
-  const shared=key=>ancestor&&ancestor.notes&&Object.prototype.hasOwnProperty.call(ancestor.notes,key)?ancestor.notes[key]:null;
-  const trashCopy=(key,local)=>{const item=items.get(notesTrashKey(key)),candidate=item&&item.candidates.find(candidate=>candidate.kind==='record'&&candidate.sources.some(source=>!!source.local===local));return candidate?candidate.value:null;};
-  const same=(a,b)=>!!a&&!!b&&String(a.text??'')===String(b.text??'')&&String(a.label??'')===String(b.label??'');
-  const settled=new Map(),texts=new Map(),labels=new Map(),conflicts=[],deletions=[],titles=[];
+  const shared=(key:string)=>ancestor&&ancestor.notes&&Object.prototype.hasOwnProperty.call(ancestor.notes,key)?ancestor.notes[key]:null;
+  const trashCopy=(key:string,local:boolean)=>{const item=items.get(notesTrashKey(key)),candidate=item&&item.candidates.find(candidate=>candidate.kind==='record'&&candidate.sources.some(source=>!!source.local===local));return candidate?candidate.value:null;};
+  const same=(a:NoteFields|null,b:NoteFields|null|undefined)=>!!a&&!!b&&String(a.text??'')===String(b.text??'')&&String(a.label??'')===String(b.label??'');
+  const settled=new Map<string,string>(),texts=new Map<string,string>(),labels=new Map<string,string>(),conflicts=[],deletions=[],titles=[];
   for(const item of plan.notes){
     if(!item.conflict||!notesTrashKey(item.key))continue;
     const local=item.candidates.find(candidate=>candidate.local),incoming=item.candidates.find(candidate=>!candidate.local),base=shared(item.key);if(!local||!incoming)continue;
     if(local.kind==='record'&&incoming.kind==='record'){
       const mine=local.value,theirs=incoming.value;
-      for(const [field,decided] of [['text',texts],['label',labels]]){
+      for(const [field,decided] of [['text',texts],['label',labels]] as const){
         const localValue=String(mine[field]??''),incomingValue=String(theirs[field]??'');if(localValue===incomingValue)continue;
         if(base&&localValue===base[field])decided.set(item.key,incomingValue);
         else if(base&&incomingValue===base[field])decided.set(item.key,localValue);
-        else if(field==='text'&&base&&smartMerge(base.text,localValue,incomingValue)!==null)decided.set(item.key,smartMerge(base.text,localValue,incomingValue));
+        else if(field==='text'&&base&&smartMerge(base.text,localValue,incomingValue)!==null)decided.set(item.key,smartMerge(base.text,localValue,incomingValue)!);
         else if(field==='label')titles.push(freeze({key:item.key,local:localValue,incoming:incomingValue,base:base?String(base.label):null}));
         else conflicts.push(freeze({key:item.key,label:String(mine.label||theirs.label||item.key),localCandidateId:local.id,incomingCandidateId:incoming.id,localValue,incomingValue,incomingLabel:incoming.sources[0]?.label||'Backup copy',ancestorAvailable:!!base,ancestorValue:base?String(base.text):''}));
       }
@@ -812,9 +847,9 @@ function noteReconciliationState(plan,ancestor=null){
 }
 // Smart merge of two edits made since the shared text: the merged text when
 // no paragraph changed on both sides, else null.
-const smartMerges=new Map();
-function smartMerge(base,local,incoming){
-  const key=JSON.stringify([base,local,incoming]);if(smartMerges.has(key))return smartMerges.get(key);
+const smartMerges=new Map<string,string|null>();
+function smartMerge(base:string,local:string,incoming:string){
+  const key=JSON.stringify([base,local,incoming]);if(smartMerges.has(key))return smartMerges.get(key)!;
   let value=null;try{const result=NoteReconciliation.merge(base,local,incoming);value=result&&result.safe===true?String(result.value):null;}catch(error){AppDiagnostics.capture('backup.smart-merge',error,'warn');}
   if(smartMerges.size>64)smartMerges.clear();smartMerges.set(key,value);return value;
 }
@@ -823,10 +858,10 @@ function smartMerge(base,local,incoming){
 // review with what both last shared (for Smart merge then); a note edited on
 // one side and deleted on the other stays, and its review offers to delete
 // it. Times only choose what shows until the person reviews it.
-function syncNoteReviews(plan,state){
-  const reviews=[],byKey=new Map(),time=value=>Date.parse(String(value&&value.updatedAt||''))||0;
-  const pair=key=>{const item=state.items.get(key),local=item&&item.candidates.find(candidate=>candidate.local),incoming=item&&item.candidates.find(candidate=>!candidate.local);return local&&incoming?{local,incoming,incomingNewer:time(incoming.value)>time(local.value)}:null;};
-  const entry=key=>{let value=byKey.get(key);if(!value){value={kept:{},base:{},hasBase:true};byKey.set(key,value);}return value;};
+function syncNoteReviews(plan:ReconciliationPlan,state:NotesState){
+  const reviews:PendingReview[]=[],byKey=new Map<string,{kept:NoteFields;base:NoteFields;hasBase:boolean}>(),time=(value:{updatedAt?:string}|null)=>Date.parse(String(value&&value.updatedAt||''))||0;
+  const pair=(key:string)=>{const item=state.items.get(key),local=item&&item.candidates.find(candidate=>candidate.local),incoming=item&&item.candidates.find(candidate=>!candidate.local);return local&&incoming?{local,incoming,incomingNewer:time(incoming.value)>time(local.value)}:null;};
+  const entry=(key:string)=>{let value=byKey.get(key);if(!value){value={kept:{},base:{},hasBase:true};byKey.set(key,value);}return value;};
   for(const conflict of state.conflicts){
     const sides=pair(conflict.key);if(!sides)continue;
     state.texts.set(conflict.key,sides.incomingNewer?conflict.incomingValue:conflict.localValue);
@@ -854,20 +889,20 @@ async function reviewKeptVersions({ref=''}={}){
   requireBackupMutationControl('reviewing kept versions');
   // One review per note or day at a time, the oldest first: a second kept
   // version of the same note waits for the next look.
-  const target=String(ref||''),waiting=(await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt&&(!target||review.ref===target)),first=new Map();
+  const target=String(ref||''),waiting=(await AppData.pendingReviews.list()).filter((review):review is OpenReview=>!review.resolvedAt&&(!target||review.ref===target)),first=new Map<string,OpenReview>();
   for(const review of [...waiting].sort((a,b)=>a.keptAt.localeCompare(b.keptAt)||a.id.localeCompare(b.id)))if(!first.has(review.subject+':'+review.ref)&&(review.subject!=='session'||!hasActiveSession()))first.set(review.subject+':'+review.ref,review);
-  const reviews=[...first.values()],of=subject=>reviews.filter(review=>review.subject===subject);
+  const reviews=[...first.values()],of=(subject:ReviewSubject)=>reviews.filter(review=>review.subject===subject);
   if(!reviews.length)return freeze({reviewed:0,left:waiting.length,changed:0});
   const noteIds=[...new Set(of('note').map(review=>review.ref))],noteRows=noteIds.length?await AppData.notes.readFreshItems(noteIds):[],notes=new Map(noteIds.map((id,index)=>[id,noteRows[index]||null]));
   const days=new Map((of('savedDay').length?await getDailyRecordDocumentsByDates(of('savedDay').map(review=>review.ref)):[]).map(record=>[record.date,record]));
   const personal=of('personal').length?await personalExport({flush:false}):null,session=of('session').length?(await readCanonicalActiveSession()).value||null:null;
   // Each choice: 'keep' leaves this device's as it is (wait: the review stays
   // open), 'use' takes the kept version.
-  const groups=[],steps=[],texts=[],choice=(review,part,label,description,keep,use,wait=false)=>{const id=`kept__${review.id}${part?`__${part}`:''}`;groups.push(freeze({id,label,defaultValue:'keep',description,choices:freeze([freeze({value:'keep',...keep}),freeze({value:'use',...use})])}));steps.push({id,review,part,wait});};
-  const when=review=>savedDayDecisionTimestamp(review.keptAt),day=(record,origin)=>record?savedDayChoiceDescription({kind:'record',record,local:origin==='here',sources:[{label:'Kept version',local:origin==='here'}]}):origin==='here'?'Not on this device.':'Deleted on the other device.';
+  type ReviewStep={id:string;review:OpenReview;part:string;wait:boolean};
+  const groups:DecisionGroup[]=[],steps:ReviewStep[]=[],texts:TextConflict[]=[],choice=(review:OpenReview,part:string,label:string,description:string,keep:Omit<Choice,'value'>,use:Omit<Choice,'value'>,wait=false)=>{const id=`kept__${review.id}${part?`__${part}`:''}`;groups.push(freeze({id,label,defaultValue:'keep',description,choices:freeze([freeze({value:'keep',...keep}),freeze({value:'use',...use})])}));steps.push({id,review,part,wait});};
+  const when=(review:PendingReview)=>savedDayDecisionTimestamp(review.keptAt),day=(record:DailyRecord|null,origin:string)=>record?savedDayChoiceDescription({kind:'record',record,local:origin==='here',sources:[{label:'Kept version',local:origin==='here'}]}):origin==='here'?'Not on this device.':'Deleted on the other device.';
   for(const review of reviews){
-    const kept=review.kept;
-    if(review.subject==='note'){
+    if(review.subject==='note'){const kept=review.kept;
       const note=notes.get(review.ref);
       if(!note)choice(review,'','Note · deleted here',`Another device changed this note after it was deleted here (kept ${when(review)}). Restore it from Recently deleted to compare.`,{label:'Keep for later',description:'The kept version waits.'},{label:'Discard the kept version',description:'Nothing changes here.'},true);
       else if(!kept)choice(review,'',`Note · ${note.label}`,'Deleted on another device while it was edited here. It stays until you choose.',{label:'Keep the note',description:'It stays as it is.'},{label:'Delete it',description:'It moves to Recently deleted.'});
@@ -875,10 +910,10 @@ async function reviewKeptVersions({ref=''}={}){
         if(typeof kept.label==='string'&&kept.label!==note.label)choice(review,'label',`Note title · ${note.label}`,`Renamed on both devices; “${kept.label}” was kept for review (${when(review)}).`,{label:`Keep “${note.label}”`,description:''},{label:`Use “${kept.label}”`,description:''});
         if(typeof kept.text==='string'&&kept.text!==note.text)texts.push(freeze({key:review.ref,label:note.label,localCandidateId:'current',incomingCandidateId:review.id,localValue:note.text,incomingValue:kept.text,incomingLabel:`Kept ${when(review)}`,ancestorAvailable:typeof review.base?.text==='string',ancestorValue:String(review.base?.text||'')}));
       }
-    }else if(review.subject==='savedDay'){
+    }else if(review.subject==='savedDay'){const kept=review.kept;
       const record=days.get(review.ref)||null;
       if(record||kept)choice(review,'',`Saved Day · ${review.ref}`,'Changed on both devices. The newer one shows; the other was kept for review.',{label:record?'Keep the current one':'Keep it deleted',description:day(record,'here')},{label:kept?'Use the kept version':'Delete it',description:day(kept,'kept')});
-    }else if(review.subject==='personal'){
+    }else if(review.subject==='personal'){const kept=review.kept;
       if(!personal){steps.push({id:'',review,part:'',wait:true});continue;}
       if(!Canonical.same(personal.plans,kept.plans))choice(review,'plans','Plan draft and saved plans','Changed on both devices; the other version was kept for review.',{label:'Keep current plans',description:''},{label:'Use kept plans',description:`The kept draft and saved plans (${kept.plans.savedPlans.length} saved plans).`});
       if(!Canonical.same(personal.preferences,kept.preferences))choice(review,'settings','Personal and display settings','Changed on both devices; the other version was kept for review.',{label:'Keep current settings',description:''},{label:'Use kept settings',description:'The kept name, theme, text size and other preferences.'});
@@ -886,10 +921,10 @@ async function reviewKeptVersions({ref=''}={}){
       choice(review,'','Active / suspended session',`Both devices changed today’s session; the other was kept for review (${when(review)}).`,{label:session?'Keep the current session':'Keep no session',description:''},{label:'Use the kept session',description:'It is set aside here, ready to continue.'});
     }
   }
-  let picked=freeze({}),resolvedTexts=null;
+  let picked:Decisions|null=freeze({}),resolvedTexts:TextResolution|null=null;
   if(groups.length){picked=await configure({title:'Kept versions',message:'A sync kept these versions where both devices changed the same thing. The current one stays selected; choose where the kept one should replace it.',groups,confirmLabel:'Apply choices',cancelLabel:'Later'});if(!picked)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});}
   if(texts.length){resolvedTexts=await NoteReconciliation.resolve(freeze({conflicts:freeze(texts),incomingAssets:freeze([]),purpose:'kept'}));if(!resolvedTexts)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});}
-  const use=step=>picked[step.id]==='use',waits=new Set(steps.filter(step=>step.wait&&!use(step)).map(step=>step.review.id));
+  const use=(step:ReviewStep)=>picked![step.id]==='use',waits=new Set(steps.filter(step=>step.wait&&!use(step)).map(step=>step.review.id));
   return runExclusive('review-kept-versions',()=>withPersistenceSuppressed(async()=>{
     requireBackupMutationControl('reviewing kept versions');
     // What another device or a sync changed while the person chose stays:
@@ -900,13 +935,13 @@ async function reviewKeptVersions({ref=''}={}){
     for(const review of of('savedDay'))if(!Canonical.same(freshDays.get(review.ref)||null,days.get(review.ref)||null))changed.add(review.ref);
     if(personal&&!Canonical.same(await personalExport({flush:false}),personal))changed.add('personal');
     if(of('session').length&&(hasActiveSession()||!Canonical.same((await readCanonicalActiveSession()).value||null,session)))changed.add('session');
-    const done=reviews.filter(review=>still.has(review.id)&&!waits.has(review.id)&&!changed.has(review.ref)),doneIds=new Set(done.map(review=>review.id)),chosen=(review,part)=>steps.some(step=>step.review===review&&step.part===part&&use(step));
-    const noteItems=[],dayItems=[],now=new Date().toISOString();let plans=false,settings=false,keptSession=null;
+    const done=reviews.filter(review=>still.has(review.id)&&!waits.has(review.id)&&!changed.has(review.ref)),doneIds=new Set(done.map(review=>review.id)),chosen=(review:PendingReview,part:string)=>steps.some(step=>step.review===review&&step.part===part&&use(step));
+    const noteItems=[],dayItems=[],now=new Date().toISOString();let plans:PersonalData['plans']|false=false,settings:PersonalData['preferences']|false=false,keptSession:ActiveSession|null=null;
     for(const review of done){
       if(review.subject==='note'){
         const note=notes.get(review.ref);if(!note)continue;
         if(!review.kept){if(chosen(review,''))noteItems.push(freeze({key:review.ref,changed:true,state:'deleted',deletedAt:now}));continue;}
-        const label=chosen(review,'label')?review.kept.label:note.label,text=resolvedTexts&&resolvedTexts.notes[review.ref]?String(resolvedTexts.notes[review.ref].text):note.text;
+        const label=chosen(review,'label')?review.kept.label:note.label,text=resolvedTexts&&resolvedTexts.notes[review.ref]?String(resolvedTexts.notes[review.ref]!.text):note.text;
         if(label!==note.label||text!==note.text)noteItems.push(freeze({key:review.ref,changed:true,state:'record',value:freeze({...note,label,text,updatedAt:nextNoteRevision(note)})}));
       }else if(review.subject==='savedDay'&&chosen(review,''))dayItems.push(freeze(review.kept?{date:review.ref,changed:true,state:'record',record:freeze({...review.kept,updatedAt:now}),hadLocal:days.has(review.ref)}:{date:review.ref,changed:true,state:'deleted',deletedAt:now}));
       else if(review.subject==='personal'){plans=plans||chosen(review,'plans')&&review.kept.plans;settings=settings||chosen(review,'settings')&&review.kept.preferences;}
@@ -914,14 +949,14 @@ async function reviewKeptVersions({ref=''}={}){
     }
     if(noteItems.length)await applyResolvedNotes(freeze({notes:freeze(noteItems)}));
     if(dayItems.length)await applyResolvedSavedDays(freeze({savedDays:freeze(dayItems),sourcePlan:freeze({savedDays:freeze([])})}),null,()=>{});
-    if(plans||settings)await personalImport({version:2,plans:plans||personal.plans,preferences:settings||personal.preferences});
+    if(plans||settings)await personalImport({version:2,plans:plans||personal!.plans,preferences:settings||personal!.preferences});
     if(keptSession)await applyResolvedActiveSession(freeze({activeSession:freeze({changed:true,value:freeze({...keptSession,status:'suspended',suspendedAt:keptSession.suspendedAt||now,revision:Math.max(Number(session&&session.revision)||0,Number(keptSession.revision)||0)+1,updatedAt:now})})}));
     if(doneIds.size)await AppData.pendingReviews.resolve([...doneIds]);
     try{libraryChanged();}catch(error){AppDiagnostics.capture('backup.kept-review-render',error,'warn');}
     return freeze({reviewed:doneIds.size,left:waiting.length-doneIds.size,changed:reviews.filter(review=>still.has(review.id)&&!waits.has(review.id)&&changed.has(review.ref)).length});
   }));
 }
-function noteTitleGroup(titles){
+function noteTitleGroup(titles:readonly NoteTitle[]){
   const count=titles.length,examples=titles.slice(0,3).map(item=>`“${item.local}” here, “${item.incoming}” in the backup`).join(' · ')+(count>3?` · and ${count-3} more`:'');
   return freeze({id:'noteTitles',label:`Note titles · ${count} renamed`,defaultValue:'local',description:`Renamed on both sides since your last sync, or with no shared history: ${examples}.`,choices:freeze([
     freeze({value:'local',label:'Keep this device’s titles',description:'The notes keep the titles they have here.'}),
@@ -931,59 +966,59 @@ function noteTitleGroup(titles){
 // Every note decision for a combine: what settled itself, what the person
 // chose, and the reviewed text. A note this device deleted by choice keeps
 // this device's copy in Recently deleted.
-function noteSelections(plan,state,decisions,result){
-  const out=Object.create(null),reviewed=result&&result.notes&&typeof result.notes==='object'?result.notes:{},backupTitles=decisions.noteTitles==='incoming';
+function noteSelections(plan:ReconciliationPlan,state:NotesState,decisions:Decisions,result:TextResolution|null){
+  const out:Record<string,string|{value:NoteFields}|null>=empty(),reviewed=result&&result.notes&&typeof result.notes==='object'?result.notes:{},backupTitles=decisions['noteTitles']==='incoming';
   for(const item of plan.notes){
     if(!item.conflict||!notesTrashKey(item.key))continue;
     const local=item.candidates.find(candidate=>candidate.local),incoming=item.candidates.find(candidate=>!candidate.local);if(!local||!incoming)continue;
     if(local.kind!=='record'||incoming.kind!=='record'){
-      const chosen=state.settled.get(item.key)||decisions[item.decisionKey]||item.defaultCandidateId;out[item.key]=chosen;
+      const chosen=state.settled.get(item.key)||selection(decisions,item.decisionKey)||item.defaultCandidateId;out[item.key]=chosen;
       const trashKey=notesTrashKey(item.key),trashItem=state.items.get(trashKey),backupTrash=trashItem&&trashItem.candidates.find(candidate=>candidate.kind==='record'&&!candidate.local);
-      if(chosen===incoming.id&&incoming.kind==='deleted'&&!state.settled.has(item.key)&&backupTrash&&(backupTrash.value.text!==local.value.text||backupTrash.value.label!==local.value.label))out[trashKey]=freeze({value:freeze({...local.value,key:trashKey,updatedAt:nextNoteRevision(local.value,backupTrash.value)})});
+      if(chosen===incoming.id&&incoming.kind==='deleted'&&!state.settled.has(item.key)&&backupTrash&&(backupTrash.value!.text!==local.value!.text||backupTrash.value!.label!==local.value!.label))out[trashKey]=freeze({value:freeze({...local.value,key:trashKey,updatedAt:nextNoteRevision(local.value,backupTrash.value)})});
       continue;
     }
     const mine=local.value,theirs=incoming.value,localText=String(mine.text||''),incomingText=String(theirs.text||'');
-    const text=state.texts.has(item.key)?state.texts.get(item.key):Object.prototype.hasOwnProperty.call(reviewed,item.key)?String(reviewed[item.key].text??''):localText;
-    const label=state.labels.has(item.key)?state.labels.get(item.key):backupTitles?String(theirs.label):String(mine.label);
+    const text=state.texts.has(item.key)?state.texts.get(item.key)!:Object.prototype.hasOwnProperty.call(reviewed,item.key)?String(reviewed[item.key]!.text??''):localText;
+    const label=state.labels.has(item.key)?state.labels.get(item.key)!:backupTitles?String(theirs.label):String(mine.label);
     // A bar keeps the notes either side linked: nothing is lost.
-    const links=[...new Set([...(mine.links||[]),...(theirs.links||[])])].slice(0,APP_LIMITS.maxNoteLinks),sameLinks=value=>(value.links||[]).join('|')===links.join('|');
+    const links=[...new Set([...(mine.links||[]),...(theirs.links||[])])].slice(0,APP_LIMITS.maxNoteLinks),sameLinks=(value:NoteRecord)=>(value.links||[]).join('|')===links.join('|');
     if(text===localText&&label===String(mine.label)&&sameLinks(mine))out[item.key]=local.id;
     else if(text===incomingText&&label===String(theirs.label)&&sameLinks(theirs))out[item.key]=incoming.id;
     else{const value={...mine,label,text,updatedAt:nextNoteRevision(mine,theirs)};delete value.links;if(links.length)value.links=links;out[item.key]=freeze({value:freeze(value)});}
   }
   return freeze(out);
 }
-function reconciliationSelections(plan,decisions,noteDecisions=freeze({}),reflectionDecisions=freeze({}),settled=null){
-  const savedDays=Object.create(null),notes=Object.assign(Object.create(null),noteDecisions||{});
-  for(const item of plan.savedDays)if(item.conflict)savedDays[item.date]=settled&&settled.has(item.date)?settled.get(item.date):Object.prototype.hasOwnProperty.call(reflectionDecisions,item.date)?reflectionDecisions[item.date]:(decisions[item.decisionKey]||savedDayPreferredCandidate(item,decisions)?.id||item.defaultCandidateId);
-  for(const item of plan.notes)if(item.conflict&&!Object.prototype.hasOwnProperty.call(notes,item.key)&&item.candidates.some(candidate=>candidate.kind==='deleted'))notes[item.key]=decisions[item.decisionKey]||item.defaultCandidateId;
-  return freeze({savedDays:freeze(savedDays),notes:freeze(notes),activeSession:plan.activeSession.conflict?(decisions.activeSession||plan.activeSession.defaultCandidateId):plan.activeSession.defaultCandidateId});
+function reconciliationSelections(plan:ReconciliationPlan,decisions:Decisions,noteDecisions:ReconciliationDecisions['notes']=freeze({}),reflectionDecisions:ReconciliationDecisions['savedDays']=freeze({}),settled:DaySettled|null=null){
+  const savedDays:Record<string,DaySelection|undefined>=empty(),notes:Record<string,string|{value:NoteFields}|null|undefined>=Object.assign(empty() as Record<string,never>,noteDecisions||{});
+  for(const item of plan.savedDays)if(item.conflict)savedDays[item.date]=settled&&settled.has(item.date)?settled.get(item.date):Object.prototype.hasOwnProperty.call(reflectionDecisions,item.date)?reflectionDecisions[item.date]:(selection(decisions,item.decisionKey)||savedDayPreferredCandidate(item,decisions)?.id||item.defaultCandidateId);
+  for(const item of plan.notes)if(item.conflict&&!Object.prototype.hasOwnProperty.call(notes,item.key)&&item.candidates.some(candidate=>candidate.kind==='deleted'))notes[item.key]=selection(decisions,item.decisionKey)||item.defaultCandidateId;
+  return freeze({savedDays:freeze(savedDays),notes:freeze(notes),activeSession:plan.activeSession.conflict?(selection(decisions,'activeSession')||plan.activeSession.defaultCandidateId):plan.activeSession.defaultCandidateId});
 }
-function backupCandidatePreview(parsed,file,metadata={}){
-  const manifest=parsed&&parsed.manifest&&typeof parsed.manifest==='object'?parsed.manifest:{};
-  const data=parsed&&parsed.data&&!Array.isArray(parsed.data)&&typeof parsed.data==='object'?parsed.data:{};
+function backupCandidatePreview(parsed:Parsed,file:BackupFile|null,metadata:Metadata={}){
+  const manifest=fields(parsed&&parsed.manifest);
+  const data:Partial<Parsed['data']>=parsed&&parsed.data&&!Array.isArray(parsed.data)&&typeof parsed.data==='object'?parsed.data:{};
   const counts=BackupCodec.countShape(parsed&&parsed.counts);
-  const exportedAtValue=manifest.exportedAt||data.exportedAt||null;
-  const exportedAt=exportedAtValue&&Number.isFinite(Date.parse(exportedAtValue))?new Date(exportedAtValue).toISOString():null;
+  const exportedAtValue=manifest['exportedAt']||data.exportedAt||null;
+  const exportedAt=exportedAtValue&&Number.isFinite(Date.parse(String(exportedAtValue)))?new Date(String(exportedAtValue)).toISOString():null;
   const filename=clampText(metadata.filename||file&&file.name||'',240);
-  const dates=(parsed&&Array.isArray(parsed.records)?parsed.records:[]).map(record=>String(record&&record.date||'')).filter(Boolean).sort();
+  const dates=(parsed&&Array.isArray(parsed.records)?parsed.records as readonly DailyRecord[]:[]).map(record=>String(record&&record.date||'')).filter(Boolean).sort();
   return Object.freeze({
     filename,
     exportedAt,
-    appVersion:clampText(manifest.appVersion||data.appVersion||'',40)||null,
+    appVersion:clampText(manifest['appVersion']||data.appVersion||'',40)||null,
     formatVersion:Number(parsed&&parsed.formatVersion)||0,
     counts:Object.freeze({...counts}),
-    assets:Object.freeze({total:(parsed.assetDescriptors||[]).length,library:(parsed.assetDescriptors||[]).filter(item=>item.library).length,missing:(parsed.assetDescriptors||[]).filter(item=>item.missing).length}),
-    dateRange:dates.length?Object.freeze({first:dates[0],last:dates[dates.length-1]}):null,
-    checksumAlgorithm:clampText(manifest.checksumAlgorithm||'',20)||null,
+    assets:Object.freeze({total:(parsed.assetDescriptors||[]).length,library:(parsed.assetDescriptors||[]).filter(item=>'library' in item&&item.library).length,missing:(parsed.assetDescriptors||[]).filter(item=>item.missing).length}),
+    dateRange:dates.length?Object.freeze({first:dates[0]!,last:dates[dates.length-1]!}):null,
+    checksumAlgorithm:clampText(manifest['checksumAlgorithm']||'',20)||null,
     authenticated:metadata.encrypted===true,
     encrypted:metadata.encrypted===true,
-    checkpoint:manifest.checkpoint?Object.freeze({checkpointId:String(manifest.checkpoint.checkpointId||''),createdAt:String(manifest.checkpoint.createdAt||''),originInstallationId:String(manifest.checkpoint.originInstallationId||'')}):null,
+    checkpoint:manifest['checkpoint']?Object.freeze({checkpointId:String(fields(manifest['checkpoint'])['checkpointId']||''),createdAt:String(fields(manifest['checkpoint'])['createdAt']||''),originInstallationId:String(fields(manifest['checkpoint'])['originInstallationId']||'')}):null,
     captureAuthority:String(parsed&&parsed.captureAuthority||'unknown'),
     size:Math.max(0,Number(metadata.size!==undefined?metadata.size:file&&file.size)||0)
   });
 }
-async function restoreImpactPreview(parsed,preview,assetAssessment=null,options={}){
+async function restoreImpactPreview(parsed:Parsed,preview:Preview,assetAssessment:Assessment|null=null,options:RestoreOptions={}){
   const reconciliationPlan=await buildRestoreReconciliationPlan(parsed,preview,options);
   const summary=Reconciliation.summarizePlan(reconciliationPlan);
   return freeze({
@@ -994,7 +1029,7 @@ async function restoreImpactPreview(parsed,preview,assetAssessment=null,options=
     assets:freeze({total:(parsed.assetDescriptors||[]).length,available:(assetAssessment&&assetAssessment.available||[]).length,missing:(assetAssessment&&assetAssessment.missing||[]).length,newItems:(assetAssessment&&assetAssessment.toWrite||[]).length,reused:Number(assetAssessment&&assetAssessment.reused)||0}),
   });
 }
-function restoreDecisionSetup(parsed,impact,mode='reconcile',localPersonal=null,noteState=null,personal=null,settledDays=null,session=''){
+function restoreDecisionSetup(parsed:Parsed,impact:Impact,mode='reconcile',localPersonal:PersonalData|null=null,noteState:NotesState|null=null,personal:string|null=null,settledDays:DaySettled|null=null,session=''){
   // Plans and settings changed on one side only since the shared base are settled
   // without asking ('replace' takes the backup's, 'keep' this device's).
   const plan=impact.reconciliationPlan,groups=[],defaults={plans:personal||'keep',personalSettings:personal||'keep',safetyCopy:false};
@@ -1029,8 +1064,8 @@ function restoreDecisionSetup(parsed,impact,mode='reconcile',localPersonal=null,
   }
   return freeze({groups:freeze(groups.map(group=>freeze({...group,choices:freeze(group.choices.map(choice=>freeze(choice)))}))),defaults:freeze(defaults)});
 }
-async function assessImportedAssets(parsed,signal){
-  const available=Array.isArray(parsed.importedAssets)?parsed.importedAssets:[],missing=(parsed.assetDescriptors||[]).filter(item=>item&&item.missing===true),localRows=await AssetData.list(),localById=new Map(localRows.map(row=>[row.id,row])),verifiedPhysical=new Set();
+async function assessImportedAssets(parsed:Parsed,signal:Signal){
+  const available=Array.isArray(parsed.importedAssets)?parsed.importedAssets as readonly ImportedAsset[]:[],missing=(parsed.assetDescriptors||[]).filter(item=>item&&item.missing===true),localRows=await AssetData.list(),localById=new Map(localRows.map(row=>[row.id,row])),verifiedPhysical=new Set();
   const toWrite=[];let reused=0;
   for(const item of available){
     const row=localById.get(item.assetId);if(!row){toWrite.push(item);continue;}
@@ -1046,9 +1081,9 @@ async function assessImportedAssets(parsed,signal){
   }
   return freeze({available:freeze([...available]),missing:freeze([...missing]),toWrite:freeze(toWrite),reused});
 }
-async function resolvedAssetReferenceIds(resolvedPlan,signal,reviews=freeze([])){
-  const references=new Set(),collect=value=>{for(const id of BackupCodec.assetIds(value))references.add(id);};
-  const recordSource=await AppData.dailyRecords.backupDates(),recordDates=Array.isArray(recordSource&&recordSource.dates)?recordSource.dates:[];
+async function resolvedAssetReferenceIds(resolvedPlan:ResolvedPlan,signal:Signal,reviews:readonly PendingReview[]=freeze([])){
+  const references=new Set<string>(),collect=(value:unknown)=>{for(const id of BackupCodec.assetIds(value))references.add(id);};
+  const recordSource=await AppData.dailyRecords.backupDates(),recordDates=Array.isArray(recordSource&&recordSource.dates)?recordSource.dates as readonly string[]:[];
   const records=new Map((await getDailyRecordDocumentsByDates(recordDates)).map(record=>[record.date,record]));
   for(const item of resolvedPlan&&resolvedPlan.savedDays||[]){
     if(item.state==='deleted')records.delete(item.date);
@@ -1060,17 +1095,17 @@ async function resolvedAssetReferenceIds(resolvedPlan,signal,reviews=freeze([]))
   for(const review of reviews||[])if(!review.resolvedAt)collect(review);
   return freeze([...references].sort());
 }
-async function buildAttachmentDeletionPlan(parsed,resolvedPlan,assessment,decisions=freeze({}),signal=null,resolvedReferences=null){
-  const references=Array.isArray(resolvedReferences)?resolvedReferences:await resolvedAssetReferenceIds(resolvedPlan,signal),referenceSet=new Set(references);
+async function buildAttachmentDeletionPlan(parsed:Parsed,resolvedPlan:ResolvedPlan,assessment:Assessment,decisions:Decisions=freeze({}),signal:Signal=null,resolvedReferences:readonly string[]|null=null){
+  const references=Array.isArray(resolvedReferences)?resolvedReferences as readonly string[]:await resolvedAssetReferenceIds(resolvedPlan,signal),referenceSet=new Set(references);
   const localRows=await AssetData.list(),localById=new Map(localRows.map(row=>[row.id,row]));
-  const incomingAvailable=Array.isArray(assessment&&assessment.available)?assessment.available:[],incomingById=new Map(incomingAvailable.map(item=>[item.assetId,item]));
-  const localDeletions=await AppData.deletionRecovery.attachments(),incomingDeletions=parsed&&parsed.protectedCheckpointManifest&&Array.isArray(parsed.protectedCheckpointManifest.attachmentDeletions)?parsed.protectedCheckpointManifest.attachmentDeletions:[];
+  const incomingAvailable=Array.isArray(assessment&&assessment.available)?assessment.available as readonly ImportedAsset[]:[],incomingById=new Map(incomingAvailable.map(item=>[item.assetId,item]));
+  const localDeletions=await AppData.deletionRecovery.attachments(),incomingDeletions=parsed&&parsed.protectedCheckpointManifest&&Array.isArray(parsed.protectedCheckpointManifest.attachmentDeletions)?parsed.protectedCheckpointManifest.attachmentDeletions as readonly AttachmentDeletion[]:[];
   const localDeleted=new Map(localDeletions.map(item=>[item.assetId,item])),incomingDeleted=new Map(incomingDeletions.map(item=>[item.assetId,item]));
-  const ids=new Set([...localDeleted.keys(),...incomingDeleted.keys(),...localRows.filter(row=>row.library).map(row=>row.id),...incomingAvailable.filter(item=>item.library).map(item=>item.assetId)]),states=Object.create(null),conflicts=[];
+  const ids=new Set([...localDeleted.keys(),...incomingDeleted.keys(),...localRows.filter(row=>row.library).map(row=>row.id),...incomingAvailable.filter(item=>item.library).map(item=>item.assetId)]),states:Record<string,string>=empty(),conflicts=[];
   for(const id of [...ids].sort()){
     if(referenceSet.has(id)){states[id]='record';continue;}
     const localRow=localById.get(id),incomingRow=incomingById.get(id),localDeletion=localDeleted.get(id),incomingDeletion=incomingDeleted.get(id),localLibrary=localRow?.library===true,incomingLibrary=incomingRow?.library===true;
-    const decision=String(decisions[id]||'');
+    const decision=String(selection(decisions,id)||'');
     if(localDeletion&&incomingLibrary){
       if(decision==='record'||decision==='deleted')states[id]=decision;
       else{states[id]='deleted';conflicts.push(freeze({assetId:id,label:incomingRow.name||id,defaultValue:'deleted',localState:'deleted',incomingState:'record'}));}
@@ -1084,7 +1119,7 @@ async function buildAttachmentDeletionPlan(parsed,resolvedPlan,assessment,decisi
     if(localDeletion||incomingDeletion)states[id]='deleted';
     else if(localLibrary||incomingLibrary)states[id]='record';
   }
-  const deletionMap=new Map();
+  const deletionMap=new Map<string,AttachmentDeletion>();
   for(const [id,state] of Object.entries(states))if(state==='deleted'){
     const a=localDeleted.get(id),b=incomingDeleted.get(id),latest=!a?b:!b?a:(Date.parse(a.deletedAt)>=Date.parse(b.deletedAt)?a:b);if(latest)deletionMap.set(id,latest);
   }
@@ -1095,20 +1130,20 @@ async function buildAttachmentDeletionPlan(parsed,resolvedPlan,assessment,decisi
 // A one-note restore adds back only the images its notes need. The Attachment
 // Library and its deletion records stay as they are, except that an image the
 // restored note uses again is no longer recorded as deleted.
-async function noteAttachmentPlan(references){
+async function noteAttachmentPlan(references:readonly string[]){
   const referenceSet=new Set(references),localDeletions=await AppData.deletionRecovery.attachments(),expectedDeletions=freeze(localDeletions.filter(item=>!referenceSet.has(item.assetId)));
   return freeze({conflicts:freeze([]),states:freeze(Object.fromEntries(references.map(id=>[id,'record']))),expectedDeletions,deleteLocalIds:freeze([]),references,deletionLedgerChanged:expectedDeletions.length!==localDeletions.length});
 }
-function attachmentDeletionDecisionGroups(plan){
+function attachmentDeletionDecisionGroups(plan:AttachmentPlan){
   return freeze((plan&&plan.conflicts||[]).map(item=>freeze({id:`attachment__${item.assetId}`,label:`Attachment Library · ${item.label}`,defaultValue:item.defaultValue,description:'This standalone Attachment Library identity was explicitly deleted on one side. Referenced attachments are never deleted by this choice.',choices:freeze([
     freeze({value:'record',label:'Keep attachment',description:'Keep this independently retained Attachment Library item.'}),
     freeze({value:'deleted',label:'Keep deleted',description:'Keep the explicit deletion and prevent an older library-only copy from returning.'})
   ])})));
 }
-async function selectResolvedImportedAssets(assessment,resolvedPlan,signal,attachmentPlan=null,resolvedReferences=null){
+async function selectResolvedImportedAssets(assessment:Assessment|null,resolvedPlan:ResolvedPlan,signal:Signal,attachmentPlan:AttachmentPlan|null=null,resolvedReferences:readonly string[]|null=null){
   if(!assessment)return freeze({available:freeze([]),toWrite:freeze([]),reused:0,references:freeze([])});
-  const references=Array.isArray(resolvedReferences)?resolvedReferences:await resolvedAssetReferenceIds(resolvedPlan,signal),referenceSet=new Set(references);
-  const available=Array.isArray(assessment.available)?assessment.available:[],missing=Array.isArray(assessment.missing)?assessment.missing:[];
+  const references=Array.isArray(resolvedReferences)?resolvedReferences as readonly string[]:await resolvedAssetReferenceIds(resolvedPlan,signal),referenceSet=new Set(references);
+  const available=Array.isArray(assessment.available)?assessment.available as readonly ImportedAsset[]:[],missing=Array.isArray(assessment.missing)?assessment.missing as readonly AssetDescriptor[]:[];
   const availableById=new Map(available.map(item=>[item.assetId,item])),knownCheckpointIds=new Set([...available.map(item=>item.assetId),...missing.map(item=>item.assetId)]);
   for(const id of references){
     if(!knownCheckpointIds.has(id)||availableById.has(id))continue;
@@ -1120,7 +1155,7 @@ async function selectResolvedImportedAssets(assessment,resolvedPlan,signal,attac
   const toWriteIds=new Set((assessment.toWrite||[]).map(item=>item.assetId)),toWrite=selected.filter(item=>toWriteIds.has(item.assetId));
   return freeze({available:freeze(selected),toWrite:freeze(toWrite),reused:selected.length-toWrite.length,references});
 }
-async function commitImportedAssets(selection,signal,attachmentPlan=null){
+async function commitImportedAssets(selection:AssetSelection,signal:Signal,attachmentPlan:AttachmentPlan|null=null){
   if(!selection)return freeze({written:0,published:0,reused:0,deleted:0,expected:freeze([]),expectedRemovedIds:freeze([]),references:freeze([]),expectedDeletions:freeze([])});
   throwIfImportAborted(signal);
   const selected=selection.available||freeze([]),published=selected.length;
@@ -1133,20 +1168,20 @@ async function commitImportedAssets(selection,signal,attachmentPlan=null){
   const storedDeletions=freeze([...(await AppData.deletionRecovery.attachments())]);
   return freeze({written:(selection.toWrite||[]).length,published,reused:Number(selection.reused)||0,deleted,changed:!!(published||deleted||attachmentPlan?.deletionLedgerChanged),expected:freeze([...selected]),expectedRemovedIds:freeze([...deleteLocalIds]),references:selection.references||freeze([]),expectedDeletions:storedDeletions});
 }
-async function restoreSnapshotAssets(snapshot){
+async function restoreSnapshotAssets(snapshot:Parsed){
   await AssetData.restoreAll(snapshot.importedAssets||[]);
   return freeze({restored:true,written:snapshot.importedAssets?.length||0});
 }
-async function verifyRestoreCommit(expected,signal,authorityOptions=null){
+async function verifyRestoreCommit(expected:ExpectedRestore,signal:Signal,authorityOptions:AuthorityOptions|null=null){
   throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);
-  const records=Array.isArray(expected.records)?expected.records:[];
+  const records=Array.isArray(expected.records)?expected.records as readonly DailyRecord[]:[];
   if(records.length){
     const stored=await getDailyRecordDocumentsByDates(records.map(record=>record.date));
     const byDate=new Map(stored.map(record=>[record.date,sanitizeCurrentDailyRecord(record)]));
     for(const record of records)if(!Canonical.same(byDate.get(record.date),sanitizeCurrentDailyRecord(record)))throw new Error(`Post-restore verification failed for saved day ${record.date}.`);
   }
   if(Array.isArray(expected.recordDatesExact)){
-    const actual=[...((await AppData.dailyRecords.backupDates()).dates||[])].sort(),wanted=[...expected.recordDatesExact].sort();
+    const actual=[...((await AppData.dailyRecords.backupDates()).dates||[])].sort(),wanted=[...expected.recordDatesExact as readonly string[]].sort();
     if(actual.length!==wanted.length||actual.some((date,index)=>date!==wanted[index]))throw new Error('Post-restore verification found Saved Days outside the selected version.');
   }
   if(expected.notes){
@@ -1155,7 +1190,7 @@ async function verifyRestoreCommit(expected,signal,authorityOptions=null){
   }
   if(Array.isArray(expected.assets)){
     const rows=await AssetData.list(),catalogue=new Map(rows.map(row=>[row.id,row])),verifiedPhysical=new Set();
-    for(const item of expected.assets){
+    for(const item of expected.assets as readonly ImportedAsset[]){
       const row=catalogue.get(item.assetId);
       if(!row||row.name!==item.name||row.library!==item.library||row.size!==item.size||row.type!==item.mimeType)throw new Error(`Post-restore verification failed for attachment ${item.assetId}.`);
       const physicalKey=String(row.file||item.assetId)+'\u0000'+String(item.checksum||'')+'\u0000'+Number(item.size);
@@ -1166,11 +1201,11 @@ async function verifyRestoreCommit(expected,signal,authorityOptions=null){
       }
     }
     if(Array.isArray(expected.assetIdsExact)){
-      const actual=rows.map(row=>String(row.id||'')).sort(),wanted=[...expected.assetIdsExact].map(String).sort();
+      const actual=rows.map(row=>String(row.id||'')).sort(),wanted=[...expected.assetIdsExact as readonly string[]].map(String).sort();
       if(actual.length!==wanted.length||actual.some((id,index)=>id!==wanted[index]))throw new Error('Post-restore verification found attachment identities outside the selected version.');
     }
   }
-  if(Array.isArray(expected.removedAssetIds)&&expected.removedAssetIds.length){const catalogue=new Set((await AssetData.list()).map(row=>row.id));for(const id of expected.removedAssetIds)if(catalogue.has(id))throw new Error(`Post-restore verification failed to remove Attachment Library identity ${id}.`);}
+  if(Array.isArray(expected.removedAssetIds)&&expected.removedAssetIds.length){const catalogue=new Set((await AssetData.list()).map(row=>row.id));for(const id of expected.removedAssetIds as readonly string[])if(catalogue.has(id))throw new Error(`Post-restore verification failed to remove Attachment Library identity ${id}.`);}
   if(expected.personalData)await personalVerify(expected.personalData);
   if(Array.isArray(expected.pendingReviews)&&!Canonical.same(await AppData.pendingReviews.list(),expected.pendingReviews))throw new Error('Post-restore verification failed for versions kept for review.');
   if(Array.isArray(expected.savedDayDeletions)){const stored=await AppData.deletionRecovery.savedDays();if(!Canonical.same(stored,expected.savedDayDeletions))throw new Error('Post-restore verification failed for Saved-Day deletion history.');}
@@ -1184,20 +1219,20 @@ async function verifyRestoreCommit(expected,signal,authorityOptions=null){
   }
   return true;
 }
-function sealVerifiedPortableSnapshot(parsed,{provenance=freeze({kind:'portable-file'}),release=null}={}){
-  if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)||Number(parsed.formatVersion)!==DATA_CONTRACT.schemas.Backup.version||!parsed.protectedCheckpointManifest)throw new TypeError('Verified portable snapshot must use the current canonical backup format.');
+function sealVerifiedPortableSnapshot(parsed:Parsed,{provenance=freeze({kind:'portable-file'}),release=null}:{provenance?:Provenance;release?:Release|null}={}){
+  if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)||Number(parsed.formatVersion)!==DATA_CONTRACT.schemas.Backup.version||!parsed?.protectedCheckpointManifest)throw new TypeError('Verified portable snapshot must use the current canonical backup format.');
   if(!provenance||typeof provenance!=='object'||Array.isArray(provenance)||!Object.isFrozen(provenance))throw new TypeError('Verified portable snapshot provenance is invalid.');
   const snapshot=freeze({format:'study-director.verified-portable-snapshot',version:1}),state={parsed,provenance,release:typeof release==='function'?release:null,released:false};
   verifiedPortableSnapshots.set(snapshot,state);return snapshot;
 }
-function verifiedPortableSnapshotState(snapshot){
+function verifiedPortableSnapshotState(snapshot:VerifiedSnapshot){
   const state=snapshot&&verifiedPortableSnapshots.get(snapshot);if(!state||state.released)throw new Error('Backup candidate is not backed by a current verified portable snapshot.');return state;
 }
-async function releaseVerifiedPortableSnapshot(snapshot){
+async function releaseVerifiedPortableSnapshot(snapshot:VerifiedSnapshot){
   const state=snapshot&&verifiedPortableSnapshots.get(snapshot);if(!state||state.released)return false;state.released=true;verifiedPortableSnapshots.delete(snapshot);if(state.release)await state.release();return true;
 }
-function candidateSnapshotState(stored){return stored&&stored.snapshot?verifiedPortableSnapshotState(stored.snapshot):null;}
-function createBackupCandidate(snapshot,{file=null,metadata=freeze({}),signal=null}={}){
+function candidateSnapshotState(stored:StoredCandidate|null|undefined){return stored&&stored.snapshot?verifiedPortableSnapshotState(stored.snapshot):null;}
+function createBackupCandidate(snapshot:VerifiedSnapshot,{file=null,metadata=freeze({}),signal=null}:{file?:BackupFile|null;metadata?:Metadata;signal?:Signal}={}){
   const state=verifiedPortableSnapshotState(snapshot),candidate=freeze({
     kind:'study-director.backup-candidate',
     release:async()=>{const stored=inspectedBackups.get(candidate);if(!stored)return false;inspectedBackups.delete(candidate);return releaseVerifiedPortableSnapshot(stored.snapshot);},
@@ -1205,19 +1240,19 @@ function createBackupCandidate(snapshot,{file=null,metadata=freeze({}),signal=nu
   });
   inspectedBackups.set(candidate,{snapshot,signal});return candidate;
 }
-function managedSnapshotStage(stage,code,work){
+function managedSnapshotStage<T>(stage:string,code:string,work:()=>T){
   const label=String(stage||'validation');
   OperationDiagnostics.mark(`managed-checkpoint-${label}-start`);
   try{const value=work();OperationDiagnostics.mark(`managed-checkpoint-${label}-complete`);return value;}
   catch(error){
     const failure=error instanceof Error?error:new Error(String(error||'Managed checkpoint validation failed.'));
-    if(!failure.code||failure.code==='Error')failure.code=code;
-    if(!failure.backupStage)failure.backupStage=`managed-${label}`;
-    OperationDiagnostics.mark(`managed-checkpoint-${label}-failed`,{stage:failure.backupStage,errorCode:String(failure.code||code)});
+    if(!fields(failure)['code']||fields(failure)['code']==='Error')fields(failure)['code']=code;
+    if(!fields(failure)['backupStage'])fields(failure)['backupStage']=`managed-${label}`;
+    OperationDiagnostics.mark(`managed-checkpoint-${label}-failed`,{stage:fields(failure)['backupStage'],errorCode:String(fields(failure)['code']||code)});
     throw failure;
   }
 }
-function managedParsedSnapshot(capture,metadata={}){
+function managedParsedSnapshot(capture:ReconstructedCapture,metadata:VerifiedOptions){
   // A one-note read (noteScope) holds just that note and its images: each was
   // verified against the manifest, and checks that need the whole checkpoint
   // are left to full reads, which alone may replace or combine everything.
@@ -1226,29 +1261,28 @@ function managedParsedSnapshot(capture,metadata={}){
   if(!Canonical.same(repositoryManifest.checkpoint,plan.checkpoint)||String(repositoryManifest.sourceRevision||'')!==String(plan.sourceRevision||'')||String(repositoryManifest.exportedAt||'')!==String(plan.exportedAt||''))throw new Error('Managed repository provenance does not match the reconstructed checkpoint.');
   const records=managedSnapshotStage('daily-records','MANAGED_CHECKPOINT_DAILY_RECORDS_FAILED',()=>[...(plan.dailyDocuments||[])].map(record=>{const clean=BackupCodec.normalizeRecord(record);if(!clean)throw new Error('Managed repository Daily Records contain a record outside the supported schema range.');return clean;}).sort((a,b)=>a.date.localeCompare(b.date)));
   const recordDates=managedSnapshotStage('daily-records-membership','MANAGED_CHECKPOINT_DAILY_RECORDS_FAILED',()=>{const actual=records.map(record=>String(record.date)),declared=[...(plan.recordDates||[])].map(String).sort();if(actual.length!==declared.length||actual.some((date,index)=>date!==declared[index]))throw new Error('Managed repository Saved-Day membership failed verification.');return actual;});
-  // Versions saved before notes had permanent ids (manifest 5 and older) keep
-  // notes, and their deletion history, under note names; both convert to ids.
-  const notes=managedSnapshotStage('notes','MANAGED_CHECKPOINT_NOTES_FAILED',()=>{const out=Object.create(null);for(const raw of plan.noteItems||[]){const key=String(raw&&raw.key||''),clean=BackupCodec.normalizeNote(raw,key);if(!clean||!key||Object.prototype.hasOwnProperty.call(out,clean.key))throw new Error('Managed repository note failed current-schema verification.');out[clean.key]=clean;}return out;});
+  // Canonical notes and deletion records use permanent note ids.
+  const notes=managedSnapshotStage('notes','MANAGED_CHECKPOINT_NOTES_FAILED',()=>{const out:Record<string,NoteRecord>=empty();for(const raw of plan.noteItems||[]){const key=String(raw&&raw['key']||''),clean=BackupCodec.normalizeNote(raw,key);if(!clean||!key||Object.prototype.hasOwnProperty.call(out,clean.key))throw new Error('Managed repository note failed current-schema verification.');out[clean.key]=clean;}return out;});
   const activeSession=managedSnapshotStage('active-session','MANAGED_CHECKPOINT_ACTIVE_SESSION_FAILED',()=>{const clean=plan.activeSession?BackupCodec.normalizeImportedActiveSession(plan.activeSession):null;if(plan.activeSession&&!clean)throw new Error('Managed repository Active Session failed schema verification.');return clean;});
   const personalData=managedSnapshotStage('personal-data','MANAGED_CHECKPOINT_PERSONAL_DATA_FAILED',()=>plan.personalData?BackupCodec.normalizePersonalData(plan.personalData):null);
   // Versions kept for review (manifest 8 and later).
   const pendingReviews=managedSnapshotStage('pending-reviews','MANAGED_CHECKPOINT_PENDING_REVIEWS_FAILED',()=>{const seen=new Set();return freeze((plan.pendingReviewItems||[]).map(raw=>{const clean=BackupCodec.normalizePendingReview(raw);if(!clean||seen.has(clean.id))throw new Error('Managed repository version kept for review failed current-schema verification.');seen.add(clean.id);return clean;}).sort((a,b)=>a.id.localeCompare(b.id)));});
   const counts=managedSnapshotStage('counts','MANAGED_CHECKPOINT_COUNTS_FAILED',()=>{const value=BackupCodec.countShape({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:records.length,note:Object.keys(notes).length,activeSession:activeSession?1:0,pendingReview:pendingReviews.length});if(!noteScope&&(!BackupCodec.countsEqual(value,plan.counts)||!BackupCodec.countsEqual(value,repositoryManifest.counts)))throw new Error('Managed repository counts failed portable-snapshot verification.');return value;});
   const attachmentState=managedSnapshotStage('attachments','MANAGED_CHECKPOINT_ATTACHMENTS_FAILED',()=>{
-    const rawAssetItems=Array.isArray(plan.assetItems)?plan.assetItems:[],assetDescriptors=BackupCodec.normalizeAssetDescriptors(rawAssetItems.map(item=>item&&item.descriptor)),assetById=new Map(rawAssetItems.map(item=>[String(item&&item.descriptor&&item.descriptor.assetId||''),item])),importedAssets=[];
+    const rawAssetItems=Array.isArray(plan.assetItems)?plan.assetItems as readonly CapturedAsset[]:[],assetDescriptors=BackupCodec.normalizeAssetDescriptors(rawAssetItems.map(item=>item&&item.descriptor)),assetById=new Map(rawAssetItems.map(item=>[String(item&&item.descriptor&&item.descriptor.assetId||''),item])),importedAssets=[];
     for(const descriptor of assetDescriptors){const item=assetById.get(descriptor.assetId);if(!item)throw new Error(`Managed repository attachment ${descriptor.assetId} is unavailable.`);if(descriptor.missing===true){if(item.blob!==null&&item.blob!==undefined)throw new Error(`Managed repository missing attachment ${descriptor.assetId} unexpectedly contains bytes.`);continue;}if(!(item.blob instanceof Blob)||item.blob.size!==descriptor.size)throw new Error(`Managed repository attachment ${descriptor.assetId} failed snapshot binding.`);importedAssets.push(freeze({...descriptor,blob:item.blob.slice(0,item.blob.size,descriptor.mimeType)}));}
-    const referencedAssetIds=new Set(),collect=value=>{for(const id of BackupCodec.assetIds(value))referencedAssetIds.add(id);};records.forEach(collect);Object.values(notes).forEach(collect);if(activeSession)collect(activeSession);pendingReviews.forEach(collect);
+    const referencedAssetIds=new Set<string>(),collect=(value:unknown)=>{for(const id of BackupCodec.assetIds(value))referencedAssetIds.add(id);};records.forEach(collect);Object.values(notes).forEach(collect);if(activeSession)collect(activeSession);pendingReviews.forEach(collect);
     const descriptorIds=new Set(assetDescriptors.map(item=>item.assetId));for(const id of referencedAssetIds)if(!descriptorIds.has(id))throw new Error(`Managed repository is missing attachment descriptor ${id}.`);
     return freeze({assetDescriptors,assetById,importedAssets,referencedAssetIds});
   });
   const {assetDescriptors,assetById,importedAssets,referencedAssetIds}=attachmentState;
-  const normalizedPlan=freeze({...plan,dailyDocuments:freeze(records),recordDates:freeze(recordDates),noteItems:freeze(Object.values(notes).sort((a,b)=>String(a.key).localeCompare(String(b.key)))),activeSession,personalData,pendingReviewItems:pendingReviews,counts:freeze({...counts}),assetItems:freeze(assetDescriptors.map(descriptor=>freeze({descriptor,blob:descriptor.missing===true?null:assetById.get(descriptor.assetId).blob})))});
-  const protectedCheckpointManifest=managedSnapshotStage('protected-manifest','MANAGED_CHECKPOINT_PROTECTED_MANIFEST_FAILED',()=>{if(noteScope)return repositoryManifest.protectedCheckpointManifest;const value=BackupCodec.createProtectedManifest(normalizedPlan,plan.checkpoint);if(!Canonical.same(value,plan.protectedCheckpointManifest)||!Canonical.same(value,repositoryManifest.protectedCheckpointManifest))throw new Error('Managed repository protected checkpoint state failed portable-snapshot verification.');return value;});
+  const normalizedPlan=freeze({...plan,dailyDocuments:freeze(records),recordDates:freeze(recordDates),noteItems:freeze(Object.values(notes).sort((a,b)=>String(a.key).localeCompare(String(b.key)))),activeSession,personalData,pendingReviewItems:pendingReviews,counts:freeze({...counts}),assetItems:freeze(assetDescriptors.map(descriptor=>freeze({descriptor,blob:descriptor.missing===true?null:assetById.get(descriptor.assetId)!.blob})))});
+  const protectedCheckpointManifest=managedSnapshotStage('protected-manifest','MANAGED_CHECKPOINT_PROTECTED_MANIFEST_FAILED',()=>{if(noteScope)return BackupCodec.createProtectedManifest({...normalizedPlan,savedDayDeletions:[],noteDeletions:[],attachmentDeletions:[]},plan.checkpoint);const value=BackupCodec.createProtectedManifest(normalizedPlan,plan.checkpoint);if(!Canonical.same(value,plan.protectedCheckpointManifest)||!Canonical.same(value,repositoryManifest.protectedCheckpointManifest))throw new Error('Managed repository protected checkpoint state failed portable-snapshot verification.');return value;});
   const manifest=freeze(BackupCodec.createManifest(normalizedPlan,{compression:'none',algorithm:BackupCodec.checksumAlgorithm()})),report=freeze({sourceVersion:backupVersion,degraded:0,warnings:freeze([])});
   const sourceBytes=Math.max(0,Number(metadata&&metadata.verifiedSourceBytes)||0),entityCount=records.length+Object.keys(notes).length+(activeSession?1:0)+(personalData?1:0)+pendingReviews.length+1,chunkOverhead=Math.ceil(entityCount/Math.max(1,Number(APP_LIMITS.backupChunkItems)||1))*512+8192;
   return freeze({noteScope,importedPersonalData:personalData,data:freeze({notes:freeze(notes)}),records:freeze(records),pendingReviews,hasNotes:true,notesComplete:true,importedActiveSession:activeSession,protectedCheckpointManifest,captureAuthority:'canonical-complete',formatVersion:Number(backupVersion),counts:freeze({...counts}),manifest,report,uncompressedBytes:sourceBytes+chunkOverhead,assetDescriptors,referencedAssetIds:freeze([...referencedAssetIds].sort()),importedAssets:freeze(importedAssets),assetBytes:importedAssets.reduce((total,item)=>total+item.size,0)});
 }
-async function inspectVerifiedLogicalCapture(capture,metadata={}){
+async function inspectVerifiedLogicalCapture(capture:ReconstructedCapture,metadata:ManagedMetadata){
   const signal=metadata&&metadata.signal||activeImportOperation&&activeImportOperation.signal||null;throwIfImportAborted(signal);
   const parsed=managedParsedSnapshot(capture,metadata),repositoryManifest=metadata.repositoryManifest,release=metadata.release;
   if(typeof release!=='function')throw new TypeError('Managed repository attachment lease is unavailable.');
@@ -1257,8 +1291,8 @@ async function inspectVerifiedLogicalCapture(capture,metadata={}){
   try{return createBackupCandidate(snapshot,{signal,metadata:freeze({filename:`${repositoryManifest.checkpoint.checkpointId}.sdbackup`,encrypted:metadata.sourceEncrypted===true,size:Math.max(0,Number(metadata.storedBytes)||0)})});}
   catch(error){await releaseVerifiedPortableSnapshot(snapshot).catch(()=>{});throw error;}
 }
-async function verifyVerifiedLogicalCapture(capture,metadata={}){throwIfImportAborted(metadata&&metadata.signal||null);managedParsedSnapshot(capture,metadata);return true;}
-async function inspectBackup(file,metadata={}){
+async function verifyVerifiedLogicalCapture(capture:ReconstructedCapture,metadata:VerifiedOptions){throwIfImportAborted(metadata&&metadata.signal||null);managedParsedSnapshot(capture,metadata);return true;}
+async function inspectBackup(file:BackupFile,metadata:Metadata|string={}){
   const options=typeof metadata==='string'?{filename:metadata}:(metadata&&typeof metadata==='object'?metadata:{});
   const signal=options.signal||activeImportOperation&&activeImportOperation.signal||null;
   throwIfImportAborted(signal);
@@ -1272,11 +1306,11 @@ async function inspectBackup(file,metadata={}){
   if(options.validateOnly){inspectedBackups.delete(candidate);await releaseVerifiedPortableSnapshot(snapshot);}
   return candidate;
 }
-async function replacePortableCanonicalSnapshot(snapshot,{scheduleText='',deletionState=null,signal=null,restoreId='',requirePersonal=false,phasePrefix='restoring-version',authorityOptions=null}={}){
+async function replacePortableCanonicalSnapshot(snapshot:Parsed,{scheduleText='',deletionState=null,signal=null,restoreId='',requirePersonal=false,phasePrefix='restoring-version',authorityOptions=null}:ReplaceOptions={}){
   const source=snapshot&&typeof snapshot==='object'?snapshot:null;
   if(!source)throw new Error('The portable restore snapshot is unavailable.');
   requireBackupMutationControl('replacing the portable Study Director state');
-  const mark=async phase=>{if(restoreId)await AppData.restoreJournal.mark(restoreId,`${phasePrefix}-${phase}`);};
+  const mark=async (phase:string)=>{if(restoreId)await AppData.restoreJournal.mark(restoreId,`${phasePrefix}-${phase}`);};
   const records=normalizeImportedDailyRecordSet(source.records||[]).records,targetDates=freeze(records.map(record=>record.date)),targetDateSet=new Set(targetDates);
   const targetNotes=AppData.notes.normalizePayload(source.data&&source.data.notes||{});
   const targetSession=source.importedActiveSession?ActiveSessionCodec.sanitizeCurrent(source.importedActiveSession):null;
@@ -1284,10 +1318,10 @@ async function replacePortableCanonicalSnapshot(snapshot,{scheduleText='',deleti
   const targetPersonal=source.importedPersonalData||null;
   if(requirePersonal&&!targetPersonal)throw new Error('The selected managed version is missing portable Plans or Preferences.');
   const deletions=deletionState||freeze({savedDays:freeze([]),notes:freeze([]),attachments:freeze([])});
-  for(const key of ['savedDays','notes','attachments'])if(!Array.isArray(deletions[key]))throw new Error('The selected version has invalid canonical deletion state.');
+  for(const key of ['savedDays','notes','attachments'] as const)if(!Array.isArray(deletions[key]))throw new Error('The selected version has invalid canonical deletion state.');
   throwIfImportAborted(signal,authorityOptions);
   await mark('saved-days');
-  const currentSource=await AppData.dailyRecords.backupDates(),currentDates=Array.isArray(currentSource&&currentSource.dates)?currentSource.dates:[],removedDates=[];
+  const currentSource=await AppData.dailyRecords.backupDates(),currentDates=Array.isArray(currentSource&&currentSource.dates)?currentSource.dates as readonly string[]:[],removedDates=[];
   for(const date of currentDates){
     if(targetDateSet.has(date))continue;
     throwIfImportAborted(signal,authorityOptions);await AppData.dailyRecords.remove(date,{rollback:true});removedDates.push(date);await yieldImport(signal,authorityOptions);
@@ -1302,7 +1336,7 @@ async function replacePortableCanonicalSnapshot(snapshot,{scheduleText='',deleti
   let restoredAssets=0;
   {
     await mark('attachments');
-    const assets=Array.isArray(source.importedAssets)?source.importedAssets:[];
+    const assets=Array.isArray(source.importedAssets)?source.importedAssets as readonly ImportedAsset[]:[];
     await restoreSnapshotAssets(source);restoredAssets=assets.length;
     throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);
   }
@@ -1323,15 +1357,15 @@ async function replacePortableCanonicalSnapshot(snapshot,{scheduleText='',deleti
   const expectedAssets=(source.importedAssets||[]);
   await verifyRestoreCommit({
     personalData:targetPersonal,records,recordDatesExact:targetDates,notes:AppData.notes.normalizePayload(restoredNotes),
-    assets:expectedAssets,assetIdsExact:Array.isArray(expectedAssets)?expectedAssets.map(item=>item.assetId):undefined,
+    assets:expectedAssets,assetIdsExact:Array.isArray(expectedAssets)?(expectedAssets as readonly ImportedAsset[]).map(item=>item.assetId):undefined,
     activeSession:targetSession,scheduleText:String(scheduleText||''),savedDayDeletions:deletions.savedDays,noteDeletions:deletions.notes,attachmentDeletions:deletions.attachments,
     ...(targetReviews?{pendingReviews:targetReviews}:{})
   },signal,authorityOptions);
-  for(const [scope,operation] of [['library',libraryChanged],['notes',refreshPnote],['review',()=>ReviewView.refresh()],['schedule',renderSched]])try{operation();}catch(error){AppDiagnostics.capture(`backup.version-restore-${scope}`,error,'warn');}
+  for(const [scope,operation] of [['library',libraryChanged],['notes',refreshPnote],['review',()=>ReviewView.refresh()],['schedule',renderSched]] as const)try{operation();}catch(error){AppDiagnostics.capture(`backup.version-restore-${scope}`,error,'warn');}
   AssetData.scheduleMaintenance(0);
   return freeze({records:records.length,removedRecords:removedDates.length,recordBatches,notes:Object.keys(targetNotes).length,activeSession:!!targetSession,personalData:!!targetPersonal,assets:restoredAssets});
 }
-async function rebaseRepositoryPreparationAcceleration(reason='authoritative-recovery',authorityOptions=null){
+async function rebaseRepositoryPreparationAcceleration(reason='authoritative-recovery',authorityOptions:AuthorityOptions|null=null){
   assertAuthority(authorityOptions||undefined);
   ManagedRepository.invalidatePreparation();
   OperationDiagnostics.mark('repository-preparation-rebase-start',{reason});
@@ -1347,12 +1381,11 @@ async function rebaseRepositoryPreparationAcceleration(reason='authoritative-rec
   }
 }
 
-function rollbackDeletionState(snapshot,override=null){
-  const protectedManifest=snapshot&&snapshot.protectedCheckpointManifest||null,provided=override&&typeof override==='object'?override:{};
-  const value=(key,manifestKey)=>Array.isArray(provided[key])?provided[key]:Array.isArray(protectedManifest&&protectedManifest[manifestKey])?protectedManifest[manifestKey]:freeze([]);
-  return freeze({savedDays:freeze([...value('savedDays','savedDayDeletions')]),notes:freeze([...value('notes','noteDeletions')]),attachments:freeze([...value('attachments','attachmentDeletions')])});
+function rollbackDeletionState(snapshot:Parsed,override:DeletionState|null=null){
+  const manifest=snapshot.protectedCheckpointManifest;
+  return freeze({savedDays:freeze([...(Array.isArray(override?.savedDays)?override.savedDays as readonly SavedDayDeletion[]:manifest.savedDayDeletions||[])]),notes:freeze([...(Array.isArray(override?.notes)?override.notes as readonly NoteDeletion[]:manifest.noteDeletions||[])]),attachments:freeze([...(Array.isArray(override?.attachments)?override.attachments as readonly AttachmentDeletion[]:manifest.attachmentDeletions||[])])});
 }
-async function rollbackImportedState(journal,scheduleText='',deletionState=null){
+async function rollbackImportedState(journal:Parsed,scheduleText='',deletionState:DeletionState|null=null){
   const rollbackAuthority=freeze({allowDurableProtected:true});
   assertAuthority(rollbackAuthority);
   const snapshot=journal&&typeof journal==='object'?journal:null;
@@ -1362,10 +1395,10 @@ async function rollbackImportedState(journal,scheduleText='',deletionState=null)
   return freeze({removedAddedRecords:result.removedRecords,restoredRecords:result.records});
 }
 
-async function ensureRestoreCapacity(parsed,preview={}){
+async function ensureRestoreCapacity(parsed:Parsed,preview:Partial<Preview>={}){
   const expandedBytes=Math.max(0,Number(parsed&&parsed.uncompressedBytes)||Number(preview&&preview.size)||0);let safetyAssetBytes=0;
   {
-    const physicalSizes=new Map();
+    const physicalSizes=new Map<string,number>();
     for(const row of await AssetData.list()){
       const identity=String(row&&row.file||row&&row.id||''),size=Number(row&&row.size);if(!identity||!Number.isSafeInteger(size)||size<=0)continue;
       physicalSizes.set(identity,Math.max(size,physicalSizes.get(identity)||0));
@@ -1375,14 +1408,14 @@ async function ensureRestoreCapacity(parsed,preview={}){
   try{
     const estimate=globalThis.navigator&&globalThis.navigator.storage&&typeof globalThis.navigator.storage.estimate==='function'?await globalThis.navigator.storage.estimate():null;
     if(estimate&&Number.isFinite(estimate.quota)&&Number.isFinite(estimate.usage)){
-      const available=Math.max(0,estimate.quota-estimate.usage),backupLimit=Math.max(0,Number(APP_LIMITS.backupMaxFileBytes||APP_LIMITS.backupMaxCompressedBytes)||0),incomingWorkingBytes=Math.max(5*1024*1024,Math.min(backupLimit*2||Number.MAX_SAFE_INTEGER,expandedBytes*2)),required=Math.min(Number.MAX_SAFE_INTEGER,incomingWorkingBytes+safetyAssetBytes);
+      const available=Math.max(0,estimate.quota!-estimate.usage!),backupLimit=Math.max(0,Number(APP_LIMITS.backupMaxFileBytes||APP_LIMITS.backupMaxCompressedBytes)||0),incomingWorkingBytes=Math.max(5*1024*1024,Math.min(backupLimit*2||Number.MAX_SAFE_INTEGER,expandedBytes*2)),required=Math.min(Number.MAX_SAFE_INTEGER,incomingWorkingBytes+safetyAssetBytes);
       if(available<required)throw new Error('This device does not have enough available browser storage to restore the backup safely. Free space and retry.');
     }
-  }catch(error){if(error&&/enough available browser storage/.test(error.message))throw error;}
+  }catch(error){if(error&&/enough available browser storage/.test(String(fields(error)['message']||'')))throw error;}
   return true;
 }
 
-async function captureLocalSafetyCopy(_stored,{afterCapture=null}={}){
+async function captureLocalSafetyCopy(_stored:StoredCandidate|null|undefined,{afterCapture=null}:{afterCapture?:(()=>Promise<unknown>)|null}={}){
   const materialized=await createCanonicalCheckpointWithInspection({assumeFlushed:true,requireCanonicalComplete:true}),rollbackJournal=materialized.inspection;
   const {inspection:_inspection,...safety}=materialized,safetyFile=freeze(safety);
   try{
@@ -1391,19 +1424,19 @@ async function captureLocalSafetyCopy(_stored,{afterCapture=null}={}){
     return freeze({safetyFile,rollbackJournal});
   }catch(error){await Exports.run('file.release',{file:safetyFile.blob}).catch(()=>{});throw error;}
 }
-async function runRestoreMutation(stored,kind,operation){
+async function runRestoreMutation(stored:StoredCandidate,kind:string,operation:()=>Promise<RecoveryOutcome>){
   if(typeof operation!=='function')throw new TypeError('Restore mutation operation is required.');
   const snapshot=candidateSnapshotState(stored),managed=snapshot&&snapshot.provenance&&typeof snapshot.provenance.managedRecovery==='function'?snapshot.provenance.managedRecovery:null;
   const apply=()=>withPersistenceSuppressed(operation);
   if(managed)return managed(freeze({kind,apply}));
   return runExclusive(kind,apply);
 }
-function restoreSurfaceStatus(stored,message,ok=true,stage='local',details={}){
+function restoreSurfaceStatus(stored:StoredCandidate|null|undefined,message:string,ok=true,stage='local',details:Progress={}){
   const snapshot=candidateSnapshotState(stored),report=snapshot&&snapshot.provenance&&snapshot.provenance.managedProgress;
   if(typeof report==='function'){try{report(freeze({stage:String(stage||'local'),message:String(message||''),ok:ok!==false,...details}));}catch(error){AppDiagnostics.capture('backup.managed-recovery-progress',error,'warn');}return true;}
   portablePresentation?.update({progress:{stage,...details}});setLocalExportStatus(message,ok);return false;
 }
-async function restoreBackupAttemptWithOperation(candidate,operation,options={}){
+async function restoreBackupAttemptWithOperation(candidate:Candidate,operation:ImportOperation,options:RestoreOptions={}){
   // A sync runs without questions like adding what is missing, but takes
   // everything one side alone changed; anything needing a choice is left
   // for the person.
@@ -1413,11 +1446,11 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   if(!parsed)throw new Error('Backup candidate is not a current verified Study Director inspection.');
   if(parsed.noteScope&&parsed.noteScope!==note)throw new Error('This backup version was read for one note only and cannot be combined as a whole.');
   throwIfImportCancelled(signal);
-  const preview=candidate.preview||{};
+  const preview=candidate!.preview;
   OperationDiagnostics.mark('restore-preflight-start');
   await flushRestorePreflightState(signal);
   OperationDiagnostics.mark('restore-preflight-complete');
-  const unchanged=reason=>Object.freeze({cancelled:true,reason,mode:'reconcile',added:0,replaced:0,kept:0,batches:0,assetsRestored:0,notesReconciled:false,activeSessionReconciled:false,savedDayDeletionsApplied:0}),needsDecision=()=>unchanged('needs-decision');
+  const unchanged=(reason:string)=>Object.freeze({cancelled:true,reason,mode:'reconcile',added:0,replaced:0,kept:0,batches:0,assetsRestored:0,notesReconciled:false,activeSessionReconciled:false,savedDayDeletionsApplied:0}),needsDecision=()=>unchanged('needs-decision');
   // What both sides last shared, and the session: while one runs here a
   // sync keeps it as it is; otherwise the side that did not change it since
   // takes the other's.
@@ -1429,8 +1462,8 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   // the other device's, which runs there, and keeps this one's for review).
   // Versions a sync keeps for review (5.2). One that cannot be kept leaves
   // the difference for the person, so nothing is overwritten unkept.
-  const keptReviews=[],keep=build=>{try{keptReviews.push(...[].concat(build()));return true;}catch(error){AppDiagnostics.capture('backup.sync-keep-review',error,'warn');return false;}};
-  const keepSession=value=>{const kept=value&&ActiveSessionCodec.sanitizeCurrent(value);return !!kept&&keep(()=>PendingReviewCodec.create({subject:'session',ref:'session',kept}));};
+  const keptReviews:PendingReview[]=[],keep=(build:()=>PendingReview|readonly PendingReview[])=>{try{const value=build();keptReviews.push(...(Array.isArray(value)?value as readonly PendingReview[]:[value as PendingReview]));return true;}catch(error){AppDiagnostics.capture('backup.sync-keep-review',error,'warn');return false;}};
+  const keepSession=(value:ActiveSession|null)=>{const kept=value&&ActiveSessionCodec.sanitizeCurrent(value);return !!kept&&keep(()=>PendingReviewCodec.create({subject:'session',ref:'session',kept}));};
   if(session==='yield'){
     await yieldSession(parsed.importedActiveSession);
     if(sync){const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null;session='incoming';if(mine&&!keepSession(mine))return needsDecision();}
@@ -1441,7 +1474,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   // the other side ended shows ended. A side without a session has nothing
   // to keep.
   if(sync&&(session==='conflict'||session===''||session==='ended')){
-    const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null,theirs=parsed.importedActiveSession||null,time=value=>Number(value&&value.revision)||Date.parse(String(value&&value.updatedAt||''))||0;
+    const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null,theirs=parsed.importedActiveSession||null,time=(value:ActiveSession|null)=>Number(value&&value.revision)||Date.parse(String(value&&value.updatedAt||''))||0;
     const incomingShows=session==='ended'||!mine||!!theirs&&time(theirs)>time(mine),hidden=incomingShows?mine:theirs;session=incomingShows?'incoming':'local';
     if(hidden&&!keepSession(hidden))return needsDecision();
   }
@@ -1449,14 +1482,14 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   const stable=await buildStableRestoreImpact(parsed,preview,signal,{missingOnly,note,holdSession}),impact=stable.impact;
   // A one-note restore stops here when the backup has no copy of the note or
   // the same text, so nothing is written and no safety backup is made.
-  const noteItem=note?impact.reconciliationPlan.notes.find(item=>item.key===note)||null:null,noteRecord=local=>noteItem?.candidates.find(candidate=>candidate.local===local&&candidate.kind==='record')||null;
+  const noteItem=note?impact.reconciliationPlan.notes.find(item=>item.key===note)||null:null,noteRecord=(local:boolean)=>noteItem?.candidates.find(candidate=>candidate.local===local&&candidate.kind==='record')||null;
   if(note){
     const localNote=noteRecord(true),backupNote=noteRecord(false);
     if(!backupNote)return unchanged(noteItem?.identical?'note-unchanged':'note-missing');
     if(localNote&&String(localNote.value?.text||'')===String(backupNote.value?.text||''))return unchanged('note-unchanged');
   }
   // The restored text is a new edit, so it carries a new revision.
-  const restoredNote=text=>{const base=noteRecord(true)||noteRecord(false),revision=Math.max(Date.now(),(Date.parse(String(noteRecord(true)?.value?.updatedAt||''))||0)+1);return freeze({[note]:freeze({value:freeze({...base.value,key:note,text,updatedAt:new Date(revision).toISOString()})})});};
+  const restoredNote=(text:string)=>{const base=noteRecord(true)||noteRecord(false),revision=Math.max(Date.now(),(Date.parse(String(noteRecord(true)?.value?.updatedAt||''))||0)+1);return freeze({[note]:freeze({value:freeze({...base!.value,key:note,text,updatedAt:new Date(revision).toISOString()})})});};
   OperationDiagnostics.mark('reconciliation-impact-ready',{savedDayConflicts:Number(impact.savedDays&&impact.savedDays.conflicts)||0,activeSessionConflicts:Number(impact.activeSession&&impact.activeSession.conflicts)||0});
   const reconciliationRevision=stable.revision,relevantDates=stable.relevantDates;
   const mode='reconcile';
@@ -1478,7 +1511,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   }
   const noteConflicts=sync?freeze([]):noteState.conflicts,decisionNoteState=sync?freeze({...noteState,deletions:freeze([]),titles:freeze([])}):noteState;
   const decisionSetup=restoreDecisionSetup(parsed,impact,mode,localPersonal,note?null:decisionNoteState,personal,settledDays,session);
-  let selectedDecisions=freeze({});
+  let selectedDecisions:Decisions|null=freeze({});
   if(quiet&&(decisionSetup.groups.some(group=>sync||!['plans','personalSettings'].includes(group.id))||noteConflicts.length))return needsDecision();
   if(decisionSetup.groups.length&&!quiet&&!note){
     selectedDecisions=await configure({
@@ -1494,7 +1527,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   }
   const sessionPick=session==='incoming'&&impact.reconciliationPlan.activeSession.conflict?impact.reconciliationPlan.activeSession.candidates.find(candidate=>!candidate.local)?.id:'';
   const decisions=freeze({...decisionSetup.defaults,...selectedDecisions,...(sessionPick?{activeSession:sessionPick}:{})});
-  if(decisions.safetyCopy===true){
+  if(decisions['safetyCopy']===true){
     await assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates,stable.scope);
     const extra=await downloadSafetyCopy({assumeFlushed:true});try{await Exports.run('file.release',{file:extra.blob});}catch(error){AppDiagnostics.capture('backup.optional-safety-copy-release',error,'warn');}
     await assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates,stable.scope);
@@ -1503,21 +1536,21 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   const reflectionConflicts=savedDayReflectionConflicts(impact.reconciliationPlan,settledDays);
   if(quiet&&reflectionConflicts.length)return needsDecision();
   if(reflectionConflicts.length){
-    const reflectionResult=await NoteReconciliation.resolve(freeze({conflicts:reflectionConflicts,incomingAssets:Array.isArray(parsed.importedAssets)?parsed.importedAssets:freeze([]),signal,manualOnly:true}));
+    const reflectionResult=await NoteReconciliation.resolve(freeze({conflicts:reflectionConflicts,incomingAssets:Array.isArray(parsed.importedAssets)?parsed.importedAssets as readonly ImportedAsset[]:freeze([]),signal,manualOnly:true}));
     if(!reflectionResult)return Object.freeze({cancelled:true,mode,added:0,replaced:0,kept:0,batches:0,assetsRestored:0,notesReconciled:false,activeSessionReconciled:false,savedDayDeletionsApplied:0});
     reflectionDecisionMap=savedDayReflectionSelections(impact.reconciliationPlan,reflectionResult,decisions);
   }
   let noteDecisionMap=freeze({}),noteResult=null;
   if(noteConflicts.length){
-    noteResult=await NoteReconciliation.resolve(freeze({conflicts:noteConflicts,incomingAssets:Array.isArray(parsed.importedAssets)?parsed.importedAssets:freeze([]),signal,...(note?{purpose:'version'}:{})}));
+    noteResult=await NoteReconciliation.resolve(freeze({conflicts:noteConflicts,incomingAssets:Array.isArray(parsed.importedAssets)?parsed.importedAssets as readonly ImportedAsset[]:freeze([]),signal,...(note?{purpose:'version'}:{})}));
     if(!noteResult)return Object.freeze({cancelled:true,mode,added:0,replaced:0,kept:0,batches:0,assetsRestored:0,notesReconciled:false,activeSessionReconciled:false,savedDayDeletionsApplied:0});
-    if(note){const text=String(noteResult.notes?.[note]?.text??noteConflicts[0].localValue);if(text===noteConflicts[0].localValue)return unchanged('note-kept');noteDecisionMap=restoredNote(text);}
+    if(note){const text=String(noteResult.notes?.[note]?.text??noteConflicts[0]!.localValue);if(text===noteConflicts[0]!.localValue)return unchanged('note-kept');noteDecisionMap=restoredNote(text);}
   }
   if(!note)noteDecisionMap=noteSelections(impact.reconciliationPlan,noteState,decisions,noteResult);
   else if(!noteConflicts.length){
     // Nothing on this device to compare with (the note is empty or was
     // deleted here), so the backup's text comes back as it is.
-    noteDecisionMap=restoredNote(String(noteRecord(false).value?.text||''));
+    noteDecisionMap=restoredNote(String(noteRecord(false)!.value?.text||''));
   }
   // Versions kept for review join this device's: the other side's and those
   // this merge keeps. None is ever dropped; more than may wait stops a sync.
@@ -1533,14 +1566,14 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   if(attachmentPlan.conflicts.length){
     const groups=attachmentDeletionDecisionGroups(attachmentPlan),choice=await configure({title:'Review attachment differences',message:'Choose what to keep for standalone attachments that differ between this device and the backup. Attachments still referenced by your data are always kept.',groups,confirmLabel:'Apply choices',cancelLabel:'Cancel'});
     if(!choice)return Object.freeze({cancelled:true,mode,added:0,replaced:0,kept:0,batches:0,assetsRestored:0,notesReconciled:false,activeSessionReconciled:false,savedDayDeletionsApplied:0});
-    const mapped=Object.create(null);for(const item of attachmentPlan.conflicts)mapped[item.assetId]=choice[`attachment__${item.assetId}`]||item.defaultValue;
+    const mapped:Record<string,string|boolean|null|undefined>=empty();for(const item of attachmentPlan.conflicts)mapped[item.assetId]=choice[`attachment__${item.assetId}`]||item.defaultValue;
     attachmentPlan=await buildAttachmentDeletionPlan(parsed,resolvedPlan,stable.impact.assetAssessment||null,freeze(mapped),signal,resolvedAssetReferences);
   }
   throwIfImportAborted(signal);await yieldImport(signal);
   await assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates,stable.scope);
   // Taking in Drive's newest version makes it what both sides last shared.
-  const sharedBase=!note&&!missingOnly&&snapshot.provenance&&snapshot.provenance.sharedHead===true?await sharedBaseUpdate(parsed):null;
-  return runRestoreMutation(stored,'restore-backup',async()=>{
+  const sharedBase=!note&&!missingOnly&&snapshot!.provenance&&snapshot!.provenance.sharedHead===true?await sharedBaseUpdate(parsed):null;
+  return runRestoreMutation(stored!,'restore-backup',async()=>{
   OperationDiagnostics.mark('local-restore-mutation-enter');
   await assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates,stable.scope);
   await ensureRestoreCapacity(parsed,preview);
@@ -1556,7 +1589,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     OperationDiagnostics.mark('restore-journal-prepare-start');
     await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,scheduleText:rollbackScheduleText,savedDayDeletions:rollbackDeletionState.savedDays,noteDeletions:rollbackDeletionState.notes,attachmentDeletions:rollbackDeletionState.attachments});
     journalPrepared=true;OperationDiagnostics.mark('restore-journal-prepare-complete');
-    let assetResult=freeze({written:0,published:0,reused:0,deleted:0,changed:false,expected:freeze([]),expectedRemovedIds:freeze([]),references:freeze([]),expectedDeletions:freeze([])});
+    let assetResult:Awaited<ReturnType<typeof commitImportedAssets>>&{changed?:boolean}=freeze({written:0,published:0,reused:0,deleted:0,changed:false,expected:freeze([]),expectedRemovedIds:freeze([]),references:freeze([]),expectedDeletions:freeze([])});
     {
       await AppData.restoreJournal.mark(restoreId,'applying-assets');
       const currentAssessment=await assessImportedAssets(parsed,signal);
@@ -1580,7 +1613,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     if(noteResult.changed)committedDescription+=(committedDescription?' and ':'')+'Notes were already saved';
     await AppData.restoreJournal.mark(restoreId,'notes-committed');
     throwIfImportAborted(signal);await yieldImport(signal);
-    let reviewResult=freeze({changed:false,expected:null,kept:0});
+    let reviewResult:{changed:boolean;expected:readonly PendingReview[]|null;kept:number}=freeze({changed:false,expected:null,kept:0});
     if(incomingReviews.length){
       await AppData.restoreJournal.mark(restoreId,'applying-pending-reviews');
       const expected=freeze(PendingReviewCodec.merge([await AppData.pendingReviews.list(),incomingReviews],APP_LIMITS.maxPendingReviews));
@@ -1593,11 +1626,11 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     if(sessionResult.changed)committedDescription+=(committedDescription?' and ':'')+'the Active Session was already saved';
     await AppData.restoreJournal.mark(restoreId,'active-session-committed');
     const localPersonal=rollbackJournal.importedPersonalData;
-    const expectedPersonal=localPersonal?{version:2,plans:decisions.plans==='replace'&&parsed.importedPersonalData?parsed.importedPersonalData.plans:localPersonal.plans,preferences:decisions.personalSettings==='replace'&&parsed.importedPersonalData?parsed.importedPersonalData.preferences:localPersonal.preferences}:null;
+    const expectedPersonal:PersonalData|null=localPersonal?{version:2,plans:decisions['plans']==='replace'&&parsed.importedPersonalData?parsed.importedPersonalData.plans:localPersonal.plans,preferences:decisions['personalSettings']==='replace'&&parsed.importedPersonalData?parsed.importedPersonalData.preferences:localPersonal.preferences}:null;
     if(expectedPersonal){await AppData.restoreJournal.mark(restoreId,'applying-personal-data');await personalImport(expectedPersonal);}
-    const personalChanged=!!parsed.importedPersonalData&&(decisions.plans==='replace'||decisions.personalSettings==='replace');
+    const personalChanged=!!parsed.importedPersonalData&&(decisions['plans']==='replace'||decisions['personalSettings']==='replace');
     await AppData.restoreJournal.mark(restoreId,'verifying');
-    const expectedCommit={
+    const expectedCommit:ExpectedRestore={
       personalData:expectedPersonal,records:appliedRecords,
       notes:noteResult.expected,
       assets:assetResult.expected,
@@ -1660,8 +1693,8 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
         Object.defineProperty(failure,'studyDirectorRollbackDescription',{value:'All recovery changes were rolled back from the verified safety copy.',configurable:true});
         committedDescription='';
       }catch(rollbackError){
-        failClosed(`Interrupted restore recovery is required: ${rollbackError&&rollbackError.message||rollbackError}`);
-        Object.defineProperty(failure,'studyDirectorRollbackDescription',{value:`Automatic rollback also failed: ${rollbackError&&rollbackError.message||rollbackError}. The recovery record was retained; do not clear site data.`,configurable:true});
+        failClosed(`Interrupted restore recovery is required: ${rollbackError&&fields(rollbackError)['message']||rollbackError}`);
+        Object.defineProperty(failure,'studyDirectorRollbackDescription',{value:`Automatic rollback also failed: ${rollbackError&&fields(rollbackError)['message']||rollbackError}. The recovery record was retained; do not clear site data.`,configurable:true});
       }
     }
     Object.defineProperty(failure,'studyDirectorCommittedDescription',{value:committedDescription,configurable:true});
@@ -1676,12 +1709,12 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
 // deleted moves to Recently deleted. What this device has that the backup
 // neither has nor deleted (notes, Saved Days, attachments, saved plans) stays
 // unless the person chooses to remove it. Recently deleted always stays.
-async function planReplacement(stored,parsed){
+async function planReplacement(stored:StoredCandidate|null|undefined,parsed:Parsed){
   const manifest=parsed.protectedCheckpointManifest,local=AppData.notes.normalizePayload(await AppData.notes.readFreshPayload());
   const target=AppData.notes.alignByTitle(parsed.data&&parsed.data.notes||{},(await AppData.deletionRecovery.notes()).map(entry=>entry.key));
-  const ids=(list,field)=>new Set((list||[]).map(entry=>String(entry&&entry[field]||'')));
+  const ids=<K extends string>(list:readonly Record<K,string>[]|null,field:K)=>new Set((list||[]).map(entry=>String(entry&&entry[field]||'')));
   const backupNoteDeletions=ids(manifest.noteDeletions,'key'),liveLocal=Object.keys(local).filter(key=>notesTrashKey(key));
-  const changed=liveLocal.filter(key=>target[key]&&String(target[key].text||'')!==String(local[key].text||'')),gone=liveLocal.filter(key=>!target[key]);
+  const changed=liveLocal.filter(key=>target[key]&&String(target[key].text||'')!==String(local[key]!.text||'')),gone=liveLocal.filter(key=>!target[key]);
   const deletedByBackup=gone.filter(key=>backupNoteDeletions.has(key)||!!target[notesTrashKey(key)]);
   const backupDates=ids(parsed.records,'date'),backupDayDeletions=ids(manifest.savedDayDeletions,'date');
   const days=((await AppData.dailyRecords.backupDates()).dates||[]).filter(date=>!backupDates.has(date)&&!backupDayDeletions.has(date));
@@ -1693,29 +1726,29 @@ async function planReplacement(stored,parsed){
   return freeze({local,target,changed:freeze(changed),deletedByBackup:freeze(deletedByBackup),ancestor,plansOverLimit:!!backupPlans&&backupPlans.length+plans.length>100,extras:freeze({notes:freeze(gone.filter(key=>!deletedByBackup.includes(key))),days:freeze(days),assets:freeze(assets),plans:freeze(plans)})});
 }
 // "2 notes (“Geography”, “Essay”), 1 Saved Day (12 Oct)": counts, naming the first few.
-function replacementExtrasSummary(plan){
-  const extras=plan.extras,dayLabel=date=>{const at=new Date(date+'T12:00:00');return Number.isFinite(at.getTime())?at.toLocaleDateString(undefined,{day:'numeric',month:'short'}):date;};
-  const part=(items,one,many,name)=>{if(!items.length)return '';const names=name?items.slice(0,3).map(name):[];return `${items.length} ${items.length===1?one:many}${names.length?` (${names.join(', ')}${items.length>3?` and ${items.length-3} more`:''})`:''}`;};
-  return [part(extras.notes,'note','notes',key=>`“${String(plan.local[key].label||'Untitled')}”`),part(extras.days,'Saved Day','Saved Days',dayLabel),part(extras.assets,'attachment','attachments'),part(extras.plans,'saved plan','saved plans')].filter(Boolean).join(', ');
+function replacementExtrasSummary(plan:Replacement){
+  const extras=plan.extras,dayLabel=(date:string)=>{const at=new Date(date+'T12:00:00');return Number.isFinite(at.getTime())?at.toLocaleDateString(undefined,{day:'numeric',month:'short'}):date;};
+  const part=(items:readonly string[],one:string,many:string,name?:((value:string)=>string))=>{if(!items.length)return '';const names=name?items.slice(0,3).map(name):[];return `${items.length} ${items.length===1?one:many}${names.length?` (${names.join(', ')}${items.length>3?` and ${items.length-3} more`:''})`:''}`;};
+  return [part(extras.notes,'note','notes',key=>`“${String(plan.local[key]!.label||'Untitled')}”`),part(extras.days,'Saved Day','Saved Days',dayLabel),part(extras.assets,'attachment','attachments'),part(extras.plans,'saved plan','saved plans')].filter(Boolean).join(', ');
 }
 const REPLACEMENT_EXTRA_CHOICES=freeze([
   freeze({value:'keep',label:'Keep them',kind:'primary',description:'They stay on this device alongside the restored backup.'}),
   freeze({value:'remove',label:'Remove them',kind:'danger',description:'This device matches the backup exactly. Removed notes go to Recently deleted.'})
 ]);
-async function reviewReplacedNotes(plan,parsed,signal){
+async function reviewReplacedNotes(plan:Replacement,parsed:Parsed,signal:Signal){
   const {local,target,ancestor}=plan,conflicts=[];
   for(const key of plan.changed){
-    const mine=local[key],theirs=target[key],localValue=String(mine.text||''),incomingValue=String(theirs.text||''),shared=ancestor&&ancestor.notes&&ancestor.notes[key]||null;
+    const mine=local[key]!,theirs=target[key]!,localValue=String(mine.text||''),incomingValue=String(theirs.text||''),shared=ancestor&&ancestor.notes&&ancestor.notes[key]||null;
     if(shared&&shared.text===localValue)continue;
     conflicts.push(freeze({key,label:String(mine.label||key),localCandidateId:'local',incomingCandidateId:'incoming',localValue,incomingValue,incomingLabel:'This backup',ancestorAvailable:!!shared,ancestorValue:shared?shared.text:''}));
   }
   if(!conflicts.length)return freeze({});
-  const result=await NoteReconciliation.resolve(freeze({conflicts,incomingAssets:Array.isArray(parsed.importedAssets)?parsed.importedAssets:freeze([]),signal,startWith:'incoming'}));
+  const result=await NoteReconciliation.resolve(freeze({conflicts,incomingAssets:Array.isArray(parsed.importedAssets)?parsed.importedAssets as readonly ImportedAsset[]:freeze([]),signal,startWith:'incoming'}));
   if(!result)return null;
-  const notes=Object.create(null);
+  const notes:Record<string,NoteRecord>=empty();
   for(const conflict of conflicts){
     const text=String(result.notes?.[conflict.key]?.text??conflict.incomingValue);if(text===conflict.incomingValue)continue;
-    const mine=local[conflict.key],theirs=target[conflict.key];
+    const mine=local[conflict.key]!,theirs=target[conflict.key]!;
     notes[conflict.key]=freeze(text===conflict.localValue?mine:{...theirs,text,updatedAt:nextNoteRevision(mine,theirs)});
   }
   return freeze(notes);
@@ -1723,26 +1756,26 @@ async function reviewReplacedNotes(plan,parsed,signal){
 // The notes after a replace. A retired note keeps this device's copy in
 // Recently deleted unless the backup's deleted copy already holds it, or this
 // device had not changed it since the shared base.
-function replacementNotes(plan,reviewed,keepExtras){
+function replacementNotes(plan:Replacement,reviewed:Readonly<Record<string,NoteRecord>>|null,keepExtras:boolean){
   const {local,target,ancestor}=plan,notes={...target,...reviewed},retired=[];
-  const same=(a,b)=>!!a&&!!b&&String(a.text??'')===String(b.text??'')&&String(a.label??'')===String(b.label??'');
+  const same=(a:NoteFields|null,b:NoteFields|null|undefined)=>!!a&&!!b&&String(a.text??'')===String(b.text??'')&&String(a.label??'')===String(b.label??'');
   for(const key of [...plan.deletedByBackup,...(keepExtras?[]:plan.extras.notes)]){
-    const mine=local[key],trashKey=notesTrashKey(key),theirs=notes[trashKey];retired.push(key);
-    if(!String(mine.text||'').trim()||same(mine,theirs)||(theirs&&same(mine,ancestor&&ancestor.notes&&ancestor.notes[key])))continue;
+    const mine=local[key]!,trashKey=notesTrashKey(key),theirs=notes[trashKey];retired.push(key);
+    if(!String(mine.text||'').trim()||same(mine,theirs||null)||(theirs&&same(mine,ancestor&&ancestor.notes&&ancestor.notes[key])))continue;
     notes[trashKey]=freeze({...mine,key:trashKey,updatedAt:nextNoteRevision(mine,theirs)});
   }
-  if(keepExtras)for(const key of plan.extras.notes)notes[key]=local[key];
+  if(keepExtras)for(const key of plan.extras.notes)notes[key]=local[key]!;
   for(const [key,value] of Object.entries(local))if(!notesTrashKey(key)&&!notes[key])notes[key]=value;
   return freeze({notes:freeze(notes),retired:freeze(retired)});
 }
 // The backup with what this device keeps: its kept Saved Days, saved plans and
 // attachments, and every attachment the kept data uses, taken from the
 // verified safety snapshot of this device.
-function replacementSnapshot(parsed,journal,plan,notes,keepExtras){
+function replacementSnapshot(parsed:Parsed,journal:Parsed,plan:Replacement,notes:Readonly<Record<string,NoteRecord>>,keepExtras:boolean){
   const days=new Set(keepExtras?plan.extras.days:[]),plans=new Set(keepExtras?plan.extras.plans:[]);
   const records=freeze([...(parsed.records||[]),...(journal.records||[]).filter(record=>days.has(String(record&&record.date||'')))]);
   // Versions kept for review stay: the backup's and this device's together.
-  const pendingReviews=freeze(PendingReviewCodec.merge([journal.pendingReviews,parsed.pendingReviews],APP_LIMITS.maxPendingReviews).map(freeze));
+  const pendingReviews=freeze(PendingReviewCodec.merge([journal.pendingReviews,parsed.pendingReviews],APP_LIMITS.maxPendingReviews).map(value=>freeze(value)));
   let personal=parsed.importedPersonalData||null,assets=parsed.importedAssets;
   if(personal&&plans.size){const kept=(journal.importedPersonalData?.plans?.savedPlans||[]).filter(item=>plans.has(String(item&&item.id||'')));personal=freeze({...personal,plans:freeze({...personal.plans,savedPlans:freeze([...personal.plans.savedPlans,...kept])})});}
   {
@@ -1754,14 +1787,14 @@ function replacementSnapshot(parsed,journal,plan,notes,keepExtras){
 }
 // Deletion records after a replace: the backup's and this device's, for
 // whatever the result does not hold, plus what this replace removed.
-function mergedDeletions(field,limit,lists,present){
-  const byKey=new Map();
-  for(const list of lists)for(const entry of list||[]){const key=String(entry&&entry[field]||''),at=Date.parse(String(entry&&entry.deletedAt||''));if(!key||!Number.isFinite(at)||present(key))continue;const prior=byKey.get(key);if(!prior||at>Date.parse(prior.deletedAt))byKey.set(key,freeze({[field]:key,deletedAt:new Date(at).toISOString()}));}
+function mergedDeletions<K extends string>(field:K,limit:number,lists:readonly (readonly (Record<K,string>&{deletedAt:string})[])[],present:(key:string)=>boolean){
+  const byKey=new Map<string,Record<K,string>&{deletedAt:string}>();
+  for(const list of lists)for(const entry of list||[]){const key=String(entry&&entry[field]||''),at=Date.parse(String(entry&&entry.deletedAt||''));if(!key||!Number.isFinite(at)||present(key))continue;const prior=byKey.get(key);if(!prior||at>Date.parse(prior.deletedAt))byKey.set(key,freeze({[field]:key,deletedAt:new Date(at).toISOString()} as Record<K,string>&{deletedAt:string}));}
   return freeze([...byKey.values()].sort((a,b)=>Date.parse(b.deletedAt)-Date.parse(a.deletedAt)||a[field].localeCompare(b[field])).slice(0,limit).sort((a,b)=>a[field].localeCompare(b[field])));
 }
-function replacementDeletions(parsed,localState,snapshot,removed){
+function replacementDeletions(parsed:Parsed,localState:DeletionState,snapshot:Parsed,removed:{notes:readonly string[];days:readonly string[]}){
   const manifest=parsed.protectedCheckpointManifest,notes=snapshot.data.notes,dates=new Set(snapshot.records.map(record=>record.date)),assets=new Set((snapshot.importedAssets||[]).map(item=>item.assetId));
-  const now=new Date().toISOString(),fresh=(field,keys,lists)=>{const known=new Set(lists.flatMap(list=>(list||[]).map(entry=>String(entry&&entry[field]||''))));return keys.filter(key=>!known.has(key)).map(key=>({[field]:key,deletedAt:now}));};
+  const now=new Date().toISOString(),fresh=<K extends string>(field:K,keys:readonly string[],lists:readonly (readonly Record<K,string>[])[])=>{const known=new Set(lists.flatMap(list=>(list||[]).map(entry=>String(entry&&entry[field]||''))));return keys.filter(key=>!known.has(key)).map(key=>({[field]:key,deletedAt:now} as Record<K,string>&{deletedAt:string}));};
   const dayLists=[manifest.savedDayDeletions,localState.savedDays],noteLists=[manifest.noteDeletions,localState.notes];
   return freeze({
     savedDays:mergedDeletions('date',APP_LIMITS.maxImportRecords,[...dayLists,fresh('date',removed.days,dayLists)],date=>dates.has(date)),
@@ -1769,13 +1802,13 @@ function replacementDeletions(parsed,localState,snapshot,removed){
     attachments:mergedDeletions('assetId',Infinity,[manifest.attachmentDeletions,localState.attachments],id=>assets.has(id))
   });
 }
-async function restoreExactVersionWithOperation(candidate,operation,{confirmed=false,requireManaged=false}={}){
+async function restoreExactVersionWithOperation(candidate:Candidate|null,operation:ImportOperation,{confirmed=false,requireManaged=false}:RestoreOptions={}){
   const stored=candidate&&typeof candidate==='object'?inspectedBackups.get(candidate):null,snapshot=stored?candidateSnapshotState(stored):null,parsed=snapshot&&snapshot.parsed||null,provenance=snapshot&&snapshot.provenance||null,repositoryManifest=provenance&&provenance.repositoryManifest||null;
   const signal=operation&&operation.signal||stored&&stored.signal||null;
   if(!parsed)throw new Error('The selected backup is not a current verified Study Director backup.');
   if(parsed.noteScope)throw new Error('This backup version was read for one note only and cannot replace current data.');
-  if(requireManaged&&(!repositoryManifest||provenance.repositoryCommitted!==true))throw new Error('Replace current data is available here only for a verified Device Folder or Google Drive backup.');
-  const checkpointId=String(repositoryManifest&&repositoryManifest.checkpoint&&repositoryManifest.checkpoint.checkpointId||parsed.protectedCheckpointManifest.checkpointId||''),preview=candidate.preview||{};
+  if(requireManaged&&(!repositoryManifest||provenance!.repositoryCommitted!==true))throw new Error('Replace current data is available here only for a verified Device Folder or Google Drive backup.');
+  const checkpointId=String(repositoryManifest&&repositoryManifest.checkpoint&&repositoryManifest.checkpoint.checkpointId||parsed.protectedCheckpointManifest.checkpointId||''),preview=candidate!.preview;
   if(!checkpointId||checkpointId!==String(parsed.protectedCheckpointManifest.checkpointId||''))throw new Error('The selected backup identity is inconsistent.');
   throwIfImportCancelled(signal);
   OperationDiagnostics.mark('restore-preflight-start');
@@ -1795,7 +1828,7 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
       groups:extras?freeze([freeze({id:'extras',label:`Not in this backup · ${extras}`,defaultValue:'keep',description:'On this device, but neither in this backup nor deleted by it.',choices:REPLACEMENT_EXTRA_CHOICES})]):freeze([]),confirmLabel:'Replace current data',cancelLabel:'Cancel',caution:true,signal
     });
     if(!accepted)return cancelled;
-    keepExtras=accepted.extras!=='remove';
+    keepExtras=accepted['extras']!=='remove';
   }else if(extras){
     const choice=await choose({title:'Keep what isn’t in this backup?',message:`This device has ${extras} that this backup neither has nor deleted.`,details:['Everything else will match the backup. Notes the backup deleted move to Recently deleted.'],cancelLabel:'Cancel',choices:REPLACEMENT_EXTRA_CHOICES});
     if(!choice)return cancelled;
@@ -1806,7 +1839,7 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
   if(!reviewed)return cancelled;
   const {notes,retired}=replacementNotes(plan,reviewed,keepExtras),removed=freeze({notes:retired,days:keepExtras?freeze([]):plan.extras.days});
   throwIfImportAborted(signal);
-  return runRestoreMutation(stored,requireManaged?'restore-managed-version':'restore-file-version',async()=>{
+  return runRestoreMutation(stored!,requireManaged?'restore-managed-version':'restore-file-version',async()=>{
     OperationDiagnostics.mark('local-restore-mutation-enter');
     await ensureRestoreCapacity(parsed,preview);
     OperationDiagnostics.mark('restore-capacity-verified');
@@ -1831,7 +1864,7 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
       await AppData.restoreJournal.clear(restoreId);journalPrepared=false;clearFault();
       // A restored version is this device's own change: the base stays what
       // was last shared, so the next sync carries the restore to Drive.
-      const live=Object.keys(notes).filter(key=>notesTrashKey(key)).length,plural=(count,word)=>`${count} ${word}${count===1?'':'s'}`;
+      const live=Object.keys(notes).filter(key=>notesTrashKey(key)).length,plural=(count:number,word:string)=>`${count} ${word}${count===1?'':'s'}`;
       const summary=`✓ Backup restored · ${plural(restored.records,'Saved Day')} · ${plural(live,'Note')} · ${plural(restored.assets,'attachment')}${keepExtras&&extras?` · kept ${extras} not in the backup`:''}${retired.length?` · ${plural(retired.length,'note')} moved to Recently deleted`:''}. Final verification passed.`;
       restoreSurfaceStatus(stored,summary,true,'local-complete');
       return freeze({cancelled:false,mode:'restore-version',verified:true,changed:true,checkpointId,restored,summary});
@@ -1848,8 +1881,8 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
           Object.defineProperty(failure,'studyDirectorRollbackDescription',{value:'All restore changes were rolled back from the verified safety copy.',configurable:true});
           committedDescription='';
         }catch(rollbackError){
-          failClosed(`Interrupted restore recovery is required: ${rollbackError&&rollbackError.message||rollbackError}`);
-          Object.defineProperty(failure,'studyDirectorRollbackDescription',{value:`Automatic rollback also failed: ${rollbackError&&rollbackError.message||rollbackError}. The recovery record was retained; do not clear site data.`,configurable:true});
+          failClosed(`Interrupted restore recovery is required: ${rollbackError&&fields(rollbackError)['message']||rollbackError}`);
+          Object.defineProperty(failure,'studyDirectorRollbackDescription',{value:`Automatic rollback also failed: ${rollbackError&&fields(rollbackError)['message']||rollbackError}. The recovery record was retained; do not clear site data.`,configurable:true});
         }
       }
       Object.defineProperty(failure,'studyDirectorCommittedDescription',{value:committedDescription,configurable:true});
@@ -1857,24 +1890,24 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
     }finally{await Exports.run('file.release',{file:safetyFile.blob});}
   });
 }
-async function restoreManagedVersion(candidate,options={}){
+async function restoreManagedVersion(candidate:Candidate|null,options:RestoreOptions={}){
   const owned=!activeImportOperation,operation=activeImportOperation||beginImport();
   try{return await restoreExactVersionWithOperation(candidate,operation,{confirmed:options&&options.confirmed===true,requireManaged:true});}
-  finally{try{await candidate.release();}catch(error){AppDiagnostics.capture('backup.version-candidate-release',error,'warn');}if(owned)finishImport(operation);}
+  finally{try{await candidate!.release();}catch(error){AppDiagnostics.capture('backup.version-candidate-release',error,'warn');}if(owned)finishImport(operation);}
 }
-async function restoreStandaloneVersion(candidate,options={}){
+async function restoreStandaloneVersion(candidate:Candidate,options:RestoreOptions={}):Promise<RecoveryOutcome>{
   const owned=!activeImportOperation,operation=activeImportOperation||beginImport();
   try{
     const stored=inspectedBackups.get(candidate),snapshot=stored?candidateSnapshotState(stored):null,parsed=snapshot&&snapshot.parsed||null;
-    if(String(parsed&&parsed.captureAuthority||'')!=='canonical-complete'||!parsed.protectedCheckpointManifest)throw new Error('Authoritative replacement requires a current standalone backup with verified complete-capture authority. Use its current recovery choices instead.');
+    if(String(parsed&&parsed.captureAuthority||'')!=='canonical-complete'||!parsed?.protectedCheckpointManifest)throw new Error('Authoritative replacement requires a current standalone backup with verified complete-capture authority. Use its current recovery choices instead.');
     return await restoreExactVersionWithOperation(candidate,operation,{confirmed:options&&options.confirmed===true,requireManaged:false});
-  }finally{try{await candidate.release();}catch(error){AppDiagnostics.capture('backup.file-version-candidate-release',error,'warn');}if(owned)finishImport(operation);}
+  }finally{try{await candidate!.release();}catch(error){AppDiagnostics.capture('backup.file-version-candidate-release',error,'warn');}if(owned)finishImport(operation);}
 }
 async function recoverInterruptedRestore(){
   const traceId=OperationDiagnostics.start('startup-restore-recovery','Local safety journal');
   let durable;
   try{durable=await AppData.restoreJournal.read();}
-  catch(error){failClosed(error&&error.message||String(error));OperationDiagnostics.fail(error,{},traceId);throw error;}
+  catch(error){failClosed(String(error&&fields(error)['message']||error));OperationDiagnostics.fail(error,{},traceId);throw error;}
   if(!durable){clearFault();OperationDiagnostics.finish({recovered:false},traceId);return Object.freeze({recovered:false});}
   if(!appCanMutate()){
     failClosed('An interrupted restore is waiting for the tab that holds Study Director control. Reload after taking control before editing data.');
@@ -1892,30 +1925,30 @@ async function recoverInterruptedRestore(){
       recoveryNotice.finish({message:'Local recovery completed: the interrupted restore was rolled back and verified before Study Director became writable.',outcome:'local-recovery-completed'});
       OperationDiagnostics.finish({recovered:true},traceId);return Object.freeze({recovered:true});
     }catch(error){
-      recoveryNotice.finish({lifecycle:'failed',message:`Interrupted restore recovery could not finish: ${error&&error.message||error}. Preserve browser storage and retry recovery.`});
-      failClosed(`Interrupted restore recovery could not finish: ${error&&error.message||error}`);
+      recoveryNotice.finish({lifecycle:'failed',message:`Interrupted restore recovery could not finish: ${error&&fields(error)['message']||error}. Preserve browser storage and retry recovery.`});
+      failClosed(`Interrupted restore recovery could not finish: ${error&&fields(error)['message']||error}`);
       OperationDiagnostics.fail(error,{},traceId);throw error;
     }finally{await Exports.run('file.release',{file:durable.payload.blob});}
   }));
 }
-async function restoreBackupWithOperation(candidate,operation,options={}){
+async function restoreBackupWithOperation(candidate:Candidate,operation:ImportOperation,options:RestoreOptions={}):Promise<RecoveryOutcome>{
   const maxRebuilds=2,stored=candidate&&typeof candidate==='object'?inspectedBackups.get(candidate):null;
   for(let rebuild=0;;rebuild+=1){
     try{return await restoreBackupAttemptWithOperation(candidate,operation,options);}
     catch(error){
-      if(error?.code!=='STUDY_DIRECTOR_RECONCILIATION_STALE'||rebuild>=maxRebuilds)throw error;
+      if(fields(error)['code']!=='STUDY_DIRECTOR_RECONCILIATION_STALE'||rebuild>=maxRebuilds)throw error;
       throwIfImportAborted(operation&&operation.signal);
       restoreSurfaceStatus(stored,'Local data changed while differences were being reviewed. Rebuilding the comparison from the latest saved state…',true,'rebuild');
       await yieldImport(operation&&operation.signal);
     }
   }
 }
-async function restoreBackup(candidate,options={}){
+async function restoreBackup(candidate:Candidate,options:RestoreOptions={}){
   const owned=!activeImportOperation,operation=activeImportOperation||beginImport();
   try{return await restoreBackupWithOperation(candidate,operation,options);}
-  finally{try{await candidate.release();}catch(error){AppDiagnostics.capture('backup.candidate-release',error,'warn');}if(owned)finishImport(operation);}
+  finally{try{await candidate!.release();}catch(error){AppDiagnostics.capture('backup.candidate-release',error,'warn');}if(owned)finishImport(operation);}
 }
-async function importPortableBackup(ev){
+async function importPortableBackup(ev:Event&{target:HTMLInputElement}){
   if(activeImportOperation||localExportPromise||localExportRequest)return freeze({cancelled:true,reason:'busy'});
   if(!appCanMutate()){setLocalExportStatus('Study control is in another tab. Take control here before importing.',false);return;}
   const f=ev.target.files&&ev.target.files[0];if(!f)return;
@@ -1942,46 +1975,46 @@ async function importPortableBackup(ev){
     }
     finishPortablePresentation({outcome:'local-recovery-completed'});OperationDiagnostics.finish({cancelled:!!(result&&result.cancelled),mode,changed:!!(result&&result.changed)},traceId);return result;
   }catch(e){
-    const committedDescription=e&&e.studyDirectorCommittedDescription||'';
-    const rollbackDescription=e&&e.studyDirectorRollbackDescription||'';
+    const committedDescription=e&&fields(e)['studyDirectorCommittedDescription']||'';
+    const rollbackDescription=e&&fields(e)['studyDirectorRollbackDescription']||'';
     const partial=committedDescription?` ${committedDescription}; those completed changes were not rolled back.`:'';
-    const cancelled=e&&e.code==='STUDY_DIRECTOR_IMPORT_CANCELLED',reason=String(e&&e.message||e),message=(cancelled?'Import cancelled safely: ':'Import failed: ')+reason+partial+(rollbackDescription?' '+rollbackDescription:'');
+    const cancelled=e&&fields(e)['code']==='STUDY_DIRECTOR_IMPORT_CANCELLED',reason=String(e&&fields(e)['message']||e),message=(cancelled?'Import cancelled safely: ':'Import failed: ')+reason+partial+(rollbackDescription?' '+rollbackDescription:'');
     setLocalExportStatus(message,false);if(cancelled)OperationDiagnostics.finish({cancelled:true},traceId);else OperationDiagnostics.fail(e,{},traceId);
     finishPortablePresentation({message,lifecycle:cancelled?'cancelled':'failed'});
   }finally{
-    if(candidate&&!consumed)try{await candidate.release();}catch(error){AppDiagnostics.capture('backup.file-candidate-release',error,'warn');}
+    if(candidate&&!consumed)try{await candidate!.release();}catch(error){AppDiagnostics.capture('backup.file-candidate-release',error,'warn');}
     finishImport(operation);ev.target.value='';
   }
 }
 
 const controller=freeze({
-  createCheckpoint:(...args)=>track(()=>createCheckpoint(...args),true),
-  inspect:(...args)=>track(()=>inspectBackup(...args),true),
-  restore:(...args)=>track(()=>restoreBackup(...args),true),
-  downloadSafetyCopy:(...args)=>track(()=>downloadSafetyCopy(...args),true),
+  createCheckpoint:(...args:Parameters<typeof createCheckpoint>)=>track(()=>createCheckpoint(...args),true),
+  inspect:(...args:Parameters<typeof inspectBackup>)=>track(()=>inspectBackup(...args),true),
+  restore:(...args:Parameters<typeof restoreBackup>)=>track(()=>restoreBackup(...args),true),
+  downloadSafetyCopy:(...args:Parameters<typeof downloadSafetyCopy>)=>track(()=>downloadSafetyCopy(...args),true),
   // Explicit recovery hook for invalidating cached repository preparation state.
   invalidateRepositoryPreparation:()=>ManagedRepository.invalidatePreparation(),
   markCompleted:markBackupCompleted,
-  exportLocal:(...args)=>exportLocalBackup(...args),
-  importLocal:(...args)=>track(()=>importPortableBackup(...args),false,'file'),
+  exportLocal:(...args:Parameters<typeof exportLocalBackup>)=>exportLocalBackup(...args),
+  importLocal:(...args:Parameters<typeof importPortableBackup>)=>track(()=>importPortableBackup(...args),false,'file'),
   beginImport,
   cancelImport,
   cancelStandalone,
   finishImport,
   subscribeStatus,
-  recoverInterruptedRestore:(...args)=>track(()=>recoverInterruptedRestore(...args),true),
-  reviewKeptVersions:(...args)=>track(()=>reviewKeptVersions(...args),true),
+  recoverInterruptedRestore:(...args:Parameters<typeof recoverInterruptedRestore>)=>track(()=>recoverInterruptedRestore(...args),true),
+  reviewKeptVersions:(...args:Parameters<typeof reviewKeptVersions>)=>track(()=>reviewKeptVersions(...args),true),
   status
 });
 const repository=freeze({
   createPublication:ManagedRepository.createPublication,
-  publish:(...args)=>track(()=>ManagedRepository.publish(...args),true),
+  publish:<W,P,C,B,L>(history:readonly Manifest[],options:PublishOptions|undefined,transport:Transport<W,P,C,B,L>)=>track(()=>ManagedRepository.publish(history,options,transport),true),
   // Inline publication is used only when the caller already owns the outer export job.
   publishInline:ManagedRepository.publish,
   inspectManifest:ManagedRepository.inspectManifest,
   inspect:ManagedRepository.inspect,
   bringIn:controller.restore,
-  restoreVersion:(...args)=>track(()=>restoreManagedVersion(...args),true),
+  restoreVersion:(...args:Parameters<typeof restoreManagedVersion>)=>track(()=>restoreManagedVersion(...args),true),
   verifyCheckpoint:ManagedRepository.verifyCheckpoint,
   verifyObject:ManagedRepository.verifyObject,
   scrub:ManagedRepository.scrub,
@@ -1999,7 +2032,7 @@ const repository=freeze({
   // What this device last shared through Drive, and recording a version
   // placed there as shared.
   sharedBase:()=>AppData.reconciliationBase.read().catch(()=>null),
-  establishBase:checkpointId=>ManagedRepository.establishBase(checkpointId),
+  establishBase:(checkpointId:string)=>ManagedRepository.establishBase(checkpointId),
   spine:()=>ManagedRepository.spine()
 });
 return freeze({controller,repository});
@@ -2040,5 +2073,6 @@ if(!Object.isFrozen(BackupProviderRuntime))throw new Error('Backup provider runt
     });
   }
   return freeze({format:'study-director.backup-module',contractVersion:1,createRuntime});
-});
+};registry.define('backup',1,createModule);return createModule;
 })();
+export type BackupModule=ReturnType<typeof sdBackupFactory>;

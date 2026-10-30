@@ -15,7 +15,7 @@ import {testPendingReviewCodec,memoryPendingReviews,paragraphMerge} from '../../
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
 const read=relative=>readScript(path.join(ROOT,relative));
-for(const file of ['source/core/internal.js','source/core/operation-lifecycle.ts','source/core/persistence.ts','source/core/record-codecs.ts','source/core/backup-codec.ts','source/core/canonical.ts','source/core/reconciliation.ts','source/core/managed-repository.ts','source/core/repository-policy.ts','source/core/repository-background.ts','source/core/backup-provider.js','source/core/backup-capture.ts','source/core/backup.js']){
+for(const file of ['source/core/internal.js','source/core/operation-lifecycle.ts','source/core/persistence.ts','source/core/record-codecs.ts','source/core/backup-codec.ts','source/core/canonical.ts','source/core/reconciliation.ts','source/core/managed-repository.ts','source/core/repository-policy.ts','source/core/repository-background.ts','source/core/backup-provider.ts','source/core/backup-capture.ts','source/core/backup.ts']){
   vm.runInThisContext(read(file),{filename:file});
 }
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
@@ -119,7 +119,7 @@ let cancelDuringBatchOnce=false;
 let restoreJournal=null;
 let activeSessionBlocking=false;
 let selectIncomingSavedDay=false;
-let exportSaveStatus='downloaded',chooseSaveResult=()=>Promise.resolve(null);const chosenNames=[];
+let exportSaveStatus='downloaded',chooseSaveResult=()=>Promise.resolve(null),cancelExport=()=>{},cancelExportCalls=0;const exportProgress=[];const chosenNames=[];
 let currentFileJob=null;
 function exclusiveFileJob(operation,{wait=false}={}){
   if(currentFileJob){
@@ -173,7 +173,7 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
     personalSettle:async()=>true,personalExport:async()=>personalDataFixture,personalImport:async()=>true,personalVerify:async()=>true,storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async options=>{snapshotFenceOptions.push(Object.freeze({...options}));return options?.full===true?'full-stable':'fast-stable';},canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],scheduleRead:()=> '08:00 | 60 | Existing | work | Ethics | block | 1',
     installationId:()=> 'inst_device_a',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryNotes:async()=>[],deletionRecoveryReplaceNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>null,reconciliationBaseReadNotes:async()=>freeze({}),reconciliationBaseReadDays:async()=>freeze({}),...keptReviews.ports,reconciliationBaseWrite:async()=>true
   }),
-  exports:freeze({...testProcessing,followProtection:async()=>false,backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():file,unprotect:async blob=>({blob,encrypted:false}),check:()=>{},job:exclusiveFileJob,download:()=>({status:'downloaded'}),chooseSave:(filename,accept,options)=>{chosenNames.push(filename);assert.equal(options?.id,'study-director-backups');return chooseSaveResult();},save:async(file,handle,options)=>{assert.ok(file.blob.size>0,'A backup file must never receive an empty backup.');assert.equal(typeof options?.onProgress,'function');return handle?{status:'saved',filename:handle.name}:{status:exportSaveStatus};}}),
+  exports:freeze({...testProcessing,followProtection:async()=>false,cancel:()=>{cancelExportCalls++;cancelExport();},backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():file,unprotect:async blob=>({blob,encrypted:false}),check:()=>{},job:exclusiveFileJob,download:()=>({status:'downloaded'}),chooseSave:(filename,accept,options)=>{chosenNames.push(filename);assert.equal(options?.id,'study-director-backups');return chooseSaveResult();},save:async(file,handle,options)=>{assert.ok(file.blob.size>0,'A backup file must never receive an empty backup.');assert.equal(typeof options?.onProgress,'function');options.onProgress({loaded:file.blob.size,total:file.blob.size});exportProgress.push(backupPresentation.read('file')?.progress);return handle?{status:'saved',filename:handle.name}:{status:exportSaveStatus};}}),
   assets:freeze({get:async id=>{assetGetCalls+=1;return assetRows.some(row=>row.id===id)?(assetBlobOverrides.get(id)||duplicateAssetBlob):null;},put:async()=>true,keys:async()=>assetRows.map(row=>row.id),list:async()=>assetRows,importAll:async()=>0,restoreAll:async()=>true,removeMany:async()=>0,removeMetadata:async()=>0,scheduleMaintenance:()=>true}),
     codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec,pendingReview:pendingReviewCodec}),
     reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async({conflicts=[]})=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries(conflicts.map(item=>[item.key,freeze({text:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
@@ -274,8 +274,17 @@ assert.deepEqual({...backupCompletions[0].copy},{source:'file',sourceRevision:'2
 // there and read back is a verified copy of the data as of its capture.
 backupCompletions.length=0;chosenNames.length=0;chooseSaveResult=()=>Promise.resolve({name:'chosen.sdbackup'});
 const savedExport=await withoutFileJobDeadlock(()=>runtime.controller.exportLocal());
+assert.ok(exportProgress.some(progress=>progress?.stage==='export'&&progress.completedBytes===progress.totalBytes&&progress.totalBytes>0),'export progress must update the presentation without calling a missing renderer');
 assert.equal(savedExport.status,'saved');assert.match(chosenNames[0],/-study-director-backup-\d{4}-\d{2}-\d{2}\.sdbackup$/u);
 assert.equal(backupCompletions.length,1);assert.deepEqual({...backupCompletions[0].copy},{source:'file',sourceRevision:'2026-09-15T12:00:00.000Z',verified:true});
+// Cancellation reaches the declared export port while a standalone operation is pending.
+let rejectExportChoice;chooseSaveResult=()=>new Promise((_resolve,reject)=>{rejectExportChoice=reject;});
+cancelExport=()=>rejectExportChoice(Object.assign(new Error('cancelled'),{name:'AbortError'}));
+const pendingStandalone=runtime.controller.exportLocal();
+assert.equal(runtime.controller.status().standaloneExportActive,true);
+assert.equal(runtime.controller.cancelStandalone(),true);assert.equal(cancelExportCalls,1);
+assert.equal((await pendingStandalone).status,'cancelled');
+assert.equal(runtime.controller.status().standaloneExportActive,false);cancelExport=()=>{};
 // Closing the dialog cancels quietly: nothing is prepared or recorded.
 backupCompletions.length=0;chooseSaveResult=()=>Promise.reject(Object.assign(new Error('cancelled'),{name:'AbortError'}));
 assert.equal((await withoutFileJobDeadlock(()=>runtime.controller.exportLocal())).status,'cancelled');assert.equal(backupCompletions.length,0);

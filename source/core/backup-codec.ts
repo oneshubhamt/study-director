@@ -174,10 +174,10 @@ function normalizeCheckpointAttachmentDeletions(values:unknown){
 }
 function authorityMatches(input:unknown,expected:Readonly<Record<string,string>>){const value=input as Record<string,unknown>|null;return !!(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('|')===Object.keys(expected).sort().join('|')&&Object.entries(expected).every(([key,required])=>value[key]===required));}
 function validateCheckpointAuthority(value:unknown){if(!authorityMatches(value,CHECKPOINT_AUTHORITY))throw new Error('Checkpoint authority contract is invalid.');return CHECKPOINT_AUTHORITY;}
-function backupProtectedCheckpointManifest(plan:BackupPlan,checkpoint:CheckedCheckpoint){
+function backupProtectedCheckpointManifest(plan:BackupPlan,checkpointInput:unknown){
   const contract=DATA_CONTRACT.schemas.CheckpointProtectedManifest;
   if(!contract||contract.format!=='study-director.checkpoint-protected-manifest'||Number(contract.version)!==PROTECTED_MANIFEST_NOTE_NAMES_VERSION)throw new Error('Checkpoint protected-manifest contract is unavailable.');
-  validateCheckpointMetadata(checkpoint);
+  const checkpoint=validateCheckpointMetadata(checkpointInput);
   const sourceRevision=String(plan&&plan.sourceRevision||'');
   if(!Number.isFinite(Date.parse(sourceRevision)))throw new Error('Checkpoint source revision is invalid.');
   const savedDayDeletions=normalizeCheckpointSavedDayDeletions(plan&&plan.savedDayDeletions||[]),noteDeletions=normalizeCheckpointNoteDeletions(plan&&plan.noteDeletions||[]),attachmentDeletions=normalizeCheckpointAttachmentDeletions(plan&&plan.attachmentDeletions||[]);

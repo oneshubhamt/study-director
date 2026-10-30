@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const app=fs.readFileSync('source/app.html','utf8');
-const backup=fs.readFileSync('source/core/backup.js','utf8');
-const provider=fs.readFileSync('source/core/backup-provider.js','utf8');
+const backup=readScript('source/core/backup.ts');
+const provider=readScript('source/core/backup-provider.ts');
 const presentation=fs.readFileSync('source/core/backup-presentation.js','utf8');
 const device=readScript('source/core/device-backup.ts');
 const host=readScript('source/core/backup-recovery-host.ts');
@@ -38,19 +38,19 @@ assert.match(dataSurface,/id="security-storage-heading">Storage</u);assert.match
 assert.match(styles,/\.backup-advanced-disclosure>summary/u);assert.doesNotMatch(styles,/\.backup-recovery-/u,'obsolete Recovery & History styling must be removed');
 
 // The host draws Google Drive's row from the engine's status, like the Device Folder row.
-assert.doesNotMatch(provider,/document\.createElement\('button'\)|backup-provider-actions/u,'the engine reports status; it never draws location controls');
-assert.match(provider,/wasConnected:connectedOnceByProvider\.has\(selected\.id\),engineBusy:busy,/u,'location status carries connection history and whether another operation holds the engine');
+assert.doesNotMatch(provider,/document\s*\.createElement\s*\('button'\s*\)|backup-provider-actions/u,'the engine reports status; it never draws location controls');
+assert.match(provider,/wasConnected:connectedOnceByProvider\s*\.has\s*\(selected\s*\.id\s*\)\s*,engineBusy:busy\s*,/u,'location status carries connection history and whether another operation holds the engine');
 assert.match(app,/function renderDriveBackup\(\)\{[\s\S]*BackupProviderRuntime\.locationStatus\('google-drive'\)[\s\S]*BackupPresentation\.locationLabel\('google-drive',state\)/u,'Drive row must use the shared location presentation with connection history');
 assert.match(app,/BackupProviderRuntime\.subscribeStatus\(renderDriveBackup\)/u);
 assert.match(presentation,/if\(!state\.connected\)return state\.wasConnected\?'Signed out':'Off'/u,'shared row status must distinguish expired authorization from a never-connected provider');
 assert.match(app,/const label=state\.wasConnected\?'Reconnect':'Connect';connect\.hidden=connected[\s\S]*settings\.hidden=!connected/u,'expired Drive authorization must collapse stale backup/history/settings actions to one Reconnect action while never-connected Drive still offers Connect and Versions');
-assert.match(provider,/subscribeConnection:typeof config\.subscribeConnection==='function'\?config\.subscribeConnection:null/u);assert.match(provider,/connectedOnceByProvider=new Set\(\)/u,'provider UI must remember an authorization that was live in this tab so expiry can become Reconnect rather than a misleading fresh Connect state');assert.match(provider,/normalized\.subscribeConnection\)normalized\.subscribeConnection\(\(\)=>\{[^\n]*notifyStatus\(\)/u,'provider UI must subscribe to live authorization changes instead of waiting for the next user action');assert.match(app,/document\.addEventListener\('visibilitychange',\(\)=>\{if\(document\.hidden\)\{[^\n]*\}else BackupProviderRuntime\.refresh\(\);\}\);/u,'returning from a suspended mobile tab must synchronously re-evaluate token validity even if background timers were throttled');
+assert.match(provider,/subscribeConnection:typeof config\s*\.subscribeConnection\s*=\s*=\s*='function'\?config\s*\.subscribeConnection:null/u);assert.match(provider,/connectedOnceByProvider\s*=new Set\s*\(\s*\)/u,'provider UI must remember an authorization that was live in this tab so expiry can become Reconnect rather than a misleading fresh Connect state');assert.match(provider,/normalized\s*\.subscribeConnection\s*\)normalized\s*\.subscribeConnection\s*\(\s*\(\s*\)\s*=>\s*\{[^\n]*notifyStatus\s*\(\s*\)/u,'provider UI must subscribe to live authorization changes instead of waiting for the next user action');assert.match(app,/document\.addEventListener\('visibilitychange',\(\)=>\{if\(document\.hidden\)\{[^\n]*\}else BackupProviderRuntime\.refresh\(\);\}\);/u,'returning from a suspended mobile tab must synchronously re-evaluate token validity even if background timers were throttled');
 assert.match(dataSurface,/id="connect-drive-backup"[\s\S]*id="cancel-drive-backup"[\s\S]*id="drive-backup-settings"[^>]*data-action="toggle-backup-settings"/u,'the Drive row has the same parts as the Device Folder row: connect, cancel and settings');
 assert.match(dataSurface,/id="drive-backup-settings-panel"[\s\S]*id="disconnect-drive-backup"[^>]*data-action="disconnect-drive-backup"/u,'Drive settings open in place, as the Device Folder\'s do');
 assert.doesNotMatch(provider,/backup-provider-import|importLabel/u,'provider overlay must reuse the shared provider-scoped recovery host rather than a second import implementation');
-assert.match(provider,/async function bringInRepositoryProvider\(id,options=\{\}\)[\s\S]*checkpointId:String\(options&&options\.checkpointId\|\|''\)/u,'provider Combine must accept an explicitly selected provider checkpoint');
+assert.match(provider,/async function bringInRepositoryProvider\s*\(id\s*,options\s*=\s*\{\}\s*\)[\s\S]*checkpointId:String\s*\(options&&options\s*\.checkpointId\|\|''\s*\)/u,'provider Combine must accept an explicitly selected provider checkpoint');
 // Every restore names its version, chosen in Version History; no location has a picker of its own.
-assert.match(provider,/if\(!checkpointId&&!missingOnly\)throw new Error\('Choose a version to restore\. Nothing was changed\.'\);/u,'a restore without a chosen version stops before reading anything');
+assert.match(provider,/if\s*\(!checkpointId&&!missingOnly\s*\)throw new Error\s*\('Choose a version to restore\s*\. Nothing was changed\s*\.'\s*\);/u,'a restore without a chosen version stops before reading anything');
 assert.doesNotMatch(provider+device,/checkpoint-selection-start|repository\.choose|chooseCheckpoint/u);
 
 assert.match(host,/async function collectAll\(/u);
@@ -63,10 +63,10 @@ assert.match(app,/id="managed-version-history-progress"[\s\S]*id="managed-versio
 assert.match(host,/function setHistoryProgress[\s\S]*progressStage[\s\S]*progressDetail/u,'managed recovery progress must be rendered inside Version History rather than a generic page footer.');
 assert.match(styles,/\.managed-version-history\{position:fixed;inset:0;[\s\S]*margin:auto/u,'Version History must be explicitly centered as an application modal.');
 assert.match(host,/function close\(\)\{const \{dialog\}=elements\(\);if\(dialog\?\.open\)dialog\.close\(\);return true;\}/u,'Close must only dismiss Version History and must not cancel the active recovery.');
-assert.doesNotMatch(provider,/document\.|getElementById|classList|requestAnimationFrame/u,'the engine draws nothing: the host draws every location from its status and presentation events');
+assert.doesNotMatch(provider,/document\s*\.|getElementById|classList|requestAnimationFrame/u,'the engine draws nothing: the host draws every location from its status and presentation events');
 assert.doesNotMatch(app,/backup-provider-overlay|BackupProviderRuntime\.open\(/u,'there is no separate Drive dialog');
 assert.match(app,/'cancel-drive-backup': \(\)=>BackupProviderRuntime\.cancelForeground\(undefined,'google-drive'\)/u,'Drive Cancel stays coupled to the live foreground operation');
-assert.match(provider,/async function connectProvider\(selected\)[\s\S]*Promise\.all\(\[foreground\.settled,selected\.prepare\?selected\.prepare\(\):null\]\)[\s\S]*statusText\(''\);return true;/u,'Connect prepares sign-in alongside background work giving way, and a success leaves no message: the row says On');
+assert.match(provider,/async function connectProvider\s*\(selected\s*\)[\s\S]*Promise\s*\.all\s*\(\[foreground\s*\.settled\s*,selected\s*\.prepare\?selected\s*\.prepare\s*\(\s*\):null\]\s*\)[\s\S]*statusText\s*\(''\s*\);return true;/u,'Connect prepares sign-in alongside background work giving way, and a success leaves no message: the row says On');
 assert.match(app,/function renderBackupActions\(\)\{[\s\S]*recovering=rows\.some\(row=>row\.busy===true&&\['history','restore-version','bring-in','remove-version'\]\.includes[\s\S]*versions\.disabled=busy&&!recovering/u,'Version History must remain available to reattach to an active recovery operation.');
 assert.match(device,/async function refreshPermission\(\)[\s\S]*permission=await query\(\)[\s\S]*permissionNeeded\(\)/u,'Device Folder must re-check persisted directory permission without prompting automatically.');
 assert.doesNotMatch(device,/if\(handle\)\{[\s\S]{0,300}storage\.remove\(config\.metadataKey\)/u,'temporary Device Folder permission loss must never discard the configured directory handle.');
@@ -76,14 +76,14 @@ const deviceActivation=app.slice(app.indexOf('async function refreshDeviceBackgr
 assert.match(deviceActivation,/DeviceBackup\.refreshPermission\(\)/u,'foreground return must refresh Device Folder permission state without opening a permission prompt.');
 assert.doesNotMatch(deviceActivation,/requestPermission|DeviceBackup\.connect\(/u,'activation opportunities must not prompt for folder access.');
 
-assert.match(backup,/title:'Use this backup'/u);assert.match(backup,/cancelLabel:'Keep current'/u);assert.match(backup,/choices=\[restoreChoices\.missing,restoreChoices\.combine,\.\.\.\(exactCapable\?\[restoreChoices\.replace\]:\[\]\)\]/u);
-assert.match(backup,/checkboxes:\[\{id:'safetyCopy',label:'Download an extra standalone safety copy before applying'/u,'optional file safety copy must be a compact checkbox on the existing reconciliation surface');
-assert.doesNotMatch(backup,/id:'safetyCopy',label:'Optional extra backup copy'[\s\S]*choices:/u,'optional file safety copy must not render as another radio-choice conflict row');
-assert.match(backup,/if\(decisions\.safetyCopy===true\)/u,'checkbox must only trigger the optional standalone download while automatic rollback remains independent');
-assert.match(backup,/restoreStandaloneVersion\(candidate,\{confirmed:true\}\)/u,'standalone Replace must use exact verified restore');
-assert.match(backup,/restoreBackup\(candidate,\{missingOnly:mode==='missing'\}\)/u,'standalone Combine must keep the reconciliation engine');
-assert.match(backup,/exactCapable=captureAuthority==='canonical-complete'&&!!parsed&&!!parsed\.protectedCheckpointManifest/u,'standalone Replace must require current complete-capture authority rather than merely a protected manifest');
-assert.match(backup,/exactCapable\?'Choose how this backup should be applied\.':'This backup was saved while browser storage was failing/u,'verified rescue-partial standalone backups must remain recoverable without becoming exact-replacement authority');
+assert.match(backup,/title:'Use this backup'/u);assert.match(backup,/cancelLabel:'Keep current'/u);assert.match(backup,/choices\s*=\[restoreChoices\s*\.missing\s*,restoreChoices\s*\.combine\s*,\s*\.\s*\.\s*\.\s*\(exactCapable\?\[restoreChoices\s*\.replace\]:\[\]\s*\)\]/u);
+assert.match(backup,/checkboxes:\[\s*\{id:'safetyCopy'\s*,label:'Download an extra standalone safety copy before applying'/u,'optional file safety copy must be a compact checkbox on the existing reconciliation surface');
+assert.doesNotMatch(backup,/id:'safetyCopy'\s*,label:'Optional extra backup copy'[\s\S]*choices:/u,'optional file safety copy must not render as another radio-choice conflict row');
+assert.match(backup,/if\s*\(decisions\['safetyCopy'\]\s*=\s*=\s*=true\s*\)/u,'checkbox must only trigger the optional standalone download while automatic rollback remains independent');
+assert.match(backup,/restoreStandaloneVersion\s*\(candidate\s*,\s*\{confirmed:true\}\s*\)/u,'standalone Replace must use exact verified restore');
+assert.match(backup,/restoreBackup\s*\(candidate\s*,\s*\{missingOnly:mode\s*=\s*=\s*='missing'\}\s*\)/u,'standalone Combine must keep the reconciliation engine');
+assert.match(backup,/exactCapable\s*=captureAuthority\s*=\s*=\s*='canonical-complete'&&!!parsed&&!!parsed\s*\.protectedCheckpointManifest/u,'standalone Replace must require current complete-capture authority rather than merely a protected manifest');
+assert.match(backup,/exactCapable\?'Choose how this backup should be applied\s*\.':'This backup was saved while browser storage was failing/u,'verified rescue-partial standalone backups must remain recoverable without becoming exact-replacement authority');
 
 
 assert.match(app,/BackupProviderRuntime\.createProtectedSafety\(location\.id,purpose\)/u,'Clear Library must require a verified protected safety version at the connected backup location');

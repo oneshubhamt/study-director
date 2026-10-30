@@ -100,7 +100,7 @@ async function settleDeletionRecovery(){
 async function getBackupDailyRecordDates(){return AppData.dailyRecords.backupDates();}
 const LOGICAL_CHECKPOINT_CAPTURE_FORMAT='study-director.logical-checkpoint-capture',LOGICAL_CHECKPOINT_CAPTURE_VERSION=1;
 const logicalCheckpointGuards=new WeakMap<LogicalCapture,CaptureGuard>();
-function requireLogicalCheckpointCapture<T extends LogicalCapture>(capture:T){
+function requireLogicalCheckpointCapture<T extends {format:string;version:number;checkpoint:{createdAt:unknown;checkpointId:unknown};exportedAt:string;protectedCheckpointManifest:{checkpointId:unknown}}>(capture:T){
   if(!capture||!Object.isFrozen(capture)||capture.format!==LOGICAL_CHECKPOINT_CAPTURE_FORMAT||Number(capture.version)!==LOGICAL_CHECKPOINT_CAPTURE_VERSION)throw new TypeError('Logical checkpoint capture is invalid.');
   if(!capture.checkpoint||capture.checkpoint.createdAt!==capture.exportedAt)throw new Error('Logical checkpoint provenance is invalid.');
   if(!capture.protectedCheckpointManifest||capture.protectedCheckpointManifest.checkpointId!==capture.checkpoint.checkpointId)throw new Error('Logical checkpoint protected manifest is invalid.');

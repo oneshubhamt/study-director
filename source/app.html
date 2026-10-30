@@ -9111,7 +9111,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
   codecs:Object.freeze({activeSession:ActiveSessionCodec,backup:RuntimeBackupCodec,pendingReview:PendingReviewCodec}),
   reconciliation:Object.freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),
   noteReconciliation:Object.freeze({resolve:options=>withRichTextAssetMaintenancePaused(()=>NoteReconciliationUI.resolve(options)),merge:(base,local,incoming)=>RichTextApi.mergeThreeWay(base,local,incoming)}),
-  exports:Object.freeze({backgroundAvailable:backupBackgroundAvailability,protect:BackupProtection.protect,unprotect:BackupProtection.unprotect,followProtection:BackupProtection.follow,check:Exports.check,scope:operation=>AttachmentStorage.during(()=>Exports.scope(operation)),job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,download:Exports.download,chooseSave:Exports.chooseSave,save:Exports.save}),
+  exports:Object.freeze({backgroundAvailable:backupBackgroundAvailability,cancel:Exports.cancel,protect:BackupProtection.protect,unprotect:BackupProtection.unprotect,followProtection:BackupProtection.follow,check:Exports.check,scope:operation=>AttachmentStorage.during(()=>Exports.scope(operation)),job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,download:Exports.download,chooseSave:Exports.chooseSave,save:Exports.save}),
   session:Object.freeze({
     canMutate:()=>appCanMutate(),
     cancelLiveDraftSave:()=>{

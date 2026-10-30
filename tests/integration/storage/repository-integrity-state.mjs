@@ -85,9 +85,9 @@ await test('lost write ownership and results without repository identity fail cl
   await assert.rejects(h.context.updateRepositoryIntegrityTarget('device-folder',{status:'completed',complete:true}));assert.equal(h.state.durable,before);
 });
 await test('Drive executor quarantines confirmed corruption while retaining availability and yield progress',async()=>{
-  const source=fs.readFileSync('source/core/backup-provider.js','utf8'),start=source.indexOf('  async function runConfiguredIntegrityScrub('),end=source.indexOf('  async function backupRepositoryProvider(',start);
+  const source=readScript('source/core/backup-provider.ts'),start=source.indexOf('  async function runConfiguredIntegrityScrub('),end=source.indexOf('  async function backupRepositoryProvider(',start);
   let failure;const context={Object,String,freeze:Object.freeze,integrityScrubHooks:{},repositoryProviderObjectIds:rows=>Object.freeze([...new Set(rows)]),AppDiagnostics:{capture(){}},scrubRepositoryProvider:async()=>{throw failure;}};
-  vm.createContext(context);vm.runInContext(source.slice(start,end),context);
+  vm.createContext(context);vm.runInContext(source.match(/const fields=[^\n]+;/u)[0]+source.slice(start,end),context);
   for(const [code,name,status,quarantine] of [['DRIVE_TIMEOUT','Error','unavailable',false],['NotAllowedError','NotAllowedError','unavailable',false],['BACKUP_LOCKED','Error','unavailable',false],['REPOSITORY_INTEGRITY_CORRUPT','Error','failed',true],['REPOSITORY_OBJECT_MISSING','Error','failed',true],['REPOSITORY_INTEGRITY_BUDGET','AbortError','yielded',false]]){
     failure=Object.assign(new Error('test failure'),{code,name,repositoryObjectId:objectId('d'),repositoryScrubProgress:{cursor:objectId('e'),scanId,checked:1,quarantined:[objectId('c')]}});
     const result=await context.runConfiguredIntegrityScrub({id:'google-drive',repository:{}},{repositoryScope:'drive-one',skipObjectIds:[objectId('c')]});

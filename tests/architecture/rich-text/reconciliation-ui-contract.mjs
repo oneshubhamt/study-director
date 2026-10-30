@@ -1,10 +1,11 @@
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const read=file=>fs.readFileSync(file,'utf8');
 const editor=read('rich-text/editor.ts');
 const ui=read('source/core/reconciliation-ui.js');
-const backup=read('source/core/backup.js');
+const backup=readScript('source/core/backup.ts');
 const app=read('source/app.html');
 const styles=read('source/styles/core.css');
 const manifest=read('build/module-manifest.mjs');
@@ -32,10 +33,10 @@ assert.match(styles,/\.sd-note-reconcile-editors\{display:grid;grid-template-col
 assert.match(styles,/@media\(max-width:800px\).*\.sd-note-reconcile-editors\{grid-template-columns:1fr/s,'Mobile reconciliation must stack the editors.');
 
 const reconcileAt=backup.indexOf('await NoteReconciliation.resolve');
-const mutationBoundaryAt=backup.indexOf("runRestoreMutation(stored,'restore-backup'",reconcileAt);
+const mutationBoundaryAt=reconcileAt+backup.slice(reconcileAt).search(/runRestoreMutation\(stored\s*,'restore-backup'/u);
 const safetyAt=backup.indexOf('captureLocalSafetyCopy(stored',mutationBoundaryAt);
 assert.ok(reconcileAt>0&&mutationBoundaryAt>reconcileAt&&safetyAt>mutationBoundaryAt,'Scratch reconciliation must finish before the P4 managed mutation boundary and internal safety/journaled canonical mutation start.');
-assert.match(backup,/noteDecisionMap=noteSelections\(/,'Scratch decisions must flow into ResolvedPlan rather than writing notes directly.');
+assert.match(backup,/noteDecisionMap\s*=noteSelections\s*\(/,'Scratch decisions must flow into ResolvedPlan rather than writing notes directly.');
 assert.match(app,/ReconciliationUIModule\.createController/,'Host must compose the private reconciliation UI module explicitly.');
 assert.match(manifest,/id:'reconciliation-ui'/,'Reconciliation UI must be a declared private module.');
 assert.match(manifest,/backup:Object\.freeze\(\[[^\]]*'reconciliation-ui'/,'Backup runtime dependency must declare the reconciliation UI boundary.');

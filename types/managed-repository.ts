@@ -1,3 +1,4 @@
+import type {RecoveryOutcome,ManagedTransaction} from './backup-provider.ts';
 import type {BackupCodecModule} from '../source/core/backup-codec.ts';
 import type {BackupCaptureModule} from '../source/core/backup-capture.ts';
 import type {ExportsModule} from '../source/core/exports.ts';
@@ -10,7 +11,7 @@ import type {ExportProcessing,ProtectionOptions,ExportOptions} from './exports.t
 import type {AssetRow} from './asset-storage.ts';
 import type {WorkBudget} from './lifecycle.ts';
 import type {IntegrityState,VerificationInput,VerificationResult} from './integrity-continuation.ts';
-import type {RecoveryRun,Progress} from './backup-recovery-host.ts';
+import type {Progress} from './backup-recovery-host.ts';
 export type Fields=Record<string,unknown>;
 export type CaptureApi=ReturnType<BackupCaptureModule['create']>;
 type Protection=ReturnType<ExportsModule['createProtection']>;
@@ -30,9 +31,12 @@ export type Manifest={format:'study-director.backup-repository-checkpoint';versi
 export type IdentitySource=Pick<Manifest,'counts'|'protectedCheckpointManifest'|'objects'|'assets'>;
 export type Commit={format:'study-director.backup-repository-commit';version:1;checkpointId:string;exportedAt:string;sourceRevision:string;manifestVersion:number};
 export type CommitFile=Commit&{blob:Blob;size:number;digest:string;checkProtection?:Check|undefined;checkSource?:Check|undefined};
+export type RetentionRow={id:string;manifest:{version:number;exportedAt:string;retention:Pick<Retention,'role'|'protectedUntil'|'notesFingerprint'>&{calendar:Calendar|null};installationId?:string;checkpoint?:{originInstallationId:unknown}}};
+export type RetentionProof=Pick<Manifest,'version'|'checkpoint'|'exportedAt'|'sourceRevision'|'retention'|'objects'>&{installationId?:string};
+export type CleanupRow={id:string;manifest:RetentionProof};
 export type RepositoryRow={id:string;manifest:Manifest};
-export type Artifact={id:string;kind:string;createdAt?:string;modifiedAt?:string};
-export type CleanupInput<R extends RepositoryRow,A extends Artifact,O extends Artifact>={checkpoints:readonly R[];invalidCount?:number;ignoredCount?:number;unreadableCount?:number;overflow?:boolean;inventoryBeforeDelete?:boolean;blockObjectGc?:boolean;now?:Date;maxCheckpointDeletes?:number;maxObjectDeletes?:number;incompleteArtifacts?:readonly A[];workBudget?:Pick<WorkBudget,'check'|'advance'>;objectGraceBefore?:string;beginDeletion?():Promise<unknown>;deleteIncompleteArtifact(item:A):Promise<unknown>;deleteCheckpoint(row:R):Promise<unknown>;deleteObject(item:O):Promise<unknown>;listObjects():Promise<readonly O[]|{items:readonly O[];overflow?:boolean;invalidCount?:number}>;onError?(stage:string,error:unknown,item:R|A|O|null):void};
+export type Artifact={id:string;kind?:string;createdAt?:string;modifiedAt?:string};
+export type CleanupInput<R extends CleanupRow,A extends {kind:string},O extends Artifact>={checkpoints:readonly R[];invalidCount?:number;ignoredCount?:number;unreadableCount?:number;overflow?:boolean;inventoryBeforeDelete?:boolean;blockObjectGc?:boolean;now?:Date;maxCheckpointDeletes?:number;maxObjectDeletes?:number;incompleteArtifacts?:readonly A[];workBudget?:Pick<WorkBudget,'check'|'advance'>|null;objectGraceBefore?:string;beginDeletion?:(()=>Promise<unknown>)|null;deleteIncompleteArtifact(item:A):Promise<unknown>;deleteCheckpoint(row:R):Promise<unknown>;deleteObject(item:O):Promise<unknown>;listObjects():Promise<readonly O[]|{items:readonly O[];overflow?:boolean;invalidCount?:number}>;onError?(stage:string,error:unknown,item:R|A|O|null):void};
 export type StructuredPayload=readonly DailyRecord[]|NoteRecord|ActiveSession|PersonalData|PendingReview|null;
 export type PreparationEntry=Member&{unit:string;present:boolean;members:readonly string[];assetIds:readonly string[]};
 export type PreparationIndex={version:number;epochToken:string;checkpointId:string;noteCount:number;noteKeyFingerprint:string;stamps:readonly PreparationStamp[];entries:readonly PreparationEntry[];baseCheckpointId?:string;sinceBase?:readonly string[]|null};
@@ -49,14 +53,14 @@ export type Copy={manifestBlob:Blob;checkpointId:string;current?:boolean;readObj
 export type PrepareOptions={interactive?:boolean;availableObjectIds?:ReadonlySet<string>|null;excludedObjectIds?:readonly string[]|null;retention?:RetentionInput|null;signal?:AbortSignal|null|undefined;baseUpdate?:boolean};
 export type PublishOptions=PrepareOptions&{continuation?:Continuation|null;copy?:Copy|null;shared?:boolean};
 export type PublicationContext<P,C>={prepared:Prepared;manifest:Manifest;sourceRevision:string;exportedAt:string;publication:P|{name:string;unchanged:true};commitReceipt:C|null;objectsWritten:number;objectsReused:number;writtenBytes:number;attachmentBytesWritten:number;unchanged?:boolean};
-export type Transport<W,P,C,B,L>={writeObject(entry:PreparedObject,prepared:Prepared):Promise<W>;writeManifest(file:ManifestFile,prepared:Prepared):Promise<P>;commit(file:CommitFile,prepared:Prepared,publication:P):Promise<C>;onCommitted?(context:PublicationContext<P,C>):Promise<B>;cleanup?(context:PublicationContext<P,C>&{committedResult:B|null}):Promise<L>;retainOnFailure?(error:unknown):Promise<boolean>;onFailure?(error:unknown,context:{prepared:Prepared|null;publication:P|null;commitReceipt:C|null;committed:boolean;retained:boolean;written:readonly {entry:PreparedObject;receipt:W}[]}):Promise<unknown>};
+export type Transport<W,P,C,B,L>={writeObject(entry:PreparedObject,prepared:Prepared):Promise<W>;writeManifest(file:ManifestFile,prepared:Prepared):Promise<P>;commit(file:CommitFile,prepared:Prepared,publication:P):Promise<C>;onCommitted?(context:PublicationContext<P,C>):Promise<B>;cleanup?(context:PublicationContext<P,C>&{committedResult:B|null}):Promise<L>;retainOnFailure?(error:unknown):boolean|Promise<boolean>;onFailure?(error:unknown,context:{prepared:Prepared|null;publication:P|null;commitReceipt:C|null;committed:boolean;retained:boolean;written:readonly {entry:PreparedObject;receipt:W}[]}):Promise<unknown>};
 export type ReadOptions=ProtectionOptions&{opened?:BlobLease|undefined};
 export type ScrubProgress={complete:boolean;cursor:string;recheckCursor:string;scanId:string;partial:IntegrityState|null;checked:number;checkedBytes:number;attempted:number;total:number;quarantined:readonly string[];corruption?:boolean};
 export type ScrubOptions={cursor?:string;recheckCursor?:string;scanId?:string;partial?:IntegrityState|null;recheck?:boolean;verifyIncremental?:((input:Omit<VerificationInput,'entry'|'signal'>&{entry:ObjectEntry;signal:AbortSignal|null})=>Promise<VerificationResult>)|null;readRange?:VerificationInput['readRange']|null;maxObjects?:number;maxBytes?:number;signal?:AbortSignal|null;skipObjectIds?:readonly string[]|null;onProgress?:((value:ScrubProgress)=>Promise<unknown>)|null;storedDigest?:((entry:ObjectEntry)=>string)|null};
 // Reconstructed records have verified bytes/identity, but remain unknown until
 // the canonical backup codec validates their domain fields.
 export type ReconstructedCapture=Omit<FullLogicalCapture,'dailyDocuments'|'noteItems'|'activeSession'|'personalData'|'pendingReviewItems'|'completeness'|'checkpoint'|'installationId'|'protectedCheckpointManifest'|'savedDayDeletions'|'noteDeletions'|'attachmentDeletions'>&{checkpoint:ManifestCheckpoint;installationId:unknown;protectedCheckpointManifest:ProtectedEnvelope;savedDayDeletions:readonly unknown[];noteDeletions:readonly unknown[];attachmentDeletions:readonly unknown[];dailyDocuments:readonly Fields[];noteItems:readonly Fields[];activeSession:unknown;personalData:unknown;pendingReviewItems:readonly Fields[];noteScope:string};
-export type InspectOptions=ProtectionOptions&{note?:string;committed?:boolean;sharedHead?:boolean;managedRecovery?:RecoveryRun|null;managedProgress?:((value:Progress)=>void)|null};
+export type InspectOptions=ProtectionOptions&{note?:string;committed?:boolean;sharedHead?:boolean;managedRecovery?:((transaction:ManagedTransaction&{kind?:string})=>Promise<RecoveryOutcome>)|null;managedProgress?:((value:Progress)=>void)|null};
 export type VerifiedOptions={signal:AbortSignal|null;sourceEncrypted:boolean;repositoryManifest:Manifest;verifiedSourceBytes:number;storedBytes:number};
 export interface ManagedRepositoryInput<I,V>{
  codec:ReturnType<BackupCodecModule['createBackupCodec']>;
@@ -64,6 +68,6 @@ export interface ManagedRepositoryInput<I,V>{
  persistence:{reconciliationBaseRead:Baseline['readHeader'];reconciliationBaseWrite:Baseline['write'];personalFingerprint(value:unknown):Promise<string>;dayFingerprints(records:readonly DailyRecord[]):Promise<Readonly<Record<string,BaselineDays>>>;sessionFingerprint(value:unknown):Promise<string>};
  assets:{get(id:string):Promise<Blob|null>;verifyAliases(rows:readonly AssetRow[],ids:readonly string[]):Promise<unknown>};
  files:Pick<Protection,'protect'|'unprotect'>&Pick<ExportProcessing,'run'|'scope'>;
- checkpoint:{capture:CaptureApi['captureLogicalCheckpoint'];beginPreparation:CaptureApi['beginManagedPreparationCapture'];readPreparationUnits:CaptureApi['readManagedPreparationUnits'];finalizePreparation:CaptureApi['finalizeManagedPreparationCapture'];establishPreparationBaseline:CaptureApi['establishManagedPreparationBaseline'];assertCurrent:CaptureApi['assertLogicalCheckpointCurrent'];currentImportSignal():AbortSignal|null;inspectVerifiedCapture(capture:ReconstructedCapture,options:VerifiedOptions&{release:Release;repositoryCommitted:boolean;sharedHead:boolean;managedRecovery:RecoveryRun|null;managedProgress:((value:Progress)=>void)|null}):Promise<I>;verifyVerifiedCapture(capture:ReconstructedCapture,options:VerifiedOptions):Promise<V>};
+ checkpoint:{capture:CaptureApi['captureLogicalCheckpoint'];beginPreparation:CaptureApi['beginManagedPreparationCapture'];readPreparationUnits:CaptureApi['readManagedPreparationUnits'];finalizePreparation:CaptureApi['finalizeManagedPreparationCapture'];establishPreparationBaseline:CaptureApi['establishManagedPreparationBaseline'];assertCurrent:CaptureApi['assertLogicalCheckpointCurrent'];currentImportSignal():AbortSignal|null;inspectVerifiedCapture(capture:ReconstructedCapture,options:VerifiedOptions&{release:Release;repositoryCommitted:boolean;sharedHead:boolean;managedRecovery:((transaction:ManagedTransaction&{kind?:string})=>Promise<RecoveryOutcome>)|null;managedProgress:((value:Progress)=>void)|null}):Promise<I>;verifyVerifiedCapture(capture:ReconstructedCapture,options:VerifiedOptions):Promise<V>};
  domain:{clampText(value:unknown,max:number):string};environment:{throwIfAborted(signal?:AbortSignal|null):void;yieldTask(options?:{priority:'background'}):Promise<unknown>};diagnostics:{capture(scope:string,error:unknown,level:'warn'):void}};
 }

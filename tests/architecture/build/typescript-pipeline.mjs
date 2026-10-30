@@ -1,4 +1,3 @@
-import {readScript} from '../../../build/source-script.mts';
 import {PRODUCTION_LIMITS} from '../../../contracts/production-limits.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

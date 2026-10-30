@@ -28,7 +28,7 @@ export type BatchOptions={bumpRevision?:boolean;ownershipToken?:WriteToken|null;
 export type MaintenanceOptions={force?:boolean;check?:()=>void;workBudget?:{check():void;advance():void}|undefined};
 export type MaintenanceResult={status:'skipped';reason:string;lastRun?:string}|{status:'completed';version:number;completedAt:string}|{status:'yielded';reason:unknown;phase:number}|{status:'failed';reason:unknown};
 export type WindowOptions={limit?:number;windowDays?:number;from?:string;to?:string};
-export type ImportOptions={signal?:AbortSignal;onProgress?:(value:Readonly<{committed:number;total:number;batches:number}>)=>void;yieldControl?:()=>Promise<void>};
+export type ImportOptions={signal?:AbortSignal|null|undefined;onProgress?:(value:Readonly<{committed:number;total:number;batches:number}>)=>void;yieldControl?:()=>Promise<void>};
 export type CanonicalReadOptions={requireCanonical?:boolean};
 export type MetadataFields=Partial<Record<'format'|'version'|'token'|'committedAt'|'unit'|'updatedAt'|'counter'|'status'|'completedAt'|'date'|'deletedAt'|'key'|'assetId'|'savedPlans'|'defaultId',unknown>>;
 // These validators accept numeric/string coercion for operational wire fields.

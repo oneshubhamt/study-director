@@ -69,3 +69,25 @@ const deletedDays:Promise<{date:string;deletedAt:string}[]>=repositories.deletio
 void repositories.dailyRecords.documents([12]);
 // @ts-expect-error -- write authority cannot be replaced by a token-shaped string.
 void repositories.planData.writeDraft('plan',{ownershipToken:'primary'});
+
+
+// Phase 4 orchestration must preserve verified domain and transport distinctions.
+import type {BackupRuntimeInput,Candidate} from '../backup.ts';
+import type {RepositoryTransport} from '../backup-provider.ts';
+import type {Manifest,RetentionProof} from '../managed-repository.ts';
+declare const backupPorts:BackupRuntimeInput['ports'];
+declare const retentionProof:RetentionProof;
+// @ts-expect-error -- a retention proof cannot be restored as a complete manifest.
+const restoreManifest:Manifest=retentionProof;void restoreManifest;
+// @ts-expect-error -- callers cannot fabricate an inspected candidate from a preview.
+const unverifiedCandidate:Candidate={preview:{exportedAt:'2026-10-30T00:00:00.000Z'}};void unverifiedCandidate;
+declare const transport:RepositoryTransport;
+const whole=transport.download({kind:'object',id:'object'});
+const range=transport.download({kind:'object',id:'object'},{offset:0,length:32});
+void whole;void range;
+// @ts-expect-error -- range requests require a length as well as an offset.
+void transport.download({kind:'object',id:'object'},{offset:0});
+// @ts-expect-error -- cancellation is a required executable export port.
+const missingCancel:BackupRuntimeInput['ports']['exports']={...backupPorts.exports,cancel:undefined};void missingCancel;
+// @ts-expect-error -- a note review cannot hold a personal-data payload.
+const wrongReview:PendingReview={version:1,id:'review',subject:'note',ref:'note',keptAt:'',kept:{version:2,plans:{draft:null,savedPlans:[],defaultId:null},preferences:{}},base:null,resolvedAt:''};void wrongReview;

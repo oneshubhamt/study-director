@@ -17,8 +17,8 @@ console.log(JSON.stringify({status:'PASS',boundary:'attachment-references',hostC
 
 { // backup-surface-boundary
 const app=fs.readFileSync('source/app.html','utf8');
-const backup=fs.readFileSync('source/core/backup.js','utf8');
-const provider=fs.readFileSync('source/core/backup-provider.js','utf8');
+const backup=readScript('source/core/backup.ts');
+const provider=readScript('source/core/backup-provider.ts');
 const styles=fs.readFileSync('source/styles/core.css','utf8');
 
 const applicable=app.match(/function applicableNotesForTask\(t\)\{[\s\S]*?\n\}/u)?.[0]||'';
@@ -32,8 +32,8 @@ assert.ok(exportFn,'exportPortableBackup must remain present');
 assert.match(exportFn,/setLocalExportStatus\(message/u,'successful standalone download feedback must stay on the standalone backup surface');
 assert.match(exportFn,/message=cancelled\?'Backup export cancelled\.'[\s\S]*setLocalExportStatus\(message,cancelled\)/u,'standalone export cancellation and failures must stay on the standalone backup surface');
 assert.doesNotMatch(exportFn,/setStatus\('library-status'/u,'standalone export must not leak its routine status to the bottom-of-Library global status surface');
-assert.doesNotMatch(backup,/Exports\.status\(\)/u,'Backup runtime must not depend on the restricted Exports port exposing internal coordinator status');
-assert.doesNotMatch(backup,/document\.|getElementById/u,'the backup runtime draws nothing: the app draws the file row from its status');
+assert.doesNotMatch(backup,/Exports\s*\.status\s*\(\s*\)/u,'Backup runtime must not depend on the restricted Exports port exposing internal coordinator status');
+assert.doesNotMatch(backup,/document\s*\.|getElementById/u,'the backup runtime draws nothing: the app draws the file row from its status');
 assert.match(app,/if\(cancel\)cancel\.hidden=!\(exporting\|\|Exports\.status\(\)\.fileBusy\);/u,'one renderer decides the file row Cancel from export and file-processor state');
 
 
@@ -43,11 +43,11 @@ assert.doesNotMatch(app,/BackupProtection\.refresh\(\)\.catch\(error=>setStatus\
 assert.doesNotMatch(app,/'backup-protection':[\s\S]*?setStatus\('library-status'/u,'backup-encryption action errors must stay beside Backup encryption');
 const libraryStatusWrites=[...backup.matchAll(/setStatus\('library-status'/gu)];
 assert.equal(libraryStatusWrites.length,0,'backup runtime must use scoped presentation for startup recovery as well as foreground operations');
-assert.match(backup,/presentation\.begin\('file','startup-recovery',[^\n]*surfaceId:'library-status'/u,'startup recovery retains its existing quiet Library surface');
-assert.match(backup,/setLocalExportStatus\('Cancelling backup import safely/u,'standalone cancellation must stay on standalone backup surface');
-assert.match(backup,/else setLocalExportStatus\(message\)/u,'standalone import batch progress must stay on standalone backup surface');
-assert.match(backup,/setLocalExportStatus\(message,ok\);return false;/u,'standalone deep restore status must stay on standalone backup surface');
-assert.match(provider,/BackupController\.cancelImport\(reason,freeze\(\{announce:false\}\)\)/u,'managed-provider cancellation must not leak into standalone or global Library status');
+assert.match(backup,/presentation\s*\.begin\s*\('file'\s*,'startup-recovery'\s*,[^\n]*surfaceId:'library-status'/u,'startup recovery retains its existing quiet Library surface');
+assert.match(backup,/setLocalExportStatus\s*\('Cancelling backup import safely/u,'standalone cancellation must stay on standalone backup surface');
+assert.match(backup,/else setLocalExportStatus\s*\(message\s*\)/u,'standalone import batch progress must stay on standalone backup surface');
+assert.match(backup,/setLocalExportStatus\s*\(message\s*,ok\s*\);return false;/u,'standalone deep restore status must stay on standalone backup surface');
+assert.match(provider,/BackupController\s*\.cancelImport\s*\(reason\s*,freeze\s*\(\s*\{announce:false\}\s*\)\s*\)/u,'managed-provider cancellation must not leak into standalone or global Library status');
 
 console.log(JSON.stringify({noteReadOnly:true,standaloneStatusLocal:true,libraryFallbackRetained:true,backupProtectionStatusLocal:true,managedCancellationLocal:true},null,2));
 }

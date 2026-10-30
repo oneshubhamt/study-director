@@ -201,7 +201,7 @@ const createModule=(input:BackgroundModuleInput)=>{
     if(!input.coordinator||input.coordinator.format!=='study-director.repository-background-coordinator'||input.coordinator.contractVersion!==1)throw new TypeError('Repository maintenance scheduler coordinator is invalid.');
     if(!input.intent||input.intent.format!=='study-director.repository-maintenance-intent'||input.intent.contractVersion!==1)throw new TypeError('Repository maintenance scheduler intent is invalid.');
     for(const key of ['capture','execute','isAvailable','isBusy','report'] as const)if(typeof input[key]!=='function')throw new TypeError('Repository maintenance scheduler port is invalid.');
-    let requestGeneration=0,deferredRequest:DeferredRequest|null=null,retainedObservation:{observation:RepositoryObservation|null;delay:number;scope:string}|null=null;
+    let requestGeneration=0,deferredRequest:DeferredRequest|null=null,retainedObservation:{observation:RepositoryObservation|null;delay:number;scope:string|null}|null=null;
     const nowMs=()=>input.coordinator.now();
     function emit(phase:string,details:Readonly<Record<string,unknown>>={}){try{input.report(freeze({phase:String(phase||''),at:new Date(nowMs()).toISOString(),...details}));}catch(error){try{input.capture('report',error);}catch{}}}
     function schedule(delay:number|undefined,trigger='scheduled',mode:ScheduleMode='earliest'){return job.schedule(Math.max(1000,Number(delay)||1000),trigger,mode);}

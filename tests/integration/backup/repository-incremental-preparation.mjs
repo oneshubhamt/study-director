@@ -7,7 +7,7 @@ import vm from 'node:vm';
 import {createProcessingEngine} from '../../helpers/file-processing.mjs';
 import {testPendingReviewCodec,memoryPendingReviews,paragraphMerge} from '../../helpers/pending-review-codec.mjs';
 
-for(const file of ['source/core/internal.js','source/core/operation-lifecycle.ts','source/core/canonical.ts','source/core/record-codecs.ts','source/core/reconciliation.ts','source/core/managed-repository.ts','source/core/repository-policy.ts','source/core/repository-background.ts','source/core/backup-provider.js','source/core/backup-capture.ts','source/core/backup.js'])vm.runInThisContext(readScript(file),{filename:file});
+for(const file of ['source/core/internal.js','source/core/operation-lifecycle.ts','source/core/canonical.ts','source/core/record-codecs.ts','source/core/reconciliation.ts','source/core/managed-repository.ts','source/core/repository-policy.ts','source/core/repository-background.ts','source/core/backup-provider.ts','source/core/backup-capture.ts','source/core/backup.ts'])vm.runInThisContext(readScript(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const freeze=Object.freeze,CanonicalModule=registry.require('canonical',1),ManagedRepositoryModule=registry.require('managed-repository',1),RepositoryPolicyModule=registry.require('repository-policy',1),RepositoryBackgroundModule=registry.require('repository-background',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})),BackupProviderModule=registry.require('backup-provider',1,freeze({repositoryPolicy:RepositoryPolicyModule})),BackupCaptureModule=registry.require('backup-capture',1),BackupModule=registry.require('backup',1,freeze({backupCapture:BackupCaptureModule,backupProvider:BackupProviderModule,canonical:CanonicalModule,managedRepository:ManagedRepositoryModule,repositoryBackground:RepositoryBackgroundModule})),ReconciliationModule=registry.require('reconciliation',1,freeze({canonical:CanonicalModule}));
 const processing=createProcessingEngine(),documentStub=freeze({getElementById:()=>null,addEventListener:()=>{},createElement:()=>({click(){},remove(){}}),createDocumentFragment:()=>({appendChild(){}}),body:freeze({appendChild(){}})}),noop=()=>{};
@@ -23,7 +23,7 @@ const BackupCodec=freeze({
 });
 const ActiveSessionCodec=freeze({sanitizeImportedActiveSession:value=>value,sanitizeCurrent:value=>value});
 const exportsPort=freeze({followProtection:async()=>false,
-  backgroundAvailable:()=>true,protect:async(file)=>freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),unprotect:async file=>freeze({blob:file,encrypted:false}),check:()=>{},scope:operation=>operation(),job:operation=>operation(),
+  cancel:()=>{},backgroundAvailable:()=>true,protect:async(file)=>freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),unprotect:async file=>freeze({blob:file,encrypted:false}),check:()=>{},scope:operation=>operation(),job:operation=>operation(),
   run:async(type,data,options)=>{if(type==='file.release')return true;return processing.run(type,data,options?.progress);},download:async()=>{},chooseSave:()=>{},save:async()=>({status:'saved'})
 });
 const token=value=>Number(value).toString(16).padStart(32,'0').slice(-32);
