@@ -1,14 +1,13 @@
 Promotion QA request
 
-Request: final-full-promotion-uncontended-rerun-2026-10-30
-Source/test revision: 9c62a925cdc4029f51a6a6c4f070ef78f2a57005 (request commit changes only this QA request file)
+Request: full-qa-current-fixes-2026-10-30
+Requested by repository owner to run complete QA of the current-fixes branch.
 
-Rerun the complete Promotion QA without changing product code or performance budgets.
+Source/test revision: 1f368fccb5591bb8ca7dd2c6a221fd4fde67b2d4
+Scope:
+- Run entire Promotion QA (fast correctness, risk coverage, mutation, AST branch-edge coverage, non-browser release checks, complete Chromium browser certification, built-runtime coverage).
+- Run the existing independent Insights performance samples and unchanged product performance budget.
+- Do not change application source, tests, QA thresholds, deployment, or workflows.
+- Report genuine failures and infrastructure variability separately.
 
-Reason:
-- The immediately preceding run passed the complete main Promotion job, including hermetic correctness, risk coverage, mutation certification, branch-edge coverage, non-browser release certification, and complete browser/built-runtime coverage.
-- Only the three-sample Insights performance gate failed.
-- No runtime or Insights source changed since the preceding run whose Insights gate passed; its uncontended samples completed in 639.9 ms and 865 ms against the unchanged 1000 ms budget.
-- Keep the existing budget unchanged and require the workflow's normal one-of-three uncontended sample gate.
-
-This is the final full certification rerun for the current source/test state.
+This file is the documented on-demand trigger for Promotion QA on current-fixes.
