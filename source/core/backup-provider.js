@@ -216,9 +216,9 @@ registry.define('backup-provider',1,input=>{
     if(typeof onProgress==='function')try{onProgress(freeze({stage:String(stage||'working'),message:String(message||''),ok:ok!==false,...details}));}catch(error){AppDiagnostics.capture('backup-provider.recovery-progress',error,'warn');}
   }
   function setBusy(next){busy=!!next;notifyStatus();}
-  function beginForeground(selected,externalSignal=null){
+  function beginForeground(selected,externalSignal=null,{respectBackgroundSuspension=false}={}){
     if(foregroundController)return null;
-    const background=providerBackground(selected),scope=background.beginForeground({externalSignal,cancelCode:'PROVIDER_FOREGROUND_CANCELLED',cancelMessage:'Backup operation was cancelled.'});if(!scope)return null;
+    const background=providerBackground(selected),scope=background.beginForeground({externalSignal,cancelCode:'PROVIDER_FOREGROUND_CANCELLED',cancelMessage:'Backup operation was cancelled.',respectBackgroundSuspension});if(!scope)return null;
     foregroundController=scope.controller;
     let released=false;
     return freeze({signal:scope.signal,settled:scope.settled,release:()=>{
@@ -888,7 +888,7 @@ registry.define('backup-provider',1,input=>{
       const quarantinedObjectIds=integrityScrubHooks?await integrityScrubHooks.quarantine(selected.id):[],entries=RepositoryCheckpointPipeline.projectHistory(Object.freeze(retained.map(row=>Object.freeze({id:row.id,manifest:row.manifest}))),Object.freeze({id:selected.id,label:selected.label}),{quarantinedObjectIds});
       clearRecentHistory(selected);
       // The version sync waited on is gone: sync looks again at once.
-      if(selected.shared&&syncState(selected).newer===requested){newerVersionGone(selected);syncState(selected).behind=true;schedulePendingProviderBackup(selected,1000);}
+      if(selected.shared&&syncState(selected).newer===requested){newerVersionGone(selected);syncState(selected).behind=true;schedulePendingProviderBackup(selected,1000,{trigger:'newer-version-removed'});}
       return freeze({removed:true,checkpointId:requested,kind:safety?'safety':'unreadable',gcRemoved:Number(cleanup.gcRemoved)||0,warning:String(cleanup.warning||''),entries});
     }finally{if(maintenanceLease)await endRepositoryMaintenance(selected,maintenanceLease);}
   }
@@ -1147,40 +1147,41 @@ registry.define('backup-provider',1,input=>{
   }
   async function settlePublishedSessionClaim(selected,current,{signal=null}={}){
     if(!current||current.claim.state==='released')return false;
+    const attemptRevision=canonicalConvergenceRevision();
     try{
       const claim=current.claim,released=freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken:claim.sessionToken,epoch:claim.epoch+1,state:'released',ownerToken:claim.ownerToken,revision:claim.revision,observedOwnerToken:claim.ownerToken,observedRevision:claim.revision,claimedAt:new Date().toISOString()});
       await writeRepositorySessionClaim(selected,released,{signal});return true;
     }catch(error){
       AppDiagnostics.capture('backup-provider.session-claim-settle',error,'warn');
       const owner=providers.get(safeId(selected&&selected.id))||selected;
-      try{if(pendingRetryHooks){if(!await pendingRetryState(owner))await markPendingRetry(owner);schedulePendingProviderBackup(owner,PROVIDER_CONVERGENCE_BUSY_RETRY_MS);}}catch(retryError){AppDiagnostics.capture('backup-provider.session-claim-settle-retry',retryError,'warn');}
+      try{if(pendingRetryHooks){if(!await pendingRetryState(owner))await markPendingRetry(owner);schedulePendingProviderBackup(owner,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{attemptRevision,trigger:'session-claim-settle'});}}catch(retryError){AppDiagnostics.capture('backup-provider.session-claim-settle-retry',retryError,'warn');}
       return false;
     }
   }
 
   // Take in Drive's newest version quietly. What it cannot settle on its own
   // waits for the person; their Combine of that version resumes the sync.
-  function catchUpSharedProvider(selected,head){
+  function catchUpSharedProvider(selected,head,attemptRevision=canonicalConvergenceRevision()){
     const state=syncState(selected);if(state.catching)return false;state.catching=true;notifyStatus();
     setTimeout(async()=>{
       const summary=presentation.begin(selected.id,'sync',{id:'external-sync',label:selected.label,foreground:false,message:`Syncing with ${selected.label}…`});
-      try{settleCatchUp(selected,head.item.id,await syncRepositoryProvider(selected.id,{checkpointId:head.item.id,presentation:summary}),summary);}
+      try{settleCatchUp(selected,head.item.id,await syncRepositoryProvider(selected.id,{checkpointId:head.item.id,presentation:summary,respectBackgroundSuspension:true}),summary,attemptRevision);}
       catch(error){
         // Another device set or changed the backup password: sync waits for it.
         if(['BACKUP_LOCKED','BACKUP_AUTH_FAILED'].includes(String(error?.code||''))){state.password=head.item.id;summary.finish({message:`${selected.label} needs this profile’s backup password.`,outcome:'sync-password'});presentation.notice(selected.id,'sync-password',`Your backup password was set or changed on another device. Enter it to keep syncing with ${selected.label}.`);}
         // A version this build cannot read is not retried: sync waits on it.
         else if(error?.repositoryUnreadable===true||String(error?.code||'')==='BACKUP_ENCRYPTION_UNSUPPORTED'){markUnreadable(selected,head.item.id);summary.finish({message:`${selected.label} has a version this app can’t read.`,outcome:'sync-newer'});waitForNewerVersion(selected,head.item.id);}
-        else{AppDiagnostics.capture('backup-provider.sync-catch-up',error,'warn');state.behind=true;state.failed=true;summary.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'failed'});schedulePendingProviderBackup(selected,nextConvergenceRetryDelay(selected,{sync:true}),{backoff:true});}
+        else{AppDiagnostics.capture('backup-provider.sync-catch-up',error,'warn');state.behind=true;state.failed=true;summary.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'failed'});schedulePendingProviderBackup(selected,nextConvergenceRetryDelay(selected,{sync:true}),{backoff:true,attemptRevision,trigger:'catch-up-failed'});}
       }
       finally{state.catching=false;notifyStatus();}
     },0);
     return true;
   }
-  function settleCatchUp(selected,headId,result,summary){
+  function settleCatchUp(selected,headId,result,summary,attemptRevision=''){
     const state=syncState(selected);
     if(result&&result.cancelled&&result.reason==='needs-decision'){state.review=headId;summary?.finish({message:`${selected.label} has changes that need your review.`,outcome:'sync-review'});presentation.notice(selected.id,'sync-review',`${selected.label} has changes from another device that need your review.`);}
-    else if(result&&result.cancelled){state.behind=true;summary?.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'cancelled'});schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS);}
-    else{state.review='';state.password='';state.failed=false;state.syncedAt=new Date().toISOString();resetConvergenceRetry(selected);presentation.resolve(selected.id,'sync-review');presentation.resolve(selected.id,'sync-password');summary?.finish({message:`Synced with ${selected.label}.`,outcome:'sync-complete'});if(automaticWaiting(selected))schedulePendingProviderBackup(selected,1000);}
+    else if(result&&result.cancelled){state.behind=true;summary?.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'cancelled'});schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{attemptRevision,trigger:'catch-up-cancelled'});}
+    else{state.review='';state.password='';state.failed=false;state.syncedAt=new Date().toISOString();resetConvergenceRetry(selected);presentation.resolve(selected.id,'sync-review');presentation.resolve(selected.id,'sync-password');summary?.finish({message:`Synced with ${selected.label}.`,outcome:'sync-complete'});if(automaticWaiting(selected))schedulePendingProviderBackup(selected,1000,{trigger:'catch-up-complete'});}
   }
   // The person enters the password the newest version needs; the sync then
   // takes that version in and keeps the password for this device.
@@ -1238,9 +1239,9 @@ registry.define('backup-provider',1,input=>{
         // deadline; Drive asking the Device Folder to go first does not.
         const due=automaticDueAt(selected),now=String(trigger||'').startsWith('flush:');
         if(!owed&&!syncDue&&!now&&due>Date.now()+50){job.schedule(due-Date.now(),'automatic','earliest');return freeze({status:'idle',reason:'not-due'});}
-        if(busy||sync?.catching){schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS);return freeze({status:'deferred',reason:'busy'});}
+        if(busy||sync?.catching){schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{trigger:'provider-busy'});return freeze({status:'deferred',reason:'busy'});}
         scope=await background.beginBackground('convergence',{budgetMs:0,preemptCode:'REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage:'An automatic backup yielded to a foreground operation.'});
-        if(!scope){schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS);return freeze({status:'deferred',reason:'background-busy'});}
+        if(!scope){schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{trigger:'background-busy'});return freeze({status:'deferred',reason:'background-busy'});}
         traceId=OperationDiagnostics.start('provider-convergence',selected.label,{provider:selected.id,background:true,trigger:String(trigger||'scheduled'),nextEligibleAt:eligibleAt,actionable:true});
         OperationDiagnostics.mark('background-transition',background.transition('convergence','scheduled','running',{reason:String(trigger||'scheduled'),nextEligibleAt:eligibleAt,actionable:true}),traceId);
         OperationDiagnostics.mark('convergence-eligibility',{provider:selected.id,nextEligibleAt:eligibleAt,actionable:true},traceId);
@@ -1254,7 +1255,7 @@ registry.define('backup-provider',1,input=>{
           const ahead=await sharedAhead(inventory,selected),finish=(status,reason)=>{OperationDiagnostics.mark('background-transition',background.transition('convergence','running',status,{reason,actionable:false}),traceId);OperationDiagnostics.finish({status,reason},traceId);return freeze({status,reason});};
           if(ahead?.unreadable){waitForNewerVersion(selected,ahead.item.id);return finish('idle','needs-update');}
           newerVersionGone(selected);
-          if(ahead&&sync.review!==ahead.item.id){scope.release();scope=null;catchUpSharedProvider(selected,ahead);return finish('deferred','catching-up');}
+          if(ahead&&sync.review!==ahead.item.id){scope.release();scope=null;catchUpSharedProvider(selected,ahead,attemptRevision);return finish('deferred','catching-up');}
           if(ahead)return finish('idle','needs-review');
           if(sync.review){sync.review='';presentation.resolve(selected.id,'sync-review');}
           sync.failed=false;sync.syncedAt=new Date().toISOString();notifyStatus();
@@ -1309,14 +1310,12 @@ registry.define('backup-provider',1,input=>{
   // location while recovery still holds the background suspension. Their
   // existing convergence jobs arm when that suspension is released, so every
   // destination independently publishes the resulting canonical local state.
-  function queueOtherLocations(selected){
+  async function queueOtherLocations(selected){
     const out=[];
     for(const other of providers.values()){
-      if(other.id===selected.id||!providerConnected(other)||!automaticEnabled(other))continue;
-      let queued=false;
-      try{const job=providerConvergenceJob(other);if(job)queued=job.schedule(1000,'managed-recovery','earliest')!==false;}
-      catch(error){AppDiagnostics.capture('backup-provider.recovery-peer-convergence',error,'warn');}
-      out.push(freeze({id:other.id,label:other.label,shared:other.shared===true,status:queued?'pending':'failed',queued}));
+      if(other.id===selected.id||!automaticEnabled(other))continue;
+      const retryQueued=await markPendingRetry(other),scheduled=retryQueued&&schedulePendingProviderBackup(other,1000,{trigger:'managed-recovery-peer'});
+      out.push(freeze({id:other.id,label:other.label,shared:other.shared===true,status:retryQueued?'pending':'failed',queued:retryQueued,scheduled:scheduled===true,connected:providerConnected(other)}));
     }
     return freeze(out);
   }
@@ -1329,12 +1328,12 @@ registry.define('backup-provider',1,input=>{
     }else{
       providerBackground(selected).clearScheduled('convergence');
       await clearPendingRetry(selected);
-      const scheduled=automaticNeeded(selected)&&schedulePendingProviderBackup(selected,1000);
-      source=scheduled
-        ?freeze({status:'pending',checkpoint:String(sourceCheckpoint||''),reason:'scheduled',unchanged:false,retryQueued:false,scheduled:true,shared:selected.shared===true})
-        :freeze({status:'completed',checkpoint:String(sourceCheckpoint||''),unchanged:true,retryQueued:false,scheduled:false,shared:selected.shared===true});
+      if(automaticNeeded(selected)){
+        const retryQueued=await markPendingRetry(selected),scheduled=retryQueued&&schedulePendingProviderBackup(selected,1000,{trigger:'managed-recovery-source-current'});
+        source=freeze({status:retryQueued?'pending':'failed',checkpoint:String(sourceCheckpoint||''),reason:retryQueued?(scheduled?'scheduled':'managed-recovery'):'automatic retry could not be queued',unchanged:false,retryQueued,scheduled:scheduled===true,shared:selected.shared===true});
+      }else source=freeze({status:'completed',checkpoint:String(sourceCheckpoint||''),unchanged:true,retryQueued:false,scheduled:false,shared:selected.shared===true});
     }
-    return freeze({source,others:queueOtherLocations(selected)});
+    return freeze({source,others:await queueOtherLocations(selected)});
   }
   async function managedProviderPresent(selected,result,{sourceNeeded=true,sourceCheckpoint=''}={}){
     const convergence=await queueResolvedProviderState(selected,result,{sourceNeeded,sourceCheckpoint}),sourceReady=convergence.source.status==='completed'||convergence.source.status==='pending'&&(convergence.source.retryQueued===true||convergence.source.scheduled===true);
@@ -1625,7 +1624,7 @@ registry.define('backup-provider',1,input=>{
     const {scheduleMaintenance:_scheduleMaintenance,...saveOptions}=options&&typeof options==='object'?options:{};
     if(saveOptions.retention?.role!=='before-restore'&&providerPublications.get(selected.id)?.continuation.status().pending)await markPendingRetry(selected);
     let pending=null,pendingRead=true;try{pending=await pendingRetryState(selected);}catch{pendingRead=false;}
-    const saved=await saveRepositoryProvider(selected,{...saveOptions,pendingIntent:pending});presentation.condition(selected.id,'permission','');if(pendingRead&&publicationCoversPending(saved,pending))await clearPendingRetry(selected,pending);else schedulePendingProviderBackup(selected);return saved;
+    const saved=await saveRepositoryProvider(selected,{...saveOptions,pendingIntent:pending});presentation.condition(selected.id,'permission','');if(pendingRead&&publicationCoversPending(saved,pending))await clearPendingRetry(selected,pending);else schedulePendingProviderBackup(selected,1000,{trigger:'pending-intent-still-open'});return saved;
   }
   async function loadRepositoryProviderCandidate(id,operation,options={}){
     const selected=providers.get(safeId(id));if(!selected||!selected.repository)throw new Error('Repository backup provider is unavailable.');
@@ -1731,7 +1730,7 @@ registry.define('backup-provider',1,input=>{
     if(!selected)return false;
     statusSource=selected.id;
     if(busy){statusText('Another backup operation is still in progress…');return false;}
-    const traceId=OperationDiagnostics.start('provider-backup',selected.label,{provider:selected.id}),foreground=beginForeground(selected);
+    const attemptRevision=canonicalConvergenceRevision(),traceId=OperationDiagnostics.start('provider-backup',selected.label,{provider:selected.id}),foreground=beginForeground(selected);
     if(!foreground){OperationDiagnostics.finish({status:'skipped',reason:'busy'},traceId);return false;}
     beginForegroundView(selected,'backup',`Connecting to ${selected.label}…`);setBusy(true);providerProgress(selected,'authorize',`Connecting to ${selected.label}…`);
     try{
@@ -1750,7 +1749,7 @@ registry.define('backup-provider',1,input=>{
         OperationDiagnostics.finish({status:'pending',reason:'needs-update'},traceId);statusText(text,false);finishForegroundView(selected,{message:text,ok:false,lifecycle:'cancelled'});return false;
       }
       if(behind||code==='REPOSITORY_SYNC_TURN'){
-        if(behind)syncState(selected).behind=true;await markPendingRetry(selected).catch(()=>{});schedulePendingProviderBackup(selected,behind?1000:PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{backoff:!behind});
+        if(behind)syncState(selected).behind=true;await markPendingRetry(selected).catch(()=>{});schedulePendingProviderBackup(selected,behind?1000:PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{backoff:!behind,attemptRevision,trigger:behind?'shared-behind':'sync-turn'});
         const text=behind?`Taking in newer changes from ${selected.label} first; your backup follows.`:`Another device is saving to ${selected.label}; your backup goes next.`;
         OperationDiagnostics.finish({status:'pending',reason:behind?'behind':'turn'},traceId);statusText(text,true);finishForegroundView(selected,{message:text,ok:true,lifecycle:'cancelled'});return false;
       }
@@ -1767,7 +1766,7 @@ registry.define('backup-provider',1,input=>{
     const selected=providers.get(safeId(id));
     if(!selected||!selected.shared||!selected.repository)return freeze({cancelled:true,reason:'unavailable'});
     if(!providerConnected(selected))return freeze({cancelled:true,reason:'not-connected'});
-    const traceId=OperationDiagnostics.start('provider-sync',selected.label,{provider:selected.id}),foreground=beginForeground(selected,options&&options.signal||null);
+    const traceId=OperationDiagnostics.start('provider-sync',selected.label,{provider:selected.id}),foreground=beginForeground(selected,options&&options.signal||null,{respectBackgroundSuspension:options&&options.respectBackgroundSuspension===true});
     if(!foreground){OperationDiagnostics.finish({status:'skipped',reason:'busy'},traceId);return freeze({cancelled:true,reason:'busy'});}
     const operation=BackupController.beginImport(),cancelImport=()=>operation.cancel?.('Synchronization was cancelled.');
     if(foreground.signal.aborted)cancelImport();else foreground.signal.addEventListener('abort',cancelImport,{once:true});

@@ -4738,6 +4738,11 @@ async function reconcileChangeClock(){
   if(latest===recorded)return false;
   writeStorageHealth({lastLocalSaveAt:latest});return true;
 }
+let startupChangeClockReady=null;
+function reconcileStartupChangeClock(){
+  if(!startupChangeClockReady)startupChangeClockReady=reconcileChangeClock();
+  return startupChangeClockReady;
+}
 async function installVerifiedRecoveryFreshness(){
   verifiedRecoveryState=await readVerifiedRecoveryState();
   BackupProviderRuntime.refresh();return verifiedRecoveryState;
@@ -9307,8 +9312,12 @@ async function importBackupAttachments(items,{signal,replace=false}={}){
   });
 }
 function currentBackupSourceRevision(){
-  const stored=AppData.local.getJson(STORAGE_KEYS.storageHealth,null);
-  return stored&&stored.lastLocalSaveAt||readStorageHealth().lastLocalSaveAt||'';
+  const stored=AppData.local.getJson(STORAGE_KEYS.storageHealth,null),memory=readStorageHealth();let latest='',latestAt=NaN;
+  for(const value of [stored&&stored.lastLocalSaveAt,memory.lastLocalSaveAt]){
+    const revision=String(value||''),at=Date.parse(revision);
+    if(Number.isFinite(at)&&(!Number.isFinite(latestAt)||at>latestAt)){latest=revision;latestAt=at;}
+  }
+  return latest;
 }
 async function legacyBackupSnapshotRevision(){
   return JSON.stringify([await AppData.dailyRecords.datasetRevision(),await AppData.deletionRecovery.savedDays(),await AppData.deletionRecovery.notes(),await AppData.deletionRecovery.attachments(),richAssetReferenceRevision,await PlanData.exportData({flush:false}),document.getElementById('plan-input')?.value,await AttachmentStorage.list()]);
@@ -10908,7 +10917,7 @@ function installApplicationDomBindings(){
   NativeCapabilities.install();
   void BackupProtection.refresh().catch(setBackupProtectionSurfaceError);
   BackupProviderRuntime.subscribeStatus(renderDriveBackup);renderDriveBackup();
-  void reconcileChangeClock().catch(()=>false).then(()=>DeviceBackup.install()).then(()=>installRepositoryIntegrityScrub()).catch(error=>AppDiagnostics.capture('backup.repository-integrity-install',error,'warn'));
+  void reconcileStartupChangeClock().then(()=>DeviceBackup.install()).then(()=>installRepositoryIntegrityScrub()).catch(error=>AppDiagnostics.capture('backup.repository-integrity-install',error,'warn'));
   updateFullscreenButton();
   PlanDraftEditor.install();
   UiTabRegistry.updateOrientation();
@@ -11011,6 +11020,9 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
         try{await AppData.mutationEpoch.reseed();backupFastFenceReady=true;}
         catch(error){AppDiagnostics.capture('startup.canonical-mutation-epoch',error,'warn');}
       }
+      // The durable mutation epoch must repair the fast mirror before the
+      // startup gate opens any automatic provider work.
+      await reconcileStartupChangeClock();
       resumeUnresolvedStorageReset();
       installBackgroundOwners();scheduleDataMaintenance();BackgroundOperations.wake('startup');installSessionWatch();void KeptVersions.refresh();UnsupportedData.announce();renderUnsupportedData();
       void Profiles.collect().then(result=>{if(result.error)AppDiagnostics.capture('profiles.collect',result.error,'warn');});askProfilePassword();

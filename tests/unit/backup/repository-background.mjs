@@ -57,6 +57,17 @@ assert.equal(module.maintenanceDefersAcrossObservation(freeze({reason:'publicati
 }
 
 {
+  const fake=clock(),bg=coordinator(fake),hold=bg.suspend('qa-hold');
+  assert.equal(bg.beginForeground({respectBackgroundSuspension:true}),null,'automatic foreground handoff must not enter while provider background is suspended');
+  const manual=bg.beginForeground();assert.ok(manual,'explicit foreground work still overrides a background suspension');assert.equal(manual.signal.aborted,false);manual.release();bg.resume(hold);
+
+  const automatic=bg.beginForeground({respectBackgroundSuspension:true});assert.ok(automatic);
+  const paused=bg.suspend('qa-update');assert.equal(automatic.signal.aborted,true,'a suspension that arrives after automatic foreground admission must pre-empt it');
+  let settled=false;paused.settled.then(()=>{settled=true;});await Promise.resolve();assert.equal(settled,false,'suspension settlement waits for the automatic foreground handoff to release');
+  automatic.release();await paused.settled;assert.equal(settled,true);bg.resume(paused);assert.equal(fake.pending().length,0);
+}
+
+{
   const fake=clock(),bg=coordinator(fake);let fired=0;const convergence=await bg.beginBackground('convergence');assert.ok(convergence);
   bg.schedule('maintenance',1000,()=>{fired+=1;});await fake.advance(1500);assert.equal(fired,0,'lower-priority scheduled work must not fire while a higher-priority background job owns the target');
   convergence.release();await fake.advance(0);assert.equal(fired,1,'deferred scheduled work must re-arm when the higher-priority owner releases');

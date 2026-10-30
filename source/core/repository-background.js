@@ -116,6 +116,10 @@ registry.define('repository-background',1,input=>{
     function resumeTimers(){if(foreground||suspensions.size)return false;for(const entry of scheduled.values())arm(entry);return true;}
     function suspend(reason='suspended'){
       const token=`bg_${(++suspensionSequence).toString(36)}_${nowMs().toString(36)}`,label=String(reason||'suspended'),waiting=[];suspensions.add(token);suspendTimers();
+      if(foreground?.respectBackgroundSuspension===true){
+        if(!foreground.controller.signal.aborted)foreground.controller.abort(backgroundAbort('REPOSITORY_BACKGROUND_SUSPENDED',`Automatic repository work paused (${label}).`));
+        waiting.push(foreground.settlement);
+      }
       for(const row of active.values()){if(!row.controller.signal.aborted)row.controller.abort(backgroundAbort(row.preemptCode,`${row.preemptMessage} (${label})`));waiting.push(row.settlement);}
       const settled=waitForSettlement(waiting);return freeze({token,reason:label,settled});
     }
@@ -142,14 +146,14 @@ registry.define('repository-background',1,input=>{
       const row={controller,settlement,preemptCode:String(preemptCode),preemptMessage:String(preemptMessage)};active.set(name,row);
       return freeze({job:name,signal:controller.signal,controller,settlement,workBudget,release:()=>{if(released)return;released=true;if(externalSignal)externalSignal.removeEventListener('abort',relay);if(active.get(name)===row)active.delete(name);resolveSettlement?.();resumeTimers();notifyRelease(name);}});
     }
-    function beginForeground({externalSignal=null,cancelCode='REPOSITORY_FOREGROUND_CANCELLED',cancelMessage='Repository foreground operation was cancelled.'}={}){
-      if(foreground)return null;suspendTimers();
+    function beginForeground({externalSignal=null,cancelCode='REPOSITORY_FOREGROUND_CANCELLED',cancelMessage='Repository foreground operation was cancelled.',respectBackgroundSuspension=false}={}){
+      const suspensionAware=respectBackgroundSuspension===true;if(foreground||suspensionAware&&suspensions.size)return null;suspendTimers();
       const controller=new TargetAbortController(),relay=()=>{if(!controller.signal.aborted)controller.abort(externalSignal?.reason instanceof Error?externalSignal.reason:backgroundAbort(cancelCode,cancelMessage));};
       if(externalSignal){if(externalSignal.aborted)relay();else externalSignal.addEventListener('abort',relay,{once:true});}
       const waiting=[];for(const row of active.values()){if(!row.controller.signal.aborted)row.controller.abort(backgroundAbort(row.preemptCode,row.preemptMessage));waiting.push(row.settlement);}
-      const settled=waitForSettlement(waiting,controller.signal);const row={controller};foreground=row;
+      const settled=waitForSettlement(waiting,controller.signal);let resolveRelease;const settlement=new Promise(resolve=>{resolveRelease=resolve;});let released=false;const row={controller,respectBackgroundSuspension:suspensionAware,settlement};foreground=row;
       const workBudget=Lifecycle.createWorkBudget({now:environment.now,check:()=>{if(controller.signal.aborted)throw controller.signal.reason;},yieldError:()=>backgroundAbort('REPOSITORY_MAINTENANCE_BUDGET','Repository cleanup will continue later.')});
-      return freeze({signal:controller.signal,controller,settled,workBudget,release:()=>{if(externalSignal)externalSignal.removeEventListener('abort',relay);if(foreground===row){foreground=null;resumeTimers();wake('foreground');}}});
+      return freeze({signal:controller.signal,controller,settled,workBudget,release:()=>{if(released)return;released=true;if(externalSignal)externalSignal.removeEventListener('abort',relay);if(foreground===row)foreground=null;resolveRelease?.();resumeTimers();wake('foreground');}});
     }
     function cancelForeground(error){if(!foreground||foreground.controller.signal.aborted)return false;foreground.controller.abort(error instanceof Error?error:backgroundAbort('REPOSITORY_FOREGROUND_CANCELLED',String(error||'Repository foreground operation was cancelled.')));return true;}
     async function preemptBackground(){const waiting=[];for(const row of active.values()){if(!row.controller.signal.aborted)row.controller.abort(backgroundAbort(row.preemptCode,row.preemptMessage));waiting.push(row.settlement);}if(waiting.length)await waitForSettlement(waiting);return waiting.length>0;}

@@ -157,6 +157,30 @@ const cases=[];
   cases.push('a failed sync catch-up retries on the backoff, not the 20-minute check');
 }
 {
+  // A canonical edit made while a quiet Drive catch-up is failing keeps its
+  // urgent deadline instead of being pushed behind the failed head's backoff.
+  const id='cp_'+'d'.repeat(32),item=kind=>freeze({kind,id,name:id+(kind==='commit'?'.sdcommit':'.sdcheckpoint'),size:100,createdAt:'2026-10-06T07:30:00.000Z',modifiedAt:'2026-10-06T07:30:00.000Z',remoteId:kind+'-revision'});
+  const reads=[];let t=null,changed=false;
+  t=fixture({covered:'2026-10-06T09:00:00.000Z',shared:true,
+    driveList:async({kind})=>({items:kind==='checkpoint'||kind==='commit'?[item(kind)]:[],overflow:false,ignored:0}),
+    driveDownload:async()=>{reads.push(t.clock.now());if(!changed){changed=true;t.change(true);}throw Object.assign(new Error('network down'),{code:'DRIVE_NETWORK'});}});
+  await tick(t,10*1000);
+  assert.equal(t.runtime.backgroundStatus().find(row=>row.job==='google-drive convergence').reason,'important-change','catch-up failure backoff must not replace a newer urgent revision');
+  const first=[...new Set(reads)].length;await tick(t,t.policy.automaticUrgentMs+5000);
+  assert.ok([...new Set(reads)].length>first,'the newer revision must get a catch-up opportunity before the old failure backoff');
+  cases.push('catch-up failure backoff preserves a newer canonical revision');
+}
+{
+  // A manual shared upload that loses its turn may discover a newer local edit
+  // during the attempt. That edit keeps its urgent deadline.
+  const t=fixture({covered:'2026-10-06T08:00:00.000Z',shared:true});await tick(t,1000);let first=true;
+  t.onPublication(async()=>{if(!first)return;first=false;await t.clock.advance(1000);t.change(true);throw Object.assign(new Error('another device is publishing'),{code:'REPOSITORY_SYNC_TURN'});});
+  assert.equal(await t.runtime.backup('google-drive'),false);
+  assert.equal(t.runtime.backgroundStatus().find(row=>row.job==='google-drive convergence').reason,'important-change','manual turn backoff must preserve the newer revision trigger');
+  await tick(t,t.policy.automaticUrgentMs+5000);assert.ok(t.publishedAt.length>=2,'newer local work must run before the turn retry deadline');
+  cases.push('manual shared turn backoff preserves a newer canonical revision');
+}
+{
   // Drive's newest version is one this app cannot read (from a newer Study
   // Director, or damaged). Sync reads it once, then waits: no retry ladder,
   // one notice, "Needs app update", and no upload over it. Once that version

@@ -341,3 +341,15 @@ Interactive reads may offer rescue data when browser storage fails. Destructive 
 Library clear captures the entire affected scope in a durable journal before changing it. Recovery uses that journal and verifies the restored canonical state before journal retirement. If verification cannot read the data, recovery remains pending rather than reporting success.
 
 Backup preparation accepts deletion reconciliation only when its boolean result is explicitly true. Both full and incremental preparation enforce that rule, including full captures whose other writers were already settled. Failed settlement can support a clearly labelled rescue export but cannot authorize a complete managed checkpoint or local restore preflight. A read-only export cannot settle deletions; it requires a canonical fast fence to claim complete state, otherwise deletion coverage remains uncertain.
+
+### 2026-10-30 correctness closure: source revision and provider convergence
+
+This pass closes the P1 source-revision weakness and the three P2 convergence gaps without introducing another scheduler, queue, repository format or storage authority.
+
+- **P1 source revision.** IndexedDB's canonical mutation epoch remains authoritative. The fast backup revision now selects the newest valid timestamp from the in-memory storage-health projection and its localStorage mirror, so a failed mirror write cannot hide a newer committed mutation in the same tab. Startup runs one shared change-clock reconciliation promise and awaits it before opening background-owner activation; Device Folder installation uses the same prerequisite.
+- **P2 revision-aware retry.** Catch-up and foreground shared-turn failure paths retain the canonical revision captured by the attempt. Same-revision backoff may replace its own deadline; a newer revision keeps an earlier urgent deadline. Secondary scheduling sites carry explicit trigger provenance instead of falling through to a generic pending-retry label.
+- **P2 suspension ownership.** Repository foreground admission has one opt-in suspension-aware mode used only by automatic Drive catch-up. A hold already in force blocks admission; a hold arriving after admission aborts that automatic handoff and waits for its actual release. Explicit user foreground work keeps its existing ability to pre-empt background work.
+- **P2 recovery durability.** Managed recovery writes the existing strict `managedProviderBackupPending` ledger for every configured automatic destination that owes the recovered canonical state, including temporarily disconnected peers. Each provider clears only the exact serviced request after verified publication. Explicit disconnect/forget continues to retire that provider's obligation.
+
+Deliberately deferred to the next pass: read-only maintenance-planning bounds, canonical-maintenance foreground-busy liveness cleanup, optional capture deduplication if measurement justifies it, and remaining low-value diagnostic/provenance polish.
+
