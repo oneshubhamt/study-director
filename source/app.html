@@ -3099,7 +3099,7 @@ function renderFileBackup(){
   const button=node('download-backup'),cancel=node('cancel-standalone-import'),importCancel=node('cancel-backup-import'),note=node('backup-file-status');
   if(button){button.disabled=exporting;button.setAttribute('aria-busy',exporting?'true':'false');button.textContent=exporting?'Preparing backup…':'Export backup…';}
   if(cancel)cancel.hidden=!(exporting||Exports.status().fileBusy);
-  if(importCancel)importCancel.hidden=!state.importActive;
+  if(importCancel)importCancel.hidden=!state.importHoldsBackground;
   if(note){const event=BackupPresentation.current('file'),message=BackupPresentation.summary(event);note.hidden=!message;if(note.textContent!==message)note.textContent=message;note.dataset.state=event?.severity==='error'?'error':'ok';}
 }
 // Each location row opens its settings in place: 'device' or 'drive'.
