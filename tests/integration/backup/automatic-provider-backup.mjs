@@ -158,19 +158,22 @@ const cases=[];
   cases.push('a failed sync catch-up retries on the backoff, not the 20-minute check');
 }
 {
-  // A canonical edit made while a quiet Drive catch-up is failing keeps its
-  // urgent deadline instead of being pushed behind the failed head's backoff.
+  // Force a sync-only catch-up first, then create an urgent canonical edit
+  // inside that catch-up. Its failure belongs to the older attempt revision,
+  // so that backoff must not replace the newer edit's urgent deadline.
   const id='cp_'+'d'.repeat(32),item=kind=>freeze({kind,id,name:id+(kind==='commit'?'.sdcommit':'.sdcheckpoint'),size:100,createdAt:'2026-10-06T07:30:00.000Z',modifiedAt:'2026-10-06T07:30:00.000Z',remoteId:kind+'-revision'});
   const reads=[];let t=null,changed=false,changedAt=NaN;
   t=fixture({covered:'2026-10-06T07:00:00.000Z',shared:true,
     driveList:async({kind})=>({items:kind==='checkpoint'||kind==='commit'?[item(kind)]:[],overflow:false,ignored:0}),
     driveDownload:async()=>{reads.push(t.clock.now());if(!changed){changed=true;await t.clock.advance(1);changedAt=t.clock.now();t.change(true);}throw Object.assign(new Error('network down'),{code:'DRIVE_NETWORK'});}});
-  await tick(t,10*1000);
+  assert.equal(t.runtime.scheduleSharedSync('google-drive','revision-aware-catch-up'),true);
+  await tick(t,t.policy.automaticUrgentMs+7000);
   const distinctReads=[...new Set(reads)];
-  assert.ok(Number.isFinite(changedAt)&&distinctReads.some(at=>at>changedAt&&at<=changedAt+t.policy.automaticUrgentMs+1000),'the newer revision must get a catch-up opportunity by its urgent deadline, before the earlier sync failure backoff can govern');
+  assert.ok(Number.isFinite(changedAt),'the canonical edit must occur inside the first catch-up attempt');
+  assert.ok(distinctReads.some(at=>at>changedAt&&at<=changedAt+t.policy.automaticUrgentMs+1000),'the newer revision must get another catch-up opportunity inside its urgent window rather than inherit the older attempt\'s backoff');
   const afterUrgent=distinctReads.length;await tick(t,10*1000);
-  assert.equal([...new Set(reads)].length,afterUrgent,'after the urgent opportunity itself fails, the normal sync failure backoff resumes instead of hot-looping');
-  cases.push('pre-due catch-up preserves one urgent canonical opportunity, then normal backoff resumes');
+  assert.equal([...new Set(reads)].length,afterUrgent,'once the newer revision\'s own catch-up attempt fails, its normal retry backoff may govern');
+  cases.push('catch-up failure backoff is revision-aware');
 }
 {
   // A manual shared upload that loses its turn may discover a newer local edit
