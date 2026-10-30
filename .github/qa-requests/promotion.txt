@@ -1,17 +1,12 @@
 Promotion QA request
 
-Request: current-fixes-final-promotion-r3-2026-10-30
-Source/test revision: bc9ebc0927f584f1235c5388842fd901fad91841 (trigger commit changes only this QA request file)
+Request: current-fixes-convergence-diagnostic-2026-10-30
+Source/test revision: 2d954d88325ea602cbf6fe5603baff45ef32eaf4 (trigger commit changes only this QA request file)
 
-Run the full Promotion QA on the corrected current-fixes source.
+Run Promotion QA. This diagnostic run intentionally changes only the failing automatic-provider-backup assertion message so the hermetic failure reports:
+- canonical change time/current revision,
+- all distinct Drive read times,
+- convergence pending reason/deadline,
+- every provider-convergence trigger and scheduler eligibility time seen in the case.
 
-The previous run exposed that wall-clock settlement time was the wrong owner for an automatic deadline: a convergence attempt can become eligible before an automatic/urgent deadline but settle after it. This revision binds that decision to the convergence job's scheduler eligibility time and carries it through asynchronous Drive catch-up.
-
-Certify:
-- a pre-deadline sync/convergence opportunity cannot consume a still-unspent automatic/urgent opportunity, even when async settlement happens after that deadline;
-- the later automatic opportunity is preserved exactly once;
-- once an attempt becomes eligible at/after that deadline, same-revision failure backoff may govern without a hot loop;
-- newer canonical revisions retain their own automatic/urgent deadline;
-- all prior source-freshness, startup gating, durable pending-intent, suspension/preemption, managed recovery, provider independence, Active Session ownership, PWA/service-worker, Insights, architecture, mutation, browser and release contracts.
-
-No workflow change is part of this request.
+Production behavior is unchanged from bc9ebc0927f584f1235c5388842fd901fad91841. Do not alter workflow policy.
