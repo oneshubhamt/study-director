@@ -1,11 +1,17 @@
 Promotion QA request
 
-Request: current-fixes-final-promotion-2026-10-30
-Source/test revision: 98b398a857d77dc9d20f79af51e73885d256eaee (trigger commit changes only this QA request file)
+Request: current-fixes-final-promotion-r2-2026-10-30
+Source/test revision: 21033152b07ee6ed58f1c78da53de585ad970ed3 (trigger commit changes only this QA request file)
 
-Run full Promotion QA on the cleaned current-fixes source.
+Run full Promotion QA on the corrected and cleaned current-fixes source.
 
-Certify the complete branch state, with particular attention to:
+Certify the complete branch state, including the regression exposed by the prior Promotion run:
+- a convergence failure may move to failure backoff only after the automatic/urgent opportunity for that canonical revision has actually become due;
+- a pre-deadline sync prerequisite cannot consume or replace that still-unspent automatic opportunity;
+- a newer canonical revision still reasserts its own automatic/urgent deadline;
+- once that opportunity is due and its same-revision prerequisite fails, normal failure backoff may govern without a hot loop.
+
+Also certify:
 - canonical backup source-revision freshness and startup mutation-clock gating;
 - provider convergence retry ordering, durable pending intent and exact trigger provenance;
 - suspension/preemption correctness for automatic Drive catch-up, manual file work, restores, updates and storage reset;
@@ -16,4 +22,4 @@ Certify the complete branch state, with particular attention to:
 - Insights performance/refinement changes included in this branch;
 - architecture, mutation, branch-edge, browser and release certification.
 
-No runtime or workflow change is part of this request. This is the final full Promotion QA gate for the cleaned source head above.
+No workflow change is part of this request.
