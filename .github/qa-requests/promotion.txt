@@ -1,17 +1,12 @@
 Promotion QA request
 
-Request: backup-p1-p2-correctness-closure-r5-2026-10-30
-Source/test revision: 44a05597de184e2704740b519a3660d67c56887c (the request commit itself changes only this QA request file)
+Request: backup-p1-p2-correctness-closure-r6-2026-10-30
+Source/test revision: 05075bb9d143cbfa3c67a8bcde68699f1c7606e2 (request commit changes only this QA request file)
 
-Run full Promotion QA on the current branch.
+Run full Promotion QA.
 
-This revision closes the actual revision-ordering seam exposed by r4: when a failed attempt detects that the canonical revision changed while it was running, it explicitly reasserts that newer state's normal automatic/urgent deadline before recording the old attempt's backoff. Same-revision backoff may still replace its own deadline.
+The revision-aware regression now guarantees a distinct canonical source revision during the failing attempt, matching production's monotonic mutation clock rather than allowing a fake-clock same-timestamp edit. The production guard from 44a05597de184e2704740b519a3660d67c56887c remains: if an attempt revision is stale, reassert the newer automatic/urgent deadline before recording the old backoff.
 
-Also certify:
-- freshest backup source revision projection and startup change-clock reconciliation before automatic-provider activation;
-- exact trigger provenance on all pending-provider schedules;
-- suspension-aware automatic Drive catch-up, without changing manual foreground semantics;
-- durable managed-recovery obligations for every configured automatic destination, including temporarily unavailable peers;
-- recovery convergence remains pending if any configured peer intent could not be persisted; explicit disconnect/forget retires the obligation.
+Also certify P1 source-revision/startup reconciliation, exact trigger provenance, suspension-safe automatic Drive catch-up, and durable all-destination managed-recovery obligations including fail-closed peer intent persistence.
 
-No workflow/timing-budget changes. Lower-priority efficiency/liveness refinements remain deferred.
+No workflow or timing-budget changes. Lower-priority efficiency/liveness refinements remain deferred.
