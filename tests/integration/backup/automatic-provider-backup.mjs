@@ -27,7 +27,8 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shar
   const unexpected=()=>{throw new Error('Unexpected executor in the automatic backup test');};
   const pipeline=freeze({noteObject:unexpected,readNote:unexpected,createPublication:unexpected,publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,sharedBase,establishBase:unexpected,verifyObject:unexpected,inspectCommit:unexpected,
     publish:async(_history,options,executor)=>{
-      assert.equal(options.interactive,manual===true,manual?'manual foreground backup must use the interactive provider path':'automatic backups never prompt');
+      const expectedInteractive=manual===true&&publishedAt.length===0;
+      assert.equal(options.interactive,expectedInteractive,expectedInteractive?'the first publication in the manual-turn case must use the foreground interactive path':'automatic convergence publications never prompt');
       const captured=current;publishedAt.push(clock.now());publishedBy.push(freeze({by:both&&options.shared!==true?'device-folder':'google-drive',at:clock.now()}));await publicationHook(options);
       await executor.onCommitted(freeze({sourceRevision:captured,exportedAt:captured}));
       return {checkpointId:'cp_'+'a'.repeat(32),sourceRevision:captured,publication:{name:'cp_'+'a'.repeat(32)},manifest:{objects:[]}};
