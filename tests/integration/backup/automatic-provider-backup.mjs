@@ -190,8 +190,10 @@ const cases=[];
   t.change();
   t.onPublication(async()=>{if(!first)return;first=false;await t.clock.advance(1000);t.change(true);throw Object.assign(new Error('another device is publishing'),{code:'REPOSITORY_SYNC_TURN'});});
   assert.equal(await t.runtime.backup('google-drive'),false);
+  assert.equal(first,false,'manual turn regression must reach the publication hook');
+  assert.equal(t.publishedAt.length,1,'manual turn regression must exercise exactly one publication attempt before checking its retry deadline');
   const pending=t.runtime.backgroundStatus().find(row=>row.job==='google-drive convergence'),dueAt=Date.parse(pending?.nextEligibleAt||'');
-  assert.ok(Number.isFinite(dueAt)&&dueAt<=t.clock.now()+t.policy.automaticUrgentMs+1000,'manual turn backoff must not push the newer canonical revision behind its urgent deadline');
+  assert.ok(Number.isFinite(dueAt)&&dueAt<=t.clock.now()+t.policy.automaticUrgentMs+1000,`manual-turn deadline state=${JSON.stringify({now:t.clock.now(),urgentMs:t.policy.automaticUrgentMs,pending,publishedAt:t.publishedAt,starts:t.diagnosticStarts.filter(row=>row.name==='provider-convergence')})}`);
   await tick(t,t.policy.automaticUrgentMs+5000);assert.ok(t.publishedAt.length>=2,'newer local work must run before the turn retry deadline');
   cases.push('manual shared turn backoff preserves a newer canonical revision');
 }
