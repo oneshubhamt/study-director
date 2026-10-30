@@ -1302,6 +1302,10 @@ registry.define('backup-provider',1,input=>{
     const job=providerConvergenceJob(selected);
     if(!job)return false;
     const newer=backoff&&attemptRevision&&canonicalConvergenceRevision()!==attemptRevision;
+    // Reassert the newer mutation's normal deadline before recording the old
+    // attempt's retry. Correctness must not depend on its timer surviving an
+    // in-flight catch-up/foreground ownership transition.
+    if(newer)scheduleAutomaticBackup(selected,{urgent:Number.isFinite(automaticState(selected).urgentSince)});
     return job.schedule(Math.max(1000,Number(delay)||1000),String(trigger||'pending-retry'),backoff&&!newer?'replace':'earliest')!==false;
   }
   function wakeProviderBackground(selected,trigger='eligibility'){
