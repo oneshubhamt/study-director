@@ -45,7 +45,7 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shar
   runtime.configurePendingBackupRetry(freeze(pending));
   runtime.configureAutomaticBackup(freeze({covered:id=>coveredBy.has(id)?coveredBy.get(id):covered,current:()=>current}));
   return {
-    clock,runtime,presentation,policy:policy.protocol,publishedAt,publishedBy,diagnosticStarts,currentRevision:()=>current,onPublication:fn=>{publicationHook=fn;},
+    clock,runtime,presentation,policy:policy.protocol,publishedAt,publishedBy,diagnosticStarts,onPublication:fn=>{publicationHook=fn;},
     change:(urgent=false)=>{current=new clock.Date(clock.now()).toISOString();runtime.noteChange({urgent});},
     expire:()=>{expiresAt=clock.now();listener?.();},
     signIn:(lifetime=59*MINUTE)=>{authorized=true;expiresAt=clock.now()+lifetime;listener?.();},
@@ -185,10 +185,13 @@ const cases=[];
   // A manual shared upload that loses its turn may discover a newer local edit
   // during the attempt. That edit keeps its urgent deadline.
   const t=fixture({covered:'2026-10-06T08:00:00.000Z',shared:true});await tick(t,1000);let first=true;
+  // Give Back up now real canonical work. The publication hook then creates a
+  // second urgent revision inside that in-flight attempt before simulating turn loss.
+  t.change();
   t.onPublication(async()=>{if(!first)return;first=false;await t.clock.advance(1000);t.change(true);throw Object.assign(new Error('another device is publishing'),{code:'REPOSITORY_SYNC_TURN'});});
   assert.equal(await t.runtime.backup('google-drive'),false);
   const pending=t.runtime.backgroundStatus().find(row=>row.job==='google-drive convergence'),dueAt=Date.parse(pending?.nextEligibleAt||'');
-  assert.ok(Number.isFinite(dueAt)&&dueAt<=t.clock.now()+t.policy.automaticUrgentMs+1000,`manual-turn state=${JSON.stringify({now:t.clock.now(),current:t.currentRevision(),urgentMs:t.policy.automaticUrgentMs,pending,publishedAt:t.publishedAt,starts:t.diagnosticStarts.filter(row=>row.name==='provider-convergence')})}`);
+  assert.ok(Number.isFinite(dueAt)&&dueAt<=t.clock.now()+t.policy.automaticUrgentMs+1000,'manual turn backoff must not push the newer canonical revision behind its urgent deadline');
   await tick(t,t.policy.automaticUrgentMs+5000);assert.ok(t.publishedAt.length>=2,'newer local work must run before the turn retry deadline');
   cases.push('manual shared turn backoff preserves a newer canonical revision');
 }
