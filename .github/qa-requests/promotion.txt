@@ -1,8 +1,10 @@
 Promotion QA request
 
-Request: final-cleer-publication-convergence-browser-qa5-2026-10-30
+Request: final-cleer-unchanged-source-performance-recert-2026-10-30
 Source revision: current-fixes HEAD from this request commit
 Run full Promotion QA on one commit: hermetic correctness, risk/critical mutation, AST branches, non-browser release, complete built-runtime browser certification and three Insights samples.
 Check: failed commit leaves prior latest intact even with orphan manifest; no speculative deletion of a reused/ambiguous manifest or commit; Device Folder digest mismatch refuses delete; genuinely newer urgent revisions take precedence over failed old revision backoff, while same revision obeys backoff; retry provenance remains accurate.
 Do not weaken 2,000-note startup/keystroke budgets, notes UI behavior or cross-tab storage-clear invariants. The notes capacity benchmark must execute without competing Chromium work. Cross-tab clear must establish a previous database connection before expecting the second tab to count a recreation.
 Device/OS quota, eviction and permission lifecycle acceptance is separate and still outstanding.
+
+This is a new certification request after the prior complete browser/non-browser promotion jobs passed but all three independent Insights performance samples failed. Do not alter time budgets, browser expectations, or production code. Require one sample to meet the existing 1000 ms complete deadline. Compare sample profiles; no user-data fixtures or deployment.
