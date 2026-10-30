@@ -1,13 +1,15 @@
 Promotion QA request
 
-Request: current-fixes-final-promotion-r9-2026-10-30
-Source/test revision: 53d513105b2a6060d103eee506ad8a1d8d41adc1 (trigger commit changes only this QA request file)
+Request: current-fixes-final-promotion-r10-2026-10-30
+Source/test revision: 9a368f31d9a8b73447a48d63d8a839c180079cb8 (trigger commit changes only this QA request file)
 
 Run full Promotion QA on current-fixes.
 
-The full hermetic run has now progressed past the convergence regressions. The latest test-only correction aligns the notification lifecycle fixture with the intentional current contract:
-- manual/version-history imports expose importHoldsBackground and remain cancellable;
-- suspension-aware automatic Drive catch-up may be importActive without impersonating user-held file work or exposing the same Cancel state.
+The full hermetic run now reaches architecture certification. The latest test-only correction updates the broad CLEER contract to the already-current managed-recovery model:
+- source and every configured automatic peer receive durable pending intent first;
+- each obligation is then scheduled through its existing convergence job;
+- temporarily disconnected configured peers remain represented durably;
+- an already-present source checkpoint with newer canonical local state also gets durable source-current convergence.
 
 Certify the complete branch across hermetic correctness, risk coverage, mutation, AST branch-edge coverage, release certification, complete browser certification, Insights performance, backup/recovery/convergence, PWA/service-worker behavior, and architecture contracts.
 
