@@ -1164,6 +1164,7 @@
       authorize,
       backgroundAvailable:()=>tokenValid(),
       connected:()=>tokenValid(),
+      automaticConfigured:()=>tokenValid()||signedInBefore,
       connectionExpiresAt:()=>tokenValid()?tokenExpiresAt:0,
       subscribeConnection,
       disconnect,

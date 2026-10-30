@@ -161,7 +161,7 @@ const cases=[];
   // urgent deadline instead of being pushed behind the failed head's backoff.
   const id='cp_'+'d'.repeat(32),item=kind=>freeze({kind,id,name:id+(kind==='commit'?'.sdcommit':'.sdcheckpoint'),size:100,createdAt:'2026-10-06T07:30:00.000Z',modifiedAt:'2026-10-06T07:30:00.000Z',remoteId:kind+'-revision'});
   const reads=[];let t=null,changed=false;
-  t=fixture({covered:'2026-10-06T09:00:00.000Z',shared:true,
+  t=fixture({covered:'2026-10-06T07:00:00.000Z',shared:true,
     driveList:async({kind})=>({items:kind==='checkpoint'||kind==='commit'?[item(kind)]:[],overflow:false,ignored:0}),
     driveDownload:async()=>{reads.push(t.clock.now());if(!changed){changed=true;t.change(true);}throw Object.assign(new Error('network down'),{code:'DRIVE_NETWORK'});}});
   await tick(t,10*1000);

@@ -170,6 +170,11 @@ registry.define('backup-provider',1,input=>{
     // own (the Device Folder: from when it was chosen). Without one, a location
     // backs up on its own only after this device first backed up to it.
     automaticBaseline:typeof config.automaticBaseline==='function'?config.automaticBaseline:null,
+    // Whether this location remains an automatic destination while its
+    // transport is temporarily unavailable (for example revoked folder
+    // permission or an expired Drive token). Explicit disconnect/forget must
+    // make this false.
+    automaticConfigured:typeof config.automaticConfigured==='function'?config.automaticConfigured:null,
     subscribeConnection:typeof config.subscribeConnection==='function'?config.subscribeConnection:null,
     // hosted: the location's own controller tells the person about its
     // connection (the Device Folder's permission); the engine stays quiet.
@@ -938,6 +943,11 @@ registry.define('backup-provider',1,input=>{
   }
   // Signing in to the shared location (Drive) is enough: sync starts at once.
   function automaticEnabled(selected){return !!automaticHooks&&!!selected?.repository&&(selected.shared&&providerConnected(selected)||Number.isFinite(automaticCovered(selected)));}
+  function automaticRecoveryDestination(selected){
+    if(!automaticHooks||!selected?.repository)return false;
+    try{if(selected.automaticConfigured?.()===true)return true;}catch(error){AppDiagnostics.capture('backup-provider.automatic-configured',error,'warn');}
+    return automaticEnabled(selected)||connectedOnceByProvider.has(selected.id);
+  }
   function automaticNeeded(selected){
     if(!automaticEnabled(selected))return false;
     let current=NaN;try{current=Date.parse(String(automaticHooks.current()||''));}catch(error){AppDiagnostics.capture('backup-provider.automatic-current',error,'warn');}
@@ -1313,7 +1323,7 @@ registry.define('backup-provider',1,input=>{
   async function queueOtherLocations(selected){
     const out=[];
     for(const other of providers.values()){
-      if(other.id===selected.id||!automaticEnabled(other))continue;
+      if(other.id===selected.id||!automaticRecoveryDestination(other))continue;
       const retryQueued=await markPendingRetry(other),scheduled=retryQueued&&schedulePendingProviderBackup(other,1000,{trigger:'managed-recovery-peer'});
       out.push(freeze({id:other.id,label:other.label,shared:other.shared===true,status:retryQueued?'pending':'failed',queued:retryQueued,scheduled:scheduled===true,connected:providerConnected(other)}));
     }

@@ -189,6 +189,7 @@ registry.define('device-backup',1,()=>{
       id:ID,label:LABEL,hosted:true,
       connected,backgroundAvailable:connected,
       automaticBaseline:()=>connected()?baseline||EPOCH:'',
+      automaticConfigured:()=>supported&&!!handle,
       subscribeConnection:listener=>{connectionListener=listener;},
       authorize,disconnect:disconnectFolder,disconnectLabel:'Turn off',
       repository:transport
