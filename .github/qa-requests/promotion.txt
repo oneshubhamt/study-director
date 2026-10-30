@@ -1,25 +1,17 @@
 Promotion QA request
 
-Request: current-fixes-final-promotion-r2-2026-10-30
-Source/test revision: 21033152b07ee6ed58f1c78da53de585ad970ed3 (trigger commit changes only this QA request file)
+Request: current-fixes-final-promotion-r3-2026-10-30
+Source/test revision: bc9ebc0927f584f1235c5388842fd901fad91841 (trigger commit changes only this QA request file)
 
-Run full Promotion QA on the corrected and cleaned current-fixes source.
+Run the full Promotion QA on the corrected current-fixes source.
 
-Certify the complete branch state, including the regression exposed by the prior Promotion run:
-- a convergence failure may move to failure backoff only after the automatic/urgent opportunity for that canonical revision has actually become due;
-- a pre-deadline sync prerequisite cannot consume or replace that still-unspent automatic opportunity;
-- a newer canonical revision still reasserts its own automatic/urgent deadline;
-- once that opportunity is due and its same-revision prerequisite fails, normal failure backoff may govern without a hot loop.
+The previous run exposed that wall-clock settlement time was the wrong owner for an automatic deadline: a convergence attempt can become eligible before an automatic/urgent deadline but settle after it. This revision binds that decision to the convergence job's scheduler eligibility time and carries it through asynchronous Drive catch-up.
 
-Also certify:
-- canonical backup source-revision freshness and startup mutation-clock gating;
-- provider convergence retry ordering, durable pending intent and exact trigger provenance;
-- suspension/preemption correctness for automatic Drive catch-up, manual file work, restores, updates and storage reset;
-- independent Device Folder / Google Drive publication with no retired spine/backfill/provider-copy path;
-- managed recovery safety, rollback/verification, retention, cleanup and integrity;
-- shared Active Session ownership/catch-up across Drive;
-- PWA update/service-worker durability and built-runtime behavior;
-- Insights performance/refinement changes included in this branch;
-- architecture, mutation, branch-edge, browser and release certification.
+Certify:
+- a pre-deadline sync/convergence opportunity cannot consume a still-unspent automatic/urgent opportunity, even when async settlement happens after that deadline;
+- the later automatic opportunity is preserved exactly once;
+- once an attempt becomes eligible at/after that deadline, same-revision failure backoff may govern without a hot loop;
+- newer canonical revisions retain their own automatic/urgent deadline;
+- all prior source-freshness, startup gating, durable pending-intent, suspension/preemption, managed recovery, provider independence, Active Session ownership, PWA/service-worker, Insights, architecture, mutation, browser and release contracts.
 
 No workflow change is part of this request.
