@@ -1,20 +1,12 @@
 Promotion QA request
 
-Request: current-fixes-final-promotion-r5-2026-10-30
-Source/test revision: da7e7b0bf9c6ef57d4d826d4f245739adc828ede (trigger commit changes only this QA request file)
+Request: current-fixes-manual-turn-diagnostic-2026-10-30
+Source/test revision: b5d46826abb37a05de78f6c0e04de8a9bdd55c88 (trigger commit changes only this QA request file)
 
-Run full Promotion QA on current-fixes.
+Run Promotion QA. This diagnostic pass changes only the failing manual-turn assertion message so the hermetic result reports:
+- fake-clock time and canonical revision,
+- convergence pending reason/deadline,
+- publication attempt times,
+- provider-convergence triggers/eligibility.
 
-The prior diagnostic established that the runtime preserved the urgent automatic deadline correctly. The regression harness now also flushes a timer armed at the current fake-clock instant by end-of-advance microtasks, matching the browser's next task rather than delaying it to a later artificial clock step.
-
-Certify the complete branch:
-- backup freshness and startup mutation-clock gating;
-- revision-aware convergence, scheduler-owned automatic opportunities and durable retry intent;
-- suspension/preemption, managed recovery and independent Device Folder/Google Drive publication;
-- shared Active Session ownership;
-- restore verification/rollback, retention, cleanup and integrity;
-- PWA/service-worker and built-runtime behavior;
-- Insights performance;
-- full hermetic, risk, mutation, branch-edge, release and browser certification.
-
-No workflow policy change is part of this request.
+Production behavior is unchanged from bc9ebc0927f584f1235c5388842fd901fad91841. Do not alter workflow policy.
