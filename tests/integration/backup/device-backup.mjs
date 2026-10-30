@@ -15,10 +15,11 @@ await test('a browser without folder access never registers a location and every
 
 await test('choosing an empty folder opens the picker from the click and makes the first backup at once',async()=>{
   const w=world();await w.controller.install();assert.equal(w.controller.status().mode,'off');
+  assert.equal(w.providerConfiguration().automaticConfigured(),false,'a supported but unchosen Device Folder is not a configured automatic destination');
   const folder=w.directory();w.choose(folder);
   const connecting=w.controller.connect();assert.equal(w.pickerCalls,1,'the picker opens before anything is awaited');
   await connecting;await w.settle();
-  assert.equal(w.controller.status().connected,true);assert.equal(w.published.length,1,'the first backup is made at once');assert.equal((await w.commits(folder)).length,1);
+  assert.equal(w.controller.status().connected,true);assert.equal(w.providerConfiguration().automaticConfigured(),true,'a chosen Device Folder remains a configured automatic destination');assert.equal(w.published.length,1,'the first backup is made at once');assert.equal((await w.commits(folder)).length,1);
   assert.equal(w.settingsStore.get('deviceFolder').directoryHandle,folder,'the folder is remembered');
   assert.ok(w.controller.status().lastBackupAt,'the row shows when it was last verified');assert.deepEqual(await w.locks(folder),[],'no lock files remain');
   assert.equal(w.controller.cancelForeground('No active Device Folder operation.'),false,'Cancel is a quiet no-op when no foreground Device Folder operation is active');

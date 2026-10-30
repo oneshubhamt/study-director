@@ -31,7 +31,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   const worldNumber=++worlds;
   let owner=freeze({profile,scope:'',device,name}),repositoryChoice=rows=>rows[0].name;const repositoryChoices=[];
   const clock=createFakeClock(start),notices=[],published=[],verified=new Map(),settingsStore=new Map(),rendered=[],captures=[];
-  let current=new clock.Date(clock.now()-MINUTE).toISOString(),localEmpty=false,canMutate=true,pickerResult=null,pickerCalls=0,sequence=0,durablePending=null;
+  let current=new clock.Date(clock.now()-MINUTE).toISOString(),localEmpty=false,canMutate=true,pickerResult=null,pickerCalls=0,sequence=0,durablePending=null,registeredProvider=null;
   const context={Object,Symbol,TypeError,Error,Date:clock.Date,AbortController,Blob,File,Promise,Map,Set,WeakMap,TextEncoder,Uint8Array,JSON,Math,Number,String,Array,console,crypto:webcrypto,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,DOMException};
   context.globalThis=context;vm.createContext(context);
   for(const name of ['internal','operation-lifecycle','repository-policy','repository-background','managed-repository','backup-provider','backup-recovery-host','notice-coordinator','backup-presentation','device-folder-storage','device-backup','host-metadata'])vm.runInContext(fs.readFileSync(`source/core/${name}.js`,'utf8'),context,{filename:`source/core/${name}.js`});
@@ -98,7 +98,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   const showDirectoryPicker=supported?()=>{pickerCalls+=1;if(pickerResult instanceof Error)return Promise.reject(pickerResult);return Promise.resolve(pickerResult);}:null;
   const controller=registry.require('device-backup',1).createController(freeze({
     configuration:freeze({metadataKey:'deviceFolder',pickerId:'study-director-device-backup',settingsTimeoutMs:10*1000}),
-    engine:freeze({backup:id=>runtime.backup(id),cancelForeground:(reason,id)=>runtime.cancelForeground(reason,id),disconnect:id=>runtime.disconnect(id),forget:id=>runtime.forget(id),locationStatus:id=>runtime.locationStatus(id),register:config=>runtime.register(config),subscribeStatus:listener=>runtime.subscribeStatus(listener)}),
+    engine:freeze({backup:id=>runtime.backup(id),cancelForeground:(reason,id)=>runtime.cancelForeground(reason,id),disconnect:id=>runtime.disconnect(id),forget:id=>runtime.forget(id),locationStatus:id=>runtime.locationStatus(id),register:config=>{registeredProvider=config;return runtime.register(config);},subscribeStatus:listener=>runtime.subscribeStatus(listener)}),
     environment:freeze({backgroundBlocker:()=>canMutate?'':'awaiting-control',canMutate:()=>canMutate,clearTimeout:clock.clearTimeout,setTimeout:clock.setTimeout,showDirectoryPicker,withLock:lock}),
     hooks:freeze({capture:(scope,error)=>captures.push(freeze({scope,message:String(error?.message||error)})),chooseRepository:async rows=>{repositoryChoices.push([...rows]);return repositoryChoice(rows);},render:state=>rendered.push(state),repositoryOwner:()=>owner,sourceRevision:()=>current,verifiedAt:()=>verified.get('device-folder')?.at||''}),
     presentation,
@@ -138,7 +138,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   async function commits(handle,folderName=owner.name){try{const root=await handle.getDirectoryHandle(folderName);return (await root.getDirectoryHandle(IDENTITIES.commits)).names();}catch{return [];}}
   async function locks(handle,folderName=owner.name){const root=await handle.getDirectoryHandle(folderName);return (await root.getDirectoryHandle(IDENTITIES.objects)).names().filter(name=>/\.sd(?:publication|maintenance)$/u.test(name));}
   return {
-    clock,runtime,controller,published,verified,settingsStore,notices,rendered,captures,directory,tick,settle,commits,locks,storageFor,plant,
+    clock,runtime,controller,published,verified,settingsStore,notices,rendered,captures,directory,tick,settle,commits,locks,storageFor,plant,providerConfiguration:()=>registeredProvider,
     get pickerCalls(){return pickerCalls;},
     get repositoryChoices(){return repositoryChoices;},
     setOwner:value=>{owner=freeze({...owner,...value});},chooseRepositoryWith:fn=>{repositoryChoice=fn;},
