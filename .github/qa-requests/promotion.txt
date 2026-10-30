@@ -1,16 +1,15 @@
 Promotion QA request
 
-Request: current-fixes-final-promotion-r10-2026-10-30
-Source/test revision: 9a368f31d9a8b73447a48d63d8a839c180079cb8 (trigger commit changes only this QA request file)
+Request: current-fixes-final-promotion-rerun-after-diagnostics-2026-10-30
+Source/test revision: 85f6df16913fa7961df5bd923189a856f2834a09 (request commit changes only this QA request file)
 
-Run full Promotion QA on current-fixes.
+Run the complete Promotion QA on the exact cleaned current-fixes source above.
 
-The full hermetic run now reaches architecture certification. The latest test-only correction updates the broad CLEER contract to the already-current managed-recovery model:
-- source and every configured automatic peer receive durable pending intent first;
-- each obligation is then scheduled through its existing convergence job;
-- temporarily disconnected configured peers remain represented durably;
-- an already-present source checkpoint with newer canonical local state also gets durable source-current convergence.
+This rerun follows the full-gate findings and targeted corrections:
+- convergence failure backoff now preserves an automatic/urgent opportunity until that opportunity has actually become due, while remaining revision-aware and bounded;
+- the current fixed convergence/recovery trigger vocabulary is complete in the privacy-safe diagnostics allow-list;
+- targeted Repository Checks pass on the exact source revision above.
 
-Certify the complete branch across hermetic correctness, risk coverage, mutation, AST branch-edge coverage, release certification, complete browser certification, Insights performance, backup/recovery/convergence, PWA/service-worker behavior, and architecture contracts.
+Certify the full release surface: hermetic correctness, risk coverage, mutation certification, AST branch-edge coverage, non-browser release certification, complete browser/built-runtime coverage, Insights performance gate, backup/restore/recovery, Drive synchronization and Active Session ownership, independent Device Folder/Drive publication, background suspension/preemption, PWA/service-worker behavior, storage durability and current architecture contracts.
 
-No workflow policy change is part of this request.
+No runtime or workflow change is part of this request commit.
