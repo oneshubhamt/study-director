@@ -45,7 +45,7 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shar
   runtime.configurePendingBackupRetry(freeze(pending));
   runtime.configureAutomaticBackup(freeze({covered:id=>coveredBy.has(id)?coveredBy.get(id):covered,current:()=>current}));
   return {
-    clock,runtime,presentation,policy:policy.protocol,publishedAt,publishedBy,diagnosticStarts,onPublication:fn=>{publicationHook=fn;},
+    clock,runtime,presentation,policy:policy.protocol,publishedAt,publishedBy,diagnosticStarts,currentRevision:()=>current,onPublication:fn=>{publicationHook=fn;},
     change:(urgent=false)=>{current=new clock.Date(clock.now()).toISOString();runtime.noteChange({urgent});},
     expire:()=>{expiresAt=clock.now();listener?.();},
     signIn:(lifetime=59*MINUTE)=>{authorized=true;expiresAt=clock.now()+lifetime;listener?.();},
@@ -167,7 +167,7 @@ const cases=[];
     driveDownload:async()=>{reads.push(t.clock.now());if(!changed){changed=true;await t.clock.advance(1);t.change(true);}throw Object.assign(new Error('network down'),{code:'DRIVE_NETWORK'});}});
   await tick(t,10*1000);
   const pending=t.runtime.backgroundStatus().find(row=>row.job==='google-drive convergence'),dueAt=Date.parse(pending?.nextEligibleAt||'');
-  assert.ok(Number.isFinite(dueAt)&&dueAt<=t.clock.now()+t.policy.automaticUrgentMs+1000,'catch-up failure backoff must not push a newer revision behind its urgent deadline');
+  assert.ok(Number.isFinite(dueAt)&&dueAt<=t.clock.now()+t.policy.automaticUrgentMs+1000,`catch-up deadline state=${JSON.stringify({now:t.clock.now(),current:t.currentRevision(),urgentMs:t.policy.automaticUrgentMs,pending,starts:t.diagnosticStarts.filter(row=>row.name==='provider-convergence')})}`);
   const first=[...new Set(reads)].length;await tick(t,t.policy.automaticUrgentMs+5000);
   assert.ok([...new Set(reads)].length>first,'the newer revision must get a catch-up opportunity before the old failure backoff');
   cases.push('catch-up failure backoff preserves a newer canonical revision');
