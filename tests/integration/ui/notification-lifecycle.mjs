@@ -139,7 +139,7 @@ class Element {
   const draw=({exporting=false,fileBusy=false,importing=false,event=null}={})=>{
     const nodes=new Map(ids.map(id=>[id,new Element()]));
     new Function('document','BackupController','Exports','BackupPresentation',html.slice(start,end)+';fileBackupRowReady=true;renderFileBackup();')(
-      {getElementById:id=>nodes.get(id)||null},{status:()=>({standaloneExportActive:exporting,importActive:importing})},{status:()=>({fileBusy})},
+      {getElementById:id=>nodes.get(id)||null},{status:()=>({standaloneExportActive:exporting,importActive:importing,importHoldsBackground:importing})},{status:()=>({fileBusy})},
       {current:()=>event,summary:value=>value?.message||''});
     return id=>nodes.get(id);
   };
