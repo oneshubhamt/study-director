@@ -1,16 +1,16 @@
 Promotion QA request
 
-Request: backup-p1-p2-correctness-closure-2026-10-30
-Source revision: 346085a6670d7332db24e15a4a6a1efb790fe271 (the request commit itself changes only this QA request file)
-Run full Promotion QA on the current source: hermetic correctness, risk/critical mutation, AST branches, non-browser release, complete built-runtime browser certification and the existing Insights samples.
+Request: backup-p1-p2-correctness-closure-r2-2026-10-30
+Source revision: 3a5752cd934123aa25cf50db96b75503cb5d00d8 (the request commit itself changes only this QA request file)
+Run full Promotion QA on the current source.
 
-Targeted correctness checks for this pass:
-- backup source revision selects the newest valid storage-health projection; stale raw localStorage cannot hide newer in-memory committed state;
-- startup change-clock reconciliation completes before automatic provider/background-owner activation and Device Folder installation shares the same barrier;
-- catch-up and shared-turn failure backoff carry the owning attemptRevision so newer urgent canonical revisions keep their earlier deadline;
-- retry/catch-up scheduling retains exact trigger provenance;
-- automatic Drive catch-up cannot enter through an existing provider background suspension, and a suspension arriving after admission aborts and awaits that automatic handoff without changing explicit/manual foreground semantics;
-- managed recovery durably marks every configured automatic destination that owes the recovered canonical state, including temporarily disconnected peers, and explicit disconnect/forget retires that destination's obligation.
+Targeted checks:
+- newest valid backup source-revision projection and startup mutation-clock reconciliation before automatic provider activation;
+- revision-aware catch-up and shared-turn backoff: same-revision work may back off, newer urgent canonical revisions retain the earlier deadline;
+- exact pending-provider trigger provenance;
+- suspension-aware automatic Drive catch-up admission/pre-emption without altering explicit/manual foreground semantics;
+- durable managed-recovery obligations for every configured automatic destination, including a chosen Device Folder with temporarily unavailable permission and a current-session Drive destination after token expiry; explicit disconnect/forget retires the obligation.
 
-Do not alter workflow policy, timing budgets, retention semantics, repository formats, backup storage topology, or the lower-priority efficiency/liveness items deferred to the next pass.
-Device/OS quota, eviction and permission lifecycle acceptance remains separate physical-device QA.
+This recertification follows a first QA run that correctly exposed stale test assertions and a faulty future-covered revision fixture. Those test contracts are corrected; no timing budget or workflow policy was weakened.
+Lower-priority maintenance efficiency/liveness refinements remain deliberately deferred to the next pass.
+Physical device/OS quota, eviction and permission-lifecycle acceptance remains separate.
