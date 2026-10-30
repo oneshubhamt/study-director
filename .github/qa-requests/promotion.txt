@@ -1,16 +1,19 @@
 Promotion QA request
 
-Request: backup-p1-p2-correctness-closure-final2-2026-10-30
-Source/test revision: f3c5e8510a9a14cb2dec4f44c0ec402f21b3bc04 (request commit changes only this QA request file)
+Request: current-fixes-final-promotion-2026-10-30
+Source/test revision: 98b398a857d77dc9d20f79af51e73885d256eaee (trigger commit changes only this QA request file)
 
-Run full Promotion QA on the clean source.
+Run full Promotion QA on the cleaned current-fixes source.
 
-Certify:
-- P1 freshest backup source-revision projection and startup canonical mutation-clock reconciliation before automatic provider/background-owner activation.
-- P2 revision ordering: all catch-up/turn/failure backoffs carry attemptRevision; newer revisions reassert their normal automatic deadline.
-- P2 pre-deadline sync ownership: a sync-only catch-up that starts before an already-waiting automatic deadline preserves exactly that one publication opportunity. Once the deadline is due and its prerequisite attempt fails, the normal failure backoff may govern, preventing a hot loop.
-- P2 exact trigger provenance at every pending-provider scheduling site.
-- P2 automatic Drive catch-up respects provider background suspension before and after foreground admission without changing explicit/manual foreground semantics.
-- P2 managed recovery durably records every configured automatic destination, including temporarily unavailable configured peers, and remains pending if any peer intent cannot be persisted; explicit disconnect/forget retires the obligation.
+Certify the complete branch state, with particular attention to:
+- canonical backup source-revision freshness and startup mutation-clock gating;
+- provider convergence retry ordering, durable pending intent and exact trigger provenance;
+- suspension/preemption correctness for automatic Drive catch-up, manual file work, restores, updates and storage reset;
+- independent Device Folder / Google Drive publication with no retired spine/backfill/provider-copy path;
+- managed recovery safety, rollback/verification, retention, cleanup and integrity;
+- shared Active Session ownership/catch-up across Drive;
+- PWA update/service-worker durability and built-runtime behavior;
+- Insights performance/refinement changes included in this branch;
+- architecture, mutation, branch-edge, browser and release certification.
 
-The prior diagnostic run established the exact consumed-deadline seam; temporary diagnostic exposure has been removed. No workflow policy, timing budget, storage topology, repository format, or lower-priority efficiency/liveness item is changed in this pass.
+No runtime or workflow change is part of this request. This is the final full Promotion QA gate for the cleaned source head above.
