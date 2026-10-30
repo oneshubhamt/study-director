@@ -1,16 +1,15 @@
 Promotion QA request
 
-Request: backup-p1-p2-correctness-closure-r2-2026-10-30
-Source revision: 3a5752cd934123aa25cf50db96b75503cb5d00d8 (the request commit itself changes only this QA request file)
-Run full Promotion QA on the current source.
+Request: backup-p1-p2-correctness-closure-r3-2026-10-30
+Source/test revision: 539850901a992cbae879a11265057d31901a54c3 (the request commit itself changes only this QA request file)
 
-Targeted checks:
-- newest valid backup source-revision projection and startup mutation-clock reconciliation before automatic provider activation;
-- revision-aware catch-up and shared-turn backoff: same-revision work may back off, newer urgent canonical revisions retain the earlier deadline;
-- exact pending-provider trigger provenance;
-- suspension-aware automatic Drive catch-up admission/pre-emption without altering explicit/manual foreground semantics;
-- durable managed-recovery obligations for every configured automatic destination, including a chosen Device Folder with temporarily unavailable permission and a current-session Drive destination after token expiry; explicit disconnect/forget retires the obligation.
+Run full Promotion QA on the current branch. Production source remains the correctness implementation from 3a5752cd934123aa25cf50db96b75503cb5d00d8; this revision only corrects two over-specific test contracts exposed by the previous run.
 
-This recertification follows a first QA run that correctly exposed stale test assertions and a faulty future-covered revision fixture. Those test contracts are corrected; no timing budget or workflow policy was weakened.
-Lower-priority maintenance efficiency/liveness refinements remain deliberately deferred to the next pass.
-Physical device/OS quota, eviction and permission-lifecycle acceptance remains separate.
+Targeted correctness remains:
+- newest valid backup source-revision projection and startup change-clock reconciliation before automatic provider activation;
+- catch-up and shared-turn backoff cannot move a newer canonical revision later than its existing urgent/earlier opportunity;
+- exact retry provenance is preserved at the scheduling call and when that retry actually owns the next execution;
+- automatic Drive catch-up respects provider background suspension before and after admission;
+- managed recovery durably marks every configured automatic destination, including temporarily unavailable configured peers, with explicit disconnect/forget retiring the obligation.
+
+Do not change workflow policy or timing budgets. Lower-priority efficiency/liveness refinements remain deferred.
