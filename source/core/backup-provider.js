@@ -1171,26 +1171,26 @@ registry.define('backup-provider',1,input=>{
 
   // Take in Drive's newest version quietly. What it cannot settle on its own
   // waits for the person; their Combine of that version resumes the sync.
-  function catchUpSharedProvider(selected,head,attemptRevision=canonicalConvergenceRevision()){
+  function catchUpSharedProvider(selected,head,attemptRevision=canonicalConvergenceRevision(),{preserveAutomatic=false}={}){
     const state=syncState(selected);if(state.catching)return false;state.catching=true;notifyStatus();
     setTimeout(async()=>{
       const summary=presentation.begin(selected.id,'sync',{id:'external-sync',label:selected.label,foreground:false,message:`Syncing with ${selected.label}…`});
-      try{settleCatchUp(selected,head.item.id,await syncRepositoryProvider(selected.id,{checkpointId:head.item.id,presentation:summary,respectBackgroundSuspension:true}),summary,attemptRevision);}
+      try{settleCatchUp(selected,head.item.id,await syncRepositoryProvider(selected.id,{checkpointId:head.item.id,presentation:summary,respectBackgroundSuspension:true}),summary,attemptRevision,{preserveAutomatic});}
       catch(error){
         // Another device set or changed the backup password: sync waits for it.
         if(['BACKUP_LOCKED','BACKUP_AUTH_FAILED'].includes(String(error?.code||''))){state.password=head.item.id;summary.finish({message:`${selected.label} needs this profile’s backup password.`,outcome:'sync-password'});presentation.notice(selected.id,'sync-password',`Your backup password was set or changed on another device. Enter it to keep syncing with ${selected.label}.`);}
         // A version this build cannot read is not retried: sync waits on it.
         else if(error?.repositoryUnreadable===true||String(error?.code||'')==='BACKUP_ENCRYPTION_UNSUPPORTED'){markUnreadable(selected,head.item.id);summary.finish({message:`${selected.label} has a version this app can’t read.`,outcome:'sync-newer'});waitForNewerVersion(selected,head.item.id);}
-        else{AppDiagnostics.capture('backup-provider.sync-catch-up',error,'warn');state.behind=true;state.failed=true;summary.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'failed'});schedulePendingProviderBackup(selected,nextConvergenceRetryDelay(selected,{sync:true}),{backoff:true,attemptRevision,trigger:'catch-up-failed'});}
+        else{AppDiagnostics.capture('backup-provider.sync-catch-up',error,'warn');state.behind=true;state.failed=true;summary.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'failed'});schedulePendingProviderBackup(selected,nextConvergenceRetryDelay(selected,{sync:true}),{backoff:true,attemptRevision,preserveAutomatic,trigger:'catch-up-failed'});}
       }
       finally{state.catching=false;notifyStatus();}
     },0);
     return true;
   }
-  function settleCatchUp(selected,headId,result,summary,attemptRevision=''){
+  function settleCatchUp(selected,headId,result,summary,attemptRevision='',{preserveAutomatic=false}={}){
     const state=syncState(selected);
     if(result&&result.cancelled&&result.reason==='needs-decision'){state.review=headId;summary?.finish({message:`${selected.label} has changes that need your review.`,outcome:'sync-review'});presentation.notice(selected.id,'sync-review',`${selected.label} has changes from another device that need your review.`);}
-    else if(result&&result.cancelled){state.behind=true;summary?.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'cancelled'});schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{attemptRevision,trigger:'catch-up-cancelled'});}
+    else if(result&&result.cancelled){state.behind=true;summary?.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'cancelled'});schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{attemptRevision,preserveAutomatic,trigger:'catch-up-cancelled'});}
     else{state.review='';state.password='';state.failed=false;state.syncedAt=new Date().toISOString();resetConvergenceRetry(selected);presentation.resolve(selected.id,'sync-review');presentation.resolve(selected.id,'sync-password');summary?.finish({message:`Synced with ${selected.label}.`,outcome:'sync-complete'});if(automaticWaiting(selected))schedulePendingProviderBackup(selected,1000,{trigger:'catch-up-complete'});}
   }
   // The person enters the password the newest version needs; the sync then
@@ -1265,7 +1265,14 @@ registry.define('backup-provider',1,input=>{
           const ahead=await sharedAhead(inventory,selected),finish=(status,reason)=>{OperationDiagnostics.mark('background-transition',background.transition('convergence','running',status,{reason,actionable:false}),traceId);OperationDiagnostics.finish({status,reason},traceId);return freeze({status,reason});};
           if(ahead?.unreadable){waitForNewerVersion(selected,ahead.item.id);return finish('idle','needs-update');}
           newerVersionGone(selected);
-          if(ahead&&sync.review!==ahead.item.id){scope.release();scope=null;catchUpSharedProvider(selected,ahead,attemptRevision);return finish('deferred','catching-up');}
+          if(ahead&&sync.review!==ahead.item.id){
+            const automaticDeadline=automaticDueAt(selected),preserveAutomatic=automaticNeeded(selected)&&Number.isFinite(automaticDeadline)&&automaticDeadline>Date.now()+50;
+            // A sync-only turn before the local automatic deadline must not
+            // consume that later publication opportunity. Reassert it now;
+            // once the deadline is due, a failed prerequisite may back off.
+            if(preserveAutomatic)scheduleAutomaticBackup(selected,{urgent:Number.isFinite(automaticState(selected).urgentSince)});
+            scope.release();scope=null;catchUpSharedProvider(selected,ahead,attemptRevision,{preserveAutomatic});return finish('deferred','catching-up');
+          }
           if(ahead)return finish('idle','needs-review');
           if(sync.review){sync.review='';presentation.resolve(selected.id,'sync-review');}
           sync.failed=false;sync.syncedAt=new Date().toISOString();notifyStatus();
@@ -1298,15 +1305,15 @@ registry.define('backup-provider',1,input=>{
   // Backoff supersedes urgency for the *same* failed revision, but must not
   // push back a higher-priority request for a newer canonical revision.
   // A missing revision is treated conservatively as the same failed work.
-  function schedulePendingProviderBackup(selected,delay=1000,{backoff=false,attemptRevision='',trigger='pending-retry'}={}){
+  function schedulePendingProviderBackup(selected,delay=1000,{backoff=false,attemptRevision='',preserveAutomatic=false,trigger='pending-retry'}={}){
     const job=providerConvergenceJob(selected);
     if(!job)return false;
-    const newer=backoff&&attemptRevision&&canonicalConvergenceRevision()!==attemptRevision;
-    // Reassert the newer mutation's normal deadline before recording the old
-    // attempt's retry. Correctness must not depend on its timer surviving an
-    // in-flight catch-up/foreground ownership transition.
-    if(newer)scheduleAutomaticBackup(selected,{urgent:Number.isFinite(automaticState(selected).urgentSince)});
-    return job.schedule(Math.max(1000,Number(delay)||1000),String(trigger||'pending-retry'),backoff&&!newer?'replace':'earliest')!==false;
+    const newer=backoff&&attemptRevision&&canonicalConvergenceRevision()!==attemptRevision,preserve=preserveAutomatic===true&&automaticNeeded(selected);
+    // Reassert a newer revision, or one still waiting for its first automatic
+    // opportunity while an earlier sync prerequisite ran. After that
+    // opportunity is actually due, ordinary same-revision backoff may govern.
+    if(newer||preserve)scheduleAutomaticBackup(selected,{urgent:Number.isFinite(automaticState(selected).urgentSince)});
+    return job.schedule(Math.max(1000,Number(delay)||1000),String(trigger||'pending-retry'),backoff&&!newer&&!preserve?'replace':'earliest')!==false;
   }
   function wakeProviderBackground(selected,trigger='eligibility'){
     if(!selected?.repository)return false;
