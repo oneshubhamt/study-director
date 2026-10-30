@@ -45,7 +45,7 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shar
   runtime.configurePendingBackupRetry(freeze(pending));
   runtime.configureAutomaticBackup(freeze({covered:id=>coveredBy.has(id)?coveredBy.get(id):covered,current:()=>current}));
   return {
-    clock,runtime,presentation,policy:policy.protocol,publishedAt,publishedBy,diagnosticStarts,currentRevision:()=>current,onPublication:fn=>{publicationHook=fn;},
+    clock,runtime,presentation,policy:policy.protocol,publishedAt,publishedBy,diagnosticStarts,onPublication:fn=>{publicationHook=fn;},
     change:(urgent=false)=>{current=new clock.Date(clock.now()).toISOString();runtime.noteChange({urgent});},
     expire:()=>{expiresAt=clock.now();listener?.();},
     signIn:(lifetime=59*MINUTE)=>{authorized=true;expiresAt=clock.now()+lifetime;listener?.();},
@@ -168,10 +168,12 @@ const cases=[];
     driveDownload:async()=>{reads.push(t.clock.now());if(!changed){changed=true;await t.clock.advance(1);changedAt=t.clock.now();t.change(true);}throw Object.assign(new Error('network down'),{code:'DRIVE_NETWORK'});}});
   assert.equal(t.runtime.scheduleSharedSync('google-drive','revision-aware-catch-up'),true);
   await tick(t,t.policy.automaticUrgentMs+7000);
-  const distinctReads=[...new Set(reads)];
   assert.ok(Number.isFinite(changedAt),'the canonical edit must occur inside the first catch-up attempt');
-  const pending=t.runtime.backgroundStatus().find(row=>row.job==='google-drive convergence');
-  assert.ok(distinctReads.some(at=>at>changedAt&&at<=changedAt+t.policy.automaticUrgentMs+1000),`revision-aware catch-up state=${JSON.stringify({changedAt,now:t.clock.now(),current:t.currentRevision(),urgentMs:t.policy.automaticUrgentMs,reads:distinctReads,pending,starts:t.diagnosticStarts.filter(row=>row.name==='provider-convergence')})}`);
+  // The change is asynchronous and may occur at the end of the first fake-clock
+  // advance. Give its own urgent deadline time to become eligible.
+  await tick(t,t.policy.automaticUrgentMs+1000);
+  const distinctReads=[...new Set(reads)];
+  assert.ok(distinctReads.some(at=>at>changedAt&&at<=changedAt+t.policy.automaticUrgentMs+1000),'the newer revision must get another catch-up opportunity inside its urgent window rather than inherit the older attempt\'s backoff');
   const afterUrgent=distinctReads.length;await tick(t,10*1000);
   assert.equal([...new Set(reads)].length,afterUrgent,'once the newer revision\'s own catch-up attempt fails, its normal retry backoff may govern');
   cases.push('catch-up failure backoff is revision-aware');
