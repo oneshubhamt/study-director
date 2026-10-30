@@ -68,6 +68,23 @@ assert.equal(module.maintenanceDefersAcrossObservation(freeze({reason:'publicati
 }
 
 {
+  const fake=clock(),bg=coordinator(fake),automatic=bg.beginForeground({respectBackgroundSuspension:true});
+  assert.ok(automatic,'automatic sync enters without an external hold');
+  const internal=bg.suspend('sync',{preserveForegroundController:automatic.controller});
+  await internal.settled;assert.equal(automatic.signal.aborted,false,'managed recovery must not cancel the automatic sync that initiated its own suspension');
+  assert.equal(bg.status().held,true,'managed recovery still suspends other background work');
+  assert.equal(await bg.beginBackground('convergence'),null,'no second automatic operation may enter during managed recovery');
+  const external=bg.suspend('pwa-update');
+  assert.equal(automatic.signal.aborted,true,'a separate PWA suspension must still cancel the retained automatic sync');
+  let finished=false;external.settled.then(()=>{finished=true;});await Promise.resolve();
+  assert.equal(finished,false,'external suspension waits until the cancelled automatic sync actually releases');
+  automatic.release();await external.settled;assert.equal(finished,true);
+  bg.resume(internal);bg.resume(external);
+  const later=bg.beginForeground({respectBackgroundSuspension:true});assert.ok(later,'automatic sync can resume after all holds release');later.release();
+  assert.deepEqual(fake.pending(),[]);
+}
+
+{
   const fake=clock(),bg=coordinator(fake);let fired=0;const convergence=await bg.beginBackground('convergence');assert.ok(convergence);
   bg.schedule('maintenance',1000,()=>{fired+=1;});await fake.advance(1500);assert.equal(fired,0,'lower-priority scheduled work must not fire while a higher-priority background job owns the target');
   convergence.release();await fake.advance(0);assert.equal(fired,1,'deferred scheduled work must re-arm when the higher-priority owner releases');

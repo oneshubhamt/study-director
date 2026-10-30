@@ -121,7 +121,7 @@ registry.define('backup-recovery-host',1,()=>{
       // captures half-applied data.
       automaticBackup:freeze({
         suspend:async reason=>{
-          const held=input.providers.suspendBackground(reason);
+          const held=input.providers.suspendBackground(reason,{preserveManagedSync:reason==='sync'});
           try{await held.settled;}catch(error){held.release();throw error;}
           return held;
         },

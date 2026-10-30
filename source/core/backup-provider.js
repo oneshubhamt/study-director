@@ -1553,9 +1553,13 @@ registry.define('backup-provider',1,input=>{
     return providerBackground(selected).preemptBackground();
   }
 
-  function suspendBackground(reason='pwa-update'){
+  function suspendBackground(reason='pwa-update',{preserveManagedSync=false}={}){
+    // The sync initiating managed recovery must survive its own background
+    // hold. Other holds (PWA update, file backup, storage reset) still abort it.
+    const retained=preserveManagedSync===true&&reason==='sync'&&foregroundView()?.kind==='sync'?foregroundController:null;
+    const retainedProvider=retained?foregroundView()?.providerId:'';
     const held=[...providers.values()].filter(selected=>selected.repository).map(selected=>{
-      const coordinator=providerBackground(selected);return {coordinator,suspension:coordinator.suspend(reason)};
+      const coordinator=providerBackground(selected);return {coordinator,suspension:coordinator.suspend(reason,{preserveForegroundController:selected.id===retainedProvider?retained:null})};
     });
     let released=false;
     return freeze({settled:Promise.all(held.map(row=>row.suspension.settled)),release:()=>{

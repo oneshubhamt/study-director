@@ -114,9 +114,9 @@ registry.define('repository-background',1,input=>{
     function wake(reason='eligibility',discover=true){if(foreground||suspensions.size)return false;for(const [name,owned] of jobs)owned.wake(reason,discover&&!owned.status().busy&&discoverable.get(name)?.()===true);resumeTimers();return true;}
     function suspendTimers(){for(const entry of scheduled.values())disarm(entry);}
     function resumeTimers(){if(foreground||suspensions.size)return false;for(const entry of scheduled.values())arm(entry);return true;}
-    function suspend(reason='suspended'){
+    function suspend(reason='suspended',{preserveForegroundController=null}={}){
       const token=`bg_${(++suspensionSequence).toString(36)}_${nowMs().toString(36)}`,label=String(reason||'suspended'),waiting=[];suspensions.add(token);suspendTimers();
-      if(foreground?.respectBackgroundSuspension===true){
+      if(foreground?.respectBackgroundSuspension===true&&foreground.controller!==preserveForegroundController){
         if(!foreground.controller.signal.aborted)foreground.controller.abort(backgroundAbort('REPOSITORY_BACKGROUND_SUSPENDED',`Automatic repository work paused (${label}).`));
         waiting.push(foreground.settlement);
       }
