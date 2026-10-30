@@ -9371,10 +9371,30 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     notesAlignByTitle:(value,deletedIds)=>AppData.notes.alignByTitle(value,deletedIds),
     notesTrashKey:key=>DailyRecordCodec.noteKeys.trash(key),
     notesFailure:()=>AppData.notes.failure(),
-    restoreJournalPrepare:async value=>{const backupFile=await Exports.run('file.persist',{file:value.blob});const {blob,...metadata}=value;return AppData.restoreJournal.prepare({...metadata,backupFile});},
+    restoreJournalPrepare:async value=>{
+      const backupFile=await Exports.run('file.persist',{file:value.blob}),{blob,...metadata}=value;
+      try{return await AppData.restoreJournal.prepare({...metadata,backupFile});}
+      catch(error){
+        // A failed/ambiguous commit must never discard the only rollback bytes.
+        // Release an unused producer only after a fresh journal read proves
+        // that no durable reference points to this file.
+        try{
+          const journal=await AppData.restoreJournal.read();
+          if(journal?.payload?.backupFile?.name!==backupFile.name)await BackupFiles.release(backupFile.name);
+        }catch(probeError){AppDiagnostics.capture('backup.restore-journal-orphan-check',probeError,'warn');}
+        throw error;
+      }
+    },
     restoreJournalRead:async()=>{const journal=await AppData.restoreJournal.read();if(!journal)return null;const ref=journal.payload.backupFile;return ref?{...journal,payload:{...journal.payload,blob:await Exports.run('file.read',{ref})}}:journal;},
     restoreJournalMark:async(id,phase)=>{const marked=await AppData.restoreJournal.mark(id,phase);if(phase==='verified')settleStorageReset();return marked;},
-    restoreJournalClear:async id=>{const journal=await AppData.restoreJournal.read();await AppData.restoreJournal.clear(id);if(journal?.payload.backupFile)await BackupFiles.release(journal.payload.backupFile.name);},
+    restoreJournalClear:async id=>{
+      const journal=await AppData.restoreJournal.read();
+      await AppData.restoreJournal.clear(id);
+      // Once the durable journal is retired, failed scratch disposal must not
+      // convert a verified restore into a failed restore/second rollback.
+      if(journal?.payload.backupFile)try{await BackupFiles.release(journal.payload.backupFile.name);}
+      catch(error){AppDiagnostics.capture('backup.restore-journal-file-release',error,'warn');}
+    },
     scheduleRead:()=>PlanData.readDraft()??'',
     personalSettle:async options=>{
       const backupCapture=options&&options.backupCapture===true;
