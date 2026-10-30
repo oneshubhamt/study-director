@@ -1,12 +1,17 @@
 Promotion QA request
 
-Request: backup-p1-p2-correctness-closure-r6-2026-10-30
-Source/test revision: 05075bb9d143cbfa3c67a8bcde68699f1c7606e2 (request commit changes only this QA request file)
+Request: backup-p1-p2-correctness-closure-final-2026-10-30
+Source/test revision: a2cd2dd6f4b9f1d845d0caf2590f56f2cf0b82f2 (request commit changes only this QA request file)
 
-Run full Promotion QA.
+Run full Promotion QA on the clean branch state.
 
-The revision-aware regression now guarantees a distinct canonical source revision during the failing attempt, matching production's monotonic mutation clock rather than allowing a fake-clock same-timestamp edit. The production guard from 44a05597de184e2704740b519a3660d67c56887c remains: if an attempt revision is stale, reassert the newer automatic/urgent deadline before recording the old backoff.
+Objectives to certify:
+- P1: backup source revision selects the freshest valid storage-health projection; startup reconciles the durable canonical mutation clock before automatic provider/background-owner activation and Device Folder installation shares that prerequisite.
+- P2 revision ordering: all genuine failure/turn/catch-up backoffs carry the attempt revision; if canonical state changes during an attempt, the newer state’s automatic/urgent deadline is explicitly reasserted before the old attempt’s retry is recorded.
+- P2 provenance: all pending-provider schedule sites carry explicit trigger provenance.
+- P2 suspension: automatic Drive catch-up cannot enter through an existing provider background suspension; a later suspension aborts and awaits that automatic handoff; explicit/manual foreground semantics remain unchanged.
+- P2 recovery durability: every configured automatic destination that owes recovered canonical state gets the durable managed-provider pending marker, including temporarily unavailable configured peers; convergence is not reported complete if any peer intent failed to persist; explicit disconnect/forget retires that destination’s obligation.
 
-Also certify P1 source-revision/startup reconciliation, exact trigger provenance, suspension-safe automatic Drive catch-up, and durable all-destination managed-recovery obligations including fail-closed peer intent persistence.
+The targeted repository run on the immediately preceding clean source logic passed all targeted safety/repository contracts, PWA deployment, source build, generated-build verification and syntax. Temporary test diagnostics have been removed; the distinct-revision regression remains.
 
-No workflow or timing-budget changes. Lower-priority efficiency/liveness refinements remain deferred.
+Do not change workflow policy or timing budgets. Lower-priority efficiency/liveness refinements remain deferred to the next pass.
