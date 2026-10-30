@@ -48,6 +48,7 @@ await app.restoreJournal.clear(restoreId);
 assert.equal(idbDurability.strict,restoreStrictBefore+1,'restore journal retirement must use strict durability');
 assert.equal(idbDurability.normal,restoreNormalBefore,'restore journal retirement must not fall back to a normal durability transaction');
 assert.equal(await app.restoreJournal.read(),null,'restore journal should disappear only after explicit cleanup');
+await assert.rejects(()=>app.restoreJournal.clear(restoreId),/disappeared before cleanup/u,'a named journal cannot silently disappear during cleanup');
 await journalMeta.write('restoreJournalPayload',initialPayload);
 await assert.rejects(()=>app.restoreJournal.read(),/incomplete or corrupted/u,'orphan payload must fail closed');
 await assert.rejects(()=>app.restoreJournal.prepare(Object.freeze({id:'restore_qa-orphan-payload',blob:new Blob(['new']),filename:'new.sdbackup',scheduleText:''})),/still requires recovery/u,'orphan payload cannot be overwritten');
