@@ -46,7 +46,12 @@ try{
   const a=await open(first,server,'A'),b=await open(second,server,'B');
   await connect(a,'A');await waitFor(async()=>!!(await sync(a))?.syncedAt,{label:'A synced',timeout:60000});
   assert.equal(await b.evaluate(runSession('Phone')),'running','the phone runs today\'s session');
-  await connect(b,'B');await waitFor(async()=>!!(await sync(b))?.syncedAt,{label:'B synced',timeout:60000});
+  await connect(b,'B');
+  try{await waitFor(async()=>!!(await sync(b))?.syncedAt,{label:'B synced',timeout:60000});}
+  catch(error){
+    const diagnostic=await b.evaluate(`(async()=>{const d=__PWA6;return {provider:d.BackupProviderRuntime.status(),location:d.BackupProviderRuntime.locationStatus('google-drive'),background:d.BackupProviderRuntime.backgroundStatus(),sync:d.BackupProviderRuntime.diagnosticSync(),automaticWaiting:d.BackupProviderRuntime.automaticWaiting(),session:(await d.AppData.activeSession.load()).value};})()`).catch(cause=>({diagnosticError:String(cause&&cause.message||cause)}));
+    console.error('[session-plan-sync] B initial sync diagnostic',JSON.stringify(diagnostic));throw error;
+  }
   await waitFor(async()=>!markers()&&!await waiting(b),{label:'B settles',timeout:90000});
 
   await checkAgain(a,'A');
