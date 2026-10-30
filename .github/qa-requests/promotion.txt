@@ -1,23 +1,16 @@
 Promotion QA request
 
-Request: current-fixes-final-promotion-r7-2026-10-30
-Source/test revision: 4cba1b91ac9e9d6b15f791a786734012ba5645c6 (trigger commit changes only this QA request file)
+Request: current-fixes-final-promotion-r8-2026-10-30
+Source/test revision: ccd100e153d6bb52f6fa6dc1b8ea086893e78340 (trigger commit changes only this QA request file)
 
 Run full Promotion QA on current-fixes.
 
-The revision-aware convergence regressions now use a faithful harness:
-- automatic cases continue to assert non-interactive publication;
-- the manual shared-turn case explicitly enables the foreground interactive provider path, verifies that publication was reached, then creates a newer urgent revision inside the failed attempt.
+The manual shared-turn harness now models the actual sequence:
+- first publication is the explicit foreground interactive backup;
+- after turn loss, the preserved newer revision is handled by the normal non-interactive automatic convergence path.
 
-Certify the complete branch:
-- backup freshness/startup gating;
-- revision-aware convergence and durable retry intent;
-- suspension/preemption and managed recovery;
-- independent Device Folder/Google Drive publication;
-- shared Active Session ownership;
-- restore verification/rollback, retention, cleanup and integrity;
-- PWA/service-worker and built-runtime behavior;
-- Insights performance;
-- full hermetic, risk, mutation, branch-edge, release and browser certification.
+All automatic-only cases continue to assert that they never prompt.
+
+Certify the complete branch across hermetic correctness, risk coverage, mutation, branch-edge coverage, release certification, complete browser certification, Insights performance, backup/recovery/convergence, PWA/service-worker behavior, and architecture contracts.
 
 No workflow policy change is part of this request.
