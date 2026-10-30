@@ -299,13 +299,13 @@ Each item below records **baseline observation → risk → required investigati
 | F13 | Durability policy | C | OPEN | Initial source trace |
 | F14 | Cache-key risk | D | OPEN | Initial source trace |
 | F15 | Restart limitation | E | OPEN | Initial source trace |
-| F16 | Retention policy | E | OPEN | Initial source trace |
-| F17 | Token security policy | E | OPEN | Initial source trace |
-| F18 | PWA operational limits | E | OPEN | Initial source trace |
-| F19 | Capacity envelope | E | OPEN | Initial source trace |
-| F20 | Architecture cleanup | F | OPEN | Initial source trace |
+| F16 | Retention policy | None | VERIFIED CLOSED — intentional | User confirmed current-format preference, 2026-10-30 |
+| F17 | Token security policy | None | VERIFIED CLOSED — accepted | Serverless short-lived Drive token storage accepted, 2026-10-30 |
+| F18 | PWA operational limits | None | VERIFIED CLOSED — accepted | No server; PWA execution restrictions understood, 2026-10-30 |
+| F19 | Capacity envelope | Deferred | DEFERRED — do not add arbitrary global size cap | Revisit only a proven space/memory defect |
+| F20 | Architecture cleanup | Deferred | DEFERRED — no size-only modularization | Refactor only for demonstrated correctness or duplication |
 
-**Total:** 20 open items, including non-defect choices. Do not report “20 bugs fixed” when this tracker is complete.
+**Total: 15 active findings (F1–F15); 3 accepted/closed by policy (F16–F18); 2 deferred (F19–F20).** These are not 20 bugs.
 
 ## 7. Implementation programme — pass cards
 
@@ -341,14 +341,14 @@ Each item below records **baseline observation → risk → required investigati
 **Targeted QA:** Missing file, wrong size, same-size modified bytes, stale digest key, quarantine/recovery and reused objects.
 
 ### Pass E — Provider resilience, retention policy, security and capacity
-**Status:** NOT STARTED. **IDs:** F15–F19. **Depends:** B and D where applicable.  
+**Status:** NOT STARTED. **Active ID: F15.** F16–F18 resolved by policy; F19 deferred. **Depends:** B and D.  
 **Audit:** Drive upload continuity/collisions; device-specific transport differences; current/legacy retention; auth token storage and CSP; background eligibility; binary streaming/memory/quota.  
 **Plan:** Choose policies explicitly and do not implement complexity without value. Show per-provider pending/current/permission/failure states truthfully.  
 **Objective verification:** (E1) stopped uploads cannot yield false verified commit; (E2) history policy is justified and safe; (E3) token lifetime and exposure understood; (E4) no false closed-PWA scheduling promises; (E5) large datasets fail safely without destroying canonical data; (E6) two providers remain independent.  
 **Targeted QA:** Interrupted Drive upload/restart, identity collisions, old-version retirement, permission expiry, offline/resume, simulated low quota and capacity bounds.
 
 ### Pass F — Consolidation, dead-code cleanup and source-level re-audit
-**Status:** NOT STARTED. **IDs:** F20 and leftovers. **Depends:** A–E.  
+**Status:** DEFERRED. **F20 is not an authorized module-splitting pass.** Only reopen for a proven issue and user approval.  
 **Audit:** Re-examine source and the completed ledger de novo; map actual duplicated policies/branches, contracts and call chains; compare post-A–E architecture with invariants.  
 **Plan:** Remove only proven redundancy, preserve compatibility guards still required by shipped data, avoid feature drift.  
 **Objective verification:** (F1-obj) all F1–F20 have evidenced dispositions; (F2-obj) no drift from backup/recovery invariant set; (F3-obj) no new parallel systems or dead adapters; (F4-obj) simpler/equivalent behavior; (F5-obj) targeted QA of all F changes.  
@@ -365,7 +365,7 @@ A pass is **closed** only when:
 6. §6 and §7 statuses match the implementation journal entry.
 7. No unrequested full QA, source rewrite, release, branch merge or unrelated modification occurred.
 
-Final A–F completion requires **all 20 findings accounted for**, not necessarily 20 code changes; any outstanding safety issue remains visibly OPEN/BLOCKED.
+Active completion means F1–F15 have evidenced outcomes. F16–F18 are accepted; F19–F20 deferred. Never misreport a remaining safety issue as closed.
 
 ## 9. Append-only implementation journal / scratchpad
 
@@ -381,6 +381,16 @@ Final A–F completion requires **all 20 findings accounted for**, not necessari
 - **Objectives check:** Document preserves complete issue register; preserves known strengths and uncertainty labels; defines the preliminary-plus-five-step process, per-pass objectives, dependencies, closure rules and journal; does not claim passes completed.
 - **QA:** **None executed** for this documentation-only setup. At most, verify the committed document exists on correct branch with its content intact.
 - **Next action:** Pass A — start with this ledger (§0 and Pass A), read current source, update findings/plan, implement, verify objectives, run targeted QA, append journal entry.
+
+### Entry 001 — Owner decisions on F16–F20 (2026-10-30)
+- **Source of decision:** Owner explicitly retained current-format history preference (F16), accepted browser-only Google Drive token and PWA restrictions (F17–F18), requested no arbitrary capacity changes (F19), and deferred architectural splitting (F20). Implement F1–F15 including F14–F15.
+- **F16: VERIFIED CLOSED, intentional.** Current-format ordinary checkpoints should supersede old-format ordinary checkpoints according to existing retention rules. Preserve safety exceptions for protected/unreadable/uncertain history.
+- **F17: VERIFIED CLOSED, accepted trade-off.** Keep GIS token-model authorization and origin-local localStorage reuse for a short-lived access token. Source: source/external/drive.js; it requests only https://www.googleapis.com/auth/drive.file, validates scopes and expires/removes tokens. No refresh token is held; without a backend, expired tokens need user-driven reauthorization. Retain strict CSP, minimized script surface, no token logging and explicit revoke. Moving to sessionStorage or memory would impair reload/cross-tab reuse; browser-only encryption with an accessible key is not meaningful protection against script compromise. Google docs: https://developers.google.com/identity/oauth2/web/guides/use-token-model and https://developers.google.com/identity/oauth2/web/guides/migration-to-gis .
+- **F18: VERIFIED CLOSED, accepted platform limit.** No server. PWA automatic backups run only when browser execution, connectivity and provider authorization allow. Do not simulate unavailable always-on background sync. Recheck any concrete incorrect UI claim if found incidentally.
+- **F19: DEFERRED.** Do not impose global aggregate size cap. Existing per-asset and metadata limits, Blob composition and restore storage preflight warrant preserving large-library support. Reopen only for a specific demonstrated unsafe allocation, quota or retry failure; correct that narrow problem.
+- **F20: DEFERRED.** No module split based solely on file length. Keep existing ownership boundaries, clean up proven duplication only while fixing F1–F15; no standalone refactor phase.
+- **Plan:** Pass A → B → C → D (includes F14) → focused Pass E (F15); Pass F not scheduled. These policy closures are not code fixes. All F1–F15 remain unimplemented.
+- **Implementation:** Ledger-only edit; no application code changed. **Targeted QA:** Not applicable to this documentation decision; verify ledger read-back and diff.
 
 ### Template — copy for the next pass
 #### Entry NNN — Pass [A–F], [short description]
