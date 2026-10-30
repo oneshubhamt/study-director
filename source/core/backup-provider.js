@@ -1786,7 +1786,10 @@ registry.define('backup-provider',1,input=>{
     if(!providerConnected(selected))return freeze({cancelled:true,reason:'not-connected'});
     const traceId=OperationDiagnostics.start('provider-sync',selected.label,{provider:selected.id}),foreground=beginForeground(selected,options&&options.signal||null,{respectBackgroundSuspension:options&&options.respectBackgroundSuspension===true});
     if(!foreground){OperationDiagnostics.finish({status:'skipped',reason:'busy'},traceId);return freeze({cancelled:true,reason:'busy'});}
-    const operation=BackupController.beginImport(),cancelImport=()=>operation.cancel?.('Synchronization was cancelled.');
+    // An automatic catch-up is already admitted under the suspension-aware
+    // provider owner. It must not impersonate a standalone file import and
+    // suspend/cancel its own foreground sync through the file-work observer.
+    const operation=BackupController.beginImport({backgroundPreemptible:options&&options.respectBackgroundSuspension===true}),cancelImport=()=>operation.cancel?.('Synchronization was cancelled.');
     if(foreground.signal.aborted)cancelImport();else foreground.signal.addEventListener('abort',cancelImport,{once:true});
     beginForegroundView(selected,'sync',`Syncing with ${selected.label}…`,options.presentation);setBusy(true);
     try{

@@ -9496,13 +9496,12 @@ const {
 // Each location row has one inline note, drawn from the presentation's current event.
 // The controller owns execution; the coordinator owns the immutable presentation event.
 fileBackupRowReady=true;BackupController.subscribeStatus(renderFileBackup);renderFileBackup();
-// A file backup or file import the person starts holds every location's
-// background work (integrity checks, automatic backups) until it ends, so it
-// never queues behind a background hash in the shared file worker. Automatic
-// backups never set these flags, so they cannot hold themselves.
+// A user-started file backup/import holds background locations until it ends.
+// An automatic Drive catch-up also uses the shared import controller but is
+// already suspension-aware; treating it as manual file work cancels itself.
 let fileWorkHold=null;
 function holdBackgroundForFileWork(){
-  const status=BackupController.status(),active=!!(status.importActive||status.standaloneExportActive);
+  const status=BackupController.status(),active=!!(status.importHoldsBackground||status.standaloneExportActive);
   if(active&&!fileWorkHold){try{fileWorkHold=BackupProviderRuntime.suspendBackground('file-backup');void Promise.resolve(fileWorkHold.settled).catch(()=>{});}catch(error){fileWorkHold=null;AppDiagnostics.capture('backup.file-hold',error,'warn');}}
   else if(!active&&fileWorkHold){const hold=fileWorkHold;fileWorkHold=null;try{hold.release();}catch(error){AppDiagnostics.capture('backup.file-hold-release',error,'warn');}}
   foregroundChanged();

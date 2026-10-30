@@ -130,10 +130,10 @@ function throwIfImportAborted(signal,authorityOptions=null){assertAuthority(auth
 const statusListeners=new Set();
 function subscribeStatus(listener){if(typeof listener!=='function')throw new TypeError('Backup status listener is invalid.');statusListeners.add(listener);return ()=>statusListeners.delete(listener);}
 function notifyStatus(){for(const listener of statusListeners)try{listener();}catch(error){AppDiagnostics.capture('backup.status-listener',error,'warn');}}
-function beginImport(){
+function beginImport({backgroundPreemptible=false}={}){
   if(activeImportOperation)return activeImportOperation;
   const controller=new AbortController(),id=++importSequence;
-  activeImportOperation=freeze({id,signal:controller.signal,cancel:reason=>{if(!controller.signal.aborted)controller.abort(importAbortError(reason));}});
+  activeImportOperation=freeze({id,backgroundPreemptible:backgroundPreemptible===true,signal:controller.signal,cancel:reason=>{if(!controller.signal.aborted)controller.abort(importAbortError(reason));}});
   notifyStatus();return activeImportOperation;
 }
 function cancelImport(reason='Backup import was cancelled by the user.',options={}){
@@ -149,7 +149,7 @@ async function yieldImport(signal,authorityOptions=null){
   await yieldTask({signal});
   throwIfImportAborted(signal,authorityOptions);
 }
-function status(){return Object.freeze({busy:activeOperations>0,activeOperations,importActive:!!activeImportOperation,importCancelled:!!activeImportOperation?.signal.aborted,standaloneExportActive:!!localExportPromise||!!localExportRequest});}
+function status(){return Object.freeze({busy:activeOperations>0,activeOperations,importActive:!!activeImportOperation,importHoldsBackground:!!activeImportOperation&&!activeImportOperation.backgroundPreemptible,importCancelled:!!activeImportOperation?.signal.aborted,standaloneExportActive:!!localExportPromise||!!localExportRequest});}
 async function track(operation,wait=false,surface='managed'){activeOperations+=1;try{return await Exports.job(operation,{wait,surface});}finally{activeOperations=Math.max(0,activeOperations-1);}}
 const BackupCapture=BackupCaptureModule.create(freeze({
   configuration:freeze({backupVersion,limits:APP_LIMITS,portableAssets}),
