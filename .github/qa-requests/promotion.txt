@@ -1,15 +1,18 @@
 Promotion QA request
 
-Request: backup-p1-p2-correctness-closure-r3-2026-10-30
-Source/test revision: 539850901a992cbae879a11265057d31901a54c3 (the request commit itself changes only this QA request file)
+Request: backup-p1-p2-correctness-closure-r4-2026-10-30
+Source/test revision: 90d63f2a1675f3ee1ecb4afe6f6435a7edd9faee (the request commit itself changes only this QA request file)
 
-Run full Promotion QA on the current branch. Production source remains the correctness implementation from 3a5752cd934123aa25cf50db96b75503cb5d00d8; this revision only corrects two over-specific test contracts exposed by the previous run.
+Run full Promotion QA on the current branch.
 
-Targeted correctness remains:
-- newest valid backup source-revision projection and startup change-clock reconciliation before automatic provider activation;
-- catch-up and shared-turn backoff cannot move a newer canonical revision later than its existing urgent/earlier opportunity;
-- exact retry provenance is preserved at the scheduling call and when that retry actually owns the next execution;
-- automatic Drive catch-up respects provider background suspension before and after admission;
-- managed recovery durably marks every configured automatic destination, including temporarily unavailable configured peers, with explicit disconnect/forget retiring the obligation.
+Correctness objectives:
+- backup source revision uses the freshest valid projection and startup reconciles the durable mutation clock before automatic provider activation;
+- every catch-up/turn/failure backoff carries its attempt revision, so same-revision backoff may govern itself but cannot postpone a newer canonical revision's earlier opportunity;
+- pending-provider scheduling retains exact trigger provenance;
+- automatic Drive catch-up atomically respects provider background suspension before admission and if a suspension arrives after admission, while explicit/manual foreground behavior is unchanged;
+- managed recovery durably records every configured automatic destination that owes recovered canonical state, including temporarily unavailable configured peers;
+- recovery convergence is not reported complete if any configured peer intent failed to persist; explicit disconnect/forget retires that provider's obligation.
 
-Do not change workflow policy or timing budgets. Lower-priority efficiency/liveness refinements remain deferred.
+The newest behavioral tests assert the actual scheduling contract (deadline preservation) rather than requiring a particular diagnostic label to win when an even-earlier sync request already owns the slot. Provenance is asserted independently at source and runtime when each retry owns execution.
+
+No workflow policy/timing budget changes. Lower-priority efficiency/liveness refinements remain deferred to the next pass.
