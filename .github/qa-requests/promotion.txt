@@ -1,24 +1,20 @@
 Promotion QA request
 
-Request: current-fixes-final-promotion-r4-2026-10-30
-Source/test revision: becb45546bd13abff7120a4191ffb90538f4834e (trigger commit changes only this QA request file)
+Request: current-fixes-final-promotion-r5-2026-10-30
+Source/test revision: da7e7b0bf9c6ef57d4d826d4f245739adc828ede (trigger commit changes only this QA request file)
 
-Run full Promotion QA on the cleaned and corrected current-fixes source.
+Run full Promotion QA on current-fixes.
 
-This revision includes:
-- scheduler-eligibility ownership for an unspent automatic/urgent provider opportunity, carried through asynchronous Drive catch-up;
-- the regression test corrected to measure the urgent window from the actual asynchronous canonical change rather than from time advanced before that change occurred;
-- architecture assertions aligned with the explicit ownership contract.
+The prior diagnostic established that the runtime preserved the urgent automatic deadline correctly. The regression harness now also flushes a timer armed at the current fake-clock instant by end-of-advance microtasks, matching the browser's next task rather than delaying it to a later artificial clock step.
 
 Certify the complete branch:
-- backup freshness/startup gating;
-- revision-aware provider convergence and durable retry intent;
-- suspension/preemption and managed recovery;
-- independent Device Folder/Google Drive publication;
+- backup freshness and startup mutation-clock gating;
+- revision-aware convergence, scheduler-owned automatic opportunities and durable retry intent;
+- suspension/preemption, managed recovery and independent Device Folder/Google Drive publication;
 - shared Active Session ownership;
 - restore verification/rollback, retention, cleanup and integrity;
 - PWA/service-worker and built-runtime behavior;
 - Insights performance;
 - full hermetic, risk, mutation, branch-edge, release and browser certification.
 
-No workflow change is part of this request.
+No workflow policy change is part of this request.
