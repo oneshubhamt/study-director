@@ -145,6 +145,7 @@ const cases=[];
   assert.equal(t.runtime.locationStatus('google-drive').sync.failed,true,'a failed sync is known');
   assert.match(t.presentation.syncLabel({...t.runtime.locationStatus('google-drive'),sync:{...t.runtime.locationStatus('google-drive').sync,syncedAt:'2026-10-06T07:00:00.000Z'}}),/^Last synced /u,'so the sidebar says "Last synced", not "Synced"');
   await tick(t,40*1000);assert.equal(attempts().length,2,'a failed catch-up is tried again within a minute');
+  assert.ok(t.diagnosticStarts.some(row=>row.name==='provider-convergence'&&row.details?.trigger==='catch-up-failed'),'when catch-up failure backoff owns the next run, diagnostics preserve its exact trigger');
   await tick(t,2*MINUTE);assert.equal(attempts().length,3,'then after two minutes');
   assert.ok(attempts().at(-1)<5*MINUTE,'long before the next 20-minute check');
   await tick(t,11*MINUTE);assert.equal(attempts().length,4,'then after ten');
@@ -165,7 +166,8 @@ const cases=[];
     driveList:async({kind})=>({items:kind==='checkpoint'||kind==='commit'?[item(kind)]:[],overflow:false,ignored:0}),
     driveDownload:async()=>{reads.push(t.clock.now());if(!changed){changed=true;t.change(true);}throw Object.assign(new Error('network down'),{code:'DRIVE_NETWORK'});}});
   await tick(t,10*1000);
-  assert.equal(t.runtime.backgroundStatus().find(row=>row.job==='google-drive convergence').reason,'important-change','catch-up failure backoff must not replace a newer urgent revision');
+  const pending=t.runtime.backgroundStatus().find(row=>row.job==='google-drive convergence'),dueAt=Date.parse(pending?.nextEligibleAt||'');
+  assert.ok(Number.isFinite(dueAt)&&dueAt<=t.clock.now()+t.policy.automaticUrgentMs+1000,'catch-up failure backoff must not push a newer revision behind its urgent deadline; an already-earlier sync opportunity may legitimately remain the winning trigger');
   const first=[...new Set(reads)].length;await tick(t,t.policy.automaticUrgentMs+5000);
   assert.ok([...new Set(reads)].length>first,'the newer revision must get a catch-up opportunity before the old failure backoff');
   cases.push('catch-up failure backoff preserves a newer canonical revision');
@@ -176,7 +178,8 @@ const cases=[];
   const t=fixture({covered:'2026-10-06T08:00:00.000Z',shared:true});await tick(t,1000);let first=true;
   t.onPublication(async()=>{if(!first)return;first=false;await t.clock.advance(1000);t.change(true);throw Object.assign(new Error('another device is publishing'),{code:'REPOSITORY_SYNC_TURN'});});
   assert.equal(await t.runtime.backup('google-drive'),false);
-  assert.equal(t.runtime.backgroundStatus().find(row=>row.job==='google-drive convergence').reason,'important-change','manual turn backoff must preserve the newer revision trigger');
+  const pending=t.runtime.backgroundStatus().find(row=>row.job==='google-drive convergence'),dueAt=Date.parse(pending?.nextEligibleAt||'');
+  assert.ok(Number.isFinite(dueAt)&&dueAt<=t.clock.now()+t.policy.automaticUrgentMs+1000,'manual turn backoff must not push the newer canonical revision behind its urgent deadline');
   await tick(t,t.policy.automaticUrgentMs+5000);assert.ok(t.publishedAt.length>=2,'newer local work must run before the turn retry deadline');
   cases.push('manual shared turn backoff preserves a newer canonical revision');
 }
