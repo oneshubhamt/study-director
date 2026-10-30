@@ -172,6 +172,9 @@ const cases=[];
   // The change is asynchronous and may occur at the end of the first fake-clock
   // advance. Give its own urgent deadline time to become eligible.
   await tick(t,t.policy.automaticUrgentMs+1000);
+  // FakeClock finishes its advance before microtasks can arm a timer that is
+  // already due. Flush that same instant once, matching the browser's next task.
+  await t.clock.advance(0);await t.clock.drainMicrotasks(240);
   const distinctReads=[...new Set(reads)];
   assert.ok(distinctReads.some(at=>at>changedAt&&at<=changedAt+t.policy.automaticUrgentMs+1000),'the newer revision must get another catch-up opportunity inside its urgent window rather than inherit the older attempt\'s backoff');
   const afterUrgent=distinctReads.length;await tick(t,10*1000);
