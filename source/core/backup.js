@@ -1422,6 +1422,10 @@ async function ensureRestoreCapacity(parsed,preview={}){
   return true;
 }
 
+async function releaseRestoreScratch(file,scope){
+  try{await Exports.run('file.release',{file});}
+  catch(error){AppDiagnostics.capture(scope,error,'warn');}
+}
 async function captureLocalSafetyCopy(_stored,{afterCapture=null}={}){
   const materialized=await createCanonicalCheckpointWithInspection({assumeFlushed:true,requireCanonicalComplete:true}),rollbackJournal=materialized.inspection;
   const {inspection:_inspection,...safety}=materialized,safetyFile=freeze(safety);
@@ -1606,11 +1610,11 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   OperationDiagnostics.mark('local-safety-capture-start');
   const {safetyFile,rollbackJournal}=await captureLocalSafetyCopy(stored,{afterCapture:()=>assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates,stable.scope)});
   OperationDiagnostics.mark('local-safety-capture-complete',{bytes:Number(safetyFile&&safetyFile.blob&&safetyFile.blob.size)||0});
-  const rollbackScheduleText=scheduleRead();
-  const rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),notes:await AppData.deletionRecovery.notes(),attachments:await AppData.deletionRecovery.attachments()});
   const restoreId=`restore_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,14)}`;
-  let committedDescription='',journalPrepared=false;
+  let rollbackScheduleText='',rollbackDeletionState=null,committedDescription='',journalPrepared=false;
   try{
+    rollbackScheduleText=scheduleRead();
+    rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),notes:await AppData.deletionRecovery.notes(),attachments:await AppData.deletionRecovery.attachments()});
     OperationDiagnostics.mark('restore-journal-prepare-start');
     await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,scheduleText:rollbackScheduleText,savedDayDeletions:rollbackDeletionState.savedDays,noteDeletions:rollbackDeletionState.notes,attachmentDeletions:rollbackDeletionState.attachments});
     journalPrepared=true;OperationDiagnostics.mark('restore-journal-prepare-complete');
@@ -1747,7 +1751,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     }
     Object.defineProperty(failure,'studyDirectorCommittedDescription',{value:committedDescription,configurable:true});
     throw failure;
-  }finally{await Exports.run('file.release',{file:safetyFile.blob});}
+  }finally{await releaseRestoreScratch(safetyFile.blob,'backup.restore-safety-file-release');}
   });
 }
 // Replace makes this device match the backup without losing anything here
@@ -1896,9 +1900,11 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
     OperationDiagnostics.mark('local-safety-capture-start');
     const {safetyFile,rollbackJournal}=await captureLocalSafetyCopy(stored);
     OperationDiagnostics.mark('local-safety-capture-complete',{bytes:Number(safetyFile&&safetyFile.blob&&safetyFile.blob.size)||0});
-    const rollbackScheduleText=scheduleRead(),rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),notes:await AppData.deletionRecovery.notes(),attachments:await AppData.deletionRecovery.attachments()});
-    const restoreId=`restore_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,14)}`;let journalPrepared=false,committedDescription='';
+    const restoreId=`restore_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,14)}`;
+    let rollbackScheduleText='',rollbackDeletionState=null,journalPrepared=false,committedDescription='';
     try{
+      rollbackScheduleText=scheduleRead();
+      rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),notes:await AppData.deletionRecovery.notes(),attachments:await AppData.deletionRecovery.attachments()});
       OperationDiagnostics.mark('restore-journal-prepare-start');
       await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,scheduleText:rollbackScheduleText,savedDayDeletions:rollbackDeletionState.savedDays,noteDeletions:rollbackDeletionState.notes,attachmentDeletions:rollbackDeletionState.attachments});
       journalPrepared=true;OperationDiagnostics.mark('restore-journal-prepare-complete');
@@ -1936,7 +1942,7 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
       }
       Object.defineProperty(failure,'studyDirectorCommittedDescription',{value:committedDescription,configurable:true});
       throw failure;
-    }finally{await Exports.run('file.release',{file:safetyFile.blob});}
+    }finally{await releaseRestoreScratch(safetyFile.blob,'backup.restore-safety-file-release');}
   });
 }
 async function restoreManagedVersion(candidate,options={}){
@@ -1960,7 +1966,7 @@ async function recoverInterruptedRestore(){
   if(!durable){clearFault();OperationDiagnostics.finish({recovered:false},traceId);return Object.freeze({recovered:false});}
   if(!appCanMutate()){
     failClosed('An interrupted restore is waiting for the tab that holds Study Director control. Reload after taking control before editing data.');
-    await Exports.run('file.release',{file:durable.payload.blob});OperationDiagnostics.finish({pending:true},traceId);return Object.freeze({recovered:false,pending:true});
+    await releaseRestoreScratch(durable.payload.blob,'backup.recovery-file-release');OperationDiagnostics.finish({pending:true},traceId);return Object.freeze({recovered:false,pending:true});
   }
   requireBackupMutationControl('recovering an interrupted restore');
   return runExclusive('restore-recovery',()=>withPersistenceSuppressed(async()=>{
@@ -1977,7 +1983,7 @@ async function recoverInterruptedRestore(){
       recoveryNotice.finish({lifecycle:'failed',message:`Interrupted restore recovery could not finish: ${error&&error.message||error}. Preserve browser storage and retry recovery.`});
       failClosed(`Interrupted restore recovery could not finish: ${error&&error.message||error}`);
       OperationDiagnostics.fail(error,{},traceId);throw error;
-    }finally{await Exports.run('file.release',{file:durable.payload.blob});}
+    }finally{await releaseRestoreScratch(durable.payload.blob,'backup.recovery-file-release');}
   }));
 }
 async function restoreBackupWithOperation(candidate,operation,options={}){
