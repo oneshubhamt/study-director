@@ -285,13 +285,13 @@ Each item below records **baseline observation → risk → required investigati
 
 | Finding | Class | Pass | Baseline state | Latest result / evidence |
 |---|---|---|---|---|
-| F1 | Confirmed defect | A | OPEN | Initial source trace; not implemented |
+| F1 | Confirmed defect | A | IMPLEMENTED — QA PENDING | Strict atomic journal preparation guards both prior records |
 | F2 | Confirmed defect | C | OPEN | Initial source trace; not implemented |
-| F3 | Confirmed control-flow defect | A | OPEN | Initial source trace; not implemented |
+| F3 | Confirmed control-flow defect | A | IMPLEMENTED — QA PENDING | Post-clear scratch disposal cannot override verified restoration |
 | F4 | Confirmed proof defect | B | OPEN | Initial source trace; not implemented |
 | F5 | Semantic / policy gap | B | OPEN | Initial source trace; policy to decide |
-| F6 | Atomicity risk | A | OPEN | Initial source trace |
-| F7 | Orphan cleanup risk | A | OPEN | Initial source trace |
+| F6 | Atomicity risk | A | IMPLEMENTED — QA PENDING | Pair is read in one readonly metadata transaction |
+| F7 | Orphan cleanup risk | A | IMPLEMENTED — QA PENDING | Journal-aware scratch lease release and protected finally |
 | F8 | Receipt consistency risk | B | OPEN | Initial source trace |
 | F9 | Capacity asymmetry | C | OPEN | Initial source trace |
 | F10 | Integrity trade-off | D | OPEN | Initial source trace |
@@ -311,7 +311,7 @@ Each item below records **baseline observation → risk → required investigati
 ## 7. Implementation programme — pass cards
 
 ### Pass A — Recovery journal correctness and atomicity
-**Status:** NOT STARTED. **IDs:** F1, F3, F6, F7.  
+**Status:** IMPLEMENTED — TARGETED RUNTIME QA PENDING. **IDs:** F1, F3, F6, F7.  
 **Preliminary:** Read §§0–6, current source and §9; identify existing journal lifecycle and rollback file ownership.  
 **Audit:** Full prepare→persist→mark→read→clear→recovery call chains including ambiguous transaction success.  
 **Plan:** Enforce no-overwrite, same-snapshot reads, safe temporary-file disposal, post-commit success independence. Consider shared internal journal helpers only if they reduce rather than obscure logic.  
