@@ -1,16 +1,14 @@
 Promotion QA request
 
-Request: current-fixes-final-promotion-after-risk-coverage-2026-10-30
+Request: final-full-promotion-uncontended-rerun-2026-10-30
 Source/test revision: 9c62a925cdc4029f51a6a6c4f070ef78f2a57005 (request commit changes only this QA request file)
 
-Run the complete Promotion QA on the exact current-fixes source above.
+Rerun the complete Promotion QA without changing product code or performance budgets.
 
-Prior full-gate findings are now closed without relaxing policy:
-- convergence retry/backoff preserves unspent automatic/urgent deadlines and remains revision-aware;
-- the fixed current convergence/recovery trigger vocabulary is complete in privacy-safe diagnostics;
-- Device Folder automaticConfigured behavior is explicitly exercised so the existing risk-coverage floor is preserved rather than lowered;
-- targeted Repository Checks pass on the exact source revision above.
+Reason:
+- The immediately preceding run passed the complete main Promotion job, including hermetic correctness, risk coverage, mutation certification, branch-edge coverage, non-browser release certification, and complete browser/built-runtime coverage.
+- Only the three-sample Insights performance gate failed.
+- No runtime or Insights source changed since the preceding run whose Insights gate passed; its uncontended samples completed in 639.9 ms and 865 ms against the unchanged 1000 ms budget.
+- Keep the existing budget unchanged and require the workflow's normal one-of-three uncontended sample gate.
 
-Certify the complete release surface: hermetic correctness, risk coverage, mutation certification, AST branch-edge coverage, non-browser release certification, complete browser/built-runtime coverage, Insights performance gate, backup/restore/recovery, Drive synchronization and Active Session ownership, independent Device Folder/Drive publication, background suspension/preemption, PWA/service-worker behavior, storage durability and current architecture contracts.
-
-No runtime or workflow change is part of this request commit.
+This is the final full certification rerun for the current source/test state.
