@@ -4102,7 +4102,7 @@ function writeActiveSessionNow(snapshot,options={}){
   if(!appCanMutate())return Promise.resolve(null);
   if(ReviewSaveService.status().activeSessionPersistenceBlocked)return Promise.resolve(null);
   const session=activeSessionPayload(snapshot);if(!session)return Promise.resolve(null);
-  return AppData.activeSession.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true}).then(result=>{handleActiveSessionRepositoryResult(result,'save');return result;}).catch(error=>{handleActiveSessionRepositoryResult({ok:false,error},'save');return {ok:false,error};});
+  return AppData.activeSession.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true}).then(result=>{handleActiveSessionRepositoryResult(result,'save');return result;}).catch(error=>{handleActiveSessionRepositoryResult({ok:false,error},'save');return {ok:false,error};});
 }
 function writeLiveDraftNow(options={}){
   if(restoreSessionPersistenceSuppressed()||managedRecoverySessionQuiesced()&&options.allowDuringRecoveryQuiescence!==true)return null;
@@ -5038,7 +5038,7 @@ async function suspendTodaySession(){
         session.status='suspended';
         session.suspendedAt=new Date().toISOString();
         session.updatedAt=session.suspendedAt;
-        const saved=await AppData.activeSession.save(session);
+        const saved=await AppData.activeSession.save(session,{strictDurability:true});
         if(!saved.ok)throw saved.error||new Error('active session save failed');
       }
       resetRuntimeSessionState({lifecycleManaged:true,source:'session-suspend',date:todayISO()});
@@ -5086,7 +5086,7 @@ async function transferSessionOwnershipHere(session){
     ownershipClaim=claimed.claim;
     next=ActiveSessionCodec.sanitizeCurrent({...planned,revision:Math.max(planned.revision,Number(ownershipClaim.revision)||0),updatedAt:new Date().toISOString()});
     if(!next)throw new Error('the accepted Active Session ownership revision is invalid');
-    const saved=await AppData.activeSession.save(next);
+    const saved=await AppData.activeSession.save(next,{strictDurability:true});
     if(!handleActiveSessionRepositoryResult(saved,'save'))throw saved.error||new Error('the session could not be saved on this device');
     localSaved=true;
     const current=(await AppData.activeSession.load())?.value||null;
@@ -5098,7 +5098,7 @@ async function transferSessionOwnershipHere(session){
     if(localSaved){
       try{
         const current=(await AppData.activeSession.load())?.value||null;
-        if(CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),next)){const restored=await AppData.activeSession.save(previous);if(!restored?.ok)throw restored?.error||new Error('session rollback failed');rolledBack=true;}
+        if(CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),next)){const restored=await AppData.activeSession.save(previous,{strictDurability:true});if(!restored?.ok)throw restored?.error||new Error('session rollback failed');rolledBack=true;}
       }catch(rollbackError){AppDiagnostics.capture('session.takeover-local-rollback',rollbackError,'warn');}
     }
     if(ownershipClaim&&(!localSaved||rolledBack))await BackupProviderRuntime.releaseSessionClaim('google-drive',ownershipClaim);
@@ -5192,7 +5192,7 @@ async function finishTodaySession(){
     setTimerMode(TIMER_MODES.DONE,'manual-finish-day');
     resetBreakState();
     refreshCoreUi();
-    const saved=await writeLiveDraftNow({markChanged:true});
+    const saved=await writeLiveDraftNow({markChanged:true,emergency:true});
     if(saved&&saved.ok===false)throw saved.error||new Error('live session save failed');
     setPlanStatus('Today is finished for this plan. Review the day and save it to Library when ready.');
     await goTab('review',{source:'finish-today'});
@@ -9240,7 +9240,7 @@ async function restoreSessionStateThroughLifecycle(importedSession,scheduleText=
     snapshotReview:snapshot&&snapshot.review
   },async()=>{
     if(session){
-      const saved=await AppData.activeSession.save(session);
+      const saved=await AppData.activeSession.save(session,{strictDurability:true});
       if(!saved.ok)throw saved.error||new Error('Rollback active-session save failed.');
       if(session.status==='suspended'){
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
