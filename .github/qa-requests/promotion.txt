@@ -1,12 +1,12 @@
 Promotion QA request
 
-Request: consolidated-a-f-certification-2026-10-31-retry-5
+Request: consolidated-a-f-certification-2026-10-31-retry-6
 Requested by repository owner after Pass F: comprehensive A–F verification, all available QA and no deployment.
 
 Audited application baseline: 5874b06667f42e0798b5b534620105a3e8b82f89
 Test-only correction: 14e975055c1b8cdf0a6dada7eb602e977dc5ee8f — portable export receipt assertions include the intentionally added attachmentsComplete field. No production code changed.
 Prior full run 41202180229 stopped in backup-persistence.mjs on a stale expected test object; all Insights samples and their aggregate gate passed.
-Source differences since baseline: documentation/planning and this workflow request only; no application or test modification.
+Source differences since audited Pass F application baseline: documentation, scoped test/fixture corrections, and QA request records only; production application code, formats, QA budgets, and CI workflows unchanged.
 Reference plan: docs/DATA-TOPOLOGY-BACKUP-REMEDIATION.md, Entry 012.
 
 Scope (existing full Promotion QA workflow, unchanged):
@@ -28,3 +28,5 @@ Retry-3 evidence: full run 41202516115 completed hermetic unit/integration tests
 Retry-4 evidence: Promotion 41202990901 had a PASS Insights performance gate, then stopped at a syntax error in an authored architecture assertion for the partial-attachment choices contract (no production failure). The malformed nested regex was replaced by exact-string source-structure checks at `38b58ddf95ffbe61c900a2ef8fd69898cdd4a266`. Continue full Promotion without relaxing any product or QA standard.
 
 Retry-5 evidence: full Promotion 41203411096 passed the Insights performance gate and the updated backup-recovery architecture test, then failed cleer-integration.mjs at an obsolete exact Active Session save call. Current production correctly waits for durable Drive ownership then uses AppData.activeSession.save(next,{strictDurability:true}). An adjacent destructive-maintenance assertion also assumed non-fresh under-lease inventory; Pass F correctly uses freshDigests:true. Both architecture contracts updated at d6704c7e740112cb1ac170b90a8c18f5202ca994. No runtime source change or QA threshold change.
+
+Retry-6 evidence: full Promotion 41203991995 completed unit and integration suites, failed in architecture/storage/compatibility-contract.mjs line 113 because its original receipt-format exact-source assertion predated Pass B's correct null-format exclusion for known incomplete attachment copies. Contract updated (test-only) in 0dc9fe9ed2bf084468c2c857b3f309880796b594, preserving the no-fresh-backup proof for incomplete copies. All Insights performance jobs and aggregate gate passed on 41203991995. Re-run full Promotion; do not claim complete certification until every gate is green.
