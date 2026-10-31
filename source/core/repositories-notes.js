@@ -241,7 +241,7 @@ const repository=(()=>{
       lastRescueShortfallNotice=risk;
       if(risk){
         const labels=rescueShortfall.map(key=>displayAreaName(notes[key]?.label||key));
-        showSubjectNoteSaveWarning(`The browser's ${Math.round(APP_LIMITS.noteRescueBytes/104857.6)/10} MiB emergency copy could not hold unsaved ${labels.length===1?'Note':'Notes'}: ${labels.slice(0,3).join(', ')}${labels.length>3?` and ${labels.length-3} more`:''}. Keep this tab open until Notes finish saving; otherwise these edits may be lost.`);
+        showSubjectNoteSaveWarning(freeze({kind:'rescue-capacity',message:`The browser's ${Math.round(APP_LIMITS.noteRescueBytes/104857.6)/10} MiB emergency copy could not hold unsaved ${labels.length===1?'Note':'Notes'}: ${labels.slice(0,3).join(', ')}${labels.length>3?` and ${labels.length-3} more`:''}. Keep this tab open until Notes finish saving; otherwise these edits may be lost.`}));
       }
     }
     if(!written||!complete)AppDiagnostics.capture('notes.rescue-write',LocalStorageContract.lastError||new Error(`Unsaved notes exceed the ${Math.round(APP_LIMITS.noteRescueBytes/1024)} KB browser copy.`),'error');
