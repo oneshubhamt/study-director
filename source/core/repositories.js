@@ -879,7 +879,7 @@ async function loadActiveSessionRecord(retry=0,options={}){
         try{
           if(readEpoch!==activeSessionMutationEpoch)return;
           assertWriteToken(reconciliationToken,'the active-session reconciliation');
-          await idbPutActiveSession(value,reconciliationToken);
+          await idbPutActiveSession(value,reconciliationToken,true);
           if(readEpoch===activeSessionMutationEpoch){assertWriteToken(reconciliationToken,'clearing reconciled session recovery');if(!LocalStorageContract.remove(STORAGE_KEYS.recovery)&&options.strict)throw LocalStorageContract.lastError||new Error('Reconciled session recovery could not be cleared.');}
           if(!clearDeletionRecoveryKeys([deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID)])&&options.strict)throw LocalStorageContract.lastError||new Error('Session deletion recovery could not be reconciled.');
         }catch(e){reconciliationError=e;if(!isOwnershipLostError(e))AppDiagnostics.capture('active-session.reconcile-idb',e);}
@@ -887,7 +887,7 @@ async function loadActiveSessionRecord(retry=0,options={}){
         try{
           if(readEpoch!==activeSessionMutationEpoch)return;
           assertWriteToken(reconciliationToken,'the active-session canonical read-repair');
-          if(rawIdb&&!sameDataValue(rawIdb,idbSession))await idbPutActiveSession(idbSession,reconciliationToken);
+          if(rawIdb&&!sameDataValue(rawIdb,idbSession))await idbPutActiveSession(idbSession,reconciliationToken,true);
           if(!LocalStorageContract.remove(STORAGE_KEYS.recovery)&&options.strict)throw LocalStorageContract.lastError||new Error('Session recovery could not be cleared.');
         }catch(error){reconciliationError=error;if(!isOwnershipLostError(error))AppDiagnostics.capture('active-session.reconcile-local',error);}
       }
