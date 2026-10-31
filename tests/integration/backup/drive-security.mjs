@@ -493,8 +493,16 @@ const restartCases=[];
   assert.equal(matching.length,1,'a reload replay must not create duplicate '+kind+' identities');
   const changed=await makeRepositoryFile(kind,id,'CHANGED-'+kind+'-stable-contents');
   await assert.rejects(()=>page2.provider.repository.upload({...changed,knownAbsent:true}),/different content|identity|checksum/u,'replayed '+kind+' conflicts must preserve the original');
-  assert.equal(page2.state.files.get(sent.remoteId).sha256Checksum,original.digest);
-  restartCases.push('completed '+kind+' replay and collision rejected');
+  const remote=page2.state.files.get(sent.remoteId);
+  assert.equal(remote.sha256Checksum,original.digest);
+  remote.ownedByMe=false;
+  await assert.rejects(()=>page2.provider.repository.upload({...original,knownAbsent:true}),/unsafe metadata/u,'a marked but untrusted existing identity cannot be treated as absent');
+  remote.ownedByMe=true;
+  remote.sha256Checksum='f'.repeat(64);
+  await assert.rejects(()=>page2.provider.repository.upload({...original,knownAbsent:true}),/different content/u,'server-reported wrong SHA-256 must forbid reuse');
+  remote.sha256Checksum=original.digest;
+  assert.equal([...page2.state.files.values()].filter(row=>row.appProperties?.studyDirectorRepositoryKind===kind&&row.appProperties?.studyDirectorRepositoryId===id).length,1,'unsafe metadata and server SHA-256 cannot produce a duplicate');
+  restartCases.push('completed '+kind+' replay, malformed identity and checksum collision rejected');
  }
 }
 {
