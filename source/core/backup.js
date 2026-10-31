@@ -232,7 +232,7 @@ async function createPortableBackupBlob(plan,{preferCompression=true,verify=true
 async function materializePortableCheckpoint(capture,{preferCompression=true,verify=true,retainInspection=false,report=null}={}){
   const plan=requireLogicalCheckpointCapture(capture);
   const file=await createPortableBackupBlob(plan,{preferCompression,verify,retainInspection,report});
-  return freeze({...file,exportedAt:plan.exportedAt,sourceRevision:plan.sourceRevision,warning:plan.warning,counts:freeze({...plan.counts})});
+  return freeze({...file,exportedAt:plan.exportedAt,sourceRevision:plan.sourceRevision,warning:plan.warning,attachmentsComplete:plan.completeness?.fullyRecoverable===true,counts:freeze({...plan.counts})});
 }
 const LogicalCheckpointCapture=freeze({capture:captureLogicalCheckpoint});
 const PortableCheckpointMaterializer=freeze({materialize:materializePortableCheckpoint});
@@ -303,7 +303,7 @@ function exportReporter(){
 // A portable backup holds the data as of its capture. A file saved through the
 // save dialog is read back (verified); a download cannot be, but the person
 // still made a backup, so the reminder counts both.
-function portableCopy(file,verified){return freeze({source:'file',sourceRevision:String(file&&file.sourceRevision||''),verified});}
+function portableCopy(file,verified){return freeze({source:'file',sourceRevision:String(file&&file.sourceRevision||''),verified,attachmentsComplete:file?.attachmentsComplete===true});}
 async function exportPortableBackup(){
   if(localExportPromise)return localExportPromise;
   // The save dialog opens straight from the click, before any waiting, so the
@@ -995,7 +995,7 @@ function backupCandidatePreview(parsed,file,metadata={}){
     appVersion:clampText(manifest.appVersion||data.appVersion||'',40)||null,
     formatVersion:Number(parsed&&parsed.formatVersion)||0,
     counts:Object.freeze({...counts}),
-    assets:Object.freeze({total:(parsed.assetDescriptors||[]).length,library:(parsed.assetDescriptors||[]).filter(item=>item.library).length,missing:(parsed.assetDescriptors||[]).filter(item=>item.missing).length}),
+    assets:Object.freeze({...BackupCodec.attachmentCoverage(parsed.assetDescriptors||[]),library:(parsed.assetDescriptors||[]).filter(item=>item.library).length}),
     legacy:!!report.legacy,
     ignoredTombstones:Number(report.ignoredTombstones)||0,
     ignoredOrInvalid:(Number(report.skipped)||0)+(Number(report.duplicates)||0),
@@ -2014,7 +2014,7 @@ async function importPortableBackup(ev){
     const preview=candidate.preview||{},stored=inspectedBackups.get(candidate),snapshot=stored?candidateSnapshotState(stored):null,parsed=snapshot&&snapshot.parsed||null;
     const captureAuthority=String(parsed&&parsed.captureAuthority||'unknown'),exactCapable=Number(parsed&&parsed.formatVersion)>=18&&captureAuthority==='canonical-complete'&&!!parsed&&!!parsed.protectedCheckpointManifest,rescuePartial=captureAuthority==='rescue-partial';
     const restoreChoices=presentation.restoreChoices,choices=[...(preview.reconciliationCapable?[restoreChoices.missing]:[]),restoreChoices.combine,...(exactCapable?[restoreChoices.replace]:[])];
-    const decisionDetails=[exactCapable?'Choose how this backup should be applied.':rescuePartial?'This backup was saved while browser storage was failing. It can bring back what it holds, but it cannot replace current data.':'This backup is from an older version of Study Director. It can be combined with current data, but it cannot replace it.',...[presentation.reach?.()||''].filter(Boolean)];
+    const decisionDetails=[exactCapable?'Choose how this backup should be applied.':rescuePartial?'This backup was saved while browser storage was failing. It can bring back what it holds, but it cannot replace current data.':'This backup is from an older version of Study Director. It can be combined with current data, but it cannot replace it.',BackupCodec.missingAttachmentWarning(parsed.assetDescriptors||[]),...[presentation.reach?.()||''].filter(Boolean)].filter(Boolean);
     OperationDiagnostics.mark('standalone-decision-start',{},traceId);const mode=await choose({title:'Use this backup',message:`Verified backup${preview.exportedAt?` from ${new Date(preview.exportedAt).toLocaleString()}`:''}.`,details:decisionDetails,cancelLabel:'Keep current',choices});
     OperationDiagnostics.mark('standalone-decision-complete',{mode:mode||'keep-current'},traceId);if(!mode){finishPortablePresentation({message:'Backup import cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,stage:'decision'},traceId);return freeze({cancelled:true});}
     consumed=true;OperationDiagnostics.mark('standalone-apply-start',{mode},traceId);
