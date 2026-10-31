@@ -9679,10 +9679,26 @@ function showStorageResetDecision({unsaved=[],retrying=false}={}){
 }
 // Pausing is synchronous: scheduling stops at once, and waiting only lets a
 // running automatic backup wind down.
+let deviceBackupInstallPromise=null;
+function ensureDeviceBackupInstalled(){
+  // Startup and reset recovery share the same installation/permission read.
+  // A second caller must not mistake an in-flight installation for readiness.
+  if(!deviceBackupInstallPromise)deviceBackupInstallPromise=reconcileStartupChangeClock().then(()=>DeviceBackup.install()).catch(error=>{deviceBackupInstallPromise=null;throw error;});
+  return deviceBackupInstallPromise;
+}
 function beginStorageResetHold(clearedAt){
   if(storageResetHold)return storageResetHold;
-  const hold={provider:null,reloaded:false,clearedAt:String(clearedAt||new Date().toISOString())};storageResetHold=hold;storageResetSince=Date.now();
+  const hold={provider:null,deviceReady:null,reloaded:false,clearedAt:String(clearedAt||new Date().toISOString())};storageResetHold=hold;storageResetSince=Date.now();
   try{hold.provider=BackupProviderRuntime.suspendBackground('storage-reset');}catch(error){AppDiagnostics.capture('storage-reset.provider-suspend',error,'warn');}
+  // Permission may have changed while the site data was cleared. Never prompt
+  // automatically: a denied or disconnected folder falls through to Drive or
+  // the explicit restore decision. The timeout bounds a stalled browser API.
+  hold.deviceReady=new Promise(resolve=>{
+    let finished=false;
+    const complete=value=>{if(finished)return;finished=true;clearTimeout(timer);resolve(value);};
+    const timer=setTimeout(()=>{AppDiagnostics.capture('storage-reset.device-ready',new Error('Device Folder readiness did not finish in time.'),'warn');complete(false);},8000);
+    void ensureDeviceBackupInstalled().then(()=>DeviceBackup.refreshPermission()).then(()=>complete(DeviceBackup.status().connected)).catch(error=>{AppDiagnostics.capture('storage-reset.device-ready',error,'warn');complete(false);});
+  });
   if(readStorageHealth().browserDataClearedAt!==hold.clearedAt)writeStorageHealth({browserDataClearedAt:hold.clearedAt});
   return hold;
 }
@@ -10953,7 +10969,7 @@ function installApplicationDomBindings(){
   NativeCapabilities.install();
   void BackupProtection.refresh().catch(setBackupProtectionSurfaceError);
   BackupProviderRuntime.subscribeStatus(renderDriveBackup);renderDriveBackup();
-  void reconcileStartupChangeClock().then(()=>DeviceBackup.install()).then(()=>installRepositoryIntegrityScrub()).catch(error=>AppDiagnostics.capture('backup.repository-integrity-install',error,'warn'));
+  void ensureDeviceBackupInstalled().then(()=>installRepositoryIntegrityScrub()).catch(error=>AppDiagnostics.capture('backup.repository-integrity-install',error,'warn'));
   updateFullscreenButton();
   PlanDraftEditor.install();
   UiTabRegistry.updateOrientation();
