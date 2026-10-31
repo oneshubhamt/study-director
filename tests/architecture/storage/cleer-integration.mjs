@@ -186,7 +186,7 @@ const sessionClaimRelease=backupProvider.slice(backupProvider.indexOf('async fun
 assert.doesNotMatch(sessionClaimRelease,/deleteSessionClaim/u,'failed takeover rollback must never delete the newest immutable claim and expose an older owner');
 assert.match(sessionClaimRelease,/writeRepositorySessionClaim/u,'failed takeover rollback must publish a higher ownership epoch restoring the previous owner');
 const sessionTransfer=app.slice(app.indexOf('async function transferSessionOwnershipHere('),app.indexOf('// Another device continued today\'s session'));
-assert.ok(sessionTransfer.indexOf("claimSessionOwnership('google-drive'")>=0&&sessionTransfer.indexOf("claimSessionOwnership('google-drive'")<sessionTransfer.indexOf('AppData.activeSession.save(next)'),'Drive ownership must become durable before the new local owner is saved or allowed to run');
+assert.ok(sessionTransfer.indexOf("claimSessionOwnership('google-drive'")>=0&&sessionTransfer.indexOf("claimSessionOwnership('google-drive'")<sessionTransfer.indexOf('AppData.activeSession.save(next,{strictDurability:true})'),'Drive ownership must become durable before the new local owner is saved or allowed to run');
 assert.match(app,/'apply-schedule': async\(\)=>\{[\s\S]{0,700}transferSessionOwnershipHere\(sessionPanelSession\)/u,'Start a new plan here must use the same durable ownership transfer as Continue Here');
 assert.match(app,/claim\?\.state==='owned'&&claim\.ownedHere&&claim\.applies[\s\S]{0,180}resumeAfterReleasedSessionClaim/u,'only an explicit rollback ownership claim projected to this device may resume a claim-frozen timer');
 
@@ -209,7 +209,7 @@ const cleanupStages=[
   'repositoryObjectInventory(planning,{signal})',
   'beginRepositoryMaintenance(planning,',
   'repositoryOperationSelected(owner,{signal,checkProtection:keepAlive})',
-  'repositoryProviderInventory(protectedSelection,{signal})',
+  'repositoryProviderInventory(protectedSelection,{signal,freshDigests:true})',
   'repositoryCleanupInventoryMatches(state,currentInventory)',
   'cleanupRepositoryProviderState(protectedSelection,state,{workBudget,preparedObjectListing,checkMaintenance:()=>keepAlive(true),inventoryBeforeDelete:true',
   'endRepositoryMaintenance(planning,maintenanceLease)'
