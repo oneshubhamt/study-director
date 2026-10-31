@@ -26,6 +26,8 @@ The Device Folder and Drive used to carry their own copies of the same machinery
   - Device Folder: a local directory handle (`device-folder-storage.js`). A thin controller (`device-backup.js`) keeps the chosen folder, its permission, remembering it across launches and its status row.
   - Drive: the Drive API (`drive.js`).
 
+**Implementation ownership after Pass F.** The backup provider is the sole owner of checkpoint/commit history-list normalization, the comparison of planned versus current cleanup identities, and the publication read-back lease/checksum lifecycle. Both ordinary Version History discovery and destructive cleanup use the same identity parsing; only cleanup requests fresh content digests. Immediately before deletion, the engine repeats the manifest/commit digest check under its exclusive maintenance lease, treating any changed or unreadable identity as a reason to defer rather than delete. Manifest and commit **provenance** validation remains separate after the shared byte verification; format validation, object retention and canonical capture still belong to `managed-repository.js`. Storage adapters produce physical listing, transport and checksum evidence but do not decide which backup version is safe to retain or remove. No new modules or backup-format changes were introduced for this consolidation.
+
 ## Rules the engine applies once
 
 - **Needs a backup.** Each location records the change time its last committed backup captured. It needs a backup when the change clock has moved past that. The clock is the mutation epoch written inside every save's transaction, and it only moves forward.
