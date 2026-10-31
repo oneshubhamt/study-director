@@ -1,6 +1,6 @@
 Promotion QA request
 
-Request: consolidated-a-f-certification-2026-10-31-retry-4
+Request: consolidated-a-f-certification-2026-10-31-retry-5
 Requested by repository owner after Pass F: comprehensive A–F verification, all available QA and no deployment.
 
 Audited application baseline: 5874b06667f42e0798b5b534620105a3e8b82f89
@@ -26,3 +26,5 @@ Retry-2 evidence: Promotion run 41202319659 stopped in repository-incremental-pr
 Retry-3 evidence: full run 41202516115 completed hermetic unit/integration tests and reached architecture tests, where backup-recovery-ux-contract.mjs retained an obsolete unconditional Replace-choice assumption. Corrected the source-shape assertion and added a behavioral partial-attachment recovery regression at commit e9a9bc57d60e54ec731e06a4f8762d966aa85fb4. Insights gate separately failed with all three worker timing samples over the existing unchanged limit on that run; previous two runs passed. Do not weaken performance budget or claim it passed until a new qualifying run does.
 
 Retry-4 evidence: Promotion 41202990901 had a PASS Insights performance gate, then stopped at a syntax error in an authored architecture assertion for the partial-attachment choices contract (no production failure). The malformed nested regex was replaced by exact-string source-structure checks at `38b58ddf95ffbe61c900a2ef8fd69898cdd4a266`. Continue full Promotion without relaxing any product or QA standard.
+
+Retry-5 evidence: full Promotion 41203411096 passed the Insights performance gate and the updated backup-recovery architecture test, then failed cleer-integration.mjs at an obsolete exact Active Session save call. Current production correctly waits for durable Drive ownership then uses AppData.activeSession.save(next,{strictDurability:true}). An adjacent destructive-maintenance assertion also assumed non-fresh under-lease inventory; Pass F correctly uses freshDigests:true. Both architecture contracts updated at d6704c7e740112cb1ac170b90a8c18f5202ca994. No runtime source change or QA threshold change.
