@@ -1,6 +1,6 @@
 # Background services — source audit, implementation strategy and working remediation ledger
 
-> **Programme:** Background Services P0–P6. **Established:** 2026-10-31 on `current-fixes` at `05cf0d8c925f91a6f90b26b61d326cf2941b75e9`. **Current state:** PHASE 0 (DOCUMENTATION) COMPLETE when this file is committed; **P0 NOT STARTED**. No runtime edits; 21 candidate findings, *not 21 confirmed bugs*. Existing A–F backup/data certification stays closed, subject to new counterevidence.
+> **Programme:** Background Services P0–P6. **Established:** 2026-10-31 on `current-fixes` at `05cf0d8c925f91a6f90b26b61d326cf2941b75e9`. **Current state:** **P0 SOURCE-EVIDENCE BASELINE COMPLETE** (Entry 002); P1–P6 NOT STARTED. No runtime edits; 21 candidate findings, *not 21 confirmed bugs*. P0 adjudications and scenario gates: [P0-EVIDENCE.md](BACKGROUND-SERVICES-P0-EVIDENCE.md). Existing A–F backup/data certification stays closed, subject to new counterevidence.
 
 > **Current source wins.** This document is a working implementation scratchpad; the source links in §3 are frozen observations. Before **every** later pass, re-read the exact current production code, adjacent safeguards and this ledger. Never implement a speculative 'fix' based solely on the frozen audit or a passing/failing QA fixture.
 
@@ -80,7 +80,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 ## 2. Full independent candidate findings register — source evidence, controls and objectives
 
 ### BS01 — Remote-ownership freeze ignores thrown, null or {ok:false} local session flush and still stops the clock
-- **Baseline classification:** Control-flow defect; **priority:** P1; **provisional pass:** P1; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Control-flow defect; **priority:** P1; **provisional pass:** P1; **status:** P0 SOURCE REVIEWED — SOURCE-CONFIRMED GAP — P1 runtime failure proof pending. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs01).
 - **Source trace:** [`source/app.html`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/app.html#L2775), [`4091-4124`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/4091-4124). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** Remote-ownership freeze ignores thrown, null or {ok:false} local session flush and still stops the clock.
 - **Target:** Preserve dirty/local rescue, stop duplicate execution safely, and prevent destructive interpretation of unverified state.
@@ -88,7 +88,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** Capture save result and trace recovered local state; no data-loss conclusion without fault-run.
 
 ### BS02 — Equal/higher job contention can defer work under a long busy retry after the blocking slot is released
-- **Baseline classification:** Liveness risk; **priority:** P2; **provisional pass:** P3; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Liveness risk; **priority:** P2; **provisional pass:** P3; **status:** P0 SOURCE REVIEWED — QUALIFIED CONTENTION RISK — P3 clock proof pending. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs02).
 - **Source trace:** [`source/core/repository-background.js`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/core/repository-background.js#L93), [`127-148`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/127-148), [`273-304`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/273-304), [`326-348`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/326-348). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** Equal/higher job contention can defer work under a long busy retry after the blocking slot is released.
 - **Target:** Prove timing; wake eligible deferred jobs on release without collapsing deliberate error/permission backoff.
@@ -96,7 +96,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** Provider release listeners currently redraw status; not necessarily a runnable wake.
 
 ### BS03 — Notification click can navigate an existing in-scope client to app root without that page's save preflight
-- **Baseline classification:** Conditional navigation hazard; **priority:** P1/P2; **provisional pass:** P2; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Conditional navigation hazard; **priority:** P1/P2; **provisional pass:** P2; **status:** P0 SOURCE REVIEWED — SOURCE-CONFIRMED CONDITIONAL NAVIGATION — P2 browser proof pending. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs03).
 - **Source trace:** [`source/platform/sw.js`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/platform/sw.js#L205), [`source/app.html`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/app.html#L2192). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** Notification click can navigate an existing in-scope client to app root without that page's save preflight.
 - **Target:** Focus existing client and route in-page where possible; avoid destructive navigation of dirty data.
@@ -104,7 +104,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** Pagehide rescue exists; loss of edits unproven.
 
 ### BS04 — PDF fallback handedOff=true prevents releasing Blob URL and OPFS reader with no visible later owner
-- **Baseline classification:** Resource lifecycle gap; **priority:** P2; **provisional pass:** P2; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Resource lifecycle gap; **priority:** P2; **provisional pass:** P2; **status:** P0 SOURCE REVIEWED — SOURCE-CONFIRMED READER/URL LIFETIME — P2 proof pending. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs04).
 - **Source trace:** [`source/app.html`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/app.html#L2103). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** PDF fallback handedOff=true prevents releasing Blob URL and OPFS reader with no visible later owner.
 - **Target:** Explicit bounded/acknowledged handoff retirement, not premature revoke.
@@ -112,7 +112,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** External reader may legitimately need the URL during handoff.
 
 ### BS05 — One-second popup poll persists until window
-- **Baseline classification:** Performance trade-off; **priority:** P3; **provisional pass:** P2; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Performance trade-off; **priority:** P3; **provisional pass:** P2; **status:** P0 SOURCE REVIEWED — MEASURE ONLY — P2 optional resource cleanup. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs05).
 - **Source trace:** [`source/app.html`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/app.html#L2118). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** One-second popup poll persists until window.closed; no explicit parent page-exit owner.
 - **Target:** Consolidated popup lifetime cleanup, preserving long-lived PDF access.
@@ -120,7 +120,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** Avoid revoking before external viewer finishes.
 
 ### BS06 — Each 128-object shallow integrity chunk rematerializes, sorts, stringifies and SHA-hashes full metadata catalogue
-- **Baseline classification:** Repeated work proven in source; **priority:** P2; **provisional pass:** P4; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Repeated work proven in source; **priority:** P2; **provisional pass:** P4; **status:** P0 SOURCE REVIEWED — REPEATED FULL SCAN CONFIRMED — P4 benchmark pending. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs06).
 - **Source trace:** [`source/core/asset-storage.js`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/core/asset-storage.js#L65). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** Each 128-object shallow integrity chunk rematerializes, sorts, stringifies and SHA-hashes full metadata catalogue.
 - **Target:** Recheck against stable generation/cursor; no false clean on mutation or corruption.
@@ -128,7 +128,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** Shallow audit intentionally tests presence/size, not every file hash.
 
 ### BS07 — Reference inventory gathering precedes the nominal five-second shallow-audit budget
-- **Baseline classification:** Unbounded preflight risk; **priority:** P2; **provisional pass:** P4; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Unbounded preflight risk; **priority:** P2; **provisional pass:** P4; **status:** P0 SOURCE REVIEWED — QUALIFIED BULK READ WITH YIELDS — P4 benchmark pending. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs07).
 - **Source trace:** [`source/app.html`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/app.html#L8827). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** Reference inventory gathering precedes the nominal five-second shallow-audit budget.
 - **Target:** Measure and if needed paginate/canonicalize source scan with no missing-reference false negative.
@@ -136,7 +136,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** Existing strict source check must be preserved.
 
 ### BS08 — GC phase constructs entire Notes/days/pending-review value arrays before bounded per-entry loop
-- **Baseline classification:** Bulk materialization risk; **priority:** P2; **provisional pass:** P4; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Bulk materialization risk; **priority:** P2; **provisional pass:** P4; **status:** P0 SOURCE REVIEWED — BULK REFERENCES CONFIRMED — P4 benchmark pending. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs08).
 - **Source trace:** [`source/core/asset-maintenance.js`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/core/asset-maintenance.js#L24). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** GC phase constructs entire Notes/days/pending-review value arrays before bounded per-entry loop.
 - **Target:** Bound expensive snapshots only where benchmark warrants, with conservative complete reference proof.
@@ -144,7 +144,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** No deletion from partial/unknown reference census.
 
 ### BS09 — OPFS directory iterator and current entry survive yielded passes; browser mutation semantics deserve verification
-- **Baseline classification:** Iterator liveness question; **priority:** P3; **provisional pass:** P4; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Iterator liveness question; **priority:** P3; **provisional pass:** P4; **status:** P0 SOURCE REVIEWED — ITERATOR PORTABILITY RISK — P4 proof pending. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs09).
 - **Source trace:** [`source/core/asset-storage.js`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/core/asset-storage.js#L127). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** OPFS directory iterator and current entry survive yielded passes; browser mutation semantics deserve verification.
 - **Target:** Prove eventual orphan reclamation after mutation/sleep; reset iterator only at safe cycle boundaries.
@@ -152,7 +152,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** May be retained as-is with evidence.
 
 ### BS10 — Scratch GC rereads restore and integrity metadata for every candidate in a pass
-- **Baseline classification:** Repeated metadata I/O; **priority:** P2; **provisional pass:** P4; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Repeated metadata I/O; **priority:** P2; **provisional pass:** P4; **status:** P0 SOURCE REVIEWED — REPEATED PROTECTION READ CONFIRMED — P4 benchmark pending. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs10).
 - **Source trace:** [`source/core/exports.js`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/core/exports.js#L23), [`source/app.html`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/app.html#L8609). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** Scratch GC rereads restore and integrity metadata for every candidate in a pass.
 - **Target:** Eliminate redundant reads only with fresh per-deletion durable pin validation.
@@ -160,7 +160,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** Never delete on cached absence alone.
 
 ### BS11 — Read-only history/object maintenance planning precedes the bounded destructive lease
-- **Baseline classification:** Safety/performance trade-off; **priority:** P2; **provisional pass:** P5; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Safety/performance trade-off; **priority:** P2; **provisional pass:** P5; **status:** P0 SOURCE REVIEWED — INTENTIONAL SAFE PREFLIGHT — P5 measure before changes. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs11).
 - **Source trace:** [`source/core/backup-provider.js`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/core/backup-provider.js#L715). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** Read-only history/object maintenance planning precedes the bounded destructive lease.
 - **Target:** Measure pages, bytes, memory, responsiveness; safely resume preflight if material, keep fresh lease revalidation.
@@ -168,7 +168,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** Long planning is intentional to avoid locking foreground publication.
 
 ### BS12 — Installation rejects new generation at three shell caches before a capacity cleanup opportunity
-- **Baseline classification:** Availability liveness trade-off; **priority:** P2; **provisional pass:** P3; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Availability liveness trade-off; **priority:** P2; **provisional pass:** P3; **status:** P0 SOURCE REVIEWED — CONDITIONAL INSTALL LIMIT — P3 reproduction pending. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs12).
 - **Source trace:** [`source/platform/sw.js`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/platform/sw.js#L65), [`108-142`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/108-142). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** Installation rejects new generation at three shell caches before a capacity cleanup opportunity.
 - **Target:** Perform only proven-safe preinstall reclamation; preserve unknown/live generation protections.
@@ -176,7 +176,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** No eviction under uncertainty.
 
 ### BS13 — PWA update check/download uses independent timer and may overlap large foreground network work
-- **Baseline classification:** Network contention hypothesis; **priority:** P3; **provisional pass:** P5; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Network contention hypothesis; **priority:** P3; **provisional pass:** P5; **status:** P0 SOURCE REVIEWED — NETWORK CONTENTION HYPOTHESIS — P5 measurement. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs13).
 - **Source trace:** [`source/app.html`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/app.html#L10248). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** PWA update check/download uses independent timer and may overlap large foreground network work.
 - **Target:** Measure contention; optionally defer nonurgent check with bounded eventual retry.
@@ -184,7 +184,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** Update application itself already has safety gates.
 
 ### BS14 — Timed-out registration
-- **Baseline classification:** Native API limitation; **priority:** P3; **provisional pass:** P3; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Native API limitation; **priority:** P3; **provisional pass:** P3; **status:** P0 SOURCE REVIEWED — NATIVE API LIMIT — P3 late-state proof only. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs14).
 - **Source trace:** [`source/core/pwa-lifecycle.js`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/core/pwa-lifecycle.js#L216). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** Timed-out registration.update() can continue in browser despite Promise timeout.
 - **Target:** Reconcile late worker activation and reflect 'timed out' without implying native cancellation.
@@ -192,7 +192,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** Browser-native request need not be abortable.
 
 ### BS15 — Concurrent focus/activation permission queries can overwrite newer permission state out of order
-- **Baseline classification:** Async race risk; **priority:** P2; **provisional pass:** P6; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Async race risk; **priority:** P2; **provisional pass:** P6; **status:** P0 SOURCE REVIEWED — SOURCE-CONFIRMED PERMISSION RACE SHAPE — P6 fault proof. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs15).
 - **Source trace:** [`source/core/device-backup.js`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/core/device-backup.js#L214). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** Concurrent focus/activation permission queries can overwrite newer permission state out of order.
 - **Target:** Coalesce/generation-fence by handle identity; preserve user-gesture permission requests.
@@ -200,7 +200,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** prepareRepository already fences handle changes.
 
 ### BS16 — Visible session polls remote ownership every 15 s (up to four remote checks/minute)
-- **Baseline classification:** Drive cost trade-off; **priority:** P2; **provisional pass:** P5; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Drive cost trade-off; **priority:** P2; **provisional pass:** P5; **status:** P0 SOURCE REVIEWED — 15-SECOND POLL CONFIRMED — P5 request/latency measurement. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs16).
 - **Source trace:** [`source/app.html`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/app.html#L2768), [`source/core/backup-provider.js`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/core/backup-provider.js#L1108). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** Visible session polls remote ownership every 15 s (up to four remote checks/minute).
 - **Target:** Measure latency/requests; adaptive cadence only if handoff responsiveness remains acceptable.
@@ -208,7 +208,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** Do not silently weaken ownership fencing.
 
 ### BS17 — Startup may wake multiple independent bounded housekeeping jobs simultaneously
-- **Baseline classification:** Concurrency performance hypothesis; **priority:** P2; **provisional pass:** P5; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Concurrency performance hypothesis; **priority:** P2; **provisional pass:** P5; **status:** P0 SOURCE REVIEWED — STARTUP OVERLAP HYPOTHESIS — P5 measurement. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs17).
 - **Source trace:** [`source/app.html`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/app.html#L5413), [`11069-11081`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/11069-11081). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** Startup may wake multiple independent bounded housekeeping jobs simultaneously.
 - **Target:** Measure overlap/CPU/input delay; deconflict only proven disruptive bursts.
@@ -216,7 +216,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** Do not introduce global lock/deadlock.
 
 ### BS18 — Wall-time deadlines plus throttled/suspended browser timers can delay opportunities after clock change
-- **Baseline classification:** Clock/suspend policy; **priority:** P3; **provisional pass:** P3; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Clock/suspend policy; **priority:** P3; **provisional pass:** P3; **status:** P0 SOURCE REVIEWED — CLOCK/SUSPEND HYPOTHESIS — P3 testing. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs18).
 - **Source trace:** [`source/core/operation-lifecycle.js`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/core/operation-lifecycle.js), [`source/core/repository-background.js`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/core/repository-background.js). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** Wall-time deadlines plus throttled/suspended browser timers can delay opportunities after clock change.
 - **Target:** Clarify wall-time due vs monotonic attempt budget; rediscover after resume, no false guarantee.
@@ -224,7 +224,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** No claim of hidden-page guaranteed execution.
 
 ### BS19 — Runtime SW cache reads rely on install-time SHA-256 rather than rehashing each retrieval
-- **Baseline classification:** Accepted integrity envelope; **priority:** P3; **provisional pass:** P6; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Accepted integrity envelope; **priority:** P3; **provisional pass:** P6; **status:** P0 SOURCE REVIEWED — INTENTIONAL INSTALL-TIME HASH POLICY — P6 retain. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs19).
 - **Source trace:** [`source/platform/sw.js`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/platform/sw.js#L39), [`150-160`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/150-160), [`224-239`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/224-239). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** Runtime SW cache reads rely on install-time SHA-256 rather than rehashing each retrieval.
 - **Target:** Retain unless actual corruption/recovery evidence warrants sampled validation.
@@ -232,7 +232,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** Not backup data corruption; policy/decision not automatic code fix.
 
 ### BS20 — Diagnostics lacks first-class preflight/CPU/lease/metadata-read phase metrics
-- **Baseline classification:** Observability gap; **priority:** P3; **provisional pass:** P6; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Observability gap; **priority:** P3; **provisional pass:** P6; **status:** P0 SOURCE REVIEWED — OVERBROAD CLAIM REFUTED; NARROW METRICS — P6 only. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs20).
 - **Source trace:** [`source/core/backup-operation-diagnostics.js`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/core/backup-operation-diagnostics.js), [`source/app.html`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/app.html). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** Diagnostics lacks first-class preflight/CPU/lease/metadata-read phase metrics.
 - **Target:** Add only bounded, sanitized metrics needed to validate chosen corrections.
@@ -240,7 +240,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Nearby defense / limit:** No unbounded trace logging.
 
 ### BS21 — No installed OS alarm/backend; page-owned work cannot run reliably after every window closes
-- **Baseline classification:** Platform limitation; **priority:** Operational; **provisional pass:** P6; **status:** OPEN / REVALIDATION REQUIRED.
+- **Baseline classification:** Platform limitation; **priority:** Operational; **provisional pass:** P6; **status:** P0 SOURCE REVIEWED — ACCEPTED PLATFORM LIMIT — documented, no code. See [individual evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md#bs21).
 - **Source trace:** [`source/core/operation-lifecycle.js`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/core/operation-lifecycle.js), [`source/platform/sw.js`](https://github.com/oneshubhamt/study-director/blob/05cf0d8c925f91a6f90b26b61d326cf2941b75e9/source/platform/sw.js). Frozen 31 Oct 2026 baseline; these line anchors are *not* proof of current code after any later commit.
 - **Observed mechanism:** No installed OS alarm/backend; page-owned work cannot run reliably after every window closes.
 - **Target:** Document eligibility-and-resume semantics; do not pretend an always-on scheduler exists.
@@ -265,29 +265,29 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 
 | ID | Severity | Initial class | Planned pass | Current state |
 |---|---|---|---|---|
-| BS01 | P1 | Control-flow defect | P1 | OPEN — revalidate |
-| BS02 | P2 | Liveness risk | P3 | OPEN — revalidate |
-| BS03 | P1/P2 | Conditional navigation hazard | P2 | OPEN — revalidate |
-| BS04 | P2 | Resource lifecycle gap | P2 | OPEN — revalidate |
-| BS05 | P3 | Performance trade-off | P2 | OPEN — revalidate |
-| BS06 | P2 | Repeated work proven in source | P4 | OPEN — revalidate |
-| BS07 | P2 | Unbounded preflight risk | P4 | OPEN — revalidate |
-| BS08 | P2 | Bulk materialization risk | P4 | OPEN — revalidate |
-| BS09 | P3 | Iterator liveness question | P4 | OPEN — revalidate |
-| BS10 | P2 | Repeated metadata I/O | P4 | OPEN — revalidate |
-| BS11 | P2 | Safety/performance trade-off | P5 | OPEN — revalidate |
-| BS12 | P2 | Availability liveness trade-off | P3 | OPEN — revalidate |
-| BS13 | P3 | Network contention hypothesis | P5 | OPEN — revalidate |
-| BS14 | P3 | Native API limitation | P3 | OPEN — revalidate |
-| BS15 | P2 | Async race risk | P6 | OPEN — revalidate |
-| BS16 | P2 | Drive cost trade-off | P5 | OPEN — revalidate |
-| BS17 | P2 | Concurrency performance hypothesis | P5 | OPEN — revalidate |
-| BS18 | P3 | Clock/suspend policy | P3 | OPEN — revalidate |
-| BS19 | P3 | Accepted integrity envelope | P6 | OPEN — revalidate |
-| BS20 | P3 | Observability gap | P6 | OPEN — revalidate |
-| BS21 | Operational | Platform limitation | P6 | OPEN — revalidate |
+| BS01 | P1 | Control-flow defect | P1 | SOURCE-CONFIRMED GAP — P1 runtime failure proof pending |
+| BS02 | P2 | Liveness risk | P3 | QUALIFIED CONTENTION RISK — P3 clock proof pending |
+| BS03 | P1/P2 | Conditional navigation hazard | P2 | SOURCE-CONFIRMED CONDITIONAL NAVIGATION — P2 browser proof pending |
+| BS04 | P2 | Resource lifecycle gap | P2 | SOURCE-CONFIRMED READER/URL LIFETIME — P2 proof pending |
+| BS05 | P3 | Performance trade-off | P2 | MEASURE ONLY — P2 optional resource cleanup |
+| BS06 | P2 | Repeated work proven in source | P4 | REPEATED FULL SCAN CONFIRMED — P4 benchmark pending |
+| BS07 | P2 | Unbounded preflight risk | P4 | QUALIFIED BULK READ WITH YIELDS — P4 benchmark pending |
+| BS08 | P2 | Bulk materialization risk | P4 | BULK REFERENCES CONFIRMED — P4 benchmark pending |
+| BS09 | P3 | Iterator liveness question | P4 | ITERATOR PORTABILITY RISK — P4 proof pending |
+| BS10 | P2 | Repeated metadata I/O | P4 | REPEATED PROTECTION READ CONFIRMED — P4 benchmark pending |
+| BS11 | P2 | Safety/performance trade-off | P5 | INTENTIONAL SAFE PREFLIGHT — P5 measure before changes |
+| BS12 | P2 | Availability liveness trade-off | P3 | CONDITIONAL INSTALL LIMIT — P3 reproduction pending |
+| BS13 | P3 | Network contention hypothesis | P5 | NETWORK CONTENTION HYPOTHESIS — P5 measurement |
+| BS14 | P3 | Native API limitation | P3 | NATIVE API LIMIT — P3 late-state proof only |
+| BS15 | P2 | Async race risk | P6 | SOURCE-CONFIRMED PERMISSION RACE SHAPE — P6 fault proof |
+| BS16 | P2 | Drive cost trade-off | P5 | 15-SECOND POLL CONFIRMED — P5 request/latency measurement |
+| BS17 | P2 | Concurrency performance hypothesis | P5 | STARTUP OVERLAP HYPOTHESIS — P5 measurement |
+| BS18 | P3 | Clock/suspend policy | P3 | CLOCK/SUSPEND HYPOTHESIS — P3 testing |
+| BS19 | P3 | Accepted integrity envelope | P6 | INTENTIONAL INSTALL-TIME HASH POLICY — P6 retain |
+| BS20 | P3 | Observability gap | P6 | OVERBROAD CLAIM REFUTED; NARROW METRICS — P6 only |
+| BS21 | Operational | Platform limitation | P6 | ACCEPTED PLATFORM LIMIT — documented, no code |
 
-**Initial counts (31 Oct baseline):** 21 candidate items, not 21 bugs. **All remain OPEN for independent P0 reclassification.** A policy/limitation may be closed as 'RETAINED BY POLICY' with owner decision; a perf hypothesis may be dropped as 'SUPERSEDED WITH EVIDENCE'. Accepted statuses: OPEN, REVALIDATING, IN PROGRESS, IMPLEMENTED—QA PENDING, VERIFIED CLOSED, RETAINED BY POLICY, DEFERRED, REFUTED WITH EVIDENCE.
+**P0 classification complete (2026-10-31, Entry 002):** 21 source candidates adjudicated, **not** 21 user-visible bugs. Direct control-flow gaps: 4 (BS01/03/04/15); repeated-work/rate patterns: 5; conditional risks: 4; resource hypotheses: 4; policy/platform: 3; refined observability: 1. **No P1–P6 runtime bugs or performance improvement certified yet.** Individual source proof and measurement gates: [P0 evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md). Future accepted statuses: OPEN, REVALIDATING, IN PROGRESS, IMPLEMENTED—QA PENDING, VERIFIED CLOSED, RETAINED BY POLICY, DEFERRED, REFUTED WITH EVIDENCE.
 
 ## 5. Measurements and acceptance boundaries
 
@@ -309,10 +309,10 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 
 ## 6. Implementation plan — pass cards (P0–P6)
 
-**Phase 0 = documentation and orchestration only.** Each card below is **PLANNED**, not implementation evidence. The initial audit proposed B0–B6; for this active programme they are **renamed P0–P6 in the same order**. A–F remains the preceding, completed, independent programme.
+**Phase 0 = documentation and orchestration (complete); P0 = source-evidence baseline (complete).** P1–P6 are **PLANNED**, not implementation evidence. The initial audit proposed B0–B6; for this active programme they are **renamed P0–P6 in the same order**. A–F remains the preceding, completed, independent programme. P0 closure and actual test boundaries: [evidence report](BACKGROUND-SERVICES-P0-EVIDENCE.md).
 
 ### P0 — Independent evidence baseline and risk disposition
-**Status: PLANNED — NOT STARTED.** **Finding scope:** BS01–BS21.
+**Status: SOURCE-BASELINE VERIFIED COMPLETE (2026-10-31, Entry 002), RUNTIME/DEVICE EXECUTION NOT RUN.** **Finding scope:** BS01–BS21.
 - **Audit / analysis:** No product changes by default; establish exact current source and reproducible counterexamples; confirm owner, severity, source defenses, timing/perf envelope; classify each candidate and update tracker. Reuse existing fake clocks and production host; tests may validate but must not be used to invent the original findings.
 - **Objectives (must be enumerated more finely before any edit):** For all 21: classification confirmed/amended/refuted; reproducibility plan and explicit not-run boundaries; before/after measurement plan. Reproduce failure paths where feasible without user data.
 - **Targeted QA plan:** Source-only reinspection; focused hermetic instrumentation or fault-injection checks where feasible; no full QA; mark runtime environments not exercised.
@@ -393,6 +393,17 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Read-back:** `docs/PROGRAMMES.md`, `docs/DATA-TOPOLOGY-BACKUP-CLOSURE.md`, and `docs/BACKGROUND-SERVICES-REMEDIATION.md` were fetched from the committed revision and verified; branch was an ordinary one-commit fast-forward.
 - **Objective verdict:** Phase 0's document organization, historical preservation, five-step workflow and coverage **MET**. Evidence limits and open P0 scope remain explicit. **No product QA was run:** not required for docs-only work; no runtime acceptance or physical-browser checks claimed.
 - **Next authorized activity:** P0 **NOT STARTED**. At the next instruction, re-read current HEAD and source afresh before recording measurement/failure evidence; no P1–P6 edits were pre-authorized.
+### Entry 002 — Pass P0: de novo source revalidation and triage (2026-10-31)
+
+- **Source baseline:** `current-fixes` @ `bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6`. GitHub compare since initial BS audit confirms documentation-only updates, no application source/test drift.
+- **Preliminary orientation:** AGENTS, programme index, complete BS ledger/journal, A–F closure, background coordination behavior and verification were reread; per-pass objectives and source-protection gates oriented before evidence writing.
+- **Step 1 — audit:** Retraced production call chains for **all BS01–BS21**, including cross-source `attachments.js` cooperative-yield behavior, timer release/rearm, Session save success shape, provider maintenance post-preflight revalidation, SW cache capacity and sanitized diagnostics. Evidence and frozen line anchors: [P0 report](BACKGROUND-SERVICES-P0-EVIDENCE.md).
+- **Step 2 — analyze:** Reclassified 4 source control-flow gaps, 5 repeated-work/cadence mechanisms, 4 conditional risks, 4 measurement-only hypotheses, 3 policy/platform matters and 1 narrower diagnostics matter. Changed BS02/BS07/BS11/BS20 claims where safeguards refute original breadth. Prioritize P1 (BS01), P2 (BS03–05), P3 liveness/worker, P4 bounded local upkeep, P5 provider cost, P6 permission and documentation.
+- **Step 3 — implementation:** **Documentation/tracker/evidence only**. No runtime source, tests, schemas, providers, build, workflow, release or deployment modifications. No P1–P6 implementation started.
+- **Step 4 — objective check:** P0.1 HEAD/source drift MET; P0.2 21/21 source traces MET; P0.3 refuted/qualified hypotheses MET; P0.4 scoped dependencies and test gates MET; P0.5 repeatable scenarios **PLANNED/NOT EXECUTED** (not misreported as baselines measured); P0.6 docs-only MET; P0.7 ledger and append-only journal MET.
+- **Step 5 — targeted QA:** 21 source-text anchors statically checked: **21/21 PASS after correcting two check-expression mismatches (BS07 and BS18)**. The initial 19/21 result was a probe-matching mistake; exact production lines were re-read. Compared branch commits and verified no source changes. **Actual JS suites/Chromium/browser/iOS/Drive/device tests NOT RUN**, no local connected executable checkout; tests are only mapped by file and scenario. Documentation commit diff/read-back verification follows this entry; full Promotion intentionally not run.
+- **Status:** P0 **SOURCE-EVIDENCE COMPLETE**; all source-level open claims remain subject to the runtime/cost gates of their planned passes, BS21 accepted as platform policy. P1–P6 **NOT STARTED**.
+- **Next action:** **P1** — live Session owner claim save-result/read-back proof and smallest coherent repair, only after new instruction; read this entry, §0 and P1 card first.
 ### Journal template — duplicate this for the next pass
 
 - **Entry NNN — Pass P#, topic / date:**

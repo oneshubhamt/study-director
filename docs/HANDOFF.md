@@ -1,6 +1,6 @@
 # Handoff
 
-> **Current programme navigation (2026-10-31):** Read [PROGRAMMES.md](PROGRAMMES.md). The later A–F data-topology/backup remediation is **certified closed** ([closure and exact QA evidence](DATA-TOPOLOGY-BACKUP-CLOSURE.md)); historical sections below keep their original dates and scope. A *new* independent background-services audit has opened **BS01–BS21** ([working P0–P6 ledger](BACKGROUND-SERVICES-REMEDIATION.md)). **Phase 0 is documentation only; P0 is planned, not started.** The old “Done: every background service” section records the **earlier coordination pass**, not proof against these new findings.
+> **Current programme navigation (2026-10-31):** Read [PROGRAMMES.md](PROGRAMMES.md). The later A–F data-topology/backup remediation is **certified closed** ([closure and exact QA evidence](DATA-TOPOLOGY-BACKUP-CLOSURE.md)); historical sections below keep their original dates and scope. A *new* independent background-services audit has opened **BS01–BS21** ([working P0–P6 ledger](BACKGROUND-SERVICES-REMEDIATION.md)). **Phase 0 and source-evidence P0 are complete; P1–P6 remain unimplemented.** The old “Done: every background service” section records the **earlier coordination pass**, not proof against these new findings.
 
 Status of the work. It was built on `refactor/background-coordination` and merged into `main` through PR #1; the original release is kept on the branch `SDVB75F10`. Read sections 1 and 5 first; sections 2 to 4 are closed summaries.
 

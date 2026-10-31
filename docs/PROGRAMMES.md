@@ -5,7 +5,7 @@
 | Programme | Status | Read first | Next action |
 |---|---|---|---|
 | Data topology, backup and recovery (A–F) | **CERTIFIED CLOSED** at source/automated-QA level | [Consolidated closure](DATA-TOPOLOGY-BACKUP-CLOSURE.md), [complete historical A–F ledger](DATA-TOPOLOGY-BACKUP-REMEDIATION.md), [backup engine](BACKUP-ENGINE.md) | No pass pending. Physical-device/real Drive acceptance is separate and NOT TESTED under that certification. |
-| Background services (P0–P6) | **PHASE 0 DOCUMENTATION PREPARED**; **P0 NOT STARTED** | [Active remediation ledger](BACKGROUND-SERVICES-REMEDIATION.md), [background behavior](BACKGROUND-OPERATIONS.md) | On next explicit instruction, undertake **P0: independent baseline/reclassification**, not P1 code changes. |
+| Background services (P0–P6) | **P0 SOURCE-EVIDENCE BASELINE COMPLETE**; **P1–P6 NOT STARTED** | [Active remediation ledger](BACKGROUND-SERVICES-REMEDIATION.md), [background behavior](BACKGROUND-OPERATIONS.md) | On next explicit instruction, undertake **P1: Active Session ownership save-result fault proof**, then minimal correction and targeted QA. [P0 evidence and corrected classification](BACKGROUND-SERVICES-P0-EVIDENCE.md). |
 | Historical earlier background reviews | Closed snapshots of old architecture; not active P programme | [2026-10-25 audit](AUDIT-BACKGROUND-SERVICES.md), [2026-10-04 record](BACKGROUND-AUDIT.md), [HANDOFF.md](HANDOFF.md) | Historical cross-check only. |
 
 ## Priority and evidence hierarchy
@@ -24,4 +24,4 @@
 
 Clean, Lean, Efficient, Elegant, Robust, Reliable. No duplicative owner/scheduler, speculative compatibility/format changes, unverified deletion, weakening of restore safety, false 'always-on background' claims or unapproved merge/deploy/workflow changes. Do not put app data, tokens, backups, personal content or generated outputs in documentation.
 
-**Naming:** Phase 0 is today's documentation pass. P0 is the **next**, not-yet-executed evidence-baselining pass. P1–P6 are later code/measurement/policy passes. Do not confuse them with A–F (certified backup programme) or the old background audit's B0–B6 labels.
+**Naming:** Phase 0 is the completed document-setup pass. P0 is the completed **source-only evidence and triage** pass. P1 is next; P2–P6 are later code/measurement/policy passes. Do not confuse these with A–F or the historical B0–B6 labels. Do not confuse them with A–F (certified backup programme) or the old background audit's B0–B6 labels.
