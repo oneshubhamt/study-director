@@ -887,7 +887,10 @@
     const saved=repositoryUploads.get(uploadKey);
     if(saved&&(saved.digest!==file.digest||saved.size!==file.blob.size))throw noRetry(new Error('An incomplete Study Director upload has different content for this identity.'));
     if(saved?.busy)throw noRetry(new Error('This Study Director backup file is already uploading.'));
-    const existing=file.knownAbsent===true&&!saved?null:await findRepositoryFile(parent,file.kind,file.id,context);
+    // A presumed-new identity is not proof of absence after an interrupted
+    // upload or page restart. Check the remote logical identity before any
+    // multipart POST or resumable session creation; only metadata is read.
+    const existing=await findRepositoryFile(parent,file.kind,file.id,context);
     if(existing){
       const descriptor=repositoryDescriptor(existing,parent);if(descriptor.size!==file.blob.size||descriptor.digest!==file.digest)throw noRetry(new Error('A Study Director backup file with this identity already exists but has different content.'));
       await assertDriveOperationCurrent(context);repositoryUploads.delete(uploadKey);return descriptor;
