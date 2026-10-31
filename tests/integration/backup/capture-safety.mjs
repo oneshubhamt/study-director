@@ -20,10 +20,10 @@ function harness(overrides={}){
       deletionRecovery:freeze({flush:async()=>{await hook('deletionSettle');return true;},savedDays:async()=>[],notes:async()=>[],attachments:async()=>[]}),
       mutationEpoch:freeze({read:async()=>({token:token()})}),preparationUnits:freeze({list:async()=>[],replace:async()=>[]}),provenance:freeze({installationId:()=> 'capture-test'}),pendingReviews:freeze({list:async()=>[],readItems:async ids=>ids.map(()=>null)})
     }),
-    codecs:freeze({activeSession:freeze({sanitizeCurrent:value=>value}),backup:freeze({countShape:value=>value,assetIds:()=>[],attachmentCoverage:values=>freeze({total:values.length,missing:values.filter(row=>row.missing).length,missingIds:freeze(values.filter(row=>row.missing).map(row=>row.assetId)),fullyRecoverable:!values.some(row=>row.missing)}),missingAttachmentWarning:values=>values.some(row=>row.missing)?'Partial attachment recovery: 1 attachment missing.':'',createCheckpointMetadata:(_id,createdAt)=>({checkpointId:'checkpoint',createdAt}),createProtectedManifest:()=>({checkpointId:'checkpoint'})})}),
+    codecs:freeze({activeSession:freeze({sanitizeCurrent:value=>value}),backup:freeze({...overrides.backup,countShape:value=>value,assetIds:()=>[],attachmentCoverage:values=>freeze({total:values.length,missing:values.filter(row=>row.missing).length,missingIds:freeze(values.filter(row=>row.missing).map(row=>row.assetId)),fullyRecoverable:!values.some(row=>row.missing)}),missingAttachmentWarning:values=>values.some(row=>row.missing)?'Partial attachment recovery: 1 attachment missing.':'',createCheckpointMetadata:(_id,createdAt)=>({checkpointId:'checkpoint',createdAt}),createProtectedManifest:()=>({checkpointId:'checkpoint'})})}),
     session:freeze(overrides.session||{canMutate:()=>true,cancelLiveDraftSave:()=>{},captureSnapshot:()=>session,hasTasks:()=>false,toActiveSession:value=>value}),
     personal:freeze({settle:async()=>hook('personalSettle'),export:async options=>{readOptions.push(options);await hook('personalRead');return {name:'Student'};}}),
-    assets:freeze({get:async()=>null,list:async()=>[]}),exports:freeze({check:()=>{},run:async()=>{}}),
+    assets:freeze(overrides.assets||{get:async()=>null,list:async()=>[]}),exports:freeze({check:()=>{},run:async()=>{}}),
     persistence:freeze(overrides.persistence||{sourceRevision:async()=>sourceRevision(),snapshotRevision:async()=>{await hook('fence');return `study-director.fast-capture-fence.v1|${token()}|${revision}`;},dailyRecordDocuments:async values=>values.map(date=>({date})),storageGeneration:()=>generation}),
     diagnostics:freeze({capture:()=>{},mark:()=>{}}),domain:freeze({getStudentName:()=> 'Student',currentDailyRecords:values=>values}),environment:freeze({yieldTask:async()=>{}})
   }));
@@ -127,6 +127,22 @@ for(const rescued of [false,true]){
   await assert.rejects(()=>load(0,{strict:true}),/Temporary canonical session read failure/);
   controls.onSessionRead=null;const recovered=await load(0,{strict:true});assert.equal(recovered.ok,true);assert.equal(recovered.error,null);assert.equal(recovered.value.revision,20);
   cases.push('host strict-read propagation rejects unavailable canonical session '+(rescued?'with':'without')+' older rescue and recovers newest stored state');
+}
+
+
+// Canonical text-domain capture and recoverability of referenced binary assets
+// are distinct. A missing image must preserve the rescue checkpoint, not claim
+// that all of its attachment bytes are available.
+{
+  const missingId='img-abcdefghijklmnopqrstuvwx';
+  const h=harness({backup:{assetIds:()=>freeze([missingId])}});
+  const captured=await h.capture.captureLogicalCheckpoint();
+  assert.equal(captured.completeness.complete,true,'canonical record capture must remain available as a partial rescue');
+  assert.equal(captured.completeness.attachments,'missing');
+  assert.equal(captured.completeness.fullyRecoverable,false);
+  assert.equal(captured.assetItems[0].descriptor.assetId,missingId);
+  assert.equal(captured.assetItems[0].descriptor.missing,true);
+  assert.match(captured.warning,/Partial attachment recovery/u,'a missing attachment must produce explicit success warning');
 }
 
 // The actual host freshness/receipt functions must not certify a backup from
