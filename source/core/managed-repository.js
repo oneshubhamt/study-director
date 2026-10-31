@@ -693,6 +693,10 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
         const blob=await AssetData.get(descriptor.assetId);throwIfImportAborted(signal);
         if(!(blob instanceof Blob)){assets.push(freeze({assetId:descriptor.assetId,missing:true}));continue;}
         if(blob.size!==descriptor.size||blob.type!==descriptor.mimeType)throw new Error('An attachment changed while the repository checkpoint was being prepared. Retry the backup.');
+        // A new repository object must prove its plaintext against canonical metadata.
+        // Reused immutable objects already have prior receipts and periodic scrub coverage;
+        // avoid hashing those and avoid hashing every ordinary attachment read.
+        if(await Exports.run('checksum',{value:blob},{signal})!==contentFingerprint)throw repositoryCorruption(`Local attachment ${descriptor.assetId} failed plaintext verification before backup publication.`);
         const objectId=repositoryObjectId(),file=await protectRepositoryBlob(blob,objectId+'.sdobject',context,{interactive,knownChecksum:contentFingerprint,signal});
         leases.push(file.release);object=freeze({objectId,kind:'attachment',key:contentKey,fingerprint:contentFingerprint,compression:'none',sourceBytes:blob.size,storedBytes:file.blob.size,storedChecksum:file.storedChecksum,reused:false,blob:file.blob,checkProtection:file.checkProtection});
         objects.push(object);currentByUnit.set(repositoryUnitKey('attachment',contentKey),object);attachmentObjectsByFingerprint.set(contentFingerprint+':'+descriptor.size,object);
