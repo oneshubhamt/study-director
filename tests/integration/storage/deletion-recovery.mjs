@@ -100,6 +100,29 @@ assert.equal((await h.app.deletionRecovery.attachments()).some(row=>row.assetId=
 assert.equal(await h.app.deletionRecovery.clearAttachment(deletedAttachmentId),true);
 assert.equal((await h.app.deletionRecovery.attachments()).some(row=>row.assetId===deletedAttachmentId),false,'Recreating/restoring an Attachment Library identity must retire its deletion marker.');
 
+
+// Selective durability is a performance contract: timer snapshots default to
+// normal durability; suspension, explicit lifecycle barriers and page-exit
+// rescue request strict IndexedDB commit whenever the browser supports it.
+{
+  const local=new Map(),h=createHarness(local);
+  const base={id:'active',version:1,revision:100,date:'2026-09-17',status:'active',scheduleText:'08:00 30 Study',snapshot:{date:'2026-09-17'},updatedAt:'2026-09-17T11:00:00.000Z'};
+  const save=(revision,options={})=>h.app.activeSession.save({...base,revision,updatedAt:new Date(Date.UTC(2026,8,17,11,revision%59)).toISOString()},options);
+  const startStrict=h.idbDurability.strict,startNormal=h.idbDurability.normal;
+  assert.equal((await save(101)).ok,true);
+  assert.equal((await save(102)).ok,true);
+  assert.equal(h.idbDurability.normal-startNormal,2,'ordinary timer snapshots do not force strict durability');
+  assert.equal(h.idbDurability.strict-startStrict,0);
+  assert.equal((await h.app.activeSession.save({...base,revision:103,status:'suspended',updatedAt:'2026-09-17T11:03:00.000Z'})).ok,true);
+  assert.equal((await save(104,{strictDurability:true})).ok,true,'explicit critical transition is durably committed');
+  assert.equal((await save(105,{emergency:true})).ok,true,'page-exit snapshot remains protected');
+  assert.equal(h.idbDurability.strict-startStrict,3,'critical writes alone use strict durability');
+  assert.equal((await save(106)).ok,true);
+  assert.equal(h.idbDurability.normal-startNormal,3,'normal saving resumes after critical writes');
+  assert.equal((await h.app.activeSession.clear()).ok,true);
+  assert.ok(h.idbDurability.strict-startStrict>=4,'Active Session deletion remains a strict durable mutation');
+}
+
 const session={id:'active',version:1,revision:1,date:'2026-09-17',status:'active',scheduleText:'08:00 30 Study',snapshot:{date:'2026-09-17'},updatedAt:'2026-09-17T11:00:00.000Z'};
 await h.app.activeSession.save(session);
 assert.equal(h.stores.sync.size,0);assert.equal(h.stores.tombstones.size,0);
