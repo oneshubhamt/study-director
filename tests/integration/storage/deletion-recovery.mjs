@@ -332,4 +332,22 @@ for(const executor of ['migration','deletion-recovery'])for(const arrival of ['u
   assert.equal((await current.app.maintenance.run({force:true})).status,'completed');
   assert.deepEqual(stores.daily.get(incoming.date),incoming);assert.equal(local.get('fallback').length,0);
 }
+
+// Critical Active Session saves request strict durability, while ordinary
+// timer snapshots retain the lighter default transaction policy.
+{
+  const h=createHarness(),session={id:'active',version:1,revision:1,date:'2026-09-17',status:'active',scheduleText:'08:00 30 Study',snapshot:{date:'2026-09-17'},updatedAt:'2026-09-17T11:00:00.000Z'};
+  const count=kind=>h.idbDurability[kind+'Stores'].filter(names=>names.includes('session')).length;
+  assert.equal((await h.app.activeSession.save(session)).ok,true);
+  assert.equal(count('normal'),1,'ordinary timer snapshot uses default durability');
+  assert.equal(count('strict'),0);
+  assert.equal((await h.app.activeSession.save({...session,revision:2},{emergency:true})).ok,true);
+  assert.equal(count('strict'),1,'page-exit emergency flush uses strict commit');
+  assert.equal((await h.app.activeSession.save({...session,revision:3,status:'suspended'})).ok,true);
+  assert.equal(count('strict'),2,'suspension is a critical Session transition');
+  assert.equal((await h.app.activeSession.save({...session,revision:4},{strictDurability:true})).ok,true);
+  assert.equal(count('strict'),3,'explicit transfer/restore write is durable');
+  assert.equal((await h.app.activeSession.save({...session,revision:5})).ok,true);
+  assert.equal(count('normal'),2,'later ordinary timer write avoids strict durability');
+}
 console.log(JSON.stringify({status:'PASS',suite:'rescue-reconciliation',committedSavesAcknowledged:true,cleanupDiagnosed:true,staleReplayProtected:true,concurrentCopiesPreserved:true,cases:7}));
