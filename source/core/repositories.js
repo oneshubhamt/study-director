@@ -783,9 +783,9 @@ async function idbDelete(date,{trackDeletion=true,ownershipToken=null,deletedAt=
     tx.oncomplete=()=>{InsightsDatasetRevision.committed(revisionState);finish(true,{changed});};
   },'daily record deletion aborted');
 }
-async function idbPutActiveSession(session,ownershipToken=null){
+async function idbPutActiveSession(session,ownershipToken=null,strictDurability=false){
   const current=ActiveSessionCodec.sanitizeCurrent(session);if(!current)throw canonicalRuntimeError('Active Session write requires the current canonical schema.');session=current;
-  return idbTransaction([DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
+  return (strictDurability?idbStrictTransaction:idbTransaction)([DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
     const store=tx.objectStore(DB_ACTIVE_SESSION_STORE);
     if(ownershipToken)assertWriteToken(ownershipToken,'the active-session transaction');
     stageCanonicalMutationEpoch(tx,['activeSession']);const request=store.put(session);request.onerror=()=>finish(false,request.error||new Error('active session write failed'));
@@ -802,7 +802,7 @@ async function idbDeleteActiveSession(ownershipToken=null){
   },'active session delete aborted');
 }
 
-async function saveActiveSessionRecord(session,{emergency=false,backupCapture=false}={}){
+async function saveActiveSessionRecord(session,{emergency=false,backupCapture=false,strictDurability=false}={}){
   let ownershipToken;
   try{ownershipToken=issueWriteToken('saving the active session');}
   catch(error){return {ok:false,value:null,error,storage:{local:false,idb:false}};}
@@ -824,7 +824,9 @@ async function saveActiveSessionRecord(session,{emergency=false,backupCapture=fa
   activeSessionWriteChain=activeSessionWriteChain.catch(error=>{AppDiagnostics.capture('active-session.previous-write',error,'error');}).then(async()=>{
     let idbSaved=false,idbError=null;
     try{
-      await idbPutActiveSession(clean,ownershipToken);idbSaved=true;
+      // Only explicit critical saves, page-exit flushes and suspension need
+      // strict disk-commit semantics. Periodic timer snapshots stay default.
+      await idbPutActiveSession(clean,ownershipToken,strictDurability===true||emergency===true||clean.status==='suspended');idbSaved=true;
       clearDeletionRecoveryKeys([deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID)]);
       reportCanonicalCommit('activeSession','upsert',clean,{backupCapture});
     }catch(e){
