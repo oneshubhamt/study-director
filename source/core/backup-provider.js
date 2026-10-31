@@ -38,8 +38,7 @@ registry.define('backup-provider',1,input=>{
     const OperationDiagnostics=freeze({start:ports.diagnostics.start,mark:ports.diagnostics.mark,finish:ports.diagnostics.finish,fail:ports.diagnostics.fail});
   const providers=new Map();
   const VERIFIED_HISTORY_INDEX_LIMIT=64;
-  const REPOSITORY_IO_CONCURRENCY=8;
-  const VERIFIED_HISTORY_READ_CONCURRENCY=REPOSITORY_IO_CONCURRENCY;
+  const VERIFIED_HISTORY_READ_CONCURRENCY=8;
   const RECENT_HISTORY_TTL_MS=30*1000;
   const VERIFIED_HISTORY_INTERPRETATION_VERSION='managed-history-v1:'+APP_VERSION;
   const {publicationMaxAgeMs:PUBLICATION_MAX_AGE_MS,maintenanceWorkBudgetMs:PROVIDER_MAINTENANCE_BUDGET_MS,maintenanceMaxAgeMs:MAINTENANCE_MAX_AGE_MS,objectGcGraceMs:OBJECT_GC_GRACE_MS,automaticQuietMs:AUTOMATIC_QUIET_MS,automaticUrgentMs:AUTOMATIC_URGENT_MS,automaticExpiryLeadMs:AUTOMATIC_EXPIRY_LEAD_MS}=RepositoryPolicy.protocol;
@@ -327,6 +326,24 @@ registry.define('backup-provider',1,input=>{
     for(const raw of Array.isArray(values)?values:[]){let item;try{item=repositoryProviderItem(raw,kind);if(seen.has(item.id))throw new Error(`Duplicate repository ${kind==='commit'?'commit':'checkpoint'} identity was returned by the backup provider.`);seen.add(item.id);items.push(item);}catch(error){if(/Duplicate repository (?:commit|checkpoint) identity/u.test(String(error&&error.message||'')))throw error;invalid.push(Object.freeze({item:item||null,error,kind}));}}
     return Object.freeze({items:Object.freeze(items),invalid:Object.freeze(invalid)});
   }
+  // All provider history consumers share one listing/identity-validation path.
+  // Cleanup alone requests fresh Device Folder digests; an inventory lookup
+  // must never accidentally weaken that safety boundary or incur its cost.
+  async function listRepositoryHistory(selected,{signal=null,freshDigests=false}={}){
+    const [listed,listedCommits]=await Promise.all([
+      selected.repository.list(freeze({kind:'checkpoint',signal,freshDigests})),
+      selected.repository.list(freeze({kind:'commit',signal,freshDigests}))
+    ]);
+    const items=Array.isArray(listed)?listed:Array.isArray(listed?.items)?listed.items:[];
+    const commitItems=Array.isArray(listedCommits)?listedCommits:Array.isArray(listedCommits?.items)?listedCommits.items:[];
+    return freeze({
+      items,commitItems,
+      preparedCommits:prepareRepositoryHistoryItems(commitItems,'commit'),
+      preparedManifests:prepareRepositoryHistoryItems(items,'checkpoint'),
+      ignored:Math.max(0,Number(listed?.ignored)||0)+Math.max(0,Number(listedCommits?.ignored)||0),
+      overflow:listed?.overflow===true||listedCommits?.overflow===true
+    });
+  }
   // A failure in a file's own content, marked as the repository module's
   // unreadableVersion does: its format is not one this build reads, it is
   // damaged, or it fails its checks. A read that failed, or one waiting for
@@ -364,12 +381,10 @@ registry.define('backup-provider',1,input=>{
     return freeze({uncertain:freeze(uncertain),unreadable:freeze(unreadable.sort())});
   }
   async function repositoryProviderStateWork(selected,{interactive=true,signal=null,forCleanup=false}={}){
-    // Timestamp/size caches are insufficient proof before retention or GC.
-    const [listed,listedCommits]=await Promise.all([selected.repository.list(Object.freeze({kind:'checkpoint',signal,freshDigests:forCleanup})),selected.repository.list(Object.freeze({kind:'commit',signal,freshDigests:forCleanup}))]);
-    const items=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],commitItems=Array.isArray(listedCommits)?listedCommits:Array.isArray(listedCommits&&listedCommits.items)?listedCommits.items:[];
+    const {items,commitItems,preparedCommits,preparedManifests,ignored,overflow}=await listRepositoryHistory(selected,{signal,freshDigests:forCleanup});
     const scopes=new Set([...items,...commitItems].map(raw=>String(raw&&raw.verificationScope||'')).filter(Boolean)),verifiedScope=scopes.size===1?[...scopes][0]:null;
-    const preparedCommits=prepareRepositoryHistoryItems(commitItems,'commit'),preparedManifests=prepareRepositoryHistoryItems(items,'checkpoint'),invalid=[...preparedCommits.invalid,...preparedManifests.invalid],work=[...preparedCommits.items.map(item=>Object.freeze({kind:'commit',item})),...preparedManifests.items.map(item=>Object.freeze({kind:'checkpoint',item}))];
-    if(forCleanup&&listed?.overflow!==true&&listedCommits?.overflow!==true)pruneRepositoryHistoryProofs(selected,[...preparedCommits.items,...preparedManifests.items],verifiedScope);
+    const invalid=[...preparedCommits.invalid,...preparedManifests.invalid],work=[...preparedCommits.items.map(item=>freeze({kind:'commit',item})),...preparedManifests.items.map(item=>freeze({kind:'checkpoint',item}))];
+    if(forCleanup&&!overflow)pruneRepositoryHistoryProofs(selected,[...preparedCommits.items,...preparedManifests.items],verifiedScope);
     const verified=await mapRepositoryHistoryBounded(work,selected.repository.historyReadConcurrency,task=>verifyRepositoryHistoryItem(selected,task.item,task.kind,verifiedScope,{interactive,signal,forCleanup}),signal),manifests=[],commits=[];
     for(const result of verified){if(result.invalid){invalid.push(result.invalid);continue;}if(result.kind==='commit')commits.push(result.row);else manifests.push(result.row);}
     const classified=RepositoryCheckpointPipeline.classifyState(Object.freeze({manifests:Object.freeze(manifests),commits:Object.freeze(commits)}));
@@ -377,7 +392,7 @@ registry.define('backup-provider',1,input=>{
     // Obsolete history keeps only verified retention/provenance proofs. Full
     // object references are needed solely for the at-most-16 selected versions.
     const fullById=new Map(),retentionAt=new Date().toISOString();
-    if(forCleanup&&!splitRepositoryFailures(invalid).uncertain.length&&!Number(listed?.ignored)&&!Number(listedCommits?.ignored)&&listed?.overflow!==true&&listedCommits?.overflow!==true){
+    if(forCleanup&&!splitRepositoryFailures(invalid).uncertain.length&&!ignored&&!overflow){
       const retained=RepositoryCheckpointPipeline.selectRetention(classified.committed,{now:new Date(retentionAt)}).retained;
       const full=await mapRepositoryHistoryBounded(retained,selected.repository.historyReadConcurrency,row=>verifyRepositoryHistoryItem(selected,row.ref,'checkpoint',verifiedScope,{interactive,signal}),signal);
       for(const result of full){if(result.invalid)invalid.push(result.invalid);else fullById.set(result.row.id,result.row.manifest);}
@@ -387,9 +402,8 @@ registry.define('backup-provider',1,input=>{
     const failures=splitRepositoryFailures(invalid),unreadableIds=new Set(failures.unreadable),listedFiles=[...preparedCommits.items,...preparedManifests.items];
     const unreadable=freeze(failures.unreadable.map(id=>freeze({id,items:freeze(listedFiles.filter(item=>item.id===id).sort((a,b)=>Number(a.kind==='checkpoint')-Number(b.kind==='checkpoint')))})));
     const rows=Object.freeze(classified.committed.filter(row=>!unreadableIds.has(row.id)).map(row=>Object.freeze({item:row.ref,manifest:fullById.get(row.id)||row.manifest,commitItem:row.commitRef||null}))),uncommitted=Object.freeze(classified.uncommitted.filter(row=>!unreadableIds.has(row.id)).map(row=>Object.freeze({item:row.ref,manifest:row.manifest}))),orphanCommits=Object.freeze(classified.orphanCommits.filter(row=>!unreadableIds.has(row.id)).map(row=>row.ref));
-    const overflow=listed&&listed.overflow===true||listedCommits&&listedCommits.overflow===true;
     if(!overflow)unreadableByProvider.set(selected.id,unreadableIds);
-    return Object.freeze({rows,uncommitted,orphanCommits,invalid:failures.uncertain,unreadable,ignored:Math.max(0,Number(listed&&listed.ignored)||0)+Math.max(0,Number(listedCommits&&listedCommits.ignored)||0),overflow,retentionAt:forCleanup?retentionAt:null,latest:rows.length?rows[rows.length-1]:null});
+    return Object.freeze({rows,uncommitted,orphanCommits,invalid:failures.uncertain,unreadable,ignored,overflow,retentionAt:forCleanup?retentionAt:null,latest:rows.length?rows[rows.length-1]:null});
   }
 
   async function repositoryProviderState(selected,options={}){
@@ -401,13 +415,12 @@ registry.define('backup-provider',1,input=>{
   }
   async function repositoryProviderInventory(selected,{signal=null}={}){
     await synchronizeRepositoryScope(selected);
-    const [listed,listedCommits]=await Promise.all([selected.repository.list(Object.freeze({kind:'checkpoint',signal})),selected.repository.list(Object.freeze({kind:'commit',signal}))]);
-    const items=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],commitItems=Array.isArray(listedCommits)?listedCommits:Array.isArray(listedCommits&&listedCommits.items)?listedCommits.items:[];
-    const preparedCommits=prepareRepositoryHistoryItems(commitItems,'commit'),preparedManifests=prepareRepositoryHistoryItems(items,'checkpoint'),invalid=[...preparedCommits.invalid,...preparedManifests.invalid],commitById=new Map(preparedCommits.items.map(item=>[item.id,item])),manifestIds=new Set(preparedManifests.items.map(item=>item.id)),pairs=[],uncommitted=[];
+    const {preparedCommits,preparedManifests,ignored,overflow}=await listRepositoryHistory(selected,{signal});
+    const invalid=[...preparedCommits.invalid,...preparedManifests.invalid],commitById=new Map(preparedCommits.items.map(item=>[item.id,item])),manifestIds=new Set(preparedManifests.items.map(item=>item.id)),pairs=[],uncommitted=[];
     for(const item of preparedManifests.items){const commitItem=commitById.get(item.id)||null;if(commitItem)pairs.push(freeze({item,commitItem}));else uncommitted.push(freeze({item}));}
     const orphanCommits=preparedCommits.items.filter(item=>!manifestIds.has(item.id));
     pairs.sort((a,b)=>Date.parse(repositoryMetadataTimestamp(a.item)||0)-Date.parse(repositoryMetadataTimestamp(b.item)||0)||a.item.id.localeCompare(b.item.id));
-    return freeze({pairs:freeze(pairs),uncommitted:freeze(uncommitted),orphanCommits:freeze(orphanCommits),invalid:freeze(invalid),ignored:Math.max(0,Number(listed&&listed.ignored)||0)+Math.max(0,Number(listedCommits&&listedCommits.ignored)||0),overflow:listed&&listed.overflow===true||listedCommits&&listedCommits.overflow===true});
+    return freeze({pairs:freeze(pairs),uncommitted:freeze(uncommitted),orphanCommits:freeze(orphanCommits),invalid:freeze(invalid),ignored,overflow});
   }
   // Background cleanup does its expensive verification and object inventory
   // without an exclusion lease. Once it is ready to delete, this compact
@@ -419,24 +432,17 @@ registry.define('backup-provider',1,input=>{
     return [String(item.kind||''),String(item.id||''),String(item.name||''),Number.isSafeInteger(size)?String(size):'',String(item.digest||''),String(item.serverDigest||''),String(item.remoteId||''),String(item.remoteVersion||''),String(item.verificationScope||''),String(item.createdAt||''),String(item.modifiedAt||'')].join('\u0000');
   }
   function repositoryCleanupFilesSnapshot(items){return (Array.isArray(items)?items:[]).map(repositoryCleanupFileSnapshot).filter(Boolean).sort().join('\u0001');}
-  function repositoryCleanupStateSnapshot(state){
+  function repositoryCleanupHistorySnapshot(history){
     const items=[];
-    for(const row of state&&state.rows||[]){if(row&&row.item)items.push(row.item);if(row&&row.commitItem)items.push(row.commitItem);}
-    for(const row of state&&state.uncommitted||[])if(row&&row.item)items.push(row.item);
-    for(const item of state&&state.orphanCommits||[])if(item)items.push(item);
-    for(const row of state&&state.unreadable||[])for(const item of row&&row.items||[])if(item)items.push(item);
-    return repositoryCleanupFilesSnapshot(items);
-  }
-  function repositoryCleanupInventorySnapshot(inventory){
-    const items=[];
-    for(const row of inventory&&inventory.pairs||[]){if(row&&row.item)items.push(row.item);if(row&&row.commitItem)items.push(row.commitItem);}
-    for(const row of inventory&&inventory.uncommitted||[])if(row&&row.item)items.push(row.item);
-    for(const item of inventory&&inventory.orphanCommits||[])if(item)items.push(item);
+    for(const row of history.rows||history.pairs||[]){if(row?.item)items.push(row.item);if(row?.commitItem)items.push(row.commitItem);}
+    for(const row of history.uncommitted||[])if(row?.item)items.push(row.item);
+    for(const item of history.orphanCommits||[])if(item)items.push(item);
+    for(const row of history.unreadable||[])for(const item of row?.items||[])if(item)items.push(item);
     return repositoryCleanupFilesSnapshot(items);
   }
   function repositoryCleanupInventoryMatches(state,inventory){
     if(!state||!inventory||inventory.overflow===true||Math.max(0,Number(inventory.ignored)||0)>0||(inventory.invalid||[]).length)return false;
-    return repositoryCleanupStateSnapshot(state)===repositoryCleanupInventorySnapshot(inventory);
+    return repositoryCleanupHistorySnapshot(state)===repositoryCleanupHistorySnapshot(inventory);
   }
   function repositoryCleanupObjectListing(inventory){
     const items=freeze((inventory&&Array.isArray(inventory.items)?inventory.items:[]).map(item=>freeze({id:item.id,ref:item,createdAt:String(item.createdAt||''),modifiedAt:String(item.modifiedAt||'')})));
@@ -568,33 +574,35 @@ registry.define('backup-provider',1,input=>{
     try{await RepositoryCheckpointPipeline.verifyObject(lease.blob,entry,Object.freeze({signal,onProgress:transferProgress('verify-hash','checking')}));return true;}
     finally{await lease.release().catch(()=>{});}
   }
+  // Metadata verification shares the byte-level lease and checksum contract;
+  // manifest and commit provenance are still inspected independently below.
+  async function inspectUploadedRepositoryBytes(selected,item,kind,signal,inspect){
+    const lease=repositoryDownloadLease(await selected.repository.download(item,freeze({signal})));
+    try{
+      if(item.size&&lease.blob.size!==item.size)throw new Error(`Remote repository ${kind} size changed before verification.`);
+      if(item.digest){const actual=await Exports.run('checksum',{value:lease.blob});if(actual!==item.digest)throw new Error(`Remote repository ${kind} failed content-integrity verification.`);}
+      return await inspect(lease.blob);
+    }finally{await lease.release().catch(()=>{});}
+  }
   async function verifyUploadedRepositoryManifest(selected,item,expected,expectedDigest='',signal=null){
     const localDigest=String(expectedDigest||item.digest||'').toLowerCase();
     if(item.serverDigest){
       if(!localDigest||item.digest!==localDigest||item.serverDigest!==localDigest)throw new Error('The stored checksum did not match the uploaded backup version.');
       return expected;
     }
-    const lease=repositoryDownloadLease(await selected.repository.download(item,Object.freeze({signal})));
-    try{
-      if(item.size&&lease.blob.size!==item.size)throw new Error('Remote repository checkpoint size changed before verification.');
-      if(item.digest){
-        const actualDigest=await Exports.run('checksum',{value:lease.blob});
-        if(actualDigest!==item.digest)throw new Error('Remote repository checkpoint failed content-integrity verification.');
-      }
-      const actual=await RepositoryCheckpointPipeline.inspectManifest(lease.blob,{interactive:false});
-      if(actual.checkpoint.checkpointId!==expected.checkpoint.checkpointId||actual.sourceRevision!==expected.sourceRevision||actual.exportedAt!==expected.exportedAt)throw new Error('Remote repository checkpoint failed provenance verification.');
-      return actual;
-    }finally{await lease.release().catch(()=>{});}
+    const actual=await inspectUploadedRepositoryBytes(selected,item,'checkpoint',signal,blob=>RepositoryCheckpointPipeline.inspectManifest(blob,{interactive:false}));
+    if(actual.checkpoint.checkpointId!==expected.checkpoint.checkpointId||actual.sourceRevision!==expected.sourceRevision||actual.exportedAt!==expected.exportedAt)throw new Error('Remote repository checkpoint failed provenance verification.');
+    return actual;
   }
   async function verifyUploadedRepositoryCommit(selected,item,expected,signal=null){
     const localDigest=String(expected&&expected.digest||item.digest||'').toLowerCase();
     if(item.serverDigest){
       if(!localDigest||item.digest!==localDigest||item.serverDigest!==localDigest)throw new Error('The stored checksum did not match the uploaded backup commit.');
-      return Object.freeze({format:expected.format,version:expected.version,checkpointId:expected.checkpointId,exportedAt:expected.exportedAt,sourceRevision:expected.sourceRevision,manifestVersion:expected.manifestVersion});
+      return freeze({format:expected.format,version:expected.version,checkpointId:expected.checkpointId,exportedAt:expected.exportedAt,sourceRevision:expected.sourceRevision,manifestVersion:expected.manifestVersion});
     }
-    const lease=repositoryDownloadLease(await selected.repository.download(item,Object.freeze({signal})));
-    try{if(item.size&&lease.blob.size!==item.size)throw new Error('Remote repository commit size changed before verification.');if(item.digest){const actualDigest=await Exports.run('checksum',{value:lease.blob});if(actualDigest!==item.digest)throw new Error('Remote repository commit failed content-integrity verification.');}const actual=await RepositoryCheckpointPipeline.inspectCommit(lease.blob);if(actual.checkpointId!==expected.checkpointId||actual.exportedAt!==expected.exportedAt||actual.sourceRevision!==expected.sourceRevision||Number(actual.manifestVersion)!==Number(expected.manifestVersion))throw new Error('Remote repository commit failed provenance verification.');return actual;}
-    finally{await lease.release().catch(()=>{});}
+    const actual=await inspectUploadedRepositoryBytes(selected,item,'commit',signal,blob=>RepositoryCheckpointPipeline.inspectCommit(blob));
+    if(actual.checkpointId!==expected.checkpointId||actual.exportedAt!==expected.exportedAt||actual.sourceRevision!==expected.sourceRevision||Number(actual.manifestVersion)!==Number(expected.manifestVersion))throw new Error('Remote repository commit failed provenance verification.');
+    return actual;
   }
   function repositoryPublicationCapable(selected){return !!(selected&&selected.repository&&selected.repository.beginPublication&&selected.repository.listPublications&&selected.repository.assertPublication&&selected.repository.endPublication);}
   function repositoryMaintenanceCapable(selected){return !!(selected&&selected.repository&&selected.repository.beginMaintenance&&selected.repository.listMaintenances&&selected.repository.assertMaintenance&&selected.repository.endMaintenance);}
