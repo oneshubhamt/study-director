@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -6,7 +7,7 @@ const read=file=>fs.readFileSync(file,'utf8');
 const editor=read('rich-text/editor.ts');
 const ui=read('source/core/reconciliation-ui.js');
 const backup=readScript('source/core/backup.ts');
-const app=read('source/app.html');
+const app=readHostHtml();
 const styles=read('source/styles/core.css');
 const manifest=read('build/module-manifest.mjs');
 

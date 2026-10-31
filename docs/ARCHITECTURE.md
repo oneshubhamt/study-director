@@ -4,7 +4,7 @@ This is the current source/runtime map for `TS-Conversion`. [Product purpose](PR
 
 ## Composition and source ownership
 
-The host in `source/app.html` constructs private registry modules through explicit capability ports. Modules do not freely resolve one another. `build/module-manifest.mjs` defines source paths, registration order and dependency edges; `contracts/` defines durable identities and limits. Runtime identity/version/shape checks remain necessary even where TypeScript checks callers.
+The host in `source/host/main.js`, composed into the `source/app.html` shell, constructs private registry modules through explicit capability ports. Modules do not freely resolve one another. `build/module-manifest.mjs` defines source paths, registration order and dependency edges; `contracts/` defines durable identities and limits. Runtime identity/version/shape checks remain necessary even where TypeScript checks callers.
 
 ```mermaid
 flowchart TD
@@ -21,7 +21,7 @@ flowchart TD
 
 | Layer | Source owners | Boundary |
 | --- | --- | --- |
-| Bootstrap/composition | `source/app.html`, `source/core/internal.js`, `startup.js`, `profiles.js` | Early scope/presentation before storage or hydration; explicit feature/service wiring |
+| Bootstrap/composition | `source/app.html`, `source/host/`, `source/core/internal.js`, `startup.js`, `profiles.js` | Early scope/presentation before storage or hydration; explicit feature/service wiring |
 | Core data | `domain.ts`, `record-codecs.ts`, `persistence.ts`, `app-meta.ts`, `repositories.ts`, `repositories-notes.ts` in `source/core/` | Unknown stored input → validated canonical records; strict transactions and stable identities |
 | Session/execution | `ownership.ts`, `mutation-coordinator.ts`, `session-lifecycle.ts`, `timer-state.ts`, `timer-engine.ts`, `pomodoro.ts`, `practice-pacer.ts`, plus host adapters | One writable owner; portable session evidence and local execution state |
 | Features | `plan.js`, `review.js`, `library.js`, `note-links.js`, `note-export.js`, host UI | User actions and presentation; durable writes through domain services |
@@ -35,7 +35,7 @@ File extensions reflect the current mixed-source boundary. [TypeScript tooling](
 
 ## Startup and active lifecycle
 
-The five inline scripts capture install events, establish profile scope, initialize the presentation kernel, synchronize presentation metadata, and compose the main application. Their order and synchronous first-paint behavior matter. Hydration follows storage availability/unsupported-data checks and ownership setup; feature controllers consume the resulting state. Extraction must preserve scope, events, public capabilities, CSP and cache identity before restructuring.
+The five authored scripts in `source/host/` are inserted inline by `build/host-source.mjs` at their manifest-marked positions in `source/app.html`. They capture install events, establish profile scope, initialize the presentation kernel, synchronize presentation metadata, and compose the main application. Their order and synchronous first-paint behavior matter. Hydration follows storage availability/unsupported-data checks and ownership setup; feature controllers consume the resulting state. Build-time composition preserves their original scope and positions without additional requests. Later restructuring must preserve events, public capabilities, CSP and cache identity; the Phase 5 register assigns their owners.
 
 An Active Session names the installation running it. That installation may rehydrate the timer; another device displays the shared session until an explicit handoff/Continue Here. A Plan draft equal to the applied schedule remains live; a different draft remains editing state. Host adapters coordinate notes, timer controls, restore and visibility changes. [Backup/sync](BACKUP-ENGINE.md) owns the cross-device rules.
 

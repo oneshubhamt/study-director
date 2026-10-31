@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -9,7 +10,7 @@ const backup=read('source/core/backup-codec.ts');
 const journals=read('source/core/repository-journals.ts');
 const repositories=read('source/core/repositories.ts');
 const notes=read('source/core/repositories-notes.ts');
-const app=read('source/app.html');
+const app=readHostHtml();
 const appMeta=read('source/core/app-meta.ts');
 
 assert.match(persistence,/createLocalStorage[\s\S]*createInstallationIdentity[\s\S]*createIndexedDb/,'persistence primitives must retain browser storage ownership and separate installation identity');
@@ -19,7 +20,7 @@ assert.doesNotMatch(codecs,/sanitizeCurrentSyncMetadata|sanitizeHistoricalSyncMe
 assert.match(persistence,/strictTransaction:idbStrictTransaction[\s\S]*strictStoreTransaction:idbStrictStoreTransaction/,'IndexedDB primitives must expose one centralized strict-durability capability');
 assert.match(persistence,/db\.transaction\(stores,mode,\{durability:'strict'\}\)/,'strict durability must use the native IndexedDB transaction option');
 assert.doesNotMatch(repositories,/idbPutReflectionDraft|DB_REFLECTION_DRAFT_STORE/u,'retired Reflection Draft persistence must not remain a current repository boundary');
-assert.match(repositories,/async function idbPutActiveSession[\s\S]*?return idbTransaction\(\[DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE\],'readwrite'/,'high-frequency active-session checkpoints must share their canonical mutation epoch in the same default-durability transaction');
+assert.match(repositories,/async function idbPutActiveSession[\s\S]*?return idbTransaction\s*\(\[DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE\],'readwrite'/,'high-frequency active-session checkpoints must share their canonical mutation epoch in the same default-durability transaction');
 assert.doesNotMatch(notes,/meta\.put\('noteRecoveryPrefix'/u,'Notes save straight to their canonical rows and never journal edits in appMeta');
 assert.match(notes,/async function idbApplyDelta[\s\S]*?idbStrictTransaction\s*\(\[DB_NOTES_STORE,DB_APP_META_STORE\],'readwrite'/,'canonical note commits and deletion markers must share one strict transaction');
 assert.match(repositories,/async function idbPutDailyRecordBatch[\s\S]*?idbStrictTransaction\s*\(stores,'readwrite'/,'authoritative Daily Record commits must opt into strict durability');
@@ -29,8 +30,8 @@ const functionSlice=(source,name,next)=>{const start=source.indexOf(name),end=ne
 
 assert.match(repositories,/study-director\.saved-day-deletion/,'Saved-Day deletion history must have a purpose-specific repository contract');
 assert.match(repositories,/function randomCoordinationToken\(\)[\s\S]*crypto\.getRandomValues/,'canonical coordination tokens must come from fresh opaque random bytes rather than portable/domain authority');
-assert.match(repositories,/function newCanonicalMutationEpoch\(\)\{\s*return freeze\(\{format:'study-director\.canonical-mutation-epoch',version:1,token:randomCoordinationToken\(\)/u,'canonical mutation fencing must use the opaque coordination-token generator');
-assert.match(repositories,/function stageCanonicalMutationEpoch\(tx,preparationUnits=null\)[\s\S]*Meta\.view\(tx\)\.put\('canonicalMutationEpoch'/,'canonical epoch publication and preparation-unit attribution must be stageable inside the same IndexedDB transaction as canonical data');
+assert.match(repositories,/function newCanonicalMutationEpoch\(\)\s*\{\s*return freeze\(\{format:'study-director\.canonical-mutation-epoch',version:1,token:randomCoordinationToken\(\)/u,'canonical mutation fencing must use the opaque coordination-token generator');
+assert.match(repositories,/function stageCanonicalMutationEpoch\(tx\s*,preparationUnits\s*=null\)[\s\S]*Meta\.view\(tx\)\.put\('canonicalMutationEpoch'/,'canonical epoch publication and preparation-unit attribution must be stageable inside the same IndexedDB transaction as canonical data');
 assert.match(app,/async function fullBackupSnapshotRevision\(\)[\s\S]*AppData\.dailyRecords\.datasetRevision\(\)[\s\S]*PlanData\.exportData\(\{flush:false\}\)[\s\S]*AttachmentStorage\.list\(\)/,'the full snapshot fence must remain available as a conservative fallback');
 assert.match(app,/async function backupSnapshotRevision\(options=\{\}\)[\s\S]*options&&options\.full===true[\s\S]*AppData\.mutationEpoch\.eligible\(\)[\s\S]*study-director\.fast-capture-fence\.v1/,'healthy backup fencing must use the constant-size epoch/generation guard and fail back to the full snapshot fence when explicitly requested or ineligible');
 assert.match(app,/captureMutationGeneration\+\+/,'in-process textarea mutations must advance the local capture generation before canonical persistence necessarily settles');

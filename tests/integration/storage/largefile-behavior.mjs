@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import {createNotifications} from '../../helpers/notifications.mjs';
 import assert from 'node:assert/strict';
@@ -60,7 +61,7 @@ function element(id=''){
   let jobCalls=0,cancelCalls=0,putStarted=false,putAborted=false;const lateProgress=[];
   const {coordinator,port}=createNotifications('attachments');
   const document={activeElement:null,getElementById:id=>ids.get(id)||element(id),querySelectorAll(){return []},querySelector(){return null},createElement:tag=>element(tag),createDocumentFragment:()=>element('fragment'),addEventListener(){}};
-  const html=fs.readFileSync('source/app.html','utf8');
+  const html=readHostHtml();
   vm.runInNewContext(html.slice(html.indexOf('function renderNotificationSurfaces(state){'),html.indexOf('const BackupPresentation=')),{NoticeCoordinator:coordinator,document});
   const store={
     requireAvailable(){},during:fn=>fn(),list:async()=>[],discard:async()=>0,publish:async()=>1,

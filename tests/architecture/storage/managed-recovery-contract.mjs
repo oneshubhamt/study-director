@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -6,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 const read=relative=>readScript(path.join(root,relative));
-const app=read('source/app.html'),backup=read('source/core/backup.ts'),repository=read('source/core/managed-repository.ts'),repositories=read('source/core/repositories.ts'),background=read('source/core/repository-background.ts'),provider=read('source/core/backup-provider.ts'),device=read('source/core/device-backup.ts'),managed=read('source/core/managed-recovery.ts'),host=read('source/core/backup-recovery-host.ts'),manifest=read('build/module-manifest.mjs');
+const app=readHostHtml(),backup=read('source/core/backup.ts'),repository=read('source/core/managed-repository.ts'),repositories=read('source/core/repositories.ts'),background=read('source/core/repository-background.ts'),provider=read('source/core/backup-provider.ts'),device=read('source/core/device-backup.ts'),managed=read('source/core/managed-recovery.ts'),host=read('source/core/backup-recovery-host.ts'),manifest=read('build/module-manifest.mjs');
 
 assert.match(manifest,/id:'managed-recovery',source:'core\/managed-recovery\.ts'/u,'managed recovery must be a first-class private runtime module rather than host-inline orchestration');
 assert.match(manifest,/id:'backup-recovery-host',source:'core\/backup-recovery-host\.ts'/u,'managed recovery/history host orchestration must be a first-class private runtime module');

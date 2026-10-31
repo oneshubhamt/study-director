@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -5,7 +6,7 @@ import {renderBuild,validateBuild} from '../../../build/build.mjs';
 import {externalModules,trustedExternalModuleIds} from '../../../build/module-manifest.mjs';
 
 const read=file=>fs.readFileSync(new URL(`../../../${file}`,import.meta.url),'utf8');
-const app=read('source/app.html');
+const app=readHostHtml();
 const drive=read('source/external/drive.js');
 const review=read('source/core/review.js');
 const plan=read('source/core/plan.js');

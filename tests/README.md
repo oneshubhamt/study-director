@@ -22,6 +22,12 @@ tests/
 
 Release cadence is metadata in `helpers/release-tests.mjs`, not a separate test layer.
 
+## Reading authored host code
+
+`source/app.html` is the shell template; five script bodies live in `source/host/`. Use `readHostHtml` from `build/host-source.mjs` for tests that inspect composed authored HTML, and `readScript` from `build/source-script.mts` for individual classic scripts. Both follow the production manifest/erasure path. Portable ES-module source readers use `eraseTypes`; do not send runtime imports through the classic-script parser. Keep assertions about source contracts tolerant of whitespace left by type erasure, without relaxing required operations or ordering.
+
+The browser harness and generated-output checks continue using built HTML. Substring/VM host tests do not prove whole-file authored coverage; do not attach an invented host source map. Later feature passes own their affected readers and Phase 6 owns their complete replacement where appropriate.
+
 ## Commands
 
 The fast correctness suite is npm-free, offline and hermetic:

@@ -1,3 +1,4 @@
+import {readHostHtml} from './host-source.mjs';
 import {compileScript} from './source-script.mts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,7 +9,7 @@ import {PRODUCTION_LIMITS,assertProductionLimits} from '../contracts/production-
 import {LOCAL_STORAGE_KEYS,DEVICE_WIDE_LOCAL_STORAGE_KEYS,PROFILE_SCOPE_SEPARATOR,SESSION_STORAGE_KEYS,APP_META_KEYS,APP_META_RUNTIME_REGISTRY,assertDataArchitecture} from '../contracts/data-architecture.mjs';
 import {RUNTIME_DATA_CONTRACT,INDEXED_DB_STORE_NAMES,OPFS_IDENTITIES,CACHE_STORAGE_IDENTITIES,EXTERNAL_REPOSITORY_IDENTITIES,assertCanonicalIdentities} from '../contracts/canonical-identities.mjs';
 import {
-  privateModules,externalModules,styleModules,trustedExternalModuleIds,runtimeDependencies,htmlSource,privateModuleMarker,
+  privateModules,externalModules,styleModules,trustedExternalModuleIds,runtimeDependencies,htmlSource,privateModuleMarker,hostScripts,
   platformFiles,staticAssets,legalReaderAssets
 } from './module-manifest.mjs';
 
@@ -84,7 +85,7 @@ function renderPlatformTokens(value,identity,sourceName,tokens={}){
 }
 function assertCanonicalSource(){
   const expected=[
-    htmlSource,...privateModules.map(row=>row.source),...externalSourceFiles(),...styleModules.map(row=>row.source),
+    htmlSource,...hostScripts.map(row=>row.source),...privateModules.map(row=>row.source),...externalSourceFiles(),...styleModules.map(row=>row.source),
     ...Object.values(platformFiles).map(row=>row.source),...staticAssets.map(row=>row.source)
   ].sort();
   const actual=[];
@@ -99,12 +100,12 @@ function assertCanonicalSource(){
   actual.sort();
   invariant(JSON.stringify(actual)===JSON.stringify(expected),'Canonical source inventory differs from the module manifest.');
   const joined=[
-    htmlSource,...privateModules.map(row=>row.source),...externalSourceFiles(),...styleModules.map(row=>row.source),
+    htmlSource,...hostScripts.map(row=>row.source),...privateModules.map(row=>row.source),...externalSourceFiles(),...styleModules.map(row=>row.source),
     ...Object.values(platformFiles).map(row=>row.source)
   ].map(name=>sourceFile(name)).join('\n');
   invariant(!/\bSDV[A-Z]\d+[a-z]*(?:[NR]\d+)?\b/.test(joined),'Canonical source contains a stamped SDV release.');
   invariant(!/\b(?:sd)?v[a-z]\d+[a-z]*(?:[nr]\d+)?\b/.test(joined),'Canonical source contains a stamped SDV release id.');
-  const html=sourceFile(htmlSource);
+  const html=readHostHtml(SOURCE);
   invariant(html.split(privateModuleMarker).length===2,'Canonical HTML must contain exactly one private-module marker.');
   const ids=privateModules.map(module=>module.id);
   invariant(privateModules[0]?.id==='internal','The internal registry must be the first private module.');
@@ -180,7 +181,7 @@ export function renderBuild(){
     development:new Map(externalModules.map(module=>[module.id,filename(module,externalSources.development.get(module.id))])),
     deployment:new Map(externalModules.map(module=>[module.id,filename(module,externalSources.deployment.get(module.id))]))
   });
-  const templateSource=sourceFile(htmlSource);
+  const templateSource=readHostHtml(SOURCE);
   const template=target=>renderPlatformTokens(templateSource,identity,htmlSource,{
     EXTERNAL_GLASS_FILENAME:externalNames[target].get('glass'),
     EXTERNAL_AURORA_FILENAME:externalNames[target].get('aurora'),
@@ -272,7 +273,7 @@ export function renderBuild(){
 
 function sourceHashes(){
   return Object.fromEntries([
-    htmlSource,...privateModules.map(row=>row.source),...externalSourceFiles(),...styleModules.map(row=>row.source),
+    htmlSource,...hostScripts.map(row=>row.source),...privateModules.map(row=>row.source),...externalSourceFiles(),...styleModules.map(row=>row.source),
     ...Object.values(platformFiles).map(row=>row.source),...staticAssets.map(row=>row.source)
   ].sort().map(name=>[name,sha256(sourceBytes(name))]));
 }

@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -6,7 +7,7 @@ import fs from 'node:fs';
 
 { // attachment-reference-boundary
 const attachments=readScript('source/core/attachments.ts');
-const host=fs.readFileSync('source/app.html','utf8');
+const host=readHostHtml();
 assert.match(attachments,/function createReferenceCoordinator\(/,'attachments module owns reference transaction coordination');
 assert.doesNotMatch(attachments,/kind===['\"]draft|Unfinished Reflection/,'retired Reflection Draft references must not remain in current attachment runtime');
 for(const name of ['restoreAttachmentReferenceState','removeAttachmentReferencesEverywhere','verifyAttachmentReferenceAbsent','attachmentReferenceDescriptor'])assert.doesNotMatch(host,new RegExp(`function\\s+${name}\\b`),`host must not reacquire attachment reference transaction logic: ${name}`);
@@ -16,7 +17,7 @@ console.log(JSON.stringify({status:'PASS',boundary:'attachment-references',hostC
 }
 
 { // backup-surface-boundary
-const app=fs.readFileSync('source/app.html','utf8');
+const app=readHostHtml();
 const backup=readScript('source/core/backup.ts');
 const provider=readScript('source/core/backup-provider.ts');
 const styles=fs.readFileSync('source/styles/core.css','utf8');
@@ -56,7 +57,7 @@ console.log(JSON.stringify({noteReadOnly:true,standaloneStatusLocal:true,library
 { // workspace-history-boundary
 const navigation=fs.readFileSync('source/core/navigation.js','utf8');
 const guide=fs.readFileSync('source/external/guide.js','utf8');
-const app=fs.readFileSync('source/app.html','utf8');
+const app=readHostHtml();
 const overlay=fs.readFileSync('source/core/workspace-overlay.js','utf8');
 const interactions=fs.readFileSync('source/core/interactions.js','utf8');
 
@@ -76,7 +77,7 @@ console.log(JSON.stringify({status:'PASS',suite:'workspace-history-ownership',ow
 }
 
 { // library-sections-contract
-const app=fs.readFileSync('source/app.html','utf8');
+const app=readHostHtml();
 const library=fs.readFileSync('source/core/library.js','utf8');
 const editor=fs.readFileSync('rich-text/editor.ts','utf8');
 // Notes · Days · Data: one switch, one panel each, Notes first.

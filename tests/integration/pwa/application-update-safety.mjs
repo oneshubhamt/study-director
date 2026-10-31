@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -5,7 +6,7 @@ import {createHarness as repositoryHarness} from '../../helpers/repository-harne
 
 // Execute the canonical host functions. Browser rendering is covered separately;
 // these fixtures expose save failures, lock lifetime, and background drain races.
-const source=fs.readFileSync('source/app.html','utf8');
+const source=readHostHtml();
 const preparation=source.slice(source.indexOf('function pwaRecoveryReadBackIssue('),source.indexOf('function schedulePwaUpdateEvaluation('));
 const updateScheduler=source.slice(source.indexOf('function schedulePwaUpdateEvaluation('),source.indexOf('async function evaluateAutomaticPwaUpdate('));
 const scheduler=source.slice(source.indexOf('function pwaLastUpdateCheckAt('),source.indexOf('const PwaLifecycle=PwaLifecycleModule'));

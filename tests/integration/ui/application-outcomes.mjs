@@ -1,8 +1,9 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createNotifications} from '../../helpers/notifications.mjs';
-const html=fs.readFileSync('source/app.html','utf8'),review=fs.readFileSync('source/core/review.js','utf8');
+const html=readHostHtml(),review=fs.readFileSync('source/core/review.js','utf8');
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 const noop=()=>{};
 

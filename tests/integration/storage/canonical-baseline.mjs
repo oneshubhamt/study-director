@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import {dailyRecordCodec,dataContract} from '../../helpers/current-codec-fixture.mjs';
 const stamp='2026-09-10T10:00:00.000Z',current=dailyRecordCodec.createDiaryRecord('2026-09-09','Canonical reflection',{savedAt:stamp,updatedAt:stamp});
@@ -21,7 +22,7 @@ const indexedDb={
     hold,keys:store=>[...(held.get(store)?.keys()||[])],summary:()=>({total:[...held.values()].reduce((sum,rows)=>sum+rows.size,0),protected:[...held.values()].reduce((sum,rows)=>sum+rows.size,0),stores:{},reasons:{}})
   }
 };
-const host=fs.readFileSync('source/app.html','utf8'),begin=host.indexOf('const UnsupportedData=(()=>{'),end=host.indexOf('const RepositoryAppMetaValidators=',begin);
+const host=readHostHtml(),begin=host.indexOf('const UnsupportedData=(()=>{'),end=host.indexOf('const RepositoryAppMetaValidators=',begin);
 assert.ok(begin>=0&&end>begin);
 const census=vm.runInNewContext(host.slice(begin,end)+'\nUnsupportedData;',{
   DATA_CONTRACT:dataContract,DB_STORES:Object.fromEntries(Object.keys(stores).map(name=>[name,name])),

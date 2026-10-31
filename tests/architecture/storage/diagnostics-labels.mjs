@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -21,7 +22,7 @@ const patterns={
 const counts={};
 for(const [kind,expressions] of Object.entries(patterns)){
   const missing=new Map();let seen=0;
-  for(const file of files){const text=fs.readFileSync(file,'utf8');for(const expression of expressions)for(const match of text.matchAll(expression)){seen++;if(!lists[kind].has(match[1])&&!missing.has(match[1]))missing.set(match[1],file);}}
+  for(const file of files){const text=(file==='source/app.html'?readHostHtml():fs.readFileSync(file,'utf8'));for(const expression of expressions)for(const match of text.matchAll(expression)){seen++;if(!lists[kind].has(match[1])&&!missing.has(match[1]))missing.set(match[1],file);}}
   assert.deepEqual([...missing].map(([label,file])=>`${label} (${file})`),[],`every diagnostics ${kind.slice(0,-1)} the code uses is on its allow-list`);
   counts[kind]=seen;
 }

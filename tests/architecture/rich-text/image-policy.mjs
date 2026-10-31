@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -6,7 +7,7 @@ import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
 const processing=fs.readFileSync('rich-text/image-processing.ts','utf8');
 const editor=fs.readFileSync('rich-text/editor.ts','utf8');
-const app=fs.readFileSync('source/app.html','utf8');
+const app=readHostHtml();
 const attachments=readScript('source/core/attachments.ts');
 const codec=readScript('source/core/backup-codec.ts');
 const richBundle=richTextRuntimeSource();

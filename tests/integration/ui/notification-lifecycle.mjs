@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import {readCoreScript,coreScriptPath} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
@@ -84,7 +85,7 @@ class Element {
 {
   const {notices:n}=coordinator(),nodes=new Map(['device-folder','google-drive'].map(source=>[`backup-operation-note-${source}`,new Element()]));
   const presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications:n}));
-  const html=fs.readFileSync('source/app.html','utf8'),a=html.indexOf('BackupPresentation.subscribe(()=>{'),b=html.indexOf('const REPOSITORY_MAINTENANCE_FORMAT',a);
+  const html=readHostHtml(),a=html.indexOf('BackupPresentation.subscribe(()=>{'),b=html.indexOf('const REPOSITORY_MAINTENANCE_FORMAT',a);
   new Function('BackupPresentation','document','renderFileBackup',html.slice(a,b))(presentation,{getElementById:id=>nodes.get(id)||null},()=>{});
   for(const sourceId of ['device-folder','google-drive']){
     const handle=presentation.begin(sourceId,'restore-version',{label:sourceId,message:'Verifying safety copy'});
@@ -97,7 +98,7 @@ class Element {
 {
   const {notices:n}=coordinator();for(let i=0;i<200;i++)n.notify({key:`routine-${i}`,title:'Saved'});
   assert.ok(n.eventStatus().events.length<=100,'routine notification queues and dedup history remain bounded');n.clear();
-  const html=fs.readFileSync('source/app.html','utf8'),a=html.indexOf('function renderCoordinatedNotice(state){'),b=html.indexOf('function noticeCanCompact',a);
+  const html=readHostHtml(),a=html.indexOf('function renderCoordinatedNotice(state){'),b=html.indexOf('function noticeCanCompact',a);
   const announcer=new Element(),render=new Function('document',html.slice(a,b)+';return renderCoordinatedNotice;')({getElementById:id=>id==='install-notice-announcer'?announcer:null});
   render({active:{kind:'safety'},announcement:'Local save failed'});assert.equal(announcer.textContent,'Local save failed');render({active:null,announcement:''});assert.equal(announcer.textContent,'','the DOM live region must clear between identical recurrences');render({active:{kind:'safety'},announcement:'Local save failed'});assert.equal(announcer.textContent,'Local save failed');
 }
@@ -113,7 +114,7 @@ class Element {
 {
   const {notices:n}=coordinator();for(let i=0;i<200;i++)n.emit({source:'maintenance',id:`quiet-${i}`,foreground:false,lifecycle:'succeeded',message:'Done'});
   assert.ok(n.eventStatus().events.length<=64,'quiet background results also have bounded retention');n.clear();
-  const html=fs.readFileSync('source/app.html','utf8'),start=html.indexOf('function renderDeviceBackup(state){'),end=html.indexOf('\nfunction markStorageHealthOk',start),status=new Element(),note=new Element(),recover=new Element(),cleared=[];
+  const html=readHostHtml(),start=html.indexOf('function renderDeviceBackup(state){'),end=html.indexOf('\nfunction markStorageHealthOk',start),status=new Element(),note=new Element(),recover=new Element(),cleared=[];
   let actionsDrawn=0;
   new Function('document','storageHealthTime','schedulePwaUpdateEvaluation','NoticeCoordinator','BackupPresentation','renderBackupActions',html.slice(start,end)+`;renderDeviceBackup({busy:true,foregroundKind:'restore-version',cancellable:false,connected:true,hasNote:true});`)({getElementById:id=>({'device-backup-status':status,'device-backup-note':note}[id]||null)},()=>'',()=>{}, {resolveEvent:(...args)=>cleared.push(args)},registry.require('backup-presentation',1).createPresentation(freeze({notifications:n})),()=>{actionsDrawn+=1;});
   assert.equal(status.textContent,'Restoring…');assert.equal(note.hidden,true);assert.equal(cleared.length,0,'Device state cannot erase the coordinator summary during cancellation');assert.equal(actionsDrawn,1,'the shared actions follow the Device Folder row');
@@ -121,7 +122,7 @@ class Element {
 {
   // One Back up now and one Version History for every location: shown while
   // any location is connected; a running restore can still be reopened.
-  const html=fs.readFileSync('source/app.html','utf8'),start=html.indexOf('function renderBackupActions(){'),end=html.indexOf('\n// The Device Folder backs up first',start);
+  const html=readHostHtml(),start=html.indexOf('function renderBackupActions(){'),end=html.indexOf('\n// The Device Folder backs up first',start);
   const draw=states=>{
     const nodes=new Map(['backup-shared-actions','backup-now','open-version-history'].map(id=>[id,new Element()]));
     new Function('document','BackupProviderRuntime',html.slice(start,end)+';renderBackupActions();')({getElementById:id=>nodes.get(id)||null},{locationStatus:id=>states[id]||null});
@@ -136,7 +137,7 @@ class Element {
 {
   // The portable-file row is drawn by the app too: Export and Cancel follow the
   // backup controller and the file processor; Version History's Cancel follows an import.
-  const html=fs.readFileSync('source/app.html','utf8'),start=html.indexOf('let fileBackupRowReady=false;'),end=html.indexOf("// Each location row opens its settings in place",start);
+  const html=readHostHtml(),start=html.indexOf('let fileBackupRowReady=false;'),end=html.indexOf("// Each location row opens its settings in place",start);
   const ids=['download-backup','cancel-standalone-import','cancel-backup-import','backup-file-status'];
   const draw=({exporting=false,fileBusy=false,importing=false,event=null}={})=>{
     const nodes=new Map(ids.map(id=>[id,new Element()]));
@@ -153,7 +154,7 @@ class Element {
 {
   // Google Drive's row is drawn by the app from engine status, with the same
   // parts as the Device Folder row.
-  const html=fs.readFileSync('source/app.html','utf8'),start=html.indexOf('function renderDriveBackup(){'),end=html.indexOf('\nfunction renderDeviceBackup(',start);
+  const html=readHostHtml(),start=html.indexOf('function renderDriveBackup(){'),end=html.indexOf('\nfunction renderDeviceBackup(',start);
   const ids=['backup-provider-row-status-google-drive','connect-drive-backup','cancel-drive-backup','drive-backup-settings','drive-backup-settings-panel','drive-backup-settings-last','disconnect-drive-backup'];
   const draw=(state,verifiedAt='')=>{
     const nodes=new Map(ids.map(id=>[id,new Element()]));nodes.get('drive-backup-settings-panel').hidden=false;
@@ -198,7 +199,7 @@ class Element {
   assert.equal(first.read(),null);assert.equal(first.finish('failed','Late failure'),false);
   second.finish('succeeded','Saved');assert.equal(second.read().message,'Saved');n.clear();
   const node=new Element();node.id='status';const nodes=[node];
-  const html=fs.readFileSync('source/app.html','utf8'),start=html.indexOf('function renderNotificationSurfaces(state){'),end=html.indexOf('const BackupPresentation=',start);
+  const html=readHostHtml(),start=html.indexOf('function renderNotificationSurfaces(state){'),end=html.indexOf('const BackupPresentation=',start);
   new Function('NoticeCoordinator','document',html.slice(start,end))(n,{getElementById:id=>id==='status'?node:null,querySelectorAll:()=>nodes.filter(node=>node.dataset.notificationKey)});
   port.feedback({id:'hint',surfaceId:'status',surface:'inline',message:'First hint'});
   const operation=port.begin({id:'work',surfaceId:'status',announce:false});operation.finish('succeeded','Completed');
@@ -210,7 +211,7 @@ class Element {
 // Exercise the actual file picker handler: AbortError is neutral; recovery clears the condition.
 {
   const {notices:n}=coordinator(),presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications:n}));
-  const html=fs.readFileSync('source/app.html','utf8'),start=html.indexOf("  'pick-import-file': async()=>{"),end=html.indexOf("  'test-sound':",start);
+  const html=readHostHtml(),start=html.indexOf("  'pick-import-file': async()=>{"),end=html.indexOf("  'test-sound':",start);
   let failure=Object.assign(new Error('Cancelled'),{name:'AbortError'}),imports=0;
   const handler=new Function('Exports','document','BackupController','NoticeCoordinator','BackupPresentation','return ({'+html.slice(start,end)+'})["pick-import-file"];')({open:async()=>{if(failure)throw failure;return new Blob(['backup']);}},{getElementById:()=>({})},{importLocal:async()=>imports++},n,presentation);
   await handler();assert.equal(n.eventStatus().events.length,0);

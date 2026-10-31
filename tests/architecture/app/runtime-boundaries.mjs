@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -6,7 +7,7 @@ import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 // Current runtime boundary invariants: decision time, pacing, presentation, and bounded background/display work.
 
 { // decision-clock-boundary
-const host=fs.readFileSync('source/app.html','utf8');
+const host=readHostHtml();
 const timer=readScript('source/core/timer-engine.ts');
 const attachments=readScript('source/core/attachments.ts');
 const mutation=readScript('source/core/mutation-coordinator.ts');
@@ -77,7 +78,7 @@ console.log(JSON.stringify({status:'PASS',boundary:'practice-pacer',pureModel:tr
 }
 
 { // presentation-surface-boundary
-const app=fs.readFileSync('source/app.html','utf8');
+const app=readHostHtml();
 assert.match(app,/<html[^>]*data-presentation="glass"[^>]*data-typography="glass"[^>]*data-shape="glass"[^>]*data-material="glass"[^>]*data-depth="glass"/u,'Glass must be the pre-hydration presentation before bootstrap JavaScript runs.');
 const core=fs.readFileSync('source/styles/core.css','utf8');
 const glass=fs.readFileSync('source/external/glass.js','utf8');

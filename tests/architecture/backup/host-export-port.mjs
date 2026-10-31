@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 const backup=fs.readFileSync(path.join(root,'source/core/backup.ts'),'utf8');
-const host=fs.readFileSync(path.join(root,'source/app.html'),'utf8');
+const host=readHostHtml(path.join(root,'source'));
 const contract=backup.match(/exports:freeze\((\[[^\]]+\])\)/u);
 const wired=host.match(/^\s*exports:(Object\.freeze\(\{[^\n]+\}\)),?$/mu);
 assert.ok(contract&&wired,'Backup exports contract and production host wiring must be present.');

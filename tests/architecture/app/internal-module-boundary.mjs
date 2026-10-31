@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -5,7 +6,7 @@ import {privateModules} from '../../../build/module-manifest.mjs';
 
 const coreRoot='source/core';
 const internal=fs.readFileSync(path.join(coreRoot,'internal.js'),'utf8');
-const app=fs.readFileSync('source/app.html','utf8');
+const app=readHostHtml();
 const coreFiles=fs.readdirSync(coreRoot).filter(name=>/\.(?:js|ts)$/u.test(name)).sort();
 const sources=new Map(coreFiles.map(name=>[name,fs.readFileSync(path.join(coreRoot,name),'utf8')]));
 
@@ -19,7 +20,8 @@ for(const [name,format,version] of [
   ['app-meta','study-director.app-meta',1],
   ['exports','study-director.exports-module',1]
 ]) assert.match(app,new RegExp(`INTERNAL_MODULES\\.load\\('${name}',1,'${format}',${version}(?:,Object\\.freeze\\(\\{lifecycle:OperationLifecycle\\}\\))?\\)`,'u'),`${name} must be validated at the host module boundary`);
-assert.match(sources.get('attachments.js'),/format:'study-director\.attachments-module',contractVersion:1/u,'attachments exposes explicit module identity metadata');
+const attachmentsSource=privateModules.find(module=>module.id==='attachments').source;
+assert.match(sources.get(path.basename(attachmentsSource)),/format:'study-director\.attachments-module',contractVersion:1/u,'attachments exposes explicit module identity metadata');
 
 const localExact=coreFiles.filter(name=>/function\s+exactObject\s*\(/u.test(sources.get(name)));
 const localFunctions=coreFiles.filter(name=>/function\s+functions\s*\(/u.test(sources.get(name)));

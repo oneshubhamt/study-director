@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -5,7 +6,7 @@ import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
-const app=fs.readFileSync('source/app.html','utf8'),repositories=readScript('source/core/repositories.ts');
+const app=readHostHtml(),repositories=readScript('source/core/repositories.ts');
 const id='att-'+'a'.repeat(32),otherId='att-'+'c'.repeat(32);
 function fixture(){
   const clock=createFakeClock();

@@ -1,8 +1,9 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const app=fs.readFileSync('source/app.html','utf8');
+const app=readHostHtml();
 const background=readScript('source/core/repository-background.ts');
 const device=readScript('source/core/device-backup.ts');
 const provider=readScript('source/core/backup-provider.ts');

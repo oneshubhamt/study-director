@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import {readCoreScript,coreScriptPath} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
@@ -7,7 +8,7 @@ import {webcrypto} from 'node:crypto';
 import {createHarness} from '../../helpers/repository-harness.mjs';
 import {noteRow,TRASH_PREFIX} from '../../helpers/note-ids.mjs';
 import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
-const source=fs.readFileSync('source/app.html','utf8');
+const source=readHostHtml();
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 function fixture(){
   const timers=new Map();let seq=0;const state={owner:true,busy:false,revision:'one',refs:0,failure:false,commitFailure:false,completed:0,scans:[],keys:['late'],removed:[],journal:null,removedPasses:[],invalidated:0,now:0};

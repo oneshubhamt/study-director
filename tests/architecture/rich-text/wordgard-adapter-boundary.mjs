@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,7 +35,7 @@ assert.match(editor,/tableRuler\.addEventListener\('pointerdown',[\s\S]*?beginTa
 const styles=read('source/styles/core.css');
 assert.match(styles,/\.workspace-overlay-rich-text \.workspace-overlay-head\{flex-wrap:nowrap\}[\s\S]*?\.workspace-overlay-rich-text \.workspace-overlay-header-content\{order:0;flex:0 0 auto;flex-basis:auto;width:auto\}/,'Rich-text Focus Mode header must remain one line on mobile.');
 assert.match(styles,/--sd-rte-focus-obscured-bottom,0px/,'Mobile Focus Mode geometry must consume the visual-viewport keyboard inset.');
-const app=read('source/app.html');
+const app=readHostHtml();
 assert.match(app,/if\(candidate&&!mounted\.has\(candidate\)&&!pending\.has\(candidate\)\)return activate\(candidate\);/,'Automatic view synchronization must mount editors without focus intent.');
 assert.match(app,/function onFocusIn\(event\).*activate\(field,\{focus:true\}\);/,'Explicit textarea focus must preserve the user focus intent across rich-editor mounting.');
 assert.match(app,/focusOnMount:options\.focus===true/,'Application focus intent must be forwarded explicitly to the rich editor.');

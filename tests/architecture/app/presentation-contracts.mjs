@@ -1,7 +1,8 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const html=fs.readFileSync('source/app.html','utf8');
+const html=readHostHtml();
 const planJs=fs.readFileSync('source/core/plan.js','utf8');
 const coreCss=fs.readFileSync('source/styles/core.css','utf8');
 const glassCss=fs.readFileSync('source/external/glass.js','utf8');

@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -402,7 +403,7 @@ for(const native of [false,true]){
 
 // The host's presentation wait must settle even if a hidden tab receives no frames.
 {
-  const host=fs.readFileSync('source/app.html','utf8');
+  const host=readHostHtml();
   const start=host.indexOf('const nextNavigationFrame='),end=host.indexOf('\n});',start)+4;
   for(const hidden of [false,true])for(const winner of ['frame','timer']){
     let id=0,resolved=0;const frames=new Map(),timers=new Map();

@@ -1,8 +1,9 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readCoreScript,coreScriptPath} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-const source=fs.readFileSync('source/app.html','utf8'),copied=[],notices=[],errors=[];
+const source=readHostHtml(),copied=[],notices=[],errors=[];
 const context={console,Date,Map,Object,Array,Symbol,Error,TypeError,Number,String,JSON,Promise,setTimeout,clearTimeout};vm.createContext(context);
 for(const file of ['internal','operation-lifecycle','backup-operation-diagnostics'])vm.runInContext(readCoreScript(file),context,{filename:coreScriptPath(file)});
 const registry=context[Symbol.for('studyDirector.internalModules.v1')],lifecycle=registry.require('operation-lifecycle',1);

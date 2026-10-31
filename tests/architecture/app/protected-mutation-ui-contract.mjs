@@ -1,7 +1,8 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const html=fs.readFileSync('source/app.html','utf8');
+const html=readHostHtml();
 const review=fs.readFileSync('source/core/review.js','utf8');
 
 assert.match(html,/let mutationUiOperationActive=false;/u,'protected-operation UI reconciliation must track the local mutation lifecycle.');

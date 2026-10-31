@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {PRODUCTION_LIMITS,CAPACITY_PROFILES,assertProductionLimits} from '../../../contracts/production-limits.mjs';
@@ -23,7 +24,7 @@ assert.ok(CAPACITY_PROFILES.denseTextMetadata.dailyRecords<PRODUCTION_LIMITS.max
 assert.equal(CAPACITY_PROFILES.denseTextMetadata.assetCount,0);
 assert.equal(Object.prototype.hasOwnProperty.call(CAPACITY_PROFILES.denseTextMetadata,'reflectionDrafts'),false);
 assert.equal(CAPACITY_PROFILES.countBoundaries.includes('reflectionDrafts'),false);
-const app=fs.readFileSync('source/app.html','utf8'),build=fs.readFileSync('build/build.mjs','utf8'),editor=fs.readFileSync('rich-text/editor.ts','utf8');
+const app=readHostHtml(),build=fs.readFileSync('build/build.mjs','utf8'),editor=fs.readFileSync('rich-text/editor.ts','utf8');
 assert.match(app,/Object\.freeze\(@@SD_PRODUCTION_LIMITS@@\)/);
 assert.match(build,/import \{PRODUCTION_LIMITS,assertProductionLimits\}/);
 assert.match(editor,/PRODUCTION_LIMITS\.richAssetMaxBytes/);

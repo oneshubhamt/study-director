@@ -2,7 +2,7 @@
 
 ## TS-Conversion program
 
-When working on `TS-Conversion`, first read [the execution control record](TS-CONVERSION-EXECUTION.md), [binding decisions](docs/typescript/DECISIONS.md), the assigned [Phase 5 objectives](docs/typescript/PHASE-5.md), and relevant current source/consumers. [The documentation map](docs/README.md) separates current contracts from history. Preparation and Phases 1–4 are complete in their recorded scopes; Phase 5 is not started at the documentation checkpoint.
+When working on `TS-Conversion`, first read [the execution control record](TS-CONVERSION-EXECUTION.md), [binding decisions](docs/typescript/DECISIONS.md), the assigned [Phase 5 objectives](docs/typescript/PHASE-5.md), and relevant current source/consumers. [The documentation map](docs/README.md) separates current contracts from history. Use the execution record for current phase/pass state; do not infer it from historical completion labels.
 
 For **every subpass**, follow inspect → analyze → implement → source/objective reconciliation → targeted QA. Maintain the execution record's active durable scratchpad **throughout** the pass, starting before source edits; use a second temporary scratchpad outside the repository. Record fixed starting HEAD, assigned objective IDs, source observations versus risks, material decisions, actual changes/checks, unfinished work and next action. Verify each objective against current source and adjacent flows. Do not close it solely from old checkmarks, types, prose or green tests. Follow the status/evidence and interruption-recovery rules in the control record; keep one authoritative status location. No new routine approval checkpoints or delegation are required.
 

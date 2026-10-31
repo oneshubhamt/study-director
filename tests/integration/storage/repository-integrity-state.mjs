@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readCoreScript,coreScriptPath} from '../../helpers/core-script.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
@@ -9,7 +10,7 @@ import {hashSnapshot} from '../../../portable/integrity-hash.ts';
 
 // Execute canonical host normalization and persistence, using atomic transaction
 // boundaries with injectable read/write/commit failures and real handle identity.
-const app=fs.readFileSync('source/app.html','utf8');
+const app=readHostHtml();
 const normalization=app.slice(app.indexOf('function normalizeRepositoryIntegrityTarget('),app.indexOf('async function libraryClearSnapshot('));
 const persistence=app.slice(app.indexOf('let repositoryIntegrityWriteChain='),app.indexOf('const RepositoryIntegrityContinuation='));
 const objectId=char=>'obj_'+char.repeat(32),scanId='a'.repeat(64),stamp='2026-09-01T00:00:00.000Z';

@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
@@ -5,7 +6,7 @@ import fs from 'node:fs';
 // appears while an automatic backup can run or while some backup already holds
 // the latest changes, and it does appear when changes have gone a week
 // without reaching any backup.
-const html=fs.readFileSync(new URL('../../../source/app.html',import.meta.url),'utf8');
+const html=readHostHtml();
 const start=html.indexOf('async function maybePromptBackupNudge(force=false){'),end=html.indexOf('\n/* LIVE DRAFT AND ACTIVE SESSION STORE */',start);
 assert.ok(start>=0&&end>start,'The backup reminder must be available.');
 const helpers=['function verifiedRecoveryEntries(','function lastBackupTime('].map(head=>{const at=html.indexOf(head);assert.ok(at>=0,head);return html.slice(at,html.indexOf('\n',at));}).join('\n');

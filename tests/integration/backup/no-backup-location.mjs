@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {createDeviceFolderWorld,MINUTE} from '../../helpers/device-folder-world.mjs';
@@ -6,7 +7,7 @@ import {createDeviceFolderWorld,MINUTE} from '../../helpers/device-folder-world.
 // interaction across the app still works, does nothing it does not need to,
 // and never shows a notice. The app's own functions run against the real
 // backup engine with no location registered (a browser without folder access).
-const html=fs.readFileSync(new URL('../../../source/app.html',import.meta.url),'utf8');
+const html=readHostHtml();
 const slice=(from,to)=>{const start=html.indexOf(from),end=html.indexOf(to,start);assert.ok(start>=0&&end>start,`app.html must contain ${from}`);return html.slice(start,end);};
 const w=createDeviceFolderWorld({supported:false});await w.controller.install();
 const runtime=w.runtime,captured=[],statuses=[],shown=[];

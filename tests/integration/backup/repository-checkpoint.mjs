@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import {performance} from 'node:perf_hooks';
 import {createBackupPresentation} from '../../helpers/backup-presentation.mjs';
@@ -901,7 +902,7 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
 }
 // The actual adapter's uncertainty count must reach the actual integrity owner
 // and host state projector, even when some usable history remains.
-const incompleteInventoryCases=[],hostSource=fs.readFileSync('source/app.html','utf8');
+const incompleteInventoryCases=[],hostSource=readHostHtml();
 for(const usableHistory of [false,true])for(const kind of ['checkpoint','commit'])for(const fault of ['renamed','undownloadable']){
  const realDate=globalThis.Date,clock=createFakeClock('2026-10-03T12:00:00.000Z');backgroundClock=clock;globalThis.Date=clock.Date;backgroundReady=true;dailyRecords=[];notes={};assetDescriptor=null;
  const id=`uncertain-${usableHistory}-${kind}-${fault}`,h=createDriveHarness({clock,registerProvider:config=>runtime.providers.register(freeze({...config,id,label:'Drive Integrity QA'}))});

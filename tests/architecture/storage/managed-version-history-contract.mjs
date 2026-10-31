@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -5,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 const read=relative=>readScript(path.join(root,relative));
-const app=read('source/app.html'),repository=read('source/core/managed-repository.ts'),provider=read('source/core/backup-provider.ts'),device=read('source/core/device-backup.ts'),host=read('source/core/backup-recovery-host.ts'),drive=read('source/external/drive.js');
+const app=readHostHtml(),repository=read('source/core/managed-repository.ts'),provider=read('source/core/backup-provider.ts'),device=read('source/core/device-backup.ts'),host=read('source/core/backup-recovery-host.ts'),drive=read('source/external/drive.js');
 
 assert.match(repository,/const REPOSITORY_MANIFEST_FORMAT='study-director\.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=8[;,]/u);
 assert.match(repository,/function repositoryLogicalIdentityPayload\(value\s*\)[\s\S]*format:'study-director\.managed-backup-logical-state'[\s\S]*objects:freeze\(objects\),assets:freeze\(assets\),deletions:/u);

@@ -1,7 +1,8 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const html=fs.readFileSync(new URL('../../../source/app.html',import.meta.url),'utf8');
+const html=readHostHtml();
 const start=html.indexOf('function canonicalAttachmentReferenceDescriptor(event){');
 const end=html.indexOf('\nasync function refreshPersistedSessionBadge()',start);
 assert.ok(start>=0&&end>start,'The reference-aware canonical commit handler must be available.');

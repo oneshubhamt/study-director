@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import {readCoreScript} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
@@ -81,7 +82,7 @@ await assert.rejects(store.shallowAudit(['asset-good']),{name:'NotAllowedError'}
 
 // Execute the host audit's commit boundary: old findings must survive both a
 // metadata read failure and failure to durably save a newly clean scan.
-const app=fs.readFileSync('source/app.html','utf8'),begin=app.indexOf('let attachmentIntegrityView='),end=app.indexOf('const REPOSITORY_INTEGRITY_BATCH_BYTES=',begin);
+const app=readHostHtml(),begin=app.indexOf('let attachmentIntegrityView='),end=app.indexOf('const REPOSITORY_INTEGRITY_BATCH_BYTES=',begin);
 for(const failure of ['read','write']){
   const clock=createFakeClock();let cleared=0,writes=0;const retained=new Map([['asset-good',{kind:'size-mismatch'}]]),scheduled=[];
   const context=vm.createContext({console,Object,Map,Date:clock.Date,Promise,Symbol,TypeError,StartupLifecycle:{status:()=>({fullyInitialized:true})},APP_META_KEYS:{attachmentIntegrityAudit:'integrity'},AttachmentsModule:{validId:value=>/^asset-/.test(value)},attachmentIntegrityIssues:retained,

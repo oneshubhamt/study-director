@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -6,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 const read=relative=>readScript(path.join(root,relative));
-const app=read('source/app.html');
+const app=readHostHtml();
 const backup=read('source/core/backup.ts');
 const backupCapture=read('source/core/backup-capture.ts');
 const managedRepository=read('source/core/managed-repository.ts');

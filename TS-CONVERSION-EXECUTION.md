@@ -1,6 +1,6 @@
 # TypeScript conversion — execution control record
 
-**Current checkpoint: 2026-10-31 (UTC).** Phase 4 is implemented and verified within its recorded targeted scope at [`4136ba5`](https://github.com/oneshubhamt/study-director/commit/4136ba513479f0e0e0c01e0cef2495bcf61e0a2e): 34 Phase 4 modules, 126 files admitted to strict checks, zero unchecked existing TS. This is not whole-application certification. **Phase 5 application work has not started.** This documentation pass organizes the overall product/engineering guides and adopts the execution discipline below; next application work is P5.0.
+**Current checkpoint: 2026-10-31 (UTC).** Phase 4 is implemented and verified within its recorded targeted scope at [`4136ba5`](https://github.com/oneshubhamt/study-director/commit/4136ba513479f0e0e0c01e0cef2495bcf61e0a2e): 34 Phase 4 modules, 126 files admitted to strict checks, zero unchecked existing TS. This is not whole-application certification. **Phase 5 is ACTIVE: P5.0 is VERIFIED — TARGETED.** Next is P5.1; strict feature conversions remain unstarted.
 
 ## Read first and document ownership
 
@@ -20,7 +20,7 @@ This file owns current program state, active findings and the durable working sc
 | 2 — Contracts/existing TS | Complete in its recorded scope | Archive: Phase 2 implementation and verification |
 | 3 — Leaves/codecs | Complete in its recorded scope | Archive: Phase 3 implementation and verification |
 | 4 — Persistence/orchestration | VERIFIED — TARGETED | `4136ba5`; archive's final Phase 4 completion records exact scope and deferred QA |
-| 5 — Host/features | NOT STARTED | [P5.0 onward](docs/typescript/PHASE-5.md); convert host portions with their owning features |
+| 5 — Host/features | ACTIVE — P5.0 verified | [P5.0 onward](docs/typescript/PHASE-5.md); convert host portions with their owning features |
 | 6 — Tooling/tests | NOT STARTED | Before starting, bound build/contracts, shared fixtures/loaders, test layers and transitional-bridge retirement into explicit units |
 | 7 — Certification | NOT STARTED | Fresh whole-application source reconciliation plus complete correctness, coverage, mutation, browser, release and performance gates |
 
@@ -56,8 +56,8 @@ These are process/verification gaps identified during documentation review, **no
 
 | ID | Kind / status | Owner and closure condition |
 | --- | --- | --- |
-| F-001 | Host allocation gap — OPEN | P5.0: assign all inline scripts and main-host responsibilities to named subpasses, including cross-feature helpers; verify no unowned ranges. The current ownership map is a starting allocation, not a completed source audit |
-| F-002 | Fragile source-text test readers — OPEN | P5.0: inventory consumers of host text and repair shared extraction/erasure paths; each later pass handles newly affected assertions without weakening behavior requirements. Phase 6 owns full removal of remaining transitional test bridges |
+| F-001 | Host allocation gap — CLOSED in P5.0 | All five scripts assigned; main host has 117 contiguous owner ranges covering every line and all 1,005 top-level statements; action callbacks also assigned. Feature behavior/type reconciliation remains with each owner |
+| F-002 | Reader inventory/assembly — CLOSED for P5.0; retirement OPEN | All 42 existing source consumers use the shared composer; three baseline reader defects repaired. Each feature owns newly affected assertions; Phase 6 owns full retirement of transitional text/VM bridges and authored coverage reconciliation |
 | F-003 | Whole-program verification gap — OPEN | Phase 7: reconcile all remaining authored runtime code, whole-app behavior and current canonical formats; execute the full gates and record failures/repairs. Record unavailable manual/device evidence separately, without claiming it passed |
 
 ## Two scratchpads and recovery after interruption
@@ -70,7 +70,7 @@ On resume, read the current docs and inspect actual Git/source state before acti
 
 Keep only the active pass and recent handoff here. At a natural phase boundary, move closed worklogs intact to one phase history file and retain commit/evidence pointers; never create competing per-pass plan, acceptance and scratchpad documents. Preserve original observations and corrections instead of rewriting history into uninterrupted success.
 
-## Active durable worklog — DOC-2026-10-30
+## Recent closed worklog — DOC-2026-10-30
 
 **State: VERIFIED — TARGETED, completed 2026-10-31 (UTC).** Start HEAD `4136ba513479f0e0e0c01e0cef2495bcf61e0a2e`; clean `TS-Conversion`; fetched remote matched; main `9afbda7d1e18310d5e847662504cf057f363fb65`. Temporary checklist: `/tmp/ts-documentation-pass.md`. Phase 5 application implementation is not part of this pass. The owner subsequently expanded scope to all application documentation, product purpose/design, long-term architecture and implementation guidance.
 
@@ -110,6 +110,37 @@ assert archive.split(b'<!-- BEGIN PRESERVED EXECUTION RECORD -->\n\n', 1)[1] == 
 ```
 
 **Handoff:** DOC-01–DOC-08 are closed within the documented scope. F-001–F-003 remain open. Next application action: P5.0 inspection and mechanical extraction, beginning with its baseline and full host-consumer allocation. The completion commit is the documentation commit containing this worklog (resolve with `git log -1 --format=%H -- TS-CONVERSION-EXECUTION.md`); publication is checked against `git ls-remote origin refs/heads/TS-Conversion` before reporting the push. Phase 5 has not begun. No changes were made to the Practice Desk reference or either main branch.
+
+## Active durable worklog — P5.0
+
+**State: VERIFIED — TARGETED.** Baseline `8d9c525550d652e391c58f6fbd3db87160cf25fa`, clean `TS-Conversion`, 2026-10-31 UTC. Remote identity verified with `ls-remote` and an explicit branch refspec (origin's configured fetch maps only main); fetched `origin/TS-Conversion` now matches. Main remains `9afbda7`. Temporary pad: `/tmp/study-director-P5.0.md`.
+
+**Bounded objectives:** P5.0-A extract all five scripts without executable changes; P5.0-B route build and affected source readers through manifest-backed composition/erasure; P5.0-C complete host range/function ownership and consumer inventory (F-001/F-002); P5.0-D reconcile baseline/output and targeted build, source-reader and browser startup/core-flow evidence. All four objectives are closed below; no strict feature conversion or behavior change assigned.
+
+**Inspection/design:** `app.html` contains install capture, profile scope, presentation kernel, presentation metadata and the main IIFE. Early scripts must run synchronously at exactly their existing DOM positions. Extract their complete bodies to `source/host/*.js` and replace bodies with unique manifest markers. Build-time reinsertion preserves delivered inline script bytes, lexical scope, CSP, precache and first-paint behavior without adding requests or changing defer/module semantics. The shared reader will compose authored HTML for existing source-text tests, using the same classic-script erasure helper as the build. Test assertions remain intact. Runtime module splits/typing belong to later owners. No dependency, vendor, workflow, release or hosting-policy changes planned.
+
+**Implementation checkpoint:** five bodies moved verbatim into `source/host/`; the manifest-backed `build/host-source.mjs` composes them at their original inline positions. Build inventory/source hashes include them. All 42 source-reading tests use this shared path; assertions retained. Added composition tests for missing/duplicate/reordered/unknown markers, changed script attributes, closing-script injection and literal dollar sequences. Exact baseline comparison passed for reassembled authored HTML and every one of the 197 generated files (including CSP/cache identities). Host allocation now covers 9,284 lines / 1,005 top-level statements in 117 contiguous ranges plus all action entries; the Phase 5 register owns the map and consumer inventory. This is ownership accounting, not whole-host behavioral certification.
+
+**Failures and repairs:** three source-reader failures reproduced against unchanged `8d9c525`: `internal-module-boundary` looked up retired `attachments.js` (now resolves the manifest path); `data-architecture` sent portable ESM through the classic parser (now uses `eraseTypes` for non-core source, retains the core parser guard, and scans `.ts` as well); `persistence-boundary` rejected whitespace left by erased types/generic arguments (three patterns now allow whitespace, preserving transaction stores, durability and epoch requirements). Main's corresponding files were inspected; its JS-era readers were not suitable for direct port. No runtime defect established or application semantics changed. One baseline reproduction initially lacked copied external sources; completing that disposable fixture reproduced the actual parser failure. One rerun initially used a stale copied test; the final validated copy contains the repair.
+
+| Objective | Closure evidence |
+| --- | --- |
+| P5.0-A | All five script bodies byte-identical to their original inline bodies; composed authored HTML equals baseline exactly; no added requests/scope/timing changes |
+| P5.0-B | Canonical inventory/source hashes include five host files; shared build/test composer; 42 existing readers adapted; malformed-marker/closing-tag/literal-replacement regressions pass |
+| P5.0-C | Phase 5 register owns exhaustive 117-range / 1,005-statement map, all action entries and full source-reader inventory; F-001 closed, F-002 assembly closed with Phase 6 retirement retained |
+| P5.0-D | All 197 output files byte-identical; 44 targeted fast checks, build/source/generated syntax/deployment checks and two Chromium workflows passed; limits below |
+
+**Executed QA — baseline plus this pass's changed paths:** Node 26.12.1, Chromium 154.0.8037.57 on Debian. Disposable validation/build copies under `/tmp`; no generated outputs committed.
+
+- Exact-output proof: before extraction, hash every value in `renderBuild().development` and `.deployment` using SHA-256; after extraction compare both filename→hash maps. All 98 development + 99 deployment files match. `readHostHtml()` equals `git show 8d9c525:source/app.html` byte-for-byte. Build-manifest source hashes intentionally change because authored files moved; runtime output, CSP and PWA identity do not.
+- Targeted runner: `node tests/helpers/run-category.mjs targeted <paths>` with the 42 paths in the Phase 5 consumer table plus `tests/architecture/build/host-source.mjs` and `tests/architecture/test-suite/suite-governance.mjs`. **44 unique tests passed** (2 unit, 18 integration, 24 architecture). The first run stopped at the first baseline reader failure; subsequent selections resumed the affected architecture subset. Unaffected unit/integration checks were not rerun. Logs: `/tmp/p5-targeted.log`, `/tmp/p5-targeted-architecture.log`, `/tmp/p5-targeted-architecture-rest.log`, `/tmp/p5-targeted-architecture-final.log`; durable failure/repair details above.
+- `node build/build.mjs`, `node build/verify-build.mjs`, `node tests/architecture/build/syntax-check.mjs`, `node tests/architecture/build/generated-syntax-check.mjs`, `node tests/architecture/build/deployment-contract.mjs` passed. Source syntax covered 332 files / 52 rendered templates; generated syntax covered 134 JS files and 10 inline scripts across both targets. Subsequent test-reader fixes do not alter generated output; the changed tests themselves executed successfully.
+- `node tests/browser/app/core-flow.mjs` and `node tests/browser/pwa/pwa-offline.mjs` passed serially. Evidence includes clean startup, plan/timer/review persistence/reload, saved-day backup/re-export, offline cold reload/lazy features, corrupt update rejection and multi-tab update settlement. Log: `/tmp/p5-build-browser.log`.
+- New composition regression checks and suite governance pass. Final checks passed: 153 local documentation links; exact five-body/authored-HTML/output comparison; parsed the documented 117 ranges and proved every one of 1,005 AST statements is wholly assigned with no line gaps/overlaps; `git diff --check`. Protected source, vendor, canonical contracts, dependency/workflow/release configuration and preserved history are unchanged.
+
+No TypeScript admission count changed: this is mechanical preparation, not new strict typing. Full QA, authored-host coverage, repeated pre-merge browser reliability runs, manual/device and whole-app certification were not performed; Phase 7 remains required. Later edits were documentation/test-reader repairs only, so unchanged runtime/build/browser evidence remains applicable.
+
+**Handoff:** P5.0 complete within targeted scope; next is P5.1 foundation modules and their allocated host adapters. Establish a fresh baseline and bounded objectives before editing those implementations. Preserve the current canonical model and immutable Wordgard. Commit containing this worklog identifies the completion revision (`git log -1 --format=%H -- TS-CONVERSION-EXECUTION.md`); verify `git ls-remote origin refs/heads/TS-Conversion` before claiming push. No main/Practice Desk edits or deployment.
 
 ## Worklog template — replace the active block when starting the next pass
 

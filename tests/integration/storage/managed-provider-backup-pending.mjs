@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -65,7 +66,7 @@ assert.equal(strictWrites,4,'repository-maintenance intent removal must use stri
 
 console.log(JSON.stringify({status:'PASS',suite:'managed-provider-backup-pending',strictDurability:true,restartPersistence:true,clearable:true,maintenanceRestartPersistence:true,maintenanceStrictDurability:true,maintenanceEligibilityPersistence:true},null,2));
 
-const Background=registry.require('repository-background',1,freeze({lifecycle:registry.require('operation-lifecycle',1)})),hostSource=fs.readFileSync('source/app.html','utf8'),hostText=hostSource.slice(hostSource.indexOf('const REPOSITORY_MAINTENANCE_FORMAT='),hostSource.indexOf('async function canonicalLocalRecoveryEmpty('));
+const Background=registry.require('repository-background',1,freeze({lifecycle:registry.require('operation-lifecycle',1)})),hostSource=readHostHtml(),hostText=hostSource.slice(hostSource.indexOf('const REPOSITORY_MAINTENANCE_FORMAT='),hostSource.indexOf('async function canonicalLocalRecoveryEmpty('));
 function host(){
  const context={Object,Number,String,Date,Promise,Map,crypto:globalThis.crypto,AppDiagnostics:{capture(){}},BackupProviderRuntime:{configureRepositoryMaintenance(){}},BackupAppMeta:gateway().bind('backup')};vm.createContext(context);vm.runInContext(hostText,context);
  return {read:vm.runInContext('repositoryMaintenanceState',context),mark:vm.runInContext('markRepositoryMaintenancePending',context),clear:vm.runInContext('clearRepositoryMaintenancePending',context)};

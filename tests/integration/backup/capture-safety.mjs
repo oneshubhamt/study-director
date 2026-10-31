@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readCoreScript} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -78,7 +79,7 @@ const cases=['payload reads reject overlapping mutations','settle-time writes ar
 // Quantified completeness: for every preparation route and settlement failure,
 // a canonical checkpoint is forbidden. A later successful retry must include
 // the deletion ledger and retire the pending marker, not resurrect the record.
-const appSource=fs.readFileSync('source/app.html','utf8');
+const appSource=readHostHtml();
 for(const route of ['canonical','assumed-settled','rescue','incremental'])for(const fault of ['database-write','marker-read','throws','false','undefined']){
   const controls={dailyKeyEnumeration:true},h=createHarness(new Map(),null,controls),date='2026-09-16';
   await h.app.dailyRecords.save({version:1,date,savedAt:'2026-09-17T10:00:00.000Z',updatedAt:'2026-09-17T10:00:00.000Z',reflection:'Deliberately deleted study day'});

@@ -1,3 +1,4 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import {readCoreScript} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
@@ -87,7 +88,7 @@ console.log(JSON.stringify({status:'PASS',suite:'data-maintenance-phase-outcomes
 const {createFakeClock}=await import('../../helpers/fake-clock.mjs');
 const lifecycleContext=vm.createContext({Symbol,Object,Error,TypeError,Date,Promise,Map,Set,setTimeout,clearTimeout});
 for(const file of ['internal','operation-lifecycle'])vm.runInContext(readCoreScript(file),lifecycleContext);
-const lifecycle=lifecycleContext[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1),hostSource=fs.readFileSync('source/app.html','utf8');
+const lifecycle=lifecycleContext[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1),hostSource=readHostHtml();
 function automaticMaintenance(h,clock,controls){
  const context={Object,Error,Date:clock.Date,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,OperationLifecycle:lifecycle,AppData:h.app,StartupLifecycle:{status:()=>({fullyInitialized:true})},appCanMutate:()=>controls.owned!==false,UnsupportedData:{held:()=>false},backgroundMaintenanceForegroundBusy:()=>!!controls.foreground,AppDiagnostics:{capture(){}},BackupOperationDiagnostics:{start:()=>'',mark(){},finish(){},fail(){}},DATA_MAINTENANCE_FAILURE_RETRY_MS:300000,DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS:86400000,ATTACHMENT_CLEANUP_AFTER_UPKEEP_MS:5000,scheduleDataMaintenance:(delay,reason)=>context.job.schedule(delay,reason),scheduleRichTextAssetMaintenance:delay=>{(controls.cleanups??=[]).push(delay);return true;},wakeBackgroundOperations:trigger=>{(controls.wakes??=[]).push(trigger);context.job.wake(trigger,true);return true;}};
  vm.createContext(context);controls.host=context;

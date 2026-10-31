@@ -1,8 +1,9 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const html=fs.readFileSync('source/app.html','utf8');
+const html=readHostHtml();
 const scripts=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match=>match[1]);
 const presentationSource=scripts.find(source=>source.includes('studyDirector.presentationKernel.v1'));
 assert.ok(presentationSource,'Presentation Kernel bootstrap must remain inline and discoverable.');

@@ -1,10 +1,11 @@
+import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const backup=readScript('source/core/backup.ts');
 const ui=fs.readFileSync('source/core/reconciliation-ui.js','utf8');
-const app=fs.readFileSync('source/app.html','utf8');
+const app=readHostHtml();
 
 assert.match(ui,/const checkpointAssets=new Map\(\)/,'Reconciliation preview must use a checkpoint-backed temporary asset map.');
 assert.match(ui,/readonlyAssetStore=\(preferCheckpoint=false\)/,'Reconciliation preview must expose read-only temporary stores.');

@@ -138,6 +138,15 @@ export const styleModules=Object.freeze([
 ]);
 
 
+// Authored scripts are inlined at these exact HTML positions before token rendering.
+export const hostScripts=Object.freeze([
+  Object.freeze({id:'install-capture',source:'host/install-capture.js',marker:'<!-- @SD_HOST_INSTALL_CAPTURE@ -->'}),
+  Object.freeze({id:'profile-scope',source:'host/profile-scope.js',marker:'<!-- @SD_HOST_PROFILE_SCOPE@ -->'}),
+  Object.freeze({id:'presentation-kernel',source:'host/presentation-kernel.js',marker:'<!-- @SD_HOST_PRESENTATION_KERNEL@ -->'}),
+  Object.freeze({id:'presentation-metadata',source:'host/presentation-metadata.js',marker:'<!-- @SD_HOST_PRESENTATION_METADATA@ -->'}),
+  Object.freeze({id:'main',source:'host/main.js',marker:'<!-- @SD_HOST_MAIN@ -->'}),
+]);
+
 export const htmlSource='app.html';
 export const privateModuleMarker='<!-- @SD_PRIVATE_MODULES@ -->';
 

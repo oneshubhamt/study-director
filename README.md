@@ -36,7 +36,7 @@ For a source-only build using reviewed checked-in runtime bundles, `node build/b
 
 | Location | Responsibility |
 | --- | --- |
-| `source/app.html`, `source/core/` | Host composition, feature controllers and private modules |
+| `source/app.html`, `source/host/`, `source/core/` | HTML shell, authored inline host scripts, feature controllers and private modules |
 | `source/external/` | Authored integrations/presentations plus generated editor/worker bundles; see [architecture](docs/ARCHITECTURE.md) before editing |
 | `source/platform/`, `source/styles/`, `source/legal/` | PWA runtime, visual system and served legal/security documentation |
 | `portable/`, `rich-text/` | Authored codec/file/worker and editor sources |

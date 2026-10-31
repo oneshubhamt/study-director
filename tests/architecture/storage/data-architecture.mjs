@@ -1,4 +1,5 @@
-import {readScript} from '../../../build/source-script.mts';
+import {readHostHtml} from '../../../build/host-source.mjs';
+import {readScript,eraseTypes} from '../../../build/source-script.mts';
 import {
   LOCAL_STORAGE_KEYS,SESSION_STORAGE_KEYS,APP_META_KEYS,APP_META_FAMILY_COUNT,APP_META_FAMILY_LABEL,APP_META_VALIDATION_OWNERS,APP_META_RUNTIME_REGISTRY,
   OPFS_IDENTITIES,PERSISTENCE_CLASSES,DATA_ARCHITECTURE,assertDataArchitecture
@@ -16,15 +17,15 @@ import {
 assert.equal(assertCanonicalIdentities(),true);
 assert.equal(assertDataArchitecture(),true);
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
-const read=relative=>relative.startsWith('source/core/')?readScript(path.join(root,relative)):readScript(path.join(root,relative));
-const app=read('source/app.html');
+const read=relative=>relative.startsWith('source/core/')?readScript(path.join(root,relative)):eraseTypes(fs.readFileSync(path.join(root,relative),'utf8'),relative);
+const app=readHostHtml();
 const repositories=read('source/core/repositories.ts');
 const journals=read('source/core/repository-journals.ts');
 const appMeta=read('source/core/app-meta.ts');
 const persistence=read('source/core/persistence.ts');
 const insights=read('source/external/insights.js');
 const sourceFiles=[];
-const walk=dir=>{for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const full=path.join(dir,entry.name);if(entry.isDirectory())walk(full);else if(/\.(?:js|html)$/u.test(entry.name))sourceFiles.push(full);}};
+const walk=dir=>{for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const full=path.join(dir,entry.name);if(entry.isDirectory())walk(full);else if(/\.(?:js|ts|html)$/u.test(entry.name))sourceFiles.push(full);}};
 walk(path.join(root,'source'));
 
 assert.match(app,/const STORAGE_KEYS=Object\.freeze\(Object\.fromEntries\(Object\.entries\(@@SD_LOCAL_STORAGE_KEYS@@\)\.map\(\(\[name,key\]\)=>\[name,DEVICE_WIDE_STORAGE_KEYS\.includes\(name\)\?key:ProfileScope\.scoped\(key\)\]\)\)\);/u,'every browser-storage key but the device-wide ones belongs to the open profile');
