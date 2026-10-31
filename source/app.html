@@ -10942,7 +10942,7 @@ function installApplicationDomBindings(){
   NoteSyncPopover.install();
   AttachmentLibrary.install();
   void installAttachmentIntegrityAudit();
-  void installVerifiedRecoveryFreshness();
+  void installVerifiedRecoveryFreshness().catch(error=>AppDiagnostics.capture('backup.freshness-startup',error,'warn'));
   OwnershipUiProjection.install();
   BlockedActionHint.install();
   RichTextRuntime.install();
