@@ -442,6 +442,11 @@ Active completion means F1–F15 have evidenced outcomes. F16–F18 are accepted
 - **Disposition:** F2/F9/F12/F13 implementation and relevant targeted tests verified, subject to final completed state of the latest post-adjustment workflow. The rescue ceiling is an explicit constrained-PWA design choice, not a claim that browser localStorage can guarantee preservation of a 2 MiB Note. Pass A's journal-specific test remains separately outstanding; this entry does not change its status.
 - **Next:** Pass D (F10/F11/F14), starting with this ledger; audit attachment hash integrity, remote object reuse and Device Folder digest-cache proof boundaries, preserving incremental performance.
 
+### Entry 005 — Pass C CI closure verification (2026-10-31)
+
+- **Follow-up check:** GitHub Actions Repository Checks run **41161735193**, source SHA **f205b6cad56758d5f3e0602e8a673a3d1a4664fe**, completed with **conclusion: success**, after the blocked IndexedDB deletion error-handling change. All recorded steps passed: targeted safety and repository contracts, PWA deployment contract, source build, generated build verification, generated syntax verification.
+- **Disposition:** Confirms Entry 004's previously provisional post-adjustment QA statement. Pass C F2/F9/F12/F13 remains **VERIFIED CLOSED — targeted QA**, with the same known limitations: full QA was not requested, standalone profile-unit and Note-persistence tests were not directly executed in this CI selection, and Pass A/B's independently pending tests remain tracked in their own entries. No application code changed by this addendum.
+
 ### Template — copy for the next pass
 #### Entry NNN — Pass [A–F], [short description]
 - **Date / branch / head before:**
