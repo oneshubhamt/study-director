@@ -1,10 +1,48 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
 import {createDeviceFolderWorld as world,IDENTITIES,MINUTE,DAY} from '../../helpers/device-folder-world.mjs';
 
 // The Device Folder is one location of the shared backup engine; see the
 // world helper for what runs for real.
 const cases=[];
 async function test(name,run){await run();cases.push(name);}
+
+// Real host reset recovery must wait for the Device Folder's actual startup
+// installation and refreshed permission, or fall through after a bounded wait.
+await test('storage reset waits for real Device Folder readiness, handles denied access and times out safely',async()=>{
+  const source=fs.readFileSync('source/app.html','utf8'),start=source.indexOf('let deviceBackupInstallPromise=null;'),end=source.indexOf('const storageResetSteps=',start);
+  assert.ok(start>0&&end>start,'real reset readiness host functions are available');
+  function scenario({connected=false,stall=false}={}){
+    let allowInstall,timer=null,refreshes=0,installationCalls=0;
+    const gate=new Promise(resolve=>{allowInstall=resolve;});
+    const state={browserDataClearedAt:null};
+    const diagnostics=[];
+    const sandbox={
+      Date,Promise,Error,AppDiagnostics:{capture:(...parts)=>diagnostics.push(parts)},
+      setTimeout:callback=>{timer=callback;return 1;},clearTimeout:()=>{timer=null;},
+      reconcileStartupChangeClock:async()=>{},
+      DeviceBackup:{install:async()=>{installationCalls++;await gate;},refreshPermission:async()=>{refreshes++;return {};},status:()=>({connected})},
+      BackupProviderRuntime:{suspendBackground:()=>({release(){}})},
+      readStorageHealth:()=>state,writeStorageHealth:value=>Object.assign(state,value),
+      storageResetHold:null,storageResetSince:0
+    };
+    vm.createContext(sandbox);
+    vm.runInContext('let storageResetHold=null,storageResetSince=0;\n'+source.slice(start,end)+'\n globalThis.qaBeginStorageResetHold=beginStorageResetHold;',sandbox);
+    const hold=sandbox.qaBeginStorageResetHold('2026-10-31T02:00:00.000Z');
+    return {hold,release:allowInstall,expire:()=>timer?.(),refreshes:()=>refreshes,installationCalls:()=>installationCalls,diagnostics};
+  }
+  const delayed=scenario({connected:true});let done=false;delayed.hold.deviceReady.then(()=>{done=true;});
+  await Promise.resolve();await Promise.resolve();
+  assert.equal(done,false,'a pending installation cannot masquerade as Device Folder readiness');
+  delayed.release();assert.equal(await delayed.hold.deviceReady,true,'granted folder becomes eligible after installation and refresh');
+  assert.equal(delayed.installationCalls(),1);assert.equal(delayed.refreshes(),1);
+  const denied=scenario({connected:false});denied.release();assert.equal(await denied.hold.deviceReady,false,'denied or unchosen folder falls through without a permission prompt');
+  const stalled=scenario({connected:true,stall:true});stalled.expire();assert.equal(await stalled.hold.deviceReady,false,'stalled browser readiness is bounded');
+  assert.ok(stalled.diagnostics.some(row=>String(row[0]).includes('device-ready')),'timeout is diagnosed');
+  stalled.release();await Promise.resolve();await Promise.resolve();
+  assert.equal(await stalled.hold.deviceReady,false,'late permission result does not reverse a timed-out recovery decision');
+});
 
 await test('a browser without folder access never registers a location and every backup path stays quiet',async()=>{
   const w=world({supported:false});await w.controller.install();
