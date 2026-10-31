@@ -1,5 +1,7 @@
 # Data Topology, Durability, Backup and Recovery — Source Audit & Remediation Ledger
 
+> **POST-CERTIFICATION STATUS (2026-10-31): A–F VERIFIED CLOSED AT SOURCE/AUTOMATED QA LEVEL.** See [consolidated closure](DATA-TOPOLOGY-BACKUP-CLOSURE.md) and original **Entry 013** for exact SHA, QA run and outstanding *manual-only* checks. Historical introduction/status snapshots below retain their original dates; this banner does not retroactively edit them. **New background services P0–P6 is a separate open programme** at [BACKGROUND-SERVICES-REMEDIATION.md](BACKGROUND-SERVICES-REMEDIATION.md).
+
 > **Working engineering scratchpad / source of truth for passes A–F.**  
 > **Established:** 2026-10-30. **Branch:** current-fixes. **Audit baseline:** 53c968b7f876280f0d5e57528eeb5400a1783b29.  
 > **Status at creation:** AUDIT RECORDED — ALL PASSES NOT STARTED. **Source:** fresh de novo reading of application source. No fixtures or previous QA results were used to establish these findings.  

@@ -1,5 +1,7 @@
 # Background coordination
 
+> **Current behavior contract, not a claim of exhaustive post-audit certification.** The earlier background coordination pass was completed; a new independent 2026-10-31 source audit identified BS01–BS21 candidates for revalidation. See the [active background-services P0–P6 ledger](BACKGROUND-SERVICES-REMEDIATION.md) and [programme index](PROGRAMMES.md). Phase 0 prepares documentation; P0 source-evidence work is not started. Existing A–F data/backup certification is separately [closed](DATA-TOPOLOGY-BACKUP-CLOSURE.md).
+
 Background work belongs to the open application. It is not an operating-system service that is guaranteed to run after the app closes. Pending durable work is rediscovered when the app opens and its required access is available.
 
 ## Ownership

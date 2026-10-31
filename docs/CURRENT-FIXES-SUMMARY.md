@@ -1,5 +1,7 @@
 # current-fixes branch summary
 
+> **Historical branch-level certification snapshot (2026-10-30), not the latest A–F programme certification.** The later A–F findings and full Promotion QA closure are summarized at [DATA-TOPOLOGY-BACKUP-CLOSURE.md](DATA-TOPOLOGY-BACKUP-CLOSURE.md) (run 41205367918 at SHA 1299d97a). A separate background-services source audit is now tracked at [BACKGROUND-SERVICES-REMEDIATION.md](BACKGROUND-SERVICES-REMEDIATION.md); P0 remains not started.
+
 **Closed:** 2026-10-30  
 **Baseline:** `refactor/background-coordination` at `9afbda7d1e18310d5e847662504cf057f363fb65`  
 **Certified branch head:** `7709612cbe214990f6d832bcd66e92c0ab7b97d8`  

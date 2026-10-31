@@ -14,8 +14,9 @@ Study Director is a local-first PWA for planning, focused study sessions, review
 - `docs/ARCHITECTURE.md` — current runtime/data architecture and invariants.
 - `docs/VERIFICATION.md` — current verification results and release procedure.
 - `docs/NOTIFICATIONS.md` — app-wide producer inventory and delivery contract.
+- `docs/PROGRAMMES.md` — status and read-first map: completed A–F backup certification vs new background-services P0–P6 programme.
 
-Historical per-pass plans, closure notes and measurement logs are intentionally not retained in the canonical source package. The source should describe the application as it exists now rather than preserve an implementation diary.
+Historical per-pass plans and measurement output are not deployment/runtime assets. Working remediation ledgers retained in `docs/` are source-development records: consult `docs/PROGRAMMES.md` for their status, and use the current architecture documents for production behavior.
 
 ## Current architecture
 

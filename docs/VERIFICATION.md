@@ -2,6 +2,8 @@
 
 This document records the current QA and release discipline. It is intentionally short and current-state focused.
 
+For the new background-services programme follow the exact preliminary orientation, five steps, current-source revalidation, append-only journal, and per-pass targeted QA in [BACKGROUND-SERVICES-REMEDIATION.md](BACKGROUND-SERVICES-REMEDIATION.md). The earlier A–F certification is a separate [closed baseline](DATA-TOPOLOGY-BACKUP-CLOSURE.md); its passed run is **not** proof of future P1–P6 edits. Documentation-only Phase 0 does not require full Promotion QA.
+
 ## 1. Development cycle
 
 For each meaningful change:
