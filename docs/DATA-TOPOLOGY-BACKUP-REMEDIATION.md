@@ -294,11 +294,11 @@ Each item below records **baseline observation → risk → required investigati
 | F7 | Orphan cleanup risk | A | IMPLEMENTED — QA PENDING | Journal-aware scratch lease release and protected finally |
 | F8 | Receipt consistency risk | B | VERIFIED CLOSED — TARGETED QA PASS | Durable commit precedes in-memory receipt; failed writes reported and do not claim durable recovery |
 | F9 | Capacity asymmetry | C | VERIFIED CLOSED — POLICY + TARGETED QA | 1 MiB rescue cap intentionally retained; oversized unsaved Notes named and warned before failed IDB save |
-| F10 | Integrity trade-off | D | OPEN | Initial source trace |
-| F11 | Reuse trade-off | D | OPEN | Initial source trace |
+| F10 | Integrity trade-off | D | IN PROGRESS | Initial source trace |
+| F11 | Reuse trade-off | D | IN PROGRESS | Initial source trace |
 | F12 | Destructive ordering risk | C | VERIFIED CLOSED — TARGETED QA PASS | Persist rescue/local state until IndexedDB and OPFS deletion succeed; retry marker, blocked-tab notification |
 | F13 | Durability policy | C | VERIFIED CLOSED — TARGETED QA PASS | Strict critical Session updates, suspension/finish/restore/transfer; lightweight default timer snapshots |
-| F14 | Cache-key risk | D | OPEN | Initial source trace |
+| F14 | Cache-key risk | D | IN PROGRESS | Initial source trace |
 | F15 | Restart limitation | E | OPEN | Initial source trace |
 | F16 | Retention policy | None | VERIFIED CLOSED — intentional | User confirmed current-format preference, 2026-10-30 |
 | F17 | Token security policy | None | VERIFIED CLOSED — accepted | Serverless short-lived Drive token storage accepted, 2026-10-30 |
@@ -335,7 +335,7 @@ Each item below records **baseline observation → risk → required investigati
 **Targeted QA:** Delayed/revoked folder, reset and reload, failed save at cap, interrupted profile removal, critical Session transitions.
 
 ### Pass D — Binary verification, reuse and Device Folder caching
-**Status:** NOT STARTED. **IDs:** F10, F11, F14. **Depends:** B semantics.  
+**Status:** IN PROGRESS — source re-audit and plan recorded (Entry 006). **IDs:** F10, F11, F14. **Depends:** B semantics.  
 **Audit:** Ingest metadata/bytes, OPFS reads, asset reference GC, remote object reuse, scrub/quarantine, Device Folder cache usage and destructive checks.  
 **Plan:** Preserve deduplication and incremental performance; refine integrity exposure, targeted rechecks, scrub scheduling and cache invalidation only where safety demands.  
 **Objective verification:** (D1) detected corrupt bytes cannot be silently restored/published as complete; (D2) cache never alone proves a destructive action safe; (D3) reused object verification guarantees are explicit; (D4) no unnecessary full re-download/hash.  
@@ -446,6 +446,14 @@ Active completion means F1–F15 have evidenced outcomes. F16–F18 are accepted
 
 - **Follow-up check:** GitHub Actions Repository Checks run **41161735193**, source SHA **f205b6cad56758d5f3e0602e8a673a3d1a4664fe**, completed with **conclusion: success**, after the blocked IndexedDB deletion error-handling change. All recorded steps passed: targeted safety and repository contracts, PWA deployment contract, source build, generated build verification, generated syntax verification.
 - **Disposition:** Confirms Entry 004's previously provisional post-adjustment QA statement. Pass C F2/F9/F12/F13 remains **VERIFIED CLOSED — targeted QA**, with the same known limitations: full QA was not requested, standalone profile-unit and Note-persistence tests were not directly executed in this CI selection, and Pass A/B's independently pending tests remain tracked in their own entries. No application code changed by this addendum.
+
+### Entry 006 — Pass D: source re-audit and implementation plan (2026-10-31)
+
+- **Date/branch/start:** 2026-10-31; current-fixes @ 9da666a78a0dc521b7931d61f24c57c2cc6bade1. **Scope:** F10/F11/F14 only. Pass C verified closed by Repository Checks run 41161735193. Pass A specialized journal runtime, Pass B standalone portable checks and separate C unit checks remain independently pending; none blocks this isolated attachment/provider pass.
+- **Step 1 — source audit:** `asset-storage.js` get and `shallowAudit` intentionally validate metadata, existence and size without a full digest on ordinary reads; ingest, metadata rollback and restore have stronger verification. `managed-repository.js` reuses immutable attachment objects indexed by verified previous manifest and available inventory, excluding provider quarantine; new attachment publication obtains OPFS bytes but (when unencrypted) `protectRepositoryBlob` accepts the catalogue hash as `knownChecksum`, while encryption changes the stored checksum and can allow a wrong same-size local plaintext to be sealed without an explicit plaintext hash. Remote object receipts prove newly uploaded stored bytes, not the age-independent health of all reused historical objects. `scrubRepositoryIntegrity` already performs bounded, resumable content checks (or Drive server SHA-256), and provider recovery/repair excludes quarantined objects. `device-folder-storage.js` memoizes checkpoint/commit digests and summary by repository/name/mtime/size; external same-size/same-mtime modification can alias this metadata. Provider verified-history and cleanup proof caches use listed digest and version; critical reuse must not rely on a stale digest cache.
+- **Step 2 — agreed objectives:** D1 hash **only newly materialized local attachment plaintext before publishing** against the canonical catalogue checksum, with an abortable checksum and a fail-closed, non-published outcome on mismatch; preserve ordinary size-only reads, already-hashed restore paths and cheap remote reuse. D2 keep existing provider incremental object reuse, scrub/quarantine/repair, and bounded verification; document explicitly that previous verification and server-reported digest are not a new full historical download/hash for every checkpoint. D3 make Device Folder cache freshness explicit at safety boundaries: bypass timestamp/size digest cache during destructive cleanup inventory; refresh or invalidate the corresponding summary cache on changed content; explicitly re-read and verify the chosen manifest/commit at restore before mutation, not trusting any history proof cache. D4 add focused regressions for same-size local corruption and stale mtime/size digests; no schema, format, retention, scheduler, backend, generated build or security change.
+- **Planned affected source:** `managed-repository.js`, `device-folder-storage.js`, `backup-provider.js`; focused existing backup integration tests; update `BACKUP-ENGINE.md` for integrity semantics. Follow audit→plan→implement→objective check→targeted QA; don't label closed before evidence.
+- **Status:** IN PROGRESS; implementation and QA not yet claimed.
 
 ### Template — copy for the next pass
 #### Entry NNN — Pass [A–F], [short description]
