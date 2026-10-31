@@ -477,4 +477,41 @@ for(const boundary of ['payload-change','repository-change','expired-session','r
  }
  await h.provider.disconnect();assert.equal(clock.pending(),0);resumableUploadCases.push(boundary);
 }
-console.log(JSON.stringify({status:'PASS',suite:'drive-repository-security',resumableUploadCases,productiveTransferCases,bodyContractCases,folderVerificationMeasurement,transportOnly:true,commitMarkerTransport:true,legacyWholeBlobRetired:true,driveFileScopeOnly:true,endpointConfined:true,tinyMultipartUpload:true,largeResumableUpload:true,opaqueMarkers:true,boundedStreamingDownload:true,coldFolderSingleFlight:true,coldFolderFailureRetry:true,folderAmbiguityRejected:true,policyBoundaryFailClosed:true,duplicateIdentityFailClosed:true,sourceFenceThroughUpload:true,parallelCancellationIsolated:true,parallelSourceFenceIsolated:true,parallelProtectionFenceIsolated:true,folderVerificationCoalesced:true,folderReceiptInvalidation:true,exactDeletion:true,temporaryDownloadRelease:true,publicationProtectionLifecycle:true,maintenanceProtectionLifecycle:true,externalRepositoryDeletionSelfHeals:true,trashedRepositorySelfHeals:true,boundedMaintenanceLease:true},null,2));
+// A second browser page has no upload session memory. It must not create a
+// duplicate logical file if the prior page's response/receipt was lost.
+const restartCases=[];
+{
+ const first=createHarness();await first.provider.prepare();await first.provider.authorize();
+ const kindIds=[['object','obj_'+'1'.repeat(32)],['checkpoint','cp_'+'2'.repeat(32)],['commit','cp_'+'3'.repeat(32)]];
+ for(const [kind,id] of kindIds){
+  const original=await makeRepositoryFile(kind,id,'restart-'+kind+'-stable-contents');
+  const sent=await first.provider.repository.upload({...original,knownAbsent:true});
+  const page2=createHarness({remoteState:first.state});await page2.provider.prepare();await page2.provider.authorize();
+  const duplicate=await page2.provider.repository.upload({...original,knownAbsent:true});
+  assert.equal(duplicate.remoteId,sent.remoteId,'a reload replay must reuse the exact existing '+kind+' identity');
+  const matching=[...page2.state.files.values()].filter(row=>row.appProperties?.studyDirectorRepositoryKind===kind&&row.appProperties?.studyDirectorRepositoryId===id);
+  assert.equal(matching.length,1,'a reload replay must not create duplicate '+kind+' identities');
+  const changed=await makeRepositoryFile(kind,id,'CHANGED-'+kind+'-stable-contents');
+  await assert.rejects(()=>page2.provider.repository.upload({...changed,knownAbsent:true}),/different content|identity|checksum/u,'replayed '+kind+' conflicts must preserve the original');
+  assert.equal(page2.state.files.get(sent.remoteId).sha256Checksum,original.digest);
+  restartCases.push('completed '+kind+' replay and collision rejected');
+ }
+}
+{
+ const clock=createFakeClock(),first=createHarness({clock});first.clock=clock;await first.provider.prepare();await first.provider.authorize();
+ const file=await makeRepositoryFile('object','obj_'+'4'.repeat(32),new Blob([new Uint8Array(6*1048576)]));
+ first.state.uploadProgressSteps=14;first.state.uploadProgressStepMs=90000;
+ const controller=new AbortController(),upload=first.provider.repository.upload({...file,knownAbsent:true},{signal:controller.signal});
+ for(let steps=0;![...first.state.uploads.values()].some(row=>row.received===2*1048576)&&steps<1300;steps++){await new Promise(resolve=>setImmediate(resolve));if(!first.state.nativeUploadReplies)await clock.advance(1000);}
+ assert.equal([...first.state.uploads.values()][0]?.received,2*1048576,'first page must hold only a partially acknowledged server-side upload');
+ controller.abort(Object.assign(new Error('page closed during upload'),{name:'AbortError'}));await assert.rejects(upload,{name:'AbortError'});
+ assert.equal(first.state.files.size,0,'partial remote object is not committed');
+ const second=createHarness({clock,remoteState:first.state});second.clock=clock;await second.provider.prepare();await second.provider.authorize();
+ second.state.uploadProgressSteps=1;second.state.uploadProgressStepMs=0;
+ const result=await settleUpload(second.provider.repository.upload({...file,knownAbsent:true}),second);
+ assert.equal(result.ok,true,result.error?.message);assert.equal(result.value.serverDigest,file.digest);
+ assert.equal(second.state.files.size,1,'restart creates one verified committed remote object');
+ assert.equal(second.state.uploads.size,2,'page-local upload URL is not falsely reconstructed from the remote orphan session');
+ restartCases.push('interrupted large upload restarts from canonical bytes without false receipt');
+}
+console.log(JSON.stringify({status:'PASS',suite:'drive-repository-security',resumableUploadCases,restartCases,productiveTransferCases,bodyContractCases,folderVerificationMeasurement,transportOnly:true,commitMarkerTransport:true,legacyWholeBlobRetired:true,driveFileScopeOnly:true,endpointConfined:true,tinyMultipartUpload:true,largeResumableUpload:true,opaqueMarkers:true,boundedStreamingDownload:true,coldFolderSingleFlight:true,coldFolderFailureRetry:true,folderAmbiguityRejected:true,policyBoundaryFailClosed:true,duplicateIdentityFailClosed:true,sourceFenceThroughUpload:true,parallelCancellationIsolated:true,parallelSourceFenceIsolated:true,parallelProtectionFenceIsolated:true,folderVerificationCoalesced:true,folderReceiptInvalidation:true,exactDeletion:true,temporaryDownloadRelease:true,publicationProtectionLifecycle:true,maintenanceProtectionLifecycle:true,externalRepositoryDeletionSelfHeals:true,trashedRepositorySelfHeals:true,boundedMaintenanceLease:true},null,2));
