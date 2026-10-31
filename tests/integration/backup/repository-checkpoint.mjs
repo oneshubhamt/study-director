@@ -222,6 +222,19 @@ for(const code of ['DRIVE_TIMEOUT','BACKUP_LOCKED','BACKUP_AUTH_FAILED']){
  await assert.rejects(runtime.repository.scrub([firstManifest],entry=>entry.objectId===knownBadId?new Blob(['new damage']):progressReader(entry),{recheck:true,skipObjectIds:[laterHealthyId],maxObjects:32,maxBytes:1024*1024*1024}),error=>error.code==='REPOSITORY_INTEGRITY_CORRUPT'&&error.repositoryObjectId===knownBadId&&error.repositoryScrubProgress.recheckCursor==='','new corruption retains the existing typed failure/repair path');
 }
 
+// A new attachment cannot be sealed from same-size corrupted OPFS plaintext,
+// even if its canonical metadata still advertises the original SHA-256.
+// Existing healthy content-addressed objects remain eligible for cheap reuse.
+{
+  const originalAudio=audioBlob,originalDescriptor=assetDescriptor,oldSnapshot=snapshotRevision,oldRevision=sourceRevision;
+  const canonical=new Blob(['canonical-audio'],{type:'audio/mpeg'}),tampered=new Blob(['CORRUPTED-audio'],{type:'audio/mpeg'});
+  assert.equal(canonical.size,tampered.size);
+  assetDescriptor=freeze({...originalDescriptor,size:canonical.size,hash:await engine.run('checksum',{value:canonical})});
+  audioBlob=tampered;snapshotRevision='corrupt-attachment';sourceRevision='2026-09-19T00:00:15.000Z';
+  try{await assert.rejects(()=>publishLocal(firstManifest),error=>error?.code==='REPOSITORY_INTEGRITY_CORRUPT'&&/Local attachment .*plaintext verification/u.test(error.message),'a same-size corrupt local attachment must never become a newly committed checkpoint');}
+  finally{audioBlob=originalAudio;assetDescriptor=originalDescriptor;snapshotRevision=oldSnapshot;sourceRevision=oldRevision;}
+}
+
 const readsBeforeSecond=assetReads,encodesBeforeSecond=encodeOpenCounter;
 const secondPublication=await publishLocal(firstManifest),secondManifest=secondPublication.manifest;
 assert.equal(assetReads,readsBeforeSecond,'unchanged 300 MB attachment must not be reread for the second checkpoint');
