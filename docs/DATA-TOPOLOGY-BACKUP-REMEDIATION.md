@@ -288,11 +288,11 @@ Each item below records **baseline observation → risk → required investigati
 | F1 | Confirmed defect | A | IMPLEMENTED — QA PENDING | Strict atomic journal preparation guards both prior records |
 | F2 | Confirmed defect | C | OPEN | Initial source trace; not implemented |
 | F3 | Confirmed control-flow defect | A | IMPLEMENTED — QA PENDING | Post-clear scratch disposal cannot override verified restoration |
-| F4 | Confirmed proof defect | B | OPEN | Initial source trace; not implemented |
-| F5 | Semantic / policy gap | B | OPEN | Initial source trace; policy to decide |
+| F4 | Confirmed proof defect | B | VERIFIED CLOSED — TARGETED QA PASS | Canonical mutation-epoch comparison; unknown/invalid/failed reads return unverified |
+| F5 | Semantic / policy gap | B | VERIFIED CLOSED — TARGETED QA PASS | Separate binary recoverability status; missing asset IDs and warnings; partial backups retained but exact replacement disallowed |
 | F6 | Atomicity risk | A | IMPLEMENTED — QA PENDING | Pair is read in one readonly metadata transaction |
 | F7 | Orphan cleanup risk | A | IMPLEMENTED — QA PENDING | Journal-aware scratch lease release and protected finally |
-| F8 | Receipt consistency risk | B | OPEN | Initial source trace |
+| F8 | Receipt consistency risk | B | VERIFIED CLOSED — TARGETED QA PASS | Durable commit precedes in-memory receipt; failed writes reported and do not claim durable recovery |
 | F9 | Capacity asymmetry | C | OPEN | Initial source trace |
 | F10 | Integrity trade-off | D | OPEN | Initial source trace |
 | F11 | Reuse trade-off | D | OPEN | Initial source trace |
@@ -321,7 +321,7 @@ Each item below records **baseline observation → risk → required investigati
 **Gate for closure:** A1–A5 verified with relevant source and targeted outcomes.
 
 ### Pass B — Backup completeness, freshness and truthful receipts
-**Status:** NOT STARTED. **IDs:** F4, F5, F8. **Depends:** A.  
+**Status:** VERIFIED CLOSED — TARGETED QA PASS (2026-10-31). **IDs:** F4, F5, F8. **Depends:** Pass A source implementation, whose own journal-specific runtime QA remains separately outstanding.  
 **Audit:** Source revision clock and mutation epoch, backup capture/fence, manifest descriptor semantics, provider/file receipts, inspection/restore presentation and all consumers of freshness.  
 **Plan:** Define “canonical complete”, “all bytes recoverable”, “verified partial” and “fresh relative to known revision” as distinct evidence classes. Preserve recoverable rescue export.  
 **Objective verification:** (B1) unknown clock never proves fresh; (B2) asset missing/corruption cannot be labeled fully recoverable; (B3) local receipt durability accurately represented; (B4) ordinary successful backups remain efficient; (B5) compatibility and preview semantics intact.  
@@ -402,6 +402,32 @@ Active completion means F1–F15 have evidenced outcomes. F16–F18 are accepted
 - **Step 5 — Targeted QA:** Executed six programmatic checks against the current source (A1–A5 plus presence of regression scenarios): **6/6 passed**. Authored focused behavioral tests but **execution NOT verified** because no authenticated local checkout is available here. The automatic Repository checks workflow was queued and does not directly run the journal-specific test in its hardcoded targeted list. Suggested targeted command: node tests/helpers/run-category.mjs targeted tests/integration/storage/repository-journals.mjs tests/integration/backup/file-lifetimes.mjs tests/integration/backup/capture-safety.mjs tests/integration/library/library-clear.mjs. Full QA intentionally omitted. No claim of executed runtime tests.
 - **Status:** IMPLEMENTED; ALL SOURCE OBJECTIVES MET; TARGETED RUNTIME QA PENDING. Reopen and append a corrective entry for any runtime failure. Do not declare Pass A fully CLOSED until focused tests actually run and pass.
 - **Next:** Finish targeted runtime verification when feasible; then Pass B (F4/F5/F8), beginning with current source and this ledger.
+
+### Entry 003 — Pass B: truthful backup freshness, attachment recoverability and durable receipts
+
+- **Date:** 2026-10-31. **Branch:** current-fixes. **Starting HEAD:** c8299c0fc02eefe36983baeb4a6643b8fd44a750. **Implementation HEAD:** 9b6ff61c4d1e3d329d1b73374dd31ab1a491a53f.
+- **Preliminary:** Read §§0–7 and Entries 001–002, established source HEAD and checked Pass A's status. Pass A implementation and its repository checks passed; note that Pass A's directly targeted repository-journals.mjs runtime test is still marked pending in its separate entry. Limited scope to F4/F5/F8 and affected source/preview/managed publication boundaries.
+- **Step 1 — Fresh source audit:**
+  - F4: app.html verifyFreshCurrentBackup accepted any current-format receipt when readStorageHealth().lastLocalSaveAt was absent; mutationEpoch.latestChangeAt already reconciles the canonical IndexedDB epoch and the fast local copy.
+  - F8: app.html updateVerifiedRecoveryState set an optimistic in-memory receipt before awaiting the typed appMeta write, logged but swallowed a write error, and readVerifiedRecoveryState silently substituted memory after a read failure. backupCompleted did not await the receipt update, so local metadata failure must remain separate from actual external publication. Reminder/startup consumers of reads required explicit failure handling.
+  - F5: backup-capture.js logical completeness covers canonical records, notes, active session and deletion history, not binary coverage; portable backup-codec.js and managed-repository.js already cryptographically represent missing descriptors alongside intact data. Existing manifest.warning and provider/result messaging support a format-preserving warning; backup.js and backup-recovery-host.js replacement options otherwise permitted known binary-incomplete backup copies.
+- **Step 2 — Plan and acceptance criteria:**
+  - B1: Require an authoritative, parseable canonical current revision; missing/invalid/failed clock or receipt read means no fresh proof, stale copies fail.
+  - B2: Derive separate attachment coverage from the existing verified asset descriptor list. Keep logical canonical completeness distinct, allow inspectable partial rescue checkpoints, clearly communicate missing IDs/count, and fail closed on exact replacement from missing bytes.
+  - B3: Do not publish an in-memory **durable** local receipt before the appMeta write commits; propagate/log failed writes without invalidating an actually committed external checkpoint; protect startup/reminder readers against rejected promises.
+  - B4: No re-hashing/re-uploading unchanged attachments merely for status; keep managed incremental reuse and standalone Blob framing.
+  - B5: No backup-format/schema migration or destructive changes to earlier-version readers; preserve Combine and Add only what is missing.
+- **Step 3 — Implementation:**
+  1. app.html: verifyFreshCurrentBackup now uses AppData.mutationEpoch.latestChangeAt(currentBackupSourceRevision()), fails closed on unknown, invalid, stale or unreadable proofs. Local receipt writer now serially reads, writes and only then updates verifiedRecoveryState; errors reject and are logged by the backupCompleted callback. A partial-attachment copy stores a null current-format freshness marker, while its actual source revision and last-backup history remain visible. Startup and reminder read failures become logged, nonfatal status uncertainty.
+  2. backup-codec.js: pure derived attachmentCoverage and missingAttachmentWarning on existing signed asset descriptors; no new persisted completion fields.
+  3. backup-capture.js: portable canonical completeness now includes an independent transient binary coverage verdict and explicit warning, while preserving the original canonical-complete vs rescue-partial proof.
+  4. managed-repository.js / backup-provider.js: manifest warning carries partial binary recoverability and sample missing IDs. Committed/unchanged provider versions surface warnings. Provider's local receipt signals attachmentsComplete from the verified manifest; full coverage remains eligible as proof, missing assets do not.
+  5. backup.js / backup-recovery-host.js: restore preview reports coverage and exact replacement preflight rejects missing attachment bytes; both portable and managed UI suppress exact replace when known partial. Combine/Add still work. Even if UI misses a warning, the engine rejects unsafe exact replacement.
+  6. tests/integration/backup/capture-safety.mjs: deterministic tests of canonical text with missing binary, missing/stale epoch, failed/stalled metadata writes, in-memory receipt visibility, partial receipt eligibility, and failure logging by executing extracted actual host code. tests/integration/backup/repository-checkpoint.mjs: updated real module harness codec port. tests/integration/backup/portable-backup.mjs: added direct actual-codec partial descriptor assertions. **Earlier failing CI runs were traced to incomplete test mocks and an overridden fixture assetIds function; both were corrected, not ignored.**
+- **Step 4 — Objectives verified:** B1 MET (canonical epoch / parseability / no unknown-fresh branch), B2 MET (partial warnings, identities, source-level exact-restore guard), B3 MET (IDB write before state update, explicit failure handling), B4 MET (derived descriptor-only coverage without extra provider binary I/O), B5 MET (no on-disk schema/format changes; existing import and combine preserved). Seven separate focused source reinspection checks passed; diff reviewed for scope.
+- **Step 5 — Targeted QA results:** **PASS** — GitHub Actions Repository checks, run **41159578102**, commit **9b6ff61c4d1e3d329d1b73374dd31ab1a491a53f**. All steps passed: targeted safety/repository contracts (including the enhanced capture-safety.mjs and repository-checkpoint.mjs), deployment contract, source build, generated build verification and generated syntax verification. Earlier run **41159448381** also passed full repository checks for the substantial F5 / restore changes. Failed interim runs were inspected and fixed. The additional direct portable-backup.mjs assertions were written but **that specific test is not part of the hardcoded workflow targeted set and has not been independently executed**; they remain for a future separate targeted run. No full QA was performed. No browser/manual device restore test was run.
+- **Disposition:** **Pass B COMPLETE for implemented objectives and executed targeted safety checks**, with the explicit additional portable-backup test execution gap recorded rather than disguised. F4, F5 and F8 may be marked verified closed; if separate portable test later exposes a bug, reopen promptly. Pass A's outstanding specialized journal-runtime execution is not silently closed by Pass B.
+- **Next:** Pass C (F2/F9/F12/F13), starting by reading §§0–7 and this entry; audit storage-reset readiness, Note capacity, profile deletion sequencing and selected Active Session durability.
 
 ### Template — copy for the next pass
 #### Entry NNN — Pass [A–F], [short description]
