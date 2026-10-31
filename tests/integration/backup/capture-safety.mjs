@@ -239,4 +239,42 @@ for(const rescued of [false,true]){
   assert.equal(await stalled.deviceReady,false,'unresponsive permission API is bounded');
 }
 
+
+
+// Removed profiles keep emergency browser rescue copies if IndexedDB/OPFS
+// deletion fails; the registry intent survives and retries are idempotent.
+{
+  vm.runInThisContext(fs.readFileSync('source/core/profiles.js','utf8'));
+  const profiles=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('profiles',1);
+  const removed='prof_removed_abcdef_12345678',live='prof_live_abcdef_12345679',registryKey='profiles-test-registry';
+  const registryRow={version:1,active:live,profiles:[{id:live,scope:live,name:'Current',createdAt:'2026-10-31T00:00:00.000Z'}],removing:[removed]};
+  const store=new Map([[registryKey,JSON.stringify(registryRow)],['noteRescue~'+removed,'unsaved'],['noteRescue~'+live,'current']]);
+  const events=[],fail={db:true,opfs:false,local:false};
+  const controller=profiles.createController(freeze({ports:freeze({
+    scope:freeze({pattern:/^prof_[a-z0-9]{1,24}_[a-z0-9]{6,12}_[a-f0-9]{8}$/u,registryKey,scope:live,separator:'~'}),
+    storage:freeze({read:()=>store.get(registryKey)||null,write:value=>{store.set(registryKey,value);return true;},keys:()=>[...store.keys()],remove:key=>{if(fail.local)return false;return store.delete(key);}}),
+    names:freeze({database:'study-db',directories:freeze(['assets','rollback']),keys:freeze(['noteRescue']),legacyDirectory:'legacy-assets'}),
+    platform:freeze({deleteDatabase:async name=>{events.push('db:'+name);if(fail.db)throw new Error('Blocked IDB delete');return true;},removeDirectory:async name=>{events.push('opfs:'+name);if(fail.opfs)throw new Error('Blocked OPFS delete');},listen:()=>()=>{},now:()=>Date.now(),random:()=> '12345678',reload:()=>{}}),
+    limits:freeze({maxName:60})
+  })}));
+  const pending=()=>JSON.parse(store.get(registryKey)).removing;
+  assert.equal((await controller.collect()).removed,false);
+  assert.equal(store.get('noteRescue~'+removed),'unsaved','blocked IDB deletion must preserve rescue bytes');
+  assert.deepEqual(pending(),[removed]);
+  fail.db=false;fail.opfs=true;
+  assert.equal((await controller.collect()).removed,false);
+  assert.equal(store.get('noteRescue~'+removed),'unsaved','failed OPFS deletion must preserve rescue bytes');
+  assert.deepEqual(pending(),[removed]);
+  fail.opfs=false;fail.local=true;
+  assert.equal((await controller.collect()).removed,false);
+  assert.deepEqual(pending(),[removed],'failed local rescue removal retains pending deletion');
+  fail.local=false;
+  assert.equal((await controller.collect()).removed,true);
+  assert.equal(store.has('noteRescue~'+removed),false);
+  assert.equal(store.get('noteRescue~'+live),'current','an unrelated live profile is untouched');
+  assert.deepEqual(pending(),[]);
+  assert.equal((await controller.collect()).removed,false,'a completed cleanup is idempotent');
+  assert.ok(events.some(row=>row.startsWith('opfs:')));
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'backup-capture-safety',cases},null,2));
