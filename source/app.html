@@ -3992,7 +3992,10 @@ async function maybePromptBackupNudge(force=false){
   const now=Date.now();
   if(!force&&now-backupNudgeCheckedAt<BACKUP_NUDGE_CHECK_MS)return;
   backupNudgeCheckedAt=now;
-  const health=readStorageHealth(),backups=await readVerifiedRecoveryState(),entries=verifiedRecoveryEntries(backups);
+  let backups;
+  try{backups=await readVerifiedRecoveryState();}
+  catch(error){AppDiagnostics.capture('backup.nudge-receipt-read',error,'warn');return;}
+  const health=readStorageHealth(),entries=verifiedRecoveryEntries(backups);
   // One reminder for every kind of backup, counted from the latest backup
   // anywhere: a verified file, a download, the Device Folder or Drive. It stays away while an
   // automatic backup is able to run, and while a backup already holds the latest
