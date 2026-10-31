@@ -519,7 +519,7 @@ assert.equal(receiptDownloads.checkpoint.length,1,'new manifest must be download
 assert.equal(receiptDownloads.commit.length,1,'new commit marker must be downloaded exactly once for publication read-back verification; post-commit state must reuse that verified receipt');
 assert.equal(receiptReleases.checkpoint,1,'shared publication readback must release the checkpoint lease after verification');
 assert.equal(receiptReleases.commit,1,'shared publication readback must release the commit lease after verification');
-assert.ok(receiptListOptions.some(row=>row.kind==='checkpoint'&&row.freshDigests===true)&&receiptListOptions.some(row=>row.kind==='commit'&&row.freshDigests===true),'destructive cleanup must request fresh checksum evidence for both immutable version file kinds');
+assert.ok(receiptListOptions.some(row=>row.kind==='checkpoint'&&row.freshDigests===false)&&receiptListOptions.some(row=>row.kind==='commit'&&row.freshDigests===false),'ordinary post-publication history refresh must not pay the full fresh-digest maintenance cost');
 assert.equal([...receiptFiles.values()].filter(file=>file.kind==='checkpoint').length,1,'receipt reuse must not change sparse retention results');
 assert.equal([...receiptFiles.values()].filter(file=>file.kind==='commit').length,1,'receipt reuse must retain the matching commit marker');
 assert.equal(receiptLists.object,1,'a cold first publication without a reusable pre-publication inventory must still obtain a fresh object listing for cleanup');
