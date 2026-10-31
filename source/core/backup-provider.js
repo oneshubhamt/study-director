@@ -413,9 +413,9 @@ registry.define('backup-provider',1,input=>{
   function repositoryMetadataTimestamp(item){
     const value=String(item&&item.history&&item.history.exportedAt||item&&item.createdAt||item&&item.modifiedAt||'');return Number.isFinite(Date.parse(value))?new Date(value).toISOString():'';
   }
-  async function repositoryProviderInventory(selected,{signal=null}={}){
+  async function repositoryProviderInventory(selected,{signal=null,freshDigests=false}={}){
     await synchronizeRepositoryScope(selected);
-    const {preparedCommits,preparedManifests,ignored,overflow}=await listRepositoryHistory(selected,{signal});
+    const {preparedCommits,preparedManifests,ignored,overflow}=await listRepositoryHistory(selected,{signal,freshDigests});
     const invalid=[...preparedCommits.invalid,...preparedManifests.invalid],commitById=new Map(preparedCommits.items.map(item=>[item.id,item])),manifestIds=new Set(preparedManifests.items.map(item=>item.id)),pairs=[],uncommitted=[];
     for(const item of preparedManifests.items){const commitItem=commitById.get(item.id)||null;if(commitItem)pairs.push(freeze({item,commitItem}));else uncommitted.push(freeze({item}));}
     const orphanCommits=preparedCommits.items.filter(item=>!manifestIds.has(item.id));
@@ -749,11 +749,11 @@ registry.define('backup-provider',1,input=>{
       if(force)await assertRepositoryMaintenance(planning,maintenanceLease);
     };
     try{
-      // The lease exists only for the destructive unit. Re-read checkpoint and
-      // commit metadata under that lease; if anything changed while planning,
-      // release it without deleting and rebuild the plan on the next pass.
+      // The lease exists only for the destructive unit. Re-hash checkpoint and
+      // commit metadata under that lease: equal timestamps/sizes alone cannot
+      // establish that a manifest still means what the earlier plan saw.
       const protectedSelection=typeof owner.repository.beginOperation==='function'?repositoryOperationSelected(owner,{signal,checkProtection:keepAlive}):planning;
-      const currentInventory=await repositoryProviderInventory(protectedSelection,{signal});
+      const currentInventory=await repositoryProviderInventory(protectedSelection,{signal,freshDigests:true});
       if(!repositoryCleanupInventoryMatches(state,currentInventory)){
         OperationDiagnostics.mark('maintenance-inventory-invalidated',{provider:selected.id},traceId);
         return deferredRepositoryMaintenance('Repository maintenance was deferred because backup history changed after its read-only planning pass.',1000);
