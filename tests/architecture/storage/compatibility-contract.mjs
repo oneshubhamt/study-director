@@ -110,7 +110,7 @@ assert.match(app,/migrateCompatibility:async\(\)=>\{await UnsupportedData\.censu
 assert.match(app,/verifyReady:\(\)=>CompatibilityFacade\.verifyCanonicalInstallation\(\)/u,'actual installations must run the canonical proof before publishing startup-ready');
 assert.match(app,/studyDirectorCanonicalBaseline=proof\.canonical\?'verified':'not-proven'/u);
 assert.match(app,/studydirector:canonicalstatus/u);
-assert.match(app,/const entry=\{at:new Date\(\)\.toISOString\(\),sourceRevision,format:DATA_CONTRACT\.schemas\.Backup\.version\}/u,'each recorded backup copy keeps only when it was made, the change it holds and its backup format');
+assert.match(app,/const entry=\{at:new Date\(\)\.toISOString\(\),sourceRevision,format:copy\.attachmentsComplete===false\?null:DATA_CONTRACT\.schemas\.Backup\.version\}/u,'a backup receipt keeps source revision and current-format proof only when its attachment coverage is complete');
 assert.match(app,/async function verifyFreshCurrentBackup\(\)/u);
 assert.match(app,/entry\.verified!==false&&entry\.format===DATA_CONTRACT\.schemas\.Backup\.version/u,'only a verified copy in the current backup format proves a fresh backup');
 assert.match(startup,/await runStage\('compatibility-migration',startup\.migrateCompatibility\)/u);
