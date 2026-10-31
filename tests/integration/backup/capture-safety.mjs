@@ -128,4 +128,50 @@ for(const rescued of [false,true]){
   controls.onSessionRead=null;const recovered=await load(0,{strict:true});assert.equal(recovered.ok,true);assert.equal(recovered.error,null);assert.equal(recovered.value.revision,20);
   cases.push('host strict-read propagation rejects unavailable canonical session '+(rescued?'with':'without')+' older rescue and recovers newest stored state');
 }
+
+// The actual host freshness/receipt functions must not certify a backup from
+// absent canonical revision evidence or an uncommitted local receipt.
+{
+  const appSource=fs.readFileSync('source/app.html','utf8');
+  const first=appSource.indexOf('const VERIFIED_RECOVERY_META_KEY='),last=appSource.indexOf('// Compare policy identity',first);
+  assert.ok(first>=0&&last>first,'freshness host code must remain identifiable');
+  let durable={version:3,file:null,providers:{}},changedAt='',writeGate=null,failWrite=false,failRead=false;
+  const diagnostics=[];
+  const sandbox={
+    APP_META_KEYS:{verifiedRecoveryBackups:'verifiedRecoveryBackups'},
+    DATA_CONTRACT:{schemas:{Backup:{version:20}}},
+    BackupProviderRuntime:{refresh(){}},
+    AppDiagnostics:{capture:(...parts)=>diagnostics.push(parts)},
+    currentBackupSourceRevision:()=>changedAt,
+    readStorageHealth:()=>({lastLocalSaveAt:changedAt}),
+    readHostAppMetaValue:async()=>{if(failRead)throw new Error('Injected receipt read failure');return durable;},
+    writeHostAppMetaValue:async(_key,value)=>{if(failWrite)throw new Error('Injected receipt commit failure');if(writeGate)await writeGate;durable=structuredClone(value);},
+    AppData:{mutationEpoch:{latestChangeAt:async recorded=>changedAt||recorded}}
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(appSource.slice(first,last)+'\n globalThis.freshnessTest={recordBackupCopy,verifyFreshCurrentBackup,receipt:()=>verifiedRecoveryState};',sandbox);
+  const api=sandbox.freshnessTest;
+  assert.equal((await api.verifyFreshCurrentBackup()).ok,false,'missing canonical change clock cannot certify a fresh copy');
+  changedAt='2026-10-01T12:00:00.000Z';
+  let unlock;writeGate=new Promise(resolve=>{unlock=resolve;});
+  const pending=api.recordBackupCopy({source:'google-drive',sourceRevision:changedAt,attachmentsComplete:true});
+  await Promise.resolve();
+  assert.equal(Object.keys(api.receipt().providers).length,0,'pending local receipt must not appear durable before commit');
+  unlock();await pending;writeGate=null;
+  assert.equal((await api.verifyFreshCurrentBackup()).ok,true,'durable full copy at canonical revision is fresh');
+  assert.ok(api.receipt().providers['google-drive'],'completed local metadata commit becomes visible');
+  changedAt='2026-10-01T12:00:01.000Z';
+  assert.equal((await api.verifyFreshCurrentBackup()).ok,false,'stale copy cannot satisfy newer canonical revision');
+  failWrite=true;
+  await assert.rejects(api.recordBackupCopy({source:'device-folder',sourceRevision:changedAt,attachmentsComplete:true}),/Injected receipt commit failure/);
+  assert.equal(api.receipt().providers['device-folder'],undefined,'failed durable receipt write must not update memory');
+  failWrite=false;failRead=true;
+  assert.equal((await api.verifyFreshCurrentBackup()).ok,false,'unreadable receipt must fail closed');
+  failRead=false;
+  await api.recordBackupCopy({source:'google-drive',sourceRevision:changedAt,attachmentsComplete:false});
+  assert.equal(api.receipt().providers['google-drive'].format,null,'known partial attachment copy cannot certify full recovery');
+  assert.equal((await api.verifyFreshCurrentBackup()).ok,false,'known partial attachment backup cannot prove fully fresh recovery');
+  assert.ok(diagnostics.some(row=>String(row[0]).includes('freshness-write')),'failed local receipt must leave diagnostics');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'backup-capture-safety',cases},null,2));
