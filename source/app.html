@@ -4705,17 +4705,17 @@ function verifiedRecoveryEntries(state=verifiedRecoveryState){return [state.file
 function lastBackupTime(state=verifiedRecoveryState){return Math.max(-Infinity,...verifiedRecoveryEntries(state).map(entry=>Date.parse(entry.at)).filter(Number.isFinite));}
 // Decisions read the record fresh; a failed read falls back to the copy in memory.
 async function readVerifiedRecoveryState(){
-  return normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY).catch(error=>{AppDiagnostics.capture('backup.freshness-read',error,'warn');return verifiedRecoveryState;}));
+  return normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY));
 }
-// The copy in memory changes at once, so a decision made right after a backup
-// (whether a location still has changes waiting) already sees it; the durable
-// record follows.
+// A receipt becomes visible only after its durable metadata write commits.
+// A provider may have published successfully even when this local receipt fails;
+// keep its real external outcome, but never represent the receipt as durable.
 function updateVerifiedRecoveryState(change){
-  verifiedRecoveryState=normalizeVerifiedRecoveryState(change(verifiedRecoveryState));BackupProviderRuntime.refresh();
   const run=async()=>{
     const next=normalizeVerifiedRecoveryState(change(await readVerifiedRecoveryState()));
+    try{await writeHostAppMetaValue(VERIFIED_RECOVERY_META_KEY,next);}
+    catch(error){AppDiagnostics.capture('backup.freshness-write',error,'warn');throw error;}
     verifiedRecoveryState=next;BackupProviderRuntime.refresh();
-    try{await writeHostAppMetaValue(VERIFIED_RECOVERY_META_KEY,next);}catch(error){AppDiagnostics.capture('backup.freshness-write',error,'warn');}
     return true;
   };
   const next=verifiedRecoveryWriteChain.catch(()=>{}).then(run);verifiedRecoveryWriteChain=next;return next;
@@ -4750,10 +4750,20 @@ async function installVerifiedRecoveryFreshness(){
   BackupProviderRuntime.refresh();return verifiedRecoveryState;
 }
 async function verifyFreshCurrentBackup(){
-  const state=normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY).catch(()=>null));
-  const currentSave=Date.parse(readStorageHealth().lastLocalSaveAt||'');
-  // Only a verified copy in the current backup format that holds the latest change counts.
-  const candidates=verifiedRecoveryEntries(state).filter(entry=>entry.verified!==false&&entry.format===DATA_CONTRACT.schemas.Backup.version&&(!Number.isFinite(currentSave)||Date.parse(entry.sourceRevision)>=currentSave));
+  const unknown=()=>Object.freeze({ok:false,verifiedCopies:0,latestVerifiedAt:''});
+  let currentRevision;
+  try{
+    // Canonical commits write the mutation epoch inside their transaction;
+    // the localStorage health clock alone is not proof of the latest change.
+    currentRevision=await AppData.mutationEpoch.latestChangeAt(currentBackupSourceRevision());
+  }catch(error){AppDiagnostics.capture('backup.freshness-epoch-read',error,'warn');return unknown();}
+  const currentSave=Date.parse(String(currentRevision||''));
+  if(!Number.isFinite(currentSave))return unknown();
+  let state;
+  try{state=normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY));}
+  catch(error){AppDiagnostics.capture('backup.freshness-receipt-read',error,'warn');return unknown();}
+  // A missing, invalid or untrusted clock cannot authorize destructive work.
+  const candidates=verifiedRecoveryEntries(state).filter(entry=>entry.verified!==false&&entry.format===DATA_CONTRACT.schemas.Backup.version&&Date.parse(entry.sourceRevision)>=currentSave);
   return Object.freeze({ok:candidates.length>0,verifiedCopies:candidates.length,latestVerifiedAt:candidates.sort((a,b)=>Date.parse(b.at)-Date.parse(a.at))[0]?.at||''});
 }
 // Compare policy identity and ownership inside the same typed metadata transaction.
@@ -9482,7 +9492,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
       backupNudgeCheckedAt=Date.now();
       backupNudgeNotifiedDate='';
       refreshStorageFallbackWarning();
-      if(context?.copy)void recordBackupCopy(context.copy);
+      if(context?.copy)void recordBackupCopy(context.copy).catch(error=>AppDiagnostics.capture('backup.freshness-receipt',error,'warn'));
       schedulePwaUpdateEvaluation(250);
     }
   }),
