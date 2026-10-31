@@ -40,169 +40,211 @@
 
 ## 3. Per-finding de novo source adjudication and scenario gate
 
-### BS01 — CONTROL-FLOW GAP · P1
+### BS01
 
-**P0 outcome:** Open for P1. **Source:** [`source/app.html:2775`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L2775); 4101–4106; 4149–4155.
+**Classification:** CONTROL-FLOW GAP · P1
+
+**P0 outcome:** Open for P1. **Source:** [`source/app.html:2775–2790`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L2775-L2790); [`source/app.html:4101–4106`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L4101-L4106); [`source/app.html:4149–4155`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L4149-L4155).
 
 **Independent re-evaluation:** `await flushLiveDraft()` is `try/catch` only. `writeActiveSessionNow()` can yield null or `{ok:false,error}` instead of rejecting; `TimerEngine.stopExecution()` and freeze still execute. An in-memory timer is stopped; loss of saved progress is **not** established from this trace because other rescue/reconciliation guards exist.
 
 **Next-pass proof requirement:** Inject strict save `{ok:false}`/null/throw and assert the last-tick/unsaved content is recoverable, no two clocks run, and the remote owner is not overruled.
 
-### BS02 — QUALIFIED CONTENTION-LIVENESS · P2
+### BS02
 
-**P0 outcome:** Open for P3. **Source:** repository-background.js 93–116, 127–147, 282–284, 326–344.
+**Classification:** QUALIFIED CONTENTION-LIVENESS · P2
+
+**P0 outcome:** Open for P3. **Source:** [`source/core/repository-background.js:93–116`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/repository-background.js#L93-L116); [`source/core/repository-background.js:127–147`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/repository-background.js#L127-L147); [`source/core/repository-background.js:282–284`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/repository-background.js#L282-L284); [`source/core/repository-background.js:326–344`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/repository-background.js#L326-L344).
 
 **Independent re-evaluation:** Correction: a scheduled callback suppressed by an active peer is **rearmed** by `scope.release() -> resumeTimers()`; the generic ‘lost timer’ claim was false. However `beginBackground()` denial leads to `MAINTENANCE.busyMs` (15 s) or `INTEGRITY.retryMs` (10 min), and releasing the blocking peer does not pull those deliberate *future* deadlines forward.
 
 **Next-pass proof requirement:** Fake clock: denial→higher-priority release after 50 ms→eligible pending job; distinguish immediate eligible work from error/authorization retry; verify no hot loop.
 
-### BS03 — CONFIRMED NAVIGATION PATH · P1/P2
+### BS03
 
-**P0 outcome:** Open for P2. **Source:** platform/sw.js 205–221; [`source/app.html:2192`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L2192).
+**Classification:** CONFIRMED NAVIGATION PATH · P1/P2
+
+**P0 outcome:** Open for P2. **Source:** [`source/platform/sw.js:205–221`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/platform/sw.js#L205-L221); [`source/app.html:2192–2210`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L2192-L2210).
 
 **Independent re-evaluation:** System notifications request root `./` and `notificationclick` invokes `existing.navigate(requested.href)` before `focus()` whenever URLs differ. A dirty in-scope `/index.html`, query route or deep link can be navigated. Pagehide/rescue may prevent loss, so actual data corruption is **not** shown.
 
 **Next-pass proof requirement:** Real Chromium: notification click from `/index.html`/deep link while Notes/editor or Session dirty, with multiple clients, offline and popup denials; preserve content/route and focus.
 
-### BS04 — CONFIRMED LIFETIME GAP · P2
+### BS04
 
-**P0 outcome:** Open for P2. **Source:** app.html 2105–2115, 2117–2140.
+**Classification:** CONFIRMED LIFETIME GAP · P2
+
+**P0 outcome:** Open for P2. **Source:** [`source/app.html:2105–2115`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L2105-L2115); [`source/app.html:2117–2140`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L2117-L2140).
 
 **Independent re-evaluation:** Fallback link click marks `handedOff=true`; overlay close's `release()` only revokes Blob URL and releases OPFS retained reader when `!handedOff`. No observed subsequent explicit release owner for clicked handoff. Normal iframe viewer has a deterministic onAfterClose release.
 
 **Next-pass proof requirement:** Instrument Blob URL/reader counts; open, download, close, tab exit, multiple fallback clicks, premature-revocation prevention.
 
-### BS05 — LOW-COST PERFORMANCE HYPOTHESIS · P3
+### BS05
 
-**P0 outcome:** Measure in P2. **Source:** [`source/app.html:2117`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L2117).
+**Classification:** LOW-COST PERFORMANCE HYPOTHESIS · P3
+
+**P0 outcome:** Measure in P2. **Source:** [`source/app.html:2117–2121`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L2117-L2121).
 
 **Independent re-evaluation:** Direct native PDF uses 1 s polling until `opened.closed`; interval naturally dies with parent page, so 'leaks after page destroyed' would be overclaiming. Cost while long-lived tabs remain and popup behavior are unmeasured.
 
 **Next-pass proof requirement:** Inspect timers after many external viewers and BFCache; decide whether cleanup merits a change.
 
-### BS06 — PROVEN REPEATED WORK · P2
+### BS06
 
-**P0 outcome:** Measure/optimize in P4. **Source:** [`source/core/asset-storage.js:65`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/asset-storage.js#L65).
+**Classification:** PROVEN REPEATED WORK · P2
+
+**P0 outcome:** Measure/optimize in P4. **Source:** [`source/core/asset-storage.js:65–96`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/asset-storage.js#L65-L96).
 
 **Independent re-evaluation:** `shallowAudit()` reconstructs sorted `allEntries()` plus sorted references and SHA-256 of the full serialized identity **each invocation**, while checking at most 128 file entries. Rough scan-work amplification across N/128 chunks is source-inherent; wall time/memory unknown. Rechecking mutations is a deliberate correctness property.
 
 **Next-pass proof requirement:** Count IDB reads, bytes encoded/hashed and pauses at N=0/128/129/1000; change metadata mid-scan and reject stale progress.
 
-### BS07 — QUALIFIED BULK PREPARATION · P2
+### BS07
 
-**P0 outcome:** Measure in P4. **Source:** [`source/app.html:8818`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L8818); [`source/core/attachments.js:77`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/attachments.js#L77).
+**Classification:** QUALIFIED BULK PREPARATION · P2
+
+**P0 outcome:** Measure in P4. **Source:** [`source/app.html:8818–8835`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L8818-L8835); [`source/core/attachments.js:77–99`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/attachments.js#L77-L99).
 
 **Independent re-evaluation:** The host awaits full `AttachmentReferences.sources()` before its 5 s/128-entry `shallowAudit` budget. **Correction:** `sources()` cooperatively yields after Notes/Day descriptors when background budget indicates; however its `readFreshPayload()` and `dailyRecords.list({strict:true})` materialize complete collections and it returns a whole map/array.
 
 **Next-pass proof requirement:** Benchmark 1000+ Notes/Days/large reflection strings; track capture/read cost vs yields; never scan partial inventory as complete.
 
-### BS08 — PROVEN BULK MATERIALIZATION · P2
+### BS08
 
-**P0 outcome:** Measure in P4. **Source:** asset-maintenance.js 23–45, 59–75.
+**Classification:** PROVEN BULK MATERIALIZATION · P2
+
+**P0 outcome:** Measure in P4. **Source:** [`source/core/asset-maintenance.js:23–45`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/asset-maintenance.js#L23-L45); [`source/core/asset-maintenance.js:59–75`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/asset-maintenance.js#L59-L75).
 
 **Independent re-evaluation:** The GC reference walk is bounded *after* source phase population; `Object.values(readNotes())`, `listDailyRecords().map(...)` and `readPendingReviewTexts()` can allocate full arrays first. Source change gates and fail-closed incomplete reference checks exist.
 
 **Next-pass proof requirement:** Large Notes and Day history, mid-phase revision, unsupported text, earlier user edit, crash; prohibit deletion on unknown references.
 
-### BS09 — ITERATOR PORTABILITY RISK · P3
+### BS09
 
-**P0 outcome:** Prove or retain in P4. **Source:** [`source/core/asset-storage.js:127`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/asset-storage.js#L127).
+**Classification:** ITERATOR PORTABILITY RISK · P3
+
+**P0 outcome:** Prove or retain in P4. **Source:** [`source/core/asset-storage.js:127–150`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/asset-storage.js#L127-L150).
 
 **Independent re-evaluation:** OPFS sweep iterator persists across yielded passes; on nonbudget errors it resets. The code checks `storedFiles()` and reader leases, limiting destructive exposure. Browser iterator mutation/suspend semantics are not established from source.
 
 **Next-pass proof requirement:** Chrome + iPad where supported: add/remove during scan, delayed resumption, reopen; check orphan eventual reclamation and reachable-file safety.
 
-### BS10 — PROVEN REPEATED PROTECTION READ · P2
+### BS10
 
-**P0 outcome:** Measure in P4. **Source:** [`source/core/exports.js:23`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/exports.js#L23); [`source/app.html:8609`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L8609).
+**Classification:** PROVEN REPEATED PROTECTION READ · P2
+
+**P0 outcome:** Measure in P4. **Source:** [`source/core/exports.js:23–40`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/exports.js#L23-L40); [`source/app.html:8609–8615`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L8609-L8615).
 
 **Independent re-evaluation:** `retained()` is called inside every candidate's exclusive file lock; it reads restore-journal payload and repository integrity scrub state each time. Fresh pins are important; simply caching absence could make deletion unsafe.
 
 **Next-pass proof requirement:** Count metadata reads per 128 candidates; injection: create/retire pinned rollback between iterations; compare candidate-safe fresh validation.
 
-### BS11 — INTENTIONAL PROTECTION/PERF TRADE-OFF · P2
+### BS11
 
-**P0 outcome:** Measure in P5. **Source:** [`source/core/backup-provider.js:715`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/backup-provider.js#L715).
+**Classification:** INTENTIONAL PROTECTION/PERF TRADE-OFF · P2
+
+**P0 outcome:** Measure in P5. **Source:** [`source/core/backup-provider.js:715–766`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/backup-provider.js#L715-L766).
 
 **Independent re-evaluation:** Read-only history and object inventory happen outside the destructive lease expressly to keep foreground unblocked. Source **already** rehashes fresh digests and checks the inventory under the lease before deletion. Performance of long preflight is not proven unacceptable.
 
 **Next-pass proof requirement:** Mock 100/1000 checkpoints, slow paginated object list and a simultaneous new publication; record wall/read requests, preserve all fresh-delete guards.
 
-### BS12 — CONDITIONAL SW INSTALL LIVENESS · P2
+### BS12
 
-**P0 outcome:** Reproduce in P3. **Source:** platform/sw.js 65–92, 108–143, 161–169.
+**Classification:** CONDITIONAL SW INSTALL LIVENESS · P2
+
+**P0 outcome:** Reproduce in P3. **Source:** [`source/platform/sw.js:65–92`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/platform/sw.js#L65-L92); [`source/platform/sw.js:108–143`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/platform/sw.js#L108-L143); [`source/platform/sw.js:161–169`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/platform/sw.js#L161-L169).
 
 **Independent re-evaluation:** At three shell-cache generations, a new identity refuses install before reclamation. Existing cleanup respects live/unknown client release and preserves recent history; this may be a deliberate safety constraint, not an unconditional bug.
 
 **Next-pass proof requirement:** Simulate cap with zero/live/unknown clients; navigate to trigger retirement, retry install; ensure no pinned cache eviction.
 
-### BS13 — NETWORK CONTENTION HYPOTHESIS · P3
+### BS13
 
-**P0 outcome:** Measure in P5. **Source:** [`source/app.html:10248`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L10248).
+**Classification:** NETWORK CONTENTION HYPOTHESIS · P3
+
+**P0 outcome:** Measure in P5. **Source:** [`source/app.html:10248–10278`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L10248-L10278).
 
 **Independent re-evaluation:** The PWA update check has an independent due timer, primary-tab ownership, online condition, browser Web Lock and failure backoff. It does not explicitly share backup's network eligibility check; 'downloads saturate backup' is unmeasured.
 
 **Next-pass proof requirement:** Throttle network and overlap large Drive upload/update; check delay and user progress; retain update liveness.
 
-### BS14 — NATIVE API TIMING LIMIT · P3
+### BS14
 
-**P0 outcome:** Retain policy; verify P3. **Source:** [`source/core/pwa-lifecycle.js:216`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/pwa-lifecycle.js#L216).
+**Classification:** NATIVE API TIMING LIMIT · P3
+
+**P0 outcome:** Retain policy; verify P3. **Source:** [`source/core/pwa-lifecycle.js:216–255`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/pwa-lifecycle.js#L216-L255).
 
 **Independent re-evaluation:** `Promise.race(registration.update(), 120s timeout)` does not cancel browser-native update. The lifecycle already listens to `controllerchange`, install states and page resumes; late activation may converge. No source-based evidence that extra cancellation is needed.
 
 **Next-pass proof requirement:** Simulate resolve after timeout and statechange later; verify messages reflect timeout vs native completion, no unsafe reload.
 
-### BS15 — CONFIRMED ASYNC RACE SHAPE · P2
+### BS15
 
-**P0 outcome:** Open for P6. **Source:** device-backup.js 199–223, 227–262.
+**Classification:** CONFIRMED ASYNC RACE SHAPE · P2
+
+**P0 outcome:** Open for P6. **Source:** [`source/core/device-backup.js:199–223`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/device-backup.js#L199-L223); [`source/core/device-backup.js:227–262`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/device-backup.js#L227-L262).
 
 **Independent re-evaluation:** `refreshPermission()` assigns `permission=await query()` with no identity/generation check. Multiple focus wakeups, disconnect or new folder selection can overlap; a late answer may publish stale permission. `prepareRepository()` separately guards folder identity, but not this status assignment.
 
 **Next-pass proof requirement:** Two perm queries resolve out of order (including handle switch, regrant, disconnect); latest handle and user-gesture prompt rules win.
 
-### BS16 — CONFIRMED POLLING RATE; VALUE UNMEASURED · P2
+### BS16
 
-**P0 outcome:** Measure in P5. **Source:** [`source/app.html:2763`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L2763); [`source/core/backup-provider.js:1755`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/backup-provider.js#L1755).
+**Classification:** CONFIRMED POLLING RATE; VALUE UNMEASURED · P2
+
+**P0 outcome:** Measure in P5. **Source:** [`source/app.html:2763–2822`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L2763-L2822); [`source/core/backup-provider.js:1755–1758`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/backup-provider.js#L1755-L1758).
 
 **Independent re-evaluation:** `SESSION_CLAIM_WATCH_MS=15000`; while visible, initialized, connected and TASKS exist or claim is frozen, watcher reads remote session claim and strict local Session. Thus upper scheduled rate is 4 attempts/min (less under gating/inflight). Detection latency is a correctness/product trade-off.
 
 **Next-pass proof requirement:** Count actual Drive requests per 30 min session across idle/running/offline/dual devices; measure owner-transfer detection p95.
 
-### BS17 — CONDITIONAL STARTUP RESOURCE BURST · P2
+### BS17
 
-**P0 outcome:** Measure in P5. **Source:** app.html 5411–5429, 5435–5469, 11069–11081.
+**Classification:** CONDITIONAL STARTUP RESOURCE BURST · P2
+
+**P0 outcome:** Measure in P5. **Source:** [`source/app.html:5411–5429`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L5411-L5429); [`source/app.html:5435–5469`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L5435-L5469); [`source/app.html:11069–11081`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L11069-L11081).
 
 **Independent re-evaluation:** Startup `BackgroundOperations.wake()` discovers six owners and separately calls `BackupFiles.collect()`, though each has own blockers/work budgets. Peak concurrent CPU/IO is not measured; no claim that startup always overloads the device.
 
 **Next-pass proof requirement:** Cold/warm startup with backlog, slow CPU, immediate typing; measure time-to-interaction, concurrent active jobs, worker/IO peak.
 
-### BS18 — TIMER/WALL-CLOCK PLATFORM HYPOTHESIS · P3
+### BS18
 
-**P0 outcome:** Prove or document P3. **Source:** [`source/core/operation-lifecycle.js:53`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/operation-lifecycle.js#L53); [`source/core/repository-background.js:93`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/repository-background.js#L93).
+**Classification:** TIMER/WALL-CLOCK PLATFORM HYPOTHESIS · P3
+
+**P0 outcome:** Prove or document P3. **Source:** [`source/core/operation-lifecycle.js:53–98`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/operation-lifecycle.js#L53-L98); [`source/core/repository-background.js:93–116`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/repository-background.js#L93-L116).
 
 **Independent re-evaluation:** Due times are `environment.now()/Date.now` and browser timers are set using a derived delay. App has foreground/resume wake, but wall-clock jumps and throttled timers can create drift. No guarantee of background execution is feasible.
 
 **Next-pass proof requirement:** Clock jump forward/back, BFCache and suspended timers; validate eventual wake and bounded retry; no 'always on' promises.
 
-### BS19 — INTENTIONAL INTEGRITY ENVELOPE · P3
+### BS19
 
-**P0 outcome:** Retain design; document P6. **Source:** platform/sw.js 40–63, 150–159.
+**Classification:** INTENTIONAL INTEGRITY ENVELOPE · P3
+
+**P0 outcome:** Retain design; document P6. **Source:** [`source/platform/sw.js:40–63`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/platform/sw.js#L40-L63); [`source/platform/sw.js:150–159`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/platform/sw.js#L150-L159).
 
 **Independent re-evaluation:** New/reused shell assets are SHA-256 verified during installation; subsequent cache fetch returns cached response without hashing every read. A blanket per-fetch hash is unjustified absent actual browser cache corruption evidence.
 
 **Next-pass proof requirement:** Cache-corruption simulation only if risk material; verify offline previous generation; avoid speed regression.
 
-### BS20 — REFINED OBSERVABILITY GAP · P3
+### BS20
 
-**P0 outcome:** Only targeted metrics in P6. **Source:** backup-operation-diagnostics.js 13–24, 33–51, 53–125; [`source/core/backup-provider.js:724`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/backup-provider.js#L724).
+**Classification:** REFINED OBSERVABILITY GAP · P3
+
+**P0 outcome:** Only targeted metrics in P6. **Source:** [`source/core/backup-operation-diagnostics.js:13–24`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/backup-operation-diagnostics.js#L13-L24); [`source/core/backup-operation-diagnostics.js:33–51`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/backup-operation-diagnostics.js#L33-L51); [`source/core/backup-operation-diagnostics.js:53–125`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/backup-operation-diagnostics.js#L53-L125); [`source/core/backup-provider.js:724–762`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/backup-provider.js#L724-L762).
 
 **Independent re-evaluation:** Correction: diagnostics **already include** maintenance inventory-start/end/invalidation and deletion-start, sanitized bounded traces, dropped-count and active state. Broad claim 'no preflight diagnostics' is **refuted**. Per-candidate read counts, explicit resource lease maxima and high-level work/idle durations are not all surfaced.
 
 **Next-pass proof requirement:** First identify missing decision-relevant counters; prove whitelisting, redaction and stable cardinality; avoid duplicating existing metrics.
 
-### BS21 — ACCEPTED PWA PLATFORM LIMIT
+### BS21
 
-**P0 outcome:** Policy documented; no code. **Source:** [`source/core/operation-lifecycle.js:51`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/operation-lifecycle.js#L51); platform/sw.js 161–239; [`source/app.html:11069`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L11069).
+**Classification:** ACCEPTED PWA PLATFORM LIMIT
+
+**P0 outcome:** Policy documented; no code. **Source:** [`source/core/operation-lifecycle.js:51–98`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/core/operation-lifecycle.js#L51-L98); [`source/platform/sw.js:161–239`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/platform/sw.js#L161-L239); [`source/app.html:11069–11081`](https://github.com/oneshubhamt/study-director/blob/bb1fd4aa8cb4a30908ee37505c880ea631a1e4c6/source/app.html#L11069-L11081).
 
 **Independent re-evaluation:** Jobs are page-owned, and service-worker events cannot supply a guaranteed repeating OS scheduler after all windows close. Existing A–F F18 already accepted this operational restriction.
 

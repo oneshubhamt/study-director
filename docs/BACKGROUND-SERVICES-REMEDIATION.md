@@ -404,6 +404,13 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Step 5 — targeted QA:** 21 source-text anchors statically checked: **21/21 PASS after correcting two check-expression mismatches (BS07 and BS18)**. The initial 19/21 result was a probe-matching mistake; exact production lines were re-read. Compared branch commits and verified no source changes. **Actual JS suites/Chromium/browser/iOS/Drive/device tests NOT RUN**, no local connected executable checkout; tests are only mapped by file and scenario. Documentation commit diff/read-back verification follows this entry; full Promotion intentionally not run.
 - **Status:** P0 **SOURCE-EVIDENCE COMPLETE**; all source-level open claims remain subject to the runtime/cost gates of their planned passes, BS21 accepted as platform policy. P1–P6 **NOT STARTED**.
 - **Next action:** **P1** — live Session owner claim save-result/read-back proof and smallest coherent repair, only after new instruction; read this entry, §0 and P1 card first.
+### Entry 003 — P0 source-documentation targeted QA and link correction (2026-10-31)
+
+- **P0 baseline commit inspected:** `f0d522b09bff185eee427c004bdefa416334e962`; verified `current-fixes` HEAD and exact five-file Markdown-only diff from `bb1fd4aa...` (new P0 evidence plus tracker, programmes index, background contract and handoff status). No product source, tests, generated files, CI or release change.
+- **Objective/read-back QA:** All 21 **BS01–BS21** source-evidence sections are present exactly once; all 21 tracker entries have P0 dispositions; all seven P0–P6 pass cards and journal Entries 000–002 remain. `docs/PROGRAMMES.md` points to P1 as next and does not claim P1 began.
+- **Source-link correction:** The P0 evidence report now uses stable `### BSxx` GitHub anchors and fully qualified immutable source links for **all** cited multi-range/compound paths; the ledger's `#bsxx` links now resolve correctly. Solely a citation correction discovered in first committed read-back.
+- **Targeted QA scope:** Source-text proof checks **21/21** with two corrected static probes; docs structure/read-back and GitHub diff PASS; real unit/integration/Chromium/Drive/iPad tests **NOT RUN**. Do not infer performance gains or verified user-level fixes.
+- **P0 disposition:** **SOURCE-EVIDENCE BASELINE COMPLETE.** P1–P6 not started; unverified runtime and physical-device claims remain explicit next-pass tests.
 ### Journal template — duplicate this for the next pass
 
 - **Entry NNN — Pass P#, topic / date:**
