@@ -190,4 +190,53 @@ for(const rescued of [false,true]){
   assert.ok(diagnostics.some(row=>String(row[0]).includes('freshness-write')),'failed local receipt must leave diagnostics');
 }
 
+
+
+// Browser-reset recovery must await the actual Device Folder installation and
+// permission read, share an in-flight startup task, and fail open to the
+// explicit recovery decision rather than hanging forever.
+{
+  const appSource=fs.readFileSync('source/app.html','utf8');
+  const start=appSource.indexOf('const STORAGE_RESET_RETRY_MS='),end=appSource.indexOf('const storageResetSteps=',start);
+  assert.ok(start>=0&&end>start,'storage reset gate remains a single host contract');
+  let finishInstall,finishPermission,connected=false,installCalls=0,refreshCalls=0,timeout=null;
+  const installing=new Promise(resolve=>{finishInstall=resolve;}),permission=new Promise(resolve=>{finishPermission=resolve;});
+  const diagnostics=[];
+  const sandbox={
+    Date,Promise,Object,Array,Map,Set,Error,
+    setTimeout:callback=>{timeout=callback;return 1;},clearTimeout:()=>{timeout=null;},
+    BackupProviderRuntime:{suspendBackground:()=>({release(){}}),connected:()=>false},
+    DeviceBackup:{install:()=>{installCalls++;return installing;},refreshPermission:()=>{refreshCalls++;return permission;},status:()=>({connected})},
+    reconcileStartupChangeClock:async()=>true,
+    readStorageHealth:()=>({browserDataClearedAt:''}),writeStorageHealth:()=>{},
+    AppDiagnostics:{capture:(...args)=>diagnostics.push(args)}
+  };
+  vm.createContext(sandbox);
+  vm.runInContext('let storageResetHold=null,storageResetSince=0;\n'+appSource.slice(start,end),sandbox);
+  const hold=vm.runInContext("beginStorageResetHold('2026-10-31T00:00:00.000Z')",sandbox);
+  assert.ok(hold.deviceReady&&typeof hold.deviceReady.then==='function');
+  let ready=false;hold.deviceReady.then(()=>{ready=true;});
+  await Promise.resolve();await Promise.resolve();await Promise.resolve();
+  assert.equal(ready,false,'readiness remains pending during in-flight installation');
+  const same=vm.runInContext('ensureDeviceBackupInstalled()',sandbox);
+  assert.equal(same,vm.runInContext('ensureDeviceBackupInstalled()',sandbox),'startup/reset reuse the installation promise');
+  finishInstall({connected:false});
+  for(let i=0;i<8;i++)await Promise.resolve();
+  assert.equal(ready,false,'permission refresh must also settle before recovery starts');
+  connected=true;finishPermission({connected:true});
+  assert.equal(await hold.deviceReady,true);assert.equal(installCalls,1);assert.equal(refreshCalls,1);
+  vm.runInContext('storageResetHold=null;deviceBackupInstallPromise=null;',sandbox);
+  sandbox.DeviceBackup.install=async()=>({connected:false});
+  sandbox.DeviceBackup.refreshPermission=async()=>{throw new Error('Permission unavailable');};
+  const unavailable=vm.runInContext("beginStorageResetHold('2026-10-31T00:01:00.000Z')",sandbox);
+  assert.equal(await unavailable.deviceReady,false,'failed permission is a fallback, not a stalled restore');
+  assert.ok(diagnostics.some(row=>String(row[0]).includes('storage-reset.device-ready')));
+  vm.runInContext('storageResetHold=null;deviceBackupInstallPromise=null;',sandbox);
+  sandbox.DeviceBackup.install=()=>new Promise(()=>{});
+  const stalled=vm.runInContext("beginStorageResetHold('2026-10-31T00:02:00.000Z')",sandbox);
+  assert.equal(typeof timeout,'function');
+  timeout();
+  assert.equal(await stalled.deviceReady,false,'unresponsive permission API is bounded');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'backup-capture-safety',cases},null,2));
