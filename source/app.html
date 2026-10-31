@@ -4724,7 +4724,9 @@ function updateVerifiedRecoveryState(change){
 function recordBackupCopy(copy){
   const source=String(copy?.source||''),sourceRevision=backupTime(copy?.sourceRevision);
   if(!sourceRevision||!/^[a-z][a-z0-9-]{0,40}$/u.test(source))return Promise.resolve(false);
-  const entry={at:new Date().toISOString(),sourceRevision,format:DATA_CONTRACT.schemas.Backup.version};
+  // Known missing attachment bytes may be archived, but cannot be used as
+  // proof of a fully recoverable, current-format external safety copy.
+  const entry={at:new Date().toISOString(),sourceRevision,format:copy.attachmentsComplete===false?null:DATA_CONTRACT.schemas.Backup.version};
   return updateVerifiedRecoveryState(prior=>source==='file'?{...prior,file:{...entry,verified:copy.verified===true}}:{...prior,providers:{...prior.providers,[source]:entry}});
 }
 // Every save writes the change clock inside its own transaction (the
