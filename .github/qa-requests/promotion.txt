@@ -1,13 +1,20 @@
 Promotion QA request
 
-Request: full-qa-current-fixes-2026-10-30
-Requested by repository owner to run complete QA of the current-fixes branch.
+Request: consolidated-a-f-certification-2026-10-31
+Requested by repository owner after Pass F: comprehensive A–F verification, all available QA and no deployment.
 
-Source/test revision: 1f368fccb5591bb8ca7dd2c6a221fd4fde67b2d4
-Scope:
-- Run entire Promotion QA (fast correctness, risk coverage, mutation, AST branch-edge coverage, non-browser release checks, complete Chromium browser certification, built-runtime coverage).
-- Run the existing independent Insights performance samples and unchanged product performance budget.
-- Do not change application source, tests, QA thresholds, deployment, or workflows.
-- Report genuine failures and infrastructure variability separately.
+Audited application baseline: 5874b06667f42e0798b5b534620105a3e8b82f89
+Source differences since baseline: documentation/planning and this workflow request only; no application or test modification.
+Reference plan: docs/DATA-TOPOLOGY-BACKUP-REMEDIATION.md, Entry 012.
 
-This file is the documented on-demand trigger for Promotion QA on current-fixes.
+Scope (existing full Promotion QA workflow, unchanged):
+- All hermetic unit, integration and architecture contracts, including previously unexecuted A/B/C/D tests.
+- Risk-based coverage, safety mutation certification and AST branch-edge coverage.
+- Non-browser release, dependency assurance, secure/minified build and generated-output certification.
+- Every browser journey with built-runtime coverage, observing isolation for tests marked alone.
+- Three independent Insights performance samples at unchanged limits, and aggregate performance gate.
+- Verify exact source head, inspect all jobs and failures; do not weaken thresholds or tests.
+- Preserve production code, data formats, credentials, workflows, branch settings and release identity unless a verified defect needs a minimal correction.
+- Real Google Drive accounts, actual physical devices, storage eviction and power-loss conditions are manual follow-up and cannot be marked passed by CI.
+
+Trigger: this request file only; no merge, deployment or release.
