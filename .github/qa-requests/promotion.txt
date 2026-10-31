@@ -1,6 +1,6 @@
 Promotion QA request
 
-Request: consolidated-a-f-certification-2026-10-31-retry-2
+Request: consolidated-a-f-certification-2026-10-31-retry-3
 Requested by repository owner after Pass F: comprehensive A–F verification, all available QA and no deployment.
 
 Audited application baseline: 5874b06667f42e0798b5b534620105a3e8b82f89
@@ -22,3 +22,5 @@ Scope (existing full Promotion QA workflow, unchanged):
 Trigger: this request file only; no merge, deployment or release.
 
 Retry-2 evidence: Promotion run 41202319659 stopped in repository-incremental-preparation.mjs because its isolated zero-attachment BackupCodec stub lacked Pass B's attachmentCoverage and missingAttachmentWarning functions. Fixture-only correction fa74e870bac6dae907cd0c17fc8d262be83b699b. Retest complete QA unchanged; all Insights samples passed in first two runs.
+
+Retry-3 evidence: full run 41202516115 completed hermetic unit/integration tests and reached architecture tests, where backup-recovery-ux-contract.mjs retained an obsolete unconditional Replace-choice assumption. Corrected the source-shape assertion and added a behavioral partial-attachment recovery regression at commit e9a9bc57d60e54ec731e06a4f8762d966aa85fb4. Insights gate separately failed with all three worker timing samples over the existing unchanged limit on that run; previous two runs passed. Do not weaken performance budget or claim it passed until a new qualifying run does.
