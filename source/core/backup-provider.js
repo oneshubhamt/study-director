@@ -332,12 +332,12 @@ registry.define('backup-provider',1,input=>{
   // damaged, or it fails its checks. A read that failed, or one waiting for
   // the password, is not one.
   function contentFailure(message){const error=new Error(message);error.repositoryUnreadable=true;return error;}
-  async function verifyRepositoryHistoryItem(selected,item,kind,verifiedScope,{interactive=true,signal=null,forCleanup=false}={}){
+  async function verifyRepositoryHistoryItem(selected,item,kind,verifiedScope,{interactive=true,signal=null,forCleanup=false,fresh=false}={}){
     let lease,read=false;
     try{
       const identity=forCleanup&&item.verificationScope===verifiedScope?verifiedHistoryIdentity(item):'',proofCache=identity&&verifiedHistoryCache(selected,item),proof=proofCache&&proofCache.proofs.get(identity);
-      if(proof)return proof;
-      const cached=readVerifiedHistory(selected,item,verifiedScope);
+      if(proof&&!fresh)return proof;
+      const cached=fresh?null:readVerifiedHistory(selected,item,verifiedScope);
       let value;
       if(cached&&cached.kind===kind)value=cached.value;
       else{
@@ -364,7 +364,8 @@ registry.define('backup-provider',1,input=>{
     return freeze({uncertain:freeze(uncertain),unreadable:freeze(unreadable.sort())});
   }
   async function repositoryProviderStateWork(selected,{interactive=true,signal=null,forCleanup=false}={}){
-    const [listed,listedCommits]=await Promise.all([selected.repository.list(Object.freeze({kind:'checkpoint',signal})),selected.repository.list(Object.freeze({kind:'commit',signal}))]);
+    // Timestamp/size caches are insufficient proof before retention or GC.
+    const [listed,listedCommits]=await Promise.all([selected.repository.list(Object.freeze({kind:'checkpoint',signal,freshDigests:forCleanup})),selected.repository.list(Object.freeze({kind:'commit',signal,freshDigests:forCleanup}))]);
     const items=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],commitItems=Array.isArray(listedCommits)?listedCommits:Array.isArray(listedCommits&&listedCommits.items)?listedCommits.items:[];
     const scopes=new Set([...items,...commitItems].map(raw=>String(raw&&raw.verificationScope||'')).filter(Boolean)),verifiedScope=scopes.size===1?[...scopes][0]:null;
     const preparedCommits=prepareRepositoryHistoryItems(commitItems,'commit'),preparedManifests=prepareRepositoryHistoryItems(items,'checkpoint'),invalid=[...preparedCommits.invalid,...preparedManifests.invalid],work=[...preparedCommits.items.map(item=>Object.freeze({kind:'commit',item})),...preparedManifests.items.map(item=>Object.freeze({kind:'checkpoint',item}))];
@@ -490,12 +491,12 @@ registry.define('backup-provider',1,input=>{
   function repositoryInventoryObservation(inventory,{verificationFailures=0}={}){
     const source=inventory&&typeof inventory==='object'?inventory:{};return freeze({invalid:source.invalid||freeze([]),uncommitted:source.uncommitted||freeze([]),orphanCommits:source.orphanCommits||freeze([]),ignored:Math.max(0,Number(source.ignored)||0)+Math.max(0,Number(verificationFailures)||0),overflow:source.overflow===true,rows:source.pairs||freeze([])});
   }
-  async function verifyRepositoryInventoryPair(selected,pair,{interactive=true,signal=null}={}){
+  async function verifyRepositoryInventoryPair(selected,pair,{interactive=true,signal=null,fresh=false}={}){
     if(!pair||!pair.item||!pair.commitItem)throw new Error('The selected backup version is incomplete.');
     const scopes=new Set([pair.item.verificationScope,pair.commitItem.verificationScope].filter(Boolean)),verifiedScope=scopes.size===1?[...scopes][0]:null;
     const [manifestResult,commitResult]=await Promise.all([
-      verifyRepositoryHistoryItem(selected,pair.item,'checkpoint',verifiedScope,{interactive,signal}),
-      verifyRepositoryHistoryItem(selected,pair.commitItem,'commit',verifiedScope,{interactive:false,signal})
+      verifyRepositoryHistoryItem(selected,pair.item,'checkpoint',verifiedScope,{interactive,signal,fresh}),
+      verifyRepositoryHistoryItem(selected,pair.commitItem,'commit',verifiedScope,{interactive:false,signal,fresh})
     ]);
     if(manifestResult.invalid)throw manifestResult.invalid.error;if(commitResult.invalid)throw commitResult.invalid.error;
     const classified=RepositoryCheckpointPipeline.classifyState(freeze({manifests:freeze([manifestResult.row]),commits:freeze([commitResult.row])}));
@@ -1410,7 +1411,7 @@ registry.define('backup-provider',1,input=>{
     const sharedHead=whole&&selected.shared===true&&newestOf(inventory)&&(!reusedHistory||newestOf(await repositoryProviderInventory(selected,{signal:operation.signal})));
     OperationDiagnostics.mark('checkpoint-selected',{provider:selected.id});
     progress('verify',`Verifying selected backup in ${selected.label}…`);
-    const verificationTask=(async()=>{OperationDiagnostics.mark('selected-checkpoint-verification-start',{provider:selected.id});const row=await verifyRepositoryInventoryPair(selected,pair,{interactive:!quiet||password,signal:operation.signal}).catch(error=>{if(error?.repositoryUnreadable===true)unreadableByProvider.set(providerSelected.id,new Set([...(unreadableByProvider.get(providerSelected.id)||[]),pair.item.id]));throw readFailure(error);});OperationDiagnostics.mark('selected-checkpoint-verification-complete',{provider:selected.id,objects:Number(row.manifest.objects&&row.manifest.objects.length)||0});return row;})();
+    const verificationTask=(async()=>{OperationDiagnostics.mark('selected-checkpoint-verification-start',{provider:selected.id});const row=await verifyRepositoryInventoryPair(selected,pair,{interactive:!quiet||password,signal:operation.signal,fresh:true}).catch(error=>{if(error?.repositoryUnreadable===true)unreadableByProvider.set(providerSelected.id,new Set([...(unreadableByProvider.get(providerSelected.id)||[]),pair.item.id]));throw readFailure(error);});OperationDiagnostics.mark('selected-checkpoint-verification-complete',{provider:selected.id,objects:Number(row.manifest.objects&&row.manifest.objects.length)||0});return row;})();
     const inventoryTask=(async()=>{OperationDiagnostics.mark('recovery-object-inventory-start',{provider:selected.id});const value=await repositoryObjectInventory(selected,{signal:operation.signal}).catch(error=>{throw readFailure(error);});OperationDiagnostics.mark('recovery-object-inventory-complete',{provider:selected.id,objects:value.items.length,invalid:value.invalidCount,overflow:value.overflow===true});return value;})();
     const quarantineTask=integrityScrubHooks?integrityScrubHooks.quarantine(selected.id):Promise.resolve([]);
     const [row,listedObjects,quarantineRows]=await Promise.all([verificationTask,inventoryTask,quarantineTask]),quarantinedObjectIds=repositoryProviderObjectIds(quarantineRows),quarantined=new Set(quarantinedObjectIds);
