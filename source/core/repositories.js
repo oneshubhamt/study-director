@@ -260,6 +260,10 @@ registry.define('repositories',1,()=>{
       AppDiagnostics.capture('daily-record.recovery-cleanup',error,'warn');return false;
     }
     function showSubjectNoteSaveWarning(reason){
+      if(reason&&typeof reason==='object'&&reason.kind==='rescue-capacity'){
+        markStorageHealthError('notes',String(reason.message||'An unsaved Note could not fit the emergency browser copy. Keep this tab open until it finishes saving.'));
+        return;
+      }
       markStorageHealthError('notes',`Notes could not be saved in this browser session${reason?`: ${reason}`:''}. Export a backup before closing this tab.`);
     }
     function notifyDailyRecordsChanged(date='',type='change'){
