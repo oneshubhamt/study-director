@@ -1,105 +1,70 @@
-# Study Director — Verification and Release Procedure
+# Verification and release procedure
 
-This document records the current QA and release discipline. It is intentionally short and current-state focused.
+This document owns check selection and evidence policy. The [test guide](../tests/README.md) owns executable-suite design and browser reliability; [TypeScript tooling](TYPESCRIPT.md) owns strict checking; the [execution record](../TS-CONVERSION-EXECUTION.md) owns results actually run. There is no undated blanket “all QA passed” claim.
 
-## 1. Development cycle
+## During implementation
 
-For each meaningful change:
+Inspect source/consumers → record scope/invariants → implement → reconcile every objective against source → run targeted QA → record evidence and handoff. Maintain the durable worklog throughout, with a separate temporary pad outside the repo. Distinguish implementation, verification and full certification.
 
-1. audit the affected implementation and contracts;
-2. state objective, scope and invariants;
-3. implement the smallest coherent change;
-4. verify that the objectives were actually met;
-5. run targeted QA for every affected surface and boundary;
-6. run broader/full QA after substantial cumulative or architectural change.
+On `TS-Conversion`, use targeted affected-surface QA during passes; full correctness/coverage/mutation/browser/release/performance certification remains Phase 7 unless the owner changes scope. Add meaningful positive, malformed-input, failure and adjacent-flow regressions where existing tests miss a changed contract. Mechanical/Markdown changes do not require tests that merely mirror the edit.
 
-Do not treat a failing test as something to silence. Determine whether source or test is stale first, then correct the appropriate side.
+| Changed boundary | Select checks for |
+| --- | --- |
+| Persistence/codecs | Canonical validation, unsupported-input rejection, save/recovery and current-format import |
+| Backup/providers | Capture, publication, retention/integrity, transport failures, restore/rollback and sync |
+| Sessions/timers | State transitions, reload/handoff, ownership, cancellation and restore |
+| Plan/Review/Library/editor | Feature behavior plus affected persistence, references, input/focus and accessibility |
+| Build/host/module boundaries | Source/generated syntax, manifest/order, CSP/cache identity, build and deployment inventory |
+| PWA/workers | Protocol validation, cancellation/stale results, offline/update/client settlement |
+| Documentation | Local links, source paths/commands, current-versus-historical claims and archive preservation; build/deployment verification when served pages change |
 
-## 2. Targeted QA
+A failing check requires diagnosis: determine whether implementation or test assumptions are wrong. Do not relax invariants, coverage floors, timeouts or assertions merely to turn a result green. Unchanged prior evidence may be reused with its source revision and limits; later edits require rerunning checks they invalidate.
 
-Choose tests according to changed behavior rather than file count. Examples:
+## Commands
 
-- persistence/codec changes → repository, migration, recovery and import tests;
-- backup/provider changes → backup, Drive/Device transport, managed repository, maintenance and recovery tests;
-- Active Session/Timer changes → session lifecycle, timer state/engine, restore and mutation-protection tests;
-- Plan/Review/Library changes → their unit/integration tests plus affected persistence or protection contracts;
-- UI/responsive changes → presentation architecture tests and browser/device checks when the environment permits them;
-- build/module changes → syntax, architecture, generated syntax, build verification and deployment contract.
-
-## 3. Core governed commands
+Install the pinned toolchain as described in the root README. Typed changes:
 
 ```bash
-npm run test:unit
-npm run test:integration
-npm run test:architecture
+npm run check:types
+npm run test:release:types
 ```
 
-For release/build boundaries:
-
-```bash
-npm run test:release:syntax
-npm run build
-npm run test:release:generated-syntax
-npm run verify
-npm run stage:firebase:minified
-npm run test:release:minified
-npm run test:release:budgets
-npm run test:release:compression
-npm run test:release:deployment
-```
-
-Coverage/mutation/browser suites are additional gates when the change or release policy requires them and the environment supports them.
-
-## 4. Environment honesty
-
-Do not report browser smoke as passed when browser navigation is unavailable. Do not report external/network dependency assurance as passed when network access is unavailable. Local lockfile/inventory/provenance checks may be run separately when useful, but should be described accurately.
-
-## 5. Build outputs
-
-`npm run build` generates canonical build output under `dist/`.
-
-`npm run stage:firebase:minified` generates a self-contained Firebase project and minified deployment directory under `dist/`. These are generated artifacts and must not be committed back into the source package.
-
-The Firebase staging process verifies that the public inventory exactly matches the deployment build and that Firebase project configuration stays outside the public directory.
-
-## 6. Packaging checks
-
-Before distributing source:
-
-- release identity matches `release.config.mjs`;
-- no `node_modules/`;
-- no generated `dist/`;
-- no temporary QA/coverage output;
-- no historical per-pass closure/plan artifacts;
-- current README/architecture/verification docs are present;
-- archive contents are inspected after packaging.
-
-Before distributing deployment:
-
-- generate it from the same source package;
-- run build/generated-syntax/build-verification/deployment-contract checks;
-- package the generated deployment directory as-is;
-- do not hand-edit minified public files.
-
-## 7. Current correction scope and safety objectives
-
-SDVB75F10 changes background data safety at three boundaries: attachment reachability, Library-clear rollback and backup deletion reconciliation. It retains the existing bounded cleanup, retry and foreground-preemption architecture. PWA behaviour is outside this correction pass.
-
-The acceptance invariants are:
-
-1. Attachment removal requires a complete, current reference inventory. An unavailable source, even with usable older rescue data, authorizes no removal and retains retry intent.
-2. Library mutation requires a complete durable rollback image before deletion. Its recovery journal retires only after strict read-back verifies restoration. Unknown state must preserve the journal and block further destructive work.
-3. A canonical backup requires successful deletion reconciliation and readable canonical ledgers. False, missing and thrown settlement results forbid canonical publication. A deliberate rescue export must report uncertain deletion state. Earlier settlement is not a substitute for proof at capture time.
-4. Known-empty data remains valid. After a transient failure clears, cleanup, rollback and backup capture must succeed with exact intended data and no lost pending intent.
-
-Integration tests group fault matrices by these contracts, using actual repository readers, cleanup storage, reference scanners and recovery journals. Collector safety and reliability share one suite; capture safety lives in the backup integration category. Existing transaction-phase, bounded-work, ownership and source-fencing tests remain complementary.
-
-Run explicit affected files through the existing hermetic runner:
+Select explicit affected executables through the hermetic runner, for example:
 
 ```bash
 npm run test:targeted -- tests/integration/storage/background-gc-reliability.mjs tests/integration/library/library-clear.mjs tests/integration/backup/capture-safety.mjs
 ```
 
-The same runner accepts selected unit and architecture files, validates each path, isolates each test and checks that execution does not modify the source tree. No default command was changed to run fewer tests.
+Fast category commands (`test:unit`, `test:integration`, `test:architecture`) are broader choices, not required after every small edit. `tests/helpers/release-tests.mjs` identifies checks with separate release cadence; do not pass those as fast-targeted paths. Focused coverage uses paired repeated `--test` and `--file` selections; see [the test guide](../tests/README.md).
 
-For this pass, run targeted checks only. Browser smoke, device/provider acceptance, complete regression, dependency rebuilding and production minification are intentionally outside the scope. Source build and archive verification are separate local checks. Exact executed paths, results and mutation-control evidence belong in the accompanying external correction evidence, not in this source tree.
+When source/build inputs change, use appropriate checks in a disposable validation checkout where practical:
+
+```bash
+node build/build.mjs
+node build/verify-build.mjs
+npm run test:release:syntax
+npm run test:release:generated-syntax
+npm run test:release:deployment
+```
+
+Use `npm run build` when authored bundle inputs changed and must be regenerated. Never hand-edit `dist` or checked-in generated bundles. Staging prepares a local Firebase project; it does not deploy it.
+
+## Final certification
+
+`npm run qa:promotion` runs the repository's complete promotion chain. `npm run test:release` is the non-browser release chain; browser tiers and built-runtime coverage are separate documented commands. Source reconciliation across the whole application remains required in Phase 7 alongside those automated gates, including behavior not adequately covered by prior fixtures.
+
+The push/PR [Repository checks workflow](../.github/workflows/qa-fast.yml) installs dependencies, runs strict compiler/lint, selected safety/governance tests and build/generated checks. [Promotion QA](../.github/workflows/qa-promotion.yml) is manually dispatched and adds full correctness, risk/branch coverage, mutations and release checks; its complete browser run is selected separately by input. Neither workflow deploys. These descriptions come from workflow source, not a claim about a particular CI run.
+
+Run browser tests marked `alone` without another browser test. Follow the [browser reliability rules](../tests/README.md#browser-test-reliability), including repeated-run requirements before merge. A local targeted browser pass does not certify every browser/device or satisfy unexecuted merge/release checks.
+
+## Evidence and environment honesty
+
+Record exact command, tested commit or fixed base plus changed paths, tool/browser environment, actual outcome and unresolved limits. Preserve failed attempts and their resolution. CI success requires an inspected run/link; planned commands are not results. Raw artifacts stay outside the repository, but enough evidence to reproduce the check belongs in the worklog.
+
+Source inspection cannot prove physical Safari/mobile behavior, screen-reader output, OS eviction/force-kill recovery or human visual judgment. Record which of those were actually exercised and which remain unknown; do not invent universal device coverage. Likewise a network-denied check is not a passed dependency/security check.
+
+## Packaging and publication
+
+Source packages retain canonical source, reviewed dependencies, current documentation and consolidated history needed for traceability. Exclude installed dependencies, generated `dist`, credentials, private data/backups and temporary QA outputs. Keep `LICENSE` identical to `source/legal/LICENSE.txt`; do not alter release identity except through authorized `release.config.mjs` changes.
+
+Deployment packages are generated from the verified source revision, with public inventory, CSP/headers and cache identity verified. Do not include source history or Firebase support configuration in the public payload. Inspect the staged/archive inventory. Preparing or verifying a package does not authorize deployment, a PR merge or a release.

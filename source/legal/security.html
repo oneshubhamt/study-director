@@ -13,7 +13,7 @@
 <header>
 <div class="kicker">Study Director · Security</div>
 <h1>Security</h1>
-<div class="meta">Last updated 20 August 2026 · Copyright © 2026 Shubham Tiwari and Dr Satyam Kumar. All rights reserved.</div>
+<div class="meta">Last updated 30 October 2026 · Copyright © 2026 Shubham Tiwari and Dr Satyam Kumar. All rights reserved.</div>
 <nav aria-label="Legal documents"><a href="./">Study Director</a><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a><a href="security.html" aria-current="page">Security</a><a href="license.html">License</a><a href="notices.html">Notices</a></nav>
 </header>
 
@@ -26,7 +26,7 @@
 <li><strong>Browser controls:</strong> the production Hosting configuration uses a restrictive Content Security Policy and additional response headers intended to reduce script-injection, framing and unnecessary browser-permission risks.</li>
 <li><strong>Google Drive least privilege:</strong> optional Drive access requests only the <code>drive.file</code> scope.</li>
 <li><strong>Short-lived authorization:</strong> the Study Director Drive provider keeps its OAuth access token in memory and in this browser's <code>localStorage</code> only until it expires (about an hour), so a reload does not ask for a new sign-in. It is removed on expiry, disconnection or rejection. No refresh token is requested or stored.</li>
-<li><strong>Backup integrity:</strong> Study Director verifies supported backups, including per-image SHA-256 checks in binary-framed backup v10 and SHA-256 read-back checks for Drive operations. Integrity verification is not encryption. Optional encrypted backups use native AES-256-GCM with authenticated headers and PBKDF2-HMAC-SHA-256 (600,000 iterations). Encryption covers backup contents; it does not encrypt browser storage or internal recovery journals.</li>
+<li><strong>Backup integrity:</strong> Study Director verifies supported backups, including SHA-256 checks for stored attachment bytes in the current binary-framed backup format and read-back verification for Drive operations. Integrity verification is not encryption. Optional encrypted backups use native AES-256-GCM with authenticated headers and PBKDF2-HMAC-SHA-256 (600,000 iterations). Encryption covers backup contents; it does not encrypt browser storage or internal recovery journals.</li>
 <li><strong>Defensive restore:</strong> backup imports are validated and previewed before destructive restore operations are committed.</li>
 </ul>
 

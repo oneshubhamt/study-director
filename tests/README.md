@@ -107,7 +107,7 @@ The goal is not the largest suite. It is the smallest suite that preserves all m
 
 Fast discovery/governance accepts `.mjs` and `.mts`; `canonical.mts` exercises native typed-test execution. Classic `.ts` modules and their VM tests use `build/source-script.mts`: erasure preserves offsets and line breaks, so V8 ranges map directly to authored source without a separate source map. AST branch coverage parses that same erased text and inventories `.ts` alongside `.js`. Pilot coverage floors and mutations prevent converted implementations disappearing from QA. Mutants edit authored `.ts` and tests freshly erase them; no cached build is used.
 
-See [the checking boundary](../docs/TYPESCRIPT.md) before admitting more files. Existing bundled editor/worker TypeScript is inventoried as unchecked until Phase 2.
+See [the checking boundary](../docs/TYPESCRIPT.md) before admitting more files. Existing authored editor/worker TypeScript has been admitted since Phase 2; Phase 4 also admits persistence/orchestration. Remaining authored JavaScript is still unchecked until converted. Use the [execution record](../TS-CONVERSION-EXECUTION.md) for current status.
 
 
 During TypeScript passes, run targeted QA on affected surfaces; full QA is reserved for final certification. Coverage supports repeated `--test <test-path>` and `--file <source-path>` arguments together. It runs only those tests, measures only those files, retains their risk floors, rejects unobserved requested sources and clearly labels the report as targeted. Unselected floors remain part of the unchanged full-certification mode.

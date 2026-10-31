@@ -1,4 +1,6 @@
-# TypeScript foundation
+# TypeScript tooling and checked boundaries
+
+For current program status and implementation workflow, use the [execution control record](../TS-CONVERSION-EXECUTION.md), [decisions](typescript/DECISIONS.md) and [Phase 5 scope register](typescript/PHASE-5.md). This document owns toolchain/checking mechanics, not pass completion status.
 
 ## Toolchain and commands
 
@@ -25,9 +27,9 @@ Running coverage without selection flags retains the complete final-certificatio
 
 `build/typecheck.mjs` checks every environment project and inventories all first-party `.ts`/`.mts`. New typed files must be admitted explicitly; stale/overlapping entries fail. Phase 2 admitted all 25 existing authored editor/worker TS files; the unchecked inventory is now empty. Generated upstream declarations are separately inventoried and reproduced before compilation.
 
-| Project | Implementation admitted through Phase 3 | Environment |
+| Project | Implementation boundary through Phase 4 | Environment |
 | --- | --- | --- |
-| browser | canonical/save-lane, domain/time, lifecycle/policy, portable file/codec modules, editor and browser adapters | ES2022 + DOM |
+| browser | prior domain/editor modules plus Phase 4 persistence, records/backup codecs, repositories, ownership, session/timer, attachment, export, backup/provider/recovery orchestration and contracts | ES2022 + DOM |
 | portable | shared contracts, domain/time, WG1, Markdown, tags and reconciliation | ES2022 only |
 | worker | search/image/attachment/export workers, validated processing requests and portable file/codec modules | ES2022 + WebWorker |
 | service-worker | boundary assertions; implementation deferred | ES2022 + WebWorker, service-worker scope |
@@ -45,12 +47,12 @@ Tests use the same helper and authored `.ts` filenames. Offset-preserving erasur
 
 `.mts` tests run through the existing hermetic loader and are included by discovery/governance. The canonical and save-lane mutations alter authored source, then execute fresh erasure. Their coverage floors require observation. No installed compiler is imported inside a hermetic test.
 
-For host extraction in Phase 5, move each inline script mechanically into a manifest entry at its existing position, update the tests to read the authored script through the shared helper, and only then split responsibilities. Keep early boot timing, rendering, CSP and lazy module boundaries explicit. Runtime imports need a deliberate bundling/loading design; the classic pilot path intentionally rejects them.
+For host extraction in Phase 5, follow P5.0 in the [scope register](typescript/PHASE-5.md): move each inline script mechanically into a manifest entry at its existing position, update the tests to read the authored script through the shared helper, account for all consumers/host owners, and only then split responsibilities. Keep early boot timing, rendering, CSP and lazy module boundaries explicit. Runtime imports need a deliberate bundling/loading design; the classic pilot path intentionally rejects them.
 
 Vendored Wordgard source remains immutable. Generated runtime bundles are rebuilt only through the builder; the owner authorized the Phase 2 style-mod update. Build validation belongs in disposable checkouts; QA output stays outside the repository.
 
 
-## Phase 2 contracts and upstream boundary
+## Vendor declarations and shared contracts
 
 `npm run types:wordgard` emits 87 declarations from the immutable upstream source. Its isolated config uses `noCheck` for vendor declaration emission only, with upstream package resolution preserved. `npm run typecheck` reproduces those declarations in a temporary directory and checks the complete output inventory, compiler/config/generator hashes and all 90 vendor file hashes. Consumers check the resulting declarations with `skipLibCheck: false`. Negative fixtures also catch unresolved imports degrading key APIs to `any`. No vendor implementation is admitted into the application strict projects.
 
@@ -58,13 +60,20 @@ The upstream signatures retain upstream types; our code has no explicit or unsaf
 
 `portable/worker-contracts.ts` defines attachment/search/image requests, replies, progress and errors; incoming structured-clone values remain unknown and are checked before use. Editor asset, attachment, note, overlay and mounted-editor ports are exported, along with the inferred public API. WG1 records represent the current version only; envelope checks do not pretend to replace Wordgard schema validation. DOM-free image resizing uses a narrow canvas port, supplied separately by browser and worker adapters.
 
-Phase 3 removed all three portable `.d.ts` bridges after converting their implementations. `types/portable-processing.ts` maps each operation to its inputs and result; JSON results remain `unknown` until validated. `portable/request-decoder.ts` validates transport shapes before the typed dispatcher, and integrity requests validate checkpoint words/tails before restoration. Opaque CryptoKey and file-handle assertions follow capability checks; WebCrypto and file operations still enforce actual capabilities. Format, size, authentication and read-back checks remain in the operation implementations. Existing JS hosts, storage records and registry remain unchecked until their implementation phases; Phase 2 does not claim whole-app type safety. Build-time `.mjs` contracts will be converted in Phase 6; the limits declaration exposes only the current readonly consumer API.
+Phase 3 removed all three portable `.d.ts` bridges after converting their implementations. `types/portable-processing.ts` maps each operation to its inputs and result; JSON results remain `unknown` until validated. `portable/request-decoder.ts` validates transport shapes before the typed dispatcher, and integrity requests validate checkpoint words/tails before restoration. Opaque CryptoKey and file-handle assertions follow capability checks; WebCrypto and file operations still enforce actual capabilities. Format, size, authentication and read-back checks remain in the operation implementations. Existing JavaScript hosts and registry remain Phase 5 work. Stored input remains unknown until runtime validation; the checked codecs do not establish whole-app type safety. Build-time `.mjs` contracts will be converted in Phase 6; the limits declaration exposes only the current readonly consumer API.
 
 
-## Phase 3 leaves and codecs
+## Portable/domain implementations and test loading
 
-Eleven JavaScript modules now have checked implementations: the eight portable hashing/file-output/encryption/integrity/processing/ZIP modules, plus domain, operation-lifecycle and repository-policy. The registry contract now links module construction inputs to exports. Lifecycle jobs preserve result types and distinguish completion from outstanding work; cancellation uses a narrow signal port so DOM globals do not leak into the ES-only graph. Binary WebCrypto/writer ports require ArrayBuffer-backed bytes. Bounded SHA/CRC indices retain explicit invariant-based assertions.
+The portable hashing/file-output/encryption/integrity/processing/ZIP implementations and domain, operation-lifecycle and repository-policy modules are checked. The registry contract now links module construction inputs to exports. Lifecycle jobs preserve result types and distinguish completion from outstanding work; cancellation uses a narrow signal port so DOM globals do not leak into the ES-only graph. Binary WebCrypto/writer ports require ArrayBuffer-backed bytes. Bounded SHA/CRC indices retain explicit invariant-based assertions.
 
 Classic build/VM loading still uses `compileScript`/`readScript`, which reject runtime module syntax. Coverage uses the shared offset-preserving `eraseTypes` primitive for both classic scripts and portable ESM; Node executes the portable `.ts` imports directly. Dynamic core-test loaders resolve source filenames from the production manifest. Type-only contracts live under `types/`, outside runtime coverage inventory. No coverage thresholds were reduced.
 
-The remaining record/backup codecs depend on storage/session contracts and move with those dependencies in Phase 4. This avoids an additional unchecked declaration facade. The JS host and registry remain transitional boundaries; whole-application type safety is still a later-phase goal.
+Record/backup codecs are now checked together with their persistence/session dependencies. The JS host and registry implementation remain transitional boundaries owned by Phase 5; whole-application type safety is not yet established.
+
+
+## Phase 4 boundary and remaining runtime work
+
+Persistence, canonical record/backup codecs, repositories, ownership/mutation, sessions/timers, attachments, export, provider orchestration and recovery implementations are now admitted to strict checking. The final `backup.ts` and `backup-provider.ts` expose actual checked construction/output contracts; reduced retention proofs are distinct from restore manifests and pending review subjects determine their payloads. Phase 4's exact validation evidence is in the [history archive](typescript/HISTORY-PREPARATION-PHASE-4.md).
+
+Host scripts, UI/feature modules, authored external integrations, registry implementation and service worker remain Phase 5 work. Generated runtime JS is expected; it must map to checked authored entry points. Phase 6 owns remaining first-party build/contracts/tests and transitional-bridge retirement. Do not infer whole-app strictness from the zero unchecked-*existing-TS* count while authored JavaScript still remains.

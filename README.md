@@ -1,124 +1,68 @@
 # Study Director
 
-Study Director is a local-first PWA for planning, focused study sessions, review, long-form notes, insights, attachments, and durable backup/recovery.
+Study Director is a local-first progressive web app for planning study, running focused sessions, reviewing the day, keeping long-form notes and attachments, and understanding study patterns. Its core working data lives in the browser. Device Folder backups and Google Drive backup/sync are optional.
 
-## Source layout
+Start with the [product guide](docs/PRODUCT.md) for the app's purpose and workflows, or the [documentation map](docs/README.md) for engineering references. Browser storage can be cleared or lost; recovery copies in that same browser are not independent backups.
 
-- `source/` — application source, styles, service worker, workers and external runtimes.
-- `portable/` — portable data and compatibility primitives shared by backup/import paths.
-- `rich-text/` — authored rich-text source and bundle inputs.
-- `contracts/` — durable architecture/data contracts used by source and tests.
-- `tests/` — governed unit, integration, architecture and browser tests.
-- `build/` — deterministic build, Firebase staging, minification and verification tooling.
-- `vendor/` — reviewed vendored dependencies that are intentionally shipped from source.
-- `docs/ARCHITECTURE.md` — current runtime/data architecture and invariants.
-- `docs/VERIFICATION.md` — current verification results and release procedure.
-- `docs/NOTIFICATIONS.md` — app-wide producer inventory and delivery contract.
+## Working on this branch
 
-Historical per-pass plans, closure notes and measurement logs are intentionally not retained in the canonical source package. The source should describe the application as it exists now rather than preserve an implementation diary.
+All TypeScript conversion work stays on **`TS-Conversion`**. Read [AGENTS.md](AGENTS.md), the [execution control record](TS-CONVERSION-EXECUTION.md) and the assigned [Phase 5 objectives](docs/typescript/PHASE-5.md) before implementation. The control record owns current status, evidence and the durable scratchpad; history is preserved separately. Current canonical formats are supported; historical data/topology migration code is retired on this branch.
 
-## Current architecture
+## Build and run locally
 
-Study Director keeps its authoritative working data locally. Structured records live in IndexedDB and attachment bytes live in OPFS. Application modules are private registry modules composed by the host through explicit capability ports.
-
-The backup system uses immutable managed repositories for Google Drive and Device Folder providers. Checkpoints reference verified logical objects; restore is journaled and protected by a Before-restore checkpoint. Foreground publication/restore has priority over bounded background maintenance. Provider state is scoped to the actual repository generation so deleting and recreating a Drive repository does not inherit stale history or maintenance assumptions.
-
-Background settlement, current-state snapshots and attempt outcomes share one lifecycle contract. Housekeeping yields at resumable units after its short allowance; slow successful preparation must still allow progress. Integrity saves bounded byte/frame checkpoints before yielding. Drive uploads and range downloads use byte-inactivity watchdogs, so slow productive transfers continue while foreground cancellation remains active. Diagnostic traces retain concurrent jobs independently, distinguish deferred/unavailable/partial work from completion, and include current cleanup, worker, repository and updater states when copied.
-
-On TS-Conversion, all supported installations are assumed to have completed the previous upgrade to the current canonical model. Historical record, backup and topology converters are retired. Current validation, backup/restore and interrupted-operation recovery remain required.
-
-Notifications share one presentation coordinator for visual notices, app sounds and device alerts. A separate playback engine makes the original Quiet Wood acoustic-style cues in code and plays them; no sound files ship. Full / Minimal / Off is a portable preference, initially Full. Execute provides an inline Pomodoro rhythm panel and a separate Focus & Alerts panel, available before a session begins.
-
-The cues are made at 22.05 kHz mono when sound is first unlocked. Device Folder and Drive share compact verification/progress labels and completion ticks. Execute note titles and Area context use the same baseline in Director and Glass.
-
-See `docs/ARCHITECTURE.md` for the full current-state summary.
-
-## Get started
-
-Prerequisites: Node.js 26.12.1 (pinned in `.node-version`), npm 12.2.1, and Python 3 for the local launcher. TypeScript 7.0.2 and the typed linter are exact development dependencies. See `docs/TYPESCRIPT.md` for the incremental checking boundary and commands.
+Use the pinned Node.js **26.12.1**, npm **12.2.1** and lockfile. Python 3 is used by the local hosting launcher. [TypeScript tooling](docs/TYPESCRIPT.md) describes the compiler/linter and environment boundaries.
 
 ```bash
-git clone https://github.com/oneshubhamt/study-director.git
+git clone --branch TS-Conversion https://github.com/oneshubhamt/study-director.git
 cd study-director
-node build/build.mjs
-node build/verify-build.mjs
-```
-
-This builds from the reviewed, checked-in runtimes without installing packages. It creates separate development and deployment output under `dist/`.
-
-To launch a staged local copy with the app's hosting headers:
-
-```bash
-node build/stage-firebase.mjs
-python3 dist/firebase-project/serve-local.py
-```
-
-Open <http://127.0.0.1:8765/> and keep the launcher running. Localhost has its own browser data, separate from the hosted app. Python may be called `python` on Windows.
-
-## Rebuild dependencies and bundles
-
-To regenerate the rich-text bundle and build with the reviewed lockfile:
-
-```bash
 npm ci --ignore-scripts
 npm run check:types
 npm run build
 npm run verify
 ```
 
-The project does not commit `node_modules` or generated `dist` output.
-
-## Deployment preparation
+To serve a staged local app with the intended hosting headers:
 
 ```bash
 npm run stage:firebase
-# Or prepare minified output:
-npm run stage:firebase:minified
+python3 dist/firebase-project/serve-local.py
 ```
 
-The Firebase project is generated under `dist/`; do not hand-edit it. These commands prepare files and do not deploy them. Hosting credentials and Google OAuth origin configuration are separate from source checkout; no GitHub workflow deploys the app automatically.
+Open <http://127.0.0.1:8765/> and leave the launcher running. Localhost has separate browser data from the hosted app. Staging prepares files; it does not deploy. Google OAuth credentials/origin configuration and browser capabilities are separate from a source checkout.
 
-## Verification
+For a source-only build using reviewed checked-in runtime bundles, `node build/build.mjs` and `node build/verify-build.mjs` do not require npm installation. That path does **not** regenerate authored bundles or prove strict type correctness.
 
-Use the smallest QA set that fully covers the changed surfaces. For substantial architecture or release changes, run the broader governed suite and release checks. Browser tests and external/network dependency checks should only be claimed when their required environment is actually available.
+## Source map
 
-Useful commands include:
+| Location | Responsibility |
+| --- | --- |
+| `source/app.html`, `source/core/` | Host composition, feature controllers and private modules |
+| `source/external/` | Authored integrations/presentations plus generated editor/worker bundles; see [architecture](docs/ARCHITECTURE.md) before editing |
+| `source/platform/`, `source/styles/`, `source/legal/` | PWA runtime, visual system and served legal/security documentation |
+| `portable/`, `rich-text/` | Authored codec/file/worker and editor sources |
+| `contracts/`, `types/` | Executable identities/limits/data architecture and TypeScript contracts |
+| `build/`, `tests/` | Build/staging/verification tooling and governed QA |
+| `vendor/wordgard/` | Immutable upstream editor source for this program |
+| `docs/` | Current product/engineering guides, active conversion plan and clearly separated history |
+
+## Verification and contribution
+
+Use targeted checks for affected surfaces, for example:
 
 ```bash
-npm run test:unit
-npm run test:integration
-npm run test:architecture
 npm run test:targeted -- tests/integration/storage/background-gc-reliability.mjs
-npm run test:release:syntax
-npm run test:release:generated-syntax
-npm run verify
-npm run test:release:deployment
 ```
 
-See `docs/VERIFICATION.md` for the current QA policy and release gates.
+[CONTRIBUTING.md](CONTRIBUTING.md) defines the implementation workflow. [Verification](docs/VERIFICATION.md) owns check selection and release gates; [the test guide](tests/README.md) owns test design and browser reliability. Full conversion certification remains Phase 7 unless the owner changes scope. Documentation and historical test results are not a current QA certificate.
 
-## Release
+Push/PR **Repository checks** install the pinned toolchain, run strict checks, selected safety/governance tests and a source build. **Promotion QA** is manually invoked; its browser coverage is optional. Neither workflow deploys. Do not infer CI success without inspecting its run.
 
-Release identity is defined only in `release.config.mjs`. Build and staging tools verify that source and generated deployment identity remain consistent.
+## Packaging and release
 
-Current release: **SDVB75F10**.
+`release.config.mjs` is the sole release-identity source. `npm run stage:firebase:minified` prepares the minified Firebase project under `dist/`; generation is not deployment authorization. Never hand-edit generated output.
 
-## Packaging policy
-
-A source release should contain canonical source, contracts, tests, build tooling, current documentation and reviewed vendored code only. It should not contain:
-
-- `node_modules/`;
-- generated `dist/` output;
-- historical per-pass plans/closure reports;
-- temporary QA output or local measurement artifacts;
-- obsolete deployment packages.
-
-A deployment package should be generated from the canonical source by the build system and should contain only the Firebase project/support files plus the exact public deployment payload.
-
-## Repository workflow
-
-Use branches and pull requests for coherent changes to `main`. See [CONTRIBUTING.md](CONTRIBUTING.md). Pushes and pull requests run selected safety/governance checks and build verification. Full promotion QA is manual, with browser checks off unless explicitly selected.
+Keep installed dependencies, generated `dist`, personal data/backups, credentials and raw QA artifacts out of commits. Retain current documentation and consolidated historical records needed for traceability; avoid duplicate per-pass reports. A deployment package contains only the generated deployment payload/support files, not the source history.
 
 ## Licence
 
-Study Director is source-available, **not open source**. The existing [licence](LICENSE), copyright and third-party notices are retained.
+Study Director is source-available, **not open source**. [LICENSE](LICENSE), copyright and third-party notices apply. [Privacy](source/legal/privacy.html), [security](source/legal/security.html) and [terms](source/legal/terms.html) ship with the app; keep factual descriptions aligned with implemented behavior without treating a documentation edit as legal or security certification.
