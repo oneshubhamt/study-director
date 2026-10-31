@@ -84,7 +84,7 @@ const repository=(()=>{
   let saveFailed=false;
   let saveMessage='';
   // Unsaved notes the last browser copy could not hold.
-  let rescueShortfall=[];
+  let rescueShortfall=[],lastRescueShortfallNotice='';
   let snapshotRevision=0,metadataSnapshotCache=null,searchSnapshotCache=null;
 
   // A collection over the note limit is refused whole; cutting it would drop
@@ -176,7 +176,7 @@ const repository=(()=>{
     const documents=Object.freeze(Object.values(notes).filter(entry=>hasContent(entry)&&!isTrashKey(entry.key)).map(entry=>Object.freeze({key:titleOf(entry),revision:String(entry.updatedAt||''),value:String(entry.text||'')})));
     searchSnapshotCache=Object.freeze({revision:snapshotRevision,documents});return searchSnapshotCache;
   }
-  function clearFailure(){saveFailed=false;saveMessage='';rescueShortfall=[];}
+  function clearFailure(){saveFailed=false;saveMessage='';rescueShortfall=[];lastRescueShortfallNotice='';}
   function recordFailure(reason){
     saveFailed=true;
     const labels=rescueShortfall.map(key=>displayAreaName(notes[key]&&notes[key].label||key)),named=labels.length>3?`${labels.slice(0,3).join(', ')} and ${labels.length-3} more`:labels.join(', ');
@@ -233,6 +233,17 @@ const repository=(()=>{
     }
     const written=Object.keys(entries).length?persistIndependentRescue(entries,room):true;
     rescueShortfall=candidates.filter(entry=>!entry.deleted&&(!written||!entries[entry.key])).map(entry=>entry.key);
+    // A page-exit rescue can fail before its async IndexedDB save is known to
+    // have failed. Name the exposed notes immediately, without claiming that
+    // the canonical save has failed or enlarging the shared localStorage cap.
+    const risk=rescueShortfall.join('|');
+    if(risk!==lastRescueShortfallNotice){
+      lastRescueShortfallNotice=risk;
+      if(risk){
+        const labels=rescueShortfall.map(key=>displayAreaName(notes[key]?.label||key));
+        showSubjectNoteSaveWarning(`The browser's ${Math.round(APP_LIMITS.noteRescueBytes/104857.6)/10} MiB emergency copy could not hold unsaved ${labels.length===1?'Note':'Notes'}: ${labels.slice(0,3).join(', ')}${labels.length>3?` and ${labels.length-3} more`:''}. Keep this tab open until Notes finish saving; otherwise these edits may be lost.`);
+      }
+    }
     if(!written||!complete)AppDiagnostics.capture('notes.rescue-write',LocalStorageContract.lastError||new Error(`Unsaved notes exceed the ${Math.round(APP_LIMITS.noteRescueBytes/1024)} KB browser copy.`),'error');
     return written&&complete;
   }
