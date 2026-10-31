@@ -385,6 +385,14 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Step 5 (targeted QA):** Documentation structure/read-back and docs-only diff; *not* application/runtime tests. Record outcome after commit verification; no full QA for this phase.
 - **Next:** **P0 NOT STARTED** — establish exact then-current HEAD, re-trace candidate source chains, run a focused proof/evidence baseline and reclassify findings before choosing P1 implementation.
 
+### Entry 001 — Phase 0 documentation QA closure (2026-10-31)
+
+- **Verified initial Phase 0 commit:** `de37f1073032e9611d6bb15ab4d4a52bdc73ae98`; authenticated read-back confirmed `current-fixes` HEAD at that exact SHA before this QA-note-only follow-up.
+- **Diff and scope:** `05cf0d8c925f91a6f90b26b61d326cf2941b75e9..de37f107` = exactly **10 Markdown files** (3 new documents, 7 existing docs/navigation files); no runtime JS/HTML, tests, CI workflows, generated files, schemas, release identity or deployment settings changed.
+- **Completeness gate:** all **BS01–BS21** have one source-evidence heading and one tracker row, with separate provisional classification/priority/owner and closure criteria; seven planned **P0–P6** pass cards; one append-only journal; A–F **F1–F20** distinctions in consolidated closure; no item silently marked fixed.
+- **Read-back:** `docs/PROGRAMMES.md`, `docs/DATA-TOPOLOGY-BACKUP-CLOSURE.md`, and `docs/BACKGROUND-SERVICES-REMEDIATION.md` were fetched from the committed revision and verified; branch was an ordinary one-commit fast-forward.
+- **Objective verdict:** Phase 0's document organization, historical preservation, five-step workflow and coverage **MET**. Evidence limits and open P0 scope remain explicit. **No product QA was run:** not required for docs-only work; no runtime acceptance or physical-browser checks claimed.
+- **Next authorized activity:** P0 **NOT STARTED**. At the next instruction, re-read current HEAD and source afresh before recording measurement/failure evidence; no P1–P6 edits were pre-authorized.
 ### Journal template — duplicate this for the next pass
 
 - **Entry NNN — Pass P#, topic / date:**
