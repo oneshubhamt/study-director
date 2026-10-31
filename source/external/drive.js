@@ -841,8 +841,11 @@
     ]);
     const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'3',fields:`nextPageToken,files(${REPOSITORY_FIELDS})`});
     const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);if(!response.ok)throw await apiError(response,'Could not locate a required Study Director backup file in Google Drive.');
-    const payload=await jsonResponse(response),files=(Array.isArray(payload&&payload.files)?payload.files:[]).filter(file=>validRepositoryMetadata(file,parent,kind)&&file.appProperties[REPOSITORY_ID_MARKER]===id);
+    const payload=await jsonResponse(response),files=Array.isArray(payload&&payload.files)?payload.files:[];
     if(payload&&payload.nextPageToken||files.length>1)throw noRetry(new Error('Duplicate Study Director backup files were found. Nothing was changed.'));
+    // A marked identity with unsafe metadata is *not* proof that the identity
+    // is absent. Do not create a duplicate beside a malformed remote file.
+    if(files.length&&(!validRepositoryMetadata(files[0],parent,kind)||files[0].appProperties[REPOSITORY_ID_MARKER]!==id))throw noRetry(new Error('Google Drive found a backup identity with unsafe metadata. Nothing was uploaded.'));
     return files[0]||null;
   }
   function repositoryUploadMetadata(file,parent){
@@ -892,7 +895,7 @@
     // multipart POST or resumable session creation; only metadata is read.
     const existing=await findRepositoryFile(parent,file.kind,file.id,context);
     if(existing){
-      const descriptor=repositoryDescriptor(existing,parent);if(descriptor.size!==file.blob.size||descriptor.digest!==file.digest)throw noRetry(new Error('A Study Director backup file with this identity already exists but has different content.'));
+      const descriptor=repositoryDescriptor(existing,parent);if(descriptor.size!==file.blob.size||descriptor.digest!==file.digest||descriptor.serverDigest&&descriptor.serverDigest!==file.digest)throw noRetry(new Error('A Study Director backup file with this identity already exists but has different content.'));
       await assertDriveOperationCurrent(context);repositoryUploads.delete(uploadKey);return descriptor;
     }
     let payload,session=saved||null;
