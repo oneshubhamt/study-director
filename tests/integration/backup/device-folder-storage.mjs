@@ -78,6 +78,27 @@ assert.equal(listed.length,1);assert.equal(listed[0].history.counts.dailyRecord,
 assert.match(listed[0].verificationScope,/^device-folder:1:[a-f0-9]{32}$/u);assert.equal((await storage.list({kind:'commit'})).items[0].verificationScope,listed[0].verificationScope,'one stable identity per folder');
 assert.equal(await storage.scope(),listed[0].verificationScope);
 
+// External modification can preserve both file size and reported modification
+// time. Ordinary listing remains cached; critical cleanup listing must hash
+// current bytes, invalidate stale digests and refresh the manifest summary.
+{
+  const fileId=id(8),originalText=JSON.stringify({id:fileId,locked:false}),modifiedText=originalText.replace('false','true ');
+  assert.equal(originalText.length,modifiedText.length);
+  await upload('checkpoint',fileId,originalText);
+  const before=(await storage.list({kind:'checkpoint'})).items.find(item=>item.id===fileId);
+  assert.ok(before?.history);
+  const handle=await (await root.getDirectoryHandle('checkpoints')).getFileHandle(fileId+'.sdcheckpoint');
+  const writer=await handle.createWritable({keepExistingData:false});await writer.write(modifiedText);await writer.close();
+  const cached=(await storage.list({kind:'checkpoint'})).items.find(item=>item.id===fileId);
+  assert.equal(cached.remoteVersion,before.remoteVersion,'the test must retain an identical filesystem version');
+  assert.equal(cached.digest,before.digest,'normal UI listing may use the metadata digest cache');
+  const fresh=(await storage.list({kind:'checkpoint',freshDigests:true})).items.find(item=>item.id===fileId);
+  assert.equal(fresh.digest,await sha256(new Blob([modifiedText])),'safety scans hash current bytes');
+  assert.notEqual(fresh.digest,before.digest,'same-size same-time modifications invalidate the old proof');
+  assert.equal(fresh.locked,true,'digest-aware summary cache must not return a stale unlocked summary');
+  await assert.rejects(()=>storage.delete(before),/changed checksum before deletion/u,'stale cleanup identity must not delete a modified checkpoint');
+}
+
 // A write that stalls (a disconnected drive, a stuck sync client) fails within
 // the timeout instead of hanging the backup.
 {
