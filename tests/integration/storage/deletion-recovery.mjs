@@ -373,4 +373,22 @@ for(const executor of ['migration','deletion-recovery'])for(const arrival of ['u
   assert.equal((await h.app.activeSession.save({...session,revision:5})).ok,true);
   assert.equal(count('normal'),2,'later ordinary timer write avoids strict durability');
 }
+
+
+{
+  const warnings=[],h=createHarness(new Map(),null,{onStorageError:(source,message)=>warnings.push({source,message})});
+  await h.app.notes.load();
+  const first='a'.repeat(600*1024),second='b'.repeat(600*1024);
+  assert.equal(h.app.notes.update('large one','Large one',first,'').status,'changed');
+  assert.equal(h.app.notes.update('large two','Large two',second,'').status,'changed');
+  assert.equal(h.app.notes.protectUnsaved(),false,'two valid large Notes cannot silently overflow the bounded browser rescue');
+  const rescueWarning=warnings.find(row=>row.source==='notes'&&/emergency copy could not hold unsaved/u.test(row.message));
+  assert.ok(rescueWarning,'even before IndexedDB reports a failure, the uncovered note must produce visible warning');
+  assert.doesNotMatch(rescueWarning.message,/Notes could not be saved in this browser session/u,'rescue-capacity risk must not claim canonical persistence has failed');
+  assert.equal(h.app.notes.failure().failed,false,'capacity risk alone does not prove the canonical save failed');
+  assert.match(rescueWarning.message,/Large one|Large two/u);
+  await h.app.notes.flush({strict:true});
+  assert.equal(h.app.notes.failure().failed,false,'successful canonical flush clears the emergency exposure');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'rescue-reconciliation',committedSavesAcknowledged:true,cleanupDiagnosed:true,staleReplayProtected:true,concurrentCopiesPreserved:true,cases:7}));
