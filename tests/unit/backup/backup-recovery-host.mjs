@@ -98,8 +98,21 @@ assert.equal(presentation.at(-1).active,false);assert.equal(presentation.at(-1).
 assert.equal(restoredCheckpoint,CHECKPOINT('a'));assert.equal(restoredConfirmed,true,'provider-owned Replace choice must be the only confirmation before exact restore');
 assert.equal(lastUseBackupOptions.cancelLabel,'Keep current');assert.deepEqual(lastUseBackupOptions.choices.map(choice=>choice.value),['missing','combine','replace']);
 
+// When backup metadata names missing attachment bytes, Replace is not an
+// available user choice; Combine and missing-only remain recoverable.
+{
+ const originalHistory=deviceHistory,partial=freeze({...deviceEntry,location:freeze({...deviceEntry.location,warning:'Partial attachment recovery: 1 attachment missing.'})});
+ deviceHistory=freeze({...originalHistory,entries:freeze([partial])});chooseMode='combine';
+ try{
+  await host.history.open();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(await host.history.recover({target:{closest:()=>deviceButton}}),true);
+  assert.deepEqual(lastUseBackupOptions.choices.map(choice=>choice.value),['missing','combine'],'a partial version cannot offer exact replacement');
+  assert.ok(lastUseBackupOptions.details.some(line=>/Partial attachment recovery:/u.test(line)),'missing binary coverage must be disclosed before recovery');
+ }finally{deviceHistory=originalHistory;}
+}
+
 chooseMode='combine';driveConnected=true;await host.history.open();await new Promise(resolve=>setImmediate(resolve));
-assert.equal(deviceHistoryReads,2);assert.equal(providerHistoryReads,1,'with Drive connected too, one list reads both');
+assert.equal(deviceHistoryReads,3);assert.equal(providerHistoryReads,1,'with Drive connected too, one list reads both');
 assert.deepEqual(host.history.status().entries.map(entry=>[entry.location.sourceId,entry.location.checkpointId]),[['device-folder',CHECKPOINT('a')],['google-drive',CHECKPOINT('b')]],'each version once, read from where it is held');
 const driveButton={dataset:{versionHistorySource:'google-drive',versionHistoryCheckpoint:CHECKPOINT('b')}};
 assert.equal(await host.history.recover({target:{closest:()=>driveButton}}),true);assert.equal(providerBringInCheckpoint,CHECKPOINT('b'));
