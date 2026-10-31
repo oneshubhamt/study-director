@@ -44,6 +44,23 @@ await test('storage reset waits for real Device Folder readiness, handles denied
   assert.equal(await stalled.hold.deviceReady,false,'late permission result does not reverse a timed-out recovery decision');
 });
 
+await test('critical Device Folder scans distrust same-size and same-time cached digests',async()=>{
+  const w=world(),folder=w.directory(),checkpointId=await w.plant(folder),storage=w.storageFor(()=>folder);
+  const before=(await storage.list({kind:'checkpoint'})).items.find(item=>item.id===checkpointId);
+  assert.ok(before?.history,'initial canonical version must be verified for listing');
+  const root=await folder.getDirectoryHandle(IDENTITIES.root),directory=await root.getDirectoryHandle(IDENTITIES.checkpoints),handle=await directory.getFileHandle(checkpointId+'.sdcheckpoint');
+  const oldText=await (await handle.getFile()).text(),newText=oldText.replace('"version":5','"version":9');
+  assert.notEqual(newText,oldText);assert.equal(newText.length,oldText.length);
+  const writer=await handle.createWritable({keepExistingData:false});await writer.write(newText);await writer.close();
+  const ordinary=(await storage.list({kind:'checkpoint'})).items.find(item=>item.id===checkpointId);
+  assert.equal(ordinary.remoteVersion,before.remoteVersion,'same-timestamp mutation reproduces a metadata cache alias');
+  assert.equal(ordinary.digest,before.digest,'ordinary listing is intentionally cached');
+  const critical=(await storage.list({kind:'checkpoint',freshDigests:true})).items.find(item=>item.id===checkpointId);
+  assert.notEqual(critical.digest,before.digest,'critical scan must hash current on-disk bytes');
+  assert.equal(critical.unreadable,true,'a changed manifest cannot keep its former verified summary');
+  await assert.rejects(()=>storage.delete(before),/changed checksum before deletion/u,'stale digest must never authorize deletion');
+});
+
 await test('a browser without folder access never registers a location and every backup path stays quiet',async()=>{
   const w=world({supported:false});await w.controller.install();
   assert.equal(w.controller.status().mode,'unsupported');assert.equal(w.runtime.list({hosted:true}).length,0);
