@@ -44,6 +44,14 @@ await test('storage reset waits for real Device Folder readiness, handles denied
   assert.equal(await stalled.hold.deviceReady,false,'late permission result does not reverse a timed-out recovery decision');
 });
 
+await test('destructive maintenance rechecks fresh checkpoint and commit digests under the lease',async()=>{
+  const code=fs.readFileSync('source/core/backup-provider.js','utf8');
+  const start=code.indexOf('async function cleanupRepositoryProviderSafely('),end=code.indexOf('async function saveRepositoryProvider(',start);
+  assert.ok(start>=0&&end>start,'destructive maintenance coordinator must remain present');
+  const maintenance=code.slice(start,end);
+  assert.match(maintenance,/repositoryProviderInventory\(protectedSelection,\{signal,freshDigests:true\}\)/u,'exclusive deletion gate must request real content digests rather than cached timestamps and sizes');
+});
+
 await test('critical Device Folder scans distrust same-size and same-time cached digests',async()=>{
   const w=world(),folder=w.directory(),checkpointId=await w.plant(folder),storage=w.storageFor(()=>folder);
   const before=(await storage.list({kind:'checkpoint'})).items.find(item=>item.id===checkpointId);
