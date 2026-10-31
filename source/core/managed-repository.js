@@ -705,16 +705,17 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       if(baseline)candidateIndex=await repositoryPreparationIndexCandidate(baseline.epochToken,baseline.stamps,candidateEntries);
     }
     const manifestObjects=freeze(objects.map(repositoryManifestObject)),manifestAssets=freeze(assets);
+    const attachmentWarning=BackupCodec.missingAttachmentWarning(manifestAssets);
     const identitySource=freeze({counts:freeze({...capture.counts}),protectedCheckpointManifest:capture.protectedCheckpointManifest,objects:manifestObjects,assets:manifestAssets});
     const logicalFingerprint=await repositoryLogicalFingerprint(identitySource);
     const manifestBase=freeze({
       format:REPOSITORY_MANIFEST_FORMAT,version:REPOSITORY_MANIFEST_VERSION,checkpoint:capture.checkpoint,exportedAt:capture.exportedAt,sourceRevision:capture.sourceRevision,
       installationId:capture.installationId,protectionId:context.protectionId,encrypted:context.encrypted,counts:freeze({...capture.counts}),protectedCheckpointManifest:capture.protectedCheckpointManifest,reconciliationBaseId,reconciliationAncestorIds,retention:repositoryRetentionDescriptor(capture.exportedAt,retention,await repositoryNotesFingerprint(candidateEntries)),logicalFingerprint,
-      objects:manifestObjects,assets:manifestAssets,warning:capture.warning
+      objects:manifestObjects,assets:manifestAssets,warning:[capture.warning,attachmentWarning].filter(Boolean).join(' ')
     });
     const prepared=freeze({
       format:'study-director.prepared-repository-checkpoint',version:1,checkpoint:capture.checkpoint,exportedAt:capture.exportedAt,sourceRevision:capture.sourceRevision,
-      protectionId:context.protectionId,encrypted:context.encrypted,counts:freeze({...capture.counts}),objects:freeze(objects),warning:capture.warning
+      protectionId:context.protectionId,encrypted:context.encrypted,counts:freeze({...capture.counts}),objects:freeze(objects),warning:[capture.warning,attachmentWarning].filter(Boolean).join(' ')
     });
     // What changed since the base carries forward until the base moves.
     const sinceBase=plan&&Array.isArray(plan.index.sinceBase)?freeze([...new Set([...plan.index.sinceBase,...plan.structuredChanged])].sort()):null;
