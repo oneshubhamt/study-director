@@ -383,12 +383,13 @@ registry.define('backup-recovery-host',1,()=>{
       // The version is read from the location the list chose for it.
       activeSourceId=source.id;activeSourceLabel=source.label;
       const note=noteTarget,from=fromDevice(entry,lastEntries),reach=typeof presentation.reach==='function'?presentation.reach():'';
+      const partialAttachments=/Partial attachment recovery:/u.test(String(location.warning||''));
       const choice=note?'combine':await input.interactions.choose({
         title:'Use this version',
         message:`Saved ${dateLabel(location.exportedAt)}${from?`, ${from}`:''}.`,
-        details:['A safety version is kept first, so you can go back.','Settings that belong to this device stay as they are.',...(reach?[reach]:[])],
+        details:['A safety version is kept first, so you can go back.','Settings that belong to this device stay as they are.',...(partialAttachments?[String(location.warning)]:[]),...(reach?[reach]:[])],
         cancelLabel:'Keep current',
-        choices:[presentation.restoreChoices.missing,presentation.restoreChoices.combine,presentation.restoreChoices.replace]
+        choices:[presentation.restoreChoices.missing,presentation.restoreChoices.combine,...(partialAttachments?[]:[presentation.restoreChoices.replace])]
       });
       if(!choice)return false;const controller=new AbortController();setOperationBusy(true,controller,choice==='replace'?'restore-version':'bring-in');setHistoryStatus('');setHistoryProgress({message:choice==='replace'?'Preparing restore…':'Preparing comparison…'});
       try{
