@@ -42,7 +42,7 @@ function createScenario(dayCount){
   const replaceStamps=async units=>{stamps=new Map([...new Set(units)].sort().map(unit=>[unit,token(++stampSerial)]));return stampRows();};
   const mutate=(unit,operation)=>{operation();epochToken=token(++epochSerial);stamps.set(unit,token(++stampSerial));sourceRevision=new Date(Date.parse(sourceRevision)+60000).toISOString();};
   const runtime=BackupModule.createRuntime(freeze({ports:freeze({
-    configuration:freeze({appVersion:'Incremental QA',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits:freeze({backupChunkItems:50,backupMaxCompressedBytes:64*1024*1024,backupMaxFileBytes:1024*1024*1024,backupMaxAssetDescriptors:50000,maxImportRecords:10000,maxNoteLinks:50,maxNotes:1000,maxPendingReviews:2000})}),
+    configuration:freeze({appVersion:'Incremental QA',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,starterSchedule:'',limits:freeze({backupChunkItems:50,backupMaxCompressedBytes:64*1024*1024,backupMaxFileBytes:1024*1024*1024,backupMaxAssetDescriptors:50000,maxImportRecords:10000,maxNoteLinks:50,maxNotes:1000,maxPendingReviews:2000})}),
     persistence:freeze({
       activeSessionLoad:async()=>({ok:true,value:null,error:null,storage:{idb:true}}),activeSessionSave:async value=>({ok:true,value}),activeSessionClear:async()=>({ok:true}),activeSessionSettled:async()=>true,
       dailyRecordBackupDates:async()=>{counters.dateScans++;return {dates:dailyRecords.map(item=>item.date),warning:dailyRecordCanonical?'':'Saved-day IndexedDB unavailable; rescue subset only.',canonical:dailyRecordCanonical};},

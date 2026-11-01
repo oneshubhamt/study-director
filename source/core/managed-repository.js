@@ -1146,18 +1146,26 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
     let objectsWritten=0,objectsReused=0,writtenBytes=0,attachmentBytesWritten=0;
     const freshObjects=[];
     for(const entry of prepared.objects){if(entry.reused)objectsReused+=1;else freshObjects.push(entry);}
-    const receipts=await mapRepositoryBounded(freshObjects,async entry=>{
-      check();await entry.checkProtection?.();check();
-      const receipt=await transport.writeObject(entry,prepared),row=freeze({entry,receipt});
-      written.push(row);
-      return row;
-    },repositoryPublicationConcurrency(freshObjects));
-    for(const row of receipts){
-      objectsWritten+=1;writtenBytes+=Number(row.entry.storedBytes)||0;if(row.entry.kind==='attachment')attachmentBytesWritten+=Number(row.entry.sourceBytes)||0;
-    }
+    // The manifest is built from the prepared checkpoint alone and stays
+    // invisible until its commit, so it uploads alongside the new objects; the
+    // commit waits for both. A failure waits for the other upload to settle.
     check();if(!manifestFile){manifestFile=await finalizeRepositoryCheckpointManifest(prepared,options);state.manifestFile=manifestFile;}
     await manifestFile.checkProtection?.();await manifestFile.checkSource?.();check();
-    publication=await transport.writeManifest(manifestFile,prepared);
+    const [objectUploads,manifestUpload]=await Promise.allSettled([
+      mapRepositoryBounded(freshObjects,async entry=>{
+        check();await entry.checkProtection?.();check();
+        const receipt=await transport.writeObject(entry,prepared),row=freeze({entry,receipt});
+        written.push(row);
+        return row;
+      },repositoryPublicationConcurrency(freshObjects)),
+      Promise.resolve().then(()=>transport.writeManifest(manifestFile,prepared))
+    ]);
+    if(objectUploads.status==='rejected')throw objectUploads.reason;
+    if(manifestUpload.status==='rejected')throw manifestUpload.reason;
+    for(const row of objectUploads.value){
+      objectsWritten+=1;writtenBytes+=Number(row.entry.storedBytes)||0;if(row.entry.kind==='attachment')attachmentBytesWritten+=Number(row.entry.sourceBytes)||0;
+    }
+    publication=manifestUpload.value;
     await manifestFile.checkSource?.();
     check();const commitMarker=state.commitMarker||(state.commitMarker=await createRepositoryCommitMarker(manifestFile.manifest,{checkProtection:manifestFile.checkProtection,checkSource:manifestFile.checkSource,signal:options.signal||null}));check();
     commitReceipt=await transport.commit(commitMarker,prepared,publication);

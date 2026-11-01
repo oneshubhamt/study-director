@@ -63,6 +63,9 @@ const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingRevi
   dailyRecordCodec,activeSessionCodec,compatibilityCodec
 }));
 const runtimeCodec=freeze({...codec,inspect:codec.inspectCurrent});
+const STARTER_SCHEDULE='06:00 | 60 | Starter Block | work | Core | block | 1';
+// A device's start-up state: no settings chosen and the starter plan.
+const startup=(draft=STARTER_SCHEDULE)=>freeze({version:2,plans:freeze({draft,savedPlans:freeze([]),defaultId:null}),preferences:freeze({studentName:null,theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null})});
 const personal=(name='Checkpoint User')=>freeze({version:2,plans:freeze({draft:null,savedPlans:freeze([]),defaultId:null}),preferences:freeze({studentName:name,theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null})});
 const record=(date,reflection,updatedAt='2026-08-20T12:00:00.000Z')=>freeze({version:16,recordKind:'study',date,reflection,studyQuality:4,savedAt:updatedAt,updatedAt});
 const session=(date,label,{runningOn='inst_device_local',status='suspended',revision=2}={})=>freeze({id:'current',type:'activeSession',version:RUNTIME_DATA_CONTRACT.schemas.ActiveSession.version,revision,date,status,runningOn,scheduleText:`08:00 | 60 | ${label} | work | Ethics | block | 1`,snapshot:freeze({label}),suspendedAt:'2026-08-20T13:00:00.000Z',updatedAt:'2026-08-20T13:00:00.000Z'});
@@ -134,7 +137,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
   const presentation=createBackupPresentation();
   presentation.subscribe(()=>{const message=presentation.current('file')?.message||'';if(message&&statuses.at(-1)!==message)statuses.push(message);});
   const runtime=BackupModule.createRuntime(freeze({ports:freeze({
-    configuration:freeze({appVersion:'QA_B3',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits:runtimeLimits}),
+    configuration:freeze({appVersion:'QA_B3',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,starterSchedule:STARTER_SCHEDULE,limits:runtimeLimits}),
     
     persistence:freeze({
       activeSessionLoad:async()=>{if(injectedFailure==='session-read')return {ok:false,value:null,error:new Error('QA_FIXTURE session read failure'),storage:{idb:true}};if(verificationFault==='active-session'&&verifying())return {ok:true,value:null,error:null,storage:{idb:true}};return {ok:true,value:state.activeSession,error:null,storage:{idb:true}};},activeSessionSave:async value=>{events.push('preflight-session-save');if(injectedFailure==='session-save')return {ok:false,value:null,error:new Error('QA_FIXTURE session save failure')};state.activeSession=value;return {ok:true,value};},activeSessionClear:async()=>(state.activeSession=null,{ok:true}),activeSessionSettled:async()=>{if(injectedFailure==='session-settle')throw new Error('QA_FIXTURE session settle failure');return true;},
@@ -597,6 +600,19 @@ let syncWorld=null;
   assert.equal((await B.sync()).cancelled,false);assert.equal(b.personal.preferences.studentName,'Name on B');
   const keptPersonal=b.reviews.open().find(review=>review.subject==='personal');assert.equal(keptPersonal.kept.preferences.studentName,'Name on A');
   b.keptChoice='use';await B.reviewKept();b.keptChoice='';assert.equal(b.personal.preferences.studentName,'Name on A','the review lets the person pick the kept settings');assert.deepEqual(b.reviews.open(),[]);
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  // A side holding nothing the other lacks takes the other's, and nothing is
+  // kept, whichever is newer (Entry 023): a device's start-up state never
+  // hides the plans and settings in use elsewhere.
+  a.personal=freeze({...personal('Name on A, planned'),plans:freeze({draft:'07:00 | 60 | A plan | work | Ethics | block | 1',savedPlans:freeze([]),defaultId:null})});await A.upload();b.personal=startup();
+  assert.equal((await B.sync()).cancelled,false);
+  assert.deepEqual(b.personal,a.personal,'the start-up side takes the plans and settings in use');
+  assert.equal(b.reviews.open().some(review=>review.subject==='personal'),false,'nothing is kept from the start-up side');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  a.personal=startup(null);await A.upload();b.personal=freeze({...personal('Name on B, planned'),plans:freeze({draft:'08:00 | 30 | B plan | work | Ethics | block | 1',savedPlans:freeze([]),defaultId:null})});const mine=b.personal;
+  assert.equal((await B.sync()).cancelled,false);
+  assert.deepEqual(b.personal,mine,'this device keeps its own when the other side holds nothing more');
+  assert.equal(b.reviews.open().some(review=>review.subject==='personal'),false,'nothing is kept from the other side either');
   await B.upload();assert.equal((await A.sync()).cancelled,false);
   // A session running here keeps its own state; everything else merges.
   a.activeSession=session('2026-08-30','A-SESSION',{runningOn:a.installationId});a.schedule=a.activeSession.scheduleText;a.running=false;a.notes=note('edited on A again');await A.upload();

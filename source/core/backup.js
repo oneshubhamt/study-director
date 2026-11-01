@@ -15,7 +15,7 @@ registry.define('backup',1,input=>{
   if(!input.backupCapture||input.backupCapture.format!=='study-director.backup-capture-module'||input.backupCapture.contractVersion!==1||typeof input.backupCapture.create!=='function')throw new TypeError('Backup capture dependency is invalid.');
   const Canonical=input.canonical,ManagedRepositoryModule=input.managedRepository,BackupProviderModule=input.backupProvider,RepositoryBackgroundModule=input.repositoryBackground,BackupCaptureModule=input.backupCapture;
   const PORT_FIELDS=freeze({
-    configuration:freeze(['appVersion','backupVersion','limits']),
+    configuration:freeze(['appVersion','backupVersion','limits','starterSchedule']),
     persistence:freeze(['activeSessionLoad','activeSessionSave','activeSessionClear','activeSessionSettled','dailyRecordBackupDates','dailyRecordBackupMonth','dailyRecordDocuments','dailyRecordImportBatches','dailyRecordRemove','dailyRecordTimestamp','notesExportPayload','notesReadFreshPayload','notesReadFreshItems','notesFlush','notesNormalizePayload','notesAlignByTitle','notesTrashKey','notesFailure','restoreJournalPrepare','restoreJournalRead','restoreJournalMark','restoreJournalClear','scheduleRead','personalSettle','personalExport','personalImport','personalVerify','sourceRevision','snapshotRevision','storageGeneration','canonicalMutationEpochRead','canonicalPreparationRebase','preparationUnitStamps','preparationUnitReplace','installationId','deletionRecoveryFlush','deletionRecoverySavedDays','deletionRecoveryReplaceSavedDays','deletionRecoveryNotes','deletionRecoveryReplaceNotes','deletionRecoveryAttachments','deletionRecoveryReplaceAttachments','deletionRecoveryClearAttachment','reconciliationBaseRead','reconciliationBaseReadNotes','reconciliationBaseReadDays','reconciliationBaseWrite','pendingReviewsList','pendingReviewsReadItems','pendingReviewsMerge','pendingReviewsReplace','pendingReviewsResolve']),
     codecs:freeze(['activeSession','backup','pendingReview']),
     reconciliation:freeze(['createPlan','resolvePlan','summarizePlan']),
@@ -68,6 +68,7 @@ registry.define('backup',1,input=>{
     const {
       appVersion:APP_VERSION,
       backupVersion,
+      starterSchedule:STARTER_SCHEDULE='',
       limits:APP_LIMITS
     }=ports.configuration;
     const {
@@ -705,6 +706,17 @@ async function personalSettled(base,local,incoming){
   const shared=String(base&&base.personalFingerprint||'');if(!shared||!local||!incoming)return null;
   const [mine,theirs]=await Promise.all([personalFingerprint(local),personalFingerprint(incoming)]);
   return mine===theirs?null:mine===shared?'replace':theirs===shared?'keep':null;
+}
+// True when one side's plans and settings hold nothing the other's lack:
+// each setting unset or equal, the draft empty, the starter plan or equal,
+// every saved plan present and identical, and the default plan unset or equal.
+function personalAddsNothing(side,other){
+  let a,b;try{a=BackupCodec.normalizePersonalData(side);b=BackupCodec.normalizePersonalData(other);}catch{return false;}if(!a||!b)return false;
+  if(Object.entries(a.preferences).some(([key,value])=>value!==null&&!Canonical.same(value,b.preferences[key])))return false;
+  const draft=String(a.plans.draft||'').trim();if(draft&&draft!==String(STARTER_SCHEDULE).trim()&&a.plans.draft!==b.plans.draft)return false;
+  if(a.plans.defaultId!==null&&a.plans.defaultId!==b.plans.defaultId)return false;
+  const plans=new Map(b.plans.savedPlans.map(plan=>[plan.id,plan]));
+  return a.plans.savedPlans.every(plan=>plans.has(plan.id)&&Canonical.same(plan,plans.get(plan.id)));
 }
 // The base keeps one fingerprint per Saved Day and one for the Active
 // Session. Both sides are fingerprinted the same way, so a side whose
@@ -1537,9 +1549,16 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     if(!keep(()=>[...syncNoteReviews(impact.reconciliationPlan,noteState),...syncSavedDayReviews(impact.reconciliationPlan,settledDays)]))return needsDecision();
     const theirs=parsed.importedPersonalData||null;
     if(!personal&&theirs&&!(localPersonal&&Canonical.same(localPersonal,theirs))){
-      const incomingTime=Date.parse(String(parsed.protectedCheckpointManifest&&parsed.protectedCheckpointManifest.sourceRevision||''))||0,localTime=Date.parse(String(await ports.persistence.sourceRevision()||''))||0;
-      personal=!localPersonal||incomingTime>localTime?'replace':'keep';
-      if(localPersonal&&!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(personal==='replace'?localPersonal:theirs)})))return needsDecision();
+      // A side holding nothing the other lacks (a new device's start-up
+      // state, say) takes the other's, and nothing is kept. Otherwise the
+      // newer shows and the other is kept for review.
+      if(!localPersonal||personalAddsNothing(localPersonal,theirs))personal='replace';
+      else if(personalAddsNothing(theirs,localPersonal))personal='keep';
+      else{
+        const incomingTime=Date.parse(String(parsed.protectedCheckpointManifest&&parsed.protectedCheckpointManifest.sourceRevision||''))||0,localTime=Date.parse(String(await ports.persistence.sourceRevision()||''))||0;
+        personal=incomingTime>localTime?'replace':'keep';
+        if(!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(personal==='replace'?localPersonal:theirs)})))return needsDecision();
+      }
     }
   }
   const noteConflicts=sync?freeze([]):noteState.conflicts,decisionNoteState=sync?freeze({...noteState,deletions:freeze([]),titles:freeze([])}):noteState;

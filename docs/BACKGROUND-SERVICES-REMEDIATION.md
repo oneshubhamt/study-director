@@ -711,6 +711,82 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
   - After `node build/build.mjs`, browser tests run one at a time: `sync-kept-reviews` PASS (76 s), `sync-and-profiles` PASS, `session-plan-sync` PASS, `restore-session-safety` PASS, `pwa-device-backup` PASS.
   - Not run: the full browser suite, a real Google Drive account, physical devices. Complete Promotion is requested at the new SHA.
 
+### Entry 023 — Drive backups slower than before, and a "Needs review" that keeps showing (2026-11-01)
+
+- **Branch / source HEAD before:** `refactor/background-coordination` at `61e4e1a` (same tree as `main`, release `SDVB75F16`). The owner reported that Drive backups are much slower than before and that the app keeps asking for review. Their Copy diagnostics show `provider-backup` taking about 20 s for 1.3 KB, `keptVersions=1`, `needsReview=false`, and Drive maintenance deferred with `publication-contention`.
+- **Step 1 — audit and reproduction:**
+  - **Speed.** A probe on the release build gave every simulated Drive request 300 ms of latency and timed three small backups. It then compared the result with the same probe on `9afbda7` (the build before the Drive identity and session-claim passes). Results: now 18 requests in about 4.1 s; before, 14 requests in about 2.9 s. Recording the start time of each request showed 13 serial steps per backup:
+    1. folder check;
+    2. lease POST;
+    3. discovery (folder, maintenance, object, checkpoint and commit lists, all at once);
+    4. publication list (`assertSharedPublicationTurn`);
+    5. session-claim read (`assertSharedSessionOwnership`);
+    6. object identity lookup;
+    7. object upload;
+    8. manifest identity lookup;
+    9. manifest upload;
+    10. lease check and maintenance list;
+    11. commit identity lookup;
+    12. commit upload;
+    13. lease DELETE.
+  - **Where the extra steps came from.** Three of the four new steps are the pre-upload identity lookups `drive.js` now makes before every upload (`c0642a1`, `7ab67f0`; a presumed-new identity is not proof of absence after a restart). The fourth is the Active Session claim read (`d089a6b`). The read-back verifications are not extra requests on Drive: the upload response carries Drive's SHA-256, so the provider's verifiers return without downloading. At real Drive latency (about 1–1.5 s per step on a phone), 13 serial steps account for the owner's 20 s.
+  - **What must stay serial.** The identity lookups and the lease check before the commit are deliberate safety steps and stay. The commit must follow every object and the manifest. Otherwise:
+    - steps 4 and 5 only read (publication markers and the session claim), and need only the lease, which already exists at step 3;
+    - the manifest does not depend on the object uploads. It is finalized from the prepared checkpoint, which is immutable once prepared, and it stays invisible to every reader until its commit exists. An uncommitted manifest left by a failed attempt is already found and removed by maintenance (`inventory.uncommitted`), and a retained continuation reuses the same manifest file, so the lookup finds and adopts it on retry.
+  - **Review.** A two-browser probe: the laptop (A) runs today's session and edits a note each round, and the phone (B) only connects and syncs. B's first sync keeps a `personal` review. That review travels to A, and both devices then show "Needs review" (count 1) indefinitely. The kept value is B's start-up state: every preference `null`, no saved plans, and a draft equal to the plan B had just taken in. It holds nothing the shown version lacks. Cause: `personalSettled` returns null when there is no shared base fingerprint (a device's first sync), so the sync keeps the hidden side whenever the two differ, even when the hidden side is a subset of the shown one. After that review was resolved, four further rounds kept nothing new.
+- **Step 2 — objectives before edits:**
+  - **E23.1** A shared publication starts its turn check and session-claim read together with discovery, once the lease exists. It still acts on them in the same order (share held, turn, newer version ahead, session ownership), so a failure reports the same error as before.
+  - **E23.2** A publication uploads the manifest alongside its new objects instead of after them. The commit still waits for both. A failure of either waits for the other to settle before the publication fails, so failure handling sees every completed write.
+  - **E23.3** A sync does not keep a `personal` version for review when it holds nothing the shown version lacks:
+    - each preference is unset or equal;
+    - the draft is empty or equal;
+    - every saved plan is present and identical;
+    - the default plan is unset or equal.
+    Anything else is still kept as today.
+  - **E23.4** Tests at the right layers:
+    - managed-repository publication order (manifest written before the objects finish; commit after both; a failed object upload still fails the publication);
+    - sync reconciliation does not keep a subset personal version but still keeps a differing one;
+    - the browser speed and review paths are checked by probe.
+  - **E23.5** No change to formats, stored records, the Drive transport, identity lookups, lease checks or verification.
+  - **Expected effect:** 13 serial steps per small backup become 9, about 30% less waiting at any latency.
+  - **Not changed:** the six-second maintenance inventory is a separate background job that already yields to backups (`publication-contention`), so it is not on the backup's path.
+- **Step 2a — amendment after a closer look (before the E23.3 edit was kept):**
+  - The first E23.3 edit (skip the review when the *hidden* side adds nothing) did not change the probe result. Temporary logging, since removed, showed that Step 1 had the direction wrong. B's sync chose `keep`: B's own start-up state was **shown**, because B's source revision was newer, and A's real plans were **hidden** and kept for review. That start-up state was all settings unset and a draft that was either empty or, on a second attempt, the built-in starter plan, which the plan editor writes once its draft is empty.
+  - So a new device's first sync replaced the plans in use with its own empty ones, and set the real ones aside "for review". Uploading B's version then carried the empty state to A.
+  - **E23.3 (amended):** when both sides changed plans and settings, or never shared them, a side that holds nothing the other lacks takes the other's, and nothing is kept, whichever is newer. A draft equal to the built-in starter plan counts as empty. The Backup configuration gains `starterSchedule`, from `FACTORY_DEFAULTS.scheduleText`, for that check. Any other difference keeps today's rule: the newer shows and the other is kept.
+- **Step 3 — implementation:**
+  - `source/core/backup-provider.js`: in a shared publication, `assertSharedPublicationTurn` and `assertSharedSessionOwnership` start right after the lease, alongside discovery. Their failures are held until they are awaited at their old places, in the old order.
+  - `source/core/managed-repository.js`: `publishRepositoryCheckpoint` finalizes the manifest first, then uploads the new objects and the manifest together with `Promise.allSettled`. It fails with the object error first, then the manifest error, and commits only after both succeed.
+  - `source/core/backup.js`:
+    - `personalAddsNothing(side, other)`;
+    - the sync's personal-data choice uses it in both directions before falling back to the newer-wins rule with a kept review;
+    - the configuration port takes `starterSchedule`.
+  - `source/app.html`: passes `starterSchedule: FACTORY_DEFAULTS.scheduleText`.
+  - Tests:
+    - `repository-checkpoint.mjs`: the manifest is written while objects are still uploading, and the commit follows both. A failed object upload waits for the manifest upload to settle, commits nothing and runs failure handling last.
+    - `sync-shared-base.mjs`: a start-up side takes the other's plans and settings in both directions with nothing kept. The existing both-changed case still keeps the other's.
+    - Five more fixtures pass `starterSchedule: ''` (the configuration port is an exact field list).
+  - Docs: `docs/BACKUP-ENGINE.md` (plans and settings with nothing more; known limit narrowed).
+  - Release `SDVB75F16` → `SDVB75F17`.
+- **Step 4 — objectives:**
+  - **E23.1 MET**: the request timing now shows the publication list and the session-claim read leaving with discovery (both at about 630 ms). The `if(shared)` block awaits them in the old order, and `sync-and-profiles` and `session-plan-sync` (turn and session ownership) pass.
+  - **E23.2 MET**: the manifest identity lookup and upload now run alongside the object's. Commit and lease check order is unchanged. The new test fails on the old sequential code ("the manifest uploads while objects are still uploading") and passes now. The resumed-publication cases (object, manifest and commit interrupted; encrypted and plain) still pass.
+  - **E23.3 (amended) MET**:
+    - In the two-device probe, the phone's first sync takes the laptop's plans, and no device holds an open review across three rounds: a note edit, a new plan applied during the session, and a phone reload. Before, a `personal` review stayed open on both devices.
+    - The new `sync-shared-base` assertions fail on the old rule ("the start-up side takes the plans and settings in use").
+  - **E23.4 MET** as listed above.
+  - **E23.5 MET**: no format, record, Drive transport, identity lookup, lease or verification change.
+  - **Measured effect** (simulated Drive, 300 ms per request, a one-note change): 13 → 9 serial steps, 4.1 s → 2.9 s per backup. Request count is unchanged at 18.
+  - **Not addressed:**
+    - A review already open on the owner's devices stays until resolved once.
+    - Both devices editing plans or settings between syncs still keeps one side, as designed.
+- **Step 5 — targeted QA (local, Node 22, Chromium 1194):**
+  - `fast` category PASS; `architecture` category PASS; suite governance PASS.
+  - Integration PASS: `sync-shared-base`, `repository-checkpoint`, `repository-restore`, `backup-persistence`, `restore-assets`, `repository-incremental-preparation`, `automatic-provider-backup`, `drive-security`, `drive-repository-scale`, `device-backup`, `device-folder-storage`, `device-folder-layout`, `pending-provider-recovery`, `drive-profile-binding`, `folder-encryption`, `managed-provider-backup-pending`.
+  - After `node build/build.mjs`, browser tests run one at a time, all PASS: `sync-kept-reviews` (75 s), `sync-and-profiles`, `session-plan-sync`, `restore-session-safety`, `pwa-device-backup`, `complete-library`, `encryption`.
+  - The speed and review probes were temporary and are not committed.
+  - Not run: the full browser suite, a real Google Drive account, physical devices.
+
 ### Journal template — duplicate this for the next pass
 
 - **Entry NNN — Pass P#, topic / date:**
