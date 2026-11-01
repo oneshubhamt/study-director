@@ -383,11 +383,15 @@ registry.define('backup-recovery-host',1,()=>{
       // The version is read from the location the list chose for it.
       activeSourceId=source.id;activeSourceLabel=source.label;
       const note=noteTarget,from=fromDevice(entry,lastEntries),reach=typeof presentation.reach==='function'?presentation.reach():'';
-      const partialAttachments=/Partial attachment recovery:/u.test(String(location.warning||''));
+      // Each location reports how many attachments its version is missing;
+      // copies of one version hold the same data, so any copy's count counts.
+      const missingAttachments=Math.max(0,...[location,...(Array.isArray(entry.copies)?entry.copies:[])].map(at=>Number(at?.attachmentsMissing)||0));
+      const partialWarning=/Partial attachment recovery:/u.test(String(location.warning||''))?String(location.warning):missingAttachments?`Partial attachment recovery: ${missingAttachments} attachment${missingAttachments===1?'':'s'} missing. Saved Days and Notes are preserved, but missing files cannot be restored from this backup.`:'';
+      const partialAttachments=!!partialWarning;
       const choice=note?'combine':await input.interactions.choose({
         title:'Use this version',
         message:`Saved ${dateLabel(location.exportedAt)}${from?`, ${from}`:''}.`,
-        details:['A safety version is kept first, so you can go back.','Settings that belong to this device stay as they are.',...(partialAttachments?[String(location.warning)]:[]),...(reach?[reach]:[])],
+        details:['A safety version is kept first, so you can go back.','Settings that belong to this device stay as they are.',...(partialAttachments?[partialWarning]:[]),...(reach?[reach]:[])],
         cancelLabel:'Keep current',
         choices:[presentation.restoreChoices.missing,presentation.restoreChoices.combine,...(partialAttachments?[]:[presentation.restoreChoices.replace])]
       });

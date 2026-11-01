@@ -98,19 +98,19 @@ assert.equal(presentation.at(-1).active,false);assert.equal(presentation.at(-1).
 assert.equal(restoredCheckpoint,CHECKPOINT('a'));assert.equal(restoredConfirmed,true,'provider-owned Replace choice must be the only confirmation before exact restore');
 assert.equal(lastUseBackupOptions.cancelLabel,'Keep current');assert.deepEqual(lastUseBackupOptions.choices.map(choice=>choice.value),['missing','combine','replace']);
 
-// When backup metadata names missing attachment bytes, Replace is not an
-// available user choice; Combine and missing-only remain recoverable.
+// A managed location reports how many attachments its version is missing
+// (attachmentsMissing, from the stored version summary). Replace is then not a
+// choice; Combine and missing-only remain, and the gap is disclosed first.
 {
- const originalHistory=deviceHistory,partial=freeze({...deviceEntry,location:freeze({...deviceEntry.location,warning:'Partial attachment recovery: 1 attachment missing.'})});
+ const originalHistory=deviceHistory,partial=freeze({...deviceEntry,location:freeze({...deviceEntry.location,attachmentsMissing:1})});
  deviceHistory=freeze({...originalHistory,entries:freeze([partial])});chooseMode='combine';
  try{
   await host.history.open();await new Promise(resolve=>setImmediate(resolve));
   assert.equal(await host.history.recover({target:{closest:()=>deviceButton}}),true);
   assert.deepEqual(lastUseBackupOptions.choices.map(choice=>choice.value),['missing','combine'],'a partial version cannot offer exact replacement');
-  assert.ok(lastUseBackupOptions.details.some(line=>/Partial attachment recovery:/u.test(line)),'missing binary coverage must be disclosed before recovery');
+  assert.ok(lastUseBackupOptions.details.some(line=>/^Partial attachment recovery: 1 attachment missing\./u.test(line)),'missing binary coverage must be disclosed before recovery');
  }finally{deviceHistory=originalHistory;}
 }
-
 chooseMode='combine';driveConnected=true;await host.history.open();await new Promise(resolve=>setImmediate(resolve));
 assert.equal(deviceHistoryReads,3);assert.equal(providerHistoryReads,1,'with Drive connected too, one list reads both');
 assert.deepEqual(host.history.status().entries.map(entry=>[entry.location.sourceId,entry.location.checkpointId]),[['device-folder',CHECKPOINT('a')],['google-drive',CHECKPOINT('b')]],'each version once, read from where it is held');
@@ -322,5 +322,20 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   assert.equal(await host.history.recover({target:{closest:()=>buttons[1]}}),true);
   assert.equal(providerBringInCheckpoint,CHECKPOINT('g'));assert.equal(lastProviderBringIn.note,'n_0123456789abcdef','Review compares only this note');
   host.history.close();driveConnected=false;
+}
+// Copies of one version in both locations hold the same data, so a gap any
+// copy reports applies to the row, whichever location the list chose for it.
+{
+ const originalHistory=deviceHistory,complete=freeze({...deviceEntry,location:freeze({...deviceEntry.location,attachmentsMissing:0})}),copy=freeze({...deviceEntry,location:freeze({...driveEntry.location,attachmentsMissing:2})});
+ deviceHistory=freeze({...originalHistory,entries:freeze([complete])});driveHistoryNow=freeze({...driveHistory,entries:freeze([copy])});driveConnected=true;chooseMode='combine';
+ try{
+  await host.history.open();await new Promise(resolve=>setImmediate(resolve));
+  const rows=host.status().history.entries.filter(row=>row.logicalId===deviceEntry.logicalId);
+  assert.equal(rows.length,1,'both copies of one version are one row');assert.equal(rows[0].copies.length,1);
+  const button={dataset:{versionHistorySource:rows[0].location.sourceId,versionHistoryCheckpoint:rows[0].location.checkpointId}};
+  assert.equal(await host.history.recover({target:{closest:()=>button}}),true);
+  assert.deepEqual(lastUseBackupOptions.choices.map(choice=>choice.value),['missing','combine'],'a copy reporting missing attachments removes exact replacement for the row');
+  assert.ok(lastUseBackupOptions.details.some(line=>/^Partial attachment recovery: 2 attachments missing\./u.test(line)));
+ }finally{deviceHistory=originalHistory;driveHistoryNow=driveHistory;driveConnected=false;host.history.close();}
 }
 console.log(JSON.stringify({status:'PASS',suite:'backup-recovery-host',oneVersionHistory:true,noteVersionsReadOnce:true,combinedNoteVersions:true,providerScopedRecovery:true,noCrossProviderDiscovery:true,replaceAndCombine:true,durableProviderRetry:true,pendingMutationFailClosed:true,managedRecoveryLifecycle:true,closeDoesNotCancel:true,reopenReattaches:true,cancelSourceScoped:true},null,2));

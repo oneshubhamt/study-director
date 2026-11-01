@@ -582,6 +582,30 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 - **Branch / source HEAD before:** `current-fixes` at `48421c2d4f9e71d1b73d23564aa57dac2eec248d`. Reported by an automated review on [oneshubhamt/study-director#7](https://github.com/oneshubhamt/study-director/pull/7) and independently traced. The owner chose to fix it before merging to `main`.
 - **Step 1 — current-source audit:** `backup-recovery-host.recover()` hides **Replace current data** only when `location.warning` contains `Partial attachment recovery:`. Managed history entries are built by `backup-provider.repositoryInventoryHistoryEntries()` from the stored version summary. On Device Folder that summary comes from `device-folder-storage.summaryOf` (which reads the manifest); on Drive it comes from the file's `appProperties`, written from `historySummary` at upload. Neither summary records attachment coverage, and `location` never has `warning`. So the partial check never fires for Device Folder or Drive versions and Replace is still offered. Choosing it is **safe**: `backup.restoreExactVersionWithOperation()` refuses on `attachmentCoverage(...).fullyRecoverable` as a preflight, before the restore flush, safety version or any write, and tells the person to combine or add what is missing. The unit test passed only because its fixture put `warning` on `location` directly, a shape production never builds.
 - **Step 2 — objectives before edits:** **E19.1** every managed version summary carries `attachmentsMissing`, the count of manifest assets marked `missing:true` (Device Folder from the inspected manifest; Drive through one new property `sdHistoryAttachmentsMissing`, written at upload from the manifest and read back; a Drive version without the property reads as 0); **E19.2** `repositoryProviderItem` validates it as a non-negative safe integer and `repositoryInventoryHistoryEntries` passes it into `location`; **E19.3** Version History treats a version as partial when its location or any merged copy reports `attachmentsMissing>0`, or carries the existing warning text. It then omits Replace and discloses the partial recovery with the existing wording; **E19.4** the `backup.js` Replace guard stays as defence in depth; **E19.5** no change to manifests, checkpoint bytes, the logical fingerprint, retention, encryption or restore behaviour; a version without the field (Drive versions uploaded earlier, locked versions) keeps today's behaviour, with the guard still refusing; **E19.6** tests at the real layers: Drive property round trip, Device Folder summary from a manifest with a missing asset, provider history location, and the host using the production-shaped location (including a merged copy); targeted QA, the hermetic gate, then complete Promotion before the merge.
+- **Step 3 — implementation:** Five small runtime edits.
+  - `device-folder-storage.summaryOf` counts `manifest.assets` marked `missing`.
+  - `backup-provider` adds the same count to the upload `historySummary`. `repositoryProviderItem` keeps it only as a positive safe integer (else 0), and `repositoryInventoryHistoryEntries` puts it on each `location`.
+  - `drive.js` writes and reads one property, `sdHistoryAttachmentsMissing`. It is read as 0 when absent or not 1–6 digits.
+  - `backup-recovery-host.recover()` uses the largest count across the row's location and merged copies. It keeps the existing warning-text path and builds the disclosure line from the count.
+  - Also changed: `docs/BACKUP-ENGINE.md`; tests in `tests/unit/backup/backup-recovery-host.mjs` (production-shaped location, plus a merged copy that reports the gap), `tests/integration/backup/drive-security.mjs` (property round trip, absent reads 0), `tests/integration/backup/device-folder-storage.mjs` (summary from a manifest with one missing asset), `tests/integration/backup/repository-restore.mjs` (real upload records 0; provider history carries 3; invalid values read 0), and the source-shape assertion in `tests/architecture/storage/backup-recovery-ux-contract.mjs`.
+- **Step 4 — objectives:**
+  - **E19.1 MET**, **E19.2 MET**, **E19.3 MET**.
+  - **E19.4 MET**: the guard in `backup.js` is unchanged.
+  - **E19.5 MET**: no manifest, checkpoint byte, fingerprint, retention, encryption or restore change, and no new Drive request. A version without the field behaves as before, so the guard still refuses Replace.
+  - **E19.6 MET**. Each mutation below was restored afterwards, and each made its test fail:
+    - the old warning-only check in the host;
+    - ignoring merged copies in the count only;
+    - dropping the Drive property write;
+    - dropping the Device Folder count;
+    - dropping the upload count;
+    - passing the raw field without validation;
+    - dropping the count from `location`.
+- **Step 5 — targeted QA (local, Node 26.12.1, npm 12.2.1):**
+  - All six changed or affected test files passed, plus `repository-checkpoint`, `drive-profile-binding` and `sync-shared-base`.
+  - Hermetic `fast` category PASS (150 files).
+  - After `npm run build`, browser `backup/restore-session-safety.mjs` and `backup/pwa-device-backup.mjs` each PASS, run alone.
+  - Complete Promotion is requested at the new SHA before the merge.
+  - Not tested: real Google Drive property round trip and physical devices.
 
 ### Journal template — duplicate this for the next pass
 

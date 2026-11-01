@@ -121,7 +121,7 @@ registry.define('device-folder-storage',1,()=>{
     async function summaryOf(file,cacheKey){
       if(summaryCache.has(cacheKey))return summaryCache.get(cacheKey);
       let summary;
-      try{const manifest=await input.inspectManifest(file,{interactive:false});summary=freeze({history:freeze({format:Number(manifest.version)||0,logicalFingerprint:manifest.logicalFingerprint,exportedAt:manifest.exportedAt,counts:freeze({dailyRecord:Number(manifest.counts?.dailyRecord)||0,note:Number(manifest.counts?.note)||0}),encrypted:manifest.encrypted===true,retention:manifest.retention,origin:String(manifest.installationId||'')})});}
+      try{const manifest=await input.inspectManifest(file,{interactive:false});summary=freeze({history:freeze({format:Number(manifest.version)||0,logicalFingerprint:manifest.logicalFingerprint,exportedAt:manifest.exportedAt,counts:freeze({dailyRecord:Number(manifest.counts?.dailyRecord)||0,note:Number(manifest.counts?.note)||0}),encrypted:manifest.encrypted===true,retention:manifest.retention,origin:String(manifest.installationId||''),attachmentsMissing:(Array.isArray(manifest.assets)?manifest.assets:[]).filter(asset=>asset?.missing===true).length})});}
       catch(error){if(error&&error.code==='BACKUP_LOCKED')return freeze({locked:true});if(error?.repositoryUnreadable!==true)return freeze({});summary=freeze({unreadable:true});}
       summaryCache.set(cacheKey,summary);if(summaryCache.size>256)summaryCache.delete(summaryCache.keys().next().value);return summary;
     }

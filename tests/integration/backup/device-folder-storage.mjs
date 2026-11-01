@@ -9,7 +9,7 @@ const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],freeze
 const sha256=async blob=>Buffer.from(await webcrypto.subtle.digest('SHA-256',await blob.arrayBuffer())).toString('hex');
 let now=Date.parse('2026-10-06T08:00:00.000Z'),folder=null,canMutate=true;
 const faults={corruptReadOf:new Set()},identities=freeze({root:'Study Director - QA - Test Device',legacyRoot:'Study-Director-Automatic-Backup-Repository',prefix:'Study Director',objects:'objects',checkpoints:'checkpoints',commits:'commits'});
-const manifestFor=id=>freeze({checkpoint:freeze({checkpointId:id}),logicalFingerprint:'a'.repeat(64),exportedAt:new Date(now).toISOString(),counts:freeze({dailyRecord:3,note:2}),encrypted:false,retention:freeze({role:'normal',protectedUntil:'',purpose:'',calendar:freeze({localDate:'2026-10-06',weekStart:'2026-10-05',month:'2026-10',utcOffsetMinutes:0})})});
+const manifestFor=id=>freeze({checkpoint:freeze({checkpointId:id}),logicalFingerprint:'a'.repeat(64),exportedAt:new Date(now).toISOString(),counts:freeze({dailyRecord:3,note:2}),encrypted:false,retention:freeze({role:'normal',protectedUntil:'',purpose:'',calendar:freeze({localDate:'2026-10-06',weekStart:'2026-10-05',month:'2026-10',utcOffsetMinutes:0})}),assets:freeze([freeze({assetId:'asset-present',objectId:'obj_present'}),freeze({assetId:'asset-gone',missing:true})])});
 const storage=registry.require('device-folder-storage',1).createStorage(freeze({
   folder:()=>folder,identities,owner:()=>({profile:'prof_qa_mve00000_abcdef01',scope:'',device:'inst_qa_test_mve00000_abcdef01'}),
   checksum:async blob=>sha256(blob),
@@ -75,6 +75,7 @@ for(const [kind,fileId,original] of [
 // A version's listing carries its summary from the manifest, so history needs no other reads.
 const listed=(await storage.list({kind:'checkpoint'})).items;
 assert.equal(listed.length,1);assert.equal(listed[0].history.counts.dailyRecord,3);assert.equal(listed[0].history.retention.calendar.month,'2026-10');
+assert.equal(listed[0].history.attachmentsMissing,1,'the summary counts attachments the version is missing, so Version History can hide Replace');
 assert.match(listed[0].verificationScope,/^device-folder:1:[a-f0-9]{32}$/u);assert.equal((await storage.list({kind:'commit'})).items[0].verificationScope,listed[0].verificationScope,'one stable identity per folder');
 assert.equal(await storage.scope(),listed[0].verificationScope);
 
