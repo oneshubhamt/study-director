@@ -208,7 +208,7 @@ for(const size of [0,1,128,129,1001]){
  meta.set(key,persisted);physical.set(name,new Blob(['X']));
  for(let i=0;i<129;i++)physical.set('attblob-'+String(i).padStart(32,'b'),new Blob(['X']));
  const scoped=storageModule.create({name:'mutation-test',protocol:'https:',storage:{getDirectory:async()=>({getDirectoryHandle:async()=>physicalDir})},locks:physicalLocks,
-   read:async k=>{reads++;return meta.get(k)||null;},keys:async()=>[...meta.keys()],entries:async()=>[...meta],
+   read:async k=>meta.get(k)||null,keys:async()=>[...meta.keys()],entries:async()=>{reads++;return [...meta];},
    commit:async()=>assert.fail('sweep must not change logical metadata'),validId:k=>/^asset-/.test(k),validType:t=>t==='application/pdf',maxBytes:1024,limitForType:()=>1024,
    issueToken:()=>1,assertToken(){},canMutate:()=>true,ingest:{ingest:async()=>assert.fail('unused')}
  });
