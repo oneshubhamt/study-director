@@ -57,3 +57,4 @@ Device Folder and Drive share the same compact location labels and inline summar
 - A newer operation owns a shared inline surface; an older operation's late progress or completion cannot take it back.
 - Local recovery success is not external backup success. Pending convergence remains pending until verification actually succeeds.
 - Permissions and operations stay feature-owned; coordinator actions navigate/reopen or invoke an explicitly requested feature action.
+- A system notification click **focuses an existing in-scope Study Director client without calling `navigate`**; this avoids bypassing dirty-work/page-save safeguards. With no in-scope client, the service worker opens only an origin-and-scope-validated notification URL (or the app root). It never treats the OS click as permission to reset an existing route.

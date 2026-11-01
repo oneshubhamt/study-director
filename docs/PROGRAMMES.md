@@ -1,11 +1,11 @@
 # Engineering programmes — current source-of-truth map
 
-> **Branch:** `current-fixes`. **As of 31 October 2026.** The source and exact revision override any narrative. This index distinguishes historical, fully verified work from new open investigation and prevents agents from reopening closed findings or skipping the implementation playbook.
+> **Branch:** `current-fixes`. **Updated 1 November 2026.** The source and exact revision override any narrative. This index distinguishes historical, fully verified work from new open investigation and prevents agents from reopening closed findings or skipping the implementation playbook.
 
 | Programme | Status | Read first | Next action |
 |---|---|---|---|
 | Data topology, backup and recovery (A–F) | **CERTIFIED CLOSED** at source/automated-QA level | [Consolidated closure](DATA-TOPOLOGY-BACKUP-CLOSURE.md), [complete historical A–F ledger](DATA-TOPOLOGY-BACKUP-REMEDIATION.md), [backup engine](BACKUP-ENGINE.md) | No pass pending. Physical-device/real Drive acceptance is separate and NOT TESTED under that certification. |
-| Background services (P0–P6) | **P0 + P1 VERIFIED AT RELEVANT LEVELS**; **P2–P6 NOT STARTED** | [Active remediation ledger](BACKGROUND-SERVICES-REMEDIATION.md), [background behavior](BACKGROUND-OPERATIONS.md) | On next explicit instruction, undertake **P2: notification navigation and PDF lifetime**. P1 passed source-level fault injection and ordinary Repository Checks; real-browser/device acceptance remains separate. [P0 evidence](BACKGROUND-SERVICES-P0-EVIDENCE.md), [P1 ledger Entry 005](BACKGROUND-SERVICES-REMEDIATION.md#entry-005--p1-implementation-independent-objectives-and-targeted-qa-closure-2026-11-01). |
+| Background services (P0–P6) | **P0–P2 VERIFIED AT DOCUMENTED LEVELS**; **P3–P6 NOT STARTED** | [Active remediation ledger](BACKGROUND-SERVICES-REMEDIATION.md), [background behavior](BACKGROUND-OPERATIONS.md) | On next explicit instruction, undertake **P3: scheduling fairness, PWA lifecycle and SW cache capacity**. P2 targeted [source/QA disposition](BACKGROUND-SERVICES-REMEDIATION.md#entry-007--p2-implementation-objective-verification-and-targeted-qa-2026-11-01) is recorded; real browser and mobile PDF acceptance remains unrun. |
 | Historical earlier background reviews | Closed snapshots of old architecture; not active P programme | [2026-10-25 audit](AUDIT-BACKGROUND-SERVICES.md), [2026-10-04 record](BACKGROUND-AUDIT.md), [HANDOFF.md](HANDOFF.md) | Historical cross-check only. |
 
 ## Priority and evidence hierarchy
@@ -24,4 +24,4 @@
 
 Clean, Lean, Efficient, Elegant, Robust, Reliable. No duplicative owner/scheduler, speculative compatibility/format changes, unverified deletion, weakening of restore safety, false 'always-on background' claims or unapproved merge/deploy/workflow changes. Do not put app data, tokens, backups, personal content or generated outputs in documentation.
 
-**Naming:** Phase 0 is documentation; P0 source-only evidence/triage; P1 the completed Active Session source/fault-injection pass; **P2 is next**, with P3–P6 later. None of these replace the A–F certification or establish real-device acceptance. Do not confuse these with A–F or the historical B0–B6 labels. Do not confuse them with A–F (certified backup programme) or the old background audit's B0–B6 labels.
+**Naming:** Phase 0 is documentation; P0 source evidence/triage; P1 Active Session safety; P2 notification/PDF lifetime; **P3 is next**, with P4–P6 planned. A–F remains separate and certified at its earlier QA level; hardware/browser acceptance is not implied.
