@@ -2789,9 +2789,11 @@ async function verifyFrozenSessionClaim(){
 }
 function resumeAfterReleasedSessionClaim(session){
   if(!sessionClaimFreeze?.localVerified||!session||session.runningOn!==InstallationIdentity.getId()||!TASKS.length)return false;
-  const frozenSinceMs=sessionClaimFreeze.frozenSinceMs;sessionClaimFreeze=null;
-  try{TimerEngine.resumeAfterPrimaryRestore({frozenSinceMs});setPlanStatus('✓ Session ownership remains on this device.');return true;}
-  catch(error){AppDiagnostics.capture('session.claim-resume',error,'warn');return false;}
+  const frozenSinceMs=sessionClaimFreeze.frozenSinceMs;
+  try{
+    if(!TimerEngine.resumeAfterPrimaryRestore({frozenSinceMs}))return false;
+    sessionClaimFreeze=null;setPlanStatus('✓ Session ownership remains on this device.');return true;
+  }catch(error){AppDiagnostics.capture('session.claim-resume',error,'warn');return false;}
 }
 async function checkSessionOwnershipClaim(){
   if(sessionClaimCheckActive||document.visibilityState!=='visible'||!StartupLifecycle.status().fullyInitialized)return false;
