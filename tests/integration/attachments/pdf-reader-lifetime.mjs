@@ -32,7 +32,7 @@ function lifetimeHarness(){
     addEventListener:(type,callback)=>{if(!pageHandlers.has(type))pageHandlers.set(type,new Set());pageHandlers.get(type).add(callback);},
     removeEventListener:(type,callback)=>pageHandlers.get(type)?.delete(callback),
     open:()=>{
-      if(openMode==='blocked')return null;
+      if(['blocked','overlay-busy','overlay-throws'].includes(openMode))return null;
       const next={closed:false,opener:{},url:null,
         location:{replace(url){next.url=url;if(openMode==='replace-fails')throw new Error('viewer unavailable');}},
         close(){next.closed=true;}
