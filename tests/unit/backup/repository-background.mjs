@@ -379,4 +379,25 @@ function jumpingClock(start=Date.parse('2026-09-26T00:00:00.000Z')){
   held.release();assert.equal(fake.pending()[0],module.maintenance.contentionMs,'durable publication backoff is never pulled forward by unrelated releases');
   await fake.advance(1000);assert.equal(runs,0);
 }
+// Provider hook reconfiguration unregisters and re-registers a job on the
+// same coordinator; an obsolete slot-release callback must not survive it.
+{
+  const fake=clock(),bg=coordinator(fake),high=await bg.beginBackground('convergence'),notifications=[];
+  const unsubscribe=bg.onRelease(job=>notifications.push(job));
+  let stored=freeze({requestedAt:new Date(fake.now()).toISOString(),nextEligibleAt:new Date(fake.now()).toISOString(),reason:'repository-state'}),executions=0;
+  const intent=bg.maintenanceIntent(freeze({scope:()=>'reconfiguration',capture:()=>{},read:async()=>stored,mark:async value=>{stored=freeze({...stored,...value});return true;},clear:async()=>{stored=null;return true;},selectRetention:()=>freeze({remove:freeze([])})}));
+  const create=()=>bg.createMaintenanceScheduler(freeze({intent,budgetMs:1000,budgetCode:'TEST_BUDGET',budgetMessage:'budget',preemptCode:'TEST_PREEMPT',preemptMessage:'preempt',capture:()=>{},isAvailable:()=>true,isBusy:()=>false,execute:async()=>{executions++;return freeze({gcPending:false});},report:()=>{}}));
+  const old=create();assert.equal((await old.run('waiting')).reason,'background-busy');
+  assert.equal(fake.pending()[0],module.maintenance.busyMs);
+  assert.equal(bg.unregisterJob('maintenance'),true);
+  assert.deepEqual(fake.pending(),[],'unregistering retires the former deadline and listener');
+  high.release();
+  assert.deepEqual(fake.pending(),[],'the old listener cannot reschedule disposed work');
+  assert.deepEqual(notifications,['convergence'],'other release subscribers retain their notifications');
+  const fresh=create();assert.ok(fresh);
+  await fake.advance(1000);for(let n=0;n<80;n++)await Promise.resolve();
+  assert.equal(executions,1,'a newly registered scheduler runs once');
+  assert.equal(stored,null);
+  unsubscribe();
+}
 console.log(JSON.stringify({status:'PASS',suite:'repository-background',sharedPolicy:true,priority:true,foregroundPreemption:true,suspensionSettlement:true,durableIntent:true,maintenanceLifecycle:true,triggerAttribution:true,integrityRecurrence:true,integrityStateFailureRetry:true},null,2));
