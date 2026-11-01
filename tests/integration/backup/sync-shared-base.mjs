@@ -68,8 +68,8 @@ const record=(date,reflection,updatedAt='2026-08-20T12:00:00.000Z')=>freeze({ver
 const session=(date,label,{runningOn='inst_device_local',status='suspended',revision=2}={})=>freeze({id:'current',type:'activeSession',version:RUNTIME_DATA_CONTRACT.schemas.ActiveSession.version,revision,date,status,runningOn,scheduleText:`08:00 | 60 | ${label} | work | Ethics | block | 1`,snapshot:freeze({label}),suspendedAt:'2026-08-20T13:00:00.000Z',updatedAt:'2026-08-20T13:00:00.000Z'});
 const draft=(date,text,revision=1,updatedAt='2026-08-20T12:00:00.000Z')=>freeze({version:1,date,reflection:text,studyQuality:3,revision,sessionRevision:0,updatedAt});
 
-async function makeCheckpoint({records=[],deletions=[],notes={},noteDeletions=[],activeSession=null,personalData=personal(),installationId='inst_checkpoint_a',exportedAt='2026-08-20T14:00:00.000Z'}={}){
-  const counts=codec.countShape({checkpointManifest:1,personalData:1,dailyRecord:records.length,note:Object.keys(notes).length,activeSession:activeSession?1:0});
+async function makeCheckpoint({records=[],deletions=[],notes={},noteDeletions=[],activeSession=null,pendingReviews=[],personalData=personal(),installationId='inst_checkpoint_a',exportedAt='2026-08-20T14:00:00.000Z'}={}){
+  const counts=codec.countShape({checkpointManifest:1,personalData:1,dailyRecord:records.length,note:Object.keys(notes).length,activeSession:activeSession?1:0,pendingReview:pendingReviews.length});
   const plan=freeze({studentName:'Checkpoint User',installationId,exportedAt,sourceRevision:exportedAt,recordDates:freeze(records.map(item=>item.date).sort()),savedDayDeletions:freeze(deletions),noteItems:freeze(Object.values(notes)),noteDeletions:freeze(noteDeletions),counts});
   const algorithm=codec.checksumAlgorithm(),manifest=codec.createManifest(plan,{compression:'none',algorithm});
   let seq=0;const hashes=[],lines=[JSON.stringify(manifest)];
@@ -78,6 +78,7 @@ async function makeCheckpoint({records=[],deletions=[],notes={},noteDeletions=[]
   await add('dailyRecord',records);
   await add('note',Object.values(notes));
   if(activeSession)await add('activeSession',[activeSession]);
+  await add('pendingReview',pendingReviews);
   await add('personalData',[personalData]);
   const complete=await codec.encodeCompletion(seq,counts,hashes,algorithm,[]);lines.push(JSON.stringify(complete));
   return codec.createV10Container(new Blob([lines.join('\n')+'\n']),{compression:'none',assetBlobs:[]});
@@ -123,9 +124,10 @@ function baseStore(state){
 
 // inertTimers: scheduled engine work never fires, so a test drives every
 // backup itself.
-function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=null,hasLiveTasks=false,fileMode='combine',extrasMode='keep',preflightFailure='',inertTimers=false}={}){
+function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=null,hasLiveTasks=false,fileMode='combine',extrasMode='keep',preflightFailure='',verificationFailure='',inertTimers=false}={}){
   state.deletions??=[];state.noteDeletions??=[];state.attachmentDeletions??=[];state.reviews??=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
-  let injectedFailure=String(preflightFailure||'');
+  let injectedFailure=String(preflightFailure||''),verificationFault=String(verificationFailure||'');
+  const verifying=()=>state.journal?.state?.phase==='verifying';
   const prompts=[];const statuses=[];const events=[];const diagnosticMarks=[];const fn=()=>false;
   const normalizeNotes=value=>Object.fromEntries(Object.entries(value||{}).map(([key,item])=>[key,normalizeArea(item,key)]).filter(([,item])=>item));
   // The file row shows the 'file' presentation's current message; record each one it shows.
@@ -135,17 +137,17 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
     configuration:freeze({appVersion:'QA_B3',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits}),
     
     persistence:freeze({
-      activeSessionLoad:async()=>{if(injectedFailure==='session-read')return {ok:false,value:null,error:new Error('QA_FIXTURE session read failure'),storage:{idb:true}};return {ok:true,value:state.activeSession,error:null,storage:{idb:true}};},activeSessionSave:async value=>{events.push('preflight-session-save');if(injectedFailure==='session-save')return {ok:false,value:null,error:new Error('QA_FIXTURE session save failure')};state.activeSession=value;return {ok:true,value};},activeSessionClear:async()=>(state.activeSession=null,{ok:true}),activeSessionSettled:async()=>{if(injectedFailure==='session-settle')throw new Error('QA_FIXTURE session settle failure');return true;},
-      dailyRecordBackupDates:async()=>({dates:[...state.records.keys()].sort(),warning:''}),dailyRecordBackupMonth:async month=>[...state.records.values()].filter(record=>String(record.date).startsWith(String(month)+'-')).sort((a,b)=>a.date.localeCompare(b.date)),dailyRecordDocuments:async dates=>dates.map(date=>state.records.get(date)).filter(Boolean),
+      activeSessionLoad:async()=>{if(injectedFailure==='session-read')return {ok:false,value:null,error:new Error('QA_FIXTURE session read failure'),storage:{idb:true}};if(verificationFault==='active-session'&&verifying())return {ok:true,value:null,error:null,storage:{idb:true}};return {ok:true,value:state.activeSession,error:null,storage:{idb:true}};},activeSessionSave:async value=>{events.push('preflight-session-save');if(injectedFailure==='session-save')return {ok:false,value:null,error:new Error('QA_FIXTURE session save failure')};state.activeSession=value;return {ok:true,value};},activeSessionClear:async()=>(state.activeSession=null,{ok:true}),activeSessionSettled:async()=>{if(injectedFailure==='session-settle')throw new Error('QA_FIXTURE session settle failure');return true;},
+      dailyRecordBackupDates:async()=>({dates:[...state.records.keys()].sort(),warning:''}),dailyRecordBackupMonth:async month=>[...state.records.values()].filter(record=>String(record.date).startsWith(String(month)+'-')).sort((a,b)=>a.date.localeCompare(b.date)),dailyRecordDocuments:async dates=>verificationFault==='saved-days'&&verifying()?[]:dates.map(date=>state.records.get(date)).filter(Boolean),
       dailyRecordImportBatches:async values=>{for(const value of values){state.records.set(value.date,freeze({...value}));state.deletions=state.deletions.filter(item=>item.date!==value.date);}return {batches:values.length?1:0};},
       dailyRecordRemove:async date=>(state.records.delete(date),true),dailyRecordTimestamp:value=>Date.parse(value?.updatedAt||value?.savedAt||'')||0,
-      notesExportPayload:()=>state.notes,notesReadFreshPayload:async()=>state.notes,notesReadFreshItems:async keys=>(keys||[]).map(key=>state.notes[key]||null),notesFlush:async()=>{events.push('preflight-notes-flush');if(injectedFailure==='notes')throw new Error('QA_FIXTURE notes preflight failure');return true;},notesNormalizePayload:normalizeNotes,notesTrashKey:key=>String(key).startsWith('~')?'':'~deleted '+key,notesAlignByTitle:value=>value,notesFailure:()=>({failed:false}),
+      notesExportPayload:()=>state.notes,notesReadFreshPayload:async()=>state.notes,notesReadFreshItems:async keys=>verificationFault==='notes'&&verifying()?(keys||[]).map(()=>null):(keys||[]).map(key=>state.notes[key]||null),notesFlush:async()=>{events.push('preflight-notes-flush');if(injectedFailure==='notes')throw new Error('QA_FIXTURE notes preflight failure');return true;},notesNormalizePayload:normalizeNotes,notesTrashKey:key=>String(key).startsWith('~')?'':'~deleted '+key,notesAlignByTitle:value=>value,notesFailure:()=>({failed:false}),
       restoreJournalPrepare:async value=>(state.journal={state:{id:value.id},payload:value}),restoreJournalRead:async()=>state.journal,restoreJournalMark:async(id,phase)=>(state.journal.state.phase=phase,state.journal.state),restoreJournalClear:async()=>(state.journal=null,true),
-      scheduleRead:()=>state.schedule,personalSettle:async()=>{if(injectedFailure==='personal')throw new Error('QA_FIXTURE personal preflight failure');return true;},personalExport:async()=>state.personal,personalImport:async value=>(state.personal=value,true),personalVerify:async value=>assert.deepEqual(state.personal,value),
+      scheduleRead:()=>state.schedule,personalSettle:async()=>{if(injectedFailure==='personal')throw new Error('QA_FIXTURE personal preflight failure');return true;},personalExport:async()=>state.personal,personalImport:async value=>(events.push('personal-import'),state.personal=value,true),personalVerify:async value=>{if(verificationFault==='personal'&&verifying())throw new Error('QA_FIXTURE personal verification failure');assert.deepEqual(state.personal,value);},
       storageGeneration:()=>0,sourceRevision:async()=>'2026-08-23T00:00:00.000Z',snapshotRevision:async()=>'stable-b3',canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],installationId:()=>state.installationId||'inst_device_local',deletionRecoveryFlush:async()=>{events.push('preflight-deletion-flush');if(injectedFailure==='deletions')throw new Error('QA_FIXTURE deletion preflight failure');if(injectedFailure==='deletions-false')return false;if(injectedFailure==='deletions-unknown')return undefined;return true;},
-      deletionRecoverySavedDays:async()=>state.deletions.map(value=>({...value})),deletionRecoveryReplaceSavedDays:async values=>(state.deletions=(values||[]).map(value=>({...value})),true),deletionRecoveryNotes:async()=>state.noteDeletions.map(value=>({...value})),deletionRecoveryReplaceNotes:async values=>(state.noteDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryAttachments:async()=>state.attachmentDeletions.map(value=>({...value})),deletionRecoveryReplaceAttachments:async values=>(state.attachmentDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryClearAttachment:async assetId=>(state.attachmentDeletions=state.attachmentDeletions.filter(item=>item.assetId!==assetId),true),...baseStore(state),...state.reviews.ports
+      deletionRecoverySavedDays:async()=>verificationFault==='deletions'&&verifying()?[{date:'2026-01-01',deletedAt:'2026-01-01T00:00:00.000Z'}]:state.deletions.map(value=>({...value})),deletionRecoveryReplaceSavedDays:async values=>(state.deletions=(values||[]).map(value=>({...value})),true),deletionRecoveryNotes:async()=>state.noteDeletions.map(value=>({...value})),deletionRecoveryReplaceNotes:async values=>(state.noteDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryAttachments:async()=>state.attachmentDeletions.map(value=>({...value})),deletionRecoveryReplaceAttachments:async values=>(state.attachmentDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryClearAttachment:async assetId=>(state.attachmentDeletions=state.attachmentDeletions.filter(item=>item.assetId!==assetId),true),...baseStore(state),...state.reviews.ports,pendingReviewsReadItems:async ids=>verificationFault==='pending-reviews'&&verifying()?(ids||[]).map(()=>null):state.reviews.ports.pendingReviewsReadItems(ids)
     }),
-    assets:freeze({get:async()=>null,put:async()=>true,keys:async()=>[],list:async()=>[],importAll:async()=>0,restoreAll:async()=>true,removeMany:async()=>0,removeMetadata:async()=>0,scheduleMaintenance:fn}),
+    assets:freeze({get:async()=>null,put:async()=>true,keys:async()=>[],list:async()=>{if(verificationFault==='attachments'&&verifying())throw new Error('QA_FIXTURE attachment verification failure');return [];},importAll:async()=>0,restoreAll:async()=>true,removeMany:async()=>0,removeMetadata:async()=>0,scheduleMaintenance:fn}),
     exports:freeze({...processing,followProtection:async value=>{(state.followed??=[]).push({...value});return false;},backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),unprotect:async blob=>({blob,encrypted:false}),check:fn,job:fn=>fn(),download:fn,chooseSave:async()=>null,save:async()=>({status:'downloaded'})}),
     codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec,pendingReview:pendingReviewCodec}),
     reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async options=>noteResolver?noteResolver(options,state):freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:options.manualOnly&&decisions.reflections==='incoming'?item.incomingValue:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
@@ -196,6 +198,28 @@ for(const [stage,code,hasLiveTasks] of preflightCases){
   assert.equal(preflightHarness.diagnosticMarks.at(-1)[0],`restore-preflight-${stage.startsWith('deletions')?'deletions':stage}-failed`);
   assert.equal(preflightHarness.diagnosticMarks.at(-1)[1].errorCode,code);
 }
+
+const verificationReview=pendingReviewCodec.create({subject:'note',ref:'Checkpoint',kept:freeze({text:checkpointNotes.Checkpoint.text}),keptAt:'2026-08-20T13:00:00.000Z'});
+const verificationBlob=await makeCheckpoint({records:checkpointRecords,deletions:checkpointDeletions,notes:checkpointNotes,activeSession:checkpointSession,pendingReviews:[verificationReview]});
+// This fixture has no physical attachment payload, so changed-only verification
+// correctly does not enter the attachment domain here; restore-assets owns that
+// physical corruption coverage. Every case below creates a real mutation in the
+// domain whose diagnostic stage it expects.
+const verificationCases=freeze([
+  freeze({domain:'saved-days',decisions:freeze({})}),
+  freeze({domain:'notes',decisions:freeze({})}),
+  freeze({domain:'personal',decisions:freeze({plans:'replace',personalSettings:'replace'})}),
+  freeze({domain:'pending-reviews',decisions:freeze({})}),
+  freeze({domain:'deletions',decisions:freeze({})}),
+  freeze({domain:'active-session',decisions:freeze({})})
+]);
+for(const {domain,decisions} of verificationCases){
+  const verificationState=createState(),verificationHarness=createHarness(verificationState,{verificationFailure:domain,decisions});
+  const verificationCandidate=await verificationHarness.runtime.controller.inspect(verificationBlob,{filename:`verification-${domain}.sdbackup`});
+  await assert.rejects(()=>verificationHarness.runtime.controller.restore(verificationCandidate),error=>{assert.equal(error.backupStage,`restore-verification-${domain}`);assert.equal(error.code,'RESTORE_VERIFICATION_MISMATCH');return true;});
+  assert.ok(verificationHarness.diagnosticMarks.some(([name,details])=>name===`restore-verification-${domain}-failed`&&details.stage===`restore-verification-${domain}`),`${domain} verification must identify its exact diagnostic stage`);
+}
+
 
 
 // Format/protection boundary: public provenance is separate from integrity-covered authority/deletion metadata.
@@ -326,6 +350,7 @@ assert.deepEqual(keepState.deletions.map(item=>item.date),['2026-08-04','2026-08
 assert.deepEqual(Object.keys(keepState.notes).sort(),['Checkpoint','Local'],'Local note conflicts stay local, but missing incoming Areas are still added.');
 assert.equal(keepState.activeSession.date,'2026-08-10');
 assert.match(keepState.schedule,/LOCAL/u);
+assert.equal(keepHarness.events.includes('personal-import'),false,'Keeping local Personal Data must not rewrite it during Combine.');
 
 // Presence semantics: when local has no Active Session and the checkpoint has one, the incoming session transfers automatically.
 const incomingSessionState=createState();
@@ -487,7 +512,7 @@ let syncWorld=null;
     return freeze({
       backUpFolder:()=>providers.backupRepositoryProvider('folder',{interactive:false}),
       upload:async()=>{await new Promise(resolve=>setTimeout(resolve,3));return providers.backupRepositoryProvider('drive',{interactive:false});},
-      sync:()=>providers.bringInRepositoryProvider('drive',{quiet:true,sync:true,checkpointId:head()}),
+      sync:()=>providers.syncRepositoryProvider('drive',{checkpointId:head()}),
       review:()=>providers.bringInRepositoryProvider('drive',{checkpointId:head(),review:true}),
       restore:checkpointId=>providers.restoreRepositoryProviderVersion('drive',{checkpointId,confirmed:true}),
       // Combine from Version History, read from the location the list chose.
@@ -608,11 +633,9 @@ let syncWorld=null;
   syncWorld.keepAll.on=false;
 }
 
-// Two devices that each back up to a Device Folder too. A version this device
-// makes is made once: its Device Folder and Drive hold it under the same id.
-// After taking in the other device's changes, the Device Folder saves that
-// same data as a version of its own (objects are not shared between devices,
-// so copying Drive's would download them all), and Drive takes nothing new.
+// Two devices that each back up to a Device Folder too. Drive and Device
+// Folder publish the same canonical local state independently; neither waits
+// for, downloads, or backfills a checkpoint from the other.
 {
   syncWorld.drive.clear();
   const {device,note,head,versions,drive}=syncWorld;
@@ -620,36 +643,36 @@ let syncWorld=null;
   const a={installationId:'inst_both_device_a',records:new Map([['2026-08-01',record('2026-08-01','first day')]]),deletions:[],noteDeletions:[],notes:note('one'),activeSession:null,schedule:'',personal:personal('Both User'),journal:null};
   const b={installationId:'inst_both_device_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Both User'),journal:null};
   const A=device(a,{folder:folderA}),B=device(b,{folder:folderB});
-  const made=await A.backUpFolder(),copied=await A.upload();
-  assert.equal(copied.checkpointId,made.checkpointId,'Drive takes the Device Folder version under the same id');assert.deepEqual(versions(drive),versions(folderA));
+  const folderFirst=await A.backUpFolder(),driveFirst=await A.upload();
+  assert.notEqual(driveFirst.checkpointId,folderFirst.checkpointId,'independent locations do not share checkpoint identities');
+  assert.equal(content(folderA,folderFirst.checkpointId),content(drive,driveFirst.checkpointId),'both destinations describe the same canonical local state');
   assert.equal((await B.sync()).cancelled,false);assert.equal(b.notes.Shared.text,'one');
   const taken=await B.backUpFolder();assert.ok(content(folderB,taken.checkpointId),'the Device Folder records what its version holds');
-  assert.equal(content(folderB,taken.checkpointId),content(drive,head()),'after a sync with nothing of its own, the Device Folder holds the same data as Drive’s newest version');
-  assert.equal((await B.upload()).unchanged,true,'and Drive has nothing new to take');assert.deepEqual(versions(drive),[made.checkpointId]);
-  // B changes: its Device Folder makes the version and Drive takes it under the same id.
-  b.notes=note('two by B');const madeB=await B.backUpFolder(),copiedB=await B.upload();
-  assert.equal(copiedB.checkpointId,madeB.checkpointId);assert.equal(head(),madeB.checkpointId);
-  // A takes it in; nothing goes back up, and A's Device Folder holds the same data.
+  assert.equal(content(folderB,taken.checkpointId),content(drive,head()),'after sync, Device Folder independently captures the same state as Drive head');
+  assert.equal((await B.upload()).unchanged,true,'Drive has nothing new to take after B only absorbed its current head');
+  // B changes: each destination independently publishes the resulting state.
+  b.notes=note('two by B');const folderBChanged=await B.backUpFolder(),driveBChanged=await B.upload();
+  assert.notEqual(driveBChanged.checkpointId,folderBChanged.checkpointId);assert.equal(content(folderB,folderBChanged.checkpointId),content(drive,driveBChanged.checkpointId));
+  // A takes it in; nothing goes back up, and A's Device Folder independently captures it.
   assert.equal((await A.sync()).cancelled,false);assert.equal(a.notes.Shared.text,'two by B');
   const takenA=await A.backUpFolder();assert.equal(content(folderA,takenA.checkpointId),content(drive,head()));
   assert.equal((await A.upload()).unchanged,true,'no device uploads again what it only took in');
-  // A note's earlier versions: what the Device Folder read is not read again
-  // from Drive, whether Drive holds it under the same id or another.
+  // A note's earlier versions deduplicate by covered logical history rather
+  // than by shared checkpoint ids.
   const local=await A.noteVersions('folder','Shared');
-  assert.equal(local.available,true);assert.deepEqual(local.entries.map(entry=>entry.text),['two by B']);assert.deepEqual(local.covered.checkpointIds,versions(folderA));
-  assert.notDeepEqual(versions(drive),versions(folderA),'Drive holds the same data under its own id');
-  assert.deepEqual((await A.noteVersions('drive','Shared')).entries.map(entry=>entry.text),['two by B'],'read alone, Drive offers it');
+  assert.equal(local.available,true);assert.deepEqual(local.entries.map(entry=>entry.text),['two by B']);
+  assert.notDeepEqual(versions(drive),versions(folderA),'independent locations retain independent checkpoint identities');
+  assert.deepEqual((await A.noteVersions('drive','Shared')).entries.map(entry=>entry.text),['two by B'],'read alone, Drive offers its copy');
   const shared=await A.noteVersions('drive','Shared',{skip:local.covered});
-  assert.equal(shared.available,true);assert.deepEqual(shared.entries,[],'after the Device Folder, Drive offers nothing new');assert.deepEqual(shared.covered.checkpointIds,[],'and reads none of its versions');
+  assert.equal(shared.available,true);assert.deepEqual(shared.entries,[],'after Device Folder coverage, Drive offers no duplicate logical note version');
 }
 
-// Combining Drive's newest version from Version History while this device is
-// behind (its sync waits for a review or a password) makes it what this device
-// and Drive share, also when the list reads it from this device's Device
-// Folder copy of it, so the next sync does not merge it again.
+// Combining Drive's newest version moves the shared base only when Drive's
+// verified shared head is the source. Device Folder remains an independent
+// recovery destination and does not impersonate Drive ancestry.
 {
   syncWorld.drive.clear();syncWorld.keepAll.on=true;
-  const {device,note,head,drive}=syncWorld;
+  const {device,note,head}=syncWorld;
   const folderA=new Map(),folderB=new Map();
   const a={installationId:'inst_head_device_a',records:new Map([['2026-08-01',record('2026-08-01','first day')]]),deletions:[],noteDeletions:[],notes:note('one'),activeSession:null,schedule:'',personal:personal('Both User'),journal:null};
   const b={installationId:'inst_head_device_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Both User'),journal:null};
@@ -657,13 +680,9 @@ let syncWorld=null;
   await A.backUpFolder();await A.upload();
   assert.equal((await B.sync()).cancelled,false);const first=head();assert.equal(b.reconciliationBase.checkpointId,first);
   a.notes=note('two by A');await A.backUpFolder();await A.upload();const newest=head();assert.notEqual(newest,first);
-  // B's Device Folder holds a copy of it under the same id, as the
-  // background fill makes one.
-  for(const [key,file] of drive)if(file.kind==='object'||file.id===newest)folderB.set(key,file);
-  const combined=await B.combine('folder',newest);assert.equal(combined.cancelled,false);assert.equal(b.notes.Shared.text,'two by A');
-  assert.equal(b.reconciliationBase.checkpointId,newest,'Combining Drive’s newest moves the shared base, read from either location');
-  // An older version read the same way leaves the base alone.
-  const older=await B.combine('drive',first);assert.equal(older.cancelled,false);assert.equal(b.reconciliationBase.checkpointId,newest);
+  const combined=await B.combine('drive',newest);assert.equal(combined.cancelled,false);assert.equal(b.notes.Shared.text,'two by A');
+  assert.equal(b.reconciliationBase.checkpointId,newest,'Combining Drive’s newest verified head moves the shared base');
+  const older=await B.combine('drive',first);assert.equal(older.cancelled,false);assert.equal(b.reconciliationBase.checkpointId,newest,'combining an older Drive version leaves the shared base alone');
   syncWorld.keepAll.on=false;
 }
 

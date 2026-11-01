@@ -130,10 +130,10 @@ function throwIfImportAborted(signal,authorityOptions=null){assertAuthority(auth
 const statusListeners=new Set();
 function subscribeStatus(listener){if(typeof listener!=='function')throw new TypeError('Backup status listener is invalid.');statusListeners.add(listener);return ()=>statusListeners.delete(listener);}
 function notifyStatus(){for(const listener of statusListeners)try{listener();}catch(error){AppDiagnostics.capture('backup.status-listener',error,'warn');}}
-function beginImport(){
+function beginImport({backgroundPreemptible=false}={}){
   if(activeImportOperation)return activeImportOperation;
   const controller=new AbortController(),id=++importSequence;
-  activeImportOperation=freeze({id,signal:controller.signal,cancel:reason=>{if(!controller.signal.aborted)controller.abort(importAbortError(reason));}});
+  activeImportOperation=freeze({id,backgroundPreemptible:backgroundPreemptible===true,signal:controller.signal,cancel:reason=>{if(!controller.signal.aborted)controller.abort(importAbortError(reason));}});
   notifyStatus();return activeImportOperation;
 }
 function cancelImport(reason='Backup import was cancelled by the user.',options={}){
@@ -149,7 +149,7 @@ async function yieldImport(signal,authorityOptions=null){
   await yieldTask({signal});
   throwIfImportAborted(signal,authorityOptions);
 }
-function status(){return Object.freeze({busy:activeOperations>0,activeOperations,importActive:!!activeImportOperation,importCancelled:!!activeImportOperation?.signal.aborted,standaloneExportActive:!!localExportPromise||!!localExportRequest});}
+function status(){return Object.freeze({busy:activeOperations>0,activeOperations,importActive:!!activeImportOperation,importHoldsBackground:!!activeImportOperation&&!activeImportOperation.backgroundPreemptible,importCancelled:!!activeImportOperation?.signal.aborted,standaloneExportActive:!!localExportPromise||!!localExportRequest});}
 async function track(operation,wait=false,surface='managed'){activeOperations+=1;try{return await Exports.job(operation,{wait,surface});}finally{activeOperations=Math.max(0,activeOperations-1);}}
 const BackupCapture=BackupCaptureModule.create(freeze({
   configuration:freeze({backupVersion,limits:APP_LIMITS,portableAssets}),
@@ -232,7 +232,7 @@ async function createPortableBackupBlob(plan,{preferCompression=true,verify=true
 async function materializePortableCheckpoint(capture,{preferCompression=true,verify=true,retainInspection=false,report=null}={}){
   const plan=requireLogicalCheckpointCapture(capture);
   const file=await createPortableBackupBlob(plan,{preferCompression,verify,retainInspection,report});
-  return freeze({...file,exportedAt:plan.exportedAt,sourceRevision:plan.sourceRevision,warning:plan.warning,counts:freeze({...plan.counts})});
+  return freeze({...file,exportedAt:plan.exportedAt,sourceRevision:plan.sourceRevision,warning:plan.warning,attachmentsComplete:plan.completeness?.fullyRecoverable===true,counts:freeze({...plan.counts})});
 }
 const LogicalCheckpointCapture=freeze({capture:captureLogicalCheckpoint});
 const PortableCheckpointMaterializer=freeze({materialize:materializePortableCheckpoint});
@@ -303,7 +303,7 @@ function exportReporter(){
 // A portable backup holds the data as of its capture. A file saved through the
 // save dialog is read back (verified); a download cannot be, but the person
 // still made a backup, so the reminder counts both.
-function portableCopy(file,verified){return freeze({source:'file',sourceRevision:String(file&&file.sourceRevision||''),verified});}
+function portableCopy(file,verified){return freeze({source:'file',sourceRevision:String(file&&file.sourceRevision||''),verified,attachmentsComplete:file?.attachmentsComplete===true});}
 async function exportPortableBackup(){
   if(localExportPromise)return localExportPromise;
   // The save dialog opens straight from the click, before any waiting, so the
@@ -400,30 +400,39 @@ async function applyResolvedSavedDays(resolvedPlan,operation,reportProgress=null
   const currentDeletions=await AppData.deletionRecovery.savedDays();
   const deletionLedgerChanged=!Canonical.same(currentDeletions,expectedDeletions);
   if(deletionLedgerChanged)await AppData.deletionRecovery.replaceSavedDays(expectedDeletions);
-  // A ledger keeps its newest records within its limit; what it stored is
-  // what the restore verifies.
-  const storedDeletions=deletionLedgerChanged?await AppData.deletionRecovery.savedDays():currentDeletions;
+  // Mutation receipts come from canonical storage after its own normalization.
+  // The resolved intent is checked before the receipt is trusted.
+  const storedDeletions=deletionLedgerChanged?freeze([...(await AppData.deletionRecovery.savedDays())]):null;
+  let committedRecords=freeze([]);
+  if(recordsToSave.length){
+    committedRecords=freeze(currentDailyRecords(await getDailyRecordDocumentsByDates(recordsToSave.map(record=>record.date)),'Committed Saved Days'));
+    const byDate=new Map(committedRecords.map(record=>[record.date,record]));
+    for(const record of recordsToSave){
+      const intended=sanitizeCurrentDailyRecord(record),committed=byDate.get(record.date);
+      if(!intended||!committed||!Canonical.same(committed,intended))throw new Error(`Saved-Day reconciliation commit did not match the resolved state for ${record.date}.`);
+    }
+  }
+  if(deletionsToApply.length){
+    const lingering=await getDailyRecordDocumentsByDates(deletionsToApply.map(item=>item.date));
+    if(lingering.length)throw new Error(`Saved-Day reconciliation did not commit ${lingering.length} selected deletion${lingering.length===1?'':'s'}.`);
+  }
   const added=items.filter(item=>item.changed&&item.state==='record'&&!item.hadLocal).length;
   const replaced=items.filter(item=>item.changed&&item.state==='record'&&item.hadLocal).length;
   const kept=items.filter(item=>{const planItem=planItems.get(item.date);return !!(planItem&&planItem.conflict&&planItem.localCandidateId&&item.candidateId===planItem.localCandidateId);}).length;
   const identical=[...planItems.values()].filter(item=>item.identical).length;
-  return freeze({
-    changed:recordsToSave.length>0||deletionsToApply.length>0||deletionLedgerChanged,
-    count:added,replaced,deleted,kept,identical,batches,
-    appliedRecords:freeze(currentDailyRecords(recordsToSave,'Resolved Saved Days')),
-    expectedDeletions:freeze([...storedDeletions])
-  });
+  return freeze({changed:recordsToSave.length>0||deletionsToApply.length>0||deletionLedgerChanged,count:added,replaced,deleted,kept,identical,batches,appliedRecords:committedRecords,removedRecordDates:freeze(deletionsToApply.map(item=>item.date).sort()),expectedDeletions:storedDeletions});
 }
 async function applyResolvedNotes(resolvedPlan){
   const changed=(resolvedPlan&&resolvedPlan.notes||[]).filter(item=>item.changed),writes=changed.filter(item=>item.state==='record'&&item.value&&typeof item.value==='object'),deletions=changed.filter(item=>item.state==='deleted'&&item.deletedAt).map(item=>freeze({key:item.key,deletedAt:item.deletedAt}));
-  if(!writes.length&&!deletions.length)return {message:'',changed:false,expected:null,expectedDeletions:null,count:0,deleted:0};
+  if(!writes.length&&!deletions.length)return {message:'',changed:false,expectedItems:null,expectedDeletions:null,count:0,deleted:0};
   requireBackupMutationControl('reconciling notes');
-  const payload=Object.create(null);for(const item of writes)payload[item.key]=item.value;
+  const before=AppData.notes.normalizePayload(await AppData.notes.readFreshPayload()),payload=Object.create(null);for(const item of writes)payload[item.key]=item.value;
   const committed=await reconcileNotes(AppData.notes.normalizePayload(payload),deletions);
   if(!committed||typeof committed!=='object'||Array.isArray(committed))throw new Error('Note reconciliation did not return a canonical committed payload.');
-  const expected=AppData.notes.normalizePayload(committed),expectedDeletions=freeze([...(await AppData.deletionRecovery.notes())]),count=writes.filter(item=>notesTrashKey(item.key)).length,deleted=deletions.filter(item=>notesTrashKey(item.key)).length;
+  const expected=AppData.notes.normalizePayload(committed),keys=[...new Set([...Object.keys(before),...Object.keys(expected)])].filter(key=>!Canonical.same(before[key]||null,expected[key]||null)).sort();
+  const expectedItems=freeze(keys.map(key=>freeze({key,value:expected[key]||null}))),expectedDeletions=freeze([...(await AppData.deletionRecovery.notes())]),count=writes.filter(item=>notesTrashKey(item.key)).length,deleted=deletions.filter(item=>notesTrashKey(item.key)).length;
   const parts=[count?`${count} note${count===1?'':'s'} updated`:'',deleted?`${deleted} note${deleted===1?'':'s'} moved to Recently deleted`:''].filter(Boolean);
-  return {message:parts.length?` · ${parts.join(' · ')}`:'',changed:true,expected,expectedDeletions,count,deleted};
+  return {message:parts.length?` · ${parts.join(' · ')}`:'',changed:true,expectedItems,expectedDeletions,count,deleted};
 }
 async function applyResolvedActiveSession(resolvedPlan,{clear=false}={}){
   const resolved=resolvedPlan&&resolvedPlan.activeSession;
@@ -986,7 +995,7 @@ function backupCandidatePreview(parsed,file,metadata={}){
     appVersion:clampText(manifest.appVersion||data.appVersion||'',40)||null,
     formatVersion:Number(parsed&&parsed.formatVersion)||0,
     counts:Object.freeze({...counts}),
-    assets:Object.freeze({total:(parsed.assetDescriptors||[]).length,library:(parsed.assetDescriptors||[]).filter(item=>item.library).length,missing:(parsed.assetDescriptors||[]).filter(item=>item.missing).length}),
+    assets:Object.freeze({...BackupCodec.attachmentCoverage(parsed.assetDescriptors||[]),library:(parsed.assetDescriptors||[]).filter(item=>item.library).length}),
     legacy:!!report.legacy,
     ignoredTombstones:Number(report.ignoredTombstones)||0,
     ignoredOrInvalid:(Number(report.skipped)||0)+(Number(report.duplicates)||0),
@@ -1147,68 +1156,71 @@ async function selectResolvedImportedAssets(assessment,resolvedPlan,signal,attac
   return freeze({available:freeze(selected),toWrite:freeze(toWrite),reused:selected.length-toWrite.length,references});
 }
 async function commitImportedAssets(selection,signal,attachmentPlan=null){
-  if(!portableAssets||!selection)return freeze({written:0,published:0,reused:0,deleted:0,expected:freeze([]),expectedRemovedIds:freeze([]),references:freeze([]),expectedDeletions:freeze([])});
+  if(!portableAssets||!selection)return freeze({written:0,published:0,reused:0,deleted:0,expected:freeze([]),expectedRemovedIds:freeze([]),references:freeze([]),expectedDeletions:null});
   throwIfImportAborted(signal);
   const selected=selection.available||freeze([]),published=selected.length;
   if(published)await AssetData.importAll(selected,signal);
   throwIfImportAborted(signal);
   const deleteLocalIds=attachmentPlan&&attachmentPlan.deleteLocalIds||freeze([]);let deleted=0;
   if(deleteLocalIds.length){const result=await AssetData.removeMetadata(deleteLocalIds);deleted=Math.max(0,Number(result&&result.removed)||0);}
-  const expectedDeletions=attachmentPlan&&attachmentPlan.expectedDeletions||freeze([]);
-  await AppData.deletionRecovery.replaceAttachments(expectedDeletions);
-  const storedDeletions=freeze([...(await AppData.deletionRecovery.attachments())]);
-  return freeze({written:(selection.toWrite||[]).length,published,reused:Number(selection.reused)||0,deleted,changed:!!(published||deleted||attachmentPlan?.deletionLedgerChanged),expected:freeze([...selected]),expectedRemovedIds:freeze([...deleteLocalIds]),references:selection.references||freeze([]),expectedDeletions:storedDeletions});
+  const expectedDeletions=attachmentPlan&&attachmentPlan.expectedDeletions||freeze([]),deletionLedgerChanged=attachmentPlan?.deletionLedgerChanged===true;
+  if(deletionLedgerChanged)await AppData.deletionRecovery.replaceAttachments(expectedDeletions);
+  const storedDeletions=deletionLedgerChanged?freeze([...(await AppData.deletionRecovery.attachments())]):null;
+  return freeze({written:(selection.toWrite||[]).length,published,reused:Number(selection.reused)||0,deleted,changed:!!(published||deleted||deletionLedgerChanged),expected:freeze([...selected]),expectedRemovedIds:freeze([...deleteLocalIds]),references:selection.references||freeze([]),expectedDeletions:storedDeletions});
 }
 async function restoreSnapshotAssets(snapshot){
   if(!portableAssets||Number(snapshot&&snapshot.formatVersion)<10)return freeze({restored:false,removed:0,written:0});
   await AssetData.restoreAll(snapshot.importedAssets||[]);
   return freeze({restored:true,written:snapshot.importedAssets?.length||0});
 }
+const RESTORE_VERIFICATION_DOMAINS=freeze(new Set(['saved-days','notes','attachments','personal','pending-reviews','deletions','active-session']));
+function restoreVerificationFailure(error,domain){
+  const failure=error instanceof Error?error:new Error(String(error||'Restore verification failed.')),stage='restore-verification-'+domain;
+  if(!failure.backupStage||failure.backupStage==='restore-verification')try{Object.defineProperty(failure,'backupStage',{value:stage,configurable:true});}catch{}
+  if(!failure.diagnosticReason)try{Object.defineProperty(failure,'diagnosticReason',{value:'verification',configurable:true});}catch{}
+  if(!failure.code||failure.code==='Error')try{Object.defineProperty(failure,'code',{value:'RESTORE_VERIFICATION_MISMATCH',configurable:true});}catch{}
+  return failure;
+}
+async function verifyRestoreDomain(domain,work){
+  if(!RESTORE_VERIFICATION_DOMAINS.has(domain)||typeof work!=='function')throw new TypeError('Restore verification domain is invalid.');
+  const phase='restore-verification-'+domain;OperationDiagnostics.mark(phase+'-start');
+  try{const value=await work();OperationDiagnostics.mark(phase+'-complete');return value;}
+  catch(error){const failure=restoreVerificationFailure(error,domain);OperationDiagnostics.mark(phase+'-failed',{stage:String(failure.backupStage||phase),errorCode:String(failure.code||failure.name||'Error')});throw failure;}
+}
 async function verifyRestoreCommit(expected,signal,authorityOptions=null){
   throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);
   const records=Array.isArray(expected.records)?expected.records:[];
-  if(records.length){
-    const stored=await getDailyRecordDocumentsByDates(records.map(record=>record.date));
-    const byDate=new Map(stored.map(record=>[record.date,sanitizeCurrentDailyRecord(record)]));
-    for(const record of records)if(!Canonical.same(byDate.get(record.date),sanitizeCurrentDailyRecord(record)))throw new Error(`Post-restore verification failed for saved day ${record.date}.`);
-  }
-  if(Array.isArray(expected.recordDatesExact)){
-    const actual=[...((await AppData.dailyRecords.backupDates()).dates||[])].sort(),wanted=[...expected.recordDatesExact].sort();
-    if(actual.length!==wanted.length||actual.some((date,index)=>date!==wanted[index]))throw new Error('Post-restore verification found Saved Days outside the selected version.');
-  }
-  if(expected.notes){
-    const stored=AppData.notes.normalizePayload(await AppData.notes.readFreshPayload());
-    if(!Canonical.same(stored,expected.notes))throw new Error('Post-restore verification failed for notes.');
-  }
-  if(Array.isArray(expected.assets)){
-    const rows=await AssetData.list(),catalogue=new Map(rows.map(row=>[row.id,row])),verifiedPhysical=new Set();
-    for(const item of expected.assets){
-      const row=catalogue.get(item.assetId);
-      if(!row||row.name!==item.name||row.library!==item.library||row.size!==item.size||row.type!==item.mimeType)throw new Error(`Post-restore verification failed for attachment ${item.assetId}.`);
-      const physicalKey=String(row.file||item.assetId)+'\u0000'+String(item.checksum||'')+'\u0000'+Number(item.size);
-      if(!verifiedPhysical.has(physicalKey)){
-        const stored=await AssetData.get(item.assetId);
-        if(!(stored instanceof Blob)||stored.size!==item.size||String(stored.type||'')!==item.mimeType||await BackupCodec.checksumBlob(stored,{signal})!==item.checksum)throw new Error(`Post-restore verification failed for attachment ${item.assetId}.`);
-        verifiedPhysical.add(physicalKey);
-      }
+  if(records.length||Array.isArray(expected.removedRecordDates)||Array.isArray(expected.recordDatesExact))await verifyRestoreDomain('saved-days',async()=>{
+    if(records.length){
+      const stored=await getDailyRecordDocumentsByDates(records.map(record=>record.date)),byDate=new Map(stored.map(record=>[record.date,sanitizeCurrentDailyRecord(record)]));
+      for(const record of records)if(!Canonical.same(byDate.get(record.date),sanitizeCurrentDailyRecord(record)))throw new Error(`Post-restore verification failed for saved day ${record.date}.`);
     }
-    if(Array.isArray(expected.assetIdsExact)){
-      const actual=rows.map(row=>String(row.id||'')).sort(),wanted=[...expected.assetIdsExact].map(String).sort();
-      if(actual.length!==wanted.length||actual.some((id,index)=>id!==wanted[index]))throw new Error('Post-restore verification found attachment identities outside the selected version.');
+    if(Array.isArray(expected.removedRecordDates)&&expected.removedRecordDates.length){const remaining=new Set((await getDailyRecordDocumentsByDates(expected.removedRecordDates)).map(record=>record.date));for(const date of expected.removedRecordDates)if(remaining.has(date))throw new Error(`Post-restore verification failed to remove saved day ${date}.`);}if(Array.isArray(expected.recordDatesExact)){const actual=[...((await AppData.dailyRecords.backupDates()).dates||[])].sort(),wanted=[...expected.recordDatesExact].sort();if(actual.length!==wanted.length||actual.some((date,index)=>date!==wanted[index]))throw new Error('Post-restore verification found Saved Days outside the selected version.');}
+  });
+  if(expected.notes||Array.isArray(expected.noteItems))await verifyRestoreDomain('notes',async()=>{
+    if(expected.notes){const stored=AppData.notes.normalizePayload(await AppData.notes.readFreshPayload());if(!Canonical.same(stored,expected.notes))throw new Error('Post-restore verification failed for notes.');}
+    if(Array.isArray(expected.noteItems)&&expected.noteItems.length){const rows=await AppData.notes.readFreshItems(expected.noteItems.map(item=>item.key));for(let index=0;index<expected.noteItems.length;index++){const receipt=expected.noteItems[index],actual=rows[index]?AppData.notes.normalizePayload({[receipt.key]:rows[index]})[receipt.key]||null:null;if(!Canonical.same(actual,receipt.value))throw new Error(`Post-restore verification failed for note ${receipt.key}.`);}}
+  });
+  if(Array.isArray(expected.assets)||Array.isArray(expected.removedAssetIds))await verifyRestoreDomain('attachments',async()=>{
+    let rows=null;
+    if(Array.isArray(expected.assets)){
+      rows=await AssetData.list();const catalogue=new Map(rows.map(row=>[row.id,row])),verifiedPhysical=new Set();
+      for(const item of expected.assets){const row=catalogue.get(item.assetId);if(!row||row.name!==item.name||row.library!==item.library||row.size!==item.size||row.type!==item.mimeType)throw new Error(`Post-restore verification failed for attachment ${item.assetId}.`);const physicalKey=String(row.file||item.assetId)+'\u0000'+String(item.checksum||'')+'\u0000'+Number(item.size);if(!verifiedPhysical.has(physicalKey)){const stored=await AssetData.get(item.assetId);if(!(stored instanceof Blob)||stored.size!==item.size||String(stored.type||'')!==item.mimeType||await BackupCodec.checksumBlob(stored,{signal})!==item.checksum)throw new Error(`Post-restore verification failed for attachment ${item.assetId}.`);verifiedPhysical.add(physicalKey);}}
+      if(Array.isArray(expected.assetIdsExact)){const actual=rows.map(row=>String(row.id||'')).sort(),wanted=[...expected.assetIdsExact].map(String).sort();if(actual.length!==wanted.length||actual.some((id,index)=>id!==wanted[index]))throw new Error('Post-restore verification found attachment identities outside the selected version.');}
     }
-  }
-  if(Array.isArray(expected.removedAssetIds)&&expected.removedAssetIds.length){const catalogue=new Set((await AssetData.list()).map(row=>row.id));for(const id of expected.removedAssetIds)if(catalogue.has(id))throw new Error(`Post-restore verification failed to remove Attachment Library identity ${id}.`);}
-  if(expected.personalData)await personalVerify(expected.personalData);
-  if(Array.isArray(expected.pendingReviews)&&!Canonical.same(await AppData.pendingReviews.list(),expected.pendingReviews))throw new Error('Post-restore verification failed for versions kept for review.');
-  if(Array.isArray(expected.savedDayDeletions)){const stored=await AppData.deletionRecovery.savedDays();if(!Canonical.same(stored,expected.savedDayDeletions))throw new Error('Post-restore verification failed for Saved-Day deletion history.');}
-  if(Array.isArray(expected.noteDeletions)){const stored=await AppData.deletionRecovery.notes();if(!Canonical.same(stored,expected.noteDeletions))throw new Error('Post-restore verification failed for note deletion history.');}
-  if(Array.isArray(expected.attachmentDeletions)){const stored=await AppData.deletionRecovery.attachments();if(!Canonical.same(stored,expected.attachmentDeletions))throw new Error('Post-restore verification failed for Attachment deletion history.');}
-  if(Object.prototype.hasOwnProperty.call(expected,'activeSession')){
-    await AppData.activeSession.settled();
-    const loaded=await readCanonicalActiveSession(),stored=loaded&&loaded.value||null;
-    if(!Canonical.same(ActiveSessionCodec.sanitizeCurrent(stored),expected.activeSession))throw new Error('Post-restore verification failed for the active session.');
-    await verifyActiveSessionRuntime(expected.activeSession,expected.scheduleText||'');
-  }
+    if(Array.isArray(expected.removedAssetIds)&&expected.removedAssetIds.length){const catalogue=new Set((rows||await AssetData.list()).map(row=>row.id));for(const id of expected.removedAssetIds)if(catalogue.has(id))throw new Error(`Post-restore verification failed to remove Attachment Library identity ${id}.`);}
+  });
+  if(expected.personalData)await verifyRestoreDomain('personal',()=>personalVerify(expected.personalData));
+  if(Array.isArray(expected.pendingReviews)||Array.isArray(expected.pendingReviewItems))await verifyRestoreDomain('pending-reviews',async()=>{
+    if(Array.isArray(expected.pendingReviews)&&!Canonical.same(await AppData.pendingReviews.list(),expected.pendingReviews))throw new Error('Post-restore verification failed for versions kept for review.');
+    if(Array.isArray(expected.pendingReviewItems)&&expected.pendingReviewItems.length){const rows=await AppData.pendingReviews.readItems(expected.pendingReviewItems.map(item=>item.id));for(let index=0;index<expected.pendingReviewItems.length;index++)if(!Canonical.same(rows[index]||null,expected.pendingReviewItems[index].value))throw new Error(`Post-restore verification failed for kept version ${expected.pendingReviewItems[index].id}.`);}
+  });
+  if(Array.isArray(expected.savedDayDeletions)||Array.isArray(expected.noteDeletions)||Array.isArray(expected.attachmentDeletions))await verifyRestoreDomain('deletions',async()=>{
+    if(Array.isArray(expected.savedDayDeletions)){const stored=await AppData.deletionRecovery.savedDays();if(!Canonical.same(stored,expected.savedDayDeletions))throw new Error('Post-restore verification failed for Saved-Day deletion history.');}
+    if(Array.isArray(expected.noteDeletions)){const stored=await AppData.deletionRecovery.notes();if(!Canonical.same(stored,expected.noteDeletions))throw new Error('Post-restore verification failed for note deletion history.');}
+    if(Array.isArray(expected.attachmentDeletions)){const stored=await AppData.deletionRecovery.attachments();if(!Canonical.same(stored,expected.attachmentDeletions))throw new Error('Post-restore verification failed for Attachment deletion history.');}
+  });
+  if(Object.prototype.hasOwnProperty.call(expected,'activeSession'))await verifyRestoreDomain('active-session',async()=>{await AppData.activeSession.settled();const loaded=await readCanonicalActiveSession(),stored=loaded&&loaded.value||null;if(!Canonical.same(ActiveSessionCodec.sanitizeCurrent(stored),expected.activeSession))throw new Error('Post-restore verification failed for the active session.');await verifyActiveSessionRuntime(expected.activeSession,expected.scheduleText||'');});
   return true;
 }
 function sealVerifiedPortableSnapshot(parsed,{provenance=freeze({kind:'portable-file'}),release=null}={}){
@@ -1410,6 +1422,10 @@ async function ensureRestoreCapacity(parsed,preview={}){
   return true;
 }
 
+async function releaseRestoreScratch(file,scope){
+  try{await Exports.run('file.release',{file});}
+  catch(error){AppDiagnostics.capture(scope,error,'warn');}
+}
 async function captureLocalSafetyCopy(_stored,{afterCapture=null}={}){
   const materialized=await createCanonicalCheckpointWithInspection({assumeFlushed:true,requireCanonicalComplete:true}),rollbackJournal=materialized.inspection;
   const {inspection:_inspection,...safety}=materialized,safetyFile=freeze(safety);
@@ -1430,6 +1446,19 @@ function restoreSurfaceStatus(stored,message,ok=true,stage='local',details={}){
   const snapshot=candidateSnapshotState(stored),report=snapshot&&snapshot.provenance&&snapshot.provenance.managedProgress;
   if(typeof report==='function'){try{report(freeze({stage:String(stage||'local'),message:String(message||''),ok:ok!==false,...details}));}catch(error){AppDiagnostics.capture('backup.managed-recovery-progress',error,'warn');}return true;}
   portablePresentation?.update({progress:{stage,...details}});setLocalExportStatus(message,ok);return false;
+}
+const RESTORE_MUTATION_STAGES=freeze(new Set(['assets','saved-day-state','notes','pending-reviews','active-session','personal-data','verification']));
+function restoreMutationFailure(error,stage){
+  const failure=error instanceof Error?error:new Error(String(error||'Restore mutation failed.'));
+  if(!failure.backupStage)try{Object.defineProperty(failure,'backupStage',{value:'restore-'+stage,configurable:true});}catch{}
+  return failure;
+}
+async function runRestoreMutationStage(stage,work){
+  if(!RESTORE_MUTATION_STAGES.has(stage)||typeof work!=='function')throw new TypeError('Restore mutation stage is invalid.');
+  const phase='restore-mutation-'+stage;
+  OperationDiagnostics.mark(phase+'-start');
+  try{const value=await work();OperationDiagnostics.mark(phase+'-complete');return value;}
+  catch(error){const failure=restoreMutationFailure(error,stage);OperationDiagnostics.mark(phase+'-failed',{stage:String(failure.backupStage||''),errorCode:String(failure.code||failure.name||'Error')});throw failure;}
 }
 async function restoreBackupAttemptWithOperation(candidate,operation,options={}){
   // A sync runs without questions like adding what is missing, but takes
@@ -1581,70 +1610,88 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   OperationDiagnostics.mark('local-safety-capture-start');
   const {safetyFile,rollbackJournal}=await captureLocalSafetyCopy(stored,{afterCapture:()=>assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates,stable.scope)});
   OperationDiagnostics.mark('local-safety-capture-complete',{bytes:Number(safetyFile&&safetyFile.blob&&safetyFile.blob.size)||0});
-  const rollbackScheduleText=scheduleRead();
-  const rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),notes:await AppData.deletionRecovery.notes(),attachments:await AppData.deletionRecovery.attachments()});
   const restoreId=`restore_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,14)}`;
-  let committedDescription='',journalPrepared=false;
+  let rollbackScheduleText='',rollbackDeletionState=null,committedDescription='',journalPrepared=false;
   try{
+    rollbackScheduleText=scheduleRead();
+    rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),notes:await AppData.deletionRecovery.notes(),attachments:await AppData.deletionRecovery.attachments()});
     OperationDiagnostics.mark('restore-journal-prepare-start');
     await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,scheduleText:rollbackScheduleText,savedDayDeletions:rollbackDeletionState.savedDays,noteDeletions:rollbackDeletionState.notes,attachmentDeletions:rollbackDeletionState.attachments});
     journalPrepared=true;OperationDiagnostics.mark('restore-journal-prepare-complete');
     let assetResult=freeze({written:0,published:0,reused:0,deleted:0,changed:false,expected:freeze([]),expectedRemovedIds:freeze([]),references:freeze([]),expectedDeletions:freeze([])});
     if(portableAssets&&Number(parsed.formatVersion)>=10){
-      await AppData.restoreJournal.mark(restoreId,'applying-assets');
-      const currentAssessment=await assessImportedAssets(parsed,signal);
-      const selectedAssets=await selectResolvedImportedAssets(currentAssessment,resolvedPlan,signal,attachmentPlan,resolvedAssetReferences);
-      assetResult=await commitImportedAssets(selectedAssets,signal,attachmentPlan);
-      if(assetResult.published)committedDescription=`${assetResult.published} selected attachment${assetResult.published===1?' was':'s were'} already updated`;
-      await AppData.restoreJournal.mark(restoreId,'assets-committed');
-      throwIfImportAborted(signal);await yieldImport(signal);
+      assetResult=await runRestoreMutationStage('assets',async()=>{
+        await AppData.restoreJournal.mark(restoreId,'applying-assets');
+        const currentAssessment=await assessImportedAssets(parsed,signal);
+        const selectedAssets=await selectResolvedImportedAssets(currentAssessment,resolvedPlan,signal,attachmentPlan,resolvedAssetReferences);
+        const result=await commitImportedAssets(selectedAssets,signal,attachmentPlan);
+        if(result.published)committedDescription=String(result.published)+' selected attachment'+(result.published===1?' was':'s were')+' already updated';
+        await AppData.restoreJournal.mark(restoreId,'assets-committed');
+        throwIfImportAborted(signal);await yieldImport(signal);return result;
+      });
     }
-    await AppData.restoreJournal.mark(restoreId,'applying-saved-day-state');
     const report={...(parsed.report||{}),warnings:[...((parsed.report&&parsed.report.warnings)||[])]};
-    const dailyResult=await applyResolvedSavedDays(resolvedPlan,operation,(message,progress)=>restoreSurfaceStatus(stored,message,true,'local-apply',{current:Number(progress&&progress.committed)||0,total:Number(progress&&progress.total)||0}));
-    const {count,replaced,deleted,kept,identical,batches,appliedRecords,expectedDeletions}=dailyResult;
-    const committedRecords=count+replaced;
-    if(committedRecords)committedDescription+=(committedDescription?' and ':'')+`${committedRecords} Saved Day${committedRecords===1?' was':'s were'} already saved`;
-    if(dailyResult.changed&&expectedDeletions)committedDescription+=(committedDescription?' and ':'')+'Saved-Day choices were already saved';
-    await AppData.restoreJournal.mark(restoreId,'saved-day-state-committed');
-    throwIfImportAborted(signal);await yieldImport(signal);
-    await AppData.restoreJournal.mark(restoreId,'applying-notes');
-    const noteResult=await applyResolvedNotes(resolvedPlan);
-    if(noteResult.changed)committedDescription+=(committedDescription?' and ':'')+'Notes were already saved';
-    await AppData.restoreJournal.mark(restoreId,'notes-committed');
-    throwIfImportAborted(signal);await yieldImport(signal);
-    let reviewResult=freeze({changed:false,expected:null,kept:0});
+    const dailyResult=await runRestoreMutationStage('saved-day-state',async()=>{
+      await AppData.restoreJournal.mark(restoreId,'applying-saved-day-state');
+      const result=await applyResolvedSavedDays(resolvedPlan,operation,(message,progress)=>restoreSurfaceStatus(stored,message,true,'local-apply',{current:Number(progress&&progress.committed)||0,total:Number(progress&&progress.total)||0}));
+      const committedRecords=result.count+result.replaced;
+      if(committedRecords)committedDescription+=(committedDescription?' and ':'')+String(committedRecords)+' Saved Day'+(committedRecords===1?' was':'s were')+' already saved';
+      if(result.changed&&result.expectedDeletions)committedDescription+=(committedDescription?' and ':'')+'Saved-Day choices were already saved';
+      await AppData.restoreJournal.mark(restoreId,'saved-day-state-committed');
+      throwIfImportAborted(signal);await yieldImport(signal);return result;
+    });
+    const {count,replaced,deleted,kept,identical,batches,appliedRecords,removedRecordDates,expectedDeletions}=dailyResult;
+    const noteResult=await runRestoreMutationStage('notes',async()=>{
+      await AppData.restoreJournal.mark(restoreId,'applying-notes');
+      const result=await applyResolvedNotes(resolvedPlan);
+      if(result.changed)committedDescription+=(committedDescription?' and ':'')+'Notes were already saved';
+      await AppData.restoreJournal.mark(restoreId,'notes-committed');
+      throwIfImportAborted(signal);await yieldImport(signal);return result;
+    });
+    let reviewResult=freeze({changed:false,expectedItems:null,kept:0});
     if(incomingReviews.length){
-      await AppData.restoreJournal.mark(restoreId,'applying-pending-reviews');
-      const expected=freeze(PendingReviewCodec.merge([await AppData.pendingReviews.list(),incomingReviews],APP_LIMITS.maxPendingReviews));
-      const changedIds=await AppData.pendingReviews.merge(incomingReviews);
-      reviewResult=freeze({changed:changedIds.length>0,expected,kept:keptReviews.length});
-      if(reviewResult.changed)committedDescription+=(committedDescription?' and ':'')+'versions kept for review were already saved';
+      reviewResult=await runRestoreMutationStage('pending-reviews',async()=>{
+        await AppData.restoreJournal.mark(restoreId,'applying-pending-reviews');
+        const before=await AppData.pendingReviews.list(),intended=freeze(PendingReviewCodec.merge([before,incomingReviews],APP_LIMITS.maxPendingReviews)),intendedById=new Map(intended.map(item=>[item.id,item]));
+        const changedIds=await AppData.pendingReviews.merge(incomingReviews),committed=changedIds.length?await AppData.pendingReviews.readItems(changedIds):freeze([]);
+        const expectedItems=freeze(changedIds.map((id,index)=>{const value=intendedById.get(id)||null;if(!Canonical.same(committed[index]||null,value))throw new Error(`Pending-review reconciliation commit did not match the resolved state for ${id}.`);return freeze({id,value});}));
+        const result=freeze({changed:changedIds.length>0,expectedItems,kept:keptReviews.length});
+        if(result.changed)committedDescription+=(committedDescription?' and ':'')+'versions kept for review were already saved';
+        return result;
+      });
     }
-    await AppData.restoreJournal.mark(restoreId,'applying-active-session');
-    const sessionResult=await applyResolvedActiveSession(resolvedPlan,{clear:clearSession});
-    if(sessionResult.changed)committedDescription+=(committedDescription?' and ':'')+'the Active Session was already saved';
-    await AppData.restoreJournal.mark(restoreId,'active-session-committed');
-    const localPersonal=rollbackJournal.importedPersonalData;
-    const expectedPersonal=localPersonal?{version:2,plans:decisions.plans==='replace'&&parsed.importedPersonalData?parsed.importedPersonalData.plans:localPersonal.plans,preferences:decisions.personalSettings==='replace'&&parsed.importedPersonalData?parsed.importedPersonalData.preferences:localPersonal.preferences}:null;
-    if(expectedPersonal){await AppData.restoreJournal.mark(restoreId,'applying-personal-data');await personalImport(expectedPersonal);}
-    const personalChanged=!!parsed.importedPersonalData&&(decisions.plans==='replace'||decisions.personalSettings==='replace');
-    await AppData.restoreJournal.mark(restoreId,'verifying');
+    const sessionResult=await runRestoreMutationStage('active-session',async()=>{
+      await AppData.restoreJournal.mark(restoreId,'applying-active-session');
+      const result=await applyResolvedActiveSession(resolvedPlan,{clear:clearSession});
+      if(result.changed)committedDescription+=(committedDescription?' and ':'')+'the Active Session was already saved';
+      await AppData.restoreJournal.mark(restoreId,'active-session-committed');return result;
+    });
+    const localPersonal=rollbackJournal.importedPersonalData,personalChanged=!!parsed.importedPersonalData&&(decisions.plans==='replace'||decisions.personalSettings==='replace');
+    let committedPersonal=null;
+    if(personalChanged){
+      const intendedPersonal=BackupCodec.normalizePersonalData(localPersonal?{version:2,plans:decisions.plans==='replace'?parsed.importedPersonalData.plans:localPersonal.plans,preferences:decisions.personalSettings==='replace'?parsed.importedPersonalData.preferences:localPersonal.preferences}:parsed.importedPersonalData);
+      if(!intendedPersonal)throw new Error('Resolved Personal Data is outside the current canonical schema.');
+      committedPersonal=await runRestoreMutationStage('personal-data',async()=>{await AppData.restoreJournal.mark(restoreId,'applying-personal-data');await personalImport(intendedPersonal);const committed=BackupCodec.normalizePersonalData(await personalExport({flush:false}));if(!committed||!Canonical.same(committed,intendedPersonal))throw new Error('Personal-data reconciliation commit did not match the resolved state.');return freeze(committed);});
+    }
     const expectedCommit={
-      personalData:expectedPersonal,records:appliedRecords,
-      notes:noteResult.expected,
-      assets:portableAssets&&Number(parsed.formatVersion)>=10?assetResult.expected:undefined,
-      removedAssetIds:portableAssets&&Number(parsed.formatVersion)>=10?assetResult.expectedRemovedIds:undefined,
-      savedDayDeletions:expectedDeletions,
-      noteDeletions:noteResult.expectedDeletions,
-      attachmentDeletions:assetResult.expectedDeletions,
-      ...(reviewResult.expected?{pendingReviews:reviewResult.expected}:{})
+      ...(committedPersonal?{personalData:committedPersonal}:{}),
+      ...(appliedRecords.length?{records:appliedRecords}:{}),
+      ...(removedRecordDates.length?{removedRecordDates}:{}),
+      ...(noteResult.expectedItems?.length?{noteItems:noteResult.expectedItems}:{}),
+      ...(portableAssets&&Number(parsed.formatVersion)>=10&&assetResult.changed?{assets:assetResult.expected,removedAssetIds:assetResult.expectedRemovedIds}:{}),
+      ...(Array.isArray(expectedDeletions)?{savedDayDeletions:expectedDeletions}:{}),
+      ...(Array.isArray(noteResult.expectedDeletions)?{noteDeletions:noteResult.expectedDeletions}:{}),
+      ...(Array.isArray(assetResult.expectedDeletions)?{attachmentDeletions:assetResult.expectedDeletions}:{}),
+      ...(reviewResult.expectedItems?.length?{pendingReviewItems:reviewResult.expectedItems}:{})
     };
     if(sessionResult.changed){expectedCommit.activeSession=sessionResult.expected;expectedCommit.scheduleText=sessionResult.scheduleText||'';}
-    await verifyRestoreCommit(expectedCommit,signal);
-    throwIfImportAborted(signal);
-    await AppData.restoreJournal.mark(restoreId,'verified');
-    OperationDiagnostics.mark('canonical-verification-complete');
+    await runRestoreMutationStage('verification',async()=>{
+      await AppData.restoreJournal.mark(restoreId,'verifying');
+      await verifyRestoreCommit(expectedCommit,signal);
+      throwIfImportAborted(signal);
+      await AppData.restoreJournal.mark(restoreId,'verified');
+      OperationDiagnostics.mark('canonical-verification-complete');
+    });
     const changed=!!(dailyResult.changed||assetResult.changed||noteResult.changed||sessionResult.changed||personalChanged||reviewResult.changed);
     if(changed)await rebaseRepositoryPreparationAcceleration('combine');
     await AppData.restoreJournal.clear(restoreId);journalPrepared=false;clearFault();
@@ -1704,7 +1751,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     }
     Object.defineProperty(failure,'studyDirectorCommittedDescription',{value:committedDescription,configurable:true});
     throw failure;
-  }finally{await Exports.run('file.release',{file:safetyFile.blob});}
+  }finally{await releaseRestoreScratch(safetyFile.blob,'backup.restore-safety-file-release');}
   });
 }
 // Replace makes this device match the backup without losing anything here
@@ -1814,6 +1861,7 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
   if(parsed.noteScope)throw new Error('This backup version was read for one note only and cannot replace current data.');
   if(requireManaged&&(!repositoryManifest||provenance.repositoryCommitted!==true))throw new Error('Replace current data is available here only for a verified Device Folder or Google Drive backup.');
   if(Number(parsed.formatVersion)<15||!parsed.protectedCheckpointManifest)throw new Error('The selected backup is too old for exact replacement. Combine it with current data instead.');
+  if(!BackupCodec.attachmentCoverage(parsed.assetDescriptors||[]).fullyRecoverable)throw new Error('This verified backup is missing attachment bytes. Combine or add what is missing instead of replacing current data.');
   const checkpointId=String(repositoryManifest&&repositoryManifest.checkpoint&&repositoryManifest.checkpoint.checkpointId||parsed.protectedCheckpointManifest.checkpointId||''),preview=candidate.preview||{};
   if(!checkpointId||checkpointId!==String(parsed.protectedCheckpointManifest.checkpointId||''))throw new Error('The selected backup identity is inconsistent.');
   throwIfImportCancelled(signal);
@@ -1853,9 +1901,11 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
     OperationDiagnostics.mark('local-safety-capture-start');
     const {safetyFile,rollbackJournal}=await captureLocalSafetyCopy(stored);
     OperationDiagnostics.mark('local-safety-capture-complete',{bytes:Number(safetyFile&&safetyFile.blob&&safetyFile.blob.size)||0});
-    const rollbackScheduleText=scheduleRead(),rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),notes:await AppData.deletionRecovery.notes(),attachments:await AppData.deletionRecovery.attachments()});
-    const restoreId=`restore_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,14)}`;let journalPrepared=false,committedDescription='';
+    const restoreId=`restore_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,14)}`;
+    let rollbackScheduleText='',rollbackDeletionState=null,journalPrepared=false,committedDescription='';
     try{
+      rollbackScheduleText=scheduleRead();
+      rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),notes:await AppData.deletionRecovery.notes(),attachments:await AppData.deletionRecovery.attachments()});
       OperationDiagnostics.mark('restore-journal-prepare-start');
       await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,scheduleText:rollbackScheduleText,savedDayDeletions:rollbackDeletionState.savedDays,noteDeletions:rollbackDeletionState.notes,attachmentDeletions:rollbackDeletionState.attachments});
       journalPrepared=true;OperationDiagnostics.mark('restore-journal-prepare-complete');
@@ -1893,7 +1943,7 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
       }
       Object.defineProperty(failure,'studyDirectorCommittedDescription',{value:committedDescription,configurable:true});
       throw failure;
-    }finally{await Exports.run('file.release',{file:safetyFile.blob});}
+    }finally{await releaseRestoreScratch(safetyFile.blob,'backup.restore-safety-file-release');}
   });
 }
 async function restoreManagedVersion(candidate,options={}){
@@ -1917,7 +1967,7 @@ async function recoverInterruptedRestore(){
   if(!durable){clearFault();OperationDiagnostics.finish({recovered:false},traceId);return Object.freeze({recovered:false});}
   if(!appCanMutate()){
     failClosed('An interrupted restore is waiting for the tab that holds Study Director control. Reload after taking control before editing data.');
-    await Exports.run('file.release',{file:durable.payload.blob});OperationDiagnostics.finish({pending:true},traceId);return Object.freeze({recovered:false,pending:true});
+    await releaseRestoreScratch(durable.payload.blob,'backup.recovery-file-release');OperationDiagnostics.finish({pending:true},traceId);return Object.freeze({recovered:false,pending:true});
   }
   requireBackupMutationControl('recovering an interrupted restore');
   return runExclusive('restore-recovery',()=>withPersistenceSuppressed(async()=>{
@@ -1934,7 +1984,7 @@ async function recoverInterruptedRestore(){
       recoveryNotice.finish({lifecycle:'failed',message:`Interrupted restore recovery could not finish: ${error&&error.message||error}. Preserve browser storage and retry recovery.`});
       failClosed(`Interrupted restore recovery could not finish: ${error&&error.message||error}`);
       OperationDiagnostics.fail(error,{},traceId);throw error;
-    }finally{await Exports.run('file.release',{file:durable.payload.blob});}
+    }finally{await releaseRestoreScratch(durable.payload.blob,'backup.recovery-file-release');}
   }));
 }
 async function restoreBackupWithOperation(candidate,operation,options={}){
@@ -1963,9 +2013,10 @@ async function importPortableBackup(ev){
   try{
     OperationDiagnostics.mark('standalone-inspection-start',{bytes:Number(f.size)||0},traceId);candidate=await inspectBackup(f,{filename:f.name||'',signal:operation.signal});OperationDiagnostics.mark('standalone-inspection-complete',{},traceId);
     const preview=candidate.preview||{},stored=inspectedBackups.get(candidate),snapshot=stored?candidateSnapshotState(stored):null,parsed=snapshot&&snapshot.parsed||null;
-    const captureAuthority=String(parsed&&parsed.captureAuthority||'unknown'),exactCapable=Number(parsed&&parsed.formatVersion)>=18&&captureAuthority==='canonical-complete'&&!!parsed&&!!parsed.protectedCheckpointManifest,rescuePartial=captureAuthority==='rescue-partial';
+    const captureAuthority=String(parsed&&parsed.captureAuthority||'unknown'),exactCapable=Number(parsed&&parsed.formatVersion)>=18&&captureAuthority==='canonical-complete'&&!!parsed&&!!parsed.protectedCheckpointManifest&&BackupCodec.attachmentCoverage(parsed.assetDescriptors||[]).fullyRecoverable,rescuePartial=captureAuthority==='rescue-partial';
     const restoreChoices=presentation.restoreChoices,choices=[...(preview.reconciliationCapable?[restoreChoices.missing]:[]),restoreChoices.combine,...(exactCapable?[restoreChoices.replace]:[])];
-    const decisionDetails=[exactCapable?'Choose how this backup should be applied.':rescuePartial?'This backup was saved while browser storage was failing. It can bring back what it holds, but it cannot replace current data.':'This backup is from an older version of Study Director. It can be combined with current data, but it cannot replace it.',...[presentation.reach?.()||''].filter(Boolean)];
+    const missingBinary=!BackupCodec.attachmentCoverage(parsed.assetDescriptors||[]).fullyRecoverable;
+    const decisionDetails=[exactCapable?'Choose how this backup should be applied.':missingBinary?'This backup is missing attachment bytes. You can combine or add its available data, but exact replacement is unsafe.':rescuePartial?'This backup was saved while browser storage was failing. It can bring back what it holds, but it cannot replace current data.':'This backup is from an older version of Study Director. It can be combined with current data, but it cannot replace it.',BackupCodec.missingAttachmentWarning(parsed.assetDescriptors||[]),...[presentation.reach?.()||''].filter(Boolean)].filter(Boolean);
     OperationDiagnostics.mark('standalone-decision-start',{},traceId);const mode=await choose({title:'Use this backup',message:`Verified backup${preview.exportedAt?` from ${new Date(preview.exportedAt).toLocaleString()}`:''}.`,details:decisionDetails,cancelLabel:'Keep current',choices});
     OperationDiagnostics.mark('standalone-decision-complete',{mode:mode||'keep-current'},traceId);if(!mode){finishPortablePresentation({message:'Backup import cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,stage:'decision'},traceId);return freeze({cancelled:true});}
     consumed=true;OperationDiagnostics.mark('standalone-apply-start',{mode},traceId);
@@ -2038,8 +2089,7 @@ const repository=freeze({
   // What this device last shared through Drive, and recording a version
   // placed there as shared.
   sharedBase:()=>AppData.reconciliationBase.read().catch(()=>null),
-  establishBase:checkpointId=>ManagedRepository.establishBase(checkpointId),
-  spine:()=>ManagedRepository.spine()
+  establishBase:checkpointId=>ManagedRepository.establishBase(checkpointId)
 });
 return freeze({controller,repository});
 })();
@@ -2059,7 +2109,7 @@ const BackupProviderRuntime=BackupProviderModule.createRuntime(freeze({
   ports:freeze({
     configuration:freeze({appVersion:APP_VERSION}),
     controller:freeze({beginImport:BackupController.beginImport,cancelImport:BackupController.cancelImport,finishImport:BackupController.finishImport}),
-    exports:freeze({run:Exports.run,followProtection:Exports.followProtection}),
+    exports:freeze({run:Exports.run,protect:Exports.protect,unprotect:Exports.unprotect,followProtection:Exports.followProtection}),
     domain:freeze({clampText}),
     view:freeze({presentation:ports.view.presentation}),
     ownership:freeze({canRunBackground:()=>!appCanMutate()?'awaiting-control':Exports.backgroundAvailable(),canShare:()=>ports.operations.canShare(),requireMutationControl:requireBackupMutationControl}),

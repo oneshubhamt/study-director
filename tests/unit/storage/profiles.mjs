@@ -10,14 +10,14 @@ for(const file of ['internal','profiles'])vm.runInContext(fs.readFileSync(`sourc
 const ProfilesModule=context[Symbol.for('studyDirector.internalModules.v1')].require('profiles',1);
 const freeze=Object.freeze,REGISTRY='studyDirector.profiles.v1',pattern=/^prof_[a-z0-9]{1,24}_[a-z0-9]{6,12}_[a-f0-9]{8}$/u;
 
-function device(){
+function device(fault={}){
   const store=new Map(),events={reloads:0,databases:[],directories:[]},listeners=new Set();let clock=Date.UTC(2026,9,18,9,0,0),counter=0;
   function page(scope=''){
     return ProfilesModule.createController(freeze({ports:freeze({
       scope:freeze({pattern,registryKey:REGISTRY,scope,separator:'~'}),
-      storage:freeze({keys:()=>[...store.keys()],read:()=>store.get(REGISTRY)??null,remove:key=>store.delete(key),write:text=>{store.set(REGISTRY,text);for(const listener of listeners)listener(REGISTRY);return true;}}),
+      storage:freeze({keys:()=>[...store.keys()],read:()=>store.get(REGISTRY)??null,remove:key=>{if(fault.key===key)return false;return store.delete(key);},write:text=>{store.set(REGISTRY,text);for(const listener of listeners)listener(REGISTRY);return true;}}),
       names:freeze({database:'sdmLocalAppDB.v1',directories:freeze(['study-director-assets-v2','study-director-backup-files-v1']),keys:freeze(['studyDirector.theme.v1','studyDirector.noteRescue.v1']),legacyDirectory:'study-director-assets'}),
-      platform:freeze({deleteDatabase:async name=>{events.databases.push(name);return true;},listen:handler=>{listeners.add(handler);return ()=>listeners.delete(handler);},now:()=>clock,random:bytes=>(++counter).toString(16).padStart(bytes*2,'0'),reload:()=>{events.reloads+=1;},removeDirectory:async name=>{events.directories.push(name);}}),
+      platform:freeze({deleteDatabase:async name=>{events.databases.push(name);if(fault.database)throw new Error('QA profile database is blocked');return true;},listen:handler=>{listeners.add(handler);return ()=>listeners.delete(handler);},now:()=>clock,random:bytes=>(++counter).toString(16).padStart(bytes*2,'0'),reload:()=>{events.reloads+=1;},removeDirectory:async name=>{events.directories.push(name);if(fault.directory===name)throw new Error('QA profile directory deletion failed');}}),
       limits:freeze({maxName:60})
     })}));
   }
@@ -123,4 +123,31 @@ function device(){
   assert.equal(d.events.reloads,reloads,'a site-data clear does not reload the page');
   assert.deepEqual(first.current(),before,'the profile keeps its id, account and library');
 }
+
+{
+  // An interrupted removal keeps the only local rescue copy until persistent
+  // database AND attachment/backup directories have actually been retired.
+  const fault={database:true},d=device(fault),first=d.page('');first.ensure('Primary');first.add();
+  const removed=d.list().profiles[1],second=d.page(removed.scope),key='studyDirector.noteRescue.v1~'+removed.scope;
+  d.store.set(key,'unsaved large Note');
+  d.store.set('studyDirector.theme.v1','primary-preserved');
+  assert.equal(second.remove(),true);
+  const databaseFailure=await first.collect();
+  assert.equal(databaseFailure.removed,false);assert.match(databaseFailure.error.message,/database is blocked/u);
+  assert.equal(d.store.get(key),'unsaved large Note','a blocked IndexedDB deletion cannot discard the rescue copy');
+  assert.deepEqual(d.list().removing,[removed.scope],'failed cleanup remains durably pending');
+  fault.database=false;fault.directory='study-director-assets-v2~'+removed.scope;
+  const directoryFailure=await first.collect();
+  assert.equal(directoryFailure.removed,false);assert.match(directoryFailure.error.message,/directory deletion failed/u);
+  assert.equal(d.store.get(key),'unsaved large Note','a failed OPFS cleanup cannot discard the rescue copy');
+  fault.directory=null;fault.key=key;
+  const localFailure=await first.collect();
+  assert.equal(localFailure.removed,false);assert.match(localFailure.error.message,/recovery storage could not be cleared/u);
+  assert.equal(d.store.get(key),'unsaved large Note','a rejected rescue-key removal is not ignored');
+  fault.key=null;
+  assert.equal((await first.collect()).removed,true,'retry safely finishes removal');
+  assert.equal(d.store.has(key),false);assert.deepEqual(d.list().removing,[]);
+  assert.equal(d.store.get('studyDirector.theme.v1'),'primary-preserved','another profile remains untouched');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'profiles',cases:['first start id follows the name','existing data','add, cancel and delete','switch and follow','first profile removed','adopt a library id','twelve at most','the last profile is replaced by a new one','kept after a deletion elsewhere','kept through a site-data clear']},null,2));

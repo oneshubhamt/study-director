@@ -106,8 +106,11 @@ registry.define('device-folder-storage',1,()=>{
       await writeFile(root,SCOPE_FILE,markerBlob(id));
       return `device-folder:1:${id}`;
     }
-    async function digestOf(file,cacheKey,signal){
-      const cached=digestCache.get(cacheKey);if(cached)return cached;
+    async function digestOf(file,cacheKey,signal,{fresh=false}={}){
+      // File name, size and lastModified are only a performance hint, not proof.
+      // Retention/deletion discovery must hash the current bytes even if all
+      // filesystem metadata appears unchanged after an external modification.
+      const cached=!fresh&&digestCache.get(cacheKey);if(cached)return cached;
       const digest=String(await input.checksum(file,{signal})||'');if(!/^[a-f0-9]{64}$/u.test(digest))throw new Error('Device Folder file checksum is invalid.');
       digestCache.set(cacheKey,digest);if(digestCache.size>512)digestCache.delete(digestCache.keys().next().value);return digest;
     }
@@ -118,23 +121,23 @@ registry.define('device-folder-storage',1,()=>{
     async function summaryOf(file,cacheKey){
       if(summaryCache.has(cacheKey))return summaryCache.get(cacheKey);
       let summary;
-      try{const manifest=await input.inspectManifest(file,{interactive:false});summary=freeze({history:freeze({format:Number(manifest.version)||0,logicalFingerprint:manifest.logicalFingerprint,exportedAt:manifest.exportedAt,counts:freeze({dailyRecord:Number(manifest.counts?.dailyRecord)||0,note:Number(manifest.counts?.note)||0}),encrypted:manifest.encrypted===true,retention:manifest.retention,origin:String(manifest.installationId||'')})});}
+      try{const manifest=await input.inspectManifest(file,{interactive:false});summary=freeze({history:freeze({format:Number(manifest.version)||0,logicalFingerprint:manifest.logicalFingerprint,exportedAt:manifest.exportedAt,counts:freeze({dailyRecord:Number(manifest.counts?.dailyRecord)||0,note:Number(manifest.counts?.note)||0}),encrypted:manifest.encrypted===true,retention:manifest.retention,origin:String(manifest.installationId||''),attachmentsMissing:(Array.isArray(manifest.assets)?manifest.assets:[]).filter(asset=>asset?.missing===true).length})});}
       catch(error){if(error&&error.code==='BACKUP_LOCKED')return freeze({locked:true});if(error?.repositoryUnreadable!==true)return freeze({});summary=freeze({unreadable:true});}
       summaryCache.set(cacheKey,summary);if(summaryCache.size>256)summaryCache.delete(summaryCache.keys().next().value);return summary;
     }
-    async function describe(kind,id,name,file,repositoryScope,signal){
+    async function describe(kind,id,name,file,repositoryScope,signal,{freshDigests=false}={}){
       const modifiedAt=iso(file.lastModified||nowMs()),cacheKey=`${repositoryScope}\u0000${name}\u0000${file.lastModified}\u0000${file.size}`,item={kind,id,name,size:file.size,createdAt:modifiedAt,modifiedAt,remoteId:name,remoteVersion:String(Math.max(1,Math.floor(Number(file.lastModified)||1))),verificationScope:repositoryScope};
-      if(kind!=='object')item.digest=await digestOf(file,cacheKey,signal);
-      if(kind==='checkpoint')Object.assign(item,await summaryOf(file,cacheKey));
+      if(kind!=='object')item.digest=await digestOf(file,cacheKey,signal,{fresh:freshDigests});
+      if(kind==='checkpoint')Object.assign(item,await summaryOf(file,cacheKey+'\u0000'+item.digest));
       return freeze(item);
     }
-    async function list({kind,signal=null}={}){
+    async function list({kind,signal=null,freshDigests=false}={}){
       const spec=KINDS[kind];if(!spec)throw new Error('Device Folder storage list kind is invalid.');
       const dirs=await directories(),repositoryScope=await scope(),items=[];let ignored=0;
       for(const [name,handle] of await entries(dirs[spec.directory],`Device Folder ${kind} folder`,signal)){
         const match=spec.pattern.exec(String(name));if(!match)continue;
         if(!handle||handle.kind!=='file'){ignored+=1;continue;}
-        try{const file=await bounded(handle.getFile(),`Device Folder ${kind} ${name}`,signal);if(!(Number(file.size)>0)){ignored+=1;continue;}items.push(await describe(kind,match[1],String(name),file,repositoryScope,signal));}
+        try{const file=await bounded(handle.getFile(),`Device Folder ${kind} ${name}`,signal);if(!(Number(file.size)>0)){ignored+=1;continue;}items.push(await describe(kind,match[1],String(name),file,repositoryScope,signal,{freshDigests}));}
         catch(error){if(error&&(error.name==='AbortError'||error.code==='DEVICE_FILESYSTEM_TIMEOUT'))throw error;ignored+=1;}
       }
       return freeze({items:freeze(items),overflow:false,ignored});
@@ -168,6 +171,17 @@ registry.define('device-folder-storage',1,()=>{
     async function upload(file){
       const spec=KINDS[file&&file.kind];if(!spec||!spec.pattern.test(String(file.id||'')+spec.suffix)||!(file.blob instanceof Blob))throw new Error('A Study Director backup upload has an invalid identity.');
       const dirs=await directories(),name=file.id+spec.suffix,directory=dirs[spec.directory],checks=async()=>{await file.checkProtection?.();await file.checkSource?.();};
+      // Repository identities are immutable. An ambiguous prior publication
+      // may have left the exact bytes here: reuse them, but never overwrite a
+      // different object/manifest/commit (including when a retry is corrupted).
+      const existing=await fileOrNull(directory,name);
+      if(existing){
+        const expected=String(file.digest||'');
+        if(!/^[a-f0-9]{64}$/u.test(expected)||existing.size!==file.blob.size||await input.checksum(file.blob,{})!==expected||await input.checksum(existing,{})!==expected)
+          throw new Error('Device Folder repository identity collision: existing verified backup bytes were preserved.');
+        await checks();
+        return freeze({...await describe(file.kind,file.id,name,existing,await scope(),null),serverDigest:expected});
+      }
       await writeFile(directory,name,file.blob,{checks,onProgress:file.onProgress});
       const written=await fileOrNull(directory,name);
       if(!written||written.size!==file.blob.size){try{await bounded(directory.removeEntry(name),`Device Folder remove ${name}`);}catch{}throw new Error('The Device Folder did not keep the complete backup file.');}
@@ -179,7 +193,14 @@ registry.define('device-folder-storage',1,()=>{
     async function remove(item){
       const spec=KINDS[item&&item.kind];if(!spec||!spec.pattern.test(String(item.id||'')+spec.suffix))throw new Error('A Study Director backup deletion request has an invalid identity.');
       const dirs=await directories(),name=item.id+spec.suffix,directory=dirs[spec.directory];
-      if(item.remoteVersion){const current=await fileOrNull(directory,name);if(!current)return false;if(String(Math.max(1,Math.floor(Number(current.lastModified)||1)))!==String(item.remoteVersion))throw new Error('A Study Director backup file changed before deletion. Nothing was removed.');}
+      if(item.remoteVersion||item.digest){
+        const current=await fileOrNull(directory,name);if(!current)return false;
+        if(item.remoteVersion&&String(Math.max(1,Math.floor(Number(current.lastModified)||1)))!==String(item.remoteVersion))throw new Error('A Study Director backup file changed before deletion. Nothing was removed.');
+        if(item.digest){
+          const expected=String(item.digest);
+          if(!/^[a-f0-9]{64}$/u.test(expected)||await input.checksum(current,{})!==expected)throw new Error('A Study Director backup file changed checksum before deletion. Nothing was removed.');
+        }
+      }
       try{await bounded(directory.removeEntry(name),`Device Folder remove ${name}`);return true;}catch(error){if(error&&error.name==='NotFoundError')return false;throw error;}
     }
     // Locks are marker files; their age comes from the file's modified time.
@@ -187,14 +208,14 @@ registry.define('device-folder-storage',1,()=>{
       const spec=LOCKS[kind],id=spec.prefix+globalThis.crypto.randomUUID().replace(/-/gu,''),name=id+spec.suffix,{objects}=await directories();
       await writeFile(objects,name,new Blob([JSON.stringify({format:spec.format,version:1,id,startedAt:iso(nowMs())})],{type:'application/json'}));
       const written=await fileOrNull(objects,name);if(!written)throw new Error('The Device Folder lock could not be written.');
-      return freeze({kind,id,name,createdAt:iso(written.lastModified||nowMs())});
+      return freeze({kind,id,name,createdAt:iso(written.lastModified||nowMs()),sameDevice:true});
     }
     async function listLocks(kind){
       const spec=LOCKS[kind],{objects}=await directories(),items=[];let ignored=0;
       for(const [name,handle] of await entries(objects,'Device Folder lock folder',null)){
         const match=spec.pattern.exec(String(name));if(!match)continue;
         if(!handle||handle.kind!=='file'){ignored+=1;continue;}
-        try{const file=await bounded(handle.getFile(),`Device Folder lock ${name}`);items.push(freeze({kind,id:match[1],name:String(name),createdAt:iso(file.lastModified)}));}catch{ignored+=1;}
+        try{const file=await bounded(handle.getFile(),`Device Folder lock ${name}`);items.push(freeze({kind,id:match[1],name:String(name),createdAt:iso(file.lastModified),sameDevice:true}));}catch{ignored+=1;}
       }
       return freeze({items:freeze(items),overflow:false,ignored});
     }

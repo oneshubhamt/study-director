@@ -260,6 +260,10 @@ registry.define('repositories',1,()=>{
       AppDiagnostics.capture('daily-record.recovery-cleanup',error,'warn');return false;
     }
     function showSubjectNoteSaveWarning(reason){
+      if(reason&&typeof reason==='object'&&reason.kind==='rescue-capacity'){
+        markStorageHealthError('notes',String(reason.message||'An unsaved Note could not fit the emergency browser copy. Keep this tab open until it finishes saving.'));
+        return;
+      }
       markStorageHealthError('notes',`Notes could not be saved in this browser session${reason?`: ${reason}`:''}. Export a backup before closing this tab.`);
     }
     function notifyDailyRecordsChanged(date='',type='change'){
@@ -739,6 +743,17 @@ async function idbPut(rec,options={}){
 }
 function idbAllRecords(){return idbGetAll(DB_DAILY_RECORD_STORE,'read aborted');}
 function idbAllSummaries(){return idbGetAll(DB_DAILY_SUMMARY_STORE,'summary read aborted');}
+function idbInsightsDailySnapshot(){
+  return idbTransaction([DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE],'readonly',(tx,finish)=>{
+    const recordsRequest=tx.objectStore(DB_DAILY_RECORD_STORE).getAll(),summariesRequest=tx.objectStore(DB_DAILY_SUMMARY_STORE).getAll();
+    let records=null,summaries=null,pending=2,failed=false;
+    const complete=()=>{if(!failed&&--pending===0)finish(true,{records:records||[],summaries:summaries||[]});};
+    recordsRequest.onsuccess=()=>{records=recordsRequest.result||[];complete();};
+    summariesRequest.onsuccess=()=>{summaries=summariesRequest.result||[];complete();};
+    const fail=request=>{if(failed)return;failed=true;finish(false,request.error||new Error('Insights snapshot read failed'));};
+    recordsRequest.onerror=()=>fail(recordsRequest);summariesRequest.onerror=()=>fail(summariesRequest);
+  },'Insights snapshot read aborted');
+}
 async function idbDailyRecordKeys(){
   return idbStoreTransaction(DB_DAILY_RECORD_STORE,'readonly',(store,tx,finish)=>{
     if(typeof store.getAllKeys==='function'){const request=store.getAllKeys();request.onsuccess=()=>finish(true,(request.result||[]).map(String));request.onerror=()=>finish(false,request.error);return;}
@@ -772,9 +787,9 @@ async function idbDelete(date,{trackDeletion=true,ownershipToken=null,deletedAt=
     tx.oncomplete=()=>{InsightsDatasetRevision.committed(revisionState);finish(true,{changed});};
   },'daily record deletion aborted');
 }
-async function idbPutActiveSession(session,ownershipToken=null){
+async function idbPutActiveSession(session,ownershipToken=null,strictDurability=false){
   const current=ActiveSessionCodec.sanitizeCurrent(session);if(!current)throw canonicalRuntimeError('Active Session write requires the current canonical schema.');session=current;
-  return idbTransaction([DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
+  return (strictDurability?idbStrictTransaction:idbTransaction)([DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
     const store=tx.objectStore(DB_ACTIVE_SESSION_STORE);
     if(ownershipToken)assertWriteToken(ownershipToken,'the active-session transaction');
     stageCanonicalMutationEpoch(tx,['activeSession']);const request=store.put(session);request.onerror=()=>finish(false,request.error||new Error('active session write failed'));
@@ -791,7 +806,7 @@ async function idbDeleteActiveSession(ownershipToken=null){
   },'active session delete aborted');
 }
 
-async function saveActiveSessionRecord(session,{emergency=false,backupCapture=false}={}){
+async function saveActiveSessionRecord(session,{emergency=false,backupCapture=false,strictDurability=false}={}){
   let ownershipToken;
   try{ownershipToken=issueWriteToken('saving the active session');}
   catch(error){return {ok:false,value:null,error,storage:{local:false,idb:false}};}
@@ -813,7 +828,9 @@ async function saveActiveSessionRecord(session,{emergency=false,backupCapture=fa
   activeSessionWriteChain=activeSessionWriteChain.catch(error=>{AppDiagnostics.capture('active-session.previous-write',error,'error');}).then(async()=>{
     let idbSaved=false,idbError=null;
     try{
-      await idbPutActiveSession(clean,ownershipToken);idbSaved=true;
+      // Only explicit critical saves, page-exit flushes and suspension need
+      // strict disk-commit semantics. Periodic timer snapshots stay default.
+      await idbPutActiveSession(clean,ownershipToken,strictDurability===true||emergency===true||clean.status==='suspended');idbSaved=true;
       clearDeletionRecoveryKeys([deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID)]);
       reportCanonicalCommit('activeSession','upsert',clean,{backupCapture});
     }catch(e){
@@ -866,7 +883,7 @@ async function loadActiveSessionRecord(retry=0,options={}){
         try{
           if(readEpoch!==activeSessionMutationEpoch)return;
           assertWriteToken(reconciliationToken,'the active-session reconciliation');
-          await idbPutActiveSession(value,reconciliationToken);
+          await idbPutActiveSession(value,reconciliationToken,true);
           if(readEpoch===activeSessionMutationEpoch){assertWriteToken(reconciliationToken,'clearing reconciled session recovery');if(!LocalStorageContract.remove(STORAGE_KEYS.recovery)&&options.strict)throw LocalStorageContract.lastError||new Error('Reconciled session recovery could not be cleared.');}
           if(!clearDeletionRecoveryKeys([deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID)])&&options.strict)throw LocalStorageContract.lastError||new Error('Session deletion recovery could not be reconciled.');
         }catch(e){reconciliationError=e;if(!isOwnershipLostError(e))AppDiagnostics.capture('active-session.reconcile-idb',e);}
@@ -874,7 +891,7 @@ async function loadActiveSessionRecord(retry=0,options={}){
         try{
           if(readEpoch!==activeSessionMutationEpoch)return;
           assertWriteToken(reconciliationToken,'the active-session canonical read-repair');
-          if(rawIdb&&!sameDataValue(rawIdb,idbSession))await idbPutActiveSession(idbSession,reconciliationToken);
+          if(rawIdb&&!sameDataValue(rawIdb,idbSession))await idbPutActiveSession(idbSession,reconciliationToken,true);
           if(!LocalStorageContract.remove(STORAGE_KEYS.recovery)&&options.strict)throw LocalStorageContract.lastError||new Error('Session recovery could not be cleared.');
         }catch(error){reconciliationError=error;if(!isOwnershipLostError(error))AppDiagnostics.capture('active-session.reconcile-local',error);}
       }
@@ -1070,6 +1087,28 @@ async function storeDailyRecordBatch(records){
     return true;
   }finally{finishWrite();}
 }
+async function getDailyRecordInsightsSnapshot(options={}){
+  const fallback=fallbackDailyRecordsGet(),yieldProjection=options&&options.yieldProjection===true;
+  try{
+    const snapshot=await idbInsightsDailySnapshot(),storedRecords=Array.isArray(snapshot.records)?snapshot.records:[],storedSummaries=Array.isArray(snapshot.summaries)?snapshot.summaries:[],cleanSummaries=storedSummaries.map(sanitizeDailyRecordSummary);
+    const summaryKeys=cleanSummaries.filter(Boolean).map(row=>row.date).sort(),recordKeys=storedRecords.map(row=>String(row&&row.date||'')).filter(isValidIsoDate).sort();
+    const projectionCurrent=!fallback.length&&!cleanSummaries.some(row=>!row)&&summaryKeys.length===recordKeys.length&&summaryKeys.every((date,index)=>date===recordKeys[index]);
+    const canonicalRecords=filterPendingDeletedEntities(mergeDailyRecordSets(storedRecords,fallback),'dailyRecord','date');
+    let summaries;
+    if(projectionCurrent)summaries=filterPendingDeletedEntities(cleanSummaries,'dailyRecord','date').map(materializeDailyRecordSummary);
+    else{
+      summaries=canonicalRecords.map(record=>materializeDailyRecordSummary(buildDailyRecordSummary(record))).filter(Boolean);
+      if(!fallback.length&&appCanMutate())void repairDailySummaries().catch(error=>AppDiagnostics.capture('daily-summaries.repair',error,'warn'));
+    }
+    if(fallback.length)migrateFallbackDailyRecords(fallback);else confirmDailyRecordStorage();
+    const records=sortDailyRecordsAsc(await materializeDailyRecordViews(canonicalRecords,{yieldProjection})).filter(record=>record.recordKind==='study');
+    return freeze({summaries:freeze(sortDailySummariesAsc(summaries)),records:freeze(records)});
+  }catch(error){
+    if(isCanonicalRuntimeError(error))throw error;
+    const [summaries,records]=await Promise.all([getSortedDailyRecordSummaries(),getDailyRecordsForWindow({yieldProjection})]);
+    return freeze({summaries:freeze(summaries),records:freeze(records)});
+  }
+}
 async function getDailyRecordSummaries(){
   const fallback=fallbackDailyRecordsGet();
   try{
@@ -1106,7 +1145,7 @@ async function getDailyRecordSummaries(){
 function sortDailySummariesAsc(summaries){return (summaries||[]).map(summary=>{const {dayOfWeek,dayName,...raw}=summary||{};return materializeDailyRecordSummary(raw);}).filter(Boolean).sort((a,b)=>a.date.localeCompare(b.date));}
 function sortDailyRecordsAsc(records){return (records||[]).filter(r=>r&&isValidIsoDate(r.date)).sort((a,b)=>a.date.localeCompare(b.date));}
 async function getSortedDailyRecordSummaries(){return sortDailySummariesAsc(await getDailyRecordSummaries());}
-async function getSortedDailyRecords(){return sortDailyRecordsAsc(await getDailyRecords());}
+async function getSortedDailyRecords(options={}){return sortDailyRecordsAsc(await getDailyRecords(options));}
 async function getDailyRecordsForWindow(options={}){
   const opts=options&&typeof options==='object'?options:{};
   if(opts.windowDays||opts.from||opts.to||opts.limit){
@@ -1116,14 +1155,14 @@ async function getDailyRecordsForWindow(options={}){
       const fallback=fallbackDailyRecordsGet();
       const idbRecords=await idbGetRecordsByDates(recordWindow.dates);
       const records=filterPendingDeletedEntities(mergeDailyRecordSets(idbRecords,fallback.filter(r=>recordWindow.dates.includes(r.date))),'dailyRecord','date');
-      return sortDailyRecordsAsc(records.map(materializeDailyRecordView)).filter(record=>record.recordKind==='study');
+      return sortDailyRecordsAsc(await materializeDailyRecordViews(records,{yieldProjection:opts.yieldProjection===true})).filter(record=>record.recordKind==='study');
     }catch(e){
       if(isCanonicalRuntimeError(e))throw e;
       const records=await Promise.all(recordWindow.dates.map(date=>getDailyRecord(date)));
       return sortDailyRecordsAsc(records).filter(record=>record.recordKind==='study');
     }
   }
-  return (await getSortedDailyRecords()).filter(record=>record.recordKind==='study');
+  return (await getSortedDailyRecords({yieldProjection:opts.yieldProjection===true})).filter(record=>record.recordKind==='study');
 }
 async function getDailyRecord(date,options={}){
   const fallback=fallbackDailyRecordsGet().find(r=>r.date===date)||null;
@@ -1145,8 +1184,21 @@ async function getDailyRecords(options={}){
     const raw=filterPendingDeletedEntities(mergeDailyRecordSets(await idbAllRecords(),fallback),'dailyRecord','date');
     if(fallback.length)migrateFallbackDailyRecords(fallback);
     else confirmDailyRecordStorage();
-    return raw.map(materializeDailyRecordView).filter(Boolean);
-  }catch(e){if(options?.strict||isCanonicalRuntimeError(e))throw e;showStorageFallbackWarning(e&&e.message?e.message:'saved-date database failed');return fallback.map(materializeDailyRecordView).filter(Boolean);}
+    return materializeDailyRecordViews(raw,{yieldProjection:options?.yieldProjection===true});
+  }catch(e){
+    if(options?.strict||isCanonicalRuntimeError(e))throw e;
+    showStorageFallbackWarning(e&&e.message?e.message:'saved-date database failed');
+    return materializeDailyRecordViews(fallback);
+  }
+}
+async function materializeDailyRecordViews(records,{yieldProjection=false}={}){
+  const source=Array.isArray(records)?records:[],out=[],batchSize=128;
+  for(let start=0;start<source.length;start+=batchSize){
+    const end=Math.min(source.length,start+batchSize);
+    for(let index=start;index<end;index+=1){const value=materializeDailyRecordView(source[index]);if(value)out.push(value);}
+    if(yieldProjection&&end<source.length)await new Promise(resolve=>setTimeout(resolve,0));
+  }
+  return out;
 }
 async function removeDailyRecord(date,options={}){
   const rollback=options&&options.rollback===true;
@@ -1437,6 +1489,7 @@ async function runDataMaintenance(options={}){
       clearAll:clearAllDailyRecords,
       sortedSummaries:getSortedDailyRecordSummaries,
       sortedList:getSortedDailyRecords,
+      insightsSnapshot:getDailyRecordInsightsSnapshot,
       'window':getDailyRecordsForWindow,
       normalizeWindow:normalizeInsightsRecordWindowOptions,
       documents:getDailyRecordDocumentsByDates,

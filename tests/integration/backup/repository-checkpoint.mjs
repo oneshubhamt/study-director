@@ -39,7 +39,7 @@ const RecordCodecs=globalThis[Symbol.for('studyDirector.internalModules.v1')].re
 const pendingReviewCodec=testPendingReviewCodec(RecordCodecs,{personalDataCodec:RecordCodecs.createPersonalDataCodec(Object.freeze({}))}),keptReviews=memoryPendingReviews(pendingReviewCodec);
 const BackupCodec=freeze({
   normalizePersonalData:personalCodec.normalize,countsEqual:(a,b)=>CanonicalModule.same(countsShape(a),countsShape(b)),normalizeAssetDescriptors:value=>{assert.equal(value.length,0,'this assembled verification fixture has no attachment descriptors');return freeze([]);},
-  countShape:countsShape,assetIds:()=>freeze(assetDescriptor?['asset-audio']:[]),withNoteIdDeletions:(manifest,nameKeyed)=>{assert.equal(nameKeyed,false,'current manifests already key notes by id');return manifest;},
+  countShape:countsShape,assetIds:()=>freeze(assetDescriptor?['asset-audio']:[]),attachmentCoverage:values=>freeze({total:values.length,missing:values.filter(row=>row.missing).length,missingIds:freeze(values.filter(row=>row.missing).map(row=>row.assetId)),fullyRecoverable:!values.some(row=>row.missing)}),missingAttachmentWarning:values=>values.some(row=>row.missing)?'Partial attachment recovery: 1 attachment missing.':'',withNoteIdDeletions:(manifest,nameKeyed)=>{assert.equal(nameKeyed,false,'current manifests already key notes by id');return manifest;},
   createCheckpointMetadata:(installationId,createdAt)=>freeze({checkpointId:'cp_'+(++checkpointCounter).toString(16).padStart(32,'0'),createdAt,originInstallationId:installationId}),
   createProtectedManifest:(plan,checkpoint)=>freeze({format:'study-director.checkpoint-protected-manifest',version:3,checkpointId:checkpoint.checkpointId,sourceRevision:new Date(plan.sourceRevision).toISOString(),authority:freeze({savedDays:'pairwise-explicit-deletions',notes:'pairwise-explicit-deletions',activeSession:'pairwise-singleton',plans:'pairwise-collection',personalSettings:'pairwise-singleton',attachments:'referenced-plus-library'}),savedDayDeletions:freeze([...(plan.savedDayDeletions||[])]),noteDeletions:freeze([...(plan.noteDeletions||[])]),attachmentDeletions:freeze([...(plan.attachmentDeletions||[])])}),
   utf8Bytes:value=>new TextEncoder().encode(String(value??'')),compressionSupported:()=>typeof CompressionStream==='function',
@@ -222,6 +222,19 @@ for(const code of ['DRIVE_TIMEOUT','BACKUP_LOCKED','BACKUP_AUTH_FAILED']){
  await assert.rejects(runtime.repository.scrub([firstManifest],entry=>entry.objectId===knownBadId?new Blob(['new damage']):progressReader(entry),{recheck:true,skipObjectIds:[laterHealthyId],maxObjects:32,maxBytes:1024*1024*1024}),error=>error.code==='REPOSITORY_INTEGRITY_CORRUPT'&&error.repositoryObjectId===knownBadId&&error.repositoryScrubProgress.recheckCursor==='','new corruption retains the existing typed failure/repair path');
 }
 
+// A new attachment cannot be sealed from same-size corrupted OPFS plaintext,
+// even if its canonical metadata still advertises the original SHA-256.
+// Existing healthy content-addressed objects remain eligible for cheap reuse.
+{
+  const originalAudio=audioBlob,originalDescriptor=assetDescriptor,oldSnapshot=snapshotRevision,oldRevision=sourceRevision;
+  const canonical=new Blob(['canonical-audio'],{type:'audio/mpeg'}),tampered=new Blob(['CORRUPTED-audio'],{type:'audio/mpeg'});
+  assert.equal(canonical.size,tampered.size);
+  assetDescriptor=freeze({...originalDescriptor,size:canonical.size,hash:await engine.run('checksum',{value:canonical})});
+  audioBlob=tampered;snapshotRevision='corrupt-attachment';sourceRevision='2026-09-19T00:00:15.000Z';
+  try{await assert.rejects(()=>publishLocal(firstManifest),error=>error?.code==='REPOSITORY_INTEGRITY_CORRUPT'&&/Local attachment .*plaintext verification/u.test(error.message),'a same-size corrupt local attachment must never become a newly committed checkpoint');}
+  finally{audioBlob=originalAudio;assetDescriptor=originalDescriptor;snapshotRevision=oldSnapshot;sourceRevision=oldRevision;}
+}
+
 const readsBeforeSecond=assetReads,encodesBeforeSecond=encodeOpenCounter;
 const secondPublication=await publishLocal(firstManifest),secondManifest=secondPublication.manifest;
 assert.equal(assetReads,readsBeforeSecond,'unchanged 300 MB attachment must not be reread for the second checkpoint');
@@ -311,6 +324,12 @@ for(const anchor of ['2024-02-29','2026-12-31',...Array.from({length:7},(_,day)=
  const started=performance.now(),selection=runtime.repository.selectRetention(many,{now:new Date(anchorMs)}),elapsed=performance.now()-started;
  assert.equal(selection.retained.filter(row=>selection.tiers[row.id]!=='hourly').length,15);assert.equal(selection.normalRetained,17,'the latest day\'s two earlier backups are Hourly');assert.ok(elapsed<1000,`retention over 1,000 versions took ${Math.round(elapsed)} ms`);
  console.log(JSON.stringify({retentionOver1000VersionsMs:Math.round(elapsed)}));
+ const expanded=Array.from({length:10000},(_,n)=>{const day=new Date(anchorMs-Math.floor(n/3)*86400000).toISOString().slice(0,10);return retentionRow(100000+n,day,`${String(8+n%3).padStart(2,'0')}:00:00`);});
+ const stressStart=performance.now(),stress=runtime.repository.selectRetention(expanded,{now:new Date(anchorMs)}),stressMs=performance.now()-stressStart;
+ assert.equal(stress.retained.filter(row=>stress.tiers[row.id]!=='hourly').length,15,'10,000 historical versions must retain the same 15 ordinary slots');
+ assert.ok(stressMs<5000,`10,000-version retention budget exceeded: ${Math.round(stressMs)} ms`);
+ console.log(JSON.stringify({retentionOver10000VersionsMs:Math.round(stressMs),candidates:expanded.length}));
+
 }
 const timezoneShiftedEvaluation=runtime.repository.selectRetention(retentionHistory,{now:new Date('2026-09-21T02:00:00-11:00')});assert.deepEqual(timezoneShiftedEvaluation.retained.map(row=>row.id),tiered.retained.map(row=>row.id),'tier windows must stay anchored to the committed Latest checkpoint capture rather than the evaluator timezone');assert.deepEqual(timezoneShiftedEvaluation.tiers,tiered.tiers,'timezone changes must not reinterpret retained tier labels for the same committed history');
 const sep13=retentionHistory.find(row=>row.manifest.retention.calendar.localDate==='2026-09-13'),historyThroughSep14=retentionHistory.filter(row=>row.manifest.retention.calendar.localDate<='2026-09-14'),asDaily=runtime.repository.selectRetention(historyThroughSep14,{now:new Date(2026,8,14,12)}),asWeekly=runtime.repository.selectRetention(retentionHistory,{now:retentionNow});assert.equal(asDaily.tiers[sep13.id],'daily','a recent checkpoint must occupy the Daily tier while inside the six-day window');assert.equal(asWeekly.tiers[sep13.id],'weekly','the same immutable checkpoint must graduate into Weekly after newer committed history moves the retention window forward');
@@ -484,12 +503,12 @@ assert.equal(overlapPublications.size,1,'provider-visible publication protection
 let overlapSettled=false;overlapBackup.finally(()=>{overlapSettled=true;});await Promise.race([releaseStartedGate,new Promise((_,reject)=>setTimeout(()=>reject(new Error('committed backup did not start publication-marker release')),1000))]);assert.equal(releaseStarted,true,'successful commit must initiate publication-marker cleanup');for(let i=0;i<8;i++)await Promise.resolve();assert.equal(overlapSettled,false,'successful backup must await publication-marker cleanup before reporting completion');assert.equal(releaseFinished,false);allowRelease();const overlapResult=await overlapBackup;assert.ok(overlapResult?.checkpointId);assert.equal(releaseFinished,true,'publication-marker cleanup must finish before successful backup returns');
 
 // Post-publication receipt reuse: verified upload read-backs seed the non-authoritative history index.
-const receiptFiles=new Map(),receiptDownloads=freeze({checkpoint:[],commit:[],object:[]}),receiptDeletes=[],receiptLists={checkpoint:0,commit:0,object:0};let receiptRemoteVersion=0,injectConcurrentObjectOnCommit=false;
+const receiptFiles=new Map(),receiptDownloads=freeze({checkpoint:[],commit:[],object:[]}),receiptReleases={checkpoint:0,commit:0,object:0},receiptDeletes=[],receiptLists={checkpoint:0,commit:0,object:0},receiptListOptions=[];let receiptRemoteVersion=0,injectConcurrentObjectOnCommit=false;
 const receiptKey=(kind,id)=>kind+':'+id,receiptScope='qa-post-publication-receipts';
 const receiptDescriptor=file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.modifiedAt,digest:file.digest,serverDigest:file.kind==='object'?file.digest:'',remoteId:'receipt-'+file.kind+'-'+file.id,remoteVersion:String(file.remoteVersion),verificationScope:receiptScope});
-const receiptList=async({kind})=>{receiptLists[kind]+=1;return freeze({items:freeze([...receiptFiles.values()].filter(file=>file.kind===kind).map(receiptDescriptor)),overflow:false});};
+const receiptList=async({kind,freshDigests=false})=>{receiptLists[kind]+=1;receiptListOptions.push(freeze({kind,freshDigests}));return freeze({items:freeze([...receiptFiles.values()].filter(file=>file.kind===kind).map(receiptDescriptor)),overflow:false});};
 const receiptUpload=async file=>{const now=new Date().toISOString(),stored=freeze({...file,createdAt:now,modifiedAt:now,remoteVersion:++receiptRemoteVersion});receiptFiles.set(receiptKey(file.kind,file.id),stored);if(file.kind==='commit'&&injectConcurrentObjectOnCommit){injectConcurrentObjectOnCommit=false;const id='obj_'+'9'.repeat(32),blob=new Blob(['concurrent-object-not-visible-to-initial-inventory']),digest=await engine.run('checksum',{value:blob});receiptFiles.set(receiptKey('object',id),freeze({kind:'object',id,name:id+'.sdobject',blob,size:blob.size,digest,createdAt:now,modifiedAt:now,remoteVersion:++receiptRemoteVersion}));}return receiptDescriptor(stored);};
-const receiptDownload=async ref=>{const stored=receiptFiles.get(receiptKey(ref.kind,ref.id));if(!stored)throw new Error('missing receipt-reuse repository file');receiptDownloads[ref.kind].push(ref.id);return freeze({blob:stored.blob,release:async()=>{}});};
+const receiptDownload=async ref=>{const stored=receiptFiles.get(receiptKey(ref.kind,ref.id));if(!stored)throw new Error('missing receipt-reuse repository file');receiptDownloads[ref.kind].push(ref.id);return freeze({blob:stored.blob,release:async()=>{receiptReleases[ref.kind]+=1;}});};
 const receiptDelete=async ref=>{receiptDeletes.push(freeze({kind:ref.kind,id:ref.id}));return receiptFiles.delete(receiptKey(ref.kind,ref.id));};
 const receiptTransport=freeze({list:receiptList,upload:receiptUpload,download:receiptDownload,delete:receiptDelete,beginOperation:()=>freeze({list:receiptList,upload:receiptUpload,download:receiptDownload,delete:receiptDelete})});
 assert.equal(runtime.providers.register(freeze({id:'repository-receipts',label:'Repository Receipts QA',repository:receiptTransport})),true);
@@ -498,6 +517,9 @@ const firstReceiptPublication=await runtime.providers.backupRepositoryProvider('
 assert.equal(receiptDownloads.object.length,0,'a matching trusted server SHA-256 receipt must avoid redundant object read-back without weakening SHA-256 verification');
 assert.equal(receiptDownloads.checkpoint.length,1,'new manifest must be downloaded exactly once for publication read-back verification; post-commit state must reuse that verified receipt');
 assert.equal(receiptDownloads.commit.length,1,'new commit marker must be downloaded exactly once for publication read-back verification; post-commit state must reuse that verified receipt');
+assert.equal(receiptReleases.checkpoint,1,'shared publication readback must release the checkpoint lease after verification');
+assert.equal(receiptReleases.commit,1,'shared publication readback must release the commit lease after verification');
+assert.ok(receiptListOptions.some(row=>row.kind==='checkpoint'&&row.freshDigests===false)&&receiptListOptions.some(row=>row.kind==='commit'&&row.freshDigests===false),'ordinary post-publication history refresh must not pay the full fresh-digest maintenance cost');
 assert.equal([...receiptFiles.values()].filter(file=>file.kind==='checkpoint').length,1,'receipt reuse must not change sparse retention results');
 assert.equal([...receiptFiles.values()].filter(file=>file.kind==='commit').length,1,'receipt reuse must retain the matching commit marker');
 assert.equal(receiptLists.object,1,'a cold first publication without a reusable pre-publication inventory must still obtain a fresh object listing for cleanup');
@@ -508,6 +530,8 @@ snapshotRevision='provider-receipt-2';sourceRevision='2026-09-19T00:46:00.000Z';
 const objectListsBeforeSecondReceipt=receiptLists.object;injectConcurrentObjectOnCommit=true;const secondReceiptPublication=await runtime.providers.backupRepositoryProvider('repository-receipts'),objectListsDuringSecondReceipt=receiptLists.object-objectListsBeforeSecondReceipt;
 assert.equal(receiptDownloads.checkpoint.length,2,'each publication should incur only its own manifest read-back, not a second post-publication manifest download');
 assert.equal(receiptDownloads.commit.length,2,'each publication should incur only its own commit read-back, not a second post-publication commit download');
+assert.equal(receiptReleases.checkpoint,2,'each checkpoint readback must release exactly one lease');
+assert.equal(receiptReleases.commit,2,'each commit readback must release exactly one lease');
 assert.ok(receiptDeletes.some(item=>item.kind==='checkpoint')&&receiptDeletes.some(item=>item.kind==='commit'),'a newer same-day publication must prune the older immutable manifest/commit even below the 15-point capacity');
 assert.equal(objectListsDuringSecondReceipt,1,'a mature publication must reuse its verified pre-publication object inventory during ordinary cleanup instead of relisting the same objects');
 assert.equal(receiptFiles.has(receiptKey('object','obj_'+'9'.repeat(32))),true,'an object that appeared after the reused inventory snapshot must be conservatively left untouched rather than inferred safe to delete');
@@ -575,33 +599,41 @@ const providerLatestBeforeCommitFailure=retainedLineage.at(-1).checkpoint.checkp
 await forceBaseline(providerLatestBeforeCommitFailure,notes);
 sourceRevision='2026-09-19T01:05:15.000Z';snapshotRevision='provider-commit-failure';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'provider commit failure probe',updatedAt:sourceRevision})};failRemoteCommit=true;
 await assert.rejects(()=>runtime.providers.backupRepositoryProvider('repository-qa'),/commit-marker failure/i);
-assert.equal([...remoteFiles.values()].filter(file=>file.kind==='checkpoint').length,providerCheckpointCountBeforeCommitFailure,'failed provider final commit must remove its unpublished manifest');
+// A failed or ambiguous commit upload leaves uncommitted bytes behind for
+// verified inventory cleanup. The publication error path cannot establish
+// ownership: speculative deletion could remove a previously committed version.
+assert.equal([...remoteFiles.values()].filter(file=>file.kind==='checkpoint').length,providerCheckpointCountBeforeCommitFailure+1,'a failed final commit may retain its unpublished manifest for safe later cleanup');
 assert.equal([...remoteFiles.values()].filter(file=>file.kind==='commit').length,providerCommitCountBeforeCommitFailure,'failed provider final commit must not add a committed-history entry');
 assert.equal(reconciliationBaseWrites.length,providerBaselineWritesBeforeCommitFailure,'failed provider final commit must not advance reconciliation provenance');
-const providerCommittedAfterFailure=[];for(const file of remoteFiles.values())if(file.kind==='checkpoint')providerCommittedAfterFailure.push(await runtime.repository.inspectManifest(file.blob,{interactive:false}));providerCommittedAfterFailure.sort((a,b)=>Date.parse(a.exportedAt)-Date.parse(b.exportedAt));assert.equal(providerCommittedAfterFailure.at(-1).checkpoint.checkpointId,providerLatestBeforeCommitFailure,'failed provider final commit must leave the previous Latest intact');
+const providerCommitIds=new Set([...remoteFiles.values()].filter(file=>file.kind==='commit').map(file=>file.id));
+const providerCommittedAfterFailure=[];for(const file of remoteFiles.values())if(file.kind==='checkpoint'&&providerCommitIds.has(file.id))providerCommittedAfterFailure.push(await runtime.repository.inspectManifest(file.blob,{interactive:false}));
+providerCommittedAfterFailure.sort((a,b)=>Date.parse(a.exportedAt)-Date.parse(b.exportedAt));
+assert.equal(providerCommittedAfterFailure.at(-1).checkpoint.checkpointId,providerLatestBeforeCommitFailure,'failed provider final commit must leave the previous committed Latest intact');
+const providerVisibleAfterFailure=await runtime.providers.history('repository-qa',{interactive:false});
+assert.equal(providerVisibleAfterFailure.entries.at(-1)?.location.checkpointId,providerLatestBeforeCommitFailure,'orphan manifest must not become a visible backup version');
 
 const pendingProviderBackups=new Map();
 runtime.providers.configurePendingBackupRetry(freeze({read:async id=>pendingProviderBackups.get(id)||null,mark:async id=>(pendingProviderBackups.set(id,freeze({providerId:id})),true),clear:async id=>(pendingProviderBackups.delete(id),true)}));
-// One history for every location: a version made in one location is copied
-// to the next under the same id, so the Device Folder and Drive hold the
-// same versions, whichever backs up first.
+// Each location publishes canonical local state independently. Neither provider
+// downloads from, waits for, or backfills from the other.
 {
-  const store=()=>{const files=new Map(),key=(kind,id)=>kind+':'+id,describe=file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,digest:file.digest,remoteId:'spine-'+key(file.kind,file.id)});
-    return freeze({files,transport:freeze({list:async({kind})=>freeze({items:freeze([...files.values()].filter(file=>file.kind===kind).map(describe)),overflow:false}),upload:async file=>{const stored=freeze({...file,createdAt:new Date().toISOString()});files.set(key(file.kind,file.id),stored);return describe(stored);},download:async ref=>{const stored=files.get(key(ref.kind,ref.id));if(!stored)throw new Error('missing spine file');return freeze({blob:stored.blob,release:async()=>{}});},delete:async ref=>files.delete(key(ref.kind,ref.id))})});};
+  const store=()=>{const files=new Map(),key=(kind,id)=>kind+':'+id,describe=file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,digest:file.digest,remoteId:'independent-'+key(file.kind,file.id)});
+    return freeze({files,transport:freeze({list:async({kind})=>freeze({items:freeze([...files.values()].filter(file=>file.kind===kind).map(describe)),overflow:false}),upload:async file=>{const stored=freeze({...file,createdAt:new Date().toISOString()});files.set(key(file.kind,file.id),stored);return describe(stored);},download:async ref=>{const stored=files.get(key(ref.kind,ref.id));if(!stored)throw new Error('missing independent-provider file');return freeze({blob:stored.blob,release:async()=>{}});},delete:async ref=>files.delete(key(ref.kind,ref.id))})});};
   let connected=true;const baseBefore=reconciliationBase,baseNotesBefore=reconciliationBaseNotes;
   const device=store(),drive=store(),versions=location=>[...location.files.values()].filter(file=>file.kind==='checkpoint').map(file=>file.id).sort(),uploads=location=>[...location.files.values()].filter(file=>file.kind==='object').length;
-  assert.equal(runtime.providers.register(freeze({id:'spine-device',label:'Device Folder',connected:()=>connected,repository:device.transport})),true);
-  assert.equal(runtime.providers.register(freeze({id:'spine-drive',label:'Google Drive',shared:true,connected:()=>connected,repository:drive.transport})),true);
+  assert.equal(runtime.providers.register(freeze({id:'independent-device',label:'Device Folder',connected:()=>connected,repository:device.transport})),true);
+  assert.equal(runtime.providers.register(freeze({id:'independent-drive',label:'Google Drive',shared:true,connected:()=>connected,repository:drive.transport})),true);
   runtime.providers.configureAutomaticBackup(freeze({covered:()=>sourceRevision,current:()=>sourceRevision}));
   try{
-    sourceRevision='2026-09-19T02:00:00.000Z';snapshotRevision='spine-1';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'spine one',updatedAt:sourceRevision})};
-    const made=await runtime.providers.backupRepositoryProvider('spine-device',{interactive:false}),copied=await runtime.providers.backupRepositoryProvider('spine-drive',{interactive:false});
-    assert.equal(copied.checkpointId,made.checkpointId,'Drive takes the Device Folder version under the same id');assert.deepEqual(versions(drive),versions(device));assert.equal(uploads(drive),uploads(device),'with every object it needs');
-    assert.equal(reconciliationBase.checkpointId,made.checkpointId,'the copied version is what this device shares with Drive');
-    sourceRevision='2026-09-19T02:10:00.000Z';snapshotRevision='spine-2';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'spine two',updatedAt:sourceRevision})};
-    const second=await runtime.providers.backupRepositoryProvider('spine-drive',{interactive:false}),back=await runtime.providers.backupRepositoryProvider('spine-device',{interactive:false});
-    assert.notEqual(second.checkpointId,made.checkpointId);assert.equal(back.checkpointId,second.checkpointId,'the Device Folder takes the Drive version under the same id');
-    assert.deepEqual(versions(drive),versions(device),'both locations hold the same versions');
+    sourceRevision='2026-09-19T02:00:00.000Z';snapshotRevision='independent-1';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'independent one',updatedAt:sourceRevision})};
+    const deviceFirst=await runtime.providers.backupRepositoryProvider('independent-device',{interactive:false}),driveFirst=await runtime.providers.backupRepositoryProvider('independent-drive',{interactive:false});
+    assert.ok(deviceFirst.checkpointId&&driveFirst.checkpointId,'both independent destinations publish a verified checkpoint');assert.notEqual(deviceFirst.checkpointId,driveFirst.checkpointId,'independent destinations must not share checkpoint identity');
+    assert.equal(versions(device).length,1);assert.equal(versions(drive).length,1);assert.ok(uploads(device)>0&&uploads(drive)>0,'each destination receives canonical objects directly');
+    assert.equal(reconciliationBase.checkpointId,driveFirst.checkpointId,'Drive publication alone establishes the shared reconciliation base');
+    sourceRevision='2026-09-19T02:10:00.000Z';snapshotRevision='independent-2';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'independent two',updatedAt:sourceRevision})};
+    const driveSecond=await runtime.providers.backupRepositoryProvider('independent-drive',{interactive:false}),deviceSecond=await runtime.providers.backupRepositoryProvider('independent-device',{interactive:false});
+    assert.ok(driveSecond.checkpointId&&deviceSecond.checkpointId);assert.notEqual(driveSecond.checkpointId,deviceSecond.checkpointId);assert.deepEqual(versions(device),[deviceSecond.checkpointId],'same-day retention keeps only the newest independent Device Folder version');assert.deepEqual(versions(drive),[driveSecond.checkpointId],'same-day retention keeps only the newest independent Drive version');
+    assert.equal(reconciliationBase.checkpointId,driveSecond.checkpointId,'Device Folder publication does not replace Drive shared ancestry');
   }finally{runtime.providers.configureAutomaticBackup(null);connected=false;reconciliationBase=baseBefore;reconciliationBaseNotes=baseNotesBefore;}
 }
 // Taking turns at Drive: another device's recent upload marker makes this one
@@ -830,10 +862,10 @@ watched='presentation-cancel';assert.equal(await runtime.providers.backup('prese
 }
 // Production Drive transport + production provider/classifier/retention +
 // owned scheduler. Only HTTP, storage and the clock are simulated.
-const assembledDriveCases=[];
-for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inventory','foreground-preemption','slow-deletion-1000','slow-deletion-3000','slow-deletion-6000','slow-deletion-11000','slow-deletion-16000','slow-deletion-31000','slow-deletion-44000','slow-deletion-all-44000','foreground-deletion','foreground-deletion-44000','lost-protection','remote-lease']){
+const assembledDriveCases=[],assembledDriveWallMs=[];
+for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inventory','foreground-preemption','slow-deletion-1000','slow-deletion-3000','slow-deletion-6000','slow-deletion-11000','slow-deletion-16000','slow-deletion-31000','slow-deletion-44000','slow-deletion-all-44000','foreground-deletion','foreground-deletion-44000','history-change-before-delete','lost-protection','remote-lease']){
  const realDate=globalThis.Date,clock=createFakeClock('2026-10-03T12:00:00.000Z');backgroundClock=clock;globalThis.Date=clock.Date;backgroundReady=true;dailyRecords=[];notes={};assetDescriptor=null;
- const maintenance=new Map(),progress=[],id='drive-'+scenario,h=createDriveHarness({clock,expiresIn:86400,registerProvider:config=>runtime.providers.register(freeze({...config,id,label:'Drive Background QA'}))});
+ const scenarioStarted=performance.now(),maintenance=new Map(),progress=[],id='drive-'+scenario,h=createDriveHarness({clock,expiresIn:86400,registerProvider:config=>runtime.providers.register(freeze({...config,id,label:'Drive Background QA'}))});
  // Four slow deletions may require four protected passes plus a final inventory.
  // Bound simulated time by five passes of at most 120 request-sized intervals;
  // wall-clock QA remains subject to the guarded runner's existing file timeout.
@@ -857,7 +889,8 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
   else if(!scenario.includes('deletion')&&scenario!=='lost-protection'){h.state.pageSize=1;h.state.pageDelayMs=10000;}
   await runtime.providers.history(coldId,{interactive:false});
   if(scenario.includes('deletion')){const delayMs=Number(scenario.split('-').at(-1))||6000;h.state.requestDelayMs=({url,method})=>(method==='GET'||scenario.includes('-all-'))&&url.searchParams.get('alt')!=='media'&&!String(url.searchParams.get('q')||'').includes("mimeType='application/vnd.google-apps.folder'")?delayMs:0;}
-  let inventoryObserved=false,protectionLost=false;
+  let inventoryObserved=false,protectionLost=false,historyChanged=false;
+  if(scenario==='history-change-before-delete')h.state.requestDelayMs=({url,method})=>{if(!historyChanged&&method==='POST'&&url.pathname==='/drive/v3/files'){const checkpoint=[...h.state.files.values()].find(file=>kind(file)==='checkpoint');if(checkpoint){historyChanged=true;checkpoint.version=h.state.nextVersion++;checkpoint.modifiedTime=new Date(clock.now()+1).toISOString();}}return 0;};
   if(scenario==='lost-protection')h.state.requestDelayMs=({url,method})=>{if(method==='GET'&&String(url.searchParams.get('q')||'').includes("value='object'"))inventoryObserved=true;const file=h.state.files.get(url.pathname.split('/').at(-1));if(inventoryObserved&&!protectionLost&&method==='GET'&&file&&kind(file)==='maintenance'){protectionLost=true;file.createdTime=new Date(clock.now()-300000).toISOString();}return 0;};
   if(scenario.endsWith('unavailable')){
    await settle(()=>maintenance.get(coldId)?.reason==='blocked-uncertain'&&!runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').busy);
@@ -866,14 +899,21 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
    h.state.failMediaKinds.clear();await clock.advance(Math.max(0,Date.parse(maintenance.get(coldId).nextEligibleAt)-clock.now()-100));
   }else if(scenario==='foreground-preemption'){
    await settle(()=>h.state.activeObjectPages>0);
+   assert.equal([...h.state.files.values()].filter(file=>kind(file)==='maintenance').length,0,'read-only cleanup planning must not hold the destructive maintenance lease');
    const deletions=h.state.deletions.length;await runtime.providers.history(coldId,{interactive:false});
    await settle(()=>h.state.activeObjectPages===0&&maintenance.get(coldId)?.reason==='preempted');
    assert.equal(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length,0,'foreground preemption precedes all destructive work');
    assert.ok(h.state.deletions.length>=deletions);await clock.advance(Math.max(0,Date.parse(maintenance.get(coldId).nextEligibleAt)-clock.now()-100));
   }else if(scenario.startsWith('foreground-deletion')){
    await settle(()=>h.state.deletions.some(remoteId=>allFiles.includes(remoteId)));
+   assert.ok([...h.state.files.values()].some(file=>kind(file)==='maintenance'),'destructive cleanup must hold the maintenance lease while deletion is in flight');
    const removedBefore=h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length;let historySettled=false;const foreground=runtime.providers.history(coldId,{interactive:false}).finally(()=>{historySettled=true;});await settle(()=>historySettled);const outcome=await foreground;assert.equal(outcome.available,true,JSON.stringify({scenario,outcome,errors:diagnosticFailures.slice(-2)}));
    assert.equal(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length,removedBefore,'foreground prevents the next protected deletion');assert.ok(maintenance.has(coldId),'preemption retains intent');
+  }else if(scenario==='history-change-before-delete'){
+   await settle(()=>historyChanged&&maintenance.get(coldId)?.reason==='publication-contention'&&!runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').busy);
+   assert.equal(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length,0,'history that changes between planning and the destructive lease must invalidate the plan before any deletion');
+   assert.equal([...h.state.files.values()].filter(file=>kind(file)==='maintenance').length,0,'an invalidated destructive unit must release its maintenance lease before retrying');
+   h.state.requestDelayMs=null;await clock.advance(Math.max(0,Date.parse(maintenance.get(coldId).nextEligibleAt)-clock.now()-100));
   }else if(scenario==='lost-protection'){
    await settle(()=>protectionLost&&maintenance.get(coldId)?.reason==='error'&&!runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').busy);
    assert.equal(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length,0,'lost protection invalidates inventory before any data deletion');assert.ok(runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').scheduled);
@@ -886,7 +926,7 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
   const retained=JSON.parse(await committed.find(file=>kind(file)==='checkpoint').content.text()),physicalObjects=new Set([...h.state.files.values()].filter(file=>kind(file)==='object').map(file=>file.appProperties.studyDirectorRepositoryId));
   assert.deepEqual([...physicalObjects].sort(),retained.objects.map(entry=>entry.objectId).sort(),'verified completion retains exactly the referenced objects');
   if(!scenario.endsWith('unavailable')&&!scenario.includes('deletion')&&scenario!=='lost-protection')assert.ok(h.state.objectPageStarts>=5,'real paginated discovery exceeds the former total deadline');
-  assembledDriveCases.push(scenario);
+  assembledDriveCases.push(scenario);assembledDriveWallMs.push({scenario,wallMs:Math.round(performance.now()-scenarioStarted)});
  }finally{runtime.providers.configureRepositoryMaintenance(null);await h.provider.disconnect();globalThis.Date=realDate;backgroundClock=null;}
 }
 // The actual adapter's uncertainty count must reach the actual integrity owner
@@ -905,11 +945,24 @@ for(const usableHistory of [false,true])for(const kind of ['checkpoint','commit'
   const host={Date:clock.Date,Error,Object,readRepositoryIntegrityTarget:async()=>current,repositoryIntegrityChanged:()=>new Error('scope changed'),mutateRepositoryIntegrityTarget:async(_target,change)=>{current=change(current);return current;}};
   vm.createContext(host);vm.runInContext(hostSource.slice(hostSource.indexOf('async function updateRepositoryIntegrityTarget('),hostSource.indexOf('const RepositoryIntegrityContinuation=')),host);
   runtime.providers.configureIntegrityScrub(freeze({readTarget:async()=>current,writeResult:async(providerId,result)=>{assert.equal(providerId,id);results.push(result);await host.updateRepositoryIntegrityTarget('drive',result);},prepare:async(_id,target)=>({repositoryScope:scope,requestId:target.requestId,cursor:target.cursor,scanId:target.scanId,skipObjectIds:target.quarantinedObjectIds}),isAvailable:providerId=>providerId===id,isUnsafe:()=>false,yieldTask:async()=>{},quarantine:async()=>current.quarantinedObjectIds}));
-  for(let elapsed=0;elapsed<120000;elapsed+=1000){await clock.drainMicrotasks(220);await new Promise(resolve=>setImmediate(resolve));if(results.length&&!runtime.providers.backgroundStatus().find(row=>row.job===id+' integrity').busy)break;await clock.advance(1000);}
-  assert.equal(results.length,1);assert.equal(results[0].status,'unavailable');assert.notEqual(results[0].complete,true);assert.equal(results[0].corruption,false);
-  assert.deepEqual([...current.quarantinedObjectIds],quarantined);assert.equal(current.cursor,cursor);assert.equal(current.scanId,scanId);assert.equal(current.completedAt,completedAt);assert.ok(current.failedAt);assert.equal(current.lastOutcome,'unavailable');
-  const job=runtime.providers.backgroundStatus().find(row=>row.job===id+' integrity');assert.equal(job.lastOutcome,'unavailable');assert.equal(job.scheduled,true);assert.ok(Date.parse(job.nextEligibleAt)-clock.now()<=600000,'uncertainty uses availability retry, not the full-scan interval');assert.deepEqual([...h.state.files.keys()].sort(),beforeFiles,'uncertainty cannot cause repair publication or deletion');
-  incompleteInventoryCases.push({usableHistory,kind,fault});
+  assert.equal(runtime.providers.requestIntegrity(id),true,'integrity-result propagation test must explicitly schedule the integrity owner instead of depending on configuration wake timing');
+  for(let elapsed=0;elapsed<120000;elapsed+=1000){
+    await clock.drainMicrotasks(220);await new Promise(resolve=>setImmediate(resolve));await realWorkSettled();await clock.drainMicrotasks(220);
+    if(results.length&&!runtime.providers.backgroundStatus().find(row=>row.job===id+' integrity').busy)break;
+    await clock.advance(1000);
+  }
+  assert.equal(results.length,1,JSON.stringify({usableHistory,kind,fault,status:runtime.providers.backgroundStatus().find(row=>row.job===id+' integrity'),diagnostics:diagnosticFailures.slice(-2)}));
+  const job=runtime.providers.backgroundStatus().find(row=>row.job===id+' integrity');
+  if(usableHistory){
+   assert.equal(results[0].status,'completed');assert.equal(results[0].complete,true);assert.ok(results[0].checked>0,'usable committed history must still be integrity-verified despite unrelated repository debris');
+   assert.equal(current.lastOutcome,'completed');assert.equal(job.lastOutcome,'completed');
+  }else{
+   assert.equal(results[0].status,'unavailable');assert.notEqual(results[0].complete,true);assert.equal(results[0].corruption,false);
+   assert.deepEqual([...current.quarantinedObjectIds],quarantined);assert.equal(current.cursor,cursor);assert.equal(current.scanId,scanId);assert.equal(current.completedAt,completedAt);assert.ok(current.failedAt);assert.equal(current.lastOutcome,'unavailable');
+   assert.equal(job.lastOutcome,'unavailable');assert.equal(job.scheduled,true);assert.ok(Date.parse(job.nextEligibleAt)-clock.now()<=600000,'uncertainty uses availability retry, not the full-scan interval');
+  }
+  assert.deepEqual([...h.state.files.keys()].sort(),beforeFiles,'integrity verification cannot cause repair publication or deletion for unrelated repository debris');
+  incompleteInventoryCases.push({usableHistory,kind,fault,status:results[0].status});
  }finally{runtime.providers.configureIntegrityScrub(null);await h.provider.disconnect();globalThis.Date=realDate;backgroundClock=null;}
 }
 // Finite backlogs cross both former limits (64 versions / 100 pages), then
@@ -1111,4 +1164,32 @@ for(const encrypted of [false,true]){
   assembledUploadContinuations.push({encrypted:true,beforeRestore:true,authorizationWindows:2,foregroundOnly:true,sealedAttachmentIdentity:true});
  }finally{runtime.providers.configurePendingBackupRetry(null);await h.provider.disconnect();publicationProtection=null;globalThis.Date=original.Date;backgroundClock=null;notes=original.notes;dailyRecords=original.dailyRecords;assetDescriptor=original.assetDescriptor;audioBlob=original.audioBlob;snapshotRevision=original.snapshotRevision;sourceRevision=original.sourceRevision;backgroundReady=original.backgroundReady;}
 }
-console.log(JSON.stringify({status:'PASS',suite:'repository-checkpoint',assembledUploadContinuations,publicationContinuationCases,assembledDriveCases,incompleteInventoryCases,driveBacklogCases,firstAttachmentReads:1,secondAttachmentReads:0,simulatedAttachmentBytes:AUDIO_BYTES,identicalCheckpointAllObjectsReused:true,unchangedStructuredObjectsRecompressed:false,oldSavedDayEditFreshObjects:fresh,noteEditFreshObjects:noteFresh,attachmentMetadataZeroByteReads:true,savedDayDeletionNoResurrection:true,sealedCaptureSurvivesLaterMutation:true,providerTieredRetentionFoundation:true,providerCommitMarkerLatestAtomicity:true,retentionPolicy15Plus1:true,beforeRestorePublication:true,managedProviderProtectedPublication:true,orphanMaintenanceBackupRecovery:true,tierGraduation:true,sparseRetention:true,retentionDeletionFailureGcSafe:true,providerReconciliationConvergence:true,providerConvergenceFailureIsolated:true,providerSharedObjectGcSafe:true,publicationProtectedGcSafe:true,reclamationGraceSafe:true,providerLargeAttachmentUploadsBeforeSelfHeal:1,providerLaterAttachmentBytes:0,providerMissingObjectSelfHeal:true,providerOrphanGc:true,providerScrubSelfHeal:true,integrityScrubPriority:true,retainedAbaReuse:true,providerPostSealMutationAllowed:true,integrityScrubStableObjectsOnly:true,integrityScrubLeasesReleased:true,providerTemporaryDownloadsReleased:true,explicitProtectedRemoval:true,durableProviderRetry:true,metadataHistoryColdZeroDownloads:coldHistoryDownloads===0,metadataHistoryWarmZeroDownloads:warmHistoryAdditionalDownloads===0,metadataHistoryScopeIndependent:true,repositoryGenerationReset:true,metadataHistoryBodyVerificationDeferred:true,metadataHistoryUncertainZeroDownloads:uncertainColdDownloads===0,metadataHistoryListedRemoteFiles:coldHistoryRemoteFiles,postPublicationReceiptReuse:true,postPublicationReceiptPublications:2,postPublicationReceiptImmutableReadbacks:receiptDownloads.checkpoint.length+receiptDownloads.commit.length,postPublicationReceiptAdditionalHistoryDownloads:receiptDownloads.checkpoint.length+receiptDownloads.commit.length-4,stateDiscoveryObjectInventoryReuse:true,stateDiscoveryMatureObjectLists:objectListsDuringSecondReceipt,stateDiscoveryConservativeConcurrentObject:true,checksumOperations:checksumCounter},null,2));
+// Pass F: the shared manifest/commit byte-verification lease must reject a
+// same-size corrupt read and release its temporary file on *both* paths.
+const providerMetadataVerificationCases=[];
+{
+ const original={notes,dailyRecords,assetDescriptor,snapshotRevision,sourceRevision};
+ try{
+  dailyRecords=[];assetDescriptor=null;notes={N4:stableSecondaryNote};
+  for(const kind of ['checkpoint','commit']){
+   const files=new Map(),key=value=>value.kind+':'+value.id;let downloaded=0,released=0;
+   const describe=file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,digest:file.digest,createdAt:file.createdAt,modifiedAt:file.createdAt,remoteId:'f-metadata-'+file.id});
+   const transport=freeze({
+    list:async({kind:listedKind})=>freeze({items:freeze([...files.values()].filter(file=>file.kind===listedKind).map(describe)),ignored:0,overflow:false}),
+    upload:async entry=>{const stored=freeze({...entry,createdAt:new Date().toISOString()});files.set(key(entry),stored);return describe(stored);},
+    download:async ref=>{const file=files.get(key(ref));if(!file)throw new Error('Missing Pass F verification fixture');downloaded++;
+     const source=file.blob,blob=ref.kind===kind?new Blob([source.slice(0,source.size-1),new Uint8Array([37])]):source;
+     return freeze({blob,release:async()=>{released++;}});},
+    delete:async ref=>files.delete(key(ref))
+   });
+   const id='f-verify-'+kind;assert.equal(runtime.providers.register(freeze({id,label:'Metadata Verification QA',repository:transport})),true);
+   snapshotRevision='f-verify-'+kind;sourceRevision=kind==='checkpoint'?'2026-10-31T11:01:00.000Z':'2026-10-31T11:02:00.000Z';
+   await assert.rejects(()=>runtime.providers.backupRepositoryProvider(id,{interactive:false}),new RegExp('Remote repository '+kind+' failed content-integrity verification','u'),'corrupt '+kind+' bytes must never receive a verified upload receipt');
+   assert.ok(downloaded>0);assert.equal(released,downloaded,'all temporary downloads must be released when '+kind+' verification fails');
+   if(kind==='checkpoint')assert.equal([...files.values()].filter(row=>row.kind==='commit').length,0,'a failed manifest proof must not upload a commit');
+   providerMetadataVerificationCases.push(kind);
+  }
+ }finally{notes=original.notes;dailyRecords=original.dailyRecords;assetDescriptor=original.assetDescriptor;snapshotRevision=original.snapshotRevision;sourceRevision=original.sourceRevision;}
+}
+console.log(JSON.stringify({status:'PASS',suite:'repository-checkpoint',providerMetadataVerificationCases,assembledUploadContinuations,publicationContinuationCases,assembledDriveCases,assembledDriveWallMs,incompleteInventoryCases,driveBacklogCases,firstAttachmentReads:1,secondAttachmentReads:0,simulatedAttachmentBytes:AUDIO_BYTES,identicalCheckpointAllObjectsReused:true,unchangedStructuredObjectsRecompressed:false,oldSavedDayEditFreshObjects:fresh,noteEditFreshObjects:noteFresh,attachmentMetadataZeroByteReads:true,savedDayDeletionNoResurrection:true,sealedCaptureSurvivesLaterMutation:true,providerTieredRetentionFoundation:true,providerCommitMarkerLatestAtomicity:true,retentionPolicy15Plus1:true,beforeRestorePublication:true,managedProviderProtectedPublication:true,orphanMaintenanceBackupRecovery:true,tierGraduation:true,sparseRetention:true,retentionDeletionFailureGcSafe:true,providerReconciliationConvergence:true,providerConvergenceFailureIsolated:true,providerSharedObjectGcSafe:true,publicationProtectedGcSafe:true,reclamationGraceSafe:true,providerLargeAttachmentUploadsBeforeSelfHeal:1,providerLaterAttachmentBytes:0,providerMissingObjectSelfHeal:true,providerOrphanGc:true,providerScrubSelfHeal:true,integrityScrubPriority:true,retainedAbaReuse:true,providerPostSealMutationAllowed:true,integrityScrubStableObjectsOnly:true,integrityScrubLeasesReleased:true,providerTemporaryDownloadsReleased:true,explicitProtectedRemoval:true,durableProviderRetry:true,metadataHistoryColdZeroDownloads:coldHistoryDownloads===0,metadataHistoryWarmZeroDownloads:warmHistoryAdditionalDownloads===0,metadataHistoryScopeIndependent:true,repositoryGenerationReset:true,metadataHistoryBodyVerificationDeferred:true,metadataHistoryUncertainZeroDownloads:uncertainColdDownloads===0,metadataHistoryListedRemoteFiles:coldHistoryRemoteFiles,postPublicationReceiptReuse:true,postPublicationReceiptPublications:2,postPublicationReceiptImmutableReadbacks:receiptDownloads.checkpoint.length+receiptDownloads.commit.length,postPublicationReceiptAdditionalHistoryDownloads:receiptDownloads.checkpoint.length+receiptDownloads.commit.length-4,stateDiscoveryObjectInventoryReuse:true,stateDiscoveryMatureObjectLists:objectListsDuringSecondReceipt,stateDiscoveryConservativeConcurrentObject:true,checksumOperations:checksumCounter},null,2));
+await import('../../helpers/session-ownership-claim-regression.mjs');

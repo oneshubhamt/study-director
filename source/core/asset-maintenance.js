@@ -19,11 +19,11 @@ registry.define('asset-maintenance',1,input=>{
     const diagMark=(...args)=>diagnostics?.mark?.(...args),diagFinish=(...args)=>diagnostics?.finish?.(...args),diagFail=(...args)=>diagnostics?.fail?.(...args);
     const liveSnapshot=()=>ports.liveFields().map(field=>[field,String(field.value??'')]);
     const liveChanged=values=>values.some(([field,value])=>!field?.isConnected||String(field.value??'')!==value);
-    function collectInto(references,value){const scan=ports.scanReferences(String(value??''));for(const id of scan.assetIds||[])references.add(id);return scan.trusted===true;}
+    function collectInto(references,value,remaining=null){const scan=ports.scanReferences(String(value??''));for(const id of scan.assetIds||[]){references.add(id);remaining?.delete(id);}return scan.trusted===true;}
     async function referencedAssetIds(keys,proof,liveValues,check,progress){
       const signature=JSON.stringify([proof,keys,liveValues.map(([,value])=>value)]);
-      if(!scanState||scanState.signature!==signature){scanState={signature,references:new Set(),phase:0,index:0,values:null};for(const [,value] of liveValues)if(!collectInto(scanState.references,value))return {references:scanState.references,trusted:false};}
-      const state=scanState,complete=()=>keys.length>0&&keys.every(id=>state.references.has(id));let units=0;const shouldYield=ports.budget();
+      if(!scanState||scanState.signature!==signature){scanState={signature,references:new Set(),remaining:new Set(keys),phase:0,index:0,values:null};for(const [,value] of liveValues)if(!collectInto(scanState.references,value,scanState.remaining)){const references=scanState.references;scanState=null;return {references,trusted:false};}}
+      const state=scanState,complete=()=>keys.length>0&&state.remaining.size===0;let units=0;const shouldYield=ports.budget();
       // Notes, the session, Saved Days, then versions kept for review.
       while(state.phase<4&&!complete()){
         check();
@@ -36,7 +36,7 @@ registry.define('asset-maintenance',1,input=>{
         }
         while(state.index<state.values.length){
           check();if(units>=batchSize)throw interrupted('budget');
-          if(!collectInto(state.references,state.values[state.index])){scanState=null;return {references:state.references,trusted:false};}
+          if(!collectInto(state.references,state.values[state.index],state.remaining)){scanState=null;return {references:state.references,trusted:false};}
           state.index++;units++;progress();if(complete())break;if(shouldYield())await ports.yieldTask({priority:'background'});
         }
         if(complete())break;state.phase++;state.index=0;state.values=null;progress();

@@ -137,6 +137,7 @@ let corruptAfterImportOnce=false;
 let corruptPostCommitReadOnce=false;
 let cancelDuringBatchOnce=false;
 let restoreJournal=null;
+let failStartupRollbackOnce=false;
 let activeSessionBlocking=false;
 let selectIncomingSavedDay=false;
 let exportSaveStatus='downloaded',chooseSaveResult=()=>Promise.resolve(null);const chosenNames=[];
@@ -212,7 +213,7 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
       currentNotes=freeze({...currentNotes,...normalized});return currentNotes;
     },
     restoreNotesSnapshot:async payload=>{events.push('rollback-notes');currentNotes=freeze(Object.fromEntries(Object.entries(payload||{}).map(([key,item])=>[key,normalizeNote(item,key)]).filter(([,item])=>item)));return currentNotes;},
-    restoreSessionState:async()=>{events.push('restore-session-state');return true;},
+    restoreSessionState:async()=>{events.push('restore-session-state');if(failStartupRollbackOnce){failStartupRollbackOnce=false;throw new Error('injected startup rollback interruption');}return true;},
     verifyActiveSessionRuntime:async()=>true,restoredFromFile:()=>false
   }),
   operations:freeze({canShare:()=>true,assertAuthority:()=>true,clearFault:fn,failClosed:fn,runExclusive:async(kind,operation)=>operation()}),
@@ -289,13 +290,13 @@ exportSaveStatus='downloaded';
 assert.equal((await withoutFileJobDeadlock(()=>runtime.controller.exportLocal())).status,'downloaded');
 assert.equal(currentFileJob,null,'standalone export must release its exclusive file job');
 assert.equal(backupCompletions.length,1);
-assert.deepEqual({...backupCompletions[0].copy},{source:'file',sourceRevision:'2026-09-15T12:00:00.000Z',verified:false},'a download is a backup the person made; it cannot be read back, so it is recorded unverified');
+assert.deepEqual({...backupCompletions[0].copy},{source:'file',sourceRevision:'2026-09-15T12:00:00.000Z',verified:false,attachmentsComplete:true},'a download is a backup the person made; it cannot be read back, so it is recorded unverified');
 // The save dialog opens from the click with the backup's file name; a file saved
 // there and read back is a verified copy of the data as of its capture.
 backupCompletions.length=0;chosenNames.length=0;chooseSaveResult=()=>Promise.resolve({name:'chosen.sdbackup'});
 const savedExport=await withoutFileJobDeadlock(()=>runtime.controller.exportLocal());
 assert.equal(savedExport.status,'saved');assert.match(chosenNames[0],/-study-director-backup-\d{4}-\d{2}-\d{2}\.sdbackup$/u);
-assert.equal(backupCompletions.length,1);assert.deepEqual({...backupCompletions[0].copy},{source:'file',sourceRevision:'2026-09-15T12:00:00.000Z',verified:true});
+assert.equal(backupCompletions.length,1);assert.deepEqual({...backupCompletions[0].copy},{source:'file',sourceRevision:'2026-09-15T12:00:00.000Z',verified:true,attachmentsComplete:true});
 // Closing the dialog cancels quietly: nothing is prepared or recorded.
 backupCompletions.length=0;chooseSaveResult=()=>Promise.reject(Object.assign(new Error('cancelled'),{name:'AbortError'}));
 assert.equal((await withoutFileJobDeadlock(()=>runtime.controller.exportLocal())).status,'cancelled');assert.equal(backupCompletions.length,0);
@@ -350,14 +351,14 @@ assert.equal(currentNotes.Ethics.version,2);
 const gzipBomb=new Blob([gzipSync('\n'.repeat(limits.backupMaxUncompressedBytes+1024))],{type:'application/gzip'});
 await assert.rejects(()=>compatibilityFacade.inspectBackup(gzipBomb,{filename:'gzip-bomb.sdbackup.gz'}),/expands beyond the 8 MB safe uncompressed limit/u);
 
-// Post-commit verification detects a corrupted write and restores the safety snapshot.
+// The canonical commit receipt detects a corrupted write immediately and restores the safety snapshot.
 // Make the local Saved Day genuinely divergent so the v15 conflict contract performs an explicit replacement rather than treating it as identical.
 importedDailyRecords.push(freeze({version:16,recordKind:'study',date:'2026-08-03',reflection:'local divergent reflection',studyQuality:2,savedAt:'2026-08-03T21:00:00.000Z'}));
 restoring=true;safetyReadDone=false;corruptAfterImportOnce=true;selectIncomingSavedDay=true;
 const verificationCandidate=await runtime.controller.inspect(created.blob,{filename:created.filename});
 const verificationFailure=await runtime.controller.restore(verificationCandidate).then(()=>null,error=>error);
 assert.ok(verificationFailure instanceof Error);
-assert.match(verificationFailure.message,/Post-restore verification failed for saved day/u);
+assert.match(verificationFailure.message,/Saved-Day reconciliation commit did not match the resolved state/u);
 assert.equal(verificationFailure.studyDirectorCommittedDescription,'');
 assert.match(verificationFailure.studyDirectorRollbackDescription,/rolled back from the verified safety copy/u);
 
@@ -385,17 +386,38 @@ assert.deepEqual(Object.keys(currentNotes),['Economics'],'rollback must restore 
 currentNotes=notes;
 restoring=false;
 
-// A durable journal left by a terminated tab is automatically replayed on the next startup.
-importedDailyRecords.splice(0,importedDailyRecords.length,freeze({version:16,recordKind:'study',date:'2026-08-04',reflection:'interrupted imported state',savedAt:'2026-08-04T20:00:00.000Z'}));
-restoreJournal={
-  state:{id:'restore_crash_recovery_12345678',phase:'notes-committed'},
-  payload:{id:'restore_crash_recovery_12345678',blob:created.blob,filename:created.filename,scheduleText:'08:00 | 60 | Existing | work | Ethics | block | 1'}
-};
-const crashRecovery=await runtime.controller.recoverInterruptedRestore();
-assert.equal(crashRecovery.recovered,true);
+// A terminated standalone or managed restore can leave the durable journal at
+// any commit boundary. Startup must replay the same verified pre-restore state
+// for every phase, never infer success from a partially written phase marker.
+const crashPhases=["prepared","applying-assets","assets-committed","applying-saved-day-state","saved-day-state-committed","applying-notes","notes-committed","applying-pending-reviews","applying-active-session","active-session-committed","applying-personal-data","verifying","verified","startup-rolling-back"];
+for(const [index,phase] of crashPhases.entries()){
+  importedDailyRecords.splice(0,importedDailyRecords.length,freeze({version:16,recordKind:'study',date:'2026-08-04',reflection:'interrupted '+phase,savedAt:'2026-08-04T20:00:00.000Z'}));
+  currentNotes=freeze({Corrupted:normalizeNote({key:'Corrupted',text:'interrupted '+phase},'Corrupted')});
+  restoreJournal={
+    state:{id:'restore_crash_recovery_'+String(index).padStart(8,'0'),phase},
+    payload:{id:'restore_crash_recovery_'+String(index).padStart(8,'0'),blob:created.blob,filename:created.filename,scheduleText:'08:00 | 60 | Existing | work | Ethics | block | 1'}
+  };
+  const result=await runtime.controller.recoverInterruptedRestore();
+  assert.equal(result.recovered,true,phase+' must be recovered');
+  assert.deepEqual([...new Set(importedDailyRecords.map(record=>record.date))],['2026-08-03'],phase+' restores the original Saved Day');
+  assert.deepEqual(Object.keys(currentNotes).sort(),['Economics','Ethics'],phase+' restores the original note set');
+  assert.equal(currentNotes.Ethics.text,notes.Ethics.text,phase+' restores the original note bytes');
+  assert.equal(restoreJournal,null,phase+' clears the journal only after verified rollback');
+}
 assert.equal(backupPresentation.read('file','startup-recovery').outcome,'local-recovery-completed');
 assert.equal(backupPresentation.read('file','startup-recovery').lifecycle,'succeeded');
-assert.equal(restoreJournal,null,'startup recovery must clear the durable journal only after verified rollback');
+// A second crash during rollback must retain the journal and make a later
+// startup retry idempotent instead of acknowledging incomplete recovery.
+importedDailyRecords.splice(0,importedDailyRecords.length,freeze({version:16,recordKind:'study',date:'2026-08-04',reflection:'half-rolled-back',savedAt:'2026-08-04T20:00:00.000Z'}));
+restoreJournal={
+  state:{id:'restore_crash_retry_12345678',phase:'startup-rolling-back'},
+  payload:{id:'restore_crash_retry_12345678',blob:created.blob,filename:created.filename,scheduleText:'08:00 | 60 | Existing | work | Ethics | block | 1'}
+};
+failStartupRollbackOnce=true;
+await assert.rejects(()=>runtime.controller.recoverInterruptedRestore(),/injected startup rollback interruption/u);
+assert.ok(restoreJournal,'a failed startup rollback must keep its durable safety journal');
+assert.equal((await runtime.controller.recoverInterruptedRestore()).recovered,true,'the next startup must retry the interrupted rollback');
+assert.equal(restoreJournal,null,'successful replay must retire the journal');
 assert.deepEqual([...new Set(importedDailyRecords.map(record=>record.date))],['2026-08-03']);
 assert.ok(events.includes('restore-session-state'));
 

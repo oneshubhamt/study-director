@@ -69,6 +69,12 @@ for(const options of [{},{from:'2026-09-09',to:'2026-09-10'},{limit:1}]){
   assert.deepEqual(Array.from(rows,row=>row.date),options.limit?['2026-09-10']:['2026-09-09','2026-09-10']);
   for(const row of rows){assert.equal(row.recordKind,'study');assert.ok(Array.isArray(row.tasks));assert.equal(codec.sanitizeCurrentDailyRecord(row),null,'read projections must not become canonical write input');}
 }
+const chunked=await app.dailyRecords.window({yieldProjection:true});
+assert.deepEqual(Array.from(chunked,row=>row.date),['2026-09-09','2026-09-10'],'chunked Insights projection must preserve the same study-record window and ordering');
+for(const row of chunked)assert.ok(Array.isArray(row.tasks),'chunked projection must preserve the ordinary materialized Daily Record view');
+const insightSnapshot=await app.dailyRecords.insightsSnapshot({yieldProjection:true}),ordinaryStudySummaries=(await app.dailyRecords.sortedSummaries()).filter(row=>row.recordKind==='study');
+assert.deepEqual(Array.from(insightSnapshot.records,row=>row.date),['2026-09-09','2026-09-10'],'atomic Insights snapshot must preserve the ordinary study-record projection');
+assert.deepEqual(Array.from(insightSnapshot.summaries.filter(row=>row.recordKind==='study'),row=>row.date),Array.from(ordinaryStudySummaries,row=>row.date),'atomic Insights snapshot must preserve the same study-summary basis consumed by the ordinary Insights reader');
 assert.deepEqual(stores.daily.get(current.date),current,'reading Insights must leave canonical data untouched');
 assert.equal(codec.sanitizeDailyRecordSummary({...diarySummary,outcomeCounts:{...diarySummary.outcomeCounts,full:1}}),null,'diary summaries must reject study outcome counts');
 

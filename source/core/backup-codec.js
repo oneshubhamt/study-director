@@ -112,6 +112,19 @@ function backupSanitizeAssetDescriptors(value){
   }
   return freeze(out);
 }
+// Recoverability is derived from the verified asset descriptor inventory,
+ // not from the canonical-record completeness proof. Missing bytes do not
+ // invalidate the readable Saved Days and Notes in a rescue checkpoint.
+function backupAttachmentCoverage(descriptors=[]){
+  const rows=Array.isArray(descriptors)?descriptors:[],missingIds=freeze(rows.filter(row=>row?.missing===true).map(row=>String(row.assetId||'')));
+  return freeze({total:rows.length,missing:missingIds.length,missingIds,fullyRecoverable:missingIds.length===0});
+}
+function backupMissingAttachmentWarning(descriptors=[]){
+  const coverage=backupAttachmentCoverage(descriptors);
+  if(!coverage.missing)return '';
+  const examples=coverage.missingIds.slice(0,3).join(', '),rest=coverage.missing>3?` and ${coverage.missing-3} more`:'';
+  return `Partial attachment recovery: ${coverage.missing} attachment${coverage.missing===1?'':'s'} missing (${examples}${rest}). Saved Days and Notes are preserved, but missing files cannot be restored from this backup.`;
+}
 function backupCountShape(value={},types=BACKUP_ENTITY_TYPES){
   return Object.fromEntries(types.map(type=>[type,boundedInt(value[type],{min:0,max:backupEntityLimit(type),fallback:0})]));
 }
@@ -617,6 +630,8 @@ return Object.freeze({
   normalizeImportedActiveSession:(value,{legacy=false}={})=>legacy||olderActiveSession(value)?CompatibilityCodec.activeSession(value):ActiveSessionCodec.sanitizeCurrent(value),
   normalizePersonalData:value=>PersonalDataCodec.normalize(value),
   normalizePendingReview:value=>{const clean=PendingReviewCodec.normalize(value);return clean?freeze(clean):null;},
+  attachmentCoverage:backupAttachmentCoverage,
+  missingAttachmentWarning:backupMissingAttachmentWarning,
   normalizeAssetDescriptors:backupSanitizeAssetDescriptors
 });
   }

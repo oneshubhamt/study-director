@@ -1,5 +1,7 @@
 # Audit: the background services after sync and profiles (2026-10-25)
 
+> **Historical record — superseded 2026-10-27.** This report describes the earlier same-history/spine design in which Device Folder and Google Drive could wait for or copy checkpoints from one another. That orchestration is retired. The current contract publishes canonical local state independently to each enabled location; Drive alone is the shared multi-device synchronization repository. See `BACKUP-ENGINE.md` and `BACKGROUND-OPERATIONS.md` for the current architecture.
+
 This is a read-only audit. It checks every background job and timer against the standard in `HANDOFF.md` section 4 (bounded work, gives way to the person, durable intent, one retry policy, writing tab only, visible in Copy diagnostics, tested). The last full map was made on 2026-10-17, before sync and profiles, so this audit looks hardest at what came after it:
 - Drive sync (catch-up, taking turns, copies between locations);
 - the Drive sign-in kept across reloads;

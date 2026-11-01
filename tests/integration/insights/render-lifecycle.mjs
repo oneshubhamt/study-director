@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const source=fs.readFileSync('source/external/insights.js','utf8');
-const start=source.indexOf('    const render=async context=>{'),end=source.indexOf('    return Object.freeze({render,ready:',start);
+const start=source.indexOf('    const render=async context=>{'),end=source.indexOf('    return Object.freeze({render,prefetch,ready:',start);
 assert.ok(start>0&&end>start);
 function harness({failSource=false,supersede=false,retained=false}={}){
   let generation=0,disconnects=0,observers=0;
@@ -12,7 +12,7 @@ function harness({failSource=false,supersede=false,retained=false}={}){
   const pane=element(),state={rendered:retained,errorTimer:null,renderedBaseKey:'source|2026-09-28|revision',renderedWindowKey:'all'};
   const values={
     observePane:()=>{},state,restoreScroll:()=>{},clearTimeout,performance:{now:()=>0},
-    InsightsRenderCoordinator:{begin:()=>++generation,isCurrent:token=>token===generation},computation:{cancel:()=>{}},
+    InsightsRenderCoordinator:{begin:()=>++generation,isCurrent:token=>token===generation},computation:{cancel:()=>{},warm:()=>true},
     PerformanceObserver:class{static supportedEntryTypes=['longtask'];constructor(){observers++;}observe(){}disconnect(){disconnects++;}},
     renderInitialInsightsLoading:()=>pane.setAttribute('aria-busy','true'),requestAnimationFrame:callback=>callback(),
     api:{insights:{notifications:port,dataSource:{getRecordSource:()=>{if(failSource)throw new Error('Source unavailable');return null;}}}},

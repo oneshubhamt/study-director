@@ -51,6 +51,45 @@
   }=InsightsModel;
   try{delete globalThis.StudyDirectorInsightsModel;}catch(error){}
 
+  // Workers need only the already-loaded model. Exit before constructing any
+  // DOM/render/runtime components so worker startup pays no UI initialization cost.
+  if(typeof document==='undefined'&&typeof self!=='undefined'&&typeof self.postMessage==='function'){
+    const classifyTaskOutcome=task=>task&&typeof task.__sdOutcome==='string'?task.__sdOutcome:'untouched';
+    const summarizePracticeRuns=()=>{throw new Error('Worker input is missing precomputed Practice Pacer evidence.');};
+    const engine=InsightsModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
+    // The host sends a revision's prepared records once, in parts, and later
+    // builds for that revision name only the window. One revision is kept.
+    let held=null,incoming=null;
+    self.addEventListener('message',event=>{
+      const message=event.data&&typeof event.data==='object'?event.data:{};
+      if(message.type==='SD_INSIGHTS_RECORDS'){
+        const revision=String(message.revision||''),parts=Number(message.parts),part=Number(message.part);
+        if(part===0||!incoming||incoming.revision!==revision)incoming={revision,parts,next:0,records:[]};
+        if(part!==incoming.next||!Array.isArray(message.records)){incoming=null;return;}
+        incoming.records.push(...message.records);incoming.next+=1;
+        if(incoming.next===incoming.parts){held={revision,records:incoming.records};incoming=null;}
+        return;
+      }
+      if(message.type!=='SD_INSIGHTS_BUILD')return;
+      const started=performance.now();
+      try{
+        if(!held||held.revision!==String(message.revision||''))throw new Error('Insights worker is missing this revision\'s records.');
+        const prepared=engine.reusePrepared(held.records,held.revision);
+        const view=message.window&&typeof message.window==='object'?message.window:{all:true};
+        const records=view.all===true?prepared.records:(Array.isArray(view.indices)?view.indices:[]).map(index=>{
+          const record=prepared.records[index];
+          if(!record)throw new Error('Insights window names a record the worker does not hold.');
+          return record;
+        });
+        const model=engine.buildPrepared(records,prepared,message.options||{});
+        self.postMessage({type:'SD_INSIGHTS_RESULT',id:message.id,model,computeMs:performance.now()-started});
+      }catch(error){
+        self.postMessage({type:'SD_INSIGHTS_ERROR',id:message.id,message:String(error&&error.message||error)});
+      }
+    });
+    return;
+  }
+
   function insightWindowDeviceState(){
     const state=window.StudyDirector?.data?.deviceState;
     if(!state||typeof state.readInsightsWindow!=='function'||typeof state.writeInsightsWindow!=='function')throw new Error('Study Director Insights device-state capability is unavailable.');
@@ -732,6 +771,8 @@
 .insights-mobile-scroll-cue{display:none}
 .insights-empty{padding:var(--sd-space-24);text-align:center;--card-border-style:dashed}
 .insights-empty-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px}
+.insights-below-fold{content-visibility:auto;contain-intrinsic-size:auto 720px}
+@media print{.insights-below-fold{content-visibility:visible}}
 `;
 
   // 9C. RESPONSIVE STYLES
@@ -3670,34 +3711,63 @@
     });
   })(InsightsConfig,InsightsPrimitives,InsightsRendering);
 
-  if(typeof document==='undefined'&&typeof self!=='undefined'&&typeof self.postMessage==='function'){
-    const classifyTaskOutcome=task=>task&&typeof task.__sdOutcome==='string'?task.__sdOutcome:'untouched';
-    const summarizePracticeRuns=()=>{throw new Error('Worker input is missing precomputed Practice Pacer evidence.');};
-    const engine=InsightsModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
-    self.addEventListener('message',event=>{
-      const message=event.data&&typeof event.data==='object'?event.data:{};
-      if(message.type!=='SD_INSIGHTS_BUILD')return;
-      const started=performance.now();
-      try{
-        const prepared=engine.prepare(message.modelRecords,message.revision);
-        const model=engine.buildPrepared(message.records,prepared,message.options||{});
-        self.postMessage({type:'SD_INSIGHTS_RESULT',id:message.id,model,computeMs:performance.now()-started});
-      }catch(error){
-        self.postMessage({type:'SD_INSIGHTS_ERROR',id:message.id,message:String(error&&error.message||error)});
-      }
-    });
-    return;
-  }
+
 
   const InsightsWorkerModel=(()=>{
     const MIN_RECORDS=120;
     const WORKER_TIMEOUT_MS=30000;
-    function create(api,engine){
-      let active=null,nextId=0;
+    // One structured clone of a long history is a main-thread task. Parts of
+    // this size keep each clone well inside the long-task budget.
+    const RECORDS_PER_MESSAGE=150;
+    // A hidden Insights tab keeps its idle worker this long, so a rebuild soon
+    // after new data runs on already-compiled code, then frees the memory.
+    const IDLE_RETIRE_MS=120000;
+    const defaultYield=()=>globalThis.scheduler&&typeof globalThis.scheduler.yield==='function'
+      ?globalThis.scheduler.yield()
+      :new Promise(resolve=>setTimeout(resolve,0));
+    function create(api,engine,{yieldTask=defaultYield}={}){
+      let active=null,nextId=0,worker=null,heldRevision='',retireTimer=null;
       const supported=()=>!!(INSIGHTS_RUNTIME_URL&&typeof Worker==='function');
-      const cancel=()=>{
+      const cancelRetire=()=>{if(retireTimer!==null){clearTimeout(retireTimer);retireTimer=null;}};
+      const retireWorker=()=>{cancelRetire();const current=worker;worker=null;heldRevision='';try{current?.terminate();}catch{}};
+      const rejectActive=error=>{const current=active;active=null;if(current)current.reject(error);};
+      const ensureWorker=()=>{
+        if(worker)return worker;
+        const created=new Worker(trustedWorkerURL(),{name:'study-director-insights'});
+        created.onmessage=event=>{
+          const message=event.data&&typeof event.data==='object'?event.data:{},current=active;
+          if(!current||message.id!==current.id)return;
+          if(message.type==='SD_INSIGHTS_ERROR')current.reject(new Error(message.message||'Insights worker failed.'));
+          else if(message.type==='SD_INSIGHTS_RESULT')current.resolve(message);
+        };
+        created.onerror=event=>{
+          event.preventDefault?.();
+          const error=new Error(event.message||'Insights worker failed.');
+          retireWorker();rejectActive(error);
+        };
+        created.onmessageerror=()=>{const error=new Error('Insights worker returned an unreadable response.');retireWorker();rejectActive(error);};
+        worker=created;heldRevision='';return created;
+      };
+      const warm=()=>{
+        if(!supported())return false;
+        try{ensureWorker();return true;}catch(error){retireWorker();return false;}
+      };
+      const abortActive=(rewarm=false)=>{
         if(!active)return false;
-        active.worker.terminate();active.reject(Object.assign(new Error('Insights computation superseded.'),{name:'AbortError'}));active=null;return true;
+        const current=active;active=null;retireWorker();
+        current.reject(Object.assign(new Error('Insights computation superseded.'),{name:'AbortError'}));
+        if(rewarm)warm();
+        return true;
+      };
+      const cancel=()=>abortActive(true);
+      const dispose=()=>{const changed=abortActive(false)||!!worker;retireWorker();return changed;};
+      // The tab was hidden: stop any running build now, but keep an idle,
+      // already-compiled worker for a while before freeing it.
+      const release=()=>{
+        if(abortActive(false))return true;
+        if(!worker)return false;
+        cancelRetire();retireTimer=setTimeout(()=>{retireTimer=null;if(!active)retireWorker();},IDLE_RETIRE_MS);
+        return true;
       };
       const enrichRecords=records=>(Array.isArray(records)?records:[]).map(record=>{
         const tasks=(Array.isArray(record&&record.tasks)?record.tasks:[]).map(task=>({...task,__sdOutcome:api.logic.classifyTaskOutcome(task)}));
@@ -3709,38 +3779,57 @@
         const model=engine.buildPrepared(records,prepared,options);
         return {model,mode:reason,computeMs:performance.now()-started,roundTripMs:0};
       };
+      // Name the window by position in the held records, so a window change
+      // sends a few hundred integers instead of the records again.
+      const windowOf=(records,prepared)=>{
+        if(records===prepared.records)return {all:true};
+        const positions=new Map(prepared.records.map((record,index)=>[record,index]));
+        const indices=records.map(record=>positions.has(record)?positions.get(record):-1);
+        if(indices.some(index=>index<0))throw new Error('Insights window records are not part of the prepared history.');
+        return {indices};
+      };
       const build=async(records,prepared,options)=>{
         const started=performance.now();
         if(Math.max(records.length,prepared.records.length)<MIN_RECORDS||!supported())return fallback(records,prepared,options,started,supported()?'main-thread-small':'main-thread-unavailable');
-        cancel();
-        const id=++nextId;let worker=null,timeout=null;
+        cancel();cancelRetire();
+        const id=++nextId;let timeout=null,sentRecords=0;
         try{
-          worker=new Worker(trustedWorkerURL(),{name:'study-director-insights'});
-          const response=await new Promise((resolve,reject)=>{
-            active={id,worker,reject};
+          const currentWorker=ensureWorker();
+          const view=windowOf(records,prepared),revision=String(prepared.revision||'');
+          const response=new Promise((resolve,reject)=>{
+            active={id,resolve,reject};
             timeout=setTimeout(()=>reject(new Error('Insights processing timed out. Retry the report.')),WORKER_TIMEOUT_MS);
-            worker.onmessage=event=>{
-              const message=event.data&&typeof event.data==='object'?event.data:{};
-              if(message.id!==id)return;
-              if(message.type==='SD_INSIGHTS_ERROR')reject(new Error(message.message||'Insights worker failed.'));
-              else if(message.type==='SD_INSIGHTS_RESULT')resolve(message);
-            };
-            worker.onerror=event=>{event.preventDefault?.();reject(new Error(event.message||'Insights worker failed.'));};
-            worker.onmessageerror=()=>reject(new Error('Insights worker returned an unreadable response.'));
-            worker.postMessage({type:'SD_INSIGHTS_BUILD',id,records,modelRecords:prepared.records,revision:prepared.revision,options});
           });
-          const model=response.model;
+          // A superseded build rejects through `response`; keep the sends
+          // from surfacing that same rejection a second time.
+          response.catch(()=>{});
+          if(heldRevision!==revision){
+            const all=prepared.records,parts=Math.max(1,Math.ceil(all.length/RECORDS_PER_MESSAGE));
+            for(let part=0;part<parts;part+=1){
+              if(part>0){await yieldTask();if(worker!==currentWorker||!active||active.id!==id)return await response;}
+              const slice=all.slice(part*RECORDS_PER_MESSAGE,(part+1)*RECORDS_PER_MESSAGE);
+              currentWorker.postMessage({type:'SD_INSIGHTS_RECORDS',revision,part,parts,records:slice});sentRecords+=slice.length;
+            }
+            heldRevision=revision;
+          }
+          currentWorker.postMessage({type:'SD_INSIGHTS_BUILD',id,revision,window:view,options});
+          const result=await response;
+          const model=result.model;
           Object.defineProperty(model,'getLabEvidence',{enumerable:false,value:()=>engine.getLabEvidence(prepared,options)});
-          return {model,mode:'worker',computeMs:Number(response.computeMs)||0,roundTripMs:performance.now()-started};
+          return {model,mode:'worker',computeMs:Number(result.computeMs)||0,roundTripMs:performance.now()-started,sentRecords};
         }catch(error){
+          // cancel() already retires the superseded worker and may prewarm its
+          // replacement. Do not immediately kill that replacement from the
+          // cancelled build's rejection path.
           if(error&&error.name==='AbortError')throw error;
+          retireWorker();
           throw Object.assign(new Error('Insights processing failed. Retry the report.'),{code:'INSIGHTS_PROCESSING_FAILED',cause:error});
         }finally{
-          clearTimeout(timeout);worker?.terminate();
+          clearTimeout(timeout);
           if(active&&active.id===id)active=null;
         }
       };
-      return Object.freeze({build,cancel,enrichRecords,supported,minimumRecords:MIN_RECORDS});
+      return Object.freeze({build,cancel,dispose,release,warm,enrichRecords,supported,minimumRecords:MIN_RECORDS});
     }
     return Object.freeze({create,minimumRecords:MIN_RECORDS});
   })();
@@ -3761,6 +3850,13 @@
     const {
       renderAnalyticsLab
     }=AnalyticsLab;
+  // Sections below the first screen skip layout and paint until they come
+  // near the viewport; they stay in the accessibility tree, find-in-page and
+  // anchor navigation. Their last rendered height is remembered.
+  function belowFold(node){
+    if(node&&node.classList)node.classList.add('insights-below-fold');
+    return node;
+  }
   async function renderModel(pane,model,options={}){
     const started=performance.now();let maxChunkMs=0,chunks=0;
     const appendChunk=callback=>{
@@ -3768,7 +3864,11 @@
       maxChunkMs=Math.max(maxChunkMs,performance.now()-chunkStarted);chunks+=1;
     };
     const nextChunk=async callback=>{
-      await new Promise(resolve=>requestAnimationFrame(resolve));
+      // Keep secondary sections cooperative without forcing one complete display
+      // frame per section. scheduler.yield lets input, style and paint work run
+      // between chunks without turning nine short DOM units into nine frame waits.
+      if(globalThis.scheduler&&typeof globalThis.scheduler.yield==='function')await globalThis.scheduler.yield();
+      else await new Promise(resolve=>setTimeout(resolve,0));
       if(typeof options.isCurrent==='function'&&!options.isCurrent())return false;
       appendChunk(callback);return true;
     };
@@ -3804,23 +3904,23 @@
     }))return {cancelled:true,domMs:performance.now()-started,maxChunkMs,chunks};
     if(!await nextChunk(()=>{
       const head=clusterHeader('Performance','The training record and output evidence: what was planned, completed, sustained, and repeated across the selected window.');
-      head.id='insights-performance';head.classList.add('insights-anchor-target');wrap.append(head,renderMetrics(model));
+      head.id='insights-performance';head.classList.add('insights-anchor-target');wrap.append(head,belowFold(renderMetrics(model)));
     }))return {cancelled:true,domMs:performance.now()-started,maxChunkMs,chunks};
-    if(!await nextChunk(()=>wrap.appendChild(renderTrainingLog(model))))return {cancelled:true,domMs:performance.now()-started,maxChunkMs,chunks};
+    if(!await nextChunk(()=>wrap.appendChild(belowFold(renderTrainingLog(model)))))return {cancelled:true,domMs:performance.now()-started,maxChunkMs,chunks};
     if(!await nextChunk(()=>{
       const head=clusterHeader('Study Output','Work-completion trends, weekly rhythm, plan realism, and calendar intensity for the selected window.');
-      head.id='insights-output';head.classList.add('insights-anchor-target');wrap.append(head,renderVisuals(model));
+      head.id='insights-output';head.classList.add('insights-anchor-target');wrap.append(head,belowFold(renderVisuals(model)));
     }))return {cancelled:true,domMs:performance.now()-started,maxChunkMs,chunks};
     if(!await nextChunk(()=>{
       const head=clusterHeader('Execution','Daily execution mechanics and timed-practice pacing, kept as two distinct views.');
-      head.id='insights-execution';head.classList.add('insights-anchor-target');wrap.append(head,renderExecutionSurface(model));
+      head.id='insights-execution';head.classList.add('insights-anchor-target');wrap.append(head,belowFold(renderExecutionSurface(model)));
     }))return {cancelled:true,domMs:performance.now()-started,maxChunkMs,chunks};
     if(!await nextChunk(()=>{
       const head=clusterHeader('Area Coverage','Describes area work completion, planned-versus-completed allocation, known absences, and Coverage Watch signals.');
-      head.id='insights-areas';head.classList.add('insights-anchor-target');wrap.append(head,renderSubjectCoverage(model));
+      head.id='insights-areas';head.classList.add('insights-anchor-target');wrap.append(head,belowFold(renderSubjectCoverage(model)));
     }))return {cancelled:true,domMs:performance.now()-started,maxChunkMs,chunks};
     if(!await nextChunk(()=>{
-      const section=renderStudyDynamics(model);section.id='insights-dynamics';section.classList.add('insights-anchor-target');wrap.appendChild(section);
+      const section=renderStudyDynamics(model);section.id='insights-dynamics';section.classList.add('insights-anchor-target');wrap.appendChild(belowFold(section));
     }))return {cancelled:true,domMs:performance.now()-started,maxChunkMs,chunks};
     if(!await nextChunk(()=>{
       const section=renderAnalyticsLab(model);section.id='insights-lab';section.classList.add('insights-anchor-target');wrap.appendChild(section);
@@ -3888,7 +3988,10 @@
       suppressScroll:false,
       paneObserver:null,
       lastProfile:null,
-      navigationReady:Promise.resolve(true)
+      navigationReady:Promise.resolve(true),
+      prefetching:null,
+      prefetchWorking:false,
+      prefetched:null
     };
     const main=document.querySelector('.main');
     const observePane=pane=>{
@@ -3897,7 +4000,7 @@
       state.pane=pane;
       if(typeof MutationObserver!=='function')return;
       state.paneObserver=new MutationObserver(()=>{
-        if(pane.hidden||!pane.classList.contains('on')){computation.cancel();engine.releaseTransient();}
+        if(pane.hidden||!pane.classList.contains('on')){computation.release();engine.releaseTransient();}
       });
       state.paneObserver.observe(pane,{attributes:true,attributeFilter:['class','hidden']});
     };
@@ -3927,33 +4030,114 @@
       if(source&&source.type==='demo'||typeof dataSource.getDatasetRevision!=='function')return null;
       try{return await dataSource.getDatasetRevision();}catch(error){return null;}
     };
-    const loadSession=async({dataSource,source,sourceKey,currentStudyDate,datasetRevision,token,profile})=>{
+    const loadSession=async({dataSource,source,sourceKey,currentStudyDate,datasetRevision,isCurrent,profile})=>{
       const loadStarted=performance.now();
-      let summaries=normalizeSummaries(typeof dataSource.getDailySummaries==='function'
-        ? await dataSource.getDailySummaries()
-        : []);
-      if(!InsightsRenderCoordinator.isCurrent(token))return null;
-      let rawRecords=await dataSource.getDailyRecords({});
-      let records=Array.isArray(rawRecords)?rawRecords:[];
+      const readCanonicalInputs=async()=>{
+        if(typeof dataSource.getDailySnapshot==='function'){
+          const snapshot=await dataSource.getDailySnapshot();
+          return [Array.isArray(snapshot&&snapshot.summaries)?snapshot.summaries:[],Array.isArray(snapshot&&snapshot.records)?snapshot.records:[]];
+        }
+        return Promise.all([
+          typeof dataSource.getDailySummaries==='function'?dataSource.getDailySummaries():[],
+          dataSource.getDailyRecords({})
+        ]);
+      };
+      let [rawSummaries,rawRecords]=await readCanonicalInputs();
+      let summaries=normalizeSummaries(rawSummaries),records=Array.isArray(rawRecords)?rawRecords:[];
+      if(!isCurrent())return null;
       let after=await readDatasetRevision(dataSource,source);
       if(datasetRevision&&after&&datasetRevision!==after){
         const retryRevision=after;
-        summaries=normalizeSummaries(typeof dataSource.getDailySummaries==='function'?await dataSource.getDailySummaries():[]);
-        rawRecords=await dataSource.getDailyRecords({});
-        records=Array.isArray(rawRecords)?rawRecords:[];
+        [rawSummaries,rawRecords]=await readCanonicalInputs();
+        summaries=normalizeSummaries(rawSummaries);records=Array.isArray(rawRecords)?rawRecords:[];
         after=await readDatasetRevision(dataSource,source);
         datasetRevision=retryRevision&&after===retryRevision?after:null;
       }else if(!(datasetRevision&&after===datasetRevision))datasetRevision=null;
-      if(!InsightsRenderCoordinator.isCurrent(token))return null;
+      if(!isCurrent())return null;
       profile.recordLoadMs+=performance.now()-loadStarted;
       const evidenceStarted=performance.now();
       records=computation.enrichRecords(records);
+      const yieldPreparation=()=>globalThis.scheduler&&typeof globalThis.scheduler.yield==='function'
+        ?globalThis.scheduler.yield()
+        :new Promise(resolve=>setTimeout(resolve,0));
+      const prepared=await engine.prepareAsync(records,datasetRevision,yieldPreparation);
       profile.evidencePreparationMs+=performance.now()-evidenceStarted;
-      const prepared=engine.prepare(records,datasetRevision);
       const summaryRevision=summariesRevisionKey(summaries);
       const finalSourceRevision=datasetRevision||String(source&&source.revision||'');
       const baseKey=`${sourceKey}|${currentStudyDate}|${finalSourceRevision||'fallback'}`;
       return Object.freeze({baseKey,source,currentStudyDate,datasetRevision,summaries,summaryRevision,prepared});
+    };
+    // One description of the model a session and window need, shared by the
+    // visible render and idle pre-computation so their keys always agree.
+    const planModel=(session,windowKey,currentStudyDate)=>{
+      const canonicalSummaryCount=new Set(session.summaries.map(summary=>summary.date)).size;
+      const windowInfo=engine.filterPreparedWindow(session.prepared,windowKey,currentStudyDate);
+      const fullKey=`${session.baseKey}|${windowInfo.key}|${session.summaryRevision}|${session.prepared.revision}`;
+      const windowSummaries=filterSummariesForInsightWindow(session.summaries,windowInfo);
+      const modelOptions={
+        windowKey:windowInfo.key,
+        windowDays:windowInfo.days,
+        windowLabel:windowInfo.label,
+        windowFrom:windowInfo.from,
+        windowTo:windowInfo.to,
+        allRecordCount:Math.max(canonicalSummaryCount,windowInfo.allRecordCount),
+        currentStudyDate,
+        streakSummaries:windowSummaries,
+        subjectReferenceSummaries:session.summaries,
+        subjectReferenceRevision:session.summaryRevision
+      };
+      return {windowInfo,fullKey,modelOptions};
+    };
+    // Idle pre-computation. A long saved history is read and its model built
+    // while the app is idle and Insights is closed, so opening the tab draws a
+    // ready model instead of waiting on a cold worker. It only reads data, runs
+    // only with a worker, a trusted dataset revision and a visible page, and its
+    // result is used only when every key part still matches.
+    const PREFETCH_IDLE_TIMEOUT_MS=10000;
+    const publishPrefetch=status=>{
+      const result=Object.freeze({...status,at:Number(performance.now().toFixed(2))});
+      window.__StudyDirectorInsightsPrefetch=result;
+      return result;
+    };
+    const whenIdle=()=>new Promise(resolve=>{
+      if(typeof requestIdleCallback==='function')requestIdleCallback(()=>resolve(),{timeout:PREFETCH_IDLE_TIMEOUT_MS});
+      else setTimeout(resolve,200);
+    });
+    const insightsOpen=()=>{const pane=document.getElementById('pane-insights');return !!pane&&!pane.hidden&&pane.classList.contains('on');};
+    const runPrefetch=async()=>{
+      await whenIdle();
+      if(document.visibilityState==='hidden')return publishPrefetch({state:'skipped',reason:'hidden'});
+      if(insightsOpen())return publishPrefetch({state:'skipped',reason:'open'});
+      if(!computation.supported())return publishPrefetch({state:'skipped',reason:'no-worker'});
+      // From here an opening of the tab waits for this work and reuses it.
+      state.prefetchWorking=true;
+      const started=performance.now();
+      const dataSource=api.insights.dataSource;
+      const source=typeof dataSource.getRecordSource==='function'?dataSource.getRecordSource():null;
+      if(!source||source.type!=='real')return publishPrefetch({state:'skipped',reason:'not-saved-data'});
+      const currentStudyDate=typeof dataSource.getCurrentStudyDate==='function'?dataSource.getCurrentStudyDate():localIsoDate();
+      const windowKey=readInsightWindowKey();
+      const datasetRevision=await readDatasetRevision(dataSource,source);
+      if(!datasetRevision)return publishPrefetch({state:'skipped',reason:'no-revision'});
+      const sourceKey=sourceIdentity(source),baseKey=`${sourceKey}|${currentStudyDate}|${datasetRevision}`;
+      if(state.rendered&&state.renderedBaseKey===baseKey&&state.renderedWindowKey===windowKey)return publishPrefetch({state:'skipped',reason:'view-current'});
+      if(state.prefetched&&state.prefetched.baseKey===baseKey&&state.prefetched.windowKey===windowKey)return publishPrefetch({state:'ready',reason:'already-prepared'});
+      const timing={recordLoadMs:0,evidencePreparationMs:0};
+      const session=state.session&&state.session.baseKey===baseKey?state.session:await loadSession({dataSource,source,sourceKey,currentStudyDate,datasetRevision,isCurrent:()=>true,profile:timing});
+      if(!session||session.baseKey!==baseKey)return publishPrefetch({state:'skipped',reason:'revision-changed'});
+      state.session=session;
+      const plan=planModel(session,windowKey,currentStudyDate);
+      if(Math.max(plan.windowInfo.records.length,session.prepared.records.length)<computation.minimumRecords)return publishPrefetch({state:'skipped',reason:'short-history',recordLoadMs:timing.recordLoadMs});
+      const result=await computation.build(plan.windowInfo.records,session.prepared,plan.modelOptions);
+      if(!insightsOpen())computation.release();
+      state.prefetched=Object.freeze({baseKey,windowKey,fullKey:plan.fullKey,result});
+      return publishPrefetch({state:'ready',reason:'prepared',mode:result.mode,records:plan.windowInfo.records.length,recordLoadMs:Number(timing.recordLoadMs.toFixed(2)),evidencePreparationMs:Number(timing.evidencePreparationMs.toFixed(2)),modelComputeMs:Number(result.computeMs.toFixed(2)),workerRoundTripMs:Number(result.roundTripMs.toFixed(2)),totalMs:Number((performance.now()-started).toFixed(2))});
+    };
+    const prefetch=()=>{
+      if(state.prefetching)return state.prefetching;
+      const running=runPrefetch().catch(error=>publishPrefetch({state:error&&error.name==='AbortError'?'skipped':'failed',reason:error&&error.name==='AbortError'?'superseded':'error'})).finally(()=>{if(state.prefetching===running){state.prefetching=null;state.prefetchWorking=false;}});
+      state.prefetching=running;
+      return running;
     };
     const publishProfile=(profile,model=null)=>{
       const result=Object.freeze({
@@ -3961,7 +4145,7 @@
         evidencePreparationMs:Number(profile.evidencePreparationMs.toFixed(2)),modelComputeMs:Number(profile.modelComputeMs.toFixed(2)),workerRoundTripMs:Number(profile.workerRoundTripMs.toFixed(2)),
         domMs:Number(profile.domMs.toFixed(2)),maxDomChunkMs:Number(profile.maxDomChunkMs.toFixed(2)),domChunks:profile.domChunks,
         layoutPaintMs:Number(profile.layoutPaintMs.toFixed(2)),completeMs:Number((performance.now()-profile.started).toFixed(2)),
-        maxLongTaskMs:Number(profile.maxLongTaskMs.toFixed(2)),mode:profile.mode,records:profile.records,
+        maxLongTaskMs:Number(profile.maxLongTaskMs.toFixed(2)),mode:profile.mode,source:profile.source||(profile.mode==='retained'?'retained':'computed'),sentRecords:profile.sentRecords||0,records:profile.records,
         modelSignature:model?JSON.stringify({
           overview:model.overview,
           streak:{current:model.streak&&model.streak.current,longest:model.streak&&model.streak.longest,latest:model.streak&&model.streak.latest},
@@ -3984,7 +4168,10 @@
       if(state.errorTimer){clearTimeout(state.errorTimer);state.errorTimer=null;}
       const token=InsightsRenderCoordinator.begin();
       const notice=api.insights.notifications.begin({id:'report',foreground:false,announce:false,title:'Insights',message:'Preparing your saved study history…',action:{label:'Retry',run:()=>render(context)}});
-      computation.cancel();
+      // Join only work that is already reading data; a pre-computation still
+      // waiting for idle time sees the open tab and stands down by itself.
+      const joining=state.prefetchWorking?state.prefetching:null;
+      if(!joining){computation.cancel();computation.warm();}
       const profile={started:performance.now(),shellMs:0,revisionMs:0,recordLoadMs:0,evidencePreparationMs:0,modelComputeMs:0,workerRoundTripMs:0,domMs:0,maxDomChunkMs:0,domChunks:0,layoutPaintMs:0,maxLongTaskMs:0,mode:'retained',records:0};
       let longTaskObserver=null;
       try{
@@ -4003,6 +4190,12 @@
           resolveNavigationReady(true);
           await new Promise(resolve=>requestAnimationFrame(resolve));
         }else state.navigationReady=Promise.resolve(true);
+        if(joining){
+          // An idle pre-computation is already reading this history: finish it
+          // and reuse it rather than start the same work again.
+          await joining;
+          if(!InsightsRenderCoordinator.isCurrent(token))return;
+        }
         const dataSource=api.insights.dataSource;
         const currentStudyDate=typeof dataSource.getCurrentStudyDate==='function'?dataSource.getCurrentStudyDate():localIsoDate();
         const source=typeof dataSource.getRecordSource==='function'?dataSource.getRecordSource():null;
@@ -4027,32 +4220,20 @@
           if(!InsightsRenderCoordinator.isCurrent(token))return;
         }
         let session=sourceRevision&&state.session&&state.session.baseKey===baseKey?state.session:null;
-        if(!session)session=await loadSession({dataSource,source,sourceKey,currentStudyDate,datasetRevision,token,profile});
+        if(!session)session=await loadSession({dataSource,source,sourceKey,currentStudyDate,datasetRevision,isCurrent:()=>InsightsRenderCoordinator.isCurrent(token),profile});
         if(!session||!InsightsRenderCoordinator.isCurrent(token))return;
-        const canonicalSummaryCount=new Set(session.summaries.map(summary=>summary.date)).size;
-        const windowInfo=engine.filterPreparedWindow(session.prepared,windowKey,currentStudyDate);
+        const {windowInfo,fullKey,modelOptions}=planModel(session,windowKey,currentStudyDate);
         const effectiveBaseKey=session.baseKey;
-        const fullKey=`${effectiveBaseKey}|${windowInfo.key}|${session.summaryRevision}|${session.prepared.revision}`;
         if(state.rendered&&state.renderedKey===fullKey){
           state.session=session;
           clearInsightsUpdateStatus(pane);
           restoreScroll();
           return;
         }
-        const windowSummaries=filterSummariesForInsightWindow(session.summaries,windowInfo);
-        const modelOptions={
-          windowKey:windowInfo.key,
-          windowDays:windowInfo.days,
-          windowLabel:windowInfo.label,
-          windowFrom:windowInfo.from,
-          windowTo:windowInfo.to,
-          allRecordCount:Math.max(canonicalSummaryCount,windowInfo.allRecordCount),
-          currentStudyDate,
-          streakSummaries:windowSummaries,
-          subjectReferenceSummaries:session.summaries,
-          subjectReferenceRevision:session.summaryRevision
-        };
-        const modelResult=await computation.build(windowInfo.records,session.prepared,modelOptions);
+        const prefetched=state.prefetched&&state.prefetched.fullKey===fullKey?state.prefetched:null;
+        state.prefetched=null;
+        const modelResult=prefetched?prefetched.result:await computation.build(windowInfo.records,session.prepared,modelOptions);
+        profile.source=prefetched?'prefetched':'computed';profile.sentRecords=prefetched?0:Number(modelResult.sentRecords)||0;
         const model=modelResult.model;profile.mode=modelResult.mode;profile.modelComputeMs=modelResult.computeMs;profile.workerRoundTripMs=modelResult.roundTripMs;profile.records=windowInfo.records.length;
         if(!InsightsRenderCoordinator.isCurrent(token))return;
         const previousScroll=state.rendered;
@@ -4104,7 +4285,7 @@
         longTaskObserver?.disconnect();
       }
     };
-    return Object.freeze({render,ready:async()=>{await state.navigationReady;await restoreScroll();return true;},profile:()=>state.lastProfile});
+    return Object.freeze({render,prefetch,ready:async()=>{await state.navigationReady;await restoreScroll();return true;},profile:()=>state.lastProfile});
   }
     return Object.freeze({
       createInsightsView,supportsCapabilities
@@ -4136,6 +4317,12 @@
       render:view.render,
       ready:view.ready
     });
+    if(registered){
+      // Prepare a long history while the app is idle, and again when the page
+      // returns to view (the dataset may have changed meanwhile).
+      view.prefetch();
+      document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')view.prefetch();});
+    }
     if(registered&&document.documentElement.dataset.insightsResizeBound!=='1'){
       document.documentElement.dataset.insightsResizeBound='1';
       window.addEventListener('resize',()=>Layout.resize(()=>document.getElementById('pane-insights')));

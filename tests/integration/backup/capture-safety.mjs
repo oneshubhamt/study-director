@@ -20,10 +20,10 @@ function harness(overrides={}){
       deletionRecovery:freeze({flush:async()=>{await hook('deletionSettle');return true;},savedDays:async()=>[],notes:async()=>[],attachments:async()=>[]}),
       mutationEpoch:freeze({read:async()=>({token:token()})}),preparationUnits:freeze({list:async()=>[],replace:async()=>[]}),provenance:freeze({installationId:()=> 'capture-test'}),pendingReviews:freeze({list:async()=>[],readItems:async ids=>ids.map(()=>null)})
     }),
-    codecs:freeze({activeSession:freeze({sanitizeCurrent:value=>value}),backup:freeze({countShape:value=>value,assetIds:()=>[],createCheckpointMetadata:(_id,createdAt)=>({checkpointId:'checkpoint',createdAt}),createProtectedManifest:()=>({checkpointId:'checkpoint'})})}),
+    codecs:freeze({activeSession:freeze({sanitizeCurrent:value=>value}),backup:freeze({countShape:value=>value,assetIds:overrides.backup?.assetIds||(()=>[]),attachmentCoverage:values=>freeze({total:values.length,missing:values.filter(row=>row.missing).length,missingIds:freeze(values.filter(row=>row.missing).map(row=>row.assetId)),fullyRecoverable:!values.some(row=>row.missing)}),missingAttachmentWarning:values=>values.some(row=>row.missing)?'Partial attachment recovery: 1 attachment missing.':'',createCheckpointMetadata:(_id,createdAt)=>({checkpointId:'checkpoint',createdAt}),createProtectedManifest:()=>({checkpointId:'checkpoint'})})}),
     session:freeze(overrides.session||{canMutate:()=>true,cancelLiveDraftSave:()=>{},captureSnapshot:()=>session,hasTasks:()=>false,toActiveSession:value=>value}),
     personal:freeze({settle:async()=>hook('personalSettle'),export:async options=>{readOptions.push(options);await hook('personalRead');return {name:'Student'};}}),
-    assets:freeze({get:async()=>null,list:async()=>[]}),exports:freeze({check:()=>{},run:async()=>{}}),
+    assets:freeze(overrides.assets||{get:async()=>null,list:async()=>[]}),exports:freeze({check:()=>{},run:async()=>{}}),
     persistence:freeze(overrides.persistence||{sourceRevision:async()=>sourceRevision(),snapshotRevision:async()=>{await hook('fence');return `study-director.fast-capture-fence.v1|${token()}|${revision}`;},dailyRecordDocuments:async values=>values.map(date=>({date})),storageGeneration:()=>generation}),
     diagnostics:freeze({capture:()=>{},mark:()=>{}}),domain:freeze({getStudentName:()=> 'Student',currentDailyRecords:values=>values}),environment:freeze({yieldTask:async()=>{}})
   }));
@@ -128,4 +128,153 @@ for(const rescued of [false,true]){
   controls.onSessionRead=null;const recovered=await load(0,{strict:true});assert.equal(recovered.ok,true);assert.equal(recovered.error,null);assert.equal(recovered.value.revision,20);
   cases.push('host strict-read propagation rejects unavailable canonical session '+(rescued?'with':'without')+' older rescue and recovers newest stored state');
 }
+
+
+// Canonical text-domain capture and recoverability of referenced binary assets
+// are distinct. A missing image must preserve the rescue checkpoint, not claim
+// that all of its attachment bytes are available.
+{
+  const missingId='img-abcdefghijklmnopqrstuvwx';
+  const h=harness({backup:{assetIds:()=>freeze([missingId])}});
+  const captured=await h.capture.captureLogicalCheckpoint();
+  assert.equal(captured.completeness.complete,true,'canonical record capture must remain available as a partial rescue');
+  assert.equal(captured.completeness.attachments,'missing');
+  assert.equal(captured.completeness.fullyRecoverable,false);
+  assert.equal(captured.assetItems[0].descriptor.assetId,missingId);
+  assert.equal(captured.assetItems[0].descriptor.missing,true);
+  assert.match(captured.warning,/Partial attachment recovery/u,'a missing attachment must produce explicit success warning');
+}
+
+// The actual host freshness/receipt functions must not certify a backup from
+// absent canonical revision evidence or an uncommitted local receipt.
+{
+  const appSource=fs.readFileSync('source/app.html','utf8');
+  const first=appSource.indexOf('const VERIFIED_RECOVERY_META_KEY='),last=appSource.indexOf('// Compare policy identity',first);
+  assert.ok(first>=0&&last>first,'freshness host code must remain identifiable');
+  let durable={version:3,file:null,providers:{}},changedAt='',writeGate=null,failWrite=false,failRead=false;
+  const diagnostics=[];
+  const sandbox={
+    APP_META_KEYS:{verifiedRecoveryBackups:'verifiedRecoveryBackups'},
+    DATA_CONTRACT:{schemas:{Backup:{version:20}}},
+    BackupProviderRuntime:{refresh(){}},
+    AppDiagnostics:{capture:(...parts)=>diagnostics.push(parts)},
+    currentBackupSourceRevision:()=>changedAt,
+    readStorageHealth:()=>({lastLocalSaveAt:changedAt}),
+    readHostAppMetaValue:async()=>{if(failRead)throw new Error('Injected receipt read failure');return durable;},
+    writeHostAppMetaValue:async(_key,value)=>{if(failWrite)throw new Error('Injected receipt commit failure');if(writeGate)await writeGate;durable=structuredClone(value);},
+    AppData:{mutationEpoch:{latestChangeAt:async recorded=>changedAt||recorded}}
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(appSource.slice(first,last)+'\n globalThis.freshnessTest={recordBackupCopy,verifyFreshCurrentBackup,receipt:()=>verifiedRecoveryState};',sandbox);
+  const api=sandbox.freshnessTest;
+  assert.equal((await api.verifyFreshCurrentBackup()).ok,false,'missing canonical change clock cannot certify a fresh copy');
+  changedAt='2026-10-01T12:00:00.000Z';
+  let unlock;writeGate=new Promise(resolve=>{unlock=resolve;});
+  const pending=api.recordBackupCopy({source:'google-drive',sourceRevision:changedAt,attachmentsComplete:true});
+  await Promise.resolve();
+  assert.equal(Object.keys(api.receipt().providers).length,0,'pending local receipt must not appear durable before commit');
+  unlock();await pending;writeGate=null;
+  assert.equal((await api.verifyFreshCurrentBackup()).ok,true,'durable full copy at canonical revision is fresh');
+  assert.ok(api.receipt().providers['google-drive'],'completed local metadata commit becomes visible');
+  changedAt='2026-10-01T12:00:01.000Z';
+  assert.equal((await api.verifyFreshCurrentBackup()).ok,false,'stale copy cannot satisfy newer canonical revision');
+  failWrite=true;
+  await assert.rejects(api.recordBackupCopy({source:'device-folder',sourceRevision:changedAt,attachmentsComplete:true}),/Injected receipt commit failure/);
+  assert.equal(api.receipt().providers['device-folder'],undefined,'failed durable receipt write must not update memory');
+  failWrite=false;failRead=true;
+  assert.equal((await api.verifyFreshCurrentBackup()).ok,false,'unreadable receipt must fail closed');
+  failRead=false;
+  await api.recordBackupCopy({source:'google-drive',sourceRevision:changedAt,attachmentsComplete:false});
+  assert.equal(api.receipt().providers['google-drive'].format,null,'known partial attachment copy cannot certify full recovery');
+  assert.equal((await api.verifyFreshCurrentBackup()).ok,false,'known partial attachment backup cannot prove fully fresh recovery');
+  assert.ok(diagnostics.some(row=>String(row[0]).includes('freshness-write')),'failed local receipt must leave diagnostics');
+}
+
+
+
+// Browser-reset recovery must await the actual Device Folder installation and
+// permission read, share an in-flight startup task, and fail open to the
+// explicit recovery decision rather than hanging forever.
+{
+  const appSource=fs.readFileSync('source/app.html','utf8');
+  const start=appSource.indexOf('const STORAGE_RESET_RETRY_MS='),end=appSource.indexOf('const storageResetSteps=',start);
+  assert.ok(start>=0&&end>start,'storage reset gate remains a single host contract');
+  let finishInstall,finishPermission,connected=false,installCalls=0,refreshCalls=0,timeout=null;
+  const installing=new Promise(resolve=>{finishInstall=resolve;}),permission=new Promise(resolve=>{finishPermission=resolve;});
+  const diagnostics=[];
+  const sandbox={
+    Date,Promise,Object,Array,Map,Set,Error,
+    setTimeout:callback=>{timeout=callback;return 1;},clearTimeout:()=>{timeout=null;},
+    BackupProviderRuntime:{suspendBackground:()=>({release(){}}),connected:()=>false},
+    DeviceBackup:{install:()=>{installCalls++;return installing;},refreshPermission:()=>{refreshCalls++;return permission;},status:()=>({connected})},
+    reconcileStartupChangeClock:async()=>true,
+    readStorageHealth:()=>({browserDataClearedAt:''}),writeStorageHealth:()=>{},
+    AppDiagnostics:{capture:(...args)=>diagnostics.push(args)}
+  };
+  vm.createContext(sandbox);
+  vm.runInContext('let storageResetHold=null,storageResetSince=0;\n'+appSource.slice(start,end),sandbox);
+  const hold=vm.runInContext("beginStorageResetHold('2026-10-31T00:00:00.000Z')",sandbox);
+  assert.ok(hold.deviceReady&&typeof hold.deviceReady.then==='function');
+  let ready=false;hold.deviceReady.then(()=>{ready=true;});
+  await Promise.resolve();await Promise.resolve();await Promise.resolve();
+  assert.equal(ready,false,'readiness remains pending during in-flight installation');
+  const same=vm.runInContext('ensureDeviceBackupInstalled()',sandbox);
+  assert.equal(same,vm.runInContext('ensureDeviceBackupInstalled()',sandbox),'startup/reset reuse the installation promise');
+  finishInstall({connected:false});
+  for(let i=0;i<8;i++)await Promise.resolve();
+  assert.equal(ready,false,'permission refresh must also settle before recovery starts');
+  connected=true;finishPermission({connected:true});
+  assert.equal(await hold.deviceReady,true);assert.equal(installCalls,1);assert.equal(refreshCalls,1);
+  vm.runInContext('storageResetHold=null;deviceBackupInstallPromise=null;',sandbox);
+  sandbox.DeviceBackup.install=async()=>({connected:false});
+  sandbox.DeviceBackup.refreshPermission=async()=>{throw new Error('Permission unavailable');};
+  const unavailable=vm.runInContext("beginStorageResetHold('2026-10-31T00:01:00.000Z')",sandbox);
+  assert.equal(await unavailable.deviceReady,false,'failed permission is a fallback, not a stalled restore');
+  assert.ok(diagnostics.some(row=>String(row[0]).includes('storage-reset.device-ready')));
+  vm.runInContext('storageResetHold=null;deviceBackupInstallPromise=null;',sandbox);
+  sandbox.DeviceBackup.install=()=>new Promise(()=>{});
+  const stalled=vm.runInContext("beginStorageResetHold('2026-10-31T00:02:00.000Z')",sandbox);
+  assert.equal(typeof timeout,'function');
+  timeout();
+  assert.equal(await stalled.deviceReady,false,'unresponsive permission API is bounded');
+}
+
+
+
+// Removed profiles keep emergency browser rescue copies if IndexedDB/OPFS
+// deletion fails; the registry intent survives and retries are idempotent.
+{
+  vm.runInThisContext(fs.readFileSync('source/core/profiles.js','utf8'));
+  const profiles=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('profiles',1);
+  const removed='prof_removed_abcdef_12345678',live='prof_live_abcdef_12345679',registryKey='profiles-test-registry';
+  const registryRow={version:1,active:live,profiles:[{id:live,scope:live,name:'Current',createdAt:'2026-10-31T00:00:00.000Z'}],removing:[removed]};
+  const store=new Map([[registryKey,JSON.stringify(registryRow)],['noteRescue~'+removed,'unsaved'],['noteRescue~'+live,'current']]);
+  const events=[],fail={db:true,opfs:false,local:false};
+  const controller=profiles.createController(freeze({ports:freeze({
+    scope:freeze({pattern:/^prof_[a-z0-9]{1,24}_[a-z0-9]{6,12}_[a-f0-9]{8}$/u,registryKey,scope:live,separator:'~'}),
+    storage:freeze({read:()=>store.get(registryKey)||null,write:value=>{store.set(registryKey,value);return true;},keys:()=>[...store.keys()],remove:key=>{if(fail.local)return false;return store.delete(key);}}),
+    names:freeze({database:'study-db',directories:freeze(['assets','rollback']),keys:freeze(['noteRescue']),legacyDirectory:'legacy-assets'}),
+    platform:freeze({deleteDatabase:async name=>{events.push('db:'+name);if(fail.db)throw new Error('Blocked IDB delete');return true;},removeDirectory:async name=>{events.push('opfs:'+name);if(fail.opfs)throw new Error('Blocked OPFS delete');},listen:()=>()=>{},now:()=>Date.now(),random:()=> '12345678',reload:()=>{}}),
+    limits:freeze({maxName:60})
+  })}));
+  const pending=()=>JSON.parse(store.get(registryKey)).removing;
+  assert.equal((await controller.collect()).removed,false);
+  assert.equal(store.get('noteRescue~'+removed),'unsaved','blocked IDB deletion must preserve rescue bytes');
+  assert.deepEqual(pending(),[removed]);
+  fail.db=false;fail.opfs=true;
+  assert.equal((await controller.collect()).removed,false);
+  assert.equal(store.get('noteRescue~'+removed),'unsaved','failed OPFS deletion must preserve rescue bytes');
+  assert.deepEqual(pending(),[removed]);
+  fail.opfs=false;fail.local=true;
+  assert.equal((await controller.collect()).removed,false);
+  assert.deepEqual(pending(),[removed],'failed local rescue removal retains pending deletion');
+  fail.local=false;
+  assert.equal((await controller.collect()).removed,true);
+  assert.equal(store.has('noteRescue~'+removed),false);
+  assert.equal(store.get('noteRescue~'+live),'current','an unrelated live profile is untouched');
+  assert.deepEqual(pending(),[]);
+  assert.equal((await controller.collect()).removed,false,'a completed cleanup is idempotent');
+  assert.ok(events.some(row=>row.startsWith('opfs:')));
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'backup-capture-safety',cases},null,2));

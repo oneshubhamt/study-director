@@ -7,6 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <meta name="study-director-build" content="@@SD_BUILD_ID@@">
+<meta name="study-director-source-commit" content="@@SD_SOURCE_COMMIT@@">
 <meta name="study-director-assets" content="__SD_PAGE_ASSET_ID__">
 <meta name="theme-color" content="#04050a" data-sd-theme-color>
 <meta name="mobile-web-app-capable" content="yes">
@@ -17,6 +18,7 @@
 <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="assets/icons/favicon-16.png">
+<link rel="preload" as="script" href="@@SD_RICH_TEXT_FILENAME@@">
 <title>STUDY DIRECTOR · sd@@SD_RELEASE_ID@@</title>
 <script>
 (()=>{
@@ -1095,7 +1097,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
             <summary><span class="backup-model-summary"><span class="backup-model-summary-title">Backup model</span><span class="backup-model-summary-copy">Local-first · syncs through Drive</span></span></summary>
             <div class="backup-model-body ui-helper">
               <dl class="backup-model-explainer">
-                <div><dt>Versions</dt><dd>The Device Folder keeps verified versions in a folder you choose on this device; Google Drive keeps the same history off this device. Each version is a complete copy of your data, even though unchanged parts are stored once.</dd></div>
+                <div><dt>Versions</dt><dd>The Device Folder and Google Drive each keep verified versions independently, using the same retention rules. Each version is a complete copy of your data, even though unchanged parts are stored once.</dd></div>
                 <div><dt>Several devices</dt><dd>While a device is signed in to Google Drive it syncs: it takes in what your other devices changed, then uploads its own changes. A change made on one side only is taken for you. Where both sides changed the same thing, the newer shows and the other is kept for you, marked Needs review; edits to different paragraphs of a note are joined for you. Saved data and the Active Session travel too; changes to a session running here wait until it ends. Without Drive, each device keeps working on its own.</dd></div>
                 <div><dt>Portable backup</dt><dd>Export backup creates one complete <span class="ui-mono">.sdbackup</span> file for manual transfer or safekeeping. Restore it on any Study Director device when needed; it is not part of Version History.</dd></div>
               </dl>
@@ -1112,13 +1114,13 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                 <button class="mini-btn ui-btn" id="open-version-history" type="button" data-action="open-version-history" aria-haspopup="dialog" aria-controls="managed-version-history">Version History</button>
               </div>
             </div>
-            <p class="ui-helper" id="backup-retention-note">Your backups keep 15 versions: the latest, 6 daily, 4 weekly and 4 monthly, so about four to five months back. They also keep one version per hour from the last 24 hours when your notes changed, up to 10 more. Before a restore, each device also keeps a safety version for 7 days. The Device Folder and Google Drive keep the same history.</p>
+            <p class="ui-helper" id="backup-retention-note">Your backups keep 15 versions: the latest, 6 daily, 4 weekly and 4 monthly, so about four to five months back. They also keep one version per hour from the last 24 hours when your notes changed, up to 10 more. Before a restore, each device also keeps a safety version for 7 days. The Device Folder and Google Drive use the same retention rules but keep independent version histories.</p>
             <div class="backup-location-stack" aria-label="Automatic backup locations">
               <div class="backup-location-row backup-device-row">
                 <div class="backup-row-copy">
                   <div class="backup-location-heading">
                     <span class="ui-label">Device Folder</span>
-                    <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="device-backup-info" aria-label="About Device Folder backup" aria-expanded="false" aria-controls="device-backup-info">i</button><span class="pnote-info-popover" id="device-backup-info" role="note" hidden>Versions saved automatically in a folder you choose on this device. With Google Drive connected too, both keep the same history. Use a folder only this device uses, not one that Dropbox, OneDrive or iCloud syncs between devices.</span></span>
+                    <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="device-backup-info" aria-label="About Device Folder backup" aria-expanded="false" aria-controls="device-backup-info">i</button><span class="pnote-info-popover" id="device-backup-info" role="note" hidden>Versions saved automatically in a folder you choose on this device. With Google Drive connected too, each destination backs up this device’s canonical data independently. Use a folder only this device uses, not one that Dropbox, OneDrive or iCloud syncs between devices.</span></span>
                   </div>
                 </div>
                 <strong class="backup-status-value standard ui-mono" id="device-backup-status">Off</strong>
@@ -1860,7 +1862,7 @@ const Profiles=ProfilesModule.createController(Object.freeze({ports:Object.freez
   }),
   names:Object.freeze({database:DATA_CONTRACT.storage.dbName,directories:Object.freeze(['@@SD_ATTACHMENT_OPFS_DIRECTORY@@','@@SD_BACKUP_FILES_OPFS_DIRECTORY@@']),keys:Object.freeze(Object.entries(@@SD_LOCAL_STORAGE_KEYS@@).filter(([name])=>!DEVICE_WIDE_STORAGE_KEYS.includes(name)).map(([,key])=>key)),legacyDirectory:'@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@'}),
   platform:Object.freeze({
-    deleteDatabase:name=>new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase(name);request.onsuccess=()=>resolve(true);request.onerror=()=>reject(request.error||new Error('A removed profile could not be deleted.'));}),
+    deleteDatabase:name=>new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase(name);request.onsuccess=()=>resolve(true);request.onerror=()=>reject(request.error||new Error('A removed profile could not be deleted.'));request.onblocked=()=>reject(new Error('Profile deletion is waiting for another open Study Director tab. Close the other tabs and retry; your recovery data remains protected.'));}),
     listen:handler=>{const listener=event=>{if(event.storageArea===localStorage)handler(event.key);};window.addEventListener('storage',listener);return ()=>window.removeEventListener('storage',listener);},
     now:()=>Date.now(),random:bytes=>randomIdPart(bytes),reload:()=>location.reload(),
     removeDirectory:async name=>{const root=await navigator.storage?.getDirectory?.();if(!root)return;await root.removeEntry(name,{recursive:true}).catch(error=>{if(error?.name!=='NotFoundError')throw error;});}
@@ -2100,22 +2102,73 @@ function prepareNativePdfWindow(){
   if(!prefersNativePdfNavigation())return null;
   try{const opened=window.open('about:blank','_blank');if(opened)opened.opener=null;return opened||null;}catch{return null;}
 }
+// Blob URLs and OPFS reader leases must outlive an external viewer handoff,
+// but must never become ownerless if the browser hides that viewer's lifetime.
+const PDF_DOWNLOAD_HANDOFF_MS=2*60*1000,PDF_UNTRACKED_VIEWER_MS=10*60*1000;
+function retainPdfUrl(url,releaseReader=()=>{}){
+  let released=false,poll=null,expiry=null;
+  const release=()=>{
+    if(released)return false;
+    released=true;
+    if(poll!==null)clearInterval(poll);
+    if(expiry!==null)clearTimeout(expiry);
+    window.removeEventListener('pagehide',release);
+    try{URL.revokeObjectURL(url);}finally{releaseReader();}
+    return true;
+  };
+  const expireAfter=delay=>{
+    if(released)return false;
+    if(expiry!==null)clearTimeout(expiry);
+    expiry=setTimeout(release,delay);
+    return true;
+  };
+  const track=opened=>{
+    if(!opened)return expireAfter(PDF_UNTRACKED_VIEWER_MS);
+    if(poll!==null)clearInterval(poll);
+    poll=setInterval(()=>{
+      try{if(opened.closed)release();}
+      catch{clearInterval(poll);poll=null;expireAfter(PDF_UNTRACKED_VIEWER_MS);}
+    },1000);
+    return true;
+  };
+  window.addEventListener('pagehide',release);
+  return Object.freeze({release,expireAfter,track});
+}
 function openPdfFallback(row,url,releaseReader=()=>{}){
-  const content=document.createElement('div'),message=document.createElement('p'),actions=document.createElement('div'),open=document.createElement('a'),download=document.createElement('a');let released=false;
+  const lease=retainPdfUrl(url,releaseReader);
+  const content=document.createElement('div'),message=document.createElement('p'),actions=document.createElement('div'),open=document.createElement('a'),download=document.createElement('a');
   content.className='workspace-pdf-fallback';message.className='ui-helper';message.textContent='This browser could not open the PDF automatically. Open it in the browser viewer or download it.';actions.className='workspace-pdf-fallback-actions';
   open.className='mini-btn ui-btn primary';open.textContent='Open PDF';open.href=url;open.target='_blank';open.rel='noopener noreferrer';
   download.className='mini-btn ui-btn';download.textContent='Download';download.href=url;download.download=String(row?.name||'document.pdf');actions.append(open,download);content.append(message,actions);
-  let handedOff=false;for(const action of [open,download])action.addEventListener('click',()=>{handedOff=true;});
-  const release=()=>{if(released)return;released=true;if(!handedOff){URL.revokeObjectURL(url);releaseReader();}};
-  let handle;try{handle=WorkspaceOverlay.open({label:String(row?.name||'PDF'),content,className:'workspace-overlay-pdf-fallback',closeLabel:'Close PDF options',onBeforeClose:release});}catch(error){release();throw error}
-  if(!handle){release();Interactions.notify({source:'attachments',key:'pdf-open-failed',kind:'error',title:'PDF could not open',message:'Use the attachment Download action to save the PDF.'});return false;}
+  let handedOff=false,handle=null;
+  const closeOnPagehide=()=>handle?.close();
+  const closeAfterClick=()=>setTimeout(()=>handle?.close(),0);
+  open.addEventListener('click',event=>{
+    let opened=null;
+    try{
+      opened=window.open('about:blank','_blank');
+      if(opened){opened.opener=null;opened.location.replace(url);}
+    }catch{try{opened?.close();}catch{}opened=null;}
+    if(opened)event.preventDefault(); // A tracked viewer replaces the noopener anchor.
+    handedOff=true;lease.track(opened);closeAfterClick();
+  });
+  download.addEventListener('click',()=>{handedOff=true;lease.expireAfter(PDF_DOWNLOAD_HANDOFF_MS);closeAfterClick();});
+  try{handle=WorkspaceOverlay.open({label:String(row?.name||'PDF'),content,className:'workspace-overlay-pdf-fallback',closeLabel:'Close PDF options',onBeforeClose:()=>{window.removeEventListener('pagehide',closeOnPagehide);if(!handedOff)lease.release();}});}
+  catch(error){lease.release();throw error;}
+  if(!handle){lease.release();Interactions.notify({source:'attachments',key:'pdf-open-failed',kind:'error',title:'PDF could not open',message:'Use the attachment Download action to save the PDF.'});return false;}
+  // If the opener enters BFCache, do not return to options with a dead Blob URL.
+  window.addEventListener('pagehide',closeOnPagehide);
   NoticeCoordinator.resolveEvent('attachments','pdf-open-failed');NoticeCoordinator.resolveEvent('attachments','pdf-overlay-busy');
   return true;
 }
 function openPdfDirect(row,file,reservedWindow=null,releaseReader=()=>{}){
   const url=URL.createObjectURL(file);let opened=reservedWindow;
   if(!opened)try{opened=window.open('about:blank','_blank');if(opened)opened.opener=null;}catch{opened=null;}
-  if(opened)try{opened.location.replace(url);const poll=setInterval(()=>{if(opened.closed){clearInterval(poll);URL.revokeObjectURL(url);releaseReader();}},1000);NoticeCoordinator.resolveEvent('attachments','pdf-open-failed');NoticeCoordinator.resolveEvent('attachments','pdf-overlay-busy');return true;}catch{try{opened.close();}catch{}}
+  if(opened)try{
+    opened.location.replace(url);
+    retainPdfUrl(url,releaseReader).track(opened);
+    NoticeCoordinator.resolveEvent('attachments','pdf-open-failed');NoticeCoordinator.resolveEvent('attachments','pdf-overlay-busy');return true;
+  }catch{try{opened.close();}catch{}}
   return openPdfFallback(row,url,releaseReader);
 }
 async function reopenPdfWorkspace(id,descriptor){
@@ -2510,6 +2563,7 @@ let backupNudgeNotifiedDate='';
 let saveReminderDate='';
 let restoreSessionPersistenceSuppressionDepth=0;
 let managedRecoverySessionQuiescenceDepth=0,managedRecoveryTimerFrozenSinceMs=null;
+let sessionClaimFreeze=null;
 let refreshSessionSafetyUi=()=>{};
 function restoreSessionPersistenceSuppressed(){return restoreSessionPersistenceSuppressionDepth>0;}
 function managedRecoverySessionQuiesced(){return managedRecoverySessionQuiescenceDepth>0;}
@@ -2757,19 +2811,111 @@ function uploadSoonAfterPlanApply(result){
   const done=applied=>{if(applied)void Promise.resolve(flushLiveDraft()).catch(error=>AppDiagnostics.capture('backup.plan-apply-flush',error,'warn')).then(()=>notifyBackupChange({urgent:true,reason:'plan-apply'}));return applied;};
   return result&&typeof result.then==='function'?result.then(done):done(result);
 }
-// While today's session runs here or on another device and the app is open,
-// look at Drive every two minutes instead of every twenty, so a plan applied
-// or a session moved on the other device shows up here without a reload.
-const SESSION_WATCH_MS=2*60*1000;
-let sessionWatchTimer=null;
+// During a live session, a tiny ownership claim is checked frequently while
+// full checkpoint reconciliation keeps its ordinary cadence. A remote claim
+// stops only this runtime clock; canonical progress stays untouched until the
+// verified full checkpoint arrives and ordinary reconciliation preserves it.
+const SESSION_WATCH_MS=2*60*1000,SESSION_CLAIM_WATCH_MS=15*1000,SESSION_CLAIM_SYNC_RETRY_MS=30*1000;
+let sessionWatchTimer=null,sessionClaimWatchTimer=null,sessionClaimCheckActive=false,sessionClaimLastAttemptAt=0;
+const SESSION_CLAIM_SAVE_WARNING='The session moved to another device, but the latest local progress has not been verified in browser storage. Keep this tab open; saving will retry. Do not clear its data.';
+async function verifyFrozenSessionClaim(){
+  const frozen=sessionClaimFreeze;
+  try{
+    if(!frozen?.snapshot)throw new Error('The frozen Active Session snapshot is unavailable.');
+    const saved=await writeActiveSessionNow(snapshotWhileSessionClaimFrozen(),{emergency:true,strictDurability:true});
+    if(!saved?.ok||saved.storage?.idb!==true||!saved.value)throw saved?.error||new Error('The Active Session was not committed to canonical browser storage.');
+    const loaded=await AppData.activeSession.load(0,{strict:true});
+    if(!loaded?.ok||loaded.error||loaded.storage?.idb!==true||!loaded.value||Number(loaded.value.revision)!==Number(saved.value.revision))throw new Error('The transferred Active Session did not pass the strict local read-back.');
+    if(sessionClaimFreeze!==frozen)return false;
+    sessionClaimFreeze=Object.freeze({...frozen,localVerified:true});
+    if(sessionSafetyMessage===SESSION_CLAIM_SAVE_WARNING)clearSessionSafetyMessage(SESSION_CLAIM_SAVE_WARNING);
+    return true;
+  }catch(error){
+    AppDiagnostics.capture('session.claim-flush',error,'warn');
+    markStorageHealthError('activeSession',SESSION_CLAIM_SAVE_WARNING);
+    sessionSafetyMessage=SESSION_CLAIM_SAVE_WARNING;refreshStorageFallbackWarning();
+    setPlanStatus('CRITICAL: Session handoff is waiting for a verified local save. Keep this tab open.',false);
+    return false;
+  }
+}
+function resumeAfterReleasedSessionClaim(session){
+  if(!sessionClaimFreeze?.localVerified||!session||session.runningOn!==InstallationIdentity.getId()||!TASKS.length)return false;
+  const frozenSinceMs=sessionClaimFreeze.frozenSinceMs;
+  try{
+    if(!TimerEngine.resumeAfterPrimaryRestore({frozenSinceMs}))return false;
+    sessionClaimFreeze=null;setPlanStatus('✓ Session ownership remains on this device.');return true;
+  }catch(error){AppDiagnostics.capture('session.claim-resume',error,'warn');return false;}
+}
+async function checkSessionOwnershipClaim(){
+  if(sessionClaimCheckActive||document.visibilityState!=='visible'||!StartupLifecycle.status().fullyInitialized)return false;
+  if(!TASKS.length&&!sessionClaimFreeze&&sessionPanelMode!=='elsewhere')return false;
+  if(!BackupProviderRuntime.connected('google-drive')||navigator.onLine===false)return false;
+  sessionClaimLastAttemptAt=Date.now();sessionClaimCheckActive=true;
+  try{
+    const [claim,loaded]=await Promise.all([BackupProviderRuntime.readSessionClaim('google-drive'),AppData.activeSession.load(0,{strict:true})]);
+    if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be checked safely.');
+    const session=loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null,me=InstallationIdentity.getId(),remote=!!(claim&&session&&claim.applies&&claim.state==='owned'&&!claim.ownedHere),mine=!!(session&&session.runningOn===me);
+    if(remote&&mine&&TASKS.length){
+      const now=DecisionClock.nowMs(),same=sessionClaimFreeze&&sessionClaimFreeze.epoch===claim.epoch;
+      if(!same){
+        // Stop duplicate execution before awaiting a potentially slow/failed disk write.
+        const frozenSinceMs=DecisionClock.nowMs();TimerEngine.stopExecution();
+        let snapshot=null,evidence=null;
+        try{
+          markDayContentChanged();
+          evidence=captureRuntimeEvidence({includeActivePause:false,withCompletion:false,includeRecords:true});
+          snapshot=captureSessionSnapshot(evidence);
+        }catch(error){AppDiagnostics.capture('session.claim-snapshot',error,'warn');}
+        cancelPendingLiveDraftSave();
+        sessionClaimFreeze=Object.freeze({epoch:claim.epoch,frozenSinceMs,lastSyncAt:0,localVerified:false,snapshot,evidence});
+      }
+      // A local emergency envelope is useful for recovery, but the managed
+      // reconciliation preflight requires a strict canonical commit and read-back.
+      // Retry the same frozen evidence; never add time spent waiting to study time.
+      if(!sessionClaimFreeze.localVerified){
+        if(!await verifyFrozenSessionClaim())return true;
+        setPlanStatus('Today’s session moved to another device. Syncing its latest state…');
+      }
+      const current=sessionClaimFreeze;
+      if(current&&(!current.lastSyncAt||now-current.lastSyncAt>=SESSION_CLAIM_SYNC_RETRY_MS)){
+        sessionClaimFreeze=Object.freeze({...current,lastSyncAt:now});
+        BackupProviderRuntime.scheduleSharedSync('google-drive','session-claim');
+      }
+      return true;
+    }
+    if(sessionClaimFreeze){
+      if(!mine||!TASKS.length){sessionClaimFreeze=null;return false;}
+      if(!sessionClaimFreeze.localVerified&&!await verifyFrozenSessionClaim())return true;
+      if(claim?.state==='owned'&&claim.ownedHere&&claim.applies)return resumeAfterReleasedSessionClaim(session);
+      const now=DecisionClock.nowMs(),current=sessionClaimFreeze;
+      if(!current.lastSyncAt||now-current.lastSyncAt>=SESSION_CLAIM_SYNC_RETRY_MS){
+        sessionClaimFreeze=Object.freeze({...current,lastSyncAt:now});
+        BackupProviderRuntime.scheduleSharedSync('google-drive','session-claim-release');
+      }
+      return true;
+    }
+    return false;
+  }catch(error){AppDiagnostics.capture('session.claim-watch',error,'warn');return false;}
+  finally{sessionClaimCheckActive=false;}
+}
+function wakeSessionOwnershipClaim(){
+  const now=Date.now();
+  if(sessionClaimLastAttemptAt&&now>=sessionClaimLastAttemptAt&&now-sessionClaimLastAttemptAt<SESSION_CLAIM_WATCH_MS)return false;
+  return checkSessionOwnershipClaim();
+}
 function installSessionWatch(){
-  if(sessionWatchTimer)return false;
+  if(sessionWatchTimer||sessionClaimWatchTimer)return false;
   sessionWatchTimer=setInterval(()=>{
     if(document.visibilityState!=='visible'||!StartupLifecycle.status().fullyInitialized)return;
     if(!TASKS.length&&sessionPanelMode!=='elsewhere')return;
     try{if(BackupProviderRuntime.syncing())BackupProviderRuntime.wakeBackground('session-watch');}
     catch(error){AppDiagnostics.capture('backup-provider.session-watch',error,'warn');}
   },SESSION_WATCH_MS);
+  sessionClaimWatchTimer=setInterval(()=>{void wakeSessionOwnershipClaim();},SESSION_CLAIM_WATCH_MS);
+  // Existing interval owns the cadence. Foreground/online return only advances
+  // an eligible missed attempt, never introducing a second polling timer.
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void wakeSessionOwnershipClaim();});
+  window.addEventListener('online',()=>{void wakeSessionOwnershipClaim();});
   return true;
 }
 function notifyDeviceBackupIfStudyDayResolved(reason='study-day-completed'){
@@ -3050,7 +3196,7 @@ function renderFileBackup(){
   const button=node('download-backup'),cancel=node('cancel-standalone-import'),importCancel=node('cancel-backup-import'),note=node('backup-file-status');
   if(button){button.disabled=exporting;button.setAttribute('aria-busy',exporting?'true':'false');button.textContent=exporting?'Preparing backup…':'Export backup…';}
   if(cancel)cancel.hidden=!(exporting||Exports.status().fileBusy);
-  if(importCancel)importCancel.hidden=!state.importActive;
+  if(importCancel)importCancel.hidden=!state.importHoldsBackground;
   if(note){const event=BackupPresentation.current('file'),message=BackupPresentation.summary(event);note.hidden=!message;if(note.textContent!==message)note.textContent=message;note.dataset.state=event?.severity==='error'?'error':'ok';}
 }
 // Each location row opens its settings in place: 'device' or 'drive'.
@@ -3088,7 +3234,8 @@ function renderBackupActions(){
   if(backupNow){backupNow.disabled=busy;backupNow.title=busy&&syncText?syncText:rows.some(row=>row.maintenanceBusy)?'Background backup maintenance will yield to Back up now.':'';}
   if(versions){versions.disabled=busy&&!recovering;versions.title=recovering?'Reopen the active recovery operation.':busy&&syncText?syncText:'';}
 }
-// The Device Folder backs up first, so Drive can take its version.
+// Back up each enabled destination independently. The sequential UI action
+// avoids overlapping foreground operations; neither destination consumes the other.
 async function backUpEverywhere(){
   let done=false;
   if(DeviceBackup.status().connected)done=await DeviceBackup.backupNow()!==false||done;
@@ -3177,7 +3324,7 @@ async function inspectStorageCapability(){
   const usage=Number(estimate&&estimate.usage),quota=Number(estimate&&estimate.quota);
   const ratio=Number.isFinite(usage)&&Number.isFinite(quota)&&quota>0?usage/quota:null;
   const use=document.getElementById('local-storage-use');
-  if(use)use.textContent=Number.isFinite(usage)?` · Using ${storageSizeLabel(usage)}${ratio!==null?` of ${storageSizeLabel(quota)}`:''}`:'';
+  if(use)use.textContent=Number.isFinite(usage)?` · Browser storage estimate: ${storageSizeLabel(usage)}${ratio!==null?` of ${storageSizeLabel(quota)}`:''}`:'';
   const payload={version:1,persisted:persisted===true,usageBytes:Number.isFinite(usage)?usage:null,quotaBytes:Number.isFinite(quota)?quota:null,usageRatio:ratio,checkedAt:new Date().toISOString()};
   storageEstimate=Object.freeze({persisted,usageBytes:payload.usageBytes,quotaBytes:payload.quotaBytes});
   if(ratio!==null&&ratio>=APP_LIMITS.storageCriticalRatio){
@@ -3236,6 +3383,7 @@ function dismissStorageWarning(){
 }
 function resumeTimerLoopAfterPrimaryRestore(){
   try{
+    if(sessionClaimFreeze)return false;
     const resumed=TimerEngine.resumeAfterPrimaryRestore();
     if(StartupLifecycle.status().fullyInitialized)SessionLifecycle.reconcile('ownership-primary',{
       date:getReviewDate(),
@@ -3941,7 +4089,10 @@ async function maybePromptBackupNudge(force=false){
   const now=Date.now();
   if(!force&&now-backupNudgeCheckedAt<BACKUP_NUDGE_CHECK_MS)return;
   backupNudgeCheckedAt=now;
-  const health=readStorageHealth(),backups=await readVerifiedRecoveryState(),entries=verifiedRecoveryEntries(backups);
+  let backups;
+  try{backups=await readVerifiedRecoveryState();}
+  catch(error){AppDiagnostics.capture('backup.nudge-receipt-read',error,'warn');return;}
+  const health=readStorageHealth(),entries=verifiedRecoveryEntries(backups);
   // One reminder for every kind of backup, counted from the latest backup
   // anywhere: a verified file, a download, the Device Folder or Drive. It stays away while an
   // automatic backup is able to run, and while a backup already holds the latest
@@ -4009,6 +4160,14 @@ function captureSessionSnapshot(evidence=null){
     practice:PracticePacer.snapshot(),updatedAt:new Date().toISOString()
   }));
 }
+// Keep elapsed time and practice progress at the ownership boundary while
+// retaining any later text, completion or reflection edits for reconciliation.
+function snapshotWhileSessionClaimFrozen(){
+  const frozen=sessionClaimFreeze;
+  if(!frozen?.snapshot)return captureSessionSnapshot();
+  const recent=captureSessionSnapshot(frozen.evidence);
+  return Object.freeze({...recent,timerRuntime:frozen.snapshot.timerRuntime,practice:frozen.snapshot.practice});
+}
 function nextSessionRevision(seed=0){return AppData.activeSession.nextRevision(seed);}
 function activeSessionPayload(snapshot=null,options={}){
   if(!TASKS.length)return null;
@@ -4048,14 +4207,16 @@ function writeActiveSessionNow(snapshot,options={}){
   if(!appCanMutate())return Promise.resolve(null);
   if(ReviewSaveService.status().activeSessionPersistenceBlocked)return Promise.resolve(null);
   const session=activeSessionPayload(snapshot);if(!session)return Promise.resolve(null);
-  return AppData.activeSession.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true}).then(result=>{handleActiveSessionRepositoryResult(result,'save');return result;}).catch(error=>{handleActiveSessionRepositoryResult({ok:false,error},'save');return {ok:false,error};});
+  return AppData.activeSession.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true}).then(result=>{handleActiveSessionRepositoryResult(result,'save');return result;}).catch(error=>{handleActiveSessionRepositoryResult({ok:false,error},'save');return {ok:false,error};});
 }
 function writeLiveDraftNow(options={}){
   if(restoreSessionPersistenceSuppressed()||managedRecoverySessionQuiesced()&&options.allowDuringRecoveryQuiescence!==true)return null;
   if(!appCanMutate())return null;
   try{
+    // Preserve the frozen clock even if a managed sync settles the latest
+    // reflection or edits after the remote ownership claim.
     if(options.markChanged!==false)markDayContentChanged();
-    const snapshot=captureSessionSnapshot();if(!snapshot)return null;
+    const snapshot=sessionClaimFreeze?.snapshot?snapshotWhileSessionClaimFrozen():captureSessionSnapshot();if(!snapshot)return null;
     lastTimerSnapshotMs=DecisionClock.nowMs();
     return writeActiveSessionNow(snapshot,options);
   }catch(e){
@@ -4654,17 +4815,17 @@ function verifiedRecoveryEntries(state=verifiedRecoveryState){return [state.file
 function lastBackupTime(state=verifiedRecoveryState){return Math.max(-Infinity,...verifiedRecoveryEntries(state).map(entry=>Date.parse(entry.at)).filter(Number.isFinite));}
 // Decisions read the record fresh; a failed read falls back to the copy in memory.
 async function readVerifiedRecoveryState(){
-  return normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY).catch(error=>{AppDiagnostics.capture('backup.freshness-read',error,'warn');return verifiedRecoveryState;}));
+  return normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY));
 }
-// The copy in memory changes at once, so a decision made right after a backup
-// (whether a location still has changes waiting) already sees it; the durable
-// record follows.
+// A receipt becomes visible only after its durable metadata write commits.
+// A provider may have published successfully even when this local receipt fails;
+// keep its real external outcome, but never represent the receipt as durable.
 function updateVerifiedRecoveryState(change){
-  verifiedRecoveryState=normalizeVerifiedRecoveryState(change(verifiedRecoveryState));BackupProviderRuntime.refresh();
   const run=async()=>{
     const next=normalizeVerifiedRecoveryState(change(await readVerifiedRecoveryState()));
+    try{await writeHostAppMetaValue(VERIFIED_RECOVERY_META_KEY,next);}
+    catch(error){AppDiagnostics.capture('backup.freshness-write',error,'warn');throw error;}
     verifiedRecoveryState=next;BackupProviderRuntime.refresh();
-    try{await writeHostAppMetaValue(VERIFIED_RECOVERY_META_KEY,next);}catch(error){AppDiagnostics.capture('backup.freshness-write',error,'warn');}
     return true;
   };
   const next=verifiedRecoveryWriteChain.catch(()=>{}).then(run);verifiedRecoveryWriteChain=next;return next;
@@ -4673,7 +4834,9 @@ function updateVerifiedRecoveryState(change){
 function recordBackupCopy(copy){
   const source=String(copy?.source||''),sourceRevision=backupTime(copy?.sourceRevision);
   if(!sourceRevision||!/^[a-z][a-z0-9-]{0,40}$/u.test(source))return Promise.resolve(false);
-  const entry={at:new Date().toISOString(),sourceRevision,format:DATA_CONTRACT.schemas.Backup.version};
+  // Known missing attachment bytes may be archived, but cannot be used as
+  // proof of a fully recoverable, current-format external safety copy.
+  const entry={at:new Date().toISOString(),sourceRevision,format:copy.attachmentsComplete===false?null:DATA_CONTRACT.schemas.Backup.version};
   return updateVerifiedRecoveryState(prior=>source==='file'?{...prior,file:{...entry,verified:copy.verified===true}}:{...prior,providers:{...prior.providers,[source]:entry}});
 }
 // Every save writes the change clock inside its own transaction (the
@@ -4683,19 +4846,36 @@ function recordBackupCopy(copy){
 // backed up. Seeding the clock also keeps later saves later after a reload.
 async function reconcileChangeClock(){
   const recorded=String(readStorageHealth().lastLocalSaveAt||'');let latest=recorded;
-  try{latest=await AppData.mutationEpoch.latestChangeAt(recorded);}catch(error){AppDiagnostics.capture('backup.change-clock-read',error,'warn');return false;}
+  try{latest=await AppData.mutationEpoch.latestChangeAt(recorded);}catch(error){AppDiagnostics.capture('backup.change-clock-read',error,'error');throw error;}
   if(latest===recorded)return false;
   writeStorageHealth({lastLocalSaveAt:latest});return true;
+}
+let startupChangeClockReady=null;
+function reconcileStartupChangeClock(){
+  // An unknown durable clock cannot authorize automatic provider work.
+  // Do not memoize a transient failure as a successful startup check.
+  if(!startupChangeClockReady)startupChangeClockReady=reconcileChangeClock().catch(error=>{startupChangeClockReady=null;throw error;});
+  return startupChangeClockReady;
 }
 async function installVerifiedRecoveryFreshness(){
   verifiedRecoveryState=await readVerifiedRecoveryState();
   BackupProviderRuntime.refresh();return verifiedRecoveryState;
 }
 async function verifyFreshCurrentBackup(){
-  const state=normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY).catch(()=>null));
-  const currentSave=Date.parse(readStorageHealth().lastLocalSaveAt||'');
-  // Only a verified copy in the current backup format that holds the latest change counts.
-  const candidates=verifiedRecoveryEntries(state).filter(entry=>entry.verified!==false&&entry.format===DATA_CONTRACT.schemas.Backup.version&&(!Number.isFinite(currentSave)||Date.parse(entry.sourceRevision)>=currentSave));
+  const unknown=()=>Object.freeze({ok:false,verifiedCopies:0,latestVerifiedAt:''});
+  let currentRevision;
+  try{
+    // Canonical commits write the mutation epoch inside their transaction;
+    // the localStorage health clock alone is not proof of the latest change.
+    currentRevision=await AppData.mutationEpoch.latestChangeAt(currentBackupSourceRevision());
+  }catch(error){AppDiagnostics.capture('backup.freshness-epoch-read',error,'warn');return unknown();}
+  const currentSave=Date.parse(String(currentRevision||''));
+  if(!Number.isFinite(currentSave))return unknown();
+  let state;
+  try{state=normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY));}
+  catch(error){AppDiagnostics.capture('backup.freshness-receipt-read',error,'warn');return unknown();}
+  // A missing, invalid or untrusted clock cannot authorize destructive work.
+  const candidates=verifiedRecoveryEntries(state).filter(entry=>entry.verified!==false&&entry.format===DATA_CONTRACT.schemas.Backup.version&&Date.parse(entry.sourceRevision)>=currentSave);
   return Object.freeze({ok:candidates.length>0,verifiedCopies:candidates.length,latestVerifiedAt:candidates.sort((a,b)=>Date.parse(b.at)-Date.parse(a.at))[0]?.at||''});
 }
 // Compare policy identity and ownership inside the same typed metadata transaction.
@@ -4965,7 +5145,7 @@ async function suspendTodaySession(){
         session.status='suspended';
         session.suspendedAt=new Date().toISOString();
         session.updatedAt=session.suspendedAt;
-        const saved=await AppData.activeSession.save(session);
+        const saved=await AppData.activeSession.save(session,{strictDurability:true});
         if(!saved.ok)throw saved.error||new Error('active session save failed');
       }
       resetRuntimeSessionState({lifecycleManaged:true,source:'session-suspend',date:todayISO()});
@@ -4998,20 +5178,57 @@ async function confirmSessionTakeover(session,{replace=false}={}){
     confirmLabel:replace?'Apply here':'Continue here',cancelLabel:'Not now'
   });
 }
+async function transferSessionOwnershipHere(session){
+  if(!appCanMutate())throw new Error('Study Director does not currently have write control.');
+  if(!BackupProviderRuntime.connected('google-drive'))throw new Error('Google Drive must be connected to transfer a session that belongs to another device.');
+  const previous=ActiveSessionCodec.sanitizeCurrent(session),planned=previous?ActiveSessionCodec.sanitizeCurrent({...previous,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(previous.revision),updatedAt:new Date().toISOString()}):null;
+  if(!previous||!planned)throw new Error('the transferred session state is invalid');
+  let next=planned;
+  let ownershipClaim=null,backgroundHold=null,localSaved=false,rolledBack=false;
+  try{
+    backgroundHold=BackupProviderRuntime.suspendBackground('session-continue');await backgroundHold.settled;
+    setPlanStatus('Transferring today’s session to this device…');
+    const claimed=await BackupProviderRuntime.claimSessionOwnership('google-drive',{date:previous.date,observedOwner:previous.runningOn,observedRevision:previous.revision,revision:planned.revision});
+    if(!claimed||claimed.status!=='completed'||!claimed.claim)throw new Error('Google Drive did not confirm the Active Session ownership claim.');
+    ownershipClaim=claimed.claim;
+    next=ActiveSessionCodec.sanitizeCurrent({...planned,revision:Math.max(planned.revision,Number(ownershipClaim.revision)||0),updatedAt:new Date().toISOString()});
+    if(!next)throw new Error('the accepted Active Session ownership revision is invalid');
+    const saved=await AppData.activeSession.save(next,{strictDurability:true});
+    if(!handleActiveSessionRepositoryResult(saved,'save'))throw saved.error||new Error('the session could not be saved on this device');
+    localSaved=true;
+    const current=(await AppData.activeSession.load())?.value||null;
+    if(!CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),next))throw new Error('the session changed locally before its ownership transfer could finish');
+    backgroundHold.release();backgroundHold=null;
+    notifyBackupChange({urgent:true,reason:'session-continue'});
+    return Object.freeze({previous,session:saved.value||next,claim:ownershipClaim});
+  }catch(error){
+    if(localSaved){
+      try{
+        const current=(await AppData.activeSession.load())?.value||null;
+        if(CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),next)){const restored=await AppData.activeSession.save(previous,{strictDurability:true});if(!restored?.ok)throw restored?.error||new Error('session rollback failed');rolledBack=true;}
+      }catch(rollbackError){AppDiagnostics.capture('session.takeover-local-rollback',rollbackError,'warn');}
+    }
+    if(ownershipClaim&&(!localSaved||rolledBack))await BackupProviderRuntime.releaseSessionClaim('google-drive',ownershipClaim);
+    else if(ownershipClaim)notifyBackupChange({urgent:true,reason:'session-continue'});
+    try{BackupProviderRuntime.wakeBackground('session-watch');}catch{}
+    throw error;
+  }finally{backgroundHold?.release();}
+}
 async function continueSessionHere(){
   if(!appCanMutate())return false;
+  let previous=null;
   try{
     const loaded=await AppData.activeSession.load(),session=loaded&&loaded.value||null;
     if(!session){setSessionPanelMode('none');return false;}
     if(!sessionFromElsewhere(session))return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
     if(sessionRunsElsewhere(session)&&!await confirmSessionTakeover(session))return false;
     if(!appCanMutate())return false;
-    const claimed=await AppData.activeSession.save({...session,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(session.revision),updatedAt:new Date().toISOString()});
-    if(!handleActiveSessionRepositoryResult(claimed,'save'))throw claimed.error||new Error('the session could not be moved to this device');
-    notifyBackupChange({urgent:true,reason:'session-continue'});
-    return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
+    previous=ActiveSessionCodec.sanitizeCurrent(session);
+    const moved=await transferSessionOwnershipHere(session);
+    return moved.previous.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
   }catch(error){
     setPlanStatus('Could not continue today’s session here: '+(error&&error.message?error.message:error),false);
+    if(previous)setSessionPanelMode(sessionRunsElsewhere(previous)?'elsewhere':'suspended',previous);
     return false;
   }
 }
@@ -5082,7 +5299,7 @@ async function finishTodaySession(){
     setTimerMode(TIMER_MODES.DONE,'manual-finish-day');
     resetBreakState();
     refreshCoreUi();
-    const saved=await writeLiveDraftNow({markChanged:true});
+    const saved=await writeLiveDraftNow({markChanged:true,emergency:true});
     if(saved&&saved.ok===false)throw saved.error||new Error('live session save failed');
     setPlanStatus('Today is finished for this plan. Review the day and save it to Library when ready.');
     await goTab('review',{source:'finish-today'});
@@ -6497,6 +6714,20 @@ const PluginRuntime=(()=>{
   }
   return Object.freeze({registerPlaceholders,requestTab,register,status});
 })();
+// Insights prepares a long saved history in idle time so its first opening
+// does not wait on a cold worker. Load its file only after start-up
+// housekeeping has had its turn, while the page is visible and idle.
+const INSIGHTS_PRELOAD_DELAY_MS=4000;
+function scheduleInsightsPreload(){
+  setTimeout(()=>{
+    const load=()=>{
+      if(document.visibilityState==='hidden'){document.addEventListener('visibilitychange',load,{once:true});return;}
+      // requestTab reports load failures in plugin status and never rejects.
+      void PluginRuntime.requestTab('insights');
+    };
+    if(typeof requestIdleCallback==='function')requestIdleCallback(load,{timeout:10000});else load();
+  },INSIGHTS_PRELOAD_DELAY_MS);
+}
 function registerStudyDirectorPlugin(plugin){
   return PluginRuntime.register(plugin);
 }
@@ -7829,6 +8060,7 @@ async function quiesceManagedRecoveryRuntime(operation){
     if(outer&&managedRecoverySessionQuiescenceDepth===0)void AppMutationCoordinator.settled().then(()=>{
       if(managedRecoverySessionQuiesced()||AppMutationCoordinator.status().active)return;
       const frozenSinceMs=managedRecoveryTimerFrozenSinceMs;managedRecoveryTimerFrozenSinceMs=null;
+      if(sessionClaimFreeze)return;
       try{TimerEngine.resumeAfterPrimaryRestore({frozenSinceMs});}catch(error){AppDiagnostics.capture('managed-recovery.resume-timer',error,'warn');}
     });
   }
@@ -8701,7 +8933,7 @@ function applyAttachmentIntegrityState(state){
   return normalized;
 }
 function scheduleAttachmentIntegrityAudit(delay=15000,trigger='scheduled'){
-  return AttachmentIntegrityJob.schedule(delay,trigger,'replace');
+  return AttachmentIntegrityJob.schedule(delay,trigger,'earliest');
 }
 function attachmentIntegrityDeferredError(message='Attachment integrity audit deferred.',code='ATTACHMENT_INTEGRITY_DEFERRED'){const error=new Error(message);error.code=code;return error;}
 async function runAttachmentIntegrityAttempt({trigger,nextEligibleAt}){
@@ -8716,9 +8948,9 @@ async function runAttachmentIntegrityAttempt({trigger,nextEligibleAt}){
     const check=()=>{if(!appCanMutate())throw attachmentIntegrityDeferredError('Attachment integrity audit is awaiting primary-tab control.','ATTACHMENT_INTEGRITY_NOT_PRIMARY');if(backgroundMaintenanceForegroundBusy())throw attachmentIntegrityDeferredError();};
     await BackgroundTasks.yieldTask({priority:'background'});check();
     const referenceRevision=richAssetReferenceRevision,dataset=await AppData.dailyRecords.datasetRevision();
-    const sources=await AttachmentReferences.sources({includeLive:false,priority:'background'}),references=new Set();
-    for(const source of sources||[])for(const id of source.ids||[])if(AttachmentsModule.validId(id))references.add(id);
-    const audit=await AttachmentStorage.shallowAudit([...references],{
+    const references=await AttachmentReferences.sources({includeLive:false,priority:'background',referencesOnly:true});
+    if(Object.prototype.toString.call(references)!=='[object Set]')throw new Error('Attachment reference inventory could not be verified.');
+    const audit=await AttachmentStorage.shallowAudit([...references].filter(AttachmentsModule.validId),{
       progress:prior.progress,workMs:5000,maxEntries:128,shouldYield:BackgroundTasks.budget(),yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'}),check
     });
     check();if(referenceRevision!==richAssetReferenceRevision||dataset!==await AppData.dailyRecords.datasetRevision())throw attachmentIntegrityDeferredError();
@@ -9129,7 +9361,7 @@ async function restoreSessionStateThroughLifecycle(importedSession,scheduleText=
     snapshotReview:snapshot&&snapshot.review
   },async()=>{
     if(session){
-      const saved=await AppData.activeSession.save(session);
+      const saved=await AppData.activeSession.save(session,{strictDurability:true});
       if(!saved.ok)throw saved.error||new Error('Rollback active-session save failed.');
       if(session.status==='suspended'){
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
@@ -9218,8 +9450,12 @@ async function importBackupAttachments(items,{signal,replace=false}={}){
   });
 }
 function currentBackupSourceRevision(){
-  const stored=AppData.local.getJson(STORAGE_KEYS.storageHealth,null);
-  return stored&&stored.lastLocalSaveAt||readStorageHealth().lastLocalSaveAt||'';
+  const stored=AppData.local.getJson(STORAGE_KEYS.storageHealth,null),memory=readStorageHealth();let latest='',latestAt=NaN;
+  for(const value of [stored&&stored.lastLocalSaveAt,memory.lastLocalSaveAt]){
+    const revision=String(value||''),at=Date.parse(revision);
+    if(Number.isFinite(at)&&(!Number.isFinite(latestAt)||at>latestAt)){latest=revision;latestAt=at;}
+  }
+  return latest;
 }
 async function legacyBackupSnapshotRevision(){
   return JSON.stringify([await AppData.dailyRecords.datasetRevision(),await AppData.deletionRecovery.savedDays(),await AppData.deletionRecovery.notes(),await AppData.deletionRecovery.attachments(),richAssetReferenceRevision,await PlanData.exportData({flush:false}),document.getElementById('plan-input')?.value,await AttachmentStorage.list()]);
@@ -9271,10 +9507,30 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     notesAlignByTitle:(value,deletedIds)=>AppData.notes.alignByTitle(value,deletedIds),
     notesTrashKey:key=>DailyRecordCodec.noteKeys.trash(key),
     notesFailure:()=>AppData.notes.failure(),
-    restoreJournalPrepare:async value=>{const backupFile=await Exports.run('file.persist',{file:value.blob});const {blob,...metadata}=value;return AppData.restoreJournal.prepare({...metadata,backupFile});},
+    restoreJournalPrepare:async value=>{
+      const backupFile=await Exports.run('file.persist',{file:value.blob}),{blob,...metadata}=value;
+      try{return await AppData.restoreJournal.prepare({...metadata,backupFile});}
+      catch(error){
+        // A failed/ambiguous commit must never discard the only rollback bytes.
+        // Release an unused producer only after a fresh journal read proves
+        // that no durable reference points to this file.
+        try{
+          const journal=await AppData.restoreJournal.read();
+          if(journal?.payload?.backupFile?.name!==backupFile.name)await BackupFiles.release(backupFile.name);
+        }catch(probeError){AppDiagnostics.capture('backup.restore-journal-orphan-check',probeError,'warn');}
+        throw error;
+      }
+    },
     restoreJournalRead:async()=>{const journal=await AppData.restoreJournal.read();if(!journal)return null;const ref=journal.payload.backupFile;return ref?{...journal,payload:{...journal.payload,blob:await Exports.run('file.read',{ref})}}:journal;},
     restoreJournalMark:async(id,phase)=>{const marked=await AppData.restoreJournal.mark(id,phase);if(phase==='verified')settleStorageReset();return marked;},
-    restoreJournalClear:async id=>{const journal=await AppData.restoreJournal.read();await AppData.restoreJournal.clear(id);if(journal?.payload.backupFile)await BackupFiles.release(journal.payload.backupFile.name);},
+    restoreJournalClear:async id=>{
+      const journal=await AppData.restoreJournal.read();
+      await AppData.restoreJournal.clear(id);
+      // Once the durable journal is retired, failed scratch disposal must not
+      // convert a verified restore into a failed restore/second rollback.
+      if(journal?.payload.backupFile)try{await BackupFiles.release(journal.payload.backupFile.name);}
+      catch(error){AppDiagnostics.capture('backup.restore-journal-file-release',error,'warn');}
+    },
     scheduleRead:()=>PlanData.readDraft()??'',
     personalSettle:async options=>{
       const backupCapture=options&&options.backupCapture===true;
@@ -9362,7 +9618,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
       backupNudgeCheckedAt=Date.now();
       backupNudgeNotifiedDate='';
       refreshStorageFallbackWarning();
-      if(context?.copy)void recordBackupCopy(context.copy);
+      if(context?.copy)void recordBackupCopy(context.copy).catch(error=>AppDiagnostics.capture('backup.freshness-receipt',error,'warn'));
       schedulePwaUpdateEvaluation(250);
     }
   }),
@@ -9396,13 +9652,12 @@ const {
 // Each location row has one inline note, drawn from the presentation's current event.
 // The controller owns execution; the coordinator owns the immutable presentation event.
 fileBackupRowReady=true;BackupController.subscribeStatus(renderFileBackup);renderFileBackup();
-// A file backup or file import the person starts holds every location's
-// background work (integrity checks, automatic backups) until it ends, so it
-// never queues behind a background hash in the shared file worker. Automatic
-// backups never set these flags, so they cannot hold themselves.
+// A user-started file backup/import holds background locations until it ends.
+// An automatic Drive catch-up also uses the shared import controller but is
+// already suspension-aware; treating it as manual file work cancels itself.
 let fileWorkHold=null;
 function holdBackgroundForFileWork(){
-  const status=BackupController.status(),active=!!(status.importActive||status.standaloneExportActive);
+  const status=BackupController.status(),active=!!(status.importHoldsBackground||status.standaloneExportActive);
   if(active&&!fileWorkHold){try{fileWorkHold=BackupProviderRuntime.suspendBackground('file-backup');void Promise.resolve(fileWorkHold.settled).catch(()=>{});}catch(error){fileWorkHold=null;AppDiagnostics.capture('backup.file-hold',error,'warn');}}
   else if(!active&&fileWorkHold){const hold=fileWorkHold;fileWorkHold=null;try{hold.release();}catch(error){AppDiagnostics.capture('backup.file-hold-release',error,'warn');}}
   foregroundChanged();
@@ -9545,10 +9800,26 @@ function showStorageResetDecision({unsaved=[],retrying=false}={}){
 }
 // Pausing is synchronous: scheduling stops at once, and waiting only lets a
 // running automatic backup wind down.
+let deviceBackupInstallPromise=null;
+function ensureDeviceBackupInstalled(){
+  // Startup and reset recovery share the same installation/permission read.
+  // A second caller must not mistake an in-flight installation for readiness.
+  if(!deviceBackupInstallPromise)deviceBackupInstallPromise=reconcileStartupChangeClock().then(()=>DeviceBackup.install()).catch(error=>{deviceBackupInstallPromise=null;throw error;});
+  return deviceBackupInstallPromise;
+}
 function beginStorageResetHold(clearedAt){
   if(storageResetHold)return storageResetHold;
-  const hold={provider:null,reloaded:false,clearedAt:String(clearedAt||new Date().toISOString())};storageResetHold=hold;storageResetSince=Date.now();
+  const hold={provider:null,deviceReady:null,reloaded:false,clearedAt:String(clearedAt||new Date().toISOString())};storageResetHold=hold;storageResetSince=Date.now();
   try{hold.provider=BackupProviderRuntime.suspendBackground('storage-reset');}catch(error){AppDiagnostics.capture('storage-reset.provider-suspend',error,'warn');}
+  // Permission may have changed while the site data was cleared. Never prompt
+  // automatically: a denied or disconnected folder falls through to Drive or
+  // the explicit restore decision. The timeout bounds a stalled browser API.
+  hold.deviceReady=new Promise(resolve=>{
+    let finished=false;
+    const complete=value=>{if(finished)return;finished=true;clearTimeout(timer);resolve(value);};
+    const timer=setTimeout(()=>{AppDiagnostics.capture('storage-reset.device-ready',new Error('Device Folder readiness did not finish in time.'),'warn');complete(false);},8000);
+    void ensureDeviceBackupInstalled().then(()=>DeviceBackup.refreshPermission()).then(()=>complete(DeviceBackup.status().connected)).catch(error=>{AppDiagnostics.capture('storage-reset.device-ready',error,'warn');complete(false);});
+  });
   if(readStorageHealth().browserDataClearedAt!==hold.clearedAt)writeStorageHealth({browserDataClearedAt:hold.clearedAt});
   return hold;
 }
@@ -9697,7 +9968,7 @@ BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze({
     bringInRepositoryProvider:(id,options)=>BackupProviderRuntime.bringInRepositoryProvider(id,options),cancelForeground:(reason,id)=>BackupProviderRuntime.cancelForeground(reason,id),
     configureManagedRecovery:config=>BackupProviderRuntime.configureManagedRecovery(config),configurePendingBackupRetry:config=>BackupProviderRuntime.configurePendingBackupRetry(config),
     history:(id,options)=>BackupProviderRuntime.history(id,options),list:()=>BackupProviderRuntime.list(),noteVersions:(id,noteId,options)=>BackupProviderRuntime.noteVersions(id,noteId,options),removeRepositoryProviderVersion:(id,checkpointId)=>BackupProviderRuntime.removeRepositoryProviderVersion(id,checkpointId),
-    restoreRepositoryProviderVersion:(id,options)=>BackupProviderRuntime.restoreRepositoryProviderVersion(id,options),suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason)
+    restoreRepositoryProviderVersion:(id,options)=>BackupProviderRuntime.restoreRepositoryProviderVersion(id,options),suspendBackground:(reason,options)=>BackupProviderRuntime.suspendBackground(reason,options)
   }),
   session:Object.freeze({hasBlocking:()=>hasBlockingActiveSession()}),
   sourceRevision:()=>currentBackupSourceRevision(),
@@ -9722,7 +9993,9 @@ async function readRepositoryIntegrityState(){
 }
 function applyRepositoryIntegrityHealth(state){
   repositoryIntegrityView=state;renderIntegrityStatuses();
-  const targets=Object.values(state?.locations||{}),quarantined=targets.some(target=>target?.quarantinedObjectIds?.length),failed=targets.some(target=>target?.failedAt);
+  const targets=Object.entries(state?.locations||{}).filter(([id,target])=>!!target?.repositoryScope&&repositoryIntegrityBoundScopes[id]===target.repositoryScope).map(([,target])=>target);
+  const quarantined=targets.some(target=>target.quarantinedObjectIds?.length);
+  const failed=targets.some(target=>{const failure=Date.parse(String(target.failedAt||'')),completed=Date.parse(String(target.completedAt||''));return Number.isFinite(failure)&&(!Number.isFinite(completed)||failure>=completed);});
   if(quarantined)markStorageHealthError('repositoryIntegrity','Some backup objects failed integrity verification. Keep the local copy and use a healthy backup version.',{level:'warn'});
   else if(failed)markStorageHealthError('repositoryIntegrity','Backup verification is incomplete or unavailable. Study Director will retry; keep the local copy until verification succeeds.',{level:'warn'});
   else markStorageHealthOk('repositoryIntegrity');
@@ -9753,15 +10026,15 @@ function repositoryIntegrityChanged(){const error=new Error('The backup reposito
 async function readRepositoryIntegrityTarget(target){
   const actual=await BackupProviderRuntime.repositoryScope(target);
   if(!actual)throw new Error('The backup repository identity is unavailable.');
-  const prior=(await readRepositoryIntegrityState()).locations[target]||normalizeRepositoryIntegrityTarget(null);
+  const state=await readRepositoryIntegrityState(),prior=state.locations[target]||normalizeRepositoryIntegrityTarget(null);
   const same=prior.repositoryScope===actual;
-  if(same&&prior.repositoryScope){repositoryIntegrityBoundScopes[target]=prior.repositoryScope;renderIntegrityStatuses();return prior;}
+  if(same&&prior.repositoryScope){repositoryIntegrityBoundScopes[target]=prior.repositoryScope;applyRepositoryIntegrityHealth(state);return prior;}
   const repositoryScope=String(actual);
   const bound=await mutateRepositoryIntegrityTarget(target,current=>{
     if(current.repositoryScope!==prior.repositoryScope)throw repositoryIntegrityChanged();
     return {...normalizeRepositoryIntegrityTarget(null),repositoryScope};
   });
-  repositoryIntegrityBoundScopes[target]=bound.repositoryScope;renderIntegrityStatuses();return bound;
+  repositoryIntegrityBoundScopes[target]=bound.repositoryScope;applyRepositoryIntegrityHealth(await readRepositoryIntegrityState());return bound;
 }
 async function updateRepositoryIntegrityTarget(target,result){
   if(!result?.repositoryScope)throw new Error('Integrity results require their repository identity.');
@@ -9792,6 +10065,11 @@ AppActivation.subscribe(event=>{if([APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTI
 // Device Folder from when it was chosen). A change found on start is backed up
 // only while local data is present.
 BackupProviderRuntime.configureAutomaticBackup(Object.freeze({covered:id=>verifiedRecoveryState.providers[id]?.sourceRevision||'',current:()=>currentBackupSourceRevision(),ready:async()=>await canonicalLocalRecoveryEmpty()===false}));
+BackupProviderRuntime.configureSessionOwnership(Object.freeze({
+  installationId:()=>InstallationIdentity.getId(),
+  today:()=>todayISO(),
+  read:async()=>{const loaded=await AppData.activeSession.load(0,{strict:true});if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be read safely.');const value=loaded.value;return value?Object.freeze({date:value.date,runningOn:value.runningOn,revision:value.revision}):null;}
+}));
 // Each location's integrity state is kept under its location id.
 BackupProviderRuntime.configureIntegrityScrub(Object.freeze({
   readTarget:id=>readRepositoryIntegrityTarget(id),
@@ -10098,15 +10376,21 @@ function schedulePwaUpdateCheck(minimumDelay=0){
   pwaUpdateCheckDueAt=now+delay;pwaUpdateCheckTimer=setTimeout(()=>{pwaUpdateCheckTimer=null;pwaUpdateCheckDueAt=0;void checkPwaUpdateIfDue();},delay);
   return true;
 }
+function pwaProviderNetworkBusy(){return BackupProviderRuntime.status().busy===true||BackupProviderRuntime.locationStatus('google-drive')?.backingUp===true;}
 async function checkPwaUpdateIfDue({force=false}={}){
   const lifecycle=PwaLifecycle.status();
   if(!lifecycle.supported||pwaUpdateCheckRunning||!force&&(lifecycle.registered&&!lifecycle.checkError&&!pwaUpdateCheckDue()||pwaUpdateCheckRetryAt>Date.now()))return false;
   const ownership=AppOwnership.status();
   if(ownership.state!==OWNERSHIP_STATES.PRIMARY)return false;
   if(navigator.onLine===false)return false;
-  pwaUpdateCheckRunning=true;
+  // Automatic update discovery must not compete with an active provider transfer.
+  // Manual checks remain explicit user actions; they are never delayed here.
+  if(!force&&pwaProviderNetworkBusy()){schedulePwaUpdateCheck(30000);return false;}
+  pwaUpdateCheckRunning=true;let deferredForProvider=false;
   const perform=async()=>{
     if(!force&&(PwaLifecycle.status().registered&&!PwaLifecycle.status().checkError&&!pwaUpdateCheckDue()||pwaUpdateCheckRetryAt>Date.now()))return false;
+    // A transfer may have started while waiting for the cross-tab update lock.
+    if(!force&&pwaProviderNetworkBusy()){deferredForProvider=true;return false;}
     const success=await PwaLifecycle.checkForUpdate();
     if(success){markPwaUpdateCheck();clearPwaUpdateCheckFailure();return true;}
     recordPwaUpdateCheckFailure();
@@ -10118,7 +10402,7 @@ async function checkPwaUpdateIfDue({force=false}={}){
     }
     return await perform();
   }catch(error){recordPwaUpdateCheckFailure();AppDiagnostics.capture('pwa.update-check-scheduler',error,'warn');return false;}
-  finally{pwaUpdateCheckRunning=false;schedulePwaUpdateCheck();}
+  finally{pwaUpdateCheckRunning=false;schedulePwaUpdateCheck(deferredForProvider?30000:0);}
 }
 const PwaLifecycle=PwaLifecycleModule.createCoordinator(Object.freeze({
   configuration:Object.freeze({assetId:'__SD_PAGE_ASSET_ID__',buildId:'@@SD_BUILD_ID@@',scope:'./',workerUrl:trustedAssetURL('./sw.js'),reloadSessionKey:SESSION_STORAGE_KEYS.pwaReload}),
@@ -10240,6 +10524,12 @@ const PreviewRuntime=(()=>{
   return Object.freeze({registerProvider,useSample,setRecords,clear,clearExcept,status,summaries,records});
 })();
 const InsightsDataSource=Object.freeze({
+  async getDailySnapshot(){
+    const previewRecords=PreviewRuntime.records('insights',{});
+    if(previewRecords)return Object.freeze({records:previewRecords,summaries:PreviewRuntime.summaries('insights')||[]});
+    const snapshot=await AppData.dailyRecords.insightsSnapshot({yieldProjection:true});
+    return Object.freeze({records:snapshot.records,summaries:snapshot.summaries.filter(summary=>summary?.recordKind==='study')});
+  },
   async getDailySummaries(){
     const preview=PreviewRuntime.summaries('insights');
     if(preview)return preview;
@@ -10248,7 +10538,7 @@ const InsightsDataSource=Object.freeze({
   async getDailyRecords(options={}){
     const preview=PreviewRuntime.records('insights',options);
     if(preview)return preview;
-    return AppData.dailyRecords.window(options);
+    return AppData.dailyRecords.window({...options,yieldProjection:true});
   },
   getRecordSource(){
     return PreviewRuntime.status('insights');
@@ -10276,7 +10566,7 @@ function currentBackupDiagnosticStates(){
   sample('Note saving',()=>AppData.notes.failure(),value=>[{job:'Note saving',state:value.failed?'failed':'observed',failed:value.failed===true}]);
   sample('Write ownership',()=>({primary:appCanMutate(),...AppMutationCoordinator.status()}),value=>[{job:'Write ownership',state:value.active?'running':value.recoveryFault?'blocked':value.primary?'primary':'secondary',busy:!!value.active,pending:!!value.recoveryFault,foreign:value.foreign,authorityHealthy:value.authorityHealthy,authorityDurableProtected:value.authorityDurableProtected}]);
   sample('Backup controller',()=>BackupController.status(),value=>[{job:'Backup controller',...OperationLifecycle.snapshot(value),importActive:value.importActive,importCancelled:value.importCancelled,exportActive:value.standaloneExportActive}]);
-  sample('Device backup',()=>DeviceBackup.status(),value=>[{job:'Device backup',...OperationLifecycle.snapshot({busy:value.busy||value.backingUp,pending:value.pending,nextEligibleAt:value.nextEligibleAt}),connected:value.connected,permission:value.permission,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped,completedAt:value.lastBackupAt||''}]);
+  sample('Device backup',()=>DeviceBackup.status(),value=>[{job:'Device backup',...OperationLifecycle.snapshot({busy:value.busy||value.backingUp,pending:value.pending,nextEligibleAt:value.nextEligibleAt}),connected:value.connected,permission:value.permission,stalePermissionResponses:value.stalePermissionResponses,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped,completedAt:value.lastBackupAt||''}]);
   sample('Provider operation',()=>BackupProviderRuntime.status(),value=>[{job:'Provider operation',...OperationLifecycle.snapshot(value)}]);
   sample('Provider connection',()=>BackupProviderRuntime.diagnosticConnections(),values=>values.map(value=>({job:value.id==='google-drive'?'Google Drive connection':'External provider connection',state:value.connected?'connected':'disconnected',connected:value.connected,scopeBound:value.scopeBound,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped})));
   sample('Backup encryption',()=>BackupProtection.status(),value=>[{job:'Backup encryption',state:value.enabled?value.unlocked?'unlocked':'locked':'off',enabled:value.enabled,unlocked:value.unlocked}]);
@@ -10296,7 +10586,7 @@ function currentBackupDiagnosticStates(){
   });
   // Sync with Drive and the profiles on this device: what to read first when
   // a device does not sync.
-  sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,waitingForDeviceFolder:value.waitingForDeviceFolder,turnWaits:value.turnWaits,keptVersions:KeptVersions.count()})));
+  sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,turnWaits:value.turnWaits,keptVersions:KeptVersions.count()})));
   sample('Profiles',()=>({count:Profiles.list().length,pending:Profiles.removalPending(),unsupported:Profiles.unsupported()}),value=>[{job:'Profiles',state:value.unsupported?'unsupported':value.pending?'pending':'observed',profiles:value.count,removalPending:value.pending>0}]);
   sample('Unsupported data',()=>UnsupportedData.summary(),value=>[{job:'Unsupported data',state:value.blocked?'blocked':value.protected?'held':value.held?'replaceable':'none',held:value.held,protectedCount:value.protected,savedDays:value.items.days,notes:value.items.notes,assets:value.items.attachments,sessions:value.items.sessions,settings:value.items.settings}]);
   sample('Provider background',()=>BackupProviderRuntime.backgroundStatus(),values=>values);return states;
@@ -10399,7 +10689,19 @@ const CLICK_ACTIONS=Object.freeze({
   'confirm-plan-edit': ()=>uploadSoonAfterPlanApply(PlanDraftEditor.confirm()),
   'cancel-plan-edit': PlanDraftEditor.cancel,
   'load-default': loadDefaultPlan,
-  'apply-schedule': async()=>{if(sessionPanelMode==='elsewhere'&&!TASKS.length&&!await confirmSessionTakeover(sessionPanelSession,{replace:true}))return false;const result=uploadSoonAfterPlanApply(applySchedule());if(result&&typeof result.finally==='function')return result.finally(()=>schedulePwaUpdateEvaluation(250));schedulePwaUpdateEvaluation(250);return result;},
+  'apply-schedule': async()=>{
+    let takeover=null;
+    if(sessionPanelMode==='elsewhere'&&!TASKS.length){
+      if(!await confirmSessionTakeover(sessionPanelSession,{replace:true}))return false;
+      try{takeover=await transferSessionOwnershipHere(sessionPanelSession);}
+      catch(error){setPlanStatus('Could not move today’s session here: '+(error&&error.message?error.message:error),false);return false;}
+    }
+    try{
+      let result=uploadSoonAfterPlanApply(applySchedule(takeover?{source:'ownership-takeover'}:{}));if(result&&typeof result.then==='function')result=await result;
+      if(result===false&&takeover)await attemptAutoRestoreActiveSession();
+      return result;
+    }finally{schedulePwaUpdateEvaluation(250);}
+  },
   'clear-schedule-draft': PlanDraftEditor.clear,
   'open-notes': openNotesLibrary,
   'toggle-pnote-info': togglePnoteInfo,
@@ -10786,7 +11088,7 @@ function installApplicationDomBindings(){
   NoteSyncPopover.install();
   AttachmentLibrary.install();
   void installAttachmentIntegrityAudit();
-  void installVerifiedRecoveryFreshness();
+  void installVerifiedRecoveryFreshness().catch(error=>AppDiagnostics.capture('backup.freshness-startup',error,'warn'));
   OwnershipUiProjection.install();
   BlockedActionHint.install();
   RichTextRuntime.install();
@@ -10794,7 +11096,7 @@ function installApplicationDomBindings(){
   NativeCapabilities.install();
   void BackupProtection.refresh().catch(setBackupProtectionSurfaceError);
   BackupProviderRuntime.subscribeStatus(renderDriveBackup);renderDriveBackup();
-  void reconcileChangeClock().catch(()=>false).then(()=>DeviceBackup.install()).then(()=>installRepositoryIntegrityScrub()).catch(error=>AppDiagnostics.capture('backup.repository-integrity-install',error,'warn'));
+  void ensureDeviceBackupInstalled().then(()=>installRepositoryIntegrityScrub()).catch(error=>AppDiagnostics.capture('backup.repository-integrity-install',error,'warn'));
   updateFullscreenButton();
   PlanDraftEditor.install();
   UiTabRegistry.updateOrientation();
@@ -10897,6 +11199,9 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
         try{await AppData.mutationEpoch.reseed();backupFastFenceReady=true;}
         catch(error){AppDiagnostics.capture('startup.canonical-mutation-epoch',error,'warn');}
       }
+      // The durable mutation epoch must repair the fast mirror before the
+      // startup gate opens any automatic provider work.
+      await reconcileStartupChangeClock();
       resumeUnresolvedStorageReset();
       installBackgroundOwners();scheduleDataMaintenance();BackgroundOperations.wake('startup');installSessionWatch();void KeptVersions.refresh();UnsupportedData.announce();renderUnsupportedData();
       void Profiles.collect().then(result=>{if(result.error)AppDiagnostics.capture('profiles.collect',result.error,'warn');});askProfilePassword();
@@ -10908,6 +11213,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
       NoticeCoordinator.dismiss('startup-failure');
       window.dispatchEvent(new CustomEvent('studydirector:canonicalstatus',{detail:proof}));
       window.dispatchEvent(new CustomEvent('studydirector:startupready',{detail:Object.freeze({version:APP_VERSION,canonical:proof.canonical,retirementDataReady:proof.retirementDataReady})}));
+      scheduleInsightsPreload();
       void PwaLifecycle.confirmBoot().catch(error=>AppDiagnostics.capture('pwa.boot-confirmation',error,'warn'));
       setTimeout(()=>{void offerDeviceRecoveryIfLocalEmpty({reason:'startup'}).catch(error=>AppDiagnostics.capture('backup.device-recovery-offer',error,'warn'));},0);
       return proof;

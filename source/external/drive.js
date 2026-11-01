@@ -34,7 +34,7 @@
   const REPOSITORY_KIND_MARKER=REPOSITORY_IDENTITIES.driveRepositoryKindMarker;
   const REPOSITORY_ID_MARKER=REPOSITORY_IDENTITIES.driveRepositoryIdMarker;
   const REPOSITORY_VERSION='1';
-  const REPOSITORY_KINDS=Object.freeze(new Set(['object','checkpoint','commit']));
+  const REPOSITORY_KINDS=Object.freeze(new Set(['object','checkpoint','commit','session-claim']));
   const PUBLICATION_KIND='publication',MAINTENANCE_KIND='maintenance';
   const MAINTENANCE_VERSION='2';
   let PUBLICATION_MAX_AGE_MS=0,PUBLICATION_ASSERTION_MARGIN_MS=0,MAINTENANCE_MAX_AGE_MS=0,MAINTENANCE_ASSERTION_MARGIN_MS=0;
@@ -45,7 +45,7 @@
   const MULTIPART_UPLOAD_MAX_BYTES=5*1024*1024;
   // The device an upload marker comes from, so a device never waits its turn
   // for a marker an earlier page of its own left behind.
-  const PUBLICATION_DEVICE_MARKER='sdPublicationDevice',DEVICE_PATTERN=/^inst_[a-z0-9_]{1,80}$/u;
+  const PUBLICATION_DEVICE_MARKER='sdPublicationDevice',MAINTENANCE_DEVICE_MARKER='sdMaintenanceDevice',DEVICE_PATTERN=/^inst_[a-z0-9_]{1,80}$/u;
   const HISTORY_FINGERPRINT_MARKER='sdHistoryFingerprint';
   const HISTORY_COUNTS_MARKER='sdHistoryCounts';
   const HISTORY_ENCRYPTED_MARKER='sdHistoryEncrypted';
@@ -55,6 +55,7 @@
   const HISTORY_NOTES_MARKER='sdHistoryNotes';
   // The version's manifest format. Files without it are older than this build.
   const HISTORY_FORMAT_MARKER='sdHistoryFormat';
+  const HISTORY_ATTACHMENTS_MISSING_MARKER='sdHistoryAttachmentsMissing';
   // The device that made the version (its ID says what it is).
   const HISTORY_ORIGIN_MARKER='sdHistoryOrigin',ORIGIN_PATTERN=/^inst_[a-z0-9_]{8,96}$/u;
   const GIS_LOAD_TIMEOUT_MS=20000;
@@ -605,8 +606,8 @@
   }
   async function repositoryScope(context=EMPTY_DRIVE_OPERATION){return repositoryVerificationScope(await ensureFolder(context));}
   const REPOSITORY_FIELDS='id,name,size,version,modifiedTime,createdTime,mimeType,parents,ownedByMe,shared,trashed,sha256Checksum,appProperties,capabilities(canDownload)';
-  function repositoryIdValid(kind,id){return kind==='object'?/^obj_[a-f0-9]{32}$/u.test(String(id||'')):['checkpoint','commit'].includes(kind)?/^cp_[a-f0-9]{32}$/u.test(String(id||'')):false;}
-  function repositoryFilename(kind,id){return String(id)+(kind==='object'?'.sdobject':kind==='commit'?'.sdcommit':'.sdcheckpoint');}
+  function repositoryIdValid(kind,id){return kind==='object'?/^obj_[a-f0-9]{32}$/u.test(String(id||'')):['checkpoint','commit'].includes(kind)?/^cp_[a-f0-9]{32}$/u.test(String(id||'')):kind==='session-claim'?/^sc_[a-f0-9]{16}$/u.test(String(id||'')):false;}
+  function repositoryFilename(kind,id){return String(id)+(kind==='object'?'.sdobject':kind==='commit'?'.sdcommit':kind==='session-claim'?'.sdsessionclaim':'.sdcheckpoint');}
   function validRepositoryMetadata(file,parent,kind=''){
     const properties=file&&file.appProperties||{},actualKind=String(properties[REPOSITORY_KIND_MARKER]||''),id=String(properties[REPOSITORY_ID_MARKER]||''),size=finiteSize(file&&file.size);
     if(kind&&actualKind!==kind)return false;
@@ -624,7 +625,7 @@
       const logicalFingerprint=String(properties[HISTORY_FINGERPRINT_MARKER]||'').toLowerCase(),countsMatch=/^(\d+),(\d+)$/u.exec(String(properties[HISTORY_COUNTS_MARKER]||'')),role=String(properties[HISTORY_ROLE_MARKER]||'normal'),protectedUntil=String(properties[HISTORY_PROTECTED_UNTIL_MARKER]||''),exportedAt=String(properties[REPOSITORY_IDENTITIES.driveExportedAtMarker]||file.createdTime||''),calendarMatch=/^(\d{4}-\d{2}-\d{2}),(\d{4}-\d{2}-\d{2}),(\d{4}-\d{2}),(-?\d{1,4})$/u.exec(String(properties[HISTORY_CALENDAR_MARKER]||''));
       let calendar=null;
       if(calendarMatch&&Number.isFinite(Date.parse(exportedAt))){const localDate=calendarMatch[1],weekStart=calendarMatch[2],month=calendarMatch[3],utcOffsetMinutes=Number(calendarMatch[4]),localOrdinal=Math.floor(Date.parse(`${localDate}T00:00:00.000Z`)/86400000),weekOrdinal=Math.floor(Date.parse(`${weekStart}T00:00:00.000Z`)/86400000),offsetDate=new Date(Date.parse(exportedAt)+utcOffsetMinutes*60000).toISOString().slice(0,10);if(Number.isInteger(utcOffsetMinutes)&&Math.abs(utcOffsetMinutes)<=14*60&&month===localDate.slice(0,7)&&offsetDate===localDate&&Number.isFinite(localOrdinal)&&Number.isFinite(weekOrdinal)&&weekOrdinal<=localOrdinal&&localOrdinal-weekOrdinal<=6&&new Date(weekOrdinal*86400000).getUTCDay()===1)calendar=Object.freeze({localDate,weekStart,month,utcOffsetMinutes});}
-      if(/^[a-f0-9]{64}$/u.test(logicalFingerprint)&&countsMatch&&['normal','before-restore'].includes(role)&&Number.isFinite(Date.parse(exportedAt))&&(!protectedUntil||Number.isFinite(Date.parse(protectedUntil))))history=Object.freeze({format:/^[1-9]\d{0,3}$/u.test(String(properties[HISTORY_FORMAT_MARKER]||''))?Number(properties[HISTORY_FORMAT_MARKER]):0,logicalFingerprint,exportedAt:new Date(exportedAt).toISOString(),counts:Object.freeze({dailyRecord:Number(countsMatch[1]),note:Number(countsMatch[2])}),encrypted:properties[HISTORY_ENCRYPTED_MARKER]==='1',retention:Object.freeze({role,protectedUntil:protectedUntil?new Date(protectedUntil).toISOString():'',calendar,notesFingerprint:/^[a-f0-9]{64}$/u.test(String(properties[HISTORY_NOTES_MARKER]||''))?String(properties[HISTORY_NOTES_MARKER]):''}),origin:ORIGIN_PATTERN.test(String(properties[HISTORY_ORIGIN_MARKER]||''))?String(properties[HISTORY_ORIGIN_MARKER]):''});
+      if(/^[a-f0-9]{64}$/u.test(logicalFingerprint)&&countsMatch&&['normal','before-restore'].includes(role)&&Number.isFinite(Date.parse(exportedAt))&&(!protectedUntil||Number.isFinite(Date.parse(protectedUntil))))history=Object.freeze({format:/^[1-9]\d{0,3}$/u.test(String(properties[HISTORY_FORMAT_MARKER]||''))?Number(properties[HISTORY_FORMAT_MARKER]):0,logicalFingerprint,exportedAt:new Date(exportedAt).toISOString(),counts:Object.freeze({dailyRecord:Number(countsMatch[1]),note:Number(countsMatch[2])}),encrypted:properties[HISTORY_ENCRYPTED_MARKER]==='1',retention:Object.freeze({role,protectedUntil:protectedUntil?new Date(protectedUntil).toISOString():'',calendar,notesFingerprint:/^[a-f0-9]{64}$/u.test(String(properties[HISTORY_NOTES_MARKER]||''))?String(properties[HISTORY_NOTES_MARKER]):''}),origin:ORIGIN_PATTERN.test(String(properties[HISTORY_ORIGIN_MARKER]||''))?String(properties[HISTORY_ORIGIN_MARKER]):'',attachmentsMissing:/^\d{1,6}$/u.test(String(properties[HISTORY_ATTACHMENTS_MISSING_MARKER]||''))?Number(properties[HISTORY_ATTACHMENTS_MISSING_MARKER]):0});
     }
     return Object.freeze({kind,id,remoteId:String(file.id),remoteVersion:String(file.version||''),verificationScope:repositoryVerificationScope(parent),name:String(file.name),size:Number(file.size),createdAt:String(file.createdTime||''),modifiedAt:String(file.modifiedTime||''),digest:String(properties[FILE_DIGEST_MARKER]||''),serverDigest,history});
   }
@@ -734,7 +735,7 @@
   function maintenanceDescriptor(file,parent){
     if(!validMaintenanceMetadata(file,parent))throw noRetry(new Error('Google Drive returned unsafe Study Director maintenance metadata.'));
     const id=String(file.appProperties[REPOSITORY_ID_MARKER]),createdAt=String(file.createdTime||''),maxAge=file.appProperties[REPOSITORY_VERSION_MARKER]===MAINTENANCE_VERSION?MAINTENANCE_MAX_AGE_MS:LEGACY_MAINTENANCE_MAX_AGE_MS;
-    return Object.freeze({kind:MAINTENANCE_KIND,id,remoteId:String(file.id),verificationScope:coordinationVerificationScope(parent),name:String(file.name),createdAt,modifiedAt:String(file.modifiedTime||''),expiresAt:Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+maxAge).toISOString():''});
+    const device=thisDevice();return Object.freeze({kind:MAINTENANCE_KIND,id,sameDevice:!!device&&file.appProperties[MAINTENANCE_DEVICE_MARKER]===device,remoteId:String(file.id),verificationScope:coordinationVerificationScope(parent),name:String(file.name),createdAt,modifiedAt:String(file.modifiedTime||''),expiresAt:Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+maxAge).toISOString():''});
   }
   async function findRepositoryMaintenance(parent,id,context=EMPTY_DRIVE_OPERATION){
     if(!maintenanceIdValid(id))throw noRetry(new Error('A Study Director maintenance marker has an invalid identity.'));
@@ -757,7 +758,8 @@
       // Older clients classify this version as uncertain and defer. They must
       // not expire a network lease using their former 60-second lifetime.
       [REPOSITORY_MARKER.key]:REPOSITORY_MARKER.value,[REPOSITORY_VERSION_MARKER]:MAINTENANCE_VERSION,[REPOSITORY_KIND_MARKER]:MAINTENANCE_KIND,[REPOSITORY_ID_MARKER]:id,
-      [FILE_SECURITY_MARKER]:FILE_SECURITY_VERSION,[REPOSITORY_IDENTITIES.driveAppVersionMarker]:PLUGIN_VERSION,[REPOSITORY_IDENTITIES.driveExportedAtMarker]:now
+      [FILE_SECURITY_MARKER]:FILE_SECURITY_VERSION,[REPOSITORY_IDENTITIES.driveAppVersionMarker]:PLUGIN_VERSION,[REPOSITORY_IDENTITIES.driveExportedAtMarker]:now,
+      ...(thisDevice()?{[MAINTENANCE_DEVICE_MARKER]:thisDevice()}:{})
     }};
     let response=null,file=null;
     try{response=await authorizedFetch(`${DRIVE_API}/files?fields=${encodeURIComponent(REPOSITORY_FIELDS)}`,{method:'POST',headers:{'Content-Type':'application/json; charset=UTF-8'},body:JSON.stringify(metadata)},API_TIMEOUT_MS,context);}
@@ -840,8 +842,11 @@
     ]);
     const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'3',fields:`nextPageToken,files(${REPOSITORY_FIELDS})`});
     const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);if(!response.ok)throw await apiError(response,'Could not locate a required Study Director backup file in Google Drive.');
-    const payload=await jsonResponse(response),files=(Array.isArray(payload&&payload.files)?payload.files:[]).filter(file=>validRepositoryMetadata(file,parent,kind)&&file.appProperties[REPOSITORY_ID_MARKER]===id);
+    const payload=await jsonResponse(response),files=Array.isArray(payload&&payload.files)?payload.files:[];
     if(payload&&payload.nextPageToken||files.length>1)throw noRetry(new Error('Duplicate Study Director backup files were found. Nothing was changed.'));
+    // A marked identity with unsafe metadata is *not* proof that the identity
+    // is absent. Do not create a duplicate beside a malformed remote file.
+    if(files.length&&(!validRepositoryMetadata(files[0],parent,kind)||files[0].appProperties[REPOSITORY_ID_MARKER]!==id))throw noRetry(new Error('Google Drive found a backup identity with unsafe metadata. Nothing was uploaded.'));
     return files[0]||null;
   }
   function repositoryUploadMetadata(file,parent){
@@ -858,6 +863,7 @@
         const notesFingerprint=String(history.retention&&history.retention.notesFingerprint||'').toLowerCase();if(/^[a-f0-9]{64}$/u.test(notesFingerprint))properties[HISTORY_NOTES_MARKER]=notesFingerprint;
         if(ORIGIN_PATTERN.test(String(history.origin||'')))properties[HISTORY_ORIGIN_MARKER]=String(history.origin);
         if(Number.isSafeInteger(Number(history.format))&&Number(history.format)>0&&Number(history.format)<10000)properties[HISTORY_FORMAT_MARKER]=String(Number(history.format));
+        properties[HISTORY_ATTACHMENTS_MISSING_MARKER]=String(Number.isSafeInteger(Number(history.attachmentsMissing))&&Number(history.attachmentsMissing)>0?Number(history.attachmentsMissing):0);
       }
     }
     return {name:repositoryFilename(file.kind,file.id),parents:[parent],mimeType:'application/octet-stream',appProperties:properties};
@@ -886,9 +892,12 @@
     const saved=repositoryUploads.get(uploadKey);
     if(saved&&(saved.digest!==file.digest||saved.size!==file.blob.size))throw noRetry(new Error('An incomplete Study Director upload has different content for this identity.'));
     if(saved?.busy)throw noRetry(new Error('This Study Director backup file is already uploading.'));
-    const existing=file.knownAbsent===true&&!saved?null:await findRepositoryFile(parent,file.kind,file.id,context);
+    // A presumed-new identity is not proof of absence after an interrupted
+    // upload or page restart. Check the remote logical identity before any
+    // multipart POST or resumable session creation; only metadata is read.
+    const existing=await findRepositoryFile(parent,file.kind,file.id,context);
     if(existing){
-      const descriptor=repositoryDescriptor(existing,parent);if(descriptor.size!==file.blob.size||descriptor.digest!==file.digest)throw noRetry(new Error('A Study Director backup file with this identity already exists but has different content.'));
+      const descriptor=repositoryDescriptor(existing,parent);if(descriptor.size!==file.blob.size||descriptor.digest!==file.digest||descriptor.serverDigest&&descriptor.serverDigest!==file.digest)throw noRetry(new Error('A Study Director backup file with this identity already exists but has different content.'));
       await assertDriveOperationCurrent(context);repositoryUploads.delete(uploadKey);return descriptor;
     }
     let payload,session=saved||null;
@@ -979,12 +988,19 @@
       beginPublication:()=>beginRepositoryPublication(base),
       listPublications:()=>listRepositoryPublications(base),
       assertPublication:ref=>assertRepositoryPublication(ref,base),
-      endPublication:ref=>endRepositoryPublication(ref,base),
+      // Marker retirement is cleanup, not operation work. Like maintenance
+      // release, it must survive the operation signal being aborted by an
+      // expected foreground preemption.
+      endPublication:ref=>endRepositoryPublication(ref,driveOperationContext({folderState:base.folderState})),
       beginMaintenance:()=>beginRepositoryMaintenance(base),
       listMaintenances:()=>listRepositoryMaintenances(base),
       assertMaintenance:ref=>assertRepositoryMaintenance(ref,base),
       renewMaintenance:ref=>renewRepositoryMaintenance(ref,base),
       endMaintenance:ref=>endRepositoryMaintenance(ref,driveOperationContext({folderState:base.folderState})),
+      listSessionClaims:opts=>repositoryList(Object.freeze({...opts,kind:'session-claim'}),base),
+      uploadSessionClaim:file=>repositoryUpload(file,base),
+      downloadSessionClaim:(ref,opts)=>repositoryDownload(ref,opts,base),
+      deleteSessionClaim:(ref,opts)=>repositoryDelete(ref,opts,base),
       scope:()=>repositoryScope(base),
       historyReadConcurrency:8
     });
@@ -1156,11 +1172,12 @@
       authorize,
       backgroundAvailable:()=>tokenValid(),
       connected:()=>tokenValid(),
+      automaticConfigured:()=>tokenValid()||signedInBefore,
       connectionExpiresAt:()=>tokenValid()?tokenExpiresAt:0,
       subscribeConnection,
       disconnect,
       release,
-      repository:Object.freeze({discardUploads:()=>repositoryUploads.clear(),list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:beginRepositoryPublication,listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,scope:()=>repositoryScope(),beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
+      repository:Object.freeze({discardUploads:()=>repositoryUploads.clear(),list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:beginRepositoryPublication,listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,listSessionClaims:opts=>repositoryList(Object.freeze({...opts,kind:'session-claim'})),uploadSessionClaim:repositoryUpload,downloadSessionClaim:repositoryDownload,deleteSessionClaim:repositoryDelete,scope:()=>repositoryScope(),beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
     }));
   }
 

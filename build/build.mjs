@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import releaseConfig from '../release.config.mjs';
 import {PRODUCTION_LIMITS,assertProductionLimits} from '../contracts/production-limits.mjs';
@@ -29,6 +30,18 @@ function externalSourceFiles(){return externalModules.flatMap(moduleSourceFiles)
 function escapeRegExp(value){return String(value).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
 function escapeHtml(value){return String(value).replace(/[&<>]/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[character]));}
 
+function sourceCommit(){
+  for(const raw of [process.env.SD_SOURCE_COMMIT,process.env.GITHUB_SHA]){
+    const value=String(raw||'').trim().toLowerCase();if(/^[a-f0-9]{40}$/u.test(value))return value;
+  }
+  try{
+    const result=spawnSync('git',['rev-parse','HEAD'],{cwd:WORK,encoding:'utf8',stdio:['ignore','pipe','ignore']});
+    const value=result.status===0?String(result.stdout||'').trim().toLowerCase():'';
+    if(/^[a-f0-9]{40}$/u.test(value))return value;
+  }catch{}
+  return '';
+}
+
 function legalReaderHtml(reader,text){
   const links=[['Privacy','privacy.html','privacy'],['Terms','terms.html','terms'],['Security','security.html','security'],['License','license.html','license'],['Notices','notices.html','notices']];
   const navigation=links.map(([label,href,id])=>`<a href="${href}"${id===reader.active?' aria-current="page"':''}>${label}</a>`).join('');
@@ -43,7 +56,8 @@ export function releaseIdentity(){
   const expectedBuildId=new RegExp(`^${escapeRegExp(release.toLowerCase())}-[0-9]{8}-r[1-9][0-9]*$`,'u');
   invariant(expectedBuildId.test(buildId),`${release} internal build id is missing or malformed.`);
   const id=release.toLowerCase().replace(/^sd/,'');
-  return Object.freeze({release,id,buildId,main:'index.html'});
+  const commit=sourceCommit();invariant(!commit||/^[a-f0-9]{40}$/u.test(commit),'Source commit identity is malformed.');
+  return Object.freeze({release,id,buildId,sourceCommit:commit,main:'index.html'});
 }
 
 function filename(module,value){return `${module.stem}.${sha256(value).slice(0,12)}.js`;}
@@ -57,6 +71,7 @@ function renderTokens(value,identity,sourceName){
     .replaceAll('@@SD_RELEASE@@',identity.release)
     .replaceAll('@@SD_RELEASE_ID@@',identity.id)
     .replaceAll('@@SD_BUILD_ID@@',identity.buildId)
+    .replaceAll('@@SD_SOURCE_COMMIT@@',identity.sourceCommit)
     .replaceAll('@@SD_PRODUCTION_LIMITS@@',JSON.stringify(PRODUCTION_LIMITS))
     .replaceAll('@@SD_LOCAL_STORAGE_KEYS@@',JSON.stringify(LOCAL_STORAGE_KEYS))
     .replaceAll('@@SD_THEME_STORAGE_KEY@@',LOCAL_STORAGE_KEYS.theme)
@@ -337,6 +352,8 @@ export function validateBuild(build){
       const name=externalNames[target].get(id);
       invariant(html.includes(`src:'${name}'`),`${target} ${id} on-demand plugin identity is invalid.`);
     }
+    const richTextName=externalNames[target].get('rich-text');
+    invariant(html.includes(`<link rel="preload" as="script" href="${richTextName}">`),`${target} rich-text startup preload is missing.`);
   }
   for(const module of privateModules){
     const name=privateNames.get(module.id),expected=privateSources.get(module.id);
@@ -406,7 +423,7 @@ export function buildManifest(build){
   validateBuild(build);
   return Object.freeze({
     format:'study-director-build-manifest',version:2,
-    release:build.identity.release,releaseId:build.identity.id,buildId:build.identity.buildId,main:build.identity.main,
+    release:build.identity.release,releaseId:build.identity.id,buildId:build.identity.buildId,sourceCommit:build.identity.sourceCommit,main:build.identity.main,
     sourceDateEpoch:releaseConfig.sourceDateEpoch,minified:false,
     privateModuleOrder:privateModules.map(row=>row.id),cacheableCoreFiles:privateModules.map(row=>build.privateNames.get(row.id)),cacheableStyleFiles:styleModules.map(row=>build.styleNames.get(row.id)),externalRuntimeFiles:externalModules.map(row=>build.externalNames.deployment.get(row.id)),externalExecution:Object.fromEntries(externalModules.map(row=>[row.id,row.execution])),
     developmentRuntimeFiles:[...privateModules.map(row=>build.privateNames.get(row.id)),...externalModules.map(row=>build.externalNames.development.get(row.id))],

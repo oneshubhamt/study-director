@@ -128,6 +128,10 @@ await test('download failure has an explicit stage and actionable error; success
 });
 await test('silent browser update check is bounded and late resolution cannot erase its failure',async()=>{
  const h=harness(),gate=deferred();await h.api.install();h.behavior.update=()=>gate.promise;const task=h.api.checkForUpdate();await flush();await h.advance(120000);assert.equal(await task,false);assert.equal(h.api.status().checking,false);assert.equal(h.timers.size,0);assert.ok(h.api.status().checkError);gate.resolve();await flush();assert.equal(h.api.status().phase,'installation-failed');
+ // Native registration.update() may complete after JavaScript has timed out;
+ // its later worker event cannot bypass the protected reload path.
+ h.registration.waiting=h.candidate;h.candidate.state='installed';h.candidate.emit('statechange');await flush();
+ assert.equal(h.counts().reloads,0);assert.equal(h.counts().reserves,0);assert.equal(h.api.status().checking,false);
 });
 for(const stage of ['preparation','activation'])await test(`A to B to C replacement during ${stage} only activates freshly prepared C`,async()=>{
  const h=harness(),gate=deferred();h.candidate.releaseId='A';await h.api.install();if(stage==='preparation')h.behavior.prepare=()=>gate.promise;const task=h.api.apply();await flush();

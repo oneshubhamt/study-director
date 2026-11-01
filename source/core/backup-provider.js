@@ -12,14 +12,14 @@ registry.define('backup-provider',1,input=>{
   const PORT_FIELDS=freeze({
     configuration:freeze(['appVersion']),
     controller:freeze(['beginImport','cancelImport','finishImport']),
-    exports:freeze(['followProtection','run']),
+    exports:freeze(['followProtection','protect','run','unprotect']),
     domain:freeze(['clampText']),
     view:freeze(['presentation']),
     ownership:freeze(['canRunBackground','canShare','requireMutationControl']),
     environment:freeze(['clearTimeout','setTimeout']),
     diagnostics:freeze(['capture','fail','finish','mark','start'])
   });
-  const REPOSITORY_FIELDS=freeze(['createPublication','publish','publishInline','inspectManifest','inspect','bringIn','restoreVersion','verifyCheckpoint','verifyObject','scrub','cleanup','inspectCommit','retention','validatePolicy','classifyState','activeProtected','selectRetention','projectHistory','noteObject','readNote','markCompleted','sharedBase','establishBase','spine']);
+  const REPOSITORY_FIELDS=freeze(['createPublication','publish','publishInline','inspectManifest','inspect','bringIn','restoreVersion','verifyCheckpoint','verifyObject','scrub','cleanup','inspectCommit','retention','validatePolicy','classifyState','activeProtected','selectRetention','projectHistory','noteObject','readNote','markCompleted','sharedBase','establishBase']);
   function createRuntime(input){
     exactObject(input,['background','ports','repository'],'Backup provider input');
     const Background=exactObject(input.background,['contractVersion','createCoordinator','format','maintenance','maintenanceActionable'],'Backup provider repository-background dependency');
@@ -38,12 +38,12 @@ registry.define('backup-provider',1,input=>{
     const OperationDiagnostics=freeze({start:ports.diagnostics.start,mark:ports.diagnostics.mark,finish:ports.diagnostics.finish,fail:ports.diagnostics.fail});
   const providers=new Map();
   const VERIFIED_HISTORY_INDEX_LIMIT=64;
-  const REPOSITORY_IO_CONCURRENCY=8;
-  const VERIFIED_HISTORY_READ_CONCURRENCY=REPOSITORY_IO_CONCURRENCY;
+  const VERIFIED_HISTORY_READ_CONCURRENCY=8;
   const RECENT_HISTORY_TTL_MS=30*1000;
   const VERIFIED_HISTORY_INTERPRETATION_VERSION='managed-history-v1:'+APP_VERSION;
   const {publicationMaxAgeMs:PUBLICATION_MAX_AGE_MS,maintenanceWorkBudgetMs:PROVIDER_MAINTENANCE_BUDGET_MS,maintenanceMaxAgeMs:MAINTENANCE_MAX_AGE_MS,objectGcGraceMs:OBJECT_GC_GRACE_MS,automaticQuietMs:AUTOMATIC_QUIET_MS,automaticUrgentMs:AUTOMATIC_URGENT_MS,automaticExpiryLeadMs:AUTOMATIC_EXPIRY_LEAD_MS}=RepositoryPolicy.protocol;
   const PROVIDER_RECOVERY_MAINTENANCE_POLL_MS=500,PROVIDER_RECOVERY_MAINTENANCE_YIELD_MS=MAINTENANCE_MAX_AGE_MS+PROVIDER_RECOVERY_MAINTENANCE_POLL_MS;
+  const SESSION_CLAIM_FORMAT='study-director.active-session-claim',SESSION_CLAIM_VERSION=2,SESSION_CLAIM_MAX_BYTES=4096,SESSION_OWNER_PATTERN=/^inst_[a-z0-9_]{8,128}$/iu,SESSION_CLAIM_TOKEN_PATTERN=/^[a-f0-9]{64}$/u;
   const MAINTENANCE_MIN_CHECKPOINT_DELETES=16,MAINTENANCE_MAX_CHECKPOINT_DELETES=128,MAINTENANCE_MAX_OBJECT_DELETES=48,PROVIDER_CONVERGENCE_BUSY_RETRY_MS=15*1000,PROVIDER_CONVERGENCE_RETRY_DELAYS=freeze([30*1000,2*60*1000,10*60*1000,30*60*1000]);
   const MAINTENANCE_POLICY=Background.maintenance;
   // The formats of each location's kept versions, as its last cleanup left them.
@@ -68,6 +68,7 @@ registry.define('backup-provider',1,input=>{
   let pendingRetryHooks=null;
   let maintenanceHooks=null;
   let automaticHooks=null;
+  let sessionOwnershipHooks=null;
   const safeId=value=>String(value||'').trim().toLowerCase().match(/^[a-z][a-z0-9-]{0,40}$/)?.[0]||'';
   const registeredProvider=value=>providers.get(safeId(value&&value.id||value))||value||null;
   function providerBackground(selected){
@@ -95,12 +96,13 @@ registry.define('backup-provider',1,input=>{
     if(!value||typeof value!=='object')return null;
     const required=['list','upload','download','delete'];
     if(required.some(key=>typeof value[key]!=='function'))return null;
-    const publicationMethods=['beginPublication','listPublications','assertPublication','endPublication'],maintenanceMethods=['beginMaintenance','listMaintenances','assertMaintenance','endMaintenance'];
-    const publicationCapable=publicationMethods.every(key=>typeof value[key]==='function'),maintenanceCapable=maintenanceMethods.every(key=>typeof value[key]==='function');
+    const publicationMethods=['beginPublication','listPublications','assertPublication','endPublication'],maintenanceMethods=['beginMaintenance','listMaintenances','assertMaintenance','endMaintenance'],sessionClaimMethods=['listSessionClaims','uploadSessionClaim','downloadSessionClaim','deleteSessionClaim'];
+    const publicationCapable=publicationMethods.every(key=>typeof value[key]==='function'),maintenanceCapable=maintenanceMethods.every(key=>typeof value[key]==='function'),sessionClaimCapable=sessionClaimMethods.every(key=>typeof value[key]==='function');
     return Object.freeze({
       list:value.list,upload:value.upload,download:value.download,delete:value.delete,
       beginPublication:publicationCapable?value.beginPublication:null,listPublications:publicationCapable?value.listPublications:null,assertPublication:publicationCapable?value.assertPublication:null,endPublication:publicationCapable?value.endPublication:null,
       beginMaintenance:maintenanceCapable?value.beginMaintenance:null,listMaintenances:maintenanceCapable?value.listMaintenances:null,assertMaintenance:maintenanceCapable?value.assertMaintenance:null,renewMaintenance:maintenanceCapable&&typeof value.renewMaintenance==='function'?value.renewMaintenance:null,endMaintenance:maintenanceCapable?value.endMaintenance:null,
+      listSessionClaims:sessionClaimCapable?value.listSessionClaims:null,uploadSessionClaim:sessionClaimCapable?value.uploadSessionClaim:null,downloadSessionClaim:sessionClaimCapable?value.downloadSessionClaim:null,deleteSessionClaim:sessionClaimCapable?value.deleteSessionClaim:null,
       scope:typeof value.scope==='function'?value.scope:null,
       discardUploads:typeof value.discardUploads==='function'?value.discardUploads:null,
       beginOperation:typeof value.beginOperation==='function'?value.beginOperation:null,
@@ -167,6 +169,11 @@ registry.define('backup-provider',1,input=>{
     // own (the Device Folder: from when it was chosen). Without one, a location
     // backs up on its own only after this device first backed up to it.
     automaticBaseline:typeof config.automaticBaseline==='function'?config.automaticBaseline:null,
+    // Whether this location remains an automatic destination while its
+    // transport is temporarily unavailable (for example revoked folder
+    // permission or an expired Drive token). Explicit disconnect/forget must
+    // make this false.
+    automaticConfigured:typeof config.automaticConfigured==='function'?config.automaticConfigured:null,
     subscribeConnection:typeof config.subscribeConnection==='function'?config.subscribeConnection:null,
     // hosted: the location's own controller tells the person about its
     // connection (the Device Folder's permission); the engine stays quiet.
@@ -213,9 +220,9 @@ registry.define('backup-provider',1,input=>{
     if(typeof onProgress==='function')try{onProgress(freeze({stage:String(stage||'working'),message:String(message||''),ok:ok!==false,...details}));}catch(error){AppDiagnostics.capture('backup-provider.recovery-progress',error,'warn');}
   }
   function setBusy(next){busy=!!next;notifyStatus();}
-  function beginForeground(selected,externalSignal=null){
+  function beginForeground(selected,externalSignal=null,{respectBackgroundSuspension=false}={}){
     if(foregroundController)return null;
-    const background=providerBackground(selected),scope=background.beginForeground({externalSignal,cancelCode:'PROVIDER_FOREGROUND_CANCELLED',cancelMessage:'Backup operation was cancelled.'});if(!scope)return null;
+    const background=providerBackground(selected),scope=background.beginForeground({externalSignal,cancelCode:'PROVIDER_FOREGROUND_CANCELLED',cancelMessage:'Backup operation was cancelled.',respectBackgroundSuspension});if(!scope)return null;
     foregroundController=scope.controller;
     let released=false;
     return freeze({signal:scope.signal,settled:scope.settled,release:()=>{
@@ -228,7 +235,7 @@ registry.define('backup-provider',1,input=>{
     if(requested&&active&&requested!==active)return false;
     if(!foregroundController||foregroundController.signal.aborted)return false;
     foregroundController.abort(providerBackgroundAbort('PROVIDER_FOREGROUND_CANCELLED',reason));
-    if(foregroundView()&&['bring-in','restore-version'].includes(foregroundView().kind))try{BackupController.cancelImport(reason,freeze({announce:false}));}catch{}
+    if(foregroundView()&&['bring-in','restore-version','sync'].includes(foregroundView().kind))try{BackupController.cancelImport(reason,freeze({announce:false}));}catch{}
     if(foregroundView())updateForegroundView({id:foregroundView().providerId},{stage:'cancelling',message:'Cancelling safely…',ok:true});
     writeStatus('Cancelling safely…',true);setBusy(true);return true;
   }
@@ -251,7 +258,7 @@ registry.define('backup-provider',1,input=>{
   }
   function repositoryProviderItem(raw,kind){
     if(!raw||typeof raw!=='object')throw new Error('Backup repository transport returned invalid file metadata.');
-    const id=String(raw.id||''),expected=kind==='object'?/^obj_[a-f0-9]{32}$/u:['checkpoint','commit'].includes(kind)?/^cp_[a-f0-9]{32}$/u:/a^/u;
+    const id=String(raw.id||''),expected=kind==='object'?/^obj_[a-f0-9]{32}$/u:['checkpoint','commit'].includes(kind)?/^cp_[a-f0-9]{32}$/u:kind==='session-claim'?/^sc_[a-f0-9]{16}$/u:/a^/u;
     if(raw.kind!==kind||!expected.test(id))throw new Error('Backup repository transport returned mismatched file identity.');
     const size=Number(raw.size);
     if(raw.size!==undefined&&(!Number.isSafeInteger(size)||size<=0))throw new Error('Backup repository transport returned invalid file size.');
@@ -264,7 +271,7 @@ registry.define('backup-provider',1,input=>{
     let history=null;
     if(kind==='checkpoint'&&raw.history&&typeof raw.history==='object'){
       const fingerprint=String(raw.history.logicalFingerprint||'').toLowerCase(),exportedAt=String(raw.history.exportedAt||''),daily=Number(raw.history.counts&&raw.history.counts.dailyRecord),notes=Number(raw.history.counts&&raw.history.counts.note),role=String(raw.history.retention&&raw.history.retention.role||'normal'),protectedUntil=String(raw.history.retention&&raw.history.retention.protectedUntil||''),purpose=String(raw.history.retention&&raw.history.retention.purpose||''),calendarRaw=raw.history.retention&&raw.history.retention.calendar||{},localDate=String(calendarRaw.localDate||''),weekStart=String(calendarRaw.weekStart||''),month=String(calendarRaw.month||''),utcOffsetMinutes=Number(calendarRaw.utcOffsetMinutes),notesFingerprint=String(raw.history.retention&&raw.history.retention.notesFingerprint||'').toLowerCase(),calendar=/^\d{4}-\d{2}-\d{2}$/u.test(localDate)&&/^\d{4}-\d{2}-\d{2}$/u.test(weekStart)&&/^\d{4}-\d{2}$/u.test(month)&&Number.isInteger(utcOffsetMinutes)?freeze({localDate,weekStart,month,utcOffsetMinutes}):null;
-      if(/^[a-f0-9]{64}$/u.test(fingerprint)&&Number.isFinite(Date.parse(exportedAt))&&Number.isSafeInteger(daily)&&daily>=0&&Number.isSafeInteger(notes)&&notes>=0&&['normal','before-restore'].includes(role)&&(!protectedUntil||Number.isFinite(Date.parse(protectedUntil)))&&(!purpose||['before-restore','before-combine','before-clear-library','before-clear-archive'].includes(purpose)))history=freeze({format:Number.isSafeInteger(Number(raw.history.format))&&Number(raw.history.format)>0?Number(raw.history.format):0,logicalFingerprint:fingerprint,exportedAt:new Date(exportedAt).toISOString(),counts:freeze({dailyRecord:daily,note:notes}),encrypted:raw.history.encrypted===true,retention:freeze({role,protectedUntil:protectedUntil?new Date(protectedUntil).toISOString():'',purpose:role==='before-restore'?(purpose==='before-clear-archive'?'before-clear-library':(purpose||'before-restore')):'',calendar,notesFingerprint:/^[a-f0-9]{64}$/u.test(notesFingerprint)?notesFingerprint:''}),origin:/^inst_[a-z0-9_]{8,96}$/u.test(String(raw.history.origin||''))?String(raw.history.origin):''});
+      if(/^[a-f0-9]{64}$/u.test(fingerprint)&&Number.isFinite(Date.parse(exportedAt))&&Number.isSafeInteger(daily)&&daily>=0&&Number.isSafeInteger(notes)&&notes>=0&&['normal','before-restore'].includes(role)&&(!protectedUntil||Number.isFinite(Date.parse(protectedUntil)))&&(!purpose||['before-restore','before-combine','before-clear-library','before-clear-archive'].includes(purpose)))history=freeze({format:Number.isSafeInteger(Number(raw.history.format))&&Number(raw.history.format)>0?Number(raw.history.format):0,logicalFingerprint:fingerprint,exportedAt:new Date(exportedAt).toISOString(),counts:freeze({dailyRecord:daily,note:notes}),encrypted:raw.history.encrypted===true,retention:freeze({role,protectedUntil:protectedUntil?new Date(protectedUntil).toISOString():'',purpose:role==='before-restore'?(purpose==='before-clear-archive'?'before-clear-library':(purpose||'before-restore')):'',calendar,notesFingerprint:/^[a-f0-9]{64}$/u.test(notesFingerprint)?notesFingerprint:''}),origin:/^inst_[a-z0-9_]{8,96}$/u.test(String(raw.history.origin||''))?String(raw.history.origin):'',attachmentsMissing:Number.isSafeInteger(Number(raw.history.attachmentsMissing))&&Number(raw.history.attachmentsMissing)>0?Number(raw.history.attachmentsMissing):0});
     }
     // A location that reads each version for its summary (the Device Folder)
     // says which ones it could not read, and which wait for the password.
@@ -319,17 +326,35 @@ registry.define('backup-provider',1,input=>{
     for(const raw of Array.isArray(values)?values:[]){let item;try{item=repositoryProviderItem(raw,kind);if(seen.has(item.id))throw new Error(`Duplicate repository ${kind==='commit'?'commit':'checkpoint'} identity was returned by the backup provider.`);seen.add(item.id);items.push(item);}catch(error){if(/Duplicate repository (?:commit|checkpoint) identity/u.test(String(error&&error.message||'')))throw error;invalid.push(Object.freeze({item:item||null,error,kind}));}}
     return Object.freeze({items:Object.freeze(items),invalid:Object.freeze(invalid)});
   }
+  // All provider history consumers share one listing/identity-validation path.
+  // Cleanup alone requests fresh Device Folder digests; an inventory lookup
+  // must never accidentally weaken that safety boundary or incur its cost.
+  async function listRepositoryHistory(selected,{signal=null,freshDigests=false}={}){
+    const [listed,listedCommits]=await Promise.all([
+      selected.repository.list(freeze({kind:'checkpoint',signal,freshDigests})),
+      selected.repository.list(freeze({kind:'commit',signal,freshDigests}))
+    ]);
+    const items=Array.isArray(listed)?listed:Array.isArray(listed?.items)?listed.items:[];
+    const commitItems=Array.isArray(listedCommits)?listedCommits:Array.isArray(listedCommits?.items)?listedCommits.items:[];
+    return freeze({
+      items,commitItems,
+      preparedCommits:prepareRepositoryHistoryItems(commitItems,'commit'),
+      preparedManifests:prepareRepositoryHistoryItems(items,'checkpoint'),
+      ignored:Math.max(0,Number(listed?.ignored)||0)+Math.max(0,Number(listedCommits?.ignored)||0),
+      overflow:listed?.overflow===true||listedCommits?.overflow===true
+    });
+  }
   // A failure in a file's own content, marked as the repository module's
   // unreadableVersion does: its format is not one this build reads, it is
   // damaged, or it fails its checks. A read that failed, or one waiting for
   // the password, is not one.
   function contentFailure(message){const error=new Error(message);error.repositoryUnreadable=true;return error;}
-  async function verifyRepositoryHistoryItem(selected,item,kind,verifiedScope,{interactive=true,signal=null,forCleanup=false}={}){
+  async function verifyRepositoryHistoryItem(selected,item,kind,verifiedScope,{interactive=true,signal=null,forCleanup=false,fresh=false}={}){
     let lease,read=false;
     try{
       const identity=forCleanup&&item.verificationScope===verifiedScope?verifiedHistoryIdentity(item):'',proofCache=identity&&verifiedHistoryCache(selected,item),proof=proofCache&&proofCache.proofs.get(identity);
-      if(proof)return proof;
-      const cached=readVerifiedHistory(selected,item,verifiedScope);
+      if(proof&&!fresh)return proof;
+      const cached=fresh?null:readVerifiedHistory(selected,item,verifiedScope);
       let value;
       if(cached&&cached.kind===kind)value=cached.value;
       else{
@@ -356,11 +381,10 @@ registry.define('backup-provider',1,input=>{
     return freeze({uncertain:freeze(uncertain),unreadable:freeze(unreadable.sort())});
   }
   async function repositoryProviderStateWork(selected,{interactive=true,signal=null,forCleanup=false}={}){
-    const [listed,listedCommits]=await Promise.all([selected.repository.list(Object.freeze({kind:'checkpoint',signal})),selected.repository.list(Object.freeze({kind:'commit',signal}))]);
-    const items=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],commitItems=Array.isArray(listedCommits)?listedCommits:Array.isArray(listedCommits&&listedCommits.items)?listedCommits.items:[];
+    const {items,commitItems,preparedCommits,preparedManifests,ignored,overflow}=await listRepositoryHistory(selected,{signal,freshDigests:forCleanup});
     const scopes=new Set([...items,...commitItems].map(raw=>String(raw&&raw.verificationScope||'')).filter(Boolean)),verifiedScope=scopes.size===1?[...scopes][0]:null;
-    const preparedCommits=prepareRepositoryHistoryItems(commitItems,'commit'),preparedManifests=prepareRepositoryHistoryItems(items,'checkpoint'),invalid=[...preparedCommits.invalid,...preparedManifests.invalid],work=[...preparedCommits.items.map(item=>Object.freeze({kind:'commit',item})),...preparedManifests.items.map(item=>Object.freeze({kind:'checkpoint',item}))];
-    if(forCleanup&&listed?.overflow!==true&&listedCommits?.overflow!==true)pruneRepositoryHistoryProofs(selected,[...preparedCommits.items,...preparedManifests.items],verifiedScope);
+    const invalid=[...preparedCommits.invalid,...preparedManifests.invalid],work=[...preparedCommits.items.map(item=>freeze({kind:'commit',item})),...preparedManifests.items.map(item=>freeze({kind:'checkpoint',item}))];
+    if(forCleanup&&!overflow)pruneRepositoryHistoryProofs(selected,[...preparedCommits.items,...preparedManifests.items],verifiedScope);
     const verified=await mapRepositoryHistoryBounded(work,selected.repository.historyReadConcurrency,task=>verifyRepositoryHistoryItem(selected,task.item,task.kind,verifiedScope,{interactive,signal,forCleanup}),signal),manifests=[],commits=[];
     for(const result of verified){if(result.invalid){invalid.push(result.invalid);continue;}if(result.kind==='commit')commits.push(result.row);else manifests.push(result.row);}
     const classified=RepositoryCheckpointPipeline.classifyState(Object.freeze({manifests:Object.freeze(manifests),commits:Object.freeze(commits)}));
@@ -368,7 +392,7 @@ registry.define('backup-provider',1,input=>{
     // Obsolete history keeps only verified retention/provenance proofs. Full
     // object references are needed solely for the at-most-16 selected versions.
     const fullById=new Map(),retentionAt=new Date().toISOString();
-    if(forCleanup&&!splitRepositoryFailures(invalid).uncertain.length&&!Number(listed?.ignored)&&!Number(listedCommits?.ignored)&&listed?.overflow!==true&&listedCommits?.overflow!==true){
+    if(forCleanup&&!splitRepositoryFailures(invalid).uncertain.length&&!ignored&&!overflow){
       const retained=RepositoryCheckpointPipeline.selectRetention(classified.committed,{now:new Date(retentionAt)}).retained;
       const full=await mapRepositoryHistoryBounded(retained,selected.repository.historyReadConcurrency,row=>verifyRepositoryHistoryItem(selected,row.ref,'checkpoint',verifiedScope,{interactive,signal}),signal);
       for(const result of full){if(result.invalid)invalid.push(result.invalid);else fullById.set(result.row.id,result.row.manifest);}
@@ -378,9 +402,8 @@ registry.define('backup-provider',1,input=>{
     const failures=splitRepositoryFailures(invalid),unreadableIds=new Set(failures.unreadable),listedFiles=[...preparedCommits.items,...preparedManifests.items];
     const unreadable=freeze(failures.unreadable.map(id=>freeze({id,items:freeze(listedFiles.filter(item=>item.id===id).sort((a,b)=>Number(a.kind==='checkpoint')-Number(b.kind==='checkpoint')))})));
     const rows=Object.freeze(classified.committed.filter(row=>!unreadableIds.has(row.id)).map(row=>Object.freeze({item:row.ref,manifest:fullById.get(row.id)||row.manifest,commitItem:row.commitRef||null}))),uncommitted=Object.freeze(classified.uncommitted.filter(row=>!unreadableIds.has(row.id)).map(row=>Object.freeze({item:row.ref,manifest:row.manifest}))),orphanCommits=Object.freeze(classified.orphanCommits.filter(row=>!unreadableIds.has(row.id)).map(row=>row.ref));
-    const overflow=listed&&listed.overflow===true||listedCommits&&listedCommits.overflow===true;
     if(!overflow)unreadableByProvider.set(selected.id,unreadableIds);
-    return Object.freeze({rows,uncommitted,orphanCommits,invalid:failures.uncertain,unreadable,ignored:Math.max(0,Number(listed&&listed.ignored)||0)+Math.max(0,Number(listedCommits&&listedCommits.ignored)||0),overflow,retentionAt:forCleanup?retentionAt:null,latest:rows.length?rows[rows.length-1]:null});
+    return Object.freeze({rows,uncommitted,orphanCommits,invalid:failures.uncertain,unreadable,ignored,overflow,retentionAt:forCleanup?retentionAt:null,latest:rows.length?rows[rows.length-1]:null});
   }
 
   async function repositoryProviderState(selected,options={}){
@@ -390,15 +413,40 @@ registry.define('backup-provider',1,input=>{
   function repositoryMetadataTimestamp(item){
     const value=String(item&&item.history&&item.history.exportedAt||item&&item.createdAt||item&&item.modifiedAt||'');return Number.isFinite(Date.parse(value))?new Date(value).toISOString():'';
   }
-  async function repositoryProviderInventory(selected,{signal=null}={}){
+  async function repositoryProviderInventory(selected,{signal=null,freshDigests=false}={}){
     await synchronizeRepositoryScope(selected);
-    const [listed,listedCommits]=await Promise.all([selected.repository.list(Object.freeze({kind:'checkpoint',signal})),selected.repository.list(Object.freeze({kind:'commit',signal}))]);
-    const items=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],commitItems=Array.isArray(listedCommits)?listedCommits:Array.isArray(listedCommits&&listedCommits.items)?listedCommits.items:[];
-    const preparedCommits=prepareRepositoryHistoryItems(commitItems,'commit'),preparedManifests=prepareRepositoryHistoryItems(items,'checkpoint'),invalid=[...preparedCommits.invalid,...preparedManifests.invalid],commitById=new Map(preparedCommits.items.map(item=>[item.id,item])),manifestIds=new Set(preparedManifests.items.map(item=>item.id)),pairs=[],uncommitted=[];
+    const {preparedCommits,preparedManifests,ignored,overflow}=await listRepositoryHistory(selected,{signal,freshDigests});
+    const invalid=[...preparedCommits.invalid,...preparedManifests.invalid],commitById=new Map(preparedCommits.items.map(item=>[item.id,item])),manifestIds=new Set(preparedManifests.items.map(item=>item.id)),pairs=[],uncommitted=[];
     for(const item of preparedManifests.items){const commitItem=commitById.get(item.id)||null;if(commitItem)pairs.push(freeze({item,commitItem}));else uncommitted.push(freeze({item}));}
     const orphanCommits=preparedCommits.items.filter(item=>!manifestIds.has(item.id));
     pairs.sort((a,b)=>Date.parse(repositoryMetadataTimestamp(a.item)||0)-Date.parse(repositoryMetadataTimestamp(b.item)||0)||a.item.id.localeCompare(b.item.id));
-    return freeze({pairs:freeze(pairs),uncommitted:freeze(uncommitted),orphanCommits:freeze(orphanCommits),invalid:freeze(invalid),ignored:Math.max(0,Number(listed&&listed.ignored)||0)+Math.max(0,Number(listedCommits&&listedCommits.ignored)||0),overflow:listed&&listed.overflow===true||listedCommits&&listedCommits.overflow===true});
+    return freeze({pairs:freeze(pairs),uncommitted:freeze(uncommitted),orphanCommits:freeze(orphanCommits),invalid:freeze(invalid),ignored,overflow});
+  }
+  // Background cleanup does its expensive verification and object inventory
+  // without an exclusion lease. Once it is ready to delete, this compact
+  // metadata fingerprint lets the short destructive unit prove that no
+  // checkpoint/commit changed during planning.
+  function repositoryCleanupFileSnapshot(item){
+    if(!item||typeof item!=='object')return '';
+    const size=Number(item.size);
+    return [String(item.kind||''),String(item.id||''),String(item.name||''),Number.isSafeInteger(size)?String(size):'',String(item.digest||''),String(item.serverDigest||''),String(item.remoteId||''),String(item.remoteVersion||''),String(item.verificationScope||''),String(item.createdAt||''),String(item.modifiedAt||'')].join('\u0000');
+  }
+  function repositoryCleanupFilesSnapshot(items){return (Array.isArray(items)?items:[]).map(repositoryCleanupFileSnapshot).filter(Boolean).sort().join('\u0001');}
+  function repositoryCleanupHistorySnapshot(history){
+    const items=[];
+    for(const row of history.rows||history.pairs||[]){if(row?.item)items.push(row.item);if(row?.commitItem)items.push(row.commitItem);}
+    for(const row of history.uncommitted||[])if(row?.item)items.push(row.item);
+    for(const item of history.orphanCommits||[])if(item)items.push(item);
+    for(const row of history.unreadable||[])for(const item of row?.items||[])if(item)items.push(item);
+    return repositoryCleanupFilesSnapshot(items);
+  }
+  function repositoryCleanupInventoryMatches(state,inventory){
+    if(!state||!inventory||inventory.overflow===true||Math.max(0,Number(inventory.ignored)||0)>0||(inventory.invalid||[]).length)return false;
+    return repositoryCleanupHistorySnapshot(state)===repositoryCleanupHistorySnapshot(inventory);
+  }
+  function repositoryCleanupObjectListing(inventory){
+    const items=freeze((inventory&&Array.isArray(inventory.items)?inventory.items:[]).map(item=>freeze({id:item.id,ref:item,createdAt:String(item.createdAt||''),modifiedAt:String(item.modifiedAt||'')})));
+    return freeze({items,overflow:inventory&&inventory.overflow===true,invalidCount:Math.max(0,Number(inventory&&inventory.invalidCount)||0)});
   }
   // Earlier texts of one note in this location's kept versions, newest first.
   // Each version's index says which stored record holds the note; a record
@@ -449,12 +497,12 @@ registry.define('backup-provider',1,input=>{
   function repositoryInventoryObservation(inventory,{verificationFailures=0}={}){
     const source=inventory&&typeof inventory==='object'?inventory:{};return freeze({invalid:source.invalid||freeze([]),uncommitted:source.uncommitted||freeze([]),orphanCommits:source.orphanCommits||freeze([]),ignored:Math.max(0,Number(source.ignored)||0)+Math.max(0,Number(verificationFailures)||0),overflow:source.overflow===true,rows:source.pairs||freeze([])});
   }
-  async function verifyRepositoryInventoryPair(selected,pair,{interactive=true,signal=null}={}){
+  async function verifyRepositoryInventoryPair(selected,pair,{interactive=true,signal=null,fresh=false}={}){
     if(!pair||!pair.item||!pair.commitItem)throw new Error('The selected backup version is incomplete.');
     const scopes=new Set([pair.item.verificationScope,pair.commitItem.verificationScope].filter(Boolean)),verifiedScope=scopes.size===1?[...scopes][0]:null;
     const [manifestResult,commitResult]=await Promise.all([
-      verifyRepositoryHistoryItem(selected,pair.item,'checkpoint',verifiedScope,{interactive,signal}),
-      verifyRepositoryHistoryItem(selected,pair.commitItem,'commit',verifiedScope,{interactive:false,signal})
+      verifyRepositoryHistoryItem(selected,pair.item,'checkpoint',verifiedScope,{interactive,signal,fresh}),
+      verifyRepositoryHistoryItem(selected,pair.commitItem,'commit',verifiedScope,{interactive:false,signal,fresh})
     ]);
     if(manifestResult.invalid)throw manifestResult.invalid.error;if(commitResult.invalid)throw commitResult.invalid.error;
     const classified=RepositoryCheckpointPipeline.classifyState(freeze({manifests:freeze([manifestResult.row]),commits:freeze([commitResult.row])}));
@@ -481,7 +529,7 @@ registry.define('backup-provider',1,input=>{
       // it is listed as locked, never matched by data with another copy.
       else{if(currentFormat&&!item.locked||legacyKept>=legacyLimit)return null;legacyKept+=1;tier=legacyKept===1?'latest':'retained';}
       if(item.locked)return freeze({logicalId:'locked_'+item.id,logicalFingerprint:'',exportedAt,counts:null,origin:'',locked:true,location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:item.id,exportedAt,tier,encrypted:true,verification:'on-restore',legacyMetadata:true,quarantineDeferred:quarantined.length>0})});
-      return freeze({logicalId:'state_'+fingerprint,logicalFingerprint:fingerprint,exportedAt,counts:summary?.counts||freeze({dailyRecord:0,note:0}),origin:String(summary?.origin||''),location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:item.id,exportedAt,tier,encrypted:summary?.encrypted===true,verification:'on-restore',legacyMetadata:!summary,quarantineDeferred:quarantined.length>0})});
+      return freeze({logicalId:'state_'+fingerprint,logicalFingerprint:fingerprint,exportedAt,counts:summary?.counts||freeze({dailyRecord:0,note:0}),origin:String(summary?.origin||''),location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:item.id,exportedAt,tier,encrypted:summary?.encrypted===true,verification:'on-restore',legacyMetadata:!summary,quarantineDeferred:quarantined.length>0,attachmentsMissing:Number(summary?.attachmentsMissing)||0})});
     }).filter(Boolean));
   }
 
@@ -526,33 +574,35 @@ registry.define('backup-provider',1,input=>{
     try{await RepositoryCheckpointPipeline.verifyObject(lease.blob,entry,Object.freeze({signal,onProgress:transferProgress('verify-hash','checking')}));return true;}
     finally{await lease.release().catch(()=>{});}
   }
+  // Metadata verification shares the byte-level lease and checksum contract;
+  // manifest and commit provenance are still inspected independently below.
+  async function inspectUploadedRepositoryBytes(selected,item,kind,signal,inspect){
+    const lease=repositoryDownloadLease(await selected.repository.download(item,freeze({signal})));
+    try{
+      if(item.size&&lease.blob.size!==item.size)throw new Error(`Remote repository ${kind} size changed before verification.`);
+      if(item.digest){const actual=await Exports.run('checksum',{value:lease.blob});if(actual!==item.digest)throw new Error(`Remote repository ${kind} failed content-integrity verification.`);}
+      return await inspect(lease.blob);
+    }finally{await lease.release().catch(()=>{});}
+  }
   async function verifyUploadedRepositoryManifest(selected,item,expected,expectedDigest='',signal=null){
     const localDigest=String(expectedDigest||item.digest||'').toLowerCase();
     if(item.serverDigest){
       if(!localDigest||item.digest!==localDigest||item.serverDigest!==localDigest)throw new Error('The stored checksum did not match the uploaded backup version.');
       return expected;
     }
-    const lease=repositoryDownloadLease(await selected.repository.download(item,Object.freeze({signal})));
-    try{
-      if(item.size&&lease.blob.size!==item.size)throw new Error('Remote repository checkpoint size changed before verification.');
-      if(item.digest){
-        const actualDigest=await Exports.run('checksum',{value:lease.blob});
-        if(actualDigest!==item.digest)throw new Error('Remote repository checkpoint failed content-integrity verification.');
-      }
-      const actual=await RepositoryCheckpointPipeline.inspectManifest(lease.blob,{interactive:false});
-      if(actual.checkpoint.checkpointId!==expected.checkpoint.checkpointId||actual.sourceRevision!==expected.sourceRevision||actual.exportedAt!==expected.exportedAt)throw new Error('Remote repository checkpoint failed provenance verification.');
-      return actual;
-    }finally{await lease.release().catch(()=>{});}
+    const actual=await inspectUploadedRepositoryBytes(selected,item,'checkpoint',signal,blob=>RepositoryCheckpointPipeline.inspectManifest(blob,{interactive:false}));
+    if(actual.checkpoint.checkpointId!==expected.checkpoint.checkpointId||actual.sourceRevision!==expected.sourceRevision||actual.exportedAt!==expected.exportedAt)throw new Error('Remote repository checkpoint failed provenance verification.');
+    return actual;
   }
   async function verifyUploadedRepositoryCommit(selected,item,expected,signal=null){
     const localDigest=String(expected&&expected.digest||item.digest||'').toLowerCase();
     if(item.serverDigest){
       if(!localDigest||item.digest!==localDigest||item.serverDigest!==localDigest)throw new Error('The stored checksum did not match the uploaded backup commit.');
-      return Object.freeze({format:expected.format,version:expected.version,checkpointId:expected.checkpointId,exportedAt:expected.exportedAt,sourceRevision:expected.sourceRevision,manifestVersion:expected.manifestVersion});
+      return freeze({format:expected.format,version:expected.version,checkpointId:expected.checkpointId,exportedAt:expected.exportedAt,sourceRevision:expected.sourceRevision,manifestVersion:expected.manifestVersion});
     }
-    const lease=repositoryDownloadLease(await selected.repository.download(item,Object.freeze({signal})));
-    try{if(item.size&&lease.blob.size!==item.size)throw new Error('Remote repository commit size changed before verification.');if(item.digest){const actualDigest=await Exports.run('checksum',{value:lease.blob});if(actualDigest!==item.digest)throw new Error('Remote repository commit failed content-integrity verification.');}const actual=await RepositoryCheckpointPipeline.inspectCommit(lease.blob);if(actual.checkpointId!==expected.checkpointId||actual.exportedAt!==expected.exportedAt||actual.sourceRevision!==expected.sourceRevision||Number(actual.manifestVersion)!==Number(expected.manifestVersion))throw new Error('Remote repository commit failed provenance verification.');return actual;}
-    finally{await lease.release().catch(()=>{});}
+    const actual=await inspectUploadedRepositoryBytes(selected,item,'commit',signal,blob=>RepositoryCheckpointPipeline.inspectCommit(blob));
+    if(actual.checkpointId!==expected.checkpointId||actual.exportedAt!==expected.exportedAt||actual.sourceRevision!==expected.sourceRevision||Number(actual.manifestVersion)!==Number(expected.manifestVersion))throw new Error('Remote repository commit failed provenance verification.');
+    return actual;
   }
   function repositoryPublicationCapable(selected){return !!(selected&&selected.repository&&selected.repository.beginPublication&&selected.repository.listPublications&&selected.repository.assertPublication&&selected.repository.endPublication);}
   function repositoryMaintenanceCapable(selected){return !!(selected&&selected.repository&&selected.repository.beginMaintenance&&selected.repository.listMaintenances&&selected.repository.assertMaintenance&&selected.repository.endMaintenance);}
@@ -564,11 +614,11 @@ registry.define('backup-provider',1,input=>{
     for(const row of rows){const created=Date.parse(String(row&&row.createdAt||''));if(!Number.isFinite(created)){invalid+=1;continue;}if(now-created<PUBLICATION_MAX_AGE_MS){active+=1;const expires=created+PUBLICATION_MAX_AGE_MS;if(!nextEligibleAt||expires<nextEligibleAt)nextEligibleAt=expires;continue;}try{await selected.repository.endPublication(row);}catch(error){AppDiagnostics.capture('backup-provider.repository-publication-expired-cleanup',error,'warn');}}
     return freeze({blocked:active>0||invalid>0,reason:active>0?'active-publication':invalid>0?'uncertain-publication-state':'',active,invalid,nextEligibleAt:nextEligibleAt?new Date(nextEligibleAt).toISOString():''});
   }
-  async function repositoryMaintenanceSafety(selected,{excludeId=''}={}){
+  async function repositoryMaintenanceSafety(selected,{excludeId='',releaseSameDevice=false}={}){
     if(!repositoryMaintenanceCapable(selected))return freeze({blocked:false,reason:'maintenance-protection-unavailable',active:0,invalid:0});
     let listed;try{listed=await selected.repository.listMaintenances();}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenances',error,'warn');return freeze({blocked:true,reason:'maintenance-state-unavailable',active:0,invalid:1});}
     const rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],now=Date.now(),excluded=String(excludeId||'');let active=0,invalid=Math.max(0,Number(listed&&listed.ignored)||0)+(listed&&listed.overflow===true?1:0),nextEligibleAt=0;
-    for(const row of rows){if(excluded&&String(row&&row.id||'')===excluded)continue;const created=Date.parse(String(row&&row.createdAt||'')),expires=row&&row.expiresAt?Date.parse(String(row.expiresAt)):created+MAINTENANCE_MAX_AGE_MS;if(!Number.isFinite(created)||!Number.isFinite(expires)||expires<=created){invalid+=1;continue;}if(now<expires){active+=1;if(!nextEligibleAt||expires<nextEligibleAt)nextEligibleAt=expires;continue;}try{await selected.repository.endMaintenance(row);}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenance-expired-cleanup',error,'warn');}}
+    for(const row of rows){if(excluded&&String(row&&row.id||'')===excluded)continue;if(releaseSameDevice&&row&&row.sameDevice===true){try{await selected.repository.endMaintenance(row);}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenance-own-release',error,'warn');invalid+=1;}continue;}const created=Date.parse(String(row&&row.createdAt||'')),expires=row&&row.expiresAt?Date.parse(String(row.expiresAt)):created+MAINTENANCE_MAX_AGE_MS;if(!Number.isFinite(created)||!Number.isFinite(expires)||expires<=created){invalid+=1;continue;}if(now<expires){active+=1;if(!nextEligibleAt||expires<nextEligibleAt)nextEligibleAt=expires;continue;}try{await selected.repository.endMaintenance(row);}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenance-expired-cleanup',error,'warn');}}
     return freeze({blocked:active>0||invalid>0,reason:active>0?'active-maintenance':invalid>0?'uncertain-maintenance-state':'',active,invalid,nextEligibleAt:nextEligibleAt?new Date(nextEligibleAt).toISOString():''});
   }
   // Markers this page started. A marker from this device that this page did
@@ -597,7 +647,7 @@ registry.define('backup-provider',1,input=>{
     const started=Date.now(),deadline=started+PROVIDER_RECOVERY_MAINTENANCE_YIELD_MS;let announced=false,polls=0;
     for(;;){
       if(signal&&signal.aborted)throw signal.reason instanceof Error?signal.reason:new DOMException('The operation was aborted.','AbortError');
-      const safety=await repositoryMaintenanceSafety(selected);polls+=1;
+      const safety=await repositoryMaintenanceSafety(selected,{releaseSameDevice:true});polls+=1;
       OperationDiagnostics.mark('recovery-safety-maintenance-state',{provider:selected.id,blocked:safety.blocked===true,reason:String(safety.reason||''),active:Math.max(0,Number(safety.active)||0),invalid:Math.max(0,Number(safety.invalid)||0),polls});
       if(!safety.blocked){if(announced)OperationDiagnostics.mark('recovery-safety-maintenance-yield-complete',{provider:selected.id,waitedMs:Math.max(0,Date.now()-started),polls});return true;}
       if(Number(safety.invalid)>0){const error=repositoryMaintenanceError(safety);OperationDiagnostics.mark('recovery-safety-maintenance-yield-failed',{provider:selected.id,errorCode:error.code,reason:String(safety.reason||'')});throw error;}
@@ -631,7 +681,7 @@ registry.define('backup-provider',1,input=>{
   }
   async function assertRepositoryMaintenance(selected,lease){if(!lease)return true;const [,publications]=await Promise.all([selected.repository.assertMaintenance(lease),repositoryPublicationSafety(selected)]);if(publications.blocked){const error=new Error('Repository maintenance yielded to a higher-priority foreground publication.');error.name='AbortError';error.code='REPOSITORY_BACKGROUND_PREEMPTED';throw error;}return true;}
   async function endRepositoryMaintenance(selected,lease){if(!lease)return false;try{return await selected.repository.endMaintenance(lease);}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenance-release',error,'warn');return false;}}
-  async function cleanupRepositoryProviderState(selected,state,{reuseObjectInventory=false,maintenanceLease=null,checkMaintenance=null,inventoryBeforeDelete=false,beginDeletion=null,workBudget=null}={}){
+  async function cleanupRepositoryProviderState(selected,state,{reuseObjectInventory=false,preparedObjectListing=null,maintenanceLease=null,checkMaintenance=null,inventoryBeforeDelete=false,beginDeletion=null,workBudget=null}={}){
     const publicationCapable=repositoryPublicationCapable(selected),publicationSafety=await repositoryPublicationSafety(selected),objectGraceBefore=publicationCapable?new Date(Date.now()-OBJECT_GC_GRACE_MS).toISOString():'',assertLease=checkMaintenance||(async()=>{if(maintenanceLease)await assertRepositoryMaintenance(selected,maintenanceLease);});
     const cleanupRows=Object.freeze(state.rows.map(row=>Object.freeze({id:row.item.id,ref:Object.freeze({checkpoint:row.item,commit:row.commitItem}),manifest:row.manifest}))),retentionBacklog=RepositoryCheckpointPipeline.selectRetention(cleanupRows,{now:new Date()}).remove.length,checkpointDeleteBudget=Math.min(MAINTENANCE_MAX_CHECKPOINT_DELETES,Math.max(MAINTENANCE_MIN_CHECKPOINT_DELETES,retentionBacklog));
     const cleaned=await RepositoryCheckpointPipeline.cleanup(Object.freeze({
@@ -642,7 +692,7 @@ registry.define('backup-provider',1,input=>{
       deleteIncompleteArtifact:async artifact=>{await assertLease();await selected.repository.delete(artifact.ref);return true;},
       deleteCheckpoint:async row=>{await assertLease();if(row.ref.commit)await selected.repository.delete(row.ref.commit);await assertLease();await selected.repository.delete(row.ref.checkpoint);return true;},
       listObjects:async()=>{
-        await assertLease();if(reuseObjectInventory){const cached=reusableRepositoryObjectListing(selected);if(cached)return cached;}
+        await assertLease();if(preparedObjectListing)return preparedObjectListing;if(reuseObjectInventory){const cached=reusableRepositoryObjectListing(selected);if(cached)return cached;}
         const listing=await selected.repository.list(Object.freeze({kind:'object'})),raw=Array.isArray(listing)?listing:Array.isArray(listing&&listing.items)?listing.items:[];
         const items=[],seen=new Set();let invalidCount=Math.max(0,Number(listing&&listing.ignored)||0);
         for(const value of raw){try{const item=repositoryProviderItem(value,'object');if(seen.has(item.id)){invalidCount+=1;continue;}seen.add(item.id);items.push(Object.freeze({id:item.id,ref:item,createdAt:item.createdAt,modifiedAt:item.modifiedAt}));}catch{invalidCount+=1;}}
@@ -659,41 +709,64 @@ registry.define('backup-provider',1,input=>{
     if(!state.rows.some(row=>row.item.id===newCheckpointId))throw new Error('The newly uploaded checkpoint did not become the committed Latest candidate before retention cleanup.');
     return String((await cleanupRepositoryProviderState(selected,state,options)).warning||'');
   }
+  function deferredRepositoryMaintenance(warning,contentionRetryMs=0){
+    return freeze({warning:String(warning||'Repository maintenance was deferred.'),retained:null,removedCheckpoints:0,checkpointDeferred:0,checkpointFailures:0,gcRemoved:0,gcDeferred:0,gcBudgetDeferred:0,gcFailures:0,gcSkipped:true,gcPending:true,maintenanceBlocked:true,contentionRetryMs:Math.max(0,Number(contentionRetryMs)||0),uncertainCount:0,selection:null});
+  }
   async function cleanupRepositoryProviderSafely(selected,{signal=null,workBudget,traceId=''}={}){
-    const owner=selected,scoped=repositoryOperationSelected(selected,{signal});
-    await synchronizeRepositoryScope(scoped);
-    if(!repositoryCoordinationCapable(scoped)){
+    const owner=selected,planning=repositoryOperationSelected(selected,{signal});
+    await synchronizeRepositoryScope(planning);
+    if(!repositoryCoordinationCapable(planning)){
       workBudget.start(PROVIDER_MAINTENANCE_BUDGET_MS);
-      const state=await repositoryProviderState(scoped,{interactive:false,signal,forCleanup:true});
-      return cleanupRepositoryProviderState(scoped,state,{workBudget});
+      const state=await repositoryProviderState(planning,{interactive:false,signal,forCleanup:true});
+      return cleanupRepositoryProviderState(planning,state,{workBudget});
     }
-    let contentionRetryMs=0,maintenanceLease=await beginRepositoryMaintenance(scoped,{onBlocked:safety=>{const uncertain=Number(safety.publications&&safety.publications.invalid)||Number(safety.maintenances&&safety.maintenances.invalid)||0;if(uncertain)return;const deadlines=[safety.publications&&safety.publications.nextEligibleAt,safety.maintenances&&safety.maintenances.nextEligibleAt].map(value=>Date.parse(String(value||''))).filter(Number.isFinite);if(deadlines.length)contentionRetryMs=Math.max(1000,Math.min(...deadlines)-Date.now()+1000);}});
-    if(!maintenanceLease)return freeze({warning:'Repository maintenance was deferred because another backup or maintenance operation is active.',retained:null,removedCheckpoints:0,checkpointDeferred:0,checkpointFailures:0,gcRemoved:0,gcDeferred:0,gcBudgetDeferred:0,gcFailures:0,gcSkipped:true,gcPending:true,maintenanceBlocked:true,contentionRetryMs,uncertainCount:0,selection:null});
-    const renewable=typeof scoped.repository.renewMaintenance==='function'&&typeof owner.repository.beginOperation==='function';let renewing=null;
+
+    // Read-only planning is deliberately outside the maintenance exclusion.
+    // Foreground backup/sync therefore never waits for history verification,
+    // retention planning or the potentially paginated object inventory.
+    OperationDiagnostics.mark('maintenance-inventory-start',{provider:selected.id},traceId);
+    const state=await repositoryProviderState(planning,{interactive:false,signal,forCleanup:true});
+    if(state.overflow||(state.invalid||[]).length||Math.max(0,Number(state.ignored)||0)>0){
+      OperationDiagnostics.mark('maintenance-inventory-complete',{provider:selected.id,total:state.rows.length,destructive:false},traceId);
+      workBudget.start(PROVIDER_MAINTENANCE_BUDGET_MS);
+      return cleanupRepositoryProviderState(planning,state,{workBudget});
+    }
+    const preparedObjectListing=repositoryCleanupObjectListing(await repositoryObjectInventory(planning,{signal}));
+    OperationDiagnostics.mark('maintenance-inventory-complete',{provider:selected.id,total:state.rows.length,objects:preparedObjectListing.items.length,destructive:true},traceId);
+
+    let contentionRetryMs=0,maintenanceLease=await beginRepositoryMaintenance(planning,{onBlocked:safety=>{const uncertain=Number(safety.publications&&safety.publications.invalid)||Number(safety.maintenances&&safety.maintenances.invalid)||0;if(uncertain)return;const deadlines=[safety.publications&&safety.publications.nextEligibleAt,safety.maintenances&&safety.maintenances.nextEligibleAt].map(value=>Date.parse(String(value||''))).filter(Number.isFinite);if(deadlines.length)contentionRetryMs=Math.max(1000,Math.min(...deadlines)-Date.now()+1000);}});
+    if(!maintenanceLease)return deferredRepositoryMaintenance('Repository maintenance was deferred because another backup or maintenance operation is active.',contentionRetryMs);
+
+    const renewable=typeof planning.repository.renewMaintenance==='function'&&typeof owner.repository.beginOperation==='function';let renewing=null;
     const keepAlive=async(force=false)=>{
       if(signal?.aborted)throw signal.reason;
       if(renewing){await renewing;return;}
       const created=Date.parse(maintenanceLease.createdAt),duration=Date.parse(maintenanceLease.expiresAt)-created;
       const renewAfter=Number.isFinite(duration)&&duration>0?duration/4:PROVIDER_MAINTENANCE_BUDGET_MS/2;
       if(renewable&&Date.now()-created>=renewAfter){
-        renewing=(async()=>{maintenanceLease=await scoped.repository.renewMaintenance(maintenanceLease);await assertRepositoryMaintenance(scoped,maintenanceLease);})().finally(()=>{renewing=null;});await renewing;return;
+        renewing=(async()=>{maintenanceLease=await planning.repository.renewMaintenance(maintenanceLease);await assertRepositoryMaintenance(planning,maintenanceLease);})().finally(()=>{renewing=null;});await renewing;return;
       }
-      if(force)await assertRepositoryMaintenance(scoped,maintenanceLease);
+      if(force)await assertRepositoryMaintenance(planning,maintenanceLease);
     };
     try{
-      if(!renewable)workBudget.start(PROVIDER_MAINTENANCE_BUDGET_MS);
-      const protectedSelection=renewable?repositoryOperationSelected(owner,{signal,checkProtection:keepAlive}):scoped;
+      // The lease exists only for the destructive unit. Re-hash checkpoint and
+      // commit metadata under that lease: equal timestamps/sizes alone cannot
+      // establish that a manifest still means what the earlier plan saw.
+      const protectedSelection=typeof owner.repository.beginOperation==='function'?repositoryOperationSelected(owner,{signal,checkProtection:keepAlive}):planning;
+      const currentInventory=await repositoryProviderInventory(protectedSelection,{signal,freshDigests:true});
+      if(!repositoryCleanupInventoryMatches(state,currentInventory)){
+        OperationDiagnostics.mark('maintenance-inventory-invalidated',{provider:selected.id},traceId);
+        return deferredRepositoryMaintenance('Repository maintenance was deferred because backup history changed after its read-only planning pass.',1000);
+      }
       await keepAlive(true);
-      OperationDiagnostics.mark('maintenance-inventory-start',{provider:selected.id},traceId);
-      const state=await repositoryProviderState(protectedSelection,{interactive:false,signal,forCleanup:true});
-      return await cleanupRepositoryProviderState(protectedSelection,state,{workBudget,checkMaintenance:()=>keepAlive(true),inventoryBeforeDelete:true,beginDeletion:async()=>{await keepAlive(true);OperationDiagnostics.mark('maintenance-inventory-complete',{provider:selected.id,total:state.rows.length},traceId);if(renewable)workBudget.start(PROVIDER_MAINTENANCE_BUDGET_MS);}});
+      return await cleanupRepositoryProviderState(protectedSelection,state,{workBudget,preparedObjectListing,checkMaintenance:()=>keepAlive(true),inventoryBeforeDelete:true,beginDeletion:()=>{workBudget.start(PROVIDER_MAINTENANCE_BUDGET_MS);OperationDiagnostics.mark('maintenance-deletion-start',{provider:selected.id,total:state.rows.length},traceId);}});
     }finally{
       if(renewing)await renewing.catch(()=>{});
-      await endRepositoryMaintenance(scoped,maintenanceLease);
+      await endRepositoryMaintenance(planning,maintenanceLease);
     }
   }
 
-  async function saveRepositoryProvider(selected,{interactive=true,excludedObjectIds=null,retention=null,signal=null,preemptBackground=true,foregroundPriority=false,recoveryProgress=null,repositorySnapshot=null,pendingIntent=null,copy=null}={}){
+  async function saveRepositoryProvider(selected,{interactive=true,excludedObjectIds=null,retention=null,signal=null,preemptBackground=true,foregroundPriority=false,recoveryProgress=null,repositorySnapshot=null,pendingIntent=null}={}){
     const presentationId=foregroundView()?.operationId||'';
     if(preemptBackground)await preemptProviderBackground(selected);
     const publicationOwner=selected;selected=repositoryOperationSelected(selected,{signal});
@@ -701,11 +774,11 @@ registry.define('backup-provider',1,input=>{
     const role=retention?.role==='before-restore'?'before-restore':'normal',previousPublication=providerPublications.get(selected.id)?.continuation.status();
     if(previousPublication?.invalidated||previousPublication?.pending&&previousPublication.role!==role)await discardProviderPublication(selected);
     let publication=null,continuation=null;
-    if(!copy&&selected.repository.discardUploads&&repositoryScopeByProvider.has(selected.id)){
+    if(selected.repository.discardUploads&&repositoryScopeByProvider.has(selected.id)){
       publication=providerPublications.get(selected.id);if(!publication){publication=freeze({continuation:RepositoryCheckpointPipeline.createPublication(),requestId:String(pendingIntent?.requestedAt||'')});providerPublications.set(selected.id,publication);}continuation=publication.continuation;
     }
     const resuming=continuation?.status().pending===true;
-    const publicationProtected=repositoryCoordinationCapable(selected),deferredMaintenance=!!maintenanceHooks&&publicationProtected;let publicationLease=null,publicationSafetyTask=null,maintenanceQueued=false,maintenanceNeeded=false,published=null,copied=null;
+    const publicationProtected=repositoryCoordinationCapable(selected),deferredMaintenance=!!maintenanceHooks&&publicationProtected;let publicationLease=null,publicationSafetyTask=null,maintenanceQueued=false,maintenanceNeeded=false,published=null,sessionOwnershipState=null;
     let objectStarted=0,objectCompleted=0,objectCount=0,uploadedBytes=0,totalBytes=0;
     const progress=(stage,message,details={})=>{if(signal?.aborted||(foregroundView()?.operationId||'')!==presentationId)return;if(recoveryProgress){if(presentationId)recoveryStatus(message,true,recoveryProgress,stage,details);else try{recoveryProgress(freeze({stage,message,ok:true,...details}));}catch(error){AppDiagnostics.capture('backup-provider.recovery-progress',error,'warn');}}else providerProgress(selected,stage,message,details);};
     try{
@@ -727,40 +800,27 @@ registry.define('backup-provider',1,input=>{
       // version: one without that data would read as its deletion elsewhere.
       if(shared&&ports.ownership.canShare()!==true)throw Object.assign(new Error(`This device has data from a newer version of Study Director, so it does not upload to ${selected.label} until the app is updated.`),{code:'STUDY_DIRECTOR_SHARE_HELD'});
       if(shared){
-        // Another device's upload that started first goes first. A marker older
-        // than the turn window is taken as abandoned (an upload cut off by a
-        // closed tab or an ended sign-in), so it never holds sync up for long.
-        if(publicationLease){const listed=await selected.repository.listPublications(),rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],mine=Date.parse(publicationLease.createdAt);
-          if(rows.some(row=>{const id=String(row&&row.id||''),at=Date.parse(String(row&&row.createdAt||''));return id!==publicationLease.id&&!ownPublications.has(id)&&row.sameDevice!==true&&Number.isFinite(at)&&Date.now()-at<SYNC_TURN_WINDOW_MS&&(at<mine||at===mine&&id<publicationLease.id);}))throw syncError('REPOSITORY_SYNC_TURN',`Another device is saving to ${selected.label}.`);}
+        await assertSharedPublicationTurn(selected,publicationLease);
         const ahead=base.inventory?await sharedAhead(base.inventory,selected):null;
         if(ahead?.unreadable){waitForNewerVersion(selected,ahead.item.id);throw syncError('REPOSITORY_SYNC_NEEDS_UPDATE',`${selected.label} has a version this app can’t read. Update the app, or remove that version in Version History, to sync again.`);}
         if(ahead)throw syncError('REPOSITORY_SYNC_BEHIND',`${selected.label} has newer changes to take in first.`);
+        sessionOwnershipState=await assertSharedSessionOwnership(selected,{signal});
       }
       OperationDiagnostics.mark('provider-repository-scan-complete',{provider:selected.id,history:history.length,invalid:Number(base.invalidCount)||0,reused:!!repositorySnapshot});
       const maintenancePendingState=deferredMaintenance?await maintenanceState(selected):null,maintenanceWasActionable=maintenanceActionable(maintenancePendingState),maintenanceReason=String(maintenancePendingState&&maintenancePendingState.reason||''),maintenanceDeferred=!maintenanceWasActionable&&maintenanceReason==='publication-contention',inventory=base.inventory;
       maintenanceNeeded=maintenanceWasActionable||base.invalidCount>0||inventory.uncommitted.length>0||inventory.orphanCommits.length>0;
-      // A copy reads the version from where it is; every object already here
-      // stays as it is, so nothing is written twice.
-      if(copy){
-        const from=repositoryOperationSelected(copy.source,{signal}),inventory=recentHistory(copy.source,copy.checkpointId)||await repositoryProviderInventory(from,{signal}),pair=inventory.pairs.find(candidate=>candidate.item.id===copy.checkpointId);
-        if(!pair)throw syncError('REPOSITORY_COPY_UNAVAILABLE','The version to copy is no longer available.');
-        const [manifest,objects]=await Promise.all([from.repository.download(pair.item,freeze({signal})),repositoryObjectInventory(from,{signal})]),lease=repositoryDownloadLease(manifest),byId=new Map(objects.items.map(item=>[item.id,item]));
-        copied=freeze({checkpointId:copy.checkpointId,current:copy.current===true,manifestBlob:lease.blob,release:lease.release,readObject:async entry=>{const item=byId.get(entry.objectId);if(!item)throw syncError('REPOSITORY_COPY_UNAVAILABLE',`Backup object ${entry.objectId} is missing where it was to be copied from.`);return repositoryDownloadLease(await from.repository.download(item,freeze({signal})));}});
-        availableObjectIds=new Set((base.objectInventory?.items||[]).map(item=>item.id));
-        for(const id of excluded)if(availableObjectIds.has(id))throw syncError('REPOSITORY_COPY_UNAVAILABLE','A copied version needs an object held for an integrity check here.');
-      }
       if(availableObjectIds instanceof Set)for(const id of excluded)availableObjectIds.delete(id);
       progress('prepare',`Preparing backup for ${selected.label}…`);
       OperationDiagnostics.mark('checkpoint-preparation-start',{provider:selected.id,beforeRestore:retention?.role==='before-restore'});
       if(resuming)OperationDiagnostics.mark('provider-publication-resumed',{provider:selected.id,status:'running'});
       const publishCheckpoint=retention?.role==='before-restore'?RepositoryCheckpointPipeline.publishInline:RepositoryCheckpointPipeline.publish;
-      published=await publishCheckpoint(history,{interactive,availableObjectIds,excludedObjectIds:excluded,retention,signal,continuation,shared,baseUpdate:shared||sharingActive(),copy:copied},Object.freeze({
+      published=await publishCheckpoint(history,{interactive,availableObjectIds,excludedObjectIds:excluded,retention,signal,continuation,shared,baseUpdate:shared||sharingActive()},Object.freeze({
         writeObject:async (entry,prepared)=>{
           requireBackupMutationControl('saving to '+selected.label);await entry.checkProtection?.();
           if(!objectCount){const fresh=prepared.objects.filter(object=>!object.reused);objectCount=fresh.length;totalBytes=fresh.reduce((sum,object)=>sum+object.storedBytes,0);}
           const index=++objectStarted;OperationDiagnostics.mark('provider-object-upload-start',{provider:selected.id,index,count:objectCount,bytes:entry.storedBytes});
           progress(retention?.role==='before-restore'?'safety-upload':'upload',retention?.role==='before-restore'?`Saving safety version in ${selected.label}…`:`Uploading backup data to ${selected.label}…`,{current:objectCompleted,total:objectCount,completedBytes:uploadedBytes,totalBytes});
-          const item=repositoryProviderItem(await selected.repository.upload(Object.freeze({kind:'object',id:entry.objectId,name:entry.objectId+'.sdobject',blob:entry.blob,size:entry.storedBytes,digest:entry.storedChecksum,exportedAt:prepared.exportedAt,appVersion:APP_VERSION,checkProtection:entry.checkProtection,knownAbsent:!resuming})),'object');
+          const item=repositoryProviderItem(await selected.repository.upload(Object.freeze({kind:'object',id:entry.objectId,name:entry.objectId+'.sdobject',blob:entry.blob,size:entry.storedBytes,digest:entry.storedChecksum,exportedAt:prepared.exportedAt,appVersion:APP_VERSION,checkProtection:entry.checkProtection})),'object');
           await verifyUploadedRepositoryObject(selected,entry,item,{signal,index,count:objectCount,onProgress:progress});uploadedBytes+=entry.storedBytes;objectCompleted+=1;rememberRepositoryObjectReceipt(selected,item);OperationDiagnostics.mark('provider-object-upload-complete',{provider:selected.id,index,count:objectCount,bytes:entry.storedBytes,completed:objectCompleted});
           progress(retention?.role==='before-restore'?'safety-upload':'upload',retention?.role==='before-restore'?`Saving safety version in ${selected.label}…`:`Uploading backup data to ${selected.label}…`,{current:objectCompleted,total:objectCount,completedBytes:uploadedBytes,totalBytes});return item;
         },
@@ -769,23 +829,22 @@ registry.define('backup-provider',1,input=>{
           // asserted once, before the commit that makes the version real.
           requireBackupMutationControl('saving to '+selected.label);await file.checkProtection?.();await file.checkSource?.();
           OperationDiagnostics.mark('provider-manifest-upload-start',{provider:selected.id});progress(retention?.role==='before-restore'?'safety-manifest':'manifest',retention?.role==='before-restore'?`Finalizing safety version in ${selected.label}…`:`Uploading and verifying the backup version in ${selected.label}…`);
-          const digest=await Exports.run('checksum',{value:file.blob},{signal}),checkpointId=file.manifest.checkpoint.checkpointId;let item=null;
-          try{
-            item=repositoryProviderItem(await selected.repository.upload(Object.freeze({kind:'checkpoint',id:checkpointId,name:checkpointId+'.sdcheckpoint',blob:file.blob,size:file.blob.size,digest,exportedAt:file.exportedAt,appVersion:APP_VERSION,checkProtection:file.checkProtection,checkSource:file.checkSource,knownAbsent:!resuming,historySummary:Object.freeze({format:Number(file.manifest.version)||0,logicalFingerprint:file.manifest.logicalFingerprint,counts:file.manifest.counts,encrypted:file.manifest.encrypted===true,retention:file.manifest.retention,origin:String(file.manifest.installationId||'')})})),'checkpoint');
-            const verifiedManifest=await verifyUploadedRepositoryManifest(selected,item,file.manifest,digest,signal);await file.checkSource?.();
-            const projected=Object.freeze([...history.map(manifest=>Object.freeze({id:manifest.checkpoint.checkpointId,manifest})),Object.freeze({id:verifiedManifest.checkpoint.checkpointId,manifest:verifiedManifest})]);if(RepositoryCheckpointPipeline.selectRetention(projected,{now:new Date(Date.parse(verifiedManifest.exportedAt))}).remove.length)maintenanceNeeded=true;
-            rememberVerifiedHistory(selected,item,Object.freeze({kind:'checkpoint',value:verifiedManifest}),item.verificationScope||null);OperationDiagnostics.mark('provider-manifest-upload-complete',{provider:selected.id});return item;
-          }catch(error){
-            if(item)await selected.repository.delete(item).catch(()=>{});else await selected.repository.delete(Object.freeze({kind:'checkpoint',id:checkpointId,digest})).catch(()=>{});throw error;
-          }
+          const digest=await Exports.run('checksum',{value:file.blob},{signal}),checkpointId=file.manifest.checkpoint.checkpointId;
+          // Uploads can reuse committed identities or succeed before their response
+          // fails; ownership is uncertain. Only verified maintenance may delete.
+          const item=repositoryProviderItem(await selected.repository.upload(Object.freeze({kind:'checkpoint',id:checkpointId,name:checkpointId+'.sdcheckpoint',blob:file.blob,size:file.blob.size,digest,exportedAt:file.exportedAt,appVersion:APP_VERSION,checkProtection:file.checkProtection,checkSource:file.checkSource,historySummary:Object.freeze({format:Number(file.manifest.version)||0,logicalFingerprint:file.manifest.logicalFingerprint,counts:file.manifest.counts,encrypted:file.manifest.encrypted===true,retention:file.manifest.retention,origin:String(file.manifest.installationId||''),attachmentsMissing:(Array.isArray(file.manifest.assets)?file.manifest.assets:[]).filter(asset=>asset?.missing===true).length})})),'checkpoint');
+          const verifiedManifest=await verifyUploadedRepositoryManifest(selected,item,file.manifest,digest,signal);await file.checkSource?.();
+          const projected=Object.freeze([...history.map(manifest=>Object.freeze({id:manifest.checkpoint.checkpointId,manifest})),Object.freeze({id:verifiedManifest.checkpoint.checkpointId,manifest:verifiedManifest})]);if(RepositoryCheckpointPipeline.selectRetention(projected,{now:new Date(Date.parse(verifiedManifest.exportedAt))}).remove.length)maintenanceNeeded=true;
+          rememberVerifiedHistory(selected,item,Object.freeze({kind:'checkpoint',value:verifiedManifest}),item.verificationScope||null);OperationDiagnostics.mark('provider-manifest-upload-complete',{provider:selected.id});return item;
         },
         commit:async marker=>{
-          requireBackupMutationControl('saving to '+selected.label);await marker.checkProtection?.();await marker.checkSource?.();if(publicationLease)await assertRepositoryPublication(selected,publicationLease);let item=null;
+          requireBackupMutationControl('saving to '+selected.label);await marker.checkProtection?.();await marker.checkSource?.();if(publicationLease)await assertRepositoryPublication(selected,publicationLease);
           OperationDiagnostics.mark('provider-commit-start',{provider:selected.id});progress(retention?.role==='before-restore'?'safety-commit':'commit',retention?.role==='before-restore'?`Committing safety version in ${selected.label}…`:`Committing and verifying the backup in ${selected.label}…`);
-          try{item=repositoryProviderItem(await selected.repository.upload(Object.freeze({kind:'commit',id:marker.checkpointId,name:marker.checkpointId+'.sdcommit',blob:marker.blob,size:marker.size,digest:marker.digest,exportedAt:marker.exportedAt,appVersion:APP_VERSION,checkProtection:marker.checkProtection,checkSource:marker.checkSource,knownAbsent:!resuming})),'commit');const verifiedCommit=await verifyUploadedRepositoryCommit(selected,item,marker,signal);await marker.checkSource?.();rememberVerifiedHistory(selected,item,Object.freeze({kind:'commit',value:verifiedCommit}),item.verificationScope||null);OperationDiagnostics.mark('provider-commit-complete',{provider:selected.id});return item;}
-          catch(error){if(item)await selected.repository.delete(item).catch(()=>{});else await selected.repository.delete(Object.freeze({kind:'commit',id:marker.checkpointId,digest:marker.digest})).catch(()=>{});throw error;}
+          // A commit might already be visible if its verification fails. Never
+          // retract a potentially reused or already-published identity here.
+          const item=repositoryProviderItem(await selected.repository.upload(Object.freeze({kind:'commit',id:marker.checkpointId,name:marker.checkpointId+'.sdcommit',blob:marker.blob,size:marker.size,digest:marker.digest,exportedAt:marker.exportedAt,appVersion:APP_VERSION,checkProtection:marker.checkProtection,checkSource:marker.checkSource})),'commit');const verifiedCommit=await verifyUploadedRepositoryCommit(selected,item,marker,signal);await marker.checkSource?.();rememberVerifiedHistory(selected,item,Object.freeze({kind:'commit',value:verifiedCommit}),item.verificationScope||null);OperationDiagnostics.mark('provider-commit-complete',{provider:selected.id});return item;
         },
-        onCommitted:async context=>{OperationDiagnostics.mark('provider-checkpoint-committed',{provider:selected.id});RepositoryCheckpointPipeline.markCompleted({copy:{source:selected.id,sourceRevision:context.sourceRevision||context.exportedAt||''}});restartAutomaticCountdown(publicationOwner,context.sourceRevision||context.exportedAt);progress(retention?.role==='before-restore'?'safety-complete':'complete',retention?.role==='before-restore'?`Safety version saved in ${selected.label}.`:`Finishing ${selected.label} backup…`);return null;},
+        onCommitted:async context=>{OperationDiagnostics.mark('provider-checkpoint-committed',{provider:selected.id});RepositoryCheckpointPipeline.markCompleted({copy:{source:selected.id,sourceRevision:context.sourceRevision||context.exportedAt||'',attachmentsComplete:!(context.manifest?.assets||[]).some(item=>item.missing===true)}});restartAutomaticCountdown(publicationOwner,context.sourceRevision||context.exportedAt);progress(retention?.role==='before-restore'?'safety-complete':'complete',retention?.role==='before-restore'?`Safety version saved in ${selected.label}.`:`Finishing ${selected.label} backup…`);return null;},
         cleanup:deferredMaintenance?async()=>{if(!maintenanceNeeded)return Object.freeze({warning:''});const scheduler=providerMaintenanceScheduler(selected);if(maintenanceDeferred&&maintenancePendingState&&scheduler){const due=Date.parse(String(maintenancePendingState.nextEligibleAt||'')),delay=Number.isFinite(due)?Math.max(1000,due-Date.now()):MAINTENANCE_POLICY.contentionMs;scheduler.schedule(delay,maintenanceReason||'repository-state','earliest');maintenanceQueued=true;}else maintenanceQueued=await scheduler?.request('repository-state',MAINTENANCE_POLICY.busyMs,{mode:'earliest'})===true;return Object.freeze({warning:maintenanceQueued?'':'Backup cleanup is still pending and will be retried on a later backup.'});}:async context=>{progress('finish',`Finishing ${selected.label} backup…`);const after=await repositoryProviderState(selected,{interactive:false}),warning=await cleanupRepositoryProvider(selected,after,context.manifest.checkpoint.checkpointId,{reuseObjectInventory:true});return Object.freeze({warning});},
         retainOnFailure:error=>{
           const code=String(error?.code||''),cancelCode=String(signal?.reason?.code||'');
@@ -796,18 +855,25 @@ registry.define('backup-provider',1,input=>{
           if(context.committed)return;
           if(context.retained){
             OperationDiagnostics.mark('provider-publication-retained',{provider:selected.id,status:'pending',beforeRestore:role==='before-restore'});
-            if(role==='normal')try{if(!await pendingRetryState(publicationOwner))await markPendingRetry(publicationOwner);}finally{schedulePendingProviderBackup(publicationOwner);}
+            if(role==='normal')try{if(!await pendingRetryState(publicationOwner))await markPendingRetry(publicationOwner);}finally{schedulePendingProviderBackup(publicationOwner,1000,{trigger:'publication-failure'});}
             return;
           }
-          if(context.commitReceipt)await selected.repository.delete(context.commitReceipt).catch(()=>{});
-          if(context.publication)await selected.repository.delete(context.publication).catch(()=>{});
-          for(const row of context.written)if(row.receipt)await selected.repository.delete(row.receipt).catch(()=>{});
+          // No receipt here proves creation by this attempt. In particular,
+          // an upload may have succeeded before its response failed, and a
+          // resumed attempt may have reused an already committed identity.
+          // Retention/inventory verification is the only safe deletion path.
           if(deferredMaintenance)await providerMaintenanceScheduler(selected)?.request('failure-cleanup',MAINTENANCE_POLICY.continuationMs,{mode:'earliest'});
         }
       }));
-    }finally{if(copied)await copied.release().catch(()=>{});if(continuation&&!continuation.status().pending)await discardProviderPublication(publicationOwner);if(publicationLease){const lease=publicationLease;publicationLease=null;OperationDiagnostics.mark('provider-publication-release-start',{provider:selected.id});const released=await endRepositoryPublication(signal&&signal.aborted?publicationOwner:selected,lease);OperationDiagnostics.mark('provider-publication-release-complete',{provider:selected.id,released});if(released&&maintenanceHooks){const pending=await maintenanceState(publicationOwner);if(pending&&String(pending.reason||'')==='publication-contention'&&!maintenanceActionable(pending))await providerMaintenanceScheduler(publicationOwner)?.request('repository-state',MAINTENANCE_POLICY.busyMs,{mode:'replace'});}}}
-    const warning=[String(published&&published.warning||''),String(published&&published.cleanupResult&&published.cleanupResult.warning||'')].filter(Boolean).join(' '),item=published&&published.publication||{};
-    clearRecentHistory(selected);if(role==='normal'&&(!copy||copy.current)){placedSpine(published.checkpointId,publicationOwner);if(publicationOwner.shared)syncState(publicationOwner).failed=false;if(publicationOwner.shared)syncState(publicationOwner).syncedAt=new Date().toISOString();}
+      if(shared&&sessionOwnershipState?.releaseAfterCommit)await settlePublishedSessionClaim(selected,sessionOwnershipState.current,{signal});
+    }finally{if(continuation&&!continuation.status().pending)await discardProviderPublication(publicationOwner);if(publicationLease){const lease=publicationLease;publicationLease=null;OperationDiagnostics.mark('provider-publication-release-start',{provider:selected.id});const released=await endRepositoryPublication(signal&&signal.aborted?publicationOwner:selected,lease);OperationDiagnostics.mark('provider-publication-release-complete',{provider:selected.id,released});if(released&&maintenanceHooks){const pending=await maintenanceState(publicationOwner);if(pending&&String(pending.reason||'')==='publication-contention'&&!maintenanceActionable(pending))await providerMaintenanceScheduler(publicationOwner)?.request('repository-state',MAINTENANCE_POLICY.busyMs,{mode:'replace'});}}}
+    // A valid commit may still carry intentionally missing attachment bytes.
+    // Distinguish that partial recovery from an all-bytes-verified checkpoint.
+    const missingAssets=(published?.manifest?.assets||[]).filter(row=>row?.missing===true);
+    const missingWarning=missingAssets.length
+      ?`Partial attachment recovery: ${missingAssets.length} attachment${missingAssets.length===1?'':'s'} missing. Saved Days and Notes remain recoverable, but these files cannot be restored from this backup.`:'';
+    const warning=[String(published&&published.warning||''),String(published&&published.cleanupResult&&published.cleanupResult.warning||''),String(published?.manifest?.warning||''),...(!String(published?.manifest?.warning||'').includes('Partial attachment recovery:')?[missingWarning]:[])].filter(Boolean).join(' '),item=published&&published.publication||{};
+    clearRecentHistory(selected);if(role==='normal'&&publicationOwner.shared){syncState(publicationOwner).failed=false;syncState(publicationOwner).syncedAt=new Date().toISOString();}
     return Object.freeze({name:item.name||published.checkpointId,unchanged:published.unchanged===true,checkpointId:published.checkpointId,manifest:published.manifest,warning,maintenancePending:deferredMaintenance&&maintenanceQueued,sourceRevision:published.sourceRevision,requestId:publication?.requestId||String(pendingIntent?.requestedAt||''),objectsWritten:published.objectsWritten,objectsReused:published.objectsReused,writtenBytes:published.writtenBytes,attachmentBytesWritten:published.attachmentBytesWritten});
   }
   // The protected safety version of the device that made checkpointId.
@@ -841,7 +907,7 @@ registry.define('backup-provider',1,input=>{
       const quarantinedObjectIds=integrityScrubHooks?await integrityScrubHooks.quarantine(selected.id):[],entries=RepositoryCheckpointPipeline.projectHistory(Object.freeze(retained.map(row=>Object.freeze({id:row.id,manifest:row.manifest}))),Object.freeze({id:selected.id,label:selected.label}),{quarantinedObjectIds});
       clearRecentHistory(selected);
       // The version sync waited on is gone: sync looks again at once.
-      if(selected.shared&&syncState(selected).newer===requested){newerVersionGone(selected);syncState(selected).behind=true;schedulePendingProviderBackup(selected,1000);}
+      if(selected.shared&&syncState(selected).newer===requested){newerVersionGone(selected);syncState(selected).behind=true;schedulePendingProviderBackup(selected,1000,{trigger:'newer-version-removed'});}
       return freeze({removed:true,checkpointId:requested,kind:safety?'safety':'unreadable',gcRemoved:Number(cleanup.gcRemoved)||0,warning:String(cleanup.warning||''),entries});
     }finally{if(maintenanceLease)await endRepositoryMaintenance(selected,maintenanceLease);}
   }
@@ -891,6 +957,11 @@ registry.define('backup-provider',1,input=>{
   }
   // Signing in to the shared location (Drive) is enough: sync starts at once.
   function automaticEnabled(selected){return !!automaticHooks&&!!selected?.repository&&(selected.shared&&providerConnected(selected)||Number.isFinite(automaticCovered(selected)));}
+  function automaticRecoveryDestination(selected){
+    if(!automaticHooks||!selected?.repository)return false;
+    try{if(selected.automaticConfigured?.()===true)return true;}catch(error){AppDiagnostics.capture('backup-provider.automatic-configured',error,'warn');}
+    return automaticEnabled(selected)||connectedOnceByProvider.has(selected.id);
+  }
   function automaticNeeded(selected){
     if(!automaticEnabled(selected))return false;
     let current=NaN;try{current=Date.parse(String(automaticHooks.current()||''));}catch(error){AppDiagnostics.capture('backup-provider.automatic-current',error,'warn');}
@@ -914,6 +985,10 @@ registry.define('backup-provider',1,input=>{
     try{expiresAt=Number(selected.connectionExpiresAt?.());}catch(error){AppDiagnostics.capture('backup-provider.connection-expiry',error,'warn');}
     if(Number.isFinite(expiresAt)&&expiresAt>0)due=Math.min(due,expiresAt-AUTOMATIC_EXPIRY_LEAD_MS);
     return due;
+  }
+  function automaticOpportunityUnspent(selected,eligibleAt=Date.now()){
+    const deadline=automaticDueAt(selected),at=Number(eligibleAt);
+    return automaticNeeded(selected)&&Number.isFinite(deadline)&&Number.isFinite(at)&&deadline>at+50;
   }
   function scheduleAutomaticBackup(selected,{urgent=false}={}){
     if(!automaticNeeded(selected)||!providerConnected(selected))return false;
@@ -954,7 +1029,7 @@ registry.define('backup-provider',1,input=>{
   // Waiting for another device's upload asks again after 15 seconds, then a
   // minute, then every five minutes, up to the turn window.
   const SYNC_RECHECK_MS=60*1000,SYNC_TURN_WINDOW_MS=15*60*1000,SYNC_TURN_RETRY_DELAYS=freeze([15*1000,60*1000,5*60*1000]),syncByProvider=new Map();
-  function syncState(selected){const id=safeId(selected&&selected.id);let state=syncByProvider.get(id);if(!state){state={checkedAt:0,review:'',password:'',newer:'',catching:false,behind:false,failed:false,syncedAt:'',waitedAt:0,turnWaits:0};syncByProvider.set(id,state);}return state;}
+  function syncState(selected){const id=safeId(selected&&selected.id);let state=syncByProvider.get(id);if(!state){state={checkedAt:0,review:'',password:'',newer:'',catching:false,behind:false,failed:false,syncedAt:'',turnWaits:0};syncByProvider.set(id,state);}return state;}
   function syncView(selected){const state=syncState(selected);return freeze({syncedAt:state.syncedAt,review:!!state.review,password:!!state.password,newer:!!state.newer,failed:!!state.failed,syncing:state.catching});}
   function sharedSyncing(selected){return !!selected?.shared&&!!selected.repository&&!!pendingRetryHooks&&providerConnected(selected);}
   function sharingActive(){return [...providers.values()].some(sharedSyncing);}
@@ -999,29 +1074,142 @@ registry.define('backup-provider',1,input=>{
     const state=syncState(selected);return !state.behind&&!state.catching&&Date.now()-state.checkedAt>=SYNC_RECHECK_MS;
   }
   function syncError(code,message){const error=new Error(message);error.code=code;error.studyDirectorDriveNoRetry=true;return error;}
+  function repositorySessionClaimCapable(selected){return !!(selected&&selected.repository&&selected.repository.listSessionClaims&&selected.repository.uploadSessionClaim&&selected.repository.downloadSessionClaim&&selected.repository.deleteSessionClaim);}
+  function sessionClaimId(epoch){const value=Number(epoch);if(!Number.isSafeInteger(value)||value<1)throw new TypeError('Active-session ownership epoch is invalid.');return 'sc_'+value.toString(16).padStart(16,'0');}
+  function sessionClaimEpoch(id){const match=/^sc_([a-f0-9]{16})$/u.exec(String(id||''));if(!match)return 0;const value=Number.parseInt(match[1],16);return Number.isSafeInteger(value)&&value>0?value:0;}
+  async function sessionClaimToken(kind,value,{signal=null}={}){
+    const label=String(kind||''),text=String(value||'');if(!['session','owner'].includes(label)||!text)throw new TypeError('Active-session ownership token input is invalid.');
+    const digest=await Exports.run('checksum',{value:new Blob([SESSION_CLAIM_FORMAT+'|'+label+'|'+text],{type:'text/plain'})},{signal});
+    if(!SESSION_CLAIM_TOKEN_PATTERN.test(String(digest||'')))throw new Error('Active-session ownership token could not be derived safely.');
+    return String(digest);
+  }
+  function normalizeSessionClaim(value){
+    if(!value||typeof value!=='object'||Array.isArray(value))return null;
+    const keys=Object.keys(value).sort().join('|');
+    if(Number(value.version)!==SESSION_CLAIM_VERSION||keys!=='claimedAt|epoch|format|observedOwnerToken|observedRevision|ownerToken|revision|sessionToken|state|version')return null;
+    const epoch=Number(value.epoch),revision=Number(value.revision),observedRevision=Number(value.observedRevision),state=String(value.state||''),claimedAt=String(value.claimedAt||''),sessionToken=String(value.sessionToken||''),ownerToken=String(value.ownerToken||''),observedOwnerToken=String(value.observedOwnerToken||'');
+    if(value.format!==SESSION_CLAIM_FORMAT||!Number.isSafeInteger(epoch)||epoch<1||!Number.isSafeInteger(revision)||revision<1||!Number.isSafeInteger(observedRevision)||observedRevision<1||!['owned','released'].includes(state)||!Number.isFinite(Date.parse(claimedAt))||!SESSION_CLAIM_TOKEN_PATTERN.test(sessionToken)||!SESSION_CLAIM_TOKEN_PATTERN.test(ownerToken)||!SESSION_CLAIM_TOKEN_PATTERN.test(observedOwnerToken))return null;
+    return freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken,epoch,state,ownerToken,revision,observedOwnerToken,observedRevision,claimedAt:new Date(claimedAt).toISOString()});
+  }
+  function normalizePlainSessionClaim(value){
+    if(!value||typeof value!=='object'||Array.isArray(value))return null;
+    const version=Number(value.version),keys=Object.keys(value).sort().join('|'),v1=version===1&&keys==='claimedAt|date|epoch|format|observedRevision|owner|version',v2=version===2&&keys==='claimedAt|date|epoch|format|observedOwner|observedRevision|owner|revision|state|version';
+    if(!v1&&!v2)return null;
+    const date=String(value.date||''),epoch=Number(value.epoch),owner=String(value.owner||''),observedOwner=v1?owner:String(value.observedOwner||''),observedRevision=Number(value.observedRevision),revision=v1?observedRevision+1:Number(value.revision),state=v1?'owned':String(value.state||''),claimedAt=String(value.claimedAt||'');
+    if(value.format!==SESSION_CLAIM_FORMAT||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(date)||!Number.isSafeInteger(epoch)||epoch<1||!SESSION_OWNER_PATTERN.test(owner)||!SESSION_OWNER_PATTERN.test(observedOwner)||!Number.isSafeInteger(observedRevision)||observedRevision<1||!Number.isSafeInteger(revision)||revision<1||!['owned','released'].includes(state)||!Number.isFinite(Date.parse(claimedAt)))return null;
+    return freeze({date,epoch,state,owner,revision,observedOwner,observedRevision,claimedAt:new Date(claimedAt).toISOString()});
+  }
+  async function decodeSessionClaim(value,{signal=null}={}){
+    const current=normalizeSessionClaim(value);if(current)return current;
+    const legacy=normalizePlainSessionClaim(value);if(!legacy)return null;
+    const [sessionToken,ownerToken,observedOwnerToken]=await Promise.all([sessionClaimToken('session',legacy.date,{signal}),sessionClaimToken('owner',legacy.owner,{signal}),sessionClaimToken('owner',legacy.observedOwner,{signal})]);
+    return freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken,epoch:legacy.epoch,state:legacy.state,ownerToken,revision:legacy.revision,observedOwnerToken,observedRevision:legacy.observedRevision,claimedAt:legacy.claimedAt});
+  }
+  async function readRepositorySessionClaim(selected,{signal=null}={}){
+    if(!repositorySessionClaimCapable(selected))return null;
+    const listed=await selected.repository.listSessionClaims(freeze({signal})),rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],invalid=Math.max(0,Number(listed&&listed.ignored)||0)+(listed&&listed.overflow===true?1:0);
+    if(invalid)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state in the shared repository could not be verified safely.');
+    let latest=null,latestEpoch=0;
+    for(const raw of rows){const item=repositoryProviderItem(raw,'session-claim'),epoch=sessionClaimEpoch(item.id);if(!epoch)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state has an invalid identity.');if(epoch>latestEpoch){latest=item;latestEpoch=epoch;}}
+    if(!latest)return null;
+    const lease=repositoryDownloadLease(await selected.repository.downloadSessionClaim(latest,freeze({signal})));let decoded=null;
+    try{
+      if(lease.blob.size<=0||lease.blob.size>SESSION_CLAIM_MAX_BYTES||latest.size&&lease.blob.size!==latest.size)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state changed size unexpectedly.');
+      const digest=await Exports.run('checksum',{value:lease.blob},{signal});
+      if(latest.digest&&latest.digest!==digest||latest.serverDigest&&latest.serverDigest!==digest)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state failed content verification.');
+      decoded=await Exports.unprotect(lease.blob,{interactive:false,signal});
+      if(!decoded||!(decoded.blob instanceof Blob))throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state could not be opened safely.');
+      let parsed=null;try{parsed=JSON.parse(await decoded.blob.text());}catch{}
+      const claim=await decodeSessionClaim(parsed,{signal});if(!claim||sessionClaimId(claim.epoch)!==latest.id)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state is malformed.');
+      return freeze({claim,item:latest});
+    }finally{
+      if(decoded&&decoded.blob instanceof Blob&&decoded.blob!==lease.blob)await Exports.run('file.release',{file:decoded.blob}).catch(()=>{});
+      await lease.release().catch(()=>{});
+    }
+  }
+  async function writeRepositorySessionClaim(selected,claim,{signal=null,interactive=false}={}){
+    const normalized=normalizeSessionClaim(claim);if(Number(claim&&claim.version)!==SESSION_CLAIM_VERSION||!normalized||normalized.version!==SESSION_CLAIM_VERSION)throw new TypeError('Active-session ownership claim is invalid.');
+    const id=sessionClaimId(normalized.epoch),source=new Blob([JSON.stringify(normalized)],{type:'application/json'});let protectedFile=null;
+    try{
+      protectedFile=await Exports.protect({blob:source,filename:id+'.sdsessionclaim'},{interactive,signal});
+      if(!protectedFile||!(protectedFile.blob instanceof Blob)||protectedFile.blob.size<=0||protectedFile.blob.size>SESSION_CLAIM_MAX_BYTES)throw new Error('Active-session ownership claim is too large.');
+      await protectedFile.checkProtection?.();
+      const digest=await Exports.run('checksum',{value:protectedFile.blob},{signal}),item=repositoryProviderItem(await selected.repository.uploadSessionClaim(freeze({kind:'session-claim',id,name:id+'.sdsessionclaim',blob:protectedFile.blob,size:protectedFile.blob.size,digest,exportedAt:normalized.claimedAt,appVersion:APP_VERSION,knownAbsent:true,checkProtection:protectedFile.checkProtection})),'session-claim');
+      await protectedFile.checkProtection?.();
+      if(item.digest!==digest||item.serverDigest&&item.serverDigest!==digest)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The shared repository did not verify the active-session ownership claim.');
+      const verified=await readRepositorySessionClaim(selected,{signal});if(!verified||verified.item.id!==id||JSON.stringify(verified.claim)!==JSON.stringify(normalized))throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The active-session ownership claim could not be read back exactly.');
+      return verified;
+    }finally{if(protectedFile&&protectedFile.blob instanceof Blob&&protectedFile.blob!==source)await Exports.run('file.release',{file:protectedFile.blob}).catch(()=>{});}
+  }
+  async function assertSharedPublicationTurn(selected,publicationLease){
+    if(!publicationLease||!repositoryPublicationCapable(selected))return true;
+    const listed=await selected.repository.listPublications(),rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],mine=Date.parse(publicationLease.createdAt);
+    if(rows.some(row=>{const id=String(row&&row.id||''),at=Date.parse(String(row&&row.createdAt||''));return id!==publicationLease.id&&!ownPublications.has(id)&&row.sameDevice!==true&&Number.isFinite(at)&&Date.now()-at<SYNC_TURN_WINDOW_MS&&(at<mine||at===mine&&id<publicationLease.id);}))throw syncError('REPOSITORY_SYNC_TURN',`Another device is saving to ${selected.label}.`);
+    return true;
+  }
+  async function localSessionOwnership(){
+    if(!sessionOwnershipHooks)return null;
+    const raw=await sessionOwnershipHooks.read(),today=String(sessionOwnershipHooks.today()||'');
+    if(raw===null||raw===undefined)return freeze({today,value:null});
+    const date=String(raw.date||''),runningOn=String(raw.runningOn||''),revision=Number(raw.revision);
+    if(!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(date)||!SESSION_OWNER_PATTERN.test(runningOn)||!Number.isSafeInteger(revision)||revision<1)throw new Error('Canonical Active Session ownership state is invalid.');
+    return freeze({today,value:freeze({date,runningOn,revision})});
+  }
+  async function projectSessionClaim(current,{signal=null}={}){
+    if(!current)return null;
+    const local=await localSessionOwnership(),claim=current.claim,me=String(sessionOwnershipHooks&&sessionOwnershipHooks.installationId()||''),ownerToken=me?await sessionClaimToken('owner',me,{signal}):'';
+    let applies=false;if(local?.value)applies=await sessionClaimToken('session',local.value.date,{signal})===claim.sessionToken;else if(local?.today)applies=await sessionClaimToken('session',local.today,{signal})===claim.sessionToken;
+    return freeze({epoch:claim.epoch,state:claim.state,revision:claim.revision,observedRevision:claim.observedRevision,claimedAt:claim.claimedAt,ownedHere:!!ownerToken&&ownerToken===claim.ownerToken,applies});
+  }
+  async function assertSharedSessionOwnership(selected,{signal=null}={}){
+    if(!sessionOwnershipHooks||!repositorySessionClaimCapable(selected))return freeze({current:null,releaseAfterCommit:false});
+    const current=await readRepositorySessionClaim(selected,{signal});if(!current)return freeze({current:null,releaseAfterCommit:false});
+    const local=await localSessionOwnership(),claim=current.claim;
+    if(local?.today&&await sessionClaimToken('session',local.today,{signal})!==claim.sessionToken||claim.state==='released')return freeze({current,releaseAfterCommit:false});
+    if(local?.value){
+      const [sessionToken,ownerToken]=await Promise.all([sessionClaimToken('session',local.value.date,{signal}),sessionClaimToken('owner',local.value.runningOn,{signal})]);
+      if(sessionToken===claim.sessionToken&&ownerToken===claim.ownerToken&&local.value.revision>=claim.revision)return freeze({current,releaseAfterCommit:false});
+    }
+    if(!local?.value&&await sessionClaimToken('owner',sessionOwnershipHooks.installationId(),{signal})===claim.ownerToken)return freeze({current,releaseAfterCommit:true});
+    throw syncError('REPOSITORY_SESSION_OWNERSHIP_AHEAD',`Today’s Active Session is owned by another device in ${selected.label}; this device must take in that ownership before publishing.`);
+  }
+  async function settlePublishedSessionClaim(selected,current,{signal=null}={}){
+    if(!current||current.claim.state==='released')return false;
+    const attemptRevision=canonicalConvergenceRevision();
+    try{
+      const claim=current.claim,released=freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken:claim.sessionToken,epoch:claim.epoch+1,state:'released',ownerToken:claim.ownerToken,revision:claim.revision,observedOwnerToken:claim.ownerToken,observedRevision:claim.revision,claimedAt:new Date().toISOString()});
+      await writeRepositorySessionClaim(selected,released,{signal});return true;
+    }catch(error){
+      AppDiagnostics.capture('backup-provider.session-claim-settle',error,'warn');
+      const owner=providers.get(safeId(selected&&selected.id))||selected;
+      try{if(pendingRetryHooks){if(!await pendingRetryState(owner))await markPendingRetry(owner);schedulePendingProviderBackup(owner,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{attemptRevision,trigger:'session-claim-settle'});}}catch(retryError){AppDiagnostics.capture('backup-provider.session-claim-settle-retry',retryError,'warn');}
+      return false;
+    }
+  }
+
   // Take in Drive's newest version quietly. What it cannot settle on its own
   // waits for the person; their Combine of that version resumes the sync.
-  function catchUpSharedProvider(selected,head){
+  function catchUpSharedProvider(selected,head,attemptRevision=canonicalConvergenceRevision(),{preserveAutomatic=false}={}){
     const state=syncState(selected);if(state.catching)return false;state.catching=true;notifyStatus();
     setTimeout(async()=>{
       const summary=presentation.begin(selected.id,'sync',{id:'external-sync',label:selected.label,foreground:false,message:`Syncing with ${selected.label}…`});
-      try{settleCatchUp(selected,head.item.id,await bringInRepositoryProvider(selected.id,{quiet:true,sync:true,checkpointId:head.item.id,presentation:summary}),summary);}
+      try{settleCatchUp(selected,head.item.id,await syncRepositoryProvider(selected.id,{checkpointId:head.item.id,presentation:summary,respectBackgroundSuspension:true}),summary,attemptRevision,{preserveAutomatic});}
       catch(error){
         // Another device set or changed the backup password: sync waits for it.
         if(['BACKUP_LOCKED','BACKUP_AUTH_FAILED'].includes(String(error?.code||''))){state.password=head.item.id;summary.finish({message:`${selected.label} needs this profile’s backup password.`,outcome:'sync-password'});presentation.notice(selected.id,'sync-password',`Your backup password was set or changed on another device. Enter it to keep syncing with ${selected.label}.`);}
         // A version this build cannot read is not retried: sync waits on it.
         else if(error?.repositoryUnreadable===true||String(error?.code||'')==='BACKUP_ENCRYPTION_UNSUPPORTED'){markUnreadable(selected,head.item.id);summary.finish({message:`${selected.label} has a version this app can’t read.`,outcome:'sync-newer'});waitForNewerVersion(selected,head.item.id);}
-        else{AppDiagnostics.capture('backup-provider.sync-catch-up',error,'warn');state.behind=true;state.failed=true;summary.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'failed'});schedulePendingProviderBackup(selected,nextConvergenceRetryDelay(selected,{sync:true}));}
+        else{AppDiagnostics.capture('backup-provider.sync-catch-up',error,'warn');state.behind=true;state.failed=true;summary.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'failed'});schedulePendingProviderBackup(selected,nextConvergenceRetryDelay(selected,{sync:true}),{backoff:true,attemptRevision,preserveAutomatic,trigger:'catch-up-failed'});}
       }
       finally{state.catching=false;notifyStatus();}
     },0);
     return true;
   }
-  function settleCatchUp(selected,headId,result,summary){
+  function settleCatchUp(selected,headId,result,summary,attemptRevision='',{preserveAutomatic=false}={}){
     const state=syncState(selected);
     if(result&&result.cancelled&&result.reason==='needs-decision'){state.review=headId;summary?.finish({message:`${selected.label} has changes that need your review.`,outcome:'sync-review'});presentation.notice(selected.id,'sync-review',`${selected.label} has changes from another device that need your review.`);}
-    else if(result&&result.cancelled){state.behind=true;summary?.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'cancelled'});schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS);}
-    else{state.review='';state.password='';state.failed=false;state.syncedAt=new Date().toISOString();resetConvergenceRetry(selected);presentation.resolve(selected.id,'sync-review');presentation.resolve(selected.id,'sync-password');summary?.finish({message:`Synced with ${selected.label}.`,outcome:'sync-complete'});if(automaticWaiting(selected))schedulePendingProviderBackup(selected,1000);}
+    else if(result&&result.cancelled){state.behind=true;summary?.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'cancelled'});schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{attemptRevision,preserveAutomatic,trigger:'catch-up-cancelled'});}
+    else{state.review='';state.password='';state.failed=false;state.syncedAt=new Date().toISOString();resetConvergenceRetry(selected);presentation.resolve(selected.id,'sync-review');presentation.resolve(selected.id,'sync-password');summary?.finish({message:`Synced with ${selected.label}.`,outcome:'sync-complete'});if(automaticWaiting(selected))schedulePendingProviderBackup(selected,1000,{trigger:'catch-up-complete'});}
   }
   // The person enters the password the newest version needs; the sync then
   // takes that version in and keeps the password for this device.
@@ -1029,7 +1217,7 @@ registry.define('backup-provider',1,input=>{
     const selected=providers.get(safeId(id));if(!selected||!selected.shared)return freeze({cancelled:true,reason:'unavailable'});
     const state=syncState(selected),head=state.password;if(!head||state.catching)return freeze({cancelled:true,reason:head?'busy':'none'});
     state.catching=true;notifyStatus();
-    try{const result=await bringInRepositoryProvider(selected.id,{quiet:true,sync:true,password:true,checkpointId:head});settleCatchUp(selected,head,result,null);return result;}
+    try{const result=await syncRepositoryProvider(selected.id,{checkpointId:head,password:true});settleCatchUp(selected,head,result,null);return result;}
     finally{state.catching=false;notifyStatus();}
   }
   // Open the versions that need review in the Combine dialog.
@@ -1040,95 +1228,50 @@ registry.define('backup-provider',1,input=>{
     if(result&&!result.cancelled){syncState(selected).review='';presentation.resolve(selected.id,'sync-review');}
     return result;
   }
-  // One history for every location. A version is made once and placed in
-  // each connected location under the same id: the next location copies it
-  // instead of making its own, and a location that was away copies the
-  // versions it missed that it would keep. Drive waits briefly for the
-  // Device Folder to make a version, so files come from this device rather
-  // than being downloaded again.
-  let spinePlaced=freeze({checkpointId:'',at:freeze([])});
-  // A copy that fails is not tried again: the location makes its own version
-  // instead, and history keeps going.
-  const BACKFILL_RECHECK_MS=AUTOMATIC_QUIET_MS,SPINE_WAIT_MS=2*60*1000,fillState=new Map(),copyFailed=new Map(),fillSkipped=new Set();
-  function placedSpine(checkpointId,selected){
-    const id=String(checkpointId||''),spine=RepositoryCheckpointPipeline.spine();if(!id||!spine||spine.checkpointId!==id)return;
-    spinePlaced=freeze({checkpointId:id,at:freeze([...new Set([...(spinePlaced.checkpointId===id?spinePlaced.at:[]),safeId(selected.id)])])});
-    // A location that waited for this version goes now; any other keeps its
-    // own deadline.
-    for(const other of providers.values())if(!spinePlaced.at.includes(other.id)){if(other.shared&&syncState(other).waitedAt)providerConvergenceJob(other)?.schedule(1000,'spine','earliest');else scheduleAutomaticBackup(other);}
-  }
-  function spineCopy(selected){
-    const spine=RepositoryCheckpointPipeline.spine();if(!spine||spinePlaced.checkpointId!==spine.checkpointId||spinePlaced.at.includes(selected.id)||copyFailed.get(selected.id)===spine.checkpointId||selected.shared&&!spine.shareable)return null;
-    let current=NaN;try{current=Date.parse(String(automaticHooks?.current()||''));}catch(error){AppDiagnostics.capture('backup-provider.spine-current',error,'warn');}
-    if(!(Date.parse(spine.sourceRevision)>=current))return null;
-    const source=spinePlaced.at.map(id=>providers.get(id)).find(other=>other&&other.repository&&providerConnected(other));
-    return source?freeze({source,checkpointId:spine.checkpointId,current:true}):null;
-  }
-  // The Device Folder that also needs a version, if Drive should wait for it.
-  function spineLeader(selected){
-    if(!selected.shared)return null;const state=syncState(selected),leader=[...providers.values()].find(other=>!other.shared&&other.repository&&providerConnected(other)&&automaticNeeded(other));
-    if(!leader){state.waitedAt=0;return null;}
-    if(!state.waitedAt)state.waitedAt=Date.now();return Date.now()-state.waitedAt<SPINE_WAIT_MS?leader:null;
-  }
-  function backfillDue(selected,trigger){
-    if(![...providers.values()].some(other=>other.id!==selected.id&&other.repository&&providerConnected(other))||!providerConnected(selected))return false;
-    const reason=String(trigger||''),at=fillState.get(selected.id)||0;
-    return ['connection','registered','backfill'].includes(reason)||Date.now()-at>=BACKFILL_RECHECK_MS;
-  }
-  // A version another connected location holds that this one lacks and would
-  // keep, newest first. Drive never takes a copy newer than its newest.
-  async function backfillCandidate(selected,{signal=null}={}){
-    fillState.set(selected.id,Date.now());
-    const scoped=repositoryOperationSelected(selected,{signal}),mine=recentHistory(selected)||await repositoryProviderInventory(scoped,{signal}),have=new Set(mine.pairs.map(pair=>pair.item.id));rememberRecentHistory(selected,mine);
-    const normal=pair=>(pair.item.history?.retention?.role||'normal')==='normal',row=pair=>pair.item.history?.retention?.calendar?freeze({id:pair.item.id,manifest:freeze({version:pair.item.history.format,exportedAt:pair.item.history.exportedAt,retention:pair.item.history.retention,installationId:String(pair.item.history.origin||'')})}):null;
-    const newest=[...mine.pairs].reverse().find(normal),limit=selected.shared&&newest?Date.parse(repositoryMetadataTimestamp(newest.item)):Infinity;
-    for(const source of providers.values()){
-      if(source.id===selected.id||!source.repository||!providerConnected(source))continue;
-      const theirs=recentHistory(source)||await repositoryProviderInventory(repositoryOperationSelected(source,{signal}),{signal});rememberRecentHistory(source,theirs);
-      const missing=theirs.pairs.filter(pair=>!have.has(pair.item.id)&&!fillSkipped.has(pair.item.id)&&!unreadableByProvider.get(source.id)?.has(pair.item.id)&&normal(pair)&&row(pair)&&Date.parse(pair.item.history.exportedAt)<limit);if(!missing.length)continue;
-      const kept=new Set(RepositoryCheckpointPipeline.selectRetention(freeze([...mine.pairs,...missing].map(row).filter(Boolean)),{now:new Date()}).retained.map(entry=>entry.id));
-      const pick=[...missing].reverse().find(pair=>kept.has(pair.item.id));
-      if(pick)return freeze({source,checkpointId:pick.item.id,current:false});
-    }
-    return null;
-  }
+  // Each backup location publishes the canonical local state independently.
+  // Drive is the shared synchronization repository; Device Folder is a separate
+  // destination and never waits for, downloads from, or backfills from Drive.
   async function retryPendingProviderBackup(selected,{signal=null}={}){
     const pending=await pendingRetryState(selected),resuming=providerPublications.get(selected.id)?.continuation.status().pending===true;if(!pending&&!resuming&&!automaticNeeded(selected))return freeze({status:'idle',reason:'none',maintenancePending:false});
     if(!pending&&!resuming&&!changeNoted&&automaticHooks?.ready&&await automaticHooks.ready()===false)return freeze({status:'idle',reason:'local-empty',maintenancePending:false});
     const summary=presentation.begin(selected.id,'backup',{id:'external-backup',label:selected.label,foreground:false,message:`Backing up to ${selected.label}…`});
     notifyStatus();
     try{
-      // Each round of changes waits afresh: the wait ends once Drive goes on.
-      const copy=spineCopy(selected),leader=copy?null:spineLeader(selected);if(!leader&&selected.shared)syncState(selected).waitedAt=0;
-      if(leader){providerConvergenceJob(leader)?.schedule(1000,'spine','earliest');summary.finish({message:`Backing up to the ${leader.label} first.`,lifecycle:'cancelled',outcome:'external-backup-pending'});return freeze({status:'pending',reason:'spine'});}
-      const saved=await saveRepositoryProvider(selected,{interactive:false,signal,preemptBackground:false,pendingIntent:pending,copy,recoveryProgress:value=>summary.update({message:value.message,progress:value})}).catch(error=>{if(copy&&!['REPOSITORY_SYNC_TURN','REPOSITORY_SYNC_BEHIND','REPOSITORY_SYNC_NEEDS_UPDATE','STUDY_DIRECTOR_SHARE_HELD'].includes(String(error?.code||''))&&!signal?.aborted)copyFailed.set(selected.id,copy.checkpointId);throw error;}),covered=publicationCoversPending(saved,pending),cleared=covered&&(!pending||await clearPendingRetry(selected,pending));
+      const saved=await saveRepositoryProvider(selected,{interactive:false,signal,preemptBackground:false,pendingIntent:pending,recoveryProgress:value=>summary.update({message:value.message,progress:value})}),covered=publicationCoversPending(saved,pending),cleared=covered&&(!pending||await clearPendingRetry(selected,pending));
       summary.finish({message:cleared?`Backed up to ${selected.label}.`:covered?`Backed up to ${selected.label}; its status updates shortly.`:`Backed up to ${selected.label}; newer changes back up next.`,outcome:cleared?'external-backup-verified':'external-backup-pending'});
       return freeze({status:cleared?'completed':'pending',checkpointId:String(saved&&saved.checkpointId||saved&&saved.name||''),reason:cleared?'':covered?'retry marker could not be cleared':'source',maintenancePending:saved&&saved.maintenancePending===true});
     }catch(error){
-      const code=String(error&&error.code||''),turn=code==='REPOSITORY_SYNC_TURN',behind=code==='REPOSITORY_SYNC_BEHIND',newer=code==='REPOSITORY_SYNC_NEEDS_UPDATE'||code==='STUDY_DIRECTOR_SHARE_HELD';
-      summary.finish({message:newer?`Sync with ${selected.label} waits for an app update.`:behind?`Catching up with ${selected.label} first.`:turn?`Another device is saving to ${selected.label}; this backup goes next.`:'External backup update is pending.',lifecycle:signal?.aborted||behind||turn||newer?'cancelled':'failed',outcome:'external-backup-pending'});
-      if(!behind&&!turn&&!newer)AppDiagnostics.capture('backup-provider.pending-retry',error,'warn');
-      return freeze({status:'pending',reason:newer?'needs-update':behind?'behind':turn?'turn':String(error&&error.message||error)});
+      const code=String(error&&error.code||''),turn=code==='REPOSITORY_SYNC_TURN',behind=code==='REPOSITORY_SYNC_BEHIND',sessionAhead=code==='REPOSITORY_SESSION_OWNERSHIP_AHEAD',newer=code==='REPOSITORY_SYNC_NEEDS_UPDATE'||code==='STUDY_DIRECTOR_SHARE_HELD';
+      summary.finish({message:newer?`Sync with ${selected.label} waits for an app update.`:behind?`Catching up with ${selected.label} first.`:sessionAhead?'Taking in the Active Session owner from the other device first.':turn?`Another device is saving to ${selected.label}; this backup goes next.`:'External backup update is pending.',lifecycle:signal?.aborted||behind||sessionAhead||turn||newer?'cancelled':'failed',outcome:'external-backup-pending'});
+      if(!behind&&!sessionAhead&&!turn&&!newer)AppDiagnostics.capture('backup-provider.pending-retry',error,'warn');
+      return freeze({status:'pending',reason:newer?'needs-update':behind?'behind':sessionAhead?'session-owner':turn?'turn':String(error&&error.message||error)});
     }finally{notifyStatus();}
+  }
+  // Opaque canonical timestamps are compared for *change*, not ordering:
+  // the attempted revision must not govern a newer edit's urgent deadline.
+  function canonicalConvergenceRevision(){
+    try{const value=String(automaticHooks?.current?.()||'');return Number.isFinite(Date.parse(value))?value:'';}
+    catch(error){AppDiagnostics.capture('backup-provider.canonical-revision',error,'warn');return '';}
   }
   function providerConvergenceJob(selected){
     if(!selected?.repository||!pendingRetryHooks)return null;const id=safeId(selected.id);
     let job=providerConvergenceJobs.get(id);if(job)return job;const background=providerBackground(selected);
     job=background.registerJob('convergence',{isAvailable:()=>{const available=providerBackgroundAvailability(selected),saved=providerPublications.get(id)?.continuation.status();return available===true&&saved?.pending&&saved.role==='before-restore'?'awaiting-foreground':available;},retryMs:PROVIDER_CONVERGENCE_RETRY_DELAYS[0],capture:error=>AppDiagnostics.capture('backup-provider.convergence-lifecycle',error,'warn'),execute:async({trigger,nextEligibleAt:eligibleAt})=>{
       let scope=null,traceId='';
+      const attemptRevision=canonicalConvergenceRevision(),eligibleMs=Date.parse(String(eligibleAt||'')),preserveAutomatic=automaticOpportunityUnspent(selected,Number.isFinite(eligibleMs)?eligibleMs:Date.now());
       try{
-        const owed=!!await pendingRetryState(selected)||providerPublications.get(selected.id)?.continuation.status().pending===true,syncDue=syncCheckDue(selected,trigger),sync=sharedSyncing(selected)?syncState(selected):null,fillDue=backfillDue(selected,trigger);
+        const owed=!!await pendingRetryState(selected)||providerPublications.get(selected.id)?.continuation.status().pending===true,syncDue=syncCheckDue(selected,trigger),sync=sharedSyncing(selected)?syncState(selected):null;
         if(sync)job.schedule(AUTOMATIC_QUIET_MS,'sync','earliest');
-        if(!owed&&!automaticNeeded(selected)&&!syncDue&&!fillDue){resetConvergenceRetry(selected);return freeze({status:'idle',reason:'none'});}
+        if(!owed&&!automaticNeeded(selected)&&!syncDue){resetConvergenceRetry(selected);return freeze({status:'idle',reason:'none'});}
         // Any other wake-up before the waiting changes are due keeps their
         // deadline; Drive asking the Device Folder to go first does not.
-        const due=automaticDueAt(selected),now=String(trigger||'').startsWith('flush:')||trigger==='spine';
-        if(!owed&&!syncDue&&!fillDue&&!now&&due>Date.now()+50){job.schedule(due-Date.now(),'automatic','earliest');return freeze({status:'idle',reason:'not-due'});}
-        if(busy||sync?.catching){schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS);return freeze({status:'deferred',reason:'busy'});}
+        const due=automaticDueAt(selected),now=String(trigger||'').startsWith('flush:');
+        if(!owed&&!syncDue&&!now&&due>Date.now()+50){job.schedule(due-Date.now(),'automatic','earliest');return freeze({status:'idle',reason:'not-due'});}
+        if(busy||sync?.catching){schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{trigger:'provider-busy'});return freeze({status:'deferred',reason:'busy'});}
         scope=await background.beginBackground('convergence',{budgetMs:0,preemptCode:'REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage:'An automatic backup yielded to a foreground operation.'});
-        if(!scope){schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS);return freeze({status:'deferred',reason:'background-busy'});}
-        traceId=OperationDiagnostics.start('provider-convergence',selected.label,{provider:selected.id,background:true,trigger:'managed-recovery',nextEligibleAt:eligibleAt,actionable:true});
-        OperationDiagnostics.mark('background-transition',background.transition('convergence','scheduled','running',{reason:'managed-recovery',nextEligibleAt:eligibleAt,actionable:true}),traceId);
+        if(!scope){schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{trigger:'background-busy'});return freeze({status:'deferred',reason:'background-busy'});}
+        traceId=OperationDiagnostics.start('provider-convergence',selected.label,{provider:selected.id,background:true,trigger:String(trigger||'scheduled'),nextEligibleAt:eligibleAt,actionable:true});
+        OperationDiagnostics.mark('background-transition',background.transition('convergence','scheduled','running',{reason:String(trigger||'scheduled'),nextEligibleAt:eligibleAt,actionable:true}),traceId);
         OperationDiagnostics.mark('convergence-eligibility',{provider:selected.id,nextEligibleAt:eligibleAt,actionable:true},traceId);
         // Catch up before backing up: Drive's newest version comes in first.
         // A backup due now checks this itself, so a separate look is only
@@ -1140,48 +1283,50 @@ registry.define('backup-provider',1,input=>{
           const ahead=await sharedAhead(inventory,selected),finish=(status,reason)=>{OperationDiagnostics.mark('background-transition',background.transition('convergence','running',status,{reason,actionable:false}),traceId);OperationDiagnostics.finish({status,reason},traceId);return freeze({status,reason});};
           if(ahead?.unreadable){waitForNewerVersion(selected,ahead.item.id);return finish('idle','needs-update');}
           newerVersionGone(selected);
-          if(ahead&&sync.review!==ahead.item.id){scope.release();scope=null;catchUpSharedProvider(selected,ahead);return finish('deferred','catching-up');}
+          if(ahead&&sync.review!==ahead.item.id){scope.release();scope=null;catchUpSharedProvider(selected,ahead,attemptRevision,{preserveAutomatic});return finish('deferred','catching-up');}
           if(ahead)return finish('idle','needs-review');
           if(sync.review){sync.review='';presentation.resolve(selected.id,'sync-review');}
           sync.failed=false;sync.syncedAt=new Date().toISOString();notifyStatus();
-          if(!owed&&!automaticNeeded(selected)&&!fillDue){resetConvergenceRetry(selected);return finish('completed','in-sync');}
-        }
-        // Nothing to back up: fill in a version another location holds.
-        if(!owed&&!automaticNeeded(selected)){
-          const candidate=fillDue?await backfillCandidate(selected,{signal:scope.signal}):null,finish=(status,reason)=>{OperationDiagnostics.mark('background-transition',background.transition('convergence','running',status,{reason,actionable:false}),traceId);OperationDiagnostics.finish({status,reason},traceId);return freeze({status,reason});};
-          if(!candidate){resetConvergenceRetry(selected);return finish('completed','none');}
-          try{await saveRepositoryProvider(selected,{interactive:false,signal:scope.signal,preemptBackground:false,copy:candidate});}
-          catch(error){if(scope.signal.aborted)throw error;if(!['REPOSITORY_SYNC_TURN','REPOSITORY_SYNC_BEHIND','REPOSITORY_SYNC_NEEDS_UPDATE','STUDY_DIRECTOR_SHARE_HELD'].includes(String(error?.code||''))){fillSkipped.add(candidate.checkpointId);AppDiagnostics.capture('backup-provider.backfill-copy',error,'warn');}return finish('completed','copy-skipped');}
-          job.schedule(5000,'backfill','earliest');return finish('completed','copied');
+          if(!owed&&!automaticNeeded(selected)){resetConvergenceRetry(selected);return finish('completed','in-sync');}
         }
         OperationDiagnostics.mark('convergence-publication-start',{provider:selected.id},traceId);const result=await retryPendingProviderBackup(selected,{signal:scope.signal});{const state=syncState(selected);state.turnWaits=result.reason==='turn'?state.turnWaits+1:0;}OperationDiagnostics.mark('convergence-publication-complete',{provider:selected.id,status:String(result.status||''),maintenancePending:result.maintenancePending===true},traceId);OperationDiagnostics.mark('background-transition',background.transition('convergence','running',result.status==='completed'?'completed':'deferred',{reason:String(result.reason||''),actionable:false}),traceId);OperationDiagnostics.finish({status:String(result.status||'pending'),reason:String(result.reason||''),maintenancePending:result.maintenancePending===true},traceId);
         if(result.status==='completed'){resetConvergenceRetry(selected);background.wake('publication');scheduleAutomaticBackup(selected);}
         else if(['none','local-empty'].includes(result.reason))resetConvergenceRetry(selected);
         // Waiting for an app update is not a failure: no retry ladder, and the
         // regular check looks again (removing that version wakes it sooner).
-        else if(result.reason==='needs-update'){resetConvergenceRetry(selected);schedulePendingProviderBackup(selected,AUTOMATIC_QUIET_MS);}
+        else if(result.reason==='needs-update'){resetConvergenceRetry(selected);schedulePendingProviderBackup(selected,AUTOMATIC_QUIET_MS,{backoff:true,attemptRevision,trigger:'needs-update'});}
         // Drive moved on, or another device is backing up there: catch up or take turns.
-        else if(['behind','turn'].includes(result.reason)){if(sync&&result.reason==='behind')sync.behind=true;const turns=syncState(selected).turnWaits;schedulePendingProviderBackup(selected,result.reason==='behind'?1000:SYNC_TURN_RETRY_DELAYS[Math.min(Math.max(0,turns-1),SYNC_TURN_RETRY_DELAYS.length-1)]);}
-        // Waiting for the Device Folder's version: it is due already, so the
-        // retry keeps that (going to the background stays "at once").
-        else if(result.reason==='spine')job.schedule(PROVIDER_CONVERGENCE_BUSY_RETRY_MS,'spine','replace');
-        else if(result.reason==='source'){resetConvergenceRetry(selected);if(!scheduleAutomaticBackup(selected))schedulePendingProviderBackup(selected,AUTOMATIC_QUIET_MS);}
-        else schedulePendingProviderBackup(selected,scope.signal.aborted?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay(selected));
+        else if(['behind','turn'].includes(result.reason)){if(sync&&result.reason==='behind')sync.behind=true;const turns=syncState(selected).turnWaits;schedulePendingProviderBackup(selected,result.reason==='behind'?1000:SYNC_TURN_RETRY_DELAYS[Math.min(Math.max(0,turns-1),SYNC_TURN_RETRY_DELAYS.length-1)],{backoff:result.reason==='turn',attemptRevision,preserveAutomatic,trigger:result.reason==='turn'?'sync-turn':'shared-behind'});}
+        else if(result.reason==='source'){resetConvergenceRetry(selected);if(!scheduleAutomaticBackup(selected))schedulePendingProviderBackup(selected,AUTOMATIC_QUIET_MS,{trigger:'source-changed'});}
+        else schedulePendingProviderBackup(selected,scope.signal.aborted?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay(selected),{backoff:!scope.signal.aborted,attemptRevision,preserveAutomatic,trigger:scope.signal.aborted?'background-preempted':'retry-failure'});
         return result;
       }catch(error){
         const preempted=scope?.signal.aborted&&error?.name==='AbortError';
-        if(!traceId)traceId=OperationDiagnostics.start('provider-convergence',selected.label,{provider:selected.id,background:true,trigger:'managed-recovery',nextEligibleAt:eligibleAt,actionable:true});
+        if(!traceId)traceId=OperationDiagnostics.start('provider-convergence',selected.label,{provider:selected.id,background:true,trigger:String(trigger||'scheduled'),nextEligibleAt:eligibleAt,actionable:true});
         OperationDiagnostics.mark('background-transition',background.transition('convergence',scope?'running':'scheduled',preempted?'deferred':'failed',{reason:preempted?String(error?.code||'background-yield'):'unavailable',actionable:false}),traceId);
         if(preempted)OperationDiagnostics.finish({status:'pending',reason:String(error?.code||'background-yield')},traceId);
         else{OperationDiagnostics.fail(error,{background:true,status:'unavailable'},traceId);AppDiagnostics.capture('backup-provider.pending-retry-background',error,'warn');}
         // A failed read is unknown, not absence. The next bounded opportunity
         // checks the durable marker again; do not read it again in this handler.
-        schedulePendingProviderBackup(selected,preempted?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay(selected));
+        schedulePendingProviderBackup(selected,preempted?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay(selected),{backoff:!preempted,attemptRevision,preserveAutomatic,trigger:preempted?'background-preempted':'state-read-failed'});
         return freeze({status:'unavailable',reason:preempted?'preempted':'state-read-failed'});
       }finally{scope?.release();}
     }});providerConvergenceJobs.set(id,job);return job;
   }
-  function schedulePendingProviderBackup(selected,delay=1000){return providerConvergenceJob(selected)?.schedule(Math.max(1000,Number(delay)||1000),'managed-recovery','replace')||false;}
+  // Backoff supersedes urgency for the *same* failed revision, but must not
+  // push back a higher-priority request for a newer canonical revision.
+  // A missing revision is treated conservatively as the same failed work.
+  function schedulePendingProviderBackup(selected,delay=1000,{backoff=false,attemptRevision='',preserveAutomatic=false,trigger='pending-retry'}={}){
+    const job=providerConvergenceJob(selected);
+    if(!job)return false;
+    const newer=backoff&&attemptRevision&&canonicalConvergenceRevision()!==attemptRevision;
+    const preserve=automaticNeeded(selected)&&(preserveAutomatic===true||backoff&&automaticOpportunityUnspent(selected));
+    // A failure may replace only the opportunity it actually attempted.
+    // Scheduler eligibility owns this decision, so late async settlement cannot
+    // consume an automatic deadline that became due while earlier sync ran.
+    if(newer||preserve)scheduleAutomaticBackup(selected,{urgent:Number.isFinite(automaticState(selected).urgentSince)});
+    return job.schedule(Math.max(1000,Number(delay)||1000),String(trigger||'pending-retry'),backoff&&!newer&&!preserve?'replace':'earliest')!==false;
+  }
   function wakeProviderBackground(selected,trigger='eligibility'){
     if(!selected?.repository)return false;
     try{
@@ -1194,26 +1339,39 @@ registry.define('backup-provider',1,input=>{
       return woke;
     }catch(error){AppDiagnostics.capture('backup-provider.background-configuration',error,'error');return false;}
   }
-  // After a restore, every other location that backs up on its own picks up
-  // the restored data once automatic backups resume.
-  function otherLocations(selected){return freeze([...providers.values()].filter(other=>other.id!==selected.id&&providerConnected(other)&&automaticEnabled(other)).map(other=>freeze({id:other.id,label:other.label,shared:other.shared===true,status:'pending',queued:true})));}
+  // After a successful recovery, explicitly queue every other automatic
+  // location while recovery still holds the background suspension. Their
+  // existing convergence jobs arm when that suspension is released, so every
+  // destination independently publishes the resulting canonical local state.
+  async function queueOtherLocations(selected){
+    const out=[];
+    for(const other of providers.values()){
+      if(other.id===selected.id||!automaticRecoveryDestination(other))continue;
+      const retryQueued=await markPendingRetry(other),scheduled=retryQueued&&schedulePendingProviderBackup(other,1000,{trigger:'managed-recovery-peer'});
+      out.push(freeze({id:other.id,label:other.label,shared:other.shared===true,status:retryQueued?'pending':'failed',queued:retryQueued,scheduled:scheduled===true,connected:providerConnected(other)}));
+    }
+    return freeze(out);
+  }
   async function queueResolvedProviderState(selected,result,{sourceNeeded=true,sourceCheckpoint=''}={}){
     if(!result||result.cancelled)return freeze({source:freeze({status:'skipped',reason:'cancelled'}),others:freeze([])});
     let source;
     if(sourceNeeded){
-      const retryQueued=await markPendingRetry(selected);
-      source=freeze({status:retryQueued?'pending':'failed',reason:retryQueued?'queued':'automatic retry could not be queued',retryQueued,shared:selected.shared===true});
+      const retryQueued=await markPendingRetry(selected),scheduled=retryQueued&&schedulePendingProviderBackup(selected,1000,{trigger:'managed-recovery'});
+      source=freeze({status:retryQueued?'pending':'failed',reason:retryQueued?(scheduled?'scheduled':'managed-recovery'):'automatic retry could not be queued',retryQueued,scheduled:scheduled===true,shared:selected.shared===true});
     }else{
       providerBackground(selected).clearScheduled('convergence');
       await clearPendingRetry(selected);
-      source=freeze({status:'completed',checkpoint:String(sourceCheckpoint||''),unchanged:true,retryQueued:false,shared:selected.shared===true});
+      if(automaticNeeded(selected)){
+        const retryQueued=await markPendingRetry(selected),scheduled=retryQueued&&schedulePendingProviderBackup(selected,1000,{trigger:'managed-recovery-source-current'});
+        source=freeze({status:retryQueued?'pending':'failed',checkpoint:String(sourceCheckpoint||''),reason:retryQueued?(scheduled?'scheduled':'managed-recovery'):'automatic retry could not be queued',unchanged:false,retryQueued,scheduled:scheduled===true,shared:selected.shared===true});
+      }else source=freeze({status:'completed',checkpoint:String(sourceCheckpoint||''),unchanged:true,retryQueued:false,scheduled:false,shared:selected.shared===true});
     }
-    return freeze({source,others:otherLocations(selected)});
+    return freeze({source,others:await queueOtherLocations(selected)});
   }
   async function managedProviderPresent(selected,result,{sourceNeeded=true,sourceCheckpoint=''}={}){
-    const convergence=await queueResolvedProviderState(selected,result,{sourceNeeded,sourceCheckpoint}),sourceReady=convergence.source.status==='completed'||convergence.source.status==='pending'&&convergence.source.retryQueued===true;
-    const reason=sourceReady?'':[convergence.source.reason||`${selected.label} backup could not be queued`,convergence.source.retryQueued!==true?'automatic retry could not be queued':''].filter(Boolean).join(' · ');
-    return freeze({status:sourceReady?'completed':'pending',reason,checkpointId:String(convergence.source.checkpoint||''),source:convergence.source,others:convergence.others});
+    const convergence=await queueResolvedProviderState(selected,result,{sourceNeeded,sourceCheckpoint}),sourceReady=convergence.source.status==='completed'||convergence.source.status==='pending'&&(convergence.source.retryQueued===true||convergence.source.scheduled===true),peerFailed=convergence.others.find(row=>row.queued!==true),ready=sourceReady&&!peerFailed;
+    const reason=ready?'':!sourceReady?[convergence.source.reason||`${selected.label} backup could not be queued`,convergence.source.retryQueued!==true?'automatic retry could not be queued':''].filter(Boolean).join(' · '):`${peerFailed.label} automatic backup retry could not be recorded.`;
+    return freeze({status:ready?'completed':'pending',reason,checkpointId:String(convergence.source.checkpoint||''),source:convergence.source,others:convergence.others});
   }
   function repositoryObjectInventoryForManifest(inventory,manifest){
     if(!inventory||inventory.overflow===true)throw new Error('An unusual number of backup objects was found. Recovery was stopped for review.');
@@ -1254,17 +1412,14 @@ registry.define('backup-provider',1,input=>{
     // location that holds it (repositoryReadFailed).
     let applying=false;const readFailure=error=>{if(!applying&&error&&typeof error==='object'&&error.name!=='AbortError'&&Object.isExtensible(error)&&!['PROVIDER_FOREGROUND_CANCELLED','STUDY_DIRECTOR_IMPORT_CANCELLED','BACKUP_LOCKED'].includes(String(error.code||'')))error.repositoryReadFailed=true;return error;};
     const pair=newest.find(candidate=>candidate.item.id===chosenId);if(!pair)throw readFailure(new Error('The selected backup version is no longer available.'));
-    // Combining Drive's newest ordinary version as a whole makes it what this
-    // device and Drive share, wherever it is read from: the Device Folder's
-    // copy of it has the same id and the same data. Drive's newest comes from
-    // a fresh listing, never a recent one that may miss a newer version.
+    // Only Drive's own freshly verified newest ordinary version can become the
+    // shared reconciliation base. Device Folder has an independent checkpoint
+    // history and never impersonates Drive ancestry.
     const ordinary=candidate=>candidate.item.history?.retention?.role!=='before-restore',whole=mode==='bring-in'&&!note&&!missingOnly,newestOf=listed=>!listed.overflow&&[...listed.pairs].reverse().find(ordinary)?.item.id===pair.item.id;
-    let sharedHead=false;
-    if(whole&&selected.shared===true)sharedHead=newestOf(inventory)&&(!reusedHistory||newestOf(await repositoryProviderInventory(selected,{signal:operation.signal})));
-    else if(whole){const shared=[...providers.values()].find(sharedSyncing);if(shared)try{sharedHead=newestOf(await repositoryProviderInventory(repositoryOperationSelected(shared,{signal:operation.signal}),{signal:operation.signal}));}catch(error){if(operation.signal?.aborted)throw error;AppDiagnostics.capture('backup-provider.shared-head',error,'warn');}}
+    const sharedHead=whole&&selected.shared===true&&newestOf(inventory)&&(!reusedHistory||newestOf(await repositoryProviderInventory(selected,{signal:operation.signal})));
     OperationDiagnostics.mark('checkpoint-selected',{provider:selected.id});
     progress('verify',`Verifying selected backup in ${selected.label}…`);
-    const verificationTask=(async()=>{OperationDiagnostics.mark('selected-checkpoint-verification-start',{provider:selected.id});const row=await verifyRepositoryInventoryPair(selected,pair,{interactive:!quiet||password,signal:operation.signal}).catch(error=>{if(error?.repositoryUnreadable===true)unreadableByProvider.set(providerSelected.id,new Set([...(unreadableByProvider.get(providerSelected.id)||[]),pair.item.id]));throw readFailure(error);});OperationDiagnostics.mark('selected-checkpoint-verification-complete',{provider:selected.id,objects:Number(row.manifest.objects&&row.manifest.objects.length)||0});return row;})();
+    const verificationTask=(async()=>{OperationDiagnostics.mark('selected-checkpoint-verification-start',{provider:selected.id});const row=await verifyRepositoryInventoryPair(selected,pair,{interactive:!quiet||password,signal:operation.signal,fresh:true}).catch(error=>{if(error?.repositoryUnreadable===true)unreadableByProvider.set(providerSelected.id,new Set([...(unreadableByProvider.get(providerSelected.id)||[]),pair.item.id]));throw readFailure(error);});OperationDiagnostics.mark('selected-checkpoint-verification-complete',{provider:selected.id,objects:Number(row.manifest.objects&&row.manifest.objects.length)||0});return row;})();
     const inventoryTask=(async()=>{OperationDiagnostics.mark('recovery-object-inventory-start',{provider:selected.id});const value=await repositoryObjectInventory(selected,{signal:operation.signal}).catch(error=>{throw readFailure(error);});OperationDiagnostics.mark('recovery-object-inventory-complete',{provider:selected.id,objects:value.items.length,invalid:value.invalidCount,overflow:value.overflow===true});return value;})();
     const quarantineTask=integrityScrubHooks?integrityScrubHooks.quarantine(selected.id):Promise.resolve([]);
     const [row,listedObjects,quarantineRows]=await Promise.all([verificationTask,inventoryTask,quarantineTask]),quarantinedObjectIds=repositoryProviderObjectIds(quarantineRows),quarantined=new Set(quarantinedObjectIds);
@@ -1343,10 +1498,17 @@ registry.define('backup-provider',1,input=>{
     const providerSelected=providers.get(safeId(id));if(!providerSelected||!providerSelected.repository)throw new Error('Repository backup provider is unavailable.');
     const selected=repositoryOperationSelected(providerSelected,{signal:options&&options.signal||null});
     const state=await repositoryProviderState(selected,{interactive:false,signal:options&&options.signal||null});
-    if(state.overflow||state.ignored||state.invalid?.length||state.uncommitted?.length||state.orphanCommits?.length)throw new Error('Repository history is incomplete or unreadable; integrity verification is unavailable.');
+    // Integrity scrub is read-only. Verify every committed version we can prove
+    // valid even when unrelated incomplete/orphan publication debris exists.
+    // An incomplete listing is different: we cannot prove which committed
+    // versions exist, so that remains fail-closed. Destructive maintenance has
+    // its own stricter anomaly gates and is deliberately unchanged here.
+    if(state.overflow)throw new Error('Repository history could not be listed completely; integrity verification is unavailable.');
     const actualScope=typeof selected.repository.scope==='function'?String(await selected.repository.scope()||''):'';
     if(options.repositoryScope&&options.repositoryScope!==actualScope){const error=new Error('The backup repository changed.');error.code='REPOSITORY_CHANGED';throw error;}
     const history=Object.freeze(state.rows.map(row=>row.manifest));
+    const anomalousHistory=Math.max(0,Number(state.ignored)||0)+Number(state.invalid?.length||0)+Number(state.uncommitted?.length||0)+Number(state.orphanCommits?.length||0)+Number(state.unreadable?.length||0);
+    if(!history.length&&anomalousHistory)throw new Error('No committed backup version could be verified from the repository history.');
     if(!history.length)return Object.freeze({complete:true,cursor:'',checked:0,checkedBytes:0,total:0,quarantined:Object.freeze([])});
     const readObject=entry=>selected.repository.download(Object.freeze({kind:'object',id:entry.objectId,size:entry.storedBytes,digest:entry.storedChecksum}),Object.freeze({signal:options&&options.signal||null}));
     const readRange=async(entry,range)=>selected.repository.download(Object.freeze({kind:'object',id:entry.objectId,size:entry.storedBytes,digest:entry.storedChecksum}),Object.freeze({...range,signal:options&&options.signal||null}));
@@ -1394,6 +1556,11 @@ registry.define('backup-provider',1,input=>{
     if(!config||typeof config!=='object'||typeof config.covered!=='function'||typeof config.current!=='function'||config.ready!==undefined&&typeof config.ready!=='function')throw new TypeError('Automatic backup hooks are invalid.');
     automaticHooks=freeze({covered:config.covered,current:config.current,ready:config.ready||null});for(const selected of providers.values())wakeProviderBackground(selected,'configured');return true;
   }
+  function configureSessionOwnership(config=null){
+    if(config===null){sessionOwnershipHooks=null;return true;}
+    if(!config||typeof config!=='object'||typeof config.installationId!=='function'||typeof config.read!=='function'||typeof config.today!=='function')throw new TypeError('Active-session ownership hooks are invalid.');
+    sessionOwnershipHooks=freeze({installationId:config.installationId,read:config.read,today:config.today});return true;
+  }
   async function maintenanceState(selected,{throwOnError=false}={}){const intent=providerMaintenanceIntent(selected);return intent?intent.read({throwOnError}):null;}
   const maintenanceActionable=(state,now=Date.now())=>Background.maintenanceActionable(state,now);
   async function observeRepositoryMaintenance(selected,observation){
@@ -1405,9 +1572,13 @@ registry.define('backup-provider',1,input=>{
     return providerBackground(selected).preemptBackground();
   }
 
-  function suspendBackground(reason='pwa-update'){
+  function suspendBackground(reason='pwa-update',{preserveManagedSync=false}={}){
+    // The sync initiating managed recovery must survive its own background
+    // hold. Other holds (PWA update, file backup, storage reset) still abort it.
+    const retained=preserveManagedSync===true&&reason==='sync'&&foregroundView()?.kind==='sync'?foregroundController:null;
+    const retainedProvider=retained?foregroundView()?.providerId:'';
     const held=[...providers.values()].filter(selected=>selected.repository).map(selected=>{
-      const coordinator=providerBackground(selected);return {coordinator,suspension:coordinator.suspend(reason)};
+      const coordinator=providerBackground(selected);return {coordinator,suspension:coordinator.suspend(reason,{preserveForegroundController:selected.id===retainedProvider?retained:null})};
     });
     let released=false;
     return freeze({settled:Promise.all(held.map(row=>row.suspension.settled)),release:()=>{
@@ -1490,11 +1661,7 @@ registry.define('backup-provider',1,input=>{
     const {scheduleMaintenance:_scheduleMaintenance,...saveOptions}=options&&typeof options==='object'?options:{};
     if(saveOptions.retention?.role!=='before-restore'&&providerPublications.get(selected.id)?.continuation.status().pending)await markPendingRetry(selected);
     let pending=null,pendingRead=true;try{pending=await pendingRetryState(selected);}catch{pendingRead=false;}
-    // A version another location already holds for the current data is
-    // copied under the same id, so both histories match; if the copy fails,
-    // this location makes its own.
-    const copy=saveOptions.retention?.role==='before-restore'?null:spineCopy(selected),save=value=>saveRepositoryProvider(selected,{...saveOptions,pendingIntent:pending,copy:value});
-    const saved=await save(copy).catch(error=>{if(!copy||saveOptions.signal?.aborted||['REPOSITORY_SYNC_TURN','REPOSITORY_SYNC_BEHIND','REPOSITORY_SYNC_NEEDS_UPDATE','STUDY_DIRECTOR_SHARE_HELD'].includes(String(error?.code||'')))throw error;copyFailed.set(selected.id,copy.checkpointId);AppDiagnostics.capture('backup-provider.spine-copy',error,'warn');return save(null);});presentation.condition(selected.id,'permission','');if(pendingRead&&publicationCoversPending(saved,pending))await clearPendingRetry(selected,pending);else schedulePendingProviderBackup(selected);return saved;
+    const saved=await saveRepositoryProvider(selected,{...saveOptions,pendingIntent:pending});presentation.condition(selected.id,'permission','');if(pendingRead&&publicationCoversPending(saved,pending))await clearPendingRetry(selected,pending);else schedulePendingProviderBackup(selected,1000,{trigger:'pending-intent-still-open'});return saved;
   }
   async function loadRepositoryProviderCandidate(id,operation,options={}){
     const selected=providers.get(safeId(id));if(!selected||!selected.repository)throw new Error('Repository backup provider is unavailable.');
@@ -1511,7 +1678,7 @@ registry.define('backup-provider',1,input=>{
   // still have to do.
   function presentRecovery(selected,kind,result){
     const convergence=result&&result.managedRecovery&&result.managedRecovery.present||freeze({status:'pending',source:freeze({status:'failed',reason:'post-operation backup status unavailable'}),others:freeze([])});
-    const sourceReady=convergence.source&&(convergence.source.status==='completed'||convergence.source.status==='pending'&&convergence.source.retryQueued===true);
+    const sourceReady=convergence.source&&(convergence.source.status==='completed'||convergence.source.status==='pending'&&(convergence.source.retryQueued===true||convergence.source.scheduled===true));
     const finalMessage=presentation.outcome(kind,selected.label,convergence,result&&result.summary);statusText(finalMessage,sourceReady);finishForegroundView(selected,{message:finalMessage,ok:true});
     return convergence;
   }
@@ -1551,12 +1718,56 @@ registry.define('backup-provider',1,input=>{
     }
   }
 
+  async function claimSessionOwnership(id='google-drive',request={}){
+    if(busy)return freeze({status:'busy',reason:'busy'});
+    const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected))return freeze({status:'unavailable',reason:'not-connected'});
+    if(!repositorySessionClaimCapable(selected))return freeze({status:'unavailable',reason:'unavailable'});
+    const date=String(request&&request.date||''),observedOwner=String(request&&request.observedOwner||''),observedRevision=Number(request&&request.observedRevision),revision=Number(request&&request.revision),owner=String(sessionOwnershipHooks&&sessionOwnershipHooks.installationId()||'');
+    if(!sessionOwnershipHooks||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(date)||!SESSION_OWNER_PATTERN.test(observedOwner)||!SESSION_OWNER_PATTERN.test(owner)||!Number.isSafeInteger(observedRevision)||observedRevision<1||!Number.isSafeInteger(revision)||revision<=observedRevision)throw new TypeError('Active-session takeover request is invalid.');
+    const foreground=beginForeground(selected,request&&request.signal||null);if(!foreground)return freeze({status:'busy',reason:'busy'});
+    setBusy(true);let publicationLease=null;
+    try{
+      await foreground.settled;const scoped=repositoryOperationSelected(selected,{signal:foreground.signal});await synchronizeRepositoryScope(scoped);
+      publicationLease=await beginRepositoryPublication(scoped);await assertSharedPublicationTurn(scoped,publicationLease);
+      const [current,sessionToken,ownerToken,observedOwnerToken]=await Promise.all([readRepositorySessionClaim(scoped,{signal:foreground.signal}),sessionClaimToken('session',date,{signal:foreground.signal}),sessionClaimToken('owner',owner,{signal:foreground.signal}),sessionClaimToken('owner',observedOwner,{signal:foreground.signal})]);
+      if(current&&current.claim.sessionToken===sessionToken&&current.claim.state==='owned'&&current.claim.ownerToken===ownerToken&&current.claim.observedOwnerToken===observedOwnerToken&&current.claim.observedRevision===observedRevision&&current.claim.revision>=revision)return freeze({status:'completed',claim:current.claim,reused:true});
+      if(current&&current.claim.sessionToken===sessionToken&&current.claim.state==='released'&&current.claim.revision>=observedRevision)throw syncError('REPOSITORY_SESSION_CLAIM_STALE','The shared Active Session has already ended. Sync before starting it again.');
+      if(current&&current.claim.sessionToken===sessionToken&&current.claim.state==='owned'&&(current.claim.ownerToken!==observedOwnerToken||current.claim.revision>observedRevision))throw syncError('REPOSITORY_SESSION_CLAIM_STALE','Active Session ownership changed on another device before this takeover could be confirmed.');
+      const epoch=Math.max(0,Number(current&&current.claim&&current.claim.epoch)||0)+1,claim=freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken,epoch,state:'owned',ownerToken,revision,observedOwnerToken,observedRevision,claimedAt:new Date().toISOString()}),verified=await writeRepositorySessionClaim(scoped,claim,{signal:foreground.signal,interactive:true});
+      return freeze({status:'completed',claim:verified.claim,reused:false});
+    }finally{if(publicationLease)await endRepositoryPublication(selected,publicationLease);await release(selected,'session-claim');setBusy(false);foreground.release();}
+  }
+  async function releaseSessionClaim(id='google-drive',claim=null){
+    if(busy)return false;
+    const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected)||!repositorySessionClaimCapable(selected))return false;
+    const expected=normalizeSessionClaim(claim);if(!expected||expected.state!=='owned')return false;
+    const foreground=beginForeground(selected);if(!foreground)return false;setBusy(true);let publicationLease=null;
+    try{
+      await foreground.settled;const scoped=repositoryOperationSelected(selected,{signal:foreground.signal});await synchronizeRepositoryScope(scoped);
+      publicationLease=await beginRepositoryPublication(scoped);await assertSharedPublicationTurn(scoped,publicationLease);
+      const current=await readRepositorySessionClaim(scoped,{signal:foreground.signal});
+      if(!current||current.item.id!==sessionClaimId(expected.epoch)||current.claim.ownerToken!==expected.ownerToken||current.claim.state!=='owned')return false;
+      const rollback=freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken:expected.sessionToken,epoch:expected.epoch+1,state:'owned',ownerToken:expected.observedOwnerToken,revision:expected.observedRevision,observedOwnerToken:expected.ownerToken,observedRevision:expected.revision,claimedAt:new Date().toISOString()});
+      await writeRepositorySessionClaim(scoped,rollback,{signal:foreground.signal,interactive:true});return true;
+    }catch(error){AppDiagnostics.capture('backup-provider.session-claim-release',error,'warn');return false;}
+    finally{if(publicationLease)await endRepositoryPublication(selected,publicationLease);await release(selected,'session-claim-release');setBusy(false);foreground.release();}
+  }
+  async function readSessionClaim(id='google-drive',options={}){
+    const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected)||!repositorySessionClaimCapable(selected))return null;
+    const signal=options&&options.signal||null,current=await readRepositorySessionClaim(repositoryOperationSelected(selected,{signal}),{signal});return projectSessionClaim(current,{signal});
+  }
+  function scheduleSharedSync(id='google-drive',reason='shared-sync'){
+    const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected))return false;
+    const job=providerConvergenceJob(selected);if(!job)return false;
+    syncState(selected).behind=true;job.schedule(0,'flush:'+String(reason||'shared-sync'),'replace');return true;
+  }
+
   async function backupProvider(id=''){
     const selected=providers.get(safeId(id));
     if(!selected)return false;
     statusSource=selected.id;
     if(busy){statusText('Another backup operation is still in progress…');return false;}
-    const traceId=OperationDiagnostics.start('provider-backup',selected.label,{provider:selected.id}),foreground=beginForeground(selected);
+    const attemptRevision=canonicalConvergenceRevision(),traceId=OperationDiagnostics.start('provider-backup',selected.label,{provider:selected.id}),foreground=beginForeground(selected);
     if(!foreground){OperationDiagnostics.finish({status:'skipped',reason:'busy'},traceId);return false;}
     beginForegroundView(selected,'backup',`Connecting to ${selected.label}…`);setBusy(true);providerProgress(selected,'authorize',`Connecting to ${selected.label}…`);
     try{
@@ -1575,7 +1786,7 @@ registry.define('backup-provider',1,input=>{
         OperationDiagnostics.finish({status:'pending',reason:'needs-update'},traceId);statusText(text,false);finishForegroundView(selected,{message:text,ok:false,lifecycle:'cancelled'});return false;
       }
       if(behind||code==='REPOSITORY_SYNC_TURN'){
-        if(behind)syncState(selected).behind=true;await markPendingRetry(selected).catch(()=>{});schedulePendingProviderBackup(selected,behind?1000:PROVIDER_CONVERGENCE_BUSY_RETRY_MS);
+        if(behind)syncState(selected).behind=true;await markPendingRetry(selected).catch(()=>{});schedulePendingProviderBackup(selected,behind?1000:PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{backoff:!behind,attemptRevision,trigger:behind?'shared-behind':'sync-turn'});
         const text=behind?`Taking in newer changes from ${selected.label} first; your backup follows.`:`Another device is saving to ${selected.label}; your backup goes next.`;
         OperationDiagnostics.finish({status:'pending',reason:behind?'behind':'turn'},traceId);statusText(text,true);finishForegroundView(selected,{message:text,ok:true,lifecycle:'cancelled'});return false;
       }
@@ -1583,13 +1794,46 @@ registry.define('backup-provider',1,input=>{
       return false;
     }finally{if(foregroundView()&&foregroundView().providerId===selected.id)finishForegroundView(selected);await release(selected,'export');setBusy(false);foreground.release();}
   }
+  // Normal Drive synchronization is its own operation: pull one verified Drive
+  // head, reconcile it into canonical local state, verify the changed units and
+  // publish the resulting local state. It reuses the same transaction/rollback
+  // primitives as recovery without entering the user-facing Combine workflow.
+  async function syncRepositoryProvider(id,options={}){
+    if(busy)return freeze({cancelled:true,reason:'busy'});
+    const selected=providers.get(safeId(id));
+    if(!selected||!selected.shared||!selected.repository)return freeze({cancelled:true,reason:'unavailable'});
+    if(!providerConnected(selected))return freeze({cancelled:true,reason:'not-connected'});
+    const traceId=OperationDiagnostics.start('provider-sync',selected.label,{provider:selected.id}),foreground=beginForeground(selected,options&&options.signal||null,{respectBackgroundSuspension:options&&options.respectBackgroundSuspension===true});
+    if(!foreground){OperationDiagnostics.finish({status:'skipped',reason:'busy'},traceId);return freeze({cancelled:true,reason:'busy'});}
+    // An automatic catch-up is already admitted under the suspension-aware
+    // provider owner. It must not impersonate a standalone file import and
+    // suspend/cancel its own foreground sync through the file-work observer.
+    const operation=BackupController.beginImport({backgroundPreemptible:options&&options.respectBackgroundSuspension===true}),cancelImport=()=>operation.cancel?.('Synchronization was cancelled.');
+    if(foreground.signal.aborted)cancelImport();else foreground.signal.addEventListener('abort',cancelImport,{once:true});
+    beginForegroundView(selected,'sync',`Syncing with ${selected.label}…`,options.presentation);setBusy(true);
+    try{
+      await enterForeground(selected,foreground,traceId,{prepare:true});
+      const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',quiet:true,sync:true,password:options&&options.password===true,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});
+      if(!candidate){finishForegroundView(selected,{message:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:'unavailable'},traceId);return freeze({cancelled:true,reason:'unavailable'});}
+      const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{sync:true});
+      if(result&&result.cancelled){finishForegroundView(selected,{message:result.reason==='needs-decision'?`${selected.label} has changes that need your review.`:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:String(result.reason||'cancelled')},traceId);return freeze({...result,cancelled:true,exportedAt});}
+      OperationDiagnostics.finish({cancelled:false},traceId);return freeze({...result,exportedAt});
+    }catch(error){
+      if(String(error&&error.code||'')==='STUDY_DIRECTOR_IMPORT_CANCELLED'){finishForegroundView(selected,{message:'Sync cancelled safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:'cancelled'},traceId);return freeze({cancelled:true,reason:'cancelled'});}
+      finishForegroundView(selected,{message:`Sync failed: ${userProviderMessage(error,'The newest shared version could not be verified safely.')}`,ok:false});OperationDiagnostics.fail(error,{},traceId);throw error;
+    }finally{
+      if(foregroundView()&&foregroundView().providerId===selected.id)finishForegroundView(selected);
+      foreground.signal.removeEventListener('abort',cancelImport);BackupController.finishImport(operation);await release(selected,'sync');setBusy(false);foreground.release();
+    }
+  }
+
   // A quiet run (adding what is missing after browser data was cleared) never
   // prompts: it runs only while already connected and never asks for sign-in.
   async function bringInRepositoryProvider(id,options={}){
     if(busy)return freeze({cancelled:true,reason:'busy'});
     const selected=providers.get(safeId(id));
     if(!selected||!selected.repository)throw new Error('Backup location is unavailable.');
-    const quiet=options?.quiet===true,missingOnly=options?.missingOnly===true,sync=quiet&&!missingOnly&&options?.sync===true,note=!missingOnly&&!sync&&typeof options?.note==='string'?options.note:'';
+    const quiet=options?.quiet===true,missingOnly=options?.missingOnly===true,note=!missingOnly&&typeof options?.note==='string'?options.note:'';
     if(quiet&&!providerConnected(selected))return freeze({cancelled:true,reason:'not-connected'});
     const traceId=OperationDiagnostics.start('provider-combine',selected.label,{provider:selected.id}),foreground=beginForeground(selected,options&&options.signal||null);
     if(!foreground){OperationDiagnostics.finish({status:'skipped',reason:'busy'},traceId);return freeze({cancelled:true,reason:'busy'});}
@@ -1599,8 +1843,8 @@ registry.define('backup-provider',1,input=>{
     try{
       await enterForeground(selected,foreground,traceId,{prepare:true,authorizeAs:quiet?'':'import'});
       statusText(`Reading ${selected.label}…`);
-      const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',note,missingOnly,before:String(options?.before||''),quiet,sync,password:sync&&options?.password===true,review:!quiet&&!note&&options?.review===true,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});if(!candidate){const message=missingOnly?'No version saved before browser data was cleared was found. Nothing was changed.':'Combine cancelled.';statusText(message);finishForegroundView(selected,{message,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({cancelled:true,...(missingOnly?{reason:'needs-decision'}:{})});}
-      const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{note,missingOnly,sync,review:!quiet&&!note&&options?.review===true});
+      const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',note,missingOnly,before:String(options?.before||''),quiet,review:!quiet&&!note&&options?.review===true,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});if(!candidate){const message=missingOnly?'No version saved before browser data was cleared was found. Nothing was changed.':'Combine cancelled.';statusText(message);finishForegroundView(selected,{message,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({cancelled:true,...(missingOnly?{reason:'needs-decision'}:{})});}
+      const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{note,missingOnly,review:!quiet&&!note&&options?.review===true});
       if(result&&result.cancelled){const message=String(result.reason||'').startsWith('note-')||result.reason==='needs-decision'?'No changes were made.':'Combine cancelled.';statusText(message);finishForegroundView(selected,{message,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({...result,cancelled:true});}
       const convergence=presentRecovery(selected,'bring-in',result);
 
@@ -1690,10 +1934,10 @@ registry.define('backup-provider',1,input=>{
   function list(){return Object.freeze([...providers.values()].map(item=>Object.freeze({id:item.id,label:item.label,shared:item.shared===true,connected:providerConnected(item)})));}
   function backgroundStatus(){return freeze([...providerBackgroundCoordinators.entries()].flatMap(([id,coordinator])=>[freeze({job:id+' maintenance',...(providerMaintenanceSchedulers.get(id)?.status()||coordinator.jobStatus('maintenance'))}),freeze({job:id+' integrity',...(providerIntegritySchedulers.get(id)?.status()||coordinator.jobStatus('integrity'))}),freeze({job:id+' convergence',...coordinator.jobStatus('convergence')})]));}
   // Sync state of each shared location, for diagnostics: times and flags only.
-  function diagnosticSync(){return freeze([...providers.values()].filter(selected=>selected.shared).map(selected=>{const state=syncState(selected),job=providerBackgroundCoordinators.get(selected.id)?.jobStatus('convergence');let endsAt=NaN;try{endsAt=Number(selected.connectionExpiresAt?.());}catch{}return freeze({id:selected.id,connected:providerConnected(selected),syncedAt:state.syncedAt,checkedAt:state.checkedAt?new Date(state.checkedAt).toISOString():'',nextEligibleAt:String(job?.nextEligibleAt||''),needsReview:!!state.review,needsUpdate:!!state.newer,needsPassword:!!state.password,behind:!!state.behind,catchingUp:!!state.catching,waitingForDeviceFolder:!!state.waitedAt,turnWaits:Math.max(0,Number(state.turnWaits)||0),signInEndsAt:Number.isFinite(endsAt)&&endsAt>0?new Date(endsAt).toISOString():''});}));}
+  function diagnosticSync(){return freeze([...providers.values()].filter(selected=>selected.shared).map(selected=>{const state=syncState(selected),job=providerBackgroundCoordinators.get(selected.id)?.jobStatus('convergence');let endsAt=NaN;try{endsAt=Number(selected.connectionExpiresAt?.());}catch{}return freeze({id:selected.id,connected:providerConnected(selected),syncedAt:state.syncedAt,checkedAt:state.checkedAt?new Date(state.checkedAt).toISOString():'',nextEligibleAt:String(job?.nextEligibleAt||''),needsReview:!!state.review,needsUpdate:!!state.newer,needsPassword:!!state.password,behind:!!state.behind,catchingUp:!!state.catching,turnWaits:Math.max(0,Number(state.turnWaits)||0),signInEndsAt:Number.isFinite(endsAt)&&endsAt>0?new Date(endsAt).toISOString():''});}));}
   function diagnosticConnections(){return freeze([...providers.values()].map(selected=>freeze({id:selected.id,connected:providerConnected(selected),formats:formatsByProvider.get(selected.id)||null,scopeBound:repositoryScopeByProvider.has(selected.id),retryAttempt:providerConvergenceRetryAttempts.get(selected.id)||0,retryBackoffCapped:(providerConvergenceRetryAttempts.get(selected.id)||0)>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length})));}
   function status(){return Object.freeze({busy,cancellable:!!foregroundController&&!foregroundController.signal.aborted,operation:foregroundView()?Object.freeze({...foregroundView()}):null});}
-  return Object.freeze({register,list,syncing:()=>sharingActive(),status,locationStatus,reviewSync,unlockSync,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,diagnosticSync,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},cancelForeground,history:historyRepositoryProvider,noteVersions:noteVersionsRepositoryProvider,backup:backupProvider,backupRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeRepositoryProviderVersion,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,suspendBackground,repositoryScope});
+  return Object.freeze({register,list,syncing:()=>sharingActive(),status,locationStatus,reviewSync,unlockSync,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,diagnosticSync,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},cancelForeground,history:historyRepositoryProvider,noteVersions:noteVersionsRepositoryProvider,backup:backupProvider,backupRepositoryProvider,syncRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeRepositoryProviderVersion,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,configureSessionOwnership,claimSessionOwnership,releaseSessionClaim,readSessionClaim,scheduleSharedSync,suspendBackground,repositoryScope});
 
   }
   return freeze({format:'study-director.backup-provider-module',contractVersion:1,createRuntime});

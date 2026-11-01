@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import vm from 'node:vm';
 
 const app=fs.readFileSync('source/app.html','utf8');
 const background=fs.readFileSync('source/core/repository-background.js','utf8');
@@ -32,6 +33,22 @@ assert.match(background,/function maintenancePlan\(cleanup\)[\s\S]*bounded-conti
 assert.match(background,/maintenanceDefersAcrossObservation[\s\S]*preserveDeferred[\s\S]*maintenanceDelay\(pending/u,'repeated inspection must preserve blocked/error deadlines instead of pulling them into a hot loop');
 assert.match(background,/function createMaintenanceScheduler[\s\S]*state-read-failed[\s\S]*marker-clear-failed[\s\S]*intent-write-failed/u,'shared maintenance lifecycle must retain retry opportunities when durable marker operations fail');
 assert.match(background,/function createIntegrityScheduler[\s\S]*integrityTargetDue[\s\S]*beginBackground\('integrity'[\s\S]*signal:scope\.signal[\s\S]*failureRetryMs/u,'repository integrity recurrence, ownership, cancellation and budget enforcement must be centralized in the shared background module');
+assert.match(background,/function createIntegrityScheduler[\s\S]*function schedule\(delay,reason='scheduled'\)\{return job\.schedule\([^\n]*'earliest'\)/u,'new integrity rechecks must retain their earlier deadline during a running scan');
+assert.match(app,/function currentBackupSourceRevision\(\)\{[\s\S]*stored=AppData\.local\.getJson\(STORAGE_KEYS\.storageHealth,null\),memory=readStorageHealth\(\)[\s\S]*Date\.parse\(revision\)[\s\S]*at>latestAt[\s\S]*return latest;/u,'backup source revision must choose the newest valid fast projection instead of trusting a stale raw localStorage mirror first');
+assert.doesNotMatch(app,/return stored&&stored\.lastLocalSaveAt\|\|readStorageHealth\(\)\.lastLocalSaveAt/u,'raw localStorage must never short-circuit a newer in-memory source revision');
+assert.match(app,/let startupChangeClockReady=null;[\s\S]*function reconcileStartupChangeClock\(\)[\s\S]*startupChangeClockReady=reconcileChangeClock\(\)\.catch\(error=>\{startupChangeClockReady=null;throw error;\}\)[\s\S]*markReady:async proof=>\{[\s\S]*await reconcileStartupChangeClock\(\);[\s\S]*installBackgroundOwners\(\)/u,'startup must reconcile the durable mutation epoch before automatic background owners can activate');
+assert.match(app,/async function reconcileChangeClock\(\)[\s\S]*backup\.change-clock-read',error,'error'\);throw error;\}[\s\S]*function reconcileStartupChangeClock\(\)/u,'a failed authoritative change-clock read must reject startup rather than silently open automatic backup with stale freshness');
+assert.match(app,/function ensureDeviceBackupInstalled\(\)[\s\S]*reconcileStartupChangeClock\(\)\.then\(\(\)=>DeviceBackup\.install\(\)[\s\S]*void ensureDeviceBackupInstalled\(\)\.then\(\(\)=>installRepositoryIntegrityScrub\(\)\)/u,'Device Folder startup and reset recovery must reuse the same authoritative change-clock and installation promise');
+assert.match(background,/function beginForeground\(\{[\s\S]*respectBackgroundSuspension=false[\s\S]*suspensionAware&&suspensions\.size[\s\S]*respectBackgroundSuspension:suspensionAware/u,'repository foreground admission must expose a narrow suspension-aware mode without changing explicit foreground semantics');
+assert.match(background,/function suspend\(reason='suspended',\{preserveForegroundController=null\}=\{\}\)[\s\S]*foreground\?\.respectBackgroundSuspension===true&&foreground\.controller!==preserveForegroundController[\s\S]*REPOSITORY_BACKGROUND_SUSPENDED[\s\S]*waiting\.push\(foreground\.settlement\)/u,'unrelated provider suspensions must pre-empt and await an automatic foreground handoff, while the same managed sync may retain its own controller');
+assert.match(provider,/function suspendBackground\(reason='pwa-update',\{preserveManagedSync=false\}=\{\}\)[\s\S]*reason==='sync'&&foregroundView\(\)\?\.kind==='sync'[\s\S]*preserveForegroundController:selected\.id===retainedProvider\?retained:null/u,'managed sync may preserve only its own foreground controller');
+assert.match(provider,/function catchUpSharedProvider\(selected,head,attemptRevision=canonicalConvergenceRevision\(\),\{preserveAutomatic=false\}=\{\}\)[\s\S]*syncRepositoryProvider\(selected\.id,\{checkpointId:head\.item\.id,presentation:summary,respectBackgroundSuspension:true\}\)[\s\S]*backoff:true,attemptRevision,preserveAutomatic,trigger:'catch-up-failed'/u,'automatic Drive catch-up must be suspension-aware and retain both the attempt revision and scheduler ownership of an unspent automatic opportunity');
+assert.match(provider,/async function backupProvider\(id=''\)[\s\S]*attemptRevision=canonicalConvergenceRevision\(\)[\s\S]*backoff:!behind,attemptRevision,trigger:behind\?'shared-behind':'sync-turn'/u,'foreground shared-turn retry must carry its attempt revision and exact trigger provenance');
+assert.match(provider,/function canonicalConvergenceRevision\(\)[\s\S]*automaticHooks\?\.current\?\.\(\)/u,'convergence must identify a canonical revision, without introducing a competing scheduler');
+assert.match(provider,/function automaticOpportunityUnspent\(selected,eligibleAt=Date\.now\(\)\)[\s\S]*deadline=automaticDueAt\(selected\)[\s\S]*deadline>at\+50/u,'automatic opportunity ownership must be evaluated against scheduler eligibility, not delayed async settlement time');
+assert.match(provider,/const attemptRevision=canonicalConvergenceRevision\(\),eligibleMs=Date\.parse\(String\(eligibleAt\|\|''\)\),preserveAutomatic=automaticOpportunityUnspent\(selected,Number\.isFinite\(eligibleMs\)\?eligibleMs:Date\.now\(\)\)[\s\S]*catchUpSharedProvider\(selected,ahead,attemptRevision,\{preserveAutomatic\}\)/u,'a convergence attempt must carry whether it became eligible before the pending automatic deadline into asynchronous catch-up');
+assert.match(provider,/function schedulePendingProviderBackup\(selected,delay=1000,\{backoff=false,attemptRevision='',preserveAutomatic=false,trigger='pending-retry'\}=\{\}\)[\s\S]*const newer=backoff&&attemptRevision&&canonicalConvergenceRevision\(\)!==attemptRevision[\s\S]*preserve=automaticNeeded\(selected\)&&\(preserveAutomatic===true\|\|backoff&&automaticOpportunityUnspent\(selected\)\)[\s\S]*if\(newer\|\|preserve\)scheduleAutomaticBackup\(selected,\{urgent:Number\.isFinite\(automaticState\(selected\)\.urgentSince\)\}\)[\s\S]*backoff&&!newer&&!preserve\?'replace':'earliest'/u,'failure backoff must preserve newer canonical work and scheduler-owned unspent automatic opportunities; only spent same-revision work may back off');
+assert.doesNotMatch(provider,/schedulePendingProviderBackup\([^\n]*\),'managed-recovery'/u,'generic failure retries must not masquerade as managed recovery');
 assert.match(app,/readRepositoryMaintenancePending\(\{throwOnError=false\}=[\s\S]*if\(throwOnError\)throw error/u,'durable maintenance state reads must be able to fail closed instead of silently becoming empty state');
 assert.match(app,/function mutateRepositoryMaintenancePending[\s\S]*BackupAppMeta\.transaction\('readwrite'[\s\S]*handle\.request\.onerror[\s\S]*outcome='superseded'[\s\S]*strict:true/u,'maintenance mutation must compare requests inside a strict transaction and fail closed on unavailable state');
 assert.doesNotMatch(device,/MAINTENANCE_(?:CATCHUP|GRACE|BLOCKED|ERROR|CONTENTION)_RETRY_MS/u,'Device must not retain a private maintenance cadence table');
@@ -55,10 +72,10 @@ assert.match(managedRepository,/function rethrowCleanupControl[\s\S]*AbortError[
 assert.match(managedRepository,/objectListingFailed=true[\s\S]*uncertainCount:uncertain/u,'repository object-list failures must remain diagnosable blocked uncertainty');
 
 // One ownership/pre-emption model; local executors retain only their transport/cadence work.
-assert.match(background,/const PRIORITY=freeze\(\{integrity:10,maintenance:20,automatic:30,convergence:40\}\)/u,'background priority must be explicit and shared');
+assert.match(background,/const PRIORITY=freeze\(\{integrity:10,maintenance:20,convergence:30\}\)/u,'background priority must be explicit and shared');
 assert.match(background,/function beginForeground[\s\S]*suspendTimers\(\)[\s\S]*row\.controller\.abort/u,'foreground work must disarm scheduled work and abort active lower-priority jobs');
-assert.match(background,/function suspend\(reason='suspended'\)[\s\S]*waiting=\[\][\s\S]*row\.settlement[\s\S]*const settled=waitForSettlement\(waiting\)/u,'shared suspension must expose a settlement barrier rather than merely signal abort');
-assert.match(provider,/if\(busy\|\|sync\?\.catching\)\{schedulePendingProviderBackup\(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS\)/u,'automatic backups never start while a foreground operation owns the engine');
+assert.match(background,/function suspend\(reason='suspended',\{preserveForegroundController=null\}=\{\}\)[\s\S]*waiting=\[\][\s\S]*row\.settlement[\s\S]*const settled=waitForSettlement\(waiting\)/u,'shared suspension must expose a settlement barrier rather than merely signal abort');
+assert.match(provider,/if\(busy\|\|sync\?\.catching\)\{schedulePendingProviderBackup\(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,\{trigger:'provider-busy'\}\)/u,'automatic backups never start while a foreground operation owns the engine and retain their deferral provenance');
 assert.match(provider,/scope=await background\.beginBackground\('convergence'/u,'automatic publication must use the shared background ownership gate');
 assert.match(provider,/async function createProtectedSafety\(id,purpose='before-clear-library',options=\{\}\)[\s\S]*beginForeground\(selected[\s\S]*await foreground\.settled[\s\S]*saveRepositoryProvider/u,'Before Clear Library safety must reserve foreground ownership and settle background work before repository work');
 assert.match(provider,/function beginForeground\(selected[\s\S]*background\.beginForeground/u,'Drive explicit operations must reserve shared foreground ownership');
@@ -73,7 +90,10 @@ assert.match(app,/function upkeepBlocker\(options\)\{\s*const blocker=background
 assert.match(app,/function foregroundChanged\(\)\{\s*if\(foregroundWatch===null\)return false;[\s\S]*?return wakeBackgroundOperations\('foreground-released'\);/u,'the watcher wakes every job once the foreground work ends');
 assert.match(app,/NoticeCoordinator\.subscribe\(\(\)=>\{foregroundChanged\(\);\}\)/u,'notice changes check the watcher at once');
 assert.match(app,/if\(pwaUpdateReservation===token\)\{pwaUpdateReservation=null;foregroundChanged\(\);\}/u,'an app update that ends releases upkeep at once');
-assert.match(app,/function holdBackgroundForFileWork\(\)\{\s*const status=BackupController\.status\(\),active=!!\(status\.importActive\|\|status\.standaloneExportActive\);[\s\S]*?BackupProviderRuntime\.suspendBackground\('file-backup'\)[\s\S]*?hold\.release\(\)[\s\S]*?foregroundChanged\(\);\s*\}\s*BackupController\.subscribeStatus\(holdBackgroundForFileWork\);/u,'a file backup or import the person starts holds background backup work; automatic backups never set those flags');
+assert.match(app,/function holdBackgroundForFileWork\(\)\{\s*const status=BackupController\.status\(\),active=!!\(status\.importHoldsBackground\|\|status\.standaloneExportActive\);[\s\S]*?BackupProviderRuntime\.suspendBackground\('file-backup'\)[\s\S]*?hold\.release\(\)[\s\S]*?foregroundChanged\(\);\s*\}\s*BackupController\.subscribeStatus\(holdBackgroundForFileWork\);/u,'a file backup or import the person starts holds background backup work; automatic backups never set those flags');
+assert.match(app,/if\(importCancel\)importCancel\.hidden=!state\.importHoldsBackground/u,'the standalone-file import Cancel control must not appear for an automatic provider catch-up');
+assert.match(backup,/function beginImport\(\{backgroundPreemptible=false\}=\{\}\)[\s\S]*backgroundPreemptible:backgroundPreemptible===true[\s\S]*importHoldsBackground:!!activeImportOperation&&!activeImportOperation\.backgroundPreemptible/u,'standalone/manual imports hold all providers while an admitted automatic sync does not cancel itself via the file observer');
+assert.match(provider,/BackupController\.beginImport\(\{backgroundPreemptible:options&&options\.respectBackgroundSuspension===true\}\)/u,'automatic catch-up must use the controller under its already suspension-aware provider ownership');
 assert.doesNotMatch(app,/schedule\w*\((?:15000|ATTACHMENT_INTEGRITY_RETRY_MS),'foreground-busy'\)/u,'no upkeep job polls for the foreground on its own');
 assert.match(app,/function backupBackgroundAvailability\(\)\{return backgroundBlocker\(\)\|\|/u,'automatic backups and their upkeep use the shared gate');
 assert.match(app,/const DataMaintenanceJob=[\s\S]{0,120}isAvailable:\(\)=>upkeepBlocker\(\{housekeeping:false\}\)/u,'canonical maintenance is recovery and keeps running through a browser-data clear');
@@ -129,4 +149,98 @@ assert.doesNotMatch(provider,/Background\.integrity|PROVIDER_CONVERGENCE_BUDGET|
 assert.doesNotMatch(app,/dataMaintenanceTimer|attachmentIntegrityTimer|attachmentIntegrityRunning|attachmentIntegrityAwaitingControl|attachmentMaintenanceDailyTimer/u,'host timers must not duplicate lifecycle ownership');
 assert.doesNotMatch(device,/scheduledUrgent|scheduledRetry|automaticRetryPaused/u,'automatic deadlines and blockers belong to the shared lifecycle');
 assert.match(host,/JSON\.stringify\(pending\)!==JSON\.stringify\(expected\)/u,'publication completion must compare the serviced durable request');
+// P5: exercise the exact production admission and ownership-wake functions
+// under deterministic provider, lock, visibility and wall-clock conditions.
+function productionFunction(signature){
+ const start=app.indexOf(signature),end=start>=0?app.indexOf('\n}',start):-1;
+ assert.ok(start>=0&&end>start,'missing production function '+signature);
+ return app.slice(start,end+2);
+}
+const updateRuntime=productionFunction('function pwaProviderNetworkBusy(){')+'\n'+productionFunction('async function checkPwaUpdateIfDue({force=false}={}){');
+function updateHarness({busy=false,backingUp=false,lockRace=false,offline=false}={}){
+ const activity={busy,backingUp},calls={update:0,mark:0,fail:0,retry:[],lock:0};
+ const context=vm.createContext({
+  navigator:{onLine:!offline,locks:{request:async(_,__,perform)=>{calls.lock++;if(lockRace)activity.backingUp=true;return perform();}}},
+  AppOwnership:{status:()=>({state:'primary'})},OWNERSHIP_STATES:{PRIMARY:'primary'},
+  BackupProviderRuntime:{status:()=>({busy:activity.busy}),locationStatus:()=>({backingUp:activity.backingUp})},
+  PwaLifecycle:{status:()=>({supported:true,registered:true,checkError:false}),checkForUpdate:async()=>{calls.update++;return true;}},
+  pwaUpdateCheckDue:()=>true,markPwaUpdateCheck:()=>{calls.mark++;},clearPwaUpdateCheckFailure:()=>{},
+  recordPwaUpdateCheckFailure:()=>{calls.fail++;},schedulePwaUpdateCheck:delay=>{calls.retry.push(delay);},
+  AppDiagnostics:{capture:()=>{}},PWA_UPDATE_CHECK_LOCK:'qa-update-check',
+  pwaUpdateCheckRetryAt:0,Date
+ });
+ vm.runInContext('let pwaUpdateCheckRunning=false;\n'+updateRuntime+'\nglobalThis.p5Check=checkPwaUpdateIfDue;',context);
+ return {activity,calls,check:force=>context.p5Check({force})};
+}
+for(const mode of [{busy:true},{backingUp:true},{lockRace:true}]){
+ const t=updateHarness(mode);
+ assert.equal(await t.check(false),false);
+ assert.equal(t.calls.update,0,'automatic discovery never competes with an observed provider transfer');
+ assert.equal(t.calls.fail,0,'provider deferral must not count as update failure');
+ assert.equal(t.calls.retry.at(-1),30000,'provider deferral retains a bounded retry on the existing timer');
+ if(mode.lockRace)assert.equal(t.calls.lock,1,'busy state must be checked again after waiting on the Web Lock');
+ else assert.equal(t.calls.lock,0,'busy provider does not acquire a network update lock');
+ assert.equal(t.activity.backingUp===true||t.activity.busy===true,true);
+}
+{
+ const t=updateHarness({busy:true,backingUp:true});
+ assert.equal(await t.check(true),true,'manual user-triggered check must remain available');
+ assert.equal(t.calls.update,1);assert.equal(t.calls.mark,1);assert.equal(t.calls.fail,0);
+}
+{
+ const t=updateHarness();assert.equal(await t.check(false),true);
+ assert.equal(t.calls.update,1);assert.equal(t.calls.mark,1);assert.equal(t.calls.lock,1);
+}
+{
+ const t=updateHarness({offline:true});assert.equal(await t.check(false),false);
+ assert.equal(t.calls.update,0);assert.equal(t.calls.lock,0);
+}
+const claimRuntime=productionFunction('async function checkSessionOwnershipClaim(){')+'\n'
+ +productionFunction('function wakeSessionOwnershipClaim(){')+'\n'
+ +productionFunction('function installSessionWatch(){');
+function claimHarness(){
+ let now=100000,remote=0,local=0,connected=true,online=true,ready=true;
+ const handlers=new Map(),intervals=[];
+ const document={visibilityState:'visible',addEventListener:(kind,fn)=>handlers.set('document:'+kind,fn)};
+ const window={addEventListener:(kind,fn)=>handlers.set('window:'+kind,fn)};
+ const context=vm.createContext({
+  navigator:{get onLine(){return online;}},document,window,Date:{now:()=>now},
+  StartupLifecycle:{status:()=>({fullyInitialized:ready})},TASKS:[{}],sessionPanelMode:'active',
+  BackupProviderRuntime:{connected:()=>connected,readSessionClaim:async()=>{remote++;return null;},syncing:()=>false,wakeBackground:()=>{}},
+  AppData:{activeSession:{load:async()=>{local++;return {ok:true,value:null,error:null,storage:{idb:true}};}}},
+  AppDiagnostics:{capture:()=>{}},SESSION_CLAIM_WATCH_MS:15000,SESSION_WATCH_MS:120000,
+  setInterval:(fn,ms)=>{intervals.push({fn,ms});return intervals.length;},
+  ActiveSessionCodec:{sanitizeCurrent:value=>value},InstallationIdentity:{getId:()=> 'local'}
+ });
+ vm.runInContext('let sessionClaimFreeze=null,sessionClaimCheckActive=false,sessionClaimLastAttemptAt=0,sessionWatchTimer=null,sessionClaimWatchTimer=null;\n'+claimRuntime+'\nglobalThis.p5Start=installSessionWatch;globalThis.p5Wake=wakeSessionOwnershipClaim;globalThis.p5Check=checkSessionOwnershipClaim;',context);
+ const settle=async()=>{for(let k=0;k<8;k++)await Promise.resolve();};
+ return {start:()=>context.p5Start(),wake:()=>context.p5Wake(),check:()=>context.p5Check(),get remote(){return remote;},get local(){return local;},intervals,
+  shift:ms=>{now+=ms;},setOnline:v=>{online=v;},setVisible:v=>{document.visibilityState=v?'visible':'hidden';},
+  setConnected:v=>{connected=v;},setReady:v=>{ready=v;},
+  event:async name=>{handlers.get(name)?.();await settle();},poll:async()=>{intervals.find(x=>x.ms===15000)?.fn();await settle();}
+ };
+}
+{
+ const t=claimHarness();assert.equal(t.start(),true);assert.equal(t.start(),false,'one existing owner of intervals and wake handlers');
+ assert.equal(t.intervals.length,2);
+ for(let minute=0;minute<30;minute++)for(let quarter=0;quarter<4;quarter++){
+  t.shift(15000);await t.poll();
+ }
+ assert.equal(t.remote,120,'30 minutes of an eligible, visible online session has at most four remote claim reads per minute');
+ assert.equal(t.local,120,'strict local session check remains paired with each remote claim read');
+ await t.event('window:online');assert.equal(t.remote,120,'redundant online events cannot duplicate an immediate poll');
+ t.setOnline(false);t.shift(15000);await t.poll();assert.equal(t.remote,120,'offline interval performs no remote request');
+ t.shift(600000);t.setOnline(true);await t.event('window:online');assert.equal(t.remote,121,'connectivity return immediately checks an overdue ownership claim');
+ await t.event('window:online');assert.equal(t.remote,121,'successive reconnect events remain coalesced');
+ t.setVisible(false);t.shift(60000);await t.poll();assert.equal(t.remote,121);
+ t.setVisible(true);await t.event('document:visibilitychange');assert.equal(t.remote,122,'foreground return checks immediately after missed interval');
+ await t.poll();assert.equal(t.remote,122,'immediate scheduled tick does not double the foreground return poll');
+}
+// BS11/17 retain safety-critical boundaries: read-only planning precedes the
+// destructive lease, and startup orphan collection is not replaced by a wake.
+assert.match(provider,/Read-only planning is deliberately outside the maintenance exclusion[\s\S]*repositoryObjectInventory\(planning,[\s\S]*beginRepositoryMaintenance\(planning/u);
+assert.match(provider,/repositoryProviderInventory\(protectedSelection,\{signal,freshDigests:true\}\)[\s\S]*repositoryCleanupInventoryMatches\(state,currentInventory\)/u);
+assert.match(app,/installBackgroundOwners\(\);scheduleDataMaintenance\(\);BackgroundOperations\.wake\('startup'\);installSessionWatch\(\)/u);
+assert.match(app,/void BackupFiles\.collect\(\)\.catch/u,'cold startup must discover orphan scratch bytes even without a pending job');
+
 console.log(JSON.stringify({status:'PASS',suite:'background-work-contract',sharedStateMachine:true,maintenanceEligibility:true,maintenanceClassification:true,blockedBackoff:true,foregroundPreemption:true,suspensionSettlement:true,opportunityDrivenIntegrity:true,leanProviderPort:true,clearLibrarySafetyForeground:true,backgroundDiagnostics:true,authoritativeRebase:true,persistenceHardening:true,sharedRepositoryPolicy:true},null,2));

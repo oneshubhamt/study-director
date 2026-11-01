@@ -428,6 +428,18 @@ records.push(freeze({version:16,recordKind:'study',date:'2026-09-21',reflection:
   const added=await runtime.providers.bringInRepositoryProvider('repository-missing-qa',{missingOnly:true,quiet:true,before:beforeClear});
   assert.equal(added.cancelled,false);assert.equal(added.added,1);assert.deepEqual(records.map(row=>row.date),['2026-09-18'],'the missing Saved Day comes back');
   assert.ok(Date.parse(added.exportedAt)<Date.parse(beforeClear),'the version used was saved before the clear');
+  // Each uploaded version records how many attachments it is missing, and
+  // Version History receives that count on the version's location.
+  // (Versions this test seeds directly carry no format; uploads always do.)
+  const storedVersions=[...remoteFiles.values()].filter(file=>file.kind==='checkpoint'&&file.history?.format>0);
+  assert.ok(storedVersions.length>0&&storedVersions.every(file=>file.history.attachmentsMissing===0),'upload records a complete version as missing no attachments');
+  const listedId=(await runtime.providers.history('repository-missing-qa',{interactive:false})).entries[0].location.checkpointId;
+  const partialVersion=[...remoteFiles.values()].find(file=>file.kind==='checkpoint'&&file.id===listedId),completeSummary=partialVersion.history;
+  const missingCount=async value=>{partialVersion.history=freeze({...completeSummary,attachmentsMissing:value});const listed=await runtime.providers.history('repository-missing-qa',{interactive:false});return listed.entries.find(entry=>entry.location.checkpointId===partialVersion.id)?.location.attachmentsMissing;};
+  try{
+    assert.equal(await missingCount(3),3,'a version missing attachment bytes reaches Version History with its count');
+    assert.equal(await missingCount('3x'),0);assert.equal(await missingCount(-1),0);assert.equal(await missingCount(undefined),0,'an absent or invalid count reads as none');
+  }finally{partialVersion.history=completeSummary;}
   records=[];
   const none=await runtime.providers.bringInRepositoryProvider('repository-missing-qa',{missingOnly:true,quiet:true,before:'2000-01-01T00:00:00.000Z'});
   assert.equal(none.cancelled,true);assert.equal(none.reason,'needs-decision');assert.deepEqual(records,[],'nothing changes without a version from before the clear');

@@ -134,12 +134,27 @@ registry.define('profiles',1,()=>{
       const pending=read().removing.filter(scope=>scope!==pageScope);
       for(const scope of pending){
         const scoped=name=>scope?`${name}${separator}${scope}`:String(name);
+        // The registry is the durable deletion intent. Refuse to clean a scope
+        // that another tab has since attached to a live profile.
+        const assertPending=()=>{
+          const state=read();
+          if(state.unsupported||!state.removing.includes(scope)||state.profiles.some(row=>row.scope===scope))throw new Error('Profile removal state changed during cleanup. No further data was deleted.');
+        };
         try{
-          for(const key of storage.keys())if(scope?key.endsWith(separator+scope):names.keys.includes(key))storage.remove(key);
+          assertPending();
+          // Preserve the only local rescue copies until both persistent stores
+          // have been retired. If a browser blocks deletion, retry can still
+          // recover data and the registry retains this removal intent.
           await platform.deleteDatabase(scoped(names.database));
-          for(const directory of names.directories)await platform.removeDirectory(scoped(directory));
-          if(!scope&&names.legacyDirectory)await platform.removeDirectory(names.legacyDirectory);
-          const list=read();write({...list,removing:list.removing.filter(value=>value!==scope)});
+          assertPending();
+          for(const directory of names.directories){await platform.removeDirectory(scoped(directory));assertPending();}
+          if(!scope&&names.legacyDirectory){await platform.removeDirectory(names.legacyDirectory);assertPending();}
+          for(const key of storage.keys()){
+            if(!(scope?key.endsWith(separator+scope):names.keys.includes(key)))continue;
+            assertPending();
+            if(storage.remove(key)!==true)throw new Error('Removed profile browser recovery storage could not be cleared. Cleanup will be retried.');
+          }
+          const list=read();assertPending();write({...list,removing:list.removing.filter(value=>value!==scope)});
         }catch(error){return freeze({removed:false,error});}
       }
       return freeze({removed:pending.length>0,error:null});

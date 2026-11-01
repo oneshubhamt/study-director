@@ -123,7 +123,17 @@ for(const entry of ['node_modules/','dist/','qa/','coverage/','.nyc_output/','te
 const fastWorkflow=fs.readFileSync('.github/workflows/qa-fast.yml','utf8'),promotionWorkflow=fs.readFileSync('.github/workflows/qa-promotion.yml','utf8');
 assert.match(fastWorkflow,/pull_request:/);assert.match(fastWorkflow,/push:/);assert.match(fastWorkflow,/node tests\/helpers\/run-category\.mjs targeted/,'automatic checks must run the explicit targeted contracts');assert.doesNotMatch(fastWorkflow,/npm (?:ci|install)/);
 assert.match(fastWorkflow,/bug-regression-policy\.mjs/,'bug-like PRs must be machine-checked for regression protection');
-assert.match(promotionWorkflow,/workflow_dispatch:/);assert.doesNotMatch(promotionWorkflow,/^  (?:push|release|pull_request):/m,'full promotion must be manually invoked');assert.match(promotionWorkflow,/default: false/);assert.match(promotionWorkflow,/if: inputs\.run_browser/,'browser certification must be explicitly requested');assert.match(promotionWorkflow,/node tests\/helpers\/mutation\.mjs/);assert.match(promotionWorkflow,/npm run test:release/);assert.match(promotionWorkflow,/npm run test:coverage:browser/,'promotion QA must collect browser/build runtime coverage');
+// Promotion remains manual by default. Its only automated entry is an
+// explicit request-file edit on current-fixes; ordinary code pushes do not run it.
+const promotionTriggerBlock=promotionWorkflow.match(/^on:\n([\s\S]*?)^permissions:/m)?.[1]||'';
+assert.deepEqual([...promotionTriggerBlock.matchAll(/^  ([a-z_]+):/gm)].map(([,name])=>name).sort(),['push','workflow_dispatch']);
+assert.match(promotionTriggerBlock,/^  push:\n    branches: \[current-fixes\]\n    paths:\n      - \.github\/qa-requests\/promotion\.txt(?:\n|$)/m,'only a dedicated QA request on current-fixes may trigger full promotion');
+assert.match(promotionWorkflow,/default: false/,'manual browser certification must remain opt-in');
+assert.match(promotionWorkflow,/if: github\.event_name == 'push' \|\| inputs\.run_browser/,'only explicit browser selection or a dedicated QA request may enable browser certification');
+assert.match(promotionWorkflow,/if: \(github\.event_name == 'push' \|\| inputs\.run_browser\) && always\(\)/,'the performance gate must follow the same browser-selection policy');
+assert.match(promotionWorkflow,/node tests\/helpers\/mutation\.mjs/);
+assert.match(promotionWorkflow,/npm run test:release/);
+assert.match(promotionWorkflow,/npm run test:coverage:browser/,'promotion QA must collect browser/build runtime coverage');
 
 assert.match(fastWorkflow,/node build\/build\.mjs/);assert.match(fastWorkflow,/node build\/verify-build\.mjs/);
 assert.doesNotMatch(fastWorkflow,/npm run test:coverage:browser|run-category\.mjs fast/,'automatic repository checks must not silently expand to full or browser QA');

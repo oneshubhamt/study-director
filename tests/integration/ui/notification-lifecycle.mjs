@@ -119,10 +119,10 @@ class Element {
 {
   // One Back up now and one Version History for every location: shown while
   // any location is connected; a running restore can still be reopened.
-  const html=fs.readFileSync('source/app.html','utf8'),start=html.indexOf('function renderBackupActions(){'),end=html.indexOf('\n// The Device Folder backs up first',start);
+  const html=fs.readFileSync('source/app.html','utf8'),start=html.indexOf('function renderBackupActions(){'),end=html.indexOf('\nasync function backUpEverywhere(){',start);
   const draw=states=>{
-    const nodes=new Map(['backup-shared-actions','backup-now','open-version-history'].map(id=>[id,new Element()]));
-    new Function('document','BackupProviderRuntime',html.slice(start,end)+';renderBackupActions();')({getElementById:id=>nodes.get(id)||null},{locationStatus:id=>states[id]||null});
+    const nodes=new Map(['backup-shared-actions','backup-now','open-version-history'].map(id=>[id,new Element()]));for(const node of nodes.values())node.hidden=false;
+    new Function('document','BackupProviderRuntime',html.slice(start,end)+'\n;renderBackupActions();')({getElementById:id=>nodes.get(id)||null},{locationStatus:id=>states[id]||null});
     return {group:nodes.get('backup-shared-actions').hidden,backupNow:nodes.get('backup-now').disabled,versions:nodes.get('open-version-history').disabled};
   };
   const off={connected:false},on={connected:true,busy:false};
@@ -139,7 +139,7 @@ class Element {
   const draw=({exporting=false,fileBusy=false,importing=false,event=null}={})=>{
     const nodes=new Map(ids.map(id=>[id,new Element()]));
     new Function('document','BackupController','Exports','BackupPresentation',html.slice(start,end)+';fileBackupRowReady=true;renderFileBackup();')(
-      {getElementById:id=>nodes.get(id)||null},{status:()=>({standaloneExportActive:exporting,importActive:importing})},{status:()=>({fileBusy})},
+      {getElementById:id=>nodes.get(id)||null},{status:()=>({standaloneExportActive:exporting,importActive:importing,importHoldsBackground:importing})},{status:()=>({fileBusy})},
       {current:()=>event,summary:value=>value?.message||''});
     return id=>nodes.get(id);
   };

@@ -7,11 +7,14 @@ import {renderBuild,validateBuild} from '../../../build/build.mjs';
 
 const root=path.resolve(new URL('../../..',import.meta.url).pathname);
 const read=relative=>fs.readFileSync(path.join(root,relative),'utf8');
-const build=renderBuild();assert.equal(validateBuild(build),true);
+const sourceCommit='a'.repeat(40),previousSourceCommit=process.env.SD_SOURCE_COMMIT;process.env.SD_SOURCE_COMMIT=sourceCommit;
+const build=renderBuild();assert.equal(validateBuild(build),true);assert.equal(build.identity.sourceCommit,sourceCommit);
 const manifest=JSON.parse(read('source/platform/manifest.webmanifest'));
 const merge=JSON.parse(read('source/platform/firebase-hosting-headers.merge.json'));
 
 assert.ok(build.deployment.has('firebase-hosting-headers.merge.json'));
+const deploymentIndex=build.deployment.get(build.identity.main),richTextName=build.externalNames.deployment.get('rich-text');
+assert.ok(deploymentIndex.includes(`<link rel="preload" as="script" href="${richTextName}">`),'deployment must preload the blocking RichText runtime');
 assert.equal(build.deployment.has('firebase.json'),false,'generated Firebase project configuration must remain outside public build output');
 assert.equal(Object.prototype.hasOwnProperty.call(merge.hosting,'public'),false,'the merge file must not replace the existing public directory setting');
 const headers=new Map(merge.hosting.headers.map(item=>[item.source,new Map(item.headers.map(row=>[row.key.toLowerCase(),row.value]))]));
@@ -31,7 +34,7 @@ try{
     const relative=path.relative(root,source).split(path.sep)[0];
     return !['dist','node_modules','.git','tests'].includes(relative);
   }});
-  const staged=captureProcess(process.execPath,['build/stage-firebase.mjs'],{cwd:isolatedRoot,encoding:'utf8'});
+  const staged=captureProcess(process.execPath,['build/stage-firebase.mjs'],{cwd:isolatedRoot,encoding:'utf8',env:{...process.env,SD_SOURCE_COMMIT:sourceCommit}});
   assert.equal(staged.status,0,staged.stderr||staged.stdout);
   const firebaseStage=path.join(isolatedRoot,'dist','firebase-project'),publicDir=path.join(firebaseStage,'public');
   const listFiles=(directory,prefix='')=>fs.readdirSync(directory,{withFileTypes:true}).flatMap(entry=>{
@@ -44,6 +47,7 @@ try{
   assert.ok(fs.existsSync(path.join(firebaseStage,'.firebaserc')));
   assert.ok(fs.existsSync(path.join(firebaseStage,'README.md')));
   assert.ok(fs.existsSync(path.join(publicDir,'index.html')));
+  assert.ok(fs.readFileSync(path.join(publicDir,'index.html'),'utf8').includes(`<meta name="study-director-source-commit" content="${sourceCommit}">`),'staged app must carry exact source commit provenance');
   assert.ok(fs.existsSync(path.join(publicDir,'assets','icons','icon-192.png')));
   assert.equal(fs.existsSync(path.join(publicDir,'firebase.json')),false);
   assert.equal(fs.existsSync(path.join(publicDir,'.firebaserc')),false);
@@ -64,6 +68,7 @@ try{
   assert.deepEqual(listFiles(publicDir).sort(),[...build.deployment.keys()].filter(name=>name!=='firebase-hosting-headers.merge.json').sort(),'the staged public directory must contain only the current release inventory');
 }finally{
   fs.rmSync(temp,{recursive:true,force:true});
+  if(previousSourceCommit===undefined)delete process.env.SD_SOURCE_COMMIT;else process.env.SD_SOURCE_COMMIT=previousSourceCommit;
 }
 
 console.log(JSON.stringify({

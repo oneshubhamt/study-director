@@ -48,7 +48,7 @@ let importBlob=codec.createV10Container(new Blob([JSON.stringify(manifest)+'\n'+
 
 const originalDeletionLedger=freeze([freeze({date:'2026-08-30',deletedAt:'2026-08-31T00:30:00.000Z'})]);
 const originalAttachmentDeletionLedger=freeze([freeze({assetId:'img-deletedhistoryabcdefghijkl',deletedAt:'2026-08-31T00:45:00.000Z'})]);
-let notes={Local:freeze({key:'Local',text:'local before restore',updatedAt:'2026-08-31T01:00:00.000Z'})},assets=new Map(),assetMeta=new Map(),journal=null,failAtPhase='',deletionLedger=[...originalDeletionLedger],attachmentDeletionLedger=[...originalAttachmentDeletionLedger],noteChoice=null;
+let notes={Local:freeze({key:'Local',text:'local before restore',updatedAt:'2026-08-31T01:00:00.000Z'})},assets=new Map(),assetMeta=new Map(),journal=null,failAtPhase='',verificationFault='',deletionLedger=[...originalDeletionLedger],attachmentDeletionLedger=[...originalAttachmentDeletionLedger],noteChoice=null;
 const events=[],statuses=[];let configureResult=freeze({});const fn=()=>false,clampText=(v,max=100000)=>String(v??'').slice(0,max);
 const documentStub=freeze({getElementById:()=>null,addEventListener:()=>false,createElement:()=>({click:()=>events.push('safety-download'),remove:()=>false}),createDocumentFragment:()=>({appendChild:()=>false}),body:freeze({appendChild:()=>false})});
 const runtime=BackupModule.createRuntime(freeze({ports:freeze({
@@ -56,7 +56,7 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
   
   persistence:freeze({activeSessionLoad:async()=>({ok:true,value:null,error:null,storage:{idb:true}}),activeSessionSave:async v=>({ok:true,value:v}),activeSessionClear:async()=>({ok:true}),activeSessionSettled:async()=>true,dailyRecordBackupDates:async()=>({dates:[],warning:''}),dailyRecordBackupMonth:async()=>[],dailyRecordDocuments:async()=>[],dailyRecordImportBatches:async()=>({batches:0}),dailyRecordRemove:async()=>true,dailyRecordTimestamp:()=>0,notesExportPayload:()=>notes,notesReadFreshPayload:async()=>notes,notesReadFreshItems:async keys=>(keys||[]).map(key=>notes[key]||null),notesFlush:async()=>true,notesNormalizePayload:v=>Object.fromEntries(Object.entries(v||{}).map(([k,x])=>[k,normalizeArea(x,k)]).filter(([,x])=>x)),notesTrashKey:key=>String(key).startsWith('~')?'':'~deleted '+key,notesAlignByTitle:value=>value,notesFailure:()=>({failed:false}),restoreJournalPrepare:async v=>(journal={state:{id:v.id},payload:v}),restoreJournalRead:async()=>journal,restoreJournalMark:async(id,phase)=>{journal.state.phase=phase;if(failAtPhase===phase){failAtPhase='';throw new Error(`injected ${phase} restore failure`);}return journal.state;},restoreJournalClear:async()=>{journal=null;return true;},personalSettle:async()=>true,personalExport:async()=>personalData,personalImport:async()=>true,personalVerify:async()=>true,storageGeneration:()=>0,sourceRevision:async()=> '2026-09-15T12:00:00.000Z',snapshotRevision:async()=>'stable',canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],scheduleRead:()=>'',installationId:()=> 'inst_device_local',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>deletionLedger.map(value=>({...value})),deletionRecoveryReplaceSavedDays:async values=>{deletionLedger=(values||[]).map(value=>({...value}));return true;},deletionRecoveryNotes:async()=>[],deletionRecoveryReplaceNotes:async()=>true,deletionRecoveryAttachments:async()=>attachmentDeletionLedger.map(value=>({...value})),deletionRecoveryReplaceAttachments:async values=>{attachmentDeletionLedger=(values||[]).map(value=>({...value}));return true;},deletionRecoveryClearAttachment:async assetIdValue=>{attachmentDeletionLedger=attachmentDeletionLedger.filter(item=>item.assetId!==assetIdValue);return true;},reconciliationBaseRead:async()=>null,reconciliationBaseReadNotes:async()=>freeze({}),reconciliationBaseReadDays:async()=>freeze({}),...keptReviews.ports,reconciliationBaseWrite:async()=>true}),
   assets:freeze({
-    list:async()=>Promise.all([...assets].map(async([id,blob])=>{const meta=assetMeta.get(id)||{};return{id,hash:await codec.checksumBlob(blob),type:blob.type,size:blob.size,name:String(meta.name||''),library:meta.library===true};})),
+    list:async()=>{if(verificationFault==='attachments'&&journal?.state?.phase==='verifying')throw new Error('QA_FIXTURE attachment verification failure');return Promise.all([...assets].map(async([id,blob])=>{const meta=assetMeta.get(id)||{};return{id,hash:await codec.checksumBlob(blob),type:blob.type,size:blob.size,name:String(meta.name||''),library:meta.library===true};}));},
     importAll:async items=>{for(const item of items){events.push('asset-put');assets.set(item.assetId,item.blob);assetMeta.set(item.assetId,{name:item.name,library:item.library});}return items.length;},
     restoreAll:async items=>{assets=new Map(items.map(item=>[item.assetId,item.blob]));assetMeta=new Map(items.map(item=>[item.assetId,{name:item.name,library:item.library}]));},
     get:async id=>assets.get(id)||null,put:async(id,blob)=>{events.push('asset-put');assets.set(id,blob);},keys:async()=>[...assets.keys()],removeMany:async ids=>{events.push('asset-remove');for(const id of ids)assets.delete(id);return ids.length;},removeMetadata:async ids=>{for(const id of ids){assets.delete(id);assetMeta.delete(id);}return freeze({status:'completed',removed:ids.length});},scheduleMaintenance:()=>{events.push('asset-maintenance');return true;}}),
@@ -81,6 +81,19 @@ assert.equal(assets.has(unusedAssetId),false,'unreferenced non-library checkpoin
 assert.equal(notes.Ethics.text,rich);assert.ok(events.indexOf('asset-put')<events.indexOf('reconcile-notes'),'selected asset bytes must commit before rich strings');
 assert.equal(events.filter(event=>event==='asset-put').length,2,'only selected attachments may be published');
 assert.ok(events.includes('asset-maintenance'),'post-commit maintenance must be scheduled');
+
+// Changed-only verification must still enter the attachment family when a real
+// attachment mutation committed. The generic shared-base fixture has no bytes.
+{
+  notes={Local:freeze({key:'Local',text:'local before attachment verification fault',updatedAt:'2026-08-31T01:00:00.000Z'})};assets=new Map();assetMeta=new Map();deletionLedger=originalDeletionLedger.map(value=>({...value}));attachmentDeletionLedger=originalAttachmentDeletionLedger.map(value=>({...value}));events.length=0;journal=null;verificationFault='attachments';
+  const verificationCandidate=await runtime.controller.inspect(importBlob,{filename:'attachment-verification-fault.sdbackup'});
+  const failure=await runtime.controller.restore(verificationCandidate).then(()=>null,error=>error);verificationFault='';
+  assert.ok(failure instanceof Error,'attachment verification fault must reject the restore');
+  assert.equal(failure.backupStage,'restore-verification-attachments');assert.equal(failure.code,'RESTORE_VERIFICATION_MISMATCH');
+  assert.equal(assets.size,0,'attachment verification failure must roll back newly imported bytes');
+  assert.deepEqual(Object.keys(notes),['Local'],'attachment verification failure must restore local notes');
+  assert.equal(journal,null,'attachment verification failure must retire its rollback journal after rollback');
+}
 
 
 // A standalone Attachment Library identity that was explicitly deleted locally

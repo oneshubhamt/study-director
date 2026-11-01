@@ -16,12 +16,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '26.12.1'
+          package-manager-cache: false
       - name: Bug regression policy
         if: github.event_name == 'pull_request'
         run: node tests/helpers/bug-regression-policy.mjs
@@ -43,9 +44,12 @@ jobs:
           tests/integration/exports/scratch-gc.mjs
           tests/architecture/storage/background-work-contract.mjs
           tests/architecture/storage/managed-recovery-contract.mjs
+          tests/integration/pwa/service-worker-lifecycle.mjs
           tests/architecture/test-suite/suite-governance.mjs
           tests/architecture/test-suite/suite-structure.mjs
           tests/architecture/test-suite/suite-policy.mjs
+      - name: PWA deployment contract
+        run: node tests/architecture/build/deployment-contract.mjs
       - name: Source build
         run: node build/build.mjs
       - name: Verify generated build

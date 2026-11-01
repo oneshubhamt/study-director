@@ -227,12 +227,15 @@ async function captureLogicalCheckpoint(exportedAt=new Date().toISOString(),opti
   assertStorageGeneration(generation);
   const installationId=AppData.provenance.installationId();
   const checkpointMetadata=Number(backupVersion)>=14?BackupCodec.createCheckpointMetadata(installationId,exportedAt):null;
+  const attachmentCoverage=BackupCodec.attachmentCoverage(assetItems.map(item=>item.descriptor));
+  const attachmentWarning=BackupCodec.missingAttachmentWarning(assetItems.map(item=>item.descriptor));
+  const captureCompleteness=freeze({...completeness,attachments:attachmentCoverage.fullyRecoverable?'complete':'missing',fullyRecoverable:completeness.complete&&attachmentCoverage.fullyRecoverable});
   const captureBase={
     format:LOGICAL_CHECKPOINT_CAPTURE_FORMAT,version:LOGICAL_CHECKPOINT_CAPTURE_VERSION,
     dailyDocuments:freeze([...dailyDocuments]),exportedAt,sourceRevision,studentName:getStudentNameFromDisplay(),installationId,checkpoint:checkpointMetadata,
     recordDates:freeze([...recordDates]),noteItems:freeze([...noteItems]),activeSession,personalData,pendingReviewItems:freeze([...pendingReviewItems]),
     savedDayDeletions:freeze([...(savedDayDeletions||[])]),noteDeletions:freeze([...(noteDeletions||[])]),attachmentDeletions:freeze([...(attachmentDeletions||[])]),counts,assetItems:freeze(assetItems),
-    warning:[sessionResult.warning,recordSource.warning,recoveryWarning,noteRecoveryWarning].filter(Boolean).join(' '),completeness
+    warning:[sessionResult.warning,recordSource.warning,recoveryWarning,noteRecoveryWarning,attachmentWarning].filter(Boolean).join(' '),completeness:captureCompleteness
   };
   const protectedCheckpointManifest=Number(backupVersion)>=15?BackupCodec.createProtectedManifest(captureBase,checkpointMetadata):null;
   const capture=freeze({...captureBase,protectedCheckpointManifest});

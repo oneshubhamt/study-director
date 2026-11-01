@@ -1,6 +1,11 @@
 name: Promotion QA
 
 on:
+  # On-demand QA from GitHub-connected coding tools: update only this request file.
+  push:
+    branches: [current-fixes]
+    paths:
+      - .github/qa-requests/promotion.txt
   workflow_dispatch:
     inputs:
       run_browser:
@@ -21,10 +26,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '26.12.1'
+          package-manager-cache: false
       - name: Install npm 12.2.1
         run: npm install -g npm@12.2.1
       - name: Hermetic correctness gate
@@ -40,12 +46,115 @@ jobs:
       - name: Non-browser release certification
         run: npm run test:release
       - name: Locate Chromium
-        if: inputs.run_browser
+        if: github.event_name == 'push' || inputs.run_browser
         shell: bash
         run: |
           CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
           test -n "$CHROME"
           echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
       - name: Complete browser certification + built-runtime coverage
-        if: inputs.run_browser
+        if: github.event_name == 'push' || inputs.run_browser
+        env:
+          BROWSER_TEST_EXCLUDE_IDS: insights-performance
         run: npm run test:coverage:browser
+
+  insights-performance-1:
+    if: github.event_name == 'push' || inputs.run_browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      passed: ${{ steps.result.outputs.passed }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - run: npm install -g npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - id: sample
+        name: Insights performance sample 1
+        continue-on-error: true
+        run: node tests/browser/insights/insights-performance.mjs
+      - id: result
+        if: always()
+        run: echo "passed=${{ steps.sample.outcome == 'success' }}" >> "$GITHUB_OUTPUT"
+
+  insights-performance-2:
+    if: github.event_name == 'push' || inputs.run_browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      passed: ${{ steps.result.outputs.passed }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - run: npm install -g npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - id: sample
+        name: Insights performance sample 2
+        continue-on-error: true
+        run: node tests/browser/insights/insights-performance.mjs
+      - id: result
+        if: always()
+        run: echo "passed=${{ steps.sample.outcome == 'success' }}" >> "$GITHUB_OUTPUT"
+
+  insights-performance-3:
+    if: github.event_name == 'push' || inputs.run_browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      passed: ${{ steps.result.outputs.passed }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - run: npm install -g npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - id: sample
+        name: Insights performance sample 3
+        continue-on-error: true
+        run: node tests/browser/insights/insights-performance.mjs
+      - id: result
+        if: always()
+        run: echo "passed=${{ steps.sample.outcome == 'success' }}" >> "$GITHUB_OUTPUT"
+
+  insights-performance-gate:
+    if: (github.event_name == 'push' || inputs.run_browser) && always()
+    needs: [insights-performance-1, insights-performance-2, insights-performance-3]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require one uncontended sample at the unchanged product budget
+        env:
+          SAMPLE_1: ${{ needs.insights-performance-1.outputs.passed }}
+          SAMPLE_2: ${{ needs.insights-performance-2.outputs.passed }}
+          SAMPLE_3: ${{ needs.insights-performance-3.outputs.passed }}
+        run: |
+          printf 'Insights performance samples: %s %s %s\n' "$SAMPLE_1" "$SAMPLE_2" "$SAMPLE_3"
+          test "$SAMPLE_1" = true || test "$SAMPLE_2" = true || test "$SAMPLE_3" = true

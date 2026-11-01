@@ -28,6 +28,12 @@ Stop and ask before you:
 - Report what you actually changed and checked. Say plainly when a check was skipped or failed; never describe a check you did not run as passed.
 - If one of these rules blocks the task, stop and ask rather than work around it.
 
+## Active programme read-first and five-step workflow
+
+- Before beginning background-services work on `current-fixes`, read `docs/PROGRAMMES.md`, `docs/BACKGROUND-SERVICES-REMEDIATION.md` (entire ledger and latest journal) and relevant current production code. The A–F data/backup programme is certified closed, not the present P0 plan.
+- For each P0–P6 pass: preliminary orientation (current SHA, IDs, dependencies) → de novo source audit → written objectives/plan **before** edits → minimal implementation → objective-by-objective source recheck → targeted QA → append-only journal and tracker update. Full QA only after substantial work/explicit milestone, not per pass.
+- Documentation Phase 0 does not authorize P0 implementation; a passing fixture is never independent proof that production paths are correct. Preserve the original A–F findings/history and do not reopen without new code-level evidence.
+
 ## This repository: Study Director
 
 - Study Director is a local-first study planning PWA. Follow [CONTRIBUTING.md](CONTRIBUTING.md): one branch per coherent change, a pull request to `main`, and targeted QA for what changed.

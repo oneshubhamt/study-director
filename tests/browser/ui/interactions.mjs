@@ -61,6 +61,9 @@ try{
     __PWA6.Interactions.confirm({title:'Delete saved day?',message:'Only this saved day will be removed.',danger:true,confirmLabel:'Delete saved day',cancelLabel:'Keep saved day'}).then(value=>{window.__confirmValue=value;});
   })()`);
   await waitFor(()=>page.evaluate(`document.getElementById('sd-interaction-dialog').open`),{label:'themed confirmation'});
+  // Contrast is measured on the settled dialog: mid-entry, its opacity is below 1
+  // and axe's colour-contrast result depends on the exact frame it samples.
+  await settleMotion(page);
   await page.evaluate(axeSource,{returnByValue:false});
   const accessibility=await page.evaluate(`axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21a','wcag21aa','wcag22aa']}}).then(value=>value.violations.filter(item=>item.impact==='serious'||item.impact==='critical').map(item=>({id:item.id,impact:item.impact,nodes:item.nodes.length})))`);
   assert.deepEqual(accessibility,[]);

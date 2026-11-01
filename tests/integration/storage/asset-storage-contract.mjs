@@ -92,4 +92,33 @@ files.set('attblob-'+String(999).padStart(20,'b'),new Blob(['later']));
 await assert.rejects(store.collect(async gc=>gc.sweep(),{check:()=>{if(++checks>=5)throw Object.assign(new Error('foreground'),{code:'ASSET_MAINTENANCE_YIELDED'});},maxEntries:8}),/foreground/);
 assert.ok(files.has('attblob-'+String(999).padStart(20,'b')));
 assert.equal((await store.collect(async gc=>gc.sweep(),{maxEntries:8})),1,'the interrupted iterator entry must remain resumable');
+// In-memory mock OPFS iteration can include a new file mid-cycle. Fresh
+// retained sets and protected reader leases must still forbid unsafe deletion.
+{
+ const later='attblob-'+String(700).padStart(20,'b'),more='attblob-'+String(701).padStart(20,'b');
+ files.set(later,new Blob(['orphan']));
+ const first=await store.collect(async gc=>({removed:await gc.sweep(),pending:gc.status().sweepPending}),{maxEntries:1});
+ files.set(more,new Blob(['orphan-created-mid-sweep']));
+ const pin=await store.retain();
+ assert.equal((await store.collect(async gc=>gc.sweep())).reason,'active-editor-or-file-operation');
+ assert.ok(files.has(later)&&files.has(more),'a skipped collection must delete nothing');
+ pin();
+ // The lease settles asynchronously, as with real Web Locks. Resume only once
+ // it is gone, so every counted enumeration below is a batch that really ran.
+ while(sharedReaders)await new Promise(resolve=>setTimeout(resolve,0));
+ // A file created mid-iteration may be invisible until the next OPFS
+ // directory enumeration. Require bounded eventual cleanup instead of
+ // assuming that the active iterator discovers concurrent insertions.
+ let completedEnumerations=0;
+ for(let n=0;n<16&&completedEnumerations<2;n++){
+   const item=await store.collect(async gc=>({removed:await gc.sweep(),pending:gc.status().sweepPending}),{maxEntries:2});
+   assert.equal(item.status,undefined,`resume batch ${n} must run, not be ${item.status} (${item.reason})`);
+   if(item.pending===false)completedEnumerations++;
+ }
+ assert.equal(completedEnumerations,2,'two complete bounded enumerations must finish after a mid-sweep mutation');
+ assert.equal(files.has(metadata.get(B).file),true,'reachable bytes must survive iterator mutation and resume');
+ assert.equal(files.has(later),false,'original orphan must be reclaimed');
+ assert.equal(files.has(more),false,'new orphan must be reclaimed by the next complete sweep');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'asset-storage-bounded-sweep',passes,totalSwept,retainedSource:true,foregroundPreemption:true}));

@@ -1,5 +1,7 @@
 # Audit: backups and app behaviour after sync (2026-10-24)
 
+> **Historical record — superseded 2026-10-27.** This audit documents the earlier same-ID “one history / spine” implementation in which Drive and Device Folder could wait for or copy from one another. That orchestration is retired. The current contract publishes canonical local state independently to Drive and Device Folder; only Drive establishes shared multi-device ancestry. See `docs/BACKUP-ENGINE.md` and `docs/ARCHITECTURE.md` for the live design.
+
 Read-only audit asked for in `HANDOFF.md` 5.6, step 5. Drive went from a manual handoff (back up, then Combine or Replace on the other device) to automatic sync, with one history shared by the Device Folder and Drive. This checks whether everything around backups is still in its best shape after that change.
 
 Scope:
