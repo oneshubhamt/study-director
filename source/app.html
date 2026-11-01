@@ -2141,6 +2141,7 @@ function openPdfFallback(row,url,releaseReader=()=>{}){
   open.className='mini-btn ui-btn primary';open.textContent='Open PDF';open.href=url;open.target='_blank';open.rel='noopener noreferrer';
   download.className='mini-btn ui-btn';download.textContent='Download';download.href=url;download.download=String(row?.name||'document.pdf');actions.append(open,download);content.append(message,actions);
   let handedOff=false,handle=null;
+  const closeOnPagehide=()=>handle?.close();
   const closeAfterClick=()=>setTimeout(()=>handle?.close(),0);
   open.addEventListener('click',event=>{
     let opened=null;
@@ -2152,9 +2153,11 @@ function openPdfFallback(row,url,releaseReader=()=>{}){
     handedOff=true;lease.track(opened);closeAfterClick();
   });
   download.addEventListener('click',()=>{handedOff=true;lease.expireAfter(PDF_DOWNLOAD_HANDOFF_MS);closeAfterClick();});
-  try{handle=WorkspaceOverlay.open({label:String(row?.name||'PDF'),content,className:'workspace-overlay-pdf-fallback',closeLabel:'Close PDF options',onBeforeClose:()=>{if(!handedOff)lease.release();}});}
+  try{handle=WorkspaceOverlay.open({label:String(row?.name||'PDF'),content,className:'workspace-overlay-pdf-fallback',closeLabel:'Close PDF options',onBeforeClose:()=>{window.removeEventListener('pagehide',closeOnPagehide);if(!handedOff)lease.release();}});}
   catch(error){lease.release();throw error;}
   if(!handle){lease.release();Interactions.notify({source:'attachments',key:'pdf-open-failed',kind:'error',title:'PDF could not open',message:'Use the attachment Download action to save the PDF.'});return false;}
+  // If the opener enters BFCache, do not return to options with a dead Blob URL.
+  window.addEventListener('pagehide',closeOnPagehide);
   NoticeCoordinator.resolveEvent('attachments','pdf-open-failed');NoticeCoordinator.resolveEvent('attachments','pdf-overlay-busy');
   return true;
 }
