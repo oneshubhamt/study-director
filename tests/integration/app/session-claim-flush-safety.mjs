@@ -22,7 +22,7 @@ function harness(){
   let claim={...owned},now=100000,sessionValue={...session},saves=[],loads=[],captureFailure=false,resumeWorks=true,reviewText='Retain the last edits';
   const calls={stops:0,resumes:0,snapshots:[],captureEvidenceArgs:[],evidences:[],writes:[],syncs:[],warnings:[],status:[],captures:[],changed:0,cancelled:0};
   const app={
-    document:{visibilityState:'visible'},
+    document:{visibilityState:'visible'},navigator:{onLine:true},
     StartupLifecycle:{status:()=>({fullyInitialized:true})},
     TASKS:[{}],sessionPanelMode:'active',
     BackupProviderRuntime:{connected:()=>true,readSessionClaim:async()=>claim,scheduleSharedSync:(id,reason)=>{calls.syncs.push(reason);return true;}},
