@@ -2771,7 +2771,7 @@ async function verifyFrozenSessionClaim(){
   const frozen=sessionClaimFreeze;
   try{
     if(!frozen?.snapshot)throw new Error('The frozen Active Session snapshot is unavailable.');
-    const saved=await writeActiveSessionNow(frozen.snapshot,{emergency:true,strictDurability:true});
+    const saved=await writeActiveSessionNow(snapshotWhileSessionClaimFrozen(),{emergency:true,strictDurability:true});
     if(!saved?.ok||saved.storage?.idb!==true||!saved.value)throw saved?.error||new Error('The Active Session was not committed to canonical browser storage.');
     const loaded=await AppData.activeSession.load(0,{strict:true});
     if(!loaded?.ok||loaded.error||loaded.storage?.idb!==true||!loaded.value||Number(loaded.value.revision)!==Number(saved.value.revision))throw new Error('The transferred Active Session did not pass the strict local read-back.');
@@ -2809,11 +2809,14 @@ async function checkSessionOwnershipClaim(){
       if(!same){
         // Stop duplicate execution before awaiting a potentially slow/failed disk write.
         const frozenSinceMs=DecisionClock.nowMs();TimerEngine.stopExecution();
-        let snapshot=null;
-        try{markDayContentChanged();snapshot=captureSessionSnapshot();}
-        catch(error){AppDiagnostics.capture('session.claim-snapshot',error,'warn');}
+        let snapshot=null,evidence=null;
+        try{
+          markDayContentChanged();
+          evidence=captureRuntimeEvidence({includeActivePause:false,withCompletion:false,includeRecords:true});
+          snapshot=captureSessionSnapshot(evidence);
+        }catch(error){AppDiagnostics.capture('session.claim-snapshot',error,'warn');}
         cancelPendingLiveDraftSave();
-        sessionClaimFreeze=Object.freeze({epoch:claim.epoch,frozenSinceMs,lastSyncAt:0,localVerified:false,snapshot});
+        sessionClaimFreeze=Object.freeze({epoch:claim.epoch,frozenSinceMs,lastSyncAt:0,localVerified:false,snapshot,evidence});
       }
       // A local emergency envelope is useful for recovery, but the managed
       // reconciliation preflight requires a strict canonical commit and read-back.
@@ -4097,6 +4100,14 @@ function captureSessionSnapshot(evidence=null){
     practice:PracticePacer.snapshot(),updatedAt:new Date().toISOString()
   }));
 }
+// Keep elapsed time and practice progress at the ownership boundary while
+// retaining any later text, completion or reflection edits for reconciliation.
+function snapshotWhileSessionClaimFrozen(){
+  const frozen=sessionClaimFreeze;
+  if(!frozen?.snapshot)return captureSessionSnapshot();
+  const recent=captureSessionSnapshot(frozen.evidence);
+  return Object.freeze({...recent,timerRuntime:frozen.snapshot.timerRuntime,practice:frozen.snapshot.practice});
+}
 function nextSessionRevision(seed=0){return AppData.activeSession.nextRevision(seed);}
 function activeSessionPayload(snapshot=null,options={}){
   if(!TASKS.length)return null;
@@ -4142,11 +4153,10 @@ function writeLiveDraftNow(options={}){
   if(restoreSessionPersistenceSuppressed()||managedRecoverySessionQuiesced()&&options.allowDuringRecoveryQuiescence!==true)return null;
   if(!appCanMutate())return null;
   try{
-    // A transferred session stays frozen through managed-recovery preflight.
-    // Do not turn time spent waiting for the other device into study time.
-    const frozen=sessionClaimFreeze?.snapshot||null;
-    if(options.markChanged!==false&&!frozen)markDayContentChanged();
-    const snapshot=frozen||captureSessionSnapshot();if(!snapshot)return null;
+    // Preserve the frozen clock even if a managed sync settles the latest
+    // reflection or edits after the remote ownership claim.
+    if(options.markChanged!==false)markDayContentChanged();
+    const snapshot=sessionClaimFreeze?.snapshot?snapshotWhileSessionClaimFrozen():captureSessionSnapshot();if(!snapshot)return null;
     lastTimerSnapshotMs=DecisionClock.nowMs();
     return writeActiveSessionNow(snapshot,options);
   }catch(e){
