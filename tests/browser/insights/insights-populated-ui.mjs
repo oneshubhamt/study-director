@@ -96,19 +96,25 @@ try{
     const practiceTab=[...pane.querySelectorAll('.insights-execution-tab')].find(button=>/Practice Pacing/i.test(button.textContent));practiceTab?.click();
     const practiceDetails=pane.querySelector('.insights-practice');if(practiceDetails&&practiceDetails.tagName==='DETAILS')practiceDetails.open=true;
     const calculation=practiceDetails?.querySelector('.insights-calculation-disclosure')||null;
-    const practiceCopy=pane.querySelector('.insights-practice-trend-card')?.innerText||'';
-    const calculationClosed=calculation?!calculation.open:false;if(calculation)calculation.open=true;
+    // Sections below the first screen are laid out only near the viewport, so
+    // bring this one into view, as a reader would, before reading rendered text.
+    (practiceDetails||pane.querySelector('.insights-practice-trend-card'))?.scrollIntoView({block:'start'});
+    const calculationClosed=calculation?!calculation.open:false;
     return {
       elapsed:performance.now()-${seeded.started},window:pane.querySelector('.insights-window-note')?.textContent||'',
       workTrend:evidence.find(item=>item.label==='Work trend')||null,
       practiceSummary:pane.querySelector('.insights-practice-summary-meta')?.textContent||'',
-      practiceCopy,calculationClosed,calculationCopy:calculation?.innerText||'',
+      calculationClosed,
       documentOverflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,
       profile:window.__StudyDirectorInsightsLastProfile||null
     };
   })()`);
   await page.settle(2);
+  desktop.practiceCopy=await page.evaluate(`document.querySelector('#pane-insights .insights-practice-trend-card')?.innerText||''`);
+  await page.evaluate(`(()=>{const calculation=document.querySelector('.insights-practice .insights-calculation-disclosure');if(calculation)calculation.open=true;})()`);
+  await page.settle(2);
   desktop.calculationCopy=await page.evaluate(`document.querySelector('.insights-practice .insights-calculation-disclosure')?.innerText||''`);
+  assert.ok(desktop.practiceCopy.trim().length>0,'the Practice trend card must render readable text once in view');
   assert.match(desktop.window,/totals, averages and counts use the full window/i);
   assert.match(desktop.workTrend?.note||'',/All records/i);
   assert.match(desktop.workTrend?.note||'',/590 completion days/i);

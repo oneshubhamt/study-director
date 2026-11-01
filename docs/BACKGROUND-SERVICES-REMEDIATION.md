@@ -649,7 +649,7 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
   | Cold at start-up | 435–573 ms | 917 ms | 2000 |
   | Worker-unavailable fallback | 332–364 ms | 898 ms | 2000 |
 
-  The full release browser suite and the promotion run are recorded at the next SHA.
+  Full release browser suite at `c24fc30`: every test passed except `tests/browser/insights/insights-populated-ui.mjs`. It read the Practice trend card's `innerText` while that section was off-screen. A section skipped by `content-visibility:auto` has no rendered text, so the card read as empty (one of its assertions was therefore passing vacuously). To check that objective 4 is a material improvement, I reverted it and measured settled openings at 2.5× slowed CPU, two runs of three samples each. The longest main-thread tasks were 78/0/0 and 69/**103**/76 ms (the full-page layout); with the change they are 0. The change was therefore restored. The test now scrolls the section into view, as a reader would, and settles before reading rendered text. It reads the card before opening its calculation disclosure (which sits inside the card), and asserts the card's text is not empty. `insights-populated-ui` then PASS 2/2 alone; `insights-maximum-import` PASS. The Promotion run is recorded at the next SHA.
 
 ### Journal template — duplicate this for the next pass
 
