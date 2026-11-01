@@ -40,3 +40,8 @@ Run unchanged complete Promotion QA via existing push trigger: hermetic correctn
 Include standalone diagnostics unit/integration contracts for P6; analyze each failure at original owner, do not suppress or relax any test/budget. Keep browser isolation requirements. This request modifies only the QA trigger text, not product code or workflow, so application executable remains at the above baseline.
 Manual physical Chromium/Android/iPad, real Google Drive, actual OS power management, storage eviction or power-loss acceptance remain NOT RUN under CI.
 No deployment, main merge, release or workflow changes authorized.
+
+2026-11-01 — Comprehensive Promotion QA retry 2 after first full-run evidence
+Previous Promotion run 41275856383: hermetic gate failed at tests/integration/pwa/application-update-safety.mjs when its isolated fixture omitted the production BackupProviderRuntime.locationStatus('google-drive') method. Production source/core/backup-provider.js exports that method, which is used by source/app.html to defer automatic update checks during Drive transfers. Corrected fixture and added both global-provider-busy and Drive-backing-up deferral/recovery assertions at 8387f706687a2caf0fa874e5d19e0463df56d31e. No production code, workflow, threshold or release configuration changed.
+Previous run's Insights samples all exceeded the unchanged 1,000 ms complete-render threshold (1110.3, 1132.3, 1165.0 ms). This is a failed gate, not a pass; remeasure using independent samples and investigate if persistent. Stop no other safeguards, do not modify budgets or suppress tests.
+Execute complete Promotion QA again for exact new HEAD; require every job green, report browser and physical-device limits accurately.
