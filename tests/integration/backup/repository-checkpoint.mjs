@@ -67,7 +67,7 @@ async function forceBaseline(checkpointId,notePayload){
   reconciliationBaseNotes=Object.create(null);for(const [key,value] of Object.entries(notePayload||{}))reconciliationBaseNotes[key]=freeze({label:String(value&&value.label||''),text:String(value&&value.text||'')});const keys=Object.keys(reconciliationBaseNotes).sort();reconciliationBase=freeze({format:'study-director.reconciliation-base',version:2,checkpointId,establishedAt:new Date().toISOString(),noteCount:keys.length,noteKeyFingerprint:await baselineFingerprint(keys)});
 }
 const runtime=BackupModule.createRuntime(freeze({ports:freeze({
-  configuration:freeze({appVersion:'repository-checkpoint-test',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits:freeze({backupChunkItems:50,backupMaxCompressedBytes:64*1024*1024,backupMaxFileBytes:1024*1024*1024,backupMaxAssetDescriptors:50000,maxImportRecords:10000,maxNoteLinks:50,maxNotes:1000,maxPendingReviews:2000})}),
+  configuration:freeze({appVersion:'repository-checkpoint-test',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,starterSchedule:'',limits:freeze({backupChunkItems:50,backupMaxCompressedBytes:64*1024*1024,backupMaxFileBytes:1024*1024*1024,backupMaxAssetDescriptors:50000,maxImportRecords:10000,maxNoteLinks:50,maxNotes:1000,maxPendingReviews:2000})}),
   
   persistence:freeze({
     activeSessionLoad:async()=>({ok:true,value:null,error:null,storage:{idb:true}}),activeSessionSave:async value=>({ok:true,value}),activeSessionClear:async()=>({ok:true}),activeSessionSettled:async()=>true,
@@ -1190,6 +1190,36 @@ const providerMetadataVerificationCases=[];
    providerMetadataVerificationCases.push(kind);
   }
  }finally{notes=original.notes;dailyRecords=original.dailyRecords;assetDescriptor=original.assetDescriptor;snapshotRevision=original.snapshotRevision;sourceRevision=original.sourceRevision;}
+}
+// The manifest uploads alongside the new objects, and the commit waits for
+// both; a failed object upload still fails the publication only after the
+// manifest upload has settled (Entry 023).
+{
+  const original={notes,dailyRecords,assetDescriptor,snapshotRevision,sourceRevision};
+  const fresh=label=>{runtime.controller.invalidateRepositoryPreparation();dailyRecords=[];notes={Subject:freeze({version:2,key:'Subject',text:'parallel '+label,updatedAt:'2026-10-05T00:00:00.000Z'})};assetDescriptor=null;snapshotRevision='parallel-'+label;sourceRevision='2026-10-05T00:00:00.000Z';};
+  try{
+    for(const failObject of [false,true]){
+      fresh(failObject?'failure':'success');
+      const events=[];let releaseObjects,manifestSettled=false;const objectsHeld=new Promise(resolve=>{releaseObjects=resolve;setTimeout(resolve,2000);});
+      const transport=freeze({
+        writeObject:async entry=>{events.push('object-start');await objectsHeld;events.push('object-end');if(failObject)throw new Error('QA object upload failure');return freeze({id:entry.objectId});},
+        writeManifest:async file=>{events.push('manifest');releaseObjects();await new Promise(resolve=>setTimeout(resolve,20));manifestSettled=true;events.push('manifest-end');return freeze({name:file.manifest.checkpoint.checkpointId+'.sdcheckpoint'});},
+        commit:async marker=>{events.push('commit');return freeze({name:marker.checkpointId+'.sdcommit'});},
+        onCommitted:async()=>null,cleanup:async()=>null,onFailure:async()=>{events.push('failure');}
+      });
+      const run=runtime.repository.publish(null,{interactive:false},transport);
+      if(failObject){
+        await assert.rejects(run,/QA object upload failure/u);
+        assert.equal(manifestSettled,true,'a failed object upload waits for the manifest upload to settle');
+        assert.equal(events.includes('commit'),false,'nothing is committed after a failed object upload');
+        assert.ok(events.indexOf('manifest-end')<events.indexOf('failure'),'failure handling runs after both uploads settle');
+      }else{
+        await run;
+        assert.ok(events.indexOf('manifest')<events.indexOf('object-end'),'the manifest uploads while objects are still uploading');
+        assert.ok(events.lastIndexOf('object-end')<events.indexOf('commit')&&events.indexOf('manifest-end')<events.indexOf('commit'),'the commit waits for every object and the manifest');
+      }
+    }
+  }finally{runtime.controller.invalidateRepositoryPreparation();notes=original.notes;dailyRecords=original.dailyRecords;assetDescriptor=original.assetDescriptor;snapshotRevision=original.snapshotRevision;sourceRevision=original.sourceRevision;}
 }
 console.log(JSON.stringify({status:'PASS',suite:'repository-checkpoint',providerMetadataVerificationCases,assembledUploadContinuations,publicationContinuationCases,assembledDriveCases,assembledDriveWallMs,incompleteInventoryCases,driveBacklogCases,firstAttachmentReads:1,secondAttachmentReads:0,simulatedAttachmentBytes:AUDIO_BYTES,identicalCheckpointAllObjectsReused:true,unchangedStructuredObjectsRecompressed:false,oldSavedDayEditFreshObjects:fresh,noteEditFreshObjects:noteFresh,attachmentMetadataZeroByteReads:true,savedDayDeletionNoResurrection:true,sealedCaptureSurvivesLaterMutation:true,providerTieredRetentionFoundation:true,providerCommitMarkerLatestAtomicity:true,retentionPolicy15Plus1:true,beforeRestorePublication:true,managedProviderProtectedPublication:true,orphanMaintenanceBackupRecovery:true,tierGraduation:true,sparseRetention:true,retentionDeletionFailureGcSafe:true,providerReconciliationConvergence:true,providerConvergenceFailureIsolated:true,providerSharedObjectGcSafe:true,publicationProtectedGcSafe:true,reclamationGraceSafe:true,providerLargeAttachmentUploadsBeforeSelfHeal:1,providerLaterAttachmentBytes:0,providerMissingObjectSelfHeal:true,providerOrphanGc:true,providerScrubSelfHeal:true,integrityScrubPriority:true,retainedAbaReuse:true,providerPostSealMutationAllowed:true,integrityScrubStableObjectsOnly:true,integrityScrubLeasesReleased:true,providerTemporaryDownloadsReleased:true,explicitProtectedRemoval:true,durableProviderRetry:true,metadataHistoryColdZeroDownloads:coldHistoryDownloads===0,metadataHistoryWarmZeroDownloads:warmHistoryAdditionalDownloads===0,metadataHistoryScopeIndependent:true,repositoryGenerationReset:true,metadataHistoryBodyVerificationDeferred:true,metadataHistoryUncertainZeroDownloads:uncertainColdDownloads===0,metadataHistoryListedRemoteFiles:coldHistoryRemoteFiles,postPublicationReceiptReuse:true,postPublicationReceiptPublications:2,postPublicationReceiptImmutableReadbacks:receiptDownloads.checkpoint.length+receiptDownloads.commit.length,postPublicationReceiptAdditionalHistoryDownloads:receiptDownloads.checkpoint.length+receiptDownloads.commit.length-4,stateDiscoveryObjectInventoryReuse:true,stateDiscoveryMatureObjectLists:objectListsDuringSecondReceipt,stateDiscoveryConservativeConcurrentObject:true,checksumOperations:checksumCounter},null,2));
 await import('../../helpers/session-ownership-claim-regression.mjs');

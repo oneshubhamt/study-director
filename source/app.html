@@ -9479,6 +9479,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
   configuration:Object.freeze({
     appVersion:APP_VERSION,
     backupVersion:DATA_CONTRACT.schemas.Backup.version,
+    starterSchedule:FACTORY_DEFAULTS.scheduleText,
     limits:Object.freeze({
       backupChunkItems:APP_LIMITS.backupChunkItems,
       backupMaxCompressedBytes:APP_LIMITS.backupMaxCompressedBytes,
