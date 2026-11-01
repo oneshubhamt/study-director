@@ -28,7 +28,7 @@ registry.define('device-backup',1,()=>{
     const supported=typeof environment.showDirectoryPicker==='function';
     let installed=false,handle=null,permission='unknown',baseline='',mode=supported?'off':'unsupported',settingsUnverified=supported,connectionListener=null,connecting=false,permissionNoticeShown=false;
     // A permission observation belongs to a particular folder and request order.
-    let permissionRevision=0,stalePermissionResponses=0;
+    let permissionRevision=0,stalePermissionResponses=0,authorizing=0;
     // The repository folder inside the chosen folder this profile and device
     // use; '' until it is settled (found, moved in or made).
     let repositoryName='',preparing=null,oldFolder=false;
@@ -182,7 +182,19 @@ registry.define('device-backup',1,()=>{
     async function authorize({operation=''}={}){
       if(operation==='disconnect')return;
       if(!handle)throw new Error('Choose the backup folder first.');
-      if(permission!=='granted'){permission=await query();if(permission==='prompt')permission=await request();if(permission!=='granted'){permissionNeeded();publish();throw new Error('Folder permission is required. Choose Allow access.');}mode='connected';connectionChanged();}
+      if(permission!=='granted'){
+        const target=handle,revision=++permissionRevision;
+        authorizing++;
+        try{
+          let observed=await query(target);
+          if(revision!==permissionRevision||handle!==target)throw Object.assign(new Error('The backup folder changed.'),{name:'AbortError'});
+          if(observed==='prompt')observed=await request(target);
+          if(revision!==permissionRevision||handle!==target)throw Object.assign(new Error('The backup folder changed.'),{name:'AbortError'});
+          permission=observed;
+          if(permission!=='granted'){permissionNeeded();publish();throw new Error('Folder permission is required. Choose Allow access.');}
+          mode='connected';connectionChanged();
+        }finally{authorizing--;}
+      }
       await prepareRepository();
     }
     async function disconnectFolder(){
@@ -225,7 +237,7 @@ registry.define('device-backup',1,()=>{
     // Permission can change while the app is open (another tab, the browser's
     // site settings); it is checked again whenever the app comes back.
     async function refreshPermission(){
-      if(!supported||!installed||connecting)return snapshot();
+      if(!supported||!installed||connecting||authorizing)return snapshot();
       if(settingsUnverified){installed=false;return install();}
       if(!handle)return snapshot();
       const target=handle,revision=++permissionRevision;
