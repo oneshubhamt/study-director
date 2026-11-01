@@ -705,6 +705,11 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
   - **E22.4 MET**: the browser test passes on the fixed build. On a build with only the two limit fixes reverted, it fails with "A is in step with Drive", the owner's failure.
   - **E22.5 MET**: no format, record, reconciliation or merge change.
   - **Left as is:** `managed-repository.js` reads `backupMaxEntryBytes` and `backupMaxUncompressedBytes` with explicit fallbacks (2 MiB and the compressed limit), so it applies tighter bounds than production declares. That is conservative, not a failure, and is out of scope here.
+- **Step 5 — targeted QA (local, Node 22, Chromium 1194):**
+  - Hermetic `fast` category PASS (151, including the new architecture test); `architecture` category PASS (32); suite governance PASS.
+  - `automatic-provider-backup`, `sync-shared-base`, `repository-restore`, `backup-persistence`, `restore-assets`, `repository-checkpoint` and `repository-incremental-preparation` PASS.
+  - After `node build/build.mjs`, browser tests run one at a time: `sync-kept-reviews` PASS (76 s), `sync-and-profiles` PASS, `session-plan-sync` PASS, `restore-session-safety` PASS, `pwa-device-backup` PASS.
+  - Not run: the full browser suite, a real Google Drive account, physical devices. Complete Promotion is requested at the new SHA.
 
 ### Journal template — duplicate this for the next pass
 
