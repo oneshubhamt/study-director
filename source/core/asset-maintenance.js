@@ -22,7 +22,7 @@ registry.define('asset-maintenance',1,input=>{
     function collectInto(references,value,remaining=null){const scan=ports.scanReferences(String(value??''));for(const id of scan.assetIds||[]){references.add(id);remaining?.delete(id);}return scan.trusted===true;}
     async function referencedAssetIds(keys,proof,liveValues,check,progress){
       const signature=JSON.stringify([proof,keys,liveValues.map(([,value])=>value)]);
-      if(!scanState||scanState.signature!==signature){scanState={signature,references:new Set(),remaining:new Set(keys),phase:0,index:0,values:null};for(const [,value] of liveValues)if(!collectInto(scanState.references,value,scanState.remaining))return {references:scanState.references,trusted:false};}
+      if(!scanState||scanState.signature!==signature){scanState={signature,references:new Set(),remaining:new Set(keys),phase:0,index:0,values:null};for(const [,value] of liveValues)if(!collectInto(scanState.references,value,scanState.remaining)){const references=scanState.references;scanState=null;return {references,trusted:false};}}
       const state=scanState,complete=()=>keys.length>0&&state.remaining.size===0;let units=0;const shouldYield=ports.budget();
       // Notes, the session, Saved Days, then versions kept for review.
       while(state.phase<4&&!complete()){
