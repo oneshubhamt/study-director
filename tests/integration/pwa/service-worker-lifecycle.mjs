@@ -80,6 +80,15 @@ function fixture({badPath='',active=null,windows=[],rejectDelete='',failMetadata
  const h=fixture({active:{}});for(let i=0;i<3;i++)h.seed('study-director-shell-held-'+i,String(i).repeat(24));await assert.rejects(h.emit('install'),error=>error.code==='SD_PWA_CACHE_LIMIT');assert.equal(h.fetches.length,0);assert.equal(h.stores.size,3);assert.equal(h.deletions.length,0);cases.push('cache capacity defers installation without deleting held assets');
 }
 {
+ const h=fixture({active:{}}),live=h.client('active-client');h.windows.push(live);
+ h.seed(current,assetId);h.seed('study-director-shell-in-use','b'.repeat(24));h.seed('study-director-shell-unidentified','c'.repeat(24));
+ await assert.rejects(h.emit('install'),error=>error.code==='SD_PWA_CACHE_LIMIT');
+ assert.equal(h.deletions.length,0,'unknown and live clients must not lose their shells during an installing worker');
+ assert.ok(h.stores.has('study-director-shell-in-use')&&h.stores.has('study-director-shell-unidentified'));
+ assert.ok(h.messages.some(row=>row.type==='SD_PWA_INSTALL_FAILED'&&row.reason==='cache-limit'));
+ cases.push('cache capacity preserves live and unknown-generation clients');
+}
+{
  const h=fixture({active:{}}),page=h.client('page');h.windows.push(page);h.seed(current,assetId);h.seed('study-director-shell-orphan','b'.repeat(24),{state:'installed'});h.self.registration.waiting={};await h.report(page,assetId);assert.equal(h.stores.has('study-director-shell-orphan'),true);h.self.registration.waiting=null;await h.report(page,assetId);assert.equal(h.stores.has('study-director-shell-orphan'),false);cases.push('waiting candidate is retained and a later abandoned candidate is reclaimed');
 }
 {
