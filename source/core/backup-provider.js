@@ -1164,6 +1164,19 @@ registry.define('backup-provider',1,input=>{
     let applies=false;if(local?.value)applies=await sessionClaimToken('session',local.value.date,{signal})===claim.sessionToken;else if(local?.today)applies=await sessionClaimToken('session',local.today,{signal})===claim.sessionToken;
     return freeze({epoch:claim.epoch,state:claim.state,revision:claim.revision,observedRevision:claim.observedRevision,claimedAt:claim.claimedAt,ownedHere:!!ownerToken&&ownerToken===claim.ownerToken,applies});
   }
+  // Drive's newest claim names this device for the session running here. A
+  // sync then keeps that session even when the version it brings in, saved
+  // before this device took over, still names the other device. Unknown
+  // counts as no: the sync then settles the session as before.
+  async function sessionClaimedHere(selected,{signal=null}={}){
+    if(!sessionOwnershipHooks||!repositorySessionClaimCapable(selected))return false;
+    try{
+      const local=await localSessionOwnership(),me=String(sessionOwnershipHooks.installationId()||'');
+      if(!local?.value||!me||local.value.runningOn!==me)return false;
+      const claim=await projectSessionClaim(await readRepositorySessionClaim(repositoryOperationSelected(selected,{signal}),{signal}),{signal});
+      return !!claim&&claim.state==='owned'&&claim.ownedHere&&claim.applies;
+    }catch(error){if(!signal?.aborted)AppDiagnostics.capture('backup-provider.sync-session-claim',error,'warn');return false;}
+  }
   async function assertSharedSessionOwnership(selected,{signal=null}={}){
     if(!sessionOwnershipHooks||!repositorySessionClaimCapable(selected))return freeze({current:null,releaseAfterCommit:false});
     const current=await readRepositorySessionClaim(selected,{signal});if(!current)return freeze({current:null,releaseAfterCommit:false});
@@ -1826,7 +1839,8 @@ registry.define('backup-provider',1,input=>{
       await enterForeground(selected,foreground,traceId,{prepare:true});
       const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',quiet:true,sync:true,password:options&&options.password===true,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});
       if(!candidate){finishForegroundView(selected,{message:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:'unavailable'},traceId);return freeze({cancelled:true,reason:'unavailable'});}
-      const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{sync:true});
+      const sessionClaimed=await sessionClaimedHere(selected,{signal:foreground.signal});
+      const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{sync:true,sessionClaimedHere:sessionClaimed});
       if(result&&result.cancelled){finishForegroundView(selected,{message:result.reason==='needs-decision'?`${selected.label} has changes that need your review.`:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:String(result.reason||'cancelled')},traceId);return freeze({...result,cancelled:true,exportedAt});}
       OperationDiagnostics.finish({cancelled:false},traceId);return freeze({...result,exportedAt});
     }catch(error){

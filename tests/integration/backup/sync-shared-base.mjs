@@ -506,8 +506,17 @@ let syncWorld=null;
     delete:async ref=>{if(!keepAll.on)files.delete(key(ref.kind,ref.id));}
   }),transport=store(drive),versions=files=>[...files.values()].filter(file=>file.kind==='checkpoint'&&file.historySummary?.retention?.role!=='before-restore').map(file=>file.id).sort();
   const head=()=>[...drive.values()].filter(file=>file.kind==='checkpoint'&&file.historySummary?.retention?.role!=='before-restore').sort((a,b)=>Date.parse(b.exportedAt)-Date.parse(a.exportedAt))[0]?.id||'';
+  // Session ownership claims on Drive, shared by the devices that use them.
+  const claims=new Map(),claimItem=file=>freeze({kind:'session-claim',id:file.id,name:file.name,size:file.blob.size,digest:file.digest,serverDigest:file.digest,createdAt:file.exportedAt,modifiedAt:file.exportedAt,remoteId:'claim-'+file.id});
+  const claimTransport=freeze({...transport,
+    listSessionClaims:async()=>freeze({items:freeze([...claims.values()].map(claimItem)),overflow:false,ignored:0}),
+    uploadSessionClaim:async file=>{claims.set(file.id,freeze({...file}));return claimItem(file);},
+    downloadSessionClaim:async item=>{const file=claims.get(item.id);if(!file)throw new Error('QA_FIXTURE missing session claim');return freeze({blob:file.blob,release:async()=>{}});},
+    deleteSessionClaim:async item=>claims.delete(item.id)
+  });
   // folder: this device also backs up to a Device Folder of its own.
-  const device=(state,{folder=null}={})=>{
+  // claims: it takes part in session ownership claims (Continue here).
+  const device=(state,{folder=null,claims:claiming=false}={})=>{
     // A review of kept versions takes state.keptChoice ('use' or the default)
     // and, for note texts, state.reviewText(conflict) or the current text.
     const reviewTexts=(options,current)=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:typeof current.reviewText==='function'?current.reviewText(item,options):item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))});
@@ -516,7 +525,8 @@ let syncWorld=null;
       lifecycle:freeze({settle:async()=>{},quiesce:async operation=>operation(),revision:()=>'2026-08-23T00:00:00.000Z',rebuild:async()=>{}}),mutation:freeze({run:async(_kind,operation)=>operation()})
     }));
     providers.configureManagedRecovery(freeze({run:spec=>recovery.execute(spec)}));
-    assert.equal(providers.register(freeze({id:'drive',label:'Google Drive',shared:true,connected:()=>true,repository:transport})),true);
+    assert.equal(providers.register(freeze({id:'drive',label:'Google Drive',shared:true,connected:()=>true,repository:claiming?claimTransport:transport})),true);
+    if(claiming)providers.configureSessionOwnership(freeze({installationId:()=>state.installationId,read:async()=>state.activeSession,today:()=>'2026-08-31'}));
     // The change clock: every capture in this harness has the same source revision.
     if(folder){assert.equal(providers.register(freeze({id:'folder',label:'Device Folder',connected:()=>true,repository:store(folder)})),true);providers.configureAutomaticBackup(freeze({covered:()=>'',current:()=>'2026-08-23T00:00:00.000Z'}));providers.configurePendingBackupRetry(freeze({read:async()=>null,mark:async()=>true,clear:async()=>true}));}
     return freeze({
@@ -528,7 +538,8 @@ let syncWorld=null;
       // Combine from Version History, read from the location the list chose.
       combine:(id,checkpointId)=>providers.bringInRepositoryProvider(id,{checkpointId}),
       reviewKept:(options={})=>harness.runtime.controller.reviewKeptVersions(options),
-      noteVersions:(id,noteId,options={})=>providers.noteVersions(id,noteId,{interactive:false,...options})
+      noteVersions:(id,noteId,options={})=>providers.noteVersions(id,noteId,{interactive:false,...options}),
+      claim:request=>providers.claimSessionOwnership('drive',request)
     });
   };
   const note=text=>freeze({Shared:freeze({version:2,key:'Shared',text,updatedAt:new Date().toISOString()})});
@@ -537,7 +548,7 @@ let syncWorld=null;
   const A=device(a),B=device(b);
   // A new device takes in everything.
   const v1=await A.upload();assert.equal(a.reconciliationBase.checkpointId,v1.checkpointId,'a Drive backup is what this device shares');
-  syncWorld=freeze({drive,head,device,note,keepAll,versions});
+  syncWorld=freeze({drive,head,device,note,keepAll,versions,claims});
   assert.equal((await B.sync()).cancelled,false);
   assert.deepEqual([...b.records.keys()].sort(),['2026-08-01','2026-08-02']);assert.equal(b.notes.Shared.text,'first');
   assert.deepEqual(b.followed,[{protectionId:'',encrypted:false,removedElsewhere:false}],'a sync tells the backup password what the newest version uses');assert.equal(b.reconciliationBase.checkpointId,v1.checkpointId,'what a device takes in from Drive is what it shares');
@@ -752,6 +763,43 @@ let syncWorld=null;
   const keptProgress=a.reviews.open().find(review=>review.subject==='session');assert.equal(keptProgress.kept.snapshot.label,'A-PROGRESS','its own progress is kept for review');assert.equal(keptProgress.kept.status,'suspended');
 }
 
+// Continue here pressed before this device took in the other's newest
+// upload. That upload, saved before the takeover, still names the other
+// device; Drive's claim names this one, so the sync keeps the session here.
+// A later takeover (a newer claim) still stops it.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device,note}=syncWorld,day='2026-08-31';
+  const a={installationId:'inst_claim_sync_a',records:new Map(),deletions:[],noteDeletions:[],notes:note('first'),activeSession:null,schedule:'',personal:personal('Sync User'),journal:null};
+  const b={installationId:'inst_claim_sync_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Sync User'),journal:null};
+  const A=device(a,{claims:true}),B=device(b,{claims:true}),running=(state,label,revision)=>{state.activeSession=session(day,label,{runningOn:state.installationId,status:'active',revision});state.schedule=state.activeSession.scheduleText;state.running=true;};
+  const keptSessions=state=>state.reviews.open().filter(review=>review.subject==='session');
+  running(a,'A-1',10);await A.upload();
+  assert.equal((await B.sync()).cancelled,false);assert.equal(b.activeSession.runningOn,a.installationId);assert.equal(b.activeSession.snapshot.label,'A-1');
+  // A records more and uploads; B has not taken it in when it continues here.
+  running(a,'A-2',11);await A.upload();
+  const claimed=await B.claim({date:day,observedOwner:a.installationId,observedRevision:10,revision:12});
+  assert.equal(claimed.status,'completed','B claims the session from its view of A-1');
+  running(b,'B-CONTINUED',12);
+  // A cannot upload past B's claim.
+  running(a,'A-3',13);await assert.rejects(A.upload(),error=>error?.code==='REPOSITORY_SESSION_OWNERSHIP_AHEAD','the device taken over cannot upload over the claim');
+  assert.equal((await B.sync()).cancelled,false,'B takes in A’s upload');
+  assert.equal(b.running,true,'the session keeps running on B');assert.equal(b.activeSession.runningOn,b.installationId);assert.equal(b.activeSession.snapshot.label,'B-CONTINUED','an upload saved before B took over does not take the session back');
+  assert.equal(keptSessions(b).length,0,'nothing is kept for review on B');
+  assert.equal(b.notes.Shared.text,'first','everything else merges as usual');
+  await B.upload();
+  assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.running,false,'A stops its timer');assert.equal(a.activeSession.runningOn,b.installationId,'A shows the session running on B');
+  assert.ok(keptSessions(a).some(review=>review.kept.snapshot.label==='A-3'),'A keeps what it recorded since for review');
+  // A takes it back with a newer claim: B, with progress of its own, stops.
+  const back=await A.claim({date:day,observedOwner:b.installationId,observedRevision:12,revision:14});
+  assert.equal(back.status,'completed');running(a,'A-BACK',14);await A.upload();
+  running(b,'B-PROGRESS',15);
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.running,false,'a takeover with a newer claim still stops B');assert.equal(b.activeSession.runningOn,a.installationId);assert.equal(b.activeSession.snapshot.label,'A-BACK');
+  assert.ok(keptSessions(b).some(review=>review.kept.snapshot.label==='B-PROGRESS'),'B keeps its progress for review');
+}
+
 // Taken over and already saved as that day's Saved Day on the other device
 // before this one syncs: the session ends here too (it never comes back), and
 // what this device recorded since it last synced is kept for review.
@@ -785,4 +833,4 @@ let syncWorld=null;
   assert.equal((await A.sync()).cancelled,false);assert.equal(a.activeSession.snapshot.label,'A-UNSEEN','a session the other side never had is not ended by it');assert.equal(a.running,true);
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'sync-shared-base',preflightVariants:preflightCases.length,coverage:['two-device Drive sync','a restore reaches every device and keeps reviews','Combining Drive’s newest from any location moves the shared base','versions kept for review travel and resolve everywhere','study session hand-off and takeover','current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential Combine','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'sync-shared-base',preflightVariants:preflightCases.length,coverage:['two-device Drive sync','a restore reaches every device and keeps reviews','Combining Drive’s newest from any location moves the shared base','versions kept for review travel and resolve everywhere','study session hand-off and takeover','a takeover is not undone by an upload saved before it','current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential Combine','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));

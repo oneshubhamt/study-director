@@ -835,6 +835,48 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
   - After `node build/build.mjs`, browser tests one at a time, all PASS: `sync-and-profiles`, `sync-kept-reviews`, `session-plan-sync` (alone).
   - Not run: the full `fast` and browser suites, real Google Drive, physical devices, the other skins beyond the default glass presentation in dark and light.
 
+### Entry 025 — Continue Here: instant feedback, and a sync that handed the session back (2026-11-01)
+
+- **Branch / source HEAD before:** `refactor/background-coordination` at `f849a96` (release `SDVB75F18`, above `main`'s `SDVB75F17`; no further bump in this pull request). Phase 2 of [STATUS-SYSTEM.md](STATUS-SYSTEM.md).
+- **Step 1 — audit and measurement:**
+  - `continueSessionHere` → `transferSessionOwnershipHere` → `suspendBackground('session-continue').settled` → `claimSessionOwnership` → strict local save and read-back → restore and Execute. Nothing on screen changes from the click until the timer runs; the only message is the Plan status line, which is not on screen in Execute. Errors also go only to the Plan status line. A second click while the first runs starts a second hand-off.
+  - Measured with a scratch two-browser probe (simulated Drive, 250 ms per request; not committed): click → timer running 2.8 s with nothing running, 3.0–3.3 s with a sync catch-up running. Stopping the running sync took 20–290 ms. The rest is the ownership claim: about 11 Drive requests one after another (scope check, upload marker, turn check, claim read, claim write, read-back, marker removal). **Refuted:** the plan's assumption that waiting for a running sync dominates. The claim's order is what keeps two devices from claiming at once, so it is not shortened in this pass.
+  - **Found (pre-existing, `source/core/backup.js` `sessionSettlement`):** Continue Here pressed while this device had not yet taken in the other device's newest upload. After the claim, the interrupted catch-up resumes and brings in that upload, saved *before* the claim, which still names the other device. The merge counts it as a fresh takeover (`yield`): this device stops, shows "Running on another device" and keeps its own progress for review. Drive's claim still names this device, so its uploads are refused (`REPOSITORY_SESSION_OWNERSHIP_AHEAD`, retried with backoff), and the other device freezes its timer on seeing the claim. Neither device can run or upload the session. Reproduced three times by the probe; the merge rule has no knowledge of the claim.
+- **Step 2 — objectives before edits:**
+  - **E25.1** Continue Here responds at once: every copy (Execute card, Plan strip) shows "Continuing…", disabled and `aria-busy`, from the click until the hand-off ends; a second click does nothing.
+  - **E25.2** The Execute card shows each step as a polite live line: checking today's session, pausing this device's sync, confirming with Google Drive, starting here. The Plan strip's state label shows the same step.
+  - **E25.3** A failure shows in the Execute card in plain words (Drive busy, not connected, changed on another device, the reason otherwise) and as an error toast; the line clears on the next attempt or when the session view changes.
+  - **E25.4** A sync never hands the session back because of a version saved before this device's takeover: while this device holds Drive's newest claim for today's session and runs it, an incoming session running elsewhere does not count as a takeover; the session stays here and everything else merges. The provider reads the claim only while a session runs here. A session the other device ended and saved is unchanged.
+  - **E25.5** Tests: `sync-shared-base` gains claim-aware devices (takeover after a stale view holds; a takeover after the newest claim still yields); `session-plan-sync` makes the PC upload newer progress before the phone's Continue Here, and asserts the busy label, the step text and that the phone keeps the session and uploads.
+  - **E25.6** No change to the claim protocol, the upload path, stored formats or notification producers beyond the one error toast.
+- **Step 3 — implementation:**
+  - `source/core/backup.js`: `sessionSettlement` takes `claimedHere`; with it, an incoming session running on another device is not a takeover, so a session running here holds. `restoreBackupAttemptWithOperation` passes it only for a sync (`options.sessionClaimedHere`). The ended-and-saved case is unchanged.
+  - `source/core/backup-provider.js`: `sessionClaimedHere` reads Drive's newest claim only when the local session runs on this device, and answers yes when that claim is owned here and applies to today's session; a failed read counts as no (logged). `syncRepositoryProvider` passes it to the sync. A Combine review (`bringInRepositoryProvider`) is unchanged.
+  - `source/app.html`:
+    - the Execute card gains a live step line (`#execute-session-progress`);
+    - `sessionHandoff` (declared with the early `let`s) holds the step or the failure; `setSessionHandoff` redraws through `updateSessionControls`, which shows "Continuing…", disabled and `aria-busy` on every Continue Here, the step in the Plan strip's label and the step or failure in the card;
+    - `continueSessionHere` ignores a second tap while busy, shows each step, and on failure keeps the plain-words reason in the card, the Plan status and one error toast (`session/session-continue`); `setSessionPanelMode` clears a failure once the session is no longer elsewhere or suspended;
+    - `transferSessionOwnershipHere` reports its steps through an optional `onStep` (the Plan apply takeover passes none) and gives Drive busy and not connected their own codes.
+  - `source/styles/core.css`: the step line (info colour), its error tone, a small spinner on a busy Continue Here (static with reduced motion), and up to 900 px the step replaces the card's longer text so the button stays inside the card.
+  - Tests:
+    - `sync-shared-base` gains claim-aware devices (session claims on the shared fake Drive) and a block: B claims from a stale view, A cannot upload over the claim, B's sync of A's earlier upload keeps B running with nothing kept for review and everything else merged, A then follows and keeps its own progress for review, and A taking it back with a newer claim still stops B;
+    - `session-plan-sync`: the PC uploads newer progress (and a note) before the phone's Continue Here; the test checks "Continuing…", disabled and busy on every copy, the "Confirming with Google Drive" step in the card and the Plan strip, a second tap claiming nothing more, the step line clearing, and after release the phone still running the session, uploading, and holding the PC's note;
+    - `cleer-integration` accepts extra options on the sync's `bringIn` call (shape check only).
+  - Docs: STATUS-SYSTEM.md (phases, phase 2 notes, noise rule), BACKUP-ENGINE.md (Active Session hold rule), NOTIFICATIONS.md (Continue Here producer).
+- **Step 4 — objectives:**
+  - **E25.1 MET**: the browser test sees "Continuing…", disabled and busy on every shown copy while the claim is held; a second tap adds no claim.
+  - **E25.2 MET**: the browser test sees the step in the card and the Plan strip; scratch screenshots (not committed) at phone and laptop width show the step line and spinner.
+  - **E25.3 MET** (probe, not a committed test): with Drive held busy by another operation, the card, the Plan status and the toast say "Google Drive is busy with another backup or restore. Try again in a moment.", and the button returns to Continue Here; screenshots at phone and laptop width. The other messages are read from source only.
+  - **E25.4 MET**: without the change, the new `sync-shared-base` block fails ("the session keeps running on B") and `session-plan-sync` times out at "the phone publishes its full state after ownership"; with it both pass. The scratch probe's catch-up-running case, stuck in three earlier runs, now finishes.
+  - **E25.5 MET** as listed in step 3.
+  - **E25.6 MET**: the claim protocol, upload path and stored formats are unchanged; the only new notification is the failure toast.
+  - Measured after the change (scratch probe, 250 ms a request): 2.8 s idle, 3.1 s with a catch-up running, 3.6 s with an upload running (stopping it took 0.56 s).
+- **Step 5 — targeted QA (local, Node 22, Chromium 1194):**
+  - Targeted PASS (8): `integration/backup/sync-shared-base`, `integration/backup/repository-checkpoint` (includes the session-claim regression helper), `integration/backup/backup-persistence`, `integration/backup/drive-security`, `integration/backup/automatic-provider-backup`, `integration/backup/backup-reminder`, `integration/ui/notification-lifecycle`, `unit/backup/sync-status`.
+  - `architecture` category: first run FAIL in `cleer-integration` (its shape check expected the exact `bringIn(candidate,{sync:true})`); after relaxing it, PASS (32). Suite governance PASS.
+  - After `node build/build.mjs`, browser tests one at a time, PASS: `restore-session-safety`, then `session-plan-sync` alone. A last provider tweak (the claim read sets up its Drive operation inside its own guard) followed; `sync-shared-base`, `repository-checkpoint`, `drive-security` and `architecture` were rerun, and `session-plan-sync` was rerun alone on that final build, all PASS (`restore-session-safety` was not rerun; it does not sync through Drive).
+  - Not run: the full `fast` and browser suites, real Google Drive, physical devices, skins other than the default glass dark presentation.
+
 ### Journal template — duplicate this for the next pass
 
 - **Entry NNN — Pass P#, topic / date:**

@@ -98,6 +98,8 @@ session running on another device, app update ready, no backup in over a week.
 
 - Syncing and synced change only the indicator. Phase 1 adds no new toasts or sounds.
 - Existing notices (sync review, sign-in expiry, session hand-off) are unchanged.
+- Continue Here shows its steps in the Execute card and the Plan strip; only a
+  failure adds a pop-up (it also stays in the card).
 - Later phases: one pop-up when a new review first appears; red only after
   retries run out; during a running study session only blocking problems pop up.
 
@@ -105,10 +107,17 @@ session running on another device, app update ready, no backup in over a week.
 
 | Phase | Scope | State |
 |---|---|---|
-| 1 | Status model (`backup-presentation.status`), indicator on all hosts, panel section, retire the text line and phone dot | This pass |
-| 2 | Continue Here: instant busy button ("Continuing…"), step text in the Execute card, errors in the Execute card; measure and shorten the wait for a running sync | Planned |
+| 1 | Status model (`backup-presentation.status`), indicator on all hosts, panel section, retire the text line and phone dot | Done |
+| 2 | Continue Here: instant busy button ("Continuing…"), step text in the Execute card, errors in the Execute card; measure and shorten the wait for a running sync | Done (see below) |
 | 3 | Connect Drive: a progress card on any tab (checking folder → bringing in changes → uploading → Synced ✓) | Planned |
 | 4 | Remaining cases: session hand-off ready row, first-sync progress counts, pop-up rules from section 6 | Planned |
+
+### Phase 2 — Continue Here
+
+- **Feedback.** Every Continue Here button reads "Continuing…" (disabled, busy) from the tap until it ends. The Execute card and the Plan strip show the step: checking today's session, pausing this device's sync, confirming with Google Drive, starting here. On a phone the step replaces the card's longer text so the button stays in view.
+- **Errors** stay in the Execute card in plain words (Drive busy, not connected, changed on another device, offline) and pop up once.
+- **Wait, measured** (two browsers, simulated Drive at 250 ms a request): 2.8 s with nothing running, 3.1 s with a sync catch-up running, 3.6 s with an upload running. Stopping the running work takes 0.03–0.6 s; the rest is the ownership claim, about 11 Drive requests one after another, whose order keeps two devices from claiming at once. It is not shortened here.
+- **Fixed on the way:** Continue Here pressed before this device took in the other device's newest upload could hand the session back once that upload came in, leaving neither device able to run or upload it. A sync now keeps the session while Drive's claim names this device ([BACKUP-ENGINE.md](BACKUP-ENGINE.md), Active Session).
 
 ## 8. Ownership
 

@@ -101,15 +101,30 @@ try{
   // are locked while a sync applies changes).
   await waitFor(async()=>!markers()&&!await waiting(b)&&await b.evaluate(`(()=>{const button=[...document.querySelectorAll('[data-action="restore-session"]')].find(item=>!item.hidden);return !!button&&!button.disabled;})()`)&&!(await sync(b)).catchingUp,{label:'the phone settles',timeout:90000});
   await holdBackground(b,'__qaOwnershipHold');
+  // The PC records more and uploads it before the phone takes it in. That
+  // upload, saved before the phone takes over, still names the PC; it must
+  // not take the session back once the phone has continued.
+  const pcUploads=uploadsBy('A'),phoneView=(await screen(b)).revision;
+  await a.evaluate(`(async()=>{const d=__PWA6;await new Promise(r=>setTimeout(r,1100));d.AppData.notes.update('pc-late','PC note','Written on the PC before the phone continued','');await d.AppData.notes.flush({strict:true});await d.flushLiveDraft();await d.BackupProviderRuntime.flushAutomatic('app-hidden');})()`);
+  await waitFor(async()=>uploadsBy('A')>pcUploads&&!await waiting(a)&&!markers(),{label:'the PC uploads newer progress',timeout:45000});
+  assert.ok((await screen(a)).revision>phoneView,'the PC’s session moved on since the phone last took it in');
   const returnUploads=uploadsBy('B'),returnClaims=claimsBy('B'),releaseReturnClaim=gateUploads();
   await b.evaluate(`(async()=>{${acceptDialogs}__PWA6.goTab('plan');await new Promise(r=>setTimeout(r,150));document.querySelector('#plan-board-session-actions [data-action="restore-session"]').click();})()`);
-  await sleep(250);
+  // Continue Here answers at once: every copy says it is working, a second
+  // tap does nothing, and the Execute card and the Plan strip show the step.
+  const handoff=()=>b.evaluate(`(()=>{const buttons=[...document.querySelectorAll('[data-action="restore-session"]')].filter(item=>!item.hidden);return {labels:buttons.map(item=>item.textContent.trim()),disabled:buttons.every(item=>item.disabled),busy:buttons.every(item=>item.getAttribute('aria-busy')==='true'),step:document.getElementById('execute-session-progress').hidden?'':document.getElementById('execute-session-progress').textContent,strip:document.getElementById('plan-session-state').textContent};})()`);
+  await waitFor(async()=>/^Confirming with Google Drive/u.test((await handoff()).step),{label:'Continue Here shows it is confirming with Google Drive',timeout:5000});
+  const busy=await handoff();
+  assert.deepEqual([...new Set(busy.labels)],['Continuing…'],`every Continue Here says it is working (${busy.labels.join(' / ')})`);
+  assert.equal(busy.disabled&&busy.busy,true,'and is disabled and busy');
+  assert.match(busy.strip,/^Confirming with Google Drive/u,'the Plan strip shows the step');
+  await b.evaluate(`document.getElementById('execute-session-action').click()`);
   assert.equal(claimsBy('B'),returnClaims,'Continue Here has not committed while its ownership write is held');
   assert.notEqual((await screen(b)).mode,'running','Continue Here keeps the timer stopped before the small ownership claim is durable');
   releaseReturnClaim();
   await waitFor(async()=>claimsBy('B')>returnClaims&&(await screen(b)).mode==='running',{label:'Continue Here ownership claim',timeout:10000});
   await b.evaluate(`clearInterval(window.__acceptTimer)`);
-  const moved=await screen(b),phoneClaim=await latestClaim(),phoneProjection=await b.evaluate(`__PWA6.BackupProviderRuntime.readSessionClaim('google-drive')`);
+  const moved=await screen(b),phoneClaim=await latestClaim(),phoneProjection=await b.evaluate(`__PWA6.BackupProviderRuntime.readSessionClaim('google-drive')`),phoneClaimOwner=moved.owner;
   assert.equal(moved.mode,'running','Continue Here runs after the verified ownership claim');
   assert.equal(phoneClaim.state,'owned');assert.match(phoneClaim.ownerToken,/^[a-f0-9]{64}$/u);assert.equal(Object.hasOwn(phoneClaim,'owner'),false);assert.equal(phoneProjection.ownedHere,true);assert.equal(phoneProjection.applies,true);assert.ok(moved.revision>=phoneClaim.revision);
   assert.equal(uploadsBy('B'),returnUploads,'Continue Here does not wait for the full session checkpoint');
@@ -124,8 +139,15 @@ try{
   await waitFor(async()=>{await a.evaluate(`__PWA6.checkSessionOwnershipClaim()`);return await a.evaluate(`!__PWA6.TimerEngine.status().loopActive`);},{label:'the old runtime clock stops from the lightweight claim before full reconciliation',timeout:10000});
   assert.equal((await screen(a)).mode,'running','the lightweight ownership claim freezes execution without rewriting canonical session semantics before reconciliation');
 
+  assert.equal(claimsBy('B'),returnClaims+1,'a second tap while it was working claimed nothing more');
+  assert.equal((await handoff()).step,'','the step line clears once the session runs here');
+
   await releaseBackground(b,'__qaOwnershipHold');
   await waitFor(async()=>uploadsBy('B')>returnUploads&&!await waiting(b),{label:'the phone publishes its full state after ownership',timeout:45000});
+  const kept=await screen(b);
+  assert.equal(kept.mode,'running','the PC’s earlier upload did not take the session back');
+  assert.equal(kept.owner,phoneClaimOwner,'the phone still runs the session');
+  assert.match(await b.evaluate(`String(__PWA6.AppData.notes.get('pc-late')?.text||'')`),/before the phone continued/u,'everything else in that upload came in');
 
   // Ending the owner session publishes the no-session checkpoint first, then a
   // higher-epoch released claim. A stale frozen device must not interpret that

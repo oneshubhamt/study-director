@@ -2173,6 +2173,13 @@ html[data-study-director-ui-mutable="0"] [data-ownership-ui="drag"]{cursor:not-a
 .execute-overlay-title{font-family:var(--sd-font-condensed);font-size:var(--sd-type-role-display-emphasis-size);font-weight:var(--sd-font-weight-black);letter-spacing:calc(2px * var(--sd-type-caps-tracking-scale));text-transform:var(--sd-type-transform-title);color:var(--sd-color-accent-primary);line-height:1.05;filter:drop-shadow(0 0 14px var(--sd-state-accent-line))}
 .execute-overlay-sub{max-width:620px;margin-top:10px;color:var(--sd-color-text-secondary);line-height:1.45}
 .execute-overlay-action{margin-top:16px;min-height:40px;padding:9px 16px;--btn-bg:var(--sd-surface-accent-soft);--btn-border:var(--sd-state-accent-line-strong);--btn-color:var(--sd-color-accent-primary)}
+/* Continue Here: the step in progress, or why it stopped. */
+.execute-overlay-progress{margin-top:12px;color:var(--sd-color-info);letter-spacing:1px}
+.execute-overlay-progress.error{max-width:520px;color:var(--sd-color-danger);letter-spacing:.2px;text-transform:none;line-height:1.4}
+[data-action="restore-session"][aria-busy="true"]::before{content:"";display:inline-block;width:.8em;height:.8em;margin-right:.5em;vertical-align:-.1em;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sd-busy-spin .8s linear infinite}
+@keyframes sd-busy-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){[data-action="restore-session"][aria-busy="true"]::before{animation:none;opacity:.6}}
+@media (max-width: 900px){.execute-state-overlay:has(>.execute-overlay-progress:not([hidden]))>.execute-overlay-sub{display:none}}
 .cd-card.overlay-on #cd,.cd-card.overlay-on .cd-mode,.cd-card.overlay-on .prog-strip,.cd-card.overlay-on .cd-hint,.cd-card.overlay-on #overflow-wrap,.cd-card.overlay-on .break-meter{opacity:.18;pointer-events:none}
 .execute-ops-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(280px,.85fr);grid-auto-rows:max-content;align-items:start;gap:14px;margin:16px 0 14px}
 .execute-ops-grid>.focus-rhythm,.execute-ops-grid>.execute-session-panel{align-self:start;min-width:0;min-height:0;height:auto}

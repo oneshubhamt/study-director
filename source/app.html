@@ -633,6 +633,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
           <div class="execute-overlay-kicker ui-label" id="execute-overlay-kicker">Execute Status</div>
           <div class="execute-overlay-title" id="execute-overlay-title">No Schedule Loaded</div>
           <div class="execute-overlay-sub ui-mono" id="execute-overlay-sub">Open Plan and apply today’s schedule to begin.</div>
+          <div class="execute-overlay-progress ui-label" id="execute-session-progress" role="status" aria-live="polite" hidden></div>
           <button class="execute-overlay-action ui-btn" id="execute-open-plan" type="button" data-tab="plan">Open Plan</button>
           <button class="execute-overlay-action ui-btn primary" id="execute-session-action" type="button" data-action="restore-session" hidden disabled>Continue Here</button>
         </div>
@@ -2569,7 +2570,7 @@ let sessionPanelMode='none',sessionPanelSession=null;
 let sessionSafetyMessage='';
 // The profile indicator's state (renderSyncStatus); declared early because
 // storage health asks for a redraw during start-up.
-let backupNudgeMessage='',driveConnecting=false,syncStatusTimer=null,syncStatusRing='',syncStatusSettle=null;
+let backupNudgeMessage='',driveConnecting=false,syncStatusTimer=null,syncStatusRing='',syncStatusSettle=null,sessionHandoff={step:'',error:''};
 let backupNudgeCheckedAt=0;
 let backupNudgeNotifiedDate='';
 let saveReminderDate='';
@@ -4467,6 +4468,7 @@ function isRecoverablePreviousActiveSession(session){
 function setSessionPanelMode(mode,session=null){
   sessionPanelMode=mode||'none';
   sessionPanelSession=['suspended','elsewhere'].includes(sessionPanelMode)?session:null;
+  if(!sessionPanelSession&&sessionHandoff.error)sessionHandoff={...sessionHandoff,error:''};
   // The Execute header names the device running the session, or stops doing
   // so. Before the panel's own controls, which the idle display disables.
   try{updateExecuteSessionStatus();refreshExecuteIdleDisplay(new Date(),{force:true});}catch(error){AppDiagnostics.capture('execute.session-elsewhere-header',error,'warn');}
@@ -5190,17 +5192,23 @@ async function confirmSessionTakeover(session,{replace=false}={}){
     confirmLabel:replace?'Apply here':'Continue here',cancelLabel:'Not now'
   });
 }
-async function transferSessionOwnershipHere(session){
+const sessionHandoffError=(code,message)=>Object.assign(new Error(message),{code});
+// onStep(text): each step, for Continue Here's progress line.
+async function transferSessionOwnershipHere(session,{onStep=null}={}){
+  const step=text=>{try{onStep?.(text);}catch{}};
   if(!appCanMutate())throw new Error('Study Director does not currently have write control.');
-  if(!BackupProviderRuntime.connected('google-drive'))throw new Error('Google Drive must be connected to transfer a session that belongs to another device.');
+  if(!BackupProviderRuntime.connected('google-drive'))throw sessionHandoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive must be connected to transfer a session that belongs to another device.');
   const previous=ActiveSessionCodec.sanitizeCurrent(session),planned=previous?ActiveSessionCodec.sanitizeCurrent({...previous,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(previous.revision),updatedAt:new Date().toISOString()}):null;
   if(!previous||!planned)throw new Error('the transferred session state is invalid');
   let next=planned;
   let ownershipClaim=null,backgroundHold=null,localSaved=false,rolledBack=false;
   try{
+    step('Pausing this device’s sync…');
     backgroundHold=BackupProviderRuntime.suspendBackground('session-continue');await backgroundHold.settled;
-    setPlanStatus('Transferring today’s session to this device…');
+    setPlanStatus('Transferring today’s session to this device…');step('Confirming with Google Drive…');
     const claimed=await BackupProviderRuntime.claimSessionOwnership('google-drive',{date:previous.date,observedOwner:previous.runningOn,observedRevision:previous.revision,revision:planned.revision});
+    if(claimed?.status==='busy')throw sessionHandoffError('SESSION_CONTINUE_BUSY','Google Drive is busy with another backup or restore.');
+    if(claimed?.status==='unavailable')throw sessionHandoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive is not connected.');
     if(!claimed||claimed.status!=='completed'||!claimed.claim)throw new Error('Google Drive did not confirm the Active Session ownership claim.');
     ownershipClaim=claimed.claim;
     next=ActiveSessionCodec.sanitizeCurrent({...planned,revision:Math.max(planned.revision,Number(ownershipClaim.revision)||0),updatedAt:new Date().toISOString()});
@@ -5226,9 +5234,26 @@ async function transferSessionOwnershipHere(session){
     throw error;
   }finally{backgroundHold?.release();}
 }
+// Continue Here in progress: every Continue Here button says so and the
+// Execute card shows the step; a failure stays in the card until the next
+// try or until the session moves on.
+function setSessionHandoff(step='',error=''){
+  sessionHandoff={step:String(step||''),error:String(error||'')};
+  updateSessionControls();
+}
+function sessionHandoffProblem(error){
+  const code=String(error&&error.code||'');
+  if(navigator.onLine===false)return 'You’re offline. Connect to the internet, then try again.';
+  if(code==='SESSION_CONTINUE_BUSY')return 'Google Drive is busy with another backup or restore. Try again in a moment.';
+  if(code==='SESSION_CONTINUE_NOT_CONNECTED')return 'Google Drive isn’t connected. Sign in from your profile, then try again.';
+  if(code==='REPOSITORY_SESSION_CLAIM_STALE')return 'Today’s session changed on another device. Wait for this device to catch up, then try again.';
+  if(code==='REPOSITORY_SYNC_TURN')return 'Another device is saving to Google Drive. Try again in a moment.';
+  return String(error&&error.message||error||'Something went wrong.');
+}
 async function continueSessionHere(){
-  if(!appCanMutate())return false;
+  if(!appCanMutate()||sessionHandoff.step)return false;
   let previous=null;
+  setSessionHandoff('Checking today’s session…');
   try{
     const loaded=await AppData.activeSession.load(),session=loaded&&loaded.value||null;
     if(!session){setSessionPanelMode('none');return false;}
@@ -5236,13 +5261,17 @@ async function continueSessionHere(){
     if(sessionRunsElsewhere(session)&&!await confirmSessionTakeover(session))return false;
     if(!appCanMutate())return false;
     previous=ActiveSessionCodec.sanitizeCurrent(session);
-    const moved=await transferSessionOwnershipHere(session);
+    const moved=await transferSessionOwnershipHere(session,{onStep:text=>setSessionHandoff(text)});
+    setSessionHandoff('Starting here…');
     return moved.previous.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
   }catch(error){
-    setPlanStatus('Could not continue today’s session here: '+(error&&error.message?error.message:error),false);
+    const problem=sessionHandoffProblem(error);
+    setPlanStatus('Could not continue today’s session here: '+problem,false);
     if(previous)setSessionPanelMode(sessionRunsElsewhere(previous)?'elsewhere':'suspended',previous);
+    setSessionHandoff('','Couldn’t continue here. '+problem);
+    Interactions.notify({source:'session',kind:'error',key:'session-continue',title:'Couldn’t continue here',message:problem});
     return false;
-  }
+  }finally{if(sessionHandoff.step)setSessionHandoff('',sessionHandoff.error);}
 }
 // Another device continued today's session after this one changed it: the
 // timer stops here and this device's progress stays as a suspended session,
@@ -8602,9 +8631,11 @@ function updateSessionControls(){
       ? 'The timer is actively tracking a block. Suspend or reset only if you intentionally want to stop this live session.'
       : 'A plan is loaded but no countdown is running. These controls affect today’s live session; saved Library records and notes are kept.';
   }
+  const continuing=!!sessionHandoff.step,progress=document.getElementById('execute-session-progress'),progressText=continuing?sessionHandoff.step:sessionHandoff.error;
+  if(progress){progress.hidden=!progressText;progress.classList.toggle('error',!continuing&&!!progressText);if(progress.textContent!==progressText)progress.textContent=progressText;}
   if(planControls){
     planControls.hidden=!visible;
-    const state=document.getElementById('plan-session-state'),label=elsewhere?`Running ${sessionDevice(sessionPanelSession)}`:handedOff?`Suspended ${sessionDevice(sessionPanelSession)}`:suspended?'Today’s session is suspended':finished?'Today finished':running?'Live session':'Today’s session';
+    const state=document.getElementById('plan-session-state'),label=continuing?sessionHandoff.step:elsewhere?`Running ${sessionDevice(sessionPanelSession)}`:handedOff?`Suspended ${sessionDevice(sessionPanelSession)}`:suspended?'Today’s session is suspended':finished?'Today finished':running?'Live session':'Today’s session';
     if(state&&state.textContent!==label)state.textContent=label;
   }
   // The same controls in Execute's status card, its session panel and Plan's
@@ -8612,7 +8643,7 @@ function updateSessionControls(){
   // running elsewhere offers only Continue Here.
   [panel,planControls,cardAction?.parentElement].filter(Boolean).forEach(container=>container.querySelectorAll('button[data-action]').forEach(btn=>{
     const action=btn.dataset.action;
-    if(action==='restore-session'){btn.hidden=!suspended&&!elsewhere;btn.disabled=!suspended&&!elsewhere;const label=elsewhere||handedOff?'Continue Here':'Restore Session';if(btn.textContent!==label)btn.textContent=label;}
+    if(action==='restore-session'){btn.hidden=!suspended&&!elsewhere;btn.disabled=continuing||!suspended&&!elsewhere;const label=continuing?'Continuing…':elsewhere||handedOff?'Continue Here':'Restore Session';if(btn.textContent!==label)btn.textContent=label;btn.setAttribute('aria-busy',continuing?'true':'false');}
     else if(action==='suspend-session'){btn.hidden=suspended||elsewhere;btn.disabled=!active;}
     else if(action==='finish-session'){btn.hidden=elsewhere||suspended;btn.disabled=!active||finished;}
     else if(action==='reset-session'){btn.hidden=elsewhere;btn.disabled=!visible||elsewhere;}

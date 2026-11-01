@@ -780,12 +780,15 @@ function syncSavedDayReviews(plan,settled){
 // ended (it has none and saved the session's day since both last shared one)
 // counts as taken over too, or as 'ended' when it does not run here: the
 // other side's ending shows and this device's progress is kept for review.
-async function sessionSettlement(base,parsed,{hold=false,sync=false}={}){
+// claimedHere: Drive's newest ownership claim names this device, so a
+// version naming another device was saved before this device took over and
+// does not take the session back.
+async function sessionSettlement(base,parsed,{hold=false,sync=false,claimedHere=false}={}){
   const loaded=await readCanonicalActiveSession(),local=loaded&&loaded.value||null,incoming=parsed&&parsed.importedActiveSession||null;
   if(!local&&!incoming||local&&incoming&&Canonical.same(local,incoming))return 'same';
   const me=installationId(),shared=String(base&&base.sessionFingerprint||'');
   const ended=(hold||sync)&&!!local&&!incoming&&!!shared&&await daySavedSinceBase(parsed,local.date);
-  const takenOver=hold&&(!!incoming&&incoming.status!=='suspended'&&incoming.runningOn!==me||ended);
+  const takenOver=hold&&(!!incoming&&incoming.status!=='suspended'&&incoming.runningOn!==me&&!claimedHere||ended);
   if(hold&&!takenOver)return 'hold';if(!base)return takenOver?'yield':'';
   const [mine,theirs]=await Promise.all([sessionFingerprint(local),sessionFingerprint(incoming)]);
   if(takenOver)return mine===shared?'incoming':theirs===shared?'local':'yield';
@@ -1498,7 +1501,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   // takes the other's.
   // A review during a study session leaves the session as it is too.
   const review=!quiet&&!note&&options?.review===true,base=note?null:await lastSharedBase(stored);
-  let session=note||missingOnly?'same':await sessionSettlement(base,parsed,{hold:(sync||review)&&hasActiveSession(),sync});
+  let session=note||missingOnly?'same':await sessionSettlement(base,parsed,{hold:(sync||review)&&hasActiveSession(),sync,claimedHere:sync&&options?.sessionClaimedHere===true});
   // Another device took the session over: stop it here, keeping what this
   // device recorded, and let the person choose between the two (a sync shows
   // the other device's, which runs there, and keeps this one's for review).
