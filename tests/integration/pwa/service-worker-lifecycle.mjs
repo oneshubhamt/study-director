@@ -8,7 +8,7 @@ const scope='https://study.test/app/',current='study-director-shell-current',ass
 const rows=Array.from({length:9},(_,i)=>({path:`./asset-${i}.js`,body:`asset-${i}`})),manifest=rows.map(row=>({path:row.path,sha256:sha(row.body)}));
 const cases=[];
 function fixture({badPath='',active=null,windows=[],rejectDelete='',failMetadata=false,delays={}}={}){
- const stores=new Map(),listeners=new Map(),deletions=[],messages=[],fetches=[],fetchEvents=[],claims=[];let concurrent=0,maximum=0;
+ const stores=new Map(),listeners=new Map(),deletions=[],messages=[],fetches=[],fetchEvents=[],claims=[],opened=[];let concurrent=0,maximum=0;
  const ensure=name=>{if(!stores.has(name))stores.set(name,new Map());return stores.get(name);};
  const caches={
   async has(name){return stores.has(name);},async keys(){return [...stores.keys()];},
@@ -21,7 +21,7 @@ function fixture({badPath='',active=null,windows=[],rejectDelete='',failMetadata
   };}
  };
  const self={registration:{scope,active,installing:null,waiting:null},location:{origin:'https://study.test'},addEventListener(type,fn){listeners.set(type,fn);},async skipWaiting(){claims.push('skip');}};
- const clients={async matchAll(){return windows;},async claim(){claims.push('claim');}};
+ const clients={async matchAll(){return windows;},async claim(){claims.push('claim');},async openWindow(url){opened.push(url);return {url};}};
  const fetch=async request=>{const row=rows.find(row=>new URL(row.path,scope).href===request.url);fetches.push({url:request.url,cache:request.cache});fetchEvents.push(`start:${row?.path||request.url}:${request.cache}`);if(!row)throw new Error('offline');concurrent++;maximum=Math.max(maximum,concurrent);await new Promise(resolve=>setTimeout(resolve,Number(delays[row.path])||1));concurrent--;fetchEvents.push(`finish:${row.path}:${request.cache}`);return new Response(row.body+(row.path===badPath?'corrupt':''));};
  const context=vm.createContext({self,caches,clients,URL,Request,Response,crypto:webcrypto,fetch,Date,console});
  const rendered=template.replaceAll('@@SD_RELEASE@@','QA_FIXTURE').replaceAll('@@SD_BUILD_ID@@','qa-build').replaceAll('@@SD_PAGE_ASSET_ID@@',assetId).replaceAll('@@SD_PWA_RELEASE_ID@@','current').replaceAll('@@SD_PWA_ASSET_MANIFEST@@',JSON.stringify(manifest)).replaceAll('@@SD_CACHE_STORAGE_IDENTITIES@@',JSON.stringify(CACHE_STORAGE_IDENTITIES));
@@ -30,7 +30,7 @@ function fixture({badPath='',active=null,windows=[],rejectDelete='',failMetadata
  function seed(name,id,{activatedAt=1,state='active',asset='old.js'}={}){const map=ensure(name);map.set(meta,new Response(JSON.stringify({assetId:id,buildId:'qa-'+id,state,activatedAt})));map.set(scope+asset,new Response(name+' offline bytes'));return map;}
  function client(id){return {id,url:scope,postMessage(value){messages.push({id,...value});}};}
  async function report(client,id){await emit('message',{source:client,data:{type:'SD_PWA_CLIENT_STATE',assetId:id,ready:true}});}
- return {stores,windows,deletions,messages,fetches,fetchEvents,claims,self,seed,client,report,emit,maximum:()=>maximum};
+ return {stores,windows,deletions,messages,fetches,fetchEvents,claims,opened,self,seed,client,report,emit,maximum:()=>maximum};
 }
 {
  const h=fixture();await h.emit('install');assert.equal(h.stores.get(current).size,rows.length+1);assert.equal(h.maximum(),8);assert.equal(h.fetches.length,rows.length);assert.ok(h.fetches.every(row=>row.cache==='default'));assert.deepEqual(h.claims,['skip']);assert.equal(h.deletions.length,0);cases.push('eight-way verified precache and first installation');
@@ -94,4 +94,40 @@ function fixture({badPath='',active=null,windows=[],rejectDelete='',failMetadata
 {
  const h=fixture({active:{}}),page=h.client('page');h.windows.push(page);h.seed(current,assetId);h.stores.set('study-director-shell-legacy',new Map([[scope+'index.html',new Response('<meta name="study-director-build" content="old-build">')]]));await h.report(page,assetId);assert.equal(h.stores.has('study-director-shell-legacy'),true,'one previous legacy shell is retained for history return');cases.push('previous-generation retention also covers legacy pages without asset metadata');
 }
+// A system notification focuses an existing app, even when its URL differs
+// from the notification's root URL. No navigation/save-unaware reload is allowed.
+{
+  const windowClient={url:scope+'index.html?draft=unsaved',focused:0,navigated:0,
+    async navigate(){this.navigated++;throw new Error('notification must not navigate a dirty app');},
+    async focus(){this.focused++;return this;}};
+  const h=fixture({active:{},windows:[windowClient]});
+  let closes=0;
+  await h.emit('notificationclick',{notification:{data:{url:scope},close(){closes++;}}});
+  assert.equal(closes,1);assert.equal(windowClient.focused,1);
+  assert.equal(windowClient.navigated,0,'an existing index/query client must not reload');
+  assert.deepEqual(h.opened,[]);
+  cases.push('notification focuses dirty in-scope window without navigation');
+}
+{
+  const wrong={url:'https://other.test/app/index.html',async focus(){throw Error('wrong origin');}};
+  const app={url:scope+'nested/day',focused:0,async focus(){this.focused++;return this;}};
+  const h=fixture({windows:[wrong,app]});
+  await h.emit('notificationclick',{notification:{data:{url:scope+'index.html'},close(){}}});
+  assert.equal(app.focused,1);
+  assert.deepEqual(h.opened,[]);
+  cases.push('notification retains an existing deep route among multiple clients');
+}
+{
+  const h=fixture();
+  await h.emit('notificationclick',{notification:{data:{url:scope+'index.html?tab=review'},close(){}}});
+  assert.deepEqual(h.opened,[scope+'index.html?tab=review']);
+  cases.push('notification opens a valid route when no app window exists');
+}
+for(const unsafe of ['https://outside.test/', 'https://study.test/app-other/index.html']){
+  const h=fixture();
+  await h.emit('notificationclick',{notification:{data:{url:unsafe},close(){}}});
+  assert.deepEqual(h.opened,[scope],'out-of-scope notification URL must fall back to app root');
+}
+cases.push('notification refuses cross-origin and sibling-scope routes');
+
 console.log(JSON.stringify({status:'PASS',suite:'service-worker-lifecycle',cases},null,2));
