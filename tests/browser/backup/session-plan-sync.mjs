@@ -85,13 +85,22 @@ try{
   assert.match(phone.header,/^RUNNING ON /u,`the Execute header names the device running the session (${phone.header})`);
   assert.equal(phone.overlay,'Running on Another Device','the Execute card says so too');
   assert.doesNotMatch(phone.now,/No Schedule Loaded/u,'no "No Schedule Loaded" next to the panel');
+  // Continue Here sits in the Execute status card and in the strip above the
+  // Plan board; the Execute session panel keeps only the note.
+  const controls=await b.evaluate(`(()=>{const card=document.getElementById('execute-session-action'),strip=document.getElementById('plan-board-session-actions'),board=document.getElementById('plan-board'),shown=root=>[...root.querySelectorAll('button[data-action]')].filter(item=>!item.hidden).map(item=>item.textContent.trim());return {card:card.hidden?'':card.textContent.trim(),cardInOverlay:!!card.closest('#execute-state-overlay'),strip:shown(strip),stripState:document.getElementById('plan-session-state').textContent,stripAboveBoard:!!(strip.compareDocumentPosition(board)&Node.DOCUMENT_POSITION_FOLLOWING),panel:shown(document.getElementById('session-panel'))};})()`);
+  assert.equal(controls.card,'Continue Here','the Execute status card offers Continue Here');
+  assert.equal(controls.cardInOverlay,true);
+  assert.deepEqual(controls.strip,['Continue Here'],'the Plan strip offers only Continue Here while the session runs elsewhere');
+  assert.match(controls.stripState,/^Running on /u,'the Plan strip names the device running the session');
+  assert.equal(controls.stripAboveBoard,true,'the Plan strip sits above the board');
+  assert.deepEqual(controls.panel,[],'the Execute session panel shows no disabled controls');
 
   // Continue Here, once the phone has finished taking in the plan (buttons
   // are locked while a sync applies changes).
   await waitFor(async()=>!markers()&&!await waiting(b)&&await b.evaluate(`(()=>{const button=[...document.querySelectorAll('[data-action="restore-session"]')].find(item=>!item.hidden);return !!button&&!button.disabled;})()`)&&!(await sync(b)).catchingUp,{label:'the phone settles',timeout:90000});
   await holdBackground(b,'__qaOwnershipHold');
   const returnUploads=uploadsBy('B'),returnClaims=claimsBy('B'),releaseReturnClaim=gateUploads();
-  await b.evaluate(`(async()=>{${acceptDialogs}__PWA6.goTab('plan');await new Promise(r=>setTimeout(r,150));[...document.querySelectorAll('[data-action="restore-session"]')].find(item=>!item.hidden).click();})()`);
+  await b.evaluate(`(async()=>{${acceptDialogs}__PWA6.goTab('plan');await new Promise(r=>setTimeout(r,150));document.querySelector('#plan-board-session-actions [data-action="restore-session"]').click();})()`);
   await sleep(250);
   assert.equal(claimsBy('B'),returnClaims,'Continue Here has not committed while its ownership write is held');
   assert.notEqual((await screen(b)).mode,'running','Continue Here keeps the timer stopped before the small ownership claim is durable');

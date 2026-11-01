@@ -635,6 +635,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
           <div class="execute-overlay-title" id="execute-overlay-title">No Schedule Loaded</div>
           <div class="execute-overlay-sub ui-mono" id="execute-overlay-sub">Open Plan and apply today’s schedule to begin.</div>
           <button class="execute-overlay-action ui-btn" id="execute-open-plan" type="button" data-tab="plan">Open Plan</button>
+          <button class="execute-overlay-action ui-btn primary" id="execute-session-action" type="button" data-action="restore-session" hidden disabled>Continue Here</button>
         </div>
         <div class="break-meter ui-inset" id="break-meter">
           <span class="break-meter-label ui-label" id="break-label">Break elapsed</span>
@@ -879,12 +880,9 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
         <div class="session-panel-title ui-label" id="session-panel-title">Live Session Active</div>
         <div class="session-panel-note ui-body" id="session-panel-note">Today’s live schedule is active. These controls affect only the live session; saved Library records and notes are kept.</div>
         <div class="session-actions">
-          <button class="plan-btn ui-btn primary" type="button" data-action="restore-session" hidden disabled>Restore Session</button>
           <button class="plan-btn ui-btn warn" type="button" data-action="suspend-session" disabled>Suspend Today</button>
-          <button class="plan-btn ui-btn danger" type="button" data-action="reset-session" disabled>Reset Today</button>
-        </div>
-        <div class="session-finish-action">
           <button class="plan-btn ui-btn finish" type="button" data-action="finish-session" disabled>Finish Today</button>
+          <button class="plan-btn ui-btn danger" type="button" data-action="reset-session" disabled>Reset Today</button>
         </div>
       </div>
     </section>
@@ -1089,8 +1087,8 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
           <button class="mini-btn ui-btn" id="review-kept-versions" type="button" data-action="review-kept-versions">Review</button>
         </div>
         <div class="backup-location-row unsupported-data-row" id="unsupported-data" role="status" hidden>
-          <div class="backup-row-copy"><span class="ui-label">From a newer version</span><span class="ui-helper" id="unsupported-data-text"></span></div>
-          <button class="mini-btn ui-btn" type="button" data-action="check-unsupported-update">Check for update</button>
+          <div class="backup-row-copy"><span class="ui-label">Data from a newer app version</span><span class="ui-helper" id="unsupported-data-text"></span></div>
+          <button class="mini-btn ui-btn" type="button" data-action="check-unsupported-update">Update app</button>
         </div>
         <div class="library-data-group ui-panel">
           <details class="backup-model-disclosure ui-disclosure">
@@ -1312,6 +1310,15 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
       </div>
     </details>
     <div class="plan-status ui-status" id="plan-status"></div>
+    <div class="plan-session-strip ui-surface" id="plan-board-session-actions" role="group" aria-labelledby="plan-session-state" hidden>
+      <div class="plan-session-state ui-label" id="plan-session-state">Today’s session</div>
+      <div class="plan-session-buttons">
+        <button class="plan-btn ui-btn primary" type="button" data-action="restore-session" hidden disabled>Restore Session</button>
+        <button class="plan-btn ui-btn warn" type="button" data-action="suspend-session" disabled>Suspend Today</button>
+        <button class="plan-btn ui-btn finish" type="button" data-action="finish-session" disabled>Finish Today</button>
+        <button class="plan-btn ui-btn danger" type="button" data-action="reset-session" disabled>Reset Today</button>
+      </div>
+    </div>
     <div class="plan-board ui-panel" id="plan-board" data-mode="empty">
       <div class="plan-board-head">
         <div class="plan-board-title-stack">
@@ -1349,12 +1356,6 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
         <div class="sched-meta ui-mono" id="sched-meta">—</div>
       </div>
       <div class="sched-list" id="sched-list"></div>
-    </div>
-    <div class="plan-board-session-actions" id="plan-board-session-actions" hidden>
-      <button class="plan-btn ui-btn primary" type="button" data-action="restore-session" hidden disabled>Restore Session</button>
-      <button class="plan-btn ui-btn warn" type="button" data-action="suspend-session" disabled>Suspend Today</button>
-      <button class="plan-btn ui-btn finish" type="button" data-action="finish-session" disabled>Finish Today</button>
-      <button class="plan-btn ui-btn danger" type="button" data-action="reset-session" disabled>Reset Today</button>
     </div>
     <div class="ui-helper">Applying during a current trackable window starts its remaining time automatically; later trackable blocks start at their scheduled wall-clock windows. Reordering or changing duration recalculates later starts and closes following gaps.</div>
   </div>
@@ -2406,9 +2407,12 @@ function updateExecutePanels(state=null,options={}){
 }
 // Today's session as another device runs it, while this one shows it there.
 function sessionShownElsewhere(){return sessionPanelMode==='elsewhere'&&!TASKS.length?sessionPanelSession:null;}
+// Today's session parked on this device (Suspend Today, or handed over by another).
+function sessionParkedHere(){return sessionPanelMode==='suspended'&&!TASKS.some(isTrackableBlock);}
 function executeSessionStatusModel(){
   const elsewhere=sessionShownElsewhere();
   if(elsewhere)return {state:'elsewhere',label:`RUNNING ${sessionDevice(elsewhere).toUpperCase()}`};
+  if(sessionParkedHere())return {state:'suspended',label:'SUSPENDED'};
   if(!TASKS.length)return {state:'empty',label:'NO SESSION'};
   if(TimerState.mode===TIMER_MODES.SUSPENDED)return {state:'suspended',label:'SUSPENDED'};
   if(TimerState.mode===TIMER_MODES.DONE)return {state:'complete',label:'COMPLETE'};
@@ -4623,7 +4627,7 @@ const UnsupportedData=(()=>{
     NoticeCoordinator.emit({source:'unsupported-data',id:'held',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,dismissible:true,cue:'none',
       title:'Some data is from a newer version',
       message:`This device has ${describe(state)} saved by a newer version of Study Director. This version leaves them exactly as they are and works with everything else; Drive sync waits until the app is updated.`,
-      action:{label:'Check for update',run:()=>void PwaLifecycle.checkForUpdate().catch(error=>AppDiagnostics.capture('unsupported-data.update-check',error,'warn'))}});
+      action:{label:'Update app',run:()=>void checkUnsupportedUpdate()}});
     return true;
   }
   // The profile cannot be opened: shown instead of the start-up failure.
@@ -8354,7 +8358,11 @@ function executeIdlePresentation(d=new Date(),options={}){
     return view;
   };
   const elsewhere=sessionShownElsewhere();
-  if(elsewhere)return applyOverrides(executeIdleView('Running on Another Device',sessionDevice(elsewhere).replace(/^on /,'').toUpperCase(),'Running on Another Device',`Today’s session is running ${sessionDevice(elsewhere)} (last update ${sessionUpdateTime(elsewhere)}). Continue Here, below, moves it to this device.`,'NEXT: —'));
+  if(sessionParkedHere()){
+    const handed=sessionFromElsewhere(sessionPanelSession);
+    return applyOverrides(executeIdleView('Session Suspended','SUSPENDED','Today’s Session Suspended',handed?`Today’s session was suspended ${sessionDevice(sessionPanelSession)}. Continue Here picks it up on this device.`:'Restore Session continues it here. Review → Save Today can also save its progress without restarting the timer.','NEXT: —'));
+  }
+  if(elsewhere)return applyOverrides(executeIdleView('Running on Another Device',sessionDevice(elsewhere).replace(/^on /,'').toUpperCase(),'Running on Another Device',`Today’s session is running ${sessionDevice(elsewhere)} (last update ${sessionUpdateTime(elsewhere)}). Continue Here moves it to this device.`,'NEXT: —'));
   if(!hasRows)return applyOverrides(executeIdleView('No Schedule Loaded','—','No Schedule Loaded','Open Plan and apply today’s schedule to begin.','NEXT: —'));
   if(!hasTrackable)return applyOverrides(executeIdleView('Plan Has No Study Blocks','FIXED / NON-TRACKABLE ONLY','No Trackable Blocks','This plan has no work or support blocks for the timer to run. Edit it in Plan before starting.','NEXT: —'));
   if(TimerState.mode===TIMER_MODES.DONE){
@@ -8476,7 +8484,7 @@ function updateBadges(){
   updateSessionControls();
 }
 function updateSessionControls(){
-  const panel=document.getElementById('session-panel'),planControls=document.getElementById('plan-board-session-actions');
+  const panel=document.getElementById('session-panel'),planControls=document.getElementById('plan-board-session-actions'),cardAction=document.getElementById('execute-session-action');
   const active=TASKS.some(isTrackableBlock);
   const running=TimerState.runtime&&TimerState.runtime.startMs!==null&&TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex]);
   const finished=active&&TimerState.mode===TIMER_MODES.DONE;
@@ -8500,13 +8508,20 @@ function updateSessionControls(){
       ? 'The timer is actively tracking a block. Suspend or reset only if you intentionally want to stop this live session.'
       : 'A plan is loaded but no countdown is running. These controls affect today’s live session; saved Library records and notes are kept.';
   }
-  if(planControls)planControls.hidden=!visible;
-  [panel,planControls].filter(Boolean).forEach(container=>container.querySelectorAll('button[data-action]').forEach(btn=>{
+  if(planControls){
+    planControls.hidden=!visible;
+    const state=document.getElementById('plan-session-state'),label=elsewhere?`Running ${sessionDevice(sessionPanelSession)}`:handedOff?`Suspended ${sessionDevice(sessionPanelSession)}`:suspended?'Today’s session is suspended':finished?'Today finished':running?'Live session':'Today’s session';
+    if(state&&state.textContent!==label)state.textContent=label;
+  }
+  // The same controls in Execute's status card, its session panel and Plan's
+  // strip: the next step first, then Suspend, Finish and Reset. A session
+  // running elsewhere offers only Continue Here.
+  [panel,planControls,cardAction?.parentElement].filter(Boolean).forEach(container=>container.querySelectorAll('button[data-action]').forEach(btn=>{
     const action=btn.dataset.action;
     if(action==='restore-session'){btn.hidden=!suspended&&!elsewhere;btn.disabled=!suspended&&!elsewhere;const label=elsewhere||handedOff?'Continue Here':'Restore Session';if(btn.textContent!==label)btn.textContent=label;}
     else if(action==='suspend-session'){btn.hidden=suspended||elsewhere;btn.disabled=!active;}
-    else if(action==='finish-session')btn.disabled=!active||finished;
-    else if(action==='reset-session')btn.disabled=!visible||elsewhere;
+    else if(action==='finish-session'){btn.hidden=elsewhere||suspended;btn.disabled=!active||finished;}
+    else if(action==='reset-session'){btn.hidden=elsewhere;btn.disabled=!visible||elsewhere;}
   }));
   updateExecutePanels();
   refreshSessionSafetyUi();
@@ -9060,7 +9075,14 @@ const KeptVersions=(()=>{
 function renderUnsupportedData(){
   const state=UnsupportedData.summary(),row=document.getElementById('unsupported-data'),text=document.getElementById('unsupported-data-text');
   if(row)row.hidden=!state.total;
-  if(text&&state.total)text.textContent=`${UnsupportedData.describe(state)} ${state.total===1?'was':'were'} saved by a newer version of Study Director. This version leaves ${state.total===1?'it':'them'} exactly as ${state.total===1?'it is':'they are'} and does not show ${state.total===1?'it':'them'}; Drive sync waits until the app is updated.`;
+  if(text)text.textContent=state.total?`${UnsupportedData.describe(state)} on this device ${state.total===1?'was':'were'} saved by a newer version of Study Director. ${state.total===1?'It is':'They are'} kept safe but hidden here, and Drive sync is paused until you update the app.`:'';
+}
+// Update app: look for the newer version; say so when there is none yet.
+async function checkUnsupportedUpdate(){
+  try{
+    await PwaLifecycle.checkForUpdate();
+    if(!PwaLifecycle.status().updateReady)Interactions.notify({source:'unsupported-data',key:'no-update',title:'No newer version yet',message:'This device has the newest version it can get right now. The data stays safe and hidden until an update arrives.'});
+  }catch(error){AppDiagnostics.capture('unsupported-data.update-check',error,'warn');}
 }
 function renderKeptVersions(){
   const row=document.getElementById('kept-versions'),text=document.getElementById('kept-versions-text'),count=KeptVersions.count();
@@ -10625,7 +10647,7 @@ const CLICK_ACTIONS=Object.freeze({
   'apply-pwa-update': applyPwaUpdateFromUi,
   'protect-local-data': protectLocalData,
   'install-notice-action': ()=>runInstallationAction({dismissNotice:true}),
-  'check-unsupported-update': ()=>void PwaLifecycle.checkForUpdate().catch(error=>AppDiagnostics.capture('unsupported-data.update-check',error,'warn')),
+  'check-unsupported-update': ()=>void checkUnsupportedUpdate(),
   'dismiss-install-notice': ()=>NativeCapabilities.dismissInstallNotice(),
   'toggle-system-alerts': ()=>SystemNotifications.toggle(),
   'connect-device-backup': ()=>connectDeviceBackupWithRecovery(),
