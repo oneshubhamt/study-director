@@ -187,4 +187,55 @@ for(const size of [0,1,128,129,1001]){
  assert.equal(result.reason,'uncertain-rich-text');assert.equal(f.stats().removed,0,'unknown text cannot authorize a deletion');
 }
 
+// Real StorageManager environments require device acceptance. This OPFS
+// mock tests bounded iterator continuation, mutation and active-reader locks.
+{
+ const physical=new Map(),meta=new Map();let reads=0,removed=0;
+ const key='asset-retained',name='attblob-'+'c'.repeat(32);
+ const physicalDir={
+  async *entries(){for(const item of physical.keys())yield [item,{kind:'file'}];},
+  async removeEntry(item){if(physical.delete(item))removed++;},
+  async getFileHandle(item){if(!physical.has(item))throw Object.assign(new Error('missing'),{name:'NotFoundError'});return {getFile:async()=>physical.get(item)};}
+ };
+ const physicalLocks={readers:0,async request(_name,options,callback){
+   if(typeof options==='function'){callback=options;options={};}
+   if(options.mode==='shared'){this.readers++;try{return await callback({});}finally{this.readers--;}}
+   if(options.ifAvailable&&this.readers)return callback(null);
+   return callback({});
+ }};
+ const persisted={version:2,storage:'opfs',file:name,hash:'a'.repeat(64),size:1,type:'application/pdf',name:'keep',library:true};
+ meta.set(key,persisted);physical.set(name,new Blob(['X']));
+ for(let i=0;i<129;i++)physical.set('attblob-'+String(i).padStart(32,'b'),new Blob(['X']));
+ const scoped=storageModule.create({name:'mutation-test',protocol:'https:',storage:{getDirectory:async()=>({getDirectoryHandle:async()=>physicalDir})},locks:physicalLocks,
+   read:async k=>{reads++;return meta.get(k)||null;},keys:async()=>[...meta.keys()],entries:async()=>[...meta],
+   commit:async()=>assert.fail('sweep must not change logical metadata'),validId:k=>/^asset-/.test(k),validType:t=>t==='application/pdf',maxBytes:1024,limitForType:()=>1024,
+   issueToken:()=>1,assertToken(){},canMutate:()=>true,ingest:{ingest:async()=>assert.fail('unused')}
+ });
+ const first=await scoped.collect(async gc=>({removed:await gc.sweep(),pending:gc.status().sweepPending}),{maxEntries:8});
+ assert.equal(first.pending,true);assert.ok(first.removed<=8);
+ const inserted='attblob-'+'e'.repeat(32);physical.set(inserted,new Blob(['new during iterator']));
+ const release=await scoped.retain();
+ assert.equal((await scoped.collect(async gc=>gc.sweep())).reason,'active-editor-or-file-operation');
+ release();await new Promise(resolve=>setImmediate(resolve));
+ for(let n=0;n<30;n++){const step=await scoped.collect(async gc=>({removed:await gc.sweep(),pending:gc.status().sweepPending}),{maxEntries:8});if(!step.pending)break;}
+ assert.equal(physical.has(name),true,'published bytes survive all continuation passes');
+ assert.equal(physical.has(inserted),false,'new orphan is eventually reconsidered in mock iterator');
+ assert.equal(physical.size,1);
+ assert.ok(removed>=130);assert.ok(reads>=1);
+}
+// No safe short-cut for a full metadata fingerprint: the digest must revalidate
+// inventory even when a 1001-entry audit is resumed in 128-entry passes.
+{
+ const many=new Map(Array.from({length:1001},(_,i)=>['asset-'+String(i).padStart(6,'0'),metadata('attblob-'+String(i).padStart(32,'a'),10,false)]));
+ let catalogReads=0,progress=null,complete=false,passes=0;
+ const store=storageModule.create({name:'large-read',protocol:'https:',storage:{getDirectory:async()=>root},locks,
+   read:async k=>many.get(k),keys:async()=>[...many.keys()],entries:async()=>{catalogReads++;return [...many];},
+   commit:async()=>assert.fail('read only'),validId:k=>/^asset-/.test(k),validType:t=>t==='application/pdf',maxBytes:1024,limitForType:()=>1024,
+   issueToken:()=>1,assertToken(){},canMutate:()=>true,ingest:{ingest:async()=>assert.fail('unused')}
+ });
+ while(!complete){const result=await store.shallowAudit([],{maxEntries:128,progress});complete=result.complete;progress=result.progress;passes++;assert.ok(passes<12);}
+ assert.equal(passes,8);
+ assert.equal(catalogReads,passes,'P4 retains fresh metadata validation for every persisted scan continuation');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'attachment-integrity-audit',checked:result.checked,issues:result.issues.map(issue=>issue.kind),yieldCalls,unavailableIsNotCorruption:true,failedMetadataPreservesFindings:true},null,2));
