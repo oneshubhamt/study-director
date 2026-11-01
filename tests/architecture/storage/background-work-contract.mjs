@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import vm from 'node:vm';
 
 const app=fs.readFileSync('source/app.html','utf8');
 const background=fs.readFileSync('source/core/repository-background.js','utf8');
@@ -148,4 +149,98 @@ assert.doesNotMatch(provider,/Background\.integrity|PROVIDER_CONVERGENCE_BUDGET|
 assert.doesNotMatch(app,/dataMaintenanceTimer|attachmentIntegrityTimer|attachmentIntegrityRunning|attachmentIntegrityAwaitingControl|attachmentMaintenanceDailyTimer/u,'host timers must not duplicate lifecycle ownership');
 assert.doesNotMatch(device,/scheduledUrgent|scheduledRetry|automaticRetryPaused/u,'automatic deadlines and blockers belong to the shared lifecycle');
 assert.match(host,/JSON\.stringify\(pending\)!==JSON\.stringify\(expected\)/u,'publication completion must compare the serviced durable request');
+// P5: exercise the exact production admission and ownership-wake functions
+// under deterministic provider, lock, visibility and wall-clock conditions.
+function productionFunction(signature){
+ const start=app.indexOf(signature),end=start>=0?app.indexOf('\n}',start):-1;
+ assert.ok(start>=0&&end>start,'missing production function '+signature);
+ return app.slice(start,end+2);
+}
+const updateRuntime=productionFunction('function pwaProviderNetworkBusy(){')+'\n'+productionFunction('async function checkPwaUpdateIfDue({force=false}={}){');
+function updateHarness({busy=false,backingUp=false,lockRace=false,offline=false}={}){
+ const activity={busy,backingUp},calls={update:0,mark:0,fail:0,retry:[],lock:0};
+ const context=vm.createContext({
+  navigator:{onLine:!offline,locks:{request:async(_,__,perform)=>{calls.lock++;if(lockRace)activity.backingUp=true;return perform();}}},
+  AppOwnership:{status:()=>({state:'primary'})},OWNERSHIP_STATES:{PRIMARY:'primary'},
+  BackupProviderRuntime:{status:()=>({busy:activity.busy}),locationStatus:()=>({backingUp:activity.backingUp})},
+  PwaLifecycle:{status:()=>({supported:true,registered:true,checkError:false}),checkForUpdate:async()=>{calls.update++;return true;}},
+  pwaUpdateCheckDue:()=>true,markPwaUpdateCheck:()=>{calls.mark++;},clearPwaUpdateCheckFailure:()=>{},
+  recordPwaUpdateCheckFailure:()=>{calls.fail++;},schedulePwaUpdateCheck:delay=>{calls.retry.push(delay);},
+  AppDiagnostics:{capture:()=>{}},PWA_UPDATE_CHECK_LOCK:'qa-update-check',
+  pwaUpdateCheckRetryAt:0,Date
+ });
+ vm.runInContext('let pwaUpdateCheckRunning=false;\n'+updateRuntime+'\nglobalThis.p5Check=checkPwaUpdateIfDue;',context);
+ return {activity,calls,check:force=>context.p5Check({force})};
+}
+for(const mode of [{busy:true},{backingUp:true},{lockRace:true}]){
+ const t=updateHarness(mode);
+ assert.equal(await t.check(false),false);
+ assert.equal(t.calls.update,0,'automatic discovery never competes with an observed provider transfer');
+ assert.equal(t.calls.fail,0,'provider deferral must not count as update failure');
+ assert.equal(t.calls.retry.at(-1),30000,'provider deferral retains a bounded retry on the existing timer');
+ if(mode.lockRace)assert.equal(t.calls.lock,1,'busy state must be checked again after waiting on the Web Lock');
+ else assert.equal(t.calls.lock,0,'busy provider does not acquire a network update lock');
+ assert.equal(t.activity.backingUp===true||t.activity.busy===true,true);
+}
+{
+ const t=updateHarness({busy:true,backingUp:true});
+ assert.equal(await t.check(true),true,'manual user-triggered check must remain available');
+ assert.equal(t.calls.update,1);assert.equal(t.calls.mark,1);assert.equal(t.calls.fail,0);
+}
+{
+ const t=updateHarness();assert.equal(await t.check(false),true);
+ assert.equal(t.calls.update,1);assert.equal(t.calls.mark,1);assert.equal(t.calls.lock,1);
+}
+{
+ const t=updateHarness({offline:true});assert.equal(await t.check(false),false);
+ assert.equal(t.calls.update,0);assert.equal(t.calls.lock,0);
+}
+const claimRuntime=productionFunction('async function checkSessionOwnershipClaim(){')+'\n'
+ +productionFunction('function wakeSessionOwnershipClaim(){')+'\n'
+ +productionFunction('function installSessionWatch(){');
+function claimHarness(){
+ let now=100000,remote=0,local=0,connected=true,online=true,ready=true;
+ const handlers=new Map(),intervals=[];
+ const document={visibilityState:'visible',addEventListener:(kind,fn)=>handlers.set('document:'+kind,fn)};
+ const window={addEventListener:(kind,fn)=>handlers.set('window:'+kind,fn)};
+ const context=vm.createContext({
+  navigator:{get onLine(){return online;}},document,window,Date:{now:()=>now},
+  StartupLifecycle:{status:()=>({fullyInitialized:ready})},TASKS:[{}],sessionPanelMode:'active',
+  BackupProviderRuntime:{connected:()=>connected,readSessionClaim:async()=>{remote++;return null;},syncing:()=>false,wakeBackground:()=>{}},
+  AppData:{activeSession:{load:async()=>{local++;return {ok:true,value:null,error:null,storage:{idb:true}};}}},
+  AppDiagnostics:{capture:()=>{}},SESSION_CLAIM_WATCH_MS:15000,SESSION_WATCH_MS:120000,
+  setInterval:(fn,ms)=>{intervals.push({fn,ms});return intervals.length;},
+  ActiveSessionCodec:{sanitizeCurrent:value=>value},InstallationIdentity:{getId:()=> 'local'}
+ });
+ vm.runInContext('let sessionClaimFreeze=null,sessionClaimCheckActive=false,sessionClaimLastAttemptAt=0,sessionWatchTimer=null,sessionClaimWatchTimer=null;\n'+claimRuntime+'\nglobalThis.p5Start=installSessionWatch;globalThis.p5Wake=wakeSessionOwnershipClaim;globalThis.p5Check=checkSessionOwnershipClaim;',context);
+ const settle=async()=>{for(let k=0;k<8;k++)await Promise.resolve();};
+ return {start:()=>context.p5Start(),wake:()=>context.p5Wake(),check:()=>context.p5Check(),get remote(){return remote;},get local(){return local;},intervals,
+  shift:ms=>{now+=ms;},setOnline:v=>{online=v;},setVisible:v=>{document.visibilityState=v?'visible':'hidden';},
+  setConnected:v=>{connected=v;},setReady:v=>{ready=v;},
+  event:async name=>{handlers.get(name)?.();await settle();},poll:async()=>{intervals.find(x=>x.ms===15000)?.fn();await settle();}
+ };
+}
+{
+ const t=claimHarness();assert.equal(t.start(),true);assert.equal(t.start(),false,'one existing owner of intervals and wake handlers');
+ assert.equal(t.intervals.length,2);
+ for(let minute=0;minute<30;minute++)for(let quarter=0;quarter<4;quarter++){
+  t.shift(15000);await t.poll();
+ }
+ assert.equal(t.remote,120,'30 minutes of an eligible, visible online session has at most four remote claim reads per minute');
+ assert.equal(t.local,120,'strict local session check remains paired with each remote claim read');
+ await t.event('window:online');assert.equal(t.remote,120,'redundant online events cannot duplicate an immediate poll');
+ t.setOnline(false);t.shift(15000);await t.poll();assert.equal(t.remote,120,'offline interval performs no remote request');
+ t.shift(600000);t.setOnline(true);await t.event('window:online');assert.equal(t.remote,121,'connectivity return immediately checks an overdue ownership claim');
+ await t.event('window:online');assert.equal(t.remote,121,'successive reconnect events remain coalesced');
+ t.setVisible(false);t.shift(60000);await t.poll();assert.equal(t.remote,121);
+ t.setVisible(true);await t.event('document:visibilitychange');assert.equal(t.remote,122,'foreground return checks immediately after missed interval');
+ await t.poll();assert.equal(t.remote,122,'immediate scheduled tick does not double the foreground return poll');
+}
+// BS11/17 retain safety-critical boundaries: read-only planning precedes the
+// destructive lease, and startup orphan collection is not replaced by a wake.
+assert.match(provider,/Read-only planning is deliberately outside the maintenance exclusion[\s\S]*repositoryObjectInventory\(planning,[\s\S]*beginRepositoryMaintenance\(planning/u);
+assert.match(provider,/repositoryProviderInventory\(protectedSelection,\{signal,freshDigests:true\}\)[\s\S]*repositoryCleanupInventoryMatches\(state,currentInventory\)/u);
+assert.match(app,/installBackgroundOwners\(\);scheduleDataMaintenance\(\);BackgroundOperations\.wake\('startup'\);installSessionWatch\(\)/u);
+assert.match(app,/void BackupFiles\.collect\(\)\.catch/u,'cold startup must discover orphan scratch bytes even without a pending job');
+
 console.log(JSON.stringify({status:'PASS',suite:'background-work-contract',sharedStateMachine:true,maintenanceEligibility:true,maintenanceClassification:true,blockedBackoff:true,foregroundPreemption:true,suspensionSettlement:true,opportunityDrivenIntegrity:true,leanProviderPort:true,clearLibrarySafetyForeground:true,backgroundDiagnostics:true,authoritativeRebase:true,persistenceHardening:true,sharedRepositoryPolicy:true},null,2));
