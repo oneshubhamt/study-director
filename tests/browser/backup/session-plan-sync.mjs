@@ -92,6 +92,8 @@ try{
   assert.equal(controls.cardInOverlay,true);
   assert.deepEqual(controls.strip,['Continue Here'],'the Plan strip offers only Continue Here while the session runs elsewhere');
   assert.match(controls.stripState,/^Running on /u,'the Plan strip names the device running the session');
+  // The profile indicator lists it too, with a way to Execute.
+  await waitFor(()=>b.evaluate(`/Today’s session is running on /u.test(document.getElementById('profile-badge').getAttribute('aria-label')||'')`),{label:'the phone\'s indicator names the device running the session',timeout:10000});
   assert.equal(controls.stripAboveBoard,true,'the Plan strip sits above the board');
   assert.deepEqual(controls.panel,[],'the Execute session panel shows no disabled controls');
 

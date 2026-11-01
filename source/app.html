@@ -557,15 +557,14 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
   <div class="mobile-brand ui-label">Study Director</div>
   <div class="sb-head">
     <div class="sb-eyebrow ui-label">Study Director</div>
-    <button class="sb-name profile-tag" id="profile-tag" type="button" data-action="open-profile" aria-haspopup="dialog" aria-controls="profile-dialog" title="Profile, Google Drive and backup password"><span class="profile-tag-name" data-student-name>Student</span><span class="profile-tag-caret" aria-hidden="true"></span></button>
+    <button class="sb-name profile-tag status-host" id="profile-tag" type="button" data-action="open-profile" data-ring="off" aria-haspopup="dialog" aria-controls="profile-dialog" title="Profile, Google Drive and backup password"><span class="profile-tag-name" data-student-name>Student</span><span class="profile-tag-caret" aria-hidden="true"></span><svg class="status-ring" aria-hidden="true" focusable="false"><rect class="status-ring-track" width="100%" height="100%" rx="11" pathLength="100"/><rect class="status-ring-arc" width="100%" height="100%" rx="11" pathLength="100"/></svg><span class="status-badge" aria-hidden="true"></span></button>
     <div class="sb-race ui-mono" id="sb-date">—</div>
-    <button class="sb-sync ui-mono" id="sb-sync" type="button" data-action="show-drive-sync" aria-label="Google Drive sync status" hidden></button>
   </div>
   <div class="sb-clock">
     <div class="sb-clock-lbl ui-label">Local Time</div>
     <div id="clock">00:00:00</div>
   </div>
-  <button class="profile-badge" id="profile-badge" type="button" data-action="open-profile" aria-haspopup="dialog" aria-controls="profile-dialog" aria-label="Profile: Student"><span class="profile-badge-letter" aria-hidden="true">S</span><span class="profile-badge-dot" id="profile-badge-dot" hidden></span></button>
+  <button class="profile-badge status-host" id="profile-badge" type="button" data-action="open-profile" data-ring="off" aria-haspopup="dialog" aria-controls="profile-dialog" aria-label="Profile: Student"><span class="profile-badge-letter" aria-hidden="true">S</span><svg class="status-ring" aria-hidden="true" focusable="false"><rect class="status-ring-track" width="100%" height="100%" rx="50%" pathLength="100"/><rect class="status-ring-arc" width="100%" height="100%" rx="50%" pathLength="100"/></svg><span class="status-badge" aria-hidden="true"></span></button>
   <div class="sb-nav" role="tablist" aria-label="Primary navigation">
     <button class="nav-item ui-label on" id="tab-plan" type="button" role="tab" data-tab="plan" aria-controls="pane-plan" aria-selected="true" tabindex="0"><span class="nav-icon" aria-hidden="true">▦</span>Plan</button>
     <button class="nav-item ui-label" id="tab-execute" type="button" role="tab" data-tab="execute" aria-controls="pane-execute" aria-selected="false" tabindex="-1"><span class="nav-icon" aria-hidden="true">⏱</span>Execute</button>
@@ -1460,7 +1459,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
 <dialog class="interaction-dialog profile-dialog" id="profile-dialog" aria-labelledby="profile-dialog-title">
   <div class="interaction-shell">
     <div class="interaction-header profile-header">
-      <span class="profile-avatar" id="profile-avatar" aria-hidden="true">S</span>
+      <span class="profile-avatar status-host" id="profile-avatar" data-ring="off" aria-hidden="true"><span class="profile-avatar-letter">S</span><svg class="status-ring" aria-hidden="true" focusable="false"><rect class="status-ring-track" width="100%" height="100%" rx="50%" pathLength="100"/><rect class="status-ring-arc" width="100%" height="100%" rx="50%" pathLength="100"/></svg><span class="status-badge" aria-hidden="true"></span></span>
       <div class="profile-heading">
         <div class="interaction-eyebrow ui-label">Profile</div>
         <h2 class="interaction-title ui-title profile-title" id="profile-dialog-title" data-student-name>Student</h2>
@@ -1468,6 +1467,13 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
       </div>
     </div>
     <div class="interaction-body profile-body">
+      <section class="profile-status" id="profile-status" aria-labelledby="profile-status-title">
+        <h3 class="profile-section-title ui-label" id="profile-status-title">Sync &amp; backups</h3>
+        <p class="profile-status-headline" id="profile-status-headline" role="status" aria-live="polite"></p>
+        <div class="profile-status-next"><span class="profile-status-detail" id="profile-status-detail"></span><button class="mini-btn ui-btn" id="profile-status-primary" type="button" data-action="sync-status-action" hidden></button></div>
+        <ul class="profile-status-items" id="profile-status-items"></ul>
+        <button class="profile-status-link" type="button" data-action="sync-status-action" data-sync-action="open-data">Details in Library → Data</button>
+      </section>
       <div class="profile-rows">
         <label class="profile-row profile-name-row"><span class="profile-row-label ui-label">Name</span><input class="ui-field interaction-input profile-name-input" id="profile-name-input" type="text" autocomplete="name" spellcheck="false" data-keydown="profile-name" data-blur="profile-name"></label>
         <div class="profile-row"><span class="profile-row-label ui-label">Google Drive</span><span class="profile-row-value" id="profile-drive-value">Not connected</span><span class="profile-row-actions"><button class="mini-btn ui-btn" id="profile-drive-action" type="button" data-action="profile-drive">Connect</button></span></div>
@@ -2561,7 +2567,9 @@ const TIMER_SNAPSHOT_INTERVAL_MS=60*1000;
 let lastTimerSnapshotMs=0;
 let sessionPanelMode='none',sessionPanelSession=null;
 let sessionSafetyMessage='';
-let backupNudgeMessage='';
+// The profile indicator's state (renderSyncStatus); declared early because
+// storage health asks for a redraw during start-up.
+let backupNudgeMessage='',driveConnecting=false,syncStatusTimer=null,syncStatusRing='',syncStatusSettle=null;
 let backupNudgeCheckedAt=0;
 let backupNudgeNotifiedDate='';
 let saveReminderDate='';
@@ -3104,6 +3112,7 @@ function storageHealthClass(health){
   return 'ok';
 }
 function renderStorageHealth(health=readStorageHealth()){
+  scheduleSyncStatus();
   const el=document.getElementById('storage-health');
   const lastSaved=document.getElementById('last-local-save');
   if(lastSaved){lastSaved.textContent=health.lastLocalSaveAt?storageHealthTime(health.lastLocalSaveAt):'Never';lastSaved.title=health.lastLocalSaveAt||'';}
@@ -3222,8 +3231,6 @@ function renderDriveBackup(){
   if(panel&&!connected)panel.hidden=true;
   if(last){const at=verifiedRecoveryState.providers['google-drive']?.at;last.textContent=at?`Last backup ${storageHealthTime(at)}`:'No backup yet';}
   if(disconnect)disconnect.disabled=state.engineBusy;
-  // Kept versions waiting for review show as Needs review too.
-  const sync=node('sb-sync');if(sync){const syncing=state.connected&&UnsupportedData.held()?'Needs app update':BackupPresentation.syncLabel(state),kept=KeptVersions.count()>0&&!['Syncing…','Needs password','Needs app update'].includes(syncing),label=kept?'Needs review':syncing;sync.hidden=!label;if(sync.textContent!==label)sync.textContent=label;sync.dataset.state=state.sync?.review||state.sync?.password||kept||label==='Needs app update'?'review':'';}
   renderBackupActions();renderProfile();if(FirstStart.isOpen())FirstStart.render();
 }
 // One Back up now and one Version History for every location, shown while
@@ -3248,6 +3255,7 @@ async function backUpEverywhere(){
 }
 function renderDeviceBackup(state){
   if(!state)return;
+  scheduleSyncStatus();
   const status=document.getElementById('device-backup-status');
   const actions=document.getElementById('device-backup-actions');
   const connect=document.getElementById('connect-device-backup');
@@ -4462,7 +4470,7 @@ function setSessionPanelMode(mode,session=null){
   // The Execute header names the device running the session, or stops doing
   // so. Before the panel's own controls, which the idle display disables.
   try{updateExecuteSessionStatus();refreshExecuteIdleDisplay(new Date(),{force:true});}catch(error){AppDiagnostics.capture('execute.session-elsewhere-header',error,'warn');}
-  updateSessionControls();
+  updateSessionControls();scheduleSyncStatus();
 }
 async function recoverPreviousSessionForReview(session){
   const snapshot=activeSessionSnapshot(session);
@@ -6089,24 +6097,105 @@ function profileLabel(row,rows=Profiles.list()){
   const name=row?.name||'New profile',alike=rows.some(other=>other.scope!==row.scope&&(other.name||'New profile')===name);
   return {name,meta:row?.email||(alike&&profileSince(row)?`since ${profileSince(row)}`:'')};
 }
-function driveSyncLabel(){
-  const status=BackupProviderRuntime.locationStatus('google-drive');if(!status?.connected)return '';
-  if(UnsupportedData.held())return 'Needs app update';
-  return KeptVersions.count()>0&&!status.sync?.syncing?'Needs review':BackupPresentation.syncLabel(status)||'Connected';
-}
 function renderProfileBadge(){
-  let label='',locked=false;
-  try{label=driveSyncLabel();const protection=BackupProtection.status();locked=protection.enabled&&!protection.unlocked;}catch{/* Drawn again once backups are set up. */}
-  const name=getStudentNameFromDisplay(),letter=profileInitial(name),problem=['Needs review','Needs password','Needs attention','Needs app update'].includes(label)||locked;
-  const badge=document.getElementById('profile-badge');
-  if(badge){const glyph=badge.querySelector('.profile-badge-letter');if(glyph&&glyph.textContent!==letter)glyph.textContent=letter;badge.setAttribute('aria-label',`Profile: ${name}${problem?` · ${label||'Needs password'}`:''}`);}
-  const dot=document.getElementById('profile-badge-dot');if(dot)dot.hidden=!problem;
-  const avatar=document.getElementById('profile-avatar');if(avatar&&avatar.textContent!==letter)avatar.textContent=letter;
+  const letter=profileInitial(getStudentNameFromDisplay());
+  for(const glyph of document.querySelectorAll('.profile-badge-letter,.profile-avatar-letter'))if(glyph.textContent!==letter)glyph.textContent=letter;
+  scheduleSyncStatus();
+}
+// One status for the phone circle, the sidebar name and the profile panel:
+// a ring for sync health and a badge for what needs the person
+// (docs/STATUS-SYSTEM.md). Drawn after the current task, so every input
+// below is initialised and bursts of changes draw once.
+function scheduleSyncStatus(){if(syncStatusTimer===null)syncStatusTimer=setTimeout(renderSyncStatus,0);}
+function syncStatusInput(){
+  const drive=BackupProviderRuntime.locationStatus('google-drive'),email=Profiles.current()?.email||'';
+  let device=null,protection=null,storage=[];
+  try{device=DeviceBackup.status();}catch{/* Not installed yet. */}
+  try{protection=BackupProtection.status();}catch{/* Not installed yet. */}
+  try{storage=readStorageHealth().issues;}catch{/* Not installed yet. */}
+  return {
+    online:navigator.onLine!==false,
+    drive:drive?{...drive,setUp:drive.connected||drive.wasConnected||!!email,connecting:driveConnecting}:driveConnecting?{connecting:true}:null,
+    device:device&&device.supported?device:null,
+    passwordNeeded:!!protection&&protection.enabled&&!protection.unlocked,
+    newerData:UnsupportedData.held(),
+    kept:KeptVersions.count(),
+    storage:storage.map(issue=>({source:issue.source,label:issue.label,message:issue.message,level:issue.level})),
+    reminder:backupNudgeMessage,
+    updateReady:!!(pwaLatestUpdateState?.updateReady&&!pwaLatestUpdateState.applying),
+    sessionElsewhere:sessionPanelMode==='elsewhere'&&sessionPanelSession?sessionDevice(sessionPanelSession):''
+  };
+}
+function drawStatusHost(host,model){
+  if(!host)return;
+  if(host.dataset.ring!==model.ring)host.dataset.ring=model.ring;
+  if((host.dataset.badge||'')!==model.badge)host.dataset.badge=model.badge;
+  host.toggleAttribute('data-slow',model.slow);
+  const badge=host.querySelector('.status-badge'),text=model.badge==='review'&&model.count>1?(model.count>9?'9+':String(model.count)):['error','warning'].includes(model.badge)?'!':model.badge==='update'?'↑':'';
+  if(badge&&badge.textContent!==text)badge.textContent=text;
+}
+function renderSyncStatus(){
+  syncStatusTimer=null;
+  let model;
+  try{model=BackupPresentation.status(syncStatusInput());}
+  catch(error){AppDiagnostics.capture('sync-status.render',error,'warn');return;}
+  const hosts=['profile-tag','profile-badge','profile-avatar'].map(id=>document.getElementById(id));
+  // Syncing settles into the green ring with a brief glow.
+  if(syncStatusRing==='syncing'&&model.ring==='synced'){
+    clearTimeout(syncStatusSettle);for(const host of hosts)host?.classList.add('status-settle');
+    syncStatusSettle=setTimeout(()=>{for(const host of hosts)host?.classList.remove('status-settle');},1400);
+  }
+  syncStatusRing=model.ring;
+  for(const host of hosts)drawStatusHost(host,model);
+  const name=getStudentNameFromDisplay();
+  const tag=document.getElementById('profile-tag');if(tag){tag.title=`${model.label} — profile and sync`;tag.setAttribute('aria-label',`Profile: ${name} · ${model.label}`);}
+  const badge=document.getElementById('profile-badge');if(badge){badge.title=model.label;badge.setAttribute('aria-label',`Profile: ${name} · ${model.label}`);}
+  renderSyncStatusPanel(model);
+}
+function renderSyncStatusPanel(model){
+  const dialog=document.getElementById('profile-dialog');if(!dialog?.open)return;
+  const headline=document.getElementById('profile-status-headline');if(headline&&headline.textContent!==model.headline)headline.textContent=model.headline;
+  const detail=document.getElementById('profile-status-detail');if(detail)detail.textContent=model.detail;
+  const primary=document.getElementById('profile-status-primary');
+  if(primary){primary.hidden=!model.action;if(model.action){primary.textContent=model.action.label;primary.dataset.syncAction=model.action.action;}}
+  // Rebuilt only when the items change, so a focused button keeps focus.
+  const list=document.getElementById('profile-status-items'),key=JSON.stringify(model.items);
+  if(list&&list.dataset.key!==key){list.dataset.key=key;list.replaceChildren(...model.items.map(item=>{
+    const row=document.createElement('li');row.className='profile-status-item';row.dataset.tone=item.tone;row.dataset.item=item.id;
+    const mark=document.createElement('span');mark.className='profile-status-mark';mark.setAttribute('aria-hidden','true');
+    const text=document.createElement('span');text.className='profile-status-text';text.textContent=item.text;
+    const button=document.createElement('button');button.type='button';button.className='mini-btn ui-btn';button.dataset.action='sync-status-action';button.dataset.syncAction=item.action;button.textContent=item.actionLabel;
+    row.append(mark,text,button);return row;
+  }));}
+}
+// Each panel action calls the feature's own action; the indicator never
+// starts work by itself. Sync now, Try again and Sign in keep the panel open
+// so the ring shows the work; the others close it for their own dialog or view.
+async function syncStatusAction(ev){
+  const kind=String(ev?.target?.closest?.('[data-sync-action]')?.dataset.syncAction||'');
+  if(!['sync-now','retry','sign-in'].includes(kind))closeProfilePanel();
+  try{
+    switch(kind){
+      case 'sync-now':case 'retry':BackupProviderRuntime.scheduleSharedSync('google-drive',kind==='retry'?'sync-retry':'sync-now');scheduleSyncStatus();return true;
+      case 'sign-in':return await connectDriveForProfile();
+      case 'enter-password':return await CLICK_ACTIONS['backup-protection']();
+      case 'unlock-sync':return await BackupProviderRuntime.unlockSync('google-drive');
+      case 'check-update':return await checkUnsupportedUpdate();
+      case 'apply-update':return await applyPwaUpdateFromUi();
+      case 'review-sync':return await BackupProviderRuntime.reviewSync('google-drive');
+      case 'review-kept':return await KeptVersions.review();
+      case 'device-permission':return await connectDeviceBackupWithRecovery();
+      case 'open-execute':return await goTab('execute',{source:'sync-status'});
+      case 'open-data':if(!await goTab('library',{source:'sync-status'}))return false;LibraryView.showSection('data');return true;
+      default:return false;
+    }
+  }catch(error){AppDiagnostics.capture('sync-status.action',error,'warn');return false;}
 }
 function renderProfilePanel(){
   const dialog=document.getElementById('profile-dialog');if(!dialog?.open)return;
-  const mine=Profiles.current(),rows=Profiles.list(),drive=BackupProviderRuntime.locationStatus('google-drive'),email=mine?.email||'',sync=driveSyncLabel(),protection=BackupProtection.status();
-  const subtitle=document.getElementById('profile-subtitle');if(subtitle)subtitle.textContent=drive?.connected?[email,sync].filter(Boolean).join(' · '):email?`${email} · Signed out`:'Only on this device';
+  const mine=Profiles.current(),rows=Profiles.list(),drive=BackupProviderRuntime.locationStatus('google-drive'),email=mine?.email||'',protection=BackupProtection.status();
+  // Sync state is the Sync & backups section's; the subtitle names the account.
+  const subtitle=document.getElementById('profile-subtitle');if(subtitle){subtitle.textContent=email;subtitle.hidden=!email;}
   const driveValue=document.getElementById('profile-drive-value'),driveAction=document.getElementById('profile-drive-action');
   if(driveValue)driveValue.textContent=drive?.connected?(email||'Connected'):email?`${email} · Signed out`:'Not connected';
   if(driveAction){driveAction.textContent=drive?.connected?'Disconnect':email?'Sign in':'Connect';driveAction.dataset.state=drive?.connected?'connected':'';driveAction.disabled=!!drive?.engineBusy;}
@@ -6237,7 +6326,12 @@ async function driveProfileDeleted(info){
 // a background sync) never does.
 let driveConnectRequestedAt=0,driveLibraryQuestion=null;
 const DRIVE_CHOICE_WINDOW_MS=5*60*1000;
-function connectDriveForProfile(){driveConnectRequestedAt=Date.now();return BackupProviderRuntime.connect('google-drive');}
+// The indicator shows Connecting… from the click until the sign-in settles.
+function connectDriveForProfile(){
+  driveConnectRequestedAt=Date.now();driveConnecting=true;scheduleSyncStatus();
+  const settled=()=>{driveConnecting=false;scheduleSyncStatus();};
+  const result=BackupProviderRuntime.connect('google-drive');Promise.resolve(result).then(settled,settled);return result;
+}
 async function recordDriveLibrary(email,folder){
   const mine=Profiles.current();if(!mine)return;
   // Another Drive library than the one last synced with: what was shared
@@ -9076,6 +9170,7 @@ const KeptVersions=(()=>{
 })();
 // Library → Data says what this device holds from a newer version.
 function renderUnsupportedData(){
+  scheduleSyncStatus();
   const state=UnsupportedData.summary(),row=document.getElementById('unsupported-data'),text=document.getElementById('unsupported-data-text');
   if(row)row.hidden=!state.total;
   if(text)text.textContent=state.total?`${UnsupportedData.describe(state)} on this device ${state.total===1?'was':'were'} saved by a newer version of Study Director. ${state.total===1?'It is':'They are'} kept safe but hidden here, and Drive sync is paused until you update the app.`:'';
@@ -10347,7 +10442,7 @@ function renderPwaUpdateStatus(state){
   const message=document.getElementById('pwa-update-message');
   if(!control||!button||!message)return;
   const previous=pwaLatestUpdateState;
-  pwaLatestUpdateState=state;
+  pwaLatestUpdateState=state;scheduleSyncStatus();
   button.disabled=!!state.applying||!!state.checking;
   button.textContent=state.applying?'Updating…':state.checking?'Checking…':!state.updateReady&&state.bootState==='pending'?'Retry confirmation':state.registrationError||state.checkError&&!state.updateReady?'Retry update check':pwaUpdateActionLabel();
   const progress=document.getElementById('pwa-update-progress-message');if(progress)progress.textContent=state.message||'Preparing the update…';
@@ -10746,7 +10841,7 @@ const CLICK_ACTIONS=Object.freeze({
   'gap-ignore': ()=>classifyInactiveGap('ignore'),
   'gap-apply': applyInactiveGapSplit,
   'dismiss-storage-warning': dismissStorageWarning,
-  'show-drive-sync': ()=>BackupProviderRuntime.locationStatus('google-drive')?.sync?.password?BackupProviderRuntime.unlockSync('google-drive'):BackupProviderRuntime.locationStatus('google-drive')?.sync?.review?showBackupPresentation('google-drive','sync-review'):KeptVersions.count()?KeptVersions.review():showBackupPresentation('google-drive','status'),
+  'sync-status-action': syncStatusAction,
   'review-kept-versions': ()=>KeptVersions.review(),
   'open-profile': openProfilePanel,
   'close-profile': closeProfilePanel,
@@ -11124,6 +11219,10 @@ function installApplicationDomBindings(){
   NativeCapabilities.install();
   void BackupProtection.refresh().catch(setBackupProtectionSurfaceError);
   BackupProviderRuntime.subscribeStatus(renderDriveBackup);renderDriveBackup();
+  // The indicator also follows the network and keeps its times current.
+  for(const type of ['online','offline'])window.addEventListener(type,scheduleSyncStatus);
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')scheduleSyncStatus();});
+  setInterval(()=>{if(document.visibilityState==='visible')scheduleSyncStatus();},30*1000);
   void ensureDeviceBackupInstalled().then(()=>installRepositoryIntegrityScrub()).catch(error=>AppDiagnostics.capture('backup.repository-integrity-install',error,'warn'));
   updateFullscreenButton();
   PlanDraftEditor.install();

@@ -18,6 +18,12 @@ try{
   await waitFor(()=>commits()>=1,{label:'A uploads its first version',timeout:60000});
   await waitFor(async()=>!!(await sync(a))?.syncedAt,{label:'A synced',timeout:30000});
 
+  // One status indicator replaces the sidebar's sync line: the sidebar name and
+  // the phone circle both show Synced (docs/STATUS-SYSTEM.md).
+  await waitFor(()=>a.evaluate(`['profile-tag','profile-badge'].every(id=>document.getElementById(id).dataset.ring==='synced')`),{label:'A shows the synced ring',timeout:20000});
+  assert.match(await a.evaluate(`document.getElementById('profile-tag').getAttribute('aria-label')`),/· Synced \d/u,'the sidebar name says when it synced');
+  assert.equal(await a.evaluate(`!!document.getElementById('sb-sync')`),false,'the sidebar sync line is gone');
+
   // A reload keeps the sign-in: connected again without asking Google.
   await a.reload();await reopen(a,'A after reload');
   await waitFor(()=>a.evaluate(`__PWA6.BackupProviderRuntime.connected('google-drive')`),{label:'A still signed in after reload',timeout:20000});

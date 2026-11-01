@@ -40,6 +40,8 @@ Events carry source and stable ID, lifecycle, severity, foreground/background in
 
 ## Deliberately local UI state
 
+The profile status indicator (ring and badge on the sidebar name, the phone circle and the profile panel; [STATUS-SYSTEM.md](STATUS-SYSTEM.md)) is derived from current state and is not a notification producer: it emits no events, toasts or sounds.
+
 Editor autosave glyphs, timer counters and study eligibility, form validation inside decision dialogs, consent/restore choices, loading shells, empty states, search counts, and native media controls remain with their feature UI. They are not independent toast/audio/OS producers. Operation outcomes above use coordinator state. Rendering and DOM transition caches contain elements, not a second notification history. Provider caches contain repository data, not a competing message history.
 
 The only app-generated audio playback entry is the coordinator's audio port (including explicit Test sound). The only OS constructors/delivery calls are in the host transport adapter, which rechecks enablement, permission, ownership and freshness after awaiting service-worker registration. The service worker handles notification clicks; it does not invent a separate alert policy.

@@ -108,7 +108,90 @@ registry.define('backup-presentation',1,()=>{
     // The reach line for a restore or combine dialog, while Drive syncs.
     function reach(){try{return typeof input.synced==='function'&&input.synced()===true?RESTORE_CHOICES.reach:'';}catch{return '';}}
     function reset(source){for(const event of notifications.eventStatus().events)if(event.source===source)notifications.resolveEvent(source,event.id);}
-    return freeze({begin,read,current,feedback,condition,notice,bytes,detail,outcome,locationLabel,syncLabel,summary,reach,restoreChoices:RESTORE_CHOICES,resolve:(source,id='backup-operation')=>notifications.resolveEvent(source,id),reset,subscribe:notifications.subscribe});
+    // The profile indicator on every screen size: a ring for sync health and a
+    // badge for the most important thing that needs the person, plus the text
+    // and actions for the profile panel. The host gathers the inputs; this only
+    // decides. States and priorities: docs/STATUS-SYSTEM.md.
+    function status(value={}){
+      const drive=value&&value.drive||null,sync=drive&&drive.sync||{},device=value&&value.device||null;
+      const online=value.online!==false,connecting=!!drive&&drive.connecting===true;
+      const connected=!!drive&&drive.connected===true,setUp=connected||!!drive&&drive.setUp===true;
+      const lockHere=value.passwordNeeded===true||connected&&drive.locked===true,syncPassword=connected&&sync.password===true;
+      const newer=value.newerData===true||connected&&sync.newer===true;
+      const driveBusy=connected&&(drive.busy===true||drive.backingUp===true||sync.syncing===true);
+      const turn=connected&&Number(sync.turnWaits)>0;
+      const deviceOn=!!device&&device.connected===true,deviceBusy=!!device&&(device.busy===true||device.backingUp===true);
+      const failed=connected&&sync.failed===true,waiting=connected&&drive.waiting===true,review=connected&&sync.review===true;
+      const kept=Math.max(0,Math.floor(Number(value.kept)||0)),storage=Array.isArray(value.storage)?value.storage:[];
+      let ring='off';
+      if(connecting&&online)ring='syncing';
+      else if(setUp){
+        if(!online)ring='offline';
+        else if(!connected)ring='signed-out';
+        else if(lockHere||syncPassword||newer)ring='blocked';
+        else if(driveBusy||turn||deviceBusy)ring='syncing';
+        else if(failed&&drive.retryBackoffCapped===true)ring='error';
+        else if(waiting||failed||review||!sync.syncedAt)ring='pending';
+        else ring='synced';
+      }else if(deviceBusy)ring='syncing';
+      const slow=ring==='syncing'&&turn&&!connecting&&!driveBusy&&!deviceBusy;
+      const syncedAt=connected||setUp?timeText(sync.syncedAt):'';
+      function activity(){
+        if(connecting)return 'Connecting Google Drive…';
+        if(connected&&drive.busy===true){
+          if(drive.stalled===true)return 'Still working · Google Drive is slow to respond…';
+          return ({history:'Reading backup versions…','restore-version':'Restoring a version…','bring-in':'Combining with a backup…','remove-version':'Removing a version…',prepare:'Preparing Google Drive…',backup:'Backing up to Google Drive…'})[String(drive.foregroundKind||'')]||'Syncing…';
+        }
+        if(connected&&sync.syncing===true)return 'Syncing · bringing in changes…';
+        if(connected&&drive.backingUp===true)return 'Syncing · uploading changes…';
+        if(deviceBusy)return device.foregroundKind==='connect'?'Connecting the Device Folder…':['history','restore-version','bring-in','remove-version'].includes(String(device.foregroundKind||''))?'Working in the Device Folder…':'Backing up to the Device Folder…';
+        if(turn)return 'Waiting for another device to finish saving…';
+        return 'Syncing…';
+      }
+      const items=[],add=(id,tone,short,text,action='',actionLabel='')=>items.push(freeze({id,tone,short,text,action,actionLabel}));
+      if(ring==='error')add('sync-stopped','error','Sync stopped','Google Drive did not accept this device’s sync. Everything is still saved here; try again now or see Library → Data.','retry','Try again');
+      if(setUp&&!connected&&!connecting)add('signed-out','warning','Google Drive signed out','Google Drive is signed out on this device. Sign in to keep syncing.','sign-in','Sign in');
+      if(syncPassword)add('sync-password','warning','Needs password','The backup password was set or changed on another device. Enter it here to keep syncing.','unlock-sync','Enter password');
+      else if(lockHere)add('password','warning','Needs password','Backups and sync wait until this profile’s backup password is entered on this device.','enter-password','Enter password');
+      if(newer)add('update-needed','warning','Needs app update',value.newerData===true?'Data saved by a newer version of the app is kept safe on this device. Update the app to use and sync it.':'Google Drive has a version saved by a newer app. Update the app to keep syncing.','check-update','Update app');
+      if(review)add('sync-review','review','Needs review','Google Drive has changes that need your review.','review-sync','Review');
+      if(kept)add('kept','review',`${kept} kept version${kept===1?'':'s'} to review`,`${kept} kept version${kept===1?' is':'s are'} waiting for your review.`,'review-kept','Review');
+      if(device&&device.mode==='permission')add('device-permission','warning','Device Folder needs permission','The Device Folder needs your permission again before it can back up.','device-permission','Allow access');
+      const deviceFailing=!!device&&(device.mode==='error'||deviceOn&&device.retryBackoffCapped===true);
+      if(deviceFailing)add('device-error','error','Device Folder backup failing','Backups to the Device Folder are not completing. Library → Data has the details.','open-data','Details');
+      for(const issue of storage){const label=String(issue&&issue.label||'Storage');add('storage:'+String(issue&&issue.source||label),issue&&issue.level==='error'?'error':'warning',label,`${label}: ${String(issue&&issue.message||'').slice(0,180)}`,'open-data','Details');}
+      if(value.reminder)add('reminder','warning','No backup in over a week',String(value.reminder).replace(/^Backup reminder:\s*/u,''),'open-data','Open backups');
+      if(value.sessionElsewhere)add('session-elsewhere','info',`Today’s session is running ${value.sessionElsewhere}`,`Today’s session is running ${value.sessionElsewhere}.`,'open-execute','Go to Execute');
+      if(value.updateReady===true)add('update-ready','info','Update ready','A new version of Study Director is ready.','apply-update','Update');
+      const order={error:0,warning:1,review:2,info:3};items.sort((a,b)=>order[a.tone]-order[b.tone]);
+      // Signed out, password and update needs already show in the ring and their
+      // own badge; the amber ! is for the other warnings.
+      const count=kept+(review?1:0),ownBadge=new Set(['signed-out','password','sync-password','update-needed']),hasTone=tone=>items.some(item=>item.tone===tone&&!ownBadge.has(item.id));
+      const badge=hasTone('error')?'error':lockHere||syncPassword?'lock':newer?'update':hasTone('warning')?'warning':count?'review':value.updateReady===true?'info':'';
+      let primary='',headline='',detail='';
+      switch(ring){
+        case 'off':primary=deviceOn?`Only on this device${device.lastBackupAt?` · Device Folder backup ${timeText(device.lastBackupAt)}`:''}`:'Only on this device';headline=deviceOn?'Not syncing. This device backs up to its Device Folder.':'Only on this device. Connect Google Drive to sync your devices.';break;
+        case 'syncing':primary=activity();headline=primary;break;
+        case 'synced':primary=`Synced ${syncedAt}`;headline=`Synced at ${syncedAt}. This device is up to date.`;detail='Checks Google Drive again when you return to the app.';break;
+        case 'pending':
+          if(failed){primary=syncedAt?`Last synced ${syncedAt} · retrying`:'Not synced yet · retrying';headline=syncedAt?`Last synced at ${syncedAt}. Syncing will retry.`:'Not synced yet. Syncing will retry.';const next=timeText(drive.nextEligibleAt);detail=next?`Next try at ${next}.`:'Syncing will try again shortly.';}
+          else if(waiting){primary=syncedAt?`Changes since ${syncedAt}`:'Changes waiting to upload';headline=syncedAt?`Changes since ${syncedAt} are waiting to upload.`:'Changes are waiting to upload.';const due=timeText(drive.nextEligibleAt);detail=due?`Uploads by ${due}, or when you leave the app.`:'Uploads soon, or when you leave the app.';}
+          else if(review){primary=syncedAt?`Last synced ${syncedAt}`:'Not synced yet';headline='Google Drive has changes that need your review.';}
+          else{primary='Connected · first sync not finished';headline='Connected. The first sync hasn’t finished yet.';detail='It starts shortly.';}
+          break;
+        case 'offline':primary=syncedAt?`Offline · last synced ${syncedAt}`:'Offline · syncs when you’re back online';headline='Offline. Syncing resumes when you’re back online.';detail='Changes stay safe on this device meanwhile.';break;
+        case 'signed-out':primary=syncedAt?`Google Drive signed out · last synced ${syncedAt}`:'Google Drive signed out';headline=syncedAt?`Not syncing. Last synced at ${syncedAt}.`:'Not syncing.';break;
+        case 'blocked':primary=lockHere||syncPassword?'Needs password':'Needs app update';headline=syncedAt?`Syncing is paused. Last synced at ${syncedAt}.`:'Syncing is paused.';break;
+        case 'error':{primary=syncedAt?`Sync stopped · last synced ${syncedAt}`:'Sync stopped';headline='Syncing stopped after several tries.';const next=timeText(drive.nextEligibleAt);detail=next?`Next try at ${next}.`:'';break;}
+      }
+      // The label (tooltip and screen readers) starts with the most urgent
+      // thing that needs the person, then sync health, then the rest.
+      const urgent=items.filter(item=>item.tone!=='info'&&item.short!==primary&&!primary.startsWith(item.short));
+      const label=[...urgent.slice(0,2).map(item=>item.short),primary,...items.filter(item=>item.tone==='info').slice(0,1).map(item=>item.short)].filter(Boolean).join(' · ');
+      const action=connected&&online&&!connecting&&!lockHere&&!syncPassword&&!newer&&ring!=='syncing'?freeze({action:ring==='error'?'retry':'sync-now',label:ring==='error'?'Try again':'Sync now'}):null;
+      return freeze({ring,slow,badge,count,label,primary,headline,detail,action,items:freeze(items)});
+    }
+    return freeze({begin,read,current,feedback,condition,notice,bytes,detail,outcome,locationLabel,syncLabel,status,summary,reach,restoreChoices:RESTORE_CHOICES,resolve:(source,id='backup-operation')=>notifications.resolveEvent(source,id),reset,subscribe:notifications.subscribe});
   }
   return freeze({format:'study-director.backup-presentation-module',contractVersion:1,createPresentation});
 });

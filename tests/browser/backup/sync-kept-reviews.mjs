@@ -40,6 +40,9 @@ try{
   assert.equal(await noteText(b,'ethics'),'Edited on A','B shows the newer edit');
   const kept=(await reviews(b)).filter(review=>!review.resolvedAt);
   assert.ok(kept.some(review=>review.subject==='note'&&review.kept?.text==='Edited on B'),'B keeps its own text for review');
+  // The profile indicator shows the review as a yellow badge on every screen size.
+  await waitFor(()=>b.evaluate(`['profile-tag','profile-badge'].every(id=>document.getElementById(id).dataset.badge==='review')`),{label:'B shows the review badge',timeout:20000});
+  assert.match(await b.evaluate(`document.getElementById('profile-badge').getAttribute('aria-label')`),/kept versions? to review/u,'the phone circle names what waits for review');
 
   // B resolves what it kept and uploads the resolution.
   const beforeB=uploadsBy('B');

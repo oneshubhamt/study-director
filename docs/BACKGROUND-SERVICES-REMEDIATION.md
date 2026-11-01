@@ -787,6 +787,54 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
   - The speed and review probes were temporary and are not committed.
   - Not run: the full browser suite, a real Google Drive account, physical devices.
 
+### Entry 024 — One sync and background status indicator, phase 1 (2026-11-01)
+
+- **Branch / source HEAD before:** `refactor/background-coordination` at `00488f8` (release `SDVB75F18`, above `main`'s `SDVB75F17`; no further bump in this pull request). Plan and decisions: [STATUS-SYSTEM.md](STATUS-SYSTEM.md).
+- **Step 1 — audit:**
+  - The sidebar's sync line (`#sb-sync`) shows one text at a time from `BackupPresentation.syncLabel` plus a kept-versions override: Syncing…, Synced, Changes since, Last synced, Needs password, Needs review, Needs app update. It is hidden when Drive is signed out, when the backup password is not entered, and before the first sync.
+  - The phone circle (`#profile-badge-dot`) shows one warning dot for Needs review, Needs password, Needs app update or a locked password, and nothing while syncing or synced. Phone and laptop therefore disagree.
+  - The profile panel shows only a subtitle with the same text and has no link to the review.
+  - Signals already available: `locationStatus('google-drive')` (connected, busy, foregroundKind, stalled, backingUp, waiting, locked, nextEligibleAt, retryBackoffCapped, sync view), `DeviceBackup.status()`, `KeptVersions.count()`, `BackupProtection.status()`, `UnsupportedData.held()`, storage-health issues (which already carry backup-check warnings), the PWA update state, the session panel mode and `backupNudgeMessage`. The sync view lacks the other-device turn wait; it gains `turnWaits` (read-only, no behaviour change).
+- **Step 2 — objectives before edits:**
+  - **E24.1** `backup-presentation` gains a pure `status(input)` that returns ring, badge, count, label, headline, next-sync detail, primary action and needs-you items, with the priorities in STATUS-SYSTEM.md section 2.
+  - **E24.2** Every case the retired text line and phone dot covered maps to the indicator (STATUS-SYSTEM.md section 3), checked row by row in a new unit test, plus the new cases (off, signed out, offline, first sync, failing after retries, Device Folder, storage, session elsewhere, update ready, backup reminder).
+  - **E24.3** One indicator component on three hosts: ring around the phone circle, squircle around the sidebar name (the sync text line is removed), ring around the profile panel avatar. Tooltip and `aria-label` carry the full text; reduced motion stops the travelling arc; a settle animation marks syncing → synced.
+  - **E24.4** The profile panel gains a Sync & backups section: headline, next-sync detail, Sync now, one row per item with its action, and a link to Library → Data. Actions call existing feature actions only.
+  - **E24.5** The indicator re-renders on every input change: provider status, Device Folder status, kept versions, protection, storage health, PWA update state, session mode, online/offline, and a 30 s tick for time text.
+  - **E24.6** No new notification producers, sounds or stored records; no change to sync, backup or session behaviour.
+  - **E24.7** Tests: the unit table (E24.2); `sync-and-profiles` asserts the synced squircle and phone ring and that the old line is gone; `sync-kept-reviews` asserts the review badge.
+
+- **Step 3 — implementation:**
+  - `source/core/backup-presentation.js`: `status(input)` returns `ring` (off, syncing, synced, pending, offline, signed-out, blocked, error), `slow`, `badge` (error, lock, update, warning, review, info), `count`, `label`, `primary`, `headline`, `detail`, `action` (Sync now or Try again) and `items` (each with tone, short and full text, and one action). Pure; no DOM.
+  - `source/core/backup-provider.js`: the sync view adds `turnWaits` (read-only).
+  - `source/app.html`:
+    - the sidebar name button, the phone circle and the profile panel avatar carry one SVG ring (squircle on the name, circle elsewhere) and a corner badge;
+    - `#sb-sync`, its `show-drive-sync` action, `driveSyncLabel` and `#profile-badge-dot` are removed;
+    - `renderSyncStatus` gathers the inputs and draws all three hosts and the panel, scheduled once per task;
+    - the panel gains Sync & backups (headline, next-sync detail, Sync now, item rows, Library → Data link) and `sync-status-action` maps each item to the feature's existing action;
+    - redraws on provider status, Device Folder status, kept versions, protection, storage health (which also carries the backup reminder), unsupported data, PWA update state, session mode, online/offline, visibility and a 30 s tick;
+    - Connect shows Connecting… from the click until sign-in settles.
+  - `source/styles/core.css`: ring states, travelling arc, settle glow, reduced motion, badges, amber mixed from the theme's warning colour so it stays distinct from the review yellow in every theme, and the panel section. The sidebar name gains 6 px of vertical room for the squircle; at the owner's request the squircle's line is finer (1.5 px) and its resting synced state slightly softer.
+  - Tests:
+    - new `tests/unit/backup/sync-status.mjs` (35 rows: 12 retired-text cases, 20 new cases, 3 priority cases);
+    - `sync-and-profiles` asserts the synced squircle and phone ring and that the old line is gone;
+    - `sync-kept-reviews` asserts the review badge and the phone circle's label;
+    - `session-plan-sync` asserts the indicator names the device running the session;
+    - `notification-lifecycle` passes the new redraw hook to its extracted `renderDeviceBackup`.
+- **Step 4 — objectives:**
+  - **E24.1 MET**: `status` as specified; priorities checked by the unit test's priority rows.
+  - **E24.2 MET**: every retired case and every new case is a unit row; the browser tests check synced, review and session-elsewhere in the real app.
+  - **E24.3 MET**: screenshots (scratch, not committed) of every ring and badge state on the squircle (dark and light) and the phone circle, and of the live squircle and ring through connect → syncing → synced → changes waiting → offline → signed out.
+  - **E24.4 MET**: panel screenshots for synced, changes waiting, offline and signed out at laptop and phone widths.
+  - **E24.5 MET**: the live probe saw each transition without a reload.
+  - **E24.6 MET**: no new notification producer, sound or stored record; sync, backup and session code paths unchanged apart from the read-only `turnWaits`.
+  - **E24.7 MET** as listed above.
+- **Step 5 — targeted QA (local, Node 22, Chromium 1194):**
+  - `architecture` category PASS (32); suite governance PASS.
+  - Targeted PASS: `unit/backup/sync-status`, `integration/backup/automatic-provider-backup`, `integration/backup/pending-provider-recovery`, `integration/backup/backup-reminder`, `integration/ui/notification-lifecycle`, `architecture/storage/backup-recovery-ux-contract`.
+  - After `node build/build.mjs`, browser tests one at a time, all PASS: `sync-and-profiles`, `sync-kept-reviews`, `session-plan-sync` (alone).
+  - Not run: the full `fast` and browser suites, real Google Drive, physical devices, the other skins beyond the default glass presentation in dark and light.
+
 ### Journal template — duplicate this for the next pass
 
 - **Entry NNN — Pass P#, topic / date:**

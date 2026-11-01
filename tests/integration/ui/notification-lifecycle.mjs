@@ -113,7 +113,7 @@ class Element {
   assert.ok(n.eventStatus().events.length<=64,'quiet background results also have bounded retention');n.clear();
   const html=fs.readFileSync('source/app.html','utf8'),start=html.indexOf('function renderDeviceBackup(state){'),end=html.indexOf('\nfunction markStorageHealthOk',start),status=new Element(),note=new Element(),recover=new Element(),cleared=[];
   let actionsDrawn=0;
-  new Function('document','storageHealthTime','schedulePwaUpdateEvaluation','NoticeCoordinator','BackupPresentation','renderBackupActions',html.slice(start,end)+`;renderDeviceBackup({busy:true,foregroundKind:'restore-version',cancellable:false,connected:true,hasNote:true});`)({getElementById:id=>({'device-backup-status':status,'device-backup-note':note}[id]||null)},()=>'',()=>{}, {resolveEvent:(...args)=>cleared.push(args)},registry.require('backup-presentation',1).createPresentation(freeze({notifications:n})),()=>{actionsDrawn+=1;});
+  new Function('document','storageHealthTime','schedulePwaUpdateEvaluation','NoticeCoordinator','BackupPresentation','renderBackupActions','scheduleSyncStatus',html.slice(start,end)+`;renderDeviceBackup({busy:true,foregroundKind:'restore-version',cancellable:false,connected:true,hasNote:true});`)({getElementById:id=>({'device-backup-status':status,'device-backup-note':note}[id]||null)},()=>'',()=>{}, {resolveEvent:(...args)=>cleared.push(args)},registry.require('backup-presentation',1).createPresentation(freeze({notifications:n})),()=>{actionsDrawn+=1;},()=>{});
   assert.equal(status.textContent,'Restoring…');assert.equal(note.hidden,true);assert.equal(cleared.length,0,'Device state cannot erase the coordinator summary during cancellation');assert.equal(actionsDrawn,1,'the shared actions follow the Device Folder row');
 }
 {

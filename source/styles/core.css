@@ -971,10 +971,6 @@ input,textarea,select{border-radius:var(--sd-shape-field-radius)}
 .sb-eyebrow{color:var(--sd-color-shell-header-eyebrow);margin-bottom:6px;position:relative}
 .sb-name{display:block;font-family:var(--sd-font-condensed);font-size:var(--sd-type-role-title-compact-size);font-weight:var(--sd-font-weight-black);color:var(--sd-color-on-strong);letter-spacing:calc(.7px * var(--sd-type-caps-tracking-scale));text-transform:var(--sd-type-transform-title);line-height:1.04;position:relative;text-shadow:0 0 18px var(--sd-line-neutral-strong)}
 .sb-race{color:var(--sd-color-shell-header-date);margin-top:10px;position:relative}
-.sb-sync{display:block;margin-top:4px;padding:0;border:0;background:none;color:var(--sd-color-shell-header-date);font-size:var(--sd-type-role-overline-size);text-align:left;cursor:pointer;position:relative;opacity:.85}
-.sb-sync:hover,.sb-sync:focus-visible{opacity:1;color:var(--sd-color-accent-primary)}
-.sb-sync[data-state="review"]{color:var(--sd-color-warning);opacity:1}
-.sb-sync[hidden]{display:none}
 .sb-clock{padding:var(--sd-space-16) var(--sd-space-20) var(--sd-space-17);border-bottom:1px solid rgba(var(--sd-rgb-neutral-overlay),.08)}
 .sb-clock-lbl{color:var(--sd-color-text-secondary);margin-bottom:4px}
 #clock{font-family:var(--sd-font-mono);font-size:var(--sd-type-role-title-size);color:var(--sd-color-accent-primary);filter:drop-shadow(0 0 10px rgba(var(--sd-rgb-accent-primary),.32));letter-spacing:2px}
@@ -1543,7 +1539,7 @@ html[data-sd-appearance-shift] *,html[data-sd-appearance-shift] *::before,html[d
 .theme-btn[aria-pressed="true"],.presentation-btn[aria-pressed="true"]{color:var(--sd-color-accent-primary);border-color:rgba(var(--sd-rgb-accent-primary),.42);background:var(--sd-surface-accent-soft)}
 /* PROFILE: the sidebar name tag, the phone letter circle and the Profile dialog family
    (the Profile panel, the first-start form and Add profile share size, layout and style). */
-.sb-name.profile-tag{display:flex;align-items:center;gap:9px;width:calc(100% + 16px);max-width:calc(100% + 16px);margin:-3px -8px -4px;padding:3px 8px 4px;border:1px solid transparent;border-radius:var(--sd-shape-control-radius);background:transparent;color:var(--sd-color-on-strong);text-align:left;cursor:pointer;transition:background-color .16s ease,border-color .16s ease,color .16s ease,transform .1s ease}
+.sb-name.profile-tag{display:flex;align-items:center;gap:9px;width:calc(100% + 16px);max-width:calc(100% + 16px);margin:3px -8px -1px;padding:3px 8px 4px;border:1px solid transparent;border-radius:var(--sd-shape-control-radius);background:transparent;color:var(--sd-color-on-strong);text-align:left;cursor:pointer;transition:background-color .16s ease,border-color .16s ease,color .16s ease,transform .1s ease}
 .profile-tag-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .profile-tag-caret{flex:0 0 auto;width:7px;height:7px;margin:-3px 2px 0 auto;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);opacity:.5;transition:opacity .16s ease,transform .16s ease}
 .profile-tag:hover{background:rgba(var(--sd-rgb-accent-primary),.08);border-color:rgba(var(--sd-rgb-accent-primary),.24);color:var(--sd-color-accent-primary)}
@@ -1551,6 +1547,68 @@ html[data-sd-appearance-shift] *,html[data-sd-appearance-shift] *::before,html[d
 .profile-tag:focus-visible{outline:2px solid var(--sd-color-accent-primary);outline-offset:2px}
 .profile-tag:active{transform:translateY(1px)}
 .profile-badge{display:none}
+/* Sync and background status (docs/STATUS-SYSTEM.md): one indicator on the
+   sidebar name (a squircle), the phone circle and the profile panel avatar.
+   The ring is sync health; the corner badge is what needs the person. Shape
+   and motion differ per state, so colour is never the only signal. */
+.status-host{position:relative;--status-ok:var(--sd-color-success);--status-warn:color-mix(in oklab,var(--sd-color-warning) 50%,#ff7a00);--status-error:var(--sd-color-danger);--status-idle:var(--sd-color-text-secondary);--status-review:#facc15;--status-info:var(--sd-color-info);--status-gap:3px}
+.status-ring{position:absolute;left:calc(-1 * var(--status-gap));top:calc(-1 * var(--status-gap));width:calc(100% + 2 * var(--status-gap));height:calc(100% + 2 * var(--status-gap));overflow:visible;pointer-events:none}
+.status-ring rect{fill:none;stroke:transparent;stroke-width:2px;stroke-linecap:round;transition:stroke .3s ease}
+.status-host[data-ring="off"] .status-ring{display:none}
+.status-host[data-ring="synced"] .status-ring-arc{stroke:var(--status-ok)}
+.status-host[data-ring="syncing"] .status-ring-track{stroke:rgba(var(--sd-rgb-success),.2)}
+.status-host[data-ring="syncing"] .status-ring-arc{stroke:var(--status-ok);stroke-dasharray:26 74;animation:status-travel 1.3s linear infinite}
+.status-host[data-ring="syncing"][data-slow] .status-ring-arc{animation-duration:3.6s}
+.status-host[data-ring="pending"] .status-ring-arc{stroke:var(--status-ok);stroke-dasharray:84 16;stroke-dashoffset:-8}
+.status-host[data-ring="offline"] .status-ring-arc{stroke:var(--status-idle);stroke-dasharray:3 4;stroke-linecap:butt}
+.status-host[data-ring="signed-out"] .status-ring-arc{stroke:var(--status-warn);stroke-dasharray:19 6;stroke-dashoffset:3}
+.status-host[data-ring="blocked"] .status-ring-arc{stroke:var(--status-warn)}
+.status-host[data-ring="error"] .status-ring-arc{stroke:var(--status-error)}
+.status-host.status-settle .status-ring-arc{animation:status-settle 1.2s ease-out}
+@keyframes status-travel{to{stroke-dashoffset:-100}}
+@keyframes status-settle{from{stroke-dasharray:26 74}45%{filter:drop-shadow(0 0 3px var(--status-ok))}to{stroke-dasharray:100 0;filter:none}}
+.status-badge{position:absolute;top:calc(-1 * var(--status-gap) - 5px);right:calc(-1 * var(--status-gap) - 5px);display:none;box-sizing:border-box;min-width:15px;height:15px;padding:0 3px;border-radius:8px;font:800 10px/15px var(--sd-font-body);text-align:center;letter-spacing:0;text-transform:none;box-shadow:0 0 0 2px var(--sd-color-surface-1);pointer-events:none}
+.status-host[data-badge="error"] .status-badge{display:block;background:var(--status-error);color:#fff}
+.status-host:is([data-badge="warning"],[data-badge="update"],[data-badge="lock"]) .status-badge{display:block;background:var(--status-warn);color:#1b1100}
+.status-host[data-badge="review"] .status-badge{display:block;background:var(--status-review);color:#1b1500;border:1px solid rgba(0,0,0,.28)}
+.status-host[data-badge="review"] .status-badge:empty{min-width:12px;width:12px;height:12px;top:calc(-1 * var(--status-gap) - 3px);right:calc(-1 * var(--status-gap) - 3px);padding:0}
+.status-host[data-badge="info"] .status-badge{display:block;min-width:9px;width:9px;height:9px;padding:0;top:calc(-1 * var(--status-gap) - 1px);right:calc(-1 * var(--status-gap) - 1px);background:var(--status-info)}
+.status-host[data-badge="lock"] .status-badge::before{content:"";position:absolute;left:50%;top:2px;width:6px;height:5px;margin-left:-3px;box-sizing:border-box;border:1.5px solid currentColor;border-bottom:0;border-radius:3px 3px 0 0}
+.status-host[data-badge="lock"] .status-badge::after{content:"";position:absolute;left:50%;top:6.5px;width:8px;height:5.5px;margin-left:-4px;border-radius:1px;background:currentColor}
+.profile-avatar.status-host:not([data-ring="off"]){box-shadow:none}
+/* The sidebar squircle is long, so a finer line; at rest (synced) it steps
+   back a little, so any change of state draws the eye. */
+.profile-tag .status-ring rect{stroke-width:1.5px}
+.profile-tag[data-ring="synced"]:not(.status-settle):not(:hover):not(:focus-visible) .status-ring{opacity:.72}
+.profile-tag .status-ring{transition:opacity .3s ease}
+@media (prefers-reduced-motion: reduce){
+  .status-host[data-ring="syncing"] .status-ring-arc{animation:none;stroke-dasharray:6 4}
+  .status-host.status-settle .status-ring-arc{animation:none}
+  .status-ring rect{transition:none}
+}
+/* Profile panel: Sync & backups. */
+.profile-status{--status-ok:var(--sd-color-success);--status-warn:color-mix(in oklab,var(--sd-color-warning) 50%,#ff7a00);--status-error:var(--sd-color-danger);--status-review:#facc15;--status-info:var(--sd-color-info);display:grid;gap:8px;padding:12px;border:1px solid var(--sd-line-neutral-soft);border-radius:var(--sd-shape-field-radius);background:rgba(var(--sd-rgb-neutral-overlay),.012)}
+.profile-status-headline{margin:0;color:var(--sd-color-text-primary);font:600 var(--sd-type-role-copy-compact-size)/1.35 var(--sd-font-body)}
+.profile-status-next{display:flex;align-items:center;justify-content:space-between;gap:6px 12px;flex-wrap:wrap;color:var(--sd-color-text-secondary);font:400 var(--sd-type-role-caption-size)/1.4 var(--sd-font-body)}
+.profile-status-next:has(>.profile-status-detail:empty):has(>button[hidden]){display:none}
+.profile-status-next>button{margin-left:auto}
+.profile-status-next>button[hidden]{display:none!important}
+.profile-status-items{display:grid;gap:6px;margin:0;padding:0;list-style:none}
+.profile-status-items:empty{display:none}
+.profile-status-item{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px 10px;padding:7px 8px 7px 10px;border:1px solid var(--sd-line-neutral-soft);border-radius:var(--sd-shape-field-radius)}
+.profile-status-mark{width:9px;height:9px;border-radius:50%;background:var(--status-info)}
+.profile-status-item[data-tone="error"]{border-color:rgba(var(--sd-rgb-danger),.35)}
+.profile-status-item[data-tone="error"] .profile-status-mark{background:var(--status-error)}
+.profile-status-item[data-tone="warning"]{border-color:rgba(var(--sd-rgb-warning),.32)}
+.profile-status-item[data-tone="warning"] .profile-status-mark{background:var(--status-warn)}
+.profile-status-item[data-tone="review"] .profile-status-mark{background:var(--status-review);box-shadow:0 0 0 1px rgba(0,0,0,.28)}
+.profile-status-text{min-width:0;color:var(--sd-color-text-secondary);font:400 var(--sd-type-role-caption-size)/1.4 var(--sd-font-body);overflow-wrap:anywhere}
+.profile-status-link{justify-self:start;padding:2px 0;border:0;background:none;color:var(--sd-color-accent-primary);font:500 var(--sd-type-role-caption-size)/1.4 var(--sd-font-body);text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.profile-status-link:focus-visible{outline:2px solid var(--sd-color-accent-primary);outline-offset:2px}
+@media (max-width: 500px){
+  .profile-status-item{grid-template-columns:auto minmax(0,1fr)}
+  .profile-status-item>button{grid-column:2;justify-self:start;width:auto}
+}
 .profile-header{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:14px}
 .profile-avatar,.profile-item-avatar{display:grid;place-items:center;flex:0 0 auto;border-radius:50%;border:1px solid var(--sd-state-accent-line-strong);background:var(--sd-surface-accent-soft);color:var(--sd-color-accent-primary);font-family:var(--sd-font-condensed);font-weight:var(--sd-font-weight-black);line-height:1}
 .profile-avatar{width:52px;height:52px;font-size:1.45rem;box-shadow:0 0 0 4px rgba(var(--sd-rgb-accent-primary),.07)}
@@ -2483,13 +2541,11 @@ html,body,.app{max-width:100%;overflow-x:hidden}
   .main{margin-left:0;overflow:visible}
   .sidebar::before,.sidebar::after{display:none}
   .sb-head,.sb-clock,.sb-stats{display:none}
-  /* The name tag becomes a letter circle at the start of the section bar; its dot says Needs review or a sync problem. */
+  /* The name tag becomes a letter circle at the start of the section bar; its ring and badge carry the sync status. */
   .profile-badge{display:grid;place-items:center;position:relative;flex:0 0 auto;align-self:center;width:42px;height:42px;margin:0 4px 0 6px;padding:0;border:1px solid var(--sd-state-accent-line-strong);border-radius:50%;background:var(--sd-surface-accent-soft);color:var(--sd-color-accent-primary);font-family:var(--sd-font-condensed);font-size:1.12rem;font-weight:var(--sd-font-weight-black);line-height:1;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .1s ease,background-color .16s ease}
   .profile-badge:hover{background:rgba(var(--sd-rgb-accent-primary),.18)}
   .profile-badge:focus-visible{outline:2px solid var(--sd-color-accent-primary);outline-offset:2px}
   .profile-badge:active{transform:scale(.93)}
-  .profile-badge-dot{position:absolute;top:0;right:0;width:11px;height:11px;border-radius:50%;background:var(--sd-color-warning);box-shadow:0 0 0 2px var(--sd-color-surface-1)}
-  .profile-badge-dot[hidden]{display:none}
 }
 @media (max-width: 900px),(hover:none) and (pointer:coarse){
   input.ui-field,textarea.ui-field,select.ui-field,.plan-textarea,.plan-draft-field,.library-controls select,.library-controls input,.gap-split input,.profile-dialog input.ui-field{font-size:var(--sd-type-role-reading-size)}
