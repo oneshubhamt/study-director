@@ -169,8 +169,8 @@ for(const bad of [
   t.setClaim({...owned,epoch:3});
   t.loads.push(loaded(session),good());t.saves.push(saved);await t.check();
   assert.equal(t.calls.stops,2);
-  assert.equal(t.calls.snapshots.length,2);
-  assert.notEqual(t.calls.snapshots[0],t.calls.snapshots[1]);
+  assert.equal(t.calls.snapshots.length,4,'each epoch projects once after its timing capture');
+  assert.notEqual(t.calls.snapshots[0],t.calls.snapshots[2]);
   assert.equal(t.calls.syncs.length,2);
 }
 
