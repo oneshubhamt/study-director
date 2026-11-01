@@ -19,18 +19,18 @@ const localOnly={ok:true,value:{...session,revision:5},storage:{local:true,idb:f
 const failed={ok:false,value:{...session,revision:5},storage:{local:false,idb:false},error:new Error('Both local stores unavailable')};
 const loaded=value=>({ok:true,value,storage:{local:false,idb:true}});
 function harness(){
-  let claim={...owned},now=100000,sessionValue={...session},saves=[],loads=[],captureFailure=false;
+  let claim={...owned},now=100000,sessionValue={...session},saves=[],loads=[],captureFailure=false,resumeWorks=true;
   const calls={stops:0,resumes:0,snapshots:[],writes:[],syncs:[],warnings:[],status:[],captures:[],changed:0,cancelled:0};
   const app={
     document:{visibilityState:'visible'},
     StartupLifecycle:{status:()=>({fullyInitialized:true})},
     TASKS:[{}],sessionPanelMode:'active',
     BackupProviderRuntime:{connected:()=>true,readSessionClaim:async()=>claim,scheduleSharedSync:(id,reason)=>{calls.syncs.push(reason);return true;}},
-    AppData:{activeSession:{load:async()=>loads.length?await loads.shift():loaded(sessionValue)}},
+    AppData:{activeSession:{load:async()=>{const next=loads.length?loads.shift():loaded(sessionValue);return typeof next==='function'?await next():await next;}}},
     ActiveSessionCodec:{sanitizeCurrent:value=>value},
     InstallationIdentity:{getId:()=> 'inst_local'},
     DecisionClock:{nowMs:()=>now},
-    TimerEngine:{stopExecution:()=>{calls.stops++;return true;},resumeAfterPrimaryRestore:()=>{calls.resumes++;return true;}},
+    TimerEngine:{stopExecution:()=>{calls.stops++;return true;},resumeAfterPrimaryRestore:()=>{calls.resumes++;return resumeWorks;}},
     markDayContentChanged:()=>{calls.changed++;},
     captureSessionSnapshot:()=>{if(captureFailure)throw new Error('snapshot failed');const snap={token:calls.snapshots.length+1,review:{reflection:'Retain the last edits'},timerRuntime:{frozenAt:now}};calls.snapshots.push(snap);return snap;},
     cancelPendingLiveDraftSave:()=>{calls.cancelled++;},
@@ -50,7 +50,7 @@ function harness(){
   };
   const context=vm.createContext(app);
   vm.runInContext(`let sessionClaimFreeze=null,sessionClaimCheckActive=false,sessionSafetyMessage='';\n${runtime}\nglobalThis.check=checkSessionOwnershipClaim;globalThis.state=()=>({freeze:sessionClaimFreeze,warning:sessionSafetyMessage,active:sessionClaimCheckActive});`,context,{filename:'production-session-claim.js'});
-  return {calls,check:()=>context.check(),state:()=>context.state(),saves,loads,setClaim:v=>{claim=v;},setLocal:v=>{sessionValue=v;},setNow:v=>{now=v;},failCapture:()=>{captureFailure=true;},setTasks:v=>{context.TASKS=v;}};
+  return {calls,check:()=>context.check(),state:()=>context.state(),saves,loads,setClaim:v=>{claim=v;},setLocal:v=>{sessionValue=v;},setNow:v=>{now=v;},setResumeWorks:v=>{resumeWorks=v;},failCapture:()=>{captureFailure=true;},setTasks:v=>{context.TASKS=v;}};
 }
 const good=()=>loaded({...session,revision:5});
 
@@ -125,6 +125,20 @@ for(const bad of [
   assert.equal(t.calls.syncs.length,0);
 }
 
+// If the timer is not restorable yet, do not clear the frozen handoff or report success.
+{
+  const t=harness();t.loads.push(loaded(session),good());t.saves.push(saved);await t.check();
+  t.setClaim({...owned,ownedHere:true});t.setResumeWorks(false);
+  t.loads.push(loaded(session));
+  assert.equal(await t.check(),false);
+  assert.ok(t.state().freeze,'cannot retire an unresumed frozen state');
+  assert.equal(t.calls.resumes,1);
+  t.setResumeWorks(true);t.loads.push(loaded(session));
+  assert.equal(await t.check(),true);
+  assert.equal(t.state().freeze,null);
+  assert.equal(t.calls.resumes,2);
+}
+
 // A newer remote epoch freezes a new snapshot once and never reuses an old proof.
 {
   const t=harness();t.loads.push(loaded(session),good());t.saves.push(saved);await t.check();
@@ -166,4 +180,4 @@ for(const bad of [
   assert.deepEqual(t.calls.syncs,['session-claim']);
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:15,productionFunctions:true}));
+console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:16,productionFunctions:true}));
