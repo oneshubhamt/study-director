@@ -4142,8 +4142,11 @@ function writeLiveDraftNow(options={}){
   if(restoreSessionPersistenceSuppressed()||managedRecoverySessionQuiesced()&&options.allowDuringRecoveryQuiescence!==true)return null;
   if(!appCanMutate())return null;
   try{
-    if(options.markChanged!==false)markDayContentChanged();
-    const snapshot=captureSessionSnapshot();if(!snapshot)return null;
+    // A transferred session stays frozen through managed-recovery preflight.
+    // Do not turn time spent waiting for the other device into study time.
+    const frozen=sessionClaimFreeze?.snapshot||null;
+    if(options.markChanged!==false&&!frozen)markDayContentChanged();
+    const snapshot=frozen||captureSessionSnapshot();if(!snapshot)return null;
     lastTimerSnapshotMs=DecisionClock.nowMs();
     return writeActiveSessionNow(snapshot,options);
   }catch(e){
