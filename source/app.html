@@ -1240,7 +1240,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                 <div class="backup-storage-state ui-mono">
                   <strong class="backup-status-value standard" id="local-data-status" role="status" aria-live="polite">Checking…</strong>
                   <button class="backup-storage-action mini-btn ui-btn" id="protect-local-data" type="button" data-action="protect-local-data" hidden>Try protection</button>
-                  <span class="backup-status-meta">· Saved <span id="last-local-save">Never</span></span><span class="backup-status-meta" id="local-storage-use"></span>
+                  <span class="backup-status-meta">Saved <span id="last-local-save">Never</span></span><span class="backup-status-meta" id="local-storage-use"></span>
                 </div>
               </div>
               <div class="backup-inline-note ui-helper"><strong>Verification</strong><p id="attachment-verification-status" role="status">Attachment presence and size: not yet checked. This check does not verify file contents.</p><p id="device-verification-status" role="status">Device Folder: not yet verified.</p><button class="mini-btn ui-btn" type="button" data-action="recheck-device-integrity">Recheck Device Folder</button><p id="drive-verification-status" role="status">Google Drive: not yet verified.</p><button class="mini-btn ui-btn" type="button" data-action="recheck-drive-integrity">Recheck Google Drive</button></div>
@@ -3328,7 +3328,7 @@ async function inspectStorageCapability(){
   const usage=Number(estimate&&estimate.usage),quota=Number(estimate&&estimate.quota);
   const ratio=Number.isFinite(usage)&&Number.isFinite(quota)&&quota>0?usage/quota:null;
   const use=document.getElementById('local-storage-use');
-  if(use)use.textContent=Number.isFinite(usage)?` · Browser storage estimate: ${storageSizeLabel(usage)}${ratio!==null?` of ${storageSizeLabel(quota)}`:''}`:'';
+  if(use)use.textContent=Number.isFinite(usage)?`Browser storage estimate: ${storageSizeLabel(usage)}${ratio!==null?` of ${storageSizeLabel(quota)}`:''}`:'';
   const payload={version:1,persisted:persisted===true,usageBytes:Number.isFinite(usage)?usage:null,quotaBytes:Number.isFinite(quota)?quota:null,usageRatio:ratio,checkedAt:new Date().toISOString()};
   storageEstimate=Object.freeze({persisted,usageBytes:payload.usageBytes,quotaBytes:payload.quotaBytes});
   if(ratio!==null&&ratio>=APP_LIMITS.storageCriticalRatio){
