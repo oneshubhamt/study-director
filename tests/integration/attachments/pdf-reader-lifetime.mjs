@@ -102,6 +102,27 @@ function lifetimeHarness(){
   assert.deepEqual(h.stats(),{revoked:1,readerReleases:1,intervals:0,timeouts:0,pageHandlers:0});
 }
 
+// BFCache must not restore stale fallback actions after their URL is revoked.
+{
+  const h=lifetimeHarness();h.open();
+  const options=h.overlay(),previous=options.onBeforeClose;let closed=0;
+  options.onBeforeClose=()=>{closed++;previous();};
+  h.pagehide();
+  assert.equal(closed,1,'pagehide closes options that would contain dead Blob links');
+  assert.deepEqual(h.stats(),{revoked:1,readerReleases:1,intervals:0,timeouts:0,pageHandlers:0});
+}
+
+// A reserved popup may fail navigation without leaking the URL before showing
+// the fallback; closing those options still releases exactly once.
+{
+  const h=lifetimeHarness();h.setMode('replace-fails');
+  assert.equal(h.open(),true);
+  assert.equal(h.windows.length,1);
+  assert.equal(h.windows[0].closed,true);
+  h.overlay().onBeforeClose();
+  assert.deepEqual(h.stats(),{revoked:1,readerReleases:1,intervals:0,timeouts:0,pageHandlers:0});
+}
+
 // An explicit second user gesture can open a tracked viewer even if the
 // initial non-gesture popup was blocked.
 {
