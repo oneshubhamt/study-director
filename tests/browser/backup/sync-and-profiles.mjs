@@ -34,6 +34,15 @@ try{
   // and Drive cleanup may follow. Both finish before A edits.
   await waitFor(async()=>!markers()&&!await waiting(b),{label:'B settles',timeout:90000});
 
+  // Library → Data offers Recheck only for a connected location; a recheck
+  // says it started and then shows its result under Verification.
+  await b.evaluate(`(async()=>{__PWA6.goTab('library');await new Promise(r=>setTimeout(r,150));document.getElementById('library-tab-data').click();})()`);
+  await waitFor(()=>b.evaluate(`!document.getElementById('recheck-google-drive').hidden`),{label:'B offers Recheck Google Drive',timeout:20000});
+  assert.equal(await b.evaluate(`document.getElementById('recheck-device-folder').hidden&&getComputedStyle(document.getElementById('recheck-device-folder')).display==='none'`),true,'Recheck Device Folder must not be offered without a Device Folder');
+  await b.evaluate(`document.getElementById('recheck-google-drive').click()`);
+  await waitFor(()=>b.evaluate(`/Google Drive recheck started/u.test(document.getElementById('library-status').textContent)`),{label:'B says the recheck started',timeout:5000});
+  await waitFor(()=>b.evaluate(`/^Google Drive: Checked/u.test(document.getElementById('drive-verification-status').textContent)`),{label:'B shows the recheck result',timeout:60000});
+
   // A edits and goes to the background: the edit goes up (after B's turn,
   // if B is still saving).
   const before=uploadsBy('A');

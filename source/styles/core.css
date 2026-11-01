@@ -3087,6 +3087,7 @@ html,body,.app{max-width:100%;overflow-x:hidden}
 .backup-storage-state>.backup-status-value:not([hidden])~.backup-status-meta:not(:empty)::before,
 .backup-storage-state>.backup-status-meta~.backup-status-meta:not(:empty)::before{content:"· "}
 .library-danger>.mini-btn{flex:0 0 auto;white-space:nowrap}
+.backup-recheck[hidden]{display:none!important}
 @media (min-width: 651px){
   #library-data .backup-security-group .backup-compact-row{grid-template-columns:minmax(max-content,.34fr) minmax(0,1fr)}
   #library-data .backup-location-heading{flex-wrap:nowrap}
@@ -3094,6 +3095,7 @@ html,body,.app{max-width:100%;overflow-x:hidden}
   #library-data .backup-security-state>.backup-status-meta{order:-1}
   #library-data .backup-storage-action{order:9;margin-left:auto}
   #library-data .backup-security-group .backup-inline-note:has(>button){display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:2px 12px}
+  #library-data .backup-security-group .backup-inline-note:has(>button)>p{grid-column:1}
   #library-data .backup-security-group .backup-inline-note:has(>button)>:is(strong,p:first-of-type){grid-column:1/-1}
   #library-data .backup-security-group .backup-inline-note:has(>button)>button{grid-column:2;margin-block:3px}
 }

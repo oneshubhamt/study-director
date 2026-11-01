@@ -1243,7 +1243,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                   <span class="backup-status-meta">Saved <span id="last-local-save">Never</span></span><span class="backup-status-meta" id="local-storage-use"></span>
                 </div>
               </div>
-              <div class="backup-inline-note ui-helper"><strong>Verification</strong><p id="attachment-verification-status" role="status">Attachment presence and size: not yet checked. This check does not verify file contents.</p><p id="device-verification-status" role="status">Device Folder: not yet verified.</p><button class="mini-btn ui-btn" type="button" data-action="recheck-device-integrity">Recheck Device Folder</button><p id="drive-verification-status" role="status">Google Drive: not yet verified.</p><button class="mini-btn ui-btn" type="button" data-action="recheck-drive-integrity">Recheck Google Drive</button></div>
+              <div class="backup-inline-note ui-helper"><strong>Verification</strong><p id="attachment-verification-status" role="status">Attachment presence and size: not yet checked. This check does not verify file contents.</p><p id="device-verification-status" role="status">Device Folder: not yet verified.</p><button class="mini-btn ui-btn backup-recheck" id="recheck-device-folder" type="button" data-action="recheck-device-integrity" hidden>Recheck Device Folder</button><p id="drive-verification-status" role="status">Google Drive: not yet verified.</p><button class="mini-btn ui-btn backup-recheck" id="recheck-google-drive" type="button" data-action="recheck-drive-integrity" hidden>Recheck Google Drive</button></div>
               <div class="backup-compact-row backup-diagnostics-row">
                 <span class="backup-location-heading"><span class="ui-label">Data and backup diagnostics</span><span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="backup-diagnostics-info" aria-label="About data and backup diagnostics" aria-expanded="false" aria-controls="backup-diagnostics-info">i</button><span class="pnote-info-popover" id="backup-diagnostics-info" role="note" hidden>Copies storage-health observations, backup and recovery stages, verification progress and pending cleanup for troubleshooting. Study content, note text, attachment names and backup payloads are not included.</span></span></span>
                 <div class="backup-security-state"><button class="mini-btn ui-btn" id="copy-backup-diagnostics" type="button" data-action="copy-backup-diagnostics">Copy diagnostics</button><span class="backup-status-meta" id="backup-diagnostics-status" role="status" aria-live="polite"></span></div>
@@ -8892,17 +8892,20 @@ function renderIntegrityStatuses(){
     const element=document.getElementById(id);if(!element)continue;
     const value=location?repositoryIntegrityView?.locations?.[location]:attachmentIntegrityView,bound=!location||value?.repositoryScope&&repositoryIntegrityBoundScopes[location]===value.repositoryScope;
     element.textContent=label+': '+(bound?integrityStatusText(value,{shallow:!location}):'Awaiting connection to the repository; no current scan confirmed.');
+    // Recheck is offered only for a location this device is connected to.
+    const recheck=location&&document.getElementById('recheck-'+location);if(recheck)recheck.hidden=!bound;
   }
 }
 async function requestRepositoryIntegrityRecheck(target){
+  const label=target==='device-folder'?'Device Folder':'Google Drive';
   try{
     if(!appCanMutate())throw new Error('Use the primary tab to request backup verification.');
-    if(!BackupProviderRuntime.locationStatus(target)?.connected)throw new Error('Connect this backup location before requesting verification.');
+    if(!BackupProviderRuntime.locationStatus(target)?.connected)throw new Error(`Connect ${label} before rechecking it.`);
     const bound=await readRepositoryIntegrityTarget(target);
     await mutateRepositoryIntegrityTarget(target,current=>{if(current.repositoryScope!==bound.repositoryScope)throw repositoryIntegrityChanged();return {...current,requestId:crypto.randomUUID(),recheck:true,recheckCursor:'',cursor:'',scanId:'',partial:null,cycleStartedAt:new Date().toISOString()};});
     BackupProviderRuntime.requestIntegrity(target);
-    setStatus('Backup recheck requested. Quarantined objects remain hidden until they pass full verification.');return true;
-  }catch(error){setStatus(String(error?.message||error),false);AppDiagnostics.capture('backup.integrity-recheck',error,'warn');return false;}
+    setStatus('library-status',`${label} recheck started. The result appears under Verification.`);return true;
+  }catch(error){setStatus('library-status',String(error?.message||error),false);AppDiagnostics.capture('backup.integrity-recheck',error,'warn');return false;}
 }
 const ATTACHMENT_INTEGRITY_META_KEY=APP_META_KEYS.attachmentIntegrityAudit;
 const ATTACHMENT_INTEGRITY_INTERVAL_MS=24*60*60*1000;
