@@ -204,10 +204,12 @@ registry.define('repository-background',1,input=>{
     if(!input.coordinator||input.coordinator.format!=='study-director.repository-background-coordinator'||input.coordinator.contractVersion!==1)throw new TypeError('Repository maintenance scheduler coordinator is invalid.');
     if(!input.intent||input.intent.format!=='study-director.repository-maintenance-intent'||input.intent.contractVersion!==1)throw new TypeError('Repository maintenance scheduler intent is invalid.');
     for(const key of ['capture','execute','isAvailable','isBusy','report'])if(typeof input[key]!=='function')throw new TypeError('Repository maintenance scheduler port is invalid.');
-    let requestGeneration=0,deferredRequest=null,retainedObservation=null;
+    let requestGeneration=0,deferredRequest=null,retainedObservation=null,waitingForSlot=false;
     const nowMs=()=>input.coordinator.now();
     function emit(phase,details={}){try{input.report(freeze({phase:String(phase||''),at:new Date(nowMs()).toISOString(),...details}));}catch(error){try{input.capture('report',error);}catch{}}}
     function schedule(delay,trigger='scheduled',mode='earliest'){return job.schedule(Math.max(1000,Number(delay)||1000),trigger,mode);}
+    const slotReleased=()=>{if(!waitingForSlot)return;const state=input.coordinator.status();if(state.foreground||state.active.length)return;waitingForSlot=false;schedule(1000,'priority-slot-released','earliest');};
+    input.coordinator.onRelease(slotReleased);
     async function persistPending(reason,delay,expected=undefined,newRequest=false){
       const generation=requestGeneration,retry=Math.max(1000,Number(delay)||MAINTENANCE.errorMs),ok=await input.intent.mark(String(reason||'error'),retry,{expected,newRequest}),nextEligibleAt=new Date(nowMs()+retry).toISOString();
       if(ok==='superseded'||expected!==undefined&&generation!==requestGeneration)return freeze({ok:true,superseded:true});
@@ -281,9 +283,9 @@ registry.define('repository-background',1,input=>{
         catch(error){input.capture('state-read',error);emit('state-read-failed',{reason:'state-read-failed'});schedule(MAINTENANCE.errorMs,'state-read-failed','replace');return freeze({status:'pending',reason:'state-read-failed',nextEligibleAt:new Date(nowMs()+MAINTENANCE.errorMs).toISOString()});}
         if(!pending){emit('idle',{reason:'no-pending-state'});return freeze({status:'idle',reason:'no-pending-state'});}
         if(!input.intent.actionable(pending)){const delay=input.intent.delay(pending,MAINTENANCE.continuationMs);emit('deferred',{reason:String(pending.reason||trigger),requestedAt:String(pending.requestedAt||''),nextEligibleAt:String(pending.nextEligibleAt||''),actionable:false});schedule(delay,pending.reason||trigger,'replace');return freeze({status:'deferred',reason:String(pending.reason||trigger),nextEligibleAt:String(pending.nextEligibleAt||'')});}
-        if(input.isBusy()){const persisted=await persistPending('busy',MAINTENANCE.busyMs,pending);if(persisted.superseded)return preserveNewerRequest();const delay=persisted.ok?MAINTENANCE.busyMs:persisted.retryMs;emit('deferred',{reason:persisted.ok?'busy':'intent-write-failed',nextEligibleAt:persisted.nextEligibleAt,actionable:false});schedule(delay,persisted.ok?'busy':'intent-write-failed','replace');return freeze({status:'pending',reason:persisted.ok?'busy':'intent-write-failed',nextEligibleAt:persisted.nextEligibleAt});}
-        const scope=await input.coordinator.beginBackground('maintenance',{budgetMs:Math.max(0,Number(input.budgetMs)||0),budgetCode:String(input.budgetCode||'REPOSITORY_MAINTENANCE_BUDGET'),budgetMessage:String(input.budgetMessage||'Repository maintenance reached its work limit.'),preemptCode:String(input.preemptCode||'REPOSITORY_BACKGROUND_PREEMPTED'),preemptMessage:String(input.preemptMessage||'Repository maintenance yielded to a higher-priority operation.')});
-        if(!scope){schedule(MAINTENANCE.busyMs,'background-busy','replace');emit('deferred',{reason:'background-busy',nextEligibleAt:new Date(nowMs()+MAINTENANCE.busyMs).toISOString(),actionable:false});return freeze({status:'deferred',reason:'background-busy'});}
+        if(input.isBusy()){waitingForSlot=false;const persisted=await persistPending('busy',MAINTENANCE.busyMs,pending);if(persisted.superseded)return preserveNewerRequest();const delay=persisted.ok?MAINTENANCE.busyMs:persisted.retryMs;emit('deferred',{reason:persisted.ok?'busy':'intent-write-failed',nextEligibleAt:persisted.nextEligibleAt,actionable:false});schedule(delay,persisted.ok?'busy':'intent-write-failed','replace');return freeze({status:'pending',reason:persisted.ok?'busy':'intent-write-failed',nextEligibleAt:persisted.nextEligibleAt});}
+        waitingForSlot=false;const scope=await input.coordinator.beginBackground('maintenance',{budgetMs:Math.max(0,Number(input.budgetMs)||0),budgetCode:String(input.budgetCode||'REPOSITORY_MAINTENANCE_BUDGET'),budgetMessage:String(input.budgetMessage||'Repository maintenance reached its work limit.'),preemptCode:String(input.preemptCode||'REPOSITORY_BACKGROUND_PREEMPTED'),preemptMessage:String(input.preemptMessage||'Repository maintenance yielded to a higher-priority operation.')});
+        if(!scope){waitingForSlot=true;schedule(MAINTENANCE.busyMs,'background-busy','replace');slotReleased();emit('deferred',{reason:'background-busy',nextEligibleAt:new Date(nowMs()+MAINTENANCE.busyMs).toISOString(),actionable:false});return freeze({status:'deferred',reason:'background-busy'});}
         emit('running',{reason:String(pending.reason||trigger),requestedAt:String(pending.requestedAt||''),nextEligibleAt:String(pending.nextEligibleAt||''),actionable:true,transition:input.coordinator.transition('maintenance','scheduled','running',{reason:String(pending.reason||trigger),nextEligibleAt:String(pending.nextEligibleAt||''),actionable:true})});
         try{
           emit('cleanup-start',{reason:String(pending.reason||trigger)});const cleanup=await input.execute(freeze({signal:scope.signal,workBudget:scope.workBudget,pending,trigger:String(trigger||'scheduled')})),plan=input.intent.plan(cleanup);emit('cleanup-complete',{cleanup,plan});
@@ -325,6 +327,9 @@ registry.define('repository-background',1,input=>{
     // An explicit recheck scheduled during an active scan must survive the scan's
     // own recurrence or state retry; only the first outstanding deadline wins.
     function schedule(delay,reason='scheduled'){return job.schedule(Math.max(1000,Number(delay)||1000),reason,'earliest');}
+    let waitingForSlot=false;
+    const slotReleased=()=>{if(!waitingForSlot)return;const state=input.coordinator.status();if(state.foreground||state.active.length)return;waitingForSlot=false;schedule(1000,'priority-slot-released');};
+    input.coordinator.onRelease(slotReleased);
     async function runAttempt({trigger}){
       let stage='state-read';
       return (async()=>{
@@ -335,8 +340,8 @@ registry.define('repository-background',1,input=>{
         // A total timer can repeatedly discard a healthy but slow segment.
         // Enforce the work allowance after durable progress; stall watchdogs
         // and the coordinator's foreground signal still interrupt active IO.
-        const scope=await input.coordinator.beginBackground('integrity',{budgetMs:0,budgetCode:String(input.budgetCode||'REPOSITORY_INTEGRITY_BUDGET'),budgetMessage:String(input.budgetMessage||'Repository integrity verification reached its work limit.'),preemptCode:String(input.preemptCode||'REPOSITORY_BACKGROUND_PREEMPTED'),preemptMessage:String(input.preemptMessage||'Repository integrity verification yielded to a higher-priority operation.')});
-        if(!scope){schedule(INTEGRITY.retryMs,'background-busy');return freeze({status:'skipped',reason:'busy'});}
+        waitingForSlot=false;const scope=await input.coordinator.beginBackground('integrity',{budgetMs:0,budgetCode:String(input.budgetCode||'REPOSITORY_INTEGRITY_BUDGET'),budgetMessage:String(input.budgetMessage||'Repository integrity verification reached its work limit.'),preemptCode:String(input.preemptCode||'REPOSITORY_BACKGROUND_PREEMPTED'),preemptMessage:String(input.preemptMessage||'Repository integrity verification yielded to a higher-priority operation.')});
+        if(!scope){waitingForSlot=true;schedule(INTEGRITY.retryMs,'background-busy');slotReleased();return freeze({status:'skipped',reason:'busy'});}
         try{
           const dueBase=Date.parse(String(target&&target.completedAt||target&&target.cycleStartedAt||'')),nextEligibleAt=Number.isFinite(dueBase)?new Date(dueBase+INTEGRITY.intervalMs).toISOString():new Date(now).toISOString();
           scope.workBudget.start(Math.max(0,Number(input.budgetMs)||0));
