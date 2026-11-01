@@ -10,7 +10,7 @@ function productionFunction(name){
 }
 const saveWarning=source.match(/^const SESSION_CLAIM_SAVE_WARNING=.*;$/mu)?.[0];
 assert.ok(saveWarning,'Production session-claim warning must exist.');
-const runtime=[saveWarning,productionFunction('async function verifyFrozenSessionClaim(){'),productionFunction('function resumeAfterReleasedSessionClaim(session){'),productionFunction('async function checkSessionOwnershipClaim(){')].join('\n');
+const runtime=[saveWarning,productionFunction('async function verifyFrozenSessionClaim(){'),productionFunction('function resumeAfterReleasedSessionClaim(session){'),productionFunction('async function checkSessionOwnershipClaim(){'),productionFunction('function writeLiveDraftNow(options={}){')].join('\n');
 
 const owned={epoch:2,applies:true,state:'owned',ownedHere:false};
 const session={runningOn:'inst_local',revision:4};
@@ -29,7 +29,9 @@ function harness(){
     AppData:{activeSession:{load:async()=>{const next=loads.length?loads.shift():loaded(sessionValue);return typeof next==='function'?await next():await next;}}},
     ActiveSessionCodec:{sanitizeCurrent:value=>value},
     InstallationIdentity:{getId:()=> 'inst_local'},
-    DecisionClock:{nowMs:()=>now},
+    DecisionClock:{nowMs:()=>now},lastTimerSnapshotMs:0,
+    restoreSessionPersistenceSuppressed:()=>false,managedRecoverySessionQuiesced:()=>false,appCanMutate:()=>true,
+    showLiveDraftSaveWarning:reason=>calls.warnings.push({key:'capture',message:reason}),
     TimerEngine:{stopExecution:()=>{calls.stops++;return true;},resumeAfterPrimaryRestore:()=>{calls.resumes++;return resumeWorks;}},
     markDayContentChanged:()=>{calls.changed++;},
     captureSessionSnapshot:()=>{if(captureFailure)throw new Error('snapshot failed');const snap={token:calls.snapshots.length+1,review:{reflection:'Retain the last edits'},timerRuntime:{frozenAt:now}};calls.snapshots.push(snap);return snap;},
@@ -49,8 +51,8 @@ function harness(){
     SESSION_CLAIM_SYNC_RETRY_MS:30000
   };
   const context=vm.createContext(app);
-  vm.runInContext(`let sessionClaimFreeze=null,sessionClaimCheckActive=false,sessionSafetyMessage='';\n${runtime}\nglobalThis.check=checkSessionOwnershipClaim;globalThis.state=()=>({freeze:sessionClaimFreeze,warning:sessionSafetyMessage,active:sessionClaimCheckActive});`,context,{filename:'production-session-claim.js'});
-  return {calls,check:()=>context.check(),state:()=>context.state(),saves,loads,setClaim:v=>{claim=v;},setLocal:v=>{sessionValue=v;},setNow:v=>{now=v;},setResumeWorks:v=>{resumeWorks=v;},failCapture:()=>{captureFailure=true;},setTasks:v=>{context.TASKS=v;}};
+  vm.runInContext(`let sessionClaimFreeze=null,sessionClaimCheckActive=false,sessionSafetyMessage='';\n${runtime}\nglobalThis.check=checkSessionOwnershipClaim;globalThis.liveWrite=writeLiveDraftNow;globalThis.state=()=>({freeze:sessionClaimFreeze,warning:sessionSafetyMessage,active:sessionClaimCheckActive});`,context,{filename:'production-session-claim.js'});
+  return {calls,check:()=>context.check(),liveWrite:options=>context.liveWrite(options),state:()=>context.state(),saves,loads,setClaim:v=>{claim=v;},setLocal:v=>{sessionValue=v;},setNow:v=>{now=v;},setResumeWorks:v=>{resumeWorks=v;},failCapture:()=>{captureFailure=true;},setTasks:v=>{context.TASKS=v;}};
 }
 const good=()=>loaded({...session,revision:5});
 
@@ -139,6 +141,24 @@ for(const bad of [
   assert.equal(t.calls.resumes,2);
 }
 
+// Other save callers (notably managed-recovery preflight) must not recapture
+// elapsed wall time after the remote owner's timer has been frozen.
+{
+  const t=harness();t.loads.push(loaded(session),good());t.saves.push(saved);await t.check();
+  const original=t.state().freeze.snapshot;
+  t.setNow(130000);t.saves.push(saved);
+  assert.equal((await t.liveWrite({markChanged:false,allowDuringRecoveryQuiescence:true})).ok,true);
+  assert.equal(t.calls.writes[1].snapshot,original,'recovery preflight must persist frozen time evidence');
+  assert.equal(t.calls.snapshots.length,1,'no fresh running-time capture while ownership moved');
+  assert.equal(t.calls.changed,1,'the initial freeze marks change only once');
+}
+{
+  const t=harness();t.saves.push(saved);
+  assert.equal((await t.liveWrite({markChanged:false})).ok,true);
+  assert.equal(t.calls.snapshots.length,1,'ordinary live saving still captures latest state');
+  assert.equal(t.calls.writes[0].snapshot,t.calls.snapshots[0]);
+}
+
 // A newer remote epoch freezes a new snapshot once and never reuses an old proof.
 {
   const t=harness();t.loads.push(loaded(session),good());t.saves.push(saved);await t.check();
@@ -180,4 +200,4 @@ for(const bad of [
   assert.deepEqual(t.calls.syncs,['session-claim']);
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:16,productionFunctions:true}));
+console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:18,productionFunctions:true}));
