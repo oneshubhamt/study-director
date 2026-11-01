@@ -81,7 +81,7 @@ function fixture({badPath='',active=null,windows=[],rejectDelete='',failMetadata
 }
 {
  const h=fixture({active:{}}),live=h.client('active-client');h.windows.push(live);
- h.seed(current,assetId);h.seed('study-director-shell-in-use','b'.repeat(24));h.seed('study-director-shell-unidentified','c'.repeat(24));
+ h.seed('study-director-shell-previous',assetId);h.seed('study-director-shell-in-use','b'.repeat(24));h.seed('study-director-shell-unidentified','c'.repeat(24));
  await assert.rejects(h.emit('install'),error=>error.code==='SD_PWA_CACHE_LIMIT');
  assert.equal(h.deletions.length,0,'unknown and live clients must not lose their shells during an installing worker');
  assert.ok(h.stores.has('study-director-shell-in-use')&&h.stores.has('study-director-shell-unidentified'));
