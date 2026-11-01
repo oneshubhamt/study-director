@@ -82,7 +82,7 @@ registry.define('repository-background',1,input=>{
     const target=String(input.target||'repository').slice(0,80),scheduled=new Map(),active=new Map(),suspensions=new Set(),jobs=new Map(),discoverable=new Map();let foreground=null,suspensionSequence=0;
     // Told after a background job gives back its slot, so a status shown as
     // busy while the job ran is drawn again once it is not.
-    const releaseListeners=new Set();
+    const releaseListeners=new Set(),unregisterCleanup=new Map();
     function onRelease(listener){if(typeof listener!=='function')throw new TypeError('Repository-background release listener is invalid.');releaseListeners.add(listener);return ()=>releaseListeners.delete(listener);}
     function notifyRelease(job){for(const listener of releaseListeners){try{listener(job);}catch{}}}
     const nowMs=()=>{const value=Number(environment.now());return Number.isFinite(value)?value:Date.now();};
@@ -108,11 +108,12 @@ registry.define('repository-background',1,input=>{
     function clearAllScheduled(){for(const owned of jobs.values())owned.clear();for(const entry of scheduled.values())disarm(entry);scheduled.clear();return true;}
     function registerJob(name,ports){
       if(!priority(name)||jobs.has(name))throw new TypeError('Repository background job is invalid or already registered.');
-      const {initialDelayMs=1000,discover=true,...jobPorts}=ports;
+      const {initialDelayMs=1000,discover=true,onUnregister=null,...jobPorts}=ports;
+      if(onUnregister!==null&&typeof onUnregister!=='function')throw new TypeError('Repository background unregister callback is invalid.');
       const owned=Lifecycle.createJob({...jobPorts,onBlocked:()=>{const row=active.get(name);if(row&&!row.controller.signal.aborted)row.controller.abort(backgroundAbort(row.preemptCode,row.preemptMessage));},minDelayMs:1000,environment:freeze({now:nowMs,setTimeout:(callback,delay)=>{schedule(name,delay,callback);return scheduled.get(name);},clearTimeout:entry=>{if(scheduled.get(name)===entry)clearTimer(name);}})});
-      jobs.set(name,owned);if(discover)discoverable.set(name,()=>{try{return typeof discover==='function'?discover()===true:true;}catch(error){try{ports.capture(error);}catch{}return true;}});if(initialDelayMs!==null)owned.schedule(initialDelayMs,'registered');return owned;
+      jobs.set(name,owned);if(onUnregister)unregisterCleanup.set(name,onUnregister);if(discover)discoverable.set(name,()=>{try{return typeof discover==='function'?discover()===true:true;}catch(error){try{ports.capture(error);}catch{}return true;}});if(initialDelayMs!==null)owned.schedule(initialDelayMs,'registered');return owned;
     }
-    function unregisterJob(name){const owned=jobs.get(name);if(!owned)return false;owned.dispose();jobs.delete(name);discoverable.delete(name);const row=active.get(name);if(row&&!row.controller.signal.aborted)row.controller.abort(backgroundAbort(row.preemptCode,row.preemptMessage));return true;}
+    function unregisterJob(name){const owned=jobs.get(name);if(!owned)return false;owned.dispose();jobs.delete(name);discoverable.delete(name);const cleanup=unregisterCleanup.get(name);unregisterCleanup.delete(name);try{cleanup?.();}catch{}const row=active.get(name);if(row&&!row.controller.signal.aborted)row.controller.abort(backgroundAbort(row.preemptCode,row.preemptMessage));return true;}
     function wake(reason='eligibility',discover=true){if(foreground||suspensions.size)return false;for(const [name,owned] of jobs)owned.wake(reason,discover&&!owned.status().busy&&discoverable.get(name)?.()===true);resumeTimers(true);return true;}
     function suspendTimers(){for(const entry of scheduled.values())disarm(entry);}
     function resumeTimers(refresh=false){if(foreground||suspensions.size)return false;for(const entry of scheduled.values()){if(refresh)disarm(entry);arm(entry);}return true;}
@@ -209,7 +210,7 @@ registry.define('repository-background',1,input=>{
     function emit(phase,details={}){try{input.report(freeze({phase:String(phase||''),at:new Date(nowMs()).toISOString(),...details}));}catch(error){try{input.capture('report',error);}catch{}}}
     function schedule(delay,trigger='scheduled',mode='earliest'){return job.schedule(Math.max(1000,Number(delay)||1000),trigger,mode);}
     const slotReleased=()=>{if(!waitingForSlot)return;const state=input.coordinator.status();if(state.foreground||state.active.length)return;waitingForSlot=false;schedule(1000,'priority-slot-released','earliest');};
-    input.coordinator.onRelease(slotReleased);
+    const stopSlotRelease=input.coordinator.onRelease(slotReleased);
     async function persistPending(reason,delay,expected=undefined,newRequest=false){
       const generation=requestGeneration,retry=Math.max(1000,Number(delay)||MAINTENANCE.errorMs),ok=await input.intent.mark(String(reason||'error'),retry,{expected,newRequest}),nextEligibleAt=new Date(nowMs()+retry).toISOString();
       if(ok==='superseded'||expected!==undefined&&generation!==requestGeneration)return freeze({ok:true,superseded:true});
@@ -304,7 +305,7 @@ registry.define('repository-background',1,input=>{
         }finally{scope.release();}
       })().finally(()=>emit('settled'));
     }
-    const job=input.coordinator.registerJob('maintenance',{execute:runAttempt,isAvailable:input.isAvailable,capture:error=>input.capture('lifecycle',error),retryMs:MAINTENANCE.errorMs});
+    const job=input.coordinator.registerJob('maintenance',{onUnregister:stopSlotRelease,execute:runAttempt,isAvailable:input.isAvailable,capture:error=>input.capture('lifecycle',error),retryMs:MAINTENANCE.errorMs});
     return freeze({format:'study-director.repository-maintenance-scheduler',contractVersion:1,schedule,observe,request,adopt,run:trigger=>job.run(trigger),wake:trigger=>job.wake(trigger,true),status:()=>{const retained=retainedRequest(),state=input.coordinator.jobStatus('maintenance');return freeze({...state,...(retained?{pending:true,reason:'intent-write-failed',nextEligibleAt:new Date(retained.retryAt).toISOString(),state:state.state==='idle'?'pending':state.state}:{}),intentPending:!!retained,running:state.busy});}});
   }
 
@@ -329,7 +330,7 @@ registry.define('repository-background',1,input=>{
     function schedule(delay,reason='scheduled'){return job.schedule(Math.max(1000,Number(delay)||1000),reason,'earliest');}
     let waitingForSlot=false;
     const slotReleased=()=>{if(!waitingForSlot)return;const state=input.coordinator.status();if(state.foreground||state.active.length)return;waitingForSlot=false;schedule(1000,'priority-slot-released');};
-    input.coordinator.onRelease(slotReleased);
+    const stopSlotRelease=input.coordinator.onRelease(slotReleased);
     async function runAttempt({trigger}){
       let stage='state-read';
       return (async()=>{
@@ -351,7 +352,7 @@ registry.define('repository-background',1,input=>{
       })().catch(error=>{const yielded=error?.name==='AbortError',budgeted=yielded&&String(error?.code||'')===String(input.budgetCode||''),preempted=yielded&&String(error?.code||'')===String(input.preemptCode||''),stateFailed=stage!=='execute'||error?.code==='REPOSITORY_INTEGRITY_STATE_UNAVAILABLE',changed=error?.code==='REPOSITORY_CHANGED';if(!yielded)input.capture(error);schedule(changed||budgeted?INTEGRITY.continueMs:stateFailed?INTEGRITY.stateRetryMs:preempted?INTEGRITY.retryMs:INTEGRITY.failureRetryMs,changed?'repository-changed':budgeted?'budget':preempted?'preempted':stateFailed?'state-unavailable':'error');return freeze({status:yielded?'skipped':stateFailed||changed?'unavailable':'failed',reason:budgeted?'budget':preempted?'preempted':String(error&&error.message||error)});});
     }
     async function install(){try{const target=await input.readTarget(),completed=Date.parse(String(target&&target.completedAt||'')),now=input.coordinator.now();schedule(integrityTargetDue(target,now)?45000:Math.max(1000,INTEGRITY.intervalMs-(now-completed)+1000),'install');return target;}catch(error){input.capture(error);schedule(INTEGRITY.stateRetryMs,'state-read-failed');return null;}}
-    const job=input.coordinator.registerJob('integrity',{initialDelayMs:45000,execute:runAttempt,isAvailable:input.isAvailable,capture:input.capture,retryMs:INTEGRITY.unavailableRetryMs});
+    const job=input.coordinator.registerJob('integrity',{onUnregister:stopSlotRelease,initialDelayMs:45000,execute:runAttempt,isAvailable:input.isAvailable,capture:input.capture,retryMs:INTEGRITY.unavailableRetryMs});
     return freeze({format:'study-director.repository-integrity-scheduler',contractVersion:1,schedule,run:trigger=>job.run(trigger),wake:trigger=>job.wake(trigger,true),install,status:()=>input.coordinator.jobStatus('integrity')});
   }
   return freeze({format:'study-director.repository-background-module',contractVersion:1,priority:PRIORITY,maintenance:MAINTENANCE,integrity:INTEGRITY,maintenanceActionable,maintenanceDefersAcrossObservation,maintenancePlan,maintenanceDetails,integrityDetails,createCoordinator,createMaintenanceScheduler,integrityTargetDue,integrityResultDelay,createIntegrityScheduler});
