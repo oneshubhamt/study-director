@@ -73,6 +73,19 @@ for(const latency of [4999,5000,6000,20000]){
  assert.equal(final.complete,true);assert.deepEqual(final.issues,result.issues);assert.equal(final.checked,result.checked);
 }
 
+// A same-size metadata mutation during a yielded audit must invalidate its
+// old scan identity; cursor 1 cannot silently advance to cursor 2.
+{
+ const first=await store.shallowAudit(['asset-good','asset-size'],{maxEntries:1});
+ assert.equal(first.progress.cursor,1);
+ const previous=rows.get('asset-good');
+ rows.set('asset-good',{...previous,name:'changedname.pdf'});
+ const restart=await store.shallowAudit(['asset-good','asset-size'],{maxEntries:1,progress:first.progress});
+ assert.equal(restart.progress.cursor,1,'same-size metadata change restarts strong inventory digest');
+ assert.notEqual(restart.progress.scanId,first.progress.scanId);
+ rows.set('asset-good',previous);
+}
+
 const originalGet=dir.getFileHandle;
 dir.getFileHandle=async()=>{throw Object.assign(new Error('permission unavailable'),{name:'NotAllowedError'});};
 await assert.rejects(store.shallowAudit(['asset-good']),{name:'NotAllowedError'},'unavailable file access must not become a missing-file finding');dir.getFileHandle=originalGet;
