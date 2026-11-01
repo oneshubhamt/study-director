@@ -32,3 +32,11 @@ Retry-5 evidence: full Promotion 41203411096 passed the Insights performance gat
 Retry-6 evidence: full Promotion 41203991995 completed unit and integration suites, failed in architecture/storage/compatibility-contract.mjs line 113 because its original receipt-format exact-source assertion predated Pass B's correct null-format exclusion for known incomplete attachment copies. Contract updated (test-only) in 0dc9fe9ed2bf084468c2c857b3f309880796b594, preserving the no-fresh-backup proof for incomplete copies. All Insights performance jobs and aggregate gate passed on 41203991995. Re-run full Promotion; do not claim complete certification until every gate is green.
 
 Retry-7 evidence: Promotion run 41204940509 passed all hermetic unit and integration tests and the Insights gate but failed the architecture/persistence-boundary.mjs default-only Active Session transaction assertion. Pass C correctly selects strict durability for emergency, suspended, and explicitly critical writes; architecture test updated in f25e8efde53fdbbfaf334ca44ead029909ef5f55 to verify the conditional strict/default choice. Continue full Promotion without changing runtime or QA policy.
+
+2026-11-01 — Background-services P0–P6 comprehensive Promotion QA authorization
+Requested by repository owner in chat after P6 implementation.
+Application baseline: d7f11d98f2263b413e72c9f8848fade01b7d459b (Repository Checks 41275054203 SUCCESS).
+Run unchanged complete Promotion QA via existing push trigger: hermetic correctness, risk coverage, critical mutation, branch-edge coverage, full non-browser release, browser coverage and all browser journeys, three independent isolated Insights samples and aggregate gate.
+Include standalone diagnostics unit/integration contracts for P6; analyze each failure at original owner, do not suppress or relax any test/budget. Keep browser isolation requirements. This request modifies only the QA trigger text, not product code or workflow, so application executable remains at the above baseline.
+Manual physical Chromium/Android/iPad, real Google Drive, actual OS power management, storage eviction or power-loss acceptance remain NOT RUN under CI.
+No deployment, main merge, release or workflow changes authorized.
