@@ -14,7 +14,7 @@ function deferred(){let resolve;const promise=new Promise(yes=>{resolve=yes;});r
 function fixture(){
   const calls=[],listeners=new Map(),elements=[],holds=new Set();
   const state={owner:{state:'primary',revision:1},mutation:{active:'',foreign:false},lifecycle:{ready:true,revision:1},
-    startup:true,timer:false,pacer:false,attachment:false,providerBusy:false,dialog:false,diary:true,planFlush:true,reflection:true,
+    startup:true,timer:false,pacer:false,attachment:false,providerBusy:false,providerBackingUp:false,dialog:false,diary:true,planFlush:true,reflection:true,
     deletionFlush:true,draft:'edited plan',storedDraft:'edited plan',noteFailure:null,loaded:{value:{revision:7},storage:{idb:true}},
     live:{ok:true,value:{revision:7},storage:{idb:true}},maintenance:Promise.resolve(),backups:Promise.resolve(),
     diaryWait:Promise.resolve(),lockCount:0,quiesced:0,updates:0,checkSuccess:true,online:true,now:1000000,
@@ -32,7 +32,7 @@ function fixture(){
       try{return await run({assert(){assert.equal(state.owner.state,'primary');}});}finally{state.mutation.active='';state.lockCount--;calls.push('unlock');}
     }},
     ReviewSaveService:{status:()=>({})},AttachmentLibrary:{status:()=>({busy:state.attachment})},AttachmentIngest:{status:()=>({busy:false})},Exports:{status:()=>({busy:false})},BackupController:{status:()=>({busy:false})},
-    BackupProviderRuntime:{status:()=>({busy:state.providerBusy}),suspendBackground:()=>{calls.push('provider-suspend');holds.add('provider');return {settled:state.backups,release:()=>{holds.delete('provider');calls.push('provider-resume');}};}},
+    BackupProviderRuntime:{status:()=>({busy:state.providerBusy}),locationStatus:id=>{assert.equal(id,'google-drive');return {backingUp:state.providerBackingUp};},suspendBackground:()=>{calls.push('provider-suspend');holds.add('provider');return {settled:state.backups,release:()=>{holds.delete('provider');calls.push('provider-resume');}};}},
     DeviceBackup:{status:()=>({busy:false})},
     AttachmentIntegrityJob:{settled:()=>Promise.resolve()},RichTextAssetMaintenance:{settled:()=>state.maintenance},OwnershipUiProjection:{apply(){calls.push('project');}},
     RichTextRuntime:{quiesce:async run=>{state.quiesced++;try{return await run();}finally{state.quiesced--;}}},
@@ -127,6 +127,18 @@ await test('missing registration retries despite prior success; failures back of
   h.state.now+=30000;h.state.checkSuccess=true;assert.equal(await h.sandbox.checkPwaUpdateIfDue(),true);assert.equal(h.state.updates,2);assert.equal(h.state.lastCheck,h.state.now);
   assert.equal([...h.state.timers.values()][0].delay,86400000);assert.equal(await h.sandbox.checkPwaUpdateIfDue(),false);
   assert.equal(await h.sandbox.checkPwaUpdateIfDue({force:true}),true);assert.equal(h.state.updates,3);
+});
+await test('automatic PWA checks defer around active provider or Drive transfers, then resume without forcing an update',async()=>{
+  for(const flag of ['providerBusy','providerBackingUp']){
+    const h=fixture();h.state[flag]=true;
+    assert.equal(await h.sandbox.checkPwaUpdateIfDue(),false,flag+' must defer automatic checks');
+    assert.equal(h.state.updates,0,'no network update check while '+flag);
+    assert.equal(h.state.lastCheck,0,'deferral must not stamp a successful check');
+    assert.ok([...h.state.timers.values()].some(({delay})=>delay===30000),'deferred check is rescheduled');
+    h.state[flag]=false;h.state.now+=30000;
+    assert.equal(await h.sandbox.checkPwaUpdateIfDue(),true,'check succeeds when '+flag+' clears');
+    assert.equal(h.state.updates,1);
+  }
 });
 await test('unsupported, secondary and offline windows do not register through the scheduler',async()=>{
   for(const mode of ['unsupported','secondary','offline']){const h=fixture();if(mode==='unsupported')h.state.status.supported=false;if(mode==='secondary')h.state.owner.state='secondary';if(mode==='offline')h.state.online=false;assert.equal(await h.sandbox.checkPwaUpdateIfDue(),false);assert.equal(h.state.updates,0);if(mode!=='offline'){assert.equal(h.sandbox.schedulePwaUpdateCheck(),false);assert.equal(h.state.timers.size,0);}}
