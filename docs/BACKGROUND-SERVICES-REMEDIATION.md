@@ -607,6 +607,13 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
   - Complete Promotion is requested at the new SHA before the merge.
   - Not tested: real Google Drive property round trip and physical devices.
 
+### Entry 020 — Promotion browser failure in `ui/interactions.mjs` (2026-11-01)
+
+- **Branch / source HEAD before:** `current-fixes` at `1ae38313a2bfe1e891fe03d030acf59812654cc0`. [Promotion QA run 41282174906](https://github.com/oneshubhamt/study-director/actions/runs/41282174906) passed every step except browser certification. There, `tests/browser/ui/interactions.mjs:66` reported `[{id:'color-contrast',impact:'serious',nodes:2}]` on the themed confirmation dialog, while running alongside `attachments.mjs` (which writes a 100 MB file).
+- **Audit:** Entry 019 changed no style or interaction code, and this test passed in runs 41277058507 and 41280066144 on the same CSS. Run alone locally it passed 5/5, and with 20× CPU throttling 2/2. The test runs axe as soon as the dialog reports `open`. Probes showed the dialog's computed opacity at that moment is 0.90 (running animations on the dialog), and 1 only after `settleMotion`. At 0.90, axe files the dialog's text under *incomplete* colour-contrast ("background colour could not be determined"), so the result depends on the frame sampled. The exact two-node violation from CI was **not reproduced locally**; under CI load a different frame is the plausible cause. No product defect was found: the settled dialog passes.
+- **Change (test-only):** wait for `settleMotion(page)` before the axe run, as the same file already does for its mobile dialog check. No change to styles, the axe rule set or test selection.
+- **QA:** see the Promotion request at the new SHA.
+
 ### Journal template — duplicate this for the next pass
 
 - **Entry NNN — Pass P#, topic / date:**
