@@ -122,6 +122,56 @@ await test('a folder that needs permission again asks once, never prompts on its
   assert.equal(w.controller.status().connected,true);assert.equal(w.published.length,1,'changes made meanwhile are backed up');assert.equal(w.settingsStore.get('deviceFolder').directoryHandle,folder,'the same folder is kept');
 });
 
+await test('overlapping passive permission queries publish only the newest observation',async()=>{
+  const w=world(),folder=w.directory();w.store(folder);await w.controller.install();await w.settle();
+  const pending=[];folder.queryPermission=()=>new Promise(resolve=>pending.push(resolve));
+  const old=w.controller.refreshPermission(),recent=w.controller.refreshPermission();
+  assert.equal(pending.length,2,'independent activation checks can overlap');
+  pending[1]('denied');await recent;
+  assert.equal(w.controller.status().permission,'denied');assert.equal(w.controller.status().connected,false);
+  pending[0]('granted');await old;
+  assert.equal(w.controller.status().permission,'denied','late stale grant cannot resume automatic backup');
+  assert.equal(w.controller.status().stalePermissionResponses,1);
+  assert.equal(folder.requests,0,'passive refresh never prompts the browser');
+  const earlier=w.controller.refreshPermission(),newest=w.controller.refreshPermission();
+  pending[3]('granted');await newest;
+  pending[2]('denied');await earlier;
+  assert.equal(w.controller.status().permission,'granted','late stale denial cannot revoke a newer grant');
+  assert.equal(w.controller.status().connected,true);
+  assert.equal(w.controller.status().stalePermissionResponses,2);
+});
+
+await test('gesture regrant cannot be undone by an earlier permission refresh',async()=>{
+  const w=world(),folder=w.directory();w.store(folder);await w.controller.install();await w.settle();
+  let resolveOld;folder.queryPermission=()=>new Promise(resolve=>{resolveOld=resolve;});
+  const outdated=w.controller.refreshPermission();
+  folder.permission='prompt';
+  const regrant=w.controller.connect();
+  assert.equal(folder.requests,1,'requestPermission begins synchronously in click activation');
+  assert.equal((await w.controller.refreshPermission()).stalePermissionResponses,0,'passive refresh stays quiet while connecting');
+  await regrant;
+  resolveOld('denied');await outdated;
+  assert.equal(w.controller.status().permission,'granted');
+  assert.equal(w.controller.status().connected,true,'stale denial does not disable the manually regranted folder');
+  assert.equal(w.controller.status().stalePermissionResponses,1);
+  assert.equal(folder.requests,1,'no background prompt was added');
+});
+
+await test('disconnect and folder replacement invalidate an outstanding permission read',async()=>{
+  const w=world(),oldFolder=w.directory();w.store(oldFolder);await w.controller.install();await w.settle();
+  let completeOld;oldFolder.queryPermission=()=>new Promise(resolve=>{completeOld=resolve;});
+  const pending=w.controller.refreshPermission();
+  await w.controller.disconnect();
+  assert.equal(w.controller.status().mode,'off');
+  const newFolder=w.directory();newFolder.name='replacement-folder';w.choose(newFolder);
+  await w.controller.connect();await w.settle();
+  completeOld('denied');await pending;
+  assert.equal(w.controller.status().connected,true);
+  assert.equal(w.controller.status().folderName,'replacement-folder');
+  assert.equal(w.controller.status().permission,'granted');
+  assert.equal(w.controller.status().stalePermissionResponses,1);
+});
+
 await test('cancelling the picker or refusing permission leaves a clean, unconnected state',async()=>{
   const w=world();await w.controller.install();
   w.choose(Object.assign(new Error('The user aborted a request.'),{name:'AbortError'}));await w.controller.connect();
