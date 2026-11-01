@@ -52,6 +52,8 @@ const persisted=saturated.start('persisted'),reloaded=make(),fresh=reloaded.star
 assert.equal(reloaded.snapshot().find(row=>row.id===persisted).status,'interrupted');reloaded.finish({},fresh);
 const unavailable=DiagnosticsModule.createRecorder(freeze({configuration:freeze({release:'test',limit:3}),environment:freeze({now:()=>0}),storage:freeze({read:()=>'',write:()=>false})}));
 const memoryId=unavailable.start('memory-only');assert.equal(unavailable.finish({},memoryId),true);assert.equal(unavailable.status().persistence,'unavailable');assert.match(unavailable.text(),/1970-01-01T00:00:00.000Z/u);
+assert.match(unavailable.text([{job:'Device backup',state:'connected',permission:'granted',stalePermissionResponses:3,folderName:'PRIVATE DATA',token:'PRIVATE DATA'}]),/stalePermissionResponses=3/u);
+assert.doesNotMatch(unavailable.text([{job:'Device backup',state:'connected',permission:'granted',stalePermissionResponses:3,folderName:'PRIVATE DATA',token:'PRIVATE DATA'}]),/PRIVATE DATA/u);
 assert.doesNotMatch(unavailable.text([{job:'cleanup',state:'scheduled',pending:true,reason:'private note',folderName:'private folder',nextEligibleAt:'tomorrow'}]),/private note|private folder/u,'live diagnostics use a narrow field projection');
 console.log(JSON.stringify({status:'PASS',suite:'backup-operation-diagnostics',phaseTiming:true,reloadInterruption:true,boundedHistory:true,copyText:true},null,2));
 
