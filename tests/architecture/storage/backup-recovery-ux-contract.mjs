@@ -67,7 +67,13 @@ assert.doesNotMatch(app,/backup-provider-overlay|BackupProviderRuntime\.open\(/u
 assert.match(app,/'cancel-drive-backup': \(\)=>BackupProviderRuntime\.cancelForeground\(undefined,'google-drive'\)/u,'Drive Cancel stays coupled to the live foreground operation');
 assert.match(provider,/async function connectProvider\(selected\)[\s\S]*Promise\.all\(\[foreground\.settled,selected\.prepare\?selected\.prepare\(\):null\]\)[\s\S]*statusText\(''\);return true;/u,'Connect prepares sign-in alongside background work giving way, and a success leaves no message: the row says On');
 assert.match(app,/function renderBackupActions\(\)\{[\s\S]*recovering=rows\.some\(row=>row\.busy===true&&\['history','restore-version','bring-in','remove-version'\]\.includes[\s\S]*versions\.disabled=busy&&!recovering/u,'Version History must remain available to reattach to an active recovery operation.');
-assert.match(device,/async function refreshPermission\(\)[\s\S]*permission=await query\(\)[\s\S]*permissionNeeded\(\)/u,'Device Folder must re-check persisted directory permission without prompting automatically.');
+const refreshStart=device.indexOf('async function refreshPermission(){'),refreshEnd=device.indexOf('// The folder picker or permission prompt',refreshStart);
+assert.ok(refreshStart>=0&&refreshEnd>refreshStart,'Device Folder must define a passive permission refresh distinct from the user-gesture permission pathway');
+const passivePermissionRefresh=device.slice(refreshStart,refreshEnd);
+assert.match(passivePermissionRefresh,/const target=handle,revision=\\+\\+permissionRevision;/u,'passive checks must capture the selected folder and a monotonic observation generation');
+assert.match(passivePermissionRefresh,/const observed=await query\\(target\\);[\\s\\S]*revision!==permissionRevision\\|\\|handle!==target\\|\\|connecting[\\s\\S]*permission=observed;/u,'stale permission responses must be rejected before they can change the active folder permission');
+assert.match(passivePermissionRefresh,/permissionNeeded\\(\\)/u,'a current denied permission must still surface the renewal state');
+assert.doesNotMatch(passivePermissionRefresh,/requestPermission\\(|showDirectoryPicker\\(|await request\\(/u,'passive checks must never prompt without a user gesture');
 assert.doesNotMatch(device,/if\(handle\)\{[\s\S]{0,300}storage\.remove\(config\.metadataKey\)/u,'temporary Device Folder permission loss must never discard the configured directory handle.');
 assert.match(app,/connect\.textContent=state\.mode==='permission'\?'Allow access':'Choose folder…'/u,'configured Device Folder permission renewal must be presented as Allow access rather than folder reselection.');
 assert.match(app,/AppActivation\.subscribe\(event=>\{[^\n]*void refreshDeviceBackgroundPermission\(event\)/u,'foreground return must delegate to the permission and integrity opportunity handler.');
