@@ -151,14 +151,15 @@ const Attachments=context[Symbol.for('studyDirector.internalModules.v1')].requir
 vm.runInContext(fs.readFileSync('source/core/operation-lifecycle.js','utf8'),context,{filename:'source/core/operation-lifecycle.js'});
 vm.runInContext(fs.readFileSync('source/core/asset-maintenance.js','utf8'),context,{filename:'source/core/asset-maintenance.js'});
 const Lifecycle=context[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1),Maintenance=context[Symbol.for('studyDirector.internalModules.v1')].require('asset-maintenance',1,Object.freeze({lifecycle:Lifecycle}));
-function gcFixture(size,{untrusted=false}={}){
+function gcFixture(size,{untrusted=false,untrustedLive=false,emptyNotes=false}={}){
  let currentRevision=1,notesRead=0,removed=0,scanned=0,daysRead=0,activeRead=0,callbacks=[],seq=0;
  const ids=Array.from({length:size},(_,i)=>'asset-'+String(i).padStart(6,'0'));
- const notes=Object.fromEntries(ids.map((id,i)=>[id,{text:untrusted&&i===0?'INVALID':'ref '+id}]));
+ const notes=emptyNotes?{}:Object.fromEntries(ids.map((id,i)=>[id,{text:untrusted&&i===0?'INVALID':'ref '+id}]));
+ const fields=untrustedLive?[{value:'INVALID',isConnected:true}]:[];
  const ports={
   canMutate:()=>true,mutationActive:()=>false,
   collect:async(operation)=>operation({keys:async()=>ids,removeMany:async collection=>{removed+=collection.length;return collection.length;},sweep:async()=>0,status:()=>({sweepPending:false})}),
-  readRestoreJournal:async()=>null,readLibraryClearJournal:async()=>null,liveFields:()=>[],
+  readRestoreJournal:async()=>null,readLibraryClearJournal:async()=>null,liveFields:()=>fields,
   getReferenceRevision:()=>currentRevision,getDatasetRevision:async()=>String(currentRevision),
   scanReferences:text=>{scanned++;return {trusted:!text.includes('INVALID'),assetIds:ids.filter(id=>text.includes(id))};},
   readNotes:async()=>{notesRead++;return notes;},loadActiveSession:async()=>{activeRead++;return {ok:true,value:null};},
@@ -168,7 +169,7 @@ function gcFixture(size,{untrusted=false}={}){
   now:()=>1000
  };
  const runner=Maintenance.create(ports,{lease:{protect:()=>{},release:()=>{},isProtected:()=>false},batchSize:128});
- return {runner,ids,notes,setRevision:v=>{currentRevision=v;},stats:()=>({notesRead,daysRead,activeRead,removed,scanned}),callbacks:()=>callbacks};
+ return {runner,ids,notes,fields,setRevision:v=>{currentRevision=v;},stats:()=>({notesRead,daysRead,activeRead,removed,scanned}),callbacks:()=>callbacks};
 }
 for(const size of [0,1,128,129,1001]){
  const f=gcFixture(size);
@@ -238,4 +239,18 @@ for(const size of [0,1,128,129,1001]){
  assert.equal(catalogReads,passes,'P4 retains fresh metadata validation for every persisted scan continuation');
 }
 
+// The same invalid editor across two separate retry attempts must never be
+// mistaken for a verified scan just because the cached signature matches.
+{
+ const f=gcFixture(1,{untrustedLive:true,emptyNotes:true});
+ for(let retry=0;retry<2;retry++){
+  const result=await f.runner.run();
+  assert.equal(result.reason,'uncertain-rich-text','malformed live editor blocks every retry');
+  assert.equal(f.stats().removed,0,'untrusted live text must never authorize GC');
+ }
+ f.fields[0].value='valid without attachment references';
+ const after=await f.runner.run();
+ assert.equal(after.status,'completed','trusted editor permits normal verified orphan cleanup');
+ assert.equal(f.stats().removed,1,'only a now-trusted source allows metadata GC');
+}
 console.log(JSON.stringify({status:'PASS',suite:'attachment-integrity-audit',checked:result.checked,issues:result.issues.map(issue=>issue.kind),yieldCalls,unavailableIsNotCorruption:true,failedMetadataPreservesFindings:true},null,2));
