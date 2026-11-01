@@ -8926,7 +8926,7 @@ async function runAttachmentIntegrityAttempt({trigger,nextEligibleAt}){
     await BackgroundTasks.yieldTask({priority:'background'});check();
     const referenceRevision=richAssetReferenceRevision,dataset=await AppData.dailyRecords.datasetRevision();
     const references=await AttachmentReferences.sources({includeLive:false,priority:'background',referencesOnly:true});
-    if(!(references instanceof Set))throw new Error('Attachment reference inventory could not be verified.');
+    if(Object.prototype.toString.call(references)!=='[object Set]')throw new Error('Attachment reference inventory could not be verified.');
     const audit=await AttachmentStorage.shallowAudit([...references].filter(AttachmentsModule.validId),{
       progress:prior.progress,workMs:5000,maxEntries:128,shouldYield:BackgroundTasks.budget(),yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'}),check
     });
