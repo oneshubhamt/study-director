@@ -15,7 +15,7 @@ Stop and ask before you:
 
 - delete, overwrite or move tracked files beyond what the requested change needs;
 - rewrite git history in any form;
-- change repository settings, branch protection or rulesets, GitHub Actions workflows, secrets, deployment configuration or release identity;
+- change repository settings, branch protection or rulesets, GitHub Actions workflows, secrets, deployment configuration or release identity (the release-number bump below is the one exception);
 - deploy, publish or release anything.
 
 ## Data and secrets
@@ -39,6 +39,7 @@ Stop and ask before you:
 - Study Director is a local-first study planning PWA. Follow [CONTRIBUTING.md](CONTRIBUTING.md): one branch per coherent change, a pull request to `main`, and targeted QA for what changed.
 - Change first-party code only in `source`, `portable` or `rich-text`. Never hand-edit generated `dist` output or external bundles.
 - `release.config.mjs` is the only source of release identity. `LICENSE` must stay identical to `source/legal/LICENSE.txt`.
+- A pull request that changes the shipped app (anything under `source`, `portable` or `rich-text`) raises `release` in `release.config.mjs` by one, for example `SDVB75F16` → `SDVB75F17`. Do this once per pull request, not once per commit, and only when the pull request's `release` is not already above `main`'s. Change nothing else in `release.config.mjs` without asking. Pull requests that change only tests, docs or tooling keep the release.
 - A pull request titled like a bug fix (for example `fix: ...`) must include a regression test; CI enforces this.
 - Never run a browser test marked `alone` in `tests/helpers/browser-tests.mjs` at the same time as another browser test; they fail under CPU load. `npm run test:browser*` runs the others two at a time and the `alone` tests by themselves. Report browser runs as one summary, not test by test. Before you treat a failure seen under concurrency as a bug, rerun that test alone. [tests/README.md](tests/README.md#browser-test-reliability) has the full rules.
 - Storage, backup and restore code protects the owner's data. Changes there need targeted tests at the right layer.
