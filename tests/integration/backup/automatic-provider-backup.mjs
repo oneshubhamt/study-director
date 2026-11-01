@@ -183,6 +183,24 @@ const cases=[];
   cases.push('catch-up failure backoff is revision-aware');
 }
 {
+  // A catch-up whose restore fails and rolls back (Entry 022). The rollback
+  // writes local data, so it reports a change, with an urgent change already
+  // waiting. That report is not a new edit: the same Drive version waits for
+  // the backoff instead of being taken in and rolled back every few seconds.
+  const head='f';const item=kind=>freeze({kind,id:'cp_'+head.repeat(32),name:'cp_'+head.repeat(32)+(kind==='commit'?'.sdcommit':'.sdcheckpoint'),size:100,createdAt:'2026-10-06T07:30:00.000Z',modifiedAt:'2026-10-06T07:30:00.000Z',remoteId:kind+'-'+head});
+  const reads=[];let t=null;
+  t=fixture({covered:'2026-10-06T07:00:00.000Z',shared:true,
+    driveList:async({kind})=>({items:kind==='checkpoint'||kind==='commit'?[item(kind)]:[],overflow:false,ignored:0}),
+    driveDownload:async()=>{reads.push(freeze({at:t.clock.now(),head}));await t.clock.advance(1);t.change(false);throw Object.assign(new Error('Pending-review reconciliation commit did not match the resolved state.'),{backupStage:'restore-pending-reviews'});}});
+  t.change(true);
+  const start=t.clock.now(),attempts=of=>[...new Set(reads.filter(row=>row.head===of).map(row=>Math.round((row.at-start)/1000)))];
+  await tick(t,10*MINUTE);
+  assert.ok(attempts('f').length<=5,`a rolled-back catch-up follows its backoff, not each rollback (${attempts('f').join(',')} s)`);
+  assert.ok(attempts('f').length>=3,'and is still retried on that backoff');
+  assert.equal(t.runtime.locationStatus('google-drive').sync.failed,true,'the failure stays visible');
+  cases.push('a rolled-back catch-up waits for its backoff, not for each rollback');
+}
+{
   // A manual shared upload that loses its turn may discover a newer local edit
   // during the attempt. That edit keeps its urgent deadline.
   const t=fixture({covered:'2026-10-06T08:00:00.000Z',shared:true,manual:true});await tick(t,1000);let first=true;

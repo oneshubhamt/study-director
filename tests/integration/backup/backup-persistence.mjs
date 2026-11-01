@@ -37,7 +37,7 @@ const limits=freeze({
   backupMaxLineBytes:262144,backupMaxCompressedBytes:4*1024*1024,backupMaxFileBytes:16*1024*1024,
   backupMaxUncompressedBytes:8*1024*1024,backupMaxAssetDescriptors:100,richAssetMaxBytes:8*1024*1024,maxBackupChunks:1000,
   importBytes:4*1024*1024,maxImportRecords:100,maxNotes:100,
-  maxLegacyImportTombstones:100,maxReflectionChars:10000
+  maxLegacyImportTombstones:100,maxReflectionChars:10000,maxNoteLinks:50,maxPendingReviews:2000
 });
 const dataContract=RUNTIME_DATA_CONTRACT;
 const entityDefinitions=freeze({

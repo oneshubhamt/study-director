@@ -31,6 +31,8 @@ registry.define('backup',1,input=>{
     diagnostics:freeze(['capture','fail','finish','mark','start']),
     assets:freeze(['get','put','keys','list','importAll','restoreAll','removeMany','removeMetadata','scheduleMaintenance'])
   });
+  // Every APP_LIMITS key read below (tests/architecture/app/backup-limits-wiring.mjs).
+  const REQUIRED_LIMITS=freeze(['backupChunkItems','backupMaxAssetDescriptors','backupMaxCompressedBytes','backupMaxFileBytes','maxImportRecords','maxNoteLinks','maxNotes','maxPendingReviews']);
   function createRuntime(input){
     exactObject(input,['ports'],'Backup input');
     const rawPorts=input.ports;
@@ -55,6 +57,10 @@ registry.define('backup',1,input=>{
     if(!Object.isFrozen(ports.configuration.limits)){
       throw new TypeError('Backup configuration objects must be frozen.');
     }
+    // A limit this module reads but was not given would silently become 0
+    // or no limit at all, so a missing one stops start-up.
+    const missingLimits=REQUIRED_LIMITS.filter(key=>!(Number(ports.configuration.limits[key])>0));
+    if(missingLimits.length)throw new TypeError(`Backup configuration is missing limits: ${missingLimits.join(', ')}.`);
     if(!Object.isFrozen(ports.codecs.backup)||!Object.isFrozen(ports.codecs.activeSession)||!Object.isFrozen(ports.codecs.pendingReview)){
       throw new TypeError('Backup codecs must be frozen.');
     }
