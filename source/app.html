@@ -2850,9 +2850,7 @@ async function checkSessionOwnershipClaim(){
   if(sessionClaimCheckActive||document.visibilityState!=='visible'||!StartupLifecycle.status().fullyInitialized)return false;
   if(!TASKS.length&&!sessionClaimFreeze&&sessionPanelMode!=='elsewhere')return false;
   if(!BackupProviderRuntime.connected('google-drive')||navigator.onLine===false)return false;
-  const attemptAt=Date.now();
-  if(sessionClaimLastAttemptAt&&attemptAt>=sessionClaimLastAttemptAt&&attemptAt-sessionClaimLastAttemptAt<SESSION_CLAIM_WATCH_MS)return false;
-  sessionClaimLastAttemptAt=attemptAt;sessionClaimCheckActive=true;
+  sessionClaimLastAttemptAt=Date.now();sessionClaimCheckActive=true;
   try{
     const [claim,loaded]=await Promise.all([BackupProviderRuntime.readSessionClaim('google-drive'),AppData.activeSession.load(0,{strict:true})]);
     if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be checked safely.');
@@ -2900,6 +2898,11 @@ async function checkSessionOwnershipClaim(){
   }catch(error){AppDiagnostics.capture('session.claim-watch',error,'warn');return false;}
   finally{sessionClaimCheckActive=false;}
 }
+function wakeSessionOwnershipClaim(){
+  const now=Date.now();
+  if(sessionClaimLastAttemptAt&&now>=sessionClaimLastAttemptAt&&now-sessionClaimLastAttemptAt<SESSION_CLAIM_WATCH_MS)return false;
+  return checkSessionOwnershipClaim();
+}
 function installSessionWatch(){
   if(sessionWatchTimer||sessionClaimWatchTimer)return false;
   sessionWatchTimer=setInterval(()=>{
@@ -2908,11 +2911,11 @@ function installSessionWatch(){
     try{if(BackupProviderRuntime.syncing())BackupProviderRuntime.wakeBackground('session-watch');}
     catch(error){AppDiagnostics.capture('backup-provider.session-watch',error,'warn');}
   },SESSION_WATCH_MS);
-  sessionClaimWatchTimer=setInterval(()=>{void checkSessionOwnershipClaim();},SESSION_CLAIM_WATCH_MS);
+  sessionClaimWatchTimer=setInterval(()=>{void wakeSessionOwnershipClaim();},SESSION_CLAIM_WATCH_MS);
   // Existing interval owns the cadence. Foreground/online return only advances
   // an eligible missed attempt, never introducing a second polling timer.
-  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void checkSessionOwnershipClaim();});
-  window.addEventListener('online',()=>{void checkSessionOwnershipClaim();});
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void wakeSessionOwnershipClaim();});
+  window.addEventListener('online',()=>{void wakeSessionOwnershipClaim();});
   return true;
 }
 function notifyDeviceBackupIfStudyDayResolved(reason='study-day-completed'){
