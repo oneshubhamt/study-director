@@ -36,6 +36,14 @@ The visible/eligible Active Session claim watcher keeps its **15-second** cadenc
 
 **Retained safety policies:** Read-only provider maintenance planning remains outside the remote deletion lease; the destructive phase checks fresh digest/history equality under the lease. Startup still wakes the six background owners after authoritative mutation epoch reconciliation and separately discovers OPFS scratch orphans. Real Drive paginated preflight, update/upload contention, device performance and cross-device handoff p95 have not been measured; see [Entry 015](BACKGROUND-SERVICES-REMEDIATION.md#entry-015--p5-implementation-independent-objective-recheck-and-targeted-qa-closure-2026-11-01) for the bounded Node simulation and exact acceptance limits.
 
+## P6 permission currency, safe diagnostics and browser execution limits (2026-11-01)
+
+Device Folder passive permission observations are ordered by a controller-local generation and bound to the exact directory handle they queried. A superseded async answer cannot overwrite a newer grant, revocation, reconnect, folder replacement or disconnect. Start-up folder rehydration follows the same generation fence, while the folder picker and `requestPermission()` are still invoked directly from the user's click. Passive refresh never requests permission, and it does not compete with an active authorization. The existing transport, repository locks, verified backup and connection notifications remain unchanged.
+
+Library → Data → Copy diagnostics includes the current permission and a capped, nonnegative `stalePermissionResponses` count (per open controller, not persisted). It helps explain discarded out-of-order observations without recording directory handles, folder names, note text, file paths, credentials or tokens. Existing bounded operation phase timing and inventory milestones remain the primary performance diagnostics; no new CPU sampler, background daemon or trace log is installed.
+
+The service worker still checks asset SHA-256 at install/reuse rather than rehashing every cached response, preserving offline startup performance and safe retained generations. Background work is only **eligible** when an executing app context, storage authority, permissions and other gates allow it. Closing/suspending all pages provides no recurring background-execution guarantee. Work with durable intent is rediscovered on the next eligible app open/activation; that is a recovery contract, **not** a promised backup frequency while closed. Actual permission revocation/regrant on desktop Chromium, Safari/iPad and Android suspend/kill/reopen require separate operator validation and are not certified by Node/CI.
+
 ## Ownership
 
 ```mermaid
