@@ -214,7 +214,8 @@ self.addEventListener('notificationclick',event=>{
     const windows=await clients.matchAll({type:'window',includeUncontrolled:true});
     const existing=windows.find(client=>{const url=new URL(client.url);return url.origin===scope.origin&&url.pathname.startsWith(scope.pathname);});
     if(existing){
-      if('navigate' in existing&&existing.url!==requested.href)await existing.navigate(requested.href);
+      // A notification is a focus request, not permission to reload unsaved
+      // work in an already-open app client (including /index.html or a deep URL).
       return existing.focus();
     }
     return clients.openWindow?clients.openWindow(requested.href):null;
