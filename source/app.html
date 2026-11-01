@@ -6714,6 +6714,20 @@ const PluginRuntime=(()=>{
   }
   return Object.freeze({registerPlaceholders,requestTab,register,status});
 })();
+// Insights prepares a long saved history in idle time so its first opening
+// does not wait on a cold worker. Load its file only after start-up
+// housekeeping has had its turn, while the page is visible and idle.
+const INSIGHTS_PRELOAD_DELAY_MS=4000;
+function scheduleInsightsPreload(){
+  setTimeout(()=>{
+    const load=()=>{
+      if(document.visibilityState==='hidden'){document.addEventListener('visibilitychange',load,{once:true});return;}
+      // requestTab reports load failures in plugin status and never rejects.
+      void PluginRuntime.requestTab('insights');
+    };
+    if(typeof requestIdleCallback==='function')requestIdleCallback(load,{timeout:10000});else load();
+  },INSIGHTS_PRELOAD_DELAY_MS);
+}
 function registerStudyDirectorPlugin(plugin){
   return PluginRuntime.register(plugin);
 }
@@ -11199,6 +11213,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
       NoticeCoordinator.dismiss('startup-failure');
       window.dispatchEvent(new CustomEvent('studydirector:canonicalstatus',{detail:proof}));
       window.dispatchEvent(new CustomEvent('studydirector:startupready',{detail:Object.freeze({version:APP_VERSION,canonical:proof.canonical,retirementDataReady:proof.retirementDataReady})}));
+      scheduleInsightsPreload();
       void PwaLifecycle.confirmBoot().catch(error=>AppDiagnostics.capture('pwa.boot-confirmation',error,'warn'));
       setTimeout(()=>{void offerDeviceRecoveryIfLocalEmpty({reason:'startup'}).catch(error=>AppDiagnostics.capture('backup.device-recovery-offer',error,'warn'));},0);
       return proof;

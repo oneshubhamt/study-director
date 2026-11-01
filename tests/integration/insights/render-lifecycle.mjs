@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const source=fs.readFileSync('source/external/insights.js','utf8');
-const start=source.indexOf('    const render=async context=>{'),end=source.indexOf('    return Object.freeze({render,ready:',start);
+const start=source.indexOf('    const render=async context=>{'),end=source.indexOf('    return Object.freeze({render,prefetch,ready:',start);
 assert.ok(start>0&&end>start);
 function harness({failSource=false,supersede=false,retained=false}={}){
   let generation=0,disconnects=0,observers=0;
