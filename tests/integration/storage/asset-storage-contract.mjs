@@ -102,9 +102,18 @@ assert.equal((await store.collect(async gc=>gc.sweep(),{maxEntries:8})),1,'the i
  const pin=await store.retain();
  assert.equal((await store.collect(async gc=>gc.sweep())).reason,'active-editor-or-file-operation');
  pin();
- for(let n=0;n<8;n++){const item=await store.collect(async gc=>({removed:await gc.sweep(),pending:gc.status().sweepPending}),{maxEntries:2});if(!item.pending)break;}
+ // A file created mid-iteration may be invisible until the next OPFS
+ // directory enumeration. Require bounded eventual cleanup instead of
+ // assuming that the active iterator discovers concurrent insertions.
+ let completedEnumerations=0;
+ for(let n=0;n<16&&completedEnumerations<2;n++){
+   const item=await store.collect(async gc=>({removed:await gc.sweep(),pending:gc.status().sweepPending}),{maxEntries:2});
+   if(!item.pending)completedEnumerations++;
+ }
+ assert.equal(completedEnumerations,2,'two complete bounded enumerations must finish after a mid-sweep mutation');
  assert.equal(files.has(metadata.get(B).file),true,'reachable bytes must survive iterator mutation and resume');
- assert.equal(files.has(later),false);assert.equal(files.has(more),false);
+ assert.equal(files.has(later),false,'original orphan must be reclaimed');
+ assert.equal(files.has(more),false,'new orphan must be reclaimed by the next complete sweep');
 }
 
 console.log(JSON.stringify({status:'PASS',suite:'asset-storage-bounded-sweep',passes,totalSwept,retainedSource:true,foregroundPreemption:true}));
