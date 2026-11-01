@@ -2816,7 +2816,7 @@ function uploadSoonAfterPlanApply(result){
 // stops only this runtime clock; canonical progress stays untouched until the
 // verified full checkpoint arrives and ordinary reconciliation preserves it.
 const SESSION_WATCH_MS=2*60*1000,SESSION_CLAIM_WATCH_MS=15*1000,SESSION_CLAIM_SYNC_RETRY_MS=30*1000;
-let sessionWatchTimer=null,sessionClaimWatchTimer=null,sessionClaimCheckActive=false;
+let sessionWatchTimer=null,sessionClaimWatchTimer=null,sessionClaimCheckActive=false,sessionClaimLastAttemptAt=0;
 const SESSION_CLAIM_SAVE_WARNING='The session moved to another device, but the latest local progress has not been verified in browser storage. Keep this tab open; saving will retry. Do not clear its data.';
 async function verifyFrozenSessionClaim(){
   const frozen=sessionClaimFreeze;
@@ -2849,8 +2849,10 @@ function resumeAfterReleasedSessionClaim(session){
 async function checkSessionOwnershipClaim(){
   if(sessionClaimCheckActive||document.visibilityState!=='visible'||!StartupLifecycle.status().fullyInitialized)return false;
   if(!TASKS.length&&!sessionClaimFreeze&&sessionPanelMode!=='elsewhere')return false;
-  if(!BackupProviderRuntime.connected('google-drive'))return false;
-  sessionClaimCheckActive=true;
+  if(!BackupProviderRuntime.connected('google-drive')||navigator.onLine===false)return false;
+  const attemptAt=Date.now();
+  if(sessionClaimLastAttemptAt&&attemptAt>=sessionClaimLastAttemptAt&&attemptAt-sessionClaimLastAttemptAt<SESSION_CLAIM_WATCH_MS)return false;
+  sessionClaimLastAttemptAt=attemptAt;sessionClaimCheckActive=true;
   try{
     const [claim,loaded]=await Promise.all([BackupProviderRuntime.readSessionClaim('google-drive'),AppData.activeSession.load(0,{strict:true})]);
     if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be checked safely.');
@@ -2907,6 +2909,10 @@ function installSessionWatch(){
     catch(error){AppDiagnostics.capture('backup-provider.session-watch',error,'warn');}
   },SESSION_WATCH_MS);
   sessionClaimWatchTimer=setInterval(()=>{void checkSessionOwnershipClaim();},SESSION_CLAIM_WATCH_MS);
+  // Existing interval owns the cadence. Foreground/online return only advances
+  // an eligible missed attempt, never introducing a second polling timer.
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void checkSessionOwnershipClaim();});
+  window.addEventListener('online',()=>{void checkSessionOwnershipClaim();});
   return true;
 }
 function notifyDeviceBackupIfStudyDayResolved(reason='study-day-completed'){
@@ -10353,15 +10359,21 @@ function schedulePwaUpdateCheck(minimumDelay=0){
   pwaUpdateCheckDueAt=now+delay;pwaUpdateCheckTimer=setTimeout(()=>{pwaUpdateCheckTimer=null;pwaUpdateCheckDueAt=0;void checkPwaUpdateIfDue();},delay);
   return true;
 }
+function pwaProviderNetworkBusy(){return BackupProviderRuntime.status().busy===true||BackupProviderRuntime.locationStatus('google-drive')?.backingUp===true;}
 async function checkPwaUpdateIfDue({force=false}={}){
   const lifecycle=PwaLifecycle.status();
   if(!lifecycle.supported||pwaUpdateCheckRunning||!force&&(lifecycle.registered&&!lifecycle.checkError&&!pwaUpdateCheckDue()||pwaUpdateCheckRetryAt>Date.now()))return false;
   const ownership=AppOwnership.status();
   if(ownership.state!==OWNERSHIP_STATES.PRIMARY)return false;
   if(navigator.onLine===false)return false;
-  pwaUpdateCheckRunning=true;
+  // Automatic update discovery must not compete with an active provider transfer.
+  // Manual checks remain explicit user actions; they are never delayed here.
+  if(!force&&pwaProviderNetworkBusy()){schedulePwaUpdateCheck(30000);return false;}
+  pwaUpdateCheckRunning=true;let deferredForProvider=false;
   const perform=async()=>{
     if(!force&&(PwaLifecycle.status().registered&&!PwaLifecycle.status().checkError&&!pwaUpdateCheckDue()||pwaUpdateCheckRetryAt>Date.now()))return false;
+    // A transfer may have started while waiting for the cross-tab update lock.
+    if(!force&&pwaProviderNetworkBusy()){deferredForProvider=true;return false;}
     const success=await PwaLifecycle.checkForUpdate();
     if(success){markPwaUpdateCheck();clearPwaUpdateCheckFailure();return true;}
     recordPwaUpdateCheckFailure();
@@ -10373,7 +10385,7 @@ async function checkPwaUpdateIfDue({force=false}={}){
     }
     return await perform();
   }catch(error){recordPwaUpdateCheckFailure();AppDiagnostics.capture('pwa.update-check-scheduler',error,'warn');return false;}
-  finally{pwaUpdateCheckRunning=false;schedulePwaUpdateCheck();}
+  finally{pwaUpdateCheckRunning=false;schedulePwaUpdateCheck(deferredForProvider?30000:0);}
 }
 const PwaLifecycle=PwaLifecycleModule.createCoordinator(Object.freeze({
   configuration:Object.freeze({assetId:'__SD_PAGE_ASSET_ID__',buildId:'@@SD_BUILD_ID@@',scope:'./',workerUrl:trustedAssetURL('./sw.js'),reloadSessionKey:SESSION_STORAGE_KEYS.pwaReload}),
