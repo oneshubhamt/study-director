@@ -10,7 +10,7 @@ function productionFunction(name){
 }
 const saveWarning=source.match(/^const SESSION_CLAIM_SAVE_WARNING=.*;$/mu)?.[0];
 assert.ok(saveWarning,'Production session-claim warning must exist.');
-const runtime=[saveWarning,productionFunction('async function verifyFrozenSessionClaim(){'),productionFunction('function resumeAfterReleasedSessionClaim(session){'),productionFunction('async function checkSessionOwnershipClaim(){'),productionFunction('function writeLiveDraftNow(options={}){')].join('\n');
+const runtime=[saveWarning,productionFunction('async function verifyFrozenSessionClaim(){'),productionFunction('function resumeAfterReleasedSessionClaim(session){'),productionFunction('async function checkSessionOwnershipClaim(){'),productionFunction('function writeLiveDraftNow(options={}){'),productionFunction('function snapshotWhileSessionClaimFrozen(){')].join('\n');
 
 const owned={epoch:2,applies:true,state:'owned',ownedHere:false};
 const session={runningOn:'inst_local',revision:4};
@@ -19,8 +19,8 @@ const localOnly={ok:true,value:{...session,revision:5},storage:{local:true,idb:f
 const failed={ok:false,value:{...session,revision:5},storage:{local:false,idb:false},error:new Error('Both local stores unavailable')};
 const loaded=value=>({ok:true,value,storage:{local:false,idb:true}});
 function harness(){
-  let claim={...owned},now=100000,sessionValue={...session},saves=[],loads=[],captureFailure=false,resumeWorks=true;
-  const calls={stops:0,resumes:0,snapshots:[],writes:[],syncs:[],warnings:[],status:[],captures:[],changed:0,cancelled:0};
+  let claim={...owned},now=100000,sessionValue={...session},saves=[],loads=[],captureFailure=false,resumeWorks=true,reviewText='Retain the last edits';
+  const calls={stops:0,resumes:0,snapshots:[],captureEvidenceArgs:[],evidences:[],writes:[],syncs:[],warnings:[],status:[],captures:[],changed:0,cancelled:0};
   const app={
     document:{visibilityState:'visible'},
     StartupLifecycle:{status:()=>({fullyInitialized:true})},
@@ -34,7 +34,8 @@ function harness(){
     showLiveDraftSaveWarning:reason=>calls.warnings.push({key:'capture',message:reason}),
     TimerEngine:{stopExecution:()=>{calls.stops++;return true;},resumeAfterPrimaryRestore:()=>{calls.resumes++;return resumeWorks;}},
     markDayContentChanged:()=>{calls.changed++;},
-    captureSessionSnapshot:()=>{if(captureFailure)throw new Error('snapshot failed');const snap={token:calls.snapshots.length+1,review:{reflection:'Retain the last edits'},timerRuntime:{frozenAt:now}};calls.snapshots.push(snap);return snap;},
+    captureRuntimeEvidence:()=>{const evidence={actualTime:[42],actualRecords:[{seconds:42}],capturedAt:now};calls.evidences.push(evidence);return evidence;},
+    captureSessionSnapshot:evidence=>{if(captureFailure)throw new Error('snapshot failed');const snap={token:calls.snapshots.length+1,review:{reflection:reviewText},timerRuntime:{frozenAt:now},practice:{frozenAt:now},actualTime:evidence?.actualTime||[]};calls.snapshots.push(snap);calls.captureEvidenceArgs.push(evidence);return snap;},
     cancelPendingLiveDraftSave:()=>{calls.cancelled++;},
     writeActiveSessionNow:async(snapshot,options)=>{
       calls.writes.push({snapshot,options});
@@ -52,7 +53,7 @@ function harness(){
   };
   const context=vm.createContext(app);
   vm.runInContext(`let sessionClaimFreeze=null,sessionClaimCheckActive=false,sessionSafetyMessage='';\n${runtime}\nglobalThis.check=checkSessionOwnershipClaim;globalThis.liveWrite=writeLiveDraftNow;globalThis.state=()=>({freeze:sessionClaimFreeze,warning:sessionSafetyMessage,active:sessionClaimCheckActive});`,context,{filename:'production-session-claim.js'});
-  return {calls,check:()=>context.check(),liveWrite:options=>context.liveWrite(options),state:()=>context.state(),saves,loads,setClaim:v=>{claim=v;},setLocal:v=>{sessionValue=v;},setNow:v=>{now=v;},setResumeWorks:v=>{resumeWorks=v;},failCapture:()=>{captureFailure=true;},setTasks:v=>{context.TASKS=v;}};
+  return {calls,check:()=>context.check(),liveWrite:options=>context.liveWrite(options),state:()=>context.state(),saves,loads,setClaim:v=>{claim=v;},setLocal:v=>{sessionValue=v;},setNow:v=>{now=v;},setResumeWorks:v=>{resumeWorks=v;},setReviewText:v=>{reviewText=v;},failCapture:()=>{captureFailure=true;},setTasks:v=>{context.TASKS=v;}};
 }
 const good=()=>loaded({...session,revision:5});
 
@@ -63,7 +64,8 @@ const good=()=>loaded({...session,revision:5});
   assert.equal(t.calls.stops,1);
   assert.equal(t.calls.snapshots.length,1);
   assert.equal(t.calls.writes.length,1);
-  assert.equal(t.calls.writes[0].snapshot,t.calls.snapshots[0]);
+  assert.equal(t.calls.writes[0].snapshot.timerRuntime,t.calls.snapshots[0].timerRuntime);
+  assert.equal(t.calls.captureEvidenceArgs[1],t.calls.evidences[0]);
   assert.equal(t.calls.writes[0].options.emergency,true);
   assert.equal(t.calls.writes[0].options.strictDurability,true);
   assert.equal(t.state().freeze.localVerified,true);
@@ -92,8 +94,8 @@ for(const [name,result] of [
   t.loads.push(loaded(session),good());t.saves.push(saved);
   assert.equal(await t.check(),true,name+' retry');
   assert.equal(t.calls.stops,1,name+' no duplicate freeze');
-  assert.equal(t.calls.snapshots.length,1,name+' one freeze snapshot');
-  assert.equal(t.calls.writes[1].snapshot,t.calls.writes[0].snapshot,name+' retry must not accrue time');
+  assert.equal(t.calls.evidences.length,1,name+' one frozen timing evidence');
+  assert.equal(t.calls.writes[1].snapshot.timerRuntime,t.calls.writes[0].snapshot.timerRuntime,name+' retry must not accrue time');
   assert.equal(t.state().freeze.localVerified,true,name+' recovered');
   assert.equal(t.state().warning,'',name+' clears owned warning');
   assert.deepEqual(t.calls.syncs,['session-claim'],name+' sync after verification');
@@ -146,10 +148,12 @@ for(const bad of [
 {
   const t=harness();t.loads.push(loaded(session),good());t.saves.push(saved);await t.check();
   const original=t.state().freeze.snapshot;
-  t.setNow(130000);t.saves.push(saved);
+  t.setNow(130000);t.setReviewText('Edited reflection after ownership moved');t.saves.push(saved);
   assert.equal((await t.liveWrite({markChanged:false,allowDuringRecoveryQuiescence:true})).ok,true);
-  assert.equal(t.calls.writes[1].snapshot,original,'recovery preflight must persist frozen time evidence');
-  assert.equal(t.calls.snapshots.length,1,'no fresh running-time capture while ownership moved');
+  assert.equal(t.calls.writes[1].snapshot.timerRuntime,original.timerRuntime,'recovery preflight preserves frozen timer evidence');
+  assert.equal(t.calls.writes[1].snapshot.practice,original.practice,'recovery preflight preserves practice evidence');
+  assert.equal(t.calls.writes[1].snapshot.review.reflection,'Edited reflection after ownership moved','a later reflection is not silently discarded');
+  assert.equal(t.calls.evidences.length,1,'no fresh timing evidence while ownership moved');
   assert.equal(t.calls.changed,1,'the initial freeze marks change only once');
 }
 {
