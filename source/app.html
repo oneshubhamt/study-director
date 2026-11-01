@@ -8925,9 +8925,9 @@ async function runAttachmentIntegrityAttempt({trigger,nextEligibleAt}){
     const check=()=>{if(!appCanMutate())throw attachmentIntegrityDeferredError('Attachment integrity audit is awaiting primary-tab control.','ATTACHMENT_INTEGRITY_NOT_PRIMARY');if(backgroundMaintenanceForegroundBusy())throw attachmentIntegrityDeferredError();};
     await BackgroundTasks.yieldTask({priority:'background'});check();
     const referenceRevision=richAssetReferenceRevision,dataset=await AppData.dailyRecords.datasetRevision();
-    const sources=await AttachmentReferences.sources({includeLive:false,priority:'background'}),references=new Set();
-    for(const source of sources||[])for(const id of source.ids||[])if(AttachmentsModule.validId(id))references.add(id);
-    const audit=await AttachmentStorage.shallowAudit([...references],{
+    const references=await AttachmentReferences.sources({includeLive:false,priority:'background',referencesOnly:true});
+    if(!(references instanceof Set))throw new Error('Attachment reference inventory could not be verified.');
+    const audit=await AttachmentStorage.shallowAudit([...references].filter(AttachmentsModule.validId),{
       progress:prior.progress,workMs:5000,maxEntries:128,shouldYield:BackgroundTasks.budget(),yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'}),check
     });
     check();if(referenceRevision!==richAssetReferenceRevision||dataset!==await AppData.dailyRecords.datasetRevision())throw attachmentIntegrityDeferredError();
