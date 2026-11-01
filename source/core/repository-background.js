@@ -92,7 +92,9 @@ registry.define('repository-background',1,input=>{
     function disarm(entry){if(entry&&entry.timer!==null){environment.clearTimeout(entry.timer);entry.timer=null;}}
     function arm(entry){
       if(!entry||foreground||suspensions.size||entry.timer!==null)return false;
-      const wait=Math.max(0,entry.dueAt-nowMs());entry.timer=environment.setTimeout(()=>{entry.timer=null;if(scheduled.get(entry.job)!==entry)return;const rank=priority(entry.job);for(const activeJob of active.keys())if(priority(activeJob)>=rank)return;scheduled.delete(entry.job);void Promise.resolve().then(entry.callback);},wait);return true;
+      const wait=Math.max(0,entry.dueAt-nowMs());entry.timer=environment.setTimeout(()=>{entry.timer=null;if(scheduled.get(entry.job)!==entry)return;
+       if(nowMs()<entry.dueAt){arm(entry);return;} // Wall clock moved backwards.
+       const rank=priority(entry.job);for(const activeJob of active.keys())if(priority(activeJob)>=rank)return;scheduled.delete(entry.job);void Promise.resolve().then(entry.callback);},wait);return true;
     }
     function schedule(job,delay,callback,{mode='replace'}={}){
       const name=String(job||'');if(!priority(name)||typeof callback!=='function')throw new TypeError('Repository-background scheduled job is invalid.');
@@ -111,9 +113,9 @@ registry.define('repository-background',1,input=>{
       jobs.set(name,owned);if(discover)discoverable.set(name,()=>{try{return typeof discover==='function'?discover()===true:true;}catch(error){try{ports.capture(error);}catch{}return true;}});if(initialDelayMs!==null)owned.schedule(initialDelayMs,'registered');return owned;
     }
     function unregisterJob(name){const owned=jobs.get(name);if(!owned)return false;owned.dispose();jobs.delete(name);discoverable.delete(name);const row=active.get(name);if(row&&!row.controller.signal.aborted)row.controller.abort(backgroundAbort(row.preemptCode,row.preemptMessage));return true;}
-    function wake(reason='eligibility',discover=true){if(foreground||suspensions.size)return false;for(const [name,owned] of jobs)owned.wake(reason,discover&&!owned.status().busy&&discoverable.get(name)?.()===true);resumeTimers();return true;}
+    function wake(reason='eligibility',discover=true){if(foreground||suspensions.size)return false;for(const [name,owned] of jobs)owned.wake(reason,discover&&!owned.status().busy&&discoverable.get(name)?.()===true);resumeTimers(true);return true;}
     function suspendTimers(){for(const entry of scheduled.values())disarm(entry);}
-    function resumeTimers(){if(foreground||suspensions.size)return false;for(const entry of scheduled.values())arm(entry);return true;}
+    function resumeTimers(refresh=false){if(foreground||suspensions.size)return false;for(const entry of scheduled.values()){if(refresh)disarm(entry);arm(entry);}return true;}
     function suspend(reason='suspended',{preserveForegroundController=null}={}){
       const token=`bg_${(++suspensionSequence).toString(36)}_${nowMs().toString(36)}`,label=String(reason||'suspended'),waiting=[];suspensions.add(token);suspendTimers();
       if(foreground?.respectBackgroundSuspension===true&&foreground.controller!==preserveForegroundController){
