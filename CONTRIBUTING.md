@@ -20,7 +20,7 @@ Select additional affected tests as needed. Full regression, coverage, mutation 
 
 If build inputs change, run `node build/build.mjs`, `node build/verify-build.mjs` and the relevant generated-syntax checks in a disposable checkout. Keep QA evidence outside the working tree.
 
-Change first-party code in `source`, `portable` or `rich-text`. Regenerate external bundles through their build scripts, and preserve reviewed dependency notices. `release.config.mjs` is the only release-identity source. The root `LICENSE` mirrors `source/legal/LICENSE.txt`; keep both texts identical when an authorised licence change is made.
+Change first-party code in `source`, `portable` or `rich-text`. Regenerate external bundles through their build scripts, and preserve reviewed dependency notices. `release.config.mjs` is the only release-identity source. A pull request that changes the shipped app (`source`, `portable` or `rich-text`) raises `release` there by one (for example `SDVB75F16` → `SDVB75F17`), once per pull request. The root `LICENSE` mirrors `source/legal/LICENSE.txt`; keep both texts identical when an authorised licence change is made.
 
 ## Automation
 

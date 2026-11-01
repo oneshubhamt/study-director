@@ -1029,7 +1029,7 @@ registry.define('backup-provider',1,input=>{
   // Waiting for another device's upload asks again after 15 seconds, then a
   // minute, then every five minutes, up to the turn window.
   const SYNC_RECHECK_MS=60*1000,SYNC_TURN_WINDOW_MS=15*60*1000,SYNC_TURN_RETRY_DELAYS=freeze([15*1000,60*1000,5*60*1000]),syncByProvider=new Map();
-  function syncState(selected){const id=safeId(selected&&selected.id);let state=syncByProvider.get(id);if(!state){state={checkedAt:0,review:'',password:'',newer:'',catching:false,behind:false,failed:false,syncedAt:'',turnWaits:0};syncByProvider.set(id,state);}return state;}
+  function syncState(selected){const id=safeId(selected&&selected.id);let state=syncByProvider.get(id);if(!state){state={checkedAt:0,review:'',password:'',newer:'',catching:false,behind:false,failed:false,rolledBack:null,syncedAt:'',turnWaits:0};syncByProvider.set(id,state);}return state;}
   function syncView(selected){const state=syncState(selected);return freeze({syncedAt:state.syncedAt,review:!!state.review,password:!!state.password,newer:!!state.newer,failed:!!state.failed,syncing:state.catching});}
   function sharedSyncing(selected){return !!selected?.shared&&!!selected.repository&&!!pendingRetryHooks&&providerConnected(selected);}
   function sharingActive(){return [...providers.values()].some(sharedSyncing);}
@@ -1199,7 +1199,13 @@ registry.define('backup-provider',1,input=>{
         if(['BACKUP_LOCKED','BACKUP_AUTH_FAILED'].includes(String(error?.code||''))){state.password=head.item.id;summary.finish({message:`${selected.label} needs this profile’s backup password.`,outcome:'sync-password'});presentation.notice(selected.id,'sync-password',`Your backup password was set or changed on another device. Enter it to keep syncing with ${selected.label}.`);}
         // A version this build cannot read is not retried: sync waits on it.
         else if(error?.repositoryUnreadable===true||String(error?.code||'')==='BACKUP_ENCRYPTION_UNSUPPORTED'){markUnreadable(selected,head.item.id);summary.finish({message:`${selected.label} has a version this app can’t read.`,outcome:'sync-newer'});waitForNewerVersion(selected,head.item.id);}
-        else{AppDiagnostics.capture('backup-provider.sync-catch-up',error,'warn');state.behind=true;state.failed=true;summary.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'failed'});schedulePendingProviderBackup(selected,nextConvergenceRetryDelay(selected,{sync:true}),{backoff:true,attemptRevision,preserveAutomatic,trigger:'catch-up-failed'});}
+        else{
+          AppDiagnostics.capture('backup-provider.sync-catch-up',error,'warn');state.behind=true;state.failed=true;summary.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'failed'});
+          // A restore that failed and rolled back fails the same way until
+          // Drive or the backoff moves on; its own rollback is not a new edit.
+          const delay=nextConvergenceRetryDelay(selected,{sync:true});state.rolledBack=/^restore-/u.test(String(error?.backupStage||''))?freeze({head:head.item.id,retryAt:Date.now()+delay}):null;
+          schedulePendingProviderBackup(selected,delay,{backoff:true,attemptRevision,preserveAutomatic,trigger:'catch-up-failed'});
+        }
       }
       finally{state.catching=false;notifyStatus();}
     },0);
@@ -1209,7 +1215,7 @@ registry.define('backup-provider',1,input=>{
     const state=syncState(selected);
     if(result&&result.cancelled&&result.reason==='needs-decision'){state.review=headId;summary?.finish({message:`${selected.label} has changes that need your review.`,outcome:'sync-review'});presentation.notice(selected.id,'sync-review',`${selected.label} has changes from another device that need your review.`);}
     else if(result&&result.cancelled){state.behind=true;summary?.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'cancelled'});schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{attemptRevision,preserveAutomatic,trigger:'catch-up-cancelled'});}
-    else{state.review='';state.password='';state.failed=false;state.syncedAt=new Date().toISOString();resetConvergenceRetry(selected);presentation.resolve(selected.id,'sync-review');presentation.resolve(selected.id,'sync-password');summary?.finish({message:`Synced with ${selected.label}.`,outcome:'sync-complete'});if(automaticWaiting(selected))schedulePendingProviderBackup(selected,1000,{trigger:'catch-up-complete'});}
+    else{state.review='';state.password='';state.failed=false;state.rolledBack=null;state.syncedAt=new Date().toISOString();resetConvergenceRetry(selected);presentation.resolve(selected.id,'sync-review');presentation.resolve(selected.id,'sync-password');summary?.finish({message:`Synced with ${selected.label}.`,outcome:'sync-complete'});if(automaticWaiting(selected))schedulePendingProviderBackup(selected,1000,{trigger:'catch-up-complete'});}
   }
   // The person enters the password the newest version needs; the sync then
   // takes that version in and keeps the password for this device.
@@ -1283,10 +1289,12 @@ registry.define('backup-provider',1,input=>{
           const ahead=await sharedAhead(inventory,selected),finish=(status,reason)=>{OperationDiagnostics.mark('background-transition',background.transition('convergence','running',status,{reason,actionable:false}),traceId);OperationDiagnostics.finish({status,reason},traceId);return freeze({status,reason});};
           if(ahead?.unreadable){waitForNewerVersion(selected,ahead.item.id);return finish('idle','needs-update');}
           newerVersionGone(selected);
+          const held=sync.rolledBack;
+          if(ahead&&sync.review!==ahead.item.id&&held&&held.head===ahead.item.id&&!now&&Date.now()+50<held.retryAt){sync.behind=true;job.schedule(held.retryAt-Date.now(),'catch-up-failed','earliest');return finish('deferred','catch-up-failed');}
           if(ahead&&sync.review!==ahead.item.id){scope.release();scope=null;catchUpSharedProvider(selected,ahead,attemptRevision,{preserveAutomatic});return finish('deferred','catching-up');}
           if(ahead)return finish('idle','needs-review');
           if(sync.review){sync.review='';presentation.resolve(selected.id,'sync-review');}
-          sync.failed=false;sync.syncedAt=new Date().toISOString();notifyStatus();
+          sync.failed=false;sync.rolledBack=null;sync.syncedAt=new Date().toISOString();notifyStatus();
           if(!owed&&!automaticNeeded(selected)){resetConvergenceRetry(selected);return finish('completed','in-sync');}
         }
         OperationDiagnostics.mark('convergence-publication-start',{provider:selected.id},traceId);const result=await retryPendingProviderBackup(selected,{signal:scope.signal});{const state=syncState(selected);state.turnWaits=result.reason==='turn'?state.turnWaits+1:0;}OperationDiagnostics.mark('convergence-publication-complete',{provider:selected.id,status:String(result.status||''),maintenancePending:result.maintenancePending===true},traceId);OperationDiagnostics.mark('background-transition',background.transition('convergence','running',result.status==='completed'?'completed':'deferred',{reason:String(result.reason||''),actionable:false}),traceId);OperationDiagnostics.finish({status:String(result.status||'pending'),reason:String(result.reason||''),maintenancePending:result.maintenancePending===true},traceId);

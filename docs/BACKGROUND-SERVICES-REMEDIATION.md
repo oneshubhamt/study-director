@@ -651,6 +651,66 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
 
   Full release browser suite at `c24fc30`: every test passed except `tests/browser/insights/insights-populated-ui.mjs`. It read the Practice trend card's `innerText` while that section was off-screen. A section skipped by `content-visibility:auto` has no rendered text, so the card read as empty (one of its assertions was therefore passing vacuously). To check that objective 4 is a material improvement, I reverted it and measured settled openings at 2.5× slowed CPU, two runs of three samples each. The longest main-thread tasks were 78/0/0 and 69/**103**/76 ms (the full-page layout); with the change they are 0. The change was therefore restored. The test now scrolls the section into view, as a reader would, and settles before reading rendered text. It reads the card before opening its calculation disclosure (which sits inside the card), and asserts the card's text is not empty. `insights-populated-ui` then PASS 2/2 alone; `insights-maximum-import` PASS. The Promotion run is recorded at the next SHA.
 
+### Entry 022 — Drive sync fails at `restore-pending-reviews` and retries every few seconds (2026-11-01)
+
+- **Branch / source HEAD before:** `refactor/background-coordination` at `b573069` (same tree as `main`). The owner reported Copy diagnostics from release `SDVB75F15`. Every `provider-sync` failed at `restore-mutation-pending-reviews-failed · stage=restore-pending-reviews · errorCode=Error`. Each failure rolled back with every verification passing, and the next attempt started about 8 s later (`retryAttempt=8`, `retryBackoffCapped=true`, `keptVersions=0`).
+- **Step 1 — audit and reproduction:**
+  - **Reproduction.** A two-browser probe on the release build (simulated Drive) reproduced the exact failure:
+    1. A and B sync.
+    2. Both edit one note, and B's sync keeps a version for review. B's first-start settings were also kept, as a personal review that reaches A.
+    3. B resolves its kept versions.
+    4. A's next catch-up fails at `restore-pending-reviews` with `errorCode=Error`.
+  - **The thrown message.** Temporary logging, since removed, captured it: `Pending-review reconciliation commit did not match the resolved state for pr_…`. The id was the review A held open and Drive held resolved. For that id, the stored row was the correct resolved review, but the stage's own expected value was `null`.
+  - **Cause 1 — missing limit.** `app.html` hands the Backup module a hand-picked `limits` object. That object has no `maxPendingReviews` (and no `maxNoteLinks`). In `backup.js`, `PendingReviewCodec.merge(lists, undefined)` keeps `Math.max(0, Number(undefined)||0)`, which is 0 resolved reviews. The repository's own merge uses the real limit (2000), so it writes the resolved review while the restore stage expects it gone. The commit check then throws on every sync that brings in or changes a resolved review. Integration tests pass the full limits object, so they never saw the gap. No browser test resolves a kept version on one device and syncs it to another.
+  - **Other effects of the same missing limit:**
+    - `replacePortableCanonicalSnapshot` is used by rollback and by whole-version Replace. With the zero limit it writes the target reviews without any resolved ones, so each failed attempt deleted this device's resolved-review records. Verification compared against the same reduced list and passed.
+    - `replacementSnapshot` drops resolved reviews from the journal merge in the same way.
+    - The "more than N versions would wait" guard compares against `undefined`, so it never fires in `backup.js`. The repository still enforces it.
+    - `maxNoteLinks` is missing too, so `slice(0, undefined)` does not cap the union of two notes' links when combining.
+    - No note, Saved Day, session or settings data was affected. Resolved-review records live on Drive in every checkpoint, so the next successful sync brings them back ("a resolved one wins").
+  - **Cause 2 — the retry loop.** A fake-clock experiment on `backup-provider.js` used a catch-up that always fails after a restore rolls back, with an urgent local change waiting. With the rollback reporting a data change (as it does in the app: the diagnostics show `provider-convergence` starting with `reason=important-change` 0.3 s after each failure), there were **120 attempts in 10 minutes**, one per fixture step. Without that report, attempts came at 0, 10, 45 and 170 s. Why: the rollback's own writes move the canonical revision and call `noteChange`. The backoff therefore treats them as a newer local edit that deserves its own urgent catch-up, which is correct for a network failure but not for a deterministic one. The same Drive version is then downloaded, applied and rolled back again every few seconds.
+- **Step 2 — objectives before edits:**
+  - **E22.1** The Backup module receives `maxPendingReviews` and `maxNoteLinks`, the two limits `backup.js` reads without a fallback.
+  - **E22.2** The Backup module refuses to start when any limit it reads directly is missing or not a positive number, so a gap like this fails at start-up in every test instead of silently in one sync path.
+  - **E22.3** After a catch-up fails *and its restore rolled back* (`backupStage` starting `restore-`), wake-ups for the same Drive version wait for that failure's backoff time, including the rollback's own change report. A newer Drive version, the backoff run itself and an explicit flush still run at once. Network failures keep today's revision-aware behaviour unchanged.
+  - **E22.4** Tests at the right layers:
+    - architecture: every limit `backup.js` reads is wired in `app.html`;
+    - module boot refuses missing limits;
+    - fake clock: a rolled-back failure keeps its backoff, and the existing revision-aware network case still passes;
+    - browser: the user's two-device path, where one device resolves kept versions and the other catches up and keeps the resolved records.
+  - **E22.5** No change to formats, stored records, reconciliation rules or the merge itself.
+  - **Trade-off:** a person's own edit after a rolled-back failure waits for the backoff (30 s, then 2, 10 and 30 minutes) instead of retrying at once. A deterministic failure cannot be fixed by retrying sooner, and the edit is uploaded after the next successful catch-up either way.
+- **Step 3 — implementation:**
+  - `source/app.html`: the Backup runtime's `limits` gains `maxNoteLinks` and `maxPendingReviews`.
+  - `source/core/backup.js`: `REQUIRED_LIMITS` lists every limit the module reads (plus `backupMaxAssetDescriptors`, which it passes to capture). `createRuntime` throws `Backup configuration is missing limits: …` unless each is a positive number.
+  - `source/core/backup-provider.js`:
+    - A catch-up failure whose `backupStage` starts with `restore-` records `rolledBack:{head, retryAt}`, where `retryAt` comes from the same backoff delay it schedules.
+    - Convergence that finds that same head ahead before `retryAt` sets `behind`, schedules the job for `retryAt` (`catch-up-failed`, earliest) and finishes `deferred / catch-up-failed`, unless it is a `flush:` run.
+    - A completed sync clears the record.
+  - Tests:
+    - New `tests/architecture/app/backup-limits-wiring.mjs`.
+    - `sync-shared-base.mjs`: start-up refuses a missing `maxPendingReviews` or `maxNoteLinks`.
+    - `automatic-provider-backup.mjs`: a rolled-back catch-up whose rollback reports a change follows its backoff.
+    - New browser test `tests/browser/backup/sync-kept-reviews.mjs`, registered in `browser-tests.mjs`.
+    - Six backup integration fixtures that built hand-made limits without these keys now pass them. Five of them were themselves running with the zero review limit.
+  - Docs: `docs/ARCHITECTURE.md` (P2 revision-aware retry note).
+- **Step 4 — objectives:**
+  - **E22.1 MET**: both limits are wired. The new architecture test fails on the old `app.html` ("the app wires maxNoteLinks…").
+  - **E22.2 MET**: all six fixtures failed to start until given the limits. The `sync-shared-base` assertions cover both keys.
+  - **E22.3 MET**:
+    - On the fake clock, the rolled-back case went from 120 attempts in 10 minutes to the same 4 retry times as the no-rollback baseline (0, 10, 45, 170 s).
+    - With the gate disabled, the new test fails with an attempt every 10 s.
+    - The existing revision-aware network case still passes.
+    - The "newer Drive version is not held" path is checked by reading the code only: the gate compares `held.head` with the version found ahead. The fixture's simulated Drive did not report a second version as ahead, with or without this change, so that assertion was dropped.
+  - **E22.4 MET**: the browser test passes on the fixed build. On a build with only the two limit fixes reverted, it fails with "A is in step with Drive", the owner's failure.
+  - **E22.5 MET**: no format, record, reconciliation or merge change.
+  - **Left as is:** `managed-repository.js` reads `backupMaxEntryBytes` and `backupMaxUncompressedBytes` with explicit fallbacks (2 MiB and the compressed limit), so it applies tighter bounds than production declares. That is conservative, not a failure, and is out of scope here.
+- **Step 5 — targeted QA (local, Node 22, Chromium 1194):**
+  - Hermetic `fast` category PASS (151, including the new architecture test); `architecture` category PASS (32); suite governance PASS.
+  - `automatic-provider-backup`, `sync-shared-base`, `repository-restore`, `backup-persistence`, `restore-assets`, `repository-checkpoint` and `repository-incremental-preparation` PASS.
+  - After `node build/build.mjs`, browser tests run one at a time: `sync-kept-reviews` PASS (76 s), `sync-and-profiles` PASS, `session-plan-sync` PASS, `restore-session-safety` PASS, `pwa-device-backup` PASS.
+  - Not run: the full browser suite, a real Google Drive account, physical devices. Complete Promotion is requested at the new SHA.
+
 ### Journal template — duplicate this for the next pass
 
 - **Entry NNN — Pass P#, topic / date:**

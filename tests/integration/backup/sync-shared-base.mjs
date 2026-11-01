@@ -30,7 +30,7 @@ const limits=freeze({
   backupChunkItems:10,backupChunkTargetBytes:65536,backupMaxEntryBytes:65536,backupMaxLineBytes:262144,
   backupMaxCompressedBytes:4*1024*1024,backupMaxFileBytes:16*1024*1024,backupMaxUncompressedBytes:8*1024*1024,
   backupMaxAssetDescriptors:100,richAssetMaxBytes:8*1024*1024,maxBackupChunks:1000,importBytes:4*1024*1024,
-  maxImportRecords:100,maxNotes:100,maxLegacyImportTombstones:100,maxImportReflectionDrafts:100,maxReflectionChars:10000,maxPendingReviews:20
+  maxImportRecords:100,maxNotes:100,maxLegacyImportTombstones:100,maxImportReflectionDrafts:100,maxReflectionChars:10000,maxPendingReviews:20,maxNoteLinks:50
 });
 const dataContract=RUNTIME_DATA_CONTRACT;
 const defs=freeze({
@@ -124,7 +124,7 @@ function baseStore(state){
 
 // inertTimers: scheduled engine work never fires, so a test drives every
 // backup itself.
-function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=null,hasLiveTasks=false,fileMode='combine',extrasMode='keep',preflightFailure='',verificationFailure='',inertTimers=false}={}){
+function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=null,hasLiveTasks=false,fileMode='combine',extrasMode='keep',preflightFailure='',verificationFailure='',inertTimers=false,runtimeLimits=limits}={}){
   state.deletions??=[];state.noteDeletions??=[];state.attachmentDeletions??=[];state.reviews??=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
   let injectedFailure=String(preflightFailure||''),verificationFault=String(verificationFailure||'');
   const verifying=()=>state.journal?.state?.phase==='verifying';
@@ -134,7 +134,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
   const presentation=createBackupPresentation();
   presentation.subscribe(()=>{const message=presentation.current('file')?.message||'';if(message&&statuses.at(-1)!==message)statuses.push(message);});
   const runtime=BackupModule.createRuntime(freeze({ports:freeze({
-    configuration:freeze({appVersion:'QA_B3',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits}),
+    configuration:freeze({appVersion:'QA_B3',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits:runtimeLimits}),
     
     persistence:freeze({
       activeSessionLoad:async()=>{if(injectedFailure==='session-read')return {ok:false,value:null,error:new Error('QA_FIXTURE session read failure'),storage:{idb:true}};if(verificationFault==='active-session'&&verifying())return {ok:true,value:null,error:null,storage:{idb:true}};return {ok:true,value:state.activeSession,error:null,storage:{idb:true}};},activeSessionSave:async value=>{events.push('preflight-session-save');if(injectedFailure==='session-save')return {ok:false,value:null,error:new Error('QA_FIXTURE session save failure')};state.activeSession=value;return {ok:true,value};},activeSessionClear:async()=>(state.activeSession=null,{ok:true}),activeSessionSettled:async()=>{if(injectedFailure==='session-settle')throw new Error('QA_FIXTURE session settle failure');return true;},
@@ -186,6 +186,13 @@ const preflightCases=[
   ['session-settle','RESTORE_PREFLIGHT_SESSION_SETTLE_FAILED',true],
   ['session-read','RESTORE_PREFLIGHT_SESSION_READ_FAILED',false]
 ];
+// A limit the module reads but is not given would become 0 or no limit at
+// all (the review merge then kept no resolved reviews, Entry 022): start-up
+// refuses it instead.
+for(const key of ['maxPendingReviews','maxNoteLinks']){
+  const without=freeze(Object.fromEntries(Object.entries(limits).filter(([name])=>name!==key)));
+  assert.throws(()=>createHarness(createState(),{runtimeLimits:without}),new RegExp(`Backup configuration is missing limits: ${key}\\.`,'u'),`the Backup module refuses to start without ${key}`);
+}
 for(const [stage,code,hasLiveTasks] of preflightCases){
   const preflightState=createState();
   if(hasLiveTasks)preflightState.activeSession=session('2026-08-31','PREFLIGHT');

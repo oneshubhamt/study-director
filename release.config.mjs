@@ -1,9 +1,10 @@
-const release='SDVB75F15';
+const release='SDVB75F16';
 const sourceDateEpoch='2026-10-27T00:00:00.000Z';
 const buildDate=sourceDateEpoch.slice(0,10).replaceAll('-','');
 const buildId=`${release.toLowerCase()}-${buildDate}-r1`;
 
-// Increment `release` once for each deployable pass. Derived identities must not
+// Increment `release` by one in each pull request that changes the shipped app
+// (source, portable or rich-text); see AGENTS.md. Derived identities must not
 // duplicate the release number independently.
 export const deploymentDirectoryName=`StudyDirector-${release}-Deployment`;
 
