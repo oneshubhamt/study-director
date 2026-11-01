@@ -92,4 +92,19 @@ files.set('attblob-'+String(999).padStart(20,'b'),new Blob(['later']));
 await assert.rejects(store.collect(async gc=>gc.sweep(),{check:()=>{if(++checks>=5)throw Object.assign(new Error('foreground'),{code:'ASSET_MAINTENANCE_YIELDED'});},maxEntries:8}),/foreground/);
 assert.ok(files.has('attblob-'+String(999).padStart(20,'b')));
 assert.equal((await store.collect(async gc=>gc.sweep(),{maxEntries:8})),1,'the interrupted iterator entry must remain resumable');
+// In-memory mock OPFS iteration can include a new file mid-cycle. Fresh
+// retained sets and protected reader leases must still forbid unsafe deletion.
+{
+ const later='attblob-'+String(700).padStart(20,'b'),more='attblob-'+String(701).padStart(20,'b');
+ files.set(later,new Blob(['orphan']));
+ const first=await store.collect(async gc=>({removed:await gc.sweep(),pending:gc.status().sweepPending}),{maxEntries:1});
+ files.set(more,new Blob(['orphan-created-mid-sweep']));
+ const pin=await store.retain();
+ assert.equal((await store.collect(async gc=>gc.sweep())).reason,'active-editor-or-file-operation');
+ pin();
+ for(let n=0;n<8;n++){const item=await store.collect(async gc=>({removed:await gc.sweep(),pending:gc.status().sweepPending}),{maxEntries:2});if(!item.pending)break;}
+ assert.equal(files.has(metadata.get(B).file),true,'reachable bytes must survive iterator mutation and resume');
+ assert.equal(files.has(later),false);assert.equal(files.has(more),false);
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'asset-storage-bounded-sweep',passes,totalSwept,retainedSource:true,foregroundPreemption:true}));
