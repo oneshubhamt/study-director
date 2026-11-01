@@ -36,4 +36,15 @@ for(const latency of [0,4999,5000,6000,20000]){
  const h=fixture();h.delay(6000);h.files.set(h.name(1),new Blob(['x']));let resume;h.onRead(()=>{resume=h.api.suspend();});
  assert.equal((await h.api.collect()).status,'yielded');assert.equal(h.files.size,1,'foreground arrival during a slow proof read forbids deletion');h.onRead(null);resume();await h.api.collect();assert.equal(h.files.size,0);cases.push('slow proof reads still yield to foreground before deletion');
 }
+{
+ const h=fixture(),first=h.name(31),second=h.name(32);h.files.set(first,new Blob(['orphan']));h.files.set(second,new Blob(['pinned-after-first-sweep']));
+ let protectedReads=0;
+ h.onRead(()=>{protectedReads++;if(protectedReads===2)h.keep.add(second);});
+ const result=await h.api.collect();
+ assert.equal(result.status,'completed');
+ assert.equal(protectedReads,2,'journal/retention metadata must be re-read under each candidate lock');
+ assert.equal(h.files.has(first),false);
+ assert.equal(h.files.has(second),true,'new journal pin between candidate reads must prevent deletion');
+ cases.push('mid-pass journal pin is revalidated for each deletion');
+}
 console.log(JSON.stringify({status:'PASS',suite:'scratch-gc',cases},null,2));
