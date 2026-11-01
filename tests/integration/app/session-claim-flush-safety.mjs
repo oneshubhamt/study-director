@@ -62,7 +62,7 @@ const good=()=>loaded({...session,revision:5});
   const t=harness();t.loads.push(loaded(session),good());t.saves.push(saved);
   assert.equal(await t.check(),true);
   assert.equal(t.calls.stops,1);
-  assert.equal(t.calls.snapshots.length,1);
+  assert.equal(t.calls.snapshots.length,2,'initial capture and current non-timing projection');
   assert.equal(t.calls.writes.length,1);
   assert.equal(t.calls.writes[0].snapshot.timerRuntime,t.calls.snapshots[0].timerRuntime);
   assert.equal(t.calls.captureEvidenceArgs[1],t.calls.evidences[0]);
