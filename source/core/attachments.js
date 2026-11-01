@@ -75,8 +75,8 @@ registry.define('attachments',1,()=>{
     }
 
     async function sources(options={}){
-      const includeLive=options.includeLive!==false,priority=options.priority==='background'?'background':'user-visible',sources=new Map(),budget=background.budget();
-      const add=(kind,key,label,value)=>{if(!key)return;const identity=kind+':'+key;sources.set(identity,descriptor(kind,key,label,value));};
+      const includeLive=options.includeLive!==false,priority=options.priority==='background'?'background':'user-visible',referencesOnly=options.referencesOnly===true,sources=new Map(),references=referencesOnly?new Set():null,budget=background.budget();
+      const add=(kind,key,label,value)=>{if(!key)return;if(references){for(const id of scan(value).assetIds||[])references.add(id);return;}const identity=kind+':'+key;sources.set(identity,descriptor(kind,key,label,value));};
       for(const [key,note] of Object.entries(await data.notes.readFreshPayload()||{})){add('note',key,note.label||key,note.text);if(budget())await background.yieldTask({priority});}
       // Verification and reference removal require a complete canonical inventory.
       for(const day of await data.dailyRecords.list({strict:true})||[]){add('day',day.date,'Reflection · '+day.date,day.reflection);if(budget())await background.yieldTask({priority});}
@@ -91,11 +91,12 @@ registry.define('attachments',1,()=>{
           const key=diary?field.dataset.diaryDate:reflection?String(session?.id||'current'):live.noteKey(field.dataset.areaKey);
           if(!key)continue;
           const kind=diary?'day':reflection?'session':'note',label=diary?'Diary edit · '+key:reflection?'Reflection · '+reviewDate:key;
+          if(references){add(kind,key,label,field.value);continue;}
           const identity=kind+':'+key,current=descriptor(kind,key,label,field.value),prior=sources.get(identity);
           if(prior){const ids=new Set([...prior.ids,...current.ids]);sources.set(identity,Object.freeze({...current,ids}));}else sources.set(identity,current);
         }
       }
-      return [...sources.values()];
+      return references||[...sources.values()];
     }
     async function restore(snapshot){
       if(!snapshot)return true;
