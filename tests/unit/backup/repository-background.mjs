@@ -302,4 +302,81 @@ for(const elapsed of [19999,20000,20001,180000]){
   stop();const again=await bg.beginBackground('maintenance');again.release();assert.equal(seen.length,1,'an unsubscribed listener is not told');
   assert.throws(()=>bg.onRelease(null),/listener is invalid/u);
 }
+// The browser timeout clock is monotonic, while repository deadlines use
+// civil time. Simulate clock jumps without pretending setTimeout moves too.
+function jumpingClock(start=Date.parse('2026-09-26T00:00:00.000Z')){
+  let wall=start,elapsed=0,next=0;const timers=new Map();
+  const setTimeout=(callback,delay)=>{const id=++next;timers.set(id,{callback,at:elapsed+Math.max(0,Number(delay)||0)});return id;};
+  const clearTimeout=id=>timers.delete(id);
+  const flush=async()=>{for(let n=0;n<30;n++)await Promise.resolve();};
+  async function advance(ms){
+    const end=elapsed+ms;
+    for(;;){
+      const due=[...timers.entries()].filter(([,entry])=>entry.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];
+      if(!due)break;
+      wall+=due[1].at-elapsed;elapsed=due[1].at;timers.delete(due[0]);due[1].callback();await flush();
+    }
+    wall+=end-elapsed;elapsed=end;await flush();
+  }
+  return freeze({now:()=>wall,setTimeout,clearTimeout,advance,shiftWall:delta=>{wall+=delta;},pending:()=>[...timers.values()].map(entry=>entry.at-elapsed).sort((a,b)=>a-b)});
+}
+{
+  const fake=jumpingClock(),bg=coordinator(fake);let runs=0;
+  bg.schedule('maintenance',1000,()=>{runs++;});
+  fake.shiftWall(-800);
+  await fake.advance(1000);
+  assert.equal(runs,0,'backward clock jump must not execute before the absolute due date');
+  assert.deepEqual(fake.pending(),[800],'callback is rearmed for remaining civil-time eligibility');
+  await fake.advance(800);
+  assert.equal(runs,1);assert.deepEqual(fake.pending(),[]);
+}
+{
+  const fake=jumpingClock(),bg=coordinator(fake);let runs=0;
+  bg.schedule('integrity',60000,()=>{runs++;});
+  fake.shiftWall(65000);bg.wake('pageshow',false);await fake.advance(0);
+  assert.equal(runs,1,'eligibility wake must recheck a past absolute deadline after a forward jump');
+  assert.deepEqual(fake.pending(),[]);
+}
+{
+  const fake=jumpingClock(),bg=coordinator(fake);let runs=0;
+  bg.schedule('maintenance',1000,()=>{runs++;});
+  const foreground=bg.beginForeground();fake.shiftWall(5000);bg.wake('suspended',false);
+  await fake.advance(2000);assert.equal(runs,0,'foreground protection takes precedence over overdue clock deadline');
+  foreground.release();await fake.advance(0);assert.equal(runs,1,'real foreground release resumes overdue work');
+}
+// A priority denial is not an error or a durable publication deferral.
+// A job can retry after the actual competing slot clears, not 15s/10m later.
+{
+  const fake=clock(),bg=coordinator(fake),high=await bg.beginBackground('convergence');
+  let stored=freeze({requestedAt:new Date(fake.now()).toISOString(),nextEligibleAt:new Date(fake.now()).toISOString(),reason:'repository-state'}),runs=0;
+  const intent=bg.maintenanceIntent(freeze({scope:()=>'slot-test',capture:()=>{},read:async()=>stored,mark:async value=>{stored=freeze({...stored,...value});return true;},clear:async()=>{stored=null;return true;},selectRetention:()=>freeze({remove:freeze([])})}));
+  const maintenance=bg.createMaintenanceScheduler(freeze({intent,budgetMs:1000,budgetCode:'TEST_BUDGET',budgetMessage:'budget',preemptCode:'TEST_PREEMPT',preemptMessage:'preempt',capture:()=>{},isAvailable:()=>true,isBusy:()=>false,execute:async()=>{runs++;return freeze({gcPending:false});},report:()=>{}}));
+  const result=await maintenance.run('blocked-by-convergence');
+  assert.equal(result.reason,'background-busy');assert.equal(runs,0);
+  assert.equal(fake.pending()[0],module.maintenance.busyMs);
+  high.release();
+  assert.equal(fake.pending()[0],1000,'actual slot release shortens only the transient contention retry');
+  await fake.advance(1000);for(let n=0;n<80;n++)await Promise.resolve();
+  assert.equal(runs,1);assert.equal(stored,null);
+  assert.equal(fake.pending().length,0,'no repeated busy spin after job completes');
+}
+{
+  const fake=clock(),bg=coordinator(fake),higher=await bg.beginBackground('maintenance');let runs=0;
+  const integrity=bg.createIntegrityScheduler(freeze({budgetMs:1000,budgetCode:'TEST_BUDGET',budgetMessage:'budget',preemptCode:'TEST_PREEMPT',preemptMessage:'preempt',capture:()=>{},isAvailable:()=>true,isUnsafe:()=>false,readTarget:async()=>({}),writeResult:async()=>{},yieldTask:async()=>{},execute:async()=>{runs++;return freeze({status:'completed',complete:true});}}));
+  const result=await integrity.run('blocked-by-maintenance');
+  assert.equal(result.reason,'busy');assert.equal(runs,0);assert.equal(fake.pending()[0],module.integrity.retryMs);
+  higher.release();assert.equal(fake.pending()[0],1000,'release does not retain the 10-minute missed-slot penalty');
+  await fake.advance(1000);for(let n=0;n<80;n++)await Promise.resolve();
+  assert.equal(runs,1);assert.equal(fake.pending()[0],module.integrity.intervalMs);
+}
+{
+  const fake=clock(),bg=coordinator(fake);let stored=freeze({requestedAt:new Date(fake.now()).toISOString(),nextEligibleAt:new Date(fake.now()+module.maintenance.contentionMs).toISOString(),reason:'publication-contention'}),runs=0;
+  const intent=bg.maintenanceIntent(freeze({scope:()=>'retained-deadline',capture:()=>{},read:async()=>stored,mark:async()=>{assert.fail('deferred pending intent must not be rewritten');},clear:async()=>{stored=null;return true;},selectRetention:()=>freeze({remove:freeze([])})}));
+  const maintenance=bg.createMaintenanceScheduler(freeze({intent,budgetMs:1000,budgetCode:'TEST_BUDGET',budgetMessage:'budget',preemptCode:'TEST_PREEMPT',preemptMessage:'preempt',capture:()=>{},isAvailable:()=>true,isBusy:()=>false,execute:async()=>{runs++;return freeze({gcPending:false});},report:()=>{}}));
+  const held=await bg.beginBackground('convergence');
+  const result=await maintenance.run('durable-defer');
+  assert.equal(result.reason,'publication-contention');
+  held.release();assert.equal(fake.pending()[0],module.maintenance.contentionMs,'durable publication backoff is never pulled forward by unrelated releases');
+  await fake.advance(1000);assert.equal(runs,0);
+}
 console.log(JSON.stringify({status:'PASS',suite:'repository-background',sharedPolicy:true,priority:true,foregroundPreemption:true,suspensionSettlement:true,durableIntent:true,maintenanceLifecycle:true,triggerAttribution:true,integrityRecurrence:true,integrityStateFailureRetry:true},null,2));
