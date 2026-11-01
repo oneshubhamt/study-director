@@ -2766,8 +2766,29 @@ function uploadSoonAfterPlanApply(result){
 // verified full checkpoint arrives and ordinary reconciliation preserves it.
 const SESSION_WATCH_MS=2*60*1000,SESSION_CLAIM_WATCH_MS=15*1000,SESSION_CLAIM_SYNC_RETRY_MS=30*1000;
 let sessionWatchTimer=null,sessionClaimWatchTimer=null,sessionClaimCheckActive=false;
+const SESSION_CLAIM_SAVE_WARNING='The session moved to another device, but the latest local progress has not been verified in browser storage. Keep this tab open; saving will retry. Do not clear its data.';
+async function verifyFrozenSessionClaim(){
+  const frozen=sessionClaimFreeze;
+  try{
+    if(!frozen?.snapshot)throw new Error('The frozen Active Session snapshot is unavailable.');
+    const saved=await writeActiveSessionNow(frozen.snapshot,{emergency:true,strictDurability:true});
+    if(!saved?.ok||saved.storage?.idb!==true||!saved.value)throw saved?.error||new Error('The Active Session was not committed to canonical browser storage.');
+    const loaded=await AppData.activeSession.load(0,{strict:true});
+    if(!loaded?.ok||loaded.error||loaded.storage?.idb!==true||!loaded.value||Number(loaded.value.revision)!==Number(saved.value.revision))throw new Error('The transferred Active Session did not pass the strict local read-back.');
+    if(sessionClaimFreeze!==frozen)return false;
+    sessionClaimFreeze=Object.freeze({...frozen,localVerified:true});
+    if(sessionSafetyMessage===SESSION_CLAIM_SAVE_WARNING)clearSessionSafetyMessage(SESSION_CLAIM_SAVE_WARNING);
+    return true;
+  }catch(error){
+    AppDiagnostics.capture('session.claim-flush',error,'warn');
+    markStorageHealthError('activeSession',SESSION_CLAIM_SAVE_WARNING);
+    sessionSafetyMessage=SESSION_CLAIM_SAVE_WARNING;refreshStorageFallbackWarning();
+    setPlanStatus('CRITICAL: Session handoff is waiting for a verified local save. Keep this tab open.',false);
+    return false;
+  }
+}
 function resumeAfterReleasedSessionClaim(session){
-  if(!sessionClaimFreeze||!session||session.runningOn!==InstallationIdentity.getId()||!TASKS.length)return false;
+  if(!sessionClaimFreeze?.localVerified||!session||session.runningOn!==InstallationIdentity.getId()||!TASKS.length)return false;
   const frozenSinceMs=sessionClaimFreeze.frozenSinceMs;sessionClaimFreeze=null;
   try{TimerEngine.resumeAfterPrimaryRestore({frozenSinceMs});setPlanStatus('✓ Session ownership remains on this device.');return true;}
   catch(error){AppDiagnostics.capture('session.claim-resume',error,'warn');return false;}
@@ -2784,9 +2805,19 @@ async function checkSessionOwnershipClaim(){
     if(remote&&mine&&TASKS.length){
       const now=DecisionClock.nowMs(),same=sessionClaimFreeze&&sessionClaimFreeze.epoch===claim.epoch;
       if(!same){
-        try{await flushLiveDraft();}catch(error){AppDiagnostics.capture('session.claim-flush',error,'warn');}
+        // Stop duplicate execution before awaiting a potentially slow/failed disk write.
         const frozenSinceMs=DecisionClock.nowMs();TimerEngine.stopExecution();
-        sessionClaimFreeze=Object.freeze({epoch:claim.epoch,frozenSinceMs,lastSyncAt:0});
+        let snapshot=null;
+        try{markDayContentChanged();snapshot=captureSessionSnapshot();}
+        catch(error){AppDiagnostics.capture('session.claim-snapshot',error,'warn');}
+        cancelPendingLiveDraftSave();
+        sessionClaimFreeze=Object.freeze({epoch:claim.epoch,frozenSinceMs,lastSyncAt:0,localVerified:false,snapshot});
+      }
+      // A local emergency envelope is useful for recovery, but the managed
+      // reconciliation preflight requires a strict canonical commit and read-back.
+      // Retry the same frozen evidence; never add time spent waiting to study time.
+      if(!sessionClaimFreeze.localVerified){
+        if(!await verifyFrozenSessionClaim())return true;
         setPlanStatus('Today’s session moved to another device. Syncing its latest state…');
       }
       const current=sessionClaimFreeze;
@@ -2797,8 +2828,9 @@ async function checkSessionOwnershipClaim(){
       return true;
     }
     if(sessionClaimFreeze){
-      if(mine&&claim?.state==='owned'&&claim.ownedHere&&claim.applies)return resumeAfterReleasedSessionClaim(session);
       if(!mine||!TASKS.length){sessionClaimFreeze=null;return false;}
+      if(!sessionClaimFreeze.localVerified&&!await verifyFrozenSessionClaim())return true;
+      if(claim?.state==='owned'&&claim.ownedHere&&claim.applies)return resumeAfterReleasedSessionClaim(session);
       const now=DecisionClock.nowMs(),current=sessionClaimFreeze;
       if(!current.lastSyncAt||now-current.lastSyncAt>=SESSION_CLAIM_SYNC_RETRY_MS){
         sessionClaimFreeze=Object.freeze({...current,lastSyncAt:now});
