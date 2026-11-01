@@ -157,6 +157,21 @@ await test('gesture regrant cannot be undone by an earlier permission refresh',a
   assert.equal(folder.requests,1,'no background prompt was added');
 });
 
+await test('a provider authorization cannot be overturned by a prior passive refresh',async()=>{
+  const w=world(),folder=w.directory({permission:'prompt'});w.store(folder);await w.controller.install();
+  let completeOld,checks=0;folder.queryPermission=()=>{
+    checks++;
+    return checks===1?new Promise(resolve=>{completeOld=resolve;}):Promise.resolve('prompt');
+  };
+  const old=w.controller.refreshPermission(),authorized=w.providerConfiguration().authorize();
+  await authorized;
+  assert.equal(folder.requests,1,'only explicit authorization requests folder access');
+  completeOld('denied');await old;
+  assert.equal(w.controller.status().permission,'granted');
+  assert.equal(w.controller.status().stalePermissionResponses,1);
+  assert.equal(w.controller.status().connected,true);
+});
+
 await test('disconnect and folder replacement invalidate an outstanding permission read',async()=>{
   const w=world(),oldFolder=w.directory();w.store(oldFolder);await w.controller.install();await w.settle();
   let completeOld;oldFolder.queryPermission=()=>new Promise(resolve=>{completeOld=resolve;});
