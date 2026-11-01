@@ -100,4 +100,78 @@ for(const failure of ['read','write']){
   assert.equal(clock.nextAt(),clock.now()+2000,'a newly requested earlier deadline must pull verification forward');
 }
 
+// The integrity path needs only attachment IDs. It must scan the same
+// complete, strict canonical sources as the interactive descriptor path.
+vm.runInContext(fs.readFileSync('source/core/attachments.js','utf8'),context,{filename:'source/core/attachments.js'});
+const Attachments=context[Symbol.for('studyDirector.internalModules.v1')].require('attachments',1);
+{
+ const refs=Array.from({length:13},(_,i)=>'att-'+String(i).padStart(32,'a'));
+ let reads=0,days=0,sessionReads=0,yields=0,scanCalls=0,bad=false;
+ const notes=Object.fromEntries(Array.from({length:1000},(_,i)=>['note-'+i,{label:'Note '+i,text:i===999&&bad?'UNTRUSTED':'text '+refs[i%refs.length]}]));
+ const records=Array.from({length:1000},(_,i)=>({date:'2026-10-'+String(i+1).padStart(4,'0'),reflection:'diary '+refs[(i+3)%refs.length]}));
+ const data={
+  notes:{readFreshPayload:async()=>{reads++;return notes;}},
+  dailyRecords:{list:async options=>{assert.equal(options.strict,true);days++;return records;}},
+  activeSession:{load:async(_,opts)=>{assert.equal(opts.strict,true);sessionReads++;return {ok:true,value:{id:'session',date:'2026-10-01',snapshot:{review:{reflection:refs[12]}}}};}}
+ };
+ const port=Attachments.createReferenceCoordinator({
+  data,scan:text=>{scanCalls++;return {trusted:!String(text).includes('UNTRUSTED'),assetIds:refs.filter(id=>String(text).includes(id)),occurrences:[]};},
+  rewriteReferences:async()=>{},withPersistenceSuppressed:fn=>fn(),review:{hydrate:()=>{},invalidateBindings:()=>{}},
+  background:{budget:()=>()=>true,yieldTask:async()=>{yields++;}},
+  live:{fields:()=>[],reviewDate:()=>'',todayIso:()=>'',noteKey:x=>x}
+ });
+ const compact=await port.sources({includeLive:false,priority:'background',referencesOnly:true});
+ assert.ok(compact instanceof Set);assert.deepEqual([...compact].sort(),refs.slice().sort());
+ assert.equal(reads,1);assert.equal(days,1);assert.equal(sessionReads,1);
+ assert.ok(yields>=2000,'large inventory yields between descriptors rather than one long synchronous walk');
+ const normal=await port.sources({includeLive:false,priority:'background'});
+ assert.ok(Array.isArray(normal));assert.equal(normal.length,2001);
+ assert.deepEqual([...new Set(normal.flatMap(row=>[...row.ids]))].sort(),[...compact].sort());
+ assert.equal(reads,2);assert.equal(days,2);assert.equal(sessionReads,2,'compact mode never duplicates strict whole-source reads');
+ assert.ok(scanCalls>=4000);
+ notes['note-999'].text='UNTRUSTED';bad=true;
+ await assert.rejects(()=>port.sources({includeLive:false,priority:'background',referencesOnly:true}),/could not be verified/);
+ await assert.rejects(()=>port.sources({includeLive:false,priority:'background'}),/could not be verified/);
+}
+// The GC's unresolved-key count replaces a repeated keys.every() traversal.
+// Durable source-revision and untrusted-text checks remain the deletion gate.
+vm.runInContext(fs.readFileSync('source/core/operation-lifecycle.js','utf8'),context,{filename:'source/core/operation-lifecycle.js'});
+vm.runInContext(fs.readFileSync('source/core/asset-maintenance.js','utf8'),context,{filename:'source/core/asset-maintenance.js'});
+const Lifecycle=context[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1),Maintenance=context[Symbol.for('studyDirector.internalModules.v1')].require('asset-maintenance',1,Object.freeze({lifecycle:Lifecycle}));
+function gcFixture(size,{untrusted=false}={}){
+ let currentRevision=1,notesRead=0,removed=0,scanned=0,daysRead=0,activeRead=0,callbacks=[],seq=0;
+ const ids=Array.from({length:size},(_,i)=>'asset-'+String(i).padStart(6,'0'));
+ const notes=Object.fromEntries(ids.map((id,i)=>[id,{text:untrusted&&i===0?'INVALID':'ref '+id}]));
+ const ports={
+  canMutate:()=>true,mutationActive:()=>false,
+  collect:async(operation)=>operation({keys:async()=>ids,removeMany:async collection=>{removed+=collection.length;return collection.length;},sweep:async()=>0,status:()=>({sweepPending:false})}),
+  readRestoreJournal:async()=>null,readLibraryClearJournal:async()=>null,liveFields:()=>[],
+  getReferenceRevision:()=>currentRevision,getDatasetRevision:async()=>String(currentRevision),
+  scanReferences:text=>{scanned++;return {trusted:!text.includes('INVALID'),assetIds:ids.filter(id=>text.includes(id))};},
+  readNotes:async()=>{notesRead++;return notes;},loadActiveSession:async()=>{activeRead++;return {ok:true,value:null};},
+  listDailyRecords:async()=>{daysRead++;return [];},readPendingReviewTexts:async()=>[],
+  budget:()=>()=>false,yieldTask:async()=>{},invalidate:()=>{},captureError:error=>{throw error;},
+  setTimeout:(cb,ms)=>{callbacks.push({id:++seq,cb,ms});return seq;},clearTimeout:id=>{callbacks=callbacks.filter(row=>row.id!==id);},
+  now:()=>1000
+ };
+ const runner=Maintenance.create(ports,{lease:{protect:()=>{},release:()=>{},isProtected:()=>false},batchSize:128});
+ return {runner,ids,notes,setRevision:v=>{currentRevision=v;},stats:()=>({notesRead,daysRead,activeRead,removed,scanned}),callbacks:()=>callbacks};
+}
+for(const size of [0,1,128,129,1001]){
+ const f=gcFixture(size);
+ let result;
+ for(let n=0;n<20;n++){
+  result=await f.runner.run();if(['completed','clean'].includes(result.status))break;
+  assert.equal(result.status,'yielded','large inventory must remain resumable');
+ }
+ assert.ok(['completed','clean'].includes(result.status),'all referenced keys eventually complete at '+size);
+ assert.equal(f.stats().removed,0);
+ assert.ok(f.stats().scanned<=size+1,'reference scan is linear rather than repeatedly scanning keys');
+ if(size>=129)assert.ok(f.stats().notesRead<=2,'large text source stays resumable between bounded phases');
+}
+{
+ const f=gcFixture(129,{untrusted:true}),result=await f.runner.run();
+ assert.equal(result.reason,'uncertain-rich-text');assert.equal(f.stats().removed,0,'unknown text cannot authorize a deletion');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'attachment-integrity-audit',checked:result.checked,issues:result.issues.map(issue=>issue.kind),yieldCalls,unavailableIsNotCorruption:true,failedMetadataPreservesFindings:true},null,2));
