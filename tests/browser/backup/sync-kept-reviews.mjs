@@ -43,11 +43,20 @@ try{
   // The profile indicator shows the review as a yellow badge on every screen size.
   await waitFor(()=>b.evaluate(`['profile-tag','profile-badge'].every(id=>document.getElementById(id).dataset.badge==='review')`),{label:'B shows the review badge',timeout:20000});
   assert.match(await b.evaluate(`document.getElementById('profile-badge').getAttribute('aria-label')`),/kept versions? to review/u,'the phone circle names what waits for review');
+  // It pops up once when it first appears (phase 4), with Review.
+  const keptToast=`[...document.querySelectorAll('#sd-toast-region .interaction-toast')].filter(node=>node.textContent.includes('Kept for review')).map(node=>({text:node.textContent,review:[...node.querySelectorAll('button')].some(button=>button.textContent==='Review')}))`;
+  await waitFor(async()=>(await b.evaluate(keptToast)).length===1,{label:'B pops up the kept version',timeout:20000});
+  assert.equal((await b.evaluate(keptToast))[0].review,true,'the pop-up offers Review');
+  const firstDelivery=await b.evaluate(`__PWA6.NoticeCoordinator.readEvent('sync','kept-new')?.deliveryId`);
+
+  await waitFor(async()=>!await waiting(b),{label:'B settles after its catch-up',timeout:120000});
+  assert.equal(await b.evaluate(`__PWA6.NoticeCoordinator.readEvent('sync','kept-new')?.deliveryId`),firstDelivery,'later refreshes do not pop it up again');
 
   // B resolves what it kept and uploads the resolution.
   const beforeB=uploadsBy('B');
   await b.evaluate(`(async()=>{await __PWA6.AppData.pendingReviews.resolve(${JSON.stringify(kept.map(review=>review.id))});await __PWA6.BackupProviderRuntime.flushAutomatic('app-hidden');})()`);
   await waitFor(async()=>uploadsBy('B')>beforeB&&!await waiting(b),{label:'B uploads the resolution',timeout:120000});
+  await waitFor(()=>b.evaluate(`!__PWA6.NoticeCoordinator.readEvent('sync','kept-new')`),{label:'B clears the pop-up once nothing is kept',timeout:20000});
 
   // A takes in the resolved reviews: one it already holds open is resolved
   // too, and the catch-up completes rather than rolling back.

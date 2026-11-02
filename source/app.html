@@ -2470,10 +2470,13 @@ function buildLiveTimeline(){
   return chronologicalRows(rows);
 }
 /* RUNTIME STATE · PRIVATE TIMER CONTROLLER */
+// While the study timer runs here, pop-ups that block nothing wait until it
+// stops (docs/STATUS-SYSTEM.md, noise rules).
+function syncStudyQuiet(){try{NoticeCoordinator.setStudying(TimerState.mode===TIMER_MODES.RUNNING);}catch(error){AppDiagnostics.capture('notifications.study-hold',error,'warn');}}
 const TimerState=TimerStateModule.createStateController(Object.freeze({
   helpers:Object.freeze({makeTaskId}),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
-  effects:Object.freeze({modeChanged:()=>{updateExecutePanels();void NativeCapabilities?.syncWake();}})
+  effects:Object.freeze({modeChanged:()=>{updateExecutePanels();void NativeCapabilities?.syncWake();syncStudyQuiet();}})
 }));
 const {
   session:SessionState, tasks:TASKS, modes:TIMER_MODES, taskIdentity:TaskIdentity, setMode:setTimerMode
@@ -2577,7 +2580,7 @@ let sessionPanelMode='none',sessionPanelSession=null;
 let sessionSafetyMessage='';
 // The profile indicator's state (renderSyncStatus); declared early because
 // storage health asks for a redraw during start-up.
-let backupNudgeMessage='',driveConnecting=false,syncStatusTimer=null,syncStatusRing='',syncStatusSettle=null,sessionHandoff={step:'',error:''},driveConnectCard=null,driveConnectCardHide=null;
+let backupNudgeMessage='',driveConnecting=false,syncStatusTimer=null,syncStatusRing='',syncStatusSettle=null,sessionHandoff={step:'',error:''},driveConnectCard=null,driveConnectCardHide=null,sessionYieldedAt=0;
 let backupNudgeCheckedAt=0;
 let backupNudgeNotifiedDate='';
 let saveReminderDate='';
@@ -5260,6 +5263,8 @@ function sessionHandoffProblem(error){
 async function continueSessionHere(){
   if(!appCanMutate()||sessionHandoff.step)return false;
   let previous=null;
+  // The "Today’s session is ready" pop-up has done its job.
+  NoticeCoordinator.resolveEvent('session','session-handoff');
   setSessionHandoff('Checking today’s session…');
   try{
     const loaded=await AppData.activeSession.load(),session=loaded&&loaded.value||null;
@@ -5280,6 +5285,13 @@ async function continueSessionHere(){
     return false;
   }finally{if(sessionHandoff.step)setSessionHandoff('',sessionHandoff.error);}
 }
+// From a pop-up or the profile panel: open Execute first, where the card
+// shows each Continue Here step.
+async function continueSessionOnExecute(source){
+  if(sessionHandoff.step)return false;
+  await goTab('execute',{source});
+  return continueSessionHere();
+}
 // Another device continued today's session after this one changed it: the
 // timer stops here and this device's progress stays as a suspended session,
 // so the review can offer both.
@@ -5296,6 +5308,7 @@ async function yieldSessionToOtherDevice(){
     updateExecutePanels();
     return true;
   });
+  sessionYieldedAt=Date.now();
   Interactions.notify({source:'session',key:'session-yield',title:'Session continued on another device',message:'The timer here stopped. What this device recorded is kept for you under Needs review.'});
   return true;
 }
@@ -6159,7 +6172,9 @@ function syncStatusInput(){
     storage:storage.map(issue=>({source:issue.source,label:issue.label,message:issue.message,level:issue.level})),
     reminder:backupNudgeMessage,
     updateReady:!!(pwaLatestUpdateState?.updateReady&&!pwaLatestUpdateState.applying),
-    sessionElsewhere:sessionPanelMode==='elsewhere'&&sessionPanelSession?sessionDevice(sessionPanelSession):''
+    sessionElsewhere:sessionPanelMode==='elsewhere'&&sessionPanelSession?sessionDevice(sessionPanelSession):'',
+    sessionReady:sessionParkedHere()&&sessionFromElsewhere(sessionPanelSession)?sessionDevice(sessionPanelSession):'',
+    operation:driveRunningOperation()
   };
 }
 function drawStatusHost(host,model){
@@ -6223,6 +6238,7 @@ async function syncStatusAction(ev){
       case 'review-kept':return await KeptVersions.review();
       case 'device-permission':return await connectDeviceBackupWithRecovery();
       case 'open-execute':return await goTab('execute',{source:'sync-status'});
+      case 'continue-session':return await continueSessionOnExecute('sync-status');
       case 'open-data':if(!await goTab('library',{source:'sync-status'}))return false;LibraryView.showSection('data');return true;
       default:return false;
     }
@@ -6384,7 +6400,7 @@ function startDriveConnectCard(){
   driveConnectCard={startedAt:Date.now(),phase:'signing-in',error:'',seen:{sync:false,upload:false},kept:KeptVersions.count(),lastStatus:''};
 }
 function endDriveConnectCard(){clearTimeout(driveConnectCardHide);driveConnectCardHide=null;driveConnectCard=null;renderDriveConnectCard();}
-function driveConnectOperation(){
+function driveRunningOperation(){
   for(const [id,kind] of [['external-sync','sync'],['backup-operation',''],['external-backup','upload']]){
     const event=BackupPresentation.read('google-drive',id);
     if(event&&event.lifecycle==='running')return {kind:kind||(event.kind==='sync'?'sync':'upload'),message:String(event.message||''),progress:event.progress||null};
@@ -6397,7 +6413,7 @@ function renderDriveConnectCard(){
   if(!state){root.hidden=true;return;}
   let model;
   try{
-    const drive=BackupProviderRuntime.locationStatus('google-drive'),operation=driveConnectOperation();
+    const drive=BackupProviderRuntime.locationStatus('google-drive'),operation=driveRunningOperation();
     if(drive?.sync?.syncing||operation?.kind==='sync')state.seen.sync=true;
     if(operation?.kind==='upload'&&['upload','commit','complete'].includes(String(operation.progress?.stage||'')))state.seen.upload=true;
     model=BackupPresentation.connectProgress({phase:state.phase,error:state.error,startedAt:state.startedAt,online:navigator.onLine!==false,drive,operation,seen:state.seen,keptNew:Math.max(0,KeptVersions.count()-state.kept)});
@@ -9232,15 +9248,30 @@ const LibraryClearCoordinator=LibraryClearModule.createCoordinator(Object.freeze
 // count shows in Library → Data and the sidebar; a note with one carries a
 // quiet "Needs review" mark. Reviewing never opens by itself.
 const KeptVersions=(()=>{
-  let count=0,notes=new Set(),generation=0;
+  let count=0,notes=new Set(),generation=0,seen=null;
   async function refresh(){
     const token=++generation;let open;
     try{open=(await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt);}catch(error){AppDiagnostics.capture('kept-versions.refresh',error,'warn');return false;}
     if(token!==generation)return false;
     const next=new Set(open.filter(review=>review.subject==='note').map(review=>review.ref)),notesChanged=[...next].sort().join('|')!==[...notes].sort().join('|');
+    // Kept versions pop up once, when they first appear; those already here
+    // at start-up do not.
+    const fresh=seen?open.filter(review=>!seen.has(review.id)):[];
+    seen=new Set([...(seen||[]),...open.map(review=>review.id)]);
     count=open.length;notes=next;renderKeptVersions();renderDriveBackup();
     if(notesChanged)LibraryView.refreshNotes();
+    if(!count)NoticeCoordinator.resolveEvent('sync','kept-new');
+    else if(fresh.length)announce(fresh);
     return true;
+  }
+  function announce(fresh){
+    // The Connect card reports what its sync kept, and the pop-up for a
+    // session that moved to another device says this device's was kept.
+    if(driveConnectCard)return;
+    if(Date.now()-sessionYieldedAt<60000&&fresh.every(review=>review.subject==='session'))return;
+    Interactions.notify({source:'sync',key:'kept-new',kind:'warning',duration:12000,waitWhileStudying:true,title:'Kept for review',
+      message:`${count===1?'One version was':`${count} versions were`} kept where two devices changed the same thing. Nothing is lost; choose what to keep when you’re ready.`,
+      action:{label:'Review',run:()=>void review()}});
   }
   async function review(ref=''){
     try{
@@ -9577,7 +9608,7 @@ async function restoreSessionStateThroughLifecycle(importedSession,scheduleText=
         const input=document.getElementById('plan-input');if(input)input.value=session.scheduleText;
         void PlanData.writeDraft(session.scheduleText);
         PlanDraftEditor.preview({silent:true,enterDraft:true});setSessionPanelMode('suspended',session);
-        if(sessionFromElsewhere(session)&&isSuspendedActiveSession(session))Interactions.notify({source:'session',key:'session-handoff',title:'Today’s session is ready',message:'It was suspended on another device. Continue it here when you are ready.',action:{label:'Continue here',run:()=>void continueSessionHere()}});
+        if(sessionFromElsewhere(session)&&isSuspendedActiveSession(session))Interactions.notify({source:'session',key:'session-handoff',title:'Today’s session is ready',message:'It was suspended on another device. Continue it here when you are ready.',action:{label:'Continue here',run:()=>void continueSessionOnExecute('session-handoff')}});
       }else if(sessionRunsElsewhere(session)){
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
         setSessionPanelMode('elsewhere',session);
@@ -11314,8 +11345,9 @@ function installApplicationDomBindings(){
   for(const type of ['online','offline'])window.addEventListener(type,scheduleSyncStatus);
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')scheduleSyncStatus();});
   setInterval(()=>{if(document.visibilityState==='visible')scheduleSyncStatus();},30*1000);
-  // The Connect card follows each step and count of the first sync.
-  BackupPresentation.subscribe(renderDriveConnectCard);
+  // The indicator, the panel's counts and the Connect card follow each step
+  // and count of a sync or upload.
+  BackupPresentation.subscribe(scheduleSyncStatus);
   void ensureDeviceBackupInstalled().then(()=>installRepositoryIntegrityScrub()).catch(error=>AppDiagnostics.capture('backup.repository-integrity-install',error,'warn'));
   updateFullscreenButton();
   PlanDraftEditor.install();

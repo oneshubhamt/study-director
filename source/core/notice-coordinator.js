@@ -84,7 +84,7 @@ registry.define('notice-coordinator',1,()=>{
     const LIFECYCLES=new Set(['running','succeeded','failed','cancelled','resolved']);
     const SURFACES=new Set(['toast','inline','quiet']);
     const MAX_TOASTS=4,QUEUE_LIMIT=32,RECENT_LIMIT=64;
-    let sequence=0,eventRevision=0,eventTimer=null,hidden=false;
+    let sequence=0,eventRevision=0,eventTimer=null,hidden=false,studying=false;
     function identity(value,label){
       if(typeof value!=='string'||!value.trim()||value.length>120||/[\u0000-\u001f]/u.test(value))throw new TypeError(`Notification ${label} is invalid.`);
       return value;
@@ -115,12 +115,14 @@ registry.define('notice-coordinator',1,()=>{
       // A condition that only a decision can clear (dismissible:false) keeps its toast until resolved.
       const dismissible=!(persistent&&raw.dismissible===false&&raw.action);
       const duration=persistent?0:Math.max(1800,Math.min(12000,Number(raw.duration)|| (severity==='warning'?7000:4200)));
-      return freeze({source,id,operationId,surfaceId:String(raw.surfaceId||''),retainInline:raw.retainInline!==false,occurrence:String(raw.occurrence||''),cue:String(raw.cue||''),system:raw.system===true,kind:String(raw.kind||''),outcome:String(raw.outcome||''),completedAt:String(raw.completedAt||''),announce:raw.announce===true,severity,lifecycle,foreground:raw.foreground!==false,title,message,progress,action,secondaryAction,surface,persistent,dismissible,duration});
+      return freeze({source,id,operationId,surfaceId:String(raw.surfaceId||''),retainInline:raw.retainInline!==false,waitWhileStudying:raw.waitWhileStudying===true,occurrence:String(raw.occurrence||''),cue:String(raw.cue||''),system:raw.system===true,kind:String(raw.kind||''),outcome:String(raw.outcome||''),completedAt:String(raw.completedAt||''),announce:raw.announce===true,severity,lifecycle,foreground:raw.foreground!==false,title,message,progress,action,secondaryAction,surface,persistent,dismissible,duration});
     }
     function signature(event){return JSON.stringify({...event,action:event.action?event.action.label:null,secondaryAction:event.secondaryAction?event.secondaryAction.label:null});}
     function publicEvent(row){return freeze({...row.event,key:row.key,deliveryId:String(row.sequence),revision:row.revision,surfaceRevision:row.surfaceRevision,dismissed:row.dismissed});}
+    // While the study timer runs, a pop-up that blocks nothing
+    // (waitWhileStudying) waits, unseen and untimed, until it stops.
     function visibleEvents(){
-      return [...events.values()].filter(row=>!row.dismissed&&(row.event.surface==='toast'||row.event.announce)&&row.event.lifecycle!=='resolved')
+      return [...events.values()].filter(row=>!row.dismissed&&(row.event.surface==='toast'||row.event.announce)&&row.event.lifecycle!=='resolved'&&!(studying&&row.event.waitWhileStudying))
         .sort((a,b)=>SEVERITY[b.event.severity]-SEVERITY[a.event.severity]||a.sequence-b.sequence).slice(0,MAX_TOASTS);
     }
     function eventSnapshot(){return freeze({events:freeze([...events.values()].map(publicEvent)),toasts:freeze(visibleEvents().map(publicEvent))});}
@@ -186,6 +188,7 @@ registry.define('notice-coordinator',1,()=>{
       accountTime();if(paused)row.pauses.add(reason);else row.pauses.delete(reason);publishEvents();return true;
     }
     function setHidden(value){if(hidden===!!value)return;accountTime();hidden=!!value;if(hidden)stopSound();publishEvents();}
+    function setStudying(value){if(studying===!!value)return;accountTime();studying=!!value;publishEvents();}
     function subscribe(listener){if(typeof listener!=='function')throw new TypeError('Notification listener is required.');listeners.add(listener);listener(eventSnapshot());return ()=>listeners.delete(listener);}
     function clearEvents(){accountTime();events.clear();failureSounds.clear();heard.clear();stopSound();publishEvents();}
     function notify(raw={}){
@@ -291,7 +294,7 @@ registry.define('notice-coordinator',1,()=>{
     }
     function status(){return snapshot();}
     return freeze({format:'study-director.notice-coordinator',contractVersion:1,priorities:PRIORITIES,publish,dismiss,acknowledge,clear,status,
-      readEvent:(source,id)=>{const row=events.get(eventKey(source,id));return row?publicEvent(row):null;},emit,begin,presentation,configureDelivery,setSoundMode,soundStatus,testSound,stopSound,deliverSystem,resolveEvent,dismissEvent,pauseEvent,setHidden,subscribe,notify,eventStatus:eventSnapshot});
+      readEvent:(source,id)=>{const row=events.get(eventKey(source,id));return row?publicEvent(row):null;},emit,begin,presentation,configureDelivery,setSoundMode,soundStatus,testSound,stopSound,deliverSystem,resolveEvent,dismissEvent,pauseEvent,setHidden,setStudying,subscribe,notify,eventStatus:eventSnapshot});
   }
   return freeze({format:'study-director.notice-coordinator-module',contractVersion:1,priorities:PRIORITIES,createCoordinator});
 });

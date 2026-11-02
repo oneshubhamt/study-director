@@ -916,6 +916,51 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
   - After `node build/build.mjs`, browser tests one at a time, PASS: `interactions` (before the subscription move), then `sync-and-profiles` on the final build.
   - Not run: the full suites, real Google Drive and its real sign-in window, physical devices, skins other than the default glass dark presentation, a screen reader.
 
+### Entry 027 — Status phase 4: hand-off row, progress counts, pop-up rules (2026-11-02)
+
+- **Branch / source HEAD before:** `refactor/background-coordination` at `eb8601d` (release `SDVB75F18`; no further bump in this pull request). Phase 4 of [STATUS-SYSTEM.md](STATUS-SYSTEM.md).
+- **Step 1 — audit:**
+  - **Hand-off ready.** When a sync brings in a session suspended on another device, `restoreSessionStateThroughLifecycle` sets the panel mode to suspended and pops up "Today’s session is ready" with Continue here, which runs `continueSessionHere` from whatever tab is open; its steps (Entry 025) show only in the Execute card and the Plan strip. The status model has a row for a session running elsewhere (`session-elsewhere`, Go to Execute) but none for one waiting here, so once the pop-up closes only the Execute card says so.
+  - **Progress counts.** While a catch-up or upload runs, the panel headline says "Syncing · bringing in changes…" or "Syncing · uploading changes…" and nothing more; the counts (`external-sync`/`external-backup` progress) appear only in the Connect card (Entry 026) and Library → Data.
+  - **Reviews.** A sync that needs a decision pops up once (`presentation.notice('sync-review')`, deduplicated until resolved). Versions a sync keeps for review (`AppData.pendingReviews`) raise no pop-up at all: only the badge and Library → Data change. When this device yields a session, its own pop-up ("Session continued on another device") already says what was kept.
+  - **Red.** The ring turns red only once retries ran out (Entry 024). Before that a failed background sync or upload is inline only (`foreground:false`, not announced). Two places disagree: the Connect card turns red on the first failure while it is still retrying, and the pop-up that fires exactly when retries run out (`retry-exhausted`) is amber.
+  - **During a study session.** Nothing holds back background pop-ups while the timer runs. The background ones are: sign-in expired, keeps failing (retries ran out), backup password set elsewhere, newer version needs an update, sync review, Device Folder permission, data from a newer version, storage reset; the new kept-versions pop-up would join them. All but the sync review and kept versions block syncing or saving until the person acts.
+- **Step 2 — objectives before edits:**
+  - **E27.1** The panel lists a session suspended on another device as a row ("Today’s session is ready … Continue here"). Its button and the existing pop-up's Continue here open Execute first, so the Continue Here steps are visible. No badge: it is an offer, not a problem.
+  - **E27.2** While a catch-up or upload runs, the panel's detail line shows its stage and counts (the Connect card's text, for example "Downloading backup data… · 2 of 5 complete · 150 KB of 300 KB"). Ring, badge and label unchanged.
+  - **E27.3** New kept versions pop up once ("N versions kept for review", Review). The host remembers the reviews it has seen since start-up (those present at start-up do not pop up). Not while the Connect card is showing (it reports them), and not when every new one is the session this device just yielded (that pop-up said so). The sync review pop-up already shows once per review: unchanged.
+  - **E27.4** Red only after retries run out: the Connect card is amber while a failed sync will retry and red once retries ran out; the `retry-exhausted` pop-up is red.
+  - **E27.5** While this device's study timer runs, background pop-ups that do not block anything (sync review, kept versions) wait and show when the timer stops (pause, block end, session end) for their usual time; one resolved meanwhile never shows. Blocking ones and anything answering the person's own action still show at once. The notice coordinator holds them (`setStudying`, event flag `waitWhileStudying`); the host sets it from the timer mode.
+  - **E27.6** No change to sync, upload, review or session behaviour, only to what is shown and when.
+  - **E27.7** Tests: unit rows for the hand-off row, the progress detail and the card's retrying tone; a coordinator unit test for the study hold; `sync-kept-reviews` checks the kept pop-up appears once.
+- **Step 3 — implementation:**
+  - `source/core/backup-presentation.js`: `status` takes `sessionReady` (a `session-ready` row, info tone, no badge, action `continue-session`) and `operation` (while syncing, `detail` is its stage and counts via a shared `operationText`, also used by `connectProgress`). `connectProgress` is amber (`attention`) with the step marked `waiting` while a failed sync retries or Drive is signed out; red only once retries ran out or sign-in fails. `notice` takes `{error, waitWhileStudying}`.
+  - `source/core/notice-coordinator.js`: `setStudying(boolean)`; events carry `waitWhileStudying`; while studying such events are neither visible nor timed, and come back with the time they had left.
+  - `source/core/backup-provider.js`: the `retry-exhausted` notice is red; the `sync-review` notice waits while studying.
+  - `source/app.html`:
+    - `syncStatusInput` passes `sessionReady` (parked here and from another device) and the running Drive operation (`driveRunningOperation`, renamed from `driveConnectOperation`, now shared);
+    - `continueSessionOnExecute` opens Execute, then runs Continue Here; used by the panel row and the hand-off pop-up; `continueSessionHere` resolves the hand-off pop-up as it starts;
+    - `KeptVersions` remembers review ids seen since start-up and raises `sync/kept-new` (warning, 12 s, Review, waits while studying) for new ones, skipped while the Connect card shows or when every new one is the session yielded in the last minute (`sessionYieldedAt`); resolved when none are left;
+    - `syncStudyQuiet` sets the coordinator's hold from the timer's `modeChanged` effect (running only; a pause, block end or session end releases it);
+    - the presentation subscription now redraws the whole status (`scheduleSyncStatus`), so the panel's counts move with each progress event; the Connect card redraws with it.
+  - `source/styles/core.css`: the `waiting` step in amber.
+  - Tests: `sync-status` (5 phase 4 rows; card rows for retrying and signed out now amber with a `waiting` step); `notification-lifecycle` (study hold: blocking and own results shown, held ones shown after with their full time, resolved meanwhile never shown, on-screen ones step aside and resume); `session-draft-edit` (with the timer running a waiting pop-up is not shown and a blocking one is, pausing shows it); `sync-kept-reviews` (B pops up "Kept for review" once with Review, not again on later refreshes, and clears it once resolved).
+  - Found on the way: `integration/pwa/application-update-safety` had failed since Entry 024 because the sliced `renderPwaUpdateStatus` now calls `scheduleSyncStatus`; its two sandboxes gain a stub. (Entry 024–026 ran targeted tests only and did not include it.)
+  - Docs: STATUS-SYSTEM.md (section 4 actions, section 6, phase 4), NOTIFICATIONS.md (Continue Here, kept versions, study hold rows), PROGRAMMES.md.
+- **Step 4 — objectives:**
+  - **E27.1 MET**: unit rows; a scratch probe (two browsers, simulated Drive at 200 ms a request, not committed) suspends a session on A and shows B's pop-up, then the panel row (laptop and phone screenshots), whose Continue here opens Execute with "Confirming with Google Drive…" and ends with the timer running on B.
+  - **E27.2 MET**: unit rows; the same probe shows "Downloading backup data from Google Drive… · 0 of 4 complete · 0 KB of 3 KB" in B's open panel during its first catch-up.
+  - **E27.3 MET**: `sync-kept-reviews`; skips are by construction (Connect card, yielded session), not separately tested.
+  - **E27.4 MET**: unit rows (card) and `notification-lifecycle` (the `retry-exhausted` notice is `error`).
+  - **E27.5 MET**: `notification-lifecycle` and `session-draft-edit`.
+  - **E27.6 MET**: sync, upload, review and session code paths unchanged apart from the notice options; `session-plan-sync` passes.
+  - **E27.7 MET** as listed in step 3.
+- **Step 5 — targeted QA (local, Node 22, Chromium 1194):**
+  - Targeted PASS: `unit/backup/sync-status`, `integration/ui/notification-lifecycle`, `integration/backup/automatic-provider-backup`, `integration/backup/backup-reminder` and 13 tests that slice `app.html` or touch the changed code; `application-update-safety` FAIL on first run (above), PASS after the stub.
+  - Because that failure had slipped through targeted runs, the fast Node categories ran once: `unit` PASS (24), `integration` PASS (96; a first run stopped only because docs were edited while it ran), `architecture` PASS (32), suite governance PASS.
+  - After `node build/build.mjs`, browser tests one at a time, PASS: `session-draft-edit`, `sync-kept-reviews`, `sync-and-profiles`; then, after the hand-off pop-up change and a rebuild, `session-plan-sync` alone.
+  - Not run: the browser suites as a whole, real Google Drive, physical devices, skins other than the default glass dark presentation, a screen reader.
+
 ### Journal template — duplicate this for the next pass
 
 - **Entry NNN — Pass P#, topic / date:**

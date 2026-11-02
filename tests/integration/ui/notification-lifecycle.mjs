@@ -257,4 +257,27 @@ class Element {
   n.emit({source:'plain',id:'ordinary',severity:'warning',surface:'toast',persistent:true,dismissible:false,title:'No action'});
   const plain=n.eventStatus().toasts[0];assert.equal(plain.dismissible,true,'without an action a notice stays dismissible');assert.equal(n.dismissEvent(plain.key,plain.deliveryId),true);
 }
-console.log(JSON.stringify({status:'PASS',suite:'notification-lifecycle',checks:['priority and persistent errors','decision notices persist until resolved','deduplication','hover/focus/hidden expiry','dismissal versus cancellation','recurring notices','stale operation handles','terminal fencing','renderer severity','Device and Drive summaries']},null,2));
+{
+  // While the study timer runs, pop-ups that block nothing wait, untimed, and
+  // show when it stops; blocking ones and the person's own results show at once.
+  const {notices:n,time}=coordinator(),presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications:n}));
+  const ids=()=>n.eventStatus().toasts.map(row=>row.id).sort();
+  n.setStudying(true);
+  presentation.notice('google-drive','sync-review','Google Drive has changes from another device that need your review.',{waitWhileStudying:true});
+  n.notify({source:'sync',key:'kept-new',kind:'warning',duration:12000,waitWhileStudying:true,title:'Kept for review',message:'One version was kept.'});
+  presentation.notice('google-drive','retry-exhausted','Syncing with Google Drive keeps failing.',{error:true});
+  presentation.notice('google-drive','permission','Google Drive sign-in expired.');
+  n.notify({key:'saved',kind:'success',title:'Saved'});
+  assert.deepEqual(ids(),['permission','retry-exhausted','saved'],'blocking pop-ups and the person’s own results show while studying');
+  assert.equal(n.eventStatus().toasts.find(row=>row.id==='retry-exhausted').severity,'error','retries that ran out are red');
+  assert.equal(n.eventStatus().toasts.find(row=>row.id==='permission').severity,'warning','a sign-in that ended is amber');
+  time.tick(60000);assert.deepEqual(ids(),[],'the shown ones expire as usual');
+  n.resolveEvent('sync','kept-new');n.setStudying(false);
+  assert.deepEqual(ids(),['sync-review'],'held pop-ups show when the timer stops; one resolved meanwhile never shows');
+  time.tick(11000);assert.deepEqual(ids(),['sync-review'],'and keep their full time');time.tick(1001);assert.deepEqual(ids(),[]);
+  n.notify({source:'sync',key:'kept-new',kind:'warning',duration:12000,waitWhileStudying:true,title:'Kept for review',message:'Two versions were kept.'});
+  time.tick(4000);n.setStudying(true);assert.deepEqual(ids(),[],'a pop-up on screen steps aside when the timer starts');
+  time.tick(60000);n.setStudying(false);time.tick(7999);assert.deepEqual(ids(),['kept-new'],'and comes back with the time it had left');time.tick(1);assert.deepEqual(ids(),[]);
+  n.clear();
+}
+console.log(JSON.stringify({status:'PASS',suite:'notification-lifecycle',checks:['priority and persistent errors','decision notices persist until resolved','deduplication','hover/focus/hidden expiry','dismissal versus cancellation','recurring notices','stale operation handles','terminal fencing','renderer severity','Device and Drive summaries','study-timer hold']},null,2));

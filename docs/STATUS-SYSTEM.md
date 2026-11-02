@@ -81,7 +81,8 @@ session running on another device, app update ready, no backup in over a week.
 - **Needs you:** one row per item with its own button — Sign in, Enter password,
   Update app, Review (sync), Review (kept versions), Allow access (Device Folder),
   Details (storage, backup check, Device Folder failing), Go to Execute (session
-  elsewhere), Update (new version ready).
+  elsewhere), Continue here (session suspended on another device), Update (new
+  version ready).
 - **Details in Library → Data** link.
 
 ## 5. Motion and accessibility
@@ -100,8 +101,14 @@ session running on another device, app update ready, no backup in over a week.
 - Existing notices (sync review, sign-in expiry, session hand-off) are unchanged.
 - Continue Here shows its steps in the Execute card and the Plan strip; only a
   failure adds a pop-up (it also stays in the card).
-- Later phases: one pop-up when a new review first appears; red only after
-  retries run out; during a running study session only blocking problems pop up.
+- One pop-up when a review first appears: the sync review (once until it is
+  resolved) and versions kept for review (once per version since start-up).
+- Red only after retries run out: the ring, the badge, the "keeps failing"
+  pop-up and the Connect card; while a sync still retries it is amber.
+- While this device's study timer runs, only blocking problems pop up
+  (signed out, password, app update, retries ran out, storage, Device Folder
+  permission) and results of the person's own actions. Reviews wait and show
+  when the timer stops (pause, block end, session end).
 
 ## 7. Phases
 
@@ -110,7 +117,7 @@ session running on another device, app update ready, no backup in over a week.
 | 1 | Status model (`backup-presentation.status`), indicator on all hosts, panel section, retire the text line and phone dot | Done |
 | 2 | Continue Here: instant busy button ("Continuing…"), step text in the Execute card, errors in the Execute card; measure and shorten the wait for a running sync | Done (see below) |
 | 3 | Connect Drive: a progress card on any tab (checking folder → bringing in changes → uploading → Synced ✓) | Done (see below) |
-| 4 | Remaining cases: session hand-off ready row, first-sync progress counts, pop-up rules from section 6 | Planned |
+| 4 | Remaining cases: session hand-off ready row, first-sync progress counts, pop-up rules from section 6 | Done (see below) |
 
 ### Phase 2 — Continue Here
 
@@ -127,6 +134,13 @@ session running on another device, app update ready, no backup in over a week.
 - **Endings.** Synced (closes itself after 6 s; offers Review when the sync kept versions for review); needs the backup password, a review or an app update (stays, with the button); offline (continues when back online); couldn't finish (says when it tries again, with Try now); sign-in didn't finish (Try again). Declining or refusing a library closes it; the existing toast explains.
 - **×** hides it; syncing carries on and the indicator still shows it.
 - **Model.** `backup-presentation.connectProgress` decides; the host only remembers when the card started and whether a catch-up or upload ran since.
+
+### Phase 4 — Remaining cases
+
+- **Hand-off row.** A session suspended on another device is a panel row, "Today’s session was suspended on Laptop. Continue it here when you’re ready.", with Continue here (no badge: it is an offer). That button and the hand-off pop-up's Continue here open Execute first, so the Continue Here steps show; the pop-up closes once Continue Here starts.
+- **Counts.** While a catch-up or upload runs, the panel's line under the headline shows its stage and counts, for example "Downloading backup data from Google Drive… · 2 of 5 complete · 150 KB of 300 KB".
+- **Pop-ups.** Section 6. Kept versions now pop up once ("Kept for review", Review); not those present at start-up, not while the Connect card shows (it reports them), and not a session this device just handed over (its own pop-up says so). The Connect card is amber while a sync retries or is signed out, red once retries ran out or a sign-in fails.
+- **Mechanism.** `notice-coordinator.setStudying` holds events flagged `waitWhileStudying` without showing or timing them; the host sets it from the timer mode.
 
 ## 8. Ownership
 

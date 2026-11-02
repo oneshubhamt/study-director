@@ -1487,6 +1487,8 @@ html[data-sd-appearance-shift] *,html[data-sd-appearance-shift] *::before,html[d
 .drive-connect-steps li[data-state="done"]::before{content:"✓";opacity:1;border:0;color:var(--sd-color-success);font-size:12px;font-weight:700;line-height:12px;text-align:center}
 .drive-connect-steps li[data-state="failed"]{color:var(--sd-color-danger)}
 .drive-connect-steps li[data-state="failed"]::before{content:"×";opacity:1;border:0;font-size:15px;font-weight:700;line-height:11px;text-align:center}
+.drive-connect-steps li[data-state="waiting"]{color:var(--sd-color-warning)}
+.drive-connect-steps li[data-state="waiting"]::before{opacity:1}
 .drive-connect-bar{position:relative;height:4px;border-radius:2px;background:rgba(var(--sd-rgb-accent-primary),.18);overflow:hidden}
 .drive-connect-bar[hidden]{display:none}
 .drive-connect-bar>span{position:absolute;top:0;bottom:0;left:0;width:0;border-radius:inherit;background:var(--sd-color-accent-primary);transition:width .3s ease}

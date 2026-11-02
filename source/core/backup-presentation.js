@@ -12,6 +12,13 @@ registry.define('backup-presentation',1,()=>{
     else if(p.activeBytes>0)parts.push(`${bytes(p.loadedBytes)} of ${bytes(p.activeBytes)} in current item`);
     return parts.join(' · ');
   }
+  // A running catch-up or upload: its stage and counts. Its opening line
+  // ("Syncing with Google Drive…") only repeats the status, so it is left out.
+  function operationText(op){
+    if(!op)return '';
+    const message=String(op.message||''),stage=/^(Syncing with|Backing up to) /u.test(message)?'':message;
+    return [stage,detail(op.progress||{})].filter(Boolean).join(' · ');
+  }
   // The three ways a verified backup can be applied, worded once for every
   // backup location. Adding only what is missing leaves everything current as
   // it is and stops, unchanged, at anything that would need a choice. While
@@ -101,10 +108,12 @@ registry.define('backup-presentation',1,()=>{
     }
     function feedback(source,message,ok=true){if(!message)return notifications.resolveEvent(source,'backup-status');return notifications.emit({source,id:'backup-status',message,severity:ok?'info':'error',lifecycle:ok?'succeeded':'failed',surface:'inline',title:source,action:action(source,'status')});}
     function condition(source,id,message){if(!message)return notifications.resolveEvent(source,id);return notifications.emit({source,id,message,severity:'warning',lifecycle:'failed',foreground:false,title:source==='file'?'File backup':source==='device-folder'?'Device Folder backup':'Google Drive backup',action:action(source,id),surface:'toast',persistent:true});}
-    // A one-off heads-up (a sign-in that ended, repeated failures): a toast
+    // A one-off heads-up (a sign-in that ended, retries that ran out): a toast
     // that closes on its own or when dismissed. Repeating the same notice
-    // does not show it again until it is resolved.
-    function notice(source,id,message){return notifications.emit({source,id,message,severity:'warning',lifecycle:'succeeded',foreground:false,title:source==='device-folder'?'Device Folder backup':'Google Drive backup',action:action(source,id),surface:'toast',duration:12000});}
+    // does not show it again until it is resolved. Red (error) only for
+    // retries that ran out; one that blocks nothing waits while the study
+    // timer runs (docs/STATUS-SYSTEM.md, noise rules).
+    function notice(source,id,message,{error=false,waitWhileStudying=false}={}){return notifications.emit({source,id,message,severity:error?'error':'warning',lifecycle:'succeeded',foreground:false,waitWhileStudying,title:source==='device-folder'?'Device Folder backup':'Google Drive backup',action:action(source,id),surface:'toast',duration:12000});}
     // The reach line for a restore or combine dialog, while Drive syncs.
     function reach(){try{return typeof input.synced==='function'&&input.synced()===true?RESTORE_CHOICES.reach:'';}catch{return '';}}
     function reset(source){for(const event of notifications.eventStatus().events)if(event.source===source)notifications.resolveEvent(source,event.id);}
@@ -162,6 +171,8 @@ registry.define('backup-presentation',1,()=>{
       for(const issue of storage){const label=String(issue&&issue.label||'Storage');add('storage:'+String(issue&&issue.source||label),issue&&issue.level==='error'?'error':'warning',label,`${label}: ${String(issue&&issue.message||'').slice(0,180)}`,'open-data','Details');}
       if(value.reminder)add('reminder','warning','No backup in over a week',String(value.reminder).replace(/^Backup reminder:\s*/u,''),'open-data','Open backups');
       if(value.sessionElsewhere)add('session-elsewhere','info',`Today’s session is running ${value.sessionElsewhere}`,`Today’s session is running ${value.sessionElsewhere}.`,'open-execute','Go to Execute');
+      // A session suspended on another device waits here: an offer, so no badge.
+      else if(value.sessionReady)add('session-ready','info','Today’s session is ready',`Today’s session was suspended ${value.sessionReady}. Continue it here when you’re ready.`,'continue-session','Continue here');
       if(value.updateReady===true)add('update-ready','info','Update ready','A new version of Study Director is ready.','apply-update','Update');
       const order={error:0,warning:1,review:2,info:3};items.sort((a,b)=>order[a.tone]-order[b.tone]);
       // Signed out, password and update needs already show in the ring and their
@@ -171,7 +182,7 @@ registry.define('backup-presentation',1,()=>{
       let primary='',headline='',detail='';
       switch(ring){
         case 'off':primary=deviceOn?`Only on this device${device.lastBackupAt?` · Device Folder backup ${timeText(device.lastBackupAt)}`:''}`:'Only on this device';headline=deviceOn?'Not syncing. This device backs up to its Device Folder.':'Only on this device. Connect Google Drive to sync your devices.';break;
-        case 'syncing':primary=activity();headline=primary;break;
+        case 'syncing':primary=activity();headline=primary;detail=operationText(value.operation);break;
         case 'synced':primary=`Synced ${syncedAt}`;headline=`Synced at ${syncedAt}. This device is up to date.`;detail='Checks Google Drive again when you return to the app.';break;
         case 'pending':
           if(failed){primary=syncedAt?`Last synced ${syncedAt} · retrying`:'Not synced yet · retrying';headline=syncedAt?`Last synced at ${syncedAt}. Syncing will retry.`:'Not synced yet. Syncing will retry.';const next=timeText(drive.nextEligibleAt);detail=next?`Next try at ${next}.`:'Syncing will try again shortly.';}
@@ -201,22 +212,22 @@ registry.define('backup-presentation',1,()=>{
       const started=Number(value.startedAt)||0,syncedAt=Date.parse(String(sync.syncedAt||''))||0,kept=Math.max(0,Number(value.keptNew)||0);
       const syncing=!!(sync.syncing||op?.kind==='sync'),uploading=!!(op?.kind==='upload'&&['upload','commit','complete'].includes(String(op.progress?.stage||''))),working=syncing||!!drive?.backingUp||!!op;
       const p=op?.progress||{},fraction=p.total>0?Math.min(1,(Number(p.current)||0)/p.total):p.totalBytes>0?Math.min(1,(Number(p.completedBytes)||0)/p.totalBytes):null;
-      // An operation's opening line ("Syncing with Google Drive…") only repeats the status.
-      const opMessage=/^(Syncing with|Backing up to) /u.test(String(op?.message||''))?'':String(op?.message||''),opDetail=op?[opMessage,detail(p)].filter(Boolean).join(' · '):'';
-      const steps=(active,failed='')=>{
+      const opDetail=operationText(op);
+      const steps=(active,failed='',waiting=false)=>{
         const order=['sign-in','bring-in','upload'],at=order.indexOf(active);
         const labels={
           'sign-in':at>0||active==='done'?'Signed in to Google':'Sign in to Google',
           'bring-in':active==='done'?(seen.sync?'Brought in changes from Google Drive':'Nothing new on Google Drive'):at>1?(seen.sync?'Brought in changes from Google Drive':'Checked Google Drive'):'Bring in what’s on Google Drive',
           upload:active==='done'?(seen.upload?'Uploaded this device’s data':'Nothing to upload'):'Upload this device’s data'
         };
-        return freeze(order.map((id,index)=>freeze({id,label:labels[id],state:id===failed?'failed':active==='done'||index<at?'done':index===at?'active':'pending'})));
+        return freeze(order.map((id,index)=>freeze({id,label:labels[id],state:id===failed?(waiting?'waiting':'failed'):active==='done'||index<at?'done':index===at?'active':'pending'})));
       };
-      const result=(tone,title,status,active,extra={})=>freeze({tone,title,status,detail:'',fraction:null,action:null,done:false,...extra,steps:steps(active,extra.failed||'')});
+      // A step that waits (for a retry or a sign-in) is amber; failed (×) is red.
+      const result=(tone,title,status,active,{waiting=false,...extra}={})=>freeze({tone,title,status,detail:'',fraction:null,action:null,done:false,...extra,steps:steps(active,extra.failed||'',waiting)});
       const act=(action,label)=>freeze({action,label});
       if(phase==='failed')return result('error','Google Drive wasn’t connected',String(value.error||'Sign-in didn’t finish.'),'sign-in',{failed:'sign-in',action:act('sign-in','Try again')});
       if(phase==='signing-in')return result('working','Connecting Google Drive','Signing in to Google…','sign-in');
-      if(!drive?.connected)return result('error','Google Drive signed out','Sign in again to finish syncing.','bring-in',{failed:'bring-in',action:act('sign-in','Sign in')});
+      if(!drive?.connected)return result('attention','Google Drive signed out','Sign in again to finish syncing.','bring-in',{failed:'bring-in',waiting:true,action:act('sign-in','Sign in')});
       // After a catch-up, what remains is this device's upload.
       const active=uploading||seen.sync&&!syncing?'upload':'bring-in';
       if(!online)return result('attention','Syncing with Google Drive','Offline. Syncing continues when you’re back online.',active);
@@ -224,7 +235,8 @@ registry.define('backup-presentation',1,()=>{
       if(drive.locked)return result('attention','Enter your backup password','Your backups are encrypted. Enter the password on this device to finish syncing.',active,{action:act('enter-password','Enter password')});
       if(sync.newer)return result('attention','Update the app to finish syncing','Google Drive holds data from a newer version of Study Director.','bring-in',{action:act('check-update','Check for update')});
       if(!working&&drive.retryBackoffCapped)return result('error','Sync stopped','Syncing stopped after several tries.',active,{failed:active,action:act('retry','Try again')});
-      if(!working&&sync.failed){const next=timeText(drive.nextEligibleAt);return result('error','Syncing with Google Drive',`Couldn’t finish syncing.${next?` Trying again at ${next}.`:' Trying again shortly.'}`,active,{failed:active,action:act('retry','Try now')});}
+      // Still retrying: amber; red only once retries ran out (above).
+      if(!working&&sync.failed){const next=timeText(drive.nextEligibleAt);return result('attention','Syncing with Google Drive',`Couldn’t finish syncing.${next?` Trying again at ${next}.`:' Trying again shortly.'}`,active,{failed:active,waiting:true,action:act('retry','Try now')});}
       if(!working&&syncedAt>=started&&syncedAt>0&&!drive.waiting){
         if(sync.review)return result('attention','Synced with Google Drive','Some changes need your review before they come in.','done',{action:act('review-sync','Review')});
         const when=timeText(sync.syncedAt);

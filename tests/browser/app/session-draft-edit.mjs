@@ -31,7 +31,17 @@ try{
   const capture=await page.evaluate(`__PWA6.BackupController.createCheckpoint().then(file=>({ok:true,warning:String(file.warning||'')}),error=>({ok:false,error:String(error&&error.message||error)}))`);
   assert.equal(capture.ok,true,`a backup captures the session (${capture.error||''})`);
   assert.doesNotMatch(capture.warning,/from memory/u,'the session comes from storage, not memory');
+
+  // While the timer runs, a pop-up that blocks nothing waits and a blocking
+  // one shows; pausing shows the one that waited (STATUS-SYSTEM.md, noise rules).
+  const hold=await page.evaluate(`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms)),shown=text=>[...document.querySelectorAll('#sd-toast-region .interaction-toast')].some(node=>node.textContent.includes(text));
+    d.Interactions.notify({source:'sync',key:'kept-new',kind:'warning',duration:12000,waitWhileStudying:true,title:'Kept for review',message:'One version was kept.'});
+    d.Interactions.notify({source:'qa',key:'blocking',kind:'warning',duration:12000,title:'Needs password',message:'Enter it to keep syncing.'});
+    await wait(200);const running={mode:d.TimerState.mode,kept:shown('Kept for review'),blocking:shown('Needs password')};
+    d.togglePause();await wait(300);const paused={mode:d.TimerState.mode,kept:shown('Kept for review')};
+    return {running,paused};})()`);
+  assert.deepEqual(hold,{running:{mode:'running',kept:false,blocking:true},paused:{mode:'paused',kept:true}},'pop-ups that block nothing wait for the timer to stop');
   assert.deepEqual(page.warnings.filter(text=>/\[Study Director\]/u.test(text)),[],'no session save failed');
   assert.deepEqual(page.events.filter(event=>!/favicon|ResizeObserver loop/iu.test(event.text||'')),[]);
-  console.log(JSON.stringify({status:'PASS',checks:{appliedPlanKept:true,pacerSaved:true,backupComplete:true}}));
+  console.log(JSON.stringify({status:'PASS',checks:{appliedPlanKept:true,pacerSaved:true,backupComplete:true,popUpsWaitWhileStudying:true}}));
 }finally{await browser.close();await server.close();}

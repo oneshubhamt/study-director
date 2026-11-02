@@ -13,7 +13,7 @@ const presentation=registry.require('backup-presentation',1).createPresentation(
 const SYNCED='2026-11-01T12:04:00.000Z';
 const drive=(patch={},sync={})=>({connected:true,setUp:true,busy:false,backingUp:false,waiting:false,locked:false,retryBackoffCapped:false,stalled:false,foregroundKind:'',nextEligibleAt:'',...patch,sync:{syncedAt:SYNCED,review:false,password:false,newer:false,failed:false,syncing:false,turnWaits:0,...sync}});
 const status=input=>presentation.status({online:true,kept:0,storage:[],...input});
-const actions=new Set(['retry','sign-in','unlock-sync','enter-password','check-update','review-sync','review-kept','device-permission','open-data','open-execute','apply-update']);
+const actions=new Set(['retry','sign-in','unlock-sync','enter-password','check-update','review-sync','review-kept','device-permission','open-data','open-execute','continue-session','apply-update']);
 function check(name,input,expected){
   const result=status(input);
   for(const key of ['ring','badge','count','slow'])if(key in expected)assert.equal(result[key],expected[key],`${name}: ${key}`);
@@ -63,6 +63,14 @@ check('Backup reminder',{drive:null,reminder:'Backup reminder: the last backup i
 check('Session elsewhere',{drive:drive(),sessionElsewhere:'on Laptop'},{ring:'synced',badge:'',label:/^Synced 12:04 · Today’s session is running on Laptop$/u,items:['open-execute']});
 check('Update ready',{drive:drive(),updateReady:true},{ring:'synced',badge:'info',items:['apply-update']});
 
+// Phase 4: a session suspended on another device waits here (an offer, no
+// badge), and a running catch-up or upload shows its stage and counts.
+check('Session ready to continue here',{drive:drive(),sessionReady:'on Laptop'},{ring:'synced',badge:'',label:/^Synced 12:04 · Today’s session is ready$/u,items:['continue-session']});
+check('Running elsewhere wins over ready',{drive:drive(),sessionElsewhere:'on Laptop',sessionReady:'on Laptop'},{items:['open-execute']});
+check('Catch-up counts',{drive:drive({},{syncing:true}),operation:{kind:'sync',message:'Downloading backup data from Google Drive…',progress:{stage:'download',current:2,total:5,completedBytes:153600,totalBytes:307200}}},{ring:'syncing',label:/^Syncing · bringing in changes…$/u,detail:/^Downloading backup data from Google Drive… · 2 of 5 complete · 150 KB of 300 KB$/u});
+check('Upload counts, opening line left out',{drive:drive({backingUp:true}),operation:{kind:'upload',message:'Backing up to Google Drive…',progress:{stage:'upload',current:3,total:4}}},{ring:'syncing',detail:/^3 of 4 complete$/u});
+check('No counts while synced',{drive:drive(),operation:{kind:'sync',message:'Downloading…',progress:{current:1,total:2}}},{ring:'synced',detail:/return to the app/u});
+
 // Priorities: a failure outranks a review in the badge and the label; the
 // most urgent need comes first, sync health second.
 check('Failure and review together',{drive:drive({retryBackoffCapped:true},{failed:true}),kept:1},{ring:'error',badge:'error',label:/^1 kept version to review · Sync stopped/u,items:['retry','review-kept']});
@@ -105,8 +113,9 @@ checkCard('Needs password (another device)',{phase:'signed-in',drive:linked({wai
 checkCard('Needs password (this device)',{phase:'signed-in',drive:linked({locked:true,waiting:true})},{tone:'attention',action:'enter-password'});
 checkCard('Needs app update',{phase:'signed-in',drive:linked({},{newer:true})},{tone:'attention',action:'check-update'});
 checkCard('Offline',{phase:'signed-in',online:false,drive:linked({waiting:true})},{tone:'attention',status:/^Offline/u,action:''});
-checkCard('Retrying',{phase:'signed-in',drive:linked({waiting:true,nextEligibleAt:'2026-11-01T12:10:00.000Z'},{failed:true})},{tone:'error',status:/Trying again at 12:10/u,steps:'done,failed,pending',action:'retry'});
-checkCard('Stopped after retries',{phase:'signed-in',drive:linked({retryBackoffCapped:true,waiting:true},{failed:true})},{tone:'error',title:'Sync stopped',action:'retry'});
-checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({connected:false})},{tone:'error',action:'sign-in'});
+// Red only once retries ran out (phase 4); retrying and signed out wait in amber.
+checkCard('Retrying',{phase:'signed-in',drive:linked({waiting:true,nextEligibleAt:'2026-11-01T12:10:00.000Z'},{failed:true})},{tone:'attention',status:/Trying again at 12:10/u,steps:'done,waiting,pending',action:'retry'});
+checkCard('Stopped after retries',{phase:'signed-in',drive:linked({retryBackoffCapped:true,waiting:true},{failed:true})},{tone:'error',title:'Sync stopped',steps:'done,failed,pending',action:'retry'});
+checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({connected:false})},{tone:'attention',steps:'done,waiting,pending',action:'sign-in'});
 
-console.log(JSON.stringify({status:'PASS',suite:'sync-status',oldTextCases:12,newCases:20,priorityCases:3,connectCardCases:20}));
+console.log(JSON.stringify({status:'PASS',suite:'sync-status',oldTextCases:12,newCases:20,priorityCases:3,phase4Cases:5,connectCardCases:20}));
