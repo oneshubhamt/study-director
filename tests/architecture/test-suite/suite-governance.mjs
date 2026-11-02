@@ -121,7 +121,7 @@ for(const entry of ['node_modules/','dist/','qa/','coverage/','.nyc_output/','te
 
 // CI policy.
 const fastWorkflow=fs.readFileSync('.github/workflows/qa-fast.yml','utf8'),promotionWorkflow=fs.readFileSync('.github/workflows/qa-promotion.yml','utf8');
-assert.match(fastWorkflow,/pull_request:/);assert.match(fastWorkflow,/push:/);assert.match(fastWorkflow,/node tests\/helpers\/run-category\.mjs targeted/,'automatic checks must run the explicit targeted contracts');assert.doesNotMatch(fastWorkflow,/npm (?:ci|install)/);
+assert.match(fastWorkflow,/pull_request:/);assert.match(fastWorkflow,/push:/);assert.match(fastWorkflow,/run: node tests\/helpers\/run-category\.mjs fast\n/,'automatic checks must run the whole fast suite');assert.doesNotMatch(fastWorkflow,/npm (?:ci|install)/);
 assert.match(fastWorkflow,/bug-regression-policy\.mjs/,'bug-like PRs must be machine-checked for regression protection');
 // Promotion runs only when started by hand; no push or schedule runs it.
 const promotionTriggerBlock=promotionWorkflow.match(/^on:\n([\s\S]*?)^permissions:/m)?.[1]||'';
@@ -134,7 +134,7 @@ assert.match(promotionWorkflow,/npm run test:release/);
 assert.match(promotionWorkflow,/npm run test:coverage:browser/,'promotion QA must collect browser/build runtime coverage');
 
 assert.match(fastWorkflow,/node build\/build\.mjs/);assert.match(fastWorkflow,/node build\/verify-build\.mjs/);
-assert.doesNotMatch(fastWorkflow,/npm run test:coverage:browser|run-category\.mjs fast/,'automatic repository checks must not silently expand to full or browser QA');
+assert.doesNotMatch(fastWorkflow,/npm run test:coverage:browser|browser-suite\.mjs|coverage\.mjs/,'automatic repository checks must not expand to browser QA or coverage');
 assert.equal(fs.readFileSync('LICENSE','utf8'),fs.readFileSync('source/legal/LICENSE.txt','utf8'),'repository and served application must retain the same licence');
 assert.ok(fs.existsSync('CONTRIBUTING.md'));
 const prTemplate=fs.readFileSync('.github/pull_request_template.md','utf8');assert.match(prTemplate,/regression test/i);assert.match(prTemplate,/correct layer/i);
