@@ -1,9 +1,9 @@
 name: Promotion QA
 
 on:
-  # On-demand QA from GitHub-connected coding tools: update only this request file.
+  # On-demand QA from GitHub-connected coding tools: update only this request
+  # file, on any branch.
   push:
-    branches: [current-fixes]
     paths:
       - .github/qa-requests/promotion.txt
   workflow_dispatch:

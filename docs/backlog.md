@@ -36,7 +36,6 @@ Status checked against the code and git history on 2026-11-02; the owner confirm
 - **Large orchestration modules** (`backup-provider.js`, `backup.js`, `app.html`): no splitting by size alone; consolidate only proven duplication.
 - **`backup-encryption` browser test** fails only under concurrent load and runs alone until its cause is found ([tests/README.md](../tests/README.md#browser-test-reliability)).
 - **Unregistered sessionStorage key** `study-director.backup-operation-diagnostics.v1` is not listed in `contracts/data-architecture.mjs` with the other browser-storage keys.
-- **Promotion QA push trigger** still names the deleted `current-fixes` branch; the manual Run workflow button works.
 
 ## Not yet checked
 
