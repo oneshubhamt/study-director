@@ -170,6 +170,9 @@ function printTable(rows){
 const keepRawIndex=process.argv.indexOf('--keep-raw');
 const keepRaw=keepRawIndex>=0?process.argv[keepRawIndex+1]:null;
 if(keepRawIndex>=0&&!keepRaw)throw new Error('--keep-raw requires a directory outside the repository.');
+// A reused folder would mix an earlier run's files into the branch report.
+const keepRawTarget=keepRaw?externalOutputPath(keepRaw,'Raw coverage directory'):null;
+if(keepRawTarget&&fs.existsSync(keepRawTarget)&&fs.readdirSync(keepRawTarget).length)throw new Error(`--keep-raw needs a new or empty directory; ${keepRawTarget} already has files.`);
 const coverageDir=fs.mkdtempSync(path.join(os.tmpdir(),'study-director-coverage-'));
 try{
   const result=spawnSync(process.execPath,['tests/helpers/run-category.mjs','fast'],{
@@ -177,10 +180,9 @@ try{
   });
   if(result.error)throw result.error;
   if(result.status!==0)process.exit(result.status??1);
-  if(keepRaw){
-    const target=externalOutputPath(keepRaw,'Raw coverage directory');
-    fs.mkdirSync(target,{recursive:true});
-    for(const file of fs.readdirSync(coverageDir))fs.copyFileSync(path.join(coverageDir,file),path.join(target,file));
+  if(keepRawTarget){
+    fs.mkdirSync(keepRawTarget,{recursive:true});
+    for(const file of fs.readdirSync(coverageDir))fs.copyFileSync(path.join(coverageDir,file),path.join(keepRawTarget,file));
   }
   const scripts=loadCoverage(coverageDir);
   const rows=[...scripts].map(([file,script])=>summarize(file,script));
