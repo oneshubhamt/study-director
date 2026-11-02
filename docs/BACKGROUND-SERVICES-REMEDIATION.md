@@ -961,6 +961,18 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
   - After `node build/build.mjs`, browser tests one at a time, PASS: `session-draft-edit`, `sync-kept-reviews`, `sync-and-profiles`; then, after the hand-off pop-up change and a rebuild, `session-plan-sync` alone.
   - Not run: the browser suites as a whole, real Google Drive, physical devices, skins other than the default glass dark presentation, a screen reader.
 
+### Entry 028 — Waiting pop-ups show during support and fixed blocks (2026-11-02)
+
+- **Branch / source HEAD before:** `refactor/background-coordination` at `55a3616`. Owner's correction to Entry 027 (E27.5): pop-ups that block nothing may show during support and fixed blocks, not only at a pause or the session's end.
+- **Step 1 — audit:** `syncStudyQuiet` holds whenever `TimerState.mode` is running, which includes support blocks (trackable, timer running); fixed blocks already release it (mode `ready` at the fixed boundary). It runs only from the timer's `modeChanged` effect; moving from one running block to the next goes through the host's `setCurrentTask` and may not change the mode.
+- **Step 2 — objectives before edits:**
+  - **E28.1** The hold applies only while the timer runs on a work block (`isWorkBlock`); support blocks, fixed blocks, pauses and the session's end release it.
+  - **E28.2** It is re-evaluated when the current block changes, not only when the mode changes.
+  - **E28.3** Tests: `session-draft-edit` moves the running timer from a work block to a support block and sees the waiting pop-up appear.
+  - Then the full QA the owner asked for.
+- **Step 3 — implementation:** `syncStudyQuiet` holds only when the mode is running and `isWorkBlock(TASKS[TimerState.currentIndex])`; the host's `setCurrentTask` calls it too. `session-draft-edit`: its second block is now a support block; after the pause check the timer resumes on the work block (a new waiting pop-up stays hidden), then Finish moves it to the support block (mode still running) and the pop-up shows. Docs: STATUS-SYSTEM.md section 6 and phase 4, NOTIFICATIONS.md.
+- **Step 4 — objectives:** **E28.1 MET** and **E28.2 MET** by `session-draft-edit` (the support-block step fails under the Entry 027 rule, where a running timer held regardless of block). **E28.3 MET.**
+
 ### Journal template — duplicate this for the next pass
 
 - **Entry NNN — Pass P#, topic / date:**

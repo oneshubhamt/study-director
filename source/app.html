@@ -2470,9 +2470,10 @@ function buildLiveTimeline(){
   return chronologicalRows(rows);
 }
 /* RUNTIME STATE · PRIVATE TIMER CONTROLLER */
-// While the study timer runs here, pop-ups that block nothing wait until it
-// stops (docs/STATUS-SYSTEM.md, noise rules).
-function syncStudyQuiet(){try{NoticeCoordinator.setStudying(TimerState.mode===TIMER_MODES.RUNNING);}catch(error){AppDiagnostics.capture('notifications.study-hold',error,'warn');}}
+// While the timer runs on a work block here, pop-ups that block nothing
+// wait; support and fixed blocks, a pause or the end let them show
+// (docs/STATUS-SYSTEM.md, noise rules).
+function syncStudyQuiet(){try{NoticeCoordinator.setStudying(TimerState.mode===TIMER_MODES.RUNNING&&isWorkBlock(TASKS[TimerState.currentIndex]));}catch(error){AppDiagnostics.capture('notifications.study-hold',error,'warn');}}
 const TimerState=TimerStateModule.createStateController(Object.freeze({
   helpers:Object.freeze({makeTaskId}),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
@@ -2962,6 +2963,7 @@ function setCurrentTask(idx,options={}){
   const next=boundedInt(idx,{min:0,max:Math.max(0,TASKS.length),fallback:0});
   if(options.notifyPractice!==false)PracticePacer.onMainTaskChanging(next<TASKS.length?TaskIdentity.idAt(next):null);
   TimerState.currentIndex=next;
+  syncStudyQuiet();
   return TimerState.currentIndex;
 }
 function resetCountdownRuntime(){return TimerEngine.resetCountdownRuntime();}

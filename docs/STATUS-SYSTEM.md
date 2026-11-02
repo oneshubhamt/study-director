@@ -105,10 +105,10 @@ session running on another device, app update ready, no backup in over a week.
   resolved) and versions kept for review (once per version since start-up).
 - Red only after retries run out: the ring, the badge, the "keeps failing"
   pop-up and the Connect card; while a sync still retries it is amber.
-- While this device's study timer runs, only blocking problems pop up
-  (signed out, password, app update, retries ran out, storage, Device Folder
-  permission) and results of the person's own actions. Reviews wait and show
-  when the timer stops (pause, block end, session end).
+- While this device's timer runs on a work block, only blocking problems pop
+  up (signed out, password, app update, retries ran out, storage, Device
+  Folder permission) and results of the person's own actions. Reviews wait
+  and show at the next support or fixed block, pause, or the session's end.
 
 ## 7. Phases
 
@@ -140,7 +140,7 @@ session running on another device, app update ready, no backup in over a week.
 - **Hand-off row.** A session suspended on another device is a panel row, "Today’s session was suspended on Laptop. Continue it here when you’re ready.", with Continue here (no badge: it is an offer). That button and the hand-off pop-up's Continue here open Execute first, so the Continue Here steps show; the pop-up closes once Continue Here starts.
 - **Counts.** While a catch-up or upload runs, the panel's line under the headline shows its stage and counts, for example "Downloading backup data from Google Drive… · 2 of 5 complete · 150 KB of 300 KB".
 - **Pop-ups.** Section 6. Kept versions now pop up once ("Kept for review", Review); not those present at start-up, not while the Connect card shows (it reports them), and not a session this device just handed over (its own pop-up says so). The Connect card is amber while a sync retries or is signed out, red once retries ran out or a sign-in fails.
-- **Mechanism.** `notice-coordinator.setStudying` holds events flagged `waitWhileStudying` without showing or timing them; the host sets it from the timer mode.
+- **Mechanism.** `notice-coordinator.setStudying` holds events flagged `waitWhileStudying` without showing or timing them; the host sets it from the timer mode and the current block (work blocks only).
 
 ## 8. Ownership
 
