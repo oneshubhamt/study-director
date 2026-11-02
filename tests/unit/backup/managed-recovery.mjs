@@ -27,7 +27,7 @@ function harness(options={}){
   }));
   const spec=freeze({
     kind:options.kind||'restore-version',label:'Device Folder',
-    createSafety:async()=>{events.push('safety');if(options.failSafety)throw new Error('safety failed');return freeze({verified:true,checkpointId:CHECKPOINT,sourceRevision:revision});},
+    createSafety:async()=>{events.push('safety');if(options.failSafety)throw new Error('safety failed');const value=freeze({verified:true,checkpointId:CHECKPOINT,sourceRevision:revision,...options.safety});if(options.changeDuringSafety)revision='2026-09-20T12:05:00.000Z';return value;},
     apply:async()=>{events.push('apply');if(options.failApply)throw new Error('apply failed');return options.cancelled?freeze({cancelled:true}):freeze({cancelled:false,value:'restored'});},
     publishPresent:async()=>{events.push('present');if(options.failPresent)throw new Error('present failed');return freeze({status:'completed',checkpointId:'cp_'+'b'.repeat(32)});}
   });
@@ -50,6 +50,24 @@ function harness(options={}){
   await assert.rejects(()=>h.coordinator.execute(h.spec),/safety failed/);
   assert.equal(h.events.includes('apply'),false,'Local mutation must not begin before the protected safety checkpoint is verified.');
   assert.deepEqual(h.events,['mutation:enter','suspend:restore-version','quiesce:enter','settle:restore-version','quiesce:exit','safety','mutation:exit','resume:s1']);
+  assert.deepEqual(h.state(),{suspended:0,activeLock:false});
+}
+
+// A safety version that is not verified, or names no real checkpoint or
+// source revision, stops the recovery before local data changes.
+for(const safety of [{verified:false},{checkpointId:'cp_short'},{sourceRevision:'not a time'}]){
+  const h=harness({safety});
+  await assert.rejects(()=>h.coordinator.execute(h.spec),/could not verify the Before restore safety version in Device Folder/,JSON.stringify(safety));
+  assert.equal(h.events.includes('apply'),false,`an unverified safety version (${JSON.stringify(safety)}) never lets the restore apply`);
+  assert.deepEqual(h.state(),{suspended:0,activeLock:false});
+}
+
+// Local data that changes while the safety version is made is not in it: the
+// recovery stops before applying, so the change is never lost.
+{
+  const h=harness({changeDuringSafety:true});
+  await assert.rejects(()=>h.coordinator.execute(h.spec),error=>error.code==='STUDY_DIRECTOR_RECOVERY_STALE_SAFETY');
+  assert.equal(h.events.includes('apply'),false,'a change made during the safety backup stops the restore');
   assert.deepEqual(h.state(),{suspended:0,activeLock:false});
 }
 

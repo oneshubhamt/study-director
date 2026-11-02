@@ -58,7 +58,7 @@ const mutations=Object.freeze([
   Object.freeze({
     id:'hourly-keeps-only-changed-notes',file:'source/core/managed-repository.js',
     find:'if(hour(row)===hour(after)||notes(row)&&notes(row)===notes(after))continue;',replace:'if(hour(row)===hour(after))continue;',
-    tests:Object.freeze(['tests/integration/backup/repository-checkpoint.mjs'])
+    tests:Object.freeze(['tests/unit/backup/repository-retention.mjs'])
   }),
   Object.freeze({
     id:'clock-jump-rebases-timer-start',file:'source/core/timer-engine.js',

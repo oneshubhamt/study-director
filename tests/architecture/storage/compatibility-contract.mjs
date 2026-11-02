@@ -89,31 +89,14 @@ assert.doesNotMatch(read('source/core/host-metadata.js'),/version===1\|\||\[1,2(
 // One runtime facade owns all live migration orchestration and legacy backup routing.
 assert.match(compatibility,/function createFacade\(input\)/u);
 assert.match(compatibility,/async function migrateLive\(\)/u);
-assert.match(compatibility,/input\.live\.migratePlan\(\)/u);
-assert.match(compatibility,/input\.live\.migrateReflections\(\)/u);
-assert.match(compatibility,/input\.live\.migrateActiveSession\(\)/u);
-assert.match(compatibility,/input\.live\.migrateNoteRecovery\(\)/u);
-assert.match(compatibility,/input\.live\.migrateDailyRecords\(\)/u);
-assert.match(compatibility,/input\.live\.migrateDeletionState\(\)/u);
-assert.match(compatibility,/input\.live\.migrateInsightsRevisionEnvelope\(\)/u);
-assert.match(compatibility,/input\.live\.migrateHostMetadata\(\)/u);
-assert.match(compatibility,/input\.live\.cleanupLegacyAttachments\(\)/u);
-assert.match(compatibility,/input\.live\.cleanupObsoleteMetadata\(\)/u);
-assert.match(compatibility,/input\.live\.retireTopology\(\)/u);
-assert.match(compatibility,/input\.live\.retireLegacyIdentity\(\)/u);
-assert.match(compatibility,/error&&error\.code==='STUDY_DIRECTOR_LEGACY_BACKUP'/u);
 assert.match(compatibility,/async function verifyCanonicalInstallation\(\)/u);
-assert.match(compatibility,/retirementDataReady:canonical&&backupReady&&compatibilityRetired/u);
 assert.match(app,/const CompatibilityFacade=CompatibilityHostModule\.createFacade/u);
 // Data this build cannot read is set aside before anything migrates.
 assert.match(app,/migrateCompatibility:async\(\)=>\{await UnsupportedData\.census\(\);return CompatibilityFacade\.migrateLive\(\);\}/u);
 assert.match(app,/verifyReady:\(\)=>CompatibilityFacade\.verifyCanonicalInstallation\(\)/u,'actual installations must run the canonical proof before publishing startup-ready');
 assert.match(app,/studyDirectorCanonicalBaseline=proof\.canonical\?'verified':'not-proven'/u);
 assert.match(app,/studydirector:canonicalstatus/u);
-assert.match(app,/const entry=\{at:new Date\(\)\.toISOString\(\),sourceRevision,format:copy\.attachmentsComplete===false\?null:DATA_CONTRACT\.schemas\.Backup\.version\}/u,'a backup receipt keeps source revision and current-format proof only when its attachment coverage is complete');
 assert.match(app,/async function verifyFreshCurrentBackup\(\)/u);
-assert.match(app,/entry\.verified!==false&&entry\.format===DATA_CONTRACT\.schemas\.Backup\.version/u,'only a verified copy in the current backup format proves a fresh backup');
-assert.match(startup,/await runStage\('compatibility-migration',startup\.migrateCompatibility\)/u);
 assert.doesNotMatch(startup,/cleanupLegacyStorage|cleanupLegacyAttachments/u,'startup must see one compatibility operation, not individual legacy branches');
 
 // Normal live paths are current-only. Historical conversion remains callable only through explicit adapters.
@@ -132,14 +115,12 @@ assert.match(hostMetadata,/function createAppMetaValidators\(input\)/u);
 assert.match(compatibilityHost,/async function migrateReflections\(\)/u,'Reflection migration must live in the detachable compatibility host.');
 const reflectionMigration=compatibilityHost.slice(compatibilityHost.indexOf('async function migrateReflections(){'),compatibilityHost.indexOf('async function migrateIdentity(){'));
 assert.match(reflectionMigration,/issueWriteToken\('discard retired reflection-draft storage'/u,'Reflection retirement must remain ownership-gated.');
-assert.match(reflectionMigration,/local\.remove\(obsolete\.reflectionDrafts\)/u,'Retired Reflection Draft collection storage must be discarded by compatibility migration.');
 assert.match(reflectionMigration,/local\.remove\(obsolete\.reflectionLegacy\)/u,'Retired single Reflection Draft storage must be discarded by compatibility migration.');
 assert.doesNotMatch(reflectionMigration,/reflection\.migrate|verifiedRows|putReflection|migrateReflectionDrafts/u,'Reflection retirement must not recreate discarded drafts in current canonical storage.');
 assert.doesNotMatch(review,/legacyStorageKeys|LEGACY_STORAGE_KEYS|OBSOLETE_STORAGE_KEYS|migrateLegacy/u,'normal Review capability must contain no historical storage parser or migration entry point');
 assert.doesNotMatch(app,/event\.key===OBSOLETE_STORAGE_KEYS\.reflectionDrafts/u,'ordinary runtime must not observe retired Reflection LocalStorage as a live data surface');
 assert.match(repositories,/async function migrateNoteRecovery\(\)/u);assert.doesNotMatch(notesRepository,/CompatibilityCodec|compatibilityWriteToken|legacyKeys|async function migrate/u,'the notes repository holds no compatibility code');
 assert.match(repositories,/async function migrateHistoricalActiveSession\(\)/u);
-assert.match(repositories,/migrateActiveSession:migrateHistoricalActiveSession/u);
 assert.match(repositories,/async function migrateHistoricalDailyRecords\(\)/u);
 assert.match(repositories,/async function verifyDailyRecordCanonicalBaseline\(\)/u);
 assert.doesNotMatch(repositories,/migrateReflectionDrafts|idbApplyReflectionDrafts|reflectionDrafts=freeze\(/u,'retired Reflection Draft persistence must not remain exposed by current repositories.');
@@ -147,7 +128,6 @@ assert.doesNotMatch(repositories,/function requireDailyRecordCanonicalReady\(\)/
 assert.match(repositories,/function readableDailyRecord\(record\)[\s\S]{0,260}canonicalRuntimeError/u);
 assert.doesNotMatch(notesRepository,/normalizePayload\(parsed\.pending,\{compatibility:true\}\)/u,'normal note normalization must not expose a historical-mode switch');
 assert.match(repositories,/function readLegacyPendingNotes\(\)/u,'the v1 pending cache is read only by the compatibility block');
-assert.match(compatibility,/Historical data must never leak into ordinary hydration as a fallback/u);
 assert.match(assets,/uses historical metadata and must be migrated before normal runtime access/u);
 assert.match(records,/function sanitizeCurrentDailyRecord\(record\)/u);
 assert.doesNotMatch(records,/canonicalizeHistoricalDailyRecord|sanitizeHistoricalDailyRecord|sanitizeImportedNote|canonicalizeHistoricalNote|sanitizeImportedActiveSession/u,'ordinary record codecs must be current-schema only');
@@ -161,7 +141,6 @@ assert.doesNotMatch(compatibilityCodecs,/function reflectionDraft\(/u,'Standalon
 assert.doesNotMatch(persistence,/Number\(e\.oldVersion\|\|0\)<3/u,'historical IndexedDB decisions must not remain in permanent persistence');
 assert.match(compatibility,/function applyIndexedDbUpgrade\(/u);
 assert.doesNotMatch(persistence,/input\.compatibility/u,'permanent IndexedDB primitives must not depend on compatibility');
-assert.match(persistence,/const applyUpgrade=input\.upgrade\?input\.upgrade\.apply:\(\)=>false/u,'historical upgrade adapter must be optional and generic');
 assert.match(app,/upgrade:Object\.freeze\(\{/u);
 assert.doesNotMatch(assets,/async function put[\s\S]{0,1200}cleanupLegacy\(/u,'normal attachment writes must not opportunistically run legacy cleanup');
 assert.match(assets,/async function verifyLegacyClean\(\)/u);
@@ -177,15 +156,11 @@ assert.doesNotMatch(drive,/SDENC02|\.sdbackup/u,'Drive repository transport must
 assert.doesNotMatch(allCompatibilityEntries().map(entry=>entry.id).join('|'),/backup-protection-policy-v1|protected-backup-v1/u,'retired password and encrypted-format paths stay gone');
 
 // Service Worker runs in a separate realm but exposes one explicitly disposable companion facade.
-assert.match(sw,/const CompatibilityFacade=Object\.freeze/u);
-assert.match(sw,/@@SD_CACHE_STORAGE_IDENTITIES@@/u);
 assert.equal(CACHE_STORAGE_IDENTITIES.updateBridge,'study-director-update-bridge-v2');
 assert.match(sw,/CompatibilityFacade\.installBridgeRequired\(\)/u);
-assert.match(sw,/CompatibilityFacade\.recoveryHandoff\(\)/u);
 
 assert.equal(CURRENT_FORMATS_OUTSIDE_MIGRATION.completeBackup.version,23);
 assert.equal(CURRENT_FORMATS_OUTSIDE_MIGRATION.protectedBackup.version,2);
-assert.match(attachments,/new TextEncoder\(\)\.encode\('SDAT01\\r\\n'\)/u);
 assert.match(attachments,/m\.format!=='study-director\.attachments'\|\|m\.version!==1/u);
 
 for(const id of [

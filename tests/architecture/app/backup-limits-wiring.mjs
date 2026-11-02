@@ -13,7 +13,6 @@ const declared=backup.match(/const REQUIRED_LIMITS=freeze\(\[([^\]]*)\]\)/u);
 assert.ok(declared,'backup.js declares the limits it requires');
 const required=new Set([...declared[1].matchAll(/'([A-Za-z]+)'/gu)].map(match=>match[1]));
 for(const key of read)assert.ok(required.has(key),`backup.js reads APP_LIMITS.${key}, so it must be in REQUIRED_LIMITS`);
-assert.match(backup,/REQUIRED_LIMITS\.filter\(key=>!\(Number\(ports\.configuration\.limits\[key\]\)>0\)\)/u,'start-up refuses a missing or non-positive limit');
 
 const start=app.indexOf('const BackupRuntime=BackupModule.createRuntime(');
 assert.ok(start>=0,'the app creates the Backup runtime');

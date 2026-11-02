@@ -13,6 +13,7 @@ const CHECKPOINT=value=>'cp_'+value.repeat(32);
 const events=[],statuses=[],diagnostics=[];
 let storedPending=null,storageReadError=null,providerBringInResult=freeze({ok:true}),chooseMode='replace',restoredCheckpoint='',restoredConfirmed=false,suspended=0,cancelImportCalls=0,deviceCancelCalls=0,providerCancelCalls=0,lastProviderCancelId='';
 let deletionResults=[];
+let attachmentsBusy=false,notesFailure=null,backgroundSettled=null;
 let providerRestoreImpl=async()=>freeze({ok:true});
 let driveConnected=false,noteVersionsImpl=async()=>freeze({available:true,entries:freeze([])}),lastProviderBringIn=null;
 let deviceRestoreFailure=null;const removedVersions=[];
@@ -41,8 +42,8 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
   }}),
   lifecycle:freeze({
     activeSessionIssue:()=>'',activeSessionLoad:async()=>freeze({ok:true,value:session.tasks?freeze({revision:session.revision}):null,error:null,storage:freeze({idb:true})}),activeSessionSettled:async()=>{events.push('active-settled');return true;},
-    attachmentBusy:()=>false,canonicalPlanDraft:async()=>plan.stored,deletionRecoveryFlush:async()=>{events.push('deletion-flush');const value=deletionResults.length?deletionResults.shift():true;if(value instanceof Error)throw value;return value;},
-    flushNotes:async()=>{events.push('notes-flush');return true;},flushPlanDraft:async()=>{events.push('plan-flush');return true;},hasTasks:()=>session.tasks,noteFailure:()=>null,
+    attachmentBusy:()=>attachmentsBusy,canonicalPlanDraft:async()=>plan.stored,deletionRecoveryFlush:async()=>{events.push('deletion-flush');const value=deletionResults.length?deletionResults.shift():true;if(value instanceof Error)throw value;return value;},
+    flushNotes:async()=>{events.push('notes-flush');return true;},flushPlanDraft:async()=>{events.push('plan-flush');return true;},hasTasks:()=>session.tasks,noteFailure:()=>notesFailure,
     planDraft:()=>plan.cached,planInputValue:()=>plan.input,quiesce:async operation=>{events.push('quiesce-enter');try{return await operation();}finally{events.push('quiesce-exit');}},
     // Mirrors PlanData: the write is skipped when the page believes storage already holds it.
     savePlanDraft:async(options={})=>{plan.saves.push(options.force===true);if(options.force===true||plan.persisted!==plan.input){if(plan.writable)plan.stored=plan.input;plan.persisted=plan.input;}plan.cached=plan.input;return true;},settleAttachmentWriters:async()=>{events.push('attachments-settle');return true;},settlePlan:async()=>{events.push('plan-settle');return true;},writeLiveDraft:async()=>{session.writes+=1;session.revision+=1;session.source=new Date(Date.parse('2026-09-20T12:00:00.000Z')+session.revision*1000).toISOString();return freeze({ok:true,value:freeze({revision:session.revision}),storage:freeze({idb:true})});}
@@ -67,7 +68,7 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
       if(id==='device-folder'){restoredCheckpoint=options.checkpointId;restoredConfirmed=options.confirmed===true;events.push(`restore:${restoredCheckpoint}`);return freeze({ok:true});}
       return providerRestoreImpl(id,options);
     },
-    suspendBackground:()=>{suspended+=1;events.push('suspend');let released=false;return freeze({settled:Promise.resolve(),release:()=>{if(released)return false;released=true;suspended-=1;events.push('resume');return true;}});}
+    suspendBackground:()=>{suspended+=1;events.push('suspend');let released=false;return freeze({settled:backgroundSettled||Promise.resolve(),release:()=>{if(released)return false;released=true;suspended-=1;events.push('resume');return true;}});}
   }),
   session:freeze({hasBlocking:()=>sessionBlocking}),
   sourceRevision:()=>session.source,
@@ -85,8 +86,37 @@ await assert.rejects(()=>providerHooks.pending.mark('google-drive'),/temporary a
 assert.equal(storedPending,preservedPending,'failed strict pending-marker mutation must not overwrite or remove unread durable state');
 storageReadError=null;assert.equal(await providerHooks.pending.read('google-drive'),null,'a successfully read marker without this provider is confirmed absence');storedPending=null;diagnostics.length=0;
 
-const recovery=await host.managedRecovery(freeze({kind:'restore-version',label:'Device Folder',createSafety:async()=>freeze({verified:true,checkpointId:CHECKPOINT('c'),sourceRevision:'2026-09-20T12:00:00.000Z'}),apply:async()=>{events.push('apply');return freeze({ok:true});},publishPresent:async()=>freeze({status:'completed',checkpointId:CHECKPOINT('e')})}));
+const recoverySpec=freeze({kind:'restore-version',label:'Device Folder',createSafety:async()=>freeze({verified:true,checkpointId:CHECKPOINT('c'),sourceRevision:'2026-09-20T12:00:00.000Z'}),apply:async()=>{events.push('apply');return freeze({ok:true});},publishPresent:async()=>freeze({status:'completed',checkpointId:CHECKPOINT('e')})});
+const beforeRecovery=events.length;
+const recovery=await host.managedRecovery(recoverySpec);
 assert.equal(recovery.managedRecovery.present.status,'completed');assert.equal(suspended,0);
+// Before anything is replaced, every pending write is saved: attachments,
+// the Plan draft, notes, deletions and the active session, and automatic
+// backups are paused for the whole operation.
+{
+  const steps=events.slice(beforeRecovery),applied=steps.indexOf('apply');
+  assert.ok(steps.indexOf('suspend')>=0&&steps.indexOf('suspend')<applied,'automatic backups pause before the restore');
+  for(const step of ['attachments-settle','plan-flush','plan-settle','notes-flush','deletion-flush','active-settled'])assert.ok(steps.indexOf(step)>=0&&steps.indexOf(step)<applied,`${step} happens before the restore applies`);
+  assert.ok(steps.lastIndexOf('resume')>applied,'automatic backups resume after it');
+}
+// Background work already running when a restore starts finishes first:
+// nothing is saved or replaced until it has.
+{
+  let finish;backgroundSettled=new Promise(resolve=>{finish=resolve;});
+  const start=events.length,running=host.managedRecovery(recoverySpec);
+  for(let turn=0;turn<20;turn++)await Promise.resolve();
+  assert.deepEqual(events.slice(start).filter(event=>['plan-flush','notes-flush','apply'].includes(event)),[],'nothing happens while background work is still running');
+  finish();backgroundSettled=null;await running;
+  assert.ok(events.slice(start).includes('apply'),'the restore goes ahead once it has finished');assert.equal(suspended,0);
+}
+// Nothing is replaced while an attachment is still being written or notes
+// are not safely stored.
+for(const [label,arrange] of [['an attachment is still saving',()=>{attachmentsBusy=true;}],['notes are not safely stored',()=>{notesFailure=freeze({failed:true,message:'Notes are not safely stored yet.'});}]]){
+  arrange();const start=events.length;
+  await assert.rejects(()=>host.managedRecovery(recoverySpec),/attachment is still being prepared|Notes are not safely stored/,label);
+  assert.equal(events.slice(start).includes('apply'),false,`${label}: the restore does not apply`);assert.equal(suspended,0,`${label}: automatic backups resume`);
+  attachmentsBusy=false;notesFailure=null;
+}
 
 await host.history.open();await new Promise(resolve=>setImmediate(resolve));
 assert.equal(deviceHistoryReads,1);assert.equal(providerHistoryReads,0,'Version History reads only the locations that are connected');
