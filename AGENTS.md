@@ -28,18 +28,29 @@ Stop and ask before you:
 - Report what you actually changed and checked. Say plainly when a check was skipped or failed; never describe a check you did not run as passed.
 - If one of these rules blocks the task, stop and ask rather than work around it.
 
-## Active programme read-first and five-step workflow
+## How to work
 
-- Before beginning background-services work on `current-fixes`, read `docs/PROGRAMMES.md`, `docs/BACKGROUND-SERVICES-REMEDIATION.md` (entire ledger and latest journal) and relevant current production code. The A–F data/backup programme is certified closed, not the present P0 plan.
-- For each P0–P6 pass: preliminary orientation (current SHA, IDs, dependencies) → de novo source audit → written objectives/plan **before** edits → minimal implementation → objective-by-objective source recheck → targeted QA → append-only journal and tracker update. Full QA only after substantial work/explicit milestone, not per pass.
-- Documentation Phase 0 does not authorize P0 implementation; a passing fixture is never independent proof that production paths are correct. Preserve the original A–F findings/history and do not reopen without new code-level evidence.
+- Start at [docs/README.md](docs/README.md) and read the page for the area you are changing. The code is the final authority; a doc or a passing test is not proof that the code is right.
+- Before editing, write numbered objectives (in the conversation, then in the pull request). For data, storage, backup, sync or background-job changes, also name the invariants at risk and the failure paths you will test.
+- Plans may change as you learn; say what changed and why.
+- Before finishing, check each objective against the code, not only the tests: met, partly met or not met.
+- Record lasting decisions in the area's doc and open work in [docs/backlog.md](docs/backlog.md). History lives in git and pull requests; do not keep a journal in the repository.
+- [docs/workflow.md](docs/workflow.md) has the detail: choosing tests, commands, build and release.
 
 ## This repository: Study Director
 
-- Study Director is a local-first study planning PWA. Follow [CONTRIBUTING.md](CONTRIBUTING.md): one branch per coherent change, a pull request to `main`, and targeted QA for what changed.
+- Study Director is a local-first study planning PWA. One branch per coherent change, a pull request to `main`, and targeted tests for what changed.
 - Change first-party code only in `source`, `portable` or `rich-text`. Never hand-edit generated `dist` output or external bundles.
 - `release.config.mjs` is the only source of release identity. `LICENSE` must stay identical to `source/legal/LICENSE.txt`.
 - A pull request that changes the shipped app (anything under `source`, `portable` or `rich-text`) raises `release` in `release.config.mjs` by one, for example `SDVB75F16` → `SDVB75F17`. Do this once per pull request, not once per commit, and only when the pull request's `release` is not already above `main`'s. Change nothing else in `release.config.mjs` without asking. Pull requests that change only tests, docs or tooling keep the release.
 - A pull request titled like a bug fix (for example `fix: ...`) must include a regression test; CI enforces this.
-- Never run a browser test marked `alone` in `tests/helpers/browser-tests.mjs` at the same time as another browser test; they fail under CPU load. `npm run test:browser*` runs the others two at a time and the `alone` tests by themselves. Report browser runs as one summary, not test by test. Before you treat a failure seen under concurrency as a bug, rerun that test alone. [tests/README.md](tests/README.md#browser-test-reliability) has the full rules.
+- Never run a browser test marked `alone` in `tests/helpers/browser-tests.mjs` at the same time as another browser test; they fail under CPU load. The browser runner runs the others two at a time and the `alone` tests by themselves. Report browser runs as one summary, not test by test. Before you treat a failure seen under concurrency as a bug, rerun that test alone. [tests/README.md](tests/README.md#browser-test-reliability) has the full rules.
 - Storage, backup and restore code protects the owner's data. Changes there need targeted tests at the right layer.
+- If `npm run` refuses to start because of the pinned npm version, run the equivalent `node` command from [docs/workflow.md](docs/workflow.md#commands).
+
+## Owner's preferences
+
+- Clean, lean and reliable: simple things done very well, no unnecessary features or over-engineering.
+- The owner's data is never put at risk.
+- The app defines correct behaviour; tests follow it, never the reverse.
+- Short, plain replies, with tables where they help.

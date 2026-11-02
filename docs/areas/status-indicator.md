@@ -1,11 +1,11 @@
-# Sync and background status — plan and contract
+# Status indicator
 
 One indicator tells the person, on every screen size, what Study Director is
 doing in the background and whether anything needs them. It replaces the
 sidebar's sync text line and the phone circle's warning dot. Decisions below
 were made with the owner on 2026-11-01.
 
-## 1. Where it shows
+## Where it shows
 
 | Screen | Host | Shape |
 |---|---|---|
@@ -17,7 +17,7 @@ Every host is the same component: a ring (SVG rounded rectangle) and a corner
 badge. Tapping any host opens the profile panel. The panel lists everything
 and offers each action.
 
-## 2. Ring and badge
+## Ring and badge
 
 The ring shows **sync health**. The badge shows the **most important thing
 that needs the person**. Both can show at once (for example Synced with a
@@ -43,14 +43,14 @@ shape or motion and always has text (hover tooltip and screen-reader label).
 | `update` | Amber **↑** | App update needed to keep syncing |
 | `warning` | Amber **!** | Needs attention but not failing: Device Folder permission, storage or backup-check warning, no backup in over a week |
 | `review` | Yellow dot (count when 2 or more) | Something to review: kept versions, a sync review |
-| `info` | Small blue dot (count when 2 or more) | A new app version is ready (not blocking); news that faded unseen since the panel was last opened ([NOTIFICATIONS.md](NOTIFICATIONS.md), Recent) |
+| `info` | Small blue dot (count when 2 or more) | A new app version is ready (not blocking); news that faded unseen since the panel was last opened ([notifications.md](notifications.md#recent)) |
 
 **Priority.** Ring: offline → signed-out → blocked → syncing → error →
 pending → synced (a retry in progress shows as syncing). Badge: error → lock →
 update → warning → review → info. The tooltip and screen-reader label start
 with the most urgent text.
 
-## 3. Every case the old text line covered
+## Every case the old text line covered
 
 The sidebar text and the phone dot are retired. Each of their cases maps to
 the indicator; `tests/unit/backup/sync-status.mjs` checks every row.
@@ -72,7 +72,7 @@ signed out, first sync not finished, offline, failing after retries, Device
 Folder activity and problems, storage and backup-check warnings, today's
 session running on another device, app update ready, no backup in over a week.
 
-## 4. Profile panel — Sync & backups
+## Profile panel — Sync & backups
 
 - **Headline:** one sentence, for example "Synced at 12:04. This device is up to date."
 - **When next:** "Uploads by 12:24, or when you leave the app" (from the
@@ -87,7 +87,7 @@ session running on another device, app update ready, no backup in over a week.
   Disconnect) and Backup password (On / Off, Set / Change / Enter), then
   **Backup details** — a row with an arrow to Library → Data.
 
-**Panel layout** (Entry 030). The header (avatar with its ring, the name, the
+**Panel layout.** The header (avatar with its ring, the name, the
 Google account when there is one) and Done stay in place; only the middle
 scrolls. The name renames in place: tap it, type, Enter or leaving saves,
 Escape keeps the old name. Sections, in order: Sync & backups, Profiles on this
@@ -96,7 +96,7 @@ Recent (the three newest, Show all for the rest). Every section is a small
 heading over one box of rows; a row is a label over a quieter value with at most
 one compact button (32 px, 36 px on touch screens).
 
-## 5. Motion and accessibility
+## Motion and accessibility
 
 - Travelling arc only while work runs; `prefers-reduced-motion` shows a static
   dashed ring instead.
@@ -106,9 +106,9 @@ one compact button (32 px, 36 px on touch screens).
 - Each host's `aria-label` and `title` carry the full status text.
 - The panel section is a labelled region; its headline is a polite live region.
 
-## 6. Noise rules
+## Noise rules
 
-- Syncing and synced change only the indicator. Phase 1 adds no new toasts or sounds.
+- Syncing and synced change only the indicator. They add no pop-ups or sounds.
 - Existing notices (sync review, sign-in expiry, session hand-off) are unchanged.
 - Continue Here shows its steps in the Execute card and the Plan strip; only a
   failure adds a pop-up (it also stays in the card).
@@ -116,7 +116,7 @@ one compact button (32 px, 36 px on touch screens).
   resolved) and versions kept for review (once per version since start-up).
 - Red only after retries run out: the ring, the badge, the "keeps failing"
   pop-up and the Connect card; while a sync still retries it is amber.
-- Every pop-up has a kind ([NOTIFICATIONS.md](NOTIFICATIONS.md), Kinds):
+- Every pop-up has a kind ([notifications.md](notifications.md#kinds)):
   result, news, blocking or critical. Blocking problems (signed out,
   password, app update, retries ran out, Device Folder permission, data from
   a newer version) stay pinned until closed or resolved and knock once (red:
@@ -128,23 +128,14 @@ one compact button (32 px, 36 px on touch screens).
 - News that faded unseen counts on the blue `info` badge until the profile
   panel is opened; the panel's Recent list shows the day's pop-ups.
 
-## 7. Phases
-
-| Phase | Scope | State |
-|---|---|---|
-| 1 | Status model (`backup-presentation.status`), indicator on all hosts, panel section, retire the text line and phone dot | Done |
-| 2 | Continue Here: instant busy button ("Continuing…"), step text in the Execute card, errors in the Execute card; measure and shorten the wait for a running sync | Done (see below) |
-| 3 | Connect Drive: a progress card on any tab (checking folder → bringing in changes → uploading → Synced ✓) | Done (see below) |
-| 4 | Remaining cases: session hand-off ready row, first-sync progress counts, pop-up rules from section 6 | Done (see below) |
-
-### Phase 2 — Continue Here
+## Continue Here
 
 - **Feedback.** Every Continue Here button reads "Continuing…" (disabled, busy) from the tap until it ends. The Execute card and the Plan strip show the step: checking today's session, pausing this device's sync, confirming with Google Drive, starting here. On a phone the step replaces the card's longer text so the button stays in view.
 - **Errors** stay in the Execute card in plain words (Drive busy, not connected, changed on another device, offline) and pop up once.
 - **Wait, measured** (two browsers, simulated Drive at 250 ms a request): 2.8 s with nothing running, 3.1 s with a sync catch-up running, 3.6 s with an upload running. Stopping the running work takes 0.03–0.6 s; the rest is the ownership claim, about 11 Drive requests one after another, whose order keeps two devices from claiming at once. It is not shortened here.
-- **Fixed on the way:** Continue Here pressed before this device took in the other device's newest upload could hand the session back once that upload came in, leaving neither device able to run or upload it. A sync now keeps the session while Drive's claim names this device ([BACKUP-ENGINE.md](BACKUP-ENGINE.md), Active Session).
+- **Session kept through a sync.** A sync keeps the session while Drive's ownership claim names this device, so Continue Here pressed before this device took in the other device's newest upload cannot hand the session back ([study-session.md](study-session.md)).
 
-### Phase 3 — Connect Google Drive card
+## Connect Google Drive card
 
 - **When.** From any Connect or Sign in (profile panel, Library → Data, first start, the permission notice) until that first sync ends, on every tab.
 - **Where.** A card of the notification stack (top right on a laptop, above the bottom bar on a phone): first after the pinned cards, counted in "+N more", closed by Clear all.
@@ -153,14 +144,14 @@ one compact button (32 px, 36 px on touch screens).
 - **×** hides it; syncing carries on and the indicator still shows it.
 - **Model.** `backup-presentation.connectProgress` decides; the host only remembers when the card started and whether a catch-up or upload ran since.
 
-### Phase 4 — Remaining cases
+## Hand-off row, counts and pop-ups
 
 - **Hand-off row.** A session suspended on another device is a panel row, "Today’s session was suspended on Laptop. Continue it here when you’re ready.", with Continue here (no badge: it is an offer). That button and the hand-off pop-up's Continue here open Execute first, so the Continue Here steps show; the pop-up closes once Continue Here starts.
 - **Counts.** While a catch-up or upload runs, the panel's line under the headline shows its stage and counts, for example "Downloading backup data from Google Drive… · 2 of 5 complete · 150 KB of 300 KB".
-- **Pop-ups.** Section 6. Kept versions now pop up once ("Kept for review", Review); not those present at start-up, not while the Connect card shows (it reports them), and not a session this device just handed over (its own pop-up says so). The Connect card is amber while a sync retries or is signed out, red once retries ran out or a sign-in fails.
-- **Mechanism.** `notice-coordinator.setStudying` holds news without showing or timing it; the host sets it from the timer mode and the current block (work blocks only). (Entry 029 replaced the `waitWhileStudying` flag with the news kind.)
+- **Pop-ups.** As in "Noise rules" above. Kept versions pop up once ("Kept for review", Review); not those present at start-up, not while the Connect card shows (it reports them), and not a session this device just handed over (its own pop-up says so). The Connect card is amber while a sync retries or is signed out, red once retries ran out or a sign-in fails.
+- **Mechanism.** `notice-coordinator.setStudying` holds news without showing or timing it; the host sets it from the timer mode and the current block (work blocks only).
 
-## 8. Ownership
+## Ownership
 
 - `source/core/backup-presentation.js` owns the pure status decision (no DOM, no clocks except the `now` it is given).
 - The host (`source/app.html`) gathers the inputs, draws the hosts and panel, and maps panel actions to existing feature actions. Features keep their own operations; the indicator never starts work on its own.

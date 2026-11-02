@@ -1465,7 +1465,7 @@ html[data-sd-appearance-shift] *,html[data-sd-appearance-shift] *::before,html[d
 .interaction-toast.warning .interaction-toast-title{color:var(--sd-color-warning)}
 .interaction-toast.error .interaction-toast-title{color:var(--sd-color-danger)}
 .interaction-toast-message{color:var(--sd-color-text-secondary-strong);line-height:1.35;overflow-wrap:anywhere}
-/* Connect Google Drive card (docs/STATUS-SYSTEM.md, phase 3): first in the
+/* Connect Google Drive card (docs/areas/status-indicator.md, Connect card): first in the
    notification area, so toasts stack below it. */
 .drive-connect-card{display:grid;gap:8px;padding:12px 12px 12px 14px;border:1px solid var(--sd-state-accent-line);border-radius:var(--sd-shape-floating-radius);background:var(--sd-material-nudge);box-shadow:var(--sd-depth-floating);backdrop-filter:var(--sd-material-nudge-filter);-webkit-backdrop-filter:var(--sd-material-nudge-filter);pointer-events:auto}
 .drive-connect-card[hidden]{display:none}
@@ -1501,7 +1501,7 @@ html[data-sd-appearance-shift] *,html[data-sd-appearance-shift] *::before,html[d
 .interaction-toast-close{width:34px;height:34px;min-width:34px;padding:0;border:0;background:transparent;color:var(--sd-color-text-secondary);font-size:20px;cursor:pointer}
 .interaction-toast[data-tier="critical"]{border-color:var(--sd-state-danger-line)}
 .interaction-toast[data-tier="critical"] .interaction-toast-title{color:var(--sd-color-danger)}
-/* Pop-up stack (docs/NOTIFICATIONS.md, layout). Collapsed: pinned cards, the
+/* Pop-up stack (docs/areas/notifications.md, stack). Collapsed: pinned cards, the
    front card and up to two edges peeking below it, then "+N more" and Clear
    all; expanded: one scrolling column over a see-through backdrop. The script
    places each card (data-stack-place) and its grid row. */
@@ -1613,7 +1613,7 @@ html[data-sd-appearance-shift] *,html[data-sd-appearance-shift] *::before,html[d
 .profile-tag:focus-visible{outline:2px solid var(--sd-color-accent-primary);outline-offset:2px}
 .profile-tag:active{transform:translateY(1px)}
 .profile-badge{display:none}
-/* Sync and background status (docs/STATUS-SYSTEM.md): one indicator on the
+/* Sync and background status (docs/areas/status-indicator.md): one indicator on the
    sidebar name (a squircle), the phone circle and the profile panel avatar.
    The ring is sync health; the corner badge is what needs the person. Shape
    and motion differ per state, so colour is never the only signal. */
@@ -1654,7 +1654,7 @@ html[data-sd-appearance-shift] *,html[data-sd-appearance-shift] *::before,html[d
   .status-ring rect{transition:none}
 }
 /* Profile panel: Sync & backups. */
-/* Profile panel (docs/STATUS-SYSTEM.md, panel). One frame: the header and
+/* Profile panel (docs/areas/status-indicator.md, panel). One frame: the header and
    Done stay, the middle scrolls. One section style: a small heading over one
    box of rows. One row: label over a quieter value, one compact button. */
 .profile-dialog[open]{display:flex;flex-direction:column;overflow:hidden}

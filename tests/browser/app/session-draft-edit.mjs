@@ -34,7 +34,7 @@ try{
 
   // While the timer runs on a work block, news (a pop-up that blocks nothing)
   // waits and a blocking one shows; pausing shows the one that waited, and so does
-  // moving on to a support block (STATUS-SYSTEM.md, noise rules).
+  // moving on to a support block (docs/areas/status-indicator.md, noise rules).
   const hold=await page.evaluate(`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms)),shown=text=>[...document.querySelectorAll('#sd-toast-region .interaction-toast')].some(node=>node.textContent.includes(text));
     d.Interactions.notify({source:'sync',key:'kept-new',kind:'warning',tier:'news',title:'Kept for review',message:'One version was kept.'});
     d.Interactions.notify({source:'qa',key:'blocking',kind:'warning',tier:'blocking',title:'Needs password',message:'Enter it to keep syncing.'});

@@ -1,6 +1,6 @@
-# Notification coverage and delivery contract
+# Notifications and sounds
 
-This is the current SDVB75EA coverage inventory, audited from notification producers, presentation adapters, direct status writes, audio/OS calls and feature operation boundaries. It is not inferred solely from test names. See `VERIFICATION.md` for results and platform gaps.
+Pop-ups, banners, the Recent list, app sounds and device notifications: who owns them, how each kind behaves, and every producer.
 
 ## Ownership and shared contract
 
@@ -87,7 +87,7 @@ Red blocking and critical pop-ups and the unsaved-work banner play Attention. Ba
 
 ## Deliberately local UI state
 
-The profile status indicator (ring and badge on the sidebar name, the phone circle and the profile panel; [STATUS-SYSTEM.md](STATUS-SYSTEM.md)) is derived from current state and Recent's unseen count and is not a notification producer: it emits no events, toasts or sounds.
+The profile status indicator (ring and badge on the sidebar name, the phone circle and the profile panel; [status-indicator.md](status-indicator.md)) is derived from current state and Recent's unseen count and is not a notification producer: it emits no events, toasts or sounds.
 
 Editor autosave glyphs, timer counters and study eligibility, form validation inside decision dialogs, consent/restore choices, loading shells, empty states, search counts, and native media controls remain with their feature UI. They are not independent toast/audio/OS producers. Operation outcomes above use coordinator state. Rendering and DOM transition caches contain elements, not a second notification history; Recent is the coordinator's own day list. Provider caches contain repository data, not a competing message history.
 
@@ -107,3 +107,37 @@ Device Folder and Drive share the same compact location labels and inline summar
 - Local recovery success is not external backup success. Pending convergence remains pending until verification actually succeeds.
 - Permissions and operations stay feature-owned; coordinator actions navigate/reopen or invoke an explicitly requested feature action.
 - A system notification click **focuses an existing in-scope Study Director client without calling `navigate`**; this avoids bypassing dirty-work/page-save safeguards. With no in-scope client, the service worker opens only an origin-and-scope-validated notification URL (or the app root). It never treats the OS click as permission to reset an existing route.
+
+## Coordinator events
+
+The shared immutable event contract carries `source`, `id`, `operationId`, `severity` (`info`, `success`, `warning`, `error`), `lifecycle` (`running`, `succeeded`, `failed`, `cancelled`, `resolved`), `foreground`, `title`, `message`, optional numeric `progress`, optional `action` (`label`, `run`), and `surface` (`toast`, `inline`, `quiet`). Background success/cancellation defaults to the quiet surface. Presentation actions run only on explicit activation. Progress carries a stage, completed/total item counts and completed/total byte counts.
+
+- `emit(event)` publishes a condition by source/id. Identical publications do not restart expiry or undo acknowledgement. `resolveEvent(source,id)` clears the condition and re-arms identical recurrence.
+- `notify(options)` adapts existing one-shot interaction messages. It deduplicates visible repetitions, while a later foreground result can appear again after the previous result expired or was dismissed. Unspecified severity is neutral; known failure callers explicitly report errors.
+- `begin(event)` establishes a new operation generation and returns a scoped `read()` / `update(patch)` / `resolve()` handle. A replaced generation cannot overwrite or clear the current one. Terminal outcomes reject later progress. Controllers must retain this handle in the operation closure rather than discover the current handle in a delayed callback.
+- How long a pop-up stays, where it sits and its order follow its kind (above). One coordinator deadline timer manages pop-up expiry and explicitly transient inline feedback (`retainInline:false`). Hover, keyboard focus, a hidden page and the expanded stack pause the remaining time; removal cleans stale pause reasons. Active operations and unresolved failures stay until resolved or closed.
+- The existing top notice region retains local-save failure > safety > storage > update > installation ordering. Acknowledgement suppresses the current condition; resolving it clears that suppression and resets the live announcement.
+
+## Inline feedback
+
+Device Folder, Drive and portable controllers publish directly through the shared backup presentation port. Recovery lends its event handle to nested work. The host renders coordinator-owned inline events beside the backup rows, preserving progress when an operation overlay closes. Existing Settings/Versions actions can reopen active operations. Device automatic backup retains its existing quiet inline presentation, with operation-specific busy labels. Recovery outcomes name local verification and provider-specific pending/verified backup state separately.
+
+Provider transport caches retain operational repository metadata. Review saves, clipboard export, Library exports/deletions and attachment operations use the coordinator’s scoped presentation port. Optional `surfaceId` identifies the existing inline status node; a single host subscriber projects its latest event. Local save failures have the highest-priority persistent banner with recovery guidance. A committed save followed by a refresh or cleanup error explicitly retains the local-save-completed outcome. Editor autosave indicators and decision dialogs remain feature-owned.
+
+Plan, saved-plan operations, generic Review/Library/recovery feedback, attachment access failures, backup encryption errors, clipboard diagnostics and Insights computation outcomes also use coordinator state. The host projects inline messages using a coordinator-issued surface revision: an operation keeps its initial surface precedence so late callbacks cannot overwrite a newer operation, while a new unscoped feedback occurrence can supersede older content. Expired transient feedback leaves the surface empty rather than resurrecting an older message. Scoped reads check generation even when a caller reuses an operation ID. Startup journal recovery is a background running/succeeded/failed operation, not an error-shaped progress message.
+
+## Sound policy and settings
+
+Sound is an output of the notification coordinator, not a Pomodoro setting. `configureDelivery` installs the audio and OS transport ports and the current tab/visibility predicate. Semantic event occurrences (`cue`, `occurrence`, `operationId`, optionally `system`) retain feature provenance. Features never select assets or audio frequencies. Timer start/resume/pause, combined block advancement, study-day completion, Pomodoro and practice cues are scoped through the coordinator. The Pomodoro module owns rhythm and break eligibility only.
+
+The central cue policy defines Full / Minimal / Off. Full is the initial default; explicit changes persist as optional `soundMode` in typed PortablePreferences v2 within appMeta, including portable backup round trips. Existing records remain canonical without the optional field. An existing `nudge.sound:false` is read as Off only when the new field is absent; saving rhythm writes the current global sound mode and removes sound from new rhythm configuration. There is no migration framework or new store. Device permission and screen wake preferences remain device-local.
+
+Full adds short pause/resume/skip, near-target and explicit successful-operation cues. Minimal retains core study milestones, Pomodoro/break/overtime/target cues and actionable failures. Autosaves, normal automatic backup completion, cleanup, navigation and progress are silent. Failure conditions sound on first appearance, severity escalation, or recurrence after success/resolution; retries and reopening never replay them. Sound acceptance is separate from visual dismissal and operation cancellation.
+
+The coordinator fences delayed playback by operation generation, occurrence, lifecycle, semantic cue, visibility, ownership, sound mode and a 1.2-second loading deadline. It drops lower-priority cues during attention playback. Off and ownership/page lifecycle changes invalidate pending playback and fade current audio. Test sound is an explicit one-shot exception, without changing preferences or interrupting attention cues. No audio is queued for a future unlock.
+
+The private `audio-engine` makes a bounded catalogue of seventeen cues in code (thirteen original, four added in November 2026; Sounds, above), plays them as buffers with short fades, reports readiness, keeps each cue once made, makes a cue again for a new event if making it failed, and releases source/gain nodes. Its AudioContext is closed on disposal. The cues are the original Quiet Wood family: short D-major/pentatonic phrases of plucked-string notes (eight damped, slightly inharmonic partials over a quiet wooden body) with two early reflections, normalised to one loudness, mono at 22.05 kHz. They are acoustic-style modal synthesis, not recordings. The recipe (`PHRASES`, `tone`, `render` in `audio-engine.js`) reproduces the WAV files that shipped before (identical but for three samples one step apart), so no sound files ship or are precached. After sound is unlocked the engine makes every cue in idle moments, one at a time (about 160 ms in all on a desktop), so a cue never waits to be made when it plays. `tests/integration/ui/sound-synthesis.mjs` holds each original cue to the former files' length, peak, loudness and shape.
+
+For foreground study reminders, the coordinator chooses the custom cue; in the background it delegates to permitted OS delivery without deliberately playing an additional app sound. Off requests `silent` OS delivery. The browser adapter rechecks ownership, permission, enablement and occurrence validity after asynchronous service-worker lookup. Legacy OS-only reminders use `deliverSystem` with deduplication and a bounded delivery age. Only explicit settings actions request permission. Device-controlled sound, browser audio interaction requirements and lack of guaranteed closed-app alarms remain platform limits. Transient notification state is never backed up.
+
+Execute settings have two independent panels: compact Pomodoro rhythm with inline validated minutes (commit on blur/Enter), and Focus & Alerts with screen awake, app sounds and device notifications. Both are available without an active session and use shared Director/Glass tokens. Numeric values remain editable with rhythm disabled; native radios provide the mode selector's keyboard behavior. There is one Test sound action and one device-notification test, with no per-cue catalogue or volume slider.

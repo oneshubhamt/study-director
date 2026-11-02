@@ -284,7 +284,7 @@ class Element {
 }
 {
   // Kinds decide how long a pop-up stays, where it sits and what it sounds
-  // like (docs/NOTIFICATIONS.md, kinds).
+  // like (docs/areas/notifications.md, kinds).
   const {notices:n,time}=coordinator(),played=[],system=[];
   n.configureDelivery({audio:{play:name=>{played.push(name);return Promise.resolve(true);},stop:()=>{},status:()=>'ready'},system:event=>{system.push(event.id);return true;},context:()=>({owner:true,foreground:true})});
   const ids=()=>n.eventStatus().toasts.map(row=>row.id),toast=id=>n.eventStatus().toasts.find(row=>row.id===id);

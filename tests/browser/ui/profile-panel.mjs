@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor,settleMotion} from '../../helpers/browser-harness.mjs';
 
-// The profile panel (docs/STATUS-SYSTEM.md, panel) on a laptop and a phone:
+// The profile panel (docs/areas/status-indicator.md, panel) on a laptop and a phone:
 // Done stays in view however long the panel is; Recent shows the three newest
 // and Show all lists the rest; a live pop-up's Recent row opens what its
 // button opens; the name renames in place (Enter saves, Escape keeps it and

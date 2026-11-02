@@ -113,7 +113,7 @@ registry.define('notice-coordinator',1,()=>{
     const LIFECYCLES=new Set(['running','succeeded','failed','cancelled','resolved']);
     const SURFACES=new Set(['toast','inline','quiet']);
     // A pop-up's kind decides how long it stays, where it sits, its sound and
-    // whether it waits (docs/NOTIFICATIONS.md, kinds):
+    // whether it waits (docs/areas/notifications.md, kinds):
     //   result    answers the person's own action;
     //   news      background, blocks nothing; waits while a work block runs;
     //   blocking  something stops until the person acts; stays, pinned;
@@ -148,7 +148,7 @@ registry.define('notice-coordinator',1,()=>{
       if(raw.action){
         if(!String(raw.action.label||'').trim()||typeof raw.action.run!=='function')throw new TypeError('Notification action is invalid.');
         // opens: the button only opens something (a dialog, a place, a sign-in),
-        // so a click anywhere on the card may do the same (docs/NOTIFICATIONS.md).
+        // so a click anywhere on the card may do the same (docs/areas/notifications.md).
         action=freeze({label:String(raw.action.label).trim().slice(0,100),run:raw.action.run,opens:raw.action.opens===true});
       }
       // A decision notice may offer a second choice beside its primary action.

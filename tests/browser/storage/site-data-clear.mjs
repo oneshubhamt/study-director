@@ -23,7 +23,7 @@ const decision=toast('/Continue with current data/');
 const restoreView=`(()=>{const shown=node=>!!node&&node.checkVisibility();return {tab:document.querySelector('.pane.on')?.id||'',drawer:!document.getElementById('library-data').hidden,
   importButton:shown(document.querySelector('[data-action="pick-import-file"]')),driveRow:shown(document.getElementById('backup-provider-row-status-google-drive')),folderRow:document.getElementById('device-backup-status').textContent.trim()};})()`;
 const restoredToast=toast('/Added 1 past Saved Day and 0 attachments from your Device Folder backup/');
-// The automatic restore reports as news (docs/NOTIFICATIONS.md, kinds): it
+// The automatic restore reports as news (docs/areas/notifications.md, kinds): it
 // waits while the timer runs on a work block and shows at a pause.
 const restoreReported=`!!__PWA6.NoticeCoordinator.readEvent('storage-reset','restored')`;
 const read=`(async()=>{const d=__PWA6,session=await d.AppData.activeSession.load(0,{strict:true}),plans=await d.AppData.planData.read(),notes=await d.AppData.notes.readFreshPayload(),notice=${decision},yesterday=await d.AppData.dailyRecords.get(window.__qaYesterday||'');

@@ -352,7 +352,7 @@ registry.define('interactions',1,()=>{
       timer=setTimeout(finish,TOAST_REMOVE_FALLBACK_MS);
       return true;
     }
-    // The pop-up stack (docs/NOTIFICATIONS.md, layout). Collapsed: pinned
+    // The pop-up stack (docs/areas/notifications.md, stack). Collapsed: pinned
     // cards in full (two, or one on a phone), the newest of the rest in full
     // with up to two cards peeking behind it, and "+N more". Expanded: one
     // scrolling column over a see-through backdrop. Every card stays in the
@@ -492,7 +492,7 @@ registry.define('interactions',1,()=>{
       return card&&card.parentNode===region&&isStackCard(card)?card:null;
     }
     // A card in full view whose button only opens something does the same
-    // when clicked anywhere (docs/NOTIFICATIONS.md, stack); other cards, and
+    // when clicked anywhere (docs/areas/notifications.md, stack); other cards, and
     // cards behind the front one, expand the stack.
     function openCard(card){
       if(card.dataset.opens!=='true')return false;

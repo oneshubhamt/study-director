@@ -10,7 +10,7 @@ import {staticAssets} from '../../../build/module-manifest.mjs';
 const REFERENCE={begin:[24916,.2253,767.2],pause:[13891,.2546,403.91],resume:[15876,.2602,463.27],skip:[12568,.2339,355.93],
   complete:[25798,.2805,811.76],day:[33957,.2465,1094.53],invitation:[24475,.2506,717.5],return:[22711,.2817,665.21],
   overtime:[21609,.2382,645.92],target:[18963,.2619,559.13],hint:[9922,.2617,244.22],confirm:[12458,.2456,344.3],attention:[24696,.2497,736.38],
-  // Added later in the same recipe (docs/NOTIFICATIONS.md, sounds): measured
+  // Added later in the same recipe (docs/areas/notifications.md, sounds): measured
   // from the code when they were made, so any change to them is deliberate.
   settle:[32413,.2628,1011.36],handoff:[27342,.2574,818.61],knock:[16096,.2382,451.95],chime:[23152,.2694,663.98]};
 
