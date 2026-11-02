@@ -1362,7 +1362,14 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
 </main>
 </div>
 <!-- GLOBAL INTERACTIONS: decisions, structured input, brief feedback -->
-<div class="sd-toast-region" id="sd-toast-region" role="region" aria-label="Study Director notifications" aria-live="polite" aria-atomic="false"></div>
+<div class="sd-toast-region" id="sd-toast-region" role="region" aria-label="Study Director notifications" aria-live="polite" aria-atomic="false"><section class="drive-connect-card" id="drive-connect-card" aria-labelledby="drive-connect-title" aria-live="off" data-tone="working" hidden>
+  <div class="drive-connect-head"><strong class="drive-connect-title ui-label" id="drive-connect-title">Connecting Google Drive</strong><button class="drive-connect-close" type="button" data-action="close-drive-connect" aria-label="Hide (syncing continues)" title="Hide (syncing continues)">×</button></div>
+  <p class="drive-connect-status ui-body" id="drive-connect-status" role="status"></p>
+  <ol class="drive-connect-steps" id="drive-connect-steps"></ol>
+  <div class="drive-connect-bar" id="drive-connect-bar" aria-hidden="true" hidden><span></span></div>
+  <p class="drive-connect-detail ui-body" id="drive-connect-detail" hidden></p>
+  <button class="drive-connect-action mini-btn ui-btn" id="drive-connect-action" type="button" data-action="sync-status-action" hidden></button>
+</section></div>
 <dialog class="interaction-dialog" id="sd-interaction-dialog"></dialog>
 <dialog class="interaction-dialog danger library-clear-dialog" id="library-clear-dialog" aria-labelledby="library-clear-title">
   <div class="interaction-shell">
@@ -2570,7 +2577,7 @@ let sessionPanelMode='none',sessionPanelSession=null;
 let sessionSafetyMessage='';
 // The profile indicator's state (renderSyncStatus); declared early because
 // storage health asks for a redraw during start-up.
-let backupNudgeMessage='',driveConnecting=false,syncStatusTimer=null,syncStatusRing='',syncStatusSettle=null,sessionHandoff={step:'',error:''};
+let backupNudgeMessage='',driveConnecting=false,syncStatusTimer=null,syncStatusRing='',syncStatusSettle=null,sessionHandoff={step:'',error:''},driveConnectCard=null,driveConnectCardHide=null;
 let backupNudgeCheckedAt=0;
 let backupNudgeNotifiedDate='';
 let saveReminderDate='';
@@ -6180,6 +6187,7 @@ function renderSyncStatus(){
   const tag=document.getElementById('profile-tag');if(tag){tag.title=`${model.label} — profile and sync`;tag.setAttribute('aria-label',`Profile: ${name} · ${model.label}`);}
   const badge=document.getElementById('profile-badge');if(badge){badge.title=model.label;badge.setAttribute('aria-label',`Profile: ${name} · ${model.label}`);}
   renderSyncStatusPanel(model);
+  renderDriveConnectCard();
 }
 function renderSyncStatusPanel(model){
   const dialog=document.getElementById('profile-dialog');if(!dialog?.open)return;
@@ -6355,11 +6363,61 @@ async function driveProfileDeleted(info){
 // a background sync) never does.
 let driveConnectRequestedAt=0,driveLibraryQuestion=null;
 const DRIVE_CHOICE_WINDOW_MS=5*60*1000;
-// The indicator shows Connecting… from the click until the sign-in settles.
+// The indicator shows Connecting… from the click until the sign-in settles,
+// and the Connect card follows the first sync to its end.
 function connectDriveForProfile(){
-  driveConnectRequestedAt=Date.now();driveConnecting=true;scheduleSyncStatus();
-  const settled=()=>{driveConnecting=false;scheduleSyncStatus();};
-  const result=BackupProviderRuntime.connect('google-drive');Promise.resolve(result).then(settled,settled);return result;
+  driveConnectRequestedAt=Date.now();driveConnecting=true;startDriveConnectCard();scheduleSyncStatus();
+  const settled=ok=>{
+    driveConnecting=false;
+    if(driveConnectCard&&driveConnectCard.phase==='signing-in'){
+      if(ok===true)driveConnectCard.phase='signed-in';
+      else{const said=BackupPresentation.read('google-drive','backup-status');driveConnectCard.phase='failed';driveConnectCard.error=String(said?.message||'').replace(/^Connection failed:\s*/u,'')||'Sign-in didn’t finish.';}
+    }
+    scheduleSyncStatus();
+  };
+  const result=BackupProviderRuntime.connect('google-drive');Promise.resolve(result).then(settled,()=>settled(false));return result;
+}
+// The Connect card (docs/STATUS-SYSTEM.md, phase 3): it reads what Drive
+// reports and decides nothing itself.
+function startDriveConnectCard(){
+  clearTimeout(driveConnectCardHide);driveConnectCardHide=null;
+  driveConnectCard={startedAt:Date.now(),phase:'signing-in',error:'',seen:{sync:false,upload:false},kept:KeptVersions.count(),lastStatus:''};
+}
+function endDriveConnectCard(){clearTimeout(driveConnectCardHide);driveConnectCardHide=null;driveConnectCard=null;renderDriveConnectCard();}
+function driveConnectOperation(){
+  for(const [id,kind] of [['external-sync','sync'],['backup-operation',''],['external-backup','upload']]){
+    const event=BackupPresentation.read('google-drive',id);
+    if(event&&event.lifecycle==='running')return {kind:kind||(event.kind==='sync'?'sync':'upload'),message:String(event.message||''),progress:event.progress||null};
+  }
+  return null;
+}
+function renderDriveConnectCard(){
+  const node=id=>document.getElementById(id),root=node('drive-connect-card');if(!root)return;
+  const state=driveConnectCard;
+  if(!state){root.hidden=true;return;}
+  let model;
+  try{
+    const drive=BackupProviderRuntime.locationStatus('google-drive'),operation=driveConnectOperation();
+    if(drive?.sync?.syncing||operation?.kind==='sync')state.seen.sync=true;
+    if(operation?.kind==='upload'&&['upload','commit','complete'].includes(String(operation.progress?.stage||'')))state.seen.upload=true;
+    model=BackupPresentation.connectProgress({phase:state.phase,error:state.error,startedAt:state.startedAt,online:navigator.onLine!==false,drive,operation,seen:state.seen,keptNew:Math.max(0,KeptVersions.count()-state.kept)});
+  }catch(error){AppDiagnostics.capture('drive-connect-card.render',error,'warn');root.hidden=true;return;}
+  root.hidden=false;root.dataset.tone=model.tone;
+  setTextSafe('drive-connect-title',model.title);
+  // Screen readers hear the sentence when it changes, not every count.
+  if(state.lastStatus!==model.status){state.lastStatus=model.status;setTextSafe('drive-connect-status',model.status);}
+  const list=node('drive-connect-steps'),key=JSON.stringify(model.steps);
+  if(list&&list.dataset.key!==key){
+    list.dataset.key=key;
+    list.replaceChildren(...model.steps.map(step=>{const item=document.createElement('li');item.dataset.state=step.state;item.textContent=step.label;if(step.state==='active')item.setAttribute('aria-current','step');return item;}));
+  }
+  const bar=node('drive-connect-bar'),showBar=model.tone==='working'&&state.phase!=='signing-in';
+  if(bar){bar.hidden=!showBar;bar.dataset.mode=model.fraction===null?'indeterminate':'determinate';bar.firstElementChild.style.width=model.fraction===null?'':`${Math.round(model.fraction*100)}%`;}
+  const detail=node('drive-connect-detail');if(detail){detail.hidden=!model.detail;if(detail.textContent!==model.detail)detail.textContent=model.detail;}
+  const action=node('drive-connect-action');
+  if(action){action.hidden=!model.action;if(model.action){action.dataset.syncAction=model.action.action;if(action.textContent!==model.action.label)action.textContent=model.action.label;}}
+  // Synced closes on its own; anything that needs the person stays.
+  if(model.done&&!driveConnectCardHide)driveConnectCardHide=setTimeout(()=>{if(driveConnectCard===state)endDriveConnectCard();},6000);
 }
 async function recordDriveLibrary(email,folder){
   const mine=Profiles.current();if(!mine)return;
@@ -6384,14 +6442,14 @@ function askToJoinLibrary(email,library){
 async function bindDriveLibrary(info){
   const mine=Profiles.current();if(!mine)return 'refuse';
   const email=String(info?.email||''),folder=String(info?.folder||''),found=String(info?.found||''),others=Profiles.list().filter(row=>row.scope!==mine.scope);
-  const refuse=message=>{Interactions.notify({key:'drive-profile-refused',title:'Google Drive was not used',message});renderProfile();return 'refuse';};
+  const refuse=message=>{endDriveConnectCard();Interactions.notify({key:'drive-profile-refused',title:'Google Drive was not used',message});renderProfile();return 'refuse';};
   const owner=others.find(row=>email&&row.email===email||found&&row.id===found);
   if(owner)return refuse(`This Google account holds ${owner.name||'another profile'}’s library on this device. Each profile syncs with its own Google account.`);
   if(info?.mine){await recordDriveLibrary(email,folder);return 'continue';}
   if(!found&&(!info?.library||!others.length)){await recordDriveLibrary(email,folder);return 'claim';}
   if(Date.now()-driveConnectRequestedAt>DRIVE_CHOICE_WINDOW_MS)return refuse(`${email||'This Google account'} already holds a Study Director library. Connect Google Drive again to choose whether to continue with it.`);
   driveLibraryQuestion??=askToJoinLibrary(email,info.library).finally(()=>{driveLibraryQuestion=null;});
-  if(!await driveLibraryQuestion){renderProfile();return 'refuse';}
+  if(!await driveLibraryQuestion){endDriveConnectCard();renderProfile();return 'refuse';}
   if(found&&!Profiles.adopt(found))return refuse('That library belongs to another profile on this device.');
   FirstStart.joined();
   await recordDriveLibrary(email,folder);
@@ -10873,6 +10931,8 @@ const CLICK_ACTIONS=Object.freeze({
   'gap-apply': applyInactiveGapSplit,
   'dismiss-storage-warning': dismissStorageWarning,
   'sync-status-action': syncStatusAction,
+  // Hiding the card leaves the work running; the indicator still shows it.
+  'close-drive-connect': ()=>{endDriveConnectCard();return true;},
   'review-kept-versions': ()=>KeptVersions.review(),
   'open-profile': openProfilePanel,
   'close-profile': closeProfilePanel,
@@ -11254,6 +11314,8 @@ function installApplicationDomBindings(){
   for(const type of ['online','offline'])window.addEventListener(type,scheduleSyncStatus);
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')scheduleSyncStatus();});
   setInterval(()=>{if(document.visibilityState==='visible')scheduleSyncStatus();},30*1000);
+  // The Connect card follows each step and count of the first sync.
+  BackupPresentation.subscribe(renderDriveConnectCard);
   void ensureDeviceBackupInstalled().then(()=>installRepositoryIntegrityScrub()).catch(error=>AppDiagnostics.capture('backup.repository-integrity-install',error,'warn'));
   updateFullscreenButton();
   PlanDraftEditor.install();

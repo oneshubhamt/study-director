@@ -29,12 +29,24 @@ try{
   await waitFor(()=>a.evaluate(`__PWA6.BackupProviderRuntime.connected('google-drive')`),{label:'A still signed in after reload',timeout:20000});
   assert.equal(await a.evaluate(`window.__gisTokenRequests||0`),0,'the reload asked Google for no new sign-in');
 
-  // B: the same profile on another device. Connecting brings A's note.
+  // B: the same profile on another device. Connecting brings A's note. B
+  // connects with the Connect button, and the Connect card follows its first
+  // sync on any tab: signed in, bringing in A's changes, uploading, Synced.
   const b=await open(second,server,'B');
   assert.equal(await noteText(b,'ethics'),null,'B starts without the note');
-  await connect(b,'B');
+  await b.evaluate(`(()=>{window.__connectCard=[];const card=document.getElementById('drive-connect-card'),seen=()=>{if(card.hidden)return;const row=[card.dataset.tone,document.getElementById('drive-connect-status').textContent,[...card.querySelectorAll('#drive-connect-steps li')].map(item=>item.dataset.state).join(',')].join('|');if(window.__connectCard.at(-1)!==row)window.__connectCard.push(row);};new MutationObserver(seen).observe(card,{subtree:true,childList:true,attributes:true,characterData:true});__PWA6.goTab('plan');document.querySelector('[data-action="connect-drive-backup"]').click();seen();})()`);
+  await waitFor(()=>b.evaluate(`__PWA6.BackupProviderRuntime.connected('google-drive')`),{label:'B connects',timeout:20000});
   await waitFor(async()=>/Written on A/u.test(await noteText(b,'ethics')||''),{label:'B receives A\'s note',timeout:60000});
   await waitFor(async()=>!!(await sync(b))?.syncedAt,{label:'B synced',timeout:30000});
+  await waitFor(()=>b.evaluate(`document.getElementById('drive-connect-card').dataset.tone==='done'`),{label:'the Connect card says Synced',timeout:90000});
+  const connectCard=await b.evaluate(`({rows:window.__connectCard,steps:[...document.querySelectorAll('#drive-connect-steps li')].map(item=>item.textContent),status:document.getElementById('drive-connect-status').textContent,inRegion:document.getElementById('drive-connect-card').parentElement.id})`);
+  assert.equal(connectCard.inRegion,'sd-toast-region','the card sits in the notification area');
+  assert.ok(connectCard.rows.some(row=>/^working\|Signing in/u.test(row)),`the card starts at sign-in (${connectCard.rows.join(' / ')})`);
+  assert.ok(connectCard.rows.some(row=>/^working\|Bringing in changes from Google Drive…\|done,active,pending$/u.test(row)),`the card shows the catch-up step (${connectCard.rows.join(' / ')})`);
+  assert.ok(connectCard.rows.some(row=>/^working\|Uploading this device’s data…\|done,done,active$/u.test(row)),`the card shows the upload step (${connectCard.rows.join(' / ')})`);
+  assert.match(connectCard.status,/^Synced at \d/u,'the card ends Synced');
+  assert.deepEqual(connectCard.steps,['Signed in to Google','Brought in changes from Google Drive','Uploaded this device’s data']);
+  await waitFor(()=>b.evaluate(`document.getElementById('drive-connect-card').hidden`),{label:'the Connect card closes on its own',timeout:12000});
 
   // B's first sync uploads what it brought (its own first-start settings),
   // and Drive cleanup may follow. Both finish before A edits.

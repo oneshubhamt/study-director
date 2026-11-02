@@ -109,7 +109,7 @@ session running on another device, app update ready, no backup in over a week.
 |---|---|---|
 | 1 | Status model (`backup-presentation.status`), indicator on all hosts, panel section, retire the text line and phone dot | Done |
 | 2 | Continue Here: instant busy button ("Continuing…"), step text in the Execute card, errors in the Execute card; measure and shorten the wait for a running sync | Done (see below) |
-| 3 | Connect Drive: a progress card on any tab (checking folder → bringing in changes → uploading → Synced ✓) | Planned |
+| 3 | Connect Drive: a progress card on any tab (checking folder → bringing in changes → uploading → Synced ✓) | Done (see below) |
 | 4 | Remaining cases: session hand-off ready row, first-sync progress counts, pop-up rules from section 6 | Planned |
 
 ### Phase 2 — Continue Here
@@ -118,6 +118,15 @@ session running on another device, app update ready, no backup in over a week.
 - **Errors** stay in the Execute card in plain words (Drive busy, not connected, changed on another device, offline) and pop up once.
 - **Wait, measured** (two browsers, simulated Drive at 250 ms a request): 2.8 s with nothing running, 3.1 s with a sync catch-up running, 3.6 s with an upload running. Stopping the running work takes 0.03–0.6 s; the rest is the ownership claim, about 11 Drive requests one after another, whose order keeps two devices from claiming at once. It is not shortened here.
 - **Fixed on the way:** Continue Here pressed before this device took in the other device's newest upload could hand the session back once that upload came in, leaving neither device able to run or upload it. A sync now keeps the session while Drive's claim names this device ([BACKUP-ENGINE.md](BACKUP-ENGINE.md), Active Session).
+
+### Phase 3 — Connect Google Drive card
+
+- **When.** From any Connect or Sign in (profile panel, Library → Data, first start, the permission notice) until that first sync ends, on every tab.
+- **Where.** First in the notification area (top right on a laptop, top on a phone); toasts stack below it.
+- **What.** Three steps — sign in to Google, bring in what's on Google Drive, upload this device's data — each waiting, working (spinner), done (✓) or failed (×); one sentence for where it is; the running stage with its counts ("Downloading backup data… · 2 of 5 complete · 150 KB of 300 KB") and a bar (a sweep when there are no counts yet).
+- **Endings.** Synced (closes itself after 6 s; offers Review when the sync kept versions for review); needs the backup password, a review or an app update (stays, with the button); offline (continues when back online); couldn't finish (says when it tries again, with Try now); sign-in didn't finish (Try again). Declining or refusing a library closes it; the existing toast explains.
+- **×** hides it; syncing carries on and the indicator still shows it.
+- **Model.** `backup-presentation.connectProgress` decides; the host only remembers when the card started and whether a catch-up or upload ran since.
 
 ## 8. Ownership
 

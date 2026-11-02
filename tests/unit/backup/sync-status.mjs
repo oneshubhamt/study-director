@@ -69,4 +69,44 @@ check('Failure and review together',{drive:drive({retryBackoffCapped:true},{fail
 check('Offline outranks signed out',{online:false,drive:drive({connected:false})},{ring:'offline',items:['sign-in']});
 check('Password outranks an update',{drive:drive({},{password:true,newer:true})},{ring:'blocked',badge:'lock',items:['unlock-sync','check-update']});
 
-console.log(JSON.stringify({status:'PASS',suite:'sync-status',oldTextCases:12,newCases:20,priorityCases:3}));
+// The Connect Google Drive card (phase 3): steps, live sentence, counts and
+// how it ends.
+const STARTED=Date.parse('2026-11-01T12:00:00.000Z'),LATER='2026-11-01T12:04:00.000Z';
+const card=(input)=>presentation.connectProgress({startedAt:STARTED,online:true,seen:{},...input});
+const states=result=>result.steps.map(step=>step.state).join(',');
+function checkCard(name,input,expected){
+  const result=card(input);
+  for(const key of ['tone','title','done'])if(key in expected)assert.equal(result[key],expected[key],`${name}: ${key}`);
+  if(expected.status)assert.match(result.status,expected.status,`${name}: status "${result.status}"`);
+  if(expected.steps)assert.equal(states(result),expected.steps,`${name}: steps`);
+  if(expected.labels)assert.deepEqual(result.steps.map(step=>step.label),expected.labels,`${name}: labels`);
+  if('detail' in expected)assert.match(result.detail,expected.detail,`${name}: detail "${result.detail}"`);
+  if('fraction' in expected)assert.equal(result.fraction,expected.fraction,`${name}: fraction`);
+  if('action' in expected)assert.equal(result.action?.action||'',expected.action,`${name}: action`);
+  if(result.action)assert.ok(actions.has(result.action.action)||['sync-now'].includes(result.action.action),`${name}: the host handles ${result.action.action}`);
+  assert.equal(result.steps.length,3,`${name}: three steps`);assert.ok(result.title&&result.status,`${name}: always says something`);
+  return result;
+}
+const linked=(patch={},sync={})=>drive({waiting:false,...patch},{syncedAt:'',...sync});
+checkCard('Signing in',{phase:'signing-in',drive:null},{tone:'working',title:'Connecting Google Drive',status:/^Signing in/u,steps:'active,pending,pending',action:''});
+checkCard('Sign-in failed',{phase:'failed',error:'The sign-in window was closed.',drive:null},{tone:'error',status:/window was closed/u,steps:'failed,pending,pending',action:'sign-in'});
+checkCard('Checking Drive',{phase:'signed-in',drive:linked({waiting:true})},{tone:'working',status:/^Checking Google Drive/u,steps:'done,active,pending',labels:['Signed in to Google','Bring in what’s on Google Drive','Upload this device’s data']});
+checkCard('Reading existing backups (upload getting ready)',{phase:'signed-in',drive:linked({backingUp:true,waiting:true}),operation:{kind:'upload',message:'Reading existing backups in Google Drive…',progress:{stage:'scan',current:0,total:0}}},{status:/^Checking Google Drive/u,steps:'done,active,pending',detail:/^Reading existing backups in Google Drive…$/u,fraction:null});
+checkCard('Bringing in, with counts',{phase:'signed-in',drive:linked({busy:true,foregroundKind:'sync',waiting:true},{syncing:true}),operation:{kind:'sync',message:'Downloading backup data from Google Drive…',progress:{stage:'download',current:2,total:5,completedBytes:153600,totalBytes:307200}}},{status:/^Bringing in changes/u,steps:'done,active,pending',detail:/Downloading backup data from Google Drive… · 2 of 5 complete · 150 KB of 300 KB/u,fraction:0.4});
+checkCard('An opening line is not repeated',{phase:'signed-in',drive:linked({busy:true,foregroundKind:'sync',waiting:true},{syncing:true}),operation:{kind:'sync',message:'Syncing with Google Drive…',progress:null}},{status:/^Bringing in changes/u,detail:/^$/u});
+checkCard('Between catch-up and upload',{phase:'signed-in',seen:{sync:true},drive:linked({waiting:true},{syncedAt:LATER})},{status:/^Uploading this device’s data/u,steps:'done,done,active',labels:['Signed in to Google','Brought in changes from Google Drive','Upload this device’s data']});
+checkCard('Uploading, with counts',{phase:'signed-in',seen:{sync:true},drive:linked({backingUp:true,waiting:true},{syncedAt:LATER}),operation:{kind:'upload',message:'Uploading backup data to Google Drive…',progress:{stage:'upload',current:3,total:4}}},{status:/^Uploading/u,steps:'done,done,active',fraction:0.75,detail:/3 of 4 complete/u});
+checkCard('Synced, new library',{phase:'signed-in',seen:{upload:true},drive:linked({},{syncedAt:LATER})},{tone:'done',done:true,status:/^Synced at 12:04\. This device is up to date\.$/u,steps:'done,done,done',labels:['Signed in to Google','Nothing new on Google Drive','Uploaded this device’s data'],action:''});
+checkCard('Synced, joined library',{phase:'signed-in',seen:{sync:true,upload:true},drive:linked({},{syncedAt:LATER})},{tone:'done',labels:['Signed in to Google','Brought in changes from Google Drive','Uploaded this device’s data']});
+checkCard('Synced with versions kept for review',{phase:'signed-in',seen:{sync:true},keptNew:2,drive:linked({},{syncedAt:LATER})},{tone:'done',done:true,status:/2 versions kept for you to review/u,action:'review-kept'});
+checkCard('A sync before this connect is not this one',{phase:'signed-in',drive:linked({},{syncedAt:'2026-11-01T11:00:00.000Z'})},{tone:'working',done:false,status:/^Checking Google Drive/u});
+checkCard('Needs review',{phase:'signed-in',seen:{sync:true},drive:linked({},{syncedAt:LATER,review:true})},{tone:'attention',action:'review-sync'});
+checkCard('Needs password (another device)',{phase:'signed-in',drive:linked({waiting:true},{password:true})},{tone:'attention',title:'Enter your backup password',action:'unlock-sync'});
+checkCard('Needs password (this device)',{phase:'signed-in',drive:linked({locked:true,waiting:true})},{tone:'attention',action:'enter-password'});
+checkCard('Needs app update',{phase:'signed-in',drive:linked({},{newer:true})},{tone:'attention',action:'check-update'});
+checkCard('Offline',{phase:'signed-in',online:false,drive:linked({waiting:true})},{tone:'attention',status:/^Offline/u,action:''});
+checkCard('Retrying',{phase:'signed-in',drive:linked({waiting:true,nextEligibleAt:'2026-11-01T12:10:00.000Z'},{failed:true})},{tone:'error',status:/Trying again at 12:10/u,steps:'done,failed,pending',action:'retry'});
+checkCard('Stopped after retries',{phase:'signed-in',drive:linked({retryBackoffCapped:true,waiting:true},{failed:true})},{tone:'error',title:'Sync stopped',action:'retry'});
+checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({connected:false})},{tone:'error',action:'sign-in'});
+
+console.log(JSON.stringify({status:'PASS',suite:'sync-status',oldTextCases:12,newCases:20,priorityCases:3,connectCardCases:20}));

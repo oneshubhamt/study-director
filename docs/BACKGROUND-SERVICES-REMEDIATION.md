@@ -877,6 +877,45 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
   - After `node build/build.mjs`, browser tests one at a time, PASS: `restore-session-safety`, then `session-plan-sync` alone. A last provider tweak (the claim read sets up its Drive operation inside its own guard) followed; `sync-shared-base`, `repository-checkpoint`, `drive-security` and `architecture` were rerun, and `session-plan-sync` was rerun alone on that final build, all PASS (`restore-session-safety` was not rerun; it does not sync through Drive).
   - Not run: the full `fast` and browser suites, real Google Drive, physical devices, skins other than the default glass dark presentation.
 
+### Entry 026 — Connect Google Drive: a progress card on every tab (2026-11-02)
+
+- **Branch / source HEAD before:** `refactor/background-coordination` at `7468e83` (release `SDVB75F18`; no further bump in this pull request). Phase 3 of [STATUS-SYSTEM.md](STATUS-SYSTEM.md).
+- **Step 1 — audit and measurement:**
+  - Every Connect and Sign in goes through `connectDriveForProfile` (profile panel, Library → Data, first start, the permission notice), which calls `BackupProviderRuntime.connect`; the indicator shows Connecting… until sign-in settles (Entry 024). `bindDriveLibrary` may ask whether to continue with a library already on Drive, or refuse with a toast.
+  - After sign-in nothing else is shown outside Library → Data. A scratch probe (two browsers, simulated Drive at 200 ms a request, 60 notes; not committed) recorded what the app knows each 100 ms:
+    - new library: connected → about 1 s later the upload starts (`external-backup` event: reading existing backups → preparing → uploading 0–4 of 4 with bytes → committing and verifying → finishing) → synced, 4 s in all;
+    - joining a library: the upload starts, stops with "Catching up with Google Drive first", then the catch-up runs (`external-sync`: reading versions → verifying → downloading with counts → taking in changes → finalizing), "Changes since", then the upload (same stages), synced at 8.9 s.
+  - So every stage and its counts already exist as presentation events; only Library → Data shows them, and `BackupPresentation.current` does not read `external-sync`.
+- **Step 2 — objectives before edits:**
+  - **E26.1** `backup-presentation` gains a pure `connectProgress(input)`: three steps (sign in, bring in what is on Drive, upload this device's data) each pending, active, done or failed; the live sentence; the running operation's message with its counts; a fraction for a progress bar when counts exist; and an ending: Synced (with kept versions to review when the sync kept any), needs password (another device's or this device's), needs review, needs app update, offline, retrying, stopped after retries, sign-in failed. One action at most, from the indicator's action set.
+  - **E26.2** The host shows it as a card at the top of the notification area (top right on a laptop, top on a phone), on every tab, from any Connect or Sign in until the first sync ends. Toasts stack below it. A close button hides it (the work goes on and the indicator still shows it); Synced hides it after 6 s; a library the person declines, or one refused, closes it without a card error (the existing toast explains).
+  - **E26.3** It redraws on provider status and on each progress event.
+  - **E26.4** Screen readers hear each step once, not each count; reduced motion stops the indeterminate bar.
+  - **E26.5** No change to connect, sync or upload behaviour and no new notification producer: the card reads existing state only.
+  - **E26.6** Tests: unit rows for `connectProgress`; `sync-and-profiles` connects the second device through the real Connect button and checks the card's steps, its Synced ending and that it hides.
+- **Step 3 — implementation:**
+  - `source/core/backup-presentation.js`: `connectProgress(input)` as in E26.1. After a catch-up the remaining step is the upload; an operation's opening line ("Syncing with Google Drive…") is not repeated under the status; a sync that ended before this connect started does not count as its ending.
+  - `source/app.html`:
+    - the card (`#drive-connect-card`) is the first child of `#sd-toast-region`, so toasts stack below it; its sentence is a `role="status"` line and the rest of the card is `aria-live="off"`;
+    - `connectDriveForProfile` starts it and records sign-in success or failure (the provider's "Connection failed" text without its prefix);
+    - `renderDriveConnectCard` reads `locationStatus`, the running `external-sync`/`backup-operation`/`external-backup` event and the kept-version count, notes when a catch-up or an upload ran, draws the model, and closes it 6 s after Synced; it redraws with the indicator and on every presentation event (subscribed beside the indicator's other wiring, not inside the Library row's subscription, which a test runs on its own);
+    - `bindDriveLibrary`'s refuse and Not now paths close it; `close-drive-connect` hides it; its button uses the indicator's `sync-status-action`.
+  - `source/styles/core.css`: the card in the toasts' material, tone borders, step marks (spinner, ✓, ×), a determinate bar or a sweep, reduced motion stops both animations.
+  - Tests: `sync-status` gains 20 card rows; `sync-and-profiles` connects B with the Connect button (from the Plan tab) and checks the card is in the notification area, starts at sign-in, shows the catch-up step and the upload step, ends "Synced at …" with all three steps done, and closes on its own.
+  - Docs: STATUS-SYSTEM.md (phase 3), NOTIFICATIONS.md (card row), PROGRAMMES.md.
+- **Step 4 — objectives:**
+  - **E26.1 MET**: unit rows cover each step state and every ending.
+  - **E26.2 MET**: the browser test sees the card in the notification area from the Plan tab, through Synced, then closed; scratch screenshots (not committed) at laptop and phone width during checking, bringing in, uploading and Synced, and after a sign-in that failed (served by a failing sign-in stub), with toasts above nothing and the card first.
+  - **E26.3 MET**: the browser test records the catch-up and upload steps as they happen.
+  - **E26.4 MET** by construction (one live sentence; counts outside it; reduced-motion rules); not checked with a screen reader.
+  - **E26.5 MET**: no change to connect, sync or upload code paths; the card adds no coordinator event.
+  - **E26.6 MET** as listed in step 3.
+- **Step 5 — targeted QA (local, Node 22, Chromium 1194):**
+  - First targeted run FAIL: `notification-lifecycle` runs the Library row's `BackupPresentation.subscribe` block on its own and the card's redraw inside it was undefined there; the card now subscribes separately. Rerun PASS: `unit/backup/sync-status`, `integration/ui/notification-lifecycle`, `integration/backup/backup-reminder`.
+  - `architecture` category PASS (32); suite governance PASS.
+  - After `node build/build.mjs`, browser tests one at a time, PASS: `interactions` (before the subscription move), then `sync-and-profiles` on the final build.
+  - Not run: the full suites, real Google Drive and its real sign-in window, physical devices, skins other than the default glass dark presentation, a screen reader.
+
 ### Journal template — duplicate this for the next pass
 
 - **Entry NNN — Pass P#, topic / date:**

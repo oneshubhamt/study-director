@@ -1465,6 +1465,37 @@ html[data-sd-appearance-shift] *,html[data-sd-appearance-shift] *::before,html[d
 .interaction-toast.warning .interaction-toast-title{color:var(--sd-color-warning)}
 .interaction-toast.error .interaction-toast-title{color:var(--sd-color-danger)}
 .interaction-toast-message{color:var(--sd-color-text-secondary-strong);line-height:1.35;overflow-wrap:anywhere}
+/* Connect Google Drive card (docs/STATUS-SYSTEM.md, phase 3): first in the
+   notification area, so toasts stack below it. */
+.drive-connect-card{display:grid;gap:8px;padding:12px 12px 12px 14px;border:1px solid var(--sd-state-accent-line);border-radius:var(--sd-shape-floating-radius);background:var(--sd-material-nudge);box-shadow:var(--sd-depth-floating);backdrop-filter:var(--sd-material-nudge-filter);-webkit-backdrop-filter:var(--sd-material-nudge-filter);pointer-events:auto}
+.drive-connect-card[hidden]{display:none}
+.drive-connect-card[data-tone="done"]{border-color:var(--sd-state-success-line)}
+.drive-connect-card[data-tone="attention"]{border-color:var(--sd-state-warn-line)}
+.drive-connect-card[data-tone="error"]{border-color:var(--sd-state-danger-line)}
+.drive-connect-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.drive-connect-title{color:var(--sd-color-accent-primary);letter-spacing:1.4px}
+.drive-connect-card[data-tone="done"] .drive-connect-title{color:var(--sd-color-success)}
+.drive-connect-card[data-tone="attention"] .drive-connect-title{color:var(--sd-color-warning)}
+.drive-connect-card[data-tone="error"] .drive-connect-title{color:var(--sd-color-danger)}
+.drive-connect-close{width:30px;height:30px;min-width:30px;margin:-6px -2px -6px 0;padding:0;border:0;background:transparent;color:var(--sd-color-text-secondary);font-size:20px;cursor:pointer}
+.drive-connect-status{margin:0;color:var(--sd-color-text-secondary-strong);line-height:1.35}
+.drive-connect-steps{display:grid;gap:5px;margin:0;padding:0;list-style:none}
+.drive-connect-steps li{display:flex;align-items:center;gap:8px;color:var(--sd-color-text-secondary);font-size:.92em;line-height:1.3}
+.drive-connect-steps li::before{content:"";flex:0 0 auto;box-sizing:border-box;width:12px;height:12px;border:1.5px solid currentColor;border-radius:50%;opacity:.5}
+.drive-connect-steps li[data-state="active"]{color:var(--sd-color-text-primary)}
+.drive-connect-steps li[data-state="active"]::before{opacity:1;border-color:var(--sd-color-accent-primary);border-right-color:transparent;animation:sd-busy-spin .8s linear infinite}
+.drive-connect-steps li[data-state="done"]::before{content:"✓";opacity:1;border:0;color:var(--sd-color-success);font-size:12px;font-weight:700;line-height:12px;text-align:center}
+.drive-connect-steps li[data-state="failed"]{color:var(--sd-color-danger)}
+.drive-connect-steps li[data-state="failed"]::before{content:"×";opacity:1;border:0;font-size:15px;font-weight:700;line-height:11px;text-align:center}
+.drive-connect-bar{position:relative;height:4px;border-radius:2px;background:rgba(var(--sd-rgb-accent-primary),.18);overflow:hidden}
+.drive-connect-bar[hidden]{display:none}
+.drive-connect-bar>span{position:absolute;top:0;bottom:0;left:0;width:0;border-radius:inherit;background:var(--sd-color-accent-primary);transition:width .3s ease}
+.drive-connect-bar[data-mode="indeterminate"]>span{width:34%;animation:drive-connect-sweep 1.4s ease-in-out infinite}
+@keyframes drive-connect-sweep{from{transform:translateX(-100%)}to{transform:translateX(300%)}}
+.drive-connect-detail{margin:0;color:var(--sd-color-text-secondary);font-size:.86em;line-height:1.35;overflow-wrap:anywhere}
+.drive-connect-detail[hidden],.drive-connect-action[hidden]{display:none}
+.drive-connect-action{justify-self:start}
+@media (prefers-reduced-motion: reduce){.drive-connect-steps li[data-state="active"]::before{animation:none;border-right-color:var(--sd-color-accent-primary)}.drive-connect-bar[data-mode="indeterminate"]>span{width:100%;animation:none;opacity:.45}}
 .interaction-toast-close{width:34px;height:34px;min-width:34px;padding:0;border:0;background:transparent;color:var(--sd-color-text-secondary);font-size:20px;cursor:pointer}
 #nudge-overlay{display:none;position:fixed;right:22px;bottom:22px;width:min(430px,calc(100vw - 32px));z-index:401;text-align:left;border:1px solid rgba(var(--sd-rgb-info),.26);padding:var(--sd-space-15) var(--sd-space-16) var(--sd-space-14);clip-path:var(--sd-shape-floating-clip);border-radius:var(--sd-shape-floating-radius)}
 #nudge-overlay{background:var(--sd-material-nudge);box-shadow:var(--sd-depth-overlay);backdrop-filter:var(--sd-material-nudge-filter);-webkit-backdrop-filter:var(--sd-material-nudge-filter);transform:var(--sd-motion-overlay-transform)}

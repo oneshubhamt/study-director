@@ -191,7 +191,50 @@ registry.define('backup-presentation',1,()=>{
       const action=connected&&online&&!connecting&&!lockHere&&!syncPassword&&!newer&&ring!=='syncing'?freeze({action:ring==='error'?'retry':'sync-now',label:ring==='error'?'Try again':'Sync now'}):null;
       return freeze({ring,slow,badge,count,label,primary,headline,detail,action,items:freeze(items)});
     }
-    return freeze({begin,read,current,feedback,condition,notice,bytes,detail,outcome,locationLabel,syncLabel,status,summary,reach,restoreChoices:RESTORE_CHOICES,resolve:(source,id='backup-operation')=>notifications.resolveEvent(source,id),reset,subscribe:notifications.subscribe});
+    // The card shown from Connect (or Sign in) until the first sync ends:
+    // three steps, the live sentence, the running operation with its counts
+    // and how it ended. The host keeps the history (when it started, whether
+    // a catch-up or an upload ran since); this only decides. Phase 3 of
+    // docs/STATUS-SYSTEM.md.
+    function connectProgress(value={}){
+      const phase=String(value.phase||'signing-in'),drive=value.drive||null,sync=drive?.sync||{},op=value.operation||null,seen=value.seen||{},online=value.online!==false;
+      const started=Number(value.startedAt)||0,syncedAt=Date.parse(String(sync.syncedAt||''))||0,kept=Math.max(0,Number(value.keptNew)||0);
+      const syncing=!!(sync.syncing||op?.kind==='sync'),uploading=!!(op?.kind==='upload'&&['upload','commit','complete'].includes(String(op.progress?.stage||''))),working=syncing||!!drive?.backingUp||!!op;
+      const p=op?.progress||{},fraction=p.total>0?Math.min(1,(Number(p.current)||0)/p.total):p.totalBytes>0?Math.min(1,(Number(p.completedBytes)||0)/p.totalBytes):null;
+      // An operation's opening line ("Syncing with Google Drive…") only repeats the status.
+      const opMessage=/^(Syncing with|Backing up to) /u.test(String(op?.message||''))?'':String(op?.message||''),opDetail=op?[opMessage,detail(p)].filter(Boolean).join(' · '):'';
+      const steps=(active,failed='')=>{
+        const order=['sign-in','bring-in','upload'],at=order.indexOf(active);
+        const labels={
+          'sign-in':at>0||active==='done'?'Signed in to Google':'Sign in to Google',
+          'bring-in':active==='done'?(seen.sync?'Brought in changes from Google Drive':'Nothing new on Google Drive'):at>1?(seen.sync?'Brought in changes from Google Drive':'Checked Google Drive'):'Bring in what’s on Google Drive',
+          upload:active==='done'?(seen.upload?'Uploaded this device’s data':'Nothing to upload'):'Upload this device’s data'
+        };
+        return freeze(order.map((id,index)=>freeze({id,label:labels[id],state:id===failed?'failed':active==='done'||index<at?'done':index===at?'active':'pending'})));
+      };
+      const result=(tone,title,status,active,extra={})=>freeze({tone,title,status,detail:'',fraction:null,action:null,done:false,...extra,steps:steps(active,extra.failed||'')});
+      const act=(action,label)=>freeze({action,label});
+      if(phase==='failed')return result('error','Google Drive wasn’t connected',String(value.error||'Sign-in didn’t finish.'),'sign-in',{failed:'sign-in',action:act('sign-in','Try again')});
+      if(phase==='signing-in')return result('working','Connecting Google Drive','Signing in to Google…','sign-in');
+      if(!drive?.connected)return result('error','Google Drive signed out','Sign in again to finish syncing.','bring-in',{failed:'bring-in',action:act('sign-in','Sign in')});
+      // After a catch-up, what remains is this device's upload.
+      const active=uploading||seen.sync&&!syncing?'upload':'bring-in';
+      if(!online)return result('attention','Syncing with Google Drive','Offline. Syncing continues when you’re back online.',active);
+      if(sync.password)return result('attention','Enter your backup password','Another device encrypts this library. Enter its password to finish syncing.','bring-in',{action:act('unlock-sync','Enter password')});
+      if(drive.locked)return result('attention','Enter your backup password','Your backups are encrypted. Enter the password on this device to finish syncing.',active,{action:act('enter-password','Enter password')});
+      if(sync.newer)return result('attention','Update the app to finish syncing','Google Drive holds data from a newer version of Study Director.','bring-in',{action:act('check-update','Check for update')});
+      if(!working&&drive.retryBackoffCapped)return result('error','Sync stopped','Syncing stopped after several tries.',active,{failed:active,action:act('retry','Try again')});
+      if(!working&&sync.failed){const next=timeText(drive.nextEligibleAt);return result('error','Syncing with Google Drive',`Couldn’t finish syncing.${next?` Trying again at ${next}.`:' Trying again shortly.'}`,active,{failed:active,action:act('retry','Try now')});}
+      if(!working&&syncedAt>=started&&syncedAt>0&&!drive.waiting){
+        if(sync.review)return result('attention','Synced with Google Drive','Some changes need your review before they come in.','done',{action:act('review-sync','Review')});
+        const when=timeText(sync.syncedAt);
+        if(kept)return result('done','Synced with Google Drive',`Synced at ${when}. ${kept} version${kept===1?'':'s'} kept for you to review.`,'done',{done:true,action:act('review-kept','Review')});
+        return result('done','Synced with Google Drive',`Synced at ${when}. This device is up to date.`,'done',{done:true});
+      }
+      const status=active==='upload'?'Uploading this device’s data…':syncing?'Bringing in changes from Google Drive…':'Checking Google Drive…';
+      return result('working','Syncing with Google Drive',status,active,{detail:opDetail,fraction});
+    }
+    return freeze({begin,read,current,feedback,condition,notice,bytes,detail,outcome,locationLabel,syncLabel,status,connectProgress,summary,reach,restoreChoices:RESTORE_CHOICES,resolve:(source,id='backup-operation')=>notifications.resolveEvent(source,id),reset,subscribe:notifications.subscribe});
   }
   return freeze({format:'study-director.backup-presentation-module',contractVersion:1,createPresentation});
 });
