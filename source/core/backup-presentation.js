@@ -107,13 +107,16 @@ registry.define('backup-presentation',1,()=>{
       return freeze({operationId:handle.operationId,read:current,update,finish,resolve:handle.resolve});
     }
     function feedback(source,message,ok=true){if(!message)return notifications.resolveEvent(source,'backup-status');return notifications.emit({source,id:'backup-status',message,severity:ok?'info':'error',lifecycle:ok?'succeeded':'failed',surface:'inline',title:source,action:action(source,'status')});}
-    function condition(source,id,message){if(!message)return notifications.resolveEvent(source,id);return notifications.emit({source,id,message,severity:'warning',lifecycle:'failed',foreground:false,title:source==='file'?'File backup':source==='device-folder'?'Device Folder backup':'Google Drive backup',action:action(source,id),surface:'toast',persistent:true});}
-    // A one-off heads-up (a sign-in that ended, retries that ran out): a toast
-    // that closes on its own or when dismissed. Repeating the same notice
+    // A problem the person ran into while doing something (a backup file that
+    // would not open): it stays until closed or resolved.
+    function condition(source,id,message){if(!message)return notifications.resolveEvent(source,id);return notifications.emit({source,id,message,severity:'warning',lifecycle:'failed',foreground:false,tier:'result',title:source==='file'?'File backup':source==='device-folder'?'Device Folder backup':'Google Drive backup',action:action(source,id),surface:'toast',persistent:true});}
+    // A heads-up from background work. Blocking (the default: a sign-in that
+    // ended, a password, an app update, retries that ran out) stays pinned
+    // until closed or resolved and sounds once; news (a sync review) fades
+    // after 12 s and waits while a work block runs. Repeating the same notice
     // does not show it again until it is resolved. Red (error) only for
-    // retries that ran out; one that blocks nothing waits while the study
-    // timer runs (docs/STATUS-SYSTEM.md, noise rules).
-    function notice(source,id,message,{error=false,waitWhileStudying=false}={}){return notifications.emit({source,id,message,severity:error?'error':'warning',lifecycle:'succeeded',foreground:false,waitWhileStudying,title:source==='device-folder'?'Device Folder backup':'Google Drive backup',action:action(source,id),surface:'toast',duration:12000});}
+    // retries that ran out (docs/NOTIFICATIONS.md, kinds).
+    function notice(source,id,message,{error=false,tier='blocking'}={}){return notifications.emit({source,id,message,severity:error?'error':'warning',lifecycle:'succeeded',foreground:false,tier,title:source==='device-folder'?'Device Folder backup':'Google Drive backup',action:action(source,id),surface:'toast',duration:12000});}
     // The reach line for a restore or combine dialog, while Drive syncs.
     function reach(){try{return typeof input.synced==='function'&&input.synced()===true?RESTORE_CHOICES.reach:'';}catch{return '';}}
     function reset(source){for(const event of notifications.eventStatus().events)if(event.source===source)notifications.resolveEvent(source,event.id);}
@@ -178,7 +181,10 @@ registry.define('backup-presentation',1,()=>{
       // Signed out, password and update needs already show in the ring and their
       // own badge; the amber ! is for the other warnings.
       const count=kept+(review?1:0),ownBadge=new Set(['signed-out','password','sync-password','update-needed']),hasTone=tone=>items.some(item=>item.tone===tone&&!ownBadge.has(item.id));
-      const badge=hasTone('error')?'error':lockHere||syncPassword?'lock':newer?'update':hasTone('warning')?'warning':count?'review':value.updateReady===true?'info':'';
+      // News that faded unseen (docs/NOTIFICATIONS.md, Recent) shares the
+      // blue info badge, with its count.
+      const unseen=Math.max(0,Math.floor(Number(value.unseen)||0)),unseenText=unseen?`${unseen} new notification${unseen===1?'':'s'}`:'';
+      const badge=hasTone('error')?'error':lockHere||syncPassword?'lock':newer?'update':hasTone('warning')?'warning':count?'review':value.updateReady===true||unseen?'info':'';
       let primary='',headline='',detail='';
       switch(ring){
         case 'off':primary=deviceOn?`Only on this device${device.lastBackupAt?` · Device Folder backup ${timeText(device.lastBackupAt)}`:''}`:'Only on this device';headline=deviceOn?'Not syncing. This device backs up to its Device Folder.':'Only on this device. Connect Google Drive to sync your devices.';break;
@@ -198,9 +204,9 @@ registry.define('backup-presentation',1,()=>{
       // The label (tooltip and screen readers) starts with the most urgent
       // thing that needs the person, then sync health, then the rest.
       const urgent=items.filter(item=>item.tone!=='info'&&item.short!==primary&&!primary.startsWith(item.short));
-      const label=[...urgent.slice(0,2).map(item=>item.short),primary,...items.filter(item=>item.tone==='info').slice(0,1).map(item=>item.short)].filter(Boolean).join(' · ');
+      const label=[...urgent.slice(0,2).map(item=>item.short),primary,...items.filter(item=>item.tone==='info').slice(0,1).map(item=>item.short),unseenText].filter(Boolean).join(' · ');
       const action=connected&&online&&!connecting&&!lockHere&&!syncPassword&&!newer&&ring!=='syncing'?freeze({action:ring==='error'?'retry':'sync-now',label:ring==='error'?'Try again':'Sync now'}):null;
-      return freeze({ring,slow,badge,count,label,primary,headline,detail,action,items:freeze(items)});
+      return freeze({ring,slow,badge,count,unseen,label,primary,headline,detail,action,items:freeze(items)});
     }
     // The card shown from Connect (or Sign in) until the first sync ends:
     // three steps, the live sentence, the running operation with its counts

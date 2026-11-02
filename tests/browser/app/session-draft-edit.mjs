@@ -32,16 +32,16 @@ try{
   assert.equal(capture.ok,true,`a backup captures the session (${capture.error||''})`);
   assert.doesNotMatch(capture.warning,/from memory/u,'the session comes from storage, not memory');
 
-  // While the timer runs on a work block, a pop-up that blocks nothing waits
-  // and a blocking one shows; pausing shows the one that waited, and so does
+  // While the timer runs on a work block, news (a pop-up that blocks nothing)
+  // waits and a blocking one shows; pausing shows the one that waited, and so does
   // moving on to a support block (STATUS-SYSTEM.md, noise rules).
   const hold=await page.evaluate(`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms)),shown=text=>[...document.querySelectorAll('#sd-toast-region .interaction-toast')].some(node=>node.textContent.includes(text));
-    d.Interactions.notify({source:'sync',key:'kept-new',kind:'warning',duration:12000,waitWhileStudying:true,title:'Kept for review',message:'One version was kept.'});
-    d.Interactions.notify({source:'qa',key:'blocking',kind:'warning',duration:12000,title:'Needs password',message:'Enter it to keep syncing.'});
+    d.Interactions.notify({source:'sync',key:'kept-new',kind:'warning',tier:'news',title:'Kept for review',message:'One version was kept.'});
+    d.Interactions.notify({source:'qa',key:'blocking',kind:'warning',tier:'blocking',title:'Needs password',message:'Enter it to keep syncing.'});
     await wait(200);const running={mode:d.TimerState.mode,kept:shown('Kept for review'),blocking:shown('Needs password')};
     d.togglePause();await wait(300);const paused={mode:d.TimerState.mode,kept:shown('Kept for review')};
     d.togglePause();await wait(200);
-    d.Interactions.notify({source:'sync',key:'qa-waiting',kind:'warning',duration:12000,waitWhileStudying:true,title:'Waiting pop-up',message:'Blocks nothing.'});
+    d.Interactions.notify({source:'sync',key:'qa-waiting',kind:'warning',tier:'news',title:'Waiting pop-up',message:'Blocks nothing.'});
     await wait(200);const working={mode:d.TimerState.mode,waiting:shown('Waiting pop-up')};
     d.markDone();await wait(300);const support={mode:d.TimerState.mode,kind:d.TimerState.tasks[d.TimerState.currentIndex]?.kind||'',waiting:shown('Waiting pop-up')};
     return {running,paused,working,support};})()`);

@@ -62,6 +62,13 @@ check('Storage error',{drive:null,storage:[{source:'localStorage.write',label:'B
 check('Backup reminder',{drive:null,reminder:'Backup reminder: the last backup is over a week old.'},{badge:'warning',label:/^No backup in over a week/u,items:['open-data']});
 check('Session elsewhere',{drive:drive(),sessionElsewhere:'on Laptop'},{ring:'synced',badge:'',label:/^Synced 12:04 · Today’s session is running on Laptop$/u,items:['open-execute']});
 check('Update ready',{drive:drive(),updateReady:true},{ring:'synced',badge:'info',items:['apply-update']});
+// News that faded unseen (docs/NOTIFICATIONS.md, Recent): the blue info
+// badge with its count, last in the label; anything more urgent wins.
+const unseenOne=check('One unseen notification',{drive:drive(),unseen:1},{ring:'synced',badge:'info',label:/^Synced 12:04 · 1 new notification$/u,items:[]});
+assert.equal(unseenOne.unseen,1);
+check('Three unseen notifications',{drive:drive(),unseen:3,updateReady:true},{badge:'info',label:/^Synced 12:04 · Update ready · 3 new notifications$/u,items:['apply-update']});
+check('Unseen yields to a review',{drive:drive(),unseen:2,kept:1},{badge:'review',label:/· 2 new notifications$/u});
+check('No unseen, no badge',{drive:drive(),unseen:0},{badge:'',label:/^Synced 12:04$/u});
 
 // Phase 4: a session suspended on another device waits here (an offer, no
 // badge), and a running catch-up or upload shows its stage and counts.
@@ -118,4 +125,4 @@ checkCard('Retrying',{phase:'signed-in',drive:linked({waiting:true,nextEligibleA
 checkCard('Stopped after retries',{phase:'signed-in',drive:linked({retryBackoffCapped:true,waiting:true},{failed:true})},{tone:'error',title:'Sync stopped',steps:'done,failed,pending',action:'retry'});
 checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({connected:false})},{tone:'attention',steps:'done,waiting,pending',action:'sign-in'});
 
-console.log(JSON.stringify({status:'PASS',suite:'sync-status',oldTextCases:12,newCases:20,priorityCases:3,phase4Cases:5,connectCardCases:20}));
+console.log(JSON.stringify({status:'PASS',suite:'sync-status',oldTextCases:12,newCases:20,priorityCases:3,phase4Cases:5,unseenCases:4,connectCardCases:20}));

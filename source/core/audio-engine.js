@@ -23,9 +23,23 @@ registry.define('audio-engine',1,()=>{
     target:[[0,69,.55,.65],[.16,66,.6,.8]],
     hint:[[0,69,.35,.60]],
     confirm:[[0,74,.38,.66],[.075,78,.39,.45]],
-    attention:[[0,66,.68,.85],[.22,62,.80,.95]]
+    attention:[[0,66,.68,.85],[.22,62,.80,.95]],
+    // Added after the first thirteen, so their seeds and sound stay the same.
+    // settle: a fixed block began and the timer stopped; Begin's arpeggio
+    // turned downward, slower, landing on the low D.
+    settle:[[0,74,.62,.6],[.18,69,.66,.7],[.37,62,1.0,.85]],
+    // handoff: the session continues on another device; a short arch that
+    // fades as it goes and ends open, on A.
+    handoff:[[0,71,.42,.78],[.13,74,.48,.62],[.29,69,.85,.48]],
+    // knock: something needs you; two soft taps on one note, played quieter.
+    knock:[[0,69,.30,.8],[.17,69,.46,.7]],
+    // chime: news in the background; a light rising sixth, played quietest.
+    chime:[[0,69,.48,.5],[.15,78,.8,.42]]
   });
   const NAMES=Object.freeze(Object.keys(PHRASES));
+  // Playback level relative to the others: every cue is made to one loudness,
+  // and these two are meant to sit below it.
+  const LEVELS=Object.freeze({knock:.75,chime:.6});
   const REFLECTIONS=[[0,1],[.023,.055],[.051,.028]];
   // Python's random.Random(seed) (Mersenne Twister), so each note's phases and
   // touch of noise are the ones the recipe was tuned with.
@@ -125,7 +139,7 @@ registry.define('audio-engine',1,()=>{
         const data=buffer(name);
         const source=context.createBufferSource(),gain=context.createGain();
         source.buffer=data;source.connect(gain);gain.connect(context.destination);
-        const t=context.currentTime;gain.gain.setValueAtTime(0,t);gain.gain.linearRampToValueAtTime(.8,t+.012);gain.gain.setValueAtTime(.8,t+Math.max(.012,data.duration-.045));gain.gain.linearRampToValueAtTime(0,t+data.duration);
+        const t=context.currentTime,level=.8*(LEVELS[name]||1);gain.gain.setValueAtTime(0,t);gain.gain.linearRampToValueAtTime(level,t+.012);gain.gain.setValueAtTime(level,t+Math.max(.012,data.duration-.045));gain.gain.linearRampToValueAtTime(0,t+data.duration);
         return await new Promise(resolve=>{
           const record={source,gain,finish:resolve};active=record;
           source.onended=()=>{disconnect(record);if(active===record)active=null;resolve(true);};
@@ -138,6 +152,6 @@ registry.define('audio-engine',1,()=>{
     function dispose(){const record=active;stop();if(record){record.source.onended=null;disconnect(record);record.finish(false);}disposed=true;buffers.clear();if(installed){document.removeEventListener('pointerdown',interaction,true);document.removeEventListener('keydown',interaction,true);}if(context){context.onstatechange=null;void context.close().catch(()=>{});}report();}
     return Object.freeze({play,stop,unlock,install,dispose,status});
   }
-  return Object.freeze({format:'study-director.audio-engine-module',contractVersion:1,createEngine,cues:NAMES,sampleRate:RATE,render});
+  return Object.freeze({format:'study-director.audio-engine-module',contractVersion:1,createEngine,cues:NAMES,levels:LEVELS,sampleRate:RATE,render});
 });
 })();

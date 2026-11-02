@@ -9,7 +9,10 @@ import {staticAssets} from '../../../build/module-manifest.mjs';
 // overall shape (sum of absolute samples), measured from those files.
 const REFERENCE={begin:[24916,.2253,767.2],pause:[13891,.2546,403.91],resume:[15876,.2602,463.27],skip:[12568,.2339,355.93],
   complete:[25798,.2805,811.76],day:[33957,.2465,1094.53],invitation:[24475,.2506,717.5],return:[22711,.2817,665.21],
-  overtime:[21609,.2382,645.92],target:[18963,.2619,559.13],hint:[9922,.2617,244.22],confirm:[12458,.2456,344.3],attention:[24696,.2497,736.38]};
+  overtime:[21609,.2382,645.92],target:[18963,.2619,559.13],hint:[9922,.2617,244.22],confirm:[12458,.2456,344.3],attention:[24696,.2497,736.38],
+  // Added later in the same recipe (docs/NOTIFICATIONS.md, sounds): measured
+  // from the code when they were made, so any change to them is deliberate.
+  settle:[32413,.2628,1011.36],handoff:[27342,.2574,818.61],knock:[16096,.2382,451.95],chime:[23152,.2694,663.98]};
 
 for(const file of ['source/core/internal.js','source/core/audio-engine.js'])vm.runInThisContext(fs.readFileSync(file,'utf8'),{filename:file});
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('audio-engine',1);
@@ -26,6 +29,11 @@ for(const cue of module.cues){
   assert.ok(length/22050<=1.6,`${cue}: short`);
 }
 assert.throws(()=>module.render('missing'),/Unknown sound cue/);
+// The two quiet cues play below the common loudness; every other plays at it.
+assert.deepEqual({...module.levels},{knock:.75,chime:.6});
+// Each new cue is its own phrase: no two cues share the same notes.
+const phrases=new Set(module.cues.map(cue=>{const samples=module.render(cue);return `${samples.length}:${samples[4000]}`;}));
+assert.equal(phrases.size,module.cues.length);
 
 // Nothing about sounds ships as a file or is precached any more.
 const build=renderBuild(),sw=String(build.deployment.get('sw.js'));
@@ -34,4 +42,4 @@ assert.ok(!sw.includes('assets/sounds/'));
 for(const target of [build.deployment,build.development])assert.ok(![...target.keys()].some(name=>name.startsWith('assets/sounds/')));
 assert.equal(fs.existsSync('source/assets/sounds'),false);
 
-console.log(JSON.stringify({status:'PASS',suite:'sound-synthesis',cues:module.cues.length,checks:['matches the former WAV cues','common loudness','silent endpoints','no sound files shipped or precached']},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'sound-synthesis',cues:module.cues.length,checks:['matches the former WAV cues','new cues match their recorded shape','common loudness','quieter playback for knock and chime','silent endpoints','no sound files shipped or precached']},null,2));

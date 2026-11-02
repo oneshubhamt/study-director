@@ -200,7 +200,7 @@ try{
     history.replaceState({workspace:null},'');window.__historyEvents=[];
     const notices=registry.require('notice-coordinator',1).createCoordinator(Object.freeze({}));
     const controller=mod.createController(Object.freeze({ports:Object.freeze({
-      notifications:Object.freeze({notify:notices.notify,subscribe:notices.subscribe,dismissEvent:notices.dismissEvent,pauseEvent:notices.pauseEvent,setHidden:notices.setHidden}),
+      notifications:Object.freeze({notify:notices.notify,subscribe:notices.subscribe,dismissEvent:notices.dismissEvent,dismissAll:notices.dismissAll,pauseEvent:notices.pauseEvent,setPaused:notices.setPaused,setHidden:notices.setHidden}),
       environment:Object.freeze({clearTimeout:id=>clearTimeout(id),document,nativeConfirm:()=>false,nativePrompt:()=>null,requestAnimationFrame:callback=>requestAnimationFrame(callback),setTimeout:(callback,delay)=>setTimeout(callback,delay),window}),
       diagnostics:Object.freeze({capture:(scope,error)=>__historyEvents.push({type:'error',scope,message:String(error&&error.message||error)})}),
       history:Object.freeze({

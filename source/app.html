@@ -1362,8 +1362,8 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
 </main>
 </div>
 <!-- GLOBAL INTERACTIONS: decisions, structured input, brief feedback -->
-<div class="sd-toast-region" id="sd-toast-region" role="region" aria-label="Study Director notifications" aria-live="polite" aria-atomic="false"><section class="drive-connect-card" id="drive-connect-card" aria-labelledby="drive-connect-title" aria-live="off" data-tone="working" hidden>
-  <div class="drive-connect-head"><strong class="drive-connect-title ui-label" id="drive-connect-title">Connecting Google Drive</strong><button class="drive-connect-close" type="button" data-action="close-drive-connect" aria-label="Hide (syncing continues)" title="Hide (syncing continues)">×</button></div>
+<div class="sd-toast-region" id="sd-toast-region" role="region" aria-label="Study Director notifications" aria-live="polite" aria-atomic="false"><section class="drive-connect-card" id="drive-connect-card" aria-labelledby="drive-connect-title" aria-live="off" data-tone="working" data-toast-card hidden>
+  <div class="drive-connect-head"><strong class="drive-connect-title ui-label" id="drive-connect-title">Connecting Google Drive</strong><button class="drive-connect-close" type="button" data-action="close-drive-connect" data-card-close aria-label="Hide (syncing continues)" title="Hide (syncing continues)">×</button></div>
   <p class="drive-connect-status ui-body" id="drive-connect-status" role="status"></p>
   <ol class="drive-connect-steps" id="drive-connect-steps"></ol>
   <div class="drive-connect-bar" id="drive-connect-bar" aria-hidden="true" hidden><span></span></div>
@@ -1481,6 +1481,11 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
         <div class="profile-status-next"><span class="profile-status-detail" id="profile-status-detail"></span><button class="mini-btn ui-btn" id="profile-status-primary" type="button" data-action="sync-status-action" hidden></button></div>
         <ul class="profile-status-items" id="profile-status-items"></ul>
         <button class="profile-status-link" type="button" data-action="sync-status-action" data-sync-action="open-data">Details in Library → Data</button>
+      </section>
+      <section class="profile-recent" id="profile-recent" aria-labelledby="profile-recent-title">
+        <div class="profile-recent-head"><h3 class="profile-section-title ui-label" id="profile-recent-title">Recent</h3><button class="profile-status-link" id="profile-recent-clear" type="button" data-action="clear-recent" hidden>Clear</button></div>
+        <p class="profile-recent-empty" id="profile-recent-empty">Nothing yet today.</p>
+        <ol class="profile-recent-list" id="profile-recent-list"></ol>
       </section>
       <div class="profile-rows">
         <label class="profile-row profile-name-row"><span class="profile-row-label ui-label">Name</span><input class="ui-field interaction-input profile-name-input" id="profile-name-input" type="text" autocomplete="name" spellcheck="false" data-keydown="profile-name" data-blur="profile-name"></label>
@@ -2045,6 +2050,55 @@ const NoticeCoordinator=NoticeCoordinatorModule.createCoordinator(Object.freeze(
 if(!Object.isFrozen(NoticeCoordinator)||NoticeCoordinator.format!=='study-director.notice-coordinator'||NoticeCoordinator.contractVersion!==1){
   throw new Error('Study Director notice coordinator is unavailable or incompatible.');
 }
+// Recent (docs/NOTIFICATIONS.md): today's pop-ups and banners in the profile
+// panel. Kept for this window across a reload (sessionStorage), tied to the
+// profile; never uploaded or backed up. Opening the panel marks news seen.
+const NotificationRecent=(()=>{
+  let highlight=new Set();
+  function restore(){
+    try{
+      const value=JSON.parse(sessionStorage.getItem(SESSION_STORAGE_KEYS.notifications)||'null');
+      if(value&&value.version===1&&value.scope===ProfileScope.scope&&Array.isArray(value.entries))NoticeCoordinator.restoreRecent(value.entries);
+    }catch(error){AppDiagnostics.capture('notifications.recent-restore',error,'warn');}
+  }
+  function save(state){
+    try{
+      if(!state.entries.length){sessionStorage.removeItem(SESSION_STORAGE_KEYS.notifications);return;}
+      const entries=state.entries.map(({id,source,tier,severity,title,message,at,outcome,seen})=>({id,source,tier,severity,title,message,at,outcome,seen}));
+      sessionStorage.setItem(SESSION_STORAGE_KEYS.notifications,JSON.stringify({version:1,scope:ProfileScope.scope,entries}));
+    }catch(error){AppDiagnostics.capture('notifications.recent-save',error,'warn');}
+  }
+  function changed(state){save(state);scheduleSyncStatus();render(state);}
+  function time(at){try{return new Date(at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}catch{return '';}}
+  // Rebuilt only when the entries change, so a focused button keeps focus.
+  function render(state=NoticeCoordinator.recent()){
+    const dialog=document.getElementById('profile-dialog');if(!dialog?.open)return;
+    const list=document.getElementById('profile-recent-list'),empty=document.getElementById('profile-recent-empty'),clear=document.getElementById('profile-recent-clear');
+    if(empty)empty.hidden=!!state.entries.length;if(clear)clear.hidden=!state.entries.length;
+    const key=JSON.stringify([state.entries,[...highlight]]);if(!list||list.dataset.key===key)return;list.dataset.key=key;
+    list.replaceChildren(...state.entries.map(entry=>{
+      const row=document.createElement('li');row.className='profile-recent-item';row.dataset.tone=entry.severity;row.dataset.tier=entry.tier;
+      if(highlight.has(entry.id))row.dataset.unseen='true';
+      const mark=document.createElement('span');mark.className='profile-recent-mark';mark.setAttribute('aria-hidden','true');
+      const text=document.createElement('span');text.className='profile-recent-text';
+      const title=document.createElement('strong');title.className='profile-recent-title';title.textContent=entry.title;text.append(title);
+      if(entry.message){const message=document.createElement('span');message.className='profile-recent-message';message.textContent=entry.message;text.append(message);}
+      const when=document.createElement('time');when.className='profile-recent-time';when.dateTime=new Date(entry.at).toISOString();when.textContent=time(entry.at);
+      row.append(mark,text,when);
+      if(entry.actionLabel){const button=document.createElement('button');button.type='button';button.className='mini-btn ui-btn';button.dataset.action='recent-action';button.dataset.recentId=entry.id;button.textContent=entry.actionLabel;row.append(button);}
+      return row;
+    }));
+  }
+  // News that faded unseen stays marked while the panel is open.
+  function opened(){const state=NoticeCoordinator.recent();highlight=new Set(state.entries.filter(entry=>entry.tier==='news'&&entry.outcome==='expired'&&!entry.seen).map(entry=>entry.id));render(state);NoticeCoordinator.markRecentSeen();}
+  function closed(){highlight=new Set();}
+  function run(ev){
+    const id=String(ev?.target?.closest?.('[data-recent-id]')?.dataset.recentId||'');if(!id)return false;
+    closeProfilePanel();return NoticeCoordinator.runRecentAction(id);
+  }
+  restore();
+  return Object.freeze({changed,render,opened,closed,run,clear:()=>{NoticeCoordinator.clearRecent();return true;}});
+})();
 async function showBackupPresentation(source,kind){
   if(source==='device-folder'&&kind==='permission')return DeviceBackup?.connect();
   // Reconnecting straight from the toast keeps it to one click.
@@ -2099,7 +2153,7 @@ const Interactions=InteractionsModule.createController(Object.freeze({ports:Obje
   }),
   diagnostics:Object.freeze({capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn')}),
   history:WorkspaceHistoryBridge,
-  notifications:Object.freeze({notify:NoticeCoordinator.notify,subscribe:NoticeCoordinator.subscribe,dismissEvent:NoticeCoordinator.dismissEvent,pauseEvent:NoticeCoordinator.pauseEvent,setHidden:NoticeCoordinator.setHidden})
+  notifications:Object.freeze({notify:NoticeCoordinator.notify,subscribe:NoticeCoordinator.subscribe,dismissEvent:NoticeCoordinator.dismissEvent,dismissAll:NoticeCoordinator.dismissAll,pauseEvent:NoticeCoordinator.pauseEvent,setPaused:NoticeCoordinator.setPaused,setHidden:NoticeCoordinator.setHidden})
 })}));
 if(!Object.isFrozen(Interactions)||Interactions.format!=='study-director.interactions'||Interactions.contractVersion!==1){
   throw new Error('Study Director interaction controller is unavailable or incompatible.');
@@ -4646,7 +4700,7 @@ const UnsupportedData=(()=>{
   let noticeShown=false;
   function announce(){
     const state=summary();if(!state.total||noticeShown)return false;noticeShown=true;
-    NoticeCoordinator.emit({source:'unsupported-data',id:'held',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,dismissible:true,cue:'none',
+    NoticeCoordinator.emit({source:'unsupported-data',id:'held',severity:'warning',lifecycle:'succeeded',foreground:false,tier:'blocking',surface:'toast',dismissible:true,
       title:'Some data is from a newer version',
       message:`This device has ${describe(state)} saved by a newer version of Study Director. This version leaves them exactly as they are and works with everything else; Drive sync waits until the app is updated.`,
       action:{label:'Update app',run:()=>void checkUnsupportedUpdate()}});
@@ -4656,7 +4710,7 @@ const UnsupportedData=(()=>{
   function reportBlocked(){
     if(!blocked)return false;
     const others=Profiles.list().filter(row=>row.scope!==ProfileScope.scope);
-    NoticeCoordinator.emit({source:'unsupported-data',id:'blocked',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,dismissible:false,cue:'none',
+    NoticeCoordinator.emit({source:'unsupported-data',id:'blocked',severity:'warning',lifecycle:'succeeded',foreground:false,tier:'blocking',surface:'toast',dismissible:false,
       title:'This profile needs a newer version',
       message:'This profile was saved by a newer version of Study Director, which changed how its data is stored. This version leaves it exactly as it is. Update the app to open it, or use another profile meanwhile.',
       action:{label:'Check for update',run:()=>void PwaLifecycle.checkForUpdate().catch(error=>AppDiagnostics.capture('unsupported-data.update-check',error,'warn'))},
@@ -5277,7 +5331,11 @@ async function continueSessionHere(){
     previous=ActiveSessionCodec.sanitizeCurrent(session);
     const moved=await transferSessionOwnershipHere(session,{onStep:text=>setSessionHandoff(text)});
     setSessionHandoff('Starting here…');
-    return moved.previous.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
+    if(moved.previous.status==='suspended')return restoreSuspendedTodaySession();
+    // The timer runs here now: Resume, as Restore Session plays.
+    const restored=await attemptAutoRestoreActiveSession();
+    if(restored)NoticeCoordinator.emit({source:'session',id:'session-continued',surface:'quiet',foreground:false,cue:'resume',occurrence:String(Date.now())});
+    return restored;
   }catch(error){
     const problem=sessionHandoffProblem(error);
     setPlanStatus('Could not continue today’s session here: '+problem,false);
@@ -5311,7 +5369,7 @@ async function yieldSessionToOtherDevice(){
     return true;
   });
   sessionYieldedAt=Date.now();
-  Interactions.notify({source:'session',key:'session-yield',title:'Session continued on another device',message:'The timer here stopped. What this device recorded is kept for you under Needs review.'});
+  Interactions.notify({source:'session',key:'session-yield',tier:'news',cue:'session-moved',system:true,title:'Session continued on another device',message:'The timer here stopped. What this device recorded is kept for you under Needs review.'});
   return true;
 }
 async function restoreSuspendedTodaySession(){
@@ -5326,7 +5384,7 @@ async function restoreSuspendedTodaySession(){
     if(restored===false)throw new Error('The suspended session could not be restored.');
     setSessionPanelMode('active');
     setPlanStatus('✓ Suspended session restored.');
-    Interactions.notify({source:'session',kind:'success',key:'session-restore',title:'Session restored',message:'Today’s suspended session is active again.'});
+    Interactions.notify({source:'session',kind:'success',key:'session-restore',cue:'resume',title:'Session restored',message:'Today’s suspended session is active again.'});
     await goTab('execute',{source:'session-restore'});
     return true;
   }catch(error){
@@ -6176,7 +6234,8 @@ function syncStatusInput(){
     updateReady:!!(pwaLatestUpdateState?.updateReady&&!pwaLatestUpdateState.applying),
     sessionElsewhere:sessionPanelMode==='elsewhere'&&sessionPanelSession?sessionDevice(sessionPanelSession):'',
     sessionReady:sessionParkedHere()&&sessionFromElsewhere(sessionPanelSession)?sessionDevice(sessionPanelSession):'',
-    operation:driveRunningOperation()
+    operation:driveRunningOperation(),
+    unseen:NoticeCoordinator.recent().unseen
   };
 }
 function drawStatusHost(host,model){
@@ -6184,7 +6243,8 @@ function drawStatusHost(host,model){
   if(host.dataset.ring!==model.ring)host.dataset.ring=model.ring;
   if((host.dataset.badge||'')!==model.badge)host.dataset.badge=model.badge;
   host.toggleAttribute('data-slow',model.slow);
-  const badge=host.querySelector('.status-badge'),text=model.badge==='review'&&model.count>1?(model.count>9?'9+':String(model.count)):['error','warning'].includes(model.badge)?'!':model.badge==='update'?'↑':'';
+  const many=value=>value>9?'9+':String(value);
+  const badge=host.querySelector('.status-badge'),text=model.badge==='review'&&model.count>1?many(model.count):model.badge==='info'&&model.unseen>1?many(model.unseen):['error','warning'].includes(model.badge)?'!':model.badge==='update'?'↑':'';
   if(badge&&badge.textContent!==text)badge.textContent=text;
 }
 function renderSyncStatus(){
@@ -6280,14 +6340,14 @@ function renderProfile(){renderProfileBadge();renderProfilePanel();}
 function openProfilePanel(){
   const dialog=document.getElementById('profile-dialog');if(!dialog||dialog.open)return false;
   const input=document.getElementById('profile-name-input');if(input)input.value=getStudentNameFromDisplay();
-  dialog.showModal();renderProfilePanel();return true;
+  dialog.showModal();renderProfilePanel();NotificationRecent.opened();return true;
 }
 function closeProfilePanel(){const dialog=document.getElementById('profile-dialog');if(dialog?.open)dialog.close();}
 function installProfileDialogs(){
   const form=document.getElementById('first-start-form');form?.addEventListener('submit',event=>event.preventDefault());
   // First start stays until Skip, Cancel or Continue; Escape does not drop it.
   document.getElementById('first-start-dialog')?.addEventListener('cancel',event=>event.preventDefault());
-  document.getElementById('profile-dialog')?.addEventListener('close',()=>saveProfileName());
+  document.getElementById('profile-dialog')?.addEventListener('close',()=>{saveProfileName();NotificationRecent.closed();});
 }
 function saveProfileName(){
   const input=document.getElementById('profile-name-input');if(!input)return;
@@ -9271,7 +9331,7 @@ const KeptVersions=(()=>{
     // session that moved to another device says this device's was kept.
     if(driveConnectCard)return;
     if(Date.now()-sessionYieldedAt<60000&&fresh.every(review=>review.subject==='session'))return;
-    Interactions.notify({source:'sync',key:'kept-new',kind:'warning',duration:12000,waitWhileStudying:true,title:'Kept for review',
+    Interactions.notify({source:'sync',key:'kept-new',kind:'warning',tier:'news',title:'Kept for review',
       message:`${count===1?'One version was':`${count} versions were`} kept where two devices changed the same thing. Nothing is lost; choose what to keep when you’re ready.`,
       action:{label:'Review',run:()=>void review()}});
   }
@@ -9610,7 +9670,7 @@ async function restoreSessionStateThroughLifecycle(importedSession,scheduleText=
         const input=document.getElementById('plan-input');if(input)input.value=session.scheduleText;
         void PlanData.writeDraft(session.scheduleText);
         PlanDraftEditor.preview({silent:true,enterDraft:true});setSessionPanelMode('suspended',session);
-        if(sessionFromElsewhere(session)&&isSuspendedActiveSession(session))Interactions.notify({source:'session',key:'session-handoff',title:'Today’s session is ready',message:'It was suspended on another device. Continue it here when you are ready.',action:{label:'Continue here',run:()=>void continueSessionOnExecute('session-handoff')}});
+        if(sessionFromElsewhere(session)&&isSuspendedActiveSession(session))Interactions.notify({source:'session',key:'session-handoff',tier:'news',title:'Today’s session is ready',message:'It was suspended on another device. Continue it here when you are ready.',action:{label:'Continue here',run:()=>void continueSessionOnExecute('session-handoff')}});
       }else if(sessionRunsElsewhere(session)){
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
         setSessionPanelMode('elsewhere',session);
@@ -9985,7 +10045,7 @@ async function offerDeviceRecoveryIfLocalEmpty(options={}){
   if(!await canonicalLocalRecoveryEmpty())return false;
   const state=DeviceBackup.status(),latestBefore=Number(options.latestBefore)||Number.POSITIVE_INFINITY;
   if(!state.connected){
-    if(options.reason==='startup'&&!deviceRecoveryHintNotified&&await studyDataLostHere()){deviceRecoveryHintNotified=true;Interactions.notify({key:'device-recovery-empty-local',title:'No local study data found',message:`If browser data was cleared, restore from ${backupRestoreChoices()}.`,action:{label:'Restore from backup',run:()=>void openBackupRestore()}});}
+    if(options.reason==='startup'&&!deviceRecoveryHintNotified&&await studyDataLostHere()){deviceRecoveryHintNotified=true;Interactions.notify({key:'device-recovery-empty-local',tier:'news',title:'No local study data found',message:`If browser data was cleared, restore from ${backupRestoreChoices()}.`,action:{label:'Restore from backup',run:()=>void openBackupRestore()}});}
     return false;
   }
   deviceRecoveryOfferRunning=true;
@@ -10038,7 +10098,7 @@ function showStorageResetDecision({unsaved=[],retrying=false}={}){
   const backingUp=DeviceBackup.status().connected||BackupProviderRuntime.connected('google-drive');
   parts.push(backingUp?'Past Saved Days and attachments need a restore from backup.':`Past Saved Days and attachments can be restored from ${backupRestoreChoices()}.`);
   if(backingUp)parts.push('Automatic backups are paused until you choose.');
-  NoticeCoordinator.emit({source:'storage-reset',id:'detected',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,dismissible:false,cue:'none',
+  NoticeCoordinator.emit({source:'storage-reset',id:'detected',severity:'warning',lifecycle:'succeeded',foreground:false,tier:'critical',surface:'toast',dismissible:false,
     title:'Browser data was cleared',message:parts.join(' '),
     action:{label:'Restore from backup',run:()=>void restoreAfterStorageReset()},
     secondaryAction:{label:'Continue with current data',run:()=>settleStorageReset()}});
@@ -10121,7 +10181,7 @@ async function restoreMissingAfterStorageReset(hold){
   settleStorageReset();
   const at=Date.parse(String(outcome.exportedAt||'')),days=Math.max(0,Number(outcome.result?.added)||0),files=Math.max(0,Number(outcome.result?.assetsRestored)||0);
   const source=`your ${outcome.label} backup${Number.isFinite(at)?` of ${new Date(at).toLocaleString()}`:''}`,count=(value,word)=>`${value} ${word}${value===1?'':'s'}`;
-  NoticeCoordinator.emit({source:'storage-reset',id:'restored',severity:'success',lifecycle:'succeeded',foreground:false,surface:'toast',duration:12000,cue:'none',
+  NoticeCoordinator.emit({source:'storage-reset',id:'restored',severity:'success',lifecycle:'succeeded',foreground:false,tier:'news',surface:'toast',
     title:'Browser data was cleared',
     message:days||files?`Your open work was kept. Added ${count(days,'past Saved Day')} and ${count(files,'attachment')} from ${source}.`:`Your open work was kept. Nothing was missing compared with ${source}.`});
   return true;
@@ -10966,6 +11026,8 @@ const CLICK_ACTIONS=Object.freeze({
   'sync-status-action': syncStatusAction,
   // Hiding the card leaves the work running; the indicator still shows it.
   'close-drive-connect': ()=>{endDriveConnectCard();return true;},
+  'recent-action': ev=>NotificationRecent.run(ev),
+  'clear-recent': ()=>NotificationRecent.clear(),
   'review-kept-versions': ()=>KeptVersions.review(),
   'open-profile': openProfilePanel,
   'close-profile': closeProfilePanel,
@@ -11350,6 +11412,7 @@ function installApplicationDomBindings(){
   // The indicator, the panel's counts and the Connect card follow each step
   // and count of a sync or upload.
   BackupPresentation.subscribe(scheduleSyncStatus);
+  NoticeCoordinator.subscribeRecent(NotificationRecent.changed);
   void ensureDeviceBackupInstalled().then(()=>installRepositoryIntegrityScrub()).catch(error=>AppDiagnostics.capture('backup.repository-integrity-install',error,'warn'));
   updateFullscreenButton();
   PlanDraftEditor.install();

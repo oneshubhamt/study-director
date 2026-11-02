@@ -38,4 +38,27 @@ vm.createContext(context);vm.runInContext(helper+start+finish,context);sounds.le
 context.startCur();await settle();assert.deepEqual(sounds,['begin']);context.finishTrackableBlock(false);await settle();assert.deepEqual(sounds,['begin','complete'],'completion and next start are a single cue');context.finishTrackableBlock(false);await settle();assert.deepEqual(sounds,['begin','complete','day']);
 coordinator.setSoundMode('minimal');state.currentIndex=0;const previousCount=sounds.length;context.startCur();await settle();assert.equal(sounds.length,previousCount,'manually starting a later block is silent in Minimal');
 coordinator.clear();
-console.log(JSON.stringify({status:'PASS',suite:'study-cue-lifecycle',checks:['inline bounds and commit','disabled rhythm remains editable','one Pomodoro occurrence','turning rhythm off resolves reminder','start/block/day combined transitions']}));
+// A fixed block that starts during study time stops the timer with a settle in
+// the foreground, a device notification in the background, and silence when the
+// person was away (they find the choice waiting).
+{
+  const {coordinator:fixed}=createNotifications();
+  const heard=[],shown=[],view={foreground:true};
+  fixed.configureDelivery({audio:{stop:noop,status:()=> 'ready',play:async(phrase,options)=>{if(options.isCurrent())heard.push(phrase);return true;}},
+    system:async(event,isCurrent)=>{if(isCurrent())shown.push(`${event.title}: ${event.message}`);return true;},context:()=>({owner:true,foreground:view.foreground})});
+  const stop=src.slice(src.indexOf('function stopTimerForFixedBoundary('),src.indexOf('\n}\n',src.indexOf('function stopTimerForFixedBoundary('))+3);
+  const timerState={currentIndex:0,paused:false,runtime:{},emptyRuntime:()=>({})},modes=[];
+  const fixedContext={notifications:fixed,TimerState:timerState,TIMER_MODES:{READY:'ready'},discardInactiveGap:noop,recordCurrentActiveToTask:noop,saveNote:noop,tInt:null,clearInterval:noop,TimerPresentation:{stop:noop},
+    resetBreakState:noop,Pomodoro:{timerEvent:noop},setTimerMode:mode=>modes.push(mode),shortTaskLabel:task=>task.name,showEmpty:noop,refreshPnote:noop,recoverySetStatus:noop,flushLiveDraft:noop};
+  vm.createContext(fixedContext);vm.runInContext(helper+stop,fixedContext);
+  const boundary={task:{name:'Lab'}};
+  fixedContext.stopTimerForFixedBoundary(boundary);await settle();
+  assert.deepEqual([heard,shown],[['settle'],[]],'a fixed block starting in the foreground settles');
+  view.foreground=false;fixedContext.stopTimerForFixedBoundary(boundary);await settle();
+  assert.deepEqual([heard,shown],[['settle'],['Fixed block started: Lab has started. The timer stopped and counted focus was saved.']],'in the background it is a device notification, not an in-app sound');
+  view.foreground=true;fixedContext.stopTimerForFixedBoundary(boundary,{away:true});await settle();
+  assert.deepEqual([heard.length,shown.length],[1,1],'nothing sounds when the person was away');
+  assert.deepEqual(modes,['ready','ready','ready']);
+  fixed.clear();
+}
+console.log(JSON.stringify({status:'PASS',suite:'study-cue-lifecycle',checks:['inline bounds and commit','disabled rhythm remains editable','one Pomodoro occurrence','turning rhythm off resolves reminder','fixed block start: settle, device notification, silent when away','start/block/day combined transitions']}));

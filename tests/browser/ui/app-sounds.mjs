@@ -24,8 +24,9 @@ try{
   const played=await waitFor(()=>page.evaluate(`window.__sounds.played[0]||null`),{label:'test sound playing'});
   assert.deepEqual(played,{length:24916,rate:22050,state:'running'},'Test sound plays the full begin cue');result.checks.testSoundPlays=true;
 
-  const made=await waitFor(()=>page.evaluate(`window.__sounds.made.length>=13?window.__sounds.made:null`),{label:'every cue made in idle moments'});
-  assert.equal(made.length,13,'each cue is made once');assert.ok(made.includes(24916)&&made.includes(33957));result.checks.allCuesMadeOnce=true;
+  const cues=await page.evaluate(`window[Symbol.for('studyDirector.internalModules.v1')].require('audio-engine',1).cues.length`);
+  const made=await waitFor(()=>page.evaluate(`window.__sounds.made.length>=${cues}?window.__sounds.made:null`),{label:'every cue made in idle moments'});
+  assert.equal(made.length,cues,'each cue is made once');assert.ok(made.includes(24916)&&made.includes(33957));result.checks.allCuesMadeOnce=true;
 
   assert.deepEqual(server.requests.filter(request=>request.path.includes('/assets/sounds/')),[],'no sound file is requested');result.checks.noSoundFiles=true;
   const unexpected=page.events.filter(event=>!/favicon|ResizeObserver loop/i.test(event.text||''));assert.deepEqual(unexpected,[]);result.checks.noRuntimeErrors=true;

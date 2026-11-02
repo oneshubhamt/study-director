@@ -43,7 +43,7 @@ shape or motion and always has text (hover tooltip and screen-reader label).
 | `update` | Amber **↑** | App update needed to keep syncing |
 | `warning` | Amber **!** | Needs attention but not failing: Device Folder permission, storage or backup-check warning, no backup in over a week |
 | `review` | Yellow dot (count when 2 or more) | Something to review: kept versions, a sync review |
-| `info` | Small blue dot | A new app version is ready (not blocking) |
+| `info` | Small blue dot (count when 2 or more) | A new app version is ready (not blocking); news that faded unseen since the panel was last opened ([NOTIFICATIONS.md](NOTIFICATIONS.md), Recent) |
 
 **Priority.** Ring: offline → signed-out → blocked → syncing → error →
 pending → synced (a retry in progress shows as syncing). Badge: error → lock →
@@ -105,10 +105,17 @@ session running on another device, app update ready, no backup in over a week.
   resolved) and versions kept for review (once per version since start-up).
 - Red only after retries run out: the ring, the badge, the "keeps failing"
   pop-up and the Connect card; while a sync still retries it is amber.
-- While this device's timer runs on a work block, only blocking problems pop
-  up (signed out, password, app update, retries ran out, storage, Device
-  Folder permission) and results of the person's own actions. Reviews wait
-  and show at the next support or fixed block, pause, or the session's end.
+- Every pop-up has a kind ([NOTIFICATIONS.md](NOTIFICATIONS.md), Kinds):
+  result, news, blocking or critical. Blocking problems (signed out,
+  password, app update, retries ran out, Device Folder permission, data from
+  a newer version) stay pinned until closed or resolved and knock once (red:
+  Attention); news (sync review, kept versions, hand-off ready, storage
+  restored) fades after 12 s with a chime.
+- While this device's timer runs on a work block, news waits and shows at the
+  next support or fixed block, pause, or the session's end; blocking and
+  critical pop-ups and results of the person's own actions show at once.
+- News that faded unseen counts on the blue `info` badge until the profile
+  panel is opened; the panel's Recent list shows the day's pop-ups.
 
 ## 7. Phases
 
@@ -129,7 +136,7 @@ session running on another device, app update ready, no backup in over a week.
 ### Phase 3 — Connect Google Drive card
 
 - **When.** From any Connect or Sign in (profile panel, Library → Data, first start, the permission notice) until that first sync ends, on every tab.
-- **Where.** First in the notification area (top right on a laptop, top on a phone); toasts stack below it.
+- **Where.** A card of the notification stack (top right on a laptop, above the bottom bar on a phone): first after the pinned cards, counted in "+N more", closed by Clear all.
 - **What.** Three steps — sign in to Google, bring in what's on Google Drive, upload this device's data — each waiting, working (spinner), done (✓) or failed (×); one sentence for where it is; the running stage with its counts ("Downloading backup data… · 2 of 5 complete · 150 KB of 300 KB") and a bar (a sweep when there are no counts yet).
 - **Endings.** Synced (closes itself after 6 s; offers Review when the sync kept versions for review); needs the backup password, a review or an app update (stays, with the button); offline (continues when back online); couldn't finish (says when it tries again, with Try now); sign-in didn't finish (Try again). Declining or refusing a library closes it; the existing toast explains.
 - **×** hides it; syncing carries on and the indicator still shows it.
@@ -140,7 +147,7 @@ session running on another device, app update ready, no backup in over a week.
 - **Hand-off row.** A session suspended on another device is a panel row, "Today’s session was suspended on Laptop. Continue it here when you’re ready.", with Continue here (no badge: it is an offer). That button and the hand-off pop-up's Continue here open Execute first, so the Continue Here steps show; the pop-up closes once Continue Here starts.
 - **Counts.** While a catch-up or upload runs, the panel's line under the headline shows its stage and counts, for example "Downloading backup data from Google Drive… · 2 of 5 complete · 150 KB of 300 KB".
 - **Pop-ups.** Section 6. Kept versions now pop up once ("Kept for review", Review); not those present at start-up, not while the Connect card shows (it reports them), and not a session this device just handed over (its own pop-up says so). The Connect card is amber while a sync retries or is signed out, red once retries ran out or a sign-in fails.
-- **Mechanism.** `notice-coordinator.setStudying` holds events flagged `waitWhileStudying` without showing or timing them; the host sets it from the timer mode and the current block (work blocks only).
+- **Mechanism.** `notice-coordinator.setStudying` holds news without showing or timing it; the host sets it from the timer mode and the current block (work blocks only). (Entry 029 replaced the `waitWhileStudying` flag with the news kind.)
 
 ## 8. Ownership
 
