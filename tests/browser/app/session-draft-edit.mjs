@@ -12,7 +12,7 @@ try{
   await waitForStudyDirector(page,{instrumented:true});
   await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'ownership'});
   const applied=await page.evaluate(`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms)),now=new Date(),m=now.getHours()*60+now.getMinutes(),fmt=v=>String(Math.floor((v+1440)%1440/60)).padStart(2,'0')+':'+String((v+1440)%1440%60).padStart(2,'0');
-    document.getElementById('plan-input').value=[fmt(m-5)+' | 60 | Draft QA Block | work | Medicine | questions | 12',fmt(m+55)+' | 30 | Draft QA Next | work | Ethics | pages | 5'].join('\\n');
+    document.getElementById('plan-input').value=[fmt(m-5)+' | 60 | Draft QA Block | work | Medicine | questions | 12',fmt(m+55)+' | 30 | Draft QA Review | support | Planning | block | 1'].join('\\n');
     const result=d.applySchedule({skipNotify:true});if(result&&result.then)await result;
     d.goTab('execute');await wait(50);d.setCurrentTask(0);d.TimerEngine.startCur();await wait(200);
     // A different draft arrives mid-session.
@@ -31,7 +31,22 @@ try{
   const capture=await page.evaluate(`__PWA6.BackupController.createCheckpoint().then(file=>({ok:true,warning:String(file.warning||'')}),error=>({ok:false,error:String(error&&error.message||error)}))`);
   assert.equal(capture.ok,true,`a backup captures the session (${capture.error||''})`);
   assert.doesNotMatch(capture.warning,/from memory/u,'the session comes from storage, not memory');
+
+  // While the timer runs on a work block, news (a pop-up that blocks nothing)
+  // waits and a blocking one shows; pausing shows the one that waited, and so does
+  // moving on to a support block (STATUS-SYSTEM.md, noise rules).
+  const hold=await page.evaluate(`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms)),shown=text=>[...document.querySelectorAll('#sd-toast-region .interaction-toast')].some(node=>node.textContent.includes(text));
+    d.Interactions.notify({source:'sync',key:'kept-new',kind:'warning',tier:'news',title:'Kept for review',message:'One version was kept.'});
+    d.Interactions.notify({source:'qa',key:'blocking',kind:'warning',tier:'blocking',title:'Needs password',message:'Enter it to keep syncing.'});
+    await wait(200);const running={mode:d.TimerState.mode,kept:shown('Kept for review'),blocking:shown('Needs password')};
+    d.togglePause();await wait(300);const paused={mode:d.TimerState.mode,kept:shown('Kept for review')};
+    d.togglePause();await wait(200);
+    d.Interactions.notify({source:'sync',key:'qa-waiting',kind:'warning',tier:'news',title:'Waiting pop-up',message:'Blocks nothing.'});
+    await wait(200);const working={mode:d.TimerState.mode,waiting:shown('Waiting pop-up')};
+    d.markDone();await wait(300);const support={mode:d.TimerState.mode,kind:d.TimerState.tasks[d.TimerState.currentIndex]?.kind||'',waiting:shown('Waiting pop-up')};
+    return {running,paused,working,support};})()`);
+  assert.deepEqual(hold,{running:{mode:'running',kept:false,blocking:true},paused:{mode:'paused',kept:true},working:{mode:'running',waiting:false},support:{mode:'running',kind:'support',waiting:true}},'pop-ups that block nothing wait only while a work block runs');
   assert.deepEqual(page.warnings.filter(text=>/\[Study Director\]/u.test(text)),[],'no session save failed');
   assert.deepEqual(page.events.filter(event=>!/favicon|ResizeObserver loop/iu.test(event.text||'')),[]);
-  console.log(JSON.stringify({status:'PASS',checks:{appliedPlanKept:true,pacerSaved:true,backupComplete:true}}));
+  console.log(JSON.stringify({status:'PASS',checks:{appliedPlanKept:true,pacerSaved:true,backupComplete:true,popUpsWaitOnlyDuringWorkBlocks:true}}));
 }finally{await browser.close();await server.close();}

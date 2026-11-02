@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 const read=relative=>fs.readFileSync(path.join(root,relative),'utf8');
 for(const file of ['source/core/internal.js','source/core/interactions.js'])vm.runInThisContext(read(file),{filename:file});
-const notificationPort=Object.freeze({notify:()=>'',subscribe:()=>()=>{},dismissEvent:()=>false,pauseEvent:()=>false,setHidden:()=>{}});
+const notificationPort=Object.freeze({notify:()=>'',subscribe:()=>()=>{},dismissEvent:()=>false,dismissAll:()=>0,pauseEvent:()=>false,setPaused:()=>false,setHidden:()=>{}});
 const interactions=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('interactions',1);
 
 { // interaction-guidance-module

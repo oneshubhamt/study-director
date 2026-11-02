@@ -410,6 +410,9 @@ function stopTimerForFixedBoundary(boundary,options={}){
   setTimerMode(TIMER_MODES.READY,'fixed-boundary');
   const label=boundary&&boundary.task?shortTaskLabel(boundary.task):'fixed block';
   const away=options&&options.away===true;
+  // Settle, or a device notification while the app is in the background. Not
+  // when the person was away: they find the choice waiting when they return.
+  if(!away)soundEvent('fixed-start',{system:true,title:'Fixed block started',message:`${label} has started. The timer stopped and counted focus was saved.`},true);
   showEmpty(away
     ?`Fixed block started while you were away: ${label}. Your choice was applied to the study time before it; time from the fixed block on was not counted.`
     :`Fixed block started: ${label}. Counted focus was saved; resume or shift the remaining study blocks when ready.`);

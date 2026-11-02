@@ -25,7 +25,10 @@ function coordinator(){const time=clock(),renders=[];return {time,renders,notice
   const {notices:n,time}=coordinator();
   n.notify({key:'failure',kind:'error',title:'Not saved',message:'Retry'});
   for(let i=0;i<7;i++)n.notify({key:`done-${i}`,kind:'success',title:'Done'});
-  assert.equal(n.eventStatus().toasts.length,4);assert.equal(n.eventStatus().toasts[0].id,'failure');
+  // Nothing waits out of sight: every pop-up is in the stack, the error
+  // pinned first, then the newest first.
+  assert.deepEqual(n.eventStatus().toasts.map(row=>row.id),['failure','done-6','done-5','done-4','done-3','done-2','done-1','done-0']);
+  assert.equal(n.eventStatus().toasts[0].pinned,true);assert.equal(n.eventStatus().toasts[1].pinned,false);
   time.tick(50000);assert.deepEqual(n.eventStatus().toasts.map(row=>row.id),['failure'],'routine results cannot evict or expire unresolved errors');
   const error=n.eventStatus().toasts[0];n.dismissEvent(error.key,error.deliveryId);n.emit({source:'interaction',id:'failure',severity:'error',lifecycle:'failed',title:'Not saved',message:'Retry'});
   assert.equal(n.eventStatus().toasts.length,0,'identical updates cannot undo acknowledgement');
@@ -61,23 +64,21 @@ class Element {
   contains(target){return target===this||this.children.some(child=>child.contains(target));}
 }
 {
-  const {notices:n,time}=coordinator(),region=new Element(),document=new Element('document'),errors=[];
-  document.getElementById=id=>id==='sd-toast-region'?region:null;document.createElement=tag=>new Element(tag);document.hidden=false;
-  const controller=registry.require('interactions',1).createController(freeze({ports:freeze({
-    environment:freeze({document,window:{},nativeConfirm:()=>false,nativePrompt:()=>null,requestAnimationFrame:fn=>fn(),setTimeout:time.setTimeout,clearTimeout:time.clearTimeout}),
-    history:freeze({opened:()=>{},closed:()=>{},requestClose:()=>false}),diagnostics:freeze({capture:(scope,error)=>errors.push({scope,error})}),
-    notifications:freeze({notify:n.notify,subscribe:n.subscribe,dismissEvent:n.dismissEvent,pauseEvent:n.pauseEvent,setHidden:n.setHidden})
-  })}));
-  controller.notify({key:'saved',title:'Saved',duration:4000});const toast=region.children[0];time.tick(1000);toast.dispatch('mouseenter');time.tick(10000);assert.equal(n.eventStatus().toasts.length,1);
-  toast.dispatch('focusin');toast.dispatch('mouseleave');time.tick(10000);assert.equal(n.eventStatus().toasts.length,1,'keyboard focus retains a paused toast');
-  toast.dispatch('focusout',{relatedTarget:null});time.tick(2000);document.hidden=true;document.dispatch('visibilitychange');time.tick(10000);assert.equal(n.eventStatus().toasts.length,1);
-  document.hidden=false;document.dispatch('visibilitychange');time.tick(1001);assert.equal(n.eventStatus().toasts.length,0);time.tick(1000);assert.equal(region.children.length,0,'dismissed DOM and exit timer are cleaned up');
+  // Hover and focus hold one pop-up's time; a hidden page holds every one.
+  // The renderer itself is checked in a real page (tests/browser/ui/notification-stack.mjs).
+  const {notices:n,time}=coordinator();
+  n.notify({key:'saved',title:'Saved',duration:4000});const saved=n.eventStatus().toasts[0];time.tick(1000);
+  n.pauseEvent(saved.key,saved.deliveryId,'hover',true);time.tick(10000);assert.equal(n.eventStatus().toasts.length,1);
+  n.pauseEvent(saved.key,saved.deliveryId,'focus',true);n.pauseEvent(saved.key,saved.deliveryId,'hover',false);time.tick(10000);assert.equal(n.eventStatus().toasts.length,1,'keyboard focus retains a paused toast');
+  n.pauseEvent(saved.key,saved.deliveryId,'focus',false);time.tick(2000);n.setHidden(true);time.tick(10000);assert.equal(n.eventStatus().toasts.length,1);
+  n.setHidden(false);time.tick(1001);assert.equal(n.eventStatus().toasts.length,0);
   // Exercise the actual attachment error call site, rather than inferring severity from wording.
   const source=fs.readFileSync('source/core/attachments.js','utf8'),start=source.indexOf('    function reportError('),end=source.indexOf('\n    async function operation',start);
-  new Function('notifications',source.slice(start,end)+';reportError(new Error("Disk full"));')(n.presentation('attachments')); 
-  const failure=region.children[0];assert.ok(failure.classList.contains('error'));assert.equal(failure.attributes.role,'alert');
-  failure.children[1].dispatch('click');time.tick(1000);assert.equal(region.children.length,0);
-  assert.deepEqual(errors,[]);n.clear();assert.equal(time.count(),0);
+  new Function('notifications',source.slice(start,end)+';reportError(new Error("Disk full"));')(n.presentation('attachments'));
+  const failure=n.eventStatus().toasts[0];
+  assert.deepEqual([failure.severity,failure.tier,failure.pinned,failure.duration],['error','result',true,0],'a failed action is red, pinned and stays');
+  assert.equal(n.dismissEvent(failure.key,failure.deliveryId),true);assert.equal(n.eventStatus().toasts.length,0);
+  n.clear();assert.equal(time.count(),0);
 }
 {
   const {notices:n}=coordinator(),nodes=new Map(['device-folder','google-drive'].map(source=>[`backup-operation-note-${source}`,new Element()]));
@@ -113,7 +114,7 @@ class Element {
   assert.ok(n.eventStatus().events.length<=64,'quiet background results also have bounded retention');n.clear();
   const html=fs.readFileSync('source/app.html','utf8'),start=html.indexOf('function renderDeviceBackup(state){'),end=html.indexOf('\nfunction markStorageHealthOk',start),status=new Element(),note=new Element(),recover=new Element(),cleared=[];
   let actionsDrawn=0;
-  new Function('document','storageHealthTime','schedulePwaUpdateEvaluation','NoticeCoordinator','BackupPresentation','renderBackupActions',html.slice(start,end)+`;renderDeviceBackup({busy:true,foregroundKind:'restore-version',cancellable:false,connected:true,hasNote:true});`)({getElementById:id=>({'device-backup-status':status,'device-backup-note':note}[id]||null)},()=>'',()=>{}, {resolveEvent:(...args)=>cleared.push(args)},registry.require('backup-presentation',1).createPresentation(freeze({notifications:n})),()=>{actionsDrawn+=1;});
+  new Function('document','storageHealthTime','schedulePwaUpdateEvaluation','NoticeCoordinator','BackupPresentation','renderBackupActions','scheduleSyncStatus',html.slice(start,end)+`;renderDeviceBackup({busy:true,foregroundKind:'restore-version',cancellable:false,connected:true,hasNote:true});`)({getElementById:id=>({'device-backup-status':status,'device-backup-note':note}[id]||null)},()=>'',()=>{}, {resolveEvent:(...args)=>cleared.push(args)},registry.require('backup-presentation',1).createPresentation(freeze({notifications:n})),()=>{actionsDrawn+=1;},()=>{});
   assert.equal(status.textContent,'Restoring…');assert.equal(note.hidden,true);assert.equal(cleared.length,0,'Device state cannot erase the coordinator summary during cancellation');assert.equal(actionsDrawn,1,'the shared actions follow the Device Folder row');
 }
 {
@@ -257,4 +258,143 @@ class Element {
   n.emit({source:'plain',id:'ordinary',severity:'warning',surface:'toast',persistent:true,dismissible:false,title:'No action'});
   const plain=n.eventStatus().toasts[0];assert.equal(plain.dismissible,true,'without an action a notice stays dismissible');assert.equal(n.dismissEvent(plain.key,plain.deliveryId),true);
 }
-console.log(JSON.stringify({status:'PASS',suite:'notification-lifecycle',checks:['priority and persistent errors','decision notices persist until resolved','deduplication','hover/focus/hidden expiry','dismissal versus cancellation','recurring notices','stale operation handles','terminal fencing','renderer severity','Device and Drive summaries']},null,2));
+{
+  // While the study timer runs, pop-ups that block nothing wait, untimed, and
+  // show when it stops; blocking ones and the person's own results show at once.
+  const {notices:n,time}=coordinator(),presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications:n}));
+  const ids=()=>n.eventStatus().toasts.map(row=>row.id).sort();
+  n.setStudying(true);
+  presentation.notice('google-drive','sync-review','Google Drive has changes from another device that need your review.',{tier:'news'});
+  n.notify({source:'sync',key:'kept-new',kind:'warning',tier:'news',title:'Kept for review',message:'One version was kept.'});
+  presentation.notice('google-drive','retry-exhausted','Syncing with Google Drive keeps failing.',{error:true});
+  presentation.notice('google-drive','permission','Google Drive sign-in expired.');
+  n.notify({key:'saved',kind:'success',title:'Saved'});
+  assert.deepEqual(ids(),['permission','retry-exhausted','saved'],'blocking pop-ups and the person’s own results show while studying');
+  assert.equal(n.eventStatus().toasts.find(row=>row.id==='retry-exhausted').severity,'error','retries that ran out are red');
+  assert.equal(n.eventStatus().toasts.find(row=>row.id==='permission').severity,'warning','a sign-in that ended is amber');
+  time.tick(60000);assert.deepEqual(ids(),['permission','retry-exhausted'],'results fade; blocking pop-ups stay until closed or resolved');
+  for(const row of n.eventStatus().toasts)n.dismissEvent(row.key,row.deliveryId);assert.deepEqual(ids(),[]);
+  n.resolveEvent('sync','kept-new');n.setStudying(false);
+  assert.deepEqual(ids(),['sync-review'],'held pop-ups show when the timer stops; one resolved meanwhile never shows');
+  time.tick(11000);assert.deepEqual(ids(),['sync-review'],'and keep their full time');time.tick(1001);assert.deepEqual(ids(),[]);
+  n.notify({source:'sync',key:'kept-new',kind:'warning',tier:'news',title:'Kept for review',message:'Two versions were kept.'});
+  time.tick(4000);n.setStudying(true);assert.deepEqual(ids(),[],'a pop-up on screen steps aside when the timer starts');
+  time.tick(60000);n.setStudying(false);time.tick(7999);assert.deepEqual(ids(),['kept-new'],'and comes back with the time it had left');time.tick(1);assert.deepEqual(ids(),[]);
+  n.clear();
+}
+{
+  // Kinds decide how long a pop-up stays, where it sits and what it sounds
+  // like (docs/NOTIFICATIONS.md, kinds).
+  const {notices:n,time}=coordinator(),played=[],system=[];
+  n.configureDelivery({audio:{play:name=>{played.push(name);return Promise.resolve(true);},stop:()=>{},status:()=>'ready'},system:event=>{system.push(event.id);return true;},context:()=>({owner:true,foreground:true})});
+  const ids=()=>n.eventStatus().toasts.map(row=>row.id),toast=id=>n.eventStatus().toasts.find(row=>row.id===id);
+  n.notify({key:'r1',kind:'success',title:'Saved'});
+  n.emit({source:'bg',id:'n1',severity:'info',foreground:false,surface:'toast',title:'Synced elsewhere'});
+  n.emit({source:'bg',id:'b1',severity:'warning',foreground:false,surface:'toast',title:'Sign in again'});
+  n.emit({source:'bg',id:'c1',severity:'warning',foreground:false,surface:'toast',tier:'critical',title:'Browser data was cleared'});
+  n.notify({key:'r2',kind:'info',title:'Copied'});
+  assert.deepEqual(['r1','n1','b1','c1','r2'].map(id=>toast(id).tier),['result','news','blocking','critical','result'],'kinds default from foreground and severity');
+  assert.deepEqual(ids(),['c1','b1','r2','n1','r1'],'critical, then blocking, pinned; then newest first');
+  assert.deepEqual(['r1','n1','b1','c1'].map(id=>toast(id).duration),[4200,12000,0,0],'results 4.2 s, news 12 s, blocking and critical stay');
+  assert.equal(toast('c1').dismissible,false,'a critical pop-up cannot be closed');assert.equal(n.dismissEvent(toast('c1').key,toast('c1').deliveryId),false);
+  assert.throws(()=>n.emit({source:'bg',id:'bad',tier:'urgent'}),/tier/);
+  n.notify({key:'r1',kind:'success',title:'Saved',message:'Again'});assert.deepEqual(ids(),['c1','b1','r2','n1','r1'],'an update keeps its place');
+  // Sounds: knock for amber blocking, Attention for critical, a chime for news.
+  assert.deepEqual(played,['chime','knock','attention'],'news chimes, blocking knocks, critical sounds Attention');
+  n.emit({source:'bg',id:'b1',severity:'warning',foreground:false,surface:'toast',title:'Sign in again',message:'Still signed out.'});
+  assert.equal(played.length,3,'a blocking pop-up sounds once per occurrence');
+  n.emit({source:'bg',id:'b2',severity:'error',foreground:false,surface:'toast',title:'Sync stopped'});assert.equal(played.at(-1),'attention','red blocking sounds Attention');
+  n.emit({source:'bg',id:'n2',severity:'info',foreground:false,surface:'toast',title:'More news'});assert.equal(played.at(-1),'attention','a second chime within 4 s is skipped');
+  time.tick(4000);n.emit({source:'bg',id:'n3',severity:'success',foreground:false,surface:'toast',title:'Later news'});assert.equal(played.at(-1),'chime');
+  // Closing everything leaves only what cannot be closed; clocks stop while the stack is open.
+  assert.ok(n.dismissAll()>=5);assert.deepEqual(ids(),['c1'],'Clear all keeps the critical pop-up');
+  n.notify({key:'held',title:'Held'});n.setPaused('expanded',true);time.tick(60000);assert.ok(ids().includes('held'),'an expanded stack stops every clock');
+  n.setPaused('expanded',false);time.tick(4200);assert.ok(!ids().includes('held'));
+  // A blocking pop-up closed by hand comes back, with its sound, only if raised again.
+  const count=played.length;n.notify({source:'bg',key:'block',kind:'warning',tier:'blocking',title:'Needs password'});assert.equal(played.length,count+1);
+  n.dismissEvent(toast('block').key,toast('block').deliveryId);n.notify({source:'bg',key:'block',kind:'warning',tier:'blocking',title:'Needs password'});
+  assert.ok(ids().includes('block'));assert.equal(played.at(-1),'knock');assert.equal(played.length,count+2);
+  // Minimal plays the knock but not the chime; news waits, and chimes, after a work block.
+  n.setSoundMode('minimal');time.tick(5000);n.emit({source:'bg',id:'n4',foreground:false,surface:'toast',title:'Minimal news'});assert.equal(played.length,count+2);
+  n.setSoundMode('full');n.setStudying(true);time.tick(5000);n.emit({source:'bg',id:'n5',foreground:false,surface:'toast',title:'Held news'});assert.equal(played.length,count+2,'held news does not chime');
+  n.setStudying(false);assert.equal(played.at(-1),'chime','it chimes when it shows');
+  // No hidden queue: at most 32, the oldest that would fade go first.
+  n.clear();for(let i=0;i<40;i++)n.notify({key:`many-${i}`,title:`Many ${i}`});
+  assert.equal(ids().length,32);assert.equal(ids()[0],'many-39');assert.ok(!ids().includes('many-7')&&ids().includes('many-8'));
+  // Explicit cues and device notifications: a session moving away notifies the device while hidden.
+  n.clear();n.setHidden(true);n.notify({source:'session',key:'session-yield',tier:'news',cue:'session-moved',system:true,title:'Session continued on another device'});
+  assert.deepEqual(system,['session-yield'],'in the background the device is notified instead');n.setHidden(false);
+  n.clear();
+}
+{
+  // Banners: unsaved work sounds Attention, storage the softer knock; once per
+  // new line, again only after the banner clears and returns.
+  const {notices:n,time}=coordinator(),played=[];
+  n.configureDelivery({audio:{play:name=>{played.push(name);return Promise.resolve(true);},stop:()=>{},status:()=>'ready'},context:()=>({owner:true,foreground:true})});
+  // Each step waits out the sound before it, which a lesser sound never cuts off.
+  n.publish('safety',{kind:'safety',title:'Unsaved work needs attention',message:'Today’s session could not be saved.'});
+  n.publish('safety',{kind:'safety',title:'Unsaved work needs attention',message:'Today’s session could not be saved.'});
+  assert.deepEqual(played,['attention']);
+  time.tick(4000);n.publish('safety',{visible:false});n.publish('storage',{kind:'storage',title:'Storage or recovery notice',message:'Backup reminder: over a week.'});
+  assert.deepEqual(played,['attention','knock']);
+  time.tick(4000);n.acknowledge('storage');n.publish('storage',{kind:'storage',title:'Storage or recovery notice',message:'Backup reminder: over a week.\nStorage is almost full.'});
+  assert.equal(played.length,3,'a new line sounds again');
+  n.publish('storage',{kind:'storage',title:'Storage or recovery notice',message:'Storage is almost full.'});assert.equal(played.length,3,'a line going away is silent');
+  time.tick(4000);n.publish('storage',{visible:false});n.publish('storage',{kind:'storage',title:'Storage or recovery notice',message:'Storage is almost full.'});assert.equal(played.length,4,'it sounds again after it cleared');
+  n.publish('update',{kind:'update',title:'Update ready',message:'A new version is ready.'});assert.equal(played.length,4,'other banners are silent');
+  const recent=n.recent().entries;assert.deepEqual(recent.map(entry=>[entry.source,entry.title,entry.outcome]),[['banner','Storage or recovery notice','open'],['banner','Storage or recovery notice','resolved'],['banner','Unsaved work needs attention','resolved']],'banners enter Recent');
+  n.clearRecent();n.publish('storage',{kind:'storage',title:'Storage or recovery notice',message:'Storage is almost full.\nStill full.'});
+  assert.equal(n.recent().entries.length,0,'a banner still showing stays out of Recent after Clear');
+}
+{
+  // Recent: today's pop-ups and banners, newest first, at most 20; news that
+  // faded untouched counts as unseen until Recent is opened.
+  const {notices:n,time}=coordinator(),seen=[];let ran=0;
+  const day=new Date(2026,10,2,9,0).getTime();time.tick(day);
+  n.subscribeRecent(state=>seen.push(state));
+  n.notify({key:'saved',kind:'success',title:'Saved'});
+  n.emit({source:'sync',id:'kept',severity:'warning',foreground:false,surface:'toast',tier:'news',title:'Kept for review',action:{label:'Review',run:()=>{ran++;}}});
+  let state=n.recent();assert.deepEqual(state.entries.map(entry=>entry.title),['Kept for review','Saved']);assert.equal(state.entries[0].actionLabel,'Review','a live pop-up offers its button');assert.equal(state.unseen,0);
+  time.tick(12000);state=n.recent();assert.equal(state.unseen,1,'news that faded untouched is unseen');assert.equal(state.entries[1].outcome,'expired');
+  assert.equal(n.runRecentAction(state.entries[0].id),true);assert.equal(ran,1,'Recent runs the pop-up’s own action');
+  assert.equal(n.markRecentSeen().unseen,0);
+  n.notify({key:'hovered',tier:'news',title:'Hovered'});const hovered=n.eventStatus().toasts.find(row=>row.id==='hovered');n.pauseEvent(hovered.key,hovered.deliveryId,'hover',true);n.pauseEvent(hovered.key,hovered.deliveryId,'hover',false);
+  time.tick(12000);assert.equal(n.recent().unseen,0,'a hovered pop-up counts as seen');
+  n.notify({key:'closed',tier:'news',title:'Closed'});const closed=n.eventStatus().toasts.find(row=>row.id==='closed');n.dismissEvent(closed.key,closed.deliveryId);
+  assert.equal(n.recent().entries[0].outcome,'dismissed');assert.equal(n.recent().unseen,0);
+  for(let i=0;i<25;i++)n.notify({key:`r-${i}`,title:`Result ${i}`});assert.equal(n.recent().entries.length,20);assert.equal(n.recent().entries[0].title,'Result 24');
+  assert.deepEqual(n.recent().entries.slice(0,3).map(entry=>entry.title),['Result 24','Result 23','Result 22'],'pop-ups still on screen do not come back after being trimmed');
+  const running=n.begin({source:'drive',id:'upload',title:'Uploading',announce:true,surface:'inline'});
+  assert.ok(!n.recent().entries.some(entry=>entry.title==='Uploading'),'running work enters Recent only with its result');
+  running.update({lifecycle:'succeeded',severity:'success',message:'Uploaded'});assert.equal(n.recent().entries[0].title,'Uploading');
+  // Kept across a reload: today's entries come back as text; other days, other shapes and duplicates are dropped.
+  const saved=n.recent().entries.map(({id,source,tier,severity,title,message,at,outcome,seen})=>({id,source,tier,severity,title,message,at,outcome,seen}));
+  const {notices:fresh,time:clock}=coordinator();clock.tick(day+60000);
+  const restored=fresh.restoreRecent([...saved.slice(0,3),{...saved[3],at:day-24*3600000},{...saved[4],tier:'loud'},saved[0]]);
+  assert.equal(restored.entries.length,3);assert.ok(restored.entries.every(entry=>!entry.actionLabel&&entry.id.startsWith('restored:')));
+  assert.equal(fresh.clearRecent().entries.length,0);
+  n.clearRecent();n.notify({key:'r-24',title:'Result 24',message:'Updated'});assert.equal(n.recent().entries.length,0,'or after Clear');
+  // Entries from yesterday drop off at midnight.
+  time.tick(24*3600000);assert.equal(n.recent().entries.length,0);
+  assert.ok(seen.length>3,'listeners hear each change');
+}
+// A button that only opens something marks its card (and its Recent row) as
+// opening from anywhere; other buttons, and absent flags, do not.
+{
+  const {notices:n}=coordinator();let ran=0;
+  n.notify({source:'sync',key:'opens',tier:'news',title:'Needs review',action:{label:'Review',opens:true,run:()=>ran++}});
+  n.notify({key:'undo',kind:'success',title:'Moved',action:{label:'Undo',run:()=>ran++}});
+  n.notify({key:'yes-ish',kind:'success',title:'Odd',action:{label:'Open',opens:'yes',run:()=>ran++}});
+  const actions=Object.fromEntries(n.eventStatus().events.map(event=>[event.title,event.action.opens]));
+  assert.deepEqual(actions,{'Needs review':true,Moved:false,Odd:false},'only opens:true counts');
+  const rows=Object.fromEntries(n.recent().entries.map(entry=>[entry.title,entry.actionOpens]));
+  assert.deepEqual(rows,{'Needs review':true,Moved:false,Odd:false});
+  const id=n.recent().entries.find(entry=>entry.title==='Needs review').id;
+  n.runRecentAction(id);assert.equal(ran,1);
+  assert.equal(n.eventStatus().events.find(event=>event.title==='Needs review').dismissed,true,'the pop-up closes');
+  assert.equal(n.recent().entries.find(entry=>entry.id===id).actionOpens,true,'while the review still waits, its row still opens it');
+  n.resolveEvent('sync','opens');
+  assert.equal(n.recent().entries.find(entry=>entry.id===id).actionOpens,false,'once resolved, the row opens nothing');
+  n.clear();
+}
+console.log(JSON.stringify({status:'PASS',suite:'notification-lifecycle',checks:['priority and persistent errors','decision notices persist until resolved','deduplication','hover/focus/hidden expiry','dismissal versus cancellation','recurring notices','stale operation handles','terminal fencing','renderer severity','Device and Drive summaries','study-timer hold','kinds, order and sounds','no hidden queue','banner sounds','recent and unseen','opening cards']},null,2));

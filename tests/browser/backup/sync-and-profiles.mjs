@@ -18,21 +18,48 @@ try{
   await waitFor(()=>commits()>=1,{label:'A uploads its first version',timeout:60000});
   await waitFor(async()=>!!(await sync(a))?.syncedAt,{label:'A synced',timeout:30000});
 
+  // One status indicator replaces the sidebar's sync line: the sidebar name and
+  // the phone circle both show Synced (docs/STATUS-SYSTEM.md).
+  await waitFor(()=>a.evaluate(`['profile-tag','profile-badge'].every(id=>document.getElementById(id).dataset.ring==='synced')`),{label:'A shows the synced ring',timeout:20000});
+  assert.match(await a.evaluate(`document.getElementById('profile-tag').getAttribute('aria-label')`),/· Synced \d/u,'the sidebar name says when it synced');
+  assert.equal(await a.evaluate(`!!document.getElementById('sb-sync')`),false,'the sidebar sync line is gone');
+
   // A reload keeps the sign-in: connected again without asking Google.
   await a.reload();await reopen(a,'A after reload');
   await waitFor(()=>a.evaluate(`__PWA6.BackupProviderRuntime.connected('google-drive')`),{label:'A still signed in after reload',timeout:20000});
   assert.equal(await a.evaluate(`window.__gisTokenRequests||0`),0,'the reload asked Google for no new sign-in');
 
-  // B: the same profile on another device. Connecting brings A's note.
+  // B: the same profile on another device. Connecting brings A's note. B
+  // connects with the Connect button, and the Connect card follows its first
+  // sync on any tab: signed in, bringing in A's changes, uploading, Synced.
   const b=await open(second,server,'B');
   assert.equal(await noteText(b,'ethics'),null,'B starts without the note');
-  await connect(b,'B');
+  await b.evaluate(`(()=>{window.__connectCard=[];const card=document.getElementById('drive-connect-card'),seen=()=>{if(card.hidden)return;const row=[card.dataset.tone,document.getElementById('drive-connect-status').textContent,[...card.querySelectorAll('#drive-connect-steps li')].map(item=>item.dataset.state).join(',')].join('|');if(window.__connectCard.at(-1)!==row)window.__connectCard.push(row);};new MutationObserver(seen).observe(card,{subtree:true,childList:true,attributes:true,characterData:true});__PWA6.goTab('plan');document.querySelector('[data-action="connect-drive-backup"]').click();seen();})()`);
+  await waitFor(()=>b.evaluate(`__PWA6.BackupProviderRuntime.connected('google-drive')`),{label:'B connects',timeout:20000});
   await waitFor(async()=>/Written on A/u.test(await noteText(b,'ethics')||''),{label:'B receives A\'s note',timeout:60000});
   await waitFor(async()=>!!(await sync(b))?.syncedAt,{label:'B synced',timeout:30000});
+  await waitFor(()=>b.evaluate(`document.getElementById('drive-connect-card').dataset.tone==='done'`),{label:'the Connect card says Synced',timeout:90000});
+  const connectCard=await b.evaluate(`({rows:window.__connectCard,steps:[...document.querySelectorAll('#drive-connect-steps li')].map(item=>item.textContent),status:document.getElementById('drive-connect-status').textContent,inRegion:document.getElementById('drive-connect-card').parentElement.id})`);
+  assert.equal(connectCard.inRegion,'sd-toast-region','the card sits in the notification area');
+  assert.ok(connectCard.rows.some(row=>/^working\|Signing in/u.test(row)),`the card starts at sign-in (${connectCard.rows.join(' / ')})`);
+  assert.ok(connectCard.rows.some(row=>/^working\|Bringing in changes from Google Drive…\|done,active,pending$/u.test(row)),`the card shows the catch-up step (${connectCard.rows.join(' / ')})`);
+  assert.ok(connectCard.rows.some(row=>/^working\|Uploading this device’s data…\|done,done,active$/u.test(row)),`the card shows the upload step (${connectCard.rows.join(' / ')})`);
+  assert.match(connectCard.status,/^Synced at \d/u,'the card ends Synced');
+  assert.deepEqual(connectCard.steps,['Signed in to Google','Brought in changes from Google Drive','Uploaded this device’s data']);
+  await waitFor(()=>b.evaluate(`document.getElementById('drive-connect-card').hidden`),{label:'the Connect card closes on its own',timeout:12000});
 
   // B's first sync uploads what it brought (its own first-start settings),
   // and Drive cleanup may follow. Both finish before A edits.
   await waitFor(async()=>!markers()&&!await waiting(b),{label:'B settles',timeout:90000});
+
+  // Library → Data offers Recheck only for a connected location; a recheck
+  // says it started and then shows its result under Verification.
+  await b.evaluate(`(async()=>{__PWA6.goTab('library');await new Promise(r=>setTimeout(r,150));document.getElementById('library-tab-data').click();})()`);
+  await waitFor(()=>b.evaluate(`!document.getElementById('recheck-google-drive').hidden`),{label:'B offers Recheck Google Drive',timeout:20000});
+  assert.equal(await b.evaluate(`document.getElementById('recheck-device-folder').hidden&&getComputedStyle(document.getElementById('recheck-device-folder')).display==='none'`),true,'Recheck Device Folder must not be offered without a Device Folder');
+  await b.evaluate(`document.getElementById('recheck-google-drive').click()`);
+  await waitFor(()=>b.evaluate(`/Google Drive recheck started/u.test(document.getElementById('library-status').textContent)`),{label:'B says the recheck started',timeout:5000});
+  await waitFor(()=>b.evaluate(`/^Google Drive: Checked/u.test(document.getElementById('drive-verification-status').textContent)`),{label:'B shows the recheck result',timeout:60000});
 
   // A edits and goes to the background: the edit goes up (after B's turn,
   // if B is still saving).

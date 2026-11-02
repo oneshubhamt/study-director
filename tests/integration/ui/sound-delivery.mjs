@@ -58,8 +58,8 @@ await engine.unlock();assert.equal(starts,0,'unlock must never drain a backlog')
 let eligible=false;assert.equal(await engine.play('begin',{isCurrent:()=>eligible}),false);assert.equal(starts,0,'an expired cue never plays');
 eligible=true;const playing=engine.play('begin',{isCurrent:()=>eligible});await settle();assert.equal(starts,1);assert.equal(made,1);engine.stop();await playing;assert.equal(disconnections,2,'both the source and gain are released');
 const explicit=engine.play('pause',{explicit:true});engine.stop();assert.equal(await explicit,false);assert.equal(starts,1,'mute fences pending playback');
-runIdle();assert.equal(made,13,'every cue is made once; the one already made is kept');
-const again=engine.play('begin');await settle();sources.at(-1).onended();assert.equal(await again,true);assert.equal(made,13,'made cues are reused');
+runIdle();assert.equal(made,module.cues.length,'every cue is made once; the one already made is kept');
+const again=engine.play('begin');await settle();sources.at(-1).onended();assert.equal(await again,true);assert.equal(made,module.cues.length,'made cues are reused');
 const engine2=module.createEngine({window:{AudioContext:Context,requestIdleCallback:step=>idle.push(step)},document:{addEventListener(){},removeEventListener(){}}});
 await engine2.unlock();idle.length=0;failMake=true;assert.equal(await engine2.play('confirm'),false,'a cue that cannot be made stays silent');
 const retry=engine2.play('confirm');await settle();sources.at(-1).onended();assert.equal(await retry,true,'it is made again for a new event');engine2.dispose();

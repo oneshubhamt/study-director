@@ -23,6 +23,9 @@ const decision=toast('/Continue with current data/');
 const restoreView=`(()=>{const shown=node=>!!node&&node.checkVisibility();return {tab:document.querySelector('.pane.on')?.id||'',drawer:!document.getElementById('library-data').hidden,
   importButton:shown(document.querySelector('[data-action="pick-import-file"]')),driveRow:shown(document.getElementById('backup-provider-row-status-google-drive')),folderRow:document.getElementById('device-backup-status').textContent.trim()};})()`;
 const restoredToast=toast('/Added 1 past Saved Day and 0 attachments from your Device Folder backup/');
+// The automatic restore reports as news (docs/NOTIFICATIONS.md, kinds): it
+// waits while the timer runs on a work block and shows at a pause.
+const restoreReported=`!!__PWA6.NoticeCoordinator.readEvent('storage-reset','restored')`;
 const read=`(async()=>{const d=__PWA6,session=await d.AppData.activeSession.load(0,{strict:true}),plans=await d.AppData.planData.read(),notes=await d.AppData.notes.readFreshPayload(),notice=${decision},yesterday=await d.AppData.dailyRecords.get(window.__qaYesterday||'');
   return {message:notice?notice.textContent:'',cleared:d.readStorageHealth().browserDataClearedAt||null,note:Object.values(notes).find(row=>String(row?.label||'').toLowerCase()==='medicine')?.text||null,draft:String(plans.draft||''),savedPlans:plans.savedPlans.length,session:!!session.value,mode:d.TimerState.mode,name:(await d.AppData.personalPreferences.read())?.studentName||null,yesterday:yesterday?.reflection||null,
     notice:notice?{dismissible:!!notice.querySelector('.interaction-toast-close'),buttons:[...notice.querySelectorAll('button:not(.interaction-toast-close)')].map(button=>button.textContent.trim())}:null,paused:d.DeviceBackup.status().paused,folder:d.DeviceBackup.status().connected};})()`;
@@ -125,12 +128,16 @@ try{
 
       await page.send('Storage.clearDataForOrigin',{origin:server.origin,storageTypes:'indexeddb,local_storage,cache_storage,service_workers'});
       assert.equal(await editNote(page,'FolderQA note edited after clearing'),'changed');
-      await waitFor(()=>page.evaluate(`!!${restoredToast}`),{label:'automatic restore toast',timeout:60000});
+      await waitFor(()=>page.evaluate(restoreReported),{label:'automatic restore',timeout:60000});
+      assert.equal(await page.evaluate(`!!${restoredToast}`),false,'the restore pop-up waits while a work block runs');
       const restored=await page.evaluate(read);
       assert.equal(restored.yesterday,'FolderQA yesterday','the missing Saved Day is added back from the latest backup');
       assert.equal(restored.note,'FolderQA note edited after clearing','notes written after the clear are kept');
       assert.equal(restored.session,true);assert.equal(restored.mode,'running','the running session is untouched');
       assert.equal(restored.notice,null,'no decision is needed');assert.equal(restored.paused,false,'automatic backups resume');
+      await page.evaluate(`__PWA6.togglePause()`);
+      await waitFor(()=>page.evaluate(`!!${restoredToast}`),{label:'the restore pop-up shows at a pause',timeout:10000});
+      await page.evaluate(`__PWA6.togglePause()`);
       result.checks.automaticMissingOnlyRestore=true;
       assert.equal(await page.evaluate(`__PWA6.DeviceBackup.backupNow().then(result=>result===true)`),true,'the combined state backs up completely');
       result.checks.restoredStateBacksUp=true;
@@ -157,7 +164,7 @@ try{
       await waitFor(()=>page.evaluate(`${read}.then(state=>!!state.notice&&!state.folder)`),{label:'notice after reload'});
       assert.equal((await page.evaluate(read)).yesterday,null,'the Saved Day is missing until a restore');
       await page.evaluate(`document.getElementById('connect-device-backup').click()`);
-      await waitFor(()=>page.evaluate(`!!${restoredToast}`),{label:'restore after reconnecting',timeout:60000});
+      await waitFor(()=>page.evaluate(restoreReported),{label:'restore after reconnecting',timeout:60000});
       await waitFor(()=>page.evaluate(`${read}.then(state=>!state.notice)`),{label:'notice resolved after reconnecting'});
       const reconnected=await page.evaluate(read);
       assert.equal(reconnected.yesterday,'FolderQA yesterday');assert.equal(reconnected.note,'FolderQA note edited after second clear');

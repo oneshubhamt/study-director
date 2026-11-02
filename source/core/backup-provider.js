@@ -919,7 +919,7 @@ registry.define('backup-provider',1,input=>{
     try{return await pendingRetryHooks.read(selected.id);}catch(error){AppDiagnostics.capture('backup-provider.pending-retry-read',error,'warn');throw error;}
   }
   function resetConvergenceRetry(selected){providerConvergenceRetryAttempts.delete(safeId(selected&&selected.id));presentation.resolve(selected.id,'retry-exhausted');}
-  function nextConvergenceRetryDelay(selected,{sync=false}={}){const id=safeId(selected&&selected.id);if(!id)return PROVIDER_CONVERGENCE_RETRY_DELAYS[0];const attempt=Math.max(0,Number(providerConvergenceRetryAttempts.get(id))||0),delay=PROVIDER_CONVERGENCE_RETRY_DELAYS[Math.min(attempt,PROVIDER_CONVERGENCE_RETRY_DELAYS.length-1)];providerConvergenceRetryAttempts.set(id,attempt+1);if(attempt+1>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length)presentation.notice(id,'retry-exhausted',sync?`Syncing with ${selected.label} keeps failing. It keeps trying; reconnect if this stays.`:`Backing up to ${selected.label} keeps failing. Open ${selected.label} settings and choose Back up now, or reconnect.`);return delay;}
+  function nextConvergenceRetryDelay(selected,{sync=false}={}){const id=safeId(selected&&selected.id);if(!id)return PROVIDER_CONVERGENCE_RETRY_DELAYS[0];const attempt=Math.max(0,Number(providerConvergenceRetryAttempts.get(id))||0),delay=PROVIDER_CONVERGENCE_RETRY_DELAYS[Math.min(attempt,PROVIDER_CONVERGENCE_RETRY_DELAYS.length-1)];providerConvergenceRetryAttempts.set(id,attempt+1);if(attempt+1>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length)presentation.notice(id,'retry-exhausted',sync?`Syncing with ${selected.label} keeps failing. It keeps trying; reconnect if this stays.`:`Backing up to ${selected.label} keeps failing. Open ${selected.label} settings and choose Back up now, or reconnect.`,{error:true});return delay;}
   async function markPendingRetry(selected){
     if(!pendingRetryHooks)return false;
     try{const marked=await pendingRetryHooks.mark(selected.id)===true;if(marked)resetConvergenceRetry(selected);return marked;}catch(error){AppDiagnostics.capture('backup-provider.pending-retry-write',error,'warn');return false;}
@@ -1033,7 +1033,7 @@ registry.define('backup-provider',1,input=>{
   // minute, then every five minutes, up to the turn window.
   const SYNC_RECHECK_MS=60*1000,SYNC_TURN_WINDOW_MS=15*60*1000,SYNC_TURN_RETRY_DELAYS=freeze([15*1000,60*1000,5*60*1000]),syncByProvider=new Map();
   function syncState(selected){const id=safeId(selected&&selected.id);let state=syncByProvider.get(id);if(!state){state={checkedAt:0,review:'',password:'',newer:'',catching:false,behind:false,failed:false,rolledBack:null,syncedAt:'',turnWaits:0};syncByProvider.set(id,state);}return state;}
-  function syncView(selected){const state=syncState(selected);return freeze({syncedAt:state.syncedAt,review:!!state.review,password:!!state.password,newer:!!state.newer,failed:!!state.failed,syncing:state.catching});}
+  function syncView(selected){const state=syncState(selected);return freeze({syncedAt:state.syncedAt,review:!!state.review,password:!!state.password,newer:!!state.newer,failed:!!state.failed,syncing:state.catching,turnWaits:Math.max(0,Number(state.turnWaits)||0)});}
   function sharedSyncing(selected){return !!selected?.shared&&!!selected.repository&&!!pendingRetryHooks&&providerConnected(selected);}
   function sharingActive(){return [...providers.values()].some(sharedSyncing);}
   // Drive's newest ordinary version, when this device has not taken it in.
@@ -1164,6 +1164,19 @@ registry.define('backup-provider',1,input=>{
     let applies=false;if(local?.value)applies=await sessionClaimToken('session',local.value.date,{signal})===claim.sessionToken;else if(local?.today)applies=await sessionClaimToken('session',local.today,{signal})===claim.sessionToken;
     return freeze({epoch:claim.epoch,state:claim.state,revision:claim.revision,observedRevision:claim.observedRevision,claimedAt:claim.claimedAt,ownedHere:!!ownerToken&&ownerToken===claim.ownerToken,applies});
   }
+  // Drive's newest claim names this device for the session running here. A
+  // sync then keeps that session even when the version it brings in, saved
+  // before this device took over, still names the other device. Unknown
+  // counts as no: the sync then settles the session as before.
+  async function sessionClaimedHere(selected,{signal=null}={}){
+    if(!sessionOwnershipHooks||!repositorySessionClaimCapable(selected))return false;
+    try{
+      const local=await localSessionOwnership(),me=String(sessionOwnershipHooks.installationId()||'');
+      if(!local?.value||!me||local.value.runningOn!==me)return false;
+      const claim=await projectSessionClaim(await readRepositorySessionClaim(repositoryOperationSelected(selected,{signal}),{signal}),{signal});
+      return !!claim&&claim.state==='owned'&&claim.ownedHere&&claim.applies;
+    }catch(error){if(!signal?.aborted)AppDiagnostics.capture('backup-provider.sync-session-claim',error,'warn');return false;}
+  }
   async function assertSharedSessionOwnership(selected,{signal=null}={}){
     if(!sessionOwnershipHooks||!repositorySessionClaimCapable(selected))return freeze({current:null,releaseAfterCommit:false});
     const current=await readRepositorySessionClaim(selected,{signal});if(!current)return freeze({current:null,releaseAfterCommit:false});
@@ -1216,7 +1229,7 @@ registry.define('backup-provider',1,input=>{
   }
   function settleCatchUp(selected,headId,result,summary,attemptRevision='',{preserveAutomatic=false}={}){
     const state=syncState(selected);
-    if(result&&result.cancelled&&result.reason==='needs-decision'){state.review=headId;summary?.finish({message:`${selected.label} has changes that need your review.`,outcome:'sync-review'});presentation.notice(selected.id,'sync-review',`${selected.label} has changes from another device that need your review.`);}
+    if(result&&result.cancelled&&result.reason==='needs-decision'){state.review=headId;summary?.finish({message:`${selected.label} has changes that need your review.`,outcome:'sync-review'});presentation.notice(selected.id,'sync-review',`${selected.label} has changes from another device that need your review.`,{tier:'news'});}
     else if(result&&result.cancelled){state.behind=true;summary?.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'cancelled'});schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{attemptRevision,preserveAutomatic,trigger:'catch-up-cancelled'});}
     else{state.review='';state.password='';state.failed=false;state.rolledBack=null;state.syncedAt=new Date().toISOString();resetConvergenceRetry(selected);presentation.resolve(selected.id,'sync-review');presentation.resolve(selected.id,'sync-password');summary?.finish({message:`Synced with ${selected.label}.`,outcome:'sync-complete'});if(automaticWaiting(selected))schedulePendingProviderBackup(selected,1000,{trigger:'catch-up-complete'});}
   }
@@ -1826,7 +1839,8 @@ registry.define('backup-provider',1,input=>{
       await enterForeground(selected,foreground,traceId,{prepare:true});
       const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',quiet:true,sync:true,password:options&&options.password===true,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});
       if(!candidate){finishForegroundView(selected,{message:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:'unavailable'},traceId);return freeze({cancelled:true,reason:'unavailable'});}
-      const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{sync:true});
+      const sessionClaimed=await sessionClaimedHere(selected,{signal:foreground.signal});
+      const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{sync:true,sessionClaimedHere:sessionClaimed});
       if(result&&result.cancelled){finishForegroundView(selected,{message:result.reason==='needs-decision'?`${selected.label} has changes that need your review.`:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:String(result.reason||'cancelled')},traceId);return freeze({...result,cancelled:true,exportedAt});}
       OperationDiagnostics.finish({cancelled:false},traceId);return freeze({...result,exportedAt});
     }catch(error){

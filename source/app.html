@@ -557,15 +557,14 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
   <div class="mobile-brand ui-label">Study Director</div>
   <div class="sb-head">
     <div class="sb-eyebrow ui-label">Study Director</div>
-    <button class="sb-name profile-tag" id="profile-tag" type="button" data-action="open-profile" aria-haspopup="dialog" aria-controls="profile-dialog" title="Profile, Google Drive and backup password"><span class="profile-tag-name" data-student-name>Student</span><span class="profile-tag-caret" aria-hidden="true"></span></button>
+    <button class="sb-name profile-tag status-host" id="profile-tag" type="button" data-action="open-profile" data-ring="off" aria-haspopup="dialog" aria-controls="profile-dialog" title="Profile, Google Drive and backup password"><span class="profile-tag-name" data-student-name>Student</span><span class="profile-tag-caret" aria-hidden="true"></span><svg class="status-ring" aria-hidden="true" focusable="false"><rect class="status-ring-track" width="100%" height="100%" rx="11" pathLength="100"/><rect class="status-ring-arc" width="100%" height="100%" rx="11" pathLength="100"/></svg><span class="status-badge" aria-hidden="true"></span></button>
     <div class="sb-race ui-mono" id="sb-date">—</div>
-    <button class="sb-sync ui-mono" id="sb-sync" type="button" data-action="show-drive-sync" aria-label="Google Drive sync status" hidden></button>
   </div>
   <div class="sb-clock">
     <div class="sb-clock-lbl ui-label">Local Time</div>
     <div id="clock">00:00:00</div>
   </div>
-  <button class="profile-badge" id="profile-badge" type="button" data-action="open-profile" aria-haspopup="dialog" aria-controls="profile-dialog" aria-label="Profile: Student"><span class="profile-badge-letter" aria-hidden="true">S</span><span class="profile-badge-dot" id="profile-badge-dot" hidden></span></button>
+  <button class="profile-badge status-host" id="profile-badge" type="button" data-action="open-profile" data-ring="off" aria-haspopup="dialog" aria-controls="profile-dialog" aria-label="Profile: Student"><span class="profile-badge-letter" aria-hidden="true">S</span><svg class="status-ring" aria-hidden="true" focusable="false"><rect class="status-ring-track" width="100%" height="100%" rx="50%" pathLength="100"/><rect class="status-ring-arc" width="100%" height="100%" rx="50%" pathLength="100"/></svg><span class="status-badge" aria-hidden="true"></span></button>
   <div class="sb-nav" role="tablist" aria-label="Primary navigation">
     <button class="nav-item ui-label on" id="tab-plan" type="button" role="tab" data-tab="plan" aria-controls="pane-plan" aria-selected="true" tabindex="0"><span class="nav-icon" aria-hidden="true">▦</span>Plan</button>
     <button class="nav-item ui-label" id="tab-execute" type="button" role="tab" data-tab="execute" aria-controls="pane-execute" aria-selected="false" tabindex="-1"><span class="nav-icon" aria-hidden="true">⏱</span>Execute</button>
@@ -634,7 +633,9 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
           <div class="execute-overlay-kicker ui-label" id="execute-overlay-kicker">Execute Status</div>
           <div class="execute-overlay-title" id="execute-overlay-title">No Schedule Loaded</div>
           <div class="execute-overlay-sub ui-mono" id="execute-overlay-sub">Open Plan and apply today’s schedule to begin.</div>
+          <div class="execute-overlay-progress ui-label" id="execute-session-progress" role="status" aria-live="polite" hidden></div>
           <button class="execute-overlay-action ui-btn" id="execute-open-plan" type="button" data-tab="plan">Open Plan</button>
+          <button class="execute-overlay-action ui-btn primary" id="execute-session-action" type="button" data-action="restore-session" hidden disabled>Continue Here</button>
         </div>
         <div class="break-meter ui-inset" id="break-meter">
           <span class="break-meter-label ui-label" id="break-label">Break elapsed</span>
@@ -879,12 +880,9 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
         <div class="session-panel-title ui-label" id="session-panel-title">Live Session Active</div>
         <div class="session-panel-note ui-body" id="session-panel-note">Today’s live schedule is active. These controls affect only the live session; saved Library records and notes are kept.</div>
         <div class="session-actions">
-          <button class="plan-btn ui-btn primary" type="button" data-action="restore-session" hidden disabled>Restore Session</button>
           <button class="plan-btn ui-btn warn" type="button" data-action="suspend-session" disabled>Suspend Today</button>
-          <button class="plan-btn ui-btn danger" type="button" data-action="reset-session" disabled>Reset Today</button>
-        </div>
-        <div class="session-finish-action">
           <button class="plan-btn ui-btn finish" type="button" data-action="finish-session" disabled>Finish Today</button>
+          <button class="plan-btn ui-btn danger" type="button" data-action="reset-session" disabled>Reset Today</button>
         </div>
       </div>
     </section>
@@ -1089,8 +1087,8 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
           <button class="mini-btn ui-btn" id="review-kept-versions" type="button" data-action="review-kept-versions">Review</button>
         </div>
         <div class="backup-location-row unsupported-data-row" id="unsupported-data" role="status" hidden>
-          <div class="backup-row-copy"><span class="ui-label">From a newer version</span><span class="ui-helper" id="unsupported-data-text"></span></div>
-          <button class="mini-btn ui-btn" type="button" data-action="check-unsupported-update">Check for update</button>
+          <div class="backup-row-copy"><span class="ui-label">Data from a newer app version</span><span class="ui-helper" id="unsupported-data-text"></span></div>
+          <button class="mini-btn ui-btn" type="button" data-action="check-unsupported-update">Update app</button>
         </div>
         <div class="library-data-group ui-panel">
           <details class="backup-model-disclosure ui-disclosure">
@@ -1242,10 +1240,10 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                 <div class="backup-storage-state ui-mono">
                   <strong class="backup-status-value standard" id="local-data-status" role="status" aria-live="polite">Checking…</strong>
                   <button class="backup-storage-action mini-btn ui-btn" id="protect-local-data" type="button" data-action="protect-local-data" hidden>Try protection</button>
-                  <span class="backup-status-meta">· Saved <span id="last-local-save">Never</span></span><span class="backup-status-meta" id="local-storage-use"></span>
+                  <span class="backup-status-meta">Saved <span id="last-local-save">Never</span></span><span class="backup-status-meta" id="local-storage-use"></span>
                 </div>
               </div>
-              <div class="backup-inline-note ui-helper"><strong>Verification</strong><p id="attachment-verification-status" role="status">Attachment presence and size: not yet checked. This check does not verify file contents.</p><p id="device-verification-status" role="status">Device Folder: not yet verified.</p><button class="mini-btn ui-btn" type="button" data-action="recheck-device-integrity">Recheck Device Folder</button><p id="drive-verification-status" role="status">Google Drive: not yet verified.</p><button class="mini-btn ui-btn" type="button" data-action="recheck-drive-integrity">Recheck Google Drive</button></div>
+              <div class="backup-inline-note ui-helper"><strong>Verification</strong><p id="attachment-verification-status" role="status">Attachment presence and size: not yet checked. This check does not verify file contents.</p><p id="device-verification-status" role="status">Device Folder: not yet verified.</p><button class="mini-btn ui-btn backup-recheck" id="recheck-device-folder" type="button" data-action="recheck-device-integrity" hidden>Recheck Device Folder</button><p id="drive-verification-status" role="status">Google Drive: not yet verified.</p><button class="mini-btn ui-btn backup-recheck" id="recheck-google-drive" type="button" data-action="recheck-drive-integrity" hidden>Recheck Google Drive</button></div>
               <div class="backup-compact-row backup-diagnostics-row">
                 <span class="backup-location-heading"><span class="ui-label">Data and backup diagnostics</span><span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="backup-diagnostics-info" aria-label="About data and backup diagnostics" aria-expanded="false" aria-controls="backup-diagnostics-info">i</button><span class="pnote-info-popover" id="backup-diagnostics-info" role="note" hidden>Copies storage-health observations, backup and recovery stages, verification progress and pending cleanup for troubleshooting. Study content, note text, attachment names and backup payloads are not included.</span></span></span>
                 <div class="backup-security-state"><button class="mini-btn ui-btn" id="copy-backup-diagnostics" type="button" data-action="copy-backup-diagnostics">Copy diagnostics</button><span class="backup-status-meta" id="backup-diagnostics-status" role="status" aria-live="polite"></span></div>
@@ -1312,6 +1310,15 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
       </div>
     </details>
     <div class="plan-status ui-status" id="plan-status"></div>
+    <div class="plan-session-strip ui-surface" id="plan-board-session-actions" role="group" aria-labelledby="plan-session-state" hidden>
+      <div class="plan-session-state ui-label" id="plan-session-state">Today’s session</div>
+      <div class="plan-session-buttons">
+        <button class="plan-btn ui-btn primary" type="button" data-action="restore-session" hidden disabled>Restore Session</button>
+        <button class="plan-btn ui-btn warn" type="button" data-action="suspend-session" disabled>Suspend Today</button>
+        <button class="plan-btn ui-btn finish" type="button" data-action="finish-session" disabled>Finish Today</button>
+        <button class="plan-btn ui-btn danger" type="button" data-action="reset-session" disabled>Reset Today</button>
+      </div>
+    </div>
     <div class="plan-board ui-panel" id="plan-board" data-mode="empty">
       <div class="plan-board-head">
         <div class="plan-board-title-stack">
@@ -1350,18 +1357,19 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
       </div>
       <div class="sched-list" id="sched-list"></div>
     </div>
-    <div class="plan-board-session-actions" id="plan-board-session-actions" hidden>
-      <button class="plan-btn ui-btn primary" type="button" data-action="restore-session" hidden disabled>Restore Session</button>
-      <button class="plan-btn ui-btn warn" type="button" data-action="suspend-session" disabled>Suspend Today</button>
-      <button class="plan-btn ui-btn finish" type="button" data-action="finish-session" disabled>Finish Today</button>
-      <button class="plan-btn ui-btn danger" type="button" data-action="reset-session" disabled>Reset Today</button>
-    </div>
     <div class="ui-helper">Applying during a current trackable window starts its remaining time automatically; later trackable blocks start at their scheduled wall-clock windows. Reordering or changing duration recalculates later starts and closes following gaps.</div>
   </div>
 </main>
 </div>
 <!-- GLOBAL INTERACTIONS: decisions, structured input, brief feedback -->
-<div class="sd-toast-region" id="sd-toast-region" role="region" aria-label="Study Director notifications" aria-live="polite" aria-atomic="false"></div>
+<div class="sd-toast-region" id="sd-toast-region" role="region" aria-label="Study Director notifications" aria-live="polite" aria-atomic="false"><section class="drive-connect-card" id="drive-connect-card" aria-labelledby="drive-connect-title" aria-live="off" data-tone="working" data-toast-card hidden>
+  <div class="drive-connect-head"><strong class="drive-connect-title ui-label" id="drive-connect-title">Connecting Google Drive</strong><button class="drive-connect-close" type="button" data-action="close-drive-connect" data-card-close aria-label="Hide (syncing continues)" title="Hide (syncing continues)">×</button></div>
+  <p class="drive-connect-status ui-body" id="drive-connect-status" role="status"></p>
+  <ol class="drive-connect-steps" id="drive-connect-steps"></ol>
+  <div class="drive-connect-bar" id="drive-connect-bar" aria-hidden="true" hidden><span></span></div>
+  <p class="drive-connect-detail ui-body" id="drive-connect-detail" hidden></p>
+  <button class="drive-connect-action mini-btn ui-btn" id="drive-connect-action" type="button" data-action="sync-status-action" hidden></button>
+</section></div>
 <dialog class="interaction-dialog" id="sd-interaction-dialog"></dialog>
 <dialog class="interaction-dialog danger library-clear-dialog" id="library-clear-dialog" aria-labelledby="library-clear-title">
   <div class="interaction-shell">
@@ -1459,28 +1467,46 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
 <dialog class="interaction-dialog profile-dialog" id="profile-dialog" aria-labelledby="profile-dialog-title">
   <div class="interaction-shell">
     <div class="interaction-header profile-header">
-      <span class="profile-avatar" id="profile-avatar" aria-hidden="true">S</span>
+      <span class="profile-avatar status-host" id="profile-avatar" data-ring="off" aria-hidden="true"><span class="profile-avatar-letter">S</span><svg class="status-ring" aria-hidden="true" focusable="false"><rect class="status-ring-track" width="100%" height="100%" rx="50%" pathLength="100"/><rect class="status-ring-arc" width="100%" height="100%" rx="50%" pathLength="100"/></svg><span class="status-badge" aria-hidden="true"></span></span>
       <div class="profile-heading">
-        <div class="interaction-eyebrow ui-label">Profile</div>
-        <h2 class="interaction-title ui-title profile-title" id="profile-dialog-title" data-student-name>Student</h2>
-        <div class="profile-subtitle" id="profile-subtitle"></div>
+        <h2 class="interaction-title ui-title profile-title" id="profile-dialog-title"><span class="sr-only">Profile: </span><button class="profile-name" id="profile-name-button" type="button" data-action="rename-profile" title="Rename"><span class="profile-name-text" data-student-name>Student</span><svg class="profile-name-pencil" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M11.2 2.3a1.6 1.6 0 0 1 2.3 2.3l-7.9 7.9-3.1.8.8-3.1z"/></svg></button></h2>
+        <input class="ui-field profile-name-input" id="profile-name-input" type="text" autocomplete="name" spellcheck="false" maxlength="80" aria-label="Your name" data-keydown="profile-name" data-blur="profile-name" hidden>
+        <div class="profile-subtitle" id="profile-subtitle" hidden></div>
       </div>
     </div>
     <div class="interaction-body profile-body">
-      <div class="profile-rows">
-        <label class="profile-row profile-name-row"><span class="profile-row-label ui-label">Name</span><input class="ui-field interaction-input profile-name-input" id="profile-name-input" type="text" autocomplete="name" spellcheck="false" data-keydown="profile-name" data-blur="profile-name"></label>
-        <div class="profile-row"><span class="profile-row-label ui-label">Google Drive</span><span class="profile-row-value" id="profile-drive-value">Not connected</span><span class="profile-row-actions"><button class="mini-btn ui-btn" id="profile-drive-action" type="button" data-action="profile-drive">Connect</button></span></div>
-        <div class="profile-row"><span class="profile-row-label ui-label">Backup password</span><span class="profile-row-value" id="profile-password-value">Off</span><span class="profile-row-actions"><button class="mini-btn ui-btn" id="profile-password-action" type="button" data-action="backup-protection">Set…</button></span></div>
-      </div>
+      <section class="profile-section profile-status" id="profile-status" aria-labelledby="profile-status-title">
+        <h3 class="profile-section-title ui-label" id="profile-status-title">Sync &amp; backups</h3>
+        <div class="profile-group">
+          <div class="profile-status-block">
+            <p class="profile-status-headline" id="profile-status-headline" role="status" aria-live="polite"></p>
+            <div class="profile-status-next"><span class="profile-status-detail" id="profile-status-detail"></span><button class="profile-act ui-btn" id="profile-status-primary" type="button" data-action="sync-status-action" hidden></button></div>
+            <ul class="profile-status-items" id="profile-status-items"></ul>
+          </div>
+          <div class="profile-row"><span class="profile-row-text"><span class="profile-row-label">Google Drive</span><span class="profile-row-value" id="profile-drive-value">Not connected</span></span><button class="profile-act ui-btn" id="profile-drive-action" type="button" data-action="profile-drive">Connect</button></div>
+          <div class="profile-row"><span class="profile-row-text"><span class="profile-row-label">Backup password</span><span class="profile-row-value" id="profile-password-value">Off</span></span><button class="profile-act ui-btn" id="profile-password-action" type="button" data-action="backup-protection">Set…</button></div>
+          <button class="profile-row profile-link-row" type="button" data-action="sync-status-action" data-sync-action="open-data"><span class="profile-row-text"><span class="profile-row-label">Backup details</span><span class="profile-row-value">Versions and backup files in Library → Data</span></span><span class="profile-chevron" aria-hidden="true"></span></button>
+        </div>
+      </section>
       <section class="profile-section" aria-labelledby="profile-list-title">
         <h3 class="profile-section-title ui-label" id="profile-list-title">Profiles on this device</h3>
-        <ul class="profile-list" id="profile-list"></ul>
+        <div class="profile-group">
+          <ul class="profile-list" id="profile-list"></ul>
+          <button class="profile-row profile-add" id="profile-add" type="button" data-action="add-profile"><span class="profile-add-mark" aria-hidden="true">+</span><span class="profile-row-label">Add profile</span></button>
+        </div>
         <p class="profile-note" id="profile-unsupported" hidden>This profile list was saved by a newer version of Study Director. Update the app to add, switch or remove profiles; the list stays as it is.</p>
-        <button class="mini-btn ui-btn ghost profile-add" id="profile-add" type="button" data-action="add-profile">+ Add profile</button>
+        <p class="profile-caption" id="profile-device"></p>
+      </section>
+      <section class="profile-section profile-recent" id="profile-recent" aria-labelledby="profile-recent-title">
+        <div class="profile-section-head"><h3 class="profile-section-title ui-label" id="profile-recent-title">Recent</h3><button class="profile-act profile-act-quiet ui-btn" id="profile-recent-clear" type="button" data-action="clear-recent" hidden>Clear</button></div>
+        <p class="profile-recent-empty" id="profile-recent-empty">Nothing yet today.</p>
+        <div class="profile-group" id="profile-recent-group" hidden>
+          <ol class="profile-recent-list" id="profile-recent-list"></ol>
+          <button class="profile-row profile-more-row" id="profile-recent-more" type="button" data-action="recent-more" aria-expanded="false" aria-controls="profile-recent-list" hidden></button>
+        </div>
       </section>
     </div>
     <div class="interaction-actions profile-actions">
-      <span class="profile-device" id="profile-device"></span>
       <button class="interaction-action ui-btn primary" type="button" data-action="close-profile" autofocus>Done</button>
     </div>
   </div>
@@ -2030,6 +2056,66 @@ const NoticeCoordinator=NoticeCoordinatorModule.createCoordinator(Object.freeze(
 if(!Object.isFrozen(NoticeCoordinator)||NoticeCoordinator.format!=='study-director.notice-coordinator'||NoticeCoordinator.contractVersion!==1){
   throw new Error('Study Director notice coordinator is unavailable or incompatible.');
 }
+// Recent (docs/NOTIFICATIONS.md): today's pop-ups and banners in the profile
+// panel. Kept for this window across a reload (sessionStorage), tied to the
+// profile; never uploaded or backed up. Opening the panel marks news seen.
+const NotificationRecent=(()=>{
+  // The three newest show; Show all lists the rest while the panel is open.
+  const SHOWN=3;
+  let highlight=new Set(),all=false;
+  function restore(){
+    try{
+      const value=JSON.parse(sessionStorage.getItem(SESSION_STORAGE_KEYS.notifications)||'null');
+      if(value&&value.version===1&&value.scope===ProfileScope.scope&&Array.isArray(value.entries))NoticeCoordinator.restoreRecent(value.entries);
+    }catch(error){AppDiagnostics.capture('notifications.recent-restore',error,'warn');}
+  }
+  function save(state){
+    try{
+      if(!state.entries.length){sessionStorage.removeItem(SESSION_STORAGE_KEYS.notifications);return;}
+      const entries=state.entries.map(({id,source,tier,severity,title,message,at,outcome,seen})=>({id,source,tier,severity,title,message,at,outcome,seen}));
+      sessionStorage.setItem(SESSION_STORAGE_KEYS.notifications,JSON.stringify({version:1,scope:ProfileScope.scope,entries}));
+    }catch(error){AppDiagnostics.capture('notifications.recent-save',error,'warn');}
+  }
+  function changed(state){save(state);scheduleSyncStatus();render(state);}
+  function time(at){try{return new Date(at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}catch{return '';}}
+  // Rebuilt only when the entries change, so a focused button keeps focus.
+  function render(state=NoticeCoordinator.recent()){
+    const dialog=document.getElementById('profile-dialog');if(!dialog?.open)return;
+    const list=document.getElementById('profile-recent-list'),empty=document.getElementById('profile-recent-empty'),clear=document.getElementById('profile-recent-clear');
+    const group=document.getElementById('profile-recent-group'),more=document.getElementById('profile-recent-more'),total=state.entries.length;
+    if(empty)empty.hidden=!!total;if(clear)clear.hidden=!total;if(group)group.hidden=!total;
+    if(more){
+      more.hidden=total<=SHOWN;more.setAttribute('aria-expanded',all?'true':'false');
+      const label=all?'Show fewer':`Show all (${total})`;if(more.textContent!==label)more.textContent=label;
+    }
+    const shown=all?state.entries:state.entries.slice(0,SHOWN);
+    const key=JSON.stringify([shown,[...highlight]]);if(!list||list.dataset.key===key)return;list.dataset.key=key;
+    list.replaceChildren(...shown.map(entry=>{
+      const row=document.createElement('li');row.className='profile-recent-item';row.dataset.tone=entry.severity;row.dataset.tier=entry.tier;
+      if(highlight.has(entry.id))row.dataset.unseen='true';
+      // A live pop-up whose button opens something opens from anywhere on its row.
+      if(entry.actionOpens){row.dataset.action='recent-action';row.dataset.recentId=entry.id;row.dataset.opens='true';}
+      const mark=document.createElement('span');mark.className='profile-recent-mark';mark.setAttribute('aria-hidden','true');
+      const text=document.createElement('span');text.className='profile-recent-text';
+      const title=document.createElement('strong');title.className='profile-recent-title';title.textContent=entry.title;text.append(title);
+      if(entry.message){const message=document.createElement('span');message.className='profile-recent-message';message.textContent=entry.message;text.append(message);}
+      const when=document.createElement('time');when.className='profile-recent-time';when.dateTime=new Date(entry.at).toISOString();when.textContent=time(entry.at);
+      row.append(mark,text,when);
+      if(entry.actionLabel){const button=document.createElement('button');button.type='button';button.className='profile-act ui-btn';button.dataset.action='recent-action';button.dataset.recentId=entry.id;button.textContent=entry.actionLabel;row.append(button);}
+      return row;
+    }));
+  }
+  // News that faded unseen stays marked while the panel is open.
+  function opened(){const state=NoticeCoordinator.recent();highlight=new Set(state.entries.filter(entry=>entry.tier==='news'&&entry.outcome==='expired'&&!entry.seen).map(entry=>entry.id));render(state);NoticeCoordinator.markRecentSeen();}
+  function closed(){highlight=new Set();all=false;}
+  function toggle(){all=!all;render();return true;}
+  function run(ev){
+    const id=String(ev?.target?.closest?.('[data-recent-id]')?.dataset.recentId||'');if(!id)return false;
+    closeProfilePanel();return NoticeCoordinator.runRecentAction(id);
+  }
+  restore();
+  return Object.freeze({changed,render,opened,closed,run,toggle,clear:()=>{NoticeCoordinator.clearRecent();return true;}});
+})();
 async function showBackupPresentation(source,kind){
   if(source==='device-folder'&&kind==='permission')return DeviceBackup?.connect();
   // Reconnecting straight from the toast keeps it to one click.
@@ -2073,7 +2159,7 @@ function renderNotificationSurfaces(state){
   }
 }
 NoticeCoordinator.subscribe(renderNotificationSurfaces);
-const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze({notifications:NoticeCoordinator,timeLabel:storageHealthTime,synced:()=>BackupProviderRuntime.syncing()===true,verified:source=>verifiedRecoveryState.providers[source]||null,action:(source,kind)=>Object.freeze({label:kind==='permission'?(source==='device-folder'?'Allow access':'Reconnect'):kind==='sync-review'?'Review':kind==='sync-password'?'Enter password':kind==='sync-newer'?'Check for update':'Show details',run:()=>showBackupPresentation(source,kind)})}));
+const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze({notifications:NoticeCoordinator,timeLabel:storageHealthTime,synced:()=>BackupProviderRuntime.syncing()===true,verified:source=>verifiedRecoveryState.providers[source]||null,action:(source,kind)=>Object.freeze({label:kind==='permission'?(source==='device-folder'?'Allow access':'Reconnect'):kind==='sync-review'?'Review':kind==='sync-password'?'Enter password':kind==='sync-newer'?'Check for update':'Show details',opens:true,run:()=>showBackupPresentation(source,kind)})}));
 const Interactions=InteractionsModule.createController(Object.freeze({ports:Object.freeze({
   environment:Object.freeze({
     clearTimeout:id=>clearTimeout(id),document,
@@ -2084,7 +2170,7 @@ const Interactions=InteractionsModule.createController(Object.freeze({ports:Obje
   }),
   diagnostics:Object.freeze({capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn')}),
   history:WorkspaceHistoryBridge,
-  notifications:Object.freeze({notify:NoticeCoordinator.notify,subscribe:NoticeCoordinator.subscribe,dismissEvent:NoticeCoordinator.dismissEvent,pauseEvent:NoticeCoordinator.pauseEvent,setHidden:NoticeCoordinator.setHidden})
+  notifications:Object.freeze({notify:NoticeCoordinator.notify,subscribe:NoticeCoordinator.subscribe,dismissEvent:NoticeCoordinator.dismissEvent,dismissAll:NoticeCoordinator.dismissAll,pauseEvent:NoticeCoordinator.pauseEvent,setPaused:NoticeCoordinator.setPaused,setHidden:NoticeCoordinator.setHidden})
 })}));
 if(!Object.isFrozen(Interactions)||Interactions.format!=='study-director.interactions'||Interactions.contractVersion!==1){
   throw new Error('Study Director interaction controller is unavailable or incompatible.');
@@ -2406,9 +2492,12 @@ function updateExecutePanels(state=null,options={}){
 }
 // Today's session as another device runs it, while this one shows it there.
 function sessionShownElsewhere(){return sessionPanelMode==='elsewhere'&&!TASKS.length?sessionPanelSession:null;}
+// Today's session parked on this device (Suspend Today, or handed over by another).
+function sessionParkedHere(){return sessionPanelMode==='suspended'&&!TASKS.some(isTrackableBlock);}
 function executeSessionStatusModel(){
   const elsewhere=sessionShownElsewhere();
   if(elsewhere)return {state:'elsewhere',label:`RUNNING ${sessionDevice(elsewhere).toUpperCase()}`};
+  if(sessionParkedHere())return {state:'suspended',label:'SUSPENDED'};
   if(!TASKS.length)return {state:'empty',label:'NO SESSION'};
   if(TimerState.mode===TIMER_MODES.SUSPENDED)return {state:'suspended',label:'SUSPENDED'};
   if(TimerState.mode===TIMER_MODES.DONE)return {state:'complete',label:'COMPLETE'};
@@ -2452,10 +2541,14 @@ function buildLiveTimeline(){
   return chronologicalRows(rows);
 }
 /* RUNTIME STATE · PRIVATE TIMER CONTROLLER */
+// While the timer runs on a work block here, pop-ups that block nothing
+// wait; support and fixed blocks, a pause or the end let them show
+// (docs/STATUS-SYSTEM.md, noise rules).
+function syncStudyQuiet(){try{NoticeCoordinator.setStudying(TimerState.mode===TIMER_MODES.RUNNING&&isWorkBlock(TASKS[TimerState.currentIndex]));}catch(error){AppDiagnostics.capture('notifications.study-hold',error,'warn');}}
 const TimerState=TimerStateModule.createStateController(Object.freeze({
   helpers:Object.freeze({makeTaskId}),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
-  effects:Object.freeze({modeChanged:()=>{updateExecutePanels();void NativeCapabilities?.syncWake();}})
+  effects:Object.freeze({modeChanged:()=>{updateExecutePanels();void NativeCapabilities?.syncWake();syncStudyQuiet();}})
 }));
 const {
   session:SessionState, tasks:TASKS, modes:TIMER_MODES, taskIdentity:TaskIdentity, setMode:setTimerMode
@@ -2557,7 +2650,9 @@ const TIMER_SNAPSHOT_INTERVAL_MS=60*1000;
 let lastTimerSnapshotMs=0;
 let sessionPanelMode='none',sessionPanelSession=null;
 let sessionSafetyMessage='';
-let backupNudgeMessage='';
+// The profile indicator's state (renderSyncStatus); declared early because
+// storage health asks for a redraw during start-up.
+let backupNudgeMessage='',driveConnecting=false,syncStatusTimer=null,syncStatusRing='',syncStatusSettle=null,sessionHandoff={step:'',error:''},driveConnectCard=null,driveConnectCardHide=null,sessionYieldedAt=0;
 let backupNudgeCheckedAt=0;
 let backupNudgeNotifiedDate='';
 let saveReminderDate='';
@@ -2939,6 +3034,7 @@ function setCurrentTask(idx,options={}){
   const next=boundedInt(idx,{min:0,max:Math.max(0,TASKS.length),fallback:0});
   if(options.notifyPractice!==false)PracticePacer.onMainTaskChanging(next<TASKS.length?TaskIdentity.idAt(next):null);
   TimerState.currentIndex=next;
+  syncStudyQuiet();
   return TimerState.currentIndex;
 }
 function resetCountdownRuntime(){return TimerEngine.resetCountdownRuntime();}
@@ -3100,6 +3196,7 @@ function storageHealthClass(health){
   return 'ok';
 }
 function renderStorageHealth(health=readStorageHealth()){
+  scheduleSyncStatus();
   const el=document.getElementById('storage-health');
   const lastSaved=document.getElementById('last-local-save');
   if(lastSaved){lastSaved.textContent=health.lastLocalSaveAt?storageHealthTime(health.lastLocalSaveAt):'Never';lastSaved.title=health.lastLocalSaveAt||'';}
@@ -3218,8 +3315,6 @@ function renderDriveBackup(){
   if(panel&&!connected)panel.hidden=true;
   if(last){const at=verifiedRecoveryState.providers['google-drive']?.at;last.textContent=at?`Last backup ${storageHealthTime(at)}`:'No backup yet';}
   if(disconnect)disconnect.disabled=state.engineBusy;
-  // Kept versions waiting for review show as Needs review too.
-  const sync=node('sb-sync');if(sync){const syncing=state.connected&&UnsupportedData.held()?'Needs app update':BackupPresentation.syncLabel(state),kept=KeptVersions.count()>0&&!['Syncing…','Needs password','Needs app update'].includes(syncing),label=kept?'Needs review':syncing;sync.hidden=!label;if(sync.textContent!==label)sync.textContent=label;sync.dataset.state=state.sync?.review||state.sync?.password||kept||label==='Needs app update'?'review':'';}
   renderBackupActions();renderProfile();if(FirstStart.isOpen())FirstStart.render();
 }
 // One Back up now and one Version History for every location, shown while
@@ -3244,6 +3339,7 @@ async function backUpEverywhere(){
 }
 function renderDeviceBackup(state){
   if(!state)return;
+  scheduleSyncStatus();
   const status=document.getElementById('device-backup-status');
   const actions=document.getElementById('device-backup-actions');
   const connect=document.getElementById('connect-device-backup');
@@ -3324,7 +3420,7 @@ async function inspectStorageCapability(){
   const usage=Number(estimate&&estimate.usage),quota=Number(estimate&&estimate.quota);
   const ratio=Number.isFinite(usage)&&Number.isFinite(quota)&&quota>0?usage/quota:null;
   const use=document.getElementById('local-storage-use');
-  if(use)use.textContent=Number.isFinite(usage)?` · Browser storage estimate: ${storageSizeLabel(usage)}${ratio!==null?` of ${storageSizeLabel(quota)}`:''}`:'';
+  if(use)use.textContent=Number.isFinite(usage)?`Browser storage estimate: ${storageSizeLabel(usage)}${ratio!==null?` of ${storageSizeLabel(quota)}`:''}`:'';
   const payload={version:1,persisted:persisted===true,usageBytes:Number.isFinite(usage)?usage:null,quotaBytes:Number.isFinite(quota)?quota:null,usageRatio:ratio,checkedAt:new Date().toISOString()};
   storageEstimate=Object.freeze({persisted,usageBytes:payload.usageBytes,quotaBytes:payload.quotaBytes});
   if(ratio!==null&&ratio>=APP_LIMITS.storageCriticalRatio){
@@ -4455,10 +4551,11 @@ function isRecoverablePreviousActiveSession(session){
 function setSessionPanelMode(mode,session=null){
   sessionPanelMode=mode||'none';
   sessionPanelSession=['suspended','elsewhere'].includes(sessionPanelMode)?session:null;
+  if(!sessionPanelSession&&sessionHandoff.error)sessionHandoff={...sessionHandoff,error:''};
   // The Execute header names the device running the session, or stops doing
   // so. Before the panel's own controls, which the idle display disables.
   try{updateExecuteSessionStatus();refreshExecuteIdleDisplay(new Date(),{force:true});}catch(error){AppDiagnostics.capture('execute.session-elsewhere-header',error,'warn');}
-  updateSessionControls();
+  updateSessionControls();scheduleSyncStatus();
 }
 async function recoverPreviousSessionForReview(session){
   const snapshot=activeSessionSnapshot(session);
@@ -4620,20 +4717,20 @@ const UnsupportedData=(()=>{
   let noticeShown=false;
   function announce(){
     const state=summary();if(!state.total||noticeShown)return false;noticeShown=true;
-    NoticeCoordinator.emit({source:'unsupported-data',id:'held',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,dismissible:true,cue:'none',
+    NoticeCoordinator.emit({source:'unsupported-data',id:'held',severity:'warning',lifecycle:'succeeded',foreground:false,tier:'blocking',surface:'toast',dismissible:true,
       title:'Some data is from a newer version',
       message:`This device has ${describe(state)} saved by a newer version of Study Director. This version leaves them exactly as they are and works with everything else; Drive sync waits until the app is updated.`,
-      action:{label:'Check for update',run:()=>void PwaLifecycle.checkForUpdate().catch(error=>AppDiagnostics.capture('unsupported-data.update-check',error,'warn'))}});
+      action:{label:'Update app',opens:true,run:()=>void checkUnsupportedUpdate()}});
     return true;
   }
   // The profile cannot be opened: shown instead of the start-up failure.
   function reportBlocked(){
     if(!blocked)return false;
     const others=Profiles.list().filter(row=>row.scope!==ProfileScope.scope);
-    NoticeCoordinator.emit({source:'unsupported-data',id:'blocked',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,dismissible:false,cue:'none',
+    NoticeCoordinator.emit({source:'unsupported-data',id:'blocked',severity:'warning',lifecycle:'succeeded',foreground:false,tier:'blocking',surface:'toast',dismissible:false,
       title:'This profile needs a newer version',
       message:'This profile was saved by a newer version of Study Director, which changed how its data is stored. This version leaves it exactly as it is. Update the app to open it, or use another profile meanwhile.',
-      action:{label:'Check for update',run:()=>void PwaLifecycle.checkForUpdate().catch(error=>AppDiagnostics.capture('unsupported-data.update-check',error,'warn'))},
+      action:{label:'Check for update',opens:true,run:()=>void PwaLifecycle.checkForUpdate().catch(error=>AppDiagnostics.capture('unsupported-data.update-check',error,'warn'))},
       secondaryAction:others.length?{label:`Open ${others[0].name||'another profile'}`,run:()=>{try{Profiles.switchTo(others[0].id);}catch(error){AppDiagnostics.capture('unsupported-data.switch-profile',error,'warn');}}}:{label:'Start a new profile',run:()=>{try{Profiles.add();}catch(error){AppDiagnostics.capture('unsupported-data.add-profile',error,'warn');}}}});
     return true;
   }
@@ -5178,17 +5275,23 @@ async function confirmSessionTakeover(session,{replace=false}={}){
     confirmLabel:replace?'Apply here':'Continue here',cancelLabel:'Not now'
   });
 }
-async function transferSessionOwnershipHere(session){
+const sessionHandoffError=(code,message)=>Object.assign(new Error(message),{code});
+// onStep(text): each step, for Continue Here's progress line.
+async function transferSessionOwnershipHere(session,{onStep=null}={}){
+  const step=text=>{try{onStep?.(text);}catch{}};
   if(!appCanMutate())throw new Error('Study Director does not currently have write control.');
-  if(!BackupProviderRuntime.connected('google-drive'))throw new Error('Google Drive must be connected to transfer a session that belongs to another device.');
+  if(!BackupProviderRuntime.connected('google-drive'))throw sessionHandoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive must be connected to transfer a session that belongs to another device.');
   const previous=ActiveSessionCodec.sanitizeCurrent(session),planned=previous?ActiveSessionCodec.sanitizeCurrent({...previous,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(previous.revision),updatedAt:new Date().toISOString()}):null;
   if(!previous||!planned)throw new Error('the transferred session state is invalid');
   let next=planned;
   let ownershipClaim=null,backgroundHold=null,localSaved=false,rolledBack=false;
   try{
+    step('Pausing this device’s sync…');
     backgroundHold=BackupProviderRuntime.suspendBackground('session-continue');await backgroundHold.settled;
-    setPlanStatus('Transferring today’s session to this device…');
+    setPlanStatus('Transferring today’s session to this device…');step('Confirming with Google Drive…');
     const claimed=await BackupProviderRuntime.claimSessionOwnership('google-drive',{date:previous.date,observedOwner:previous.runningOn,observedRevision:previous.revision,revision:planned.revision});
+    if(claimed?.status==='busy')throw sessionHandoffError('SESSION_CONTINUE_BUSY','Google Drive is busy with another backup or restore.');
+    if(claimed?.status==='unavailable')throw sessionHandoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive is not connected.');
     if(!claimed||claimed.status!=='completed'||!claimed.claim)throw new Error('Google Drive did not confirm the Active Session ownership claim.');
     ownershipClaim=claimed.claim;
     next=ActiveSessionCodec.sanitizeCurrent({...planned,revision:Math.max(planned.revision,Number(ownershipClaim.revision)||0),updatedAt:new Date().toISOString()});
@@ -5214,9 +5317,28 @@ async function transferSessionOwnershipHere(session){
     throw error;
   }finally{backgroundHold?.release();}
 }
+// Continue Here in progress: every Continue Here button says so and the
+// Execute card shows the step; a failure stays in the card until the next
+// try or until the session moves on.
+function setSessionHandoff(step='',error=''){
+  sessionHandoff={step:String(step||''),error:String(error||'')};
+  updateSessionControls();
+}
+function sessionHandoffProblem(error){
+  const code=String(error&&error.code||'');
+  if(navigator.onLine===false)return 'You’re offline. Connect to the internet, then try again.';
+  if(code==='SESSION_CONTINUE_BUSY')return 'Google Drive is busy with another backup or restore. Try again in a moment.';
+  if(code==='SESSION_CONTINUE_NOT_CONNECTED')return 'Google Drive isn’t connected. Sign in from your profile, then try again.';
+  if(code==='REPOSITORY_SESSION_CLAIM_STALE')return 'Today’s session changed on another device. Wait for this device to catch up, then try again.';
+  if(code==='REPOSITORY_SYNC_TURN')return 'Another device is saving to Google Drive. Try again in a moment.';
+  return String(error&&error.message||error||'Something went wrong.');
+}
 async function continueSessionHere(){
-  if(!appCanMutate())return false;
+  if(!appCanMutate()||sessionHandoff.step)return false;
   let previous=null;
+  // The "Today’s session is ready" pop-up has done its job.
+  NoticeCoordinator.resolveEvent('session','session-handoff');
+  setSessionHandoff('Checking today’s session…');
   try{
     const loaded=await AppData.activeSession.load(),session=loaded&&loaded.value||null;
     if(!session){setSessionPanelMode('none');return false;}
@@ -5224,13 +5346,28 @@ async function continueSessionHere(){
     if(sessionRunsElsewhere(session)&&!await confirmSessionTakeover(session))return false;
     if(!appCanMutate())return false;
     previous=ActiveSessionCodec.sanitizeCurrent(session);
-    const moved=await transferSessionOwnershipHere(session);
-    return moved.previous.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
+    const moved=await transferSessionOwnershipHere(session,{onStep:text=>setSessionHandoff(text)});
+    setSessionHandoff('Starting here…');
+    if(moved.previous.status==='suspended')return restoreSuspendedTodaySession();
+    // The timer runs here now: Resume, as Restore Session plays.
+    const restored=await attemptAutoRestoreActiveSession();
+    if(restored)NoticeCoordinator.emit({source:'session',id:'session-continued',surface:'quiet',foreground:false,cue:'resume',occurrence:String(Date.now())});
+    return restored;
   }catch(error){
-    setPlanStatus('Could not continue today’s session here: '+(error&&error.message?error.message:error),false);
+    const problem=sessionHandoffProblem(error);
+    setPlanStatus('Could not continue today’s session here: '+problem,false);
     if(previous)setSessionPanelMode(sessionRunsElsewhere(previous)?'elsewhere':'suspended',previous);
+    setSessionHandoff('','Couldn’t continue here. '+problem);
+    Interactions.notify({source:'session',kind:'error',key:'session-continue',title:'Couldn’t continue here',message:problem});
     return false;
-  }
+  }finally{if(sessionHandoff.step)setSessionHandoff('',sessionHandoff.error);}
+}
+// From a pop-up or the profile panel: open Execute first, where the card
+// shows each Continue Here step.
+async function continueSessionOnExecute(source){
+  if(sessionHandoff.step)return false;
+  await goTab('execute',{source});
+  return continueSessionHere();
 }
 // Another device continued today's session after this one changed it: the
 // timer stops here and this device's progress stays as a suspended session,
@@ -5248,7 +5385,9 @@ async function yieldSessionToOtherDevice(){
     updateExecutePanels();
     return true;
   });
-  Interactions.notify({source:'session',key:'session-yield',title:'Session continued on another device',message:'The timer here stopped. What this device recorded is kept for you under Needs review.'});
+  sessionYieldedAt=Date.now();
+  Interactions.notify({source:'session',key:'session-yield',tier:'news',cue:'session-moved',system:true,title:'Session continued on another device',message:'The timer here stopped. What this device recorded is kept for you under Needs review.',
+    action:{label:'Review',opens:true,run:()=>void KeptVersions.review()}});
   return true;
 }
 async function restoreSuspendedTodaySession(){
@@ -5263,7 +5402,7 @@ async function restoreSuspendedTodaySession(){
     if(restored===false)throw new Error('The suspended session could not be restored.');
     setSessionPanelMode('active');
     setPlanStatus('✓ Suspended session restored.');
-    Interactions.notify({source:'session',kind:'success',key:'session-restore',title:'Session restored',message:'Today’s suspended session is active again.'});
+    Interactions.notify({source:'session',kind:'success',key:'session-restore',cue:'resume',title:'Session restored',message:'Today’s suspended session is active again.'});
     await goTab('execute',{source:'session-restore'});
     return true;
   }catch(error){
@@ -6085,24 +6224,111 @@ function profileLabel(row,rows=Profiles.list()){
   const name=row?.name||'New profile',alike=rows.some(other=>other.scope!==row.scope&&(other.name||'New profile')===name);
   return {name,meta:row?.email||(alike&&profileSince(row)?`since ${profileSince(row)}`:'')};
 }
-function driveSyncLabel(){
-  const status=BackupProviderRuntime.locationStatus('google-drive');if(!status?.connected)return '';
-  if(UnsupportedData.held())return 'Needs app update';
-  return KeptVersions.count()>0&&!status.sync?.syncing?'Needs review':BackupPresentation.syncLabel(status)||'Connected';
-}
 function renderProfileBadge(){
-  let label='',locked=false;
-  try{label=driveSyncLabel();const protection=BackupProtection.status();locked=protection.enabled&&!protection.unlocked;}catch{/* Drawn again once backups are set up. */}
-  const name=getStudentNameFromDisplay(),letter=profileInitial(name),problem=['Needs review','Needs password','Needs attention','Needs app update'].includes(label)||locked;
-  const badge=document.getElementById('profile-badge');
-  if(badge){const glyph=badge.querySelector('.profile-badge-letter');if(glyph&&glyph.textContent!==letter)glyph.textContent=letter;badge.setAttribute('aria-label',`Profile: ${name}${problem?` · ${label||'Needs password'}`:''}`);}
-  const dot=document.getElementById('profile-badge-dot');if(dot)dot.hidden=!problem;
-  const avatar=document.getElementById('profile-avatar');if(avatar&&avatar.textContent!==letter)avatar.textContent=letter;
+  const letter=profileInitial(getStudentNameFromDisplay());
+  for(const glyph of document.querySelectorAll('.profile-badge-letter,.profile-avatar-letter'))if(glyph.textContent!==letter)glyph.textContent=letter;
+  scheduleSyncStatus();
+}
+// One status for the phone circle, the sidebar name and the profile panel:
+// a ring for sync health and a badge for what needs the person
+// (docs/STATUS-SYSTEM.md). Drawn after the current task, so every input
+// below is initialised and bursts of changes draw once.
+function scheduleSyncStatus(){if(syncStatusTimer===null)syncStatusTimer=setTimeout(renderSyncStatus,0);}
+function syncStatusInput(){
+  const drive=BackupProviderRuntime.locationStatus('google-drive'),email=Profiles.current()?.email||'';
+  let device=null,protection=null,storage=[];
+  try{device=DeviceBackup.status();}catch{/* Not installed yet. */}
+  try{protection=BackupProtection.status();}catch{/* Not installed yet. */}
+  try{storage=readStorageHealth().issues;}catch{/* Not installed yet. */}
+  return {
+    online:navigator.onLine!==false,
+    drive:drive?{...drive,setUp:drive.connected||drive.wasConnected||!!email,connecting:driveConnecting}:driveConnecting?{connecting:true}:null,
+    device:device&&device.supported?device:null,
+    passwordNeeded:!!protection&&protection.enabled&&!protection.unlocked,
+    newerData:UnsupportedData.held(),
+    kept:KeptVersions.count(),
+    storage:storage.map(issue=>({source:issue.source,label:issue.label,message:issue.message,level:issue.level})),
+    reminder:backupNudgeMessage,
+    updateReady:!!(pwaLatestUpdateState?.updateReady&&!pwaLatestUpdateState.applying),
+    sessionElsewhere:sessionPanelMode==='elsewhere'&&sessionPanelSession?sessionDevice(sessionPanelSession):'',
+    sessionReady:sessionParkedHere()&&sessionFromElsewhere(sessionPanelSession)?sessionDevice(sessionPanelSession):'',
+    operation:driveRunningOperation(),
+    unseen:NoticeCoordinator.recent().unseen
+  };
+}
+function drawStatusHost(host,model){
+  if(!host)return;
+  if(host.dataset.ring!==model.ring)host.dataset.ring=model.ring;
+  if((host.dataset.badge||'')!==model.badge)host.dataset.badge=model.badge;
+  host.toggleAttribute('data-slow',model.slow);
+  const many=value=>value>9?'9+':String(value);
+  const badge=host.querySelector('.status-badge'),text=model.badge==='review'&&model.count>1?many(model.count):model.badge==='info'&&model.unseen>1?many(model.unseen):['error','warning'].includes(model.badge)?'!':model.badge==='update'?'↑':'';
+  if(badge&&badge.textContent!==text)badge.textContent=text;
+}
+function renderSyncStatus(){
+  syncStatusTimer=null;
+  let model;
+  try{model=BackupPresentation.status(syncStatusInput());}
+  catch(error){AppDiagnostics.capture('sync-status.render',error,'warn');return;}
+  const hosts=['profile-tag','profile-badge','profile-avatar'].map(id=>document.getElementById(id));
+  // Syncing settles into the green ring with a brief glow.
+  if(syncStatusRing==='syncing'&&model.ring==='synced'){
+    clearTimeout(syncStatusSettle);for(const host of hosts)host?.classList.add('status-settle');
+    syncStatusSettle=setTimeout(()=>{for(const host of hosts)host?.classList.remove('status-settle');},1400);
+  }
+  syncStatusRing=model.ring;
+  for(const host of hosts)drawStatusHost(host,model);
+  const name=getStudentNameFromDisplay();
+  const tag=document.getElementById('profile-tag');if(tag){tag.title=`${model.label} — profile and sync`;tag.setAttribute('aria-label',`Profile: ${name} · ${model.label}`);}
+  const badge=document.getElementById('profile-badge');if(badge){badge.title=model.label;badge.setAttribute('aria-label',`Profile: ${name} · ${model.label}`);}
+  renderSyncStatusPanel(model);
+  renderDriveConnectCard();
+}
+function renderSyncStatusPanel(model){
+  const dialog=document.getElementById('profile-dialog');if(!dialog?.open)return;
+  const headline=document.getElementById('profile-status-headline');if(headline&&headline.textContent!==model.headline)headline.textContent=model.headline;
+  const detail=document.getElementById('profile-status-detail');if(detail)detail.textContent=model.detail;
+  const primary=document.getElementById('profile-status-primary');
+  if(primary){primary.hidden=!model.action;if(model.action){primary.textContent=model.action.label;primary.dataset.syncAction=model.action.action;}}
+  // Rebuilt only when the items change, so a focused button keeps focus.
+  const list=document.getElementById('profile-status-items'),key=JSON.stringify(model.items);
+  if(list&&list.dataset.key!==key){list.dataset.key=key;list.replaceChildren(...model.items.map(item=>{
+    const row=document.createElement('li');row.className='profile-status-item';row.dataset.tone=item.tone;row.dataset.item=item.id;
+    const mark=document.createElement('span');mark.className='profile-status-mark';mark.setAttribute('aria-hidden','true');
+    const text=document.createElement('span');text.className='profile-status-text';text.textContent=item.text;
+    const button=document.createElement('button');button.type='button';button.className='profile-act ui-btn';button.dataset.action='sync-status-action';button.dataset.syncAction=item.action;button.textContent=item.actionLabel;
+    row.append(mark,text,button);return row;
+  }));}
+}
+// Each panel action calls the feature's own action; the indicator never
+// starts work by itself. Sync now, Try again and Sign in keep the panel open
+// so the ring shows the work; the others close it for their own dialog or view.
+async function syncStatusAction(ev){
+  const kind=String(ev?.target?.closest?.('[data-sync-action]')?.dataset.syncAction||'');
+  if(!['sync-now','retry','sign-in'].includes(kind))closeProfilePanel();
+  try{
+    switch(kind){
+      case 'sync-now':case 'retry':BackupProviderRuntime.scheduleSharedSync('google-drive',kind==='retry'?'sync-retry':'sync-now');scheduleSyncStatus();return true;
+      case 'sign-in':return await connectDriveForProfile();
+      case 'enter-password':return await CLICK_ACTIONS['backup-protection']();
+      case 'unlock-sync':return await BackupProviderRuntime.unlockSync('google-drive');
+      case 'check-update':return await checkUnsupportedUpdate();
+      case 'apply-update':return await applyPwaUpdateFromUi();
+      case 'review-sync':return await BackupProviderRuntime.reviewSync('google-drive');
+      case 'review-kept':return await KeptVersions.review();
+      case 'device-permission':return await connectDeviceBackupWithRecovery();
+      case 'open-execute':return await goTab('execute',{source:'sync-status'});
+      case 'continue-session':return await continueSessionOnExecute('sync-status');
+      case 'open-data':if(!await goTab('library',{source:'sync-status'}))return false;LibraryView.showSection('data');return true;
+      default:return false;
+    }
+  }catch(error){AppDiagnostics.capture('sync-status.action',error,'warn');return false;}
 }
 function renderProfilePanel(){
   const dialog=document.getElementById('profile-dialog');if(!dialog?.open)return;
-  const mine=Profiles.current(),rows=Profiles.list(),drive=BackupProviderRuntime.locationStatus('google-drive'),email=mine?.email||'',sync=driveSyncLabel(),protection=BackupProtection.status();
-  const subtitle=document.getElementById('profile-subtitle');if(subtitle)subtitle.textContent=drive?.connected?[email,sync].filter(Boolean).join(' · '):email?`${email} · Signed out`:'Only on this device';
+  const mine=Profiles.current(),rows=Profiles.list(),drive=BackupProviderRuntime.locationStatus('google-drive'),email=mine?.email||'',protection=BackupProtection.status();
+  // Sync state is the Sync & backups section's; the subtitle names the account.
+  const subtitle=document.getElementById('profile-subtitle');if(subtitle){subtitle.textContent=email;subtitle.hidden=!email;}
   const driveValue=document.getElementById('profile-drive-value'),driveAction=document.getElementById('profile-drive-action');
   if(driveValue)driveValue.textContent=drive?.connected?(email||'Connected'):email?`${email} · Signed out`:'Not connected';
   if(driveAction){driveAction.textContent=drive?.connected?'Disconnect':email?'Sign in':'Connect';driveAction.dataset.state=drive?.connected?'connected':'';driveAction.disabled=!!drive?.engineBusy;}
@@ -6121,7 +6347,7 @@ function renderProfilePanel(){
       if(meta){const small=document.createElement('small');small.textContent=meta;text.append(small);}
       let end;
       if(current){end=document.createElement('span');end.className='profile-item-tag ui-label';end.textContent='This profile';}
-      else{end=document.createElement('button');end.type='button';end.className='mini-btn ui-btn profile-switch';end.textContent='Switch';end.dataset.action='switch-profile';end.dataset.profile=row.id;end.setAttribute('aria-label',`Switch to ${name}`);end.disabled=locked;}
+      else{end=document.createElement('button');end.type='button';end.className='profile-act ui-btn profile-switch';end.textContent='Switch';end.dataset.action='switch-profile';end.dataset.profile=row.id;end.setAttribute('aria-label',`Switch to ${name}`);end.disabled=locked;}
       item.append(avatar,text,end);return item;
     }));
   }
@@ -6132,14 +6358,14 @@ function renderProfile(){renderProfileBadge();renderProfilePanel();}
 function openProfilePanel(){
   const dialog=document.getElementById('profile-dialog');if(!dialog||dialog.open)return false;
   const input=document.getElementById('profile-name-input');if(input)input.value=getStudentNameFromDisplay();
-  dialog.showModal();renderProfilePanel();return true;
+  dialog.showModal();renderProfilePanel();NotificationRecent.opened();return true;
 }
 function closeProfilePanel(){const dialog=document.getElementById('profile-dialog');if(dialog?.open)dialog.close();}
 function installProfileDialogs(){
   const form=document.getElementById('first-start-form');form?.addEventListener('submit',event=>event.preventDefault());
   // First start stays until Skip, Cancel or Continue; Escape does not drop it.
   document.getElementById('first-start-dialog')?.addEventListener('cancel',event=>event.preventDefault());
-  document.getElementById('profile-dialog')?.addEventListener('close',()=>saveProfileName());
+  document.getElementById('profile-dialog')?.addEventListener('close',()=>{finishProfileRename();NotificationRecent.closed();});
 }
 function saveProfileName(){
   const input=document.getElementById('profile-name-input');if(!input)return;
@@ -6147,9 +6373,25 @@ function saveProfileName(){
   if(normalizeStudentName(raw)===getStudentNameFromDisplay())return;
   const clean=applyStudentName(raw);input.value=clean;persistUserDefaultName(clean);
 }
+// The name in the panel's header renames in place, as a note title does:
+// Enter or leaving the field saves, Escape keeps the old name.
+function startProfileRename(){
+  const button=document.getElementById('profile-name-button'),input=document.getElementById('profile-name-input');
+  if(!button||!input)return false;
+  input.value=getStudentNameFromDisplay();button.hidden=true;input.hidden=false;input.focus();input.select();
+  return true;
+}
+function finishProfileRename(){
+  saveProfileName();
+  const button=document.getElementById('profile-name-button'),input=document.getElementById('profile-name-input');
+  if(input)input.hidden=true;if(button)button.hidden=false;
+}
 function handleProfileNameKey(e){
-  if(e.key==='Enter'){e.preventDefault();saveProfileName();e.currentTarget.blur();return false;}
-  if(e.key==='Escape'){e.currentTarget.value=getStudentNameFromDisplay();}
+  // Key handlers are delegated from the document, so the field is the target.
+  const input=e.target,button=document.getElementById('profile-name-button');
+  if(e.key==='Enter'){e.preventDefault();input.blur();button?.focus();return false;}
+  // Escape leaves the name as it was and keeps the panel open.
+  if(e.key==='Escape'){e.preventDefault();e.stopPropagation();input.value=getStudentNameFromDisplay();input.blur();button?.focus();return false;}
   return true;
 }
 async function profileDriveAction(){
@@ -6233,7 +6475,62 @@ async function driveProfileDeleted(info){
 // a background sync) never does.
 let driveConnectRequestedAt=0,driveLibraryQuestion=null;
 const DRIVE_CHOICE_WINDOW_MS=5*60*1000;
-function connectDriveForProfile(){driveConnectRequestedAt=Date.now();return BackupProviderRuntime.connect('google-drive');}
+// The indicator shows Connecting… from the click until the sign-in settles,
+// and the Connect card follows the first sync to its end.
+function connectDriveForProfile(){
+  driveConnectRequestedAt=Date.now();driveConnecting=true;startDriveConnectCard();scheduleSyncStatus();
+  const settled=ok=>{
+    driveConnecting=false;
+    if(driveConnectCard&&driveConnectCard.phase==='signing-in'){
+      if(ok===true)driveConnectCard.phase='signed-in';
+      else{const said=BackupPresentation.read('google-drive','backup-status');driveConnectCard.phase='failed';driveConnectCard.error=String(said?.message||'').replace(/^Connection failed:\s*/u,'')||'Sign-in didn’t finish.';}
+    }
+    scheduleSyncStatus();
+  };
+  const result=BackupProviderRuntime.connect('google-drive');Promise.resolve(result).then(settled,()=>settled(false));return result;
+}
+// The Connect card (docs/STATUS-SYSTEM.md, phase 3): it reads what Drive
+// reports and decides nothing itself.
+function startDriveConnectCard(){
+  clearTimeout(driveConnectCardHide);driveConnectCardHide=null;
+  driveConnectCard={startedAt:Date.now(),phase:'signing-in',error:'',seen:{sync:false,upload:false},kept:KeptVersions.count(),lastStatus:''};
+}
+function endDriveConnectCard(){clearTimeout(driveConnectCardHide);driveConnectCardHide=null;driveConnectCard=null;renderDriveConnectCard();}
+function driveRunningOperation(){
+  for(const [id,kind] of [['external-sync','sync'],['backup-operation',''],['external-backup','upload']]){
+    const event=BackupPresentation.read('google-drive',id);
+    if(event&&event.lifecycle==='running')return {kind:kind||(event.kind==='sync'?'sync':'upload'),message:String(event.message||''),progress:event.progress||null};
+  }
+  return null;
+}
+function renderDriveConnectCard(){
+  const node=id=>document.getElementById(id),root=node('drive-connect-card');if(!root)return;
+  const state=driveConnectCard;
+  if(!state){root.hidden=true;return;}
+  let model;
+  try{
+    const drive=BackupProviderRuntime.locationStatus('google-drive'),operation=driveRunningOperation();
+    if(drive?.sync?.syncing||operation?.kind==='sync')state.seen.sync=true;
+    if(operation?.kind==='upload'&&['upload','commit','complete'].includes(String(operation.progress?.stage||'')))state.seen.upload=true;
+    model=BackupPresentation.connectProgress({phase:state.phase,error:state.error,startedAt:state.startedAt,online:navigator.onLine!==false,drive,operation,seen:state.seen,keptNew:Math.max(0,KeptVersions.count()-state.kept)});
+  }catch(error){AppDiagnostics.capture('drive-connect-card.render',error,'warn');root.hidden=true;return;}
+  root.hidden=false;root.dataset.tone=model.tone;
+  setTextSafe('drive-connect-title',model.title);
+  // Screen readers hear the sentence when it changes, not every count.
+  if(state.lastStatus!==model.status){state.lastStatus=model.status;setTextSafe('drive-connect-status',model.status);}
+  const list=node('drive-connect-steps'),key=JSON.stringify(model.steps);
+  if(list&&list.dataset.key!==key){
+    list.dataset.key=key;
+    list.replaceChildren(...model.steps.map(step=>{const item=document.createElement('li');item.dataset.state=step.state;item.textContent=step.label;if(step.state==='active')item.setAttribute('aria-current','step');return item;}));
+  }
+  const bar=node('drive-connect-bar'),showBar=model.tone==='working'&&state.phase!=='signing-in';
+  if(bar){bar.hidden=!showBar;bar.dataset.mode=model.fraction===null?'indeterminate':'determinate';bar.firstElementChild.style.width=model.fraction===null?'':`${Math.round(model.fraction*100)}%`;}
+  const detail=node('drive-connect-detail');if(detail){detail.hidden=!model.detail;if(detail.textContent!==model.detail)detail.textContent=model.detail;}
+  const action=node('drive-connect-action');
+  if(action){action.hidden=!model.action;if(model.action){action.dataset.syncAction=model.action.action;if(action.textContent!==model.action.label)action.textContent=model.action.label;}}
+  // Synced closes on its own; anything that needs the person stays.
+  if(model.done&&!driveConnectCardHide)driveConnectCardHide=setTimeout(()=>{if(driveConnectCard===state)endDriveConnectCard();},6000);
+}
 async function recordDriveLibrary(email,folder){
   const mine=Profiles.current();if(!mine)return;
   // Another Drive library than the one last synced with: what was shared
@@ -6257,14 +6554,14 @@ function askToJoinLibrary(email,library){
 async function bindDriveLibrary(info){
   const mine=Profiles.current();if(!mine)return 'refuse';
   const email=String(info?.email||''),folder=String(info?.folder||''),found=String(info?.found||''),others=Profiles.list().filter(row=>row.scope!==mine.scope);
-  const refuse=message=>{Interactions.notify({key:'drive-profile-refused',title:'Google Drive was not used',message});renderProfile();return 'refuse';};
+  const refuse=message=>{endDriveConnectCard();Interactions.notify({key:'drive-profile-refused',title:'Google Drive was not used',message});renderProfile();return 'refuse';};
   const owner=others.find(row=>email&&row.email===email||found&&row.id===found);
   if(owner)return refuse(`This Google account holds ${owner.name||'another profile'}’s library on this device. Each profile syncs with its own Google account.`);
   if(info?.mine){await recordDriveLibrary(email,folder);return 'continue';}
   if(!found&&(!info?.library||!others.length)){await recordDriveLibrary(email,folder);return 'claim';}
   if(Date.now()-driveConnectRequestedAt>DRIVE_CHOICE_WINDOW_MS)return refuse(`${email||'This Google account'} already holds a Study Director library. Connect Google Drive again to choose whether to continue with it.`);
   driveLibraryQuestion??=askToJoinLibrary(email,info.library).finally(()=>{driveLibraryQuestion=null;});
-  if(!await driveLibraryQuestion){renderProfile();return 'refuse';}
+  if(!await driveLibraryQuestion){endDriveConnectCard();renderProfile();return 'refuse';}
   if(found&&!Profiles.adopt(found))return refuse('That library belongs to another profile on this device.');
   FirstStart.joined();
   await recordDriveLibrary(email,folder);
@@ -8354,7 +8651,11 @@ function executeIdlePresentation(d=new Date(),options={}){
     return view;
   };
   const elsewhere=sessionShownElsewhere();
-  if(elsewhere)return applyOverrides(executeIdleView('Running on Another Device',sessionDevice(elsewhere).replace(/^on /,'').toUpperCase(),'Running on Another Device',`Today’s session is running ${sessionDevice(elsewhere)} (last update ${sessionUpdateTime(elsewhere)}). Continue Here, below, moves it to this device.`,'NEXT: —'));
+  if(sessionParkedHere()){
+    const handed=sessionFromElsewhere(sessionPanelSession);
+    return applyOverrides(executeIdleView('Session Suspended','SUSPENDED','Today’s Session Suspended',handed?`Today’s session was suspended ${sessionDevice(sessionPanelSession)}. Continue Here picks it up on this device.`:'Restore Session continues it here. Review → Save Today can also save its progress without restarting the timer.','NEXT: —'));
+  }
+  if(elsewhere)return applyOverrides(executeIdleView('Running on Another Device',sessionDevice(elsewhere).replace(/^on /,'').toUpperCase(),'Running on Another Device',`Today’s session is running ${sessionDevice(elsewhere)} (last update ${sessionUpdateTime(elsewhere)}). Continue Here moves it to this device.`,'NEXT: —'));
   if(!hasRows)return applyOverrides(executeIdleView('No Schedule Loaded','—','No Schedule Loaded','Open Plan and apply today’s schedule to begin.','NEXT: —'));
   if(!hasTrackable)return applyOverrides(executeIdleView('Plan Has No Study Blocks','FIXED / NON-TRACKABLE ONLY','No Trackable Blocks','This plan has no work or support blocks for the timer to run. Edit it in Plan before starting.','NEXT: —'));
   if(TimerState.mode===TIMER_MODES.DONE){
@@ -8476,7 +8777,7 @@ function updateBadges(){
   updateSessionControls();
 }
 function updateSessionControls(){
-  const panel=document.getElementById('session-panel'),planControls=document.getElementById('plan-board-session-actions');
+  const panel=document.getElementById('session-panel'),planControls=document.getElementById('plan-board-session-actions'),cardAction=document.getElementById('execute-session-action');
   const active=TASKS.some(isTrackableBlock);
   const running=TimerState.runtime&&TimerState.runtime.startMs!==null&&TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex]);
   const finished=active&&TimerState.mode===TIMER_MODES.DONE;
@@ -8500,13 +8801,22 @@ function updateSessionControls(){
       ? 'The timer is actively tracking a block. Suspend or reset only if you intentionally want to stop this live session.'
       : 'A plan is loaded but no countdown is running. These controls affect today’s live session; saved Library records and notes are kept.';
   }
-  if(planControls)planControls.hidden=!visible;
-  [panel,planControls].filter(Boolean).forEach(container=>container.querySelectorAll('button[data-action]').forEach(btn=>{
+  const continuing=!!sessionHandoff.step,progress=document.getElementById('execute-session-progress'),progressText=continuing?sessionHandoff.step:sessionHandoff.error;
+  if(progress){progress.hidden=!progressText;progress.classList.toggle('error',!continuing&&!!progressText);if(progress.textContent!==progressText)progress.textContent=progressText;}
+  if(planControls){
+    planControls.hidden=!visible;
+    const state=document.getElementById('plan-session-state'),label=continuing?sessionHandoff.step:elsewhere?`Running ${sessionDevice(sessionPanelSession)}`:handedOff?`Suspended ${sessionDevice(sessionPanelSession)}`:suspended?'Today’s session is suspended':finished?'Today finished':running?'Live session':'Today’s session';
+    if(state&&state.textContent!==label)state.textContent=label;
+  }
+  // The same controls in Execute's status card, its session panel and Plan's
+  // strip: the next step first, then Suspend, Finish and Reset. A session
+  // running elsewhere offers only Continue Here.
+  [panel,planControls,cardAction?.parentElement].filter(Boolean).forEach(container=>container.querySelectorAll('button[data-action]').forEach(btn=>{
     const action=btn.dataset.action;
-    if(action==='restore-session'){btn.hidden=!suspended&&!elsewhere;btn.disabled=!suspended&&!elsewhere;const label=elsewhere||handedOff?'Continue Here':'Restore Session';if(btn.textContent!==label)btn.textContent=label;}
+    if(action==='restore-session'){btn.hidden=!suspended&&!elsewhere;btn.disabled=continuing||!suspended&&!elsewhere;const label=continuing?'Continuing…':elsewhere||handedOff?'Continue Here':'Restore Session';if(btn.textContent!==label)btn.textContent=label;btn.setAttribute('aria-busy',continuing?'true':'false');}
     else if(action==='suspend-session'){btn.hidden=suspended||elsewhere;btn.disabled=!active;}
-    else if(action==='finish-session')btn.disabled=!active||finished;
-    else if(action==='reset-session')btn.disabled=!visible||elsewhere;
+    else if(action==='finish-session'){btn.hidden=elsewhere||suspended;btn.disabled=!active||finished;}
+    else if(action==='reset-session'){btn.hidden=elsewhere;btn.disabled=!visible||elsewhere;}
   }));
   updateExecutePanels();
   refreshSessionSafetyUi();
@@ -8877,17 +9187,20 @@ function renderIntegrityStatuses(){
     const element=document.getElementById(id);if(!element)continue;
     const value=location?repositoryIntegrityView?.locations?.[location]:attachmentIntegrityView,bound=!location||value?.repositoryScope&&repositoryIntegrityBoundScopes[location]===value.repositoryScope;
     element.textContent=label+': '+(bound?integrityStatusText(value,{shallow:!location}):'Awaiting connection to the repository; no current scan confirmed.');
+    // Recheck is offered only for a location this device is connected to.
+    const recheck=location&&document.getElementById('recheck-'+location);if(recheck)recheck.hidden=!bound;
   }
 }
 async function requestRepositoryIntegrityRecheck(target){
+  const label=target==='device-folder'?'Device Folder':'Google Drive';
   try{
     if(!appCanMutate())throw new Error('Use the primary tab to request backup verification.');
-    if(!BackupProviderRuntime.locationStatus(target)?.connected)throw new Error('Connect this backup location before requesting verification.');
+    if(!BackupProviderRuntime.locationStatus(target)?.connected)throw new Error(`Connect ${label} before rechecking it.`);
     const bound=await readRepositoryIntegrityTarget(target);
     await mutateRepositoryIntegrityTarget(target,current=>{if(current.repositoryScope!==bound.repositoryScope)throw repositoryIntegrityChanged();return {...current,requestId:crypto.randomUUID(),recheck:true,recheckCursor:'',cursor:'',scanId:'',partial:null,cycleStartedAt:new Date().toISOString()};});
     BackupProviderRuntime.requestIntegrity(target);
-    setStatus('Backup recheck requested. Quarantined objects remain hidden until they pass full verification.');return true;
-  }catch(error){setStatus(String(error?.message||error),false);AppDiagnostics.capture('backup.integrity-recheck',error,'warn');return false;}
+    setStatus('library-status',`${label} recheck started. The result appears under Verification.`);return true;
+  }catch(error){setStatus('library-status',String(error?.message||error),false);AppDiagnostics.capture('backup.integrity-recheck',error,'warn');return false;}
 }
 const ATTACHMENT_INTEGRITY_META_KEY=APP_META_KEYS.attachmentIntegrityAudit;
 const ATTACHMENT_INTEGRITY_INTERVAL_MS=24*60*60*1000;
@@ -9031,15 +9344,30 @@ const LibraryClearCoordinator=LibraryClearModule.createCoordinator(Object.freeze
 // count shows in Library → Data and the sidebar; a note with one carries a
 // quiet "Needs review" mark. Reviewing never opens by itself.
 const KeptVersions=(()=>{
-  let count=0,notes=new Set(),generation=0;
+  let count=0,notes=new Set(),generation=0,seen=null;
   async function refresh(){
     const token=++generation;let open;
     try{open=(await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt);}catch(error){AppDiagnostics.capture('kept-versions.refresh',error,'warn');return false;}
     if(token!==generation)return false;
     const next=new Set(open.filter(review=>review.subject==='note').map(review=>review.ref)),notesChanged=[...next].sort().join('|')!==[...notes].sort().join('|');
+    // Kept versions pop up once, when they first appear; those already here
+    // at start-up do not.
+    const fresh=seen?open.filter(review=>!seen.has(review.id)):[];
+    seen=new Set([...(seen||[]),...open.map(review=>review.id)]);
     count=open.length;notes=next;renderKeptVersions();renderDriveBackup();
     if(notesChanged)LibraryView.refreshNotes();
+    if(!count)NoticeCoordinator.resolveEvent('sync','kept-new');
+    else if(fresh.length)announce(fresh);
     return true;
+  }
+  function announce(fresh){
+    // The Connect card reports what its sync kept, and the pop-up for a
+    // session that moved to another device says this device's was kept.
+    if(driveConnectCard)return;
+    if(Date.now()-sessionYieldedAt<60000&&fresh.every(review=>review.subject==='session'))return;
+    Interactions.notify({source:'sync',key:'kept-new',kind:'warning',tier:'news',title:'Kept for review',
+      message:`${count===1?'One version was':`${count} versions were`} kept where two devices changed the same thing. Nothing is lost; choose what to keep when you’re ready.`,
+      action:{label:'Review',opens:true,run:()=>void review()}});
   }
   async function review(ref=''){
     try{
@@ -9058,9 +9386,17 @@ const KeptVersions=(()=>{
 })();
 // Library → Data says what this device holds from a newer version.
 function renderUnsupportedData(){
+  scheduleSyncStatus();
   const state=UnsupportedData.summary(),row=document.getElementById('unsupported-data'),text=document.getElementById('unsupported-data-text');
   if(row)row.hidden=!state.total;
-  if(text&&state.total)text.textContent=`${UnsupportedData.describe(state)} ${state.total===1?'was':'were'} saved by a newer version of Study Director. This version leaves ${state.total===1?'it':'them'} exactly as ${state.total===1?'it is':'they are'} and does not show ${state.total===1?'it':'them'}; Drive sync waits until the app is updated.`;
+  if(text)text.textContent=state.total?`${UnsupportedData.describe(state)} on this device ${state.total===1?'was':'were'} saved by a newer version of Study Director. ${state.total===1?'It is':'They are'} kept safe but hidden here, and Drive sync is paused until you update the app.`:'';
+}
+// Update app: look for the newer version; say so when there is none yet.
+async function checkUnsupportedUpdate(){
+  try{
+    await PwaLifecycle.checkForUpdate();
+    if(!PwaLifecycle.status().updateReady)Interactions.notify({source:'unsupported-data',key:'no-update',title:'No newer version yet',message:'This device has the newest version it can get right now. The data stays safe and hidden until an update arrives.'});
+  }catch(error){AppDiagnostics.capture('unsupported-data.update-check',error,'warn');}
 }
 function renderKeptVersions(){
   const row=document.getElementById('kept-versions'),text=document.getElementById('kept-versions-text'),count=KeptVersions.count();
@@ -9368,7 +9704,7 @@ async function restoreSessionStateThroughLifecycle(importedSession,scheduleText=
         const input=document.getElementById('plan-input');if(input)input.value=session.scheduleText;
         void PlanData.writeDraft(session.scheduleText);
         PlanDraftEditor.preview({silent:true,enterDraft:true});setSessionPanelMode('suspended',session);
-        if(sessionFromElsewhere(session)&&isSuspendedActiveSession(session))Interactions.notify({source:'session',key:'session-handoff',title:'Today’s session is ready',message:'It was suspended on another device. Continue it here when you are ready.',action:{label:'Continue here',run:()=>void continueSessionHere()}});
+        if(sessionFromElsewhere(session)&&isSuspendedActiveSession(session))Interactions.notify({source:'session',key:'session-handoff',tier:'news',title:'Today’s session is ready',message:'It was suspended on another device. Continue it here when you are ready.',action:{label:'Continue here',run:()=>void continueSessionOnExecute('session-handoff')}});
       }else if(sessionRunsElsewhere(session)){
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
         setSessionPanelMode('elsewhere',session);
@@ -9743,7 +10079,7 @@ async function offerDeviceRecoveryIfLocalEmpty(options={}){
   if(!await canonicalLocalRecoveryEmpty())return false;
   const state=DeviceBackup.status(),latestBefore=Number(options.latestBefore)||Number.POSITIVE_INFINITY;
   if(!state.connected){
-    if(options.reason==='startup'&&!deviceRecoveryHintNotified&&await studyDataLostHere()){deviceRecoveryHintNotified=true;Interactions.notify({key:'device-recovery-empty-local',title:'No local study data found',message:`If browser data was cleared, restore from ${backupRestoreChoices()}.`,action:{label:'Restore from backup',run:()=>void openBackupRestore()}});}
+    if(options.reason==='startup'&&!deviceRecoveryHintNotified&&await studyDataLostHere()){deviceRecoveryHintNotified=true;Interactions.notify({key:'device-recovery-empty-local',tier:'news',title:'No local study data found',message:`If browser data was cleared, restore from ${backupRestoreChoices()}.`,action:{label:'Restore from backup',opens:true,run:()=>void openBackupRestore()}});}
     return false;
   }
   deviceRecoveryOfferRunning=true;
@@ -9796,7 +10132,7 @@ function showStorageResetDecision({unsaved=[],retrying=false}={}){
   const backingUp=DeviceBackup.status().connected||BackupProviderRuntime.connected('google-drive');
   parts.push(backingUp?'Past Saved Days and attachments need a restore from backup.':`Past Saved Days and attachments can be restored from ${backupRestoreChoices()}.`);
   if(backingUp)parts.push('Automatic backups are paused until you choose.');
-  NoticeCoordinator.emit({source:'storage-reset',id:'detected',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,dismissible:false,cue:'none',
+  NoticeCoordinator.emit({source:'storage-reset',id:'detected',severity:'warning',lifecycle:'succeeded',foreground:false,tier:'critical',surface:'toast',dismissible:false,
     title:'Browser data was cleared',message:parts.join(' '),
     action:{label:'Restore from backup',run:()=>void restoreAfterStorageReset()},
     secondaryAction:{label:'Continue with current data',run:()=>settleStorageReset()}});
@@ -9879,7 +10215,7 @@ async function restoreMissingAfterStorageReset(hold){
   settleStorageReset();
   const at=Date.parse(String(outcome.exportedAt||'')),days=Math.max(0,Number(outcome.result?.added)||0),files=Math.max(0,Number(outcome.result?.assetsRestored)||0);
   const source=`your ${outcome.label} backup${Number.isFinite(at)?` of ${new Date(at).toLocaleString()}`:''}`,count=(value,word)=>`${value} ${word}${value===1?'':'s'}`;
-  NoticeCoordinator.emit({source:'storage-reset',id:'restored',severity:'success',lifecycle:'succeeded',foreground:false,surface:'toast',duration:12000,cue:'none',
+  NoticeCoordinator.emit({source:'storage-reset',id:'restored',severity:'success',lifecycle:'succeeded',foreground:false,tier:'news',surface:'toast',
     title:'Browser data was cleared',
     message:days||files?`Your open work was kept. Added ${count(days,'past Saved Day')} and ${count(files,'attachment')} from ${source}.`:`Your open work was kept. Nothing was missing compared with ${source}.`});
   return true;
@@ -10322,7 +10658,7 @@ function renderPwaUpdateStatus(state){
   const message=document.getElementById('pwa-update-message');
   if(!control||!button||!message)return;
   const previous=pwaLatestUpdateState;
-  pwaLatestUpdateState=state;
+  pwaLatestUpdateState=state;scheduleSyncStatus();
   button.disabled=!!state.applying||!!state.checking;
   button.textContent=state.applying?'Updating…':state.checking?'Checking…':!state.updateReady&&state.bootState==='pending'?'Retry confirmation':state.registrationError||state.checkError&&!state.updateReady?'Retry update check':pwaUpdateActionLabel();
   const progress=document.getElementById('pwa-update-progress-message');if(progress)progress.textContent=state.message||'Preparing the update…';
@@ -10625,7 +10961,7 @@ const CLICK_ACTIONS=Object.freeze({
   'apply-pwa-update': applyPwaUpdateFromUi,
   'protect-local-data': protectLocalData,
   'install-notice-action': ()=>runInstallationAction({dismissNotice:true}),
-  'check-unsupported-update': ()=>void PwaLifecycle.checkForUpdate().catch(error=>AppDiagnostics.capture('unsupported-data.update-check',error,'warn')),
+  'check-unsupported-update': ()=>void checkUnsupportedUpdate(),
   'dismiss-install-notice': ()=>NativeCapabilities.dismissInstallNotice(),
   'toggle-system-alerts': ()=>SystemNotifications.toggle(),
   'connect-device-backup': ()=>connectDeviceBackupWithRecovery(),
@@ -10721,7 +11057,13 @@ const CLICK_ACTIONS=Object.freeze({
   'gap-ignore': ()=>classifyInactiveGap('ignore'),
   'gap-apply': applyInactiveGapSplit,
   'dismiss-storage-warning': dismissStorageWarning,
-  'show-drive-sync': ()=>BackupProviderRuntime.locationStatus('google-drive')?.sync?.password?BackupProviderRuntime.unlockSync('google-drive'):BackupProviderRuntime.locationStatus('google-drive')?.sync?.review?showBackupPresentation('google-drive','sync-review'):KeptVersions.count()?KeptVersions.review():showBackupPresentation('google-drive','status'),
+  'sync-status-action': syncStatusAction,
+  // Hiding the card leaves the work running; the indicator still shows it.
+  'close-drive-connect': ()=>{endDriveConnectCard();return true;},
+  'recent-action': ev=>NotificationRecent.run(ev),
+  'recent-more': ()=>NotificationRecent.toggle(),
+  'rename-profile': startProfileRename,
+  'clear-recent': ()=>NotificationRecent.clear(),
   'review-kept-versions': ()=>KeptVersions.review(),
   'open-profile': openProfilePanel,
   'close-profile': closeProfilePanel,
@@ -10758,7 +11100,7 @@ const INPUT_ACTIONS=Object.freeze({
   'practice-setup': ()=>PracticePacer.previewSetup()
 });
 const BLUR_ACTIONS=Object.freeze({
-  'profile-name': saveProfileName,
+  'profile-name': finishProfileRename,
   'save-reflection': ()=>flushPendingReviewSave()
 });
 const KEYDOWN_ACTIONS=Object.freeze({
@@ -11099,6 +11441,14 @@ function installApplicationDomBindings(){
   NativeCapabilities.install();
   void BackupProtection.refresh().catch(setBackupProtectionSurfaceError);
   BackupProviderRuntime.subscribeStatus(renderDriveBackup);renderDriveBackup();
+  // The indicator also follows the network and keeps its times current.
+  for(const type of ['online','offline'])window.addEventListener(type,scheduleSyncStatus);
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')scheduleSyncStatus();});
+  setInterval(()=>{if(document.visibilityState==='visible')scheduleSyncStatus();},30*1000);
+  // The indicator, the panel's counts and the Connect card follow each step
+  // and count of a sync or upload.
+  BackupPresentation.subscribe(scheduleSyncStatus);
+  NoticeCoordinator.subscribeRecent(NotificationRecent.changed);
   void ensureDeviceBackupInstalled().then(()=>installRepositoryIntegrityScrub()).catch(error=>AppDiagnostics.capture('backup.repository-integrity-install',error,'warn'));
   updateFullscreenButton();
   PlanDraftEditor.install();

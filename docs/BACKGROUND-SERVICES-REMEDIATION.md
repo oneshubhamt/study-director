@@ -787,6 +787,339 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
   - The speed and review probes were temporary and are not committed.
   - Not run: the full browser suite, a real Google Drive account, physical devices.
 
+### Entry 024 — One sync and background status indicator, phase 1 (2026-11-01)
+
+- **Branch / source HEAD before:** `refactor/background-coordination` at `00488f8` (release `SDVB75F18`, above `main`'s `SDVB75F17`; no further bump in this pull request). Plan and decisions: [STATUS-SYSTEM.md](STATUS-SYSTEM.md).
+- **Step 1 — audit:**
+  - The sidebar's sync line (`#sb-sync`) shows one text at a time from `BackupPresentation.syncLabel` plus a kept-versions override: Syncing…, Synced, Changes since, Last synced, Needs password, Needs review, Needs app update. It is hidden when Drive is signed out, when the backup password is not entered, and before the first sync.
+  - The phone circle (`#profile-badge-dot`) shows one warning dot for Needs review, Needs password, Needs app update or a locked password, and nothing while syncing or synced. Phone and laptop therefore disagree.
+  - The profile panel shows only a subtitle with the same text and has no link to the review.
+  - Signals already available: `locationStatus('google-drive')` (connected, busy, foregroundKind, stalled, backingUp, waiting, locked, nextEligibleAt, retryBackoffCapped, sync view), `DeviceBackup.status()`, `KeptVersions.count()`, `BackupProtection.status()`, `UnsupportedData.held()`, storage-health issues (which already carry backup-check warnings), the PWA update state, the session panel mode and `backupNudgeMessage`. The sync view lacks the other-device turn wait; it gains `turnWaits` (read-only, no behaviour change).
+- **Step 2 — objectives before edits:**
+  - **E24.1** `backup-presentation` gains a pure `status(input)` that returns ring, badge, count, label, headline, next-sync detail, primary action and needs-you items, with the priorities in STATUS-SYSTEM.md section 2.
+  - **E24.2** Every case the retired text line and phone dot covered maps to the indicator (STATUS-SYSTEM.md section 3), checked row by row in a new unit test, plus the new cases (off, signed out, offline, first sync, failing after retries, Device Folder, storage, session elsewhere, update ready, backup reminder).
+  - **E24.3** One indicator component on three hosts: ring around the phone circle, squircle around the sidebar name (the sync text line is removed), ring around the profile panel avatar. Tooltip and `aria-label` carry the full text; reduced motion stops the travelling arc; a settle animation marks syncing → synced.
+  - **E24.4** The profile panel gains a Sync & backups section: headline, next-sync detail, Sync now, one row per item with its action, and a link to Library → Data. Actions call existing feature actions only.
+  - **E24.5** The indicator re-renders on every input change: provider status, Device Folder status, kept versions, protection, storage health, PWA update state, session mode, online/offline, and a 30 s tick for time text.
+  - **E24.6** No new notification producers, sounds or stored records; no change to sync, backup or session behaviour.
+  - **E24.7** Tests: the unit table (E24.2); `sync-and-profiles` asserts the synced squircle and phone ring and that the old line is gone; `sync-kept-reviews` asserts the review badge.
+
+- **Step 3 — implementation:**
+  - `source/core/backup-presentation.js`: `status(input)` returns `ring` (off, syncing, synced, pending, offline, signed-out, blocked, error), `slow`, `badge` (error, lock, update, warning, review, info), `count`, `label`, `primary`, `headline`, `detail`, `action` (Sync now or Try again) and `items` (each with tone, short and full text, and one action). Pure; no DOM.
+  - `source/core/backup-provider.js`: the sync view adds `turnWaits` (read-only).
+  - `source/app.html`:
+    - the sidebar name button, the phone circle and the profile panel avatar carry one SVG ring (squircle on the name, circle elsewhere) and a corner badge;
+    - `#sb-sync`, its `show-drive-sync` action, `driveSyncLabel` and `#profile-badge-dot` are removed;
+    - `renderSyncStatus` gathers the inputs and draws all three hosts and the panel, scheduled once per task;
+    - the panel gains Sync & backups (headline, next-sync detail, Sync now, item rows, Library → Data link) and `sync-status-action` maps each item to the feature's existing action;
+    - redraws on provider status, Device Folder status, kept versions, protection, storage health (which also carries the backup reminder), unsupported data, PWA update state, session mode, online/offline, visibility and a 30 s tick;
+    - Connect shows Connecting… from the click until sign-in settles.
+  - `source/styles/core.css`: ring states, travelling arc, settle glow, reduced motion, badges, amber mixed from the theme's warning colour so it stays distinct from the review yellow in every theme, and the panel section. The sidebar name gains 6 px of vertical room for the squircle; at the owner's request the squircle's line is finer (1.5 px) and its resting synced state slightly softer.
+  - Tests:
+    - new `tests/unit/backup/sync-status.mjs` (35 rows: 12 retired-text cases, 20 new cases, 3 priority cases);
+    - `sync-and-profiles` asserts the synced squircle and phone ring and that the old line is gone;
+    - `sync-kept-reviews` asserts the review badge and the phone circle's label;
+    - `session-plan-sync` asserts the indicator names the device running the session;
+    - `notification-lifecycle` passes the new redraw hook to its extracted `renderDeviceBackup`.
+- **Step 4 — objectives:**
+  - **E24.1 MET**: `status` as specified; priorities checked by the unit test's priority rows.
+  - **E24.2 MET**: every retired case and every new case is a unit row; the browser tests check synced, review and session-elsewhere in the real app.
+  - **E24.3 MET**: screenshots (scratch, not committed) of every ring and badge state on the squircle (dark and light) and the phone circle, and of the live squircle and ring through connect → syncing → synced → changes waiting → offline → signed out.
+  - **E24.4 MET**: panel screenshots for synced, changes waiting, offline and signed out at laptop and phone widths.
+  - **E24.5 MET**: the live probe saw each transition without a reload.
+  - **E24.6 MET**: no new notification producer, sound or stored record; sync, backup and session code paths unchanged apart from the read-only `turnWaits`.
+  - **E24.7 MET** as listed above.
+- **Step 5 — targeted QA (local, Node 22, Chromium 1194):**
+  - `architecture` category PASS (32); suite governance PASS.
+  - Targeted PASS: `unit/backup/sync-status`, `integration/backup/automatic-provider-backup`, `integration/backup/pending-provider-recovery`, `integration/backup/backup-reminder`, `integration/ui/notification-lifecycle`, `architecture/storage/backup-recovery-ux-contract`.
+  - After `node build/build.mjs`, browser tests one at a time, all PASS: `sync-and-profiles`, `sync-kept-reviews`, `session-plan-sync` (alone).
+  - Not run: the full `fast` and browser suites, real Google Drive, physical devices, the other skins beyond the default glass presentation in dark and light.
+
+### Entry 025 — Continue Here: instant feedback, and a sync that handed the session back (2026-11-01)
+
+- **Branch / source HEAD before:** `refactor/background-coordination` at `f849a96` (release `SDVB75F18`, above `main`'s `SDVB75F17`; no further bump in this pull request). Phase 2 of [STATUS-SYSTEM.md](STATUS-SYSTEM.md).
+- **Step 1 — audit and measurement:**
+  - `continueSessionHere` → `transferSessionOwnershipHere` → `suspendBackground('session-continue').settled` → `claimSessionOwnership` → strict local save and read-back → restore and Execute. Nothing on screen changes from the click until the timer runs; the only message is the Plan status line, which is not on screen in Execute. Errors also go only to the Plan status line. A second click while the first runs starts a second hand-off.
+  - Measured with a scratch two-browser probe (simulated Drive, 250 ms per request; not committed): click → timer running 2.8 s with nothing running, 3.0–3.3 s with a sync catch-up running. Stopping the running sync took 20–290 ms. The rest is the ownership claim: about 11 Drive requests one after another (scope check, upload marker, turn check, claim read, claim write, read-back, marker removal). **Refuted:** the plan's assumption that waiting for a running sync dominates. The claim's order is what keeps two devices from claiming at once, so it is not shortened in this pass.
+  - **Found (pre-existing, `source/core/backup.js` `sessionSettlement`):** Continue Here pressed while this device had not yet taken in the other device's newest upload. After the claim, the interrupted catch-up resumes and brings in that upload, saved *before* the claim, which still names the other device. The merge counts it as a fresh takeover (`yield`): this device stops, shows "Running on another device" and keeps its own progress for review. Drive's claim still names this device, so its uploads are refused (`REPOSITORY_SESSION_OWNERSHIP_AHEAD`, retried with backoff), and the other device freezes its timer on seeing the claim. Neither device can run or upload the session. Reproduced three times by the probe; the merge rule has no knowledge of the claim.
+- **Step 2 — objectives before edits:**
+  - **E25.1** Continue Here responds at once: every copy (Execute card, Plan strip) shows "Continuing…", disabled and `aria-busy`, from the click until the hand-off ends; a second click does nothing.
+  - **E25.2** The Execute card shows each step as a polite live line: checking today's session, pausing this device's sync, confirming with Google Drive, starting here. The Plan strip's state label shows the same step.
+  - **E25.3** A failure shows in the Execute card in plain words (Drive busy, not connected, changed on another device, the reason otherwise) and as an error toast; the line clears on the next attempt or when the session view changes.
+  - **E25.4** A sync never hands the session back because of a version saved before this device's takeover: while this device holds Drive's newest claim for today's session and runs it, an incoming session running elsewhere does not count as a takeover; the session stays here and everything else merges. The provider reads the claim only while a session runs here. A session the other device ended and saved is unchanged.
+  - **E25.5** Tests: `sync-shared-base` gains claim-aware devices (takeover after a stale view holds; a takeover after the newest claim still yields); `session-plan-sync` makes the PC upload newer progress before the phone's Continue Here, and asserts the busy label, the step text and that the phone keeps the session and uploads.
+  - **E25.6** No change to the claim protocol, the upload path, stored formats or notification producers beyond the one error toast.
+- **Step 3 — implementation:**
+  - `source/core/backup.js`: `sessionSettlement` takes `claimedHere`; with it, an incoming session running on another device is not a takeover, so a session running here holds. `restoreBackupAttemptWithOperation` passes it only for a sync (`options.sessionClaimedHere`). The ended-and-saved case is unchanged.
+  - `source/core/backup-provider.js`: `sessionClaimedHere` reads Drive's newest claim only when the local session runs on this device, and answers yes when that claim is owned here and applies to today's session; a failed read counts as no (logged). `syncRepositoryProvider` passes it to the sync. A Combine review (`bringInRepositoryProvider`) is unchanged.
+  - `source/app.html`:
+    - the Execute card gains a live step line (`#execute-session-progress`);
+    - `sessionHandoff` (declared with the early `let`s) holds the step or the failure; `setSessionHandoff` redraws through `updateSessionControls`, which shows "Continuing…", disabled and `aria-busy` on every Continue Here, the step in the Plan strip's label and the step or failure in the card;
+    - `continueSessionHere` ignores a second tap while busy, shows each step, and on failure keeps the plain-words reason in the card, the Plan status and one error toast (`session/session-continue`); `setSessionPanelMode` clears a failure once the session is no longer elsewhere or suspended;
+    - `transferSessionOwnershipHere` reports its steps through an optional `onStep` (the Plan apply takeover passes none) and gives Drive busy and not connected their own codes.
+  - `source/styles/core.css`: the step line (info colour), its error tone, a small spinner on a busy Continue Here (static with reduced motion), and up to 900 px the step replaces the card's longer text so the button stays inside the card.
+  - Tests:
+    - `sync-shared-base` gains claim-aware devices (session claims on the shared fake Drive) and a block: B claims from a stale view, A cannot upload over the claim, B's sync of A's earlier upload keeps B running with nothing kept for review and everything else merged, A then follows and keeps its own progress for review, and A taking it back with a newer claim still stops B;
+    - `session-plan-sync`: the PC uploads newer progress (and a note) before the phone's Continue Here; the test checks "Continuing…", disabled and busy on every copy, the "Confirming with Google Drive" step in the card and the Plan strip, a second tap claiming nothing more, the step line clearing, and after release the phone still running the session, uploading, and holding the PC's note;
+    - `cleer-integration` accepts extra options on the sync's `bringIn` call (shape check only).
+  - Docs: STATUS-SYSTEM.md (phases, phase 2 notes, noise rule), BACKUP-ENGINE.md (Active Session hold rule), NOTIFICATIONS.md (Continue Here producer).
+- **Step 4 — objectives:**
+  - **E25.1 MET**: the browser test sees "Continuing…", disabled and busy on every shown copy while the claim is held; a second tap adds no claim.
+  - **E25.2 MET**: the browser test sees the step in the card and the Plan strip; scratch screenshots (not committed) at phone and laptop width show the step line and spinner.
+  - **E25.3 MET** (probe, not a committed test): with Drive held busy by another operation, the card, the Plan status and the toast say "Google Drive is busy with another backup or restore. Try again in a moment.", and the button returns to Continue Here; screenshots at phone and laptop width. The other messages are read from source only.
+  - **E25.4 MET**: without the change, the new `sync-shared-base` block fails ("the session keeps running on B") and `session-plan-sync` times out at "the phone publishes its full state after ownership"; with it both pass. The scratch probe's catch-up-running case, stuck in three earlier runs, now finishes.
+  - **E25.5 MET** as listed in step 3.
+  - **E25.6 MET**: the claim protocol, upload path and stored formats are unchanged; the only new notification is the failure toast.
+  - Measured after the change (scratch probe, 250 ms a request): 2.8 s idle, 3.1 s with a catch-up running, 3.6 s with an upload running (stopping it took 0.56 s).
+- **Step 5 — targeted QA (local, Node 22, Chromium 1194):**
+  - Targeted PASS (8): `integration/backup/sync-shared-base`, `integration/backup/repository-checkpoint` (includes the session-claim regression helper), `integration/backup/backup-persistence`, `integration/backup/drive-security`, `integration/backup/automatic-provider-backup`, `integration/backup/backup-reminder`, `integration/ui/notification-lifecycle`, `unit/backup/sync-status`.
+  - `architecture` category: first run FAIL in `cleer-integration` (its shape check expected the exact `bringIn(candidate,{sync:true})`); after relaxing it, PASS (32). Suite governance PASS.
+  - After `node build/build.mjs`, browser tests one at a time, PASS: `restore-session-safety`, then `session-plan-sync` alone. A last provider tweak (the claim read sets up its Drive operation inside its own guard) followed; `sync-shared-base`, `repository-checkpoint`, `drive-security` and `architecture` were rerun, and `session-plan-sync` was rerun alone on that final build, all PASS (`restore-session-safety` was not rerun; it does not sync through Drive).
+  - Not run: the full `fast` and browser suites, real Google Drive, physical devices, skins other than the default glass dark presentation.
+
+### Entry 026 — Connect Google Drive: a progress card on every tab (2026-11-02)
+
+- **Branch / source HEAD before:** `refactor/background-coordination` at `7468e83` (release `SDVB75F18`; no further bump in this pull request). Phase 3 of [STATUS-SYSTEM.md](STATUS-SYSTEM.md).
+- **Step 1 — audit and measurement:**
+  - Every Connect and Sign in goes through `connectDriveForProfile` (profile panel, Library → Data, first start, the permission notice), which calls `BackupProviderRuntime.connect`; the indicator shows Connecting… until sign-in settles (Entry 024). `bindDriveLibrary` may ask whether to continue with a library already on Drive, or refuse with a toast.
+  - After sign-in nothing else is shown outside Library → Data. A scratch probe (two browsers, simulated Drive at 200 ms a request, 60 notes; not committed) recorded what the app knows each 100 ms:
+    - new library: connected → about 1 s later the upload starts (`external-backup` event: reading existing backups → preparing → uploading 0–4 of 4 with bytes → committing and verifying → finishing) → synced, 4 s in all;
+    - joining a library: the upload starts, stops with "Catching up with Google Drive first", then the catch-up runs (`external-sync`: reading versions → verifying → downloading with counts → taking in changes → finalizing), "Changes since", then the upload (same stages), synced at 8.9 s.
+  - So every stage and its counts already exist as presentation events; only Library → Data shows them, and `BackupPresentation.current` does not read `external-sync`.
+- **Step 2 — objectives before edits:**
+  - **E26.1** `backup-presentation` gains a pure `connectProgress(input)`: three steps (sign in, bring in what is on Drive, upload this device's data) each pending, active, done or failed; the live sentence; the running operation's message with its counts; a fraction for a progress bar when counts exist; and an ending: Synced (with kept versions to review when the sync kept any), needs password (another device's or this device's), needs review, needs app update, offline, retrying, stopped after retries, sign-in failed. One action at most, from the indicator's action set.
+  - **E26.2** The host shows it as a card at the top of the notification area (top right on a laptop, top on a phone), on every tab, from any Connect or Sign in until the first sync ends. Toasts stack below it. A close button hides it (the work goes on and the indicator still shows it); Synced hides it after 6 s; a library the person declines, or one refused, closes it without a card error (the existing toast explains).
+  - **E26.3** It redraws on provider status and on each progress event.
+  - **E26.4** Screen readers hear each step once, not each count; reduced motion stops the indeterminate bar.
+  - **E26.5** No change to connect, sync or upload behaviour and no new notification producer: the card reads existing state only.
+  - **E26.6** Tests: unit rows for `connectProgress`; `sync-and-profiles` connects the second device through the real Connect button and checks the card's steps, its Synced ending and that it hides.
+- **Step 3 — implementation:**
+  - `source/core/backup-presentation.js`: `connectProgress(input)` as in E26.1. After a catch-up the remaining step is the upload; an operation's opening line ("Syncing with Google Drive…") is not repeated under the status; a sync that ended before this connect started does not count as its ending.
+  - `source/app.html`:
+    - the card (`#drive-connect-card`) is the first child of `#sd-toast-region`, so toasts stack below it; its sentence is a `role="status"` line and the rest of the card is `aria-live="off"`;
+    - `connectDriveForProfile` starts it and records sign-in success or failure (the provider's "Connection failed" text without its prefix);
+    - `renderDriveConnectCard` reads `locationStatus`, the running `external-sync`/`backup-operation`/`external-backup` event and the kept-version count, notes when a catch-up or an upload ran, draws the model, and closes it 6 s after Synced; it redraws with the indicator and on every presentation event (subscribed beside the indicator's other wiring, not inside the Library row's subscription, which a test runs on its own);
+    - `bindDriveLibrary`'s refuse and Not now paths close it; `close-drive-connect` hides it; its button uses the indicator's `sync-status-action`.
+  - `source/styles/core.css`: the card in the toasts' material, tone borders, step marks (spinner, ✓, ×), a determinate bar or a sweep, reduced motion stops both animations.
+  - Tests: `sync-status` gains 20 card rows; `sync-and-profiles` connects B with the Connect button (from the Plan tab) and checks the card is in the notification area, starts at sign-in, shows the catch-up step and the upload step, ends "Synced at …" with all three steps done, and closes on its own.
+  - Docs: STATUS-SYSTEM.md (phase 3), NOTIFICATIONS.md (card row), PROGRAMMES.md.
+- **Step 4 — objectives:**
+  - **E26.1 MET**: unit rows cover each step state and every ending.
+  - **E26.2 MET**: the browser test sees the card in the notification area from the Plan tab, through Synced, then closed; scratch screenshots (not committed) at laptop and phone width during checking, bringing in, uploading and Synced, and after a sign-in that failed (served by a failing sign-in stub), with toasts above nothing and the card first.
+  - **E26.3 MET**: the browser test records the catch-up and upload steps as they happen.
+  - **E26.4 MET** by construction (one live sentence; counts outside it; reduced-motion rules); not checked with a screen reader.
+  - **E26.5 MET**: no change to connect, sync or upload code paths; the card adds no coordinator event.
+  - **E26.6 MET** as listed in step 3.
+- **Step 5 — targeted QA (local, Node 22, Chromium 1194):**
+  - First targeted run FAIL: `notification-lifecycle` runs the Library row's `BackupPresentation.subscribe` block on its own and the card's redraw inside it was undefined there; the card now subscribes separately. Rerun PASS: `unit/backup/sync-status`, `integration/ui/notification-lifecycle`, `integration/backup/backup-reminder`.
+  - `architecture` category PASS (32); suite governance PASS.
+  - After `node build/build.mjs`, browser tests one at a time, PASS: `interactions` (before the subscription move), then `sync-and-profiles` on the final build.
+  - Not run: the full suites, real Google Drive and its real sign-in window, physical devices, skins other than the default glass dark presentation, a screen reader.
+
+### Entry 027 — Status phase 4: hand-off row, progress counts, pop-up rules (2026-11-02)
+
+- **Branch / source HEAD before:** `refactor/background-coordination` at `eb8601d` (release `SDVB75F18`; no further bump in this pull request). Phase 4 of [STATUS-SYSTEM.md](STATUS-SYSTEM.md).
+- **Step 1 — audit:**
+  - **Hand-off ready.** When a sync brings in a session suspended on another device, `restoreSessionStateThroughLifecycle` sets the panel mode to suspended and pops up "Today’s session is ready" with Continue here, which runs `continueSessionHere` from whatever tab is open; its steps (Entry 025) show only in the Execute card and the Plan strip. The status model has a row for a session running elsewhere (`session-elsewhere`, Go to Execute) but none for one waiting here, so once the pop-up closes only the Execute card says so.
+  - **Progress counts.** While a catch-up or upload runs, the panel headline says "Syncing · bringing in changes…" or "Syncing · uploading changes…" and nothing more; the counts (`external-sync`/`external-backup` progress) appear only in the Connect card (Entry 026) and Library → Data.
+  - **Reviews.** A sync that needs a decision pops up once (`presentation.notice('sync-review')`, deduplicated until resolved). Versions a sync keeps for review (`AppData.pendingReviews`) raise no pop-up at all: only the badge and Library → Data change. When this device yields a session, its own pop-up ("Session continued on another device") already says what was kept.
+  - **Red.** The ring turns red only once retries ran out (Entry 024). Before that a failed background sync or upload is inline only (`foreground:false`, not announced). Two places disagree: the Connect card turns red on the first failure while it is still retrying, and the pop-up that fires exactly when retries run out (`retry-exhausted`) is amber.
+  - **During a study session.** Nothing holds back background pop-ups while the timer runs. The background ones are: sign-in expired, keeps failing (retries ran out), backup password set elsewhere, newer version needs an update, sync review, Device Folder permission, data from a newer version, storage reset; the new kept-versions pop-up would join them. All but the sync review and kept versions block syncing or saving until the person acts.
+- **Step 2 — objectives before edits:**
+  - **E27.1** The panel lists a session suspended on another device as a row ("Today’s session is ready … Continue here"). Its button and the existing pop-up's Continue here open Execute first, so the Continue Here steps are visible. No badge: it is an offer, not a problem.
+  - **E27.2** While a catch-up or upload runs, the panel's detail line shows its stage and counts (the Connect card's text, for example "Downloading backup data… · 2 of 5 complete · 150 KB of 300 KB"). Ring, badge and label unchanged.
+  - **E27.3** New kept versions pop up once ("N versions kept for review", Review). The host remembers the reviews it has seen since start-up (those present at start-up do not pop up). Not while the Connect card is showing (it reports them), and not when every new one is the session this device just yielded (that pop-up said so). The sync review pop-up already shows once per review: unchanged.
+  - **E27.4** Red only after retries run out: the Connect card is amber while a failed sync will retry and red once retries ran out; the `retry-exhausted` pop-up is red.
+  - **E27.5** While this device's study timer runs, background pop-ups that do not block anything (sync review, kept versions) wait and show when the timer stops (pause, block end, session end) for their usual time; one resolved meanwhile never shows. Blocking ones and anything answering the person's own action still show at once. The notice coordinator holds them (`setStudying`, event flag `waitWhileStudying`); the host sets it from the timer mode.
+  - **E27.6** No change to sync, upload, review or session behaviour, only to what is shown and when.
+  - **E27.7** Tests: unit rows for the hand-off row, the progress detail and the card's retrying tone; a coordinator unit test for the study hold; `sync-kept-reviews` checks the kept pop-up appears once.
+- **Step 3 — implementation:**
+  - `source/core/backup-presentation.js`: `status` takes `sessionReady` (a `session-ready` row, info tone, no badge, action `continue-session`) and `operation` (while syncing, `detail` is its stage and counts via a shared `operationText`, also used by `connectProgress`). `connectProgress` is amber (`attention`) with the step marked `waiting` while a failed sync retries or Drive is signed out; red only once retries ran out or sign-in fails. `notice` takes `{error, waitWhileStudying}`.
+  - `source/core/notice-coordinator.js`: `setStudying(boolean)`; events carry `waitWhileStudying`; while studying such events are neither visible nor timed, and come back with the time they had left.
+  - `source/core/backup-provider.js`: the `retry-exhausted` notice is red; the `sync-review` notice waits while studying.
+  - `source/app.html`:
+    - `syncStatusInput` passes `sessionReady` (parked here and from another device) and the running Drive operation (`driveRunningOperation`, renamed from `driveConnectOperation`, now shared);
+    - `continueSessionOnExecute` opens Execute, then runs Continue Here; used by the panel row and the hand-off pop-up; `continueSessionHere` resolves the hand-off pop-up as it starts;
+    - `KeptVersions` remembers review ids seen since start-up and raises `sync/kept-new` (warning, 12 s, Review, waits while studying) for new ones, skipped while the Connect card shows or when every new one is the session yielded in the last minute (`sessionYieldedAt`); resolved when none are left;
+    - `syncStudyQuiet` sets the coordinator's hold from the timer's `modeChanged` effect (running only; a pause, block end or session end releases it);
+    - the presentation subscription now redraws the whole status (`scheduleSyncStatus`), so the panel's counts move with each progress event; the Connect card redraws with it.
+  - `source/styles/core.css`: the `waiting` step in amber.
+  - Tests: `sync-status` (5 phase 4 rows; card rows for retrying and signed out now amber with a `waiting` step); `notification-lifecycle` (study hold: blocking and own results shown, held ones shown after with their full time, resolved meanwhile never shown, on-screen ones step aside and resume); `session-draft-edit` (with the timer running a waiting pop-up is not shown and a blocking one is, pausing shows it); `sync-kept-reviews` (B pops up "Kept for review" once with Review, not again on later refreshes, and clears it once resolved).
+  - Found on the way: `integration/pwa/application-update-safety` had failed since Entry 024 because the sliced `renderPwaUpdateStatus` now calls `scheduleSyncStatus`; its two sandboxes gain a stub. (Entry 024–026 ran targeted tests only and did not include it.)
+  - Docs: STATUS-SYSTEM.md (section 4 actions, section 6, phase 4), NOTIFICATIONS.md (Continue Here, kept versions, study hold rows), PROGRAMMES.md.
+- **Step 4 — objectives:**
+  - **E27.1 MET**: unit rows; a scratch probe (two browsers, simulated Drive at 200 ms a request, not committed) suspends a session on A and shows B's pop-up, then the panel row (laptop and phone screenshots), whose Continue here opens Execute with "Confirming with Google Drive…" and ends with the timer running on B.
+  - **E27.2 MET**: unit rows; the same probe shows "Downloading backup data from Google Drive… · 0 of 4 complete · 0 KB of 3 KB" in B's open panel during its first catch-up.
+  - **E27.3 MET**: `sync-kept-reviews`; skips are by construction (Connect card, yielded session), not separately tested.
+  - **E27.4 MET**: unit rows (card) and `notification-lifecycle` (the `retry-exhausted` notice is `error`).
+  - **E27.5 MET**: `notification-lifecycle` and `session-draft-edit`.
+  - **E27.6 MET**: sync, upload, review and session code paths unchanged apart from the notice options; `session-plan-sync` passes.
+  - **E27.7 MET** as listed in step 3.
+- **Step 5 — targeted QA (local, Node 22, Chromium 1194):**
+  - Targeted PASS: `unit/backup/sync-status`, `integration/ui/notification-lifecycle`, `integration/backup/automatic-provider-backup`, `integration/backup/backup-reminder` and 13 tests that slice `app.html` or touch the changed code; `application-update-safety` FAIL on first run (above), PASS after the stub.
+  - Because that failure had slipped through targeted runs, the fast Node categories ran once: `unit` PASS (24), `integration` PASS (96; a first run stopped only because docs were edited while it ran), `architecture` PASS (32), suite governance PASS.
+  - After `node build/build.mjs`, browser tests one at a time, PASS: `session-draft-edit`, `sync-kept-reviews`, `sync-and-profiles`; then, after the hand-off pop-up change and a rebuild, `session-plan-sync` alone.
+  - Not run: the browser suites as a whole, real Google Drive, physical devices, skins other than the default glass dark presentation, a screen reader.
+
+### Entry 028 — Waiting pop-ups show during support and fixed blocks (2026-11-02)
+
+- **Branch / source HEAD before:** `refactor/background-coordination` at `55a3616`. Owner's correction to Entry 027 (E27.5): pop-ups that block nothing may show during support and fixed blocks, not only at a pause or the session's end.
+- **Step 1 — audit:** `syncStudyQuiet` holds whenever `TimerState.mode` is running, which includes support blocks (trackable, timer running); fixed blocks already release it (mode `ready` at the fixed boundary). It runs only from the timer's `modeChanged` effect; moving from one running block to the next goes through the host's `setCurrentTask` and may not change the mode.
+- **Step 2 — objectives before edits:**
+  - **E28.1** The hold applies only while the timer runs on a work block (`isWorkBlock`); support blocks, fixed blocks, pauses and the session's end release it.
+  - **E28.2** It is re-evaluated when the current block changes, not only when the mode changes.
+  - **E28.3** Tests: `session-draft-edit` moves the running timer from a work block to a support block and sees the waiting pop-up appear.
+  - Then the full QA the owner asked for.
+- **Step 3 — implementation:** `syncStudyQuiet` holds only when the mode is running and `isWorkBlock(TASKS[TimerState.currentIndex])`; the host's `setCurrentTask` calls it too. `session-draft-edit`: its second block is now a support block; after the pause check the timer resumes on the work block (a new waiting pop-up stays hidden), then Finish moves it to the support block (mode still running) and the pop-up shows. Docs: STATUS-SYSTEM.md section 6 and phase 4, NOTIFICATIONS.md.
+- **Step 4 — objectives:** **E28.1 MET** and **E28.2 MET** by `session-draft-edit` (the support-block step fails under the Entry 027 rule, where a running timer held regardless of block). **E28.3 MET.**
+- **Step 5 — full QA at `66f9295` (local, Node 22, npm 10.9.4, Chromium 1194), as the owner asked:**
+  - `npm run` refuses every script here (`EBADDEVENGINES`: `devEngines` requires npm 12.2.1), so each script's commands ran directly with node, in the same order.
+  - Fast suite PASS (152: unit, integration, architecture, governance).
+  - Release certification: 15 of 16 steps PASS (syntax, deployment contract, rich-text codecs, binary backup capacity, search performance, rich-text bundle, build, generated syntax, build verification, minified staging, minified release, performance budgets, compression). Not run: dependency assurance, which shells out to `npm audit` and so hits the same npm refusal; the dependency tree is unchanged on this branch since Entry 024.
+  - Browser release tier PASS: 48 tests, two at a time, `alone` tests by themselves, none quarantined.
+  - The repository was unchanged after the run.
+
+### Entry 029 — Notifications as a stack, kinds, Recent list; sounds for every occasion (2026-11-02)
+
+- **Branch / source HEAD before:** `refactor/background-coordination` at `4b0f4da` (release `SDVB75F18`; no further bump). The owner approved the audit's design (kinds, Mac-style stack, Recent list, sounds) and asked for N1–N8 and S1–S6 in full.
+- **Step 1 — audit (current source):**
+  - **N1 Kinds.** Fade time, place, sound and waiting come from unrelated fields: `persistent`/`lifecycle` (fade), `severity` (order), `occurrenceCue` (sound, only for `failed`, explicit cues and a confirmation list), `waitWhileStudying` (waiting). Background notices (`backup-presentation.notice`) are amber 12 s pop-ups even when they block syncing (sign-in expired, password, newer version, Device Folder permission), so they fade while still true; red "keeps failing" fades too and is silent (`lifecycle:'succeeded'`, no cue).
+  - **N2 Order.** `visibleEvents` sorts by severity, then oldest first; `interactions.renderToasts` appends new cards at the end, so the DOM keeps arrival order whatever the sort says. A newer result sits below an older one.
+  - **N3 Hidden queue.** `MAX_TOASTS=4`: a fifth pop-up waits unseen, untimed, and shows later (possibly long after the moment), up to `QUEUE_LIMIT=32`.
+  - **N4 History.** Once a pop-up fades or is closed there is nowhere to see it again; the profile indicator has no count of missed news.
+  - **N5 Phone.** `.sd-toast-region` has no height limit; four long cards (the storage-reset decision alone is 6–8 lines) run off a phone screen.
+  - **N6 Buttons.** Pressing a pop-up's button leaves the pop-up open (only producers that resolve it close it).
+  - **N7 Dismissal.** Only × per card: no Clear all, no Escape, no swipe.
+  - **N8 Connect card.** The Connect Google Drive card sits in the same region but outside the coordinator: not counted, not ordered, not cleared with the rest.
+  - **Sounds.** Thirteen Quiet Wood cues (`audio-engine.js`). Missing: **S1** a fixed block that stops the timer (`timer-engine.stopTimerForFixedBoundary`) clears the cue operation and makes no sound and no device notification; **S2** a session that moves to another device stops the timer with a silent info card (`yieldSessionToOtherDevice`), and Continue Here makes no sound when the timer starts; **S3** the red "keeps failing" pop-up is silent. Beyond the three listed in the audit: **S4** blocking problems (sign-in expired, password, app update needed, Device Folder permission, data from a newer version) are silent; **S5** the unsaved-work and storage banners make no sound (only a local-saving failure does); **S6** background news (sync review, kept versions, hand-off ready, storage restored) is silent, so with the pop-up area out of sight it goes unnoticed.
+  - Found on the way, out of scope: `study-director.backup-operation-diagnostics.v1` is written to sessionStorage (app.html, operation diagnostics) without being registered in `contracts/data-architecture.mjs`. Recorded, not changed here.
+- **Step 2 — objectives before edits:**
+  - **E29.1 (N1) Kinds.** Every pop-up has a `tier`: `result` (answers the person's own action), `news` (background, nothing blocked), `blocking` (something stops until the person acts), `critical` (data at risk). Default: foreground → result; background success/info → news; background warning/error → blocking; producers set it where the default is wrong. The tier decides: fade (result: success/info 4.2 s, warning 7 s, failed stays; news 12 s; blocking stays; critical stays and cannot be closed), place (critical, then blocking and red, pinned at the top), sound (E29.11–E29.14) and waiting (news waits while a work block runs; `waitWhileStudying` retires).
+  - **E29.2 (N2) Order.** Pinned cards first (critical, then blocking/red, newest first), then the rest newest first. The cards on screen follow that order; an update never moves a card.
+  - **E29.3 (N3) No hidden queue.** Every pop-up is in the stack at once and its time runs whether it is in front or behind. At most 32; beyond that the oldest that would fade anyway go first.
+  - **E29.4 (N4) Recent.** The profile panel lists today's pop-ups and banners, newest first, at most 20: time, title, message, and the button while the pop-up is still live; Clear empties it. It survives a reload in the same window (sessionStorage `studyDirector.notifications.v1`, registered in the data architecture, tied to the profile and to today) and is never uploaded or backed up. News that faded without being touched since the panel was last opened shows as a blue badge with its count ("N new notifications" in the label); opening the panel marks them seen.
+  - **E29.5 (N5) Phone height.** Collapsed, a phone shows at most one pinned card, the front card and two peeking edges, with long messages clamped to four lines (six on a laptop); expanded, the column scrolls within the screen.
+  - **E29.6 (N6)** Pressing a pop-up's button closes it, except critical pop-ups and decisions that close themselves once settled.
+  - **E29.7 (N7) Stack.** Collapsed: pinned cards (two on a laptop, one on a phone), the newest of the rest in full with up to two cards peeking behind it, and "+N more"; Clear all once there are two or more cards. A click on a card or "+N more" expands the stack into one scrolling column over a see-through backdrop with Show less and Clear all; Escape, a click outside or Show less collapses it. Times stop while it is expanded. Clear all closes everything that can be closed (the Connect card too). A sideways swipe (touch or pen, 80 px) closes a card. All cards stay in the page for screen readers; cards that are not in full view are announced through one polite live line. Reduced motion: no slide or scale.
+  - **E29.8 (N8)** The Connect card is a card of the stack: first after the pinned ones, counted in "+N more", closed by Clear all; its × works as before.
+  - **E29.9 (S1)** A fixed block that stops the timer plays a new cue, **settle** (D5–A4–D4 falling, the mirror of Begin), and sends a device notification while the app is in the background. Not when the person was away (they see the dialog on return).
+  - **E29.10 (S2)** A session that continues on another device plays a new cue, **hand-off** (B4–D5–A4, ending open), and sends a device notification in the background; it is news (12 s, Recent). The device that continues plays Resume when its timer starts (Continue Here, Restore Session).
+  - **E29.11 (S3)** Red blocking or critical pop-ups play Attention once per occurrence ("keeps failing", browser data cleared).
+  - **E29.12 (S4)** Amber blocking pop-ups play a new cue, **needs you** (A4 A4, two soft knocks, quieter playback), once per occurrence, also during a work block; Minimal plays it.
+  - **E29.13 (S5)** Banners: unsaved work → Attention; storage and backup reminders → needs you; once per new line, again only after it clears and returns. Local saving failed keeps its existing Attention.
+  - **E29.14 (S6)** News plays a new cue, **chime** (A4–F#5, a light sixth, quieter playback), when it first shows (after a work block if it waited), Full mode only, at most once every 4 s.
+  - **E29.15** The new phrases are appended after the thirteen (whose seeds and sound stay identical), use the same synthesis and loudness, and stay under 1.6 s; per-cue playback level lives in the engine. `sound-synthesis` gains reference rows.
+  - **E29.16** No feature changes what it does; only how its pop-ups look, order, last and sound.
+  - **E29.17** Tests: coordinator (tiers, order, no queue, Recent and unseen, sounds per tier, banners, news wait), interactions (stack, expand, Clear all, Escape, outside click, swipe, action closes, Connect card), sync-status (unseen badge), sound-synthesis (new cues), data architecture (new key), a browser test on a laptop and a phone viewport, and the existing browser tests that touch pop-ups.
+- **Step 3 — implementation:**
+  - `source/core/notice-coordinator.js`: `tier` on every event (default from foreground and severity; `waitWhileStudying` retired); critical cannot be closed; blocking, critical, red, running and failed stay; news 12 s. `visibleEvents` orders by rank (critical, pinned, rest) then newest first, with no slice and no queue; an update keeps its sequence. `STACK_LIMIT=32` drops the oldest fading pop-ups first. `dismissAll`, `setPaused(reason,value)` (expanded stack), `dismissEvent(…,'acted')`. Sounds: `occurrenceCue` gives blocking Needs you and red/critical Attention once per occurrence (`tierSounds`, cleared when the pop-up is raised again); news Chime when first shown, Full only, at most once every 4 s; `playCue` shared with banners. Banners: safety → Attention, storage → Needs you, once per new line, again after the banner clears. Recent: today's entries (at most 20) with text, outcome and `seen`; `actionLabel` while the pop-up is live; `subscribeRecent`, `markRecentSeen`, `clearRecent`, `restoreRecent` (drops other days, invalid entries and duplicates; open entries become ended), `runRecentAction`; unseen = news that expired untouched.
+  - `source/core/interactions.js`: one stack renderer over the coordinator's cards and `[data-toast-card]` cards (the Connect card). Collapsed places (`full`, `front`, `behind-1/2`, `hidden`) and grid rows; cards keep the stack's order in the page by moving only those out of place; front height tracked with a ResizeObserver for the peeking edges; "+N more"/Show less (`aria-expanded`) and Clear all; expand with a see-through backdrop, focus kept, times stopped; Escape (capture), click outside, swipe (touch or pen, 80 px; critical springs back); a card's button closes it first (not critical or non-dismissible); arrivals behind or hidden read once through one polite live line; phone layout from `(max-width: 560px)`.
+  - `source/core/audio-engine.js`: four phrases appended after the thirteen (settle, handoff, knock, chime) with a per-phrase playback level (`LEVELS`: knock 0.75, chime 0.6); the thirteen are unchanged.
+  - `source/core/timer-engine.js`: `stopTimerForFixedBoundary` sends `fixed-start` (system) unless the person was away.
+  - `source/core/backup-presentation.js` / `backup-provider.js`: background notices default to blocking, the sync review is news, the "file would not open" condition is a result; the status model counts unseen news on the `info` badge and in the label.
+  - `source/app.html`: producer kinds and cues (storage-clear decision critical, restored news, unsupported data blocking, kept versions, hand-off ready, startup hint news; session moved Hand-off with a device notification; Continue Here and Restore Session Resume); Connect card marked as a stack card with `data-card-close`; Recent section in the profile panel (`NotificationRecent`: restore/save in sessionStorage, render, Recent's button, Clear); badge count for unseen news.
+  - `source/styles/core.css`: stack places, peeks, clamps (6 lines, 4 on a phone), expanded column and backdrop, bar, critical red, phone bottom offset, reduced motion; Recent list; `info` badge count.
+  - `contracts/data-architecture.mjs`: `SESSION_STORAGE_KEYS.notifications` and its sessionStorage surface (operational, this window, today only, never uploaded, backed up or exported).
+- **Owner correction during the pass:** "don't shape the system according to tests." Two guards had been added only so a fake-DOM integration test could run (`typeof` checks in the stack renderer and an optional `delivery?.audio`). Both were removed; the renderer is checked in a real browser (`notification-stack`) instead of the fake DOM, and tests were changed to follow the app wherever they disagreed.
+- **Found and fixed on the way:**
+  - A Recent entry could re-add itself after being trimmed or cleared, because a later update of the same pop-up wrote it again. Entries are now created once per occurrence (`recorded`, `created`), and later updates only change existing ones.
+  - In a real browser the cards behind the front one opened extra grid columns, so the stack rendered side by side. All cards now share one column (`.sd-toast-region>*{grid-column:1}`).
+- **Step 4 — objective recheck (source):**
+  - E29.1 MET — `normalize` derives the kind and its fade/persistence; producers set it where the default is wrong; no `waitWhileStudying` remains in source.
+  - E29.2 MET — `visibleEvents` rank then descending sequence; `layoutStack` moves cards into that order; `storeEvent` keeps the sequence on update.
+  - E29.3 MET — no slice or queue; `STACK_LIMIT` 32, oldest fading first; clocks run behind the front card.
+  - E29.4 MET — Recent in the profile panel, 20 entries, today only, sessionStorage tied to the profile, Clear; unseen count on the `info` badge and label; opening the panel or pointing at a card marks news seen.
+  - E29.5 MET — phone: one pinned card, clamp 4 lines, expanded column within the screen above the bottom bar.
+  - E29.6 MET — action closes first, except critical and non-dismissible decisions (`interactions` and `runRecentAction`).
+  - E29.7 MET, with one precision: cards behind or hidden are hidden from screen readers as from sight; each one that arrives there is read once through the polite live line, and "+N more" (`aria-expanded`) opens the full list.
+  - E29.8 MET — the Connect card is first after the pinned cards, counted, closed by Clear all.
+  - E29.9 MET — Settle, device notification in the background, silent when away.
+  - E29.10 MET — Hand-off on the device that yields (device notification in the background; news); Resume on the device that continues (Continue Here auto-restore, Restore Session).
+  - E29.11 MET — red blocking and critical: Attention once per occurrence.
+  - E29.12 MET — amber blocking: Needs you once per occurrence, Minimal included, also during a work block.
+  - E29.13 MET — unsaved work and startup failure Attention; storage (with backup reminders) Needs you; once per new line; Local saving failed keeps its event's Attention.
+  - E29.14 MET — Chime when news first shows (after the work block if it waited), Full only, 4 s apart.
+  - E29.15 MET — phrases appended, the thirteen unchanged; lengths 1.47 s, 1.24 s, 0.73 s, 1.05 s at 22.05 kHz; peaks 0.24–0.27; `LEVELS` in the engine; reference rows in `sound-synthesis`.
+  - E29.16 MET — no feature's work changed; only kinds, cues and presentation.
+  - E29.17 MET — see step 5. The stack checks run in a real browser rather than the fake DOM (owner correction above).
+- **Step 5 — targeted QA (run at the working tree on `4b0f4da`):**
+  - Build: passed (`node build/build.mjs`).
+  - Categories: unit 24/24, architecture 32/32, integration 96/96 PASS.
+  - Browser tests, each run alone: `notification-stack` (new; laptop 1280×800 and phone 390×844: collapsed places and 8/16 px peeks, expand with times stopped, Escape, click outside, a card's button and × close it, Connect card counted and cleared, critical pinned and kept by Clear all, Recent and badge, Recent after a reload, phone clamp, column above the bottom bar, swipe closes, critical springs back), `interactions`, `app-sounds`, `notes-management`, `session-draft-edit`, `sync-kept-reviews`, `sync-and-profiles`, `site-data-clear` — all PASS.
+  - Tests changed to follow the app: `notification-stack` first measured the peeks mid-transition (now waits with `settleMotion`) and forced the Connect card visible, which the app rightly hid again (now the real Connect button, with a stand-in Google script whose window the person closes, so nothing reaches Google); `app-sounds` counted 13 cues (now the engine's own list); `site-data-clear` expected the restored pop-up during a work block (now: held while the block runs, shown at a pause); `session-draft-edit` used `waitWhileStudying` (now `tier:'news'` and `tier:'blocking'`); `study-cue-lifecycle` gained the fixed-block check (Settle in the foreground, a device notification in the background, silence when away).
+  - Not run: the full browser suite, other skins and themes, real devices, a screen reader, and listening on phone speakers. The out-of-scope sessionStorage key from step 1 is still unregistered.
+
+### Entry 030 — Profile panel refinement; pop-ups that open where they point (2026-11-02)
+
+- **Branch / source HEAD before:** `refactor/background-coordination` at `9cfd32c` (release `SDVB75F18`, already above `main`'s `SDVB75F17`; no bump). The owner approved the profile panel proposal (rename in the header; Recent at the bottom showing three) and asked that pop-ups be clickable, with Kept for review opening the review directly.
+- **Step 1 — audit (current source and screenshots at 1280×860 and 390×844):**
+  - **P1 Frame.** The whole dialog scrolls (`.interaction-dialog` overflow), so with three Recent entries Done is below the screen on both a laptop and a phone.
+  - **P2 Name three times.** Header title, the Name field (`#profile-name-input`) and the profile list.
+  - **P3 Inverted hierarchy.** Row labels ("Google Drive") are smaller and greyer than their values ("Not connected").
+  - **P4 Four button sizes.** Row buttons 42 px tall with a 96 px minimum width, a full-width ghost "+ Add profile" on a phone, a large Done, and underlined text links (Clear, "Details in Library → Data").
+  - **P5 Three section styles.** Sync & backups is a boxed card with its title inside; Recent and Profiles have titles outside and loose content; Name/Drive/Password is a box with no title.
+  - **P6 Split Drive story.** The Sync headline says "Connect Google Drive", but Connect is in a separate box further down, and the backup password sits apart from backups.
+  - **P7 Order.** Recent (up to 20 entries) sits between the status and the settings and pushes them down.
+  - **P8 Phone header.** A 52 px avatar plus a "Profile" eyebrow over the name.
+  - **C1 Cards are not clickable.** Clicking a pop-up only expands the stack (`interactions.onRegionClick`); its destination is reachable only through its button. Every background pop-up already has a destination button (`backup-presentation` notices → `showBackupPresentation`; Kept for review → `KeptVersions.review` → the review dialog; unsupported data → update; no-local-data hint → restore). Two buttons change data or ownership (library Undo, hand-off Continue here); the storage-clear decision has two choices.
+  - **C2 Session moved has no button.** "Session continued on another device" says this device's record is kept for review but offers no way there.
+  - **C3 Recent rows.** Only the small button runs a live pop-up's action.
+- **Step 2 — objectives before edits:**
+  - **E30.1 (P1)** Header and footer stay; only the middle scrolls; Done is always visible.
+  - **E30.2 (P2, P8)** Header: avatar (44 px, 40 px on a phone) with its sync ring, the name as a button that renames in place (Enter or leaving saves, Escape keeps the old name, the same rules as a note title), and one line under it with the Google account when there is one. The Name field and the "Profile" eyebrow go (the dialog is still named "Profile" for screen readers). Saving uses the existing name path.
+  - **E30.3 (P5)** One section style: a small heading, then one box of rows with thin dividers; no boxes inside boxes.
+  - **E30.4 (P6)** Sync & backups holds the status (headline, detail, its one main button, any items), then Google Drive and Backup password rows, then "Backup details" as a row with an arrow to Library → Data.
+  - **E30.5 (P3, P4)** Row: label above (primary colour, normal weight), value below (smaller, secondary). One compact button for row actions (32 px; 36 px on touch screens; as wide as its text). One main button per section at most. Text links become buttons or rows.
+  - **E30.6** Profiles: each profile a row (avatar, name and detail, Switch or "This profile"); "Add profile" is the last row; the device name is a caption under the box.
+  - **E30.7 (P7)** Recent is last: heading with a compact Clear, the three newest, then "Show all (N)" / "Show fewer"; empty is one quiet line.
+  - **E30.8 (C1)** A pop-up whose button only opens something can be clicked anywhere on the card to do the same (and closes, as the button does). Producers mark such buttons `opens:true`: every `backup-presentation` notice and condition, Kept for review, unsupported data, the no-local-data hint, and the session-moved Review (E30.9). Not: Undo, Continue here, or a card with two choices. A card behind the front one, or one without such a button, still expands the stack; a swipe or a text selection never clicks. Such cards show a pointer and lift slightly on hover; the button stays for keyboards and screen readers.
+  - **E30.9 (C2)** "Session continued on another device" gets Review, which opens the review of what was kept.
+  - **E30.10 (C3)** A Recent row whose pop-up is live and opens something can be clicked anywhere.
+  - **E30.11** No feature changes what it does: same actions, status logic, Recent entries and saving.
+  - **E30.12** Tests: the stack browser test gains card clicks (opening card runs and closes; Undo-like card expands instead); a new profile panel browser check (Done in view with Recent full on a laptop and a phone, rename in place, Escape keeps the name, Show all); the coordinator keeps `opens`; affected browser tests rerun.
+- **Step 3 — implementation:**
+  - `source/core/notice-coordinator.js`: an action keeps `opens` (only `true` counts; part of the signature); Recent rows carry `actionOpens` while what they point to still stands.
+  - `source/core/interactions.js`: `openCard` — a card in full view (front, pinned or in the open list) marked `data-opens` presses its button when clicked anywhere; a text selection inside it is not a click; a click within 400 ms of a swipe is ignored; other cards keep expanding the stack. A closing card is made `inert`, so its button cannot be pressed twice during the fade.
+  - Producers: every `backup-presentation` action (via the host's action factory), Kept for review, both unsupported-data updates and the no-local-data hint are `opens:true`; "Session continued on another device" gains Review (`KeptVersions.review`).
+  - `source/app.html` panel: new markup with the same element ids (status, Drive, password, profile list, Recent); the name is a button that swaps to `#profile-name-input` (`startProfileRename`, `finishProfileRename`); Done alone in the footer; Recent rows that open are clickable; `NotificationRecent` shows three with Show all / Show fewer (`recent-more`, reset when the panel closes). Row and status buttons use `.profile-act`.
+  - `source/styles/core.css`: the panel's block rewritten — flex frame with a scrolling body, header avatar 44/40 px, rename button with a pencil on hover (always faint on touch), one section and row system, `.profile-act` compact button (32 px; 36 px on coarse pointers), dividers between rows, Recent and profile rows, quiet Clear, Show all row; old `.profile-rows`, `.profile-row-actions`, `.profile-name-row`, `.profile-status-link` and `.profile-device` rules removed. Opening cards get a pointer and a 1 px lift on hover (none with reduced motion).
+- **Found and fixed on the way:** Enter in the profile Name field never saved and threw `e.currentTarget.blur is not a function`, because key handlers are delegated from the document. The handler now uses the field (`e.target`); the new browser test covers Enter, Escape and a reload. No other delegated key handler used `currentTarget`.
+- **Step 4 — objective recheck (source):**
+  - E30.1 MET — `.profile-dialog[open]` is a flex column, the body scrolls; Done in view on both viewports with Recent full and scrolled (browser test).
+  - E30.2 MET — avatar 44/40 px with ring; name button and in-place input; Enter/blur save, Escape keeps and leaves the panel open; subtitle shows the account only when there is one; the dialog name still starts "Profile:" for screen readers (`sr-only`).
+  - E30.3 MET — every section is heading + `.profile-group`; no nested boxes except the status "needs you" items, which keep their tone borders inside the status block by design.
+  - E30.4 MET — status block, Drive and password rows, Backup details row with arrow, all in one box.
+  - E30.5 MET — `.profile-row-label` (primary, 500, body size) over `.profile-row-value` (secondary, caption); `.profile-act` only for row actions; links replaced by rows or buttons.
+  - E30.6 MET — profile rows, Add profile row, device caption.
+  - E30.7 MET — Recent last, three shown, Show all (N) / Show fewer with `aria-expanded`, quiet Clear, one-line empty state.
+  - E30.8 MET — `opens` producers listed above; Undo, Continue here and two-choice cards excluded; behind cards expand; swipe and selection guarded; hover affordance; button kept.
+  - E30.9 MET — session-yield Review.
+  - E30.10 MET — Recent rows with a live opening action are clickable; their button stays.
+  - E30.11 MET — no feature's work changed; the Enter fix makes the existing save path reachable.
+  - E30.12 MET — see step 5.
+- **Step 5 — targeted QA (working tree on `9cfd32c`):**
+  - Build passed. Categories: unit, architecture and integration PASS (integration includes the new coordinator check that only `opens:true` counts and that a Recent row opens until what it points to is resolved).
+  - Browser tests, each run alone: `profile-panel` (new; laptop and phone: Done in view with Recent full and scrolled, three rows then Show all (7) / Show fewer, a live Recent row opens Review and closes the pop-up, rename with Enter, Escape keeps the name and the panel, name kept after a reload), `notification-stack` (adds: an opening card runs Review from a click on its text and closes; an Undo card expands the stack and does not run), `interactions`, `site-data-clear`, `sync-kept-reviews`, `sync-and-profiles` — all PASS.
+  - Tests changed to follow the app: the stack test reads Recent after Show all and skips cards that are closing; the coordinator check first assumed a used Recent row stops opening, but Recent keeps the button while what it points to still stands, by design, so the check now resolves it first.
+  - Screenshots at 1280×860 and 390×844 checked before and after. Not run: the full browser suite, other skins and themes, real devices, a screen reader.
+
+### Entry 031 — Two review findings on the status model (2026-11-02)
+
+- **Branch / HEAD before:** `refactor/background-coordination` at `fca10f7` (PR #10).
+- **Orientation:** two Codex review findings on `source/core/backup-presentation.js`, both in code added by Entries 024–026.
+- **Step 1 — audit (source):**
+  - Finding 1 proved. `status()` turns the ring red only when `sync.failed && retryBackoffCapped`. `sync.failed` is set only by a failed catch-up (`backup-provider.js`, `settleCatchUp`). An upload that keeps failing advances the same retry counter through `nextConvergenceRetryDelay`, which raises the red "keeps failing" pop-up, but leaves `sync.failed` false. The ring then stays at pending "Changes since…", with no error badge and no Try again. That contradicts STATUS-SYSTEM.md section 6 ("Red only after retries run out: the ring, the badge, the pop-up and the Connect card").
+  - Finding 2 proved. A catch-up that needs a decision sets `state.review` and leaves `syncedAt` unchanged. While the review waits, convergence ends with `needs-review` and neither syncs nor uploads. `connectProgress()` checks the review only after `syncedAt>=startedAt`, so on a first connection the card stays on "Checking Google Drive…" (or "Uploading…" once a catch-up was seen) and offers no Review. The unit row covering this case gave the review a fresh `syncedAt`, a state the app never produces.
+- **Step 2 — objectives:**
+  - E31.1: retries that ran out turn the ring red whichever half (catch-up or upload) failed. The test is `retryBackoffCapped`, which is reset on every success.
+  - E31.2: a waiting sync review shows on the Connect card with Review, whatever the sync timestamp. It shows as amber with the bring-in step waiting, because nothing has come in yet.
+  - E31.3: unit rows follow states the app produces: an upload whose retries ran out (`failed:false`, capped), and a review with no new `syncedAt`.
+- **Step 3 — implementation:**
+  - `source/core/backup-presentation.js`: the ring is `error` when `retryBackoffCapped` is set, whether or not `sync.failed` is. `connectProgress` checks a waiting review before the synced-time gate: amber, titled "Google Drive has changes to review", bring-in step waiting, with Review.
+  - `tests/unit/backup/sync-status.mjs`: new "Uploads failing after retries" row. The card's review row was replaced with two rows, first connect and reconnect after an older sync, both without a new sync time.
+- **Step 4 — recheck:** E31.1 MET: the ring is red with the error badge and Try again; a running retry still shows syncing, because busy is checked first. E31.2 MET: Review shows on a first connect and on a reconnect. E31.3 MET: before the fix, both new rows failed against the old source ("Uploads failing after retries: ring"; "Needs review (first connect): tone") and pass after it.
+- **Step 5 — targeted QA:** build passed; unit 24, architecture 32 and integration 96 PASS; browser `sync-and-profiles` and `notification-stack` each run alone, PASS. Not run: the rest of the browser suite.
+
 ### Journal template — duplicate this for the next pass
 
 - **Entry NNN — Pass P#, topic / date:**
