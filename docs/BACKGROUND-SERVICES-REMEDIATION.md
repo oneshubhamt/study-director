@@ -972,6 +972,12 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
   - Then the full QA the owner asked for.
 - **Step 3 — implementation:** `syncStudyQuiet` holds only when the mode is running and `isWorkBlock(TASKS[TimerState.currentIndex])`; the host's `setCurrentTask` calls it too. `session-draft-edit`: its second block is now a support block; after the pause check the timer resumes on the work block (a new waiting pop-up stays hidden), then Finish moves it to the support block (mode still running) and the pop-up shows. Docs: STATUS-SYSTEM.md section 6 and phase 4, NOTIFICATIONS.md.
 - **Step 4 — objectives:** **E28.1 MET** and **E28.2 MET** by `session-draft-edit` (the support-block step fails under the Entry 027 rule, where a running timer held regardless of block). **E28.3 MET.**
+- **Step 5 — full QA at `66f9295` (local, Node 22, npm 10.9.4, Chromium 1194), as the owner asked:**
+  - `npm run` refuses every script here (`EBADDEVENGINES`: `devEngines` requires npm 12.2.1), so each script's commands ran directly with node, in the same order.
+  - Fast suite PASS (152: unit, integration, architecture, governance).
+  - Release certification: 15 of 16 steps PASS (syntax, deployment contract, rich-text codecs, binary backup capacity, search performance, rich-text bundle, build, generated syntax, build verification, minified staging, minified release, performance budgets, compression). Not run: dependency assurance, which shells out to `npm audit` and so hits the same npm refusal; the dependency tree is unchanged on this branch since Entry 024.
+  - Browser release tier PASS: 48 tests, two at a time, `alone` tests by themselves, none quarantined.
+  - The repository was unchanged after the run.
 
 ### Journal template — duplicate this for the next pass
 
