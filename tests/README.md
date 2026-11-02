@@ -53,6 +53,7 @@ Each browser tier is also `node tests/helpers/browser-suite.mjs <smoke|feature|e
 1. One executable should represent one coherent production contract. Closely coupled scenarios may share it; unrelated failure domains should not.
 2. Strengthen the existing authoritative test for a regression before adding another file. Never create tests named after a release/pass/bug era.
 3. Prefer exact invariants—conservation, monotonicity, idempotence, bounds, reference preservation, transaction atomicity—over arbitrary thresholds or example-only assertions.
+   Where a rule must hold for any input, check it over generated cases with `helpers/generated-cases.mjs`: fixed seeds, so every run tests the same cases, and a failure names its seed, which `SD_CASE_SEED=<seed>` reruns alone. Show the cases reach every branch of the rule (tally them once) and that a mutant breaking the rule fails them. Sync merge (`integration/backup/sync-shared-base.mjs`), backup retention (`integration/backup/repository-checkpoint.mjs`) and the timer (`unit/app/timer-engine-logic.mjs`) do this.
 4. Behavior belongs at the lowest faithful behavioral layer. Static source assertions belong in `architecture` only when source shape is itself the contract.
 5. Browser smoke is intentionally small; feature and extended tiers remain separate when their cost or failure mode is materially different.
 6. Capacity/stress certification that distorts fast coverage belongs in release/extended cadence rather than ordinary correctness runs.

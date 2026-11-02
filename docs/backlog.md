@@ -23,10 +23,9 @@ Status checked against the code and git history and confirmed by the owner on 20
 
 The suite is slow, pins source text and misses the study features. Eight pull requests, in this order; remove each line when its pull request merges.
 
-1. **Speed.** No idle timers or busy polling in tests; a parallel runner that reports every failure; one coverage pass; Promotion runs the fast suite once and Repository checks run all of it.
-2. **Governance.** Keep one-route, manifest and hermetic checks; drop the word-similarity duplicate detector, the history-word bans and `feature-contracts.mjs`. The code-snippet anchors in `coverage-risk.mjs` go in 4–6, once mutants replace them.
-3. **Data-safety rules.** Seeded generated-input tests for sync merge, backup retention and the timer.
-4–6. **Behaviour over source text, and consolidation,** area by area (backup and storage; app, interface and PWA; editor and browser): about 1,300 source-text checks down to about 200; about 95 fast files and 31 browser tests; migration-only tests in `tests/migration/`; names by subject.
+Steps 1–3 (speed, governance, data-safety rules) are done.
+
+4–6. **Behaviour over source text, and consolidation,** area by area (backup and storage; app, interface and PWA; editor and browser): about 1,300 source-text checks down to about 200; about 95 fast files and 31 browser tests; migration-only tests in `tests/migration/`; names by subject. The code-snippet anchors in `coverage-risk.mjs` go once mutants replace them.
 7. **Study features.** Insights numbers (hand-worked cases and generated-input rules), the plan-to-review browser journey, note links, and a median-of-three Insights speed gate.
 8. **Rules and docs.** When to add a test, in `tests/README.md` and `AGENTS.md`.
 
@@ -34,7 +33,7 @@ Cautions that hold throughout:
 
 - A source-text check is deleted only after a behaviour test is shown to fail when the code it pinned is broken (mutation harness on a temporary copy, never the working tree); the most important become permanent mutants.
 - Merged files keep every scenario and assertion; merged browser tests pass 3 runs on their own; `alone` rules stay.
-- Coverage of safety modules never drops; the 8 existing mutants stay killed.
+- Coverage of safety modules never drops; every mutant in `tests/helpers/mutation.mjs` stays killed.
 - A new test that disagrees with the app is reported to the owner, not resolved by changing either side.
 - Tests and tooling only; no release bump unless a confirmed app bug is fixed with the owner's agreement.
 

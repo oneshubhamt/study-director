@@ -8,6 +8,7 @@ import {createProcessingEngine} from '../../helpers/file-processing.mjs';
 import {createDriveHarness,pendingRepositoryDigests} from '../../helpers/drive-harness.mjs';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
 import {testPendingReviewCodec,memoryPendingReviews,paragraphMerge} from '../../helpers/pending-review-codec.mjs';
+import {checkCases} from '../../helpers/generated-cases.mjs';
 
 for(const file of ['source/core/internal.js','source/core/operation-lifecycle.js','source/core/canonical.js','source/core/record-codecs.js','source/core/reconciliation.js','source/core/exports.js','source/core/managed-repository.js','source/core/repository-policy.js','source/core/repository-background.js','source/core/backup-provider.js','source/core/backup-capture.js','source/core/backup.js','source/core/backup-recovery-host.js'])vm.runInThisContext(fs.readFileSync(file,'utf8'),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
@@ -347,11 +348,40 @@ assert.equal(afterBreak.normalRetained,15,'no day is dropped while a slot is fre
 // Device Folder and Drive do. Whatever the gaps, every day with a backup is
 // kept up to 15, one backup never costs more than one version, and the
 // newest is always Latest.
-const retentionRun=(times,firstId,check=()=>{})=>{let kept=[],tiers={};times.forEach((ms,index)=>{
-  const at=new Date(ms).toISOString(),candidates=[...kept,retentionRow(firstId+index,at.slice(0,10),at.slice(11,19))],selection=runtime.repository.selectRetention(candidates,{now:new Date(ms)});
+// notesAt(index), when given, is the notes fingerprint of each backup, so the
+// Hourly rule (only where notes changed) runs on generated histories too.
+const withNotes=(row,notes)=>notes?freeze({...row,manifest:freeze({...row.manifest,retention:freeze({...row.manifest.retention,notesFingerprint:notes})})}):row;
+const retentionIds=rows=>rows.map(row=>row.id);
+// The general rules every selection follows, whatever the history: never
+// under-filled, Hourly at most 10 from the last 24 hours, kept and removed
+// split the versions, a second pass keeps everything, listing order does not
+// matter, and the Hourly rule holds (see the Hourly cases below).
+const retentionRules=(candidates,selection,ms)=>{
   const base=selection.retained.filter(row=>selection.tiers[row.id]!=='hourly'),hourly=selection.retained.filter(row=>selection.tiers[row.id]==='hourly');
-  assert.equal(base.length,Math.min(15,new Set(candidates.map(row=>row.manifest.retention.calendar.localDate)).size));assert.ok(selection.remove.filter(row=>tiers[row.id]!=='hourly').length<=1,'one backup costs at most one version outside Hourly');assert.equal(selection.tiers[candidates.at(-1).id],'latest');
+  assert.equal(base.length,Math.min(15,new Set(candidates.map(row=>row.manifest.retention.calendar.localDate)).size),'never under-filled: up to 15, one per day with a backup');
   assert.ok(hourly.length<=10&&hourly.every(row=>Date.parse(row.manifest.exportedAt)>ms-24*3600000),'Hourly keeps at most 10, all from the 24 hours before the latest');
+  assert.deepEqual([...retentionIds(selection.retained),...retentionIds(selection.remove)].sort(),retentionIds(candidates).sort(),'every version is either kept or removed, never both');
+  assert.deepEqual(retentionIds(runtime.repository.selectRetention(selection.retained,{now:new Date(ms)}).retained),retentionIds(selection.retained),'retention is idempotent');
+  assert.deepEqual(retentionIds(runtime.repository.selectRetention([...candidates].reverse(),{now:new Date(ms)}).retained),retentionIds(selection.retained),'the order versions are listed in does not matter');
+  // Hourly: each differs in local hour and notes from the next newer version
+  // kept; below the limit, every removed version in the window matches the
+  // next newer version kept in one of them.
+  {
+    const time=row=>Date.parse(row.manifest.exportedAt),hour=row=>Math.floor((time(row)+row.manifest.retention.calendar.utcOffsetMinutes*60000)/3600000),notes=row=>String(row.manifest.retention.notesFingerprint||'');
+    const ordered=[...candidates].sort((x,y)=>time(x)-time(y)||x.id.localeCompare(y.id)),keptIds=new Set(retentionIds(selection.retained)),nextKept=position=>ordered.slice(position+1).find(row=>keptIds.has(row.id));
+    const hourlyCount=hourly.length,windowStart=ms-24*3600000;
+    ordered.forEach((row,position)=>{
+      const next=nextKept(position);if(!next)return;
+      const matches=hour(row)===hour(next)||!!notes(row)&&notes(row)===notes(next);
+      if(selection.tiers[row.id]==='hourly')assert.ok(!matches,'an Hourly version differs from the next one kept in hour and notes');
+      else if(!keptIds.has(row.id)&&hourlyCount<10&&time(row)>windowStart)assert.ok(matches,'a version in the 24 hours whose hour and notes both changed is kept while Hourly has room');
+    });
+  }
+};
+const retentionRun=(times,firstId,check=()=>{},notesAt=null)=>{let kept=[],tiers={};times.forEach((ms,index)=>{
+  const at=new Date(ms).toISOString(),candidates=[...kept,withNotes(retentionRow(firstId+index,at.slice(0,10),at.slice(11,19)),notesAt?.(index))],selection=runtime.repository.selectRetention(candidates,{now:new Date(ms)});
+  retentionRules(candidates,selection,ms);
+  assert.ok(selection.remove.filter(row=>tiers[row.id]!=='hourly').length<=1,'one backup costs at most one version outside Hourly');assert.equal(selection.tiers[candidates.at(-1).id],'latest');
   kept=[...selection.retained];tiers=selection.tiers;check(kept,index);
 });return kept;};
 // Six months of backups twice a day, a three-month break, then four months
@@ -365,14 +395,18 @@ const finalHistory=retentionRun(breakTimes,40000,(kept,index)=>{if(index>=364)af
 assert.equal(afterResume[0],14,'the first backup after a three-month break replaces one version, never the history');
 assert.ok(afterResume.every((count,index)=>index===0||count===afterResume[index-1]||count===afterResume[index-1]-1),'older versions give way one at a time');
 assert.deepEqual(beforeResume(finalHistory).map(row=>row.manifest.retention.calendar.localDate),['2026-07-05'],'four months on, the last day before the break is still kept as Monthly');
-// Random schedules mixing minutes, days, weeks, months and half-year breaks.
-let retentionSeed=20261005;const retentionRandom=()=>(retentionSeed=(retentionSeed*1103515245+12345)%2147483648)/2147483648;
-for(let schedule=0;schedule<40;schedule++){
-  const spans=[()=>retentionRandom()*6*3600000,()=>DAY,()=>DAY*(2+Math.floor(retentionRandom()*12)),()=>DAY*(20+Math.floor(retentionRandom()*40)),()=>DAY*(60+Math.floor(retentionRandom()*120))],weights=spans.map(()=>retentionRandom()),total=weights.reduce((sum,value)=>sum+value,0),times=[];
-  let at=Date.UTC(2025,0,1)+Math.floor(retentionRandom()*365)*DAY;
-  for(let index=0;index<40+Math.floor(retentionRandom()*120);index++){let pick=retentionRandom()*total,span=0;while(pick>weights[span]){pick-=weights[span];span+=1;}at+=Math.max(60000,Math.round(spans[span]()));times.push(at);}
-  retentionRun(times,50000+schedule*1000);
-}
+// Generated schedules mixing busy study days, hours, days, weeks, months and
+// half-year breaks, with notes that change at some backups and not at others.
+const retentionCases=await checkCases('retention rules',{seed:20261005,count:40},({random,int,chance},schedule)=>{
+  const spans=[()=>int(20,90)*60000,()=>random()*2*3600000,()=>DAY,()=>DAY*int(2,13),()=>DAY*int(20,59),()=>DAY*int(60,179)],weights=spans.map(()=>random()),total=weights.reduce((sum,value)=>sum+value,0),times=[],fingerprints=[];
+  let at=Date.UTC(2025,0,1)+int(0,364)*DAY,notes='a';
+  // Gaps come in runs of one kind, so a busy day holds many backups.
+  for(let index=0,count=int(40,159),span=0,run=0;index<count;index++,run--){if(run<=0){let pick=random()*total;span=0;while(pick>weights[span]){pick-=weights[span];span+=1;}run=int(1,15);}at+=Math.max(60000,Math.round(spans[span]()));times.push(at);if(chance(0.75))notes=String.fromCharCode(97+int(0,5));fingerprints.push(notes.repeat(64));}
+  retentionRun(times,50000+schedule*1000,()=>{},index=>fingerprints[index]);
+  // A whole history read at once, as a location's first cleanup does, cut at a few points.
+  const rows=times.map((ms,index)=>{const at=new Date(ms).toISOString();return withNotes(retentionRow(150000+schedule*1000+index,at.slice(0,10),at.slice(11,19)),fingerprints[index]);});
+  for(let cut=0;cut<4;cut++){const end=int(1,rows.length),candidates=rows.slice(0,end),ms=times[end-1],selection=runtime.repository.selectRetention(candidates,{now:new Date(ms)});retentionRules(candidates,selection,ms);assert.equal(selection.tiers[candidates.at(-1).id],'latest');}
+});
 const sameDayUnderLimit=[retentionRow(920,'2026-09-20','09:00:00'),retentionRow(921,'2026-09-20','13:00:00'),retentionRow(922,'2026-09-20','18:00:00')],sameDaySelection=runtime.repository.selectRetention(sameDayUnderLimit,{now:retentionNow});assert.deepEqual(sameDaySelection.retained.map(row=>sameDaySelection.tiers[row.id]),['hourly','hourly','latest'],'earlier backups of the latest day are kept as Hourly');assert.equal(sameDaySelection.remove.length,0);
 {
   // Hourly: walking back from the latest over the 24 hours before it, the
@@ -1223,5 +1257,5 @@ const providerMetadataVerificationCases=[];
     }
   }finally{runtime.controller.invalidateRepositoryPreparation();notes=original.notes;dailyRecords=original.dailyRecords;assetDescriptor=original.assetDescriptor;snapshotRevision=original.snapshotRevision;sourceRevision=original.sourceRevision;}
 }
-console.log(JSON.stringify({status:'PASS',suite:'repository-checkpoint',providerMetadataVerificationCases,assembledUploadContinuations,publicationContinuationCases,assembledDriveCases,assembledDriveWallMs,incompleteInventoryCases,driveBacklogCases,firstAttachmentReads:1,secondAttachmentReads:0,simulatedAttachmentBytes:AUDIO_BYTES,identicalCheckpointAllObjectsReused:true,unchangedStructuredObjectsRecompressed:false,oldSavedDayEditFreshObjects:fresh,noteEditFreshObjects:noteFresh,attachmentMetadataZeroByteReads:true,savedDayDeletionNoResurrection:true,sealedCaptureSurvivesLaterMutation:true,providerTieredRetentionFoundation:true,providerCommitMarkerLatestAtomicity:true,retentionPolicy15Plus1:true,beforeRestorePublication:true,managedProviderProtectedPublication:true,orphanMaintenanceBackupRecovery:true,tierGraduation:true,sparseRetention:true,retentionDeletionFailureGcSafe:true,providerReconciliationConvergence:true,providerConvergenceFailureIsolated:true,providerSharedObjectGcSafe:true,publicationProtectedGcSafe:true,reclamationGraceSafe:true,providerLargeAttachmentUploadsBeforeSelfHeal:1,providerLaterAttachmentBytes:0,providerMissingObjectSelfHeal:true,providerOrphanGc:true,providerScrubSelfHeal:true,integrityScrubPriority:true,retainedAbaReuse:true,providerPostSealMutationAllowed:true,integrityScrubStableObjectsOnly:true,integrityScrubLeasesReleased:true,providerTemporaryDownloadsReleased:true,explicitProtectedRemoval:true,durableProviderRetry:true,metadataHistoryColdZeroDownloads:coldHistoryDownloads===0,metadataHistoryWarmZeroDownloads:warmHistoryAdditionalDownloads===0,metadataHistoryScopeIndependent:true,repositoryGenerationReset:true,metadataHistoryBodyVerificationDeferred:true,metadataHistoryUncertainZeroDownloads:uncertainColdDownloads===0,metadataHistoryListedRemoteFiles:coldHistoryRemoteFiles,postPublicationReceiptReuse:true,postPublicationReceiptPublications:2,postPublicationReceiptImmutableReadbacks:receiptDownloads.checkpoint.length+receiptDownloads.commit.length,postPublicationReceiptAdditionalHistoryDownloads:receiptDownloads.checkpoint.length+receiptDownloads.commit.length-4,stateDiscoveryObjectInventoryReuse:true,stateDiscoveryMatureObjectLists:objectListsDuringSecondReceipt,stateDiscoveryConservativeConcurrentObject:true,checksumOperations:checksumCounter},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'repository-checkpoint',retentionCases,providerMetadataVerificationCases,assembledUploadContinuations,publicationContinuationCases,assembledDriveCases,assembledDriveWallMs,incompleteInventoryCases,driveBacklogCases,firstAttachmentReads:1,secondAttachmentReads:0,simulatedAttachmentBytes:AUDIO_BYTES,identicalCheckpointAllObjectsReused:true,unchangedStructuredObjectsRecompressed:false,oldSavedDayEditFreshObjects:fresh,noteEditFreshObjects:noteFresh,attachmentMetadataZeroByteReads:true,savedDayDeletionNoResurrection:true,sealedCaptureSurvivesLaterMutation:true,providerTieredRetentionFoundation:true,providerCommitMarkerLatestAtomicity:true,retentionPolicy15Plus1:true,beforeRestorePublication:true,managedProviderProtectedPublication:true,orphanMaintenanceBackupRecovery:true,tierGraduation:true,sparseRetention:true,retentionDeletionFailureGcSafe:true,providerReconciliationConvergence:true,providerConvergenceFailureIsolated:true,providerSharedObjectGcSafe:true,publicationProtectedGcSafe:true,reclamationGraceSafe:true,providerLargeAttachmentUploadsBeforeSelfHeal:1,providerLaterAttachmentBytes:0,providerMissingObjectSelfHeal:true,providerOrphanGc:true,providerScrubSelfHeal:true,integrityScrubPriority:true,retainedAbaReuse:true,providerPostSealMutationAllowed:true,integrityScrubStableObjectsOnly:true,integrityScrubLeasesReleased:true,providerTemporaryDownloadsReleased:true,explicitProtectedRemoval:true,durableProviderRetry:true,metadataHistoryColdZeroDownloads:coldHistoryDownloads===0,metadataHistoryWarmZeroDownloads:warmHistoryAdditionalDownloads===0,metadataHistoryScopeIndependent:true,repositoryGenerationReset:true,metadataHistoryBodyVerificationDeferred:true,metadataHistoryUncertainZeroDownloads:uncertainColdDownloads===0,metadataHistoryListedRemoteFiles:coldHistoryRemoteFiles,postPublicationReceiptReuse:true,postPublicationReceiptPublications:2,postPublicationReceiptImmutableReadbacks:receiptDownloads.checkpoint.length+receiptDownloads.commit.length,postPublicationReceiptAdditionalHistoryDownloads:receiptDownloads.checkpoint.length+receiptDownloads.commit.length-4,stateDiscoveryObjectInventoryReuse:true,stateDiscoveryMatureObjectLists:objectListsDuringSecondReceipt,stateDiscoveryConservativeConcurrentObject:true,checksumOperations:checksumCounter},null,2));
 await import('../../helpers/session-ownership-claim-regression.mjs');
