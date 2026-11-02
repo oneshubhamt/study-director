@@ -124,10 +124,10 @@ const fastWorkflow=fs.readFileSync('.github/workflows/qa-fast.yml','utf8'),promo
 assert.match(fastWorkflow,/pull_request:/);assert.match(fastWorkflow,/push:/);assert.match(fastWorkflow,/node tests\/helpers\/run-category\.mjs targeted/,'automatic checks must run the explicit targeted contracts');assert.doesNotMatch(fastWorkflow,/npm (?:ci|install)/);
 assert.match(fastWorkflow,/bug-regression-policy\.mjs/,'bug-like PRs must be machine-checked for regression protection');
 // Promotion remains manual by default. Its only automated entry is an
-// explicit request-file edit on current-fixes; ordinary code pushes do not run it.
+// explicit request-file edit (on any branch); ordinary code pushes do not run it.
 const promotionTriggerBlock=promotionWorkflow.match(/^on:\n([\s\S]*?)^permissions:/m)?.[1]||'';
 assert.deepEqual([...promotionTriggerBlock.matchAll(/^  ([a-z_]+):/gm)].map(([,name])=>name).sort(),['push','workflow_dispatch']);
-assert.match(promotionTriggerBlock,/^  push:\n    branches: \[current-fixes\]\n    paths:\n      - \.github\/qa-requests\/promotion\.txt(?:\n|$)/m,'only a dedicated QA request on current-fixes may trigger full promotion');
+assert.match(promotionTriggerBlock,/^  push:\n    paths:\n      - \.github\/qa-requests\/promotion\.txt\n  workflow_dispatch:/m,'only a dedicated QA request file edit may trigger full promotion');
 assert.match(promotionWorkflow,/default: false/,'manual browser certification must remain opt-in');
 assert.match(promotionWorkflow,/if: github\.event_name == 'push' \|\| inputs\.run_browser/,'only explicit browser selection or a dedicated QA request may enable browser certification');
 assert.match(promotionWorkflow,/if: \(github\.event_name == 'push' \|\| inputs\.run_browser\) && always\(\)/,'the performance gate must follow the same browser-selection policy');
