@@ -6,6 +6,9 @@ import {webcrypto} from 'node:crypto';
 import {drainMicrotasks,nextTurn} from '../../helpers/async-tools.mjs';
 
 const MiB=1048576;
+// Real timers that do not keep the process alive: the coordinator's 2-minute idle
+// and stall timers stay armed as in the app, but the test exits when its work ends.
+const releasingTimers={setTimeout:(fn,ms)=>{const handle=setTimeout(fn,ms);handle.unref?.();return handle;},clearTimeout};
 function loadModule(files,name){
   const context={console,Blob,DOMException,AbortController,TextEncoder,TextDecoder,URL,crypto:webcrypto,Map,Set,Object,Promise,Number,String,Math,Uint8Array,Uint32Array,DataView,queueMicrotask,setTimeout,clearTimeout,Symbol};
   context.globalThis=context;vm.createContext(context);
@@ -18,7 +21,7 @@ function loadModule(files,name){
   const {module}=loadModule(['source/core/internal.js','source/core/attachment-ingest.js'],'attachment-ingest');
   let estimateCalls=0;const posted=[];
   const worker={terminate(){},postMessage(message){posted.push(message);if(message.type==='ingest')queueMicrotask(()=>{this.onmessage?.({data:{id:message.id,progress:{phase:'copying',loaded:130*MiB,total:260*MiB,mode:'sync'}}});this.onmessage?.({data:{id:message.id,value:{storageName:message.data.storageName,hash:'a'.repeat(64),size:260*MiB,mode:'sync'}}});});}};
-  const coordinator=module.create({createWorker:()=>worker,directory:'study-director-assets-v2',storage:{estimate:async()=>{estimateCalls++;return {quota:1024*MiB,usage:100*MiB};}},randomUUID:()=> '12345678-1234-1234-1234-123456789012'});
+  const coordinator=module.create({...releasingTimers,createWorker:()=>worker,directory:'study-director-assets-v2',storage:{estimate:async()=>{estimateCalls++;return {quota:1024*MiB,usage:100*MiB};}},randomUUID:()=> '12345678-1234-1234-1234-123456789012'});
   const virtual=Object.create(Blob.prototype);Object.defineProperty(virtual,'size',{value:260*MiB});
   let progressCalls=0;
   const result=await coordinator.ingest(virtual,{onProgress:progress=>{progressCalls++;if(progress.phase==='copying')throw new Error('UI callback failure must be isolated');}});
@@ -32,7 +35,7 @@ function loadModule(files,name){
   let estimateCalls=0,workerPosts=0;
   const worker={terminate(){},postMessage(){workerPosts++;}};
   const virtual=Object.create(Blob.prototype);Object.defineProperty(virtual,'size',{value:260*MiB});
-  const low=module.create({createWorker:()=>worker,directory:'study-director-assets-v2',storage:{estimate:async()=>{estimateCalls++;return {quota:300*MiB,usage:40*MiB};}},randomUUID:()=> '12345678-1234-1234-1234-123456789012'});
+  const low=module.create({...releasingTimers,createWorker:()=>worker,directory:'study-director-assets-v2',storage:{estimate:async()=>{estimateCalls++;return {quota:300*MiB,usage:40*MiB};}},randomUUID:()=> '12345678-1234-1234-1234-123456789012'});
   await assert.rejects(()=>low.ingest(virtual),error=>error?.name==='QuotaExceededError');
   assert.equal(workerPosts,0,'quota rejection must happen before worker ingestion');
   const controller=new AbortController();controller.abort();estimateCalls=0;

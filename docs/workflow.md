@@ -39,6 +39,7 @@ A pull request titled as a bug fix (`fix: …`) must add or strengthen a regress
 | Fast suite (unit, integration, architecture) | `npm test` | `node tests/helpers/run-category.mjs fast` |
 | One category | `npm run test:unit` | `node tests/helpers/run-category.mjs unit` (or `integration`, `architecture`) |
 | Chosen files | `npm run test:targeted -- <files>` | `node tests/helpers/run-category.mjs targeted <files>` |
+| Options | — | `--jobs N` (files at once, default up to 4), `--bail` (stop after the first failure) |
 | Browser tiers | `npm run test:browser` (`:feature`, `:extended`, `:release`) | `node tests/helpers/browser-suite.mjs smoke` (`feature`, `extended`, `release`) |
 | One browser test | — | `node tests/browser/<area>/<test>.mjs` |
 | Build | `npm run build` | `node build/wordgard-bundle.mjs --write && node build/build.mjs` |
@@ -64,7 +65,7 @@ A pull request titled as a bug fix (`fix: …`) must add or strengthen a regress
 
 ## Continuous integration
 
-- **Repository checks** run on every push and pull request: selected safety and governance tests and a source build. No npm install, credentials or browser.
+- **Repository checks** run on every push and pull request: the whole fast suite and a source build. No npm install, credentials or browser.
 - **Promotion QA** runs from GitHub Actions' Run workflow button: every hermetic test, risk coverage, mutation, branch coverage, release certification and, with its checkbox, every browser journey and the Insights performance samples. It is the full regression gate; Repository checks do not replace it. Neither workflow deploys.
 - Read failures by their original step; do not suppress them.
 

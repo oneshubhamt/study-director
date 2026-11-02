@@ -163,14 +163,26 @@ function printTable(rows){
   }
 }
 
+// One run of the whole fast suite is both the correctness gate and the coverage
+// measurement (unit and integration files; architecture tests only read source).
+// --keep-raw <dir> keeps the raw V8 data so branch-coverage.mjs --from <dir> can
+// report branch edges without running the suite again.
+const keepRawIndex=process.argv.indexOf('--keep-raw');
+const keepRaw=keepRawIndex>=0?process.argv[keepRawIndex+1]:null;
+if(keepRawIndex>=0&&!keepRaw)throw new Error('--keep-raw requires a directory outside the repository.');
+// A reused folder would mix an earlier run's files into the branch report.
+const keepRawTarget=keepRaw?externalOutputPath(keepRaw,'Raw coverage directory'):null;
+if(keepRawTarget&&fs.existsSync(keepRawTarget)&&fs.readdirSync(keepRawTarget).length)throw new Error(`--keep-raw needs a new or empty directory; ${keepRawTarget} already has files.`);
 const coverageDir=fs.mkdtempSync(path.join(os.tmpdir(),'study-director-coverage-'));
 try{
-  for(const category of ['unit','integration']){
-    const result=spawnSync(process.execPath,['tests/helpers/run-category.mjs',category],{
-      cwd:root,env:{...process.env,SD_COVERAGE_DIR:coverageDir},stdio:'inherit',timeout:900000
-    });
-    if(result.error)throw result.error;
-    if(result.status!==0)process.exit(result.status??1);
+  const result=spawnSync(process.execPath,['tests/helpers/run-category.mjs','fast'],{
+    cwd:root,env:{...process.env,SD_COVERAGE_DIR:coverageDir},stdio:'inherit',timeout:900000
+  });
+  if(result.error)throw result.error;
+  if(result.status!==0)process.exit(result.status??1);
+  if(keepRawTarget){
+    fs.mkdirSync(keepRawTarget,{recursive:true});
+    for(const file of fs.readdirSync(coverageDir))fs.copyFileSync(path.join(coverageDir,file),path.join(keepRawTarget,file));
   }
   const scripts=loadCoverage(coverageDir);
   const rows=[...scripts].map(([file,script])=>summarize(file,script));

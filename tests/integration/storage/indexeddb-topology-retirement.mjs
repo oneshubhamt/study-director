@@ -50,10 +50,15 @@ function fakeIndexedDb(initial){
   };
 }
 
+// The modules and this test share one clock running 10 times faster, so the app's
+// 2.5 s open limit and the waits around it keep their order without real waiting.
+const TIME_SCALE=10;
+const fastTimeout=(fn,ms=0)=>setTimeout(fn,Math.ceil((Number(ms)||0)/TIME_SCALE));
+
 function loadModules(indexedDB){
   const context=vm.createContext({
     console,Date,Math,JSON,RegExp,Error,TypeError,Object,Array,String,Number,Map,Set,Promise,Uint8Array,TextEncoder,
-    crypto:globalThis.crypto,indexedDB,setTimeout,clearTimeout,queueMicrotask,globalThis:null
+    crypto:globalThis.crypto,indexedDB,setTimeout:fastTimeout,clearTimeout,queueMicrotask,globalThis:null
   });
   context.globalThis=context;
   for(const file of ['internal','persistence','compatibility'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),context,{filename:`${file}.js`});
@@ -159,7 +164,7 @@ function blockingIndexedDb({releaseAfter}){
   return {events,open(){
     const req={result:null,error:null,onupgradeneeded:null,onsuccess:null,onerror:null,onblocked:null};
     queueMicrotask(()=>req.onblocked?.());
-    if(releaseAfter!==null)setTimeout(()=>{
+    if(releaseAfter!==null)fastTimeout(()=>{
       const db={version:9,objectStoreNames:new StoreNames(new Set(canonicalNames)),createObjectStore(){},deleteObjectStore(){},close(){events.closed++;},onversionchange:null,onclose:null};
       req.result=db;req.onupgradeneeded?.({oldVersion:8,target:{result:db,transaction:{abort(){events.aborted++;},objectStore(){return {};}}}});req.onsuccess?.();
     },releaseAfter);
@@ -174,7 +179,7 @@ function blockingIndexedDb({releaseAfter}){
   await assert.rejects(makeDb(stuck).open(),/IndexedDB open blocked/u,'a block that never clears fails within the time limit');
   const late=blockingIndexedDb({releaseAfter:2700});
   await assert.rejects(makeDb(late).open(),/IndexedDB open blocked/u);
-  await new Promise(resolve=>setTimeout(resolve,300));
+  await new Promise(resolve=>fastTimeout(resolve,300));
   assert.deepEqual(late.events,{aborted:1,closed:1},'a late result is not upgraded and its connection is closed');
 }
 
@@ -190,7 +195,7 @@ function silentIndexedDb({answerFrom,lateAfter=null}){
   return {events,open(){
     const attempt=++events.opens,req={result:null,error:null,onupgradeneeded:null,onsuccess:null,onerror:null,onblocked:null};
     if(attempt>=answerFrom)queueMicrotask(()=>answer(req));
-    else if(lateAfter!==null)setTimeout(()=>answer(req),lateAfter);
+    else if(lateAfter!==null)fastTimeout(()=>answer(req),lateAfter);
     return req;
   }};
 }
@@ -205,7 +210,7 @@ function countingDb(indexedDB,errors){
 {
   const errors=[],slow=silentIndexedDb({answerFrom:2,lateAfter:2700});
   assert.equal(Number((await countingDb(slow,errors).open()).version),9,'a slow open succeeds on its second attempt');
-  await new Promise(resolve=>setTimeout(resolve,500));
+  await new Promise(resolve=>fastTimeout(resolve,500));
   assert.deepEqual(slow.events,{opens:2,aborted:1,closed:1},'the late first request is closed without upgrading');
   assert.deepEqual(errors,[],'a slow open that recovers reports no storage error');
   const hungErrors=[],hung=silentIndexedDb({answerFrom:Infinity});

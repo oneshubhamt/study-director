@@ -38,7 +38,7 @@
     "test:coverage": "node tests/helpers/coverage.mjs",
     "test:mutation": "node tests/helpers/mutation.mjs",
     "test:governance": "node tests/architecture/test-suite/suite-governance.mjs",
-    "qa:promotion": "node tests/helpers/run-category.mjs fast && node tests/helpers/coverage.mjs && node tests/helpers/mutation.mjs && npm run test:coverage:branches && npm run test:release && npm run test:coverage:browser",
+    "qa:promotion": "node tests/helpers/coverage.mjs && node tests/helpers/mutation.mjs && npm run test:coverage:branches && npm run test:release && npm run test:coverage:browser",
     "test:release:deployment": "node tests/architecture/build/deployment-contract.mjs",
     "test:coverage:branches": "node tests/helpers/branch-coverage.mjs",
     "test:coverage:browser": "node tests/helpers/browser-coverage.mjs"

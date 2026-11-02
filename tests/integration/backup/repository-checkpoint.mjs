@@ -1109,7 +1109,9 @@ for(const encrypted of [false,true]){
  const row=()=>runtime.providers.backgroundStatus().find(value=>value.job===id+' convergence');
  const pump=async(predicate)=>{let elapsed=0;for(const deadline=performance.now()+30000;!predicate()&&performance.now()<deadline;){
   await new Promise(resolve=>setImmediate(resolve));if(predicate())break;
-  if(h.state.awaitingUploadProgress&&!h.state.nativeUploadReplies){await clock.advance(1000);elapsed+=1000;}
+  // Awaiting simulated upload progress: let background work finish, then move
+  // straight to the next due timer (at least 1 s) instead of 1 s at a time.
+  if(h.state.awaitingUploadProgress&&!h.state.nativeUploadReplies){await realWorkSettled();const next=clock.nextAt(),delay=Math.max(1000,next===null?1000:next-clock.now());await clock.advance(delay);elapsed+=delay;}
   else if(!row().busy&&row().scheduled&&h.provider.connected()){const delay=Math.max(1,Date.parse(row().nextEligibleAt)-clock.now());await clock.advance(delay);elapsed+=delay;}
   else await new Promise(resolve=>setTimeout(resolve,1));
   assert.ok(elapsed<12*3600000,'finite unchanged payloads must converge across bounded authorization windows');

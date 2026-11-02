@@ -33,7 +33,7 @@ node tests/helpers/run-category.mjs integration
 node tests/helpers/run-category.mjs architecture
 ```
 
-`npm test` and the `test:unit|integration|architecture|fast` scripts are thin aliases only.
+Files run in parallel, each in its own process (`--jobs N`, default the CPU count up to 4); every failure is reported at the end, and `--bail` stops starting new files after the first. `npm test` and the `test:unit|integration|architecture|fast` scripts are thin aliases only.
 
 Browser QA is deliberately separate:
 
@@ -80,7 +80,7 @@ A browser test that sometimes fails is a defect, either in the test or in the ap
 
 ## Coverage and mutation
 
-`node tests/helpers/coverage.mjs` uses V8 coverage over the hermetic unit/integration runtime. Global percentages are diagnostic; enforcement is risk-based through `helpers/coverage-risk.mjs`, which combines conservative floors for safety-critical modules with explicit critical-path anchors and named owners for production code exercised only outside the fast runtime.
+`node tests/helpers/coverage.mjs` runs the whole fast suite once, which is both the correctness gate and the V8 coverage measurement of the unit and integration tests; `--keep-raw <dir>` keeps the raw data so `branch-coverage.mjs --from <dir>` reports branch edges without another run. Global percentages are diagnostic; enforcement is risk-based through `helpers/coverage-risk.mjs`, which combines conservative floors for safety-critical modules with explicit critical-path anchors and named owners for production code exercised only outside the fast runtime.
 
 `node tests/helpers/mutation.mjs` applies a small curated set of safety-critical mutants to temporary repository clones. Existing behavioral tests must kill every mutant; the working tree is never mutated.
 
@@ -92,11 +92,9 @@ Regression tooling names VM-loaded canonical modules for accurate coverage attri
 
 The architecture governance tests enforce the suite itself:
 
-- canonical semantic paths and one execution route per test;
-- no exact duplicate tests, orphan tests, release-era filenames or active historical QA tokens;
-- semantic-overlap and structural-containment detection, with explicit rationale for intentional overlap;
-- durable feature contracts mapped to authoritative behavioral owners;
-- browser tier/manifest integrity, bounded timeouts and semantic coverage tags;
+- canonical paths and one execution route per test;
+- no exact duplicate tests or orphan tests;
+- browser manifest integrity, bounded timeouts, written reasons for `alone` and coverage tags;
 - release-manifest/package entrypoint consistency;
 - hermetic source and runtime restrictions;
 - browser-only, time-bounded quarantine rules;
