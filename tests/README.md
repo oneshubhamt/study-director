@@ -92,11 +92,9 @@ Regression tooling names VM-loaded canonical modules for accurate coverage attri
 
 The architecture governance tests enforce the suite itself:
 
-- canonical semantic paths and one execution route per test;
-- no exact duplicate tests, orphan tests, release-era filenames or active historical QA tokens;
-- semantic-overlap and structural-containment detection, with explicit rationale for intentional overlap;
-- durable feature contracts mapped to authoritative behavioral owners;
-- browser tier/manifest integrity, bounded timeouts and semantic coverage tags;
+- canonical paths and one execution route per test;
+- no exact duplicate tests or orphan tests;
+- browser manifest integrity, bounded timeouts, written reasons for `alone` and coverage tags;
 - release-manifest/package entrypoint consistency;
 - hermetic source and runtime restrictions;
 - browser-only, time-bounded quarantine rules;

@@ -24,7 +24,7 @@ Status checked against the code and git history and confirmed by the owner on 20
 The suite is slow, pins source text and misses the study features. Eight pull requests, in this order; remove each line when its pull request merges.
 
 1. **Speed.** No idle timers or busy polling in tests; a parallel runner that reports every failure; one coverage pass; Promotion runs the fast suite once and Repository checks run all of it.
-2. **Governance.** Keep one-route, manifest and hermetic checks; drop the word-similarity duplicate detector, the history-word bans, `feature-contracts.mjs` and code-snippet coverage anchors.
+2. **Governance.** Keep one-route, manifest and hermetic checks; drop the word-similarity duplicate detector, the history-word bans and `feature-contracts.mjs`. The code-snippet anchors in `coverage-risk.mjs` go in 4–6, once mutants replace them.
 3. **Data-safety rules.** Seeded generated-input tests for sync merge, backup retention and the timer.
 4–6. **Behaviour over source text, and consolidation,** area by area (backup and storage; app, interface and PWA; editor and browser): about 1,300 source-text checks down to about 200; about 95 fast files and 31 browser tests; migration-only tests in `tests/migration/`; names by subject.
 7. **Study features.** Insights numbers (hand-worked cases and generated-input rules), the plan-to-review browser journey, note links, and a median-of-three Insights speed gate.

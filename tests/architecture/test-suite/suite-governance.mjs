@@ -7,19 +7,9 @@ import {RELEASE_TEST_SET} from '../../helpers/release-tests.mjs';
 import {validateBrowserQuarantineEntries,validateBrowserQuarantines} from '../../helpers/quarantine.mjs';
 import {externalOutputPath,repositoryRoot} from '../../helpers/output-paths.mjs';
 import {evaluateBugRegressionPolicy} from '../../helpers/bug-regression-policy.mjs';
-import {FEATURE_CONTRACTS,FEATURE_DOMAINS} from '../../helpers/feature-contracts.mjs';
 
 const layers=['unit','integration','browser','architecture'];
 const generatedRoots=['qa','coverage','.nyc_output','test-results','.study-director-test-artifacts'];
-const crossLayerContracts=new Map([
-  ['backup/encryption','Integration protects cryptographic/backup behavior; browser protects the user-facing password and file workflow.'],
-  ['exports/exports','Integration protects export processing/contracts; browser protects the complete user export workflow.'],
-  ['ui/interactions','Integration protects interaction-controller behavior and prompt lifecycle ownership; browser protects real dialogs, guidance, and asynchronous History API traversal ordering.'],
-]);
-const overlapExceptions=new Map();
-const semanticThreshold=0.55;
-const structuralContainmentThreshold=0.30;
-
 function walk(directory){
   return fs.readdirSync(directory,{withFileTypes:true}).flatMap(entry=>{
     const target=path.join(directory,entry.name);
@@ -28,18 +18,6 @@ function walk(directory){
 }
 function normalizedSource(file){return fs.readFileSync(file,'utf8').replace(/\r\n?/g,'\n').replace(/[ \t]+$/gm,'').replace(/\n{3,}/g,'\n\n').trim();}
 function normalizedFingerprint(file){return crypto.createHash('sha256').update(normalizedSource(file)).digest('hex');}
-function semanticTokens(file){
-  const stop=new Set(['assert','equal','true','false','const','await','async','function','return','string','status','pass','error','im'+'port','fr'+'om','node','tests','helpers','source','object','json','console','undefined','includes','length','message','value','values','file','files','path','root','result','results','test']);
-  return new Set((normalizedSource(file).match(/[A-Za-z_][A-Za-z0-9_-]{3,}/gu)||[]).map(token=>token.toLowerCase()).filter(token=>!stop.has(token)));
-}
-function jaccard(a,b){let common=0;for(const item of a)if(b.has(item))common++;return common/(a.size+b.size-common||1);}
-function pairKey(a,b){return [a,b].sort().join('|');}
-function structuralShingles(file){
-  const lines=normalizedSource(file).split('\n').map(line=>line.trim().replace(/\s+/gu,' ')).filter(line=>line&&!line.startsWith('import ')&&!line.startsWith('//')&&!line.startsWith('console.log'));
-  return new Set(lines.slice(0,-1).map((line,index)=>`${line}\n${lines[index+1]}`));
-}
-function containment(a,b){let common=0;for(const item of a)if(b.has(item))common++;return common/(Math.min(a.size,b.size)||1);}
-
 const tests=layers.flatMap(layer=>walk(`tests/${layer}`)).sort();
 assert.ok(tests.length>0,'classified suite must not be empty');
 const allowedRoots=new Set([...layers,'fixtures','helpers']);
@@ -47,59 +25,12 @@ const actualRoots=fs.readdirSync('tests',{withFileTypes:true}).filter(entry=>ent
 for(const root of actualRoots)assert.ok(allowedRoots.has(root),`orphan test/support root is not part of the canonical taxonomy: tests/${root}`);
 for(const root of allowedRoots)assert.ok(actualRoots.includes(root),`canonical test/support root is missing: tests/${root}`);
 
-// Historical release archaeology is forbidden anywhere in the active test system, not merely in filenames.
-for(const file of [...tests,...walk('tests/helpers')])assert.doesNotMatch(fs.readFileSync(file,'utf8'),/\bSDV[AB]\d[A-Za-z0-9]*/iu,`historical release token leaked into active test code: ${file}`);
-
 // Exact/format-only duplicate files are never legitimate, regardless of layer.
 const byFingerprint=new Map();
 for(const file of tests){
   const fingerprint=normalizedFingerprint(file),previous=byFingerprint.get(fingerprint);
   assert.equal(previous,undefined,`duplicate test implementation: ${previous} and ${file}`);byFingerprint.set(fingerprint,file);
 }
-
-// High lexical overlap is a maintenance smell. It needs an explicit durable rationale.
-const tokens=new Map(tests.map(file=>[file,semanticTokens(file)]));
-const actualSemanticExceptions=new Set();
-for(let i=0;i<tests.length;i++)for(let j=i+1;j<tests.length;j++){
-  const left=tests[i],right=tests[j],score=jaccard(tokens.get(left),tokens.get(right));
-  if(score<semanticThreshold)continue;
-  const key=pairKey(left,right),rationale=overlapExceptions.get(key);
-  assert.ok(rationale&&rationale.length>=32,`probable semantic duplicate (${score.toFixed(3)}): ${left} <> ${right}`);
-  actualSemanticExceptions.add(key);
-}
-
-const structural=new Map(tests.map(file=>[file,structuralShingles(file)])),actualStructuralExceptions=new Set();
-for(let i=0;i<tests.length;i++)for(let j=i+1;j<tests.length;j++){
-  const left=tests[i],right=tests[j],score=containment(structural.get(left),structural.get(right));
-  if(score<structuralContainmentThreshold)continue;
-  const key=pairKey(left,right),rationale=overlapExceptions.get(key);
-  assert.ok(rationale&&rationale.length>=32,`probable structural duplicate (${score.toFixed(3)} containment): ${left} <> ${right}`);
-  actualStructuralExceptions.add(key);
-}
-for(const key of overlapExceptions.keys())assert.ok(actualSemanticExceptions.has(key)||actualStructuralExceptions.has(key),`stale overlap exception: ${key}`);
-
-// Same semantic domain/name across layers is allowed only when the layers prove different things.
-const byContract=new Map();
-for(const file of tests){const [,layer,domain,name]=file.split('/');const key=`${domain}/${name.replace(/\.mjs$/,'')}`;const list=byContract.get(key)||[];list.push({layer,file});byContract.set(key,list);}
-const actualCrossLayer=new Set();
-for(const [key,entries] of byContract){
-  if(entries.length<2)continue;actualCrossLayer.add(key);const rationale=crossLayerContracts.get(key);
-  assert.ok(rationale&&rationale.length>=24,`cross-layer duplicate contract needs an explicit rationale: ${key}`);
-  assert.equal(new Set(entries.map(entry=>entry.layer)).size,entries.length,`duplicate contract within one layer: ${key}`);
-}
-for(const key of crossLayerContracts.keys())assert.ok(actualCrossLayer.has(key),`stale cross-layer duplicate exception: ${key}`);
-
-// Durable product contracts must keep one explicit authoritative behavioral home.
-const featureIds=new Set(),featureOwners=new Set(),featureDomains=new Set();
-for(const feature of FEATURE_CONTRACTS){
-  assert.match(feature.id,/^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$/u,`invalid feature-contract id: ${feature.id}`);
-  assert.equal(featureIds.has(feature.id),false,`duplicate feature-contract id: ${feature.id}`);featureIds.add(feature.id);
-  assert.ok(tests.includes(feature.owner),`feature contract has no classified owner: ${feature.id} -> ${feature.owner}`);
-  assert.notEqual(feature.owner.split('/')[1],'architecture',`product behavior cannot be architecture-only: ${feature.id}`);
-  featureOwners.add(feature.owner);featureDomains.add(feature.id.split('.')[0]);
-}
-for(const domain of FEATURE_DOMAINS)assert.ok(featureDomains.has(domain),`durable feature domain has no contract inventory: ${domain}`);
-for(const entry of BROWSER_TEST_MANIFEST.smoke)assert.ok(featureOwners.has(entry.script),`smoke workflow lacks an authoritative durable feature contract: ${entry.script}`);
 
 const browserEntries=[...BROWSER_TEST_MANIFEST.smoke.map(entry=>({...entry,tier:'smoke'})),...BROWSER_TEST_MANIFEST.feature.map(entry=>({...entry,tier:'feature'})),...BROWSER_TEST_MANIFEST.extended.map(entry=>({...entry,tier:'extended'}))];
 const quarantines=validateBrowserQuarantines({browserEntries});
@@ -142,4 +73,4 @@ assert.equal(evaluateBugRegressionPolicy({title:'fix: restore rollback',changedF
 assert.equal(evaluateBugRegressionPolicy({title:'fix: restore rollback',changedFiles:['source/core/backup.js','tests/integration/backup/backup-persistence.mjs']}).passed,true);
 assert.equal(evaluateBugRegressionPolicy({title:'feat: new theme',changedFiles:['source/app.html']}).required,false);
 
-console.log(JSON.stringify({status:'PASS',tests:tests.length,exactDuplicates:0,semanticOverlapThreshold:semanticThreshold,structuralContainmentThreshold,overlapExceptions:[...new Set([...actualSemanticExceptions,...actualStructuralExceptions])],crossLayerContracts:[...actualCrossLayer],quarantines:quarantines.length,orphanTests:0,historicalReleaseTokens:0,generatedEvidenceInsideRepository:false,ciGovernance:true,featureContracts:FEATURE_CONTRACTS.length,featureDomains:FEATURE_DOMAINS.length},null,2));
+console.log(JSON.stringify({status:'PASS',tests:tests.length,exactDuplicates:0,quarantines:quarantines.length},null,2));
