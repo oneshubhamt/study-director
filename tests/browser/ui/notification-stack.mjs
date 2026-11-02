@@ -37,6 +37,7 @@ try{
     // The page's own clocks would close results mid-test; hold them as an expanded stack does.
     await page.evaluate(`__PWA6.NoticeCoordinator.setPaused('qa',true)`);
     await page.evaluate(seed);await page.settle(4);await settleMotion(page);
+    const escape=async()=>{await page.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await page.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});};
     let state=await page.evaluate(stack);
     assert.equal(state.mode,'collapsed');
     assert.deepEqual(titles(state),['Google Drive backup','Export ready','Copied','Kept for review','Saved'],'pinned first, then newest first');
@@ -66,13 +67,29 @@ try{
     // A card's own button closes it; so does ×.
     await page.click('#sd-toast-region .interaction-toast[data-tier="blocking"] .interaction-action');await page.settle(3);
     assert.deepEqual(await page.evaluate(`window.__acted`),['reconnect']);assert.ok(!titles(await page.evaluate(stack)).includes('Google Drive backup'),'pressing Reconnect closes its card');
-    await page.click('#sd-toast-region [data-stack-place="front"] .interaction-toast-close');await page.settle(3);
+    await page.click('#sd-toast-region [data-stack-place="front"]:not(.leaving) .interaction-toast-close');await page.settle(3);
     state=await page.evaluate(stack);assert.deepEqual(titles(state),['Copied','Kept for review','Saved'],'× closes the front card and the next comes forward');assert.equal(places(state).Copied,'front');
     checks.closeCards=true;
 
+    // A card whose button only opens something opens it from anywhere on the
+    // card and closes; one whose button changes data (Undo) expands the stack.
+    await page.evaluate(`(()=>{const n=__PWA6.NoticeCoordinator;window.__acted=[];
+      n.notify({key:'undo',kind:'success',duration:12000,title:'Moved to Recently deleted',message:'Physiology.',action:{label:'Undo',run:()=>window.__acted.push('undo')}});
+      n.notify({source:'sync',key:'opens',kind:'warning',tier:'news',title:'Needs review',message:'Google Drive has changes that need your review.',action:{label:'Review',opens:true,run:()=>window.__acted.push('review')}});})()`);await page.settle(3);
+        assert.equal(await page.evaluate(`document.querySelector('#sd-toast-region [data-stack-place="front"]:not(.leaving)').dataset.opens`),'true');
+    await page.click('#sd-toast-region [data-stack-place="front"]:not(.leaving) .interaction-toast-message');await page.settle(3);
+    assert.deepEqual(await page.evaluate(`window.__acted`),['review'],'a click on the card runs Review');
+    state=await page.evaluate(stack);assert.ok(!titles(state).includes('Needs review'),'and closes it');
+    assert.equal(places(state)['Moved to Recently deleted'],'front');assert.equal(await page.evaluate(`document.querySelector('#sd-toast-region [data-stack-place="front"]:not(.leaving)').dataset.opens`),'false');
+    await page.click('#sd-toast-region [data-stack-place="front"]:not(.leaving) .interaction-toast-message');await page.settle(3);
+    assert.equal((await page.evaluate(stack)).mode,'expanded','a card whose button changes data expands the stack instead');assert.deepEqual(await page.evaluate(`window.__acted`),['review'],'Undo did not run');
+    await escape();await page.settle(2);
+    await page.click('#sd-toast-region [data-stack-place="front"]:not(.leaving) .interaction-toast-close');await page.settle(3);
+    assert.deepEqual(titles(await page.evaluate(stack)),['Copied','Kept for review','Saved']);
+    checks.cardOpens=true;
+
     // The Connect card is a card of the stack; Clear all closes it and keeps the critical card.
     // Connect from the profile panel and close Google's window: the card stays with its error.
-    const escape=async()=>{await page.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await page.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});};
     await page.click('#profile-tag');await waitFor(()=>page.evaluate(`document.getElementById('profile-dialog').open`),{label:'profile panel open'});
     await page.click('#profile-drive-action');
     await waitFor(()=>page.evaluate(`document.getElementById('drive-connect-card').dataset.tone==='error'`),{label:'the Connect card shows the failed sign-in'});
@@ -93,13 +110,14 @@ try{
     await waitFor(()=>page.evaluate(`document.getElementById('profile-tag').dataset.badge==='info'`),{label:'unseen news shows the blue badge',timeout:6000});
     assert.match(await page.evaluate(`document.getElementById('profile-tag').getAttribute('aria-label')`),/1 new notification/u);
     await page.click('#profile-tag');await waitFor(()=>page.evaluate(`document.getElementById('profile-dialog').open`),{label:'profile panel'});
+    await page.click('#profile-recent-more');await page.settle(2);
     const recent=await page.evaluate(`[...document.querySelectorAll('#profile-recent-list .profile-recent-item')].map(row=>({title:row.querySelector('.profile-recent-title').textContent,unseen:row.dataset.unseen==='true',time:/\\d/.test(row.querySelector('time').textContent)}))`);
     assert.deepEqual(recent.slice(0,2).map(row=>row.title),['Synced from Laptop','Browser data was cleared']);
     assert.equal(recent[0].unseen,true,'the faded news is marked while the panel is open');assert.ok(recent.every(row=>row.time));
     assert.ok(recent.some(row=>row.title==='Google Drive backup')&&recent.some(row=>row.title==='Saved'),'results and closed cards stay in Recent');
     await page.click('[data-action="close-profile"]');
     await waitFor(()=>page.evaluate(`document.getElementById('profile-tag').dataset.badge===''`),{label:'opening Recent clears the badge',timeout:4000});
-    const before=recent.length;
+    const before=await page.evaluate(`__PWA6.NoticeCoordinator.recent().entries.length`);assert.equal(recent.length,before,'Show all lists every entry');
     await page.navigate(server.url('deployment','instrumented.html'));await waitForStudyDirector(page,{instrumented:true});
     assert.equal(await page.evaluate(`__PWA6.NoticeCoordinator.recent().entries.length`),before,'Recent survives a reload in this window');
     checks.recentAndBadge=true;
@@ -114,10 +132,10 @@ try{
     await page.evaluate(`__PWA6.NoticeCoordinator.notify({key:'long',duration:12000,title:'Backup checked',message:'${'Every version on this device was read back and matched what was written. '.repeat(4)}'})`);await page.settle(4);
     let state=await page.evaluate(stack);
     assert.deepEqual(places(state),{'Google Drive backup':'full','Backup checked':'front','Export ready':'behind-1','Copied':'behind-2','Kept for review':'hidden','Saved':'hidden'},'one pinned card on a phone');
-    assert.equal(await page.evaluate(`(()=>{const message=document.querySelector('#sd-toast-region [data-stack-place="front"] .interaction-toast-message');return message.scrollHeight>message.clientHeight+1;})()`),true,'a long message is cut short while folded');
+    assert.equal(await page.evaluate(`(()=>{const message=document.querySelector('#sd-toast-region [data-stack-place="front"]:not(.leaving) .interaction-toast-message');return message.scrollHeight>message.clientHeight+1;})()`),true,'a long message is cut short while folded');
     // A tap on the front card expands the stack; the column stays above the bottom bar and scrolls.
     for(let i=0;i<8;i++)await page.evaluate(`__PWA6.NoticeCoordinator.notify({key:'extra-${i}',duration:12000,title:'Extra ${i}',message:'Another result.'})`);
-    await page.tap('#sd-toast-region [data-stack-place="front"] .interaction-toast-title');await page.settle(4);await settleMotion(page);
+    await page.tap('#sd-toast-region [data-stack-place="front"]:not(.leaving) .interaction-toast-title');await page.settle(4);await settleMotion(page);
     const column=await page.evaluate(`(()=>{const region=document.getElementById('sd-toast-region'),rect=region.getBoundingClientRect(),bar=document.querySelector('.sd-toast-bar').getBoundingClientRect();return {mode:region.dataset.stack,scrolls:region.scrollHeight>region.clientHeight,bottom:Math.round(rect.bottom),barShown:bar.bottom<=rect.bottom+1,clamped:[...region.querySelectorAll('.interaction-toast-message')].some(message=>message.scrollHeight>message.clientHeight+1)};})()`);
     assert.equal(column.mode,'expanded');assert.equal(column.scrolls,true);assert.ok(column.bottom<=844-80,`the column ends above the bottom bar (${column.bottom})`);assert.equal(column.barShown,true);assert.equal(column.clamped,false,'expanded shows messages in full');
     await page.tap('.sd-toast-more');await page.settle(3);assert.equal((await page.evaluate(stack)).mode,'collapsed');
@@ -129,7 +147,7 @@ try{
       await page.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await page.settle(4);
     };
     const front=places(await page.evaluate(stack)),frontTitle=Object.keys(front).find(title=>front[title]==='front');
-    await swipe('#sd-toast-region [data-stack-place="front"] .interaction-toast-message');
+    await swipe('#sd-toast-region [data-stack-place="front"]:not(.leaving) .interaction-toast-message');
     assert.ok(!titles(await page.evaluate(stack)).includes(frontTitle),`a swipe closes ${frontTitle}`);
     await page.evaluate(`__PWA6.NoticeCoordinator.emit({source:'storage-reset',id:'qa-critical',severity:'warning',foreground:false,surface:'toast',tier:'critical',title:'Browser data was cleared',message:'Choose how to continue.'})`);await page.settle(3);
     await swipe('#sd-toast-region .interaction-toast[data-tier="critical"] .interaction-toast-message');

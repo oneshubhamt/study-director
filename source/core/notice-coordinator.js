@@ -147,7 +147,9 @@ registry.define('notice-coordinator',1,()=>{
       }
       if(raw.action){
         if(!String(raw.action.label||'').trim()||typeof raw.action.run!=='function')throw new TypeError('Notification action is invalid.');
-        action=freeze({label:String(raw.action.label).trim().slice(0,100),run:raw.action.run});
+        // opens: the button only opens something (a dialog, a place, a sign-in),
+        // so a click anywhere on the card may do the same (docs/NOTIFICATIONS.md).
+        action=freeze({label:String(raw.action.label).trim().slice(0,100),run:raw.action.run,opens:raw.action.opens===true});
       }
       // A decision notice may offer a second choice beside its primary action.
       if(action&&raw.secondaryAction){
@@ -163,7 +165,7 @@ registry.define('notice-coordinator',1,()=>{
       const duration=persistent?0:Math.max(1800,Math.min(12000,Number(raw.duration)||(tier==='news'?NEWS_MS:severity==='warning'?7000:4200)));
       return freeze({source,id,operationId,surfaceId:String(raw.surfaceId||''),retainInline:raw.retainInline!==false,occurrence:String(raw.occurrence||''),cue:String(raw.cue||''),system:raw.system===true,kind:String(raw.kind||''),outcome:String(raw.outcome||''),completedAt:String(raw.completedAt||''),announce:raw.announce===true,severity,lifecycle,foreground,tier,title,message,progress,action,secondaryAction,surface,persistent,dismissible,duration});
     }
-    function signature(event){return JSON.stringify({...event,action:event.action?event.action.label:null,secondaryAction:event.secondaryAction?event.secondaryAction.label:null});}
+    function signature(event){return JSON.stringify({...event,action:event.action?[event.action.label,event.action.opens]:null,secondaryAction:event.secondaryAction?event.secondaryAction.label:null});}
     function pinned(event){return event.tier==='critical'||event.tier==='blocking'||event.severity==='error';}
     function publicEvent(row){return freeze({...row.event,key:row.key,deliveryId:String(row.sequence),revision:row.revision,surfaceRevision:row.surfaceRevision,dismissed:row.dismissed,pinned:pinned(row.event)});}
     function rank(row){return row.event.tier==='critical'?0:pinned(row.event)?1:2;}
@@ -321,7 +323,7 @@ registry.define('notice-coordinator',1,()=>{
       trimRecent();
       const entries=recentEntries.map(entry=>{
         const row=events.get(entry.key),live=!!row&&String(row.sequence)===entry.deliveryId&&!!row.event.action&&row.event.lifecycle!=='resolved';
-        return freeze({id:entry.id,source:entry.source,tier:entry.tier,severity:entry.severity,title:entry.title,message:entry.message,at:entry.at,outcome:entry.outcome,seen:entry.seen,actionLabel:live?row.event.action.label:''});
+        return freeze({id:entry.id,source:entry.source,tier:entry.tier,severity:entry.severity,title:entry.title,message:entry.message,at:entry.at,outcome:entry.outcome,seen:entry.seen,actionLabel:live?row.event.action.label:'',actionOpens:live&&row.event.action.opens===true});
       });
       // Unseen: news that faded on its own, untouched, since Recent was last opened.
       return freeze({entries:freeze(entries),unseen:entries.filter(entry=>entry.tier==='news'&&entry.outcome==='expired'&&!entry.seen).length});

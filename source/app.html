@@ -1469,38 +1469,44 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
     <div class="interaction-header profile-header">
       <span class="profile-avatar status-host" id="profile-avatar" data-ring="off" aria-hidden="true"><span class="profile-avatar-letter">S</span><svg class="status-ring" aria-hidden="true" focusable="false"><rect class="status-ring-track" width="100%" height="100%" rx="50%" pathLength="100"/><rect class="status-ring-arc" width="100%" height="100%" rx="50%" pathLength="100"/></svg><span class="status-badge" aria-hidden="true"></span></span>
       <div class="profile-heading">
-        <div class="interaction-eyebrow ui-label">Profile</div>
-        <h2 class="interaction-title ui-title profile-title" id="profile-dialog-title" data-student-name>Student</h2>
-        <div class="profile-subtitle" id="profile-subtitle"></div>
+        <h2 class="interaction-title ui-title profile-title" id="profile-dialog-title"><span class="sr-only">Profile: </span><button class="profile-name" id="profile-name-button" type="button" data-action="rename-profile" title="Rename"><span class="profile-name-text" data-student-name>Student</span><svg class="profile-name-pencil" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M11.2 2.3a1.6 1.6 0 0 1 2.3 2.3l-7.9 7.9-3.1.8.8-3.1z"/></svg></button></h2>
+        <input class="ui-field profile-name-input" id="profile-name-input" type="text" autocomplete="name" spellcheck="false" maxlength="80" aria-label="Your name" data-keydown="profile-name" data-blur="profile-name" hidden>
+        <div class="profile-subtitle" id="profile-subtitle" hidden></div>
       </div>
     </div>
     <div class="interaction-body profile-body">
-      <section class="profile-status" id="profile-status" aria-labelledby="profile-status-title">
+      <section class="profile-section profile-status" id="profile-status" aria-labelledby="profile-status-title">
         <h3 class="profile-section-title ui-label" id="profile-status-title">Sync &amp; backups</h3>
-        <p class="profile-status-headline" id="profile-status-headline" role="status" aria-live="polite"></p>
-        <div class="profile-status-next"><span class="profile-status-detail" id="profile-status-detail"></span><button class="mini-btn ui-btn" id="profile-status-primary" type="button" data-action="sync-status-action" hidden></button></div>
-        <ul class="profile-status-items" id="profile-status-items"></ul>
-        <button class="profile-status-link" type="button" data-action="sync-status-action" data-sync-action="open-data">Details in Library → Data</button>
+        <div class="profile-group">
+          <div class="profile-status-block">
+            <p class="profile-status-headline" id="profile-status-headline" role="status" aria-live="polite"></p>
+            <div class="profile-status-next"><span class="profile-status-detail" id="profile-status-detail"></span><button class="profile-act ui-btn" id="profile-status-primary" type="button" data-action="sync-status-action" hidden></button></div>
+            <ul class="profile-status-items" id="profile-status-items"></ul>
+          </div>
+          <div class="profile-row"><span class="profile-row-text"><span class="profile-row-label">Google Drive</span><span class="profile-row-value" id="profile-drive-value">Not connected</span></span><button class="profile-act ui-btn" id="profile-drive-action" type="button" data-action="profile-drive">Connect</button></div>
+          <div class="profile-row"><span class="profile-row-text"><span class="profile-row-label">Backup password</span><span class="profile-row-value" id="profile-password-value">Off</span></span><button class="profile-act ui-btn" id="profile-password-action" type="button" data-action="backup-protection">Set…</button></div>
+          <button class="profile-row profile-link-row" type="button" data-action="sync-status-action" data-sync-action="open-data"><span class="profile-row-text"><span class="profile-row-label">Backup details</span><span class="profile-row-value">Versions and backup files in Library → Data</span></span><span class="profile-chevron" aria-hidden="true"></span></button>
+        </div>
       </section>
-      <section class="profile-recent" id="profile-recent" aria-labelledby="profile-recent-title">
-        <div class="profile-recent-head"><h3 class="profile-section-title ui-label" id="profile-recent-title">Recent</h3><button class="profile-status-link" id="profile-recent-clear" type="button" data-action="clear-recent" hidden>Clear</button></div>
-        <p class="profile-recent-empty" id="profile-recent-empty">Nothing yet today.</p>
-        <ol class="profile-recent-list" id="profile-recent-list"></ol>
-      </section>
-      <div class="profile-rows">
-        <label class="profile-row profile-name-row"><span class="profile-row-label ui-label">Name</span><input class="ui-field interaction-input profile-name-input" id="profile-name-input" type="text" autocomplete="name" spellcheck="false" data-keydown="profile-name" data-blur="profile-name"></label>
-        <div class="profile-row"><span class="profile-row-label ui-label">Google Drive</span><span class="profile-row-value" id="profile-drive-value">Not connected</span><span class="profile-row-actions"><button class="mini-btn ui-btn" id="profile-drive-action" type="button" data-action="profile-drive">Connect</button></span></div>
-        <div class="profile-row"><span class="profile-row-label ui-label">Backup password</span><span class="profile-row-value" id="profile-password-value">Off</span><span class="profile-row-actions"><button class="mini-btn ui-btn" id="profile-password-action" type="button" data-action="backup-protection">Set…</button></span></div>
-      </div>
       <section class="profile-section" aria-labelledby="profile-list-title">
         <h3 class="profile-section-title ui-label" id="profile-list-title">Profiles on this device</h3>
-        <ul class="profile-list" id="profile-list"></ul>
+        <div class="profile-group">
+          <ul class="profile-list" id="profile-list"></ul>
+          <button class="profile-row profile-add" id="profile-add" type="button" data-action="add-profile"><span class="profile-add-mark" aria-hidden="true">+</span><span class="profile-row-label">Add profile</span></button>
+        </div>
         <p class="profile-note" id="profile-unsupported" hidden>This profile list was saved by a newer version of Study Director. Update the app to add, switch or remove profiles; the list stays as it is.</p>
-        <button class="mini-btn ui-btn ghost profile-add" id="profile-add" type="button" data-action="add-profile">+ Add profile</button>
+        <p class="profile-caption" id="profile-device"></p>
+      </section>
+      <section class="profile-section profile-recent" id="profile-recent" aria-labelledby="profile-recent-title">
+        <div class="profile-section-head"><h3 class="profile-section-title ui-label" id="profile-recent-title">Recent</h3><button class="profile-act profile-act-quiet ui-btn" id="profile-recent-clear" type="button" data-action="clear-recent" hidden>Clear</button></div>
+        <p class="profile-recent-empty" id="profile-recent-empty">Nothing yet today.</p>
+        <div class="profile-group" id="profile-recent-group" hidden>
+          <ol class="profile-recent-list" id="profile-recent-list"></ol>
+          <button class="profile-row profile-more-row" id="profile-recent-more" type="button" data-action="recent-more" aria-expanded="false" aria-controls="profile-recent-list" hidden></button>
+        </div>
       </section>
     </div>
     <div class="interaction-actions profile-actions">
-      <span class="profile-device" id="profile-device"></span>
       <button class="interaction-action ui-btn primary" type="button" data-action="close-profile" autofocus>Done</button>
     </div>
   </div>
@@ -2054,7 +2060,9 @@ if(!Object.isFrozen(NoticeCoordinator)||NoticeCoordinator.format!=='study-direct
 // panel. Kept for this window across a reload (sessionStorage), tied to the
 // profile; never uploaded or backed up. Opening the panel marks news seen.
 const NotificationRecent=(()=>{
-  let highlight=new Set();
+  // The three newest show; Show all lists the rest while the panel is open.
+  const SHOWN=3;
+  let highlight=new Set(),all=false;
   function restore(){
     try{
       const value=JSON.parse(sessionStorage.getItem(SESSION_STORAGE_KEYS.notifications)||'null');
@@ -2074,30 +2082,39 @@ const NotificationRecent=(()=>{
   function render(state=NoticeCoordinator.recent()){
     const dialog=document.getElementById('profile-dialog');if(!dialog?.open)return;
     const list=document.getElementById('profile-recent-list'),empty=document.getElementById('profile-recent-empty'),clear=document.getElementById('profile-recent-clear');
-    if(empty)empty.hidden=!!state.entries.length;if(clear)clear.hidden=!state.entries.length;
-    const key=JSON.stringify([state.entries,[...highlight]]);if(!list||list.dataset.key===key)return;list.dataset.key=key;
-    list.replaceChildren(...state.entries.map(entry=>{
+    const group=document.getElementById('profile-recent-group'),more=document.getElementById('profile-recent-more'),total=state.entries.length;
+    if(empty)empty.hidden=!!total;if(clear)clear.hidden=!total;if(group)group.hidden=!total;
+    if(more){
+      more.hidden=total<=SHOWN;more.setAttribute('aria-expanded',all?'true':'false');
+      const label=all?'Show fewer':`Show all (${total})`;if(more.textContent!==label)more.textContent=label;
+    }
+    const shown=all?state.entries:state.entries.slice(0,SHOWN);
+    const key=JSON.stringify([shown,[...highlight]]);if(!list||list.dataset.key===key)return;list.dataset.key=key;
+    list.replaceChildren(...shown.map(entry=>{
       const row=document.createElement('li');row.className='profile-recent-item';row.dataset.tone=entry.severity;row.dataset.tier=entry.tier;
       if(highlight.has(entry.id))row.dataset.unseen='true';
+      // A live pop-up whose button opens something opens from anywhere on its row.
+      if(entry.actionOpens){row.dataset.action='recent-action';row.dataset.recentId=entry.id;row.dataset.opens='true';}
       const mark=document.createElement('span');mark.className='profile-recent-mark';mark.setAttribute('aria-hidden','true');
       const text=document.createElement('span');text.className='profile-recent-text';
       const title=document.createElement('strong');title.className='profile-recent-title';title.textContent=entry.title;text.append(title);
       if(entry.message){const message=document.createElement('span');message.className='profile-recent-message';message.textContent=entry.message;text.append(message);}
       const when=document.createElement('time');when.className='profile-recent-time';when.dateTime=new Date(entry.at).toISOString();when.textContent=time(entry.at);
       row.append(mark,text,when);
-      if(entry.actionLabel){const button=document.createElement('button');button.type='button';button.className='mini-btn ui-btn';button.dataset.action='recent-action';button.dataset.recentId=entry.id;button.textContent=entry.actionLabel;row.append(button);}
+      if(entry.actionLabel){const button=document.createElement('button');button.type='button';button.className='profile-act ui-btn';button.dataset.action='recent-action';button.dataset.recentId=entry.id;button.textContent=entry.actionLabel;row.append(button);}
       return row;
     }));
   }
   // News that faded unseen stays marked while the panel is open.
   function opened(){const state=NoticeCoordinator.recent();highlight=new Set(state.entries.filter(entry=>entry.tier==='news'&&entry.outcome==='expired'&&!entry.seen).map(entry=>entry.id));render(state);NoticeCoordinator.markRecentSeen();}
-  function closed(){highlight=new Set();}
+  function closed(){highlight=new Set();all=false;}
+  function toggle(){all=!all;render();return true;}
   function run(ev){
     const id=String(ev?.target?.closest?.('[data-recent-id]')?.dataset.recentId||'');if(!id)return false;
     closeProfilePanel();return NoticeCoordinator.runRecentAction(id);
   }
   restore();
-  return Object.freeze({changed,render,opened,closed,run,clear:()=>{NoticeCoordinator.clearRecent();return true;}});
+  return Object.freeze({changed,render,opened,closed,run,toggle,clear:()=>{NoticeCoordinator.clearRecent();return true;}});
 })();
 async function showBackupPresentation(source,kind){
   if(source==='device-folder'&&kind==='permission')return DeviceBackup?.connect();
@@ -2142,7 +2159,7 @@ function renderNotificationSurfaces(state){
   }
 }
 NoticeCoordinator.subscribe(renderNotificationSurfaces);
-const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze({notifications:NoticeCoordinator,timeLabel:storageHealthTime,synced:()=>BackupProviderRuntime.syncing()===true,verified:source=>verifiedRecoveryState.providers[source]||null,action:(source,kind)=>Object.freeze({label:kind==='permission'?(source==='device-folder'?'Allow access':'Reconnect'):kind==='sync-review'?'Review':kind==='sync-password'?'Enter password':kind==='sync-newer'?'Check for update':'Show details',run:()=>showBackupPresentation(source,kind)})}));
+const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze({notifications:NoticeCoordinator,timeLabel:storageHealthTime,synced:()=>BackupProviderRuntime.syncing()===true,verified:source=>verifiedRecoveryState.providers[source]||null,action:(source,kind)=>Object.freeze({label:kind==='permission'?(source==='device-folder'?'Allow access':'Reconnect'):kind==='sync-review'?'Review':kind==='sync-password'?'Enter password':kind==='sync-newer'?'Check for update':'Show details',opens:true,run:()=>showBackupPresentation(source,kind)})}));
 const Interactions=InteractionsModule.createController(Object.freeze({ports:Object.freeze({
   environment:Object.freeze({
     clearTimeout:id=>clearTimeout(id),document,
@@ -4703,7 +4720,7 @@ const UnsupportedData=(()=>{
     NoticeCoordinator.emit({source:'unsupported-data',id:'held',severity:'warning',lifecycle:'succeeded',foreground:false,tier:'blocking',surface:'toast',dismissible:true,
       title:'Some data is from a newer version',
       message:`This device has ${describe(state)} saved by a newer version of Study Director. This version leaves them exactly as they are and works with everything else; Drive sync waits until the app is updated.`,
-      action:{label:'Update app',run:()=>void checkUnsupportedUpdate()}});
+      action:{label:'Update app',opens:true,run:()=>void checkUnsupportedUpdate()}});
     return true;
   }
   // The profile cannot be opened: shown instead of the start-up failure.
@@ -4713,7 +4730,7 @@ const UnsupportedData=(()=>{
     NoticeCoordinator.emit({source:'unsupported-data',id:'blocked',severity:'warning',lifecycle:'succeeded',foreground:false,tier:'blocking',surface:'toast',dismissible:false,
       title:'This profile needs a newer version',
       message:'This profile was saved by a newer version of Study Director, which changed how its data is stored. This version leaves it exactly as it is. Update the app to open it, or use another profile meanwhile.',
-      action:{label:'Check for update',run:()=>void PwaLifecycle.checkForUpdate().catch(error=>AppDiagnostics.capture('unsupported-data.update-check',error,'warn'))},
+      action:{label:'Check for update',opens:true,run:()=>void PwaLifecycle.checkForUpdate().catch(error=>AppDiagnostics.capture('unsupported-data.update-check',error,'warn'))},
       secondaryAction:others.length?{label:`Open ${others[0].name||'another profile'}`,run:()=>{try{Profiles.switchTo(others[0].id);}catch(error){AppDiagnostics.capture('unsupported-data.switch-profile',error,'warn');}}}:{label:'Start a new profile',run:()=>{try{Profiles.add();}catch(error){AppDiagnostics.capture('unsupported-data.add-profile',error,'warn');}}}});
     return true;
   }
@@ -5369,7 +5386,8 @@ async function yieldSessionToOtherDevice(){
     return true;
   });
   sessionYieldedAt=Date.now();
-  Interactions.notify({source:'session',key:'session-yield',tier:'news',cue:'session-moved',system:true,title:'Session continued on another device',message:'The timer here stopped. What this device recorded is kept for you under Needs review.'});
+  Interactions.notify({source:'session',key:'session-yield',tier:'news',cue:'session-moved',system:true,title:'Session continued on another device',message:'The timer here stopped. What this device recorded is kept for you under Needs review.',
+    action:{label:'Review',opens:true,run:()=>void KeptVersions.review()}});
   return true;
 }
 async function restoreSuspendedTodaySession(){
@@ -6278,7 +6296,7 @@ function renderSyncStatusPanel(model){
     const row=document.createElement('li');row.className='profile-status-item';row.dataset.tone=item.tone;row.dataset.item=item.id;
     const mark=document.createElement('span');mark.className='profile-status-mark';mark.setAttribute('aria-hidden','true');
     const text=document.createElement('span');text.className='profile-status-text';text.textContent=item.text;
-    const button=document.createElement('button');button.type='button';button.className='mini-btn ui-btn';button.dataset.action='sync-status-action';button.dataset.syncAction=item.action;button.textContent=item.actionLabel;
+    const button=document.createElement('button');button.type='button';button.className='profile-act ui-btn';button.dataset.action='sync-status-action';button.dataset.syncAction=item.action;button.textContent=item.actionLabel;
     row.append(mark,text,button);return row;
   }));}
 }
@@ -6329,7 +6347,7 @@ function renderProfilePanel(){
       if(meta){const small=document.createElement('small');small.textContent=meta;text.append(small);}
       let end;
       if(current){end=document.createElement('span');end.className='profile-item-tag ui-label';end.textContent='This profile';}
-      else{end=document.createElement('button');end.type='button';end.className='mini-btn ui-btn profile-switch';end.textContent='Switch';end.dataset.action='switch-profile';end.dataset.profile=row.id;end.setAttribute('aria-label',`Switch to ${name}`);end.disabled=locked;}
+      else{end=document.createElement('button');end.type='button';end.className='profile-act ui-btn profile-switch';end.textContent='Switch';end.dataset.action='switch-profile';end.dataset.profile=row.id;end.setAttribute('aria-label',`Switch to ${name}`);end.disabled=locked;}
       item.append(avatar,text,end);return item;
     }));
   }
@@ -6347,7 +6365,7 @@ function installProfileDialogs(){
   const form=document.getElementById('first-start-form');form?.addEventListener('submit',event=>event.preventDefault());
   // First start stays until Skip, Cancel or Continue; Escape does not drop it.
   document.getElementById('first-start-dialog')?.addEventListener('cancel',event=>event.preventDefault());
-  document.getElementById('profile-dialog')?.addEventListener('close',()=>{saveProfileName();NotificationRecent.closed();});
+  document.getElementById('profile-dialog')?.addEventListener('close',()=>{finishProfileRename();NotificationRecent.closed();});
 }
 function saveProfileName(){
   const input=document.getElementById('profile-name-input');if(!input)return;
@@ -6355,9 +6373,25 @@ function saveProfileName(){
   if(normalizeStudentName(raw)===getStudentNameFromDisplay())return;
   const clean=applyStudentName(raw);input.value=clean;persistUserDefaultName(clean);
 }
+// The name in the panel's header renames in place, as a note title does:
+// Enter or leaving the field saves, Escape keeps the old name.
+function startProfileRename(){
+  const button=document.getElementById('profile-name-button'),input=document.getElementById('profile-name-input');
+  if(!button||!input)return false;
+  input.value=getStudentNameFromDisplay();button.hidden=true;input.hidden=false;input.focus();input.select();
+  return true;
+}
+function finishProfileRename(){
+  saveProfileName();
+  const button=document.getElementById('profile-name-button'),input=document.getElementById('profile-name-input');
+  if(input)input.hidden=true;if(button)button.hidden=false;
+}
 function handleProfileNameKey(e){
-  if(e.key==='Enter'){e.preventDefault();saveProfileName();e.currentTarget.blur();return false;}
-  if(e.key==='Escape'){e.currentTarget.value=getStudentNameFromDisplay();}
+  // Key handlers are delegated from the document, so the field is the target.
+  const input=e.target,button=document.getElementById('profile-name-button');
+  if(e.key==='Enter'){e.preventDefault();input.blur();button?.focus();return false;}
+  // Escape leaves the name as it was and keeps the panel open.
+  if(e.key==='Escape'){e.preventDefault();e.stopPropagation();input.value=getStudentNameFromDisplay();input.blur();button?.focus();return false;}
   return true;
 }
 async function profileDriveAction(){
@@ -9333,7 +9367,7 @@ const KeptVersions=(()=>{
     if(Date.now()-sessionYieldedAt<60000&&fresh.every(review=>review.subject==='session'))return;
     Interactions.notify({source:'sync',key:'kept-new',kind:'warning',tier:'news',title:'Kept for review',
       message:`${count===1?'One version was':`${count} versions were`} kept where two devices changed the same thing. Nothing is lost; choose what to keep when you’re ready.`,
-      action:{label:'Review',run:()=>void review()}});
+      action:{label:'Review',opens:true,run:()=>void review()}});
   }
   async function review(ref=''){
     try{
@@ -10045,7 +10079,7 @@ async function offerDeviceRecoveryIfLocalEmpty(options={}){
   if(!await canonicalLocalRecoveryEmpty())return false;
   const state=DeviceBackup.status(),latestBefore=Number(options.latestBefore)||Number.POSITIVE_INFINITY;
   if(!state.connected){
-    if(options.reason==='startup'&&!deviceRecoveryHintNotified&&await studyDataLostHere()){deviceRecoveryHintNotified=true;Interactions.notify({key:'device-recovery-empty-local',tier:'news',title:'No local study data found',message:`If browser data was cleared, restore from ${backupRestoreChoices()}.`,action:{label:'Restore from backup',run:()=>void openBackupRestore()}});}
+    if(options.reason==='startup'&&!deviceRecoveryHintNotified&&await studyDataLostHere()){deviceRecoveryHintNotified=true;Interactions.notify({key:'device-recovery-empty-local',tier:'news',title:'No local study data found',message:`If browser data was cleared, restore from ${backupRestoreChoices()}.`,action:{label:'Restore from backup',opens:true,run:()=>void openBackupRestore()}});}
     return false;
   }
   deviceRecoveryOfferRunning=true;
@@ -11027,6 +11061,8 @@ const CLICK_ACTIONS=Object.freeze({
   // Hiding the card leaves the work running; the indicator still shows it.
   'close-drive-connect': ()=>{endDriveConnectCard();return true;},
   'recent-action': ev=>NotificationRecent.run(ev),
+  'recent-more': ()=>NotificationRecent.toggle(),
+  'rename-profile': startProfileRename,
   'clear-recent': ()=>NotificationRecent.clear(),
   'review-kept-versions': ()=>KeptVersions.review(),
   'open-profile': openProfilePanel,
@@ -11064,7 +11100,7 @@ const INPUT_ACTIONS=Object.freeze({
   'practice-setup': ()=>PracticePacer.previewSetup()
 });
 const BLUR_ACTIONS=Object.freeze({
-  'profile-name': saveProfileName,
+  'profile-name': finishProfileRename,
   'save-reflection': ()=>flushPendingReviewSave()
 });
 const KEYDOWN_ACTIONS=Object.freeze({

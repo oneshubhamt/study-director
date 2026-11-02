@@ -44,7 +44,8 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('upgrade-renamed-names','tests/browser/storage/upgrade-renamed-names.mjs',['storage','upgrade','compatibility','indexeddb','notes','reload']),
     test('unsupported-data','tests/browser/storage/unsupported-data.mjs',['storage','compatibility','indexeddb','profiles','reload'],240000),
     test('interactions','tests/browser/ui/interactions.mjs',['dialogs','history','navigation','keyboard','notifications']),
-    test('notification-stack','tests/browser/ui/notification-stack.mjs',['notifications','stack','recent','mobile','touch','keyboard','reload'])
+    test('notification-stack','tests/browser/ui/notification-stack.mjs',['notifications','stack','recent','mobile','touch','keyboard','reload']),
+    test('profile-panel','tests/browser/ui/profile-panel.mjs',['profile','recent','notifications','rename','mobile','keyboard','reload'])
   ]),
   extended:Object.freeze([
     test('attachment-library','tests/browser/attachments/attachments.mjs',['attachments','pdf','audio','opfs','references','streaming','atomic-import','trusted-types'],180000),

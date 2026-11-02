@@ -338,7 +338,8 @@ registry.define('interactions',1,()=>{
     function removeToast(toast){
       if(!toast||!toast.parentNode)return false;
       if(toast.classList.contains('leaving'))return false;
-      toast.classList.add('leaving');
+      // A closing card takes no more clicks: its button cannot run twice.
+      toast.classList.add('leaving');toast.inert=true;
       let timer=0,done=false;
       const finish=()=>{
         if(done)return;done=true;
@@ -490,16 +491,30 @@ registry.define('interactions',1,()=>{
       const region=toastRegion(),card=target.closest('.interaction-toast,[data-toast-card]');
       return card&&card.parentNode===region&&isStackCard(card)?card:null;
     }
+    // A card in full view whose button only opens something does the same
+    // when clicked anywhere (docs/NOTIFICATIONS.md, stack); other cards, and
+    // cards behind the front one, expand the stack.
+    function openCard(card){
+      if(card.dataset.opens!=='true')return false;
+      // Selecting text in a card is not a click on it.
+      const selection=window.getSelection?.();
+      if(selection&&!selection.isCollapsed&&card.contains(selection.anchorNode))return true;
+      card.querySelector('.interaction-action')?.click();
+      return true;
+    }
     function onRegionClick(event){
       if(event.target.closest('button,a,input,select,textarea,label'))return;
-      if(stackExpanded){if(event.target===toastRegion())setExpanded(false);return;}
-      const card=stackCardFrom(event.target);if(!card)return;
+      if(Date.now()-swipedAt<400)return;
+      const card=stackCardFrom(event.target);
+      if(stackExpanded){if(card)openCard(card);else if(event.target===toastRegion())setExpanded(false);return;}
+      if(!card)return;
+      if(['front','full'].includes(card.dataset.stackPlace)&&openCard(card))return;
       const cards=[...toastRegion().children].filter(isStackCard);
       if(cards.length>1||cardClamped(card))setExpanded(true);
     }
     // A sideways swipe (touch or pen) closes a card; one that cannot be
     // closed springs back.
-    let swipe=null;
+    let swipe=null,swipedAt=0;
     function onPointerDown(event){
       if(!['touch','pen'].includes(event.pointerType)||event.target.closest('button,a,input'))return;
       const card=stackCardFrom(event.target);if(!card)return;
@@ -521,7 +536,7 @@ registry.define('interactions',1,()=>{
       if(!swipe||event.pointerId!==swipe.id)return;
       const {card,dx,active,dismissible}=swipe;swipe=null;
       if(!active)return;
-      card.classList.remove('swiping');
+      swipedAt=Date.now();card.classList.remove('swiping');
       if(dismissible&&Math.abs(dx)>=SWIPE_DISTANCE&&event.type!=='pointercancel'){
         card.style.transform=`translateX(${dx>0?'110%':'-110%'})`;card.style.opacity='0';
         if(!closeCard(card)){card.style.transform='';card.style.opacity='';}
@@ -588,6 +603,9 @@ registry.define('interactions',1,()=>{
           if(row.action){entry.action=actionButton(row.action);copy.appendChild(entry.action);}
           if(row.action&&row.secondaryAction){entry.secondary=actionButton(row.secondaryAction);copy.appendChild(entry.secondary);}
         }
+        // One button that only opens something: the whole card opens it.
+        const opens=row.action?.opens===true&&!row.secondaryAction?'true':'false';
+        if(toast.dataset.opens!==opens)toast.dataset.opens=opens;
       }
       toastRows=state.toasts;
       layoutStack();

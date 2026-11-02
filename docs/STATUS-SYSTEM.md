@@ -83,7 +83,18 @@ session running on another device, app update ready, no backup in over a week.
   Details (storage, backup check, Device Folder failing), Go to Execute (session
   elsewhere), Continue here (session suspended on another device), Update (new
   version ready).
-- **Details in Library → Data** link.
+- **Settings rows** in the same box: Google Drive (account, Connect / Sign in /
+  Disconnect) and Backup password (On / Off, Set / Change / Enter), then
+  **Backup details** — a row with an arrow to Library → Data.
+
+**Panel layout** (Entry 030). The header (avatar with its ring, the name, the
+Google account when there is one) and Done stay in place; only the middle
+scrolls. The name renames in place: tap it, type, Enter or leaving saves,
+Escape keeps the old name. Sections, in order: Sync & backups, Profiles on this
+device (one row each with Switch, then Add profile, then the device name),
+Recent (the three newest, Show all for the rest). Every section is a small
+heading over one box of rows; a row is a label over a quieter value with at most
+one compact button (32 px, 36 px on touch screens).
 
 ## 5. Motion and accessibility
 

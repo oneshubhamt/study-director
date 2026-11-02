@@ -1049,6 +1049,60 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
   - Tests changed to follow the app: `notification-stack` first measured the peeks mid-transition (now waits with `settleMotion`) and forced the Connect card visible, which the app rightly hid again (now the real Connect button, with a stand-in Google script whose window the person closes, so nothing reaches Google); `app-sounds` counted 13 cues (now the engine's own list); `site-data-clear` expected the restored pop-up during a work block (now: held while the block runs, shown at a pause); `session-draft-edit` used `waitWhileStudying` (now `tier:'news'` and `tier:'blocking'`); `study-cue-lifecycle` gained the fixed-block check (Settle in the foreground, a device notification in the background, silence when away).
   - Not run: the full browser suite, other skins and themes, real devices, a screen reader, and listening on phone speakers. The out-of-scope sessionStorage key from step 1 is still unregistered.
 
+### Entry 030 — Profile panel refinement; pop-ups that open where they point (2026-11-02)
+
+- **Branch / source HEAD before:** `refactor/background-coordination` at `9cfd32c` (release `SDVB75F18`, already above `main`'s `SDVB75F17`; no bump). The owner approved the profile panel proposal (rename in the header; Recent at the bottom showing three) and asked that pop-ups be clickable, with Kept for review opening the review directly.
+- **Step 1 — audit (current source and screenshots at 1280×860 and 390×844):**
+  - **P1 Frame.** The whole dialog scrolls (`.interaction-dialog` overflow), so with three Recent entries Done is below the screen on both a laptop and a phone.
+  - **P2 Name three times.** Header title, the Name field (`#profile-name-input`) and the profile list.
+  - **P3 Inverted hierarchy.** Row labels ("Google Drive") are smaller and greyer than their values ("Not connected").
+  - **P4 Four button sizes.** Row buttons 42 px tall with a 96 px minimum width, a full-width ghost "+ Add profile" on a phone, a large Done, and underlined text links (Clear, "Details in Library → Data").
+  - **P5 Three section styles.** Sync & backups is a boxed card with its title inside; Recent and Profiles have titles outside and loose content; Name/Drive/Password is a box with no title.
+  - **P6 Split Drive story.** The Sync headline says "Connect Google Drive", but Connect is in a separate box further down, and the backup password sits apart from backups.
+  - **P7 Order.** Recent (up to 20 entries) sits between the status and the settings and pushes them down.
+  - **P8 Phone header.** A 52 px avatar plus a "Profile" eyebrow over the name.
+  - **C1 Cards are not clickable.** Clicking a pop-up only expands the stack (`interactions.onRegionClick`); its destination is reachable only through its button. Every background pop-up already has a destination button (`backup-presentation` notices → `showBackupPresentation`; Kept for review → `KeptVersions.review` → the review dialog; unsupported data → update; no-local-data hint → restore). Two buttons change data or ownership (library Undo, hand-off Continue here); the storage-clear decision has two choices.
+  - **C2 Session moved has no button.** "Session continued on another device" says this device's record is kept for review but offers no way there.
+  - **C3 Recent rows.** Only the small button runs a live pop-up's action.
+- **Step 2 — objectives before edits:**
+  - **E30.1 (P1)** Header and footer stay; only the middle scrolls; Done is always visible.
+  - **E30.2 (P2, P8)** Header: avatar (44 px, 40 px on a phone) with its sync ring, the name as a button that renames in place (Enter or leaving saves, Escape keeps the old name, the same rules as a note title), and one line under it with the Google account when there is one. The Name field and the "Profile" eyebrow go (the dialog is still named "Profile" for screen readers). Saving uses the existing name path.
+  - **E30.3 (P5)** One section style: a small heading, then one box of rows with thin dividers; no boxes inside boxes.
+  - **E30.4 (P6)** Sync & backups holds the status (headline, detail, its one main button, any items), then Google Drive and Backup password rows, then "Backup details" as a row with an arrow to Library → Data.
+  - **E30.5 (P3, P4)** Row: label above (primary colour, normal weight), value below (smaller, secondary). One compact button for row actions (32 px; 36 px on touch screens; as wide as its text). One main button per section at most. Text links become buttons or rows.
+  - **E30.6** Profiles: each profile a row (avatar, name and detail, Switch or "This profile"); "Add profile" is the last row; the device name is a caption under the box.
+  - **E30.7 (P7)** Recent is last: heading with a compact Clear, the three newest, then "Show all (N)" / "Show fewer"; empty is one quiet line.
+  - **E30.8 (C1)** A pop-up whose button only opens something can be clicked anywhere on the card to do the same (and closes, as the button does). Producers mark such buttons `opens:true`: every `backup-presentation` notice and condition, Kept for review, unsupported data, the no-local-data hint, and the session-moved Review (E30.9). Not: Undo, Continue here, or a card with two choices. A card behind the front one, or one without such a button, still expands the stack; a swipe or a text selection never clicks. Such cards show a pointer and lift slightly on hover; the button stays for keyboards and screen readers.
+  - **E30.9 (C2)** "Session continued on another device" gets Review, which opens the review of what was kept.
+  - **E30.10 (C3)** A Recent row whose pop-up is live and opens something can be clicked anywhere.
+  - **E30.11** No feature changes what it does: same actions, status logic, Recent entries and saving.
+  - **E30.12** Tests: the stack browser test gains card clicks (opening card runs and closes; Undo-like card expands instead); a new profile panel browser check (Done in view with Recent full on a laptop and a phone, rename in place, Escape keeps the name, Show all); the coordinator keeps `opens`; affected browser tests rerun.
+- **Step 3 — implementation:**
+  - `source/core/notice-coordinator.js`: an action keeps `opens` (only `true` counts; part of the signature); Recent rows carry `actionOpens` while what they point to still stands.
+  - `source/core/interactions.js`: `openCard` — a card in full view (front, pinned or in the open list) marked `data-opens` presses its button when clicked anywhere; a text selection inside it is not a click; a click within 400 ms of a swipe is ignored; other cards keep expanding the stack. A closing card is made `inert`, so its button cannot be pressed twice during the fade.
+  - Producers: every `backup-presentation` action (via the host's action factory), Kept for review, both unsupported-data updates and the no-local-data hint are `opens:true`; "Session continued on another device" gains Review (`KeptVersions.review`).
+  - `source/app.html` panel: new markup with the same element ids (status, Drive, password, profile list, Recent); the name is a button that swaps to `#profile-name-input` (`startProfileRename`, `finishProfileRename`); Done alone in the footer; Recent rows that open are clickable; `NotificationRecent` shows three with Show all / Show fewer (`recent-more`, reset when the panel closes). Row and status buttons use `.profile-act`.
+  - `source/styles/core.css`: the panel's block rewritten — flex frame with a scrolling body, header avatar 44/40 px, rename button with a pencil on hover (always faint on touch), one section and row system, `.profile-act` compact button (32 px; 36 px on coarse pointers), dividers between rows, Recent and profile rows, quiet Clear, Show all row; old `.profile-rows`, `.profile-row-actions`, `.profile-name-row`, `.profile-status-link` and `.profile-device` rules removed. Opening cards get a pointer and a 1 px lift on hover (none with reduced motion).
+- **Found and fixed on the way:** Enter in the profile Name field never saved and threw `e.currentTarget.blur is not a function`, because key handlers are delegated from the document. The handler now uses the field (`e.target`); the new browser test covers Enter, Escape and a reload. No other delegated key handler used `currentTarget`.
+- **Step 4 — objective recheck (source):**
+  - E30.1 MET — `.profile-dialog[open]` is a flex column, the body scrolls; Done in view on both viewports with Recent full and scrolled (browser test).
+  - E30.2 MET — avatar 44/40 px with ring; name button and in-place input; Enter/blur save, Escape keeps and leaves the panel open; subtitle shows the account only when there is one; the dialog name still starts "Profile:" for screen readers (`sr-only`).
+  - E30.3 MET — every section is heading + `.profile-group`; no nested boxes except the status "needs you" items, which keep their tone borders inside the status block by design.
+  - E30.4 MET — status block, Drive and password rows, Backup details row with arrow, all in one box.
+  - E30.5 MET — `.profile-row-label` (primary, 500, body size) over `.profile-row-value` (secondary, caption); `.profile-act` only for row actions; links replaced by rows or buttons.
+  - E30.6 MET — profile rows, Add profile row, device caption.
+  - E30.7 MET — Recent last, three shown, Show all (N) / Show fewer with `aria-expanded`, quiet Clear, one-line empty state.
+  - E30.8 MET — `opens` producers listed above; Undo, Continue here and two-choice cards excluded; behind cards expand; swipe and selection guarded; hover affordance; button kept.
+  - E30.9 MET — session-yield Review.
+  - E30.10 MET — Recent rows with a live opening action are clickable; their button stays.
+  - E30.11 MET — no feature's work changed; the Enter fix makes the existing save path reachable.
+  - E30.12 MET — see step 5.
+- **Step 5 — targeted QA (working tree on `9cfd32c`):**
+  - Build passed. Categories: unit, architecture and integration PASS (integration includes the new coordinator check that only `opens:true` counts and that a Recent row opens until what it points to is resolved).
+  - Browser tests, each run alone: `profile-panel` (new; laptop and phone: Done in view with Recent full and scrolled, three rows then Show all (7) / Show fewer, a live Recent row opens Review and closes the pop-up, rename with Enter, Escape keeps the name and the panel, name kept after a reload), `notification-stack` (adds: an opening card runs Review from a click on its text and closes; an Undo card expands the stack and does not run), `interactions`, `site-data-clear`, `sync-kept-reviews`, `sync-and-profiles` — all PASS.
+  - Tests changed to follow the app: the stack test reads Recent after Show all and skips cards that are closing; the coordinator check first assumed a used Recent row stops opening, but Recent keeps the button while what it points to still stands, by design, so the check now resolves it first.
+  - Screenshots at 1280×860 and 390×844 checked before and after. Not run: the full browser suite, other skins and themes, real devices, a screen reader.
+
 ### Journal template — duplicate this for the next pass
 
 - **Entry NNN — Pass P#, topic / date:**

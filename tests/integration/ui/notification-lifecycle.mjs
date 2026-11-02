@@ -378,4 +378,23 @@ class Element {
   time.tick(24*3600000);assert.equal(n.recent().entries.length,0);
   assert.ok(seen.length>3,'listeners hear each change');
 }
-console.log(JSON.stringify({status:'PASS',suite:'notification-lifecycle',checks:['priority and persistent errors','decision notices persist until resolved','deduplication','hover/focus/hidden expiry','dismissal versus cancellation','recurring notices','stale operation handles','terminal fencing','renderer severity','Device and Drive summaries','study-timer hold','kinds, order and sounds','no hidden queue','banner sounds','recent and unseen']},null,2));
+// A button that only opens something marks its card (and its Recent row) as
+// opening from anywhere; other buttons, and absent flags, do not.
+{
+  const {notices:n}=coordinator();let ran=0;
+  n.notify({source:'sync',key:'opens',tier:'news',title:'Needs review',action:{label:'Review',opens:true,run:()=>ran++}});
+  n.notify({key:'undo',kind:'success',title:'Moved',action:{label:'Undo',run:()=>ran++}});
+  n.notify({key:'yes-ish',kind:'success',title:'Odd',action:{label:'Open',opens:'yes',run:()=>ran++}});
+  const actions=Object.fromEntries(n.eventStatus().events.map(event=>[event.title,event.action.opens]));
+  assert.deepEqual(actions,{'Needs review':true,Moved:false,Odd:false},'only opens:true counts');
+  const rows=Object.fromEntries(n.recent().entries.map(entry=>[entry.title,entry.actionOpens]));
+  assert.deepEqual(rows,{'Needs review':true,Moved:false,Odd:false});
+  const id=n.recent().entries.find(entry=>entry.title==='Needs review').id;
+  n.runRecentAction(id);assert.equal(ran,1);
+  assert.equal(n.eventStatus().events.find(event=>event.title==='Needs review').dismissed,true,'the pop-up closes');
+  assert.equal(n.recent().entries.find(entry=>entry.id===id).actionOpens,true,'while the review still waits, its row still opens it');
+  n.resolveEvent('sync','opens');
+  assert.equal(n.recent().entries.find(entry=>entry.id===id).actionOpens,false,'once resolved, the row opens nothing');
+  n.clear();
+}
+console.log(JSON.stringify({status:'PASS',suite:'notification-lifecycle',checks:['priority and persistent errors','decision notices persist until resolved','deduplication','hover/focus/hidden expiry','dismissal versus cancellation','recurring notices','stale operation handles','terminal fencing','renderer severity','Device and Drive summaries','study-timer hold','kinds, order and sounds','no hidden queue','banner sounds','recent and unseen','opening cards']},null,2));
