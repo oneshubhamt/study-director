@@ -1103,6 +1103,23 @@ The independent 2026-10-31 de novo audit checked production job owners and impor
   - Tests changed to follow the app: the stack test reads Recent after Show all and skips cards that are closing; the coordinator check first assumed a used Recent row stops opening, but Recent keeps the button while what it points to still stands, by design, so the check now resolves it first.
   - Screenshots at 1280×860 and 390×844 checked before and after. Not run: the full browser suite, other skins and themes, real devices, a screen reader.
 
+### Entry 031 — Two review findings on the status model (2026-11-02)
+
+- **Branch / HEAD before:** `refactor/background-coordination` at `fca10f7` (PR #10).
+- **Orientation:** two Codex review findings on `source/core/backup-presentation.js`, both in code added by Entries 024–026.
+- **Step 1 — audit (source):**
+  - Finding 1 proved. `status()` turns the ring red only when `sync.failed && retryBackoffCapped`. `sync.failed` is set only by a failed catch-up (`backup-provider.js`, `settleCatchUp`). An upload that keeps failing advances the same retry counter through `nextConvergenceRetryDelay`, which raises the red "keeps failing" pop-up, but leaves `sync.failed` false. The ring then stays at pending "Changes since…", with no error badge and no Try again. That contradicts STATUS-SYSTEM.md section 6 ("Red only after retries run out: the ring, the badge, the pop-up and the Connect card").
+  - Finding 2 proved. A catch-up that needs a decision sets `state.review` and leaves `syncedAt` unchanged. While the review waits, convergence ends with `needs-review` and neither syncs nor uploads. `connectProgress()` checks the review only after `syncedAt>=startedAt`, so on a first connection the card stays on "Checking Google Drive…" (or "Uploading…" once a catch-up was seen) and offers no Review. The unit row covering this case gave the review a fresh `syncedAt`, a state the app never produces.
+- **Step 2 — objectives:**
+  - E31.1: retries that ran out turn the ring red whichever half (catch-up or upload) failed. The test is `retryBackoffCapped`, which is reset on every success.
+  - E31.2: a waiting sync review shows on the Connect card with Review, whatever the sync timestamp. It shows as amber with the bring-in step waiting, because nothing has come in yet.
+  - E31.3: unit rows follow states the app produces: an upload whose retries ran out (`failed:false`, capped), and a review with no new `syncedAt`.
+- **Step 3 — implementation:**
+  - `source/core/backup-presentation.js`: the ring is `error` when `retryBackoffCapped` is set, whether or not `sync.failed` is. `connectProgress` checks a waiting review before the synced-time gate: amber, titled "Google Drive has changes to review", bring-in step waiting, with Review.
+  - `tests/unit/backup/sync-status.mjs`: new "Uploads failing after retries" row. The card's review row was replaced with two rows, first connect and reconnect after an older sync, both without a new sync time.
+- **Step 4 — recheck:** E31.1 MET: the ring is red with the error badge and Try again; a running retry still shows syncing, because busy is checked first. E31.2 MET: Review shows on a first connect and on a reconnect. E31.3 MET: before the fix, both new rows failed against the old source ("Uploads failing after retries: ring"; "Needs review (first connect): tone") and pass after it.
+- **Step 5 — targeted QA:** build passed; unit 24, architecture 32 and integration 96 PASS; browser `sync-and-profiles` and `notification-stack` each run alone, PASS. Not run: the rest of the browser suite.
+
 ### Journal template — duplicate this for the next pass
 
 - **Entry NNN — Pass P#, topic / date:**

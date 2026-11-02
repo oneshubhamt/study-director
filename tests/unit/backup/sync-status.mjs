@@ -49,6 +49,7 @@ check('Signed out',{drive:drive({connected:false})},{ring:'signed-out',badge:'',
 check('Offline',{online:false,drive:drive()},{ring:'offline',label:/^Offline · last synced 12:04$/u,action:''});
 check('First sync not finished',{drive:drive({},{syncedAt:''})},{ring:'pending',label:/^Connected · first sync not finished$/u});
 check('Failing after retries',{drive:drive({retryBackoffCapped:true},{failed:true})},{ring:'error',badge:'error',label:/^Sync stopped · last synced 12:04$/u,action:'retry',items:['retry']});
+check('Uploads failing after retries',{drive:drive({retryBackoffCapped:true,waiting:true})},{ring:'error',badge:'error',label:/^Sync stopped · last synced 12:04$/u,action:'retry',items:['retry']});
 check('Retry running after retries ran out',{drive:drive({retryBackoffCapped:true},{failed:true,syncing:true})},{ring:'syncing'});
 check('Another device saving',{drive:drive({},{turnWaits:1})},{ring:'syncing',slow:true,label:/^Waiting for another device/u});
 check('Connecting',{drive:{connecting:true}},{ring:'syncing',slow:false,label:/^Connecting Google Drive…$/u});
@@ -115,7 +116,9 @@ checkCard('Synced, new library',{phase:'signed-in',seen:{upload:true},drive:link
 checkCard('Synced, joined library',{phase:'signed-in',seen:{sync:true,upload:true},drive:linked({},{syncedAt:LATER})},{tone:'done',labels:['Signed in to Google','Brought in changes from Google Drive','Uploaded this device’s data']});
 checkCard('Synced with versions kept for review',{phase:'signed-in',seen:{sync:true},keptNew:2,drive:linked({},{syncedAt:LATER})},{tone:'done',done:true,status:/2 versions kept for you to review/u,action:'review-kept'});
 checkCard('A sync before this connect is not this one',{phase:'signed-in',drive:linked({},{syncedAt:'2026-11-01T11:00:00.000Z'})},{tone:'working',done:false,status:/^Checking Google Drive/u});
-checkCard('Needs review',{phase:'signed-in',seen:{sync:true},drive:linked({},{syncedAt:LATER,review:true})},{tone:'attention',action:'review-sync'});
+// A catch-up that needs a decision leaves the sync time as it was and waits.
+checkCard('Needs review (first connect)',{phase:'signed-in',seen:{sync:true},drive:linked({waiting:true},{review:true})},{tone:'attention',status:/need your review/u,steps:'done,waiting,pending',action:'review-sync'});
+checkCard('Needs review (reconnect, older sync)',{phase:'signed-in',seen:{sync:true},drive:linked({waiting:true},{syncedAt:'2026-11-01T11:00:00.000Z',review:true})},{tone:'attention',steps:'done,waiting,pending',action:'review-sync'});
 checkCard('Needs password (another device)',{phase:'signed-in',drive:linked({waiting:true},{password:true})},{tone:'attention',title:'Enter your backup password',action:'unlock-sync'});
 checkCard('Needs password (this device)',{phase:'signed-in',drive:linked({locked:true,waiting:true})},{tone:'attention',action:'enter-password'});
 checkCard('Needs app update',{phase:'signed-in',drive:linked({},{newer:true})},{tone:'attention',action:'check-update'});
@@ -125,4 +128,4 @@ checkCard('Retrying',{phase:'signed-in',drive:linked({waiting:true,nextEligibleA
 checkCard('Stopped after retries',{phase:'signed-in',drive:linked({retryBackoffCapped:true,waiting:true},{failed:true})},{tone:'error',title:'Sync stopped',steps:'done,failed,pending',action:'retry'});
 checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({connected:false})},{tone:'attention',steps:'done,waiting,pending',action:'sign-in'});
 
-console.log(JSON.stringify({status:'PASS',suite:'sync-status',oldTextCases:12,newCases:20,priorityCases:3,phase4Cases:5,unseenCases:4,connectCardCases:20}));
+console.log(JSON.stringify({status:'PASS',suite:'sync-status',oldTextCases:12,newCases:21,priorityCases:3,phase4Cases:5,unseenCases:4,connectCardCases:21}));

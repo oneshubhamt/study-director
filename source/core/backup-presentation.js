@@ -142,7 +142,9 @@ registry.define('backup-presentation',1,()=>{
         else if(!connected)ring='signed-out';
         else if(lockHere||syncPassword||newer)ring='blocked';
         else if(driveBusy||turn||deviceBusy)ring='syncing';
-        else if(failed&&drive.retryBackoffCapped===true)ring='error';
+        // Retries ran out, for a catch-up or an upload (the counter resets on
+        // every success).
+        else if(drive.retryBackoffCapped===true)ring='error';
         else if(waiting||failed||review||!sync.syncedAt)ring='pending';
         else ring='synced';
       }else if(deviceBusy)ring='syncing';
@@ -243,8 +245,10 @@ registry.define('backup-presentation',1,()=>{
       if(!working&&drive.retryBackoffCapped)return result('error','Sync stopped','Syncing stopped after several tries.',active,{failed:active,action:act('retry','Try again')});
       // Still retrying: amber; red only once retries ran out (above).
       if(!working&&sync.failed){const next=timeText(drive.nextEligibleAt);return result('attention','Syncing with Google Drive',`Couldn’t finish syncing.${next?` Trying again at ${next}.`:' Trying again shortly.'}`,active,{failed:active,waiting:true,action:act('retry','Try now')});}
+      // A review leaves the sync time as it was, and nothing comes in or
+      // goes up until it is settled.
+      if(!working&&sync.review)return result('attention','Google Drive has changes to review','Some changes need your review before they come in.','bring-in',{failed:'bring-in',waiting:true,action:act('review-sync','Review')});
       if(!working&&syncedAt>=started&&syncedAt>0&&!drive.waiting){
-        if(sync.review)return result('attention','Synced with Google Drive','Some changes need your review before they come in.','done',{action:act('review-sync','Review')});
         const when=timeText(sync.syncedAt);
         if(kept)return result('done','Synced with Google Drive',`Synced at ${when}. ${kept} version${kept===1?'':'s'} kept for you to review.`,'done',{done:true,action:act('review-kept','Review')});
         return result('done','Synced with Google Drive',`Synced at ${when}. This device is up to date.`,'done',{done:true});
