@@ -19,7 +19,7 @@ try{
   await waitFor(async()=>!!(await sync(a))?.syncedAt,{label:'A synced',timeout:30000});
 
   // One status indicator replaces the sidebar's sync line: the sidebar name and
-  // the phone circle both show Synced (docs/STATUS-SYSTEM.md).
+  // the phone circle both show Synced (docs/areas/status-indicator.md).
   await waitFor(()=>a.evaluate(`['profile-tag','profile-badge'].every(id=>document.getElementById(id).dataset.ring==='synced')`),{label:'A shows the synced ring',timeout:20000});
   assert.match(await a.evaluate(`document.getElementById('profile-tag').getAttribute('aria-label')`),/· Synced \d/u,'the sidebar name says when it synced');
   assert.equal(await a.evaluate(`!!document.getElementById('sb-sync')`),false,'the sidebar sync line is gone');

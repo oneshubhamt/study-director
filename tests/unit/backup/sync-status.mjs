@@ -63,7 +63,7 @@ check('Storage error',{drive:null,storage:[{source:'localStorage.write',label:'B
 check('Backup reminder',{drive:null,reminder:'Backup reminder: the last backup is over a week old.'},{badge:'warning',label:/^No backup in over a week/u,items:['open-data']});
 check('Session elsewhere',{drive:drive(),sessionElsewhere:'on Laptop'},{ring:'synced',badge:'',label:/^Synced 12:04 · Today’s session is running on Laptop$/u,items:['open-execute']});
 check('Update ready',{drive:drive(),updateReady:true},{ring:'synced',badge:'info',items:['apply-update']});
-// News that faded unseen (docs/NOTIFICATIONS.md, Recent): the blue info
+// News that faded unseen (docs/areas/notifications.md, Recent): the blue info
 // badge with its count, last in the label; anything more urgent wins.
 const unseenOne=check('One unseen notification',{drive:drive(),unseen:1},{ring:'synced',badge:'info',label:/^Synced 12:04 · 1 new notification$/u,items:[]});
 assert.equal(unseenOne.unseen,1);

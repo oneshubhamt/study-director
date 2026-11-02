@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor,settleMotion} from '../../helpers/browser-harness.mjs';
 
-// The notification stack in the real app (docs/NOTIFICATIONS.md, layout), on
+// The notification stack in the real app (docs/areas/notifications.md, stack), on
 // a laptop and a phone: pinned cards, the front card with two peeking behind
 // it, "+N more"; expanding into one scrolling column (clocks stop); Escape and
 // a click outside fold it; a card's button and × close it; Clear all keeps the

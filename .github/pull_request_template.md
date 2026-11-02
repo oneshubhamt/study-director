@@ -2,6 +2,10 @@
 
 Describe the behavior or test-system change briefly.
 
+## Objectives
+
+Numbered objectives, each marked met, partly met or not met against the code. Say what changed from the plan and why.
+
 ## Regression protection
 
 - [ ] If this fixes a bug/regression, I added or strengthened a regression test at the **correct layer** (`unit`, `integration`, `browser`, or `architecture`).

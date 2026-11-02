@@ -11,12 +11,7 @@ Study Director is a local-first PWA for planning, focused study sessions, review
 - `tests/` — governed unit, integration, architecture and browser tests.
 - `build/` — deterministic build, Firebase staging, minification and verification tooling.
 - `vendor/` — reviewed vendored dependencies that are intentionally shipped from source.
-- `docs/ARCHITECTURE.md` — current runtime/data architecture and invariants.
-- `docs/VERIFICATION.md` — current verification results and release procedure.
-- `docs/NOTIFICATIONS.md` — app-wide producer inventory and delivery contract.
-- `docs/PROGRAMMES.md` — status and read-first map: completed A–F backup certification vs new background-services P0–P6 programme.
-
-Historical per-pass plans and measurement output are not deployment/runtime assets. Working remediation ledgers retained in `docs/` are source-development records: consult `docs/PROGRAMMES.md` for their status, and use the current architecture documents for production behavior.
+- `docs/` — documentation. Start at [docs/README.md](docs/README.md): the architecture overview, how to work, the backlog, and one page per area of the app.
 
 ## Current architecture
 
@@ -32,7 +27,7 @@ Notifications share one presentation coordinator for visual notices, app sounds 
 
 The cues are made at 22.05 kHz mono when sound is first unlocked. Device Folder and Drive share compact verification/progress labels and completion ticks. Execute note titles and Area context use the same baseline in Director and Glass.
 
-See `docs/ARCHITECTURE.md` for the full current-state summary.
+See [docs/architecture.md](docs/architecture.md) for the overview and the area pages it links to.
 
 ## Get started
 
@@ -95,7 +90,7 @@ npm run verify
 npm run test:release:deployment
 ```
 
-See `docs/VERIFICATION.md` for the current QA policy and release gates.
+See [docs/workflow.md](docs/workflow.md) for choosing tests, commands (including `node` equivalents when `npm run` refuses the installed npm) and release gates.
 
 ## Release
 

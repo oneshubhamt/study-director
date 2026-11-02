@@ -2056,7 +2056,7 @@ const NoticeCoordinator=NoticeCoordinatorModule.createCoordinator(Object.freeze(
 if(!Object.isFrozen(NoticeCoordinator)||NoticeCoordinator.format!=='study-director.notice-coordinator'||NoticeCoordinator.contractVersion!==1){
   throw new Error('Study Director notice coordinator is unavailable or incompatible.');
 }
-// Recent (docs/NOTIFICATIONS.md): today's pop-ups and banners in the profile
+// Recent (docs/areas/notifications.md): today's pop-ups and banners in the profile
 // panel. Kept for this window across a reload (sessionStorage), tied to the
 // profile; never uploaded or backed up. Opening the panel marks news seen.
 const NotificationRecent=(()=>{
@@ -2543,7 +2543,7 @@ function buildLiveTimeline(){
 /* RUNTIME STATE · PRIVATE TIMER CONTROLLER */
 // While the timer runs on a work block here, pop-ups that block nothing
 // wait; support and fixed blocks, a pause or the end let them show
-// (docs/STATUS-SYSTEM.md, noise rules).
+// (docs/areas/status-indicator.md, noise rules).
 function syncStudyQuiet(){try{NoticeCoordinator.setStudying(TimerState.mode===TIMER_MODES.RUNNING&&isWorkBlock(TASKS[TimerState.currentIndex]));}catch(error){AppDiagnostics.capture('notifications.study-hold',error,'warn');}}
 const TimerState=TimerStateModule.createStateController(Object.freeze({
   helpers:Object.freeze({makeTaskId}),
@@ -6231,7 +6231,7 @@ function renderProfileBadge(){
 }
 // One status for the phone circle, the sidebar name and the profile panel:
 // a ring for sync health and a badge for what needs the person
-// (docs/STATUS-SYSTEM.md). Drawn after the current task, so every input
+// (docs/areas/status-indicator.md). Drawn after the current task, so every input
 // below is initialised and bursts of changes draw once.
 function scheduleSyncStatus(){if(syncStatusTimer===null)syncStatusTimer=setTimeout(renderSyncStatus,0);}
 function syncStatusInput(){
@@ -6489,7 +6489,7 @@ function connectDriveForProfile(){
   };
   const result=BackupProviderRuntime.connect('google-drive');Promise.resolve(result).then(settled,()=>settled(false));return result;
 }
-// The Connect card (docs/STATUS-SYSTEM.md, phase 3): it reads what Drive
+// The Connect card (docs/areas/status-indicator.md, Connect card): it reads what Drive
 // reports and decides nothing itself.
 function startDriveConnectCard(){
   clearTimeout(driveConnectCardHide);driveConnectCardHide=null;

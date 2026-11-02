@@ -115,7 +115,7 @@ registry.define('backup-presentation',1,()=>{
     // until closed or resolved and sounds once; news (a sync review) fades
     // after 12 s and waits while a work block runs. Repeating the same notice
     // does not show it again until it is resolved. Red (error) only for
-    // retries that ran out (docs/NOTIFICATIONS.md, kinds).
+    // retries that ran out (docs/areas/notifications.md, kinds).
     function notice(source,id,message,{error=false,tier='blocking'}={}){return notifications.emit({source,id,message,severity:error?'error':'warning',lifecycle:'succeeded',foreground:false,tier,title:source==='device-folder'?'Device Folder backup':'Google Drive backup',action:action(source,id),surface:'toast',duration:12000});}
     // The reach line for a restore or combine dialog, while Drive syncs.
     function reach(){try{return typeof input.synced==='function'&&input.synced()===true?RESTORE_CHOICES.reach:'';}catch{return '';}}
@@ -123,7 +123,7 @@ registry.define('backup-presentation',1,()=>{
     // The profile indicator on every screen size: a ring for sync health and a
     // badge for the most important thing that needs the person, plus the text
     // and actions for the profile panel. The host gathers the inputs; this only
-    // decides. States and priorities: docs/STATUS-SYSTEM.md.
+    // decides. States and priorities: docs/areas/status-indicator.md.
     function status(value={}){
       const drive=value&&value.drive||null,sync=drive&&drive.sync||{},device=value&&value.device||null;
       const online=value.online!==false,connecting=!!drive&&drive.connecting===true;
@@ -183,7 +183,7 @@ registry.define('backup-presentation',1,()=>{
       // Signed out, password and update needs already show in the ring and their
       // own badge; the amber ! is for the other warnings.
       const count=kept+(review?1:0),ownBadge=new Set(['signed-out','password','sync-password','update-needed']),hasTone=tone=>items.some(item=>item.tone===tone&&!ownBadge.has(item.id));
-      // News that faded unseen (docs/NOTIFICATIONS.md, Recent) shares the
+      // News that faded unseen (docs/areas/notifications.md, Recent) shares the
       // blue info badge, with its count.
       const unseen=Math.max(0,Math.floor(Number(value.unseen)||0)),unseenText=unseen?`${unseen} new notification${unseen===1?'':'s'}`:'';
       const badge=hasTone('error')?'error':lockHere||syncPassword?'lock':newer?'update':hasTone('warning')?'warning':count?'review':value.updateReady===true||unseen?'info':'';
@@ -214,7 +214,7 @@ registry.define('backup-presentation',1,()=>{
     // three steps, the live sentence, the running operation with its counts
     // and how it ended. The host keeps the history (when it started, whether
     // a catch-up or an upload ran since); this only decides. Phase 3 of
-    // docs/STATUS-SYSTEM.md.
+    // docs/areas/status-indicator.md.
     function connectProgress(value={}){
       const phase=String(value.phase||'signing-in'),drive=value.drive||null,sync=drive?.sync||{},op=value.operation||null,seen=value.seen||{},online=value.online!==false;
       const started=Number(value.startedAt)||0,syncedAt=Date.parse(String(sync.syncedAt||''))||0,kept=Math.max(0,Number(value.keptNew)||0);

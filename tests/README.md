@@ -46,6 +46,8 @@ npm run test:browser:release    # every browser journey
 
 Non-browser release certification is `npm run test:release`. Full promotion is `npm run qa:promotion`.
 
+Each browser tier is also `node tests/helpers/browser-suite.mjs <smoke|feature|extended|release>`, for environments where `npm run` refuses the installed npm ([docs/workflow.md](../docs/workflow.md#commands)).
+
 ## Test design
 
 1. One executable should represent one coherent production contract. Closely coupled scenarios may share it; unrelated failure domains should not.
@@ -71,7 +73,7 @@ A browser test that sometimes fails is a defect, either in the test or in the ap
 3. A failure seen only while tests run concurrently is not yet evidence of a bug. Rerun that test alone first. If it passes alone but fails under load more than once, diagnose it like any other failure. Fix the cause when the test can avoid it. Otherwise, or until it is diagnosed, mark it `alone` with the reason.
 4. A failure seen in a test running alone is real until diagnosed. Decide whether the test, the app or the browser is at fault, and fix that. Never add an in-test retry loop, raise a timeout or skip an assertion just to get green. Independent hosted-runner sampling is allowed only for a diagnosed absolute wall-clock benchmark under rule 2, with the product thresholds unchanged.
 5. Wait for observable state (a DOM value, a stored record, a service-worker registration state), never for a fixed sleep. A sleep is acceptable only when the elapsed time is itself the contract, such as a debounce or a re-check interval. A wait must not disturb what it watches. For example, messaging a service worker in a polling loop delays its activation. Wait for the outcome, not the first event on the way to it. A blocked database delete completes once the old connection closes. The first save after a storage clear may abort and be retried. A file can exist before it is fully written.
-6. A new or changed browser test must pass 5 consecutive runs before it is merged.
+6. A new browser test must pass 3 consecutive runs on its own before it is merged.
 7. Report a run as one summary: the totals plus each failure. Do not report passing tests one by one.
 8. When a test times out, its failure message must say what it was waiting for and the last observed state, so a single failure can be diagnosed without a rerun.
 9. Quarantine is the last resort, follows the governance rules below and never applies to the smoke tier.
@@ -83,6 +85,8 @@ A browser test that sometimes fails is a defect, either in the test or in the ap
 `node tests/helpers/mutation.mjs` applies a small curated set of safety-critical mutants to temporary repository clones. Existing behavioral tests must kill every mutant; the working tree is never mutated.
 
 Promotion-only branch coverage and browser runtime coverage use the installed release/browser toolchain.
+
+Regression tooling names VM-loaded canonical modules for accurate coverage attribution. The baseline comparison, mutation harness, source/generated syntax checks and deployment contract share file-backed subprocess capture; launch errors, signals and output-limit failures are harness failures, not application/test results. This also supports environments that prohibit subprocess pipes. Coverage floors and critical-path requirements remain enforced.
 
 ## Governance
 

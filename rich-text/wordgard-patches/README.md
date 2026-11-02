@@ -15,4 +15,4 @@ Each rewrite names the upstream text it replaces. To use a new Wordgard version,
 
 The build makes Wordgard its own module, `source/external/wordgard.js` (readable, on `globalThis.StudyDirectorWordgard`), and Study Director's editor, `source/external/rich-text.js`, which reads it from there. The minified deployment ships one lean build of both instead. `parseInertHTML` lives in the Wordgard module, so there is one `sd-inert-html` policy.
 
-All four rewrites and both runtime additions were checked against Wordgard 0.6.2 and are still needed (docs/HANDOFF.md section 6).
+All four rewrites and both runtime additions were checked against Wordgard 0.6.2 and are still needed (docs/areas/notes.md, "The editor (Wordgard)").
