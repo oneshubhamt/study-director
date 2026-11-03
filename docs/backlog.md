@@ -48,6 +48,8 @@ Not yet investigated. Each fix comes with a test that would have caught it.
 
 **Notes: images.** Enlarge an image, pan and zoom it, and focus on it (a full-view mode).
 
+**Notes: interface review and redesign.** Tags, links and other note features may be buried: someone could use the app and never find them, or never get their full use. Review how each is discovered and used, and whether the rest of the app makes the most of them. Then propose a redesign. Not started; after the test programme.
+
 **Backup and sync review.** Questions to settle first, as a report, before any building. In this order:
 
 1. **Is the repository design right, from first principles?** The point of the repository is that unchanged large files are never uploaded or downloaded again, which makes transfers faster and safer. Does it upload and download only what changed, and does each upload and restore land whole or not at all? Is it well optimised overall? The owner thinks the repository principle is good; propose a better one only if there is one.
