@@ -11,7 +11,7 @@ const sha256=async blob=>createHash('sha256').update(Buffer.from(await blob.arra
 const unexpected=()=>{throw new Error('Unexpected backup-pipeline operation in Active Session claim test.');};
 const pipeline=freeze({
   createPublication:unexpected,publish:unexpected,publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,verifyObject:unexpected,scrub:unexpected,cleanup:unexpected,inspectCommit:unexpected,
-  retention:freeze({}),validatePolicy:unexpected,classifyState:unexpected,activeProtected:unexpected,selectRetention:unexpected,projectHistory:unexpected,noteObject:unexpected,readNote:unexpected,markCompleted:unexpected,sharedBase:unexpected,establishBase:unexpected
+  retention:freeze({}),validatePolicy:unexpected,classifyState:unexpected,activeProtected:unexpected,selectRetention:unexpected,projectHistory:unexpected,noteObject:unexpected,readNote:unexpected,readSession:unexpected,markCompleted:unexpected,sharedBase:unexpected,establishBase:unexpected
 });
 const presentation=freeze({
   begin:()=>freeze({update:noop,finish:noop}),read:()=>null,feedback:noop,condition:noop,notice:noop,detail:noop,outcome:noop,locationLabel:()=>'',resolve:noop,reset:noop,subscribe:()=>noop
