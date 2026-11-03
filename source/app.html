@@ -5350,10 +5350,14 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
     if(!previous||previous.date!==requested.date)throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE','Today’s shared session ended or changed while Continue Here was starting.');
     if(previous.runningOn!==requested.runningOn)throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE','Today’s session changed ownership while Continue Here was starting.');
     if(Number(previous.revision)<Number(requested.revision))throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','This device has a newer session copy than the verified Google Drive head. Sync must settle that difference before ownership can move.');
+    const [requestedContentFingerprint,observedContentFingerprint]=await Promise.all([activeSessionContentFingerprint(requested),activeSessionContentFingerprint(previous)]);
+    if(requestedContentFingerprint!==observedContentFingerprint){
+      BackupProviderRuntime.scheduleSharedSync('google-drive','session-handoff-source-advanced');
+      throw sessionHandoffError('SESSION_CONTINUE_SYNC_REQUIRED','Today’s shared session has newer study content. This device is syncing it first; retry Continue Here after sync.');
+    }
     planned=ActiveSessionCodec.sanitizeCurrent({...previous,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(previous.revision),updatedAt:new Date().toISOString()});
     if(!planned)throw new Error('the transferred session state is invalid');
     next=planned;
-    const observedContentFingerprint=await activeSessionContentFingerprint(previous);
     setPlanStatus('Transferring today’s session to this device…');step('Confirming with Google Drive…');
     const claimed=await BackupProviderRuntime.claimSessionOwnership('google-drive',{date:previous.date,observedOwner:previous.runningOn,observedRevision:previous.revision,observedContentFingerprint,expectedCheckpointId,revision:planned.revision});
     if(claimed?.status==='busy')throw sessionHandoffError('SESSION_CONTINUE_BUSY','Google Drive is busy with another backup or restore.');
@@ -5377,8 +5381,13 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
         if(CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),next)){const restored=await AppData.activeSession.save(previous,{strictDurability:true});if(!restored?.ok)throw restored?.error||new Error('session rollback failed');rolledBack=true;}
       }catch(rollbackError){AppDiagnostics.capture('session.takeover-local-rollback',rollbackError,'warn');}
     }
-    if(ownershipClaim&&(!localSaved||rolledBack))await BackupProviderRuntime.releaseSessionClaim('google-drive',ownershipClaim);
-    else if(ownershipClaim)notifyBackupChange({urgent:true,reason:'session-continue'});
+    if(ownershipClaim&&(!localSaved||rolledBack)){
+      const released=await BackupProviderRuntime.releaseSessionClaim('google-drive',ownershipClaim);
+      if(!released){
+        try{BackupProviderRuntime.wakeBackground('session-watch');}catch{}
+        throw sessionHandoffError('SESSION_CONTINUE_ROLLBACK_UNCERTAIN','Google Drive confirmed the ownership transfer, but this device could not finish the local session save or verify the ownership rollback. Do not start the timer here; reload and retry Continue Here.');
+      }
+    }else if(ownershipClaim)notifyBackupChange({urgent:true,reason:'session-continue'});
     try{BackupProviderRuntime.wakeBackground('session-watch');}catch{}
     throw error;
   }finally{backgroundHold?.release();}
@@ -5395,6 +5404,8 @@ function sessionHandoffProblem(error){
   if(navigator.onLine===false)return 'You’re offline. Connect to the internet, then try again.';
   if(code==='SESSION_CONTINUE_BUSY')return 'Google Drive is busy with another backup or restore. Try again in a moment.';
   if(code==='SESSION_CONTINUE_NOT_CONNECTED')return 'Google Drive isn’t connected. Sign in from your profile, then try again.';
+  if(code==='SESSION_CONTINUE_SYNC_REQUIRED')return 'Today’s shared session advanced. This device is syncing it first; retry Continue Here after sync.';
+  if(code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN')return 'Google Drive confirmed the transfer, but the local save or rollback could not be verified. Do not start the timer here; reload and retry Continue Here.';
   if(code==='REPOSITORY_SESSION_CLAIM_STALE')return 'Today’s session changed on another device. Wait for this device to catch up, then try again.';
   if(code==='REPOSITORY_SYNC_TURN')return 'Another device is saving to Google Drive. Try again in a moment.';
   return String(error&&error.message||error||'Something went wrong.');
