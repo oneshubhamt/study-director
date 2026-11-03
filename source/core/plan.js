@@ -529,10 +529,13 @@ function completeScheduleApply(preparation,parsed,rawOriginal,opts,draft){
 }
 function applySchedule(options={}){
   const opts=options&&typeof options==='object'?options:{};
-  const rawOriginal=String(document.getElementById('plan-input')?.value||'');
+  // Active-session restore applies an already-canonical schedule without
+  // borrowing the person's independent Plan draft as a transport buffer.
+  const explicitSchedule=typeof opts.scheduleText==='string'?opts.scheduleText:null;
+  const rawOriginal=explicitSchedule===null?String(document.getElementById('plan-input')?.value||''):explicitSchedule;
   const projection=opts.projection&&opts.projection.format==='study-director.plan-draft-projection'
     ?opts.projection:createPlanDraftProjection(parseScheduleDraftText(rawOriginal));
-  PlanDraftEditor.save();
+  if(opts.persistDraft!==false)PlanDraftEditor.save();
   if(projection.status!=='valid'){renderInvalidScheduleApply(projection);return false;}
   const draft=projection.draft,parsed=draft.parsed;
   const preparation=prepareScheduleApply(parsed,rawOriginal,opts);
