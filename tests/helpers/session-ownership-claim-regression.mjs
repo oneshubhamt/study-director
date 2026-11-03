@@ -17,10 +17,12 @@ const presentation=freeze({
   begin:()=>freeze({update:noop,finish:noop}),read:()=>null,feedback:noop,condition:noop,notice:noop,detail:noop,outcome:noop,locationLabel:()=>'',resolve:noop,reset:noop,subscribe:()=>noop
 });
 const files=new Map();let publicationId=0;
+const HEAD_A='cp_'+'a'.repeat(32),HEAD_B='cp_'+'b'.repeat(32),CONTENT_FINGERPRINT='c'.repeat(64);let headId=HEAD_A;
 const descriptor=file=>freeze({kind:'session-claim',id:file.id,name:file.name,size:file.blob.size,digest:file.digest,serverDigest:file.digest,createdAt:file.exportedAt,modifiedAt:file.exportedAt,remoteId:'claim-'+file.id});
+const headDescriptor=kind=>freeze({kind,id:headId,name:headId+(kind==='checkpoint'?'.sdcheckpoint':'.sdcommit'),size:1,digest:'d'.repeat(64),serverDigest:'d'.repeat(64),createdAt:'2026-10-27T08:00:00.000Z',modifiedAt:'2026-10-27T08:00:00.000Z',remoteId:kind+'-'+headId,...(kind==='checkpoint'?{history:freeze({format:15,logicalFingerprint:'e'.repeat(64),exportedAt:'2026-10-27T08:00:00.000Z',counts:freeze({dailyRecord:0,note:0}),encrypted:false,retention:freeze({role:'normal'}),origin:B})}:{})});
 const repository=freeze({
   scope:async()=>'claim-scope',
-  list:async()=>freeze({items:freeze([]),overflow:false,ignored:0}),upload:unexpected,download:unexpected,delete:unexpected,
+  list:async({kind})=>freeze({items:freeze(['checkpoint','commit'].includes(kind)?[headDescriptor(kind)]:[]),overflow:false,ignored:0}),upload:unexpected,download:unexpected,delete:unexpected,
   beginPublication:async()=>freeze({id:'pub_'+(++publicationId),createdAt:new Date().toISOString(),sameDevice:false}),
   listPublications:async()=>freeze({items:freeze([]),overflow:false,ignored:0}),assertPublication:async()=>true,endPublication:async()=>true,
   listSessionClaims:async()=>freeze({items:freeze([...files.values()].map(descriptor)),overflow:false,ignored:0}),
@@ -51,15 +53,17 @@ function makeRuntime(installationId,read){
 }
 let sessionA=freeze({date:DATE,runningOn:B,revision:50}),sessionB=freeze({date:DATE,runningOn:B,revision:50});
 const a=makeRuntime(A,()=>sessionA),b=makeRuntime(B,()=>sessionB);
-const claimed=await a.claimSessionOwnership('google-drive',{date:DATE,observedOwner:B,observedRevision:50,revision:51});
+const claimed=await a.claimSessionOwnership('google-drive',{date:DATE,observedOwner:B,observedRevision:50,observedContentFingerprint:CONTENT_FINGERPRINT,expectedCheckpointId:HEAD_A,revision:51});
 assert.equal(claimed.status,'completed');assert.equal(claimed.claim.state,'owned');assert.equal(claimed.claim.revision,51);
 const stored=[...files.values()].sort((x,y)=>x.id.localeCompare(y.id)).at(-1),raw=JSON.parse(await stored.blob.text());
-assert.equal(raw.version,2);assert.equal(raw.state,'owned');assert.match(raw.sessionToken,/^[a-f0-9]{64}$/u);assert.match(raw.ownerToken,/^[a-f0-9]{64}$/u);assert.match(raw.observedOwnerToken,/^[a-f0-9]{64}$/u);
+assert.equal(raw.version,3);assert.equal(raw.state,'owned');assert.match(raw.sessionToken,/^[a-f0-9]{64}$/u);assert.match(raw.ownerToken,/^[a-f0-9]{64}$/u);assert.match(raw.observedOwnerToken,/^[a-f0-9]{64}$/u);assert.equal(raw.observedContentFingerprint,CONTENT_FINGERPRINT);
 for(const key of ['date','owner','observedOwner'])assert.equal(Object.hasOwn(raw,key),false,`stored claim must not expose ${key}`);
 const seenA=await a.readSessionClaim('google-drive'),seenB=await b.readSessionClaim('google-drive');
 assert.deepEqual({state:seenA.state,applies:seenA.applies,ownedHere:seenA.ownedHere,revision:seenA.revision},{state:'owned',applies:true,ownedHere:true,revision:51});
 assert.deepEqual({state:seenB.state,applies:seenB.applies,ownedHere:seenB.ownedHere,revision:seenB.revision},{state:'owned',applies:true,ownedHere:false,revision:51});
-await assert.rejects(()=>b.claimSessionOwnership('google-drive',{date:DATE,observedOwner:B,observedRevision:50,revision:51}),error=>error?.code==='REPOSITORY_SESSION_CLAIM_STALE','the stale former owner must not reclaim from old evidence');
+await assert.rejects(()=>b.claimSessionOwnership('google-drive',{date:DATE,observedOwner:B,observedRevision:50,observedContentFingerprint:CONTENT_FINGERPRINT,expectedCheckpointId:HEAD_A,revision:51}),error=>error?.code==='REPOSITORY_SESSION_CLAIM_STALE','the stale former owner must not reclaim from old evidence');
+headId=HEAD_B;
+await assert.rejects(()=>a.claimSessionOwnership('google-drive',{date:DATE,observedOwner:B,observedRevision:50,observedContentFingerprint:CONTENT_FINGERPRINT,expectedCheckpointId:HEAD_A,revision:52}),error=>error?.code==='REPOSITORY_SESSION_CLAIM_STALE','a takeover must fail if Drive advances after the verified head was observed but before the claim linearizes');
 assert.equal(await a.releaseSessionClaim('google-drive',claimed.claim),true,'a failed local takeover can restore the previous owner with a higher epoch');
 const rolledBack=await b.readSessionClaim('google-drive');assert.equal(rolledBack.state,'owned');assert.equal(rolledBack.applies,true);assert.equal(rolledBack.ownedHere,true);assert.equal(rolledBack.revision,50);
-console.log(JSON.stringify({status:'PASS',suite:'session-ownership-claim',opaque:true,staleOwnerBlocked:true,rollbackEpoch:true},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'session-ownership-claim',opaque:true,contentAnchored:true,staleOwnerBlocked:true,staleHeadBlocked:true,rollbackEpoch:true},null,2));
