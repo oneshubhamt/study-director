@@ -46,7 +46,18 @@ try{
     d.markDone();await wait(300);const support={mode:d.TimerState.mode,kind:d.TimerState.tasks[d.TimerState.currentIndex]?.kind||'',waiting:shown('Waiting pop-up')};
     return {running,paused,working,support};})()`);
   assert.deepEqual(hold,{running:{mode:'running',kept:false,blocking:true},paused:{mode:'paused',kept:true},working:{mode:'running',waiting:false},support:{mode:'running',kind:'support',waiting:true}},'pop-ups that block nothing wait only while a work block runs');
+
+  // BF-1: a previous-day Active Session is only an unsaved recovery candidate
+  // when its content is newer than the Saved Day. Seed yesterday with an exact
+  // saved acknowledgement, reload, and require startup to retire the redundant
+  // recovery copy without asking to save the day again.
+  const coveredPrevious=await page.evaluate(`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms));d.TimerEngine.stopExecution();d.goTab('review');await wait(120);d.setStudyQuality(4,{save:false});if(!await d.saveDayRecord())throw new Error('BF1 fixture Save Today failed');await d.flushLiveDraft();const today=d.todayISO(),dateObject=new Date(today+'T12:00:00');dateObject.setDate(dateObject.getDate()-1);const yesterday=[dateObject.getFullYear(),String(dateObject.getMonth()+1).padStart(2,'0'),String(dateObject.getDate()).padStart(2,'0')].join('-'),record=await d.AppData.dailyRecords.get(today),loaded=await d.AppData.activeSession.load(),session=structuredClone(loaded.value);if(!record||!session)throw new Error('BF1 fixture state missing');const stamp=new Date().toISOString(),saved={...record,date:yesterday,savedAt:stamp,updatedAt:stamp},snapshot={...session.snapshot,date:yesterday},previous={...session,date:yesterday,snapshot,status:'active',updatedAt:stamp};await d.AppData.dailyRecords.save(saved);const stored=await d.AppData.activeSession.save(previous,{strictDurability:true});if(stored?.ok===false)throw stored.error||new Error('BF1 previous session save failed');return {yesterday,sourceRevision:Number(saved.sourceRevision),contentRevision:Number(snapshot.contentRevision)};})()`);
+  assert.ok(coveredPrevious.sourceRevision>=coveredPrevious.contentRevision,'the previous-day Saved Day covers the recovery content revision');
+  await page.reload();await waitForStudyDirector(page,{instrumented:true});await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'ownership after covered previous-day reload'});
+  await waitFor(()=>page.evaluate(`__PWA6.AppData.activeSession.load().then(result=>result.value===null)`),{label:'covered previous-day recovery retired'});
+  assert.equal(await page.evaluate(`document.getElementById('sd-interaction-dialog')?.textContent.includes('Unsaved previous study day found')||false`),false,'a Saved Day that covers the recovery session is not reported as unsaved again');
+
   assert.deepEqual(page.warnings.filter(text=>/\[Study Director\]/u.test(text)),[],'no session save failed');
   assert.deepEqual(page.events.filter(event=>!/favicon|ResizeObserver loop/iu.test(event.text||'')),[]);
-  console.log(JSON.stringify({status:'PASS',checks:{appliedPlanKept:true,pacerSaved:true,backupComplete:true,popUpsWaitOnlyDuringWorkBlocks:true}}));
+  console.log(JSON.stringify({status:'PASS',checks:{appliedPlanKept:true,pacerSaved:true,backupComplete:true,popUpsWaitOnlyDuringWorkBlocks:true,coveredPreviousDayRetired:true}}));
 }finally{await browser.close();await server.close();}
