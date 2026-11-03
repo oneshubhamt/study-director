@@ -23,19 +23,19 @@ const blob=new Blob(['safety-copy']);
 const rollbackDeletions=Object.freeze([Object.freeze({date:'2026-09-12',deletedAt:'2026-09-13T05:30:00.000Z'})]);
 const rollbackNoteDeletions=Object.freeze([Object.freeze({key:'Ethics',deletedAt:'2026-09-13T05:31:00.000Z'})]);
 const rollbackAttachmentDeletions=Object.freeze([Object.freeze({assetId:'img-journalabcdefghijklmnop',deletedAt:'2026-09-13T05:32:00.000Z'})]);
-await app.restoreJournal.prepare(Object.freeze({id:restoreId,blob,filename:'qa.sdbackup',scheduleText:'07:00 | 60 | QA | Study | Area | pages | 10',savedDayDeletions:rollbackDeletions,noteDeletions:rollbackNoteDeletions,attachmentDeletions:rollbackAttachmentDeletions}));
+await app.restoreJournal.prepare(Object.freeze({id:restoreId,blob,filename:'qa.sdbackup',savedDayDeletions:rollbackDeletions,noteDeletions:rollbackNoteDeletions,attachmentDeletions:rollbackAttachmentDeletions}));
 const restoreHeader=await app.restoreJournal.diagnostics();assert.equal(restoreHeader.phase,'prepared');assert.equal(restoreHeader.blob,undefined);assert.equal(restoreHeader.scheduleText,undefined);
 let restore=await app.restoreJournal.read();
 assert.equal(restore.state.id,restoreId);
 assert.equal(restore.state.phase,'prepared');
 assert.equal(await restore.payload.blob.text(),'safety-copy');
-assert.equal(restore.payload.version,5);
+assert.equal(restore.payload.version,6);assert.equal(Object.hasOwn(restore.payload,'scheduleText'),false,'restore journal no longer carries the independent Plan draft');
 assert.equal(JSON.stringify(restore.payload.savedDayDeletions),JSON.stringify(rollbackDeletions),'restore journal must persist the Saved-Day deletion ledger needed for exact rollback');
 assert.equal(JSON.stringify(restore.payload.noteDeletions),JSON.stringify(rollbackNoteDeletions),'restore journal must persist note deletion history for exact rollback');
 assert.equal(JSON.stringify(restore.payload.attachmentDeletions),JSON.stringify(rollbackAttachmentDeletions),'restore journal must persist Attachment Library deletion history for exact rollback');
 const initialPayload=restore.payload;
 for(const id of [restoreId,'restore_qa-journal-other']){
-  await assert.rejects(()=>app.restoreJournal.prepare(Object.freeze({id,blob:new Blob(['MUST NOT REPLACE']),filename:'override.sdbackup',scheduleText:''})),/still requires recovery/u,'new journal preparation must not overwrite an existing rollback');
+  await assert.rejects(()=>app.restoreJournal.prepare(Object.freeze({id,blob:new Blob(['MUST NOT REPLACE']),filename:'override.sdbackup'})),/still requires recovery/u,'new journal preparation must not overwrite an existing rollback');
 }
 assert.equal((await app.restoreJournal.read()).state.id,restoreId);
 assert.equal(await (await app.restoreJournal.read()).payload.blob.text(),'safety-copy','original recovery data survives duplicate and competing journal preparations');
@@ -51,7 +51,7 @@ assert.equal(await app.restoreJournal.read(),null,'restore journal should disapp
 await assert.rejects(()=>app.restoreJournal.clear(restoreId),/disappeared before cleanup/u,'a named journal cannot silently disappear during cleanup');
 await journalMeta.write('restoreJournalPayload',initialPayload);
 await assert.rejects(()=>app.restoreJournal.read(),/incomplete or corrupted/u,'orphan payload must fail closed');
-await assert.rejects(()=>app.restoreJournal.prepare(Object.freeze({id:'restore_qa-orphan-payload',blob:new Blob(['new']),filename:'new.sdbackup',scheduleText:''})),/still requires recovery/u,'orphan payload cannot be overwritten');
+await assert.rejects(()=>app.restoreJournal.prepare(Object.freeze({id:'restore_qa-orphan-payload',blob:new Blob(['new']),filename:'new.sdbackup'})),/still requires recovery/u,'orphan payload cannot be overwritten');
 await assert.rejects(()=>app.restoreJournal.clear(),/incomplete or mismatched/u,'clear must preserve orphaned rollback payload');
 await journalMeta.remove('restoreJournalPayload');
 
@@ -78,13 +78,13 @@ assert.equal(await app.libraryClearJournal.read(),null,'library-clear journal sh
 const legacyId='restore_qa-journal-legacy1',legacyTime='2026-09-13T05:00:00.000Z';
 const backupFile=Object.freeze({name:'backup-123e4567-e89b-12d3-a456-426614174000',size:64,hash:'a'.repeat(64)});
 for(const payload of [
-  Object.freeze({format:'study-director.restore-journal',version:1,id:legacyId,backupFile,filename:'legacy-v1.sdbackup',scheduleText:''}),
-  Object.freeze({format:'study-director.restore-journal',version:2,id:legacyId,blob:new Blob(['v2']),filename:'legacy-v2.sdbackup',scheduleText:'',savedDayDeletions:Object.freeze([{date:'2026-09-10',deletedAt:legacyTime}])}),
-  Object.freeze({format:'study-director.restore-journal',version:3,id:legacyId,blob:new Blob(['v3']),filename:'legacy-v3.sdbackup',scheduleText:'',savedDayDeletions:Object.freeze([]),noteDeletions:Object.freeze([{key:'GS2',deletedAt:legacyTime}])})
+  Object.freeze({format:'study-director.restore-journal',version:1,id:legacyId,backupFile,filename:'legacy-v1.sdbackup'}),
+  Object.freeze({format:'study-director.restore-journal',version:2,id:legacyId,blob:new Blob(['v2']),filename:'legacy-v2.sdbackup',savedDayDeletions:Object.freeze([{date:'2026-09-10',deletedAt:legacyTime}])}),
+  Object.freeze({format:'study-director.restore-journal',version:3,id:legacyId,blob:new Blob(['v3']),filename:'legacy-v3.sdbackup',savedDayDeletions:Object.freeze([]),noteDeletions:Object.freeze([{key:'GS2',deletedAt:legacyTime}])})
 ]){
   await assert.rejects(()=>journalMeta.write('restoreJournalPayload',payload),/not canonical/u,`version ${payload.version} is not read by the ordinary runtime`);
 }
-await assert.rejects(()=>journalMeta.write('restoreJournalPayload',Object.freeze({format:'study-director.restore-journal',version:5,id:legacyId,blob:new Blob(['v5']),filename:'bad.sdbackup',scheduleText:''})),/not canonical/u);
+await assert.rejects(()=>journalMeta.write('restoreJournalPayload',Object.freeze({format:'study-director.restore-journal',version:5,id:legacyId,blob:new Blob(['v5']),filename:'bad.sdbackup'})),/not canonical/u);
 await journalMeta.remove('restoreJournalPayload');
 
 // Invalid and mismatched mutation/journal operations fail closed rather than mutating another operation's state.
@@ -92,7 +92,7 @@ await assert.rejects(()=>app.mutationLease.acquire(Object.freeze({id:'bad',owner
 assert.equal(await app.mutationLease.release('bad'),false);
 const held=await app.mutationLease.acquire(Object.freeze({id:'mutation_qa-journal-0004',owner:'tab_qa-journal-owner-0004',kind:'restore',expiresAt:clock.now()+60_000}));assert.equal(held.acquired,true);assert.equal(await app.mutationLease.release('mutation_qa-journal-wrong'),false);assert.equal(await app.mutationLease.release('mutation_qa-journal-0004'),true);
 await assert.rejects(()=>app.restoreJournal.mark('bad','committing'),/phase is invalid/u);
-await app.restoreJournal.prepare(Object.freeze({id:'restore_qa-journal-0002',blob:new Blob(['rollback']),filename:'qa2.sdbackup',scheduleText:''}));
+await app.restoreJournal.prepare(Object.freeze({id:'restore_qa-journal-0002',blob:new Blob(['rollback']),filename:'qa2.sdbackup'}));
 const original=await app.restoreJournal.read();
 await journalMeta.write('restoreJournalPayload',Object.freeze({...original.payload,id:'restore_qa-journal-other'}));
 await assert.rejects(()=>app.restoreJournal.read(),/incomplete or corrupted/u,'a mismatched pair cannot be accepted');
@@ -113,7 +113,7 @@ await app.libraryClearJournal.clear();assert.equal(await app.libraryClearJournal
 console.log(JSON.stringify({status:'PASS',suite:'repository-journals',contracts:['exclusive durable mutation lease','restore journal lifecycle','library-clear chunked integrity journal lifecycle']},null,2));
 
 // Missing payloads do not make the header-only diagnostic call read or repair payloads.
-await app.restoreJournal.prepare(Object.freeze({id:'restore_qa-diagnostic-0001',blob:new Blob(['PRIVATE DATA']),filename:'private.sdbackup',scheduleText:''}));
+await app.restoreJournal.prepare(Object.freeze({id:'restore_qa-diagnostic-0001',blob:new Blob(['PRIVATE DATA']),filename:'private.sdbackup'}));
 assert.ok(stores.meta.has('restoreJournalPayload'));stores.meta.delete('restoreJournalPayload');assert.equal((await app.restoreJournal.diagnostics()).phase,'prepared');assert.equal(stores.meta.has('restoreJournalPayload'),false,'diagnostics must not repair or write a missing payload');
 assert.equal((await app.metadata.diagnostics()).maintenanceStatus,'never');assert.equal((await app.metadata.diagnostics()).deletions,0);assert.equal((await app.metadata.diagnostics()).localRecovery,false);
 await assert.rejects(()=>app.restoreJournal.clear(),/incomplete or mismatched/u,'state-only journal must be preserved for manual recovery');
