@@ -250,8 +250,8 @@ registry.define('backup-recovery-host',1,()=>{
         const status=input.document.createElement('span');status.className='ui-helper';status.textContent=`${tierLabel(location.tier,location.safetyPurpose)}${location.encrypted?' · Encrypted':''}${location.health==='degraded'?' · Degraded capture':''}${several&&Array.isArray(entry.held)&&entry.held.length===1?` · Only in ${entry.held[0]}`:''}`;copy.appendChild(status);
         if(location.warning){const warning=input.document.createElement('span');warning.className='ui-status warn';warning.textContent=String(location.warning);copy.appendChild(warning);}
         const actions=input.document.createElement('div');actions.className='managed-version-location-actions';
-        const use=input.document.createElement('button');use.type='button';use.className='mini-btn ui-btn';use.dataset.action=noteTarget?'compare-managed-note':'recover-managed-version';use.dataset.versionHistorySource=location.sourceId;use.dataset.versionHistoryCheckpoint=location.checkpointId;use.textContent=noteTarget?'Restore note…':'Restore…';actions.appendChild(use);
-        if(location.tier==='before-restore'&&!noteTarget)actions.appendChild(removeButton(location,'Remove safety version'));
+        const use=input.document.createElement('button');use.type='button';use.className='mini-btn ui-btn';use.dataset.action='recover-managed-version';use.dataset.versionHistorySource=location.sourceId;use.dataset.versionHistoryCheckpoint=location.checkpointId;use.textContent='Restore…';actions.appendChild(use);
+        if(location.tier==='before-restore')actions.appendChild(removeButton(location,'Remove safety version'));
         row.append(copy,actions);card.appendChild(row);list.appendChild(card);
       }
     }

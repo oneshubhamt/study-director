@@ -34,8 +34,8 @@ Cautions that hold throughout:
 - A source-text check is deleted only after a behaviour test is shown to fail when the code it pinned is broken (mutation harness on a temporary copy, never the working tree); the most important become permanent mutants.
 - Merged files keep every scenario and assertion; merged browser tests pass 3 runs on their own; `alone` rules stay.
 - Coverage of safety modules never drops; every mutant in `tests/helpers/mutation.mjs` stays killed.
-- A new test that disagrees with the app is reported to the owner, not resolved by changing either side.
-- Tests and tooling only; no release bump unless a confirmed app bug is fixed with the owner's agreement.
+- Improve the app, not only the tests (owner, 2026-11-03). A bug, dead code or a clear refinement found along the way is fixed in the app code in the same step, with a test that would have caught it, and named in the step's summary. Ask the owner first only when the right behaviour is unclear or the change is large.
+- The branch raises `release` once, the first time it changes the shipped app.
 
 ## Owner's requests (noted 2026-11-03)
 
@@ -63,7 +63,6 @@ Cautions that hold throughout:
 - **Duplicate local checkpoint captures**: an optimisation to make only if measurement shows it matters.
 - **Large orchestration modules** (`backup-provider.js`, `backup.js`, `app.html`): no splitting by size alone; consolidate only proven duplication.
 - **`backup-encryption` browser test** fails only under concurrent load and runs alone until its cause is found ([tests/README.md](../tests/README.md#browser-test-reliability)).
-- **Unreachable label in Version History.** `backup-recovery-host.js` gives the whole-library list a `'Restore note…'` label in note mode, but note mode draws its own list, whose buttons say "Review". The branch never runs. Found in step 4 of the test programme; the app is unchanged.
 - **Unregistered sessionStorage key** `study-director.backup-operation-diagnostics.v1` is not listed in `contracts/data-architecture.mjs` with the other browser-storage keys.
 
 ## Not yet checked
