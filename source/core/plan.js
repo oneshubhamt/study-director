@@ -647,7 +647,9 @@ const PlanDraftEditor=(()=>{
     const opts=options&&typeof options==='object'?options:{};
     clearTimer('preview');
     const supplied=opts.projection&&opts.projection.format==='study-director.plan-draft-projection'?opts.projection:null;
-    if(opts.enterDraft||!TASKS.length)draftMode=true;
+    if(opts.enterDraft===true)draftMode=true;
+    else if(opts.enterDraft===false){draftMode=false;clearDragState();}
+    else if(!TASKS.length)draftMode=true;
     const projection=supplied||createPlanDraftProjection();
     pendingPreviewProjection=null;
     if(projection.status!=='valid'){
