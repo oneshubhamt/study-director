@@ -4561,12 +4561,14 @@ function isRecoverablePreviousActiveSession(session){
 async function savedDayCoversActiveSession(session){
   if(!isPreviousActiveSessionRecord(session))return false;
   const snapshot=activeSessionSnapshot(session),contentRevision=Number(snapshot&&snapshot.contentRevision),savedRevision=Number(snapshot&&snapshot.savedRevision);
+  // savedRevision belongs to this exact session lineage: unlike another
+  // device's sourceRevision counter, it cannot coincidentally "cover" a
+  // divergent branch. A current Saved Day must still exist for the date.
   if(!Number.isSafeInteger(contentRevision)||contentRevision<0||!Number.isSafeInteger(savedRevision)||savedRevision<contentRevision)return false;
   let record=null;
   try{record=await AppData.dailyRecords.get(session.date);}
   catch(error){AppDiagnostics.capture('session.previous-day-saved-check',error,'warn');return false;}
-  const sourceRevision=Number(record&&record.sourceRevision);
-  return !!record&&record.recordKind==='study'&&record.date===session.date&&Number.isSafeInteger(sourceRevision)&&sourceRevision>=contentRevision;
+  return !!record&&record.recordKind==='study'&&record.date===session.date;
 }
 async function retireCoveredPreviousActiveSession(session){
   if(!await savedDayCoversActiveSession(session))return false;
