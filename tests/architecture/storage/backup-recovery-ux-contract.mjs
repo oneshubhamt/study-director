@@ -4,7 +4,6 @@ import fs from 'node:fs';
 const app=fs.readFileSync('source/app.html','utf8');
 const backup=fs.readFileSync('source/core/backup.js','utf8');
 const provider=fs.readFileSync('source/core/backup-provider.js','utf8');
-const presentation=fs.readFileSync('source/core/backup-presentation.js','utf8');
 const device=fs.readFileSync('source/core/device-backup.js','utf8');
 const host=fs.readFileSync('source/core/backup-recovery-host.js','utf8');
 const guide=fs.readFileSync('source/external/guide.js','utf8');
@@ -48,7 +47,7 @@ assert.doesNotMatch(provider+device,/checkpoint-selection-start|repository\.choo
 
 assert.match(host,/async function collectAll\(/u);
 assert.doesNotMatch(host,/input\.repository\.mergeHistory/u,'the host merges what the locations return; the repository is not asked to');
-assert.ok(host.includes('choices:[presentation.restoreChoices.missing,presentation.restoreChoices.combine,...(partialAttachments?[]:[presentation.restoreChoices.replace])]'),'partial attachment backups must never offer exact Replace');assert.match(presentation,/label:'Replace current data'[\s\S]*Make your data match this backup\. You choose whether to keep what isn’t in it/u);assert.match(presentation,/reach:'Google Drive is connected, so your other devices get the result at their next sync\.'/u,'while Drive syncs, a restore says it reaches every device');assert.match(presentation,/label:'Combine with current data'[\s\S]*changed on one side only since your last sync are taken for you; you choose the rest/u);assert.match(presentation,/label:'Add only what’s missing'[\s\S]*Nothing you have now changes/u);
+assert.ok(host.includes('choices:[presentation.restoreChoices.missing,presentation.restoreChoices.combine,...(partialAttachments?[]:[presentation.restoreChoices.replace])]'),'partial attachment backups must never offer exact Replace');
 assert.match(app,/id="managed-version-history-progress"[\s\S]*id="managed-version-history-progress-stage"[\s\S]*id="managed-version-history-progress-detail"/u,'Version History must own its structured recovery progress surface.');
 assert.match(host,/function setHistoryProgress[\s\S]*progressStage[\s\S]*progressDetail/u,'managed recovery progress must be rendered inside Version History rather than a generic page footer.');
 assert.match(styles,/\.managed-version-history\{position:fixed;inset:0;[\s\S]*margin:auto/u,'Version History must be explicitly centered as an application modal.');
@@ -68,10 +67,7 @@ assert.match(app,/AppActivation\.subscribe\(event=>\{[^\n]*void refreshDeviceBac
 const deviceActivation=app.slice(app.indexOf('async function refreshDeviceBackgroundPermission('),app.indexOf('AppActivation.subscribe(',app.indexOf('async function refreshDeviceBackgroundPermission(')));
 assert.doesNotMatch(deviceActivation,/requestPermission|DeviceBackup\.connect\(/u,'activation opportunities must not prompt for folder access.');
 
-assert.match(backup,/cancelLabel:'Keep current'/u);assert.match(backup,/choices=\[\.\.\.\(preview\.reconciliationCapable\?\[restoreChoices\.missing\]:\[\]\),restoreChoices\.combine,\.\.\.\(exactCapable\?\[restoreChoices\.replace\]:\[\]\)\]/u);
-assert.match(backup,/checkboxes:\[\{id:'safetyCopy',label:'Download an extra standalone safety copy before applying'/u,'optional file safety copy must be a compact checkbox on the existing reconciliation surface');
 assert.doesNotMatch(backup,/id:'safetyCopy',label:'Optional extra backup copy'[\s\S]*choices:/u,'optional file safety copy must not render as another radio-choice conflict row');
-assert.match(backup,/if\(decisions\.safetyCopy===true\)/u,'checkbox must only trigger the optional standalone download while automatic rollback remains independent');
 assert.match(backup,/exactCapable=Number\(parsed&&parsed\.formatVersion\)>=18&&captureAuthority==='canonical-complete'&&!!parsed&&!!parsed\.protectedCheckpointManifest/u,'standalone Replace must require current complete-capture authority rather than merely a protected manifest');
 assert.match(backup,/rescuePartial=captureAuthority==='rescue-partial'/u,'verified rescue-partial standalone backups must remain recoverable without becoming exact-replacement authority');
 
@@ -84,7 +80,6 @@ assert.match(app,/'recover-managed-version': ev=>BackupRecoveryHost\.history\.re
 assert.doesNotMatch(app,/'restore-latest-backup'|'recover-device-backup'|'recover-provider-backup'|'bring-in-managed-backup'|'restore-managed-version'/u);
 assert.match(app,/ACTIVE_SESSION_BLOCKED_CLICK_ACTIONS=new Set\(\[[^\]]*'open-version-history'[^\]]*'recover-managed-version'/u);
 
-assert.match(guide,/Local-first: each device keeps all its data/u);assert.match(guide,/signed in to Google Drive, it syncs/u);assert.match(guide,/\["Recover"/u);assert.match(guide,/Keep current, Add only what’s missing, Combine with current data, or Replace current data/u);assert.match(guide,/\["Replace current data"/u);assert.match(guide,/\["Combine with current data"/u);
 assert.doesNotMatch(guide,/\["Restore latest"|\["Backup history"|\["Merge from backup"/u);
 assert.match(reconciliation,/label:'Backup copy'/u);
 

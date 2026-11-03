@@ -71,6 +71,35 @@ try{
     finally{HTMLAnchorElement.prototype.click=click;delete window.restoreChoices;}
   })()`);
   assert.equal(restored.restored,true);assert.equal(restored.workersRemaining,0);result.checks.repositoryRestore=restored;
+  // Choosing a backup file asks how to use it: the three ways to apply it, or Keep current, which changes nothing.
+  const fileDialog=await page.evaluate(`(async()=>{
+    const d=__PWA6,before=d.AppData.notes.get('History').text,file=new File([fixtureBackup.blob],fixtureBackup.filename);
+    const pending=d.BackupController.importLocal({target:{files:[file],value:file.name}});
+    let dialog=null;for(let i=0;i<400&&!dialog;i++){await new Promise(resolve=>setTimeout(resolve,25));dialog=[...document.querySelectorAll('dialog[open]')].find(node=>node.textContent.includes('Use this backup'))||null;}
+    if(!dialog)return {opened:false,outcome:await Promise.race([pending,new Promise(resolve=>setTimeout(()=>resolve('pending'),100))])};
+    const choices=[...dialog.querySelectorAll('.interaction-choice')].map(node=>node.textContent),cancel=dialog.querySelector('[data-interaction-cancel]');
+    const cancelLabel=cancel.textContent;cancel.click();const outcome=await pending;
+    return {opened:true,choices,cancelLabel,outcome,unchanged:d.AppData.notes.get('History').text===before};
+  })()`);
+  assert.equal(fileDialog.opened,true,`choosing a backup file opens "Use this backup" (${JSON.stringify(fileDialog.outcome)})`);
+  assert.equal(fileDialog.cancelLabel,'Keep current');
+  const expectedChoices=[['Add only what’s missing','Nothing you have now changes.'],['Combine with current data','changed on one side only since your last sync are taken for you; you choose the rest'],['Replace current data','Make your data match this backup. You choose whether to keep what isn’t in it']];
+  assert.equal(fileDialog.choices.length,expectedChoices.length,`a complete backup offers every choice: ${JSON.stringify(fileDialog.choices)}`);
+  expectedChoices.forEach(([label,description],index)=>{assert.ok(fileDialog.choices[index].startsWith(label),`choice ${index+1} is ${label}`);assert.ok(fileDialog.choices[index].includes(description),`${label} says what it does`);});
+  assert.equal(fileDialog.outcome.cancelled,true);assert.equal(fileDialog.unchanged,true,'Keep current changes nothing');result.checks.fileDecisionDialog=true;
+  // The optional safety copy is a checkbox on the review, off by default; ticking it downloads one standalone backup before anything is applied.
+  const safetyCopy=await page.evaluate(`(async()=>{
+    const d=__PWA6,runs=[];const click=HTMLAnchorElement.prototype.click;let downloads=[];HTMLAnchorElement.prototype.click=function(){downloads.push(String(this.download||''));};
+    try{for(const tick of [false,true]){
+      await d.AppData.notes.remove('History');await d.AppData.notes.flush();downloads=[];let offered=null;
+      window.restoreChoices=options=>{offered=(options.checkboxes||[]).map(box=>({id:box.id,label:box.label,defaultChecked:box.defaultChecked===true}));return {...chooseIncomingBackup(options),safetyCopy:tick};};
+      const candidate=await d.BackupController.inspect(fixtureBackup.blob,{filename:fixtureBackup.filename});await d.BackupController.restore(candidate);
+      runs.push({tick,offered,downloads:downloads.slice()});
+    }}finally{HTMLAnchorElement.prototype.click=click;delete window.restoreChoices;}
+    return runs;
+  })()`);
+  for(const run of safetyCopy)assert.deepEqual(run.offered,[{id:'safetyCopy',label:'Download an extra standalone safety copy before applying',defaultChecked:false}],'the review offers the safety copy, unticked');
+  assert.equal(safetyCopy[0].downloads.length,0,'no safety copy unless ticked');assert.equal(safetyCopy[1].downloads.length,1,'ticking it downloads one safety copy');result.checks.optionalSafetyCopy=true;
   const safety=await page.evaluate(`(async()=>{
     const d=__PWA6,before=d.AppData.notes.get('History').text,bytes=new Uint8Array(await fixtureBackup.blob.arrayBuffer());bytes[bytes.length-1]^=1;let rejected=false;
     try{await d.BackupController.inspect(new Blob([bytes]),{filename:'corrupt.sdbackup'});}catch(error){rejected=/integrity/.test(error.message);}
