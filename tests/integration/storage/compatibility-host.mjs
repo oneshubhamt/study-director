@@ -253,12 +253,16 @@ metadataRows.set('restoreJournalPayload.v1',{key:'restoreJournalPayload.v1',vers
 assert.equal((await Host.createFacade(malformedInput).verifyCanonicalInstallation()).compatibilityRetired,false);
 await Host.createFacade(malformedInput).migrateLive();
 assert.equal(metadataRows.has('restoreJournalPayload.v1'),false);const currentJournal=metadataRows.get('restoreJournalPayload').value;
-assert.equal(currentJournal.version,5);assert.equal(currentJournal.blob,journalBlob);assert.deepEqual(currentJournal.savedDayDeletions,oldJournal.savedDayDeletions);assert.deepEqual([...currentJournal.noteDeletions],[]);assert.deepEqual([...currentJournal.attachmentDeletions],[]);
-// Version 4 named the note deletions areaNoteDeletions; version 5 calls them noteDeletions.
+assert.equal(currentJournal.version,6);assert.equal(currentJournal.blob,journalBlob);assert.equal(Object.hasOwn(currentJournal,'scheduleText'),false,'current restore journals do not own the Plan draft');assert.deepEqual(currentJournal.savedDayDeletions,oldJournal.savedDayDeletions);assert.deepEqual([...currentJournal.noteDeletions],[]);assert.deepEqual([...currentJournal.attachmentDeletions],[]);
+// Version 4 named the note deletions areaNoteDeletions; current version 6 calls them noteDeletions and has no scheduleText.
 const noteDeletion={key:'note_oldname0000000003',deletedAt:'2026-09-11T00:00:00.000Z'},v4Journal={...oldJournal,version:4,areaNoteDeletions:[noteDeletion],attachmentDeletions:[]};
 metadataRows.set('restoreJournalPayload',{key:'restoreJournalPayload',version:1,value:v4Journal,updatedAt:'2026-09-12T00:00:00.000Z'});
 await Host.createFacade(malformedInput).migrateLive();
-const v5Journal=metadataRows.get('restoreJournalPayload').value;assert.equal(v5Journal.version,5);assert.equal(Object.hasOwn(v5Journal,'areaNoteDeletions'),false);assert.deepEqual([...v5Journal.noteDeletions],[noteDeletion],'version 4 note deletions carry over under their new name');assert.equal(v5Journal.blob,journalBlob);
+const v6Journal=metadataRows.get('restoreJournalPayload').value;assert.equal(v6Journal.version,6);assert.equal(Object.hasOwn(v6Journal,'areaNoteDeletions'),false);assert.equal(Object.hasOwn(v6Journal,'scheduleText'),false);assert.deepEqual([...v6Journal.noteDeletions],[noteDeletion],'version 4 note deletions carry over under their current name');assert.equal(v6Journal.blob,journalBlob);
+const v5Journal={format:'study-director.restore-journal',version:5,id:'restore_qa-v5-journal',blob:journalBlob,filename:'safety.sdbackup',scheduleText:'legacy draft must not return',savedDayDeletions:[],noteDeletions:[noteDeletion],attachmentDeletions:[]};
+metadataRows.set('restoreJournalPayload',{key:'restoreJournalPayload',version:1,value:v5Journal,updatedAt:'2026-09-12T00:00:00.000Z'});
+await Host.createFacade(malformedInput).migrateLive();
+const migratedV5=metadataRows.get('restoreJournalPayload').value;assert.equal(migratedV5.version,6);assert.equal(Object.hasOwn(migratedV5,'scheduleText'),false,'version 5 scheduleText is deliberately retired during migration');assert.deepEqual([...migratedV5.noteDeletions],[noteDeletion]);
 const unknownJournal={...oldJournal,version:1,unexpected:true};
 metadataRows.set('restoreJournalPayload',{key:'restoreJournalPayload',version:1,value:unknownJournal,updatedAt:'2026-09-12T00:00:00.000Z'});
 await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/interrupted restore from an older version has an unknown shape/u);
